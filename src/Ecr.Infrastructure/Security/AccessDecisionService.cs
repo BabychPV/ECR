@@ -103,6 +103,17 @@ public sealed class AccessDecisionService(
             Grants = new Dictionary<string, GrantLevel>(StringComparer.Ordinal),
             Denies = own.Denies,
             RoleIds = new HashSet<int>(),
+            UnscopedRoleIds = new HashSet<int>(),
+
+            // ⚠ Заборони ролей з областю дії (ФВ-6.14) лишаються в своїх
+            // проєктах; гранти й ролі — порожні з тієї ж причини, що вище.
+            Scoped = own.Scoped.ToDictionary(
+                s => s.Key,
+                s => s.Value with
+                {
+                    Grants = new Dictionary<string, GrantLevel>(StringComparer.Ordinal),
+                    RoleIds = new HashSet<int>(),
+                }),
             IsIntegrationWriter = true,
         };
 
@@ -280,16 +291,39 @@ public sealed class AccessDecisionService(
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
-        var roleIds = assignments
-            .Where(a => a.IsEffectiveOn(today))
+        var effective = assignments.Where(a => a.IsEffectiveOn(today)).ToList();
+
+        // ⛔ ФВ-6.14: призначення з областю дії дає свої права ЛИШЕ в
+        // перелічених проєктах. Роль → проєкти її областей (об'єднання, якщо
+        // роль прийшла кількома призначеннями — особистим і груповим).
+        var unscopedRoleIds = effective
+            .Where(a => a.ScopeJson is null)
             .Select(a => a.RoleId)
-            .Distinct()
-            .ToList();
-        var permissions = roleIds.Count == 0
+            .ToHashSet();
+        var scopedProjects = new Dictionary<int, HashSet<int>>();
+        foreach (var assignment in effective.Where(a => a.ScopeJson is not null))
+        {
+            if (!scopedProjects.TryGetValue(assignment.RoleId, out var projects))
+            {
+                scopedProjects[assignment.RoleId] = projects = [];
+            }
+
+            projects.UnionWith(assignment.ScopedProjectIds() ?? []);
+        }
+
+        var roleIds = unscopedRoleIds.Concat(scopedProjects.Keys).Distinct().ToList();
+        var permissionRoleIds = unscopedRoleIds.ToList();
+
+        // ⛔ Функціональні права — ЛИШЕ з ролей без області. Право на кшталт
+        // `Security.ManageUsers` не має проєкту, і роль «лише в проєкті A»
+        // дала б його глобально. Обмежити функціональне право проєктом
+        // можна лише в точці перевірки, а там проєкту здебільшого немає —
+        // тому закрито в безпечний бік.
+        var permissions = permissionRoleIds.Count == 0
             ? []
             : await db.RolePermissions
                 .AsNoTracking()
-                .Where(rp => roleIds.Contains(rp.RoleId))
+                .Where(rp => permissionRoleIds.Contains(rp.RoleId))
                 .Select(rp => rp.PermissionCode)
                 .Distinct()
                 .ToListAsync(ct)
@@ -300,28 +334,73 @@ public sealed class AccessDecisionService(
             : await db.ResourceGrants
                 .AsNoTracking()
                 .Where(g => roleIds.Contains(g.RoleId))
-                .Select(g => new { g.ResourceKind, g.ResourceId, g.Level, g.IsDeny })
+                .Select(g => new { g.RoleId, g.ResourceKind, g.ResourceId, g.Level, g.IsDeny })
                 .ToListAsync(ct)
                 .ConfigureAwait(false);
 
         var grants = new Dictionary<string, GrantLevel>(StringComparer.Ordinal);
         var denies = new HashSet<string>(StringComparer.Ordinal);
+        var layers = new Dictionary<int, (Dictionary<string, GrantLevel> Grants, HashSet<string> Denies)>();
 
         foreach (var row in rows)
         {
             var key = $"{row.ResourceKind}:{row.ResourceId}";
 
-            if (row.IsDeny)
+            if (unscopedRoleIds.Contains(row.RoleId))
             {
-                denies.Add(key);
+                Merge(grants, denies, key, row.Level, row.IsDeny);
+            }
+
+            if (!scopedProjects.TryGetValue(row.RoleId, out var projects))
+            {
                 continue;
             }
 
-            // Дві ролі на той самий ресурс — виграє ширший рівень: людина
-            // отримує суму своїх ролей, а не випадкову з них.
-            grants[key] = grants.TryGetValue(key, out var existing) && existing > row.Level
-                ? existing
-                : row.Level;
+            if (row.ResourceKind == ResourceKind.Project)
+            {
+                // Грант на проєкт області — у спільну мапу (ключ і так
+                // називає проєкт); на проєкт поза областю — нікуди.
+                if (projects.Contains(row.ResourceId))
+                {
+                    Merge(grants, denies, key, row.Level, row.IsDeny);
+                }
+
+                continue;
+            }
+
+            // ⚠ Аркуш/таблиця/колонка — окремо на КОЖЕН проєкт області: їхні
+            // ідентифікатори спільні для всіх проєктів шаблону. Решта видів
+            // (довідник тощо) проєкту не має — роль з областю їх не дає.
+            if (row.ResourceKind is not (ResourceKind.Sheet or ResourceKind.Table or ResourceKind.Column))
+            {
+                continue;
+            }
+
+            foreach (var projectId in projects)
+            {
+                if (!layers.TryGetValue(projectId, out var layer))
+                {
+                    layers[projectId] = layer = (
+                        new Dictionary<string, GrantLevel>(StringComparer.Ordinal),
+                        new HashSet<string>(StringComparer.Ordinal));
+                }
+
+                Merge(layer.Grants, layer.Denies, key, row.Level, row.IsDeny);
+            }
+        }
+
+        var scoped = new Dictionary<int, ScopedProjectAccess>();
+        foreach (var projectId in scopedProjects.Values.SelectMany(p => p).Distinct())
+        {
+            var rolesHere = unscopedRoleIds.ToHashSet();
+            rolesHere.UnionWith(scopedProjects.Where(p => p.Value.Contains(projectId)).Select(p => p.Key));
+
+            scoped[projectId] = layers.TryGetValue(projectId, out var layer)
+                ? new ScopedProjectAccess(layer.Grants, layer.Denies, rolesHere)
+                : new ScopedProjectAccess(
+                    new Dictionary<string, GrantLevel>(StringComparer.Ordinal),
+                    new HashSet<string>(StringComparer.Ordinal),
+                    rolesHere);
         }
 
         // ⛔ Успадкування Project → Sheet → Table → Column тут НЕ розгортається
@@ -338,7 +417,26 @@ public sealed class AccessDecisionService(
             Grants = grants,
             Denies = denies,
             RoleIds = roleIds.ToHashSet(),
+            UnscopedRoleIds = scopedProjects.Count == 0 ? null : unscopedRoleIds,
+            Scoped = scoped,
         };
+    }
+
+    /// <summary>Додає рядок гранта до мапи: заборона — у набір, дозвіл — ширший рівень.</summary>
+    /// <remarks>
+    /// Дві ролі на той самий ресурс — виграє ширший рівень: людина отримує
+    /// суму своїх ролей, а не випадкову з них.
+    /// </remarks>
+    private static void Merge(
+        Dictionary<string, GrantLevel> grants, HashSet<string> denies, string key, GrantLevel level, bool isDeny)
+    {
+        if (isDeny)
+        {
+            denies.Add(key);
+            return;
+        }
+
+        grants[key] = grants.TryGetValue(key, out var existing) && existing > level ? existing : level;
     }
 
     /// <inheritdoc />
@@ -823,7 +921,10 @@ public sealed class AccessDecisionService(
                 sourceValues,
                 EmptyExpressions);
 
-            var outcome = PeriodAccessRules.Evaluate(slice.Rules.Rules, facts, profile.RoleIds);
+            // ⚠ Ролі, чинні в проєкті зрізу (ФВ-6.14): правило, обмежене роллю
+            // з областю «проєкт A», не стосується цієї людини в проєкті B.
+            var outcome = PeriodAccessRules.Evaluate(
+                slice.Rules.Rules, facts, profile.RoleIdsIn(slice.Shared.ProjectId));
 
             if (outcome.Blocks)
             {

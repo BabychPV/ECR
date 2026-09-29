@@ -266,7 +266,9 @@ public static class EditRules
         // ⚠ Параметр необов'язковий, і за замовчуванням поведінка **не
         // змінюється**: маршрутів у seed немає, система без них працює як
         // раніше, і жоден наявний тест затвердження не правився.
-        if (requiredRoleId is { } roleId && !profile.RoleIds.Contains(roleId))
+        // ⚠ Роль — чинна в ЦЬОМУ проєкті (ФВ-6.14): роль з областю «проєкт A»
+        // не робить людину учасником маршруту проєкту B.
+        if (requiredRoleId is { } roleId && !profile.RoleIdsIn(context.ProjectId).Contains(roleId))
         {
             return EditDecision.Deny(
                 EditDenyReason.NoGrant,
@@ -384,9 +386,15 @@ public static class EditRules
             (ResourceKind.Column, context.ColumnDefId),
         };
 
+        // ⛔ ФВ-6.14: гранти й заборони ролей з областю дії — лише з ЦЬОГО
+        // проєкту (див. `AccessProfile.Scoped`). Заборона ролі з областю діє
+        // лише в її області, але там — так само «виграє завжди».
+        profile.Scoped.TryGetValue(context.ProjectId, out var scoped);
+
         foreach (var (kind, id) in scopes)
         {
-            if (profile.Denies.Contains($"{kind}:{id}"))
+            var key = $"{kind}:{id}";
+            if (profile.Denies.Contains(key) || (scoped is not null && scoped.Denies.Contains(key)))
             {
                 return GrantLevel.None;
             }
@@ -431,11 +439,22 @@ public static class EditRules
             return GrantLevel.None;
         }
 
-        // Від найдрібнішого до найширшого: перший оголошений і виграє.
+        // Від найдрібнішого до найширшого: перший оголошений і виграє. На
+        // одному рівні гранти ролей без області й з областю цього проєкту
+        // складаються так само, як дві ролі без області, — ширший рівень.
         for (var i = scopes.Length - 1; i >= 0; i--)
         {
             var (kind, id) = scopes[i];
-            if (profile.Grants.TryGetValue($"{kind}:{id}", out var level))
+            var key = $"{kind}:{id}";
+            var found = profile.Grants.TryGetValue(key, out var level);
+
+            if (scoped is not null && scoped.Grants.TryGetValue(key, out var scopedLevel))
+            {
+                level = found && level > scopedLevel ? level : scopedLevel;
+                found = true;
+            }
+
+            if (found)
             {
                 return level;
             }

@@ -42,6 +42,43 @@ public sealed class AccessProfile
     public required IReadOnlySet<int> RoleIds { get; init; }
 
     /// <summary>
+    /// Ролі з призначень БЕЗ області дії (ФВ-6.14); <c>null</c> — областей у
+    /// користувача немає, і це те саме, що <see cref="RoleIds"/>.
+    /// </summary>
+    public IReadOnlySet<int>? UnscopedRoleIds { get; init; }
+
+    /// <summary>
+    /// Те, що ролі з ОБЛАСТЮ дії дають у конкретному проєкті: ключ —
+    /// <c>ProjectId</c> (ФВ-6.14).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Гранти на аркуш, таблицю й колонку ролі з областю НЕ потрапляють у
+    /// <see cref="Grants"/>: ідентифікатори аркушів спільні для всіх проєктів
+    /// шаблону, тож у спільній мапі «аркуш S у проєкті A» діяв би й у
+    /// проєкті B. Грант на сам проєкт області — навпаки, у <see cref="Grants"/>
+    /// (ключ і так називає проєкт); на проєкт поза областю — нікуди.
+    ///
+    /// ⚠ Порожньо за замовчуванням — безпечний бік: профіль, складений без
+    /// цього поля, просто не має прав з областю.
+    /// </remarks>
+    public IReadOnlyDictionary<int, ScopedProjectAccess> Scoped { get; init; } = NoScoped;
+
+    private static readonly IReadOnlyDictionary<int, ScopedProjectAccess> NoScoped
+        = new Dictionary<int, ScopedProjectAccess>();
+
+    /// <summary>
+    /// Ролі, чинні в проєкті: без області — скрізь, з областю — лише в ній.
+    /// </summary>
+    /// <param name="projectId">Проєкт.</param>
+    /// <remarks>
+    /// ⛔ Для рішень у межах проєкту (роль кроку маршруту, правила періоду,
+    /// обмежені роллю) — саме цей метод, а не <see cref="RoleIds"/>: там ролі
+    /// з областю в УСІХ проєктах.
+    /// </remarks>
+    public IReadOnlySet<int> RoleIdsIn(int projectId)
+        => Scoped.TryGetValue(projectId, out var scoped) ? scoped.RoleIds : UnscopedRoleIds ?? RoleIds;
+
+    /// <summary>
     /// Профіль побудований у сеансі симуляції «очима користувача» (D-96).
     /// Права беруться повністю від <see cref="SimulatedForUserId"/>, але
     /// <b>будь-яка</b> дія запису відхиляється з
@@ -101,3 +138,12 @@ public sealed class AccessProfile
     internal static GrantLevel Resolve(bool isDenied, GrantLevel? grant)
         => isDenied ? GrantLevel.None : grant ?? GrantLevel.None;
 }
+
+/// <summary>Що ролі з областю дії дають в одному проєкті (ФВ-6.14).</summary>
+/// <param name="Grants">Гранти на аркуш/таблицю/колонку: ключ <c>"{ResourceKind}:{ResourceId}"</c>.</param>
+/// <param name="Denies">Заборони на аркуш/таблицю/колонку.</param>
+/// <param name="RoleIds">Ролі, чинні в проєкті: без області плюс ті, чия область його містить.</param>
+public sealed record ScopedProjectAccess(
+    IReadOnlyDictionary<string, GrantLevel> Grants,
+    IReadOnlySet<string> Denies,
+    IReadOnlySet<int> RoleIds);

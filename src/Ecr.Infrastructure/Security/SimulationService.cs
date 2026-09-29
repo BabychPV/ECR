@@ -106,6 +106,11 @@ public sealed class SimulationService(
             // тобто симуляція показувала б не те, що бачить користувач, і
             // сенс режиму зникав би (`D-96`).
             RoleIds = subject.RoleIds,
+
+            // ⛔ Області дії (ФВ-6.14) — теж від суб'єкта: без них симуляція
+            // не бачила б прав, які роль з областю дає в своїх проєктах.
+            UnscopedRoleIds = subject.UnscopedRoleIds,
+            Scoped = subject.Scoped,
             IsSimulation = true,
             SimulatedForUserId = subjectUserId,
 
