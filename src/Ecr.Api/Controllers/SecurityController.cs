@@ -216,6 +216,22 @@ public sealed class SecurityController(
         => Ok(await listGrants.ListProjectsAsync(ct).ConfigureAwait(false));
 
     /// <summary>
+    /// Проєкт, код і назва аркушів чинної версії шаблону кожного проєкту — для
+    /// області призначення ролі за аркушами (D-214). Право
+    /// <c>Security.ManageRoles</c> або <c>Security.ManageUsers</c>.
+    /// </summary>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ Лише ідентичність аркуша — ні таблиць, ні колонок, ні даних; та сама
+    /// межа, що й у <c>GET /security/projects</c>. Видалені аркуші — ні.
+    /// </remarks>
+    [HttpGet("security/project-sheets")]
+    [ProducesResponseType<IReadOnlyList<Ecr.Application.Security.GrantableSheet>>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    public async Task<IActionResult> GrantableSheets(CancellationToken ct)
+        => Ok(await listGrants.ListProjectSheetsAsync(ct).ConfigureAwait(false));
+
+    /// <summary>
     /// Замінює набір грантів ролі цілком. Право <c>Security.ManageRoles</c>.
     /// </summary>
     /// <remarks>

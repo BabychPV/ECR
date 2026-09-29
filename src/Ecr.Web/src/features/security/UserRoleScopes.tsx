@@ -1,13 +1,25 @@
 import type { JSX } from 'react';
-import { MultiSelect, Stack, Text } from '@mantine/core';
+import { Stack, Text } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import type { RoleScopeDto, UserRoleAssignmentView } from '@/api/types';
 import { t } from '@/shared/i18n';
-import { ScopeGlobalWarning, ScopeSummary, projectOptions, useGrantableProjects } from './roleScope';
+import {
+  EmptyScope,
+  ScopeFields,
+  ScopeGlobalWarning,
+  ScopeNarrowedWarning,
+  ScopeSummary,
+  scopeFromDto,
+  scopeToDto,
+  scopeValid,
+  useGrantableProjects,
+  useProjectSheets,
+  type ScopeEntry,
+} from './roleScope';
 
 /**
- * Області дії ролей користувача у формі доступу (ФВ-6.14).
+ * Області дії ролей користувача у формі доступу (ФВ-6.14, D-214).
  *
  * ⛔ `PUT /users/{id}/roles` зі словником `scopes` — ПОВНА відповідь: роль без
  * запису в ньому діє в усіх проєктах. Слати його, не прочитавши збережених
@@ -20,8 +32,8 @@ import { ScopeGlobalWarning, ScopeSummary, projectOptions, useGrantableProjects 
  *   області відмовила б адміністраторові, що міняв лише пошту.
  */
 
-/** Код ролі → проєкти області; порожньо або немає запису — усі проєкти. */
-export type ScopeDraft = Readonly<Record<string, readonly number[]>>;
+/** Код ролі → область; немає запису чи порожні проєкти — усі проєкти. */
+export type ScopeDraft = Readonly<Record<string, ScopeEntry>>;
 
 export type ScopeState = 'pending' | 'ready' | 'unavailable' | 'unreadable';
 
@@ -37,7 +49,7 @@ export function useUserRoleScopes(userId: number | null): { baseline: ScopeDraft
   if (query.isPending) return { baseline: {}, state: 'pending' };
   if (query.isError || !Array.isArray(query.data)) return { baseline: {}, state: 'unavailable' };
 
-  const baseline: Record<string, readonly number[]> = {};
+  const baseline: Record<string, ScopeEntry> = {};
   let unreadable = false;
 
   for (const row of query.data) {
@@ -50,7 +62,7 @@ export function useUserRoleScopes(userId: number | null): { baseline: ScopeDraft
     // Показати її «усіма проєктами» і зберегти так — розширити права мовчки.
     if (row.scope.projects.length === 0) unreadable = true;
 
-    baseline[row.roleCode] = row.scope.projects;
+    baseline[row.roleCode] = scopeFromDto(row.scope);
   }
 
   return { baseline, state: unreadable ? 'unreadable' : 'ready' };
@@ -59,11 +71,16 @@ export function useUserRoleScopes(userId: number | null): { baseline: ScopeDraft
 function pick(selected: readonly string[], draft: ScopeDraft): Record<string, RoleScopeDto> {
   const result: Record<string, RoleScopeDto> = {};
   for (const code of [...selected].sort()) {
-    const projects = draft[code] ?? [];
-    if (projects.length > 0) result[code] = { projects: [...projects].sort((a, b) => a - b) };
+    const dto = scopeToDto(draft[code] ?? EmptyScope);
+    if (dto !== null) result[code] = dto;
   }
 
   return result;
+}
+
+/** Чи всі області обраних ролей можна надіслати (межі періодів — періоди). */
+export function scopesValid(selected: readonly string[], draft: ScopeDraft): boolean {
+  return selected.every((code) => scopeValid(draft[code] ?? EmptyScope));
 }
 
 /**
@@ -95,9 +112,11 @@ export function RoleScopeFields({
   state: ScopeState;
   /** Відмова сервера, прив'язана до ролі: код → текст. */
   error: { readonly code: string; readonly text: string } | null;
-  onChange: (code: string, projects: number[]) => void;
+  onChange: (code: string, scope: ScopeEntry) => void;
 }): JSX.Element | null {
-  const { projects } = useGrantableProjects(state === 'ready' && selected.length > 0);
+  const enabled = state === 'ready' && selected.length > 0;
+  const { projects } = useGrantableProjects(enabled);
+  const { sheets } = useProjectSheets(enabled);
 
   if (state === 'pending' || selected.length === 0) return null;
 
@@ -109,25 +128,28 @@ export function RoleScopeFields({
     );
   }
 
-  const scoped = selected.some((code) => (draft[code] ?? []).length > 0);
+  const entries = selected.map((code) => draft[code] ?? EmptyScope);
+  const scoped = entries.some((entry) => entry.projects.length > 0);
+  const narrowed = entries.some(
+    (entry) => entry.projects.length > 0 && (entry.sheets.length > 0 || entry.from.trim() !== '' || entry.to.trim() !== ''),
+  );
 
   return (
     <Stack gap="xs" mt="sm">
       {selected.map((code) => {
-        const ids = draft[code] ?? [];
+        const entry = draft[code] ?? EmptyScope;
 
         return (
           <Stack key={code} gap="xs">
-            <MultiSelect
-              label={`${t('security.scopeProjects')} · ${code}`}
-              data={projectOptions(projects, ids)}
-              value={ids.map(String)}
-              onChange={(values) => onChange(code, values.map(Number))}
-              searchable
-              clearable
+            <ScopeFields
+              value={entry}
+              onChange={(next) => onChange(code, next)}
+              projects={projects}
+              sheets={sheets}
+              suffix={code}
               error={error?.code === code ? error.text : undefined}
             />
-            {ids.length === 0 && (
+            {entry.projects.length === 0 && (
               <div>
                 <ScopeSummary projectIds={null} projects={projects} />
               </div>
@@ -136,6 +158,7 @@ export function RoleScopeFields({
         );
       })}
       {scoped && <ScopeGlobalWarning />}
+      {narrowed && <ScopeNarrowedWarning />}
     </Stack>
   );
 }

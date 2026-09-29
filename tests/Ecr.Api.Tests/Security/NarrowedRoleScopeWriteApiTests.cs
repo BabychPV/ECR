@@ -131,6 +131,56 @@ public sealed class NarrowedRoleScopeWriteApiTests(SqlServerFixture sql)
         Assert.Equal(202612, scope.GetProperty("periods").GetProperty("to").GetInt32());
     }
 
+    /// <summary>
+    /// Довідник аркушів для області: проєкт, код і назва — і більше нічого; без
+    /// права керування ролями чи користувачами — 403.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-6.14")]
+    public async Task Довідник_аркушів_лише_ідентичність_і_лише_адміністраторові()
+    {
+        var b = await new TestDocumentBuilder(sql.ConnectionString).BuildAsync().ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        using var admin = await AdminAsync(app, b.ProjectId).ConfigureAwait(true);
+
+        using var response = await admin.GetAsync(new Uri("/api/v1/security/project-sheets", UriKind.Relative))
+            .ConfigureAwait(true);
+        var body = await response.Content.ReadAsStringAsync().ConfigureAwait(true);
+        Assert.True(response.StatusCode == HttpStatusCode.OK, $"{response.StatusCode}\n{body}");
+
+        var sheet = JsonDocument.Parse(body).RootElement.EnumerateArray()
+            .Single(s => s.GetProperty("projectId").GetInt32() == b.ProjectId);
+        Assert.Equal(b.SheetCode, sheet.GetProperty("code").GetString());
+        Assert.Equal(
+            ["code", "nameL10n", "projectId"],
+            sheet.EnumerateObject().Select(p => p.Name).Order(StringComparer.Ordinal).ToArray());
+
+        var (target, _) = await TargetAsync().ConfigureAwait(true);
+        using var plain = await SignedInAsTargetAsync(app, target).ConfigureAwait(true);
+        using var denied = await plain.GetAsync(new Uri("/api/v1/security/project-sheets", UriKind.Relative))
+            .ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
+    }
+
+    private async Task<HttpClient> SignedInAsTargetAsync(EcrApiFactory app, int userId)
+    {
+        string name;
+        await using (var db = Context())
+        {
+            name = await db.Users.Where(u => u.Id == userId).Select(u => u.UserName).SingleAsync().ConfigureAwait(false);
+        }
+
+        var client = app.CreateClient();
+        var login = await client.PostAsJsonAsync(
+            new Uri("/api/v1/login/local", UriKind.Relative),
+            new { userName = name, password = Password }).ConfigureAwait(false);
+        Assert.True(login.IsSuccessStatusCode, $"{login.StatusCode}: {app.ErrorsText}");
+
+        return client;
+    }
+
     private static async Task ExpectAsync(EcrApiFactory app, HttpStatusCode expected, HttpResponseMessage response)
     {
         using (response)

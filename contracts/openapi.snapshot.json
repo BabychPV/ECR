@@ -3906,6 +3906,30 @@
         ],
         "type": "object"
       },
+      "GrantableSheet": {
+        "description": "Аркуш чинної версії шаблону проєкту — для області призначення ролі (D-214).",
+        "properties": {
+          "code": {
+            "description": "Код аркуша — те, що йде в `scope.sheets`.",
+            "type": "string"
+          },
+          "nameL10n": {
+            "$ref": "#/components/schemas/LocalizedText",
+            "description": "Назва мовами каталогу."
+          },
+          "projectId": {
+            "description": "Проєкт.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "projectId",
+          "code",
+          "nameL10n"
+        ],
+        "type": "object"
+      },
       "GroupAssignmentView": {
         "description": "Групове призначення, яке існує в системі.",
         "properties": {
@@ -28180,6 +28204,66 @@
           }
         },
         "summary": "Звідки взялися (або не взялися) ролі ВЛАСНОГО запису. Права не потребує.",
+        "tags": [
+          "Security"
+        ]
+      }
+    },
+    "/api/v1/security/project-sheets": {
+      "get": {
+        "description": "⛔ Лише ідентичність аркуша — ні таблиць, ні колонок, ні даних; та сама\nмежа, що й у `GET /security/projects`. Видалені аркуші — ні.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/GrantableSheet"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/GrantableSheet"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/GrantableSheet"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "summary": "Проєкт, код і назва аркушів чинної версії шаблону кожного проєкту — для\nобласті призначення ролі за аркушами (D-214). Право\n`Security.ManageRoles` або `Security.ManageUsers`.",
         "tags": [
           "Security"
         ]

@@ -10537,6 +10537,61 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/security/project-sheets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Проєкт, код і назва аркушів чинної версії шаблону кожного проєкту — для
+         *     області призначення ролі за аркушами (D-214). Право
+         *     `Security.ManageRoles` або `Security.ManageUsers`.
+         * @description ⛔ Лише ідентичність аркуша — ні таблиць, ні колонок, ні даних; та сама
+         *     межа, що й у `GET /security/projects`. Видалені аркуші — ні.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["GrantableSheet"][];
+                        "text/json": components["schemas"]["GrantableSheet"][];
+                        "text/plain": components["schemas"]["GrantableSheet"][];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/security/projects": {
         parameters: {
             query?: never;
@@ -16905,6 +16960,18 @@ export interface components {
             id: number;
             /** @description Назва мовами каталогу. */
             nameL10n: components["schemas"]["LocalizedText"];
+        };
+        /** @description Аркуш чинної версії шаблону проєкту — для області призначення ролі (D-214). */
+        GrantableSheet: {
+            /** @description Код аркуша — те, що йде в `scope.sheets`. */
+            code: string;
+            /** @description Назва мовами каталогу. */
+            nameL10n: components["schemas"]["LocalizedText"];
+            /**
+             * Format: int32
+             * @description Проєкт.
+             */
+            projectId: number;
         };
         /** @description Групове призначення, яке існує в системі. */
         GroupAssignmentView: {

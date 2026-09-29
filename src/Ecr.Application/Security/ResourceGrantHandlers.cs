@@ -188,6 +188,39 @@ public sealed class ListResourceGrantsHandler(
         return await nameResolver.ListProjectsAsync(ct).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Код і назва аркушів чинної версії шаблону кожного проєкту — для області
+    /// призначення ролі за аркушами (D-214). Ті самі права, що й у довідника
+    /// проєктів.
+    /// </summary>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ Лише ідентичність аркуша: ні таблиць, ні колонок, ні даних — та сама
+    /// межа, що в <see cref="ListProjectsAsync"/>. Форма вибирає з нього коди
+    /// аркушів проєктів, обраних в області.
+    /// </remarks>
+    public async Task<IReadOnlyList<GrantableSheet>> ListProjectSheetsAsync(CancellationToken ct)
+    {
+        var userId = currentUser.UserId
+            ?? throw new AccessDeniedException(
+                "ECR-AUTH-0401", "Потрібна автентифікація.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.signInRequired" });
+
+        var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
+        if (!profile.Has(Permission) && !profile.Has(ProjectCatalogAltPermission))
+        {
+            throw new AccessDeniedException(
+                "ECR-AUTH-0403", $"Потрібне право {Permission} або {ProjectCatalogAltPermission}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-AUTH-0403.permission",
+                    ["permission"] = Permission,
+                });
+        }
+
+        return await nameResolver.ListProjectSheetsAsync(projectIds: null, ct).ConfigureAwait(false);
+    }
+
     /// <summary>Друге право, що відкриває довідник проєктів: область призначення ролі (ФВ-6.14).</summary>
     public const string ProjectCatalogAltPermission = "Security.ManageUsers";
 

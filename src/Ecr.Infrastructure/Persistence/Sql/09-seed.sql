@@ -4859,6 +4859,19 @@ USING (VALUES
     (N'security.scopeUnreadable',              N'en', N'A stored project scope of this user cannot be read, so the role applies in no project. Saving keeps it as it is.', 1),
     (N'groupRoles.scope',                      N'en', N'Scope', 1),
     (N'groupRoles.scopeChangeHint',            N'en', N'Leave empty for all projects. To change the scope later, revoke and assign again.', 1),
+    -- D-214 (ФВ-6.14): область ролі звужується ще й аркушами й проміжком періодів.
+    (N'security.scopeSheets',                  N'en', N'Sheets', 1),
+    (N'security.scopeAllSheets',               N'en', N'All sheets', 1),
+    (N'security.scopePeriodFrom',              N'en', N'Periods from', 1),
+    (N'security.scopePeriodTo',                N'en', N'to', 1),
+    (N'security.scopeAllPeriods',              N'en', N'All periods', 1),
+    (N'security.scopePeriodHint',              N'en', N'Year-number, e.g. 2026-01', 1),
+    (N'security.scopePeriodInvalid',           N'en', N'Enter a period as year-number, e.g. 2026-01.', 1),
+    (N'security.scopePeriodOrder',             N'en', N'The last period is earlier than the first one.', 1),
+    (N'security.scopeNarrowingNeedsProjects',  N'en', N'Choose projects first: sheets and periods narrow the role inside them.', 1),
+    (N'security.scopeSheetsSummary',           N'en', N'Sheets: {sheets}', 1),
+    (N'security.scopePeriodsSummary',          N'en', N'Periods: {from} to {to}', 1),
+    (N'security.scopeNarrowedWarning',         N'en', N'A role limited to sheets or periods opens the documents of its projects, but inside a document it shows only its sheets and periods. It gives no project-wide rights (calculations, reports, creating or deleting documents, managing the project).', 1),
     -- SEC: кінець секції
     -- D16: ФВ-2.16 — підтвердження пакетних правок (вставка, протягування) і
     -- серверна відмова батчу без підтвердження (`PatchCellsHandler.EnsureConfirmed`).

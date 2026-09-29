@@ -8,7 +8,7 @@ import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { notificationCloseButtonProps, showApiError, showDone } from '@/shared/ui/notify';
 import { logSuppressedDetail, problemText } from '@/shared/ui/problemText';
 import { t } from '@/shared/i18n';
-import { RoleScopeFields, scopesToSend, useUserRoleScopes } from './UserRoleScopes';
+import { RoleScopeFields, scopesToSend, scopesValid, useUserRoleScopes, type ScopeDraft } from './UserRoleScopes';
 import { scopeProblem } from './roleScope';
 
 /**
@@ -92,12 +92,12 @@ export function UserAccessEditor({
 
   // ФВ-6.14: області дії ролей — чернетка поверх збережених.
   const scopes = useUserRoleScopes(user?.id ?? null);
-  const [scopeDraft, setScopeDraft] = useState<Record<string, readonly number[]>>({});
+  const [scopeDraft, setScopeDraft] = useState<ScopeDraft>({});
   const [scopeError, setScopeError] = useState<{ code: string; text: string } | null>(null);
   const baselineKey = JSON.stringify(scopes.baseline);
 
   useEffect(() => {
-    setScopeDraft(JSON.parse(baselineKey) as Record<string, readonly number[]>);
+    setScopeDraft(JSON.parse(baselineKey) as ScopeDraft);
   }, [baselineKey]);
 
   /**
@@ -177,7 +177,9 @@ export function UserAccessEditor({
       if (problem !== null) {
         const code =
           problem.roleCode ??
-          selected.find((c) => problem.projectId !== null && (scopeDraft[c] ?? []).includes(problem.projectId));
+          selected.find(
+            (c) => problem.projectId !== null && (scopeDraft[c]?.projects ?? []).includes(problem.projectId),
+          );
         if (code !== undefined) setScopeError({ code, text: messageOf(error) });
       }
 
@@ -329,9 +331,9 @@ export function UserAccessEditor({
               draft={scopeDraft}
               state={scopes.state}
               error={scopeError}
-              onChange={(code, projects) => {
+              onChange={(code, scope) => {
                 setScopeError(null);
-                setScopeDraft((draft) => ({ ...draft, [code]: projects }));
+                setScopeDraft((draft) => ({ ...draft, [code]: scope }));
               }}
             />
           </>
@@ -357,7 +359,9 @@ export function UserAccessEditor({
             збою мережі. */}
         <Button
           loading={save.isPending}
-          disabled={assigned.isPending || Boolean(assigned.error)}
+          // D-214: межа періоду, що не є періодом, — поле вже каже про це;
+          // надіслати її було б нічим (сервер відповів би 422).
+          disabled={assigned.isPending || Boolean(assigned.error) || !scopesValid(selected, scopeDraft)}
           onClick={() => save.mutate()}
         >
           {t('common.save')}

@@ -810,8 +810,11 @@ export type EntityFieldMapDto = Schemas['EntityFieldMapDto'];
  */
 export type MappingOutcome = Schemas['MappingOutcome'];
 
-/** Область дії призначення ролі (ФВ-6.14): проєкти, у яких роль діє. */
+/** Область дії призначення ролі (ФВ-6.14, D-214): проєкти, за бажанням — аркуші й проміжок періодів. */
 export type RoleScopeDto = Schemas['RoleScopeDto'];
+
+/** Аркуш чинної версії шаблону проєкту — для області за аркушами (`GET /security/project-sheets`, D-214). */
+export type GrantableSheet = Schemas['GrantableSheet'];
 
 /** Особисте призначення ролі користувачу з межами й областю (`GET /users/{id}/role-assignments`). */
 export type UserRoleAssignmentView = Schemas['UserRoleAssignmentView'];

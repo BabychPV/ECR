@@ -4,7 +4,6 @@ import {
   Button,
   Code,
   Group,
-  MultiSelect,
   Select,
   Skeleton,
   Stack,
@@ -23,7 +22,18 @@ import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { showApiError, showDone } from '@/shared/ui/notify';
 import { Timestamp } from '@/shared/ui/Timestamp';
 import { t } from '@/shared/i18n';
-import { ScopeGlobalWarning, ScopeSummary, projectOptions, useGrantableProjects } from './roleScope';
+import {
+  EmptyScope,
+  ScopeFields,
+  ScopeGlobalWarning,
+  ScopeNarrowedWarning,
+  ScopeSummary,
+  scopeToDto,
+  scopeValid,
+  useGrantableProjects,
+  useProjectSheets,
+  type ScopeEntry,
+} from './roleScope';
 
 type Assignment = components['schemas']['GroupRoleAssignmentView'];
 type AssignRequest = components['schemas']['AssignGroupRoleRequest'];
@@ -72,11 +82,14 @@ export function GroupAssignmentsPanel({ roles }: { roles: RoleView[] }): JSX.Ele
   const [validFrom, setValidFrom] = useState<Date | null>(null);
   const [validTo, setValidTo] = useState<Date | null>(null);
 
-  // ФВ-6.14: область дії; порожньо — усі проєкти (поле `scope` не шлеться).
+  // ФВ-6.14: область дії; порожні проєкти — усі проєкти (поле `scope` не
+  // шлеться). D-214: аркуші й періоди звужують роль усередині проєктів.
   // ⚠ Змінити область наявного призначення можна лише «відкликати й
   // призначити знову» — так і на сервері, окремого редагування немає.
-  const [scopeProjects, setScopeProjects] = useState<number[]>([]);
+  const [scope, setScope] = useState<ScopeEntry>(EmptyScope);
   const { projects } = useGrantableProjects(true);
+  const { sheets } = useProjectSheets(true);
+  const scopeDto = scopeToDto(scope);
 
   // ⛔ R-06/X-01: відкликання ролі в групи йшло одним натисканням — а це
   // права ВСІХ членів групи каталогу одразу.
@@ -104,7 +117,7 @@ export function GroupAssignmentsPanel({ roles }: { roles: RoleView[] }): JSX.Ele
           // Незадана межа не шлеться взагалі: для сервера це те саме, що `null`.
           ...(from !== null && { validFrom: from }),
           ...(to !== null && { validTo: to }),
-          ...(scopeProjects.length > 0 && { scope: { projects: scopeProjects } }),
+          ...(scopeDto !== null && { scope: scopeDto }),
         } satisfies AssignRequest),
       }),
     onSuccess: async (result) => {
@@ -112,7 +125,7 @@ export function GroupAssignmentsPanel({ roles }: { roles: RoleView[] }): JSX.Ele
       setPrincipal('');
       setValidFrom(null);
       setValidTo(null);
-      setScopeProjects([]);
+      setScope(EmptyScope);
       showDone(t(result.effectiveAfterNextSignIn ? 'groupRoles.assignedNextSignIn' : 'groupRoles.assigned'));
     },
     onError: (error) => {
@@ -182,7 +195,12 @@ export function GroupAssignmentsPanel({ roles }: { roles: RoleView[] }): JSX.Ele
                 <Timestamp value={row.validTo} dateOnly fallback={Unbounded} />
               </Table.Td>
               <Table.Td data-column="scope">
-                <ScopeSummary projectIds={row.scope?.projects} projects={projects} />
+                <ScopeSummary
+                  projectIds={row.scope?.projects}
+                  projects={projects}
+                  sheets={row.scope?.sheets}
+                  periods={row.scope?.periods}
+                />
               </Table.Td>
               <Table.Td>
                 <Button
@@ -233,22 +251,19 @@ export function GroupAssignmentsPanel({ roles }: { roles: RoleView[] }): JSX.Ele
           onChange={setValidTo}
           error={orderBroken ? t('groupRoles.validityOrder') : undefined}
         />
-        <MultiSelect
-          label={t('security.scopeProjects')}
-          description={t('groupRoles.scopeChangeHint')}
-          placeholder={scopeProjects.length === 0 ? t('security.scopeAllProjects') : undefined}
-          data={projectOptions(projects, scopeProjects)}
-          value={scopeProjects.map(String)}
-          onChange={(values) => setScopeProjects(values.map(Number))}
-          searchable
-          clearable
-          miw={200}
+        <ScopeFields
+          value={scope}
+          onChange={setScope}
+          projects={projects}
+          sheets={sheets}
+          hint={t('groupRoles.scopeChangeHint')}
         />
         <Button
           disabled={
             roleId === null ||
             principal.trim().length === 0 ||
             orderBroken ||
+            !scopeValid(scope) ||
             (assign.isPending && assign.variables === true)
           }
           // ⚠ Лише своя дія: «Assign anyway» нижче — та сама мутація з іншим
@@ -260,7 +275,10 @@ export function GroupAssignmentsPanel({ roles }: { roles: RoleView[] }): JSX.Ele
         </Button>
       </Group>
 
-      {scopeProjects.length > 0 && <ScopeGlobalWarning />}
+      {scopeDto !== null && <ScopeGlobalWarning />}
+      {scopeDto !== null && (scopeDto.sheets !== undefined || scopeDto.periods !== undefined) && (
+        <ScopeNarrowedWarning />
+      )}
 
       {dangerous !== null && (
         <Alert color="statusError" title={t('groupRoles.dangerousTitle')}>
