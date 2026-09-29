@@ -9,7 +9,8 @@ using Microsoft.Extensions.Logging;
 namespace Ecr.Worker;
 
 /// <summary>
-/// Точка входу: <c>--supervisor [-- аргументи дитини]</c> або <c>--child [аргументи заглушки]</c>.
+/// Точка входу: <c>--supervisor [-- аргументи дитини]</c>, <c>--child</c> (дочірній
+/// воркер черги, I1) або <c>--child &lt;аргументи заглушки&gt;</c> (перевірки P1).
 /// </summary>
 internal static partial class WorkerProgram
 {
@@ -30,7 +31,8 @@ internal static partial class WorkerProgram
 
     private const string Usage =
         "Використання: Ecr.Worker --supervisor [-- аргументи дочірнього]  |  "
-        + "Ecr.Worker --child [--eat-mb N] [--hang] [--exit-after-ms N] [--exit-code C]";
+        + "Ecr.Worker --child  |  "
+        + "Ecr.Worker --child --stub [--eat-mb N] [--hang] [--exit-after-ms N] [--exit-code C]";
 
     /// <summary>Запускає режим за першим аргументом; повертає код виходу.</summary>
     public static async Task<int> RunAsync(string[] args, CancellationToken cancellationToken)
@@ -49,6 +51,8 @@ internal static partial class WorkerProgram
 
                 return await RunSupervisorAsync(separator == 0 ? rest.Skip(1).ToList() : [], cancellationToken)
                     .ConfigureAwait(false);
+            case "--child" when rest.Count == 0:
+                return await RunChildAsync(cancellationToken).ConfigureAwait(false);
             case "--child" when ChildStubOptions.Parse(rest) is { } stub:
                 using (var host = CreateBuilder(stub).Build())
                 {
@@ -98,6 +102,47 @@ internal static partial class WorkerProgram
             return ExitUnsupportedPlatform;
         }
 
+        await host.RunAsync(cancellationToken).ConfigureAwait(false);
+        return Environment.ExitCode;
+    }
+
+    /// <summary>
+    /// Дочірній воркер (I1): лейн перерахунку черги в базі, роль <c>wrk</c>, одна
+    /// задача на процес. Рядок підключення — зі змінної <c>ECR_ConnectionStrings__Ecr</c>
+    /// оточення, успадкованого від наглядача (служби).
+    /// </summary>
+    private static async Task<int> RunChildAsync(CancellationToken cancellationToken)
+    {
+        var builder = CreateBuilder(stub: null);
+
+        // ⚠ Перевірка контейнера при побудові ВИМКНЕНА навмисно (у Development її
+        // вмикає хост): складання Infrastructure несе й реєстрації лише для Api —
+        // захист секретів сповіщень через Data Protection, — яких задачі
+        // перерахунку не резолвлять. Перевірка вимагала б сертифікат Data
+        // Protection і в воркера без жодної потреби. Те, що граф перерахунку
+        // резолвиться без Data Protection, доводить ChildCompositionTests.
+        builder.ConfigureContainer(new DefaultServiceProviderFactory(
+            new ServiceProviderOptions { ValidateScopes = true, ValidateOnBuild = false }));
+
+        var problems = WorkerPoolOptions.TryLoad(builder.Configuration, out var pool);
+        if (problems.Count > 0)
+        {
+            await Console.Error.WriteLineAsync(string.Join(Environment.NewLine, problems)).ConfigureAwait(false);
+            return ExitInvalidConfiguration;
+        }
+
+        try
+        {
+            Child.ChildComposition.AddChildWorker(builder.Services, builder.Configuration, pool);
+        }
+        catch (InvalidOperationException ex)
+        {
+            // Немає рядка підключення тощо: код виходу називає причину наглядачеві.
+            await Console.Error.WriteLineAsync(ex.Message).ConfigureAwait(false);
+            return ExitInvalidConfiguration;
+        }
+
+        using var host = builder.Build();
         await host.RunAsync(cancellationToken).ConfigureAwait(false);
         return Environment.ExitCode;
     }

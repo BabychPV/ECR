@@ -20,6 +20,9 @@ internal sealed record ChildStubOptions(int EatMegabytes, bool Hang, TimeSpan? E
         {
             switch (args[i])
             {
+                case "--stub":
+                    // Заглушка без поведінки (I1: голий `--child` — справжній воркер).
+                    break;
                 case "--hang":
                     result = result with { Hang = true };
                     break;
@@ -49,8 +52,8 @@ internal sealed record ChildStubOptions(int EatMegabytes, bool Hang, TimeSpan? E
 }
 
 /// <summary>
-/// Заглушка циклу дочірнього воркера (P1): чекає сигналу зупинки. Реальний
-/// цикл над <c>IJobQueue</c> — крок I1.
+/// Заглушка дочірнього процесу для перевірок меж Job Object і наглядача (P1):
+/// чекає сигналу зупинки. Справжній цикл над чергою — голий <c>--child</c> (I1).
 /// </summary>
 internal sealed class ChildStub(ChildStubOptions options) : BackgroundService
 {

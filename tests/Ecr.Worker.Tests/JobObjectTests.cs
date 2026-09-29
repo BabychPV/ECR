@@ -40,7 +40,7 @@ public sealed class JobObjectTests
         {
             eater = Start(Command("--child", "--eat-mb", "256"));
             job.Assign(eater);
-            idle = Start(Command("--child"));
+            idle = Start(Command("--child", "--stub"));
             job.Assign(idle);
 
             // ⛔ Без SetInformationJobObject 256 МБ комітяться спокійно і

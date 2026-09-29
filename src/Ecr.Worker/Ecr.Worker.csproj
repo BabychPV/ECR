@@ -3,7 +3,7 @@
   <!--
     ФВ-9.8 (D-206, крок P1): процес пулу перерахунку. Один exe у двох ролях:
     наглядач пулу під Windows Job Object і дочірній воркер (див. WorkerProgram).
-    Реальний цикл дочірнього над чергою — крок I1.
+    Дочірній (I1) виконує лейн перерахунку черги в базі тим самим JobWorker, що й Api.
   -->
   <PropertyGroup>
     <OutputType>Exe</OutputType>
@@ -11,6 +11,13 @@
     <!-- [LibraryImport] генерує unsafe-код маршалінгу; без цього SYSLIB1062. -->
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
+
+  <!-- I1: те саме складання задач перерахунку, що в Ecr.Api (без веб-частини). -->
+  <ItemGroup>
+    <ProjectReference Include="..\Ecr.Application\Ecr.Application.csproj" />
+    <ProjectReference Include="..\Ecr.Infrastructure\Ecr.Infrastructure.csproj" />
+    <ProjectReference Include="..\Ecr.Calculations\Ecr.Calculations.csproj" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.Hosting" />
