@@ -207,6 +207,11 @@ public sealed class ExcelImportApplyWorkbookTests(SqlServerFixture sql) : IDispo
         access.BuildProfileAsync(Arg.Any<int>(), Arg.Any<CancellationToken>()).Returns(profile);
         access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
             .Returns(c => real.CanReadDocumentAsync(c.ArgAt<AccessProfile>(0), c.ArgAt<long>(1), c.ArgAt<CancellationToken>(2)));
+
+        // S6: межі читання — справжні (конфлікт версії питає їх, щоб не назвати
+        // значення прихованої колонки).
+        access.ReadScopeAsync(Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
+            .Returns(c => real.ReadScopeAsync(c.ArgAt<AccessProfile>(0), c.ArgAt<long>(1), c.ArgAt<CancellationToken>(2)));
         access.CanEditCellsAsync(
                 Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<PeriodKey>(),
                 Arg.Any<IReadOnlyCollection<CellAddress>>(), Arg.Any<CancellationToken>())

@@ -40,6 +40,10 @@ public sealed class ImportDiffBuilder
     /// <param name="rowIds">Ідентифікатори рядків цієї таблиці: <c>RowKey</c> → <c>TableRow.Id</c>.</param>
     /// <param name="versions">Версії рядків цієї таблиці: <c>RowKey</c> → hex <c>rowversion</c>.</param>
     /// <param name="current">Поточний зріз комірок цієї таблиці.</param>
+    /// <param name="canReadColumn">
+    /// Чи бачить той, хто імпортує, колонку (<c>DocumentReadScope.CanReadColumn</c>, S6);
+    /// <c>null</c> — бачить усі.
+    /// </param>
     /// <remarks>
     /// ⛔ Q-168 (аудит фази 2, продуктивність). Метод БІЛЬШЕ НЕ ходить у базу
     /// сам — <paramref name="rowIds"/>, <paramref name="versions"/> і
@@ -57,7 +61,8 @@ public sealed class ImportDiffBuilder
         IReadOnlyDictionary<int, IReadOnlyDictionary<string, long>> lookups,
         IReadOnlyDictionary<string, long> rowIds,
         IReadOnlyDictionary<string, string> versions,
-        IReadOnlyList<CellRecord> current)
+        IReadOnlyList<CellRecord> current,
+        Func<int, bool>? canReadColumn = null)
     {
         ArgumentNullException.ThrowIfNull(worksheet);
         ArgumentNullException.ThrowIfNull(block);
@@ -96,6 +101,26 @@ public sealed class ImportDiffBuilder
                 }
 
                 var cell = worksheet.Cell(row.Number, column.Number);
+
+                // ⛔ S6 (ФВ-6.6): колонка, якої користувач не бачить, — ПЕРШОЮ і
+                // без жодного погляду на її поточне значення. Далі йде
+                // порівняння з ним (`Same`), і «незмінена — пропуск, змінена —
+                // відмова» відповідало на питання «чи дорівнює приховане число
+                // тому, що я вписав у книгу». Тепер відповідь залежить лише від
+                // книги: порожньо — нічого, щось вписано — відмова правами
+                // (записати в приховану колонку однаково не можна).
+                if (canReadColumn is not null && !canReadColumn(definition.Id))
+                {
+                    if (!cell.IsEmpty() && cell.GetString().Trim().Length > 0)
+                    {
+                        rejected.Add(new ImportRejection(
+                            row.RowKey, column.Code, "ECR-ACCS-0403",
+                            $"Editing the cell is not allowed: {EditDenyReason.NoGrant}.",
+                            table.Code, table.NameL10n, ImportMessageKeys.Denied(EditDenyReason.NoGrant)));
+                    }
+
+                    continue;
+                }
 
                 // ⛔ `V-10`. Формула в обчислюваній комірці — це те, що туди
                 // поклав САМ експорт (`ExcelExporter.WriteFormulas`), а не

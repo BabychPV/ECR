@@ -61,6 +61,11 @@ public sealed class ExcelImporterTemplateVersionTests
         _access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
             .Returns(EditDecision.Allow());
 
+        // S6: межі читання — «бачить усе»; про заборони — ImportDiffBuilderHiddenColumnTests
+        // і DenyReadTests.ImportPreview (Api).
+        _access.ReadScopeAsync(Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
+            .Returns(_ => ReadScopes.Everything(BuildSnapshot()));
+
         // ⚠ Порожній словник рішень — жодна адреса не заборонена явно
         // (той самий прийом, що й у PatchCellsTests): ImportDiffBuilder
         // трактує відсутність запису як «дозволено».

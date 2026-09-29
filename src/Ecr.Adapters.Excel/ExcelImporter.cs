@@ -144,6 +144,14 @@ public sealed class ExcelImporter(
         var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
         var lookups = await LookupsAsync(snapshot, ct).ConfigureAwait(false);
 
+        // ⛔ S6 (ФВ-6.6): межі читання того, хто імпортує. Перегляд порівнює
+        // книгу з ПОТОЧНИМИ значеннями, і будь-яка відповідь, що залежить від
+        // значення прихованої комірки («нічого не зміниться» проти «відмова»),
+        // — оракул: підставляючи числа в книгу, прочитати приховане можна було
+        // без жодного права на читання. Приховане порівнянню не віддається
+        // зовсім (див. нижче і `ImportDiffBuilder.Build`).
+        var readable = await access.ReadScopeAsync(profile, documentId, ct).ConfigureAwait(false);
+
         var diffs = new List<TableDiff>(map.Tables.Count);
         var changes = new List<ImportChange>();
         var rejected = new List<ImportRejection>();
@@ -164,8 +172,14 @@ public sealed class ExcelImporter(
             // проєкт) могла б підмінити `TableInstanceId` і змусити код нижче
             // прочитати рядки й комірки ЧУЖОГО екземпляра ще ДО будь-якого
             // рішення про доступ.
+            //
+            // ⛔ S6: таблиця під забороною читання — та сама відмова, що й
+            // неіснуючий екземпляр, і ДО читання її рядків і комірок. Інакше
+            // відмова несла б код і назву прихованої таблиці зі знімка, а
+            // «зміна проти відмови» — чи збігається її значення з книжковим.
             if (!validInstances.TryGetValue(block.TableInstanceId, out var actualTableDefId)
-                || actualTableDefId != block.TableDefId)
+                || actualTableDefId != block.TableDefId
+                || !readable.CanReadTable(actualTableDefId))
             {
                 rejected.Add(new ImportRejection(
                     "—", block.TableCode, "ECR-IMP-0422",
@@ -232,7 +246,8 @@ public sealed class ExcelImporter(
                 block.TableInstanceId, (IReadOnlyList<CellRecord>)EmptySlice);
 
             var diff = diffBuilder.Build(
-                worksheet, block, map.PeriodKey, table, decisions, lookups, rowIds, versions, current);
+                worksheet, block, map.PeriodKey, table, decisions, lookups, rowIds, versions, current,
+                readable.CanReadColumn);
 
             diffs.Add(diff);
             changes.AddRange(diff.Changes);
