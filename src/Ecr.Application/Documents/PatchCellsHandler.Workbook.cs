@@ -17,7 +17,7 @@ namespace Ecr.Application.Documents;
 /// ⛔ Правила — ТІ САМІ методи, що й у поштучного <see cref="HandleAsync"/>
 /// (<c>EnforceRowCreationRules</c>, <c>EnsureNoVersionConflictsAsync</c>,
 /// <c>CheckAccess</c>, <c>BuildCellChanges</c>, <c>EvaluateRequiredInputs</c>,
-/// <c>EnsureValidationPasses</c>, <c>CheckLookups*</c>, <c>CheckUnitsExist</c>,
+/// <c>EnsureValidationPassesAsync</c>, <c>CheckLookups*</c>, <c>CheckUnitsExist</c>,
 /// <c>CheckSheetStatus</c>, <c>CheckRowLimit</c>, <c>BuildAuditRecords</c>).
 /// Відрізняється лише ТЕ, ЯК дістаються дані: пакетом на книгу замість запиту
 /// на таблицю. Друга копія правила колись розійшлася б із першою.
@@ -203,8 +203,11 @@ public sealed partial class PatchCellsHandler
                 .LoadRegistryFieldsAsync(
                     validation, registries, item.Context.Snapshot, item.Context.Table, item.Planned.Upserts, ct)
                 .ConfigureAwait(false);
-            item.Messages = Blamed(item.Id, () => EnsureValidationPasses(
-                item.Context, item.Request, item.Planned, item.RequiredInputMessages, headerValues, registryFields));
+            // ⚠ S6: перевірка асинхронна — фільтр видимих повідомлень питає межі
+            // читання (лише коли повідомлення називає колонку поза батчем).
+            item.Messages = await BlamedAsync(item.Id, () => EnsureValidationPassesAsync(
+                item.Context, item.Request, item.Planned, item.RequiredInputMessages, headerValues, registryFields, ct))
+                .ConfigureAwait(false);
         }
 
         var toWrite = active.SelectMany(x => AddressesToWrite(x.Planned)).ToList();

@@ -449,6 +449,11 @@ public sealed class PatchCellsWorkbookTests(SqlServerFixture sql) : IDisposable
                 c.ArgAt<AccessProfile>(0), c.ArgAt<IReadOnlyDictionary<long, IReadOnlyCollection<string>>>(1),
                 c.ArgAt<CancellationToken>(2)));
 
+        // ⚠ S6: межі читання (конфлікт версії, фільтр повідомлень) — теж
+        // справжня служба, інакше заглушка віддала б `null`.
+        access.ReadScopeAsync(Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
+            .Returns(c => real.ReadScopeAsync(c.ArgAt<AccessProfile>(0), c.ArgAt<long>(1), c.ArgAt<CancellationToken>(2)));
+
         var user = Substitute.For<ICurrentUser>();
         user.UserId.Returns(1);
 
