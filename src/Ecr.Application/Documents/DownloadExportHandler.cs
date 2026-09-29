@@ -29,14 +29,25 @@ namespace Ecr.Application.Documents;
 /// <see cref="IExportStore"/>, щоб він узагалі пам'ятав, з якого документа
 /// побудована книга — раніше він зберігав лише байти.
 /// </para>
+/// <para>
+/// ⛔ S20 (аудит безпеки): кожне віддане завантаження — подія
+/// <see cref="EventType"/> у журналі безпеки (хто, документ, формат, розмір).
+/// Замовлення експорту (<see cref="ExportDocumentHandler"/>) і завантаження —
+/// різні події: книгу можна забрати кілька разів за її строк життя.
+/// </para>
 /// </remarks>
 public sealed class DownloadExportHandler(
     IExportStore exports,
     IAccessDecisionService access,
-    ICurrentUser currentUser)
+    ICurrentUser currentUser,
+    IAuditWriter audit,
+    Ecr.Domain.Abstractions.IClock clock)
 {
     /// <summary>Право на експорт (`02-contracts.md` §9).</summary>
     public const string Permission = "Document.Export";
+
+    /// <summary>Тип події в <c>aud.SecurityEvent</c>.</summary>
+    public const string EventType = "DocumentExportDownloaded";
 
     /// <summary>Читає готову книгу.</summary>
     /// <param name="exportId">Ключ експорту з прогресу задачі.</param>
@@ -86,6 +97,24 @@ public sealed class DownloadExportHandler(
         // ⛔ B-08: невидимий документ — 404, як і `GET /documents/{id}`, а не 403
         // «NoGrant»: різниця відповідей сама розкривала б, що документ існує.
         await DocumentVisibility.RequireVisibleAsync(access, profile, book.DocumentId, Permission, ct).ConfigureAwait(false);
+
+        // ⚠ Лише ВІДДАНЕ завантаження: відмови вище не пишуться — вони нічого
+        // не віддали, а «чужий exportId» і так рівний неіснуючому (S6).
+        await audit.WriteSecurityEventAsync(
+            new SecurityEventRecord(
+                clock.UtcNow,
+                EventType,
+                TargetUserId: null,
+                TargetRoleId: null,
+                System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    documentId = book.DocumentId,
+                    format = DocumentExportFormat.OfContent(book.Content).Extension,
+                    bytes = book.Content.Length,
+                }),
+                requester,
+                currentUser.CorrelationId),
+            ct).ConfigureAwait(false);
 
         return book.Content;
     }

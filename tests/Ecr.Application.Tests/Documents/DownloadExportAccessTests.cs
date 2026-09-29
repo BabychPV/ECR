@@ -111,5 +111,6 @@ public sealed class DownloadExportAccessTests
         await _access.DidNotReceiveWithAnyArgs().CanReadDocumentAsync(default!, default, default);
     }
 
-    private DownloadExportHandler Handler() => new(_exports, _access, _user);
+    private DownloadExportHandler Handler()
+        => new(_exports, _access, _user, Substitute.For<IAuditWriter>(), Substitute.For<Ecr.Domain.Abstractions.IClock>());
 }

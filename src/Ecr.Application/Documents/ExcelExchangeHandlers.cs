@@ -16,14 +16,24 @@ namespace Ecr.Application.Documents;
 /// будь-який розумний HTTP-таймаут. Синхронний експорт працював би на
 /// демонстрації і відвалювався б у останній день періоду, коли його
 /// запускають усі одразу.
+///
+/// ⛔ S20 (аудит безпеки): замовлення експорту — подія <see cref="EventType"/>
+/// у журналі безпеки: хто, який документ, формат і межі S6 — лише КІЛЬКІСТЬ
+/// прихованих таблиць і колонок, без назв (назви прихованого — те саме, що
+/// приховано). Доти вивантаження документа цілком не лишало сліду.
 /// </remarks>
 public sealed class ExportDocumentHandler(
     IBackgroundJobScheduler jobs,
     IAccessDecisionService access,
-    ICurrentUser currentUser)
+    ICurrentUser currentUser,
+    IAuditWriter audit,
+    Ecr.Domain.Abstractions.IClock clock)
 {
     /// <summary>Право на експорт (`02-contracts.md` §9).</summary>
     public const string Permission = "Document.Export";
+
+    /// <summary>Тип події в <c>aud.SecurityEvent</c>.</summary>
+    public const string EventType = "DocumentExportRequested";
 
     /// <summary>Ставить експорт у чергу.</summary>
     /// <param name="documentId">Документ.</param>
@@ -83,10 +93,33 @@ public sealed class ExportDocumentHandler(
         // читання в файлі — ЙОГО межі, а не того, хто дізнався `exportId`.
         var requestedBy = currentUser.UserId ?? profile.UserId;
 
-        return await jobs
+        var jobId = await jobs
             .EnqueueAsync<IExcelExportJob>(
                 new ExcelExportTask(documentId, options, exportId, normalized, requestedBy), ct, currentUser.UserId)
             .ConfigureAwait(false);
+
+        // ⚠ ПІСЛЯ постановки: запис «експорт замовлено» без задачі в черзі
+        // брехав би про вивантаження, якого не буде.
+        await audit.WriteSecurityEventAsync(
+            new SecurityEventRecord(
+                clock.UtcNow,
+                EventType,
+                TargetUserId: null,
+                TargetRoleId: null,
+                System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    documentId,
+                    format = normalized,
+                    periodKey = options.PeriodKey,
+                    jobId,
+                    hiddenTableCount = options.HiddenTableDefIds?.Count ?? 0,
+                    hiddenColumnCount = options.HiddenColumnDefIds?.Count ?? 0,
+                }),
+                requestedBy,
+                currentUser.CorrelationId),
+            ct).ConfigureAwait(false);
+
+        return jobId;
     }
 }
 

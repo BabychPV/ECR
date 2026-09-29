@@ -500,15 +500,46 @@ public sealed class ListUserRolesHandler(
 /// порожній перелік адресатів, тобто сповіщення (<c>ФВ-12</c>) не надходили
 /// нікому, а перемикач «отримувати сповіщення» був вічно неактивним і
 /// виглядав як налаштування, яке просто вимкнули.
+///
+/// ⛔ S20 (аудит безпеки): зміна адреси — подія безпеки <see cref="EventType"/>
+/// в тій самій транзакції, що й зміна. Адреса — канал сповіщень і, отже,
+/// спосіб перехопити їх; без сліду в журналі підміну не видно. Адреси в
+/// журналі МАСКОВАНІ (<see cref="MaskEmail"/>): журнал читає ширше коло, ніж
+/// картку користувача.
 /// </remarks>
 public sealed class SetUserEmailHandler(
     IUserStore users,
     IAccessDecisionService access,
     IUnitOfWork uow,
-    ICurrentUser currentUser)
+    ICurrentUser currentUser,
+    IAuditWriter audit,
+    IClock clock)
 {
     /// <summary>Право керування користувачами.</summary>
     public const string Permission = "Security.ManageUsers";
+
+    /// <summary>Тип події в <c>aud.SecurityEvent</c>.</summary>
+    public const string EventType = "UserEmailChanged";
+
+    /// <summary>
+    /// Маска адреси для журналу: перші два символи локальної частини й домен
+    /// (<c>jo***@example.com</c>); <c>null</c> — адреси немає.
+    /// </summary>
+    /// <param name="email">Адреса.</param>
+    public static string? MaskEmail(string? email)
+    {
+        if (string.IsNullOrWhiteSpace(email))
+        {
+            return null;
+        }
+
+        var trimmed = email.Trim();
+        var at = trimmed.LastIndexOf('@');
+        var local = at < 0 ? trimmed : trimmed[..at];
+        var domain = at < 0 ? string.Empty : trimmed[at..];
+
+        return string.Concat(local.AsSpan(0, Math.Min(2, local.Length)), "***", domain);
+    }
 
     /// <summary>Задає або прибирає адресу.</summary>
     /// <param name="userId">Користувач.</param>
@@ -542,6 +573,8 @@ public sealed class SetUserEmailHandler(
                            ["userId"] = userId.ToString(System.Globalization.CultureInfo.InvariantCulture),
                        });
 
+        var before = user.Email;
+
         // ⚠ Прибирання адреси знімає і прапорець сповіщень: прапорець без
         // пошти беззмістовний і виглядав би як налаштований адресат, якому
         // нічого не надсилається.
@@ -551,7 +584,38 @@ public sealed class SetUserEmailHandler(
             user.SetReceivesAlerts(false);
         }
 
-        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+        // Та сама адреса — не зміна: подія без зміни засмічувала б журнал.
+        if (string.Equals(before, user.Email, StringComparison.Ordinal))
+        {
+            await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+            return;
+        }
+
+        var after = user.Email;
+
+        // ⛔ Зміна й подія — ОДНА транзакція: журнал не має казати про зміну,
+        // якої не сталося, і зміна не має пройти без запису.
+        await uow.ExecuteInTransactionAsync(
+            async token =>
+            {
+                await audit.WriteSecurityEventAsync(
+                    new SecurityEventRecord(
+                        ChangedAt: clock.UtcNow,
+                        EventType: EventType,
+                        TargetUserId: userId,
+                        TargetRoleId: null,
+                        DetailsJson: JsonSerializer.Serialize(new
+                        {
+                            oldEmail = MaskEmail(before),
+                            newEmail = MaskEmail(after),
+                        }),
+                        ChangedByUserId: actorId,
+                        CorrelationId: currentUser.CorrelationId),
+                    token).ConfigureAwait(false);
+
+                await uow.SaveChangesAsync(token).ConfigureAwait(false);
+            },
+            ct).ConfigureAwait(false);
     }
 }
 

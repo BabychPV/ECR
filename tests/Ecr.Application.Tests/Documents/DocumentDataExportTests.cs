@@ -279,7 +279,10 @@ public sealed class DocumentDataExportTests
         access.ReadScopeAsync(Arg.Any<AccessProfile>(), DocumentId, Arg.Any<CancellationToken>())
               .Returns(ReadScopes.Everything(new TemplateVersionSnapshot(
                   1, 0, [], new Dictionary<int, ColumnDef>(), new Dictionary<(int, string), RowDef>())));
-        return (new ExportDocumentHandler(jobs, access, user), jobs);
+        return (
+            new ExportDocumentHandler(
+                jobs, access, user, Substitute.For<IAuditWriter>(), Substitute.For<Ecr.Domain.Abstractions.IClock>()),
+            jobs);
     }
 
     private static ExcelExportOptions Options() => new(false, false, "en", Period);

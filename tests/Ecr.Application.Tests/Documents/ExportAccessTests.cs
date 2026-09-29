@@ -97,7 +97,8 @@ public sealed class ExportAccessTests
     private static bool ServerScoped(object? payload)
         => payload is ExcelExportTask { Options: { HiddenTableDefIds: { Count: 0 }, HiddenColumnDefIds: { Count: 0 } } };
 
-    private ExportDocumentHandler Handler() => new(_jobs, _access, _user);
+    private ExportDocumentHandler Handler()
+        => new(_jobs, _access, _user, Substitute.For<IAuditWriter>(), Substitute.For<Ecr.Domain.Abstractions.IClock>());
 
     private static ExcelExportOptions Options()
         => new(IncludeFormulas: false, IncludeStyles: false, Language: "en", PeriodKey: 202601);
