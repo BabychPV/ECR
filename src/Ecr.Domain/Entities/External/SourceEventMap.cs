@@ -57,6 +57,8 @@ public sealed class SourceEventMap : Entity<int>
     /// <summary>Довжина імені атрибута — як <c>ext.EntityFieldMap.SourceField</c>.</summary>
     public const int MaxAttributeLength = 200;
 
+    private static readonly string[] ReservedAttributes = [StartAttribute, EndAttribute, NameAttribute];
+
     private static readonly string[] RequiredAttributes = [StartAttribute, EndAttribute];
 
     private readonly List<SourceEventFieldMap> _fields = [];
@@ -138,7 +140,10 @@ public sealed class SourceEventMap : Entity<int>
     /// <param name="spec">Опис поля.</param>
     /// <returns>Додане поле.</returns>
     /// <exception cref="DomainException">
-    /// <c>ECR-INT-0422</c>: колонка з іншої таблиці (<c>.eventMapColumnNotInTable</c>);
+    /// <c>ECR-INT-0422</c>: колонка з іншої таблиці (<c>.eventMapColumnNotInTable</c>),
+    /// невідомий чи неправильно вжитий <c>$</c>-атрибут (<c>.eventMapReservedAttributeInvalid</c>),
+    /// <c>$start</c>/<c>$end</c> не на <c>Date</c>-колонку (<c>.eventMapStartEndNotDate</c>),
+    /// вид значення не пасує до типу колонки (<c>.eventMapValueKindMismatch</c>);
     /// <c>ECR-INT-0409</c> <c>.eventMapColumnTaken</c> — колонка вже має поле.
     /// </exception>
     public SourceEventFieldMap AddField(SourceEventFieldSpec spec)
@@ -165,6 +170,59 @@ public sealed class SourceEventMap : Entity<int>
                 });
         }
 
+        if (attribute.StartsWith('$'))
+        {
+            // «$Start» — те саме, що «$start»: зберігається канонічне ім'я, бо
+            // синхронізація шукає зарезервовані атрибути порівнянням Ordinal.
+            var known = Array.Find(
+                ReservedAttributes, r => string.Equals(r, attribute, StringComparison.OrdinalIgnoreCase));
+            attribute = known ?? attribute;
+            if (known is null || spec.Scope != SourceEventAttributeScope.Event || spec.ValueKind != SourceEventValueKind.Direct)
+            {
+                throw new DomainException(
+                    "ECR-INT-0422",
+                    $"Атрибут «{attribute}» не є зарезервованим атрибутом події або вжитий не як пряме значення самої події.",
+                    new Dictionary<string, object?>
+                    {
+                        ["messageKey"] = "err.ECR-INT-0422.eventMapReservedAttributeInvalid",
+                        ["attribute"] = attribute,
+                    });
+            }
+
+            if (attribute is StartAttribute or EndAttribute && target.DataType != CellDataType.Date)
+            {
+                throw new DomainException(
+                    "ECR-INT-0422",
+                    $"Час події «{attribute}» лягає лише в колонку типу Date; «{target.Code}» має тип {target.DataType}.",
+                    new Dictionary<string, object?>
+                    {
+                        ["messageKey"] = "err.ECR-INT-0422.eventMapStartEndNotDate",
+                        ["attribute"] = attribute,
+                        ["targetColumn"] = target.Code,
+                        ["dataType"] = target.DataType.ToString(),
+                    });
+            }
+        }
+
+        // Lookup-колонка приймає лише запис довідника (за кодом, назвою чи явною
+        // відповідністю), а решта — лише пряме значення. Обчислювану колонку
+        // синхронізація не пише взагалі: її значення дає формула.
+        var lookupKind = spec.ValueKind != SourceEventValueKind.Direct;
+        var lookupColumn = target.DataType == CellDataType.Lookup;
+        if (lookupKind != lookupColumn || target.IsComputed)
+        {
+            throw new DomainException(
+                "ECR-INT-0422",
+                $"Колонка «{target.Code}» типу {target.DataType} не приймає значення події виду {spec.ValueKind}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-INT-0422.eventMapValueKindMismatch",
+                    ["targetColumn"] = target.Code,
+                    ["dataType"] = target.DataType.ToString(),
+                    ["valueKind"] = spec.ValueKind.ToString(),
+                });
+        }
+
         // Одне поле на колонку (UQ_SEFM_Target): два атрибути в ту саму комірку
         // дали б значення, яке залежить від порядку обходу. Колонки шаблону на
         // момент налаштування мапінгу вже збережені, тож порівняння за Id.
@@ -184,6 +242,25 @@ public sealed class SourceEventMap : Entity<int>
             Id, target.Id, attribute, spec.Scope, spec.ValueKind, spec.SourceUnitId, spec.TargetUnitId);
         _fields.Add(field);
         return field;
+    }
+
+    /// <summary>Прибирає поле колонки.</summary>
+    /// <param name="targetColumnDefId">Колонка поля.</param>
+    /// <returns><c>true</c> — поле було й прибране.</returns>
+    /// <exception cref="DomainException">
+    /// <c>ECR-INT-0422</c> <c>.eventMapStartEndRequired</c> — це останнє поле <c>$start</c> чи <c>$end</c>.
+    /// </exception>
+    public bool RemoveField(int targetColumnDefId)
+    {
+        var field = _fields.Find(f => f.TargetColumnDefId == targetColumnDefId);
+        if (field is null)
+        {
+            return false;
+        }
+
+        EnsureStartEnd(removing: field);
+        _fields.Remove(field);
+        return true;
     }
 
     private void EnsureStartEnd(SourceEventFieldMap? removing)
@@ -254,4 +331,5 @@ public sealed class SourceEventFieldMap : Entity<int>
     public int? SourceUnitId { get; private set; }
 
     public int? TargetUnitId { get; private set; }
+
 }
