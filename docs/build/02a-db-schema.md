@@ -2811,8 +2811,34 @@ CREATE TABLE itg.JobProgress
     -- — лише за віком HeartbeatAt. NULL — рядок старший за колонку.
     -- Міграція Analiz1JobsCoverageIndexes.
     InstanceId    nvarchar(64)  NULL,
-    CONSTRAINT PK_JobProgress PRIMARY KEY (JobId)
+    -- Черга в базі (MI-02, D-208; міграція MI02JobQueue). Усе NULL, без backfill:
+    -- Lane NULL — дзеркало Quartz, черга його не бере. Моменти — SYSUTCDATETIME().
+    Lane              varchar(32)      NULL,  -- JobLanes: 'default', 'recalc'
+    Payload           nvarchar(max)    NULL,  -- JSON аргументів задачі
+    AvailableAt       datetime2(3)     NULL,  -- коли можна брати; обов'язковий за Lane
+    LeaseUntil        datetime2(3)     NULL,  -- кінець оренди Running
+    ClaimToken        uniqueidentifier NULL,  -- токен оренди (fencing), новий на кожен claim
+    TargetKey         nvarchar(200)    NULL,  -- «{ТипМаркера}~{ціль}»; NULL — без коалесценції
+    CancelRequestedAt datetime2(3)     NULL,  -- запит скасування Running
+    ReclaimCount      int              NULL,  -- переклейми після втраченої оренди, окремо від Attempt
+    CONSTRAINT PK_JobProgress PRIMARY KEY (JobId),
+    CONSTRAINT CK_JobProgress_QueueShape CHECK (Lane IS NULL OR AvailableAt IS NOT NULL)
 );
+GO
+
+-- ⚠ Фільтровані індекси: кожна сесія, що пише в таблицю, — QUOTED_IDENTIFIER ON
+-- і ANSI_NULLS ON (sqlcmd — лише з -I), інакше INSERT/UPDATE падає з 1934.
+-- На ціль — щонайбільше одна Queued і одна Running («1 Running + 1 Queued позаду»);
+-- 2601/2627 при переході в Running claim читає як «нічого не взяв» (D-208).
+CREATE UNIQUE INDEX UX_JobProgress_Target_Queued
+    ON itg.JobProgress (TargetKey) WHERE State = 'Queued' AND TargetKey IS NOT NULL;
+CREATE UNIQUE INDEX UX_JobProgress_Target_Running
+    ON itg.JobProgress (TargetKey) WHERE State = 'Running' AND TargetKey IS NOT NULL;
+-- Claim: WHERE Lane IN (…) AND State … AND AvailableAt <= now ORDER BY AvailableAt, JobId.
+CREATE INDEX IX_JobProgress_Claim
+    ON itg.JobProgress (Lane, State, AvailableAt)
+    INCLUDE (TargetKey, LeaseUntil, Attempt, ReclaimCount)
+    WHERE Lane IS NOT NULL AND State IN ('Queued', 'Running');
 GO
 
 -- «Мої задачі» (JobProgressStore.ListRecentAsync; шапка опитує кожні 3–30 с):
