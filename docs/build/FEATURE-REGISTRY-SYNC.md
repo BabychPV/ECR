@@ -68,6 +68,12 @@
 `PUT /api/v1/sources/{id}/registry` вимагає `Integration.Manage` і `Registry.EditData` або грант
 `Write` на довідник (відв'язка — на поточний), інакше `403`.
 
+⚠ **Хто заводить зовнішній ідентифікатор запису (S2, судження розробки):** право на ДАНІ
+довідника — `Registry.EditData` або грант `Write` на довідник зі шляху, **без**
+`Integration.Manage`. Зв'язок `RegistryExternalKey` — властивість запису, як значення його
+полів; делегування запису синку — це прив'язка `SourceEntity` вище, і там `Integration.Manage`
+уже вимагається. Перелік — `Registry.View` або грант `Read`.
+
 Події:
 
 | Подія | Коли | Що з записом |
@@ -122,7 +128,7 @@ HSE301).
 |---|---|---|---|
 | **S0** | цей документ + `D-202` | — | ✓ 2026-09-28 |
 | **S1** | порт `ReadCurrentAsync` (поточні значення атрибутів елементів AF) | вікно HSE301 `F4` (той самий файл порту) | ☐ після `F4` |
-| **S2** | API зовнішніх ключів: перелік/прив'язка/відв'язка `dic.RegistryExternalKey` | — | ☐ |
+| **S2** | API зовнішніх ключів: перелік/прив'язка/відв'язка `dic.RegistryExternalKey` | — | ✓ `lane/analiz/registry-sync-s2` (див. §5.3) |
 | **S3** | створення `SourceEntity` з вебу | — | ✓ `lane/analiz/sources-create` `56cb4066` |
 | **S4** | `RegistrySyncPlanner` — чиста логіка + тести | S0 | ✓ у гілці `lane/analiz/registry-sync-s0-s4` |
 | **S5** | `RegistrySyncJob` — **лише звірка**: читає, планує, пише події, нічого в довідник | S1, S4, планувальник `D-09` | ☐ |
@@ -187,11 +193,32 @@ HSE301).
   прибрати `entry.RegistryDefId == registryDefId` у `LinksAsync` → червоний тест межі A/B (шлях
   ключа XB переписано).
 
+### 5.3 S2 — API зовнішніх ключів (2026-09-29)
+
+- `GET /api/v1/registries/{code}/external-keys?entryId=&dataSourceId=&cursor=&limit=` —
+  `PagedResult<RegistryExternalKeyView>` за зростанням `id`, сторінка 1..200 (`0` — 50).
+- `POST /api/v1/registries/{code}/external-keys` `{ entryId, dataSourceId, externalId }` → `201`.
+  Запис видалений, відсутній або з іншого довідника — `404 err.ECR-REG-0404.registryEntry`;
+  джерела немає — `404 err.ECR-INT-0404.dataSource`; `externalId` порожній чи > 200 —
+  `422 err.ECR-REQ-0422.externalKeyInvalid`; пара `(DataSourceId, ExternalId)` уже зайнята —
+  `409 ECR-REG-0409` (`externalKeyTaken`, гонка — `externalKeyTakenConcurrently` з
+  `UQ_RegistryExternalKey`).
+- `DELETE /api/v1/registries/{code}/external-keys/{id}` → `204`; зв'язок запису іншого довідника —
+  `404 err.ECR-REG-0404.externalKey`.
+- Право — §3 («Хто заводить зовнішній ідентифікатор»). Аудит — `aud.StructureChange`
+  (`EntityType = dic.RegistryExternalKey`, `Bind`/`Unbind`) у транзакції зі зміною.
+- `ExternalPath` через API не задається: його ставить синк (`MarkSynced`).
+- Клієнт: панель «External identifiers» у формі наявного запису (`RegistryExternalKeysPanel`).
+- Тести: `RegistryExternalKeyHandlersTests` (Application), `RegistryExternalKeysApiTests` (HTTP +
+  гонка в сховищі), `RegistryExternalKeysPanel.test.tsx`. Мутації (2026-09-29, кожна окремо,
+  відкат і контрольний прогін): прибрати перевірку права → червоні; прибрати звірку «запис
+  належить довіднику шляху» → червоний; прибрати перевірку дубля → червоний.
+
 ## 6. Журнал покриття
 
 | Вимога | Що покриває | Стан |
 |---|---|---|
-| `ФВ-8.10` | `RegistryExternalKey` (сутність і тести `RegistryExternalKeyTests`); планувальник: зниклий/неприв'язаний/перенесений елемент (`RegistrySyncPlannerTests`, S4) | покрито частково: API й панель — S2, S10 |
+| `ФВ-8.10` | `RegistryExternalKey` (сутність і тести `RegistryExternalKeyTests`); планувальник: зниклий/неприв'язаний/перенесений елемент (`RegistrySyncPlannerTests`, S4) | API — S2 (`RegistryExternalKeyHandlersTests`, `RegistryExternalKeysApiTests`); повна панель — S10 |
 | `ФВ-8.11` | мапінг `ext.EntityFieldMap` на поле довідника (`CreateEntityFieldMapTests`); політика `SourceKind`, ідемпотентність, ручна правка, відмова типу (`RegistrySyncPlannerTests`, S4); звірка (`RegistrySyncJobTests`, S5); запис через writer від `svc-integration`, повтор без змін, невідомий автор, відмова одного запису, `Local` без запису (`RegistrySyncApplyTests`, S7a); дубль ключа в пакеті, обмін ключами, темпоральні вікна, межа довідника (`RegistrySyncApplyTests`, S7-3) | покрито частково: S7b, S8 |
 | `ФВ-8.9` | політика `SourceKind` у планувальнику | логіка є; перемикання й подвійна звірка в UI — поза цим планом |
 
