@@ -10580,6 +10580,17 @@ export interface paths {
                         "text/plain": components["schemas"]["JobAcceptedResponse"];
                     };
                 };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
             };
         };
         delete?: never;
