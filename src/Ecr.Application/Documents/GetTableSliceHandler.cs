@@ -111,7 +111,8 @@ public sealed class GetTableSliceHandler(
         // й неіснуючий екземпляр (`RowStore.ResolveTableInstanceAsync`): 403
         // «заборонено» сам розповідав би, що таблиця є (той самий принцип, що й
         // B-08 для документа).
-        var readable = await access.ReadScopeAsync(profile, documentId, ct).ConfigureAwait(false);
+        var readable = (await access.ReadScopeAsync(profile, documentId, ct).ConfigureAwait(false))
+            .InPeriod(new Ecr.Domain.ValueObjects.PeriodKey(instance.PeriodKey));
 
         if (!readable.CanReadTable(instance.TableDefId))
         {

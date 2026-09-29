@@ -150,7 +150,7 @@ public sealed class ExcelImporter(
         // — оракул: підставляючи числа в книгу, прочитати приховане можна було
         // без жодного права на читання. Приховане порівнянню не віддається
         // зовсім (див. нижче і `ImportDiffBuilder.Build`).
-        var readable = await access.ReadScopeAsync(profile, documentId, ct).ConfigureAwait(false);
+        var readable = (await access.ReadScopeAsync(profile, documentId, ct).ConfigureAwait(false)).InPeriod(period);
 
         var diffs = new List<TableDiff>(map.Tables.Count);
         var changes = new List<ImportChange>();

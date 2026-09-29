@@ -62,7 +62,8 @@ public sealed class ExportDocumentHandler(
         // вивантаження. Задача в черзі не знає користувача, тож межі читання
         // рахуються ТУТ, з профілю, і їдуть у завданні. Перезаписуються завжди —
         // що б не прийшло від викликача.
-        var readable = await access.ReadScopeAsync(profile, documentId, ct).ConfigureAwait(false);
+        var readable = (await access.ReadScopeAsync(profile, documentId, ct).ConfigureAwait(false))
+            .InPeriod(new Ecr.Domain.ValueObjects.PeriodKey(options.PeriodKey));
         options = options with
         {
             HiddenTableDefIds = readable.HiddenTableIds(),

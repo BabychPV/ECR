@@ -85,7 +85,7 @@ public sealed class GetValidationResultHandler(
         // бачить — той самий фільтр, що й у `ValidateDocumentHandler`.
         var readable = stored.Count == 0
             ? null
-            : await access.ReadScopeAsync(profile, documentId, ct).ConfigureAwait(false);
+            : (await access.ReadScopeAsync(profile, documentId, ct).ConfigureAwait(false))?.InPeriod(periodKey);
         // ⛔ Приховані помилки — одним знеособленим зауваженням
         // (`HiddenValidationIssues`), а не мовчки: інакше читач, чиї зауваження
         // всі під забороною, бачить «зауважень немає» при заблокованому поданні.

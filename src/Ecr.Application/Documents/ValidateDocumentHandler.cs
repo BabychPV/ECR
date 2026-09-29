@@ -135,12 +135,13 @@ public sealed class ValidateDocumentHandler(
         // помилки на весь документ, а не на те, що бачить запускач. ВІДДАЮТЬСЯ ж
         // лише повідомлення про таблиці й колонки, які запускач бачить: адреса
         // (`RowKey`, `ColumnCode`) і текст правила — теж зміст прихованого.
-        var readable = await access.ReadScopeAsync(profile, documentId, ct).ConfigureAwait(false);
+        var scope = await access.ReadScopeAsync(profile, documentId, ct).ConfigureAwait(false);
+        Security.DocumentReadScope? readable = null;
 
         // ⛔ Приховані помилки не зникають мовчки (`HiddenValidationIssues`):
         // інакше запускач, чиї зауваження всі під забороною, бачить «зауважень
         // немає», а «Подати» відмовляє.
-        return HiddenValidationIssues.ForViewer(messages, m => readable.CanReadAt(m.TableDefId, m.ColumnCode));
+        return HiddenValidationIssues.ForViewer(messages, m => (readable ??= scope.InPeriod(periodKey)).CanReadAt(m.TableDefId, m.ColumnCode));
     }
 
 }

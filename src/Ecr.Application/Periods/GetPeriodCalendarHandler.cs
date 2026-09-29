@@ -51,7 +51,9 @@ public sealed class GetPeriodCalendarHandler(
         // Той самий патерн, що й `ActivateProjectHandler`/`RunCalculationHandler`
         // (Q-179): грант на КОНКРЕТНИЙ проєкт, перевірений ПІСЛЯ existence-check
         // (інакше запит на неіснуючий проєкт завжди повертав би 403 замість 404).
-        if (profile.LevelFor(ResourceKind.Project, projectId) < GrantLevel.Read)
+        // ⚠ D-214: календар — рівень документа, його відкриває й роль, звужена
+        // аркушами чи періодами (`SeesDocumentsOf`).
+        if (!profile.SeesDocumentsOf(projectId))
         {
             throw new AccessDeniedException(
                 "ECR-AUTH-0403", $"Немає гранта на проєкт {projectId}.",

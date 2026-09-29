@@ -84,7 +84,7 @@ public sealed class GetDocumentTablesHandler(
         // ⛔ S6 (ФВ-6.6): таблиця під забороною (своєю чи аркуша) не з'являється
         // в переліку — ні назвою, ні кодом, ні `tableInstanceId`. Зріз на неї
         // однаково дав би 404, а назва в навігації сама розповідала б про неї.
-        var readable = await access.ReadScopeAsync(profile, documentId, ct).ConfigureAwait(false);
+        var readable = (await access.ReadScopeAsync(profile, documentId, ct).ConfigureAwait(false)).InPeriod(key);
 
         var byTableDef = instances.ToDictionary(i => i.TableDefId);
         var result = new List<DocumentTableDto>(instances.Count);

@@ -196,7 +196,7 @@ public sealed class PatchDocumentHeaderHandler(
         var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
 
         var document = await documents.FindAsync(documentId, new PeriodKeyFilter(null), ct).ConfigureAwait(false);
-        if (document is null || profile.LevelFor(ResourceKind.Project, document.ProjectId) < GrantLevel.Read)
+        if (document is null || !profile.SeesDocumentsOf(document.ProjectId))
         {
             throw new NotFoundException(
                 ErrorCodes.DocumentNotFound, $"Документ {documentId} не знайдено.",

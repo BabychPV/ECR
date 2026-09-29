@@ -702,8 +702,8 @@ public sealed partial class PatchCellsHandler(
     {
         if (stale.Any(cell => cell.ColumnDefId is not null))
         {
-            var scope = await access.ReadScopeAsync(context.Profile, context.Instance.DocumentId, ct)
-                .ConfigureAwait(false);
+            var scope = (await access.ReadScopeAsync(context.Profile, context.Instance.DocumentId, ct)
+                .ConfigureAwait(false)).InPeriod(new PeriodKey(context.Instance.PeriodKey));
             stale = [.. stale.Select(cell => cell.ColumnDefId is { } columnDefId && !scope.CanReadColumn(columnDefId)
                 ? cell with { ColumnDefId = null }
                 : cell)];
@@ -1639,10 +1639,12 @@ public sealed partial class PatchCellsHandler(
             return static _ => true;
         }
 
-        var scope = await access.ReadScopeAsync(context.Profile, context.Instance.DocumentId, ct).ConfigureAwait(false);
+        var anyPeriod = await access.ReadScopeAsync(context.Profile, context.Instance.DocumentId, ct).ConfigureAwait(false);
+        var period = new PeriodKey(context.Instance.PeriodKey);
+        DocumentReadScope? scope = null;
         var tableDefId = context.Instance.TableDefId;
 
-        return m => Own(m) || scope.CanReadAt(tableDefId, m.ColumnCode);
+        return m => Own(m) || (scope ??= anyPeriod.InPeriod(period)).CanReadAt(tableDefId, m.ColumnCode);
     }
 
     /// <summary>

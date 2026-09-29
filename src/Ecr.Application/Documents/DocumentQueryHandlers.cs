@@ -66,8 +66,7 @@ public sealed class ListDocumentsHandler(
         // проєкту — це вже відомості про те, які об'єкти звітують і як часто, і
         // помилка в побудові фільтра запиту не має цього відкривати.
         var visible = all.Items
-            .Where(d => profile.LevelFor(ResourceKind.Project, d.ProjectId) >= GrantLevel.Read
-                        && profile.Has(Permission, d.ProjectId))
+            .Where(d => profile.SeesDocumentsOf(d.ProjectId) && profile.Has(Permission, d.ProjectId))
             .ToList();
 
         // ⛔ `all.TotalCount` НЕ проводиться далі як є — саме це й було дірою:
@@ -155,9 +154,15 @@ public sealed class ListDocumentsHandler(
     /// </summary>
     /// <param name="profile">Профіль.</param>
     /// <param name="permission">Проєктне право (напр. <c>Document.View</c>).</param>
+    /// <remarks>
+    /// ⚠ D-214: і проєкти, де документ відкриває лише роль, звужена аркушами
+    /// чи періодами (<see cref="AccessProfile.SeesDocumentsOf"/>) — перелік
+    /// документів належить рівню документа.
+    /// </remarks>
     internal static HashSet<int> ReadableProjects(AccessProfile profile, string permission)
     {
         var ids = ReadableProjects(profile);
+        ids.UnionWith(profile.Scoped.Keys.Where(profile.SeesDocumentsOf));
         ids.RemoveWhere(id => !profile.Has(permission, id));
         return ids;
     }
@@ -200,7 +205,7 @@ public sealed class GetDocumentHandler(
         // які документи існують у проєктах, доступу до яких немає.
         // ⛔ ФВ-6.14: без права перегляду В ЦЬОМУ проєкті — так само невидимий.
         return document is null
-               || profile.LevelFor(ResourceKind.Project, document.ProjectId) < GrantLevel.Read
+               || !profile.SeesDocumentsOf(document.ProjectId)
                || !profile.Has(ListDocumentsHandler.Permission, document.ProjectId)
             ? null
             : document;

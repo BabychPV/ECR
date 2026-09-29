@@ -119,7 +119,7 @@ public sealed class GetTableStatusHandler(
         // ⚠ Колонка під забороною у ВИДИМІЙ таблиці лишається в лічильниках:
         // віддається лише кількість (скільки комірок заповнено, скільки
         // зауважень), не значення й не адреса. Знаменник — властивість таблиці.
-        var readable = await access.ReadScopeAsync(profile, documentId, ct).ConfigureAwait(false);
+        var readable = (await access.ReadScopeAsync(profile, documentId, ct).ConfigureAwait(false)).InPeriod(key);
 
         var live = instances.Select(i => i.TableDefId).Where(readable.CanReadTable).ToHashSet();
 

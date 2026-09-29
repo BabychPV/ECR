@@ -115,6 +115,14 @@ public sealed class AccessDecisionService(
                     Grants = new Dictionary<string, GrantLevel>(StringComparer.Ordinal),
                     RoleIds = new HashSet<int>(),
                     Permissions = new HashSet<string>(StringComparer.Ordinal),
+
+                    // ⚠ D-214: заборони звужених ролей — у своїх аркушах і періодах.
+                    Narrowed = [.. s.Value.Narrowed.Select(l => l with
+                    {
+                        Grants = new Dictionary<string, GrantLevel>(StringComparer.Ordinal),
+                        RoleIds = new HashSet<int>(),
+                        Permissions = new HashSet<string>(StringComparer.Ordinal),
+                    })],
                 }),
             IsIntegrationWriter = true,
         };
@@ -303,17 +311,34 @@ public sealed class AccessDecisionService(
             .Select(a => a.RoleId)
             .ToHashSet();
         var scopedProjects = new Dictionary<int, HashSet<int>>();
+
+        // ⛔ D-214: призначення, чия область звужена ще й аркушами чи періодами,
+        // — окремо, кожне своїм шаром: злиття з іншими дало б їхнім грантам
+        // увесь проєкт.
+        var narrowedScopes = new List<(int RoleId, RoleAssignmentScope Scope)>();
         foreach (var assignment in effective.Where(a => a.ScopeJson is not null))
         {
+            var scope = RoleAssignmentScope.TryParse(assignment.ScopeJson!);
+            if (scope is { IsNarrowed: true })
+            {
+                narrowedScopes.Add((assignment.RoleId, scope));
+                continue;
+            }
+
             if (!scopedProjects.TryGetValue(assignment.RoleId, out var projects))
             {
                 scopedProjects[assignment.RoleId] = projects = [];
             }
 
-            projects.UnionWith(assignment.ScopedProjectIds() ?? []);
+            // Зіпсована область (`null`) — порожньо: роль не діє ніде.
+            projects.UnionWith(scope?.ProjectIds ?? []);
         }
 
-        var roleIds = unscopedRoleIds.Concat(scopedProjects.Keys).Distinct().ToList();
+        var roleIds = unscopedRoleIds
+            .Concat(scopedProjects.Keys)
+            .Concat(narrowedScopes.Select(n => n.RoleId))
+            .Distinct()
+            .ToList();
 
         var rolePermissions = roleIds.Count == 0
             ? []
@@ -398,21 +423,31 @@ public sealed class AccessDecisionService(
             }
         }
 
+        var narrowed = await NarrowedLayersAsync(
+                narrowedScopes,
+                rows.Select(r => (r.RoleId, r.ResourceKind, r.ResourceId, r.Level, r.IsDeny)).ToList(),
+                rolePermissions.Select(rp => (rp.RoleId, rp.PermissionCode)).ToList(),
+                ct)
+            .ConfigureAwait(false);
+
         var scoped = new Dictionary<int, ScopedProjectAccess>();
-        foreach (var projectId in scopedProjects.Values.SelectMany(p => p).Distinct())
+        foreach (var projectId in scopedProjects.Values.SelectMany(p => p).Concat(narrowed.Keys).Distinct())
         {
             var scopedHere = scopedProjects.Where(p => p.Value.Contains(projectId)).Select(p => p.Key).ToList();
             var rolesHere = unscopedRoleIds.ToHashSet();
             rolesHere.UnionWith(scopedHere);
             var permissionsHere = scopedHere.SelectMany(r => scopedPermissions[r]).ToHashSet(StringComparer.Ordinal);
 
-            scoped[projectId] = layers.TryGetValue(projectId, out var layer)
+            scoped[projectId] = (layers.TryGetValue(projectId, out var layer)
                 ? new ScopedProjectAccess(layer.Grants, layer.Denies, rolesHere, permissionsHere)
                 : new ScopedProjectAccess(
                     new Dictionary<string, GrantLevel>(StringComparer.Ordinal),
                     new HashSet<string>(StringComparer.Ordinal),
                     rolesHere,
-                    permissionsHere);
+                    permissionsHere)) with
+            {
+                Narrowed = narrowed.TryGetValue(projectId, out var here) ? here : [],
+            };
         }
 
         // ⛔ Успадкування Project → Sheet → Table → Column тут НЕ розгортається
@@ -429,9 +464,104 @@ public sealed class AccessDecisionService(
             Grants = grants,
             Denies = denies,
             RoleIds = roleIds.ToHashSet(),
-            UnscopedRoleIds = scopedProjects.Count == 0 ? null : unscopedRoleIds,
+            // ⛔ Не `null`, щойно є бодай одна область: інакше `RoleIdsIn`
+            // упав би на `RoleIds`, а там ролі з областю — в усіх проєктах.
+            UnscopedRoleIds = scopedProjects.Count == 0 && narrowedScopes.Count == 0 ? null : unscopedRoleIds,
             Scoped = scoped,
         };
+    }
+
+    /// <summary>
+    /// Шари ролей, звужених аркушами чи періодами (D-214): проєкт → шари.
+    /// </summary>
+    /// <param name="narrowedScopes">Роль і розібрана область кожного такого призначення.</param>
+    /// <param name="grantRows">Гранти всіх ролей профілю.</param>
+    /// <param name="rolePermissions">Права всіх ролей профілю.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⚠ Шар — на кожну пару «призначення × проєкт області». Гранти: на сам
+    /// проєкт (лише цей) і на аркуш, таблицю, колонку — решта видів проєкту не
+    /// має. Права: лише рівня документа (<see cref="PermissionScopes.Narrowable"/>).
+    ///
+    /// ⛔ Документ «поза проміжком періодів» — це документ проєкту, жоден
+    /// період якого не потрапляє в проміжок області: шару для такого проєкту
+    /// немає зовсім, тож роль там не відкриває навіть документа. Проєкт без
+    /// жодного періоду — так само (закрито за замовчуванням). Ціна — один
+    /// запит, і лише коли є звуження за періодами.
+    /// </remarks>
+    private async Task<Dictionary<int, List<NarrowedAccess>>> NarrowedLayersAsync(
+        List<(int RoleId, RoleAssignmentScope Scope)> narrowedScopes,
+        List<(int RoleId, ResourceKind Kind, int ResourceId, GrantLevel Level, bool IsDeny)> grantRows,
+        List<(int RoleId, string PermissionCode)> rolePermissions,
+        CancellationToken ct)
+    {
+        var result = new Dictionary<int, List<NarrowedAccess>>();
+        if (narrowedScopes.Count == 0)
+        {
+            return result;
+        }
+
+        var periodProjects = narrowedScopes
+            .Where(n => n.Scope.HasPeriods)
+            .SelectMany(n => n.Scope.ProjectIds)
+            .Distinct()
+            .ToList();
+
+        var spans = periodProjects.Count == 0
+            ? []
+            : (await db.Periods
+                    .AsNoTracking()
+                    .Where(p => periodProjects.Contains(p.ProjectId))
+                    .GroupBy(p => p.ProjectId)
+                    .Select(g => new { ProjectId = g.Key, First = g.Min(p => p.PeriodKeyValue), Last = g.Max(p => p.PeriodKeyValue) })
+                    .ToListAsync(ct)
+                    .ConfigureAwait(false))
+                .ToDictionary(s => s.ProjectId, s => (First: new PeriodKey(s.First), Last: new PeriodKey(s.Last)));
+
+        var grantsByRole = grantRows.ToLookup(r => r.RoleId);
+        var permissionsByRole = rolePermissions
+            .Where(p => PermissionScopes.IsNarrowable(p.PermissionCode))
+            .ToLookup(p => p.RoleId, p => p.PermissionCode);
+
+        foreach (var (roleId, scope) in narrowedScopes)
+        {
+            IReadOnlySet<string>? sheets = scope.SheetCodes.Count == 0
+                ? null
+                : scope.SheetCodes.ToHashSet(StringComparer.Ordinal);
+            var permissions = permissionsByRole[roleId].ToHashSet(StringComparer.Ordinal);
+
+            foreach (var projectId in scope.ProjectIds)
+            {
+                if (scope.HasPeriods
+                    && (!spans.TryGetValue(projectId, out var span) || !scope.OverlapsPeriods(span.First, span.Last)))
+                {
+                    continue;
+                }
+
+                var grants = new Dictionary<string, GrantLevel>(StringComparer.Ordinal);
+                var denies = new HashSet<string>(StringComparer.Ordinal);
+                foreach (var row in grantsByRole[roleId])
+                {
+                    var own = row.Kind == ResourceKind.Project
+                        ? row.ResourceId == projectId
+                        : row.Kind is ResourceKind.Sheet or ResourceKind.Table or ResourceKind.Column;
+                    if (own)
+                    {
+                        Merge(grants, denies, $"{row.Kind}:{row.ResourceId}", row.Level, row.IsDeny);
+                    }
+                }
+
+                if (!result.TryGetValue(projectId, out var list))
+                {
+                    result[projectId] = list = [];
+                }
+
+                list.Add(new NarrowedAccess(
+                    sheets, scope.PeriodFrom, scope.PeriodTo, grants, denies, new HashSet<int> { roleId }, permissions));
+            }
+        }
+
+        return result;
     }
 
     /// <summary>Додає рядок гранта до мапи: заборона — у набір, дозвіл — ширший рівень.</summary>
@@ -514,7 +644,10 @@ public sealed class AccessDecisionService(
         var integrationReads = profile.IsIntegrationWriter
                                && !profile.Denies.Contains($"{ResourceKind.Project}:{projectId}");
 
-        return integrationReads || profile.LevelFor(ResourceKind.Project, projectId) >= GrantLevel.Read
+        //
+        // ⚠ D-214: роль, звужена аркушами чи періодами, документ відкриває
+        // (`SeesDocumentsOf`), але рівня проєкту не піднімає.
+        return integrationReads || profile.SeesDocumentsOf(projectId)
             ? EditDecision.Allow()
             : EditDecision.Deny(EditDenyReason.NoGrant);
     }
@@ -966,8 +1099,11 @@ public sealed class AccessDecisionService(
 
             // ⚠ Ролі, чинні в проєкті зрізу (ФВ-6.14): правило, обмежене роллю
             // з областю «проєкт A», не стосується цієї людини в проєкті B.
+            // D-214: і звужені аркушем чи періодом — лише на своєму аркуші в своєму періоді.
             var outcome = PeriodAccessRules.Evaluate(
-                slice.Rules.Rules, facts, profile.RoleIdsIn(slice.Shared.ProjectId));
+                slice.Rules.Rules,
+                facts,
+                profile.RoleIdsAt(slice.Shared.ProjectId, slice.Shared.SheetCode, slice.Shared.Period));
 
             if (outcome.Blocks)
             {
@@ -1109,8 +1245,11 @@ public sealed class AccessDecisionService(
                     .Where(c => c.TableDefId == instance.TableDefId)
                     .ToList();
 
+                // ⚠ D-214: код аркуша — зі знімка, що вже в руках; без нього
+                // роль, звужена аркушами, у рішеннях зрізу не діяла б.
                 result[instance.Id] = new SliceContext(
-                    periodKey, instance.TableDefId, sheetDefId, sharedBySheet[sheetDefId],
+                    periodKey, instance.TableDefId, sheetDefId,
+                    sharedBySheet[sheetDefId] with { SheetCode = SheetCodeOf(snapshot, sheetDefId) },
                     columns, snapshot, ruleContext);
             }
         }
@@ -1334,6 +1473,7 @@ public sealed class AccessDecisionService(
         var context = await BuildContextAsync(
                 documentId, periodKey, sheetDefId, columnDefId: 0, evaluateAccessWindow: true, ct)
             .ConfigureAwait(false);
+        context = await WithSheetCodeAsync(profile, documentId, context, ct).ConfigureAwait(false);
 
         if (DenyIfInvisible(profile, context) is { } invisible)
         {
@@ -1364,6 +1504,7 @@ public sealed class AccessDecisionService(
         var context = await BuildContextAsync(
                 documentId, periodKey, sheetDefId, columnDefId: 0, evaluateAccessWindow: true, ct)
             .ConfigureAwait(false);
+        context = await WithSheetCodeAsync(profile, documentId, context, ct).ConfigureAwait(false);
 
         if (DenyIfInvisible(profile, context) is { } invisible)
         {
@@ -1387,6 +1528,7 @@ public sealed class AccessDecisionService(
         var context = await BuildContextAsync(
                 documentId, periodKey, sheetDefId, columnDefId: 0, evaluateAccessWindow: true, ct)
             .ConfigureAwait(false);
+        context = await WithSheetCodeAsync(profile, documentId, context, ct).ConfigureAwait(false);
 
         return DenyIfInvisible(profile, context) ?? EditRules.CanReopen(profile, context);
     }
@@ -1547,6 +1689,7 @@ public sealed class AccessDecisionService(
         ColumnDef? column = null;
         var tableDefId = 0;
         var effectiveSheet = sheetDefId ?? 0;
+        string? sheetCode = null;
 
         if (columnDefId != 0)
         {
@@ -1554,6 +1697,7 @@ public sealed class AccessDecisionService(
             column = snapshot.ColumnsById.TryGetValue(columnDefId, out var found) ? found : null;
             tableDefId = column?.TableDefId ?? 0;
             effectiveSheet = sheetDefId ?? SheetOf(snapshot, tableDefId);
+            sheetCode = SheetCodeOf(snapshot, effectiveSheet);
         }
 
         var outOfWindow = evaluateAccessWindow
@@ -1577,7 +1721,41 @@ public sealed class AccessDecisionService(
             sheetStatus ?? DocumentStatus.Draft,
             column?.IsComputed ?? false,
             column?.IsReadOnly ?? false,
-            RowIsReadOnly: false);
+            RowIsReadOnly: false)
+        {
+            // ⚠ D-214: період рішення відомий завжди; код аркуша — там, де знімок
+            // уже прочитано (рішення про комірку). Подання й затвердження
+            // добирають його самі (`WithSheetCodeAsync`) і лише тоді, коли він
+            // комусь потрібен.
+            SheetCode = sheetCode,
+            Period = periodKey,
+        };
+    }
+
+    /// <summary>Код аркуша зі знімка; <c>null</c> — аркуша в знімку немає.</summary>
+    private static string? SheetCodeOf(TemplateVersionSnapshot snapshot, int sheetDefId)
+        => snapshot.Sheets.FirstOrDefault(s => s.Id == sheetDefId)?.Code;
+
+    /// <summary>
+    /// Додає до умов код аркуша — лише коли в проєкті є роль, звужена аркушами (D-214).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Знімок шаблону на шляху подання й затвердження не читається навмисно
+    /// (див. <see cref="BuildContextAsync"/>); тут — лише для профілю, якому
+    /// код справді змінює рішення. Решта профілів не платить нічого.
+    /// </remarks>
+    private async Task<CellAccessContext> WithSheetCodeAsync(
+        AccessProfile profile, long documentId, CellAccessContext context, CancellationToken ct)
+    {
+        if (context.SheetCode is not null
+            || !profile.Scoped.TryGetValue(context.ProjectId, out var scoped)
+            || !scoped.Narrowed.Any(l => l.SheetCodes is not null))
+        {
+            return context;
+        }
+
+        var snapshot = await SnapshotAsync(documentId, ct).ConfigureAwait(false);
+        return context with { SheetCode = SheetCodeOf(snapshot, context.SheetDefId) };
     }
 
     /// <summary>Аркуш, якому належить таблиця.</summary>

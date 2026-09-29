@@ -449,9 +449,10 @@ public sealed class SubmitSheetHandler(
             // той, хто подає, — і таблиці й колонки під його забороною в ньому
             // не називаються. Приховані помилки — одним знеособленим
             // зауваженням без числа й адреси (`HiddenValidationIssues`).
-            var readable = await access.ReadScopeAsync(profile, documentId, ct).ConfigureAwait(false);
+            var anyPeriod = await access.ReadScopeAsync(profile, documentId, ct).ConfigureAwait(false);
+            DocumentReadScope? readable = null;
             var shown = Validation.HiddenValidationIssues.ForViewer(
-                blocking, m => readable.CanReadAt(m.TableDefId, m.ColumnCode));
+                blocking, m => (readable ??= anyPeriod.InPeriod(key)).CanReadAt(m.TableDefId, m.ColumnCode));
             var onlyHidden = shown.Count == 1 && Validation.HiddenValidationIssues.IsPlaceholder(shown[0]);
 
             // ⚠ Число — лише разом із видимими: `messageCount` рахує рядки
