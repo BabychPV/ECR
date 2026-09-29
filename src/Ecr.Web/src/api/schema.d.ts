@@ -9087,6 +9087,86 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/registries/{code}/rows": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Рядки довідника зі значеннями полів, сторінками за курсором. Право `Registry.View` або
+         *     грант `Read` на довідник.
+         * @description Фільтри полів — параметри `field.&lt;КОД&gt;=значення` у поданні `values[].value`.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Бізнес-дата чинності; обов'язкова для темпорального довідника. */
+                    asOf?: string;
+                    /** @description Системний момент (UTC) — значення «станом на»; немає — поточні. */
+                    asOfUtc?: string;
+                    /** @description Батько композиції або каскаду. */
+                    parentEntryId?: number;
+                    /** @description Підрядок коду, назви або текстового поля. */
+                    q?: string;
+                    /** @description Курсор попередньої сторінки. */
+                    cursor?: string;
+                    /** @description Розмір сторінки, 1…500. */
+                    limit?: number;
+                };
+                header?: never;
+                path: {
+                    /** @description Код довідника. */
+                    code: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PagedResultOfRegistryRowDto"];
+                        "text/json": components["schemas"]["PagedResultOfRegistryRowDto"];
+                        "text/plain": components["schemas"]["PagedResultOfRegistryRowDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/registries/{code}/usage": {
         parameters: {
             query?: never;
@@ -17683,6 +17763,19 @@ export interface components {
         };
         /** @description Сторінка результатів. Ендпоінтів, що повертають «усе», не існує —
          *     перевіряється архітектурним тестом. */
+        PagedResultOfRegistryRowDto: {
+            /** @description Елементи сторінки. */
+            items: components["schemas"]["RegistryRowDto"][];
+            /** @description Курсор наступної сторінки; `null` — кінець. */
+            nextCursor: null | string;
+            /**
+             * Format: int32
+             * @description Загальна кількість; `null`, якщо підрахунок дорогий.
+             */
+            totalCount: null | number;
+        };
+        /** @description Сторінка результатів. Ендпоінтів, що повертають «усе», не існує —
+         *     перевіряється архітектурним тестом. */
         PagedResultOfStructureChangeView: {
             /** @description Елементи сторінки. */
             items: components["schemas"]["StructureChangeView"][];
@@ -18703,6 +18796,50 @@ export interface components {
         };
         /** @enum {unknown} */
         RegistryRelationKind: "Reference" | "Composition" | null;
+        /** @description Рядок довідника зі значеннями полів (RT-13, FEATURE-REGISTRY-TABLES §7.1). */
+        RegistryRowDto: {
+            /** @description Код запису. */
+            code: string;
+            /** @description Назва мовою користувача; немає — код. */
+            display: string;
+            /**
+             * Format: int64
+             * @description Запис.
+             */
+            id: number;
+            /**
+             * Format: int64
+             * @description Батько ієрархії (`ParentEntryId`), не композиції.
+             */
+            parentEntryId: null | number;
+            /**
+             * Format: date
+             * @description Перший чинний день; `null` — від початку.
+             */
+            validFrom: null | string;
+            /**
+             * Format: date
+             * @description Перший НЕчинний день; `null` — без обмеження.
+             */
+            validTo: null | string;
+            /** @description Код поля → значення; поля без значення відсутні. */
+            values: {
+                [key: string]: components["schemas"]["RegistryRowValueDto"];
+            };
+            /** @description Жетон конкуренції (`D-166`): найпізніший `PeriodStart` запису та його значень. Непрозорий
+             *     рядок — клієнт повертає його як `baseVersion` (RT-14), а не розбирає. */
+            version: string;
+        };
+        /** @description Значення поля рядка. */
+        RegistryRowValueDto: {
+            /** @description Назва цілі `Lookup` або код одиниці поля `Unit`; інакше `null`. */
+            display: null | string;
+            /** @description Код одиниці числового значення; `null` — безрозмірне. */
+            unit: null | string;
+            /** @description Значення рядком: число — інваріантно й без втрати знаків (D-30), дата — `yyyy-MM-dd`,
+             *     логічне — `true`/`false`, `Lookup` — ідентифікатор запису-цілі, `Unit` — ідентифікатор одиниці. */
+            value: null | string;
+        };
         /** @description Правило цілісності довідника. */
         RegistryRuleDto: {
             /** @description Код правила. */

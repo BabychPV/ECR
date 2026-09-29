@@ -6341,6 +6341,39 @@
         ],
         "type": "object"
       },
+      "PagedResultOfRegistryRowDto": {
+        "description": "Сторінка результатів. Ендпоінтів, що повертають «усе», не існує —\nперевіряється архітектурним тестом.",
+        "properties": {
+          "items": {
+            "description": "Елементи сторінки.",
+            "items": {
+              "$ref": "#/components/schemas/RegistryRowDto"
+            },
+            "type": "array"
+          },
+          "nextCursor": {
+            "description": "Курсор наступної сторінки; `null` — кінець.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "totalCount": {
+            "description": "Загальна кількість; `null`, якщо підрахунок дорогий.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor",
+          "totalCount"
+        ],
+        "type": "object"
+      },
       "PagedResultOfStructureChangeView": {
         "description": "Сторінка результатів. Ендпоінтів, що повертають «усе», не існує —\nперевіряється архітектурним тестом.",
         "properties": {
@@ -8473,6 +8506,102 @@
           "Composition",
           null
         ]
+      },
+      "RegistryRowDto": {
+        "description": "Рядок довідника зі значеннями полів (RT-13, FEATURE-REGISTRY-TABLES §7.1).",
+        "properties": {
+          "code": {
+            "description": "Код запису.",
+            "type": "string"
+          },
+          "display": {
+            "description": "Назва мовою користувача; немає — код.",
+            "type": "string"
+          },
+          "id": {
+            "description": "Запис.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "parentEntryId": {
+            "description": "Батько ієрархії (`ParentEntryId`), не композиції.",
+            "format": "int64",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "validFrom": {
+            "description": "Перший чинний день; `null` — від початку.",
+            "format": "date",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "validTo": {
+            "description": "Перший НЕчинний день; `null` — без обмеження.",
+            "format": "date",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "values": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/RegistryRowValueDto"
+            },
+            "description": "Код поля → значення; поля без значення відсутні.",
+            "type": "object"
+          },
+          "version": {
+            "description": "Жетон конкуренції (`D-166`): найпізніший `PeriodStart` запису та його значень. Непрозорий\nрядок — клієнт повертає його як `baseVersion` (RT-14), а не розбирає.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "display",
+          "parentEntryId",
+          "validFrom",
+          "validTo",
+          "version",
+          "values"
+        ],
+        "type": "object"
+      },
+      "RegistryRowValueDto": {
+        "description": "Значення поля рядка.",
+        "properties": {
+          "display": {
+            "description": "Назва цілі `Lookup` або код одиниці поля `Unit`; інакше `null`.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "unit": {
+            "description": "Код одиниці числового значення; `null` — безрозмірне.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "value": {
+            "description": "Значення рядком: число — інваріантно й без втрати знаків (D-30), дата — `yyyy-MM-dd`,\nлогічне — `true`/`false`, `Lookup` — ідентифікатор запису-цілі, `Unit` — ідентифікатор одиниці.",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "value",
+          "display",
+          "unit"
+        ],
+        "type": "object"
       },
       "RegistryRuleDto": {
         "description": "Правило цілісності довідника.",
@@ -25818,6 +25947,141 @@
         ]
       }
     },
+    "/api/v1/registries/{code}/rows": {
+      "get": {
+        "description": "Фільтри полів — параметри `field.&lt;КОД&gt;=значення` у поданні `values[].value`.",
+        "parameters": [
+          {
+            "description": "Код довідника.",
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Бізнес-дата чинності; обов'язкова для темпорального довідника.",
+            "in": "query",
+            "name": "asOf",
+            "schema": {
+              "format": "date",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Системний момент (UTC) — значення «станом на»; немає — поточні.",
+            "in": "query",
+            "name": "asOfUtc",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Батько композиції або каскаду.",
+            "in": "query",
+            "name": "parentEntryId",
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Підрядок коду, назви або текстового поля.",
+            "in": "query",
+            "name": "q",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Курсор попередньої сторінки.",
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Розмір сторінки, 1…500.",
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 50,
+              "format": "int32",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagedResultOfRegistryRowDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagedResultOfRegistryRowDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagedResultOfRegistryRowDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Рядки довідника зі значеннями полів, сторінками за курсором. Право `Registry.View` або\nгрант `Read` на довідник.",
+        "tags": [
+          "RegistryRows"
+        ]
+      }
+    },
     "/api/v1/registries/{code}/usage": {
       "get": {
         "description": "    ⛔ Посилання на сам ДОВІДНИК, а не на окремий його запис: колонки\n    шаблонів типу `Lookup`, поля сусідніх довідників, речовини\n    методологій, сутності зовнішніх джерел. Відповідь потрібна ДО зміни\n    опису — сьогодні перевипустити довідник можна наосліп.\n    ⚠ total і довжина items — різні числа: перелік обрізаний\nсторінкою, лічильник чесний.",
@@ -33328,6 +33592,9 @@
     },
     {
       "name": "RegistryDefinitionTools"
+    },
+    {
+      "name": "RegistryRows"
     },
     {
       "name": "Reports"
