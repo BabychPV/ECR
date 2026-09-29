@@ -4792,6 +4792,7 @@ USING (VALUES
     (N'err.ECR-INT-0422.eventMapFilterIncomplete', N'en', N'An event filter needs all three parts together: the attribute, where it is (event or primary element) and the value.', 1),
     (N'err.ECR-INT-0422.eventMapValueMapNotAllowed', N'en', N'The field for "{attribute}" finds registry entries as {valueKind}, so an explicit value map would never be used.', 1),
     (N'err.ECR-INT-0409.eventMapSourceValueTaken', N'en', N'Source value "{sourceValue}" is already mapped to a registry entry in this field.', 1),
+    (N'err.ECR-INT-0422.eventLinkTransitionInvalid', N'en', N'The link of source event "{sourceEventId}" cannot change from {from} to {to}.', 1),
     -- HSE301:F9 ── кінець секції
     -- UX-прохід, четвертий раунд, лінія E2 (оболонка й адмін-екрани).
     (N'common.technicalDetails', N'en', N'Technical details', 1),
