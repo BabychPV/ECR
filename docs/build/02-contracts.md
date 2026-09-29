@@ -3326,7 +3326,10 @@ public sealed class NotFoundException(string errorCode, string message)
 }
 ```
 
-* `limit` — за замовчуванням 50, максимум 500. Більше — `400`.
+* `limit` — за замовчуванням 50, максимум 500. Поза `1…500` — `422 ECR-REQ-0422`
+  (`messageKey` `err.ECR-REQ-0422.pageSizeOutOfRange`, подробиця `max`), а не `400`: межа сторінки —
+  правило запиту, як у решті курсорних переліків (`ConsistencyIssuesControllerTests`,
+  `RegistryRowsHttpTests`). ✎ 2026-09-29: тут доти стояло «`400`» — код так не поводився ніколи.
 * Ендпоінтів, що повертають «усе», не існує — перевіряється архітектурним тестом.
 
 **Фільтрація:** плоскі параметри — `?projectId=5&status=Draft&sheetCode=Water_07`.
