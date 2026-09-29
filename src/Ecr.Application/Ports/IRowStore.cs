@@ -240,6 +240,20 @@ public interface IRowStore
     /// </remarks>
     public Task<IReadOnlyList<long>> GetOrphanedRowIdsAsync(
         long documentId, PeriodKey periodKey, CancellationToken ct);
+
+    /// <summary>
+    /// Таблиця кожного з рядків одного періоду ОДНИМ запитом:
+    /// <c>TableRow.Id</c> → <c>TableDefId</c> його екземпляра.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ S6 (ФВ-6.6): відмова подання через осиротілі рядки не має називати
+    /// рядків таблиць, прихованих від того, хто подає, — а
+    /// <see cref="GetOrphanedRowIdsAsync"/> дає самі ідентифікатори. Рядка, якого
+    /// немає в періоді, у результаті немає (для викликача — «таблиця невідома»,
+    /// тобто невидима).
+    /// </remarks>
+    public Task<IReadOnlyDictionary<long, int>> GetTableDefIdsOfRowsAsync(
+        IReadOnlyCollection<long> rowIds, PeriodKey periodKey, CancellationToken ct);
 }
 
 /// <summary>Ідентичність екземпляра таблиці.</summary>

@@ -804,6 +804,10 @@ public sealed class MaterializeIntegrationActorTests(SqlServerFixture sql)
 
         public Task<IReadOnlyList<long>> GetOrphanedRowIdsAsync(long documentId, PeriodKey periodKey, CancellationToken ct)
             => inner.GetOrphanedRowIdsAsync(documentId, periodKey, ct);
+
+        public Task<IReadOnlyDictionary<long, int>> GetTableDefIdsOfRowsAsync(
+            IReadOnlyCollection<long> rowIds, PeriodKey periodKey, CancellationToken ct)
+            => inner.GetTableDefIdsOfRowsAsync(rowIds, periodKey, ct);
     }
 
     /// <summary>

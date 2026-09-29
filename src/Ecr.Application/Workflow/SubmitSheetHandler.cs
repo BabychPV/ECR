@@ -176,14 +176,33 @@ public sealed class SubmitSheetHandler(
         var orphaned = await rowStore.GetOrphanedRowIdsAsync(documentId, key, ct).ConfigureAwait(false);
         if (orphaned.Count > 0)
         {
+            // ⛔ S6 (ФВ-6.6): блокують УСІ сироти документа, але тіло відмови
+            // називає лише рядки таблиць, які подавач бачить. Рядки прихованих
+            // таблиць не входять ні в `rowIds`, ні в число; коли видимих немає —
+            // одне знеособлене зауваження без числа й адреси (як у валідації).
+            // Межі читання й відповідність «рядок → таблиця» — лише на шляху
+            // відмови: успішне подання не платить за них жодним запитом.
+            var visibleOrphans = await VisibleOrphansAsync(profile, documentId, key, orphaned, ct)
+                .ConfigureAwait(false);
+            if (visibleOrphans.Count == 0)
+            {
+                throw new BusinessRuleException(
+                    ErrorCodes.SubmitBlocked,
+                    "Подання неможливе: є зауваження поза вашою видимістю.",
+                    new Dictionary<string, object?>
+                    {
+                        ["messageKey"] = Validation.HiddenValidationIssues.MessageKey,
+                    });
+            }
+
             throw new BusinessRuleException(
                 ErrorCodes.SubmitBlocked,
-                $"Подання неможливе: рядків із втраченим посиланням на реєстр — {orphaned.Count}.",
+                $"Подання неможливе: рядків із втраченим посиланням на реєстр — {visibleOrphans.Count}.",
                 new Dictionary<string, object?>
                 {
                     ["messageKey"] = "err.ECR-SUB-4221.orphanedRows",
-                    ["rowCount"] = orphaned.Count.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                    ["rowIds"] = orphaned,
+                    ["rowCount"] = visibleOrphans.Count.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["rowIds"] = visibleOrphans,
                 });
         }
 
@@ -269,6 +288,17 @@ public sealed class SubmitSheetHandler(
                 .ConfigureAwait(false);
             if (freshness.IsStale)
             {
+                // ⛔ S6 (ФВ-6.6): `inputsChangedAt` — час правки, яка могла лежати
+                // в прихованій таблиці замикання. Подавач, що не бачить бодай
+                // однієї таблиці замикання, отримує те саме блокування без цього
+                // часу (`null`). `calculatedAt` — час прогону, не даних таблиць.
+                // Замикання `null` — перевірка по всьому документу, тож і
+                // видимим мусить бути весь документ.
+                var readable = await access.ReadScopeAsync(profile, documentId, ct).ConfigureAwait(false);
+                var seesAllInputs = freshnessTables is null
+                    ? readable.HiddenTableIds().Count == 0
+                    : freshnessTables.All(readable.CanReadTable);
+
                 throw new BusinessRuleException(
                     ErrorCodes.SubmitBlocked,
                     "Подання неможливе: результати методологій застаріли — "
@@ -277,7 +307,7 @@ public sealed class SubmitSheetHandler(
                     {
                         ["messageKey"] = "err.ECR-SUB-4221.staleMethodologyResults",
                         ["calculatedAt"] = freshness.CalculatedAt,
-                        ["inputsChangedAt"] = freshness.InputsChangedAt,
+                        ["inputsChangedAt"] = seesAllInputs ? freshness.InputsChangedAt : null,
                     });
             }
         }
@@ -475,6 +505,29 @@ public sealed class SubmitSheetHandler(
             innerCt => SubmitCoreAsync(
                 documentId, sheetDefId, periodKey, key, userId, templateVersionId, instances, headerFieldCodes, innerCt),
             ct).ConfigureAwait(false);
+    }
+
+    /// <summary>Осиротілі рядки, які подавач має право бачити (S6).</summary>
+    /// <remarks>
+    /// ⚠ Документ без жодної прихованої таблиці — список як є, без запиту
+    /// «рядок → таблиця». Інакше рядок невідомої таблиці — невидимий (закрито
+    /// за замовчуванням, як у <see cref="DocumentReadScope"/>).
+    /// </remarks>
+    private async Task<IReadOnlyList<long>> VisibleOrphansAsync(
+        AccessProfile profile, long documentId, PeriodKey key, IReadOnlyList<long> orphaned, CancellationToken ct)
+    {
+        var readable = await access.ReadScopeAsync(profile, documentId, ct).ConfigureAwait(false);
+        if (readable.HiddenTableIds().Count == 0)
+        {
+            return orphaned;
+        }
+
+        var tableOfRow = await rowStore.GetTableDefIdsOfRowsAsync(orphaned, key, ct).ConfigureAwait(false);
+        return
+        [
+            .. orphaned.Where(rowId => tableOfRow.TryGetValue(rowId, out var tableDefId)
+                                       && readable.CanReadTable(tableDefId)),
+        ];
     }
 
     /// <summary>Зріз, стан аркуша й проведення в звітність — усе під транзакцією.</summary>

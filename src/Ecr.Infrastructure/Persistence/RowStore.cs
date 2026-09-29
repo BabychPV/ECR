@@ -834,6 +834,29 @@ public sealed class RowStore(
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
+    /// <inheritdoc />
+    public async Task<IReadOnlyDictionary<long, int>> GetTableDefIdsOfRowsAsync(
+        IReadOnlyCollection<long> rowIds, PeriodKey periodKey, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(rowIds);
+        if (rowIds.Count == 0)
+        {
+            return new Dictionary<long, int>();
+        }
+
+        var ids = rowIds.Distinct().ToList();
+
+        // ⚠ `PeriodKey` літералом на ОБОХ партиціонованих таблицях — той самий
+        // урок, що в `OrphanedRowIdsQuery` нижче.
+        return await db.TableRows
+            .AsNoTracking()
+            .Where(r => r.PeriodKeyValue == periodKey.Value && ids.Contains(r.Id))
+            .Join(db.TableInstances.AsNoTracking().Where(t => t.PeriodKeyValue == periodKey.Value),
+                  r => r.TableInstanceId, t => t.Id, (r, t) => new { r.Id, t.TableDefId })
+            .ToDictionaryAsync(x => x.Id, x => x.TableDefId, ct)
+            .ConfigureAwait(false);
+    }
+
     /// <summary>Екземпляри таблиць документа в одному періоді.</summary>
     /// <param name="db">Контекст.</param>
     /// <param name="documentId">Документ.</param>
