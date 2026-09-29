@@ -24,14 +24,6 @@ public sealed class StartSimulationHandler(
     /// <summary>Право, без якого симуляція неможлива.</summary>
     public const string Permission = "Security.Simulate";
 
-    /// <summary>Профіль останнього відкритого сеансу.</summary>
-    /// <remarks>
-    /// ⛔ Тримається на обробнику, а не кладеться в кеш профілів (ФВ-6.16a
-    /// п. 4). Під ключем суб'єкта він дістався б справжньому користувачеві —
-    /// разом із чужими правами і прапорцем <c>IsSimulation</c>.
-    /// </remarks>
-    public AccessProfile? Profile { get; private set; }
-
     /// <summary>Відкриває сеанс і повертає його ідентифікатор.</summary>
     /// <param name="subjectUserId">Чиїми очима дивитися.</param>
     /// <param name="reason">Причина; обов'язкова.</param>
@@ -81,7 +73,11 @@ public sealed class StartSimulationHandler(
         var sessionId = await simulation
             .StartAsync(actorUserId, subjectUserId, reason, ct).ConfigureAwait(false);
 
-        Profile = await simulation.BuildProfileAsync(sessionId, ct).ConfigureAwait(false);
+        // ⚠ Профіль тут НЕ видається і ніде не тримається: профіль сеансу
+        // будує на КОЖЕН запит SimulationAwareAccessDecisionService (V-06).
+        // Виклик лишається заради побічної перевірки — вимкнений чи відсутній
+        // суб'єкт дає ECR-AUTH-0401 одразу, а не на наступному запиті.
+        _ = await simulation.BuildProfileAsync(sessionId, ct).ConfigureAwait(false);
 
         return sessionId;
     }

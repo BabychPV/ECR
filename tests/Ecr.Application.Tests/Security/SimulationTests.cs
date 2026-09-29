@@ -46,7 +46,7 @@ public sealed class SimulationTests
     public async Task Запис_під_симуляцією_відхиляється_навіть_із_Manage()
     {
         await Start().HandleAsync(Subject, "перевірка скарги", CancellationToken.None);
-        var profile = Start().Profile ?? _simulation.LastProfile!;
+        var profile = _simulation.LastProfile!;
 
         Assert.Equal(GrantLevel.Manage, profile.LevelFor(ResourceKind.Project, AccessBuilder.ProjectId));
 
@@ -79,10 +79,9 @@ public sealed class SimulationTests
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
     public async Task Профіль_симуляції_не_кешується_і_не_витікає_справжньому_користувачу()
     {
-        var handler = Start();
-        await handler.HandleAsync(Subject, "перевірка скарги", CancellationToken.None);
+        await Start().HandleAsync(Subject, "перевірка скарги", CancellationToken.None);
 
-        var profile = handler.Profile!;
+        var profile = _simulation.LastProfile!;
 
         // ⛔ Профіль суб'єкта не будується через кешований шлях: під ключем
         // суб'єкта він дістався б справжньому користувачеві разом із чужими
@@ -98,10 +97,9 @@ public sealed class SimulationTests
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
     public async Task Автором_дій_лишається_той_хто_симулює()
     {
-        var handler = Start();
-        await handler.HandleAsync(Subject, "перевірка скарги", CancellationToken.None);
+        await Start().HandleAsync(Subject, "перевірка скарги", CancellationToken.None);
 
-        var profile = handler.Profile!;
+        var profile = _simulation.LastProfile!;
 
         // Права — суб'єкта, автор — той, хто симулює (D-86). Інакше в аудиті
         // стояла б людина, яка нічого не робила, і питання «хто це зробив»
