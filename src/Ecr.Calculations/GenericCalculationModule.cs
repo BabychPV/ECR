@@ -112,6 +112,16 @@ public sealed class GenericCalculationModule(
 
         var period = await PeriodAsync(methodology, documentId, periodKey, ct).ConfigureAwait(false);
 
+        // ⛔ HSE301 L: формули імпортованих методологій, на які версія посилається
+        // транзитивно, — ТУТ, раз на прив'язку, з версією бібліотеки, чинною на бізнес-дату
+        // (кінець періоду, та сама вісь, що в констант і довідників). Версія без посилань
+        // за межу своїх формул не коштує жодного запиту.
+        var libraries = await Application.Calculations.MethodologyLibraryClosure
+            .LoadAsync(
+                methodologies, formulaEngine, methodology.MethodologyId, methodology.MethodologyVersionId,
+                ordered, period.End, ct)
+            .ConfigureAwait(false);
+
         // ⚠ Масштаб колонок-приймачів читається ТУТ, разом зі складом версії:
         // він однаковий для всієї прив'язки, а `ExecuteAsync` кличуть на кожен
         // рядок (`CAL-06`). Питання йде за `MethodologyId`, а не за версією:
@@ -124,12 +134,16 @@ public sealed class GenericCalculationModule(
         // ⛔ RT-23a (`D-162`): знімок довідників — ТУТ, раз на прив'язку, і довідник
         // одиниць теж. Після підготовки обчислення рядків не звертається до сховищ
         // жодного разу: ні `REGSUM` на 34 рядках складу, ні `CONVERT`.
-        var snapshot = await RegistriesAsync(ordered, period, registries, ct).ConfigureAwait(false);
+        // ⚠ Бібліотечні формули рахуються в тому самому рядку, тож їхні довідники — у тому
+        // самому знімку.
+        var snapshot = await RegistriesAsync(
+                [.. ordered, .. libraries?.Versions.SelectMany(v => v.Formulas) ?? []], period, registries, ct)
+            .ConfigureAwait(false);
         await UnitsAsync(ct).ConfigureAwait(false);
 
         return new CalculationBindingContext(
             methodology, documentId, periodKey, ordered, substances, outputs, period,
-            scales ?? EmptyScales, constantsByCode, snapshot);
+            scales ?? EmptyScales, constantsByCode, snapshot, libraries);
     }
 
     /// <summary>
@@ -305,16 +319,28 @@ public sealed class GenericCalculationModule(
             formulasByCode.TryAdd(formula.Code, formula);
         }
 
+        // ⛔ HSE301 L: бібліотечні формули рахуються в контексті ЦЬОГО рядка — Row-формули
+        // бібліотеки до Row-формул версії, формули речовини — на початку кожної речовини.
+        var library = binding.Libraries is { } libraries
+            ? new LibraryRun(this, libraries, input, arguments, period, units, binding.Registries, numeric, trace)
+            : null;
+
+        library?.AddInputUnits(formulasByCode);
+
         // ⛔ Константи Row-формул резолвляться БЕЗ речовини: константа, задана по
         // речовинах, у Row-формулі — відмова публікації, а не «коефіцієнт першої».
         var rowConstantUnits = new Dictionary<string, int?>(StringComparer.OrdinalIgnoreCase);
         var rowContext = new MethodologyEvaluationContext(
             period,
             arguments,
-            ResolveConstants(version, rowFormulas, substanceEntryId: null, period, binding.Constants, rowConstantUnits),
+            ResolveConstants(
+                version.MethodologyVersionId, rowFormulas, substanceEntryId: null, period, binding.Constants, rowConstantUnits),
             units,
-            binding.Registries);
+            binding.Registries,
+            library is null ? null : name => library.Resolve(name, rowPhase: true));
         var rowScope = new TraceScope(input, formulasByCode, rowConstantUnits, SubstanceEntryId: null);
+
+        library?.EvaluateRow();
 
         foreach (var formula in rowFormulas)
         {
@@ -359,13 +385,19 @@ public sealed class GenericCalculationModule(
         {
             var constantUnits = new Dictionary<string, int?>(StringComparer.OrdinalIgnoreCase);
             var resolved = ResolveConstants(
-                version, substanceFormulas, substance?.SubstanceEntryId, period, binding.Constants, constantUnits);
+                version.MethodologyVersionId, substanceFormulas, substance?.SubstanceEntryId, period, binding.Constants,
+                constantUnits);
 
-            var context = new MethodologyEvaluationContext(period, arguments, resolved, units, binding.Registries);
+            var context = new MethodologyEvaluationContext(
+                period, arguments, resolved, units, binding.Registries,
+                library is null ? null : name => library.Resolve(name, rowPhase: false));
             var scope = new TraceScope(input, formulasByCode, constantUnits, substance?.SubstanceEntryId);
 
             // Кроки цієї речовини — з її адресою: за нею крок знаходить свій результат.
             trace.EnterSubstance(substance?.SubstanceEntryId);
+
+            // Бібліотечні формули речовини — з константами бібліотеки на ЦЮ речовину.
+            library?.EvaluateSubstance(substance?.SubstanceEntryId);
 
             // Row-результати — готові, не перераховуються: саме заради цього D-176.
             foreach (var formula in rowFormulas)
@@ -578,13 +610,19 @@ public sealed class GenericCalculationModule(
         TraceRecorder trace,
         TraceScope scope)
     {
+        // ⚠ HSE301 L: крок бібліотечної формули несе джерело (методологію й версію), а її
+        // «видимість» тут не діє — видима формула Common є проміжним значенням Common, а не
+        // викликача, і на ErrorsOnly пишеться лише тоді, коли не порахувалася.
+        var source = scope.Source;
+        var visible = formula.IsVisible && source is null;
+
         var parsed = formulaEngine.Parse(formula.Expression, ExpressionDialect.Methodology);
         if (!parsed.IsSuccess || parsed.Expression is null)
         {
             // Нерозібрана формула в опублікованій версії — дефект публікації,
             // але тут це помилка-ЗНАЧЕННЯ: один зламаний рядок не має валити
             // прогін на мільйон рядків.
-            trace.Failed(formula.Code, formula.Expression, "#VALUE");
+            trace.Failed(formula.Code, formula.Expression, "#VALUE", source: source);
             return ExpressionValue.Error("#VALUE");
         }
 
@@ -601,19 +639,20 @@ public sealed class GenericCalculationModule(
                 formula.Code,
                 formula.Expression,
                 result.ErrorCode!,
-                trace.RecordsFailures ? Describe(formula, parsed.Expression, context, numeric, scope) : null);
+                trace.RecordsFailures ? Describe(formula, parsed.Expression, context, numeric, scope) : null,
+                source);
             return result;
         }
 
         // ⚠ Входи збираються лише для кроку, який запишеться: на `ErrorsOnly` невидима
         // формула не платить за обхід і повторне читання посилань нічим.
-        var detail = trace.Records(formula.IsVisible)
+        var detail = trace.Records(visible)
             ? Describe(formula, parsed.Expression, context, numeric, scope)
             : null;
 
         if (result.AsNumber() is not { } number)
         {
-            trace.Step(formula.Code, formula.Expression, null, formula.IsVisible, detail);
+            trace.Step(formula.Code, formula.Expression, null, visible, detail, source);
             return result;
         }
 
@@ -632,7 +671,7 @@ public sealed class GenericCalculationModule(
         // результату між ЗАЛЕЖНИМИ методологіями, де число проходить через
         // колонку і втрачає знаки за її типом. Це ребро графа
         // `calc.MethodologyDependency`, а не крок усередині формули.
-        trace.Step(formula.Code, formula.Expression, number, formula.IsVisible, detail);
+        trace.Step(formula.Code, formula.Expression, number, visible, detail, source);
 
         return result;
     }
@@ -712,11 +751,188 @@ public sealed class GenericCalculationModule(
     /// <param name="Formulas">Формули версії за кодом.</param>
     /// <param name="ConstantUnits">Одиниці розв'язаних констант цієї речовини.</param>
     /// <param name="SubstanceEntryId">Речовина; <c>null</c> — рівень рядка.</param>
+    /// <param name="Source">Бібліотека, чия формула рахується (HSE301 L); <c>null</c> — своя версія.</param>
     private sealed record TraceScope(
         CalculationInput Input,
         IReadOnlyDictionary<string, MethodologyFormula> Formulas,
         IReadOnlyDictionary<string, int?> ConstantUnits,
-        long? SubstanceEntryId);
+        long? SubstanceEntryId,
+        TraceSource? Source = null);
+
+    /// <summary>
+    /// Бібліотечні формули одного рядка (HSE301 L): контексти бібліотек на рівні рядка й
+    /// на поточну речовину.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Формула бібліотеки рахується в контексті РЯДКА ВИКЛИКАЧА: аргументи — рядка
+    /// викликача, константи — версії БІБЛІОТЕКИ (з кандидатами на поточну речовину),
+    /// посилання — у просторі імен бібліотеки (своя формула бібліотеки, потім її імпорти).
+    /// Арифметика — викликача: різні режими публікація не пропускає (<c>importModeMismatch</c>).
+    /// <para>
+    /// ⚠ Область — та сама модель, що у версії (<c>D-176</c>): Row-формула бібліотеки
+    /// рахується один раз на рядок, і контекст речовини бере її готовою; формула речовини —
+    /// у кожної речовини своя. Порядок — власний <c>EvaluationOrder</c> бібліотеки: формули
+    /// замикання вже в ньому, а посилання в іншу бібліотеку добирається на вимогу.
+    /// </para>
+    /// <para>
+    /// ⚠ Цикл (<see cref="LibraryLink.IsCycle"/> або повторне ім'я в контексті) — <c>#CYCLE</c>,
+    /// а не рекурсія: бібліотеку могли перевидати з посиланням назад після публікації.
+    /// </para>
+    /// </remarks>
+    private sealed class LibraryRun(
+        GenericCalculationModule module,
+        CalculationLibraries libraries,
+        CalculationInput input,
+        IReadOnlyDictionary<string, ExpressionValue> arguments,
+        Expressions.PeriodContext period,
+        UnitTable units,
+        Expressions.Evaluation.IRegistrySnapshot? registries,
+        NumericPolicy numeric,
+        TraceRecorder trace)
+    {
+        private readonly Dictionary<int, CalculationLibrary> _versions =
+            libraries.Versions.ToDictionary(v => v.MethodologyVersionId);
+
+        private readonly Dictionary<int, MethodologyEvaluationContext> _row = [];
+        private Dictionary<int, MethodologyEvaluationContext> _substance = [];
+        private long? _substanceId;
+
+        /// <summary>Куди веде <c>!Code</c> викликача за межу його версії; <c>null</c> — нікуди.</summary>
+        /// <param name="name">Ім'я після <c>!</c>.</param>
+        /// <param name="rowPhase">Питає контекст рядка (а не речовини).</param>
+        public ExpressionValue? Resolve(string name, bool rowPhase)
+            => libraries.Imports.TryGetValue(name, out var link) ? Follow(link, name, rowPhase) : null;
+
+        /// <summary>Одиниці бібліотечних формул — для входу <c>!Code</c> у трейсі кроку викликача.</summary>
+        /// <param name="formulasByCode">Формули викликача за кодом; своя формула не перекривається.</param>
+        public void AddInputUnits(Dictionary<string, MethodologyFormula> formulasByCode)
+        {
+            foreach (var (name, link) in libraries.Imports)
+            {
+                if (!link.IsCycle
+                    && _versions.TryGetValue(link.MethodologyVersionId, out var library)
+                    && Find(library, name) is { } formula)
+                {
+                    formulasByCode.TryAdd(name, formula);
+                }
+            }
+        }
+
+        /// <summary>Row-формули замикання — один раз на рядок, до Row-формул викликача.</summary>
+        public void EvaluateRow()
+        {
+            foreach (var library in libraries.Versions)
+            {
+                foreach (var formula in library.Formulas.Where(f => f.Scope == MethodologyFormulaScope.Row))
+                {
+                    Context(library, rowPhase: true).GetFormulaResult(formula.Code);
+                }
+            }
+        }
+
+        /// <summary>Формули речовини замикання — на початку кожної речовини.</summary>
+        /// <param name="substanceEntryId">Речовина; <c>null</c> — версія без речовин.</param>
+        public void EvaluateSubstance(long? substanceEntryId)
+        {
+            _substanceId = substanceEntryId;
+            _substance = [];
+
+            foreach (var library in libraries.Versions)
+            {
+                foreach (var formula in library.Formulas.Where(f => f.Scope != MethodologyFormulaScope.Row))
+                {
+                    Context(library, rowPhase: false).GetFormulaResult(formula.Code);
+                }
+            }
+        }
+
+        private ExpressionValue Follow(LibraryLink link, string name, bool rowPhase)
+        {
+            if (link.IsCycle)
+            {
+                return ExpressionValue.Error(Expressions.ExpressionErrors.RuntimeCycle);
+            }
+
+            return _versions.TryGetValue(link.MethodologyVersionId, out var library)
+                ? Context(library, rowPhase).GetFormulaResult(name)
+                : ExpressionValue.Error(Expressions.ExpressionErrors.BadReference);
+        }
+
+        private MethodologyEvaluationContext Context(CalculationLibrary library, bool rowPhase)
+        {
+            var contexts = rowPhase ? _row : _substance;
+            if (!contexts.TryGetValue(library.MethodologyVersionId, out var context))
+            {
+                context = Create(library, rowPhase);
+                contexts[library.MethodologyVersionId] = context;
+            }
+
+            return context;
+        }
+
+        private MethodologyEvaluationContext Create(CalculationLibrary library, bool rowPhase)
+        {
+            var substance = rowPhase ? null : _substanceId;
+            var group = library.Formulas
+                .Where(f => (f.Scope == MethodologyFormulaScope.Row) == rowPhase)
+                .ToList();
+
+            // ⛔ Константи — версії бібліотеки, а не викликача: той самий код у Common і в
+            // HSE400 — різні коефіцієнти, і формула Common рахується своїм.
+            var constantUnits = new Dictionary<string, int?>(StringComparer.OrdinalIgnoreCase);
+            var constants = module.ResolveConstants(
+                library.MethodologyVersionId, group, substance, period, library.Constants, constantUnits);
+
+            var scope = new TraceScope(
+                input,
+                library.Formulas.DistinctBy(f => f.Code, StringComparer.OrdinalIgnoreCase)
+                    .ToDictionary(f => f.Code, StringComparer.OrdinalIgnoreCase),
+                constantUnits,
+                substance,
+                new TraceSource(library.MethodologyCode, library.MethodologyVersionId));
+
+            MethodologyEvaluationContext context = null!;
+            context = new MethodologyEvaluationContext(
+                period, arguments, constants, units, registries,
+                name => ResolveIn(library, context, scope, rowPhase, name));
+
+            return context;
+        }
+
+        /// <summary>Ім'я в просторі бібліотеки: своя формула, потім її імпорти.</summary>
+        private ExpressionValue? ResolveIn(
+            CalculationLibrary library,
+            MethodologyEvaluationContext context,
+            TraceScope scope,
+            bool rowPhase,
+            string name)
+        {
+            if (Find(library, name) is not { } formula)
+            {
+                return library.Imports.TryGetValue(name, out var link) ? Follow(link, name, rowPhase) : null;
+            }
+
+            var isRow = formula.Scope == MethodologyFormulaScope.Row;
+
+            // Row-результат — один на рядок: контекст речовини бере його готовим.
+            if (isRow && !rowPhase)
+            {
+                return Context(library, rowPhase: true).GetFormulaResult(name);
+            }
+
+            // Формула речовини поза речовиною — #REF, як і у версії викликача (публікація
+            // таке посилання з Row-формули не пропускає).
+            if (!isRow && rowPhase)
+            {
+                return null;
+            }
+
+            return module.Evaluate(formula, context, numeric, trace, scope);
+        }
+
+        private static MethodologyFormula? Find(CalculationLibrary library, string name)
+            => library.Formulas.FirstOrDefault(f => string.Equals(f.Code, name, StringComparison.OrdinalIgnoreCase));
+    }
 
     /// <summary>Резолвить усі константи, згадані у формулах, для однієї речовини.</summary>
     /// <remarks>
@@ -724,7 +940,7 @@ public sealed class GenericCalculationModule(
     /// (аудит P1), тут — лише вибір у пам'яті.
     /// </remarks>
     private Dictionary<string, ExpressionValue> ResolveConstants(
-        MethodologyDescriptor version,
+        int methodologyVersionId,
         IReadOnlyList<MethodologyFormula> formulas,
         long? substanceEntryId,
         Expressions.PeriodContext period,
@@ -737,7 +953,7 @@ public sealed class GenericCalculationModule(
         {
             var constant = constants.Resolve(
                 candidatesByCode.TryGetValue(code, out var candidates) ? candidates : [],
-                version.MethodologyVersionId,
+                methodologyVersionId,
                 code,
                 category: null,
                 substanceEntryId,

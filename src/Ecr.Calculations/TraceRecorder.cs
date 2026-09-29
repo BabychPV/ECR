@@ -55,8 +55,14 @@ public sealed class TraceRecorder(TraceLevel level)
     /// <param name="value">Значення кроку.</param>
     /// <param name="visible">Формула видима — крок пишеться й на <c>ErrorsOnly</c>.</param>
     /// <param name="detail">Одиниця й входи кроку для <c>TraceJson</c> v1.</param>
+    /// <param name="source">Бібліотека, чия це формула (HSE301 L); <c>null</c> — своя версія.</param>
     public void Step(
-        string code, string? expression, decimal? value, bool visible = false, TraceDetail? detail = null)
+        string code,
+        string? expression,
+        decimal? value,
+        bool visible = false,
+        TraceDetail? detail = null,
+        TraceSource? source = null)
     {
         // ⛔ Off не пише НІЧОГО — навіть у пам'ять. Накопичити «про всяк
         // випадок» і не зберегти означало б платити пам'яттю воркера за те,
@@ -66,7 +72,8 @@ public sealed class TraceRecorder(TraceLevel level)
             return;
         }
 
-        _steps.Add(new TraceStep(_steps.Count + 1, code, expression, value, null, Detail: detail, SubstanceEntryId: _substance));
+        _steps.Add(new TraceStep(
+            _steps.Count + 1, code, expression, value, null, Detail: detail, SubstanceEntryId: _substance, Source: source));
     }
 
     /// <summary>Записує крок, що завершився помилкою.</summary>
@@ -74,19 +81,22 @@ public sealed class TraceRecorder(TraceLevel level)
     /// <param name="expression">Вираз.</param>
     /// <param name="error">Код помилки-значення (<c>#DIV/0</c>, <c>#UNIT</c>).</param>
     /// <param name="detail">Входи кроку — з якими значеннями він не порахувався.</param>
+    /// <param name="source">Бібліотека, чия це формула (HSE301 L); <c>null</c> — своя версія.</param>
     /// <remarks>
     /// ⚠ Помилковий крок пишеться і на <c>ErrorsOnly</c>, і на <c>Full</c>:
     /// саме заради нього рівень <c>ErrorsOnly</c> і є типовим. Число, яке не
     /// порахувалося, без запису неможливо ні пояснити, ні відтворити.
     /// </remarks>
-    public void Failed(string code, string? expression, string error, TraceDetail? detail = null)
+    public void Failed(
+        string code, string? expression, string error, TraceDetail? detail = null, TraceSource? source = null)
     {
         if (!RecordsFailures)
         {
             return;
         }
 
-        _steps.Add(new TraceStep(_steps.Count + 1, code, expression, null, error, Detail: detail, SubstanceEntryId: _substance));
+        _steps.Add(new TraceStep(
+            _steps.Count + 1, code, expression, null, error, Detail: detail, SubstanceEntryId: _substance, Source: source));
     }
 
     /// <summary>Записує крок, значення якого замасковане в нуль.</summary>
@@ -124,6 +134,11 @@ public sealed class TraceRecorder(TraceLevel level)
 /// <param name="Masked">Чому значення стало нулем (<c>H-24d-1</c>).</param>
 /// <param name="Detail">Одиниця й входи кроку; <c>null</c> — крок без виразу (маскування виходу).</param>
 /// <param name="SubstanceEntryId">Речовина кроку; <c>null</c> — рівень рядка.</param>
+/// <param name="Source">
+/// Бібліотека, чия формула рахувалася (HSE301 L); <c>null</c> — формула своєї версії.
+/// ⚠ Окремим полем, а не кваліфікованим кодом: <c>StepCode</c> — <c>nvarchar(64)</c>, і
+/// «Common@910.Common_WtCi_Methane» туди не вміщається.
+/// </param>
 public sealed record TraceStep(
     int Order,
     string Code,
@@ -132,11 +147,17 @@ public sealed record TraceStep(
     string? Error,
     MaskedZeroReason Masked = MaskedZeroReason.None,
     TraceDetail? Detail = null,
-    long? SubstanceEntryId = null)
+    long? SubstanceEntryId = null,
+    TraceSource? Source = null)
 {
     /// <summary>Крок у схемі <c>TraceJson</c> v1 (FEATURE-HSE301-VIEW §7.2).</summary>
     public string ToJson() => TraceJson.Write(this);
 }
+
+/// <summary>Звідки формула кроку: імпортована методологія і її версія (HSE301 L).</summary>
+/// <param name="Methodology">Код методології-бібліотеки.</param>
+/// <param name="VersionId">Версія бібліотеки, чинна на бізнес-дату прогону.</param>
+public sealed record TraceSource(string Methodology, int VersionId);
 
 /// <summary>Те, що крок знає понад значення: одиницю результату й входи.</summary>
 /// <param name="UnitCode">Код одиниці результату; <c>null</c> — формула одиниці не оголошує.</param>
@@ -202,6 +223,16 @@ public static class TraceJson
             json.WriteString("unit", step.Detail?.UnitCode);
             json.WriteString("masked", step.Masked == MaskedZeroReason.None ? null : step.Masked.ToString());
             json.WriteString("error", step.Error);
+
+            // ⚠ HSE301 L: лише для кроку бібліотечної формули — крок своєї версії лишається
+            // побайтно тим самим, що до кроку.
+            if (step.Source is { } source)
+            {
+                json.WriteStartObject("source");
+                json.WriteString("methodology", source.Methodology);
+                json.WriteNumber("versionId", source.VersionId);
+                json.WriteEndObject();
+            }
 
             json.WriteStartArray("inputs");
             foreach (var input in step.Detail?.Inputs ?? [])
