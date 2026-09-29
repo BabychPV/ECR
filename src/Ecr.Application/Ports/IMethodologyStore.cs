@@ -66,6 +66,27 @@ public interface IMethodologyStore
         int methodologyVersionId, DateOnly onDate, CancellationToken ct);
 
     /// <summary>
+    /// Те саме, що <see cref="ResolveImportsAsync"/>, але разом зі СКЛАДОМ обраної версії
+    /// кожної бібліотеки: формули, константи й режими (HSE301 L).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Версія бібліотеки — рівно та, яку дає <see cref="ResolveImportsAsync"/> на ту саму
+    /// дату: «остання з <c>EffectiveFrom ≤ дата</c>». Друге правило вибору тут розійшлося б
+    /// із публікацією на першому ж перевиданні <c>Common</c>, і прогін рахував би не ту
+    /// редакцію, яку перевірив золотий набір.
+    ///
+    /// ⚠ Лише один рівень — імпорти ЦІЄЇ версії. Транзитивне замикання будує викликач
+    /// (<c>MethodologyLibraryClosure</c>): він знає, які формули справді потрібні, і
+    /// ходить за імпортами бібліотеки лише тоді, коли потрібна формула туди посилається.
+    /// </remarks>
+    /// <param name="methodologyVersionId">Версія, що оголосила імпорти.</param>
+    /// <param name="onDate">Бізнес-дата: кінець періоду в прогоні, дата чинності в публікації.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Імпорти в порядку коду методології; без чинної версії — з порожнім складом.</returns>
+    public Task<IReadOnlyList<MethodologyLibraryContent>> GetLibraryContentsAsync(
+        int methodologyVersionId, DateOnly onDate, CancellationToken ct);
+
+    /// <summary>
     /// Замінює ребра <c>calc.MethodologyDependency</c>, що виходять із методології.
     /// </summary>
     /// <remarks>
@@ -237,6 +258,21 @@ public sealed record MethodologyLibrary(
     string MethodologyCode,
     int? MethodologyVersionId,
     IReadOnlyList<string> FormulaCodes);
+
+/// <summary>
+/// Імпорт, розв'язаний на дату, разом зі складом обраної версії бібліотеки (HSE301 L).
+/// </summary>
+/// <param name="Library">Імпорт: методологія, обрана версія, коди формул.</param>
+/// <param name="NumericMode">Арифметика обраної версії; <c>null</c> — версії немає.</param>
+/// <param name="CalendarMode">Календар обраної версії; <c>null</c> — версії немає.</param>
+/// <param name="Formulas">Формули обраної версії в порядку <c>EvaluationOrder</c>.</param>
+/// <param name="Constants">Усі константи обраної версії — кандидати для вибору на речовину й дату.</param>
+public sealed record MethodologyLibraryContent(
+    MethodologyLibrary Library,
+    Domain.Enums.NumericMode? NumericMode,
+    Domain.Enums.CalendarMode? CalendarMode,
+    IReadOnlyList<MethodologyFormula> Formulas,
+    IReadOnlyList<MethodologyConstant> Constants);
 
 /// <summary>Символи, видимі виразам версії методології.</summary>
 /// <param name="Constants">Константи — префікс <c>CST.</c>.</param>

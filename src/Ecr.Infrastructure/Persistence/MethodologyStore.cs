@@ -629,6 +629,58 @@ public sealed class MethodologyStore(EcrDbContext db, int constantCap) : IMethod
             throw new InvalidOperationException($"Тест «{code}»: {part} не читається.", error);
         }
     }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⛔ Версія бібліотеки — з <see cref="ResolveImportsAsync"/>, а не власним запитом:
+    /// правило вибору задане один раз (<c>H-24d-4</c>), і третя його копія тут дала б
+    /// прогону іншу редакцію <c>Common</c>, ніж публікації.
+    ///
+    /// ⚠ Склад читається без відстеження: це чужа версія, прогін і публікація її лише
+    /// читають. Відстежені формули бібліотеки потрапили б у <c>SaveChanges</c> публікації
+    /// викликача — разом з усім, що там могло випадково змінитися.
+    ///
+    /// ⚠ Константи — через <see cref="GetConstantsAsync"/>: стеля там відмовляє, а не
+    /// обрізає, і для бібліотеки це так само важливо, як для своєї версії.
+    /// </remarks>
+    public async Task<IReadOnlyList<MethodologyLibraryContent>> GetLibraryContentsAsync(
+        int methodologyVersionId, DateOnly onDate, CancellationToken ct)
+    {
+        var libraries = await ResolveImportsAsync(methodologyVersionId, onDate, ct).ConfigureAwait(false);
+        var contents = new List<MethodologyLibraryContent>(libraries.Count);
+
+        foreach (var library in libraries)
+        {
+            if (library.MethodologyVersionId is not { } versionId)
+            {
+                contents.Add(new MethodologyLibraryContent(library, null, null, [], []));
+                continue;
+            }
+
+            var modes = await db.MethodologyVersions
+                .AsNoTracking()
+                .Where(v => v.Id == versionId)
+                .Select(v => new { v.NumericMode, v.CalendarMode })
+                .FirstAsync(ct)
+                .ConfigureAwait(false);
+
+            var formulas = await db.MethodologyFormulas
+                .AsNoTracking()
+                .Where(f => f.MethodologyVersionId == versionId)
+                .OrderBy(f => f.EvaluationOrder)
+                .ThenBy(f => f.Id)
+                .Take(MaxChildren)
+                .ToListAsync(ct)
+                .ConfigureAwait(false);
+
+            var constants = await GetConstantsAsync(versionId, ct).ConfigureAwait(false);
+
+            contents.Add(new MethodologyLibraryContent(
+                library, modes.NumericMode, modes.CalendarMode, formulas, constants));
+        }
+
+        return contents;
+    }
 }
 
 /// <summary>Реалізація <see cref="IConstantStore"/> над <see cref="EcrDbContext"/>.</summary>
