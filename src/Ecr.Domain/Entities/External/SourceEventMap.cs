@@ -57,6 +57,9 @@ public sealed class SourceEventMap : Entity<int>
     /// <summary>Довжина імені атрибута — як <c>ext.EntityFieldMap.SourceField</c>.</summary>
     public const int MaxAttributeLength = 200;
 
+    /// <summary>Довжина значення фільтра й значення джерела в явній відповідності.</summary>
+    public const int MaxValueLength = 400;
+
     private static readonly string[] ReservedAttributes = [StartAttribute, EndAttribute, NameAttribute];
 
     private static readonly string[] RequiredAttributes = [StartAttribute, EndAttribute];
@@ -126,6 +129,13 @@ public sealed class SourceEventMap : Entity<int>
 
     /// <summary>Динамічна таблиця, у яку лягають події.</summary>
     public int TableDefId { get; private set; }
+
+    /// <summary>Атрибут звуження (події лише цієї ділянки чи факела); <c>null</c> — без звуження.</summary>
+    public string? FilterAttribute { get; private set; }
+
+    public SourceEventAttributeScope? FilterScope { get; private set; }
+
+    public string? FilterValue { get; private set; }
 
     public SourceEventVolumeMode VolumeMode { get; private set; }
 
@@ -263,6 +273,62 @@ public sealed class SourceEventMap : Entity<int>
         return true;
     }
 
+    /// <summary>Задає звуження подій; усі три значення разом або жодного.</summary>
+    /// <param name="attribute">Атрибут звуження.</param>
+    /// <param name="scope">Де він лежить.</param>
+    /// <param name="value">Значення, з яким порівнюється атрибут.</param>
+    /// <exception cref="DomainException">
+    /// <c>ECR-INT-0422</c> <c>.eventMapFilterIncomplete</c> — задано не всі три.
+    /// </exception>
+    public void SetFilter(string? attribute, SourceEventAttributeScope? scope, string? value)
+    {
+        var name = string.IsNullOrWhiteSpace(attribute) ? null : attribute.Trim();
+        var text = string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+        if (name is null && scope is null && text is null)
+        {
+            FilterAttribute = null;
+            FilterScope = null;
+            FilterValue = null;
+            return;
+        }
+
+        // Половинний фільтр — або «звуження ні до чого», або «звуження до
+        // порожнього»: обидва дають реєстр, повніший чи порожніший, ніж людина
+        // налаштувала, і без жодного знаку про це.
+        if (name is null || scope is null || text is null)
+        {
+            throw new DomainException(
+                "ECR-INT-0422",
+                "Звуження подій задається трьома значеннями разом: атрибут, де він лежить, і значення.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-INT-0422.eventMapFilterIncomplete",
+                });
+        }
+
+        EnsureDefined(scope.Value, nameof(scope));
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(name.Length, MaxAttributeLength, nameof(attribute));
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(text.Length, MaxValueLength, nameof(value));
+
+        FilterAttribute = name;
+        FilterScope = scope;
+        FilterValue = text;
+    }
+
+    /// <summary>Перемикає режим об'єму (§4.7.5) — даними, без релізу.</summary>
+    public void SetVolumeMode(SourceEventVolumeMode volumeMode)
+    {
+        EnsureDefined(volumeMode, nameof(volumeMode));
+        VolumeMode = volumeMode;
+    }
+
+    /// <summary>Вимикає синхронізацію за цим мапінгом; зв'язки й рядки лишаються.</summary>
+    public void Deactivate() => IsActive = false;
+
+    /// <summary>Вмикає синхронізацію знову.</summary>
+    public void Activate() => IsActive = true;
+
     private void EnsureStartEnd(SourceEventFieldMap? removing)
     {
         foreach (var reserved in RequiredAttributes)
@@ -297,6 +363,8 @@ public sealed class SourceEventMap : Entity<int>
 /// </summary>
 public sealed class SourceEventFieldMap : Entity<int>
 {
+    private readonly List<SourceEventValueMap> _values = [];
+
     private SourceEventFieldMap() { }
 
     internal SourceEventFieldMap(
@@ -332,4 +400,84 @@ public sealed class SourceEventFieldMap : Entity<int>
 
     public int? TargetUnitId { get; private set; }
 
+    /// <summary>Явні відповідності «значення джерела → запис довідника».</summary>
+    public IReadOnlyList<SourceEventValueMap> Values => _values;
+
+    /// <summary>Додає явну відповідність значення джерела запису довідника.</summary>
+    /// <param name="sourceValue">Значення атрибута в джерелі.</param>
+    /// <param name="registryEntryId">Запис довідника Lookup-колонки.</param>
+    /// <returns>Додана відповідність.</returns>
+    /// <exception cref="DomainException">
+    /// <c>ECR-INT-0422</c> <c>.eventMapValueMapNotAllowed</c> — поле не виду
+    /// <see cref="SourceEventValueKind.ValueMap"/>; <c>ECR-INT-0409</c>
+    /// <c>.eventMapSourceValueTaken</c> — те саме значення вже зіставлено.
+    /// </exception>
+    /// <remarks>
+    /// ⚠ Порівняння без регістру й з обрізкою — так само, як його порівнює
+    /// <c>UQ_SEVM_Value</c> у базі (зіставлення <c>_CI_</c>).
+    /// </remarks>
+    public SourceEventValueMap AddValue(string sourceValue, long registryEntryId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sourceValue);
+
+        var value = sourceValue.Trim();
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(value.Length, SourceEventMap.MaxValueLength, nameof(sourceValue));
+
+        // Відповідність на полі, яке шукає за кодом чи назвою, не діяла б
+        // ніколи: людина бачила б налаштоване «зима → Winter» і порожню комірку.
+        if (ValueKind != SourceEventValueKind.ValueMap)
+        {
+            throw new DomainException(
+                "ECR-INT-0422",
+                $"Поле атрибута «{SourceAttribute}» шукає запис довідника як {ValueKind}; явна відповідність тут не діє.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-INT-0422.eventMapValueMapNotAllowed",
+                    ["attribute"] = SourceAttribute,
+                    ["valueKind"] = ValueKind.ToString(),
+                });
+        }
+
+        if (_values.Exists(v => string.Equals(v.SourceValue, value, StringComparison.OrdinalIgnoreCase)))
+        {
+            throw new DomainException(
+                "ECR-INT-0409",
+                $"Значення «{value}» уже зіставлено із записом довідника в цьому полі.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-INT-0409.eventMapSourceValueTaken",
+                    ["sourceValue"] = value,
+                });
+        }
+
+        var map = new SourceEventValueMap(Id, value, registryEntryId);
+        _values.Add(map);
+        return map;
+    }
+}
+
+/// <summary>
+/// Явна відповідність «значення джерела → запис довідника»
+/// (<c>ext.SourceEventValueMap</c>, §4.7.3, §4.7.6).
+/// </summary>
+public sealed class SourceEventValueMap : Entity<int>
+{
+    private SourceEventValueMap() { }
+
+    internal SourceEventValueMap(int sourceEventFieldMapId, string sourceValue, long registryEntryId)
+    {
+        SourceEventFieldMapId = sourceEventFieldMapId;
+        SourceValue = sourceValue;
+        RegistryEntryId = registryEntryId;
+    }
+
+    public int SourceEventFieldMapId { get; private set; }
+
+    public string SourceValue { get; private set; } = null!;
+
+    /// <summary>
+    /// Запис довідника. ⚠ <c>bigint</c>, а не <c>int</c> плану §4.7.3:
+    /// <c>dic.RegistryEntry.Id</c> — <c>bigint</c>, і ключ мусить мати той самий тип.
+    /// </summary>
+    public long RegistryEntryId { get; private set; }
 }
