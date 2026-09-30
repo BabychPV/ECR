@@ -12574,6 +12574,80 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- PIPELINE:editor ── кінець секції ──
+-- SEC:effective-access ── ru/kz розрізу ефективного доступу (ФВ-6.16, D-220); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-REQ-0422.effectiveAccessResource', N'ru', N'Ресурс нужно указать как тип и положительное число, например Registry:5 или Project:3.'),
+    (N'effectiveAccess.show', N'ru', N'Показать эффективный доступ'),
+    (N'effectiveAccess.hide', N'ru', N'Скрыть эффективный доступ'),
+    (N'effectiveAccess.title', N'ru', N'Эффективный доступ к ресурсу'),
+    (N'effectiveAccess.hint', N'ru', N'Выберите справочник или проект, чтобы увидеть итоговый уровень и какой грант какой роли его даёт. Это лишь объяснение решения, ничего не меняется.'),
+    (N'effectiveAccess.kind', N'ru', N'Тип ресурса'),
+    (N'effectiveAccess.kindRegistry', N'ru', N'Справочник'),
+    (N'effectiveAccess.kindProject', N'ru', N'Проект'),
+    (N'effectiveAccess.resourceId', N'ru', N'Идентификатор ресурса'),
+    (N'effectiveAccess.explain', N'ru', N'Объяснить'),
+    (N'effectiveAccess.level', N'ru', N'Итоговый уровень: {level}'),
+    (N'effectiveAccess.denied', N'ru', N'Явный запрет: запрет побеждает любой грант и любое глобальное право, поэтому ресурс скрыт.'),
+    (N'effectiveAccess.noGrant', N'ru', N'Ни одна роль этого человека не даёт доступа к ресурсу.'),
+    (N'effectiveAccess.groupsUnknown', N'ru', N'Группы из билета входа этого человека здесь неизвестны, поэтому роли, приходящие только через группу, не показаны.'),
+    (N'effectiveAccess.noContributions', N'ru', N'Ни у одной роли нет гранта или права на этот ресурс.'),
+    (N'effectiveAccess.colSource', N'ru', N'Чем дано'),
+    (N'effectiveAccess.colRole', N'ru', N'Роль'),
+    (N'effectiveAccess.colVia', N'ru', N'Назначение'),
+    (N'effectiveAccess.colLevel', N'ru', N'Уровень'),
+    (N'effectiveAccess.colScope', N'ru', N'Область'),
+    (N'effectiveAccess.colCounted', N'ru', N'Учтено'),
+    (N'effectiveAccess.sourceGrant', N'ru', N'Ресурсный грант'),
+    (N'effectiveAccess.sourcePermission', N'ru', N'Право {permission}'),
+    (N'effectiveAccess.viaPersonal', N'ru', N'Лично'),
+    (N'effectiveAccess.viaGroup', N'ru', N'Через группу {sid}'),
+    (N'effectiveAccess.deny', N'ru', N'Запрет'),
+    (N'effectiveAccess.scopeUnscoped', N'ru', N'Везде'),
+    (N'effectiveAccess.scopeInScope', N'ru', N'Проект входит в область'),
+    (N'effectiveAccess.scopeNarrowed', N'ru', N'Сужено листами или периодами: открывает документы, но не повышает уровень проекта'),
+    (N'effectiveAccess.scopeOutOfScope', N'ru', N'Вне области назначения'),
+    (N'effectiveAccess.scopeExpired', N'ru', N'Назначение не действует'),
+    (N'effectiveAccess.counted', N'ru', N'Да'),
+    (N'effectiveAccess.notCounted', N'ru', N'Нет'),
+    (N'err.ECR-REQ-0422.effectiveAccessResource', N'kz', N'Ресурсты түрі мен оң санымен көрсету керек, мысалы Registry:5 немесе Project:3.'),
+    (N'effectiveAccess.show', N'kz', N'Тиімді қолжетімділікті көрсету'),
+    (N'effectiveAccess.hide', N'kz', N'Тиімді қолжетімділікті жасыру'),
+    (N'effectiveAccess.title', N'kz', N'Ресурсқа тиімді қолжетімділік'),
+    (N'effectiveAccess.hint', N'kz', N'Түпкілікті деңгейді және оны қай рөлдің қай гранты беретінін көру үшін анықтамалықты немесе жобаны таңдаңыз. Бұл тек шешімнің түсіндірмесі, ештеңе өзгермейді.'),
+    (N'effectiveAccess.kind', N'kz', N'Ресурс түрі'),
+    (N'effectiveAccess.kindRegistry', N'kz', N'Анықтамалық'),
+    (N'effectiveAccess.kindProject', N'kz', N'Жоба'),
+    (N'effectiveAccess.resourceId', N'kz', N'Ресурс идентификаторы'),
+    (N'effectiveAccess.explain', N'kz', N'Түсіндіру'),
+    (N'effectiveAccess.level', N'kz', N'Түпкілікті деңгей: {level}'),
+    (N'effectiveAccess.denied', N'kz', N'Айқын тыйым: тыйым кез келген грант пен кез келген жаһандық құқықтан басым, сондықтан ресурс жасырылған.'),
+    (N'effectiveAccess.noGrant', N'kz', N'Бұл адамның ешбір рөлі ресурсқа қолжетімділік бермейді.'),
+    (N'effectiveAccess.groupsUnknown', N'kz', N'Бұл адамның кіру билетіндегі топтар мұнда белгісіз, сондықтан тек топ арқылы келетін рөлдер көрсетілмеген.'),
+    (N'effectiveAccess.noContributions', N'kz', N'Ешбір рөлде бұл ресурсқа грант не құқық жоқ.'),
+    (N'effectiveAccess.colSource', N'kz', N'Немен берілген'),
+    (N'effectiveAccess.colRole', N'kz', N'Рөл'),
+    (N'effectiveAccess.colVia', N'kz', N'Тағайындау'),
+    (N'effectiveAccess.colLevel', N'kz', N'Деңгей'),
+    (N'effectiveAccess.colScope', N'kz', N'Аумақ'),
+    (N'effectiveAccess.colCounted', N'kz', N'Ескерілген'),
+    (N'effectiveAccess.sourceGrant', N'kz', N'Ресурстық грант'),
+    (N'effectiveAccess.sourcePermission', N'kz', N'{permission} құқығы'),
+    (N'effectiveAccess.viaPersonal', N'kz', N'Жеке'),
+    (N'effectiveAccess.viaGroup', N'kz', N'{sid} тобы арқылы'),
+    (N'effectiveAccess.deny', N'kz', N'Тыйым'),
+    (N'effectiveAccess.scopeUnscoped', N'kz', N'Барлық жерде'),
+    (N'effectiveAccess.scopeInScope', N'kz', N'Жоба аумаққа кіреді'),
+    (N'effectiveAccess.scopeNarrowed', N'kz', N'Парақтармен немесе кезеңдермен тарылтылған: құжаттарды ашады, бірақ жоба деңгейін көтермейді'),
+    (N'effectiveAccess.scopeOutOfScope', N'kz', N'Тағайындау аумағынан тыс'),
+    (N'effectiveAccess.scopeExpired', N'kz', N'Тағайындау қолданыста емес'),
+    (N'effectiveAccess.counted', N'kz', N'Иә'),
+    (N'effectiveAccess.notCounted', N'kz', N'Жоқ')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- SEC:effective-access ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

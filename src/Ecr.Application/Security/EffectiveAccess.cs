@@ -132,11 +132,12 @@ public sealed class GetEffectiveAccessHandler(
         if (kind == ResourceKind.Registry && !denied)
         {
             // Глобальне право відкриває довідник без гранта (RegistryAccess.RequireAsync), заборона — ні.
-            if (profile.Has(RegistryEditData))
+            // Permissions.Contains — те саме, що Has(code): читання вже відбудованого профілю, не нове рішення.
+            if (profile.Permissions.Contains(RegistryEditData))
             {
                 level = Max(level, GrantLevel.Write);
             }
-            else if (profile.Has(RegistryView))
+            else if (profile.Permissions.Contains(RegistryView))
             {
                 level = Max(level, GrantLevel.Read);
             }
