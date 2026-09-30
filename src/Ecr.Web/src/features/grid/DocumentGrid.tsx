@@ -17,6 +17,7 @@ import type {
 } from '@/api/types';
 import { useColumnWidths } from '@/features/preferences/columnWidthsSync';
 import { cellAppearanceClassOf, cellAppearanceOf } from './cellAppearance';
+import { conditionalMatchOf, conditionalRulesOf, withConditionalRule } from './conditionalAppearance';
 import { cellDisplay, cellText, editorValueOf, isNumericColumn, sameCellValue } from './cellValue';
 import { parseClipboard, planPaste, toClipboard, type PasteRejection } from './clipboard';
 import { captureEdit, coerce, revertsToSaved, valueOf, withKnownVersions } from './edits';
@@ -2200,6 +2201,10 @@ export function gridColumns(
     const isRequired = column.isRequired || column.isRequiredByMethodology;
     const requiredHint = isRequired ? t('grid.columnRequiredHint') : null;
 
+    // ⛔ `ФВ-2.7`: правила умовного форматування колонки — раз на колонку, а
+    // не на кожну комірку; яке з них спрацювало, рахує `cellProperties`.
+    const conditionalRules = conditionalRulesOf(column);
+
     /*
      * ⛔ `U-05`: вирівнювання числа вирішує ТИП КОЛОНКИ з сервера
      * (`ColumnDto.dataType`), а не вигляд значення. Здогад за виглядом
@@ -2404,11 +2409,16 @@ export function gridColumns(
         // не заміна: рахується ЗАВЖДИ, незалежно від того, чи спрацював
         // хоч один з інших маркерів, — інакше жирна колонка без стилю
         // фарбувалась би, лише щойно комірку зроблено `dirty`.
-        const appearance = cellAppearanceOf(column.style);
+        //
+        // ⛔ `ФВ-2.7`: спрацьоване правило умовного форматування — шар ПОВЕРХ
+        // стилю автора, тим самим шляхом (`conditionalAppearance.ts`).
+        const conditional = conditionalMatchOf(conditionalRules, column.code, (model as GridRow)[column.code]);
+        const style = conditional === null ? column.style : withConditionalRule(column.style, conditional.rule);
+        const appearance = cellAppearanceOf(style);
 
         // ⛔ `X-10`: колір і заливка автора — змінними й класами, які читає
         // `cellEditors.css`, а не inline-кольором (коментар `cellAppearanceOf`).
-        const appearanceClass = cellAppearanceClassOf(column.style);
+        const appearanceClass = cellAppearanceClassOf(style);
 
         /*
          * ⛔ `U-05`: повне значення має бути ДОСТУПНЕ, навіть коли воно
@@ -2480,6 +2490,10 @@ export function gridColumns(
           // ⚠ Атрибут окремо від класу: тест читає саме його і тому доводить
           // розрізнення станів, не залежачи від жодного кольору (`ФВ-14.18`).
           ...(state === null ? {} : { 'data-cell-state': state }),
+
+          // ⚠ Яке правило спрацювало — атрибутом, не лише кольором: тест і
+          // людина з інструментами розробника бачать причину підсвітки.
+          ...(conditional === null ? {} : { 'data-conditional-rule': String(conditional.position) }),
 
           // ⚠ Підказка СТАНУ має першість над підказкою ЗНАЧЕННЯ, і це
           // вибір, а не випадок: `title` на елементі один, а «сервер

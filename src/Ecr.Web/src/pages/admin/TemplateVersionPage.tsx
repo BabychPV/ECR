@@ -160,8 +160,8 @@ const ValidationRuleList = lazy(async () => ({
 
 /**
  * Умовне форматування (`ФВ-2.7`) — лінивий чанк, як і решта редакторів
- * вище. Збереження в ньому вимкнене: сервер правил не зберігає
- * (`conditionalFormat.ts`).
+ * вище. Правила читаються й зберігаються на сервері (`If-Match`,
+ * `conditionalFormatApi.ts`).
  */
 const ConditionalFormatPanel = lazy(async () => ({
   default: (await import('@/features/templates/ConditionalFormatPanel')).ConditionalFormatPanel,
@@ -1684,6 +1684,8 @@ export function TemplateVersionPage(): JSX.Element {
         {conditionalFormatTable !== null && (
           <Suspense fallback={null}>
             <ConditionalFormatPanel
+              templateVersionId={id}
+              canEdit={canEditSheets}
               columns={conditionalFormatTable.columns.map((column) => ({
                 code: column.code,
                 label: localized(column.headerL10n) || column.code,

@@ -4,13 +4,12 @@ import { normalizeDecimal } from '@/shared/format';
  * Умовне форматування комірок за правилами шаблону (`ФВ-2.7`) — клієнтська
  * модель правила й перевірка «чи спрацьовує правило на значенні».
  *
- * ⛔ СЕРВЕР ПРАВИЛ НЕ ЗБЕРІГАЄ. Ні `StyleDef`, ні `ColumnDef`, ні окрема
- * сутність не мають місця під умову (`D-234`, звіт лінії
- * `constructor-dnd-format`): потрібна схема (`cfg.ConditionalFormatRule` —
- * міграція EF), CRUD-ендпоінти й поле в структурі версії. Тому редактор
- * (`ConditionalFormatPanel.tsx`) дає скласти правила й перевірити їх на
- * прикладі значення, але збереження вимкнене і так і підписане. Модель тут —
- * те, що редактор і майбутнє застосування в сітці мають розуміти однаково.
+ * Сервер зберігає правила в `cfg.ConditionalFormatRule` (`GET/PUT
+ * …/template-versions/{id}/conditional-formats`, `D-234`) і віддає їх сітці
+ * документа в зрізі таблиці (`ColumnDto.conditionalFormats`). Модель тут — те,
+ * що редактор (`ConditionalFormatPanel.tsx`) і сітка (`DocumentGrid.tsx`)
+ * розуміють однаково: той самий `firstMatchingRule` і в перегляді редактора, і
+ * на живій комірці.
  *
  * ⚠ Порівняння — через `Number` після `normalizeDecimal`: для вибору кольору
  * межа точності `double` не має значення, а для збереження значень ця
@@ -71,25 +70,40 @@ export function operandCount(operator: ConditionOperator): 0 | 1 | 2 {
   return operator === 'between' ? 2 : 1;
 }
 
-export type RuleBlocker = 'Column' | 'Value' | 'ValueTo' | 'Range' | 'Style';
+export type RuleBlocker = 'Column' | 'Value' | 'ValueTo' | 'Range' | 'Color' | 'Style';
 
-/** Чому правило ще не повне; `null` — повне. */
+/** Межа довжини операнда — `ConditionalFormatRule.MaxOperandLength` на сервері. */
+export const MaxOperandLength = 64;
+
+const HexColor = /^#[0-9a-fA-F]{6}$/;
+
+function isOperandNumber(text: string): boolean {
+  return text.trim().length <= MaxOperandLength && normalizeDecimal(text) !== null;
+}
+
+/**
+ * Чому правило ще не повне; `null` — повне.
+ *
+ * ⛔ Ті самі умови, що перевіряє сервер (`ConditionalFormatRule.Validate`):
+ * операнд — число для КОЖНОГО оператора з операндом, включно з «дорівнює»
+ * (сервер текстового операнда не прийме — `condFormatOperand`), колір —
+ * рівно `#rrggbb`. Правило, яке редактор назвав повним, не може отримати
+ * відмову `422` при збереженні.
+ */
 export function whyRuleIncomplete(rule: ConditionalRule): RuleBlocker | null {
   if (rule.columnCode.trim().length === 0) return 'Column';
 
   const count = operandCount(rule.operator);
-  const isOrdering = rule.operator !== 'eq' && rule.operator !== 'ne';
 
-  if (count >= 1) {
-    if (rule.value.trim().length === 0) return 'Value';
-    // ⚠ «більше/менше/між» має сенс лише для чисел; «дорівнює» — і для тексту.
-    if (isOrdering && normalizeDecimal(rule.value) === null) return 'Value';
-  }
+  if (count >= 1 && !isOperandNumber(rule.value)) return 'Value';
 
   if (count === 2) {
-    const to = normalizeDecimal(rule.valueTo);
-    if (to === null) return 'ValueTo';
-    if (Number(to) < Number(normalizeDecimal(rule.value))) return 'Range';
+    if (!isOperandNumber(rule.valueTo)) return 'ValueTo';
+    if (Number(normalizeDecimal(rule.valueTo)) < Number(normalizeDecimal(rule.value))) return 'Range';
+  }
+
+  for (const hex of [rule.backgroundHex, rule.foregroundHex]) {
+    if (hex !== '' && !HexColor.test(hex)) return 'Color';
   }
 
   if (rule.backgroundHex === '' && rule.foregroundHex === '' && !rule.isBold) return 'Style';
@@ -154,4 +168,61 @@ export function firstMatchingRule(
       (rule) => rule.columnCode === columnCode && whyRuleIncomplete(rule) === null && ruleMatches(rule, cell),
     ) ?? null
   );
+}
+
+/**
+ * Форма правила на дроті (`ConditionalFormatRuleDto`). ⚠ Своя, а не з
+ * `schema.d.ts`: модуль живе в чанку сітки, і тип тут — лише опис полів.
+ */
+export interface ConditionalRuleWire {
+  readonly columnCode: string;
+  readonly operator: string;
+  readonly value?: string | null;
+  readonly valueTo?: string | null;
+  readonly backgroundHex?: string | null;
+  readonly foregroundHex?: string | null;
+  readonly isBold: boolean;
+}
+
+function isOperator(value: string): value is ConditionOperator {
+  return (ConditionOperators as readonly string[]).includes(value);
+}
+
+/**
+ * Правило з відповіді сервера. `null` у полях — порожньо (колір теми, немає
+ * операнда). Невідомий оператор — `null`: сервер такого не збереже
+ * (`ECR-CFG-0422`), а вгадати, що він означав, клієнт не може.
+ */
+export function ruleFromWire(wire: ConditionalRuleWire): ConditionalRule | null {
+  if (!isOperator(wire.operator)) return null;
+
+  return {
+    columnCode: wire.columnCode,
+    operator: wire.operator,
+    value: wire.value ?? '',
+    valueTo: wire.valueTo ?? '',
+    backgroundHex: wire.backgroundHex ?? '',
+    foregroundHex: wire.foregroundHex ?? '',
+    isBold: wire.isBold,
+  };
+}
+
+/**
+ * Правило для `PUT`. Порожні поля — `null`; операнд, якого оператор не бере
+ * (`valueTo` поза `between`, будь-який для `empty`), не шлеться: сервер
+ * відхилив би зайве (`condFormatOperand`), а людина його вже не бачить.
+ */
+export function ruleToWire(rule: ConditionalRule): Required<ConditionalRuleWire> {
+  const count = operandCount(rule.operator);
+  const blank = (text: string): string | null => (text.trim().length === 0 ? null : text.trim());
+
+  return {
+    columnCode: rule.columnCode,
+    operator: rule.operator,
+    value: count >= 1 ? blank(rule.value) : null,
+    valueTo: count === 2 ? blank(rule.valueTo) : null,
+    backgroundHex: blank(rule.backgroundHex),
+    foregroundHex: blank(rule.foregroundHex),
+    isBold: rule.isBold,
+  };
 }

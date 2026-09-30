@@ -4,6 +4,7 @@ using Ecr.Application.Ports;
 using Ecr.Application.Security;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Configuration;
+using Ecr.Domain.Errors;
 
 namespace Ecr.Application.Templates;
 
@@ -12,6 +13,15 @@ namespace Ecr.Application.Templates;
 /// PUT-семантика: клієнтський редактор тримає весь список, тож одна операція
 /// покриває створення, зміну, перевпорядкування й видалення. Порядок
 /// правил у колонці — порядок у запиті; перше спрацьоване правило виграє.
+///
+/// ⛔ Конкурентність (lost update): заміна цілком не лишає від чужої правки
+/// нічого, тож клієнт шле <c>If-Match</c> з версією набору
+/// (<see cref="ConditionalFormatsVersion"/>, <c>ETag</c> відповіді <c>GET</c>).
+/// Звірка — ПІСЛЯ <c>UPDLOCK</c> на рядку версії (<see cref="DraftVersionLock"/>),
+/// у тій самій транзакції, що й запис: дві одночасні заміни з однієї версії —
+/// одна <c>200</c>, друга <c>409 ECR-TMPL-0409</c> (<c>condFormatChanged</c>,
+/// актуальна версія в <c>details.version</c>). Без заголовка —
+/// <c>422 ECR-REQ-0422</c> (<c>condFormatIfMatch</c>), як для грантів ролі.
 /// </summary>
 public sealed class SaveConditionalFormatsHandler(
     IConditionalFormatStore rules,
@@ -31,12 +41,32 @@ public sealed class SaveConditionalFormatsHandler(
     /// <exception cref="DomainException">
     /// <c>ECR-TMPL-0409</c> — версія заморожена; <c>ECR-CFG-0422</c> — правило невалідне.
     /// </exception>
+    /// <param name="templateVersionId">Версія-чернетка.</param>
+    /// <param name="requested">Повний набір правил.</param>
+    /// <param name="ifMatch">
+    /// Значення <c>If-Match</c> — версія набору, з якої почалася правка (<c>ETag</c>
+    /// відповіді <c>GET</c>). Обов'язкове.
+    /// </param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <exception cref="BusinessRuleException">Немає <c>If-Match</c> — <c>ECR-REQ-0422</c>.</exception>
+    /// <exception cref="ConcurrencyConflictException">
+    /// Набір змінили після читання — <c>ECR-TMPL-0409</c>, актуальна версія у <c>details.version</c>.
+    /// </exception>
     public async Task<IReadOnlyList<ConditionalFormatRuleDto>> HandleAsync(
-        int templateVersionId, IReadOnlyList<ConditionalFormatRuleDto> requested, CancellationToken ct)
+        int templateVersionId, IReadOnlyList<ConditionalFormatRuleDto> requested, string? ifMatch, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(requested);
 
         await PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
+
+        var expected = Integration.ListCollectionSchedulesHandler.NormalizeETag(ifMatch)
+                       ?? throw new BusinessRuleException(
+                           ErrorCodes.RequestInvalid,
+                           "Заміна правил умовного форматування має нести заголовок If-Match з ETag прочитаного набору.",
+                           new Dictionary<string, object?>
+                           {
+                               ["messageKey"] = "err.ECR-REQ-0422.condFormatIfMatch",
+                           });
 
         var version = await store.GetWithStructureAsync(templateVersionId, ct).ConfigureAwait(false);
         version.EnsureStructurallyMutable();
@@ -84,6 +114,25 @@ public sealed class SaveConditionalFormatsHandler(
         await uow.ExecuteInTransactionAsync(async innerCt =>
         {
             await DraftVersionLock.EnsureDraftUnderLockAsync(store, version, innerCt).ConfigureAwait(false);
+
+            // ⚠ Читання ПІСЛЯ блокування: друга одночасна заміна чекала на
+            // UPDLOCK і тепер бачить уже зафіксований набір першої.
+            var actual = ConditionalFormatsVersion.Of(
+                (await rules.GetAsync(templateVersionId, innerCt).ConfigureAwait(false))
+                .Select(ConditionalFormatMapper.Map));
+            if (!string.Equals(actual, expected, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new ConcurrencyConflictException(
+                    ErrorCodes.TemplateFrozen,
+                    $"Правила умовного форматування версії {templateVersionId} змінили після того, як їх прочитали.",
+                    new Dictionary<string, object?>
+                    {
+                        ["messageKey"] = "err.ECR-TMPL-0409.condFormatChanged",
+                        ["versionId"] = templateVersionId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                        ["version"] = actual,
+                    });
+            }
+
             await rules.ReplaceAsync(templateVersionId, built, innerCt).ConfigureAwait(false);
             await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
         }, ct).ConfigureAwait(false);
@@ -126,6 +175,43 @@ public sealed class GetConditionalFormatsHandler(
         }
 
         return [.. all.Select(ConditionalFormatMapper.Map)];
+    }
+}
+
+/// <summary>Версія набору правил умовного форматування — для <c>ETag</c> / <c>If-Match</c>.</summary>
+/// <remarks>
+/// ⚠ Хеш НАБОРУ, а не лічильник: токена конкурентності в
+/// <c>cfg.ConditionalFormatRule</c> немає, а міграція поза цією задачею (токен
+/// міграцій черговий) — той самий прийом, що <c>ResourceGrantsVersion</c>.
+/// Порядок усередині колонки — пріоритет правил, тож він ВХОДИТЬ у хеш; порядок
+/// між колонками — ні (<c>GET</c> сортує за колонкою, <c>PUT</c> повертає в
+/// порядку запиту, і це той самий набір).
+/// </remarks>
+public static class ConditionalFormatsVersion
+{
+    /// <summary>Хеш набору (hex, 32 символи).</summary>
+    /// <param name="rules">Правила версії.</param>
+    public static string Of(IEnumerable<ConditionalFormatRuleDto> rules)
+    {
+        ArgumentNullException.ThrowIfNull(rules);
+
+        var text = new System.Text.StringBuilder();
+
+        // ⚠ `OrderBy` стабільний: усередині колонки лишається порядок застосування.
+        foreach (var rule in rules.OrderBy(r => r.ColumnCode, StringComparer.Ordinal))
+        {
+            text.Append(rule.ColumnCode).Append('\u001f')
+                .Append(rule.Operator).Append('\u001f')
+                .Append(rule.Value).Append('\u001f')
+                .Append(rule.ValueTo).Append('\u001f')
+                .Append(rule.BackgroundHex).Append('\u001f')
+                .Append(rule.ForegroundHex).Append('\u001f')
+                .Append(rule.IsBold ? '1' : '0')
+                .Append('\u001e');
+        }
+
+        var hash = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(text.ToString()));
+        return Convert.ToHexString(hash.AsSpan(0, 16));
     }
 }
 

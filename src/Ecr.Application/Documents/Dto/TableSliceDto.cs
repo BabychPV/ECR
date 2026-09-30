@@ -61,6 +61,11 @@ public sealed record TableSliceDto(
 /// ⚠ <see cref="Style"/> — оформлення, задане автором шаблону (директива
 /// registry-lookup / cell-style, PR B2); <c>null</c> —
 /// <see cref="ColumnDef.StyleId"/> не задано, комірка виглядає як завжди.
+///
+/// ⚠ <see cref="ConditionalFormats"/> — правила умовного форматування колонки
+/// (ФВ-2.7) у порядку застосування: перше спрацьоване на значенні комірки
+/// кладе свої колір і жирність ПОВЕРХ <see cref="Style"/>. <c>null</c> — правил
+/// немає.
 /// </remarks>
 public sealed record ColumnDto(
     int Id,
@@ -78,7 +83,8 @@ public sealed record ColumnDto(
     byte? Precision = null,
     byte? Scale = null,
     bool IsRequiredByMethodology = false,
-    CellStyleDto? Style = null);
+    CellStyleDto? Style = null,
+    IReadOnlyList<Ecr.Application.Templates.ConditionalFormatRuleDto>? ConditionalFormats = null);
 
 /// <summary>
 /// Підмножина <c>StyleDef</c>, потрібна ЖИВІЙ сітці (директива registry-

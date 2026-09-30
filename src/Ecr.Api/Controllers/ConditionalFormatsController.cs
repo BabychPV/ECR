@@ -1,6 +1,7 @@
 using Ecr.Application.Templates;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Net.Http.Headers;
 
 namespace Ecr.Api.Controllers;
 
@@ -19,7 +20,16 @@ public sealed class ConditionalFormatsController(
     [ProducesResponseType<IReadOnlyList<ConditionalFormatRuleDto>>(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<IReadOnlyList<ConditionalFormatRuleDto>>> List(int id, CancellationToken ct)
-        => Ok(await get.HandleAsync(id, ct).ConfigureAwait(false));
+    {
+        var rules = await get.HandleAsync(id, ct).ConfigureAwait(false);
+
+        // ⚠ Версія набору — у заголовку `ETag` (тіло лишається масивом); її
+        // повертають у `If-Match` на `PUT`. Опис дії в XML-доці не змінено
+        // свідомо: він їде в `openapi.snapshot.json`.
+        Response.Headers[HeaderNames.ETag] = $"\"{ConditionalFormatsVersion.Of(rules)}\"";
+
+        return Ok(rules);
+    }
 
     /// <summary>
     /// Замінює набір правил версії-чернетки (порожній список — прибрати всі).
@@ -38,7 +48,17 @@ public sealed class ConditionalFormatsController(
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        return Ok(await save.HandleAsync(id, request.Rules, ct).ConfigureAwait(false));
+        // ⛔ `If-Match` із `ETag` відповіді `GET`: набір змінили після читання —
+        // `409 ECR-TMPL-0409` (`condFormatChanged`, актуальна версія в
+        // `details.version`); без заголовка — `422 ECR-REQ-0422`
+        // (`condFormatIfMatch`). Нова версія — у `ETag` відповіді.
+        var ifMatch = Request.Headers[HeaderNames.IfMatch].ToString();
+
+        var saved = await save.HandleAsync(id, request.Rules, ifMatch, ct).ConfigureAwait(false);
+
+        Response.Headers[HeaderNames.ETag] = $"\"{ConditionalFormatsVersion.Of(saved)}\"";
+
+        return Ok(saved);
     }
 }
 

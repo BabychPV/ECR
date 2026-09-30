@@ -1713,6 +1713,15 @@
           "code": {
             "type": "string"
           },
+          "conditionalFormats": {
+            "items": {
+              "$ref": "#/components/schemas/ConditionalFormatRuleDto"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
           "dataType": {
             "type": "string"
           },

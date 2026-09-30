@@ -18003,6 +18003,7 @@ export interface components {
         /** @description Опис колонки для клієнта. */
         ColumnDto: {
             code: string;
+            conditionalFormats?: null | components["schemas"]["ConditionalFormatRuleDto"][];
             dataType: string;
             defaultValue: null | string;
             displayFormat: null | string;
