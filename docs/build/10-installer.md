@@ -611,9 +611,36 @@ msiexec /x {ProductCode} /qn
 | W4 | Оновлення з `WORKER_ENABLED=0` | `/i` нового MSI | `EcrWorker` знято; `deploy-ecr.ps1 -DisableWorker` попереджає заздалегідь і перемикає Api на `InProcess` |
 
 `tools/verify-msi.ps1` автоматично проганяє сценарії 1 (разом із W0), W1,
-W2, 5, 9, 15 і статичні перевірки таблиць MSI S1–S5 (§6). Решта —
-вручну: вони потребують перезавантаження, відсутності прав адміністратора
-або двох версій MSI одночасно.
+W2, 5, 9, 15 і статичні перевірки таблиць MSI S1–S5 (§6); з
+`-PreviousMsiPath` — ще W3 і W3b (попередня з типовими властивостями →
+оновлення поточною: `EcrWorker` лишився, встановлена рівно одна версія), а
+також W5 (чиста установка з `WORKER_ENABLED=0` — служби й `Ecr.Worker.exe`
+немає). Решта — вручну: вони потребують перезавантаження або відсутності
+прав адміністратора.
+
+**CI: джоба `msi-install (windows)`** (`.github/workflows/ci.yml`, НЕ
+обов'язковий гейт; `needs: msi-windows` заради артефакту `ecr-msi`) ставить
+MSI по-справжньому на ефемерному `windows-latest` через
+`tools/ci-msi-install.ps1`:
+
+- `verify-msi.ps1` без `-StaticOnly`; попередня MSI — артефакт `ecr-msi`
+  останнього прогону `dev/integration` або `main` (`gh`), інакше — ранній
+  прогін тієї ж гілки (позначається в лозі); немає або не нижча версія — W3/W3b
+  пропускаються з поясненням;
+- `deploy-ecr.ps1 -WhatIf` типово і з `-DisableWorker`: план передає
+  `WORKER_ENABLED=1/0` і пише `Mode=Database`/`Executor=Worker` або
+  `Executor=InProcess` (SQL не потрібен — під `-WhatIf` `sqlcmd` не кличеться);
+- функції кроку 5 `deploy-ecr.ps1` (вирізані парсером, як у
+  `DeployWorkerModeTests`) проти **справжнього** реєстру встановленої служби:
+  `EcrWorker` є → `Environment` `EcrApi` має `Mode=Database`, `Executor=Worker`;
+  після `REINSTALL … WORKER_ENABLED=0` → `Executor=InProcess`, `Mode=Quartz`;
+- довідково (не падає): чи пережив `Environment` `EcrApi` оновлення MSI без
+  повторного `deploy-ecr.ps1` (W3 у матриці вище).
+
+⚠ Не перевіряє: старт служб і `/health` (SQL на ранері немає, `SERVICE_ACCOUNT`
+порожній → служби зареєстровані, але зупинені, §1.4), повний прогін
+`deploy-ecr.ps1` без `-WhatIf`, сценарії 3, 4 з реальним релізом, 6, 7, 8,
+10–14. Журнали `msiexec /l*v` — артефакт `msi-install-logs` при падінні.
 
 ---
 

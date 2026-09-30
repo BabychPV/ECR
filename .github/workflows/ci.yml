@@ -376,6 +376,66 @@ jobs:
           pwsh -File tools/verify-msi.ps1 -MsiPath $msi.FullName -StaticOnly
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
 
+      # ⚠ Єдине доповнення цієї джоби для `msi-install (windows)`: MSI
+      # артефактом — для реальної установки в тому ж прогоні і як «попередня
+      # MSI» для наступних (оновлення, W3/W3b). 30 днів — вистачає на тижневий
+      # цикл мержу.
+      - name: Артефакт MSI (ecr-msi)
+        uses: actions/upload-artifact@v4
+        with:
+          name: ecr-msi
+          path: artifacts/msi/**/*.msi
+          if-no-files-found: error
+          retention-days: 30
+
+  # ⚠ РЕАЛЬНА установка MSI (пряме рішення людини 2026-09-30): ефемерний
+  # windows-latest, справжній msiexec і служби. `tools/ci-msi-install.ps1`:
+  # verify-msi.ps1 без -StaticOnly (свіжа установка — EcrWorker є, Auto +
+  # DelayedAutoStart; WORKER_ENABLED=0 — служби нема; оновлення з попередньої
+  # MSI — артефакт `ecr-msi` останнього прогону dev/integration чи main через
+  # `gh`), `deploy-ecr.ps1 -WhatIf` і функції кроку 5 deploy-ecr.ps1 проти
+  # справжнього реєстру служби (Mode=Database/Executor=Worker за наявної
+  # EcrWorker, InProcess без неї).
+  # ⚠ Служби НЕ стартують: SQL на ранері немає, SERVICE_ACCOUNT порожній —
+  # зареєстровані, але зупинені (10-installer.md §1.4). Старт і /health тут
+  # не перевіряються.
+  #
+  # ⛔ НЕ обов'язковий гейт (як `msi (windows)`): до переліку семи не входить,
+  # у `server` не зводиться. `needs` — лише заради артефакту поточної MSI.
+  # Кроки перевірки не з `verify-all.ps1`, тож `CiPipelineTests` його не
+  # зачіпає.
+  msi-install:
+    name: msi-install (windows)
+    needs: msi-windows
+    runs-on: windows-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: read      # gh api / gh run download — артефакт попередньої MSI
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Поточна MSI (артефакт ecr-msi)
+        uses: actions/download-artifact@v4
+        with:
+          name: ecr-msi
+          path: msi-current
+
+      - name: Реальна установка MSI (ci-msi-install.ps1)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          pwsh -File tools/ci-msi-install.ps1 -MsiDir msi-current -LogDir "$env:RUNNER_TEMP\msi-logs" -DiscoverPrevious
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+
+      - name: Журнали msiexec (/l*v) і deploy -WhatIf
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: msi-install-logs
+          path: ${{ runner.temp }}/msi-logs
+          retention-days: 14
+
   # ⛔ Набір у ПЕРЕМІШАНОМУ порядку — і це НЕ восьмий гейт. Він не блокує
   # мерж (`continue-on-error`), бо його призначення інше: показати, що набір
   # зелений ПО СУТІ, а не тому, що штатний порядок випадково влаштовує

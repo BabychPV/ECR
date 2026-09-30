@@ -7,15 +7,23 @@
 .PARAMETER StaticOnly
     Лише статичні перевірки таблиць MSI: нічого не встановлює, безпечно на
     будь-якій машині (зокрема на машині збірки).
+.PARAMETER LogDir
+    Куди класти журнали msiexec (/l*v). Типово — поточна тека (як і раніше).
+    CI (джоба `msi-install (windows)`, tools/ci-msi-install.ps1) вивантажує
+    їх артефактом при падінні.
 .NOTES
     ⛔ Без -StaticOnly запускати ЛИШЕ на тестовій машині. Скрипт встановлює і
-    видаляє службу.
+    видаляє службу. У CI — ефемерний ранер windows-latest.
+    ⚠ Без -ServiceAccount служби реєструються під LocalSystem, але НЕ
+    стартують (EcrServiceAutoStart/EcrWorkerAutoStart умовні на
+    SERVICE_ACCOUNT) — саме так і в CI, де SQL для старту служб немає.
 #>
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)] [string] $MsiPath,
     [string] $PreviousMsiPath,
     [string] $ServiceAccount,
+    [string] $LogDir,
     [switch] $StaticOnly
 )
 $ErrorActionPreference = 'Stop'
@@ -28,10 +36,29 @@ function Test-Case([string] $name, [scriptblock] $body) {
     try { & $body; $results.Add([pscustomobject]@{ Case = $name; Result = 'PASS' }) }
     catch { $results.Add([pscustomobject]@{ Case = $name; Result = "FAIL: $_" }) }
 }
-function Invoke-Msi([string] $args) {
-    $p = Start-Process msiexec -ArgumentList $args -Wait -PassThru
-    if ($p.ExitCode -notin 0, 3010) { throw "msiexec: $($p.ExitCode)" }
+# ⚠ Параметр НЕ `$args`: це автоматична змінна PowerShell, і оголошувати її
+# параметром — пастка (до CI-прогону повний режим не запускався жодного разу).
+function Invoke-Msi([string] $arguments) {
+    $p = Start-Process msiexec -ArgumentList $arguments -Wait -PassThru
+    if ($p.ExitCode -notin 0, 3010) {
+        $log = if ($arguments -match '/l\*v\s+(\S+)') { " — журнал $($Matches[1])" } else { '' }
+        throw "msiexec $arguments → $($p.ExitCode)$log"
+    }
     $p.ExitCode
+}
+# SERVICE_ACCOUNT= з порожнім значенням не передаємо взагалі: порожня
+# властивість у командному рядку msiexec — зайвий ризик 1639, а сенс той самий.
+$acct = if ($ServiceAccount) { " SERVICE_ACCOUNT=$ServiceAccount" } else { '' }
+
+# StartMode з WMI (Auto/Manual/Disabled) + DelayedAutoStart з реєстру: Get-Service
+# у різних версіях PowerShell показує відкладений старт по-різному.
+function Assert-AutoStart([string] $name) {
+    $svc = Get-CimInstance Win32_Service -Filter "Name='$name'"
+    if (-not $svc) { throw "служби $name немає" }
+    if ($svc.StartMode -ne 'Auto') { throw "$name StartMode = $($svc.StartMode), очікували Auto" }
+    $delayed = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\$name" -Name DelayedAutoStart -ErrorAction SilentlyContinue
+    if (-not $delayed -or $delayed.DelayedAutoStart -ne 1) { throw "$name без DelayedAutoStart = 1" }
+    return $svc
 }
 
 # ── Статичні перевірки: таблиці MSI, без установки ────────────────────────
@@ -109,6 +136,14 @@ Test-Case 'S5. EcrApi — безумовна, як і раніше' {
     if ($cond) { throw "компонент EcrApi отримав умову '$cond'" }
 }
 
+function Get-MsiProperty([string] $name) {
+    $rows = Get-MsiRows "SELECT ``Value`` FROM ``Property`` WHERE ``Property`` = '$name'" 1
+    if ($rows.Count -ne 1) { return $null }
+    return $rows[0][0]
+}
+$currentVersion = Get-MsiProperty 'ProductVersion'
+$upgradeCode = Get-MsiProperty 'UpgradeCode'
+
 $db = $null
 [System.Runtime.InteropServices.Marshal]::ReleaseComObject($installer) | Out-Null
 
@@ -121,38 +156,77 @@ if ($StaticOnly) {
 # ── Сценарії з установкою (лише тестова машина) ───────────────────────────
 if ($env:COMPUTERNAME -eq 'PROD-SERVER') { throw "не запускати на продуктиві" }
 
+if ($LogDir) {
+    New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
+    Set-Location $LogDir
+}
+
+# Встановлені продукти з тим самим UpgradeCode → версії. Більше одного —
+# оновлення поставило продукт ПОРУЧ, а не замість (MajorUpgrade не спрацював).
+function Get-InstalledEcrVersions {
+    $msi = New-Object -ComObject WindowsInstaller.Installer
+    try {
+        return , @(foreach ($code in $msi.RelatedProducts($upgradeCode)) { $msi.ProductInfo($code, 'VersionString') })
+    }
+    finally { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($msi) | Out-Null }
+}
+
 Test-Case '1. Чиста установка' {
-    Invoke-Msi "/i `"$MsiPath`" /qn /l*v c1.log SERVICE_ACCOUNT=$ServiceAccount"
-    $s = Get-Service EcrApi -ErrorAction Stop
-    if ($s.StartType -ne 'Automatic') { throw "StartType = $($s.StartType)" }
+    Invoke-Msi "/i `"$MsiPath`" /qn /l*v c1.log$acct"
+    Assert-AutoStart 'EcrApi' | Out-Null
     # I2-2: без WORKER_ENABLED служба воркера є — типове значення 1.
-    $w = Get-CimInstance Win32_Service -Filter "Name='EcrWorker'"
-    if (-not $w) { throw 'EcrWorker не зареєстровано без WORKER_ENABLED (типове 1)' }
+    if (-not (Get-CimInstance Win32_Service -Filter "Name='EcrWorker'")) { throw 'EcrWorker не зареєстровано без WORKER_ENABLED (типове 1)' }
+    $w = Assert-AutoStart 'EcrWorker'
     if ($w.PathName -notmatch 'Ecr\.Worker\.exe"?\s+--supervisor') { throw "PathName = $($w.PathName)" }
     $api = Get-CimInstance Win32_Service -Filter "Name='EcrApi'"
     if ($w.StartName -ne $api.StartName) { throw "обліковий запис EcrWorker '$($w.StartName)' ≠ EcrApi '$($api.StartName)'" }
+    # Без облікового запису служби не стартують (§1.4) — і воркер теж.
+    if (-not $ServiceAccount) {
+        foreach ($s in $api, $w) { if ($s.State -ne 'Stopped') { throw "$($s.Name) у стані $($s.State) без SERVICE_ACCOUNT, очікували Stopped" } }
+    }
+    $exe = ($w.PathName -replace '^"([^"]+)".*$', '$1')
+    if (-not (Test-Path $exe)) { throw "бінарника служби немає на диску: $exe" }
 }
 
 Test-Case 'W1. WORKER_ENABLED=0 прибирає службу, EcrApi лишається (REINSTALL, транзитивний компонент)' {
-    Invoke-Msi "/i `"$MsiPath`" /qn /l*v cw1.log REINSTALL=ALL REINSTALLMODE=vomus WORKER_ENABLED=0 SERVICE_ACCOUNT=$ServiceAccount"
+    Invoke-Msi "/i `"$MsiPath`" /qn /l*v cw1.log REINSTALL=ALL REINSTALLMODE=vomus WORKER_ENABLED=0$acct"
     if (Get-Service EcrWorker -ErrorAction SilentlyContinue) { throw 'EcrWorker лишився' }
     Get-Service EcrApi -ErrorAction Stop | Out-Null
 }
 
 Test-Case 'W2. Той самий MSI, WORKER_ENABLED=1 повертає службу' {
-    Invoke-Msi "/i `"$MsiPath`" /qn /l*v cw2.log REINSTALL=ALL REINSTALLMODE=vomus WORKER_ENABLED=1 SERVICE_ACCOUNT=$ServiceAccount"
+    Invoke-Msi "/i `"$MsiPath`" /qn /l*v cw2.log REINSTALL=ALL REINSTALLMODE=vomus WORKER_ENABLED=1$acct"
     if (-not (Get-Service EcrWorker -ErrorAction SilentlyContinue)) { throw 'EcrWorker не зареєстровано' }
+    Assert-AutoStart 'EcrWorker' | Out-Null
 }
 
 # I2-2: оновлення з попередньої версії БЕЗ властивостей — служба воркера є
 # (попередня версія могла ставити без неї: тоді це саме той випадок, де
 # Executor = Worker лишився б без виконавця, якби типове було 0).
 if ($PreviousMsiPath) {
+    $previous = (Resolve-Path $PreviousMsiPath).Path
     Test-Case 'W3. Оновлення з попередньої версії без WORKER_ENABLED — служба є' {
         Invoke-Msi "/x `"$MsiPath`" /qn /l*v cw3x.log"
-        Invoke-Msi "/i `"$((Resolve-Path $PreviousMsiPath).Path)`" /qn /l*v cw3a.log WORKER_ENABLED=0 SERVICE_ACCOUNT=$ServiceAccount"
-        Invoke-Msi "/i `"$MsiPath`" /qn /l*v cw3b.log SERVICE_ACCOUNT=$ServiceAccount"
+        Invoke-Msi "/i `"$previous`" /qn /l*v cw3a.log WORKER_ENABLED=0$acct"
+        Invoke-Msi "/i `"$MsiPath`" /qn /l*v cw3b.log$acct"
         if (-not (Get-Service EcrWorker -ErrorAction SilentlyContinue)) { throw 'після оновлення EcrWorker немає' }
+    }
+
+    # Звичайний шлях адміністратора: попередня стоїть із типовими
+    # властивостями, оновлення поточною — служба воркера ЛИШАЄТЬСЯ, і стоїть
+    # рівно одна версія продукту (MajorUpgrade прибрав попередню).
+    Test-Case 'W3b. Попередня (типові властивості) → оновлення поточною: EcrWorker лишився' {
+        Invoke-Msi "/x `"$MsiPath`" /qn /l*v cw3cx.log"
+        Invoke-Msi "/i `"$previous`" /qn /l*v cw3ca.log$acct"
+        $before = if (Get-Service EcrWorker -ErrorAction SilentlyContinue) { 'є' } else { 'немає' }
+        Write-Host "  W3b: після попередньої MSI служба EcrWorker — $before; версії: $((Get-InstalledEcrVersions) -join ', ')"
+        Invoke-Msi "/i `"$MsiPath`" /qn /l*v cw3cb.log$acct"
+        Assert-AutoStart 'EcrWorker' | Out-Null
+        Assert-AutoStart 'EcrApi' | Out-Null
+        $versions = Get-InstalledEcrVersions
+        if ($versions.Count -ne 1 -or $versions[0] -ne $currentVersion) {
+            throw "після оновлення встановлено версії [$($versions -join ', ')], очікували лише $currentVersion"
+        }
     }
 }
 
@@ -172,6 +246,20 @@ Test-Case '9. Видалення' {
     if (Get-Service EcrApi -ErrorAction SilentlyContinue) { throw "служба лишилася" }
     if (Get-Service EcrWorker -ErrorAction SilentlyContinue) { throw "служба EcrWorker лишилася" }
     if (-not (Test-Path "$env:ProgramData\ECR\config")) { throw "конфіг прибрано, а не мав бути" }
+}
+
+# Свіже встановлення з вимкненим воркером (deploy-ecr.ps1 -DisableWorker / Express
+# передає саме WORKER_ENABLED=0): EcrApi є, служби EcrWorker і її exe — немає.
+Test-Case 'W5. Чиста установка з WORKER_ENABLED=0 — служби EcrWorker немає' {
+    Invoke-Msi "/i `"$MsiPath`" /qn /l*v cw5.log WORKER_ENABLED=0$acct"
+    try {
+        Assert-AutoStart 'EcrApi' | Out-Null
+        if (Get-Service EcrWorker -ErrorAction SilentlyContinue) { throw 'EcrWorker зареєстровано за WORKER_ENABLED=0' }
+        $api = Get-CimInstance Win32_Service -Filter "Name='EcrApi'"
+        $dir = Split-Path ($api.PathName -replace '^"([^"]+)".*$', '$1') -Parent
+        if (Test-Path (Join-Path $dir 'Ecr.Worker.exe')) { throw "Ecr.Worker.exe встановлено без служби ($dir)" }
+    }
+    finally { Invoke-Msi "/x `"$MsiPath`" /qn /l*v cw5x.log" | Out-Null }
 }
 
 $results | Format-Table -AutoSize
