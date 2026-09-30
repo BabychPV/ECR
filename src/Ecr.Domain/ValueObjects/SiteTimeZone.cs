@@ -58,7 +58,7 @@ public readonly record struct SiteTimeZone
             : throw new DomainException(
                 ErrorCodes.ProjectTimeZoneNotIana,
                 $"Часовий пояс майданчика «{value}» не є відомим ідентифікатором IANA "
-                + "(наприклад, «Asia/Aqtau»). Windows-ідентифікатори на кшталт "
+                + "(наприклад, «Asia/Atyrau»). Windows-ідентифікатори на кшталт "
                 + "«Central Asia Standard Time» і зсуви на кшталт «+05:00» не приймаються: "
                 + "пояс задає межі періодів і позначки пізніх змін, і після відкриття "
                 + "першого періоду його вже не змінити.",
