@@ -2199,6 +2199,16 @@ public interface ICollectionRunner
 }
 ```
 
+#### `ISourceEventSyncJob`
+
+Маркер задачі синхронізації подій джерела (PI Event Frames) у рядки динамічних таблиць (HSE301 A5b, FEATURE-HSE301-VIEW §4.7.4). Ставить її `CollectionJob` для сутності-шаблону з активним `SourceEventMap` — `EnqueueCoalescedAsync` на ціль `SourceEventSyncTarget.Of(sourceEntityId)` (`source-events-e{id}`): сплеск постановок зливається, виконувана не переривається. Читає `ReadEventsAsync`, пише рядки `EF-…` через `ICellPatcher.ApplyIntegrationRowsAsync`, веде `ext.SourceEventLink`.
+
+```csharp
+public interface ISourceEventSyncJob : IBackgroundJob;
+
+public sealed record SourceEventSyncRequest(int SourceEntityId, DateTime? FromUtc = null, DateTime? ToUtc = null);
+```
+
 #### `IMaterializationScheduler`
 
 Постановка матеріалізації PI (D-118) з місця переходу періоду, для якого `PeriodMaterializationTrigger.Requires(before, after)`: `Scheduled → Open/Grace` (відкриття), `Scheduled → … → Closed` за один прогін (задача лишає `SkippedPeriodClosed` у журналі покриття — пропуск не мовчазний), `Closed → Grace` (перевідкриття підхоплює пропущені точки). Викликати лише ПІСЛЯ коміту переходу (`PeriodStateJob`, `ActivateProjectHandler`, `ReopenPeriodHandler`).
