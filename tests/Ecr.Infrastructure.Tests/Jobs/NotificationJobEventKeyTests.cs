@@ -25,6 +25,23 @@ public sealed class NotificationJobEventKeyTests
         Assert.Equal(expected, NotificationJob.EventKindOf(digestKind));
     }
 
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [InlineData("excel-export", "x", "Failed", NotificationEventKind.ExportFailed)]
+    [InlineData("maintenance", "partition-check", "Degraded", NotificationEventKind.PartitionsRunningOut)]
+    [InlineData("maintenance", "consistency-check", "Degraded", NotificationEventKind.ConsistencyIssuesFound)]
+    [InlineData("maintenance", "consistency-check", "Failed", NotificationEventKind.JobFailed)]
+    [InlineData("maintenance", "partition-check", "Failed", NotificationEventKind.JobFailed)]
+    [InlineData("maintenance", "archive-year", "Degraded", NotificationEventKind.JobFailed)]
+    [InlineData("recalculation", "j", "Failed", NotificationEventKind.JobFailed)]
+    [InlineData(NotificationJob.CollectionKind, "SRC", "Failed", NotificationEventKind.CollectionFailed)]
+    public void Події_матриці_зі_своєю_клітинкою_справді_спрацьовують(
+        string kind, string subject, string status, NotificationEventKind expected)
+    {
+        // ФВ-12.5: правило для цих подій можна налаштувати в матриці - отже, вони мають надходити.
+        Assert.Equal(expected, NotificationJob.EventKindOf(kind, subject, status));
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     public void Той_самий_набір_збоїв_дає_той_самий_ключ_незалежно_від_порядку()

@@ -312,7 +312,7 @@ public sealed class NotificationJob(
         // вимикають разом із корисним. Груп рівно стільки, скільки різних подій
         // матриці правил, бо адміністратор має змогу надіслати «збій збору» в
         // один канал, а «збій задачі» — в інший.
-        foreach (var group in failures.GroupBy(f => EventKindOf(f.Kind)))
+        foreach (var group in failures.GroupBy(f => EventKindOf(f.Kind, f.Subject, f.Status)))
         {
             var lines = group
                 .Select(f => $"[{f.Kind}] {f.Subject}: {f.Status}. {f.Details}")
@@ -397,7 +397,7 @@ public sealed class NotificationJob(
     /// <remarks>
     /// ⚠ Перелік явний, а не «усі Failed»: збір і матеріалізація мають власні види, а
     /// службові задачі (узгодженість, пошук осиротілих) — власні шляхи. Вид рядка не збігається
-    /// з <see cref="CollectionKind"/>, тож <see cref="EventKindOf"/> відносить їх до
+    /// з <see cref="CollectionKind"/>, тож <see cref="EventKindOf(string)"/> відносить їх до
     /// <see cref="NotificationEventKind.JobFailed"/> — «збій задачі», а не «збій збору».
     /// </remarks>
     public static IReadOnlyDictionary<string, string> AlertedJobKinds { get; } =
@@ -443,6 +443,39 @@ public sealed class NotificationJob(
         => digestKind is CollectionKind or AuthenticationKind or CoverageKind
             ? NotificationEventKind.CollectionFailed
             : NotificationEventKind.JobFailed;
+
+    /// <summary>
+    /// Подія матриці за видом, темою і статусом рядка: уточнює <see cref="EventKindOf(string)"/>
+    /// для подій, що мають власну клітинку матриці (ФВ-12.5, REQ-CLOSURE №36).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Без цього правило «ExportFailed / PartitionsRunningOut / ConsistencyIssuesFound → канал»
+    /// можна було налаштувати, але воно ніколи не спрацьовувало: усі три йшли як
+    /// <see cref="NotificationEventKind.JobFailed"/>. ⚠ Лише <c>Degraded</c> (знахідки, мала
+    /// запас партицій) — власна подія; падіння самої перевірки (<c>Failed</c>) — збій задачі.
+    /// </remarks>
+    public static NotificationEventKind EventKindOf(string digestKind, string subject, string status)
+    {
+        if (digestKind == "excel-export")
+        {
+            return NotificationEventKind.ExportFailed;
+        }
+
+        if (digestKind == "maintenance" && status == "Degraded")
+        {
+            if (subject == PartitionCheckJob.Code)
+            {
+                return NotificationEventKind.PartitionsRunningOut;
+            }
+
+            if (subject == ConsistencyCheckJob.Code)
+            {
+                return NotificationEventKind.ConsistencyIssuesFound;
+            }
+        }
+
+        return EventKindOf(digestKind);
+    }
 
     /// <summary>
     /// Вид рядка зведення для події журналу покриття (<c>ІНТ-3.3</c>, <c>D-118</c>).
