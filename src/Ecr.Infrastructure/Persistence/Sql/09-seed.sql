@@ -5223,8 +5223,13 @@ USING (VALUES
     (N'jobs.sourceEventsNoMaps', N'en', N'No active event mappings', 1),
     (N'jobs.sourceEventsReading', N'en', N'Reading events from the source', 1),
     (N'jobs.sourceEventsWriting', N'en', N'Writing event rows', 1),
-    (N'jobs.sourceEventsDone', N'en', N'Created {created}, updated {updated}, kept manual {keptManual}, missing {missing}, open {open}, unmapped {unmapped}, period closed {closed}, pending {pending}', 1)
+    (N'jobs.sourceEventsDone', N'en', N'Created {created}, updated {updated}, kept manual {keptManual}, missing {missing}, open {open}, unmapped {unmapped}, period closed {closed}, pending {pending}', 1),
     -- HSE301:a5b ── кінець секції ───────────────────────────────────────────────────────────
+    -- JOBL ── людські назви видів фонових задач, яких бракувало в jobLabel.ts (KindKeys) ──
+    (N'jobs.kind.sourceEventSync',  N'en', N'Source event sync', 1),
+    (N'jobs.kind.consistencyCheck', N'en', N'Consistency check', 1),
+    (N'jobs.kind.orphanScan',       N'en', N'Orphaned data scan', 1)
+    -- JOBL ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -11903,6 +11908,21 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- IMP:rounding ── кінець секції ──
+
+-- JOBL ── ru/kz назв видів задач (jobLabel.ts, KindKeys); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'jobs.kind.sourceEventSync', N'ru', N'Синхронизация событий источника'),
+    (N'jobs.kind.sourceEventSync', N'kz', N'Көз оқиғаларын синхрондау'),
+    (N'jobs.kind.consistencyCheck', N'ru', N'Проверка согласованности'),
+    (N'jobs.kind.consistencyCheck', N'kz', N'Келісімділікті тексеру'),
+    (N'jobs.kind.orphanScan', N'ru', N'Поиск осиротевших данных'),
+    (N'jobs.kind.orphanScan', N'kz', N'Иесіз деректерді іздеу')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- JOBL ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t
