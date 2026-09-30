@@ -245,7 +245,8 @@ Test-Case '9. Видалення' {
     Invoke-Msi "/x `"$MsiPath`" /qn /l*v c9.log"
     if (Get-Service EcrApi -ErrorAction SilentlyContinue) { throw "служба лишилася" }
     if (Get-Service EcrWorker -ErrorAction SilentlyContinue) { throw "служба EcrWorker лишилася" }
-    if (-not (Test-Path "$env:ProgramData\ECR\config")) { throw "конфіг прибрано, а не мав бути" }
+    # Сам файл, а не лише тека: тека без файлу — це вже «конфіг прибрано».
+    if (-not (Test-Path "$env:ProgramData\ECR\config\appsettings.Production.json")) { throw "конфіг прибрано, а не мав бути (appsettings.Production.json)" }
 }
 
 # Свіже встановлення з вимкненим воркером (deploy-ecr.ps1 -DisableWorker / Express
