@@ -360,7 +360,8 @@ public sealed class CreateRowWindowMapHandler(
     ICurrentUser currentUser,
     IUnitOfWork uow,
     IAuditWriter audit,
-    IClock clock)
+    IClock clock,
+    IRowWindowColumnIndex columnIndex)
 {
     /// <summary>Операція в журналі структурних змін.</summary>
     public const string AuditOperation = "CreateRowWindowMap";
@@ -438,6 +439,10 @@ public sealed class CreateRowWindowMapHandler(
                 innerCt).ConfigureAwait(false);
         }, ct).ConfigureAwait(false);
 
+        // Знімок колонок вікна живе в пам'яті до 60 с: без скидання правка Початку/Кінця нової прив'язки не
+        // ставила б підтягування (IRowWindowTrigger питає індекс, а не базу).
+        columnIndex.Invalidate();
+
         return RowWindowMapSupport.ToDto(created!, columns);
     }
 }
@@ -457,7 +462,8 @@ public sealed class UpdateRowWindowMapHandler(
     ICurrentUser currentUser,
     IUnitOfWork uow,
     IAuditWriter audit,
-    IClock clock)
+    IClock clock,
+    IRowWindowColumnIndex columnIndex)
 {
     /// <summary>Операція в журналі структурних змін.</summary>
     public const string AuditOperation = "UpdateRowWindowMap";
@@ -529,6 +535,10 @@ public sealed class UpdateRowWindowMapHandler(
                 $"Прив'язку вікна рядка {map.Id} змінено.", innerCt).ConfigureAwait(false);
         }, ct).ConfigureAwait(false);
 
+        // Колонки Початку/Кінця/селектора могли змінитися, а активність — вимкнутися: скидаємо знімок індексу.
+        // Старі RowWindowValue лишаються історією — PUT їх не чіпає.
+        columnIndex.Invalidate();
+
         return RowWindowMapSupport.ToDto(map, columns);
     }
 }
@@ -549,7 +559,8 @@ public sealed class DeleteRowWindowMapHandler(
     ICurrentUser currentUser,
     IUnitOfWork uow,
     IAuditWriter audit,
-    IClock clock)
+    IClock clock,
+    IRowWindowColumnIndex columnIndex)
 {
     /// <summary>Операція в журналі структурних змін.</summary>
     public const string AuditOperation = "DeleteRowWindowMap";
@@ -590,5 +601,7 @@ public sealed class DeleteRowWindowMapHandler(
                 removed, newJson: null, $"Прив'язку вікна рядка {id} видалено.", innerCt)
                 .ConfigureAwait(false);
         }, ct).ConfigureAwait(false);
+
+        columnIndex.Invalidate();
     }
 }

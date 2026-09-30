@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Ecr.Application.Ports;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Entities.External;
 using Ecr.Domain.Entities.Security;
@@ -14,6 +15,7 @@ using Ecr.Infrastructure.Security;
 using Ecr.TestKit;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace Ecr.Api.Tests;
@@ -276,6 +278,46 @@ public sealed class RowWindowMapsApiTests(SqlServerFixture sql)
         Assert.Equal(["CreateRowWindowMap", "DeleteRowWindowMap"], audit.Select(a => a.Operation));
         Assert.Null(audit[1].NewJson);
         Assert.Contains("\"summary\":\"Total\"", audit[1].OldJson, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "HSE301-A1-CRUD")]
+    public async Task Кожна_зміна_прив_язки_скидає_знімок_колонок_вікна_хука_запису_а_старий_провенанс_лишається()
+    {
+        await using var stand = await ArrangeAsync();
+        using var app = new EcrApiFactory(sql);
+        using var manager = await SignedInAsync(app, ["Integration.Manage"], stand.ProjectId, GrantLevel.Manage);
+        var index = app.Services.GetRequiredService<IRowWindowColumnIndex>();
+
+        // Знімок прогрітий ДО створення: без скидання він ще 60 с казав би «колонок вікна немає».
+        Assert.Empty(await index.WindowColumnsAsync(stand.TableDefId, CancellationToken.None));
+
+        var id = await CreateAsync(manager, stand, stand.TargetA);
+        Assert.Equal(
+            new[] { stand.Start, stand.End, stand.Selector }.Order(),
+            (await index.WindowColumnsAsync(stand.TableDefId, CancellationToken.None)).Order());
+
+        // PUT без селектора й зі старим провенансом: знімок оновився, провенанс не зачеплено.
+        await AddValueAsync(stand, id);
+        var one = new Uri($"/api/v1/row-window-maps/{id}", UriKind.Relative);
+        Assert.Equal(HttpStatusCode.OK, (await manager.PutAsJsonAsync(one, Replace(stand, selector: null, sources: [Source(null, stand.EntityId, "Flare.All", stand.UnitSource)]))).StatusCode);
+        Assert.Equal(
+            new[] { stand.Start, stand.End }.Order(),
+            (await index.WindowColumnsAsync(stand.TableDefId, CancellationToken.None)).Order());
+        Assert.Equal(1, await ScalarAsync($"SELECT COUNT(*) FROM ext.RowWindowValue WHERE RowWindowMapId = {id}"));
+
+        // Пауза виводить прив'язку зі знімка (у ньому лише активні).
+        Assert.Equal(HttpStatusCode.OK, (await manager.PutAsJsonAsync(one, Replace(stand, selector: null, isActive: false, sources: [Source(null, stand.EntityId, "Flare.All", stand.UnitSource)]))).StatusCode);
+        Assert.Empty(await index.WindowColumnsAsync(stand.TableDefId, CancellationToken.None));
+
+        // Відновлення повертає її; видалення після очищення провенансу знову спорожнює знімок.
+        Assert.Equal(HttpStatusCode.OK, (await manager.PutAsJsonAsync(one, Replace(stand, selector: null, sources: [Source(null, stand.EntityId, "Flare.All", stand.UnitSource)]))).StatusCode);
+        Assert.NotEmpty(await index.WindowColumnsAsync(stand.TableDefId, CancellationToken.None));
+        await ExecuteAsync($"DELETE FROM ext.RowWindowValue WHERE RowWindowMapId = {id}");
+        Assert.Equal(HttpStatusCode.NoContent, (await manager.DeleteAsync(one)).StatusCode);
+        Assert.Empty(await index.WindowColumnsAsync(stand.TableDefId, CancellationToken.None));
     }
 
     // ── тіла запитів ──────────────────────────────────────────────────────────
