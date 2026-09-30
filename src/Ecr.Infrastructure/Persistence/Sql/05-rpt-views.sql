@@ -232,7 +232,7 @@ AS
 SELECT p.Id AS _ProjectId, p.Code AS _ProjectCode,
        d.Id AS _DocumentId, d.BusinessKey AS _DocumentKey,
        r.PeriodKey AS _PeriodKey,
-       CAST(0 AS tinyint) AS _Status,
+       CAST(COALESCE(a.Status, 0) AS tinyint) AS _Status,
        r.Id AS _RowId, r.RowKey AS _RowKey, r.Ordinal AS _RowOrdinal', @select, N'
 FROM doc.TableInstance AS ti
 JOIN doc.TableRow      AS r ON r.PeriodKey = ti.PeriodKey AND r.TableInstanceId = ti.Id AND r.IsDeleted = 0
@@ -253,7 +253,7 @@ WHERE ti.TableDefId = ', CAST(@id AS nvarchar(10)), N';');
             EXEC sys.sp_executesql @sql;
             INSERT INTO @result VALUES (@id, @view, N'Created');
         END
-        ELSE IF 1 = 1
+        ELSE IF @pos = 0
              OR SUBSTRING(@existing, @pos, LEN(@existing)) COLLATE Latin1_General_BIN2
                 <> SUBSTRING(@sql, CHARINDEX(@marker, @sql), LEN(@sql)) COLLATE Latin1_General_BIN2
         BEGIN
@@ -295,5 +295,5 @@ GO
 --     ALTER ROLE rpt_reader ADD MEMBER [DOMAIN\svc-ssrs];
 IF DATABASE_PRINCIPAL_ID(N'rpt_reader') IS NULL
     CREATE ROLE rpt_reader;
-REVOKE SELECT ON SCHEMA::rpt TO rpt_reader;
+GRANT SELECT ON SCHEMA::rpt TO rpt_reader;
 GO
