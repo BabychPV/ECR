@@ -28,3 +28,11 @@ export const DataSourceScheduleTab = lazy(() =>
 export const SourceEntitiesTab = lazy(() =>
   import('./SourceEntitiesTab').then((module) => ({ default: module.SourceEntitiesTab })),
 );
+
+/**
+ * Вкладка «Події з PI» (HSE301 A6) — за `import()` з тієї ж причини: таблиця подій, мапінги й форма мапінгу
+ * потрібні лише тому, хто її відкрив, і в чанк сторінки джерел (а тим паче в `DocumentPage`) не входять.
+ */
+export const SourceEventsTab = lazy(() =>
+  import('@/features/sources/SourceEventsTab').then((module) => ({ default: module.SourceEventsTab })),
+);
