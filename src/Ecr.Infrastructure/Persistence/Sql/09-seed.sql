@@ -4417,7 +4417,6 @@ USING (VALUES
     -- ru/kz — окремою порцією `COLL:a6-api` у блоці I18N нижче.
     -- COLL:a6-api ── кінець секції ──
     -- COLL:a6-ui ── інтерфейс подій джерела: вкладка «Події з PI», форма мапінгу подій, проба (HSE301 A6-UI, FEATURE-HSE301-VIEW §10.6) ──
-    (N'jobs.kind.sourceEventSync',                   N'en', N'Source event synchronization', 1),
     (N'sourceEvents.actions',                        N'en', N'Actions', 1),
     (N'sourceEvents.attrEnd',                        N'en', N'event end time', 1),
     (N'sourceEvents.attrName',                       N'en', N'event name', 1),
@@ -11538,7 +11537,6 @@ GO
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
   FROM (VALUES
-    (N'jobs.kind.sourceEventSync', N'ru', N'Синхронизация событий источника'),
     (N'sourceEvents.actions', N'ru', N'Действия'),
     (N'sourceEvents.attrEnd', N'ru', N'время окончания события'),
     (N'sourceEvents.attrName', N'ru', N'имя события'),
@@ -11666,7 +11664,6 @@ SELECT v.[Key], v.Lang, v.Val
     (N'sourceEvents.volumeModeHint', N'ru', N'Откуда берётся объём события.'),
     (N'sourceEvents.volumeNone', N'ru', N'Вводится вручную'),
     (N'sourceEvents.volumeRowWindow', N'ru', N'Итог PI за окно строки'),
-    (N'jobs.kind.sourceEventSync', N'kz', N'Көз оқиғаларын синхрондау'),
     (N'sourceEvents.actions', N'kz', N'Әрекеттер'),
     (N'sourceEvents.attrEnd', N'kz', N'оқиғаның аяқталу уақыты'),
     (N'sourceEvents.attrName', N'kz', N'оқиға атауы'),
