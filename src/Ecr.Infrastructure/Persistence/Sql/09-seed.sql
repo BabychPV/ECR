@@ -553,6 +553,9 @@ UPDATE t
   FROM sys_ecr.UiString AS t
   JOIN (VALUES
     (N'common.loading',                  N'en', N'Loading…', N'Loading...'),
+    -- Назва продукту лишається англійською (рішення людини 2026-09-30).
+    (N'login.title',                     N'ru', N'Отчётность по экологическому соответствию', N'Environmental Compliance Reporting'),
+    (N'login.title',                     N'kz', N'Экологиялық сәйкестік бойынша есептілік', N'Environmental Compliance Reporting'),
     -- ФВ-4.2: кнопка більше не завжди Excel — формат обирається поруч.
     (N'document.export',                 N'en', N'Export to Excel', N'Export'),
     (N'periods.timeZone',                N'en', N'Site time zone', N'Site time zone (IANA)'),
@@ -5255,7 +5258,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'state.errorTitle', N'ru', N'Запрос не выполнен'),
     (N'state.errorUnknown', N'ru', N'Произошла непредвиденная ошибка. Повторите попытку; если ошибка повторится, обратитесь в службу поддержки и опишите, что вы делали.'),
     (N'state.emptyTitle', N'ru', N'Здесь пока ничего нет'),
-    (N'login.title', N'ru', N'Отчётность по экологическому соответствию'),
+    (N'login.title', N'ru', N'Environmental Compliance Reporting'),
     (N'login.windows', N'ru', N'Войти с учётной записью Windows'),
     (N'login.or', N'ru', N'или'),
     (N'login.user', N'ru', N'Имя пользователя'),
@@ -8283,7 +8286,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'state.errorTitle', N'kz', N'Сұрау орындалмады'),
     (N'state.errorUnknown', N'kz', N'Күтпеген қате орын алды. Әрекетті қайталаңыз; қате қайталанса, қолдау қызметіне хабарласып, не істегеніңізді сипаттаңыз.'),
     (N'state.emptyTitle', N'kz', N'Мұнда әзірге ештеңе жоқ'),
-    (N'login.title', N'kz', N'Экологиялық сәйкестік бойынша есептілік'),
+    (N'login.title', N'kz', N'Environmental Compliance Reporting'),
     (N'login.windows', N'kz', N'Windows тіркелгісімен кіру'),
     (N'login.or', N'kz', N'немесе'),
     (N'login.user', N'kz', N'Пайдаланушы аты'),
