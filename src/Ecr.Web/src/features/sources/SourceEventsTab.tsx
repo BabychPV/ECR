@@ -22,7 +22,15 @@ const SourceEventMapModal = lazy(() =>
   import('./SourceEventMapModal').then((module) => ({ default: module.SourceEventMapModal })),
 );
 
-type Editing = { readonly mode: 'create' } | { readonly mode: 'edit'; readonly map: SourceEventMap };
+/**
+ * Розділ «Прив'язки PI за вікном рядка» (HSE301 A1) — за `import()`: форма з сіткою колонок і перелік джерел
+ * потрібні лише тому, хто відкрив вкладку; сторінка джерел, а тим паче документа, їх не обчислюють.
+ */
+const RowWindowMapsPanel = lazy(() =>
+  import('./RowWindowMapsPanel').then((module) => ({ default: module.RowWindowMapsPanel })),
+);
+
+type Editing ={ readonly mode: 'create' } | { readonly mode: 'edit'; readonly map: SourceEventMap };
 
 /**
  * Вкладка «Події з PI» шухляди з'єднання (HSE301 A6, FEATURE-HSE301-VIEW §10.6): сутність-шаблон подій цього
@@ -129,6 +137,15 @@ export function SourceEventsTab({
         canManage={canManage}
         onCreateMap={() => setEditing({ mode: 'create' })}
       />
+
+      <Suspense fallback={<Loader size="sm" />}>
+        <RowWindowMapsPanel
+          sourceEntityId={entity.id}
+          entities={own}
+          documents={documents.data ?? []}
+          canManage={canManage}
+        />
+      </Suspense>
 
       {canManage && editing !== null && (
         <Suspense fallback={<Loader size="sm" />}>

@@ -138,6 +138,7 @@ function respond({
       if (path === '/api/v1/sources') return json([Entity]);
       if (path === '/api/v1/data-sources/7/event-templates') return templates();
       if (path === '/api/v1/source-event-maps') return json(maps);
+      if (path === '/api/v1/row-window-maps') return json([]);
       if (path === '/api/v1/source-event-maps/12' && method === 'PUT') return json({ ...Map12, ...(body as object) });
       if (path === '/api/v1/source-event-maps/12' && method === 'DELETE') return remove();
       if (path === '/api/v1/documents') {

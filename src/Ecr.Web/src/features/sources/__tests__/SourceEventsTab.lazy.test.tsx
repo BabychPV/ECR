@@ -16,7 +16,13 @@ import { testTheme } from '@/test/render';
  *
  * ⛔ Порядок перевірок значущий: модуль обчислюється один раз на файл.
  */
-const probe = vi.hoisted(() => ({ table: false, modal: false }));
+const probe = vi.hoisted(() => ({ table: false, modal: false, rowWindow: false }));
+
+// HSE301 A1: розділ прив'язок вікна рядка — теж за `import()`, лише після відкриття вкладки.
+vi.mock('@/features/sources/RowWindowMapsPanel', async (importOriginal) => {
+  probe.rowWindow = true;
+  return importOriginal();
+});
 
 vi.mock('@/features/sources/SourceEventsTable', async (importOriginal) => {
   probe.table = true;
@@ -125,12 +131,15 @@ describe('«Події з PI» — ліниво', () => {
     const tab = await within(drawer).findByRole('tab', { name: '⟦sourceEvents.tab⟧' });
     expect(probe.table).toBe(false);
     expect(probe.modal).toBe(false);
+    expect(probe.rowWindow).toBe(false);
 
     fireEvent.click(tab);
 
     await waitFor(() => expect(drawer.querySelector('[data-source-events-tab="PI-MAIN"]')).not.toBeNull());
     expect(probe.table).toBe(true);
     expect(probe.modal).toBe(false);
+    await waitFor(() => expect(drawer.querySelector('[data-row-window-maps]')).not.toBeNull());
+    expect(probe.rowWindow).toBe(true);
 
     fireEvent.click(await within(drawer).findByRole('button', { name: '⟦sourceEvents.mapCreate⟧' }));
 
