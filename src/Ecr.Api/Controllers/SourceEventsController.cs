@@ -26,7 +26,9 @@ public sealed class SourceEventsController(
     ListSourceEventsHandler events,
     SyncSourceEventsHandler sync,
     ListSourceEventMapsHandler maps,
-    CreateSourceEventMapHandler create) : ControllerBase
+    CreateSourceEventMapHandler create,
+    UpdateSourceEventMapHandler update,
+    DeleteSourceEventMapHandler delete) : ControllerBase
 {
     /// <summary>
     /// Каталог шаблонів подій джерела й їхніх атрибутів. Право <c>Integration.View</c> або <c>Integration.Manage</c>.
@@ -151,6 +153,44 @@ public sealed class SourceEventsController(
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     public async Task<IActionResult> CreateMap([FromBody] CreateSourceEventMapCommand request, CancellationToken ct)
         => Ok(await create.HandleAsync(request, ct).ConfigureAwait(false));
+
+    /// <summary>
+    /// Повна заміна налаштувань мапінгу: режим об'єму, звуження, поля, <c>isActive</c> (пауза й відновлення).
+    /// Право <c>Integration.Manage</c> і грант <c>Manage</c> на проєкт документа.
+    /// </summary>
+    /// <param name="id">Мапінг.</param>
+    /// <param name="request">Нові налаштування.</param>
+    /// <param name="ct">Скасування.</param>
+    [HttpPut("source-event-maps/{id:int}")]
+    [ProducesResponseType<SourceEventMapDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> UpdateMap(
+        int id, [FromBody] UpdateSourceEventMapCommand request, CancellationToken ct)
+        => Ok(await update.HandleAsync(id, request, ct).ConfigureAwait(false));
+
+    /// <summary>
+    /// Видаляє мапінг подій, за яким ще нічого не синхронізовано. Право <c>Integration.Manage</c> і грант
+    /// <c>Manage</c> на проєкт документа.
+    /// </summary>
+    /// <param name="id">Мапінг.</param>
+    /// <param name="ct">Скасування.</param>
+    /// <remarks>
+    /// Мапінг зі зв'язками «подія ↔ рядок» — <c>409 ECR-INT-0409</c>: вихід — пауза (<c>isActive = false</c>).
+    /// </remarks>
+    [HttpDelete("source-event-maps/{id:int}")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> DeleteMap(int id, CancellationToken ct)
+    {
+        await delete.HandleAsync(id, ct).ConfigureAwait(false);
+
+        return NoContent();
+    }
 
     private static DateTime? AsUtc(DateTime? value) => value is { } v
         ? v.Kind switch

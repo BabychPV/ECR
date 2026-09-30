@@ -1,4 +1,4 @@
-using Ecr.Application.Documents;
+﻿using Ecr.Application.Documents;
 using Ecr.Application.Templates;
 using Ecr.Domain.Services;
 using Microsoft.Extensions.DependencyInjection;
@@ -400,6 +400,8 @@ public static class DependencyInjection
         services.AddScoped<Integration.SourceEvents.SyncSourceEventsHandler>();
         services.AddScoped<Sources.ListSourceEventMapsHandler>();
         services.AddScoped<Sources.CreateSourceEventMapHandler>();
+        services.AddScoped<Sources.UpdateSourceEventMapHandler>();
+        services.AddScoped<Sources.DeleteSourceEventMapHandler>();
 
         // BE-07: публічні дані екрана входу. Єдиний обробник, який НЕ перевіряє
         // жодного права — бо викликається до автентифікації; склад полів і
