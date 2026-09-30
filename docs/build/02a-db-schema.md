@@ -1296,7 +1296,7 @@ CREATE TABLE doc.Project
     PeriodPolicyId      int           NOT NULL,
     YearGraceOffsetDays int           NOT NULL CONSTRAINT DF_Project_YearGrace DEFAULT(45),
     -- Пояс майданчика: у ньому рахуються межі періодів, offsets і IsLateEdit (D-68).
-    -- Значення — ІДЕНТИФІКАТОР IANA (N'Asia/Aqtau'), не Windows-ідентифікатор і не
+    -- Значення — ІДЕНТИФІКАТОР IANA (N'Asia/Atyrau'), не Windows-ідентифікатор і не
     -- зсув: зсув міняється переходом на літній час, а збережене число — ні (H-13).
     -- ⛔ DEFAULT прибраний (D2-74). Він підставляв N'Central Asia Standard Time' —
     -- Windows-ідентифікатор, і робив це мовчки для будь-якої вставки, яка колонку
