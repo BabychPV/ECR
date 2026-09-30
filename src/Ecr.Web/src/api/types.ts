@@ -113,6 +113,9 @@ export type CurrentUserDto = Schemas['CurrentUserDto'];
 /** Документ у переліку; зведеного статусу немає за побудовою (D-93). */
 export type DocumentSummary = Schemas['DocumentSummary'];
 
+/** Сторінка документів. */
+export type DocumentPage = Schemas['PagedResultOfDocumentSummary'];
+
 /** Екземпляр таблиці документа разом з аркушем, якому він належить. */
 export type DocumentTableDto = Schemas['DocumentTableDto'];
 
