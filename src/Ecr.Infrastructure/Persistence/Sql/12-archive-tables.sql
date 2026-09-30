@@ -105,7 +105,7 @@ CREATE TABLE arc.CellChange
 ) ON [DATA_ARCHIVE];
 GO
 
--- ФВ-2.16 / D-239: дзеркало ud.CellChange.IsOutOfWindow для наявних баз.
+-- ФВ-2.16 / D-239: дзеркало aud.CellChange.IsOutOfWindow для наявних баз.
 IF COL_LENGTH(N'arc.CellChange', N'IsOutOfWindow') IS NULL
     ALTER TABLE arc.CellChange
         ADD IsOutOfWindow bit NOT NULL CONSTRAINT DF_arc_CellChange_OutOfWindow DEFAULT (0);
