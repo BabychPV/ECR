@@ -145,6 +145,7 @@ public sealed class AccessDecisionTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "ФВ-5.13")]
     public void A09_поданий_документ_блокує_запис_навіть_у_відкритому_періоді()
     {
         var decision = EditRules.CanEdit(

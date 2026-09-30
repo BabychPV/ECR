@@ -55,6 +55,7 @@ public sealed class ReportSnapshotSyncTests
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
     [Trait("Finding", "H-23b")]
+    [Trait("Requirement", "ФВ-10.10")]
     public async Task Подання_останнього_аркуша_морозить_поточний_зріз()
     {
         // ⛔ Регресія: виклик прибрали — і зріз лишається перебудовуваним
@@ -71,6 +72,7 @@ public sealed class ReportSnapshotSyncTests
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
     [Trait("Finding", "H-23b")]
+    [Trait("Requirement", "ФВ-10.10")]
     public async Task Подання_одного_аркуша_з_кількох_зріз_НЕ_морозить()
     {
         // ⚠ Умова замороження — не «подали цей аркуш», а «у періоді не
@@ -89,6 +91,8 @@ public sealed class ReportSnapshotSyncTests
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
     [Trait("Finding", "H-23b")]
+    [Trait("Requirement", "ФВ-5.14")]
+    [Trait("Requirement", "ФВ-10.10")]
     public async Task Затвердження_перераховує_статус_зрізу_але_не_морозить_його()
     {
         // ⛔ Статус зрізу успадковується від даних (`D-65`). Без перерахунку
@@ -110,6 +114,7 @@ public sealed class ReportSnapshotSyncTests
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
     [Trait("Finding", "H-23b")]
+    [Trait("Requirement", "ФВ-10.10")]
     public async Task Уже_поданий_зріз_повторно_не_чіпається()
     {
         // ⚠ Інакше кожна наступна зміна стану аркуша била б у доменну відмову

@@ -161,7 +161,6 @@ public sealed class BoundaryUnitConversionTests
 
     [Theory]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
-    [Trait("Requirement", "ФВ-16.12")]
     [InlineData(null, null)]
     [InlineData(KilogramId, null)]
     [InlineData(null, TonneId)]

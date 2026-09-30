@@ -76,6 +76,7 @@ public sealed class StyleDefTests
     private ListStyleDefsHandler List() => new(_styles, _store, _access, _user);
 
     [Fact]
+    [Trait("Requirement", "ФВ-2.7")]
     public async Task Новий_стиль_заводиться_і_зберігається()
     {
         var saved = await Save().HandleAsync(1, "Bold1", Command(isBold: true), CancellationToken.None);
@@ -106,6 +107,7 @@ public sealed class StyleDefTests
     }
 
     [Fact]
+    [Trait("Requirement", "ФВ-2.7")]
     public async Task Порожнє_ім_я_шрифту_і_формат_числа_нормалізуються_в_null()
     {
         var saved = await Save().HandleAsync(

@@ -48,6 +48,7 @@ public sealed class ApplyImportThresholdTests
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait("Finding", "T10-45")]
+    [Trait("Requirement", "ФВ-4.5")]
     public async Task Малий_diff_застосовується_синхронно()
     {
         _importer.CountPendingChangesAsync(Token, Arg.Any<CancellationToken>())
@@ -67,6 +68,7 @@ public sealed class ApplyImportThresholdTests
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait("Finding", "T10-45")]
+    [Trait("Requirement", "ФВ-4.5")]
     public async Task Великий_diff_іде_в_чергу_а_не_застосовується_синхронно()
     {
         _importer.CountPendingChangesAsync(Token, Arg.Any<CancellationToken>())

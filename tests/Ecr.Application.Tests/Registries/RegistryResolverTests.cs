@@ -71,6 +71,7 @@ public sealed class RegistryResolverTests
     };
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait("Requirement", "ФВ-8.1")]
     public void Дозвіл_чинний_на_дату_періоду_потрапляє_у_список()
     {
         var permit = Entry(101, Permits, "PERMIT_A", from: new DateOnly(2025, 1, 1), to: new DateOnly(2027, 1, 1));

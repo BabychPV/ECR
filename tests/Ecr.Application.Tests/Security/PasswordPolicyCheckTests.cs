@@ -95,6 +95,7 @@ public sealed class PasswordPolicyCheckTests
     [InlineData(PasswordPath.Create)]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait("Finding", "S15")]
+    [Trait("Requirement", "ФВ-6.4")]
     public async Task Пароль_з_іменем_користувача_без_урахування_регістру_відхиляється(PasswordPath path)
     {
         // Ім'я — того, ЧИЙ це пароль: власника, а при створенні — нового запису.
@@ -111,6 +112,7 @@ public sealed class PasswordPolicyCheckTests
     [InlineData(PasswordPath.Create)]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait("Finding", "S15")]
+    [Trait("Requirement", "ФВ-6.4")]
     public async Task Найпоширеніший_пароль_відхиляється(PasswordPath path)
     {
         // Довжина 12 — `MinLength` пропускає; зупиняє лише блок-лист.
@@ -122,6 +124,7 @@ public sealed class PasswordPolicyCheckTests
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait("Finding", "S15")]
+    [Trait("Requirement", "ФВ-6.4")]
     public async Task Зміна_на_чинний_пароль_відхиляється()
     {
         var error = await Assert.ThrowsAsync<BusinessRuleException>(
@@ -133,6 +136,7 @@ public sealed class PasswordPolicyCheckTests
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait("Finding", "S15")]
+    [Trait("Requirement", "ФВ-6.4")]
     public async Task Закороткий_пароль_як_і_раніше_відмовляє_ключем_tooShort()
     {
         var error = await Assert.ThrowsAsync<BusinessRuleException>(() => SetAsync(PasswordPath.Change, "short1"));

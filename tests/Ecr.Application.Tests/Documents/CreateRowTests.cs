@@ -176,7 +176,6 @@ public sealed class CreateRowTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
-    [Trait("Requirement", "ФВ-3.1")]
     public async Task Створення_рядка_у_Fixed_таблиці_заборонене()
     {
         Arrange(TableRowMode.Fixed, maxRows: null);

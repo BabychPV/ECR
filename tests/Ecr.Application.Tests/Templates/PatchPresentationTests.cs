@@ -56,7 +56,6 @@ public sealed class PatchPresentationTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
-    [Trait("Requirement", "ФВ-2.7")]
     public async Task Зміна_підпису_справді_міняє_поле_а_не_лише_піднімає_ревізію()
     {
         // ⛔ Найдорожчий різновид зеленого тесту — той, що перевіряє все

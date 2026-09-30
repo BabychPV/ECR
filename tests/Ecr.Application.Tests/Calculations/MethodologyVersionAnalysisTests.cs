@@ -55,6 +55,7 @@ public sealed class MethodologyVersionAnalysisTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "ФВ-13.2")]
     public void Різниця_знаходить_додане_і_прибране_в_кожному_наборі()
     {
         var before = Content(

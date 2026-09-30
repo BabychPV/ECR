@@ -133,7 +133,6 @@ public sealed class MethodologyPublishChecksTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
-    [Trait("Requirement", "ФВ-16.6")]
     public void Текстова_формула_оголошена_виходом_методології_відхиляється()
     {
         // ⛔ Оголошений вихід лягає в числову колонку — іншої в

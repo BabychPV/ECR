@@ -79,6 +79,7 @@ public sealed class TableDefTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "ФВ-2.3")]
     public async Task Нова_таблиця_зберігається_і_потрапляє_в_аудит_структурних_змін()
     {
         var saved = await Save().HandleAsync(1, "Water", "Balances", Command(), CancellationToken.None);
@@ -102,6 +103,7 @@ public sealed class TableDefTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "ФВ-2.3")]
     public async Task Повторний_запис_тим_самим_кодом_оновлює_а_не_дублює()
     {
         await Save().HandleAsync(1, "Water", "Balances", Command(en: "Balances v1"), CancellationToken.None);
@@ -130,6 +132,7 @@ public sealed class TableDefTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "ФВ-2.3")]
     public async Task Перемикання_на_фіксовані_рядки_зі_стелею_відхиляється()
     {
         // ⛔ `SetMaxDynamicRows` викликається ПІСЛЯ `SetRowMode` саме тому, що

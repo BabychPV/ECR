@@ -128,7 +128,6 @@ public sealed class UserAccessTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
-    [Trait("Requirement", "ФВ-12.1")]
     public async Task Адреса_задається_і_прибирається_разом_із_прапорцем_алертів()
     {
         // ⛔ Поле існувало від Етапу 3 і не присвоювалося ніде: сповіщення не
@@ -201,7 +200,6 @@ public sealed class UserAccessTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
-    [Trait("Requirement", "ФВ-6.16")]
     public async Task Строкове_призначення_діє_за_домену_і_негайно_стає_нечинним()
     {
         // `#48` (директива №11, T3): до цього `RoleAssignment.ValidFrom`/
