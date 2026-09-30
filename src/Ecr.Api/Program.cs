@@ -198,10 +198,12 @@ builder.Services.Configure<GzipCompressionProviderOptions>(
 // композицією і конвеєром, розходиться першою ж правкою.
 builder.Services.AddEcrRateLimiting(builder.Configuration);
 
+builder.Services.AddScoped<Ecr.Api.Health.IRecalculationWorkerProbe, Ecr.Api.Health.RecalculationWorkerProbe>();
 builder.Services.AddHealthChecks()
     .AddCheck<Ecr.Api.Health.DatabaseHealthCheck>("db", tags: ["db", "ready"])
     .AddCheck<Ecr.Api.Health.JobsHealthCheck>("jobs", tags: ["ready"])
-    .AddCheck<Ecr.Api.Health.SourcesHealthCheck>("sources", tags: ["ready"]);
+    .AddCheck<Ecr.Api.Health.SourcesHealthCheck>("sources", tags: ["ready"])
+    .AddCheck<Ecr.Api.Health.RecalculationWorkerHealthCheck>("worker", tags: ["ready"]);
 
 var app = builder.Build();
 
