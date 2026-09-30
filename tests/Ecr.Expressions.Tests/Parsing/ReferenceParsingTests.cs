@@ -10,6 +10,7 @@ namespace Ecr.Expressions.Tests.Parsing;
 public sealed class ReferenceParsingTests
 {
     [Theory] [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "ФВ-3.4")]
     [InlineData("[Jan]")]
     [InlineData("[7001001].[Jan]")]
     [InlineData("[Main].[7001001].[Jan]")]
@@ -55,6 +56,7 @@ public sealed class ReferenceParsingTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "ФВ-3.4")]
     public void Крос_період_розбирається_з_від_ємним_і_додатним_зсувом()
     {
         var back = Assert.IsType<CellReferenceNode>(
@@ -86,6 +88,7 @@ public sealed class ReferenceParsingTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "ФВ-3.4")]
     public void Діапазон_рядків_розбирається_у_список_ключів()
     {
         var reference = Assert.IsType<CellReferenceNode>(

@@ -21,6 +21,7 @@ public sealed class MethodologyConstantValidityTests
 {
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
     [Trait("Requirement", "ФВ-16.1")]
+    [Trait("Requirement", "ФВ-13.2")]
     public void IsValidOn_бере_нижню_межу_включно_а_верхню_ні()
     {
         var constant = Numeric();

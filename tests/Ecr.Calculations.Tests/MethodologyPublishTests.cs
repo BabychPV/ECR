@@ -94,7 +94,6 @@ public sealed class MethodologyPublishTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
-    [Trait("Requirement", "ФВ-13.5")]
     public async Task Публікація_автором_останньої_правки_відхиляється_ECR_CALC_0409()
     {
         _user.UserId.Returns(Author);
@@ -360,7 +359,7 @@ public sealed class MethodologyPublishTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
-    [Trait("Requirement", "ФВ-9.10")]
+    [Trait("Requirement", "ФВ-9.4")]
     public async Task Топологічний_порядок_формул_обчислюється_при_публікації()
     {
         var formulas = Formulas();

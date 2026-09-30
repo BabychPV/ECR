@@ -46,6 +46,7 @@ public sealed class LayerRulesTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "ФВ-11.9")]
     public void Правило_3_ядро_не_знає_про_AF_Excel_і_екологію()
     {
         // ⚠ «Екологія» тут — конкретні методики й формули НКОК. Ядро має

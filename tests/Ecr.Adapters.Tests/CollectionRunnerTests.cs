@@ -175,7 +175,6 @@ public sealed class CollectionRunnerTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
-    [Trait("Requirement", "ФВ-12.1")]
     public async Task Вимкнена_сутність_джерела_відмовляє_а_не_мовчить()
     {
         var world = new World();

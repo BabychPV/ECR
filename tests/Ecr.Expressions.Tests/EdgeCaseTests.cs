@@ -224,7 +224,6 @@ public sealed class EdgeCaseTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)]
-    [Trait("Requirement", "ФВ-5.9")]
     public void E22_відсутня_комірка_бере_DefaultValue()
     {
         var context = new TestEvaluationContext { CurrentRow = "R1" };

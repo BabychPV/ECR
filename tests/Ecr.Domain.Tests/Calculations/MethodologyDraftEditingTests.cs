@@ -138,7 +138,6 @@ public sealed class MethodologyDraftEditingTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
-    [Trait("Requirement", "ФВ-16.6")]
     public void Числову_формулу_з_одиницею_можна_перевести_в_текстову()
     {
         var version = Draft();

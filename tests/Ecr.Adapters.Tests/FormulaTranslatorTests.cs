@@ -23,7 +23,6 @@ public sealed class FormulaTranslatorTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
-    [Trait("Requirement", "ФВ-4.1")]
     public void Посилання_на_комірку_стає_координатою_книги()
     {
         var excel = new FormulaTranslator().ToExcel("[T1].[R10].[C1] + 1", Coordinates());

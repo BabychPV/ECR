@@ -130,6 +130,8 @@ public sealed class UnitCheckerTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait("Requirement", "ФВ-16.6")]
+    [Trait("Requirement", "ФВ-16.8")]
     public void Агрегація_колонки_з_одиницею_на_рядок_без_приведення_відхиляється()
     {
         var context = Context();

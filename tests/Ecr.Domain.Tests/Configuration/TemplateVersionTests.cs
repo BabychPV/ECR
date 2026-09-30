@@ -65,7 +65,7 @@ public sealed class TemplateVersionTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
-    [Trait("Requirement", "ФВ-2.8")]
+    [Trait("Requirement", "ФВ-7.1")]
     public void Опублікована_версія_структурно_заморожена()
     {
         var version = Draft();
