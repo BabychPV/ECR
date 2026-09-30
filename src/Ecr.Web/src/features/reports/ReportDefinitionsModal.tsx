@@ -18,12 +18,14 @@ import { apiFetch } from '@/api/client';
 import type {
   CreateReportDefRequest,
   CreateReportVersionRequest,
+  PublishReportVersionRequest,
   ReportColumnCommand,
   ReportDefinition,
 } from '@/api/types';
 import { t } from '@/shared/i18n';
 import { localized } from '@/shared/i18n/localized';
 import { LocalizedInput, hasAnyText, type LocalizedValue } from '@/shared/ui/LocalizedInput';
+import { ReasonModal } from '@/shared/ui/ReasonModal';
 import { StatusBadge } from '@/shared/ui/StatusBadge';
 import { showApiError, showDone } from '@/shared/ui/notify';
 
@@ -65,6 +67,13 @@ export function ReportDefinitionsModal({
 
   const [versionOf, setVersionOf] = useState<string | null>(null);
   const [nextVersion, setNextVersion] = useState('');
+
+  // ФВ-14.7: публікація версії звіту вимагає причини — діалог відкривається на кнопці.
+  const [publishing, setPublishing] = useState<{
+    definitionId: number;
+    versionId: number;
+    version: string;
+  } | null>(null);
 
   const refresh = async (): Promise<void> => {
     await queryClient.invalidateQueries({ queryKey: ['report-defs'] });
@@ -123,13 +132,17 @@ export function ReportDefinitionsModal({
   });
 
   const publish = useMutation({
-    mutationFn: (target: { definitionId: number; versionId: number }) =>
+    mutationFn: (target: { definitionId: number; versionId: number; reason: string }) =>
       apiFetch<unknown>(
         `/api/v1/reports/${target.definitionId}/versions/${target.versionId}/publish`,
-        { method: 'POST' },
+        {
+          method: 'POST',
+          body: JSON.stringify({ reason: target.reason } satisfies PublishReportVersionRequest),
+        },
       ),
     onSuccess: async () => {
       await refresh();
+      setPublishing(null);
       showDone(t('reportDefs.published'));
     },
     onError: showApiError,
@@ -193,11 +206,11 @@ export function ReportDefinitionsModal({
                             <Button
                               size="compact-xs"
                               variant="light"
-                              loading={publish.isPending}
-                              onClick={() =>
-                                publish.mutate({
+                                              onClick={() =>
+                                setPublishing({
                                   definitionId: definition.id,
                                   versionId: reportVersion.id,
+                                  version: reportVersion.version,
                                 })
                               }
                             >
@@ -276,6 +289,18 @@ export function ReportDefinitionsModal({
             {t('reportDefs.newVersion')}
           </Button>
         </Group>
+
+        <ReasonModal
+          opened={publishing !== null}
+          title={t('reportDefs.publishReasonTitle', { version: publishing?.version ?? '' })}
+          label={t('reportDefs.publishReason')}
+          confirmLabel={t('reportDefs.publish')}
+          isPending={publish.isPending}
+          onConfirm={(reason) => {
+            if (publishing !== null) publish.mutate({ ...publishing, reason });
+          }}
+          onClose={() => setPublishing(null)}
+        />
       </Stack>
     </Modal>
   );

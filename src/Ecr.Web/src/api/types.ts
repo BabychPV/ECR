@@ -445,6 +445,9 @@ export type CreateReportDefRequest = Schemas['CreateReportDefRequest'];
 /** Запит на створення версії-чернетки опису звіту. */
 export type CreateReportVersionRequest = Schemas['CreateReportVersionRequest'];
 
+/** Запит на публікацію версії опису звіту: причина обов'язкова (ФВ-14.7). */
+export type PublishReportVersionRequest = Schemas['PublishReportVersionRequest'];
+
 /** Стан фонової задачі. */
 export type JobStatus = Schemas['JobStatus'];
 
