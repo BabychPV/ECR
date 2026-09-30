@@ -25,7 +25,8 @@ namespace Ecr.Application.Sources;
 /// вимикатиме записи довідника. Це зміна його даних — право те саме.
 ///
 /// ⚠ Порядок відмов: 403 на <c>Integration.Manage</c> → 404 сутності → 422
-/// «не прив'язана» → 403 на довідник → 422 перевірки тіла. Тіло перевіряється
+/// «не прив'язана» → 403 на довідник → 422 перевірки тіла → 422 дат для
+/// нетемпорального довідника (<see cref="NotTemporalKey"/>, PR-7). Тіло перевіряється
 /// ПІСЛЯ права: відмова з подробицями валідації тому, хто не має права
 /// змінювати, — зайва інформація.
 ///
@@ -39,8 +40,12 @@ public sealed class SetSourceEntityRegistryPolicyHandler(
     IUnitOfWork uow,
     IAuditWriter audit,
     ICurrentUser currentUser,
-    IClock clock)
+    IClock clock,
+    IRegistryStore registries)
 {
+    /// <summary>Ключ відмови: атрибути дат дії для нетемпорального довідника (<c>D-212</c> PR-7).</summary>
+    public const string NotTemporalKey = "err.ECR-REQ-0422.registrySyncPolicyNotTemporal";
+
     /// <summary>Операція в журналі структурних змін.</summary>
     public const string AuditOperation = "SetRegistrySyncPolicy";
 
@@ -100,6 +105,22 @@ public sealed class SetSourceEntityRegistryPolicyHandler(
 
         entity.ConfigureRegistrySync(
             command.OnMissingInSource, command.ValidFromAttribute, command.ValidToAttribute, command.ValidToInclusive);
+
+        // D-212 PR-7: вікно дії є лише в записів ТЕМПОРАЛЬНОГО довідника. Атрибути дат для
+        // нетемпорального — налаштування, дії якого не буде: синк їх не читає, і адміністратор
+        // шукав би, чому дати AF «не доходять». Після перевірки тіла — порядок відмов з remarks.
+        if ((entity.ValidFromAttribute is not null || entity.ValidToAttribute is not null)
+            && await registries.FindDefinitionByIdAsync(registryDefId, ct).ConfigureAwait(false) is { IsTemporal: false } registry)
+        {
+            throw new BusinessRuleException(
+                ErrorCodes.RequestInvalid,
+                $"Довідник «{registry.Code}» не темпоральний: атрибути дат дії синку йому не застосовні.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = NotTemporalKey,
+                    ["registry"] = registry.Code,
+                });
+        }
 
         var after = Json(entity);
 

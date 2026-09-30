@@ -189,6 +189,41 @@ public sealed class SourceRegistryPolicyEndpointTests(SqlServerFixture sql)
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Decision", "D-212")]
+    public async Task Атрибути_дат_для_нетемпорального_довідника_дають_422_а_політика_без_дат_проходить()
+    {
+        using var app = new EcrApiFactory(sql);
+        var stand = await StandAsync(bound: true, temporal: false).ConfigureAwait(true);
+
+        try
+        {
+            using var client = await SignedInAsync(app, stand.RegistryId).ConfigureAwait(true);
+
+            // Лише кінець — теж дата дії: вікно є лише в записів темпорального довідника (PR-7).
+            var dates = await client.PutAsJsonAsync(
+                Uri(stand.EntityId),
+                new { onMissingInSource = "Deactivate", validFromAttribute = (string?)null, validToAttribute = "End", validToInclusive = false });
+            await AssertProblemAsync(dates, Ecr.Application.Sources.SetSourceEntityRegistryPolicyHandler.NotTemporalKey)
+                .ConfigureAwait(true);
+
+            var row = await EntityAsync(stand.EntityId).ConfigureAwait(true);
+            Assert.Equal((RegistryMissingPolicy.MarkOrphaned, (string?)null), (row.OnMissingInSource, row.ValidToAttribute));
+            Assert.Empty(await AuditAsync(stand.EntityId).ConfigureAwait(true));
+
+            // Контроль: та сама сутність без дат — 200 (відмова саме за датами, а не за довідником).
+            var plain = await client.PutAsJsonAsync(Uri(stand.EntityId), Body("Deactivate"));
+            Assert.Equal(HttpStatusCode.OK, plain.StatusCode);
+            Assert.Equal(RegistryMissingPolicy.Deactivate, (await EntityAsync(stand.EntityId).ConfigureAwait(true)).OnMissingInSource);
+        }
+        finally
+        {
+            await DeactivateAsync(stand.DataSourceId).ConfigureAwait(true);
+        }
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "D-212")]
     public async Task Перелік_зовнішніх_ключів_віддає_MissingInSourceSince()
     {
         using var app = new EcrApiFactory(sql);
@@ -250,7 +285,11 @@ public sealed class SourceRegistryPolicyEndpointTests(SqlServerFixture sql)
         Assert.Equal(messageKey, problem.GetProperty("messageKey").GetString());
     }
 
-    private async Task<Stand> StandAsync(bool bound)
+    /// <param name="bound">Прив'язати сутність до довідника.</param>
+    /// <param name="temporal">
+    /// Довідник темпоральний: атрибути дат дії приймаються лише для такого (<c>D-212</c> PR-7).
+    /// </param>
+    private async Task<Stand> StandAsync(bool bound, bool temporal = true)
     {
         await using var db = Context();
         var tag = $"{Guid.NewGuid():N}"[..8];
@@ -258,7 +297,7 @@ public sealed class SourceRegistryPolicyEndpointTests(SqlServerFixture sql)
         var source = new DataSource(
             EcrCode.Create($"Pol{tag}"), Name("D-212"), ExternalTransport.PiWebApi, "https://example.test", "secret");
         db.DataSources.Add(source);
-        var target = new RegistryDef(EcrCode.Create($"RPT{tag}"), Name("target"), isTemporal: false);
+        var target = new RegistryDef(EcrCode.Create($"RPT{tag}"), Name("target"), isTemporal: temporal);
         var other = new RegistryDef(EcrCode.Create($"RPO{tag}"), Name("other"), isTemporal: false);
         db.RegistryDefs.AddRange(target, other);
         await db.SaveChangesAsync().ConfigureAwait(false);
