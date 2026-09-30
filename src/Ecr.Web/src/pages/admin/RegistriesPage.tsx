@@ -17,6 +17,7 @@ import {
   isExternalRegistry,
 } from '@/features/registries/RegistryEntryEditor';
 import { RegistryImportPanel } from '@/features/registries/RegistryImportPanel';
+import { EntryUsageButton } from '@/features/registries/rc814/EntryUsageButton';
 import { SourceKindSwitch } from '@/features/registries/SourceKindSwitch';
 import { localized } from '@/shared/i18n/localized';
 import { can, useSession } from '@/shared/session/useSession';
@@ -320,6 +321,23 @@ export function RegistriesPage(): JSX.Element {
                   {t('common.delete')}
                 </Button>
               </Group>
+            ),
+          } satisfies DataTableColumn<RegistryEntryDto>,
+        ]
+      : []),
+
+    /*
+     * ФВ-8.14: «Де використовується» запис — окрема колонка (`rc814`). Право — те саме, що в
+     * `GET /registries/{code}/usage` (`Registry.EditDefinition`); діалог — лінивий чанк.
+     */
+    ...(code !== null && can(session.data, 'Registry.EditDefinition')
+      ? [
+          {
+            key: 'usage',
+            label: t('registries.entryUsage.column'),
+            sortable: false,
+            render: (entry: RegistryEntryDto) => (
+              <EntryUsageButton registryCode={code} entry={entry} siblings={entries.data ?? []} />
             ),
           } satisfies DataTableColumn<RegistryEntryDto>,
         ]
