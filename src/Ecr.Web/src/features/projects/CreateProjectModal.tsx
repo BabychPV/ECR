@@ -23,7 +23,7 @@ const PeriodKinds = ['Monthly', 'Quarterly', 'Yearly', 'Custom'];
  * Перелік поясів IANA.
  *
  * ⛔ `supportedValuesOf('timeZone')` віддає САМЕ ідентифікатори IANA
- * (`Asia/Aqtau`) — інших сервер не приймає (`ECR-CFG-4221`, директива ПК-1
+ * (`Asia/Atyrau`) — інших сервер не приймає (`ECR-CFG-4221`, директива ПК-1
  * №06 §3). Вільного введення тут немає навмисно: пояс вічний (`ФВ-1.1a`), і
  * опечатка в ньому стала б вічною властивістю проєкту.
  *
@@ -35,7 +35,8 @@ export function timeZones(): string[] {
   const supported = (Intl as { supportedValuesOf?: (key: string) => string[] }).supportedValuesOf;
   const all = typeof supported === 'function' ? supported('timeZone') : [];
 
-  const fallback = ['Asia/Almaty', 'Asia/Aqtau', 'Asia/Atyrau', 'Asia/Oral', 'Europe/London', 'UTC'];
+  // Атирау першим: майданчик NCOC (+05:00 без переходів, F-4).
+  const fallback = ['Asia/Atyrau', 'Asia/Aqtau', 'Asia/Almaty', 'Asia/Oral', 'Europe/London', 'UTC'];
 
   return all.length > 0 ? all : fallback;
 }
@@ -191,9 +192,9 @@ export function CreateProjectModal({
   // Тут стояв пояс браузера як початкове значення — і це та сама мовчазна
   // підстановка, тільки на крок пізніше: форму можна було надіслати, жодного
   // разу не глянувши на поле, і пояс конфігуратора ставав ВІЧНОЮ властивістю
-  // проєкту (`ФВ-1.1a`). Конфігуратор сидить в Астані, майданчик — в Актау,
-  // це +06:00 проти +05:00: кожен період закривався б на годину раніше, ніж
-  // чекають на місці, і помітили б це за скаргою «не встиг подати».
+  // проєкту (`ФВ-1.1a`). Конфігуратор сидить, скажімо, в Києві (+02:00/+03:00),
+  // майданчик — в Атирау (+05:00): кожен період закривався б на 2–3 години
+  // пізніше, ніж чекають на місці, і помітили б це за скаргою «не встиг подати».
   const [timeZoneId, setTimeZoneId] = useState<string | null>(null);
   const [versionId, setVersionId] = useState<string | null>(null);
   const [policyId, setPolicyId] = useState<string | null>(null);
