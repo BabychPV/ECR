@@ -17,6 +17,8 @@ const SeededStrings: Record<string, string> = {
   'registries.externalKeySource': 'Source',
   'registries.externalKeyId': 'Identifier in the source',
   'registries.externalKeyPath': 'Path in the source',
+  'registries.externalKeyMissing': 'Missing in source',
+  'registries.externalKeyMissingSince': 'Since {date}',
   'registries.externalKeyAdd': 'Link',
   'registries.externalKeyRemove': 'Unlink',
   'registries.externalKeyRemoveTitle': 'Unlink identifier "{externalId}"?',
@@ -32,6 +34,7 @@ const link = {
   externalId: 'GUID-1',
   externalPath: '\\\\AF\\Db\\FL01',
   lastSyncedAt: null,
+  missingInSourceSince: null,
 };
 
 interface Call {
@@ -95,6 +98,23 @@ describe('Зовнішні ідентифікатори запису довід�
 
     const list = calls.find((c) => c.method === 'GET' && c.url.includes('/external-keys'));
     expect(list?.url).toContain('/api/v1/registries/Flares/external-keys?entryId=42');
+  });
+
+  it('D-212: зв\'язок, зниклий із джерела, позначено «з <дата>»; наявний — без позначки', async () => {
+    mockFetch([
+      link,
+      { ...link, id: 8, externalId: 'GUID-GONE', missingInSourceSince: '2026-09-28T03:00:00Z' },
+    ]);
+    await loadCatalog('en', 'private');
+    show();
+
+    await screen.findByText('GUID-GONE');
+    expect(screen.getByRole('columnheader', { name: 'Missing in source' })).toBeTruthy();
+
+    const marks = document.querySelectorAll('[data-external-key-missing]');
+    expect(marks).toHaveLength(1);
+    expect(marks[0]?.getAttribute('data-external-key-missing')).toBe('8');
+    expect(marks[0]?.textContent).toMatch(/^Since .*2026/);
   });
 
   it('прив\'язує: джерело з переліку і ідентифікатор без країв', async () => {

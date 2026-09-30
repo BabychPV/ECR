@@ -1,8 +1,9 @@
 import { useState, type JSX } from 'react';
-import { Button, Group, Select, Skeleton, Stack, Table, Text, TextInput, Title } from '@mantine/core';
+import { Badge, Button, Group, Select, Skeleton, Stack, Table, Text, TextInput, Title } from '@mantine/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { listDataSources } from '@/features/integration/dataSourceApi';
 import { DataSourcesQueryKey } from '@/features/integration/dataSourcesKey';
+import { formatDateTime } from '@/shared/format/datetime';
 import { t } from '@/shared/i18n';
 import { ConfirmModal } from '@/shared/ui/ConfirmModal';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
@@ -89,6 +90,7 @@ export function RegistryExternalKeysPanel({
               <Table.Th>{t('registries.externalKeySource')}</Table.Th>
               <Table.Th>{t('registries.externalKeyId')}</Table.Th>
               <Table.Th>{t('registries.externalKeyPath')}</Table.Th>
+              <Table.Th>{t('registries.externalKeyMissing')}</Table.Th>
               <Table.Th />
             </Table.Tr>
           </Table.Thead>
@@ -98,6 +100,16 @@ export function RegistryExternalKeysPanel({
                 <Table.Td>{link.dataSourceCode}</Table.Td>
                 <Table.Td>{link.externalId}</Table.Td>
                 <Table.Td>{link.externalPath ?? ''}</Table.Td>
+                <Table.Td>
+                  {/* D-212: синк не знайшов елемент у повному знімку джерела — відтоді й досі. */}
+                  {link.missingInSourceSince != null && (
+                    <Badge color="statusWarning" variant="light" data-external-key-missing={link.id}>
+                      {t('registries.externalKeyMissingSince', {
+                        date: formatDateTime(link.missingInSourceSince),
+                      })}
+                    </Badge>
+                  )}
+                </Table.Td>
                 <Table.Td>
                   <Button size="xs" variant="subtle" color="statusError" onClick={() => setRemoving(link)}>
                     {t('registries.externalKeyRemove')}

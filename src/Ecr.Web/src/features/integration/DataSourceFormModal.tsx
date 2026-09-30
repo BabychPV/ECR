@@ -98,7 +98,8 @@ function draftOf(source: DataSource | null): Draft {
   return {
     code: source?.code ?? '',
     name: source === null ? '' : (source.nameL10n[language()] ?? dataSourceName(source)),
-    transport: source?.transport ?? 'PiWebApi',
+    // D-212: типовий транспорт нового з'єднання — PI SQL (views — основний канал), не PI Web API.
+    transport: source?.transport ?? 'PiSqlClient',
     endpoint: source?.endpoint ?? '',
     secondaryEndpoint: source?.secondaryEndpoint ?? '',
     catalog: source?.catalog ?? '',

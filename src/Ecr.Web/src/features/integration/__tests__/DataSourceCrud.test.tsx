@@ -236,7 +236,8 @@ describe("З'єднання: створення", () => {
     expect(post?.body).toEqual({
       code: 'LAB',
       nameL10n: { [language()]: 'Lab feed' },
-      transport: 'PiWebApi',
+      // D-212: транспорт не вибирали — типовий PI SQL (views — основний канал).
+      transport: 'PiSqlClient',
       endpoint: 'Server=lab;Database=Lims',
       secondaryEndpoint: null,
       catalog: 'Lims',
