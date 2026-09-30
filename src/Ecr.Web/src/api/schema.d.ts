@@ -9519,6 +9519,82 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/registries/{code}/entries/{id}/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Історія запису довідника (RT-15): хто, коли й що змінив — від найновішого. Право
+         *     `Registry.View` або грант `Read` на довідник.
+         * @description Джерело — системні версії запису й значень (`FOR SYSTEM_TIME ALL`), тож історію має будь-який
+         *     шлях запису: форма, пакет, CSV, синк. Видалений запис теж має історію; запис іншого довідника —
+         *     `404`.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Курсор попередньої сторінки. */
+                    cursor?: string;
+                    /** @description Розмір сторінки, 1…500. */
+                    limit?: number;
+                };
+                header?: never;
+                path: {
+                    /** @description Код довідника. */
+                    code: string;
+                    /** @description Запис. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PagedResultOfRegistryEntryHistoryItemDto"];
+                        "text/json": components["schemas"]["PagedResultOfRegistryEntryHistoryItemDto"];
+                        "text/plain": components["schemas"]["PagedResultOfRegistryEntryHistoryItemDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/registries/{code}/entries/{id}/validity": {
         parameters: {
             query?: never;
@@ -9567,6 +9643,87 @@ export interface paths {
                 };
             };
         };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/registries/{code}/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Експорт записів довідника в CSV або XLSX (RT-16): записи, чинні на `asOf`, посилання —
+         *     кодами. Право `Registry.View` або грант `Read` на довідник.
+         * @description Формат — `?format=csv|xlsx`; без нього — за `Accept` (`text/csv` або тип книги
+         *     Excel), інакше CSV. CSV приймає назад імпорт (`POST …/entries/import`) без змін. Стеля —
+         *     `Registries:ExportMaxRows` (50 000): понад неї — `422`, а не обрізаний файл.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description `csv` або `xlsx`. */
+                    format?: string;
+                    /** @description Бізнес-дата чинності; без неї — сьогодні (UTC). */
+                    asOf?: string;
+                };
+                header?: never;
+                path: {
+                    /** @description Код довідника. */
+                    code: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": components["schemas"]["FileResult"];
+                        "text/csv": components["schemas"]["FileResult"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": components["schemas"]["ProblemDetails"];
+                        "text/csv": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": components["schemas"]["ProblemDetails"];
+                        "text/csv": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": components["schemas"]["ProblemDetails"];
+                        "text/csv": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -10109,6 +10266,8 @@ export interface paths {
                     asOfUtc?: string;
                     /** @description Батько композиції або каскаду. */
                     parentEntryId?: number;
+                    /** @description Лише ці записи (параметр повторюється: `?id=1&amp;id=2`, ≤ 500). */
+                    id?: number[];
                     /** @description Підрядок коду, назви або текстового поля. */
                     q?: string;
                     /** @description Курсор попередньої сторінки. */
@@ -20614,6 +20773,19 @@ export interface components {
         };
         /** @description Сторінка результатів. Ендпоінтів, що повертають «усе», не існує —
          *     перевіряється архітектурним тестом. */
+        PagedResultOfRegistryEntryHistoryItemDto: {
+            /** @description Елементи сторінки. */
+            items: components["schemas"]["RegistryEntryHistoryItemDto"][];
+            /** @description Курсор наступної сторінки; `null` — кінець. */
+            nextCursor: null | string;
+            /**
+             * Format: int32
+             * @description Загальна кількість; `null`, якщо підрахунок дорогий.
+             */
+            totalCount: null | number;
+        };
+        /** @description Сторінка результатів. Ендпоінтів, що повертають «усе», не існує —
+         *     перевіряється архітектурним тестом. */
         PagedResultOfRegistryExternalKeyView: {
             /** @description Елементи сторінки. */
             items: components["schemas"]["RegistryExternalKeyView"][];
@@ -21260,8 +21432,23 @@ export interface components {
              * @description Наявний запис; `null` — новий (лише для `upsert`).
              */
             id: null | number;
+            /** @description Назва НОВОГО запису мовою за замовчуванням; порожньо — назва дорівнює коду. Для наявного запису
+             *     не приймається (`batchItemNewOnly`): перейменування — форма запису (`POST …/entries`). */
+            name?: null | string;
             /** @description `upsert` або `delete`. */
             op: string;
+            /**
+             * Format: date
+             * @description Перший чинний день НОВОГО запису; `null` — від початку. Для наявного запису не приймається:
+             *     зміна вікна перераховує посилання документів (`POST …/entries/{id}/validity`).
+             */
+            validFrom?: null | string;
+            /**
+             * Format: date
+             * @description Перший НЕчинний день НОВОГО запису; `null` — без обмеження. Порожнє вікно
+             *     (`validTo ≤ validFrom`) — помилка рядка в полі `@validity`.
+             */
+            validTo?: null | string;
             /** @description Значення за кодами полів; поле, якого немає, не змінюється. */
             values: null | {
                 [key: string]: unknown;
@@ -21491,6 +21678,35 @@ export interface components {
             validFrom: null | string;
             /** Format: date */
             validTo: null | string;
+        };
+        /** @description Рядок історії запису довідника (`GET /registries/{code}/entries/{id}/history`, RT-15). */
+        RegistryEntryHistoryItemDto: {
+            /**
+             * Format: date-time
+             * @description Момент зміни (UTC) — початок системної версії.
+             */
+            at: string;
+            /** @description Ім'я автора (`sec.User.DisplayName`, не логін — R-A2); `null` — невідомий. */
+            byDisplayName: null | string;
+            /**
+             * Format: int32
+             * @description Автор; `null` — невідомий (фонова задача без автора, рядок до міграції `RK03`).
+             */
+            byUserId: null | number;
+            /** @description Код поля для `value`; інакше `null`. */
+            field: null | string;
+            /** @description `created`, `value`, `name`, `validity`, `active`, `deleted`. */
+            kind: string;
+            /** @description Те саме для «стало». */
+            newDisplay?: null | string;
+            /** @description Стало, у тому самому поданні; `null` — значення прибрано. */
+            newValue: null | string;
+            /** @description Назва цілі `Lookup` або код одиниці поля `Unit` для «було»; інакше `null`. */
+            oldDisplay?: null | string;
+            /** @description Було: значення в поданні string? RegistryRowValueDto.Value (число без втрати знаків, дата
+             *     `yyyy-MM-dd`, `Lookup` — Id цілі); для `validity` — інтервал ISO 8601
+             *     `2026-01-01/2027-01-01` з `..` для відкритого кінця; `null` — не було. */
+            oldValue: null | string;
         };
         /** @description Ідентифікатор запису довідника. */
         RegistryEntryIdResponse: {
