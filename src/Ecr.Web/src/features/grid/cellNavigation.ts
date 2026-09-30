@@ -75,6 +75,14 @@ export function completeCellNavigation(seq: number): void {
   notify();
 }
 
+/** Скидає невиконаний запит: сторінка пішла, і пізніший монтаж не має «стрибати». */
+export function clearCellNavigation(): void {
+  if (current === null) return;
+
+  current = null;
+  notify();
+}
+
 export function subscribeCellNavigation(listener: () => void): () => void {
   listeners.add(listener);
 

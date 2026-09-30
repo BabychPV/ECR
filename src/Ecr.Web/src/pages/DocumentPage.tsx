@@ -1,4 +1,4 @@
-﻿import { lazy, Suspense, useEffect, useMemo, useState, type JSX } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useState, type JSX } from 'react';
 import { Badge, Button, Skeleton, Stack, Tabs, Text } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery } from '@tanstack/react-query';
@@ -124,6 +124,13 @@ type SheetTablesComponent = typeof import('@/features/grid/SheetTables')['SheetT
 interface GridModuleState {
   readonly component: SheetTablesComponent | null;
   readonly error: unknown;
+}
+
+// Невиконаний запит переходу до комірки не переживає сторінку (ФВ-5.6).
+function useClearCellNavigationOnUnmount(): void {
+  useEffect(() => () => {
+    void import('@/features/grid/cellNavigation').then((module) => { module.clearCellNavigation(); });
+  }, []);
 }
 
 function useSheetTablesModule(): GridModuleState & { readonly reload: () => void } {
@@ -386,6 +393,7 @@ export function DocumentPage(): JSX.Element {
   // ⚠ Викликається БЕЗУМОВНО і до будь-якого розгалуження показу: правило
   // хуків не знає про `AsyncBoundary` нижче.
   const gridModule = useSheetTablesModule();
+  useClearCellNavigationOnUnmount();
 
   /*
    * ⛔ Незбережені правки належать ДОКУМЕНТУ, а не сітці (`D14-12`). Хук

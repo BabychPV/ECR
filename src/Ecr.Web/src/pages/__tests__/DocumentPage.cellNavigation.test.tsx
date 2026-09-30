@@ -166,4 +166,28 @@ describe('DocumentPage: перехід від зауваження до комі
     );
     expect(screen.queryByTestId('grid-100')).toBeNull();
   });
+
+  it('невиконаний запит скидається, коли сторінка розмонтована', async () => {
+    mockFetch();
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+
+    const { unmount } = render(
+      <MantineProvider>
+        <MemoryRouter initialEntries={['/documents/1?periodKey=202401']}>
+          <QueryClientProvider client={client}>
+            <Routes>
+              <Route path="/documents/:id" element={<DocumentPage />} />
+            </Routes>
+          </QueryClientProvider>
+        </MemoryRouter>
+      </MantineProvider>,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: FindingText }));
+    await waitFor(() => expect(currentCellNavigation()).not.toBeNull());
+
+    unmount();
+
+    await waitFor(() => expect(currentCellNavigation()).toBeNull());
+  });
 });
