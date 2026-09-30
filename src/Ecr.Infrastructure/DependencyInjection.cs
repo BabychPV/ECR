@@ -408,6 +408,7 @@ public static class DependencyInjection
         services.AddScoped<IJobProgressStore, JobProgressStore>();
         services.AddScoped<ICollectionStore, CollectionStore>();
         services.AddScoped<ISourceEventMapStore, SourceEventMapStore>();
+        services.AddScoped<IRowWindowMapStore, RowWindowMapStore>(); // HSE301 A1
         services.AddScoped<ICollectionScheduleStore, CollectionScheduleStore>();
         services.AddScoped<IDataSourceStore, DataSourceStore>();
         services.AddScoped<ICollectionRunReader, CollectionRunReader>();

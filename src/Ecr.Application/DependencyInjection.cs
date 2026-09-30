@@ -405,6 +405,12 @@ public static class DependencyInjection
         services.AddScoped<Sources.UpdateSourceEventMapHandler>();
         services.AddScoped<Sources.DeleteSourceEventMapHandler>();
 
+        // HSE301 A1: CRUD прив'язок вікна рядка (ext.RowWindowMap).
+        services.AddScoped<Sources.ListRowWindowMapsHandler>();
+        services.AddScoped<Sources.CreateRowWindowMapHandler>();
+        services.AddScoped<Sources.UpdateRowWindowMapHandler>();
+        services.AddScoped<Sources.DeleteRowWindowMapHandler>();
+
         // BE-07: публічні дані екрана входу. Єдиний обробник, який НЕ перевіряє
         // жодного права — бо викликається до автентифікації; склад полів і
         // причина кожного з них — у самому файлі.

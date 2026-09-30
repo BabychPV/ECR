@@ -3109,6 +3109,33 @@ public interface ISourceEventMapStore
 > полів мапінгу спершу позначає старі поля й відповідності до видалення
 > (`ReleaseFields`), а вже потім `SourceEventMap.ReplaceFields` очищає колекцію.
 
+#### `IRowWindowMapStore` — прив'язки вікна рядка (HSE301 A1)
+
+Налаштування «атрибут PI → колонка, вікно = рядок» (`FEATURE-HSE301-VIEW` §4.4):
+`ext.RowWindowMap` із джерелами `ext.RowWindowSource`. Підтягування значень робить
+`RowWindowFetchJob`; порт обслуговує лише CRUD.
+
+| Маршрут | Право | Що робить |
+|---|---|---|
+| `GET row-window-maps?tableDefId=&sourceEntityId=`, `GET row-window-maps/{id}` | `Integration.View`/`Manage` | перелік (обидва фільтри необов'язкові; `sourceEntityId` — прив'язки, що мають джерело на цій сутності) і одна прив'язка з кодами колонок, джерелами й `rowVersion` |
+| `POST row-window-maps` | `Integration.Manage` + грант `Manage` на кожен проєкт, що використовує колонку-ціль | `201`; `404 ECR-INT-0405` (колонки), `ECR-UOM-0404` (одиниці), `ECR-INT-0404` (сутності джерела); `422 ECR-INT-0422` (`windowColumnsNotDate`, `targetNotDecimal`, `selectorNotInTable`, `rowWindowTargetNotInTable`, `rowWindowPolicyOutOfRange`, `rowWindowSelectorWithoutColumn`), `ECR-REQ-0422` (`rowWindowSourceInvalid`, `rowWindowSummaryUnknown`); `409 ECR-INT-0409` (`rowWindowTargetTaken`, `rowWindowSelectorTaken`) |
+| `PUT row-window-maps/{id}` | те саме | повна заміна вікна, селектора, згортки, порогів, `isActive` (пауза) і джерел; таблиця й колонка-ціль — ключ і не змінюються; `rowVersion` не збігається — `409 err.ECR-INT-0409.rowWindowConcurrency` |
+| `DELETE row-window-maps/{id}` | те саме | `204`; із записами провенансу (`ext.RowWindowValue`) — `409 err.ECR-INT-0409.rowWindowMapHasValues`, вихід — пауза |
+
+Слід кожної зміни — у `aud.StructureChange` (`ext.RowWindowMap`, `ФВ-12.10`).
+
+```csharp
+public interface IRowWindowMapStore
+{
+    public Task<RowWindowMap?> FindMapAsync(int id, CancellationToken ct);
+    public Task<IReadOnlyList<RowWindowMap>> ListMapsAsync(int? tableDefId, int? sourceEntityId, CancellationToken ct);
+    public Task<bool> TargetTakenAsync(int tableDefId, int targetColumnDefId, CancellationToken ct);
+    public void ReleaseSources(RowWindowMap map);             // до ClearSources: FK_RWS_Map обов'язковий
+    public Task<int> CountValuesAsync(int mapId, CancellationToken ct);
+    // … FindColumns/Add/Save/Remove — див. src/Ecr.Application/Ports/IRowWindowMapStore.cs
+}
+```
+
 > ⛔ **Джерела даних — без сховища секретів** (`BE-21`, пряме рішення людини на
 > `Q15-06`): «Windows-автентифікація службового облікового запису; секретів у
 > застосунку немає». Тому в `SaveDataSourceRequest` поля секрету НЕМАЄ і
@@ -3779,6 +3806,11 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/source-event-maps` | `Integration.Manage` | 7 |
 | `PUT` | `/api/v1/source-event-maps/{id}` | `Integration.Manage` | 7 |
 | `DELETE` | `/api/v1/source-event-maps/{id}` | `Integration.Manage` | 7 |
+| `GET` | `/api/v1/row-window-maps` | `Integration.View` | 7 |
+| `GET` | `/api/v1/row-window-maps/{id}` | `Integration.View` | 7 |
+| `POST` | `/api/v1/row-window-maps` | `Integration.Manage` | 7 |
+| `PUT` | `/api/v1/row-window-maps/{id}` | `Integration.Manage` | 7 |
+| `DELETE` | `/api/v1/row-window-maps/{id}` | `Integration.Manage` | 7 |
 | `GET` | `/api/v1/campaign/summary` | `Report.ViewCampaign` | 5 |
 | `GET` | `/api/v1/reports/snapshots` | `Report.ViewRegulatory` | 5 |
 | `POST` | `/api/v1/reports/snapshots/{id}/verify` | `Report.ViewRegulatory` | 5 |
