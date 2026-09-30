@@ -12,36 +12,15 @@ import {
   useComputedColorScheme,
 } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
-import { apiFetch } from '@/api/client';
 import type { TableDto } from '@/api/types';
 import { t } from '@/shared/i18n';
 import { localized } from '@/shared/i18n/localized';
 import { themeSurface } from '@/shared/theme/theme';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import type { ConditionalRule } from './conditionalFormat';
-import type { ConditionalFormatRuleDto } from './conditionalFormatApi';
+import { conditionalFormatsKey, getConditionalFormats } from './conditionalFormatApi';
 import { dataTypeLabel, rowKindLabel } from './enumLabels';
 import { buildTablePreview, cellLook, previewCellLook, type PreviewColumn } from './tablePreviewModel';
-
-/**
- * Ключ правил версії для перегляду. ⚠ Локальний і окремий від ключа редактора
- * правил: перегляд читає лише тіло (масив правил) і монтується наново з
- * кожним відкриттям діалогу, тож бачить щойно збережене.
- */
-export function tablePreviewRulesKey(templateVersionId: number): readonly ['templates', 'tablePreviewRules', number] {
-  return ['templates', 'tablePreviewRules', templateVersionId] as const;
-}
-
-/**
- * Правила версії — тіло `GET …/conditional-formats`. ⚠ Свій виклик, а не
- * `getConditionalFormats`: перегляду не потрібна версія набору (`ETag`), а
- * лише масив правил, форма якого в контракті стала.
- */
-function loadRules(templateVersionId: number): Promise<ConditionalFormatRuleDto[]> {
-  return apiFetch<ConditionalFormatRuleDto[]>(
-    `/api/v1/template-versions/${String(templateVersionId)}/conditional-formats`,
-  );
-}
 
 /** Коротко про правило. ⚠ Ключі — літерали (сторож каталогу бачить їх у коді). */
 function ruleSummary(rule: ConditionalRule): string {
@@ -110,8 +89,9 @@ export function TablePreview({
   const surface = themeSurface[scheme].body;
 
   const rules = useQuery({
-    queryKey: tablePreviewRulesKey(templateVersionId),
-    queryFn: () => loadRules(templateVersionId),
+    // Той самий ключ і виклик, що в редакторі правил: один кеш, одне джерело.
+    queryKey: conditionalFormatsKey(templateVersionId),
+    queryFn: () => getConditionalFormats(templateVersionId),
   });
 
   if (rules.error !== null) {
@@ -122,7 +102,7 @@ export function TablePreview({
     return <Skeleton height={160} radius="sm" data-table-preview="pending" />;
   }
 
-  const model = buildTablePreview(table, rules.data, localized);
+  const model = buildTablePreview(table, rules.data.rules, localized);
   const value = sample.trim().length === 0 ? null : sample;
 
   return (

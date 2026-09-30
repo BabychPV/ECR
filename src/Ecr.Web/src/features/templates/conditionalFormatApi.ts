@@ -24,6 +24,10 @@ export interface ConditionalFormatSet {
   readonly etag: string | null;
 }
 
+/** Ключ запиту правил версії: редактор, перегляд і збереження читають один кеш. */
+export const conditionalFormatsKey = (templateVersionId: number) =>
+  ["conditionalFormats", templateVersionId] as const;
+
 const url = (templateVersionId: number): string =>
   `/api/v1/template-versions/${String(templateVersionId)}/conditional-formats`;
 

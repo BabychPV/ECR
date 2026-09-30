@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import type { TableDto } from '@/api/types';
 import { themeSurface } from '@/shared/theme/theme';
 import type { ConditionalFormatRuleDto } from '../conditionalFormatApi';
-import { buildTablePreview, cellLook, MaxPreviewRows, previewCellLook, ruleOfDto } from '../tablePreviewModel';
+import { buildTablePreview, cellLook, MaxPreviewRows, previewCellLook } from '../tablePreviewModel';
+import { ruleFromWire } from '../conditionalFormat';
 
 /**
  * Модель попереднього перегляду таблиці шаблону (`ФВ-2.6`).
@@ -156,18 +157,19 @@ describe('buildTablePreview', () => {
   });
 });
 
-describe('ruleOfDto', () => {
-  it('null у полях — порожньо; невідомий оператор — null', () => {
-    expect(ruleOfDto(rule('A', { backgroundHex: null, foregroundHex: '#000000', value: null, operator: 'empty' }))).toEqual({
-      columnCode: 'A',
-      operator: 'empty',
-      value: '',
-      valueTo: '',
-      backgroundHex: '',
-      foregroundHex: '#000000',
-      isBold: false,
-    });
-    expect(ruleOfDto(rule('A', { operator: 'contains' }))).toBeNull();
+describe('правила з відповіді сервера (через спільний ruleFromWire)', () => {
+  it('null у полях — порожньо (правило лишається в колонці); невідомий оператор — не показується', () => {
+    const [col] = buildTablePreview(
+      { columns: [column('A', 0)], rows: [] },
+      [rule('A', { backgroundHex: null, foregroundHex: '#000000', value: null, operator: 'empty' })],
+      label,
+    ).columns;
+    expect(col?.rules).toEqual([ruleFromWire(rule('A', { backgroundHex: null, foregroundHex: '#000000', value: null, operator: 'empty' }))]);
+    expect(col?.rules[0]).toMatchObject({ value: '', valueTo: '', backgroundHex: '', foregroundHex: '#000000', isBold: false });
+
+    const unknown = buildTablePreview({ columns: [column('A', 0)], rows: [] }, [rule('A', { operator: 'contains' })], label);
+    expect(unknown.columns[0]?.rules).toEqual([]);
+    expect(unknown.ignoredRules).toBe(1);
   });
 });
 
@@ -180,19 +182,19 @@ describe('cellLook / previewCellLook', () => {
   });
 
   it('заливка + колір автора, що читається на ній; жирність', () => {
-    const look = cellLook(ruleOfDto(rule('A', { backgroundHex: '#ffff00', foregroundHex: '#000080', isBold: true })), light);
+    const look = cellLook(ruleFromWire(rule('A', { backgroundHex: '#ffff00', foregroundHex: '#000080', isBold: true })), light);
 
     expect(look).toEqual({ backgroundColor: '#ffff00', color: '#000080', fontWeight: 'bold' });
   });
 
   it('колір автора, що не читається на заливці, замінюється текстом теми', () => {
-    const look = cellLook(ruleOfDto(rule('A', { backgroundHex: '#ffff00', foregroundHex: '#ffffcc' })), light);
+    const look = cellLook(ruleFromWire(rule('A', { backgroundHex: '#ffff00', foregroundHex: '#ffffcc' })), light);
 
     expect(look.color).toBe(themeSurface.light.text);
   });
 
   it('без заливки темний колір автора не ставиться на темну поверхню', () => {
-    const noFill = ruleOfDto(rule('A', { backgroundHex: null, foregroundHex: '#1a1a1a', isBold: true }));
+    const noFill = ruleFromWire(rule('A', { backgroundHex: null, foregroundHex: '#1a1a1a', isBold: true }));
 
     expect(cellLook(noFill, light).color).toBe('#1a1a1a');
     expect(cellLook(noFill, dark).color).toBeUndefined();

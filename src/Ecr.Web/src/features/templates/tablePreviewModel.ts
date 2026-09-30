@@ -3,10 +3,9 @@ import type { ConditionalFormatRuleDto } from './conditionalFormatApi';
 import { AA, contrast } from '@/shared/theme/contrast';
 import { themeSurface } from '@/shared/theme/theme';
 import {
-  ConditionOperators,
   firstMatchingRule,
+  ruleFromWire,
   whyRuleIncomplete,
-  type ConditionOperator,
   type ConditionalRule,
 } from './conditionalFormat';
 
@@ -65,28 +64,6 @@ export interface TablePreviewModel {
  */
 export const MaxPreviewRows = 200;
 
-function isOperator(value: string): value is ConditionOperator {
-  return (ConditionOperators as readonly string[]).includes(value);
-}
-
-/**
- * Правило з відповіді сервера. `null` у полях — порожньо (колір теми, немає
- * операнда). Невідомий оператор — `null`: вгадувати його зміст клієнт не може.
- */
-export function ruleOfDto(dto: ConditionalFormatRuleDto): ConditionalRule | null {
-  if (!isOperator(dto.operator)) return null;
-
-  return {
-    columnCode: dto.columnCode,
-    operator: dto.operator,
-    value: dto.value ?? '',
-    valueTo: dto.valueTo ?? '',
-    backgroundHex: dto.backgroundHex ?? '',
-    foregroundHex: dto.foregroundHex ?? '',
-    isBold: dto.isBold,
-  };
-}
-
 function byOrdinal<T extends { readonly ordinal: number }>(key: (item: T) => string) {
   return (a: T, b: T): number => a.ordinal - b.ordinal || key(a).localeCompare(key(b));
 }
@@ -109,7 +86,7 @@ export function buildTablePreview(
   const own = rules.filter((rule) => table.columns.some((column) => column.code === rule.columnCode));
 
   const complete = own
-    .map(ruleOfDto)
+    .map(ruleFromWire)
     .filter((rule): rule is ConditionalRule => rule !== null && whyRuleIncomplete(rule) === null);
   const applied = complete.filter((rule) => codes.has(rule.columnCode));
 

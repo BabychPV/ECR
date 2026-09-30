@@ -29,6 +29,7 @@ import {
   type ConditionalRule,
 } from './conditionalFormat';
 import {
+  conditionalFormatsKey,
   getConditionalFormats,
   isStaleConditionalFormats,
   saveConditionalFormats,
@@ -64,7 +65,7 @@ function operatorLabel(operator: ConditionOperator): string {
 }
 
 /** Ключ запиту правил версії: редактор кожної таблиці читає той самий набір. */
-const rulesKey = (templateVersionId: number) => ['conditionalFormats', templateVersionId] as const;
+const rulesKey = conditionalFormatsKey;
 
 /**
  * Точка відліку чернетки: правила ЦІЄЇ таблиці, правила решти колонок версії
