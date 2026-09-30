@@ -224,6 +224,28 @@ public sealed class SourceEventLinkTests
         Assert.Throws<ArgumentOutOfRangeException>(() => link.RekeyTo(new string('x', SourceEventLink.MaxSourceEventIdLength + 1)));
     }
 
+    /// <remarks>
+    /// Мутаційний доказ (M6): у <c>Observe</c> замінити <c>?? PrimaryElement</c> на присвоєння без нього —
+    /// подія без елемента затре наявний ключ, і тест червоніє.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Directive", "HSE301-M6")]
+    public void Елемент_заповнюється_нормалізованим_і_порожнє_спостереження_його_не_стирає()
+    {
+        var link = Written();
+        Assert.Null(link.PrimaryElement);
+
+        link.RecordWritten(Closed() with { PrimaryElement = "  Flare A " }, Row, null, null, Now);
+        Assert.Equal("FLARE A", link.PrimaryElement);
+
+        link.RecordWritten(Closed(), Row, null, null, Now);
+        Assert.Equal("FLARE A", link.PrimaryElement);
+
+        Assert.Null(SourceEventLink.NormalizeElement("  "));
+        Assert.Equal(SourceEventLink.MaxPrimaryElementLength, SourceEventLink.NormalizeElement(new string('a', 300))!.Length);
+    }
+
     private static SourceEventLink Written()
         => SourceEventLink.FirstSeenWritten(Map, Closed(), Row, keptManualJson: null, unmappedJson: null, Now);
 

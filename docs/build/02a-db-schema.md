@@ -2274,6 +2274,7 @@ CREATE TABLE ext.SourceEventLink
     StartUtc          datetime2(3)  NOT NULL,
     EndUtc            datetime2(3)  NULL,       -- NULL — подія ще триває
     SourceModifiedUtc datetime2(3)  NULL,
+    PrimaryElement    nvarchar(200) NULL,       -- M6: первинний елемент (Location/Equipment), Trim + UPPER; NULL — старий зв'язок, заповнює синк
     Status            nvarchar(32)  NOT NULL,
     KeptManualJson    nvarchar(max) NULL,       -- коди колонок, лишених за людиною (D-118)
     UnmappedJson      nvarchar(max) NULL,       -- [{column, value}] без відповідника
@@ -2299,6 +2300,12 @@ GO
 
 -- Реєстр подій (§10.4): «з якої події цей рядок».
 CREATE INDEX IX_SEL_Row ON ext.SourceEventLink (TableInstanceId, RowKey);
+GO
+
+-- M6 (міграція HSE301M6SourceEventKey): повний природний ключ події — мапінг (= шаблон) + початок + первинний
+-- елемент. Фільтрований: старі зв'язки (PrimaryElement NULL) не входять і не переписуються.
+CREATE UNIQUE INDEX UX_SEL_NaturalKey ON ext.SourceEventLink (SourceEventMapId, StartUtc, PrimaryElement)
+    WHERE PrimaryElement IS NOT NULL;
 GO
 
 CREATE TABLE ext.ConsistencyRule

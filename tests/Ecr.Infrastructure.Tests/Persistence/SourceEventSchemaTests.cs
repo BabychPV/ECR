@@ -156,6 +156,45 @@ public sealed class SourceEventSchemaTests(SqlServerFixture sql)
         Assert.Contains("UQ_SEL_Event", error.InnerException?.Message, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// M6: <c>UX_SEL_NaturalKey</c> (мапінг, початок, елемент) — фільтрований унікальний. Мутація: прибрати
+    /// <c>IsUnique</c> чи <c>HasFilter</c> у <c>SourceEventLinkConfiguration</c> — червоніє.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "HSE301-M6")]
+    public async Task Повний_природний_ключ_унікальний_а_старі_зв_язки_без_елемента_співіснують()
+    {
+        var arranged = await ArrangeAsync();
+        var mapId = await SavedMapIdAsync(arranged);
+        var oldA = new SourceEventObservation("old-a", "Flaring", Now, Now.AddMinutes(15), Now);
+        var oldB = new SourceEventObservation("old-b", "Flaring", Now, Now.AddMinutes(15), Now);
+
+        await using (var db = sql.CreateContext())
+        {
+            // Два зв'язки без елемента з однаковим початком (старі рядки) — фільтр їх не чіпає.
+            db.SourceEventLinks.Add(SourceEventLink.FirstSeenUnwritten(mapId, oldA, SourceEventLinkStatus.PeriodNotOpen, Now));
+            db.SourceEventLinks.Add(SourceEventLink.FirstSeenUnwritten(mapId, oldB, SourceEventLinkStatus.PeriodNotOpen, Now));
+            db.SourceEventLinks.Add(SourceEventLink.FirstSeenUnwritten(
+                mapId, oldA with { SourceEventId = "on-a", PrimaryElement = " flare a " }, SourceEventLinkStatus.PeriodNotOpen, Now));
+            db.SourceEventLinks.Add(SourceEventLink.FirstSeenUnwritten(
+                mapId, oldA with { SourceEventId = "on-b", PrimaryElement = "Flare B" }, SourceEventLinkStatus.PeriodNotOpen, Now));
+            await db.SaveChangesAsync();
+        }
+
+        Assert.Equal(
+            ["FLARE A", "FLARE B"],
+            await QueryAsync($"SELECT PrimaryElement FROM ext.SourceEventLink WHERE SourceEventMapId = {mapId} AND PrimaryElement IS NOT NULL ORDER BY PrimaryElement"));
+
+        await using var again = sql.CreateContext();
+        again.SourceEventLinks.Add(SourceEventLink.FirstSeenUnwritten(
+            mapId, oldA with { SourceEventId = "dup", PrimaryElement = "FLARE A" }, SourceEventLinkStatus.PeriodNotOpen, Now));
+
+        var error = await Assert.ThrowsAsync<DbUpdateException>(() => again.SaveChangesAsync());
+        Assert.Contains("UX_SEL_NaturalKey", error.InnerException?.Message, StringComparison.Ordinal);
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]

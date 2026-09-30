@@ -10,12 +10,18 @@ namespace Ecr.Domain.Entities.External;
 /// <param name="StartUtc">Початок, UTC.</param>
 /// <param name="EndUtc">Кінець, UTC, виключно; <c>null</c> — подія ще триває.</param>
 /// <param name="SourceModifiedUtc">Остання зміна події в джерелі.</param>
+/// <param name="PrimaryElement">
+/// Первинний елемент події (Location/Equipment); зв'язок зберігає його ключовий вигляд
+/// (<see cref="SourceEventLink.NormalizeElement"/>). <c>null</c> — джерело не дало чи ключ
+/// неоднозначний: наявне значення зв'язку не змінюється.
+/// </param>
 public sealed record SourceEventObservation(
     string SourceEventId,
     string? EventName,
     DateTime StartUtc,
     DateTime? EndUtc,
-    DateTime? SourceModifiedUtc);
+    DateTime? SourceModifiedUtc,
+    string? PrimaryElement = null);
 
 /// <summary>Рядок документа, у який лягла подія.</summary>
 /// <param name="PeriodKey">Період екземпляра таблиці.</param>
@@ -59,6 +65,9 @@ public sealed class SourceEventLink : Entity<long>
 
     /// <summary>Довжина назви події; довша обрізається — це підпис, а не ключ.</summary>
     public const int MaxEventNameLength = 400;
+
+    /// <summary>Довжина ключового вигляду первинного елемента.</summary>
+    public const int MaxPrimaryElementLength = 200;
 
     /// <summary>Довжина ключа рядка — як <c>doc.TableRow.RowKey</c>.</summary>
     public const int MaxRowKeyLength = 100;
@@ -138,6 +147,12 @@ public sealed class SourceEventLink : Entity<long>
     public DateTime? EndUtc { get; private set; }
 
     public DateTime? SourceModifiedUtc { get; private set; }
+
+    /// <summary>
+    /// Первинний елемент події (Location/Equipment) у ключовому вигляді — частина повного природного
+    /// ключа (HSE301 M6, <c>UX_SEL_NaturalKey</c>); <c>null</c> — старий зв'язок чи ключ неоднозначний.
+    /// </summary>
+    public string? PrimaryElement { get; private set; }
 
     public SourceEventLinkStatus Status { get; private set; }
 
@@ -285,6 +300,20 @@ public sealed class SourceEventLink : Entity<long>
         LastSyncAt = nowUtc;
     }
 
+    /// <summary>Ключовий вигляд первинного елемента: без країв, верхній регістр, до 200 знаків; порожній — <c>null</c>.</summary>
+    /// <param name="element">Елемент, як його дало джерело.</param>
+    /// <returns>Ключ чи <c>null</c>.</returns>
+    public static string? NormalizeElement(string? element)
+    {
+        if (string.IsNullOrWhiteSpace(element))
+        {
+            return null;
+        }
+
+        var key = element.Trim().ToUpperInvariant();
+        return key.Length > MaxPrimaryElementLength ? key[..MaxPrimaryElementLength] : key;
+    }
+
     /// <summary>
     /// Джерело перестворило подію з новим ID: зв'язок (і його рядок) лишається, ключем стає новий ID
     /// (HSE301 A5b — EFID лише кеш, зіставлення за природним ключем).
@@ -326,6 +355,7 @@ public sealed class SourceEventLink : Entity<long>
         StartUtc = observation.StartUtc;
         EndUtc = observation.EndUtc;
         SourceModifiedUtc = observation.SourceModifiedUtc;
+        PrimaryElement = NormalizeElement(observation.PrimaryElement) ?? PrimaryElement;
         LastSeenAt = nowUtc;
     }
 

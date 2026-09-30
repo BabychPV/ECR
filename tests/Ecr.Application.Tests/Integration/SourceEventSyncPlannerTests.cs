@@ -262,6 +262,123 @@ public sealed class SourceEventSyncPlannerTests
         Assert.Equal("first", Assert.Single(plan.Items).Event.Name);
     }
 
+    // ── Повний природний ключ (HSE301 M6) ────────────────────────────────────
+    // Мутації: (а) крок 1 MatchByNaturalKey прибрати — червоніє Повний_ключ_зіставляє_за_елементом_при_різних_назвах;
+    // (б) у кроці 2 прибрати фільтр candidates (l.PrimaryElement is null || …) — червоніє Зв_язок_з_іншим_елементом_не_зіставляється_слабким_ключем;
+    // (в) ElementToStore завжди повертає element — червоніє Двозначний_ключ_елемента_не_записується.
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Directive", "HSE301-M6")]
+    public void Повний_ключ_розрізняє_події_з_однаковими_початком_і_назвою_на_різних_елементах()
+    {
+        var onA = Linked("OLD-A", "EF-OLD-A", element: "FLARE A");
+        var onB = Linked("OLD-B", "EF-OLD-B", element: "FLARE B");
+
+        // Обидві події перестворені з новими ID; без елемента в ключі вони були б двозначні й не зіставились.
+        var plan = Plan(
+            [Ev("NEW-B", Start, Start.AddMinutes(15), element: " flare b "), Ev("NEW-A", Start, Start.AddMinutes(15), element: "Flare A")],
+            [onA, onB]);
+
+        Assert.Equal(
+            [("NEW-B", "EF-OLD-B", true), ("NEW-A", "EF-OLD-A", true)],
+            plan.Items.Select(i => (i.Event.EventId, i.RowKey, i.IsRekey)));
+        Assert.Empty(plan.Missing);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Directive", "HSE301-M6")]
+    public void Повний_ключ_зіставляє_за_елементом_при_різних_назвах()
+    {
+        var old = Linked("OLD", "EF-OLD", name: "Old name", element: "FLARE A");
+
+        var item = Assert.Single(Plan([Ev("NEW", Start, Start.AddMinutes(15), name: "Renamed", element: "flare a")], [old]).Items);
+
+        Assert.Equal((true, false, "EF-OLD"), (item.IsRekey, item.IsCreate, item.RowKey));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Directive", "HSE301-M6")]
+    public void Інший_елемент_не_є_тією_самою_подією_навіть_з_однаковою_назвою()
+    {
+        var old = Linked("OLD", "EF-OLD", element: "FLARE A");
+
+        var plan = Plan([Ev("NEW", Start, Start.AddMinutes(15), element: "Flare B")], [old]);
+
+        Assert.True(Assert.Single(plan.Items).IsCreate);
+        Assert.Equal(["OLD"], plan.Missing.Select(m => m.SourceEventId));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Directive", "HSE301-M6")]
+    public void Старий_зв_язок_без_елемента_зіставляється_слабким_ключем_і_отримує_елемент()
+    {
+        var old = Linked("OLD", "EF-OLD");
+
+        var item = Assert.Single(Plan([Ev("NEW", Start, Start.AddMinutes(15), element: "Flare A")], [old]).Items);
+
+        Assert.Equal((true, "EF-OLD", "FLARE A"), (item.IsRekey, item.RowKey, item.ElementToStore));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Directive", "HSE301-M6")]
+    public void Зв_язок_з_іншим_елементом_не_зіставляється_слабким_ключем()
+    {
+        // Той самий початок і назва, але елементи відомі й різні: слабкий ключ тут злив би різні події.
+        var old = Linked("OLD", "EF-OLD", element: "FLARE A");
+
+        var item = Assert.Single(Plan([Ev("NEW", Start, Start.AddMinutes(15), element: "Flare B")], [old]).Items);
+
+        Assert.False(item.IsRekey);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Directive", "HSE301-M6")]
+    public void Два_старі_зв_язки_без_елемента_на_двох_нових_подіях_лишаються_двозначними()
+    {
+        var plan = Plan(
+            [Ev("N1", Start, Start.AddMinutes(15), element: "A"), Ev("N2", Start, Start.AddMinutes(15), element: "B")],
+            [Linked("O1", "EF-O1")]);
+
+        Assert.All(plan.Items, i => Assert.True(i.IsCreate));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Directive", "HSE301-M6")]
+    public void Двозначний_ключ_елемента_не_записується()
+    {
+        // Дві події одного елемента з одним початком (різні назви): унікальний індекс не витримав би обох.
+        var plan = Plan(
+            [Ev("E1", Start, Start.AddMinutes(15), name: "a", element: "FLARE A"),
+             Ev("E2", Start, Start.AddMinutes(20), name: "b", element: "FLARE A"),
+             Ev("E3", Start.AddHours(1), Start.AddHours(2), element: "FLARE A")],
+            []);
+
+        Assert.Equal([null, null, "FLARE A"], plan.Items.Select(i => i.ElementToStore));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Directive", "HSE301-M6")]
+    public void Ключ_яким_уже_володіє_інший_зв_язок_не_записується()
+    {
+        var other = Linked("OTHER", "EF-OTHER", element: "FLARE A");
+
+        // OTHER повернувся за ID з новим початком, але в базі ще тримає (Start, FLARE A).
+        var plan = Plan(
+            [Ev("E1", Start, Start.AddMinutes(15), element: "Flare A"),
+             Ev("OTHER", Start.AddHours(1), Start.AddHours(2), element: "Flare A")],
+            [other]);
+
+        Assert.Equal([null, "FLARE A"], plan.Items.Select(i => i.ElementToStore));
+    }
+
     // ── Помічники ────────────────────────────────────────────────────────────
 
     private static SourceEventSyncPlan Plan(IReadOnlyList<SourceEvent> events, IReadOnlyList<SourceEventLinkState> links)
@@ -300,8 +417,9 @@ public sealed class SourceEventSyncPlannerTests
         DateTime? end,
         string? name = "Flaring",
         string? parent = null,
-        IReadOnlyList<SourceEventAttribute>? attrs = null)
-        => new(id, "FlareEvent", name, start, end, null, null, parent, attrs ?? []);
+        IReadOnlyList<SourceEventAttribute>? attrs = null,
+        string? element = null)
+        => new(id, "FlareEvent", name, start, end, null, element, parent, attrs ?? []);
 
     private static SourceEventAttribute Attribute(string name, string value)
         => new(name, SourceEventAttributeScope.Event, null, value, null);
@@ -312,6 +430,7 @@ public sealed class SourceEventSyncPlannerTests
         int periodKey = 202601,
         DateTime? start = null,
         string? name = "Flaring",
-        SourceEventLinkStatus status = SourceEventLinkStatus.Synced)
-        => new(id, name, start ?? Start, status, periodKey, 10, rowKey);
+        SourceEventLinkStatus status = SourceEventLinkStatus.Synced,
+        string? element = null)
+        => new(id, name, start ?? Start, status, periodKey, 10, rowKey, element);
 }

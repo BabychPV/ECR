@@ -299,7 +299,7 @@ public sealed class SourceEventSyncJob(
         Dictionary<string, SourceEventLink> linkByEventId)
     {
         var ev = item.Event;
-        var observation = new SourceEventObservation(ev.EventId, ev.Name, ev.StartUtc, ev.EndUtc, ev.ModifiedUtc);
+        var observation = new SourceEventObservation(ev.EventId, ev.Name, ev.StartUtc, ev.EndUtc, ev.ModifiedUtc, item.ElementToStore);
 
         if (link is not null && item.IsRekey)
         {
@@ -688,7 +688,8 @@ public sealed class SourceEventSyncJob(
             link.Status,
             link.PeriodKey,
             link.TableInstanceId,
-            link.RowKey);
+            link.RowKey,
+            link.PrimaryElement);
 
     private static string Text(int value) => value.ToString(CultureInfo.InvariantCulture);
 

@@ -1,6 +1,7 @@
 // src/Ecr.Application/Integration/SourceEvents/SourceEventSyncPlanner.cs
 using System.Globalization;
 using Ecr.Application.Ports;
+using Ecr.Domain.Entities.External;
 using Ecr.Domain.Enums;
 
 namespace Ecr.Application.Integration.SourceEvents;
@@ -41,6 +42,7 @@ public sealed record SourceEventPeriodTarget(int PeriodKey, PeriodState State, l
 /// <param name="PeriodKey">Період рядка; <c>null</c> — рядка немає.</param>
 /// <param name="TableInstanceId">Екземпляр таблиці рядка; <c>null</c> — рядка немає.</param>
 /// <param name="RowKey">Ключ рядка; <c>null</c> — рядка немає.</param>
+/// <param name="PrimaryElement">Первинний елемент у ключовому вигляді; <c>null</c> — старий зв'язок (M6).</param>
 public sealed record SourceEventLinkState(
     string SourceEventId,
     string? EventName,
@@ -48,7 +50,8 @@ public sealed record SourceEventLinkState(
     SourceEventLinkStatus Status,
     int? PeriodKey,
     long? TableInstanceId,
-    string? RowKey)
+    string? RowKey,
+    string? PrimaryElement = null)
 {
     /// <summary>Чи прив'язано рядок документа.</summary>
     public bool HasRow => TableInstanceId is not null;
@@ -83,12 +86,17 @@ public sealed record SourceEventSyncInput(
 /// <param name="Link">Наявний зв'язок (за ID чи за природним ключем); <c>null</c> — подію бачимо вперше.</param>
 /// <param name="RowKey">Ключ рядка: наявного зв'язку, інакше <c>EF-…</c> від ID події.</param>
 /// <param name="Target">Період початку події; <c>null</c> — його немає.</param>
+/// <param name="ElementToStore">
+/// Ключовий вигляд первинного елемента, який зв'язок має записати (M6); <c>null</c> — джерело його не дало
+/// чи ключ «початок + елемент» неоднозначний (інша подія чи зв'язок несе той самий) — тоді не пишемо.
+/// </param>
 public sealed record SourceEventPlanItem(
     SourceEvent Event,
     SourceEventAction Action,
     SourceEventLinkState? Link,
     string RowKey,
-    SourceEventPeriodTarget? Target)
+    SourceEventPeriodTarget? Target,
+    string? ElementToStore = null)
 {
     /// <summary>Чи створюється новий рядок (а не оновлюється наявний).</summary>
     public bool IsCreate => Action == SourceEventAction.Write && Link is not { HasRow: true };
@@ -167,7 +175,8 @@ public static class SourceEventSyncPlanner
         foreach (var ev in roots)
         {
             var link = byId.GetValueOrDefault(ev.EventId) ?? rekeyed.GetValueOrDefault(ev.EventId);
-            items.Add(Decide(ev, link, input.PeriodOf));
+            var decided = Decide(ev, link, input.PeriodOf);
+            items.Add(decided with { ElementToStore = ElementToStore(ev, link, roots, input.Links) });
         }
 
         var claimed = rekeyed.Values.Select(l => l.SourceEventId).ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -263,26 +272,81 @@ public static class SourceEventSyncPlanner
     private static Dictionary<string, SourceEventLinkState> MatchByNaturalKey(
         List<SourceEvent> roots, Dictionary<string, SourceEventLinkState> byId, HashSet<string> returned)
     {
-        var fresh = roots
-            .Where(e => !byId.ContainsKey(e.EventId))
-            .GroupBy(e => NaturalKey(e.StartUtc, e.Name))
-            .ToDictionary(g => g.Key, g => g.ToList());
-
-        var orphans = byId.Values
-            .Where(l => !returned.Contains(l.SourceEventId))
-            .GroupBy(l => NaturalKey(l.StartUtc, l.EventName))
-            .ToDictionary(g => g.Key, g => g.ToList());
-
+        var fresh = roots.Where(e => !byId.ContainsKey(e.EventId)).ToList();
+        var orphans = byId.Values.Where(l => !returned.Contains(l.SourceEventId)).ToList();
         var result = new Dictionary<string, SourceEventLinkState>(StringComparer.OrdinalIgnoreCase);
-        foreach (var (key, events) in fresh)
+        var taken = new HashSet<SourceEventLinkState>();
+
+        // Крок 1 — ПОВНИЙ ключ: початок до мс + первинний елемент (шаблон — сам мапінг). Лише пара
+        // «один до одного» з обох боків; подія без елемента чи зв'язок без елемента в ньому не беруть участі.
+        var freshFull = fresh
+            .Where(e => ElementKey(e) is not null)
+            .GroupBy(e => (RoundToMillisecond(e.StartUtc).Ticks, ElementKey(e)))
+            .Where(g => g.Count() == 1)
+            .ToDictionary(g => g.Key, g => g.Single());
+        var orphanFull = orphans
+            .Where(l => l.PrimaryElement is not null)
+            .GroupBy(l => (RoundToMillisecond(l.StartUtc).Ticks, (string?)l.PrimaryElement))
+            .Where(g => g.Count() == 1)
+            .ToDictionary(g => g.Key, g => g.Single());
+        foreach (var (key, ev) in freshFull)
         {
-            if (events.Count == 1 && orphans.TryGetValue(key, out var candidates) && candidates.Count == 1)
+            if (orphanFull.TryGetValue(key, out var link) && taken.Add(link))
             {
-                result[events[0].EventId] = candidates[0];
+                result[ev.EventId] = link;
+            }
+        }
+
+        // Крок 2 — слабкий ключ (початок до мс + назва без регістру) для решти: зв'язки, записані до M6
+        // (елемент NULL), і події без елемента. Зв'язок із ІНШИМ елементом сюди не потрапляє.
+        var freshWeak = fresh
+            .Where(e => !result.ContainsKey(e.EventId))
+            .GroupBy(e => NaturalKey(e.StartUtc, e.Name))
+            .Where(g => g.Count() == 1)
+            .ToDictionary(g => g.Key, g => g.Single());
+        var orphanWeak = orphans.Where(l => !taken.Contains(l)).GroupBy(l => NaturalKey(l.StartUtc, l.EventName));
+        foreach (var group in orphanWeak)
+        {
+            if (!freshWeak.TryGetValue(group.Key, out var ev))
+            {
+                continue;
+            }
+
+            var candidates = group
+                .Where(l => l.PrimaryElement is null || ElementKey(ev) is null)
+                .ToList();
+            if (candidates.Count == 1)
+            {
+                result[ev.EventId] = candidates[0];
             }
         }
 
         return result;
+    }
+
+    private static string? ElementKey(SourceEvent ev) => SourceEventLink.NormalizeElement(ev.PrimaryElementPath);
+
+    /// <summary>
+    /// Елемент, який зв'язок запише (заповнення старих рядків м'яко, через синк): лише коли ключ
+    /// «початок + елемент» однозначний серед подій прогону й серед інших зв'язків мапінгу —
+    /// унікальний індекс <c>UX_SEL_NaturalKey</c> не має право впасти посеред збереження прогону.
+    /// </summary>
+    private static string? ElementToStore(
+        SourceEvent ev, SourceEventLinkState? link, List<SourceEvent> roots, IReadOnlyList<SourceEventLinkState> links)
+    {
+        var element = ElementKey(ev);
+        if (element is null)
+        {
+            return null;
+        }
+
+        var start = RoundToMillisecond(ev.StartUtc);
+        var sameInRun = roots.Count(r => RoundToMillisecond(r.StartUtc) == start
+                                         && string.Equals(ElementKey(r), element, StringComparison.Ordinal));
+        var heldByOther = links.Any(l => !ReferenceEquals(l, link)
+                                         && string.Equals(l.PrimaryElement, element, StringComparison.Ordinal)
+                                         && RoundToMillisecond(l.StartUtc) == start);
+        return sameInRun == 1 && !heldByOther ? element : null;
     }
 
     private static (long Start, string Name) NaturalKey(DateTime startUtc, string? name)

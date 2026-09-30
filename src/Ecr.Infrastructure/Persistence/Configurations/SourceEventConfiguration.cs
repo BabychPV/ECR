@@ -151,9 +151,16 @@ public sealed class SourceEventLinkConfiguration : IEntityTypeConfiguration<Sour
         builder.Property(x => x.SourceEventId).HasMaxLength(SourceEventLink.MaxSourceEventIdLength).IsRequired();
         builder.Property(x => x.RowKey).HasMaxLength(SourceEventLink.MaxRowKeyLength);
         builder.Property(x => x.EventName).HasMaxLength(SourceEventLink.MaxEventNameLength);
+        builder.Property(x => x.PrimaryElement).HasMaxLength(SourceEventLink.MaxPrimaryElementLength);
         builder.Property(x => x.Status).HasConversion<string>().HasMaxLength(32).IsRequired();
         builder.Property(x => x.RowVersion).IsRowVersion();
         builder.Ignore(x => x.HasRow);
+
+        // ⛔ Повний природний ключ події (HSE301 M6): мапінг (= шаблон) + початок + первинний елемент.
+        // Фільтр — старі зв'язки (елемент NULL) в індекс не входять і не переписуються.
+        builder.HasIndex(x => new { x.SourceEventMapId, x.StartUtc, x.PrimaryElement })
+               .IsUnique().HasDatabaseName("UX_SEL_NaturalKey")
+               .HasFilter("[PrimaryElement] IS NOT NULL");
 
         // ⛔ Одна подія джерела — один зв'язок у межах мапінгу: повтор синхронізації
         // не дублює ні зв'язку, ні рядка (§4.7.4, крок 2).
