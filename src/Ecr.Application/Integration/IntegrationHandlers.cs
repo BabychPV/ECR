@@ -202,7 +202,7 @@ public sealed class GetJobStatusHandler(
 
         var createdByUserId = await jobs.GetCreatedByUserIdAsync(jobId, ct).ConfigureAwait(false);
 
-        if (!profile.Has(Permission))
+        if (!PermissionCheck.IsGranted(profile, Permission))
         {
             if (createdByUserId != userId)
             {
@@ -491,7 +491,7 @@ public sealed class RestartJobHandler(
         // задачі»); чужу чи системну (автор `null`) — лише з правом.
         var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
 
-        if (!profile.Has(GetJobStatusHandler.Permission))
+        if (!PermissionCheck.IsGranted(profile, GetJobStatusHandler.Permission))
         {
             var ownerId = await jobs.GetCreatedByUserIdAsync(jobId, ct).ConfigureAwait(false);
 
@@ -633,7 +633,7 @@ public sealed class CancelJobHandler(
 
         var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
 
-        if (!profile.Has(GetJobStatusHandler.Permission))
+        if (!PermissionCheck.IsGranted(profile, GetJobStatusHandler.Permission))
         {
             // Автор скасовує СВОЮ задачу без `System.ViewHealth`; чужу — ні.
             // ⚠ `null` (системна задача за розкладом) автором не є нікому:

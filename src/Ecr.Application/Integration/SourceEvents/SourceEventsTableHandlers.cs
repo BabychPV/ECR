@@ -133,8 +133,8 @@ public sealed class ListSourceEventsHandler(
         }
 
         var entity = await sources.FindSourceEntityAsync(filter.SourceEntityId, ct).ConfigureAwait(false);
-        var integrationReader = profile.Has(ListDataSourcesHandler.Permission)
-                                || profile.Has(SaveDataSourceHandler.Permission);
+        var integrationReader = PermissionCheck.IsGranted(profile, ListDataSourcesHandler.Permission)
+                                || PermissionCheck.IsGranted(profile, SaveDataSourceHandler.Permission);
         if (entity is null)
         {
             if (integrationReader)
