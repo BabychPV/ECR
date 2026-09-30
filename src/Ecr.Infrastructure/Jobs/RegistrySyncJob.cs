@@ -11,6 +11,7 @@ using Ecr.Domain.Entities.Dictionaries;
 using Ecr.Domain.Entities.External;
 using Ecr.Domain.Entities.Integration;
 using Ecr.Domain.Enums;
+using Ecr.Domain.Errors;
 using Ecr.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -66,6 +67,16 @@ public interface IRegistrySyncJob
 /// повернулась, повторно не пишеться — ознаки «розв'язано» журнал не має.
 /// </para>
 /// <para>
+/// ⚠ Елемент, чий GUID уже прив'язаний у цьому джерелі до запису ІНШОГО довідника
+/// (<c>UQ_RegistryExternalKey</c>), у план не йде зовсім — ні створення, ні перепривʼязки: лише
+/// подія <see cref="CollectionCoverage.RegistryElementUnlinked"/> з
+/// <c>err.ECR-REG-0409.externalKeyTaken</c>, без Id чужого запису.
+/// </para>
+/// <para>
+/// ⚠ Поле <c>Lookup</c> з довідником-ціллю (<c>RegistryFieldDef.RefRegistryDefId</c>) приходить КОДОМ
+/// запису (<c>D-212</c> (5)): коди розв'язуються в Id одним запитом на довідник до планування.
+/// </para>
+/// <para>
 /// ⚠ «Останній автор — людина» (<c>D-118</c>): автор є і це не <c>svc-integration</c>, АБО автор
 /// невідомий (<c>null</c> — значення до RT-04). Невідомий = людина: значення лишається, подія
 /// <see cref="CollectionCoverage.RegistryConflictKeptManual"/> (дефолт координатора).
@@ -84,6 +95,9 @@ public sealed class RegistrySyncJob(
 {
     /// <summary>Префікс ключа дедупу в <c>Details</c> події.</summary>
     public const string DedupKeyPrefix = "; key=";
+
+    /// <summary>Ключ каталогу: GUID елемента вже прив'язаний у цьому джерелі до іншого запису.</summary>
+    public const string ExternalKeyTakenKey = "err.ECR-REG-0409.externalKeyTaken";
 
     private const string SourceUnavailable = "ECR-INT-0503";
 
@@ -143,20 +157,32 @@ public sealed class RegistrySyncJob(
 
         var entries = await EntriesAsync(links, mappings, ct).ConfigureAwait(false);
 
-        var plan = RegistrySyncPlanner.Plan(new RegistrySyncInput(
+        // GUID, прив'язаний у цьому джерелі до ІНШОГО довідника, — не наш елемент: створити чи
+        // перепривʼязати його означало б порушити UQ_RegistryExternalKey або вкрасти чужий зв'язок.
+        var foreign = await ForeignAsync(dataSource.Id, snapshot.Elements, links, ct).ConfigureAwait(false);
+
+        var input = new RegistrySyncInput(
             registryDefId,
             registry.SourceKind,
             snapshot.IsComplete,
-            snapshot.Elements,
+            [.. snapshot.Elements.Where(e => !foreign.Contains(e.ExternalId))],
             links,
             entries,
-            mappings));
+            mappings);
+
+        // D-212 (5): коди записів інших довідників → Id, одним запитом на довідник.
+        var lookupCodes = await ResolveCodesAsync(RegistrySyncPlanner.LookupCodes(input), ct).ConfigureAwait(false);
+        var plan = RegistrySyncPlanner.Plan(input with { LookupCodes = lookupCodes });
 
         var now = clock.UtcNow;
         var events = new List<SyncEvent>();
 
         events.AddRange(snapshot.Rejections.Select(r => new SyncEvent(
             CollectionCoverage.RegistryValueRejected, r, KeyOf(CollectionCoverage.RegistryValueRejected, r, value: string.Empty))));
+        events.AddRange(snapshot.Elements
+            .Where(e => foreign.Contains(e.ExternalId))
+            .OrderBy(e => e.ExternalId, StringComparer.Ordinal)
+            .Select(e => Foreign(e.ExternalId)));
         events.AddRange(plan.Events.Select(Event));
 
         // TODO PR-6: перепривʼязку задача ще не виконує — доти журнал той самий, що до
@@ -405,14 +431,74 @@ public sealed class RegistrySyncJob(
 
         // Поле чужого довідника пропускається: мапінг на нього відхиляє вже
         // створення мапінгу (S3), а писати в чужий довідник синк не має права.
+        // ⚠ RefRegistryDefId поля Lookup — атрибут несе КОД запису (D-212 (5)).
         return [.. maps
             .Where(m => fields.ContainsKey(m.TargetRegistryFieldDefId!.Value))
             .Select(m =>
             {
                 var field = fields[m.TargetRegistryFieldDefId!.Value];
                 return new RegistrySyncFieldMapping(
-                    field.Id, field.Code, field.DataType, field.UnitId, m.SourceField, m.IsActive);
+                    field.Id, field.Code, field.DataType, field.UnitId, m.SourceField, m.IsActive,
+                    field.DataType == CellDataType.Lookup ? field.RefRegistryDefId : null);
             })];
+    }
+
+    /// <summary>Коди записів інших довідників → Id: живі записи, регістронезалежно (як колація бази).</summary>
+    private async Task<IReadOnlyDictionary<int, IReadOnlyDictionary<string, long>>> ResolveCodesAsync(
+        IReadOnlyList<RegistrySyncLookupCode> codes, CancellationToken ct)
+    {
+        var resolved = new Dictionary<int, IReadOnlyDictionary<string, long>>();
+
+        foreach (var group in codes.GroupBy(c => c.RegistryDefId))
+        {
+            var registryDefId = group.Key;
+            var map = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var chunk in group.Select(c => c.Code).Chunk(ChunkSize))
+            {
+                var list = chunk.ToList();
+                var rows = await db.RegistryEntries
+                    .AsNoTracking()
+                    .Where(e => e.RegistryDefId == registryDefId && !e.IsDeleted && list.Contains(e.Code))
+                    .Select(e => new { e.Code, e.Id })
+                    .ToListAsync(ct)
+                    .ConfigureAwait(false);
+
+                foreach (var row in rows)
+                {
+                    map.TryAdd(row.Code, row.Id);
+                }
+            }
+
+            resolved[registryDefId] = map;
+        }
+
+        return resolved;
+    }
+
+    /// <summary>GUID елементів знімка, прив'язані в цьому джерелі до записів ІНШИХ довідників.</summary>
+    private async Task<HashSet<string>> ForeignAsync(
+        int dataSourceId,
+        IReadOnlyList<RegistrySyncSourceElement> elements,
+        IReadOnlyList<RegistrySyncLink> links,
+        CancellationToken ct)
+    {
+        var own = links.Select(l => l.ExternalId).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var candidates = elements.Select(e => e.ExternalId).Where(id => !own.Contains(id)).ToList();
+        var taken = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var chunk in candidates.Chunk(ChunkSize))
+        {
+            var list = chunk.ToList();
+            taken.UnionWith(await db.RegistryExternalKeys
+                .AsNoTracking()
+                .Where(k => k.DataSourceId == dataSourceId && list.Contains(k.ExternalId))
+                .Select(k => k.ExternalId)
+                .ToListAsync(ct)
+                .ConfigureAwait(false));
+        }
+
+        return taken;
     }
 
     /// <summary>Знімок джерела: елементи під коренем сутності й поточні значення змаплених атрибутів.</summary>
@@ -663,6 +749,18 @@ public sealed class RegistrySyncJob(
             : $"source={Text(e.SourceValue)}; error={e.ErrorCode}; messageKey={e.MessageKey}";
 
         return new SyncEvent(status, string.Join("; ", parts), KeyOf(status, subject, value));
+    }
+
+    /// <summary>Елемент з GUID, прив'язаним до запису іншого довідника цього джерела.</summary>
+    private static SyncEvent Foreign(string externalId)
+    {
+        var status = CollectionCoverage.RegistryElementUnlinked;
+
+        return new SyncEvent(
+            status,
+            Truncate($"element={externalId}; error={ErrorCodes.RegistryEntryInUse}; messageKey={ExternalKeyTakenKey}; "
+                     + "not linked (taken by another registry)"),
+            KeyOf(status, $"element={externalId}; foreign", "taken"));
     }
 
     private static SyncEvent Pending(RegistrySyncUpdate u)

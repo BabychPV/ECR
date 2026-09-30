@@ -453,12 +453,23 @@ public sealed class RegistrySyncApplyTests(SqlServerFixture sql)
             await RunAsync(provider, stand);
 
             // ⛔ Зв'язок чужого довідника в план не йде: ні значення, ні ревізії B, ні шляху ключа,
-            // ні аудиту, ні подій на XB. (Для A елемент gx — просто неприв'язаний: подія
+            // ні аудиту, ні подій на XB. (Для A елемент gx — неприв'язаний: подія
             // RegistryElementUnlinked без запису — законна.)
             Assert.Equal(before, await ForeignFingerprintAsync(xb, registryB, capB, stand.SvcId));
-            Assert.DoesNotContain(
-                await EventsAsync(stand.EntityId),
-                e => e.Details!.Split("; ").Contains($"entry={xb}"));
+            var events = await EventsAsync(stand.EntityId);
+            Assert.DoesNotContain(events, e => e.Details!.Split("; ").Contains($"entry={xb}"));
+
+            // ⛔ D-212 PR-6: A НЕ створює й не перепривʼязує запис для gx — GUID уже тримає довідник B
+            // (UQ_RegistryExternalKey). Лише подія «ключ зайнято», без Id чужого запису.
+            await using (var db = Context())
+            {
+                Assert.False(await db.RegistryEntries.AnyAsync(e => e.RegistryDefId == stand.RegistryId && e.Code == "StackX"));
+                Assert.Equal(1, await db.RegistryExternalKeys.CountAsync(k => k.DataSourceId == stand.DataSourceId && k.ExternalId == gx));
+            }
+
+            var taken = Assert.Single(
+                events, e => e.Status == CollectionCoverage.RegistryElementUnlinked && e.Details!.Contains($"element={gx}", StringComparison.Ordinal));
+            Assert.Contains($"messageKey={RegistrySyncJob.ExternalKeyTakenKey}", taken.Details, StringComparison.Ordinal);
 
             // Контроль: записи самого A оновлено.
             Assert.Equal(V(30m, stand.SvcId), (await CapValuesAsync(stand))[stand.E2]);
@@ -526,8 +537,11 @@ public sealed class RegistrySyncApplyTests(SqlServerFixture sql)
         await db.SaveChangesAsync();
 
         var cap = new RegistryFieldDef(registry.Id, EcrCode.Create("CAP"), Text("Capacity"), CellDataType.Decimal, 1);
+
+        // ⚠ REF без довідника-цілі (RefRegistryDefId = null): джерело дає Id, і відмову дає САМ
+        // writer (lookupEntryNotFound). З ціллю атрибут ніс би КОД (D-212 (5)), і відмова була б
+        // планувальника — це RegistrySyncExecuteTests.
         var reference = new RegistryFieldDef(registry.Id, EcrCode.Create("REF"), Text("Ref"), CellDataType.Lookup, 2);
-        reference.PointTo(registry.Id);
         if (keyed is not null)
         {
             // Поле первинного ключа обов'язкове (D-153).
