@@ -38,12 +38,18 @@ namespace Ecr.Infrastructure.Jobs;
 /// <item><term>правило періоду вимагає підтвердження</term><description><b>не</b> писати; <c>SkippedNeedsConfirmation</c></description></item>
 /// <item><term>комірка порожня або від інтеграції</term><description>записати</description></item>
 /// </list>
+///
+/// ⚠ HSE301 A4: записане (<c>Applied &gt; 0</c>) ставить автоперерахунок документа
+/// за період (<see cref="ICalculationTrigger"/>) — один раз на прогін, у кінці.
+/// <c>recalculation</c> необов'язковий лише для прямого конструювання в тестах
+/// запису; контейнер його завжди передає (<c>// HSE301:A4</c> у <c>DependencyInjection</c>).
 /// </remarks>
 public sealed class MaterializeCollectedDataJob(
     EcrDbContext db,
     ICellPatcher patcher,
     ICoverageJournal coverage,
-    IntegrationActor actor) : IMaterializeCollectedDataJob
+    IntegrationActor actor,
+    ICalculationTrigger? recalculation = null) : IMaterializeCollectedDataJob
 {
     /// <summary>Код задачі в черзі.</summary>
     public static string Code => "materialize-collected";
@@ -244,6 +250,17 @@ public sealed class MaterializeCollectedDataJob(
         if (events.Count > 0)
         {
             await coverage.RecordManyAsync(events, ct).ConfigureAwait(false);
+        }
+
+        // ⛔ HSE301 A4 (V-5): нові числа в комірках — перерахунок методологій.
+        // ОДИН виклик на прогін, після всього запису, і ДО відмови за одиницями:
+        // записані поля вже в документі, і відмова задачі за іншим мапінгом не
+        // скасовує того, що їх треба перерахувати. Нуль записаного — нуль задач.
+        // Закритий період сюди не доходить (гілка стану вище), а тригер
+        // перевіряє правило вдруге (`RecalculationWritePolicy`).
+        if (written.Applied > 0 && recalculation is not null)
+        {
+            await recalculation.RequestAsync(task.DocumentId, periodKey, ct).ConfigureAwait(false);
         }
 
         // ⛔ Після запису решти: несумісна одиниця одного мапінгу не зупиняє
