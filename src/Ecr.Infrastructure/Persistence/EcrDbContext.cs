@@ -35,6 +35,7 @@ public sealed class EcrDbContext(DbContextOptions<EcrDbContext> options)
     public DbSet<HeaderFieldDef> HeaderFieldDefs => Set<HeaderFieldDef>();
     public DbSet<RowDef> RowDefs => Set<RowDef>();
     public DbSet<StyleDef> StyleDefs => Set<StyleDef>();
+    public DbSet<ConditionalFormatRule> ConditionalFormatRules => Set<ConditionalFormatRule>();
     public DbSet<FormulaDef> FormulaDefs => Set<FormulaDef>();
     public DbSet<FormulaDependency> FormulaDependencies => Set<FormulaDependency>();
     public DbSet<ValidationRule> ValidationRules => Set<ValidationRule>();

@@ -235,3 +235,35 @@ BEGIN
     END
 END;
 GO
+
+-- ФВ-2.6/2.7: правила умовного форматування належать структурі версії —
+-- у Published/Deprecated (Status 1, 2) незмінні, як формули (50003/50004).
+CREATE OR ALTER TRIGGER cfg.TR_ConditionalFormatRule_Immutable
+ON cfg.ConditionalFormatRule
+AFTER INSERT, UPDATE, DELETE
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF EXISTS (
+        SELECT 1
+        FROM inserted i
+        JOIN cfg.TemplateVersion v ON v.Id = i.TemplateVersionId
+        WHERE v.Status IN (1, 2)
+          AND NOT EXISTS (SELECT 1 FROM deleted d WHERE d.Id = i.Id)
+    )
+    BEGIN
+        THROW 50004, N'Додати правило умовного форматування в опубліковану або виведену з обігу версію заборонено [ECR-TMPL-0409 structurallyFrozen] (ФВ-2.7).', 1;
+    END
+
+    IF EXISTS (
+        SELECT 1
+        FROM deleted d
+        JOIN cfg.TemplateVersion v ON v.Id = d.TemplateVersionId
+        WHERE v.Status IN (1, 2)
+    )
+    BEGIN
+        THROW 50003, N'Зміна або видалення правила умовного форматування в опублікованій або виведеній з обігу версії заборонені [ECR-TMPL-0409 structurallyFrozen] (ФВ-2.7).', 1;
+    END
+END;
+GO
