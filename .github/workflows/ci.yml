@@ -49,10 +49,11 @@ permissions:
 # заповнюється відповідями на код, якого вже немає.
 concurrency:
   # ✎ 2026-09-29 (пряме рішення людини): для dev/integration і #463 група за SHA — GitHub тримає в групі лише один очікуваний прогін, і новий витісняв попередній; тепер кожен пуш має свій вердикт
-  group: ci-${{ (github.ref == 'refs/heads/dev/integration' || github.event.pull_request.number == 463) && github.sha || github.ref }}
+  # ✎ 2026-09-30: умова не за номером PR, а за pull_request з гілки dev/integration — номер PR змінюється після кожного мержу (#463→#464)
+  group: ci-${{ (github.event_name == 'pull_request' && github.head_ref == 'dev/integration' && github.event.pull_request.head.repo.full_name == github.repository) && github.event.pull_request.head.sha || github.ref }}
   # ✎ 2026-09-29 (пряме рішення людини): на dev/integration і PR #463 — не скасовувати,
   # щоб кожен пуш отримав власний вердикт; на lane/** — скасовувати, як і раніше.
-  cancel-in-progress: ${{ !(github.ref == 'refs/heads/dev/integration' || github.event.pull_request.number == 463) }}
+  cancel-in-progress: ${{ !(github.event_name == 'pull_request' && github.head_ref == 'dev/integration' && github.event.pull_request.head.repo.full_name == github.repository) }}
 
 env:
   DOTNET_NOLOGO: 'true'
