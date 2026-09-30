@@ -78,6 +78,7 @@ import {
   type CellNavigationRequest,
 } from './cellNavigation';
 import { GridFormulaBar } from './GridFormulaBar';
+import { useOutOfWindowMarks } from './outOfWindowMarks';
 import {
   columnTotals,
   isTotalsRow,
@@ -686,6 +687,10 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
   // або виправлено.
   const rejections = usePendingRejections(tableInstanceId, periodKey);
 
+  // ⚠ `ФВ-2.16`: комірки, які сервер записав за `Warn` поза вікном доступу
+  // (`PatchCellsResponse.outOfWindow`, `outOfWindowMarks.ts`).
+  const outOfWindow = useOutOfWindowMarks(tableInstanceId, periodKey);
+
   // ⚠ Лічильник змін історії. Стек живе в `ref` — інакше кожна правка
   // перестворювала б його і губила глибину; але тоді React не знає, що
   // «можна скасувати» змінилося, і кнопки лишалися б назавжди сірими.
@@ -1002,6 +1007,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
             lookupPending,
             units.data ?? null,
             navigatedCell,
+            outOfWindow,
           ),
     [
       data,
@@ -1015,6 +1021,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
       lookupPending,
       units.data,
       navigatedCell,
+      outOfWindow,
     ],
   );
 
@@ -2184,6 +2191,9 @@ export function gridColumns(
   // ⛔ `ФВ-5.6`: комірка, до якої щойно перейшли від зауваження перевірки
   // (`cellNavigation.ts`); `null` — підсвічувати нічого.
   navigatedCell: string | null = null,
+
+  // ⛔ `ФВ-2.16`, `D-239`: комірки, записані за `Warn` поза вікном доступу.
+  outOfWindow: ReadonlySet<string> = new Set(),
 ): ColumnRegular[] {
   // ⚠ Тип оголошений ЯВНО, а не виведений із `map`. Без нього лямбди
   // всередині (`readonly`, `cellProperties`, `cellTemplate`) втрачають
@@ -2399,6 +2409,12 @@ export function gridColumns(
         // переходу до неї.
         const navigationClass = navigatedCell === key ? 'ecr-cell-nav-target' : null;
 
+        // ⛔ `ФВ-2.16`: значок «правка поза вікном» — теж маркер ПОВЕРХ стану.
+        // Причина продубльована текстом у `title`, не лише знаком.
+        const isOutOfWindow = outOfWindow.has(key);
+        const outOfWindowClass = isOutOfWindow ? 'ecr-cell-out-of-window' : null;
+        const outOfWindowHint = isOutOfWindow ? t('grid.outOfWindowHint') : null;
+
         // ⛔ Директива registry-lookup / cell-style, PR B2: оформлення
         // автора шаблону — ШАР ПІД будь-яким станом (`cellStateOf` вище),
         // не заміна: рахується ЗАВЖДИ, незалежно від того, чи спрацював
@@ -2434,6 +2450,7 @@ export function gridColumns(
           requiredInputClass === null &&
           saveErrorClass === null &&
           navigationClass === null &&
+          outOfWindowClass === null &&
           appearance === undefined
         ) {
           return numericClass === null
@@ -2458,7 +2475,13 @@ export function gridColumns(
 
         // Стан доступний і ТЕКСТОМ, не лише кольором/формою: причина заборони
         // чи незаповненого входу вже є на сервері — читалка має її почути.
-        const hint = [decision.hint, submittedHint, requiredInputMessage, saveErrorMessage]
+        const hint = [
+          decision.hint,
+          submittedHint,
+          requiredInputMessage,
+          saveErrorMessage,
+          outOfWindowHint,
+        ]
           .filter((part) => !!part)
           .join(' ');
 
@@ -2471,6 +2494,7 @@ export function gridColumns(
             requiredInputClass,
             saveErrorClass,
             navigationClass,
+            outOfWindowClass,
             numericClass,
             appearanceClass,
           ]
@@ -2480,6 +2504,7 @@ export function gridColumns(
           // ⚠ Атрибут окремо від класу: тест читає саме його і тому доводить
           // розрізнення станів, не залежачи від жодного кольору (`ФВ-14.18`).
           ...(state === null ? {} : { 'data-cell-state': state }),
+          ...(isOutOfWindow ? { 'data-out-of-window': 'true' } : {}),
 
           // ⚠ Підказка СТАНУ має першість над підказкою ЗНАЧЕННЯ, і це
           // вибір, а не випадок: `title` на елементі один, а «сервер
