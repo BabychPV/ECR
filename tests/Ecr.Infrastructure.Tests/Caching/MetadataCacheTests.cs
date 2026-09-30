@@ -92,7 +92,6 @@ public sealed class MetadataCacheTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
-    [Trait("Requirement", "ФВ-12.7")]
     public async Task Кеш_метаданих_пише_промах_а_потім_влучання()
     {
         var doc = await ArrangeAsync();

@@ -16,7 +16,6 @@ public sealed class CacheHitRatioMetricTests
 {
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
-    [Trait("Requirement", "ФВ-12.7")]
     public async Task Профіль_доступу_перший_виклик_промах_повторний_влучання()
     {
         using var capture = new InfrastructureMetricsCapture();

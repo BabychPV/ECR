@@ -27,7 +27,6 @@ public sealed class JobFailedMetricTests
 {
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
-    [Trait("Requirement", "ФВ-12.7")]
     public async Task JobWorker_провал_без_ретраїв_дає_один_ecr_job_failed_з_кодом_і_причиною()
     {
         var code = typeof(WorkerFailingJob).FullName!;
@@ -42,7 +41,6 @@ public sealed class JobFailedMetricTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
-    [Trait("Requirement", "ФВ-12.7")]
     public async Task JobWorker_успішна_задача_метрику_провалу_не_пише()
     {
         var code = typeof(WorkerOkJob).FullName!;
@@ -55,7 +53,6 @@ public sealed class JobFailedMetricTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
-    [Trait("Requirement", "ФВ-12.7")]
     public async Task QuartzJobAdapter_остаточний_провал_дає_один_ecr_job_failed()
     {
         var code = typeof(QuartzFailingJob).FullName!;
@@ -70,7 +67,6 @@ public sealed class JobFailedMetricTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
-    [Trait("Requirement", "ФВ-12.7")]
     public async Task QuartzJobAdapter_успіх_метрику_провалу_не_пише()
     {
         var code = typeof(QuartzOkJob).FullName!;
