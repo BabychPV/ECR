@@ -88,6 +88,13 @@ const CompositionEditorPage = lazy(async () => ({
 }));
 
 /**
+ * Вплив правки довідника (RT-25) — лінивий чанк; заходять із переліку довідників, не з навбару.
+ */
+const RegistryImpactPage = lazy(async () => ({
+  default: (await import('@/features/registries/impact/RegistryImpactPage')).RegistryImpactPage,
+}));
+
+/**
  * Межа очікування для маршрутів поза каркасом.
  *
  * ⚠ Сторінка входу рендериться поза `AppLayout`, тобто поза його `<Suspense>`.
@@ -316,6 +323,11 @@ export const router = createBrowserRouter([
             path: relativePath(routes.adminRegistryComposition, 'admin'),
             element: guarded(routes.adminRegistryComposition.handle, <CompositionEditorPage />),
             handle: routes.adminRegistryComposition.handle,
+          },
+          {
+            path: relativePath(routes.adminRegistryImpact, 'admin'),
+            element: guarded(routes.adminRegistryImpact.handle, <RegistryImpactPage />),
+            handle: routes.adminRegistryImpact.handle,
           },
           {
             path: relativePath(routes.adminMethodologies, 'admin'),
