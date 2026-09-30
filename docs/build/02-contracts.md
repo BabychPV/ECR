@@ -2766,6 +2766,21 @@ public interface IRegistrySnapshotLoader
 }
 ```
 
+#### `IRegistryUseStore`
+
+Ребра `cfg.RegistryUse` формул версії методології (`SourceKind = 1`, RT-23b,
+FEATURE-REGISTRY-TABLES §5.8): публікація версії переписує їх цілком — прибирає всі ребра
+версії й ставить у чергу нові; зберігає `IUnitOfWork` публікації тим самим `SaveChanges`.
+Правила довідника (`SourceKind = 2`) — `IRegistryStore.ReplaceRuleUsesAsync`.
+
+```csharp
+public interface IRegistryUseStore
+{
+    public Task ReplaceMethodologyUsesAsync(
+        int methodologyVersionId, IReadOnlyCollection<RegistryUse> uses, CancellationToken ct);
+}
+```
+
 #### `IReportDefinitionStore`
 
 Описи звітів (rpt.ReportDef) та їхні версії.

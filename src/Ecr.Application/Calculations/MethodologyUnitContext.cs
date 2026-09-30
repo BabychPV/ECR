@@ -24,21 +24,33 @@ public sealed class MethodologyUnitContext : IUnitContext
     private readonly Dictionary<string, int?> _formulas = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<int, byte> _dimensions = [];
     private readonly UnitCatalogSnapshot _units;
+    private readonly IReadOnlyDictionary<string, string> _formulaRegistries;
 
     /// <summary>Складає джерело з констант і формул версії та довідника одиниць.</summary>
     /// <param name="constants">Усі константи версії, включно з рядками на речовину й дату.</param>
     /// <param name="formulas">Формули версії.</param>
     /// <param name="units">Довідник одиниць.</param>
+    /// <param name="registries">
+    /// Форми довідників — одиниці полів <c>ROW.a.b</c>/<c>REGFIELD</c> і агрегатів
+    /// (перевірка 20, RT-23b); <c>null</c> — версія довідників не читає.
+    /// </param>
+    /// <param name="formulaRegistries">
+    /// Довідник запису, який дає формула (<c>!CASE</c>), — для <c>REGFIELD(!CASE, 'T_C')</c>.
+    /// </param>
     public MethodologyUnitContext(
         IReadOnlyList<MethodologyConstant> constants,
         IReadOnlyList<MethodologyFormula> formulas,
-        UnitCatalogSnapshot units)
+        UnitCatalogSnapshot units,
+        IRegistryShapeSource? registries = null,
+        IReadOnlyDictionary<string, string>? formulaRegistries = null)
     {
         ArgumentNullException.ThrowIfNull(constants);
         ArgumentNullException.ThrowIfNull(formulas);
         ArgumentNullException.ThrowIfNull(units);
 
         _units = units;
+        Registries = registries;
+        _formulaRegistries = formulaRegistries ?? new Dictionary<string, string>();
 
         // ⚠ Константа з тим самим кодом буває кількома рядками (на речовину, на
         // вікно чинності). Якщо їхні одиниці розходяться, одиниця `CST.x` у
@@ -60,6 +72,13 @@ public sealed class MethodologyUnitContext : IUnitContext
             _dimensions[unit.Id] = unit.DimensionId;
         }
     }
+
+    /// <inheritdoc />
+    public IRegistryShapeSource? Registries { get; }
+
+    /// <inheritdoc />
+    public string? GetFormulaRegistry(string code)
+        => code is not null && _formulaRegistries.TryGetValue(code, out var registry) ? registry : null;
 
     /// <inheritdoc />
     /// <remarks>Діалект методологій посилань на комірки не має (парсер їх відхиляє).</remarks>
