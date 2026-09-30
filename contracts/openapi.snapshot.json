@@ -3679,6 +3679,115 @@
           "InsufficientGrantLevel"
         ]
       },
+      "EffectiveAccessContribution": {
+        "description": "Один внесок у підсумковий рівень: яка роль, яким призначенням і що саме дала.",
+        "properties": {
+          "counted": {
+            "description": "Чи бере участь внесок у підсумковий рівень профілю.",
+            "type": "boolean"
+          },
+          "isDeny": {
+            "description": "Явна заборона.",
+            "type": "boolean"
+          },
+          "level": {
+            "$ref": "#/components/schemas/GrantLevel",
+            "description": "Рівень: у гранта — його рівень, у права — той, який воно відкриває для довідника."
+          },
+          "permissionCode": {
+            "description": "Код права для `Permission`; для `Grant` — `null`.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "principalSid": {
+            "description": "SID групи, через яку прийшла роль; `null` — призначена особисто.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "roleCode": {
+            "description": "Код ролі.",
+            "type": "string"
+          },
+          "scope": {
+            "description": "`Unscoped` — призначення без області; `InScope` — область містить проєкт; `Narrowed` —\n        область звужена аркушами чи періодами (D-214) і рівня проєкту не піднімає; `OutOfScope` — область\n        ресурсу не містить (чи для цього виду ресурсу не діє); `Expired` — призначення не чинне на дату.",
+            "type": "string"
+          },
+          "source": {
+            "description": "`Grant` — ресурсний грант ролі; `Permission` — глобальне функціональне право ролі.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "roleCode",
+          "principalSid",
+          "permissionCode",
+          "level",
+          "isDeny",
+          "scope",
+          "counted"
+        ],
+        "type": "object"
+      },
+      "EffectiveAccessView": {
+        "description": "Розріз «ресурс → підсумковий рівень → який грант якої ролі його дав» (ФВ-6.16, D-220).",
+        "properties": {
+          "contributions": {
+            "description": "Усі внески, включно з тими, що не порахувалися.",
+            "items": {
+              "$ref": "#/components/schemas/EffectiveAccessContribution"
+            },
+            "type": "array"
+          },
+          "denyReason": {
+            "description": "`ExplicitDeny` або `NoGrant`; `null` — рівень є.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "groupsFromTicket": {
+            "description": "Чи враховані групи сесії; для чужого запису — ні (`P-02`).",
+            "type": "boolean"
+          },
+          "isDenied": {
+            "description": "Чи є явна заборона, що перекриває все.",
+            "type": "boolean"
+          },
+          "level": {
+            "$ref": "#/components/schemas/GrantLevel",
+            "description": "Підсумковий рівень — той, що дає профіль доступу (`AccessProfile`)."
+          },
+          "resource": {
+            "description": "Ресурс у формі запиту: `Registry:5`.",
+            "type": "string"
+          },
+          "userId": {
+            "description": "Людина.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "userName": {
+            "description": "Ім'я входу.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "userId",
+          "userName",
+          "resource",
+          "level",
+          "isDenied",
+          "denyReason",
+          "groupsFromTicket",
+          "contributions"
+        ],
+        "type": "object"
+      },
       "EntityFieldMapDto": {
         "description": "Мапінг у відповіді на створення.",
         "properties": {
@@ -31613,6 +31722,118 @@
           }
         },
         "summary": "Починає сеанс симуляції. Право `Security.Simulate`.",
+        "tags": [
+          "Security"
+        ]
+      }
+    },
+    "/api/v1/security/users/{id}/effective-access": {
+      "get": {
+        "description": "⚠ Нічого не вирішує: підсумковий рівень дає той самий профіль доступу, що й усі рішення,\nа внески (роль, призначення, область, заборона) лише пояснюють його.",
+        "parameters": [
+          {
+            "description": "Обліковий запис, доступ якого пояснюємо.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Ресурс: `Registry:{id}` або `Project:{id}`.",
+            "in": "query",
+            "name": "resource",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EffectiveAccessView"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EffectiveAccessView"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/EffectiveAccessView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Розріз «ресурс → підсумковий рівень → який грант якої ролі його дав» (ФВ-6.16, D-220).\nПраво `Security.ManageUsers`.",
         "tags": [
           "Security"
         ]

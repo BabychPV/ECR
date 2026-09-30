@@ -11581,6 +11581,88 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/security/users/{id}/effective-access": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Розріз «ресурс → підсумковий рівень → який грант якої ролі його дав» (ФВ-6.16, D-220).
+         *     Право `Security.ManageUsers`.
+         * @description ⚠ Нічого не вирішує: підсумковий рівень дає той самий профіль доступу, що й усі рішення,
+         *     а внески (роль, призначення, область, заборона) лише пояснюють його.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Ресурс: `Registry:{id}` або `Project:{id}`. */
+                    resource?: string;
+                };
+                header?: never;
+                path: {
+                    /** @description Обліковий запис, доступ якого пояснюємо. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["EffectiveAccessView"];
+                        "text/json": components["schemas"]["EffectiveAccessView"];
+                        "text/plain": components["schemas"]["EffectiveAccessView"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/security/users/{id}/groups": {
         parameters: {
             query?: never;
@@ -18317,6 +18399,49 @@ export interface components {
          * @enum {unknown}
          */
         EditDenyReason: "None" | "NoGrant" | "PeriodNotOpenYet" | "PeriodClosed" | "OutOfAccessWindow" | "DocumentSubmitted" | "DocumentApproved" | "ColumnReadOnly" | "RowReadOnly" | "CalculatedCell" | "ProjectArchived" | "ArchivingInProgress" | "BusinessRule" | "SimulationReadOnly" | "OutsidePermitWindow" | "InsufficientGrantLevel";
+        /** @description Один внесок у підсумковий рівень: яка роль, яким призначенням і що саме дала. */
+        EffectiveAccessContribution: {
+            /** @description Чи бере участь внесок у підсумковий рівень профілю. */
+            counted: boolean;
+            /** @description Явна заборона. */
+            isDeny: boolean;
+            /** @description Рівень: у гранта — його рівень, у права — той, який воно відкриває для довідника. */
+            level: components["schemas"]["GrantLevel"];
+            /** @description Код права для `Permission`; для `Grant` — `null`. */
+            permissionCode: null | string;
+            /** @description SID групи, через яку прийшла роль; `null` — призначена особисто. */
+            principalSid: null | string;
+            /** @description Код ролі. */
+            roleCode: string;
+            /** @description `Unscoped` — призначення без області; `InScope` — область містить проєкт; `Narrowed` —
+             *             область звужена аркушами чи періодами (D-214) і рівня проєкту не піднімає; `OutOfScope` — область
+             *             ресурсу не містить (чи для цього виду ресурсу не діє); `Expired` — призначення не чинне на дату. */
+            scope: string;
+            /** @description `Grant` — ресурсний грант ролі; `Permission` — глобальне функціональне право ролі. */
+            source: string;
+        };
+        /** @description Розріз «ресурс → підсумковий рівень → який грант якої ролі його дав» (ФВ-6.16, D-220). */
+        EffectiveAccessView: {
+            /** @description Усі внески, включно з тими, що не порахувалися. */
+            contributions: components["schemas"]["EffectiveAccessContribution"][];
+            /** @description `ExplicitDeny` або `NoGrant`; `null` — рівень є. */
+            denyReason: null | string;
+            /** @description Чи враховані групи сесії; для чужого запису — ні (`P-02`). */
+            groupsFromTicket: boolean;
+            /** @description Чи є явна заборона, що перекриває все. */
+            isDenied: boolean;
+            /** @description Підсумковий рівень — той, що дає профіль доступу (`AccessProfile`). */
+            level: components["schemas"]["GrantLevel"];
+            /** @description Ресурс у формі запиту: `Registry:5`. */
+            resource: string;
+            /**
+             * Format: int32
+             * @description Людина.
+             */
+            userId: number;
+            /** @description Ім'я входу. */
+            userName: string;
+        };
         /** @description Мапінг у відповіді на створення. */
         EntityFieldMapDto: {
             aggregation: null | components["schemas"]["AggregationKind"];
