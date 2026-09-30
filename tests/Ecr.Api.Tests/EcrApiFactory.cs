@@ -191,6 +191,13 @@ public sealed class EcrApiFactory(SqlServerFixture sql, int stampCacheSeconds = 
                 .AddHttpClient<PiWebApiDataSource>()
                 .ConfigurePrimaryHttpMessageHandler(() => new OfflineSourceHandler(SourceCalls, SourceRequests));
 
+            // ⚠ Джерело без секрету (або з секретом `Negotiate`) ходить ОКРЕМИМ
+            // іменованим клієнтом Windows-автентифікації (PiWebApiAuthentication):
+            // без цієї підміни стенд пішов би в справжню мережу.
+            services
+                .AddHttpClient(PiWebApiAuthentication.NegotiateClientName)
+                .ConfigurePrimaryHttpMessageHandler(() => new OfflineSourceHandler(SourceCalls, SourceRequests));
+
             // ⚠ Решта строків — з конфігурації, як у проді; підмінюється лише
             // вікно ревізії. Пізніша реєстрація виграє в `GetRequiredService`.
             if (revisionWindow is { } window)
