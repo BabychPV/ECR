@@ -3225,6 +3225,17 @@ GO
 > `.ToTable(t => t.HasTrigger("..."))` у конфігурації EF — інакше `SaveChanges`
 > падає в рантаймі (ТЗ §13.5 п.1).
 
+> ✎ **2026-09-30, D5.** Текст нижче — початковий контракт (лише `Status = 1` і
+> лише `UPDATE`). **Чинний текст — `Sql/10-triggers.sql`**: заморожена версія —
+> `Status IN (1, 2)` (Published і Deprecated); тригери `TR_ColumnDef_Immutable`,
+> `TR_RowDef_Immutable`, `TR_FormulaDef_Immutable` стоять на
+> `INSERT, UPDATE, DELETE`; версія перевіряється за СТАРОЮ і НОВОЮ таблицею
+> (перенесення `TableDefId`). Номери `THROW`: `50001` колонка (UPDATE), `50002`
+> рядок (UPDATE), `50003` формула (UPDATE/DELETE), `50004` INSERT у заморожену
+> версію, `50005` DELETE колонки/рядка; текст несе ключ
+> `[ECR-TMPL-0409 structurallyFrozen]`. Дозволено: усе в Draft; презентаційні
+> поля колонки/рядка в будь-якому стані. Тести — `FrozenVersionTriggerTests`.
+
 ```sql
 CREATE OR ALTER TRIGGER cfg.TR_ColumnDef_Immutable
 ON cfg.ColumnDef

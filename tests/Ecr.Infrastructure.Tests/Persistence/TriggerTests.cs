@@ -96,8 +96,13 @@ public sealed class TriggerTests(SqlServerFixture sql)
     [Trait(TestCategories.Category, TestCategories.Integration)]
     public async Task Видалення_формули_опублікованої_версії_відхиляється()
     {
-        var doc = await PublishedAsync();
+        // ⚠ Формула лягає в Draft і лише потім версія публікується: вставка в
+        // уже опубліковану версію тепер сама відхиляється (`50004`, D5) —
+        // раніше цей тест якраз нею й користувався.
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var doc = await builder.BuildAsync(ct: CancellationToken.None);
         var formulaId = await InsertFormulaAsync(doc);
+        await PublishAsync(doc);
 
         var error = await Assert.ThrowsAsync<SqlException>(() => ExecuteAsync(
             $"DELETE FROM cfg.FormulaDef WHERE Id = {formulaId}"));
@@ -147,7 +152,13 @@ public sealed class TriggerTests(SqlServerFixture sql)
     {
         var builder = new TestDocumentBuilder(sql.ConnectionString);
         var doc = await builder.BuildAsync(ct: CancellationToken.None);
+        await PublishAsync(doc);
 
+        return doc;
+    }
+
+    private async Task PublishAsync(TestDocument doc)
+    {
         // Статус ставимо прямим UPDATE, а не через Publish: use-case публікації
         // — це Етап 2 (він робить топологічне сортування формул), а тригер має
         // працювати від СТАНУ в базі, незалежно від того, хто його поставив.
@@ -155,8 +166,6 @@ public sealed class TriggerTests(SqlServerFixture sql)
             "UPDATE cfg.TemplateVersion SET Status = " + Published +
             ", PublishedAt = SYSUTCDATETIME(), PublishedByUserId = 1 " +
             $"WHERE Id = {doc.TemplateVersionId}");
-
-        return doc;
     }
 
     private async Task<int> InsertFormulaAsync(TestDocument doc)
