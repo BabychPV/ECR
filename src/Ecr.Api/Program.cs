@@ -203,6 +203,10 @@ builder.Services.Configure<GzipCompressionProviderOptions>(
 // композицією і конвеєром, розходиться першою ж правкою.
 builder.Services.AddEcrRateLimiting(builder.Configuration);
 
+// ФВ-5.24: відмови в доступі (403) → aud.SecurityEvent. Синглтон: обмежувач флуду
+// тримає стан між запитами. Запис — в окремому scope, поза транзакцією запиту.
+builder.Services.AddSingleton<Ecr.Api.Security.IAccessDenialAuditor, Ecr.Api.Security.AccessDenialAuditor>();
+
 builder.Services.AddScoped<Ecr.Api.Health.IRecalculationWorkerProbe, Ecr.Api.Health.RecalculationWorkerProbe>();
 // F-4: база часових поясів ОС — лише попередження (Degraded), старт не блокується.
 builder.Services.AddSingleton<Ecr.Api.Health.ITimeZoneOffsetProvider, Ecr.Api.Health.SystemTimeZoneOffsetProvider>();
