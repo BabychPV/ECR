@@ -387,6 +387,7 @@ public static class DependencyInjection
         services.AddScoped<IStyleCatalog, StyleCatalog>();
         services.AddScoped<IReportDefinitionStore, ReportDefinitionStore>();
         services.AddScoped<IReportSnapshotBuilder, Reporting.ReportSnapshotBuilder>();
+        services.AddScoped<IReportViewGenerator, Reporting.ReportViewGenerator>();
         services.AddSingleton<ISecretProvider, ConfigurationSecretProvider>();
 
         // ⚠ Diff імпорту живе в РОЗПОДІЛЕНОМУ кеші: перегляд і застосування —

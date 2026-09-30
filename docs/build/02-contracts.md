@@ -2772,6 +2772,22 @@ public interface IReportSnapshotBuilder
 }
 ```
 
+#### `IReportViewGenerator`
+
+Пласкі вʼюхи `rpt.v_<Звіт>_v<Версія>` для SSRS з опублікованих версій звітів
+(ФВ-10.2, ФВ-10.4): одна вʼюха на версію, колонка = код колонки версії. DDL
+робить процедура `rpt.usp_GenerateReportViews` (`05-rpt-views.sql`) від імені
+власника; застосунок її лише викликає (D-14, D-66) — при публікації версії
+(в одній транзакції з публікацією) і на старті після seed. Ідемпотентна:
+незмінну вʼюху не чіпає. Стару версію не видаляє — нова версія = нова вʼюха (D-53).
+
+```csharp
+public interface IReportViewGenerator
+{
+    public Task GenerateAsync(int? reportDefId, CancellationToken ct);
+}
+```
+
 #### `IResourceNameResolver`
 
 Код ресурсу гранта (`Sheet`/`Table`/`Column`/`Project`) за видом і числовим

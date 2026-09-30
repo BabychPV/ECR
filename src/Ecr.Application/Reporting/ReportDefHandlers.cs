@@ -499,12 +499,21 @@ public sealed record CreateReportVersionCommand(
 /// побудованого зрізу — зріз незмінний і назавжди прив'язаний до тієї версії,
 /// за якою його побудували (<c>ФВ-9.17</c>). Наступна побудова візьме нову
 /// версію, і це буде НОВИЙ зріз із власною контрольною сумою.
+/// <para>
+/// ⛔ Публікація створює вʼюху <c>rpt.v_&lt;Звіт&gt;_v&lt;Версія&gt;</c> для SSRS
+/// (<c>ФВ-10.2</c>, <c>ФВ-10.4</c>) в ТІЙ САМІЙ транзакції: опублікована
+/// версія без вʼюхи — це держформа, яку опубліковано, але прочитати з SSRS
+/// неможливо, і дізнався б про це автор RDL, а не той, хто публікував. Не
+/// створилася вʼюха — публікація відкочується і версія лишається чернеткою.
+/// DDL робить процедура, не застосунок (<c>D-66</c>).
+/// </para>
 /// </remarks>
 public sealed class PublishReportVersionHandler(
     IRepository<ReportVersion, int> versions,
     IUnitOfWork uow,
     IAccessDecisionService access,
-    ICurrentUser currentUser)
+    ICurrentUser currentUser,
+    IReportViewGenerator views)
 {
     /// <summary>Право на авторство опису звіту (`02-contracts.md` §9).</summary>
     public const string Permission = "Report.EditDefinition";
@@ -548,7 +557,14 @@ public sealed class PublishReportVersionHandler(
         }
 
         version.Publish();
-        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+
+        await uow.ExecuteInTransactionAsync(
+            async token =>
+            {
+                await uow.SaveChangesAsync(token).ConfigureAwait(false);
+                await views.GenerateAsync(reportDefId, token).ConfigureAwait(false);
+            },
+            ct).ConfigureAwait(false);
 
         return new ReportVersionDto(
             version.Id, version.Version, version.Status.ToString(),

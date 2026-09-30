@@ -78,6 +78,22 @@ public static partial class StartupSequence
         await new SeedRunner(db, logger).RunAsync(CancellationToken.None).ConfigureAwait(false);
         LogSeedDone(logger);
 
+        // 4b) Вʼюхи rpt.v_* для SSRS (ФВ-10.2, ФВ-10.4). ⚠ ПІСЛЯ seed: seed
+        //     заводить опубліковану державну форму, і без цього кроку чиста
+        //     база мала б звіт, який SSRS прочитати не може. Процедура
+        //     ідемпотентна — незмінні вʼюхи не чіпає. ⚠ Відмова — попередження,
+        //     а не зупинка старту: вʼюхи потрібні SSRS, а не застосунку, і
+        //     зламаний опис одного звіту не має гасити всю систему.
+        try
+        {
+            await scope.ServiceProvider.GetRequiredService<IReportViewGenerator>()
+                .GenerateAsync(reportDefId: null, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (SqlException ex)
+        {
+            LogReportViewsFailed(logger, ex.Message);
+        }
+
         // 4a) Bootstrap-адміністратор. ⛔ Крок був ОГОЛОШЕНИЙ (обробник є,
         //     зареєстрований, покритий тестами) і НЕ ВИКЛИКАВСЯ (`A7-10`):
         //     у щойно розгорнутій системі не було жодного користувача, і
@@ -249,6 +265,11 @@ public static partial class StartupSequence
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Старт: seed виконано.")]
     private static partial void LogSeedDone(ILogger logger);
+
+    [LoggerMessage(Level = LogLevel.Warning,
+        Message = "Старт: вʼюхи rpt.v_* не згенеровано: {Error}. SSRS не бачить нових версій звітів, "
+            + "доки DBA не виконає EXEC rpt.usp_GenerateReportViews.")]
+    private static partial void LogReportViewsFailed(ILogger logger, string error);
 
     [LoggerMessage(
         Level = LogLevel.Warning,
