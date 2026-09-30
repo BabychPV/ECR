@@ -48,7 +48,14 @@ internal sealed record RegistryValuesPrefetch(
 /// (рядок, число, <c>bool</c>, дата, <c>JsonElement</c>); <c>Lookup</c> — Id запису-цілі.
 /// Поле, якого тут немає, не змінюється.
 /// </param>
-public sealed record RegistryEntryWrite(string Code, IReadOnlyDictionary<string, object?> Values);
+public sealed record RegistryEntryWrite(string Code, IReadOnlyDictionary<string, object?> Values)
+{
+    /// <summary>
+    /// Назва НОВОГО запису мовою за замовчуванням (<c>D-212</c>: синк — ім'я елемента AF).
+    /// <c>null</c> або порожня — назва дорівнює коду, як і досі. Наявного запису не перейменовує.
+    /// </summary>
+    public string? DisplayName { get; init; }
+}
 
 /// <summary>Пакет записів ОДНОГО довідника для <see cref="RegistryEntryWriter.WriteAsync"/>.</summary>
 /// <param name="RegistryDefId">Довідник.</param>
@@ -61,6 +68,14 @@ public sealed record RegistryEntryWriteBatch(int RegistryDefId, IReadOnlyList<Re
     /// поведінка S6 (немає — створюється).
     /// </summary>
     public bool UpdateOnly { get; init; }
+
+    /// <summary>
+    /// Лише створювати (<c>D-212</c>, автостворення синком): запис із таким кодом уже є в довіднику
+    /// (зокрема видалений логічно — код за ним лишається) — помилка рядка
+    /// <see cref="RegistryEntryWriter.EntryCodeTakenKey"/>, а не оновлення. Разом з
+    /// <see cref="UpdateOnly"/> — помилка виклику.
+    /// </summary>
+    public bool CreateOnly { get; init; }
 
     /// <summary>
     /// Коди нових записів довідника з <c>CodeMode = Auto</c> — заглушки, а не номери послідовності
@@ -79,7 +94,16 @@ public sealed record RegistryEntryWriteBatch(int RegistryDefId, IReadOnlyList<Re
 /// </summary>
 /// <param name="RegistryEntryId">Запис; мусить належати довіднику пакета й не бути видаленим логічно.</param>
 /// <param name="Values">Значення за кодами полів — як у <see cref="RegistryEntryWrite.Values"/>.</param>
-public sealed record RegistryEntryUpdate(long RegistryEntryId, IReadOnlyDictionary<string, object?> Values);
+public sealed record RegistryEntryUpdate(long RegistryEntryId, IReadOnlyDictionary<string, object?> Values)
+{
+    /// <summary>
+    /// Увімкнути (<c>true</c>) чи вимкнути (<c>false</c>) запис (<c>D-212</c>, політика
+    /// <c>Deactivate</c> і повернення елемента). <c>null</c> — не змінювати. Фактична зміна
+    /// потрапляє в ту саму подію аудиту, що й значення, як поле
+    /// <see cref="RegistryEntryWriter.ActiveFieldCode"/>.
+    /// </summary>
+    public bool? IsActive { get; init; }
+}
 
 /// <summary>Пакет оновлень ОДНОГО довідника для <see cref="RegistryEntryWriter.UpdateAsync"/>.</summary>
 /// <param name="RegistryDefId">Довідник.</param>
@@ -167,6 +191,23 @@ public sealed class RegistryEntryWriter(
     /// </remarks>
     public const string EntryCodeAutomaticKey = "err.ECR-REG-0422.entryCodeAutomatic";
 
+    /// <summary>
+    /// Ключ помилки рядка <see cref="RegistryEntryWriteBatch.CreateOnly"/>: запис із цим кодом у
+    /// довіднику вже є. Той самий ключ, що в ручного створення (<c>UpsertRegistryEntryHandler</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Помилка рядка параметрів не несе: <c>{id}</c> шаблону тут не підставлено — виклик, що
+    /// показує текст, знає код із <c>Key</c> і читає Id сам.
+    /// </remarks>
+    public const string EntryCodeTakenKey = "err.ECR-REG-0409.entryCodeTaken";
+
+    /// <summary>
+    /// Код «поля» стану запису в події аудиту <see cref="ValueChangedEventType"/>
+    /// (<see cref="RegistryEntryUpdate.IsActive"/>). <c>@</c> не буває в коді поля
+    /// (<c>EcrCode</c>), тож збігу зі справжнім полем немає.
+    /// </summary>
+    public const string ActiveFieldCode = "@active";
+
     /// <summary>Служба ключів, з якою працює writer; <c>null</c> — лише в тестах без ключів.</summary>
     internal RegistryKeyService? Keys => keys;
 
@@ -248,6 +289,11 @@ public sealed class RegistryEntryWriter(
         ArgumentNullException.ThrowIfNull(batch);
         ArgumentNullException.ThrowIfNull(batch.Entries);
 
+        if (batch.UpdateOnly && batch.CreateOnly)
+        {
+            throw new ArgumentException("Пакет не може бути водночас «лише оновлювати» і «лише створювати».", nameof(batch));
+        }
+
         // Порожній чи повторений код — помилка того, хто склав пакет, а не даних: ні помилкою
         // рядка з каталогу (тексти імпорту кажуть «у файлі»), ні «переможцем останнім».
         var codes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -289,7 +335,11 @@ public sealed class RegistryEntryWriter(
                 item.Code?.Trim() ?? string.Empty,
                 existing.GetValueOrDefault(item.Code?.Trim() ?? string.Empty),
                 MayCreate: !batch.UpdateOnly,
-                item.Values ?? new Dictionary<string, object?>()))
+                item.Values ?? new Dictionary<string, object?>())
+            {
+                MustCreate = batch.CreateOnly,
+                DisplayName = item.DisplayName,
+            })
             .ToList();
 
         return await WriteTargetsAsync(definition, targets, userId, batch.PlaceholderAutoCodes, ct).ConfigureAwait(false);
@@ -352,7 +402,10 @@ public sealed class RegistryEntryWriter(
                 entry?.Code ?? item.RegistryEntryId.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 entry,
                 MayCreate: false,
-                item.Values ?? new Dictionary<string, object?>()));
+                item.Values ?? new Dictionary<string, object?>())
+            {
+                IsActive = item.IsActive,
+            });
         }
 
         return await WriteTargetsAsync(definition, targets, userId, placeholderAutoCodes: false, ct).ConfigureAwait(false);
@@ -414,6 +467,13 @@ public sealed class RegistryEntryWriter(
                 continue;
             }
 
+            // Режим «лише створювати»: код уже зайнятий — помилка рядка, не оновлення чужого запису.
+            if (target.MustCreate && target.Existing is not null)
+            {
+                errors.Add(new RegistryEntryImportError(row, code, null, EntryCodeTakenKey));
+                continue;
+            }
+
             if (target.Existing is null && definition.CodeMode == RegistryCodeMode.Auto && code.Length > 0)
             {
                 errors.Add(new RegistryEntryImportError(row, code, null, EntryCodeAutomaticKey));
@@ -446,7 +506,9 @@ public sealed class RegistryEntryWriter(
                 ecrCode,
                 new LocalizedText(new Dictionary<string, string>
                 {
-                    [UiStringResolver.DefaultLanguage] = code.Length == 0 ? ecrCode.Value : code,
+                    [UiStringResolver.DefaultLanguage] = string.IsNullOrWhiteSpace(target.DisplayName)
+                        ? code.Length == 0 ? ecrCode.Value : code
+                        : target.DisplayName.Trim(),
                 }),
                 userId);
 
@@ -461,6 +523,23 @@ public sealed class RegistryEntryWriter(
             {
                 errors.Add(new RegistryEntryImportError(row, code, FieldOf(ex), MessageKeyOf(ex)));
                 continue;
+            }
+
+            // D-212: стан запису — та сама подія аудиту, що й значення, «полем» ActiveFieldCode.
+            // Видалений запис сюди не доходить (UpdateAsync дає 0404), тож Activate не кидає.
+            if (!isNew && target.IsActive is { } active && entry.IsActive != active)
+            {
+                var wasActive = entry.IsActive;
+                if (active)
+                {
+                    entry.Activate();
+                }
+                else
+                {
+                    entry.Deactivate();
+                }
+
+                changes = [.. changes, new RegistryValueFieldChange(ActiveFieldCode, wasActive, active)];
             }
 
             staged.Add(entry);
@@ -902,7 +981,17 @@ public sealed class RegistryEntryWriter(
     /// <param name="MayCreate">Чи створювати запис, якого немає.</param>
     /// <param name="Values">Значення за кодами полів.</param>
     private sealed record WriteTarget(
-        int Row, string Code, RegistryEntry? Existing, bool MayCreate, IReadOnlyDictionary<string, object?> Values);
+        int Row, string Code, RegistryEntry? Existing, bool MayCreate, IReadOnlyDictionary<string, object?> Values)
+    {
+        /// <summary>Лише створювати: наявний запис — помилка рядка (<see cref="RegistryEntryWriteBatch.CreateOnly"/>).</summary>
+        public bool MustCreate { get; init; }
+
+        /// <summary>Назва нового запису; <c>null</c> — код.</summary>
+        public string? DisplayName { get; init; }
+
+        /// <summary>Стан запису після оновлення; <c>null</c> — не змінювати.</summary>
+        public bool? IsActive { get; init; }
+    }
 
     /// <summary>Рядок, що пройшов перевірку значень, — для звірки ключів у межах пакета.</summary>
     /// <param name="Row">Рядок для <see cref="RegistryBatchKeys.DuplicateKeyRows"/>.</param>
