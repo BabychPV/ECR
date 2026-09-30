@@ -699,15 +699,40 @@ MSI по-справжньому на ефемерному `windows-latest` че�
 ```powershell
 # Побачити повний план, нічого не роблячи в системі
 .\tools\deploy-ecr.ps1 -SqlInstance NCATUATV12 -Database ECR `
-    -ServiceAccount 'DOMAIN\ecr-svc$' -Version 1.0.0 -WhatIf
+    -ServiceAccount 'DOMAIN\ecr-svc$' -Version 1.0.0 `
+    -DataProtectionThumbprint '<відбиток>' -HttpsThumbprint '<відбиток HTTPS>' -AppPort 443 -WhatIf
 
 # Перше розгортання на чистому сервері (порожня база — потрібен bootstrap)
 $cs = Read-Host -AsSecureString -Prompt 'Рядок підключення'
 $bp = Read-Host -AsSecureString -Prompt 'Пароль bootstrap-адміністратора'
 .\tools\deploy-ecr.ps1 -SqlInstance NCATUATV12 -Database ECR `
     -ServiceAccount 'DOMAIN\ecr-svc$' -Version 1.0.0 -ConnectionString $cs `
+    -DataProtectionThumbprint '<відбиток>' -HttpsThumbprint '<відбиток HTTPS>' -AppPort 443 `
     -BootstrapPassword $bp -ConfigValues .\uat-config.json -FirstDeployment
 ```
+
+#### Транспорт (HTTPS) — рівно один із трьох параметрів (✎ 2026-09-30, `D14-08`, `R-01`)
+
+| Параметр | Що пише крок 4 у `Services\EcrApi\Environment` | Перевірка / застереження |
+|---|---|---|
+| `-HttpsThumbprint <відбиток>` | `ASPNETCORE_URLS=https://+:<AppPort>`, `ECR_Transport__Https__CertificateThumbprint`, `ECR_Auth__RequireHttps=true` | крок 1: сертифікат у `Cert:\LocalMachine\My`, є закритий ключ, чинний (спливає < 30 днів — попередження), відбиток 40 hex. Крок 7: TLS-зонд із пришпиленням — Kestrel віддає САМЕ цей сертифікат. Відбиток не друкується |
+| `-HttpRedirectPort <n>` (лише з попереднім) | додатково `;http://+:<n>` в URLS і `ECR_Transport__Https__Port=<AppPort>` | MSI відкриває в брандмауері лише `APP_PORT`; правило для `<n>` — вручну (скрипт попереджає) |
+| `-BehindHttpsProxy` | `ASPNETCORE_URLS=http://+:<AppPort>`, `ECR_Auth__RequireHttps=true`; прибирає `Transport__Https__*` | TLS завершує проксі; попередження: закрити порт Kestrel для всіх, крім проксі; `X-Forwarded-*` не читається (HSTS — на проксі) |
+| `-AllowHttp` | `ASPNETCORE_URLS=http://+:<AppPort>`, `ECR_Auth__RequireHttps=false`; прибирає `Transport__Https__*` | лише стенд; попередження в журналі розгортання, `transport` на `/health/ready` — Degraded |
+
+Жодного з трьох (або кілька разом) — зупинка на кроці 1 до будь-якої зміни системи. HTTPS слухає на
+`-AppPort` — тому самому порту, що `APP_PORT` у брандмауері MSI (звична адреса `https://сервер/` — `-AppPort 443`).
+`ECR_Auth__RequireHttps` пишеться завжди явно, тож `false` від колишнього `-AllowHttp` не переживе
+перерозгортання. Політика `Auth:RequireHttps` **не послаблюється** ніде, крім явного `-AllowHttp`.
+Параметр — на кожному оновленні (`Environment` стирає оновлення MSI). Реалізація: чисті функції
+`Resolve-TransportConfig`, `Get-HttpsCertificateProblem`, `Invoke-PinnedHttpsProbe`
+(`tests/Ecr.Architecture.Tests/DeployTransportTests.cs`, `DeployPinnedHttpsProbeTests.cs`), на боці Api —
+`HttpsTransport` і `TransportHealthCheck`. Майстер `Ecr-Setup` має крок «Transport (HTTPS)» із тим самим вибором.
+Про MSI: `Package.wxs`/`Service.wxs` цією зміною **не змінювались** — MSI не знає про HTTPS, транспорт лише в
+`Environment` служби (`docs/build/11-install-guide.md` §2.7).
+
+`.NET SDK` `deploy-ecr.ps1` вимагає лише коли кличе `dotnet`: `build-msi.ps1` (без `-MsiPath`) і `dotnet ef`
+(схема не з пакета й без `-SkipSchema`) — `Get-DotnetRequirement`. Пакований запуск із готовим MSI SDK не потребує.
 
 Пароль bootstrap-адміністратора «вводиться під час встановлення» саме тут
 — в ОДНОМУ вже наявному, перевіреному оркестраторі, а не через діалог
@@ -722,9 +747,9 @@ $bp = Read-Host -AsSecureString -Prompt 'Пароль bootstrap-адмініст
 
 ### Що робить (сім кроків)
 
-1. **Передумови** — `sqlcmd`/.NET на місці, цільова база вже існує (сама її
-   не створює — на відміну від `verify-sql-scripts.ps1`, який працює на
-   тимчасовій).
+1. **Передумови** — `sqlcmd` на місці (.NET SDK — лише коли кличеться `dotnet`, див. нижче), цільова база вже
+   існує (сама її не створює — на відміну від `verify-sql-scripts.ps1`, який працює на
+   тимчасовій); сертифікат Data Protection; ✎ 2026-09-30: обраний транспорт і сертифікат HTTPS (нижче).
 2. **Схема** — та сама послідовність, що `verify-sql-scripts.ps1`
    (`docs/build/09-commands.md` §3), **без** `09-seed.sql` (застосунок
    виконує його сам при першому старті) і без `14-agent-jobs.sql`, якщо не
@@ -754,7 +779,8 @@ $bp = Read-Host -AsSecureString -Prompt 'Пароль bootstrap-адмініст
    клав, а `Program.cs` жодного разу не додавав як джерело конфігурації.
 6. **Старт служби** — лише якщо `-ServiceAccount` задано і служба сама не
    піднялась.
-7. **Здоров'я** — `GET /health/live` з повторними спробами.
+7. **Здоров'я** — `GET /health/live` з повторними спробами; потім `/health/ready` (`Healthy`/`Degraded`).
+   У режимі HTTPS зонд іде по TLS із пришпиленням відбитка (✎ 2026-09-30).
 
 #### Редакція SQL Server і воркер (ФВ-9.8, `D-206`, P2)
 

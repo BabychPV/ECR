@@ -19,7 +19,11 @@ Invoke-WebRequest http://localhost:5000/health/live -UseBasicParsing   # 200 = �
 Invoke-WebRequest http://localhost:5000/health/ready -UseBasicParsing  # 200 = готовий; 503 = див. п. 3.1
 ```
 
-Порт задає `ASPNETCORE_URLS` у середовищі служби (дефолт `-AppPort 5000`).
+Порт і схему (`http`/`https`) задає `ASPNETCORE_URLS` у середовищі служби (дефолт
+`-AppPort 5000`). ✎ 2026-09-30: з HTTPS (`deploy-ecr.ps1 -HttpsThumbprint`) це
+`https://+:<AppPort>` — перевіряти `https://<ім'я з сертифіката>/health/live`; по
+`https://localhost` `Invoke-WebRequest` скаржиться на ім'я сертифіката (це не збій).
+Транспорт і сертифікат — п. 11.
 
 Послідовність старту (`StartupSequence.cs`):
 
@@ -85,7 +89,9 @@ Api й воркер на **одному** хості — різні ролі й 
 | `Cache:AccessProfileSlidingMinutes` | 60 | кеш профілю доступу, хв |
 | `Auth:CookieName` | `ecr.auth` | ім'я cookie сесії. Зміна розлогінює всіх відкритих користувачів |
 | `Auth:SlidingHours` | 8 | ковзний строк сесії, год |
-| `Auth:RequireHttps` | `true` | cookie лише через HTTPS |
+| `Auth:RequireHttps` | `true` | cookie лише через HTTPS (`Secure`). `false` пише лише `deploy-ecr.ps1 -AllowHttp` (стенд): у Production `transport` на `/health/ready` — Degraded (п. 11) |
+| `Transport:Https:CertificateThumbprint` | порожньо | відбиток сертифіката HTTPS у `LocalMachine\My`; Kestrel віддає його для кожної `https://`-адреси з `ASPNETCORE_URLS`. Пише `deploy-ecr.ps1 -HttpsThumbprint`. Заданий, а сертифіката немає чи він без закритого ключа — служба не стартує (п. 11) |
+| `Transport:Https:Port` | `0` | порт HTTPS для перенаправлення `http` → `https` (308); `0` — без перенаправлення. Пише `deploy-ecr.ps1 -HttpRedirectPort` |
 | `Auth:EnableNegotiate` | `true` | вхід Windows (Negotiate) |
 | `Auth:StampCacheSeconds` | 5 | як швидко блокування чи зміна ролей діє на відкриті сесії, с |
 | `Auth:DataProtection:CertificateThumbprint` | немає | відбиток сертифіката з `LocalMachine\My` для захисту ключів Data Protection (п. 6.2). ⛔ **З 2026-09-29 (S11) у Production обов'язковий**: без нього служба не стартує. Один і той самий сертифікат (із закритим ключем, з правом читання для облікового запису служби) — на всіх вузлах |
@@ -165,7 +171,7 @@ ORDER BY [Ts];
 | Ендпоінт | Доступ | Що перевіряє |
 |---|---|---|
 | `/health/live` | анонімно | нічого: процес відповідає |
-| `/health/ready` | анонімно | `db`, `jobs`, `sources`. Подробиці `db` приховано |
+| `/health/ready` | анонімно | `db`, `jobs`, `sources`, `worker`, `transport` (✎ 2026-09-30, п. 11). Подробиці `db` приховано |
 | `/health/db` | після входу | редакція, RCSI, файлові групи, запас партицій |
 
 HTTP-код: `Healthy` і `Degraded` дають **200**, `Unhealthy` — **503**. Моніторинг
@@ -176,6 +182,7 @@ HTTP-код: `Healthy` і `Degraded` дають **200**, `Unhealthy` — **503**
 | `db` | попереду менше 2 партицій | RCSI вимкнено; немає файлової групи `DATA_HOT`, `DATA_ARCHIVE`, `AUDIT` або `INDEXES`; БД недоступна |
 | `jobs` | у планувальника немає тригерів | планувальник не зареєстрований, зупинений або кидає помилку |
 | `sources` | джерело ще не запускалось або є прогалина покриття | останній запуск будь-якого активного джерела впав. Якщо активних джерел немає — Healthy |
+| `transport` | Production із `Auth:RequireHttps = false` (`-AllowHttp`); сертифікат HTTPS спливає менш ніж за 30 днів або прострочений | ніколи (перевірка не виводить Api з ротації) |
 
 ### 3.2. Логи
 
@@ -290,6 +297,10 @@ SQL Server Agent (`14-agent-jobs.sql`) ставиться лише з `deploy-ec
 | служба не стартує, у лозі незастосовані міграції | оновили код без схеми, а `StartupMode=Validate` | застосувати схему (п. 8) і запустити службу |
 | служба не стартує: «Production: ключі кільця DataProtection … не захищені» | не задано `Auth:DataProtection:CertificateThumbprint` (S11) | встановити сертифікат із закритим ключем у `LocalMachine\My` на кожному вузлі, дати права облікового запису служби, задати `ECR_Auth__DataProtection__CertificateThumbprint` (`deploy-ecr.ps1 -DataProtectionThumbprint`). Старі відкриті ключі в таблиці лишаються чинними до кінця строку — після ввімкнення захисту ротація, п. 6.4 |
 | служба не стартує після зміни відбитка | немає сертифіката `Auth:DataProtection:CertificateThumbprint` у `LocalMachine\My` | встановити сертифікат із закритим ключем і дати права облікового запису служби |
+| вхід «вдався», далі `401` на кожен запит; з сервера працює | HTTP при `Auth:RequireHttps = true`: `Secure`-cookie по HTTP не відсилається | п. 11: HTTPS (`deploy-ecr.ps1 -HttpsThumbprint`), проксі (`-BehindHttpsProxy`) або на стенді `-AllowHttp` |
+| служба не стартує: «Transport:Https:CertificateThumbprint: …» | сертифіката HTTPS немає в `LocalMachine\My`, він без закритого ключа або відбиток не 40 hex | п. 11: поставити сертифікат із закритим ключем, повторити `deploy-ecr.ps1` |
+| служба не стартує: «Certificate … cannot be used as an SSL server certificate» | у сертифіката HTTPS розширене використання ключа без Server Authentication | видати сертифікат із EKU Server Authentication |
+| `transport` Degraded | `-AllowHttp` у Production, або сертифікат HTTPS спливає / прострочений | п. 11 |
 | `db` Degraded: менше 2 партицій попереду | не працює Agent-задача (Express) | `EXEC arc.usp_EnsurePartitions @MonthsAhead = 6;` або скрипт `GET /api/v1/health/partitions/script` |
 | `db` Unhealthy: RCSI | базу відновили або створили без `06-rcsi.sql` | виконати `06-rcsi.sql`. Перезапуск не потрібен: перевірка читає RCSI щоразу, а не з проби старту |
 | служба не стартує: «Недійсна конфігурація — служба не стартує» | значення ключа не того типу чи поза межами (`"60s"` замість `60`, друкарська помилка в `Database:EditionMode`) | виправити названий ключ у `appsettings.Production.json` або в `ECR_…` змінній служби. Той самий текст — у журналі подій (джерело `ECR`) і в лозі |
@@ -912,9 +923,54 @@ Quartz/`InProcess`, а служба `EcrWorker` (MSI її зберігає) ст
 ```powershell
 powershell -ExecutionPolicy Bypass -File tools\deploy-ecr.ps1 `
   -SqlInstance <сервер> -Database <база> -MsiPath <шлях до .msi> -SkipSchema `
-  -ConnectionString $cs -DataProtectionThumbprint <відбиток>
+  -ConnectionString $cs -DataProtectionThumbprint <відбиток> -HttpsThumbprint <відбиток HTTPS>
 ```
 
 (`-SkipSchema` — якщо схему вже застосовано; повний виклик — п. 8.) Те саме
 для відкату (п. 9, крок 3). Змінні, яких скрипт не пише
-(`ECR_Jobs__Workers__*`), виставте знову вручну.
+(`ECR_Jobs__Workers__*`), виставте знову вручну. ✎ 2026-09-30: параметр транспорту
+(`-HttpsThumbprint`, або `-BehindHttpsProxy`, або на стенді `-AllowHttp`) обов'язковий і тут — без
+нього скрипт зупиняється (п. 11).
+
+## 11. HTTPS і сертифікат (✎ 2026-09-30, `D14-08`)
+
+Повний опис — `docs/build/11-install-guide.md` §2.7; тут — те, що потрібно в експлуатації.
+
+**Три транспорти, рівно один** (`deploy-ecr.ps1`; на кожному оновленні — бо `Environment` стирає
+оновлення MSI, п. 10.3): `-HttpsThumbprint '<відбиток>'` (HTTPS; порт `-AppPort`, для `https://сервер/`
+— 443; необов'язково `-HttpRedirectPort 80`), `-BehindHttpsProxy` (TLS на проксі перед застосунком;
+`Auth:RequireHttps` лишається `true`), `-AllowHttp` (лише стенд: `Auth:RequireHttps=false`).
+Жодного — скрипт зупиняється на кроці 1. Причина вибору: cookie сеансу `Secure`, а по HTTP його
+браузер не відсилає — вхід з інших машин не працює (симптом «вдався, далі 401»).
+
+**Змінні служби `EcrApi`** (пише `deploy-ecr.ps1`): `ASPNETCORE_URLS`,
+`ECR_Transport__Https__CertificateThumbprint`, `ECR_Transport__Https__Port` (лише з перенаправленням),
+`ECR_Auth__RequireHttps` (завжди явно).
+
+**Що бачить оператор:**
+
+- Старт пише в журнал подій (джерело `ECR`) і файловий журнал: Warning «HTTP без HTTPS — cookie сеансу НЕ Secure»
+  (Production з `RequireHttps=false`); Information «HTTPS, сертифікат завантажено, діє до …»; Warning
+  «сертифікат HTTPS спливає через N дн.»; Error «сертифікат HTTPS ПРОСТРОЧЕНИЙ». Відбиток у журнал не пишеться.
+- `/health/ready` і `/admin/health`, картка «Transport (HTTPS)» — `transport`: `Degraded` (не 503),
+  коли Production працює з `RequireHttps=false`, або сертифікат спливає менш ніж за 30 днів чи прострочений.
+  Дані: `requireHttps`, `httpsCertificate`, `certificateNotAfter`, `certificateDaysLeft`.
+- Заданий відбиток без сертифіката чи сертифікат без закритого ключа — **служба не стартує** (не відкат до
+  HTTP) із назвою ключа `Transport:Https:CertificateThumbprint` і причиною. Прострочений сертифікат старт
+  **не** зупиняє (служба, що не піднялась вночі через строк, гірша за сторінку з попередженням) — це
+  видно на `transport`.
+
+**Заміна сертифіката** (продовження строку): встановити новий у `LocalMachine\My`, дати обліковому запису служби
+право читання закритого ключа, повторити `deploy-ecr.ps1` з новим `-HttpsThumbprint` і решту параметрів як
+на оновленні — служба перезапуститься; крок 7 перевірить, що Kestrel віддає саме новий сертифікат. Швидка
+заміна лише відбитка без MSI (як у `docs/build/11-install-guide.md` §9): змінити
+`ECR_Transport__Https__CertificateThumbprint` у `Environment` служби й `Restart-Service EcrApi`.
+
+⚠ **HSTS:** запити по HTTPS отримують `Strict-Transport-Security: max-age=31536000`; після першого входу браузер
+не відкриє це ім'я по `http://` до кінця строку. За проксі застосунок HSTS не віддає (`X-Forwarded-*` не читає):
+ставити на проксі.
+
+⚠ **Невідомо про майданчик замовника** (у документах проєкту немає; потрібне рішення замовника): чи є
+зворотний проксі/балансувальник перед застосунком і хто завершує TLS; ім'я хоста, за яким відкриватимуть
+застосунок (SAN сертифіката), і який ЦС його видає; кількість вузлів. Відомо лише рішення людини 2026-09-29: «HTTPS
+— сертифікат замовника».
