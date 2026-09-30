@@ -117,7 +117,7 @@ public sealed class ExcelExporter(
             .ConfigureAwait(false);
 
         var slicesBatch = await cellStore
-            .ReadSlicesAsync(instanceIds, ct)
+            .ReadSlicesAsync(instanceIds, periodKey, ct)
             .ConfigureAwait(false);
 
         // ⛔ F-02 (четвертий раунд UX): колонка `Calculated` — числом

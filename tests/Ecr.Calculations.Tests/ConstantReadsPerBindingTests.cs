@@ -143,7 +143,7 @@ public sealed class ConstantReadsPerBindingTests(SqlServerFixture sql)
             .Returns(Enumerable.Range(0, rowCount).ToDictionary(i => $"R{i:D3}", i => (long)(1000 + i)));
 
         var cells = Substitute.For<ICellStore>();
-        cells.ReadSliceAsync(TableInstance, Arg.Any<CancellationToken>()).Returns([]);
+        cells.ReadSliceAsync(TableInstance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>()).Returns([]);
 
         var metadata = Substitute.For<IMetadataCache>();
         metadata.GetAsync(TemplateVersion, Arg.Any<CancellationToken>()).Returns(

@@ -142,7 +142,8 @@ public sealed class SubmitApproveTests
         // ⚠ P3: подання читає зріз і рядки ПАКЕТНО (`ReadSlicesAsync`,
         // `GetRowIdsBatchAsync`). Пакетні виклики делегують до поштучних
         // підстановок вище — тести нижче й далі підставляють зріз поштучно.
-        _cells.ReadSlicesAsync(Arg.Any<IReadOnlyList<long>>(), Arg.Any<CancellationToken>())
+        // O3c: лише з ключем партиції періоду подання — з іншим зріз порожній.
+        _cells.ReadSlicesAsync(Arg.Any<IReadOnlyList<long>>(), new PeriodKey(Period), Arg.Any<CancellationToken>())
               .Returns(call =>
               {
                   var result = new Dictionary<long, IReadOnlyList<CellRecord>>();

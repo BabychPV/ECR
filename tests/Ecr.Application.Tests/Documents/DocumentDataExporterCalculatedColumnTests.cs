@@ -62,7 +62,7 @@ public sealed class DocumentDataExporterCalculatedColumnTests
             });
 
         var cells = Substitute.For<ICellStore>();
-        cells.ReadSlicesAsync(Arg.Any<IReadOnlyList<long>>(), Arg.Any<CancellationToken>())
+        cells.ReadSlicesAsync(Arg.Any<IReadOnlyList<long>>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
             .Returns(new Dictionary<long, IReadOnlyList<CellRecord>>());
 
         var metadata = Substitute.For<IMetadataCache>();

@@ -255,7 +255,7 @@ public sealed class RecalculationLimitsTests
                 }
 
                 rows.GetRowIdsAsync(table, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>()).Returns(rowIds);
-                cells.ReadSliceAsync(table, Arg.Any<CancellationToken>()).Returns(slice);
+                cells.ReadSliceAsync(table, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>()).Returns(slice);
             }
 
             var periods = Substitute.For<IPeriodStore>();

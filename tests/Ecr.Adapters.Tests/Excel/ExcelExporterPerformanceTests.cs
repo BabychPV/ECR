@@ -346,7 +346,7 @@ public sealed class ExcelExporterPerformanceTests(ITestOutputHelper output)
                     "GetRowIdsBatch", batch: true,
                     (IReadOnlyDictionary<long, IReadOnlyDictionary<string, long>>)_rowIds));
 
-            Cells.ReadSlicesAsync(Arg.Any<IReadOnlyList<long>>(), Arg.Any<CancellationToken>())
+            Cells.ReadSlicesAsync(Arg.Any<IReadOnlyList<long>>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
                 .Returns(_ => Record(
                     "ReadSlices", batch: true,
                     (IReadOnlyDictionary<long, IReadOnlyList<CellRecord>>)_slices));

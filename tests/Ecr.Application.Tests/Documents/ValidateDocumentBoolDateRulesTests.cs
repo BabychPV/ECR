@@ -271,7 +271,7 @@ public sealed class ValidateDocumentBoolDateRulesTests
                 new Dictionary<int, ColumnDef>(),
                 new Dictionary<(int, string), RowDef>()));
 
-        _cells.ReadSlicesAsync(Arg.Any<IReadOnlyList<long>>(), Arg.Any<CancellationToken>())
+        _cells.ReadSlicesAsync(Arg.Any<IReadOnlyList<long>>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
               .Returns(new Dictionary<long, IReadOnlyList<CellRecord>> { [Instance] = cells });
     }
 

@@ -65,7 +65,8 @@ public sealed class DocumentDataExportTests
              });
 
         var p = new PeriodKey(Period);
-        _cells.ReadSlicesAsync(Arg.Any<IReadOnlyList<long>>(), Arg.Any<CancellationToken>())
+        // O3c: зріз — з ключем партиції саме цього періоду; з іншим заглушка порожня.
+        _cells.ReadSlicesAsync(Arg.Any<IReadOnlyList<long>>(), p, Arg.Any<CancellationToken>())
               .Returns(new Dictionary<long, IReadOnlyList<CellRecord>>
               {
                   [Instance] =

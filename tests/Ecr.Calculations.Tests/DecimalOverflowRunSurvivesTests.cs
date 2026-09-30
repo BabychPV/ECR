@@ -140,7 +140,7 @@ public sealed class DecimalOverflowRunSurvivesTests
             .Returns(new Dictionary<string, long> { ["R1"] = 1001, ["R2"] = 1002 });
 
         var cells = Substitute.For<ICellStore>();
-        cells.ReadSliceAsync(TableInstance, Arg.Any<CancellationToken>()).Returns(
+        cells.ReadSliceAsync(TableInstance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>()).Returns(
         [
             Cell(1001, ColumnA, bad.A),
             Cell(1001, ColumnB, bad.B),

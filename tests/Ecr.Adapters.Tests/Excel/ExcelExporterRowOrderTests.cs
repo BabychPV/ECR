@@ -74,7 +74,7 @@ public sealed class ExcelExporterRowOrderTests
             .Returns(new Dictionary<long, IReadOnlyDictionary<string, long>> { [InstanceId] = rowIds });
 
         var store = Substitute.For<ICellStore>();
-        store.ReadSlicesAsync(Arg.Any<IReadOnlyList<long>>(), Arg.Any<CancellationToken>())
+        store.ReadSlicesAsync(Arg.Any<IReadOnlyList<long>>(), period, Arg.Any<CancellationToken>())
             .Returns(new Dictionary<long, IReadOnlyList<CellRecord>> { [InstanceId] = cells });
 
         var metadata = Substitute.For<IMetadataCache>();

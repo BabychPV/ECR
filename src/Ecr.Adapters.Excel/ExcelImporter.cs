@@ -213,7 +213,7 @@ public sealed class ExcelImporter(
         // ValidateDocumentHandler.
         var rowIdsBatch = await rowStore.GetRowIdsBatchAsync(tableInstanceIds, period, ct).ConfigureAwait(false);
         var versionsBatch = await rowStore.GetRowVersionsBatchAsync(tableInstanceIds, period, ct).ConfigureAwait(false);
-        var slicesBatch = await cellStore.ReadSlicesAsync(tableInstanceIds, ct).ConfigureAwait(false);
+        var slicesBatch = await cellStore.ReadSlicesAsync(tableInstanceIds, period, ct).ConfigureAwait(false);
 
         // ⚠ Рішення про доступ — ПАКЕТНО на зріз. Поштучна перевірка
         // тисяч комірок імпорту не вкладається в жоден бюджет і саме тому

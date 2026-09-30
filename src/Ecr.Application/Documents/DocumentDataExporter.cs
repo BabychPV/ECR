@@ -148,7 +148,7 @@ public sealed class DocumentDataExporter(
         var byTableDef = instances.ToDictionary(i => i.TableDefId);
         var ids = instances.Select(i => i.TableInstanceId).ToList();
         var rowIds = await rowStore.GetRowIdsBatchAsync(ids, key, ct).ConfigureAwait(false);
-        var slices = await cellStore.ReadSlicesAsync(ids, ct).ConfigureAwait(false);
+        var slices = await cellStore.ReadSlicesAsync(ids, key, ct).ConfigureAwait(false);
 
         // ⛔ F-02: колонка `Calculated` — числом методології, як у сітці й xlsx
         // (`CalculatedCellOverlay`). Порти необов'язкові лише заради тестів.

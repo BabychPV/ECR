@@ -499,7 +499,7 @@ public sealed class Hse301GoldenTests(Xunit.Abstractions.ITestOutputHelper log)
                     .Returns(new TableInstanceRef(table, DocumentId, 3, TemplateVersion, Period));
                 Rows.GetRowIdsAsync(table, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
                     .Returns(new Dictionary<string, long> { ["R1"] = table * 10 });
-                Cells.ReadSliceAsync(table, Arg.Any<CancellationToken>()).Returns(EventCells(table * 10));
+                Cells.ReadSliceAsync(table, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>()).Returns(EventCells(table * 10));
             }
 
             Metadata.GetAsync(TemplateVersion, Arg.Any<CancellationToken>()).Returns(

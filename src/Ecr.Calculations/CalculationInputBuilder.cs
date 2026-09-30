@@ -34,7 +34,11 @@ public sealed class CalculationInputBuilder(ICellStore cellStore, IMetadataCache
 
         var instance = await rows.ResolveTableInstanceAsync(tableInstanceId, ct).ConfigureAwait(false);
         var snapshot = await metadata.GetAsync(instance.TemplateVersionId, ct).ConfigureAwait(false);
-        var slice = await cellStore.ReadSliceAsync(tableInstanceId, ct).ConfigureAwait(false);
+        // O3c: період САМОГО екземпляра (не параметр `periodKey`) — той самий
+        // зріз, що без ключа, але з ключем партиції замість пошуку по всіх.
+        var slice = await cellStore
+            .ReadSliceAsync(tableInstanceId, new PeriodKey(instance.PeriodKey), ct)
+            .ConfigureAwait(false);
         var rowIds = await rows.GetRowIdsAsync(tableInstanceId, periodKey, ct).ConfigureAwait(false);
 
         // ⚠ Ім'я аргументу — це КОД колонки, а не її ідентифікатор: формула

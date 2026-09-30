@@ -103,7 +103,7 @@ public sealed class ExcelImporterTemplateVersionTests
                 [CurrentTableInstanceId] = new Dictionary<string, string> { ["R1"] = "0xAA" },
             });
 
-        _cellStore.ReadSlicesAsync(Arg.Any<IReadOnlyList<long>>(), Arg.Any<CancellationToken>())
+        _cellStore.ReadSlicesAsync(Arg.Any<IReadOnlyList<long>>(), Period, Arg.Any<CancellationToken>())
             .Returns(new Dictionary<long, IReadOnlyList<CellRecord>>());
     }
 
@@ -263,7 +263,7 @@ public sealed class ExcelImporterTemplateVersionTests
         // TableInstanceId (той самий шаблон, інший документ/проєкт) читала б
         // чужі дані ще до будь-якого рішення про доступ.
         await _cellStore.Received(1).ReadSlicesAsync(
-            Arg.Is<IReadOnlyList<long>>(ids => ids.Count == 0), Arg.Any<CancellationToken>());
+            Arg.Is<IReadOnlyList<long>>(ids => ids.Count == 0), Period, Arg.Any<CancellationToken>());
     }
 
     [Fact]

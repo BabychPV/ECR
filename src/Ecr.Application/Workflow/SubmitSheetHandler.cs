@@ -409,7 +409,7 @@ public sealed class SubmitSheetHandler(
         if (toValidate.Count > 0)
         {
             var validateIds = toValidate.ConvertAll(v => v.Instance.TableInstanceId);
-            cellsByInstance = await cellStore.ReadSlicesAsync(validateIds, ct).ConfigureAwait(false);
+            cellsByInstance = await cellStore.ReadSlicesAsync(validateIds, key, ct).ConfigureAwait(false);
             rowIdsByInstance = await rowStore.GetRowIdsBatchAsync(validateIds, key, ct).ConfigureAwait(false);
         }
 
@@ -849,7 +849,7 @@ public sealed class SubmitSheetHandler(
         if (instances.Count > 0)
         {
             var slices = await cellStore
-                .ReadSlicesAsync([.. instances.Select(i => i.TableInstanceId)], ct)
+                .ReadSlicesAsync([.. instances.Select(i => i.TableInstanceId)], periodKey, ct)
                 .ConfigureAwait(false);
             foreach (var instance in instances)
             {

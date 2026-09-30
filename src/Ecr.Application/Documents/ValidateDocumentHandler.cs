@@ -75,7 +75,7 @@ public sealed class ValidateDocumentHandler(
         // аркушах: бюджет — 3 с p95 на весь документ, і похід у базу на
         // кожну таблицю у нього не вкладається (той самий принцип, що вже
         // застосований вище до `GetTableInstancesAsync`).
-        var cellsByInstance = await cellStore.ReadSlicesAsync(instanceIds, ct).ConfigureAwait(false);
+        var cellsByInstance = await cellStore.ReadSlicesAsync(instanceIds, periodKey, ct).ConfigureAwait(false);
 
         // ⛔ Рядки екземпляра читаються ЯВНО: правило рівня рядка має назвати
         // `RowKey`, а зі самих комірок його не взяти — рядок без жодного

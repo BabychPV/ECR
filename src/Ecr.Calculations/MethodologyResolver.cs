@@ -141,11 +141,13 @@ public sealed class MethodologyResolver(IMethodologyStore store, ICellStore cell
         }
 
         var instance = await rows.ResolveTableInstanceAsync(tableInstanceId, ct).ConfigureAwait(false);
+        var period = new PeriodKey(instance.PeriodKey);
         var rowIds = await rows
-            .GetRowIdsAsync(tableInstanceId, new PeriodKey(instance.PeriodKey), ct)
+            .GetRowIdsAsync(tableInstanceId, period, ct)
             .ConfigureAwait(false);
 
-        var slice = await cells.ReadSliceAsync(tableInstanceId, ct).ConfigureAwait(false);
+        // O3c: період екземпляра вже відомий — ключ партиції замість пошуку по всіх.
+        var slice = await cells.ReadSliceAsync(tableInstanceId, period, ct).ConfigureAwait(false);
 
         // Значення рядка: колонка → рядкове подання. Порівняння в предикаті
         // текстове навмисно — MatchJson описує коди довідників і ознаки, а не
