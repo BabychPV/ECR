@@ -25,7 +25,26 @@ public sealed record RegistryBatchItemDto(
     long? Id,
     string? Code,
     string? BaseVersion,
-    IReadOnlyDictionary<string, object?>? Values);
+    IReadOnlyDictionary<string, object?>? Values)
+{
+    /// <summary>
+    /// Назва НОВОГО запису мовою за замовчуванням; порожньо — назва дорівнює коду. Для наявного запису
+    /// не приймається (<c>batchItemNewOnly</c>): перейменування — форма запису (<c>POST …/entries</c>).
+    /// </summary>
+    public string? Name { get; init; }
+
+    /// <summary>
+    /// Перший чинний день НОВОГО запису; <c>null</c> — від початку. Для наявного запису не приймається:
+    /// зміна вікна перераховує посилання документів (<c>POST …/entries/{id}/validity</c>).
+    /// </summary>
+    public DateOnly? ValidFrom { get; init; }
+
+    /// <summary>
+    /// Перший НЕчинний день НОВОГО запису; <c>null</c> — без обмеження. Порожнє вікно
+    /// (<c>validTo ≤ validFrom</c>) — помилка рядка в полі <c>@validity</c>.
+    /// </summary>
+    public DateOnly? ValidTo { get; init; }
+}
 
 /// <summary>Звіт пакета — завжди 200, як імпорт CSV.</summary>
 /// <param name="Applied">Чи записано зміни; хоч одна помилка рядка або <c>dryRun</c> — ні.</param>

@@ -1,5 +1,6 @@
-import { apiFetch } from '@/api/client';
+import { apiFetch, apiFetchResponse } from '@/api/client';
 import type { components } from '@/api/schema';
+import { fileNameOf } from '@/features/audit/api';
 
 /** Рядок довідника зі значеннями полів (`GET …/rows`, RT-13). */
 export type RegistryRow = components['schemas']['RegistryRowDto'];
@@ -27,6 +28,8 @@ export interface RegistryRowsQuery {
   readonly asOfUtc?: string;
   /** Батько композиції (для частини) або каскаду. */
   readonly parentEntryId?: number;
+  /** Лише ці записи (≤ 500); правило видимості на `asOf` діє й тут. */
+  readonly ids?: readonly number[];
   /** Підрядок коду, назви або текстового поля. */
   readonly q?: string;
   /** Код поля → точне значення в поданні `value`. */
@@ -47,6 +50,7 @@ export function registryRowsQuery(query: RegistryRowsQuery): string {
   if (query.asOf) params.set('asOf', query.asOf);
   if (query.asOfUtc) params.set('asOfUtc', query.asOfUtc);
   if (query.parentEntryId !== undefined) params.set('parentEntryId', String(query.parentEntryId));
+  for (const id of query.ids ?? []) params.append('id', String(id));
   if (query.q?.trim()) params.set('q', query.q.trim());
 
   for (const [field, value] of Object.entries(query.fields ?? {})) {
@@ -93,4 +97,68 @@ export function saveBatch(
       body: JSON.stringify({ items: [...items] } satisfies RegistryBatchRequest),
     },
   );
+}
+
+/** Рядок історії запису (`GET …/entries/{id}/history`, RT-15). */
+export type RegistryEntryHistoryItem = components['schemas']['RegistryEntryHistoryItemDto'];
+
+/** Сторінка історії: від найновішого, `nextCursor` (`null` — кінець), `totalCount`. */
+export type RegistryEntryHistoryPage = components['schemas']['PagedResultOfRegistryEntryHistoryItemDto'];
+
+/**
+ * Історія запису довідника: хто, коли й що змінив (FEATURE-REGISTRY-TABLES §8.5, RT-15). Споживач —
+ * вкладка «History» шторки запису (RT-33).
+ *
+ * ⚠ `kind` — `created`, `value`, `name`, `validity`, `active`, `deleted`; значення — рядком, у поданні
+ * `GET …/rows` (`Lookup` — Id, назва цілі — в `oldDisplay`/`newDisplay`).
+ */
+export function getRegistryEntryHistory(
+  code: string,
+  entryId: number,
+  page: { readonly cursor?: string | null; readonly limit?: number } = {},
+): Promise<RegistryEntryHistoryPage> {
+  const params = new URLSearchParams();
+  if (page.cursor) params.set('cursor', page.cursor);
+  params.set('limit', String(page.limit ?? 50));
+
+  return apiFetch<RegistryEntryHistoryPage>(
+    `/api/v1/registries/${encodeURIComponent(code)}/entries/${entryId}/history?${params.toString()}`,
+  );
+}
+
+/** Формат експорту довідника. */
+export type RegistryExportFormat = 'csv' | 'xlsx';
+
+/** Завантажений файл експорту: тіло й ім'я, яке запропонував сервер (або `null`). */
+export interface RegistryExportFile {
+  readonly blob: Blob;
+  readonly fileName: string | null;
+}
+
+/**
+ * Експорт записів довідника, чинних на `asOf` (RT-16): CSV (приймає назад імпорт) або XLSX. Посилання —
+ * кодами. Споживач — меню експорту редактора даних (RT-33).
+ *
+ * ⛔ `fetch` → blob, а не посилання: за посиланням браузер показав би відмову (`422`, `403`) сирим JSON.
+ *
+ * ⚠ `method: 'GET'` названо явно: сторож `EndpointCoverageTests` виводить метод із назви функції, а
+ * `apiFetchResponse` у його переліку немає.
+ */
+export async function fetchRegistryExport(
+  code: string,
+  format: RegistryExportFormat,
+  asOf?: string,
+): Promise<RegistryExportFile> {
+  const params = new URLSearchParams({ format });
+  if (asOf) params.set('asOf', asOf);
+
+  const response = await apiFetchResponse(
+    `/api/v1/registries/${encodeURIComponent(code)}/export?${params.toString()}`,
+    { method: 'GET' },
+  );
+
+  return {
+    blob: await response.blob(),
+    fileName: fileNameOf(response.headers.get('Content-Disposition')),
+  };
 }

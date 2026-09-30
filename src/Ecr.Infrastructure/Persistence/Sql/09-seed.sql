@@ -5201,6 +5201,14 @@ USING (VALUES
     (N'err.ECR-REG-4093.entryChanged', N'en', N'Entry {entryCode} was changed after you opened it.', 1),
     (N'err.ECR-REQ-0422.batchTooLarge', N'en', N'A batch can contain at most {max} rows; this one has {count}.', 1),
     (N'err.ECR-REQ-0422.batchItemInvalid', N'en', N'Batch row "{clientRowId}" cannot be processed: each row needs the action upsert or delete, a deletion needs the entry id, and an entry may appear in the batch only once.', 1),
+    -- REGSRV:rt15-16 ── серверні ендпоінти довідників: фільтр id рядків, назва й вікно нового запису в пакеті, експорт (RT-16), код одиниці в імпорті CSV ──
+    (N'err.ECR-REQ-0422.registryRowsIdsTooMany', N'en', N'The id filter can name at most {max} entries; this one names {count}.', 1),
+    (N'err.ECR-REQ-0422.batchItemNewOnly', N'en', N'Batch row "{clientRowId}": a name and a validity window can be given only for a new entry. Change them for an existing entry in its form.', 1),
+    (N'err.ECR-REQ-0422.registryExportFormatUnknown', N'en', N'There is no registry export format "{format}": use csv or xlsx.', 1),
+    (N'err.ECR-REQ-0422.registryExportTooLarge', N'en', N'Registry "{registryCode}" has {total} entries to export, the limit is {max}.', 1),
+    (N'err.ECR-REG-0422.unitCodeUnknown', N'en', N'There is no unit with this code.', 1),
+    -- ru/kz — окремою порцією `REGSRV:rt15-16` у блоці I18N нижче.
+    -- REGSRV:rt15-16 ── кінець секції ──
     -- RT-17a (ФВ-8.18, FEATURE-REGISTRY-TABLES §6, §7.2; R-5): рушій правил довідника, компіляція правил в описі.
     (N'err.ECR-REG-4221', N'en', N'Registry rule not met', 1),
     (N'err.ECR-REG-4221.ruleViolated', N'en', N'{rule}: {message}', 1),
@@ -12474,6 +12482,25 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:d212-dates ── кінець секції ──
+
+-- REGSRV:rt15-16 ── ru/kz серверних ендпоінтів довідників (RT-15, RT-16, пакет, фільтр id); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-REQ-0422.registryRowsIdsTooMany', N'ru', N'В фильтре id можно указать не больше {max} записей, а указано {count}.'),
+    (N'err.ECR-REQ-0422.registryRowsIdsTooMany', N'kz', N'id сүзгісінде {max} жазбадан артық көрсетуге болмайды, ал көрсетілгені — {count}.'),
+    (N'err.ECR-REQ-0422.batchItemNewOnly', N'ru', N'Строка пакета «{clientRowId}»: название и срок действия можно задать только новой записи. У существующей записи их меняют в её форме.'),
+    (N'err.ECR-REQ-0422.batchItemNewOnly', N'kz', N'Пакеттің «{clientRowId}» жолы: атау мен әрекет ету мерзімін тек жаңа жазбаға беруге болады. Бар жазбада оларды жазба пішінінде өзгертеді.'),
+    (N'err.ECR-REQ-0422.registryExportFormatUnknown', N'ru', N'Формата экспорта справочника «{format}» не существует: используйте csv или xlsx.'),
+    (N'err.ECR-REQ-0422.registryExportFormatUnknown', N'kz', N'«{format}» анықтамалық экспорты пішімі жоқ: csv немесе xlsx пайдаланыңыз.'),
+    (N'err.ECR-REQ-0422.registryExportTooLarge', N'ru', N'В справочнике «{registryCode}» для экспорта {total} записей, а ограничение — {max}.'),
+    (N'err.ECR-REQ-0422.registryExportTooLarge', N'kz', N'«{registryCode}» анықтамалығында экспортқа {total} жазба бар, ал шектеу — {max}.'),
+    (N'err.ECR-REG-0422.unitCodeUnknown', N'ru', N'Единицы измерения с таким кодом нет.'),
+    (N'err.ECR-REG-0422.unitCodeUnknown', N'kz', N'Мұндай коды бар өлшем бірлігі жоқ.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- REGSRV:rt15-16 ── кінець секції ──
 
 -- COLL:tz-health ── ru/kz перевірки tzdata на /health/ready (F-4); власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)

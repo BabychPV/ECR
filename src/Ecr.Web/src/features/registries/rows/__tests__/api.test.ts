@@ -1,5 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { getRegistryRows, registryRowsQuery, saveBatch } from '@/features/registries/rows/api';
+import { EcrApiError } from '@/api/client';
+import {
+  fetchRegistryExport,
+  getRegistryEntryHistory,
+  getRegistryRows,
+  registryRowsQuery,
+  saveBatch,
+} from '@/features/registries/rows/api';
 
 /**
  * Споживач `GET /api/v1/registries/{code}/rows` (RT-13, FEATURE-REGISTRY-TABLES §7.1).
@@ -79,6 +86,11 @@ describe('рядки довідника', () => {
     expect(query.get('limit')).toBe('100');
   });
 
+  it('фільтр за id — повторюваний параметр', () => {
+    const query = new URLSearchParams(registryRowsQuery({ ids: [7, 9] }));
+    expect(query.getAll('id')).toEqual(['7', '9']);
+  });
+
   it('не надсилає порожніх параметрів', () => {
     expect(registryRowsQuery({ q: '   ', cursor: null })).toBe('limit=100');
   });
@@ -152,5 +164,78 @@ describe('пакет рядків довідника', () => {
     await saveBatch('STREAM', [], false);
 
     expect(urls).toEqual(['/api/v1/registries/STREAM/entries/batch?dryRun=false']);
+  });
+});
+
+describe('історія запису довідника', () => {
+  it('читає сторінку історії з адреси запису й передає курсор', async () => {
+    const urls = mockFetch({
+      items: [
+        {
+          at: '2026-09-27T14:03:00Z',
+          byUserId: 3,
+          byDisplayName: 'D. Akhmetova',
+          kind: 'value',
+          field: 'H2S',
+          oldValue: '12.4246686',
+          newValue: '12.4246690',
+          oldDisplay: null,
+          newDisplay: null,
+        },
+      ],
+      nextCursor: 'MTIz',
+      totalCount: 4,
+    });
+
+    const page = await getRegistryEntryHistory('GAS/COMP', 4411, { cursor: 'YWJj', limit: 20 });
+
+    expect(urls).toEqual(['/api/v1/registries/GAS%2FCOMP/entries/4411/history?cursor=YWJj&limit=20']);
+    expect(page.items[0]!.kind).toBe('value');
+    expect(page.items[0]!.newValue).toBe('12.4246690');
+    expect(page.nextCursor).toBe('MTIz');
+  });
+});
+
+describe('експорт довідника', () => {
+  it('завантажує файл із форматом і датою та бере ім\'я з Content-Disposition', async () => {
+    const urls: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        urls.push(String(input));
+        return new Response('code,T\r\nE1,1.5\r\n', {
+          status: 200,
+          headers: {
+            'Content-Type': 'text/csv; charset=utf-8',
+            'Content-Disposition': "attachment; filename=registry-GAS-20260930.csv; filename*=UTF-8''registry-GAS-20260930.csv",
+          },
+        });
+      }),
+    );
+
+    const file = await fetchRegistryExport('GAS', 'csv', '2026-09-30');
+
+    expect(urls).toEqual(['/api/v1/registries/GAS/export?format=csv&asOf=2026-09-30']);
+    expect(file.fileName).toBe('registry-GAS-20260930.csv');
+    expect(await file.blob.text()).toBe('code,T\r\nE1,1.5\r\n');
+  });
+
+  it('відмова сервера — помилка з кодом, а не файл із JSON', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              status: 422,
+              errorCode: 'ECR-REQ-0422',
+              messageKey: 'err.ECR-REQ-0422.registryExportTooLarge',
+            }),
+            { status: 422, headers: { 'Content-Type': 'application/problem+json' } },
+          ),
+      ),
+    );
+
+    await expect(fetchRegistryExport('GAS', 'xlsx')).rejects.toBeInstanceOf(EcrApiError);
   });
 });

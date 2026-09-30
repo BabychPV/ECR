@@ -263,6 +263,8 @@ public static class DependencyInjection
         services.AddScoped<Registries.RegistryEntryWriter>(); // S6
         services.AddScoped<Registries.Rows.GetRegistryRowsHandler>(); // RT-13
         services.AddScoped<Registries.Rows.RegistryBatchHandler>(); // RT-14
+        services.AddScoped<Registries.Rows.GetRegistryEntryHistoryHandler>(); // RT-15
+        services.AddScoped<Registries.Export.ExportRegistryHandler>(); // RT-16
         services.AddScoped<Registries.Rules.RegistryRuleCompiler>(); // RT-17a
         services.AddScoped<Registries.Rules.IRegistryRuleEngine, Registries.Rules.RegistryRuleEngine>(); // RT-17a
 

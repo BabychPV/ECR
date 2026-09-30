@@ -27,7 +27,14 @@ public sealed record RegistryRowsRequest(
     long? ParentEntryId,
     string? Search,
     IReadOnlyDictionary<string, string> FieldFilters,
-    CursorRequest Page);
+    CursorRequest Page)
+{
+    /// <summary>
+    /// Лише ці записи (<c>?id=</c>, ≤ <see cref="CursorRequest.MaxLimit"/>); порожньо — усі. Правило видимості
+    /// діє й тут: запис, невидимий на <c>asOf</c>, не повертається.
+    /// </summary>
+    public IReadOnlyCollection<long> EntryIds { get; init; } = [];
+}
 
 /// <summary>
 /// Рядки довідника зі значеннями полів — сторінками за курсором (RT-13, FEATURE-REGISTRY-TABLES §7.1).
@@ -76,6 +83,30 @@ public sealed class GetRegistryRowsHandler(
                 new Dictionary<string, object?> { ["messageKey"] = "err.ECR-REQ-0422.pageSizeOutOfRange", ["max"] = max });
         }
 
+        var (definition, ordered) = await SelectAsync(request, ct).ConfigureAwait(false);
+
+        var after = DecodeCursor(request.Page.Cursor);
+        var page = ordered.Where(e => e.Id > after).Take(request.Page.Limit + 1).ToList();
+        var hasMore = page.Count > request.Page.Limit;
+        if (hasMore)
+        {
+            page.RemoveAt(page.Count - 1);
+        }
+
+        var items = await ProjectAsync(definition, page, request.AsOfUtc, ct).ConfigureAwait(false);
+
+        return new PagedResult<RegistryRowDto>(items, hasMore ? EncodeCursor(page[^1].Id) : null, ordered.Count);
+    }
+
+    /// <summary>
+    /// Опис довідника і ВСІ записи, що проходять запит (видимість, батько, <c>id</c>, пошук, фільтри), у
+    /// порядку <c>Id</c> — без права й без сторінки. Спільне з експортом (RT-16): одне правило відбору.
+    /// </summary>
+    /// <param name="request">Параметри; <see cref="RegistryRowsRequest.Page"/> не читається.</param>
+    /// <param name="ct">Токен скасування.</param>
+    internal async Task<(RegistryDef Definition, List<RegistryEntry> Ordered)> SelectAsync(
+        RegistryRowsRequest request, CancellationToken ct)
+    {
         var definition = await registries.FindDefinitionAsync(request.RegistryCode, ct).ConfigureAwait(false)
             ?? throw new NotFoundException(
                 ErrorCodes.RegistryEntryNotFound,
@@ -94,28 +125,51 @@ public sealed class GetRegistryRowsHandler(
                 new Dictionary<string, object?> { ["messageKey"] = "err.ECR-REQ-0422.asOfRequired", ["parameter"] = "asOf" });
         }
 
+        var entryIds = request.EntryIds ?? [];
+        if (entryIds.Count > CursorRequest.MaxLimit)
+        {
+            var max = CursorRequest.MaxLimit.ToString(CultureInfo.InvariantCulture);
+            throw new BusinessRuleException(
+                ErrorCodes.RequestInvalid,
+                $"Записів у фільтрі id {entryIds.Count}, а найбільше — {max}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-REQ-0422.registryRowsIdsTooMany",
+                    ["max"] = max,
+                    ["count"] = entryIds.Count.ToString(CultureInfo.InvariantCulture),
+                });
+        }
+
         var filters = ParseFilters(definition, request.FieldFilters);
         var entries = await rows.ListEntriesAsync(definition.Id, request.AsOfUtc, ct).ConfigureAwait(false);
         var visible = await VisibleAsync(definition, entries, chain, request, ct).ConfigureAwait(false);
+        if (entryIds.Count > 0)
+        {
+            var wanted = entryIds.ToHashSet();
+            visible = [.. visible.Where(e => wanted.Contains(e.Id))];
+        }
+
         visible = await MatchAsync(definition, visible, request.Search?.Trim(), filters, request.AsOfUtc, ct).ConfigureAwait(false);
 
         // ⛔ Порядок курсора — Id, а не порядок пікера (Ordinal, Code): «після Id N» має сенс лише в
         // порядку Id. Інакше новий запис із меншим кодом зсунув би межу, і сторінка повторила б рядки.
-        var ordered = visible.OrderBy(e => e.Id).ToList();
-        var after = DecodeCursor(request.Page.Cursor);
-        var page = ordered.Where(e => e.Id > after).Take(request.Page.Limit + 1).ToList();
-        var hasMore = page.Count > request.Page.Limit;
-        if (hasMore)
-        {
-            page.RemoveAt(page.Count - 1);
-        }
+        return (definition, visible.OrderBy(e => e.Id).ToList());
+    }
 
-        var slice = await rows.ReadRowsAsync([.. page.Select(e => e.Id)], request.AsOfUtc, ct).ConfigureAwait(false);
+    /// <summary>Рядки зі значеннями для записів сторінки (≤ 500) — сталою кількістю запитів.</summary>
+    /// <param name="definition">Опис довідника.</param>
+    /// <param name="page">Записи сторінки.</param>
+    /// <param name="asOfUtc">Системний момент; <c>null</c> — поточні дані.</param>
+    /// <param name="ct">Токен скасування.</param>
+    internal async Task<List<RegistryRowDto>> ProjectAsync(
+        RegistryDef definition, IReadOnlyList<RegistryEntry> page, DateTime? asOfUtc, CancellationToken ct)
+    {
+        var slice = await rows.ReadRowsAsync([.. page.Select(e => e.Id)], asOfUtc, ct).ConfigureAwait(false);
         var fields = definition.Fields.ToDictionary(f => f.Id);
         var values = slice.Values.ToLookup(v => v.RegistryEntryId);
         var referenced = slice.Referenced.GroupBy(e => e.Id).ToDictionary(g => g.Key, g => g.First());
 
-        var items = page
+        return page
             .Select(e => new RegistryRowDto(
                 e.Id,
                 e.Code,
@@ -126,8 +180,6 @@ public sealed class GetRegistryRowsHandler(
                 RegistryRowVersion.Encode(slice.Versions.GetValueOrDefault(e.Id)),
                 Values(values[e.Id], fields, referenced)))
             .ToList();
-
-        return new PagedResult<RegistryRowDto>(items, hasMore ? EncodeCursor(page[^1].Id) : null, ordered.Count);
     }
 
     /// <summary>Записи, видимі правилом пікера, звужені батьком.</summary>
@@ -298,7 +350,7 @@ public sealed class GetRegistryRowsHandler(
     }
 
     /// <summary>Значення рядком за типом поля; немає значення — <c>null</c>.</summary>
-    private static string? ValueText(CellDataType type, RegistryRowValue value) => type switch
+    internal static string? ValueText(CellDataType type, RegistryRowValue value) => type switch
     {
         CellDataType.String => value.Text,
         CellDataType.Int or CellDataType.Decimal => value.Numeric is { } number ? Number(number) : null,
@@ -314,7 +366,7 @@ public sealed class GetRegistryRowsHandler(
     /// доходять до клієнта цілими. Хвостові нулі шкали прибрано — <c>49.9999977539011</c>, а не
     /// <c>49.9999977539011000</c>.
     /// </summary>
-    private static string Number(decimal value)
+    internal static string Number(decimal value)
     {
         var text = value.ToString(CultureInfo.InvariantCulture);
         return text.Contains('.', StringComparison.Ordinal) ? text.TrimEnd('0').TrimEnd('.') : text;

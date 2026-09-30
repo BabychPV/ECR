@@ -2761,6 +2761,24 @@ public interface IRegistryRowsQuery
         IReadOnlyCollection<int> registryFieldDefIds, DateTime? asOfUtc, CancellationToken ct);
     public Task<RegistryRowsSlice> ReadRowsAsync(
         IReadOnlyCollection<long> registryEntryIds, DateTime? asOfUtc, CancellationToken ct);
+    public Task<RegistryEntryHistorySlice> ReadEntryHistoryAsync(long registryEntryId, CancellationToken ct);
+}
+```
+
+✎ 2026-09-30 (RT-15): `ReadEntryHistoryAsync` — усі системні версії запису та значень
+(`FOR SYSTEM_TIME ALL`) без версій нульової тривалості, імена авторів і поточні цілі `Lookup`;
+порівняння версій робить обробник.
+
+#### `IRegistryWorkbookWriter`
+
+Книга експорту довідника (RT-16): один плаский аркуш, заголовок — коди колонок. Число — числом лише
+тоді, коли `double` тримає його без втрат (D-30), інакше текстом; дата — датою `yyyy-mm-dd`. Потік —
+тимчасовий файл, закриває викликач.
+
+```csharp
+public interface IRegistryWorkbookWriter
+{
+    public Task<Stream> WriteAsync(RegistryWorkbook workbook, CancellationToken ct);
 }
 ```
 
@@ -3889,8 +3907,10 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/registries/{code}/entries/import?dryRun=` | `Registry.EditData` | 8 |
 | `POST` | `/api/v1/registries` | `Registry.EditDefinition` | 8 |
 | `POST` | `/api/v1/registries/{code}/keys/check` | `Registry.EditDefinition` | 8 |
-| `GET` | `/api/v1/registries/{code}/rows?asOf=&asOfUtc=&parentEntryId=&q=&cursor=&limit=` | `Registry.View` | 8 |
+| `GET` | `/api/v1/registries/{code}/rows?asOf=&asOfUtc=&parentEntryId=&id=&q=&cursor=&limit=` | `Registry.View` | 8 |
 | `POST` | `/api/v1/registries/{code}/entries/batch?dryRun=` | `Registry.EditData` | 8 |
+| `GET` | `/api/v1/registries/{code}/entries/{id}/history?cursor=&limit=` | `Registry.View` | 8 |
+| `GET` | `/api/v1/registries/{code}/export?format=&asOf=` | `Registry.View` | 8 |
 | `GET` | `/api/v1/reports` | `Report.ViewRegulatory` | 5 |
 | `POST` | `/api/v1/reports` | `Report.EditDefinition` | 5 |
 | `POST` | `/api/v1/reports/{id}/versions` | `Report.EditDefinition` | 5 |
@@ -3934,6 +3954,32 @@ public sealed class NotFoundException(string errorCode, string message)
 > обмін ключами між записами пакета законний. `409 ECR-REG-4092` — лише гонка під час застосування;
 > `422 ECR-REQ-0422 batchTooLarge` (> 2000) / `batchItemInvalid` (невідома дія, `delete` без `id`,
 > повтор `id`).
+
+> ✎ 2026-09-30 (RT-13/RT-14, доповнення): `GET …/rows` приймає `id` (повторюваний, ≤ 500 — інакше
+> `422 registryRowsIdsTooMany`): лише ці записи, правило видимості діє й тут. Рядок пакета
+> `POST …/entries/batch` для НОВОГО запису приймає `name` (назва мовою за замовчуванням; порожньо —
+> код), `validFrom`, `validTo` (порожнє вікно — помилка рядка в полі `@validity`); для наявного — `422
+> batchItemNewOnly` (назву й вікно наявного змінюють форма запису й `POST …/validity`).
+
+> ✎ 2026-09-30 (RT-15): `GET /registries/{code}/entries/{id}/history?cursor=&limit=` →
+> `PagedResult<RegistryEntryHistoryItemDto>` від найновішого: `{at, byUserId, byDisplayName, kind, field,
+> oldValue, newValue, oldDisplay, newDisplay}`, `kind` ∈ `created`, `value`, `name`, `validity`, `active`,
+> `deleted`. Джерело — системні версії `dic.RegistryEntry`/`dic.RegistryValue` (`FOR SYSTEM_TIME ALL`,
+> автор версії — `ChangedByUserId`, D-158), тож історію має кожен шлях запису. Значення, задані разом зі
+> створенням, окремих рядків не дають (їх підсумовує `created`); `value` зі `newValue = null` — значення
+> прибрано. Значення — у поданні `GET …/rows` (`Lookup` — Id, `oldDisplay`/`newDisplay` — назва цілі чи
+> код одиниці); `validity` — інтервал ISO 8601 `2026-01-01/..`. Видалений запис має історію; запис
+> іншого довідника — `404 REG-0404 registryEntry`. Курсор — ключ рядка (момент, вид, поле), не зсув.
+
+> ✎ 2026-09-30 (RT-16): `GET /registries/{code}/export?format=csv|xlsx&asOf=` — файл. Формат — `format`,
+> без нього — `Accept` (`text/csv` або тип книги Excel), інакше CSV; невідомий — `422
+> registryExportFormatUnknown`. Записи — ті, що бачить `GET …/rows` на `asOf` (без нього — сьогодні, UTC).
+> Посилання — кодами: `Lookup` — код запису-цілі, поле `Unit` — код одиниці. CSV (UTF-8 із BOM) —
+> `code` і коди полів, рівно те, що приймає `POST …/entries/import` (той тепер приймає код одиниці в полі
+> `Unit`, невідомий — помилка рядка `unitCodeUnknown`); XLSX додає `@name`, `@validFrom`, `@validTo`,
+> число лягає числом, лише коли `double` тримає його без втрат, інакше — текстом. Стеля
+> `Registries:ExportMaxRows` (50 000) — `422 registryExportTooLarge`. Кожен експорт — подія
+> `RegistryExported` у `aud.SecurityEvent` (незалежна від транзакції, C4).
 
 > ✎ 2026-09-29 (RT-17a, ФВ-8.18, FEATURE-REGISTRY-TABLES §6, §7.1): правила довідника виконуються
 > під час запису — `POST …/entries`, `POST …/entries/batch`, `POST …/entries/import` — на стані ПІСЛЯ

@@ -35,6 +35,9 @@ public static class DependencyInjection
         // усе, що їй треба, приходить аргументом.
         services.AddSingleton<ISnapshotWorkbookWriter, SnapshotWorkbookWriter>();
 
+        // Книга експорту довідника (RT-16): так само без стану й без портів.
+        services.AddSingleton<IRegistryWorkbookWriter, RegistryWorkbookWriter>();
+
         return services;
     }
 }

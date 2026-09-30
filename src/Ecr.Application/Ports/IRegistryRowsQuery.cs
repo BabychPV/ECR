@@ -38,6 +38,18 @@ public interface IRegistryRowsQuery
     /// <param name="ct">Токен скасування.</param>
     public Task<RegistryRowsSlice> ReadRowsAsync(
         IReadOnlyCollection<long> registryEntryIds, DateTime? asOfUtc, CancellationToken ct);
+
+    /// <summary>
+    /// Усі системні версії запису та його значень (<c>FOR SYSTEM_TIME ALL</c>, RT-15) — сировина
+    /// історії запису; порівняння версій робить обробник.
+    /// </summary>
+    /// <param name="registryEntryId">Запис; видалений логічно теж.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⚠ Версії нульової тривалості (<c>PeriodStart = PeriodEnd</c>: кілька змін рядка в одній
+    /// транзакції) відкинуто — їхнього стану ніхто ніколи не бачив.
+    /// </remarks>
+    public Task<RegistryEntryHistorySlice> ReadEntryHistoryAsync(long registryEntryId, CancellationToken ct);
 }
 
 /// <summary>Значення одного поля запису — типізовані колонки <c>dic.RegistryValue</c>.</summary>
@@ -71,4 +83,47 @@ public sealed record RegistryRowValue(
 public sealed record RegistryRowsSlice(
     IReadOnlyList<RegistryRowValue> Values,
     IReadOnlyDictionary<long, DateTime> Versions,
+    IReadOnlyList<RegistryEntry> Referenced);
+
+/// <summary>Системна версія рядка запису (<c>dic.RegistryEntry</c> + <c>dic.RegistryEntryHistory</c>).</summary>
+/// <param name="FromUtc">Початок версії (<c>PeriodStart</c>) — момент зміни.</param>
+/// <param name="ToUtc">Кінець версії (<c>PeriodEnd</c>); чинна версія — <c>9999-12-31</c>.</param>
+/// <param name="ChangedByUserId">Автор версії (<c>D-158</c>); <c>null</c> — невідомий.</param>
+/// <param name="Display">Назва мовами каталогу.</param>
+/// <param name="ValidFrom">Перший чинний день.</param>
+/// <param name="ValidTo">Перший НЕчинний день.</param>
+/// <param name="IsActive">Активний.</param>
+/// <param name="IsDeleted">Видалений логічно.</param>
+public sealed record RegistryEntryVersion(
+    DateTime FromUtc,
+    DateTime ToUtc,
+    int? ChangedByUserId,
+    Domain.ValueObjects.LocalizedText Display,
+    DateOnly? ValidFrom,
+    DateOnly? ValidTo,
+    bool IsActive,
+    bool IsDeleted);
+
+/// <summary>Системна версія значення поля (<c>dic.RegistryValue</c> + <c>dic.RegistryValueHistory</c>).</summary>
+/// <param name="ValueId">Рядок значення: видалене й знову додане значення — інший рядок.</param>
+/// <param name="FromUtc">Початок версії.</param>
+/// <param name="ToUtc">Кінець версії; чинна — <c>9999-12-31</c>.</param>
+/// <param name="ChangedByUserId">Автор версії; <c>null</c> — невідомий.</param>
+/// <param name="Value">Значення в типізованих колонках.</param>
+public sealed record RegistryValueVersion(
+    long ValueId,
+    DateTime FromUtc,
+    DateTime ToUtc,
+    int? ChangedByUserId,
+    RegistryRowValue Value);
+
+/// <summary>Сировина історії одного запису.</summary>
+/// <param name="Entry">Версії рядка запису в порядку часу.</param>
+/// <param name="Values">Версії значень запису в порядку часу.</param>
+/// <param name="UserNames">Автор → відображуване ім'я (<c>sec.User.DisplayName</c>, не логін — R-A2).</param>
+/// <param name="Referenced">Поточні записи-цілі <c>Lookup</c>-значень усіх версій.</param>
+public sealed record RegistryEntryHistorySlice(
+    IReadOnlyList<RegistryEntryVersion> Entry,
+    IReadOnlyList<RegistryValueVersion> Values,
+    IReadOnlyDictionary<int, string> UserNames,
     IReadOnlyList<RegistryEntry> Referenced);

@@ -1,4 +1,5 @@
 // src/Ecr.Application/Registries/RegistryEntryCsvHandlers.cs
+using System.Globalization;
 using System.Text.Json;
 using Ecr.Application.Common;
 using Ecr.Application.Errors;
@@ -70,8 +71,18 @@ public sealed class ImportRegistryEntriesHandler(
     IClock clock,
     RegistryEntryWriter writer,
     IUnitOfWork? uow = null,
-    Rules.IRegistryRuleEngine? rules = null)
+    Rules.IRegistryRuleEngine? rules = null,
+    IUnitStore? units = null)
 {
+    // ⚠ `units` (RT-16) — код одиниці в полі типу Unit: так його пише експорт. Без порту (тести, що
+    // будують обробник руками) поле приймає лише Id, як і досі.
+
+    /// <summary>Ключ помилки рядка: одиниці з таким кодом немає.</summary>
+    public const string UnitCodeUnknownKey = "err.ECR-REG-0422.unitCodeUnknown";
+
+    /// <summary>Код одиниці → Id у межах одного файлу: кожен код читається один раз (B-10).</summary>
+    private readonly Dictionary<string, int?> _unitIds = new(StringComparer.OrdinalIgnoreCase);
+
     // ⚠ `uow` і `rules` (RT-17a) необов'язкові лише для тестів, що будують обробник руками: контейнер
     // підставляє обидва, і файл проходить ті самі правила, що й ручний upsert і пакет.
 
@@ -629,6 +640,26 @@ public sealed class ImportRegistryEntriesHandler(
                 // і «12,5» мовчки ставало 125 (клас `C1`). Далі їде вже `decimal`
                 // — проба, ключі й запис бачать те саме число.
                 object parsed = raw;
+
+                // RT-16: експорт пише поле Unit КОДОМ одиниці; Id (число) приймається, як і раніше.
+                if (field.DataType == CellDataType.Unit && units is not null
+                    && !long.TryParse(raw.Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out _))
+                {
+                    var unitCode = raw.Trim();
+                    if (!_unitIds.TryGetValue(unitCode, out var unitId))
+                    {
+                        unitId = (await units.FindUnitByCodeAsync(unitCode, ct).ConfigureAwait(false))?.Id;
+                        _unitIds[unitCode] = unitId;
+                    }
+
+                    if (unitId is null)
+                    {
+                        return (values, field.Code, UnitCodeUnknownKey);
+                    }
+
+                    parsed = unitId.Value;
+                }
+
                 if (field.DataType is CellDataType.Int or CellDataType.Decimal)
                 {
                     var reading = CultureNumberReader.Read(raw, numberCulture);

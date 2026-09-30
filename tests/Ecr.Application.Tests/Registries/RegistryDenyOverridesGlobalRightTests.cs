@@ -190,6 +190,45 @@ public sealed class RegistryDenyOverridesGlobalRightTests
     }
 
     [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    public async Task Історія_запису__глобальне_View_і_заборона__404_і_жодного_читання_версій()
+    {
+        Profile(b => b.Permission("Registry.View").Deny(ResourceKind.Registry, DeniedId));
+        var handler = new GetRegistryEntryHistoryHandler(_registries, _rows, _access, _user);
+
+        var denied = await Assert.ThrowsAsync<NotFoundException>(
+            () => handler.HandleAsync(DeniedCode, DeniedEntryId, new CursorRequest(50, null), default));
+
+        Assert.Equal("ECR-REG-0404", denied.ErrorCode);
+        await _rows.DidNotReceive().ReadEntryHistoryAsync(Arg.Any<long>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    public async Task Експорт__глобальне_View_і_заборона__404_без_файлу_й_без_події()
+    {
+        Profile(b => b.Permission("Registry.View").Deny(ResourceKind.Registry, DeniedId));
+        var workbooks = Substitute.For<IRegistryWorkbookWriter>();
+        var handler = new Ecr.Application.Registries.Export.ExportRegistryHandler(
+            _registries,
+            new GetRegistryRowsHandler(_registries, _rows, new RegistryResolver(), _access, _user),
+            Substitute.For<IRegistryKeyStore>(),
+            workbooks,
+            _audit,
+            _access,
+            _user,
+            _clock);
+
+        var denied = await Assert.ThrowsAsync<NotFoundException>(
+            () => handler.HandleAsync(DeniedCode, "xlsx", null, 10, default));
+
+        Assert.Equal("ECR-REG-0404", denied.ErrorCode);
+        await _registries.DidNotReceive().ListEntriesAsync(Arg.Any<int>(), Arg.Any<CancellationToken>());
+        await workbooks.DidNotReceive().WriteAsync(Arg.Any<RegistryWorkbook>(), Arg.Any<CancellationToken>());
+        await _audit.DidNotReceive().WriteIndependentSecurityEventAsync(Arg.Any<SecurityEventRecord>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage4)]
     public async Task Зовнішні_ключі_перелік__глобальне_View_і_заборона__404()
     {

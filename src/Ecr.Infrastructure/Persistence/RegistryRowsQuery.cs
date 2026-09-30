@@ -83,6 +83,82 @@ public sealed class RegistryRowsQuery(EcrDbContext db) : IRegistryRowsQuery
         return new RegistryRowsSlice(values, versions, referenced);
     }
 
+    /// <inheritdoc />
+    public async Task<RegistryEntryHistorySlice> ReadEntryHistoryAsync(long registryEntryId, CancellationToken ct)
+    {
+        // ⛔ FOR SYSTEM_TIME ALL: історію пише сама база на КОЖНОМУ шляху запису (ручний, пакет, CSV,
+        // синк, прямий SQL — R-9), а автора версії ставить UnitOfWork (D-158). Журнал aud.* цього не
+        // дає: частина шляхів пише туди лише підсумок на весь файл або нічого.
+        var entries = (await db.RegistryEntries.TemporalAll().AsNoTracking()
+                .Where(e => e.Id == registryEntryId)
+                .Select(e => new
+                {
+                    From = EF.Property<DateTime>(e, RegistryEntryConfiguration.PeriodStart),
+                    To = EF.Property<DateTime>(e, RegistryEntryConfiguration.PeriodEnd),
+                    e.ChangedByUserId,
+                    e.DisplayL10n,
+                    e.ValidFrom,
+                    e.ValidTo,
+                    e.IsActive,
+                    e.IsDeleted,
+                })
+                .ToListAsync(ct).ConfigureAwait(false))
+            .Where(e => e.From != e.To)
+            .Select(e => new RegistryEntryVersion(
+                Utc(e.From), Utc(e.To), e.ChangedByUserId, e.DisplayL10n, e.ValidFrom, e.ValidTo, e.IsActive, e.IsDeleted))
+            .OrderBy(e => e.FromUtc)
+            .ToList();
+
+        var values = (await (
+                    from v in db.RegistryValues.TemporalAll().AsNoTracking()
+                    where v.RegistryEntryId == registryEntryId
+                    join u in db.Units on v.ValueUnitId equals (int?)u.Id into units
+                    from u in units.DefaultIfEmpty()
+                    select new
+                    {
+                        v.Id,
+                        From = EF.Property<DateTime>(v, RegistryEntryConfiguration.PeriodStart),
+                        To = EF.Property<DateTime>(v, RegistryEntryConfiguration.PeriodEnd),
+                        v.ChangedByUserId,
+                        Value = new RegistryRowValue(
+                            v.RegistryEntryId,
+                            v.RegistryFieldDefId,
+                            v.ValueNumeric,
+                            v.ValueString,
+                            v.ValueDate,
+                            v.ValueBool,
+                            v.ValueRefEntryId,
+                            v.ValueUnitId,
+                            u == null ? null : u.Code),
+                    })
+                .ToListAsync(ct).ConfigureAwait(false))
+            .Where(v => v.From != v.To)
+            .Select(v => new RegistryValueVersion(v.Id, Utc(v.From), Utc(v.To), v.ChangedByUserId, v.Value))
+            .OrderBy(v => v.FromUtc)
+            .ThenBy(v => v.ValueId)
+            .ToList();
+
+        var authors = entries.Select(e => e.ChangedByUserId)
+            .Concat(values.Select(v => v.ChangedByUserId))
+            .OfType<int>()
+            .Distinct()
+            .ToList();
+        var names = authors.Count == 0
+            ? new Dictionary<int, string>()
+            : await db.Users.AsNoTracking()
+                .Where(u => authors.Contains(u.Id))
+                .ToDictionaryAsync(u => u.Id, u => u.DisplayName, ct).ConfigureAwait(false);
+
+        var targets = values.Select(v => v.Value.RefEntryId).OfType<long>().Distinct().ToList();
+        IReadOnlyList<RegistryEntry> referenced = targets.Count == 0
+            ? []
+            : await Entries(null).Where(e => targets.Contains(e.Id)).ToListAsync(ct).ConfigureAwait(false);
+
+        return new RegistryEntryHistorySlice(entries, values, names, referenced);
+    }
+
+    private static DateTime Utc(DateTime value) => DateTime.SpecifyKind(value, DateTimeKind.Utc);
+
     /// <summary>Значення в типізованих колонках разом із кодом одиниці.</summary>
     private IQueryable<RegistryRowValue> Project(IQueryable<RegistryValue> values)
         => from v in values
