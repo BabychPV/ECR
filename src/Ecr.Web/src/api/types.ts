@@ -1,4 +1,4 @@
-﻿import type { components } from './schema';
+import type { components } from './schema';
 
 /**
  * DTO клієнта — **псевдоніми згенерованих типів**, а не їхня копія.
@@ -738,3 +738,9 @@ export type GrantableSheet = Schemas['GrantableSheet'];
 
 /** Особисте призначення ролі користувачу з межами й областю (`GET /users/{id}/role-assignments`). */
 export type UserRoleAssignmentView = Schemas['UserRoleAssignmentView'];
+
+/** Розріз «ресурс → рівень → грант ролі» (ФВ-6.16, `GET /security/users/{id}/effective-access`). */
+export type EffectiveAccessView = Schemas['EffectiveAccessView'];
+
+/** Один внесок у підсумковий рівень доступу: роль, призначення, область, заборона. */
+export type EffectiveAccessContribution = Schemas['EffectiveAccessContribution'];

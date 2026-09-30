@@ -5429,8 +5429,44 @@ USING (VALUES
     -- JOBL ── людські назви видів фонових задач, яких бракувало в jobLabel.ts (KindKeys) ──
     (N'jobs.kind.sourceEventSync',  N'en', N'Source event sync', 1),
     (N'jobs.kind.consistencyCheck', N'en', N'Consistency check', 1),
-    (N'jobs.kind.orphanScan',       N'en', N'Orphaned data scan', 1)
+    (N'jobs.kind.orphanScan',       N'en', N'Orphaned data scan', 1),
     -- JOBL ── кінець секції ──
+    -- SEC:effective-access ── Розріз «ресурс → рівень → грант якої ролі» (ФВ-6.16, D-220, `EffectiveAccessPanel`, GET /security/users/{id}/effective-access) ──
+    (N'err.ECR-REQ-0422.effectiveAccessResource', N'en', N'The resource must be given as Registry:{id} or Project:{id}, with a positive number.', 1),
+    (N'effectiveAccess.show',            N'en', N'Show effective access', 1),
+    (N'effectiveAccess.hide',            N'en', N'Hide effective access', 1),
+    (N'effectiveAccess.title',           N'en', N'Effective access to a resource', 1),
+    (N'effectiveAccess.hint',            N'en', N'Pick a registry or a project to see the resulting level and which grant of which role gives it. This only explains the decision; it changes nothing.', 1),
+    (N'effectiveAccess.kind',            N'en', N'Resource type', 1),
+    (N'effectiveAccess.kindRegistry',    N'en', N'Registry', 1),
+    (N'effectiveAccess.kindProject',     N'en', N'Project', 1),
+    (N'effectiveAccess.resourceId',      N'en', N'Resource ID', 1),
+    (N'effectiveAccess.explain',         N'en', N'Explain', 1),
+    (N'effectiveAccess.level',           N'en', N'Resulting level: {level}', 1),
+    (N'effectiveAccess.denied',          N'en', N'Explicitly denied: a deny wins over any grant and over any global right, so the resource is hidden.', 1),
+    (N'effectiveAccess.noGrant',         N'en', N'No role of this person gives access to this resource.', 1),
+    (N'effectiveAccess.groupsUnknown',   N'en', N'The groups in this person''s sign-in ticket are not known here, so roles that come only through a group are not shown.', 1),
+    (N'effectiveAccess.noContributions', N'en', N'No role has a grant or right for this resource.', 1),
+    (N'effectiveAccess.colSource',       N'en', N'Given by', 1),
+    (N'effectiveAccess.colRole',         N'en', N'Role', 1),
+    (N'effectiveAccess.colVia',          N'en', N'Assigned', 1),
+    (N'effectiveAccess.colLevel',        N'en', N'Level', 1),
+    (N'effectiveAccess.colScope',        N'en', N'Scope', 1),
+    (N'effectiveAccess.colCounted',      N'en', N'Counted', 1),
+    (N'effectiveAccess.sourceGrant',     N'en', N'Resource grant', 1),
+    (N'effectiveAccess.sourcePermission', N'en', N'Right {permission}', 1),
+    (N'effectiveAccess.viaPersonal',     N'en', N'Personally', 1),
+    (N'effectiveAccess.viaGroup',        N'en', N'Via group {sid}', 1),
+    (N'effectiveAccess.deny',            N'en', N'Deny', 1),
+    (N'effectiveAccess.scopeUnscoped',   N'en', N'Everywhere', 1),
+    (N'effectiveAccess.scopeInScope',    N'en', N'Project is in scope', 1),
+    (N'effectiveAccess.scopeNarrowed',   N'en', N'Narrowed to sheets or periods: opens documents but does not raise the project level', 1),
+    (N'effectiveAccess.scopeOutOfScope', N'en', N'Outside the assignment scope', 1),
+    (N'effectiveAccess.scopeExpired',    N'en', N'Assignment not in effect', 1),
+    (N'effectiveAccess.counted',         N'en', N'Yes', 1),
+    (N'effectiveAccess.notCounted',      N'en', N'No', 1)
+    -- ru/kz — окремою порцією `I18N` (SEC:effective-access).
+    -- SEC:effective-access ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type JSX } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState, type JSX } from 'react';
 import { Button, Combobox, Group, Modal, MultiSelect, Stack, Text, TextInput } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -10,6 +10,12 @@ import { logSuppressedDetail, problemText } from '@/shared/ui/problemText';
 import { t } from '@/shared/i18n';
 import { RoleScopeFields, scopesToSend, scopesValid, useUserRoleScopes, type ScopeDraft } from './UserRoleScopes';
 import { scopeProblem } from './roleScope';
+
+// ⚠ Розріз ефективного доступу (ФВ-6.16) — окремий чанк: у діалозі його не видно, доки адміністратор
+// не натисне кнопку, тож сторінка безпеки не платить за нього ні байтом.
+const EffectiveAccessPanel = lazy(async () => ({
+  default: (await import('./EffectiveAccessPanel')).EffectiveAccessPanel,
+}));
 
 /**
  * Ролі й адреса наявного користувача.
@@ -57,6 +63,7 @@ export function UserAccessEditor({
   // патерн Mantine `Combobox`, не деталь реалізації, що могла б змінитися
   // непомітно) не займаємо: Mantine продовжує сама вибирати опцію.
   const [rolesOpened, setRolesOpened] = useState(false);
+  const [showEffective, setShowEffective] = useState(false);
   const rolesFieldRef = useRef<HTMLDivElement>(null);
 
   // ⛔ UI-аудит, lane 1: обраний перелік МІГ бути непорожнім і водночас не
@@ -347,6 +354,17 @@ export function UserAccessEditor({
         value={email}
         onChange={(event) => setEmail(event.currentTarget.value)}
       />
+
+      {user !== null && (
+        <Button mt="sm" variant="subtle" size="compact-sm" onClick={() => setShowEffective((shown) => !shown)}>
+          {showEffective ? t('effectiveAccess.hide') : t('effectiveAccess.show')}
+        </Button>
+      )}
+      {user !== null && showEffective && (
+        <Suspense fallback={null}>
+          <EffectiveAccessPanel userId={user.id} />
+        </Suspense>
+      )}
 
       <Group justify="flex-end" mt="md">
         <Button variant="default" onClick={onClose}>
