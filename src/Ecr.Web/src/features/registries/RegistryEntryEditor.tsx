@@ -254,7 +254,10 @@ function EntryForm({
             <TextInput
               key={field.id}
               // ⛔ X-16: підписом стояв код поля, описом — сирий тип (`Decimal`).
-              label={`${localized(field.nameL10n) || field.code}${field.isRequired ? ' *' : ''}`}
+              label={localized(field.nameL10n) || field.code}
+              // ⚠ `required`, а не « *» у тексті підпису: зірочку в підписі читач
+              // озвучує як «зірочка» і не знає, що поле обов'язкове.
+              required={field.isRequired}
               description={`${field.code} · ${dataTypeLabel(field.dataType)}`}
               value={values[field.code] ?? ''}
               disabled={readOnly}

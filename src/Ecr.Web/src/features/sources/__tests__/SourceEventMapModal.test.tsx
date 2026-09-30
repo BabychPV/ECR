@@ -230,3 +230,41 @@ describe('SourceEventMapModal', () => {
     expect(form.querySelector('[data-source-event-map-problem="valueMapIncomplete"]')).not.toBeNull();
   });
 });
+
+/**
+ * Клавіатура у формі мапінгу (WCAG 2.4.3, 2.4.6, 2.1.1).
+ *
+ * ⛔ Мутаційні докази (перевірено руками 2026-09-30): прибрати `summary.current?.focus()` у
+ * `SourceEventProbePanel` → червоний «підсумок проби»; прибрати `aria-label` у кнопок «Прибрати» → червоний
+ * «різні імена»; прибрати `tabIndex={0}` з контейнера таблиці проби → червоний «прокрутка».
+ */
+describe('SourceEventMapModal — клавіатура', () => {
+  it('підсумок проби отримує фокус; таблицю проби можна прокрутити з клавіатури', async () => {
+    respond();
+    show(Stored);
+
+    const form = await screen.findByRole('dialog');
+    const run = within(form).getByRole('button', { name: '⟦sourceEvents.probeRun⟧' });
+    run.focus();
+    fireEvent.click(run);
+
+    await waitFor(() =>
+      expect(document.activeElement?.hasAttribute('data-source-event-probe-summary')).toBe(true),
+    );
+    const region = within(form).getByRole('region', { name: '⟦sourceEvents.probeTitle⟧' });
+    expect(region.getAttribute('tabindex')).toBe('0');
+    expect(region.querySelector('[data-source-event-probe-table]')).not.toBeNull();
+  });
+
+  it('різні імена: «Прибрати» у кожному рядку несе атрибут або значення', async () => {
+    respond();
+    show(Stored);
+
+    const form = await screen.findByRole('dialog');
+    await waitFor(() => expect(form.querySelectorAll('[data-source-event-value-pair]')).toHaveLength(1));
+
+    for (const name of ['$start', '$end', 'TUGF_Category', 'V6']) {
+      expect(within(form).getByRole('button', { name: `⟦sourceEvents.remove⟧: ${name}` })).toBeDefined();
+    }
+  });
+});

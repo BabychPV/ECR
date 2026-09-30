@@ -3,6 +3,7 @@ import { Badge, Button, Group, Loader, Stack, Table, Text, Title } from '@mantin
 import { useMutation, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import type { DocumentSummary } from '@/api/types';
 import { formatNumber } from '@/shared/format';
+import { useFocusAfterBusy } from '@/shared/a11y/focus';
 import { t } from '@/shared/i18n';
 import { ConfirmModal } from '@/shared/ui/ConfirmModal';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
@@ -76,6 +77,9 @@ export function SourceEventMapsPanel({
     onError: () => setDeleting(null),
   });
 
+  // ⚠ «Пауза»/«Відновити» на час запиту `loading` (= `disabled`) — фокус повертається саме на натиснуту кнопку.
+  const toggleFocus = useFocusAfterBusy(toggle.isPending);
+
   return (
     <Stack gap="xs" data-source-event-maps="">
       <Group justify="space-between">
@@ -111,45 +115,62 @@ export function SourceEventMapsPanel({
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
-            {maps.data.map((map) => (
-              <Table.Tr key={map.id} data-source-event-map={map.id}>
-                <Table.Td>{documentLabel(documents, map.documentId)}</Table.Td>
-                <Table.Td>{volumeModeLabel(map.volumeMode)}</Table.Td>
-                <Table.Td>{formatNumber(map.fields.length)}</Table.Td>
-                <Table.Td>
-                  <Badge variant="light" color={map.isActive ? 'statusSuccess' : 'gray'}>
-                    {map.isActive ? t('sourceEvents.mapActive') : t('sourceEvents.mapPausedState')}
-                  </Badge>
-                </Table.Td>
-                {canManage && (
+            {maps.data.map((map) => {
+              // ⚠ Кнопки рядка однакові в кожному рядку — доступне ім'я несе документ мапінгу (видимий текст
+              // лишається початком імені, WCAG 2.5.3).
+              const documentName = documentLabel(documents, map.documentId);
+
+              return (
+                <Table.Tr key={map.id} data-source-event-map={map.id}>
+                  <Table.Td>{documentName}</Table.Td>
+                  <Table.Td>{volumeModeLabel(map.volumeMode)}</Table.Td>
+                  <Table.Td>{formatNumber(map.fields.length)}</Table.Td>
                   <Table.Td>
-                    <Group gap="xs" wrap="nowrap">
-                      <Button size="xs" variant="default" onClick={() => onEdit(map)} data-source-event-map-edit={map.id}>
-                        {t('sourceEvents.mapEdit')}
-                      </Button>
-                      <Button
-                        size="xs"
-                        variant="default"
-                        loading={toggle.isPending && toggle.variables.id === map.id}
-                        onClick={() => toggle.mutate(map)}
-                        data-source-event-map-toggle={map.id}
-                      >
-                        {map.isActive ? t('sourceEvents.mapPause') : t('sourceEvents.mapResume')}
-                      </Button>
-                      <Button
-                        size="xs"
-                        variant="subtle"
-                        color="statusError"
-                        onClick={() => setDeleting(map)}
-                        data-source-event-map-delete={map.id}
-                      >
-                        {t('sourceEvents.mapDelete')}
-                      </Button>
-                    </Group>
+                    <Badge variant="light" color={map.isActive ? 'statusSuccess' : 'gray'}>
+                      {map.isActive ? t('sourceEvents.mapActive') : t('sourceEvents.mapPausedState')}
+                    </Badge>
                   </Table.Td>
-                )}
-              </Table.Tr>
-            ))}
+                  {canManage && (
+                    <Table.Td>
+                      <Group gap="xs" wrap="nowrap">
+                        <Button
+                          size="xs"
+                          variant="default"
+                          aria-label={`${t('sourceEvents.mapEdit')}: ${documentName}`}
+                          onClick={() => onEdit(map)}
+                          data-source-event-map-edit={map.id}
+                        >
+                          {t('sourceEvents.mapEdit')}
+                        </Button>
+                        <Button
+                          size="xs"
+                          variant="default"
+                          loading={toggle.isPending && toggle.variables.id === map.id}
+                          aria-label={`${map.isActive ? t('sourceEvents.mapPause') : t('sourceEvents.mapResume')}: ${documentName}`}
+                          onClick={(event) => {
+                            toggleFocus.arm(event.currentTarget);
+                            toggle.mutate(map);
+                          }}
+                          data-source-event-map-toggle={map.id}
+                        >
+                          {map.isActive ? t('sourceEvents.mapPause') : t('sourceEvents.mapResume')}
+                        </Button>
+                        <Button
+                          size="xs"
+                          variant="subtle"
+                          color="statusError"
+                          aria-label={`${t('sourceEvents.mapDelete')}: ${documentName}`}
+                          onClick={() => setDeleting(map)}
+                          data-source-event-map-delete={map.id}
+                        >
+                          {t('sourceEvents.mapDelete')}
+                        </Button>
+                      </Group>
+                    </Table.Td>
+                  )}
+                </Table.Tr>
+              );
+            })}
           </Table.Tbody>
         </Table>
       )}

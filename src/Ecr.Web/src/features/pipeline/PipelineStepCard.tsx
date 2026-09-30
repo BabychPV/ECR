@@ -1,4 +1,4 @@
-import type { JSX, ReactNode } from 'react';
+import { useId, type JSX, type ReactNode } from 'react';
 import { Alert, Group, Paper, Stack, Text, Title } from '@mantine/core';
 import type { PipelineStep } from '@/features/pipeline/pipelineSteps';
 import { PipelineStepBadge } from '@/features/pipeline/PipelineStepBadge';
@@ -32,9 +32,14 @@ export function PipelineStepCard({
 }): JSX.Element {
   const narrowed = step.state === 'zero';
 
+  // ⚠ `<section>` без імені не є орієнтиром: читач не пропонує його в
+  // переліку областей, і п'ять кроків зливаються в один потік тексту.
+  const titleId = useId();
+
   return (
     <Paper
       component="section"
+      aria-labelledby={titleId}
       withBorder
       p="md"
       data-step={step.key}
@@ -44,7 +49,7 @@ export function PipelineStepCard({
       <Stack gap="sm">
         <Group justify="space-between" wrap="nowrap" align="start">
           <Stack gap="xs">
-            <Title order={2} size="h4">
+            <Title order={2} size="h4" id={titleId}>
               {index}. {title}
             </Title>
             <Text size="sm" c="dimmed">

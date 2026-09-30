@@ -1,4 +1,4 @@
-import { useState, type JSX } from 'react';
+import { useEffect, useRef, useState, type JSX } from 'react';
 import { Alert, Button, FileInput, Group, Modal, Stack, Table, Text } from '@mantine/core';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { EcrApiError } from '@/api/client';
@@ -108,6 +108,14 @@ export function MethodologyPackageImport(): JSX.Element {
     },
   });
 
+  // ⛔ «Перевірити» й «Імпортувати» на час запиту `loading` (= `disabled`) і втрачають фокус. Прийшов звіт —
+  // фокус на нього: читач озвучує підсумок, а `Tab` веде до блокерів і конфліктів, а не з початку діалогу.
+  const reportRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (report !== null) reportRef.current?.focus();
+  }, [report]);
+
   async function choose(next: File | null): Promise<void> {
     setFile(next);
     setReport(null);
@@ -162,7 +170,13 @@ export function MethodologyPackageImport(): JSX.Element {
           </Group>
 
           {report !== null && (
-            <Stack gap="xs">
+            <Stack
+              gap="xs"
+              ref={reportRef}
+              tabIndex={-1}
+              aria-label={outcomeLabel(report.outcome)}
+              data-import-report=""
+            >
               <Alert
                 color={report.outcome === 'created' || report.outcome === 'unchanged' ? 'statusSuccess' : 'statusError'}
                 title={outcomeLabel(report.outcome)}

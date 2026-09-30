@@ -246,3 +246,56 @@ describe('RegistryImpactPage: чисті функції', () => {
     expect(impactPollInterval({ ...base, state: 'Failed' })).toBe(false);
   });
 });
+
+/**
+ * Фокус клавіатури після «Перерахувати» (WCAG 2.4.3): кнопка на час запиту `loading` (= `disabled`), діалог
+ * причини закрився — фокус мав куди піти.
+ *
+ * Мутаційні докази (перевірено руками 2026-09-30): прибрати `heading.current?.focus()` в `ImpactJob` →
+ * червоний «задачу поставлено»; прибрати `recalculateFocus.arm()` в `onConfirm` → червоний «відмова».
+ */
+describe('RegistryImpactPage: фокус після постановки перерахунку', () => {
+  it('задачу поставлено — фокус на заголовку картки задачі', async () => {
+    mockServer(['Registry.View', 'Calculation.Recalculate']);
+    show();
+
+    await screen.findByRole('link', { name: 'DOC5' });
+    fireEvent.click(await screen.findByRole('button', { name: /registries\.impact\.recalculateAll/ }));
+    await confirmWithReason('склад газу оновлено');
+
+    await waitFor(() =>
+      expect(document.activeElement?.hasAttribute('data-impact-job-heading')).toBe(true),
+    );
+  });
+
+  it('відмова постановки — фокус назад на кнопку перерахунку, а не на <body>', async () => {
+    mockServer(['Registry.View', 'Calculation.Recalculate']);
+    const answer = globalThis.fetch;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input).includes('/recalculate-impacted')) {
+          // ⚠ Відповідь не миттєва (інакше `Modal` встигає повернути фокус на вже активну кнопку), і
+          // браузер знімає фокус із кнопки, що стала `disabled`, — jsdom ні, тож відтворюємо це тут.
+          await new Promise((resolve) => setTimeout(resolve, 50));
+          (document.activeElement as HTMLElement | null)?.blur();
+          return new Response(JSON.stringify({ title: 'no', status: 422, code: 'ECR-X' }), {
+            status: 422,
+            headers: { 'Content-Type': 'application/problem+json' },
+          });
+        }
+        return answer(input, init);
+      }),
+    );
+    show();
+
+    await screen.findByRole('link', { name: 'DOC5' });
+    const button = await screen.findByRole('button', { name: /registries\.impact\.recalculateAll/ });
+    // ⚠ Клік у браузері ставить фокус на кнопку; `fireEvent.click` у jsdom — ні.
+    button.focus();
+    fireEvent.click(button);
+    await confirmWithReason('причина');
+
+    await waitFor(() => expect(document.activeElement).toBe(button));
+  });
+});

@@ -1,7 +1,8 @@
-import { useState, type JSX } from 'react';
+import { useEffect, useRef, useState, type JSX } from 'react';
 import { Badge, Button, Group, NumberInput, Stack, Table, Text, Title } from '@mantine/core';
 import { useMutation } from '@tanstack/react-query';
 import { formatDateTime, formatNumber } from '@/shared/format';
+import { useFocusAfterBusy } from '@/shared/a11y/focus';
 import { t } from '@/shared/i18n';
 import { Banner } from '@/shared/ui/Banner';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
@@ -90,6 +91,16 @@ export function SourceEventProbePanel({
 
   const result = probe.data;
 
+  // ⛔ «Перевірити» стає `loading` (= `disabled`) і втрачає фокус. Прийшов результат — фокус на його підсумок
+  // (читач озвучує вікно й кількість подій, `Tab` іде далі в таблицю); відмова — назад на кнопку, поруч з
+  // `ErrorAlert`. Інакше після кожної проби клавіатура починала з початку сторінки.
+  const runFocus = useFocusAfterBusy(probe.isPending);
+  const summary = useRef<HTMLParagraphElement>(null);
+
+  useEffect(() => {
+    if (result !== undefined) summary.current?.focus();
+  }, [result]);
+
   return (
     <Stack gap="xs" data-source-event-probe="">
       <Title order={5}>{t('sourceEvents.probeTitle')}</Title>
@@ -120,7 +131,17 @@ export function SourceEventProbePanel({
           }
           data-source-event-probe-max=""
         />
-        <Button size="xs" variant="default" loading={probe.isPending} onClick={() => probe.mutate()} data-source-event-probe-run="">
+        <Button
+          ref={runFocus.ref}
+          size="xs"
+          variant="default"
+          loading={probe.isPending}
+          onClick={() => {
+            runFocus.arm();
+            probe.mutate();
+          }}
+          data-source-event-probe-run=""
+        >
           {t('sourceEvents.probeRun')}
         </Button>
       </Group>
@@ -129,7 +150,7 @@ export function SourceEventProbePanel({
 
       {result !== undefined && (
         <Stack gap="xs" data-source-event-probe-result="">
-          <Text size="xs" c="dimmed">
+          <Text ref={summary} tabIndex={-1} size="xs" c="dimmed" data-source-event-probe-summary="">
             {t('sourceEvents.probeWindow', { from: utc(result.fromUtc), to: utc(result.toUtc), count: formatNumber(result.events.length) })}
           </Text>
 
@@ -171,7 +192,16 @@ export function SourceEventProbePanel({
               {t('sourceEvents.probeEmpty')}
             </Text>
           ) : (
-            <Table.ScrollContainer minWidth={700}>
+            // ⚠ У таблиці проби немає жодного фокусованого елемента, тож без `tabIndex` її горизонтальну
+            // прокрутку клавіатурою не досягти (WCAG 2.1.1, axe `scrollable-region-focusable`). `native` — щоб
+            // фокусованим був сам вузол, що прокручується, а не обгортка `ScrollArea` над ним.
+            <Table.ScrollContainer
+              minWidth={700}
+              type="native"
+              tabIndex={0}
+              role="region"
+              aria-label={t('sourceEvents.probeTitle')}
+            >
               <Table data-source-event-probe-table="">
                 <Table.Thead>
                   <Table.Tr>

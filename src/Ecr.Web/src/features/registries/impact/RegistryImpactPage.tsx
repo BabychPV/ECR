@@ -1,4 +1,4 @@
-import { useState, type JSX } from 'react';
+import { useEffect, useRef, useState, type JSX } from 'react';
 import { Alert, Anchor, Button, Card, Checkbox, Group, Progress, Stack, Table, Text } from '@mantine/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router-dom';
@@ -7,6 +7,7 @@ import type { JobStatus } from '@/api/types';
 import { isCalculationResultsQuery } from '@/features/methodologies/calculationResultsKey';
 import { PollMs } from '@/features/workflow/jobFollow';
 import { humanizeJobId } from '@/features/workflow/jobLabel';
+import { useFocusAfterBusy } from '@/shared/a11y/focus';
 import { t } from '@/shared/i18n';
 import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
@@ -75,11 +76,22 @@ function ImpactJob({ jobId, canOpenJobs }: { readonly jobId: string; readonly ca
   const status = job.data;
   const fan = status?.fanOut;
 
+  // ⛔ Після «Перерахувати» діалог причини закривається, а кнопка сторінки на час запиту `loading`
+  // (= `disabled`) — фокус падав на `<body>`, і про поставлену задачу читач не дізнавався. Тепер фокус — на
+  // заголовок картки задачі: він озвучується, і наступний `Tab` веде до посилання на задачу.
+  const heading = useRef<HTMLParagraphElement>(null);
+
+  useEffect(() => {
+    heading.current?.focus();
+  }, [jobId]);
+
   return (
     <Card withBorder data-impact-job={jobId}>
       <Stack gap="xs">
         <Group justify="space-between">
-          <Text fw={600}>{t('registries.impact.jobQueued', { jobId: humanizeJobId(jobId) })}</Text>
+          <Text ref={heading} tabIndex={-1} fw={600} data-impact-job-heading="">
+            {t('registries.impact.jobQueued', { jobId: humanizeJobId(jobId) })}
+          </Text>
           {status !== undefined && <StatusBadge kind="job" state={status.state} />}
         </Group>
 
@@ -154,6 +166,9 @@ export function RegistryImpactPage(): JSX.Element {
     },
   });
 
+  // ⚠ Відмова постановки: фокус назад на кнопку (поруч із `ErrorAlert`), а не на `<body>`.
+  const recalculateFocus = useFocusAfterBusy(recalculate.isPending);
+
   const canRecalculate = can(session.data, RecalculatePermission);
   const canOpenJobs = can(session.data, 'System.ViewHealth');
   const hasItems = (impact.data?.items.length ?? 0) > 0;
@@ -175,6 +190,7 @@ export function RegistryImpactPage(): JSX.Element {
         actions={
           canRecalculate && (
             <Button
+              ref={recalculateFocus.ref}
               size="xs"
               disabled={!hasItems}
               loading={recalculate.isPending}
@@ -275,6 +291,7 @@ export function RegistryImpactPage(): JSX.Element {
         isPending={recalculate.isPending}
         onConfirm={(reason) => {
           setAsking(false);
+          recalculateFocus.arm();
           recalculate.mutate(reason);
         }}
         onClose={() => setAsking(false)}

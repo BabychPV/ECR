@@ -124,3 +124,29 @@ describe('MethodologyPackageImport', () => {
     expect(sent.at(-1)).toEqual({ url: '/api/v1/methodologies/import?dryRun=false', method: 'POST' });
   });
 });
+
+/**
+ * Фокус після перевірки (WCAG 2.4.3): «Перевірити» на час запиту `loading` (= `disabled`) і втрачає фокус —
+ * звіт забирає його собі, щоб читач почув підсумок, а `Tab` вів до блокерів.
+ *
+ * Мутаційний доказ (перевірено руками 2026-09-30): прибрати `reportRef.current?.focus()` → червоний.
+ */
+describe('MethodologyPackageImport: фокус', () => {
+  it('звіт перевірки отримує фокус і має доступне ім’я — підсумок', async () => {
+    mockServer(() => ({ status: 200, body: Report }));
+    show();
+    await choosePackage();
+
+    const check = screen.getByRole('button', { name: '⟦methodologies.importCheck⟧' });
+    check.focus();
+    fireEvent.click(check);
+
+    const report = await waitFor(() => {
+      const found = document.querySelector<HTMLElement>('[data-import-report]');
+      if (found === null) throw new Error('звіту ще немає');
+      return found;
+    });
+    await waitFor(() => expect(document.activeElement).toBe(report));
+    expect(report.getAttribute('aria-label')).toBe('⟦methodologies.importOutcomeCreated⟧');
+  });
+});

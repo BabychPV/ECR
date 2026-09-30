@@ -216,3 +216,31 @@ describe('ConditionalFormatPanel', () => {
     expect(screen.getAllByRole('group', { name: /conditionalFormat\.rule/ })).toHaveLength(1);
   });
 });
+
+/**
+ * Клавіатура (WCAG 2.4.3): «Додати правило» — фокус у новому правилі; «Прибрати» — на «Додати».
+ *
+ * ⛔ Мутаційний доказ (перевірено руками 2026-09-30): прибрати `focus.added()` → червоний «додати»;
+ * прибрати `focus.removed()` → червоний «прибрати».
+ */
+describe('ConditionalFormatPanel — фокус', () => {
+  it('додати: фокус у першому полі нового правила', async () => {
+    renderWithMantine(<ConditionalFormatPanel columns={columns} />);
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole('button', { name: /conditionalFormat\.add/ }));
+
+    const second = screen.getByRole('group', { name: /conditionalFormat\.rule.*2/ });
+    expect(second.contains(document.activeElement)).toBe(true);
+  });
+
+  it('прибрати: фокус на «Додати правило», а не на <body>', async () => {
+    renderWithMantine(<ConditionalFormatPanel columns={columns} />);
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole('button', { name: /conditionalFormat\.remove/ }));
+
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: /conditionalFormat\.add/ }));
+  });
+});
+

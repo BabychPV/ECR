@@ -14,6 +14,7 @@ import {
   Text,
   TextInput,
 } from '@mantine/core';
+import { useListFocus } from '@/shared/a11y/focus';
 import { t } from '@/shared/i18n';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { showApiError, showDone } from '@/shared/ui/notify';
@@ -134,6 +135,8 @@ export function ConditionalFormatPanel({
   const [sampleColumn, setSampleColumn] = useState(firstColumn);
   const [sample, setSample] = useState('');
 
+  const focus = useListFocus(rules.length);
+
   const codes = new Set(columns.map((column) => column.code));
   const dirty = seed !== null && canonical(rules) !== canonical(seed.own);
 
@@ -215,7 +218,7 @@ export function ConditionalFormatPanel({
   }));
 
   return (
-    <Stack gap="sm">
+    <Stack gap="sm" ref={focus.container}>
       {!canEdit && (
         <Alert data-testid="conditional-format-read-only">
           {t('conditionalFormat.readOnly')}
@@ -234,7 +237,12 @@ export function ConditionalFormatPanel({
         const position = index + 1;
 
         return (
-          <Box key={index} role="group" aria-label={t('conditionalFormat.rule', { position })}>
+          <Box
+            key={index}
+            role="group"
+            aria-label={t('conditionalFormat.rule', { position })}
+            data-focus-row=""
+          >
             <Group grow align="flex-start">
               <Select
                 label={t('conditionalFormat.column')}
@@ -303,7 +311,10 @@ export function ConditionalFormatPanel({
                   variant="subtle"
                   color="statusError"
                   disabled={save.isPending}
-                  onClick={() => setRules((previous) => previous.filter((_, i) => i !== index))}
+                  onClick={() => {
+                    focus.removed();
+                    setRules((previous) => previous.filter((_, i) => i !== index));
+                  }}
                 >
                   {t('conditionalFormat.remove', { position })}
                 </Button>
@@ -326,9 +337,13 @@ export function ConditionalFormatPanel({
       {canEdit && (
         <Group>
           <Button
+            ref={focus.addButton}
             variant="default"
             disabled={save.isPending}
-            onClick={() => setRules((previous) => [...previous, emptyRule(firstColumn)])}
+            onClick={() => {
+              focus.added();
+              setRules((previous) => [...previous, emptyRule(firstColumn)]);
+            }}
           >
             {t('conditionalFormat.add')}
           </Button>
