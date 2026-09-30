@@ -137,6 +137,69 @@ public sealed class RowWindowMap : Entity<int>
         bool isStep,
         int targetUnitId)
     {
+        EnsureValid(target, start, end, selector, summary);
+
+        return new RowWindowMap(
+            target.TableDefId,
+            target.Id,
+            start.Id,
+            end.Id,
+            selector?.Id,
+            summary,
+            isStep,
+            targetUnitId);
+    }
+
+    /// <summary>
+    /// Змінює прив'язку: вікно, селектор, згортку, форму ряду й одиницю; таблиця й колонка-ціль — ключ прив'язки і
+    /// не змінюються (A1 CRUD, повна заміна налаштувань).
+    /// </summary>
+    /// <param name="start">Нова колонка початку вікна.</param>
+    /// <param name="end">Нова колонка кінця вікна.</param>
+    /// <param name="selector">Нова колонка-селектор; <c>null</c> — один атрибут на всі рядки.</param>
+    /// <param name="summary">Спосіб згортки.</param>
+    /// <param name="isStep">Ряд ступінчастий.</param>
+    /// <param name="targetUnitId">Одиниця, у якій значення лягає в колонку.</param>
+    /// <param name="target">Колонка-ціль цієї прив'язки (для перевірки таблиці колонок).</param>
+    /// <exception cref="DomainException">Ті самі відмови <c>ECR-INT-0422</c>, що й у <see cref="Create"/>.</exception>
+    public void Reconfigure(
+        ColumnDef target,
+        ColumnDef start,
+        ColumnDef end,
+        ColumnDef? selector,
+        RowWindowSummaryKind summary,
+        bool isStep,
+        int targetUnitId)
+    {
+        EnsureValid(target, start, end, selector, summary);
+
+        if (target.Id != TargetColumnDefId)
+        {
+            throw new InvalidOperationException("Колонка-ціль прив'язки не змінюється.");
+        }
+
+        StartColumnDefId = start.Id;
+        EndColumnDefId = end.Id;
+        SelectorColumnDefId = selector?.Id;
+        Summary = summary;
+        IsStep = isStep;
+        TargetUnitId = targetUnitId;
+    }
+
+    /// <summary>Вмикає чи вимикає прив'язку (пауза).</summary>
+    /// <param name="active"><c>false</c> — пауза.</param>
+    public void SetActive(bool active) => IsActive = active;
+
+    /// <summary>Прибирає всі джерела (перед заміною переліку; самі рядки видаляє сховище).</summary>
+    public void ClearSources() => _sources.Clear();
+
+    private static void EnsureValid(
+        ColumnDef target,
+        ColumnDef start,
+        ColumnDef end,
+        ColumnDef? selector,
+        RowWindowSummaryKind summary)
+    {
         ArgumentNullException.ThrowIfNull(target);
         ArgumentNullException.ThrowIfNull(start);
         ArgumentNullException.ThrowIfNull(end);
@@ -215,16 +278,6 @@ public sealed class RowWindowMap : Entity<int>
                     ["targetColumn"] = target.Code,
                 });
         }
-
-        return new RowWindowMap(
-            target.TableDefId,
-            target.Id,
-            start.Id,
-            end.Id,
-            selector?.Id,
-            summary,
-            isStep,
-            targetUnitId);
     }
 
     public int TableDefId { get; private set; }
