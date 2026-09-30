@@ -10,5 +10,14 @@
       "JobMemoryLimitMb": 22528,
       "MaxDuration": "00:30:00"
     }
+  },
+  // Рівні журналу — як у appsettings.json Ecr.Api. Без цього розділу воркер
+  // писав кожну SQL-команду EF на Information: 173 МБ за річний перерахунок
+  // 300 документів (замір I2-2, docs/build/perf/I2-annual-recalc-2026-09-30-r2.md).
+  "Logging": {
+    "LogLevel": {
+      "Default": "Information",
+      "Microsoft.EntityFrameworkCore.Database.Command": "Warning"
+    }
   }
 }

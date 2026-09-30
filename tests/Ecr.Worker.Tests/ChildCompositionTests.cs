@@ -98,6 +98,41 @@ public sealed class ChildCompositionTests
         Assert.IsType<JobWorker>(Assert.Single(provider.GetServices<IHostedService>()));
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Requirement", "ФВ-9.8")]
+    public void Журнал_дочірнього_не_пише_SQL_команди_EF_на_Information()
+    {
+        // Той самий шлях конфігурації, що в WorkerProgram.CreateBuilder: тека exe
+        // як корінь, worker.settings.json поверх. appsettings.json Api у теці
+        // тестів немає — рівень мусить дати саме файл воркера (I2-2: 173 МБ
+        // журналу за прогін, коли його не було).
+        var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings
+        {
+            ContentRootPath = AppContext.BaseDirectory,
+            EnvironmentName = Environments.Production,
+        });
+        Assert.False(File.Exists(Path.Combine(AppContext.BaseDirectory, "appsettings.json")));
+        builder.Configuration.AddJsonFile(WorkerProgram.SettingsFile, optional: false, reloadOnChange: false);
+        builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["ConnectionStrings:Ecr"] = "Server=.;Database=EcrChildCompositionProbe;Integrated Security=true",
+            [DbBackgroundJobScheduler.ModeKey] = "Database",
+            [JobLaneMap.ExecutorKey] = "Worker",
+        });
+        ChildComposition.AddChildWorker(builder.Services, builder.Configuration, new WorkerPoolOptions());
+
+        using var host = builder.Build();
+        var factory = host.Services.GetRequiredService<ILoggerFactory>();
+
+        var command = factory.CreateLogger("Microsoft.EntityFrameworkCore.Database.Command");
+        Assert.False(command.IsEnabled(LogLevel.Information));
+        Assert.True(command.IsEnabled(LogLevel.Warning));
+
+        // Власний журнал задач лишається на Information.
+        Assert.True(factory.CreateLogger<JobWorker>().IsEnabled(LogLevel.Information));
+    }
+
     private static ServiceCollection Compose(string mode, string? executor)
     {
         var configuration = new ConfigurationBuilder()
