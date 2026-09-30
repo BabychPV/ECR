@@ -241,7 +241,7 @@ describe('Порівняння версій: що запитує клієнт', 
     expect(calls).toEqual([]);
   }, 60_000);
 
-  it('запити йдуть РІВНО за контрактом — без жодного зайвого параметра', async () => {
+  it('ФВ-5.22: запити йдуть РІВНО за контрактом — без жодного зайвого параметра', async () => {
     const { calls } = mockApi(compareBody({}));
     await show();
     await runCompare();
@@ -295,7 +295,7 @@ describe('Порівняння версій: що показано', () => {
     expect(screen.queryByTestId('document-compare-truncated')).toBeNull();
   }, 60_000);
 
-  it('додані й видалені рядки — окремі блоки з позначкою, а не рядки таблиці змін', async () => {
+  it('ФВ-5.22: додані й видалені рядки — окремі блоки з позначкою, а не рядки таблиці змін', async () => {
     mockApi(
       compareBody({
         changes: [cell({ tableCode: 'T1', rowKey: 'r1', columnCode: 'C1', oldValue: '1', newValue: '2' })],

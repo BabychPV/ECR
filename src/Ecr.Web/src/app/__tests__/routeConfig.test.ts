@@ -72,7 +72,7 @@ describe('app/routes — реєстр маршрутів', () => {
     }
   });
 
-  it('пункт навбару без permission доступний усім, пункт із permission — лише за правом (той самий фільтр, що й старий AppLayout.tsx)', () => {
+  it('ФВ-14.2: пункт навбару без permission доступний усім, пункт із permission — лише за правом (той самий фільтр, що й старий AppLayout.tsx)', () => {
     const withoutPermission = navRoutes.filter((route) => route.handle.permission === undefined);
     const withPermission = navRoutes.filter((route) => route.handle.permission !== undefined);
 

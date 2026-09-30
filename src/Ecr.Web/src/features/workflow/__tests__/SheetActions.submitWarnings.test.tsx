@@ -112,7 +112,7 @@ afterEach(() => {
 });
 
 describe('SheetActions: подання з попередженнями (ФВ-5.19)', () => {
-  it('перше подання йде без підтвердження і показує діалог із переліком попереджень', async () => {
+  it('ФВ-5.19: перше подання йде без підтвердження і показує діалог із переліком попереджень', async () => {
     const spy = vi.spyOn(notifications, 'show');
     mockFetch();
     show();
@@ -127,7 +127,7 @@ describe('SheetActions: подання з попередженнями (ФВ-5.1
     expect(spy).not.toHaveBeenCalled();
   });
 
-  it('«Submit anyway» повторює подання з acknowledgeWarnings = true і закриває діалог', async () => {
+  it('ФВ-5.19: «Submit anyway» повторює подання з acknowledgeWarnings = true і закриває діалог', async () => {
     const spy = vi.spyOn(notifications, 'show');
     mockFetch();
     show();

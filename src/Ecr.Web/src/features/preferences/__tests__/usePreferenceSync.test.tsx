@@ -124,7 +124,7 @@ describe('usePreferenceSync — BE-20', () => {
     expect(preferenceCalls('PUT')).toEqual([]);
   });
 
-  it('тема з сервера застосовується', async () => {
+  it('ФВ-14.15: тема з сервера застосовується', async () => {
     server = [{ key: 'theme', value: 'dark', updatedAt: '2026-09-22T00:00:00Z' }];
 
     const { result } = renderHook(() => useProbe(true), { wrapper });
