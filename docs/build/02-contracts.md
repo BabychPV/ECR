@@ -3793,6 +3793,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `DELETE` | `/api/v1/security/simulation` | — (власний сеанс) | 3 |
 | `GET` | `/api/v1/security/my-groups` | — (власний сеанс) | 3 |
 | `GET` | `/api/v1/security/users/{id}/groups` | `Security.ManageUsers` | 3 |
+| `GET` | `/api/v1/security/users/{id}/effective-access` | `Security.ManageUsers` | 6 |
 | `GET` | `/api/v1/security/group-assignments` | `Security.ManageUsers` | 3 |
 | `POST` | `/api/v1/security/group-assignments` | `Security.ManageUsers` | 3 |
 | `DELETE` | `/api/v1/security/group-assignments/{id}` | `Security.ManageUsers` | 3 |
