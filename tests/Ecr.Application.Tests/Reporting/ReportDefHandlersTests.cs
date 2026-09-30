@@ -29,6 +29,7 @@ public sealed class ReportDefHandlersTests
     private readonly IClock _clock = Substitute.For<IClock>();
     private readonly IAccessDecisionService _access = Substitute.For<IAccessDecisionService>();
     private readonly ICurrentUser _user = Substitute.For<ICurrentUser>();
+    private readonly IReportViewGenerator _views = Substitute.For<IReportViewGenerator>();
 
     public ReportDefHandlersTests()
     {
@@ -83,7 +84,7 @@ public sealed class ReportDefHandlersTests
         _versions.FindAsync(55, Arg.Any<CancellationToken>()).Returns((ReportVersion?)null);
 
         var error = await Assert.ThrowsAsync<NotFoundException>(
-            () => new PublishReportVersionHandler(_versions, _uow, _access, _user)
+            () => new PublishReportVersionHandler(_versions, _uow, _access, _user, _views)
                 .HandleAsync(reportDefId: 1, reportVersionId: 55, CancellationToken.None));
 
         Assert.Equal(ErrorCodes.ReportNotFound, error.ErrorCode);
@@ -99,12 +100,72 @@ public sealed class ReportDefHandlersTests
         _versions.FindAsync(55, Arg.Any<CancellationToken>()).Returns(version);
 
         var error = await Assert.ThrowsAsync<NotFoundException>(
-            () => new PublishReportVersionHandler(_versions, _uow, _access, _user)
+            () => new PublishReportVersionHandler(_versions, _uow, _access, _user, _views)
                 .HandleAsync(reportDefId: 2, reportVersionId: 55, CancellationToken.None));
 
         Assert.Equal(ErrorCodes.ReportNotFound, error.ErrorCode);
         Assert.Equal("err.ECR-RPT-0404.versionWrongDef", error.Details!["messageKey"]);
         Assert.Equal("1", error.Details["versionDefId"]);
         Assert.Equal("2", error.Details["reportDefId"]);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-10.2")]
+    [Trait("Requirement", "ФВ-10.4")]
+    public async Task Публікація_генерує_вʼюху_звіту_в_тій_самій_транзакції()
+    {
+        var version = new ReportVersion(7, "1.0", "[]", """{"rowSource":"CalculationResults"}""", _clock.UtcNow);
+        _versions.FindAsync(55, Arg.Any<CancellationToken>()).Returns(version);
+
+        var trace = new List<string>();
+        var inTransaction = false;
+        _uow.ExecuteInTransactionAsync(Arg.Any<Func<CancellationToken, Task>>(), Arg.Any<CancellationToken>())
+            .Returns(async call =>
+            {
+                inTransaction = true;
+                await call.Arg<Func<CancellationToken, Task>>()(CancellationToken.None);
+                inTransaction = false;
+            });
+        _uow.SaveChangesAsync(Arg.Any<CancellationToken>())
+            .Returns(_ =>
+            {
+                trace.Add($"save:{inTransaction}");
+                return 1;
+            });
+        _views.GenerateAsync(Arg.Any<int?>(), Arg.Any<CancellationToken>())
+            .Returns(call =>
+            {
+                trace.Add($"views:{call.Arg<int?>()}:{inTransaction}");
+                return Task.CompletedTask;
+            });
+
+        var result = await new PublishReportVersionHandler(_versions, _uow, _access, _user, _views)
+            .HandleAsync(reportDefId: 7, reportVersionId: 55, CancellationToken.None);
+
+        Assert.Equal("Published", result.Status);
+
+        // ⛔ Вʼюха — лише цього звіту (не «всіх»), ПІСЛЯ збереження статусу
+        // (процедура бере лише опубліковані версії) і в ТІЙ САМІЙ транзакції:
+        // відмова генерації відкочує публікацію, а не лишає версію без вʼюхи.
+        Assert.Equal(["save:True", "views:7:True"], trace);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-10.4")]
+    public async Task Відмова_генерації_вʼюхи_не_ховається_від_того_хто_публікує()
+    {
+        var version = new ReportVersion(7, "1.0", "[]", """{"rowSource":"CalculationResults"}""", _clock.UtcNow);
+        _versions.FindAsync(55, Arg.Any<CancellationToken>()).Returns(version);
+        _uow.ExecuteInTransactionAsync(Arg.Any<Func<CancellationToken, Task>>(), Arg.Any<CancellationToken>())
+            .Returns(call => call.Arg<Func<CancellationToken, Task>>()(CancellationToken.None));
+        _views.GenerateAsync(7, Arg.Any<CancellationToken>())
+            .Returns(Task.FromException(new InvalidOperationException("view")));
+
+        // Публікація, яка «вдалася», а SSRS її не бачить, гірша за відмову.
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => new PublishReportVersionHandler(_versions, _uow, _access, _user, _views)
+                .HandleAsync(reportDefId: 7, reportVersionId: 55, CancellationToken.None));
     }
 }
