@@ -295,7 +295,8 @@ public sealed class PatchCellsWorkbookTests(SqlServerFixture sql) : IDisposable
     /// Звернень на книгу одного аркуша з оновленнями й новими рядками в кожній
     /// таблиці (див. храповик). Кожен наступний аркуш додає два (applock + стан).
     /// </summary>
-    private const long BookExecutions = 26;
+    /// ФВ-5.20a: 26 → 27 (один пошук Reopen-стану аркушів для <c>IsLateEdit</c>).
+    private const long BookExecutions = 27;
 
     private async Task AssertRejectedAsync<TException>(
         World world, AccessProfile profile, List<PatchCellsRequest> requests, Table guilty, string code, string messageKey)
