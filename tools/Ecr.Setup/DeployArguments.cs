@@ -41,6 +41,21 @@ internal static class DeployArguments
             new("DataProtectionThumbprint", state.DataProtectionThumbprint),
         };
 
+        // ⛔ D14-08: транспорт — рівно один із трьох; без жодного deploy-ecr.ps1 зупиняється (мовчазний
+        // HTTP дав би службу, у яку не можна увійти з іншої машини). Стан майстра завжди має вибір.
+        switch (state.Transport)
+        {
+            case WizardTransport.Https:
+                result.Add(new("HttpsThumbprint", state.HttpsThumbprint));
+                break;
+            case WizardTransport.Proxy:
+                result.Add(new("BehindHttpsProxy", null));
+                break;
+            default:
+                result.Add(new("AllowHttp", null));
+                break;
+        }
+
         if (state.Mode == WizardMode.FirstDeployment)
         {
             result.Add(new("FirstDeployment", null));

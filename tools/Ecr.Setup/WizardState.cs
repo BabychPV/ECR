@@ -20,6 +20,19 @@ internal enum ServiceAccountMode
     DomainUser,
 }
 
+/// <summary>Транспорт служби (крок «Транспорт», D14-08) — відповідає параметру deploy-ecr.ps1.</summary>
+internal enum WizardTransport
+{
+    /// <summary><c>-HttpsThumbprint</c>: Kestrel слухає HTTPS із сертифікатом замовника.</summary>
+    Https,
+
+    /// <summary><c>-BehindHttpsProxy</c>: TLS завершується на проксі перед застосунком.</summary>
+    Proxy,
+
+    /// <summary><c>-AllowHttp</c>: лише стенд, cookie сеансу не Secure.</summary>
+    Http,
+}
+
 /// <summary>
 /// Спільний стан майстра — кожен крок читає з нього відповіді попередніх
 /// кроків (передусім крок "Огляд") і записує власні відповіді через
@@ -75,4 +88,36 @@ internal sealed class WizardState
     /// </summary>
     public bool TryValidateDataProtection(ICertificateSource source, DateTime now, out string error)
         => DataProtectionCertificateRules.TryValidate(DataProtectionThumbprint, source, now, out error);
+
+    // Крок «Транспорт» (D14-08): HTTPS із сертифікатом (типово — рекомендований), TLS на проксі
+    // або HTTP лише для стенда. Явний вибір — deploy-ecr.ps1 без жодного з трьох зупиняється.
+    public WizardTransport Transport { get; set; } = WizardTransport.Https;
+
+    private string? _httpsThumbprint;
+
+    /// <summary>Відбиток сертифіката HTTPS; не секрет — хеш публічного сертифіката.</summary>
+    public string? HttpsThumbprint
+    {
+        get => _httpsThumbprint;
+        set
+        {
+            var normalized = DataProtectionCertificateRules.Normalize(value);
+            _httpsThumbprint = normalized.Length == 0 ? null : normalized;
+        }
+    }
+
+    /// <summary>
+    /// Чи годиться вибраний транспорт зараз: для HTTPS — сертифікат у сховищі, із ключем, чинний;
+    /// для проксі й HTTP перевіряти нічого.
+    /// </summary>
+    public bool TryValidateTransport(ICertificateSource source, DateTime now, out string error)
+    {
+        if (Transport != WizardTransport.Https)
+        {
+            error = string.Empty;
+            return true;
+        }
+
+        return HttpsCertificateRules.TryValidate(HttpsThumbprint, source, now, out error);
+    }
 }
