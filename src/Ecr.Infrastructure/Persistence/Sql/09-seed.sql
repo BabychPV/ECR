@@ -4559,6 +4559,27 @@ USING (VALUES
     (N'snapshots.staleHint',               N'en', N'The project and period were recalculated after this snapshot was built. Its numbers are kept exactly as they were; build a new snapshot to see the current ones.', 1),
     -- ru/kz — окремою порцією `RPT:stale` у блоці I18N нижче.
     -- RPT:stale ── кінець секції ──
+    -- REGCTOR814 ── ФВ-8.14: «Де використовується» запис довідника (`features/registries/rc814`).
+    (N'registries.entryUsage.column', N'en', N'Usage', 1),
+    (N'registries.entryUsage.action', N'en', N'Where used', 1),
+    (N'registries.entryUsage.actionFor', N'en', N'Where entry {code} is used', 1),
+    (N'registries.entryUsage.title', N'en', N'Where entry "{code}" is used', 1),
+    (N'registries.entryUsage.noneNamed', N'en', N'No references to this entry were found by name. The kinds listed at the bottom are not checked here.', 1),
+    (N'registries.entryUsage.fieldsTitle', N'en', N'Registry entries that refer to it', 1),
+    (N'registries.entryUsage.asOfNote', N'en', N'Entries are read as of {date}: valid, active and not deleted on that day.', 1),
+    (N'registries.entryUsage.noFields', N'en', N'No registry field refers to this registry.', 1),
+    (N'registries.entryUsage.fieldCount', N'en', N'Entries: {count}', 1),
+    (N'registries.entryUsage.fieldShown', N'en', N'Shown {shown} of {total}', 1),
+    (N'registries.entryUsage.none', N'en', N'None found', 1),
+    (N'registries.entryUsage.childrenTitle', N'en', N'Child entries', 1),
+    (N'registries.entryUsage.substancesTitle', N'en', N'Methodologies that declare it as a substance', 1),
+    (N'registries.entryUsage.substanceLink', N'en', N'Methodology versions', 1),
+    (N'registries.entryUsage.columnsTitle', N'en', N'Template columns that take values from this registry', 1),
+    (N'registries.entryUsage.columnsHint', N'en', N'These columns can hold this entry; which documents actually hold it is not listed per entry.', 1),
+    (N'registries.entryUsage.truncated', N'en', N'The registry-level list is cut short by the server: some referring fields, columns or substances may be missing here.', 1),
+    (N'registries.entryUsage.notListed', N'en', N'Not listed here per entry: document cells and headers, methodology constants and cascade links. Deleting the entry reports how many of them there are, by kind.', 1),
+    -- ru/kz — окремою порцією `REGCTOR814` у блоці I18N нижче.
+    -- REGCTOR814 ── кінець секції ──
     (N'health.sources.notRegistered',          N'en', N'The collection store is not registered in the container.', 1),
     (N'health.sources.noneActive',              N'en', N'No active collection sources.', 1),
     (N'health.sources.failedCount',             N'en', N'Sources with a failed last run: {count}.', 1),
@@ -5348,27 +5369,6 @@ USING (VALUES
     -- NAV:cell-click ── ФВ-5.6: перехід від зауваження перевірки до комірки (`ValidationPanel`).
     (N'document.validationGoTo', N'en', N'Show in the table', 1),
     -- NAV:cell-click: кінець секції
-    -- REGCTOR814 ── ФВ-8.14: «Де використовується» запис довідника (`features/registries/rc814`).
-    (N'registries.entryUsage.column', N'en', N'Usage', 1),
-    (N'registries.entryUsage.action', N'en', N'Where used', 1),
-    (N'registries.entryUsage.actionFor', N'en', N'Where entry {code} is used', 1),
-    (N'registries.entryUsage.title', N'en', N'Where entry "{code}" is used', 1),
-    (N'registries.entryUsage.noneNamed', N'en', N'No references to this entry were found by name. The kinds listed at the bottom are not checked here.', 1),
-    (N'registries.entryUsage.fieldsTitle', N'en', N'Registry entries that refer to it', 1),
-    (N'registries.entryUsage.asOfNote', N'en', N'Entries are read as of {date}: valid, active and not deleted on that day.', 1),
-    (N'registries.entryUsage.noFields', N'en', N'No registry field refers to this registry.', 1),
-    (N'registries.entryUsage.fieldCount', N'en', N'Entries: {count}', 1),
-    (N'registries.entryUsage.fieldShown', N'en', N'Shown {shown} of {total}', 1),
-    (N'registries.entryUsage.none', N'en', N'None found', 1),
-    (N'registries.entryUsage.childrenTitle', N'en', N'Child entries', 1),
-    (N'registries.entryUsage.substancesTitle', N'en', N'Methodologies that declare it as a substance', 1),
-    (N'registries.entryUsage.substanceLink', N'en', N'Methodology versions', 1),
-    (N'registries.entryUsage.columnsTitle', N'en', N'Template columns that take values from this registry', 1),
-    (N'registries.entryUsage.columnsHint', N'en', N'These columns can hold this entry; which documents actually hold it is not listed per entry.', 1),
-    (N'registries.entryUsage.truncated', N'en', N'The registry-level list is cut short by the server: some referring fields, columns or substances may be missing here.', 1),
-    (N'registries.entryUsage.notListed', N'en', N'Not listed here per entry: document cells and headers, methodology constants and cascade links. Deleting the entry reports how many of them there are, by kind.', 1),
-    -- ru/kz — окремою порцією `REGCTOR814` у блоці I18N нижче.
-    -- REGCTOR814 ── кінець секції ──
     -- D16: ФВ-2.16 — підтвердження пакетних правок (вставка, протягування) і
     -- серверна відмова батчу без підтвердження (`PatchCellsHandler.EnsureConfirmed`).
     (N'grid.batchConfirmBody', N'en', N'{count} cell(s) in this change are outside the allowed editing window and need your confirmation. Apply the whole change?', 1),
@@ -12391,6 +12391,34 @@ OPTION (RECOMPILE);
 GO
 -- NAV:cell-click ── кінець секції ──
 
+-- JOBL ── ru/kz назв видів задач (jobLabel.ts, KindKeys); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'jobs.kind.sourceEventSync', N'ru', N'Синхронизация событий источника'),
+    (N'jobs.kind.sourceEventSync', N'kz', N'Көз оқиғаларын синхрондау'),
+    (N'jobs.kind.consistencyCheck', N'ru', N'Проверка согласованности'),
+    (N'jobs.kind.consistencyCheck', N'kz', N'Келісімділікті тексеру'),
+    (N'jobs.kind.orphanScan', N'ru', N'Поиск осиротевших данных'),
+    (N'jobs.kind.orphanScan', N'kz', N'Иесіз деректерді іздеу')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- JOBL ── кінець секції ──
+
+-- RPT:stale ── ru/kz позначки застарілого зрізу (ФВ-10.5); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'snapshots.stale', N'ru', N'Устарел'),
+    (N'snapshots.staleHint', N'ru', N'После формирования этого среза проект и период были пересчитаны. Его числа сохранены в точности такими, какими были; чтобы увидеть текущие, сформируйте новый срез.'),
+    (N'snapshots.stale', N'kz', N'Ескірген'),
+    (N'snapshots.staleHint', N'kz', N'Бұл кесінді құрылғаннан кейін жоба мен кезең қайта есептелді. Оның сандары бұрынғыдай дәл сақталған; ағымдағыларын көру үшін жаңа кесінді құрыңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- RPT:stale ── кінець секції ──
+
 -- REGCTOR814 ── ru/kz «Де використовується» запису довідника (ФВ-8.14); власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
@@ -12435,34 +12463,6 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- REGCTOR814 ── кінець секції ──
-
--- JOBL ── ru/kz назв видів задач (jobLabel.ts, KindKeys); власна порція ──
-INSERT INTO #I18N ([Key], Lang, Val)
-SELECT v.[Key], v.Lang, v.Val
-  FROM (VALUES
-    (N'jobs.kind.sourceEventSync', N'ru', N'Синхронизация событий источника'),
-    (N'jobs.kind.sourceEventSync', N'kz', N'Көз оқиғаларын синхрондау'),
-    (N'jobs.kind.consistencyCheck', N'ru', N'Проверка согласованности'),
-    (N'jobs.kind.consistencyCheck', N'kz', N'Келісімділікті тексеру'),
-    (N'jobs.kind.orphanScan', N'ru', N'Поиск осиротевших данных'),
-    (N'jobs.kind.orphanScan', N'kz', N'Иесіз деректерді іздеу')
-       ) AS v ([Key], Lang, Val)
-OPTION (RECOMPILE);
-GO
--- JOBL ── кінець секції ──
-
--- RPT:stale ── ru/kz позначки застарілого зрізу (ФВ-10.5); власна порція ──
-INSERT INTO #I18N ([Key], Lang, Val)
-SELECT v.[Key], v.Lang, v.Val
-  FROM (VALUES
-    (N'snapshots.stale', N'ru', N'Устарел'),
-    (N'snapshots.staleHint', N'ru', N'После формирования этого среза проект и период были пересчитаны. Его числа сохранены в точности такими, какими были; чтобы увидеть текущие, сформируйте новый срез.'),
-    (N'snapshots.stale', N'kz', N'Ескірген'),
-    (N'snapshots.staleHint', N'kz', N'Бұл кесінді құрылғаннан кейін жоба мен кезең қайта есептелді. Оның сандары бұрынғыдай дәл сақталған; ағымдағыларын көру үшін жаңа кесінді құрыңыз.')
-       ) AS v ([Key], Lang, Val)
-OPTION (RECOMPILE);
-GO
--- RPT:stale ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t
