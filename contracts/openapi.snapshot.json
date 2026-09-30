@@ -2537,6 +2537,73 @@
         ],
         "type": "object"
       },
+      "CreateSourceEventMapCommand": {
+        "description": "Створення мапінгу подій.",
+        "properties": {
+          "documentId": {
+            "description": "Документ ділянки.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "fields": {
+            "description": "Поля; серед них обов'язково `$start` і `$end`.",
+            "items": {
+              "$ref": "#/components/schemas/SourceEventFieldInput"
+            },
+            "type": "array"
+          },
+          "filterAttribute": {
+            "description": "Атрибут звуження; усі три значення звуження разом або жодного.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "filterScope": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/SourceEventAttributeScope",
+                "description": "Де лежить атрибут звуження."
+              }
+            ]
+          },
+          "filterValue": {
+            "description": "Значення звуження.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "sourceEntityId": {
+            "description": "Сутність-шаблон подій.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "tableDefId": {
+            "description": "Динамічна таблиця документа.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "volumeMode": {
+            "$ref": "#/components/schemas/SourceEventVolumeMode",
+            "description": "Звідки береться об'єм."
+          }
+        },
+        "required": [
+          "sourceEntityId",
+          "documentId",
+          "tableDefId",
+          "volumeMode",
+          "filterAttribute",
+          "filterScope",
+          "filterValue",
+          "fields"
+        ],
+        "type": "object"
+      },
       "CreateTemplateRequest": {
         "description": "Запит на створення шаблону.",
         "properties": {
@@ -7120,6 +7187,39 @@
             "description": "Елементи сторінки.",
             "items": {
               "$ref": "#/components/schemas/RegistryRowDto"
+            },
+            "type": "array"
+          },
+          "nextCursor": {
+            "description": "Курсор наступної сторінки; `null` — кінець.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "totalCount": {
+            "description": "Загальна кількість; `null`, якщо підрахунок дорогий.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor",
+          "totalCount"
+        ],
+        "type": "object"
+      },
+      "PagedResultOfSourceEventRowDto": {
+        "description": "Сторінка результатів. Ендпоінтів, що повертають «усе», не існує —\nперевіряється архітектурним тестом.",
+        "properties": {
+          "items": {
+            "description": "Елементи сторінки.",
+            "items": {
+              "$ref": "#/components/schemas/SourceEventRowDto"
             },
             "type": "array"
           },
@@ -12793,6 +12893,743 @@
         ],
         "type": "object"
       },
+      "SourceEvent": {
+        "description": "Подія джерела — нейтральне поняття ядра (V-16); у PI AF це Event Frame.",
+        "properties": {
+          "attributes": {
+            "description": "Атрибути в порядку, у якому їх повернуло джерело.",
+            "items": {
+              "$ref": "#/components/schemas/SourceEventAttribute"
+            },
+            "type": "array"
+          },
+          "endUtc": {
+            "description": "Кінець, UTC; `null` — подія ще триває.",
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "eventId": {
+            "description": "Незмінний ідентифікатор події в джерелі — ключ синхронізації.",
+            "type": "string"
+          },
+          "modifiedUtc": {
+            "description": "Остання зміна в джерелі, UTC; `null` — джерело не дає.",
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "name": {
+            "description": "Назва події; не унікальна.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "parentId": {
+            "description": "Ідентифікатор батьківської події; `null` — подія верхнього рівня.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "primaryElementPath": {
+            "description": "Первинний елемент події; `null` — немає.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "startUtc": {
+            "description": "Початок, UTC.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "templateName": {
+            "description": "Шаблон події.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "eventId",
+          "templateName",
+          "name",
+          "startUtc",
+          "endUtc",
+          "modifiedUtc",
+          "primaryElementPath",
+          "parentId",
+          "attributes"
+        ],
+        "type": "object"
+      },
+      "SourceEventAttribute": {
+        "description": "Значення атрибута події: число <b>або</b> текст, ніколи обидва.",
+        "properties": {
+          "name": {
+            "description": "Ім'я атрибута.",
+            "type": "string"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/SourceEventAttributeScope",
+            "description": "Звідки атрибут."
+          },
+          "sourceUnitSymbol": {
+            "description": "UOM джерела; `null` — джерело не назвало.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "valueNumeric": {
+            "description": "Число в одиниці джерела.",
+            "format": "decimal",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "valueString": {
+            "description": "Текст: цифровий стан, перелік, рядок, який не є числом.",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "name",
+          "scope",
+          "valueNumeric",
+          "valueString",
+          "sourceUnitSymbol"
+        ],
+        "type": "object"
+      },
+      "SourceEventAttributeDescriptor": {
+        "description": "Атрибут шаблону подій у каталозі.",
+        "properties": {
+          "dataType": {
+            "description": "Тип значення в термінах джерела.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "name": {
+            "description": "Ім'я атрибута.",
+            "type": "string"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/SourceEventAttributeScope",
+            "description": "Звідки атрибут."
+          },
+          "sourceUnitSymbol": {
+            "description": "UOM джерела; `null` — безрозмірний або не названий.",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "name",
+          "scope",
+          "sourceUnitSymbol",
+          "dataType"
+        ],
+        "type": "object"
+      },
+      "SourceEventAttributeScope": {
+        "description": "Де лежить атрибут події джерела (FEATURE-HSE301-VIEW §4.7.1, §4.7.3; HQ-18).",
+        "enum": [
+          "Event",
+          "PrimaryElement"
+        ]
+      },
+      "SourceEventFieldDto": {
+        "description": "Поле мапінгу подій «атрибут → колонка» у відповіді (§4.7.3).",
+        "properties": {
+          "attributeScope": {
+            "$ref": "#/components/schemas/SourceEventAttributeScope",
+            "description": "Де лежить атрибут."
+          },
+          "id": {
+            "description": "Ідентифікатор `ext.SourceEventFieldMap`.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "sourceAttribute": {
+            "description": "Ім'я атрибута з каталогу або `$start`/`$end`/`$name`.",
+            "type": "string"
+          },
+          "sourceUnitId": {
+            "description": "Одиниця атрибута в джерелі; `null` — без конверсії.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "targetColumnDefId": {
+            "description": "Колонка-ціль.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "targetUnitId": {
+            "description": "Одиниця колонки; `null` — без конверсії.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "valueKind": {
+            "$ref": "#/components/schemas/SourceEventValueKind",
+            "description": "Як значення лягає в колонку."
+          },
+          "values": {
+            "description": "Явні відповідності значень (лише для SourceEventValueKind.ValueMap).",
+            "items": {
+              "$ref": "#/components/schemas/SourceEventValueDto"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "targetColumnDefId",
+          "sourceAttribute",
+          "attributeScope",
+          "valueKind",
+          "sourceUnitId",
+          "targetUnitId",
+          "values"
+        ],
+        "type": "object"
+      },
+      "SourceEventFieldInput": {
+        "description": "Поле у запиті на збереження мапінгу.",
+        "properties": {
+          "attributeScope": {
+            "$ref": "#/components/schemas/SourceEventAttributeScope",
+            "description": "Де лежить атрибут."
+          },
+          "sourceAttribute": {
+            "description": "Атрибут з каталогу або `$start`/`$end`/`$name`.",
+            "type": "string"
+          },
+          "sourceUnitId": {
+            "description": "Одиниця джерела; `null` — без конверсії.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "targetColumnDefId": {
+            "description": "Колонка-ціль.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "targetUnitId": {
+            "description": "Одиниця колонки; `null` — без конверсії.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "valueKind": {
+            "$ref": "#/components/schemas/SourceEventValueKind",
+            "description": "Як значення лягає в колонку."
+          },
+          "values": {
+            "description": "Явні відповідності; лише для SourceEventValueKind.ValueMap.",
+            "items": {
+              "$ref": "#/components/schemas/SourceEventValueInput"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          }
+        },
+        "required": [
+          "targetColumnDefId",
+          "sourceAttribute",
+          "attributeScope",
+          "valueKind",
+          "sourceUnitId",
+          "targetUnitId",
+          "values"
+        ],
+        "type": "object"
+      },
+      "SourceEventLinkStatus": {
+        "description": "Стан зв'язку «подія джерела ↔ рядок» (`ext.SourceEventLink.Status`,\nFEATURE-HSE301-VIEW §4.7.3–4.7.4).",
+        "enum": [
+          "Synced",
+          "Open",
+          "Missing",
+          "PeriodClosed",
+          "PeriodChanged",
+          "PeriodNotOpen",
+          "Unmapped",
+          "RowLimit"
+        ]
+      },
+      "SourceEventMapDto": {
+        "description": "Мапінг подій джерела «шаблон подій → динамічна таблиця документа» (§4.7.3).",
+        "properties": {
+          "documentId": {
+            "description": "Документ ділянки, куди лягають події.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "fields": {
+            "description": "Поля «атрибут → колонка».",
+            "items": {
+              "$ref": "#/components/schemas/SourceEventFieldDto"
+            },
+            "type": "array"
+          },
+          "filterAttribute": {
+            "description": "Атрибут звуження; `null` — без звуження.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "filterScope": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/SourceEventAttributeScope",
+                "description": "Де лежить атрибут звуження."
+              }
+            ]
+          },
+          "filterValue": {
+            "description": "Значення звуження.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "id": {
+            "description": "Ідентифікатор `ext.SourceEventMap`.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "isActive": {
+            "description": "Чи діє синхронізація за мапінгом.",
+            "type": "boolean"
+          },
+          "sourceEntityId": {
+            "description": "Сутність-шаблон подій.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "tableDefId": {
+            "description": "Динамічна таблиця.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "volumeMode": {
+            "$ref": "#/components/schemas/SourceEventVolumeMode",
+            "description": "Звідки береться об'єм (§4.7.5)."
+          }
+        },
+        "required": [
+          "id",
+          "sourceEntityId",
+          "documentId",
+          "tableDefId",
+          "filterAttribute",
+          "filterScope",
+          "filterValue",
+          "volumeMode",
+          "isActive",
+          "fields"
+        ],
+        "type": "object"
+      },
+      "SourceEventProbeAttribute": {
+        "description": "Атрибут, який пробне читання подій має лишити (порожній перелік — усі).",
+        "properties": {
+          "name": {
+            "description": "Ім'я атрибута з каталогу шаблону.",
+            "type": "string"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/SourceEventAttributeScope",
+            "description": "Де лежить атрибут."
+          }
+        },
+        "required": [
+          "name",
+          "scope"
+        ],
+        "type": "object"
+      },
+      "SourceEventProbeRequest": {
+        "description": "Пробне читання подій (HSE301 A6).",
+        "properties": {
+          "attributes": {
+            "description": "Атрибути; порожньо чи `null` — усі, що дало джерело.",
+            "items": {
+              "$ref": "#/components/schemas/SourceEventProbeAttribute"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "fromUtc": {
+            "description": "Початок вікна; `null` — 30 днів назад.",
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "maxEvents": {
+            "description": "Стеля подій; `null` — 20, не більше 100.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "template": {
+            "description": "Шаблон подій із каталогу.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "toUtc": {
+            "description": "Кінець вікна; `null` — «зараз».",
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "template",
+          "fromUtc",
+          "toUtc",
+          "attributes",
+          "maxEvents"
+        ],
+        "type": "object"
+      },
+      "SourceEventProbeResult": {
+        "description": "Наслідок пробного читання подій.",
+        "properties": {
+          "errorCode": {
+            "description": "Код часткової відмови адаптера; `null` — немає.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "events": {
+            "description": "Прочитані події.",
+            "items": {
+              "$ref": "#/components/schemas/SourceEvent"
+            },
+            "type": "array"
+          },
+          "fromUtc": {
+            "description": "Вікно, яке читали, початок.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "toUtc": {
+            "description": "Вікно, яке читали, кінець.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "truncated": {
+            "description": "Подій було більше за стелю проби.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "fromUtc",
+          "toUtc",
+          "events",
+          "truncated",
+          "errorCode"
+        ],
+        "type": "object"
+      },
+      "SourceEventRowDto": {
+        "description": "Рядок таблиці подій: зв'язок «подія джерела ↔ рядок документа» зі станом (HSE301 A6).",
+        "properties": {
+          "documentId": {
+            "description": "Документ мапінгу.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "documentKey": {
+            "description": "Бізнес-ключ документа.",
+            "type": "string"
+          },
+          "endLocal": {
+            "description": "Кінець у поясі проєкту.",
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "endUtc": {
+            "description": "Кінець події, UTC; `null` — подія триває.",
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "eventName": {
+            "description": "Назва події.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "firstSeenAt": {
+            "description": "Коли подію вперше побачено.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "description": "Ідентифікатор зв'язку.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "keptManual": {
+            "description": "Коди колонок, лишених за людиною.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "lastSeenAt": {
+            "description": "Коли її востаннє повернуло джерело.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "lastSyncAt": {
+            "description": "Останній прогін синхронізації.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "periodKey": {
+            "description": "Період рядка; `null` — рядка немає.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "rowKey": {
+            "description": "Ключ рядка (`EF-…`).",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "sourceEventId": {
+            "description": "ID події в джерелі.",
+            "type": "string"
+          },
+          "sourceEventMapId": {
+            "description": "Мапінг подій.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "sourceModifiedUtc": {
+            "description": "Остання зміна події в джерелі.",
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "startLocal": {
+            "description": "Початок у поясі проєкту (зі зсувом).",
+            "format": "date-time",
+            "type": "string"
+          },
+          "startUtc": {
+            "description": "Початок події, UTC.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/SourceEventLinkStatus",
+            "description": "Стан синхронізації."
+          },
+          "tableInstanceId": {
+            "description": "Екземпляр таблиці рядка.",
+            "format": "int64",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "timeZoneId": {
+            "description": "Пояс проєкту.",
+            "type": "string"
+          },
+          "unmapped": {
+            "description": "Значення без відповідника в довіднику.",
+            "items": {
+              "$ref": "#/components/schemas/SourceEventUnmappedItem"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "sourceEventMapId",
+          "sourceEventId",
+          "eventName",
+          "status",
+          "startUtc",
+          "startLocal",
+          "endUtc",
+          "endLocal",
+          "timeZoneId",
+          "sourceModifiedUtc",
+          "documentId",
+          "documentKey",
+          "periodKey",
+          "tableInstanceId",
+          "rowKey",
+          "keptManual",
+          "unmapped",
+          "firstSeenAt",
+          "lastSeenAt",
+          "lastSyncAt"
+        ],
+        "type": "object"
+      },
+      "SourceEventTemplate": {
+        "description": "Шаблон подій джерела з атрибутами — для конфігуратора.",
+        "properties": {
+          "attributes": {
+            "description": "Атрибути шаблону й первинного елемента.",
+            "items": {
+              "$ref": "#/components/schemas/SourceEventAttributeDescriptor"
+            },
+            "type": "array"
+          },
+          "templateName": {
+            "description": "Ім'я шаблону.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "templateName",
+          "attributes"
+        ],
+        "type": "object"
+      },
+      "SourceEventUnmappedItem": {
+        "description": "Значення події, яке не вдалося зіставити із записом довідника (`UnmappedJson`).",
+        "properties": {
+          "column": {
+            "description": "Код колонки.",
+            "type": "string"
+          },
+          "value": {
+            "description": "Значення джерела.",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "column",
+          "value"
+        ],
+        "type": "object"
+      },
+      "SourceEventValueDto": {
+        "description": "Явна відповідність «значення джерела → запис довідника» у відповіді (§4.7.3).",
+        "properties": {
+          "id": {
+            "description": "Ідентифікатор `ext.SourceEventValueMap`.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "registryEntryId": {
+            "description": "Запис довідника Lookup-колонки.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "sourceValue": {
+            "description": "Значення атрибута в джерелі.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "sourceValue",
+          "registryEntryId"
+        ],
+        "type": "object"
+      },
+      "SourceEventValueInput": {
+        "description": "Явна відповідність значення у запиті на збереження мапінгу.",
+        "properties": {
+          "registryEntryId": {
+            "description": "Запис довідника колонки.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "sourceValue": {
+            "description": "Значення атрибута в джерелі.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sourceValue",
+          "registryEntryId"
+        ],
+        "type": "object"
+      },
+      "SourceEventValueKind": {
+        "description": "Як значення атрибута події лягає в колонку\n(`ext.SourceEventFieldMap.ValueKind`, FEATURE-HSE301-VIEW §4.7.3).",
+        "enum": [
+          "Direct",
+          "LookupByCode",
+          "LookupByName",
+          "ValueMap"
+        ]
+      },
+      "SourceEventVolumeMode": {
+        "description": "Звідки береться об'єм події (`ext.SourceEventMap.VolumeMode`,\nFEATURE-HSE301-VIEW §4.7.5, V-19 → `D-188`).",
+        "enum": [
+          "None",
+          "EventAttribute",
+          "RowWindow"
+        ]
+      },
       "SourcePathProbeResult": {
         "description": "Наслідок пробного читання одного значення мапінгу (ФВ-13.17).",
         "properties": {
@@ -14466,6 +15303,60 @@
           "graceOffsetDays",
           "hardCloseOffsetDays",
           "yearGraceOffsetDays"
+        ],
+        "type": "object"
+      },
+      "UpdateSourceEventMapCommand": {
+        "description": "Повна заміна налаштувань мапінгу подій; документ і таблиця лишаються.",
+        "properties": {
+          "fields": {
+            "description": "Нові поля замість усіх наявних.",
+            "items": {
+              "$ref": "#/components/schemas/SourceEventFieldInput"
+            },
+            "type": "array"
+          },
+          "filterAttribute": {
+            "description": "Атрибут звуження.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "filterScope": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/SourceEventAttributeScope",
+                "description": "Де лежить атрибут звуження."
+              }
+            ]
+          },
+          "filterValue": {
+            "description": "Значення звуження.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "isActive": {
+            "description": "Чи діє синхронізація за мапінгом (пауза — `false`).",
+            "type": "boolean"
+          },
+          "volumeMode": {
+            "$ref": "#/components/schemas/SourceEventVolumeMode",
+            "description": "Звідки береться об'єм."
+          }
+        },
+        "required": [
+          "volumeMode",
+          "isActive",
+          "filterAttribute",
+          "filterScope",
+          "filterValue",
+          "fields"
         ],
         "type": "object"
       },
@@ -17258,6 +18149,119 @@
         ]
       }
     },
+    "/api/v1/data-sources/{id}/event-templates": {
+      "get": {
+        "description": "Нічого не пише. Без налаштованого запиту каталогу — `422 ECR-INT-0422`\n(`.eventQueryNotConfigured`, `.queryKindNotConfigured` чи `.queryKindNotSupported`): стан\n«не налаштовано», а не порожній список. Недоступне джерело — `503 ECR-INT-0503`.",
+        "parameters": [
+          {
+            "description": "Джерело даних.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SourceEventTemplate"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SourceEventTemplate"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SourceEventTemplate"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Каталог шаблонів подій джерела й їхніх атрибутів. Право `Integration.View` або `Integration.Manage`.",
+        "tags": [
+          "SourceEvents"
+        ]
+      }
+    },
     "/api/v1/data-sources/{id}/probe": {
       "post": {
         "description": "⚠ Читає ОДНЕ значення тим самим адаптером, яким потім збиратимуть, і\nнічого не зберігає — на відміну від `POST …/collect`. Шляху немає\nв каталозі джерела — `404 ECR-INT-0404` з переліком найближчих\nімен (`suggestions`, до 5) серед елементів каталогу того самого\nрівня; джерело не відповіло в межу `Integration:CatalogTimeoutSeconds`\nабо лежить — `503 ECR-INT-0503`; відмова в автентифікації —\n`502 ECR-INT-0502`.",
@@ -17384,6 +18388,130 @@
         "summary": "«Перевірити конфігурацію» до першого збору (ФВ-13.17). Право `Integration.Manage`.",
         "tags": [
           "DataSources"
+        ]
+      }
+    },
+    "/api/v1/data-sources/{id}/probe-events": {
+      "post": {
+        "parameters": [
+          {
+            "description": "Джерело даних.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/SourceEventProbeRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SourceEventProbeRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SourceEventProbeRequest"
+              }
+            }
+          },
+          "description": "Скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceEventProbeResult"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceEventProbeResult"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceEventProbeResult"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Пробне читання подій шаблону за вікно — без запису. Право `Integration.Manage`.",
+        "tags": [
+          "SourceEvents"
         ]
       }
     },
@@ -30339,6 +31467,516 @@
         ]
       }
     },
+    "/api/v1/source-event-maps": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Сутність-шаблон подій; `null` — усі.",
+            "in": "query",
+            "name": "sourceEntityId",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SourceEventMapDto"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SourceEventMapDto"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SourceEventMapDto"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "summary": "Мапінги подій; за sourceEntityId — лише сутності. Право `Integration.View` або `Integration.Manage`.",
+        "tags": [
+          "SourceEvents"
+        ]
+      },
+      "post": {
+        "description": "Поля обов'язково містять `$start` і `$end` на Date-колонки (`422 ECR-INT-0422`). Слід — у\nжурналі структурних змін.",
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSourceEventMapCommand"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSourceEventMapCommand"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSourceEventMapCommand"
+              }
+            }
+          },
+          "description": "Скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceEventMapDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceEventMapDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceEventMapDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Заводить мапінг подій «шаблон → динамічна таблиця документа». Право `Integration.Manage` і грант\n`Manage` на проєкт документа.",
+        "tags": [
+          "SourceEvents"
+        ]
+      }
+    },
+    "/api/v1/source-event-maps/{id}": {
+      "delete": {
+        "description": "Мапінг зі зв'язками «подія ↔ рядок» — `409 ECR-INT-0409`: вихід — пауза (`isActive = false`).",
+        "parameters": [
+          {
+            "description": "Мапінг.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "summary": "Видаляє мапінг подій, за яким ще нічого не синхронізовано. Право `Integration.Manage` і грант\n`Manage` на проєкт документа.",
+        "tags": [
+          "SourceEvents"
+        ]
+      },
+      "get": {
+        "parameters": [
+          {
+            "description": "Мапінг.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceEventMapDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceEventMapDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceEventMapDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Один мапінг подій з полями й відповідностями значень. Право `Integration.View` або `Integration.Manage`.",
+        "tags": [
+          "SourceEvents"
+        ]
+      },
+      "put": {
+        "parameters": [
+          {
+            "description": "Мапінг.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateSourceEventMapCommand"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateSourceEventMapCommand"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateSourceEventMapCommand"
+              }
+            }
+          },
+          "description": "Скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceEventMapDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceEventMapDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceEventMapDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Повна заміна налаштувань мапінгу: режим об'єму, звуження, поля, `isActive` (пауза й відновлення).\nПраво `Integration.Manage` і грант `Manage` на проєкт документа.",
+        "tags": [
+          "SourceEvents"
+        ]
+      }
+    },
     "/api/v1/sources": {
       "get": {
         "description": "⚠ Разом із кожною сутністю віддається найстаріша непокрита прогалина.\nОзнака здоров'я інтеграції — журнал покриття, а не тиша (ІНТ-3.3):\nджерело, яке щоночі успішно віддає нуль точок, і джерело, яке віддає\nдані, у переліку прогонів виглядають однаково.",
@@ -30881,6 +32519,266 @@
         "summary": "Замінює політику синку довідника з цієї сутності збору (`D-212`).\nПраво `Integration.Manage` і право на дані прив'язаного довідника —\n`Registry.EditData` або грант `Write`.",
         "tags": [
           "Sources"
+        ]
+      }
+    },
+    "/api/v1/sources/{id}/source-events": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Сутність-шаблон подій.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Лише цей мапінг.",
+            "in": "query",
+            "name": "mapId",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Лише цей документ.",
+            "in": "query",
+            "name": "documentId",
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Лише ці стани (можна повторювати); порожньо — усі.",
+            "in": "query",
+            "name": "status",
+            "schema": {
+              "items": {
+                "$ref": "#/components/schemas/SourceEventLinkStatus"
+              },
+              "type": "array"
+            }
+          },
+          {
+            "description": "Початок події не раніше (UTC, включно).",
+            "in": "query",
+            "name": "fromUtc",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Початок події раніше (UTC, виключно).",
+            "in": "query",
+            "name": "toUtc",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Лише цей період.",
+            "in": "query",
+            "name": "periodKey",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Курсор наступної сторінки.",
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Розмір сторінки 1..500; `0` — типове 50.",
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagedResultOfSourceEventRowDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagedResultOfSourceEventRowDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagedResultOfSourceEventRowDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Таблиця подій сутності: стан зв'язку «подія ↔ рядок», час у поясі проєкту й UTC, ключ рядка, документ і\nперіод. Права — `Read` на документ мапінгу; невидимі документи для користувача не існують.",
+        "tags": [
+          "SourceEvents"
+        ]
+      }
+    },
+    "/api/v1/sources/{id}/source-events/sync": {
+      "post": {
+        "description": "Повторне натискання зливається з задачею, що вже чекає чи виконується (ціль `source-events-e{id}`), — та\nсама задача, що й за розкладом. Немає активного мапінгу подій — `422`.",
+        "parameters": [
+          {
+            "description": "Сутність-шаблон подій.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobAcceptedResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobAcceptedResponse"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobAcceptedResponse"
+                }
+              }
+            },
+            "description": "Accepted"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "«Отримати з PI зараз»: ставить синхронізацію подій сутності в чергу. Право `Integration.Manage`.",
+        "tags": [
+          "SourceEvents"
         ]
       }
     },
@@ -36380,6 +38278,9 @@
     },
     {
       "name": "Security"
+    },
+    {
+      "name": "SourceEvents"
     },
     {
       "name": "Sources"

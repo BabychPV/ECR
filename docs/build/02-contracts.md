@@ -3032,6 +3032,39 @@ public interface ISourceCatalogReader
 > — та сама конвенція, що в каталозі: `503 ECR-INT-0503`
 > (`probeTimeout`/`probeUnavailable`), відмова автентифікації — `502 ECR-INT-0502`.
 
+#### `ISourceEventMapStore` — API подій джерела (HSE301 A6)
+
+Події джерела (PI Event Frames) → рядки динамічних таблиць
+(`FEATURE-HSE301-VIEW` §4.7). Порт обслуговує налаштування мапінгу подій
+(`ext.SourceEventMap`/`SourceEventFieldMap`/`SourceEventValueMap`) і читання
+таблиці подій (`ext.SourceEventLink`); саму синхронізацію робить
+`SourceEventSyncJob` напряму на `EcrDbContext`.
+
+| Маршрут | Право | Що робить |
+|---|---|---|
+| `GET /data-sources/{id}/event-templates` | `Integration.View`/`Manage` | каталог шаблонів подій і атрибутів (`DiscoverEventTemplatesAsync`); без запиту каталогу — `422 ECR-INT-0422` (`eventQueryNotConfigured`, `queryKindNotConfigured`, `queryKindNotSupported`); `503 ECR-INT-0503` (`catalogTimeout`/`catalogUnavailable`) |
+| `POST /data-sources/{id}/probe-events` | `Integration.Manage` | пробне читання подій шаблону, **нічого не пише**; тіло `{ template, fromUtc?, toUtc?, attributes?, maxEvents? }`, типово 30 днів і 20 подій, до 92 днів і 100; `422 err.ECR-REQ-0422.probeEventsInvalid`, `503 probeTimeout/probeUnavailable` |
+| `GET /sources/{id}/source-events` | `Read` на документ мапінгу | таблиця подій: стан `Synced`/`Open`/`Missing`/`PeriodClosed`/`PeriodChanged`/`PeriodNotOpen`/`Unmapped`/`RowLimit`, час у поясі проєкту й UTC, ключ рядка `EF-…`, документ і період, `keptManual`, `unmapped`; фільтри `mapId`, `documentId`, `status`(×N), `fromUtc`, `toUtc`, `periodKey`; курсор, `limit` 1–500. Документ, якого користувач не бачить, не існує: його події поза відповіддю й `totalCount`, `mapId` невидимого — `404` |
+| `POST /sources/{id}/source-events/sync` | `Integration.Manage` | «Отримати з PI зараз»: `EnqueueCoalescedAsync<ISourceEventSyncJob>`, ціль `source-events-e{id}`, `202 { jobId }`; без активного мапінгу — `422 err.ECR-INT-0422.eventSyncNoMap` |
+| `GET`/`POST source-event-maps`, `GET`/`PUT`/`DELETE source-event-maps/{id}` | `Integration.View`/`Manage` + грант `Manage` на проєкт документа | CRUD мапінгу; `PUT` — повна заміна (режим об'єму, звуження, поля з відповідностями значень, `isActive` — пауза); слід у `aud.StructureChange` (`ext.SourceEventMap`); `DELETE` зі зв'язками — `409 err.ECR-INT-0409.eventMapHasLinks` |
+
+```csharp
+public interface ISourceEventMapStore
+{
+    public Task<EventMapTableInfo?> FindTargetTableAsync(int tableDefId, CancellationToken ct);
+    public Task<EventMapDocumentInfo?> FindDocumentAsync(long documentId, CancellationToken ct);
+    public Task<SourceEventMap?> FindMapAsync(int id, CancellationToken ct);
+    public Task<IReadOnlyList<SourceEventMap>> ListMapsAsync(int? sourceEntityId, CancellationToken ct);
+    public void ReleaseFields(SourceEventMap map);            // до ReplaceFields: усі FK — Restrict
+    public Task<SourceEventLinkPage> ReadLinksAsync(SourceEventLinkFilter filter, string? cursor, int limit, CancellationToken ct);
+    // … Add/Save/Remove/HasActiveMap/CountLinks — див. src/Ecr.Application/Ports/ISourceEventMapStore.cs
+}
+```
+
+> ⛔ Усі зовнішні ключі моделі — `Restrict` (без каскаду в базі й у EF), тому заміна
+> полів мапінгу спершу позначає старі поля й відповідності до видалення
+> (`ReleaseFields`), а вже потім `SourceEventMap.ReplaceFields` очищає колекцію.
+
 > ⛔ **Джерела даних — без сховища секретів** (`BE-21`, пряме рішення людини на
 > `Q15-06`): «Windows-автентифікація службового облікового запису; секретів у
 > застосунку немає». Тому в `SaveDataSourceRequest` поля секрету НЕМАЄ і
@@ -3687,6 +3720,15 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/entity-field-maps/{id}/resume` | `Integration.Manage` | 5 |
 | `POST` | `/api/v1/entity-field-maps/{id}/accept-unit-change` | `Integration.Manage` | 5 |
 | `DELETE` | `/api/v1/entity-field-maps/{id}` | `Integration.Manage` | 5 |
+| `GET` | `/api/v1/data-sources/{id}/event-templates` | `Integration.View` | 7 |
+| `POST` | `/api/v1/data-sources/{id}/probe-events` | `Integration.Manage` | 7 |
+| `GET` | `/api/v1/sources/{id}/source-events` | — (`Read` на документ мапінгу) | 7 |
+| `POST` | `/api/v1/sources/{id}/source-events/sync` | `Integration.Manage` | 7 |
+| `GET` | `/api/v1/source-event-maps` | `Integration.View` | 7 |
+| `GET` | `/api/v1/source-event-maps/{id}` | `Integration.View` | 7 |
+| `POST` | `/api/v1/source-event-maps` | `Integration.Manage` | 7 |
+| `PUT` | `/api/v1/source-event-maps/{id}` | `Integration.Manage` | 7 |
+| `DELETE` | `/api/v1/source-event-maps/{id}` | `Integration.Manage` | 7 |
 | `GET` | `/api/v1/campaign/summary` | `Report.ViewCampaign` | 5 |
 | `GET` | `/api/v1/reports/snapshots` | `Report.ViewRegulatory` | 5 |
 | `POST` | `/api/v1/reports/snapshots/{id}/verify` | `Report.ViewRegulatory` | 5 |

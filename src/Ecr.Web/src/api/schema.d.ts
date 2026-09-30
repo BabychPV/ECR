@@ -1577,6 +1577,85 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/data-sources/{id}/event-templates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Каталог шаблонів подій джерела й їхніх атрибутів. Право `Integration.View` або `Integration.Manage`.
+         * @description Нічого не пише. Без налаштованого запиту каталогу — `422 ECR-INT-0422`
+         *     (`.eventQueryNotConfigured`, `.queryKindNotConfigured` чи `.queryKindNotSupported`): стан
+         *     «не налаштовано», а не порожній список. Недоступне джерело — `503 ECR-INT-0503`.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Джерело даних. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SourceEventTemplate"][];
+                        "text/json": components["schemas"]["SourceEventTemplate"][];
+                        "text/plain": components["schemas"]["SourceEventTemplate"][];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/data-sources/{id}/probe": {
         parameters: {
             query?: never;
@@ -1670,6 +1749,87 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/data-sources/{id}/probe-events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Пробне читання подій шаблону за вікно — без запису. Право `Integration.Manage`. */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Джерело даних. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            /** @description Скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["SourceEventProbeRequest"];
+                    "application/json": components["schemas"]["SourceEventProbeRequest"];
+                    "text/json": components["schemas"]["SourceEventProbeRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SourceEventProbeResult"];
+                        "text/json": components["schemas"]["SourceEventProbeResult"];
+                        "text/plain": components["schemas"]["SourceEventProbeResult"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
                 };
             };
         };
@@ -11418,6 +11578,334 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/source-event-maps": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Мапінги подій; за sourceEntityId — лише сутності. Право `Integration.View` або `Integration.Manage`. */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Сутність-шаблон подій; `null` — усі. */
+                    sourceEntityId?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SourceEventMapDto"][];
+                        "text/json": components["schemas"]["SourceEventMapDto"][];
+                        "text/plain": components["schemas"]["SourceEventMapDto"][];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        /**
+         * Заводить мапінг подій «шаблон → динамічна таблиця документа». Право `Integration.Manage` і грант
+         *     `Manage` на проєкт документа.
+         * @description Поля обов'язково містять `$start` і `$end` на Date-колонки (`422 ECR-INT-0422`). Слід — у
+         *     журналі структурних змін.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            /** @description Скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["CreateSourceEventMapCommand"];
+                    "application/json": components["schemas"]["CreateSourceEventMapCommand"];
+                    "text/json": components["schemas"]["CreateSourceEventMapCommand"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SourceEventMapDto"];
+                        "text/json": components["schemas"]["SourceEventMapDto"];
+                        "text/plain": components["schemas"]["SourceEventMapDto"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/source-event-maps/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Один мапінг подій з полями й відповідностями значень. Право `Integration.View` або `Integration.Manage`. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Мапінг. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SourceEventMapDto"];
+                        "text/json": components["schemas"]["SourceEventMapDto"];
+                        "text/plain": components["schemas"]["SourceEventMapDto"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        /** Повна заміна налаштувань мапінгу: режим об'єму, звуження, поля, `isActive` (пауза й відновлення).
+         *     Право `Integration.Manage` і грант `Manage` на проєкт документа. */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Мапінг. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            /** @description Скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["UpdateSourceEventMapCommand"];
+                    "application/json": components["schemas"]["UpdateSourceEventMapCommand"];
+                    "text/json": components["schemas"]["UpdateSourceEventMapCommand"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SourceEventMapDto"];
+                        "text/json": components["schemas"]["SourceEventMapDto"];
+                        "text/plain": components["schemas"]["SourceEventMapDto"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        /**
+         * Видаляє мапінг подій, за яким ще нічого не синхронізовано. Право `Integration.Manage` і грант
+         *     `Manage` на проєкт документа.
+         * @description Мапінг зі зв'язками «подія ↔ рядок» — `409 ECR-INT-0409`: вихід — пауза (`isActive = false`).
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Мапінг. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sources": {
         parameters: {
             query?: never;
@@ -11820,6 +12308,165 @@ export interface paths {
             };
         };
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sources/{id}/source-events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Таблиця подій сутності: стан зв'язку «подія ↔ рядок», час у поясі проєкту й UTC, ключ рядка, документ і
+         *     період. Права — `Read` на документ мапінгу; невидимі документи для користувача не існують. */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Лише цей мапінг. */
+                    mapId?: number;
+                    /** @description Лише цей документ. */
+                    documentId?: number;
+                    /** @description Лише ці стани (можна повторювати); порожньо — усі. */
+                    status?: components["schemas"]["SourceEventLinkStatus"][];
+                    /** @description Початок події не раніше (UTC, включно). */
+                    fromUtc?: string;
+                    /** @description Початок події раніше (UTC, виключно). */
+                    toUtc?: string;
+                    /** @description Лише цей період. */
+                    periodKey?: number;
+                    /** @description Курсор наступної сторінки. */
+                    cursor?: string;
+                    /** @description Розмір сторінки 1..500; `0` — типове 50. */
+                    limit?: number;
+                };
+                header?: never;
+                path: {
+                    /** @description Сутність-шаблон подій. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PagedResultOfSourceEventRowDto"];
+                        "text/json": components["schemas"]["PagedResultOfSourceEventRowDto"];
+                        "text/plain": components["schemas"]["PagedResultOfSourceEventRowDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sources/{id}/source-events/sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * «Отримати з PI зараз»: ставить синхронізацію подій сутності в чергу. Право `Integration.Manage`.
+         * @description Повторне натискання зливається з задачею, що вже чекає чи виконується (ціль `source-events-e{id}`), — та
+         *     сама задача, що й за розкладом. Немає активного мапінгу подій — `422`.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Сутність-шаблон подій. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Accepted */
+                202: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["JobAcceptedResponse"];
+                        "text/json": components["schemas"]["JobAcceptedResponse"];
+                        "text/plain": components["schemas"]["JobAcceptedResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
         delete?: never;
         options?: never;
         head?: never;
@@ -17048,6 +17695,33 @@ export interface components {
             entityPath: null | string;
             sourceKind: null | components["schemas"]["RegistrySourceKind"];
         };
+        /** @description Створення мапінгу подій. */
+        CreateSourceEventMapCommand: {
+            /**
+             * Format: int64
+             * @description Документ ділянки.
+             */
+            documentId: number;
+            /** @description Поля; серед них обов'язково `$start` і `$end`. */
+            fields: components["schemas"]["SourceEventFieldInput"][];
+            /** @description Атрибут звуження; усі три значення звуження разом або жодного. */
+            filterAttribute: null | string;
+            filterScope: null | components["schemas"]["SourceEventAttributeScope"];
+            /** @description Значення звуження. */
+            filterValue: null | string;
+            /**
+             * Format: int32
+             * @description Сутність-шаблон подій.
+             */
+            sourceEntityId: number;
+            /**
+             * Format: int32
+             * @description Динамічна таблиця документа.
+             */
+            tableDefId: number;
+            /** @description Звідки береться об'єм. */
+            volumeMode: components["schemas"]["SourceEventVolumeMode"];
+        };
         /** @description Запит на створення шаблону. */
         CreateTemplateRequest: {
             /** @description Код шаблону, унікальний у системі. */
@@ -19115,6 +19789,19 @@ export interface components {
         PagedResultOfRegistryRowDto: {
             /** @description Елементи сторінки. */
             items: components["schemas"]["RegistryRowDto"][];
+            /** @description Курсор наступної сторінки; `null` — кінець. */
+            nextCursor: null | string;
+            /**
+             * Format: int32
+             * @description Загальна кількість; `null`, якщо підрахунок дорогий.
+             */
+            totalCount: null | number;
+        };
+        /** @description Сторінка результатів. Ендпоінтів, що повертають «усе», не існує —
+         *     перевіряється архітектурним тестом. */
+        PagedResultOfSourceEventRowDto: {
+            /** @description Елементи сторінки. */
+            items: components["schemas"]["SourceEventRowDto"][];
             /** @description Курсор наступної сторінки; `null` — кінець. */
             nextCursor: null | string;
             /**
@@ -21717,6 +22404,348 @@ export interface components {
             /** @description Кінець у джерелі — останній чинний день. */
             validToInclusive: boolean;
         };
+        /** @description Подія джерела — нейтральне поняття ядра (V-16); у PI AF це Event Frame. */
+        SourceEvent: {
+            /** @description Атрибути в порядку, у якому їх повернуло джерело. */
+            attributes: components["schemas"]["SourceEventAttribute"][];
+            /**
+             * Format: date-time
+             * @description Кінець, UTC; `null` — подія ще триває.
+             */
+            endUtc: null | string;
+            /** @description Незмінний ідентифікатор події в джерелі — ключ синхронізації. */
+            eventId: string;
+            /**
+             * Format: date-time
+             * @description Остання зміна в джерелі, UTC; `null` — джерело не дає.
+             */
+            modifiedUtc: null | string;
+            /** @description Назва події; не унікальна. */
+            name: null | string;
+            /** @description Ідентифікатор батьківської події; `null` — подія верхнього рівня. */
+            parentId: null | string;
+            /** @description Первинний елемент події; `null` — немає. */
+            primaryElementPath: null | string;
+            /**
+             * Format: date-time
+             * @description Початок, UTC.
+             */
+            startUtc: string;
+            /** @description Шаблон події. */
+            templateName: string;
+        };
+        /** @description Значення атрибута події: число <b>або</b> текст, ніколи обидва. */
+        SourceEventAttribute: {
+            /** @description Ім'я атрибута. */
+            name: string;
+            /** @description Звідки атрибут. */
+            scope: components["schemas"]["SourceEventAttributeScope"];
+            /** @description UOM джерела; `null` — джерело не назвало. */
+            sourceUnitSymbol: null | string;
+            /**
+             * Format: decimal
+             * @description Число в одиниці джерела.
+             */
+            valueNumeric: null | string;
+            /** @description Текст: цифровий стан, перелік, рядок, який не є числом. */
+            valueString: null | string;
+        };
+        /** @description Атрибут шаблону подій у каталозі. */
+        SourceEventAttributeDescriptor: {
+            /** @description Тип значення в термінах джерела. */
+            dataType: null | string;
+            /** @description Ім'я атрибута. */
+            name: string;
+            /** @description Звідки атрибут. */
+            scope: components["schemas"]["SourceEventAttributeScope"];
+            /** @description UOM джерела; `null` — безрозмірний або не названий. */
+            sourceUnitSymbol: null | string;
+        };
+        /**
+         * @description Де лежить атрибут події джерела (FEATURE-HSE301-VIEW §4.7.1, §4.7.3; HQ-18).
+         * @enum {unknown}
+         */
+        SourceEventAttributeScope: "Event" | "PrimaryElement";
+        /** @description Поле мапінгу подій «атрибут → колонка» у відповіді (§4.7.3). */
+        SourceEventFieldDto: {
+            /** @description Де лежить атрибут. */
+            attributeScope: components["schemas"]["SourceEventAttributeScope"];
+            /**
+             * Format: int32
+             * @description Ідентифікатор `ext.SourceEventFieldMap`.
+             */
+            id: number;
+            /** @description Ім'я атрибута з каталогу або `$start`/`$end`/`$name`. */
+            sourceAttribute: string;
+            /**
+             * Format: int32
+             * @description Одиниця атрибута в джерелі; `null` — без конверсії.
+             */
+            sourceUnitId: null | number;
+            /**
+             * Format: int32
+             * @description Колонка-ціль.
+             */
+            targetColumnDefId: number;
+            /**
+             * Format: int32
+             * @description Одиниця колонки; `null` — без конверсії.
+             */
+            targetUnitId: null | number;
+            /** @description Як значення лягає в колонку. */
+            valueKind: components["schemas"]["SourceEventValueKind"];
+            /** @description Явні відповідності значень (лише для SourceEventValueKind.ValueMap). */
+            values: components["schemas"]["SourceEventValueDto"][];
+        };
+        /** @description Поле у запиті на збереження мапінгу. */
+        SourceEventFieldInput: {
+            /** @description Де лежить атрибут. */
+            attributeScope: components["schemas"]["SourceEventAttributeScope"];
+            /** @description Атрибут з каталогу або `$start`/`$end`/`$name`. */
+            sourceAttribute: string;
+            /**
+             * Format: int32
+             * @description Одиниця джерела; `null` — без конверсії.
+             */
+            sourceUnitId: null | number;
+            /**
+             * Format: int32
+             * @description Колонка-ціль.
+             */
+            targetColumnDefId: number;
+            /**
+             * Format: int32
+             * @description Одиниця колонки; `null` — без конверсії.
+             */
+            targetUnitId: null | number;
+            /** @description Як значення лягає в колонку. */
+            valueKind: components["schemas"]["SourceEventValueKind"];
+            /** @description Явні відповідності; лише для SourceEventValueKind.ValueMap. */
+            values: null | components["schemas"]["SourceEventValueInput"][];
+        };
+        /**
+         * @description Стан зв'язку «подія джерела ↔ рядок» (`ext.SourceEventLink.Status`,
+         *     FEATURE-HSE301-VIEW §4.7.3–4.7.4).
+         * @enum {unknown}
+         */
+        SourceEventLinkStatus: "Synced" | "Open" | "Missing" | "PeriodClosed" | "PeriodChanged" | "PeriodNotOpen" | "Unmapped" | "RowLimit";
+        /** @description Мапінг подій джерела «шаблон подій → динамічна таблиця документа» (§4.7.3). */
+        SourceEventMapDto: {
+            /**
+             * Format: int64
+             * @description Документ ділянки, куди лягають події.
+             */
+            documentId: number;
+            /** @description Поля «атрибут → колонка». */
+            fields: components["schemas"]["SourceEventFieldDto"][];
+            /** @description Атрибут звуження; `null` — без звуження. */
+            filterAttribute: null | string;
+            filterScope: null | components["schemas"]["SourceEventAttributeScope"];
+            /** @description Значення звуження. */
+            filterValue: null | string;
+            /**
+             * Format: int32
+             * @description Ідентифікатор `ext.SourceEventMap`.
+             */
+            id: number;
+            /** @description Чи діє синхронізація за мапінгом. */
+            isActive: boolean;
+            /**
+             * Format: int32
+             * @description Сутність-шаблон подій.
+             */
+            sourceEntityId: number;
+            /**
+             * Format: int32
+             * @description Динамічна таблиця.
+             */
+            tableDefId: number;
+            /** @description Звідки береться об'єм (§4.7.5). */
+            volumeMode: components["schemas"]["SourceEventVolumeMode"];
+        };
+        /** @description Атрибут, який пробне читання подій має лишити (порожній перелік — усі). */
+        SourceEventProbeAttribute: {
+            /** @description Ім'я атрибута з каталогу шаблону. */
+            name: string;
+            /** @description Де лежить атрибут. */
+            scope: components["schemas"]["SourceEventAttributeScope"];
+        };
+        /** @description Пробне читання подій (HSE301 A6). */
+        SourceEventProbeRequest: {
+            /** @description Атрибути; порожньо чи `null` — усі, що дало джерело. */
+            attributes: null | components["schemas"]["SourceEventProbeAttribute"][];
+            /**
+             * Format: date-time
+             * @description Початок вікна; `null` — 30 днів назад.
+             */
+            fromUtc: null | string;
+            /**
+             * Format: int32
+             * @description Стеля подій; `null` — 20, не більше 100.
+             */
+            maxEvents: null | number;
+            /** @description Шаблон подій із каталогу. */
+            template: null | string;
+            /**
+             * Format: date-time
+             * @description Кінець вікна; `null` — «зараз».
+             */
+            toUtc: null | string;
+        };
+        /** @description Наслідок пробного читання подій. */
+        SourceEventProbeResult: {
+            /** @description Код часткової відмови адаптера; `null` — немає. */
+            errorCode: null | string;
+            /** @description Прочитані події. */
+            events: components["schemas"]["SourceEvent"][];
+            /**
+             * Format: date-time
+             * @description Вікно, яке читали, початок.
+             */
+            fromUtc: string;
+            /**
+             * Format: date-time
+             * @description Вікно, яке читали, кінець.
+             */
+            toUtc: string;
+            /** @description Подій було більше за стелю проби. */
+            truncated: boolean;
+        };
+        /** @description Рядок таблиці подій: зв'язок «подія джерела ↔ рядок документа» зі станом (HSE301 A6). */
+        SourceEventRowDto: {
+            /**
+             * Format: int64
+             * @description Документ мапінгу.
+             */
+            documentId: number;
+            /** @description Бізнес-ключ документа. */
+            documentKey: string;
+            /**
+             * Format: date-time
+             * @description Кінець у поясі проєкту.
+             */
+            endLocal: null | string;
+            /**
+             * Format: date-time
+             * @description Кінець події, UTC; `null` — подія триває.
+             */
+            endUtc: null | string;
+            /** @description Назва події. */
+            eventName: null | string;
+            /**
+             * Format: date-time
+             * @description Коли подію вперше побачено.
+             */
+            firstSeenAt: string;
+            /**
+             * Format: int64
+             * @description Ідентифікатор зв'язку.
+             */
+            id: number;
+            /** @description Коди колонок, лишених за людиною. */
+            keptManual: string[];
+            /**
+             * Format: date-time
+             * @description Коли її востаннє повернуло джерело.
+             */
+            lastSeenAt: string;
+            /**
+             * Format: date-time
+             * @description Останній прогін синхронізації.
+             */
+            lastSyncAt: string;
+            /**
+             * Format: int32
+             * @description Період рядка; `null` — рядка немає.
+             */
+            periodKey: null | number;
+            /** @description Ключ рядка (`EF-…`). */
+            rowKey: null | string;
+            /** @description ID події в джерелі. */
+            sourceEventId: string;
+            /**
+             * Format: int32
+             * @description Мапінг подій.
+             */
+            sourceEventMapId: number;
+            /**
+             * Format: date-time
+             * @description Остання зміна події в джерелі.
+             */
+            sourceModifiedUtc: null | string;
+            /**
+             * Format: date-time
+             * @description Початок у поясі проєкту (зі зсувом).
+             */
+            startLocal: string;
+            /**
+             * Format: date-time
+             * @description Початок події, UTC.
+             */
+            startUtc: string;
+            /** @description Стан синхронізації. */
+            status: components["schemas"]["SourceEventLinkStatus"];
+            /**
+             * Format: int64
+             * @description Екземпляр таблиці рядка.
+             */
+            tableInstanceId: null | number;
+            /** @description Пояс проєкту. */
+            timeZoneId: string;
+            /** @description Значення без відповідника в довіднику. */
+            unmapped: components["schemas"]["SourceEventUnmappedItem"][];
+        };
+        /** @description Шаблон подій джерела з атрибутами — для конфігуратора. */
+        SourceEventTemplate: {
+            /** @description Атрибути шаблону й первинного елемента. */
+            attributes: components["schemas"]["SourceEventAttributeDescriptor"][];
+            /** @description Ім'я шаблону. */
+            templateName: string;
+        };
+        /** @description Значення події, яке не вдалося зіставити із записом довідника (`UnmappedJson`). */
+        SourceEventUnmappedItem: {
+            /** @description Код колонки. */
+            column: string;
+            /** @description Значення джерела. */
+            value: null | string;
+        };
+        /** @description Явна відповідність «значення джерела → запис довідника» у відповіді (§4.7.3). */
+        SourceEventValueDto: {
+            /**
+             * Format: int32
+             * @description Ідентифікатор `ext.SourceEventValueMap`.
+             */
+            id: number;
+            /**
+             * Format: int64
+             * @description Запис довідника Lookup-колонки.
+             */
+            registryEntryId: number;
+            /** @description Значення атрибута в джерелі. */
+            sourceValue: string;
+        };
+        /** @description Явна відповідність значення у запиті на збереження мапінгу. */
+        SourceEventValueInput: {
+            /**
+             * Format: int64
+             * @description Запис довідника колонки.
+             */
+            registryEntryId: number;
+            /** @description Значення атрибута в джерелі. */
+            sourceValue: string;
+        };
+        /**
+         * @description Як значення атрибута події лягає в колонку
+         *     (`ext.SourceEventFieldMap.ValueKind`, FEATURE-HSE301-VIEW §4.7.3).
+         * @enum {unknown}
+         */
+        SourceEventValueKind: "Direct" | "LookupByCode" | "LookupByName" | "ValueMap";
+        /**
+         * @description Звідки береться об'єм події (`ext.SourceEventMap.VolumeMode`,
+         *     FEATURE-HSE301-VIEW §4.7.5, V-19 → `D-188`).
+         * @enum {unknown}
+         */
+        SourceEventVolumeMode: "None" | "EventAttribute" | "RowWindow";
         /** @description Наслідок пробного читання одного значення мапінгу (ФВ-13.17). */
         SourcePathProbeResult: {
             /** @description `false` — шлях є в каталозі джерела, але в пробному вікні
@@ -22551,6 +23580,20 @@ export interface components {
              * @description Пільговий строк після кінця року.
              */
             yearGraceOffsetDays: number;
+        };
+        /** @description Повна заміна налаштувань мапінгу подій; документ і таблиця лишаються. */
+        UpdateSourceEventMapCommand: {
+            /** @description Нові поля замість усіх наявних. */
+            fields: components["schemas"]["SourceEventFieldInput"][];
+            /** @description Атрибут звуження. */
+            filterAttribute: null | string;
+            filterScope: null | components["schemas"]["SourceEventAttributeScope"];
+            /** @description Значення звуження. */
+            filterValue: null | string;
+            /** @description Чи діє синхронізація за мапінгом (пауза — `false`). */
+            isActive: boolean;
+            /** @description Звідки береться об'єм. */
+            volumeMode: components["schemas"]["SourceEventVolumeMode"];
         };
         /** @description Запит на зміну одиниці. */
         UpdateUnitRequest: {
