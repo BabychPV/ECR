@@ -27,7 +27,8 @@ import '@fontsource/ibm-plex-sans/700.css';
 import '@fontsource/ibm-plex-mono/400.css';
 
 import '@mantine/core/styles.css';
-import '@mantine/dates/styles.css';
+// `@mantine/dates/styles.css` тут НЕМАЄ навмисно: він переїхав у лінивий чанк
+// поля дати (`shared/dates/DateInputWithStyles.ts`, бюджет маршруту `D-132`).
 import '@mantine/notifications/styles.css';
 import './shared/theme/tokens.css';
 

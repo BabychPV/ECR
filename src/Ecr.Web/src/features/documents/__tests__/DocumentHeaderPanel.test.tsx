@@ -230,7 +230,7 @@ afterEach(() => {
  * `PeriodsPage.reopenWindow.test.tsx`).
  */
 beforeAll(async () => {
-  await import('@mantine/dates');
+  await import('@/shared/dates/DateInputWithStyles');
 });
 
 describe('DocumentHeaderPanel: порожній перелік полів', () => {

@@ -83,6 +83,10 @@ import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { showApiError } from '@/shared/ui/notify';
 import { useRowHeight } from '@/shared/theme/preferences';
 import { t } from '@/shared/i18n';
+// ⚠ Порядок стилів збережений: `cell-states.css` (раніше — у `App.tsx`) іде
+// РАНІШЕ за `cellEditors.css`, як і було в єдиному бандлі. Причина, чому файл
+// тут, а не у вхідному чанку, — бюджет маршруту (`D-132`).
+import '@/shared/theme/cell-states.css';
 import './cellEditors.css';
 
 /**

@@ -57,7 +57,7 @@ const EmptyLookupEntries: readonly RegistryEntryDto[] = [];
  * КОЖНОГО документа — навіть того, у якого серед полів шапки дати немає
  * взагалі. */
 const DateInput = lazy(async () => {
-  const module = await import('@mantine/dates');
+  const module = await import('@/shared/dates/DateInputWithStyles');
 
   return { default: module.DateInput };
 });

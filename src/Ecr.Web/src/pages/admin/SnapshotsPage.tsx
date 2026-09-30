@@ -68,7 +68,7 @@ const SnapshotRowsModal = lazy(() => import('@/features/reports/SnapshotRowsModa
  * зрізів, нема за що — рівно той аргумент, яким винесений Monaco.
  */
 const DateInput = lazy(async () => {
-  const module = await import('@mantine/dates');
+  const module = await import('@/shared/dates/DateInputWithStyles');
 
   return { default: module.DateInput };
 });

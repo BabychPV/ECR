@@ -96,7 +96,7 @@ function formatDurationMs(durationMs: number | null): string {
  * `/admin/sources` (той самий прийом, що й `SnapshotsPage.tsx`).
  */
 const DateInput = lazy(async () => {
-  const module = await import('@mantine/dates');
+  const module = await import('@/shared/dates/DateInputWithStyles');
 
   return { default: module.DateInput };
 });

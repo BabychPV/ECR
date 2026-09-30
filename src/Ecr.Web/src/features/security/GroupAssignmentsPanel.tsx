@@ -17,6 +17,7 @@ import { EcrApiError, apiFetch } from '@/api/client';
 import type { components } from '@/api/schema';
 import type { RoleView } from '@/api/types';
 import { DateInput } from '@mantine/dates';
+import '@mantine/dates/styles.css';
 import { ConfirmModal } from '@/shared/ui/ConfirmModal';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { showApiError, showDone } from '@/shared/ui/notify';

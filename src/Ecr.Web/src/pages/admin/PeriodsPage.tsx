@@ -64,7 +64,7 @@ import { fetchAllProjects } from '@/features/projects/allProjects';
  * дивиться календар періодів, нема за що.
  */
 const DateInput = lazy(async () => {
-  const module = await import('@mantine/dates');
+  const module = await import('@/shared/dates/DateInputWithStyles');
 
   return { default: module.DateInput };
 });

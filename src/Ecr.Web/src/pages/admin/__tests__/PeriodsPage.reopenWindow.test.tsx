@@ -213,7 +213,7 @@ async function openReopen(): Promise<Session> {
  * монтується через `lazy()` сторінки — прогрівається модуль, не обхід.
  */
 beforeAll(async () => {
-  await import('@mantine/dates');
+  await import('@/shared/dates/DateInputWithStyles');
 });
 
 afterEach(() => {
