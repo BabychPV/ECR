@@ -421,6 +421,7 @@ public static class DependencyInjection
         services.AddSingleton<IReportViewStatus, Reporting.ReportViewStatus>();
         services.AddScoped<IReportViewGenerator, Reporting.ReportViewGenerator>();
         services.AddSingleton<ISecretProvider, ConfigurationSecretProvider>();
+        services.AddSingleton<Ecr.Application.Ports.IEndpointNetwork, Integration.EndpointNetwork>();
 
         // ⚠ Diff імпорту живе в РОЗПОДІЛЕНОМУ кеші: перегляд і застосування —
         // два запити, і другий може потрапити на інший інстанс.

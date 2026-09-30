@@ -171,7 +171,8 @@ public sealed class SaveDataSourceHandler(
     IUnitOfWork uow,
     IAuditWriter audit,
     ICurrentUser currentUser,
-    IClock clock)
+    IClock clock,
+    IEndpointNetwork? network = null)
 {
     /// <summary>Право на керування інтеграцією (`02-contracts.md` §9).</summary>
     public const string Permission = "Integration.Manage";
@@ -353,6 +354,20 @@ public sealed class SaveDataSourceHandler(
         RequireNoCredentials(address, "endpoint");
         RequireNoCredentials(spare, "secondaryEndpoint");
 
+        if (transport == ExternalTransport.PiWebApi)
+        {
+            var bound = secrets.Find(SecretNamePrefix + code);
+            var negotiate = string.IsNullOrWhiteSpace(bound)
+                            || string.Equals(bound.Trim(), "Negotiate", StringComparison.OrdinalIgnoreCase);
+
+            await RequireAllowedEndpointAsync(address, "endpoint", negotiate, ct).ConfigureAwait(false);
+
+            if (spare is { Length: > 0 })
+            {
+                await RequireAllowedEndpointAsync(spare, "secondaryEndpoint", negotiate, ct).ConfigureAwait(false);
+            }
+        }
+
         if (await store.IsCodeTakenAsync(code, exceptId, ct).ConfigureAwait(false))
         {
             throw ListDataSourcesHandler.Invalid(
@@ -360,6 +375,42 @@ public sealed class SaveDataSourceHandler(
         }
 
         return new Parsed(new LocalizedText(named), address, spare, parallel);
+    }
+
+    /// <summary>Адреса PI Web API проходить політику SSRF (<see cref="DataSourceEndpointPolicy"/>).</summary>
+    private async Task RequireAllowedEndpointAsync(string address, string field, bool negotiate, CancellationToken ct)
+    {
+        var verdict = DataSourceEndpointPolicy.CheckAddress(address, negotiate, network?.AllowedHosts);
+
+        if (verdict == EndpointVerdict.Allowed && network is not null
+            && DataSourceEndpointPolicy.HostNeedingResolution(address) is { } name)
+        {
+            // Кожна A/AAAA-адреса; приватні за ім'ям дозволені (корпоративний AF).
+            var resolved = await network.ResolveAsync(name, ct).ConfigureAwait(false);
+
+            if (resolved.Any(DataSourceEndpointPolicy.IsBlocked))
+            {
+                verdict = EndpointVerdict.HostForbidden;
+            }
+        }
+
+        var key = verdict switch
+        {
+            EndpointVerdict.Allowed => null,
+            EndpointVerdict.Scheme => "err.ECR-REQ-0422.dataSourceEndpointScheme",
+            EndpointVerdict.HostForbidden => "err.ECR-REQ-0422.dataSourceEndpointHostForbidden",
+            EndpointVerdict.HostNotAllowed => "err.ECR-REQ-0422.dataSourceEndpointHostNotAllowed",
+            _ => "err.ECR-REQ-0422.dataSourceEndpointMalformed",
+        };
+
+        if (key is not null)
+        {
+            // ⚠ Відмова називає ПОЛЕ, а не вміст адреси.
+            throw new BusinessRuleException(
+                ErrorCodes.RequestInvalid,
+                $"Адресу джерела відхилено політикою ({verdict}).",
+                new Dictionary<string, object?> { ["messageKey"] = key, ["field"] = field });
+        }
     }
 
     /// <summary>

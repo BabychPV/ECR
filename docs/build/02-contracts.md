@@ -2951,6 +2951,21 @@ public interface ISecretProvider
 }
 ```
 
+#### `IEndpointNetwork`
+
+Мережеві відомості для політики адреси джерела PI Web API
+(`DataSourceEndpointPolicy`, захист від SSRF): allowlist хостів з
+`PiWebApi:AllowedHosts` (порожній — без обмеження, діє лише блок-лист
+loopback/link-local/metadata/unspecified) і розв'язання імені в A/AAAA.
+
+```csharp
+public interface IEndpointNetwork
+{
+    public IReadOnlyList<string> AllowedHosts { get; }
+    public Task<IReadOnlyList<IPAddress>> ResolveAsync(string host, CancellationToken ct);
+}
+```
+
 #### `ISnapshotWorkbookWriter`
 
 Складає книгу `.xlsx` зі зрізу звітності (`R7`, `D-52a`). Окремий порт, а не

@@ -4698,7 +4698,14 @@ USING (VALUES
     (N'rowWindow.problem.duplicateSelector',           N'en', N'Two sources have the same selector value.', 1),
     -- ru/kz — окремою порцією `COLL:rowwindow-crud` у блоці I18N нижче.
     -- COLL:rowwindow-crud ── кінець секції ──
-    (N'health.sources.notRegistered',          N'en', N'The collection store is not registered in the container.', 1),
+    -- COLL:ssrf ── Політика адреси джерела PI Web API: схема, заборонений хост, allowlist (`DataSourceEndpointPolicy`) ──
+    (N'err.ECR-REQ-0422.dataSourceEndpointScheme',       N'en', N'The data source address must use http or https.', 1),
+    (N'err.ECR-REQ-0422.dataSourceEndpointHostForbidden', N'en', N'This host is not allowed for a data source: loopback, link-local, metadata, unspecified and (for Windows authentication) private IP addresses are refused.', 1),
+    (N'err.ECR-REQ-0422.dataSourceEndpointHostNotAllowed', N'en', N'This host is not in the list of allowed data source hosts (PiWebApi:AllowedHosts).', 1),
+    (N'err.ECR-REQ-0422.dataSourceEndpointMalformed',    N'en', N'The data source address is empty or malformed: use a full http(s) address without a user name.', 1),
+    -- ru/kz — окремою порцією `COLL:ssrf` у блоці I18N нижче.
+    -- COLL:ssrf ── кінець секції ──
+    (N'health.sources.notRegistered',         N'en', N'The collection store is not registered in the container.', 1),
     (N'health.sources.noneActive',              N'en', N'No active collection sources.', 1),
     (N'health.sources.failedCount',             N'en', N'Sources with a failed last run: {count}.', 1),
     (N'health.sources.gapsCount',                N'en', N'Sources with a coverage gap: {count}.', 1),
@@ -12424,6 +12431,23 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:rowwindow-crud ── кінець секції ──
+
+-- COLL:ssrf ── ru/kz політики адреси джерела PI Web API; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-REQ-0422.dataSourceEndpointScheme', N'ru', N'Адрес источника данных должен использовать http или https.'),
+    (N'err.ECR-REQ-0422.dataSourceEndpointScheme', N'kz', N'Деректер көзінің мекенжайы http немесе https пайдалануы тиіс.'),
+    (N'err.ECR-REQ-0422.dataSourceEndpointHostForbidden', N'ru', N'Этот хост не допускается для источника данных: loopback, link-local, metadata, неопределённые и (для Windows-аутентификации) частные IP-адреса отклоняются.'),
+    (N'err.ECR-REQ-0422.dataSourceEndpointHostForbidden', N'kz', N'Бұл хост деректер көзі үшін рұқсат етілмейді: loopback, link-local, metadata, анықталмаған және (Windows аутентификациясы үшін) жеке IP-мекенжайлар қабылданбайды.'),
+    (N'err.ECR-REQ-0422.dataSourceEndpointHostNotAllowed', N'ru', N'Этого хоста нет в списке разрешённых хостов источников данных (PiWebApi:AllowedHosts).'),
+    (N'err.ECR-REQ-0422.dataSourceEndpointHostNotAllowed', N'kz', N'Бұл хост деректер көздерінің рұқсат етілген хосттар тізімінде жоқ (PiWebApi:AllowedHosts).'),
+    (N'err.ECR-REQ-0422.dataSourceEndpointMalformed', N'ru', N'Адрес источника данных пуст или некорректен: укажите полный адрес http(s) без имени пользователя.'),
+    (N'err.ECR-REQ-0422.dataSourceEndpointMalformed', N'kz', N'Деректер көзінің мекенжайы бос немесе қате: пайдаланушы атынсыз толық http(s) мекенжайын көрсетіңіз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:ssrf ── кінець секції ──
 
 -- COLL:d212-policy ── ru/kz політики синку довідника (D-212 PR-2); власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)
