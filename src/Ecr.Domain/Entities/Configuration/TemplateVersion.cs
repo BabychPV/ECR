@@ -69,7 +69,13 @@ public sealed class TemplateVersion : Entity<int>
                 "ECR-TMPL-0409",
                 $"Версію {Version} вже опубліковано або виведено з обігу (стан {Status}). " +
                 "Повторна публікація неможлива: опублікована версія структурно незмінна, " +
-                "а зміни вносяться клонуванням у нову версію (ФВ-7.1).");
+                "а зміни вносяться клонуванням у нову версію (ФВ-7.1).",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-TMPL-0409.alreadyPublishedOrDeprecated",
+                    ["version"] = Version,
+                    ["status"] = Status.ToString(),
+                });
         }
 
         Status = TemplateVersionStatus.Published;
@@ -96,7 +102,14 @@ public sealed class TemplateVersion : Entity<int>
             throw new DomainException(
                 "ECR-TMPL-0409",
                 $"Очікувалася презентаційна ревізія {PresentationRevision + 1}, отримано {newRevision}. " +
-                "Розбіжність означає паралельну правку, яку ця сесія не бачила.");
+                "Розбіжність означає паралельну правку, яку ця сесія не бачила.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-TMPL-0409.presentationRevisionConflict",
+                    ["expectedRevision"] = (PresentationRevision + 1)
+                        .ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["actualRevision"] = newRevision.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
         }
 
         PresentationRevision = newRevision;
@@ -130,7 +143,12 @@ public sealed class TemplateVersion : Entity<int>
             throw new DomainException(
                 "ECR-TMPL-0409",
                 $"Вивести з обігу можна лише опубліковану версію; поточний стан {Status}. " +
-                "Чернетку виводити нема від чого — вона ще нікуди не потрапила.");
+                "Чернетку виводити нема від чого — вона ще нікуди не потрапила.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-TMPL-0409.deprecateRequiresPublished",
+                    ["status"] = Status.ToString(),
+                });
         }
 
         Status = TemplateVersionStatus.Deprecated;
@@ -154,7 +172,18 @@ public sealed class TemplateVersion : Entity<int>
                 "ECR-TMPL-0409",
                 $"Версія {Version} у стані {Status} структурно заморожена. " +
                 "Структурні зміни вносяться клонуванням у нову версію (ФВ-7.1); " +
-                "без клону вже подані документи мовчки змінили б свою структуру.");
+                "без клону вже подані документи мовчки змінили б свою структуру.",
+                new Dictionary<string, object?>
+                {
+                    // ⚠ Єдине джерело цього факту: усі структурні обробники
+                    // (SaveSheetDefHandler, SaveColumnDefHandler, SaveTableDefHandler,
+                    // SaveRowDefHandler, SaveFormulaDefHandler, SaveValidationRuleHandler,
+                    // PeriodAccessRuleHandlers, TableRelationHandlers) кличуть саме
+                    // цей метод — один ключ на всіх.
+                    ["messageKey"] = "err.ECR-TMPL-0409.structurallyFrozen",
+                    ["version"] = Version,
+                    ["status"] = Status.ToString(),
+                });
         }
     }
 
@@ -175,7 +204,13 @@ public sealed class TemplateVersion : Entity<int>
             throw new DomainException(
                 "ECR-TMPL-0409",
                 $"Аркуш з кодом {sheet.Code} у версії {Version} уже існує: код — це ідентичність, " +
-                "на нього посилається адреса PUT-запиту.");
+                "на нього посилається адреса PUT-запиту.",
+                new Dictionary<string, object?>
+                {
+                    // Той самий контракт, що AddHeaderField нижче.
+                    ["messageKey"] = "err.ECR-TMPL-0409.sheetCodeTaken",
+                    ["sheetCode"] = sheet.Code,
+                });
         }
 
         _sheets.Add(sheet);

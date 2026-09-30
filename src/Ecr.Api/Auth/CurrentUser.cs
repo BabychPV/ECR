@@ -46,6 +46,16 @@ public sealed class CurrentUser(IHttpContextAccessor accessor) : ICurrentUser
     /// У локального користувача таких заявок немає, і перелік
     /// порожній: це не помилка, а нормальний стан (`P-02`).
     /// </remarks>
+    /// <inheritdoc />
+    public long? SimulationSessionId
+    {
+        get
+        {
+            var value = Principal?.FindFirstValue(AuthenticationSetup.SimulationSessionClaim);
+            return long.TryParse(value, CultureInfo.InvariantCulture, out var id) ? id : null;
+        }
+    }
+
     public IReadOnlyList<string> GroupSids =>
         Principal?.FindAll(ClaimTypes.GroupSid).Select(c => c.Value).ToArray() ?? [];
 

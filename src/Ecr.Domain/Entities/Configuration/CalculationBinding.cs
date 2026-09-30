@@ -51,7 +51,12 @@ public sealed class CalculationBinding : Entity<int>
             throw new DomainException(
                 "ECR-CFG-0422",
                 $"Прив'язка виходу «{OutputCode}» без предиката зіставлення: "
-                + "порожній рядок не є ні «вся таблиця» (це `{}`), ні звуженням.");
+                + "порожній рядок не є ні «вся таблиця» (це `{}`), ні звуженням.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CFG-0422.calculationBindingMatchRequired",
+                    ["outputCode"] = OutputCode,
+                });
         }
 
         MatchJson = matchJson;

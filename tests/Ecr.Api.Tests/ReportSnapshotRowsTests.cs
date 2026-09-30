@@ -51,7 +51,9 @@ public sealed class ReportSnapshotRowsTests(SqlServerFixture sql)
 
         var path = new Uri($"/api/v1/reports/snapshots/{snapshotId}/rows?limit=10", UriKind.Relative);
 
-        using var owner = await SignedInAsync(app, document.ProjectId, "Report.ViewRegulatory").ConfigureAwait(true);
+        // ✎ 2026-09-29: вміст зрізу — ще й `Report.ViewSnapshot` (рішення людини, ReportViewerRoleTests).
+        using var owner = await SignedInAsync(
+            app, document.ProjectId, "Report.ViewRegulatory", "Report.ViewSnapshot").ConfigureAwait(true);
         var granted = await owner.GetAsync(path).ConfigureAwait(true);
         Assert.True(granted.IsSuccessStatusCode, $"{granted.StatusCode}: {app.ErrorsText}");
 

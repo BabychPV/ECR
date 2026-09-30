@@ -84,6 +84,41 @@ public sealed class Period : Entity<int>
         ComputedCloseAt = ToUtc(PeriodEnd.AddDays(policy.HardCloseOffsetDays), siteTimeZone);
     }
 
+    /// <summary>
+    /// Межі періоду в UTC: <c>[опівніч periodStart, опівніч periodEnd + 1)</c> у
+    /// поясі майданчика (D-68, D16-03).
+    /// </summary>
+    /// <param name="periodStart">Перший день періоду (<see cref="PeriodStart"/>).</param>
+    /// <param name="periodEnd">Останній день періоду, включно (<see cref="PeriodEnd"/>).</param>
+    /// <param name="siteTimeZone">Пояс майданчика (проєкту).</param>
+    /// <remarks>
+    /// ⛔ Те саме перетворення <see cref="ToUtc"/>, що й у
+    /// <see cref="RecomputeBoundaries"/>, а не друга арифметика: згортка PI і
+    /// переходи станів не мають права мати різну думку про те, де кінчається
+    /// місяць. Статичний, бо споживачі (<c>CollectionJob</c>,
+    /// <c>MaterializeCollectedDataJob</c>) читають лише дати й пояс проєкцією,
+    /// без завантаження сутності.
+    ///
+    /// ⚠ Межі в UTC, а не в поясі сервера й не в UTC-датах: точка о 23:30
+    /// 31 січня місцевого часу належить січню, хоча в UTC це вже може бути
+    /// інша доба.
+    /// </remarks>
+    public static UtcRange UtcBounds(DateOnly periodStart, DateOnly periodEnd, TimeZoneInfo siteTimeZone)
+    {
+        ArgumentNullException.ThrowIfNull(siteTimeZone);
+
+        return new UtcRange(ToUtc(periodStart, siteTimeZone), ToUtc(periodEnd.AddDays(1), siteTimeZone));
+    }
+
+    /// <summary>Напіввідкритий інтервал <c>[StartUtc, EndUtc)</c> у UTC.</summary>
+    /// <param name="StartUtc">Початок, включно.</param>
+    /// <param name="EndUtc">Кінець, виключно.</param>
+    public readonly record struct UtcRange(DateTime StartUtc, DateTime EndUtc)
+    {
+        /// <summary>Чи перетинає інтервал напіввідкритий інтервал <c>[fromUtc, toUtc)</c>.</summary>
+        public bool Overlaps(DateTime fromUtc, DateTime toUtc) => StartUtc < toUtc && fromUtc < EndUtc;
+    }
+
     /// <summary>Опівніч указаної дати в поясі майданчика, переведена в UTC.</summary>
     private static DateTime ToUtc(DateOnly date, TimeZoneInfo siteTimeZone)
         => TimeZoneInfo.ConvertTimeToUtc(
@@ -162,7 +197,7 @@ public sealed class Period : Entity<int>
     /// <param name="until">До якого моменту діє тимчасове відкриття.</param>
     /// <param name="reason">Причина; зберігається і потрапляє в аудит.</param>
     /// <param name="utcNow">Момент операції.</param>
-    /// <exception cref="DomainException">Період не закритий або причина порожня.</exception>
+    /// <exception cref="DomainException">Період не закритий, причина порожня або дедлайн не в майбутньому.</exception>
     public void Reopen(DateTime until, string reason, DateTime utcNow)
     {
         if (State != PeriodState.Closed)
@@ -187,9 +222,44 @@ public sealed class Period : Entity<int>
                 new Dictionary<string, object?> { ["messageKey"] = "err.ECR-PRD-0422.reopenReasonRequired" });
         }
 
+        // ⛔ Аудит 2026-09-28, B6. Дедлайн у минулому (або рівно «зараз») давав
+        // стан `Grace` і запис аудиту «відкрито», а `Effective()` одразу рахував
+        // `Closed` і запис відмовляв: журнал казав «відкрито», а фактично ні.
+        // Порівняння — ПІСЛЯ приведення до UTC: інакше `Kind=Local` порівнювався
+        // б із UTC за самими тиками.
+        var deadline = AsUtc(until);
+        if (deadline <= utcNow)
+        {
+            throw new DomainException(
+                "ECR-PRD-0422",
+                $"Дедлайн відкриття {deadline:O} не пізніший за поточний момент {utcNow:O}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-PRD-0422.reopenUntilInPast",
+                    ["until"] = deadline.ToString("O", System.Globalization.CultureInfo.InvariantCulture),
+                });
+        }
+
         State = PeriodState.Grace;
-        ReopenedUntil = until;
+        ReopenedUntil = deadline;
         ReopenReason = reason;
         StateChangedAt = utcNow;
     }
+
+    /// <summary>Приводить момент до UTC за його <see cref="DateTime.Kind"/>.</summary>
+    /// <remarks>
+    /// ⛔ Аудит 2026-09-28, B6. <c>"…T18:00:00+05:00"</c> з API десеріалізується
+    /// як <c>Kind=Local</c> (перераховане в пояс СЕРВЕРА) і записувалось як є, а
+    /// читається з <c>datetime2</c> як UTC — дедлайн зсувався на зміщення
+    /// сервера. <c>Local</c> переводиться в UTC; <c>Unspecified</c> читається як
+    /// UTC — так само, як його віддає журнал і як нормалізує
+    /// <c>CollectionRunsController</c>. Тут, у домені, а не в обробнику: той самий
+    /// метод кличе й системний Reopen (<c>PeriodStateJob</c>, D-204).
+    /// </remarks>
+    private static DateTime AsUtc(DateTime value) => value.Kind switch
+    {
+        DateTimeKind.Utc => value,
+        DateTimeKind.Local => value.ToUniversalTime(),
+        _ => DateTime.SpecifyKind(value, DateTimeKind.Utc),
+    };
 }

@@ -35,8 +35,8 @@ import { expect, test, type Page, type TestInfo } from '@playwright/test';
  */
 
 /** Облікові записи стенда (`tools/e2e-stand.ps1`); існують лише в тимчасовій базі. */
-const Operator = { user: 'e2e-operator', password: 'E2E-Operator-Work-2026!' };
-const Admin = { user: 'e2e-admin', password: 'E2E-Admin-Work-2026!' };
+const Operator = { user: 'e2e-operator', password: 'E2E-Oper8tor-Work-2026!' };
+const Admin = { user: 'e2e-admin', password: 'E2E-Adm1n-Work-2026!' };
 
 /** Період і документ приходять зі стенда — зашите число ламалося б у січні. */
 const PeriodKey = process.env['ECR_E2E_PERIOD'] ?? '';
@@ -131,10 +131,10 @@ interface Watcher {
    * збереження комірки.
    *
    * ⛔ Усі екранні ознаки збереження минущі, і саме тому крок `cell-saved`
-   * роками не мав чого перевіряти. Кнопка `Save` вимкнена, щойно `pending`
-   * спорожніє (`DocumentGrid.tsx`: `disabled={pending.size === 0}`), а
-   * `onPaste` кличе `save(edits)` НЕГАЙНО — тобто після успішної вставки
-   * кнопка законно вимкнена. Індикатор `[data-save-status="saved"]` живе
+   * роками не мав чого перевіряти. ✎ `U-16`: кнопки збереження після
+   * успішної правки на екрані немає ВЗАГАЛІ — збереження автоматичне, а
+   * кнопка («Retry save (N)») з'являється лише після відмови сервера
+   * (`DocumentGrid.tsx`). Індикатор `[data-save-status="saved"]` живе
    * близько двох секунд і встигає зникнути між кроками. Запит же в журналі
    * мережі лишається назавжди — і його наявність із кодом < 400 і є
    * відповіддю на питання «комірку справді записано?».

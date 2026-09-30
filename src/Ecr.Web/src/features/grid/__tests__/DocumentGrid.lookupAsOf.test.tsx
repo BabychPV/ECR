@@ -109,6 +109,7 @@ function show(): void {
         <DocumentGrid
           documentId={1}
           tableInstanceId={1}
+          tableDefId={1}
           periodKey={PeriodKey}
           readOnly={false}
           allowsDynamicRows={false}

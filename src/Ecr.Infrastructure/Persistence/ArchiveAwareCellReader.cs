@@ -77,6 +77,7 @@ public sealed class ArchiveAwareCellReader(EcrDbContext db)
                 on new { P = cell.PeriodKeyValue, I = cell.TableRowId }
                 equals new { P = row.PeriodKeyValue, I = row.Id }
             where row.TableInstanceId == tableInstanceId && row.PeriodKeyValue == periodKey.Value
+            orderby cell.TableRowId, cell.ColumnDefId
             select new ArchivedCell(
                 cell.PeriodKeyValue, cell.TableRowId, cell.ColumnDefId, cell.TableDefId,
                 cell.ValueString, cell.ValueNumeric, cell.ValueDate, cell.ValueBool,
@@ -93,6 +94,12 @@ public sealed class ArchiveAwareCellReader(EcrDbContext db)
     /// Читається сирим SQL: <c>arc.*</c> немає в моделі EF навмисно (різниця
     /// фізична — columnstore і окрема файлова група), і заводити дзеркальні
     /// сутності означало б мати два описи однієї структури, які розійдуться.
+    /// <para>
+    /// ⛔ <c>ValueRegistryEntryId</c> у <c>arc.CellValue</c> — <c>int</c>, а в
+    /// <see cref="ArchivedCell"/> — <c>long?</c>; сирий SQL не розширює тип сам
+    /// (<c>InvalidCastException</c> на першій довідниковій комірці), тому
+    /// <c>CAST … AS bigint</c> (<c>ArchivedRegistryValueReadTests</c>).
+    /// </para>
     /// </remarks>
     private async Task<List<CellRecord>> ArchivedAsync(
         long tableInstanceId, PeriodKey periodKey, CancellationToken ct)
@@ -102,17 +109,245 @@ public sealed class ArchiveAwareCellReader(EcrDbContext db)
                 SELECT TOP ({MaxCells})
                        c.PeriodKey, c.TableRowId, c.ColumnDefId, c.TableDefId,
                        c.ValueString, c.ValueNumeric, c.ValueDate, c.ValueBool,
-                       c.ValueRegistryEntryId, c.ValueUnitId, c.IsCalculated, c.IsEmpty
+                       CAST(c.ValueRegistryEntryId AS bigint) AS ValueRegistryEntryId,
+                       c.ValueUnitId, c.IsCalculated, c.IsEmpty
                 FROM arc.CellValue c
                 JOIN arc.TableRow r
                   ON r.PeriodKey = c.PeriodKey AND r.Id = c.TableRowId
                 WHERE r.TableInstanceId = {tableInstanceId}
                   AND r.PeriodKey = {periodKey.Value}
+                ORDER BY c.TableRowId, c.ColumnDefId
                 """)
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
         return rows.ConvertAll(Map);
+    }
+
+    /// <summary>
+    /// Комірки зрізу з архіву за самим ідентифікатором екземпляра — без
+    /// відомого наперед періоду.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ На відміну від <see cref="ReadAsync"/>, викликач тут (F-13,
+    /// <c>NormalizedCellStore.ReadSliceAsync</c>) НЕ знає <c>PeriodKey</c>:
+    /// гарячий шлях бере його з <c>doc.TableInstance</c> через join, а той
+    /// рядок truncate'ний разом із партицією тим самим
+    /// <c>arc.usp_ArchiveYear</c>, що й <c>doc.CellValue</c>. Тому період
+    /// читається окремим дешевим запитом до <c>arc.TableInstance</c>, перш
+    /// ніж іти в <c>arc.CellValue</c> — а сам запит комірок УЖЕ є
+    /// (<see cref="ArchivedAsync"/>), і дублювати його тут не потрібно.
+    /// </remarks>
+    public async Task<IReadOnlyList<CellRecord>> ReadArchivedSliceAsync(long tableInstanceId, CancellationToken ct)
+    {
+        var periodKeys = await db.Database
+            .SqlQuery<int>($"""
+                SELECT TOP (1) PeriodKey AS Value
+                FROM arc.TableInstance
+                WHERE Id = {tableInstanceId}
+                """)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        if (periodKeys.Count == 0)
+        {
+            return [];
+        }
+
+        return await ArchivedAsync(tableInstanceId, new PeriodKey(periodKeys[0]), ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Те саме кількома екземплярами; екземпляр без жодного рядка в архіві в
+    /// результат не потрапляє — той самий контракт, що й у
+    /// <c>NormalizedCellStore.ReadSlicesAsync</c>.
+    /// </summary>
+    /// <remarks>
+    /// ✎ P3: ОДИН запит на весь пакет. Доти — <see cref="ReadArchivedSliceAsync"/>
+    /// у циклі: <c>SELECT TOP 1 PeriodKey FROM arc.TableInstance</c> і окремий
+    /// запит комірок на КОЖЕН екземпляр, тобто 2N звернень
+    /// (<c>ArchivedSlicesQueryCountTests</c>: 6 на 3 і 24 на 12 екземплярах).
+    /// <para>
+    /// ⚠ Результат той самий, що поштучний: період екземпляра — з
+    /// <c>arc.TableInstance</c> (<c>MIN</c> — детермінований вибір там, де
+    /// поштучний <c>TOP (1)</c> без порядку брав будь-який; <c>Id</c> береться з
+    /// послідовності, тож рядок на екземпляр один); ті самі поля й порядок
+    /// комірок; стеля <see cref="MaxCells"/> — на КОЖЕН екземпляр
+    /// (<c>ROW_NUMBER</c>), як і в поштучного.
+    /// </para>
+    /// <para>
+    /// ⚠ Перелік ідентифікаторів — одним JSON-параметром (<c>OPENJSON</c>), як у
+    /// <c>MethodologyStore.GetCalculationFreshnessAsync</c>: ліміту в 2100
+    /// параметрів немає, порціонувати нічого.
+    /// </para>
+    /// </remarks>
+    public async Task<IReadOnlyDictionary<long, IReadOnlyList<CellRecord>>> ReadArchivedSlicesAsync(
+        IReadOnlyList<long> tableInstanceIds, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(tableInstanceIds);
+        var result = new Dictionary<long, IReadOnlyList<CellRecord>>();
+        if (tableInstanceIds.Count == 0)
+        {
+            return result;
+        }
+
+        var idsJson = System.Text.Json.JsonSerializer.Serialize(tableInstanceIds.Distinct());
+
+        var rows = await db.Database
+            .SqlQuery<ArchivedSliceCell>($"""
+                WITH ti AS (
+                    SELECT t.Id, MIN(t.PeriodKey) AS PeriodKey
+                    FROM arc.TableInstance t
+                    WHERE t.Id IN (SELECT CAST(j.value AS bigint) FROM OPENJSON({idsJson}) AS j)
+                    GROUP BY t.Id
+                ),
+                cells AS (
+                    SELECT ti.Id AS TableInstanceId,
+                           c.PeriodKey, c.TableRowId, c.ColumnDefId, c.TableDefId,
+                           c.ValueString, c.ValueNumeric, c.ValueDate, c.ValueBool,
+                           CAST(c.ValueRegistryEntryId AS bigint) AS ValueRegistryEntryId,
+                           c.ValueUnitId, c.IsCalculated, c.IsEmpty,
+                           ROW_NUMBER() OVER (PARTITION BY ti.Id ORDER BY c.TableRowId, c.ColumnDefId) AS Rn
+                    FROM ti
+                    JOIN arc.TableRow r
+                      ON r.TableInstanceId = ti.Id AND r.PeriodKey = ti.PeriodKey
+                    JOIN arc.CellValue c
+                      ON c.PeriodKey = r.PeriodKey AND c.TableRowId = r.Id
+                )
+                SELECT TableInstanceId, PeriodKey, TableRowId, ColumnDefId, TableDefId,
+                       ValueString, ValueNumeric, ValueDate, ValueBool,
+                       ValueRegistryEntryId, ValueUnitId, IsCalculated, IsEmpty
+                FROM cells
+                WHERE Rn <= {MaxCells}
+                ORDER BY TableInstanceId, TableRowId, ColumnDefId
+                """)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var byInstance = rows
+            .GroupBy(r => r.TableInstanceId)
+            .ToDictionary(g => g.Key, g => g.Select(r => Map(r.ToCell())).ToList());
+
+        // Порядок ключів — порядок запиту, як у поштучного циклу.
+        foreach (var tableInstanceId in tableInstanceIds)
+        {
+            if (byInstance.TryGetValue(tableInstanceId, out var cells) && cells.Count > 0)
+            {
+                result[tableInstanceId] = cells;
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>Екземпляри таблиць документа з архіву за період.</summary>
+    /// <remarks>
+    /// ⚠ Сирий SQL, а не LINQ: <c>arc.*</c> немає в моделі EF навмисно (той
+    /// самий коментар, що й на <see cref="ArchivedAsync"/>). Джойн на
+    /// <c>doc.Document</c>/<c>doc.Project</c>, а не на <c>arc.*</c>-дзеркала
+    /// цих таблиць — їх і не існує: документ і проєкт не архівуються, лише
+    /// табличні дані (<c>12-archive-tables.sql</c>).
+    /// </remarks>
+    public async Task<IReadOnlyList<TableInstanceRef>> ReadArchivedTableInstancesAsync(
+        long documentId, PeriodKey periodKey, CancellationToken ct)
+        => await db.Database
+            .SqlQuery<TableInstanceRef>($"""
+                SELECT t.Id AS TableInstanceId, t.DocumentId, t.TableDefId,
+                       p.TemplateVersionId, t.PeriodKey
+                FROM arc.TableInstance t
+                JOIN doc.Document d ON d.Id = t.DocumentId
+                JOIN doc.Project p ON p.Id = d.ProjectId
+                WHERE t.DocumentId = {documentId} AND t.PeriodKey = {periodKey.Value}
+                ORDER BY t.Id
+                """)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+    /// <summary>Чи має документ хоч один архівний екземпляр таблиці в цьому періоді.</summary>
+    /// <remarks>
+    /// ⚠ Дешевий <c>EXISTS</c> (<c>TOP (1)</c>), а не повний
+    /// <see cref="ReadArchivedTableInstancesAsync"/>: викликач
+    /// (<c>RowStore.EnsureTableInstancesAsync</c>) хоче лише «архівовано чи
+    /// ні», а не самі рядки.
+    /// </remarks>
+    public async Task<bool> HasArchivedTableInstancesAsync(long documentId, PeriodKey periodKey, CancellationToken ct)
+    {
+        var found = await db.Database
+            .SqlQuery<int>($"""
+                SELECT TOP (1) 1 AS Value
+                FROM arc.TableInstance
+                WHERE DocumentId = {documentId} AND PeriodKey = {periodKey.Value}
+                """)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        return found.Count > 0;
+    }
+
+    /// <summary>Ключі й ідентифікатори рядків з архіву одного екземпляра таблиці.</summary>
+    /// <remarks>
+    /// ⚠ Спільна точка для <see cref="ReadArchivedRowVersionsAsync"/> нижче:
+    /// той самий перелік рядків із дефолтним значенням замість поля, якого немає
+    /// в <c>arc.TableRow</c>. <see cref="ReadArchivedOrphanFlagsAsync"/> читає
+    /// власну колонку і тому має свій запит (D4 аудиту).
+    /// </remarks>
+    public async Task<IReadOnlyList<(string RowKey, long Id)>> ReadArchivedRowIdsAsync(
+        long tableInstanceId, PeriodKey periodKey, CancellationToken ct)
+    {
+        var rows = await db.Database
+            .SqlQuery<ArchivedRowIdentity>($"""
+                SELECT r.RowKey, r.Id
+                FROM arc.TableRow r
+                WHERE r.TableInstanceId = {tableInstanceId} AND r.PeriodKey = {periodKey.Value}
+                ORDER BY r.Id
+                """)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        return [.. rows.Select(r => (r.RowKey, r.Id))];
+    }
+
+    /// <summary>Версії рядків з архіву — завжди порожній рядок.</summary>
+    /// <remarks>
+    /// ⚠ <c>arc.TableRow</c> НЕ МАЄ колонки <c>RowVersion</c>
+    /// (<c>12-archive-tables.sql</c>): архів копіює лише поля, потрібні для
+    /// читання даних, а не для оптимістичного блокування запису. Заархівовані
+    /// проєкти не редагуються (<c>EditRules.cs</c>,
+    /// <c>EditDenyReason.ProjectArchived</c>), тож версії рядка немає кому
+    /// звіряти. Порожній рядок — свідомий дефолт, а не забутий стовпець: він
+    /// НЕ є валідним Base64 <c>rowversion</c> (той завжди 8 байт і
+    /// непорожній), тож звірка <c>baseVersion</c> на архівному рядку
+    /// провалиться явно, а не збіжиться випадково.
+    /// </remarks>
+    public async Task<IReadOnlyList<(string RowKey, string RowVersion)>> ReadArchivedRowVersionsAsync(
+        long tableInstanceId, PeriodKey periodKey, CancellationToken ct)
+    {
+        var rows = await ReadArchivedRowIdsAsync(tableInstanceId, periodKey, ct).ConfigureAwait(false);
+        return [.. rows.Select(r => (r.RowKey, string.Empty))];
+    }
+
+    /// <summary>Ознаки «осиротілості» рядків з архіву — ті, що були в момент архівації.</summary>
+    /// <remarks>
+    /// D4 аудиту: <c>arc.TableRow.IsOrphaned</c> — копія <c>doc.TableRow.IsOrphaned</c>
+    /// (<c>usp_ArchiveYear</c>), і розархівація повертає її назад. Раніше колонки не
+    /// було і тут стояв жорсткий <c>false</c> — архівний перегляд ховав позначку,
+    /// яку гарячий показав би. Нічний <c>OrphanScanJob</c> архіву не торкається,
+    /// тож значення «заморожене» на момент архівації.
+    /// </remarks>
+    public async Task<IReadOnlyList<(long Id, bool IsOrphaned)>> ReadArchivedOrphanFlagsAsync(
+        long tableInstanceId, PeriodKey periodKey, CancellationToken ct)
+    {
+        var rows = await db.Database
+            .SqlQuery<ArchivedRowOrphanFlag>($"""
+                SELECT r.Id, r.IsOrphaned
+                FROM arc.TableRow r
+                WHERE r.TableInstanceId = {tableInstanceId} AND r.PeriodKey = {periodKey.Value}
+                ORDER BY r.Id
+                """)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        return [.. rows.Select(r => (r.Id, r.IsOrphaned))];
     }
 
     /// <summary>Приводить рядок будь-якої зі схем до контрактного вигляду.</summary>
@@ -151,4 +386,32 @@ public sealed class ArchiveAwareCellReader(EcrDbContext db)
         int? ValueUnitId,
         bool IsCalculated,
         bool IsEmpty);
+
+    /// <summary>Комірка архівного пакета разом з екземпляром, якому належить.</summary>
+    private sealed record ArchivedSliceCell(
+        long TableInstanceId,
+        int PeriodKey,
+        long TableRowId,
+        int ColumnDefId,
+        int TableDefId,
+        string? ValueString,
+        decimal? ValueNumeric,
+        DateTime? ValueDate,
+        bool? ValueBool,
+        long? ValueRegistryEntryId,
+        int? ValueUnitId,
+        bool IsCalculated,
+        bool IsEmpty)
+    {
+        // ⚠ Метод, а не властивість: ad-hoc-тип `SqlQuery` мапить властивості.
+        public ArchivedCell ToCell() => new(
+            PeriodKey, TableRowId, ColumnDefId, TableDefId, ValueString, ValueNumeric, ValueDate, ValueBool,
+            ValueRegistryEntryId, ValueUnitId, IsCalculated, IsEmpty);
+    }
+
+    /// <summary>Ключ і ідентифікатор рядка — форма проєкції архівного <c>arc.TableRow</c>.</summary>
+    private sealed record ArchivedRowIdentity(string RowKey, long Id);
+
+    /// <summary>Ідентифікатор рядка й позначка осиротілості — проєкція <c>arc.TableRow</c>.</summary>
+    private sealed record ArchivedRowOrphanFlag(long Id, bool IsOrphaned);
 }

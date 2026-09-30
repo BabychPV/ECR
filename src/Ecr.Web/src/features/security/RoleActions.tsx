@@ -5,18 +5,23 @@ import { EcrApiError, apiFetch } from '@/api/client';
 import type { components } from '@/api/schema';
 import type { RoleIdResponse, RoleView } from '@/api/types';
 import { showApiError, showDone } from '@/shared/ui/notify';
+import { problemText } from '@/shared/ui/problemText';
 import { t } from '@/shared/i18n';
 
 // ⚠ Прямо зі схеми: `api/types.ts` — спільний файл поза межами цієї підзадачі.
 type RenameRoleRequest = components['schemas']['RenameRoleRequest'];
 
-/** Роль не видаляється: на ній тримаються призначення або гранти. */
+/** Роль не видаляється: на ній тримаються призначення, гранти, кроки маршрутів чи правила доступу. */
 const ROLE_CONFLICT = 'ECR-SEC-0409';
 
 /** Що тримається на ролі, якщо відмова саме про це. */
 export interface RoleUsage {
   assignments: number;
   grants: number;
+  /** Кроки маршрутів погодження з цією роллю (V-09). */
+  approvalSteps: number;
+  /** Правила доступу до періоду, прив'язані до ролі. */
+  periodAccessRules: number;
 }
 
 /**
@@ -34,7 +39,21 @@ export function roleUsage(error: unknown): RoleUsage | null {
   const assignments = Number(error.problem.extensions2?.['assignments']);
   const grants = Number(error.problem.extensions2?.['grants']);
 
-  return Number.isFinite(assignments) && Number.isFinite(grants) ? { assignments, grants } : null;
+  if (!Number.isFinite(assignments) || !Number.isFinite(grants)) return null;
+
+  // ⚠ Два нові лічильники (V-09) — нулем, якщо сервер їх не назвав: відмова
+  // «роль зайнята» без них лишається тією самою відмовою, а не іншою.
+  const count = (key: string): number => {
+    const value = Number(error.problem.extensions2?.[key]);
+    return Number.isFinite(value) ? value : 0;
+  };
+
+  return {
+    assignments,
+    grants,
+    approvalSteps: count('approvalSteps'),
+    periodAccessRules: count('periodAccessRules'),
+  };
 }
 
 type Action = 'clone' | 'rename' | 'delete';
@@ -145,7 +164,12 @@ export function RoleActions({ role }: { role: RoleView }): JSX.Element {
           <Text size="sm">{t('security.deleteRoleConfirm', { code: role.code })}</Text>
         ) : (
           <Alert color="statusWarning" title={t('security.roleDeleteRefused')}>
-            <Text size="sm">{remove.error.message}</Text>
+            {/* ⛔ `X-08`: тут стояв `remove.error.message` — сирий `detail`
+                сервера. Тепер лише локалізований (`problemText`); без нього
+                заголовок відмови й бейджі нижче вже кажуть, що заважає. */}
+            {problemText(remove.error).detail !== null && (
+              <Text size="sm">{problemText(remove.error).detail}</Text>
+            )}
             {usage !== null && (
               <Group gap="xs" mt="xs">
                 <Badge color="statusWarning">
@@ -154,6 +178,16 @@ export function RoleActions({ role }: { role: RoleView }): JSX.Element {
                 <Badge color="statusWarning">
                   {t('security.grants')}: {usage.grants}
                 </Badge>
+                {usage.approvalSteps > 0 && (
+                  <Badge color="statusWarning">
+                    {t('security.roleApprovalSteps')}: {usage.approvalSteps}
+                  </Badge>
+                )}
+                {usage.periodAccessRules > 0 && (
+                  <Badge color="statusWarning">
+                    {t('security.rolePeriodAccessRules')}: {usage.periodAccessRules}
+                  </Badge>
+                )}
               </Group>
             )}
           </Alert>

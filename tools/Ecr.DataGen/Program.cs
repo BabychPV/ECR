@@ -70,6 +70,17 @@ internal static class Program
                   --workers N       скільки ОДНОЧАСНИХ робітників (типово за темпом). --workers 1
                                     серіалізує все — контрольний прогін, у якому фальшивих 409
                                     не може бути за побудовою
+                  --samples-out F   (--http-gate) кожен запит вікна рядком CSV: вид, код, завершення
+                                    від старту вікна (с), затримка й обслуговування (мс) — щоб
+                                    рахувати p50/p95 у довільному під-вікні (I2 ФВ-9.8)
+
+                  Перевизначення профілю (I2 ФВ-9.8, замір ПРД-13; без них — профіль шаблону):
+                  --tables N        таблиць на документ
+                  --median-rows N   медіана рядків у таблиці
+                  --max-rows N      максимум рядків (хвіст)
+                  --no-gate-table   без контрольної таблиці 500×60
+                  --formula-columns остання колонка кожної таблиці — формула [C2] + [C3] + [C4]
+                  --parallel N      генерувати N документів одночасно (--cells тоді не діє)
 
                 ⚠ Цільовий сценарій гейта — 300 документів при заповненості 90%:
                   замовник називає ≥200 на рік, і саме на 300 мають виконуватися бюджети.
@@ -118,6 +129,7 @@ internal static class Program
             TargetRps = options.LoadRps,
             Operators = options.Operators,
             Workers = options.Workers,
+            SamplesOut = options.SamplesOut,
         };
 
         var result = await benchmark.RunAsync(CancellationToken.None).ConfigureAwait(false);
@@ -217,7 +229,23 @@ internal static class Program
     /// <returns>Завжди <c>0</c>: генерація або відпрацювала, або кинула виняток.</returns>
     private static async Task<int> GenerateAsync(Options options)
     {
-        var profile = new DistributionProfile();
+        // ⚠ I2 ФВ-9.8: перевизначення профілю — лише явними ключами. Без них
+        // профіль лишається тим, що знятий із чинного шаблону.
+        var defaults = new DistributionProfile();
+        var profile = defaults with
+        {
+            TablesPerDocument = options.Tables ?? defaults.TablesPerDocument,
+            MedianRowsPerTable = options.MedianRows ?? defaults.MedianRowsPerTable,
+            MaxRowsPerTable = options.MaxRows ?? defaults.MaxRowsPerTable,
+        };
+
+        if (options.Tables is not null || options.MedianRows is not null || options.MaxRows is not null
+            || options.NoGateTable || options.FormulaColumns)
+        {
+            Console.WriteLine(Fmt(
+                $"⚠ Профіль ПЕРЕВИЗНАЧЕНО: таблиць {profile.TablesPerDocument}, медіана рядків {profile.MedianRowsPerTable}, максимум {profile.MaxRowsPerTable}, контрольна 500×60 — {(options.NoGateTable ? "ні" : "так")}, формульна колонка — {(options.FormulaColumns ? "так" : "ні")}."));
+        }
+
         var db = CreateContext(options.ConnectionString);
         var loader = new BulkCellLoader(options.ConnectionString, batchSize: 10_000);
 
@@ -235,6 +263,50 @@ internal static class Program
 
         long rows = 0, cells = 0;
         var random = new Random(Seed: 20260904);
+
+        // ⚠ I2 ФВ-9.8: `--parallel N` — документи генеруються N потоками (власний
+        // контекст, завантажувач і генератор чисел на потік). Один потік дає
+        // ~40 тис. комірок/с — 108 млн за ~45 хв; для заміру це недоречно довго.
+        // Межа за комірками (`--cells`) у паралельному режимі не діє.
+        // ⚠ Виміряно 2026-09-29: виграш МАЛИЙ — `BulkCellLoader` бере TABLOCK на
+        // `doc.CellValue`, і потоки стоять у LCK_M_X один за одним; паралелиться
+        // лише вставка рядків і каркаса. Більше 2 потоків сенсу не має.
+        if (options.Parallel > 1)
+        {
+            var next = 0;
+            var done = 0;
+            var gate = new object();
+            var workers = Enumerable.Range(0, options.Parallel).Select(w => Task.Run(async () =>
+            {
+                await using var wdb = CreateContext(options.ConnectionString);
+                var wloader = new BulkCellLoader(options.ConnectionString, batchSize: 10_000);
+                var wrandom = new Random(Seed: 20260904 + w);
+                int docIndex;
+                while ((docIndex = Interlocked.Increment(ref next)) <= options.Documents)
+                {
+                    var (r, c) = await GenerateDocumentAsync(
+                        wdb, wloader, scaffold, profile, options, docIndex, wrandom).ConfigureAwait(false);
+                    wdb.ChangeTracker.Clear();
+                    lock (gate)
+                    {
+                        rows += r;
+                        cells += c;
+                        done++;
+                        if (done % 10 == 0 || done == options.Documents)
+                        {
+                            Console.WriteLine(Fmt(
+                                $"  {done}/{options.Documents}: рядків {rows}, комірок {cells}, {DateTime.UtcNow - started:hh\\:mm\\:ss}"));
+                        }
+                    }
+                }
+            })).ToArray();
+
+            await Task.WhenAll(workers).ConfigureAwait(false);
+            await BuildStatisticsAsync(db).ConfigureAwait(false);
+            await PrintSizeAsync(db, rows, cells).ConfigureAwait(false);
+            await db.DisposeAsync().ConfigureAwait(false);
+            return 0;
+        }
 
         // ⚠ Межа за комірками, а не лише за документами: BR-07 названий у
         // рядках `doc.CellValue`. Обидві межі діють одночасно — генерація
@@ -314,9 +386,10 @@ internal static class Program
         // під який записаний критерій №1 BR-07. Профіль її не дає ніколи
         // (хвіст — 471 рядок), тому без неї бюджет «< 600 мс на 500×60»
         // перевірявся б на зрізі в тридцять разів меншому.
-        for (var t = 1; t <= profile.TablesPerDocument + 1; t++)
+        var tableCount = profile.TablesPerDocument + (options.NoGateTable ? 0 : 1);
+        for (var t = 1; t <= tableCount; t++)
         {
-            var isGateTable = t == profile.TablesPerDocument + 1;
+            var isGateTable = !options.NoGateTable && t == profile.TablesPerDocument + 1;
 
             var table = new TableDef(
                 sheet.Id, EcrCode.Create($"T{t}_{tag}"), Name($"Table {t}"), t,
@@ -328,18 +401,44 @@ internal static class Program
                 ? profile.GateSliceColumns
                 : random.Next(profile.MinColumns, profile.MaxColumns + 1);
 
+            // ⚠ I2 ФВ-9.8 (`--formula-columns`): ОСТАННЯ колонка — обчислювана
+            // (`Formula`), її рахує формула шаблону `[C2] + [C3] + [C4]`. Без
+            // формул повний перерахунок нічого не рахує й не пише, і замір
+            // ПРД-13 показав би лише накладні черги. Колонка не заповнюється:
+            // її значення дає сам перерахунок.
+            var formulaColumn = options.FormulaColumns && !isGateTable && columnCount >= 5
+                ? columnCount
+                : 0;
+
+            ColumnDef? computed = null;
             for (var c = 1; c <= columnCount; c++)
             {
+                var type = c == 1 ? CellDataType.String
+                    : c == formulaColumn ? CellDataType.Formula
+                    : CellDataType.Decimal;
                 var column = new ColumnDef(
-                    table.Id, EcrCode.Create($"C{c}"), Name($"C{c}"), c,
-                    c == 1 ? CellDataType.String : CellDataType.Decimal);
+                    table.Id, EcrCode.Create($"C{c}"), Name($"C{c}"), c, type);
                 db.Add(column);
+                if (c == formulaColumn)
+                {
+                    computed = column;
+                }
             }
 
             await db.SaveChangesAsync().ConfigureAwait(false);
 
+            if (computed is not null)
+            {
+                var formula = new FormulaDef(
+                    table.Id, FormulaScope.Column, "[C2] + [C3] + [C4]", ExpressionDialect.Template);
+                formula.AssignColumn(computed.Id);
+                formula.SetEvaluationOrder(t);
+                db.Add(formula);
+                await db.SaveChangesAsync().ConfigureAwait(false);
+            }
+
             var ids = await db.ColumnDefs.AsNoTracking()
-                .Where(x => x.TableDefId == table.Id)
+                .Where(x => x.TableDefId == table.Id && (computed == null || x.Id != computed.Id))
                 .OrderBy(x => x.Ordinal)
                 .Select(x => x.Id)
                 .ToListAsync().ConfigureAwait(false);
@@ -544,6 +643,13 @@ internal static class Program
     /// <param name="LoadRps">Цільовий темп операцій.</param>
     /// <param name="Operators">Скільки операторів б'є в один документ.</param>
     /// <param name="Workers">Скільки одночасних робітників; <c>0</c> — за темпом.</param>
+    /// <param name="Tables">Перевизначення кількості таблиць на документ (I2).</param>
+    /// <param name="MedianRows">Перевизначення медіани рядків (I2).</param>
+    /// <param name="MaxRows">Перевизначення максимуму рядків (I2).</param>
+    /// <param name="NoGateTable">Без контрольної таблиці 500×60 (I2).</param>
+    /// <param name="FormulaColumns">Остання колонка кожної таблиці — формула шаблону (I2).</param>
+    /// <param name="SamplesOut">Файл CSV із сирими вибірками навантаження (I2).</param>
+    /// <param name="Parallel">Скільки документів генерувати одночасно (I2).</param>
     private sealed record Options(
         int Documents,
         long TargetCells,
@@ -558,7 +664,14 @@ internal static class Program
         string BootstrapPassword,
         int LoadRps,
         int Operators,
-        int Workers)
+        int Workers,
+        int? Tables = null,
+        int? MedianRows = null,
+        int? MaxRows = null,
+        bool NoGateTable = false,
+        bool FormulaColumns = false,
+        string? SamplesOut = null,
+        int Parallel = 1)
     {
         /// <summary>Розбирає аргументи; <c>null</c>, якщо немає рядка підключення.</summary>
         /// <param name="args">Аргументи командного рядка.</param>
@@ -620,8 +733,21 @@ internal static class Program
                     ?? "Dev-Bootstrap-2026!",
                 LoadRps: Read(map, "load-rps", 25),
                 Operators: Read(map, "operators", 3),
-                Workers: Read(map, "workers", 0));
+                Workers: Read(map, "workers", 0),
+                Tables: ReadOptional(map, "tables"),
+                MedianRows: ReadOptional(map, "median-rows"),
+                MaxRows: ReadOptional(map, "max-rows"),
+                NoGateTable: flags.Contains("no-gate-table"),
+                FormulaColumns: flags.Contains("formula-columns"),
+                SamplesOut: map.GetValueOrDefault("samples-out"),
+                Parallel: Read(map, "parallel", 1));
         }
+
+        private static int? ReadOptional(Dictionary<string, string> map, string key)
+            => map.TryGetValue(key, out var raw)
+               && int.TryParse(raw, CultureInfo.InvariantCulture, out var value)
+                ? value
+                : null;
 
         private static int Read(Dictionary<string, string> map, string key, int fallback)
             => map.TryGetValue(key, out var raw)

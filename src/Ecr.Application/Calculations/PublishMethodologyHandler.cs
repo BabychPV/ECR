@@ -1,4 +1,4 @@
-﻿// src/Ecr.Application/Calculations/PublishMethodologyHandler.cs
+// src/Ecr.Application/Calculations/PublishMethodologyHandler.cs
 using System.Globalization;
 using System.Text.Json;
 using Ecr.Application.Common;
@@ -74,6 +74,14 @@ public sealed class PublishMethodologyHandler(
 
         var version = methodology.Versions.Single(v => v.Id == methodologyVersionId);
 
+        // ⛔ F-14 (четвертий раунд UX): «чотири ока» — ПЕРШОЮ відмовою, до золотого
+        // набору. Правило живе в домені (`MethodologyVersion.Publish`), але той
+        // стоїть у самому кінці, і автор, що публікує свою версію, спершу
+        // отримував відмову золотого тесту («Period not found · ECR-PRD-0404»), а
+        // про справжню причину дізнавався лише після того, як виправляв тести.
+        // Доменну перевірку не знято: вона лишається останньою лінією.
+        RejectAuthor(version, userId);
+
         // ⛔ Дата набуття чинності обов'язкова і перевіряється ПЕРШОЮ. Без неї
         // версія не має місця в часі: незрозуміло, які періоди рахувати нею, а
         // які — попередньою, і `VersionOn` не має відповіді. У схемі це
@@ -91,14 +99,26 @@ public sealed class PublishMethodologyHandler(
                 });
         }
 
+        // ⛔ V-18: правила відбору рядків — ДО золотого набору. Версія, чиї
+        // правила не збігаються ні з чим або збігаються не в тому порядку,
+        // проходила б публікацію з зеленим тестом: тест рахує формули, а не те,
+        // ЯКІ рядки документа до них дійдуть. Тут ловиться й те, що збережено
+        // до появи перевірки при збереженні.
+        await CheckRulesAsync(methodologyVersionId, ct).ConfigureAwait(false);
+
+        // ⛔ B-13: тест без періоду — людська відмова з назвою тесту ДО прогону.
+        // Доти модуль падав глибоко всередині з `ECR-PRD-0404` «Періоду 0 для
+        // документа 0 не існує…» — правда, але не про те, що має виправити автор.
+        var testCases = await methodologies.GetTestCasesAsync(methodologyVersionId, ct).ConfigureAwait(false);
+        RequireTestPeriods(testCases);
+
         // Diff рахується ДО публікації: після неї попередня версія вже не та,
         // що була чинною, і порівнювати стало б нема з чим.
         var previous = methodology.VersionOn(from.AddDays(-1));
-        var diff = await BuildDiffAsync(methodology, version, previous, ct).ConfigureAwait(false);
+        var diff = await BuildDiffAsync(methodology, version, previous, testCases, ct).ConfigureAwait(false);
 
         // Зелений тест — не прапорець, а факт: усі випадки золотого набору
         // зійшлися в межах допуску (ФВ-9.12, ФВ-13.7).
-        var testCases = await methodologies.GetTestCasesAsync(methodologyVersionId, ct).ConfigureAwait(false);
         var verdicts = await JudgeAsync(methodology, version, testCases, ct).ConfigureAwait(false);
         var greenTest = GoldenSet.IsGreen(verdicts);
 
@@ -171,13 +191,16 @@ public sealed class PublishMethodologyHandler(
             .ResolveImportsAsync(methodologyVersionId, effectiveFrom, ct)
             .ConfigureAwait(false);
 
-        var problems = new List<string>();
+        var problems = new List<PublishProblem>();
         problems.AddRange(await LibraryProblemsAsync(methodology, methodologyVersionId, ct).ConfigureAwait(false));
         problems.AddRange(imports
             .Where(library => library.MethodologyVersionId is null)
-            .Select(library =>
+            .Select(library => PublishProblem.Of(
+                "publish.problem.importNoVersion",
                 $"Імпортована методологія «{library.MethodologyCode}» не має версії, чинної на "
-                + $"{effectiveFrom:yyyy-MM-dd}: її формули невидимі."));
+                + $"{effectiveFrom:yyyy-MM-dd}: її формули невидимі.",
+                ("code", library.MethodologyCode),
+                ("date", effectiveFrom.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)))));
 
         if (formulas.Count == 0)
         {
@@ -230,6 +253,19 @@ public sealed class PublishMethodologyHandler(
                 resolution.Edges));
         }
 
+        // ⛔ HSE301 L: посилання в бібліотеку ОБЧИСЛЮЄТЬСЯ — модуль рахує формулу бібліотеки в
+        // контексті рядка викликача. Тож перевіряється те саме замикання, яке рахуватиме
+        // прогін (`MethodologyLibraryClosure`), на дату чинності: цикл імпортів, режими,
+        // область, аргументи.
+        var libraries = dependencies.Count == 0
+            ? null
+            : await MethodologyLibraryClosure
+                .LoadAsync(methodologies, formulaEngine, methodology.Id, methodologyVersionId, formulas, effectiveFrom, ct)
+                .ConfigureAwait(false);
+
+        problems.AddRange(await ImportCycleAsync(methodology, imports, effectiveFrom, ct).ConfigureAwait(false));
+        problems.AddRange(LibraryProblems(version, formulas, [.. parsed.Select(p => p.Root)], byCode, libraries));
+
         var constants = await methodologies
             .GetConstantsAsync(methodologyVersionId, ct).ConfigureAwait(false);
         var outputs = await methodologies
@@ -237,17 +273,28 @@ public sealed class PublishMethodologyHandler(
 
         RejectExtensionFunctions(parsed, version.NumericMode);
 
+        // ⛔ HSE301 A3a (D-175, D-176): область, видимість і «вихід раз на рядок».
+        // Рушій на такій версії не впав би, а мовчки дав би коефіцієнт без речовини
+        // як число рядка — тому це відмова публікації, а не помилка прогону.
+        RejectScopeViolations(formulas, [.. parsed.Select(p => p.Root)], constants, outputs);
+
         // ⛔ Лінія 1 захисту від мовчазного null: аргумент, який формула
         // вживає, мусить відповідати колонці таблиці, до якої прив'язана
         // методологія — інакше збірка (`CalculationInputBuilder`) не знайде
         // звідки його взяти, і розрахунок «успішно» порахує порожньо.
-        await CheckArgumentColumnsAsync(methodology.Id, parsed, ct).ConfigureAwait(false);
+        // ⛔ HSE301 L: разом з аргументами формул бібліотеки із замикання — вони читають
+        // рядок ВИКЛИКАЧА, і колонки там бракуватиме так само (у рантаймі — #ARG).
+        await CheckArgumentColumnsAsync(methodology.Id, [.. parsed, .. LibraryFormulas(libraries)], ct)
+            .ConfigureAwait(false);
 
         // ⚠ Попередження НЕ валять публікацію (№05 §7): «оголошено,
         // не вжито» чинна система допускала, і ламати через це міграцію не можна.
         // Вони йдуть у відповідь публікації, а не в журнал: той, хто публікує,
         // має побачити їх у ту саму мить, а не знайти через тиждень у логах.
         var warnings = new List<string>();
+
+        // ⛔ V-18: невідома константа — іменна відмова, а не рядок у «N проблем».
+        MethodologyPublishChecks.CheckUnknownConstants(parsed, constants);
 
         problems.AddRange(MethodologyPublishChecks.Check(
             parsed,
@@ -262,18 +309,25 @@ public sealed class PublishMethodologyHandler(
         if (!ordering.IsSuccess)
         {
             var byId = formulas.ToDictionary(f => f.Id, f => f.Code);
-            var cycleLength = ordering.CyclePath?.Count ?? 0;
+            string NameOf(int id) => byId.TryGetValue(id, out var code)
+                ? code
+                : id.ToString(CultureInfo.InvariantCulture);
+
+            // ⛔ V-18: шлях циклу ЗАМКНЕНИЙ — `[A, B, A]` (`TopologicalSorter`),
+            // і `Count` рахував перший вузол двічі: «3 formula(s) involved» на
+            // цикл із двох. Рахуються РІЗНІ формули, а шлях іде в текст
+            // поіменно — інакше методолог шукає цикл сам.
+            var path = ordering.CyclePath ?? [];
+            var cycleLength = path.Distinct().Count();
 
             throw new BusinessRuleException(
                 "ECR-TMPL-4221",
-                Ecr.Expressions.Graph.CycleDescription.Describe(
-                    ordering.CyclePath,
-                    id => byId.TryGetValue(id, out var code) ? code : id.ToString(
-                        System.Globalization.CultureInfo.InvariantCulture)),
+                Ecr.Expressions.Graph.CycleDescription.Describe(ordering.CyclePath, NameOf),
                 new Dictionary<string, object?>
                 {
                     ["messageKey"] = "err.ECR-TMPL-4221.formulaCycle",
                     ["cycleLength"] = cycleLength.ToString(CultureInfo.InvariantCulture),
+                    ["cyclePath"] = string.Join(" → ", path.Select(NameOf)),
                 });
         }
 
@@ -358,6 +412,140 @@ public sealed class PublishMethodologyHandler(
     }
 
     /// <summary>
+    /// Перевірки області формул і видимості (HSE301 A3a, <c>D-175</c>, <c>D-176</c>).
+    /// </summary>
+    /// <param name="formulas">Формули версії.</param>
+    /// <param name="roots">Корені розібраних виразів у тому самому порядку; <c>null</c> — не розібралася.</param>
+    /// <param name="constants">Константи версії — усі кандидати.</param>
+    /// <param name="outputs">Оголошені виходи версії.</param>
+    /// <exception cref="BusinessRuleException">
+    /// <c>ECR-CALC-0422</c>: <c>visibleFormulaNoUnit</c>, <c>rowScopeReferencesSubstance</c>,
+    /// <c>rowOutputFromSubstanceFormula</c>.
+    /// </exception>
+    /// <remarks>
+    /// <list type="bullet">
+    /// <item>Видима формула мусить мати одиницю: вона пишеться рядком
+    /// <c>calc.CalculationResult</c>, а результат без одиниці заборонений (ФВ-16.6).
+    /// Текстова формула одиниці мати не може (<c>textFormulaUnit</c>), тож видимою бути
+    /// теж не може — одна перевірка закриває обидва випадки.</item>
+    /// <item>Row-формула не посилається на Substance-формулу своєї версії, на константу,
+    /// задану хоч одним кандидатом по речовині, і не кличе <c>SUBSTANCE(…)</c>
+    /// (FEATURE-HSE301-VIEW §6.1). Рушій рахує її один раз, БЕЗ речовини: такі посилання
+    /// дали б <c>#REF</c> або коефіцієнт «ні для кого». ⚠ Транзитивність — наслідок,
+    /// а не окремий обхід: кожна Row-формула сама посилається лише на Row-формули.</item>
+    /// <item>Вихід «раз на рядок» (<c>IsPerSubstance = false</c>) мусить іти з Row-формули:
+    /// у Substance-формули N значень, і яке з них — «число рядка», сказати нема як.</item>
+    /// </list>
+    /// ⚠ Поіменна відмова з першою знахідкою, а не рядок у переліку проблем — за зразком
+    /// <c>CheckUnknownConstants</c>: ключ каталогу названо в §6.1, і клієнт показує його як є.
+    /// </remarks>
+    private static void RejectScopeViolations(
+        IReadOnlyList<MethodologyFormula> formulas,
+        IReadOnlyList<Ecr.Expressions.Ast.AstNode?> roots,
+        IReadOnlyList<MethodologyConstant> constants,
+        IReadOnlyList<MethodologyOutput> outputs)
+    {
+        foreach (var formula in formulas.Where(f => f.IsVisible && f.OutputUnitId is null))
+        {
+            throw new BusinessRuleException(
+                "ECR-CALC-0422",
+                $"Формула «{formula.Code}» позначена видимою, але не має одиниці результату: "
+                + "проміжне значення пишеться результатом, а результат без одиниці заборонений (ФВ-16.6).",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0422.visibleFormulaNoUnit",
+                    ["formula"] = formula.Code,
+                });
+        }
+
+        var scopes = formulas.ToDictionary(f => f.Code, f => f.Scope, StringComparer.OrdinalIgnoreCase);
+        var perSubstanceConstants = constants
+            .Where(c => c.SubstanceEntryId is not null)
+            .Select(c => c.Code)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        for (var i = 0; i < formulas.Count; i++)
+        {
+            if (formulas[i].Scope != MethodologyFormulaScope.Row || roots[i] is not { } root)
+            {
+                continue;
+            }
+
+            if (SubstanceReference(root, scopes, perSubstanceConstants) is { } reference)
+            {
+                throw new BusinessRuleException(
+                    "ECR-CALC-0422",
+                    $"Формула «{formulas[i].Code}» рахується раз на рядок (Scope = Row), але посилається на "
+                    + $"«{reference}», що має значення лише для речовини. Зробіть «{formulas[i].Code}» "
+                    + "формулою речовини або приберіть посилання.",
+                    new Dictionary<string, object?>
+                    {
+                        ["messageKey"] = "err.ECR-CALC-0422.rowScopeReferencesSubstance",
+                        ["formula"] = formulas[i].Code,
+                        ["reference"] = reference,
+                    });
+            }
+        }
+
+        foreach (var output in outputs.Where(o => !o.IsPerSubstance))
+        {
+            if (scopes.TryGetValue(output.Code, out var scope) && scope != MethodologyFormulaScope.Row)
+            {
+                throw new BusinessRuleException(
+                    "ECR-CALC-0422",
+                    $"Вихід «{output.Code}» пишеться раз на рядок, але його формула рахується для кожної "
+                    + "речовини: котре з її значень є числом рядка, невідомо. Зробіть формулу Row або "
+                    + "пишіть вихід на кожну речовину.",
+                    new Dictionary<string, object?>
+                    {
+                        ["messageKey"] = "err.ECR-CALC-0422.rowOutputFromSubstanceFormula",
+                        ["output"] = output.Code,
+                    });
+            }
+        }
+    }
+
+    /// <summary>
+    /// Перше посилання виразу, що має значення лише для речовини; <c>null</c> — таких немає.
+    /// </summary>
+    /// <param name="node">Вузол виразу Row-формули.</param>
+    /// <param name="scopes">Області формул версії за кодом.</param>
+    /// <param name="perSubstanceConstants">Коди констант, заданих хоч одним кандидатом по речовині.</param>
+    private static string? SubstanceReference(
+        Ecr.Expressions.Ast.AstNode node,
+        Dictionary<string, MethodologyFormulaScope> scopes,
+        HashSet<string> perSubstanceConstants)
+    {
+        switch (node)
+        {
+            case Ecr.Expressions.Ast.SymbolReferenceNode { Kind: Ecr.Expressions.Ast.SymbolKind.Formula } formula
+                when scopes.TryGetValue(formula.Name, out var scope) && scope != MethodologyFormulaScope.Row:
+                return "!" + formula.Name;
+
+            case Ecr.Expressions.Ast.SymbolReferenceNode { Kind: Ecr.Expressions.Ast.SymbolKind.Constant } constant
+                when perSubstanceConstants.Contains(constant.Name):
+                return "CST." + constant.Name;
+
+            case Ecr.Expressions.Ast.FunctionNode function
+                when string.Equals(function.Name, "SUBSTANCE", StringComparison.OrdinalIgnoreCase):
+                return "SUBSTANCE()";
+
+            default:
+                break;
+        }
+
+        foreach (var child in Children(node))
+        {
+            if (SubstanceReference(child, scopes, perSubstanceConstants) is { } found)
+            {
+                return found;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
     /// Звіряє аргументи формул версії з колонками таблиць, до яких методологію
     /// прив'язано (<c>ECR-CALC-0438</c>, лінія 1 захисту).
     /// </summary>
@@ -432,8 +620,15 @@ public sealed class PublishMethodologyHandler(
     /// <remarks>
     /// ⚠ Перелік, а не перша помилка (02b §12): методолог, який виправляє їх по
     /// одній за прогін, робить це стільки разів, скільки їх є.
+    /// <para>
+    /// ⛔ F-15/B-12: <c>count</c> — РЯДКОМ. Підстановка каталогу
+    /// (<c>ExceptionHandlingMiddleware</c>) бере лише рядкові значення, і
+    /// <c>int</c> лишав у тексті сире <c>{count}</c>. Перелік іде окремим полем
+    /// <c>problems</c> (ключ + підстановки кожного пункту) — клієнт перекладає
+    /// його сам, а не отримує одне українське речення.
+    /// </para>
     /// </remarks>
-    private static void Reject(List<string> problems)
+    private static void Reject(List<PublishProblem> problems)
     {
         if (problems.Count > 0)
         {
@@ -443,9 +638,99 @@ public sealed class PublishMethodologyHandler(
                 new Dictionary<string, object?>
                 {
                     ["messageKey"] = "err.ECR-CALC-0422.publishChecksFailed",
-                    ["count"] = problems.Count,
+                    ["count"] = problems.Count.ToString(CultureInfo.InvariantCulture),
+                    ["problems"] = problems,
                 });
         }
+    }
+
+    /// <summary>Автор версії не публікує її сам (<c>D-40</c>, F-14).</summary>
+    /// <param name="version">Версія, яку публікують.</param>
+    /// <param name="userId">Хто публікує.</param>
+    /// <exception cref="BusinessRuleException"><c>ECR-CALC-0409</c>, <c>authorCannotPublish</c>.</exception>
+    /// <remarks>
+    /// ⚠ Лише для чернетки: повторна публікація опублікованої версії — інша
+    /// відмова (<c>RequireDraft</c> домену), і підміняти її «чотирма очима»
+    /// означало б назвати не ту причину.
+    /// </remarks>
+    private static void RejectAuthor(MethodologyVersion version, int userId)
+    {
+        if (version.IsPublished || version.CreatedByUserId != userId)
+        {
+            return;
+        }
+
+        throw new BusinessRuleException(
+            "ECR-CALC-0409",
+            $"Користувач {userId.ToString(CultureInfo.InvariantCulture)} є автором версії {version.Version} "
+            + "і не може її опублікувати (правило чотирьох очей, D-40).",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-CALC-0409.authorCannotPublish",
+                ["version"] = version.Version,
+            });
+    }
+
+    /// <summary>Кожен тест золотого набору має справжній період (B-13).</summary>
+    /// <param name="testCases">Тести версії.</param>
+    /// <exception cref="BusinessRuleException"><c>ECR-CALC-0422</c>, <c>goldenTestNoPeriod</c>.</exception>
+    /// <remarks>
+    /// ⚠ Тут — лише форма ключа (<c>PeriodKey.IsValid</c>: рік×100 + номер).
+    /// Ключ правильної форми, якого немає в документі тесту, ловить
+    /// <see cref="RunTestAsync"/> — тією самою відмовою.
+    /// </remarks>
+    private static void RequireTestPeriods(IReadOnlyList<MethodologyTestCase> testCases)
+    {
+        var broken = testCases.FirstOrDefault(t => !t.Input.PeriodKey.IsValid);
+        if (broken is not null)
+        {
+            throw TestWithoutPeriod(broken);
+        }
+    }
+
+    /// <summary>Відмова «тест не має періоду» — з назвою тесту.</summary>
+    private static BusinessRuleException TestWithoutPeriod(MethodologyTestCase testCase)
+        => new(
+            "ECR-CALC-0422",
+            $"Тест золотого набору «{testCase.Code}» не має періоду: вкажіть у вході документ і період, "
+            + "що існує (periodKey — рік×100 + номер, напр. 202601). Без нього тривалість періоду "
+            + "обчислити нема з чого.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-CALC-0422.goldenTestNoPeriod",
+                ["test"] = testCase.Code,
+                ["periodKey"] = testCase.Input.PeriodKey.Value.ToString(CultureInfo.InvariantCulture),
+                ["documentId"] = testCase.Input.DocumentId.ToString(CultureInfo.InvariantCulture),
+            });
+
+    /// <summary>Проганяє тест і перекладає «періоду немає» на мову тесту (B-13).</summary>
+    private async Task<CalculationOutput> RunTestAsync(
+        MethodologyTestCase testCase, MethodologyDescriptor descriptor, CancellationToken ct)
+    {
+        try
+        {
+            return await module
+                .ExecuteAsync(WithDescriptor(testCase.Input, descriptor), ct)
+                .ConfigureAwait(false);
+        }
+        catch (DomainException ex) when (string.Equals(ex.ErrorCode, "ECR-PRD-0404", StringComparison.Ordinal))
+        {
+            throw TestWithoutPeriod(testCase);
+        }
+    }
+
+    /// <summary>Предикати й узгодженість активних правил версії (V-18).</summary>
+    private async Task CheckRulesAsync(int methodologyVersionId, CancellationToken ct)
+    {
+        var rules = await methodologies.GetRulesAsync(methodologyVersionId, ct).ConfigureAwait(false);
+
+        foreach (var rule in rules)
+        {
+            MethodologyRuleChecks.RequireValidPredicate(rule.Code, rule.MatchJson);
+        }
+
+        MethodologyRuleChecks.RequireConsistentSet(
+            [.. rules.Select(r => new MethodologyRuleChecks.RuleSpec(r.Code, r.MatchJson, r.Priority))]);
     }
 
     /// <summary>Проблеми, що випливають із природи методології (поправка 6).</summary>
@@ -454,7 +739,7 @@ public sealed class PublishMethodologyHandler(
     /// планувальник запускатиме її окремо, з порожнім набором аргументів, і
     /// щоночі писатиме або нулі, або помилку — залежно від формул.
     /// </remarks>
-    private async Task<IEnumerable<string>> LibraryProblemsAsync(
+    private async Task<IEnumerable<PublishProblem>> LibraryProblemsAsync(
         Methodology methodology, int methodologyVersionId, CancellationToken ct)
     {
         if (methodology.Kind != MethodologyKind.Library)
@@ -466,8 +751,12 @@ public sealed class PublishMethodologyHandler(
 
         return rules.Count == 0
             ? []
-            : [$"Методологія «{methodology.Code}» оголошена бібліотекою, але має {rules.Count} "
-               + "активних правил прив'язки: бібліотека не рахує ні для кого, на її формули посилаються."];
+            : [PublishProblem.Of(
+                "publish.problem.libraryHasRules",
+                $"Методологія «{methodology.Code}» оголошена бібліотекою, але має {rules.Count} "
+                + "активних правил прив'язки: бібліотека не рахує ні для кого, на її формули посилаються.",
+                ("code", methodology.Code),
+                ("count", rules.Count.ToString(CultureInfo.InvariantCulture)))];
     }
 
     /// <summary>
@@ -478,8 +767,9 @@ public sealed class PublishMethodologyHandler(
     /// ⛔ Посилання <c>!Name</c> резолвиться СПЕРШУ у своїй версії, потім у
     /// оголошених імпортах (поправка 10 директиви ПК-1 №05). Перше дає ребро
     /// між формулами, друге — ребро між МЕТОДОЛОГІЯМИ: формули бібліотеки
-    /// рахує своя методологія, і змішати їх у одному топологічному порядку
-    /// означало б зіставляти ідентифікатори з різних нумерацій.
+    /// рахуються в її власному <c>EvaluationOrder</c> (✎ HSE301 L — у контексті
+    /// рядка викликача), і змішати їх у одному топологічному порядку означало б
+    /// зіставляти ідентифікатори з різних нумерацій.
     ///
     /// ⛔ Ребра будуються з РОЗІБРАНОГО виразу, а не пошуком підрядка. Пошук
     /// підрядка — це пастка 4 директиви ПК-1 №05 §7, і вона була в нашому
@@ -510,7 +800,7 @@ public sealed class PublishMethodologyHandler(
         Dictionary<string, int> byCode,
         IReadOnlyList<MethodologyLibrary> imports,
         HashSet<int> dependencies,
-        List<string> problems)
+        List<PublishProblem> problems)
     {
         var parsed = formulaEngine.Parse(formula.Expression, ExpressionDialect.Methodology);
         if (parsed.Expression is null)
@@ -555,9 +845,15 @@ public sealed class PublishMethodologyHandler(
 
                 // ⛔ Перехресне посилання дає ребро МІЖ МЕТОДОЛОГІЯМИ, а не між
                 // формулами: формули бібліотеки не входять у топологічний
-                // порядок цієї версії — вони рахуються своєю. Без цього ребра
-                // порядок перерахунку неповний, і `HSE400` читає торішній
-                // результат `Common` без жодної помилки в журналі.
+                // порядок цієї версії. Ребро — для інвалідації: зміна `Common`
+                // тягне перерахунок `HSE400`.
+                //
+                // ✎ HSE301 L: заборону аудиту A3 (`importedFormulaNotEvaluated`)
+                // знято — модуль обчислює формулу бібліотеки в контексті рядка
+                // викликача (`GenericCalculationModule`, `LibraryRun`), а не
+                // читає записаний результат бібліотеки, тож порядок прогону між
+                // методологіями на число не впливає. Замикання перевіряється
+                // нижче (`LibraryProblems`, `ImportCycleAsync`).
                 case MethodologyReferenceOutcome.Imported:
                     dependencies.Add(reference.MethodologyId!.Value);
                     break;
@@ -567,9 +863,21 @@ public sealed class PublishMethodologyHandler(
                 // рядків у `calc.MethodologyImport`.
                 // ⚠ TODO: потрібен окремий код `ECR-CALC-0435`.
                 case MethodologyReferenceOutcome.Ambiguous:
-                    problems.Add(
+                    problems.Add(PublishProblem.Of(
+                        "publish.problem.ambiguousReference",
                         $"Формула «{formula.Code}»: посилання «!{code}» знайдено у "
-                        + $"{reference.Candidates.Count} імпортах ({string.Join(", ", reference.Candidates)}).");
+                        + $"{reference.Candidates.Count} імпортах ({string.Join(", ", reference.Candidates)}).",
+                        ("formula", formula.Code),
+                        ("name", code),
+                        ("count", reference.Candidates.Count.ToString(CultureInfo.InvariantCulture)),
+                        ("candidates", string.Join(", ", reference.Candidates))));
+                    break;
+
+                // ⛔ ФВ-9.14: `FORMULA_NOT_FOUND` виявляється ПРИ ПУБЛІКАЦІЇ, а не в
+                // прогоні. Тут стояв мовчазний пропуск (`default: break`): версія
+                // публікувалася, а кожен прогін давав `#REF` і не писав вихід.
+                case MethodologyReferenceOutcome.NotFound:
+                    problems.Add(FormulaNotFound(formula.Code, code, parsed.Expression.Root));
                     break;
 
                 default:
@@ -578,6 +886,210 @@ public sealed class PublishMethodologyHandler(
         }
 
         return new FormulaResolution(edges, parsed.Expression.Root);
+    }
+
+    /// <summary>
+    /// Цикл імпортів: транзитивний обхід оголошених імпортів дійшов до власної методології
+    /// (HSE301 L, <c>importCycle</c>).
+    /// </summary>
+    /// <param name="methodology">Методологія, що публікується.</param>
+    /// <param name="imports">Її імпорти на дату чинності.</param>
+    /// <param name="onDate">Дата чинності — версії бібліотек добираються на неї.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⚠ Обхід — усіх оголошених імпортів, а не лише тих, на які посилаються формули: цикл
+    /// в оголошеннях — дефект конфігурації сам по собі, і перше ж нове посилання замкнуло б
+    /// його і в графі залежностей. Рантайм має власний захист (<c>#CYCLE</c>), бо бібліотеку
+    /// можуть перевидати вже після цієї публікації.
+    /// </remarks>
+    private async Task<IEnumerable<PublishProblem>> ImportCycleAsync(
+        Methodology methodology, IReadOnlyList<MethodologyLibrary> imports, DateOnly onDate, CancellationToken ct)
+    {
+        var parents = new Dictionary<int, (int From, string Code)>();
+        var visited = new HashSet<int>();
+        var pending = new Queue<(MethodologyLibrary Library, int From)>(imports.Select(i => (i, methodology.Id)));
+
+        while (pending.TryDequeue(out var item))
+        {
+            var (library, from) = item;
+
+            if (library.MethodologyId == methodology.Id)
+            {
+                var chain = new List<string>();
+                for (var id = from; id != methodology.Id; id = parents[id].From)
+                {
+                    chain.Add(parents[id].Code);
+                }
+
+                chain.Reverse();
+                var path = string.Join(" → ", [methodology.Code, .. chain, methodology.Code]);
+
+                return [PublishProblem.Of(
+                    "publish.problem.importCycle",
+                    $"Імпорти методологій утворюють цикл: {path}. Методологія не може брати власні "
+                    + "формули через імпорти — розрахунок дав би #CYCLE.",
+                    ("chain", path))];
+            }
+
+            if (library.MethodologyVersionId is not { } versionId || !visited.Add(versionId))
+            {
+                continue;
+            }
+
+            parents.TryAdd(library.MethodologyId, (from, library.MethodologyCode));
+
+            foreach (var next in await methodologies.ResolveImportsAsync(versionId, onDate, ct).ConfigureAwait(false))
+            {
+                pending.Enqueue((next, library.MethodologyId));
+            }
+        }
+
+        return [];
+    }
+
+    /// <summary>
+    /// Проблеми замикання бібліотечних формул (HSE301 L): режими бібліотеки і область
+    /// посилання з Row-формули.
+    /// </summary>
+    /// <param name="version">Версія, що публікується.</param>
+    /// <param name="formulas">Її формули.</param>
+    /// <param name="roots">Корені розібраних виразів у тому самому порядку.</param>
+    /// <param name="byCode">Код своєї формули → ідентифікатор.</param>
+    /// <param name="libraries">Замикання; <c>null</c> — посилань за межу версії немає.</param>
+    /// <remarks>
+    /// <list type="bullet">
+    /// <item><c>importModeMismatch</c>: формула бібліотеки рахується в арифметиці й календарі
+    /// ВИКЛИКАЧА. Інший режим бібліотеки означав би, що та сама формула дає тут інше число,
+    /// ніж у самій бібліотеці, — і жоден тест бібліотеки цього не бачив.</item>
+    /// <item><c>rowScopeReferencesLibrarySubstance</c>: Row-формула рахується раз на рядок,
+    /// без речовини, а формула речовини бібліотеки має значення лише для речовини — те
+    /// саме правило, що <c>rowScopeReferencesSubstance</c> для своїх формул.</item>
+    /// </list>
+    /// </remarks>
+    private static IEnumerable<PublishProblem> LibraryProblems(
+        MethodologyVersion version,
+        IReadOnlyList<MethodologyFormula> formulas,
+        IReadOnlyList<Ecr.Expressions.Ast.AstNode?> roots,
+        Dictionary<string, int> byCode,
+        CalculationLibraries? libraries)
+    {
+        if (libraries is null)
+        {
+            yield break;
+        }
+
+        foreach (var library in libraries.Versions.Where(
+                     l => l.NumericMode != version.NumericMode || l.CalendarMode != version.CalendarMode))
+        {
+            yield return PublishProblem.Of(
+                "publish.problem.importModeMismatch",
+                $"Імпортована методологія «{library.MethodologyCode}» рахує в режимах "
+                + $"{library.NumericMode}/{library.CalendarMode}, а ця версія — {version.NumericMode}/"
+                + $"{version.CalendarMode}: її формули дали б тут інші числа, ніж у самій бібліотеці.",
+                ("library", library.MethodologyCode),
+                ("libraryNumeric", library.NumericMode.ToString()),
+                ("libraryCalendar", library.CalendarMode.ToString()),
+                ("numeric", version.NumericMode.ToString()),
+                ("calendar", version.CalendarMode.ToString()));
+        }
+
+        var versions = libraries.Versions.ToDictionary(v => v.MethodologyVersionId);
+
+        for (var i = 0; i < formulas.Count; i++)
+        {
+            if (formulas[i].Scope != MethodologyFormulaScope.Row || roots[i] is not { } root)
+            {
+                continue;
+            }
+
+            var names = FormulaReferences(root)
+                .Select(r => r.Name)
+                .Where(name => !byCode.ContainsKey(name))
+                .Distinct(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var name in names)
+            {
+                if (!libraries.Imports.TryGetValue(name, out var link)
+                    || link.IsCycle
+                    || !versions.TryGetValue(link.MethodologyVersionId, out var library)
+                    || library.Formulas.FirstOrDefault(
+                           f => string.Equals(f.Code, name, StringComparison.OrdinalIgnoreCase)) is not { } target
+                    || target.Scope == MethodologyFormulaScope.Row)
+                {
+                    continue;
+                }
+
+                yield return PublishProblem.Of(
+                    "publish.problem.rowScopeReferencesLibrarySubstance",
+                    $"Формула «{formulas[i].Code}» рахується раз на рядок, але «!{name}» методології "
+                    + $"«{library.MethodologyCode}» має значення лише для речовини.",
+                    ("formula", formulas[i].Code),
+                    ("name", name),
+                    ("library", library.MethodologyCode));
+            }
+        }
+    }
+
+    /// <summary>Формули замикання бібліотек як вхід перевірки аргументів.</summary>
+    private IEnumerable<ParsedFormula> LibraryFormulas(CalculationLibraries? libraries)
+        => libraries?.Versions
+               .SelectMany(v => v.Formulas)
+               .Select(f => new ParsedFormula(
+                   f.Code,
+                   f.ResultType,
+                   formulaEngine.Parse(f.Expression, ExpressionDialect.Methodology).Expression?.Root))
+           ?? [];
+
+    /// <summary>
+    /// Проблема «посилання <c>!Name</c> не веде ні у формулу цієї версії, ні в
+    /// імпорт» (ФВ-9.14, <c>FORMULA_NOT_FOUND</c>).
+    /// </summary>
+    /// <param name="formulaCode">Формула, що посилається.</param>
+    /// <param name="name">Ім'я після <c>!</c>.</param>
+    /// <param name="root">Корінь розібраного виразу — звідти береться позиція.</param>
+    private static PublishProblem FormulaNotFound(
+        string formulaCode, string name, Ecr.Expressions.Ast.AstNode root)
+    {
+        var at = PositionOf(root, name);
+
+        return PublishProblem.Of(
+            "publish.problem.formulaNotFound",
+            $"Формула «{formulaCode}»: посилання «!{name}» (позиція {at}) не веде ні у формулу цієї "
+            + "версії, ні у формулу імпортованої методології — у розрахунку щоразу був би #REF.",
+            ("formula", formulaCode),
+            ("name", name),
+            ("position", at));
+    }
+
+    /// <summary>
+    /// Позиція першого входження <c>!name</c> у виразі (позиція знака <c>!</c>,
+    /// як у діагностиках парсера); кілька входжень — одна проблема.
+    /// </summary>
+    private static string PositionOf(Ecr.Expressions.Ast.AstNode root, string name)
+        => (FormulaReferences(root)
+                .FirstOrDefault(s => string.Equals(s.Name, name, StringComparison.OrdinalIgnoreCase))
+                ?.Position ?? 0)
+            .ToString(CultureInfo.InvariantCulture);
+
+    /// <summary>Усі посилання <c>!Name</c> у дереві, у порядку обходу.</summary>
+    private static IEnumerable<Ecr.Expressions.Ast.SymbolReferenceNode> FormulaReferences(
+        Ecr.Expressions.Ast.AstNode node)
+    {
+        if (node is Ecr.Expressions.Ast.SymbolReferenceNode
+            {
+                Kind: Ecr.Expressions.Ast.SymbolKind.Formula,
+            } symbol)
+        {
+            yield return symbol;
+        }
+
+        foreach (var child in Children(node))
+        {
+            foreach (var found in FormulaReferences(child))
+            {
+                yield return found;
+            }
+        }
     }
 
     /// <summary>Що дав один прохід над виразом формули.</summary>
@@ -623,7 +1135,11 @@ public sealed class PublishMethodologyHandler(
         }
 
         var divergences = GoldenSet.Divergences(verdicts);
+        var red = verdicts.Where(v => !v.IsGreen).ToList();
 
+        // ⛔ F-15/B-12: `count` — рядком (інакше в тексті лишалося сире
+        // `{count}`), і тексту додано НАЗВИ тестів, що розійшлися: «3 values
+        // diverged» без жодного імені не давало знайти, що саме виправляти.
         throw new BusinessRuleException(
             "ECR-CALC-0422",
             $"Публікацію версії {version.Version} відхилено: на золотому наборі розійшлося "
@@ -632,8 +1148,9 @@ public sealed class PublishMethodologyHandler(
             {
                 ["messageKey"] = "err.ECR-CALC-0422.goldenSetDiverged",
                 ["version"] = version.Version,
-                ["count"] = divergences.Count,
-                ["goldenSet"] = verdicts.Where(v => !v.IsGreen).ToList(),
+                ["count"] = divergences.Count.ToString(CultureInfo.InvariantCulture),
+                ["tests"] = string.Join(", ", red.Select(v => v.Code)),
+                ["goldenSet"] = red,
             });
     }
 
@@ -653,8 +1170,7 @@ public sealed class PublishMethodologyHandler(
 
         foreach (var testCase in testCases)
         {
-            var output = await module
-                .ExecuteAsync(WithDescriptor(testCase.Input, Descriptor(methodology, version)), ct)
+            var output = await RunTestAsync(testCase, Descriptor(methodology, version), ct)
                 .ConfigureAwait(false);
 
             verdicts.Add(GoldenSet.Judge(testCase, output));
@@ -668,27 +1184,28 @@ public sealed class PublishMethodologyHandler(
         Methodology methodology,
         MethodologyVersion version,
         MethodologyVersion? previous,
+        IReadOnlyList<MethodologyTestCase> testCases,
         CancellationToken ct)
     {
         var changes = new List<MethodologyResultDelta>();
-
-        var testCases = await methodologies.GetTestCasesAsync(version.Id, ct).ConfigureAwait(false);
 
         if (previous is not null)
         {
             foreach (var testCase in testCases)
             {
-                var after = await module
-                    .ExecuteAsync(WithDescriptor(testCase.Input, Descriptor(methodology, version)), ct)
+                var after = await RunTestAsync(testCase, Descriptor(methodology, version), ct)
                     .ConfigureAwait(false);
-                var before = await module
-                    .ExecuteAsync(WithDescriptor(testCase.Input, Descriptor(methodology, previous)), ct)
+                var before = await RunTestAsync(testCase, Descriptor(methodology, previous), ct)
                     .ConfigureAwait(false);
 
-                foreach (var value in after.Values)
+                // ⚠ HSE301 A3a: diff — про ВИХОДИ (`MethodologyResultDelta.OutputCode`).
+                // Проміжні значення видимих формул у журнал публікації не йдуть: інакше
+                // прапорець «видима» сам по собі виглядав би як зміна чисел.
+                foreach (var value in after.Values.Where(v => v.Kind == CalculationResultKind.Output))
                 {
                     var old = before.Values.FirstOrDefault(
-                        v => v.OutputCode == value.OutputCode
+                        v => v.Kind == CalculationResultKind.Output
+                             && v.OutputCode == value.OutputCode
                              && v.SubstanceEntryId == value.SubstanceEntryId);
 
                     if (old is null || old.Value != value.Value)

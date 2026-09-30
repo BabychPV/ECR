@@ -84,7 +84,13 @@ public sealed class ReportVersion : Entity<int>
         {
             throw new DomainException(
                 ErrorCodes.ReportImmutable,
-                $"Версія звіту {Version} у стані {Status}: публікувати нічого.");
+                $"Версія звіту {Version} у стані {Status}: публікувати нічого.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-RPT-0409.versionNotDraft",
+                    ["version"] = Version,
+                    ["status"] = Status.ToString(),
+                });
         }
 
         Status = TemplateVersionStatus.Published;
@@ -205,7 +211,12 @@ public sealed class ReportSnapshot : Entity<long>
         {
             throw new DomainException(
                 ErrorCodes.ReportImmutable,
-                $"Зріз {Id} поданий: його вміст не перебудовується, потрібен новий зріз.");
+                $"Зріз {Id} поданий: його вміст не перебудовується, потрібен новий зріз.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-RPT-0409.snapshotSubmittedContent",
+                    ["snapshotId"] = Id.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
         }
 
         RowCount = rowCount;
@@ -243,7 +254,12 @@ public sealed class ReportSnapshot : Entity<long>
         {
             throw new DomainException(
                 ErrorCodes.ReportImmutable,
-                $"Зріз {Id} поданий: його статус не змінюється, потрібен новий зріз.");
+                $"Зріз {Id} поданий: його статус не змінюється, потрібен новий зріз.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-RPT-0409.snapshotSubmittedStatus",
+                    ["snapshotId"] = Id.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
         }
 
         Status = status;

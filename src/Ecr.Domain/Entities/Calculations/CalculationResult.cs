@@ -1,5 +1,6 @@
 // src/Ecr.Domain/Entities/Calculations/CalculationResult.cs
 using Ecr.Domain.Abstractions;
+using Ecr.Domain.Enums;
 
 namespace Ecr.Domain.Entities.Calculations;
 
@@ -24,6 +25,10 @@ public sealed class CalculationResult : Entity<long>
     /// <param name="outputCode">Код виходу методології.</param>
     /// <param name="value">Значення. <c>float</c> заборонений (D-30).</param>
     /// <param name="unitId">Одиниця результату — обов'язкова (ФВ-16.6).</param>
+    /// <param name="kind">
+    /// Вихід чи проміжне значення (<c>D-175</c>); типове — вихід, як до появи поля.
+    /// </param>
+    /// <exception cref="ArgumentOutOfRangeException">Вид поза переліком.</exception>
     public CalculationResult(
         long runId,
         int methodologyVersionId,
@@ -32,8 +37,15 @@ public sealed class CalculationResult : Entity<long>
         string? sourceRowKey,
         string outputCode,
         decimal value,
-        int unitId)
+        int unitId,
+        CalculationResultKind kind = CalculationResultKind.Output)
     {
+        if (!Enum.IsDefined(kind))
+        {
+            throw new ArgumentOutOfRangeException(nameof(kind), kind, "Невідомий вид результату.");
+        }
+
+        Kind = kind;
         CalculationRunId = runId;
         MethodologyVersionId = methodologyVersionId;
         PeriodKey = periodKey;
@@ -69,6 +81,16 @@ public sealed class CalculationResult : Entity<long>
     public decimal Value { get; private set; }
     public int UnitId { get; private set; }
     public long? SubstanceEntryId { get; private set; }
+
+    /// <summary>
+    /// Вихід методології чи значення видимої формули (<c>D-175</c>, V-6).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Зрізи <c>rpt.*</c> беруть лише <see cref="CalculationResultKind.Output"/>:
+    /// проміжне значення в зрізі змінило б його <c>ContentHash</c> (D-53). Для
+    /// проміжного <see cref="OutputCode"/> — код формули, а не виходу.
+    /// </remarks>
+    public CalculationResultKind Kind { get; private set; }
 
     // ⚠ Прапорця IsCurrent тут НЕМАЄ, хоча ФВ-9.11 його називає. Він живе на
     // ПРОГОНІ (`calc.CalculationRun.Status`): інакше «перемикання актуального

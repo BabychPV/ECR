@@ -25,11 +25,21 @@ export function LocalizedInput({
   description,
   value,
   onChange,
+  required = false,
 }: {
   label: string;
   description?: string | undefined;
   value: LocalizedValue;
   onChange: (next: LocalizedValue) => void;
+  /**
+   * Позначити назву обов'язковою (`U-13`).
+   *
+   * ⚠ Зірочку отримує лише поле мови за замовчуванням, а не кожне: форма
+   * вимагає назву ХОЧА Б ОДНІЄЮ мовою (`hasAnyText`), і три зірочки поспіль
+   * читалися б як «заповни всі три». Поле мови за замовчуванням — те саме,
+   * що вже несе `description`, тобто головне поле групи.
+   */
+  required?: boolean;
 }): JSX.Element {
   const languages = useLanguages();
 
@@ -97,6 +107,7 @@ export function LocalizedInput({
           key={language.code}
           label={`${label} · ${language.nameNative}`}
           description={language.isDefault ? description : undefined}
+          required={required && language.isDefault}
           value={value[language.code] ?? ''}
           onChange={(event) => {
             const next = { ...value };

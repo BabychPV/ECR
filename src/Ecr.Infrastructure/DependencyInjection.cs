@@ -66,6 +66,10 @@ public static class DependencyInjection
                     errorNumbersToAdd: null);
             }));
 
+        // F-13. Читач архіву, від якого залежать і NormalizedCellStore, і
+        // RowStore (фолбек «гаряча схема порожня → перевір arc.*»); Scoped,
+        // бо тримає EcrDbContext, а той теж Scoped.
+        services.AddScoped<ArchiveAwareCellReader>();
         services.AddScoped<ICellStore, NormalizedCellStore>();
         services.AddScoped<IRowStore, RowStore>();
         services.AddScoped<IDocumentHeaderStore, DocumentHeaderStore>();
@@ -83,6 +87,10 @@ public static class DependencyInjection
         services.AddScoped<IUnitOfWork, UnitOfWork>();
         services.AddScoped<IAuditWriter, AuditWriter>();
         services.AddScoped<IWorkflowStore, WorkflowStore>();
+        services.AddScoped<ISheetEditGate, SheetEditGate>();
+        services.AddSingleton(new SheetEditGatePolicy(TimeSpan.FromSeconds(Math.Clamp(
+            ReadInt(configuration, "Database:SheetLockTimeoutSeconds", SheetEditGatePolicy.DefaultLockTimeoutSeconds),
+            1, 300))));
         services.AddScoped<IDocumentVersionStore, DocumentVersionStore>();
         services.AddScoped<IPeriodStore, PeriodStore>();
         services.AddScoped<IAuditReader, AuditReader>();
@@ -96,10 +104,12 @@ public static class DependencyInjection
         services.AddScoped<IProjectStore, ProjectStore>();
         services.AddScoped<IRegistryStore, RegistryStore>();
         services.AddScoped<IRegistryDraftStore, RegistryDraftStore>();
+        services.AddScoped<IRegistryExternalKeyStore, RegistryExternalKeyStore>(); // FEATURE-REGISTRY-SYNC S2
         services.AddScoped<IUnitCatalog, UnitCatalog>();
         services.AddScoped<IUnitStore, UnitStore>();
         services.AddScoped<IWhereUsedStore, WhereUsedStore>();
         services.AddScoped<IUserPreferenceStore, UserPreferenceStore>();
+        services.AddScoped<IRecalculationApprovalStore, RecalculationApprovalStore>();
         services.AddScoped<IMethodologyStore, MethodologyStore>();
         services.AddScoped<IRuleCoverageReader, RuleCoverageReader>();
         services.AddScoped<IMethodologyDraftStore, MethodologyDraftStore>();
@@ -186,13 +196,21 @@ public static class DependencyInjection
             sp.GetRequiredService<Microsoft.Extensions.Caching.Memory.IMemoryCache>(),
             sp.GetRequiredService<CacheLifetimes>()));
         services.AddSingleton<IRegistryEntryCache, Caching.RegistryEntryCache>();
-        services.AddScoped<Application.Security.IAccessDecisionService, AccessDecisionService>();
+        // ⛔ V-06: назовні — обгортка, що підставляє профіль суб'єкта під час
+        // симуляції. `SimulationService` отримує САМУ службу: обгортці він
+        // потрібен, і через обгортку утворилося б коло залежностей.
+        services.AddScoped<AccessDecisionService>();
+        services.AddScoped<Application.Security.IAccessDecisionService>(sp => new SimulationAwareAccessDecisionService(
+            sp.GetRequiredService<AccessDecisionService>(),
+            sp.GetRequiredService<ISimulationService>(),
+            sp.GetRequiredService<Application.Common.ICurrentUser>()));
         services.AddSingleton<Application.Security.IPasswordHasher, PasswordHasher>();
         services.AddScoped<SecurityStampValidator>();
         services.AddScoped<IUserStore, UserStore>();
         services.AddSingleton<Application.Ports.IPrincipalNameResolver, WindowsPrincipalNameResolver>();
         services.AddScoped<Application.Ports.IResourceNameResolver, ResourceNameResolver>();
-        services.AddScoped<ISimulationService, SimulationService>();
+        services.AddScoped<ISimulationService>(sp => new SimulationService(
+            sp.GetRequiredService<EcrDbContext>(), sp.GetRequiredService<AccessDecisionService>()));
 
         // Каталог рядків інтерфейсу — Scoped через EcrDbContext; сам зріз
         // лежить у спільному IMemoryCache під ключем із версією (ФВ-14.9c).
@@ -201,6 +219,15 @@ public static class DependencyInjection
         services.AddScoped<Application.Ports.ICellPatcher, Integration.IntegrationCellPatcher>();
         services.AddScoped<Application.Ports.ICoverageJournal, Integration.CoverageJournal>();
         services.AddScoped<Application.Ports.IMaterializeCollectedDataJob, Jobs.MaterializeCollectedDataJob>();
+
+        // ⛔ P0: технічний автор задач інтеграції (`svc-integration`). Сам
+        // `JobActorScope` реєструє `Program.cs` разом з обгорткою
+        // `ICurrentUser` — обидва мусять бути ОДНИМ екземпляром на scope.
+        services.AddScoped<Jobs.IntegrationActor>();
+
+        // Синк довідника (FEATURE-REGISTRY-SYNC S5): його ставить `CollectionJob`
+        // для сутності з `RegistryDefId` — окремого коду в черзі немає.
+        services.AddScoped<Jobs.IRegistrySyncJob, Jobs.RegistrySyncJob>();
 
         // ⚠ Планувальник тепер справжній. Quartz піднімається як hosted
         // service, а порт лишається тим самим: заміна на Hangfire, якщо ІБ
@@ -231,11 +258,32 @@ public static class DependencyInjection
         // ⚠ Scoped, а не Singleton: прогрес живе в itg.JobProgress, тобто в
         // DbContext, а той scoped. Singleton тримав би один контекст на всі
         // одночасні постановки в чергу.
-        services.AddScoped<IBackgroundJobScheduler>(sp => new Jobs.QuartzJobScheduler(
+        services.AddScoped(sp => new Jobs.QuartzJobScheduler(
             sp.GetService<ISchedulerFactory>(),
             sp.GetService<IJobProgressStore>(),
             sp.GetService<IClock>(),
             sp.GetService<ICorrelationIdAccessor>()));
+
+        // MI-02 (F1c): черга в базі. Порти реєструються завжди (fencing читає оренду
+        // й у режимі Quartz — там вона null); виконавець і адаптер — лише за
+        // `Jobs:Queue:Mode = Database`. Дефолт — Quartz до зеленого F1d.
+        services.AddScoped<IJobQueue, Jobs.DbJobQueue>();
+        services.AddScoped<Jobs.JobLeaseContext>();
+        services.AddScoped<IJobLeaseContext>(sp => sp.GetRequiredService<Jobs.JobLeaseContext>());
+        services.AddSingleton<Jobs.JobQueueSignal>();
+        if (Jobs.DbBackgroundJobScheduler.ReadMode(configuration) == Jobs.JobQueueMode.Database)
+        {
+            services.AddScoped<IBackgroundJobScheduler, Jobs.DbBackgroundJobScheduler>();
+            services.AddSingleton(new Jobs.JobWorkerOptions
+            {
+                Lanes = Jobs.JobLaneMap.ApiLanes(Jobs.JobLaneMap.ReadExecutor(configuration)),
+            });
+            services.AddHostedService<Jobs.JobWorker>();
+        }
+        else
+        {
+            services.AddScoped<IBackgroundJobScheduler>(sp => sp.GetRequiredService<Jobs.QuartzJobScheduler>());
+        }
 
         // ⚠ Задача реєструється як МАРКЕР IRecalculationJob, бо саме ним її
         // називає use-case. Без цього рядка `EnqueueAsync<IRecalculationJob>`
@@ -248,7 +296,12 @@ public static class DependencyInjection
         // у чергу і не виконувалася б — черга без виконавця ззовні виглядає
         // як «дуже довго рахує».
         services.AddScoped<Jobs.OrphanScanJob>();
+        services.AddScoped<IOrphanScanJob, Jobs.OrphanScanJob>();
         services.AddScoped<Jobs.PeriodStateJob>();
+
+        // ⚠ Матеріалізація PI з місця переходу періоду в Open/Grace — її кличуть
+        // `PeriodStateJob` і `ActivateProjectHandler` після коміту.
+        services.AddScoped<IMaterializationScheduler, Jobs.MaterializationScheduler>();
         services.AddScoped<Jobs.ArchiveJob>();
         services.AddScoped<Jobs.ConsistencyCheckJob>();
         services.AddScoped<Jobs.PartitionCheckJob>();
@@ -347,6 +400,18 @@ public static class DependencyInjection
 
         services.AddScoped<IImportPreviewStore, ImportPreviewStore>();
         services.AddScoped<IExportStore, ExportStore>();
+
+        // ── FEATURE-REGISTRY-TABLES: append-only блоки треків (RT-01) ──
+        // Крок дописує реєстрації ЛИШЕ під свій маркер; власники —
+        // docs/build/FEATURE-REGISTRY-TABLES.md §9.0 і §9.1.
+        // RT: keys
+        services.AddScoped<IRegistryKeyStore, RegistryKeyStore>(); // RT-10a
+
+        // RT: data
+        services.AddScoped<IRegistryRowsQuery, RegistryRowsQuery>(); // RT-13
+
+        // RT: expressions
+        services.AddScoped<IRegistrySnapshotLoader, RegistrySnapshotLoader>(); // RT-22
 
         // Прогрів кешу метаданих на старті (B01 §6.3, крок 7).
         services.AddScoped<MetadataWarmup>();

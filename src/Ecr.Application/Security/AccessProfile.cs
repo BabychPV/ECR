@@ -1,6 +1,7 @@
 // src/Ecr.Application/Security/AccessProfile.cs
 
 using Ecr.Domain.Enums;
+using Ecr.Domain.ValueObjects;
 
 namespace Ecr.Application.Security;
 
@@ -42,6 +43,95 @@ public sealed class AccessProfile
     public required IReadOnlySet<int> RoleIds { get; init; }
 
     /// <summary>
+    /// Ролі з призначень БЕЗ області дії (ФВ-6.14); <c>null</c> — областей у
+    /// користувача немає, і це те саме, що <see cref="RoleIds"/>.
+    /// </summary>
+    public IReadOnlySet<int>? UnscopedRoleIds { get; init; }
+
+    /// <summary>
+    /// Те, що ролі з ОБЛАСТЮ дії дають у конкретному проєкті: ключ —
+    /// <c>ProjectId</c> (ФВ-6.14).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Гранти на аркуш, таблицю й колонку ролі з областю НЕ потрапляють у
+    /// <see cref="Grants"/>: ідентифікатори аркушів спільні для всіх проєктів
+    /// шаблону, тож у спільній мапі «аркуш S у проєкті A» діяв би й у
+    /// проєкті B. Грант на сам проєкт області — навпаки, у <see cref="Grants"/>
+    /// (ключ і так називає проєкт); на проєкт поза областю — нікуди.
+    ///
+    /// ⚠ Порожньо за замовчуванням — безпечний бік: профіль, складений без
+    /// цього поля, просто не має прав з областю.
+    /// </remarks>
+    public IReadOnlyDictionary<int, ScopedProjectAccess> Scoped { get; init; } = NoScoped;
+
+    private static readonly IReadOnlyDictionary<int, ScopedProjectAccess> NoScoped
+        = new Dictionary<int, ScopedProjectAccess>();
+
+    /// <summary>
+    /// Ролі, чинні в проєкті: без області — скрізь, з областю — лише в ній.
+    /// </summary>
+    /// <param name="projectId">Проєкт.</param>
+    /// <remarks>
+    /// ⛔ Для рішень у межах проєкту (роль кроку маршруту, правила періоду,
+    /// обмежені роллю) — саме цей метод, а не <see cref="RoleIds"/>: там ролі
+    /// з областю в УСІХ проєктах.
+    /// </remarks>
+    public IReadOnlySet<int> RoleIdsIn(int projectId)
+        => Scoped.TryGetValue(projectId, out var scoped) ? scoped.RoleIds : UnscopedRoleIds ?? RoleIds;
+
+    /// <summary>
+    /// Ролі, чинні на аркуші в періоді проєкту: <see cref="RoleIdsIn"/> плюс
+    /// ролі, звужені аркушами чи періодами (D-214), чия область їх містить.
+    /// </summary>
+    /// <param name="projectId">Проєкт.</param>
+    /// <param name="sheetCode">Код аркуша; <c>null</c> — невідомий (звужені аркушами не діють).</param>
+    /// <param name="period">Період; <c>null</c> — невідомий (звужені періодами не діють).</param>
+    public IReadOnlySet<int> RoleIdsAt(int projectId, string? sheetCode, PeriodKey? period)
+    {
+        var roles = RoleIdsIn(projectId);
+        if (!Scoped.TryGetValue(projectId, out var scoped) || scoped.Narrowed.Count == 0)
+        {
+            return roles;
+        }
+
+        var result = roles.ToHashSet();
+        foreach (var layer in scoped.Narrowed.Where(l => l.AppliesTo(sheetCode, period)))
+        {
+            result.UnionWith(layer.RoleIds);
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Чи бачить профіль документи проєкту — рівень документа (перелік,
+    /// відкриття, шапка на читання).
+    /// </summary>
+    /// <param name="projectId">Проєкт.</param>
+    /// <remarks>
+    /// ⛔ D-214: роль, звужена аркушами чи періодами, ВІДКРИВАЄ документ (грант
+    /// ≥ <c>Read</c> на сам проєкт області), але не більше: рівень проєкту в
+    /// <see cref="LevelFor"/> вона не піднімає, тож дії над документом цілком
+    /// (видалення, шапка, створення) і над проєктом (звіти, розрахунки,
+    /// керування) лишаються за ролями без звуження. Усе нижче рівня документа —
+    /// через <see cref="EditRules.Effective"/> з аркушем і періодом.
+    /// </remarks>
+    public bool SeesDocumentsOf(int projectId)
+    {
+        if (LevelFor(ResourceKind.Project, projectId) >= GrantLevel.Read)
+        {
+            return true;
+        }
+
+        var key = $"{ResourceKind.Project}:{projectId}";
+        return !Denies.Contains(key)
+               && Scoped.TryGetValue(projectId, out var scoped)
+               && scoped.Narrowed.Any(l => !l.Denies.Contains(key)
+                                           && l.Grants.TryGetValue(key, out var level)
+                                           && level >= GrantLevel.Read);
+    }
+
+    /// <summary>
     /// Профіль побудований у сеансі симуляції «очима користувача» (D-96).
     /// Права беруться повністю від <see cref="SimulatedForUserId"/>, але
     /// <b>будь-яка</b> дія запису відхиляється з
@@ -50,14 +140,71 @@ public sealed class AccessProfile
     /// </summary>
     public bool IsSimulation { get; init; }
 
+    /// <summary>
+    /// Профіль технічного автора задачі інтеграції: пише значення збору в
+    /// будь-який проєкт БЕЗ грантів, але в межах усіх заборон (<see cref="EditRules"/>).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Ставиться ЛИШЕ поверх кешованого профілю, у мить побудови, з
+    /// контексту виконання (<c>ICurrentUser.IsIntegrationJob</c>) — ніколи не
+    /// кладеться в кеш профілів за <c>userId</c>. Інакше хто перший зігрів би
+    /// кеш (HTTP чи задача), той і визначив би права іншого.
+    ///
+    /// ⚠ Не дає ні функціональних прав (<see cref="Permissions"/> порожні), ні
+    /// подання, затвердження чи повернення в роботу: інтеграція лише ПИШЕ
+    /// значення, відповідальність за звіт лишається на людині.
+    /// </remarks>
+    public bool IsIntegrationWriter { get; init; }
+
     /// <summary>Чиїми очима; <c>null</c> поза симуляцією.</summary>
     public int? SimulatedForUserId { get; init; }
 
     /// <summary>Хто симулює. Автор в аудиті — саме він, не суб'єкт.</summary>
     public int? SimulationActorUserId { get; init; }
 
-    /// <summary>Чи має користувач функціональне право.</summary>
+    /// <summary>
+    /// Чи має користувач функціональне право БЕЗ огляду на проєкт — лише з
+    /// ролей без області дії.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Для проєктного права (усе, чого немає в
+    /// <see cref="Domain.Entities.Security.PermissionScopes.Global"/>) там, де
+    /// проєкт відомий, — <see cref="Has(string, int)"/>. Сторож
+    /// <c>ProjectPermissionCheckTests</c> (IL) тримає це правило.
+    /// </remarks>
     public bool Has(string permissionCode) => Permissions.Contains(permissionCode);
+
+    /// <summary>
+    /// Чи має користувач функціональне право в проєкті (ФВ-6.14): з ролей
+    /// без області — скрізь, з ролей з областю — лише в її проєктах.
+    /// </summary>
+    /// <param name="permissionCode">Код права.</param>
+    /// <param name="projectId">Проєкт, у якому діє перевірка.</param>
+    /// <remarks>
+    /// ⚠ Роль, звужена аркушами чи періодами (D-214), дає тут лише права рівня
+    /// документа (<see cref="Domain.Entities.Security.PermissionScopes.Narrowable"/>)
+    /// — інших у її шарі немає, їх відсіяно при побудові профілю.
+    /// </remarks>
+    public bool Has(string permissionCode, int projectId)
+        => Permissions.Contains(permissionCode)
+           || (Scoped.TryGetValue(projectId, out var scoped)
+               && (scoped.Permissions.Contains(permissionCode)
+                   || scoped.Narrowed.Any(l => l.Permissions.Contains(permissionCode))));
+
+    /// <summary>
+    /// Чи є право бодай у якомусь проєкті — вхідна перевірка ПЕРЕЛІКІВ через
+    /// проєкти.
+    /// </summary>
+    /// <param name="permissionCode">Код права.</param>
+    /// <remarks>
+    /// ⛔ Лише як вхід: далі кожен елемент переліку фільтрується через
+    /// <see cref="Has(string, int)"/>. Сама по собі дала б оператору проєкту A
+    /// бачити B. Сторож вимагає реєструвати кожне використання.
+    /// </remarks>
+    public bool HasInAnyProject(string permissionCode)
+        => Permissions.Contains(permissionCode)
+           || Scoped.Values.Any(s => s.Permissions.Contains(permissionCode)
+                                     || s.Narrowed.Any(l => l.Permissions.Contains(permissionCode)));
 
     /// <summary>Ефективний рівень гранта на ресурс з урахуванням заборон.</summary>
     public GrantLevel LevelFor(ResourceKind kind, int resourceId)
@@ -84,4 +231,63 @@ public sealed class AccessProfile
     /// </remarks>
     internal static GrantLevel Resolve(bool isDenied, GrantLevel? grant)
         => isDenied ? GrantLevel.None : grant ?? GrantLevel.None;
+}
+
+/// <summary>Що ролі з областю дії дають в одному проєкті (ФВ-6.14).</summary>
+/// <param name="Grants">Гранти на аркуш/таблицю/колонку: ключ <c>"{ResourceKind}:{ResourceId}"</c>.</param>
+/// <param name="Denies">Заборони на аркуш/таблицю/колонку.</param>
+/// <param name="RoleIds">Ролі, чинні в проєкті: без області плюс ті, чия область його містить.</param>
+/// <param name="Permissions">
+/// Проєктні функціональні права ролей з областю, що містить цей проєкт;
+/// глобальні (<see cref="Domain.Entities.Security.PermissionScopes.Global"/>) сюди не потрапляють.
+/// </param>
+public sealed record ScopedProjectAccess(
+    IReadOnlyDictionary<string, GrantLevel> Grants,
+    IReadOnlySet<string> Denies,
+    IReadOnlySet<int> RoleIds,
+    IReadOnlySet<string> Permissions)
+{
+    /// <summary>
+    /// Шари ролей, чия область у цьому проєкті звужена ще й аркушами чи
+    /// періодами (D-214) — окремо на кожне призначення.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Окремо, а не злиті з полями вище: шар діє лише там, де його аркуш і
+    /// період (<see cref="NarrowedAccess.AppliesTo"/>). Злиття зробило б грант
+    /// ролі «лише аркуш F1» грантом на весь проєкт.
+    /// </remarks>
+    public IReadOnlyList<NarrowedAccess> Narrowed { get; init; } = [];
+}
+
+/// <summary>Що дає одне призначення ролі, звужене аркушами чи періодами (D-214), в одному проєкті.</summary>
+/// <param name="SheetCodes">Коди аркушів; <c>null</c> — усі аркуші.</param>
+/// <param name="PeriodFrom">Перший період, включно; <c>null</c> — відкрито.</param>
+/// <param name="PeriodTo">Останній період, включно; <c>null</c> — відкрито.</param>
+/// <param name="Grants">Гранти ролі на будь-який рівень, включно з проєктом: ключ <c>"{ResourceKind}:{ResourceId}"</c>.</param>
+/// <param name="Denies">Заборони ролі.</param>
+/// <param name="RoleIds">Роль (ролі) шару.</param>
+/// <param name="Permissions">Лише права рівня документа (<see cref="Domain.Entities.Security.PermissionScopes.Narrowable"/>).</param>
+public sealed record NarrowedAccess(
+    IReadOnlySet<string>? SheetCodes,
+    PeriodKey? PeriodFrom,
+    PeriodKey? PeriodTo,
+    IReadOnlyDictionary<string, GrantLevel> Grants,
+    IReadOnlySet<string> Denies,
+    IReadOnlySet<int> RoleIds,
+    IReadOnlySet<string> Permissions)
+{
+    /// <summary>Чи діє шар на аркуші в періоді.</summary>
+    /// <param name="sheetCode">Код аркуша; <c>null</c> — невідомий.</param>
+    /// <param name="period">Період; <c>null</c> — невідомий.</param>
+    /// <remarks>
+    /// ⛔ Невідомий вимір при звуженні за ним — шар НЕ діє (закрито за
+    /// замовчуванням): рішення без аркуша чи періоду не може знати, що воно в
+    /// межах області.
+    /// </remarks>
+    public bool AppliesTo(string? sheetCode, PeriodKey? period)
+        => (SheetCodes is null || (sheetCode is not null && SheetCodes.Contains(sheetCode)))
+           && (PeriodFrom is null && PeriodTo is null
+               || (period is { } p
+                   && (PeriodFrom is not { } from || p.Value >= from.Value)
+                   && (PeriodTo is not { } to || p.Value <= to.Value)));
 }

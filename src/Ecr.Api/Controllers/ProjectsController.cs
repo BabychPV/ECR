@@ -26,7 +26,8 @@ public sealed class ProjectsController(
     ChangeProjectTimeZoneHandler changeTimeZone,
     RunCalculationHandler recalculate,
     Ecr.Application.Workflow.GetApprovalRouteHandler getRoute,
-    Ecr.Application.Workflow.ReplaceApprovalRouteHandler replaceRoute) : ControllerBase
+    Ecr.Application.Workflow.ReplaceApprovalRouteHandler replaceRoute,
+    Ecr.Application.Documents.GetDocumentTemplateHandler documentTemplate) : ControllerBase
 {
     /// <summary>Перелік проєктів. Право <c>Document.View</c>.</summary>
     [HttpGet]
@@ -109,6 +110,22 @@ public sealed class ProjectsController(
     }
 
     /// <summary>
+    /// Версія шаблону проєкту й аркуші для нового документа. Право
+    /// <c>Document.Create</c> і грант <c>Write</c> на проєкт (V-12).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Не потребує <c>Template.View</c>: це не перегляд шаблону, а рівно те,
+    /// без чого не створити документ, — версію визначає проєкт.
+    /// </remarks>
+    [HttpGet("{id:int}/document-template")]
+    [ProducesResponseType<Ecr.Application.Documents.DocumentTemplateDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<Ecr.Application.Documents.DocumentTemplateDto>> DocumentTemplate(
+        int id, CancellationToken ct)
+        => await documentTemplate.HandleAsync(id, ct).ConfigureAwait(false);
+
+    /// <summary>
     /// Маршрут погодження проєкту. Право <c>Project.Manage</c>.
     /// </summary>
     /// <remarks>
@@ -118,6 +135,9 @@ public sealed class ProjectsController(
     /// </remarks>
     [HttpGet("{id:int}/approval-route")]
     [ProducesResponseType<Ecr.Application.Workflow.ApprovalRouteDto>(StatusCodes.Status200OK)]
+    // ⚠ S17: 404 — лише «проєкту немає або він невидимий» (`ECR-PRJ-0404`);
+    // «маршруту немає» лишається 200 із порожнім набором.
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<Ecr.Application.Workflow.ApprovalRouteDto>> ApprovalRoute(
         int id, CancellationToken ct)
         => await getRoute.HandleAsync(id, ct).ConfigureAwait(false);
@@ -195,6 +215,7 @@ public sealed class ProjectsController(
     /// </remarks>
     [HttpPost("{id:int}/activate")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> Activate(int id, CancellationToken ct)
     {
         await activate.HandleAsync(id, ct).ConfigureAwait(false);
@@ -212,6 +233,7 @@ public sealed class ProjectsController(
     /// </remarks>
     [HttpPost("{id:int}/archive")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
     public async Task<IActionResult> Archive(int id, CancellationToken ct)
     {
@@ -223,6 +245,7 @@ public sealed class ProjectsController(
     /// <summary>Клонує проєкт разом із налаштуваннями. Право <c>Project.Manage</c>.</summary>
     [HttpPost("{id:int}/clone")]
     [ProducesResponseType<Contracts.ProjectIdResponse>(StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> Clone(
         int id, [FromBody] CloneProjectRequest request, CancellationToken ct)
     {
@@ -242,6 +265,7 @@ public sealed class ProjectsController(
     /// </remarks>
     [HttpPut("{id:int}/current-period")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> SetCurrentPeriod(
         int id, [FromBody] SetCurrentPeriodRequest request, CancellationToken ct)
     {
@@ -266,6 +290,7 @@ public sealed class ProjectsController(
     /// </remarks>
     [HttpPut("{id:int}/timezone")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     public async Task<IActionResult> ChangeTimeZone(
         int id, [FromBody] ChangeProjectTimeZoneRequest request, CancellationToken ct)
@@ -301,16 +326,11 @@ public sealed class ProjectsController(
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        // ⚠ Погодження передається лише коли обидва поля заповнені: часткове
-        // (сама причина без того, хто погодив, чи навпаки) для
-        // `RunCalculationHandler` означає «погодження немає» — і саме так
-        // правило ФВ-9.7 і мало відмовити.
-        var approval = request is { ApprovedByUserId: { } approvedBy, ApprovalReason: { } reason }
-            ? new ClosedPeriodApproval(approvedBy, reason)
-            : null;
-
+        // ⛔ Аудит безпеки S1: погоджувача з тіла запиту тут більше немає —
+        // лише ідентифікатор погодження, яке друга людина підтвердила власною
+        // сесією (`POST …/recalculation-approvals/{id}/confirm`).
         var jobId = await recalculate
-            .HandleAsync(id, request.PeriodKey, approval, ct)
+            .HandleAsync(id, request.PeriodKey, request.ApprovalId, ct)
             .ConfigureAwait(false);
 
         return Accepted(new Contracts.ProjectRecalculationAcceptedResponse(jobId, id, request.PeriodKey));
@@ -319,6 +339,8 @@ public sealed class ProjectsController(
     /// <summary>Календар періодів проєкту. Право <c>Document.View</c>.</summary>
     [HttpGet("{id:int}/periods")]
     [ProducesResponseType<Ecr.Application.Periods.Dto.PeriodCalendarDto>(StatusCodes.Status200OK)]
+    // ⚠ S17: невидимий проєкт — 404, як неіснуючий.
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> Periods(int id, CancellationToken ct)
     {
         // Календар добудовується перед читанням: проєкт міг бути створений до
@@ -384,12 +406,12 @@ public sealed record SetCurrentPeriodRequest(int? PinnedPeriodId, string? Reason
 
 /// <summary>Запит на перерахунок усього проєкту (Q-151).</summary>
 /// <param name="PeriodKey">Період; <c>null</c> — повний рік, усі документи проєкту.</param>
-/// <param name="ApprovedByUserId">
-/// Хто погодив перерахунок закритого періоду (ФВ-9.7); <c>null</c> — без погодження.
+/// <param name="ApprovalId">
+/// Підтверджене погодження перерахунку закритого періоду (ФВ-9.7,
+/// <c>…/recalculation-approvals</c>); <c>null</c> — без погодження. Одноразове,
+/// лише для свого ініціатора, цього проєкту й періоду.
 /// </param>
-/// <param name="ApprovalReason">Причина погодження; обов'язкова разом із <c>ApprovedByUserId</c>.</param>
-public sealed record ProjectRecalculationRequest(
-    int? PeriodKey, int? ApprovedByUserId, string? ApprovalReason);
+public sealed record ProjectRecalculationRequest(int? PeriodKey, long? ApprovalId);
 
 /// <summary>Запит на створення політики періодів (T6/#37).</summary>
 /// <param name="Code">Код політики; має бути унікальним.</param>

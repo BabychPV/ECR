@@ -264,6 +264,8 @@
           "Max",
           "Last",
           "First",
+          "TimeWeightedAvg",
+          "TimeIntegral",
           null
         ]
       },
@@ -371,6 +373,17 @@
             "format": "int32",
             "type": "integer"
           },
+          "scope": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RoleScopeDto",
+                "description": "Область дії (ФВ-6.14): роль діє лише в перелічених проєктах; `null` —\nв усіх. Неіснуючий або невидимий проєкт — `422 ECR-REQ-0422`, без\n`Manage` на проєкт — `403 ECR-AUTH-0403`."
+              }
+            ]
+          },
           "validFrom": {
             "description": "Початок дії; `null` — від завжди.",
             "format": "date",
@@ -400,6 +413,51 @@
           "Windows",
           "Local"
         ]
+      },
+      "BindRegistryExternalKeyCommand": {
+        "description": "Тіло прив'язки.",
+        "properties": {
+          "dataSourceId": {
+            "description": "Джерело (`ext.DataSource`).",
+            "format": "int32",
+            "type": "integer"
+          },
+          "entryId": {
+            "description": "Запис довідника.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "externalId": {
+            "description": "Ідентифікатор у джерелі (WebId/GUID); до 200 символів.",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "entryId",
+          "dataSourceId",
+          "externalId"
+        ],
+        "type": "object"
+      },
+      "BindSourceEntityRegistryRequest": {
+        "description": "Прив'язка сутності збору до довідника.",
+        "properties": {
+          "registryDefId": {
+            "description": "Довідник; `null` — відв'язати.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          }
+        },
+        "required": [
+          "registryDefId"
+        ],
+        "type": "object"
       },
       "BuildSnapshotRequest": {
         "description": "Запит на побудову зрізу.",
@@ -432,6 +490,13 @@
       "CalculationBindingDto": {
         "description": "Прив'язка виходу методології до колонки документа (`D-69`).",
         "properties": {
+          "columnCode": {
+            "description": "Код колонки-приймача (F-21); як і код таблиці — лише в переліку.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
           "columnDefId": {
             "description": "Колонка-приймач.",
             "format": "int32",
@@ -504,6 +569,41 @@
       "CalculationResultDto": {
         "description": "Число, яке дав актуальний прогін розрахунку на документі.",
         "properties": {
+          "calculatedAt": {
+            "description": "Коли завершився прогін (UTC).",
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "inputsChangedAt": {
+            "description": "Остання зміна входів після прогону (UTC); `null` — не змінювались.",
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "isStale": {
+            "default": false,
+            "description": "Входи документа змінилися після прогону, що дав це число (F-05): число\nвже не відповідає даним, потрібен перерахунок.",
+            "type": "boolean"
+          },
+          "methodologyCode": {
+            "description": "Код методології — підпис числа (F-21).",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "methodologyVersion": {
+            "description": "Номер версії методології («1.2.0»), а не її ідентифікатор (F-21).",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
           "methodologyVersionId": {
             "description": "Версія, що дала число.",
             "format": "int32",
@@ -803,20 +903,70 @@
             "format": "date-time",
             "type": "string"
           },
+          "changedByDisplayName": {
+            "description": "Ім'я автора (`sec.User.DisplayName`); `null` — запису користувача\nвже немає (`R-18`). ⛔ Не логін: логін і SID показувати людині заборонено\n(R-A2, D-86). Журнал показував «By user 3» — число, з яким аудитор нічого\nне зробить.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
           "changedByUserId": {
             "description": "Автор — <b>UserId</b>, не SID (R-A2, D-86).",
             "format": "int32",
             "type": "integer"
+          },
+          "columnCode": {
+            "description": "Код колонки; `null` — колонки вже немає.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "columnDataType": {
+            "description": "Тип колонки (`Decimal`, `Date`…) — щоб клієнт показав значення\nза правилом показу (U-05/U-24), а не у форматі сховища\n(`53.1771000000000000`).",
+            "type": [
+              "null",
+              "string"
+            ]
           },
           "columnDefId": {
             "description": "Колонка.",
             "format": "int32",
             "type": "integer"
           },
+          "columnHeaderL10n": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LocalizedText",
+                "description": "Заголовок колонки мовами каталогу."
+              }
+            ]
+          },
+          "documentBusinessKey": {
+            "description": "Бізнес-ключ документа; `null` — документа вже немає.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
           "documentId": {
             "description": "Документ.",
             "format": "int64",
             "type": "integer"
+          },
+          "documentNameL10n": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LocalizedText",
+                "description": "Людська назва документа, якщо її задано."
+              }
+            ]
           },
           "isLateEdit": {
             "description": "Зміна в `Grace` або після `Reopen` (D-70).",
@@ -1344,6 +1494,11 @@
               "string"
             ]
           },
+          "lookbackDays": {
+            "description": "Вікно збору назад від моменту запуску, днів (ФВ-13.15): кожен прогін перечитує\nсаме стільки, і пропущені вікна закриваються повтором, а не станом.",
+            "format": "int32",
+            "type": "integer"
+          },
           "rowVersion": {
             "description": "Версія рядка в Base64 — її ж клієнт повертає заголовком `If-Match`.",
             "type": "string"
@@ -1377,7 +1532,8 @@
           "lastErrorAt",
           "rowVersion",
           "dataSourceId",
-          "dataSourceCode"
+          "dataSourceCode",
+          "lookbackDays"
         ],
         "type": "object"
       },
@@ -1688,7 +1844,7 @@
             ]
           },
           "ruleCode": {
-            "description": "Код правила: `ORPHANED_CELL`, `BROKEN_FK`, `ARCHIVE_CHECKSUM`.",
+            "description": "Код правила: `ORPHANED_CELL` (комірка посилається на відсутній запис\nдовідника; `doc.CellValue`, вага 2), `BROKEN_FK` (рядок посилається\nна відсутній екземпляр таблиці; `doc.TableRow`, вага 3),\n`ARCHIVE_CHECKSUM` (контрольні суми архіву й джерела не збіглися;\n`itg.ArchiveRun`, вага 3), `UNBOUND_CALCULATED_COLUMN` (колонка\n`Calculated` версії живого проєкту без чинної прив'язки методології;\n`cfg.ColumnDef`, вага 2), `UNSOURCED_FORMULA_COLUMN` (колонка\n`Formula` опублікованої або виведеної з обігу версії без формули шаблону\nй без чинної прив'язки методології; `cfg.ColumnDef`, вага 2).",
             "type": "string"
           },
           "severity": {
@@ -1761,6 +1917,72 @@
         ],
         "type": "object"
       },
+      "CoverageEventView": {
+        "description": "Подія журналу покриття: інтервал зібрано, але в комірки він не ліг.",
+        "properties": {
+          "at": {
+            "description": "Коли подію записано (UTC).",
+            "format": "date-time",
+            "type": "string"
+          },
+          "dataSourceCode": {
+            "description": "Код з'єднання.",
+            "type": "string"
+          },
+          "details": {
+            "description": "Пояснення сервера для людини; `null` — не записано.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "id": {
+            "description": "Ідентифікатор рядка покриття.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "periodKey": {
+            "description": "Період; `null` — не записано або подія синку довідника (довідник не живе за періодами).",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "sourceEntityCode": {
+            "description": "Код сутності.",
+            "type": "string"
+          },
+          "sourceEntityId": {
+            "description": "Сутність збору.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "sourceEntityName": {
+            "description": "Назва сутності; `null` — не задана.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "status": {
+            "description": "Один зі статусів `CollectionCoverage.KnownStatuses` (`src/Ecr.Domain/Entities/Integration/IntegrationLogs.cs`): події матеріалізації й синку довідника.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "sourceEntityId",
+          "sourceEntityCode",
+          "sourceEntityName",
+          "dataSourceCode",
+          "periodKey",
+          "status",
+          "details",
+          "at"
+        ],
+        "type": "object"
+      },
       "CreateCollectionScheduleRequest": {
         "description": "Тіло створення розкладу.",
         "properties": {
@@ -1771,6 +1993,14 @@
           "isEnabled": {
             "description": "Чи має розклад одразу стояти в планувальнику.",
             "type": "boolean"
+          },
+          "lookbackDays": {
+            "description": "Вікно збору назад, днів (ФВ-13.15), 1–366; `null` — типове (7).",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
           },
           "sourceEntityId": {
             "description": "Сутність джерела, яку збиратимуть за цим розкладом.",
@@ -1812,14 +2042,16 @@
             "type": "array"
           },
           "templateVersionId": {
-            "description": "Опублікована версія шаблону.",
+            "description": "Необов'язкове. ⛔ `V-11`: документ заводиться на версії шаблону ПРОЄКТУ;\nполе, якщо задане, мусить із нею збігатися (інакше `422`\n`err.ECR-DOC-0422.versionNotProject`). Клієнту його надсилати не треба:\nсклад аркушів для діалогу дає `GET /projects/{id}/document-template`.",
             "format": "int32",
-            "type": "integer"
+            "type": [
+              "null",
+              "integer"
+            ]
           }
         },
         "required": [
           "projectId",
-          "templateVersionId",
           "sheetDefIds"
         ],
         "type": "object"
@@ -2255,6 +2487,56 @@
         ],
         "type": "object"
       },
+      "CreateSourceEntityRequest": {
+        "description": "Нова сутність збору — позиція каталогу джерела.",
+        "properties": {
+          "code": {
+            "description": "Код у джерелі.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "dataSourceId": {
+            "description": "З'єднання.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "displayName": {
+            "description": "Підпис із каталогу.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "entityPath": {
+            "description": "Шлях в ієрархії джерела.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "sourceKind": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RegistrySourceKind",
+                "description": "Хто master (ФВ-8.9); `null` — `External`."
+              }
+            ]
+          }
+        },
+        "required": [
+          "dataSourceId",
+          "code",
+          "displayName",
+          "entityPath",
+          "sourceKind"
+        ],
+        "type": "object"
+      },
       "CreateTemplateRequest": {
         "description": "Запит на створення шаблону.",
         "properties": {
@@ -2453,6 +2735,21 @@
               "integer"
             ]
           },
+          "simulatedForUserName": {
+            "description": "Ім'я того, кого симулюють, — для банера «Viewing as …» (V-06).",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "simulationSessionId": {
+            "description": "Сеанс симуляції цього входу — щоб завершити його з будь-якої вкладки.",
+            "format": "int64",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
           "userId": {
             "description": "Ідентифікатор.",
             "format": "int32",
@@ -2483,22 +2780,26 @@
         "description": "Наслідок перевірки з'єднання; `Entities` — розмір каталогу джерела.",
         "properties": {
           "entities": {
+            "description": "Розмір кореневого каталогу джерела.",
             "format": "int32",
             "type": "integer"
           },
           "error": {
+            "description": "Категорія відмови; `null` — успіх.",
             "type": [
               "null",
               "string"
             ]
           },
           "messageKey": {
+            "description": "Ключ каталогу з причиною відмови.",
             "type": [
               "null",
               "string"
             ]
           },
           "ok": {
+            "description": "Чи джерело відповіло.",
             "type": "boolean"
           }
         },
@@ -2714,10 +3015,15 @@
               "$ref": "#/components/schemas/DocumentHeaderFieldDto"
             },
             "type": "array"
+          },
+          "version": {
+            "description": "Версія значень шапки — її клієнт повертає в `baseVersion` наступного\n`PATCH`. Виводиться зі ЗНАЧЕНЬ (хеш), а не з колонки: у\n`doc.DocumentHeaderValue` немає власного `rowversion`, а\n`doc.Document.RowVersion` змінюється й від правки будь-якої комірки.",
+            "type": "string"
           }
         },
         "required": [
-          "fields"
+          "fields",
+          "version"
         ],
         "type": "object"
       },
@@ -2833,6 +3139,29 @@
         ],
         "type": "object"
       },
+      "DocumentSheetState": {
+        "description": "Аркуш складу документа в переліку: код, назва, стан за період.",
+        "properties": {
+          "code": {
+            "description": "Код аркуша (`SheetDef.Code`); він же ключ у `DocumentSummary.SheetStates`.",
+            "type": "string"
+          },
+          "nameL10n": {
+            "$ref": "#/components/schemas/LocalizedText",
+            "description": "Назва аркуша мовами каталогу."
+          },
+          "state": {
+            "description": "Стан робочого процесу; аркуш без рядка стану — `Draft`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "nameL10n",
+          "state"
+        ],
+        "type": "object"
+      },
       "DocumentSummary": {
         "description": "Документ у переліку.",
         "properties": {
@@ -2905,6 +3234,16 @@
             },
             "description": "Стан робочого процесу: аркуш → статус.",
             "type": "object"
+          },
+          "sheets": {
+            "description": "Аркуші складу з назвою і станом — ті самі рядки, що в\nSheetStates, але В ПОРЯДКУ аркушів (`SheetDef.Ordinal`)\nі з людською назвою. Потрібне переліку: без назви в колонці «State» стояв\nвнутрішній код аркуша (`S99819007`). ⚠ Адитивне поле: словник\nSheetStates лишається як був. `null` — шлях читання\nйого не несе (сховище заповнює завжди; як і стан — порожньо без періоду).",
+            "items": {
+              "$ref": "#/components/schemas/DocumentSheetState"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
           },
           "warningCount": {
             "description": "Попередження звідти ж; `null` — за тим самим правилом.",
@@ -2997,6 +3336,83 @@
         ],
         "type": "object"
       },
+      "DocumentTemplateDto": {
+        "description": "З чого складається новий документ проєкту.",
+        "properties": {
+          "groupRules": {
+            "description": "Правила складу (`SheetGroupRule`) — для попередження ДО збереження.",
+            "items": {
+              "$ref": "#/components/schemas/SheetGroupRuleDto"
+            },
+            "type": "array"
+          },
+          "sheets": {
+            "description": "Аркуші версії в порядку `Ordinal`.",
+            "items": {
+              "$ref": "#/components/schemas/DocumentTemplateSheetDto"
+            },
+            "type": "array"
+          },
+          "templateCode": {
+            "description": "Код шаблону.",
+            "type": "string"
+          },
+          "templateVersionId": {
+            "description": "Версія шаблону проєкту — те, що йде в `templateVersionId`.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "version": {
+            "description": "Позначення версії.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "templateVersionId",
+          "templateCode",
+          "version",
+          "sheets",
+          "groupRules"
+        ],
+        "type": "object"
+      },
+      "DocumentTemplateSheetDto": {
+        "description": "Аркуш, який можна включити в новий документ.",
+        "properties": {
+          "code": {
+            "description": "Код аркуша.",
+            "type": "string"
+          },
+          "id": {
+            "description": "Ідентифікатор `SheetDef` — те, що йде в `sheetDefIds`.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "isMandatory": {
+            "description": "Чи обов'язковий аркуш.",
+            "type": "boolean"
+          },
+          "nameL10n": {
+            "$ref": "#/components/schemas/LocalizedText",
+            "description": "Назва всіма мовами каталогу."
+          },
+          "sheetGroup": {
+            "description": "Група для правил складу; `null` — поза групами.",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "nameL10n",
+          "sheetGroup",
+          "isMandatory"
+        ],
+        "type": "object"
+      },
       "DocumentVersionDto": {
         "description": "Версія документа — зріз подання аркуша (ФВ-5.22).",
         "properties": {
@@ -3046,7 +3462,8 @@
           "ArchivingInProgress",
           "BusinessRule",
           "SimulationReadOnly",
-          "OutsidePermitWindow"
+          "OutsidePermitWindow",
+          "InsufficientGrantLevel"
         ]
       },
       "EntityFieldMapDto": {
@@ -3493,6 +3910,54 @@
           "Manage"
         ]
       },
+      "GrantableProject": {
+        "description": "Проєкт у довіднику для видачі грантів: лише ідентичність.",
+        "properties": {
+          "code": {
+            "description": "Код проєкту.",
+            "type": "string"
+          },
+          "id": {
+            "description": "Ідентифікатор — те, що йде в `resourceId` гранта.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "nameL10n": {
+            "$ref": "#/components/schemas/LocalizedText",
+            "description": "Назва мовами каталогу."
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "nameL10n"
+        ],
+        "type": "object"
+      },
+      "GrantableSheet": {
+        "description": "Аркуш чинної версії шаблону проєкту — для області призначення ролі (D-214).",
+        "properties": {
+          "code": {
+            "description": "Код аркуша — те, що йде в `scope.sheets`.",
+            "type": "string"
+          },
+          "nameL10n": {
+            "$ref": "#/components/schemas/LocalizedText",
+            "description": "Назва мовами каталогу."
+          },
+          "projectId": {
+            "description": "Проєкт.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "projectId",
+          "code",
+          "nameL10n"
+        ],
+        "type": "object"
+      },
       "GroupAssignmentView": {
         "description": "Групове призначення, яке існує в системі.",
         "properties": {
@@ -3573,6 +4038,17 @@
             "description": "Роль.",
             "format": "int32",
             "type": "integer"
+          },
+          "scope": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RoleScopeDto",
+                "description": "Область дії (ФВ-6.14); `null` — роль діє в усіх проєктах."
+              }
+            ]
           },
           "validFrom": {
             "description": "Початок дії; `null` — від завжди.",
@@ -3796,12 +4272,36 @@
         "description": "Зміна, яку принесе імпорт.",
         "properties": {
           "columnCode": {
+            "description": "Колонка.",
             "type": "string"
           },
-          "newValue": {},
-          "oldValue": {},
+          "newValue": {
+            "description": "Значення з файлу; `null` — порожньо."
+          },
+          "oldValue": {
+            "description": "Поточне значення; `null` — порожньо."
+          },
           "rowKey": {
+            "description": "Рядок.",
             "type": "string"
+          },
+          "tableCode": {
+            "description": "Таблиця зміни. ⛔ `V-10`: у 91 таблиці шаблону ключі рядків і коди колонок\nОДНАКОВІ (`R1`/`C1`), тож без таблиці рядок переліку не каже,\nДЕ саме зміниться число. `null` лише в плані, збереженому до цієї\nправки.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "tableNameL10n": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LocalizedText",
+                "description": "Назва таблиці мовами каталогу — для показу."
+              }
+            ]
           }
         },
         "required": [
@@ -3853,16 +4353,52 @@
         "description": "Відхилена комірка з причиною — користувач має бачити, які саме (ФВ-4.4).",
         "properties": {
           "columnCode": {
+            "description": "Колонка; для відмови цілої таблиці — її код.",
             "type": "string"
+          },
+          "excelCell": {
+            "description": "Адреса комірки книги (`B3`) для значення, у якого немає рядка системи\n(`V-10`: поза рядками таблиці); інакше `null`.",
+            "type": [
+              "null",
+              "string"
+            ]
           },
           "message": {
+            "description": "Діагностичний текст для журналу — НЕ для показу людині.",
             "type": "string"
           },
+          "messageKey": {
+            "description": "Ключ тексту причини в каталозі (D-95). ⛔ `V-10`: інтерфейс показує текст\nза цим ключем мовою користувача, а не string ImportRejection.Message — доти відмови\nприходили готовими українськими реченнями («Правило доступу: лише читання.»).\nДля відмови правами — `deny.&lt;EditDenyReason&gt;`, ті самі тексти, що\nв підказці сірої комірки сітки.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
           "reasonCode": {
+            "description": "Код причини (`ECR-…`).",
             "type": "string"
           },
           "rowKey": {
+            "description": "Рядок; `—` — причина не про рядок.",
             "type": "string"
+          },
+          "tableCode": {
+            "description": "Таблиця відмови (`V-10`, як і в ImportChange).",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "tableNameL10n": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LocalizedText",
+                "description": "Назва таблиці мовами каталогу — для показу."
+              }
+            ]
           }
         },
         "required": [
@@ -4951,9 +5487,77 @@
         ],
         "type": "object"
       },
+      "MethodologyPublicationEntry": {
+        "description": "Одна публікація версії методології з журналу `aud.PublicationEvent` (F-16).",
+        "properties": {
+          "changeReason": {
+            "description": "Причина зміни (ФВ-14.7).",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "changedAt": {
+            "description": "Коли опубліковано (UTC).",
+            "format": "date-time",
+            "type": "string"
+          },
+          "changedByName": {
+            "description": "Ім'я того, хто опублікував; `null` — облікового запису вже немає.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "changedByUserId": {
+            "description": "Хто опублікував.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "id": {
+            "description": "Запис журналу.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "methodologyVersionId": {
+            "description": "Опублікована версія.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "resultDiffJson": {
+            "description": "Diff результатів на золотому наборі (ФВ-9.6), як записано.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "version": {
+            "description": "Номер версії.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "changedAt",
+          "methodologyVersionId",
+          "version",
+          "changeReason",
+          "changedByUserId",
+          "changedByName",
+          "resultDiffJson"
+        ],
+        "type": "object"
+      },
       "MethodologyRequiredInputDto": {
         "description": "Обов'язкова вхідна колонка методології — gate перед збереженням клітинки\n(директива «обов'язкові вхідні колонки методології»).",
         "properties": {
+          "columnCode": {
+            "description": "Код колонки — підпис замість голого `ColumnDefId` (F-21); лише в переліку.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
           "columnDefId": {
             "description": "Колонка документа, обов'язкова як вхід.",
             "format": "int32",
@@ -5681,6 +6285,39 @@
         ],
         "type": "object"
       },
+      "PagedResultOfCoverageEventView": {
+        "description": "Сторінка результатів. Ендпоінтів, що повертають «усе», не існує —\nперевіряється архітектурним тестом.",
+        "properties": {
+          "items": {
+            "description": "Елементи сторінки.",
+            "items": {
+              "$ref": "#/components/schemas/CoverageEventView"
+            },
+            "type": "array"
+          },
+          "nextCursor": {
+            "description": "Курсор наступної сторінки; `null` — кінець.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "totalCount": {
+            "description": "Загальна кількість; `null`, якщо підрахунок дорогий.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor",
+          "totalCount"
+        ],
+        "type": "object"
+      },
       "PagedResultOfDocumentSummary": {
         "description": "Сторінка результатів. Ендпоінтів, що повертають «усе», не існує —\nперевіряється архітектурним тестом.",
         "properties": {
@@ -5754,6 +6391,72 @@
             "description": "Елементи сторінки.",
             "items": {
               "$ref": "#/components/schemas/ProjectSummary"
+            },
+            "type": "array"
+          },
+          "nextCursor": {
+            "description": "Курсор наступної сторінки; `null` — кінець.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "totalCount": {
+            "description": "Загальна кількість; `null`, якщо підрахунок дорогий.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor",
+          "totalCount"
+        ],
+        "type": "object"
+      },
+      "PagedResultOfRegistryExternalKeyView": {
+        "description": "Сторінка результатів. Ендпоінтів, що повертають «усе», не існує —\nперевіряється архітектурним тестом.",
+        "properties": {
+          "items": {
+            "description": "Елементи сторінки.",
+            "items": {
+              "$ref": "#/components/schemas/RegistryExternalKeyView"
+            },
+            "type": "array"
+          },
+          "nextCursor": {
+            "description": "Курсор наступної сторінки; `null` — кінець.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "totalCount": {
+            "description": "Загальна кількість; `null`, якщо підрахунок дорогий.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor",
+          "totalCount"
+        ],
+        "type": "object"
+      },
+      "PagedResultOfRegistryRowDto": {
+        "description": "Сторінка результатів. Ендпоінтів, що повертають «усе», не існує —\nперевіряється архітектурним тестом.",
+        "properties": {
+          "items": {
+            "description": "Елементи сторінки.",
+            "items": {
+              "$ref": "#/components/schemas/RegistryRowDto"
             },
             "type": "array"
           },
@@ -5912,6 +6615,13 @@
         ],
         "type": "object"
       },
+      "ParentDeletePolicy": {
+        "enum": [
+          "Restrict",
+          "Cascade",
+          null
+        ]
+      },
       "PatchCell": {
         "description": "Зміна однієї комірки. Три різні операції (R-B4):\nзначення — записати; `Value = null` — стерти (рядок видаляється);\n`IsEmpty = true` — явна порожнеча; поле відсутнє в запиті — не чіпати.",
         "properties": {
@@ -5937,6 +6647,13 @@
       "PatchCellsRequest": {
         "description": "Пакетна зміна комірок. Часткове застосування заборонене: конфлікт у\nбудь-якому рядку відхиляє весь батч (B04 §2.3).",
         "properties": {
+          "confirmed": {
+            "description": "Людина підтвердила правку комірок, що вимагають підтвердження\n(`ФВ-2.16`, `AllowWithConfirmation`). Без нього батч правки\nлюдини (`UserEdit`), у якому є хоч одна така комірка, відхиляється\nЦІЛКОМ — `ECR-ACCS-0403` із причиною `ConfirmationRequired`.\nОдин прапорець на батч, а не перелік адрес: діалог на клієнті теж один на\nпакет (вставка, протягування), а адреси батчу й так несе сам запит.",
+            "type": [
+              "null",
+              "boolean"
+            ]
+          },
           "origin": {
             "description": "Джерело зміни: `UserEdit`, `Import`, `Recalculation`.",
             "type": "string"
@@ -6007,6 +6724,10 @@
       "PatchDocumentHeaderRequest": {
         "description": "Пакетна зміна шапки документа.",
         "properties": {
+          "baseVersion": {
+            "description": "Версія шапки (`version` з `GET …/header`), з якої почалася правка. Обов'язкова:\nрозбіжність із чинною — `409 ECR-DOC-0409`, а не мовчазне затирання\nчужої правки (enterprise-аудит, `C2`).",
+            "type": "string"
+          },
           "fields": {
             "description": "Зміни полів; поле, якого немає в списку, не чіпається.",
             "items": {
@@ -6016,7 +6737,8 @@
           }
         },
         "required": [
-          "fields"
+          "fields",
+          "baseVersion"
         ],
         "type": "object"
       },
@@ -6532,16 +7254,9 @@
       "ProjectRecalculationRequest": {
         "description": "Запит на перерахунок усього проєкту (Q-151).",
         "properties": {
-          "approvalReason": {
-            "description": "Причина погодження; обов'язкова разом із `ApprovedByUserId`.",
-            "type": [
-              "null",
-              "string"
-            ]
-          },
-          "approvedByUserId": {
-            "description": "Хто погодив перерахунок закритого періоду (ФВ-9.7); `null` — без погодження.",
-            "format": "int32",
+          "approvalId": {
+            "description": "Підтверджене погодження перерахунку закритого періоду (ФВ-9.7,\n`…/recalculation-approvals`); `null` — без погодження. Одноразове,\nлише для свого ініціатора, цього проєкту й періоду.",
+            "format": "int64",
             "type": [
               "null",
               "integer"
@@ -6558,8 +7273,7 @@
         },
         "required": [
           "periodKey",
-          "approvedByUserId",
-          "approvalReason"
+          "approvalId"
         ],
         "type": "object"
       },
@@ -6746,6 +7460,105 @@
         ],
         "type": "object"
       },
+      "RecalculationApprovalDto": {
+        "description": "Погодження перерахунку закритого періоду — як його бачить клієнт.",
+        "properties": {
+          "confirmedAt": {
+            "description": "Коли підтверджено, UTC.",
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "confirmedByName": {
+            "description": "Ім'я того, хто підтвердив.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "confirmedByUserId": {
+            "description": "Хто підтвердив; `null` — ще чекає.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "expiresAt": {
+            "description": "Після цього моменту погодження мертве, UTC.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "description": "Ідентифікатор; його передає `POST …/recalculate` як `approvalId`.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "periodKey": {
+            "description": "Єдиний період, який погодження відкриває.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "reason": {
+            "description": "Причина.",
+            "type": "string"
+          },
+          "requestedAt": {
+            "description": "Коли створено, UTC.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "requestedByName": {
+            "description": "Ім'я ініціатора.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "requestedByUserId": {
+            "description": "Ініціатор — єдиний, хто може ним скористатися.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "periodKey",
+          "reason",
+          "requestedByUserId",
+          "requestedByName",
+          "requestedAt",
+          "expiresAt",
+          "confirmedByUserId",
+          "confirmedByName",
+          "confirmedAt"
+        ],
+        "type": "object"
+      },
+      "RecalculationApprovalRequest": {
+        "description": "Запит на погодження перерахунку закритого періоду.",
+        "properties": {
+          "periodKey": {
+            "description": "Закритий період, який треба перерахувати.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "reason": {
+            "description": "Причина; обов'язкова, потрапляє в журнал.",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "periodKey",
+          "reason"
+        ],
+        "type": "object"
+      },
       "RecallAvailabilityDto": {
         "description": "Чи може поточний користувач відкликати аркуш (`BE-31`).",
         "properties": {
@@ -6783,6 +7596,215 @@
           "reason"
         ],
         "type": "object"
+      },
+      "RegistryBatchItemDto": {
+        "description": "Один рядок пакета.",
+        "properties": {
+          "baseVersion": {
+            "description": "`version` рядка з `GET …/rows` (`D-166`); не збігся — помилка рядка `entryChanged`.\n        `null` — без перевірки.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "clientRowId": {
+            "description": "Ідентифікатор рядка на клієнті — ним звіт адресує результат.",
+            "type": "string"
+          },
+          "code": {
+            "description": "Код нового запису довідника з ручним кодом; для `CodeMode = Auto` і для наявного запису — порожньо.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "id": {
+            "description": "Наявний запис; `null` — новий (лише для `upsert`).",
+            "format": "int64",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "op": {
+            "description": "`upsert` або `delete`.",
+            "type": "string"
+          },
+          "values": {
+            "additionalProperties": {},
+            "description": "Значення за кодами полів; поле, якого немає, не змінюється.",
+            "type": [
+              "null",
+              "object"
+            ]
+          }
+        },
+        "required": [
+          "clientRowId",
+          "op",
+          "id",
+          "code",
+          "baseVersion",
+          "values"
+        ],
+        "type": "object"
+      },
+      "RegistryBatchRequest": {
+        "description": "Пакет змін рядків довідника (`POST /registries/{code}/entries/batch`, RT-14).",
+        "properties": {
+          "items": {
+            "description": "Рядки пакета, ≤ int RegistryBatchHandler.MaxItems.",
+            "items": {
+              "$ref": "#/components/schemas/RegistryBatchItemDto"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "RegistryBatchResult": {
+        "description": "Звіт пакета — завжди 200, як імпорт CSV.",
+        "properties": {
+          "added": {
+            "description": "Нових записів.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "applied": {
+            "description": "Чи записано зміни; хоч одна помилка рядка або `dryRun` — ні.",
+            "type": "boolean"
+          },
+          "deleted": {
+            "description": "Видалених записів.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "dryRun": {
+            "description": "Прогін без запису.",
+            "type": "boolean"
+          },
+          "rows": {
+            "description": "Результат кожного рядка пакета в його порядку.",
+            "items": {
+              "$ref": "#/components/schemas/RegistryBatchRowResult"
+            },
+            "type": "array"
+          },
+          "rules": {
+            "description": "Порушення правил довідника після пакета (RT-17a, §7.1): записані рядки й батьки композиції.\nЗастосований пакет несе лише `Info`/`Warning` (`Error` — відмова\n`422 ECR-REG-4221`); `dryRun` — усі рівні, і `Error` теж: так сітка бачить Σ до\nзбереження. Порожньо — порушень немає або пакет не дійшов до правил через помилки рядків.",
+            "items": {
+              "$ref": "#/components/schemas/RegistryRuleViolationDto"
+            },
+            "type": "array"
+          },
+          "unchanged": {
+            "description": "Записів без фактичної зміни.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "updated": {
+            "description": "Змінених записів.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "applied",
+          "dryRun",
+          "added",
+          "updated",
+          "deleted",
+          "unchanged",
+          "rows"
+        ],
+        "type": "object"
+      },
+      "RegistryBatchRowError": {
+        "description": "Помилка рядка пакета.",
+        "properties": {
+          "errorCode": {
+            "description": "Код помилки (`ECR-…`).",
+            "type": "string"
+          },
+          "field": {
+            "description": "Поле; `null` — помилка рядка цілком.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "messageKey": {
+            "description": "Ключ тексту в каталозі.",
+            "type": "string"
+          },
+          "params": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Параметри тексту.",
+            "type": "object"
+          }
+        },
+        "required": [
+          "field",
+          "errorCode",
+          "messageKey",
+          "params"
+        ],
+        "type": "object"
+      },
+      "RegistryBatchRowResult": {
+        "description": "Результат рядка пакета.",
+        "properties": {
+          "clientRowId": {
+            "description": "Ідентифікатор рядка на клієнті.",
+            "type": "string"
+          },
+          "entryId": {
+            "description": "Запис; для нового — лише після запису.",
+            "format": "int64",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "errors": {
+            "description": "Помилки рядка; порожньо — рядок пройшов.",
+            "items": {
+              "$ref": "#/components/schemas/RegistryBatchRowError"
+            },
+            "type": "array"
+          },
+          "status": {
+            "description": "`added`, `updated`, `unchanged`, `deleted` або `error`.",
+            "type": "string"
+          },
+          "version": {
+            "description": "Нова версія рядка після запису — наступний `baseVersion`; інакше `null`.",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "clientRowId",
+          "status",
+          "entryId",
+          "version",
+          "errors"
+        ],
+        "type": "object"
+      },
+      "RegistryCodeMode": {
+        "enum": [
+          "Manual",
+          "Auto",
+          null
+        ]
       },
       "RegistryDefDto": {
         "description": "Опис довідника для конфігуратора і для клієнта.",
@@ -6839,12 +7861,33 @@
             "format": "int32",
             "type": "integer"
           },
+          "codeMode": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RegistryCodeMode",
+                "description": "Режим коду чернетки; `null` — без змін."
+              }
+            ]
+          },
           "fields": {
             "description": "Поля чернетки.",
             "items": {
               "$ref": "#/components/schemas/RegistryFieldSaveDto"
             },
             "type": "array"
+          },
+          "keys": {
+            "description": "Ключі чернетки; `null` — чернетка ключів не змінює.",
+            "items": {
+              "$ref": "#/components/schemas/RegistryKeySaveDto"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
           },
           "reason": {
             "description": "Причина зміни.",
@@ -6916,6 +7959,17 @@
             "description": "Код довідника.",
             "type": "string"
           },
+          "codeMode": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RegistryCodeMode",
+                "description": "Звідки береться код нового запису (`D-157`)."
+              }
+            ]
+          },
           "dataRevision": {
             "description": "Ревізія даних; росте від зміни записів.",
             "format": "int32",
@@ -6941,6 +7995,16 @@
           "isTemporal": {
             "description": "Чи мають записи вікно чинності.",
             "type": "boolean"
+          },
+          "keys": {
+            "description": "Складені ключі довідника (`D-151`, RT-11), і вимкнені теж: вимкнений ключ пояснює, чому\nколись діяла саме така унікальність.",
+            "items": {
+              "$ref": "#/components/schemas/RegistryKeyDto"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
           },
           "mappings": {
             "description": "Мапінг зовнішніх полів на поля довідника (`ФВ-8.11`).",
@@ -7001,6 +8065,65 @@
         ],
         "type": "object"
       },
+      "RegistryEntryDetailDto": {
+        "description": "Один запис довідника цілком — для форми правки (X-03, R-04).",
+        "properties": {
+          "code": {
+            "description": "Стабільний код.",
+            "type": "string"
+          },
+          "displayL10n": {
+            "$ref": "#/components/schemas/LocalizedText",
+            "description": "Назва ВСІМА мовами каталогу. ⛔ Саме цього бракувало формі: перелік несе\nназву однією мовою, і збереження з нього стирало переклади."
+          },
+          "id": {
+            "description": "Ідентифікатор.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "parentEntryId": {
+            "description": "Батьківський запис; `null` — корінь.",
+            "format": "int64",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "validFrom": {
+            "description": "Початок вікна чинності.",
+            "format": "date",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "validTo": {
+            "description": "Кінець вікна чинності.",
+            "format": "date",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "values": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Значення полів: код поля → текст в інваріантному форматі, який приймає\n`POST …/entries`; `null` — поле не заповнене.",
+            "type": "object"
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "displayL10n",
+          "parentEntryId",
+          "validFrom",
+          "validTo",
+          "values"
+        ],
+        "type": "object"
+      },
       "RegistryEntryDto": {
         "description": "Запис довідника для UI і резолвінгу. У комірці зберігається\nlong RegistryEntryDto.Id, а не string RegistryEntryDto.Display (`ФВ-8.8`) — саме тому\nперейменування не змінює історичні дані.",
         "properties": {
@@ -7053,6 +8176,13 @@
             "description": "Запис.",
             "format": "int64",
             "type": "integer"
+          },
+          "warnings": {
+            "description": "Порушення правил довідника рівнів `Info`/`Warning` (RT-17a, §7.1): запис збережено, але\nправило не виконане. Порожньо — порушень немає. Рівень `Error` сюди не потрапляє — він\nвідхиляє запис (`422 ECR-REG-4221`).",
+            "items": {
+              "$ref": "#/components/schemas/RegistryRuleViolationDto"
+            },
+            "type": "array"
           }
         },
         "required": [
@@ -7120,6 +8250,13 @@
             "description": "Записів, у яких змінилося хоча б одне поле.",
             "format": "int32",
             "type": "integer"
+          },
+          "warnings": {
+            "description": "Порушення правил довідника рівнів `Info`/`Warning` після застосування файлу (RT-17a):\nзаписи збережено. `Error` — відмова всього файлу `422 ECR-REG-4221`. Прев'ю\n(`dryRun`) правил не виконує: воно нічого не записує.",
+            "items": {
+              "$ref": "#/components/schemas/RegistryRuleViolationDto"
+            },
+            "type": "array"
           }
         },
         "required": [
@@ -7176,6 +8313,73 @@
           "display",
           "parentEntryId",
           "values"
+        ],
+        "type": "object"
+      },
+      "RegistryExternalKeyView": {
+        "description": "Зв'язок запису довідника з елементом зовнішнього джерела.",
+        "properties": {
+          "dataSourceCode": {
+            "description": "Код джерела.",
+            "type": "string"
+          },
+          "dataSourceId": {
+            "description": "Джерело (`ext.DataSource`).",
+            "format": "int32",
+            "type": "integer"
+          },
+          "entryCode": {
+            "description": "Код запису.",
+            "type": "string"
+          },
+          "externalId": {
+            "description": "Ідентифікатор у джерелі (WebId/GUID).",
+            "type": "string"
+          },
+          "externalPath": {
+            "description": "Шлях у джерелі; ставить синк (`MarkSynced`).",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "id": {
+            "description": "Ідентифікатор зв'язку.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "lastSyncedAt": {
+            "description": "Коли востаннє зіставлено з джерелом (UTC).",
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "missingInSourceSince": {
+            "description": "Відколи (UTC) елемента немає в джерелі; `null` — є (`D-212`).",
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "registryEntryId": {
+            "description": "Запис довідника.",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "registryEntryId",
+          "entryCode",
+          "dataSourceId",
+          "dataSourceCode",
+          "externalId",
+          "externalPath",
+          "lastSyncedAt",
+          "missingInSourceSince"
         ],
         "type": "object"
       },
@@ -7275,10 +8479,32 @@
             "$ref": "#/components/schemas/LocalizedText",
             "description": "Підпис мовами каталогу."
           },
+          "onParentDelete": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ParentDeletePolicy",
+                "description": "Що робити з частиною при видаленні батька; `null` — `Restrict`. Читається лише для\nкомпозиції; у наявного не змінюється."
+              }
+            ]
+          },
           "ordinal": {
             "description": "Порядок у переліку.",
             "format": "int32",
             "type": "integer"
+          },
+          "relationKind": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RegistryRelationKind",
+                "description": "Посилання чи композиція (`D-155`) — лише для нового поля `Lookup`; `null` —\nпосилання (для наявного поля — без змін). У наявного не змінюється."
+              }
+            ]
           },
           "unitId": {
             "description": "Одиниця значення.",
@@ -7356,6 +8582,192 @@
         ],
         "type": "object"
       },
+      "RegistryKeyCheckRequest": {
+        "description": "Запит живої перевірки дублікатів ключа до збереження (§4.5).",
+        "properties": {
+          "fieldCodes": {
+            "description": "Коди полів майбутнього ключа в порядку частин.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "ignoreCase": {
+            "default": true,
+            "description": "Порівнювати текст без урахування регістру (як у ключа).",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "fieldCodes"
+        ],
+        "type": "object"
+      },
+      "RegistryKeyCheckResponse": {
+        "description": "Результат перевірки дублікатів ключа на наявних даних (§4.5).",
+        "properties": {
+          "checked": {
+            "description": "Скільки живих записів перевірено.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "groups": {
+            "description": "Скільки значень ключа мають більше одного запису.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "sample": {
+            "description": "Перші групи (не більше двадцяти) — приклади для людини.",
+            "items": {
+              "$ref": "#/components/schemas/RegistryKeyDuplicateDto"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "checked",
+          "groups",
+          "sample"
+        ],
+        "type": "object"
+      },
+      "RegistryKeyDto": {
+        "description": "Складений ключ довідника в описі (`D-151`, FEATURE-REGISTRY-TABLES §4.1).",
+        "properties": {
+          "code": {
+            "description": "Код ключа в межах довідника.",
+            "type": "string"
+          },
+          "fieldCodes": {
+            "description": "Поля ключа в порядку частин — це й порядок аргументів `REGFIND`.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "id": {
+            "description": "Ідентифікатор ключа.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "ignoreCase": {
+            "description": "Текстові частини порівнюються без урахування регістру.",
+            "type": "boolean"
+          },
+          "isActive": {
+            "description": "Чи діє ключ.",
+            "type": "boolean"
+          },
+          "isPrimary": {
+            "description": "Первинний ключ: ним шукає `REGFIND`.",
+            "type": "boolean"
+          },
+          "nameL10n": {
+            "$ref": "#/components/schemas/LocalizedText",
+            "description": "Назва мовами каталогу."
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "nameL10n",
+          "fieldCodes",
+          "isPrimary",
+          "ignoreCase",
+          "isActive"
+        ],
+        "type": "object"
+      },
+      "RegistryKeyDuplicateDto": {
+        "description": "Одне значення ключа, яке мають кілька записів.",
+        "properties": {
+          "entries": {
+            "description": "Записи з цим значенням.",
+            "items": {
+              "$ref": "#/components/schemas/RegistryKeyDuplicateEntryDto"
+            },
+            "type": "array"
+          },
+          "keyText": {
+            "description": "Людський вигляд значення ключа.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "keyText",
+          "entries"
+        ],
+        "type": "object"
+      },
+      "RegistryKeyDuplicateEntryDto": {
+        "description": "Запис у групі дублікатів.",
+        "properties": {
+          "code": {
+            "description": "Код запису.",
+            "type": "string"
+          },
+          "id": {
+            "description": "Ідентифікатор запису.",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "code"
+        ],
+        "type": "object"
+      },
+      "RegistryKeySaveDto": {
+        "description": "Ключ, який зберігає конструктор (`D-151`).",
+        "properties": {
+          "code": {
+            "description": "Код ключа; у наявного не змінюється.",
+            "type": "string"
+          },
+          "fieldCodes": {
+            "description": "Коди полів у порядку частин (1–8); у наявного не змінюються.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "id": {
+            "description": "`null` — новий ключ; інакше — правка наявного.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "ignoreCase": {
+            "description": "Порівняння тексту без регістру; у наявного не змінюється.",
+            "type": "boolean"
+          },
+          "isActive": {
+            "description": "Чи діє ключ; вимкнений — не перевіряється.",
+            "type": "boolean"
+          },
+          "isPrimary": {
+            "description": "Первинний ключ; у наявного не змінюється.",
+            "type": "boolean"
+          },
+          "nameL10n": {
+            "$ref": "#/components/schemas/LocalizedText",
+            "description": "Назва мовами каталогу; змінюється."
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "nameL10n",
+          "fieldCodes",
+          "isPrimary",
+          "ignoreCase",
+          "isActive"
+        ],
+        "type": "object"
+      },
       "RegistryMappingDto": {
         "description": "Мапінг зовнішнього поля на поле довідника.",
         "properties": {
@@ -7414,6 +8826,14 @@
         ],
         "type": "object"
       },
+      "RegistryMissingPolicy": {
+        "description": "Що робить синк довідника з записом, чий елемент зник із джерела\n(`D-212`). Колонка `ext.SourceEntity.OnMissingInSource`.",
+        "enum": [
+          "MarkOrphaned",
+          "Deactivate",
+          "Ignore"
+        ]
+      },
       "RegistryRelationDto": {
         "description": "Зв'язок довідника з іншим довідником (`ФВ-8.4`).",
         "properties": {
@@ -7425,7 +8845,7 @@
             ]
           },
           "kind": {
-            "description": "Вид: `Hierarchy`, `Cascade` або `Association`.",
+            "description": "Вид: `Hierarchy`, `Cascade`, `Composition` (поле композиції, `D-155`) або\n`Association`.",
             "type": "string"
           },
           "linkCount": {
@@ -7441,6 +8861,17 @@
             "type": [
               "null",
               "string"
+            ]
+          },
+          "onParentDelete": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ParentDeletePolicy",
+                "description": "Що стається з частиною, коли видаляють батька; лише для `Composition`, інакше `null`."
+              }
             ]
           },
           "targetRegistryCode": {
@@ -7466,6 +8897,109 @@
           "targetRegistryCode",
           "linkKind",
           "linkCount"
+        ],
+        "type": "object"
+      },
+      "RegistryRelationKind": {
+        "enum": [
+          "Reference",
+          "Composition",
+          null
+        ]
+      },
+      "RegistryRowDto": {
+        "description": "Рядок довідника зі значеннями полів (RT-13, FEATURE-REGISTRY-TABLES §7.1).",
+        "properties": {
+          "code": {
+            "description": "Код запису.",
+            "type": "string"
+          },
+          "display": {
+            "description": "Назва мовою користувача; немає — код.",
+            "type": "string"
+          },
+          "id": {
+            "description": "Запис.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "parentEntryId": {
+            "description": "Батько ієрархії (`ParentEntryId`), не композиції.",
+            "format": "int64",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "validFrom": {
+            "description": "Перший чинний день; `null` — від початку.",
+            "format": "date",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "validTo": {
+            "description": "Перший НЕчинний день; `null` — без обмеження.",
+            "format": "date",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "values": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/RegistryRowValueDto"
+            },
+            "description": "Код поля → значення; поля без значення відсутні.",
+            "type": "object"
+          },
+          "version": {
+            "description": "Жетон конкуренції (`D-166`): найпізніший `PeriodStart` запису та його значень. Непрозорий\nрядок — клієнт повертає його як `baseVersion` (RT-14), а не розбирає.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "display",
+          "parentEntryId",
+          "validFrom",
+          "validTo",
+          "version",
+          "values"
+        ],
+        "type": "object"
+      },
+      "RegistryRowValueDto": {
+        "description": "Значення поля рядка.",
+        "properties": {
+          "display": {
+            "description": "Назва цілі `Lookup` або код одиниці поля `Unit`; інакше `null`.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "unit": {
+            "description": "Код одиниці числового значення; `null` — безрозмірне.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "value": {
+            "description": "Значення рядком: число — інваріантно й без втрати знаків (D-30), дата — `yyyy-MM-dd`,\nлогічне — `true`/`false`, `Lookup` — ідентифікатор запису-цілі, `Unit` — ідентифікатор одиниці.",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "value",
+          "display",
+          "unit"
         ],
         "type": "object"
       },
@@ -7573,6 +9107,48 @@
           "messageL10n",
           "parametersJson",
           "isActive"
+        ],
+        "type": "object"
+      },
+      "RegistryRuleViolationDto": {
+        "description": "Порушення правила довідника одним записом (RT-17a, FEATURE-REGISTRY-TABLES §6, §7.1).",
+        "properties": {
+          "entryCode": {
+            "description": "Його код — для людини.",
+            "type": "string"
+          },
+          "entryId": {
+            "description": "Запис, на якому правило не виконалося.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "messageKey": {
+            "description": "Ключ тексту в каталозі.",
+            "type": "string"
+          },
+          "params": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Параметри тексту: `rule`, `entryCode`, `message` (текст правила мовою\nкористувача); за потреби `value` (значення Σ шаблону «Сума дочірніх»),\n`field`, `errorCode` (вираз дав помилку-значення).",
+            "type": "object"
+          },
+          "rule": {
+            "description": "Код правила.",
+            "type": "string"
+          },
+          "severity": {
+            "description": "Рівень: `Info`, `Warning` або `Error`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "entryId",
+          "entryCode",
+          "rule",
+          "severity",
+          "messageKey",
+          "params"
         ],
         "type": "object"
       },
@@ -7744,6 +9320,16 @@
               "type": "string"
             },
             "type": "array"
+          },
+          "scopes": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/RoleScopeDto"
+            },
+            "description": "Області дії за кодом ролі (ФВ-6.14): роль діє лише в перелічених\nпроєктах. Поле відсутнє — області наявних призначень ЗБЕРІГАЮТЬСЯ (клієнт,\nщо про нього не знає, не розширює роль до всіх проєктів); передано —\nроль без запису в ньому діє в усіх проєктах.",
+            "type": [
+              "null",
+              "object"
+            ]
           },
           "validity": {
             "additionalProperties": {
@@ -8260,6 +9846,68 @@
         ],
         "type": "object"
       },
+      "RoleScopeDto": {
+        "additionalProperties": false,
+        "description": "Область дії призначення ролі в тілі запиту й у відповіді (ФВ-6.14, D-214).",
+        "properties": {
+          "periods": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RoleScopePeriodsDto",
+                "description": "Проміжок звітних періодів; `null` — усі періоди."
+              }
+            ]
+          },
+          "projects": {
+            "description": "Проєкти, у яких роль діє; непорожньо, без повторів.",
+            "items": {
+              "format": "int32",
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "sheets": {
+            "description": "Коди аркушів (`SheetDef.Code`) — роль діє лише на них; `null` чи\nпорожньо — на всіх аркушах.",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          }
+        },
+        "required": [
+          "projects"
+        ],
+        "type": "object"
+      },
+      "RoleScopePeriodsDto": {
+        "additionalProperties": false,
+        "description": "Проміжок звітних періодів області (D-214): межі включні, будь-яка може бути відкритою.",
+        "properties": {
+          "from": {
+            "description": "Перший період (`Рік*100+Номер`, напр. `202601`); `null` — від початку.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "to": {
+            "description": "Останній період; `null` — без кінця.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          }
+        },
+        "type": "object"
+      },
       "RoleValidityWindow": {
         "description": "Межі чинності одного призначення — підміна ролі на час відпустки (ФВ-6.16).",
         "properties": {
@@ -8312,6 +9960,17 @@
           "isBuiltIn": {
             "description": "Вбудована роль із seed: видаленню не підлягає.",
             "type": "boolean"
+          },
+          "nameL10n": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LocalizedText",
+                "description": "Назва мовами каталогу (`sec.Role.NameL10n`) — те, що адміністратор\nзадав при створенні чи перейменуванні. Сховище заповнює її завжди;\n`null` лише в підробках, що назви не моделюють. Клієнт без назви\nпоказує код."
+              }
+            ]
           },
           "permissions": {
             "description": "Права ролі.",
@@ -8804,6 +10463,13 @@
               "string"
             ]
           },
+          "secretConfirmation": {
+            "description": "Повторно введений секрет джерела. Обов'язковий, лише коли в середовищі\nзаданий секрет під це джерело і адреса нова (створення або зміна\nтранспорту, основної чи запасної адреси); інакше ігнорується. Не\nзберігається й не повертається.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
           "transport": {
             "$ref": "#/components/schemas/ExternalTransport",
             "description": "Транспорт: `PiWebApi`, `PiSqlClient`, `Sql`."
@@ -9192,12 +10858,33 @@
       "SaveRegistryDefinitionDraftRequest": {
         "description": "Запит на збереження чернетки опису (`BE-24` крок 2).",
         "properties": {
+          "codeMode": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RegistryCodeMode",
+                "description": "Режим коду записів; `null` — без змін."
+              }
+            ]
+          },
           "fields": {
             "description": "Повний перелік полів після правки.",
             "items": {
               "$ref": "#/components/schemas/RegistryFieldSaveDto"
             },
             "type": "array"
+          },
+          "keys": {
+            "description": "Повний перелік ключів; `null` — публікація ключів не змінює.",
+            "items": {
+              "$ref": "#/components/schemas/RegistryKeySaveDto"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
           },
           "reason": {
             "description": "Причина зміни; при публікації йде в журнал.",
@@ -9229,12 +10916,33 @@
       "SaveRegistryDefinitionDto": {
         "description": "Запит на збереження опису довідника.",
         "properties": {
+          "codeMode": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RegistryCodeMode",
+                "description": "Режим коду записів (`D-157`); `null` — без змін. Змінюється, лише поки в довіднику\nнемає жодного запису."
+              }
+            ]
+          },
           "fields": {
             "description": "Повний перелік полів після правки.",
             "items": {
               "$ref": "#/components/schemas/RegistryFieldSaveDto"
             },
             "type": "array"
+          },
+          "keys": {
+            "description": "Повний перелік ключів після правки (RT-11); ключ, якого в переліку немає, вимикається.\n`null` — ключі не змінюються (клієнт, що про ключі не знає, їх не вимикає).",
+            "items": {
+              "$ref": "#/components/schemas/RegistryKeySaveDto"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
           },
           "reason": {
             "description": "Причина зміни. Обов'язкова: опис довідника змінює те, як читаються ВЖЕ\nзбережені записи, і питання «чому тут з'явилося це поле» ставлять через рік.",
@@ -9659,6 +11367,40 @@
           "numericMode",
           "calendarMode",
           "traceLevel"
+        ],
+        "type": "object"
+      },
+      "SetRegistrySyncPolicyRequest": {
+        "description": "Політика синку довідника з AF (`D-212`).",
+        "properties": {
+          "onMissingInSource": {
+            "$ref": "#/components/schemas/RegistryMissingPolicy",
+            "description": "Що робити з записом, чий елемент зник у джерелі."
+          },
+          "validFromAttribute": {
+            "description": "Атрибут початку чинності; `null` — не синхронізувати.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "validToAttribute": {
+            "description": "Атрибут кінця чинності; `null` — не синхронізувати.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "validToInclusive": {
+            "description": "Кінець у джерелі — останній чинний день.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "onMissingInSource",
+          "validFromAttribute",
+          "validToAttribute",
+          "validToInclusive"
         ],
         "type": "object"
       },
@@ -10173,6 +11915,92 @@
         ],
         "type": "object"
       },
+      "SourceEntityDto": {
+        "description": "Сутність збору у відповіді на заведення чи прив'язку.",
+        "properties": {
+          "code": {
+            "description": "Код у джерелі.",
+            "type": "string"
+          },
+          "dataSourceId": {
+            "description": "З'єднання.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "displayName": {
+            "description": "Підпис.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "entityPath": {
+            "description": "Шлях в ієрархії.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "id": {
+            "description": "Ідентифікатор `ext.SourceEntity`.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "isActive": {
+            "description": "Чи ввімкнено збір.",
+            "type": "boolean"
+          },
+          "onMissingInSource": {
+            "$ref": "#/components/schemas/RegistryMissingPolicy",
+            "description": "Політика синку: зникнення елемента в джерелі (`D-212`)."
+          },
+          "registryDefId": {
+            "description": "Довідник; `null` — не прив'язана.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "sourceKind": {
+            "$ref": "#/components/schemas/RegistrySourceKind",
+            "description": "Хто master."
+          },
+          "validFromAttribute": {
+            "description": "Атрибут початку чинності; `null` — не синхронізується.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "validToAttribute": {
+            "description": "Атрибут кінця чинності; `null` — не синхронізується.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "validToInclusive": {
+            "description": "Кінець у джерелі — останній чинний день.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "dataSourceId",
+          "code",
+          "displayName",
+          "entityPath",
+          "sourceKind",
+          "registryDefId",
+          "isActive",
+          "onMissingInSource",
+          "validFromAttribute",
+          "validToAttribute",
+          "validToInclusive"
+        ],
+        "type": "object"
+      },
       "SourceEntityStatus": {
         "description": "Сутність збору разом зі станом останнього прогону.",
         "properties": {
@@ -10229,6 +12057,14 @@
             "type": [
               "null",
               "string"
+            ]
+          },
+          "registryDefId": {
+            "description": "Довідник, до якого прив'язана сутність; `null` — не прив'язана.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
             ]
           },
           "transport": {
@@ -10371,6 +12207,13 @@
             "description": "Момент зміни в UTC.",
             "format": "date-time",
             "type": "string"
+          },
+          "changedByDisplayName": {
+            "description": "Ім'я автора (`R-18`); `null` — запису користувача вже немає.",
+            "type": [
+              "null",
+              "string"
+            ]
           },
           "changedByUserId": {
             "description": "Автор — <b>UserId</b>, не SID (R-A2, D-86).",
@@ -11054,7 +12897,7 @@
         "description": "Diff двох версій шаблону. Зіставлення — **за ідентичністю** (`Code`,\n`RowKey`), не за позицією: інакше будь-яке перевпорядкування дало б\n«змінено все».",
         "properties": {
           "affectedDocumentCount": {
-            "description": "Скільки документів прив'язано до вихідної версії.",
+            "description": "Скільки документів прив'язано до вихідної (старшої) версії.",
             "format": "int32",
             "type": "integer"
           },
@@ -11064,11 +12907,23 @@
               "$ref": "#/components/schemas/TemplateChangeDto"
             },
             "type": "array"
+          },
+          "fromVersionId": {
+            "description": "Вихідна версія — СТАРША з двох, незалежно від того, з якої відкрили\nпорівняння (R-08).",
+            "format": "int32",
+            "type": "integer"
+          },
+          "toVersionId": {
+            "description": "Цільова версія — новіша з двох.",
+            "format": "int32",
+            "type": "integer"
           }
         },
         "required": [
           "changes",
-          "affectedDocumentCount"
+          "affectedDocumentCount",
+          "fromVersionId",
+          "toVersionId"
         ],
         "type": "object"
       },
@@ -11270,6 +13125,28 @@
           "presentationRevision",
           "clonedFromVersionId",
           "publishedAt"
+        ],
+        "type": "object"
+      },
+      "TemplateVersionsForTemplate": {
+        "description": "Версії одного шаблону в межах пакетної відповіді (`ListTemplateVersionsHandler.HandleBatchAsync`, `BR-07`).",
+        "properties": {
+          "templateId": {
+            "description": "Шаблон, якому належать версії.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "versions": {
+            "description": "Версії шаблону, у тому самому порядку, що й Task&lt;PagedResult&lt;TemplateVersionSummary&gt;&gt; ListTemplateVersionsHandler.HandleAsync(int templateId, CursorRequest page, CancellationToken ct).",
+            "items": {
+              "$ref": "#/components/schemas/TemplateVersionSummary"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "templateId",
+          "versions"
         ],
         "type": "object"
       },
@@ -11756,6 +13633,14 @@
           "isEnabled": {
             "description": "Чи має розклад стояти в планувальнику.",
             "type": "boolean"
+          },
+          "lookbackDays": {
+            "description": "Вікно збору назад, днів (ФВ-13.15), 1–366; `null` — лишити наявне.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
           }
         },
         "required": [
@@ -12017,6 +13902,49 @@
         ],
         "type": "object"
       },
+      "UserRoleAssignmentView": {
+        "description": "Особисте призначення ролі користувачу — з межами чинності й областю дії.",
+        "properties": {
+          "roleCode": {
+            "description": "Код ролі.",
+            "type": "string"
+          },
+          "scope": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RoleScopeDto",
+                "description": "Область дії (ФВ-6.14); `null` — роль діє в усіх проєктах. Порожній\nперелік — збережена область не розбирається, і роль не діє ніде\n(IReadOnlyList&lt;int&gt;? RoleAssignment.ScopedProjectIds())."
+              }
+            ]
+          },
+          "validFrom": {
+            "description": "Початок дії; `null` — від завжди.",
+            "format": "date",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "validTo": {
+            "description": "Кінець дії; `null` — безстроково.",
+            "format": "date",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "roleCode",
+          "validFrom",
+          "validTo",
+          "scope"
+        ],
+        "type": "object"
+      },
       "UserView": {
         "description": "Обліковий запис у переліку.",
         "properties": {
@@ -12260,12 +14188,17 @@
             "description": "Період, за який виконано перевірку.",
             "format": "int32",
             "type": "integer"
+          },
+          "validated": {
+            "description": "Чи документ за цей період узагалі перевіряли. `false` — перевірку ще не\nзапускали, і порожній `Messages` тоді НЕ означає «зауважень немає»\n(`X-32`, `A7-28`).",
+            "type": "boolean"
           }
         },
         "required": [
           "documentId",
           "periodKey",
-          "messages"
+          "messages",
+          "validated"
         ],
         "type": "object"
       },
@@ -12873,6 +14806,46 @@
               }
             },
             "description": "Unprocessable Entity"
+          },
+          "423": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Locked"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Too Many Requests"
           }
         },
         "summary": "Зміна власного пароля.",
@@ -13076,6 +15049,131 @@
         ]
       }
     },
+    "/api/v1/collection-runs/coverage-events": {
+      "get": {
+        "description": "⚠ Літеральний сегмент, а не `{id}`: обмеження `{id:long}` у\nдеталі прогону не дає цим двом маршрутам збігтися.",
+        "parameters": [
+          {
+            "description": "Лише події сутностей цього з'єднання.",
+            "in": "query",
+            "name": "dataSource",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Лише події цієї сутності збору.",
+            "in": "query",
+            "name": "entity",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Будь-який статус із `CollectionCoverage.KnownStatuses` (`src/Ecr.Domain/Entities/Integration/IntegrationLogs.cs`), без урахування регістру: події матеріалізації й синку довідника; інше — `422`.",
+            "in": "query",
+            "name": "status",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Лише події цього періоду.",
+            "in": "query",
+            "name": "periodKey",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Курсор наступної сторінки.",
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Розмір сторінки 1..200; `0` — типове 50.",
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagedResultOfCoverageEventView"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagedResultOfCoverageEventView"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagedResultOfCoverageEventView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Події журналу покриття: пропуск закритого періоду, конфлікт із ручним\nзначенням, стеля точок (ІНТ-3.3, `D-118`). Новіші першими.",
+        "tags": [
+          "CollectionRuns"
+        ]
+      }
+    },
     "/api/v1/collection-runs/{id}": {
       "get": {
         "parameters": [
@@ -13208,7 +15306,7 @@
         ]
       },
       "post": {
-        "description": "⚠ `If-Match` тут не потрібен: створення нічого не перезаписує.\nНевалідний cron — `422 ECR-REQ-0422` ДО запису; сутності немає —\n`404 ECR-INT-0404`; розклад у неї вже є — `409 ECR-JOB-0409`.",
+        "description": "⚠ `If-Match` тут не потрібен: створення нічого не перезаписує.\nНевалідний cron, вікно поза 1–366 днів або сутність — власна форма ECR\n(ФВ-12.8) — `422 ECR-REQ-0422` ДО запису; сутності немає —\n`404 ECR-INT-0404`; розклад у неї вже є — `409 ECR-JOB-0409`.",
         "requestBody": {
           "content": {
             "application/*+json": {
@@ -14092,7 +16190,7 @@
         ]
       },
       "put": {
-        "description": "⚠ Код не змінюється: на нього спираються сутності збору, і\nперейменування ключа виглядало б як правка підпису, а було б переїздом\nусієї конфігурації збору.",
+        "description": "⚠ Код не змінюється: на нього спираються сутності збору, і\nперейменування ключа виглядало б як правка підпису, а було б переїздом\nусієї конфігурації збору.\n\n⛔ Нова адреса (транспорт, основна чи запасна адреса — правило в\n`DataSourceAddress`) джерела, під яке середовище дає секрет, без\nправильного `secretConfirmation` — `422\nerr.ECR-REQ-0422.dataSourceSecretReentryRequired` ДО запису (S3). У\nжурнал безпеки йдуть стара й нова адреса; секрет — ніколи.",
         "parameters": [
           {
             "in": "path",
@@ -14502,7 +16600,7 @@
     },
     "/api/v1/data-sources/{id}/test": {
       "post": {
-        "description": "⚠ `200`, а не `202`: проба читає ОДИН рівень каталогу джерела\nі вкладається у відповідь — на відміну від збору, який іде по діапазону\nі тому віддає `jobId`.\n\n⚠ Причина обов'язкова і йде в журнал безпеки; відмова джерела — це\n`{ ok: false, error }`, а не помилка запиту. Проба цього ж джерела,\nяка вже виконується, — `409 ECR-JOB-0409`.",
+        "description": "⚠ `200`, а не `202`: проба читає ОДИН рівень каталогу джерела\nі вкладається у відповідь — на відміну від збору, який іде по діапазону\nі тому віддає `jobId`.\n\n⚠ Причина обов'язкова і йде в журнал безпеки; відмова джерела — це\n`{ ok: false, error, messageKey }`, а не помилка запиту. Проба цього ж\nджерела, яка вже виконується, — `409 ECR-JOB-0409`.\n\n⛔ `error` — лише категорія (`auth`, `unreachable`,\n`tls`, `timeout`, `other`, `adapterNotRegistered`),\n`messageKey` — `integration.test.failed.{категорія}`. Сирий\nтекст винятку — лише в серверному журналі (S3: інакше кнопка — сканер мережі).",
         "parameters": [
           {
             "in": "path",
@@ -15775,6 +17873,26 @@
             },
             "description": "OK"
           },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
           "404": {
             "content": {
               "application/json": {
@@ -15794,6 +17912,26 @@
               }
             },
             "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
           },
           "422": {
             "content": {
@@ -16441,7 +18579,7 @@
     },
     "/api/v1/documents/{id}/tables/status": {
       "get": {
-        "description": "⚠ Окремий маршрут, а не поля в `DocumentTableDto` сусіднього\n`GET …/tables`: той віддає СТРУКТУРУ (що є в документі) і\nчитається один раз на відкриття, а це — СТАН (скільки введено), який\nзмінюється після кожного запису. Склеїти їх означало б або\nперечитувати структуру заради лічильника, або показувати лічильник\nіз моменту відкриття сторінки.\n\n⛔ `errorCount`/`warningCount` приходять `null`, доки\nдокумент за цей період не перевіряли. Нуль тут був би тією самою\nнеправдою, що й «0 зауважень» у неперевіреного документа\n(`A7-28`): у клієнта має лишитися змога показати «—», а не\nзелений нуль. Сусідній `GET …/validation` тримає той самий поділ\nкодом `404` (`err.ECR-DOC-0404.notValidated`); тут\n`404` не годиться — заповненість відома й до першої перевірки.",
+        "description": "⚠ Окремий маршрут, а не поля в `DocumentTableDto` сусіднього\n`GET …/tables`: той віддає СТРУКТУРУ (що є в документі) і\nчитається один раз на відкриття, а це — СТАН (скільки введено), який\nзмінюється після кожного запису. Склеїти їх означало б або\nперечитувати структуру заради лічильника, або показувати лічильник\nіз моменту відкриття сторінки.\n\n⛔ `errorCount`/`warningCount` приходять `null`, доки\nдокумент за цей період не перевіряли. Нуль тут був би тією самою\nнеправдою, що й «0 зауважень» у неперевіреного документа\n(`A7-28`): у клієнта має лишитися змога показати «—», а не\nзелений нуль. Сусідній `GET …/validation` тримає той самий поділ\nполем `validated: false` (`X-32`).",
         "parameters": [
           {
             "description": "Документ.",
@@ -16566,7 +18704,7 @@
     },
     "/api/v1/documents/{id}/validation": {
       "get": {
-        "description": "⛔ Читання, а не повторний прогін (директива №09 `W8` п.3, `S-19`).\nПідсумок зберігався давно (`ФВ-5.19`), і прочитати його не міг ніхто:\n`IValidationResultStore.GetLatestAsync` не мав жодного виклику.\nЦіна видна на екрані — перелік зауважень жив рівно до перезавантаження\nсторінки, і щоб побачити його знову, оператор мусив ЗАПУСТИТИ\nперевірку заново.\n\n⚠ `404`, а не порожній перелік, коли перевірку ще не запускали:\n«зауважень немає» і «ще не перевіряли» — різні відповіді, і показувати\nпершу замість другої означає повідомити неправду про готовність.",
+        "description": "⛔ Читання, а не повторний прогін (директива №09 `W8` п.3, `S-19`).\nПідсумок зберігався давно (`ФВ-5.19`), і прочитати його не міг ніхто:\n`IValidationResultStore.GetLatestAsync` не мав жодного виклику.\nЦіна видна на екрані — перелік зауважень жив рівно до перезавантаження\nсторінки, і щоб побачити його знову, оператор мусив ЗАПУСТИТИ\nперевірку заново.\n\n⚠ «Зауважень немає» і «ще не перевіряли» — різні відповіді, і показувати\nпершу замість другої означає повідомити неправду про готовність. Тому\nнеперевірений документ віддає `validated: false`, а не порожній\nперелік сам по собі.\n\n✎ `X-32`: доти це розрізнення несла відповідь `404`. Але «ще не\nперевіряли» — звичайний стан кожного нового документа, а не помилка:\nКОЖНЕ відкриття такого документа давало червоний рядок у консолі\nбраузера («Failed to load resource: 404») і невдалий запит у мережі —\nшум, за яким справжні відмови перестають помічати. Тепер це `200`\nз тим самим змістом, названим полем.",
         "parameters": [
           {
             "description": "Документ.",
@@ -16609,26 +18747,6 @@
               }
             },
             "description": "OK"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              },
-              "text/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              },
-              "text/plain": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            },
-            "description": "Not Found"
           }
         },
         "summary": "Останній результат перевірки. Право `Document.View`.",
@@ -16840,6 +18958,26 @@
               }
             },
             "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
           }
         },
         "summary": "Заводить мапінг. Право `Integration.Manage`.",
@@ -16867,6 +19005,26 @@
         "responses": {
           "204": {
             "description": "No Content"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
           },
           "404": {
             "content": {
@@ -16993,6 +19151,26 @@
             },
             "description": "OK"
           },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
           "404": {
             "content": {
               "application/json": {
@@ -17097,6 +19275,26 @@
             },
             "description": "OK"
           },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
           "404": {
             "content": {
               "application/json": {
@@ -17179,6 +19377,26 @@
               }
             },
             "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
           },
           "404": {
             "content": {
@@ -18280,6 +20498,26 @@
               }
             },
             "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
           }
         },
         "summary": "Прив'язки методології до колонок. Право `Calculation.View`.",
@@ -18386,6 +20624,26 @@
             },
             "description": "Not Found"
           },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -18410,6 +20668,58 @@
         "summary": "Прив'язує вихід методології до колонки документа. Право `Calculation.EditRule`.",
         "tags": [
           "Methodologies"
+        ]
+      }
+    },
+    "/api/v1/methodologies/{id}/publications": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Методологія.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/MethodologyPublicationEntry"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/MethodologyPublicationEntry"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/MethodologyPublicationEntry"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "Публікації версій методології, найновіші першими. Право `Calculation.View`.",
+        "tags": [
+          "MethodologyPublications"
         ]
       }
     },
@@ -18470,6 +20780,26 @@
               }
             },
             "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
           }
         },
         "summary": "Прогін методології <b>без запису</b>. Право `Calculation.View`.",
@@ -18787,6 +21117,26 @@
               }
             },
             "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
           }
         },
         "summary": "Константи версії. Право `Calculation.View`.",
@@ -19235,6 +21585,26 @@
               }
             },
             "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
           }
         },
         "summary": "Формули версії. Право `Calculation.View`.",
@@ -19643,6 +22013,26 @@
               }
             },
             "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
           }
         },
         "summary": "Оголошені виходи версії. Право `Calculation.View`.",
@@ -19865,6 +22255,26 @@
             },
             "description": "OK"
           },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
           "409": {
             "content": {
               "application/json": {
@@ -19967,6 +22377,26 @@
               }
             },
             "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
           }
         },
         "summary": "Обов'язкові вхідні колонки версії. Право `Calculation.View`.",
@@ -20279,6 +22709,26 @@
               }
             },
             "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
           }
         },
         "summary": "Правила відбору рядків версії. Право `Calculation.View`.",
@@ -20487,6 +22937,26 @@
               }
             },
             "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
           }
         },
         "summary": "Золотий набір версії. Право `Calculation.View`.",
@@ -21857,6 +24327,26 @@
         "responses": {
           "204": {
             "description": "No Content"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
           }
         },
         "summary": "Активує проєкт. Право `Project.Manage`.",
@@ -21900,6 +24390,26 @@
               }
             },
             "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
           }
         },
         "summary": "Маршрут погодження проєкту. Право `Project.Manage`.",
@@ -22028,6 +24538,26 @@
           "204": {
             "description": "No Content"
           },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
           "409": {
             "content": {
               "application/json": {
@@ -22109,6 +24639,26 @@
               }
             },
             "description": "Created"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
           }
         },
         "summary": "Клонує проєкт разом із налаштуваннями. Право `Project.Manage`.",
@@ -22155,9 +24705,112 @@
         "responses": {
           "204": {
             "description": "No Content"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
           }
         },
         "summary": "Встановлює поточний період проєкту. Право `Period.Configure`.",
+        "tags": [
+          "Projects"
+        ]
+      }
+    },
+    "/api/v1/projects/{id}/document-template": {
+      "get": {
+        "description": "⚠ Не потребує `Template.View`: це не перегляд шаблону, а рівно те,\nбез чого не створити документ, — версію визначає проєкт.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentTemplateDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentTemplateDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentTemplateDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Версія шаблону проєкту й аркуші для нового документа. Право\n`Document.Create` і грант `Write` на проєкт (V-12).",
         "tags": [
           "Projects"
         ]
@@ -22197,6 +24850,26 @@
               }
             },
             "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
           }
         },
         "summary": "Календар періодів проєкту. Право `Document.View`.",
@@ -22327,6 +25000,26 @@
           "204": {
             "description": "No Content"
           },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -22351,6 +25044,229 @@
         "summary": "Змінює пояс майданчика проєкту. Право `Project.Manage` (T6/#52).",
         "tags": [
           "Projects"
+        ]
+      }
+    },
+    "/api/v1/projects/{projectId}/recalculation-approvals": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/RecalculationApprovalDto"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/RecalculationApprovalDto"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/RecalculationApprovalDto"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "Живі погодження проєкту: не використані й не прострочені.",
+        "tags": [
+          "RecalculationApprovals"
+        ]
+      },
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecalculationApprovalRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecalculationApprovalRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecalculationApprovalRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecalculationApprovalDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecalculationApprovalDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecalculationApprovalDto"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Створює запит на погодження від імені поточного користувача.",
+        "tags": [
+          "RecalculationApprovals"
+        ]
+      }
+    },
+    "/api/v1/projects/{projectId}/recalculation-approvals/{id}/confirm": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecalculationApprovalDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecalculationApprovalDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecalculationApprovalDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "summary": "Підтверджує чужий запит під сесією поточного користувача.",
+        "tags": [
+          "RecalculationApprovals"
         ]
       }
     },
@@ -23271,6 +26187,157 @@
         ]
       }
     },
+    "/api/v1/registries/{code}/entries/batch": {
+      "post": {
+        "description": "Звіт — завжди 200, як імпорт CSV: помилки рядків (зокрема `ECR-REG-4093 entryChanged` для\nзастарілого `baseVersion` і `4092 keyTaken`) — дані для сітки. Хоч одна помилка або\n`dryRun` — не записано нічого. 409 — лише гонка за ключем під час запису.",
+        "parameters": [
+          {
+            "description": "Код довідника.",
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Лише перевірка — із відкатом.",
+            "in": "query",
+            "name": "dryRun",
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegistryBatchRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegistryBatchRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegistryBatchRequest"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistryBatchResult"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistryBatchResult"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistryBatchResult"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Пакетний запис рядків довідника (RT-14): `upsert` і `delete` однією транзакцією.\nПраво `Registry.EditData` або грант `Write` на довідник.",
+        "tags": [
+          "RegistryRows"
+        ]
+      }
+    },
     "/api/v1/registries/{code}/entries/import": {
       "post": {
         "description": "Звіт — завжди 200: помилки рядків є даними для того, хто імпортує.\nХоч одна помилка або `dryRun` — не записано нічого. Стеля файлу —\n`Registries:ImportMaxBytes`. Колонки — коди полів ОПУБЛІКОВАНОГО\nопису плюс `code`; валідація значень — та сама, що при ручному\nредагуванні запису (UpsertRegistryEntryHandler).",
@@ -23471,6 +26538,77 @@
         "tags": [
           "Registries"
         ]
+      },
+      "get": {
+        "description": "⛔ X-03/R-04: форма правки запису відкривається з цієї відповіді, а не з\nрядка переліку, де назва лише однією мовою, а значень полів немає.",
+        "parameters": [
+          {
+            "description": "Код довідника.",
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Запис.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistryEntryDetailDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistryEntryDetailDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistryEntryDetailDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Один запис довідника цілком: назва всіма мовами й значення полів.\nПраво `Registry.View`.",
+        "tags": [
+          "Registries"
+        ]
       }
     },
     "/api/v1/registries/{code}/entries/{id}/validity": {
@@ -23547,6 +26685,359 @@
         ]
       }
     },
+    "/api/v1/registries/{code}/external-keys": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Код довідника.",
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Лише зв'язки цього запису.",
+            "in": "query",
+            "name": "entryId",
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Лише зв'язки цього джерела.",
+            "in": "query",
+            "name": "dataSourceId",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Курсор наступної сторінки.",
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Розмір сторінки 1..200; `0` — типове 50.",
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagedResultOfRegistryExternalKeyView"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagedResultOfRegistryExternalKeyView"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagedResultOfRegistryExternalKeyView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Зв'язки записів довідника, за зростанням `id`. Право `Registry.View`\nабо грант `Read` на довідник.",
+        "tags": [
+          "RegistryExternalKeys"
+        ]
+      },
+      "post": {
+        "description": "⛔ Пара «джерело + ідентифікатор» уже прив'язана (до будь-якого запису) —\n`409 ECR-REG-0409` (`externalKeyTaken`), а не другий рядок: той самий\nелемент джерела не може вказувати на два записи. Запис чужого довідника або\nвидалений — `404`.",
+        "parameters": [
+          {
+            "description": "Код довідника.",
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/BindRegistryExternalKeyCommand"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BindRegistryExternalKeyCommand"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BindRegistryExternalKeyCommand"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistryExternalKeyView"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistryExternalKeyView"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistryExternalKeyView"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Прив'язує запис до елемента джерела. Право `Registry.EditData` або грант\n`Write` на довідник.",
+        "tags": [
+          "RegistryExternalKeys"
+        ]
+      }
+    },
+    "/api/v1/registries/{code}/external-keys/{id}": {
+      "delete": {
+        "description": "Зв'язок запису іншого довідника — `404`, а не видалення «бо id збігся».",
+        "parameters": [
+          {
+            "description": "Код довідника.",
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Зв'язок.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Відв'язує. Право `Registry.EditData` або грант `Write` на довідник.",
+        "tags": [
+          "RegistryExternalKeys"
+        ]
+      }
+    },
     "/api/v1/registries/{code}/history": {
       "get": {
         "description": "⚠ Історія ОПИСУ, а не записів: зміни записів живуть у журналі комірок і\nв самих вікнах чинності. Питання, на яке відповідає цей маршрут, —\n«чому тут з'явилося це поле».",
@@ -23615,6 +27106,244 @@
         "summary": "Історія змін опису довідника. Право `Registry.View`.",
         "tags": [
           "Registries"
+        ]
+      }
+    },
+    "/api/v1/registries/{code}/keys/check": {
+      "post": {
+        "description": "⛔ Той самий алгоритм, що й публікація ключа: «дублікатів немає» тут означає, що публікація\nне відмовить `409 existingDuplicates` на тих самих даних.",
+        "parameters": [
+          {
+            "description": "Код довідника.",
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegistryKeyCheckRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegistryKeyCheckRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegistryKeyCheckRequest"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistryKeyCheckResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistryKeyCheckResponse"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistryKeyCheckResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Жива перевірка дублікатів майбутнього ключа на наявних записах. Право\n`Registry.EditDefinition`.",
+        "tags": [
+          "RegistryDefinitionTools"
+        ]
+      }
+    },
+    "/api/v1/registries/{code}/rows": {
+      "get": {
+        "description": "Фільтри полів — параметри `field.&lt;КОД&gt;=значення` у поданні `values[].value`.",
+        "parameters": [
+          {
+            "description": "Код довідника.",
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Бізнес-дата чинності; обов'язкова для темпорального довідника.",
+            "in": "query",
+            "name": "asOf",
+            "schema": {
+              "format": "date",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Системний момент (UTC) — значення «станом на»; немає — поточні.",
+            "in": "query",
+            "name": "asOfUtc",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Батько композиції або каскаду.",
+            "in": "query",
+            "name": "parentEntryId",
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Підрядок коду, назви або текстового поля.",
+            "in": "query",
+            "name": "q",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Курсор попередньої сторінки.",
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Розмір сторінки, 1…500.",
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 50,
+              "format": "int32",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagedResultOfRegistryRowDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagedResultOfRegistryRowDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagedResultOfRegistryRowDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Рядки довідника зі значеннями полів, сторінками за курсором. Право `Registry.View` або\nгрант `Read` на довідник.",
+        "tags": [
+          "RegistryRows"
         ]
       }
     },
@@ -23916,7 +27645,7 @@
             "description": "Unprocessable Entity"
           }
         },
-        "summary": "Вивантажує зріз у `.xlsx`. Право `Report.Export`.",
+        "summary": "Вивантажує зріз у `.xlsx`. Права `Report.Export` і\n`Report.ViewSnapshot` у проєкті зрізу.",
         "tags": [
           "Reports"
         ]
@@ -23998,7 +27727,7 @@
             "description": "Not Found"
           }
         },
-        "summary": "Рядки зрізу сторінками, у широкому вигляді. Право `Report.ViewRegulatory`.",
+        "summary": "Рядки зрізу сторінками, у широкому вигляді. Права `Report.ViewRegulatory`\nі `Report.ViewSnapshot` у проєкті зрізу.",
         "tags": [
           "Reports"
         ]
@@ -24713,7 +28442,7 @@
     },
     "/api/v1/roles/{id}/grants": {
       "get": {
-        "description": "⛔ Без цих двох маршрутів система не показує даних НІКОМУ (`A7-22`):\nдоступ до проєкту, аркуша чи таблиці вимагає гранта, а створити грант\nне було чим. Права відповідають на питання «що людина вміє», гранти —\n«до чого саме»; без другої відповіді перша нічого не відкриває.",
+        "description": "⛔ Без цих двох маршрутів система не показує даних НІКОМУ (`A7-22`):\nдоступ до проєкту, аркуша чи таблиці вимагає гранта, а створити грант\nне було чим. Права відповідають на питання «що людина вміє», гранти —\n«до чого саме»; без другої відповіді перша нічого не відкриває.\n\n⚠ Версія набору — у заголовку `ETag` (тіло лишається масивом, щоб\nне ламати наявних споживачів); її повертають у `If-Match` на\n`PUT`.",
         "parameters": [
           {
             "in": "path",
@@ -24755,6 +28484,26 @@
               }
             },
             "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
           }
         },
         "summary": "Ресурсні гранти ролі. Право `Security.ManageRoles`.",
@@ -24763,7 +28512,7 @@
         ]
       },
       "put": {
-        "description": "⚠ Саме заміна набору, а не правка по одному: гранти — це відповідь на\nпитання «що покриває роль», і вона має бути видима одним поглядом.\nЧасткові правки лишають стан, у якому джерело доступу не відновлюється.",
+        "description": "⚠ Саме заміна набору, а не правка по одному: гранти — це відповідь на\nпитання «що покриває роль», і вона має бути видима одним поглядом.\nЧасткові правки лишають стан, у якому джерело доступу не відновлюється.\n\n⛔ `If-Match` із `ETag` відповіді `GET`: набір змінили\nпісля читання — `409 ECR-SEC-0409` (актуальна версія в\n`details.version`), а не мовчазне затирання чужої правки. Без\nзаголовка — `422 ECR-REQ-0422` (`err.ECR-REQ-0422.roleGrantsIfMatch`).\nНова версія — у `ETag` відповіді `204`.",
         "parameters": [
           {
             "in": "path",
@@ -24799,6 +28548,66 @@
         "responses": {
           "204": {
             "description": "No Content"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
           }
         },
         "summary": "Замінює набір грантів ролі цілком. Право `Security.ManageRoles`.",
@@ -24946,6 +28755,26 @@
             },
             "description": "Created"
           },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
           "404": {
             "content": {
               "application/json": {
@@ -25089,11 +28918,131 @@
         ]
       }
     },
+    "/api/v1/security/project-sheets": {
+      "get": {
+        "description": "⛔ Лише ідентичність аркуша — ні таблиць, ні колонок, ні даних; та сама\nмежа, що й у `GET /security/projects`. Видалені аркуші — ні.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/GrantableSheet"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/GrantableSheet"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/GrantableSheet"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "summary": "Проєкт, код і назва аркушів чинної версії шаблону кожного проєкту — для\nобласті призначення ролі за аркушами (D-214). Право\n`Security.ManageRoles` або `Security.ManageUsers`.",
+        "tags": [
+          "Security"
+        ]
+      }
+    },
+    "/api/v1/security/projects": {
+      "get": {
+        "description": "⛔ D-207 п.2 (рішення людини 2026-09-29, варіант B): адміністратор\nбезпеки без грантів на проєкти не бачив жодного проєкту і не міг видати\nна нього грант. Тут — лише `id`, `code`, `nameL10n`:\nжодних станів, періодів чи документів; дані проєкту лишаються за грантами.\nПраво глобальне — роль з областю дії (ФВ-6.14) його не дає.\n✎ 2026-09-29: досить і `Security.ManageUsers` — форма ролей\nкористувача вибирає з цього довідника область дії.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/GrantableProject"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/GrantableProject"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/GrantableProject"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "summary": "Код і назва всіх проєктів — для видачі грантів і області призначення\nролі (ФВ-6.14). Право `Security.ManageRoles` або `Security.ManageUsers`.",
+        "tags": [
+          "Security"
+        ]
+      }
+    },
     "/api/v1/security/simulation": {
       "delete": {
         "parameters": [
           {
-            "description": "Сеанс.",
+            "description": "Сеанс; не задано — сеанс цього входу.",
             "in": "query",
             "name": "sessionId",
             "schema": {
@@ -25113,7 +29062,7 @@
         ]
       },
       "post": {
-        "description": "Сеанс пишеться в `aud.SimulationSession` <b>одразу</b> і не\nбатчиться: без запису «подивитися очима» стало б способом безслідно\nпереглянути чужі дані. Будь-який запис під симуляцією відхиляється\n`EditDenyReason.SimulationReadOnly` — навіть із правом\n`Manage` (ФВ-6.16a).",
+        "description": "Сеанс пишеться в `aud.SimulationSession` <b>одразу</b> і не\nбатчиться: без запису «подивитися очима» стало б способом безслідно\nпереглянути чужі дані. Будь-який запис під симуляцією відхиляється\n`EditDenyReason.SimulationReadOnly` — навіть із правом\n`Manage` (ФВ-6.16a).\n\n⛔ D-210: ціль — bootstrap-адміністратор або власник небезпечного права —\n`403 ECR-SIM-4031`; сеанс не відкривається, спроба — у журналі.",
         "requestBody": {
           "content": {
             "application/*+json": {
@@ -25154,6 +29103,26 @@
               }
             },
             "description": "Created"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
           },
           "422": {
             "content": {
@@ -25284,6 +29253,136 @@
         "tags": [
           "Sources"
         ]
+      },
+      "post": {
+        "description": "⚠ Код уже зайнятий у цьому з'єднанні — `409 ECR-INT-0409`\n(`err.ECR-INT-0409.sourceEntityDuplicate`), а не другий рядок.",
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSourceEntityRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSourceEntityRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSourceEntityRequest"
+              }
+            }
+          },
+          "description": "Скасування.",
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceEntityDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceEntityDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceEntityDto"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Заводить сутність збору з позиції каталогу джерела (`ФВ-13.11`).\nПраво `Integration.Manage`.",
+        "tags": [
+          "Sources"
+        ]
       }
     },
     "/api/v1/sources/{id}/collect": {
@@ -25341,6 +29440,26 @@
               }
             },
             "description": "Accepted"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
           }
         },
         "summary": "Запускає збір для сутності джерела. Право `Integration.Manage`.",
@@ -25406,6 +29525,236 @@
           }
         },
         "summary": "Перегляд мапінгу на реальних рядках джерела (`ФВ-13.14`).\nПраво `Integration.Manage`.",
+        "tags": [
+          "Sources"
+        ]
+      }
+    },
+    "/api/v1/sources/{id}/registry": {
+      "put": {
+        "description": "⚠ Право на дані перевіряється для цільового довідника, а при відв'язці чи\nпереприв'язці — і для поточного: після прив'язки синк пише в довідник від\n`svc-integration`, тож прив'язка — делегування права на його дані.\nБез права — `403 ECR-AUTH-0403`. `D-202`, доповнення 2026-09-29\n(`docs/tz/10-decisions.md` §1.19) — судження розробки, на підтвердження.",
+        "parameters": [
+          {
+            "description": "Сутність збору.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/BindSourceEntityRegistryRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BindSourceEntityRegistryRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BindSourceEntityRegistryRequest"
+              }
+            }
+          },
+          "description": "Скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceEntityDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceEntityDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceEntityDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Прив'язує сутність збору до довідника або відв'язує її (`ФВ-8.11`).\nПраво `Integration.Manage` і, крім того, право редагувати дані\nдовідника — `Registry.EditData` або грант `Write` на цей довідник.",
+        "tags": [
+          "Sources"
+        ]
+      }
+    },
+    "/api/v1/sources/{id}/registry/policy": {
+      "put": {
+        "description": "⚠ Сутність не прив'язана до довідника — `422 ECR-REQ-0422`\n(`registrySyncPolicyNotBound`); невалідне тіло — `422 ECR-REQ-0422`\n(`registrySyncPolicyInvalid`). Зміна пишеться в журнал структурних змін.",
+        "parameters": [
+          {
+            "description": "Сутність збору.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetRegistrySyncPolicyRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetRegistrySyncPolicyRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetRegistrySyncPolicyRequest"
+              }
+            }
+          },
+          "description": "Скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceEntityDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceEntityDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceEntityDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Замінює політику синку довідника з цієї сутності збору (`D-212`).\nПраво `Integration.Manage` і право на дані прив'язаного довідника —\n`Registry.EditData` або грант `Write`.",
         "tags": [
           "Sources"
         ]
@@ -27083,6 +31432,26 @@
               }
             },
             "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
           }
         },
         "summary": "Перелік стилів версії — для вибору наявного стилю під час\nконструювання шаблону. Право `Template.View`.",
@@ -27559,6 +31928,88 @@
           "TemplateVersions"
         ]
       },
+      "get": {
+        "description": "⛔ X-02: форма правки колонки відкривається з цієї відповіді, а не з\nбідного опису колонки в `GET …/structure`. Інакше `PUT` (заміна\nцілком) стирав точність, одиницю, довідник, значення за замовчуванням і\nстиль колонки при кожному повторному збереженні.",
+        "parameters": [
+          {
+            "description": "Версія шаблону.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Таблиця, якій належить колонка.",
+            "in": "path",
+            "name": "tableId",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Код колонки.",
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ColumnDefDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ColumnDefDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ColumnDefDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Повний склад однієї колонки — те, що приймає й повертає `PUT` нижче.\nПраво `Template.View`.",
+        "tags": [
+          "TemplateVersions"
+        ]
+      },
       "put": {
         "description": "⛔ Другий вертикальний зріз авторства структури шаблону через API\n(`W5.2`, за зразком `sheets/{code}` вище, `W5.0`).\n\n⚠ Таблиця адресується числовим `tableId`, а не парою кодів\nаркуша й таблиці — та сама форма, що й `SaveTableRelationRequest`\nвище (`SourceTableDefId`/`TargetTableDefId`): клієнт уже має\n`TableDto.Id` з попереднього `GET …/structure`.",
         "parameters": [
@@ -27932,6 +32383,90 @@
         ]
       }
     },
+    "/api/v1/template-versions/{id}/tables/{tableId}/validation-rules": {
+      "get": {
+        "description": "⛔ X-15: без цього переліку діалог видаляв правило введеним з пам'яті\nкодом, якого екран ніде не показував.",
+        "parameters": [
+          {
+            "description": "Версія шаблону.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Таблиця.",
+            "in": "path",
+            "name": "tableId",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ValidationRuleDto"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ValidationRuleDto"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ValidationRuleDto"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Правила валідації таблиці. Право `Template.View`.",
+        "tags": [
+          "TemplateVersions"
+        ]
+      }
+    },
     "/api/v1/template-versions/{id}/tables/{tableId}/validation-rules/{code}": {
       "delete": {
         "parameters": [
@@ -28252,6 +32787,60 @@
           }
         },
         "summary": "Створює шаблон. Право `Template.Edit`.",
+        "tags": [
+          "Templates"
+        ]
+      }
+    },
+    "/api/v1/templates/versions": {
+      "get": {
+        "description": "⛔ BR-07: перелік шаблонів (`/admin/templates`) читав версії ОКРЕМИМ\nзапитом на КОЖЕН рядок (N+1 на клієнті) — підтверджений 2026-09-25\nпробіл продуктивності. Тут — один запит на весь видимий перелік.\n\n⚠ Повторювані `ids=`, а не через кому — той самий патерн, що вже\nв `GET /api/v1/methodologies?ids=` (`RD-06`, стандартний біндинг\nASP.NET для масиву в query-рядку). Маршрут — літерал `versions`,\nа не `{id:int}`, тож неоднозначності з Task&lt;IActionResult&gt; TemplatesController.ListVersions(int id, int limit, string? cursor, CancellationToken ct)\nпоруч немає.",
+        "parameters": [
+          {
+            "description": "Шаблони, чиї версії цікавлять.",
+            "in": "query",
+            "name": "ids",
+            "schema": {
+              "items": {
+                "format": "int32",
+                "type": "integer"
+              },
+              "type": "array"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TemplateVersionsForTemplate"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TemplateVersionsForTemplate"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TemplateVersionsForTemplate"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "Версії ДЕКІЛЬКОХ шаблонів ОДНИМ зверненням — не по одному на шаблон.\nПраво `Template.View`.",
         "tags": [
           "Templates"
         ]
@@ -28717,6 +33306,26 @@
               }
             },
             "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
           }
         },
         "summary": "Сторінка версій шаблону. Право `Template.View`.",
@@ -30101,6 +34710,99 @@
         ]
       }
     },
+    "/api/v1/users/{id}/role-assignments": {
+      "get": {
+        "description": "⚠ `scope: null` — роль діє в усіх проєктах; порожній\n`scope.projects` — збережена область не розбирається, роль не діє\nніде. Групові призначення — `GET /security/group-assignments`.",
+        "parameters": [
+          {
+            "description": "Користувач.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/UserRoleAssignmentView"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/UserRoleAssignmentView"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/UserRoleAssignmentView"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Особисті призначення ролей користувача з межами й областю дії (ФВ-6.14).\nПраво `Security.ManageUsers`.",
+        "tags": [
+          "Security"
+        ]
+      }
+    },
     "/api/v1/users/{id}/roles": {
       "get": {
         "parameters": [
@@ -30144,6 +34846,26 @@
               }
             },
             "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
           }
         },
         "summary": "Ролі користувача. Право `Security.ManageUsers`.",
@@ -30206,6 +34928,26 @@
             },
             "description": "OK"
           },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
           "404": {
             "content": {
               "application/json": {
@@ -30225,6 +34967,26 @@
               }
             },
             "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
           }
         },
         "summary": "Замінює набір ролей користувача. Право `Security.ManageUsers`.",
@@ -30442,6 +35204,9 @@
       "name": "Methodologies"
     },
     {
+      "name": "MethodologyPublications"
+    },
+    {
       "name": "MethodologyVersions"
     },
     {
@@ -30463,7 +35228,19 @@
       "name": "Public"
     },
     {
+      "name": "RecalculationApprovals"
+    },
+    {
       "name": "Registries"
+    },
+    {
+      "name": "RegistryDefinitionTools"
+    },
+    {
+      "name": "RegistryExternalKeys"
+    },
+    {
+      "name": "RegistryRows"
     },
     {
       "name": "Reports"

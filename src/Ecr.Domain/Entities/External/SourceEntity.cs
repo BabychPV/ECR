@@ -1,6 +1,7 @@
 // src/Ecr.Domain/Entities/External/SourceEntity.cs
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Enums;
+using Ecr.Domain.Errors;
 
 namespace Ecr.Domain.Entities.External;
 
@@ -65,4 +66,67 @@ public sealed class SourceEntity : Entity<int>
 
     /// <summary>Вимикає збір із цієї сутності.</summary>
     public void Deactivate() => IsActive = false;
+
+    /// <summary>Стеля імені атрибута чинності — ширина колонок <c>Valid*Attribute</c>.</summary>
+    public const int MaxValidityAttributeLength = 200;
+
+    /// <summary>Що робить синк довідника із записом, чий елемент зник із джерела (<c>D-212</c>).</summary>
+    public RegistryMissingPolicy OnMissingInSource { get; private set; }
+
+    /// <summary>
+    /// Атрибут елемента AF, з якого синк бере <c>RegistryEntry.ValidFrom</c>;
+    /// <c>null</c> — чинність не синхронізується.
+    /// </summary>
+    public string? ValidFromAttribute { get; private set; }
+
+    /// <summary>Атрибут елемента AF, з якого синк бере кінець чинності; <c>null</c> — не береться.</summary>
+    public string? ValidToAttribute { get; private set; }
+
+    /// <summary>
+    /// <c>true</c> — значення <see cref="ValidToAttribute"/> є ОСТАННІМ чинним днем
+    /// (включна межа), і синк додає день, бо <c>RegistryEntry.ValidTo</c> виключна.
+    /// </summary>
+    public bool ValidToInclusive { get; private set; }
+
+    /// <summary>Задає політику синку довідника з цієї сутності (<c>D-212</c>).</summary>
+    /// <param name="policy">Що робити з записом, чий елемент зник у джерелі.</param>
+    /// <param name="validFromAttribute">Атрибут початку чинності; <c>null</c> — не синхронізувати.</param>
+    /// <param name="validToAttribute">Атрибут кінця чинності; <c>null</c> — не синхронізувати.</param>
+    /// <param name="validToInclusive">Кінець у джерелі — останній чинний день.</param>
+    /// <exception cref="DomainException">
+    /// <c>ECR-REQ-0422</c>: невідома політика, порожнє чи задовге ім'я атрибута,
+    /// або включна межа без атрибута кінця.
+    /// </exception>
+    public void ConfigureRegistrySync(
+        RegistryMissingPolicy policy,
+        string? validFromAttribute,
+        string? validToAttribute,
+        bool validToInclusive)
+    {
+        // ⚠ Порожнє ім'я — помилка, а не «не задано»: «не задано» — це null, і
+        // мовчазне перетворення "" на null сховало б зламану форму клієнта.
+        if (!Enum.IsDefined(policy)
+            || !IsValidAttribute(validFromAttribute)
+            || !IsValidAttribute(validToAttribute)
+            || (validToInclusive && validToAttribute is null))
+        {
+            throw new DomainException(
+                ErrorCodes.RequestInvalid,
+                $"Політика синку: невідоме значення або ім'я атрибута порожнє чи довше за {MaxValidityAttributeLength} символів; "
+                + "включна межа вимагає атрибута кінця.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-REQ-0422.registrySyncPolicyInvalid",
+                    ["max"] = MaxValidityAttributeLength,
+                });
+        }
+
+        OnMissingInSource = policy;
+        ValidFromAttribute = validFromAttribute?.Trim();
+        ValidToAttribute = validToAttribute?.Trim();
+        ValidToInclusive = validToInclusive;
+    }
+
+    private static bool IsValidAttribute(string? name)
+        => name is null || (!string.IsNullOrWhiteSpace(name) && name.Trim().Length <= MaxValidityAttributeLength);
 }

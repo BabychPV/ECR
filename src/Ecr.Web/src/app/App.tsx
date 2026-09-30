@@ -10,7 +10,15 @@ import { router } from './router';
 import { NewVersionBanner } from './staleVersion';
 
 import '@/shared/theme/motion.css';
-import '@/shared/theme/cell-states.css';
+
+/*
+ * ⛔ `cell-states.css` тут НЕ імпортується (D-132, бюджет маршруту). Це 23 КБ
+ * (7 КБ gzip) стилів сітки й станів комірок, які вантажилися у ВХІДНИЙ чанк, тобто
+ * на кожен маршрут, хоча вживає їх лише сітка документа: імпорт стоїть у
+ * `features/grid/DocumentGrid.tsx` (лінивий чанк `SheetTables`) і в
+ * `pages/KitchenSinkPage.tsx` (зразки станів). Повернути його сюди — знову
+ * додати 7 КБ до кожного маршруту, і `npm run budget` це покаже.
+ */
 
 /*
  * ⚠ Створення клієнта переїхало у `queryClient.ts` не заради охайності: разом

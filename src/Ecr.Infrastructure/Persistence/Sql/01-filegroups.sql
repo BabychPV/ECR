@@ -124,11 +124,20 @@ DECLARE @isSmall bit = CASE WHEN @isExpress = 1 OR @markedSmall = 1 THEN 1 ELSE 
 -- 1. Файлові групи, яких ще немає.
 --    Один пакет DDL замість циклу: коротше і без курсорів у скрипті,
 --    який читає людина перед запуском на проді.
-SELECT @sql = STRING_AGG(
-        CAST(N'ALTER DATABASE ' + QUOTENAME(@db) + N' ADD FILEGROUP ' + QUOTENAME(g.Name) + N';'
-             AS nvarchar(max)), NCHAR(10))
-FROM (VALUES (N'DATA_HOT'), (N'DATA_ARCHIVE'), (N'AUDIT'), (N'INDEXES')) AS g(Name)
-WHERE NOT EXISTS (SELECT 1 FROM sys.filegroups f WHERE f.name = g.Name);
+--
+-- ⛔ `FOR XML PATH`, а не `STRING_AGG`: підлога сервера — 2016 SP1 (`D-101`),
+--    а `STRING_AGG` з'явився у 2017 — на 2016 цей файл падав першим же
+--    пакетом розгортання («'STRING_AGG' is not a recognized built-in function
+--    name»). `TYPE).value(...)` повертає текст без XML-ентитизації (`&` у
+--    шляху до файлу лишається `&`). Немає рядків — підзапит дає NULL, і
+--    `STUFF(NULL, …)` теж NULL, тож `IF @sql IS NOT NULL` нижче працює як і
+--    раніше. Прецедент — міграція `20260928224103_U1UnitForeignKeys.cs`.
+SELECT @sql = STUFF((
+        SELECT NCHAR(10) + CAST(N'ALTER DATABASE ' + QUOTENAME(@db) + N' ADD FILEGROUP '
+                   + QUOTENAME(g.Name) + N';' AS nvarchar(max))
+        FROM (VALUES (N'DATA_HOT'), (N'DATA_ARCHIVE'), (N'AUDIT'), (N'INDEXES')) AS g(Name)
+        WHERE NOT EXISTS (SELECT 1 FROM sys.filegroups f WHERE f.name = g.Name)
+        FOR XML PATH(''), TYPE).value(N'.', N'nvarchar(max)'), 1, 1, N'');
 
 IF @sql IS NOT NULL EXEC sp_executesql @sql;
 
@@ -137,8 +146,9 @@ IF @sql IS NOT NULL EXEC sp_executesql @sql;
 --    Виконується ПІСЛЯ кроку 1: ADD FILE вимагає наявної файлової групи.
 SET @sql = NULL;
 
-SELECT @sql = STRING_AGG(
-        CAST(N'ALTER DATABASE ' + QUOTENAME(@db) + N' ADD FILE (NAME = '
+-- ⛔ `FOR XML PATH` замість `STRING_AGG` — з тієї ж причини, що й у кроці 1.
+SELECT @sql = STUFF((
+        SELECT NCHAR(10) + CAST(N'ALTER DATABASE ' + QUOTENAME(@db) + N' ADD FILE (NAME = '
              + QUOTENAME(f.LogicalName, '''')
              -- ⚠ Ім'я БАЗИ у фізичному імені файла обов'язкове. Без нього
              -- дві бази ECR на одному інстансі неможливі: друга падає з
@@ -152,16 +162,17 @@ SELECT @sql = STRING_AGG(
              + N', SIZE = ' + CAST(sz.SizeMb AS nvarchar(10)) + N'MB'
              + N', FILEGROWTH = ' + CAST(sz.GrowthMb AS nvarchar(10)) + N'MB)'
              + N' TO FILEGROUP ' + QUOTENAME(f.FileGroup) + N';'
-             AS nvarchar(max)), NCHAR(10))
-FROM (VALUES
-        (N'Ecr_hot',     N'DATA_HOT',     4096, 1024, 0),
-        (N'Ecr_archive', N'DATA_ARCHIVE', 4096, 4096, 1),
-        (N'Ecr_audit',   N'AUDIT',        4096, 2048, 0),
-        (N'Ecr_idx',     N'INDEXES',      2048, 1024, 0)
-     ) AS f(LogicalName, FileGroup, SizeMb0, GrowthMb0, UseArchivePath)
-CROSS APPLY (SELECT SizeMb   = CASE WHEN @isSmall = 1 THEN 64 ELSE f.SizeMb0   END,
-                    GrowthMb = CASE WHEN @isSmall = 1 THEN 64 ELSE f.GrowthMb0 END) AS sz
-WHERE NOT EXISTS (SELECT 1 FROM sys.database_files d WHERE d.name = f.LogicalName);
+             AS nvarchar(max))
+        FROM (VALUES
+                (N'Ecr_hot',     N'DATA_HOT',     4096, 1024, 0),
+                (N'Ecr_archive', N'DATA_ARCHIVE', 4096, 4096, 1),
+                (N'Ecr_audit',   N'AUDIT',        4096, 2048, 0),
+                (N'Ecr_idx',     N'INDEXES',      2048, 1024, 0)
+             ) AS f(LogicalName, FileGroup, SizeMb0, GrowthMb0, UseArchivePath)
+        CROSS APPLY (SELECT SizeMb   = CASE WHEN @isSmall = 1 THEN 64 ELSE f.SizeMb0   END,
+                            GrowthMb = CASE WHEN @isSmall = 1 THEN 64 ELSE f.GrowthMb0 END) AS sz
+        WHERE NOT EXISTS (SELECT 1 FROM sys.database_files d WHERE d.name = f.LogicalName)
+        FOR XML PATH(''), TYPE).value(N'.', N'nvarchar(max)'), 1, 1, N'');
 
 IF @sql IS NOT NULL EXEC sp_executesql @sql;
 

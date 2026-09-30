@@ -112,6 +112,19 @@ public sealed partial class ExceptionHandlingMiddleware(
         {
             foreach (var (key, value) in details)
             {
+                // ⛔ B-06 (UX-прохід, четвертий раунд): зарезервоване ім'я
+                // `problem+json` у подробицях НЕ копіюється. Розширення
+                // серіалізуються поруч зі стандартними членами, тож
+                // `["detail"] = …` давав ДВА ключі `detail` в одному об'єкті —
+                // і `JSON.parse` клієнта брав ОСТАННІЙ: сире українське речення
+                // обробника (або `null`) замість уже локалізованого. Так само
+                // `errorCode`/`correlationId` з подробиць тихо переписали б
+                // справжні.
+                if (ReservedMembers.Contains(key))
+                {
+                    continue;
+                }
+
                 problem.Extensions[key] = value;
             }
         }
@@ -420,6 +433,20 @@ public sealed partial class ExceptionHandlingMiddleware(
         BusinessRuleException e when e.ErrorCode == ErrorCodes.RegistryDefDuplicate =>
             (StatusCodes.Status409Conflict, e.ErrorCode, e.Message, e.Details),
 
+        // ⛔ RT-10a (FEATURE-REGISTRY-TABLES §7.2): «ці значення ключа вже має інший запис» —
+        // конфлікт стану, а не невірні дані: повторювати запит марно, треба змінити ключ або
+        // закрити вікно чинності того запису. ⚠ Правило суфікса нижче цей код теж ловить, тож
+        // арм — явна назва, а не єдина опора: мутація «прибрати лише арм» 409 не ламає, ламає
+        // «прибрати арм і правило суфікса» (перевірено `RegistryKeyConflictHttpTests`).
+        BusinessRuleException e when e.ErrorCode == ErrorCodes.RegistryKeyConflict =>
+            (StatusCodes.Status409Conflict, e.ErrorCode, e.Message, e.Details),
+
+        // ⛔ RT-14 (D-166): «запис змінили після того, як ви його відкрили» — конфлікт стану, як і
+        // 4092. У пакеті це помилка рядка (200), але той самий код кидатиме `POST …/entries` із
+        // `baseVersion` (RT-10a/17a) — і має доїхати 409, а не 422. Явна назва поруч із правилом суфікса.
+        BusinessRuleException e when e.ErrorCode == ErrorCodes.RegistryEntryChanged =>
+            (StatusCodes.Status409Conflict, e.ErrorCode, e.Message, e.Details),
+
         // ⛔ Та сама родина, і арм з'явився разом із маршрутом
         // `DELETE /registries/{code}/entries/{id}` (директива №15, BE-01):
         // доти `ECR-REG-0409` не доїжджав до HTTP узагалі — обробник існував,
@@ -466,6 +493,24 @@ public sealed partial class ExceptionHandlingMiddleware(
         BusinessRuleException e when IsConflictCode(e.ErrorCode) =>
             (StatusCodes.Status409Conflict, e.ErrorCode, e.Message, e.Details),
 
+        // ⚠ RT-17a (ФВ-8.18): порушене правило довідника рівня `Error` — дані суперечать правилу,
+        // а не чужій зміні, тож 422, а не 409 сусідніх `4092`/`4093`. Явний арм поруч із ними, щоб
+        // `-4221` не читався як пропущений конфлікт; перелік порушень — у подробиці `violations`.
+        BusinessRuleException e when e.ErrorCode == ErrorCodes.RegistryRuleViolation =>
+            (StatusCodes.Status422UnprocessableEntity, e.ErrorCode, e.Message, e.Details),
+
+        // ⛔ D-210: ціль «View as» заборонена ПОЛІТИКОЮ (bootstrap або небезпечні права) —
+        // запит правильний, відмовляє право бачити, тож 403. Без цього арма — 422 нижче.
+        BusinessRuleException e when e.ErrorCode == ErrorCodes.SimulationTargetForbidden =>
+            (StatusCodes.Status403Forbidden, e.ErrorCode, e.Message, e.Details),
+
+        // ⛔ HSE301 C5b (D-215): відв'язка останнього джерела `Formula`-колонки опублікованої
+        // версії — конфлікт зі СТАНОМ версії, а не невірні дані: треба спершу прив'язати нове
+        // джерело. ⚠ Правило суфікса вище цей код теж ловить (`-4091`), тож арм — явна назва,
+        // як у `RegistryKeyConflict`, а не єдина опора.
+        BusinessRuleException e when e.ErrorCode == ErrorCodes.LastSourceOfPublishedColumn =>
+            (StatusCodes.Status409Conflict, e.ErrorCode, e.Message, e.Details),
+
         BusinessRuleException e =>
             (StatusCodes.Status422UnprocessableEntity, e.ErrorCode, e.Message, e.Details),
 
@@ -487,6 +532,19 @@ public sealed partial class ExceptionHandlingMiddleware(
         _ => (StatusCodes.Status500InternalServerError, ErrorCodes.Internal,
               "Внутрішня помилка. Зверніться до адміністратора з ідентифікатором кореляції.", InternalDetails),
     };
+
+    /// <summary>
+    /// Члени <c>problem+json</c>, які пише сам конвеєр: стандартні (RFC 9457
+    /// §3.1) і два наші. Подробиці винятку їх не перекривають (B-06).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Без урахування регістру: <c>"Detail"</c> поруч із <c>"detail"</c> —
+    /// формально два різні ключі, але клієнт, що мапить їх у поля без
+    /// регістру, отримав би ту саму колізію.
+    /// </remarks>
+    internal static readonly IReadOnlySet<string> ReservedMembers = new HashSet<string>(
+        ["type", "title", "status", "detail", "instance", "errorCode", "correlationId"],
+        StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Суфікс доменних кодів «конфлікт стану» (<c>ECR-&lt;ДОМЕН&gt;-0409</c>).</summary>
     private const string ConflictCodeSuffix = "-0409";

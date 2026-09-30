@@ -1,4 +1,5 @@
-# Доказовий конвеєр двовузлового процесу.
+# Доказовий конвеєр (писався для двовузлового процесу PK1/PK2, скасованого
+# 2026-09-08; сам конвеєр чинний).
 #
 # ⛔ Імена джобів — ЧАСТИНА КОНТРАКТУ. «Готово, коли» у настановах виражається
 # саме ними, і захист гілки `main` вимагає рівно цих трьох. Перейменувати джоб
@@ -7,7 +8,8 @@
 # ⚠ Тут було ще два сторожі — `scope-guard` і `contracts-guard`. Обидва
 # трималися на GitHub Issues: читали `Closes #N`, розбирали `scope:` з тіла
 # issue, дивилися на мітку `type:contract`. Керуючий шар на issues скасовано
-# (обмін — два файли на гілці `sync`), тому сторожі пішли разом із ним.
+# (його замінив обмін через гілку `sync`, скасований і сам 2026-09-08), тому
+# сторожі пішли разом із ним. Лишився один — `honesty-guard`.
 # ⛔ Один із них до того ж завалив правомірну роботу: `contracts-guard` брав
 # теку `contracts/` цілим каталогом і зупинив PR за дописування журналу
 # знахідок. Сторож, який зупиняє правомірну роботу, вчить обходити себе.
@@ -15,7 +17,7 @@
 # Розподіл із наявним `ci.yml`:
 #   ci.yml    — важкі перевірки: SQL Server у контейнері, інтеграційні тести,
 #               розгортання під sqlcmd, клієнт, доступність. Іде довго.
-#   evidence.yml — швидкі бар'єри процесу: збірка, юніт-тести і три сторожі,
+#   evidence.yml — швидкі бар'єри процесу: збірка, юніт-тести і сторож чесності,
 #               яких машина може перевірити за хвилини. Саме вони гейтують PR.
 # Обидва потрібні: перший доводить, що система працює; другий — що процес не
 # обходять.
@@ -23,6 +25,8 @@
 name: Evidence
 
 on:
+  push:
+    branches: ['lane/**']
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -33,8 +37,11 @@ permissions:
   issues: read
 
 concurrency:
-  group: evidence-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  # ✎ 2026-09-29 (пряме рішення людини): для dev/integration і #463 група за SHA — GitHub тримає в групі лише один очікуваний прогін, і новий витісняв попередній; тепер кожен пуш має свій вердикт
+  group: evidence-${{ (github.ref == 'refs/heads/dev/integration' || github.event.pull_request.number == 463) && github.sha || (github.event.pull_request.number || github.ref) }}
+  # ✎ 2026-09-29 (пряме рішення людини): на dev/integration і PR #463 — не скасовувати,
+  # щоб кожен пуш отримав власний вердикт; на lane/** — скасовувати, як і раніше.
+  cancel-in-progress: ${{ !(github.ref == 'refs/heads/dev/integration' || github.event.pull_request.number == 463) }}
 
 env:
   DOTNET_NOLOGO: 'true'
@@ -96,8 +103,35 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      # ⛔ На push (lane/**) у події немає pull_request.*, і сторож отримував
+      # порожні BASE/HEAD: `git diff "..."` давав порожній diff, а скрипт
+      # виходив нулем — зелений гейт, що нічого не перевірив. Тому на push і
+      # workflow_dispatch база — merge-base з dev/integration (історія є:
+      # fetch-depth: 0; на самій dev/integration база = вершина, і порожній
+      # diff там чесний), а
+      # порожня чи неіснуюча база — падіння, а не «змін у .cs немає».
       - name: honesty
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: bash .github/guards/honesty-guard.sh
+          EVENT_NAME: ${{ github.event_name }}
+          PUSH_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "push" ] || [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            HEAD_SHA="$PUSH_SHA"
+            BASE_SHA="$(git merge-base origin/dev/integration "$HEAD_SHA" || true)"
+          fi
+          if [ -z "${BASE_SHA:-}" ] || [ -z "${HEAD_SHA:-}" ]; then
+            echo "::error::honesty-guard: порожня база або вершина (подія $EVENT_NAME, BASE_SHA='${BASE_SHA:-}', HEAD_SHA='${HEAD_SHA:-}'). Без бази сторож нічого не перевіряє — це падіння, а не зелений."
+            exit 1
+          fi
+          for sha in "$BASE_SHA" "$HEAD_SHA"; do
+            if ! git cat-file -e "${sha}^{commit}" 2>/dev/null; then
+              echo "::error::honesty-guard: коміт $sha відсутній у чекауті — diff був би порожнім і гейт хибно зеленим."
+              exit 1
+            fi
+          done
+          echo "honesty-guard: $EVENT_NAME, база $BASE_SHA, вершина $HEAD_SHA"
+          export BASE_SHA HEAD_SHA
+          bash .github/guards/honesty-guard.sh

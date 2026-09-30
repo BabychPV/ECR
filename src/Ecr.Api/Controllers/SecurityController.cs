@@ -1,6 +1,10 @@
+using System.Globalization;
+using System.Security.Claims;
+using Ecr.Api.Auth;
 using Ecr.Application.Common;
 using Ecr.Application.Security;
 using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -31,7 +35,8 @@ public sealed class SecurityController(
     Ecr.Application.Security.GetAccessDiagnosticsHandler accessDiagnostics,
     Ecr.Application.Security.ResetUserPasswordHandler resetPassword,
     Ecr.Application.Security.SetUserLockHandler setLock,
-    Ecr.Domain.Abstractions.IClock clock) : ControllerBase
+    Ecr.Domain.Abstractions.IClock clock,
+    ICurrentUser currentUser) : ControllerBase
 {
     /// <summary>
     /// Звідки взялися (або не взялися) ролі ВЛАСНОГО запису. Права не потребує.
@@ -172,11 +177,59 @@ public sealed class SecurityController(
     /// доступ до проєкту, аркуша чи таблиці вимагає гранта, а створити грант
     /// не було чим. Права відповідають на питання «що людина вміє», гранти —
     /// «до чого саме»; без другої відповіді перша нічого не відкриває.
+    ///
+    /// ⚠ Версія набору — у заголовку <c>ETag</c> (тіло лишається масивом, щоб
+    /// не ламати наявних споживачів); її повертають у <c>If-Match</c> на
+    /// <c>PUT</c>.
     /// </remarks>
     [HttpGet("roles/{id:int}/grants")]
     [ProducesResponseType<IReadOnlyList<Ecr.Application.Security.ResourceGrantDto>>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> ListGrants(int id, CancellationToken ct)
-        => Ok(await listGrants.HandleAsync(id, ct).ConfigureAwait(false));
+    {
+        var grants = await listGrants.HandleAsync(id, ct).ConfigureAwait(false);
+
+        Response.Headers[Microsoft.Net.Http.Headers.HeaderNames.ETag] =
+            $"\"{Ecr.Application.Security.ResourceGrantsVersion.Of(grants)}\"";
+
+        return Ok(grants);
+    }
+
+    /// <summary>
+    /// Код і назва всіх проєктів — для видачі грантів і області призначення
+    /// ролі (ФВ-6.14). Право <c>Security.ManageRoles</c> або <c>Security.ManageUsers</c>.
+    /// </summary>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ D-207 п.2 (рішення людини 2026-09-29, варіант B): адміністратор
+    /// безпеки без грантів на проєкти не бачив жодного проєкту і не міг видати
+    /// на нього грант. Тут — лише <c>id</c>, <c>code</c>, <c>nameL10n</c>:
+    /// жодних станів, періодів чи документів; дані проєкту лишаються за грантами.
+    /// Право глобальне — роль з областю дії (ФВ-6.14) його не дає.
+    /// ✎ 2026-09-29: досить і <c>Security.ManageUsers</c> — форма ролей
+    /// користувача вибирає з цього довідника область дії.
+    /// </remarks>
+    [HttpGet("security/projects")]
+    [ProducesResponseType<IReadOnlyList<Ecr.Application.Security.GrantableProject>>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    public async Task<IActionResult> GrantableProjects(CancellationToken ct)
+        => Ok(await listGrants.ListProjectsAsync(ct).ConfigureAwait(false));
+
+    /// <summary>
+    /// Проєкт, код і назва аркушів чинної версії шаблону кожного проєкту — для
+    /// області призначення ролі за аркушами (D-214). Право
+    /// <c>Security.ManageRoles</c> або <c>Security.ManageUsers</c>.
+    /// </summary>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ Лише ідентичність аркуша — ні таблиць, ні колонок, ні даних; та сама
+    /// межа, що й у <c>GET /security/projects</c>. Видалені аркуші — ні.
+    /// </remarks>
+    [HttpGet("security/project-sheets")]
+    [ProducesResponseType<IReadOnlyList<Ecr.Application.Security.GrantableSheet>>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    public async Task<IActionResult> GrantableSheets(CancellationToken ct)
+        => Ok(await listGrants.ListProjectSheetsAsync(ct).ConfigureAwait(false));
 
     /// <summary>
     /// Замінює набір грантів ролі цілком. Право <c>Security.ManageRoles</c>.
@@ -185,15 +238,28 @@ public sealed class SecurityController(
     /// ⚠ Саме заміна набору, а не правка по одному: гранти — це відповідь на
     /// питання «що покриває роль», і вона має бути видима одним поглядом.
     /// Часткові правки лишають стан, у якому джерело доступу не відновлюється.
+    ///
+    /// ⛔ <c>If-Match</c> із <c>ETag</c> відповіді <c>GET</c>: набір змінили
+    /// після читання — <c>409 ECR-SEC-0409</c> (актуальна версія в
+    /// <c>details.version</c>), а не мовчазне затирання чужої правки. Без
+    /// заголовка — <c>422 ECR-REQ-0422</c> (<c>err.ECR-REQ-0422.roleGrantsIfMatch</c>).
+    /// Нова версія — у <c>ETag</c> відповіді <c>204</c>.
     /// </remarks>
     [HttpPut("roles/{id:int}/grants")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     public async Task<IActionResult> ReplaceGrants(
         int id, [FromBody] ReplaceGrantsRequest request, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        await replaceGrants.HandleAsync(id, request.Grants, ct).ConfigureAwait(false);
+        var ifMatch = Request.Headers[Microsoft.Net.Http.Headers.HeaderNames.IfMatch].ToString();
+
+        var version = await replaceGrants.HandleAsync(id, request.Grants, ifMatch, ct).ConfigureAwait(false);
+
+        Response.Headers[Microsoft.Net.Http.Headers.HeaderNames.ETag] = $"\"{version}\"";
 
         return NoContent();
     }
@@ -240,8 +306,27 @@ public sealed class SecurityController(
     /// <summary>Ролі користувача. Право <c>Security.ManageUsers</c>.</summary>
     [HttpGet("users/{id:int}/roles")]
     [ProducesResponseType<IReadOnlyList<string>>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<IReadOnlyList<string>>> UserRoles(int id, CancellationToken ct)
         => Ok(await listUserRoles.HandleAsync(id, ct).ConfigureAwait(false));
+
+    /// <summary>
+    /// Особисті призначення ролей користувача з межами й областю дії (ФВ-6.14).
+    /// Право <c>Security.ManageUsers</c>.
+    /// </summary>
+    /// <param name="id">Користувач.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⚠ <c>scope: null</c> — роль діє в усіх проєктах; порожній
+    /// <c>scope.projects</c> — збережена область не розбирається, роль не діє
+    /// ніде. Групові призначення — <c>GET /security/group-assignments</c>.
+    /// </remarks>
+    [HttpGet("users/{id:int}/role-assignments")]
+    [ProducesResponseType<IReadOnlyList<Ecr.Application.Security.UserRoleAssignmentView>>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> UserRoleAssignments(int id, CancellationToken ct)
+        => Ok(await listUserRoles.ListAssignmentsAsync(id, ct).ConfigureAwait(false));
 
     /// <summary>
     /// Замінює набір ролей користувача. Право <c>Security.ManageUsers</c>.
@@ -257,14 +342,16 @@ public sealed class SecurityController(
     /// </remarks>
     [HttpPut("users/{id:int}/roles")]
     [ProducesResponseType<Contracts.AffectedRolesResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     public async Task<IActionResult> ReplaceUserRoles(
         int id, [FromBody] ReplaceUserRolesRequest request, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(request);
 
         var count = await replaceRoles
-            .HandleAsync(id, request.RoleCodes, request.Validity, ct)
+            .HandleAsync(id, request.RoleCodes, request.Validity, request.Scopes, ct)
             .ConfigureAwait(false);
 
         return Ok(new Contracts.AffectedRolesResponse(count));
@@ -373,9 +460,13 @@ public sealed class SecurityController(
     /// переглянути чужі дані. Будь-який запис під симуляцією відхиляється
     /// <c>EditDenyReason.SimulationReadOnly</c> — навіть із правом
     /// <c>Manage</c> (ФВ-6.16a).
+    ///
+    /// ⛔ D-210: ціль — bootstrap-адміністратор або власник небезпечного права —
+    /// <c>403 ECR-SIM-4031</c>; сеанс не відкривається, спроба — у журналі.
     /// </remarks>
     [HttpPost("security/simulation")]
     [ProducesResponseType<Contracts.SimulationSessionResponse>(StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     public async Task<IActionResult> StartSimulation(
         [FromBody] StartSimulationRequest request, CancellationToken ct)
@@ -388,6 +479,11 @@ public sealed class SecurityController(
             .HandleAsync(request.SubjectUserId, request.Reason, ct)
             .ConfigureAwait(false);
 
+        // ⛔ V-06: сеанс прив'язується до ЦЬОГО входу — claim у cookie. Без
+        // нього сеанс лише писався в журнал, а наступний же запит (і `/me`)
+        // будував профіль адміністратора з усіма правами.
+        await ReissueCookieAsync(sessionId).ConfigureAwait(false);
+
         // ⚠ Клієнт зобов'язаний показувати банер увесь сеанс — саме тому
         // відповідь несе і суб'єкта, і прапорець, а не лише ідентифікатор.
         return Created(
@@ -396,15 +492,62 @@ public sealed class SecurityController(
     }
 
     /// <summary>Завершує власний сеанс симуляції.</summary>
-    /// <param name="sessionId">Сеанс.</param>
+    /// <param name="sessionId">Сеанс; не задано — сеанс цього входу.</param>
     /// <param name="ct">Токен скасування.</param>
     [HttpDelete("security/simulation")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
-    public async Task<IActionResult> EndSimulation([FromQuery] long sessionId, CancellationToken ct)
+    public async Task<IActionResult> EndSimulation([FromQuery] long? sessionId, CancellationToken ct)
     {
-        // Чужий сеанс — 403 з обробника: обрив чужого сеансу псує чужий аудит.
-        await endSimulation.HandleAsync(sessionId, ct).ConfigureAwait(false);
+        var own = currentUser.SimulationSessionId;
+        var target = sessionId ?? own
+            ?? throw new Ecr.Application.Errors.NotFoundException(
+                "ECR-SIM-0422", "Активного сеансу симуляції не знайдено.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-SIM-0422.noSession" });
+
+        try
+        {
+            // Чужий сеанс — 403 з обробника: обрив чужого сеансу псує чужий аудит.
+            await endSimulation.HandleAsync(target, ct).ConfigureAwait(false);
+        }
+        catch (Ecr.Application.Errors.NotFoundException) when (target == own)
+        {
+            // ⚠ Сеанс цього входу вже закритий (наприклад, в іншій вкладці до
+            // того, як ця отримала нову cookie): прибрати слід із cookie — і
+            // це й є завершення, а не помилка.
+        }
+
+        if (target == own)
+        {
+            await ReissueCookieAsync(sessionId: null).ConfigureAwait(false);
+        }
+
         return NoContent();
+    }
+
+    /// <summary>
+    /// Перевидає cookie цього входу з сеансом симуляції або без нього (V-06).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Решта заявок — ті самі: штамп, групи, разовий пароль. Той самий прийом,
+    /// що й у <c>SecurityStampMiddleware</c>, який, побачивши вже записану
+    /// cookie, сам її не перевидає.
+    /// </remarks>
+    private Task ReissueCookieAsync(long? sessionId)
+    {
+        var claims = User.Claims
+            .Where(c => c.Type != AuthenticationSetup.SimulationSessionClaim)
+            .Select(c => new Claim(c.Type, c.Value))
+            .ToList();
+
+        if (sessionId is { } id)
+        {
+            claims.Add(new Claim(
+                AuthenticationSetup.SimulationSessionClaim, id.ToString(CultureInfo.InvariantCulture)));
+        }
+
+        var identity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
+        return HttpContext.SignInAsync(
+            CookieAuthenticationDefaults.AuthenticationScheme, new ClaimsPrincipal(identity));
     }
 
     /// <summary>Зміна власного пароля.</summary>
@@ -418,6 +561,10 @@ public sealed class SecurityController(
     [HttpPost("auth/change-password")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    // S9: запис заблоковано невдалими спробами (спільний із входом лічильник) —
+    // `ECR-AUTH-0423`; межа частоти на користувача — `ECR-REQ-0429`.
+    [ProducesResponseType(StatusCodes.Status423Locked)]
+    [ProducesResponseType(StatusCodes.Status429TooManyRequests)]
     public async Task<IActionResult> ChangePassword(
         [FromBody] ChangePasswordRequest request, CancellationToken ct)
     {
@@ -505,9 +652,16 @@ public sealed record UserLockRequest(string Reason);
 /// без запису тут або відсутній словник узагалі — роль безстрокова, як і
 /// раніше (сумісно з клієнтами, які про це поле не знають).
 /// </param>
+/// <param name="Scopes">
+/// Області дії за кодом ролі (ФВ-6.14): роль діє лише в перелічених
+/// проєктах. Поле відсутнє — області наявних призначень ЗБЕРІГАЮТЬСЯ (клієнт,
+/// що про нього не знає, не розширює роль до всіх проєктів); передано —
+/// роль без запису в ньому діє в усіх проєктах.
+/// </param>
 public sealed record ReplaceUserRolesRequest(
     IReadOnlyList<string> RoleCodes,
-    IReadOnlyDictionary<string, Ecr.Application.Security.RoleValidityWindow>? Validity = null);
+    IReadOnlyDictionary<string, Ecr.Application.Security.RoleValidityWindow>? Validity = null,
+    IReadOnlyDictionary<string, Ecr.Application.Security.RoleScopeDto>? Scopes = null);
 
 /// <summary>Запит на зміну адреси користувача.</summary>
 /// <param name="Email">Адреса; порожньо — прибрати разом із прапорцем алертів.</param>

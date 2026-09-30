@@ -2,6 +2,8 @@ import type { JSX } from 'react';
 import { describe, expect, it } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { createMemoryRouter, RouterProvider, useParams } from 'react-router-dom';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { templateCardKey } from '@/features/templates/templateCardQuery';
 import { TemplateVersionLayout } from '@/app/TemplateVersionLayout';
 
 /**
@@ -40,7 +42,13 @@ describe('TemplateVersionLayout — layout-маршрут секції admin/tem
       { initialEntries: ['/admin/templates/42/versions/7'] },
     );
 
-    render(<RouterProvider router={router} />);
+    render(
+      // ⚠ Layout вантажить картку шаблону (крихта з назвою); сам запит тут не
+      // важливий — перевіряється лише Outlet і спільний :id.
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false, queryFn: () => new Promise(() => {}) } } })}>
+        <RouterProvider router={router} />
+      </QueryClientProvider>,
+    );
 
     expect(screen.getByTestId('child').textContent).toBe('id=42');
   });
@@ -63,10 +71,37 @@ describe('TemplateVersionLayout — layout-маршрут секції admin/tem
       { initialEntries: ['/admin/templates/42/versions/7/relations'] },
     );
 
-    render(<RouterProvider router={router} />);
+    render(
+      // ⚠ Layout вантажить картку шаблону (крихта з назвою); сам запит тут не
+      // важливий — перевіряється лише Outlet і спільний :id.
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false, queryFn: () => new Promise(() => {}) } } })}>
+        <RouterProvider router={router} />
+      </QueryClientProvider>,
+    );
 
     // Саме сторінка зв'язків (з `:id`), не сторінка версії — той самий
     // layout обслуговує обидва маршрути, не плутаючи, який зараз активний.
     expect(screen.getByTestId('child').textContent).toBe('id=42');
+  });
+  it('вантажить картку шаблону секції — інакше крихта з назвою не має з чого резолвитись на прямому посиланні', () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const router = createMemoryRouter(
+      [
+        {
+          path: '/admin/templates/:id',
+          element: <TemplateVersionLayout />,
+          children: [{ path: 'versions/:versionId', element: <ChildReadingId /> }],
+        },
+      ],
+      { initialEntries: ['/admin/templates/42/versions/7'] },
+    );
+
+    render(
+      <QueryClientProvider client={client}>
+        <RouterProvider router={router} />
+      </QueryClientProvider>,
+    );
+
+    expect(client.getQueryState(templateCardKey(42))).toBeDefined();
   });
 });

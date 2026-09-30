@@ -11,7 +11,47 @@ public interface ICollectionRunReader
 
     /// <summary>Один прогін із текстом помилки й покриттям; <c>null</c> — такого немає.</summary>
     public Task<CollectionRunDetail?> FindAsync(long id, CancellationToken ct);
+
+    /// <summary>
+    /// Сторінка подій журналу покриття — рядків зі статусом (пропуск, конфлікт,
+    /// стеля точок), новіші першими (спадний <c>Id</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Звичайні інтервали (статус <c>null</c>) сюди не потрапляють: їх на
+    /// порядки більше, і серед них подія, заради якої адміністратор відкрив
+    /// журнал, загубилась би (ІНТ-3.3, <c>D-118</c>).
+    /// </remarks>
+    public Task<PagedResult<CoverageEventView>> ListCoverageEventsAsync(
+        CoverageEventFilter filter, CursorRequest page, CancellationToken ct);
 }
+
+/// <summary>Фільтри подій журналу покриття; <c>null</c> — без обмеження.</summary>
+/// <param name="DataSourceId">З'єднання (<c>ext.DataSource</c>).</param>
+/// <param name="SourceEntityId">Сутність збору.</param>
+/// <param name="Status">Статус події (<c>CollectionCoverage.KnownStatuses</c>).</param>
+/// <param name="PeriodKey">Період, якого стосується подія.</param>
+public sealed record CoverageEventFilter(int? DataSourceId, int? SourceEntityId, string? Status, int? PeriodKey);
+
+/// <summary>Подія журналу покриття: інтервал зібрано, але в комірки він не ліг.</summary>
+/// <param name="Id">Ідентифікатор рядка покриття.</param>
+/// <param name="SourceEntityId">Сутність збору.</param>
+/// <param name="SourceEntityCode">Код сутності.</param>
+/// <param name="SourceEntityName">Назва сутності; <c>null</c> — не задана.</param>
+/// <param name="DataSourceCode">Код з'єднання.</param>
+/// <param name="PeriodKey">Період; <c>null</c> — не записано або подія синку довідника (довідник не живе за періодами).</param>
+/// <param name="Status">Один зі статусів <c>CollectionCoverage.KnownStatuses</c> (<c>src/Ecr.Domain/Entities/Integration/IntegrationLogs.cs</c>): події матеріалізації й синку довідника.</param>
+/// <param name="Details">Пояснення сервера для людини; <c>null</c> — не записано.</param>
+/// <param name="At">Коли подію записано (UTC).</param>
+public sealed record CoverageEventView(
+    long Id,
+    int SourceEntityId,
+    string SourceEntityCode,
+    string? SourceEntityName,
+    string DataSourceCode,
+    int? PeriodKey,
+    string Status,
+    string? Details,
+    DateTime At);
 
 /// <summary>Фільтри журналу; <c>null</c> — без обмеження.</summary>
 /// <param name="DataSourceId">З'єднання (<c>ext.DataSource</c>).</param>

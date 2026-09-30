@@ -25,7 +25,14 @@ public sealed class RecalculationService(
     IDocumentHeaderStore headers,
     IAuditWriter audit,
     IClock clock,
-    IUnitOfWork uow)
+    IUnitOfWork uow,
+
+    // ⛔ Спільне блокування кожного аркуша, у який пише прогін, першою дією
+    // транзакції запису, і стан аркуша, прочитаний ПІД ним
+    // (`SubmitRecalculationRaceTests`) — той самий механізм, що в
+    // `PatchCellsHandler`. Без нього перерахунок, що перетинався з поданням,
+    // переписував обчислені числа вже поданого аркуша повз зріз подання.
+    ISheetEditGate sheetGate) : ISubmitRecalculation
 {
     /// <summary>Автор обчислених значень: їх ставить система, а не людина.</summary>
     /// <remarks>
@@ -223,8 +230,26 @@ public sealed class RecalculationService(
     /// навпаки, рахуються ОДРАЗУ — цей прогін уже фоновий, і відкласти
     /// означало б не порахувати ніколи.
     /// </remarks>
-    public async Task<int> RecalculateAllAsync(
+    public Task<int> RecalculateAllAsync(
         long documentId, PeriodKey periodKey, CancellationToken ct, int? sheetDefId = null)
+        => RecalculateDocumentAsync(documentId, periodKey, sheetDefId, heldSheetDefId: null, ct);
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⚠ Той самий повний прогін, звужений до аркуша (<c>Q-331</c>), з однією
+    /// різницею: спільного блокування ЦЬОГО аркуша прогін не бере — викликач
+    /// (<c>SubmitSheetHandler</c>) уже тримає виняткове в тій самій транзакції
+    /// (<see cref="EnterSheetsAsync"/>). Стан аркуша теж не перевіряється:
+    /// подання саме переводить аркуш у <c>Submitted</c> і відмовить, якщо стан
+    /// не той (<c>ApprovalState.Submit</c>), — тоді відкотиться й цей запис.
+    /// </remarks>
+    public Task<int> RecalculateSheetUnderSubmitLockAsync(
+        long documentId, int sheetDefId, PeriodKey periodKey, CancellationToken ct)
+        => RecalculateDocumentAsync(documentId, periodKey, sheetDefId, heldSheetDefId: sheetDefId, ct);
+
+    /// <summary>Спільне тіло повного прогону документа (або одного аркуша).</summary>
+    private async Task<int> RecalculateDocumentAsync(
+        long documentId, PeriodKey periodKey, int? sheetDefId, int? heldSheetDefId, CancellationToken ct)
     {
         var instances = await rowStore
             .GetTableInstancesAsync(documentId, periodKey, ct)
@@ -242,7 +267,8 @@ public sealed class RecalculationService(
         var written = 0;
         foreach (var group in instances.GroupBy(i => i.TemplateVersionId).OrderBy(g => g.Key))
         {
-            written += await RunAsync(group.First(), dirty: null, ct, sheetDefId).ConfigureAwait(false);
+            written += await RunAsync(group.First(), dirty: null, ct, sheetDefId, heldSheetDefId, instances)
+                .ConfigureAwait(false);
         }
 
         return written;
@@ -260,8 +286,18 @@ public sealed class RecalculationService(
     /// каскад за аркушем означало б не порахувати залежну формулу сусіднього
     /// аркуша, на яку саме каскад і розрахований.
     /// </param>
+    /// <param name="heldSheetDefId">
+    /// Аркуш, виняткове блокування якого ВЖЕ тримає викликач у цій самій
+    /// транзакції (подання); <c>null</c> — таких немає.
+    /// </param>
+    /// <param name="knownInstances">
+    /// Екземпляри документа за період, уже прочитані викликачем (O2: повний
+    /// прогін читав той самий перелік тричі — тут, у викликачі й у
+    /// <see cref="LoadPeriodAsync"/>); <c>null</c> — прочитати.
+    /// </param>
     private async Task<int> RunAsync(
-        TableInstanceRef instance, DirtySet? dirty, CancellationToken ct, int? sheetDefId = null)
+        TableInstanceRef instance, DirtySet? dirty, CancellationToken ct, int? sheetDefId = null,
+        int? heldSheetDefId = null, IReadOnlyList<TableInstanceRef>? knownInstances = null)
     {
         var periodKey = new PeriodKey(instance.PeriodKey);
 
@@ -274,7 +310,7 @@ public sealed class RecalculationService(
         // сталася правка. Формула сусідньої таблиці, яка читає цю, живе в
         // СВОЄМУ екземплярі: з одним переліком рядків вона не отримала б ані
         // ребра графа, ані місця для запису — і мовчки не перераховувалася б.
-        var instances = await rowStore
+        var instances = knownInstances ?? await rowStore
             .GetTableInstancesAsync(instance.DocumentId, periodKey, ct)
             .ConfigureAwait(false);
 
@@ -422,7 +458,7 @@ public sealed class RecalculationService(
             ? null
             : new HashSet<long>(dirty.Seeds.Select(seed => seed.TableRowId));
 
-        var (values, stored) = await LoadValuesAsync(instance, scope, ct).ConfigureAwait(false);
+        var (values, stored) = await LoadValuesAsync(instance, scope, (instances, rowIdsBatch), ct).ConfigureAwait(false);
 
         // ⛔ Знімок довідника одиниць передається В КОНТЕКСТ, а не читається
         // ним самим: `IEvaluationContext.Convert` — синхронний метод діалекту
@@ -456,7 +492,16 @@ public sealed class RecalculationService(
 
         // Результати групуються за екземпляром: кожна таблиця пишеться
         // своїм набором змін, бо `CellChangeSet` адресує один екземпляр.
-        var byInstance = new Dictionary<long, List<CellRecord>>();
+        //
+        // ⛔ V-03: усередині екземпляра — СЛОВНИК за адресою, а не список.
+        // Рядкова й колонкова формули можуть цілити в одну комірку (публікація
+        // це тепер відхиляє, але вже опубліковані версії лишаються), і список
+        // давав два записи з однією адресою: `NormalizedCellStore.ApplyAsync`
+        // падав на `PRIMARY KEY … dbo.@cells`, подання — 500, фонова задача
+        // ретраїла хвилинами. Правило пріоритету детерміноване: пише ОСТАННЯ
+        // в порядку обчислення — саме її значення вже лежить у контексті й
+        // його читають залежні формули, тож база й каскад не розходяться.
+        var byInstance = new Dictionary<long, Dictionary<CellAddress, CellRecord>>();
 
         foreach (var formulaId in targets)
         {
@@ -505,7 +550,7 @@ public sealed class RecalculationService(
                 periodKey, context, values, stored, sink);
         }
 
-        var written = byInstance.Values.Sum(list => list.Count);
+        var written = byInstance.Values.Sum(cells => cells.Count);
         if (written == 0)
         {
             return 0;
@@ -536,6 +581,16 @@ public sealed class RecalculationService(
         // Recalculation | Migration`) — досі жоден код його не використовував.
         var now = clock.UtcNow;
 
+        // Аркуш кожного екземпляра, у який цей прогін пише: ключ блокування
+        // «документ × аркуш × період» (`ISheetEditGate`).
+        var sheetOfInstance = instances
+            .Where(t => byInstance.ContainsKey(t.TableInstanceId) && tables.ContainsKey(t.TableDefId))
+            .ToDictionary(t => t.TableInstanceId, t => tables[t.TableDefId].SheetDefId);
+
+        // ⚠ Рахується ВСЕРЕДИНІ транзакції: аркуш, поданий, поки прогін рахував,
+        // не пишеться, і повернути «записано N» за нього означало б збрехати.
+        var applied = 0;
+
         // ⚠ Один запис на екземпляр: перерахунок торкається десятків комірок,
         // і окрема транзакція на кожну перетворила б фонову задачу на джерело
         // блокувань саме тоді, коли документ активно правлять.
@@ -552,19 +607,92 @@ public sealed class RecalculationService(
         // значення й аудит лягають ОДНИМ комітом або не лягають зовсім.
         await uow.ExecuteInTransactionAsync(async token =>
         {
-            foreach (var (target, records) in byInstance.Where(pair => pair.Value.Count > 0))
-            {
-                // ⚠ Старі значення читаються ДО запису — після `ApplyAsync` їх уже
-                // немає ніде, а саме вони й становлять половину запису аудиту
-                // (той самий порядок, що в `PatchCellsHandler.ReadPreviousValuesAsync`).
-                var previous = await cellStore
-                    .ReadCellsAsync([.. records.Select(r => r.Address)], token)
-                    .ConfigureAwait(false);
+            // ⚠ Лічильник обнуляється на КОЖНУ спробу: стратегія повторів EF
+            // може виконати це замикання вдруге.
+            applied = 0;
 
-                await cellStore.ApplyAsync(
-                    new CellChangeSet(
-                        target,
-                        records,
+            var writable = await EnterSheetsAsync(
+                instance.DocumentId, periodKey, sheetOfInstance.Values, heldSheetDefId, token).ConfigureAwait(false);
+
+            // ⛔ O2 (ФВ-9.8, замір I2). Доти тіло нижче виконувалося НА КОЖЕН
+            // екземпляр: `ReadCellsAsync` → `MERGE doc.CellValue` →
+            // `INSERT aud.CellChange`, тобто 3 × N_таблиць звернень на
+            // документо-період (90 таблиць × 12 періодів = 1 080 `MERGE` на
+            // документ-рік, ~11 мс ЦП SQL кожен — 66 % ЦП SQL річного
+            // перерахунку). Тепер — по одному на документо-період: той самий
+            // `MERGE` з табличним параметром (`ApplyBatchAsync`, P8), лише з
+            // усіма екземплярами разом. Порядок і вміст записів ті самі:
+            // екземпляри в порядку `byInstance`, комірки — в порядку `cells`.
+            var batch = new List<(long Target, IReadOnlyList<CellRecord> Records)>();
+            foreach (var (target, cells) in byInstance.Where(pair => pair.Value.Count > 0))
+            {
+                // ⛔ Аркуш поданий або затверджений — його обчислені числа вже в
+                // зрізі подання й не змінюються (ФВ-9.17, `RecalculationWritePolicy`):
+                // шлях змінити подане — Reopen. Екземпляр без відомого аркуша не
+                // пишеться з тієї самої причини — перевірити його нема чим.
+                if (!sheetOfInstance.TryGetValue(target, out var sheetDefId) || !writable.Contains(sheetDefId))
+                {
+                    continue;
+                }
+
+                batch.Add((target, [.. cells.Values]));
+            }
+
+            applied = batch.Sum(item => item.Records.Count);
+
+            if (batch.Count > 0)
+            {
+                await WriteBatchAsync(
+                    instance.DocumentId, batch, rowKeyByRowIdByInstance, isLateEdit, now, token).ConfigureAwait(false);
+            }
+
+            await uow.SaveChangesAsync(token).ConfigureAwait(false);
+        }, ct).ConfigureAwait(false);
+
+        return applied;
+    }
+
+    /// <summary>
+    /// Пише обчислені комірки ВСІХ екземплярів документо-періоду одним пакетом:
+    /// одне читання старих значень, один <c>MERGE</c>, один запис аудиту.
+    /// </summary>
+    /// <param name="documentId">Документ прогону.</param>
+    /// <param name="batch">Екземпляри, у які писати можна, з їхніми комірками — у порядку запису.</param>
+    /// <param name="rowKeyByRowIdByInstance">Ключ рядка за його ідентифікатором — для аудиту.</param>
+    /// <param name="isLateEdit">Зміна в <c>Grace</c> (<c>D-70</c>).</param>
+    /// <param name="now">Мить зміни для аудиту.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⚠ Виконується ВСЕРЕДИНІ транзакції запису, під спільними блокуваннями
+    /// аркушів (<see cref="EnterSheetsAsync"/>): сховище й аудит приєднуються
+    /// до ambient-транзакції (Q-243), тож значення й аудит, як і доти, лягають
+    /// одним комітом або не лягають зовсім.
+    ///
+    /// ⚠ Пакет рівносильний поштучному запису за побудовою: адреси різних
+    /// екземплярів не перетинаються (рядок належить рівно одному екземпляру),
+    /// тож запис одного не змінює «старих» значень іншого, і прочитати їх усі
+    /// до запису — те саме, що читати перед кожним
+    /// (<c>RecalculationBatchWriteTests</c>, побайтне порівняння з поштучним).
+    /// </remarks>
+    private async Task WriteBatchAsync(
+        long documentId,
+        IReadOnlyList<(long Target, IReadOnlyList<CellRecord> Records)> batch,
+        Dictionary<long, Dictionary<long, string>> rowKeyByRowIdByInstance,
+        bool isLateEdit,
+        DateTime now,
+        CancellationToken ct)
+    {
+        // ⚠ Старі значення читаються ДО запису — після `ApplyBatchAsync` їх уже
+        // немає ніде, а саме вони й становлять половину запису аудиту
+        // (той самий порядок, що в `PatchCellsHandler.ReadPreviousValuesAsync`).
+        var previous = await cellStore
+            .ReadCellsAsync([.. batch.SelectMany(item => item.Records.Select(r => r.Address))], ct)
+            .ConfigureAwait(false);
+
+        await cellStore.ApplyBatchAsync(
+            [.. batch.Select(item => new CellChangeSet(
+                        item.Target,
+                        item.Records,
                         Deletes: [],
 
                         // ⛔ `D14-07` (директива №14 частина 3, `DAT-02` п. 3).
@@ -591,36 +719,97 @@ public sealed class RecalculationService(
                         // однаково пишуть без `ExpectedRowVersions`.
                         TouchedRowIds: [],
                         ChangedByUserId: SystemUserId,
-                        isLateEdit),
-                    token).ConfigureAwait(false);
+                        isLateEdit))],
+            ct).ConfigureAwait(false);
 
-                var rowKeyByRowId = rowKeyByRowIdByInstance.TryGetValue(target, out var found)
+        // ⛔ `DAT-02` п. 2: аудит пишеться рівно по `Records`, тобто по тому,
+        // що ПІШЛО в `upserts`. Фільтр незміненого стоїть в `Evaluate` — до
+        // того, як комірка потрапить у цей список, — саме тому, щоб журнал і
+        // сховище не могли розійтися: другого переліку, який довелося б
+        // тримати в тому самому стані, тут немає.
+        await audit.WriteCellChangesAsync(
+            [.. batch.SelectMany(item =>
+            {
+                var rowKeyByRowId = rowKeyByRowIdByInstance.TryGetValue(item.Target, out var found)
                     ? found
                     : new Dictionary<long, string>();
 
-                // ⛔ `DAT-02` п. 2: аудит пишеться рівно по `records`, тобто по
-                // тому, що ПІШЛО в `upserts`. Фільтр незміненого стоїть в
-                // `Evaluate` — до того, як комірка потрапить у цей список, —
-                // саме тому, щоб журнал і сховище не могли розійтися: другого
-                // переліку, який довелося б тримати в тому самому стані, тут
-                // немає.
-                await audit.WriteCellChangesAsync(
-                    [.. records.Select(r => new CellChangeRecord(
-                        now, r.Address, instance.DocumentId,
-                        RowKey: rowKeyByRowId.GetValueOrDefault(r.Address.TableRowId, string.Empty),
-                        OldValue: Was(previous, r.Address),
-                        NewValue: Describe(r.Value),
-                        SystemUserId,
-                        Origin: "Recalculation",
-                        isLateEdit,
-                        CorrelationId: null))],
-                    token).ConfigureAwait(false);
+                return item.Records.Select(r => new CellChangeRecord(
+                    now, r.Address, documentId,
+                    RowKey: rowKeyByRowId.GetValueOrDefault(r.Address.TableRowId, string.Empty),
+                    OldValue: Was(previous, r.Address),
+                    NewValue: Describe(r.Value),
+                    SystemUserId,
+                    Origin: "Recalculation",
+                    isLateEdit,
+                    CorrelationId: null));
+            })],
+            ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Спільні блокування аркушів, у які пише прогін, — у СТАБІЛЬНОМУ порядку;
+    /// повертає аркуші, у які писати можна.
+    /// </summary>
+    /// <param name="documentId">Документ прогону.</param>
+    /// <param name="periodKey">Період прогону.</param>
+    /// <param name="sheetDefIds">Аркуші екземплярів, у які прогін пише (з повторами).</param>
+    /// <param name="heldSheetDefId">
+    /// Аркуш, виняткове блокування якого вже тримає викликач (подання): не
+    /// блокується вдруге і вважається придатним до запису.
+    /// </param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ Що було. Перерахунок читав дані й писав <c>doc.CellValue</c> без
+    /// жодного блокування і без перевірки стану аркуша. Подання, що
+    /// перетиналося з ним, фіксувало у <c>calc.SubmissionSnapshot</c> старе
+    /// обчислене число, а перерахунок одразу після того писав нове в живу комірку
+    /// вже ПОДАНОГО аркуша — подана форма й дані розходились мовчки
+    /// (<c>SubmitRecalculationRaceTests</c>, обидва порядки). Той самий дефект і
+    /// без гонки: каскадна задача після правки (<c>FormulaRecalculationJob</c>)
+    /// стану аркуша не перевіряла зовсім, тож правка → «Подати» → задача з черги
+    /// переписувала подане число.
+    ///
+    /// ⚠ Порядок блокувань — за ключем «документ × аркуш × період», тобто
+    /// всередині одного прогону (документ і період сталі) — за
+    /// <c>SheetDefId</c> за зростанням. Прогін бере кілька СПІЛЬНИХ блокувань в
+    /// одній транзакції; спільні між собою сумісні, але черга SQL Server FIFO:
+    /// спільний запит стає за винятковим (подання), що вже чекає. Два
+    /// багатоаркушеві власники спільних блокувань у різному порядку плюс два
+    /// подання в черзі дають цикл; однаковий порядок його виключає. Подання
+    /// тримає ОДИН ключ і на перерахунок не чекає ні на що інше, правка — теж
+    /// один ключ.
+    ///
+    /// ⚠ Не взято вчасно — <c>ECR-DOC-4091</c> з порту: задача падає з причиною,
+    /// а не пише повз блокування.
+    /// </remarks>
+    private async Task<IReadOnlySet<int>> EnterSheetsAsync(
+        long documentId, PeriodKey periodKey, IEnumerable<int> sheetDefIds, int? heldSheetDefId, CancellationToken ct)
+    {
+        var writable = new HashSet<int>();
+
+        foreach (var sheetDefId in sheetDefIds.Distinct().Order())
+        {
+            // ⛔ Аркуш, чиє ВИНЯТКОВЕ блокування вже тримає викликач (подання),
+            // повторно не блокується: це той самий власник, і стан аркуша під
+            // цим блокуванням змінює сам викликач.
+            if (sheetDefId == heldSheetDefId)
+            {
+                writable.Add(sheetDefId);
+                continue;
             }
 
-            await uow.SaveChangesAsync(token).ConfigureAwait(false);
-        }, ct).ConfigureAwait(false);
+            var status = await sheetGate
+                .EnterEditAsync(documentId, sheetDefId, periodKey, ct)
+                .ConfigureAwait(false);
 
-        return written;
+            if (status is not (Domain.Enums.DocumentStatus.Submitted or Domain.Enums.DocumentStatus.Approved))
+            {
+                writable.Add(sheetDefId);
+            }
+        }
+
+        return writable;
     }
 
     /// <summary>Обчислює одну формулу в усіх її цільових комірках.</summary>
@@ -640,7 +829,7 @@ public sealed class RecalculationService(
         SliceEvaluationContext context,
         Dictionary<CellKey, Ecr.Expressions.Evaluation.ExpressionValue> values,
         IReadOnlyDictionary<CellKey, CellValueData> stored,
-        List<CellRecord> upserts)
+        Dictionary<CellAddress, CellRecord> upserts)
     {
         foreach (var (rowKey, columnDefId) in Targets(table, formula, rowIds, rowFilter))
         {
@@ -669,6 +858,19 @@ public sealed class RecalculationService(
                 continue;
             }
 
+            // ⛔ V-04: формула рядка без явної колонки розкривається на ВСІ
+            // колонки рядка — і до цього писала число в String/Date/Bool/
+            // Lookup/Unit (`ValueNumeric = 15` у колонці дати). Колонка, тип
+            // якої результату не приймає, пропускається ДО контексту: інакше
+            // залежна формула прочитала б із неї число, якого в базі немає.
+            if (formula.Scope == Domain.Enums.FormulaScope.Row
+                && formula.ColumnDefId is null
+                && !FormulaTargetTypes.Accepts(
+                    table.Columns.FirstOrDefault(c => c.Id == columnDefId)?.DataType, result.Value.Type))
+            {
+                continue;
+            }
+
             var key = new CellKey(0, table.Id, rowKey, columnDefId);
 
             // ⚠ Значення контексту оновлюється ЗАВЖДИ, навіть коли запису не
@@ -686,13 +888,18 @@ public sealed class RecalculationService(
             // `старе = нове`, і — до п. 3 — стільки ж піднятих `RowVersion`.
             // Порівняння винесене в `CellValueComparison.AreEqual` і
             // перевірене окремо: саме воно вирішує, що таке «те саме».
+            var address = new CellAddress(periodKey, rowId, columnDefId);
+
+            // ⚠ V-03: «те саме, що в базі» від ПІЗНІШОЇ формули знімає й запис
+            // ранішої в ту саму комірку — інакше в базу пішло б значення, яке
+            // в контексті вже перекрите.
             if (CellValueComparison.AreEqual(stored.GetValueOrDefault(key), data))
             {
+                upserts.Remove(address);
                 continue;
             }
 
-            upserts.Add(new CellRecord(
-                new CellAddress(periodKey, rowId, columnDefId), table.Id, data));
+            upserts[address] = new CellRecord(address, table.Id, data);
         }
     }
 
@@ -775,11 +982,20 @@ public sealed class RecalculationService(
     /// </remarks>
     /// <param name="instance">Екземпляр таблиці — джерело документа й періоду.</param>
     /// <param name="scope">Замикання читання: що саме потрібно цьому прогону.</param>
+    /// <param name="current">
+    /// Екземпляри й рядки ПОТОЧНОГО періоду, уже прочитані <see cref="RunAsync"/>
+    /// (O2): читати їх тут удруге означало б два зайві звернення на кожен
+    /// документо-період.
+    /// </param>
     /// <param name="ct">Токен скасування.</param>
     private async Task<(
         Dictionary<CellKey, Ecr.Expressions.Evaluation.ExpressionValue> Values,
         Dictionary<CellKey, CellValueData> Stored)> LoadValuesAsync(
-        TableInstanceRef instance, RecalculationReadScope scope, CancellationToken ct)
+        TableInstanceRef instance,
+        RecalculationReadScope scope,
+        (IReadOnlyList<TableInstanceRef> Instances,
+            IReadOnlyDictionary<long, IReadOnlyDictionary<string, long>> RowIds) current,
+        CancellationToken ct)
     {
         var values = new Dictionary<CellKey, Ecr.Expressions.Evaluation.ExpressionValue>();
 
@@ -797,7 +1013,7 @@ public sealed class RecalculationService(
         var periodKey = new PeriodKey(instance.PeriodKey);
 
         await LoadPeriodAsync(
-                values, stored, instance.DocumentId, periodKey, offset: 0, scope.TableDefIds, ct)
+                values, stored, instance.DocumentId, periodKey, offset: 0, scope.TableDefIds, ct, current)
             .ConfigureAwait(false);
 
         // ⛔ Попередній період завантажується, коли він існує. `[Period:-1]` у
@@ -838,6 +1054,12 @@ public sealed class RecalculationService(
     /// пакетні запити не потрапляють. <c>null</c> — читати весь документ.
     /// </param>
     /// <param name="ct">Токен скасування.</param>
+    /// <param name="known">
+    /// Екземпляри й рядки ВСІХ таблиць цього періоду, уже прочитані викликачем;
+    /// <c>null</c> — прочитати (суміжний період). Рядки екземпляра від
+    /// переліку інших не залежать, тож підмножина надмножини — те саме, що
+    /// окремий запит на підмножину.
+    /// </param>
     private async Task LoadPeriodAsync(
         Dictionary<CellKey, Ecr.Expressions.Evaluation.ExpressionValue> values,
         Dictionary<CellKey, CellValueData>? stored,
@@ -845,9 +1067,12 @@ public sealed class RecalculationService(
         PeriodKey periodKey,
         int offset,
         IReadOnlySet<int>? tableDefIds,
-        CancellationToken ct)
+        CancellationToken ct,
+        (IReadOnlyList<TableInstanceRef> Instances,
+            IReadOnlyDictionary<long, IReadOnlyDictionary<string, long>> RowIds)? known = null)
     {
-        var all = await rowStore.GetTableInstancesAsync(documentId, periodKey, ct).ConfigureAwait(false);
+        var all = known?.Instances
+                  ?? await rowStore.GetTableInstancesAsync(documentId, periodKey, ct).ConfigureAwait(false);
 
         // ⛔ `CAL-02`. Фільтр стоїть ДО обох пакетних запитів, а не після них:
         // сенс рядка саме в тому, скільки комірок віддає база, а не скільки з
@@ -867,8 +1092,11 @@ public sealed class RecalculationService(
         // `RunAsync` вище — ОДИН пакетний запит на рядки і на комірки ВСІХ
         // таблиць документа за період замість запиту на кожну; викликається
         // на кожне редагування комірки (`LoadValuesAsync` читає ДВА періоди).
-        var rowIdsBatch = await rowStore.GetRowIdsBatchAsync(instanceIds, periodKey, ct).ConfigureAwait(false);
-        var cellsBatch = await cellStore.ReadSlicesAsync(instanceIds, ct).ConfigureAwait(false);
+        var rowIdsBatch = known?.RowIds
+                          ?? await rowStore.GetRowIdsBatchAsync(instanceIds, periodKey, ct).ConfigureAwait(false);
+        // ⚠ O3b: усі екземпляри — цього періоду, тож ключ партиції відомий
+        // (EcrPerfI2, 90 екземплярів: 1 984 → 181 читання doc.TableInstance).
+        var cellsBatch = await cellStore.ReadSlicesAsync(instanceIds, periodKey, ct).ConfigureAwait(false);
 
         foreach (var table in instances)
         {
@@ -926,7 +1154,13 @@ public sealed class RecalculationService(
             ?? throw new Domain.Abstractions.DomainException(
                 "ECR-PRD-0404",
                 $"Періоду {periodKey.Value} для документа {documentId} не існує: "
-                + "календарний контекст обчислити нема з чого.");
+                + "календарний контекст обчислити нема з чого.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-PRD-0404.periodForDocument",
+                    ["periodKey"] = periodKey.Value.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["documentId"] = documentId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
 
         return new Ecr.Expressions.PeriodContext(
             bounds.PeriodStart,
@@ -1029,8 +1263,7 @@ public sealed class RecalculationService(
 
         // 2. entryId ← уже завантажені `values` (Lookup-комірка читається тим
         //    самим шляхом, що й будь-яка інша), + який довідник (з колонки).
-        var neededFieldsByEntry = new Dictionary<long, HashSet<string>>();
-        var registryDefByEntry = new Dictionary<long, int>();
+        var requests = new List<Registries.RegistryFieldRequest>();
 
         foreach (var (tableDefId, rowKey, columnDefId, fieldCode) in needed)
         {
@@ -1057,102 +1290,15 @@ public sealed class RecalculationService(
                     continue;
                 }
 
-                var entryId = (long)entryIdRaw;
-                registryDefByEntry[entryId] = registryDefId;
-
-                if (!neededFieldsByEntry.TryGetValue(entryId, out var fields))
-                {
-                    neededFieldsByEntry[entryId] = fields = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                }
-
-                fields.Add(fieldCode);
+                requests.Add(new Registries.RegistryFieldRequest((long)entryIdRaw, registryDefId, fieldCode));
             }
         }
 
-        if (neededFieldsByEntry.Count == 0)
-        {
-            return null;
-        }
-
-        // 3. Визначення полів — по одному запиту на УНІКАЛЬНИЙ довідник.
-        var fieldDefsByRegistry =
-            new Dictionary<int, IReadOnlyDictionary<string, Domain.Entities.Configuration.RegistryFieldDef>>();
-
-        foreach (var registryDefId in registryDefByEntry.Values.Distinct())
-        {
-            var definition = await registryStore.FindDefinitionByIdAsync(registryDefId, ct).ConfigureAwait(false);
-            fieldDefsByRegistry[registryDefId] = definition?.Fields
-                .ToDictionary(f => f.Code, StringComparer.OrdinalIgnoreCase)
-                ?? new Dictionary<string, Domain.Entities.Configuration.RegistryFieldDef>(StringComparer.OrdinalIgnoreCase);
-        }
-
-        // 4. Значення — по одному запиту на УНІКАЛЬНИЙ запис.
-        var snapshot = new Dictionary<long, IReadOnlyDictionary<string, Ecr.Expressions.Evaluation.ExpressionValue>>();
-
-        foreach (var (entryId, fieldCodes) in neededFieldsByEntry)
-        {
-            if (!fieldDefsByRegistry.TryGetValue(registryDefByEntry[entryId], out var fieldDefs))
-            {
-                continue;
-            }
-
-            var registryValues = await registryStore.ListValuesAsync(entryId, ct).ConfigureAwait(false);
-            var byFieldDefId = registryValues.ToDictionary(v => v.RegistryFieldDefId);
-
-            var perEntry = new Dictionary<string, Ecr.Expressions.Evaluation.ExpressionValue>(
-                StringComparer.OrdinalIgnoreCase);
-
-            foreach (var fieldCode in fieldCodes)
-            {
-                if (!fieldDefs.TryGetValue(fieldCode, out var fieldDef)
-                    || !byFieldDefId.TryGetValue(fieldDef.Id, out var registryValue))
-                {
-                    // Немає такого поля або запис ще не заповнив його —
-                    // `GetRegistryField` віддасть #REF на відсутній ключ; тут
-                    // просто нема що покласти в знімок.
-                    continue;
-                }
-
-                if (ToExpressionValue(registryValue, fieldDef.DataType) is { } mapped)
-                {
-                    perEntry[fieldCode] = mapped;
-                }
-            }
-
-            if (perEntry.Count > 0)
-            {
-                snapshot[entryId] = perEntry;
-            }
-        }
-
-        return snapshot;
+        // 3–4. Визначення полів і значення — СПІЛЬНИЙ завантажувач (D16-04):
+        //      той самий, яким знімок будують правила валідації.
+        return await Registries.RegistryFieldSnapshotLoader
+            .LoadAsync(registryStore, requests, ct).ConfigureAwait(false);
     }
-
-    /// <summary>Значення поля довідника як значення виразу; типізовано за <c>RegistryFieldDef.DataType</c>.</summary>
-    /// <remarks>
-    /// ⚠ <c>Lookup</c>/<c>Unit</c>/<c>Formula</c>/<c>Calculated</c> тут
-    /// НЕМАЄ: перші два REGFIELD сьогодні не читає (задача — decimal/text/
-    /// bool/date), а останні два в довіднику взагалі не існують
-    /// (<c>RegistryValue.Set</c> їх забороняє при записі).
-    /// </remarks>
-    private static Ecr.Expressions.Evaluation.ExpressionValue? ToExpressionValue(
-        Domain.Entities.Dictionaries.RegistryValue value, Domain.Enums.CellDataType dataType)
-        => dataType switch
-        {
-            Domain.Enums.CellDataType.Decimal or Domain.Enums.CellDataType.Int => value.ValueNumeric is { } n
-                ? Ecr.Expressions.Evaluation.ExpressionValue.Number(n)
-                : null,
-            Domain.Enums.CellDataType.String => value.ValueString is { } s
-                ? Ecr.Expressions.Evaluation.ExpressionValue.Text(s)
-                : null,
-            Domain.Enums.CellDataType.Bool => value.ValueBool is { } b
-                ? Ecr.Expressions.Evaluation.ExpressionValue.Boolean(b)
-                : null,
-            Domain.Enums.CellDataType.Date => value.ValueDate is { } d
-                ? Ecr.Expressions.Evaluation.ExpressionValue.Date(d)
-                : null,
-            _ => null,
-        };
 
     /// <summary>Значення виразу як значення комірки; <c>null</c> — записувати нічого.</summary>
     private static CellValueData? ToCellValue(Ecr.Expressions.Evaluation.ExpressionValue value)

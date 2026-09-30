@@ -71,6 +71,7 @@ public sealed class CalculationBindingStore(EcrDbContext db) : ICalculationBindi
         var rows = await db.TableDefs
             .AsNoTracking()
             .Where(t => tableDefIds.Contains(t.Id))
+            .OrderBy(t => t.Id)
             .Select(t => new { t.Id, t.Code, t.NameL10n })
             .Take(MaxBindings)
             .ToListAsync(ct)
@@ -91,6 +92,9 @@ public sealed class CalculationBindingStore(EcrDbContext db) : ICalculationBindi
         var rows = await db.ColumnDefs
             .AsNoTracking()
             .Where(c => tableDefIds.Contains(c.TableDefId) && !c.IsDeleted)
+            .OrderBy(c => c.TableDefId)
+            .ThenBy(c => c.Ordinal)
+            .ThenBy(c => c.Id)
             .Select(c => new { c.TableDefId, c.Code })
             .Take(MaxBindings)
             .ToListAsync(ct)
@@ -125,6 +129,7 @@ public sealed class CalculationBindingStore(EcrDbContext db) : ICalculationBindi
                 where sheet.TemplateVersionId == templateVersionId
                 select column.Id)
             .Distinct()
+            .OrderBy(id => id)
             .Take(MaxBindings)
             .ToListAsync(ct)
             .ConfigureAwait(false);
@@ -142,6 +147,7 @@ public sealed class CalculationBindingStore(EcrDbContext db) : ICalculationBindi
                 join column in db.ColumnDefs.AsNoTracking()
                     on binding.ColumnDefId equals column.Id
                 where !column.IsDeleted
+                orderby binding.Id
                 select new { binding.OutputCode, column.Scale })
             .Take(MaxBindings)
             .ToListAsync(ct)

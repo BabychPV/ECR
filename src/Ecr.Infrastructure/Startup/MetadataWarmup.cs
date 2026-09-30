@@ -36,6 +36,10 @@ public sealed class MetadataWarmup(EcrDbContext db, IMetadataCache cache)
             .Where(p => p.Status != Domain.Enums.ProjectStatus.Archived)
             .Select(p => p.TemplateVersionId)
             .Distinct()
+            // Порядок ПІСЛЯ `Distinct` (інакше SQL його стирає): на стелі
+            // прогріваються найновіші версії — на них найімовірніше чекає
+            // перший користувач, — а не довільна вибірка плану (EF 10102).
+            .OrderByDescending(id => id)
             .Take(MaxVersions)
             .ToListAsync(ct)
             .ConfigureAwait(false);

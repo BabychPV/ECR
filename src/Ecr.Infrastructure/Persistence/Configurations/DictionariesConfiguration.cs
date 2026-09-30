@@ -33,9 +33,20 @@ public sealed class RegistryEntryConfiguration : IEntityTypeConfiguration<Regist
         // крок I.10). `ValidFrom = ValidTo` — це вікно з нуля днів, тобто
         // запис, якого ніколи не видно в списку; ловити його треба базою, а не
         // на екрані, бо масова вставка імпортера повз домен не проходить.
-        builder.ToTable("RegistryEntry", "dic", t => t.HasCheckConstraint(
-            "CK_RegEntry_Period",
-            "ValidFrom IS NULL OR ValidTo IS NULL OR ValidFrom < ValidTo"));
+        builder.ToTable("RegistryEntry", "dic", t =>
+        {
+            t.HasCheckConstraint(
+                "CK_RegEntry_Period",
+                "ValidFrom IS NULL OR ValidTo IS NULL OR ValidFrom < ValidTo");
+
+            // RK03 (D-158, FEATURE-REGISTRY-TABLES §3.6): системна історія. Вона
+            // пишеться базою на КОЖНОМУ шляху запису — ручному, CSV, імпорті,
+            // синку, прямому SQL, — тому відтворити прогін «станом на» можна
+            // незалежно від того, хто й як змінив довідник.
+            t.IsTemporal(Temporal<RegistryEntry>("RegistryEntryHistory"));
+        });
+        TemporalPeriod(builder);
+        builder.Property(x => x.ChangedByUserId);
 
         builder.HasKey(x => x.Id).HasName("PK_RegistryEntry");
         builder.Property(x => x.Id).HasConversion<int>().ValueGeneratedOnAdd();
@@ -64,7 +75,59 @@ public sealed class RegistryEntryConfiguration : IEntityTypeConfiguration<Regist
                .HasConstraintName("FK_RegEntry_Def");
         builder.HasOne<RegistryEntry>().WithMany().HasForeignKey(x => x.ParentEntryId)
                .HasConstraintName("FK_RegEntry_Parent");
+
+        // RK02 (D-157): коди записів довідників із `CodeMode = Auto` — `E` + 9
+        // цифр цієї послідовності (§4.8). Одна на всі довідники: код унікальний
+        // лише в межах довідника, тож пропуски між довідниками нічого не
+        // ламають, а окрема послідовність на кожен довідник означала б DDL
+        // під час створення довідника (D-66: застосунок DDL-прав не має).
+        //
+        // ⚠ Оголошена тут, а не поруч із `TableRowSeq` в `EcrDbContext` під
+        // `IsSqlServer()`: це послідовність саме записів довідника, а
+        // провайдера, крім SQL Server, у дереві немає (див. коментар там).
+        var model = builder.Metadata.Model;
+        var codeSequence = model.FindSequence("RegistryEntryCodeSeq", "dic")
+                           ?? model.AddSequence("RegistryEntryCodeSeq", "dic");
+        codeSequence.Type = typeof(long);
+        codeSequence.StartValue = 1;
+        codeSequence.IncrementBy = 1;
     }
+
+    /// <summary>
+    /// Налаштування системної історії таблиці <c>dic.*</c>: історична таблиця в тій
+    /// самій схемі, колонки періоду <c>PeriodStart</c>/<c>PeriodEnd</c>.
+    /// </summary>
+    /// <param name="historyTable">Ім'я історичної таблиці в схемі <c>dic</c>.</param>
+    /// <returns>Дія для <c>IsTemporal</c>.</returns>
+    internal static Action<TemporalTableBuilder<TEntity>> Temporal<TEntity>(string historyTable)
+        where TEntity : class
+        => tt =>
+        {
+            tt.UseHistoryTable(historyTable, "dic");
+            tt.HasPeriodStart(PeriodStart).HasColumnName(PeriodStart);
+            tt.HasPeriodEnd(PeriodEnd).HasColumnName(PeriodEnd);
+        };
+
+    /// <summary>Точність колонок періоду — <c>datetime2(3)</c>.</summary>
+    /// <param name="builder">Будівник сутності з системною історією.</param>
+    /// <remarks>
+    /// ⛔ <c>datetime2(3)</c>, а не типові для EF <c>datetime2(7)</c>: так вимагає
+    /// <c>D-68</c> для всіх міток часу (FEATURE-REGISTRY-TABLES §3.2). Дві зміни
+    /// рядка в межах однієї мілісекунди дають історичний рядок нульової
+    /// тривалості — його не видно на жоден момент «станом на», і це допустимо.
+    /// </remarks>
+    internal static void TemporalPeriod<TEntity>(EntityTypeBuilder<TEntity> builder)
+        where TEntity : class
+    {
+        builder.Property<DateTime>(PeriodStart).HasPrecision(3);
+        builder.Property<DateTime>(PeriodEnd).HasPrecision(3);
+    }
+
+    /// <summary>Колонка початку системного періоду.</summary>
+    internal const string PeriodStart = "PeriodStart";
+
+    /// <summary>Колонка кінця системного періоду.</summary>
+    internal const string PeriodEnd = "PeriodEnd";
 }
 
 /// <summary>Конфігурація <see cref="RegistryValue"/> — значень полів запису.</summary>
@@ -81,7 +144,12 @@ public sealed class RegistryValueConfiguration : IEntityTypeConfiguration<Regist
     {
         ArgumentNullException.ThrowIfNull(builder);
 
-        builder.ToTable("RegistryValue", "dic");
+        // RK03 (D-158): системна історія значень — див. RegistryEntryConfiguration.
+        builder.ToTable("RegistryValue", "dic", t =>
+            t.IsTemporal(RegistryEntryConfiguration.Temporal<RegistryValue>("RegistryValueHistory")));
+        RegistryEntryConfiguration.TemporalPeriod(builder);
+        builder.Property(x => x.ChangedByUserId);
+
         builder.HasKey(x => x.Id).HasName("PK_RegistryValue");
 
         builder.Property(x => x.RegistryEntryId).HasConversion<int>();
@@ -148,6 +216,7 @@ public sealed class RegistryExternalKeyConfiguration : IEntityTypeConfiguration<
         builder.Property(x => x.ExternalId).HasMaxLength(200).IsRequired();
         builder.Property(x => x.ExternalPath).HasMaxLength(400);
         builder.Property(x => x.LastSyncedAt).HasColumnType("datetime2(3)");
+        builder.Property(x => x.MissingInSourceSince).HasColumnType("datetime2(3)");
 
         // Унікальність за (джерело, зовнішній Id), а не за записом: один запис
         // довідника легально має ключі в кількох системах, але той самий GUID

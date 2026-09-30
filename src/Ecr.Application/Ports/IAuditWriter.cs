@@ -6,6 +6,22 @@ namespace Ecr.Application.Ports;
 /// Запис аудиту. Пакетний **навмисно**: окремий <c>INSERT</c> на кожну комірку
 /// не вкладається в бюджет збереження діапазону (300 мс на 100 комірок).
 /// </summary>
+/// <remarks>
+/// ⛔ C4. Два різновиди подій, і різниця між ними — не стиль, а правда журналу:
+/// <list type="bullet">
+/// <item><b>Результатна</b> подія («роль перейменовано», «версію
+/// опубліковано») описує зміну і мусить жити РІВНО стільки, скільки вона:
+/// усі методи, крім <see cref="WriteIndependentSecurityEventAsync"/>,
+/// приєднуються до поточної транзакції. Тож викликач пише подію і зберігає
+/// зміну всередині <see cref="IUnitOfWork.ExecuteInTransactionAsync"/>:
+/// поза транзакцією <c>INSERT</c> автокомітиться одразу, і відкат зміни лишає
+/// в журналі подію, якої не сталося (а запис аудиту ПІСЛЯ коміту — зміну без
+/// сліду, якщо впав аудит).</item>
+/// <item><b>Спроба</b> (доступ до даних, відмова в доступі) — факт незалежно
+/// від того, чим скінчився запит: лише
+/// <see cref="WriteIndependentSecurityEventAsync"/>.</item>
+/// </list>
+/// </remarks>
 public interface IAuditWriter
 {
     /// <summary>Записує зміни комірок однією операцією, у тій самій транзакції.</summary>
@@ -16,6 +32,24 @@ public interface IAuditWriter
 
     /// <summary>Записує подію безпеки.</summary>
     public Task WriteSecurityEventAsync(SecurityEventRecord evt, CancellationToken ct);
+
+    /// <summary>
+    /// Записує групу подій безпеки за мінімум походів до сервера, у тій самій
+    /// транзакції. Для одиночної події лишається <see cref="WriteSecurityEventAsync"/>
+    /// — цей метод не замінює його, а додається поруч для викликачів, які й так
+    /// збирають список (наприклад, пер-рядковий слід імпорту CSV довідника).
+    /// </summary>
+    public Task WriteSecurityEventsAsync(IReadOnlyList<SecurityEventRecord> events, CancellationToken ct);
+
+    /// <summary>
+    /// Записує подію-СПРОБУ безпеки, яка лишається в журналі навіть тоді, коли
+    /// транзакцію навколо відкочено (C4).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Не для результатних подій: подія зміни, записана так, переживе
+    /// відкат самої зміни — рівно той дефект, від якого цей метод відділено.
+    /// </remarks>
+    public Task WriteIndependentSecurityEventAsync(SecurityEventRecord evt, CancellationToken ct);
 
     /// <summary>Записує подію публікації з diff <b>результатів</b>, а не коду (ФВ-9.6).</summary>
     public Task WritePublicationEventAsync(PublicationEventRecord evt, CancellationToken ct);

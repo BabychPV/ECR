@@ -9,8 +9,13 @@ namespace Ecr.Api.Tests;
 /// <remarks>
 /// ⚠ Колекції xUnit живуть у межах **збірки**, тому визначення з
 /// <c>Ecr.Infrastructure.Tests</c> сюди не поширюється — потрібне власне
-/// (`Q-053`). База при цьому одна: фікстура створює її під ім'ям із
-/// <c>ECR_TEST_DB</c>, і два тестові проєкти по черзі працюють із тією самою.
+/// (`Q-053`). Бази в проєктів різні: фікстура бере ім'я з каталогу збірки
+/// (<c>EcrTest_Api_&lt;мітка worktree&gt;</c>, `Q-055`), а паралельні шарди
+/// <c>tools/verify-all.ps1 -ApiParallel K</c> додають суфікс <c>_s&lt;N&gt;</c>
+/// з <c>ECR_TEST_SHARD</c>. <c>ECR_TEST_DB</c> перекриває ім'я цілком.
+///
+/// ⚠ Усередині одного процесу тести цієї колекції йдуть ПОСЛІДОВНО, з
+/// однією базою. Прискорення — лише окремими процесами (див. скрипт).
 /// </remarks>
 [CollectionDefinition("SqlServer")]
 public sealed class SqlServerCollection : ICollectionFixture<SqlServerFixture>

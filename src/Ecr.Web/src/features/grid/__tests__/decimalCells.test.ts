@@ -8,6 +8,7 @@ import { gridColumns } from '../DocumentGrid';
 import { NoLocalFlags } from '../cellState';
 import { lookupCellDisplay } from '../LookupCellEditor';
 import { decimalTextOf, roundToScale } from '../rounding';
+import { columnTotals, totalsRow } from '../gridTotals';
 import {
   cellKey,
   discardPendingRows,
@@ -200,27 +201,96 @@ describe('Д: формат комірки — доповнення нулями 
     expect(shownValue(slice({ C1: '1e3' }, [column({ scale: 2 })]), '1e3')).toBe('1e3');
   });
 
-  it('довший дріб округлюється ПОКАЗОМ до scale — AwayFromZero, як roundToScale', () => {
-    // ✎ Рішення координатора 2026-09-22: «рівно N» — це й округлення показу.
+  it('довший дріб НЕ обрізається показом: scale — нижня межа подачі', () => {
+    /*
+     * ✒ 2026-09-23 (`U-05`, уточнення координатора): це скасовує рішення
+     * від 2026-09-22 «рівно N знаків — це й округлення показу». Підстава — не
+     * смак, а сервер: `ColumnDef.Validate` п. 7 звіряє масштаб ПІД УМОВОЮ
+     * `DataType == CellDataType.Decimal`, тож у десятковій колонці значення,
+     * довше за `scale`, узагалі не зберігається (`ECR-CELL-0422`) — там
+     * округлення показу було беззмістовне. А для `Formula`/`Calculated`
+     * перевірки немає: вихід рахується з масштабом ПРИВ'ЯЗКИ методології
+     * (`NumericPolicy.RoundOutput`), який не зобов'язаний дорівнювати `Scale`
+     * колонки-приймача. Тобто округлення показу спрацьовувало рівно там, де
+     * знаки справжні, — і ховало їх.
+     *
+     * ⛔ Мутаційна межа всього правила: поверни `roundDecimalText` у
+     * `cellDisplay` — і кожне твердження цього блоку червоніє.
+     */
     const formula = [column({ dataType: 'Formula', scale: 2 })];
 
-    expect(shownValue(slice({ C1: '1.005' }, formula), '1.005')).toBe('1.01');
-    expect(shownValue(slice({ C1: '-1.005' }, formula), '-1.005')).toBe('-1.01');
-    expect(shownValue(slice({ C1: '1.23456' }, [column({ scale: 2 })]), '1.23456')).toBe('1.23');
-    // Буфер обміну лишає повне значення.
+    expect(shownValue(slice({ C1: '1.005' }, formula), '1.005')).toBe('1.005');
+    expect(shownValue(slice({ C1: '-1.005' }, formula), '-1.005')).toBe('-1.005');
+    expect(shownValue(slice({ C1: '1.23456' }, [column({ scale: 2 })]), '1.23456')).toBe('1.23456');
+    // Буфер обміну лишає повне значення — і тепер екран теж.
     expect(cellText('1.005')).toBe('1.005');
   });
 
-  it('20 значущих цифр округлюються рядково, не через double', () => {
-    // ⛔ Через `Number` дріб став би ...0124 (13 знаків ≤ 15) і показ дав би
-    // `...012400`; рядкове AwayFromZero над ...0123456 дає ...012346.
+  it('20 значущих цифр доходять до екрана цілими, не через double', () => {
+    // ⛔ Через `Number` дріб став би ...0124 (13 знаків), а обрізання до
+    // `scale` — ...012346. Правильна відповідь — усі двадцять цифр.
     const data = slice({ C1: Twenty }, [column({ dataType: 'Calculated', scale: 15 })]);
 
-    expect(norm(shownValue(data, Twenty))).toBe('1,234.123456789012346');
+    expect(norm(shownValue(data, Twenty))).toBe('1,234.1234567890123456');
+  });
+
+  it('ціла колонка подається тим самим правилом, що й десяткова (U-05)', () => {
+    /*
+     * ⛔ Саме це й давало дві подачі числа в одному рядку: `Int` не мала
+     * шаблону взагалі, тож малювалася без групування розрядів, а десяткова
+     * поруч — із ним.
+     */
+    const int = [column({ dataType: 'Int' })];
+
+    expect(norm(shownValue(slice({ C1: 4242 }, int), 4242))).toBe('4,242');
+    expect(norm(shownValue(slice({ C1: '4242' }, int), '4242'))).toBe('4,242');
+    // Дзеркало: довідникова колонка числового шаблона не отримує — там `entryId`,
+    // і згрупований `1,204` замість назви запису читався б як вимірювання.
+    const lookup = gridColumns(
+      slice({ C1: 1204 }, [column({ dataType: 'Lookup' })]),
+      false,
+      NoLocalFlags,
+      {},
+      noRequiredInput,
+    ).find((c) => c.prop === 'C1');
+
+    expect(lookup?.cellTemplate).toBeUndefined();
   });
 
   it('буфер обміну нулів показу не отримує', () => {
     expect(cellText('1.5')).toBe('1.5');
+  });
+});
+
+describe('Д₂: ОДНЕ правило подачі — дані, щойно введене й підсумок (U-05)', () => {
+  /*
+   * ⛔ Саме це й було знайдено в живому браузері: в одній таблиці
+   * співіснували різні подачі числа. Твердження тут одне: три різні
+   * ДЖЕРЕЛА значення — зріз сервера, щойно введене оператором і сума
+   * рядка підсумків — дають текст за ТИМ САМИМ правилом.
+   */
+  it('три джерела значення — один шаблон і один формат', () => {
+    const data = slice({ C1: '1234.5' }, [column({ scale: 4 })]);
+    const totals = columnTotals(data);
+    const row = totalsRow(data, totals, 'Разом', null);
+
+    // Дані зі сховища.
+    expect(norm(shownValue(data, '1234.5'))).toBe('1,234.5000');
+    // Щойно введене: `pendingStore` кладе в модель рядок, як його набрали.
+    expect(norm(shownValue(data, '2000'))).toBe('2,000.0000');
+    // Підсумок: та сама колонка, той самий шаблон.
+    expect(norm(shownValue(data, row.C1))).toBe('1,234.5000');
+  });
+
+  it('підсумок цілої колонки групується так само, як її дані', () => {
+    /*
+     * ⛔ До цієї правки ціла колонка не мала шаблона взагалі — ані для
+     * даних, ані для суми, тож розряди в ній не групувались ніде.
+     */
+    const data = slice({ C1: 4242 }, [column({ dataType: 'Int' })]);
+    const row = totalsRow(data, columnTotals(data), 'Разом', null);
+
+    expect(norm(shownValue(data, row.C1))).toBe('4,242');
   });
 });
 

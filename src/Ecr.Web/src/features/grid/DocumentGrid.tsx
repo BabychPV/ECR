@@ -2,40 +2,66 @@ import { useCallback, useEffect, useMemo, useRef, useState, type JSX } from 'rea
 import { Alert, Badge, Button, Group, List, Modal, Stack, Text } from '@mantine/core';
 import { RevoGrid } from '@revolist/react-datagrid';
 import type { ColumnRegular } from '@revolist/revogrid';
-import { useMutation, useQueries, useQuery } from '@tanstack/react-query';
+import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
+import type { UseQueryResult } from '@tanstack/react-query';
 import { apiFetch, EcrApiError, type RequiredInputCell } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
-import type { ColumnDto, CreateRowRequest, RegistryDefDto, RegistryEntryDto, TableSliceDto } from '@/api/types';
-import { cellAppearanceOf } from './cellAppearance';
-import { cellDisplay, cellText, isNumericColumn } from './cellValue';
+import type {
+  CellConflictDto,
+  ColumnDto,
+  CreateRowRequest,
+  RegistryDefDto,
+  RegistryEntryDto,
+  TableSliceDto,
+  UnitRef,
+} from '@/api/types';
+import { useColumnWidths } from '@/features/preferences/columnWidthsSync';
+import { cellAppearanceClassOf, cellAppearanceOf } from './cellAppearance';
+import { cellDisplay, cellText, editorValueOf, isNumericColumn, sameCellValue } from './cellValue';
 import { parseClipboard, planPaste, toClipboard, type PasteRejection } from './clipboard';
-import { captureEdit, coerce, valueOf } from './edits';
+import { captureEdit, coerce, revertsToSaved, valueOf, withKnownVersions } from './edits';
+import { captureRange, isRangeEdit, type RangeEditDetail } from './rangeEdit';
+import { ConflictPanel, hasCurrentVersion, type OpenConflict } from './ConflictPanel';
 import { cellStateClass, cellStateOf, type LocalCellFlags } from './cellState';
 import { isMissingColumns, isSliceEmpty } from './emptiness';
-import { DefaultColumnWidth, readWidths, saveWidths, widthsFromEvent } from './columnWidths';
-import { createLookupCellEditor, lookupCellDisplay } from './LookupCellEditor';
+import { DefaultColumnWidth, widthsFromEvent } from './columnWidths';
+import { createLookupCellEditor, lookupCellDisplay, lookupIdOfText } from './LookupCellEditor';
+import { boolCellDisplay, createBoolCellEditor } from './BoolCellEditor';
+import { createUnitCellEditor, unitCellDisplay, unitIdOfCode } from './UnitCellEditor';
+import { createDateCellEditor } from './DateCellEditor';
 import { roundToScale, type RoundedCell } from './rounding';
-import { cellKey, confirmationOf, decide, guardOf, rowKeyOfCellKey } from './permissions';
+import {
+  cellKey,
+  cellsNeedingConfirmation,
+  confirmationOf,
+  decide,
+  guardOf,
+  rowKeyOfCellKey,
+} from './permissions';
+import { markConfirmed } from './confirmedEdits';
 import { UndoStack, type CellEdit } from './undo';
 import {
   buildRequest,
-  conflictTimeLabel,
+  moreConflictsOf,
   useCellPatch,
   useRecalculationStatus,
   type PendingEdit,
 } from './useCellPatch';
-import { registerSliceSaver, scheduleAutosave } from './autosave';
+import { holdRejectedEdits, registerSliceSaver, scheduleAutosave } from './autosave';
 // ⚠ Ключ комірки СХОВИЩА під власним іменем: у цьому файлі вже є `cellKey`
 // з `permissions.ts`, і хоч обидва дають `rowKey:columnCode`, ключем мапи
 // правок має бути рівно той, яким її будує сам сховищний модуль.
 import {
   cellKey as pendingCellKey,
+  discardPendingEdit,
   discardPendingRows,
+  pendingSlice,
   putPendingEdit,
+  putPendingEdits,
+  usePendingRejections,
   usePendingSlice,
 } from './pendingStore';
 import { installEnterKeyCompat } from './keyboardCompat';
-import { cellsOfSaveError } from './saveErrors';
 import {
   TableCornerAnchor,
   clampSelection,
@@ -57,6 +83,11 @@ import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { showApiError } from '@/shared/ui/notify';
 import { useRowHeight } from '@/shared/theme/preferences';
 import { t } from '@/shared/i18n';
+// ⚠ Порядок стилів збережений: `cell-states.css` (раніше — у `App.tsx`) іде
+// РАНІШЕ за `cellEditors.css`, як і було в єдиному бандлі. Причина, чому файл
+// тут, а не у вхідному чанку, — бюджет маршруту (`D-132`).
+import '@/shared/theme/cell-states.css';
+import './cellEditors.css';
 
 /**
  * Остання календарна дата періоду (`periodKey` — `YYYYMM`, той самий формат,
@@ -92,6 +123,8 @@ export interface DocumentGridProps {
   documentId: number;
   /** Екземпляр таблиці. */
   tableInstanceId: number;
+  /** Визначення таблиці — ключ ширин колонок (`D-201`). */
+  tableDefId: number;
   /** Ключ періоду. */
   periodKey: number;
   /** Чи доступне редагування на рівні всієї таблиці. */
@@ -192,6 +225,33 @@ function dataColumnIndexOf(gridColumnIndex: number, data: TableSliceDto): number
 const RowLabelColumnWidth = 260;
 
 /**
+ * Скільки записи Lookup-довідника в сітці вважаються свіжими: повернення у
+ * вкладку раніше не перекачує довідник (до 50 тис. записів), пізніше — один
+ * рефетч на фокус.
+ */
+const LookupEntriesStaleTimeMs = 5 * 60_000;
+
+/**
+ * `combine` для `useQueries` записів Lookup-довідників: паралельні масиви за
+ * індексом довідника. Модульна функція — стабільне посилання, тож TanStack не
+ * перераховує результат без зміни даних, а `replaceEqualDeep` лишає масиви
+ * `data`/`isPending` тими самими обʼєктами, поки їхній вміст не змінився.
+ */
+function combineLookupEntries(results: UseQueryResult<RegistryEntryDto[]>[]): {
+  data: (RegistryEntryDto[] | undefined)[];
+  isPending: boolean[];
+  error: Error | null;
+  refetch: UseQueryResult<RegistryEntryDto[]>['refetch'][];
+} {
+  return {
+    data: results.map((result) => result.data),
+    isPending: results.map((result) => result.isPending),
+    error: results.find((result) => result.error !== null)?.error ?? null,
+    refetch: results.map((result) => result.refetch),
+  };
+}
+
+/**
  * Grid-редактор документа.
  *
  * Обов'язкові можливості (`B21` §12, критерії FQ-1):
@@ -216,8 +276,15 @@ const RowLabelColumnWidth = 260;
  * рівні API (B04 §2.3), і UI не має його імітувати.
  */
 export function DocumentGrid(props: DocumentGridProps): JSX.Element {
-  const { documentId, tableInstanceId, periodKey, readOnly, allowsDynamicRows, maxDynamicRows } =
-    props;
+  const {
+    documentId,
+    tableInstanceId,
+    tableDefId,
+    periodKey,
+    readOnly,
+    allowsDynamicRows,
+    maxDynamicRows,
+  } = props;
 
   const slice = useQuery({
     // ⚠ Період лишається в КЛЮЧІ КЕШУ, але не в адресі. Екземпляр таблиці
@@ -234,14 +301,19 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
       apiFetch<TableSliceDto>(`/api/v1/documents/${documentId}/tables/${tableInstanceId}`),
   });
 
-  const {
-    patch,
-    isPending,
-    conflicts,
-    moreConflicts,
-    status: saveStatus,
-    recalculationJobId,
-  } = useCellPatch(documentId);
+  const { patch, isPending, status: saveStatus, recalculationJobId } = useCellPatch(documentId);
+
+  const queryClient = useQueryClient();
+
+  /**
+   * Конфлікт версії, який людина ще не розв'язала (`B-09`).
+   *
+   * ⛔ Не стан хука (`useCellPatch.conflicts`): той скидається на КОЖЕН
+   * наступний патч, і правка сусідньої комірки гасила панель, хоча конфліктна
+   * правка лишалась утриманою — з червоним кутом і без жодного пояснення, що
+   * з нею робити. Тепер панель живе, доки конфліктні комірки незбережені.
+   */
+  const [openConflict, setOpenConflict] = useState<OpenConflict | null>(null);
 
   // ⚠ `BE-05`: стеження за перерахунком — ЛИШЕ читання стану задачі. Зріз
   // цей хук не чіпає взагалі (ні `invalidateQueries`, ні `refetch`): саме
@@ -320,9 +392,68 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     hint: string;
   } | null>(null);
 
+  // ⛔ `ФВ-2.16`: пакетна правка (вставка, протягування), у якій є комірки
+  // `AllowWithConfirmation`, — ОДИН діалог на пакет. До кліку «Продовжити» пакет
+  // не застосований НІЯК: ні сховище, ні історія, ні сітка (протягування
+  // заблоковане в `onBeforeRangeEdit`), тож «Скасувати» не має чого відкочувати.
+  // `apply` — те, що пакет зробив би без діалогу, плюс позначка підтвердження.
+  const [batchConfirm, setBatchConfirm] = useState<{ count: number; apply: () => void } | null>(
+    null,
+  );
+
+  /**
+   * Комірки, чий PATCH зараз У ДОРОЗІ — з тим самим значенням, яке летить.
+   *
+   * ⛔ `keyboardPath.spec.ts` (`ФВ-14.16`), крок 6: Ctrl+V шле патч НЕГАЙНО
+   * (`saveThroughStore`), а рефлекторний Ctrl+S одразу за ним (`ФВ-4.1`) кличе
+   * `save([...pending.values()])` — той самий `onKeyDown`, який навмисно НЕ
+   * дивиться на `isPending` (`DocumentGrid.concurrentSave.test.tsx`, §10.2).
+   * Обидва читають версію рядка з ОДНОГО й того самого кешу зрізу
+   * (`withKnownVersions`), який підніме лише відповідь ПЕРШОГО запиту, — тобто
+   * другий патч везе ті самі щойно вставлені комірки й ту саму, вже застарілу
+   * версію. Перший доходить, рядок отримує нову версію; другий доходить услід
+   * і застає чужу-собі стару — `409` на власних, щойно надісланих значеннях.
+   *
+   * ⚠ Гейт `isPending` на Ctrl+S зняв би це, але й зняв би сценарій §10.2:
+   * там ДВА одночасні запити — навмисна й перевірена поведінка, лише рядки в
+   * них різні. Тут інакше: та сама комірка з тим самим значенням. Тому фікс —
+   * не заборона другого шляху, а дедуплікація САМЕ такого збігу: другий запит
+   * не додає серверу нічого нового, і не слати його дешевше й безпечніше, ніж
+   * ловити його ж таки `409`.
+   */
+  const inFlightEdits = useRef<Map<string, PendingEdit>>(new Map());
+
   const save = useCallback(
-    async (edits: PendingEdit[]) => {
+    async (requested: PendingEdit[], versionOverrides?: ReadonlyMap<string, string>) => {
+      if (requested.length === 0) return;
+
+      // ⛔ `B-09`: версія рядка — у мить НАДСИЛАННЯ, а не введення. Правка, що
+      // чекала повтору, інакше їхала б зі старою версією й діставала `409` на
+      // власних змінах — при кожному повторі, вічно (`withKnownVersions`).
+      const allEdits = withKnownVersions(
+        requested,
+        queryClient.getQueryData<TableSliceDto>(queryKeys.slices.one(tableInstanceId, periodKey)),
+        versionOverrides,
+      );
+
+      // ⛔ Комірка з тим самим значенням, що вже летить, — не дублюється (див.
+      // коментар `inFlightEdits` вище). Інше значення тієї самої комірки (людина
+      // встигла виправити, доки перший патч летів) дублюванням не вважається —
+      // це вже нова правка, і саме її сервер має побачити.
+      const inFlight = inFlightEdits.current;
+      const edits = allEdits.filter((edit) => {
+        const already = inFlight.get(pendingCellKey(edit));
+
+        return (
+          already === undefined ||
+          already.isEmpty !== edit.isEmpty ||
+          !sameCellValue(already.value, edit.value)
+        );
+      });
+
       if (edits.length === 0) return;
+
+      for (const edit of edits) inFlight.set(pendingCellKey(edit), edit);
 
       // ⚠ Рядки ЦЬОГО патчу — саме їх обов'язкові-вхідні позначки заміняються
       // нижче. Позначки інших рядків (з попереднього, ще не повтореного
@@ -348,7 +479,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         // «незбережено», без відновлення.
         //
         // ⚠ Фільтр — той самий `touchedRowKeys`, за яким уже фільтруються
-        // `requiredInputBlocked`/`saveErrorCells` нижче: успіх патчу
+        // `requiredInputBlocked`/`requiredInputWarnings` нижче: успіх патчу
         // стосується РІВНО його рядків і нічиїх більше.
         //
         // ⚠ `D14-12`: підтвердження йде у СХОВИЩЕ документа, а не в стан
@@ -381,12 +512,26 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
             })),
         ]);
 
-        // ⚠ Успіх ЦЬОГО патчу знімає банер і маркери лише з рядків, яких він
-        // стосувався: помилка іншого, ще не повтореного збереження, не має
-        // права мовчки зникнути через УСПІХ чужого патчу.
+        // ⚠ Успіх ЦЬОГО патчу знімає банер. Маркери відхилених комірок живуть у
+        // сховищі (`V-01`) і знімаються там же, рівно з тими комірками, які
+        // сервер щойно прийняв (`discardPendingRows` вище): відхилена комірка
+        // того самого рядка, якої в пакеті не було, лишається позначеною.
         setSaveError(null);
-        setSaveErrorCells((prev) => prev.filter((c) => !touchedRowKeys.has(c.rowKey)));
       } catch (error) {
+        // ⛔ `V-01`: відхилені правки ТРИМАЮТЬСЯ — лишаються незбереженими, з
+        // маркером і причиною, але наступні пакети автозбереження їх уже не
+        // везуть. Правильні правки, відхилені разом із ними, довозяться окремо.
+        holdRejectedEdits(tableInstanceId, periodKey, error, edits);
+
+        if (error instanceof EcrApiError && error.isConflict) {
+          // ⛔ `B-09`: конфлікт має ВИХІД, а не лише перелік — панель
+          // («Keep mine» / «Discard mine») живе, доки його не розв'язали.
+          setOpenConflict({
+            conflicts: error.conflicts as CellConflictDto[],
+            more: moreConflictsOf(error),
+          });
+        }
+
         if (error instanceof EcrApiError && error.isRequiredInputMissing) {
           setRequiredInputBlocked((prev) => [
             ...prev.filter((c) => !touchedRowKeys.has(c.rowKey)),
@@ -397,7 +542,6 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
           // (`requiredInputBlocked`) — другий банер із тим самим по суті
           // повідомленням розсіював би увагу, а не додавав інформацію.
           setSaveError(null);
-          setSaveErrorCells((prev) => prev.filter((c) => !touchedRowKeys.has(c.rowKey)));
         } else if (error instanceof EcrApiError) {
           // ⛔ Q-30x (High): ось сам фікс — реальний, локалізований текст
           // сервера («Колонка «C1» очікує число.» і подібні) показується як
@@ -405,10 +549,6 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
           // цей рядок і мала на увазі заглушка «NOT SAVED — SEE THE ERROR
           // ABOVE», яка досі не мала на що вказувати.
           setSaveError(error.message);
-          setSaveErrorCells((prev) => [
-            ...prev.filter((c) => !touchedRowKeys.has(c.rowKey)),
-            ...cellsOfSaveError(error, edits),
-          ]);
         } else {
           setSaveError(String(error));
         }
@@ -419,9 +559,45 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         // вище вже показує причину користувачеві; повторний `throw` тут
         // давав ЛИШЕ необроблене знеструмлення проміса в консолі (саме
         // симптом, який документує Stage 1), без жодного адресата.
+      } finally {
+        // ⚠ Знімається ЛИШЕ свій запис: поки цей патч летів, та сама комірка
+        // могла дістати ІНШЕ значення й полетіти окремим, новішим патчем
+        // (легальний випадок, не дедуплікований вище) — його запис у
+        // `inFlightEdits` чужий цьому виклику, і знімати його тут не можна.
+        for (const edit of edits) {
+          const key = pendingCellKey(edit);
+          if (inFlight.get(key) === edit) inFlight.delete(key);
+        }
       }
     },
-    [patch, periodKey, tableInstanceId],
+    [patch, periodKey, tableInstanceId, queryClient],
+  );
+
+  /**
+   * Надсилає правки, що НЕ пройшли через `applyEditedValue` (вставка, undo/redo),
+   * — але спершу кладе їх у сховище документа.
+   *
+   * ⛔ Доти вставка й undo/redo будували патч повз сховище: відхилена вставка
+   * показувала причину, але без маркера комірки й «Retry save», і зникала з
+   * перезавантаженням; а незбережена клавіатурна правка тієї самої комірки
+   * лишалась у сховищі й наступним автозбереженням ПЕРЕЗАПИСУВАЛА щойно
+   * скасоване. Тепер це той самий шлях, що й у звичайної правки: успіх знімає
+   * правку зі сховища (`discardPendingRows`), відмова тримає її (`V-01`) — з
+   * маркером, Retry і не блокуючи інших.
+   *
+   * ⚠ Надсилання НЕГАЙНЕ, як і було: вставка з Excel — одна свідома дія, і
+   * чекати дебаунсу для неї нема чого.
+   */
+  const saveThroughStore = useCallback(
+    (edits: PendingEdit[]) => {
+      // ⛔ Пакетом, не циклом `putPendingEdit`: поштучно кожна комірка копіювала
+      // весь зріз і сповіщала підписників — вставка 30 000 комірок ставала
+      // квадратичною в синхронному `onPaste`.
+      putPendingEdits(tableInstanceId, periodKey, edits);
+
+      void save(edits);
+    },
+    [save, tableInstanceId, periodKey],
   );
 
   // ⚠ `save` читають ззовні React-рендера (автозбереження документа), тож
@@ -479,7 +655,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
   // коректно, але ніде не показувалась — тулбар малював тільки заглушку
   // «NOT SAVED — SEE THE ERROR ABOVE», а сам текст губився в необробленому
   // знеструмленні проміса, яке бачить лише консоль розробника. `saveError` —
-  // ТЕКСТ сервера як є (ФВ-14.24), `saveErrorCells` — комірки, яких він
+  // ТЕКСТ сервера як є (ФВ-14.24), `rejections` — комірки, яких він
   // стосується (`cellsOfSaveError`, `saveErrors.ts`), для маркера поверх
   // клітинки за тим самим взірцем, що й обов'язкові вхідні колонки (Q-306).
   //
@@ -487,17 +663,20 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
   // (`requiredInputBlocked` нижче) — дублювати той самий текст у двох
   // банерах означало б розсіювати увагу там, де причина вже названа.
   const [saveError, setSaveError] = useState<string | null>(null);
-  const [saveErrorCells, setSaveErrorCells] = useState<readonly RequiredInputCell[]>([]);
+
+  // ⛔ `V-01`: комірки, які сервер відхилив, — зі СХОВИЩА документа, а не зі
+  // стану сітки. Там їх бачить автозбереження (щоб не везти), там вони
+  // переживають розмонтування сітки і там знімаються, щойно комірку прийнято
+  // або виправлено.
+  const rejections = usePendingRejections(tableInstanceId, periodKey);
 
   // ⚠ Лічильник змін історії. Стек живе в `ref` — інакше кожна правка
   // перестворювала б його і губила глибину; але тоді React не знає, що
   // «можна скасувати» змінилося, і кнопки лишалися б назавжди сірими.
-  // ⚠ Ширини читаються ОДИН раз на таблицю і далі живуть у стані: читати
-  // `localStorage` на кожному рендері таблиці 500×60 означало б розбирати JSON
-  // при кожному натисканні клавіші.
-  const [widths, setWidths] = useState<Record<string, number>>(() =>
-    readWidths(tableInstanceId),
-  );
+  // ⚠ Ширини — на користувача і ВИЗНАЧЕННЯ таблиці (`ФВ-14.29`, `D-201`):
+  // ключ `tableDefId`, а не `tableInstanceId`, інакше ширини губилися б на
+  // кожному новому періоді. Хук сам скидає стан при зміні таблиці.
+  const { widths, onResize: saveColumnWidths } = useColumnWidths(tableDefId);
 
   const [historyRevision, setHistoryRevision] = useState(0);
   const touchHistory = useCallback(() => setHistoryRevision((value) => value + 1), []);
@@ -514,6 +693,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     // правки зрізу, з якого оператор щойно пішов і куди може повернутися.
     setOverrides(new Map());
     setConfirmRequest(null);
+    setBatchConfirm(null);
 
     // ⚠ Виділення теж належить ЦЬОМУ зрізу: індекси рядка 50 в іншій таблиці
     // вказують на інші дані, і вставка пішла б від чужого якоря.
@@ -523,7 +703,6 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     // вираз колонки з тим самим номером, але з іншої таблиці.
     publishFocus(tableInstanceId, periodKey, null);
 
-    setWidths(readWidths(tableInstanceId));
     touchHistory();
 
     // ⚠ І дебаунс тут більше не скасовується. Раніше це було обов'язкове
@@ -536,18 +715,18 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
   /**
    * Зміна ширини колонки.
    *
-   * ⚠ Зберігається одразу, а не «при виході»: користувач закриє вкладку, і
-   * подія виходу не спрацює. Обсяг запису — кілька десятків байтів.
+   * ⚠ Кеш (`localStorage`) пишеться одразу, сервер (`BE-20`,
+   * `grid.columnWidths.{tableDefId}`) — з дебаунсом і при розмонтуванні:
+   * серію подій перетягування межі хук зводить до одного запиту.
    */
   const onColumnResize = useCallback(
     (event: { detail: unknown }) => {
       const changed = widthsFromEvent(event.detail);
       if (Object.keys(changed).length === 0) return;
 
-      saveWidths(tableInstanceId, changed);
-      setWidths((current) => ({ ...current, ...changed }));
+      saveColumnWidths(changed);
     },
-    [tableInstanceId],
+    [saveColumnWidths],
   );
 
   const data = slice.data;
@@ -581,10 +760,26 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
   // відповіді сервера (`cellsOfSaveError`, `saveErrors.ts`), не здогадом.
   const saveErrorByCell = useMemo(() => {
     const byCell = new Map<string, string>();
-    for (const cell of saveErrorCells) byCell.set(cellKey(cell.rowKey, cell.columnCode), cell.message);
+    for (const rejection of rejections.values()) {
+      byCell.set(cellKey(rejection.edit.rowKey, rejection.edit.columnCode), rejection.message);
+    }
 
     return byCell;
-  }, [saveErrorCells]);
+  }, [rejections]);
+
+  // ⚠ Банер пояснює ВІДХИЛЕНІ комірки, доки вони є, навіть коли останній пакет
+  // (інших комірок) пройшов: «Saved» поруч із червоним кутом без причини
+  // читалося б як «усе збережено». Відмови рівня рядка (`ECR-CALC-0437`) сюди
+  // не йдуть — у них власний, повніший банер (`requiredInputBlocked`).
+  const saveErrorText = useMemo(() => {
+    if (saveError !== null) return saveError;
+
+    const reasons = new Set(
+      [...rejections.values()].filter((r) => r.scope === 'cell').map((r) => r.message),
+    );
+
+    return reasons.size === 0 ? null : [...reasons].join(' ');
+  }, [saveError, rejections]);
 
   // ⛔ Директива registry-lookup, PR A4: `ColumnDto.lookupRegistryDefId` — це
   // ID довідника, а ендпоінт записів адресується КОДОМ
@@ -658,19 +853,69 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
           apiFetch<RegistryEntryDto[]>(
             asOf === null ? baseUrl : `${baseUrl}?asOf=${asOf}`,
           ),
+
+        // ⚠ Перф: довідник — до 50 тис. записів, а міняє його адміністратор,
+        // не оператор сітки. Дефолт застосунку (`staleTime` 30 с + рефетч на
+        // фокус) перекачував УСІ Lookup-довідники на кожне повернення у
+        // вкладку. Обмежена застарілість (`LookupEntriesStaleTimeMs`), а не
+        // `Infinity`: фокус-рефетч лишається, але лише для застарілого кешу —
+        // правка довідника в іншій вкладці/іншим користувачем доходить до
+        // сітки не пізніше ніж за 5 хв. Правку в цій вкладці доносить
+        // інвалідація `queryKeys.registries.entries(code)` (редактор/імпорт
+        // записів) незалежно від `staleTime`. Ревізії довідника в
+        // `RegistryEntryDto`/`RegistryDefDto` немає, тож у ключ її не додано.
+        staleTime: LookupEntriesStaleTimeMs,
       };
     }),
+
+    // ⚠ Без `combine` `useQueries` віддає НОВИЙ масив на кожен рендер — за ним
+    // нова `Map` нижче і перебудова `columns` сітки на кожен рендер.
+    // `combine` (модульна, тож стабільна функція) + структурне спільне
+    // використання TanStack лишають ці масиви тими самими, поки дані не змінились.
+    combine: combineLookupEntries,
   });
 
   const lookupEntriesByRegistryId = useMemo(() => {
     const map = new Map<number, readonly RegistryEntryDto[]>();
     lookupRegistryCodes.forEach(({ id }, index) => {
-      const entries = lookupEntriesQueries[index]?.data;
+      const entries = lookupEntriesQueries.data[index];
       if (entries !== undefined) map.set(id, entries);
     });
 
     return map;
-  }, [lookupRegistryCodes, lookupEntriesQueries]);
+  }, [lookupRegistryCodes, lookupEntriesQueries.data]);
+
+  /*
+   * ⚠ `X-13`: довідники, що ЩЕ ЇДУТЬ. Редактор такої колонки показує
+   * «завантаження», а не порожній перелік: порожній список оператор читає як
+   * «довідник не наповнили» (коментар над `lookupError` нижче).
+   */
+  const lookupPending = useMemo(() => {
+    const pendingIds = new Set<number>();
+    if (registriesList.isPending) {
+      for (const id of lookupRegistryDefIds) pendingIds.add(id);
+    }
+
+    lookupRegistryCodes.forEach(({ id }, index) => {
+      if (lookupEntriesQueries.isPending[index] === true) pendingIds.add(id);
+    });
+
+    return pendingIds;
+  }, [lookupRegistryDefIds, lookupRegistryCodes, lookupEntriesQueries.isPending, registriesList.isPending]);
+
+  /*
+   * ⛔ `R-01`: одиниці — для колонок `Unit`. Доти комірка одиниці була
+   * текстовим полем, у яке `kg` набрати можна, а зберегти — ні: сервер чекає
+   * ідентифікатор. Запит той самий, що й у решти екранів (`['units']`), тож
+   * кеш спільний, і лише там, де колонка `Unit` справді є.
+   */
+  const hasUnitColumns = (data?.columns ?? []).some((column) => column.dataType === 'Unit');
+  const units = useQuery({
+    queryKey: ['units'],
+    queryFn: () => apiFetch<UnitRef[]>('/api/v1/units'),
+    enabled: hasUnitColumns,
+    staleTime: 60 * 60 * 1000,
+  });
 
   /*
    * ⛔ Відмова довідника — НЕ те саме, що «довідник ще їде» і не те саме, що
@@ -690,11 +935,11 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
    * привід забрати в оператора решту таблиці.
    */
   const lookupError =
-    registriesList.error ?? lookupEntriesQueries.find((query) => query.error !== null)?.error ?? null;
+    registriesList.error ?? lookupEntriesQueries.error;
 
   const refetchLookups = (): void => {
     void registriesList.refetch();
-    lookupEntriesQueries.forEach((query) => void query.refetch());
+    lookupEntriesQueries.refetch.forEach((refetch) => void refetch());
   };
 
   /**
@@ -728,6 +973,8 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
             saveErrorByCell,
             lookupEntriesByRegistryId,
             totals,
+            lookupPending,
+            units.data ?? null,
           ),
     [
       data,
@@ -738,15 +985,36 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
       saveErrorByCell,
       lookupEntriesByRegistryId,
       totals,
+      lookupPending,
+      units.data,
     ],
   );
 
   // ⚠ `overrides` перекриває значення зі зрізу лише для комірок, підтверджених
   // ЩОЙНО (`ФВ-2.16`, `#43`): сервер про них ще не знає, і без цього шару
   // підтверджений ввід зникав би з екрана до першого успішного збереження.
+  //
+  // ⛔ `V-01`: і ВІДХИЛЕНЕ значення лежить поверх зрізу. Без цього перший же
+  // успішний патч іншої комірки перебудовував рядки зі зрізу, і в комірці з
+  // червоним кутом показувалось старе збережене число замість `abc`, яке сервер
+  // відхилив, — тобто маркер пояснював значення, якого на екрані немає.
+  // ⚠ Лише відхилені, не всі незбережені: відмови змінюються рідко, а
+  // перебудова рядків на кожну правку коштувала б 500×60 комірок.
+  const shownOverrides = useMemo(() => {
+    if (rejections.size === 0) return overrides;
+
+    const merged = new Map(overrides);
+    for (const rejection of rejections.values()) {
+      const key = cellKey(rejection.edit.rowKey, rejection.edit.columnCode);
+      if (!merged.has(key)) merged.set(key, rejection.edit.value);
+    }
+
+    return merged;
+  }, [overrides, rejections]);
+
   const rows = useMemo(
-    () => (data === undefined ? [] : gridRows(data, overrides)),
-    [data, overrides],
+    () => (data === undefined ? [] : gridRows(data, shownOverrides)),
+    [data, shownOverrides],
   );
 
   /**
@@ -777,6 +1045,37 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     [data, totals],
   );
 
+  /**
+   * Код одиниці чи запису довідника з буфера → ідентифікатор (`R-01`).
+   *
+   * ⛔ У аркуші Excel у колонці одиниці стоїть `kg`, а в колонці довідника —
+   * `KZ` чи «Казахстан», а не внутрішні номери, яких людина не знає. Без цього
+   * кожна така вставка діставала б `422` «expects the identifier». Збіг —
+   * лише ТОЧНИЙ; інакше текст їде як є і відхиляється з поясненням.
+   */
+  const pastedIdentifierOf = useCallback(
+    (text: string, column: ColumnDto | undefined): string => {
+      if (column === undefined || text.trim().length === 0 || Number.isFinite(Number(text.trim()))) {
+        return text;
+      }
+
+      if (column.dataType === 'Unit') {
+        const id = unitIdOfCode(text, units.data ?? []);
+
+        return id === null ? text : String(id);
+      }
+
+      if (column.dataType === 'Lookup' && column.lookupRegistryDefId !== null) {
+        const id = lookupIdOfText(text, lookupEntriesByRegistryId.get(column.lookupRegistryDefId) ?? []);
+
+        return id === null ? text : String(id);
+      }
+
+      return text;
+    },
+    [units.data, lookupEntriesByRegistryId],
+  );
+
   /** Ctrl+V: розкладає буфер по сітці і відхиляє батч цілком, якщо є заборонені. */
   const onPaste = useCallback(
     (event: React.ClipboardEvent<HTMLDivElement>) => {
@@ -804,12 +1103,21 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         columnIndex: dataColumnIndexOf(anchor.columnIndex, data),
       };
 
+      // ⛔ U1: неоднозначне число (`1,234` в en) відхиляється лише в числових
+      // колонках (`clipboard.ts`, `readNumber`); у текстовій це просто текст.
+      const numericCodes = new Set(
+        data.columns
+          .filter((column) => column.dataType === 'Decimal' || column.dataType === 'Int')
+          .map((column) => column.code),
+      );
+
       const plan = planPaste(
         parseClipboard(text),
         data.rows.map((row) => row.rowKey),
         data.columns.map((column) => column.code),
         dataAnchor,
         guardOf(data),
+        (code) => numericCodes.has(code),
       );
 
       if (plan.rejected.length > 0) {
@@ -828,7 +1136,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
 
       const edits: PendingEdit[] = plan.targets.map((target) => {
         const column = byCode.get(target.columnCode);
-        const value = coerce(target.value, column?.dataType);
+        const value = coerce(pastedIdentifierOf(target.value, column), column?.dataType);
 
         if (column !== undefined) {
           // ⛔ Сюди йде СИРИЙ текст буфера, а не `coerce`-нуте число:
@@ -872,26 +1180,44 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         };
       });
 
-      // ⚠ Позначки попередньої вставки знімаються: інакше через десять вставок
-      // половина таблиці була б помічена, і лічильник перестав би щось значити.
-      setRounded(roundedNow);
+      const needing = cellsNeedingConfirmation(data, edits);
 
-      // ⚠ Уся вставка — ОДИН крок історії: інакше одне Ctrl+V з'їдало б усю
-      // глибину, а Ctrl+Z відкочував би її по комірці.
-      history.current.push({
-        label: t('grid.paste', { count: edits.length }),
-        edits: edits.map<CellEdit>((edit) => ({
-          rowKey: edit.rowKey,
-          columnCode: edit.columnCode,
-          before: valueOf(data, edit.rowKey, edit.columnCode),
-          after: edit.value,
-        })),
-      });
+      const commit = (): void => {
+        // ⚠ Позначка підтвердження — ДО `saveThroughStore`: той одразу будує
+        // запит, і прапорець `confirmed` читається саме в ту мить.
+        markConfirmed(tableInstanceId, periodKey, needing);
 
-      touchHistory();
-      void save(edits);
+        // ⚠ Позначки попередньої вставки знімаються: інакше через десять вставок
+        // половина таблиці була б помічена, і лічильник перестав би щось значити.
+        setRounded(roundedNow);
+
+        // ⚠ Уся вставка — ОДИН крок історії: інакше одне Ctrl+V з'їдало б усю
+        // глибину, а Ctrl+Z відкочував би її по комірці.
+        history.current.push({
+          label: t('grid.paste', { count: edits.length }),
+          edits: edits.map<CellEdit>((edit) => ({
+            rowKey: edit.rowKey,
+            columnCode: edit.columnCode,
+            before: valueOf(data, edit.rowKey, edit.columnCode),
+            after: edit.value,
+          })),
+        });
+
+        touchHistory();
+        saveThroughStore(edits);
+      };
+
+      // ⛔ `ФВ-2.16`: вставка в комірки `AllowWithConfirmation` ішла повз діалог
+      // одиничної правки (`onBeforeEdit` бачить лише введення в комірку).
+      // Один діалог на весь пакет; «Скасувати» — пакет не застосовано ЦІЛКОМ.
+      if (needing.length > 0) {
+        setBatchConfirm({ count: needing.length, apply: commit });
+        return;
+      }
+
+      commit();
     },
-    [data, readOnly, save, touchHistory],
+    [data, readOnly, saveThroughStore, touchHistory, pastedIdentifierOf, tableInstanceId, periodKey],
   );
 
   /**
@@ -907,7 +1233,18 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
       if (data === undefined) return null;
 
       const captured = captureEdit(data, signal);
-      if (captured === null) return null;
+      if (captured === null) {
+        // ⛔ `V-01`: повернення збереженого значення в комірку з незбереженою
+        // (зокрема відхиленою) правкою — це скасування правки, а не «нічого».
+        if (
+          pendingSlice(tableInstanceId, periodKey).has(pendingCellKey(signal)) &&
+          revertsToSaved(data, signal)
+        ) {
+          discardPendingEdit(tableInstanceId, periodKey, signal);
+        }
+
+        return null;
+      }
 
       history.current.push({
         label: t('grid.edit', { column: captured.columnHeader }),
@@ -934,6 +1271,64 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
   );
 
   /**
+   * Протягування маркером заповнення — тим самим шляхом, що й вставка.
+   *
+   * ⚠ Правила комірки ті самі, що в ручного введення (`captureEdit`: право,
+   * read-only, приведення типу, «нічого не змінилось»); збереження — як у
+   * вставки: ОДИН крок історії і ОДИН пакет у сховище (`saveThroughStore`,
+   * `putPendingEdits`) — поштучний цикл повернув би квадратичну вартість
+   * (`D16-02`).
+   */
+  const applyRangeEdit = useCallback(
+    (detail: RangeEditDetail, confirmed = false) => {
+      if (data === undefined) return;
+
+      const { captured, reverted } = captureRange(data, detail, rowKeyOf);
+
+      if (confirmed) {
+        // ⛔ Підтверджене протягування (`ФВ-2.16`) сітка НЕ намалювала:
+        // `onBeforeRangeEdit` заблокував його до діалогу. Тож значення кладуться
+        // поверх зрізу тут — як і в підтвердженої одиничної правки
+        // (`onConfirmEdit`), — інакше вони з'явилися б лише після збереження.
+        markConfirmed(
+          tableInstanceId,
+          periodKey,
+          cellsNeedingConfirmation(data, captured.map((edit) => edit.pending)),
+        );
+        setOverrides((current) => {
+          const next = new Map(current);
+          for (const edit of captured) {
+            next.set(cellKey(edit.pending.rowKey, edit.pending.columnCode), edit.pending.value);
+          }
+
+          return next;
+        });
+      }
+
+      // ⛔ `V-01`: повернення до збереженого значення в комірці з незбереженою
+      // правкою — скасування цієї правки, як і в ручного введення.
+      const slice = pendingSlice(tableInstanceId, periodKey);
+      for (const signal of reverted) {
+        if (slice.has(pendingCellKey(signal))) discardPendingEdit(tableInstanceId, periodKey, signal);
+      }
+
+      if (captured.length === 0) return;
+
+      // ⚠ Окремого ключа каталогу для протягування немає — підпис кроку
+      // `grid.edit` з переліком колонок (новий ключ = рядок сіду).
+      const headers = [...new Set(captured.map((edit) => edit.columnHeader))].join(', ');
+      history.current.push({
+        label: t('grid.edit', { column: headers }),
+        edits: captured.map((edit) => edit.step),
+      });
+
+      touchHistory();
+      saveThroughStore(captured.map((edit) => edit.pending));
+    },
+    [data, saveThroughStore, touchHistory, tableInstanceId, periodKey],
+  );
+
+  /**
    * Правка з клавіатури.
    *
    * ⛔ Без цього обробника grid показував би введене значення і **не зберігав
@@ -945,6 +1340,14 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     (event: { detail: unknown }) => {
       if (data === undefined || readOnly) return;
 
+      // ⛔ Протягування маркером заповнення приходить ДІАПАЗОННОЮ формою
+      // (`rangeEdit.ts`) — без `prop`/`val`. Доти воно малювалось у сітці й не
+      // доходило ні до сховища, ні до PATCH.
+      if (isRangeEdit(event.detail)) {
+        applyRangeEdit(event.detail);
+        return;
+      }
+
       const detail = event.detail as
         | { prop?: string | number; model?: unknown; val?: unknown }
         | undefined;
@@ -955,7 +1358,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         raw: String(detail?.val ?? ''),
       });
     },
-    [data, readOnly, applyEditedValue],
+    [data, readOnly, applyEditedValue, applyRangeEdit],
   );
 
   /**
@@ -998,6 +1401,11 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
   const onConfirmEdit = useCallback(() => {
     if (confirmRequest === null) return;
 
+    // ⛔ Сервер відхиляє правку такої комірки без прапорця `confirmed`
+    // (`ФВ-2.16`); позначка — ДО захоплення, бо автозбереження може будувати
+    // запит будь-коли після нього.
+    markConfirmed(tableInstanceId, periodKey, [confirmRequest]);
+
     const captured = applyEditedValue({
       rowKey: confirmRequest.rowKey,
       columnCode: confirmRequest.columnCode,
@@ -1017,7 +1425,44 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     }
 
     setConfirmRequest(null);
-  }, [confirmRequest, applyEditedValue]);
+  }, [confirmRequest, applyEditedValue, tableInstanceId, periodKey]);
+
+  /**
+   * `beforerangeedit`: протягування маркером заповнення через комірки
+   * `AllowWithConfirmation` (`ФВ-2.16`).
+   *
+   * ⛔ Той самий прийом, що й `onBeforeEdit`: RevoGrid застосовує діапазон
+   * (`setRangeData`) одразу після цієї події, а діалог — асинхронний. Тому
+   * діапазон блокується СИНХРОННО (`preventDefault`), а застосовуємо його самі
+   * після «Продовжити» (`applyRangeEdit(…, true)`). «Скасувати» не має чого
+   * відкочувати: сітка значень так і не намалювала.
+   *
+   * ⚠ Протягування без таких комірок обробник не чіпає — воно йде звичайним
+   * шляхом `afteredit` → `applyRangeEdit`.
+   */
+  const onBeforeRangeEdit = useCallback(
+    (event: { detail: unknown; preventDefault: () => void }) => {
+      if (data === undefined || readOnly || !isRangeEdit(event.detail)) return;
+
+      const detail = event.detail;
+      const { captured } = captureRange(data, detail, rowKeyOf);
+      const needing = cellsNeedingConfirmation(
+        data,
+        captured.map((edit) => edit.pending),
+      );
+      if (needing.length === 0) return;
+
+      event.preventDefault();
+      setBatchConfirm({ count: needing.length, apply: () => applyRangeEdit(detail, true) });
+    },
+    [data, readOnly, applyRangeEdit],
+  );
+
+  const onConfirmBatch = useCallback(() => {
+    const request = batchConfirm;
+    setBatchConfirm(null);
+    request?.apply();
+  }, [batchConfirm]);
 
   /**
    * Ctrl+C: віддає ВИДІЛЕНЕ у форматі, який приймає Excel.
@@ -1075,6 +1520,27 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     [data],
   );
 
+  const applyHistory = useCallback(
+    (edits: CellEdit[] | null) => {
+      if (edits === null || data === undefined) return;
+
+      const versions = new Map(data.rows.map((row) => [row.rowKey, row.rowVersion]));
+
+      touchHistory();
+
+      saveThroughStore(
+        edits.map((edit) => ({
+          rowKey: edit.rowKey,
+          columnCode: edit.columnCode,
+          value: edit.after,
+          isEmpty: false,
+          baseVersion: versions.get(edit.rowKey) ?? null,
+        })),
+      );
+    },
+    [data, saveThroughStore, touchHistory],
+  );
+
   const onKeyDown = useCallback(
     (event: React.KeyboardEvent<HTMLDivElement>) => {
       const modifier = event.ctrlKey || event.metaKey;
@@ -1097,29 +1563,83 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         applyHistory(history.current.redo());
       }
     },
-    [pending, save],
+    // ⛔ `V-15`: `applyHistory` у залежностях ОБОВ'ЯЗКОВИЙ. Тут стояло лише
+    // `[pending, save]`, і обробник тримав `applyHistory` того рендера, де його
+    // створили, — зі старим `data`. Undo/redo зберігають повз сховище
+    // (`pending` не змінюється), тож обробник не оновлювався: Ctrl+Y брав
+    // крок зі стека, а зберігав зі старими версіями рядків або не зберігав
+    // зовсім (`data === undefined` першого рендера) — кнопки ж працювали.
+    [pending, save, applyHistory],
   );
 
-  const applyHistory = useCallback(
-    (edits: CellEdit[] | null) => {
-      if (edits === null || data === undefined) return;
+  /**
+   * Конфлікт, що ще стосується незбереженого (`B-09`).
+   *
+   * ⚠ Комірка, яку людина вже виправила іншим шляхом (нова правка, скасування
+   * до збереженого), з панелі зникає: розв'язувати там більше нічого. Немає
+   * жодної — немає й панелі.
+   */
+  const shownConflict = useMemo<OpenConflict | null>(() => {
+    if (openConflict === null) return null;
 
-      const versions = new Map(data.rows.map((row) => [row.rowKey, row.rowVersion]));
+    const open = openConflict.conflicts.filter(
+      (conflict) =>
+        conflict.columnCode === '*'
+          ? [...pending.values()].some((edit) => edit.rowKey === conflict.rowKey)
+          : pending.has(pendingCellKey(conflict)),
+    );
 
-      touchHistory();
+    return open.length === 0 ? null : { conflicts: open, more: openConflict.more };
+  }, [openConflict, pending]);
 
-      void save(
-        edits.map((edit) => ({
-          rowKey: edit.rowKey,
-          columnCode: edit.columnCode,
-          value: edit.after,
-          isEmpty: false,
-          baseVersion: versions.get(edit.rowKey) ?? null,
-        })),
-      );
-    },
-    [data, save, touchHistory],
-  );
+  /**
+   * «Keep mine»: мої значення конфліктних рядків — ще раз, із ЧИННОЮ версією,
+   * яку назвав сервер (`conflicts[].currentVersion`).
+   *
+   * ⚠ Після відповіді зріз перечитується: успіх підняв версію рядка, але
+   * чужі значення інших комірок того самого рядка кеш так і не бачив — без
+   * перечитування сітка показувала б їх старими.
+   */
+  const keepMine = useCallback(async () => {
+    if (shownConflict === null) return;
+
+    const versions = new Map(
+      shownConflict.conflicts
+        .filter(hasCurrentVersion)
+        .map((conflict) => [conflict.rowKey, conflict.currentVersion] as const),
+    );
+
+    const edits = [...pending.values()].filter((edit) => versions.has(edit.rowKey));
+
+    setOpenConflict(null);
+    await save(edits, versions);
+    void slice.refetch();
+  }, [shownConflict, pending, save, slice]);
+
+  /**
+   * «Discard mine»: мої значення конфліктних комірок викидаються, сітка
+   * показує чинні.
+   *
+   * ⚠ Лише КОНФЛІКТНІ комірки: інші незбережені правки того самого рядка —
+   * не предмет цього рішення, і вони поїдуть звичайним шляхом уже з версією,
+   * яку принесе перечитаний зріз.
+   */
+  const discardMine = useCallback(() => {
+    if (shownConflict === null) return;
+
+    for (const conflict of shownConflict.conflicts) {
+      if (conflict.columnCode === '*') {
+        for (const edit of pending.values()) {
+          if (edit.rowKey === conflict.rowKey) discardPendingEdit(tableInstanceId, periodKey, edit);
+        }
+      } else {
+        discardPendingEdit(tableInstanceId, periodKey, conflict);
+      }
+    }
+
+    setOpenConflict(null);
+    void slice.refetch();
+  }, [shownConflict, pending, tableInstanceId, periodKey, slice]);
 
   // ⚠ Правило порожнечі — у чистому модулі `emptiness.ts`, а не тут: воно
   // різне для фіксованої і динамічної таблиці (`S-13`), і саме тому має бути
@@ -1232,14 +1752,46 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         <Button size="xs" variant="default" disabled={!history.current.canRedo} onClick={() => applyHistory(history.current.redo())}>
           {t('grid.redo')}
         </Button>
-        <Button
-          size="xs"
-          loading={isPending}
-          disabled={pending.size === 0}
-          onClick={() => void save([...pending.values()])}
-        >
-          {t('grid.save', { count: pending.size })}
-        </Button>
+        {/*
+         * ⛔ `U-16`. Тут стояла ГОЛОВНА кнопка панелі — «Save (N)», завжди
+         * видима й майже завжди вимкнена, — і вона суперечила моделі
+         * роботи. Модель — АВТОЗБЕРЕЖЕННЯ (`autosave.ts`, дебаунс на
+         * документ): правильна правка після Enter доїжджає сама, `pending`
+         * порожніє, і кнопка лишається «Save (0)» вимкненою. Лічильник у неї
+         * з'являвся рівно тоді, коли сервер правку ВІДХИЛИВ, — тобто підпис
+         * обіцяв «стільки змін чекає збереження», а показував «стільки змін
+         * збереження не пройшли».
+         *
+         * ⛔ Обрана модель: автозбереження лишається ЄДИНИМ способом
+         * зберегти, а кнопка перестає вдавати, що зберігає саме вона. Вона
+         * з'являється ТІЛЬКИ тоді, коли є що робити руками — коли останнє
+         * збереження відхилено, а правки досі не прийняті, — і називає те,
+         * що справді робить: «Retry save (N)».
+         *
+         * ⚠ Саме `saveStatus === 'error'`, а не сам лише `pending.size > 0`:
+         * між натисканням Enter і спрацюванням дебаунсу правки теж лежать у
+         * `pending`, і кнопка «повторити» в те вікно означала б «повтори
+         * те, чого ще не пробували». Про це вікно каже індикатор
+         * «зберігається» поруч, а не кнопка.
+         *
+         * ⚠ Поведінка збереження НЕ змінена: автозбереження навмисне, і
+         * жодного його виклику тут не прибрано — змінено лише підпис і
+         * видимість кнопки.
+         */}
+        {/*
+         * ⚠ `V-01`: і тоді, коли останній пакет пройшов, а відхилені комірки
+         * лишились: автозбереження їх більше не везе, тож повтор — лише руками.
+         */}
+        {(saveStatus === 'error' || rejections.size > 0) && pending.size > 0 && (
+          <Button
+            size="xs"
+            loading={isPending}
+            onClick={() => void save([...pending.values()])}
+            data-testid="grid-retry-save"
+          >
+            {t('grid.retrySave', { count: pending.size })}
+          </Button>
+        )}
 
         {/*
          * ⚠ Видимий індикатор (`B-35`, `#38`): оператор має бачити, чи
@@ -1259,9 +1811,24 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
             {t(saveStatus === 'saving' ? 'grid.saving' : 'grid.saved')}
           </Text>
         )}
-        {saveStatus === 'error' && (
+        {/*
+         * ⛔ `U-17`. Тут стояв ключ `grid.saveError` — ТОЙ САМИЙ, що й у
+         * заголовку банера нижче. На екрані це давало ту саму відмову
+         * надрукованою двічі поруч: «NOT SAVED — SEE THE ERROR ABOVE»
+         * великими червоними, а прямо ПІД цим написом — рамка «Not saved —
+         * see the error above» і вже сама причина. Тобто перший напис
+         * відсилав «вище» до того, що насправді нижче.
+         *
+         * ⚠ Позначка лишається — але як ПОЗНАЧКА, а не як друге
+         * повідомлення: два слова, свій ключ, жодного «див. вище». Що саме
+         * пішло не так, каже рівно одне місце — банер із текстом сервера.
+         * Прибрати позначку зовсім було б гірше: у рядку кнопок зник би
+         * єдиний постійний слід відмови (банер може бути прокручений), а з
+         * ним і `role="alert"`, на якому стоїть `DocumentGrid.a11y-status`.
+         */}
+        {(saveStatus === 'error' || rejections.size > 0) && (
           <Badge color="statusError" variant="light" role="alert" data-save-status="error">
-            {t('grid.saveError')}
+            {t('grid.saveFailedMark')}
           </Badge>
         )}
 
@@ -1315,14 +1882,16 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         )}
       </Group>
 
-      {saveError !== null && (
-        // ⛔ Q-30x (High): САМЕ СЮДИ вказує «NOT SAVED — SEE THE ERROR
-        // ABOVE» з бейджа тулбару вище — раніше під цим написом не було
-        // нічого, а справжня причина губилася в консолі. Текст — рівно той,
-        // що назвав сервер (ФВ-14.24): код розрізняє причини, текст —
-        // людині.
+      {saveErrorText !== null && (
+        // ⛔ Q-30x (High): ЄДИНЕ місце, де сказано, ЧОМУ не збереглося.
+        // Текст — рівно той, що назвав сервер (ФВ-14.24): код розрізняє
+        // причини, текст — людині.
+        //
+        // ✎ `U-17`: заголовок більше не відсилає «див. помилку вище» — та
+        // помилка і є цей самий блок, а над ним лишилася тільки коротка
+        // позначка в рядку кнопок. Одна відмова — одне повідомлення.
         <Alert color="statusError" title={t('grid.saveError')} role="alert">
-          <Text size="sm">{saveError}</Text>
+          <Text size="sm">{saveErrorText}</Text>
         </Alert>
       )}
 
@@ -1341,48 +1910,21 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         </Alert>
       )}
 
-      {conflicts.length > 0 && (
-        <Alert color="statusWarning" title={t('grid.conflictTitle')}>
-          {/* ⛔ «Перезаписати мовчки» не є опцією: користувач бачить, чия
-              правка і яка саме, і вирішує сам. */}
-          <Text size="sm">{t('grid.conflictHint', { count: conflicts.length })}</Text>
+      {shownConflict !== null && data !== undefined && (
+        // ⛔ «Перезаписати мовчки» не є опцією: людина бачить своє і чуже
+        // значення поруч, чия правка і коли, — і вирішує сама (`B-09`).
+        <ConflictPanel
+          conflict={shownConflict}
+          rowLabel={(rowKey) => {
+            const row = data.rows.find((candidate) => candidate.rowKey === rowKey);
 
-          {/* ⛔ `BE-06`: перелік, а не саме лише число. Лічильник «змінено
-              комірок: 3» не веде до жодної дії — людина не дізнається ні що
-              саме розійшлося, ні чия це правка, ні коли вона сталася, а
-              вирішувати «беру їхнє / лишаю своє» доводиться саме за цим.
-              Сервер до цієї роботи й не мав чого сказати: поля заповнювалися
-              заглушками. */}
-          <List size="sm">
-            {conflicts.map((conflict) => (
-              <List.Item key={`${conflict.rowKey}:${conflict.columnCode}`}>
-                {t('grid.conflictItem', {
-                  row: conflict.rowKey,
-                  column: conflict.columnCode,
-                  // ⚠ `cellText`, не `String(...)`: чуже значення приходить тим
-                  // самим десятковим рядком, і «їхнє значення 12.4000000000»
-                  // у реченні, за яким людина вирішує «беру їхнє / лишаю
-                  // своє», читалося б як інше число.
-                  value:
-                    conflict.theirValue === null || conflict.theirValue === undefined
-                      ? t('grid.conflictNoValue')
-                      : cellText(conflict.theirValue),
-
-                  // ⚠ `null` означає «невідомо», і воно так і написано словом.
-                  // Порожнє місце на цьому рядку читалося б як «ніхто».
-                  user: conflict.theirUser ?? t('grid.conflictUnknownUser'),
-                  time: conflictTimeLabel(conflict.theirChangedAt) ?? t('grid.conflictUnknownTime'),
-                })}
-              </List.Item>
-            ))}
-          </List>
-
-          {moreConflicts > 0 && (
-            // ⛔ Стеля переліку — 100 комірок; решта не має зникати мовчки.
-            // Людина, яка бачить сто рядків із трьохсот, вважає, що бачить усі.
-            <Text size="sm">{t('grid.conflictMore', { count: moreConflicts })}</Text>
-          )}
-        </Alert>
+            return row === undefined ? rowKey : rowLabelOf(row);
+          }}
+          columnHeader={(code) => data.columns.find((column) => column.code === code)?.header ?? code}
+          busy={isPending}
+          onKeepMine={() => void keepMine()}
+          onDiscardMine={discardMine}
+        />
       )}
 
       {requiredInputBlocked.length > 0 && (
@@ -1442,6 +1984,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
           pinnedBottomSource={pinnedTotals}
           readonly={readOnly}
           onBeforeedit={onBeforeEdit}
+          onBeforerangeedit={onBeforeRangeEdit}
           onAfteredit={onAfterEdit}
           onAftercolumnresize={onColumnResize}
           style={{ height: '70vh' }}
@@ -1501,6 +2044,29 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
           </Button>
         </Group>
       </Modal>
+
+      {/*
+       * ⛔ `ФВ-2.16` для ПАКЕТНИХ правок (вставка, протягування): один діалог на
+       * пакет із кількістю комірок, що вимагають підтвердження. Закриття без
+       * кнопки — скасування: пакет не застосовано взагалі (`batchConfirm`).
+       */}
+      <Modal
+        opened={batchConfirm !== null}
+        onClose={() => setBatchConfirm(null)}
+        title={t('grid.confirmTitle')}
+      >
+        <Text size="sm" mb="md">
+          {t('grid.batchConfirmBody', { count: batchConfirm?.count ?? 0 })}
+        </Text>
+        <Group justify="flex-end" gap="xs">
+          <Button size="xs" variant="default" onClick={() => setBatchConfirm(null)}>
+            {t('grid.confirmCancel')}
+          </Button>
+          <Button size="xs" onClick={onConfirmBatch}>
+            {t('grid.confirmProceed')}
+          </Button>
+        </Group>
+      </Modal>
     </Stack>
       )}
     </AsyncBoundary>
@@ -1535,6 +2101,12 @@ export function gridColumns(
   // «скільки значень її склало» читається як підсумок по ВСІХ рядках колонки,
   // хоч би скільки з них були порожні.
   totals: ReadonlyMap<string, ColumnTotal> = new Map(),
+
+  // ⚠ `X-13`: довідники, що ще їдуть, — редактор показує «завантаження».
+  lookupPending: ReadonlySet<number> = new Set(),
+
+  // ⛔ `R-01`: перелік одиниць для колонок `Unit`; `null` — ще не приїхав.
+  units: readonly UnitRef[] | null = null,
 ): ColumnRegular[] {
   // ⚠ Тип оголошений ЯВНО, а не виведений із `map`. Без нього лямбди
   // всередині (`readonly`, `cellProperties`, `cellTemplate`) втрачають
@@ -1551,6 +2123,29 @@ export function gridColumns(
     const isRequired = column.isRequired || column.isRequiredByMethodology;
     const requiredHint = isRequired ? t('grid.columnRequiredHint') : null;
 
+    /*
+     * ⛔ `U-05`: вирівнювання числа вирішує ТИП КОЛОНКИ з сервера
+     * (`ColumnDto.dataType`), а не вигляд значення. Здогад за виглядом
+     * («схоже на число — вирівняти праворуч») хитався б від рядка до рядка:
+     * порожня комірка, `'н/д'`, яке `coerce` лишає текстом до відповіді
+     * `ECR-CELL-0422`, і число в тій самій колонці поїхали б у різні боки.
+     *
+     * ⚠ Той самий предикат, що й для показу (`isNumericColumn`), а не другий
+     * перелік типів поруч: колонка, яка МАЛЮЄТЬСЯ числом, і колонка, яка
+     * вирівнюється як число, — це одна колонка, і розійтися вони не мають
+     * права.
+     */
+    const isNumeric = isNumericColumn(column);
+    const numericClass = isNumeric ? 'ecr-cell-numeric' : null;
+
+    const headerProperties =
+      requiredHint === null && !isNumeric
+        ? null
+        : {
+            ...(requiredHint === null ? {} : { title: requiredHint }),
+            ...(isNumeric ? { class: 'ecr-header-numeric' } : {}),
+          };
+
     // ⛔ Директива registry-lookup, PR A4: перелік — за `lookupRegistryDefId`
     // ЦІЄЇ колонки. `null`/відсутній у мапі (запит ще вантажиться, або
     // колонку налаштовано без довідника) — редактор і показ деградують до
@@ -1560,6 +2155,16 @@ export function gridColumns(
       column.dataType === 'Lookup' && column.lookupRegistryDefId !== null
         ? (lookupEntriesByRegistryId.get(column.lookupRegistryDefId) ?? [])
         : null;
+
+    // ⚠ Для РЕДАКТОРА «ще їде» і «порожньо» — різні стани (`X-13`); для
+    // показу обидва дають сирий ідентифікатор, тож там розрізняти нічого.
+    const lookupEditorEntries =
+      lookupEntries !== null &&
+      column.lookupRegistryDefId !== null &&
+      lookupPending.has(column.lookupRegistryDefId) &&
+      !lookupEntriesByRegistryId.has(column.lookupRegistryDefId)
+        ? null
+        : lookupEntries;
 
     return {
       prop: column.code,
@@ -1578,13 +2183,17 @@ export function gridColumns(
         (column.unitSymbol === null ? column.header : `${column.header}, ${column.unitSymbol}`) +
         (isRequired ? ' *' : ''),
 
-      // Збережена ширина цієї колонки для цього робочого місця (ФВ-14.29).
+      // Збережена ширина цієї колонки для цього користувача (ФВ-14.29, D-201).
       size: widths[column.code] ?? DefaultColumnWidth,
 
       // ⚠ Зірочка в заголовку — це ЗНАК, а не пояснення: читалка екрана й
       // наведення миші мають почути/побачити ПОВНИЙ текст вимоги, а не лише
       // символ (той самий принцип, що й `hint` у `cellProperties` нижче).
-      ...(requiredHint === null ? {} : { columnProperties: () => ({ title: requiredHint }) }),
+      //
+      // ⛔ `U-05`: заголовок числової колонки вирівнюється ПРАВОРУЧ разом із
+      // її даними. Над лівою кромкою чисел заголовок читається як підпис
+      // сусідньої колонки, і саме так виглядала кожна з 91 таблиці.
+      ...(headerProperties === null ? {} : { columnProperties: () => headerProperties }),
 
       // ⛔ Директива registry-lookup, PR A4: `Lookup`-колонка редагується
       // dropdown-ом записів довідника (`LookupCellEditor.ts`), не звичайним
@@ -1593,7 +2202,7 @@ export function gridColumns(
       ...(lookupEntries === null
         ? {}
         : {
-            editor: createLookupCellEditor(lookupEntries),
+            editor: createLookupCellEditor(lookupEditorEntries),
             cellTemplate: (_h, props: { value?: unknown }) =>
               lookupCellDisplay(props.value, lookupEntries),
           }),
@@ -1624,6 +2233,33 @@ export function gridColumns(
             cellTemplate: (_h, props: { value?: unknown }) => cellDisplay(props.value, column),
           }),
 
+      // ⛔ `V-07`: логічна комірка — перелік «так / ні / порожньо», а не
+      // текстове поле, у якому `maybe` мовчки ставав `false`.
+      ...(column.dataType === 'Bool'
+        ? {
+            editor: createBoolCellEditor(),
+            cellTemplate: (_h, props: { value?: unknown }) => boolCellDisplay(props.value),
+          }
+        : {}),
+
+      // ⚠ Дата — форматом продукту, без години опівночі сховища (`cellDisplay`).
+      // ⛔ `R-02`: і поле дати з календарем, а не текст у форматі сховища.
+      ...(column.dataType === 'Date'
+        ? {
+            editor: createDateCellEditor(),
+            cellTemplate: (_h, props: { value?: unknown }) => cellDisplay(props.value, column),
+          }
+        : {}),
+
+      // ⛔ `R-01`: одиниця — перелік одиниць із кодом, а не номер у текстовому
+      // полі, і показ коду (`kg`), а не ідентифікатора.
+      ...(column.dataType === 'Unit'
+        ? {
+            editor: createUnitCellEditor(units),
+            cellTemplate: (_h, props: { value?: unknown }) => unitCellDisplay(props.value, units ?? []),
+          }
+        : {}),
+
       // ⚠ Право читається з рішення, а не з типу колонки: сіра комірка і
       // «сюди не вставиться» мають відповідати одним правилом.
       //
@@ -1647,6 +2283,10 @@ export function gridColumns(
 
           return {
             'data-grid-totals': 'cell',
+            // ⚠ `U-05`: підсумок вирівнюється тим самим правилом, що й
+            // колонка. Сума під стовпцем, вирівняним інакше, ніж вона сама,
+            // читається як чужий рядок.
+            ...(numericClass === null ? {} : { class: numericClass }),
             ...(total === undefined
               ? {}
               : { title: t('grid.totalsCellHint', { count: total.count }) }),
@@ -1684,8 +2324,38 @@ export function gridColumns(
         // фарбувалась би, лише щойно комірку зроблено `dirty`.
         const appearance = cellAppearanceOf(column.style);
 
+        // ⛔ `X-10`: колір і заливка автора — змінними й класами, які читає
+        // `cellEditors.css`, а не inline-кольором (коментар `cellAppearanceOf`).
+        const appearanceClass = cellAppearanceClassOf(column.style);
+
+        /*
+         * ⛔ `U-05`: повне значення має бути ДОСТУПНЕ, навіть коли воно
+         * ширше за комірку. Заміряно в браузері: `scrollWidth 176px` проти
+         * `clientWidth 140px` — і RevoGrid ховає хвіст трьома крапками, тобто
+         * оператор бачить не все число й ЗНАЄ про це лише з багатокрапки.
+         * Ширину колонки це не лікує (число буває будь-якої довжини), тому
+         * носіїв два: рядок формули над сіткою (`GridFormulaBar`, повне
+         * канонічне значення для комірки під курсором) і підказка тут — для
+         * того, хто просто веде мишею.
+         *
+         * ⛔ Підказка ОДНА на елемент, тож вона не змагається з причиною
+         * заборони чи з помилкою збереження: ті самі `title`, і два тексти на
+         * одному `title` означали б, що видно лише один із них. Тому значення
+         * йде в підказку РІВНО тоді, коли сказати більше нічого (гілка
+         * нижче рахує `hint` і перекриває цю підказку, якщо він непорожній).
+         */
+        const fullValueHint =
+          numericClass === null ? null : cellDisplay((model as GridRow)[column.code], column);
+
         if (state === null && requiredInputClass === null && saveErrorClass === null && appearance === undefined) {
-          return {};
+          return numericClass === null
+            ? {}
+            : {
+                class: numericClass,
+                ...(fullValueHint === null || fullValueHint.length === 0
+                  ? {}
+                  : { title: fullValueHint }),
+              };
         }
 
         const decision = decide(slice, rowKey, column);
@@ -1708,7 +2378,13 @@ export function gridColumns(
           // ⚠ Базовий `ecr-cell` завжди присутній, навіть коли `state === null`:
           // від нього залежить `position: relative` і резерв місця під маркер
           // (`cell-states.css`), а маркер обов'язкового входу — свій маркер.
-          class: [state === null ? 'ecr-cell' : cellStateClass(state), requiredInputClass, saveErrorClass]
+          class: [
+            state === null ? 'ecr-cell' : cellStateClass(state),
+            requiredInputClass,
+            saveErrorClass,
+            numericClass,
+            appearanceClass,
+          ]
             .filter((part): part is string => part !== null)
             .join(' '),
 
@@ -1716,12 +2392,19 @@ export function gridColumns(
           // розрізнення станів, не залежачи від жодного кольору (`ФВ-14.18`).
           ...(state === null ? {} : { 'data-cell-state': state }),
 
-          ...(hint.length === 0 ? {} : { title: hint }),
+          // ⚠ Підказка СТАНУ має першість над підказкою ЗНАЧЕННЯ, і це
+          // вибір, а не випадок: `title` на елементі один, а «сервер
+          // відхилив цю правку» важливіше за повтор видимого числа.
+          // Повне значення такої комірки лишається доступним у рядку формули.
+          ...(hint.length === 0
+            ? fullValueHint === null || fullValueHint.length === 0
+              ? {}
+              : { title: fullValueHint }
+            : { title: hint }),
 
-          // ⚠ `backgroundColor`/`verticalAlign` НЕМАЄ серед перенесених полів
-          // — див. коментар `cellAppearanceOf` (`cellAppearance.ts`): перший
-          // ховав би індикатор стану під кольором автора, другий не робить
-          // нічого на звичайному `<div>`.
+          // ⚠ Колір і заливка тут — ЗМІННІ (`--ecr-cell-*`), не inline `color`/
+          // `backgroundColor`: заливку застосовує лише комірка без стану, а
+          // колір — під поточну тему (`cellEditors.css`, `X-10`).
           ...(appearance === undefined ? {} : { style: appearance }),
         };
       },
@@ -1783,9 +2466,15 @@ function gridRows(slice: TableSliceDto, overrides?: ReadonlyMap<string, unknown>
     for (const column of slice.columns) {
       const key = cellKey(row.rowKey, column.code);
 
-      model[column.code] = overrides?.has(key)
-        ? overrides.get(key)
-        : (row.cells[column.code] ?? column.defaultValue ?? '');
+      // ⛔ `U-24`: модель рядка — це те, що RevoGrid кладе в поле РЕДАКТОРА
+      // (подвійний клік, F2, початок друку). Тому тут десяткове вже без
+      // хвостових нулів сховища (`editorValueOf`, `cellValue.ts`).
+      model[column.code] = editorValueOf(
+        overrides?.has(key)
+          ? overrides.get(key)
+          : (row.cells[column.code] ?? column.defaultValue ?? ''),
+        column,
+      );
     }
 
     return model;

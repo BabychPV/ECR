@@ -64,6 +64,12 @@ public static class UsageKinds
     /// <summary>Обов'язковий вхід версії методики.</summary>
     public const string MethodologyRequiredInput = "methodologyRequiredInput";
 
+    /// <summary>
+    /// Прив'язка PI за вікном рядка (<c>ext.RowWindowMap</c>): одиниця колонки-цілі або
+    /// одиниця одного з її джерел (<c>ext.RowWindowSource</c>) — один рядок на прив'язку.
+    /// </summary>
+    public const string RowWindowMap = "rowWindowMap";
+
     /// <summary>Усі види — рефлексією, щоб новий член не треба було дописувати вдруге.</summary>
     public static IReadOnlyList<string> All { get; } =
         [.. typeof(UsageKinds)

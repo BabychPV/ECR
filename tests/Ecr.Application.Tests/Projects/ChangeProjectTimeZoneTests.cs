@@ -119,8 +119,13 @@ public sealed class ChangeProjectTimeZoneTests
         // `Project.Manage` без гранта на ЦЕЙ проєкт не має бути достатнім.
         var project = ProjectBuilder.Project(timeZoneId: "Asia/Almaty");
         _periods.FindProjectAsync(project.Id, Arg.Any<CancellationToken>()).Returns(project);
+        // ⚠ S17: грант Read — проєкт ВИДИМИЙ, бракує рівня Manage. Без жодного
+        // гранта проєкт невидимий, і відповідь — 404, як на неіснуючий.
         _access.BuildProfileAsync(9, Arg.Any<CancellationToken>())
-            .Returns(new AccessBuilder { UserId = 9 }.Permission("Project.Manage").Build());
+            .Returns(new AccessBuilder { UserId = 9 }
+                .Permission("Project.Manage")
+                .Grant(ResourceKind.Project, project.Id, GrantLevel.Read)
+                .Build());
 
         var denied = await Assert.ThrowsAsync<AccessDeniedException>(
             () => Handler().HandleAsync(project.Id, "Asia/Aqtau", CancellationToken.None));

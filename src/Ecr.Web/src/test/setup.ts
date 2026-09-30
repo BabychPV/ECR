@@ -1,4 +1,15 @@
-import '@testing-library/react';
+import { configure } from '@testing-library/react';
+
+/*
+ * ⛔ Спільна межа асинхронних очікувань `waitFor`/`findBy*` — 5 с замість
+ * типової 1 с. Під навантаженням повного прогону (vmThreads + паралельні
+ * серверні набори) перехід модалки Mantine, перший рендер лінивого чанка чи
+ * ланцюжок запитів перевищують секунду, і тести падали не через код
+ * (`DocumentHeaderPanel`, `RegistryEntryEditor.reopenClearsForm`,
+ * `TemplateVersionPage.round4`, 2026-09-25). Межа — лише верхня: умова, що
+ * справджується швидко, так само швидко й проходить.
+ */
+configure({ asyncUtilTimeout: 5_000 });
 
 /*
  * ⚠ jsdom не реалізує ані `matchMedia`, ані `ResizeObserver`, а Mantine і

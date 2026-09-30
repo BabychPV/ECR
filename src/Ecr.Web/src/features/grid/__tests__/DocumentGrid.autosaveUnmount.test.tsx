@@ -157,6 +157,7 @@ function DocumentHost(): JSX.Element {
         key={table}
         documentId={DocumentId}
         tableInstanceId={table}
+        tableDefId={1}
         periodKey={Period}
         readOnly={false}
         allowsDynamicRows={false}

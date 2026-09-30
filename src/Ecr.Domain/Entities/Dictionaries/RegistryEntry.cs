@@ -85,6 +85,23 @@ public sealed class RegistryEntry : Entity<long>
     public DateTime? DeletedAt { get; private set; }
     public int? DeletedByUserId { get; private set; }
 
+    /// <summary>
+    /// Автор ОСТАННЬОЇ зміни рядка; <c>null</c> — невідомий (фонова задача без
+    /// автора, фікстура, рядок, записаний до міграції <c>RK03</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Ставить <c>UnitOfWork</c> під час збереження, а не use-case: автор
+    /// потрібен на КОЖНОМУ шляху запису, і поле, яке треба не забути
+    /// заповнити в кожному обробнику, рано чи пізно лишається порожнім.
+    /// Разом із системною історією (<c>D-158</c>) саме воно дає «хто змінив»
+    /// кожної версії рядка в <c>dic.RegistryEntryHistory</c>.
+    /// </remarks>
+    public int? ChangedByUserId { get; private set; }
+
+    /// <summary>Фіксує автора зміни рядка (див. <see cref="ChangedByUserId"/>).</summary>
+    /// <param name="userId">Автор; <c>null</c> — невідомий.</param>
+    public void MarkChangedBy(int? userId) => ChangedByUserId = userId;
+
     /// <summary>Чинний на дату: напівінтервал <c>[ValidFrom, ValidTo)</c>.</summary>
     /// <param name="date">Дата в календарі майданчика.</param>
     /// <returns><c>true</c> — запис можна обрати в цю дату (<c>ФВ-8.5</c>).</returns>
@@ -158,7 +175,12 @@ public sealed class RegistryEntry : Entity<long>
         if (parentEntryId is { } parent && IsPersisted && parent == Id)
         {
             throw new DomainException(
-                "ECR-REG-0422", $"Запис {Id} не може бути власним батьком.");
+                "ECR-REG-0422", $"Запис {Id} не може бути власним батьком.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-REG-0422.selfParent",
+                    ["entryId"] = Id.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
         }
 
         ParentEntryId = parentEntryId;
@@ -179,6 +201,27 @@ public sealed class RegistryEntry : Entity<long>
         IsActive = false;
         DeletedByUserId = userId;
         DeletedAt = utcNow;
+    }
+
+    /// <summary>
+    /// Вимикає запис без видалення: він лишається в історії й у комірках, але
+    /// не пропонується до вибору (<c>D-212</c>, політика <c>Deactivate</c>).
+    /// </summary>
+    public void Deactivate() => IsActive = false;
+
+    /// <summary>Вмикає вимкнений запис.</summary>
+    /// <exception cref="InvalidOperationException">
+    /// Запис видалено: повернення видаленого — <see cref="Restore"/>, з його
+    /// окремим сенсом і слідом, а не побічний ефект увімкнення.
+    /// </exception>
+    public void Activate()
+    {
+        if (IsDeleted)
+        {
+            throw new InvalidOperationException($"Запис {Id} видалено: його повертає Restore, а не Activate.");
+        }
+
+        IsActive = true;
     }
 
     /// <summary>Повертає видалений запис у обіг.</summary>

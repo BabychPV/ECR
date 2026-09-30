@@ -21,8 +21,33 @@ namespace Ecr.Api.Health;
 /// роками, навчають ігнорувати, і справжню деградацію ніхто не помітить.
 /// </remarks>
 public sealed class JobsHealthCheck(
-    ISchedulerFactory? factory, IUiStringCatalog catalog, ICurrentUser currentUser) : IHealthCheck
+    ISchedulerFactory? factory,
+    IUiStringCatalog catalog,
+    ICurrentUser currentUser,
+    IJobProgressStore? progress = null,
+    Domain.Abstractions.IClock? clock = null) : IHealthCheck
 {
+    /// <summary>
+    /// Скільки задача може висіти без биття, поки прибирання мало б її закрити,
+    /// перш ніж перевірка скаже «прибирання стоїть» (U16).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Жовтий — одразу, щойно є задача без биття довше за
+    /// <see cref="IJobProgressStore.StaleAfter"/>: це штатне вікно до наступного
+    /// проходу прибирання (раз на хвилину), і воно має бути видимим. Після
+    /// цього запасу — той самий жовтий, але з текстом <c>health.jobs.staleUnswept</c>
+    /// і <c>cleanupStalled = true</c>: прибирання не працює. Червоним (503 на
+    /// <c>/health/ready</c>) зависле тло не робиться свідомо — див. коментар у
+    /// перевірці. Шість проходів — з запасом на збій БД.
+    /// </remarks>
+    public static readonly TimeSpan UnsweptAfter = IJobProgressStore.StaleAfter + TimeSpan.FromMinutes(6);
+
+    /// <summary>
+    /// Вікно лічильника задач, що вичерпали стелю відкладень (Д-2 огляду O1): доба —
+    /// жовтий гасне сам наступного дня, якщо нових таких немає.
+    /// </summary>
+    public static readonly TimeSpan DeferralExhaustedWindow = TimeSpan.FromDays(1);
+
     /// <inheritdoc />
     public async Task<HealthCheckResult> CheckHealthAsync(
         HealthCheckContext context,
@@ -48,7 +73,16 @@ public sealed class JobsHealthCheck(
                 var stopped = await Text(
                     "health.jobs.stopped", "The scheduler is stopped: no background job will run.",
                     cancellationToken).ConfigureAwait(false);
-                return HealthCheckResult.Unhealthy(stopped, data: Data(0, 0));
+
+                // ⛔ U7: лише Degraded — той самий принцип, що й для завислих
+                // задач нижче: тло не виводить інстанс із ротації. Перевірка
+                // має тег `ready`, і Unhealthy дав би `/health/ready` 503 —
+                // балансувальник зняв би API, який обслуговує запити, через
+                // стан планувальника. Тяжкість показують текст
+                // (`health.jobs.stopped`) і `schedulerStopped = true`.
+                var data = Data(0, 0);
+                data["schedulerStopped"] = true;
+                return HealthCheckResult.Degraded(stopped, data: data);
             }
 
             var jobs = await scheduler
@@ -71,6 +105,69 @@ public sealed class JobsHealthCheck(
                 return HealthCheckResult.Degraded(noSchedules, data: Data(jobs.Count, 0));
             }
 
+            // ⛔ U16: «планувальник живий» ще не означає «задачі не висять».
+            // Раніше перевірка була зеленою, поки в `/jobs` місяцями «виконувалися»
+            // задачі, покинуті процесом, що зник.
+            if (progress is not null && clock is not null)
+            {
+                var now = clock.UtcNow;
+                var stale = await progress.SummarizeStaleAsync(now, cancellationToken).ConfigureAwait(false);
+
+                if (stale.Count > 0)
+                {
+                    var data = Data(jobs.Count, triggers.Count);
+                    data["staleJobs"] = stale.Count;
+
+                    var unswept = stale.OldestHeartbeatAt is not { } oldest || now - oldest > UnsweptAfter;
+                    data["cleanupStalled"] = unswept;
+                    var text = await Text(
+                            unswept ? "health.jobs.staleUnswept" : "health.jobs.stale",
+                            unswept
+                                ? "Background jobs hang without a heartbeat and the cleanup does not close them: {count}."
+                                : "Background jobs without a heartbeat, awaiting cleanup: {count}.",
+                            cancellationToken,
+                            new Dictionary<string, string>(StringComparer.Ordinal)
+                            {
+                                ["count"] = stale.Count.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                            })
+                        .ConfigureAwait(false);
+
+                    // ⛔ Лише Degraded, навіть коли прибирання стоїть. Перевірка
+                    // має тег `ready`, а Unhealthy дає `/health/ready` 503:
+                    // балансувальник вивів би з ротації здоровий API через
+                    // зависле ТЛО — і однаковий стан спільної бази зняв би так
+                    // само всі інстанси разом (рішення координатора). Тяжкість
+                    // розрізняють текст і `cleanupStalled`, а не код відповіді.
+                    return HealthCheckResult.Degraded(text, data: data);
+                }
+
+                // ⛔ Д-2 огляду O1: задача, що вичерпала стелю відкладень, закривається Failed
+                // тихо — рядок Error у журналі і конверт у /jobs. Без цього жовтого вічно
+                // зайнятий лок документа помічали б лише за непорахованими формулами.
+                var exhausted = await progress
+                    .CountFailedWithMessageKeyAsync(
+                        Infrastructure.Jobs.JobDeferral.ExhaustedKey, now - DeferralExhaustedWindow, cancellationToken)
+                    .ConfigureAwait(false);
+
+                if (exhausted > 0)
+                {
+                    var data = Data(jobs.Count, triggers.Count);
+                    data["deferralExhausted"] = exhausted;
+                    var text = await Text(
+                            "health.jobs.deferralExhausted",
+                            "Background jobs stopped on the deferral limit in the last 24 hours: {count}. See the job list for the held resource.",
+                            cancellationToken,
+                            new Dictionary<string, string>(StringComparer.Ordinal)
+                            {
+                                ["count"] = exhausted.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                            })
+                        .ConfigureAwait(false);
+
+                    // Лише Degraded — той самий принцип, що для завислих задач вище.
+                    return HealthCheckResult.Degraded(text, data: data);
+                }
+            }
+
             var running = await Text("health.jobs.running", "The scheduler is running.", cancellationToken)
                 .ConfigureAwait(false);
             return HealthCheckResult.Healthy(running, data: Data(jobs.Count, triggers.Count));
@@ -86,8 +183,9 @@ public sealed class JobsHealthCheck(
         }
     }
 
-    private Task<string> Text(string key, string fallback, CancellationToken ct)
-        => HealthCatalogText.ResolveAsync(catalog, currentUser, key, fallback, null, ct);
+    private Task<string> Text(
+        string key, string fallback, CancellationToken ct, IReadOnlyDictionary<string, string>? parameters = null)
+        => HealthCatalogText.ResolveAsync(catalog, currentUser, key, fallback, parameters, ct);
 
     private static Dictionary<string, object> Data(int jobs, int triggers)
         => new(StringComparer.Ordinal) { ["jobs"] = jobs, ["triggers"] = triggers };

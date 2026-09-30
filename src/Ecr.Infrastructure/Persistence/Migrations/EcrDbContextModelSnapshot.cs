@@ -24,6 +24,8 @@ namespace Ecr.Infrastructure.Persistence.Migrations
 
             modelBuilder.HasSequence("CalculationResultSeq", "calc");
 
+            modelBuilder.HasSequence("RegistryEntryCodeSeq", "dic");
+
             modelBuilder.HasSequence("TableInstanceSeq", "doc");
 
             modelBuilder.HasSequence("TableRowSeq", "doc");
@@ -82,6 +84,10 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                     b.Property<long>("DocumentId")
                         .HasColumnType("bigint");
 
+                    b.Property<byte>("Kind")
+                        .HasColumnType("tinyint")
+                        .HasDefaultValue((byte)0, "DF_CRes_Kind");
+
                     b.Property<int>("MethodologyVersionId")
                         .HasColumnType("int");
 
@@ -107,6 +113,9 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                     b.HasKey("PeriodKey", "Id")
                         .HasName("PK_CalculationResult");
 
+                    b.HasIndex("UnitId")
+                        .HasDatabaseName("IX_CalculationResult_UnitId");
+
                     b.HasIndex("PeriodKey", "DocumentId", "MethodologyVersionId", "OutputCode")
                         .HasDatabaseName("IX_CalculationResult_Lookup");
 
@@ -122,6 +131,9 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .HasColumnType("bigint");
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<long?>("DocumentId")
+                        .HasColumnType("bigint");
 
                     b.Property<string>("ErrorMessage")
                         .HasMaxLength(2000)
@@ -139,6 +151,9 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                     b.Property<int>("ProjectId")
                         .HasColumnType("int");
 
+                    b.Property<DateTime?>("RegistryAsOfUtc")
+                        .HasColumnType("datetime2(3)");
+
                     b.Property<DateTime>("StartedAt")
                         .HasColumnType("datetime2(3)");
 
@@ -152,7 +167,7 @@ namespace Ecr.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("ProjectId", "PeriodKey")
+                    b.HasIndex("ProjectId", "PeriodKey", "DocumentId")
                         .IsUnique()
                         .HasDatabaseName("UX_CalculationRun_Current")
                         .HasFilter("[Status] = 'Current'");
@@ -171,6 +186,9 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                     b.Property<long>("CalculationRunId")
                         .HasColumnType("bigint");
 
+                    b.Property<long?>("DocumentId")
+                        .HasColumnType("bigint");
+
                     b.Property<string>("Expression")
                         .HasMaxLength(2000)
                         .HasColumnType("nvarchar(2000)");
@@ -184,12 +202,19 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                     b.Property<long?>("ResultId")
                         .HasColumnType("bigint");
 
+                    b.Property<string>("SourceRowKey")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
                     b.Property<string>("StepCode")
                         .IsRequired()
                         .HasMaxLength(64)
                         .HasColumnType("nvarchar(64)");
 
                     b.Property<int>("StepOrder")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("SubstanceEntryId")
                         .HasColumnType("int");
 
                     b.Property<string>("TraceJson")
@@ -375,6 +400,10 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .HasMaxLength(2000)
                         .HasColumnType("nvarchar(2000)");
 
+                    b.Property<bool>("IsVisible")
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false, "DF_MF_Visible");
+
                     b.Property<int>("MethodologyVersionId")
                         .HasColumnType("int");
 
@@ -384,6 +413,10 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                     b.Property<byte>("ResultType")
                         .HasColumnType("tinyint")
                         .HasColumnName("ResultType");
+
+                    b.Property<byte>("Scope")
+                        .HasColumnType("tinyint")
+                        .HasDefaultValue((byte)0, "DF_MF_Scope");
 
                     b.HasKey("Id");
 
@@ -432,6 +465,10 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasMaxLength(64)
                         .HasColumnType("nvarchar(64)");
+
+                    b.Property<bool>("IsPerSubstance")
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true, "DF_MO_PerSub");
 
                     b.Property<int>("MethodologyVersionId")
                         .HasColumnType("int");
@@ -641,7 +678,6 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .HasColumnType("tinyint");
 
                     b.Property<byte>("TraceLevel")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("tinyint")
                         .HasDefaultValue((byte)1);
 
@@ -661,6 +697,62 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                             t.HasCheckConstraint("CK_MV_FourEyes", "PublishedByUserId IS NULL OR PublishedByUserId <> CreatedByUserId");
 
                             t.HasCheckConstraint("CK_MV_Published", "Status <> 1 OR (PublishedAt IS NOT NULL AND EffectiveFrom IS NOT NULL AND ChangeReason IS NOT NULL)");
+                        });
+                });
+
+            modelBuilder.Entity("Ecr.Domain.Entities.Calculations.RecalculationApproval", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<DateTime?>("ConfirmedAt")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<int?>("ConfirmedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("ExpiresAt")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<int>("PeriodKey")
+                        .HasColumnType("int");
+
+                    b.Property<byte>("PeriodState")
+                        .HasColumnType("tinyint");
+
+                    b.Property<DateTime>("PeriodStateChangedAt")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<int>("ProjectId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<DateTime>("RequestedAt")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<int>("RequestedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("UsedAt")
+                        .HasColumnType("datetime2(3)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProjectId", "ExpiresAt")
+                        .HasDatabaseName("IX_RecalcApproval_Project");
+
+                    b.ToTable("RecalculationApproval", "calc", t =>
+                        {
+                            t.HasCheckConstraint("CK_RecalcApproval_FourEyes", "ConfirmedByUserId IS NULL OR ConfirmedByUserId <> RequestedByUserId");
+
+                            t.HasCheckConstraint("CK_RecalcApproval_UsedConfirmed", "UsedAt IS NULL OR ConfirmedByUserId IS NOT NULL");
                         });
                 });
 
@@ -814,6 +906,12 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                     b.HasAlternateKey("TableDefId", "Id")
                         .HasName("UQ_ColumnDef_ForFk");
 
+                    b.HasIndex("LookupRegistryDefId")
+                        .HasDatabaseName("IX_ColumnDef_LookupRegistryDefId");
+
+                    b.HasIndex("UnitId")
+                        .HasDatabaseName("IX_ColumnDef_UnitId");
+
                     b.HasIndex("TableDefId", "Code")
                         .IsUnique()
                         .HasDatabaseName("UQ_ColumnDef");
@@ -842,7 +940,6 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .HasColumnType("int");
 
                     b.Property<byte>("Dialect")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("tinyint")
                         .HasDefaultValueSql("0", "DF_Formula_Dialect");
 
@@ -1069,6 +1166,13 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("nvarchar(64)");
 
+                    b.Property<byte>("CodeMode")
+                        .HasColumnType("tinyint")
+                        .HasDefaultValueSql("0", "DF_RegDef_CodeMode");
+
+                    b.Property<DateTime?>("DataChangedAt")
+                        .HasColumnType("datetime2(3)");
+
                     b.Property<int>("DataRevision")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("int")
@@ -1094,7 +1198,6 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .HasColumnType("nvarchar(max)");
 
                     b.Property<byte>("SourceKind")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("tinyint")
                         .HasDefaultValueSql("2", "DF_RegDef_Src");
 
@@ -1172,6 +1275,10 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<byte>("OnParentDelete")
+                        .HasColumnType("tinyint")
+                        .HasDefaultValueSql("0", "DF_RegField_OnDel");
+
                     b.Property<int>("Ordinal")
                         .HasColumnType("int");
 
@@ -1180,6 +1287,10 @@ namespace Ecr.Infrastructure.Persistence.Migrations
 
                     b.Property<int>("RegistryDefId")
                         .HasColumnType("int");
+
+                    b.Property<byte>("RelationKind")
+                        .HasColumnType("tinyint")
+                        .HasDefaultValueSql("0", "DF_RegField_Rel");
 
                     b.Property<int?>("UnitId")
                         .HasColumnType("int");
@@ -1190,7 +1301,135 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .IsUnique()
                         .HasDatabaseName("UQ_RegistryFieldDef");
 
-                    b.ToTable("RegistryFieldDef", "cfg");
+                    b.ToTable("RegistryFieldDef", "cfg", t =>
+                        {
+                            t.HasCheckConstraint("CK_RegField_Composition", "RelationKind = 0 OR DataType = 5");
+
+                            t.HasCheckConstraint("CK_RegField_Rel", "RelationKind BETWEEN 0 AND 1 AND OnParentDelete BETWEEN 0 AND 1");
+                        });
+                });
+
+            modelBuilder.Entity("Ecr.Domain.Entities.Configuration.RegistryImportProfile", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("NameL10n")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("RegistryDefId")
+                        .HasColumnType("int");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<string>("SpecJson")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<int>("UpdatedByUserId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id")
+                        .HasName("PK_RegistryImportProfile");
+
+                    b.HasIndex("RegistryDefId", "Code")
+                        .IsUnique()
+                        .HasDatabaseName("UQ_RegistryImportProfile");
+
+                    b.ToTable("RegistryImportProfile", "cfg", t =>
+                        {
+                            t.HasCheckConstraint("CK_RegImpProfile_Json", "ISJSON([SpecJson]) = 1");
+                        });
+                });
+
+            modelBuilder.Entity("Ecr.Domain.Entities.Configuration.RegistryKeyDef", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<int>("CreatedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("IgnoreCase")
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true, "DF_RegKey_Case");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true, "DF_RegKey_Act");
+
+                    b.Property<bool>("IsPrimary")
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false, "DF_RegKey_Pri");
+
+                    b.Property<string>("NameL10n")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("RegistryDefId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id")
+                        .HasName("PK_RegistryKeyDef");
+
+                    b.HasIndex("RegistryDefId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_RegistryKeyDef_Primary")
+                        .HasFilter("[IsPrimary] = 1 AND [IsActive] = 1");
+
+                    b.HasIndex("RegistryDefId", "Code")
+                        .IsUnique()
+                        .HasDatabaseName("UQ_RegistryKeyDef");
+
+                    b.ToTable("RegistryKeyDef", "cfg");
+                });
+
+            modelBuilder.Entity("Ecr.Domain.Entities.Configuration.RegistryKeyField", b =>
+                {
+                    b.Property<int>("RegistryKeyDefId")
+                        .HasColumnType("int");
+
+                    b.Property<byte>("Ordinal")
+                        .HasColumnType("tinyint");
+
+                    b.Property<int>("RegistryFieldDefId")
+                        .HasColumnType("int");
+
+                    b.HasKey("RegistryKeyDefId", "Ordinal")
+                        .HasName("PK_RegistryKeyField");
+
+                    b.HasIndex("RegistryKeyDefId", "RegistryFieldDefId")
+                        .IsUnique()
+                        .HasDatabaseName("UQ_RegistryKeyField_Field");
+
+                    b.ToTable("RegistryKeyField", "cfg");
                 });
 
             modelBuilder.Entity("Ecr.Domain.Entities.Configuration.RegistryRuleDef", b =>
@@ -1242,6 +1481,48 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                     b.ToTable("RegistryRuleDef", "cfg", t =>
                         {
                             t.HasCheckConstraint("CK_RegRule_Kind", "RuleKind BETWEEN 0 AND 3");
+                        });
+                });
+
+            modelBuilder.Entity("Ecr.Domain.Entities.Configuration.RegistryUse", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<string>("FieldPath")
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)");
+
+                    b.Property<string>("FormulaCode")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<int>("RegistryDefId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("SourceId")
+                        .HasColumnType("int");
+
+                    b.Property<byte>("SourceKind")
+                        .HasColumnType("tinyint");
+
+                    b.HasKey("Id")
+                        .HasName("PK_RegistryUse");
+
+                    b.HasIndex("RegistryDefId")
+                        .HasDatabaseName("IX_RegistryUse_Registry");
+
+                    SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex("RegistryDefId"), new[] { "SourceKind", "SourceId", "FormulaCode", "FieldPath" });
+
+                    b.HasIndex("SourceKind", "SourceId")
+                        .HasDatabaseName("IX_RegistryUse_Source");
+
+                    b.ToTable("RegistryUse", "cfg", t =>
+                        {
+                            t.HasCheckConstraint("CK_RegUse_Kind", "[SourceKind] BETWEEN 0 AND 2");
                         });
                 });
 
@@ -1508,7 +1789,6 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .HasColumnType("int");
 
                     b.Property<byte>("StorageMode")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("tinyint")
                         .HasDefaultValueSql("0", "DF_TableDef_Storage");
 
@@ -1732,6 +2012,9 @@ namespace Ecr.Infrastructure.Persistence.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
+                    b.Property<int?>("ChangedByUserId")
+                        .HasColumnType("int");
+
                     b.Property<string>("Code")
                         .IsRequired()
                         .HasMaxLength(100)
@@ -1771,6 +2054,18 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                     b.Property<int?>("ParentEntryId")
                         .HasColumnType("int");
 
+                    b.Property<DateTime>("PeriodEnd")
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasPrecision(3)
+                        .HasColumnType("datetime2(3)")
+                        .HasColumnName("PeriodEnd");
+
+                    b.Property<DateTime>("PeriodStart")
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasPrecision(3)
+                        .HasColumnType("datetime2(3)")
+                        .HasColumnName("PeriodStart");
+
                     b.Property<int>("RegistryDefId")
                         .HasColumnType("int");
 
@@ -1796,6 +2091,71 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         {
                             t.HasCheckConstraint("CK_RegEntry_Period", "ValidFrom IS NULL OR ValidTo IS NULL OR ValidFrom < ValidTo");
                         });
+
+                    b.ToTable(tb => tb.IsTemporal(ttb =>
+                            {
+                                ttb.UseHistoryTable("RegistryEntryHistory", "dic");
+                                ttb
+                                    .HasPeriodStart("PeriodStart")
+                                    .HasColumnName("PeriodStart");
+                                ttb
+                                    .HasPeriodEnd("PeriodEnd")
+                                    .HasColumnName("PeriodEnd");
+                            }));
+                });
+
+            modelBuilder.Entity("Ecr.Domain.Entities.Dictionaries.RegistryEntryKey", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<bool>("IsLive")
+                        .HasColumnType("bit");
+
+                    b.Property<byte[]>("KeyHash")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("binary(32)")
+                        .IsFixedLength();
+
+                    b.Property<string>("KeyText")
+                        .IsRequired()
+                        .HasMaxLength(900)
+                        .HasColumnType("nvarchar(900)");
+
+                    b.Property<int>("RegistryEntryId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("RegistryKeyDefId")
+                        .HasColumnType("int");
+
+                    b.Property<DateOnly>("ValidFromKey")
+                        .HasColumnType("date");
+
+                    b.Property<DateOnly?>("ValidTo")
+                        .HasColumnType("date");
+
+                    b.HasKey("Id")
+                        .HasName("PK_RegistryEntryKey");
+
+                    b.HasIndex("RegistryKeyDefId", "KeyHash")
+                        .HasDatabaseName("IX_RegistryEntryKey_Hash");
+
+                    SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex("RegistryKeyDefId", "KeyHash"), new[] { "RegistryEntryId", "ValidFromKey", "ValidTo", "IsLive" });
+
+                    b.HasIndex("RegistryKeyDefId", "RegistryEntryId")
+                        .IsUnique()
+                        .HasDatabaseName("UQ_RegistryEntryKey_Entry");
+
+                    b.HasIndex("RegistryKeyDefId", "KeyHash", "ValidFromKey")
+                        .IsUnique()
+                        .HasDatabaseName("UX_RegistryEntryKey_Live")
+                        .HasFilter("[IsLive] = 1");
+
+                    b.ToTable("RegistryEntryKey", "dic");
                 });
 
             modelBuilder.Entity("Ecr.Domain.Entities.Dictionaries.RegistryEntryLink", b =>
@@ -1853,6 +2213,9 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                     b.Property<DateTime?>("LastSyncedAt")
                         .HasColumnType("datetime2(3)");
 
+                    b.Property<DateTime?>("MissingInSourceSince")
+                        .HasColumnType("datetime2(3)");
+
                     b.Property<int>("RegistryEntryId")
                         .HasColumnType("int");
 
@@ -1873,6 +2236,21 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .HasColumnType("bigint");
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<int?>("ChangedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("PeriodEnd")
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasPrecision(3)
+                        .HasColumnType("datetime2(3)")
+                        .HasColumnName("PeriodEnd");
+
+                    b.Property<DateTime>("PeriodStart")
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasPrecision(3)
+                        .HasColumnType("datetime2(3)")
+                        .HasColumnName("PeriodStart");
 
                     b.Property<int>("RegistryEntryId")
                         .HasColumnType("int");
@@ -1908,6 +2286,17 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .HasDatabaseName("UQ_RegistryValue");
 
                     b.ToTable("RegistryValue", "dic");
+
+                    b.ToTable(tb => tb.IsTemporal(ttb =>
+                            {
+                                ttb.UseHistoryTable("RegistryValueHistory", "dic");
+                                ttb
+                                    .HasPeriodStart("PeriodStart")
+                                    .HasColumnName("PeriodStart");
+                                ttb
+                                    .HasPeriodEnd("PeriodEnd")
+                                    .HasColumnName("PeriodEnd");
+                            }));
                 });
 
             modelBuilder.Entity("Ecr.Domain.Entities.Documents.CellValue", b =>
@@ -1959,6 +2348,14 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .HasColumnType("int");
 
                     b.HasKey("PeriodKeyValue", "TableRowId", "ColumnDefId");
+
+                    b.HasIndex("ValueRegistryEntryId")
+                        .HasDatabaseName("IX_CellValue_RegistryEntry")
+                        .HasFilter("[ValueRegistryEntryId] IS NOT NULL");
+
+                    b.HasIndex("ValueUnitId")
+                        .HasDatabaseName("IX_CellValue_Unit")
+                        .HasFilter("[ValueUnitId] IS NOT NULL");
 
                     b.HasIndex("PeriodKeyValue", "TableRowId", "ColumnDefId")
                         .HasDatabaseName("IX_CellValue_Fill")
@@ -2258,7 +2655,6 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .HasColumnType("int");
 
                     b.Property<byte>("CurrentPeriodMode")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("tinyint")
                         .HasDefaultValueSql("0", "DF_Project_CPMode");
 
@@ -2412,6 +2808,12 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .HasColumnType("bigint");
 
                     b.HasKey("PeriodKeyValue", "Id");
+
+                    b.HasIndex("PeriodKeyValue", "TableInstanceId")
+                        .HasDatabaseName("IX_TableRow_Live")
+                        .HasFilter("[IsDeleted] = 0");
+
+                    SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex("PeriodKeyValue", "TableInstanceId"), new[] { "RowKeyValue" });
 
                     b.HasIndex("PeriodKeyValue", "TableInstanceId", "RowKeyValue")
                         .IsUnique()
@@ -2589,6 +2991,11 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .HasColumnType("bit")
                         .HasDefaultValue(true);
 
+                    b.Property<bool>("IsStep")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false);
+
                     b.Property<string>("PendingSourceUnitCode")
                         .HasMaxLength(64)
                         .HasColumnType("nvarchar(64)");
@@ -2642,7 +3049,7 @@ namespace Ecr.Infrastructure.Persistence.Migrations
 
                             t.HasCheckConstraint("CK_EFM_Target", "(TargetKind = 0 AND TargetColumnDefId IS NOT NULL) OR (TargetKind = 1 AND TargetRegistryFieldDefId IS NOT NULL)");
 
-                            t.HasCheckConstraint("CK_EFM_Transform", "TransformCode IS NULL OR TransformCode IN (N'Sum', N'Avg', N'Min', N'Max', N'Last', N'First')");
+                            t.HasCheckConstraint("CK_EFM_Transform", "TransformCode IS NULL OR TransformCode IN (N'Sum', N'Avg', N'Min', N'Max', N'Last', N'First', N'TimeWeightedAvg', N'TimeIntegral')");
                         });
                 });
 
@@ -2817,6 +3224,218 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                     b.ToTable("RawDataPoint", "ext");
                 });
 
+            modelBuilder.Entity("Ecr.Domain.Entities.External.RowWindowMap", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("EndColumnDefId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true, "DF_RWM_Act");
+
+                    b.Property<bool>("IsStep")
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false, "DF_RWM_Step");
+
+                    b.Property<int?>("MaxGapSeconds")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("MinPercentGood")
+                        .HasPrecision(5, 2)
+                        .HasColumnType("decimal(5,2)")
+                        .HasDefaultValue(95m, "DF_RWM_MinGood");
+
+                    b.Property<int>("RefetchWithinDays")
+                        .HasColumnType("int")
+                        .HasDefaultValue(7, "DF_RWM_Refetch");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<int?>("SelectorColumnDefId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("StartColumnDefId")
+                        .HasColumnType("int");
+
+                    b.Property<byte>("Summary")
+                        .HasColumnType("tinyint");
+
+                    b.Property<int>("TableDefId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("TargetColumnDefId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("TargetUnitId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TableDefId", "TargetColumnDefId")
+                        .IsUnique()
+                        .HasDatabaseName("UQ_RowWindowMap_Target");
+
+                    b.ToTable("RowWindowMap", "ext", t =>
+                        {
+                            t.HasCheckConstraint("CK_RWM_Policy", "MinPercentGood BETWEEN 0 AND 100 AND RefetchWithinDays BETWEEN 0 AND 366 AND (MaxGapSeconds IS NULL OR MaxGapSeconds > 0)");
+
+                            t.HasCheckConstraint("CK_RWM_Summary", "Summary BETWEEN 0 AND 4");
+
+                            t.HasCheckConstraint("CK_RWM_Window", "StartColumnDefId <> EndColumnDefId");
+                        });
+                });
+
+            modelBuilder.Entity("Ecr.Domain.Entities.External.RowWindowSource", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("RowWindowMapId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("SelectorValue")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<int>("SourceEntityId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("SourceField")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<int>("SourceUnitId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("RowWindowMapId", "SelectorValue")
+                        .IsUnique()
+                        .HasDatabaseName("UQ_RowWindowSource");
+
+                    b.ToTable("RowWindowSource", "ext");
+                });
+
+            modelBuilder.Entity("Ecr.Domain.Entities.External.RowWindowValue", b =>
+                {
+                    b.Property<int>("PeriodKey")
+                        .HasColumnType("int");
+
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<int>("ColumnDefId")
+                        .HasColumnType("int");
+
+                    b.Property<byte>("ComputedBy")
+                        .HasColumnType("tinyint");
+
+                    b.Property<decimal?>("ConversionFactor")
+                        .HasPrecision(34, 16)
+                        .HasColumnType("decimal(34,16)");
+
+                    b.Property<string>("ErrorCode")
+                        .HasMaxLength(32)
+                        .IsUnicode(false)
+                        .HasColumnType("varchar(32)");
+
+                    b.Property<DateTime>("FromUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<bool>("IsCurrent")
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true, "DF_RWV_Current");
+
+                    b.Property<decimal?>("PercentGood")
+                        .HasPrecision(5, 2)
+                        .HasColumnType("decimal(5,2)");
+
+                    b.Property<int>("PointCount")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("RetrievedAt")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<string>("RowKey")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<int>("RowWindowMapId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("SourceEntityId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("SourceField")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("SourceUnitSymbol")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
+                    b.Property<byte>("Summary")
+                        .HasColumnType("tinyint");
+
+                    b.Property<long>("TableInstanceId")
+                        .HasColumnType("bigint");
+
+                    b.Property<int>("TargetUnitId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("ToUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<decimal?>("ValueSource")
+                        .HasPrecision(34, 16)
+                        .HasColumnType("decimal(34,16)");
+
+                    b.Property<decimal?>("ValueTarget")
+                        .HasPrecision(34, 16)
+                        .HasColumnType("decimal(34,16)");
+
+                    b.HasKey("PeriodKey", "Id")
+                        .HasName("PK_RowWindowValue");
+
+                    b.HasIndex("PeriodKey", "TableInstanceId", "RowKey", "ColumnDefId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_RowWindowValue_Current")
+                        .HasFilter("[IsCurrent] = 1");
+
+                    b.ToTable("RowWindowValue", "ext", t =>
+                        {
+                            t.HasCheckConstraint("CK_RWV_Kinds", "Summary BETWEEN 0 AND 4 AND ComputedBy BETWEEN 0 AND 1");
+
+                            t.HasCheckConstraint("CK_RWV_Numbers", "PointCount >= 0 AND (PercentGood IS NULL OR PercentGood BETWEEN 0 AND 100)");
+
+                            t.HasCheckConstraint("CK_RWV_Status", "Status IN (N'Fetched', N'Partial', N'NoData', N'KeptManual', N'SourceError', N'InvalidWindow', N'NotApplicable')");
+                        });
+                });
+
             modelBuilder.Entity("Ecr.Domain.Entities.External.SourceEntity", b =>
                 {
                     b.Property<int>("Id")
@@ -2846,6 +3465,9 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .HasColumnType("bit")
                         .HasDefaultValue(true);
 
+                    b.Property<byte>("OnMissingInSource")
+                        .HasColumnType("tinyint");
+
                     b.Property<int?>("RegistryDefId")
                         .HasColumnType("int");
 
@@ -2854,13 +3476,27 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .HasColumnType("tinyint")
                         .HasDefaultValue((byte)0);
 
+                    b.Property<string>("ValidFromAttribute")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("ValidToAttribute")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<bool>("ValidToInclusive")
+                        .HasColumnType("bit");
+
                     b.HasKey("Id");
 
                     b.HasIndex("DataSourceId", "Code")
                         .IsUnique()
                         .HasDatabaseName("UQ_SourceEntity");
 
-                    b.ToTable("SourceEntity", "ext");
+                    b.ToTable("SourceEntity", "ext", t =>
+                        {
+                            t.HasCheckConstraint("CK_SE_OnMissingInSource", "[OnMissingInSource] IN (0, 1, 2)");
+                        });
                 });
 
             modelBuilder.Entity("Ecr.Domain.Entities.Integration.ArchiveRun", b =>
@@ -2959,6 +3595,11 @@ namespace Ecr.Infrastructure.Persistence.Migrations
 
                     SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex(new[] { "CollectionRunId", "CoveredFrom" }, "IX_CollectionCoverage_CollectionRunId"), new[] { "CoveredTo" });
 
+                    b.HasIndex(new[] { "SourceEntityId", "CoveredTo" }, "IX_CollectionCoverage_SourceEntity_CoveredTo")
+                        .HasFilter("[Status] IS NULL");
+
+                    SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex(new[] { "SourceEntityId", "CoveredTo" }, "IX_CollectionCoverage_SourceEntity_CoveredTo"), new[] { "CoveredFrom" });
+
                     b.ToTable("CollectionCoverage", "itg");
                 });
 
@@ -3026,6 +3667,15 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                     b.Property<int?>("Attempt")
                         .HasColumnType("int");
 
+                    b.Property<DateTime?>("AvailableAt")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<DateTime?>("CancelRequestedAt")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<Guid?>("ClaimToken")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<string>("CorrelationId")
                         .HasMaxLength(64)
                         .HasColumnType("nvarchar(64)");
@@ -3052,19 +3702,37 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                     b.Property<DateTime?>("HeartbeatAt")
                         .HasColumnType("datetime2(3)");
 
+                    b.Property<string>("InstanceId")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
                     b.Property<string>("JobCode")
                         .IsRequired()
                         .HasMaxLength(64)
                         .HasColumnType("nvarchar(64)");
 
+                    b.Property<string>("Lane")
+                        .HasMaxLength(32)
+                        .IsUnicode(false)
+                        .HasColumnType("varchar(32)");
+
+                    b.Property<DateTime?>("LeaseUntil")
+                        .HasColumnType("datetime2(3)");
+
                     b.Property<string>("Message")
                         .HasMaxLength(400)
                         .HasColumnType("nvarchar(400)");
+
+                    b.Property<string>("Payload")
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<int>("Percent")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("int")
                         .HasDefaultValue(0);
+
+                    b.Property<int?>("ReclaimCount")
+                        .HasColumnType("int");
 
                     b.Property<DateTime>("StartedAt")
                         .HasColumnType("datetime2(3)");
@@ -3073,6 +3741,10 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasMaxLength(32)
                         .HasColumnType("nvarchar(32)");
+
+                    b.Property<string>("TargetKey")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
 
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("datetime2(3)");
@@ -3083,7 +3755,28 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                     b.HasIndex("State", "HeartbeatAt")
                         .HasDatabaseName("IX_JobProgress_Stale");
 
-                    b.ToTable("JobProgress", "itg");
+                    b.HasIndex(new[] { "Lane", "State", "AvailableAt" }, "IX_JobProgress_Claim")
+                        .HasFilter("[Lane] IS NOT NULL AND [State] IN ('Queued', 'Running')");
+
+                    SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex(new[] { "Lane", "State", "AvailableAt" }, "IX_JobProgress_Claim"), new[] { "TargetKey", "LeaseUntil", "Attempt", "ReclaimCount" });
+
+                    b.HasIndex(new[] { "CreatedByUserId", "UpdatedAt" }, "IX_JobProgress_CreatedBy_UpdatedAt")
+                        .IsDescending(false, true);
+
+                    SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex(new[] { "CreatedByUserId", "UpdatedAt" }, "IX_JobProgress_CreatedBy_UpdatedAt"), new[] { "State", "JobCode" });
+
+                    b.HasIndex(new[] { "TargetKey" }, "UX_JobProgress_Target_Queued")
+                        .IsUnique()
+                        .HasFilter("[State] = 'Queued' AND [TargetKey] IS NOT NULL");
+
+                    b.HasIndex(new[] { "TargetKey" }, "UX_JobProgress_Target_Running")
+                        .IsUnique()
+                        .HasFilter("[State] = 'Running' AND [TargetKey] IS NOT NULL");
+
+                    b.ToTable("JobProgress", "itg", t =>
+                        {
+                            t.HasCheckConstraint("CK_JobProgress_QueueShape", "[Lane] IS NULL OR [AvailableAt] IS NOT NULL");
+                        });
                 });
 
             modelBuilder.Entity("Ecr.Domain.Entities.Integration.MaintenanceRun", b =>
@@ -4542,6 +5235,29 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .HasConstraintName("FK_MV_Methodology");
                 });
 
+            modelBuilder.Entity("Ecr.Domain.Entities.Calculations.RecalculationApproval", b =>
+                {
+                    b.HasOne("Ecr.Domain.Entities.Security.User", null)
+                        .WithMany()
+                        .HasForeignKey("ConfirmedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_RecalcApproval_ConfirmedBy");
+
+                    b.HasOne("Ecr.Domain.Entities.Documents.Project", null)
+                        .WithMany()
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_RecalcApproval_Project");
+
+                    b.HasOne("Ecr.Domain.Entities.Security.User", null)
+                        .WithMany()
+                        .HasForeignKey("RequestedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_RecalcApproval_RequestedBy");
+                });
+
             modelBuilder.Entity("Ecr.Domain.Entities.Configuration.CalculationBinding", b =>
                 {
                     b.HasOne("Ecr.Domain.Entities.Configuration.ColumnDef", null)
@@ -4573,6 +5289,12 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("FK_ColumnDef_Table");
+
+                    b.HasOne("Ecr.Domain.Entities.Units.Unit", null)
+                        .WithMany()
+                        .HasForeignKey("UnitId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_ColumnDef_Unit");
                 });
 
             modelBuilder.Entity("Ecr.Domain.Entities.Configuration.FormulaDef", b =>
@@ -4656,6 +5378,49 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("FK_RegField_Registry");
+
+                    b.HasOne("Ecr.Domain.Entities.Units.Unit", null)
+                        .WithMany()
+                        .HasForeignKey("UnitId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_RegField_Unit");
+                });
+
+            modelBuilder.Entity("Ecr.Domain.Entities.Configuration.RegistryImportProfile", b =>
+                {
+                    b.HasOne("Ecr.Domain.Entities.Configuration.RegistryDef", null)
+                        .WithMany()
+                        .HasForeignKey("RegistryDefId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_RegImpProfile_Def");
+                });
+
+            modelBuilder.Entity("Ecr.Domain.Entities.Configuration.RegistryKeyDef", b =>
+                {
+                    b.HasOne("Ecr.Domain.Entities.Configuration.RegistryDef", null)
+                        .WithMany()
+                        .HasForeignKey("RegistryDefId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_RegKey_Def");
+                });
+
+            modelBuilder.Entity("Ecr.Domain.Entities.Configuration.RegistryKeyField", b =>
+                {
+                    b.HasOne("Ecr.Domain.Entities.Configuration.RegistryFieldDef", null)
+                        .WithMany()
+                        .HasForeignKey("RegistryFieldDefId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_RegKeyField_Field");
+
+                    b.HasOne("Ecr.Domain.Entities.Configuration.RegistryKeyDef", null)
+                        .WithMany("Fields")
+                        .HasForeignKey("RegistryKeyDefId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_RegKeyField_Key");
                 });
 
             modelBuilder.Entity("Ecr.Domain.Entities.Configuration.RegistryRuleDef", b =>
@@ -4666,6 +5431,16 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("FK_RegRule_Registry");
+                });
+
+            modelBuilder.Entity("Ecr.Domain.Entities.Configuration.RegistryUse", b =>
+                {
+                    b.HasOne("Ecr.Domain.Entities.Configuration.RegistryDef", null)
+                        .WithMany()
+                        .HasForeignKey("RegistryDefId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_RegUse_Def");
                 });
 
             modelBuilder.Entity("Ecr.Domain.Entities.Configuration.RowDef", b =>
@@ -4780,6 +5555,25 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("FK_RegEntry_Def");
+                });
+
+            modelBuilder.Entity("Ecr.Domain.Entities.Dictionaries.RegistryEntryKey", b =>
+                {
+                    b.HasOne("Ecr.Domain.Entities.Dictionaries.RegistryEntry", "Entry")
+                        .WithMany()
+                        .HasForeignKey("RegistryEntryId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_RegEntryKey_Entry");
+
+                    b.HasOne("Ecr.Domain.Entities.Configuration.RegistryKeyDef", null)
+                        .WithMany()
+                        .HasForeignKey("RegistryKeyDefId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_RegEntryKey_Key");
+
+                    b.Navigation("Entry");
                 });
 
             modelBuilder.Entity("Ecr.Domain.Entities.Dictionaries.RegistryEntryLink", b =>
@@ -5109,6 +5903,109 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .HasConstraintName("FK_RDP_Unit");
                 });
 
+            modelBuilder.Entity("Ecr.Domain.Entities.External.RowWindowMap", b =>
+                {
+                    b.HasOne("Ecr.Domain.Entities.Configuration.TableDef", null)
+                        .WithMany()
+                        .HasForeignKey("TableDefId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_RWM_Table");
+
+                    b.HasOne("Ecr.Domain.Entities.Units.Unit", null)
+                        .WithMany()
+                        .HasForeignKey("TargetUnitId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_RWM_Unit");
+
+                    b.HasOne("Ecr.Domain.Entities.Configuration.ColumnDef", null)
+                        .WithMany()
+                        .HasForeignKey("TableDefId", "EndColumnDefId")
+                        .HasPrincipalKey("TableDefId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_RWM_End");
+
+                    b.HasOne("Ecr.Domain.Entities.Configuration.ColumnDef", null)
+                        .WithMany()
+                        .HasForeignKey("TableDefId", "SelectorColumnDefId")
+                        .HasPrincipalKey("TableDefId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_RWM_Selector");
+
+                    b.HasOne("Ecr.Domain.Entities.Configuration.ColumnDef", null)
+                        .WithMany()
+                        .HasForeignKey("TableDefId", "StartColumnDefId")
+                        .HasPrincipalKey("TableDefId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_RWM_Start");
+
+                    b.HasOne("Ecr.Domain.Entities.Configuration.ColumnDef", null)
+                        .WithMany()
+                        .HasForeignKey("TableDefId", "TargetColumnDefId")
+                        .HasPrincipalKey("TableDefId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_RWM_Target");
+                });
+
+            modelBuilder.Entity("Ecr.Domain.Entities.External.RowWindowSource", b =>
+                {
+                    b.HasOne("Ecr.Domain.Entities.External.RowWindowMap", null)
+                        .WithMany("Sources")
+                        .HasForeignKey("RowWindowMapId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_RWS_Map");
+
+                    b.HasOne("Ecr.Domain.Entities.External.SourceEntity", null)
+                        .WithMany()
+                        .HasForeignKey("SourceEntityId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_RWS_Entity");
+
+                    b.HasOne("Ecr.Domain.Entities.Units.Unit", null)
+                        .WithMany()
+                        .HasForeignKey("SourceUnitId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_RWS_Unit");
+                });
+
+            modelBuilder.Entity("Ecr.Domain.Entities.External.RowWindowValue", b =>
+                {
+                    b.HasOne("Ecr.Domain.Entities.Configuration.ColumnDef", null)
+                        .WithMany()
+                        .HasForeignKey("ColumnDefId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_RWV_Column");
+
+                    b.HasOne("Ecr.Domain.Entities.External.RowWindowMap", null)
+                        .WithMany()
+                        .HasForeignKey("RowWindowMapId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_RWV_Map");
+
+                    b.HasOne("Ecr.Domain.Entities.External.SourceEntity", null)
+                        .WithMany()
+                        .HasForeignKey("SourceEntityId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_RWV_Entity");
+
+                    b.HasOne("Ecr.Domain.Entities.Units.Unit", null)
+                        .WithMany()
+                        .HasForeignKey("TargetUnitId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_RWV_Unit");
+                });
+
             modelBuilder.Entity("Ecr.Domain.Entities.External.SourceEntity", b =>
                 {
                     b.HasOne("Ecr.Domain.Entities.External.DataSource", null)
@@ -5415,6 +6312,11 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                     b.Navigation("Fields");
                 });
 
+            modelBuilder.Entity("Ecr.Domain.Entities.Configuration.RegistryKeyDef", b =>
+                {
+                    b.Navigation("Fields");
+                });
+
             modelBuilder.Entity("Ecr.Domain.Entities.Configuration.SheetDef", b =>
                 {
                     b.Navigation("Tables");
@@ -5451,6 +6353,11 @@ namespace Ecr.Infrastructure.Persistence.Migrations
             modelBuilder.Entity("Ecr.Domain.Entities.Documents.Project", b =>
                 {
                     b.Navigation("Periods");
+                });
+
+            modelBuilder.Entity("Ecr.Domain.Entities.External.RowWindowMap", b =>
+                {
+                    b.Navigation("Sources");
                 });
 
             modelBuilder.Entity("Ecr.Domain.Entities.Workflow.ApprovalRoute", b =>

@@ -6,6 +6,7 @@ using Ecr.Application.Ports;
 using Ecr.Application.Registries.Dto;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Configuration;
+using Ecr.Domain.Entities.Dictionaries;
 using Ecr.Domain.Enums;
 
 namespace Ecr.Application.Registries;
@@ -305,8 +306,13 @@ public sealed class DeleteRegistryEntryHandler(
     IAuditWriter audit,
     Security.IAccessDecisionService access,
     ICurrentUser currentUser,
-    IClock clock)
+    IClock clock,
+    Keys.RegistryKeyService? keys = null)
 {
+    // ⚠ `keys` необов'язковий лише для тестів, що будують обробник руками (як в
+    // `UpsertRegistryEntryHandler`); контейнер підставляє `RegistryKeyService` завжди. Що
+    // видалення звільняє ключ на справжньому шляху, тримає `RegistryKeyLifecycleHttpTests`.
+
     /// <summary>Право на зміну даних довідника (`02-contracts.md` §9).</summary>
     public const string Permission = "Registry.EditData";
 
@@ -379,21 +385,56 @@ public sealed class DeleteRegistryEntryHandler(
                 });
         }
 
-        var references = await registries.CountReferencesAsync(registryEntryId, ct).ConfigureAwait(false);
-        if (references > 0)
+        // ⛔ D-211: запис External-довідника вручну не видаляється — master AF.
+        ExternalRegistryGuard.EnsureManualEditAllowed(definition);
+
+        // ⛔ RT-12 (ФВ-8.16, D-155): частини композиції з `Cascade` видаляються разом із батьком —
+        // на всю глибину (потік → кейс → рядки складу). Частина з `Restrict` у набір не входить і
+        // лишається посиланням ззовні — наявна відмова 409 `entryReferenced` нижче.
+        var parts = await CascadePartsAsync(entry, ct).ConfigureAwait(false);
+
+        // ⛔ D-211 + RT-12: каскад у External-довідник — та сама ручна правка його записів, лише
+        // обхідним шляхом через батька. Опис кожного зачепленого довідника читається тут, до
+        // перевірки посилань, і нижче лише отримує нову ревізію.
+        var partRegistries = new List<RegistryDef>();
+        foreach (var partRegistryId in parts.Select(p => p.RegistryDefId).Distinct().Where(id => id != definition.Id))
         {
+            if (await registries.FindDefinitionByIdAsync(partRegistryId, ct).ConfigureAwait(false) is { } partRegistry)
+            {
+                ExternalRegistryGuard.EnsureManualEditAllowed(partRegistry);
+                partRegistries.Add(partRegistry);
+            }
+        }
+
+        // ⚠ Без частин — рівно наявний підрахунок; з частинами — посилання ЗЗОВНІ набору: частина
+        // посилається на батька полем композиції, а її видалення ще не збережено, тож запит до бази
+        // побачив би її живою й не дав би видалити жодного батька з частинами.
+        var references = parts.Count == 0
+            ? await registries.CountReferencesAsync(registryEntryId, ct).ConfigureAwait(false)
+            : await registries
+                .CountReferencesFromOutsideAsync([registryEntryId, .. parts.Select(p => p.Id)], ct)
+                .ConfigureAwait(false);
+        if (references.Total > 0)
+        {
+            // ⛔ V-08: відмова несе не лише загальне число, а й розклад за
+            // видами — «на запис посилаються 3 константи методології» людина
+            // може піти й виправити, «3 посилання» — ні.
+            var byKind = references.ByKind();
+
             throw new BusinessRuleException(
                 "ECR-REG-0409",
-                $"Запис «{entry.Code}» не видаляється: на нього посилаються комірок — {references}. "
+                $"Запис «{entry.Code}» не видаляється: на нього посилаються — {references.Total} "
+                + $"({string.Join(", ", byKind.Select(k => $"{k.Key}: {k.Value}"))}). "
                 + "Закрийте його датою — історія лишиться читабельною, а в нових періодах він не пропонуватиметься.",
                 new Dictionary<string, object?>
                 {
                     // Сирі числа лишаються для клієнта; резолвер підставляє лише рядки.
                     ["messageKey"] = "err.ECR-REG-0409.entryReferenced",
                     ["code"] = entry.Code,
-                    ["referenceCount"] = references.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["referenceCount"] = references.Total.ToString(System.Globalization.CultureInfo.InvariantCulture),
                     ["registryEntryId"] = registryEntryId,
-                    ["references"] = references,
+                    ["references"] = references.Total,
+                    ["referenceKinds"] = byKind,
                 });
         }
 
@@ -403,6 +444,18 @@ public sealed class DeleteRegistryEntryHandler(
         // Повторне читання тут було б другим запитом за тим самим рядком — і,
         // що гірше, другою правдою про те, який саме довідник змінюється.
         definition.BumpDataRevision();
+
+        // Частини: логічне видалення й ревізія КОЖНОГО зачепленого довідника — інакше кеш
+        // переліку складу (ключ — ревізія довідника) віддавав би видалені рядки.
+        foreach (var part in parts)
+        {
+            part.SoftDelete(userId, clock.UtcNow);
+        }
+
+        foreach (var partRegistry in partRegistries)
+        {
+            partRegistry.BumpDataRevision();
+        }
 
         // ⛔ Слід у журналі структурних змін — як у сусідньої дії над тим самим
         // записом (`SetEntryValidityHandler`, `Operation = "SetValidity"`). Без
@@ -416,8 +469,26 @@ public sealed class DeleteRegistryEntryHandler(
         // ними лишає журнал і довідник у різних станах.
         await uow.ExecuteInTransactionAsync(async innerCt =>
         {
+            // ⛔ RT-10b: видалений запис ключ не тримає (`IsLive = 0`). Без цього рядок ключа
+            // лишався живим, і новий запис із тим самим ключем отримував 409 від запису,
+            // якого вже немає.
+            if (keys is not null)
+            {
+                await keys.ReleaseAsync(entry, innerCt).ConfigureAwait(false);
+
+                // ⛔ RT-12: частини звільняють свої ключі в тій самій транзакції (ФВ-8.16) —
+                // інакше новий рядок складу з тим самим ключем отримав би 409 від видаленого.
+                foreach (var part in parts)
+                {
+                    await keys.ReleaseAsync(part, innerCt).ConfigureAwait(false);
+                }
+            }
+
             await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
 
+            // ⚠ Один запис журналу на дію людини, як і досі; частини — переліком у ньому ж.
+            var codesByRegistry = partRegistries.ToDictionary(r => r.Id, r => r.Code);
+            codesByRegistry[definition.Id] = definition.Code;
             await audit.WriteStructureChangeAsync(
                 new StructureChangeRecord(
                     ChangedAt: clock.UtcNow,
@@ -426,13 +497,68 @@ public sealed class DeleteRegistryEntryHandler(
                     EntityId: checked((int)registryEntryId),
                     ChangeClass: ChangeClass.Breaking,
                     Operation: "Delete",
-                    OldJson: JsonSerializer.Serialize(
-                        new { registry = definition.Code, code = entry.Code }),
+                    OldJson: parts.Count == 0
+                        ? JsonSerializer.Serialize(new { registry = definition.Code, code = entry.Code })
+                        : JsonSerializer.Serialize(new
+                        {
+                            registry = definition.Code,
+                            code = entry.Code,
+                            cascade = parts.Select(p => new
+                            {
+                                registry = codesByRegistry.GetValueOrDefault(p.RegistryDefId),
+                                code = p.Code,
+                            }),
+                        }),
                     NewJson: null,
-                    ChangeReason: $"Записів довідника «{definition.Code}» прибрано: 1.",
+                    ChangeReason: parts.Count == 0
+                        ? $"Записів довідника «{definition.Code}» прибрано: 1."
+                        : $"Записів довідника «{definition.Code}» прибрано: 1, разом із частинами композиції: {parts.Count}.",
                     ChangedByUserId: userId,
                     CorrelationId: currentUser.CorrelationId),
                 innerCt).ConfigureAwait(false);
         }, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Частини композиції з <c>Cascade</c>, що видаляються разом із записом, — на всю глибину
+    /// (RT-12, FEATURE-REGISTRY-TABLES §4.8).
+    /// </summary>
+    /// <param name="root">Запис, який видаляють.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Відстежувані частини всіх рівнів, без <paramref name="root"/>.</returns>
+    /// <remarks>
+    /// ⚠ Обхід рівнями: один запит на рівень, а не на запис. Частина з <c>Restrict</c> сюди не
+    /// потрапляє і далі вниз не розгортається: вона лишається посиланням ззовні набору, і
+    /// видалення відмовляє як для будь-якого іншого посилання.
+    ///
+    /// ⚠ Уже бачений запис удруге не береться: цикл композицій забороняє опис, але дані могли
+    /// прийти повз нього — тоді обхід зупиняється, а не крутиться.
+    /// </remarks>
+    private async Task<IReadOnlyList<RegistryEntry>> CascadePartsAsync(RegistryEntry root, CancellationToken ct)
+    {
+        var seen = new HashSet<long> { root.Id };
+        var parts = new List<RegistryEntry>();
+        List<long> level = [root.Id];
+
+        while (level.Count > 0)
+        {
+            var children = await registries.ListCompositionChildrenAsync(level, ct).ConfigureAwait(false);
+
+            var next = new List<long>();
+            foreach (var child in children)
+            {
+                if (child.OnParentDelete != ParentDeletePolicy.Cascade || !seen.Add(child.Entry.Id))
+                {
+                    continue;
+                }
+
+                parts.Add(child.Entry);
+                next.Add(child.Entry.Id);
+            }
+
+            level = next;
+        }
+
+        return parts;
     }
 }

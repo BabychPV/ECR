@@ -29,7 +29,8 @@ public sealed class CollectionJob(
     IBackgroundJobScheduler jobs,
     IClock clock,
     INotificationOutbox outbox,
-    Integration.OutboxDispatcher dispatcher) : ICollectionJob
+    Integration.OutboxDispatcher dispatcher,
+    IRegistrySyncJob registrySync) : ICollectionJob
 {
     /// <summary>Код задачі в черзі.</summary>
     public static string Code => "collection";
@@ -43,6 +44,25 @@ public sealed class CollectionJob(
         var schedule = await ScheduleAsync(request.SourceEntityId, ct).ConfigureAwait(false);
 
         var now = clock.UtcNow;
+
+        // ⛔ Сутність, прив'язана до довідника, — не часовий ряд (ФВ-8.11, S5):
+        // її атрибути — поточні значення полів записів, і збирати їх у
+        // ext.RawDataPoint з матеріалізацією в комірки означало б записати
+        // довідник у документи. Той самий розклад і та сама кнопка «Зібрати»
+        // ведуть у синк довідника замість збору.
+        if (await IsRegistryBoundAsync(request.SourceEntityId, ct).ConfigureAwait(false))
+        {
+            await registrySync.ExecuteAsync(request.SourceEntityId, ct).ConfigureAwait(false);
+
+            if (schedule is not null)
+            {
+                // Прогін фіксується, watermark — ні: у синку довідника немає
+                // «зібраного до» моменту.
+                await SaveRunAsync(db, schedule, now, watermark: null, ct).ConfigureAwait(false);
+            }
+
+            return;
+        }
         var to = request.ToUtc ?? now;
 
         // ⚠ Початок береться з LookbackDays, а НЕ з Watermark. Watermark —
@@ -168,62 +188,39 @@ public sealed class CollectionJob(
     private async Task EnqueueMaterializationAsync(
         int sourceEntityId, DateTime from, DateTime to, CancellationToken ct)
     {
-        // ⚠ Мапінги без `TargetRowKey` не матеріалізуються — і це легальний
-        // стан (`D-118`): тег може збиратися для звірки, а не для форми.
-        var columnIds = await db.EntityFieldMaps
-            .AsNoTracking()
-            .Where(m => m.SourceEntityId == sourceEntityId
-                        && m.IsActive
-                        && m.TargetRowKey != null
-                        && m.TargetColumnDefId != null)
-            .Select(m => m.TargetColumnDefId!.Value)
-            .Distinct()
-            .ToListAsync(ct)
-            .ConfigureAwait(false);
-
-        if (columnIds.Count == 0)
-        {
-            return;
-        }
-
-        // Таблиці, яких стосуються ці колонки, і живі екземпляри цих таблиць.
-        var tableDefIds = await db.ColumnDefs
-            .AsNoTracking()
-            .Where(c => columnIds.Contains(c.Id))
-            .Select(c => c.TableDefId)
-            .Distinct()
-            .ToListAsync(ct)
-            .ConfigureAwait(false);
-
-        var targets = await db.TableInstances
-            .AsNoTracking()
-            .Where(t => tableDefIds.Contains(t.TableDefId))
-            .Join(db.Documents, t => t.DocumentId, d => d.Id, (t, d) => new
-            {
-                t.Id,
-                t.DocumentId,
-                t.PeriodKeyValue,
-                d.ProjectId,
-            })
-            .Take(MaxMaterializationTargets)
-            .ToListAsync(ct)
-            .ConfigureAwait(false);
-
-        foreach (var target in targets)
-        {
-            await jobs
-                .EnqueueAsync<IMaterializeCollectedDataJob>(
-                    new MaterializeTask(
-                        sourceEntityId,
-                        target.ProjectId,
-                        target.DocumentId,
-                        target.Id,
-                        target.PeriodKeyValue,
-                        from,
-                        to),
+        // ⛔ D16-03: задача — лише в екземпляри, чий ПЕРІОД перетинає вікно
+        // збору. Раніше її отримував кожен екземпляр усіх періодів, і всі вони
+        // згортали одне вікно — одне й те саме число в січень і лютий, а
+        // `Scheduled`-періоди щопрогону писали хибне «пізній збір лишається
+        // сирим». За станом НЕ фільтруємо: закритий період, що перетинає вікно,
+        // і далі має отримати `SkippedPeriodClosed`.
+        //
+        // ⚠ Точна межа — у поясі проєкту (`Period.UtcBounds`), тож у запиті лише
+        // грубий фільтр за датами з запасом у добу в обидва боки (пояс ≤ ±14 год),
+        // а точний — у пам'яті.
+        //
+        // ⛔ Період, що ВІДКРИВСЯ поза вікном, тут НЕ добирається (була гілка
+        // `StateChangedAt >= LastRunAt`, 8d1929e1). Задачу йому ставить сам
+        // перехід — `IMaterializationScheduler` після коміту `PeriodStateJob` і
+        // активації проєкту; друга постановка звідси давала б дубль на кожне
+        // відкриття, а за вимкненого розкладу не спрацювала б узагалі. Тут
+        // лишається постановка за перетином вікна — для точок, зібраних уже
+        // під час `Open`.
+        var targets = (await MaterializationTargets
+                .FindAsync(
+                    db,
+                    sourceEntityId,
+                    projectId: null,
+                    periodKeys: null,
+                    periodEndNotBefore: DateOnly.FromDateTime(from).AddDays(-1),
+                    periodStartNotAfter: DateOnly.FromDateTime(to).AddDays(1),
+                    MaxMaterializationTargets,
                     ct)
-                .ConfigureAwait(false);
-        }
+                .ConfigureAwait(false))
+            .Where(t => t.UtcBounds().Overlaps(from, to))
+            .ToList();
+
+        await MaterializationTargets.EnqueueAsync(jobs, targets, (from, to), ct).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -274,6 +271,12 @@ public sealed class CollectionJob(
             await db.SaveChangesAsync(ct).ConfigureAwait(false);
         }
     }
+
+    /// <summary>Сутність наповнює довідник (<c>ext.SourceEntity.RegistryDefId</c>).</summary>
+    private Task<bool> IsRegistryBoundAsync(int sourceEntityId, CancellationToken ct)
+        => db.SourceEntities
+            .AsNoTracking()
+            .AnyAsync(e => e.Id == sourceEntityId && e.RegistryDefId != null, ct);
 
     /// <summary>Розклад сутності; <c>null</c> — збір запустили руками.</summary>
     private Task<Domain.Entities.External.CollectionSchedule?> ScheduleAsync(

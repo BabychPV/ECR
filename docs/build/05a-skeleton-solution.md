@@ -601,6 +601,13 @@ NOT IN SCOPE: політика паролів, offsets періодів, рол�
 }
 ```
 
+✎ 2026-09-29 (`U17`): секція `Telemetry` вище — стан скелета, де
+~~`Telemetry:*` зарезервовано, експортера немає~~. Чинний вигляд у
+`src/Ecr.Api/appsettings.json`: `Enabled` (`false` — експорт вимкнено, нуль
+реєстрацій OpenTelemetry), `ServiceName`, `OtlpEndpoint` (обов'язковий за
+`Enabled=true`), `OtlpProtocol` (`Grpc`|`HttpProtobuf`), `ExportIntervalSeconds`
+(60, мін. 5). Реєстрація — `src/Ecr.Api/Observability/TelemetrySetup.cs`.
+
 ---
 
 ### `src/Ecr.Api/appsettings.Development.json`

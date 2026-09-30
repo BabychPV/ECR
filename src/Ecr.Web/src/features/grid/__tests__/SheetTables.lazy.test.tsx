@@ -185,6 +185,23 @@ describe('SheetTables монтує сітки за прокруткою', () => 
     expect(probe.observed()).toHaveLength(TablesPerSheet);
   });
 
+  /**
+   * ⛔ `X-39`: живцем — ~90 однакових мерехтливих смуг без жодного слова, що
+   * читалися як «сторінка зависла». Заглушка каже, що станеться, і не
+   * мерехтить: чекати там нема на що, доки таблицю не прогорнули.
+   */
+  it('кожна ще не змонтована таблиця каже, що завантажиться при прокрутці, і не мерехтить', () => {
+    renderSheet();
+
+    const placeholders = screen.getAllByTestId('lazy-table-placeholder');
+    expect(placeholders).toHaveLength(TablesPerSheet);
+
+    for (const placeholder of placeholders) {
+      expect(placeholder.textContent).toContain('grid.tableLoadsOnScroll');
+      expect(placeholder.querySelector('[data-animate="true"]')).toBeNull();
+    }
+  });
+
   it('кожен слот тримає висоту сітки — інакше всі 91 були б видні одразу', () => {
     renderSheet();
 

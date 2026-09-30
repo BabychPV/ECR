@@ -1,5 +1,6 @@
 using Ecr.Application.Documents;
 using Ecr.Application.Ports;
+using Ecr.Application.Security;
 
 namespace Ecr.Infrastructure.Jobs;
 
@@ -21,7 +22,8 @@ namespace Ecr.Infrastructure.Jobs;
 /// </para>
 /// </remarks>
 public sealed class ExcelExportJob(
-    IExcelExporter exporter, DocumentDataExporter data, IExportStore exports) : IExcelExportJob
+    IExcelExporter exporter, DocumentDataExporter data, IExportStore exports, IAccessDecisionService access)
+    : IExcelExportJob
 {
     /// <summary>Код задачі в черзі.</summary>
     public static string Code => "excel-export";
@@ -43,13 +45,24 @@ public sealed class ExcelExportJob(
 
         var task = ExportPayload.Parse(payload);
 
+        // ⛔ S6: файл кладеться під замовником, і завантажує його лише він.
+        // Завдання без замовника (поставлене до цієї правки) не будує нічого:
+        // файл без власника не віддав би ніхто, а будувати його — марна робота.
+        var ownerUserId = task.RequestedByUserId
+                          ?? throw new Ecr.Application.Errors.AccessDeniedException(
+                              "ECR-AUTH-0401",
+                              "Завдання експорту не називає замовника: побудуйте експорт заново.",
+                              new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.signInRequired" });
+
         await progress.ReportKeyAsync(10, "jobs.exportReadingDocument", ct).ConfigureAwait(false);
+
+        var options = await WithReadScopeAsync(task, ownerUserId, ct).ConfigureAwait(false);
 
         byte[] content;
         if (task.Format is null or DocumentExportFormat.Xlsx)
         {
             await using var book = await exporter
-                .ExportAsync(task.DocumentId, task.Options, ct)
+                .ExportAsync(task.DocumentId, options, ct)
                 .ConfigureAwait(false);
 
             using var buffer = new MemoryStream();
@@ -59,14 +72,16 @@ public sealed class ExcelExportJob(
         else
         {
             content = await data
-                .ExportAsync(task.DocumentId, task.Options.PeriodKey, task.Format, task.Options.IncludeFormulas, ct)
+                .ExportAsync(
+                    task.DocumentId, options.PeriodKey, task.Format, options.IncludeFormulas,
+                    options.HiddenTableDefIds, options.HiddenColumnDefIds, ct)
                 .ConfigureAwait(false);
         }
 
         await progress.ReportKeyAsync(80, "jobs.exportSavingWorkbook", ct).ConfigureAwait(false);
 
         await exports
-            .SaveAsync(task.ExportId, task.DocumentId, content, Lifetime, ct)
+            .SaveAsync(task.ExportId, task.DocumentId, ownerUserId, content, Lifetime, ct)
             .ConfigureAwait(false);
 
         // ⚠ Q-326: НЕ конвертується на структурований ключ. Ключ
@@ -75,6 +90,37 @@ public sealed class ExcelExportJob(
         // а не текст для людини, і `JobProgressMessageResolver` пропускає
         // будь-який рядок, що не є JSON-конвертом, без змін.
         await progress.ReportAsync(100, task.ExportId, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Режим експорту з межами читання: ті, що приїхали в завданні, або — коли
+    /// їх немає — пораховані тут від імені замовника.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ S6, закрито за замовчуванням. <c>null</c> у межах — це завдання, що
+    /// не несе їх (поставлене до S6 або викликачем, який їх не порахував), а
+    /// не «заборон немає». Раніше такий експорт ішов без фільтра, тобто
+    /// віддавав заборонені таблиці й колонки. Тепер межі рахуються на момент
+    /// виконання тим самим <see cref="IAccessDecisionService.ReadScopeAsync"/>,
+    /// що й у <c>ExportDocumentHandler</c>, для профілю замовника.
+    /// Порожній список (заборон справді немає) — не <c>null</c> і не
+    /// перераховується.
+    /// </remarks>
+    private async Task<ExcelExportOptions> WithReadScopeAsync(ExcelExportTask task, int ownerUserId, CancellationToken ct)
+    {
+        if (task.Options.HiddenTableDefIds is not null && task.Options.HiddenColumnDefIds is not null)
+        {
+            return task.Options;
+        }
+
+        var profile = await access.BuildProfileAsync(ownerUserId, ct).ConfigureAwait(false);
+        var readable = await access.ReadScopeAsync(profile, task.DocumentId, ct).ConfigureAwait(false);
+
+        return task.Options with
+        {
+            HiddenTableDefIds = readable.HiddenTableIds(),
+            HiddenColumnDefIds = readable.HiddenColumnIds(),
+        };
     }
 }
 

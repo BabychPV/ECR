@@ -39,7 +39,7 @@ public sealed class GetDocumentTablesHandler(
         long documentId, int periodKey, CancellationToken ct)
     {
         var profile = await PermissionCheck
-            .RequireAsync(access, currentUser, Permission, ct)
+            .RequireInAnyProjectAsync(access, currentUser, Permission, ct)
             .ConfigureAwait(false);
 
         // ⛔ І ГРАНТ на проєкт (Q-172, аудит фази 2). Право саме по собі каже
@@ -48,18 +48,9 @@ public sealed class GetDocumentTablesHandler(
         // перевірки будь-хто із загальним `Document.View` міг перелічити
         // `tableInstanceId` чужого документа (і зробити це для документа, що
         // ще не відкривали, — власним записом).
-        var read = await access.CanReadDocumentAsync(profile, documentId, ct).ConfigureAwait(false);
-        if (!read.IsAllowed)
-        {
-            throw new Errors.AccessDeniedException(
-                "ECR-AUTH-0403", $"Немає доступу до документа {documentId}: {read.Reason}.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-AUTH-0403.noDocumentAccess",
-                    ["documentId"] = documentId.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                    ["reason"] = read.Reason.ToString(),
-                });
-        }
+        // ⛔ B-08: невидимий документ — 404, як і `GET /documents/{id}`, а не 403
+        // «NoGrant»: різниця відповідей сама розкривала б, що документ існує.
+        await DocumentVisibility.RequireVisibleAsync(access, profile, documentId, Permission, ct).ConfigureAwait(false);
 
         var key = PeriodKey.Parse(periodKey);
 
@@ -90,12 +81,17 @@ public sealed class GetDocumentTablesHandler(
             .GetAsync(instances[0].TemplateVersionId, ct)
             .ConfigureAwait(false);
 
+        // ⛔ S6 (ФВ-6.6): таблиця під забороною (своєю чи аркуша) не з'являється
+        // в переліку — ні назвою, ні кодом, ні `tableInstanceId`. Зріз на неї
+        // однаково дав би 404, а назва в навігації сама розповідала б про неї.
+        var readable = (await access.ReadScopeAsync(profile, documentId, ct).ConfigureAwait(false)).InPeriod(key);
+
         var byTableDef = instances.ToDictionary(i => i.TableDefId);
         var result = new List<DocumentTableDto>(instances.Count);
 
         foreach (var sheet in snapshot.Sheets.Where(s => !s.IsDeleted).OrderBy(s => s.Ordinal))
         {
-            foreach (var table in sheet.Tables.Where(t => !t.IsDeleted).OrderBy(t => t.Ordinal))
+            foreach (var table in sheet.Tables.Where(t => !t.IsDeleted && readable.CanReadTable(t.Id)).OrderBy(t => t.Ordinal))
             {
                 if (!byTableDef.TryGetValue(table.Id, out var instance))
                 {

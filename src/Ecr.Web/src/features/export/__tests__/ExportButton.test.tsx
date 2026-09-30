@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -34,6 +35,7 @@ interface JobBody {
   percent: number;
   message: string | null;
   error: string | null;
+  errorCode?: string | null;
 }
 
 /**
@@ -145,20 +147,50 @@ describe('ExportButton: стеження за задачею побудови к
 
     await user.click(screen.getByRole('button'));
 
-    const link = await screen.findByRole('link');
+    // ✎ `U-25`: посилання приходить ТОСТОМ, а не елементом у рядку кнопок —
+    // тож береться з виклику `notifications.show` і рендериться окремо.
+    await waitFor(() => expect(notifications.show).toHaveBeenCalled());
+
+    const call = vi.mocked(notifications.show).mock.calls[0]?.[0] as { message: ReactNode };
+    render(<MantineProvider theme={testTheme}>{call.message}</MantineProvider>);
+
+    const link = screen.getByRole('link', { name: '⟦document.exportReady⟧' });
     expect(link.getAttribute('href')).toContain('export-key-abc');
   });
 
-  it('провалену задачу — показує ПРИЧИНУ (`error`), а не застарілий прогрес (`message`)', async () => {
+  it.each([
+    ['⟦document.exportFormatCsv⟧', '⟦document.exportReadyCsv⟧'],
+    ['⟦document.exportFormatJson⟧', '⟦document.exportReadyJson⟧'],
+  ])('V-10: посилання на файл формату %s підписане за форматом, а не «книга»', async (option, label) => {
+    mockFetch({ jobId: 'job-1', state: 'Succeeded', percent: 100, message: 'export-key-abc', error: null });
+
+    const user = userEvent.setup();
+    show();
+
+    await user.click(screen.getByRole('radio', { name: option }));
+    await user.click(screen.getByRole('button'));
+
+    await waitFor(() => expect(notifications.show).toHaveBeenCalled());
+
+    const call = vi.mocked(notifications.show).mock.calls[0]?.[0] as { message: ReactNode };
+    render(<MantineProvider theme={testTheme}>{call.message}</MantineProvider>);
+
+    expect(screen.getByRole('link', { name: label })).toBeTruthy();
+    expect(screen.queryByRole('link', { name: '⟦document.exportReady⟧' })).toBeNull();
+  });
+
+  it('X-04: провалену задачу — причина з каталогу за кодом, а не сирий `error` і не прогрес', async () => {
     mockFetch({
       jobId: 'job-1',
       state: 'Failed',
       percent: 40,
-      // ⚠ Навмисно РІЗНІ рядки: `message` — те, що лишилось із прогресу до
-      // відмови, `error` — справжня причина. Тест ловить саме плутанину
-      // полів, а не самий факт показу якогось тексту.
+      // ⚠ Навмисно ТРИ різні джерела: `message` — прогрес до відмови, `error`
+      // — `ex.Message` сервера (українською, як на живому стенді), код — те,
+      // що екран перекладає. Каталог у тесті не завантажено, тож відомого
+      // рядка немає — і мусить показатися запасний текст, а не сирий.
       message: 'Формується… 40%',
-      error: 'Аркуш W-02 перевищує ліміт рядків',
+      error: 'Violation of PRIMARY KEY constraint PK_CellValue',
+      errorCode: 'ECR-PRD-0409',
     });
 
     const user = userEvent.setup();
@@ -171,7 +203,9 @@ describe('ExportButton: стеження за задачею побудови к
     });
 
     const call = vi.mocked(notifications.show).mock.calls[0]?.[0] as { message: string };
-    expect(call.message).toBe('Аркуш W-02 перевищує ліміт рядків');
+    // ⛔ Мутація «повернути `job.data?.error ?? …`» дає тут сирий текст СУБД.
+    expect(call.message).toBe('⟦document.exportFailed⟧');
+    expect(call.message).not.toContain('PRIMARY KEY');
     expect(call.message).not.toBe('Формується… 40%');
 
     // ⛔ Кнопка не лишається «Формується…» назавжди — головне твердження
@@ -179,7 +213,9 @@ describe('ExportButton: стеження за задачею побудови к
     // стан ПРОЧИТАНО успішно. Дефект №1 нижче перевіряє випадок, коли стан
     // прочитати НЕ вдалося взагалі.
     await waitFor(() => {
-      expect(screen.getByRole('button').textContent).not.toBe('⟦document.exportBuilding⟧');
+      // ✎ `U-25`: обидва підписи тепер завжди в DOM (ширина не стрибає),
+      // тож стан читається з `data-export-state`, а не з `textContent`.
+      expect(screen.getByRole('button').getAttribute('data-export-state')).toBe('idle');
     });
   });
 
@@ -197,7 +233,9 @@ describe('ExportButton: стеження за задачею побудови к
     // а `building` лишався `true` — кнопка крутила «Формується…» вічно, і
     // побудований файл (якщо він і був) забрати було нічим.
     await waitFor(() => {
-      expect(screen.getByRole('button').textContent).not.toBe('⟦document.exportBuilding⟧');
+      // ✎ `U-25`: обидва підписи тепер завжди в DOM (ширина не стрибає),
+      // тож стан читається з `data-export-state`, а не з `textContent`.
+      expect(screen.getByRole('button').getAttribute('data-export-state')).toBe('idle');
     });
 
     // ⚠ І без тосту: причина — брак права на ЧИТАННЯ стану задачі, а не

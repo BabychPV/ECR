@@ -1,5 +1,5 @@
 import { useEffect, useId, useState, type JSX } from 'react';
-import { Button, Group, Modal, Stack, Text, Textarea, TextInput } from '@mantine/core';
+import { Button, Group, Menu, Modal, Stack, Text, Textarea, TextInput } from '@mantine/core';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { EcrApiError } from '@/api/client';
 import type { DocumentSummary } from '@/api/types';
@@ -33,13 +33,26 @@ import {
  * перевіряється ПЕРШИМ.
  */
 export function hasProjectWriteGrant(me: MeDto | undefined, projectId: number): boolean {
+  return hasProjectGrant(me, projectId, 'Write');
+}
+
+/**
+ * Чи має користувач на проєкт грант щонайменше `required` — дзеркало
+ * `profile.LevelFor(ResourceKind.Project, id) < required` на сервері.
+ * Заборона виграє на будь-якому рівні (ФВ-6.6).
+ */
+export function hasProjectGrant(
+  me: MeDto | undefined,
+  projectId: number,
+  required: GrantLevelName,
+): boolean {
   if (me === undefined) return false;
 
   const key = `Project:${String(projectId)}`;
   if ((me.denies ?? []).includes(key)) return false;
 
   const level = (me.grants ?? {})[key] as GrantLevelName | undefined;
-  return level !== undefined && meetsGrant(level, 'Write');
+  return level !== undefined && meetsGrant(level, required);
 }
 
 /**
@@ -102,8 +115,16 @@ export interface BusinessKeyChangeActionArgs {
 }
 
 export interface BusinessKeyChangeAction {
-  /** Кнопка разом із діалогом — для шапки; `null`, якщо права немає. */
-  readonly trigger: JSX.Element | null;
+  /**
+   * Пункт меню «More» сторінки документа; `null`, якщо права немає.
+   *
+   * ⛔ Не кнопка в рядку дій: зміна ключа — рідкісна дія з аудитом, і серед
+   * щоденних вона лише переповнювала рядок (знімок людини, 1290 px).
+   */
+  readonly menuItem: JSX.Element | null;
+
+  /** Діалог — ОКРЕМО від пункту: меню розмонтовує вміст, щойно закривається. */
+  readonly dialog: JSX.Element | null;
 
   /**
    * Банер відмови `rekeyStale` — під шапкою, ПІСЛЯ закриття діалогу.
@@ -234,69 +255,84 @@ export function useBusinessKeyChangeAction({
       ? change.error
       : null;
 
-  const trigger = allowed ? (
-    <>
-      <Group gap="xs" wrap="nowrap">
-        <Button
-          size="xs"
-          variant="default"
-          disabled={locked}
-          aria-describedby={locked ? lockedReasonId : undefined}
-          onClick={() => setOpened(true)}
-          data-change-business-key=""
-        >
-          {t('documents.changeKey')}
-        </Button>
-
+  /*
+   * ⚠ Заблокований пункт лишається ВИДИМИМ і пояснює причину під підписом —
+   * той самий прийом, що й кнопка до переїзду в меню: сховане без пояснення
+   * читалося б як «права немає», а причина тут — стан аркушів.
+   */
+  const menuItem = allowed ? (
+    <Menu.Item
+      disabled={locked}
+      // ⚠ Ім'я пункту — лише підпис дії: причина блокування стоїть усередині
+      // того самого `<button>` і без явного імені склеїлася б із ним. Причину
+      // читач чує через `aria-describedby`.
+      aria-label={t('documents.changeKey')}
+      aria-describedby={locked ? lockedReasonId : undefined}
+      onClick={() => setOpened(true)}
+      data-change-business-key=""
+    >
+      {/* ⚠ Лише `span`-и: пункт меню — це `<button>`, і блоковий `div`/`p`
+          усередині нього — невалідна вкладеність. */}
+      <span style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+        <span>{t('documents.changeKey')}</span>
         {locked && (
-          <Text id={lockedReasonId} size="xs" c="dimmed" data-change-key-blocked-reason="">
+          <Text
+            component="span"
+            id={lockedReasonId}
+            size="xs"
+            c="dimmed"
+            maw={260}
+            data-change-key-blocked-reason=""
+          >
             {t('documents.changeKeyLockedHint')}
           </Text>
         )}
-      </Group>
+      </span>
+    </Menu.Item>
+  ) : null;
 
-      <Modal
-        opened={opened}
-        onClose={() => setOpened(false)}
-        title={t('documents.changeKeyTitle')}
-      >
-        <Stack gap="sm">
-          <TextInput
-            label={t('documents.newBusinessKey')}
-            description={t('documents.newBusinessKeyHint', { max: BusinessKeyMaxLength })}
-            value={newKey}
-            onChange={(event) => setNewKey(event.currentTarget.value)}
-            error={keyServerError}
-            data-autofocus
-          />
+  const dialog = allowed ? (
+    <Modal
+      opened={opened}
+      onClose={() => setOpened(false)}
+      title={t('documents.changeKeyTitle')}
+    >
+      <Stack gap="sm">
+        <TextInput
+          label={t('documents.newBusinessKey')}
+          description={t('documents.newBusinessKeyHint', { max: BusinessKeyMaxLength })}
+          value={newKey}
+          onChange={(event) => setNewKey(event.currentTarget.value)}
+          error={keyServerError}
+          data-autofocus
+        />
 
-          <Textarea
-            label={t('workflow.reason')}
-            value={reason}
-            onChange={(event) => setReason(event.currentTarget.value)}
-            error={reasonServerError}
-            minRows={3}
-            autosize
-          />
+        <Textarea
+          label={t('workflow.reason')}
+          value={reason}
+          onChange={(event) => setReason(event.currentTarget.value)}
+          error={reasonServerError}
+          minRows={3}
+          autosize
+        />
 
-          {dialogBannerError !== null && <ErrorAlert error={dialogBannerError} />}
+        {dialogBannerError !== null && <ErrorAlert error={dialogBannerError} />}
 
-          <Group justify="flex-end" mt="xs">
-            <Button variant="default" onClick={() => setOpened(false)} data-testid="business-key-cancel">
-              {t('common.cancel')}
-            </Button>
-            <Button
-              disabled={!canSubmit}
-              loading={change.isPending}
-              onClick={() => change.mutate()}
-              data-testid="business-key-confirm"
-            >
-              {t('documents.changeKey')}
-            </Button>
-          </Group>
-        </Stack>
-      </Modal>
-    </>
+        <Group justify="flex-end" mt="xs">
+          <Button variant="default" onClick={() => setOpened(false)} data-testid="business-key-cancel">
+            {t('common.cancel')}
+          </Button>
+          <Button
+            disabled={!canSubmit}
+            loading={change.isPending}
+            onClick={() => change.mutate()}
+            data-testid="business-key-confirm"
+          >
+            {t('documents.changeKey')}
+          </Button>
+        </Group>
+      </Stack>
+    </Modal>
   ) : null;
 
   const refusal =
@@ -309,5 +345,5 @@ export function useBusinessKeyChangeAction({
       </Stack>
     ) : null;
 
-  return { trigger, refusal };
+  return { menuItem, dialog, refusal };
 }

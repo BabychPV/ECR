@@ -39,6 +39,34 @@ public sealed class TestBindingContext : ITypeContext, IUnitContext
     /// <summary>Тип колонки, якої немає в таблиці типів.</summary>
     public ExpressionValueType DefaultColumnType { get; set; } = ExpressionValueType.Number;
 
+    /// <summary>Форми довідників (RT-21); <c>null</c> — перевірки, яким потрібна форма, мовчать.</summary>
+    public IRegistryShapeSource? Registries { get; set; }
+
+    /// <summary>Довідник правила — для <c>THIS</c> і <c>ROW.</c> верхнього рівня.</summary>
+    public string? RuleRegistryCode { get; set; }
+
+    /// <summary>Цілі <c>Lookup</c>-колонок за кодом колонки.</summary>
+    public Dictionary<string, string> ColumnRegistries { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Цілі <c>Lookup</c>-аргументів методології за іменем.</summary>
+    public Dictionary<string, string> ArgumentRegistries { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Довідники записів, які дають інші формули (<c>!CASE</c>), за кодом формули.</summary>
+    public Dictionary<string, string> FormulaRegistries { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <inheritdoc />
+    public string? GetReferenceRegistry(CellReferenceNode reference)
+    {
+        ArgumentNullException.ThrowIfNull(reference);
+        return ColumnRegistries.GetValueOrDefault(reference.ColumnSelector);
+    }
+
+    /// <inheritdoc />
+    public string? GetArgumentRegistry(string name) => ArgumentRegistries.GetValueOrDefault(name);
+
+    /// <inheritdoc />
+    public string? GetFormulaRegistry(string code) => FormulaRegistries.GetValueOrDefault(code);
+
     /// <inheritdoc />
     public ExpressionValueType GetReferenceType(CellReferenceNode reference)
     {

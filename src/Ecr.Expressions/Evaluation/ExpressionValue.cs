@@ -95,10 +95,43 @@ public readonly record struct ExpressionValue
 
         if (Value is double d)
         {
-            return double.IsFinite(d) ? (decimal)d : null;
+            return double.IsFinite(d) ? Narrow(d) : null;
         }
 
         return (decimal)Value!;
+    }
+
+    /// <summary>
+    /// Звуження скінченного <see cref="double"/>; <c>null</c>, якщо модуль
+    /// більший за межу <see cref="decimal"/> (≈ 7.9·10²⁸).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Аудит A2: у <c>Legacy</c> <c>Pow(10, 30)</c> — скінченне число, як і
+    /// в NCalc 1.3.8, а <c>(decimal)1e30</c> КИДАЄ <see cref="OverflowException"/>.
+    /// Звідси виняток валив увесь прогін прив'язки (<c>GenericCalculationModule</c>
+    /// кличе цей метод для трейсу кожного кроку).
+    ///
+    /// ⚠ <c>null</c>, як для <c>NaN</c>/<c>±∞</c> вище: значення лишається
+    /// <see cref="double"/> і далі в обчисленні (<c>1e30 / 1e20</c> дає
+    /// <c>1e10</c>, як у NCalc), а в <c>decimal</c> його подати неможливо.
+    /// Маскувати в нуль, як нескінченність, НЕ можна: чинна система скінченне
+    /// число не обнуляє, і нуль тут був би вигаданим результатом.
+    ///
+    /// ⚠ Межа перевіряється ловлею, а не порівнянням: <c>(double)decimal.MaxValue</c>
+    /// округлюється ВГОРУ до 2⁹⁶ і сам уже не звужується назад, а конверсія
+    /// округлює мантису (документовано — до 15 значущих цифр), тож точну межу
+    /// числом не записати. Виняток тут рідкісний і дешевший за помилку на межі.
+    /// </remarks>
+    private static decimal? Narrow(double d)
+    {
+        try
+        {
+            return (decimal)d;
+        }
+        catch (OverflowException)
+        {
+            return null;
+        }
     }
 
     /// <summary>

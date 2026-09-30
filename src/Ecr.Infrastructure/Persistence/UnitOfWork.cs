@@ -1,5 +1,7 @@
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
+using Ecr.Domain.Abstractions;
+using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Errors;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
@@ -18,11 +20,20 @@ namespace Ecr.Infrastructure.Persistence;
 /// інакше воркер починає читати рядки, яких ще не видно, і отримує або старі
 /// значення, або блокування на піку останнього дня періоду.
 /// </remarks>
-public sealed class UnitOfWork(EcrDbContext db) : IUnitOfWork
+public sealed class UnitOfWork(
+    EcrDbContext db, IClock? clock = null, Application.Common.ICurrentUser? currentUser = null) : IUnitOfWork
 {
+    // ⚠ Годинник необов'язковий лише для тестів, що будують одиницю роботи
+    // руками (`new UnitOfWork(db)`, їх десятки); контейнер завжди підставляє
+    // зареєстрований `IClock`.
+    private readonly IClock _clock = clock ?? new SystemClock();
+
     /// <inheritdoc />
     public async Task<int> SaveChangesAsync(CancellationToken ct)
     {
+        StampRegistryDataChanges();
+        StampRegistryAuthors();
+
         try
         {
             return await db.SaveChangesAsync(ct).ConfigureAwait(false);
@@ -45,7 +56,11 @@ public sealed class UnitOfWork(EcrDbContext db) : IUnitOfWork
             throw new Application.Errors.ConcurrencyConflictException(
                 "ECR-CELL-0409",
                 "Дані змінилися після того, як ви їх прочитали.",
-                new Dictionary<string, object?> { ["conflicts"] = conflicts });
+                new Dictionary<string, object?>
+                {
+                    ["conflicts"] = conflicts,
+                    ["messageKey"] = "err.ECR-CELL-0409.concurrentChange",
+                });
         }
         catch (DbUpdateException ex) when (SqlConflict.IsUniqueConstraintViolation(ex))
         {
@@ -73,6 +88,80 @@ public sealed class UnitOfWork(EcrDbContext db) : IUnitOfWork
             // повідомлення, — краще необроблений 500 із CorrelationId, ніж
             // вигадана відповідь про те, чого перевірка тут не знає.
             throw;
+        }
+    }
+
+    /// <summary>
+    /// Ставить <see cref="RegistryDef.DataChangedAt"/> кожному довіднику, чия
+    /// <see cref="RegistryDef.DataRevision"/> зросла в цьому збереженні
+    /// (<c>D-163</c>, FEATURE-REGISTRY-TABLES §5.10).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Умова — саме ЗРОСТАННЯ ревізії, а не «сутність змінена»: той самий
+    /// рядок <c>cfg.RegistryDef</c> змінюється й від опису
+    /// (<c>DefinitionVersion</c>, перейменування), і мітка від такої зміни
+    /// оголосила б застарілими результати всіх документів, що читають
+    /// довідник, хоча жодне значення в ньому не змінилося.
+    ///
+    /// ⚠ Одна мітка на все збереження: кілька довідників, змінених разом,
+    /// отримують однаковий момент, як і належить одній транзакції.
+    /// </remarks>
+    private void StampRegistryDataChanges()
+    {
+        DateTime? now = null;
+        foreach (var entry in db.ChangeTracker.Entries<RegistryDef>())
+        {
+            if (entry.State != EntityState.Modified)
+            {
+                continue;
+            }
+
+            var revision = entry.Property(r => r.DataRevision);
+            if (revision.CurrentValue > revision.OriginalValue)
+            {
+                now ??= _clock.UtcNow;
+                entry.Entity.MarkDataChanged(now.Value);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Ставить <c>ChangedByUserId</c> кожному доданому чи зміненому запису й
+    /// значенню довідника (<c>D-158</c>, FEATURE-REGISTRY-TABLES §3.3).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Автор ставиться й тоді, коли він НЕВІДОМИЙ (<c>null</c>): інакше
+    /// рядок, змінений фоновою задачею без автора, успадкував би автора
+    /// попередньої версії, і історія (<c>dic.*History</c>) приписала б зміну
+    /// людині, яка її не робила.
+    ///
+    /// ⚠ Контейнер <c>Ecr.Api</c> (єдиний хост) підставляє <c>ICurrentUser</c>
+    /// завжди, без змін у <c>DependencyInjection</c> (у фоновій задачі —
+    /// її автора через <c>JobAwareCurrentUser</c>); <c>null</c> тут лише в
+    /// тестах, що будують одиницю роботи руками.
+    ///
+    /// ⚠ Видалення рядка (<c>DELETE</c>) автора не отримує: історичний рядок
+    /// несе автора ОСТАННЬОЇ зміни перед видаленням. Для записів це не
+    /// обмеження — вони видаляються логічно (<c>SoftDelete</c>, тобто UPDATE).
+    /// </remarks>
+    private void StampRegistryAuthors()
+    {
+        var userId = currentUser?.UserId;
+
+        foreach (var entry in db.ChangeTracker.Entries<Domain.Entities.Dictionaries.RegistryEntry>())
+        {
+            if (entry.State is EntityState.Added or EntityState.Modified)
+            {
+                entry.Entity.MarkChangedBy(userId);
+            }
+        }
+
+        foreach (var entry in db.ChangeTracker.Entries<Domain.Entities.Dictionaries.RegistryValue>())
+        {
+            if (entry.State is EntityState.Added or EntityState.Modified)
+            {
+                entry.Entity.MarkChangedBy(userId);
+            }
         }
     }
 
@@ -136,6 +225,7 @@ public sealed class UnitOfWork(EcrDbContext db) : IUnitOfWork
                         {
                             ["businessKey"] = document.BusinessKey,
                             ["projectId"] = document.ProjectId,
+                            ["messageKey"] = "err.ECR-DOC-0409.businessKeyDuplicate",
                         });
 
                 case Domain.Entities.Documents.Project project:
@@ -150,18 +240,60 @@ public sealed class UnitOfWork(EcrDbContext db) : IUnitOfWork
                             ["messageKey"] = "err.ECR-PRJ-0409.projectCodeTaken", ["code"] = project.Code,
                         });
 
-                case Domain.Entities.Dictionaries.RegistryEntry registryEntry:
+                case Domain.Entities.Dictionaries.RegistryEntryKey registryKey:
+                    // ⛔ RT-10b (Д-3): гонку за складеним ключем, яку не закрило блокування
+                    // `RegistryKeyStore.FindLiveHoldersForUpdateAsync`, ловить
+                    // `UX_RegistryEntryKey_Live`. Без цієї гілки — голий 500.
+                    //
+                    // ⚠ Це не теоретичний випадок: дві одночасні перевірки того самого ВІЛЬНОГО
+                    // ключа одна одну не зупиняють (блокування тримає діапазон проти вставки, а
+                    // не проти другої такої самої перевірки), обидві проходять, і розводить їх
+                    // лише індекс — виміряно `RegistryKeyRaceTests.Одночасні_записи_…`.
+                    //
+                    // ⚠ `ConcurrencyConflictException`, а не `BusinessRuleException` (як
+                    // `keyTaken`): дані правильні, хтось випередив — 409 без переліку полів.
+                    // Відомий лише ПЕРЕМОЖЕНИЙ запис і його ключ; хто переміг, база не каже, а
+                    // запит по нього тут, де вона щойно відмовила, — зайвий обмін (та сама
+                    // причина, що в `.entryCodeTakenConcurrently` нижче).
+                    return new ConcurrencyConflictException(
+                        ErrorCodes.RegistryKeyConflict,
+                        $"Ключ {registryKey.KeyText} щойно зайняв інший запис довідника.",
+                        new Dictionary<string, object?>
+                        {
+                            ["messageKey"] = "err.ECR-REG-4092.keyTakenConcurrently",
+                            ["keyText"] = registryKey.KeyText,
+                            ["code"] = registryKey.Entry?.Code,
+                        });
+
+                // ⚠ Лише доданий запис: код запису не змінюється (`RegistryEntry` не має сетера),
+                // тож змінений запис на `UQ_RegistryEntry` не впаде ніколи. Умова захисна: у
+                // пакеті команд поруч із рядком ключа змінений запис буває (правка значень міняє
+                // ключ), і якби EF поклав його в `ex.Entries` першим, гонку за ключем
+                // перехопила б гілка гонки за кодом. На поточній версії EF такий порядок не
+                // відтворився (`RegistryKeyRaceTests.Гонка_при_зміні_ключа_…` зелений і без
+                // умови) — тобто тест тримає результат, а не саму умову.
+                case Domain.Entities.Dictionaries.RegistryEntry registryEntry when entry.State == EntityState.Added:
                     // ⚠ Той самий код, що й перевірка «до запису» в
                     // `UpsertRegistryEntryHandler.CreateAsync` (`ECR-REG-0409`):
                     // клієнт бачить ОДНУ причину незалежно від того, який із
                     // двох одночасних запитів програв гонитву за унікальним
                     // індексом.
+                    //
+                    // ⛔ Ключ ОКРЕМИЙ від `.entryCodeTaken`: той шаблон називає
+                    // `{id}` запису-переможця, а тут відомий лише ПЕРЕМОЖЕНИЙ
+                    // (його Id база так і не видала). Без поля резолвер лишав
+                    // `(Id {id})` фігурними дужками на екрані. Добувати Id
+                    // переможця окремим запитом під час мапінгу збою — зайвий
+                    // обмін із базою саме там, де вона щойно відмовила; змінити
+                    // спільний шаблон — втратити Id у частому послідовному
+                    // шляху, де він є.
                     return new BusinessRuleException(
                         ErrorCodes.RegistryEntryInUse,
                         $"Запис із кодом «{registryEntry.Code}» у цьому довіднику вже існує.",
                         new Dictionary<string, object?>
                         {
-                            ["messageKey"] = "err.ECR-REG-0409.entryCodeTaken", ["code"] = registryEntry.Code,
+                            ["messageKey"] = "err.ECR-REG-0409.entryCodeTakenConcurrently",
+                            ["code"] = registryEntry.Code,
                         });
             }
         }

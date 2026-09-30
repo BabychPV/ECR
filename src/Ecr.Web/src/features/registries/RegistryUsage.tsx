@@ -87,7 +87,16 @@ export function RegistryUsageList({ usage }: { usage: UsageResponse }): JSX.Elem
                 <UsageKindLabel kind={item.kind} />
               </Badge>
 
-              {item.route === null ? (
+              {/* ⛔ X-11: вид «дані» — не об'єкт з іменем і ідентифікатором, а факт
+                  «значення цього довідника вже лежать у документах». Сервер
+                  віддавав тут ім'я таблиці сховища (`doc.CellValue`) і як
+                  підпис, і як ідентифікатор — людина читала «STORED DATA ·
+                  doc.CellValue». Тепер — речення, без технічного id. */}
+              {item.kind === 'data' ? (
+                <Text size="sm" data-registry-usage="data">
+                  {t('registries.usageDataInDocuments')}
+                </Text>
+              ) : item.route === null ? (
                 <Text size="sm">{item.label}</Text>
               ) : (
                 <Anchor component={Link} to={item.route} size="sm">
@@ -96,9 +105,11 @@ export function RegistryUsageList({ usage }: { usage: UsageResponse }): JSX.Elem
               )}
 
               {/* ⚠ Ідентифікатор — рядок сервера як є: без роздільників розрядів. */}
-              <Text size="xs" c="dimmed">
-                {item.id}
-              </Text>
+              {item.kind !== 'data' && (
+                <Text size="xs" c="dimmed">
+                  {item.id}
+                </Text>
+              )}
             </Group>
           </List.Item>
         ))}

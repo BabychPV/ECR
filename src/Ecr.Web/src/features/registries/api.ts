@@ -63,6 +63,33 @@ export function entryReferences(error: unknown): number | null {
   return typeof references === 'number' ? references : null;
 }
 
+/** Вид посилання на запис і скільки таких посилань (`V-08`). */
+export interface EntryReferenceKind {
+  readonly kind: string;
+  readonly count: number;
+}
+
+/**
+ * Хто саме посилається на запис, який відмовилися видаляти: комірки, інші
+ * записи довідників, константи методологій… (`referenceKinds` у відмові).
+ *
+ * ⛔ V-08: саме число («3 посилання») не каже, куди йти виправляти. Порожній
+ * перелік — відмова без розкладу (старий сервер), і тоді екран лишається з
+ * самим числом, а не вигадує вид.
+ */
+export function entryReferenceKinds(error: unknown): readonly EntryReferenceKind[] {
+  if (!(error instanceof EcrApiError) || error.problem.errorCode !== ENTRY_IN_USE) {
+    return [];
+  }
+
+  const kinds = error.problem.extensions2?.['referenceKinds'];
+  if (kinds === null || typeof kinds !== 'object') return [];
+
+  return Object.entries(kinds as Record<string, unknown>)
+    .filter((pair): pair is [string, number] => typeof pair[1] === 'number' && pair[1] > 0)
+    .map(([kind, count]) => ({ kind, count }));
+}
+
 /**
  * Імпортує записи довідника з CSV (`BE-24`, крок 3).
  *

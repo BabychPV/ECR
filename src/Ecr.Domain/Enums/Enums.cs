@@ -252,7 +252,22 @@ public enum EditDenyReason : byte
     /// — це той самий дефект, що весь <c>A7</c>. Тепер механізм є
     /// (<c>PeriodAccessRuleKind.SourceWindow</c>).
     /// </remarks>
-    OutsidePermitWindow = 14
+    OutsidePermitWindow = 14,
+
+    /// <summary>
+    /// Грант на ресурс Є, але його рівень нижчий за потрібний дії
+    /// (<c>EditRules.CanEdit</c>/<c>CanSubmit</c>/<c>CanApprove</c>/<c>CanReopen</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Раніше обидва випадки — «гранта немає взагалі» і «грант є, але
+    /// закороткий» — поверталися як <see cref="NoGrant"/>, і користувач не
+    /// міг відрізнити «зверніться по грант» від «зверніться по підвищення
+    /// рівня гранта». <see cref="NoGrant"/> лишається для СПРАВЖНЬОЇ
+    /// відсутності гранта (<c>Effective == GrantLevel.None</c>) — саме тому
+    /// <c>Effective</c> перевіряється на <c>None</c> окремо від порівняння з
+    /// потрібним рівнем.
+    /// </remarks>
+    InsufficientGrantLevel = 15
 }
 
 /// <summary>
@@ -626,4 +641,92 @@ public enum RegistryRuleKind : byte
     /// існувати в довіднику речовин.
     /// </summary>
     CrossRegistry = 3,
+}
+
+/// <summary>
+/// Відношення поля-посилання <see cref="CellDataType.Lookup"/> до довідника-цілі
+/// (<c>D-155</c>, FEATURE-REGISTRY-TABLES §4.8).
+/// </summary>
+/// <remarks>
+/// ⛔ Композиція — ознака <b>поля</b>, а не окремої сутності зв'язку: рядок
+/// дочірнього довідника має рівно одного батька, і його <c>ValueRefEntryId</c>
+/// уже зберігається в <c>dic.RegistryValue</c>. Друга таблиця «батько → діти»
+/// була б другим джерелом істини про те саме. Обмеження
+/// <c>CK_RegField_Composition</c> не пускає композицію на поле іншого типу.
+/// </remarks>
+public enum RegistryRelationKind : byte
+{
+    /// <summary>Просте посилання: <c>GAS_COMPOSITION.COMPONENT</c> → <c>COMPONENT</c>.</summary>
+    Reference = 0,
+
+    /// <summary>
+    /// Запис <b>є частиною</b> батька: рядок складу належить кейсу, видимий разом
+    /// із ним і видаляється за <see cref="ParentDeletePolicy"/>.
+    /// </summary>
+    Composition = 1,
+}
+
+/// <summary>
+/// Що стається з дочірніми записами композиції, коли видаляють батька
+/// (<c>D-155</c>, FEATURE-REGISTRY-TABLES §4.8).
+/// </summary>
+public enum ParentDeletePolicy : byte
+{
+    /// <summary>Видалення батька з дітьми відхиляється (<c>ECR-REG-0409</c>).</summary>
+    Restrict = 0,
+
+    /// <summary>Діти логічно видаляються в тій самій транзакції, рекурсивно.</summary>
+    Cascade = 1,
+}
+
+/// <summary>
+/// Звідки береться код нового запису довідника (<c>D-157</c>).
+/// </summary>
+/// <remarks>
+/// ⚠ <see cref="Auto"/> існує тому, що <c>EcrCode</c> приймає лише латиницю, а
+/// природний ключ довідника буває кириличним («ПК-3 (370-220) лето») — код із
+/// нього не зібрати. Тоді код — <c>E</c> + 9 цифр послідовності
+/// <c>dic.RegistryEntryCodeSeq</c>, а запис знаходять за первинним ключем.
+/// </remarks>
+public enum RegistryCodeMode : byte
+{
+    /// <summary>Код задає користувач або імпорт.</summary>
+    Manual = 0,
+
+    /// <summary>Код видає послідовність <c>dic.RegistryEntryCodeSeq</c>.</summary>
+    Auto = 1,
+}
+
+/// <summary>
+/// Область формули методології (<c>D-176</c>, V-7 FEATURE-HSE301-VIEW §6.1).
+/// </summary>
+/// <remarks>
+/// ⛔ <see cref="Substance"/> — нуль, і це не порядок оголошення, а вся суть
+/// кроку: наявні формули й кожна нова без явної області поводяться рівно так,
+/// як до появи колонки, — рахуються на кожну речовину.
+/// </remarks>
+public enum MethodologyFormulaScope : byte
+{
+    /// <summary>Рахується на кожну речовину методології — поведінка до <c>D-176</c>.</summary>
+    Substance = 0,
+
+    /// <summary>Рахується один раз на рядок, до циклу речовин.</summary>
+    Row = 1,
+}
+
+/// <summary>
+/// Вид рядка <c>calc.CalculationResult</c> (<c>D-175</c>, V-6 FEATURE-HSE301-VIEW §7.1).
+/// </summary>
+/// <remarks>
+/// ⛔ <see cref="Output"/> — нуль: наявні результати — оголошені виходи, і
+/// зрізи <c>rpt.*</c> беруть лише їх. Проміжне значення, яке без цього поля
+/// потрапило б у зріз, змінило б його <c>ContentHash</c> (D-53).
+/// </remarks>
+public enum CalculationResultKind : byte
+{
+    /// <summary>Оголошений вихід методології.</summary>
+    Output = 0,
+
+    /// <summary>Значення видимої формули — проміжний результат.</summary>
+    Intermediate = 1,
 }

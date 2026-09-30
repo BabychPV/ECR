@@ -114,8 +114,8 @@ public sealed class DialectTests
     [InlineData("POW(2, 3)", "Pow")]
     [InlineData("ROUND(1.5, 0)", "Round")]
     [InlineData("POWER(2, 3)", "Pow(a, b)")]
-    [InlineData("MOD(5, 3)", "оператор %")]
-    [InlineData("SWITCH(1, 1, 2, 3)", "вкладені if")]
+    [InlineData("MOD(5, 3)", "the % operator")]
+    [InlineData("SWITCH(1, 1, 2, 3)", "nested if")]
     public void Відмова_називає_чим_саме_заміняти(string expression, string expected)
     {
         // ⚠ «Невідома функція» відправила б методолога шукати те, чого нема.

@@ -352,16 +352,18 @@ public sealed class RecalculationJobClosedPeriodTests(SqlServerFixture sql)
     /// </remarks>
     private IReadOnlyList<CellRecord> AppliedOrEmpty()
         => [.. _cells.ReceivedCalls()
-            .Where(c => c.GetMethodInfo().Name == nameof(ICellStore.ApplyAsync))
-            .SelectMany(c => ((CellChangeSet)c.GetArguments()[0]!).Upserts)];
+            .Where(c => c.GetMethodInfo().Name == nameof(ICellStore.ApplyBatchAsync))
+            .SelectMany(c => (IReadOnlyCollection<CellChangeSet>)c.GetArguments()[0]!)
+            .SelectMany(set => set.Upserts)];
 
     /// <summary>Комірки, які служба віддала на запис.</summary>
+    /// <remarks>O2: документо-період пишеться одним пакетом (<c>ApplyBatchAsync</c>).</remarks>
     private IReadOnlyList<CellRecord> Applied()
     {
         var call = _cells.ReceivedCalls()
-            .Single(c => c.GetMethodInfo().Name == nameof(ICellStore.ApplyAsync));
+            .Single(c => c.GetMethodInfo().Name == nameof(ICellStore.ApplyBatchAsync));
 
-        return ((CellChangeSet)call.GetArguments()[0]!).Upserts;
+        return [.. ((IReadOnlyCollection<CellChangeSet>)call.GetArguments()[0]!).SelectMany(set => set.Upserts)];
     }
 
     /// <summary>
@@ -410,7 +412,7 @@ public sealed class RecalculationJobClosedPeriodTests(SqlServerFixture sql)
                 },
             });
 
-        _cells.ReadSlicesAsync(Arg.Any<IReadOnlyList<long>>(), Arg.Any<CancellationToken>())
+        _cells.ReadSlicesAsync(Arg.Any<IReadOnlyList<long>>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
             .Returns(callInfo => new Dictionary<long, IReadOnlyList<CellRecord>>
             {
                 [document.TableInstanceId] =
@@ -466,7 +468,7 @@ public sealed class RecalculationJobClosedPeriodTests(SqlServerFixture sql)
             _headers,
             Substitute.For<IAuditWriter>(),
             new TestClock(new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)),
-            uow);
+            uow, Substitute.For<Ecr.Application.Ports.ISheetEditGate>());
     }
 
     /// <summary>Порожня шапка документа — тести цього файлу її не читають.</summary>
@@ -487,7 +489,9 @@ public sealed class RecalculationJobClosedPeriodTests(SqlServerFixture sql)
             Substitute.For<IUnitOfWork>(),
             Substitute.For<Ecr.Application.Security.IAccessDecisionService>(),
             Substitute.For<ICurrentUser>(),
-            new TestClock(DateTime.UtcNow));
+            new TestClock(DateTime.UtcNow),
+            Substitute.For<Ecr.Application.Ports.IRecalculationApprovalStore>(),
+            Substitute.For<Ecr.Application.Ports.IAuditWriter>());
 
     /// <summary>Оркестратор методологій: прогін завжди «успішний і порожній».</summary>
     private sealed class StubRunner : ICalculationRunner

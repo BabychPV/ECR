@@ -30,13 +30,31 @@ public static class TemplateFunctions
         }
 
         var total = 0m;
-        foreach (var n in numbers)
+        try
         {
-            total += n;
+            foreach (var n in numbers)
+            {
+                total += n;
+            }
+        }
+        catch (OverflowException)
+        {
+            return Overflow;
         }
 
         return ExpressionValue.Number(total);
     }
+
+    /// <summary>
+    /// Переповнення <see cref="decimal"/> в агрегаті — <c>#VALUE</c>, а не виняток.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Аудит A2: виняток з однієї комірки валив перерахунок усієї таблиці
+    /// (`02b` §6.4). Код той самий, що вже дають <c>REGSUM</c>/<c>REGAVG</c>
+    /// (<c>RegistryForms.Accumulator</c>) і оператор <c>^</c> на переповненні:
+    /// одна відмова — один код, хоч би яким шляхом до неї дійшли.
+    /// </remarks>
+    private static ExpressionValue Overflow => ExpressionValue.Error(ExpressionErrors.BadValue);
 
     /// <summary>Середнє не-<c>null</c>; порожня множина → <c>null</c> (а не <c>0</c>).</summary>
     public static ExpressionValue Average(IReadOnlyList<ExpressionValue> args)
@@ -56,9 +74,16 @@ public static class TemplateFunctions
         }
 
         var total = 0m;
-        foreach (var n in numbers)
+        try
         {
-            total += n;
+            foreach (var n in numbers)
+            {
+                total += n;
+            }
+        }
+        catch (OverflowException)
+        {
+            return Overflow;
         }
 
         return ExpressionValue.Number(total / numbers.Count);
@@ -188,9 +213,16 @@ public static class TemplateFunctions
         // Порожня множина → 1, а не 0: одиниця — нейтральний елемент множення,
         // і нуль тут занулив би все, що на цей добуток помножать далі.
         var product = 1m;
-        foreach (var n in numbers)
+        try
         {
-            product *= n;
+            foreach (var n in numbers)
+            {
+                product *= n;
+            }
+        }
+        catch (OverflowException)
+        {
+            return Overflow;
         }
 
         return ExpressionValue.Number(product);
@@ -269,7 +301,14 @@ public static class TemplateFunctions
 
             if (value.AsNumber() is { } number)
             {
-                total += number;
+                try
+                {
+                    total += number;
+                }
+                catch (OverflowException)
+                {
+                    return Overflow;
+                }
             }
         }
 
@@ -277,7 +316,8 @@ public static class TemplateFunctions
     }
 
     /// <summary>
-    /// Значення поля запису довідника — <c>REGFIELD(lookup, 'код')</c>.
+    /// Значення поля запису довідника — <c>REGFIELD(lookup, 'код')</c> або шляхом
+    /// через <c>Lookup</c>-поля — <c>REGFIELD(lookup, 'STREAM.GROUP')</c>.
     /// </summary>
     /// <remarks>
     /// ⚠ Аргументи приходять НЕ пласким списком, а власними групами (як
@@ -307,32 +347,12 @@ public static class TemplateFunctions
             return ExpressionValue.Error(ExpressionErrors.BadValue);
         }
 
-        var entryValue = entry[0];
-        var fieldValue = field[0];
-
-        if (entryValue.IsError)
-        {
-            return entryValue;
-        }
-
-        if (fieldValue.IsError)
-        {
-            return fieldValue;
-        }
-
-        // Lookup-комірку ще не заповнили — це легітимна порожнеча (02b §6.3),
-        // а не помилка: запис довідника просто ще не обрали.
-        if (entryValue.IsNull)
-        {
-            return ExpressionValue.Null;
-        }
-
-        if (entryValue.AsNumber() is not { } entryId || fieldValue.Type != ExpressionValueType.Text)
-        {
-            return ExpressionValue.Error(ExpressionErrors.BadValue);
-        }
-
-        return context.GetRegistryField((long)entryId, (string)fieldValue.Value!);
+        // ⚠ Решта — спільна з методологіями (RT-20a): помилка аргументу
+        // поширюється, порожня Lookup-комірка дає null (02b §6.3 — запис ще не
+        // обрали), а код поля з крапками проходить через Lookup-поля
+        // (`'COMPONENT.MW'`). Однокрокова форма читає ТЕ САМЕ джерело, що й
+        // раніше, доки контекст не має знімка довідників (RT-24).
+        return RegistryForms.FieldPath(entry[0], field[0], context);
     }
 
     /// <summary>

@@ -1,8 +1,12 @@
-import { useState, type JSX } from 'react';
-import { Button, Group, NumberInput, Table, Text, TextInput } from '@mantine/core';
-import { useStructureChanges, type StructureChangePage } from '@/features/audit/api';
+import type { JSX } from 'react';
+import { Button, Group, Select, Table, Text, TextInput } from '@mantine/core';
+import { structureChangesQuery, useStructureChanges, type StructureChangePage } from '@/features/audit/api';
+import { authorName, useAuthorOptions } from '@/features/audit/authorOptions';
+import { FilterHints, readerOnlyDescription } from '@/features/audit/FilterHints';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { Timestamp } from '@/shared/ui/Timestamp';
+import { useDebouncedFilter, useFilterCursor } from '@/shared/ui/useDebouncedFilter';
+import { useFieldDraft } from '@/shared/ui/useFieldDraft';
 import { useUrlNumber, useUrlState } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
 
@@ -19,42 +23,62 @@ import { t } from '@/shared/i18n';
 export function StructureChangesPanel({ from, to }: { from: string; to: string }): JSX.Element {
   const [entityType, setEntityType] = useUrlState('entityType');
   const [changedBy, setChangedBy] = useUrlNumber('changedBy');
-  const [cursor, setCursor] = useState<string | null>(null);
 
-  const changes = useStructureChanges({
+  // ⛔ Набір у полях — у запит після паузи, як у журналі комірок (`AuditPage`).
+  const appliedEntityType = useDebouncedFilter(entityType);
+  const appliedChangedBy = useDebouncedFilter(changedBy);
+  // ⛔ Поля показують ВЛАСНЕ значення, не адресу (`useFieldDraft`; той самий
+  // дефект втрати символів, що в «Row key» журналу комірок).
+  const entityTypeField = useFieldDraft(entityType ?? '');
+
+  const applied = {
     from,
     to,
-    entityType,
-    changedByUserId: changedBy,
+    entityType: appliedEntityType,
+    changedByUserId: appliedChangedBy,
     limit: 100,
-    cursor,
-  });
+  };
+  // ⛔ Курсор — від застосованого фільтра, не від сирого поля (`useFilterCursor`).
+  const [cursor, setCursor] = useFilterCursor(structureChangesQuery(applied));
+
+  const changes = useStructureChanges({ ...applied, cursor });
+  const authorOptions = useAuthorOptions(changes.data?.items, changedBy);
 
   return (
     <>
-      <Group gap="xs" align="end" mb="md" wrap="wrap">
+      <Group gap="xs" align="end" mb="xs" wrap="wrap" data-audit-filter-row="structure">
         <TextInput
           size="xs"
           miw={200}
           label={t('audit.entityType')}
-          value={entityType ?? ''}
+          value={entityTypeField.value}
+          onFocus={entityTypeField.onFocus}
+          onBlur={entityTypeField.onBlur}
           onChange={(event) => {
+            entityTypeField.setValue(event.currentTarget.value);
             setEntityType(event.currentTarget.value);
-            setCursor(null);
           }}
         />
-        <NumberInput
+        {/* ⛔ `R-18`: автор — вибором за іменем, а не номером `UserId`. */}
+        <Select
           size="xs"
-          miw={140}
+          miw={180}
+          searchable
+          clearable
           label={t('audit.author')}
           description={t('audit.authorHint')}
-          value={changedBy ?? ''}
+          styles={readerOnlyDescription}
+          placeholder={t('audit.authorAny')}
+          data={authorOptions}
+          value={changedBy === null ? null : String(changedBy)}
           onChange={(value) => {
-            setChangedBy(typeof value === 'number' ? value : null);
-            setCursor(null);
+            setChangedBy(value === null ? null : Number(value));
           }}
         />
       </Group>
+
+      {/* ⚠ `U-21`: та сама будова ряду, що в журналі комірок, — див. `FilterHints`. */}
+      <FilterHints texts={[t('audit.authorHint')]} />
 
       <AsyncBoundary<StructureChangePage>
         isPending={changes.isPending}
@@ -92,7 +116,8 @@ export function StructureChangesPanel({ from, to }: { from: string; to: string }
                     <Table.Td>
                       <Timestamp value={change.changedAt} />
                     </Table.Td>
-                    <Table.Td>{change.changedByUserId}</Table.Td>
+                    {/* ⛔ `R-18`: ім'я з сервера; номер — у підказці. */}
+                    <Table.Td title={`#${String(change.changedByUserId)}`}>{authorName(change)}</Table.Td>
                     <Table.Td>
                       <Text size="xs">
                         {change.entityType} · {change.entityId}

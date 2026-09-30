@@ -26,6 +26,8 @@ public sealed class SimulationTests
     private static readonly DateTime Now = new(2026, 3, 2, 9, 0, 0, DateTimeKind.Utc);
 
     private readonly FakeSimulationService _simulation = new();
+    private readonly FakeUserStore _users = new();
+    private readonly IAuditWriter _audit = Substitute.For<IAuditWriter>();
     private readonly IAccessDecisionService _access = Substitute.For<IAccessDecisionService>();
     private readonly ICurrentUser _user = Substitute.For<ICurrentUser>();
     private readonly IClock _clock = Substitute.For<IClock>();
@@ -46,7 +48,7 @@ public sealed class SimulationTests
     public async Task Запис_під_симуляцією_відхиляється_навіть_із_Manage()
     {
         await Start().HandleAsync(Subject, "перевірка скарги", CancellationToken.None);
-        var profile = Start().Profile ?? _simulation.LastProfile!;
+        var profile = _simulation.LastProfile!;
 
         Assert.Equal(GrantLevel.Manage, profile.LevelFor(ResourceKind.Project, AccessBuilder.ProjectId));
 
@@ -79,10 +81,9 @@ public sealed class SimulationTests
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
     public async Task Профіль_симуляції_не_кешується_і_не_витікає_справжньому_користувачу()
     {
-        var handler = Start();
-        await handler.HandleAsync(Subject, "перевірка скарги", CancellationToken.None);
+        await Start().HandleAsync(Subject, "перевірка скарги", CancellationToken.None);
 
-        var profile = handler.Profile!;
+        var profile = _simulation.LastProfile!;
 
         // ⛔ Профіль суб'єкта не будується через кешований шлях: під ключем
         // суб'єкта він дістався б справжньому користувачеві разом із чужими
@@ -98,10 +99,9 @@ public sealed class SimulationTests
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
     public async Task Автором_дій_лишається_той_хто_симулює()
     {
-        var handler = Start();
-        await handler.HandleAsync(Subject, "перевірка скарги", CancellationToken.None);
+        await Start().HandleAsync(Subject, "перевірка скарги", CancellationToken.None);
 
-        var profile = handler.Profile!;
+        var profile = _simulation.LastProfile!;
 
         // Права — суб'єкта, автор — той, хто симулює (D-86). Інакше в аудиті
         // стояла б людина, яка нічого не робила, і питання «хто це зробив»
@@ -151,7 +151,72 @@ public sealed class SimulationTests
         Assert.Null(await _simulation.GetActorAsync(sessionId, CancellationToken.None));
     }
 
-    private StartSimulationHandler Start() => new(_simulation, _access, _user, _clock);
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "D-210")]
+    public async Task Ціль_bootstrap_за_прапорцем_дає_ECR_SIM_4031_без_сеансу_і_з_подією()
+    {
+        var bootstrap = _users.Seed(BootstrapAdmin.Create("hash", Now));
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Start().HandleAsync(bootstrap.Id, "перевірка скарги", CancellationToken.None));
+
+        Assert.Equal("ECR-SIM-4031", error.ErrorCode);
+        Assert.Equal("err.ECR-SIM-4031.bootstrapTarget", error.Details!["messageKey"]);
+        await AssertDeniedWithoutSessionAsync(bootstrap.Id, "bootstrapTarget");
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "D-210")]
+    public async Task Ціль_з_небезпечним_правом_дає_ECR_SIM_4031_без_сеансу_і_з_подією()
+    {
+        var subject = SeedSubjectWithRole("Security.ManageUsers");
+        _users.Dangerous.Add("Security.ManageUsers");
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Start().HandleAsync(subject, "перевірка скарги", CancellationToken.None));
+
+        Assert.Equal("ECR-SIM-4031", error.ErrorCode);
+        Assert.Equal("err.ECR-SIM-4031.dangerousTarget", error.Details!["messageKey"]);
+        await AssertDeniedWithoutSessionAsync(subject, "dangerousTarget");
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "D-210")]
+    public async Task Ціль_без_небезпечних_прав_відкривається_без_події()
+    {
+        var subject = SeedSubjectWithRole("Document.View");
+        _users.Dangerous.Add("Security.ManageUsers");
+
+        await Start().HandleAsync(subject, "перевірка скарги", CancellationToken.None);
+
+        Assert.Equal(["start", "profile"], _simulation.Calls);
+        await _audit.DidNotReceiveWithAnyArgs().WriteIndependentSecurityEventAsync(default!, default);
+    }
+
+    private int SeedSubjectWithRole(string permission)
+    {
+        var subject = _users.Seed(new Domain.Entities.Security.User("subject", "Subject", AuthProvider.Local));
+        _users.Roles.Add(new RoleView(1, "R1", IsBuiltIn: false, IsActive: true, [permission], []));
+        _users.Grants.Add((subject.UserName, "R1"));
+        return subject.Id;
+    }
+
+    private async Task AssertDeniedWithoutSessionAsync(int subjectId, string reason)
+    {
+        // ⛔ Жодного сеансу: відмова ДО запису в aud.SimulationSession.
+        Assert.Empty(_simulation.Calls);
+
+        // Подія-спроба — незалежна від транзакції; у деталях лише причина, не права цілі.
+        await _audit.Received(1).WriteIndependentSecurityEventAsync(
+            Arg.Is<SecurityEventRecord>(e =>
+                e.EventType == StartSimulationHandler.DeniedEvent
+                && e.TargetUserId == subjectId
+                && e.ChangedByUserId == Actor
+                && e.DetailsJson == $$"""{"reason":"{{reason}}"}"""),
+            Arg.Any<CancellationToken>());
+    }
+
+    private StartSimulationHandler Start() => new(_simulation, _access, _users, _audit, _user, _clock);
 
     private EndSimulationHandler End() => new(_simulation, _user, _clock);
 

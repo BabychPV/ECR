@@ -120,6 +120,7 @@ function show(): void {
         <DocumentGrid
           documentId={1}
           tableInstanceId={1}
+          tableDefId={1}
           periodKey={202609}
           readOnly={false}
           allowsDynamicRows={false}
@@ -177,7 +178,7 @@ describe('DocumentGrid: відмова довідника не виглядає 
     await waitFor(() => screen.getByRole('alert'));
 
     expect(screen.getByTestId('revogrid-stub')).toBeTruthy();
-    expect(screen.getByRole('button', { name: /grid\.save/ })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /grid\.undo/ })).toBeTruthy();
   });
 
   it('довідник приїхав — банера немає', async () => {
@@ -189,7 +190,7 @@ describe('DocumentGrid: відмова довідника не виглядає 
     // ⚠ Дочекатися саме тиші: `getByRole` одразу після монтування був би
     // зеленим і на зламаному коді, бо запит ще в дорозі.
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /grid\.save/ })).toBeTruthy();
+      expect(screen.getByRole('button', { name: /grid\.undo/ })).toBeTruthy();
     });
 
     expect(screen.queryByRole('alert')).toBeNull();

@@ -1,6 +1,5 @@
 using System.Management.Automation;
 using System.Management.Automation.Runspaces;
-using System.Runtime.InteropServices;
 using System.Security;
 
 namespace Ecr.Setup;
@@ -39,47 +38,36 @@ internal sealed class DeployRunner
 
         using var ps = PowerShell.Create(sessionState);
 
-        ps.AddCommand(scriptPath)
-            .AddParameter("SqlInstance", state.SqlInstance)
-            .AddParameter("Database", state.Database)
-            .AddParameter("MsiPath", state.MsiPath)
-            .AddParameter("AppPort", state.Port)
-            .AddParameter("ConnectionString", BuildConnectionString(state))
-            // ⛔ Q-232: директива людини (2026-09-11) — майстер запускає
-            // людина з доступом до бази, тож він завжди дозволяє
-            // deploy-ecr.ps1 створити цільову базу самому, якщо її ще
-            // немає, замість вимагати окремого кроку адміністратора БД
-            // заздалегідь (`docs/build/11-install-guide.md` §0, оновлено).
-            .AddParameter("CreateDatabaseIfMissing");
+        ps.AddCommand(scriptPath);
 
-        if (state.Mode == WizardMode.FirstDeployment)
+        // Перелік параметрів — у DeployArguments (чиста функція стану, під
+        // тестом); тут лише передача. `null` — перемикач.
+        foreach (var (name, value) in DeployArguments.Build(state))
         {
-            ps.AddParameter("FirstDeployment");
-            if (state.BootstrapPassword is not null)
+            if (value is null)
             {
-                ps.AddParameter("BootstrapPassword", state.BootstrapPassword);
+                ps.AddParameter(name);
+            }
+            else
+            {
+                ps.AddParameter(name, value);
             }
         }
 
-        if (state.SkipSchema)
+        // ⛔ ФВ-9.8 / D-206 (P2): MSI не пам'ятає WORKER_ENABLED. З I2-2
+        // deploy-ecr.ps1 ставить воркер ТИПОВО (WORKER_ENABLED=1), крім SQL
+        // Server Express, де без -EnableWorker іде WORKER_ENABLED=0 — тобто
+        // оновлення через майстер на Express мовчки ПРИБРАЛО б уже
+        // встановлений воркер. Тому поточний стан зберігається: служба
+        // EcrWorker є → -EnableWorker. Відмова від воркера — рішення
+        // адміністратора: `deploy-ecr.ps1 -DisableWorker`
+        // (11-install-guide.md §2.6); майстер його не вимикає.
+        // ⚠ -AllowExpress НЕ передається навмисно: на Express майстер має
+        // зупинитись на кроці 1 з поясненням скрипта, як і сам скрипт.
+        if (IsWorkerServiceInstalled())
         {
-            ps.AddParameter("SkipSchema");
-        }
-
-        if (state.ServiceAccountMode != ServiceAccountMode.LocalSystem)
-        {
-            ps.AddParameter("ServiceAccount", state.ServiceAccountName);
-        }
-
-        if (state.ServiceAccountMode == ServiceAccountMode.DomainUser && state.ServicePassword is not null)
-        {
-            ps.AddParameter("ServicePassword", state.ServicePassword);
-        }
-
-        if (!state.SqlAuthIsWindows)
-        {
-            ps.AddParameter("SqlLogin", state.SqlLogin);
-            ps.AddParameter("SqlPassword", state.SqlLoginPassword);
+            ps.AddParameter("EnableWorker");
+            OutputReceived?.Invoke("Служба EcrWorker уже встановлена — передаю -EnableWorker, щоб оновлення її зберегло.");
         }
 
         ps.Streams.Information.DataAdded += (_, e) => OutputReceived?.Invoke(FormatInformation(ps.Streams.Information[e.Index]));
@@ -99,6 +87,19 @@ internal sealed class DeployRunner
         return !ps.HadErrors;
     }
 
+    /// <summary>
+    /// Чи зареєстровано службу EcrWorker — за ключем служби в реєстрі: той
+    /// самий ключ, куди deploy-ecr.ps1 пише її Environment. Без
+    /// System.ServiceProcess.ServiceController: це окремий пакет, а пакети
+    /// тут не додаються.
+    /// </summary>
+    internal static bool IsWorkerServiceInstalled()
+    {
+        using var key = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(
+            @"SYSTEM\CurrentControlSet\Services\EcrWorker");
+        return key is not null;
+    }
+
     private static string FormatInformation(InformationRecord record)
     {
         // Write-Host у скрипті потрапляє сюди як HostInformationMessage —
@@ -106,43 +107,5 @@ internal sealed class DeployRunner
         return record.MessageData is HostInformationMessage host
             ? host.Message
             : record.MessageData?.ToString() ?? record.ToString();
-    }
-
-    private static SecureString BuildConnectionString(WizardState state)
-    {
-        var text = state.SqlAuthIsWindows
-            ? $"Server={state.SqlInstance};Database={state.Database};Trusted_Connection=True;TrustServerCertificate=True;"
-            : $"Server={state.SqlInstance};Database={state.Database};User Id={state.SqlLogin};Password={ToPlain(state.SqlLoginPassword)};TrustServerCertificate=True;";
-        return ToSecure(text);
-    }
-
-    private static string ToPlain(SecureString? secure)
-    {
-        if (secure is null)
-        {
-            return string.Empty;
-        }
-
-        var bstr = Marshal.SecureStringToBSTR(secure);
-        try
-        {
-            return Marshal.PtrToStringBSTR(bstr);
-        }
-        finally
-        {
-            Marshal.ZeroFreeBSTR(bstr);
-        }
-    }
-
-    private static SecureString ToSecure(string value)
-    {
-        var secure = new SecureString();
-        foreach (var c in value)
-        {
-            secure.AppendChar(c);
-        }
-
-        secure.MakeReadOnly();
-        return secure;
     }
 }

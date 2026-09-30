@@ -30,7 +30,11 @@ public sealed class ExcelImporter(
     ICellStore cellStore,
     IRowStore rowStore,
     IUnitOfWork uow,
-    IBackgroundJobScheduler jobs) : IExcelImporter
+    IBackgroundJobScheduler jobs,
+
+    // ⛔ Спільні блокування аркушів книги беруться ЗАЗДАЛЕГІДЬ і в стабільному
+    // порядку (`ExcelImportSheetLockOrderTests`) — див. `ApplyAsync`.
+    ISheetEditGate sheetGate) : IExcelImporter
 {
     /// <summary>Порожній зріз — таблиця без жодного рядка чи непорожньої комірки.</summary>
     private static readonly IReadOnlyDictionary<string, long> EmptyRowIds =
@@ -60,7 +64,14 @@ public sealed class ExcelImporter(
     {
         ArgumentNullException.ThrowIfNull(file);
 
-        using var workbook = Open(file);
+        // ⛔ S10: огляд zip-каталогу потребує позиціювання. Потік без нього
+        // буферизується з тією ж стелею, що й тіло запиту, — інакше сам буфер
+        // став би обходом запобіжника.
+        var seekable = await XlsxSafetyGate.SeekableAsync(file, ct).ConfigureAwait(false)
+                       ?? throw XlsxSafetyGate.Rejection("файл більший за стелю пакета");
+        await using var buffered = ReferenceEquals(seekable, file) ? null : seekable;
+
+        using var workbook = Open(seekable);
         var map = ReadMap(workbook);
 
         // ⛔ Книга з чужого документа не імпортується в цей. Однакова
@@ -73,6 +84,7 @@ public sealed class ExcelImporter(
                 $"Книгу вивантажено з документа {map.DocumentId}, а імпорт іде в {documentId}.",
                 new Dictionary<string, object?>
                 {
+                    ["messageKey"] = "err.ECR-IMP-0422.workbookOtherDocument",
                     ["expectedDocumentId"] = documentId,
                     ["actualDocumentId"] = map.DocumentId,
                 });
@@ -98,6 +110,13 @@ public sealed class ExcelImporter(
         // належать цьому документу за цей період — блок книги з чужим
         // (чи вигаданим) `TableInstanceId` інакше пішов би прямо в пакетні
         // читання рядків/комірок нижче без жодної перевірки належності.
+        // ⛔ Екземпляри таблиць створюються при ПЕРШОМУ відкритті документа
+        // (`GetDocumentTablesHandler`, `A7-30`). Документ, створений і ще не
+        // відкритий, їх не має, і перегляд імпорту відмовляв «документа не існує або він
+        // порожній» — хоча документ є і шаблон дає йому таблиці (UX-прохід
+        // 2026-09-24, живий стенд). Виклик ідемпотентний.
+        await rowStore.EnsureTableInstancesAsync(documentId, period, ct).ConfigureAwait(false);
+
         var instances = await rowStore.GetTableInstancesAsync(documentId, period, ct).ConfigureAwait(false);
 
         if (instances.Count == 0)
@@ -119,10 +138,19 @@ public sealed class ExcelImporter(
 
         var userId = currentUser.UserId
                      ?? throw new AccessDeniedException(
-                         "ECR-AUTH-0401", "Анонімний запит не може імпортувати дані.");
+                         "ECR-AUTH-0401", "Анонімний запит не може імпортувати дані.",
+                         new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.signInRequired" });
 
         var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
         var lookups = await LookupsAsync(snapshot, ct).ConfigureAwait(false);
+
+        // ⛔ S6 (ФВ-6.6): межі читання того, хто імпортує. Перегляд порівнює
+        // книгу з ПОТОЧНИМИ значеннями, і будь-яка відповідь, що залежить від
+        // значення прихованої комірки («нічого не зміниться» проти «відмова»),
+        // — оракул: підставляючи числа в книгу, прочитати приховане можна було
+        // без жодного права на читання. Приховане порівнянню не віддається
+        // зовсім (див. нижче і `ImportDiffBuilder.Build`).
+        var readable = (await access.ReadScopeAsync(profile, documentId, ct).ConfigureAwait(false)).InPeriod(period);
 
         var diffs = new List<TableDiff>(map.Tables.Count);
         var changes = new List<ImportChange>();
@@ -144,13 +172,21 @@ public sealed class ExcelImporter(
             // проєкт) могла б підмінити `TableInstanceId` і змусити код нижче
             // прочитати рядки й комірки ЧУЖОГО екземпляра ще ДО будь-якого
             // рішення про доступ.
+            //
+            // ⛔ S6: таблиця під забороною читання — та сама відмова, що й
+            // неіснуючий екземпляр, і ДО читання її рядків і комірок. Інакше
+            // відмова несла б код і назву прихованої таблиці зі знімка, а
+            // «зміна проти відмови» — чи збігається її значення з книжковим.
             if (!validInstances.TryGetValue(block.TableInstanceId, out var actualTableDefId)
-                || actualTableDefId != block.TableDefId)
+                || actualTableDefId != block.TableDefId
+                || !readable.CanReadTable(actualTableDefId))
             {
                 rejected.Add(new ImportRejection(
                     "—", block.TableCode, "ECR-IMP-0422",
                     "Екземпляра таблиці з файлу немає в цьому документі за цей період: "
-                    + "структуру, ймовірно, змінено після експорту."));
+                    + "структуру, ймовірно, змінено після експорту.",
+                    block.TableCode,
+                    MessageKey: ImportMessageKeys.InstanceMissing));
 
                 continue;
             }
@@ -159,7 +195,9 @@ public sealed class ExcelImporter(
             {
                 rejected.Add(new ImportRejection(
                     "—", block.TableCode, "ECR-IMP-0422",
-                    "Таблиці з файлу немає в чинній версії шаблону."));
+                    "Таблиці з файлу немає в чинній версії шаблону.",
+                    block.TableCode,
+                    MessageKey: ImportMessageKeys.TableMissing));
 
                 continue;
             }
@@ -175,18 +213,30 @@ public sealed class ExcelImporter(
         // ValidateDocumentHandler.
         var rowIdsBatch = await rowStore.GetRowIdsBatchAsync(tableInstanceIds, period, ct).ConfigureAwait(false);
         var versionsBatch = await rowStore.GetRowVersionsBatchAsync(tableInstanceIds, period, ct).ConfigureAwait(false);
-        var slicesBatch = await cellStore.ReadSlicesAsync(tableInstanceIds, ct).ConfigureAwait(false);
+        var slicesBatch = await cellStore.ReadSlicesAsync(tableInstanceIds, period, ct).ConfigureAwait(false);
+
+        // ⚠ Рішення про доступ — ПАКЕТНО на зріз. Поштучна перевірка
+        // тисяч комірок імпорту не вкладається в жоден бюджет і саме тому
+        // спокушає її пропустити.
+        // ⛔ P8 (перф-аудит): і не на зріз по черзі, а одним викликом на ВСЮ
+        // книгу. Доти `CanEditSliceAsync` на кожну таблицю коштував ~5–7
+        // звернень, тобто ~91 × 6 на типовий шаблон; тепер — стала кількість,
+        // незалежна від числа таблиць (`ImportPreviewAccessQueryCountTests`).
+        var decisionsBatch = await access
+            .CanEditSlicesAsync(profile, tableInstanceIds, ct)
+            .ConfigureAwait(false);
 
         foreach (var (block, table) in validBlocks)
         {
             var worksheet = workbook.Worksheet(block.SheetName);
 
-            // ⚠ Рішення про доступ — ПАКЕТНО на зріз. Поштучна перевірка
-            // тисяч комірок імпорту не вкладається в жоден бюджет і саме тому
-            // спокушає її пропустити.
-            var decisions = await access
-                .CanEditSliceAsync(profile, block.TableInstanceId, ct)
-                .ConfigureAwait(false);
+            // ⛔ Немає рішень на екземпляр — відмова, а не порожній словник:
+            // `ImportDiffBuilder` читає відсутнє рішення як «заборони немає».
+            if (!decisionsBatch.TryGetValue(block.TableInstanceId, out var decisions))
+            {
+                throw new InvalidOperationException(
+                    $"Служба доступу не повернула рішень для екземпляра таблиці {block.TableInstanceId}.");
+            }
 
             var rowIds = rowIdsBatch.GetValueOrDefault(
                 block.TableInstanceId, (IReadOnlyDictionary<string, long>)EmptyRowIds);
@@ -196,11 +246,21 @@ public sealed class ExcelImporter(
                 block.TableInstanceId, (IReadOnlyList<CellRecord>)EmptySlice);
 
             var diff = diffBuilder.Build(
-                worksheet, block, map.PeriodKey, table, decisions, lookups, rowIds, versions, current);
+                worksheet, block, map.PeriodKey, table, decisions, lookups, rowIds, versions, current,
+                readable.CanReadColumn,
+                Ecr.Application.Localization.NumberCulture.ForLanguage(currentUser.Language));
 
             diffs.Add(diff);
             changes.AddRange(diff.Changes);
             rejected.AddRange(diff.Rejected);
+        }
+
+        // ⛔ `V-10`: значення поза рядками таблиць (порожній документ, рядок під
+        // таблицею) — відмова з поясненням, а не мовчазний пропуск, після якого
+        // діалог каже «файл збігається з аркушем».
+        foreach (var sheet in validBlocks.GroupBy(v => v.Block.SheetName, StringComparer.OrdinalIgnoreCase))
+        {
+            rejected.AddRange(StrayValueDetector.Find(workbook.Worksheet(sheet.Key), [.. sheet]));
         }
 
         var token = Guid.NewGuid().ToString("N");
@@ -252,10 +312,23 @@ public sealed class ExcelImporter(
     /// ⚠ Ціна — довша транзакція; межу задає розмір книги (`S-16`/`S-17`), а
     /// під RCSI читачів вона не блокує.
     ///
-    /// ⚠ Перерахунок ставиться ОДИН на документ і ПІСЛЯ коміту. До `MI-02`
-    /// (транзакційна черга) це неможливо зробити всередині: Quartz тримає чергу
-    /// в пам'яті, воркер стартує раніше за коміт і прочитав би або старі дані,
+    /// ⚠ Перерахунок ставиться ОДИН на документ. Момент — за планувальником
+    /// (MI-02 (в), <see cref="IBackgroundJobScheduler.EnlistsInCallerTransaction"/>):
+    /// черга в базі — ОСТАННІМ оператором транзакції книги, після всього запису
+    /// (відкат книги відкочує й задачу); Quartz тримає чергу в пам'яті — ПІСЛЯ
+    /// коміту, бо воркер стартує раніше за коміт і прочитав би або старі дані,
     /// або — після відкату — дані, яких не було ніколи.
+    ///
+    /// ⛔ Саме останнім (умова «Аудиту» 2): постановка на ціль бере
+    /// UPDLOCK+HOLDLOCK на слот у <c>UX_JobProgress_Target_Queued</c> до кінця
+    /// транзакції, і на початку чи посередині книги він тримався б увесь її
+    /// запис (<c>ExcelImportTransactionalEnqueueTests</c> — тест порядку).
+    ///
+    /// ⛔ P8 (застосування 3/3): книга пише ОДНИМ книжковим шляхом
+    /// (<see cref="PatchCellsHandler.HandleWorkbookAsync"/>), а не циклом
+    /// поштучних PATCH — ~18 звернень до бази НА КОЖНУ таблицю (219 на книгу з
+    /// 12 таблиць) стали сталими на книгу (<c>ExcelImportApplyWorkbookTests</c>).
+    /// Правила ті самі — той самий обробник, ті самі методи правил.
     /// </remarks>
     public async Task<PatchCellsResponse> ApplyAsync(long documentId, string previewToken, CancellationToken ct)
     {
@@ -266,10 +339,58 @@ public sealed class ExcelImporter(
         var validation = new List<ValidationMessageDto>();
         var seeds = new List<RecalculationSeed>();
         long seedTableInstanceId = 0;
+        var diffs = plan.Tables.Where(t => t.Changes.Count > 0).ToList();
+
+        var period = new PeriodKey(plan.PeriodKey);
+        var sheets = await SheetsInLockOrderAsync(documentId, period, plan, ct).ConfigureAwait(false);
+
+        var enlist = jobs.EnlistsInCallerTransaction;
+
+        // ⚠ Одна задача на ВСЮ книгу, а не одна на таблицю. Каскад і так
+        // документний: `RecalculationService.RunAsync` резолвить документ із
+        // переданого екземпляра таблиці й далі читає ВСІ таблиці документа за
+        // період — формула сусіднього аркуша має право читати цю. Тому
+        // `TableInstanceId` тут — лише точка входу в документ, а насіння
+        // (`seeds`) зібране з усіх таблиць книги.
+        async Task EnqueueRecalculationAsync(CancellationToken token)
+        {
+            if (seeds.Count > 0)
+            {
+                // O1: злиття за документо-періодом (системна постановка — ціль без автора).
+                await jobs
+                    .EnqueueCoalescedAsync<IFormulaRecalculationJob>(
+                        FormulaRecalculationTarget.Of(documentId, plan.PeriodKey, createdByUserId: null),
+                        new { DocumentId = documentId, TableInstanceId = seedTableInstanceId, plan.PeriodKey, Cells = seeds },
+                        token)
+                    .ConfigureAwait(false);
+            }
+        }
 
         await uow.ExecuteInTransactionAsync(
             async innerCt =>
             {
+                // ⛔ Першою дією транзакції — спільні блокування ВСІХ аркушів
+                // книги в порядку ключа «документ × аркуш × період» (у межах
+                // книги — `SheetDefId` за зростанням), той самий порядок, що в
+                // `RecalculationService`. Доти їх брав кожен
+                // `PatchCellsHandler` сам — у порядку ТАБЛИЦЬ КНИГИ: черга
+                // блокувань FIFO, спільний запит стає за винятковим (подання),
+                // що вже чекає, і імпорт (B, потім A) проти перерахунку
+                // (A, потім B) з двома поданнями в черзі давав цикл. Повторне
+                // спільне блокування того самого аркуша в обробнику — той самий
+                // власник, воно видається одразу.
+                //
+                // ⚠ Стан аркуша тут не перевіряється: це робить
+                // `PatchCellsHandler` своєю відмовою (`ECR-ACCS-0403`), тож двох
+                // правд про «подано» не з'являється. Прочитаний тут під
+                // блокуванням стан він отримує готовим — без другого звернення.
+                var statuses = new Dictionary<int, Ecr.Domain.Enums.DocumentStatus>();
+                foreach (var sheetDefId in sheets)
+                {
+                    statuses[sheetDefId] = await sheetGate
+                        .EnterEditAsync(documentId, sheetDefId, period, innerCt).ConfigureAwait(false);
+                }
+
                 // ⚠ Накопичувачі скидаються НА ПОЧАТКУ замикання, а не поруч із
                 // оголошенням: <c>ExecuteInTransactionAsync</c> віддає тіло
                 // стратегії повторів EF (<c>EnableRetryOnFailure</c>), яка має
@@ -281,41 +402,42 @@ public sealed class ExcelImporter(
                 seeds.Clear();
                 seedTableInstanceId = 0;
 
-                foreach (var diff in plan.Tables.Where(t => t.Changes.Count > 0))
+                // ⚠ Версії рядків беруться з ПЕРЕГЛЯДУ і передаються як
+                // baseVersion. Саме це змушує звичайний шлях запису відхилити
+                // всю книгу, якщо між переглядом і застосуванням хтось правив ті
+                // самі рядки (ECR-CELL-0409) — тобто конфлікт ловить одна
+                // перевірка, а не дві, які вміють розійтися.
+                //
+                // ⚠ Той самий обробник, що й batch-PATCH, із Origin = "Import":
+                // окремий шлях запису означав би, що аудит, валідація і
+                // перерахунок для імпорту працюють інакше.
+                var requests = diffs
+                    .Select(diff => new PatchCellsRequest(
+                        diff.TableInstanceId,
+                        diff.PeriodKey,
+                        "Import",
+                        [.. diff.Changes
+                            .GroupBy(c => c.RowKey, StringComparer.Ordinal)
+                            .Select(g => new PatchRow(
+                                g.Key,
+                                diff.RowVersions.GetValueOrDefault(g.Key),
+                                [.. g.Select(c => new PatchCell(c.ColumnCode, c.NewValue))]))]))
+                    .ToList();
+
+                IReadOnlyList<PatchCellsResponse> responses;
+                try
                 {
-                    // ⚠ Версії рядків беруться з ПЕРЕГЛЯДУ і передаються як
-                    // baseVersion. Саме це змушує звичайний шлях запису відхилити
-                    // весь батч, якщо між переглядом і застосуванням хтось правив ті
-                    // самі рядки (ECR-CELL-0409) — тобто конфлікт ловить одна
-                    // перевірка, а не дві, які вміють розійтися.
-                    var rows = diff.Changes
-                        .GroupBy(c => c.RowKey, StringComparer.Ordinal)
-                        .Select(g => new PatchRow(
-                            g.Key,
-                            diff.RowVersions.GetValueOrDefault(g.Key),
-                            g.Select(c => new PatchCell(c.ColumnCode, c.NewValue)).ToList()))
-                        .ToList();
+                    responses = await patch
+                        .HandleWorkbookAsync(requests, seeds, innerCt, statuses)
+                        .ConfigureAwait(false);
+                }
+                catch (EcrException error) when (Blame(error, diffs) is { } named)
+                {
+                    throw named;
+                }
 
-                    PatchCellsResponse response;
-
-                    try
-                    {
-                        // ⚠ Той самий шлях, що й batch-PATCH, із Origin = "Import".
-                        // Окремий шлях запису означав би, що аудит, валідація і
-                        // перерахунок для імпорту працюють інакше — і розбіжність
-                        // виявиться на числах, а не на коді.
-                        response = await patch
-                            .HandleAsync(
-                                new PatchCellsRequest(diff.TableInstanceId, diff.PeriodKey, "Import", rows),
-                                innerCt,
-                                deferRecalculationUntilMi02: seeds)
-                            .ConfigureAwait(false);
-                    }
-                    catch (EcrException error) when (Blame(error, diff.TableInstanceId) is { } named)
-                    {
-                        throw named;
-                    }
-
+                foreach (var response in responses)
+                {
                     applied += response.AppliedCells;
                     validation.AddRange(response.Validation);
 
@@ -323,28 +445,22 @@ public sealed class ExcelImporter(
                     {
                         versions[key] = version;
                     }
+                }
 
-                    if (seedTableInstanceId == 0)
-                    {
-                        seedTableInstanceId = diff.TableInstanceId;
-                    }
+                seedTableInstanceId = diffs.Count > 0 ? diffs[0].TableInstanceId : 0;
+
+                // ⛔ MI-02 (в): останній оператор транзакції — див. remarks.
+                if (enlist)
+                {
+                    await EnqueueRecalculationAsync(innerCt).ConfigureAwait(false);
                 }
             },
             ct)
             .ConfigureAwait(false);
 
-        // ⚠ Одна задача на ВСЮ книгу, а не одна на таблицю. Каскад і так
-        // документний: `RecalculationService.RunAsync` резолвить документ із
-        // переданого екземпляра таблиці й далі читає ВСІ таблиці документа за
-        // період — формула сусіднього аркуша має право читати цю. Тому
-        // `TableInstanceId` тут — лише точка входу в документ, а насіння
-        // (`seeds`) зібране з усіх таблиць книги.
-        if (seeds.Count > 0)
+        if (!enlist)
         {
-            await jobs
-                .EnqueueAsync<IFormulaRecalculationJob>(
-                    new { TableInstanceId = seedTableInstanceId, plan.PeriodKey, Cells = seeds }, ct)
-                .ConfigureAwait(false);
+            await EnqueueRecalculationAsync(ct).ConfigureAwait(false);
         }
 
         // Прибирається ЛИШЕ після успіху: якщо застосування впало на конфлікті,
@@ -356,45 +472,160 @@ public sealed class ExcelImporter(
     }
 
     /// <summary>
-    /// Та сама відмова, але з номером таблиці, на якій застосування спинилося;
-    /// <c>null</c> — тип відмови невідомий, і викликач лишає оригінал як є.
+    /// Аркуші таблиць книги, у які застосування пише, — у порядку, у якому
+    /// береться їхнє блокування (<c>SheetDefId</c> за зростанням).
     /// </summary>
     /// <remarks>
-    /// ⛔ Без цього перекладу «усе або нічого» було б гіршим за часткове
-    /// застосування: користувач бачить, що не змінилося НІЧОГО, і не знає, де
-    /// саме шукати причину. Книга на десять таблиць, відмова без адреси — і
-    /// єдиний спосіб знайти винувату таблицю це пробувати їх по одній.
-    ///
-    /// ⚠ Тип відмови зберігається (від нього залежить HTTP-статус у
-    /// <c>ExceptionHandlingMiddleware.Map</c>), як і код та <c>messageKey</c>:
-    /// додається РІВНО одне поле. Невідомий підтип <see cref="EcrException"/>
-    /// дає <c>null</c> — фільтр <c>when</c> не спрацьовує, і оригінальний
-    /// виняток іде далі зі своїм стеком, а не підмінюється типом, який змінив
-    /// би статус відповіді.
+    /// ⚠ Читається ДО транзакції: це структура (екземпляр → таблиця → аркуш),
+    /// яка між переглядом і застосуванням не змінюється. Екземпляр, якого вже
+    /// немає в документі, сюди не потрапляє — його відхилить сам
+    /// <c>PatchCellsHandler</c> своєю відмовою.
     /// </remarks>
-    private static EcrException? Blame(EcrException error, long tableInstanceId)
+    private async Task<IReadOnlyList<int>> SheetsInLockOrderAsync(
+        long documentId, PeriodKey period, ImportPlan plan, CancellationToken ct)
     {
-        var details = new Dictionary<string, object?>(StringComparer.Ordinal);
-
-        if (error.Details is not null)
+        var changed = plan.Tables.Where(t => t.Changes.Count > 0).Select(t => t.TableInstanceId).ToHashSet();
+        if (changed.Count == 0)
         {
-            foreach (var (key, value) in error.Details)
+            return [];
+        }
+
+        var instances = await rowStore.GetTableInstancesAsync(documentId, period, ct).ConfigureAwait(false);
+        var sheets = new SortedSet<int>();
+
+        foreach (var group in instances.Where(i => changed.Contains(i.TableInstanceId)).GroupBy(i => i.TemplateVersionId))
+        {
+            var snapshot = await metadata.GetAsync(group.Key, ct).ConfigureAwait(false);
+            var sheetOfTable = snapshot.Sheets
+                .SelectMany(s => s.Tables)
+                .ToDictionary(t => t.Id, t => t.SheetDefId);
+
+            foreach (var instance in group)
             {
-                details[key] = value;
+                if (sheetOfTable.TryGetValue(instance.TableDefId, out var sheetDefId))
+                {
+                    sheets.Add(sheetDefId);
+                }
             }
         }
 
-        details["tableInstanceId"] =
-            tableInstanceId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        return [.. sheets];
+    }
 
-        return error switch
+    /// <summary>
+    /// Конфлікт версії таблиці, на якій книга спинилася, — лише з комірками, що
+    /// змінилися після перегляду; <c>null</c> — відмову лишити як є.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Номер таблиці (<c>tableInstanceId</c>) відмова вже несе — його додає
+    /// книжковий шлях (<see cref="PatchCellsHandler.HandleWorkbookAsync"/>) тим
+    /// самим ключем, що додавав тут колишній поштучний цикл. Лишилося те, чого
+    /// обробник знати не може: що показав перегляд.
+    ///
+    /// ⛔ F-24: конфлікт версії — РЯДКОВИЙ, і обробник запису перелічує КОЖНУ
+    /// комірку батчу в розбіжному рядку. Для імпорту це означало список
+    /// комірок, яких ніхто, крім самого імпорту, не чіпав: їхнє чинне
+    /// значення рівно те, що перегляд показав як «було». Лишаються ті, що
+    /// справді змінилися після перегляду, — саме їх людині треба звірити.
+    /// </remarks>
+    private static ConcurrencyConflictException? Blame(EcrException error, IReadOnlyList<TableDiff> diffs)
+    {
+        if (error is not ConcurrencyConflictException
+            || error.Details is not { } source
+            || source.GetValueOrDefault("tableInstanceId") is not string instance
+            || source.GetValueOrDefault("conflicts") is not IEnumerable<CellConflictDto> conflicts
+            || diffs.FirstOrDefault(d => string.Equals(
+                   d.TableInstanceId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                   instance,
+                   StringComparison.Ordinal)) is not { } diff)
         {
-            ConcurrencyConflictException => new ConcurrencyConflictException(error.ErrorCode, error.Message, details),
-            AccessDeniedException => new AccessDeniedException(error.ErrorCode, error.Message, details),
-            NotFoundException => new NotFoundException(error.ErrorCode, error.Message, details),
-            BusinessRuleException => new BusinessRuleException(error.ErrorCode, error.Message, details),
-            _ => null,
+            return null;
+        }
+
+        var details = new Dictionary<string, object?>(source, StringComparer.Ordinal)
+        {
+            ["conflicts"] = ChangedSincePreview(conflicts, diff),
         };
+
+        return new ConcurrencyConflictException(error.ErrorCode, error.Message, details);
+    }
+
+    /// <summary>
+    /// Розбіжності, у яких чинне значення комірки вже НЕ те, що перегляд
+    /// показав як «було» (F-24).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Комірка без пари в плані лишається: невідомо, що бачив перегляд, —
+    /// а прибрати справжню розбіжність гірше, ніж показати зайву.
+    /// </remarks>
+    private static List<CellConflictDto> ChangedSincePreview(
+        IEnumerable<CellConflictDto> conflicts, TableDiff diff)
+    {
+        var previewed = new Dictionary<(string RowKey, string ColumnCode), object?>();
+
+        foreach (var change in diff.Changes)
+        {
+            previewed[(change.RowKey, change.ColumnCode)] = change.OldValue;
+        }
+
+        return
+        [
+            .. conflicts.Where(conflict =>
+                !previewed.TryGetValue((conflict.RowKey, conflict.ColumnCode), out var old)
+                || !SameScalar(old, conflict.TheirValue)),
+        ];
+    }
+
+    /// <summary>
+    /// Чи те саме значення: з плану (після JSON — <see cref="JsonElement"/>) і
+    /// з бази (скаляр CLR).
+    /// </summary>
+    private static bool SameScalar(object? previewed, object? current)
+    {
+        var left = CellValueReader.Normalize(previewed);
+        var right = CellValueReader.Normalize(current);
+
+        if (left is null || right is null)
+        {
+            return left is null && right is null;
+        }
+
+        if (TryNumber(left, out var a) && TryNumber(right, out var b))
+        {
+            return a == b;
+        }
+
+        if (right is DateTime date && left is string text
+            && DateTime.TryParse(
+                text, System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.RoundtripKind, out var parsed))
+        {
+            return parsed == date;
+        }
+
+        return string.Equals(
+            Convert.ToString(left, System.Globalization.CultureInfo.InvariantCulture),
+            Convert.ToString(right, System.Globalization.CultureInfo.InvariantCulture),
+            StringComparison.Ordinal);
+    }
+
+    private static bool TryNumber(object value, out decimal number)
+    {
+        switch (value)
+        {
+            case decimal d:
+                number = d;
+                return true;
+            case int i:
+                number = i;
+                return true;
+            case long l:
+                number = l;
+                return true;
+            default:
+                number = 0;
+                return false;
+        }
     }
 
     /// <summary>
@@ -420,30 +651,53 @@ public sealed class ExcelImporter(
         var stored = await previews.FindAsync(previewToken, ct).ConfigureAwait(false)
                      ?? throw new BusinessRuleException(
                          "ECR-IMP-0422",
-                         "Перегляд імпорту не знайдено або його строк вийшов: побудуйте його заново.");
+                         "Перегляд імпорту не знайдено або його строк вийшов: побудуйте його заново.",
+
+                         // ⛔ F-24: без ключа деталь приїжджала українським
+                         // реченням під англійським заголовком.
+                         new Dictionary<string, object?> { ["messageKey"] = "err.ECR-IMP-0422.previewExpired" });
 
         var plan = JsonSerializer.Deserialize<ImportPlan>(stored, Options)
                    ?? throw new BusinessRuleException(
-                       "ECR-IMP-0422", "Збережений перегляд імпорту не читається.");
+                       "ECR-IMP-0422", "Збережений перегляд імпорту не читається.",
+                       new Dictionary<string, object?> { ["messageKey"] = "err.ECR-IMP-0422.previewUnreadable" });
 
         if (documentId is not null && plan.DocumentId != documentId)
         {
             throw new BusinessRuleException(
                 "ECR-IMP-0422",
-                $"Перегляд належить документу {plan.DocumentId}, а застосування йде в {documentId}.");
+                $"Перегляд належить документу {plan.DocumentId}, а застосування йде в {documentId}.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-IMP-0422.previewOtherDocument" });
         }
 
         return plan;
     }
 
     /// <summary>Відкриває книгу або каже, що це не книга.</summary>
+    /// <remarks>
+    /// ⛔ S10: спершу — <see cref="XlsxSafetyGate"/> (межі розпакованого
+    /// розміру, стиснення й кількості записів) ПОЗА <c>try</c> нижче: його
+    /// відмова вже має код і ключ, а ClosedXML не бачить непридатного пакета
+    /// взагалі.
+    /// </remarks>
     private static XLWorkbook Open(Stream file)
     {
+        XlsxSafetyGate.EnsureSafe(file);
+
         try
         {
             return new XLWorkbook(file);
         }
-        catch (Exception ex) when (ex is InvalidDataException or ArgumentException or FormatException)
+        // ⛔ F-07: файл, що не є книгою, ClosedXML відхиляє чим завгодно, крім
+        // того, що тут перелічували: текст і PDF — `OpenXmlPackageException`,
+        // zip без частини книги — навіть `NullReferenceException` зсередини
+        // `XLWorkbook.LoadSpreadsheetDocument`. Кожне з них ставало 500. Тому
+        // фільтр — не за типом, а за місцем: конструктор лише РОЗБИРАЄ файл, і
+        // будь-яка його відмова означає «це не книга» (скасування — не
+        // відмова розбору, воно йде далі як є).
+#pragma warning disable CA1031 // Причина — у ⛔ вище: перелік типів відмов стороннього розбору не закривається.
+        catch (Exception ex) when (ex is not OperationCanceledException)
+#pragma warning restore CA1031
         {
             throw new BusinessRuleException(
                 "ECR-IMP-0422", "Файл не читається як книга .xlsx.",
@@ -465,7 +719,8 @@ public sealed class ExcelImporter(
             throw new BusinessRuleException(
                 "ECR-IMP-0422",
                 "У книзі немає службового аркуша з картою: імпортувати можна лише файл, "
-                + "вивантажений цією системою.");
+                + "вивантажений цією системою.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-IMP-0422.noMapSheet" });
         }
 
         // ⚠ Карта складається з усіх непорожніх комірок стовпця A: експортер
@@ -478,11 +733,24 @@ public sealed class ExcelImporter(
                 .OrderBy(c => c.Address.RowNumber)
                 .Select(c => c.GetString()));
 
-        return (string.IsNullOrWhiteSpace(json)
-                   ? null
-                   : JsonSerializer.Deserialize<ExcelWorkbookMap>(json, Options))
+        ExcelWorkbookMap? map;
+
+        try
+        {
+            map = string.IsNullOrWhiteSpace(json)
+                ? null
+                : JsonSerializer.Deserialize<ExcelWorkbookMap>(json, Options);
+        }
+        catch (JsonException)
+        {
+            // ⚠ Зіпсована вручну карта — та сама відмова, що й порожня, а не 500.
+            map = null;
+        }
+
+        return map
                ?? throw new BusinessRuleException(
-                   "ECR-IMP-0422", "Карта книги порожня або пошкоджена.");
+                   "ECR-IMP-0422", "Карта книги порожня або пошкоджена.",
+                   new Dictionary<string, object?> { ["messageKey"] = "err.ECR-IMP-0422.mapBroken" });
     }
 
     /// <summary>Коди записів довідників: <c>RegistryDefId</c> → код → <c>Id</c>.</summary>

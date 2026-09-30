@@ -13,7 +13,7 @@ namespace Ecr.Api.Controllers;
 [Route("api/v1/collection-runs")]
 [Authorize]
 public sealed class CollectionRunsController(
-    ListCollectionRunsHandler list, GetCollectionRunHandler get) : ControllerBase
+    ListCollectionRunsHandler list, GetCollectionRunHandler get, ListCoverageEventsHandler events) : ControllerBase
 {
     /// <summary>Прогони збору, новіші першими.</summary>
     /// <param name="dataSource">Лише прогони сутностей цього з'єднання.</param>
@@ -53,6 +53,40 @@ public sealed class CollectionRunsController(
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> Get(long id, CancellationToken ct)
         => Ok(await get.HandleAsync(id, ct).ConfigureAwait(false));
+
+    /// <summary>
+    /// Події журналу покриття: пропуск закритого періоду, конфлікт із ручним
+    /// значенням, стеля точок (ІНТ-3.3, <c>D-118</c>). Новіші першими.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Літеральний сегмент, а не <c>{id}</c>: обмеження <c>{id:long}</c> у
+    /// деталі прогону не дає цим двом маршрутам збігтися.
+    /// </remarks>
+    /// <param name="dataSource">Лише події сутностей цього з'єднання.</param>
+    /// <param name="entity">Лише події цієї сутності збору.</param>
+    /// <param name="status">Будь-який статус із <c>CollectionCoverage.KnownStatuses</c> (<c>src/Ecr.Domain/Entities/Integration/IntegrationLogs.cs</c>), без урахування регістру: події матеріалізації й синку довідника; інше — <c>422</c>.</param>
+    /// <param name="periodKey">Лише події цього періоду.</param>
+    /// <param name="cursor">Курсор наступної сторінки.</param>
+    /// <param name="limit">Розмір сторінки 1..200; <c>0</c> — типове 50.</param>
+    /// <param name="ct">Токен скасування.</param>
+    [HttpGet("coverage-events")]
+    [ProducesResponseType<PagedResult<CoverageEventView>>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> CoverageEvents(
+        [FromQuery] int? dataSource,
+        [FromQuery] int? entity,
+        [FromQuery] string? status,
+        [FromQuery] int? periodKey,
+        [FromQuery] string? cursor,
+        [FromQuery] int limit,
+        CancellationToken ct)
+        => Ok(await events
+            .HandleAsync(
+                new CoverageEventFilter(dataSource, entity, status, periodKey),
+                new CursorRequest(limit == 0 ? 50 : limit, cursor),
+                ct)
+            .ConfigureAwait(false));
 
     /// <summary>Час без зони читається як UTC — так само, як його віддає журнал.</summary>
     private static DateTime? ToUtc(DateTime? value) => value switch

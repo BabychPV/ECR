@@ -62,18 +62,91 @@ public static class PermissionCheck
             // адміністратор не знає, що саме видати, і питання приходить до
             // розробника.
             //
-            // ⛔ `.Message` лишається українською навмисно як сирий,
-            // непризначений для клієнта текст: `ExceptionHandlingMiddleware`
-            // будує клієнтську `Detail` з каталогу (мовою користувача) плюс
-            // код права з `Details["permission"]` нижче — так само, як уже
-            // робить для `Title`. Без цього поля код права взагалі не дійшов
-            // би до клієнта окремо від готового речення.
+            // ⛔ `.Message` лишається українською навмисно як сирий, запасний
+            // текст для журналу — резолвер повертається до нього, коли ключа
+            // немає в каталозі (`Q-341`). Клієнтську `Detail` будує
+            // `err.ECR-AUTH-0403.permission` (узагальнений шлях,
+            // `ResolveGenericMessageAsync`) із коду права в
+            // `Details["permission"]`.
+            //
+            // ✎ 2026-09-25 (B-14, security): раніше тут НЕ було `messageKey` —
+            // запис 2026-09-20 у `contracts/localization-debt.md` пояснював
+            // це тим, що `ExceptionHandlingMiddleware` уже локалізує
+            // `ECR-AUTH-0403` зі старшого точкового шляху
+            // (`LocalizedDetailAsync`, гілка `permission` без `messageKey`).
+            // Той шлях і досі живий, але виявився винятком, не правилом: усі
+            // ІНШІ виклики того самого факту («бракує права X») — RoleAndUserHandlers,
+            // DocumentQueryHandlers, GetTableSliceHandler, ProjectQueryHandlers,
+            // ReopenDocumentHandler, ReopenPeriodHandler, RegistryAccess,
+            // ResourceGrantHandlers.RequireAsync, StartSimulationHandler — уже
+            // несуть `err.ECR-AUTH-0403.permission` явно. Лишати саме цей,
+            // найстаріший виклик без ключа означало розходження, не свідоме
+            // рішення: старий запис застарів, ключ додано для узгодженості.
             throw new AccessDeniedException(
                 "ECR-AUTH-0403",
                 $"Потрібне право {permission}.",
-                new Dictionary<string, object?> { ["permission"] = permission });
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-AUTH-0403.permission",
+                    ["permission"] = permission,
+                });
         }
 
         return profile;
     }
+
+    /// <summary>
+    /// Вхід у проєктну дію (ФВ-6.14): право є бодай у якомусь проєкті.
+    /// Відмова — та сама, що й у <see cref="RequireAsync"/>.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Лише вхід. Щойно проєкт ресурсу відомий, — <see cref="RequireIn"/>
+    /// (або <see cref="AccessProfile.Has(string, int)"/>). Сторож
+    /// <c>ProjectPermissionCheckTests</c> вимагає пари в тому самому методі.
+    /// Для користувача з роллю без області поведінка та сама, що й була.
+    /// </remarks>
+    /// <param name="access">Служба рішень про доступ.</param>
+    /// <param name="currentUser">Поточний користувач запиту.</param>
+    /// <param name="permission">Код проєктного права.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public static async Task<AccessProfile> RequireInAnyProjectAsync(
+        IAccessDecisionService access, ICurrentUser currentUser, string permission, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(access);
+        ArgumentNullException.ThrowIfNull(currentUser);
+
+        var userId = currentUser.UserId
+                     ?? throw new AccessDeniedException(
+                         "ECR-AUTH-0401", "Потрібна автентифікація.",
+                         new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.signInRequired" });
+
+        var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
+
+        return profile.HasInAnyProject(permission) ? profile : throw Denied(permission);
+    }
+
+    /// <summary>Вимагає проєктне право в конкретному проєкті (ФВ-6.14).</summary>
+    /// <param name="profile">Профіль.</param>
+    /// <param name="permission">Код права.</param>
+    /// <param name="projectId">Проєкт ресурсу.</param>
+    /// <exception cref="AccessDeniedException">Права в цьому проєкті немає — <c>403 ECR-AUTH-0403</c>.</exception>
+    public static void RequireIn(AccessProfile profile, string permission, int projectId)
+    {
+        ArgumentNullException.ThrowIfNull(profile);
+
+        if (!profile.Has(permission, projectId))
+        {
+            throw Denied(permission);
+        }
+    }
+
+    private static AccessDeniedException Denied(string permission)
+        => new(
+            "ECR-AUTH-0403",
+            $"Потрібне право {permission}.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-AUTH-0403.permission",
+                ["permission"] = permission,
+            });
 }

@@ -34,7 +34,11 @@ public sealed class CalculationInputBuilder(ICellStore cellStore, IMetadataCache
 
         var instance = await rows.ResolveTableInstanceAsync(tableInstanceId, ct).ConfigureAwait(false);
         var snapshot = await metadata.GetAsync(instance.TemplateVersionId, ct).ConfigureAwait(false);
-        var slice = await cellStore.ReadSliceAsync(tableInstanceId, ct).ConfigureAwait(false);
+        // O3c: період САМОГО екземпляра (не параметр `periodKey`) — той самий
+        // зріз, що без ключа, але з ключем партиції замість пошуку по всіх.
+        var slice = await cellStore
+            .ReadSliceAsync(tableInstanceId, new PeriodKey(instance.PeriodKey), ct)
+            .ConfigureAwait(false);
         var rowIds = await rows.GetRowIdsAsync(tableInstanceId, periodKey, ct).ConfigureAwait(false);
 
         // ⚠ Ім'я аргументу — це КОД колонки, а не її ідентифікатор: формула
@@ -47,6 +51,12 @@ public sealed class CalculationInputBuilder(ICellStore cellStore, IMetadataCache
             .ToDictionary(g => g.Key, g => g.ToList());
 
         var inputs = new List<CalculationInput>(rowKeys.Count);
+
+        // ⛔ `Lookup` → `EntryRef` лише у версіях `Strict` (RT-23a, `D-161`). Чинна
+        // система id запису довідника в формулу не передавала, і `Legacy` мусить
+        // лишатися побітно такою, як до кроку: там аргумент `Lookup`-колонки — той
+        // самий порожній `ValueNumeric`/`ValueString`, що й раніше.
+        var entryRefs = methodology.NumericMode == Domain.Enums.NumericMode.Strict;
 
         foreach (var rowKey in rowKeys)
         {
@@ -67,7 +77,11 @@ public sealed class CalculationInputBuilder(ICellStore cellStore, IMetadataCache
                         // (ФВ-16.8), інакше з колонки. Значення зберігається в
                         // одиниці джерела — конверсія на межі, не в сховищі
                         // (ФВ-16.10, D-79).
-                        c.Value.ValueUnitId ?? snapshot.ColumnsById[c.Address.ColumnDefId].UnitId))
+                        c.Value.ValueUnitId ?? snapshot.ColumnsById[c.Address.ColumnDefId].UnitId,
+
+                        // Id запису з `Lookup`-комірки — `EntryRef` для `REGFIND`,
+                        // `REGFIELD`, `ROW.X = @Arg` (§5.3). Інша комірка його не має.
+                        entryRefs ? c.Value.ValueRegistryEntryId : null))
                     .ToList()
                 : [];
 

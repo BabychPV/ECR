@@ -18,6 +18,7 @@ import { MoreConflictsExtension } from '@/api/types';
 import { outcomeOf, pollInterval, type JobOutcome } from '@/features/workflow/jobFollow';
 import { formatTime } from '@/shared/format';
 import { applyPatchToSlice } from './sliceApply';
+import { hasConfirmed } from './confirmedEdits';
 
 /** Накопичена зміна однієї комірки. */
 export interface PendingEdit {
@@ -76,6 +77,11 @@ export function buildRequest(
     tableInstanceId,
     periodKey,
     origin,
+    // ⛔ `ФВ-2.16`: сервер відхиляє батч із коміркою `AllowWithConfirmation`
+    // без цього прапорця. Ставиться ЛИШЕ коли в батчі є правка, яку людина
+    // справді підтвердила (`confirmedEdits.ts`), — і тут, а не в кожному
+    // викликачі: запит будують три шляхи, і жоден не має права його забути.
+    ...(hasConfirmed(tableInstanceId, periodKey, edits) ? { confirmed: true } : {}),
     rows: [...rows].map(([rowKey, row]) => ({
       rowKey,
       baseVersion: row.baseVersion,
@@ -303,7 +309,7 @@ export function useCellPatch(documentId: number): {
  * чужий формат), — це `0`, тобто «про решту нічого не відомо». Показати `NaN`
  * у реченні «і ще N комірок» було б гірше за мовчання.
  */
-function moreConflictsOf(error: EcrApiError): number {
+export function moreConflictsOf(error: EcrApiError): number {
   const raw = error.problem.extensions2?.[MoreConflictsExtension];
   const parsed = Number(raw);
 

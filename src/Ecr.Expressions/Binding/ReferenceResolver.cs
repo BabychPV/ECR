@@ -58,15 +58,17 @@ public sealed class ReferenceResolver(TemplateVersionSnapshot snapshot)
                 if (table.AllowsDynamicRows)
                 {
                     Report(diagnostics, node,
-                        $"Таблиця '{table.Code}' динамічна: посилатися на конкретний рядок " +
-                        $"'{single.RowKey}' не можна, лише предикатом.");
+                        "expr.ref.rowKeyInDynamicTable", DiagnosticParams.Of(("table", table.Code), ("row", single.RowKey)),
+                        $"Table \"{table.Code}\" is dynamic: a specific row \"{single.RowKey}\" cannot be "
+                        + "referenced, only a predicate.");
                     return null;
                 }
 
                 if (!snapshot.RowsByKey.ContainsKey((table.Id, single.RowKey)))
                 {
                     Report(diagnostics, node,
-                        $"Рядка '{single.RowKey}' немає в таблиці '{table.Code}'.");
+                        "expr.ref.unknownRow", DiagnosticParams.Of(("row", single.RowKey), ("table", table.Code)),
+                        $"Row \"{single.RowKey}\" does not exist in table \"{table.Code}\".");
                     return null;
                 }
 
@@ -83,7 +85,8 @@ public sealed class ReferenceResolver(TemplateVersionSnapshot snapshot)
                 if (!table.AllowsDynamicRows)
                 {
                     Report(diagnostics, node,
-                        $"Таблиця '{table.Code}' фіксована: предикат тут зайвий, рядки відомі наперед.");
+                        "expr.ref.predicateInFixedTable", DiagnosticParams.Of(("table", table.Code)),
+                        $"Table \"{table.Code}\" is fixed: a predicate is not needed, its rows are known in advance.");
                     return null;
                 }
 
@@ -92,7 +95,7 @@ public sealed class ReferenceResolver(TemplateVersionSnapshot snapshot)
             }
 
             default:
-                Report(diagnostics, node, "Невідомий селектор рядків.");
+                Report(diagnostics, node, "expr.ref.unknownRowSelector", null, "Unknown row selector.");
                 return null;
         }
     }
@@ -121,7 +124,9 @@ public sealed class ReferenceResolver(TemplateVersionSnapshot snapshot)
 
         if (field is null)
         {
-            Report(diagnostics, node, $"Поля шапки '{node.Name}' немає в опублікованій версії шаблону.");
+            Report(diagnostics, node,
+                "expr.ref.unknownHeaderField", DiagnosticParams.Of(("name", node.Name)),
+                $"Header field \"{node.Name}\" does not exist in the published template version.");
         }
 
         return field;
@@ -136,7 +141,10 @@ public sealed class ReferenceResolver(TemplateVersionSnapshot snapshot)
             var own = tables.FirstOrDefault(x => x.Table.Id == currentTableDefId).Table;
             if (own is null)
             {
-                Report(diagnostics, node, $"Таблиці {currentTableDefId}, у якій живе формула, немає у знімку.");
+                Report(diagnostics, node,
+                    "expr.ref.ownTableMissing",
+                    DiagnosticParams.Of(("tableDefId", currentTableDefId.ToString(System.Globalization.CultureInfo.InvariantCulture))),
+                    $"Table {currentTableDefId}, which holds the formula, is not in the snapshot.");
             }
 
             return own;
@@ -166,7 +174,8 @@ public sealed class ReferenceResolver(TemplateVersionSnapshot snapshot)
         if (candidates.Count == 0)
         {
             Report(diagnostics, node,
-                $"Таблиці '{node.SheetCode ?? "…"}.{node.TableCode}' немає в опублікованій версії шаблону.");
+                "expr.ref.unknownTable", DiagnosticParams.Of(("sheet", node.SheetCode ?? "…"), ("table", node.TableCode)),
+                $"Table \"{node.SheetCode ?? "…"}.{node.TableCode}\" does not exist in the published template version.");
             return null;
         }
 
@@ -184,7 +193,8 @@ public sealed class ReferenceResolver(TemplateVersionSnapshot snapshot)
             }
 
             Report(diagnostics, node,
-                "Плейсхолдер '{Month}' можна вжити лише у формулі, прив'язаній до місячної колонки.");
+                "expr.ref.monthPlaceholderOutsideColumn", null,
+                "The month placeholder can be used only in a formula bound to a monthly column.");
             return null;
         }
 
@@ -193,7 +203,9 @@ public sealed class ReferenceResolver(TemplateVersionSnapshot snapshot)
 
         if (column is null)
         {
-            Report(diagnostics, node, $"Колонки '{node.ColumnSelector}' немає в таблиці '{table.Code}'.");
+            Report(diagnostics, node,
+                "expr.ref.unknownColumn", DiagnosticParams.Of(("column", node.ColumnSelector), ("table", table.Code)),
+                $"Column \"{node.ColumnSelector}\" does not exist in table \"{table.Code}\".");
             return null;
         }
 
@@ -207,9 +219,143 @@ public sealed class ReferenceResolver(TemplateVersionSnapshot snapshot)
         return column.Id;
     }
 
-    private static void Report(List<ExpressionDiagnostic>? diagnostics, AstNode node, string message)
+    private static void Report(
+        List<ExpressionDiagnostic>? diagnostics,
+        AstNode node,
+        string messageKey,
+        IReadOnlyDictionary<string, string>? messageParams,
+        string message)
         => diagnostics?.Add(new ExpressionDiagnostic(
-            ExpressionErrors.Unresolved, message, node.Position, 1));
+            ExpressionErrors.Unresolved, message, node.Position, 1, messageKey, messageParams));
+
+    // ——— Довідники: перевірки 15 і 16 (FEATURE-REGISTRY-TABLES §5.5, `02b` §12) ———
+
+    /// <summary>
+    /// Код довідника з першого аргументу функції довідника, якщо він —
+    /// рядковий літерал; <c>null</c> — ні (перевірка 15, <c>expr.registryCodeMustBeLiteral</c>).
+    /// </summary>
+    /// <param name="node">Перший аргумент <c>REGFIND</c>/<c>REGONE</c>/агрегата.</param>
+    public static string? RegistryCodeLiteral(AstNode node)
+        => node is LiteralNode { Type: ExpressionValueType.Text, Value: string code } ? code : null;
+
+    /// <summary>Резолвить довідник за кодом (перевірка 15).</summary>
+    /// <param name="registries">Джерело форм довідників.</param>
+    /// <param name="code">Код — рядковий літерал виразу.</param>
+    /// <param name="literal">Вузол літерала — для позиції діагностики.</param>
+    /// <param name="diagnostics">Куди складати зауваження; <c>null</c> — мовчки.</param>
+    /// <returns>Форма довідника; <c>null</c> — такого немає.</returns>
+    /// <remarks>
+    /// ⚠ Позиція — сам літерал разом із лапками: редактор підсвічує саме код,
+    /// а не весь виклик.
+    /// </remarks>
+    public static RegistryShape? ResolveRegistry(
+        IRegistryShapeSource registries,
+        string code,
+        AstNode literal,
+        List<ExpressionDiagnostic>? diagnostics)
+    {
+        ArgumentNullException.ThrowIfNull(registries);
+        ArgumentNullException.ThrowIfNull(code);
+        ArgumentNullException.ThrowIfNull(literal);
+
+        var shape = registries.FindRegistry(code);
+        if (shape is null)
+        {
+            diagnostics?.Add(new ExpressionDiagnostic(
+                ExpressionErrors.Unresolved,
+                $"Registry \"{code}\" does not exist.",
+                literal.Position, code.Length + 2,
+                "expr.registryUnknown", DiagnosticParams.Of(("registry", code))));
+        }
+
+        return shape;
+    }
+
+    /// <summary>
+    /// Проходить шлях поля від довідника <paramref name="registry"/>:
+    /// кожен сегмент існує, проміжні — поля <c>Lookup</c> (перевірка 16).
+    /// </summary>
+    /// <param name="registries">Джерело форм — за ним іде перехід через <c>Lookup</c>.</param>
+    /// <param name="registry">Довідник, від якого починається шлях.</param>
+    /// <param name="path">Коди полів: <c>[COMPONENT, MW]</c>.</param>
+    /// <param name="segmentSpan">Позиція й довжина сегмента <c>i</c> у тексті виразу.</param>
+    /// <param name="diagnostics">Куди складати зауваження; <c>null</c> — мовчки.</param>
+    /// <returns>Останнє поле шляху; <c>null</c> — шлях не проходить.</returns>
+    /// <remarks>
+    /// ⛔ Це і є закриття <c>Д-5</c>: до цього методу описка в коді поля
+    /// <c>REGFIELD</c> проходила публікацію мовчки й виявлялася лише як
+    /// <c>#REF</c> у нічному прогоні — тобто неправильною клітинкою звіту,
+    /// яку помітять через місяць, а не червоним рядком редактора.
+    ///
+    /// ⚠ Звітує ПЕРШУ ваду шляху й зупиняється: після невідомого сегмента
+    /// решта шляху не має довідника, в якому її шукати, і кожне наступне
+    /// зауваження було б наслідком першого.
+    /// </remarks>
+    public static RegistryFieldShape? ResolveRegistryPath(
+        IRegistryShapeSource registries,
+        RegistryShape registry,
+        IReadOnlyList<string> path,
+        Func<int, (int Position, int Length)> segmentSpan,
+        List<ExpressionDiagnostic>? diagnostics)
+    {
+        ArgumentNullException.ThrowIfNull(registries);
+        ArgumentNullException.ThrowIfNull(registry);
+        ArgumentNullException.ThrowIfNull(path);
+        ArgumentNullException.ThrowIfNull(segmentSpan);
+
+        var current = registry;
+        RegistryFieldShape? field = null;
+
+        for (var i = 0; i < path.Count; i++)
+        {
+            if (field is not null)
+            {
+                // Проміжний сегмент мусить вести в інший довідник.
+                if (field.DataType != CellDataType.Lookup || field.LookupRegistryCode is null)
+                {
+                    ReportAt(diagnostics, segmentSpan(i - 1),
+                        "expr.registryFieldNotLookup",
+                        DiagnosticParams.Of(("registry", current.Code), ("field", field.Code)),
+                        $"Field \"{field.Code}\" of registry \"{current.Code}\" is not a Lookup field: "
+                        + "a field path can continue only through Lookup fields.");
+                    return null;
+                }
+
+                var next = registries.FindRegistry(field.LookupRegistryCode);
+                if (next is null)
+                {
+                    ReportAt(diagnostics, segmentSpan(i - 1),
+                        "expr.registryUnknown",
+                        DiagnosticParams.Of(("registry", field.LookupRegistryCode)),
+                        $"Registry \"{field.LookupRegistryCode}\" does not exist.");
+                    return null;
+                }
+
+                current = next;
+            }
+
+            field = current.FindField(path[i]);
+            if (field is null)
+            {
+                ReportAt(diagnostics, segmentSpan(i),
+                    "expr.registryFieldUnknown",
+                    DiagnosticParams.Of(("registry", current.Code), ("field", path[i])),
+                    $"Registry \"{current.Code}\" has no field \"{path[i]}\".");
+                return null;
+            }
+        }
+
+        return field;
+    }
+
+    private static void ReportAt(
+        List<ExpressionDiagnostic>? diagnostics,
+        (int Position, int Length) span,
+        string messageKey,
+        IReadOnlyDictionary<string, string> messageParams,
+        string message)
+        => diagnostics?.Add(new ExpressionDiagnostic(
+            ExpressionErrors.Unresolved, message, span.Position, Math.Max(1, span.Length), messageKey, messageParams));
 }
 
 /// <summary>Резолвлене посилання.</summary>

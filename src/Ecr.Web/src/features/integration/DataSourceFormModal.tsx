@@ -17,10 +17,13 @@ import { DataSourcesQueryKey } from './dataSourcesKey';
 /** Транспорти, які знає сервер (`ExternalTransport`). */
 const Transports: readonly SaveDataSourceBody['transport'][] = ['PiWebApi', 'PiSqlClient', 'Sql'];
 
-type FailedField = 'code' | 'endpoint' | 'secondaryEndpoint';
+type FailedField = 'code' | 'endpoint' | 'secondaryEndpoint' | 'secretConfirmation';
 
 /**
  * Відмови сервера, які належать КОНКРЕТНОМУ полю, — за `messageKey`.
+ *
+ * ⛔ `dataSourceSecretReentryRequired` (S3): адреса нова, а секрет середовища
+ * під це джерело не підтверджено — відмова стоїть біля поля секрету.
  *
  * Решта відмов (`dataSourceInvalid`, 403, 5xx) — загальний `ErrorAlert` над
  * кнопками.
@@ -33,6 +36,7 @@ type FailedField = 'code' | 'endpoint' | 'secondaryEndpoint';
 const FieldOfKey: Readonly<Record<string, FailedField>> = {
   'err.ECR-REQ-0422.dataSourceEndpointCarriesSecret': 'endpoint',
   'err.ECR-REQ-0422.dataSourceCodeTaken': 'code',
+  'err.ECR-REQ-0422.dataSourceSecretReentryRequired': 'secretConfirmation',
 };
 
 interface FieldFailure {
@@ -68,18 +72,40 @@ interface Draft {
   catalog: string;
   maxParallel: number | null;
   isActive: boolean;
+  /** Повторно введений секрет; живе лише в чернетці, у переліку не буває. */
+  secretConfirmation: string;
+}
+
+/**
+ * Чи правка веде секрет джерела на НОВУ адресу (S3).
+ *
+ * ⚠ Порівняння буквальне — ширше за серверне (сервер не вважає зміною регістр
+ * хоста чи кінцеву `/`). Зайве поле коштує одного введення; пропущене — `422`
+ * після натиску «Зберегти». Остаточне слово за сервером: його відмова
+ * `dataSourceSecretReentryRequired` теж відкриває поле.
+ */
+export function needsSecretReentry(draft: Draft, source: DataSource | null): boolean {
+  if (source === null || !source.hasSecret) return false;
+
+  return (
+    draft.transport !== source.transport ||
+    draft.endpoint.trim() !== source.endpoint.trim() ||
+    draft.secondaryEndpoint.trim() !== (source.secondaryEndpoint ?? '').trim()
+  );
 }
 
 function draftOf(source: DataSource | null): Draft {
   return {
     code: source?.code ?? '',
     name: source === null ? '' : (source.nameL10n[language()] ?? dataSourceName(source)),
-    transport: source?.transport ?? 'PiWebApi',
+    // D-212: типовий транспорт нового з'єднання — PI SQL (views — основний канал), не PI Web API.
+    transport: source?.transport ?? 'PiSqlClient',
     endpoint: source?.endpoint ?? '',
     secondaryEndpoint: source?.secondaryEndpoint ?? '',
     catalog: source?.catalog ?? '',
     maxParallel: source?.maxParallel ?? null,
     isActive: source?.isActive ?? true,
+    secretConfirmation: '',
   };
 }
 
@@ -104,15 +130,21 @@ export function bodyOf(draft: Draft, base: DataSource | null): SaveDataSourceBod
     catalog: optional(draft.catalog),
     maxParallel: draft.maxParallel,
     isActive: base === null ? true : draft.isActive,
+    // ⛔ Лише коли людина його ввела: сервер звіряє й не зберігає.
+    secretConfirmation: draft.secretConfirmation.length === 0 ? null : draft.secretConfirmation,
   };
 }
 
 /**
  * Створення (`source === null`) або правка з'єднання (`ФВ-14.3`, `UI-09`).
  *
- * ⛔ Поля секрету НЕМАЄ (`Q15-06`): джерела ходять під службовим обліковим
- * записом. Облікові дані в адресі сервер відхиляє `422
+ * ⛔ Поля «задати секрет» НЕМАЄ (`Q15-06`): джерела ходять під службовим
+ * обліковим записом. Облікові дані в адресі сервер відхиляє `422
  * dataSourceEndpointCarriesSecret` — відмова стоїть біля поля адреси.
+ *
+ * ⛔ S3: якщо середовище дає секрет під це джерело (`hasSecret`) і правка
+ * змінює транспорт чи адресу, з'являється поле «секрет ще раз» — без нього
+ * сервер не пустить секрет на нову адресу. Це підтвердження, а не збереження.
  *
  * ⛔ Правка шле `If-Match` із `rowVersion` рядка, який ПОКАЗАЛИ людині.
  * Хтось змінив з'єднання між читанням і збереженням — `409 dataSourceChanged`:
@@ -164,6 +196,11 @@ function DataSourceForm({
   // та, яку сервер назвав чинною, і лише коли людина сама її взяла.
   const [rowVersion, setRowVersion] = useState<string>(() => source?.rowVersion ?? '');
 
+  // ⚠ Сервер попросив секрет (зокрема при СТВОРЕННІ, коли секрет під цей код
+  // уже заданий у середовищі, — клієнт цього знати не може): поле лишається
+  // відкритим до кінця діалогу, а не зникає на час наступного запиту.
+  const [secretAsked, setSecretAsked] = useState(false);
+
   const save = useMutation({
     mutationFn: (body: SaveDataSourceBody) =>
       source === null ? createDataSource(body) : updateDataSource(source.id, body, rowVersion),
@@ -171,7 +208,11 @@ function DataSourceForm({
       void queryClient.invalidateQueries({ queryKey: DataSourcesQueryKey });
       notifications.show({ message: t(source === null ? 'sources.created' : 'sources.saved') });
       onDone();
-    },  });
+    },
+    onError: (error) => {
+      if (fieldFailureOf(error)?.field === 'secretConfirmation') setSecretAsked(true);
+    },
+  });
 
   const set = <K extends keyof Draft>(key: K, value: Draft[K]): void => {
     setDraft((current) => ({ ...current, [key]: value }));
@@ -189,10 +230,14 @@ function DataSourceForm({
 
   // ⚠ Лише обов'язковість — те, що сервер вимагає однаково й без чого запит
   // гарантовано дав би `422`. Власних правил формату тут немає.
+  const secretNeeded = needsSecretReentry(draft, source);
+  const secretShown = secretNeeded || secretAsked;
+
   const incomplete =
     draft.name.trim().length === 0 ||
     draft.endpoint.trim().length === 0 ||
-    (source === null && draft.code.trim().length === 0);
+    (source === null && draft.code.trim().length === 0) ||
+    (secretNeeded && draft.secretConfirmation.length === 0);
 
   return (
     <Stack gap="sm" data-data-source-form="">
@@ -248,6 +293,25 @@ function DataSourceForm({
         autoComplete="off"
         spellCheck={false}
       />
+
+      {/* ⛔ S3: секрет середовища йде лише на адресу, яку підтвердив той, хто
+          його знає. Значення не зберігається ні тут, ні на сервері. */}
+      {/* ⚠ `TextInput type="password"`, а не `PasswordInput`: той не зв'язує
+          текст помилки з полем (`aria-describedby`), і читалка не почула б,
+          чому збереження відмовлено. */}
+      {secretShown && (
+        <TextInput
+          type="password"
+          label={t('sources.secretConfirmation')}
+          description={t('sources.secretConfirmationHint')}
+          value={draft.secretConfirmation}
+          onChange={(event) => set('secretConfirmation', event.currentTarget.value)}
+          error={onField?.field === 'secretConfirmation' ? onField.text : undefined}
+          required={secretNeeded}
+          autoComplete="new-password"
+          data-field="secretConfirmation"
+        />
+      )}
 
       <TextInput
         label={t('sources.catalog')}

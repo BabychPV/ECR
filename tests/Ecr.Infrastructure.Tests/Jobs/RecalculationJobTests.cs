@@ -297,7 +297,7 @@ public sealed class RecalculationJobTests(SqlServerFixture sql)
             HeaderStore(),
             Substitute.For<IAuditWriter>(),
             new TestClock(new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)),
-            Substitute.For<Ecr.Application.Ports.IUnitOfWork>());
+            Substitute.For<Ecr.Application.Ports.IUnitOfWork>(), Substitute.For<Ecr.Application.Ports.ISheetEditGate>());
     }
 
     /// <summary>Порожня шапка документа — тести цього файлу її не читають.</summary>
@@ -318,7 +318,9 @@ public sealed class RecalculationJobTests(SqlServerFixture sql)
             Substitute.For<Ecr.Application.Ports.IUnitOfWork>(),
             Substitute.For<Ecr.Application.Security.IAccessDecisionService>(),
             Substitute.For<ICurrentUser>(),
-            new TestClock(DateTime.UtcNow));
+            new TestClock(DateTime.UtcNow),
+            Substitute.For<Ecr.Application.Ports.IRecalculationApprovalStore>(),
+            Substitute.For<Ecr.Application.Ports.IAuditWriter>());
 
     /// <summary>Оркестратор, що відмічає свій виклик у журналі порядку.</summary>
     private sealed class RecordingRunner(List<string> order) : ICalculationRunner

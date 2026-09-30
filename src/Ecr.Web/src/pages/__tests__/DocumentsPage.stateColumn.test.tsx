@@ -72,6 +72,64 @@ const withUnknown = {
   sheetStates: { S1: 'Returned' },
 };
 
+/*
+ * ⚠ Один аркуш — і код у стані зайвий (знімок людини: `S99819007` перед
+ * `SUBMITTED` на документі з одним аркушем).
+ */
+const singleSheet = {
+  id: 4,
+  businessKey: 'DOC-000004',
+  createdAt: '2026-01-01T00:00:00Z',
+  projectId: 1,
+  sheetCount: 1,
+  sheetStates: { S99819007: 'Submitted' },
+};
+
+/*
+ * ⚠ Аркушів ДВА, а рядок стану — лише в одного: код ще потрібен, інакше не
+ * видно, чий це стан.
+ */
+const partialStates = {
+  id: 5,
+  businessKey: 'DOC-000005',
+  createdAt: '2026-01-01T00:00:00Z',
+  projectId: 1,
+  sheetCount: 2,
+  sheetStates: { S7: 'Draft' },
+};
+
+/*
+ * ⚠ Сервер віддає `sheets` — аркуші В ПОРЯДКУ аркушів і з назвою. Порядок
+ * `sheets` навмисно НЕ збігається з порядком ключів `sheetStates`: так видно,
+ * що клітинка йде за `sheets`, а не за словником. У `WTR` назви немає жодною
+ * мовою — підпис має впасти на код. Назва `GEN` різна для `uk` і `en`: мова
+ * інтерфейсу тут `en` (`/me`), тож має бути саме англійська.
+ */
+const withNames = {
+  id: 6,
+  businessKey: 'DOC-000006',
+  createdAt: '2026-01-01T00:00:00Z',
+  projectId: 1,
+  sheetCount: 3,
+  sheetStates: { WTR: 'Rejected', AIR: 'Submitted', GEN: 'Draft' },
+  sheets: [
+    { code: 'GEN', nameL10n: { values: { uk: 'Загальні відомості', en: 'General info' } }, state: 'Draft' },
+    { code: 'AIR', nameL10n: { values: { en: 'Air emissions' } }, state: 'Submitted' },
+    { code: 'WTR', nameL10n: { values: {} }, state: 'Rejected' },
+  ],
+};
+
+/* ⚠ Один аркуш і `sheets` з назвою — підпису однаково немає: ні коду, ні назви. */
+const singleNamed = {
+  id: 7,
+  businessKey: 'DOC-000007',
+  createdAt: '2026-01-01T00:00:00Z',
+  projectId: 1,
+  sheetCount: 1,
+  sheetStates: { S42: 'Approved' },
+  sheets: [{ code: 'S42', nameL10n: { values: { en: 'Only sheet' } }, state: 'Approved' }],
+};
+
 function mockFetch(): void {
   vi.stubGlobal(
     'fetch',
@@ -98,9 +156,9 @@ function mockFetch(): void {
       if (url.includes('/api/v1/documents')) {
         return new Response(
           JSON.stringify({
-            items: [withoutStates, withStates, withUnknown],
+            items: [withoutStates, withStates, withUnknown, singleSheet, partialStates, withNames, singleNamed],
             nextCursor: null,
-            totalCount: 3,
+            totalCount: 7,
           }),
           { status: 200, headers: { 'Content-Type': 'application/json' } },
         );
@@ -336,6 +394,114 @@ describe('DocumentsPage: тон стану аркуша приходить із 
       expect(unknown.getAttribute('data-status-tone')).not.toBe(
         known.getAttribute('data-status-tone'),
       );
+    },
+    SlowEnvTimeout,
+  );
+});
+
+describe('DocumentsPage: код аркуша лише там, де аркушів кілька', () => {
+  it(
+    'документ з одним аркушем — лише бейдж, без внутрішнього коду',
+    async () => {
+      mockFetch();
+      show();
+
+      await screen.findByText('DOC-000004', {}, { timeout: SlowEnvTimeout });
+
+      const cell = stateCellOf('DOC-000004');
+
+      // ⛔ Мутаційний доказ: прибери умову `!isSingleSheet(document)` — код
+      // повернеться в клітинку, і цей рядок почервоніє.
+      expect(cell.textContent).not.toContain('S99819007');
+      expect(badgeIn(cell, 'Submitted').textContent).toBe('⟦status.sheet.Submitted⟧');
+    },
+    SlowEnvTimeout,
+  );
+
+  it(
+    'аркушів кілька, а назв сервер не віддав (`sheets` немає) — код лишається поруч зі станом',
+    async () => {
+      mockFetch();
+      show();
+
+      await screen.findByText('DOC-000005', {}, { timeout: SlowEnvTimeout });
+
+      // ⛔ Мутаційний доказ: сховай код завжди — обидва рядки почервоніють.
+      expect(pairOf(stateCellOf('DOC-000005'), 'Draft').textContent).toContain('S7');
+      expect(pairOf(stateCellOf('DOC-000002'), 'Rejected').textContent).toContain('S3');
+    },
+    SlowEnvTimeout,
+  );
+});
+
+describe('DocumentsPage: назва аркуша замість внутрішнього коду', () => {
+  it(
+    'аркушів кілька — поруч зі станом НАЗВА аркуша мовою інтерфейсу, а не код',
+    async () => {
+      mockFetch();
+      show();
+
+      await screen.findByText('DOC-000006', {}, { timeout: SlowEnvTimeout });
+
+      const cell = stateCellOf('DOC-000006');
+
+      // ⛔ Мутаційний доказ: поверни підпис `{code}` — обидві пари почервоніють.
+      const draft = pairOf(cell, 'Draft');
+      expect(draft.textContent).toContain('General info');
+      expect(draft.textContent).not.toContain('GEN');
+      expect(draft.textContent).not.toContain('Загальні відомості');
+
+      const submitted = pairOf(cell, 'Submitted');
+      expect(submitted.textContent).toContain('Air emissions');
+      expect(submitted.textContent).not.toContain('AIR');
+    },
+    SlowEnvTimeout,
+  );
+
+  it(
+    'назви немає жодною мовою — підпис падає на код, а не зникає',
+    async () => {
+      mockFetch();
+      show();
+
+      await screen.findByText('DOC-000006', {}, { timeout: SlowEnvTimeout });
+
+      // ⛔ Мутаційний доказ: прибери запасний варіант — підпис порожній, рядок червоний.
+      expect(pairOf(stateCellOf('DOC-000006'), 'Rejected').textContent).toContain('WTR');
+    },
+    SlowEnvTimeout,
+  );
+
+  it(
+    'аркуші йдуть у порядку `sheets` (порядок аркушів), а не ключів `sheetStates`',
+    async () => {
+      mockFetch();
+      show();
+
+      await screen.findByText('DOC-000006', {}, { timeout: SlowEnvTimeout });
+
+      const states = [...stateCellOf('DOC-000006').querySelectorAll('[data-status-state]')].map((node) =>
+        node.getAttribute('data-status-state'),
+      );
+
+      expect(states).toEqual(['Draft', 'Submitted', 'Rejected']);
+    },
+    SlowEnvTimeout,
+  );
+
+  it(
+    'аркуш один — лише бейдж: ні назви, ні коду',
+    async () => {
+      mockFetch();
+      show();
+
+      await screen.findByText('DOC-000007', {}, { timeout: SlowEnvTimeout });
+
+      const cell = stateCellOf('DOC-000007');
+
+      expect(cell.textContent).not.toContain('Only sheet');
+      expect(cell.textContent).not.toContain('S42');
+      expect(badgeIn(cell, 'Approved').textContent).toBe('⟦status.sheet.Approved⟧');
     },
     SlowEnvTimeout,
   );

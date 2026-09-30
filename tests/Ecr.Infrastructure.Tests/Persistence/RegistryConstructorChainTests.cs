@@ -57,7 +57,7 @@ public sealed class RegistryConstructorChainTests(SqlServerFixture sql)
 
         await using var db = Context();
         var store = new RegistryStore(db);
-        var handler = new GetRegistryDefinitionHandler(store, Access(), User());
+        var handler = new GetRegistryDefinitionHandler(store, new RegistryKeyStore(db), Access(), User());
 
         var definition = await handler.HandleAsync(permitCode, CancellationToken.None);
 
@@ -142,11 +142,14 @@ public sealed class RegistryConstructorChainTests(SqlServerFixture sql)
         await using var db = Context();
         var store = new RegistryStore(db);
 
-        var existing = await new GetRegistryDefinitionHandler(store, Access(), User())
+        var keys = new RegistryKeyStore(db);
+        var existing = await new GetRegistryDefinitionHandler(store, keys, Access(), User())
             .HandleAsync(permitCode, CancellationToken.None);
 
+        var uow = new UnitOfWork(db);
         var save = new SaveRegistryDefinitionHandler(
-            store, new UnitOfWork(db), new AuditWriter(db), Editor(), User(), Clock());
+            store, uow, new AuditWriter(db), Editor(), User(), Clock(), new UnitCatalog(db),
+            keys, new Ecr.Application.Registries.Keys.RegistryKeyService(keys, uow));
 
         var rules = existing.Rules
             .Select(r => new RegistryRuleSaveDto(
@@ -180,7 +183,7 @@ public sealed class RegistryConstructorChainTests(SqlServerFixture sql)
         // пам'яті навіть тоді, коли `SaveChanges` до таблиці не дійшов.
         await using var fresh = Context();
         var reread = await new GetRegistryDefinitionHandler(
-                new RegistryStore(fresh), Access(), User())
+                new RegistryStore(fresh), new RegistryKeyStore(fresh), Access(), User())
             .HandleAsync(permitCode, CancellationToken.None);
 
         var added = Assert.Single(reread.Rules, r => r.Code == "LimitBelowCap");

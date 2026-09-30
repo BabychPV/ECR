@@ -313,8 +313,29 @@ public sealed class ErrorContractTests(SqlServerFixture sql)
         using var app = new EcrApiFactory(sql);
         using var client = app.CreateClient();
 
-        // Користувач без жодного гранта: автентифікований, але нічого не може.
+        // Документ ВИДИМИЙ (грант Project Read), але рівня Submit немає: невидимий → 404, B-08.
         var (name, documentId, sheetDefId) = await ArrangeAsync().ConfigureAwait(true);
+        await using (var db = new Ecr.Infrastructure.Persistence.EcrDbContext(
+            new DbContextOptionsBuilder<Ecr.Infrastructure.Persistence.EcrDbContext>()
+                .UseSqlServer(sql.ConnectionString).Options))
+        {
+            var userId = await db.Users.Where(u => u.UserName == name).Select(u => u.Id)
+                                 .SingleAsync().ConfigureAwait(true);
+            var projectId = await db.Documents.Where(d => d.Id == documentId).Select(d => d.ProjectId)
+                                    .SingleAsync().ConfigureAwait(true);
+
+            var role = new Ecr.Domain.Entities.Security.Role(
+                Ecr.Domain.ValueObjects.EcrCode.Create($"V{Guid.NewGuid():N}"[..12]),
+                new Ecr.Domain.ValueObjects.LocalizedText(new Dictionary<string, string> { ["en"] = "Viewer" }));
+            db.Roles.Add(role);
+            await db.SaveChangesAsync().ConfigureAwait(true);
+
+            db.RoleAssignments.Add(new Ecr.Domain.Entities.Security.RoleAssignment(role.Id, userId, principalSid: null));
+            db.ResourceGrants.Add(new Ecr.Domain.Entities.Security.ResourceGrant(
+                role.Id, Ecr.Domain.Enums.ResourceKind.Project, projectId, Ecr.Domain.Enums.GrantLevel.Read));
+            await db.SaveChangesAsync().ConfigureAwait(true);
+        }
+
         var login = await client.PostAsJsonAsync(
             new Uri("/api/v1/login/local", UriKind.Relative),
             new { userName = name, password = LoginPassword }).ConfigureAwait(true);
@@ -335,7 +356,7 @@ public sealed class ErrorContractTests(SqlServerFixture sql)
         // «чому комірка сіра» (ФВ-6.8).
         Assert.Equal(ErrorCodes.AccessDenied, json.GetProperty("errorCode").GetString());
         Assert.Equal(
-            nameof(Ecr.Domain.Enums.EditDenyReason.NoGrant),
+            nameof(Ecr.Domain.Enums.EditDenyReason.InsufficientGrantLevel),
             json.GetProperty("reason").GetString());
         Assert.False(string.IsNullOrWhiteSpace(json.GetProperty("correlationId").GetString()));
     }

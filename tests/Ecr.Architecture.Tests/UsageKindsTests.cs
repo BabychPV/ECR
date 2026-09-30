@@ -37,7 +37,7 @@ public sealed class UsageKindsTests
                 "calculationBinding", "data", "derivedUnit", "dimensionBase", "fieldMap",
                 "methodologyConstant", "methodologyFormula", "methodologyOutput",
                 "methodologyRequiredInput", "methodologyRule", "methodologySubstance", "registryField",
-                "sourceEntity", "templateColumn", "templateFormula", "unitConversion",
+                "rowWindowMap", "sourceEntity", "templateColumn", "templateFormula", "unitConversion",
             ],
             UsageKinds.All.Order(StringComparer.Ordinal));
     }

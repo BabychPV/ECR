@@ -1,4 +1,4 @@
-﻿// tests/Ecr.Application.Tests/Documents/GetTableSliceTests.cs
+// tests/Ecr.Application.Tests/Documents/GetTableSliceTests.cs
 using Ecr.Application.Documents;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
@@ -76,6 +76,8 @@ public sealed class GetTableSliceTests
 
         _access.CanEditSliceAsync(Arg.Any<AccessProfile>(), TableInstance, Arg.Any<CancellationToken>())
                .Returns(new Dictionary<CellAddress, EditDecision>());
+        _access.ReadScopeAsync(Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
+               .Returns(async _ => ReadScopes.Everything(await _metadata.GetAsync(2, CancellationToken.None)));
 
         // ⚠ За замовчуванням жодна методологія до таблиці НЕ прив'язана —
         // предмет цих тестів вміст зрізу, а не позначку методології
@@ -135,7 +137,7 @@ public sealed class GetTableSliceTests
         => new(_rows, _cells, _metadata, Units(), _access, _methodologies, _periods, Styles());
 
     private void Cells(params CellRecord[] records)
-        => _cells.ReadSliceAsync(TableInstance, Arg.Any<CancellationToken>()).Returns(records);
+        => _cells.ReadSliceAsync(TableInstance, new PeriodKey(Period), Arg.Any<CancellationToken>()).Returns(records);
 
     private static CellRecord Cell(long rowId, CellValueData value)
         => new(new CellAddress(new PeriodKey(Period), rowId, VolumeId), TableDefId: 3, value);
@@ -195,10 +197,11 @@ public sealed class GetTableSliceTests
         _access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
             .Returns(EditDecision.Deny(EditDenyReason.NoGrant));
 
-        var denied = await Assert.ThrowsAsync<Ecr.Application.Errors.AccessDeniedException>(
+        // ⛔ B-08: невидимий документ — 404, як і відсутній, а не 403.
+        var denied = await Assert.ThrowsAsync<Ecr.Application.Errors.NotFoundException>(
             () => Handler().HandleAsync(700, TableInstance, Profile(), "en", CancellationToken.None));
 
-        Assert.Equal("ECR-AUTH-0403", denied.ErrorCode);
+        Assert.Equal("ECR-DOC-0404", denied.ErrorCode);
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
@@ -278,7 +281,10 @@ public sealed class GetTableSliceTests
 
         // Три рядки — але сховище опитане рівно по одному разу на кожен вид
         // даних. N+1 тут не «неоптимальність», а зруйнований бюджет.
-        await _cells.Received(1).ReadSliceAsync(TableInstance, Arg.Any<CancellationToken>());
+        // ⚠ O3b: зріз читається з періодом екземпляра (ключ партиції), а
+        // перевантаження без періоду — скан усіх партицій — не кличеться.
+        await _cells.Received(1).ReadSliceAsync(TableInstance, new PeriodKey(Period), Arg.Any<CancellationToken>());
+        await _cells.DidNotReceive().ReadSliceAsync(Arg.Any<long>(), Arg.Any<CancellationToken>());
         await _rows.Received(1).GetRowIdsAsync(TableInstance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>());
         await _rows.Received(1).GetRowVersionsAsync(TableInstance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>());
         await _cells.DidNotReceive().ReadCellsAsync(

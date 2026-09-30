@@ -51,7 +51,15 @@ public sealed class GetTemplateStructureHandler(
         // структури, а не до стану), тому питається окремо і завжди свіжий.
         var version = await versions.FindAsync(templateVersionId, ct).ConfigureAwait(false)
             ?? throw new NotFoundException(
-                ErrorCodes.TemplateNotFound, $"Версії шаблону {templateVersionId} не існує.");
+                ErrorCodes.TemplateNotFound,
+                $"Версії шаблону {templateVersionId} не існує.",
+                new Dictionary<string, object?>
+                {
+                    // Той самий ключ, що Repository<T,TId>.GetAsync/TemplateVersionStore
+                    // та решта: той самий факт «версії немає».
+                    ["messageKey"] = "err.ECR-TMPL-0404.templateVersion",
+                    ["versionId"] = templateVersionId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
 
         // ⛔ Одиниці розв'язуються і тут: конфігуратор без позначень
         // показував би «тип: Decimal» і жодної підказки, у чому саме

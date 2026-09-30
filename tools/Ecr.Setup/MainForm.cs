@@ -48,13 +48,19 @@ internal sealed class MainForm : Form
         MinimumSize = new Size(680, 620);
         Size = new Size(720, 660);
 
-        _reviewStep = new ReviewStep();
+        // S11: одне джерело сертифікатів і один годинник для кроку вибору й
+        // для повторної перевірки на «Огляді» перед стартом розгортання.
+        var certificates = new LocalMachineCertificateSource();
+        Func<DateTime> now = () => DateTime.Now;
+
+        _reviewStep = new ReviewStep(certificates, now);
         _installStep = new InstallStep();
 
         _steps = new List<IWizardStep>
         {
             new ModeStep(),
             new AccountAndNetworkStep(),
+            new DataProtectionStep(certificates, now),
             new DatabaseStep(_state),
             new CredentialsStep(),
             _reviewStep,

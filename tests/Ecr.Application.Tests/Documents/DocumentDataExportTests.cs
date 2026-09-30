@@ -65,7 +65,8 @@ public sealed class DocumentDataExportTests
              });
 
         var p = new PeriodKey(Period);
-        _cells.ReadSlicesAsync(Arg.Any<IReadOnlyList<long>>(), Arg.Any<CancellationToken>())
+        // O3c: зріз — з ключем партиції саме цього періоду; з іншим заглушка порожня.
+        _cells.ReadSlicesAsync(Arg.Any<IReadOnlyList<long>>(), p, Arg.Any<CancellationToken>())
               .Returns(new Dictionary<long, IReadOnlyList<CellRecord>>
               {
                   [Instance] =
@@ -219,10 +220,11 @@ public sealed class DocumentDataExportTests
     {
         var (handler, jobs) = Handler(allowed: false);
 
-        var denied = await Assert.ThrowsAsync<AccessDeniedException>(
+        // ⛔ B-08: невидимий документ — 404, як неіснуючий (`DocumentVisibility`), а не 403.
+        var denied = await Assert.ThrowsAsync<NotFoundException>(
             () => handler.HandleAsync(DocumentId, Options(), CancellationToken.None, "csv"));
 
-        Assert.Equal("ECR-AUTH-0403", denied.ErrorCode);
+        Assert.Equal("ECR-DOC-0404", denied.ErrorCode);
         await jobs.DidNotReceiveWithAnyArgs().EnqueueAsync<IExcelExportJob>(null, CancellationToken.None);
     }
 
@@ -275,7 +277,13 @@ public sealed class DocumentDataExportTests
               .Returns(new AccessBuilder { UserId = 9 }.Permission("Document.Export").Build());
         access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), DocumentId, Arg.Any<CancellationToken>())
               .Returns(allowed ? EditDecision.Allow() : EditDecision.Deny(EditDenyReason.NoGrant));
-        return (new ExportDocumentHandler(jobs, access, user), jobs);
+        access.ReadScopeAsync(Arg.Any<AccessProfile>(), DocumentId, Arg.Any<CancellationToken>())
+              .Returns(ReadScopes.Everything(new TemplateVersionSnapshot(
+                  1, 0, [], new Dictionary<int, ColumnDef>(), new Dictionary<(int, string), RowDef>())));
+        return (
+            new ExportDocumentHandler(
+                jobs, access, user, Substitute.For<IAuditWriter>(), Substitute.For<Ecr.Domain.Abstractions.IClock>()),
+            jobs);
     }
 
     private static ExcelExportOptions Options() => new(false, false, "en", Period);

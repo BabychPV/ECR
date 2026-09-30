@@ -106,8 +106,9 @@ export function AccessMatrix({ templateVersionId }: { templateVersionId: number 
         </AsyncBoundary>
 
         <Group justify="flex-end" mt="md">
+          {/* ⛔ X-18: діалог лише для читання — скасовувати нічого, тож «Close». */}
           <Button variant="default" onClick={() => setOpened(false)}>
-            {t('common.cancel')}
+            {t('common.close')}
           </Button>
         </Group>
       </Modal>

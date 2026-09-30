@@ -151,6 +151,7 @@ public sealed class ConsistencyCheckJob(
 
         await progress.ReportKeyAsync(70, "jobs.consistencyUnboundCalculated", ct).ConfigureAwait(false);
         issues.AddRange(await UnboundCalculatedColumnsAsync(ct).ConfigureAwait(false));
+        issues.AddRange(await UnsourcedFormulaColumnsAsync(ct).ConfigureAwait(false));
 
         // ⚠ Перерахунок ознаки IsOrphaned — В ОБИДВА боки (ФВ-8.13a). Задача
         // симетрична: те, що ставить ознаку, її ж і знімає. Асиметрія тут не
@@ -279,6 +280,10 @@ public sealed class ConsistencyCheckJob(
                 where cell.PeriodKeyValue == periodKey
                       && cell.ValueRegistryEntryId != null
                       && !db.RegistryEntries.Any(e => e.Id == cell.ValueRegistryEntryId)
+                // Порядок — ключ комірки в межах партиції: на бюджеті `Take`
+                // повторний прогін бачить ТІ САМІ перші знахідки, а не
+                // довільну вибірку плану (EF 10102).
+                orderby cell.TableRowId, cell.ColumnDefId
                 select new OrphanRow(cell.PeriodKeyValue, cell.TableRowId, cell.ValueRegistryEntryId!.Value);
 
             var found = await query.Take(budget).ToListAsync(ct).ConfigureAwait(false);
@@ -326,6 +331,7 @@ public sealed class ConsistencyCheckJob(
                 where row.PeriodKeyValue == periodKey
                       && !db.TableInstances.Any(
                           i => i.Id == row.TableInstanceId && i.PeriodKeyValue == periodKey)
+                orderby row.Id
                 select new BrokenRow(row.PeriodKeyValue, row.Id, row.TableInstanceId);
 
             var found = await query.Take(budget).ToListAsync(ct).ConfigureAwait(false);
@@ -437,9 +443,10 @@ public sealed class ConsistencyCheckJob(
     /// ⚠ Лише <c>IsActive</c>-прив'язки — те саме звуження, що й у
     /// <c>ICalculationBindingStore.ListBoundColumnIdsAsync</c>: вимкнену
     /// прив'язку <c>RecalculationJob.BindingsAsync</c> не бере, тож джерелом
-    /// для колонки вона не є. Тип <c>Formula</c> сюди не входить навмисно —
-    /// його джерело перевіряє публікація структури (<c>ECR-TMPL-4226</c>), і
-    /// друга перевірка того самого стану доповідала б про вже відхилене.
+    /// для колонки вона не є. Тип <c>Formula</c> сюди не входить: його
+    /// перевіряє окремий <see cref="UnsourcedFormulaColumnsAsync"/> з власним
+    /// кодом правила, бо джерел у нього два (прив'язка АБО формула шаблону) і
+    /// межа — стан версії, а не проєкту (HSE301 C5c).
     /// </remarks>
     private async Task<List<ConsistencyIssue>> UnboundCalculatedColumnsAsync(CancellationToken ct)
     {
@@ -456,6 +463,7 @@ public sealed class ConsistencyCheckJob(
                   && !column.IsDeleted && !table.IsDeleted && !sheet.IsDeleted
                   && liveVersions.Contains(sheet.TemplateVersionId)
                   && !db.CalculationBindings.Any(b => b.ColumnDefId == column.Id && b.IsActive)
+            orderby column.Id
             select new UnboundColumnRow(column.Id, table.Code, column.Code, sheet.TemplateVersionId);
 
         var found = await query.Take(MaxIssues).ToListAsync(ct).ConfigureAwait(false);
@@ -481,6 +489,71 @@ public sealed class ConsistencyCheckJob(
                 + "порожню клітинку, яку не має права заповнити. Прив'яжіть вихід методології до "
                 + "цієї колонки (PUT /api/v1/methodologies/{{id}}/bindings/{3}/{{outputCode}}) або "
                 + "увімкніть наявну прив'язку, якщо її вимкнено.",
+                f.TableCode,
+                f.ColumnCode,
+                f.TemplateVersionId,
+                f.ColumnDefId)));
+    }
+
+    /// <summary>
+    /// Колонки типу <c>Formula</c> на опублікованій або виведеній з обігу
+    /// версії шаблону, в яких немає ЖОДНОГО джерела значення (HSE301 C5c).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Визначення «джерела» — ТЕ САМЕ, що в
+    /// <c>PublishChecks.CheckComputedColumns</c> (<c>ECR-TMPL-4226</c>): не
+    /// видалена формула шаблону цієї таблиці на цій колонці
+    /// (<c>cfg.FormulaDef.ColumnDefId</c>) АБО активна прив'язка виходу
+    /// методології (<c>cfg.CalculationBinding</c>, <c>IsActive</c>). Там воно
+    /// працює над графом версії в пам'яті, тут — SQL-запитом, тож спільного
+    /// помічника без правки <c>PublishChecks</c> не винести; тому копія, і
+    /// правити обидві — разом, інакше публікація й нічна перевірка
+    /// розійдуться в тому, що вважати джерелом.
+    ///
+    /// ⚠ Друга лінія, а не перша. Публікація відхиляє такий стан
+    /// (<c>ECR-TMPL-4226</c>), а відв'язка останнього джерела на опублікованій
+    /// версії — <c>409</c> (<c>D-215</c>). У нормі знахідок тут немає; вони
+    /// означають дані, що з'явилися до цих гейтів, або правку прямим SQL — і
+    /// саме тому їх видно лише тут.
+    ///
+    /// ⚠ Лише <c>Published</c>/<c>Deprecated</c>: чернетку ще пишуть, і
+    /// формула в ній «з'явиться пізніше» законно — її відхилить публікація.
+    /// Виведену з обігу версію перевіряємо: за нею можуть досі жити документи.
+    /// </remarks>
+    private async Task<List<ConsistencyIssue>> UnsourcedFormulaColumnsAsync(CancellationToken ct)
+    {
+        var query =
+            from column in db.ColumnDefs.AsNoTracking()
+            join table in db.TableDefs.AsNoTracking() on column.TableDefId equals table.Id
+            join sheet in db.SheetDefs.AsNoTracking() on table.SheetDefId equals sheet.Id
+            join version in db.TemplateVersions.AsNoTracking() on sheet.TemplateVersionId equals version.Id
+            where column.DataType == CellDataType.Formula
+                  && !column.IsDeleted && !table.IsDeleted && !sheet.IsDeleted
+                  && (version.Status == TemplateVersionStatus.Published
+                      || version.Status == TemplateVersionStatus.Deprecated)
+                  && !db.FormulaDefs.Any(f =>
+                      f.TableDefId == column.TableDefId && f.ColumnDefId == column.Id && !f.IsDeleted)
+                  && !db.CalculationBindings.Any(b => b.ColumnDefId == column.Id && b.IsActive)
+            orderby column.Id
+            select new UnboundColumnRow(column.Id, table.Code, column.Code, sheet.TemplateVersionId);
+
+        var found = await query.Take(MaxIssues).ToListAsync(ct).ConfigureAwait(false);
+
+        return found.ConvertAll(f => new ConsistencyIssue(
+            "UNSOURCED_FORMULA_COLUMN",
+            // ⚠ Вага 2 — з тієї ж причини, що й у `UNBOUND_CALCULATED_COLUMN`:
+            // дані не зіпсовані, їх просто немає там, де форма обіцяє число.
+            Severity: 2,
+            "cfg.ColumnDef",
+            f.ColumnDefId,
+            string.Format(
+                CultureInfo.InvariantCulture,
+                "Колонка {0}.{1} (версія шаблону {2}) має тип Formula, але в опублікованій версії "
+                + "немає ні формули шаблону на цій колонці, ні чинної прив'язки виходу методології: "
+                + "перерахунок для неї не робить нічого, і оператор бачить порожню клітинку, яку не "
+                + "має права заповнити. Публікація й відв'язка такого стану не пропускають, тож дані "
+                + "потрапили в базу в обхід них. Прив'яжіть вихід методології до колонки {3} або "
+                + "виправте структуру новою версією шаблону.",
                 f.TableCode,
                 f.ColumnCode,
                 f.TemplateVersionId,

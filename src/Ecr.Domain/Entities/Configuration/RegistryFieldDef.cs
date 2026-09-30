@@ -34,6 +34,18 @@ public sealed class RegistryFieldDef : Entity<int>
     /// <summary>Посилання на інший реєстр: вкладеність або M:N.</summary>
     public int? RefRegistryDefId { get; private set; }
 
+    /// <summary>
+    /// Посилання чи композиція (<c>D-155</c>). Для будь-якого типу, крім
+    /// <see cref="CellDataType.Lookup"/>, — завжди <see cref="RegistryRelationKind.Reference"/>.
+    /// </summary>
+    public RegistryRelationKind RelationKind { get; private set; }
+
+    /// <summary>
+    /// Що стається з записом, коли видаляють батька композиції. Для
+    /// <see cref="RegistryRelationKind.Reference"/> значення не читається.
+    /// </summary>
+    public ParentDeletePolicy OnParentDelete { get; private set; }
+
     /// <summary>Змінює підпис, порядок і обов'язковість поля (ФВ-8.12).</summary>
     /// <param name="name">Новий підпис мовами каталогу.</param>
     /// <param name="ordinal">Новий порядок у переліку.</param>
@@ -76,6 +88,35 @@ public sealed class RegistryFieldDef : Entity<int>
     /// посилання в чужий довідник.
     /// </remarks>
     public void PointTo(int? refRegistryDefId) => RefRegistryDefId = refRegistryDefId;
+
+    /// <summary>
+    /// Робить поле-посилання композицією: запис є частиною запису-цілі
+    /// (<c>D-155</c>, FEATURE-REGISTRY-TABLES §4.8).
+    /// </summary>
+    /// <param name="onParentDelete">Що робити з записом, коли видаляють батька.</param>
+    /// <exception cref="InvalidOperationException">Поле не <see cref="CellDataType.Lookup"/>.</exception>
+    /// <remarks>
+    /// ⚠ Лише під час створення, як <see cref="PointTo"/>: зміна відношення
+    /// перетлумачила б наявні записи — вони раптом стали б частинами батька,
+    /// невидимими без нього й видалюваними разом із ним.
+    ///
+    /// ⚠ Тут — лише інваріант типу, його ж тримає <c>CK_RegField_Composition</c>
+    /// у базі (масовий імпорт іде повз домен). Правила опису (одна композиція на
+    /// довідник, обов'язковість, ціль — інший довідник, без циклів) перевіряє
+    /// публікація опису з повідомленнями для користувача (RT-12); виклик сюди з
+    /// недопустимим типом — помилка коду, а не введення.
+    /// </remarks>
+    public void ComposeInto(ParentDeletePolicy onParentDelete)
+    {
+        if (DataType != CellDataType.Lookup)
+        {
+            throw new InvalidOperationException(
+                $"Поле «{Code}» типу {DataType} не може бути композицією: лише {CellDataType.Lookup}.");
+        }
+
+        RelationKind = RegistryRelationKind.Composition;
+        OnParentDelete = onParentDelete;
+    }
 
     /// <summary>Вказує одиницю значення поля.</summary>
     /// <param name="unitId">Одиниця; <c>null</c> — безрозмірне.</param>

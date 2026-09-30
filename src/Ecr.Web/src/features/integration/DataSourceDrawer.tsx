@@ -10,7 +10,7 @@ import { DetailDrawer } from '@/shared/ui/DetailDrawer';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { localized } from '@/shared/i18n/localized';
 import { KeyValue, type KeyValueItem } from '@/shared/ui/KeyValue';
-import { DataSourceFormModal, DataSourceScheduleTab } from './lazyDataSourceForm';
+import { DataSourceFormModal, DataSourceScheduleTab, SourceEntitiesTab } from './lazyDataSourceForm';
 import { TestDataSourceModal } from './TestDataSourceModal';
 import { deleteDataSource, type DataSource } from './dataSourceApi';
 import { DataSourcesQueryKey } from './dataSourcesKey';
@@ -199,6 +199,9 @@ export function DataSourceDrawer({
           <Tabs.List>
             <Tabs.Tab value="connection">{t('sources.connection')}</Tabs.Tab>
             <Tabs.Tab value="schedule">{t('sources.tabSchedule')}</Tabs.Tab>
+            {/* ⛔ Без `Integration.Manage` вкладки НЕМАЄ: і перелік, і заведення,
+                і прив'язка вимагають саме цього права. */}
+            {canManage && <Tabs.Tab value="entities">{t('sources.tabEntities')}</Tabs.Tab>}
           </Tabs.List>
 
           <Tabs.Panel value="connection" pt="sm">
@@ -212,6 +215,14 @@ export function DataSourceDrawer({
               <DataSourceScheduleTab source={source} />
             </Suspense>
           </Tabs.Panel>
+
+          {canManage && (
+            <Tabs.Panel value="entities" pt="sm">
+              <Suspense fallback={<Loader size="sm" />}>
+                <SourceEntitiesTab source={source} />
+              </Suspense>
+            </Tabs.Panel>
+          )}
         </Tabs>
       </DetailDrawer>
 

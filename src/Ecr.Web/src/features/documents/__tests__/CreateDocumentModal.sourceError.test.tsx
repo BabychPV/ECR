@@ -139,7 +139,8 @@ describe('CreateDocumentModal: відмова джерел не виглядає
 
     await waitFor(() => screen.getByRole('alert'));
 
-    expect(screen.getByLabelText(/documents\.version/)).toBeDefined();
+    // ✎ V-12: версія більше не поле (її визначає проєкт) — лишається вибір проєкту.
+    expect(screen.getByLabelText(/documents\.project/)).toBeDefined();
     expect(screen.getByRole('button', { name: /common\.save/ })).toBeDefined();
   });
 

@@ -168,7 +168,7 @@
 
 | Якір | Розділ |
 |---|---|
-| [`#decisions`](#decisions) | Рішення і чому саме так |
+| [`#decisions`](#decisions) | Рішення і чому саме так (§1.6 — служба `EcrWorker`) |
 | [`#scope`](#scope) | Що інсталятор робить і чого не робить |
 | [`#tools`](#tools) | Інструментарій |
 | [`#tree`](#tree) | Дерево файлів |
@@ -275,6 +275,68 @@ Bundle» перетворює установку на переговори з а
 > Це найпоширеніша пастка при пакуванні, і вона проявляється не помилкою, а
 > тим, що «оновлення пройшло, а файли старі».
 
+### 1.6 Служба `EcrWorker` — пул перерахунку, типово ввімкнена (ФВ-9.8, `D-206`, I2-2)
+
+✎ 2026-09-30 (I2-2): типове значення `WORKER_ENABLED` змінено з `0` на `1`.
+Замір `docs/build/perf/I2-annual-recalc-2026-09-30-r2.md`: обидва режими
+вкладаються в 600 с, на користь пулу — ізоляція лейну `default`, межа пам'яті
+процесу, Api 162 МБ проти 367. Умова зміни — служба ставиться **і на свіжій
+установці, і на оновленні** без жодних властивостей, інакше оновлення лишило
+б Api з `Executor = Worker` без виконавця. Режим Api (`Jobs:Queue:Mode`,
+`Jobs:Recalculation:Executor`) MSI **не пише**: це робить `deploy-ecr.ps1`
+(§10) і лише разом зі службою. Без нього Api лишається `InProcess` із
+`appsettings.json`, служба простоює — виконавець перерахунку є в будь-якому
+разі. Перевірка `worker` на `/health/ready` жовтіє, якщо Api налаштовано на
+`Worker`, а служби немає, вона вимкнена чи задачі стоять у черзі понад 5 хв.
+
+`installer/Ecr.Installer/Worker.wxs`. Друга служба — наглядач пулу воркерів
+перерахунку: `Ecr.Worker.exe --supervisor` у тій самій теці, що й `Ecr.Api.exe`,
+тримає дочірні процеси під Windows Job Object з межами пам'яті
+(`src/Ecr.Worker`, P1).
+
+| Що | Як |
+|---|---|
+| Умова | властивість `WORKER_ENABLED`, **типово `1`** (з I2-2): служба реєструється і стартує разом з `EcrApi` |
+| Вимкнути | `WORKER_ENABLED=0` у msiexec або `deploy-ecr.ps1 -DisableWorker` (§10); `deploy-ecr.ps1` на SQL Server Express вимикає сам |
+| Обліковий запис | той самий `SERVICE_ACCOUNT`/`SERVICE_PASSWORD`, що в `EcrApi`; порожній → служба зареєстрована, але не стартує (§1.4) |
+| Старт, відновлення | `auto` + `DelayedAutoStart`, три спроби рестарту, як у `EcrApi` |
+| Секрети | рядок підключення — `HKLM\...\Services\EcrWorker\Environment` (`deploy-ecr.ps1`), не файл (D-11) |
+| Налаштування пулу | `worker.settings.json` поруч з exe — **типові значення збірки**, оновлення його перезаписує (як `appsettings.json`). Майданчик — `ECR_Jobs__Workers__Count`/`__MemoryLimitMb`/`__JobMemoryLimitMb`/`__MaxDuration` у тому ж `Environment`: перекривають файл і переживають оновлення |
+
+**Рішення й чому так:**
+
+- **`Ecr.Worker.exe` — ключовий файл компонента служби**, тому виключений з
+  `AppFiles` і ставиться лише за `WORKER_ENABLED=1` (типово — так). Windows Installer бере
+  бінарник служби з ключового файлу компонента, де стоїть `ServiceInstall`,
+  — окремого шляху в таблиці немає. Решта файлів воркера (`Ecr.Worker.dll`,
+  `*.deps.json`, `worker.settings.json`) — в `AppFiles`, ставляться завжди:
+  без exe їх ніщо не запускає.
+- **`Transitive="yes"`** на обох компонентах воркера: без нього умову
+  компонента MSI обчислює лише при першій установці. З ним повторна
+  установка ТОГО САМОГО MSI з `REINSTALL=ALL REINSTALLMODE=vomus
+  WORKER_ENABLED=1|0` вмикає або прибирає службу без видалення продукту
+  (`docs/admin/operations-runbook.md` §10).
+- **`WORKER_ENABLED` не запам'ятовується** — так само, як `SERVICE_ACCOUNT`.
+  ✎ I2-2: оновлення без властивості = типове `1`, служба є (до I2-2 — навпаки,
+  продукт без воркера). Свідоме вимкнення треба повторювати на кожному
+  оновленні. `deploy-ecr.ps1` передає її завжди (`0` лише з `-DisableWorker`
+  чи на Express) і попереджає, якщо так прибирається вже встановлена служба.
+  Запам'ятовування (RegistrySearch) свідомо не робили: єдиний небезпечний стан
+  — Api на `Worker` без служби — з типовим `1` виникає лише за явного `0`, а
+  `deploy-ecr.ps1` тоді ж перемикає Api на `InProcess`.
+- **`worker.settings.json` — не `NeverOverwrite`.** Той атрибут заморозив би
+  типові значення першої установки назавжди, разом із ключами, яких тоді ще
+  не було. `Ecr.Worker` читає файл поруч з exe і змінні `ECR_*`; `%ProgramData%`
+  він не читає (P1), тож налаштування майданчика — лише змінні служби.
+- **Публікація.** `build-msi.ps1` публікує воркер в окремий каталог і зливає
+  з публікацією Api, **не змінюючи жодного файлу Api**: спільна збірка
+  (`Microsoft.Extensions.*` — у Api з рантайм-пакета ASP.NET Core, у воркера з
+  NuGet, після ReadyToRun байти різні) лишається від Api лише тоді, коли її
+  версія не нижча за потрібну воркеру; інакше збірка зупиняється з переліком.
+  Замір 2026-09-29: нових файлів 7, однакових 189, спільних збірок лишено від
+  Api 29 (усі `10.0.0.0` = `10.0.0.0`), конфліктів 0; `Ecr.Worker.exe` з
+  об'єднаної публікації запускає дочірні й прибирає їх разом із собою.
+
 ---
 
 <a id="scope"></a>
@@ -289,6 +351,8 @@ Bundle» перетворює установку на переговори з а
    збою (три спроби, потім пауза).
 4. Додає правило брандмауера на порт застосунку — **лише для профілю домену**.
 5. Реєструє джерело журналу подій `ECR`.
+5a. За `WORKER_ENABLED=1` — ще й службу `EcrWorker` (пул перерахунку, §1.6);
+   типово — так (з I2-2).
 6. Кладе `appsettings.Production.json` у `config` **один раз** і більше його
    не перезаписує при оновленнях.
 7. Прибирає за собою при видаленні: службу, файли, правило брандмауера,
@@ -347,6 +411,7 @@ installer/
     ├── Package.wxs                Package, MajorUpgrade, властивості, UI
     ├── Folders.wxs                теки, ACL, конфіг
     ├── Service.wxs                ServiceInstall, ServiceControl, брандмауер
+    ├── Worker.wxs                 служба EcrWorker за WORKER_ENABLED (§1.6)
     ├── Strings.wxl                локалізація діалогів (en)
     └── License.rtf                ЗАПОВНЮВАЧ — реальні умови ліцензії не відомі (див. виправлення №6)
 
@@ -357,7 +422,8 @@ tools/
 │                                  migration.sql + sql/*.sql вбудовано в self-contained
 │                                  Ecr-Setup-<версія>.exe (не потребує SDK на сервері)
 ├── deploy-ecr.ps1                 схема + MSI + секрети + конфіг + старт служби, §10
-├── verify-msi.ps1                 прогін матриці сценаріїв на тестовій машині
+├── verify-msi.ps1                 статичні перевірки таблиць MSI (-StaticOnly) +
+│                                  прогін матриці сценаріїв на тестовій машині
 ├── sign-msi.ps1                   підпис — окремим кроком, лише де є сертифікат
 └── Ecr.Setup/                     майстер EcrSetup.exe (GUI, Q-216) — п'ять екранів
                                     замість ручних параметрів deploy-ecr.ps1
@@ -439,6 +505,26 @@ Include=...>` жодного `.sln`.
 .\tools\build-msi.ps1 -Version 1.0.0
 ```
 
+Другий `dotnet publish` — `src/Ecr.Worker` в `artifacts\publish-worker` і
+злиття з публікацією Api (§1.6). `-PublishOnly` — лише публікація, без WiX:
+перевірити злиття на машині, де WiX не встановлено.
+
+Статична перевірка готового MSI (нічого не встановлює):
+
+```
+.\tools\verify-msi.ps1 -MsiPath artifacts\msi\en-US\Ecr.msi -StaticOnly
+```
+
+S1–S5: `Ecr.Worker.exe`/`Ecr.Worker.dll`/`worker.settings.json` у таблиці
+`File`; `WORKER_ENABLED` = `1` (з I2-2) і в `SecureCustomProperties`; `ServiceInstall
+EcrWorker` з `--supervisor`, `[SERVICE_ACCOUNT]`, у компоненті з умовою
+`WORKER_ENABLED = "1"`, `Transitive`, KeyPath = `Ecr.Worker.exe`; старт — лише
+за `WORKER_ENABLED` і `SERVICE_ACCOUNT`; `EcrApi` — без умови. Без
+`-StaticOnly` — ще й сценарії з установкою (лише тестова машина): чиста
+установка без властивостей ставить `EcrWorker`; W1/W2 — `REINSTALL` того
+самого MSI з `WORKER_ENABLED=0`, потім `=1`; W3 (з `-PreviousMsiPath`) —
+оновлення з попередньої версії без властивостей лишає службу.
+
 ### `tools/sign-msi.ps1` — підпис окремим кроком
 
 Не входить у `build-msi.ps1` навмисно: збірка має проходити на машині без
@@ -463,6 +549,7 @@ msiexec /i Ecr.msi /qn /l*v install.log SERVICE_ACCOUNT=DOMAIN\ecr-svc$ APP_PORT
 | `SERVICE_PASSWORD` | лише для звичайного облікового запису | пароль | `Hidden`: **не потрапляє в лог** |
 | `APP_PORT` | ні | `5000` | порт Kestrel і правила брандмауера |
 | `INSTALLFOLDER` | ні | `C:\Program Files\ECR\Api` | |
+| `WORKER_ENABLED` | ні | `0` \| `1` | служба `EcrWorker` (§1.6). Типово `1` — встановлюється (з I2-2). **Не запам'ятовується**: `0` передавати на кожній установці й оновленні |
 
 Рядок підключення й пароль bootstrap-адміністратора — **не властивості MSI**
 (`SQL_CONNECTION` було прибрано, Q-214: заявлена, але ніким не читана
@@ -517,8 +604,14 @@ msiexec /x {ProductCode} /qn
 | 13 | Установка на Windows Server 2012 (не R2) | `/i` | зупинка на `Launch`, зрозумілий текст |
 | 14 | Перезавантаження сервера | `Restart-Computer` | служба піднялася сама, після SQL Server (відкладений старт) |
 | 15 | Пароль не в лозі | `/i /l*v log.txt SERVICE_PASSWORD=...` | `Select-String` по логу **не знаходить** пароля |
+| W0 | Установка без `WORKER_ENABLED` | `/i /qn SERVICE_ACCOUNT=...` | ✎ I2-2: `EcrWorker` **є** (типове `1`), `ImagePath` `…\Ecr.Worker.exe" --supervisor`, обліковий запис = `EcrApi`, `Running` |
+| W1 | Вимкнути воркер тим самим MSI | `/i /qn REINSTALL=ALL REINSTALLMODE=vomus WORKER_ENABLED=0 SERVICE_ACCOUNT=...` | `EcrWorker` знято; `EcrApi` на місці й працює |
+| W2 | Увімкнути назад тим самим MSI | те саме з `WORKER_ENABLED=1` | `EcrWorker` зареєстровано |
+| W3 | Оновлення БЕЗ `WORKER_ENABLED` | `/i` нового MSI (попередня версія — будь-яка, зокрема без воркера) | ✎ I2-2: `EcrWorker` **є** — до I2-2 тут його знімало; `Environment` служби `deploy-ecr.ps1` пише кроками 4–5 щоразу, як і для `EcrApi` — не покладатися на те, що він пережив `MajorUpgrade` |
+| W4 | Оновлення з `WORKER_ENABLED=0` | `/i` нового MSI | `EcrWorker` знято; `deploy-ecr.ps1 -DisableWorker` попереджає заздалегідь і перемикає Api на `InProcess` |
 
-`tools/verify-msi.ps1` автоматично проганяє сценарії 1, 5, 9, 15. Решта —
+`tools/verify-msi.ps1` автоматично проганяє сценарії 1 (разом із W0), W1,
+W2, 5, 9, 15 і статичні перевірки таблиць MSI S1–S5 (§6). Решта —
 вручну: вони потребують перезавантаження, відсутності прав адміністратора
 або двох версій MSI одночасно.
 
@@ -627,6 +720,53 @@ $bp = Read-Host -AsSecureString -Prompt 'Пароль bootstrap-адмініст
 6. **Старт служби** — лише якщо `-ServiceAccount` задано і служба сама не
    піднялась.
 7. **Здоров'я** — `GET /health/live` з повторними спробами.
+
+#### Редакція SQL Server і воркер (ФВ-9.8, `D-206`, P2)
+
+Рішення людини: система підлаштовується під **Standard або Enterprise**, і
+визначається це під час інсталяції. Мінімум — **SQL Server 2016 SP1**.
+
+- **Крок 1** запитує `SERVERPROPERTY('EngineEdition' | 'ProductVersion' |
+  'ProductMajorVersion' | 'Edition')` і друкує, що знайшов. Нижче
+  `13.0.4001` (2016 SP1) — зупинка. **Express** — зупинка з поясненням (немає
+  SQL Server Agent, межа 10 ГБ на базу), якщо не задано `-AllowExpress`
+  (лише dev-стенд).
+- **Крок 5** пише `ECR_Database__EditionMode` у `Environment` служб за
+  правилом «явне завжди сильніше за визначене»:
+
+  | Джерело | Дія |
+  |---|---|
+  | `-EditionMode Auto\|Standard\|Enterprise` | пишеться, перекриває все |
+  | `Database:EditionMode` у `%ProgramData%\ECR\config\appsettings.Production.json` | **не** пишеться: змінна оточення перекрила б файл (`ProgramDataConfiguration`) |
+  | `ECR_Database__EditionMode` уже в `Services\EcrApi\Environment` | не пишеться (оператор чи попереднє розгортання) |
+  | визначена редакція | Enterprise Edition → `Enterprise`; Standard → `Standard`; Developer / Evaluation (`EngineEdition = 3`, зовні як Enterprise) → `Standard` (стенд, `D-103`); Express з `-AllowExpress` → `Standard`; невідома → не пишеться (`Auto`) |
+
+  ⚠ Це уточнює `04-environment.md` §6 («прод — завжди `Standard` явно»):
+  явне значення оператора так само найсильніше, а без нього Developer і
+  Evaluation, заради яких те правило писалося, отримують `Standard`
+  автоматично — їх відрізняє рядок `Edition`, а не `EngineEdition`.
+- **Воркер перерахунку — типово так** (✎ I2-2; до того — лише з
+  `-EnableWorker`). `WORKER_ENABLED=1` у msiexec (§1.6); рядок підключення й
+  `EditionMode` — ще й у `Services\EcrWorker\Environment`; крок 6 перезапускає
+  `EcrWorker` і перевіряє, що через 5 с він `Running` (у наглядача немає HTTP —
+  лише «не впав одразу»; недійсна `Jobs:Workers:*` дає код 3 за секунди).
+  `WORKER_ENABLED=0` — лише з `-DisableWorker` або на SQL Server Express
+  (`-AllowExpress`, dev-стенд; `-EnableWorker` вмикає воркер і там); якщо
+  `EcrWorker` зараз стоїть — попередження: MSI його прибере.
+
+  **Режим Api — за фактом служби** (`Resolve-JobExecutionConfig`), у
+  `Services\EcrApi\Environment`, щоразу:
+
+  | Служба | `ECR_Jobs__Queue__Mode` | `ECR_Jobs__Recalculation__Executor` |
+  |---|---|---|
+  | є (крок 3 перевірив після msiexec) | `Database` | `Worker` |
+  | немає | `Quartz`; якщо `Jobs:Queue:Mode` задано у файлі майданчика — запис прибирається, діє файл | `InProcess` |
+
+  ⛔ `Worker` пишеться лише ПІСЛЯ перевірки, що служба встановилась: немає
+  служби після `WORKER_ENABLED=1` — розгортання зупиняється до запису режиму.
+  Значення у файлі майданчика, що суперечать факту служби, перекриваються з
+  попередженням (змінна служби сильніша за файл) — інакше `Executor = Worker`
+  у файлі без служби лишив би перерахунок без виконавця.
 
 ### `-WhatIf` — повний план, жодної дії в системі
 

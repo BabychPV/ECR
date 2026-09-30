@@ -39,27 +39,67 @@ public sealed class StrictDecimalArithmetic : IEvaluationArithmetic
             return ExpressionValue.Error(ExpressionErrors.BadValue);
         }
 
-        return op switch
+        try
         {
-            BinaryOperator.Add => ExpressionValue.Number(a + b),
-            BinaryOperator.Subtract => ExpressionValue.Number(a - b),
-            BinaryOperator.Multiply => ExpressionValue.Number(a * b),
+            return op switch
+            {
+                BinaryOperator.Add => ExpressionValue.Number(a + b),
+                BinaryOperator.Subtract => ExpressionValue.Number(a - b),
+                BinaryOperator.Multiply => ExpressionValue.Number(a * b),
 
-            // ⛔ Ділення на нуль — ЗНАЧЕННЯ-помилка, а не нескінченність:
-            // у `decimal` нескінченності не існує, і мовчазний нуль тут був би
-            // невідрізненний від справжнього.
-            BinaryOperator.Divide => b == 0m
-                ? ExpressionValue.Error(ExpressionErrors.DivideByZero)
-                : ExpressionValue.Number(a / b),
-            BinaryOperator.Modulo => b == 0m
-                ? ExpressionValue.Error(ExpressionErrors.DivideByZero)
-                : ExpressionValue.Number(a % b),
+                // ⛔ Ділення на нуль — ЗНАЧЕННЯ-помилка, а не нескінченність:
+                // у `decimal` нескінченності не існує, і мовчазний нуль тут був би
+                // невідрізненний від справжнього.
+                BinaryOperator.Divide => b == 0m
+                    ? ExpressionValue.Error(ExpressionErrors.DivideByZero)
+                    : ExpressionValue.Number(a / b),
+                BinaryOperator.Modulo => b == 0m
+                    ? ExpressionValue.Error(ExpressionErrors.DivideByZero)
+                    : ExpressionValue.Number(a % b),
 
-            BinaryOperator.Power => ExpressionValue.Number(DecimalMath.Pow(a, b)),
+                BinaryOperator.Power => ExpressionValue.Number(DecimalMath.Pow(a, b)),
 
-            _ => ExpressionValue.Error(ExpressionErrors.BadValue),
-        };
+                _ => ExpressionValue.Error(ExpressionErrors.BadValue),
+            };
+        }
+        catch (Exception ex) when (IsDomainFailure(ex))
+        {
+            return Failure(ex);
+        }
     }
+
+    /// <summary>
+    /// Чи є виняток відмовою ОБЛАСТІ ВИЗНАЧЕННЯ числа, а не дефектом коду.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Аудит A2: `decimal` на переповненні КИДАЄ (`1e15 * 1e15`,
+    /// `Exp(70)`, `1e28 / 1e-10`), а <see cref="DecimalMath"/> кидає на
+    /// аргументах поза областю (`Pow(0, -1)`, `Pow(-8, 0.5)`). Виняток звідси
+    /// летів крізь обчислювач, модуль і оркестратор аж до
+    /// <c>RecalculationJob</c>, який позначав <c>Failed</c> УВЕСЬ прогін — через
+    /// одну комірку. Контракт цього класу (зверху) обіцяв інше.
+    ///
+    /// ⚠ Перелік вузький навмисно: <see cref="ArithmeticException"/> (сюди
+    /// входять <see cref="OverflowException"/> і
+    /// <see cref="DivideByZeroException"/>) та <see cref="ArgumentException"/>
+    /// з <see cref="DecimalMath"/>. <see cref="ArgumentNullException"/> —
+    /// дефект викликача, а не число, і маскувати його під <c>#VALUE</c> не можна.
+    /// </remarks>
+    private static bool IsDomainFailure(Exception ex)
+        => ex is ArithmeticException
+           || (ex is ArgumentException && ex is not ArgumentNullException);
+
+    /// <summary>Помилка-значення для відмови області визначення.</summary>
+    /// <remarks>
+    /// ⚠ Коди — наявні, нового не заводимо: у `02b` §6.4 <c>#NUM</c> немає, а
+    /// оператор <c>^</c> шаблонів уже віддає на переповненні <c>#VALUE</c>
+    /// (<c>Evaluator.Power</c>) і на нулі у від'ємному степені — <c>#DIV/0</c>.
+    /// Та сама відмова з двох шляхів мусить мати той самий код.
+    /// </remarks>
+    private static ExpressionValue Failure(Exception ex)
+        => ExpressionValue.Error(ex is DivideByZeroException
+            ? ExpressionErrors.DivideByZero
+            : ExpressionErrors.BadValue);
 
     /// <inheritdoc />
     public ExpressionValue Round(ExpressionValue value, int digits)
@@ -77,6 +117,18 @@ public sealed class StrictDecimalArithmetic : IEvaluationArithmetic
             return ExpressionValue.Error(ExpressionErrors.BadValue);
         }
 
+        try
+        {
+            return UnaryCore(a, function);
+        }
+        catch (Exception ex) when (IsDomainFailure(ex))
+        {
+            return Failure(ex);
+        }
+    }
+
+    private static ExpressionValue UnaryCore(decimal a, string function)
+    {
         return function switch
         {
             "Abs" => ExpressionValue.Number(Math.Abs(a)),
@@ -120,6 +172,18 @@ public sealed class StrictDecimalArithmetic : IEvaluationArithmetic
             return ExpressionValue.Error(ExpressionErrors.BadValue);
         }
 
+        try
+        {
+            return BinaryCore(a, b, function);
+        }
+        catch (Exception ex) when (IsDomainFailure(ex))
+        {
+            return Failure(ex);
+        }
+    }
+
+    private static ExpressionValue BinaryCore(decimal a, decimal b, string function)
+    {
         return function switch
         {
             "Max" => ExpressionValue.Number(Math.Max(a, b)),
@@ -145,5 +209,29 @@ public sealed class StrictDecimalArithmetic : IEvaluationArithmetic
 
             _ => ExpressionValue.Error(ExpressionErrors.BadValue),
         };
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⛔ У <see cref="decimal"/>: <c>Strict</c> — наскрізний <c>decimal</c>
+    /// (<c>02b</c> §5), і порівняння не виняток (аудит A6).
+    ///
+    /// ⚠ <see cref="double"/>-значення в цьому режимі не породжує жодна операція;
+    /// якщо воно все ж потрапило сюди (<c>±∞</c> у <c>decimal</c> не подається),
+    /// порівняння йде в <c>double</c>, а не падає й не бреше звуженням.
+    /// </remarks>
+    public int? CompareNumbers(ExpressionValue left, ExpressionValue right)
+    {
+        if (left.Type != ExpressionValueType.Number || right.Type != ExpressionValueType.Number)
+        {
+            return null;
+        }
+
+        if (left.IsDouble || right.IsDouble)
+        {
+            return left.AsDouble()!.Value.CompareTo(right.AsDouble()!.Value);
+        }
+
+        return ((decimal)left.Value!).CompareTo((decimal)right.Value!);
     }
 }

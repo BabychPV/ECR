@@ -60,7 +60,7 @@
 | `Report.ViewRegulatory` | | регуляторні зрізи, `/admin/snapshots` | Approver, Viewer, Auditor, SysAdm |
 | `Report.BuildSnapshot` | | побудова зрізу | Approver, SysAdm |
 | `Report.Export` | | вивантаження звіту | DataEntry, Approver, Viewer, SysAdm |
-| `Report.EditDefinition` | так | авторство державної форми | — |
+| `Report.EditDefinition` | так | авторство державної форми | Approver (явним рядком seed, `D-203`) |
 | `Report.ViewCampaign` | так | огляд кампанії `/admin/campaign`: усі проєкти періоду без меж грантів | — |
 | `Integration.View` | | джерела даних (лише перегляд) | Auditor, SysAdm |
 | `Integration.Manage` | так | джерела, з'єднання, мапінг (`/admin/sources`, `/admin/mapping`) | — |

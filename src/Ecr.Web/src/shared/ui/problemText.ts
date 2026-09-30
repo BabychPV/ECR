@@ -1,5 +1,5 @@
 import { EcrApiError } from '@/api/client';
-import { t } from '@/shared/i18n';
+import { hasText, t } from '@/shared/i18n';
 
 /**
  * Що з відмови сервера МОЖНА показати людині.
@@ -135,6 +135,27 @@ export function problemText(error: unknown): ProblemText {
     correlationId: error.problem.correlationId,
     suppressed: fromCatalog ? null : raw,
   };
+}
+
+/**
+ * Текст провалу фонової задачі — за КОДОМ, з каталогу (`X-04`).
+ *
+ * ⛔ Не `JobStatus.error`. Той рядок — `ex.Message` із сервера
+ * (`FinishAsync(..., errorMessage: ex.Message, ...)`): українське речення
+ * розробника або взагалі текст СУБД («Violation of PRIMARY KEY…»). Він жив
+ * на екрані поруч із локалізованою назвою — тобто англійський інтерфейс
+ * показував дві причини однієї відмови, і одна з них — чужою мовою.
+ *
+ * ⚠ Запасний текст — від викликача, а не загальний: «експорт не вдався»
+ * каже більше, ніж «помилка», а невідомий код (сервер додав новий, рядка в
+ * каталозі ще немає) не має перетворитися на `⟦err.…⟧`.
+ */
+export function errorCodeText(code: string | null | undefined, fallback: string): string {
+  if (code === null || code === undefined || code === '') return fallback;
+
+  const key = `err.${code}`;
+
+  return hasText(key) ? t(key) : fallback;
 }
 
 /**

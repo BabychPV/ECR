@@ -53,7 +53,7 @@ public sealed class MethodologyRuleMatchTests
         _rows.GetRowIdsAsync(TableInstance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
              .Returns(new Dictionary<string, long> { ["R1"] = 1001, ["R2"] = 1002 });
 
-        _cells.ReadSliceAsync(TableInstance, Arg.Any<CancellationToken>()).Returns(
+        _cells.ReadSliceAsync(TableInstance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>()).Returns(
         [
             Cell(1001, SubstanceColumn, "CO2"),
             Cell(1001, SourceColumn, "Flare"),

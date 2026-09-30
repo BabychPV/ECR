@@ -13,11 +13,79 @@ import type { CellChangePage } from '@/api/types';
 /** Походження зміни — ті самі чотири значення, що пише `aud.CellChange.Origin`. */
 export const cellChangeOrigins = ['UserEdit', 'Import', 'Recalculation', 'Migration'] as const;
 
+/** Календарна дата без години — рівно те, що віддає `<input type="date">`. */
+const DateOnly = /^(\d{4})-(\d{2})-(\d{2})$/;
+
+/**
+ * КОНТРАКТ МЕЖІ ВІКНА. Обрано ОДИН варіант і записано тут.
+ *
+ * ⛔ **`From` і `To` — календарні дати, обидві ВКЛЮЧНО.** Названий у `To` день
+ * належить вікну цілком. Саме так підписи «From / To» читає людина, і саме
+ * тому напис не змінюється.
+ *
+ * ⛔ **Сервер лишається незмінним, і це не компроміс.** У сервера `from`/`to` —
+ * не дати, а МИТТЄВОСТІ UTC (`ChangedAt >= @from AND ChangedAt < @to`,
+ * `AuditReader`), і `to` виключне. Додати добу там (`to.AddDays(1)`) означало б
+ * зіпсувати кожного, хто передає справжню миттєвість: сторінка історії однієї
+ * комірки, CSV-експорт, наскрізні тести — усі вони надсилають `…T17:20:00Z`, і
+ * «плюс доба» зсунула б їм вікно на добу вперед. До того ж сервер не знає
+ * поясу того, хто дивиться, тож «кінець доби» на сервері не має значення.
+ * Доба губилася РІВНО ТУТ — у місці, де календарна дата стає миттєвістю, а це
+ * місце одне, і воно клієнтське.
+ *
+ * ⚠ **Пояс — браузерний, свідомо.** `ChangedAt` зберігається в UTC, а на екран
+ * його друкує `Timestamp` → `Intl.DateTimeFormat` БЕЗ `timeZone`, тобто в
+ * поясі браузера. Межа вікна мусить жити в тому самому поясі, у якому людина
+ * читає рядки, — інакше екран ховав би рядок, надрукований час якого лежить
+ * усередині набраних дат, і це був би той самий дефект, лише на годину.
+ *
+ * ⚠ **Чому НЕ пояс майданчика, як у `PeriodsPage`/`ArchiveJob`.** `Site time
+ * zone` — властивість ПРОЄКТУ (`Project.TimeZoneId`); періоди й архівація
+ * живуть усередині одного проєкту, тож у них це значення визначене. Журнал
+ * аудиту наскрізний: запит без `documentId` іде по всіх проєктах, і єдиного
+ * поясу майданчика для нього не існує. Третій спосіб не вигадано — узято той
+ * самий принцип («межа в тому ж поясі, що й показане значення»), а він тут
+ * дає пояс браузера.
+ *
+ * ⚠ Значення, яке НЕ є голою датою (готова миттєвість ISO), проходить як є:
+ * його вже привели до миттєвості, і другий зсув зіпсував би його.
+ */
+function instant(value: string, plusDays: number): string {
+  const parts = DateOnly.exec(value);
+
+  if (parts === null) return value;
+
+  // ⚠ `new Date(рік, місяць, день + 1)` сам переносить через кінець місяця й
+  // року, і саме він дає ПІВНІЧ У ПОЯСІ БРАУЗЕРА. `new Date('2026-09-23')`
+  // дало б північ UTC — рівно та тиха помилка на добу, яку виправляє цей код.
+  const at = new Date(Number(parts[1]), Number(parts[2]) - 1, Number(parts[3]) + plusDays);
+
+  return Number.isNaN(at.getTime()) ? value : at.toISOString();
+}
+
+/** Початок вікна: північ названої дати в поясі браузера. */
+export function windowStart(value: string): string {
+  return instant(value, 0);
+}
+
+/**
+ * Кінець вікна: північ НАСТУПНОЇ доби в поясі браузера.
+ *
+ * ⛔ Плюс доба — це і є виправлення. Сервер порівнює `ChangedAt < @to`, тож
+ * «`to` = північ названого дня» виключала ввесь названий день. Наслідок був
+ * тихий і найгірший з можливих: вікно за замовчуванням закінчується СЬОГОДНІ,
+ * дивляться журнал теж сьогодні («хто щойно це змінив») — і він відповідав
+ * «змін не було», тобто неправдою.
+ */
+export function windowEnd(value: string): string {
+  return instant(value, 1);
+}
+
 /** Фільтр журналу змін комірок. */
 export interface CellChangeFilter {
-  /** Початок вікна (`YYYY-MM-DD` або ISO); **обов'язковий**. */
+  /** Початок вікна (`YYYY-MM-DD` або ISO); **обов'язковий**. Дата — ВКЛЮЧНО. */
   readonly from: string;
-  /** Кінець вікна; **обов'язковий**. */
+  /** Кінець вікна; **обов'язковий**. Дата — ВКЛЮЧНО: названий день у вікні (див. `windowEnd`). */
   readonly to: string;
   readonly documentId?: number | null;
   readonly rowKey?: string | null;
@@ -64,8 +132,8 @@ export function isSingleCell(filter: CellChangeFilter): boolean {
 export function cellChangesQuery(filter: CellChangeFilter): string {
   const params = new URLSearchParams();
 
-  params.set('from', filter.from);
-  params.set('to', filter.to);
+  params.set('from', windowStart(filter.from));
+  params.set('to', windowEnd(filter.to));
   params.set('limit', String(filter.limit ?? 100));
 
   if (filter.documentId !== null && filter.documentId !== undefined) {
@@ -106,7 +174,9 @@ export type StructureChangePage = components['schemas']['PagedResultOfStructureC
 
 /** Фільтр журналу структурних змін; вікно **обов'язкове**, як у журналі комірок. */
 export interface StructureChangeFilter {
+  /** Початок вікна; дата — ВКЛЮЧНО. */
   readonly from: string;
+  /** Кінець вікна; дата — ВКЛЮЧНО, як у `CellChangeFilter`. */
   readonly to: string;
   readonly entityType?: string | null;
   /** Автор зміни — `UserId`, не SID. */
@@ -119,8 +189,11 @@ export interface StructureChangeFilter {
 export function structureChangesQuery(filter: StructureChangeFilter): string {
   const params = new URLSearchParams();
 
-  params.set('from', filter.from);
-  params.set('to', filter.to);
+  // ⛔ Та сама межа, що в `cellChangesQuery`, і того самого помічника. Дві
+  // вкладки одного екрана ділять ОДНУ пару дат; полагодити лише одну означало
+  // б, що одна вкладка каже правду, а друга поруч — ні.
+  params.set('from', windowStart(filter.from));
+  params.set('to', windowEnd(filter.to));
   params.set('limit', String(filter.limit ?? 100));
 
   if (filter.entityType !== null && filter.entityType !== undefined && filter.entityType.length > 0) {

@@ -115,6 +115,14 @@ public sealed class DialectCatalogTests
     [Theory]
     [InlineData("CONVERT")]
     [InlineData("SUBSTANCE")]
+    [InlineData("REGFIND")]
+    [InlineData("REGONE")]
+    [InlineData("REGFIELD")]
+    [InlineData("REGSUM")]
+    [InlineData("REGAVG")]
+    [InlineData("REGMIN")]
+    [InlineData("REGMAX")]
+    [InlineData("REGCOUNT")]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
     public void Наші_розширення_недоступні_в_Legacy(string name)
     {
@@ -145,8 +153,8 @@ public sealed class DialectCatalogTests
 
     [Theory]
     [InlineData("POWER", "Pow(a, b)")]
-    [InlineData("MOD", "оператор %")]
-    [InlineData("SWITCH", "вкладені if")]
+    [InlineData("MOD", "the % operator")]
+    [InlineData("SWITCH", "nested if")]
     [InlineData("POW", "'Pow'")]
     [InlineData("ROUND", "'Round'")]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]

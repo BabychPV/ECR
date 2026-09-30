@@ -99,3 +99,58 @@ export function listCollectionRuns(
 export function getCollectionRunDetail(id: number): Promise<CollectionRunDetail> {
   return apiFetch<CollectionRunDetail>(`/api/v1/collection-runs/${id}`);
 }
+
+/*
+ * Події журналу покриття (ІНТ-3.3, `D-118`) —
+ * `GET /api/v1/collection-runs/coverage-events`: інтервал зібрано, але в
+ * комірки він не ліг. Право те саме, що в журналу прогонів.
+ */
+export type CoverageEventView = components['schemas']['CoverageEventView'];
+export type CoverageEventPage = components['schemas']['PagedResultOfCoverageEventView'];
+
+/** Статуси подій — рівно перелік сервера (`CollectionCoverage.KnownStatuses`). */
+export const CoverageEventStatuses = [
+  'SkippedPointCeiling',
+  'SkippedPeriodClosed',
+  'SkippedWriteConflict',
+  'SkippedNeedsConfirmation',
+  'ConflictKeptManual',
+  // Синк довідника (RegistrySyncJob, S5): події без періоду (`periodKey = null`).
+  'RegistryDiverged',
+  'RegistryConflictKeptManual',
+  'RegistrySourceMissing',
+  'RegistryElementUnlinked',
+  'RegistryValueRejected',
+  'RegistryPendingUpdate',
+  // Збір: джерело відмовило віддати дані інтервалу з кодом каталогу (`CollectionRunner`);
+  // інтервал лишається прогалиною, причина — конвертом у `details`.
+  'SourceDataRefused',
+  // Синк довідника з AF за політикою D-212 (PR-3): автостворення, вимкнення й
+  // повторне ввімкнення запису, порушення правила, переприв'язка за шляхом.
+  'RegistryAutoCreated',
+  'RegistryDeactivated',
+  'RegistryReactivated',
+  'RegistryRuleViolation',
+  'RegistryExternalKeyRelinked',
+] as const;
+export type CoverageEventStatus = (typeof CoverageEventStatuses)[number];
+
+/** Ключ запиту подій — без курсора, з тієї самої причини, що {@link collectionRunsQueryKey}. */
+export function coverageEventsQueryKey(status: string | null): readonly unknown[] {
+  return ['coverageEvents', status];
+}
+
+/** Сторінка подій журналу покриття, новіші першими. */
+export function listCoverageEvents(status: string | null, cursor: string | null): Promise<CoverageEventPage> {
+  const query = new URLSearchParams();
+
+  if (status !== null && status.length > 0) {
+    query.set('status', status);
+  }
+  if (cursor !== null && cursor.length > 0) {
+    query.set('cursor', cursor);
+  }
+  query.set('limit', String(CollectionRunsDefaultLimit));
+
+  return apiFetch<CoverageEventPage>(`/api/v1/collection-runs/coverage-events?${query.toString()}`);
+}

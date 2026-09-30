@@ -15,6 +15,7 @@ public sealed class RegistriesController(
     CreateRegistryHandler createRegistry,
     GetRegistryEntriesHandler getEntries,
     UpsertRegistryEntryHandler upsert,
+    GetRegistryEntryHandler getEntry,
     SetEntryValidityHandler setValidity,
     SwitchRegistrySourceHandler switchSource,
     GetRegistryDefinitionHandler getDefinition,
@@ -249,7 +250,9 @@ public sealed class RegistriesController(
         ArgumentNullException.ThrowIfNull(dto);
 
         var isNew = dto.Id is null;
-        var id = await upsert.HandleAsync(dto, ct).ConfigureAwait(false);
+        var result = await upsert.HandleWithWarningsAsync(dto, ct).ConfigureAwait(false);
+        var id = result.Id;
+        var body = new RegistryEntryIdResponse(id) { Warnings = result.Warnings };
 
         // 201 для нового запису, 200 для оновлення: різниця видима клієнтові й
         // означає, чи з'явився новий Id, який тепер лежатиме в комірках.
@@ -258,8 +261,8 @@ public sealed class RegistriesController(
         // коментар вище: форма збігалася випадково, і перше ж перейменування
         // поля розвело б 200 і 201 мовчки.
         return isNew
-            ? CreatedAtAction(nameof(Entries), new { code }, new RegistryEntryIdResponse(id))
-            : Ok(new RegistryEntryIdResponse(id));
+            ? CreatedAtAction(nameof(Entries), new { code }, body)
+            : Ok(body);
     }
 
     /// <summary>
@@ -301,6 +304,23 @@ public sealed class RegistriesController(
             .HandleAsync(code, content, file.Length, maxBytes, dryRun, ct)
             .ConfigureAwait(false));
     }
+
+    /// <summary>
+    /// Один запис довідника цілком: назва всіма мовами й значення полів.
+    /// Право <c>Registry.View</c>.
+    /// </summary>
+    /// <param name="code">Код довідника.</param>
+    /// <param name="id">Запис.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ X-03/R-04: форма правки запису відкривається з цієї відповіді, а не з
+    /// рядка переліку, де назва лише однією мовою, а значень полів немає.
+    /// </remarks>
+    [HttpGet("{code}/entries/{id:long}")]
+    [ProducesResponseType<RegistryEntryDetailDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<RegistryEntryDetailDto>> Entry(string code, long id, CancellationToken ct)
+        => Ok(await getEntry.HandleAsync(code, id, ct).ConfigureAwait(false));
 
     /// <summary>
     /// Змінює вікно дії запису. Право <c>Registry.EditData</c>.
@@ -413,7 +433,15 @@ public sealed record RegistryDefinitionVersionResponse(int DefinitionVersion);
 
 /// <summary>Ідентифікатор запису довідника.</summary>
 /// <param name="Id">Запис.</param>
-public sealed record RegistryEntryIdResponse(long Id);
+public sealed record RegistryEntryIdResponse(long Id)
+{
+    /// <summary>
+    /// Порушення правил довідника рівнів <c>Info</c>/<c>Warning</c> (RT-17a, §7.1): запис збережено, але
+    /// правило не виконане. Порожньо — порушень немає. Рівень <c>Error</c> сюди не потрапляє — він
+    /// відхиляє запис (<c>422 ECR-REG-4221</c>).
+    /// </summary>
+    public IReadOnlyList<Ecr.Application.Registries.Rules.RegistryRuleViolationDto> Warnings { get; init; } = [];
+}
 
 /// <summary>Скільки рядків зачепила операція.</summary>
 /// <param name="AffectedRows">Кількість.</param>

@@ -50,7 +50,8 @@ public sealed class SaveColumnDefHandler(
     IUnitOfWork uow,
     IClock clock,
     IAccessDecisionService access,
-    Common.ICurrentUser currentUser)
+    Common.ICurrentUser currentUser,
+    IUnitCatalog units)
 {
     /// <summary>Право на редагування структури версії (`02-contracts.md` §9).</summary>
     public const string Permission = "Template.Edit";
@@ -63,8 +64,9 @@ public sealed class SaveColumnDefHandler(
     /// <param name="ct">Токен скасування.</param>
     /// <exception cref="NotFoundException">Версії або таблиці немає.</exception>
     /// <exception cref="BusinessRuleException">
-    /// Версія структурно заморожена (<c>ECR-TMPL-0409</c>), або повторний
-    /// запис змінює <c>DataType</c> наявної колонки (<c>ECR-TMPL-0422</c>).
+    /// Версія структурно заморожена (<c>ECR-TMPL-0409</c>), повторний запис
+    /// змінює <c>DataType</c> наявної колонки або одиниці <c>UnitId</c> у
+    /// довіднику немає (<c>ECR-TMPL-0422</c>).
     /// </exception>
     public async Task<ColumnDefDto> HandleAsync(
         int templateVersionId, int tableDefId, string code, SaveColumnDefCommand command, CancellationToken ct)
@@ -137,6 +139,8 @@ public sealed class SaveColumnDefHandler(
                 });
         }
 
+        await RequireKnownUnitAsync(units, command.UnitId, code, ct).ConfigureAwait(false);
+
         var hasDocuments = await store.HasDocumentsAsync(templateVersionId, ct).ConfigureAwait(false);
 
         // ⚠ Класифікація йде і для СТВОРЕННЯ теж: клас пишеться в аудит
@@ -160,6 +164,11 @@ public sealed class SaveColumnDefHandler(
         // `aud.StructureChange`.
         await uow.ExecuteInTransactionAsync(async innerCt =>
         {
+            // ⛔ C5: блок рядка версії ПЕРШИМ і повторна перевірка «ще
+            // чернетка» під ним — інакше колонка лягала б у версію, яку
+            // опублікували між читанням вище і цим записом.
+            await DraftVersionLock.EnsureDraftUnderLockAsync(store, version, innerCt).ConfigureAwait(false);
+
             if (existing is null)
             {
                 // ⚠ Ordinal, якщо не переданий явно, — за наявними колонками:
@@ -236,6 +245,39 @@ public sealed class SaveColumnDefHandler(
         {
             column.SetUnit(unitId);
         }
+    }
+
+    /// <summary>Відмовляє, якщо одиниці колонки в довіднику немає (HSE301 U1).</summary>
+    /// <remarks>
+    /// ⛔ Доти неіснуючий <c>UnitId</c> записувався мовчки: ключа на
+    /// <c>uom.Unit</c> не було, і висяча одиниця виринала аж у перерахунку. Тепер
+    /// ключ <c>FK_ColumnDef_Unit</c> є, і без цієї перевірки описка в номері
+    /// давала б голий <c>500</c> на 547 замість <c>422</c> з ключем.
+    /// </remarks>
+    /// <exception cref="BusinessRuleException"><c>ECR-TMPL-0422</c>, ключ <c>unknownUnit</c>.</exception>
+    private static async Task RequireKnownUnitAsync(
+        IUnitCatalog units, int? unitId, string code, CancellationToken ct)
+    {
+        if (unitId is not { } id)
+        {
+            return;
+        }
+
+        var catalogue = await units.GetAsync(ct).ConfigureAwait(false);
+        if (catalogue.Units.Values.Any(u => u.Id == id))
+        {
+            return;
+        }
+
+        throw new BusinessRuleException(
+            ErrorCodes.TemplateInvalid,
+            $"Колонка «{code}»: одиниці {id.ToString(System.Globalization.CultureInfo.InvariantCulture)} у довіднику немає.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-TMPL-0422.unknownUnit",
+                ["columnCode"] = code,
+                ["unitId"] = id.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            });
     }
 
     /// <summary>Знаходить таблицю версії за числовим ідентифікатором.</summary>
@@ -349,6 +391,61 @@ public sealed record ColumnDefDto(
     int? UnitId);
 
 /// <summary>
+/// Повний склад однієї колонки — те саме, що приймає й повертає
+/// <c>PUT …/tables/{tableId}/columns/{code}</c> (X-02, четвертий раунд UX).
+/// </summary>
+/// <remarks>
+/// ⛔ Без цього читання форма правки будувала чернетку з бідного
+/// <see cref="Dto.TemplateColumnDto"/> структури (без точності, одиниці,
+/// довідника, фільтра, значення за замовчуванням і стилю), а <c>PUT</c> — це
+/// заміна цілком: повторне збереження колонки мовчки стирало все перелічене,
+/// і форма сама попереджала «Saving will clear them». Тепер форма правки
+/// відкривається з цією відповіддю, і незмінене поле їде назад незмінним.
+///
+/// ⚠ Право ПЕРЕГЛЯДУ, а не правки: це читання, і воно законне для будь-кого,
+/// хто бачить структуру версії.
+/// </remarks>
+public sealed class GetColumnDefHandler(
+    ITemplateVersionStore store,
+    IAccessDecisionService access,
+    Common.ICurrentUser currentUser)
+{
+    /// <summary>Право на перегляд структури версії (`02-contracts.md` §9).</summary>
+    public const string Permission = "Template.View";
+
+    /// <summary>Читає колонку.</summary>
+    /// <param name="templateVersionId">Версія шаблону.</param>
+    /// <param name="tableDefId">Таблиця, якій належить колонка.</param>
+    /// <param name="code">Код колонки.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <exception cref="NotFoundException">Версії, таблиці або живої колонки немає.</exception>
+    public async Task<ColumnDefDto> HandleAsync(
+        int templateVersionId, int tableDefId, string code, CancellationToken ct)
+    {
+        await PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
+
+        var version = await store.GetWithStructureAsync(templateVersionId, ct).ConfigureAwait(false);
+        var table = SaveColumnDefHandler.FindTable(version, tableDefId);
+
+        // ⚠ Лише жива колонка: видалена в структурі не показується, і форма
+        // правки для неї не відкривається.
+        var column = table.Columns.FirstOrDefault(
+                c => !c.IsDeleted && string.Equals(c.Code, code, StringComparison.Ordinal))
+            ?? throw new NotFoundException(
+                ErrorCodes.TemplateNotFound,
+                $"Колонки «{code}» у таблиці {tableDefId} немає.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-TMPL-0404.columnCode",
+                    ["columnCode"] = code,
+                    ["tableDefId"] = tableDefId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
+
+        return SaveColumnDefHandler.Map(column);
+    }
+}
+
+/// <summary>
 /// Прибирає колонку з таблиці версії-чернетки — м'яко (<c>ФВ-7.6</c>).
 /// </summary>
 /// <remarks>
@@ -414,6 +511,9 @@ public sealed class DeleteColumnDefHandler(
         // про видалення, якого в даних не було.
         await uow.ExecuteInTransactionAsync(async innerCt =>
         {
+            // ⛔ C5: див. SaveColumnDefHandler.
+            await DraftVersionLock.EnsureDraftUnderLockAsync(store, version, innerCt).ConfigureAwait(false);
+
             await audit.WriteStructureChangeAsync(
                 new StructureChangeRecord(
                     clock.UtcNow, templateVersionId, nameof(ColumnDef), column.Id,

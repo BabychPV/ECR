@@ -90,11 +90,27 @@ public sealed class CollectionSchedule : Entity<int>
         LastErrorAt = null;
     }
 
+    /// <summary>Найвужче вікно перекриття назад, днів (ФВ-13.15).</summary>
+    /// <remarks>
+    /// ⚠ Нуль — не «без перекриття», а порожнє вікно: <c>CollectionJob</c> збирає
+    /// <c>[to − LookbackDays; to]</c>, і за нуля збір не бере жодної точки.
+    /// </remarks>
+    public const int MinLookbackDays = 1;
+
+    /// <summary>Найширше вікно перекриття назад, днів (ФВ-13.15).</summary>
+    /// <remarks>
+    /// ⚠ Рік із запасом на високосний. Межі в ТЗ немає; ширше вікно означає
+    /// щоразу перечитувати з PI AF понад рік точок заради того, що наздоганяння
+    /// (<c>CatchUpLookback</c>, 45 днів) і так закриває.
+    /// </remarks>
+    public const int MaxLookbackDays = 366;
+
     /// <summary>Ставить перекриття назад.</summary>
-    /// <param name="days">Скільки днів; від'ємне не має сенсу.</param>
+    /// <param name="days">Скільки днів: від <see cref="MinLookbackDays"/> до <see cref="MaxLookbackDays"/>.</param>
     public void SetLookback(int days)
     {
-        ArgumentOutOfRangeException.ThrowIfNegative(days);
+        ArgumentOutOfRangeException.ThrowIfLessThan(days, MinLookbackDays);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(days, MaxLookbackDays);
         LookbackDays = days;
     }
 

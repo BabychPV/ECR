@@ -16,8 +16,100 @@ namespace Ecr.Api.Controllers;
 public sealed class SourcesController(
     ListSourceEntitiesHandler list,
     CollectFromSourceHandler collect,
-    Ecr.Application.Sources.PreviewMappingHandler preview) : ControllerBase
+    Ecr.Application.Sources.PreviewMappingHandler preview,
+    Ecr.Application.Sources.CreateSourceEntityHandler create,
+    Ecr.Application.Sources.BindSourceEntityRegistryHandler bindRegistry,
+    Ecr.Application.Sources.SetSourceEntityRegistryPolicyHandler registryPolicy) : ControllerBase
 {
+    /// <summary>
+    /// Замінює політику синку довідника з цієї сутності збору (<c>D-212</c>).
+    /// Право <c>Integration.Manage</c> і право на дані прив'язаного довідника —
+    /// <c>Registry.EditData</c> або грант <c>Write</c>.
+    /// </summary>
+    /// <param name="id">Сутність збору.</param>
+    /// <param name="request">Політика цілком.</param>
+    /// <param name="ct">Скасування.</param>
+    /// <remarks>
+    /// ⚠ Сутність не прив'язана до довідника — <c>422 ECR-REQ-0422</c>
+    /// (<c>registrySyncPolicyNotBound</c>); невалідне тіло — <c>422 ECR-REQ-0422</c>
+    /// (<c>registrySyncPolicyInvalid</c>). Зміна пишеться в журнал структурних змін.
+    /// </remarks>
+    [HttpPut("{id:int}/registry/policy")]
+    [ProducesResponseType<Ecr.Application.Sources.SourceEntityDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> SetRegistryPolicy(
+        int id, [FromBody] SetRegistrySyncPolicyRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        return Ok(await registryPolicy
+            .HandleAsync(
+                id,
+                new Ecr.Application.Sources.SetRegistrySyncPolicyCommand(
+                    request.OnMissingInSource, request.ValidFromAttribute, request.ValidToAttribute, request.ValidToInclusive),
+                ct)
+            .ConfigureAwait(false));
+    }
+
+    /// <summary>
+    /// Заводить сутність збору з позиції каталогу джерела (<c>ФВ-13.11</c>).
+    /// Право <c>Integration.Manage</c>.
+    /// </summary>
+    /// <param name="request">З'єднання й позиція каталогу.</param>
+    /// <param name="ct">Скасування.</param>
+    /// <remarks>
+    /// ⚠ Код уже зайнятий у цьому з'єднанні — <c>409 ECR-INT-0409</c>
+    /// (<c>err.ECR-INT-0409.sourceEntityDuplicate</c>), а не другий рядок.
+    /// </remarks>
+    [HttpPost]
+    [ProducesResponseType<Ecr.Application.Sources.SourceEntityDto>(StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> Create([FromBody] CreateSourceEntityRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var created = await create
+            .HandleAsync(
+                new Ecr.Application.Sources.CreateSourceEntityCommand(
+                    request.DataSourceId, request.Code, request.DisplayName, request.EntityPath, request.SourceKind),
+                ct)
+            .ConfigureAwait(false);
+
+        return Created(new Uri("/api/v1/sources", UriKind.Relative), created);
+    }
+
+    /// <summary>
+    /// Прив'язує сутність збору до довідника або відв'язує її (<c>ФВ-8.11</c>).
+    /// Право <c>Integration.Manage</c> і, крім того, право редагувати дані
+    /// довідника — <c>Registry.EditData</c> або грант <c>Write</c> на цей довідник.
+    /// </summary>
+    /// <param name="id">Сутність збору.</param>
+    /// <param name="request">Довідник; <c>null</c> — відв'язати.</param>
+    /// <param name="ct">Скасування.</param>
+    /// <remarks>
+    /// ⚠ Право на дані перевіряється для цільового довідника, а при відв'язці чи
+    /// переприв'язці — і для поточного: після прив'язки синк пише в довідник від
+    /// <c>svc-integration</c>, тож прив'язка — делегування права на його дані.
+    /// Без права — <c>403 ECR-AUTH-0403</c>. <c>D-202</c>, доповнення 2026-09-29
+    /// (<c>docs/tz/10-decisions.md</c> §1.19) — судження розробки, на підтвердження.
+    /// </remarks>
+    [HttpPut("{id:int}/registry")]
+    [ProducesResponseType<Ecr.Application.Sources.SourceEntityDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> BindRegistry(
+        int id, [FromBody] BindSourceEntityRegistryRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        return Ok(await bindRegistry.HandleAsync(id, request.RegistryDefId, ct).ConfigureAwait(false));
+    }
+
     /// <summary>
     /// Перелік сутностей збору. Право <c>Integration.Manage</c>.
     /// </summary>
@@ -42,9 +134,13 @@ public sealed class SourcesController(
     /// </remarks>
     [HttpPost("{id:int}/collect")]
     [ProducesResponseType<Contracts.JobAcceptedResponse>(StatusCodes.Status202Accepted)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     public async Task<IActionResult> Collect(int id, [FromBody] CollectRequest request, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(request);
+
+        // ⚠ Межі йдуть як є: приведення до UTC і відмову на порожньому
+        // проміжку (422) робить обробник — ПІСЛЯ перевірки права (аудит B7).
 
         // ⚠ 202 з jobId, а не 200 з даними: збір ходить по мережі до чужої
         // системи, і його тривалість визначає не наш код. Синхронна відповідь
@@ -88,3 +184,31 @@ public sealed class SourcesController(
 /// <param name="FromUtc">Початок діапазону.</param>
 /// <param name="ToUtc">Кінець діапазону.</param>
 public sealed record CollectRequest(DateTime FromUtc, DateTime ToUtc);
+
+/// <summary>Нова сутність збору — позиція каталогу джерела.</summary>
+/// <param name="DataSourceId">З'єднання.</param>
+/// <param name="Code">Код у джерелі.</param>
+/// <param name="DisplayName">Підпис із каталогу.</param>
+/// <param name="EntityPath">Шлях в ієрархії джерела.</param>
+/// <param name="SourceKind">Хто master (ФВ-8.9); <c>null</c> — <c>External</c>.</param>
+public sealed record CreateSourceEntityRequest(
+    int DataSourceId,
+    string? Code,
+    string? DisplayName,
+    string? EntityPath,
+    Ecr.Domain.Enums.RegistrySourceKind? SourceKind);
+
+/// <summary>Прив'язка сутності збору до довідника.</summary>
+/// <param name="RegistryDefId">Довідник; <c>null</c> — відв'язати.</param>
+public sealed record BindSourceEntityRegistryRequest(int? RegistryDefId);
+
+/// <summary>Політика синку довідника з AF (<c>D-212</c>).</summary>
+/// <param name="OnMissingInSource">Що робити з записом, чий елемент зник у джерелі.</param>
+/// <param name="ValidFromAttribute">Атрибут початку чинності; <c>null</c> — не синхронізувати.</param>
+/// <param name="ValidToAttribute">Атрибут кінця чинності; <c>null</c> — не синхронізувати.</param>
+/// <param name="ValidToInclusive">Кінець у джерелі — останній чинний день.</param>
+public sealed record SetRegistrySyncPolicyRequest(
+    Ecr.Domain.Enums.RegistryMissingPolicy OnMissingInSource,
+    string? ValidFromAttribute,
+    string? ValidToAttribute,
+    bool ValidToInclusive);

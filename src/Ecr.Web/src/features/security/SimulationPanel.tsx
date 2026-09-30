@@ -1,6 +1,7 @@
 import { useState, type JSX } from 'react';
 import { Button } from '@mantine/core';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
 import type { SimulationSessionResponse, StartSimulationRequest } from '@/api/types';
 import { MeQueryKey } from '@/shared/session/useSession';
@@ -60,6 +61,7 @@ function rememberSession(id: string | null): void {
  */
 export function StartSimulationButton({ userId }: { userId: number }): JSX.Element {
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const [asking, setAsking] = useState(false);
 
   const start = useMutation({
@@ -77,6 +79,11 @@ export function StartSimulationButton({ userId }: { userId: number }): JSX.Eleme
 
       setAsking(false);
       showDone(t('security.simulationStarted'));
+
+      // ⚠ На головну (V-06): екран безпеки, з якого почали, суб'єкт зазвичай
+      // бачити не має — і лишитися на ньому означало б одразу показати
+      // сторінку відмови замість того, що бачить сам суб'єкт.
+      await navigate('/');
     },
     onError: showApiError,
   });
@@ -108,9 +115,18 @@ export function StartSimulationButton({ userId }: { userId: number }): JSX.Eleme
  * дивиться чужими правами, і саме там має бути вихід. Чужий сеанс завершити
  * не можна — сервер відповість 403, бо обрив чужого сеансу псує чужий аудит.
  */
-export function EndSimulationButton(): JSX.Element | null {
+export function EndSimulationButton({
+  sessionId: fromProfile,
+}: {
+  /** Сеанс цього входу з `/me` (V-06); `null` — сервер його не назвав. */
+  sessionId?: number | null;
+}): JSX.Element | null {
   const queryClient = useQueryClient();
-  const sessionId = storedSessionId();
+
+  // ⛔ V-06: номер — із `/me`, а не лише з `sessionStorage` цієї вкладки.
+  // Сеанс належить входу (cookie), тож завершити його можна з будь-якої
+  // вкладки, де стоїть банер. Сховище лишається запасним варіантом.
+  const sessionId = fromProfile != null ? String(fromProfile) : storedSessionId();
 
   const end = useMutation({
     mutationFn: (id: string) =>
@@ -126,9 +142,8 @@ export function EndSimulationButton(): JSX.Element | null {
   });
 
   // ⛔ Без номера сеансу кнопки немає: вона гарантовано дала б відмову.
-  // Це справді буває — сеанс почали в іншій вкладці. Тоді вихід із системи
-  // лишається чесним способом його завершити, і мовчазна непрацездатна
-  // кнопка була б гіршою за відсутню.
+  // Після V-06 так буває лише зі старим сервером, що номера в `/me` не віддає;
+  // вихід із системи тоді лишається чесним способом завершити сеанс.
   if (sessionId === null) return null;
 
   return (

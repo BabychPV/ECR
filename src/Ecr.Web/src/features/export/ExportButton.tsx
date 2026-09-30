@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState, type JSX } from 'react';
-import { Anchor, Button, Group, SegmentedControl } from '@mantine/core';
+import { Anchor, Button, Divider, Group, Loader, SegmentedControl } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { apiEnqueue, apiFetch } from '@/api/client';
 import type { ExportRequest, JobStatus } from '@/api/types';
 import { outcomeOf, pollInterval } from '@/features/workflow/jobFollow';
-import { showApiError } from '@/shared/ui/notify';
+import { notificationCloseButtonProps, showApiError } from '@/shared/ui/notify';
+import { errorCodeText } from '@/shared/ui/problemText';
 import { t } from '@/shared/i18n';
 
 /** Що і за який період експортувати. */
@@ -26,6 +27,26 @@ export interface ExportButtonProps {
  * дублює цю перевірку — він лише не дає обрати нічого поза цими трьома.
  */
 type ExportFormat = 'xlsx' | 'csv' | 'json';
+
+/**
+ * Підпис посилання на готовий файл — ЗА ФОРМАТОМ, у якому його будували.
+ *
+ * ⛔ `V-10`: посилання на ZIP-архів CSV і на JSON підписувалося «Download the
+ * workbook» — людина чекала книгу Excel і отримувала архів.
+ *
+ * ⚠ Літерали, а не ключ, складений із формату: сторож
+ * `EndpointCoverageTests` перевіряє в каталозі лише ключі-літерали.
+ */
+function exportReadyLabel(format: ExportFormat): string {
+  switch (format) {
+    case 'csv':
+      return t('document.exportReadyCsv');
+    case 'json':
+      return t('document.exportReadyJson');
+    default:
+      return t('document.exportReady');
+  }
+}
 
 /**
  * Підписи перемикача формату — самі значення, а не переклад лейблів, беруться
@@ -86,6 +107,11 @@ export function ExportButton({
   // заради перемикача, який мало хто чіпає частіше, ніж раз на сесію.
   const [format, setFormat] = useState<ExportFormat>('xlsx');
 
+  // ⚠ Формат ЗАПУЩЕНОЇ побудови — окремо від перемикача: людина може
+  // перемкнути формат, доки файл будується, а підпис посилання має
+  // відповідати файлу, який вона отримає, а не поточному положенню перемикача.
+  const [startedFormat, setStartedFormat] = useState<ExportFormat>('xlsx');
+
   const start = useMutation({
     mutationFn: () =>
       apiEnqueue(`/api/v1/documents/${documentId}/export`, {
@@ -95,7 +121,10 @@ export function ExportButton({
         language,
         periodKey,
       } satisfies ExportRequest),
-    onSuccess: (job) => setJobId(job.jobId),
+    onSuccess: (job) => {
+      setStartedFormat(format);
+      setJobId(job.jobId);
+    },
     onError: showApiError,
   });
 
@@ -108,8 +137,6 @@ export function ExportButton({
   });
 
   const outcome = jobId === null ? null : outcomeOf(job.data?.state, job.isError);
-  const done = outcome === 'succeeded';
-  const exportId = done ? (job.data?.message ?? '') : '';
   const building = outcome === 'running';
 
   // ⚠ Повідомлення про відмову — ОДИН раз на задачу, а не на кожен рендер:
@@ -127,20 +154,116 @@ export function ExportButton({
     // ⛔ `unknown` (стан прочитати не вдалося, `Q-156`) навмисно без тосту:
     // причина — брак права на читання задачі, а не збій експорту, і показ
     // помилки тут звинуватив би експорт у тому, чого він не робив.
+    /*
+     * ⛔ `U-25`: результат — ТОСТОМ із посиланням, а не елементом у рядку
+     * кнопок. Посилання «Download the workbook», вставлене в рядок поруч із
+     * кнопкою, мало інший розмір і вигляд і переповнювало рядок: «Delete
+     * document» переїжджав на другий рядок під поле періоду — найнебезпечніша
+     * дія документа опинялася там, де її ніхто не чекає. Тост не займає
+     * місця в рядку взагалі, тож стан експорту на розкладку не впливає.
+     *
+     * ⚠ `autoClose: false`: файл забирають тоді, коли людина повернулась до
+     * вкладки, а не протягом чотирьох секунд. Закритий тост файл не губить —
+     * те саме посилання лишається в «Мої задачі» (`JobFacts.JobResultLink`).
+     *
+     * ⚠ Адреса та сама, що й була (`a[href^="/api/v1/documents/{id}/export/"]`),
+     * — на неї спирається `e2e/zz-walkthrough.spec.ts`; тост рендериться в
+     * тому самому документі.
+     */
+    if (outcome === 'succeeded') {
+      const exportKey = job.data?.message ?? '';
+      if (exportKey.length > 0) {
+        notifications.show({
+          id: `export-ready-${jobId}`,
+          color: 'statusSuccess',
+          autoClose: false,
+          closeButtonProps: notificationCloseButtonProps,
+          message: (
+            <Anchor
+              size="sm"
+              href={`/api/v1/documents/${documentId}/export/${encodeURIComponent(exportKey)}`}
+              download
+            >
+              {exportReadyLabel(startedFormat)}
+            </Anchor>
+          ),
+        });
+      }
+    }
+
     if (outcome === 'failed') {
-      // ⛔ `error`, а не `message`: перше несе причину відмови
-      // (`FinishAsync(..., errorMessage: ex.Message, ...)`), друге — останній
-      // прогрес (`IJobProgress.ReportAsync`), який на відмові лишається тим,
-      // яким був до неї, — часто порожнім або застарілим текстом «Виконується».
+      // ⛔ `X-04`: причина — за КОДОМ з каталогу, а не `error`. `error` —
+      // `ex.Message` сервера (`FinishAsync(..., errorMessage: ex.Message)`):
+      // українське речення розробника або текст СУБД, і в тості англійського
+      // екрана він був єдиним, що людина бачила. `message` тим паче не годиться
+      // — це останній прогрес, на відмові застарілий.
       notifications.show({
         color: 'statusError',
-        message: job.data?.error ?? t('document.exportFailed'),
+        message: errorCodeText(job.data?.errorCode, t('document.exportFailed')),
+        closeButtonProps: notificationCloseButtonProps,
       });
     }
-  }, [jobId, outcome, job.data?.error]);
+  }, [jobId, outcome, job.data?.errorCode, job.data?.message, documentId, startedFormat]);
 
   return (
-    <Group gap="xs">
+    /*
+     * ⛔ `U-15`: експорт — ОДНА одиниця, видимо відокремлена від імпорту.
+     * Раніше рядок читався «Validate · Import from Excel · Excel CSV JSON ·
+     * Export»: перемикач формату стояв одразу за імпортом, без підпису, і
+     * читався як налаштування імпорту, хоча керує експортом. Тепер кнопка
+     * «Export» іде ПЕРШОЮ, формат — одразу за нею, обидва в спільній групі з
+     * `role="group"` за вертикальним роздільником: поруч з «Import from
+     * Excel» опиняється межа і слово «Export», а не голий перелік форматів.
+     * Нового тексту не додано — роздільник і порядок
+     * пояснюють належність, а ширина рядка не зростає.
+     */
+    <Group gap="xs" wrap="nowrap" role="group" aria-label={t('document.export')} data-testid="export-unit">
+      {/* ⚠ Роздільник — перший елемент самої одиниці, а не сторінки: так він
+          стоїть і там, де імпорту немає (оператор без `Document.Import`), і
+          відокремлює експорт від того, що йде перед ним. */}
+      <Divider orientation="vertical" />
+
+      {/*
+       * ⛔ `U-25`: кнопка в роботі зберігає ПІДПИС поруч зі спінером і НЕ
+       * змінює ширини. `loading` Mantine ховав підпис, лишаючи сам спінер, а
+       * зміна тексту «Export» → «Building...» міняла ширину — і заголовок
+       * документа перестрибував на окремий рядок. Обидва варіанти підпису
+       * лежать в ОДНІЙ комірці сітки (`gridArea: 1 / 1`), неактивний —
+       * `visibility: hidden`: ширина кнопки = ширина довшого з двох у будь-
+       * якій мові, і між станами вона не змінюється.
+       */}
+      <Button
+        size="xs"
+        variant="default"
+        disabled={start.isPending || building}
+        aria-busy={start.isPending || building}
+        data-export-state={start.isPending || building ? 'running' : 'idle'}
+        onClick={() => start.mutate()}
+      >
+        <span style={{ display: 'inline-grid' }}>
+          <span
+            aria-hidden={start.isPending || building}
+            style={{ gridArea: '1 / 1', visibility: start.isPending || building ? 'hidden' : 'visible' }}
+          >
+            {t('document.export')}
+          </span>
+          <span
+            aria-hidden={!(start.isPending || building)}
+            data-testid="export-running-label"
+            style={{
+              gridArea: '1 / 1',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              visibility: start.isPending || building ? 'visible' : 'hidden',
+            }}
+          >
+            <Loader size={12} />
+            {t('document.exportBuilding')}
+          </span>
+        </span>
+      </Button>
+
       <SegmentedControl
         size="xs"
         aria-label={t('document.exportFormat')}
@@ -149,28 +272,6 @@ export function ExportButton({
         disabled={start.isPending || building}
         data={exportFormatOptions()}
       />
-
-      <Button
-        size="xs"
-        variant="default"
-        loading={start.isPending || building}
-        onClick={() => start.mutate()}
-      >
-        {building ? t('document.exportBuilding') : t('document.export')}
-      </Button>
-
-      {/* ⚠ Посилання з'являється лише тоді, коли файл справді є. Показане
-          заздалегідь, воно вело б на 404 рівно доти, доки книга будується, —
-          тобто саме тоді, коли на нього тиснуть. */}
-      {done && exportId.length > 0 && (
-        <Anchor
-          size="sm"
-          href={`/api/v1/documents/${documentId}/export/${encodeURIComponent(exportId)}`}
-          download
-        >
-          {t('document.exportReady')}
-        </Anchor>
-      )}
     </Group>
   );
 }

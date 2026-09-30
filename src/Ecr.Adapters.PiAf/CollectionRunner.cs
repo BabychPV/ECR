@@ -1,7 +1,12 @@
-﻿using Ecr.Application.Errors;
+﻿using System.Globalization;
+using Ecr.Application.Errors;
 using Ecr.Application.Integration;
 using Ecr.Application.Ports;
+using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.External;
+using Ecr.Domain.Entities.Integration;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Ecr.Adapters.PiAf;
 
@@ -21,13 +26,19 @@ namespace Ecr.Adapters.PiAf;
 /// лишає по собі роботи в черзі.
 /// </para>
 /// </remarks>
-public sealed class CollectionRunner(
+public sealed partial class CollectionRunner(
     IEnumerable<IExternalDataSource> sources,
     SourceUnitConverter unitConverter,
     CatchUpPlanner catchUp,
     ICollectionStore store,
-    TimeSpan? maxRunDuration = null) : ICollectionRunner
+    TimeSpan? maxRunDuration = null,
+    ILogger<CollectionRunner>? logger = null,
+    int? maxPagesPerRead = null,
+    int? maxParallelReads = null) : ICollectionRunner
 {
+    /// <summary>Лог збоїв прогону; без реєстрації (тести) — порожній.</summary>
+    private readonly ILogger log = (ILogger?)logger ?? NullLogger.Instance;
+
     /// <summary>Стеля точок на один запит до джерела.</summary>
     /// <remarks>
     /// PI AF на надмірний запит відповідає деградацією **всім** клієнтам,
@@ -40,15 +51,21 @@ public sealed class CollectionRunner(
     /// <remarks>
     /// ⚠ П'ятнадцять хвилин — не з довідника постачальника (задокументованого
     /// SLA відповіді PI Web API в цьому репозиторії немає), а практичний
-    /// поріг: `GetAsync` у гіршому разі — це ~96 с на одну пару
-    /// інтервал/атрибут (30-секундний таймаут HttpClient (`Q-250`,
-    /// `DependencyInjection.cs`) плюс паузи ретраю 2 с і 4 с), а
-    /// `RunAsync` іде по інтервалах наздоганяння (до 45 діб, див.
-    /// <see cref="CatchUpLookback"/>) і атрибутах ПОСЛІДОВНО — без стелі
-    /// «напівживе» джерело (відповідає, але повільно) тримало б воркер
-    /// Quartz годинами замість хвилин. П'ятнадцять хвилин дають запас на
-    /// кілька десятків повільних пар, лишаючись далеко від «годин» із
-    /// симптому.
+    /// поріг: `GetAsync` у гіршому разі — це ~96 с на один запит
+    /// (30-секундний таймаут HttpClient (`Q-250`, `DependencyInjection.cs`)
+    /// плюс паузи ретраю 2 с і 4 с), а `RunAsync` іде по інтервалах
+    /// наздоганяння (до 45 діб, див. <see cref="CatchUpLookback"/>) — без
+    /// стелі «напівживе» джерело (відповідає, але повільно) тримало б воркер
+    /// Quartz годинами замість хвилин.
+    /// <para>
+    /// ✎ P7: для PI Web API (адаптер з <see cref="IBatchCollectionSource"/>)
+    /// читання тепер ГРУПОВЕ й паралельне — один <c>streamsets/recorded</c> на
+    /// інтервал для всіх атрибутів, до <see cref="DefaultMaxParallelReads"/>
+    /// інтервалів одночасно, тож за ліміт прогону вміщується наздоганяння на
+    /// сотні інтервалів. Послідовно, по запиту на пару інтервал/атрибут, читає
+    /// лише адаптер без цієї здатності (PiSqlClient) — для нього п'ятнадцять
+    /// хвилин так само дають запас на кілька десятків повільних пар.
+    /// </para>
     /// </remarks>
     public static TimeSpan DefaultMaxRunDuration => TimeSpan.FromMinutes(15);
 
@@ -62,6 +79,19 @@ public sealed class CollectionRunner(
     /// контейнера, не обхідний прийом.
     /// </remarks>
     private readonly TimeSpan runDuration = maxRunDuration ?? DefaultMaxRunDuration;
+
+    /// <summary>Стеля сторінок на одну пару інтервал/атрибут за прогін (аудит B3).</summary>
+    /// <remarks>
+    /// ⚠ Судження, не вимога: 200 сторінок по <see cref="MaxPointsPerRequest"/>
+    /// — мільйон точок, тобто майже два роки хвилинного тега. Це запобіжник від
+    /// джерела, що віддає нескінченно (тоді годинник прогону спрацював би
+    /// значно пізніше), а не робочий режим: прочитане покривається, решту
+    /// бере наздоганяння з місця зупинки.
+    /// </remarks>
+    public const int DefaultMaxPagesPerRead = 200;
+
+    /// <summary>Стеля сторінок цього прогону: параметр конструктора (тести) або дефолт.</summary>
+    private readonly int maxPages = maxPagesPerRead is > 0 ? maxPagesPerRead.Value : DefaultMaxPagesPerRead;
 
     /// <summary>
     /// Наскільки глибоко кожен прогін заглядає назад по прогалини.
@@ -88,18 +118,26 @@ public sealed class CollectionRunner(
         var entity = await store.FindSourceEntityAsync(sourceEntityId, ct).ConfigureAwait(false)
                      ?? throw Unavailable(
                          $"Сутність джерела {sourceEntityId} не існує або вимкнена: збирати нічого.",
-                         sourceEntityId);
+                         sourceEntityId,
+                         "err.ECR-INT-0503.sourceEntityUnavailable");
 
         var dataSource = await store.FindDataSourceAsync(entity.DataSourceId, ct).ConfigureAwait(false)
                          ?? throw Unavailable(
-                             $"Джерело {entity.DataSourceId} не існує або вимкнене.", sourceEntityId);
+                             $"Джерело {entity.DataSourceId} не існує або вимкнене.",
+                             sourceEntityId,
+                             // Той самий ключ і те саме речення, що SqlDataSource.cs: той самий факт.
+                             "err.ECR-INT-0503.sourceMissing",
+                             ("dataSourceId", entity.DataSourceId.ToString(System.Globalization.CultureInfo.InvariantCulture)));
 
         // ⚠ Транспорт — це НАЛАШТУВАННЯ, а не гілка коду (ФВ-11.2). Адаптер
         // обирається за Transport джерела; додати третій транспорт означає
         // зареєструвати ще одну реалізацію, а не правити цей метод.
         var adapter = sources.FirstOrDefault(s => s.Transport == dataSource.Transport)
                       ?? throw Unavailable(
-                          $"Транспорт {dataSource.Transport} не зареєстровано.", sourceEntityId);
+                          $"Транспорт {dataSource.Transport} не зареєстровано.",
+                          sourceEntityId,
+                          "err.ECR-INT-0503.transportNotRegistered",
+                          ("transport", dataSource.Transport.ToString()));
 
         var maps = await store.GetFieldMapsAsync(sourceEntityId, ct).ConfigureAwait(false);
         var units = await unitConverter.UnitsAsync(ct).ConfigureAwait(false);
@@ -115,7 +153,11 @@ public sealed class CollectionRunner(
         var covered = new List<TimeInterval>();
         var retrieved = 0;
         string? failureCode = null;
-        string? failureMessage = null;
+
+        // ⚠ U12: причина — конверт (ключ + параметри, `Q-326`), а не готове
+        // речення: `ErrorMessage` прогону читають мовою ЧИТАЧА (шухляда
+        // прогону, зведення), а мова в момент запису невідома.
+        JobProgressMessageEnvelope? failureReason = null;
         var step = 0;
 
         // ⚠ «Джерело нас у цьому прогоні вже пускало». Саме цим відрізняється
@@ -131,6 +173,19 @@ public sealed class CollectionRunner(
         // Атрибути, чиї мапінги цей прогін поставив на паузу (ФВ-16.9).
         var pausedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
+        // ⚠ Інтервал, що читається зараз, і межа, до якої він прочитаний
+        // ДОСТОВІРНО (усіма атрибутами). Потрібні, коли прогін обривається
+        // посеред сторінкування (watchdog, скасування, збій): покриття
+        // пишеться за фактично прочитане, і наздоганяння продовжує звідси, а
+        // не з початку інтервалу (аудит B3).
+        TimeInterval? inFlight = null;
+        var inFlightReached = DateTime.MinValue;
+
+        List<TimeInterval> CoveredWithInFlight()
+            => inFlight is { } open && inFlightReached > open.FromUtc
+                ? [.. covered, new TimeInterval(open.FromUtc, inFlightReached)]
+                : covered;
+
         // ⚠ Годинник прогону (Q-250): рахує ЛИШЕ звідси, а не з початку
         // методу — підготовка вище (пошук сутності, мапінгів, планування)
         // у джерело не ходить і в цей ліміт не входить. Пов'язаний із
@@ -141,95 +196,327 @@ public sealed class CollectionRunner(
         watchdog.CancelAfter(runDuration);
         var runToken = watchdog.Token;
 
+        // P7: адаптер, що читає атрибути пакетом, отримує один запит на
+        // інтервал замість одного на атрибут, а наступні інтервали читаються
+        // наперед (не більше ParallelReads одночасно). Адаптер без цієї
+        // здатності (PiSqlClient) читається, як і раніше, послідовно.
+        var batch = adapter as IBatchCollectionSource;
+
+        // Одна прочитана сторінка одного атрибута: зберегти прочитане й
+        // вирішити, чи читати далі (true — є хвіст, курсор просунуто).
+        // Спільна для послідовного й пакетного читання — B3 живе в одному місці.
+        async Task<bool> ApplyPageAsync(PathCursor state, ReadOutcome outcome, TimeInterval interval)
+        {
+            if (outcome.Collected is not { } result)
+            {
+                failureCode ??= outcome.ErrorCode ?? SourceUnavailable;
+
+                // ⚠ Відмова з кодом каталогу несе ВЛАСНИЙ ключ і параметри
+                // адаптера (`Reason`); лише сирий виняток — речення як є.
+                failureReason ??= outcome.Reason ?? SourceDetail(outcome.Message);
+
+                if (IsDataRefusal(outcome))
+                {
+                    // ⛔ Застряглий інтервал видно в журналі покриття: джерело
+                    // ВІДПОВІДАЄ, але цих даних не віддає, і наздоганяння
+                    // стукатиме в них щоразу. Подія — не покриття: інтервал
+                    // лишається прогалиною.
+                    await store
+                        .RecordCoverageEventAsync(
+                            sourceEntityId,
+                            state.Path,
+                            state.Cursor,
+                            interval.ToUtc,
+                            CollectionCoverage.SourceDataRefused,
+                            outcome.ErrorCode!,
+                            Reason(
+                                "coverageEvents.sourceDataRefused",
+                                ("path", state.Path),
+                                ("from", Instant(state.Cursor)),
+                                ("to", Instant(interval.ToUtc))) with
+                            {
+                                Inner = WithCode(outcome.ErrorCode!, outcome.Reason!),
+                            },
+                            ct)
+                        .ConfigureAwait(false);
+                }
+
+                return false;
+            }
+
+            accepted = true;
+
+            // ⚠ Успішні точки зберігаються НАВІТЬ при частковій
+            // відмові батча: викинути прочитане через те, що хвіст
+            // діапазону не дався, означало б читати його вдруге —
+            // і так до наступної відмови.
+            var saved = await SaveAsync(
+                    runId, sourceEntityId, Fresh(result.Points, state.Carried), maps, units, pausedPaths, ct)
+                .ConfigureAwait(false);
+            retrieved += saved.Written;
+            state.Pages++;
+
+            if (saved.UnitChange is { } change)
+            {
+                failureCode ??= SourceUnitConverter.UnitChangedCode;
+                failureReason ??= change;
+                return false;
+            }
+
+            if (result.ErrorCode is not null)
+            {
+                failureCode ??= result.ErrorCode;
+                return false;
+            }
+
+            if (result.FailedIntervals.Count == 0)
+            {
+                state.Cursor = interval.ToUtc;
+                return false;
+            }
+
+            // Батч обрізано стелею: наступна сторінка — з першого
+            // непрочитаного моменту. Адаптери віддають хвіст як
+            // [мітка ОСТАННЬОЇ точки, кінець) — тобто межу ВКЛЮЧНО
+            // (≥): точки з тією самою міткою, що не влізли в батч,
+            // інакше загубилися б. Уже прочитані з цією міткою
+            // наступна сторінка поверне вдруге — їх відкидає Fresh.
+            var next = result.FailedIntervals.Min(i => i.FromUtc);
+
+            if (next <= state.Cursor)
+            {
+                // Уся сторінка — одна мітка: ≥ не просуває курсора,
+                // а > загубив би точки. Далі цей атрибут у цьому
+                // інтервалі прочитати неможливо — так і пишемо.
+                failureCode ??= SourceUnavailable;
+                failureReason ??= Reason(
+                    "jobs.collectionSameTimestamp",
+                    ("path", state.Path),
+                    ("limit", Number(MaxPointsPerRequest)),
+                    ("cursor", Instant(state.Cursor)),
+                    ("to", Instant(interval.ToUtc)));
+                return false;
+            }
+
+            state.Carried = Carried(result.Points, next);
+            state.Cursor = next;
+
+            if (state.Pages >= maxPages)
+            {
+                failureCode ??= SourceUnavailable;
+                failureReason ??= Reason(
+                    "jobs.collectionPageLimit",
+                    ("path", state.Path),
+                    ("pages", Number(state.Pages)),
+                    ("limit", Number(MaxPointsPerRequest)),
+                    ("cursor", Instant(state.Cursor)),
+                    ("to", Instant(interval.ToUtc)));
+                return false;
+            }
+
+            return true;
+        }
+
+        // Пакетне читання інтервалу: раунд — одна сторінка кожного ще не
+        // дочитаного атрибута; перший раунд уже запущено наперед. Повертає
+        // межу, до якої інтервал прочитали ВСІ атрибути.
+        async Task<DateTime> ReadBatchedAsync(
+            TimeInterval interval, (List<PathCursor> Cursors, Task<IReadOnlyList<ReadOutcome>> Round) first)
+        {
+            // Атрибут на паузі (зокрема поставлений на неї вже ПІСЛЯ запуску
+            // читання наперед) у цьому інтервалі не читається й тримає його
+            // непокритим — як і в послідовному читанні.
+            var floor = paths.Any(pausedPaths.Contains) ? interval.FromUtc : interval.ToUtc;
+            var open = first.Cursors;
+            var round = first.Round;
+
+            DateTime Reached()
+                => first.Cursors.Count == 0 ? floor : Min(floor, first.Cursors.Min(c => c.Cursor));
+
+            while (open.Count > 0)
+            {
+                var outcomes = await round.ConfigureAwait(false);
+
+                if (outcomes.Any(o => o.Unauthorized))
+                {
+                    // Та сама єдина друга спроба на прогін, що й у послідовному
+                    // читанні (квиток міг протухнути), — для відмовлених атрибутів.
+                    if ((accepted || outcomes.Any(o => o.Collected is not null)) && !reacquired)
+                    {
+                        reacquired = true;
+
+                        var refused = Enumerable.Range(0, open.Count).Where(i => outcomes[i].Unauthorized).ToList();
+                        var again = await ReadRoundAsync(
+                                batch!, dataSource, sourceEntityId, [.. refused.Select(i => open[i])], interval.ToUtc, runToken)
+                            .ConfigureAwait(false);
+
+                        var merged = outcomes.ToArray();
+
+                        for (var k = 0; k < refused.Count; k++)
+                        {
+                            merged[refused[k]] = again[k];
+                        }
+
+                        outcomes = merged;
+                    }
+
+                    if (outcomes.FirstOrDefault(o => o.Unauthorized) is { } denied)
+                    {
+                        throw await FailAuthenticationAsync(
+                                runId, sourceEntityId, entity.Code, CoveredWithInFlight(), retrieved, denied.Message)
+                            .ConfigureAwait(false);
+                    }
+                }
+
+                var unfinished = new List<PathCursor>();
+
+                for (var i = 0; i < open.Count; i++)
+                {
+                    if (!pausedPaths.Contains(open[i].Path)
+                        && await ApplyPageAsync(open[i], outcomes[i], interval).ConfigureAwait(false))
+                    {
+                        unfinished.Add(open[i]);
+                    }
+                }
+
+                inFlightReached = Reached();
+                open = unfinished;
+
+                if (open.Count > 0)
+                {
+                    round = ReadRoundAsync(batch!, dataSource, sourceEntityId, open, interval.ToUtc, runToken);
+                }
+            }
+
+            return Reached();
+        }
+
         try
         {
+            await using var ahead = batch is null
+                ? null
+                : new ReadAhead(
+                    work.Count,
+                    ParallelReads,
+                    (index, token) =>
+                    {
+                        List<PathCursor> cursors =
+                        [
+                            .. paths.Where(p => !pausedPaths.Contains(p))
+                                .Select(p => new PathCursor(p, work[index].FromUtc)),
+                        ];
+
+                        return (cursors, ReadRoundAsync(
+                            batch!, dataSource, sourceEntityId, cursors, work[index].ToUtc, token));
+                    },
+                    runToken);
+
             foreach (var interval in work)
             {
-                var complete = true;
+                inFlight = interval;
+                inFlightReached = interval.FromUtc;
 
-                foreach (var path in paths)
+                // Межа, до якої інтервал прочитали ВСІ вже пройдені атрибути.
+                // `step` — порядковий номер цього інтервалу в `work`.
+                var reachedAll = ahead is null
+                    ? interval.ToUtc
+                    : await ReadBatchedAsync(interval, ahead.Take(step)).ConfigureAwait(false);
+
+                for (var index = 0; ahead is null && index < paths.Count; index++)
                 {
+                    var path = paths[index];
+                    var lastPath = index == paths.Count - 1;
+
                     // Мапінг, поставлений на паузу через зміну одиниці, у
                     // цьому прогоні більше не читається; інтервал лишається
                     // непокритим — після рішення людини його забере наздоганяння.
                     if (pausedPaths.Contains(path))
                     {
-                        complete = false;
+                        reachedAll = interval.FromUtc;
                         continue;
                     }
 
-                    var outcome = await ReadAsync(
-                        adapter, dataSource.Id, sourceEntityId, path, interval, runToken).ConfigureAwait(false);
+                    // ⛔ Аудит B3: інтервал читається СТОРІНКАМИ до кінця, а не
+                    // одним запитом зі стелею. Раніше хвіст понад
+                    // MaxPointsPerRequest лише знімав покриття, і кожен прогін
+                    // перечитував ті самі перші 5000 точок — решта не
+                    // збиралася НІКОЛИ, а прогін ставав «Degraded» з
+                    // неправдивим «джерело недоступне».
+                    var state = new PathCursor(path, interval.FromUtc);
 
-                    if (outcome.Unauthorized)
+                    while (true)
                     {
-                        // ⚠ Єдиний виняток із заборони повторювати: квиток міг
-                        // просто протухнути посеред довгого прогону. Запит
-                        // адаптера перескладається з нуля — секрет читається на
-                        // кожне звернення, — тож це справді ПЕРЕЗДОБУТТЯ, а не
-                        // той самий заголовок удруге.
-                        if (accepted && !reacquired)
-                        {
-                            reacquired = true;
+                        var page = new TimeInterval(state.Cursor, interval.ToUtc);
 
-                            outcome = await ReadAsync(
-                                adapter, dataSource.Id, sourceEntityId, path, interval, runToken)
-                                .ConfigureAwait(false);
-                        }
+                        var outcome = await ReadAsync(
+                            adapter, dataSource.Id, sourceEntityId, path, page, runToken).ConfigureAwait(false);
 
                         if (outcome.Unauthorized)
                         {
-                            // ⛔ Прогін обривається ТУТ. Решта інтервалів і
-                            // атрибутів не читається: ті самі облікові дані
-                            // дадуть ту саму відмову, а прогін від цього стане
-                            // лише довшим (`H-20`).
-                            throw await FailAuthenticationAsync(
-                                runId, sourceEntityId, entity.Code, covered, retrieved, outcome.Message)
-                                .ConfigureAwait(false);
+                            // ⚠ Єдиний виняток із заборони повторювати: квиток міг
+                            // просто протухнути посеред довгого прогону. Запит
+                            // адаптера перескладається з нуля — секрет читається на
+                            // кожне звернення, — тож це справді ПЕРЕЗДОБУТТЯ, а не
+                            // той самий заголовок удруге.
+                            if (accepted && !reacquired)
+                            {
+                                reacquired = true;
+
+                                outcome = await ReadAsync(
+                                    adapter, dataSource.Id, sourceEntityId, path, page, runToken)
+                                    .ConfigureAwait(false);
+                            }
+
+                            if (outcome.Unauthorized)
+                            {
+                                // ⛔ Прогін обривається ТУТ. Решта інтервалів і
+                                // атрибутів не читається: ті самі облікові дані
+                                // дадуть ту саму відмову, а прогін від цього стане
+                                // лише довшим (`H-20`).
+                                throw await FailAuthenticationAsync(
+                                    runId, sourceEntityId, entity.Code, CoveredWithInFlight(), retrieved,
+                                    outcome.Message)
+                                    .ConfigureAwait(false);
+                            }
+                        }
+
+                        var more = await ApplyPageAsync(state, outcome, interval).ConfigureAwait(false);
+
+                        if (lastPath)
+                        {
+                            inFlightReached = Min(reachedAll, state.Cursor);
+                        }
+
+                        if (!more)
+                        {
+                            break;
                         }
                     }
 
-                    if (outcome.Collected is { } result)
+                    reachedAll = Min(reachedAll, state.Cursor);
+
+                    if (lastPath)
                     {
-                        accepted = true;
-
-                        // ⚠ Успішні точки зберігаються НАВІТЬ при частковій
-                        // відмові батча: викинути прочитане через те, що хвіст
-                        // діапазону не дався, означало б читати його вдруге —
-                        // і так до наступної відмови.
-                        var saved = await SaveAsync(
-                            runId, sourceEntityId, result.Points, maps, units, pausedPaths, ct).ConfigureAwait(false);
-                        retrieved += saved.Written;
-
-                        if (saved.UnitChange is { } change)
-                        {
-                            failureCode ??= SourceUnitConverter.UnitChangedCode;
-                            failureMessage ??= change;
-                        }
-                        else if (result.ErrorCode is null && result.FailedIntervals.Count == 0)
-                        {
-                            continue;
-                        }
+                        inFlightReached = reachedAll;
                     }
-
-                    complete = false;
-                    failureCode ??= outcome.ErrorCode ?? SourceUnavailable;
-                    failureMessage ??= outcome.Message;
                 }
 
-                // ⛔ Покриття пишеться ЛИШЕ за повністю прочитаний інтервал.
-                // Записане наперед покриття — це дірка, яку більше ніхто не
-                // знайде: наздоганяння шукає прогалини саме тут.
-                if (complete)
+                // ⛔ Покриття пишеться ЛИШЕ за фактично прочитане ВСІМА
+                // атрибутами. Записане наперед покриття — це дірка, яку більше
+                // ніхто не знайде: наздоганяння шукає прогалини саме тут.
+                if (reachedAll > interval.FromUtc)
                 {
-                    covered.Add(interval);
+                    covered.Add(new TimeInterval(interval.FromUtc, reachedAll));
                 }
+
+                inFlight = null;
 
                 step++;
                 await progress
-                    .ReportAsync(
+                    .ReportKeyAsync(
                         Percent(step, work.Count),
-                        $"Зібрано точок: {retrieved}; інтервалів {step} із {work.Count}",
+                        "jobs.collectionProgress",
+                        Params(("points", Number(retrieved)), ("step", Number(step)), ("total", Number(work.Count))),
                         ct)
                     .ConfigureAwait(false);
             }
@@ -241,11 +528,16 @@ public sealed class CollectionRunner(
             // одиниці сюди більше не доходить — вона ставить на паузу лише
             // свій мапінг, див. SaveAsync.)
             await store
-                .WriteCoverageAsync(runId, sourceEntityId, covered, CancellationToken.None)
+                .WriteCoverageAsync(runId, sourceEntityId, CoveredWithInFlight(), CancellationToken.None)
                 .ConfigureAwait(false);
 
             await store
-                .FinishRunAsync(runId, "Failed", retrieved, ex.Message, CancellationToken.None)
+                .FinishRunAsync(
+                    runId,
+                    "Failed",
+                    retrieved,
+                    Encode(Reason("jobs.collectionRuleFailed", ("code", ex.ErrorCode), ("error", Trim(ex.Message)))),
+                    CancellationToken.None)
                 .ConfigureAwait(false);
 
             throw;
@@ -262,35 +554,120 @@ public sealed class CollectionRunner(
             // це затримка (ФВ-11.3), а не збій: непрочитане нижче піде в
             // ту саму гілку `Degraded`, що й звичайна відмова джерела, і
             // наздоганяння забере його наступного разу без втрати даних.
+            // Прочитані до обриву сторінки інтервалу — теж покриття: інакше
+            // наступний прогін почав би цей інтервал спочатку і знову вперся б
+            // у той самий ліміт (аудит B3).
+            covered = CoveredWithInFlight();
+            inFlight = null;
+
             failureCode ??= SourceUnavailable;
-            failureMessage ??=
-                $"Прогін перевищив ліміт часу {runDuration.TotalMinutes:0} хв: джерело відповідає, "
-                + "але надто повільно. Непрочитане піде в наздоганяння наступного разу.";
+            failureReason ??= Reason(
+                "jobs.collectionTimeout",
+                ("minutes", runDuration.TotalMinutes.ToString("0", CultureInfo.InvariantCulture)));
+        }
+        catch (OperationCanceledException ex) when (ct.IsCancellationRequested)
+        {
+            // ⚠ Скасування ЗЗОВНІ (Quartz `Interrupt`, зупинка сервісу) —
+            // не збій і не мовчанка (аудит B4). Прогін закривається як
+            // «Degraded»: непрочитане лишилося без покриття і піде в
+            // наздоганяння, як за відмови джерела. Окремого статусу
+            // «Cancelled» журнал прогонів не знає
+            // (`CollectionRunHandlers.KnownStates`), а вводити його — це вже
+            // зміна контракту й екрана, не цього виправлення. Виняток іде
+            // далі: задача мусить побачити, що її скасували.
+            await CloseAfterFailureAsync(
+                    runId, sourceEntityId, CoveredWithInFlight(), "Degraded", retrieved,
+                    Encode(WithCode(SourceUnavailable, Reason("jobs.collectionCancelled"))),
+                    ex)
+                .ConfigureAwait(false);
+            throw;
+        }
+        catch (Exception ex) when (ex is not SourceAuthenticationException)
+        {
+            // ⛔ Аудит B4: будь-що, крім правила й watchdog, — збій сховища
+            // (`DbUpdateException`), прогресу, самого збирача — раніше вилітало
+            // повз `WriteCoverageAsync`/`FinishRunAsync`, і `itg.CollectionRun`
+            // лишався «Running» НАЗАВЖДИ, а покриття вже прочитаних інтервалів
+            // губилося. Тепер: покриття — за повністю прочитане, прогін —
+            // «Failed» із причиною, виняток — далі (не ковтаємо: задача має
+            // стати невдалою, а причина — потрапити в журнал задачі).
+            // Відмова в автентифікації сюди не йде: її прогін уже закрито
+            // (`FailAuthenticationAsync`).
+            await CloseAfterFailureAsync(
+                    runId, sourceEntityId, CoveredWithInFlight(), CollectionFailure.FailedStatus, retrieved,
+                    Encode(Reason("jobs.collectionRunFailed", ("error", Trim(Describe(ex))))),
+                    ex)
+                .ConfigureAwait(false);
+            throw;
         }
 
-        await store.WriteCoverageAsync(runId, sourceEntityId, covered, ct).ConfigureAwait(false);
+        try
+        {
+            await store.WriteCoverageAsync(runId, sourceEntityId, covered, ct).ConfigureAwait(false);
 
-        // ⚠ Відмова джерела — «Degraded», а не «Failed», і виняток НЕ
-        // кидається: діапазон лишився непокритим, наздоганяння візьме його
-        // наступного разу. Це затримка, а не збій.
-        await store
-            .FinishRunAsync(
-                runId,
-                failureCode is null ? "Succeeded" : "Degraded",
-                retrieved,
-                failureCode is null ? null : $"{failureCode}: {failureMessage ?? "джерело недоступне"}",
-                ct)
-            .ConfigureAwait(false);
+            // ⚠ Відмова джерела — «Degraded», а не «Failed», і виняток НЕ
+            // кидається: діапазон лишився непокритим, наздоганяння візьме його
+            // наступного разу. Це затримка, а не збій.
+            await store
+                .FinishRunAsync(
+                    runId,
+                    failureCode is null ? "Succeeded" : "Degraded",
+                    retrieved,
+                    failureCode is null
+                        ? null
+                        : Encode(WithCode(failureCode, failureReason ?? Reason("jobs.collectionSourceUnavailable"))),
+                    ct)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            // Те саме правило, що й вище: прогін не лишається «Running».
+            // ⚠ Покриття вдруге НЕ пишеться (`[]`): якщо впав саме його запис,
+            // повтор додав би ті самі інтервали ще раз поверх уже відстежених.
+            await CloseAfterFailureAsync(
+                    runId, sourceEntityId, [], CollectionFailure.FailedStatus, retrieved,
+                    Encode(Reason("jobs.collectionCloseFailed", ("error", Trim(Describe(ex))))),
+                    ex)
+                .ConfigureAwait(false);
+            throw;
+        }
 
         await progress
-            .ReportAsync(
+            .ReportKeyAsync(
                 100,
-                failureCode is null
-                    ? $"Збір завершено: {retrieved} точок"
-                    : $"Збір завершено частково: {retrieved} точок, діапазон у наздоганянні",
+                failureCode is null ? "jobs.collectionDone" : "jobs.collectionDonePartial",
+                Params(("points", Number(retrieved))),
                 ct)
             .ConfigureAwait(false);
     }
+
+    /// <summary>Конверт причини (<c>Q-326</c>): ключ каталогу й параметри підстановки.</summary>
+    private static JobProgressMessageEnvelope Reason(string key, params (string Name, string Value)[] parameters)
+        => new(key, parameters.Length == 0 ? null : Params(parameters));
+
+    /// <summary>Причина відмови з кодом попереду — та сама форма «код: причина», що й до U12.</summary>
+    private static JobProgressMessageEnvelope WithCode(string code, JobProgressMessageEnvelope reason)
+        => new("jobs.collectionRunReason", Params(("code", code)), reason);
+
+    /// <summary>Текст відмови від адаптера; <c>null</c> — адаптер нічого не сказав.</summary>
+    /// <remarks>
+    /// ⚠ Сам текст — ДАНІ джерела (мова транспорту чи сервера PI), не наше
+    /// формулювання: він іде параметром як є, перекладається лише рамка.
+    /// </remarks>
+    private static JobProgressMessageEnvelope? SourceDetail(string? detail)
+        => string.IsNullOrWhiteSpace(detail) ? null : Reason("jobs.collectionSourceError", ("detail", Trim(detail)));
+
+    private static Dictionary<string, string> Params(params (string Name, string Value)[] parameters)
+        => parameters.ToDictionary(p => p.Name, p => p.Value, StringComparer.Ordinal);
+
+    private static string Encode(JobProgressMessageEnvelope envelope) => JobProgressMessageCodec.Encode(envelope);
+
+    private static string Number(int value) => value.ToString(CultureInfo.InvariantCulture);
+
+    private static string Instant(DateTime value) => value.ToString("O", CultureInfo.InvariantCulture);
+
+    /// <summary>Вільний текст — не довший за <see cref="MaxDetailLength"/> (стовпець <c>nvarchar(2000)</c>).</summary>
+    private static string Trim(string text) => JobProgressMessageCodec.Shorten(text, MaxDetailLength);
 
     /// <summary>
     /// Закриває прогін як невдалий через відмову в автентифікації і віддає
@@ -332,9 +709,16 @@ public sealed class CollectionRunner(
             .WriteCoverageAsync(runId, sourceEntityId, covered, CancellationToken.None)
             .ConfigureAwait(false);
 
+        // ⚠ U12: у журнал прогону — конверт (ключ `jobs.collectionAuthRefused`),
+        // його розпізнає CollectionFailure.IsAuthenticationRefusal за ключем.
         await store
             .FinishRunAsync(
-                runId, CollectionFailure.FailedStatus, retrieved, message, CancellationToken.None)
+                runId,
+                CollectionFailure.FailedStatus,
+                retrieved,
+                CollectionFailure.AuthenticationRefusedReason(
+                    sourceCode, string.IsNullOrWhiteSpace(detail) ? null : Trim(detail)),
+                CancellationToken.None)
             .ConfigureAwait(false);
 
         return new SourceAuthenticationException(
@@ -342,10 +726,82 @@ public sealed class CollectionRunner(
             message,
             new Dictionary<string, object?>
             {
-                ["sourceEntityId"] = sourceEntityId,
+                // ⚠ Лише Details несе ключ — `message` (вище) лишається текстом:
+                // він іде в негайний алерт (`CollectionJob.AlertAuthenticationAsync`)
+                // і в журнал задачі, а messageKey впливає лише на Detail
+                // http-відповіді (ResolveGenericMessageAsync), не на ex.Message.
+                ["messageKey"] = "err.ECR-INT-0502.authenticationRefused",
+                ["sourceEntityId"] = sourceEntityId.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 ["sourceCode"] = sourceCode,
             });
     }
+
+    /// <summary>
+    /// Закриває прогін після непередбаченого винятку: покриття за ПОВНІСТЮ
+    /// прочитане, статус і причина — у <c>itg.CollectionRun</c>, сам виняток — у лог.
+    /// </summary>
+    /// <param name="runId">Прогін збору.</param>
+    /// <param name="sourceEntityId">Сутність джерела.</param>
+    /// <param name="covered">Повністю прочитані інтервали; <c>[]</c> — покриття вже писали.</param>
+    /// <param name="status">Статус закриття.</param>
+    /// <param name="retrieved">Скільки точок устигли записати.</param>
+    /// <param name="message">Причина для журналу прогону — без стека (ФВ-6.11).</param>
+    /// <param name="cause">Виняток, що обірвав прогін; стек іде лише в лог.</param>
+    /// <remarks>
+    /// ⚠ <c>CancellationToken.None</c> — з тієї ж причини, що в
+    /// <see cref="FailAuthenticationAsync"/>: журнал має закритися й тоді,
+    /// коли задачу вже скасували.
+    /// <para>
+    /// ⛔ Власна відмова закриття (база лежить) лише логується і НЕ підміняє
+    /// первинного винятку: викликач кидає далі саме причину, а не наслідок.
+    /// </para>
+    /// </remarks>
+    private async Task CloseAfterFailureAsync(
+        long runId,
+        int sourceEntityId,
+        IReadOnlyList<TimeInterval> covered,
+        string status,
+        int retrieved,
+        string message,
+        Exception cause)
+    {
+        LogRunFailed(log, runId, sourceEntityId, status, cause);
+
+        try
+        {
+            await store
+                .WriteCoverageAsync(runId, sourceEntityId, covered, CancellationToken.None)
+                .ConfigureAwait(false);
+
+            await store
+                .FinishRunAsync(runId, status, retrieved, message, CancellationToken.None)
+                .ConfigureAwait(false);
+        }
+        catch (Exception closeFailure)
+        {
+            LogRunNotClosed(log, runId, sourceEntityId, closeFailure);
+        }
+    }
+
+    /// <summary>Тип і найглибше повідомлення винятку — без стека.</summary>
+    /// <remarks>
+    /// ⚠ Найглибше: у <c>DbUpdateException</c> власний текст — «див. внутрішній
+    /// виняток», і саме внутрішній каже, ЯКЕ обмеження порушено.
+    /// </remarks>
+    private static string Describe(Exception ex)
+        => $"{ex.GetType().Name}: {ex.GetBaseException().Message}";
+
+    [LoggerMessage(
+        Level = LogLevel.Error,
+        Message = "CollectionRunner: прогін {RunId} сутності {SourceEntityId} обірвано винятком; закривається як {Status}.")]
+    private static partial void LogRunFailed(
+        ILogger logger, long runId, int sourceEntityId, string status, Exception exception);
+
+    [LoggerMessage(
+        Level = LogLevel.Error,
+        Message = "CollectionRunner: прогін {RunId} сутності {SourceEntityId} не вдалося закрити після збою — лишається Running.")]
+    private static partial void LogRunNotClosed(
+        ILogger logger, long runId, int sourceEntityId, Exception exception);
 
     /// <summary>Скільки символів тексту від адаптера входить у журнал прогону.</summary>
     /// <remarks>
@@ -430,11 +886,84 @@ public sealed class CollectionRunner(
         }
         catch (Exception ex)
         {
-            // ⛔ Текст — без стека (ФВ-6.11): він іде в itg.CollectionRun, а
-            // цей журнал видно в інтерфейсі обслуговування.
-            return new ReadOutcome(null, SourceUnavailable, ex.Message);
+            return Refused(ex);
         }
     }
+
+    /// <summary>Відмова адаптера — результатом читання, з класифікацією за типом винятку.</summary>
+    /// <remarks>
+    /// ⛔ Виняток із кодом каталогу (<see cref="EcrException"/>,
+    /// <see cref="DomainException"/>) зберігає ВЛАСНИЙ код, ключ
+    /// (<c>Details["messageKey"]</c>) і параметри. Раніше будь-який виняток
+    /// ставав <c>ECR-INT-0503</c> з реченням адаптера: «дані джерела
+    /// нечитабельні» (<c>ECR-INT-0422</c> <c>.timestampUnreadable</c>, HSE301 A7)
+    /// видавалося за «джерело недоступне», а причина йшла українським
+    /// реченням на будь-якій мові інтерфейсу.
+    /// <para>
+    /// Лише сирі винятки транспорту (<see cref="HttpRequestException"/>,
+    /// <c>SqlException</c>, тайм-аут тощо) — <c>ECR-INT-0503</c>, як і раніше.
+    /// Текст — без стека (ФВ-6.11): він іде в <c>itg.CollectionRun</c>, а цей
+    /// журнал видно в інтерфейсі обслуговування.
+    /// </para>
+    /// </remarks>
+    private static ReadOutcome Refused(Exception ex) => ex switch
+    {
+        SourceAuthenticationException auth => new ReadOutcome(null, auth.ErrorCode, auth.Message, Unauthorized: true),
+        EcrException coded when IsCatalogCode(coded.ErrorCode)
+            => new ReadOutcome(null, coded.ErrorCode, coded.Message, Reason: CodedReason(coded.Details, coded.Message)),
+        DomainException coded when IsCatalogCode(coded.ErrorCode)
+            => new ReadOutcome(null, coded.ErrorCode, coded.Message, Reason: CodedReason(coded.Details, coded.Message)),
+        _ => new ReadOutcome(null, SourceUnavailable, ex.Message),
+    };
+
+    /// <summary>Код каталогу помилок: <c>ECR-&lt;ОБЛАСТЬ&gt;-&lt;NNNN&gt;</c>.</summary>
+    private static bool IsCatalogCode(string? code)
+        => code is not null && CatalogCode().IsMatch(code);
+
+    [System.Text.RegularExpressions.GeneratedRegex(@"^ECR-[A-Z]+-\d{4}$", System.Text.RegularExpressions.RegexOptions.CultureInvariant)]
+    private static partial System.Text.RegularExpressions.Regex CatalogCode();
+
+    /// <summary>
+    /// Причина відмови з кодом каталогу: ключ адаптера й підстановки; без ключа — речення як є.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Параметри — рядками, кожен не довший за <see cref="MaxParamLength"/>:
+    /// причина лягає і в <c>ErrorMessage</c> прогону, і в <c>Details</c> події
+    /// (<c>nvarchar(1000)</c>).
+    /// </remarks>
+    private static JobProgressMessageEnvelope? CodedReason(IReadOnlyDictionary<string, object?>? details, string message)
+    {
+        if (details?.GetValueOrDefault("messageKey") is not string { Length: > 0 } key)
+        {
+            return SourceDetail(message);
+        }
+
+        var parameters = details
+            .Where(d => d.Key != "messageKey" && d.Value is not null)
+            .ToDictionary(
+                d => d.Key,
+                d => JobProgressMessageCodec.Shorten(
+                    Convert.ToString(d.Value, CultureInfo.InvariantCulture) ?? string.Empty, MaxParamLength),
+                StringComparer.Ordinal);
+
+        return new JobProgressMessageEnvelope(key, parameters.Count == 0 ? null : parameters);
+    }
+
+    /// <summary>Стеля одного параметра причини від адаптера.</summary>
+    private const int MaxParamLength = 200;
+
+    /// <summary>
+    /// Відмова ДАНИХ, а не джерела: код каталогу, що не є ні недоступністю
+    /// (<c>0503</c>), ні автентифікацією (<c>0502</c>), і власна причина-ключ.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Недоступне джерело — затримка (ФВ-11.3), вона минає сама й подією в
+    /// журналі покриття не є; нечитабельні дані самі не минуть.
+    /// </remarks>
+    private static bool IsDataRefusal(ReadOutcome outcome)
+        => outcome is { Collected: null, Unauthorized: false, Reason: not null, ErrorCode: { } code }
+           && code != SourceUnavailable
+           && code != AuthenticationRefused;
 
     /// <summary>
     /// Перевіряє одиниці й зберігає точки. Мапінг, чия одиниця змінилася,
@@ -460,7 +989,7 @@ public sealed class CollectionRunner(
             return new SaveOutcome(0, null);
         }
 
-        string? unitChange = null;
+        JobProgressMessageEnvelope? unitChange = null;
 
         foreach (var point in points)
         {
@@ -482,8 +1011,11 @@ public sealed class CollectionRunner(
                 .ConfigureAwait(false);
 
             pausedPaths.Add(map.SourceField);
-            unitChange ??= $"Атрибут «{map.SourceField}» повертає одиницю «{actualCode}», "
-                           + $"а в мапінгу оголошено одиницю {map.SourceUnitId}. Мапінг призупинено.";
+            unitChange ??= Reason(
+                "jobs.collectionUnitChanged",
+                ("path", map.SourceField),
+                ("actual", actualCode),
+                ("declared", map.SourceUnitId?.ToString(CultureInfo.InvariantCulture) ?? "—"));
         }
 
         var accepted = pausedPaths.Count == 0
@@ -497,10 +1029,67 @@ public sealed class CollectionRunner(
         return new SaveOutcome(written, unitChange);
     }
 
+    /// <summary>
+    /// Точки сторінки без тих, що попередня сторінка вже віддала (межа ≥).
+    /// </summary>
+    /// <param name="points">Сторінка в порядку джерела.</param>
+    /// <param name="carried">Скільки точок з кожною міткою ≥ курсора вже прочитано.</param>
+    /// <remarks>
+    /// ⚠ Відкидається рівно стільки перших точок із міткою, скільки їх уже
+    /// прочитано, — не «всі з цією міткою»: точки з однаковою міткою, що не
+    /// влізли в попередній батч, ідуть після прочитаних і мають лишитися.
+    /// </remarks>
+    private static IReadOnlyList<SourceDataPoint> Fresh(
+        IReadOnlyList<SourceDataPoint> points, Dictionary<DateTime, int> carried)
+    {
+        if (carried.Count == 0)
+        {
+            return points;
+        }
+
+        var left = new Dictionary<DateTime, int>(carried);
+        var fresh = new List<SourceDataPoint>(points.Count);
+
+        foreach (var point in points)
+        {
+            if (left.TryGetValue(point.Timestamp, out var skip) && skip > 0)
+            {
+                left[point.Timestamp] = skip - 1;
+                continue;
+            }
+
+            fresh.Add(point);
+        }
+
+        return fresh;
+    }
+
+    /// <summary>Скільки точок із кожною міткою ≥ <paramref name="cursor"/> є на сторінці.</summary>
+    /// <remarks>
+    /// Рахується за СИРОЮ сторінкою, разом із відкинутими дублями: вони теж
+    /// лежать у ≥ курсора і наступна сторінка поверне їх знову.
+    /// </remarks>
+    private static Dictionary<DateTime, int> Carried(IReadOnlyList<SourceDataPoint> points, DateTime cursor)
+    {
+        var carried = new Dictionary<DateTime, int>();
+
+        foreach (var point in points)
+        {
+            if (point.Timestamp >= cursor)
+            {
+                carried[point.Timestamp] = carried.GetValueOrDefault(point.Timestamp) + 1;
+            }
+        }
+
+        return carried;
+    }
+
+    private static DateTime Min(DateTime a, DateTime b) => a < b ? a : b;
+
     /// <summary>Підсумок збереження батча.</summary>
     /// <param name="Written">Скільки точок записано.</param>
-    /// <param name="UnitChange">Текст про зміну одиниці; <c>null</c> — не було.</param>
-    private sealed record SaveOutcome(int Written, string? UnitChange);
+    /// <param name="UnitChange">Причина-конверт про зміну одиниці; <c>null</c> — не було.</param>
+    private sealed record SaveOutcome(int Written, JobProgressMessageEnvelope? UnitChange);
 
     /// <summary>Атрибути, які читаємо для сутності.</summary>
     /// <remarks>
@@ -515,11 +1104,27 @@ public sealed class CollectionRunner(
     private static int Percent(int done, int total)
         => total <= 0 ? 100 : Math.Clamp(done * 100 / total, 0, 99);
 
-    private static BusinessRuleException Unavailable(string message, int sourceEntityId)
-        => new(
-            SourceUnavailable,
-            message,
-            new Dictionary<string, object?> { ["sourceEntityId"] = sourceEntityId });
+    /// <summary>Джерело недоступне з однієї з трьох причин — кожна свій <c>messageKey</c>.</summary>
+    /// <param name="message">Запасне речення сервера (журнал; резолвер підміняє його клієнту).</param>
+    /// <param name="sourceEntityId">Сутність джерела, що запустила прогін.</param>
+    /// <param name="messageKey">Ключ каталогу — той самий факт незалежно від того, ЩО саме недоступне.</param>
+    /// <param name="extra">Додаткова підстановка (`dataSourceId`/`transport`) — сирим рядком.</param>
+    private static BusinessRuleException Unavailable(
+        string message, int sourceEntityId, string messageKey, (string Key, string Value)? extra = null)
+    {
+        var details = new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["messageKey"] = messageKey,
+            ["sourceEntityId"] = sourceEntityId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+        };
+
+        if (extra is { } pair)
+        {
+            details[pair.Key] = pair.Value;
+        }
+
+        return new(SourceUnavailable, message, details);
+    }
 
     /// <summary>Результат однієї спроби читання.</summary>
     /// <param name="Collected">Прочитане; <c>null</c> — джерело відмовило.</param>
@@ -528,6 +1133,10 @@ public sealed class CollectionRunner(
     /// <param name="Unauthorized">
     /// <c>true</c> — джерело відмовило в автентифікації (<c>H-20</c>): такий
     /// збій не йде в наздоганяння і не повторюється.
+    /// </param>
+    /// <param name="Reason">
+    /// Причина відмови з кодом каталогу — ключ і параметри адаптера
+    /// (<see cref="CodedReason"/>); <c>null</c> — сирий виняток або відмови не було.
     /// </param>
     /// <remarks>
     /// ⚠ Поле зветься <c>Collected</c>, а не <c>Result</c>, свідомо:
@@ -539,5 +1148,6 @@ public sealed class CollectionRunner(
         CollectionResult? Collected,
         string? ErrorCode,
         string? Message,
-        bool Unauthorized = false);
+        bool Unauthorized = false,
+        JobProgressMessageEnvelope? Reason = null);
 }

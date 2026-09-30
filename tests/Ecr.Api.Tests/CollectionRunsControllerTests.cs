@@ -28,9 +28,14 @@ public sealed class CollectionRunsControllerTests(SqlServerFixture sql)
     [Trait("Requirement", "ФВ-5.23")]
     public async Task Фільтри_звужують_запит_новіші_першими_курсор_доводить_до_кінця()
     {
-        var w = await ArrangeAsync().ConfigureAwait(true);
         using var app = new EcrApiFactory(sql);
         using var client = await SystemHealthControllerTests.SignedInAsync(sql, app, "Integration.View").ConfigureAwait(true);
+
+        // ⚠ Дані — ПІСЛЯ старту хоста: A3 — прогін «Running» від T0 без живої
+        // задачі збору, і прибирання на старті (U11, `AbandonedWorkSweeper`)
+        // законно закрило б його як покинутий (`Failed`). Періодичний прохід
+        // приходить лише через хвилину після старту — тест значно коротший.
+        var w = await ArrangeAsync().ConfigureAwait(true);
 
         // Сутність A: три прогони, новіші першими; сторінка по два + курсор.
         var first = await GetAsync(client, $"?entity={w.EntityA}&limit=2").ConfigureAwait(true);

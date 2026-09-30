@@ -181,6 +181,34 @@ const expected: readonly (readonly [StatusKind, string, StatusTone])[] = [
   ['collectionRun', 'Degraded', 'warning'],
   ['collectionRun', 'Failed', 'danger'],
 
+  // Події журналу покриття (`D-118`): стеля точок — значення не лягло зовсім.
+  ['coverage', 'SkippedPointCeiling', 'danger'],
+  ['coverage', 'SkippedPeriodClosed', 'warning'],
+  ['coverage', 'ConflictKeptManual', 'info'],
+  // Не записано й не правка людини: конфлікт запису (повтор наступним
+  // прогоном) і потрібне підтвердження — обидва `warning`, не `info`.
+  ['coverage', 'SkippedWriteConflict', 'warning'],
+  ['coverage', 'SkippedNeedsConfirmation', 'warning'],
+  // Синк довідника (S5): відмова значення — `danger`; розбіжність, зниклий і
+  // неприв'язаний елемент потребують рішення людини — `warning`; ручне значення
+  // за правилом `D-118` і оновлення, яке синк лише звірив, — `info`.
+  ['coverage', 'RegistryDiverged', 'warning'],
+  ['coverage', 'RegistryConflictKeptManual', 'info'],
+  ['coverage', 'RegistrySourceMissing', 'warning'],
+  ['coverage', 'RegistryElementUnlinked', 'warning'],
+  ['coverage', 'RegistryValueRejected', 'danger'],
+  ['coverage', 'RegistryPendingUpdate', 'info'],
+  // Збір: джерело відмовило віддати дані інтервалу — саме не мине, `danger`.
+  ['coverage', 'SourceDataRefused', 'danger'],
+  // Синк за політикою `D-212`: автостворення — робота за правилом `External`
+  // (`info`); вимкнення, повернення, порушення правила й переприв'язка —
+  // довідник змінився без людини, `warning` (як `NotificationJob.SeverityOf`).
+  ['coverage', 'RegistryAutoCreated', 'info'],
+  ['coverage', 'RegistryDeactivated', 'warning'],
+  ['coverage', 'RegistryReactivated', 'warning'],
+  ['coverage', 'RegistryRuleViolation', 'warning'],
+  ['coverage', 'RegistryExternalKeyRelinked', 'warning'],
+
   // `SnapshotStatus` (`Enums.cs`, `D-65`): `Rejected` у зрізі немає.
   ['snapshot', 'Draft', 'muted'],
   ['snapshot', 'Approved', 'neutral'],
@@ -204,8 +232,8 @@ describe('StatusBadge: стан → тон', () => {
    * коли й тут забули рядок: два переліки розійшлися б, а тест лишився б
    * зеленим на тому, що від них лишилося.
    */
-  it('перелік вичерпний: 36 пар, і таблиця компонента не має жодної зайвої', () => {
-    expect(expected).toHaveLength(36);
+  it('перелік вичерпний: 53 пари, і таблиця компонента не має жодної зайвої', () => {
+    expect(expected).toHaveLength(53);
     expect(expected.every(([kind, state]) => isKnownStatus(kind, state))).toBe(true);
 
     const inComponent = Object.entries(statusTable).flatMap(([kind, states]) =>
@@ -423,6 +451,54 @@ describe('StatusBadge: підпис не стискається нижче вл�
 
     expect(root.getAttribute('data-variant')).toBe('transparent');
     expect(root.style.minWidth).toBe('fit-content');
+  });
+
+  /*
+   * ⛔ **Двослівний підпис, не односкладовий.** Тест вище ловив би регрес на
+   * `miw` і лишався б зеленим, навіть якби фікс на довшому тексті знову
+   * зламався — `min-width: fit-content` для «Scheduled» (без пробілу)
+   * правильний завжди, тому що для нього `min-content == max-content` (див.
+   * коментар над `w="max-content"` у `StatusBadge.tsx`). Дефект жив саме на
+   * ДВОСЛІВНИХ підписах («Grace period», «Not open yet»), де `min-content`
+   * (найдовше слово) менше за `max-content` (увесь текст) — тож перевірка
+   * мусить брати саме такий рядок, інакше вона не ловить того самого
+   * дефекту, який знайшов живий вимір на `/admin/periods`.
+   *
+   * ⛔ jsdom не рахує розкладку (`scrollWidth`/`clientWidth` там завжди 0),
+   * тож пряме порівняння цих чисел тут було б вигаданим доказом — той самий
+   * принцип, що й у сусідньому наборі вище. Перевіряється структурно: САМЕ
+   * `width` кореня дорівнює `max-content` (а не лишається на самій лише
+   * `min-width: fit-content`, якої для двослівного тексту недостатньо —
+   * див. коментар над фіксом).
+   *
+   * ⚠ Мутаційний доказ (зроблено вручну, не лишається в тесті): прибрати
+   * `w="max-content"` з `StatusBadge.tsx`, лишивши тільки
+   * `miw="fit-content"`, — цей тест червоніє (`root.style.width` порожній).
+   * Повернути проп — тест знову зелений.
+   */
+  it.each(expected)(
+    '%s/%s — width: max-content на корені бейджа',
+    (kind, state) => {
+      const root = badge(show(<StatusBadge kind={kind} state={state} />), state);
+
+      expect(root.style.width, `${kind}/${state}`).toBe('max-content');
+    },
+  );
+
+  /*
+   * ⛔ Контроль, що перелік вище справді містить довгі, БАГАТОСЛІВНІ підписи
+   * — інакше параметризований тест над усіма 36 парами міг би пройти зелено
+   * випадково, не торкнувшись жодного разу того самого випадку, який зламав
+   * дефект (`min-content < max-content` через пробіл). Джерело — сам
+   * `09-seed.sql`, не вигадка тут: усі підписи довші за одне слово,
+   * присутні в каталозі станів компонента.
+   */
+  it('перелік вище справді ловить багатослівні підписи — не лише односкладові', () => {
+    const multiWord = expected.filter(([kind, state]) => /\s/.test(t(statusKey(kind, state))));
+
+    // «Grace period», «Not open yet», «Unknown job», «Scheduler unavailable»,
+    // «Completed with warnings» — щонайменше ці п'ять.
+    expect(multiWord.length).toBeGreaterThanOrEqual(5);
   });
 });
 

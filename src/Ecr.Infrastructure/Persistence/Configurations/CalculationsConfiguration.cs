@@ -123,7 +123,14 @@ public sealed class MethodologyVersionConfiguration : IEntityTypeConfiguration<M
         builder.Property(x => x.Level).HasColumnName("Level");
         builder.Property(x => x.NumericMode).HasDefaultValue(Domain.Enums.NumericMode.Legacy);
         builder.Property(x => x.CalendarMode).HasDefaultValue(Domain.Enums.CalendarMode.Actual);
-        builder.Property(x => x.TraceLevel).HasDefaultValue(Domain.Enums.TraceLevel.ErrorsOnly);
+        // ⛔ `ValueGeneratedNever`: значення ЗАВЖДИ надсилається з коду, а
+        // DEFAULT лишається лише для вставок повз EF. Без цього EF (20601)
+        // вважав `Off` (= 0, CLR-замовчування) «незаданим» і на INSERT
+        // мовчки підставляв DEFAULT схеми (`ErrorsOnly`): версія з `Off`,
+        // зокрема клон (`CloneAsDraft`), у базі ставала `ErrorsOnly`.
+        // Конструктор сутності задає значення явно, тож на DEFAULT схеми код
+        // не покладається.
+        builder.Property(x => x.TraceLevel).HasDefaultValue(Domain.Enums.TraceLevel.ErrorsOnly).ValueGeneratedNever();
         builder.Property(x => x.EffectiveFrom).HasColumnType("date");
         builder.Property(x => x.ChangeReason).HasMaxLength(1000);
         builder.Property(x => x.ContentHash).HasColumnType("varbinary(32)");
@@ -167,6 +174,15 @@ public sealed class MethodologyFormulaConfiguration : IEntityTypeConfiguration<M
         builder.Property(x => x.ArgumentsCsv);
         builder.Property(x => x.EvaluationOrder).HasDefaultValue(0);
         builder.Property(x => x.ResultType).HasColumnName("ResultType");
+
+        // HSE301 F6 (D-175, D-176): DEFAULT = поведінка до колонок — наявні
+        // формули рахуються на кожну речовину й проміжних не показують.
+        // `ValueGeneratedNever`: значення завжди надсилається з коду, DEFAULT
+        // лишається для наявних рядків і вставок повз EF.
+        builder.Property(x => x.Scope)
+               .HasDefaultValue(Domain.Enums.MethodologyFormulaScope.Substance, "DF_MF_Scope")
+               .ValueGeneratedNever();
+        builder.Property(x => x.IsVisible).HasDefaultValue(false, "DF_MF_Visible").ValueGeneratedNever();
 
         builder.HasIndex(x => new { x.MethodologyVersionId, x.Code })
                .IsUnique().HasDatabaseName("UQ_MethodologyFormula");
@@ -347,6 +363,12 @@ public sealed class MethodologyOutputConfiguration : IEntityTypeConfiguration<Me
         builder.HasKey(x => x.Id);
         builder.Property(x => x.Code).HasMaxLength(64).IsRequired();
 
+        // HSE301 F6 (D-176): DEFAULT 1 — наявні виходи пишуться на кожну речовину.
+        // ⛔ `ValueGeneratedNever`, як у `TraceLevel`: інакше `false` (CLR-замовчування)
+        // EF вважав би «незаданим» і на INSERT підставляв би DEFAULT схеми, тобто
+        // Row-вихід мовчки ставав би знову по-речовинним.
+        builder.Property(x => x.IsPerSubstance).HasDefaultValue(true, "DF_MO_PerSub").ValueGeneratedNever();
+
         builder.HasIndex(x => new { x.MethodologyVersionId, x.Code })
                .IsUnique().HasDatabaseName("UQ_MethodologyOutput");
 
@@ -439,6 +461,9 @@ public sealed class CalculationRunConfiguration : IEntityTypeConfiguration<Calcu
         builder.Property(x => x.FinishedAt).HasColumnType("datetime2(3)");
         builder.Property(x => x.ErrorMessage).HasMaxLength(2000);
 
+        // RK04 (D-158): момент знімка довідників; NULL — прогін до міграції.
+        builder.Property(x => x.RegistryAsOfUtc).HasColumnType("datetime2(3)");
+
         // ⛔ Унікальний ФІЛЬТРОВАНИЙ індекс — той самий прийом, що вже тримає
         // «поточний зріз» у `UX_ReportSnapshot_Current`. Доти інваріант
         // «актуальний прогін на область — щонайбільше один» не тримало НІЩО:
@@ -453,15 +478,18 @@ public sealed class CalculationRunConfiguration : IEntityTypeConfiguration<Calcu
         // двічі, за двома різними версіями методології. Звіт при цьому
         // будується й не кидає нічого.
         //
-        // ⚠ Область — ПАРА «проєкт × період», а не сам проєкт: перерахунки
-        // різних періодів ідуть паралельно, і кожен має власний актуальний
-        // прогін. `PeriodKey IS NULL` (річний прогін) — теж окрема область, і
-        // SQL Server дає це задарма: в унікальному індексі NULL рівний NULL.
+        // ⚠ Область — ТРІЙКА «проєкт × період × документ», а не пара «проєкт
+        // × період»: перерахунки різних періодів ідуть паралельно, і кожен
+        // має власний актуальний прогін. `PeriodKey IS NULL` (річний прогін) і
+        // `DocumentId IS NULL` (прогін усього проєкту, третя хвиля UX-PASS R4,
+        // «CalculationRun ховає результати сусідніх документів») — теж окремі
+        // області, і SQL Server дає це задарма: в унікальному індексі NULL
+        // рівний NULL.
         //
         // ⚠ Фільтр по `Status`, а не індекс по всій таблиці: знятих з
         // актуальності прогонів накопичуються мільйони, і вони мусять
         // співіснувати з чинним (ЗБР-1, «нічого не затирається»).
-        builder.HasIndex(x => new { x.ProjectId, x.PeriodKey })
+        builder.HasIndex(x => new { x.ProjectId, x.PeriodKey, x.DocumentId })
                .IsUnique()
                .HasFilter("[Status] = 'Current'")
                .HasDatabaseName("UX_CalculationRun_Current");
@@ -497,9 +525,22 @@ public sealed class CalculationResultConfiguration : IEntityTypeConfiguration<Ca
         builder.Property(x => x.Value).HasColumnType("decimal(34,16)");
         builder.Property(x => x.SubstanceEntryId).HasConversion<int?>();
 
+        // HSE301 F6 (D-175): DEFAULT 0 = Output — наявні рядки лишаються виходами.
+        builder.Property(x => x.Kind)
+               .HasDefaultValue(Domain.Enums.CalculationResultKind.Output, "DF_CRes_Kind")
+               .ValueGeneratedNever();
+
         builder.HasIndex(x => new { x.PeriodKey, x.DocumentId, x.MethodologyVersionId, x.OutputCode })
                .HasDatabaseName("IX_CalculationResult_Lookup")
                .IncludeProperties(x => new { x.Value, x.UnitId, x.SubstanceEntryId, x.SourceRowKey });
+
+        // ⛔ HSE301 U1 (аудит C6 п.3): індекс під FK_CRes_Unit. Без нього і
+        // перевірка ключа при видаленні одиниці, і «де використовується»
+        // (UnitStore: CalculationResults.AnyAsync(UnitId == …)) сканують усю
+        // таблицю — мільйони рядків на рік. Міграція U1UnitForeignKeys створює
+        // його сирим SQL (ONLINE лише на Enterprise/Azure, вирівняно зі схемою
+        // партиціонування таблиці); тут — лише форма для моделі.
+        builder.HasIndex(x => x.UnitId).HasDatabaseName("IX_CalculationResult_UnitId");
 
         builder.HasOne<CalculationRun>().WithMany().HasForeignKey(x => x.CalculationRunId)
                .HasConstraintName("FK_CRes_Run");
@@ -546,6 +587,12 @@ public sealed class CalculationStepConfiguration : IEntityTypeConfiguration<Calc
         builder.Property(x => x.Expression).HasMaxLength(2000);
         builder.Property(x => x.Value).HasColumnType("decimal(34,16)");
         builder.Property(x => x.Masked).HasColumnName("MaskedZero").HasDefaultValue(Domain.Enums.MaskedZeroReason.None);
+
+        // HSE301 F6: адреса кроку (§7.1). Типи — як у `calc.CalculationResult`
+        // (`SourceRowKey nvarchar(100)`, `SubstanceEntryId int`), щоб крок і його
+        // результат з'єднувалися без перетворень.
+        builder.Property(x => x.SourceRowKey).HasMaxLength(100);
+        builder.Property(x => x.SubstanceEntryId).HasConversion<int?>();
 
         // ⛔ Фільтрований індекс, а не звичайний. Замаскованих кроків мало —
         // решта трейсу це `MaskedZero = 0`, — а питання до них рівно одне:

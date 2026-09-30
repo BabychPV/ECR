@@ -34,6 +34,19 @@ public interface IRowStore
     public Task<TableInstanceRef> ResolveTableInstanceAsync(long tableInstanceId, CancellationToken ct);
 
     /// <summary>
+    /// Ідентичність КІЛЬКОХ екземплярів таблиць ОДНИМ запитом (P8, застосування
+    /// імпорту книги).
+    /// </summary>
+    /// <returns>Екземпляр → ідентичність; кожен запитаний присутній.</returns>
+    /// <remarks>
+    /// ⛔ Відсутній екземпляр — та сама відмова <c>ECR-DOC-0404</c>, що й у
+    /// <see cref="ResolveTableInstanceAsync"/>, а не мовчазний пропуск.
+    /// Поштучний метод і є цим методом з одним екземпляром.
+    /// </remarks>
+    public Task<IReadOnlyDictionary<long, TableInstanceRef>> ResolveTableInstancesAsync(
+        IReadOnlyCollection<long> tableInstanceIds, CancellationToken ct);
+
+    /// <summary>
     /// Поточні версії рядків таблиці: <c>RowKey</c> → hex <c>rowversion</c>.
     /// </summary>
     /// <remarks>
@@ -50,12 +63,38 @@ public interface IRowStore
         long tableInstanceId, PeriodKey periodKey, CancellationToken ct);
 
     /// <summary>
+    /// Живі рядки таблиці ОДНИМ запитом: ключ, <c>TableRow.Id</c>, версія
+    /// (Base64, як у <see cref="GetRowVersionsAsync"/>) і ознака осиротілості.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <c>WR-04</c> п. 3: той самий предикат, що в
+    /// <see cref="GetRowVersionsAsync"/> і <see cref="GetRowIdsAsync"/>, — тож
+    /// викликач, якому потрібні обидві мапи (запис комірок), платить одним
+    /// зверненням, а не двома.
+    /// </remarks>
+    public Task<IReadOnlyList<RowState>> GetRowsAsync(
+        long tableInstanceId, PeriodKey periodKey, CancellationToken ct);
+
+    /// <summary>
+    /// Живі рядки КІЛЬКОХ таблиць одного періоду ОДНИМ запитом — те саме, що
+    /// <see cref="GetRowsAsync"/> на кожну; екземпляр без жодного рядка в
+    /// результат не потрапляє.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ P8 (застосування імпорту книги): <see cref="GetRowsAsync"/> у циклі по
+    /// ~91 таблиці книги — звернення на кожну. Поштучний метод і є цим методом
+    /// з одним екземпляром (тест еквівалентності — <c>RowStoreBatchEquivalenceTests</c>).
+    /// </remarks>
+    public Task<IReadOnlyDictionary<long, IReadOnlyList<RowState>>> GetRowsBatchAsync(
+        IReadOnlyList<long> tableInstanceIds, PeriodKey periodKey, CancellationToken ct);
+
+    /// <summary>
     /// Ідентифікатори рядків кількох таблиць ОДНИМ запитом; екземпляр без
     /// жодного рядка в результат не потрапляє.
     /// </summary>
     /// <remarks>
     /// ⛔ Q-165 (аудит фази 2, продуктивність), той самий випадок, що й
-    /// <see cref="ICellStore.ReadSlicesAsync"/> поруч: <see cref="GetRowIdsAsync"/>
+    /// <see cref="ICellStore.ReadSlicesAsync(IReadOnlyList{long}, CancellationToken)"/> поруч: <see cref="GetRowIdsAsync"/>
     /// у циклі по таблицях документа коштує другого походу в базу НА КОЖНУ з
     /// ~90 таблиць.
     /// </remarks>
@@ -102,6 +141,26 @@ public interface IRowStore
     /// </remarks>
     public Task<IReadOnlyList<long>> CreateRowsAsync(
         long tableInstanceId, PeriodKey periodKey, IReadOnlyList<RowKey> rowKeys, int ordinal, CancellationToken ct);
+
+    /// <summary>
+    /// Створює рядки КІЛЬКОХ екземплярів ОДНИМ пакетом (P8, застосування
+    /// імпорту книги); результат — <c>Id</c> на кожен набір у порядку входу,
+    /// усередині набору — у порядку його ключів.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ <see cref="CreateRowsAsync"/> у циклі по ~91 таблиці книги — два
+    /// звернення на кожну. Тут: один діапазон <c>SEQUENCE</c> і одна вставка на
+    /// весь пакет. Поштучний метод і є цим методом з одним набором
+    /// (<c>RowStoreCreateBatchEquivalenceTests</c>).
+    ///
+    /// ⚠ Не комітить сам: у транзакції викликача (DAT-05 «усе або нічого»)
+    /// невдалий пакет не лишає жодного рядка. Зайнятий ключ — та сама
+    /// <c>ECR-ROW-0409</c>, що дав би поштучний виклик на першому (у порядку
+    /// входу) винному наборі; на пакеті з кількох екземплярів відмова несе ще
+    /// й <c>tableInstanceId</c>.
+    /// </remarks>
+    public Task<IReadOnlyList<IReadOnlyList<long>>> CreateRowsBatchAsync(
+        IReadOnlyList<RowCreationBatch> batches, CancellationToken ct);
 
     /// <summary>
     /// Піднімає <c>ModifiedAt</c> зачеплених рядків.
@@ -181,6 +240,20 @@ public interface IRowStore
     /// </remarks>
     public Task<IReadOnlyList<long>> GetOrphanedRowIdsAsync(
         long documentId, PeriodKey periodKey, CancellationToken ct);
+
+    /// <summary>
+    /// Таблиця кожного з рядків одного періоду ОДНИМ запитом:
+    /// <c>TableRow.Id</c> → <c>TableDefId</c> його екземпляра.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ S6 (ФВ-6.6): відмова подання через осиротілі рядки не має називати
+    /// рядків таблиць, прихованих від того, хто подає, — а
+    /// <see cref="GetOrphanedRowIdsAsync"/> дає самі ідентифікатори. Рядка, якого
+    /// немає в періоді, у результаті немає (для викликача — «таблиця невідома»,
+    /// тобто невидима).
+    /// </remarks>
+    public Task<IReadOnlyDictionary<long, int>> GetTableDefIdsOfRowsAsync(
+        IReadOnlyCollection<long> rowIds, PeriodKey periodKey, CancellationToken ct);
 }
 
 /// <summary>Ідентичність екземпляра таблиці.</summary>
@@ -191,3 +264,18 @@ public interface IRowStore
 /// <param name="PeriodKey">Період екземпляра; він же ключ партиції.</param>
 public sealed record TableInstanceRef(
     long TableInstanceId, long DocumentId, int TableDefId, int TemplateVersionId, int PeriodKey);
+
+/// <summary>Набір нових рядків одного екземпляра для <see cref="IRowStore.CreateRowsBatchAsync"/>.</summary>
+/// <param name="TableInstanceId">Екземпляр таблиці.</param>
+/// <param name="PeriodKey">Період екземпляра — ключ партиції.</param>
+/// <param name="RowKeys">Ключі нових рядків.</param>
+/// <param name="Ordinal">Порядковий номер, спільний для всіх рядків набору (як у <see cref="IRowStore.CreateRowsAsync"/>).</param>
+public sealed record RowCreationBatch(
+    long TableInstanceId, PeriodKey PeriodKey, IReadOnlyList<RowKey> RowKeys, int Ordinal);
+
+/// <summary>Стан одного живого рядка таблиці.</summary>
+/// <param name="RowKey">Ключ рядка.</param>
+/// <param name="Id"><c>TableRow.Id</c>.</param>
+/// <param name="RowVersion"><c>rowversion</c> у Base64 — те, що клієнт шле в <c>baseVersion</c>.</param>
+/// <param name="IsOrphaned">Збережена ознака осиротілості (<c>D-98</c>).</param>
+public sealed record RowState(string RowKey, long Id, string RowVersion, bool IsOrphaned);

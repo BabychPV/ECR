@@ -28,6 +28,70 @@ public sealed class UnitStore(EcrDbContext db) : IUnitStore
     public void RemoveUnit(Unit unit) => db.Units.Remove(unit);
 
     /// <inheritdoc />
+    /// <remarks>
+    /// <c>UPDLOCK, HOLDLOCK</c> — той самий прийом, що в <c>MethodologyVersionDeletionStore</c>:
+    /// дві правки однієї одиниці серіалізуються на її рядку, а читання під RCSI без підказки
+    /// не блокувало б нічого.
+    ///
+    /// ⚠ Екземпляр, уже відстежуваний контекстом (повтор замикання стратегією після
+    /// дедлоку), відчіплюється: інакше EF повернув би його з ПОПЕРЕДНЬОЇ спроби — зі
+    /// зміненими в пам'яті значеннями, а не з тими, що зараз у базі.
+    /// </remarks>
+    public async Task<Unit?> LockUnitAsync(int unitId, CancellationToken ct)
+    {
+        RequireTransaction();
+
+        var stale = db.ChangeTracker.Entries<Unit>().FirstOrDefault(e => e.Entity.Id == unitId);
+        if (stale is not null)
+        {
+            stale.State = EntityState.Detached;
+        }
+
+        return await db.Units
+            .FromSql($"SELECT * FROM uom.Unit WITH (UPDLOCK, HOLDLOCK) WHERE Id = {unitId}")
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⛔ Чому <c>SERIALIZABLE</c>, а не підказки в кожному запиті. Під RCSI перевірка
+    /// читає знімок: незакомічене посилання для неї не існує, а нове після неї нічим не
+    /// зупинене. <c>SERIALIZABLE</c> робить читання блокувальним (чекає на незакомічене) і
+    /// тримає діапазони ключів до кінця транзакції (нове посилання чекає коміту). Підказки
+    /// довелося б дублювати в кожному запиті переліку — і кожне нове джерело посилань
+    /// мовчки лишалося б без них.
+    ///
+    /// ⚠ Рівень ставиться окремим пакетом без параметрів (не <c>sp_executesql</c>, де він
+    /// скинувся б на виході) і повертається до <c>READ COMMITTED</c> одразу після
+    /// переліку. Блокування, узяті під <c>SERIALIZABLE</c>, лишаються до кінця транзакції й
+    /// після повернення рівня — так визначено для <c>SET TRANSACTION ISOLATION LEVEL</c>.
+    ///
+    /// ⚠ Ціна: запит до таблиці даних без індексу за одиницею тримає діапазон на всю
+    /// таблицю до коміту. Це адміністративна дія над довідником, і транзакція коротка.
+    /// </remarks>
+    public async Task<UsageResponse> FindUnitUsageForUpdateAsync(int unitId, int take, CancellationToken ct)
+    {
+        RequireTransaction();
+
+        await db.Database.ExecuteSqlRawAsync("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE;", ct).ConfigureAwait(false);
+        var usage = await FindUnitUsageAsync(unitId, take, ct).ConfigureAwait(false);
+        await db.Database.ExecuteSqlRawAsync("SET TRANSACTION ISOLATION LEVEL READ COMMITTED;", ct).ConfigureAwait(false);
+
+        return usage;
+    }
+
+    private void RequireTransaction()
+    {
+        if (db.Database.CurrentTransaction is null)
+        {
+            throw new InvalidOperationException(
+                "Блокування одиниці береться лише всередині транзакції: поза нею воно звільнилося б " +
+                "одразу і нічого не захистило б.");
+        }
+    }
+
+    /// <inheritdoc />
     public async Task<UsageResponse> FindUnitUsageAsync(int unitId, int take, CancellationToken ct)
     {
         var total = 0;
@@ -134,13 +198,34 @@ public sealed class UnitStore(EcrDbContext db) : IUnitStore
                 .Select(d => new Hit(d.Id, d.Code, null)))
             .ConfigureAwait(false);
 
+        // HSE301 U2: прив'язка PI тримає одиницю і цільовою колонкою (FK_RWM_Unit), і
+        // кожним джерелом (FK_RWS_Unit). Джерело без своєї прив'язки не існує, тож рядок —
+        // один на прив'язку, хоч би скільки її джерел були в цій одиниці. Раніше цього
+        // виду не було, і видалення такої одиниці падало на FK голим 500.
+        await AddAsync(
+            UsageKinds.RowWindowMap,
+            from m in db.RowWindowMaps
+            where m.TargetUnitId == unitId || m.Sources.Any(s => s.SourceUnitId == unitId)
+            join c in db.ColumnDefs on m.TargetColumnDefId equals c.Id
+            join t in db.TableDefs on m.TableDefId equals t.Id
+            join s in db.SheetDefs on t.SheetDefId equals s.Id
+            join v in db.TemplateVersions on s.TemplateVersionId equals v.Id
+            orderby m.Id
+            select new Hit(
+                m.Id, t.Code + "." + c.Code, "/admin/templates/" + v.TemplateId + "/versions/" + v.Id))
+            .ConfigureAwait(false);
+
         // Таблиці даних: один рядок на таблицю, без підрахунку (див. порт).
+        // ⚠ Кожен зовнішній ключ на uom.Unit мусить мати тут або вище свій запит — інакше
+        // видалення падає на FK голим 500 замість 409. Стереже UnitUsageForeignKeyTests.
         foreach (var (table, any) in new (string, Func<Task<bool>>)[]
         {
             ("doc.CellValue", () => db.CellValues.AnyAsync(x => x.ValueUnitId == unitId, ct)),
+            ("doc.DocumentHeaderValue", () => db.DocumentHeaderValues.AnyAsync(x => x.ValueUnitId == unitId, ct)),
             ("dic.RegistryValue", () => db.RegistryValues.AnyAsync(x => x.ValueUnitId == unitId, ct)),
             ("calc.CalculationResult", () => db.CalculationResults.AnyAsync(x => x.UnitId == unitId, ct)),
             ("ext.RawData", () => db.RawDataPoints.AnyAsync(x => x.UnitId == unitId, ct)),
+            ("ext.RowWindowValue", () => db.RowWindowValues.AnyAsync(x => x.TargetUnitId == unitId, ct)),
         })
         {
             if (!await any().ConfigureAwait(false))

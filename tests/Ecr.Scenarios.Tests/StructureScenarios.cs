@@ -279,11 +279,13 @@ public sealed class StructureScenarios(SqlServerFixture sql)
         Assert.True(addManual.StatusCode == HttpStatusCode.OK, $"{addManual.StatusCode}: {app.ErrorsText}");
         var manualColumnId = (await addManual.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetInt32();
 
+        // ✎ V-19: `[M] * 2`, а не колишнє `A + B` — голі імена в діалекті
+        // шаблону не резолвляться, і збереження тепер відхиляє їх з ключем.
         var rejectedFormula = await admin.Client.PutAsJsonAsync(
             new Uri(
                 $"/api/v1/template-versions/{versionId}/tables/{tableId}/formulas/column/{manualColumnId}",
                 UriKind.Relative),
-            new { dialect = "Template", expression = "A + B" });
+            new { dialect = "Template", expression = "[M] * 2" });
 
         Assert.Equal(HttpStatusCode.UnprocessableEntity, rejectedFormula.StatusCode);
         var rejectedBody = await rejectedFormula.Content.ReadFromJsonAsync<JsonElement>();
@@ -291,7 +293,7 @@ public sealed class StructureScenarios(SqlServerFixture sql)
 
         var saveFormula = await admin.Client.PutAsJsonAsync(
             new Uri($"/api/v1/template-versions/{versionId}/tables/{tableId}/formulas/column/{columnId}", UriKind.Relative),
-            new { dialect = "Template", expression = "A + B" });
+            new { dialect = "Template", expression = "[M] * 2" });
         Assert.True(saveFormula.StatusCode == HttpStatusCode.OK, $"{saveFormula.StatusCode}: {app.ErrorsText}");
         var formulaId = (await saveFormula.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetInt32();
 
@@ -302,11 +304,11 @@ public sealed class StructureScenarios(SqlServerFixture sql)
         // тій самій колонці, а Rule 3 забороняє перевіряти це `SELECT`-ом.
         var resaveFormula = await admin.Client.PutAsJsonAsync(
             new Uri($"/api/v1/template-versions/{versionId}/tables/{tableId}/formulas/column/{columnId}", UriKind.Relative),
-            new { dialect = "Template", expression = "A + B + 1" });
+            new { dialect = "Template", expression = "[M] * 2 + 1" });
         Assert.True(resaveFormula.StatusCode == HttpStatusCode.OK, $"{resaveFormula.StatusCode}: {app.ErrorsText}");
         var resavedBody = await resaveFormula.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal(formulaId, resavedBody.GetProperty("id").GetInt32());
-        Assert.Equal("A + B + 1", resavedBody.GetProperty("expression").GetString());
+        Assert.Equal("[M] * 2 + 1", resavedBody.GetProperty("expression").GetString());
 
         // ⛔ Регресія 2026-09-23: `GET .../structure` тепер несе ЧИННИЙ вираз
         // — саме те, чого редактору бракувало при повторному відкритті
@@ -325,7 +327,7 @@ public sealed class StructureScenarios(SqlServerFixture sql)
         var columnInStructure = table.GetProperty("columns").EnumerateArray()
             .Single(c => c.GetProperty("id").GetInt32() == columnId);
 
-        Assert.Equal("A + B + 1", columnInStructure.GetProperty("formulaExpression").GetString());
+        Assert.Equal("[M] * 2 + 1", columnInStructure.GetProperty("formulaExpression").GetString());
         Assert.Equal("Template", columnInStructure.GetProperty("formulaDialect").GetString());
 
         // ⛔ Колонка БЕЗ формули (`manualColumnId` — та сама, на якій
@@ -375,13 +377,17 @@ public sealed class StructureScenarios(SqlServerFixture sql)
         Assert.True(addTable.StatusCode == HttpStatusCode.OK, $"{addTable.StatusCode}: {app.ErrorsText}");
         var tableId = (await addTable.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetInt32();
 
+        // ✎ V-19: вираз — `1 >= 0`, а не колишнє `A >= 0`. Голе `A` у діалекті
+        // шаблону — невідомий ідентифікатор (посилання пишеться в дужках), і
+        // збереження тепер його відхиляє; колонки в таблиці цього сценарію
+        // немає, а предмет сценарію — персистентність правила, не його зміст.
         var addRule = await admin.Client.PutAsJsonAsync(
             new Uri($"/api/v1/template-versions/{versionId}/tables/{tableId}/validation-rules/RULE1", UriKind.Relative),
             new
             {
                 severity = "Error",
                 scope = (byte)0,
-                expression = "A >= 0",
+                expression = "1 >= 0",
                 messageL10n = new Dictionary<string, string> { ["en"] = "must be non-negative" },
                 columnDefId = (int?)null,
                 isActive = true,
@@ -399,7 +405,7 @@ public sealed class StructureScenarios(SqlServerFixture sql)
             {
                 severity = "Warning",
                 scope = (byte)0,
-                expression = "A >= 0",
+                expression = "1 >= 0",
                 messageL10n = new Dictionary<string, string> { ["en"] = "must be non-negative" },
                 columnDefId = (int?)null,
                 isActive = true,
@@ -494,14 +500,11 @@ public sealed class StructureScenarios(SqlServerFixture sql)
     /// збереженої структури (<c>W5.3</c> зробив цю формулу можливою).
     /// </summary>
     /// <remarks>
-    /// ⛔ `SaveFormulaDefHandler` не перевіряє синтаксис на запис — вираз
-    /// зберігається сирим текстом, і саме тому цей сценарій може ПОКЛАСТИ
-    /// зламане в структуру: перевірка (`FormulaEngine.Parse`, `PublishChecks.
-    /// CheckExpression`) настає лише на публікації, будуючи граф залежностей
-    /// (`PublishChecks.cs`). Раніше (до `W5.3`) довести це можна було тільки
-    /// синтаксисом БЕЗ прив'язки до версії — тепер `SUM(A, B` лежить у
-    /// справжній колонці справжньої таблиці, і публікація відмовляє РІВНО
-    /// тому, чому має.
+    /// ✎ V-19 (2026-09-24): `SaveFormulaDefHandler` ТЕПЕР перевіряє синтаксис і
+    /// посилання на запис — `SUM(A, B` через `PUT` більше не лягає в структуру.
+    /// Сценарій доводить обидві межі: запис відмовляє з ключем причини, а
+    /// зламане, що вже лежить у структурі (збережене до V-19, тут — прямим
+    /// SQL), публікація однаково відхиляє РІВНО тому, чому має.
     /// </remarks>
     [Fact]
     [Trait("Category", "Integration")]
@@ -565,13 +568,30 @@ public sealed class StructureScenarios(SqlServerFixture sql)
         Assert.True(addColumn.StatusCode == HttpStatusCode.OK, $"{addColumn.StatusCode}: {app.ErrorsText}");
         var columnId = (await addColumn.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetInt32();
 
-        // ⛔ Незакрита дужка. `PUT` приймає її мовчки (запис не валідує
-        // синтаксис) — саме це і є доказом того, ЩО перевіряє публікація, а
-        // не запис.
+        // ⛔ Незакрита дужка. `PUT` відмовляє з ключем причини (V-19).
         var saveFormula = await admin.Client.PutAsJsonAsync(
             new Uri($"/api/v1/template-versions/{versionId}/tables/{tableId}/formulas/column/{columnId}", UriKind.Relative),
             new { dialect = "Template", expression = "SUM(A, B" });
-        Assert.True(saveFormula.StatusCode == HttpStatusCode.OK, $"{saveFormula.StatusCode}: {app.ErrorsText}");
+        Assert.True(
+            saveFormula.StatusCode == HttpStatusCode.UnprocessableEntity,
+            $"{saveFormula.StatusCode}: {app.ErrorsText}");
+        var saveBody = await saveFormula.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("ECR-TMPL-0422", saveBody.GetProperty("errorCode").GetString());
+        Assert.StartsWith("expr.", saveBody.GetProperty("messageKey").GetString(), StringComparison.Ordinal);
+
+        // Зламане, збережене до V-19, — прямо в базу: публікація мусить його відхилити.
+        await using (var connection = new SqlConnection(sql.ConnectionString))
+        {
+            await connection.OpenAsync();
+            await using var insert = connection.CreateCommand();
+            insert.CommandText = """
+                INSERT INTO cfg.FormulaDef (TableDefId, Scope, ColumnDefId, Dialect, Expression)
+                VALUES (@t, 0, @c, 0, N'SUM(A, B');
+                """;
+            insert.Parameters.AddWithValue("@t", tableId);
+            insert.Parameters.AddWithValue("@c", columnId);
+            await insert.ExecuteNonQueryAsync();
+        }
 
         var publish = await admin.Client.PostAsJsonAsync(
             new Uri($"/api/v1/template-versions/{versionId}/publish", UriKind.Relative),

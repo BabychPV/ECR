@@ -11,7 +11,8 @@ namespace Ecr.Application.Reporting;
 
 /// <summary>
 /// Вивантаження зрізу в <c>.xlsx</c> (<c>R7</c>). Право <c>Report.Export</c>
-/// плюс грант <c>Read</c> на проєкт зрізу — як у рядків і перевірки.
+/// плюс грант <c>Read</c> на проєкт зрізу — як у рядків і перевірки, плюс право
+/// на вміст зрізу <c>Report.ViewSnapshot</c> у проєкті (рішення людини 2026-09-29).
 /// </summary>
 /// <remarks>
 /// ⛔ Право <c>Report.Export</c> лежало в каталозі (<c>09-seed.sql</c>) і в
@@ -59,7 +60,7 @@ public sealed class ExportSnapshotHandler(
     public async Task<SnapshotExport> HandleAsync(long snapshotId, CancellationToken ct)
     {
         var profile = await PermissionCheck
-            .RequireAsync(access, currentUser, Permission, ct)
+            .RequireInAnyProjectAsync(access, currentUser, Permission, ct)
             .ConfigureAwait(false);
 
         var projectId = await snapshots.FindProjectIdAsync(snapshotId, ct).ConfigureAwait(false);
@@ -67,11 +68,19 @@ public sealed class ExportSnapshotHandler(
         // ⛔ Чужий = неіснуючий, той самий 404, що й у рядків (BE-17, Q-239):
         // перелік чужих зрізів не показує взагалі, і відмова «є, але не твій»
         // розповідала б перебором ідентифікаторів те, що перелік приховує.
+        // ФВ-6.14: без права в проєкті зрізу — так само.
         if (projectId is not { } project
-            || profile.LevelFor(ResourceKind.Project, project) < GrantLevel.Read)
+            || profile.LevelFor(ResourceKind.Project, project) < GrantLevel.Read
+            || !profile.Has(Permission, project))
         {
             throw NotFound(snapshotId);
         }
+
+        // ⛔ Рішення людини 2026-09-29: книга несе той самий ВМІСТ, що й рядки,
+        // тож вимагає й того самого права на вміст у проєкті зрізу —
+        // `Report.Export` лише дозволяє винести назовні те, що вже можна бачити.
+        // 403, а не 404: зріз тут уже видимий (грант і `Report.Export` у проєкті).
+        PermissionCheck.RequireIn(profile, GetSnapshotRowsHandler.ContentPermission, project);
 
         var first = await Page(snapshotId, 0, ct).ConfigureAwait(false);
         var rows = new List<SnapshotRow>(first.Rows);

@@ -33,7 +33,7 @@ public sealed class PasswordChangeMiddleware(RequestDelegate next)
                 "1",
                 StringComparison.Ordinal);
 
-            PasswordChangeGate.Ensure(mustChange, context.Request.Path.Value);
+            PasswordChangeGate.Ensure(mustChange, context.Request.Method, context.Request.Path.Value);
         }
 
         return next(context);

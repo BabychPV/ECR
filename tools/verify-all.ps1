@@ -57,6 +57,33 @@
     не повз нього. Обхід виглядав би однаково зеленим — і мовчки перестав би
     отримувати кожну наступну зміну в тому, ЯК гейт запускається.
 
+.PARAMETER ApiParallel
+    Скільки паралельних процесів `dotnet test` запускає КОЖЕН із кроків
+    «Тести API (частина 1/2)». Типово — `ECR_API_PARALLEL` з оточення, без
+    нього 1.
+
+    1 — рівно один процес на крок, як і раніше (так іде конвеєр, доки його
+    не змінять). K > 1 — шарди частини (`tools/api-test-shards.psd1`, по три
+    на частину) розподіляються між min(K, 3) процесами на ту саму зібрану
+    DLL; кожен процес отримує `ECR_TEST_SHARD=<N>` і тому свою базу
+    `EcrTest_Api_<мітка>_s<N>`, свій фільтр і свій журнал у
+    `tests/Ecr.Api.Tests/TestResults/shards/`. Код виходу спільний: крок
+    червоний, якщо впав хоч один процес, і журнал упалого друкується цілком.
+
+    ⛔ Чому процеси, а не паралельні колекції xUnit: `EcrApiFactory` передає
+    рядок з'єднання через змінну оточення (одна на процес), а реєстри Quartz
+    статичні. Два шарди в одному процесі ділили б одну базу.
+
+    ⚠ Кожен процес — важкий слот машини (власна база, власний хост). Замір
+    2026-09-28, обидві частини поспіль, машина під чужим навантаженням
+    (CPU 78–83 % у середньому): K=1 — 580 с, K=2 — 570 с, K=3 — 269 с;
+    деталі в `api-test-shards.psd1`. Природне значення — 3 (по процесу на
+    шард). K=2 кладе два шарди частини в один процес, і на завантаженій
+    машині виграшу майже немає.
+
+    ⚠ `ECR_TEST_DB` при K > 1 заборонено: він перекриває ім'я бази цілком, і
+    всі процеси скидали б одну базу одне в одного.
+
 .PARAMETER ListSteps
     Надрукувати імена кроків і вийти. Це вхід для сторожа: перелік кроків
     здобувається із самого скрипта, а не переписується в тест.
@@ -73,7 +100,8 @@ param(
     [switch] $ListSteps,
     [string] $SqlServer,
     [string] $SqlLogin,
-    [string] $SqlPassword = $env:ECR_SQL_PASSWORD
+    [string] $SqlPassword = $env:ECR_SQL_PASSWORD,
+    [int] $ApiParallel = $(if ($env:ECR_API_PARALLEL) { [int] $env:ECR_API_PARALLEL } else { 1 })
 )
 
 $ErrorActionPreference = 'Stop'
@@ -173,8 +201,26 @@ function Step {
 # ⚠ Знайдено аудитом: прогін показав ✗ на кроці складання при цілком
 # справному дереві, і на з'ясування причини пішло більше часу, ніж на цей
 # рядок.
+#
+# ⛔ 2026-09-27: тут стояло `Get-Process -Name 'Ecr.Api' | Stop-Process -Force`
+# — вбивало БУДЬ-ЯКИЙ `Ecr.Api` на машині, зокрема чужий стенд іншої сесії з
+# іншого worktree, що прямо суперечить правилу «чужий піднятий Ecr.Api не
+# вбивай» (CLAUDE.md). Сам цей скрипт `Ecr.Api` не запускає (стенди
+# `smoke.ps1`/`e2e-stand.ps1` піднімають і гасять свій), тож «свого» PID, який
+# можна було б зберегти й загасити, тут немає. Тому нічого не вбиваємо:
+# складанню заважає лише процес, запущений із ЦЬОГО чекауту (тримає саме
+# нашу DLL), — його називаємо і зупиняємося з поясненням замість MSB3027.
 if (-not $ListSteps) {
-    Get-Process -Name 'Ecr.Api' -ErrorAction SilentlyContinue | Stop-Process -Force
+    $rootFull = [System.IO.Path]::GetFullPath($root).TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar
+    $ours = @(Get-Process -Name 'Ecr.Api' -ErrorAction SilentlyContinue | Where-Object {
+            $_.Path -and $_.Path.StartsWith($rootFull, [System.StringComparison]::OrdinalIgnoreCase)
+        })
+    if ($ours.Count -gt 0) {
+        Write-Host "Ecr.Api запущено з цього чекауту — складання впаде з MSB3027 (файл зайнятий):" -ForegroundColor Red
+        $ours | ForEach-Object { Write-Host "  PID $($_.Id)  $($_.Path)" -ForegroundColor Red }
+        Write-Host 'Зупини його сам, якщо він твій (Stop-Process -Id <PID>), або запускай перевірку з окремого worktree.' -ForegroundColor Red
+        exit 3
+    }
 }
 
 # ⚠ При переліку прапорці пропуску знімаються: питання «які кроки взагалі
@@ -230,10 +276,177 @@ Step 'Тести .NET' {
     # марна робота, це прилад». Гейт, який червоніє від очікуваного, — гейт,
     # який вимкнуть за тиждень. Прогрес сценаріїв — окремий, довідковий крок
     # нижче; те, що блокує збірку, лишається тут.
+    #
+    # ⛔ `Ecr.Api.Tests` теж виключений тут — і НЕ вимкнений: він іде двома
+    # кроками нижче («Тести API (частина 1/2)»). Причина — замір конвеєра
+    # 2026-09-27: у `Ecr.Api.Tests` усі тести в одній колекції `SqlServer`,
+    # тобто ПОСЛІДОВНО, ~1 с на тест, 479 тестів — 9.2 хв; решта проєктів
+    # закінчує за ~2 хв. Одне завдання тримало весь вердикт на цьому хвості.
     & dotnet test (Join-Path $root 'Ecr.sln') --no-build -v q --nologo `
         --logger 'console;verbosity=normal' `
-        --filter 'FullyQualifiedName!~Ecr.Scenarios.Tests'
+        --filter 'FullyQualifiedName!~Ecr.Scenarios.Tests&FullyQualifiedName!~Ecr.Api.Tests.'
 }
+
+# ⛔ `Ecr.Api.Tests` — двома кроками, щоб конвеєр гнав їх ПАРАЛЕЛЬНО на двох
+# агентах (кожен зі своїм SQL Server). Частина 2 — ТОЧНЕ доповнення частини
+# 1: той самий перелік префіксів, заперечений. Тож тест не може випасти з
+# обох частин і не може потрапити в обидві, хоч би які класи додавалися;
+# новий клас лише зсуне баланс, а не покриття.
+#
+# ⚠ Склад частин і шардів — у `tools/api-test-shards.psd1` (замір
+# 2026-09-28). До того тут стояла межа A–M / N–Z за першою літерою; тепер
+# частина — це три шарди, і при `-ApiParallel 1` вона йде одним процесом із
+# об'єднаним фільтром, як і раніше.
+$apiShards = @((Import-PowerShellDataFile (Join-Path $PSScriptRoot 'api-test-shards.psd1')).Shards)
+
+function Get-ApiClause {
+    param([string] $Prefix)
+    "FullyQualifiedName~Ecr.Api.Tests.$Prefix"
+}
+
+# ⛔ Перевірка даних шардів — ДО будь-якого прогону. Помилка в `.psd1`
+# (два шарди-залишки, префікс, що є початком іншого) дала б тест у двох
+# шардах або в жодному, і прогін при цьому лишився б зеленим.
+$restShards = @($apiShards | Where-Object { $_.Rest })
+if ($restShards.Count -ne 1 -or $restShards[0].Part -ne 2) {
+    throw 'api-test-shards.psd1: шард-залишок (Rest) має бути рівно один і в частині 2.'
+}
+$allPrefixes = @($apiShards | Where-Object { -not $_.Rest } | ForEach-Object { $_.Prefixes })
+foreach ($a in $allPrefixes) {
+    foreach ($b in $allPrefixes) {
+        if ($a -ne $b -and $b.StartsWith($a, [System.StringComparison]::Ordinal)) {
+            throw "api-test-shards.psd1: префікс '$a' є початком '$b' — клас потрапив би у два шарди."
+        }
+    }
+    if (@($allPrefixes | Where-Object { $_ -eq $a }).Count -gt 1) {
+        throw "api-test-shards.psd1: префікс '$a' повторюється."
+    }
+}
+
+$apiPart1 = @($apiShards | Where-Object { $_.Part -eq 1 } | ForEach-Object { $_.Prefixes } | ForEach-Object { Get-ApiClause $_ })
+
+<#
+.SYNOPSIS
+    Фільтр для групи шардів, що йде одним процесом.
+.DESCRIPTION
+    Група без шарда-залишку — об'єднання її префіксів. Група із залишком —
+    ЗАПЕРЕЧЕННЯ префіксів усіх шардів поза групою (з обох частин): так
+    залишок разом із рештою групи береться одним фільтром, а повнота
+    тримається тим самим прийомом, що й для частин.
+#>
+function Get-ApiGroupFilter {
+    param([object[]] $Group)
+
+    $ids = @($Group | ForEach-Object { $_.Id })
+    if (@($Group | Where-Object { $_.Rest }).Count -gt 0) {
+        $others = @($apiShards | Where-Object { $_.Id -notin $ids -and -not $_.Rest } |
+            ForEach-Object { $_.Prefixes } | ForEach-Object { (Get-ApiClause $_) -replace '~', '!~' })
+        return ($others -join '&')
+    }
+
+    return (@($Group | ForEach-Object { $_.Prefixes } | ForEach-Object { Get-ApiClause $_ }) -join '|')
+}
+
+<#
+.SYNOPSIS
+    Запускає частину `Ecr.Api.Tests` — одним процесом або K шардами.
+#>
+function Invoke-ApiPart {
+    param([int] $Part)
+
+    if ($TestSql) { $env:ECR_TEST_SQL = $TestSql }
+
+    $filter = if ($Part -eq 1) { $apiPart1 -join '|' } else { ($apiPart1 -replace '~', '!~') -join '&' }
+
+    if ($ApiParallel -le 1) {
+        & dotnet test (Join-Path $root 'tests/Ecr.Api.Tests') --no-build -v q --nologo `
+            --logger 'console;verbosity=normal' `
+            --filter $filter
+        return
+    }
+
+    if ($env:ECR_TEST_DB) {
+        throw 'ECR_TEST_DB задано — при -ApiParallel > 1 усі процеси скидали б одну базу. Зніми змінну або став -ApiParallel 1.'
+    }
+
+    # ⚠ Саме зібрана DLL, а не каталог проєкту: `dotnet test <проєкт>` кличе
+    # MSBuild, і кілька одночасних оцінок одного проєкту — зайвий ризик
+    # блокувань `obj/`. DLL лише читається.
+    $dll = Get-ChildItem (Join-Path $root 'tests/Ecr.Api.Tests/bin') -Recurse -Filter 'Ecr.Api.Tests.dll' -ErrorAction SilentlyContinue |
+        Where-Object { $_.Directory.Name -like 'net*' } |
+        Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    if (-not $dll) { throw 'Ecr.Api.Tests.dll не знайдено — спершу крок «Складання».' }
+
+    # Розподіл шардів частини між процесами — жадібно за заміряним часом
+    # (найдовший шард — у найменш завантажений процес).
+    $partShards = @($apiShards | Where-Object { $_.Part -eq $Part } | Sort-Object { [double] $_.Seconds } -Descending)
+    $n = [Math]::Min($ApiParallel, $partShards.Count)
+    $groups = @(1..$n | ForEach-Object { , @() })
+    $load = @(1..$n | ForEach-Object { 0.0 })
+    foreach ($s in $partShards) {
+        $i = [Array]::IndexOf($load, ($load | Measure-Object -Minimum).Minimum)
+        $groups[$i] += $s
+        $load[$i] += [double] $s.Seconds
+    }
+
+    $logDir = Join-Path $root 'tests/Ecr.Api.Tests/TestResults/shards'
+    New-Item -ItemType Directory -Force $logDir | Out-Null
+
+    $previousShard = $env:ECR_TEST_SHARD
+    $runs = @()
+    try {
+        foreach ($g in $groups) {
+            $shard = ($g | ForEach-Object { $_.Id } | Measure-Object -Minimum).Minimum
+            $log = Join-Path $logDir "shard-$shard.log"
+            $err = Join-Path $logDir "shard-$shard.err"
+
+            # ⚠ Змінна ставиться в ЦЬОМУ процесі перед запуском: дочірній
+            # успадковує оточення в момент старту. Потім відновлюється.
+            $env:ECR_TEST_SHARD = "$shard"
+            $argLine = "test `"$($dll.FullName)`" --nologo --logger `"console;verbosity=normal`" --filter `"$(Get-ApiGroupFilter $g)`""
+            $p = Start-Process -FilePath 'dotnet' -ArgumentList $argLine -NoNewWindow -PassThru `
+                -RedirectStandardOutput $log -RedirectStandardError $err
+
+            # ⛔ Без звернення до Handle одразу після старту Windows PowerShell
+            # 5.1 віддає порожній ExitCode — і впалий шард читався б як зелений.
+            $null = $p.Handle
+            $runs += [pscustomobject]@{ Shard = $shard; Ids = ($g | ForEach-Object { $_.Id }) -join ','; Process = $p; Log = $log; Err = $err }
+            Write-Host "   шард $shard (шарди $($runs[-1].Ids)) — PID $($p.Id), журнал $log"
+        }
+    }
+    finally {
+        $env:ECR_TEST_SHARD = $previousShard
+    }
+
+    $failed = 0
+    $total = 0
+    foreach ($r in $runs) {
+        $r.Process.WaitForExit()
+        $code = $r.Process.ExitCode
+        # ⚠ З `console;verbosity=normal` підсумок має вигляд `Total tests: N`,
+        # а не `Passed! … Total: N` (той — лише в тихому режимі). Беремо обидва.
+        $summary = Select-String -Path $r.Log -Pattern 'Total(?: tests)?:\s+(\d+)' | Select-Object -Last 1
+        if ($summary) { $total += [int] $summary.Matches[0].Groups[1].Value }
+        $line = if ($summary) { $summary.Line.Trim() } else { '(підсумку в журналі немає)' }
+
+        if ($code -ne 0 -or -not $summary) {
+            $failed++
+            Write-Host "   ✗ шард $($r.Shard) (код $code): $line" -ForegroundColor Red
+            Get-Content $r.Log | ForEach-Object { Write-Host $_ }
+            Get-Content $r.Err -ErrorAction SilentlyContinue | ForEach-Object { Write-Host $_ }
+        }
+        else {
+            Write-Host "   ✓ шард $($r.Shard): $line"
+        }
+    }
+
+    Write-Host "   тестів у шардах частини $($Part): $total"
+    $global:LASTEXITCODE = if ($failed -gt 0) { 1 } else { 0 }
+}
+
+Step 'Тести API (частина 1)' { Invoke-ApiPart -Part 1 }
+
+Step 'Тести API (частина 2)' { Invoke-ApiPart -Part 2 }
 
 Step 'Сценарії директиви №09 (довідково)' {
     if ($TestSql) {

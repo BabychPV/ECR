@@ -66,22 +66,32 @@ public sealed class SaveStyleDefHandler(
         version.EnsureStructurallyMutable();
 
         var ecrCode = EcrCode.Create(code);
-        var existing = await styles.FindByCodeAsync(templateVersionId, ecrCode.Value, ct).ConfigureAwait(false);
+        StyleDef? existing = null;
 
-        if (existing is null)
+        // ⛔ C5: транзакція заради блоку рядка версії — той самий порядок, що
+        // в решті обробників чернетки й у публікації: версія першою, «ще
+        // чернетка» — під блоком, лише потім запис.
+        await uow.ExecuteInTransactionAsync(async innerCt =>
         {
-            existing = new StyleDef(templateVersionId, ecrCode);
-            styles.AddDefinition(existing);
-        }
+            await DraftVersionLock.EnsureDraftUnderLockAsync(store, version, innerCt).ConfigureAwait(false);
 
-        existing.SetAppearance(
-            command.FontName, command.FontSize, command.IsBold, command.IsItalic,
-            command.ForegroundArgb, command.BackgroundArgb, command.BorderJson,
-            command.HorizontalAlign, command.VerticalAlign, command.WrapText, command.NumberFormat);
+            existing = await styles.FindByCodeAsync(templateVersionId, ecrCode.Value, innerCt).ConfigureAwait(false);
 
-        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+            if (existing is null)
+            {
+                existing = new StyleDef(templateVersionId, ecrCode);
+                styles.AddDefinition(existing);
+            }
 
-        return Map(existing);
+            existing.SetAppearance(
+                command.FontName, command.FontSize, command.IsBold, command.IsItalic,
+                command.ForegroundArgb, command.BackgroundArgb, command.BorderJson,
+                command.HorizontalAlign, command.VerticalAlign, command.WrapText, command.NumberFormat);
+
+            await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+        }, ct).ConfigureAwait(false);
+
+        return Map(existing!);
     }
 
     /// <summary>Складає DTO стилю для відповіді.</summary>
@@ -98,6 +108,7 @@ public sealed class SaveStyleDefHandler(
 /// </summary>
 public sealed class ListStyleDefsHandler(
     IStyleCatalog styles,
+    ITemplateVersionStore versions,
     IAccessDecisionService access,
     ICurrentUser currentUser)
 {
@@ -105,11 +116,27 @@ public sealed class ListStyleDefsHandler(
     public const string Permission = "Template.View";
 
     /// <summary>Усі стилі версії.</summary>
+    /// <exception cref="NotFoundException"><c>ECR-TMPL-0404</c> — версії немає.</exception>
     public async Task<IReadOnlyList<StyleDefDto>> HandleAsync(int templateVersionId, CancellationToken ct)
     {
         await PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
 
         var all = await styles.GetAsync(templateVersionId, ct).ConfigureAwait(false);
+
+        // ⛔ B-07: неіснуюча версія давала `200 []` — «стилів немає» на адресі,
+        // якої не існує. Питаємо лише коли порожньо: версія зі стилями існує.
+        if (all.Count == 0
+            && await versions.FindTemplateOfVersionAsync(templateVersionId, ct).ConfigureAwait(false) is null)
+        {
+            throw new NotFoundException(
+                Domain.Errors.ErrorCodes.TemplateNotFound,
+                $"Версії шаблону {templateVersionId} не існує.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-TMPL-0404.templateVersion",
+                    ["versionId"] = templateVersionId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
+        }
 
         return [.. all.Values.OrderBy(s => s.Code, StringComparer.Ordinal).Select(SaveStyleDefHandler.Map)];
     }

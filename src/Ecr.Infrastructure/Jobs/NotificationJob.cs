@@ -40,7 +40,8 @@ public sealed class NotificationJob(
     EcrDbContext db,
     IClock clock,
     Integration.OutboxDispatcher outbox,
-    Notifications.NotificationDispatcher channels) : IBackgroundJob
+    Notifications.NotificationDispatcher channels,
+    IUiStringCatalog catalog) : IBackgroundJob
 {
     /// <summary>Код задачі в журналі обслуговування.</summary>
     public static string Code => "notification";
@@ -113,28 +114,80 @@ public sealed class NotificationJob(
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
+        // ⛔ ІНТ-3.3, D-118: ознака здоров'я — журнал покриття, а не тиша.
+        // Матеріалізація, що ПРОПУСТИЛА інтервал (період закрито, стеля точок),
+        // завершується успішно — у `JobProgress` вона не `Failed`, тож запит
+        // матеріалізації нижче її не бачить. Єдиний слід — рядок
+        // `itg.CollectionCoverage` зі статусом.
+        //
+        // ⚠ `ConflictKeptManual` свідомо поза зведенням: ручне значення в
+        // комірці перемогло зібране — це очікувана поведінка («людина має
+        // рацію»), її видно в стрічці подій UI, а не в листі про збої.
+        // `SkippedWriteConflict` і `SkippedNeedsConfirmation` — навпаки, У
+        // зведенні: значення не записано, і людина правки не робила.
+        //
+        // ⚠ `RegistryAutoCreated` (D-212) — теж поза зведенням: синк `External`
+        // створив запис за політикою, це робота, а не збій; видно в журналі UI.
+        //
+        // ⚠ Групування (сутність, період, статус) — у базі: 5 000 пропусків
+        // того самого періоду — ОДИН рядок із лічильником, а не сто рядків,
+        // що витіснили б із зведення решту збоїв (`MaxDigestItems`).
+        var coverage = await db.CollectionCoverages
+            .AsNoTracking()
+            .Where(c => c.Status != null
+                        && c.CoveredFrom >= since
+                        && c.Status != CollectionCoverage.ConflictKeptManual
+                        && c.Status != CollectionCoverage.RegistryAutoCreated)
+            .GroupBy(c => new { c.SourceEntityId, c.PeriodKey, c.Status })
+            .Select(g => new
+            {
+                g.Key.SourceEntityId,
+                g.Key.PeriodKey,
+                g.Key.Status,
+                Count = g.Count(),
+                At = g.Max(c => c.CoveredFrom),
+                Details = g.Min(c => c.Details),
+            })
+            .OrderByDescending(g => g.At)
+            .Take(MaxDigestItems)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
         // ⚠ Коди сутностей читаються ОДНИМ запитом на всі збої. Джерело у
         // зведенні має бути назване так, як його знає адміністратор, а не
         // числом: за `42` він не знайде нічого (`H-20`).
-        var sourceIds = failed.Select(r => r.SourceEntityId).Distinct().ToList();
+        var sourceIds = failed.Select(r => r.SourceEntityId)
+            .Concat(coverage.Select(c => c.SourceEntityId))
+            .Distinct()
+            .ToList();
 
         var sourceCodes = sourceIds.Count == 0
             ? []
             : await db.SourceEntities
                 .AsNoTracking()
                 .Where(e => sourceIds.Contains(e.Id))
-                .Take(MaxDigestItems)
+                .OrderBy(e => e.Id)
+                .Take(sourceIds.Count)
                 .Select(e => new { e.Id, e.Code })
                 .ToDictionaryAsync(e => e.Id, e => e.Code, ct)
                 .ConfigureAwait(false);
 
+        // ⚠ U12: причину прогону збирач пише конвертом (ключ + параметри), а не
+        // готовим реченням. У лист іде ТЕКСТ, резолвлений мовою листа; старі
+        // рядки (сирий текст до U12) резолвер повертає як є. Вид рядка
+        // (`KindOf`) — за СИРИМ значенням: ознака відмови в автентифікації живе
+        // в ньому, а не в перекладі.
+        var reasons = await JobProgressMessageResolver
+            .ResolveManyAsync(catalog, DigestLanguage, [.. failed.Select(r => r.ErrorMessage)], ct)
+            .ConfigureAwait(false);
+
         var collection = failed
-            .Select(r => new DigestItem(
+            .Select((r, i) => new DigestItem(
                 KindOf(r.ErrorMessage),
                 sourceCodes.GetValueOrDefault(
                     r.SourceEntityId, r.SourceEntityId.ToString(CultureInfo.InvariantCulture)),
                 r.Status,
-                r.ErrorMessage,
+                reasons[i],
                 r.FinishedAt))
             .ToList();
 
@@ -166,7 +219,24 @@ public sealed class NotificationJob(
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
-        var items = collection.Concat(maintenance).Concat(materialization).Take(MaxDigestItems).ToList();
+        var coverageItems = coverage
+            .Select(c => new DigestItem(
+                CoverageKind,
+                sourceCodes.GetValueOrDefault(
+                    c.SourceEntityId, c.SourceEntityId.ToString(CultureInfo.InvariantCulture)),
+                c.Status!,
+                string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"період {c.PeriodKey}: {c.Count} подій; {c.Details}"),
+                c.At))
+            .ToList();
+
+        var items = collection
+            .Concat(maintenance)
+            .Concat(materialization)
+            .Concat(coverageItems)
+            .Take(MaxDigestItems)
+            .ToList();
 
         // ⛔ Нуль адресатів — не помилка, а СТАН, який має бути видно (`D-125`).
         // Мовчазна система без адресатів і мовчазна система без збоїв ззовні
@@ -233,7 +303,7 @@ public sealed class NotificationJob(
                 .DispatchAsync(
                     new NotificationEvent(
                         group.Key,
-                        NotificationSeverity.Error,
+                        group.Max(f => SeverityOf(f.Kind, f.Status)),
                         EventKeyOf(group.Key, group.Select(f => f.Subject)),
                         $"ECR: збоїв за період — {lines.Count}",
                         string.Join(Environment.NewLine, lines)),
@@ -268,6 +338,16 @@ public sealed class NotificationJob(
     /// це чекати на наздоганяння, якого не буде.
     /// </remarks>
     public const string AuthenticationKind = "collection.auth";
+
+    /// <summary>Мова, якою в лист резолвиться причина прогону збору (U12).</summary>
+    /// <remarks>
+    /// ⚠ Судження: лист — ОДИН на всіх адресатів (<c>recipients: null</c>, політика
+    /// <c>sec.User.ReceivesAlerts</c>), і мови адресата модель не зберігає. Тому —
+    /// базова мова каталогу, на яку падає будь-який відсутній переклад
+    /// (<see cref="Application.Localization.UiStringResolver.DefaultLanguage"/>).
+    /// Лист мовою кожного адресата — окрема зміна черги сповіщень.
+    /// </remarks>
+    public const string DigestLanguage = Application.Localization.UiStringResolver.DefaultLanguage;
 
     /// <summary>Звичайний вид рядка про збій збору.</summary>
     public const string CollectionKind = "collection";
@@ -321,9 +401,68 @@ public sealed class NotificationJob(
     /// лишається збоєм збору: адресат той самий, хоч дія і термінова.
     /// </remarks>
     public static NotificationEventKind EventKindOf(string digestKind)
-        => digestKind is CollectionKind or AuthenticationKind
+        => digestKind is CollectionKind or AuthenticationKind or CoverageKind
             ? NotificationEventKind.CollectionFailed
             : NotificationEventKind.JobFailed;
+
+    /// <summary>
+    /// Вид рядка зведення для події журналу покриття (<c>ІНТ-3.3</c>, <c>D-118</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Подія матриці — <see cref="NotificationEventKind.CollectionFailed"/>, а
+    /// не <see cref="NotificationEventKind.JobFailed"/>: задача відпрацювала, а
+    /// пропуск лікує той, хто відповідає за джерело й мапінг (стеля точок,
+    /// закритий період), а не той, хто за сервер.
+    /// </remarks>
+    public const string CoverageKind = "coverage";
+
+    /// <summary>
+    /// Серйозність рядка зведення для матриці правил (<c>BE-34</c>).
+    /// </summary>
+    /// <param name="digestKind">Вид рядка.</param>
+    /// <param name="status">Статус рядка.</param>
+    /// <remarks>
+    /// ⚠ Попередження — події покриття, де значення не записано, але причина
+    /// відома й не є дефектом:
+    /// <list type="bullet">
+    /// <item><see cref="CollectionCoverage.SkippedPeriodClosed"/> — період закрито
+    /// навмисно, людина вирішує, чи відкривати його;</item>
+    /// <item><see cref="CollectionCoverage.SkippedWriteConflict"/> — рядок
+    /// змінювали під час запису; значення не втрачено, наступний прогін
+    /// спробує знову, і стан зазвичай минає сам;</item>
+    /// <item><see cref="CollectionCoverage.SkippedNeedsConfirmation"/> — правило
+    /// періоду вимагає підтвердження людини: потрібна дія, але це робота за
+    /// правилом, а не збій.</item>
+    /// </list>
+    /// Стеля точок (<see cref="CollectionCoverage.SkippedPointCeiling"/>) —
+    /// помилка: інтервал не згорнуто через конфігурацію, і сам він не мине.
+    /// Події синку довідника (<c>D-212</c>): <see cref="CollectionCoverage.RegistryAutoCreated"/>
+    /// — інформація (синк зробив свою роботу за політикою <c>External</c>);
+    /// <see cref="CollectionCoverage.RegistryElementUnlinked"/>,
+    /// <see cref="CollectionCoverage.RegistryDeactivated"/>,
+    /// <see cref="CollectionCoverage.RegistryReactivated"/>,
+    /// <see cref="CollectionCoverage.RegistryRuleViolation"/>,
+    /// <see cref="CollectionCoverage.RegistryExternalKeyRelinked"/> — попередження:
+    /// довідник змінився або чекає рішення людини, але це не збій.
+    /// Решта рядків зведення — збої, як і раніше.
+    /// Серйозність групи — найвища серед її рядків.
+    /// </remarks>
+    public static NotificationSeverity SeverityOf(string digestKind, string status)
+        => digestKind != CoverageKind
+            ? NotificationSeverity.Error
+            : status switch
+            {
+                CollectionCoverage.RegistryAutoCreated => NotificationSeverity.Info,
+                CollectionCoverage.SkippedPeriodClosed
+                    or CollectionCoverage.SkippedWriteConflict
+                    or CollectionCoverage.SkippedNeedsConfirmation
+                    or CollectionCoverage.RegistryElementUnlinked
+                    or CollectionCoverage.RegistryDeactivated
+                    or CollectionCoverage.RegistryReactivated
+                    or CollectionCoverage.RegistryRuleViolation
+                    or CollectionCoverage.RegistryExternalKeyRelinked => NotificationSeverity.Warning,
+                _ => NotificationSeverity.Error,
+            };
 
     /// <summary>
     /// Ключ дедуплікації: той самий НАБІР збоїв дає той самий ключ.

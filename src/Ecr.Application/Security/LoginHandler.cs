@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Domain.Abstractions;
@@ -45,8 +46,18 @@ public sealed partial class LoginHandler(
     /// Однакове повідомлення без однакового часу — напівзахист: PBKDF2 з
     /// 210 000 ітерацій добре видно на графіку затримок, і невідповідь у
     /// 200 мс сама каже, що імені немає.
+    ///
+    /// ⛔ S8(а): статично, раз на процес, а не полем екземпляра. Обробник —
+    /// Scoped, тобто новий на кожен запит, і поле рахувало приманку ЗАНОВО
+    /// щоразу: невідоме ім'я коштувало Hash + Verify (2× PBKDF2), наявне з
+    /// хибним паролем — лише Verify (1×). Різниця в один PBKDF2 і була тим
+    /// самим перелічувачем імен, від якого приманка мала захищати.
+    ///
+    /// ⚠ Ключ — ТИП хешера: у продукті він один (<c>PasswordHasher</c>), а в
+    /// тестах підставні хешери різних типів не мають ділити одну приманку —
+    /// рядок одного формату інший хешер відкинув би без PBKDF2.
     /// </remarks>
-    private string? _decoyHash;
+    private static readonly ConcurrentDictionary<Type, Lazy<string>> DecoyHashes = new();
 
     /// <summary>Виконує вхід.</summary>
     /// <param name="userName">Ім'я входу.</param>
@@ -63,7 +74,11 @@ public sealed partial class LoginHandler(
         var now = clock.UtcNow;
         var user = await users.FindByUserNameAsync(userName, ct).ConfigureAwait(false);
 
-        if (user is null || user.Provider != AuthProvider.Local || !user.IsActive)
+        // ⛔ Службовий запис (`svc-integration`) не входить НІКОЛИ — навіть із
+        // правильним паролем, який міг з'явитися після скидання адміністратором.
+        // Відповідь і час — ті самі, що на невідоме ім'я: інакше форма входу
+        // підтверджувала б, що такий запис існує.
+        if (user is null || user.Provider != AuthProvider.Local || !user.IsActive || user.IsServiceAccount)
         {
             // Пароль однаково «перевіряється»: без цього відповідь на невідоме
             // ім'я приходила б помітно швидше.
@@ -83,12 +98,23 @@ public sealed partial class LoginHandler(
             throw Locked(user);
         }
 
-        if (user.PasswordHash is null || !hasher.Verify(password, user.PasswordHash))
+        // ⚠ Запис без хеша теж платить один Verify (приманкою): інакше він
+        // відповідав би швидше за будь-який інший хибний вхід.
+        var verified = user.PasswordHash is null
+            ? DecoyRejects(password)
+            : hasher.Verify(password, user.PasswordHash);
+
+        if (!verified)
         {
             var policy = await users.GetPolicyAsync(user, ct).ConfigureAwait(false);
-            var locked = user.RegisterFailedAttempt(policy.MaxFailedAttempts, policy.LockoutMinutes, now);
 
-            await FailAsync(userName, locked ? "LockedOut" : "BadPassword", ipAddress, now, ct)
+            // ⛔ S8(в): лічильник рахує СХОВИЩЕ одним оновленням рядка, а не
+            // сутність у пам'яті з наступним збереженням — інакше паралельні
+            // хибні спроби губили інкременти (lost update) і поріг не наставав.
+            var outcome = await users.RegisterFailedAttemptAsync(
+                user.Id, policy.MaxFailedAttempts, policy.LockoutMinutes, now, ct).ConfigureAwait(false);
+
+            await FailAsync(userName, outcome.LockedNow ? "LockedOut" : "BadPassword", ipAddress, now, ct)
                 .ConfigureAwait(false);
 
             throw InvalidCredentials();
@@ -100,6 +126,35 @@ public sealed partial class LoginHandler(
 
         return new LoginResult(
             user.Id, user.UserName, user.DisplayName, user.SecurityStamp, user.MustChangePassword, GroupSids: []);
+    }
+
+    /// <summary>
+    /// Вихід: прокручує <c>SecurityStamp</c>, щоб cookie цього входу — і будь-яка
+    /// її копія — перестала бути дійсною на сервері, а не лише в браузері (S21).
+    /// </summary>
+    /// <param name="userId">Хто виходить (з cookie, не з симуляції).</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ До S21 вихід лише стирав cookie в браузері. Скопійована cookie
+    /// (перехоплена, лишена в чужому профілі) жила далі до кінця ковзного строку:
+    /// сервер не мав чим відрізнити «вийшов» від «не заходив з цього браузера».
+    ///
+    /// ⚠ Наслідок, свідомо прийнятий: серверного переліку сесій немає, одиниця
+    /// відкликання — штамп КОРИСТУВАЧА, тож вихід завершує ВСІ його сесії (інші
+    /// браузери й пристрої) — ту саму дію вже роблять зміна пароля, ролей і
+    /// блокування (ФВ-6.7). Вікно — не більше за кеш штампа
+    /// (<c>Auth:StampCacheSeconds</c>, 5 с) на кожному вузлі.
+    /// </remarks>
+    public async Task SignOutAsync(int userId, CancellationToken ct)
+    {
+        var user = await users.FindByIdAsync(userId, ct).ConfigureAwait(false);
+        if (user is null)
+        {
+            return; // запису вже немає — відкликати нічого
+        }
+
+        user.RefreshSecurityStamp();
+        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
     }
 
     /// <summary>Знаходить або заводить доменного користувача за SID (ФВ-6.2).</summary>
@@ -131,6 +186,15 @@ public sealed partial class LoginHandler(
 
         var now = clock.UtcNow;
         var user = await users.FindByWindowsSidAsync(sid, ct).ConfigureAwait(false);
+
+        // ⛔ Службовий запис не входить і через Windows: ні SID, прив'язаним до
+        // нього, ні доменним обліковим записом із тим самим логіном (другий
+        // інакше пішов би в `CreateDomain` поруч зі службовим).
+        if (user?.IsServiceAccount == true || (user is null && User.IsServiceAccountName(userName)))
+        {
+            await FailAsync(userName, "ServiceAccount", ipAddress, now, ct).ConfigureAwait(false);
+            throw InvalidCredentials();
+        }
 
         if (user is null)
         {
@@ -266,12 +330,30 @@ public sealed partial class LoginHandler(
     /// <summary>«Перевірка» пароля неіснуючого користувача — заради часу відповіді.</summary>
     private void Decoy(string password)
     {
-        _decoyHash ??= hasher.Hash("decoy-for-constant-time-comparison");
-        hasher.Verify(password ?? string.Empty, _decoyHash);
+        var decoy = DecoyHashes
+            .GetOrAdd(
+                hasher.GetType(),
+                static (_, h) => new Lazy<string>(
+                    () => h.Hash("decoy-for-constant-time-comparison"), LazyThreadSafetyMode.ExecutionAndPublication),
+                hasher)
+            .Value;
+
+        hasher.Verify(password ?? string.Empty, decoy);
+    }
+
+    /// <summary>Приманка для запису без хеша; результат — завжди «не підійшов».</summary>
+    private bool DecoyRejects(string password)
+    {
+        Decoy(password);
+        return false;
     }
 
     /// <summary>Відмова заблокованому запису: причина — лічильник спроб чи адміністратор.</summary>
-    private static BusinessRuleException Locked(User user)
+    /// <remarks>
+    /// ⚠ <c>internal</c>: ту саму відмову дає і зміна пароля (S9) — блокування
+    /// одне, і форма відмови про нього теж має бути одна.
+    /// </remarks>
+    internal static BusinessRuleException Locked(User user)
         => user.IsLockedByAdministrator
             ? new BusinessRuleException(
                 "ECR-AUTH-0423", "Обліковий запис заблоковано адміністратором.",
@@ -280,6 +362,26 @@ public sealed partial class LoginHandler(
                 "ECR-AUTH-0423", "Обліковий запис тимчасово заблоковано після невдалих спроб входу.",
                 new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0423.lockedAfterFailures" });
 
+    /// <summary>Відмова входу: ім'я або пароль не підійшли (`U-01`).</summary>
+    /// <remarks>
+    /// ⛔ Ключ обов'язковий, а не прикраса. `ErrorAlert.tsx` (рішення
+    /// 2026-09-20) показує подробицю ЛИШЕ тоді, коли сервер позначив її
+    /// <c>messageKey</c>, — і без ключа користувач із хибним паролем бачив
+    /// саму лише вказівку «Sign in to continue.» плюс код: жодного слова про
+    /// те, що сталося. Українське речення лишається запасним: резолвер
+    /// повертається до нього, коли ключа в каталозі немає.
+    ///
+    /// ⚠ Область ключа в сіді — ПУБЛІЧНА (0), як у
+    /// <c>err.ECR-AUTH-0401.signInRequired</c>: це перший екран продукту, і
+    /// приватний зріз каталогу тут ще недоступний (ФВ-14.9b).
+    ///
+    /// ⚠ Причина відмови НЕ уточнюється (ні «такого користувача немає», ні
+    /// «пароль не той»): усі три кидки дають один текст навмисно — інакше
+    /// форма входу перетворюється на перелічувач імен облікових записів
+    /// (ФВ-6.11).
+    /// </remarks>
     private static AccessDeniedException InvalidCredentials()
-        => new("ECR-AUTH-0401", "Невірне ім'я користувача або пароль.");
+        => new(
+            "ECR-AUTH-0401", "Невірне ім'я користувача або пароль.",
+            new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.invalidCredentials" });
 }

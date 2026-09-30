@@ -6,9 +6,10 @@ namespace Ecr.Setup.Steps;
 /// вказано". Це точка неповернення: <see cref="MainForm"/> підписує кнопку
 /// "Далі" тут як "Встановити".
 /// </summary>
-internal sealed class ReviewStep : IWizardStep
+internal sealed class ReviewStep(ICertificateSource certificates, Func<DateTime> now) : IWizardStep
 {
     private ListView? _list;
+    private WizardState? _state;
 
     public string Title => "Review";
 
@@ -32,6 +33,7 @@ internal sealed class ReviewStep : IWizardStep
     {
         // Огляд мусить показувати ЖИВИЙ стан, не знімок з першого показу —
         // користувач міг повернутись "Назад" і щось змінити.
+        _state = state;
         _list!.Items.Clear();
 
         AddRow("Mode", state.Mode == WizardMode.FirstDeployment ? "First deployment" : "Update existing installation");
@@ -44,6 +46,7 @@ internal sealed class ReviewStep : IWizardStep
                 : $"SQL login ({state.SqlLogin}), password: {Presence(state.SqlLoginPassword is not null)}");
         AddRow("Service account", DescribeServiceAccount(state));
         AddRow("Port", state.Port.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        AddRow("Data Protection certificate", state.DataProtectionThumbprint ?? "not selected");
         AddRow("Ecr.msi file", state.MsiPath ?? "not specified");
         AddRow(
             "Database schema",
@@ -59,8 +62,17 @@ internal sealed class ReviewStep : IWizardStep
 
     public bool Validate(out string error)
     {
-        error = string.Empty;
-        return true;
+        // ⛔ S11: «Встановити» — остання точка перед кроком 1 розгортання.
+        // Сертифікат міг зникнути зі сховища чи прострочитися, поки майстер
+        // стояв відкритим, — відмова тут зрозуміліша за зупинку deploy-ecr.ps1.
+        if (_state is null)
+        {
+            // OnShow завжди передує Validate (MainForm.GoToIndex); закрита відмова — на випадок, якщо ні.
+            error = "Go back and select the Data Protection certificate.";
+            return false;
+        }
+
+        return _state.TryValidateDataProtection(certificates, now(), out error);
     }
 
     public void Apply(WizardState state)

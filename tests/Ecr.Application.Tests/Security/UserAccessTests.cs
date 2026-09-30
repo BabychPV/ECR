@@ -52,6 +52,10 @@ public sealed class UserAccessTests
         _user.UserId.Returns(9);
         _user.CorrelationId.Returns("test");
 
+        // Транзакція виконує операцію, як справжня: інакше журнал усередині неї не видно.
+        _uow.ExecuteInTransactionAsync(Arg.Any<Func<CancellationToken, Task>>(), Arg.Any<CancellationToken>())
+            .Returns(call => call.Arg<Func<CancellationToken, Task>>()(CancellationToken.None));
+
         _access.BuildProfileAsync(9, Arg.Any<CancellationToken>())
             .Returns(new AccessBuilder { UserId = 9 }.Permission("Security.ManageUsers").Build());
 
@@ -66,7 +70,7 @@ public sealed class UserAccessTests
         var user = Add("ivanov");
 
         var count = await Roles().HandleAsync(
-            user.Id, ["Approver", "DataEntry"], validity: null, CancellationToken.None);
+            user.Id, ["Approver", "DataEntry"], validity: null, scopes: null, CancellationToken.None);
 
         Assert.Equal(2, count);
         Assert.Equal(
@@ -86,8 +90,8 @@ public sealed class UserAccessTests
         // ⚠ «Хто це йому видав» — питання, на яке через рік має бути
         // відповідь, а не здогад. Тому в записі і те, що було, і те, що стало.
         var user = Add("petrov");
-        await Roles().HandleAsync(user.Id, ["DataEntry"], validity: null, CancellationToken.None);
-        await Roles().HandleAsync(user.Id, ["Approver"], validity: null, CancellationToken.None);
+        await Roles().HandleAsync(user.Id, ["DataEntry"], validity: null, scopes: null, CancellationToken.None);
+        await Roles().HandleAsync(user.Id, ["Approver"], validity: null, scopes: null, CancellationToken.None);
 
         var events = _audit.ReceivedCalls()
             .Where(c => c.GetMethodInfo().Name == nameof(IAuditWriter.WriteSecurityEventAsync))
@@ -111,11 +115,11 @@ public sealed class UserAccessTests
         // ⛔ Призначити «те, що знайшлося» гірше за відмову: людина отримала б
         // частину повноважень і вважала б, що отримала всі.
         var user = Add("sydorenko");
-        await Roles().HandleAsync(user.Id, ["DataEntry"], validity: null, CancellationToken.None);
+        await Roles().HandleAsync(user.Id, ["DataEntry"], validity: null, scopes: null, CancellationToken.None);
 
         await Assert.ThrowsAsync<NotFoundException>(
             () => Roles().HandleAsync(
-                user.Id, ["Approver", "NoSuchRole"], validity: null, CancellationToken.None));
+                user.Id, ["Approver", "NoSuchRole"], validity: null, scopes: null, CancellationToken.None));
 
         Assert.Equal(
             ["DataEntry"],
@@ -154,7 +158,7 @@ public sealed class UserAccessTests
         var user = Add("stranger");
 
         await Assert.ThrowsAsync<AccessDeniedException>(
-            () => Roles().HandleAsync(user.Id, ["Approver"], validity: null, CancellationToken.None));
+            () => Roles().HandleAsync(user.Id, ["Approver"], validity: null, scopes: null, CancellationToken.None));
 
         await Assert.ThrowsAsync<AccessDeniedException>(
             () => Email().HandleAsync(user.Id, "x@y.z", CancellationToken.None));
@@ -185,7 +189,7 @@ public sealed class UserAccessTests
 
         Assert.True(bootstrap.IsActive);
 
-        await Roles().HandleAsync(domainAdmin.Id, ["Approver"], validity: null, CancellationToken.None);
+        await Roles().HandleAsync(domainAdmin.Id, ["Approver"], validity: null, scopes: null, CancellationToken.None);
 
         Assert.False(bootstrap.IsActive);
 
@@ -212,7 +216,7 @@ public sealed class UserAccessTests
                 ValidFrom: new DateOnly(2026, 3, 1), ValidTo: new DateOnly(2026, 3, 31)),
         };
 
-        await Roles().HandleAsync(user.Id, ["Approver"], validity, CancellationToken.None);
+        await Roles().HandleAsync(user.Id, ["Approver"], validity, scopes: null, CancellationToken.None);
 
         // Строкове призначення НЕ входить у безстроковий перелік — той самий
         // контракт, що й для групових підмін (ФВ-6.16): збереження форми не
@@ -239,7 +243,7 @@ public sealed class UserAccessTests
         {
             ["Approver"] = new RoleValidityWindow(ValidFrom: null, ValidTo: new DateOnly(2026, 6, 30)),
         };
-        await Roles().HandleAsync(user.Id, ["Approver"], extended, CancellationToken.None);
+        await Roles().HandleAsync(user.Id, ["Approver"], extended, scopes: null, CancellationToken.None);
 
         var traceAfterExtend = await _users.ListAssignmentsAsync(
             user.Id, groupSids: [], asOf: new DateOnly(2026, 4, 1), CancellationToken.None);
@@ -259,7 +263,7 @@ public sealed class UserAccessTests
         };
 
         var error = await Assert.ThrowsAsync<BusinessRuleException>(
-            () => Roles().HandleAsync(user.Id, ["Approver"], validity, CancellationToken.None));
+            () => Roles().HandleAsync(user.Id, ["Approver"], validity, scopes: null, CancellationToken.None));
 
         Assert.Equal(Domain.Errors.ErrorCodes.RequestInvalid, error.ErrorCode);
         Assert.Empty(await _users.ListUserRolesAsync(user.Id, CancellationToken.None));
@@ -274,9 +278,11 @@ public sealed class UserAccessTests
 
     private ReplaceUserRolesHandler Roles() => new(
         _users, _access, _uow, _user, _audit, _clock,
-        new DisableBootstrapAdminHandler(_users, _uow, _audit, _user, _clock));
+        new DisableBootstrapAdminHandler(_users, _uow, _audit, _user, _clock),
+        Substitute.For<IDocumentStore>(),
+        Substitute.For<IResourceNameResolver>());
 
-    private SetUserEmailHandler Email() => new(_users, _access, _uow, _user);
+    private SetUserEmailHandler Email() => new(_users, _access, _uow, _user, _audit, _clock);
 
     private Domain.Entities.Security.User Add(string userName)
     {

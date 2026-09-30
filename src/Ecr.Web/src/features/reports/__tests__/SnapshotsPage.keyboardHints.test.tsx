@@ -59,7 +59,7 @@ function mockFetch(): void {
           isSimulation: false,
           language: 'en',
           mustChangePassword: false,
-          permissions: ['Report.ViewRegulatory', 'Report.Export'],
+          permissions: ['Report.ViewRegulatory', 'Report.ViewSnapshot', 'Report.Export'],
           simulatedForUserId: null,
           userId: 1,
           userName: 'tester',

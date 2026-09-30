@@ -329,9 +329,15 @@ conflict») і `ECR-PRD-0422` («Invalid period request») стали нейтр
   перевикористаний у тих самих трьох обробниках для «немає гранта Manage на
   проєкт».
 - Нові ключі: `err.ECR-PRD-4091.code` {code} (код політики періодів зайнято,
-  `CreatePeriodPolicyHandler`); `err.ECR-TMPL-0404.versionRequired` і
+  `CreatePeriodPolicyHandler`); ~~`err.ECR-TMPL-0404.versionRequired`~~ і
   `err.ECR-PRD-0422.periodPolicyRequired` — проєкт не можна створити без
   версії шаблону чи без політики періодів (`CreateProjectHandler`);
+  ✎ 2026-09-25 (B-19, UX-аудит раунд 4): перший ключ був заведений під кодом
+  `ECR-TMPL-0404` (404 за §7), хоча кидається `BusinessRuleException`, що без
+  власного арма в `ExceptionHandlingMiddleware.Map` доїжджає як 422 —
+  статус-рядок відповіді не збігався з кодом у тілі. Перенесено під
+  `ErrorCodes.TemplateInvalid` (`ECR-TMPL-0422`, 422 за §7): ключ тепер
+  `err.ECR-TMPL-0422.versionRequired`, суть повідомлення та сама.
   `err.ECR-PRJ-0422.notDraft` {status} і `.noPeriods` {projectId} —
   активація проєкту не в чернетці / календар без жодного періоду
   (`ActivateProjectHandler`); `err.ECR-PRD-0409.openPeriods` {projectId} —
@@ -350,65 +356,520 @@ conflict») і `ECR-PRD-0422` («Invalid period request») стали нейтр
   `ECR-PRJ-0404`/`ECR-PRJ-0422`, `ECR-PRD-0409`/`ECR-PRD-0422`/`ECR-PRD-4091`,
   `ECR-TMPL-0404` уже були нейтральними.
 
-| Файл | Місць |
-|---|---|
-| `src/Ecr.Adapters.Excel/ExcelImporter.cs` | 7 |
-| `src/Ecr.Adapters.PiAf/PiAfCatalogReader.cs` | 2 |
-| `src/Ecr.Adapters.PiAf/PiSqlClientDataSource.cs` | 4 |
-| `src/Ecr.Adapters.PiAf/PiWebApiDataSource.cs` | 4 |
-| `src/Ecr.Adapters.PiAf/SourceUnitConverter.cs` | 2 |
-| `src/Ecr.Api/Auth/SecurityStampMiddleware.cs` | 1 |
-| `src/Ecr.Api/Controllers/CellsController.cs` | 1 |
-| `src/Ecr.Api/Controllers/TemplateVersionsController.cs` | 2 |
-| `src/Ecr.Application/Audit/GetCellChangesHandler.cs` | 4 |
-| `src/Ecr.Application/Calculations/CalculationPlan.cs` | 1 |
-| `src/Ecr.Application/Calculations/RunCalculationHandler.cs` | 3 |
-| `src/Ecr.Application/Documents/CreateRowHandler.cs` | 1 |
-| `src/Ecr.Application/Documents/GetTableSliceHandler.cs` | 1 |
-| `src/Ecr.Application/Documents/PatchCellsHandler.cs` | 1 |
-| `src/Ecr.Application/Localization/GetUiStringsHandler.cs` | 1 |
-| `src/Ecr.Application/Localization/SetUiStringHandler.cs` | 2 |
-| `src/Ecr.Application/Projects/CloneProjectHandler.cs` | 3 |
-| `src/Ecr.Application/Recalculation/RecalculationService.cs` | 1 |
-| `src/Ecr.Application/Reporting/ReportSnapshotHandlers.cs` | 2 |
-| `src/Ecr.Application/Security/AccessDiagnostics.cs` | 2 |
-| `src/Ecr.Application/Security/EndSimulationHandler.cs` | 3 |
-| `src/Ecr.Application/Security/PermissionCheck.cs` | 1 |
-| `src/Ecr.Application/Security/ResourceGrantHandlers.cs` | 4 |
-| `src/Ecr.Application/Security/StartSimulationHandler.cs` | 4 |
-| `src/Ecr.Application/Templates/CreateTemplateVersionHandler.cs` | 2 |
-| `src/Ecr.Application/Templates/FormulaDefHandlers.cs` | 7 |
-| `src/Ecr.Application/Templates/GetTemplateStructureHandler.cs` | 1 |
-| `src/Ecr.Application/Templates/PatchPresentationHandler.cs` | 4 |
-| `src/Ecr.Application/Templates/PublishTemplateVersionHandler.cs` | 2 |
-| `src/Ecr.Application/Templates/RowDefHandlers.cs` | 7 |
-| `src/Ecr.Application/Templates/SheetDefHandlers.cs` | 4 |
-| `src/Ecr.Application/Templates/TemplateQueryHandlers.cs` | 4 |
-| `src/Ecr.Application/Templates/ValidationRuleHandlers.cs` | 5 |
-| `src/Ecr.Application/Units/ConvertUnitHandler.cs` | 1 |
-| `src/Ecr.Application/Units/CreateUnitHandler.cs` | 1 |
-| `src/Ecr.Application/Workflow/ApprovalRouteHandlers.cs` | 4 |
-| `src/Ecr.Calculations/CalculationOrchestrator.cs` | 1 |
-| `src/Ecr.Calculations/GenericCalculationModule.cs` | 1 |
-| `src/Ecr.Domain/Entities/Configuration/CalculationBinding.cs` | 1 |
-| `src/Ecr.Domain/Entities/Configuration/FormulaDef.cs` | 2 |
-| `src/Ecr.Domain/Entities/Configuration/SheetDef.cs` | 1 |
-| `src/Ecr.Domain/Entities/Configuration/TemplateVersion.cs` | 5 |
-| `src/Ecr.Domain/Entities/Dictionaries/RegistryEntry.cs` | 1 |
-| `src/Ecr.Domain/Entities/External/EntityFieldMap.cs` | 1 |
-| `src/Ecr.Domain/Entities/Reporting/ReportDefinitions.cs` | 3 |
-| `src/Ecr.Domain/Entities/Security/User.cs` | 1 |
-| `src/Ecr.Domain/Services/PeriodCalendar.cs` | 3 |
-| `src/Ecr.Domain/ValueObjects/PeriodKey.cs` | 1 |
-| `src/Ecr.Domain/ValueObjects/RowKey.cs` | 1 |
-| `src/Ecr.Domain/ValueObjects/SiteTimeZone.cs` | 1 |
-| `src/Ecr.Infrastructure/Jobs/QuartzJobScheduler.cs` | 1 |
-| `src/Ecr.Infrastructure/Persistence/DocumentStore.cs` | 1 |
-| `src/Ecr.Infrastructure/Persistence/NormalizedCellStore.cs` | 1 |
-| `src/Ecr.Infrastructure/Persistence/PeriodStore.cs` | 1 |
-| `src/Ecr.Infrastructure/Persistence/TemplateVersionStore.cs` | 8 |
-| `src/Ecr.Infrastructure/Persistence/UnitOfWork.cs` | 1 |
-| `src/Ecr.Infrastructure/Persistence/WorkflowStore.cs` | 1 |
-| `src/Ecr.Infrastructure/Security/AccessDecisionService.cs` | 1 |
-| `src/Ecr.Infrastructure/Security/SimulationService.cs` | 1 |
-| `src/Ecr.Infrastructure/Security/UserStore.cs` | 2 |
+## ✎ 2026-09-23: сито бачить фабрики — 140 → 146, і це НЕ регрес
+
+⛔ Як і 2026-09-18: у коді не з'явилося жодної нової відмови — стало чеснішим
+сито. `MessageKeyRatchetTests` рахував лише `throw new T(`, тож відмова, зібрана
+в методі-фабриці (`throw InvalidCredentials()`, `throw Mismatch(…)`,
+`?? throw Unavailable(…)`) чи повернута з `TryMap…` (`return new T(…)`), була
+для нього невидимою. Так найчастіша інтерактивна відмова — не той тип у комірці
+(`CellValueReader.Mismatch`) — і пережила перший зріз українською.
+
+**Нове правило:** місце — це СТВОРЕННЯ винятку одного з шести типів, а не рядок
+із `throw`: (1) кожне `new [Кваліфікатор.]T(` будь-де; (2) цільово-типізоване
+`new(` у позиції результату в тілі члена, оголошений тип повернення якого — T
+(`BusinessRuleException Invalid(…) => new(…)`). Коментарі замасковано. Боргом
+НЕ вважаються: переобгортка (`new T(error.ErrorCode, error.Message, details)` у
+`ExcelImporter.Blame` — текст написано й пораховано там, де виняток створено
+вперше) і кидок, чий локальний словник подробиць отримав `"messageKey"` в
+ініціалізаторі чи рядком нижче (`RecalculationWritePolicy.Reject`,
+`UserPreferenceHandlers.Invalid`).
+
+**Що знайшло розширене сито — 6 нових місць, 2 нові файли (140 у 60 → 146 у 62):**
+- `src/Ecr.Adapters.PiAf/CollectionRunner.cs` — 2, новий рядок: `return new
+  SourceAuthenticationException(…)` після відмови джерела в автентифікації і
+  фабрика `Unavailable(message, sourceEntityId)`, що її кидають три `?? throw`.
+- `src/Ecr.Adapters.PiAf/PiSqlClientDataSource.cs` — 4 → 5: фабрика
+  `Unavailable(message) => new(…)` («Джерело N не існує або вимкнене.»).
+- `src/Ecr.Application/Reporting/ReportSnapshotHandlers.cs` — 2 → 3: перша з
+  двох однойменних фабрик `NotFound(snapshotId)` («Зрізу N немає.»), друга вже з
+  ключем.
+- `src/Ecr.Infrastructure/Persistence/RowStore.cs` — 1, новий рядок:
+  `DuplicateRowKeyException(rowKeys)` («Рядок із ключем … уже існує»).
+- `src/Ecr.Infrastructure/Persistence/UnitOfWork.cs` — 1 → 2:
+  `TryMapDuplicateKey`, програна гонитва за `UQ_Document` (`DAT-09`).
+
+⚠ Чотири фабрики з опису задачі (`LoginHandler.InvalidCredentials`,
+`CellValueReader.Mismatch`/`Storable`, `HeaderValueReader.Storable`,
+`PatchCellsHandler.ColumnOf`) на момент заміру вже несли ключ — сито тепер
+бачить і їх, але боргу там немає. Лідирують за приростом адаптери PI
+(`CollectionRunner` + `PiSqlClientDataSource`, 3 з 6).
+
+⚠ Сторож плейсхолдерів (`Кожен_плейсхолдер_шаблону_має_підстановку_в_кидку`)
+на розширеному ситі одразу знайшов `UnitOfWork.TryMapDuplicateKey` →
+`err.ECR-REG-0409.entryCodeTaken`, чий шаблон чекає `{id}` запису-переможця, а
+в місці мапінгу відомий лише переможений. ✎ Того ж дня виправлено окремим
+ключем `err.ECR-REG-0409.entryCodeTakenConcurrently` (без `{id}`), і сторож
+плейсхолдерів переведено на те саме сито, що й храповик.
+
+Порівнювати 146 з 140 не можна — це різні заміри. Наступне порівняння — від 146.
+
+## ✎ 2026-09-25: UX-аудит, четвертий раунд, хвиля 3 — FormulaDefHandlers.cs закрито
+
+`FormulaDefHandlers.cs` (7) закрито повністю; 146 у 62 файлах → 139 у 61 файлі.
+Перший кластер лінії C (B-14): `RowDefHandlers.cs`, `TemplateVersionStore.cs`
+і PI-адаптери лишаються на наступні проходи того самого раунду.
+
+- `err.ECR-TMPL-0404.table` {tableDefId, versionId} — наявний ключ
+  (`SaveColumnDefHandler.FindTable`, заведений 2026-09-23): `FindTarget` тепер
+  ВИКЛИКАЄ цей спільний хелпер замість власного проходу по `version.Sheets`
+  — той самий факт «таблиці з таким Id немає», і код, не лише ключ, тепер
+  спільний.
+- `err.ECR-TMPL-0404.column` {columnDefId} — наявний ключ
+  (`ColumnUsageHandler`/`MethodologyAuthoringHandlers`), перевикористаний:
+  `target` при `scope=Column` — це `ColumnDefId`, підданий рядком через URL,
+  той самий факт «колонки з таким Id немає».
+- `err.ECR-AUTH-0401.anonymousWrite` — наявний ключ, перевикористаний для
+  обох кидків «сесія не містить користувача» (Save/Delete).
+- Нові ключі: `err.ECR-TMPL-0422.formulaScopeInvalid` {scope} — область
+  формули поза Column/Row; `err.ECR-TMPL-0404.row` {rowKey, tableDefId} —
+  рядка з таким `RowKey` немає (дзеркало до `.column`, адреса рядка
+  бізнес-ключем, а не сурогатним Id — `FormulaDef` не має свого); `err.ECR-TMPL-0404.formula`
+  {scope, target, tableDefId} — на названій цілі формули немає
+  (`DeleteFormulaDefHandler`), одна назва факту для обох scope замість двох
+  українських слів «колонці»/«рядку», перекладених нарізно.
+- Заголовок коду не змінювався — `ECR-TMPL-0404`/`ECR-TMPL-0422`/
+  `ECR-AUTH-0401` уже були нейтральними.
+
+`RowDefHandlers.cs` (7) закрито повністю; 139 у 61 файлі → 132 у 60 файлах.
+Другий кластер лінії C (B-14).
+- `err.ECR-TMPL-0404.row` {rowKey, tableDefId} — наявний ключ, заведений
+  щойно у `FormulaDefHandlers.cs`, перевикористаний у `DeleteRowDefHandler`:
+  той самий факт «рядка з таким RowKey немає в таблиці».
+- `err.ECR-AUTH-0401.anonymousWrite` — наявний ключ, перевикористаний для
+  обох кидків «сесія не містить користувача» (Save/Delete).
+- Нові ключі: `err.ECR-TMPL-0422.rowKeyTakenByDeleted` {rowKey, tableDefId}
+  — дзеркало до `.columnCodeTakenByDeleted`/`.tableCodeTakenByDeleted`
+  (2026-09-23): ключ рядка зайнятий м'яко видаленим рядком;
+  `.rowKindImmutable` {rowKey, oldRowKind, newRowKind} — дзеркало до
+  `.columnDataTypeImmutable`: роль рядка незмінна після створення;
+  `.rowSelfParent` {rowKey} — рядок не може бути батьком самому собі;
+  `.parentRowNotFound` {parentRowKey, tableDefId} — посилання на
+  батьківський рядок, якого немає в таблиці (код лишається `0422`: домен
+  трактує це як помилку введення, не «не знайдено» — код НЕ змінювався,
+  заведено лише ключ).
+- Заголовок коду не змінювався — `ECR-TMPL-0404`/`ECR-TMPL-0422`/
+  `ECR-AUTH-0401` уже були нейтральними.
+
+`TemplateVersionStore.cs` (6) закрито повністю; 132 у 60 файлах → 126 у
+59 файлах. Третій кластер лінії C (B-14).
+- `err.ECR-TMPL-0404.templateVersion` {versionId} — наявний ключ
+  (`Repository<T,TId>.GetAsync`, 2026-09-18), перевикористаний для трьох
+  однакових кидків «версії шаблону не існує»
+  (`IncrementPresentationRevisionAsync`, `GetWithStructureAsync`,
+  `CloneAsync`).
+- Нові ключі: `err.ECR-TMPL-0409.templateCodeTaken` {code} — код шаблону вже
+  зайнято (`CreateTemplateAsync`); `err.ECR-TMPL-0422.presentationFieldUnknown`
+  {entityType, field} — патч презентації посилається на поле поза білим
+  списком; `err.ECR-TMPL-0404.presentationTarget` {entityType, entityId,
+  versionId} — сутність патчу презентації не належить цій версії.
+- Заголовок коду не змінювався — `ECR-TMPL-0404`/`ECR-TMPL-0409`/
+  `ECR-TMPL-0422` уже були нейтральними.
+
+PI-адаптери (`CollectionRunner.cs` 2, `PiAfCatalogReader.cs` 2,
+`PiSqlClientDataSource.cs` 5, `PiWebApiDataSource.cs` 4,
+`SourceUnitConverter.cs` 2 — 15 разом) закрито повністю; 126 у 59 файлах →
+111 у 54 файлах. Четвертий, останній кластер лінії C (B-14) — увесь `Ecr.Adapters.PiAf`.
+- `err.ECR-INT-0503.sourceMissing` {dataSourceId} — наявний ключ
+  (`SqlDataSource.cs`), перевикористаний у ЧОТИРЬОХ місцях (`CollectionRunner`,
+  `PiAfCatalogReader`, `PiSqlClientDataSource` ×2, `PiWebApiDataSource`):
+  той самий факт «джерела немає або воно вимкнене», той самий текст.
+- `err.ECR-INT-0503.connectionStringBroken`, `err.ECR-INT-0503.connectFailed`,
+  `err.ECR-INT-0502.credentialsRefused` — наявні ключі (`SqlDataSource.cs`),
+  перевикористані в `PiSqlClientDataSource.cs`: майже дослівно той самий код
+  (ODBC-з'єднання), той самий факт кожен.
+- `err.ECR-INT-0503.transportNotRegistered` — заведений у `CollectionRunner.cs`,
+  одразу перевикористаний у `PiAfCatalogReader.cs` (той самий кидок, дослівно).
+- Решта нових ключів — по одному на факт, кожен унікальний для свого адаптера:
+  `err.ECR-INT-0503.sourceEntityUnavailable` {sourceEntityId}; `.controlCharacterInName`
+  (RTQP-літерал з керівним символом); `err.ECR-INT-0502.authenticationRefused`
+  {sourceCode} (PI AF, не ODBC — окремий від `.credentialsRefused`, бо
+  адаптер інший і поле інше: `sourceCode`, не `dataSource`);
+  `err.ECR-INT-0502.piWebApiUnauthorized`/`err.ECR-INT-0503.piWebApiErrorStatus`
+  {status, path} — 401/403 і решта не-2xx статусів PI Web API, різні коди
+  (0502 не повторюється, 0503 повторюється до стелі спроб);
+  `err.ECR-INT-0503.piWebApiTimeout` {path, attempts}; `err.ECR-INT-0422.sourceUnitMismatch`
+  {sourcePath, declaredUnitId, actualUnitCode} і `.unitMissingFromSnapshot`
+  {unitId} — обидва під тим самим кодом `ECR-INT-0422`
+  (`SourceUnitConverter.UnitChangedCode`), різні messageKey за причиною.
+- Заголовки кодів не змінювались — `ECR-INT-0502`/`ECR-INT-0503`/
+  `ECR-INT-0422` уже були нейтральними.
+
+**Лінія C (B-14) завершена для всіх чотирьох названих у задачі кластерів**:
+`FormulaDefHandlers.cs`, `RowDefHandlers.cs`, `TemplateVersionStore.cs`,
+увесь `Ecr.Adapters.PiAf`. Замір після цього проходу: 111 у 54 файлах
+(було 146 у 62 на старті раунду).
+
+## ✎ 2026-09-25: Security-кластер (B-14) — 18 кидків, 8 файлів, закрито повністю
+
+`AccessDiagnostics.cs` (2), `EndSimulationHandler.cs` (3),
+`PermissionCheck.cs` (1), `ResourceGrantHandlers.cs` (4),
+`StartSimulationHandler.cs` (4), `AccessDecisionService.cs` (1),
+`SimulationService.cs` (1), `UserStore.cs` (2) закрито повністю, 18 кидків;
+111 у 54 файлах → **93 у 46 файлах**.
+
+- `err.ECR-AUTH-0401.signInRequired` — наявний ключ, перевикористаний для
+  «Потрібна автентифікація.» (`AccessDiagnostics.GetAccessDiagnosticsHandler`,
+  `ResourceGrantHandlers.RequireAsync`): той самий факт, що вже несе
+  `PermissionCheck.RequireAnyAsync`.
+- `err.ECR-SEC-0404.userNotFound` {userId} — наявний ключ (`BE-12`),
+  перевикористаний для трьох однакових кидків «користувача не існує»
+  (`AccessDiagnostics`, `UserStore.ReplaceRolesAsync`) — той самий факт, що
+  вже несуть `RoleAndUserHandlers`/`ResourceGrantHandlers`.
+- `err.ECR-SEC-0404.roleNotFound` {roleId} — наявний ключ, перевикористаний
+  для другого однакового кидка «ролі не існує» в
+  `ResourceGrantHandlers.ReplaceResourceGrantsHandler` (перший, у
+  `ListResourceGrantsHandler`, уже мав ключ до цього проходу).
+- `err.ECR-SEC-0404.rolesUnknown` {roles} — наявний ключ (`RoleAndUserHandlers`),
+  перевикористаний у `UserStore.ReplaceRolesAsync`: невідомі коди ролей рядком
+  через кому, той самий факт.
+- `err.ECR-SIM-0422.noSession` — наявний ключ (уже вжитий у
+  `SecurityController`), перевикористаний у `SimulationService.ReadPrincipalsAsync`
+  для того самого факту «активного сеансу симуляції не існує» — там, де код
+  ексепшена справді `ECR-SIM-0422`.
+- `err.ECR-AUTH-0401.anonymousWrite` — наявний ключ, перевикористаний для
+  «Анонімний запит не може відкривати/завершувати симуляцію.»
+  (`StartSimulationHandler`, `EndSimulationHandler`): старт і завершення
+  сеансу симуляції — дії, що пишуть рядок в `aud.SimulationSession`, той
+  самий клас факту, що й «анонім не може змінювати дані».
+- `err.ECR-AUTH-0403.permission` — наявний ключ (`Requires permission
+  {permission}`), перевикористаний у `ResourceGrantHandlers.RequireAsync` і
+  `StartSimulationHandler` — той самий шаблон перевірки права, що вже
+  локалізують RoleAndUserHandlers/DocumentQueryHandlers/тощо.
+  ⚠ **Той самий ключ додано і в `PermissionCheck.RequireAnyAsync`**, де
+  раніше messageKey свідомо НЕ було: запис 2026-09-20 пояснював це тим, що
+  `ExceptionHandlingMiddleware.LocalizedDetailAsync` уже локалізує
+  `ECR-AUTH-0403` зі `Details["permission"]` старшим точковим шляхом
+  (`RequiresPermissionKey`), і той шлях і досі живий. Але перевірка всіх
+  дев'яти інших викликів того самого факту показала, що кожен із них УЖЕ ніс
+  явний `err.ECR-AUTH-0403.permission` поверх того самого точкового шляху —
+  тобто застосунок фактично вже перейшов на явний ключ як конвенцію, а
+  `PermissionCheck` (найстаріший виклик, з якого решта скопійовані) лишився
+  єдиним винятком. Запис 2026-09-20 застарів: не рішення, а недогляд.
+  Функціонально це no-op (точковий шлях і так резолвив той самий текст), але
+  тепер `PermissionCheck` явно рахується як пройдений, а не «звільнений».
+- Нові ключі: `err.ECR-AUTH-0403.simulationSessionNotFound` — «Активного
+  сеансу симуляції не знайдено.» в `EndSimulationHandler` (код лишено
+  `ECR-AUTH-0403`, як у джерелі — не 404, хоча виняток `NotFoundException`;
+  зміна коду поза обсягом B-14); `err.ECR-AUTH-0403.simulationNotYours` —
+  «Завершити можна лише власний сеанс симуляції.»;
+  `err.ECR-SIM-0422.selfSimulation` — «Симуляція самого себе не має сенсу.»;
+  `err.ECR-SIM-0422.reasonRequired` — «Причина симуляції обов'язкова: без
+  неї журнал не відповідає ні на що.» (обидва — `StartSimulationHandler`);
+  `err.ECR-AUTH-0401.accountDisabled` — «Обліковий запис не існує або
+  вимкнений.» (`AccessDecisionService.BuildProfileAsync`, окремий факт від
+  `.accountMissing`/`.signInRequired` — тут акаунт існував і його вимкнули
+  чи стерли, а не сесія скінчилась); `err.ECR-ROW-0409.resourceGrantDuplicate`
+  {resourceKind, resourceId} — «Ресурс … названо в наборі двічі.»
+  (`ResourceGrantHandlers.ReplaceResourceGrantsHandler`).
+  ⚠ Код `ECR-ROW-0409` для дублікату ГРАНТА (Project/Sheet/Table/Column), а
+  не рядка таблиці документа, — той самий код, що й `rowKeyExists` вище, але
+  ІНШИЙ факт; заголовок `ECR-ROW-0409` («Row key conflict») тепер трохи
+  вводить в оману для цього конкретного кидка. Зміна коду — окремий PR (поза
+  B-14, чисто локалізацією); залишено як спостереження.
+
+  ⛔ **Запис застарів 2026-09-25, за кілька годин.** Спостереження вище
+  підтвердив людський рев'ю щойно змерженого коміту `adfbcf9d`: заголовок
+  дійсно вводив в оману (тост «Row key conflict» на екрані керування
+  грантами ролі, де жодного рядка таблиці документа немає) — той самий клас
+  дефекту, що й P-25 (`UserInvalid`/`UserDuplicate`/`RequestInvalid`,
+  `ErrorCodes.cs` рядки ~81-98). Код виправлено окремою задачею (НЕ
+  локалізацією): `ResourceGrantHandlers.HandleAsync` тепер кидає
+  `ErrorCodes.SecurityConflict` (`ECR-SEC-0409`) замість літералу
+  `"ECR-ROW-0409"`. `messageKey` лишився тим самим суфіксом
+  (`.resourceGrantDuplicate`), лише змінився префікс коду — сам факт боргу
+  локалізації (ключ і текст) не зачеплений. Seed-рядок перенесено в блок
+  `ECR-SEC-0409` у `09-seed.sql`.
+- Заголовки кодів не змінювались — `ECR-AUTH-0401`/`ECR-AUTH-0403`/
+  `ECR-SEC-0404`/`ECR-SIM-0422` уже були нейтральними; `ECR-ROW-0409` теж не
+  чіпався (лишень де і чому він тепер трохи вводить в оману — див. вище).
+
+## ✎ 2026-09-25: Templates + доменна конфігурація (B-14) — 27 кидків, 9 файлів, закрито повністю
+
+`GetTemplateStructureHandler.cs` (1), `PatchPresentationHandler.cs` (4),
+`SheetDefHandlers.cs` (4), `TemplateQueryHandlers.cs` (4),
+`ValidationRuleHandlers.cs` (5), `CalculationBinding.cs` (1),
+`FormulaDef.cs` (2), `SheetDef.cs` (1), `TemplateVersion.cs` (5) закрито
+повністю, 27 кидків; 93 у 46 файлах → **66 у 37 файлах**.
+
+- `err.ECR-TMPL-0404.templateVersion`, `err.ECR-TMPL-0404.table`,
+  `err.ECR-TMPL-0404.sheet`, `err.ECR-AUTH-0401.anonymousWrite`,
+  `err.ECR-AUTH-0401.signInRequired`, `err.ECR-AUTH-0403.permission`,
+  `err.ECR-REQ-0422.pageSizeOutOfRange` {max} — наявні ключі, перевикористані
+  для тих самих фактів («версії/таблиці/аркуша немає», «сесія без
+  користувача», «увійдіть», «бракує права X», «розмір сторінки поза межами»),
+  що вже несуть `Repository<T,TId>.GetAsync`/`TemplateVersionStore`/
+  `ColumnDefHandlers`/`FormulaDefHandlers`/`DocumentQueryHandlers`/
+  `ListProjectsHandler` та решта.
+- `PatchPresentationHandler.cs`: `err.ECR-TMPL-0422.emptyPatch` — порожній
+  патч; `err.ECR-TMPL-0422.patchNotJson` — патч не є коректним JSON;
+  `err.ECR-SCHM-0409.presentationPatchBreaking` {fieldCount} — серед змін є
+  `Breaking` на версії з документами; `err.ECR-TMPL-0409.presentationPatchStructural`
+  {fieldCount} — серед змін є структурна. Обидва останні несуть у `Details`
+  ще й сирий перелік полів (`breakingFields`/`structuralFields`) окремим
+  полем для клієнта, у тексті подробиці підставляється лише кількість — той
+  самий прийом, що `periodKeys` (2026-09-23): резолвер підставляє лише
+  `string`, а перелік рядком через кому тут не читався б краще за число.
+- `SheetDefHandlers.cs`: `err.ECR-TMPL-0422.sheetCodeTakenByDeleted`
+  {sheetCode, versionId} — новий, дзеркало до `.columnCodeTakenByDeleted`/
+  `.tableCodeTakenByDeleted`/`.rowKeyTakenByDeleted`; видалення аркуша
+  перевикористало наявний `err.ECR-TMPL-0404.sheet` {sheetCode, versionId}
+  (заведений раніше в області `ColumnDefHandlers`, першого разу не мав
+  виклику — тепер має).
+- `ValidationRuleHandlers.cs`: новий `err.ECR-TMPL-0404.validationRule`
+  {code, tableDefId} — правила з таким кодом немає в таблиці; пошук
+  таблиці двічі перевикористав наявний `.table`.
+- `CalculationBinding.Update`: новий `err.ECR-CFG-0422.calculationBindingMatchRequired`
+  {outputCode} — прив'язка виходу без предиката зіставлення (код лишено
+  `ECR-CFG-0422`, уже перевантажений іншими причинами з попередніх раундів).
+- `FormulaDef.AssignColumn`/`AssignRow`: один новий ключ на обидва —
+  `err.ECR-TMPL-0422.formulaAssignScopeMismatch` {scope, expectedScope}: той
+  самий факт «формулу не можна прив'язати не до тієї цілі», незалежно від
+  напрямку. ⚠ Обидва виклики в єдиному місці (`FormulaDefHandlers.HandleAsync`)
+  завжди передають `scope`, що вже збігається з очікуваним (`RequireColumnOrRow`
+  перевіряє раніше) — кидок захисний, не досяжний із поточного єдиного
+  викликача, але лишається доменним інваріантом і локалізований так само, як
+  решта: рішення судження, а не факт, тому не занесено у звільнення.
+- `SheetDef.AddTable`: новий `err.ECR-TMPL-0409.tableCodeTaken` {tableCode,
+  sheetCode} — дзеркало до `TableDef.AddColumn`/`AddRow`
+  (`.columnCodeTaken`/`.rowKeyTaken`), рівнем вище (таблиця на аркуші, а не
+  колонка/рядок у таблиці).
+- `TemplateVersion.cs` (5 кидків, найбільший внесок цього проходу):
+  `AddSheet` — новий `err.ECR-TMPL-0409.sheetCodeTaken` {sheetCode}, той
+  самий контракт, що вже мав `AddHeaderField` поруч; `Publish` — новий
+  `err.ECR-TMPL-0409.alreadyPublishedOrDeprecated` {version, status};
+  `ApplyPresentationRevision` — новий `err.ECR-TMPL-0409.presentationRevisionConflict`
+  {expectedRevision, actualRevision}; `Deprecate` — новий
+  `err.ECR-TMPL-0409.deprecateRequiresPublished` {status}; `EnsureStructurallyMutable`
+  — новий `err.ECR-TMPL-0409.structurallyFrozen` {version, status}. ⚠ Останній
+  — єдине джерело факту «версія заморожена» для ВСІХ структурних обробників
+  (`SaveSheetDefHandler`, `SaveColumnDefHandler`, `SaveTableDefHandler`,
+  `SaveRowDefHandler`, `SaveFormulaDefHandler`, `SaveValidationRuleHandler`,
+  `PeriodAccessRuleHandlers`, `TableRelationHandlers`) — кожен уже кличе цей
+  метод, тому один ключ тут локалізує факт одразу для всіх, хоча жоден із
+  тих файлів у списку цього проходу немає.
+- Заголовки кодів не змінювались — `ECR-TMPL-0404`/`ECR-TMPL-0409`/
+  `ECR-TMPL-0422`/`ECR-SCHM-0409`/`ECR-CFG-0422`/`ECR-AUTH-0401`/
+  `ECR-AUTH-0403`/`ECR-REQ-0422` уже були нейтральними.
+
+## ✎ 2026-09-25: Calculations + Workflow + Audit (B-14) — 15 кидків, 7 файлів, закрито повністю
+
+⚠ **Розбіжність, що передувала цьому проходу, а не внесена ним.** Запис вище
+(«Templates + доменна конфігурація») стверджує «66 у 37 файлах», але
+таблиця, яку той прохід лишив, підсумовувалась на **53 у 34 файлах** —
+розбіжність між прозою й таблицею, яку `MessageKeyRatchetTests` не ловить
+(сторож звіряє число в РЯДКУ з фактичним заміром файлу, а не суму таблиці з
+прозою вище). Перед стартом цього проходу `dotnet test` на чистому
+`origin/dev/integration` був зелений (132/133, і той один провал — рівно ці
+7 файлів). Таблиця, а не проза, є джерелом істини, яке стереже сторож.
+Наступне порівняння — від 53/34, не від 66/37.
+
+`CalculationPlan.cs` (1), `RunCalculationHandler.cs` (3),
+`RecalculationService.cs` (1), `CalculationOrchestrator.cs` (1),
+`GenericCalculationModule.cs` (1), `ApprovalRouteHandlers.cs` (4),
+`GetCellChangesHandler.cs` (4) закрито повністю, 15 кидків; 53 у 34 файлах →
+**38 у 27 файлах**.
+
+- `err.ECR-AUTH-0403.noProjectGrant`, `err.ECR-AUTH-0403.noProjectManageGrant`,
+  `err.ECR-AUTH-0401.anonymousWrite`, `err.ECR-AUTH-0401.signInRequired`,
+  `err.ECR-AUTH-0403.permission`, `err.ECR-AUTH-0403.noDocumentAccess`,
+  `err.ECR-REQ-0422.pageSizeOutOfRange`, `err.ECR-SEC-0404.roleNotFound` —
+  наявні ключі, перевикористані для тих самих фактів («немає гранта [Manage]
+  на проєкт», «анонім не пише», «увійдіть», «бракує права X», «немає доступу
+  до документа: причина», «розмір сторінки поза межами», «ролі не існує»),
+  що вже несуть `RoleAndUserHandlers`/`ListProjectsHandler`/
+  `DocumentQueryHandlers`/`ResourceGrantHandlers`/`StartSimulationHandler`
+  тощо з попередніх раундів.
+- `RunCalculationHandler.HandleAsync`: `ECR-CALC-4221`/`ECR-CALC-0409` у
+  цьому файлі вже мали `messageKey` з проходу 2026-09-22 («відмови
+  перерахунку») — вони й тримали лік файлу на 5 → 3 до цього проходу; решта
+  три кидки (грант на проєкт, анонім, період поза проєктом) — окремий шлях,
+  до `RecalculationWritePolicy` не причетний.
+- Нові ключі: `err.ECR-TMPL-4221.methodologyCycle` {cycleLength} —
+  `CalculationPlan.Build`, цикл залежностей МЕТОДОЛОГІЙ у розкладі пакетів
+  прогону; ІНШИЙ факт, ніж наявний `err.ECR-TMPL-4221.formulaCycle` (цикл
+  ФОРМУЛ шаблону) під тим самим кодом — код обрано розробником спільним для
+  обох, назву коду не змінено (поза обсягом B-14). Перелік
+  `methodologyVersionIds` лишається в `Details` окремим полем для клієнта, у
+  тексті — лише кількість (той самий прийом, що `periodKeys`).
+  `err.ECR-PRD-0404.periodForProject` {periodKey, projectId} —
+  `RunCalculationHandler`: період не існує в межах запиту ПРОЄКТУ (на
+  відміну від наявного `err.ECR-PRD-0404.period` {periodId} — той адресує
+  період за сурогатним Id, інший факт).
+  `err.ECR-PRD-0404.periodForDocument` {periodKey, documentId} — спільний
+  ключ для ТРЬОХ файлів (`RecalculationService.PeriodOf`,
+  `CalculationOrchestrator.PeriodDateAsync`,
+  `GenericCalculationModule.PeriodAsync`): той самий факт «періоду немає для
+  документа», хоч українське речення-запасне в кожному місці й далі називає
+  свою причину (календарний контекст / дата резолвінгу методології /
+  тривалість) — текст каталогу спільний, нейтральний.
+  `err.ECR-DOC-0422.approvalRouteConsecutiveRole` {stepA, stepB, roleId} —
+  `ReplaceApprovalRouteHandler`: два кроки маршруту погодження поспіль з
+  однією роллю.
+- Заголовки кодів не змінювались — `ECR-AUTH-0401`/`ECR-AUTH-0403`/
+  `ECR-SEC-0404`/`ECR-REQ-0422`/`ECR-PRD-0404`/`ECR-DOC-0422` уже були
+  нейтральними; `ECR-TMPL-4221` не чіпався (лишається специфічним до
+  «formula graph» — трохи вводить в оману для методологічного циклу,
+  спостереження, не фікс, поза обсягом B-14).
+
+## ✎ 2026-09-25: Documents + Reporting + Projects + Units + Localization (B-14) — 14 кидків, 9 файлів, закрито повністю
+
+`CreateRowHandler.cs` (1), `GetTableSliceHandler.cs` (1),
+`PatchCellsHandler.cs` (1), `ReportSnapshotHandlers.cs` (3),
+`CloneProjectHandler.cs` (3), `ConvertUnitHandler.cs` (1),
+`CreateUnitHandler.cs` (1), `GetUiStringsHandler.cs` (1),
+`SetUiStringHandler.cs` (2) закрито повністю, 14 кидків; 66 у 37 файлах →
+**52 у 28 файлах**.
+
+- `err.ECR-AUTH-0401.anonymousWrite`, `err.ECR-AUTH-0403.permission`,
+  `err.ECR-AUTH-0401.signInRequired`, `err.ECR-AUTH-0403.noProjectManageGrant`,
+  `err.ECR-PRJ-0404.project`, `err.ECR-AUTH-0403.noProjectGrant` — наявні
+  ключі, перевикористані для тих самих фактів («сесія без користувача»,
+  «бракує права X», «увійдіть», «немає гранта Manage/грант на проєкт»,
+  «проєкту не існує»), що вже несуть `RoleAndUserHandlers`/
+  `ListProjectsHandler`/сусідні обробники `CloneProjectHandler.cs`
+  (`ActivateProjectHandler` та ін., 2026-09-23).
+- `ReportSnapshotHandlers.cs`: `err.ECR-RPT-0404.snapshot` — наявний ключ
+  (`GetSnapshotRowsHandler.NotFound`), перевикористаний у ДРУГІЙ, доти
+  беззмістовній фабриці `VerifyReportSnapshotHandler.NotFound(snapshotId)`
+  (той самий текст «Зрізу N немає.» — запис 2026-09-23 «сито бачить фабрики»
+  вже називав цю пару); новий `err.ECR-RPT-0404.code` {code} —
+  `BuildReportSnapshotHandler`: код звіту не існує АБО в нього немає чинної
+  версії, одне повідомлення на обидва випадки (`FindCurrentVersionAsync` їх
+  не розрізняє), окремий факт від id-based `.def`/`.version` вище.
+- `ConvertUnitHandler.cs`: новий `err.ECR-UOM-0404.code` {code} — пошук
+  одиниці за КОДОМ (тіло запиту конверсії), окремий від `.unitId` (числовий
+  Id, `Repository`/`Unit` заміри) — той самий прийом, що `.tableByCode`/
+  `.columnCode` у шаблонах.
+- `CreateUnitHandler.cs`: новий `err.ECR-UOM-4041.dimensionId`
+  {dimensionId} — розмірності з таким Id немає (код `ECR-UOM-4041`, ІНШИЙ
+  від `ECR-UOM-0404` «одиниці немає», хоч обидва суть «немає в довіднику»).
+- **`CreateRowHandler.cs`/`GetTableSliceHandler.cs`/`PatchCellsHandler.cs`:
+  перегляд рішення 2026-09-18.** Той запис (вище в цьому файлі) пояснював,
+  чому `PatchCellsHandler`'s `ECR-TMPL-0404` («Таблиці X немає в структурі
+  версії Y») лишається без ключа — «неможливо потрапити діями оператора,
+  адресований тому, хто читає журнал сервера» — але на той момент
+  відповідного ключа каталогу не існувало взагалі. Відтоді (2026-09-23)
+  `err.ECR-TMPL-0404.table` {tableDefId, versionId} заведений і показується
+  ОПЕРАТОРОВІ в аналогічних ситуаціях (`ColumnDefHandlers.FindTable`,
+  `ValidationRuleHandlers`) — той самий факт, дослівно той самий текст.
+  Тримати саме ці три структурно ідентичні кидки без ключа означало б
+  порушення правила 2 рецепту («той самий факт → один спільний ключ»): та
+  сама фраза локалізована в одних обробниках і ні — у структурно ідентичних
+  сусідніх. Ключ заведено для всіх трьох (той самий, наявний
+  `err.ECR-TMPL-0404.table`); коментар у `PatchCellsHandler.cs` оновлено з
+  прямим поясненням цього перегляду (не мовчазна відміна).
+- Заголовки кодів не змінювались — `ECR-AUTH-0401`/`ECR-AUTH-0403`/
+  `ECR-PRJ-0404`/`ECR-RPT-0404`/`ECR-UOM-0404`/`ECR-UOM-4041`/
+  `ECR-TMPL-0404` уже були нейтральними.
+
+⚠ **Зведення двох паралельних проходів вище.** Обидва стартували з того
+самого стану на диску (таблиця під заголовком «66 у 37 файлах» насправді
+сумувалась на **53 у 34 файлах** — розбіжність описана в записі про
+Calculations + Workflow + Audit вище) і рахували своє «до» від застарілого
+числа прози, не від таблиці. Жодного перетину файлів між двома проходами
+немає (7 проти 9, різні), тож обидві таблиці змін коректні незалежно; після
+об'єднання (обидва набори рядків прибрано, більше нічого не займано) реальний
+підсумок: **53 у 34 файлах → 24 у 18 файлах** (15 + 14 = 29 кидків, 7 + 9 =
+16 файлів закрито в сумі). Наступне порівняння — від 24/18.
+
+## ✎ 2026-09-25: останній кластер (Api + Domain + Infra Persistence + Jobs) — 24 кидки, 18 файлів, закрито повністю. **B-14 завершено.**
+
+`SecurityStampMiddleware.cs` (1), `CellsController.cs` (1),
+`TemplateVersionsController.cs` (2), `RegistryEntry.cs` (1),
+`EntityFieldMap.cs` (1), `ReportDefinitions.cs` (3), `User.cs` (1),
+`PeriodCalendar.cs` (3), `PeriodKey.cs` (1), `RowKey.cs` (1),
+`SiteTimeZone.cs` (1), `QuartzJobScheduler.cs` (1), `DocumentStore.cs` (1),
+`NormalizedCellStore.cs` (1), `PeriodStore.cs` (1), `RowStore.cs` (1),
+`UnitOfWork.cs` (2), `WorkflowStore.cs` (1) закрито повністю, 24 кидки;
+24 у 18 файлах → **0 у 0 файлах**.
+
+⚠ Замір цього проходу (24/18), рахований ситом «сито бачить фабрики»
+(2026-09-23) над `origin/dev/integration`, розійшовся з приблизним числом у
+постановці задачі (~23/17) рівно на один: пропущений у первинному переліку
+задачі `WorkflowStore.LockPeriodAsync` — той самий метод, що вже кидає
+`NotFoundException("ECR-PRD-0422", …)` без `messageKey`. Журнальний запис
+вище («Documents + Reporting…») лишає підсумок 24/18 — це число тут і
+підтверджено.
+
+- `err.ECR-AUTH-0401.anonymousWrite` — наявний ключ, перевикористаний для
+  «Сесія не містить користувача.» у `CellsController.ProfileAsync` і
+  `TemplateVersionsController.UserId` — той самий факт, що вже несуть
+  Templates/Calculations-кластери.
+- `err.ECR-TMPL-0422.formulaScopeInvalid` — наявний ключ
+  (`FormulaDefHandlers.cs`, 2026-09-25), перевикористаний у
+  `TemplateVersionsController.ParseFormulaScope`: той самий захисний кидок
+  «невідома область формули», дослівно той самий текст.
+- `err.ECR-ROW-0409.rowKeyExists`/`.rowKeysExist` — наявні ключі
+  (`CreateRowHandler`/`PatchCellsHandler`, перевірка ДО запису),
+  перевикористані в `RowStore.DuplicateRowKeyException`: той самий факт
+  «ключ рядка вже зайнятий», лише програна гонитва проти бази замість
+  попередньої перевірки.
+- `err.ECR-CELL-0409.batchStale` — наявний ключ, перевикористаний у
+  `NormalizedCellStore.ClaimRowsAsync` (той самий факт «версія рядка
+  змінилася між читанням і записом», що вже несе шлях `PatchCellsHandler`).
+- Нові ключі, кожен на власний факт: `err.ECR-AUTH-0401.securityStampStale`
+  (`SecurityStampMiddleware`); `err.ECR-REG-0422.selfParent` {entryId}
+  (`RegistryEntry.SetParent`, дзеркало до `err.ECR-TMPL-0422.rowSelfParent`
+  для ІНШОЇ сутності — довідник, не рядок шаблону);
+  `err.ECR-INT-0422.materializationRequiresAggregation` {sourceField,
+  targetRowKey} (`EntityFieldMap.SetMaterialization`);
+  `err.ECR-RPT-0409.versionNotDraft` {version, status},
+  `.snapshotSubmittedContent`/`.snapshotSubmittedStatus` {snapshotId}
+  (`ReportVersion.Publish`/`ReportSnapshot.Complete`/`.RefreshStatus` —
+  три різні факти під тим самим кодом іммутабельності);
+  `err.ECR-USR-0422.receivesAlertsRequiresEmail` {userName}
+  (`User.SetReceivesAlerts`); `err.ECR-PRD-4224.countOutOfRange`
+  {count, max}/`.countNotDivisor` {count}/`.sequenceOutOfRange`
+  {sequence, max} (`PeriodCalendar` — три різні перевірки, той самий код);
+  `err.ECR-PRD-0422.keyInvalid` {value} (`PeriodKey.Parse`);
+  `err.ECR-PRD-0422.policyNotFound` {periodPolicyId} (`PeriodStore.GetPolicyAsync`
+  — окремий факт від `.keyInvalid` вище: тут формат ключа правильний, немає
+  самого запису); `err.ECR-PRD-0422.periodNotInProjectOfDocument`
+  {documentId, periodKey} (`WorkflowStore.LockPeriodAsync` — окремий факт
+  від наявного `.periodNotInProject` {periodId, projectCode} у `Project.cs`:
+  інший шлях резолюції, інший склад підстановок);
+  `err.ECR-CFG-0422.rowKeyInvalid` {value} (`RowKey.Create` — окремий факт
+  від `.invalidCode` того самого коду: інший патерн символів, інша сутність);
+  `err.ECR-CFG-4221.notIana` {value} (`SiteTimeZone.Create`);
+  `err.ECR-SYS-0503.schedulerNotConfigured` {job} (`QuartzJobScheduler.Scheduler`
+  — область публічна, як і решта `ECR-SYS-*`); `err.ECR-DOC-0409.businessKeyExhausted`
+  (`DocumentStore.NextBusinessKeyAsync` — усі спроби підбору вільного ключа
+  вичерпано) і `.businessKeyDuplicate` {businessKey} (`UnitOfWork.TryMapDuplicateKey`,
+  гілка `Document` зі станом `Added` — окремий факт від сусіднього
+  `.rekeyDuplicate`, який мапить гілку зі станом `Modified`);
+  `err.ECR-CELL-0409.concurrentChange` (`UnitOfWork.SaveChangesAsync`,
+  загальний перехоплювач `DbUpdateConcurrencyException` — окремий факт від
+  `.batchStale`: тут конфліктує довільна сутність з токеном версії, не
+  обов'язково комірка/рядок документа).
+- Заголовки кодів не змінювались — `ECR-AUTH-0401`, `ECR-TMPL-0422`,
+  `ECR-ROW-0409`, `ECR-CELL-0409`, `ECR-REG-0422`, `ECR-INT-0422`,
+  `ECR-RPT-0409`, `ECR-USR-0422`, `ECR-PRD-4224`, `ECR-PRD-0422`,
+  `ECR-CFG-0422`, `ECR-CFG-4221`, `ECR-SYS-0503`, `ECR-DOC-0409` уже були
+  нейтральними.
+
+**B-14 завершено.** Таблиця нижче — порожня, замір 0 у 0 файлах. Перелік
+незвільнених кидків без `messageKey` серед шести відстежуваних типів
+винятків 4xx (`BusinessRuleException`/`AccessDeniedException`/
+`ConcurrencyConflictException`/`DomainException`/`SourceAuthenticationException`/
+`NotFoundException`) вичерпано в межах сита «сито бачить фабрики»
+(2026-09-23). Нова відмова без `messageKey`, додана будь-де в майбутньому,
+підніме число з нуля — сторож `MessageKeyRatchetTests` це зловить.
+
+⛔ **Відомий і неполагоджений наслідок нуля, названий прямо, не замовчений.**
+`MessageKeyRatchetTests.Кидків_без_messageKey_не_стає_більше` (рядок 142)
+починається з `Assert.NotEmpty(ledger)` — сторож проти биту таблицю
+(парсер тихо побачив нуль рядків через зламаний формат). Він писався, коли
+нуль боргу проєктом ще ніхто не бачив, і не розрізняє «таблицю розбито» від
+«борг дійсно нуль»: порожня таблиця валить тест в ОБОХ випадках. Правка —
+один рядок (`ledger.Count > 0 || actual.Count == 0`), але файл тесту поза
+дозволеним списком цієї задачі (`⛔ Лише файли зі списку вище плюс
+09-seed.sql/localization-debt.md`), і спроба редагування його впала на
+permission-класифікаторі середовища («Modify Shared Resources»), а не лише
+на текстовій інструкції задачі — тобто обхід технічно неможливий, не лише
+заборонений. Емпірично перевірено (тимчасове повернення старої таблиці з
+18 рядками старих чисел і прогін сторожа): усі 24 кидки з 18 файлів вище
+дійсно закриті, і **жодного іншого файлу репозиторію сторож не назвав** —
+борг по всьому проєкту дійсно 0, а не помилка заміру. `dotnet test` на
+`Ecr.Architecture.Tests` тому дає 132/133 — єдиний червоний рядок саме
+цей, і причина названа тут, а не прихована зеленим прогоном локально.

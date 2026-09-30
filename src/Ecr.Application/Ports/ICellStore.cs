@@ -18,19 +18,42 @@ public interface ICellStore
     public Task<IReadOnlyList<CellRecord>> ReadSliceAsync(long tableInstanceId, CancellationToken ct);
 
     /// <summary>
+    /// Те саме, що <see cref="ReadSliceAsync(long, CancellationToken)"/>, коли
+    /// період екземпляра викликачеві вже відомий.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ O3b (<c>WR-05</c>). Період — ключ партиції <c>doc.TableInstance</c>;
+    /// без нього пошук екземпляра за <c>Id</c> читає всі партиції. Передавати
+    /// треба період САМОГО екземпляра: з чужим результат порожній.
+    /// </remarks>
+    public Task<IReadOnlyList<CellRecord>> ReadSliceAsync(
+        long tableInstanceId, PeriodKey periodKey, CancellationToken ct);
+
+    /// <summary>
     /// Зрізи кількох таблиць ОДНИМ запитом; екземпляр без жодної непорожньої
     /// комірки в результат не потрапляє (шукай його ключ через
     /// <see cref="IReadOnlyDictionary{TKey,TValue}.TryGetValue"/>, а не
     /// індексатор).
     /// </summary>
     /// <remarks>
-    /// ⛔ Q-165 (аудит фази 2, продуктивність). <see cref="ReadSliceAsync"/> у
+    /// ⛔ Q-165 (аудит фази 2, продуктивність). <see cref="ReadSliceAsync(long, CancellationToken)"/> у
     /// циклі по таблицях документа — це похід у базу на кожну з ~90 таблиць;
     /// сам метод-виклювач (<c>ValidateDocumentHandler</c>) вже документує
     /// бюджет 3с p95 на документ, у який ~90 запитів не вкладаються.
     /// </remarks>
     public Task<IReadOnlyDictionary<long, IReadOnlyList<CellRecord>>> ReadSlicesAsync(
         IReadOnlyList<long> tableInstanceIds, CancellationToken ct);
+
+    /// <summary>
+    /// Те саме, що <see cref="ReadSlicesAsync(IReadOnlyList{long}, CancellationToken)"/>,
+    /// коли всі екземпляри — одного відомого періоду (документо-період
+    /// перерахунку).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ O3b (<c>WR-05</c>): екземпляр ІНШОГО періоду в результат не потрапляє.
+    /// </remarks>
+    public Task<IReadOnlyDictionary<long, IReadOnlyList<CellRecord>>> ReadSlicesAsync(
+        IReadOnlyList<long> tableInstanceIds, PeriodKey periodKey, CancellationToken ct);
 
     /// <summary>Значення конкретних комірок.</summary>
     public Task<IReadOnlyDictionary<CellAddress, CellValueData>> ReadCellsAsync(
@@ -41,7 +64,39 @@ public interface ICellStore
     /// заборонене: або весь батч, або нічого (B04 §2.3).
     /// Бюджет: p95 &lt; 150 мс на 100 комірок.
     /// </summary>
-    public Task ApplyAsync(CellChangeSet changes, CancellationToken ct);
+    /// <returns>
+    /// Нові версії «торкнутих» рядків: <c>TableRow.Id</c> → <c>RowVersion</c> у
+    /// Base64 — ті самі, що зафіксує коміт (тригерів на <c>doc.TableRow</c>
+    /// немає, а після «дотику» транзакція рядків не змінює).
+    /// </returns>
+    /// <remarks>
+    /// ⚠ <c>WR-04</c> п. 4: версії повертаються з самих <c>UPDATE</c> «дотику»
+    /// (<c>OUTPUT inserted.RowVersion</c>), тож викликачеві не треба
+    /// перечитувати їх після коміту. Рядка, якого «дотик» не знайшов (зник
+    /// паралельно), у результаті немає — викликач вирішує, чи дочитувати.
+    /// </remarks>
+    public Task<IReadOnlyDictionary<long, string>> ApplyAsync(CellChangeSet changes, CancellationToken ct);
+
+    /// <summary>
+    /// Застосовує набори змін КІЛЬКОХ екземплярів одним пакетом — те саме, що
+    /// <see cref="ApplyAsync"/> на кожен, але кожен крок (захоплення, видалення,
+    /// <c>MERGE</c>, «дотик») один на весь пакет (P8, застосування імпорту книги).
+    /// </summary>
+    /// <returns>Екземпляр → нові версії його рядків (як у <see cref="ApplyAsync"/>).</returns>
+    /// <remarks>
+    /// ⚠ Екземпляри в пакеті — різні (інакше <see cref="ArgumentException"/>).
+    ///
+    /// ⚠ Транзакція — як у <see cref="ApplyAsync"/>: відкрита викликачем —
+    /// приєднатися й не комітити (DAT-05 «усе або нічого» тримає він); немає —
+    /// одна коротка власна на весь пакет.
+    ///
+    /// ⛔ Конфлікт версії — той самий <c>ECR-CELL-0409</c>, що дав би поштучний
+    /// виклик на ПЕРШОМУ (у порядку входу) наборі з застарілими рядками:
+    /// <see cref="CellChangeSet.StaleRowIdsDetail"/> — лише його рядки, а на
+    /// пакеті з кількох екземплярів — ще й <c>tableInstanceId</c>.
+    /// </remarks>
+    public Task<IReadOnlyDictionary<long, IReadOnlyDictionary<long, string>>> ApplyBatchAsync(
+        IReadOnlyCollection<CellChangeSet> changes, CancellationToken ct);
 }
 
 /// <summary>Комірка з адресою і значенням.</summary>

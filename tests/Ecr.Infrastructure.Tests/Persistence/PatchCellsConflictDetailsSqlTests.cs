@@ -168,7 +168,16 @@ public sealed class PatchCellsConflictDetailsSqlTests(SqlServerFixture sql)
             Denies = new HashSet<string>(), RoleIds = new HashSet<int>(),
         };
         access.BuildProfileAsync(userId, Arg.Any<CancellationToken>()).Returns(profile);
-        access.CanEditSliceAsync(Arg.Any<AccessProfile>(), doc.TableInstanceId, Arg.Any<CancellationToken>())
+        access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
+            .Returns(EditDecision.Allow());
+        // S6: межі читання — «бачить усе»; про заборони — DenyReadTests (Api).
+        access.ReadScopeAsync(Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
+            .Returns(ReadScopes.Everything(snapshot));
+        // ⚠ WR-03: `EnsureAccessAsync` тепер запитує лише адреси батчу через
+        // `CanEditCellsAsync`, не весь зріз через `CanEditSliceAsync`.
+        access.CanEditCellsAsync(
+                  Arg.Any<AccessProfile>(), doc.TableInstanceId, Arg.Any<PeriodKey>(),
+                  Arg.Any<IReadOnlyCollection<CellAddress>>(), Arg.Any<CancellationToken>())
               .Returns(doc.RowIds
                   .SelectMany(rowId => doc.ColumnDefIds
                       .Select(columnId => new CellAddress(doc.PeriodKey, rowId, columnId)))
@@ -197,7 +206,7 @@ public sealed class PatchCellsConflictDetailsSqlTests(SqlServerFixture sql)
         return new PatchCellsHandler(
             cellStore, rowStore, documentStore, periods, metadata, access,
             new Ecr.Application.Validation.ValidationEngine(new RealFormulaEngine()),
-            methodologies, registries, headers, auditWriter, auditReader, jobs, uow, user, clock);
+            methodologies, registries, headers, auditWriter, auditReader, jobs, uow, user, clock, new SheetEditGate(db), new Ecr.Infrastructure.Persistence.UnitCatalog(db));
     }
 
     private static ColumnDef ColumnDefFor(TestDocument doc, int ordinal, CellDataType type)

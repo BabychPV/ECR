@@ -25,7 +25,7 @@ const AdminMeResponse = {
   userId: 1,
   userName: 'tester',
   language: 'en',
-  permissions: ['Template.Edit', 'Registry.View'],
+  permissions: ['Template.View', 'Registry.View'],
   isSimulation: false,
   mustChangePassword: false,
 };
@@ -119,7 +119,7 @@ describe('AppLayout — навбар прогріває маршрут за на
     await import('@/pages/admin/TemplatesPage');
   });
 
-  it('користувач БЕЗ права Template.Edit не бачить пункт "Templates" узагалі — прогрівати нічого', async () => {
+  it('користувач БЕЗ права Template.View не бачить пункт "Templates" узагалі — прогрівати нічого', async () => {
     const fetchMock = vi.fn();
     stubFetch(OperatorMeResponse, fetchMock);
 

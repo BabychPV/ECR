@@ -16,14 +16,24 @@ namespace Ecr.Application.Documents;
 /// будь-який розумний HTTP-таймаут. Синхронний експорт працював би на
 /// демонстрації і відвалювався б у останній день періоду, коли його
 /// запускають усі одразу.
+///
+/// ⛔ S20 (аудит безпеки): замовлення експорту — подія <see cref="EventType"/>
+/// у журналі безпеки: хто, який документ, формат і межі S6 — лише КІЛЬКІСТЬ
+/// прихованих таблиць і колонок, без назв (назви прихованого — те саме, що
+/// приховано). Доти вивантаження документа цілком не лишало сліду.
 /// </remarks>
 public sealed class ExportDocumentHandler(
     IBackgroundJobScheduler jobs,
     IAccessDecisionService access,
-    ICurrentUser currentUser)
+    ICurrentUser currentUser,
+    IAuditWriter audit,
+    Ecr.Domain.Abstractions.IClock clock)
 {
     /// <summary>Право на експорт (`02-contracts.md` §9).</summary>
     public const string Permission = "Document.Export";
+
+    /// <summary>Тип події в <c>aud.SecurityEvent</c>.</summary>
+    public const string EventType = "DocumentExportRequested";
 
     /// <summary>Ставить експорт у чергу.</summary>
     /// <param name="documentId">Документ.</param>
@@ -37,7 +47,7 @@ public sealed class ExportDocumentHandler(
         ArgumentNullException.ThrowIfNull(options);
 
         var profile = await Security.PermissionCheck
-            .RequireAsync(access, currentUser, Permission, ct)
+            .RequireInAnyProjectAsync(access, currentUser, Permission, ct)
             .ConfigureAwait(false);
 
         var normalized = DocumentExportFormat.Normalize(format)
@@ -55,18 +65,20 @@ public sealed class ExportDocumentHandler(
         // користувач узагалі вивантажує документи»; грант каже, ЯКІ. Без
         // другої перевірки право `Document.Export`, видане роллю `DataEntry`,
         // відкривало б будь-який проєкт.
-        var read = await access.CanReadDocumentAsync(profile, documentId, ct).ConfigureAwait(false);
-        if (!read.IsAllowed)
+        // ⛔ B-08: невидимий документ — 404, як неіснуючий (`DocumentVisibility`).
+        await DocumentVisibility.RequireVisibleAsync(access, profile, documentId, Permission, ct).ConfigureAwait(false);
+
+        // ⛔ S6 (ФВ-6.6): заборона на аркуш, таблицю й колонку діє й на
+        // вивантаження. Задача в черзі не знає користувача, тож межі читання
+        // рахуються ТУТ, з профілю, і їдуть у завданні. Перезаписуються завжди —
+        // що б не прийшло від викликача.
+        var readable = (await access.ReadScopeAsync(profile, documentId, ct).ConfigureAwait(false))
+            .InPeriod(new Ecr.Domain.ValueObjects.PeriodKey(options.PeriodKey));
+        options = options with
         {
-            throw new Errors.AccessDeniedException(
-                "ECR-AUTH-0403", $"Немає доступу до документа {documentId}: {read.Reason}.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-AUTH-0403.noDocumentAccess",
-                    ["documentId"] = documentId.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                    ["reason"] = read.Reason.ToString(),
-                });
-        }
+            HiddenTableDefIds = readable.HiddenTableIds(),
+            HiddenColumnDefIds = readable.HiddenColumnIds(),
+        };
 
         // ⚠ Ідентифікатор файлу створюється ТУТ і йде в завданні. Ключ
         // сховища не може дорівнювати jobId: той повертає черга вже після
@@ -76,10 +88,38 @@ public sealed class ExportDocumentHandler(
         // ⚠ `createdByUserId` — щоб автор прочитав стан ВЛАСНОЇ задачі без
         // System.ViewHealth (Q-156). CSV/JSON ідуть ТІЄЮ САМОЮ задачею, що й
         // xlsx: той самий прогрес, `exportId` і завантаження.
-        return await jobs
+        // ⛔ S6: замовник їде й у завданні — задача кладе файл під ним, і
+        // завантажити його може лише він (`DownloadExportHandler`): межі
+        // читання в файлі — ЙОГО межі, а не того, хто дізнався `exportId`.
+        var requestedBy = currentUser.UserId ?? profile.UserId;
+
+        var jobId = await jobs
             .EnqueueAsync<IExcelExportJob>(
-                new ExcelExportTask(documentId, options, exportId, normalized), ct, currentUser.UserId)
+                new ExcelExportTask(documentId, options, exportId, normalized, requestedBy), ct, currentUser.UserId)
             .ConfigureAwait(false);
+
+        // ⚠ ПІСЛЯ постановки: запис «експорт замовлено» без задачі в черзі
+        // брехав би про вивантаження, якого не буде.
+        await audit.WriteSecurityEventAsync(
+            new SecurityEventRecord(
+                clock.UtcNow,
+                EventType,
+                TargetUserId: null,
+                TargetRoleId: null,
+                System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    documentId,
+                    format = normalized,
+                    periodKey = options.PeriodKey,
+                    jobId,
+                    hiddenTableCount = options.HiddenTableDefIds?.Count ?? 0,
+                    hiddenColumnCount = options.HiddenColumnDefIds?.Count ?? 0,
+                }),
+                requestedBy,
+                currentUser.CorrelationId),
+            ct).ConfigureAwait(false);
+
+        return jobId;
     }
 }
 
@@ -88,8 +128,15 @@ public sealed class ExportDocumentHandler(
 /// <param name="Options">Режим експорту разом із періодом.</param>
 /// <param name="ExportId">Ключ, під яким задача покладе готову книгу.</param>
 /// <param name="Format">Формат; <c>null</c> у завданнях, поставлених до ФВ-4.2, — це xlsx.</param>
+/// <param name="RequestedByUserId">
+/// Хто замовив експорт — S6: лише він і завантажить готовий файл
+/// (<see cref="DownloadExportHandler"/>). <c>null</c> лише в завданні,
+/// поставленому до цієї правки; така задача відмовляє, а не кладе файл,
+/// який не має власника.
+/// </param>
 public sealed record ExcelExportTask(
-    long DocumentId, ExcelExportOptions Options, string ExportId, string? Format = DocumentExportFormat.Xlsx);
+    long DocumentId, ExcelExportOptions Options, string ExportId, string? Format = DocumentExportFormat.Xlsx,
+    int? RequestedByUserId = null);
 
 /// <summary>
 /// Попередній перегляд імпорту. Право <c>Document.Import</c>.
@@ -123,21 +170,11 @@ public sealed class PreviewImportHandler(
     public async Task<ImportPreview> HandleAsync(long documentId, Stream file, CancellationToken ct)
     {
         var profile = await Security.PermissionCheck
-            .RequireAsync(access, currentUser, Permission, ct)
+            .RequireInAnyProjectAsync(access, currentUser, Permission, ct)
             .ConfigureAwait(false);
 
-        var read = await access.CanReadDocumentAsync(profile, documentId, ct).ConfigureAwait(false);
-        if (!read.IsAllowed)
-        {
-            throw new Errors.AccessDeniedException(
-                "ECR-AUTH-0403", $"Немає доступу до документа {documentId}: {read.Reason}.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-AUTH-0403.noDocumentAccess",
-                    ["documentId"] = documentId.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                    ["reason"] = read.Reason.ToString(),
-                });
-        }
+        // ⛔ B-08: невидимий документ — 404, як неіснуючий (`DocumentVisibility`).
+        await DocumentVisibility.RequireVisibleAsync(access, profile, documentId, Permission, ct).ConfigureAwait(false);
 
         // ⚠ Синхронно, попри розмір файлу: користувач стоїть над результатом і
         // без нього не може зробити наступний крок. Перегляд у фоні означав би
@@ -196,29 +233,29 @@ public sealed class ApplyImportHandler(
         long documentId, string previewToken, CancellationToken ct)
     {
         var profile = await Security.PermissionCheck
-            .RequireAsync(access, currentUser, Permission, ct)
+            .RequireInAnyProjectAsync(access, currentUser, Permission, ct)
             .ConfigureAwait(false);
 
-        var read = await access.CanReadDocumentAsync(profile, documentId, ct).ConfigureAwait(false);
-        if (!read.IsAllowed)
-        {
-            throw new Errors.AccessDeniedException(
-                "ECR-AUTH-0403", $"Немає доступу до документа {documentId}: {read.Reason}.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-AUTH-0403.noDocumentAccess",
-                    ["documentId"] = documentId.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                    ["reason"] = read.Reason.ToString(),
-                });
-        }
+        // ⛔ B-08: невидимий документ — 404, як неіснуючий (`DocumentVisibility`).
+        await DocumentVisibility.RequireVisibleAsync(access, profile, documentId, Permission, ct).ConfigureAwait(false);
 
         var pendingCount = await importer.CountPendingChangesAsync(previewToken, ct).ConfigureAwait(false);
 
         if (pendingCount > LargeImportThreshold)
         {
+            // ⛔ F-01: автор — у завданні. Задача виконується поза HTTP-запитом,
+            // і без нього запис комірок бачив «анонімного» користувача та падав
+            // на `ECR-AUTH-0401` щоразу, не застосувавши нічого.
+            var actor = new JobActor(
+                currentUser.UserId ?? profile.UserId,
+                currentUser.UserName,
+                currentUser.Language,
+                [.. currentUser.GroupSids],
+                currentUser.CorrelationId);
+
             var jobId = await jobs
                 .EnqueueAsync<IExcelImportJob>(
-                    new ExcelImportTask(documentId, previewToken), ct, currentUser.UserId)
+                    new ExcelImportTask(documentId, previewToken, actor), ct, currentUser.UserId)
                 .ConfigureAwait(false);
 
             return ImportApplyResult.Queued(jobId);
@@ -260,4 +297,9 @@ public sealed record ImportApplyResult
 /// <summary>Завдання застосування великого імпорту у фоні.</summary>
 /// <param name="DocumentId">Документ.</param>
 /// <param name="PreviewToken">Токен раніше побудованого diff.</param>
-public sealed record ExcelImportTask(long DocumentId, string PreviewToken);
+/// <param name="Actor">
+/// Хто поставив задачу — від його імені вона й пише (F-01); <c>null</c> лише в
+/// завданні, поставленому до цієї правки, і таке завдання відмовляє
+/// <c>ECR-AUTH-0401</c>, як і досі.
+/// </param>
+public sealed record ExcelImportTask(long DocumentId, string PreviewToken, JobActor? Actor = null);

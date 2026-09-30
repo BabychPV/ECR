@@ -57,6 +57,13 @@ public sealed class SequenceTests(SqlServerFixture sql)
         var loader = new BulkCellLoader(sql.ConnectionString, 1000);
         const int BatchSize = 10_000;
 
+        // ⚠ Прогрів: у ще не використаної послідовності current_value
+        // дорівнює START WITH (1), хоча жодного значення не видано, — і
+        // «до» виходить на одиницю більшим за справжнє. Фікстура щоразу
+        // створює базу наново, тож на першому тесті колекції це падало від
+        // порядку тестів, а не від продукту.
+        await loader.ReserveIdsAsync("doc.TableRowSeq", 1, CancellationToken.None);
+
         var before = await CurrentValueAsync("doc.TableRowSeq");
         await loader.ReserveIdsAsync("doc.TableRowSeq", BatchSize, CancellationToken.None);
         var after = await CurrentValueAsync("doc.TableRowSeq");

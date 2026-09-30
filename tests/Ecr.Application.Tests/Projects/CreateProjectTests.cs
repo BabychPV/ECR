@@ -6,6 +6,7 @@ using Ecr.Application.Security;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Documents;
 using Ecr.Domain.Enums;
+using Ecr.Domain.Errors;
 using Ecr.Domain.ValueObjects;
 using Ecr.TestKit;
 using NSubstitute;
@@ -68,6 +69,13 @@ public sealed class CreateProjectTests
                 Permissions: ["Project.Manage"], DangerousPermissions: [])]);
         _users.ListGrantsAsync(ManagerRoleId, Arg.Any<CancellationToken>())
             .Returns(new List<ResourceGrantDto>());
+
+        // Грант власності йде транзакцією під UPDLOCK на рядку ролі: без цих
+        // двох налаштувань NSubstitute не виконав би замикання й «не знайшов»
+        // би роль.
+        _users.LockRoleForUpdateAsync(ManagerRoleId, Arg.Any<CancellationToken>()).Returns(true);
+        _uow.ExecuteInTransactionAsync(Arg.Any<Func<CancellationToken, Task>>(), Arg.Any<CancellationToken>())
+            .Returns(call => call.ArgAt<Func<CancellationToken, Task>>(0)(call.ArgAt<CancellationToken>(1)));
 
         // ⛔ T6/#37: обробник тепер ЗАВАНТАЖУЄ політику (щоб узяти
         // `YearGraceOffsetDays`), а не лише перевіряє, що ідентифікатор
@@ -181,6 +189,7 @@ public sealed class CreateProjectTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Requirement", "ФВ-1.8")]
     public async Task Річний_грейс_береться_з_обраної_політики_а_не_з_45_T6_37()
     {
         // ⛔ T6/#37. До цього `Project.YearGraceOffsetDays` стояв літералом
@@ -228,8 +237,12 @@ public sealed class CreateProjectTests
                     PeriodKind.Monthly, year: 2026, templateVersionId: 0, periodPolicyId: PolicyId,
                     CancellationToken.None));
 
-        Assert.Equal("ECR-TMPL-0404", error.ErrorCode);
-        Assert.Equal("err.ECR-TMPL-0404.versionRequired", error.Details!["messageKey"]);
+        // B-19: був "ECR-TMPL-0404" (404 за §7), хоча кидається
+        // BusinessRuleException, що без власного арма в Map доїжджає як 422 —
+        // код обіцяв 404, відповідь несла 422. TemplateInvalid (0422) прибирає
+        // розбіжність: причина — не "не знайдено", а незаповнене поле форми.
+        Assert.Equal(ErrorCodes.TemplateInvalid, error.ErrorCode);
+        Assert.Equal("err.ECR-TMPL-0422.versionRequired", error.Details!["messageKey"]);
         await _periods.DidNotReceiveWithAnyArgs().AddProjectAsync(null!, default);
     }
 

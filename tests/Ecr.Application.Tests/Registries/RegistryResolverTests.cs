@@ -162,7 +162,8 @@ public sealed class RegistryResolverTests
     {
         var entry = Entry(101, Permits, "PERMIT_A");
         _registries.FindEntryAsync(101, Arg.Any<CancellationToken>()).Returns(entry);
-        _registries.CountReferencesAsync(101, Arg.Any<CancellationToken>()).Returns(17);
+        _registries.CountReferencesAsync(101, Arg.Any<CancellationToken>())
+            .Returns(RegistryEntryReferences.None with { Cells = 17 });
 
         /*
          * ⚠ Довідник тепер читається ДО видалення: обробник звіряє код зі
@@ -193,7 +194,7 @@ public sealed class RegistryResolverTests
             .Returns(call => call.ArgAt<Func<CancellationToken, Task>>(0)(call.ArgAt<CancellationToken>(1)));
 
         // Без посилань — видалення логічне і проходить.
-        _registries.CountReferencesAsync(101, Arg.Any<CancellationToken>()).Returns(0);
+        _registries.CountReferencesAsync(101, Arg.Any<CancellationToken>()).Returns(RegistryEntryReferences.None);
         await handler.HandleAsync("PERMITS", 101, CancellationToken.None);
         Assert.True(entry.IsDeleted);
 
@@ -220,7 +221,7 @@ public sealed class RegistryResolverTests
         _registries.FindDefinitionByIdAsync(Permits, Arg.Any<CancellationToken>()).Returns(definition);
         _registries.FindEntryByCodeAsync(Permits, "PERMIT_A", Arg.Any<CancellationToken>()).Returns(duplicate);
 
-        var handler = new UpsertRegistryEntryHandler(_registries, _uow, _audit, _access, _user, _clock);
+        var handler = new UpsertRegistryEntryHandler(_registries, _access, _user, new RegistryEntryWriter(_registries, _uow, _audit, _user, _clock));
 
         var error = await Assert.ThrowsAsync<BusinessRuleException>(() => handler.HandleAsync(
             new RegistryEntryUpsertDto(
@@ -247,7 +248,7 @@ public sealed class RegistryResolverTests
 
         var before = definition.DataRevision;
 
-        await new UpsertRegistryEntryHandler(_registries, _uow, _audit, _access, _user, _clock).HandleAsync(
+        await new UpsertRegistryEntryHandler(_registries, _access, _user, new RegistryEntryWriter(_registries, _uow, _audit, _user, _clock)).HandleAsync(
             new RegistryEntryUpsertDto(
                 Id: 101, RegistryDefId: Permits, Code: "PERMIT_A",
                 Display: Text("Дозвіл A (перейменований)"),

@@ -2,6 +2,7 @@ import type { JSX } from 'react';
 import { Alert, Button, Group, NumberInput, Select, Stack, Switch, TextInput } from '@mantine/core';
 import { t } from '@/shared/i18n';
 import { LocalizedInput } from '@/shared/ui/LocalizedInput';
+import { rowKindLabel } from './enumLabels';
 import { type RowBlocker, type RowDraft, RowKindOptions, whyCannotSaveRow } from './row';
 
 /**
@@ -46,7 +47,7 @@ export function RowEditor({
       <Select
         label={t('rows.rowKind')}
         description={t('rows.rowKindHint')}
-        data={RowKindOptions}
+        data={RowKindOptions.map((kind) => ({ value: kind, label: rowKindLabel(kind) }))}
         value={draft.rowKind}
         disabled={disabled || !draft.isNew}
         allowDeselect={false}

@@ -59,7 +59,15 @@ public sealed class FormulaDef : Entity<int>
         {
             throw new DomainException(
                 "ECR-TMPL-0422",
-                $"Формулу з областю {Scope} не можна прив'язати до колонки: очікується Column.");
+                $"Формулу з областю {Scope} не можна прив'язати до колонки: очікується Column.",
+                new Dictionary<string, object?>
+                {
+                    // ⚠ Один ключ на обидва напрямки (AssignColumn/AssignRow нижче) —
+                    // той самий факт «спробували прив'язати формулу не до тієї цілі».
+                    ["messageKey"] = "err.ECR-TMPL-0422.formulaAssignScopeMismatch",
+                    ["scope"] = Scope.ToString(),
+                    ["expectedScope"] = nameof(FormulaScope.Column),
+                });
         }
 
         ColumnDefId = columnDefId;
@@ -75,7 +83,13 @@ public sealed class FormulaDef : Entity<int>
         {
             throw new DomainException(
                 "ECR-TMPL-0422",
-                $"Формулу з областю {Scope} не можна прив'язати до рядка: очікується Row.");
+                $"Формулу з областю {Scope} не можна прив'язати до рядка: очікується Row.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-TMPL-0422.formulaAssignScopeMismatch",
+                    ["scope"] = Scope.ToString(),
+                    ["expectedScope"] = nameof(FormulaScope.Row),
+                });
         }
 
         RowDefId = rowDefId;

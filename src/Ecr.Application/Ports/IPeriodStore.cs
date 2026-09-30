@@ -35,6 +35,18 @@ public interface IPeriodStore
     /// <summary>Додає нову політику періодів (T6/#37).</summary>
     public void AddPolicy(PeriodPolicy policy);
 
+    /// <summary>
+    /// Проєкти, що використовують політику періодів (S19): зміна її зсувів
+    /// зсуває межі періодів УСІХ цих проєктів.
+    /// </summary>
+    /// <param name="periodPolicyId">Політика.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ Без межі навмисно: перелік — підстава для перевірки прав, і
+    /// обрізаний перелік пропустив би проєкт без гранта.
+    /// </remarks>
+    public Task<IReadOnlyList<int>> ListProjectIdsUsingPolicyAsync(int periodPolicyId, CancellationToken ct);
+
     /// <summary>Період із <c>UPDLOCK</c> до кінця транзакції.</summary>
     public Task<Period?> LockAsync(int periodId, CancellationToken ct);
 

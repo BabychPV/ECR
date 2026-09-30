@@ -98,13 +98,27 @@ public sealed class AuditReader(EcrDbContext db) : IAuditReader
             where.Append("\n                   AND IsLateEdit = 1");
         }
 
+        // ⚠ `R-18`: імена — ПІСЛЯ вибору сторінки, у зовнішньому запиті. Вікно й
+        // курсор лишаються дослівно тими самими над самою `aud.CellChange`
+        // (відсікання партицій), а три LEFT JOIN торкаються лише `@take` рядків.
+        // LEFT, а не INNER: видалений автор, документ чи колонка не мають права
+        // ховати сам факт зміни — журнал append-only.
         command.CommandText = $"""
-            SELECT TOP (@take)
-                   Id, ChangedAt, PeriodKey, DocumentId, RowKey, ColumnDefId,
-                   OldValue, NewValue, ChangedByUserId, Origin, IsLateEdit
-              FROM aud.CellChange
-             WHERE {where}
-             ORDER BY Id;
+            SELECT a.Id, a.ChangedAt, a.PeriodKey, a.DocumentId, a.RowKey, a.ColumnDefId,
+                   a.OldValue, a.NewValue, a.ChangedByUserId, a.Origin, a.IsLateEdit,
+                   u.DisplayName, d.BusinessKey, d.NameL10n, c.Code, c.HeaderL10n, c.DataType
+              FROM (
+                    SELECT TOP (@take)
+                           Id, ChangedAt, PeriodKey, DocumentId, RowKey, ColumnDefId,
+                           OldValue, NewValue, ChangedByUserId, Origin, IsLateEdit
+                      FROM aud.CellChange
+                     WHERE {where}
+                     ORDER BY Id
+                   ) AS a
+              LEFT JOIN sec.[User] AS u ON u.Id = a.ChangedByUserId
+              LEFT JOIN doc.Document AS d ON d.Id = a.DocumentId
+              LEFT JOIN cfg.ColumnDef AS c ON c.Id = a.ColumnDefId
+             ORDER BY a.Id;
             """;
 
         command.Parameters.AddWithValue("@take", page.Limit + 1);
@@ -132,7 +146,15 @@ public sealed class AuditReader(EcrDbContext db) : IAuditReader
                         // не існує взагалі (R-A2, D-86).
                         reader.GetInt32(8),
                         reader.GetString(9),
-                        reader.GetBoolean(10))));
+                        reader.GetBoolean(10),
+                        StringOrNull(reader, 11),
+                        StringOrNull(reader, 12),
+                        LocalizedOrNull(reader, 13),
+                        StringOrNull(reader, 14),
+                        LocalizedOrNull(reader, 15),
+                        reader.IsDBNull(16)
+                            ? null
+                            : ((Ecr.Domain.Enums.CellDataType)reader.GetByte(16)).ToString())));
             }
         }
 
@@ -177,12 +199,13 @@ public sealed class AuditReader(EcrDbContext db) : IAuditReader
 
         command.CommandText = $"""
             SELECT TOP (@take)
-                   ChangedAt, EntityType, EntityId, Operation,
-                   OldJson, NewJson, ChangeReason, ChangedByUserId
-              FROM aud.StructureChange
-             WHERE EntityType IN ({string.Join(", ", names)})
-                   AND EntityId = @entityId
-             ORDER BY ChangedAt DESC, Id DESC;
+                   s.ChangedAt, s.EntityType, s.EntityId, s.Operation,
+                   s.OldJson, s.NewJson, s.ChangeReason, s.ChangedByUserId, u.DisplayName
+              FROM aud.StructureChange AS s
+              LEFT JOIN sec.[User] AS u ON u.Id = s.ChangedByUserId
+             WHERE s.EntityType IN ({string.Join(", ", names)})
+                   AND s.EntityId = @entityId
+             ORDER BY s.ChangedAt DESC, s.Id DESC;
             """;
 
         command.Parameters.AddWithValue("@take", limit);
@@ -200,7 +223,8 @@ public sealed class AuditReader(EcrDbContext db) : IAuditReader
                 reader.IsDBNull(4) ? null : reader.GetString(4),
                 reader.IsDBNull(5) ? null : reader.GetString(5),
                 reader.IsDBNull(6) ? null : reader.GetString(6),
-                reader.GetInt32(7)));
+                reader.GetInt32(7),
+                StringOrNull(reader, 8)));
         }
 
         return rows;
@@ -220,14 +244,22 @@ public sealed class AuditReader(EcrDbContext db) : IAuditReader
 
         var where = StructureJournalWhere(command, filter);
 
+        // ⚠ `R-18`: ім'я автора — у зовнішньому запиті, після вибору сторінки
+        // (та сама причина, що в `ReadCellChangesAsync`).
         command.CommandText = $"""
-            SELECT TOP (@take)
-                   Id, ChangedAt, EntityType, EntityId, Operation,
-                   OldJson, NewJson, ChangeReason, ChangedByUserId
-              FROM aud.StructureChange
-             WHERE {where}
-               AND Id > @after
-             ORDER BY Id;
+            SELECT s.Id, s.ChangedAt, s.EntityType, s.EntityId, s.Operation,
+                   s.OldJson, s.NewJson, s.ChangeReason, s.ChangedByUserId, u.DisplayName
+              FROM (
+                    SELECT TOP (@take)
+                           Id, ChangedAt, EntityType, EntityId, Operation,
+                           OldJson, NewJson, ChangeReason, ChangedByUserId
+                      FROM aud.StructureChange
+                     WHERE {where}
+                       AND Id > @after
+                     ORDER BY Id
+                   ) AS s
+              LEFT JOIN sec.[User] AS u ON u.Id = s.ChangedByUserId
+             ORDER BY s.Id;
             """;
 
         command.Parameters.Add("@take", SqlDbType.Int).Value = page.Limit + 1;
@@ -248,7 +280,8 @@ public sealed class AuditReader(EcrDbContext db) : IAuditReader
                         reader.IsDBNull(5) ? null : reader.GetString(5),
                         reader.IsDBNull(6) ? null : reader.GetString(6),
                         reader.IsDBNull(7) ? null : reader.GetString(7),
-                        reader.GetInt32(8))));
+                        reader.GetInt32(8),
+                        StringOrNull(reader, 9))));
             }
         }
 
@@ -425,6 +458,22 @@ public sealed class AuditReader(EcrDbContext db) : IAuditReader
                    ) AS l
               LEFT JOIN sec.[User] AS u ON u.Id = l.ChangedByUserId;
             """;
+    }
+
+    private static string? StringOrNull(SqlDataReader reader, int ordinal)
+        => reader.IsDBNull(ordinal) ? null : reader.GetString(ordinal);
+
+    /// <summary>Локалізований текст із JSON-колонки; порожній або відсутній — <c>null</c>.</summary>
+    private static Ecr.Domain.ValueObjects.LocalizedText? LocalizedOrNull(SqlDataReader reader, int ordinal)
+    {
+        if (reader.IsDBNull(ordinal))
+        {
+            return null;
+        }
+
+        var text = Ecr.Domain.ValueObjects.LocalizedText.FromJson(reader.GetString(ordinal));
+
+        return text.Values.Count == 0 ? null : text;
     }
 
     /// <summary>Формат дати для повідомлень; не для запитів.</summary>

@@ -9,6 +9,7 @@ using Ecr.Infrastructure.Persistence;
 using Ecr.Infrastructure.Reporting;
 using Ecr.TestKit;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 using NSubstitute;
 using Xunit;
 
@@ -70,7 +71,7 @@ public sealed class ReportSnapshotStoredFormatTests(SqlServerFixture sql)
 
         await using (var db = chain.CreateContext())
         {
-            var job = new ReportSnapshotFormatJob(db, new ReportSnapshotBuilder(db, new TestClock(Now)), new TestClock(Now));
+            var job = new ReportSnapshotFormatJob(db, new ReportSnapshotBuilder(db, new TestClock(Now), new MemoryCache(new MemoryCacheOptions())), new TestClock(Now));
             await job.ExecuteAsync(null, Substitute.For<IJobProgress>(), CancellationToken.None);
         }
 
@@ -110,7 +111,7 @@ public sealed class ReportSnapshotStoredFormatTests(SqlServerFixture sql)
     private static async Task<SnapshotVerifyResponse> VerifyAsync(TestDocumentBuilder chain, long id)
     {
         await using var db = chain.CreateContext();
-        var builder = new ReportSnapshotBuilder(db, new TestClock(Now));
+        var builder = new ReportSnapshotBuilder(db, new TestClock(Now), new MemoryCache(new MemoryCacheOptions()));
         var (access, user) = await ViewerAsync(builder, id);
 
         return await new VerifyReportSnapshotHandler(builder, access, user).HandleAsync(id, CancellationToken.None);
@@ -125,7 +126,7 @@ public sealed class ReportSnapshotStoredFormatTests(SqlServerFixture sql)
             .AddInterceptors(counter)
             .Options);
 
-        var builder = new ReportSnapshotBuilder(db, new TestClock(Now));
+        var builder = new ReportSnapshotBuilder(db, new TestClock(Now), new MemoryCache(new MemoryCacheOptions()));
         var (access, user) = await ViewerAsync(builder, id);
         var projectId = (await builder.FindProjectIdAsync(id, CancellationToken.None))!.Value;
 

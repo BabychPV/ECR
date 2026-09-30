@@ -41,6 +41,11 @@
 
 > Виконується **окремими скриптами під SQL Agent**, не міграціями EF: у
 > застосунку немає DDL-прав у прод (`D-66`).
+>
+> ⛔ Скрипт міграцій EF, що йде між цими скриптами, генерується **лише з
+> `--idempotent`** (`deploy-ecr.ps1`, `build-installer.ps1`, `setup-dev-db.ps1`):
+> `RK02RegistryComposition` додає колонку й `CHECK` на неї в одному пакеті, і без
+> `--idempotent` (там EF не обгортає `CHECK` в `EXEC`) скрипт падає з `Msg 207`.
 
 ### 1.0 Зіставлення бази — вимога до `CREATE DATABASE`
 
@@ -532,6 +537,7 @@ CREATE TABLE cfg.ColumnDef
     CONSTRAINT UQ_ColumnDef_ForFk UNIQUE (TableDefId, Id),
     CONSTRAINT FK_ColumnDef_Table FOREIGN KEY (TableDefId) REFERENCES cfg.TableDef (Id),
     CONSTRAINT FK_ColumnDef_Cascade FOREIGN KEY (CascadeFromColumnId) REFERENCES cfg.ColumnDef (Id),
+    -- FK_ColumnDef_Unit (UnitId → uom.Unit) — ALTER TABLE після uom.Unit.
     CONSTRAINT CK_ColumnDef_Month CHECK (IsMonthColumn = 0 OR MonthNumber BETWEEN 1 AND 12),
     CONSTRAINT CK_ColumnDef_Lookup CHECK (DataType <> 5 OR LookupRegistryDefId IS NOT NULL)
 );
@@ -734,6 +740,13 @@ CREATE TABLE cfg.RegistryDef
     DataRevision     int           NOT NULL CONSTRAINT DF_RegDef_Rev  DEFAULT(0),
     DefinitionVersion int          NOT NULL CONSTRAINT DF_RegDef_Ver  DEFAULT(1),
     IsActive         bit           NOT NULL CONSTRAINT DF_RegDef_Act  DEFAULT(1),
+    -- RK02 (D-157): 0 Manual, 1 Auto — код запису «E» + 9 цифр
+    -- dic.RegistryEntryCodeSeq. Задається лише при створенні довідника.
+    CodeMode         tinyint       NOT NULL CONSTRAINT DF_RegDef_CodeMode DEFAULT(0),
+    -- RK02 (D-163): момент останнього зростання DataRevision. Ставить
+    -- UnitOfWork, а не обробники; NULL — даних не змінювали після міграції.
+    -- Свіжість результату розрахунку порівнює його з початком прогону.
+    DataChangedAt    datetime2(3)  NULL,
     CONSTRAINT PK_RegistryDef PRIMARY KEY (Id),
     CONSTRAINT UQ_RegistryDef UNIQUE (Code)
 );
@@ -751,10 +764,20 @@ CREATE TABLE cfg.RegistryFieldDef
     IsKey          bit           NOT NULL CONSTRAINT DF_RegField_Key DEFAULT(0),
     UnitId         int           NULL,       -- одиниця поля (ФВ-16.1)
     RefRegistryDefId int         NULL,       -- вкладений реєстр / M:N
+    -- RK02 (D-155): композиція — ознака Lookup-поля; обидва задаються лише
+    -- при створенні поля.
+    RelationKind   tinyint       NOT NULL CONSTRAINT DF_RegField_Rel   DEFAULT(0), -- 0 Reference, 1 Composition
+    OnParentDelete tinyint       NOT NULL CONSTRAINT DF_RegField_OnDel DEFAULT(0), -- 0 Restrict, 1 Cascade
     CONSTRAINT PK_RegistryFieldDef PRIMARY KEY (Id),
     CONSTRAINT UQ_RegistryFieldDef UNIQUE (RegistryDefId, Code),
     CONSTRAINT FK_RegField_Reg  FOREIGN KEY (RegistryDefId)    REFERENCES cfg.RegistryDef (Id),
-    CONSTRAINT FK_RegField_Ref  FOREIGN KEY (RefRegistryDefId) REFERENCES cfg.RegistryDef (Id)
+    CONSTRAINT FK_RegField_Ref  FOREIGN KEY (RefRegistryDefId) REFERENCES cfg.RegistryDef (Id),
+    -- FK_RegField_Unit (UnitId → uom.Unit) — ALTER TABLE після uom.Unit.
+    CONSTRAINT CK_RegField_Rel CHECK (RelationKind BETWEEN 0 AND 1 AND OnParentDelete BETWEEN 0 AND 1),
+    -- ⛔ Композиція лише на полі Lookup (DataType = 5): база тримає інваріант і
+    -- для вставок повз домен — інакше «частиною батька» ставало б поле, в
+    -- якому батька немає.
+    CONSTRAINT CK_RegField_Composition CHECK (RelationKind = 0 OR DataType = 5)
 );
 GO
 
@@ -797,6 +820,96 @@ CREATE TABLE cfg.RegistryDefinitionDraft
     RowVersion            rowversion     NOT NULL,
     CONSTRAINT PK_RegistryDefinitionDraft PRIMARY KEY (RegistryDefId),
     CONSTRAINT FK_RegDraft_Registry FOREIGN KEY (RegistryDefId) REFERENCES cfg.RegistryDef (Id)
+);
+GO
+
+-- Складені ключі довідника (FEATURE-REGISTRY-TABLES §3.2, §4.1, міграція
+-- RK01RegistryKeys): упорядкований набір 1–8 полів, комбінація значень яких
+-- унікальна серед живих записів. Склад, IgnoreCase і IsPrimary після
+-- створення не змінюються — інший ключ заводять новим, старий вимикають.
+CREATE TABLE cfg.RegistryKeyDef
+(
+    Id              int           IDENTITY(1,1) NOT NULL,
+    RegistryDefId   int           NOT NULL,
+    Code            nvarchar(64)  NOT NULL,          -- EcrCode: PK, BY_LEGACY_ID
+    NameL10n        nvarchar(max) NOT NULL,
+    IsPrimary       bit           NOT NULL CONSTRAINT DF_RegKey_Pri  DEFAULT(0),
+    IgnoreCase      bit           NOT NULL CONSTRAINT DF_RegKey_Case DEFAULT(1),
+    IsActive        bit           NOT NULL CONSTRAINT DF_RegKey_Act  DEFAULT(1),
+    CreatedAt       datetime2(3)  NOT NULL,
+    CreatedByUserId int           NOT NULL,
+    CONSTRAINT PK_RegistryKeyDef PRIMARY KEY (Id),
+    CONSTRAINT UQ_RegistryKeyDef UNIQUE (RegistryDefId, Code),
+    CONSTRAINT FK_RegKey_Def FOREIGN KEY (RegistryDefId) REFERENCES cfg.RegistryDef (Id)
+);
+GO
+
+-- ⛔ Первинний ключ — рівно один АКТИВНИЙ на довідник: ним шукає REGFIND.
+CREATE UNIQUE INDEX UX_RegistryKeyDef_Primary ON cfg.RegistryKeyDef (RegistryDefId)
+    WHERE IsPrimary = 1 AND IsActive = 1;
+GO
+
+CREATE TABLE cfg.RegistryKeyField
+(
+    RegistryKeyDefId   int     NOT NULL,
+    Ordinal            tinyint NOT NULL,              -- від 1; порядок = порядок аргументів REGFIND
+    RegistryFieldDefId int     NOT NULL,
+    CONSTRAINT PK_RegistryKeyField PRIMARY KEY (RegistryKeyDefId, Ordinal),
+    CONSTRAINT UQ_RegistryKeyField_Field UNIQUE (RegistryKeyDefId, RegistryFieldDefId),
+    CONSTRAINT FK_RegKeyField_Key   FOREIGN KEY (RegistryKeyDefId)   REFERENCES cfg.RegistryKeyDef (Id),
+    CONSTRAINT FK_RegKeyField_Field FOREIGN KEY (RegistryFieldDefId) REFERENCES cfg.RegistryFieldDef (Id)
+);
+GO
+
+-- Хто використовує довідник (FEATURE-REGISTRY-TABLES §3.2, міграція
+-- RK04RegistryUseAndRunAsOf): формула шаблону, формула версії методології або
+-- правило довідника читає довідник цілком чи одне його поле. Похідні дані —
+-- публікація джерела переписує його ребра повністю. SourceId поліморфний, як
+-- cfg.FormulaDependency.SourceKind, тому FK на джерело немає.
+CREATE TABLE cfg.RegistryUse
+(
+    Id            bigint        IDENTITY(1,1) NOT NULL,
+    SourceKind    tinyint       NOT NULL,   -- 0 TemplateFormula (FormulaDefId), 1 MethodologyVersion, 2 RegistryRule
+    SourceId      int           NOT NULL,
+    FormulaCode   nvarchar(64)  NULL,       -- код формули в межах версії методології (SourceKind = 1)
+    RegistryDefId int           NOT NULL,
+    FieldPath     nvarchar(400) NULL,       -- 'COMPONENT.MW'; NULL — довідник цілком (REGFIND/агрегат)
+    CONSTRAINT PK_RegistryUse PRIMARY KEY (Id),
+    -- Вид закритий: ребро невідомого виду не прочитав би жоден споживач
+    -- («Де використано», завантажувач знімка), і довідник виглядав би невикористаним.
+    CONSTRAINT CK_RegUse_Kind CHECK (SourceKind BETWEEN 0 AND 2),
+    CONSTRAINT FK_RegUse_Def FOREIGN KEY (RegistryDefId) REFERENCES cfg.RegistryDef (Id)
+);
+GO
+
+CREATE INDEX IX_RegistryUse_Registry ON cfg.RegistryUse (RegistryDefId)
+    INCLUDE (SourceKind, SourceId, FormulaCode, FieldPath);
+CREATE INDEX IX_RegistryUse_Source ON cfg.RegistryUse (SourceKind, SourceId);
+GO
+
+-- Профілі імпорту довідника (FEATURE-REGISTRY-TABLES §4.6, §8.6, міграція
+-- RK05RegistryImportProfile; D-170): збережена RegistryImportSpec — аркуш,
+-- орієнтація, рядки заголовка, цілі й відображення, — щоб наступна ревізія
+-- HMB імпортувалась у два кліки. Вибір авторитетного стовпця-дубля (D-196,
+-- "duplicateSources": {"CO": "Carbon_Monoxide"}) — частина SpecJson.
+-- Код і довідник після створення не змінюються. RowVersion — If-Match для
+-- зміни й видалення профілю (409 profileChanged, RT-18c).
+CREATE TABLE cfg.RegistryImportProfile
+(
+    Id              int           IDENTITY(1,1) NOT NULL,
+    RegistryDefId   int           NOT NULL,
+    Code            nvarchar(64)  NOT NULL,
+    NameL10n        nvarchar(max) NOT NULL,
+    SpecJson        nvarchar(max) NOT NULL,   -- RegistryImportSpec, JSON-об'єкт
+    UpdatedAt       datetime2(3)  NOT NULL,
+    UpdatedByUserId int           NOT NULL,
+    RowVersion      rowversion    NOT NULL,
+    CONSTRAINT PK_RegistryImportProfile PRIMARY KEY (Id),
+    CONSTRAINT UQ_RegistryImportProfile UNIQUE (RegistryDefId, Code),
+    -- Синтаксис тримає й база: профіль, вставлений повз домен зі зламаним
+    -- JSON, зламав би майстер імпорту тому, хто відкриє його наступним.
+    CONSTRAINT CK_RegImpProfile_Json CHECK (ISJSON(SpecJson) = 1),
+    CONSTRAINT FK_RegImpProfile_Def FOREIGN KEY (RegistryDefId) REFERENCES cfg.RegistryDef (Id)
 );
 GO
 
@@ -869,6 +982,21 @@ GO
 
 ALTER TABLE uom.Dimension
     ADD CONSTRAINT FK_Dim_BaseUnit FOREIGN KEY (BaseUnitId) REFERENCES uom.Unit (Id);
+GO
+
+-- HSE301 U1 (аудит C6 п.1), міграція U1UnitForeignKeys. До неї одиниця колонки
+-- шаблону й поля довідника ключа не мала: видалення одиниці лишало висячий UnitId,
+-- і першим його бачив перерахунок. ON DELETE NO ACTION, як у решти FK на uom.Unit.
+-- ⛔ Міграція перед ADD CONSTRAINT перевіряє висячі UnitId і зупиняється THROW 50301
+-- з переліком (operations-runbook.md §8.2), а не 547; тихого обнулення немає.
+-- Індекс під FK_ColumnDef_Unit — IX_ColumnDef_UnitId (B-18); під FK_RegField_Unit
+-- його немає навмисно: таблиця мала, перевірка ключа сканує її за мілісекунди.
+ALTER TABLE cfg.ColumnDef
+    ADD CONSTRAINT FK_ColumnDef_Unit FOREIGN KEY (UnitId) REFERENCES uom.Unit (Id);
+GO
+
+ALTER TABLE cfg.RegistryFieldDef
+    ADD CONSTRAINT FK_RegField_Unit FOREIGN KEY (UnitId) REFERENCES uom.Unit (Id);
 GO
 
 CREATE UNIQUE INDEX UX_Unit_BasePerDimension
@@ -948,6 +1076,21 @@ CREATE TABLE dic.RegistryEntry
     DeletedByUserId int           NULL,
     CreatedAt       datetime2(3)  NOT NULL,
     CreatedByUserId int           NOT NULL,
+    -- RK03 (D-158): автор ОСТАННЬОЇ зміни рядка; ставить UnitOfWork з ICurrentUser.
+    -- NULL — невідомий (задача без автора, рядок до RK03).
+    ChangedByUserId int           NULL,
+    -- RK03 (D-158): системна історія — dic.RegistryEntryHistory нижче.
+    -- datetime2(3), а не типовий 7 (D-68); HIDDEN — `SELECT *` їх не бачить.
+    -- DEFAULT від SYSUTCDATETIME(): рядки, що були до RK03, отримують момент міграції
+    -- (не 0001-01-01), тож «станом на» раніше за неї — порожньо (FEATURE-REGISTRY-TABLES §3.5).
+    -- ⚠ Мінус 1 с навмисно: datetime2(7) → datetime2(3) округлює вгору, і ADD PERIOD
+    -- на таблиці з рядками падав Msg 13542 «start of period … in the future» (CI, Linux).
+    -- На нові рядки DEFAULT не впливає — GENERATED ALWAYS ставить час сам.
+    PeriodStart     datetime2(3)  GENERATED ALWAYS AS ROW START HIDDEN NOT NULL
+        CONSTRAINT DF_RegEntry_PS DEFAULT DATEADD(second, -1, SYSUTCDATETIME()),
+    PeriodEnd       datetime2(3)  GENERATED ALWAYS AS ROW END   HIDDEN NOT NULL
+        CONSTRAINT DF_RegEntry_PE DEFAULT CONVERT(datetime2(3), '9999-12-31 23:59:59.999'),
+    PERIOD FOR SYSTEM_TIME (PeriodStart, PeriodEnd),
     CONSTRAINT PK_RegistryEntry PRIMARY KEY (Id),
     CONSTRAINT UQ_RegistryEntry UNIQUE (RegistryDefId, Code),
     CONSTRAINT FK_RegEntry_Def    FOREIGN KEY (RegistryDefId) REFERENCES cfg.RegistryDef (Id),
@@ -963,6 +1106,13 @@ CREATE INDEX IX_RegistryEntry_Lookup
     INCLUDE (Code, Ordinal, ValidFrom, ValidTo) ON [INDEXES];
 GO
 
+-- RK02 (D-157): коди записів довідників із CodeMode = 1 (Auto) — «E» + 9 цифр
+-- («E000012345»), бо EcrCode приймає лише латиницю, а природний ключ буває
+-- кириличним. Одна на всі довідники: код унікальний лише в межах довідника,
+-- а послідовність на кожен довідник вимагала б DDL від застосунку (D-66).
+CREATE SEQUENCE dic.RegistryEntryCodeSeq AS bigint START WITH 1 INCREMENT BY 1;
+GO
+
 CREATE TABLE dic.RegistryValue
 (
     Id                  bigint         IDENTITY(1,1) NOT NULL,
@@ -974,6 +1124,12 @@ CREATE TABLE dic.RegistryValue
     ValueBool           bit            NULL,
     ValueRefEntryId     int            NULL,
     ValueUnitId         int            NULL,
+    ChangedByUserId     int            NULL,        -- RK03: як у dic.RegistryEntry
+    PeriodStart         datetime2(3)   GENERATED ALWAYS AS ROW START HIDDEN NOT NULL
+        CONSTRAINT DF_RegValue_PS DEFAULT DATEADD(second, -1, SYSUTCDATETIME()),  -- як DF_RegEntry_PS
+    PeriodEnd           datetime2(3)   GENERATED ALWAYS AS ROW END   HIDDEN NOT NULL
+        CONSTRAINT DF_RegValue_PE DEFAULT CONVERT(datetime2(3), '9999-12-31 23:59:59.999'),
+    PERIOD FOR SYSTEM_TIME (PeriodStart, PeriodEnd),
     CONSTRAINT PK_RegistryValue PRIMARY KEY (Id),
     CONSTRAINT UQ_RegistryValue UNIQUE (RegistryEntryId, RegistryFieldDefId),
     CONSTRAINT FK_RegValue_Entry FOREIGN KEY (RegistryEntryId)    REFERENCES dic.RegistryEntry (Id),
@@ -981,6 +1137,58 @@ CREATE TABLE dic.RegistryValue
     CONSTRAINT FK_RegValue_Ref   FOREIGN KEY (ValueRefEntryId)    REFERENCES dic.RegistryEntry (Id),
     CONSTRAINT FK_RegValue_Unit  FOREIGN KEY (ValueUnitId)        REFERENCES uom.Unit (Id)
 );
+GO
+
+-- RK03RegistryTemporalHistory (D-158, FEATURE-REGISTRY-TABLES §3.2, §3.6): системна
+-- історія. Відтворення прогону читає довідники FOR SYSTEM_TIME AS OF
+-- CalculationRun.RegistryAsOfUtc; історію пише база на КОЖНОМУ шляху запису.
+-- ⚠ Історичні таблиці міграція не створює явно — їх створює сам SQL Server на
+-- SET SYSTEM_VERSIONING = ON, у файловій групі за замовчуванням ([PRIMARY]).
+-- DBA може створити їх заздалегідь у своїй групі (Sql/*.sql) саме такої форми.
+-- ⛔ Над таблицями з історією не працюють TRUNCATE, DROP і ALTER колонок без
+-- SYSTEM_VERSIONING = OFF; DELETE працює (рядок іде в історію). Відкат RK03
+-- історичні таблиці не видаляє, а перейменовує (…_RK03Down_<мітка>, D-25).
+CREATE TABLE dic.RegistryEntryHistory
+(
+    Id              int           NOT NULL,
+    RegistryDefId   int           NOT NULL,
+    Code            nvarchar(100) NOT NULL,
+    DisplayL10n     nvarchar(max) NOT NULL,
+    ParentEntryId   int           NULL,
+    ValidFrom       date          NULL,
+    ValidTo         date          NULL,
+    Ordinal         int           NOT NULL,
+    IsActive        bit           NOT NULL,
+    IsDeleted       bit           NOT NULL,
+    DeletedAt       datetime2(3)  NULL,
+    DeletedByUserId int           NULL,
+    CreatedAt       datetime2(3)  NOT NULL,
+    CreatedByUserId int           NOT NULL,
+    ChangedByUserId int           NULL,
+    PeriodStart     datetime2(3)  NOT NULL,
+    PeriodEnd       datetime2(3)  NOT NULL
+);
+CREATE CLUSTERED INDEX ix_RegistryEntryHistory ON dic.RegistryEntryHistory (PeriodEnd, PeriodStart);
+ALTER TABLE dic.RegistryEntry SET (SYSTEM_VERSIONING = ON (HISTORY_TABLE = dic.RegistryEntryHistory));
+GO
+
+CREATE TABLE dic.RegistryValueHistory
+(
+    Id                  bigint         NOT NULL,
+    RegistryEntryId     int            NOT NULL,
+    RegistryFieldDefId  int            NOT NULL,
+    ValueString         nvarchar(1000) NULL,
+    ValueNumeric        decimal(34,16) NULL,
+    ValueDate           datetime2(3)   NULL,
+    ValueBool           bit            NULL,
+    ValueRefEntryId     int            NULL,
+    ValueUnitId         int            NULL,
+    ChangedByUserId     int            NULL,
+    PeriodStart         datetime2(3)   NOT NULL,
+    PeriodEnd           datetime2(3)   NOT NULL
+);
+CREATE CLUSTERED INDEX ix_RegistryValueHistory ON dic.RegistryValueHistory (PeriodEnd, PeriodStart);
+ALTER TABLE dic.RegistryValue SET (SYSTEM_VERSIONING = ON (HISTORY_TABLE = dic.RegistryValueHistory));
 GO
 
 -- Зв'язки M:N між записами реєстрів (напр. дозвіл ↔ забруднюючі речовини)
@@ -1012,6 +1220,45 @@ CREATE TABLE dic.RegistryExternalKey
     CONSTRAINT UQ_RegistryExternalKey UNIQUE (DataSourceId, ExternalId),
     CONSTRAINT FK_RegExtKey_Entry FOREIGN KEY (RegistryEntryId) REFERENCES dic.RegistryEntry (Id)
 );
+GO
+
+-- Похідні рядки унікальності складених ключів (FEATURE-REGISTRY-TABLES §3.2,
+-- §4.2, міграція RK01RegistryKeys). Відтворювані дані (D-71): будує їх лише
+-- служба ключів зі значень dic.RegistryValue. EAV не дає унікального індексу
+-- на значеннях, тому унікальність тримає SHA-256 канонічного рядка (D-151):
+-- фіксована довжина обходить межу 900 байт ключа індексу.
+CREATE TABLE dic.RegistryEntryKey
+(
+    Id               bigint        IDENTITY(1,1) NOT NULL,
+    RegistryEntryId  int           NOT NULL,
+    RegistryKeyDefId int           NOT NULL,
+    KeyHash          binary(32)    NOT NULL,          -- SHA-256 канонічного рядка (§4.2)
+    KeyText          nvarchar(900) NOT NULL,          -- «1D-2 · 370 Winter» — для повідомлень
+    -- ⛔ NOT NULL навмисно: ISNULL(ValidFrom, '0001-01-01'). Два NULL в
+    -- унікальному індексі SQL Server вважає рівними; сентинел дає
+    -- нетемпоральному довіднику повну унікальність.
+    ValidFromKey     date          NOT NULL,
+    ValidTo          date          NULL,              -- виключна межа, як у dic.RegistryEntry
+    IsLive           bit           NOT NULL,          -- NOT IsDeleted запису
+    CONSTRAINT PK_RegistryEntryKey PRIMARY KEY (Id),
+    CONSTRAINT UQ_RegistryEntryKey_Entry UNIQUE (RegistryKeyDefId, RegistryEntryId),
+    CONSTRAINT FK_RegEntryKey_Entry FOREIGN KEY (RegistryEntryId)  REFERENCES dic.RegistryEntry (Id),
+    CONSTRAINT FK_RegEntryKey_Key   FOREIGN KEY (RegistryKeyDefId) REFERENCES cfg.RegistryKeyDef (Id)
+);
+GO
+
+-- Гарантія бази: другий живий рядок із тим самим (ключ, хеш, початок вікна)
+-- не вставляється; видалений запис (IsLive = 0) ключ звільняє. Для
+-- темпорального довідника гарантія часткова — перетин вікон перевіряє служба
+-- ключів під діапазонним блокуванням (§4.4).
+CREATE UNIQUE INDEX UX_RegistryEntryKey_Live
+    ON dic.RegistryEntryKey (RegistryKeyDefId, KeyHash, ValidFromKey)
+    WHERE IsLive = 1 ON [INDEXES];
+GO
+
+CREATE INDEX IX_RegistryEntryKey_Hash
+    ON dic.RegistryEntryKey (RegistryKeyDefId, KeyHash)
+    INCLUDE (RegistryEntryId, ValidFromKey, ValidTo, IsLive) ON [INDEXES];
 GO
 ```
 
@@ -1361,6 +1608,12 @@ CREATE TABLE calc.MethodologyFormula
     -- Порядок НЕ зберігається: він топологічний і рахується при Publish (ФВ-9.4).
     -- Це поле — результат обчислення, а не введення користувача.
     EvaluationOrder       int            NOT NULL CONSTRAINT DF_MF_Order DEFAULT(0),
+    -- HSE301M3 (D-176, V-7): область формули — 0 Substance (на кожну речовину,
+    -- поведінка до колонки), 1 Row (раз на рядок, до циклу речовин).
+    Scope                 tinyint        NOT NULL CONSTRAINT DF_MF_Scope DEFAULT(0),   -- MethodologyFormulaScope
+    -- HSE301M3 (D-175, V-6): показувати значення як проміжний результат —
+    -- рядок calc.CalculationResult з Kind = 1.
+    IsVisible             bit            NOT NULL CONSTRAINT DF_MF_Visible DEFAULT(0),
     CONSTRAINT PK_MethodologyFormula PRIMARY KEY (Id),
     CONSTRAINT UQ_MethodologyFormula UNIQUE (MethodologyVersionId, Code),
     CONSTRAINT FK_MF_Version FOREIGN KEY (MethodologyVersionId) REFERENCES calc.MethodologyVersion (Id),
@@ -1446,6 +1699,9 @@ CREATE TABLE calc.MethodologyOutput
     Code                 nvarchar(64) NOT NULL,   -- 'tons', 'gsec'
     UnitId               int          NOT NULL,
     Ordinal              int          NOT NULL,
+    -- HSE301M3 (D-176, V-7): 1 — на кожну речовину (поведінка до колонки),
+    -- 0 — раз на рядок без речовини (M_t, парникові гази HSE301.FLARE).
+    IsPerSubstance       bit          NOT NULL CONSTRAINT DF_MO_PerSub DEFAULT(1),
     CONSTRAINT PK_MethodologyOutput PRIMARY KEY (Id),
     CONSTRAINT UQ_MethodologyOutput UNIQUE (MethodologyVersionId, Code),
     CONSTRAINT FK_MO_Version FOREIGN KEY (MethodologyVersionId) REFERENCES calc.MethodologyVersion (Id),
@@ -1473,6 +1729,10 @@ CREATE TABLE calc.CalculationRun
     Status            nvarchar(32)  NOT NULL,
     ModulesProfileJson nvarchar(max) NULL,       -- профіль по модулях (питання J-1)
     ErrorMessage      nvarchar(2000) NULL,
+    -- RK04 (D-158): системний момент знімка довідників — ставиться на старті
+    -- прогону, усі довідники прогону читаються FOR SYSTEM_TIME AS OF нього.
+    -- NULL — прогін до RK04: відтворюється на поточних даних із попередженням.
+    RegistryAsOfUtc   datetime2(3)  NULL,
     CONSTRAINT PK_CalculationRun PRIMARY KEY (Id),
     CONSTRAINT FK_CR_Project FOREIGN KEY (ProjectId) REFERENCES doc.Project (Id)
 );
@@ -1492,6 +1752,9 @@ CREATE TABLE calc.CalculationResult
     OutputCode           nvarchar(64)   NOT NULL,
     Value                decimal(34,16) NOT NULL,   -- float заборонений (D-30); 16 знаків — D-148
     UnitId               int            NOT NULL,
+    -- HSE301M3 (D-175, V-6): 0 Output — оголошений вихід; 1 Intermediate —
+    -- значення видимої формули (OutputCode = код формули). rpt.* бере лише 0.
+    Kind                 tinyint        NOT NULL CONSTRAINT DF_CRes_Kind DEFAULT(0),   -- CalculationResultKind
     CONSTRAINT PK_CalculationResult PRIMARY KEY CLUSTERED (PeriodKey, Id) ON ps_ByPeriodKey(PeriodKey),
     CONSTRAINT FK_CRes_Run    FOREIGN KEY (CalculationRunId)     REFERENCES calc.CalculationRun (Id),
     CONSTRAINT FK_CRes_MV     FOREIGN KEY (MethodologyVersionId) REFERENCES calc.MethodologyVersion (Id),
@@ -1505,6 +1768,16 @@ GO
 CREATE INDEX IX_CalculationResult_Lookup
     ON calc.CalculationResult (PeriodKey, DocumentId, MethodologyVersionId, OutputCode)
     INCLUDE (Value, UnitId, SubstanceEntryId, SourceRowKey) ON ps_ByPeriodKey(PeriodKey);
+GO
+
+-- HSE301 U1 (аудит C6 п.3), міграція U1UnitForeignKeys: індекс під FK_CRes_Unit.
+-- Без нього і перевірка ключа при видаленні одиниці, і «де використовується»
+-- (UnitStore) сканують усю таблицю. Вирівняний зі схемою партиціонування.
+-- ⚠ Міграція будує його з WITH (ONLINE = ON) лише на EngineEdition 3/5/8
+-- (Enterprise/Developer, Azure); на Standard і Express — офлайн, таблиця на
+-- час побудови заблокована (operations-runbook.md §8.2, вікно обслуговування).
+CREATE INDEX IX_CalculationResult_UnitId
+    ON calc.CalculationResult (UnitId) ON ps_ByPeriodKey(PeriodKey);
 GO
 
 CREATE TABLE calc.CalculationInput
@@ -1539,6 +1812,15 @@ CREATE TABLE calc.CalculationStep
     Expression       nvarchar(2000) NULL,
     Value            decimal(34,16) NULL,
     TraceJson        nvarchar(max)  NULL,
+    -- H-24d-1: чому значення стало нулем (MaskedZeroReason); окрема колонка, щоб
+    -- такі кроки можна було перелічити фільтрованим IX_CStep_Masked.
+    MaskedZero       tinyint        NOT NULL DEFAULT(0),
+    -- HSE301M3: адреса кроку — трейс на комірку (FEATURE-HSE301-VIEW §7.1).
+    -- Типи як у calc.CalculationResult, щоб крок і результат з'єднувалися без
+    -- перетворень. NULL — крок до міграції або без адреси.
+    DocumentId       bigint         NULL,
+    SourceRowKey     nvarchar(100)  NULL,
+    SubstanceEntryId int            NULL,
     CONSTRAINT PK_CalculationStep PRIMARY KEY CLUSTERED (PeriodKey, Id) ON ps_ByPeriodKey(PeriodKey),
     CONSTRAINT FK_CStep_Run FOREIGN KEY (CalculationRunId) REFERENCES calc.CalculationRun (Id)
 ) ON ps_ByPeriodKey(PeriodKey);
@@ -1729,6 +2011,10 @@ CREATE TABLE ext.EntityFieldMap
     -- сирими в ext.RawDataPoint для звірки — і це легальний стан.
     TargetRowKey     nvarchar(100) NULL,
     IsActive       bit           NOT NULL CONSTRAINT DF_EFM_Act DEFAULT(1),
+    -- HSE301 §4.1 (міграція HSE301M1): форма ряду між точками для згорток за
+    -- часом — 1 ступінчастий («Step» атрибута AF), 0 лінійний (трапеція).
+    -- Властивість сигналу, а не згортки; згортки точок (Sum…First) її не читають.
+    IsStep         bit           NOT NULL DEFAULT(0),
     CONSTRAINT PK_EntityFieldMap PRIMARY KEY (Id),
     CONSTRAINT UQ_EntityFieldMap UNIQUE (SourceEntityId, SourceField),
     CONSTRAINT FK_EFM_Entity FOREIGN KEY (SourceEntityId)  REFERENCES ext.SourceEntity (Id),
@@ -1742,8 +2028,11 @@ CREATE TABLE ext.EntityFieldMap
 ,
     -- Перелік згортань закритий: довільний код дав би можливість вписати те,
     -- чого обробник не знає, і дізнатися про це під час збору.
+    -- HSE301M1 (D-172): + TimeWeightedAvg (∫v dt / покритий час) і
+    -- TimeIntegral (∫v dt в «одиниця × секунда»), у кінець переліку.
     CONSTRAINT CK_EFM_Transform CHECK (TransformCode IS NULL OR TransformCode IN
-        (N'Sum', N'Avg', N'Min', N'Max', N'Last', N'First')),
+        (N'Sum', N'Avg', N'Min', N'Max', N'Last', N'First',
+         N'TimeWeightedAvg', N'TimeIntegral')),
     -- ⛔ Рядок і агрегація нерозривні (D-118): система не знає, величина
     -- миттєва (концентрація → Last) чи накопичувальна (обсяг → Sum).
     CONSTRAINT CK_EFM_Materialization CHECK (TargetRowKey IS NULL OR TransformCode IS NOT NULL)
@@ -1790,6 +2079,116 @@ CREATE TABLE ext.RawDataPoint
     CONSTRAINT FK_RDP_Entity FOREIGN KEY (SourceEntityId) REFERENCES ext.SourceEntity (Id),
     CONSTRAINT FK_RDP_Unit   FOREIGN KEY (UnitId)         REFERENCES uom.Unit (Id)
 );
+GO
+
+-- HSE301 M2 (FEATURE-HSE301-VIEW §4.4, D-171): прив'язка «атрибут → колонка,
+-- вікно = рядок». НЕ режим ext.EntityFieldMap: той має фіксованого адресата
+-- рядка й UQ(SourceEntityId, SourceField), а тут один атрибут обслуговує
+-- багато рядків, і вікно береться з самого рядка (колонки Start/End).
+CREATE TABLE ext.RowWindowMap
+(
+    Id                  int           IDENTITY(1,1) NOT NULL,
+    TableDefId          int           NOT NULL,
+    TargetColumnDefId   int           NOT NULL,   -- Decimal-колонка (Volume_Sm3)
+    StartColumnDefId    int           NOT NULL,   -- Date-колонка початку, час проєкту
+    EndColumnDefId      int           NOT NULL,   -- Date-колонка кінця (виключно)
+    SelectorColumnDefId int           NULL,       -- колонка, що обирає атрибут (PiSourceKey)
+    Summary             tinyint       NOT NULL,   -- 0 Total | 1 Average | 2 Minimum | 3 Maximum | 4 Count
+    IsStep              bit           NOT NULL CONSTRAINT DF_RWM_Step DEFAULT(0),
+    -- Розрив між точками (с), довший за який відрізок — прогалина (§4.1);
+    -- NULL — порога немає. Секунди, а не time: time не вміщає понад добу.
+    MaxGapSeconds       int           NULL,
+    TargetUnitId        int           NOT NULL,
+    MinPercentGood      decimal(5,2)  NOT NULL CONSTRAINT DF_RWM_MinGood DEFAULT(95),  -- нижче — Partial
+    RefetchWithinDays   int           NOT NULL CONSTRAINT DF_RWM_Refetch DEFAULT(7),   -- пізні дані PI
+    IsActive            bit           NOT NULL CONSTRAINT DF_RWM_Act DEFAULT(1),
+    RowVersion          rowversion    NOT NULL,
+    CONSTRAINT PK_RowWindowMap PRIMARY KEY (Id),
+    -- Одна прив'язка на колонку-ціль: дві писали б у ту саму комірку.
+    CONSTRAINT UQ_RowWindowMap_Target UNIQUE (TableDefId, TargetColumnDefId),
+    CONSTRAINT FK_RWM_Table FOREIGN KEY (TableDefId) REFERENCES cfg.TableDef (Id),
+    -- ⛔ Складені ключі на UQ_ColumnDef_ForFk (як FK_CellValue_Column): колонка
+    -- вікна чи селектор із чужої таблиці не пройде.
+    CONSTRAINT FK_RWM_Target   FOREIGN KEY (TableDefId, TargetColumnDefId)   REFERENCES cfg.ColumnDef (TableDefId, Id),
+    CONSTRAINT FK_RWM_Start    FOREIGN KEY (TableDefId, StartColumnDefId)    REFERENCES cfg.ColumnDef (TableDefId, Id),
+    CONSTRAINT FK_RWM_End      FOREIGN KEY (TableDefId, EndColumnDefId)      REFERENCES cfg.ColumnDef (TableDefId, Id),
+    CONSTRAINT FK_RWM_Selector FOREIGN KEY (TableDefId, SelectorColumnDefId) REFERENCES cfg.ColumnDef (TableDefId, Id),
+    CONSTRAINT FK_RWM_Unit     FOREIGN KEY (TargetUnitId) REFERENCES uom.Unit (Id),
+    CONSTRAINT CK_RWM_Summary CHECK (Summary BETWEEN 0 AND 4),
+    CONSTRAINT CK_RWM_Window  CHECK (StartColumnDefId <> EndColumnDefId),
+    CONSTRAINT CK_RWM_Policy  CHECK (MinPercentGood BETWEEN 0 AND 100
+                                     AND RefetchWithinDays BETWEEN 0 AND 366
+                                     AND (MaxGapSeconds IS NULL OR MaxGapSeconds > 0))
+);
+GO
+
+-- Значення селектора → атрибут. SelectorValue = NULL — джерело для всіх рядків.
+CREATE TABLE ext.RowWindowSource
+(
+    Id             int           IDENTITY(1,1) NOT NULL,
+    RowWindowMapId int           NOT NULL,
+    SelectorValue  nvarchar(100) NULL,
+    SourceEntityId int           NOT NULL,
+    SourceField    nvarchar(200) NOT NULL,
+    SourceUnitId   int           NOT NULL,
+    CONSTRAINT PK_RowWindowSource PRIMARY KEY (Id),
+    -- ⛔ Без фільтра IS NOT NULL навмисно: унікальний індекс вважає NULL рівними,
+    -- тож джерело «для всіх рядків» у прив'язки теж рівно одне.
+    CONSTRAINT UQ_RowWindowSource UNIQUE (RowWindowMapId, SelectorValue),
+    CONSTRAINT FK_RWS_Map    FOREIGN KEY (RowWindowMapId) REFERENCES ext.RowWindowMap (Id),
+    CONSTRAINT FK_RWS_Entity FOREIGN KEY (SourceEntityId) REFERENCES ext.SourceEntity (Id),
+    CONSTRAINT FK_RWS_Unit   FOREIGN KEY (SourceUnitId)   REFERENCES uom.Unit (Id)
+);
+GO
+
+-- Провенанс кожного підтягування (§4.4, §8.3); лише додається — нове
+-- підтягування тієї самої комірки знімає IsCurrent з попереднього.
+-- ⛔ FK на doc.TableInstance НЕМАЄ: arc.usp_ArchiveYear звільняє doc.* через
+-- TRUNCATE … WITH (PARTITIONS), а TRUNCATE таблиці, на яку посилається ключ,
+-- SQL Server відхиляє.
+CREATE TABLE ext.RowWindowValue
+(
+    PeriodKey        int            NOT NULL,
+    Id               bigint         IDENTITY(1,1) NOT NULL,
+    TableInstanceId  bigint         NOT NULL,
+    RowKey           nvarchar(100)  NOT NULL,
+    ColumnDefId      int            NOT NULL,
+    RowWindowMapId   int            NOT NULL,
+    SourceEntityId   int            NOT NULL,
+    SourceField      nvarchar(200)  NOT NULL,
+    FromUtc          datetime2(3)   NOT NULL,
+    ToUtc            datetime2(3)   NOT NULL,
+    Summary          tinyint        NOT NULL,
+    ComputedBy       tinyint        NOT NULL,   -- 0 Local | 1 Server
+    ValueSource      decimal(34,16) NULL,       -- в одиниці джерела
+    SourceUnitSymbol nvarchar(64)   NULL,
+    ValueTarget      decimal(34,16) NULL,       -- в одиниці колонки
+    TargetUnitId     int            NOT NULL,
+    ConversionFactor decimal(34,16) NULL,       -- множник межі (§4.2)
+    PointCount       int            NOT NULL,
+    PercentGood      decimal(5,2)   NULL,
+    Status           nvarchar(32)   NOT NULL,
+    ErrorCode        varchar(32)    NULL,
+    RetrievedAt      datetime2(3)   NOT NULL,
+    IsCurrent        bit            NOT NULL CONSTRAINT DF_RWV_Current DEFAULT(1),
+    CONSTRAINT PK_RowWindowValue PRIMARY KEY CLUSTERED (PeriodKey, Id) ON ps_ByPeriodKey(PeriodKey),
+    CONSTRAINT FK_RWV_Map    FOREIGN KEY (RowWindowMapId) REFERENCES ext.RowWindowMap (Id),
+    CONSTRAINT FK_RWV_Entity FOREIGN KEY (SourceEntityId) REFERENCES ext.SourceEntity (Id),
+    CONSTRAINT FK_RWV_Column FOREIGN KEY (ColumnDefId)    REFERENCES cfg.ColumnDef (Id),
+    CONSTRAINT FK_RWV_Unit   FOREIGN KEY (TargetUnitId)   REFERENCES uom.Unit (Id),
+    CONSTRAINT CK_RWV_Status CHECK (Status IN (N'Fetched', N'Partial', N'NoData', N'KeptManual',
+                                               N'SourceError', N'InvalidWindow', N'NotApplicable')),
+    CONSTRAINT CK_RWV_Kinds   CHECK (Summary BETWEEN 0 AND 4 AND ComputedBy BETWEEN 0 AND 1),
+    CONSTRAINT CK_RWV_Numbers CHECK (PointCount >= 0 AND (PercentGood IS NULL OR PercentGood BETWEEN 0 AND 100))
+) ON ps_ByPeriodKey(PeriodKey);
+GO
+
+-- Чинне значення комірки — рівно одне. UNIQUE і з PeriodKey першим: унікальний
+-- індекс партиційованої таблиці мусить містити ключ партиції (§4.4 мав тут
+-- неунікальний IX без PeriodKey — посилено при реалізації M2).
+CREATE UNIQUE INDEX UX_RowWindowValue_Current
+    ON ext.RowWindowValue (PeriodKey, TableInstanceId, RowKey, ColumnDefId)
+    WHERE IsCurrent = 1 ON ps_ByPeriodKey(PeriodKey);
 GO
 
 CREATE TABLE ext.ConsistencyRule
@@ -2330,19 +2729,32 @@ CREATE TABLE itg.CollectionCoverage
     SourceEntityId int          NOT NULL,
     CoveredFrom    datetime2(3) NOT NULL,
     CoveredTo      datetime2(3) NOT NULL,
-    CollectionRunId bigint      NOT NULL,
+    -- NULL — рядок-подія (пропуск, конфлікт, синк довідника), не прив'язаний до прогону (Q-186).
+    CollectionRunId bigint      NULL,
     CONSTRAINT PK_CollectionCoverage PRIMARY KEY (Id),
     CONSTRAINT FK_CCov_Entity FOREIGN KEY (SourceEntityId)  REFERENCES ext.SourceEntity (Id),
     CONSTRAINT FK_CCov_Run    FOREIGN KEY (CollectionRunId) REFERENCES itg.CollectionRun (Id),
-    -- Період, якого стосується статус; NULL — звичайне покриття інтервалу.
+    -- Період, якого стосується статус; NULL — звичайне покриття інтервалу
+    -- або подія синку довідника (довідник не живе за періодами).
     PeriodKey       int            NULL,
-    -- ⛔ Чому інтервал НЕ перенесено в комірки (D-118):
-    -- SkippedPeriodClosed | ConflictKeptManual. NULL — нічого незвичайного.
+    -- ⛔ Чому інтервал НЕ перенесено в комірки (D-118) або що знайшов синк
+    -- довідника (FEATURE-REGISTRY-SYNC S5). Допустимі значення — рівно
+    -- CollectionCoverage.KnownStatuses (IntegrationLogs.cs, джерело правди).
+    -- NULL — нічого незвичайного.
     -- Мовчазний пропуск тут найдорожчий: збір відпрацював, звіт склався, а
     -- числа за пізній інтервал у ньому немає.
     Status          nvarchar(64)   NULL,
     Details         nvarchar(1000) NULL
 );
+GO
+
+-- Острови покриття джерела (P5, CollectionStore.ReadCoverageIslandsAsync):
+-- лише успішні інтервали (Status IS NULL) однієї сутності в порядку CoveredTo.
+-- Міграція Analiz1JobsCoverageIndexes.
+CREATE INDEX IX_CollectionCoverage_SourceEntity_CoveredTo
+    ON itg.CollectionCoverage (SourceEntityId, CoveredTo)
+    INCLUDE (CoveredFrom)
+    WHERE [Status] IS NULL;
 GO
 
 CREATE TABLE itg.ArchiveRun
@@ -2393,8 +2805,49 @@ CREATE TABLE itg.JobProgress
     CreatedAt     datetime2(3)  NULL,  -- BE-08: перша постановка; старт і перезапуск не чіпають; NULL — розклад
     ErrorCode     varchar(32)   NULL,  -- BE-08: код каталогу помилок провалу (ErrorCodes)
     DocumentId    bigint        NULL,  -- BE-08: документ задачі, з payload при постановці
-    CONSTRAINT PK_JobProgress PRIMARY KEY (JobId)
+    -- Процес-власник «{машина}/{GUID процесу}»: пишеться при постановці, старті
+    -- й ручному перезапуску. На старті процесу активні рядки ПОПЕРЕДНІХ процесів
+    -- цієї ж машини закриваються Failed незалежно від биття; рядки інших машин
+    -- — лише за віком HeartbeatAt. NULL — рядок старший за колонку.
+    -- Міграція Analiz1JobsCoverageIndexes.
+    InstanceId    nvarchar(64)  NULL,
+    -- Черга в базі (MI-02, D-208; міграція MI02JobQueue). Усе NULL, без backfill:
+    -- Lane NULL — дзеркало Quartz, черга його не бере. Моменти — SYSUTCDATETIME().
+    Lane              varchar(32)      NULL,  -- JobLanes: 'default', 'recalc'
+    Payload           nvarchar(max)    NULL,  -- JSON аргументів задачі
+    AvailableAt       datetime2(3)     NULL,  -- коли можна брати; обов'язковий за Lane
+    LeaseUntil        datetime2(3)     NULL,  -- кінець оренди Running
+    ClaimToken        uniqueidentifier NULL,  -- токен оренди (fencing), новий на кожен claim
+    TargetKey         nvarchar(200)    NULL,  -- «{ТипМаркера}~{ціль}»; NULL — без коалесценції
+    CancelRequestedAt datetime2(3)     NULL,  -- запит скасування Running
+    ReclaimCount      int              NULL,  -- переклейми після втраченої оренди, окремо від Attempt
+    CONSTRAINT PK_JobProgress PRIMARY KEY (JobId),
+    CONSTRAINT CK_JobProgress_QueueShape CHECK (Lane IS NULL OR AvailableAt IS NOT NULL)
 );
+GO
+
+-- ⚠ Фільтровані індекси: кожна сесія, що пише в таблицю, — QUOTED_IDENTIFIER ON
+-- і ANSI_NULLS ON (sqlcmd — лише з -I), інакше INSERT/UPDATE падає з 1934.
+-- На ціль — щонайбільше одна Queued і одна Running («1 Running + 1 Queued позаду»);
+-- 2601/2627 при переході в Running claim читає як «нічого не взяв» (D-208).
+CREATE UNIQUE INDEX UX_JobProgress_Target_Queued
+    ON itg.JobProgress (TargetKey) WHERE State = 'Queued' AND TargetKey IS NOT NULL;
+CREATE UNIQUE INDEX UX_JobProgress_Target_Running
+    ON itg.JobProgress (TargetKey) WHERE State = 'Running' AND TargetKey IS NOT NULL;
+-- Claim: WHERE Lane IN (…) AND State … AND AvailableAt <= now ORDER BY AvailableAt, JobId.
+CREATE INDEX IX_JobProgress_Claim
+    ON itg.JobProgress (Lane, State, AvailableAt)
+    INCLUDE (TargetKey, LeaseUntil, Attempt, ReclaimCount)
+    WHERE Lane IS NOT NULL AND State IN ('Queued', 'Running');
+GO
+
+-- «Мої задачі» (JobProgressStore.ListRecentAsync; шапка опитує кожні 3–30 с):
+-- WHERE CreatedByUserId = @u [AND State / JobCode] ORDER BY UpdatedAt DESC, TOP.
+-- IX_JobProgress_Stale (State, HeartbeatAt) автора не веде і порядку не дає.
+-- Міграція Analiz1JobsCoverageIndexes.
+CREATE INDEX IX_JobProgress_CreatedBy_UpdatedAt
+    ON itg.JobProgress (CreatedByUserId, UpdatedAt DESC)
+    INCLUDE (State, JobCode);
 GO
 ```
 
@@ -2557,6 +3010,10 @@ CREATE TABLE arc.TableRow
     RowDefId        int           NULL,
     Ordinal         int           NOT NULL,
     IsDeleted       bit           NOT NULL,
+    -- D4 аудиту: копія doc.TableRow.IsOrphaned. У розгортанні додається
+    -- ідемпотентним ALTER у 12-archive-tables.sql; роки, заархівовані до
+    -- цього, мають тут 0 (див. operations-runbook.md, п. 7).
+    IsOrphaned      bit           NOT NULL CONSTRAINT DF_arc_TableRow_Orph DEFAULT(0),
     ModifiedAt      datetime2(3)  NOT NULL,
     INDEX CCI_arc_TableRow CLUSTERED COLUMNSTORE
 ) ON [DATA_ARCHIVE];
@@ -2611,6 +3068,7 @@ CREATE TABLE arc.CalculationResult
     OutputCode           nvarchar(64)   NOT NULL,
     Value                decimal(34,16) NOT NULL,
     UnitId               int            NOT NULL,
+    Kind                 tinyint        NOT NULL CONSTRAINT DF_arc_CRes_Kind DEFAULT (0),  -- HSE301M3
     INDEX CCI_arc_CalculationResult CLUSTERED COLUMNSTORE
 ) ON [DATA_ARCHIVE];
 GO
@@ -2626,9 +3084,21 @@ CREATE TABLE arc.CalculationStep
     Expression       nvarchar(2000) NULL,
     Value            decimal(34,16) NULL,
     TraceJson        nvarchar(max)  NULL,
+    MaskedZero       tinyint        NOT NULL CONSTRAINT DF_arc_CStep_Masked DEFAULT (0),
+    DocumentId       bigint         NULL,                                              -- HSE301M3
+    SourceRowKey     nvarchar(100)  NULL,                                              -- HSE301M3
+    SubstanceEntryId int            NULL,                                              -- HSE301M3
     INDEX CCI_arc_CalculationStep CLUSTERED COLUMNSTORE
 ) ON [DATA_ARCHIVE];
 GO
+
+-- ⚠ Колонки, що з'явилися в calc.* після першого розгортання (Kind, MaskedZero,
+-- адреса кроку), у 12-archive-tables.sql додаються не в CREATE TABLE, а окремими
+-- `IF COL_LENGTH(...) IS NULL ALTER TABLE … ADD` — CREATE на розгорнутій базі не
+-- виконується. Дзеркало стереже ArchiveMirrorTests (кожна колонка
+-- calc.CalculationResult / calc.CalculationStep має двійника того самого типу).
+-- ⚠ arc.usp_ArchiveYear (03-archive-proc.sql) переносить лише doc.*; calc.* у
+-- архів поки не копіює жодна процедура.
 ```
 
 ---
@@ -2782,8 +3252,8 @@ BEGIN
         FROM doc.CellValue WHERE PeriodKey = @k;
 
         INSERT INTO arc.TableRow WITH (TABLOCK)
-            (PeriodKey, Id, TableInstanceId, RowKey, RowDefId, Ordinal, IsDeleted, ModifiedAt)
-        SELECT PeriodKey, Id, TableInstanceId, RowKey, RowDefId, Ordinal, IsDeleted, ModifiedAt
+            (PeriodKey, Id, TableInstanceId, RowKey, RowDefId, Ordinal, IsDeleted, IsOrphaned, ModifiedAt)
+        SELECT PeriodKey, Id, TableInstanceId, RowKey, RowDefId, Ordinal, IsDeleted, IsOrphaned, ModifiedAt
         FROM doc.TableRow WHERE PeriodKey = @k;
 
         INSERT INTO arc.TableInstance WITH (TABLOCK)

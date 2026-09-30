@@ -315,6 +315,79 @@ public sealed class CollectionSchedulesControllerTests(SqlServerFixture sql)
             (row.GetProperty("dataSourceId").GetInt32(), row.GetProperty("dataSourceCode").GetString()));
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-13.15")]
+    public async Task ФВ_13_15_вікно_збору_їде_в_переліку_і_доїжджає_до_бази_зі_створення_і_правки()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, "Integration.EditSchedule").ConfigureAwait(true);
+
+        var (entityId, _) = await AddSourceEntityAsync().ConfigureAwait(true);
+
+        var created = await client.PostAsJsonAsync(
+            Schedules,
+            new { sourceEntityId = entityId, cron = FarFuture, isEnabled = true, lookbackDays = 14 }).ConfigureAwait(true);
+        Assert.True(created.StatusCode == HttpStatusCode.Created, $"{created.StatusCode}: {app.ErrorsText}");
+
+        var id = (await BodyAsync(created).ConfigureAwait(true)).GetProperty("id").GetInt32();
+        var row = await RowAsync(client, id).ConfigureAwait(true);
+        Assert.Equal(14, row.GetProperty("lookbackDays").GetInt32());
+
+        var saved = await SendAsync(
+            client, HttpMethod.Put, At(id), row.GetProperty("rowVersion").GetString(),
+            new { cron = FarFuture, isEnabled = true, lookbackDays = 90 }).ConfigureAwait(true);
+        Assert.True(saved.StatusCode == HttpStatusCode.OK, $"{saved.StatusCode}: {app.ErrorsText}");
+        Assert.Equal(90, (await BodyAsync(saved).ConfigureAwait(true)).GetProperty("lookbackDays").GetInt32());
+
+        await using (var db = NewDb())
+        {
+            Assert.Equal(
+                90,
+                (await db.CollectionSchedules.AsNoTracking().SingleAsync(s => s.Id == id).ConfigureAwait(true)).LookbackDays);
+        }
+
+        // Поза межами — 422 ДО бази, вікно лишається попереднім.
+        var fresh = (await RowAsync(client, id).ConfigureAwait(true)).GetProperty("rowVersion").GetString();
+        var refused = await SendAsync(
+            client, HttpMethod.Put, At(id), fresh,
+            new { cron = FarFuture, isEnabled = true, lookbackDays = 367 }).ConfigureAwait(true);
+
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, refused.StatusCode);
+        Assert.Equal(
+            "err.ECR-REQ-0422.collectionScheduleLookback",
+            (await BodyAsync(refused).ConfigureAwait(true)).GetProperty("messageKey").GetString());
+
+        await using var check = NewDb();
+        Assert.Equal(
+            90,
+            (await check.CollectionSchedules.AsNoTracking().SingleAsync(s => s.Id == id).ConfigureAwait(true)).LookbackDays);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-12.8")]
+    public async Task ФВ_12_8_розклад_для_власної_форми_422_і_рядка_не_зʼявляється()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, "Integration.EditSchedule").ConfigureAwait(true);
+
+        var (entityId, code) = await AddSourceEntityAsync(kind: RegistrySourceKind.Local).ConfigureAwait(true);
+
+        var refused = await PostAsync(client, entityId, FarFuture).ConfigureAwait(true);
+
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, refused.StatusCode);
+        var problem = await BodyAsync(refused).ConfigureAwait(true);
+        Assert.Equal("ECR-REQ-0422", problem.GetProperty("errorCode").GetString());
+        Assert.Equal("err.ECR-REQ-0422.scheduleForLocalEntity", problem.GetProperty("messageKey").GetString());
+        Assert.Contains(code, problem.GetProperty("detail").GetString(), StringComparison.Ordinal);
+
+        await using var db = NewDb();
+        Assert.False(await db.CollectionSchedules.AnyAsync(s => s.SourceEntityId == entityId).ConfigureAwait(true));
+    }
+
     private static Uri Filtered(string dataSource)
         => new($"{Schedules}?dataSource={Uri.EscapeDataString(dataSource)}", UriKind.Relative);
 
@@ -400,13 +473,14 @@ public sealed class CollectionSchedulesControllerTests(SqlServerFixture sql)
     /// Сутність БЕЗ розкладу (у новому з'єднанні або в названому); повертає ключ
     /// і код сутності.
     /// </summary>
-    private async Task<(int Id, string Code)> AddSourceEntityAsync(int? dataSourceId = null)
+    private async Task<(int Id, string Code)> AddSourceEntityAsync(
+        int? dataSourceId = null, RegistrySourceKind kind = RegistrySourceKind.External)
     {
         var tag = Guid.NewGuid().ToString("N")[..10];
         var sourceId = dataSourceId ?? (await AddDataSourceAsync().ConfigureAwait(false)).Id;
         await using var db = NewDb();
 
-        var entity = new SourceEntity(sourceId, $"Ent{tag}", RegistrySourceKind.External);
+        var entity = new SourceEntity(sourceId, $"Ent{tag}", kind);
         entity.Describe($"Entity {tag}", null);
         entity.Deactivate();
         db.SourceEntities.Add(entity);

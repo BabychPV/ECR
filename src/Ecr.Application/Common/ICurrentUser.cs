@@ -34,4 +34,28 @@ public interface ICurrentUser
     /// </para>
     /// </remarks>
     public IReadOnlyList<string> GroupSids { get; }
+
+    /// <summary>
+    /// Відкритий сеанс симуляції «очима користувача» цього входу (<c>ФВ-6.16a</c>);
+    /// <c>null</c> — симуляції немає.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Члена з тілом за замовчуванням навмисно: симуляцію знає лише HTTP-вхід
+    /// (cookie), а фонові задачі й тестові двійники її не мають і не повинні
+    /// вдавати, що мають (V-06).
+    /// </remarks>
+    public long? SimulationSessionId => null;
+
+    /// <summary>
+    /// Код виконується у фоновій задачі ІНТЕГРАЦІЇ від імені технічного запису
+    /// (<c>JobActorScope.EnterIntegration</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Тіло за замовчуванням — <c>false</c>, і перевизначає його лише
+    /// <see cref="JobAwareCurrentUser"/> зі стану тримача задачі. HTTP-вхід
+    /// (cookie) і тестові двійники цієї ознаки не мають: право запису
+    /// інтеграції (<c>AccessProfile.IsIntegrationWriter</c>) не можна отримати
+    /// ні іменем користувача, ні запитом.
+    /// </remarks>
+    public bool IsIntegrationJob => false;
 }

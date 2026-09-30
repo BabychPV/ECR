@@ -159,6 +159,31 @@ public static class ErrorCodes
     public const string ComputationOnManualColumn = "ECR-TMPL-4227";
 
     /// <summary>
+    /// Фіксована таблиця (<c>TableRowMode.Fixed</c>) без жодного живого
+    /// <c>RowDef</c> (директива 2026-09-25, живий перегляд стенду).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Знайдено живим переглядом стенду: шаблон версії 1, 92 таблиці, 0
+    /// <c>RowDef</c> — нові документи з такого шаблону створювалися БЕЗ
+    /// РЯДКІВ у фіксованих таблицях. Наслідок мовчазний: таблиця не порожня
+    /// через відсутність даних, вона порожня СТРУКТУРНО, і оператор не може
+    /// в неї нічого ввести — рядків, куди можна писати, просто немає, а
+    /// причина ніде не написана.
+    ///
+    /// ⚠ Перевірка звужена до <c>RowMode.Fixed</c> і НЕ чіпає <c>Mixed</c>:
+    /// у <c>Mixed</c> рядки може додати користувач (<c>TableDef.
+    /// AllowsDynamicRows</c>), тож нуль рядків на момент публікації — це
+    /// стартовий стан таблиці, яку заповнюють з нуля, а не дефект. Лише
+    /// <c>Fixed</c> обіцяє «рядки визначені в шаблоні» (див. коментар
+    /// <c>TableRowMode.Fixed</c>) і не має ІНШОГО способу отримати рядок:
+    /// <c>TableDef.AddRow</c> сам забороняє додавання рядків, коли
+    /// <c>RowMode == Dynamic</c>, а для <c>Fixed</c> рядок можна завести лише
+    /// в чернетці ДО публікації — після неї шлях один: RowDef має бути вже
+    /// там.
+    /// </remarks>
+    public const string FixedTableWithoutRows = "ECR-TMPL-4228";
+
+    /// <summary>
     /// <c>Breaking</c>-зміна у версії з документами (ФВ-7.4).
     /// </summary>
     /// <remarks>
@@ -192,6 +217,19 @@ public static class ErrorCodes
     // Документи, рядки, комірки
     public const string DocumentNotFound = "ECR-DOC-0404";
     public const string DocumentSubmitted = "ECR-DOC-0409";
+
+    /// <summary>
+    /// Аркуш зараз зайнятий: блокування «документ × аркуш × період» не взято за
+    /// відведений час (<c>ECR-DOC-4091</c>, <c>SheetEditGate</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Окремий код, а не <see cref="DocumentSubmitted"/>: той каже «аркуш
+    /// подано, потрібен Reopen», тобто стан, який повтором не минає. Тут —
+    /// навпаки: подання (або правка) ще триває, і той самий запит за мить
+    /// пройде. Клієнт, що розрізняє відмови за кодом, мусить бачити різницю.
+    /// </remarks>
+    public const string SheetBusy = "ECR-DOC-4091";
+
     public const string DocumentCompositionInvalid = "ECR-DOC-0422";
     public const string RowNotFound = "ECR-ROW-0404";
     public const string RowDuplicate = "ECR-ROW-0409";
@@ -223,6 +261,11 @@ public static class ErrorCodes
     /// самої причини, що обов'язкові вхідні колонки методології (`ECR-CALC-0437`)
     /// не діляться кодом зі звичайною помилкою формату: інакше користувач
     /// шукав би причину не там.
+    ///
+    /// ⚠ Тим самим кодом відмовляє й комірка <c>Unit</c> з неіснуючою
+    /// одиницею (B-02, <c>FK_CellValue_Unit</c> → раніше <c>500</c>): суб'єкт
+    /// той самий — посилання на запис, якого немає; ЯКИЙ саме запис — каже
+    /// <c>messageKey</c> (<c>missingEntry</c> / <c>missingUnit</c>).
     /// </remarks>
     public const string CellRegistryEntryMissing = "ECR-CELL-4223";
 
@@ -341,6 +384,28 @@ public static class ErrorCodes
     /// (<c>ECR-RPT-4091</c>).
     /// </remarks>
     public const string RegistryDefDuplicate = "ECR-REG-4091";
+
+    /// <summary>
+    /// Конфлікт складеного ключа довідника (<c>ECR-REG-4092</c>, FEATURE-REGISTRY-TABLES §7.2,
+    /// <c>D-151</c>): інший живий запис уже має ті самі значення полів ключа — для
+    /// темпорального довідника в перетинному вікні чинності.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <c>4092</c>, а не <c>0409</c>/<c>4091</c>: ті коди вже означають «запис використано» і
+    /// «довідник із таким кодом уже є». Випадок називає <c>messageKey</c>: <c>keyTaken</c>,
+    /// <c>keyWindowOverlap</c> (крок RT-10a), далі гонка, файл і пакет (RT-10b, RT-11).
+    /// </remarks>
+    public const string RegistryKeyConflict = "ECR-REG-4092";
+
+    /// <summary>
+    /// Запис довідника змінено іншим після читання (<c>ECR-REG-4093</c>, FEATURE-REGISTRY-TABLES §7.2,
+    /// <c>D-166</c>): <c>baseVersion</c> рядка не збігся з його <c>PeriodStart</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ У пакеті (RT-14) — помилка рядка <c>entryChanged</c>, не виняток: пакет завжди 200.
+    /// Випадки прев'ю імпорту й профілю (<c>importPreviewStale</c>, <c>profileChanged</c>) — RT-18.
+    /// </remarks>
+    public const string RegistryEntryChanged = "ECR-REG-4093";
 
     /// <summary>
     /// Конверсія одиниць неможлива. ⚠ Не лише різні розмірності: тим самим кодом
@@ -480,17 +545,36 @@ public static class ErrorCodes
     public const string MethodologyArgumentColumnMissing = "ECR-CALC-0438";
 
     // Робочий процес
-    /// <summary><c>Submit</c> при наявності рядків <c>IsOrphaned</c> (ФВ-8.13).</summary>
-    public const string SubmitBlockedByOrphans = "ECR-SUB-4221";
+    /// <summary>
+    /// <c>Submit</c> неможливий. Причину називає <c>messageKey</c>
+    /// (<c>SubmitSheetHandler</c>):
+    /// <list type="bullet">
+    /// <item><c>err.ECR-SUB-4221.orphanedRows</c> — рядки <c>IsOrphaned</c> (ФВ-8.13);</item>
+    /// <item><c>err.ECR-SUB-4221.staleMethodologyResults</c> — застарілі
+    /// результати прив'язаних методологій (F-05);</item>
+    /// <item><c>err.ECR-SUB-4221.validationBlocked</c> — незакриті блокувальні
+    /// помилки валідації аркуша;</item>
+    /// <item><c>err.ECR-SUB-4221.hiddenIssues</c> — блокувальні помилки лише в
+    /// таблицях чи колонках під забороною читача (S6): знеособлено, без числа
+    /// й адреси (<c>HiddenValidationIssues</c>).</item>
+    /// </list>
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Один код на три причини, той самий прийом, що
+    /// <see cref="MethodologyConflict"/>: суб'єкт відмови той самий —
+    /// «Подання неможливе», а ЯКА саме причина, каже <c>messageKey</c>.
+    /// </remarks>
+    public const string SubmitBlocked = "ECR-SUB-4221";
 
     // Безпека: симуляція і зміна пароля
     /// <summary>
     /// Спроба запису в сеансі симуляції (<c>SimulationReadOnly</c>, ФВ-6.16a).
     /// </summary>
     /// <remarks>
-    /// ⚠ Заброньований: заборона доїжджає до клієнта як
-    /// <see cref="AccessDenied"/> з <c>EditDenyReason.SimulationReadOnly</c> —
-    /// однією відмовою доступу з причиною, а не окремим кодом.
+    /// ⚠ Кидає <c>SimulationReadOnlyMiddleware</c> на будь-який небезпечний
+    /// метод під сеансом (V-06), до обробника. Запис комірок, що якимось чином
+    /// дійшов би до обробника, і далі відхиляє <c>EditRules</c> як
+    /// <see cref="AccessDenied"/> з <c>EditDenyReason.SimulationReadOnly</c>.
     /// </remarks>
     public const string SimulationReadOnly = "ECR-SIM-0403";
 
@@ -624,4 +708,72 @@ public static class ErrorCodes
     // Система
     public const string Internal = "ECR-SYS-0500";
     public const string Archiving = "ECR-SYS-0503";
+
+    /// <summary>
+    /// Старт зупинено: база чи сервер несумісні зі збіркою (ФВ-7.9,
+    /// <c>SchemaValidator</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Код журналу старту, а не відповіді API: виняток кидається до того, як
+    /// застосунок почав приймати запити. <c>5031</c> — «сервіс недоступний»,
+    /// окремий від архівації (<see cref="Archiving"/>), бо причина й дія інші.
+    /// </remarks>
+    public const string StartupSchemaIncompatible = "ECR-SYS-5031";
+
+    /// <summary>
+    /// Прив'язка методології має більше комірок входу, ніж дозволяє бюджет
+    /// прогону (<c>ECR-CALC-4222</c>, ФВ-9.8, <c>D-205</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Окремий код, а не <see cref="MethodologyInvalid"/>: методологія тут
+    /// ні до чого — надто великий ОБСЯГ даних прив'язки, і дія інша (перевірити
+    /// дані чи правило прив'язки, або підняти <c>Calculations:MaxInputCellsPerBinding</c>).
+    /// <c>422</c> за цифрами коду — загальний арм <c>DomainException</c> віддає саме
+    /// його, окремий арм не потрібен. Доменний виняток не ретраїться
+    /// (<c>QuartzJobAdapter.IsWorthRetrying</c>): ті самі дані дали б той самий вердикт.
+    /// </remarks>
+    public const string CalculationInputTooLarge = "ECR-CALC-4222";
+
+    /// <summary>
+    /// Порушено правило довідника рівня <c>Error</c> (<c>ECR-REG-4221</c>, FEATURE-REGISTRY-TABLES §6,
+    /// §7.2, <c>ФВ-8.18</c>): запис (upsert, пакет, CSV) відкочено цілком.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ 422, а не 409: дані суперечать правилу, а не чужій паралельній зміні. Подробиці —
+    /// <c>ruleViolated</c> (<c>rule</c>, <c>entryCode</c>, <c>message</c>) і повний перелік
+    /// <c>violations</c>. Порушення рівнів <c>Info</c>/<c>Warning</c> запис не зупиняють і їдуть у
+    /// <c>warnings[]</c> відповіді.
+    /// </remarks>
+    public const string RegistryRuleViolation = "ECR-REG-4221";
+
+    /// <summary>
+    /// Ціль «View as» (<c>Security.Simulate</c>) заборонена політикою
+    /// (<c>ECR-SIM-4031</c>, <c>D-210</c>): bootstrap-адміністратор або власник
+    /// хоча б одного небезпечного права (<c>sec.Permission.IsDangerous</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <c>403</c>, а не <c>422</c>: запит складено правильно, відмовляє
+    /// ПОЛІТИКА — сеанс показав би актору права, яких він не має. <c>4031</c>,
+    /// а не <c>0403</c>: той зайнятий <see cref="SimulationReadOnly"/> (запис під
+    /// сеансом), і клієнт розрізняє стани саме кодом. Причину називає
+    /// <c>messageKey</c> (<c>bootstrapTarget</c>, <c>dangerousTarget</c>).
+    /// Кидається як <c>BusinessRuleException</c> — без власного арма в
+    /// <c>ExceptionHandlingMiddleware</c> доїхав би як 422.
+    /// </remarks>
+    public const string SimulationTargetForbidden = "ECR-SIM-4031";
+
+    /// <summary>
+    /// Відв'язка забрала б у колонки типу <c>Formula</c> ОПУБЛІКОВАНОЇ версії шаблону
+    /// останнє джерело значення (<c>ECR-TMPL-4091</c>, HSE301 C5b, <c>D-215</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Дзеркало до <see cref="CalculatedWithoutSource"/> (<c>4226</c>): публікація не
+    /// пропускає <c>Formula</c>-колонку без формули шаблону й без активної прив'язки, але
+    /// після публікації той самий стан досягався однією відв'язкою — і структурно
+    /// незмінна версія жила з колонкою, якої ніхто не рахує.
+    ///
+    /// ⚠ 409, а не 422: запит правильний, суперечить він СТАНУ версії. Джерела
+    /// рахуються ПІСЛЯ зміни, тож заміна «прив'язати нове → відв'язати старе» проходить.
+    /// </remarks>
+    public const string LastSourceOfPublishedColumn = "ECR-TMPL-4091";
 }

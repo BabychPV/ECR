@@ -128,7 +128,7 @@ function Fail {
 $session = New-Object Microsoft.PowerShell.Commands.WebRequestSession
 
 function Call {
-    param([string] $Method, [string] $Path, $Body)
+    param([string] $Method, [string] $Path, $Body, [hashtable] $Headers)
 
     $arguments = @{
         Uri             = "$base$Path"
@@ -137,6 +137,8 @@ function Call {
         UseBasicParsing = $true
         TimeoutSec      = 60
     }
+
+    if ($null -ne $Headers) { $arguments.Headers = $Headers }
 
     if ($null -ne $Body) {
         $arguments.Body = ($Body | ConvertTo-Json -Depth 8 -Compress)
@@ -148,6 +150,16 @@ function Call {
     if ($response.Content) { return $response.Content | ConvertFrom-Json }
 
     return $null
+}
+
+# Версія набору грантів ролі (`ETag` GET) — для `If-Match` на PUT.
+function GrantsVersion {
+    param([int] $RoleId)
+
+    $etag = (Invoke-WebRequest -Uri "$base/api/v1/roles/$RoleId/grants" -WebSession $session -UseBasicParsing -TimeoutSec 60).Headers['ETag']
+    if (-not $etag) { Fail "GET /api/v1/roles/$RoleId/grants не віддав ETag" }
+
+    return $etag
 }
 
 if ($WebPort -eq 0) { $WebPort = $Port + 1000 }
@@ -170,6 +182,88 @@ function Assert-WebPortFree {
 
 Assert-WebPortFree
 $env:E2E_WEB_PORT = [string] $WebPort
+
+# ⛔ Прогрів Vite ДО Playwright. Без нього перший тест прогону
+# (`cellStates.spec.ts`, тема light) упирався в 30 с на `page.goto`: свіжий
+# чекаут не має кешу оптимізатора залежностей (`node_modules/.vite/deps`), і
+# перше відкриття сторінки чекало, доки esbuild збере 51 залежність.
+# Заміряно 2026-09-29: базова лінія — тест 1 `x … (30.4s)`, решта 28 зелені.
+#
+# ⚠ Прогрівати ЖИВИЙ сервер Playwright звідси неможливо: у стенді він
+# піднімає власний Vite з `reuseExistingServer: false`
+# (`playwright.config.ts`). Тому тут — ОДНОРАЗОВИЙ Vite тією самою командою
+# і на тому самому порту, і прогрівається те, що переживає його зупинку:
+# кеш залежностей на диску. Трансформи власних модулів у пам'яті не
+# переживають, але вони дешеві: на свіжому Vite з теплим кешем
+# `goto /_kitchen-sink` — 0.9 с проти 13.0 с із холодним (окремий замір).
+#
+# ⚠ Чому саме `/src/main.tsx`, а не лише `/` і `/_kitchen-sink`: SPA на обидві
+# адреси віддає той самий `index.html`, і оптимізатор від цього не
+# зрушує. Запит модуля входу запускає обхід статичних імпортів
+# (`preTransformRequests`), після якого оптимізатор комітить кеш — рівно
+# так само, як це робить браузер (перевірено: ті самі 51 файл у `deps`).
+function Invoke-ViteWarmup {
+    param([int] $TimeoutSec = 180)
+
+    $viteCache = Join-Path $client 'node_modules/.vite'
+    $metadata = Join-Path $viteCache 'deps/_metadata.json'
+    $warmLog = Join-Path $root 'artifacts/e2e.vite-warmup.log'
+    New-Item -ItemType Directory -Force (Split-Path $warmLog) | Out-Null
+
+    $vite = Start-Process -PassThru -WindowStyle Hidden -WorkingDirectory $client cmd.exe `
+        -ArgumentList "/c npm run dev -- --port $WebPort --strictPort" `
+        -RedirectStandardOutput $warmLog -RedirectStandardError "$warmLog.err"
+
+    $deadline = (Get-Date).AddSeconds($TimeoutSec)
+    try {
+        foreach ($path in @('/', '/_kitchen-sink', '/@vite/client', '/src/main.tsx')) {
+            $url = "http://localhost:$WebPort$path"
+            $last = 'немає відповіді'
+            while ($true) {
+                try {
+                    $r = Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 60
+                    $last = [string] $r.StatusCode
+                    if ($r.StatusCode -eq 200) { break }
+                }
+                catch {
+                    $resp = $_.Exception.Response
+                    $last = if ($resp) { [string] [int] $resp.StatusCode } else { $_.Exception.Message }
+                }
+                if ($vite.HasExited) { Fail "прогрів Vite: сервер завершився (код $($vite.ExitCode)) на $url, останній статус: $last; лог: $warmLog" }
+                if ((Get-Date) -gt $deadline) { Fail "прогрів Vite: $url не віддав 200 за $TimeoutSec с, останній статус: $last; лог: $warmLog" }
+                Start-Sleep -Seconds 2
+            }
+        }
+
+        # ⚠ Кеш закомічено, коли є `_metadata.json` і немає `deps_temp_*` (туди
+        # оптимізатор пише до перейменування) — двічі поспіль, бо застарілий
+        # кеш (новий lock-файл) лежить на місці, поки поруч збирається новий.
+        $stable = 0
+        while ($stable -lt 2) {
+            $busy = @(Get-ChildItem $viteCache -Directory -Filter 'deps_temp_*' -ErrorAction SilentlyContinue).Count -gt 0
+            if ((Test-Path $metadata) -and -not $busy) { $stable++ } else { $stable = 0 }
+            if ($stable -ge 2) { break }
+            if ((Get-Date) -gt $deadline) { Fail "прогрів Vite: кеш залежностей ($metadata) не закомічено за $TimeoutSec с; лог: $warmLog" }
+            Start-Sleep -Seconds 2
+        }
+    }
+    finally {
+        # Дерево процесів: cmd → npm → node (vite). Лише своє, за PID.
+        # ⚠ Q-217: stderr taskkill під 'Stop' став би винятком.
+        if (-not $vite.HasExited) {
+            $previousEapKill = $ErrorActionPreference
+            $ErrorActionPreference = 'Continue'
+            try { & taskkill.exe /T /F /PID $vite.Id | Out-Null }
+            finally { $ErrorActionPreference = $previousEapKill }
+        }
+    }
+
+    # Порт має звільнитися до Playwright: `--strictPort` інакше впаде.
+    foreach ($i in 1..15) {
+        if (-not (Get-NetTCPConnection -State Listen -LocalPort $WebPort -ErrorAction SilentlyContinue)) { break }
+        Start-Sleep -Seconds 1
+    }
+}
 
 Write-Host ''
 Write-Host "Стенд Playwright на базі $Database (API $Port, Vite $WebPort)" -ForegroundColor Cyan
@@ -225,6 +319,11 @@ $env:ECR_API_URL = $base
 # проходив би, а наступний виклик отримував 401. Змінна діє лише на цей
 # тимчасовий процес.
 $env:ECR_Auth__RequireHttps = 'false'
+
+# ⛔ S11: процес іде без launch-профілю, тобто в Production, а там без
+# сертифіката Data Protection застосунок не стартує. Одноразовий стенд — явна
+# згода на незахищене кільце (тоді старт пише Critical, а db — Degraded).
+$env:ECR_Auth__DataProtection__AllowUnprotectedKeys = 'true'
 
 Step 'старт застосунку'
 $api = Start-Process -PassThru -WindowStyle Hidden dotnet `
@@ -285,26 +384,50 @@ try {
     $adminRole = ($roles | Where-Object { $_.code -eq 'E2EAdmin' }).id
     if (-not $operatorRole -or -not $adminRole) { Fail 'ролі не створилися' }
 
-    Step 'два іменовані користувачі'
+    Step 'три іменовані користувачі'
     Call POST '/api/v1/users' @{
         userName = 'e2e-operator'; provider = 'Local'; sid = $null
-        displayName = 'E2E operator'; initialPassword = 'E2E-Operator-2026!'
+        displayName = 'E2E operator'; initialPassword = 'E2E-Oper8tor-2026!'
         roleCodes = @('E2EOperator')
     } | Out-Null
 
     Call POST '/api/v1/users' @{
         userName = 'e2e-admin'; provider = 'Local'; sid = $null
-        displayName = 'E2E administrator'; initialPassword = 'E2E-Admin-2026!'
+        displayName = 'E2E administrator'; initialPassword = 'E2E-Adm1n-2026!'
+        roleCodes = @('E2EAdmin')
+    } | Out-Null
+
+    # ⛔ F-25 (пряме рішення людини, `ApproveSheetHandler.cs`): та сама
+    # людина не може подати аркуш (`Submit`) і сама ж його погодити
+    # (`Approve`) — правило чотирьох очей. `keyboardPath.spec.ts` подає
+    # аркуш від імені `e2e-admin`, тож затверджувати ним ЦЕЙ САМИЙ аркуш
+    # сервер відмовляє (`403 ECR-ACCS-0403`, `err.ECR-ACCS-0403.approveOwnSubmission`)
+    # — другий обліковий запис із тим самим грантом (роль `E2EAdmin`) існує
+    # рівно для цього кроку.
+    #
+    # ⛔ Ім'я НЕ `e2e-approver` — живцем зловлено на стенді. Кнопка
+    # затвердження шукається `getByRole('button', { name: /Approve|Затвердити/i })`,
+    # а Playwright звіряє `name`-регексп ПІДРЯДКОМ: `e2e-approver` містить
+    # `approve`, тож той самий локатор (з `.first()`) резолвився в кнопку
+    # МЕНЮ КОРИСТУВАЧА (її доступне ім'я — юзернейм) замість кнопки
+    # робочого процесу. Симптом був загадковий: фокус і клік проходили без
+    # жодної помилки, а замість діалогу підтвердження відкривалося меню
+    # «Тема/Пароль/Вийти» — і це коштувало кількох прогонів, доки
+    # відеокадр трасування не показав меню замість діалогу.
+    Call POST '/api/v1/users' @{
+        userName = 'e2e-reviewer'; provider = 'Local'; sid = $null
+        displayName = 'E2E reviewer'; initialPassword = 'E2E-Rev1ewer-2026!'
         roleCodes = @('E2EAdmin')
     } | Out-Null
 
     # ⚠ Разовий пароль міняється ЗАРАЗ, а не в тесті: інакше кожен прогін
     # починався б із примусової зміни пароля, і перевірявся б саме цей екран,
     # а не той, заради якого прогін написаний (`ФВ-6.18`).
-    Step 'зміна разових паролів обох'
+    Step 'зміна разових паролів усіх трьох'
     foreach ($account in @(
-            @{ user = 'e2e-operator'; issued = 'E2E-Operator-2026!'; work = 'E2E-Operator-Work-2026!' },
-            @{ user = 'e2e-admin'; issued = 'E2E-Admin-2026!'; work = 'E2E-Admin-Work-2026!' })) {
+            @{ user = 'e2e-operator'; issued = 'E2E-Oper8tor-2026!'; work = 'E2E-Oper8tor-Work-2026!' },
+            @{ user = 'e2e-admin'; issued = 'E2E-Adm1n-2026!'; work = 'E2E-Adm1n-Work-2026!' },
+            @{ user = 'e2e-reviewer'; issued = 'E2E-Rev1ewer-2026!'; work = 'E2E-Rev1ewer-Work-2026!' })) {
 
         $session = New-Object Microsoft.PowerShell.Commands.WebRequestSession
         Call POST '/api/v1/login/local' @{ userName = $account.user; password = $account.issued } | Out-Null
@@ -316,11 +439,13 @@ try {
     # (`A7-22`). Грант видає адміністратор — оператор такого права не має.
     Step 'ресурсні гранти на проєкт'
     $session = New-Object Microsoft.PowerShell.Commands.WebRequestSession
-    Call POST '/api/v1/login/local' @{ userName = 'e2e-admin'; password = 'E2E-Admin-Work-2026!' } | Out-Null
+    Call POST '/api/v1/login/local' @{ userName = 'e2e-admin'; password = 'E2E-Adm1n-Work-2026!' } | Out-Null
 
+    # ⛔ `If-Match` обов'язковий (без нього — 422): версія набору — `ETag`
+    # відповіді GET, як це робить екран грантів.
     Call PUT "/api/v1/roles/$adminRole/grants" @{
         grants = @(@{ resourceKind = 'Project'; resourceId = 1; level = 'Manage'; isDeny = $false })
-    } | Out-Null
+    } -Headers @{ 'If-Match' = (GrantsVersion $adminRole) } | Out-Null
 
     # ⚠ Без перелогіну між двома PUT — навмисно. PUT грантів крутить
     # SecurityStamp усіх членів ролі (`RotateStampsForRoleAsync`), зокрема й
@@ -331,11 +456,11 @@ try {
 
     Call PUT "/api/v1/roles/$operatorRole/grants" @{
         grants = @(@{ resourceKind = 'Project'; resourceId = 1; level = 'Write'; isDeny = $false })
-    } | Out-Null
+    } -Headers @{ 'If-Match' = (GrantsVersion $operatorRole) } | Out-Null
 
     Step 'перевірка стенда: проєкт, період, документ'
     $session = New-Object Microsoft.PowerShell.Commands.WebRequestSession
-    Call POST '/api/v1/login/local' @{ userName = 'e2e-admin'; password = 'E2E-Admin-Work-2026!' } | Out-Null
+    Call POST '/api/v1/login/local' @{ userName = 'e2e-admin'; password = 'E2E-Adm1n-Work-2026!' } | Out-Null
 
     $projects = Call GET '/api/v1/projects'
     if ($projects.items.Count -eq 0) { Fail 'перелік проєктів порожній: грант не діє' }
@@ -355,6 +480,12 @@ try {
     Write-Host ''
     Write-Host "  стенд готовий: період $($open.periodKey), документ $($env:ECR_E2E_DOCUMENT)" -ForegroundColor Green
     Write-Host ''
+
+    Step 'прогрів Vite (кеш залежностей)'
+    Assert-WebPortFree
+    $warmStart = Get-Date
+    Invoke-ViteWarmup
+    Write-Host ("      прогріто за {0:N1} с" -f ((Get-Date) - $warmStart).TotalSeconds)
 
     Step 'прогони Playwright'
     Assert-WebPortFree

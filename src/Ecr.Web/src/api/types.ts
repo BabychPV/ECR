@@ -137,6 +137,9 @@ export type TemplateVersionSummary = Schemas['TemplateVersionSummary'];
 /** Сторінка версій шаблону. */
 export type TemplateVersionPage = Schemas['PagedResultOfTemplateVersionSummary'];
 
+/** Версії одного шаблону в пакетній відповіді `GET /api/v1/templates/versions?ids=` (`BR-07`). */
+export type TemplateVersionsForTemplate = Schemas['TemplateVersionsForTemplate'];
+
 /**
  * Картка шаблону разом із лічильником залежних (директива №15, `BE-26`).
  *
@@ -515,6 +518,9 @@ export type ReplaceGrantsRequest = Schemas['ReplaceGrantsRequest'];
 /** Ресурсний грант ролі. */
 export type ResourceGrantDto = Schemas['ResourceGrantDto'];
 
+/** Проєкт у довіднику видачі грантів: лише id, код і назва (D-207 п.2). */
+export type GrantableProject = Schemas['GrantableProject'];
+
 /** Публікація версії методології. */
 export type PublishMethodologyRequest = Schemas['PublishMethodologyRequest'];
 
@@ -803,3 +809,12 @@ export type EntityFieldMapDto = Schemas['EntityFieldMapDto'];
  * змусить TypeScript обробити випадок, а не мовчки його не показати.
  */
 export type MappingOutcome = Schemas['MappingOutcome'];
+
+/** Область дії призначення ролі (ФВ-6.14, D-214): проєкти, за бажанням — аркуші й проміжок періодів. */
+export type RoleScopeDto = Schemas['RoleScopeDto'];
+
+/** Аркуш чинної версії шаблону проєкту — для області за аркушами (`GET /security/project-sheets`, D-214). */
+export type GrantableSheet = Schemas['GrantableSheet'];
+
+/** Особисте призначення ролі користувачу з межами й областю (`GET /users/{id}/role-assignments`). */
+export type UserRoleAssignmentView = Schemas['UserRoleAssignmentView'];

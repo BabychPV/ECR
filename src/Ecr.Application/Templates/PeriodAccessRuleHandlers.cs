@@ -249,6 +249,9 @@ public sealed class CreatePeriodAccessRuleHandler(
         // нового правила) до цієї правки комітився ОКРЕМО від аудиту.
         await uow.ExecuteInTransactionAsync(async innerCt =>
         {
+            // ⛔ C5: блок рядка версії першим, «ще чернетка» — під ним.
+            await DraftVersionLock.EnsureDraftUnderLockAsync(store, version, innerCt).ConfigureAwait(false);
+
             // ⛔ Запис ПЕРЕД аудитом — щойно доданій сутності ще бракує Id до
             // SaveChanges (той самий привід, що в SaveSheetDefHandler).
             await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
@@ -407,6 +410,9 @@ public sealed class SavePeriodAccessRuleHandler(
         // ⛔ Q-244: аудит і `SaveChanges` тепер одна транзакція.
         await uow.ExecuteInTransactionAsync(async innerCt =>
         {
+            // ⛔ C5: блок рядка версії першим, «ще чернетка» — під ним.
+            await DraftVersionLock.EnsureDraftUnderLockAsync(store, version, innerCt).ConfigureAwait(false);
+
             await audit.WriteStructureChangeAsync(
                 new StructureChangeRecord(
                     clock.UtcNow, templateVersionId, nameof(PeriodAccessRuleDef), rule.Id,
@@ -500,6 +506,9 @@ public sealed class DeletePeriodAccessRuleHandler(
         // ⛔ Q-244: аудит і видалення/`SaveChanges` тепер одна транзакція.
         await uow.ExecuteInTransactionAsync(async innerCt =>
         {
+            // ⛔ C5: блок рядка версії першим, «ще чернетка» — під ним.
+            await DraftVersionLock.EnsureDraftUnderLockAsync(store, version, innerCt).ConfigureAwait(false);
+
             await audit.WriteStructureChangeAsync(
                 new StructureChangeRecord(
                     clock.UtcNow, templateVersionId, nameof(PeriodAccessRuleDef), rule.Id,

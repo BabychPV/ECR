@@ -79,7 +79,9 @@ public sealed class CompareDocumentVersionsHandler(
     IDocumentVersionStore versions,
     IDocumentStore documents,
     IMetadataCache metadata,
-    IDocumentHeaderStore headers)
+    IDocumentHeaderStore headers,
+    Security.IAccessDecisionService access,
+    Common.ICurrentUser currentUser)
 {
     /// <summary>Право — те саме, що й перегляд документа.</summary>
     public const string Permission = ListDocumentsHandler.Permission;
@@ -93,7 +95,20 @@ public sealed class CompareDocumentVersionsHandler(
     /// <summary>Порівнює <paramref name="from"/> із <paramref name="to"/> (<c>current</c> або ідентифікатор версії).</summary>
     public async Task<DocumentCompareDto> HandleAsync(long documentId, long from, string? to, CancellationToken ct)
     {
-        await DocumentVersionAccess.RequireAsync(getDocument, documentId, ct).ConfigureAwait(false);
+        var document = await DocumentVersionAccess.RequireAsync(getDocument, documentId, ct).ConfigureAwait(false);
+
+        // ⛔ S6 (ФВ-6.6): порівняння віддає значення комірок так само, як зріз, —
+        // і так само шанує заборону на аркуш, таблицю й колонку. Профіль той
+        // самий, яким щойно вирішено видимість документа (кеш профілів).
+        //
+        // ⛔ ФВ-6.14: право перегляду — у ПРОЄКТІ документа, а не глобальне.
+        // Глобальний `RequireAsync` тут відмовляв би власникові `Document.View`
+        // з роллю з областю (403 на порівнянні документа, який він бачить).
+        var profile = await Security.PermissionCheck
+            .RequireInAnyProjectAsync(access, currentUser, Permission, ct)
+            .ConfigureAwait(false);
+        Security.PermissionCheck.RequireIn(profile, Permission, document.ProjectId);
+        var readable = await access.ReadScopeAsync(profile, documentId, ct).ConfigureAwait(false);
 
         long? toId = null;
         if (!string.IsNullOrEmpty(to) && !string.Equals(to, Current, StringComparison.OrdinalIgnoreCase))
@@ -127,7 +142,7 @@ public sealed class CompareDocumentVersionsHandler(
         }
 
         return await DiffAsync(
-            documentId, key, from, toId,
+            documentId, key, from, toId, readable,
             SubmissionPayload.Read(older.PayloadJson), newerCells,
             SubmissionPayload.ReadHeader(older.PayloadJson), newerHeader,
             ct).ConfigureAwait(false);
@@ -159,7 +174,7 @@ public sealed class CompareDocumentVersionsHandler(
     }
 
     private async Task<DocumentCompareDto> DiffAsync(
-        long documentId, PeriodKey key, long from, long? to,
+        long documentId, PeriodKey key, long from, long? to, Security.DocumentReadScope readable,
         IReadOnlyList<SubmissionPayloadCell> oldCells, IReadOnlyList<SubmissionPayloadCell> newCells,
         IReadOnlyDictionary<string, SubmissionPayloadHeaderValue> oldHeader,
         IReadOnlyDictionary<string, SubmissionPayloadHeaderValue> newHeader,
@@ -170,10 +185,20 @@ public sealed class CompareDocumentVersionsHandler(
         var oldRows = oldCells.Select(c => c.Row).ToHashSet();
         var newRows = newCells.Select(c => c.Row).ToHashSet();
 
-        var added = newRows.Except(oldRows).Order().ToList();
-        var removed = oldRows.Except(newRows).Order().ToList();
+        // ⛔ S6 (ФВ-6.6). Рядок належить таблиці його комірок; рядок прихованої
+        // таблиці не з'являється ні серед доданих, ні серед видалених — його
+        // ключ і код таблиці теж її дані. Наявність рядка рахується ДО фільтра
+        // колонок: інакше рядок, у якому змінилась лише заборонена колонка,
+        // виглядав би доданим чи видаленим.
+        var rowReadable = oldCells.Concat(newCells)
+            .GroupBy(c => c.Row)
+            .ToDictionary(g => g.Key, g => g.Any(c => readable.CanReadTableOf(c.Column)));
+
+        var added = newRows.Except(oldRows).Where(r => rowReadable[r]).Order().ToList();
+        var removed = oldRows.Except(newRows).Where(r => rowReadable[r]).Order().ToList();
 
         var changed = oldMap.Keys.Union(newMap.Keys)
+            .Where(k => readable.CanReadColumn(k.ColumnDefId))
             .Where(k => oldRows.Contains(k.RowId) && newRows.Contains(k.RowId))
             .Where(k => !SameValue(oldMap.GetValueOrDefault(k), newMap.GetValueOrDefault(k)))
             .OrderBy(k => k.RowId).ThenBy(k => k.ColumnDefId)
@@ -278,10 +303,16 @@ public sealed class CompareDocumentVersionsHandler(
         return SameUntyped(av, bv);
     }
 
+    /// <remarks>
+    /// ⛔ `C1`: <c>Float</c>, не <c>Number</c>. Значення зрізу — МАШИННИЙ запис
+    /// (Invariant, без розрядів), культура користувача тут ні до чого; а
+    /// <c>AllowThousands</c> під Invariant викидав кому, і «12,5» дорівнювало 125 —
+    /// порівняння версій мовчало про зміну.
+    /// </remarks>
     private static bool SameUntyped(string a, string b)
     {
-        return decimal.TryParse(a, NumberStyles.Number, CultureInfo.InvariantCulture, out var x)
-               && decimal.TryParse(b, NumberStyles.Number, CultureInfo.InvariantCulture, out var y)
+        return decimal.TryParse(a, NumberStyles.Float, CultureInfo.InvariantCulture, out var x)
+               && decimal.TryParse(b, NumberStyles.Float, CultureInfo.InvariantCulture, out var y)
             ? x == y
             : string.Equals(a, b, StringComparison.Ordinal);
     }
@@ -306,11 +337,11 @@ public sealed class CompareDocumentVersionsHandler(
 internal static class DocumentVersionAccess
 {
     /// <summary>Чужий і неіснуючий документ — однаковий 404, як у <c>GET /documents/{id}</c>.</summary>
-    public static async Task RequireAsync(GetDocumentHandler getDocument, long documentId, CancellationToken ct)
+    /// <returns>Видимий документ (з його проєктом).</returns>
+    public static async Task<DocumentSummary> RequireAsync(GetDocumentHandler getDocument, long documentId, CancellationToken ct)
     {
-        if (await getDocument.HandleAsync(documentId, null, ct).ConfigureAwait(false) is null)
-        {
-            throw new NotFoundException(
+        return await getDocument.HandleAsync(documentId, null, ct).ConfigureAwait(false)
+            ?? throw new NotFoundException(
                 "ECR-DOC-0404",
                 $"Документ {documentId} не знайдено.",
                 new Dictionary<string, object?>(StringComparer.Ordinal)
@@ -318,6 +349,5 @@ internal static class DocumentVersionAccess
                     ["messageKey"] = "err.ECR-DOC-0404.document",
                     ["documentId"] = documentId.ToString(CultureInfo.InvariantCulture),
                 });
-        }
     }
 }

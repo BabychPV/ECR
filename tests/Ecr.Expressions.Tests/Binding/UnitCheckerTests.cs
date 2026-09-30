@@ -119,7 +119,7 @@ public sealed class UnitCheckerTests
 
         var mismatch = Assert.Single(diagnostics);
         Assert.Equal("ECR-TMPL-4223", mismatch.Code);
-        Assert.Contains("розмірност", mismatch.Message, StringComparison.Ordinal);
+        Assert.Equal("expr.unit.dimensionMismatch", mismatch.MessageKey);
 
         // І сам CONVERT між розмірностями теж відхиляється — на тій самій
         // підставі, що й у базі (CK_Conv_SameDimension).

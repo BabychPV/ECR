@@ -4,7 +4,8 @@ using Ecr.Expressions.Evaluation;
 namespace Ecr.Expressions.Functions;
 
 /// <summary>
-/// Каталог функцій діалекту <c>Template</c> — рівно тринадцять (<c>02b</c> §7).
+/// Каталог функцій діалекту <c>Template</c> — рівно двадцять (<c>02b</c> §7,
+/// «Функції довідників»).
 /// Розширення — зміна контракту, тобто <c>questions.md</c> і зупинка.
 /// </summary>
 /// <remarks>
@@ -26,7 +27,8 @@ public sealed class FunctionRegistry
 {
 
     /// <summary>
-    /// Тринадцять функцій діалекту <c>Template</c> (02b §7).
+    /// Двадцять функцій діалекту <c>Template</c> (02b §7): тринадцять
+    /// звичайних і сім спецформ довідників — пошук (RT-20a) і агрегати (RT-20b).
     /// </summary>
     /// <remarks>
     /// ⚠ <c>CONVERT</c> тут не за симетрією з методологіями, а за потребою
@@ -65,6 +67,28 @@ public sealed class FunctionRegistry
         // його не заповнював. Тип результату — `Null` (як у `IF`/`IFERROR`):
         // фактичний тип залежить від поля довідника, який тут невідомий.
         new("REGFIELD", 2, 2, false, ExpressionValueType.Null),
+
+        // ⚠ Чотирнадцята й п'ятнадцята — пошук запису довідника (RT-20a,
+        // `D-159`; `02b` «Функції довідників»). Це СПЕЦФОРМИ: обчислює їх
+        // `RegistryForms` через диспетчер `Evaluator`, а не `Invoke` нижче,
+        // бо умова `REGONE` рахується над кожним рядком довідника ліниво.
+        // Тут — лише сигнатура для розбору й метаданих. Результат — id запису
+        // (`EntryRef` у рантаймі — число, §5.3). Кількість частин `REGFIND`
+        // не обмежена тут: її звіряє з первинним ключем публікація (RT-21).
+        new("REGFIND", 2, null, false, ExpressionValueType.Number),
+        new("REGONE", 2, 2, false, ExpressionValueType.Number),
+
+        // ⚠ Шістнадцята–двадцята — агрегати по рядках довідника (RT-20b,
+        // `D-159`; §5.4). Теж СПЕЦФОРМИ: фільтр і вираз рахуються над кожним
+        // рядком у власній області `ROW`. Це НЕ діапазон таблиці: `AcceptsRange`
+        // — false, аргументи — код довідника, умова, вираз. `REGMIN`/`REGMAX`
+        // дають число або дату — за типом виразу, тож статично `Null`, як
+        // `REGFIELD`; уточнює тип перевірка публікації (RT-21).
+        new("REGSUM", 3, 3, false, ExpressionValueType.Number),
+        new("REGAVG", 3, 3, false, ExpressionValueType.Number),
+        new("REGMIN", 3, 3, false, ExpressionValueType.Null),
+        new("REGMAX", 3, 3, false, ExpressionValueType.Null),
+        new("REGCOUNT", 2, 2, false, ExpressionValueType.Number),
     ];
 
     private static readonly Dictionary<string, FunctionSignature> Template =
@@ -155,6 +179,13 @@ public sealed class FunctionRegistry
             "IF" => TemplateFunctions.If(args[0], args[1], args[2]),
             "IFERROR" => TemplateFunctions.IfError(args[0], args[1]),
             "CONVERT" => ConvertFunction.Invoke(args, context),
+
+            // ⛔ Не «невідома функція»: вони є в наборі, але вже обчислені
+            // значення аргументів їм не годяться — умова `REGONE` мусить
+            // рахуватися над кожним рядком довідника. Сюди потрапляє лише
+            // виклик в обхід `Evaluator`, і це дефект викликача.
+            "REGFIND" or "REGONE" or "REGSUM" or "REGAVG" or "REGMIN" or "REGMAX" or "REGCOUNT" => throw new InvalidOperationException(
+                $"Функцію '{name}' обчислює Evaluator як спецформу (RegistryForms), а не каталог."),
 
             // Сюди не потрапити з розібраного виразу: парсер відхиляє невідомі
             // імена ще при публікації. Лишається як явна межа набору.

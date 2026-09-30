@@ -28,7 +28,7 @@ public sealed class HealthTests(SqlServerFixture sql)
     /// — завалити тест. Інакше підсистема тихо випадає зі спостереження, а
     /// звіт лишається зеленим.
     /// </remarks>
-    private static readonly string[] ExpectedChecks = ["db", "jobs", "sources"];
+    private static readonly string[] ExpectedChecks = ["db", "jobs", "sources", "worker"];
 
     private const string Password = "Api-Health-Probe-2026!";
 
@@ -249,7 +249,6 @@ public sealed class HealthTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
-    [Trait("Requirement", "ФВ-12.9")]
     public async Task Health_ready_зелений_і_перелік_перевірок_повний()
     {
         // ⛔ ДВІ умови, не одна. Зелений при півтора перевірках теж зелений:

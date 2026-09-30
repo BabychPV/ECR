@@ -174,7 +174,9 @@ public sealed class Project : Entity<int>
     /// Позначає проєкт заархівованим.
     /// </summary>
     /// <param name="utcNow">Момент операції.</param>
-    /// <exception cref="InvalidOperationException">Проєкт не активний.</exception>
+    /// <exception cref="DomainException">
+    /// <c>ECR-PRD-0409</c> — проєкт уже заархівований або ще не активний.
+    /// </exception>
     /// <remarks>
     /// ⛔ Це ПОЗНАЧКА, а не перенесення даних: фізично в <c>arc.*</c> їх
     /// переносить <c>ArchiveJob</c>, і робить це окремим свідомим кроком.
@@ -187,10 +189,34 @@ public sealed class Project : Entity<int>
     /// </remarks>
     public void Archive(DateTime utcNow)
     {
+        // ⛔ F-12 (UX-прохід, четвертий раунд): `DomainException` з кодом, а не
+        // `InvalidOperationException`. Повторна архівація проходила перевірку
+        // «усі періоди закриті» (вони й закриті) і падала ТУТ — конвеєр не знає
+        // `InvalidOperationException`, тож клієнт отримував `500` на цілком
+        // людську дію «натиснув удруге». Родина `PRD` — та сама, що в сусідній
+        // відмові архівації (`err.ECR-PRD-0409.openPeriods`).
+        if (Status == ProjectStatus.Archived)
+        {
+            throw new DomainException(
+                "ECR-PRD-0409",
+                $"Проєкт {Code} уже заархівований.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-PRD-0409.projectAlreadyArchived",
+                    ["projectCode"] = Code,
+                });
+        }
+
         if (Status != ProjectStatus.Active)
         {
-            throw new InvalidOperationException(
-                $"Заархівувати можна лише активний проєкт; стан {Status}.");
+            throw new DomainException(
+                "ECR-PRD-0409",
+                $"Заархівувати можна лише активний проєкт; стан {Status}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-PRD-0409.archiveNotActive",
+                    ["status"] = Status.ToString(),
+                });
         }
 
         Status = ProjectStatus.Archived;
@@ -208,6 +234,8 @@ public sealed class Project : Entity<int>
     /// <exception cref="DomainException">Період чужий або причина порожня.</exception>
     public void PinCurrentPeriod(int periodId, string reason, int userId, DateTime utcNow)
     {
+        EnsureNotArchived();
+
         if (_periods.All(p => p.Id != periodId))
         {
             throw new DomainException(
@@ -239,6 +267,8 @@ public sealed class Project : Entity<int>
     /// <param name="utcNow">Момент операції.</param>
     public void UnpinCurrentPeriod(int userId, DateTime utcNow)
     {
+        EnsureNotArchived();
+
         CurrentPeriodMode = CurrentPeriodMode.Auto;
         CurrentPeriodPinnedReason = null;
         CurrentPeriodChangedAt = utcNow;
@@ -301,6 +331,33 @@ public sealed class Project : Entity<int>
         // правці одного з них, і розбіжність видно лише тоді, коли період
         // закриється не тоді, коли всі чекали.
         TimeZoneId = SiteTimeZone.Create(timeZoneId);
+    }
+
+    /// <summary>
+    /// Поточний період архівованого проєкту не змінюється (F-12).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Заміна поточного періоду в архівованому проєкті приймалася (<c>204</c>)
+    /// і лягала в журнал структурних змін — правка конфігурації проєкту, який
+    /// оголошено завершеним. Архів — кінцевий стан: жодна дія над проєктом,
+    /// крім читання, у ньому не має сенсу. Перевірка в сутності, а не в
+    /// обробнику: правило належить стану проєкту, і наступний викликач
+    /// <c>Pin</c>/<c>Unpin</c> не зобов'язаний про нього пам'ятати.
+    /// </remarks>
+    /// <exception cref="DomainException"><c>ECR-PRD-0409</c>.</exception>
+    private void EnsureNotArchived()
+    {
+        if (Status == ProjectStatus.Archived)
+        {
+            throw new DomainException(
+                "ECR-PRD-0409",
+                $"Проєкт {Code} заархівований: поточний період не змінюється.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-PRD-0409.projectArchivedCurrentPeriod",
+                    ["projectCode"] = Code,
+                });
+        }
     }
 
     /// <summary>Перевіряє, що дата належить проєкту (ФВ-1.11).</summary>

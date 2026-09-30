@@ -10,10 +10,17 @@ namespace Ecr.Application.Templates.Dto;
 /// «змінено все».
 /// </summary>
 /// <param name="Changes">Зміни з класифікацією за ризиком (`ФВ-7.3`).</param>
-/// <param name="AffectedDocumentCount">Скільки документів прив'язано до вихідної версії.</param>
+/// <param name="AffectedDocumentCount">Скільки документів прив'язано до вихідної (старшої) версії.</param>
+/// <param name="FromVersionId">
+/// Вихідна версія — СТАРША з двох, незалежно від того, з якої відкрили
+/// порівняння (R-08).
+/// </param>
+/// <param name="ToVersionId">Цільова версія — новіша з двох.</param>
 public sealed record TemplateDiffDto(
     IReadOnlyList<TemplateChangeDto> Changes,
-    int AffectedDocumentCount);
+    int AffectedDocumentCount,
+    int FromVersionId,
+    int ToVersionId);
 
 /// <param name="ElementPath">Шлях: <c>Sheet.Table.Column</c> або <c>Sheet.Table.RowKey</c>.</param>
 /// <param name="Kind">`Added` / `Removed` / `Modified` / `Presentation`.</param>

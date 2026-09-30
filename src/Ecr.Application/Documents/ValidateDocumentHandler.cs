@@ -18,7 +18,10 @@ public sealed class ValidateDocumentHandler(
     Domain.Abstractions.IClock clock,
     IUnitOfWork uow,
     Security.IAccessDecisionService access,
-    Common.ICurrentUser currentUser)
+    Common.ICurrentUser currentUser,
+
+    // ⛔ D16-04: знімок полів довідника для `REGFIELD` у правилах.
+    IRegistryStore registries)
 {
     /// <summary>Виконує валідацію всіх аркушів документа за період.</summary>
     /// <param name="documentId">Документ.</param>
@@ -32,21 +35,13 @@ public sealed class ValidateDocumentHandler(
         // і повертає повідомлення з підписами рядків і колонок — тобто його
         // зміст. До цього її міг запустити будь-хто, хто увійшов.
         var profile = await Security.PermissionCheck
-            .RequireAsync(access, currentUser, "Document.View", ct)
+            .RequireInAnyProjectAsync(access, currentUser, "Document.View", ct)
             .ConfigureAwait(false);
 
-        var read = await access.CanReadDocumentAsync(profile, documentId, ct).ConfigureAwait(false);
-        if (!read.IsAllowed)
-        {
-            throw new Errors.AccessDeniedException(
-                "ECR-AUTH-0403", $"Немає доступу до документа {documentId}: {read.Reason}.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-AUTH-0403.noDocumentAccess",
-                    ["documentId"] = documentId.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                    ["reason"] = read.Reason.ToString(),
-                });
-        }
+        // ⛔ B-08: невидимий документ — 404, як і `GET /documents/{id}`, а не 403
+        // «NoGrant»: різниця відповідей сама розкривала б, що документ існує.
+        // ФВ-6.14: і право — у проєкті документа.
+        await DocumentVisibility.RequireVisibleAsync(access, profile, documentId, "Document.View", ct).ConfigureAwait(false);
 
         // ⚠ Екземпляри таблиць беруться ОДНИМ запитом, а не по аркушах:
         // бюджет — 3 с p95 на весь документ, і похід у базу на кожну з
@@ -58,7 +53,7 @@ public sealed class ValidateDocumentHandler(
         // з'ясовується з кешу метаданих (без походу в базу) ДО читання
         // комірок і рядків — так у пакетні запити нижче йдуть лише таблиці,
         // які реально валідуються, а не всі ~90 таблиць документа.
-        var toValidate = new List<(TableInstanceRef Instance, TableDef Table)>();
+        var toValidate = new List<(TableInstanceRef Instance, TableDef Table, TemplateVersionSnapshot Snapshot)>();
         foreach (var instance in instances)
         {
             var snapshot = await metadata.GetAsync(instance.TemplateVersionId, ct).ConfigureAwait(false);
@@ -71,7 +66,7 @@ public sealed class ValidateDocumentHandler(
                 continue;
             }
 
-            toValidate.Add((instance, table));
+            toValidate.Add((instance, table, snapshot));
         }
 
         var instanceIds = toValidate.Select(t => t.Instance.TableInstanceId).ToList();
@@ -80,7 +75,7 @@ public sealed class ValidateDocumentHandler(
         // аркушах: бюджет — 3 с p95 на весь документ, і похід у базу на
         // кожну таблицю у нього не вкладається (той самий принцип, що вже
         // застосований вище до `GetTableInstancesAsync`).
-        var cellsByInstance = await cellStore.ReadSlicesAsync(instanceIds, ct).ConfigureAwait(false);
+        var cellsByInstance = await cellStore.ReadSlicesAsync(instanceIds, periodKey, ct).ConfigureAwait(false);
 
         // ⛔ Рядки екземпляра читаються ЯВНО: правило рівня рядка має назвати
         // `RowKey`, а зі самих комірок його не взяти — рядок без жодного
@@ -95,9 +90,18 @@ public sealed class ValidateDocumentHandler(
         // нижче означало б піти в базу настільки ж зайвий раз.
         var headerValues = await headers.GetExpressionValuesAsync(documentId, ct).ConfigureAwait(false);
 
+        // ⚠ B-11: мова того, хто ЗАПУСТИВ перевірку — `ValidationSummary.MessagesJson`
+        // нижче зберігає РЕЗУЛЬТАТ, тобто вже готовий текст цією мовою. Читач
+        // із ІНШОЮ мовою інтерфейсу (`GetValidationResultHandler`) побачить
+        // збережений підсумок мовою того, хто востаннє натиснув «Перевірити»
+        // чи «Подати» — той самий компроміс, що вже був ДО цього фіксу (тоді
+        // мова була завжди `en`, тепер — мова автора запуску). Перерахунок
+        // підсумка під мову КОЖНОГО читача — окрема задача (передбачала б або
+        // повторну валідацію на читанні, або збереження messageKey замість
+        // готового тексту), не ця.
         var messages = new List<ValidationMessage>();
 
-        foreach (var (instance, table) in toValidate)
+        foreach (var (instance, table, snapshot) in toValidate)
         {
             var cells = cellsByInstance.TryGetValue(instance.TableInstanceId, out var found)
                 ? found
@@ -106,7 +110,9 @@ public sealed class ValidateDocumentHandler(
                 ? foundRows
                 : new Dictionary<string, long>(StringComparer.Ordinal);
 
-            messages.AddRange(TableValidation.Run(engine, table, cells, rowIds, headerValues));
+            messages.AddRange(await TableValidation
+                .RunAsync(engine, registries, snapshot, table, cells, rowIds, headerValues, currentUser.Language, ct)
+                .ConfigureAwait(false));
         }
 
         var summary = new ValidationSummary(
@@ -125,7 +131,17 @@ public sealed class ValidateDocumentHandler(
         await results.SaveAsync(summary, ct).ConfigureAwait(false);
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
 
-        return messages;
+        // ⛔ S6 (ФВ-6.6): ЗБЕРІГАЄТЬСЯ підсумок цілком — подання питає його про
+        // помилки на весь документ, а не на те, що бачить запускач. ВІДДАЮТЬСЯ ж
+        // лише повідомлення про таблиці й колонки, які запускач бачить: адреса
+        // (`RowKey`, `ColumnCode`) і текст правила — теж зміст прихованого.
+        var scope = await access.ReadScopeAsync(profile, documentId, ct).ConfigureAwait(false);
+        Security.DocumentReadScope? readable = null;
+
+        // ⛔ Приховані помилки не зникають мовчки (`HiddenValidationIssues`):
+        // інакше запускач, чиї зауваження всі під забороною, бачить «зауважень
+        // немає», а «Подати» відмовляє.
+        return HiddenValidationIssues.ForViewer(messages, m => (readable ??= scope.InPeriod(periodKey)).CanReadAt(m.TableDefId, m.ColumnCode));
     }
 
 }

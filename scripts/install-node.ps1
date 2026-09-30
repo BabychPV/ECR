@@ -11,8 +11,14 @@
         прибрала їх прямим рішенням, бо вони ставали черговою
         "ASK і чекай" зупинкою при кожній новій межі каталогу).
 
+    ⚠ 2026-09-27: роль PK1/PK2 нічого не визначає (CLAUDE.md). Корисний
+    ефект скрипта лишився один — `core.hooksPath` (крок 2), без якого
+    `.githooks/pre-push` не діє. `bootstrap-sync.ps1` у репозиторії більше
+    немає (обмін через гілку `sync` скасовано 2026-09-08) — передумовою
+    він не є.
+
     ХТО ЗАПУСКАЄ
-        Людина, один раз на машині, після `bootstrap-sync.ps1`:
+        Людина, один раз на машині:
             powershell -ExecutionPolicy Bypass -File scripts\install-node.ps1 -Node PK1
             powershell -ExecutionPolicy Bypass -File scripts\install-node.ps1 -Node PK2
 
@@ -378,8 +384,8 @@ if ($null -ne $oldModel -and $oldModel -ne $wantModel) {
 # потрібно для роботи (код, тести, docs, contracts, scripts), PK1 не
 # обмежений формально, хоч і не пише код за роллю.
 #
-# ⛔ Це НЕ стосується шести гейтів CI (build, test, honesty-guard,
-# server, client, a11y) і заборони прямого пушу в main
+# ⛔ Це НЕ стосується семи гейтів CI (build, test, honesty-guard,
+# server, client, a11y (dark), a11y (light)) і заборони прямого пушу в main
 # (.githooks/pre-push) — вони лишаються критерієм приймання коду,
 # а не зональним бар'єром, і жодна настанова їх не знімає.
 $denyList = @()

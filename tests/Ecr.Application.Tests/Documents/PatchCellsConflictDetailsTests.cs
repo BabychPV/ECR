@@ -75,6 +75,15 @@ public sealed class PatchCellsConflictDetailsTests
 
     public PatchCellsConflictDetailsTests()
     {
+        // ⚠ Видимість документа — перша перевірка обробника (V-02); предмет
+        // цього файлу — перелік розбіжностей, тож документ тут видимий.
+        _access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
+            .Returns(EditDecision.Allow());
+
+        // S6: межі читання — «бачить усе», крім тесту про приховану колонку.
+        _access.ReadScopeAsync(Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
+            .Returns(async _ => ReadScopes.Everything(await _metadata.GetAsync(2, CancellationToken.None)));
+
         var column = new ColumnDef(
             TableDefId, EcrCode.Create("Volume"),
             new LocalizedText(new Dictionary<string, string> { ["en"] = "Volume" }), 1, CellDataType.Decimal);
@@ -105,16 +114,15 @@ public sealed class PatchCellsConflictDetailsTests
         _metadata.GetAsync(2, Arg.Any<CancellationToken>()).Returns(snapshot);
 
         // Версія в базі не та, яку заявляє клієнт, — це і є конфлікт.
-        _rows.GetRowVersionsAsync(TableInstance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
-             .Returns(new Dictionary<string, string> { [RowKey] = "0xFF" });
-        _rows.GetRowIdsAsync(TableInstance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
-             .Returns(new Dictionary<string, long> { [RowKey] = TableRowId });
+        _rows.GetRowsAsync(TableInstance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+             .Returns(new List<RowState> { new(RowKey, TableRowId, "0xFF", IsOrphaned: false) });
     }
 
     private PatchCellsHandler Handler()
         => new(_cells, _rows, _documents, _periods, _metadata, _access,
                new Application.Validation.ValidationEngine(new RealFormulaEngine()),
-               _methodologies, _registries, _headers, _audit, _auditReader, _jobs, _uow, _user, _clock);
+               _methodologies, _registries, _headers, _audit, _auditReader, _jobs, _uow, _user, _clock,
+               Substitute.For<ISheetEditGate>(), NSubstitute.Substitute.For<Ecr.Application.Ports.IUnitCatalog>());
 
     private static IDocumentHeaderStore CreateHeaderStore()
     {
@@ -179,6 +187,42 @@ public sealed class PatchCellsConflictDetailsTests
         // 08:00 проти 09:00.
         Assert.Equal(TheirMoment, details.TheirChangedAt);
         Assert.NotEqual(Now, details.TheirChangedAt);
+    }
+
+    /// <summary>
+    /// S6: застарілий <c>baseVersion</c> не є оракулом значення колонки, якої
+    /// автор не бачить — рядок конфлікту лишається, чуже значення, автор і
+    /// момент не дочитуються взагалі.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-6.6")]
+    public async Task Конфлікт_у_прихованій_колонці_без_чужого_значення_і_автора()
+    {
+        StoredValue(new CellValueData { ValueNumeric = 12.40m });
+        LastChange(new LastCellChange(TheirMoment, ChangedByUserId: 77, "A. Serikbayev", "UserEdit"));
+        _access.ReadScopeAsync(Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
+            .Returns(async _ => DocumentReadScope.For(
+                new AccessBuilder()
+                    .Grant(ResourceKind.Project, AccessBuilder.ProjectId, GrantLevel.Read)
+                    .Deny(ResourceKind.Column, VolumeColumnId)
+                    .Build(),
+                AccessBuilder.ProjectId,
+                await _metadata.GetAsync(2, CancellationToken.None)));
+
+        var conflict = await Assert.ThrowsAsync<ConcurrencyConflictException>(
+            () => Handler().HandleAsync(StaleRequest(new PatchCell("Volume", 9m)), CancellationToken.None));
+
+        var details = Assert.Single(ConflictsOf(conflict));
+        Assert.Equal(RowKey, details.RowKey);
+        Assert.Equal(9m, details.YourValue);
+        Assert.Null(details.TheirValue);
+        Assert.Null(details.TheirUser);
+        Assert.Null(details.TheirOrigin);
+        Assert.Null(details.TheirChangedAt);
+
+        await _cells.DidNotReceiveWithAnyArgs().ReadCellsAsync(default!, default);
+        await _auditReader.DidNotReceiveWithAnyArgs().ReadLastChangesAsync(default, default!, default, default);
     }
 
     [Fact]
@@ -295,8 +339,8 @@ public sealed class PatchCellsConflictDetailsTests
     {
         // Рядок відсутній у версіях: клієнт заявив `baseVersion` на рядок, який
         // тим часом зник.
-        _rows.GetRowVersionsAsync(TableInstance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
-             .Returns(new Dictionary<string, string>());
+        _rows.GetRowsAsync(TableInstance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+             .Returns(new List<RowState>());
 
         var conflict = await Assert.ThrowsAsync<ConcurrencyConflictException>(
             () => Handler().HandleAsync(StaleRequest(new PatchCell("Volume", 9m)), CancellationToken.None));

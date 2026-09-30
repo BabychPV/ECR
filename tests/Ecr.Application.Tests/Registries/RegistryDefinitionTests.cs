@@ -40,6 +40,8 @@ public sealed class RegistryDefinitionTests
     private readonly ICurrentUser _user = Substitute.For<ICurrentUser>();
     private readonly IClock _clock = Substitute.For<IClock>();
     private readonly IAccessDecisionService _access = Substitute.For<IAccessDecisionService>();
+    private readonly IUnitCatalog _units = Substitute.For<IUnitCatalog>();
+    private readonly IRegistryKeyStore _keys = Substitute.For<IRegistryKeyStore>();
 
     private readonly RegistryDef _permits;
     private readonly RegistryDef _substances;
@@ -57,6 +59,16 @@ public sealed class RegistryDefinitionTests
         _clock.UtcNow.Returns(Now);
         _user.UserId.Returns(9);
         _user.CorrelationId.Returns("test");
+
+        // HSE301 U1: одиниці поля звіряються з довідником. Кілограм і тонна —
+        // ті, що бере тест зміни одиниці нижче; 777 навмисно немає.
+        _units.GetAsync(Arg.Any<CancellationToken>()).Returns(new UnitCatalogSnapshot(
+            new Dictionary<string, UnitRef>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["kg"] = new(1, "kg", 1),
+                ["t"] = new(8, "t", 1, 1000m),
+            },
+            new Dictionary<string, int>(StringComparer.Ordinal)));
 
         // BE-24 крок 2: пряме збереження публікує одразу — тому і `Registry.Publish`.
         Allow("Registry.View", "Registry.EditDefinition", "Registry.Publish");
@@ -292,7 +304,12 @@ public sealed class RegistryDefinitionTests
     public async Task Нове_поле_не_може_бути_обовʼязковим_одразу()
     {
         // ⚠ Наявні записи його не мають, і вимога значення зробила б увесь
-        // довідник недійсним у мить збереження.
+        // довідник недійсним у мить збереження. RT-11: відмова — саме через
+        // наявні записи; у порожньому довіднику нове поле може бути обов'язковим.
+        _registries.ListEntriesAsync(PermitsId, Arg.Any<CancellationToken>())
+            .Returns<IReadOnlyList<Ecr.Domain.Entities.Dictionaries.RegistryEntry>>(
+                [new Ecr.Domain.Entities.Dictionaries.RegistryEntry(PermitsId, EcrCode.Create("P1"), Text("P1"))]);
+
         var fields = Fields();
         fields.Add(new RegistryFieldSaveDto(
             null, "HazardClass", Text("Клас небезпеки"), "Int", 5,
@@ -460,12 +477,57 @@ public sealed class RegistryDefinitionTests
         Assert.Equal(Tonne, _permits.Fields.Single(f => f.Code == "Limit").UnitId);
     }
 
-    private GetRegistryDefinitionHandler Definitions() => new(_registries, _access, _user);
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Directive", "HSE301-U1")]
+    public async Task Неіснуюча_одиниця_поля_422_з_ключем_і_опис_не_зберігається(bool newField)
+    {
+        // ⛔ HSE301 U1 (аудит C6 п.1). Доти UnitId поля не звірявся ні з чим: ключа на
+        // uom.Unit не було, і описка в номері одиниці записувалась мовчки. Тепер ключ
+        // FK_RegField_Unit є — без перевірки в обробнику та сама описка дала б голий
+        // 500 на 547. І наявне поле (зміна одиниці), і нове — обидва шляхи.
+        // Мутація: прибрати виклик RequireKnownUnitsAsync → сюди не приходить
+        // BusinessRuleException, SaveChanges викликається — червоне.
+        const int Missing = 777;
+
+        var fields = Fields();
+        if (newField)
+        {
+            fields.Add(new RegistryFieldSaveDto(
+                null, "Volume", Text("Volume"), nameof(CellDataType.Decimal), 5,
+                IsRequired: false, IsKey: false, LookupRegistryDefId: null, UnitId: Missing));
+        }
+        else
+        {
+            var index = fields.FindIndex(f => f.Code == "Limit");
+            fields[index] = fields[index] with { UnitId = Missing };
+        }
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Saves().HandleAsync("PERMIT", Request(fields: fields), default));
+
+        Assert.Equal("ECR-REG-0422", error.ErrorCode);
+        Assert.Equal("err.ECR-REG-0422.unknownUnit", error.Details!["messageKey"]);
+        Assert.Equal(newField ? "Volume" : "Limit", error.Details["fieldCode"]);
+        Assert.Equal("777", error.Details["unitId"]);
+
+        // Відмова ДО запису: ні журналу, ні збереження, одиниця поля не змінена.
+        await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
+        await _audit.DidNotReceive().WriteStructureChangeAsync(
+            Arg.Any<StructureChangeRecord>(), Arg.Any<CancellationToken>());
+        Assert.Null(_permits.Fields.Single(f => f.Code == "Limit").UnitId);
+        Assert.DoesNotContain(_permits.Fields, f => f.Code == "Volume");
+    }
+
+    private GetRegistryDefinitionHandler Definitions() => new(_registries, _keys, _access, _user);
 
     private GetRegistryHistoryHandler History() => new(_registries, _auditReader, _access, _user);
 
     private SaveRegistryDefinitionHandler Saves()
-        => new(_registries, _uow, _audit, _access, _user, _clock);
+        => new(_registries, _uow, _audit, _access, _user, _clock, _units, _keys,
+            new Ecr.Application.Registries.Keys.RegistryKeyService(_keys, _uow));
 
     private void Allow(params string[] permissions)
     {

@@ -93,7 +93,7 @@ describe('JobResultLink — посилання на файл результат�
   it('resultUrl не null — посилання веде саме на нього', () => {
     show(<JobResultLink resultUrl="/api/v1/documents/7/export/e-1" />);
 
-    const link = screen.getByRole('link', { name: '⟦document.exportReady⟧' });
+    const link = screen.getByRole('link', { name: '⟦jobs.resultDownload⟧' });
     expect(link.getAttribute('href')).toBe('/api/v1/documents/7/export/e-1');
   });
 

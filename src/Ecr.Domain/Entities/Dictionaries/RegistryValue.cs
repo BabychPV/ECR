@@ -61,6 +61,16 @@ public sealed class RegistryValue : Entity<long>
     /// <summary>Одиниця значення, якщо поле її має (ФВ-16.1).</summary>
     public int? ValueUnitId { get; private set; }
 
+    /// <summary>
+    /// Автор ОСТАННЬОЇ зміни значення; <c>null</c> — невідомий. Ставить
+    /// <c>UnitOfWork</c> під час збереження (як і в <see cref="RegistryEntry.ChangedByUserId"/>).
+    /// </summary>
+    public int? ChangedByUserId { get; private set; }
+
+    /// <summary>Фіксує автора зміни значення.</summary>
+    /// <param name="userId">Автор; <c>null</c> — невідомий.</param>
+    public void MarkChangedBy(int? userId) => ChangedByUserId = userId;
+
     /// <summary>Записує значення відповідно до типу поля.</summary>
     /// <param name="dataType">Тип поля з <c>RegistryFieldDef</c>.</param>
     /// <param name="value">Значення; <c>null</c> — очистити.</param>

@@ -41,6 +41,9 @@ public sealed class DeleteUnitTests
         Allow("Uom.EditCatalog");
 
         _units.FindUnitByIdAsync(UnitId, Arg.Any<CancellationToken>()).Returns(_unit);
+        _units.LockUnitAsync(UnitId, Arg.Any<CancellationToken>()).Returns(_unit);
+        _uow.ExecuteInTransactionAsync(Arg.Any<Func<CancellationToken, Task>>(), Arg.Any<CancellationToken>())
+            .Returns(call => call.Arg<Func<CancellationToken, Task>>()(call.Arg<CancellationToken>()));
         Usage();
     }
 
@@ -100,6 +103,7 @@ public sealed class DeleteUnitTests
 
         _units.DidNotReceive().RemoveUnit(Arg.Any<Unit>());
         await _units.DidNotReceive().FindUnitUsageAsync(Arg.Any<int>(), Arg.Any<int>(), Arg.Any<CancellationToken>());
+        await _units.DidNotReceive().FindUnitUsageForUpdateAsync(Arg.Any<int>(), Arg.Any<int>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -117,8 +121,12 @@ public sealed class DeleteUnitTests
     private UnitUsageHandler UsageOf() => new(_units, _access, _user);
 
     private void Usage(params UsageItemDto[] items)
-        => _units.FindUnitUsageAsync(UnitId, Arg.Any<int>(), Arg.Any<CancellationToken>())
+    {
+        _units.FindUnitUsageAsync(UnitId, Arg.Any<int>(), Arg.Any<CancellationToken>())
             .Returns(new UsageResponse(items.Length, items));
+        _units.FindUnitUsageForUpdateAsync(UnitId, Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(new UsageResponse(items.Length, items));
+    }
 
     private void Allow(params string[] permissions)
     {

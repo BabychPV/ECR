@@ -31,3 +31,26 @@ public sealed record RegistryEntryUpsertDto(
     LocalizedText Display,
     long? ParentEntryId,
     IReadOnlyDictionary<string, object?> Values);
+
+/// <summary>Один запис довідника цілком — для форми правки (X-03, R-04).</summary>
+/// <param name="Id">Ідентифікатор.</param>
+/// <param name="Code">Стабільний код.</param>
+/// <param name="DisplayL10n">
+/// Назва ВСІМА мовами каталогу. ⛔ Саме цього бракувало формі: перелік несе
+/// назву однією мовою, і збереження з нього стирало переклади.
+/// </param>
+/// <param name="ParentEntryId">Батьківський запис; <c>null</c> — корінь.</param>
+/// <param name="ValidFrom">Початок вікна чинності.</param>
+/// <param name="ValidTo">Кінець вікна чинності.</param>
+/// <param name="Values">
+/// Значення полів: код поля → текст в інваріантному форматі, який приймає
+/// <c>POST …/entries</c>; <c>null</c> — поле не заповнене.
+/// </param>
+public sealed record RegistryEntryDetailDto(
+    long Id,
+    string Code,
+    LocalizedText DisplayL10n,
+    long? ParentEntryId,
+    DateOnly? ValidFrom,
+    DateOnly? ValidTo,
+    IReadOnlyDictionary<string, string?> Values);

@@ -156,12 +156,14 @@ public sealed record MethodologyRuleDto(
 /// НЕ помилка сама по собі: вимогу можна додати ДО прив'язки — лише
 /// попередження в UI, не заборона.
 /// </param>
+/// <param name="ColumnCode">Код колонки — підпис замість голого <c>ColumnDefId</c> (F-21); лише в переліку.</param>
 public sealed record MethodologyRequiredInputDto(
     int Id,
     int ColumnDefId,
     RequiredInputSeverity Severity,
     IReadOnlyDictionary<string, string>? HintL10n,
-    bool HasActiveBinding);
+    bool HasActiveBinding,
+    string? ColumnCode = null);
 
 /// <summary>Оголошений вихід версії — те, що методологія повертає (ФВ-16.6).</summary>
 /// <param name="Id">Ідентифікатор виходу.</param>
@@ -209,6 +211,7 @@ public sealed record MethodologyTestCaseDto(
 /// в інших відповідях — <c>null</c>.
 /// </param>
 /// <param name="TableNameL10n">Назва таблиці мовами каталогу; як і код — лише в переліку.</param>
+/// <param name="ColumnCode">Код колонки-приймача (F-21); як і код таблиці — лише в переліку.</param>
 public sealed record CalculationBindingDto(
     int Id,
     int TableDefId,
@@ -218,7 +221,8 @@ public sealed record CalculationBindingDto(
     string MatchJson,
     bool IsActive,
     string? TableCode = null,
-    Ecr.Domain.ValueObjects.LocalizedText? TableNameL10n = null);
+    Ecr.Domain.ValueObjects.LocalizedText? TableNameL10n = null,
+    string? ColumnCode = null);
 
 /// <summary>
 /// Число, яке дав актуальний прогін розрахунку на документі.
@@ -234,10 +238,23 @@ public sealed record CalculationBindingDto(
 /// <param name="Value">Значення.</param>
 /// <param name="UnitId">Одиниця результату.</param>
 /// <param name="SubstanceEntryId">Речовина; <c>null</c> — вихід без речовини.</param>
+/// <param name="MethodologyCode">Код методології — підпис числа (F-21).</param>
+/// <param name="MethodologyVersion">Номер версії методології («1.2.0»), а не її ідентифікатор (F-21).</param>
+/// <param name="IsStale">
+/// Входи документа змінилися після прогону, що дав це число (F-05): число
+/// вже не відповідає даним, потрібен перерахунок.
+/// </param>
+/// <param name="CalculatedAt">Коли завершився прогін (UTC).</param>
+/// <param name="InputsChangedAt">Остання зміна входів після прогону (UTC); <c>null</c> — не змінювались.</param>
 public sealed record CalculationResultDto(
     int MethodologyVersionId,
     string? SourceRowKey,
     string OutputCode,
     decimal Value,
     int UnitId,
-    long? SubstanceEntryId);
+    long? SubstanceEntryId,
+    string? MethodologyCode = null,
+    string? MethodologyVersion = null,
+    bool IsStale = false,
+    DateTime? CalculatedAt = null,
+    DateTime? InputsChangedAt = null);

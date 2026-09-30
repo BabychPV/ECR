@@ -188,6 +188,7 @@ public sealed class MappingPreviewStore(EcrDbContext db) : IMappingPreviewStore
                         && ids.Contains(m.TargetColumnDefId!.Value))
             .Select(m => m.TargetColumnDefId!.Value)
             .Distinct()
+            .OrderBy(id => id)
             .Take(MaxColumns)
             .ToListAsync(ct)
             .ConfigureAwait(false);
@@ -197,6 +198,7 @@ public sealed class MappingPreviewStore(EcrDbContext db) : IMappingPreviewStore
             .Where(b => b.IsActive && ids.Contains(b.ColumnDefId))
             .Select(b => b.ColumnDefId)
             .Distinct()
+            .OrderBy(id => id)
             .Take(MaxColumns)
             .ToListAsync(ct)
             .ConfigureAwait(false);
@@ -206,6 +208,7 @@ public sealed class MappingPreviewStore(EcrDbContext db) : IMappingPreviewStore
             .Where(f => !f.IsDeleted && f.ColumnDefId != null && ids.Contains(f.ColumnDefId!.Value))
             .Select(f => f.ColumnDefId!.Value)
             .Distinct()
+            .OrderBy(id => id)
             .Take(MaxColumns)
             .ToListAsync(ct)
             .ConfigureAwait(false);
@@ -259,6 +262,7 @@ public sealed class MappingPreviewStore(EcrDbContext db) : IMappingPreviewStore
         var found = await db.Units
             .AsNoTracking()
             .Where(u => ids.Contains(u.Id))
+            .OrderBy(u => u.Id)
             .Take(MaxMaps)
             .Select(u => new { u.Id, u.Code })
             .ToListAsync(ct)

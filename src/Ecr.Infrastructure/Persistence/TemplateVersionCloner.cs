@@ -24,35 +24,70 @@ namespace Ecr.Infrastructure.Persistence;
 public static class TemplateVersionCloner
 {
     /// <summary>Посилання формули на колонку і рядок за їхніми ідентичностями.</summary>
-    /// <param name="Formula">Формула клону.</param>
+    /// <param name="Formula">Формула клону — ВИЛУЧЕНА з графа до першого збереження.</param>
+    /// <param name="Table">Таблиця клону, якій формула належить.</param>
     /// <param name="ColumnCode">Код колонки в джерелі; <c>null</c> — формула не колонкова.</param>
     /// <param name="RowKey">Ключ рядка в джерелі; <c>null</c> — формула не рядкова.</param>
-    public sealed record FormulaLink(FormulaDef Formula, string? ColumnCode, string? RowKey);
+    public sealed record FormulaLink(FormulaDef Formula, TableDef Table, string? ColumnCode, string? RowKey);
+
+    /// <summary>Посилання правила валідації рівня колонки на колонку за її кодом.</summary>
+    /// <param name="Rule">Правило клону.</param>
+    /// <param name="Table">Таблиця клону, якій правило належить.</param>
+    /// <param name="ColumnCode">Код колонки в джерелі.</param>
+    public sealed record RuleLink(ValidationRule Rule, TableDef Table, string ColumnCode);
+
+    /// <summary>Усе, що треба перев'язати після першого збереження клону.</summary>
+    /// <param name="Formulas">Формули, вилучені з графа до першого збереження.</param>
+    /// <param name="Rules">Правила рівня колонки.</param>
+    public sealed record CloneLinks(IReadOnlyList<FormulaLink> Formulas, IReadOnlyList<RuleLink> Rules);
 
     /// <summary>Готує клон і перелік посилань, які треба перев'язати після збереження.</summary>
     /// <param name="source">Версія-джерело з повністю завантаженим графом.</param>
     /// <param name="newVersion">Номер нової версії.</param>
     /// <param name="userId">Автор.</param>
     /// <param name="utcNow">Момент створення.</param>
-    /// <returns>Клон і посилання формул на колонки та рядки.</returns>
-    public static (TemplateVersion Clone, IReadOnlyList<FormulaLink> Links) Prepare(
+    /// <returns>Клон (БЕЗ формул) і посилання, які треба перев'язати.</returns>
+    /// <remarks>
+    /// ⛔ V-05: формули ВИЛУЧАЮТЬСЯ з графа клону. Раніше вони йшли в перше
+    /// <c>SaveChanges</c> разом із колонками й рядками, але з <c>NULL</c> в
+    /// <c>ColumnDefId</c>/<c>RowDefId</c> (нових ключів колонок ще не було),
+    /// і <c>CK_Formula_Scope</c> відхиляв вставку — «Clone version» для
+    /// будь-якої версії з формулою давав <c>500</c>. Формула не має навігації
+    /// на колонку (лише число), тож EF не може впорядкувати вставку сам:
+    /// спершу колонки й рядки, потім — формули з уже відомими ключами
+    /// (<see cref="Relink"/>), обидва кроки в одній транзакції сховища.
+    /// </remarks>
+    public static (TemplateVersion Clone, CloneLinks Links) Prepare(
         TemplateVersion source, string newVersion, int userId, DateTime utcNow)
     {
         ArgumentNullException.ThrowIfNull(source);
 
         // Посилання ЗАПАМ'ЯТОВУЮТЬСЯ до скидання ключів: після нього
         // ColumnDefId уже нічого не означає, а Code лишається.
-        var links = new List<FormulaLink>();
+        var formulaLinks = new List<FormulaLink>();
+        var ruleLinks = new List<RuleLink>();
         foreach (var sheet in source.Sheets)
         {
             foreach (var table in sheet.Tables)
             {
                 foreach (var formula in table.Formulas)
                 {
-                    links.Add(new FormulaLink(
+                    formulaLinks.Add(new FormulaLink(
                         formula,
+                        table,
                         table.Columns.FirstOrDefault(c => c.Id == formula.ColumnDefId)?.Code,
                         table.Rows.FirstOrDefault(r => r.Id == formula.RowDefId)?.RowKeyValue));
+                }
+
+                // ⚠ Правило рівня колонки до V-05 клонувалося з ColumnDefId
+                // ДЖЕРЕЛА як є: FK не падав (колонка джерела існує), але
+                // правило чернетки мовчки перевіряло чужу колонку.
+                foreach (var rule in table.ValidationRules)
+                {
+                    if (table.Columns.FirstOrDefault(c => c.Id == rule.ColumnDefId)?.Code is { } code)
+                    {
+                        ruleLinks.Add(new RuleLink(rule, table, code));
+                    }
                 }
             }
         }
@@ -94,16 +129,19 @@ public static class TemplateVersionCloner
                     Reset(formula, nameof(FormulaDef.TableDefId));
 
                     // Обнуляються НЕ в нуль, а в null: нуль означав би
-                    // посилання на колонку з Id = 0, якої не буває, і FK
-                    // впала б на вставці замість того, щоб лишитися порожньою.
+                    // посилання на колонку з Id = 0, якої не буває. Значення
+                    // однаково ставить Relink — до вставки формула не доходить.
                     Set(formula, nameof(FormulaDef.ColumnDefId), null);
                     Set(formula, nameof(FormulaDef.RowDefId), null);
                 }
+
+                DetachFormulas(table);
 
                 foreach (var rule in table.ValidationRules)
                 {
                     Reset(rule, nameof(ValidationRule.Id));
                     Reset(rule, nameof(ValidationRule.TableDefId));
+                    Set(rule, nameof(ValidationRule.ColumnDefId), null);
                 }
             }
         }
@@ -114,51 +152,65 @@ public static class TemplateVersionCloner
             Reset(field, nameof(HeaderFieldDef.TemplateVersionId));
         }
 
-        return (source, links);
+        return (source, new CloneLinks(formulaLinks, ruleLinks));
     }
 
-    /// <summary>Перев'язує формули клону на його власні колонки і рядки.</summary>
-    /// <param name="clone">Уже збережений клон із новими ключами.</param>
+    /// <summary>
+    /// Прив'язує вилучені формули й правила до колонок і рядків уже збереженого клону.
+    /// </summary>
     /// <param name="links">Посилання, зібрані в <see cref="Prepare"/>.</param>
-    public static void Relink(TemplateVersion clone, IReadOnlyList<FormulaLink> links)
+    /// <returns>Формули, готові до вставки: ключі таблиці, колонки й рядка — клону.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// Колонки чи рядка з тим самим кодом у клоні немає — клон розійшовся з
+    /// джерелом; мовчки лишити формулу без цілі означало б порушити
+    /// <c>CK_Formula_Scope</c> або, гірше, загубити формулу.
+    /// </exception>
+    public static IReadOnlyList<FormulaDef> Relink(CloneLinks links)
     {
-        ArgumentNullException.ThrowIfNull(clone);
         ArgumentNullException.ThrowIfNull(links);
 
-        // ⚠ Порівняння за ПОСИЛАННЯМ, а не за значенням. Entity<TId>.Equals
-        // порівнює Id, а в клоні всі Id щойно скинуті в нуль — тобто всі
-        // формули «рівні» одна одній, і словник злився б в один запис.
-        var byFormula = new Dictionary<object, FormulaLink>(ReferenceEqualityComparer.Instance);
-        foreach (var link in links)
+        var formulas = new List<FormulaDef>(links.Formulas.Count);
+        foreach (var link in links.Formulas)
         {
-            byFormula[link.Formula] = link;
-        }
+            Set(link.Formula, nameof(FormulaDef.TableDefId), link.Table.Id);
 
-        foreach (var sheet in clone.Sheets)
-        {
-            foreach (var table in sheet.Tables)
+            if (link.ColumnCode is { } code)
             {
-                foreach (var formula in table.Formulas)
-                {
-                    if (!byFormula.TryGetValue(formula, out var link))
-                    {
-                        continue;
-                    }
-
-                    if (link.ColumnCode is { } code)
-                    {
-                        Set(formula, nameof(FormulaDef.ColumnDefId),
-                            table.Columns.FirstOrDefault(c => c.Code == code)?.Id);
-                    }
-
-                    if (link.RowKey is { } key)
-                    {
-                        Set(formula, nameof(FormulaDef.RowDefId),
-                            table.Rows.FirstOrDefault(r => r.RowKeyValue == key)?.Id);
-                    }
-                }
+                Set(link.Formula, nameof(FormulaDef.ColumnDefId), ColumnId(link.Table, code));
             }
+
+            if (link.RowKey is { } key)
+            {
+                Set(link.Formula, nameof(FormulaDef.RowDefId),
+                    link.Table.Rows.FirstOrDefault(r => r.RowKeyValue == key)?.Id
+                    ?? throw new InvalidOperationException(
+                        $"У клоні таблиці {link.Table.Code} немає рядка {key}: клон розійшовся з джерелом."));
+            }
+
+            formulas.Add(link.Formula);
         }
+
+        foreach (var link in links.Rules)
+        {
+            Set(link.Rule, nameof(ValidationRule.ColumnDefId), ColumnId(link.Table, link.ColumnCode));
+        }
+
+        return formulas;
+    }
+
+    private static int ColumnId(TableDef table, string code)
+        => table.Columns.FirstOrDefault(c => c.Code == code)?.Id
+           ?? throw new InvalidOperationException(
+               $"У клоні таблиці {table.Code} немає колонки {code}: клон розійшовся з джерелом.");
+
+    /// <summary>Вилучає формули з колекції таблиці, щоб перше збереження їх не вставляло.</summary>
+    private static void DetachFormulas(TableDef table)
+    {
+        var field = typeof(TableDef).GetField("_formulas", BindingFlags.NonPublic | BindingFlags.Instance)
+            ?? throw new InvalidOperationException(
+                "У TableDef немає поля _formulas: клон розійшовся з моделлю.");
+
+        ((List<FormulaDef>)field.GetValue(table)!).Clear();
     }
 
     private static void Reset(object entity, string property) => Set(entity, property, 0);

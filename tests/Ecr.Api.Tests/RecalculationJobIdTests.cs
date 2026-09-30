@@ -115,8 +115,8 @@ public sealed class RecalculationJobIdTests
                       .Returns(Task.FromResult<IReadOnlyList<int>>([]));
         _rows.GetRowVersionsAsync(TableInstance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
              .Returns(new Dictionary<string, string> { ["7001001"] = "0x0A" });
-        _rows.GetRowIdsAsync(TableInstance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
-             .Returns(new Dictionary<string, long> { ["7001001"] = 1001L });
+        _rows.GetRowsAsync(TableInstance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+             .Returns(new List<RowState> { new("7001001", 1001L, "0x0A", IsOrphaned: false) });
 
         // ⛔ ОДИН профіль на обидва обробники, і в ньому НЕМАЄ
         // `System.ViewHealth`: саме це право й перевіряє `GetJobStatusHandler`
@@ -124,8 +124,14 @@ public sealed class RecalculationJobIdTests
         // предмет тесту — з ним 200 віддався б і без автора задачі.
         _access.BuildProfileAsync(Editor, Arg.Any<CancellationToken>())
                .Returns(new AccessBuilder { UserId = Editor }.Build());
+        _access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
+            .Returns(EditDecision.Allow());
 
-        _access.CanEditSliceAsync(Arg.Any<AccessProfile>(), TableInstance, Arg.Any<CancellationToken>())
+        // ⚠ WR-03: `EnsureAccessAsync` тепер запитує лише адреси батчу через
+        // `CanEditCellsAsync`, не весь зріз через `CanEditSliceAsync`.
+        _access.CanEditCellsAsync(
+                   Arg.Any<AccessProfile>(), TableInstance, Arg.Any<PeriodKey>(),
+                   Arg.Any<IReadOnlyCollection<CellAddress>>(), Arg.Any<CancellationToken>())
                .Returns(new Dictionary<CellAddress, EditDecision>
                {
                    [new CellAddress(PeriodKey.Parse(Period), 1001L, VolumeColumnId)] = EditDecision.Allow(),
@@ -185,6 +191,8 @@ public sealed class RecalculationJobIdTests
         _user.UserId.Returns(Stranger);
         _access.BuildProfileAsync(Stranger, Arg.Any<CancellationToken>())
                .Returns(new AccessBuilder { UserId = Stranger }.Build());
+        _access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
+            .Returns(EditDecision.Allow());
 
         var denied = await Assert.ThrowsAsync<Application.Errors.AccessDeniedException>(
             () => Controller().Get(response.RecalculationJobId!, CancellationToken.None))
@@ -198,7 +206,7 @@ public sealed class RecalculationJobIdTests
                 _cells, _rows, _documents, _periods, _metadata, _access,
                 new Application.Validation.ValidationEngine(new RealFormulaEngine()),
                 _methodologies, _registries, _headers, _audit, Substitute.For<IAuditReader>(),
-                _jobs, _uow, _user, _clock)
+                _jobs, _uow, _user, _clock, Substitute.For<ISheetEditGate>(), NSubstitute.Substitute.For<Ecr.Application.Ports.IUnitCatalog>())
             .HandleAsync(
                 new PatchCellsRequest(
                     TableInstance, Period, "UserEdit",
@@ -238,6 +246,11 @@ public sealed class RecalculationJobIdTests
         }
 
         public Task<string> EnqueueExclusiveAsync<TJob>(
+            string targetKey, object? payload, CancellationToken ct, int? createdByUserId = null)
+            where TJob : IBackgroundJob
+            => EnqueueAsync<TJob>(payload, ct, createdByUserId);
+
+        public Task<string> EnqueueCoalescedAsync<TJob>(
             string targetKey, object? payload, CancellationToken ct, int? createdByUserId = null)
             where TJob : IBackgroundJob
             => EnqueueAsync<TJob>(payload, ct, createdByUserId);

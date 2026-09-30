@@ -210,6 +210,9 @@ $env:ECR_ConnectionStrings__Ecr = "Server=localhost;Database=EcrE0Ruler;Trusted_
 $env:ECR_Bootstrap__Password    = 'E0-Bootstrap-2026!'
 $env:ASPNETCORE_URLS            = 'http://localhost:5097'
 $env:ECR_Auth__RequireHttps     = 'false'
+# ✎ 2026-09-29 (S11): без launch-профілю це Production, а там без сертифіката
+# Data Protection застосунок не стартує — для стенда явна згода:
+$env:ECR_Auth__DataProtection__AllowUnprotectedKeys = 'true'
 dotnet run --project src\Ecr.Api --no-launch-profile
 
 # 3) гейт продукту (в іншій оболонці)

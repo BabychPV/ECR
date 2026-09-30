@@ -26,9 +26,20 @@
     Скільки синтетичних документів згенерувати (0 — не генерувати).
     Один документ — це ~90 таблиць × 12 періодів, тобто ~1.7 млн комірок.
 
+.PARAMETER Upgrade
+    Оновити НАЯВНУ базу, а не створити нову — те, що робить замовник при
+    кожному оновленні (CLAUDE.md, «✎ 2026-09-29: перевірка ОНОВЛЕННЯ»).
+    Без `DROP`/`CREATE`: база мусить існувати, інакше зупинка. Далі те саме,
+    що й `deploy-ecr.ps1` без `-FirstDeployment`: ідемпотентний скрипт
+    міграцій і `Sql/*.sql` у тому самому порядку (`$scripts` нижче), без
+    `14-agent-jobs.sql`; потім один старт застосунку, щоб він виконав
+    `09-seed.sql` поверх живих даних. Bootstrap не створюється (він уже є),
+    синтетичні документи не генеруються (`-Documents` ігнорується).
+
 .EXAMPLE
     powershell -File tools/setup-dev-db.ps1
     powershell -File tools/setup-dev-db.ps1 -Documents 0
+    powershell -File tools/setup-dev-db.ps1 -Server localhost -Database EcrUpgrade -Upgrade
 #>
 [CmdletBinding()]
 param(
@@ -56,7 +67,11 @@ param(
     # перевіряти взагалі. Параметр існує не заради тесту самої перевірки, а
     # тому, що профіль задають ПІСЛЯ створення бази (позначка
     # `Ecr_SmallFiles`), і той, хто знає свій профіль, знає число краще.
-    [double] $RequireFreeGb = -1
+    [double] $RequireFreeGb = -1,
+
+    # ⚠ Оновлення наявної бази (див. `.PARAMETER Upgrade`). Без перемикача
+    # поведінка рівно та сама, що й до його появи.
+    [switch] $Upgrade
 )
 
 $ErrorActionPreference = 'Stop'
@@ -179,7 +194,14 @@ $serverHost = ($Server -split '\\')[0]
 $isLocalServer = $serverHost -in @('localhost', '.', '(local)', '127.0.0.1', $env:COMPUTERNAME)
 
 if ($isLocalServer) {
-    if ($RequireFreeGb -ge 0) { $needGb = [double] $RequireFreeGb } else { $needGb = Get-RequiredFreeGb }
+    # ⚠ `-Upgrade` без явного `-RequireFreeGb` не перевіряє місце: 14 ГБ —
+    # це початковий розмір файлів груп, які `01-filegroups.sql` створює на
+    # ПОРОЖНІЙ базі; на наявній файли вже є, і оновлення їх не виділяє.
+    # Вимагати 15.5 ГБ тут означало б зупиняти оновлення стенда через місце,
+    # якого воно не займе. Хто знає свій приріст — задає `-RequireFreeGb`.
+    if ($RequireFreeGb -ge 0) { $needGb = [double] $RequireFreeGb }
+    elseif ($Upgrade) { $needGb = 0 }
+    else { $needGb = Get-RequiredFreeGb }
 
     if ($needGb -gt 0) {
         # Куди насправді ляжуть файли: наш `-DataPath`, інакше типовий каталог
@@ -221,6 +243,41 @@ error 112), а прогони на такому стенді ще й дали б
     }
 }
 
+# ⛔ `-Upgrade` оновлює ЛИШЕ наявну базу — перевірка до `dotnet ef`, щоб
+# описка в імені не коштувала хвилини генерації. Створювати базу тут не можна
+# навмисно: «оновлення», що мовчки створило порожню базу, дало б зелений
+# прогін без жодних живих даних — тобто перевірило б не те.
+if ($Upgrade) {
+    # ⛔ Вивід спершу ЗБИРАЄТЬСЯ, і лише потім фільтрується. `Select-Object
+    # -First 1` прямо в конвеєрі з `sqlcmd` зупиняє конвеєр і обриває сам
+    # процес — `$LASTEXITCODE` тоді -1 на цілком успішному запиті (так і
+    # впало друге поспіль `-Upgrade` на EcrUpgrade, хоча перше пройшло).
+    $previousEap = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $dbOutput = & sqlcmd -S $Server -E -C -b -h -1 -W -d master `
+            -Q "SET NOCOUNT ON; SELECT CASE WHEN DB_ID('$Database') IS NULL THEN 0 ELSE 1 END;" 2>&1
+        $dbExitCode = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $previousEap
+    }
+    $dbExists = $dbOutput | Where-Object { "$_" -match '^\s*[01]\s*$' } | Select-Object -First 1
+
+    if ($dbExitCode -ne 0) {
+        throw "Не вдалося запитати $Server про базу $Database (sqlcmd повернув $dbExitCode): $($dbOutput -join ' ')"
+    }
+    if ("$dbExists".Trim() -ne '1') {
+        throw "-Upgrade: бази $Database на $Server немає. Режим оновлює лише наявну базу; нову створює запуск без -Upgrade."
+    }
+
+    if ($PSBoundParameters.ContainsKey('Documents') -and $Documents -gt 0) {
+        Write-Host "-Documents $Documents ігнорується: -Upgrade не генерує синтетичних документів." -ForegroundColor Yellow
+    }
+
+    Write-Host "Оновлюю наявну базу $Database (без DROP/CREATE)…"
+}
+
 Write-Host 'Генерую migration.sql…'
 New-Item -ItemType Directory -Force -Path $artifacts | Out-Null
 Invoke-NativeStep "dotnet ef migrations script" {
@@ -230,6 +287,7 @@ Invoke-NativeStep "dotnet ef migrations script" {
         --output $migration | Out-Null
 }
 
+if (-not $Upgrade) {
 Write-Host "Створюю базу $Database…"
 Invoke-Sql -Db 'master' -Query @"
 IF DB_ID('$Database') IS NOT NULL
@@ -258,6 +316,10 @@ if ($DataPath) {
 EXEC sys.sp_addextendedproperty @name = N'Ecr_DataPath', @value = N'$DataPath';
 "@
 }
+}
+# ⚠ Кінець гілки «нова база». `-Upgrade` не чіпає ні самої бази, ні позначки
+# `Ecr_DataPath`: файли груп уже лежать там, куди їх поклало перше
+# розгортання, а повторний `sp_addextendedproperty` упав би на дублікаті.
 
 # ⛔ Перелік і порядок — з `09-commands.md` §3. `07` переносить таблиці на
 # схеми партиціонування і тому йде ПІСЛЯ міграцій; `11` — ПЕРЕД `07`,
@@ -314,7 +376,11 @@ foreach ($name in $scripts) {
 # ⚠ Seed виконує САМ застосунок при старті (`02-contracts.md` §14: seed — це
 # DML, і він належить застосунку). Тому дані генеруються вже після першого
 # запуску — генератор спирається на довідник політик періодів із seed.
-if ($Documents -gt 0) {
+#
+# ⚠ `-Upgrade` стартує застосунок так само, заради того самого seed — поверх
+# ЖИВИХ даних (MERGE прав і ролей, «Змінені тексти», одноразові виправлення).
+# Саме цей шлях свіжа база не перевіряє ніколи.
+if ($Documents -gt 0 -or $Upgrade) {
     # ⛔ Складання ЯВНО і один раз. Нижче обидва `dotnet run` ідуть із
     # `--no-build` — і без цього кроку вони виконують ПОПЕРЕДНЮ збірку, а не
     # дерево. Скрипт, чия мета «чисте середовище з поточного дерева», мовчки
@@ -330,11 +396,17 @@ if ($Documents -gt 0) {
         dotnet build (Join-Path $root 'Ecr.sln') -v q --nologo | Out-Null
     }
 
-    Write-Host 'Перший старт: seed і bootstrap-адміністратор…'
+    if ($Upgrade) { Write-Host 'Старт застосунку: seed поверх наявних даних…' }
+    else { Write-Host 'Перший старт: seed і bootstrap-адміністратор…' }
 
     $env:ECR_ConnectionStrings__Ecr = $connection
     $env:ECR_Bootstrap__Password = $BootstrapPassword
     $env:ASPNETCORE_URLS = 'http://localhost:5099'
+
+    # ⛔ S11: без launch-профілю це Production, а там без сертифіката Data
+    # Protection застосунок не стартує. Стенд розробника — явна згода на
+    # незахищене кільце (тоді старт пише Critical, а db — Degraded).
+    $env:ECR_Auth__DataProtection__AllowUnprotectedKeys = 'true'
 
     # ⚠ Шлях береться В ЛАПКИ: у ньому є пробіл («ECR Web»), а Start-Process
     # ділить -ArgumentList по пробілах і без лапок передає два аргументи.
@@ -369,16 +441,28 @@ if ($Documents -gt 0) {
         }
 
         if (-not $ready) { throw "Застосунок не піднявся за 60 с. Лог: $log" }
-        Write-Host '  seed виконано, bootstrap створено'
+        if ($Upgrade) { Write-Host '  seed виконано поверх наявних даних' }
+        else { Write-Host '  seed виконано, bootstrap створено' }
     }
     finally {
         if (-not $api.HasExited) { $api.Kill(); $api.WaitForExit() }
     }
 
-    Write-Host "Генерую $Documents документ(ів)…"
-    Invoke-NativeStep "Ecr.DataGen" {
-        dotnet run --project (Join-Path $root 'tools/Ecr.DataGen') --no-build -- `
-            --documents $Documents --fill 90 --year 2026 --connection $connection | Out-Null
+    if ($Upgrade) {
+        # ⚠ Звіт секцій сіду (`PRINT` → `Seed: …` у журналі старту,
+        # `SeedRunner.LogSeedPrint`): одноразові виправлення даних кажуть,
+        # скільки рядків змінили. На повторному оновленні там мають бути нулі.
+        $seedLines = @(Get-Content -Path $log -Encoding UTF8 -ErrorAction SilentlyContinue |
+            Where-Object { $_ -match 'Seed: ' })
+        foreach ($line in $seedLines) { Write-Host "  $($line.Trim())" }
+        if ($seedLines.Count -eq 0) { Write-Host "  (рядків «Seed: …» у журналі старту немає; лог: $log)" }
+    }
+    else {
+        Write-Host "Генерую $Documents документ(ів)…"
+        Invoke-NativeStep "Ecr.DataGen" {
+            dotnet run --project (Join-Path $root 'tools/Ecr.DataGen') --no-build -- `
+                --documents $Documents --fill 90 --year 2026 --connection $connection | Out-Null
+        }
     }
 }
 
@@ -389,4 +473,7 @@ Write-Host 'Змінні оточення для запуску:'
 Write-Host "  ECR_ConnectionStrings__Ecr = $connection"
 Write-Host "  ECR_Bootstrap__Password    = $BootstrapPassword"
 Write-Host ''
-Write-Host "Вхід: bootstrap / $BootstrapPassword (пароль треба змінити при першому вході)."
+# ⚠ На оновленій базі bootstrap уже є зі СВОЇМ паролем (`D-115`: змінна діє
+# лише на першому старті), тож обіцяти вхід цим паролем було б неправдою.
+if ($Upgrade) { Write-Host 'Вхід: наявні облікові записи з їхніми паролями (bootstrap не перестворюється).' }
+else { Write-Host "Вхід: bootstrap / $BootstrapPassword (пароль треба змінити при першому вході)." }

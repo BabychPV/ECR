@@ -26,6 +26,12 @@ public sealed class FileLogOptions
 
     /// <summary>Стеля одного файлу, МБ; після неї — перекат у <c>ecr-yyyyMMdd_001.log</c>.</summary>
     public int FileSizeLimitMb { get; set; } = 100;
+
+    /// <summary>
+    /// Чи писати поруч машиночитний журнал <c>ecr-yyyyMMdd.json</c> — рядок JSON на
+    /// запис (<c>U20</c>, <see cref="CompactJsonLogFormatter"/>).
+    /// </summary>
+    public bool Json { get; set; } = true;
 }
 
 /// <summary>Що вийшло з файловим приймачем: куди пише або чому не пише.</summary>
@@ -158,7 +164,7 @@ public static partial class FileLog
             return NullLoggerProvider.Instance;
         }
 
-        var logger = new LoggerConfiguration()
+        var configuration = new LoggerConfiguration()
             .MinimumLevel.Verbose()
             .Enrich.With(new RequestEnricher(accessor))
             .Enrich.WithProperty("MachineName", Environment.MachineName)
@@ -173,8 +179,26 @@ public static partial class FileLog
                 shared: false,
                 // ⛔ Без буфера: запис про помилку, що лишився в пам'яті процесу,
                 // який саме через цю помилку впав, — це відсутній запис.
-                buffered: false)
-            .CreateLogger();
+                buffered: false);
+
+        // ⚠ U20: ДРУГИЙ приймач, а не заміна текстового. Текст читає людина
+        // (`Select-String` у runbook), JSON — SIEM: `CorrelationId`, `UserId`, `Code`
+        // стають полями, а не шматком рядка, який треба вирізати регуляркою.
+        // Строки й стеля — ті самі, тож диск росте вдвічі, не більше.
+        if (options.Json)
+        {
+            configuration = configuration.WriteTo.File(
+                new CompactJsonLogFormatter(),
+                Path.Combine(directory, "ecr-.json"),
+                rollingInterval: RollingInterval.Day,
+                retainedFileCountLimit: options.RetainedFiles,
+                fileSizeLimitBytes: options.FileSizeLimitMb * 1024L * 1024L,
+                rollOnFileSizeLimit: true,
+                shared: false,
+                buffered: false);
+        }
+
+        var logger = configuration.CreateLogger();
 
         status.Directory = directory;
         return new SerilogLoggerProvider(logger, dispose: true);

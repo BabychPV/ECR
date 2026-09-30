@@ -1,8 +1,6 @@
 using System.Globalization;
-using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Domain.Abstractions;
-using Ecr.Domain.Errors;
 using Ecr.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -31,21 +29,15 @@ public sealed partial class QuartzJobAdapter(
 {
     /// <summary>
     /// Скільки РЕТРАЇВ (не спроб) дозволено після першого провалу (D-134, №11
-    /// T10 #40).
+    /// T10 #40) — <see cref="JobRetryPolicy.MaxRetryAttempts"/>.
     /// </summary>
-    /// <remarks>
-    /// ⚠ Судження, не факт із документа (жоден тікет не називає число):
-    /// три ретраї покривають типову транзієнтну відмову (дедлок, обрив
-    /// з'єднання з SQL Server) без нескінченного спаму на систематично
-    /// зламаній задачі. Значення суто внутрішнє — конфігурації, яку читав би
-    /// хтось іззовні, тут немає.
-    /// </remarks>
-    public const int MaxRetryAttempts = 3;
+    public const int MaxRetryAttempts = JobRetryPolicy.MaxRetryAttempts;
 
-    /// <summary>
-    /// Базова затримка експоненційного відступу: 30 с, 60 с, 120 с.
-    /// </summary>
-    public static readonly TimeSpan RetryBaseDelay = TimeSpan.FromSeconds(30);
+    /// <summary>Базова затримка відступу — <see cref="JobRetryPolicy.RetryBaseDelay"/>.</summary>
+    public static readonly TimeSpan RetryBaseDelay = JobRetryPolicy.RetryBaseDelay;
+
+    /// <summary>Стан скасованої задачі в <c>itg.JobProgress</c>.</summary>
+    private const string CancelledState = "Cancelled";
 
     /// <inheritdoc />
     public async Task Execute(IJobExecutionContext context)
@@ -54,7 +46,11 @@ public sealed partial class QuartzJobAdapter(
 
         var jobId = context.JobDetail.Key.Name;
         var typeName = context.JobDetail.JobDataMap.GetString(QuartzJobScheduler.JobCodeKey);
-        var payload = context.JobDetail.JobDataMap.GetString(QuartzJobScheduler.PayloadKey);
+        // ⚠ O1: задача злиття (IFormulaRecalculationJob) несе актуальне тіло в
+        // QuartzPayloadMerges — з масивами постановок, злитих, поки вона чекала.
+        // Д-1: `freshCells` — з минулого прогону злито нові комірки, відлік стелі з триґера не діє.
+        var payload = QuartzPayloadMerges.Take(jobId, out var freshCells)
+                      ?? context.JobDetail.JobDataMap.GetString(QuartzJobScheduler.PayloadKey);
 
         using var scope = services.CreateScope();
         var provider = scope.ServiceProvider;
@@ -92,14 +88,13 @@ public sealed partial class QuartzJobAdapter(
         // один тик. Лок — негайна спроба, без очікування: якщо інший
         // інстанс уже виконує цю саму job, цей тик просто пропускається, а
         // не чекає й не дублює роботу пізніше.
-        var isRecurring = context.JobDetail.JobDataMap.ContainsKey(QuartzJobScheduler.RecurringKey)
-            && context.JobDetail.JobDataMap.GetString(QuartzJobScheduler.RecurringKey) == "1";
+        var isRecurring = QuartzJobScheduler.IsRecurring(context.JobDetail);
 
         await using var distributedLock = isRecurring
             ? await SqlDistributedLock.TryAcquireAsync(
                     provider.GetRequiredService<EcrDbContext>().Database.GetConnectionString()
                         ?? throw new InvalidOperationException("У контексту немає рядка підключення."),
-                    $"Ecr.Job.{jobId}", context.CancellationToken)
+                    QuartzJobScheduler.LockNameOf(jobId), context.CancellationToken)
                 .ConfigureAwait(false)
             : null;
 
@@ -117,10 +112,32 @@ public sealed partial class QuartzJobAdapter(
         using var logScope = logger.BeginScope(
             new Dictionary<string, object> { ["CorrelationId"] = correlationId });
 
+        // ⛔ Скасовану задачу з черги не запускаємо. Скасування з ІНШОГО
+        // інстанса не може зняти задачу з цієї черги (вона в пам'яті цього
+        // процесу) — воно лишає рядок `Cancelled` (`QuartzJobScheduler.CancelAsync`),
+        // і саме тут це стає відмовою від старту. Без перевірки `Begin`
+        // переписав би `Cancelled` на `Running`, і скасування мовчки не діяло б.
+        // Розклад не перевіряється: `Cancelled` його рядка — це про МИНУЛИЙ тик.
+        if (!isRecurring && progress is not null
+            && await progress.FindAsync(jobId, context.CancellationToken).ConfigureAwait(false)
+                is { State: CancelledState })
+        {
+            LogJobSkippedCancelled(logger, jobId, typeName ?? "—");
+            await context.Scheduler.DeleteJob(context.JobDetail.Key, CancellationToken.None).ConfigureAwait(false);
+            QuartzPayloadMerges.Forget(jobId);
+            return;
+        }
+
         await StartAsync(progress, jobId, typeName!, attemptNumber, correlationId, clock, context.CancellationToken)
             .ConfigureAwait(false);
 
-        // ⛔ Биття серця на весь час виконання. Прибирання на старті
+        // ⚠ Власний токен задачі — зв'язаний із токеном Quartz. Quartz скасовує
+        // свій на `Interrupt` (скасування на цьому інстансі, зупинка хоста), а
+        // цей додатково скасовує биття серця, коли рядок закрили ЗЗОВНІ —
+        // скасуванням з іншого інстанса.
+        using var jobCancel = CancellationTokenSource.CreateLinkedTokenSource(context.CancellationToken);
+
+        // ⛔ Биття серця на весь час виконання. Прибирання покинутих
         // (`IJobProgressStore.FailStaleAsync`) відрізняє покинуту задачу від
         // чужої живої саме за ним; без биття довга задача, яка не звітує
         // відсотків (імпорт великого файлу), через п'ять хвилин виглядала б
@@ -128,14 +145,14 @@ public sealed partial class QuartzJobAdapter(
         // як до виправлення. Насос живе в СВОЄМУ scope: `DbContext` scoped і
         // не потокобезпечний, а задача в цю мить користується своїм.
         using var heartbeatStop = new CancellationTokenSource();
-        var heartbeat = HeartbeatLoopAsync(jobId, heartbeatStop.Token);
+        var heartbeat = HeartbeatLoopAsync(jobId, jobCancel, heartbeatStop.Token);
 
         try
         {
             await job.ExecuteAsync(
                 payload,
                 new StoreJobProgress(progress, jobId, clock),
-                context.CancellationToken).ConfigureAwait(false);
+                jobCancel.Token).ConfigureAwait(false);
 
             await FinishAsync(progress, jobId, "Succeeded", null, clock, context.CancellationToken)
                 .ConfigureAwait(false);
@@ -144,29 +161,104 @@ public sealed partial class QuartzJobAdapter(
             // ЛИШЕ заради ручного перезапуску провалу — успіх її не потребує,
             // і держати деталь задачі в пам'яті планувальника навічно означало
             // б повільну витік пам'яті на кожен успішний прогін.
-            await context.Scheduler.DeleteJob(context.JobDetail.Key, CancellationToken.None)
-                .ConfigureAwait(false);
+            //
+            // ⛔ Лише РАЗОВА. У розкладу ключ той самий, що в крон-тригера, а
+            // DeleteJob знімає задачу разом із тригерами: сховище в пам'яті,
+            // розклади ставляться тільки на старті — тож задача за розкладом
+            // відпрацьовувала б рівно один раз до наступного рестарту.
+            if (!isRecurring)
+            {
+                await context.Scheduler.DeleteJob(context.JobDetail.Key, CancellationToken.None)
+                    .ConfigureAwait(false);
+                QuartzPayloadMerges.Forget(jobId);
+            }
         }
         catch (OperationCanceledException)
         {
             // Скасування — не провал: його попросили. Але й не успіх, і стан
             // мусить це розрізняти.
-            await FinishAsync(progress, jobId, "Cancelled", null, clock, CancellationToken.None)
+            await FinishAsync(progress, jobId, CancelledState, null, clock, CancellationToken.None)
                 .ConfigureAwait(false);
-            await context.Scheduler.DeleteJob(context.JobDetail.Key, CancellationToken.None)
-                .ConfigureAwait(false);
+
+            // ⛔ Скасовано ПОТОЧНИЙ прогін, а не розклад — див. гілку успіху.
+            if (!isRecurring)
+            {
+                await context.Scheduler.DeleteJob(context.JobDetail.Key, CancellationToken.None)
+                    .ConfigureAwait(false);
+                QuartzPayloadMerges.Forget(jobId);
+            }
+
             throw;
+        }
+        catch (JobDeferredException deferred)
+        {
+            // ⛔ O1 (I2 ФВ-9.8): ресурс зайнятий — новий триґер через відступ з ТИМ
+            // САМИМ лічильником спроби, і потік пулу вільний одразу. Очікування лока
+            // всередині задачі тримало б потік: у I2 так стояли всі 10 потоків Quartz.
+            // ⛔ Д-1 (огляд O1): свіжа дельта — нова серія, а не чужий відлік з триґера.
+            var since = freshCells ? null : DeferredSince(context);
+            var now = clock.UtcNow;
+
+            // ⛔ Стеля (борг O1): лок, що не звільняється, — Failed, а не вічні триґери.
+            if (JobDeferral.IsExhausted(since, now, JobDeferral.MaxDeferral))
+            {
+                var waited = now - since!.Value;
+                LogDeferralExhausted(logger, jobId, typeName ?? "—", deferred.Resource ?? "—", JobDeferral.Format(waited));
+
+                if (progress is not null)
+                {
+                    await WriteProgressAsync(
+                            jobId,
+                            async () =>
+                            {
+                                await progress.ReportAsync(
+                                        jobId, 0, JobDeferral.Envelope(deferred.Resource, waited), now, CancellationToken.None)
+                                    .ConfigureAwait(false);
+                                await FinishAsync(
+                                        progress, jobId, "Failed",
+                                        $"The job was deferred for {JobDeferral.Format(waited)} waiting for resource {deferred.Resource ?? "—"} and was stopped.",
+                                        clock, CancellationToken.None)
+                                    .ConfigureAwait(false);
+                            })
+                        .ConfigureAwait(false);
+                }
+
+                await RequeueExhaustedAsync(context, jobId, typeName, payload, progress, clock).ConfigureAwait(false);
+                QuartzPayloadMerges.MarkFailed(jobId);
+
+                // ⚠ Деталь лишається (дурабельна) — для ручного перезапуску, як у провалу нижче.
+                throw new JobExecutionException(deferred, refireImmediately: false);
+            }
+
+            LogJobDeferred(logger, jobId, typeName ?? "—", deferred.Delay);
+            await ScheduleDeferredAsync(context, correlationId, clock, deferred.Delay, since ?? now).ConfigureAwait(false);
+
+            // Задача чекає в черзі, а не виконується: стан — Queued до наступного триґера.
+            if (progress is not null)
+            {
+                await WriteProgressAsync(
+                        jobId,
+                        () => progress.QueueAsync(jobId, typeName!, now, CancellationToken.None, correlationId: correlationId))
+                    .ConfigureAwait(false);
+            }
+
+            // Задача знову чекає — злиття масиву йде в неї (O1).
+            QuartzPayloadMerges.Reopen(jobId);
         }
         catch (Exception ex)
         {
             var attempt = CurrentAttempt(context);
 
-            if (attempt < MaxRetryAttempts && IsWorthRetrying(ex))
+            if (JobRetryPolicy.ShouldRetry(attempt, ex))
             {
                 // ⚠ Ретрай — НЕ Failed. Клієнт, що опитує стан, має й далі
                 // бачити задачу «у виконанні», а не короткий спалах «провалу»,
                 // який за кілька секунд сам собою стає «виконується» знову.
+                LogJobRetrying(logger, jobId, typeName ?? "—", ex);
                 await ScheduleRetryAsync(context, attempt, correlationId, progress, clock, ex).ConfigureAwait(false);
+
+                // У паузі ретраю задача знову чекає — злиття йде в неї (O1).
+                QuartzPayloadMerges.Reopen(jobId);
                 return;
             }
 
@@ -181,13 +273,18 @@ public sealed partial class QuartzJobAdapter(
                         progress,
                         jobId,
                         "Failed",
-                        JobProgressMessageCodec.Shorten(ex.Message, IJobProgressStore.MaxErrorLength),
+                        // ⛔ V-03: текст винятку БАЗИ (імена об'єктів, значення
+                        // ключа) у `/jobs` не йде — лише в журнал рядком нижче.
+                        JobRetryPolicy.FailureText(ex, correlationId),
                         clock,
                         CancellationToken.None,
-                        ErrorCodeOf(ex)))
+                        JobRetryPolicy.ErrorCodeOf(ex)))
                 .ConfigureAwait(false);
 
-            LogJobFailed(logger, jobId, typeName ?? "—");
+            LogJobFailed(logger, jobId, typeName ?? "—", ex);
+
+            // Тіло задачі злиття — для ручного перезапуску, але в межах (огляд O1, косметика).
+            QuartzPayloadMerges.MarkFailed(jobId);
 
             // ⛔ Деталь задачі НЕ видаляється тут. Дурабельна саме на цей
             // випадок (QuartzJobScheduler.EnqueueCoreAsync): без неї
@@ -225,9 +322,13 @@ public sealed partial class QuartzJobAdapter(
     /// інтервал, тож збій БД мусить тривати п'ять хвилин поспіль, щоб
     /// вплинути хоч на щось. Помилка не ковтається мовчки: вона йде в лог.
     /// </remarks>
-    private async Task HeartbeatLoopAsync(string jobId, CancellationToken ct)
+    /// <param name="jobId">Задача.</param>
+    /// <param name="jobCancel">Токен задачі — скасовується, коли рядок закрили ззовні як <c>Cancelled</c>.</param>
+    /// <param name="ct">Зупинка самого насоса.</param>
+    private async Task HeartbeatLoopAsync(string jobId, CancellationTokenSource jobCancel, CancellationToken ct)
     {
-        using var timer = new PeriodicTimer(IJobProgressStore.HeartbeatInterval);
+        using var timer = new PeriodicTimer(
+            services.GetService<JobHeartbeatSettings>()?.Interval ?? IJobProgressStore.HeartbeatInterval);
 
         // ⚠ Зупинка через Dispose, а не через токен у WaitForNextTickAsync:
         // токен змусив би метод кинути OperationCanceledException рівно в
@@ -247,11 +348,25 @@ public sealed partial class QuartzJobAdapter(
                     return;
                 }
 
-                await store.HeartbeatAsync(
+                var alive = await store.HeartbeatAsync(
                         jobId,
                         scope.ServiceProvider.GetRequiredService<IClock>().UtcNow,
                         CancellationToken.None)
                     .ConfigureAwait(false);
+
+                // ⚠ Рядок уже не активний — його закрили ЗЗОВНІ. Лише
+                // `Cancelled` означає «зупинись» (скасування з іншого інстанса,
+                // де цієї задачі в пам'яті немає). `Failed` від прибирання після
+                // довгого збою БД — не прохання: задача жива, доробить і
+                // запише справжній результат.
+                if (!alive
+                    && await store.FindAsync(jobId, CancellationToken.None).ConfigureAwait(false)
+                        is { State: CancelledState })
+                {
+                    LogJobCancelledElsewhere(logger, jobId);
+                    await jobCancel.CancelAsync().ConfigureAwait(false);
+                    return;
+                }
             }
             catch (Exception ex)
             {
@@ -271,6 +386,21 @@ public sealed partial class QuartzJobAdapter(
                    map.GetString(QuartzJobScheduler.RetryAttemptKey), out var attempt)
             ? attempt
             : 0;
+    }
+
+    /// <summary>Момент першого відкладення з триґера; <c>null</c> — прогін не з відкладення.</summary>
+    private static DateTime? DeferredSince(IJobExecutionContext context)
+    {
+        var map = context.Trigger?.JobDataMap;
+
+        return map is not null
+               && map.ContainsKey(JobDeferral.QuartzSinceKey)
+               && long.TryParse(
+                   map.GetString(JobDeferral.QuartzSinceKey), NumberStyles.Integer, CultureInfo.InvariantCulture,
+                   out var ticks)
+               && ticks > 0 && ticks <= DateTime.MaxValue.Ticks
+            ? new DateTime(ticks, DateTimeKind.Utc)
+            : null;
     }
 
     /// <summary>
@@ -293,38 +423,6 @@ public sealed partial class QuartzJobAdapter(
     }
 
     /// <summary>
-    /// Чи має сенс повторювати задачу після цього винятку.
-    /// </summary>
-    /// <remarks>
-    /// ⛔ Перелічені типи — це ВЕРДИКТ про вже збережений стан, а не збій
-    /// дороги до нього: «зріз за період уже поданий» (<c>ECR-RPT-0409</c>),
-    /// «сутності немає», «права немає», «джерело не пускає» (<c>H-20</c>).
-    /// Той самий стан через 30 с дасть той самий вердикт, тож три ретраї
-    /// (30+60+120 = 210 с) лише ховають причину: користувач увесь цей час
-    /// бачить «виконується», а справжнє пояснення доїжджає аж наприкінці.
-    /// Провал із першої спроби показує його відразу.
-    /// <para>
-    /// ⛔ Розрізнення — лише за ТИПОМ винятку, ніколи за текстом
-    /// повідомлення: текст пишуть люди, і список за підрядком мовчки
-    /// перестане працювати від першої ж правки формулювання.
-    /// </para>
-    /// <para>
-    /// ⚠ Двох типів тут НЕМАЄ навмисно, і це не забудькуватість.
-    /// <see cref="BusinessRuleException"/> — ним із адаптерів збору приїжджає
-    /// <c>ECR-INT-0503</c> («джерело недоступне або відповідає надто
-    /// повільно»), тобто рівно та транзієнтна відмова, заради якої ретрай і
-    /// будували. <see cref="ConcurrencyConflictException"/> — конфлікт версій
-    /// минає сам, щойно повтор перечитає свіжий стан. Розширити перелік на
-    /// «усі помилки з кодом» означало б знову зламати те, що тут працює.
-    /// </para>
-    /// </remarks>
-    private static bool IsWorthRetrying(Exception ex)
-        => ex is not (DomainException
-            or NotFoundException
-            or AccessDeniedException
-            or SourceAuthenticationException);
-
-    /// <summary>
     /// Планує новий одноразовий триґер того самого <c>JobKey</c> з
     /// експоненційним відступом і пише в прогрес, ЩО задача повторює спробу.
     /// </summary>
@@ -335,11 +433,8 @@ public sealed partial class QuartzJobAdapter(
         var jobId = context.JobDetail.Key.Name;
         var nextAttempt = attempt + 1;
 
-        // ⚠ 2^(спроба-1) на базову затримку: 30 с, 60 с, 120 с — типовий
-        // експоненційний відступ, а не лінійний, щоб транзієнтна відмова
-        // джерела (наприклад, SQL Server під навантаженням) мала час
-        // розвантажитися, а не отримувала три удари поспіль за секунди.
-        var delay = TimeSpan.FromTicks(RetryBaseDelay.Ticks * (1L << (nextAttempt - 1)));
+        // 30 с, 60 с, 120 с — JobRetryPolicy.DelayBefore (спільно з JobWorker).
+        var delay = JobRetryPolicy.DelayBefore(nextAttempt);
 
         // ⚠ Час — через IClock, не DateTimeOffset.UtcNow: годинник підмінний
         // у тестах (ForbiddenApiTests пильнує саме прямі виклики годинника
@@ -366,15 +461,7 @@ public sealed partial class QuartzJobAdapter(
             // `ex.Message` лишається НЕ перекладеним параметром (дані, як
             // `run.Status` в `ArchiveJob`) — текст винятку вже такий, яким
             // його сформував код, що його кинув, а не готовий UI-рядок.
-            var envelope = new JobProgressMessageEnvelope(
-                "jobs.retryScheduled",
-                new Dictionary<string, string>(StringComparer.Ordinal)
-                {
-                    ["attempt"] = nextAttempt.ToString(CultureInfo.InvariantCulture),
-                    ["max"] = MaxRetryAttempts.ToString(CultureInfo.InvariantCulture),
-                    ["delaySeconds"] = delay.TotalSeconds.ToString("0", CultureInfo.InvariantCulture),
-                    ["error"] = ex.Message,
-                });
+            var message = JobRetryPolicy.RetryScheduledMessage(nextAttempt, delay, ex, correlationId);
 
             // ⛔ Саме тут жила найдорожча частина дефекту, знайденого наскрізною
             // перевіркою (`tools/smoke.ps1`, крок 23). `ex.Message` ішов у
@@ -391,10 +478,67 @@ public sealed partial class QuartzJobAdapter(
                     () => progress.ReportAsync(
                         jobId,
                         0,
-                        JobProgressMessageCodec.EncodeWithinLimit(envelope, "error"),
+                        message,
                         clock.UtcNow,
                         CancellationToken.None))
                 .ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Відкладення (<see cref="JobDeferredException"/>): одноразовий триґер того
+    /// самого <c>JobKey</c> через <paramref name="delay"/> з ТИМ САМИМ
+    /// <see cref="QuartzJobScheduler.RetryAttemptKey"/> — спроба не рахується.
+    /// </summary>
+    private static async Task ScheduleDeferredAsync(
+        IJobExecutionContext context, string correlationId, IClock clock, TimeSpan delay, DateTime since)
+    {
+        var jobId = context.JobDetail.Key.Name;
+
+        var trigger = TriggerBuilder.Create()
+            .ForJob(context.JobDetail.Key)
+            .WithIdentity($"{jobId}-deferred-{Guid.NewGuid():N}-trigger")
+            .UsingJobData(
+                QuartzJobScheduler.RetryAttemptKey, CurrentAttempt(context).ToString(CultureInfo.InvariantCulture))
+            .UsingJobData(QuartzJobScheduler.CorrelationKey, correlationId)
+            // Момент ПЕРШОГО відкладення — далі з триґера в триґер (стеля, борг O1).
+            .UsingJobData(JobDeferral.QuartzSinceKey, since.Ticks.ToString(CultureInfo.InvariantCulture))
+            .StartAt(new DateTimeOffset(clock.UtcNow, TimeSpan.Zero).Add(delay))
+            .Build();
+
+        await context.Scheduler.ScheduleJob(trigger, CancellationToken.None).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Стелю вичерпала задача злиття (Д-1 огляду O1): її комірки перепоставляються на
+    /// ту саму ціль раз (<see cref="JobDeferral.RequeuePayload"/>), а сама вона — <c>Failed</c>.
+    /// </summary>
+    /// <remarks>⚠ Збій перепостановки — у журнал: задача однаково Failed з конвертом.</remarks>
+    private async Task RequeueExhaustedAsync(
+        IJobExecutionContext context, string jobId, string? typeName, string? payload, IJobProgressStore? progress,
+        IClock clock)
+    {
+        if (!string.Equals(typeName, JobPayloadMerge.MergeableJobCode, StringComparison.Ordinal)
+            || JobDeferral.RequeuePayload(payload) is not { } again)
+        {
+            return;
+        }
+
+        try
+        {
+            var author = progress is null
+                ? null
+                : (await progress.FindAsync(jobId, CancellationToken.None).ConfigureAwait(false))?.CreatedByUserId;
+            var requeued = await new QuartzJobScheduler(progress: progress, clock: clock)
+                .RequeueDeferralExhaustedAsync(context.Scheduler, jobId, again, author, CancellationToken.None)
+                .ConfigureAwait(false);
+            LogDeferralRequeued(logger, jobId, requeued);
+        }
+#pragma warning disable CA1031 // Перепостановка — страховка; провал задачі вже записано.
+        catch (Exception ex)
+#pragma warning restore CA1031
+        {
+            LogDeferralRequeueFailed(logger, jobId, ex);
         }
     }
 
@@ -460,7 +604,8 @@ public sealed partial class QuartzJobAdapter(
         metrics.RecordStartLatency(elapsed.TotalMilliseconds, typeName ?? "—");
     }
 
-    private static IBackgroundJob? Resolve(IServiceProvider provider, string? typeName)
+    /// <summary>Знаходить задачу за повним іменем типу (спільно з <c>JobWorker</c>).</summary>
+    internal static IBackgroundJob? Resolve(IServiceProvider provider, string? typeName)
     {
         if (string.IsNullOrWhiteSpace(typeName))
         {
@@ -487,27 +632,41 @@ public sealed partial class QuartzJobAdapter(
         string? errorCode = null)
         => store is null ? Task.CompletedTask : store.FinishAsync(jobId, state, error, clock.UtcNow, ct, errorCode);
 
-    /// <summary>
-    /// Код каталогу для провалу (BE-08): власний код доменної чи прикладної
-    /// помилки, інакше — <see cref="ErrorCodes.Internal"/> (непередбачена).
-    /// </summary>
-    private static string ErrorCodeOf(Exception ex) => ex switch
-    {
-        EcrException e => e.ErrorCode,
-        DomainException d => d.ErrorCode,
-        _ => ErrorCodes.Internal,
-    };
-
     [LoggerMessage(Level = LogLevel.Error, Message = "Задача {TypeName} ({JobId}) не зареєстрована.")]
     private static partial void LogUnknownJob(ILogger logger, string typeName, string jobId);
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Задача {JobId} ({TypeName}) завершилася помилкою.")]
-    private static partial void LogJobFailed(ILogger logger, string jobId, string typeName);
+    private static partial void LogJobFailed(ILogger logger, string jobId, string typeName, Exception exception);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Задача {JobId} ({TypeName}) відкладена на {Delay}: ресурс зайнятий; спробу не зараховано.")]
+    private static partial void LogJobDeferred(ILogger logger, string jobId, string typeName, TimeSpan delay);
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "Задача {JobId} ({TypeName}) відкладалась {Waited}, чекаючи ресурс {Resource}; стеля відкладень вичерпана, стан Failed.")]
+    private static partial void LogDeferralExhausted(ILogger logger, string jobId, string typeName, string resource, string waited);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Комірки задачі {JobId}, що вичерпала стелю відкладень, перепоставлено задачею {RequeuedJobId}.")]
+    private static partial void LogDeferralRequeued(ILogger logger, string jobId, string requeuedJobId);
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "Не вдалося перепоставити комірки задачі {JobId}, що вичерпала стелю відкладень.")]
+    private static partial void LogDeferralRequeueFailed(ILogger logger, string jobId, Exception exception);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Задача {JobId} ({TypeName}) впала; заплановано повтор.")]
+    private static partial void LogJobRetrying(ILogger logger, string jobId, string typeName, Exception exception);
 
     [LoggerMessage(
         Level = LogLevel.Information,
         Message = "Задача {JobId} ({TypeName}) пропущена: інший інстанс уже виконує її зараз.")]
     private static partial void LogJobSkippedElsewhere(ILogger logger, string jobId, string typeName);
+
+    [LoggerMessage(
+        Level = LogLevel.Information,
+        Message = "Задача {JobId} ({TypeName}) не запущена: її скасовано, поки вона стояла в черзі.")]
+    private static partial void LogJobSkippedCancelled(ILogger logger, string jobId, string typeName);
+
+    [LoggerMessage(
+        Level = LogLevel.Information,
+        Message = "Задачу {JobId} скасовано з іншого інстанса; зупиняю її тут.")]
+    private static partial void LogJobCancelledElsewhere(ILogger logger, string jobId);
 
     [LoggerMessage(
         Level = LogLevel.Warning,
@@ -519,6 +678,15 @@ public sealed partial class QuartzJobAdapter(
         Message = "Не вдалося записати прогрес задачі {JobId}; на результат самої задачі це не впливає.")]
     private static partial void LogProgressWriteFailed(ILogger logger, string jobId, Exception exception);
 }
+
+/// <summary>Перевизначення інтервалу биття серця задачі.</summary>
+/// <param name="Interval">Інтервал.</param>
+/// <remarks>
+/// ⚠ Лише для тестів: у застосунку не реєструється, і діє
+/// <see cref="IJobProgressStore.HeartbeatInterval"/>. Параметр через DI, а не
+/// статичне поле, щоб паралельні прогони не ділили один стан.
+/// </remarks>
+public sealed record JobHeartbeatSettings(TimeSpan Interval);
 
 /// <summary>Прогрес, що пишеться у сховище.</summary>
 /// <remarks>

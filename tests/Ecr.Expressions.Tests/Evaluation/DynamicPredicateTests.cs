@@ -73,7 +73,7 @@ public sealed class DynamicPredicateTests
             "SUM([Items].[WHERE [Items].[WHERE [WasteType] = 'W-01'].[Amount] > 1].[Amount])");
 
         Assert.Contains(diagnostics, d => d.Code == "ECR-TMPL-0422");
-        Assert.Contains(diagnostics, d => d.Message.Contains("Вкладений предикат", StringComparison.Ordinal));
+        Assert.Contains(diagnostics, d => d.MessageKey == "expr.predicate.nested");
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)]

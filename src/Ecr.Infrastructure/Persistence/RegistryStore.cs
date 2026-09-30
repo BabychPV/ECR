@@ -25,6 +25,18 @@ public sealed class RegistryStore(EcrDbContext db) : IRegistryStore
     /// <summary>Стеля вибірки зв'язків каскаду.</summary>
     private const int MaxLinks = 200_000;
 
+    /// <summary>Скільки кодів чи ідентифікаторів іде в один пакетний запит.</summary>
+    private const int LookupChunkSize = 1000;
+
+    /// <summary>
+    /// Мітка SQL-запиту «чи є комірки з посиланням на довідник» (<c>R-05</c>).
+    /// </summary>
+    /// <remarks>
+    /// Коментар у тексті запиту: за ним тест знаходить план у кеші й перевіряє,
+    /// що комірки читаються індексом, а не сканом.
+    /// </remarks>
+    public const string WhereUsedCellsTag = "R-05 registry where-used: cells";
+
     /// <inheritdoc />
     public Task<RegistryDef?> FindDefinitionAsync(string code, CancellationToken ct)
         => db.RegistryDefs
@@ -122,6 +134,31 @@ public sealed class RegistryStore(EcrDbContext db) : IRegistryStore
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// ⚠ Проєкція, а не сутності: шлях запису комірок не змінює записів
+    /// довідника, і тягнути назви (<c>DisplayL10n</c>) заради п'яти полів
+    /// немає сенсу. Темпорального фільтра в SQL немає навмисно — чинність
+    /// рахує <see cref="RegistryEntryStanding.IsValidOn"/> тим самим вікном,
+    /// що й пікер.
+    /// </remarks>
+    public async Task<IReadOnlyList<RegistryEntryStanding>> FindEntryStandingsAsync(
+        IReadOnlyCollection<long> registryEntryIds, CancellationToken ct)
+    {
+        if (registryEntryIds.Count == 0)
+        {
+            return [];
+        }
+
+        return await db.RegistryEntries
+            .AsNoTracking()
+            .Where(e => registryEntryIds.Contains(e.Id))
+            .Select(e => new RegistryEntryStanding(
+                e.Id, e.RegistryDefId, e.IsActive, e.IsDeleted, e.ValidFrom, e.ValidTo))
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
     public Task<RegistryEntry?> FindEntryByCodeAsync(
         int registryDefId, string code, CancellationToken ct)
         => db.RegistryEntries
@@ -138,6 +175,7 @@ public sealed class RegistryStore(EcrDbContext db) : IRegistryStore
             join right in db.RegistryEntries.AsNoTracking()
                 on link.RightEntryId equals right.Id
             where right.RegistryDefId == registryDefId
+            orderby link.Id
             select link;
 
         return await query.Take(MaxLinks).ToListAsync(ct).ConfigureAwait(false);
@@ -158,9 +196,162 @@ public sealed class RegistryStore(EcrDbContext db) : IRegistryStore
     /// а не оптимізацією. Ціна чесної відповіді тут — повний прохід по
     /// партиціях, і він виправданий: викликач один
     /// (<c>RegistryAdminHandlers</c>, видалення запису), і це не гарячий шлях.
+    /// <para>
+    /// ⛔ V-08: решта видів рахується тут само, одним викликом. Посилання з
+    /// записів, які самі видалені логічно, не блокують: такий запис поза обігом
+    /// і сам нічого не показує.
+    /// </para>
     /// </remarks>
-    public Task<int> CountReferencesAsync(long registryEntryId, CancellationToken ct)
-        => db.CellValues.CountAsync(c => c.ValueRegistryEntryId == registryEntryId, ct);
+    public async Task<RegistryEntryReferences> CountReferencesAsync(long registryEntryId, CancellationToken ct)
+    {
+        var cells = await db.CellValues
+            .CountAsync(c => c.ValueRegistryEntryId == registryEntryId, ct).ConfigureAwait(false);
+
+        var headers = await db.DocumentHeaderValues
+            .CountAsync(h => h.ValueRegistryEntryId == registryEntryId, ct).ConfigureAwait(false);
+
+        var values = await (
+                from value in db.RegistryValues.AsNoTracking()
+                join owner in db.RegistryEntries.AsNoTracking() on value.RegistryEntryId equals owner.Id
+                where value.ValueRefEntryId == registryEntryId
+                      && owner.Id != registryEntryId
+                      && !owner.IsDeleted
+                select value.Id)
+            .CountAsync(ct).ConfigureAwait(false);
+
+        var children = await db.RegistryEntries
+            .CountAsync(e => e.ParentEntryId == registryEntryId && !e.IsDeleted, ct).ConfigureAwait(false);
+
+        var links = await db.RegistryEntryLinks
+            .CountAsync(l => l.LeftEntryId == registryEntryId || l.RightEntryId == registryEntryId, ct)
+            .ConfigureAwait(false);
+
+        var constants = await db.MethodologyConstants
+            .CountAsync(c => c.SubstanceEntryId == registryEntryId, ct).ConfigureAwait(false);
+
+        var substances = await db.MethodologySubstances
+            .CountAsync(m => m.SubstanceEntryId == registryEntryId, ct).ConfigureAwait(false);
+
+        return new RegistryEntryReferences(cells, headers, values, children, links, constants, substances);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Ті самі сім видів, що в <see cref="CountReferencesAsync"/>, але власником посилання, який
+    /// сам у наборі, нехтується: набір видаляється разом (RT-12, каскад композиції). Набір —
+    /// одиниці-сотні записів (кейс і його склад), тому <c>IN (…)</c> одним списком.
+    /// </remarks>
+    public async Task<RegistryEntryReferences> CountReferencesFromOutsideAsync(
+        IReadOnlyCollection<long> registryEntryIds, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(registryEntryIds);
+
+        if (registryEntryIds.Count == 0)
+        {
+            return RegistryEntryReferences.None;
+        }
+
+        var ids = registryEntryIds.Distinct().ToList();
+
+        var cells = await db.CellValues
+            .CountAsync(c => c.ValueRegistryEntryId != null && ids.Contains(c.ValueRegistryEntryId.Value), ct)
+            .ConfigureAwait(false);
+
+        var headers = await db.DocumentHeaderValues
+            .CountAsync(h => h.ValueRegistryEntryId != null && ids.Contains(h.ValueRegistryEntryId.Value), ct)
+            .ConfigureAwait(false);
+
+        // ⛔ Саме тут частини композиції перестають блокувати видалення батька: їхнє значення
+        // поля композиції посилається на батька, але власник значення — у наборі.
+        var values = await (
+                from value in db.RegistryValues.AsNoTracking()
+                join owner in db.RegistryEntries.AsNoTracking() on value.RegistryEntryId equals owner.Id
+                where value.ValueRefEntryId != null
+                      && ids.Contains(value.ValueRefEntryId.Value)
+                      && !ids.Contains(owner.Id)
+                      && !owner.IsDeleted
+                select value.Id)
+            .CountAsync(ct).ConfigureAwait(false);
+
+        var children = await db.RegistryEntries
+            .CountAsync(
+                e => e.ParentEntryId != null && ids.Contains(e.ParentEntryId.Value) && !ids.Contains(e.Id) && !e.IsDeleted,
+                ct)
+            .ConfigureAwait(false);
+
+        var links = await db.RegistryEntryLinks
+            .CountAsync(
+                l => (ids.Contains(l.LeftEntryId) || ids.Contains(l.RightEntryId))
+                     && !(ids.Contains(l.LeftEntryId) && ids.Contains(l.RightEntryId)),
+                ct)
+            .ConfigureAwait(false);
+
+        var constants = await db.MethodologyConstants
+            .CountAsync(c => c.SubstanceEntryId != null && ids.Contains(c.SubstanceEntryId.Value), ct)
+            .ConfigureAwait(false);
+
+        var substances = await db.MethodologySubstances
+            .CountAsync(m => ids.Contains(m.SubstanceEntryId), ct).ConfigureAwait(false);
+
+        return new RegistryEntryReferences(cells, headers, values, children, links, constants, substances);
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<RegistryCompositionChild>> ListCompositionChildrenAsync(
+        IReadOnlyCollection<long> parentEntryIds, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(parentEntryIds);
+
+        if (parentEntryIds.Count == 0)
+        {
+            return [];
+        }
+
+        var parents = parentEntryIds.Distinct().ToList();
+
+        // ⚠ Жодного AsNoTracking у джерелах: воно діє на ВЕСЬ запит, і частини повернулися б
+        // невідстежуваними — каскад «видаляв» би їх лише в пам'яті. Відстежуються лише записи:
+        // значення й поля в проєкцію не потрапляють.
+        var rows = await (
+                from value in db.RegistryValues
+                join field in db.RegistryFieldDefs on value.RegistryFieldDefId equals field.Id
+                join child in db.RegistryEntries on value.RegistryEntryId equals child.Id
+                where field.RelationKind == RegistryRelationKind.Composition
+                      && value.ValueRefEntryId != null
+                      && parents.Contains(value.ValueRefEntryId.Value)
+                      && !child.IsDeleted
+                orderby child.Id
+                select new { Child = child, Parent = value.ValueRefEntryId!.Value, field.OnParentDelete })
+            .Take(MaxEntries)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        return rows
+            .Select(r => new RegistryCompositionChild(r.Child, r.Parent, r.OnParentDelete))
+            .ToList();
+    }
+
+    /// <inheritdoc />
+    public async Task<long> NextEntryCodesAsync(int count, CancellationToken ct)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(count);
+
+        // Той самий спосіб, що `CalculationResultStore.SequenceRangeAsync`: один виклик
+        // sp_sequence_get_range на весь пакет замість NEXT VALUE FOR на кожен запис.
+        var range = await db.Database
+            .SqlQuery<long>($"""
+                DECLARE @first sql_variant;
+                EXEC sys.sp_sequence_get_range
+                    @sequence_name = N'dic.RegistryEntryCodeSeq',
+                    @range_size = {(long)count},
+                    @range_first_value = @first OUTPUT;
+                SELECT CONVERT(bigint, @first) AS Value;
+                """)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        return range.Single();
+    }
 
     /// <inheritdoc />
     public async Task<UsageResponse> FindDefinitionUsageAsync(
@@ -243,11 +434,25 @@ public sealed class RegistryStore(EcrDbContext db) : IRegistryStore
             .ConfigureAwait(false);
 
         // Дані: один рядок на таблицю, без підрахунку (див. порт).
-        var inCells = await db.CellValues
+        //
+        // ⛔ R-05: запит іде ВІД записів довідника до комірок, а не навпаки, і
+        // `IS NOT NULL` стоїть явно. Доти EXISTS по doc.CellValue з корельованим
+        // підзапитом до записів оптимізатор виконував як скан усіх комірок із
+        // пошуком запису на кожну: на стенді (2.06 млн комірок) — 7.4 с і 3 млн
+        // читань dic.RegistryEntry, навіть для довідника, на який не посилається
+        // ніхто. Тепер вартість обмежена записами ЦЬОГО довідника, а кожен
+        // пошук комірки — seek по IX_CellValue_RegistryEntry (фільтр
+        // `IS NOT NULL`: явний предикат гарантує, що фільтрований індекс
+        // зіставиться за будь-якої форми плану). PeriodKey не додається — див.
+        // CountReferencesAsync: питання глобальне за змістом.
+        var inCells = await db.RegistryEntries
+            .AsNoTracking()
+            .TagWith(WhereUsedCellsTag)
             .AnyAsync(
-                cell => db.RegistryEntries.Any(
-                    entry => entry.RegistryDefId == registryDefId
-                             && entry.Id == cell.ValueRegistryEntryId),
+                entry => entry.RegistryDefId == registryDefId
+                         && db.CellValues.Any(
+                             cell => cell.ValueRegistryEntryId != null
+                                     && cell.ValueRegistryEntryId == entry.Id),
                 ct)
             .ConfigureAwait(false);
 
@@ -256,7 +461,11 @@ public sealed class RegistryStore(EcrDbContext db) : IRegistryStore
             total++;
             if (items.Count < take)
             {
-                items.Add(new UsageItemDto(UsageKinds.Data, "doc.CellValue", "doc.CellValue", null));
+                // ⛔ X-11: тут стояло ім'я таблиці сховища (`doc.CellValue`) і як
+                // ідентифікатор, і як підпис — людина читала «STORED DATA ·
+                // doc.CellValue». Вид `data` клієнт підписує сам; підпис тут —
+                // лише людський запасний текст для інших споживачів відповіді.
+                items.Add(new UsageItemDto(UsageKinds.Data, "cells", "Values in document cells", null));
             }
         }
 
@@ -273,6 +482,7 @@ public sealed class RegistryStore(EcrDbContext db) : IRegistryStore
         long registryEntryId, CancellationToken ct)
         => await db.RegistryValues
                    .Where(v => v.RegistryEntryId == registryEntryId)
+                   .OrderBy(v => v.Id)
                    .Take(MaxEntries)
                    .ToListAsync(ct)
                    .ConfigureAwait(false);
@@ -355,6 +565,70 @@ public sealed class RegistryStore(EcrDbContext db) : IRegistryStore
             select new RegistryLinkKindStat(kinds.Key, kinds.Count());
 
         return await query.ToListAsync(ct).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⚠ Набір ріжеться на шматки <see cref="LookupChunkSize"/>: імпорт на
+    /// 1 МБ — це десятки тисяч кодів, а параметрів у запиті не більше 2100.
+    /// На звичайному файлі (до тисячі рядків) це рівно один запит.
+    /// </remarks>
+    public async Task<IReadOnlyList<RegistryEntry>> FindEntriesByCodesAsync(
+        int registryDefId, IReadOnlyCollection<string> codes, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(codes);
+
+        var found = new List<RegistryEntry>();
+        foreach (var chunk in codes.Distinct(StringComparer.OrdinalIgnoreCase).Chunk(LookupChunkSize))
+        {
+            var wanted = chunk.ToList();
+            found.AddRange(await db.RegistryEntries
+                .Where(e => e.RegistryDefId == registryDefId && wanted.Contains(e.Code))
+                .ToListAsync(ct)
+                .ConfigureAwait(false));
+        }
+
+        return found;
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<RegistryValue>> ListValuesForEntriesAsync(
+        IReadOnlyCollection<long> registryEntryIds, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(registryEntryIds);
+
+        var found = new List<RegistryValue>();
+        foreach (var chunk in registryEntryIds.Distinct().Chunk(LookupChunkSize))
+        {
+            var wanted = chunk.ToList();
+            found.AddRange(await db.RegistryValues
+                .Where(v => wanted.Contains(v.RegistryEntryId))
+                .OrderBy(v => v.Id)
+                .ToListAsync(ct)
+                .ConfigureAwait(false));
+        }
+
+        return found;
+    }
+
+    /// <inheritdoc />
+    public async Task ReplaceRuleUsesAsync(
+        int ruleRegistryDefId, IReadOnlyCollection<RegistryUse> uses, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(uses);
+
+        // ⚠ Ребра шукаються за ПРАВИЛАМИ довідника, а не за RegistryDefId ребра: правило читає й
+        // ІНШІ довідники (склад кейсу, ціль CrossRegistry), і їхні ребра — теж цього правила.
+        var ruleIds = db.RegistryRuleDefs
+            .Where(r => r.RegistryDefId == ruleRegistryDefId)
+            .Select(r => r.Id);
+        var stale = await db.RegistryUses
+            .Where(u => u.SourceKind == RegistryUse.RegistryRuleSource && ruleIds.Contains(u.SourceId))
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        db.RegistryUses.RemoveRange(stale);
+        db.RegistryUses.AddRange(uses);
     }
 
     /// <summary>Проміжний рядок пошуку посилань на визначення довідника.</summary>

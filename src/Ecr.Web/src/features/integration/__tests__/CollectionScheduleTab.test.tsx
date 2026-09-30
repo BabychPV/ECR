@@ -45,6 +45,9 @@ const Strings: Record<string, string> = {
   'schedule.cronFieldCount': 'Needs 6 or 7 fields, got {count}',
   'schedule.cronField': 'Field {position}: "{value}" is not allowed',
   'schedule.cronDayQuestion': 'Exactly one day field must be ?',
+  'schedule.lookbackDays': 'Window (days)',
+  'schedule.lookbackHint': 'Re-read this many days',
+  'schedule.lookbackRange': 'Whole days from {min} to {max}',
 };
 
 const SourceEntityId = 42;
@@ -62,6 +65,7 @@ const schedule = (overrides: Partial<CollectionSchedule> = {}): CollectionSchedu
   lastError: null,
   lastErrorAt: null,
   rowVersion: 'AAAAAAAAB9E=',
+  lookbackDays: 7,
   ...overrides,
 });
 
@@ -180,7 +184,7 @@ describe('CollectionScheduleTab', () => {
       expect(calls[0]).toEqual({
         method: 'POST',
         url: '/api/v1/collection-schedules',
-        body: { sourceEntityId: SourceEntityId, cron: '0 30 4 ? * MON-FRI', isEnabled: false },
+        body: { sourceEntityId: SourceEntityId, cron: '0 30 4 ? * MON-FRI', isEnabled: false, lookbackDays: 7 },
         ifMatch: null,
       });
 
@@ -214,7 +218,7 @@ describe('CollectionScheduleTab', () => {
       expect(calls[0]).toEqual({
         method: 'PUT',
         url: '/api/v1/collection-schedules/7',
-        body: { cron: '0 0 3 * * ?', isEnabled: false },
+        body: { cron: '0 0 3 * * ?', isEnabled: false, lookbackDays: 7 },
         ifMatch: '"AAAAAAAAB9E="',
       });
     },
@@ -299,7 +303,7 @@ describe('CollectionScheduleTab', () => {
 
       await waitFor(() => expect(calls).toHaveLength(2));
       expect(calls[1]?.ifMatch).toBe('"DDDD"');
-      expect(calls[1]?.body).toEqual({ cron: '0 0 6 * * ?', isEnabled: true });
+      expect(calls[1]?.body).toEqual({ cron: '0 0 6 * * ?', isEnabled: true, lookbackDays: 7 });
     },
     Slow,
   );
@@ -369,6 +373,61 @@ describe('CollectionScheduleTab', () => {
       });
 
       await screen.findByText('No schedule');
+    },
+    Slow,
+  );
+
+  const lookbackInput = (): HTMLInputElement => screen.getByLabelText(/Window \(days\)/) as HTMLInputElement;
+
+  it(
+    'ФВ-13.15: вікно збору показане з рядка, і PUT несе змінене значення',
+    async () => {
+      const calls = stub([() => json([schedule({ lookbackDays: 30 })])], () =>
+        json(schedule({ lookbackDays: 45, rowVersion: 'FFFF' })),
+      );
+      await show();
+
+      await waitFor(() => expect(lookbackInput().value).toBe('30'));
+      expect(screen.getByRole('button', { name: 'Save' })).toHaveProperty('disabled', true);
+
+      await userEvent.clear(lookbackInput());
+      await userEvent.type(lookbackInput(), '45');
+      await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+      await waitFor(() => expect(calls).toHaveLength(1));
+      expect(calls[0]).toEqual({
+        method: 'PUT',
+        url: '/api/v1/collection-schedules/7',
+        body: { cron: '0 15 2 * * ?', isEnabled: true, lookbackDays: 45 },
+        ifMatch: '"AAAAAAAAB9E="',
+      });
+    },
+    Slow,
+  );
+
+  it(
+    'ФВ-13.15: вікно поза 1–366 днів — причина видима, кнопка недоступна, запиту немає',
+    async () => {
+      const calls = stub([() => json([schedule()])]);
+      await show();
+
+      await waitFor(() => expect(lookbackInput().value).toBe('7'));
+
+      for (const bad of ['367', '0', '']) {
+        await userEvent.clear(lookbackInput());
+        if (bad !== '') await userEvent.type(lookbackInput(), bad);
+
+        expect(screen.getByText('Whole days from 1 to 366')).toBeTruthy();
+        expect(screen.getByRole('button', { name: 'Save' })).toHaveProperty('disabled', true);
+      }
+
+      await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+      expect(calls).toHaveLength(0);
+
+      // Сама межа проходить.
+      await userEvent.type(lookbackInput(), '366');
+      expect(screen.queryByText('Whole days from 1 to 366')).toBeNull();
+      expect(screen.getByRole('button', { name: 'Save' })).toHaveProperty('disabled', false);
     },
     Slow,
   );

@@ -80,12 +80,18 @@ public interface IUserStore
     /// Межі чинності за кодом ролі (<c>ФВ-6.16</c>) — підміна на час
     /// відпустки; <c>null</c> або код без запису тут — роль безстрокова.
     /// </param>
+    /// <param name="scopes">
+    /// Області дії за кодом ролі (<c>ФВ-6.14</c>), уже перевірені. <c>null</c>
+    /// — область кожного переназначеного призначення ЗБЕРІГАЄТЬСЯ; словник —
+    /// роль без запису в ньому діє в усіх проєктах.
+    /// </param>
     /// <param name="ct">Токен скасування.</param>
     /// <returns>Скільки ролей тепер призначено.</returns>
     public Task<int> ReplaceRolesAsync(
         int userId,
         IReadOnlyList<string> roleCodes,
         IReadOnlyDictionary<string, Security.RoleValidityWindow>? validity,
+        IReadOnlyDictionary<string, Domain.Entities.Security.RoleAssignmentScope>? scopes,
         CancellationToken ct);
 
     /// <summary>
@@ -97,6 +103,15 @@ public interface IUserStore
     /// тимчасове на постійне — людина бачить роль у списку і лишає її.
     /// </remarks>
     public Task<IReadOnlyList<string>> ListUserRolesAsync(int userId, CancellationToken ct);
+
+    /// <summary>
+    /// Усі особисті призначення користувача — безстрокові й строкові — з
+    /// областю дії (<c>ФВ-6.14</c>). Групові сюди не входять.
+    /// </summary>
+    /// <param name="userId">Користувач.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<IReadOnlyList<Security.UserRoleAssignmentView>> ListUserRoleAssignmentsAsync(
+        int userId, CancellationToken ct);
 
     /// <summary>Сторінка облікових записів.</summary>
     /// <remarks>⛔ Хеш пароля і <c>SecurityStamp</c> не покидають сховище (ФВ-6.11).</remarks>
@@ -151,6 +166,19 @@ public interface IUserStore
     /// </remarks>
     public Task ReplaceGrantsAsync(
         int roleId, IReadOnlyList<Security.ResourceGrantDto> grants, CancellationToken ct);
+
+    /// <summary>
+    /// Бере <c>UPDLOCK</c> на рядку ролі до кінця поточної транзакції.
+    /// </summary>
+    /// <param name="roleId">Роль.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns><c>false</c> — ролі немає.</returns>
+    /// <remarks>
+    /// ⛔ Має сенс лише ВСЕРЕДИНІ явної транзакції: поза нею блокування
+    /// звільняється разом із самим <c>SELECT</c>. Серіалізує заміни набору
+    /// грантів однієї ролі — звірка версії й запис стають атомарними.
+    /// </remarks>
+    public Task<bool> LockRoleForUpdateAsync(int roleId, CancellationToken ct);
 
     /// <summary>
     /// Прокручує <c>SecurityStamp</c> усім носіям ролі.
@@ -254,10 +282,83 @@ public interface IUserStore
     /// <param name="ct">Токен скасування.</param>
     public Task<IReadOnlyList<Security.PermissionCatalogItem>> ListPermissionsAsync(CancellationToken ct);
 
+    /// <summary>
+    /// Чи можна дивитися очима <paramref name="userId"/> (<c>D-210</c>): прапорець
+    /// і роль первинного налаштування та небезпечні права (<c>IsDangerous</c>)
+    /// з його ОСОБИСТИХ призначень.
+    /// </summary>
+    /// <param name="userId">Ціль «View as».</param>
+    /// <param name="utcNow">Поточний момент; прострочені підміни не рахуються.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ Не з профілю доступу: профіль викидає ГЛОБАЛЬНІ права ролі з областю
+    /// (ФВ-6.14), а область небезпечності не знімає. Тут рахується кожне право
+    /// кожного призначення — з областю чи без, чинного чи ще не чинного
+    /// (майбутнє почне діяти посеред сеансу, бо профіль сеансу будується на
+    /// кожен запит).
+    ///
+    /// ⚠ Групові призначення не входять: членство чужого запису невідоме
+    /// (<c>P-02</c>), і профіль сеансу симуляції груп суб'єкта теж не бере.
+    /// </remarks>
+    public Task<SimulationTargetPrivileges> GetSimulationTargetPrivilegesAsync(
+        int userId, DateTime utcNow, CancellationToken ct);
+
     /// <summary>Політика паролів запису або типова.</summary>
     /// <remarks>
     /// Повертає завжди щось: відсутня політика не має означати «без обмежень» —
     /// це був би тихий спосіб вимкнути перевірку довжини одним порожнім полем.
     /// </remarks>
     public Task<PasswordPolicy> GetPolicyAsync(User user, CancellationToken ct);
+
+    /// <summary>
+    /// Рахує невдалу спробу АТОМАРНО — одним оновленням рядка в сховищі
+    /// (S8(в), ФВ-6.4a).
+    /// </summary>
+    /// <param name="userId">Обліковий запис.</param>
+    /// <param name="maxFailedAttempts">Поріг блокування; ≤ 0 — не блокувати.</param>
+    /// <param name="lockoutMinutes">На скільки блокувати; ≤ 0 — 15 хв.</param>
+    /// <param name="utcNow">Поточний момент.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Стан лічильника ПІСЛЯ цієї спроби.</returns>
+    /// <remarks>
+    /// ⛔ Не «прочитати → <c>User.RegisterFailedAttempt</c> → зберегти»:
+    /// <c>sec.User</c> не має маркера паралельності, і дві одночасні хибні
+    /// спроби читали той самий лічильник та обидві писали N+1 — підбір у
+    /// кілька потоків не доходив до порогу ніколи.
+    ///
+    /// ⚠ Правило — те саме, що в <c>User.RegisterFailedAttempt</c>: минуле
+    /// блокування скидає лічильник, чинне не скорочується. Сховище зберігає
+    /// рядок само; сутність у пам'яті викликача цим методом НЕ змінюється.
+    /// </remarks>
+    public Task<FailedAttemptOutcome> RegisterFailedAttemptAsync(
+        int userId, int maxFailedAttempts, int lockoutMinutes, DateTime utcNow, CancellationToken ct);
+}
+
+/// <summary>Стан лічильника невдалих спроб після атомарного оновлення.</summary>
+/// <param name="FailedAttempts">Лічильник після спроби.</param>
+/// <param name="LockedUntil">Межа блокування після спроби; <c>null</c> — не заблоковано.</param>
+/// <param name="LockedNow">Саме ця спроба заблокувала запис.</param>
+/// <remarks>
+/// ⚠ Структура, а не клас: підставне сховище без налаштування віддає
+/// <c>default</c> — «не заблоковано», а не <c>null</c>, на якому впав би обробник.
+/// </remarks>
+public readonly record struct FailedAttemptOutcome(int FailedAttempts, DateTime? LockedUntil, bool LockedNow);
+
+/// <summary>Привілеї цілі «View as», що забороняють симуляцію (<c>D-210</c>).</summary>
+/// <param name="IsBootstrapAdmin">Прапорець запису або роль <c>BootstrapAdministrator</c>.</param>
+/// <param name="DangerousPermissions">Небезпечні права з особистих призначень; порожньо — немає.</param>
+public sealed record SimulationTargetPrivileges(bool IsBootstrapAdmin, IReadOnlyList<string> DangerousPermissions)
+{
+    /// <summary>
+    /// Причина відмови (<c>bootstrapTarget</c>, <c>dangerousTarget</c>); <c>null</c> — ціль дозволена.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Одне місце рішення для старту сеансу (<c>StartSimulationHandler</c>) і для кожного
+    /// запиту під ним (<c>SimulationService.BuildProfileAsync</c>): два формулювання однієї
+    /// стелі розійшлися б тихо.
+    /// </remarks>
+    public string? DenyReason
+        => IsBootstrapAdmin ? "bootstrapTarget"
+            : DangerousPermissions.Count > 0 ? "dangerousTarget"
+            : null;
 }

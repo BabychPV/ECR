@@ -153,14 +153,19 @@ describe('GrantsPanel: колонка розв\'язаної назви ресу
     const unknown = await screen.findByText('Not found — resource deleted or the id is wrong');
     expect(unknown).not.toBeNull();
 
-    // Обидва рядки таблиці справді мають по одній комірці кожного стану —
-    // перевіряємо, що вони в тій самій таблиці, що й дані ролі.
-    // ⚠ `getByDisplayValue`, не `getByText`: `resourceId` малює `NumberInput`
-    // — число живе в атрибуті `value` вхідного поля, а не текстовим вузлом.
+    // Обидва стани — у тій самій таблиці, по рядку на грант.
+    // ⚠ Числового поля `resourceId` більше немає (аудит U6: ресурс обирається
+    // за назвою), тож рядки рахуються за полем виду ресурсу.
     const table = resolved.closest('table');
     expect(table).not.toBeNull();
-    expect(within(table as HTMLElement).getByDisplayValue('501')).not.toBeNull();
-    expect(within(table as HTMLElement).getByDisplayValue('999')).not.toBeNull();
+    expect(within(table as HTMLElement).getByRole('textbox', { name: 'Resource kind 1' })).not.toBeNull();
+    expect(within(table as HTMLElement).getByRole('textbox', { name: 'Resource kind 2' })).not.toBeNull();
+    // ⚠ Прихований `<input type="hidden">` Mantine `Select` несе id для форми —
+    // це не показ; видимого поля з голим id бути не повинно.
+    const visibleIds = within(table as HTMLElement)
+      .queryAllByDisplayValue('501')
+      .filter((el) => (el as HTMLInputElement).type !== 'hidden');
+    expect(visibleIds).toHaveLength(0);
   });
 
   it('щойно доданий (ще не збережений) грант показує «—», а не вигадану назву чи помилку', async () => {

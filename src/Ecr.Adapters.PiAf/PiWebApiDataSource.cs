@@ -15,8 +15,9 @@ namespace Ecr.Adapters.PiAf;
 /// Використовується для того, чого не вміє RTQP. **Методів запису тут немає
 /// навмисно** (`D-44`): Web API їх підтримує, але система в AF не пише нічого.
 /// </remarks>
-public sealed class PiWebApiDataSource(
-    HttpClient http, ICollectionStore store, ISecretProvider secrets) : IExternalDataSource, IHierarchicalCatalogSource
+public sealed partial class PiWebApiDataSource(
+    HttpClient http, ICollectionStore store, ISecretProvider secrets)
+    : IExternalDataSource, IHierarchicalCatalogSource, IBatchCollectionSource
 {
     /// <summary>Скільки разів повторювати запит, який відмовив через 5xx або таймаут.</summary>
     /// <remarks>
@@ -74,8 +75,39 @@ public sealed class PiWebApiDataSource(
                 Text(item, "Description"),
                 Text(item, "Path"),
                 SourceUnitSymbol: null,
-                DataType: "Element"),
+                DataType: "Element",
+
+                // GUID елемента, а не WebId: WebId кодує ще й сервер і формат
+                // (WebID 2.0), тож змінюється разом із ними; GUID — ні (S1).
+                ExternalId: Text(item, "Id")),
             ct).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Прямі діти <paramref name="root"/> через <see cref="BrowseAsync"/>; адреса читання — шлях
+    /// (<c>attributes?path=шлях|атрибут</c>). Повний — лише якщо не дійшли до
+    /// <see cref="MaxItemsPerLevel"/> і кожен елемент має <c>Id</c>.
+    /// </remarks>
+    public async Task<SourceElementsResult> DiscoverElementsAsync(int dataSourceId, string root, CancellationToken ct)
+    {
+        var children = await BrowseAsync(dataSourceId, root, ct).ConfigureAwait(false);
+
+        var complete = children.Count < MaxItemsPerLevel;
+        var elements = new List<SourceElement>(children.Count);
+
+        foreach (var child in children)
+        {
+            if (string.IsNullOrWhiteSpace(child.ExternalId) || string.IsNullOrWhiteSpace(child.EntityPath))
+            {
+                complete = false;
+                continue;
+            }
+
+            elements.Add(new SourceElement(child.ExternalId, child.Code, child.EntityPath, child.EntityPath));
+        }
+
+        return new SourceElementsResult(elements, complete);
     }
 
     /// <inheritdoc />
@@ -90,7 +122,7 @@ public sealed class PiWebApiDataSource(
         ArgumentException.ThrowIfNullOrWhiteSpace(elementPath);
 
         var source = await SourceAsync(dataSourceId, ct).ConfigureAwait(false);
-        var webId = await ElementWebIdAsync(source, elementPath, ct).ConfigureAwait(false);
+        var (webId, elementId) = await ElementAsync(source, elementPath, ct).ConfigureAwait(false);
         return await ItemsAsync(
             source,
             $"elements/{Uri.EscapeDataString(webId)}/attributes?searchFullHierarchy=false",
@@ -102,19 +134,30 @@ public sealed class PiWebApiDataSource(
                     Text(item, "Description"),
                     Text(item, "Path"),
                     string.IsNullOrWhiteSpace(units) ? null : units,
-                    Text(item, "Type"));
+                    Text(item, "Type"),
+
+                    // Атрибут належить елементу: зовнішній ключ запису довідника —
+                    // GUID саме елемента (FEATURE-REGISTRY-SYNC §2.1).
+                    elementId);
             },
             ct).ConfigureAwait(false);
     }
 
     private async Task<string> ElementWebIdAsync(
         Domain.Entities.External.DataSource source, string path, CancellationToken ct)
+        => (await ElementAsync(source, path, ct).ConfigureAwait(false)).WebId;
+
+    /// <summary>WebId і GUID елемента за шляхом.</summary>
+    private async Task<(string WebId, string? Id)> ElementAsync(
+        Domain.Entities.External.DataSource source, string path, CancellationToken ct)
     {
         using var element = await GetAsync(
             source.Endpoint, $"elements?path={Uri.EscapeDataString(path)}", source.SecretName, ct)
             .ConfigureAwait(false);
 
-        return Text(element.RootElement, "WebId")
+        var id = Text(element.RootElement, "Id");
+
+        return (Text(element.RootElement, "WebId")
                ?? throw new BusinessRuleException(
                    SourceUnavailable,
                    $"PI Web API не знайшов елемент {path}.",
@@ -123,7 +166,7 @@ public sealed class PiWebApiDataSource(
                        ["messageKey"] = "err.ECR-INT-0503.catalogUnavailable",
                        ["code"] = source.Code.ToString(),
                        ["path"] = path,
-                   });
+                   }), id);
     }
 
     /// <summary><c>Items</c> колекції з переходом за <c>Links.Next</c> до стелі.</summary>
@@ -178,59 +221,166 @@ public sealed class PiWebApiDataSource(
     {
         ArgumentNullException.ThrowIfNull(request);
 
+        // ⛔ Лише сирі точки (HSE301 F4, D-172). Інтерпольований запит тут не
+        // реалізовано — і він не підміняється `recorded`: сирі точки під
+        // іменем інтерпольованих дали б правдоподібні, але інші числа.
+        // Перевірка ДО джерела: відмова конфігурації не чіпає PI.
+        if (request.Kind != SourceQueryKind.Raw)
+        {
+            throw IExternalDataSource.QueryKindNotSupported(request.Kind, Transport);
+        }
+
         var source = await SourceAsync(request.DataSourceId, ct).ConfigureAwait(false);
 
-        JsonDocument? attribute = null;
-        JsonDocument? recorded = null;
+        // P7: WebId — із кешу екземпляра; повторний пошук того самого шляху
+        // на кожен інтервал був половиною всіх запитів наздоганяння.
+        var attribute = await AttributeAsync(source, request.SourcePath, ct).ConfigureAwait(false);
 
-        try
+        if (attribute.NotFound is { } missing)
         {
-            attribute = await GetAsync(
-                source.Endpoint,
-                $"attributes?path={Uri.EscapeDataString(request.SourcePath)}",
-                source.SecretName,
-                ct).ConfigureAwait(false);
+            throw missing;
+        }
 
-            var webId = Text(attribute.RootElement, "WebId");
-            var defaultUnits = Text(attribute.RootElement, "DefaultUnitsName");
+        if (string.IsNullOrWhiteSpace(attribute.WebId))
+        {
+            return Unresolved(request);
+        }
+
+        using var recorded = await GetAsync(
+            source.Endpoint,
+            $"streams/{Uri.EscapeDataString(attribute.WebId)}/recorded"
+            + $"?startTime={Iso(request.FromUtc)}&endTime={Iso(request.ToUtc)}"
+            + $"&maxCount={request.MaxPoints.ToString(CultureInfo.InvariantCulture)}",
+            source.SecretName,
+            ct).ConfigureAwait(false);
+
+        return Batch(Points(recorded.RootElement, request.SourcePath, attribute.DefaultUnits), request);
+    }
+
+    /// <summary>Атрибута за шляхом немає — увесь інтервал у відмову.</summary>
+    /// <remarks>
+    /// Це не «нуль точок»: нуль означав би, що джерело відповіло порожнім
+    /// періодом, і покриття за нього записалося б як повне.
+    /// </remarks>
+    private static CollectionResult Unresolved(CollectionRequest request)
+        => new([], [new TimeInterval(request.FromUtc, request.ToUtc)], SourceUnavailable);
+
+    /// <summary>Точки одного атрибута як результат запиту — з хвостом, якщо батч повний.</summary>
+    /// <remarks>
+    /// ⚠ Повний батч означає, що джерело віддало рівно стелю — і хвіст
+    /// діапазону лишився непрочитаним. Мовчазне «зібрано» тут дало б
+    /// дірку, позначену як покриття.
+    /// ⚠ Порожній батч НЕ вважається обрізаним: із MaxPoints = 0 умова
+    /// «набрали стелю» була б істинною завжди, і points[^1] упало б на
+    /// порожньому списку — на діапазоні, у якому просто немає даних.
+    /// </remarks>
+    private static CollectionResult Batch(List<SourceDataPoint> points, CollectionRequest request)
+    {
+        var truncated = points.Count > 0 && points.Count >= request.MaxPoints;
+
+        return new CollectionResult(
+            points,
+            truncated ? [new TimeInterval(points[^1].Timestamp, request.ToUtc)] : [],
+            null);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// На кожен шлях — WebId атрибута (<c>attributes?path=</c>, як у
+    /// <see cref="ReadAsync"/>), далі <c>streams/{webId}/value</c>. Для
+    /// статичного атрибута (без PI Point) PI Web API віддає його значення тим
+    /// самим викликом.
+    /// <para>
+    /// ⚠ Запит на шлях, а не пакетний <c>streamsets/value</c>: синк довідника
+    /// читає десятки атрибутів раз на прогін, а пакет потребував би окремої
+    /// обробки часткових відмов у відповіді. Судження S1; переглянути, якщо
+    /// кількість атрибутів виросте на порядки.
+    /// </para>
+    /// <para>
+    /// ⛔ Атрибута немає (<c>404</c> або відповідь без <c>WebId</c>) — відмова
+    /// цього шляху <c>ECR-INT-0404</c>, решта читається далі. Будь-яка інша
+    /// відмова (5xx, автентифікація) летить винятком: знімок неповний.
+    /// </para>
+    /// </remarks>
+    public async Task<CurrentValuesResult> ReadCurrentAsync(
+        int dataSourceId, IReadOnlyCollection<string> paths, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(paths);
+
+        var source = await SourceAsync(dataSourceId, ct).ConfigureAwait(false);
+        var values = new List<SourceDataPoint>();
+        var failures = new List<CurrentValueFailure>();
+
+        foreach (var path in paths.Where(p => !string.IsNullOrWhiteSpace(p)).Distinct(StringComparer.Ordinal))
+        {
+            string? webId;
+            string? defaultUnits;
+
+            try
+            {
+                using var attribute = await GetAsync(
+                    source.Endpoint, $"attributes?path={Uri.EscapeDataString(path)}", source.SecretName, ct)
+                    .ConfigureAwait(false);
+                webId = Text(attribute.RootElement, "WebId");
+                defaultUnits = Text(attribute.RootElement, "DefaultUnitsName");
+            }
+            catch (BusinessRuleException ex) when (IsNotFound(ex))
+            {
+                webId = null;
+                defaultUnits = null;
+            }
 
             if (string.IsNullOrWhiteSpace(webId))
             {
-                // Атрибута за таким шляхом немає. Це не «нуль точок»: нуль
-                // означав би, що джерело відповіло порожнім періодом, і
-                // покриття за нього записалося б як повне.
-                return new CollectionResult(
-                    [], [new TimeInterval(request.FromUtc, request.ToUtc)], SourceUnavailable);
+                failures.Add(new CurrentValueFailure(path, PathNotFound, "err.ECR-INT-0404.sourcePathNotFound"));
+                continue;
             }
 
-            recorded = await GetAsync(
-                source.Endpoint,
-                $"streams/{Uri.EscapeDataString(webId)}/recorded"
-                + $"?startTime={Iso(request.FromUtc)}&endTime={Iso(request.ToUtc)}"
-                + $"&maxCount={request.MaxPoints.ToString(CultureInfo.InvariantCulture)}",
-                source.SecretName,
-                ct).ConfigureAwait(false);
+            using var value = await GetAsync(
+                source.Endpoint, $"streams/{Uri.EscapeDataString(webId)}/value", source.SecretName, ct)
+                .ConfigureAwait(false);
 
-            var points = Points(recorded.RootElement, request.SourcePath, defaultUnits);
-
-            // ⚠ Повний батч означає, що джерело віддало рівно стелю — і хвіст
-            // діапазону лишився непрочитаним. Мовчазне «зібрано» тут дало б
-            // дірку, позначену як покриття.
-            // ⚠ Порожній батч НЕ вважається обрізаним: із MaxPoints = 0 умова
-        // «набрали стелю» була б істинною завжди, і points[^1] упало б на
-        // порожньому списку — на діапазоні, у якому просто немає даних.
-        var truncated = points.Count > 0 && points.Count >= request.MaxPoints;
-
-            return new CollectionResult(
-                points,
-                truncated ? [new TimeInterval(points[^1].Timestamp, request.ToUtc)] : [],
-                null);
+            if (CurrentPoint(value.RootElement, path, defaultUnits) is { } point)
+            {
+                values.Add(point);
+            }
+            else
+            {
+                failures.Add(new CurrentValueFailure(
+                    path, SourceUnavailable, "err.ECR-INT-0503.currentValueUnreadable"));
+            }
         }
-        finally
+
+        return new CurrentValuesResult(values, failures);
+    }
+
+    /// <summary>Атрибута чи елемента немає.</summary>
+    private const string PathNotFound = "ECR-INT-0404";
+
+    /// <summary>Чи відмова <see cref="GetAsync(string, string, string, CancellationToken)"/> — це «такого шляху немає».</summary>
+    private static bool IsNotFound(BusinessRuleException error)
+        => error.Details is { } details
+           && details.TryGetValue("status", out var status)
+           && status is "404";
+
+    /// <summary>Одне значення відповіді <c>streams/{webId}/value</c>; без мітки часу — <c>null</c>.</summary>
+    private static SourceDataPoint? CurrentPoint(JsonElement item, string sourcePath, string? defaultUnits)
+    {
+        if (!item.TryGetProperty("Timestamp", out var stamp) || !stamp.TryGetDateTime(out var timestamp))
         {
-            attribute?.Dispose();
-            recorded?.Dispose();
+            return null;
         }
+
+        var (numeric, text) = Value(item);
+        var units = Text(item, "UnitsAbbreviation");
+
+        return new SourceDataPoint(
+            sourcePath,
+            timestamp.ToUniversalTime(),
+            numeric,
+            text,
+            string.IsNullOrWhiteSpace(units) ? defaultUnits : units,
+            Quality(item));
     }
 
     /// <summary>Джерело за ідентифікатором; запам'ятовується на час прогону.</summary>
@@ -245,7 +395,13 @@ public sealed class PiWebApiDataSource(
                  ?? throw new BusinessRuleException(
                      SourceUnavailable,
                      $"Джерело {dataSourceId} не існує або вимкнене.",
-                     new Dictionary<string, object?> { ["dataSourceId"] = dataSourceId });
+                     new Dictionary<string, object?>
+                     {
+                         // Той самий ключ, що SqlDataSource.cs/CollectionRunner.cs/
+                         // PiAfCatalogReader.cs/PiSqlClientDataSource.cs.
+                         ["messageKey"] = "err.ECR-INT-0503.sourceMissing",
+                         ["dataSourceId"] = dataSourceId.ToString(CultureInfo.InvariantCulture),
+                     });
 
         return cached;
     }
@@ -288,7 +444,12 @@ public sealed class PiWebApiDataSource(
                             AuthenticationRefused,
                             $"PI Web API відповів {(int)response.StatusCode} на {path}: "
                             + "джерело не приймає облікові дані.",
-                            new Dictionary<string, object?> { ["status"] = (int)response.StatusCode });
+                            new Dictionary<string, object?>
+                            {
+                                ["messageKey"] = "err.ECR-INT-0502.piWebApiUnauthorized",
+                                ["status"] = ((int)response.StatusCode).ToString(CultureInfo.InvariantCulture),
+                                ["path"] = path,
+                            });
                     }
 
                     if (attempt >= MaxAttempts || !Retryable(response.StatusCode))
@@ -296,7 +457,12 @@ public sealed class PiWebApiDataSource(
                         throw new BusinessRuleException(
                             SourceUnavailable,
                             $"PI Web API відповів {(int)response.StatusCode} на {path}.",
-                            new Dictionary<string, object?> { ["status"] = (int)response.StatusCode });
+                            new Dictionary<string, object?>
+                            {
+                                ["messageKey"] = "err.ECR-INT-0503.piWebApiErrorStatus",
+                                ["status"] = ((int)response.StatusCode).ToString(CultureInfo.InvariantCulture),
+                                ["path"] = path,
+                            });
                     }
                 }
                 else
@@ -339,8 +505,9 @@ public sealed class PiWebApiDataSource(
                     $"PI Web API не відповів на {path} за {MaxAttempts} спроб: тайм-аут запиту.",
                     new Dictionary<string, object?>
                     {
+                        ["messageKey"] = "err.ECR-INT-0503.piWebApiTimeout",
                         ["path"] = path,
-                        ["attempts"] = MaxAttempts,
+                        ["attempts"] = MaxAttempts.ToString(CultureInfo.InvariantCulture),
                         ["reason"] = "timeout",
                     });
             }

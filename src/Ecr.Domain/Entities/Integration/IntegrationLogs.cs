@@ -81,6 +81,144 @@ public sealed class CollectionCoverage : Entity<long>
 {
     private CollectionCoverage() { }
 
+    /// <summary>Період уже закрито — значення за нього не перенесено в комірки.</summary>
+    public const string SkippedPeriodClosed = "SkippedPeriodClosed";
+
+    /// <summary>У комірці ручне значення — зібране не перезаписало його.</summary>
+    public const string ConflictKeptManual = "ConflictKeptManual";
+
+    /// <summary>Точок на поле більше за стелю — інтервал не згорнуто (<c>D16-03</c>).</summary>
+    public const string SkippedPointCeiling = "SkippedPointCeiling";
+
+    /// <summary>
+    /// Рядок змінювали під час запису — повтори вичерпано, значення збору не
+    /// записано; наступний прогін спробує знову.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Не <see cref="ConflictKeptManual"/>: людина комірку не правила, і
+    /// «має правку людини» тут було б неправдою в журналі.
+    /// </remarks>
+    public const string SkippedWriteConflict = "SkippedWriteConflict";
+
+    /// <summary>
+    /// Правило періоду дозволяє запис лише з підтвердженням людини
+    /// (<c>ФВ-2.16</c>, <c>AllowWithConfirmation</c>) — інтеграція не підтверджує,
+    /// значення збору не записано.
+    /// </summary>
+    public const string SkippedNeedsConfirmation = "SkippedNeedsConfirmation";
+
+    /// <summary>
+    /// Синк довідника (<c>RegistrySyncJob</c>, <c>ФВ-8.11</c>): значення в джерелі
+    /// інше, а писати синк не має права — довідник <c>Local</c> або мапінг вимкнено.
+    /// </summary>
+    public const string RegistryDiverged = "RegistryDiverged";
+
+    /// <summary>
+    /// Синк довідника: джерело змінило поле, яке останньою правила людина —
+    /// лишається людське (<c>D-118</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Не <see cref="ConflictKeptManual"/>: той — про комірку документа, цей —
+    /// про поле запису довідника; фільтр журналу мусить їх розрізняти.
+    /// </remarks>
+    public const string RegistryConflictKeptManual = "RegistryConflictKeptManual";
+
+    /// <summary>
+    /// Синк довідника: прив'язаного елемента немає в ПОВНОМУ знімку джерела
+    /// (<c>D-187</c>); запис не видаляється.
+    /// </summary>
+    public const string RegistrySourceMissing = "RegistrySourceMissing";
+
+    /// <summary>
+    /// Синк довідника: елемент джерела без зв'язку <c>dic.RegistryExternalKey</c>;
+    /// запис не створюється (прив'язує людина).
+    /// </summary>
+    public const string RegistryElementUnlinked = "RegistryElementUnlinked";
+
+    /// <summary>
+    /// Синк довідника: значення не приводиться до типу поля (<c>ECR-REG-0422</c>)
+    /// або атрибут не прочитано (<c>ECR-INT-0404</c>/<c>ECR-INT-0503</c>).
+    /// </summary>
+    public const string RegistryValueRejected = "RegistryValueRejected";
+
+    /// <summary>
+    /// Синк довідника в режимі лише звірки: оновлення, яке синк ЗАПИСАВ би, якби
+    /// писав (поле або шлях елемента). Нічого не записано.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ З S7 для <c>External</c>/<c>Hybrid</c> оновлення пишуться через
+    /// <c>RegistryEntryWriter</c> і цієї події не дають; лишилась для <c>Local</c>
+    /// (зміна шляху елемента, <c>D-49</c>).
+    /// </remarks>
+    public const string RegistryPendingUpdate = "RegistryPendingUpdate";
+
+    /// <summary>
+    /// Синк довідника <c>External</c> (<c>D-212</c> (1)): новий елемент джерела —
+    /// синк сам створив запис (код — за <c>CodeMode</c>, назва — ім'я елемента AF).
+    /// </summary>
+    public const string RegistryAutoCreated = "RegistryAutoCreated";
+
+    /// <summary>
+    /// Синк довідника: прив'язаного елемента немає в повному знімку, а політика
+    /// <c>OnMissingInSource = Deactivate</c> — запис вимкнено, не видалено (<c>D-212</c>).
+    /// </summary>
+    public const string RegistryDeactivated = "RegistryDeactivated";
+
+    /// <summary>
+    /// Синк довідника <c>External</c>: елемент повернувся в джерело після
+    /// <see cref="RegistryDeactivated"/> — запис увімкнено знову (<c>D-212</c> Q6;
+    /// для <c>Hybrid</c> вмикає людина, і цієї події синк не пише).
+    /// </summary>
+    public const string RegistryReactivated = "RegistryReactivated";
+
+    /// <summary>
+    /// Синк довідника: значення з джерела порушує правило довідника
+    /// (<c>RegistryRuleEngine</c>, <c>ФВ-8.18</c>); запис не змінено.
+    /// </summary>
+    public const string RegistryRuleViolation = "RegistryRuleViolation";
+
+    /// <summary>
+    /// Синк довідника: зв'язок за ключем <c>(DataSourceId, ExternalId)</c> не
+    /// знайдено, і запис переприв'язано за запасним <c>ExternalPath</c> (<c>D-212</c> (7)).
+    /// </summary>
+    public const string RegistryExternalKeyRelinked = "RegistryExternalKeyRelinked";
+
+    /// <summary>
+    /// Усі статуси подій журналу покриття (<c>D-118</c>, ФВ-5.23).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Рядки дослівно ті, що пишуть <c>MaterializeCollectedDataJob</c> і
+    /// <c>RegistrySyncJob</c>: фільтр журналу відмовляє на всьому поза цим
+    /// переліком, тож новий статус без рядка тут був би невидимим для
+    /// адміністратора — саме тим мовчазним пропуском, від якого цей перелік і рятує.
+    /// </remarks>
+    public static readonly IReadOnlyList<string> KnownStatuses =
+    [
+        SkippedPeriodClosed, ConflictKeptManual, SkippedPointCeiling, SkippedWriteConflict, SkippedNeedsConfirmation,
+        RegistryDiverged, RegistryConflictKeptManual, RegistrySourceMissing, RegistryElementUnlinked,
+        RegistryValueRejected, RegistryPendingUpdate, SourceDataRefused,
+        RegistryAutoCreated, RegistryDeactivated, RegistryReactivated, RegistryRuleViolation,
+        RegistryExternalKeyRelinked,
+    ];
+
+    /// <summary>
+    /// Збір: джерело відмовило віддати дані інтервалу з кодом каталогу (дані
+    /// нечитабельні — напр. <c>ECR-INT-0422</c> <c>.timestampUnreadable</c>), а не
+    /// було недоступне. Інтервал лишається прогалиною; подія — нульової довжини
+    /// в момент відмови, інтервал і причина — конвертом у <c>Details</c>
+    /// (<c>CollectionStore.RecordCoverageEventAsync</c>).
+    /// </summary>
+    public const string SourceDataRefused = "SourceDataRefused";
+
+    /// <summary>Статуси подій синку довідника — підмножина <see cref="KnownStatuses"/>.</summary>
+    public static readonly IReadOnlyList<string> RegistryStatuses =
+    [
+        RegistryDiverged, RegistryConflictKeptManual, RegistrySourceMissing, RegistryElementUnlinked,
+        RegistryValueRejected, RegistryPendingUpdate,
+        RegistryAutoCreated, RegistryDeactivated, RegistryReactivated, RegistryRuleViolation,
+        RegistryExternalKeyRelinked,
+    ];
+
     /// <summary>Записує покритий інтервал.</summary>
     /// <param name="sourceEntityId">Сутність джерела.</param>
     /// <param name="coveredFrom">Початок покриття.</param>
@@ -109,7 +247,7 @@ public sealed class CollectionCoverage : Entity<long>
     /// </summary>
     /// <param name="sourceEntityId">Сутність джерела.</param>
     /// <param name="periodKey">Період, якого це стосується.</param>
-    /// <param name="status">Статус: <c>SkippedPeriodClosed</c>, <c>ConflictKeptManual</c>.</param>
+    /// <param name="status">Статус із <see cref="KnownStatuses"/>.</param>
     /// <param name="details">Пояснення для людини; без стеків (ФВ-6.11).</param>
     /// <param name="utcNow">Момент запису.</param>
     /// <remarks>
@@ -140,6 +278,43 @@ public sealed class CollectionCoverage : Entity<long>
             Details = details,
         };
     }
+
+    /// <summary>
+    /// Подія синхронізації довідника (<c>RegistrySyncJob</c>, <c>ФВ-8.10</c>/<c>ФВ-8.11</c>).
+    /// </summary>
+    /// <param name="sourceEntityId">Сутність джерела, прив'язана до довідника.</param>
+    /// <param name="status">Статус із <see cref="RegistryStatuses"/>.</param>
+    /// <param name="details">Пояснення для людини; без стеків (ФВ-6.11). Обрізається до <see cref="MaxDetailsLength"/>.</param>
+    /// <param name="utcNow">Момент запису.</param>
+    /// <remarks>
+    /// ⚠ <c>PeriodKey = null</c>: довідник не живе за періодами, і вигаданий
+    /// період зробив би подію видимою у фільтрі періоду, до якого вона не має
+    /// стосунку. Прогону теж немає (<c>CollectionRunId = null</c>, як у
+    /// <see cref="Skipped"/>, Q-186).
+    /// </remarks>
+    /// <exception cref="ArgumentException">Статус не з <see cref="RegistryStatuses"/>.</exception>
+    public static CollectionCoverage SkippedRegistry(
+        int sourceEntityId, string status, string details, DateTime utcNow)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(status);
+
+        // ⛔ Статус матеріалізації тут був би неправдою: подія синку довідника
+        // не стосується жодної комірки й жодного періоду.
+        if (!RegistryStatuses.Contains(status, StringComparer.Ordinal))
+        {
+            throw new ArgumentException($"Статус «{status}» не є статусом синку довідника.", nameof(status));
+        }
+
+        return new CollectionCoverage(sourceEntityId, utcNow, utcNow)
+        {
+            PeriodKey = null,
+            Status = status,
+            Details = details is { Length: > MaxDetailsLength } ? details[..MaxDetailsLength] : details,
+        };
+    }
+
+    /// <summary>Межа стовпця <c>itg.CollectionCoverage.Details</c> — <c>nvarchar(1000)</c>.</summary>
+    public const int MaxDetailsLength = 1000;
 
     public int SourceEntityId { get; private set; }
     public DateTime CoveredFrom { get; private set; }
@@ -562,6 +737,76 @@ public sealed class JobProgress
     /// <summary>Межа стовпця <see cref="ErrorCode"/>.</summary>
     public const int MaxErrorCodeLength = 32;
 
+    /// <summary>Межа стовпця <see cref="InstanceId"/>.</summary>
+    public const int MaxInstanceIdLength = 64;
+
+    /// <summary>
+    /// Процес, що тримає задачу в черзі або виконує її: <c>{машина}/{GUID процесу}</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Потрібен прибиранню на старті: рядки ПОПЕРЕДНЬОГО процесу цієї ж
+    /// машини зі свіжим биттям без нього не відрізнити від живих рядків сусіда
+    /// (<c>AbandonedWorkSweeper</c>). <c>null</c> — рядок старший за колонку;
+    /// такий закриває лише прибирання за віком биття.
+    /// </remarks>
+    public string? InstanceId { get; private set; }
+
+    private void SetInstance(string? instanceId)
+    {
+        if (instanceId is null)
+        {
+            return;
+        }
+
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(instanceId.Length, MaxInstanceIdLength);
+        InstanceId = instanceId;
+    }
+
+    /// <summary>Межа стовпця <see cref="Lane"/> (<c>varchar(32)</c>).</summary>
+    public const int MaxLaneLength = 32;
+
+    /// <summary>Межа стовпця <see cref="TargetKey"/>.</summary>
+    public const int MaxTargetKeyLength = 200;
+
+    // ── Черга в базі (MI-02, D-208). Пише й читає лише IJobQueue сирим SQL,
+    // тому доменних методів немає; усі колонки nullable, без backfill.
+
+    /// <summary>
+    /// Лейн черги; <c>null</c> — рядок-дзеркало Quartz (старий світ), черга
+    /// його не бере, прибирання на старті — навпаки, лише такі.
+    /// </summary>
+    public string? Lane { get; private set; }
+
+    /// <summary>Аргументи задачі, JSON; <c>null</c> — дзеркало Quartz.</summary>
+    public string? Payload { get; private set; }
+
+    /// <summary>
+    /// Коли задачу можна брати (годинник СУБД). Для рядка черги обов'язковий —
+    /// <c>CK_JobProgress_QueueShape</c>.
+    /// </summary>
+    public DateTime? AvailableAt { get; private set; }
+
+    /// <summary>Кінець оренди <c>Running</c>; прострочена — підлягає переклейму.</summary>
+    public DateTime? LeaseUntil { get; private set; }
+
+    /// <summary>Токен поточної оренди: кожне захоплення видає новий (fencing).</summary>
+    public Guid? ClaimToken { get; private set; }
+
+    /// <summary>
+    /// Ціль <c>{ТипМаркера}~{ціль}</c>: щонайбільше одна <c>Queued</c> і одна
+    /// <c>Running</c> на ціль (<c>UX_JobProgress_Target_*</c>).
+    /// </summary>
+    public string? TargetKey { get; private set; }
+
+    /// <summary>Коли попросили скасувати <c>Running</c>; <c>null</c> — не просили.</summary>
+    public DateTime? CancelRequestedAt { get; private set; }
+
+    /// <summary>
+    /// Скільки разів задачу переклеймили після втраченої оренди — окремо від
+    /// <see cref="Attempt"/> (ретраї виконавця); <c>null</c> — жодного.
+    /// </summary>
+    public int? ReclaimCount { get; private set; }
+
     /// <summary>
     /// Підтверджує, що задача досі виконується.
     /// </summary>
@@ -586,9 +831,11 @@ public sealed class JobProgress
     /// </remarks>
     /// <param name="correlationId">Кореляція запиту-постановника; <c>null</c> — лишити наявну.</param>
     /// <param name="documentId">Документ задачі; <c>null</c> — лишити наявний.</param>
-    public void Queue(DateTime utcNow, string? correlationId = null, long? documentId = null)
+    /// <param name="instanceId">Процес, у чиїй черзі задача; <c>null</c> — лишити наявний.</param>
+    public void Queue(DateTime utcNow, string? correlationId = null, long? documentId = null, string? instanceId = null)
     {
         SetCorrelation(correlationId);
+        SetInstance(instanceId);
         CreatedAt ??= utcNow;
         DocumentId = documentId ?? DocumentId;
         Attempt = null;
@@ -610,11 +857,13 @@ public sealed class JobProgress
     /// <param name="utcNow">Момент старту в UTC.</param>
     /// <param name="attempt">Номер спроби, від 1.</param>
     /// <param name="correlationId">Кореляція прогону; <c>null</c> — лишити наявну.</param>
-    public void Begin(DateTime utcNow, int attempt = 1, string? correlationId = null)
+    /// <param name="instanceId">Процес, що виконує задачу; <c>null</c> — лишити наявний.</param>
+    public void Begin(DateTime utcNow, int attempt = 1, string? correlationId = null, string? instanceId = null)
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(attempt, 1);
 
         SetCorrelation(correlationId);
+        SetInstance(instanceId);
         Attempt = attempt;
         State = "Running";
         Percent = 0;

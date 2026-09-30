@@ -97,6 +97,12 @@ public sealed class OrphanScanTests
                   new(new CellAddress(new PeriodKey(Period), Row1, VolumeId), 3,
                       new CellValueData { ValueNumeric = 12500m }),
               });
+        _cells.ReadSliceAsync(Arg.Any<long>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+              .Returns(new List<CellRecord>
+              {
+                  new(new CellAddress(new PeriodKey(Period), Row1, VolumeId), 3,
+                      new CellValueData { ValueNumeric = 12500m }),
+              });
 
         // ⛔ Читання зрізу тепер вимагає і права `Document.View`, і ГРАНТА на
         // проєкт (`A7-53`, `A7-55`). Фікстура видає обидва явно: предмет цих
@@ -107,6 +113,8 @@ public sealed class OrphanScanTests
 
         _access.CanEditSliceAsync(Arg.Any<AccessProfile>(), TableInstance, Arg.Any<CancellationToken>())
                .Returns(new Dictionary<CellAddress, EditDecision>());
+        _access.ReadScopeAsync(Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
+               .Returns(async _ => ReadScopes.Everything(await _metadata.GetAsync(2, CancellationToken.None)));
         _access.BuildProfileAsync(9, Arg.Any<CancellationToken>()).Returns(Profile());
         _access.CanSubmitAsync(Arg.Any<AccessProfile>(), Document, Arg.Any<int>(),
                                Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
@@ -120,6 +128,13 @@ public sealed class OrphanScanTests
         // таблиці не прив'язана.
         _methodologies.GetMethodologyIdsBoundToTableAsync(Arg.Any<int>(), Arg.Any<CancellationToken>())
                       .Returns(new List<int>());
+
+        // F-05: жодного прогону розрахунку тут немає — числа актуальні
+        // (`CalculatedAt = null` → `IsStale = false`), інакше без стабу
+        // NSubstitute повернув би `null` замість запису, і подання впало б
+        // на NRE в КОЖНОМУ тесті цього класу, не лише в тих, що про свіжість.
+        _methodologies.GetCalculationFreshnessAsync(Arg.Any<long>(), Arg.Any<int>(), Arg.Any<IReadOnlyCollection<int>?>(), Arg.Any<CancellationToken>())
+                      .Returns(new CalculationFreshness(null, null));
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
@@ -343,7 +358,11 @@ public sealed class OrphanScanTests
             new Ecr.Application.Reporting.ReportSnapshotSync(
                 NSubstitute.Substitute.For<IReportSnapshotBuilder>(),
                 NSubstitute.Substitute.For<IDocumentStore>()),
-            _uow, _user, _clock);
+            _uow, _user, _clock, NSubstitute.Substitute.For<ISheetEditGate>(),
+            NSubstitute.Substitute.For<Ecr.Application.Recalculation.ISubmitRecalculation>(),
+            _methodologies,
+            NSubstitute.Substitute.For<ITemplateVersionStore>(),
+            NSubstitute.Substitute.For<IRegistryStore>());
 
     private static RegistryDef Definition()
         => new(EcrCode.Create("PERMITS"), Text("Permits"), isTemporal: true);

@@ -1,5 +1,6 @@
 // tests/Ecr.Application.Tests/Periods/ReopenPeriodTransactionTests.cs
 using Ecr.Application.Common;
+using Ecr.Application.Errors;
 using Ecr.Application.Periods;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
@@ -63,7 +64,7 @@ public sealed class ReopenPeriodTransactionTests(SqlServerFixture sql)
         await using var db = CreateContext();
         var spy = new TransactionWatchingPeriodStore(new PeriodStore(db), db);
 
-        var handler = Handler(spy, db, new UnitOfWork(db));
+        var handler = Handler(spy, db, new UnitOfWork(db), arranged.ProjectId);
 
         await handler
             .HandleAsync(arranged.PeriodId, "уточнення за скаргою", Now.AddDays(3), CancellationToken.None)
@@ -102,7 +103,7 @@ public sealed class ReopenPeriodTransactionTests(SqlServerFixture sql)
         var arranged = await ArrangeAsync(PeriodState.Closed).ConfigureAwait(true);
 
         await using var db = CreateContext();
-        var handler = Handler(new PeriodStore(db), db, new FailingUnitOfWork(new UnitOfWork(db)));
+        var handler = Handler(new PeriodStore(db), db, new FailingUnitOfWork(new UnitOfWork(db)), arranged.ProjectId);
 
         var error = await Assert.ThrowsAsync<InvalidOperationException>(
             () => handler.HandleAsync(
@@ -135,7 +136,7 @@ public sealed class ReopenPeriodTransactionTests(SqlServerFixture sql)
         var arranged = await ArrangeAsync(PeriodState.Closed).ConfigureAwait(true);
 
         await using var db = CreateContext();
-        var handler = Handler(new PeriodStore(db), db, new UnitOfWork(db));
+        var handler = Handler(new PeriodStore(db), db, new UnitOfWork(db), arranged.ProjectId);
 
         await handler
             .HandleAsync(arranged.PeriodId, "уточнення за скаргою", Now.AddDays(3), CancellationToken.None)
@@ -144,19 +145,132 @@ public sealed class ReopenPeriodTransactionTests(SqlServerFixture sql)
         Assert.Equal(1, await AuditRowsAsync(arranged.PeriodId).ConfigureAwait(true));
     }
 
-    private ReopenPeriodHandler Handler(IPeriodStore periods, EcrDbContext db, IUnitOfWork uow)
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-6.6")]
+    public async Task Без_гранта_Manage_на_проєкт_період_не_відкривається_і_журнал_чистий()
+    {
+        // ⛔ МУТАЦІЙНИЙ ДОКАЗ. Прибрати перевірку `LevelFor(Project) < Manage` у
+        // `ReopenPeriodHandler` — і червоним стає рівно цей тест: власник права
+        // `Period.Reopen` з грантом лише Write відкриває період чужого проєкту.
+        // ⚠ Саме Write, а не «жодного гранта»: так видно, що межа — Manage.
+        var arranged = await ArrangeAsync(PeriodState.Closed).ConfigureAwait(true);
+
+        await using var db = CreateContext();
+        var handler = Handler(new PeriodStore(db), db, new UnitOfWork(db), arranged.ProjectId, GrantLevel.Write);
+
+        var error = await Assert.ThrowsAsync<AccessDeniedException>(
+            () => handler.HandleAsync(
+                arranged.PeriodId, "уточнення за скаргою", Now.AddDays(3), CancellationToken.None))
+            .ConfigureAwait(true);
+
+        Assert.Equal("err.ECR-AUTH-0403.noProjectManageGrant", error.Details!["messageKey"]);
+        Assert.Equal(0, await AuditRowsAsync(arranged.PeriodId).ConfigureAwait(true));
+
+        await using var check = CreateContext();
+        Assert.Equal(
+            PeriodState.Closed,
+            await check.Periods.Where(p => p.Id == arranged.PeriodId).Select(p => p.State)
+                       .FirstAsync().ConfigureAwait(true));
+    }
+
+    /// <remarks>
+    /// Після ручного Reopen ставиться разовий пошук осиротілих рядків — і саме
+    /// ПІСЛЯ коміту: у мить постановки інше підключення вже бачить <c>Grace</c>.
+    /// Мутація: прибрати виклик <c>EnqueueOrphanScanAsync</c> → постановки
+    /// немає, червоний (прогнано).
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-1.10")]
+    public async Task Ручне_відкриття_ставить_пошук_осиротілих_після_коміту()
+    {
+        var arranged = await ArrangeAsync(PeriodState.Closed).ConfigureAwait(true);
+
+        PeriodState? seenAtEnqueue = null;
+        var jobs = Substitute.For<IBackgroundJobScheduler>();
+        jobs.EnqueueExclusiveAsync<IOrphanScanJob>(
+                Arg.Any<string>(), Arg.Any<object?>(), Arg.Any<CancellationToken>(), Arg.Any<int?>())
+            .Returns(async _ =>
+            {
+                await using var other = CreateContext();
+                seenAtEnqueue = await other.Periods.Where(p => p.Id == arranged.PeriodId)
+                    .Select(p => (PeriodState?)p.State).FirstAsync().ConfigureAwait(false);
+                return "IOrphanScanJob~period-reopen~x";
+            });
+
+        await using var db = CreateContext();
+        await Handler(new PeriodStore(db), db, new UnitOfWork(db), arranged.ProjectId, jobs: jobs)
+            .HandleAsync(arranged.PeriodId, "уточнення за скаргою", Now.AddDays(3), CancellationToken.None)
+            .ConfigureAwait(true);
+
+        await jobs.Received(1).EnqueueExclusiveAsync<IOrphanScanJob>(
+            ReopenPeriodHandler.OrphanScanTarget, Arg.Any<object?>(), Arg.Any<CancellationToken>(), UserId);
+        Assert.Equal(PeriodState.Grace, seenAtEnqueue);
+    }
+
+    /// <remarks>
+    /// Відкат — без постановки; збій самої постановки не валить уже закомічене
+    /// відкриття (інакше 500 на успішну дію).
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-1.10")]
+    public async Task Пошук_осиротілих_не_ставиться_при_відкаті_а_його_збій_не_валить_відкриття()
+    {
+        var rolledBack = await ArrangeAsync(PeriodState.Closed).ConfigureAwait(true);
+        var jobs = Substitute.For<IBackgroundJobScheduler>();
+
+        await using (var db = CreateContext())
+        {
+            await Assert.ThrowsAsync<InvalidOperationException>(
+                () => Handler(new PeriodStore(db), db, new FailingUnitOfWork(new UnitOfWork(db)), rolledBack.ProjectId, jobs: jobs)
+                    .HandleAsync(rolledBack.PeriodId, "уточнення", Now.AddDays(3), CancellationToken.None))
+                .ConfigureAwait(true);
+        }
+
+        await jobs.DidNotReceive().EnqueueExclusiveAsync<IOrphanScanJob>(
+            Arg.Any<string>(), Arg.Any<object?>(), Arg.Any<CancellationToken>(), Arg.Any<int?>());
+
+        var committed = await ArrangeAsync(PeriodState.Closed).ConfigureAwait(true);
+        var failing = Substitute.For<IBackgroundJobScheduler>();
+        failing.EnqueueExclusiveAsync<IOrphanScanJob>(
+                Arg.Any<string>(), Arg.Any<object?>(), Arg.Any<CancellationToken>(), Arg.Any<int?>())
+            .Returns(Task.FromException<string>(new InvalidOperationException("черга недоступна")));
+
+        await using (var db = CreateContext())
+        {
+            await Handler(new PeriodStore(db), db, new UnitOfWork(db), committed.ProjectId, jobs: failing)
+                .HandleAsync(committed.PeriodId, "уточнення", Now.AddDays(3), CancellationToken.None)
+                .ConfigureAwait(true);
+        }
+
+        await using var check = CreateContext();
+        Assert.Equal(
+            PeriodState.Grace,
+            await check.Periods.Where(p => p.Id == committed.PeriodId).Select(p => p.State)
+                       .FirstAsync().ConfigureAwait(true));
+    }
+
+    private ReopenPeriodHandler Handler(
+        IPeriodStore periods, EcrDbContext db, IUnitOfWork uow, int projectId,
+        GrantLevel projectGrant = GrantLevel.Manage, IBackgroundJobScheduler? jobs = null)
     {
         var access = Substitute.For<IAccessDecisionService>();
         access.BuildProfileAsync(UserId, Arg.Any<CancellationToken>())
               .Returns(new AccessBuilder { UserId = UserId }
                   .Permission(ReopenPeriodHandler.Permission)
+                  .Grant(ResourceKind.Project, projectId, projectGrant)
                   .Build());
 
         var user = Substitute.For<ICurrentUser>();
         user.UserId.Returns(UserId);
 
         return new ReopenPeriodHandler(
-            periods, access, uow, new AuditWriter(db), user, new TestClock(Now));
+            periods, access, uow, new AuditWriter(db), user, new TestClock(Now), jobs: jobs);
     }
 
     /// <summary>Скільки записів «Reopen» про цей період лежить у журналі.</summary>
@@ -247,6 +361,9 @@ public sealed class ReopenPeriodTransactionTests(SqlServerFixture sql)
             => inner.ListPoliciesAsync(ct);
 
         public void AddPolicy(PeriodPolicy policy) => inner.AddPolicy(policy);
+
+        public Task<IReadOnlyList<int>> ListProjectIdsUsingPolicyAsync(int periodPolicyId, CancellationToken ct)
+            => inner.ListProjectIdsUsingPolicyAsync(periodPolicyId, ct);
 
         public void AddRange(IEnumerable<Period> periods) => inner.AddRange(periods);
 

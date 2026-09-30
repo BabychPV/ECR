@@ -45,7 +45,7 @@ public sealed class ValidationEngineTests
             Column("Volume"),
             new CellValueData { ValueNumeric = -5m },
             [Rule("POSITIVE", ValidationSeverity.Error, scope: 0, "[Volume] >= 0")],
-            NoHeaders);
+            NoHeaders, "en");
 
         var message = Assert.Single(messages);
         Assert.Equal(ValidationSeverity.Error, message.Severity);
@@ -62,7 +62,7 @@ public sealed class ValidationEngineTests
             scope: 3,
             [Rule("BALANCE", ValidationSeverity.Error, scope: 3, "[Total] = 0")],
             new Values { ["Total"] = 42m },
-            NoHeaders);
+            NoHeaders, "en");
 
         var message = Assert.Single(messages);
 
@@ -83,7 +83,7 @@ public sealed class ValidationEngineTests
             Column("Volume"),
             new CellValueData { ValueNumeric = 10m },
             [Rule("BROKEN", ValidationSeverity.Error, scope: 0, "[Volume] >>> 0")],
-            NoHeaders);
+            NoHeaders, "en");
 
         var message = Assert.Single(messages);
 
@@ -104,8 +104,8 @@ public sealed class ValidationEngineTests
         var c = Rule("C", ValidationSeverity.Info, scope: 0, "[Volume] <> 0");
         var value = new CellValueData { ValueNumeric = -5m };
 
-        var forward = Engine().ValidateCell(Column("Volume"), value, [a, b, c], NoHeaders);
-        var backward = Engine().ValidateCell(Column("Volume"), value, [c, b, a], NoHeaders);
+        var forward = Engine().ValidateCell(Column("Volume"), value, [a, b, c], NoHeaders, "en");
+        var backward = Engine().ValidateCell(Column("Volume"), value, [c, b, a], NoHeaders, "en");
 
         // Правила не мають між собою порядку виконання: їхній набір — це
         // множина, а не програма. Залежність від порядку означала б, що
@@ -122,7 +122,7 @@ public sealed class ValidationEngineTests
         var column = Column("Volume");
         column.SetRequired(true);
 
-        var messages = Engine().ValidateCell(column, CellValueData.Empty, [], NoHeaders);
+        var messages = Engine().ValidateCell(column, CellValueData.Empty, [], NoHeaders, "en");
 
         var message = Assert.Single(messages);
 
@@ -144,17 +144,92 @@ public sealed class ValidationEngineTests
         var rules = new[] { Rule("POSITIVE", ValidationSeverity.Error, scope: 0, "[Volume] >= 0") };
         var value = new CellValueData { ValueNumeric = -5m };
 
-        var before = Engine().ValidateCell(column, value, rules, NoHeaders);
+        var before = Engine().ValidateCell(column, value, rules, NoHeaders, "en");
 
         // «Переживає перезавантаження» означає, що результат — ФУНКЦІЯ від
         // збережених даних і конфігурації, а не від стану процесу. Новий
         // рушій, новий набір об'єктів, ті самі вхідні — та сама відповідь.
-        var after = Engine().ValidateCell(column, value, rules, NoHeaders);
+        var after = Engine().ValidateCell(column, value, rules, NoHeaders, "en");
 
         Assert.Equal(
             before.Select(m => (m.Severity, m.RuleCode, m.BlocksSave)),
             after.Select(m => (m.Severity, m.RuleCode, m.BlocksSave)));
         Assert.NotEmpty(before);
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "B-11")]
+    public void Текст_правила_іде_мовою_запиту_а_не_завжди_англійською()
+    {
+        // ⛔ B-11 (UX-аудит, четвертий раунд): було жорстко `.Get("en")` —
+        // переклад правила, який методолог заклав для RU, ігнорувався.
+        var rule = new ValidationRule(
+            tableDefId: 3, EcrCode.Create("RU_RULE"), ValidationSeverity.Warning, scope: 0, "[Volume] >= 0",
+            new LocalizedText(new Dictionary<string, string> { ["en"] = "Must be positive", ["ru"] = "Должно быть положительным" }));
+
+        var messages = Engine().ValidateCell(
+            Column("Volume"), new CellValueData { ValueNumeric = -5m }, [rule], NoHeaders, "ru");
+
+        var message = Assert.Single(messages);
+        Assert.Equal("Должно быть положительным", message.Message);
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "B-11")]
+    public void Текст_правила_без_перекладу_на_мову_запиту_підміняється_англійським()
+    {
+        // LocalizedText.Get сам робить fallback на "en" — рушій не має його дублювати.
+        var messages = Engine().ValidateCell(
+            Column("Volume"), new CellValueData { ValueNumeric = -5m },
+            [Rule("POSITIVE", ValidationSeverity.Warning, scope: 0, "[Volume] >= 0")], NoHeaders, "kz");
+
+        var message = Assert.Single(messages);
+        Assert.Equal("Порушено POSITIVE", message.Message);
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "B-11")]
+    public void Обовязкова_комірка_рос_мовою_дає_російський_текст()
+    {
+        var column = Column("Volume");
+        column.SetRequired(true);
+
+        var messages = Engine().ValidateCell(column, CellValueData.Empty, [], NoHeaders, "ru");
+
+        var message = Assert.Single(messages);
+        Assert.Contains("обязательна", message.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("обов'язкова", message.Message, StringComparison.Ordinal);
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "B-11")]
+    public void Порожня_мова_запиту_не_валить_валідацію_а_підміняється_англійською()
+    {
+        // ⚠ Виклик із порожньої/незаданої ICurrentUser.Language (типово в
+        // тестових підробках) не має права заблокувати запис комірки —
+        // м'який fallback, а не ArgumentException.
+        var messages = Engine().ValidateCell(
+            Column("Volume"), new CellValueData { ValueNumeric = -5m },
+            [Rule("POSITIVE", ValidationSeverity.Warning, scope: 0, "[Volume] >= 0")], NoHeaders, "   ");
+
+        var message = Assert.Single(messages);
+        Assert.Equal("Порушено POSITIVE", message.Message);
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "B-11")]
+    public void Зламане_правило_дає_текст_мовою_запиту()
+    {
+        var messages = Engine().ValidateCell(
+            Column("Volume"), new CellValueData { ValueNumeric = 10m },
+            [Rule("BROKEN", ValidationSeverity.Error, scope: 0, "[Volume] >>> 0")], NoHeaders, "ru");
+
+        var message = Assert.Single(messages);
+        Assert.Equal(ValidationEngine.BrokenRuleCode, message.RuleCode);
+
+        // ⛔ До фіксу тут завжди йшло українське речення незалежно від мови.
+        Assert.DoesNotContain("розбирається", message.Message, StringComparison.Ordinal);
+        Assert.Contains("разбирается", message.Message, StringComparison.Ordinal);
     }
 
     /// <summary>Значення рядка для правил рівня рядка й вище.</summary>

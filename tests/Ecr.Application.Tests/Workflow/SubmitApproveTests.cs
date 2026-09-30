@@ -35,6 +35,7 @@ public sealed class SubmitApproveTests
     private readonly IRowStore _rows = Substitute.For<IRowStore>();
     private readonly IWorkflowStore _workflow = Substitute.For<IWorkflowStore>();
     private readonly IAccessDecisionService _access = Substitute.For<IAccessDecisionService>();
+    private readonly IMethodologyStore _methodologies = Substitute.For<IMethodologyStore>();
     private readonly IUnitOfWork _uow = Substitute.For<IUnitOfWork>();
     private readonly ICurrentUser _user = Substitute.For<ICurrentUser>();
     private readonly IClock _clock = Substitute.For<IClock>();
@@ -78,6 +79,8 @@ public sealed class SubmitApproveTests
                   .Returns(true);
 
         _access.BuildProfileAsync(9, Arg.Any<CancellationToken>()).Returns(Profile());
+        _access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
+            .Returns(EditDecision.Allow());
         _access.CanSubmitAsync(Arg.Any<AccessProfile>(), Document, Arg.Any<int>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
                .Returns(EditDecision.Allow());
         _access.CanApproveAsync(Arg.Any<AccessProfile>(), Document, Arg.Any<int>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
@@ -88,6 +91,25 @@ public sealed class SubmitApproveTests
         _rows.GetOrphanFlagsAsync(Document, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
              .Returns(new Dictionary<long, bool>());
 
+        // ⚠ За замовчуванням — жодного прогону розрахунку взагалі
+        // (`CalculatedAt = null`), тобто `IsStale = false`: більшість тестів
+        // цього файлу не про методології, і застосовувати їм застарілість
+        // навмисно не потрібно. Тест на застарілість підставляє інше значення
+        // сам (`WithStaleMethodologyResults`).
+        _methodologies.GetCalculationFreshnessAsync(Document, Period, Arg.Any<IReadOnlyCollection<int>?>(), Arg.Any<CancellationToken>())
+             .Returns(new CalculationFreshness(null, null));
+
+        // ⚠ Звуження застарілості до аркуша з прив'язкою (наступний крок над
+        // F-05): перевірка `IsStale` в `SubmitSheetHandler` тепер узагалі не
+        // йде, якщо жодна таблиця аркуша не прив'язана до методології. За
+        // замовчуванням тут — прив'язка Є (будь-яка таблиця), щоб наявні
+        // тести на застарілість нижче лишались чинними без змін. Тест на
+        // аркуш БЕЗ прив'язки підставляє порожній список сам.
+        _methodologies.GetMethodologyIdsBoundToTableAsync(Arg.Any<int>(), Arg.Any<CancellationToken>())
+             .Returns(new List<int> { 1 });
+        _methodologies.GetMethodologyIdsBoundToTablesAsync(Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<CancellationToken>())
+             .Returns(new List<int> { 1 });
+
         // ⚠ Екземпляри таблиць і знімок структури: подання кличе валідацію
         // (`ФВ-5.4`, `W8`), а вона питає обидва. Порожній набір правил тут
         // навмисний — предмет цих тестів робочий процес, а не валідація;
@@ -97,6 +119,14 @@ public sealed class SubmitApproveTests
         _rows.GetRowIdsAsync(Arg.Any<long>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
              .Returns(new Dictionary<string, long> { ["7001001"] = 1001L });
         _metadata.GetAsync(TemplateVersion, Arg.Any<CancellationToken>()).Returns(Snapshot());
+
+        // ⚠ S6: тіло відмови подання фільтрується межами читання того, хто
+        // подає. За замовчуванням він бачить усе — у тій структурі, яку тест
+        // підставив у `_metadata` сам (читається ліниво, у момент виклику).
+        _access.ReadScopeAsync(Arg.Any<AccessProfile>(), Document, Arg.Any<CancellationToken>())
+            .Returns(async _ => ReadScopes.Everything(
+                await _metadata.GetAsync(TemplateVersion, CancellationToken.None)));
+
         // ⚠ Ключ — `TableInstanceId` (500), а не `DocumentId`: саме так
         // адресується зріз (`ICellStore.ReadSliceAsync`). Доти обробник
         // передавав сюди `documentId`, і фікстура повторювала ту саму
@@ -108,10 +138,68 @@ public sealed class SubmitApproveTests
                   new(new CellAddress(new PeriodKey(Period), 1001, 11), 3,
                       new CellValueData { ValueNumeric = 12500m }),
               });
+
+        // ⚠ P3: подання читає зріз і рядки ПАКЕТНО (`ReadSlicesAsync`,
+        // `GetRowIdsBatchAsync`). Пакетні виклики делегують до поштучних
+        // підстановок вище — тести нижче й далі підставляють зріз поштучно.
+        // O3c: лише з ключем партиції періоду подання — з іншим зріз порожній.
+        _cells.ReadSlicesAsync(Arg.Any<IReadOnlyList<long>>(), new PeriodKey(Period), Arg.Any<CancellationToken>())
+              .Returns(call =>
+              {
+                  var result = new Dictionary<long, IReadOnlyList<CellRecord>>();
+                  foreach (var id in call.Arg<IReadOnlyList<long>>())
+                  {
+                      result[id] = _cells.ReadSliceAsync(id, CancellationToken.None).GetAwaiter().GetResult();
+                  }
+
+                  return (IReadOnlyDictionary<long, IReadOnlyList<CellRecord>>)result;
+              });
+        _rows.GetRowIdsBatchAsync(Arg.Any<IReadOnlyList<long>>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+             .Returns(call =>
+             {
+                 var result = new Dictionary<long, IReadOnlyDictionary<string, long>>();
+                 foreach (var id in call.Arg<IReadOnlyList<long>>())
+                 {
+                     result[id] = _rows.GetRowIdsAsync(id, call.Arg<PeriodKey>(), CancellationToken.None)
+                                       .GetAwaiter().GetResult();
+                 }
+
+                 return (IReadOnlyDictionary<long, IReadOnlyDictionary<string, long>>)result;
+             });
     }
 
     /// <summary>Версія шаблону, за якою живе документ цих тестів.</summary>
     private const int TemplateVersion = 2;
+
+    /// <summary>Таблиця аркуша <c>Waste</c> (лише в <c>Snapshot(withWasteSheet: true)</c>).</summary>
+    private const int WasteTable = 4;
+
+    /// <summary>Третій аркуш (лише в <c>Snapshot(withAirSheet: true)</c>).</summary>
+    private const int Air = 22;
+
+    /// <summary>Таблиця аркуша <c>Air</c>.</summary>
+    private const int AirTable = 5;
+
+    /// <summary>Формула таблиці Water (3), що читає таблицю Waste (4).</summary>
+    private const int WaterFormula = 90;
+
+    /// <summary>Формула таблиці Waste (4), що читає таблицю Air (5).</summary>
+    private const int WasteFormula = 91;
+
+    /// <summary>Формула шаблону з заданим ідентифікатором.</summary>
+    private static Ecr.Domain.Entities.Configuration.FormulaDef Formula(int id, int tableDefId, string expression)
+    {
+        var formula = new Ecr.Domain.Entities.Configuration.FormulaDef(
+            tableDefId, FormulaScope.Column, expression, ExpressionDialect.Template);
+        typeof(Entity<int>).GetProperty("Id")!.SetValue(formula, id);
+        return formula;
+    }
+
+    /// <summary>Ребро графа: формула читає колонку таблиці (динамічний діапазон — без рядка).</summary>
+    private static Ecr.Domain.Entities.Configuration.FormulaDependency Reads(int formulaId, int tableDefId)
+        => Ecr.Domain.Entities.Configuration.FormulaDependency.ForFormula(
+            formulaId, dependsOnKind: 0, tableDefId, rowKey: null, columnDefId: 11,
+            filterJson: null, periodOffset: null, sortOrder: 0);
 
     /// <summary>
     /// Знімок структури: аркуш <c>Water</c> з однією таблицею й колонкою.
@@ -121,8 +209,24 @@ public sealed class SubmitApproveTests
     /// Колонка <c>Volume</c> обов'язкова (<c>ColumnDef.IsRequired</c>) — предмет
     /// перевірки «рядок, чиєї обов'язкової клітинки НІКОЛИ не торкались».
     /// </param>
+    /// <param name="withWasteSheet">
+    /// Додати аркуш <c>Waste</c> із таблицею <c>WasteTable</c> — для тестів
+    /// звуження застарілості методологій до таблиць аркуша (F-05).
+    /// </param>
+    /// <param name="waterFormulaReadsWaste">
+    /// Таблиця Water отримує формулу <c>WaterFormula</c> (ребра — у графі <c>_versions</c>).
+    /// </param>
+    /// <param name="withAirSheet">
+    /// Третій аркуш <c>Air</c> і формула <c>WasteFormula</c> у таблиці Waste
+    /// (разом із <paramref name="withWasteSheet"/>).
+    /// </param>
+    /// <param name="permitRegistryDefId">
+    /// Додати Lookup-колонку <c>Permit</c> на цей довідник — для <c>REGFIELD</c> у правилі (D16-04).
+    /// </param>
     private static Ecr.Domain.Entities.Configuration.TemplateVersionSnapshot Snapshot(
-        Ecr.Domain.Entities.Configuration.ValidationRule? rule = null, bool requiredColumn = false)
+        Ecr.Domain.Entities.Configuration.ValidationRule? rule = null, bool requiredColumn = false,
+        bool withWasteSheet = false, bool waterFormulaReadsWaste = false, bool withAirSheet = false,
+        int? permitRegistryDefId = null)
     {
         var column = new Ecr.Domain.Entities.Configuration.ColumnDef(
             tableDefId: 3, EcrCode.Create("Volume"),
@@ -145,6 +249,18 @@ public sealed class SubmitApproveTests
         typeof(Entity<int>).GetProperty("Id")!.SetValue(table, 3);
 
         table.AddColumn(column);
+
+        // Lookup-колонка `Permit` (id 12) на довідник — для REGFIELD у правилі (D16-04).
+        if (permitRegistryDefId is { } registryDefId)
+        {
+            var permit = new Ecr.Domain.Entities.Configuration.ColumnDef(
+                tableDefId: 3, EcrCode.Create("Permit"),
+                new LocalizedText(new Dictionary<string, string> { ["en"] = "Permit" }), 2, CellDataType.Lookup);
+            typeof(Entity<int>).GetProperty("Id")!.SetValue(permit, PermitColumn);
+            permit.SetLookup(registryDefId);
+            table.AddColumn(permit);
+        }
+
         if (rule is not null)
         {
             table.AddValidationRule(rule);
@@ -152,8 +268,58 @@ public sealed class SubmitApproveTests
 
         sheet.AddTable(table);
 
+        // ⚠ Другий аркуш (Waste, таблиця WasteTable) — лише на запит: предмет
+        // тестів звуження застарілості до таблиць аркуша (F-05). Решта тестів
+        // живе з одним аркушем, як і раніше.
+        List<Ecr.Domain.Entities.Configuration.SheetDef> sheets = [sheet];
+        if (withWasteSheet)
+        {
+            var waste = new Ecr.Domain.Entities.Configuration.SheetDef(
+                TemplateVersion, EcrCode.Create("WASTE"),
+                new LocalizedText(new Dictionary<string, string> { ["en"] = "Waste" }), 2);
+            typeof(Entity<int>).GetProperty("Id")!.SetValue(waste, Waste);
+
+            var wasteTable = new Ecr.Domain.Entities.Configuration.TableDef(
+                sheetDefId: Waste, EcrCode.Create("WASTEMAIN"),
+                new LocalizedText(new Dictionary<string, string> { ["en"] = "Waste main" }), 1,
+                TableLayoutKind.PerPeriodInstance, TableRowMode.Fixed);
+            typeof(Entity<int>).GetProperty("Id")!.SetValue(wasteTable, WasteTable);
+
+            waste.AddTable(wasteTable);
+            sheets.Add(waste);
+
+            if (withAirSheet)
+            {
+                var air = new Ecr.Domain.Entities.Configuration.SheetDef(
+                    TemplateVersion, EcrCode.Create("AIR"),
+                    new LocalizedText(new Dictionary<string, string> { ["en"] = "Air" }), 3);
+                typeof(Entity<int>).GetProperty("Id")!.SetValue(air, Air);
+
+                var airTable = new Ecr.Domain.Entities.Configuration.TableDef(
+                    sheetDefId: Air, EcrCode.Create("AIRMAIN"),
+                    new LocalizedText(new Dictionary<string, string> { ["en"] = "Air main" }), 1,
+                    TableLayoutKind.PerPeriodInstance, TableRowMode.Fixed);
+                typeof(Entity<int>).GetProperty("Id")!.SetValue(airTable, AirTable);
+
+                air.AddTable(airTable);
+                sheets.Add(air);
+
+                // Формула таблиці Waste, що читає таблицю аркуша Air.
+                wasteTable.AddFormula(Formula(WasteFormula, WasteTable, "[AIR].[AIRMAIN].[Volume]"));
+            }
+        }
+
+        // ⚠ Формула таблиці Water, що читає таблицю ІНШОГО аркуша (Waste) —
+        // предмет крос-аркушевого замикання застарілості (F-05). Сам вираз
+        // обробник не розбирає: ребра дає граф `cfg.FormulaDependency`
+        // (`_versions`), вираз тут — лише для читабельності.
+        if (waterFormulaReadsWaste)
+        {
+            table.AddFormula(Formula(WaterFormula, 3, "[WASTE].[WASTEMAIN].[Volume]"));
+        }
+
         return new Ecr.Domain.Entities.Configuration.TemplateVersionSnapshot(
-            TemplateVersion, PresentationRevision: 0, Sheets: [sheet],
+            TemplateVersion, PresentationRevision: 0, Sheets: sheets,
             ColumnsById: new Dictionary<int, Ecr.Domain.Entities.Configuration.ColumnDef> { [11] = column },
             RowsByKey: new Dictionary<(int, string), Ecr.Domain.Entities.Configuration.RowDef>());
     }
@@ -215,7 +381,20 @@ public sealed class SubmitApproveTests
         => new(_cells, _rows, _workflow, _documents, _metadata, _access,
                new Ecr.Application.Validation.ValidationEngine(new RealFormulaEngine()),
                _headers,
-               Reports(), _uow, _user, _clock);
+               Reports(), _uow, _user, _clock, Substitute.For<ISheetEditGate>(),
+               NSubstitute.Substitute.For<Ecr.Application.Recalculation.ISubmitRecalculation>(),
+               _methodologies,
+               _versions,
+               _registries);
+
+    /// <summary>Довідник для <c>REGFIELD</c> у правилах (D16-04); за замовчуванням порожній.</summary>
+    private readonly IRegistryStore _registries = Substitute.For<IRegistryStore>();
+
+    /// <summary>
+    /// Граф залежностей формул версії (<c>cfg.FormulaDependency</c>). За
+    /// замовчуванням у знімку формул немає, тож обробник його й не питає.
+    /// </summary>
+    private readonly ITemplateVersionStore _versions = Substitute.For<ITemplateVersionStore>();
 
     private static IDocumentHeaderStore CreateHeaderStore()
     {
@@ -302,6 +481,60 @@ public sealed class SubmitApproveTests
         await Submit().HandleAsync(Document, Water, Period, CancellationToken.None);
 
         await _reportSnapshots.Received(1).MarkSubmittedAsync(55, 9, Arg.Any<CancellationToken>());
+    }
+
+    // ──────────────────────────── Погодження ──────────────────────────
+    // F-25 (пряме рішення людини, UX-PASS R4): та сама людина не може бути
+    // тим, хто подав аркуш, і тим, хто його погоджує.
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Finding", "F-25")]
+    public async Task Погодження_власного_подання_відхиляється()
+    {
+        // Той самий користувач (`_user.UserId` == 9), що подав аркуш,
+        // намагається сам його затвердити.
+        _sheets[Water].Submit(userId: 9, Now);
+
+        var error = await Assert.ThrowsAsync<AccessDeniedException>(
+            () => Approve().HandleAsync(Document, Water, Period, approved: true, reason: null, CancellationToken.None));
+
+        Assert.Equal("ECR-ACCS-0403", error.ErrorCode);
+        Assert.Equal("err.ECR-ACCS-0403.approveOwnSubmission", error.Details!["messageKey"]);
+
+        // Стан не зрушив: перевірку зупиняє ДО будь-якого запису.
+        Assert.Equal(DocumentStatus.Submitted, _sheets[Water].Status);
+        await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Finding", "F-25")]
+    public async Task Погодження_подання_іншого_користувача_дозволене()
+    {
+        // ⚠ Контроль до тесту вище: наявна поведінка (хтось ІНШИЙ подав,
+        // поточний користувач погоджує) не ламається новим правилом.
+        _sheets[Water].Submit(userId: 999, Now);
+
+        await Approve().HandleAsync(Document, Water, Period, approved: true, reason: null, CancellationToken.None);
+
+        Assert.Equal(DocumentStatus.Approved, _sheets[Water].Status);
+        Assert.Equal(9, _sheets[Water].ApprovedByUserId);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Finding", "F-25")]
+    public async Task Відхилення_власного_подання_дозволене()
+    {
+        // ⚠ Заборона стосується лише ЗАТВЕРДЖЕННЯ (`approved: true`):
+        // відхилити власне подання — не конфлікт інтересів, а штатне
+        // повернення собі ж на доопрацювання.
+        _sheets[Water].Submit(userId: 9, Now);
+
+        await Approve().HandleAsync(Document, Water, Period, approved: false, reason: "помилка у сумі", CancellationToken.None);
+
+        Assert.Equal(DocumentStatus.Rejected, _sheets[Water].Status);
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
@@ -448,6 +681,59 @@ public sealed class SubmitApproveTests
         await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
     }
 
+    /// <summary>
+    /// S6 (ФВ-6.6): блокувальна помилка лише в таблиці під забороною того, хто
+    /// подає, — відмова знеособлена: ключ <c>hiddenIssues</c>, без числа, без
+    /// коду правила, тексту, рядка й колонки.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ МУТАЦІЙНИЙ ДОКАЗ: віддати в тілі <c>blocking</c> замість відфільтрованого
+    /// (як до цього фіксу) — червоніє.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-6.6")]
+    public async Task Блокувальна_помилка_під_забороною_подавача_знеособлена_у_відмові()
+    {
+        WithRule("[Volume] <= 100");
+        _access.ReadScopeAsync(Arg.Any<AccessProfile>(), Document, Arg.Any<CancellationToken>())
+            .Returns(async _ => DocumentReadScope.For(
+                new AccessBuilder()
+                    .Grant(ResourceKind.Project, AccessBuilder.ProjectId, GrantLevel.Read)
+                    .Deny(ResourceKind.Table, 3)
+                    .Build(),
+                AccessBuilder.ProjectId,
+                await _metadata.GetAsync(TemplateVersion, CancellationToken.None)));
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Submit().HandleAsync(Document, Water, Period, CancellationToken.None));
+
+        Assert.Equal("ECR-SUB-4221", error.ErrorCode);
+        Assert.Equal("err.ECR-SUB-4221.hiddenIssues", error.Details!["messageKey"]);
+        Assert.False(error.Details.ContainsKey("messageCount"));
+
+        var body = System.Text.Json.JsonSerializer.Serialize(error.Details);
+        Assert.DoesNotContain("CAP", body, StringComparison.Ordinal);
+        Assert.DoesNotContain("Volume", body, StringComparison.Ordinal);
+        Assert.DoesNotContain("7001001", body, StringComparison.Ordinal);
+        Assert.Equal(DocumentStatus.Draft, _sheets[Water].Status);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-6.6")]
+    public async Task Блокувальна_помилка_без_заборони_у_відмові_названа_регресія()
+    {
+        WithRule("[Volume] <= 100");
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Submit().HandleAsync(Document, Water, Period, CancellationToken.None));
+
+        Assert.Equal("err.ECR-SUB-4221.validationBlocked", error.Details!["messageKey"]);
+        Assert.Equal("1", error.Details["messageCount"]);
+        Assert.Contains("CAP", System.Text.Json.JsonSerializer.Serialize(error.Details), StringComparison.Ordinal);
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait("Requirement", "ФВ-5.4")]
@@ -462,12 +748,328 @@ public sealed class SubmitApproveTests
         Assert.Equal(DocumentStatus.Submitted, _sheets[Water].Status);
     }
 
+    /// <summary>Lookup-колонка <c>Permit</c> (лише в <c>Snapshot(permitRegistryDefId: …)</c>).</summary>
+    private const int PermitColumn = 12;
+
+    [Theory]
+    [InlineData(0, true)]
+    [InlineData(5, false)]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "ФВ-5.4")]
+    [Trait("Finding", "D16-04")]
+    public async Task REGFIELD_у_правилі_рядка_читає_довідник_і_блокує_подання(int limit, bool blocked)
+    {
+        // ⛔ D16-04. Правило `Error` рівня рядка: поле `Limit` запису, на який
+        // показує Lookup-комірка `Permit`, має бути додатним. Доти контекст
+        // правила не мав знімка довідника (`#REF`), а Lookup-значення `long`
+        // ішло в `Text` (`#VALUE`) — правило деградувало у Warning
+        // `ECR-VAL-RULE`, і подання з `Limit = 0` проходило.
+        const int registryDefId = 900;
+        const long entryId = 5001;
+
+        _metadata.GetAsync(TemplateVersion, Arg.Any<CancellationToken>()).Returns(
+            Snapshot(
+                new Ecr.Domain.Entities.Configuration.ValidationRule(
+                    tableDefId: 3, EcrCode.Create("PERMIT"), ValidationSeverity.Error, scope: 1,
+                    "REGFIELD([Permit], 'Limit') > 0",
+                    new LocalizedText(new Dictionary<string, string> { ["en"] = "Permit limit is zero" })),
+                permitRegistryDefId: registryDefId));
+
+        _cells.ReadSliceAsync(TableInstance, Arg.Any<CancellationToken>())
+              .Returns(new List<CellRecord>
+              {
+                  new(new CellAddress(new PeriodKey(Period), 1001, PermitColumn), 3,
+                      new CellValueData { ValueRegistryEntryId = entryId }),
+              });
+
+        RegistryTestData.PermitLimit(_registries, registryDefId, entryId, limit);
+
+        if (blocked)
+        {
+            var error = await Assert.ThrowsAsync<BusinessRuleException>(
+                () => Submit().HandleAsync(Document, Water, Period, CancellationToken.None));
+
+            Assert.Equal("ECR-SUB-4221", error.ErrorCode);
+            Assert.Equal("1", error.Details!["messageCount"]);
+            Assert.Equal(DocumentStatus.Draft, _sheets[Water].Status);
+        }
+        else
+        {
+            await Submit().HandleAsync(Document, Water, Period, CancellationToken.None);
+
+            Assert.Equal(DocumentStatus.Submitted, _sheets[Water].Status);
+        }
+    }
+
     /// <summary>Підставляє знімок структури з одним правилом валідації рядка.</summary>
     private void WithRule(string expression, ValidationSeverity severity = ValidationSeverity.Error)
         => _metadata.GetAsync(TemplateVersion, Arg.Any<CancellationToken>()).Returns(
             Snapshot(new Ecr.Domain.Entities.Configuration.ValidationRule(
                 tableDefId: 3, EcrCode.Create("CAP"), severity, scope: 1, expression,
                 new LocalizedText(new Dictionary<string, string> { ["en"] = "Volume is over the cap" }))));
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Finding", "F-05")]
+    public async Task Подання_із_застарілими_результатами_методологій_відхиляється()
+    {
+        // ⛔ F-05 дає `IsStale` (входи документа змінилися ПІСЛЯ прогону, що
+        // дав актуальні числа) — доти ЛИШЕ візуальну позначку в сітці й
+        // експорті. Подання само методологічну застарілість не перевіряло
+        // (`SubmitSheetHandler` не мав жодної згадки `IsStale`), тож аркуш із
+        // застарілим прив'язаним числом методології подавався так само, як і
+        // свіжий. Прогін формул аркуша (`ISubmitRecalculation`) цього не
+        // закриває — інший механізм (D-69).
+        var calculatedAt = Now.AddHours(-2);
+        var inputsChangedAt = Now.AddHours(-1);
+        _methodologies.GetCalculationFreshnessAsync(Document, Period, Arg.Any<IReadOnlyCollection<int>?>(), Arg.Any<CancellationToken>())
+             .Returns(new CalculationFreshness(calculatedAt, inputsChangedAt));
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Submit().HandleAsync(Document, Water, Period, CancellationToken.None));
+
+        Assert.Equal("ECR-SUB-4221", error.ErrorCode);
+        Assert.Equal("err.ECR-SUB-4221.staleMethodologyResults", error.Details!["messageKey"]);
+
+        // ⚠ Ні зрізу, ні зміни стану: відмова зупиняє подання ДО того, як
+        // з'явиться будь-який слід — той самий інваріант, що й для орфанів і
+        // блокувальної валідації вище.
+        Assert.Empty(_snapshots);
+        Assert.Equal(DocumentStatus.Draft, _sheets[Water].Status);
+        await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Finding", "F-05")]
+    public async Task Подання_з_актуальними_результатами_методологій_проходить()
+    {
+        // ⚠ Контрольний випадок до теста вище: прогін БУВ (`CalculatedAt` не
+        // null — на відміну від дефолту фікстури, де методологій не рахували
+        // взагалі), але входи після нього НЕ мінялися (`InputsChangedAt =
+        // null`) — числа актуальні, і подання не має відмовляти.
+        _methodologies.GetCalculationFreshnessAsync(Document, Period, Arg.Any<IReadOnlyCollection<int>?>(), Arg.Any<CancellationToken>())
+             .Returns(new CalculationFreshness(Now.AddHours(-2), null));
+
+        await Submit().HandleAsync(Document, Water, Period, CancellationToken.None);
+
+        Assert.Equal(DocumentStatus.Submitted, _sheets[Water].Status);
+        Assert.Single(_snapshots);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Finding", "F-05")]
+    public async Task Подання_аркуша_без_привязки_методології_ігнорує_застарілість_чужого_аркуша()
+    {
+        // ⛔ Аркуш Water (таблиця 3) у цьому тесті НЕ має жодної методологічної
+        // прив'язки — на відміну від дефолту фікстури (конструктор), де
+        // `GetMethodologyIdsBoundToTableAsync` повертає непорожній список для
+        // БУДЬ-якої таблиці. Це і є сценарій звуження: сусідній аркуш того
+        // самого документа+періоду застарілий, а ЦЕЙ аркуш до жодної
+        // методології взагалі не причетний — застарілість чужого не повинна
+        // його блокувати.
+        _methodologies.GetMethodologyIdsBoundToTableAsync(Arg.Any<int>(), Arg.Any<CancellationToken>())
+             .Returns(new List<int>());
+        _methodologies.GetMethodologyIdsBoundToTablesAsync(Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<CancellationToken>())
+             .Returns(new List<int>());
+        _methodologies.GetCalculationFreshnessAsync(Document, Period, Arg.Any<IReadOnlyCollection<int>?>(), Arg.Any<CancellationToken>())
+             .Returns(new CalculationFreshness(Now.AddHours(-2), Now.AddHours(-1))); // IsStale = true
+
+        await Submit().HandleAsync(Document, Water, Period, CancellationToken.None);
+
+        Assert.Equal(DocumentStatus.Submitted, _sheets[Water].Status);
+        Assert.Single(_snapshots);
+
+        // ⚠ Мутаційний доказ, сильніший за «не заблокував»: запит на
+        // свіжість геть НЕ пішов. Застарілість чужого прив'язаного результату
+        // цього непричетного аркуша не стосується, тож і питати про неї
+        // не потрібно (реалізація мусить пропускати виклик, а не лише
+        // ігнорувати його результат).
+        await _methodologies.DidNotReceive()
+            .GetCalculationFreshnessAsync(Document, Period, Arg.Any<IReadOnlyCollection<int>?>(), Arg.Any<CancellationToken>());
+    }
+
+    /// <summary>
+    /// Два аркуші з прив'язками одного документа+періоду: входи змінилися лише
+    /// в таблиці аркуша <c>Waste</c>. Підставний порт відповідає так, як
+    /// відповідає справжній (<c>MethodologyStore</c>): застаріло, якщо
+    /// фільтра немає (<c>null</c> — увесь документ) або фільтр містить таблицю
+    /// <c>Waste</c>.
+    /// </summary>
+    private void WithStaleOnlyInWasteTable()
+    {
+        _metadata.GetAsync(TemplateVersion, Arg.Any<CancellationToken>())
+                 .Returns(Snapshot(withWasteSheet: true));
+        _methodologies.GetCalculationFreshnessAsync(
+                Document, Period, Arg.Any<IReadOnlyCollection<int>?>(), Arg.Any<CancellationToken>())
+            .Returns(call =>
+            {
+                var tables = call.ArgAt<IReadOnlyCollection<int>?>(2);
+                return tables is null || tables.Contains(WasteTable)
+                    ? new CalculationFreshness(Now.AddHours(-2), Now.AddHours(-1))
+                    : new CalculationFreshness(Now.AddHours(-2), null);
+            });
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Finding", "F-05")]
+    public async Task Подання_аркуша_з_привязкою_ігнорує_застарілість_привязаної_таблиці_іншого_аркуша()
+    {
+        // ⛔ Залишок F-05: доти аркуш З прив'язкою блокувався застарілістю
+        // ЧУЖОЇ прив'язаної таблиці того самого документа+періоду — порт
+        // рахував свіжість на документ×період. Тепер обробник питає лише про
+        // таблиці свого аркуша.
+        WithStaleOnlyInWasteTable();
+
+        await Submit().HandleAsync(Document, Water, Period, CancellationToken.None);
+
+        Assert.Equal(DocumentStatus.Submitted, _sheets[Water].Status);
+        Assert.Single(_snapshots);
+        await _methodologies.Received(1).GetCalculationFreshnessAsync(
+            Document, Period,
+            Arg.Is<IReadOnlyCollection<int>?>(t => t != null && t.Count == 1 && t.Contains(3)),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Finding", "F-05")]
+    public async Task Подання_аркуша_чия_привязана_таблиця_застаріла_відхиляється()
+    {
+        // Контрольний випадок до теста вище: той самий стан, але подають
+        // САМЕ аркуш, чия таблиця застаріла, — звуження не має його пропустити.
+        WithStaleOnlyInWasteTable();
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Submit().HandleAsync(Document, Waste, Period, CancellationToken.None));
+
+        Assert.Equal("ECR-SUB-4221", error.ErrorCode);
+        Assert.Equal("err.ECR-SUB-4221.staleMethodologyResults", error.Details!["messageKey"]);
+        Assert.Empty(_snapshots);
+        Assert.Equal(DocumentStatus.Draft, _sheets[Waste].Status);
+    }
+
+    /// <summary>
+    /// Входи змінилися лише в таблиці <paramref name="staleTable"/>; порт
+    /// відповідає як справжній стор: застаріло, якщо фільтра немає або він
+    /// містить цю таблицю.
+    /// </summary>
+    private void WithStaleOnlyIn(
+        int staleTable,
+        Ecr.Domain.Entities.Configuration.TemplateVersionSnapshot snapshot,
+        params Ecr.Domain.Entities.Configuration.FormulaDependency[] graph)
+    {
+        _metadata.GetAsync(TemplateVersion, Arg.Any<CancellationToken>()).Returns(snapshot);
+        _versions.ListFormulaDependenciesAsync(TemplateVersion, Arg.Any<CancellationToken>())
+                 .Returns((IReadOnlyList<Ecr.Domain.Entities.Configuration.FormulaDependency>)graph);
+        _methodologies.GetCalculationFreshnessAsync(
+                Document, Period, Arg.Any<IReadOnlyCollection<int>?>(), Arg.Any<CancellationToken>())
+            .Returns(call =>
+            {
+                var tables = call.ArgAt<IReadOnlyCollection<int>?>(2);
+                return tables is null || tables.Contains(staleTable)
+                    ? new CalculationFreshness(Now.AddHours(-2), Now.AddHours(-1))
+                    : new CalculationFreshness(Now.AddHours(-2), null);
+            });
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Finding", "F-05")]
+    public async Task Подання_аркуша_чия_формула_читає_застарілу_таблицю_іншого_аркуша_відхиляється()
+    {
+        // ⛔ Пропущене блокування після звуження до таблиць аркуша (9159a8e7).
+        // Таблиця Water (прив'язана) має формульну колонку, що читає таблицю
+        // аркуша Waste. Правка в Waste пише `aud.CellChange` у ЧУЖУ таблицю
+        // (відсіює фільтр таблиць), а каскад переписує похідну клітинку в
+        // Water з `Origin = Recalculation` (відсіює фільтр походження). Обидва
+        // фільтри правильні поодинці — а разом пропускали подання Water із
+        // застарілим результатом методології.
+        WithStaleOnlyIn(
+            WasteTable,
+            Snapshot(withWasteSheet: true, waterFormulaReadsWaste: true),
+            Reads(WaterFormula, WasteTable));
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Submit().HandleAsync(Document, Water, Period, CancellationToken.None));
+
+        Assert.Equal("ECR-SUB-4221", error.ErrorCode);
+        Assert.Equal("err.ECR-SUB-4221.staleMethodologyResults", error.Details!["messageKey"]);
+        Assert.Empty(_snapshots);
+        Assert.Equal(DocumentStatus.Draft, _sheets[Water].Status);
+
+        // Питали саме замикання {Water, Waste}, а не весь документ (null).
+        await _methodologies.Received(1).GetCalculationFreshnessAsync(
+            Document, Period,
+            Arg.Is<IReadOnlyCollection<int>?>(t => t != null && t.Count == 2 && t.Contains(3) && t.Contains(WasteTable)),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Finding", "F-05")]
+    public async Task Замикання_залежностей_транзитивне_через_проміжний_аркуш()
+    {
+        // Water читає Waste, Waste читає Air; змінилося лише в Air. Правка в
+        // Air каскадом переписує Waste, потім Water — усе `Recalculation`.
+        WithStaleOnlyIn(
+            AirTable,
+            Snapshot(withWasteSheet: true, waterFormulaReadsWaste: true, withAirSheet: true),
+            Reads(WaterFormula, WasteTable),
+            Reads(WasteFormula, AirTable));
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Submit().HandleAsync(Document, Water, Period, CancellationToken.None));
+
+        Assert.Equal("err.ECR-SUB-4221.staleMethodologyResults", error.Details!["messageKey"]);
+        await _methodologies.Received(1).GetCalculationFreshnessAsync(
+            Document, Period,
+            Arg.Is<IReadOnlyCollection<int>?>(t => t != null && t.Count == 3
+                && t.Contains(3) && t.Contains(WasteTable) && t.Contains(AirTable)),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Finding", "F-05")]
+    public async Task Формула_що_читає_лише_свою_таблицю_не_тягне_чужий_аркуш_у_перевірку()
+    {
+        // Контроль до двох тестів вище: формула в Water є, але читає лише
+        // власну таблицю — застарілість Waste аркуш Water і далі не блокує
+        // (звуження 9159a8e7 не скасоване).
+        WithStaleOnlyIn(
+            WasteTable,
+            Snapshot(withWasteSheet: true, waterFormulaReadsWaste: true),
+            Reads(WaterFormula, 3));
+
+        await Submit().HandleAsync(Document, Water, Period, CancellationToken.None);
+
+        Assert.Equal(DocumentStatus.Submitted, _sheets[Water].Status);
+        await _methodologies.Received(1).GetCalculationFreshnessAsync(
+            Document, Period,
+            Arg.Is<IReadOnlyCollection<int>?>(t => t != null && t.Count == 1 && t.Contains(3)),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Finding", "F-05")]
+    public async Task Формули_без_графа_залежностей_перевіряються_по_всьому_документу()
+    {
+        // ⚠ Версія, для якої граф `cfg.FormulaDependency` не наповнювали:
+        // формули є, що вони читають — невідомо. Звужувати за мовчанням графа
+        // означало б знову пропустити крос-аркушеве читання; перевірка йде
+        // по всьому документу (null), як до 9159a8e7.
+        WithStaleOnlyIn(WasteTable, Snapshot(withWasteSheet: true, waterFormulaReadsWaste: true));
+
+        await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Submit().HandleAsync(Document, Water, Period, CancellationToken.None));
+
+        await _methodologies.Received(1).GetCalculationFreshnessAsync(
+            Document, Period, null, Arg.Any<CancellationToken>());
+    }
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]

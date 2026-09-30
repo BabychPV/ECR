@@ -206,7 +206,7 @@ describe('Breadcrumbs — маршрут глибиною 2 (довідник)',
     expect(listLink!.getAttribute('href')).toBe('/admin/registries');
 
     // Немає кнопки розкриття — ланцюжок з 2 елементів коротший за поріг усічення.
-    expect(screen.queryByRole('button', { name: 'Show all breadcrumbs' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '⟦nav.showAllCrumbs⟧' })).toBeNull();
   });
 
   it('запит сторінки ще виконується (реалістичне вікно до відповіді) — Skeleton, не порожнє місце і не сирий код', () => {
@@ -256,7 +256,7 @@ describe('Breadcrumbs — маршрут глибиною 4 (шаблон, ве�
 
     // Видно: перший (статичний "Templates"-ключ без каталогу — bracket-форма
     // `t()`), передостанній (версія, резолвлена) і поточний (Relations-ключ).
-    expect(screen.getByRole('button', { name: 'Show all breadcrumbs' })).toBeDefined();
+    expect(screen.getByRole('button', { name: '⟦nav.showAllCrumbs⟧' })).toBeDefined();
     expect(screen.getByText('1.0')).toBeDefined();
 
     const current = screen.getByText(/tables\.relationsTitle/);
@@ -273,10 +273,10 @@ describe('Breadcrumbs — маршрут глибиною 4 (шаблон, ве�
     await screen.findByText('1.0');
     expect(screen.queryByText('TPL1')).toBeNull();
 
-    await user.click(screen.getByRole('button', { name: 'Show all breadcrumbs' }));
+    await user.click(screen.getByRole('button', { name: '⟦nav.showAllCrumbs⟧' }));
 
     expect(screen.getByText('TPL1')).toBeDefined();
-    expect(screen.queryByRole('button', { name: 'Show all breadcrumbs' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '⟦nav.showAllCrumbs⟧' })).toBeNull();
   });
 
   it('крихта з назвою шаблону веде на КАРТКУ шаблону, а не на перелік', async () => {
@@ -299,7 +299,7 @@ describe('Breadcrumbs — маршрут глибиною 4 (шаблон, ве�
     show(relationsRouter('/admin/templates/1/versions/7/relations'), queryClient);
 
     await screen.findByText('1.0');
-    await user.click(screen.getByRole('button', { name: 'Show all breadcrumbs' }));
+    await user.click(screen.getByRole('button', { name: '⟦nav.showAllCrumbs⟧' }));
 
     const template = await screen.findByRole('link', { name: 'TPL1' });
 
@@ -339,7 +339,7 @@ describe('Breadcrumbs — нуль нових HTTP-запитів (найваж�
     show(relationsRouter('/admin/templates/1/versions/7/relations'), queryClient);
 
     await screen.findByText('1.0');
-    await user.click(screen.getByRole('button', { name: 'Show all breadcrumbs' }));
+    await user.click(screen.getByRole('button', { name: '⟦nav.showAllCrumbs⟧' }));
     await screen.findByText('TPL1');
 
     expect(fetchSpy).not.toHaveBeenCalled();

@@ -21,7 +21,8 @@ public sealed class DatabaseHealthCheck(
     Ecr.Domain.Abstractions.IClock clock,
     IUiStringCatalog catalog,
     ICurrentUser currentUser,
-    DataProtectionKeyProtection keyProtection) : IHealthCheck
+    DataProtectionKeyProtection keyProtection,
+    IHostEnvironment? environment = null) : IHealthCheck
 {
     /// <summary>Скільки вільних партицій попереду вважається достатнім.</summary>
     /// <remarks>
@@ -29,6 +30,11 @@ public sealed class DatabaseHealthCheck(
     /// вночі, коли архівація впреться у відсутню межу.
     /// </remarks>
     private const int MinimumPartitionsAhead = 2;
+
+    /// <summary>Запасний текст ключа <c>health.db.limitation.dataProtectionKeys</c>.</summary>
+    private const string UnprotectedKeysFallback =
+        "Session keys are stored unencrypted in sec.DataProtectionKey: no certificate is configured "
+        + "(Auth:DataProtection:CertificateThumbprint). Restrict the table to the service account with DENY for everyone else.";
 
     /// <summary>Файлові групи, без яких фізична модель не працює.</summary>
     private static readonly string[] RequiredFilegroups =
@@ -61,9 +67,17 @@ public sealed class DatabaseHealthCheck(
 
             var partitionsAhead = await PartitionsAheadAsync(cancellationToken).ConfigureAwait(false);
             data["partitionsAhead"] = partitionsAhead;
-            data["limitations"] = await LimitationsAsync(cancellationToken).ConfigureAwait(false);
 
-            if (!capabilities.IsReadCommittedSnapshotOn)
+            // ⛔ U18: RCSI — ЖИВИМ запитом, а не з проби старту. Проба читає його
+            // раз на процес, тож після `06-rcsi.sql` (runbook §5) перевірка
+            // лишалася червоною до перезапуску служби, а RCSI, вимкнений на ходу,
+            // показувала зеленим. Запит — один рядок `sys.databases`, дешевший за
+            // `sys.filegroups` вище.
+            var rcsi = await ReadCommittedSnapshotOnAsync(cancellationToken).ConfigureAwait(false);
+            data["rcsi"] = rcsi;
+            data["limitations"] = await LimitationsAsync(rcsi, cancellationToken).ConfigureAwait(false);
+
+            if (!rcsi)
             {
                 // Не Degraded, а Unhealthy: без RCSI пік останнього дня періоду
                 // впирається в блокування (D-29), і це не «трохи гірше», а
@@ -81,6 +95,20 @@ public sealed class DatabaseHealthCheck(
                     Param("names", string.Join(", ", missing)), cancellationToken)
                     .ConfigureAwait(false);
                 return HealthCheckResult.Unhealthy(message, data: data);
+            }
+
+            // ⛔ S11: у Production незахищене кільце стартує лише з явною згодою
+            // `Auth:DataProtection:AllowUnprotectedKeys` (одноразові стенди, старт
+            // пише Critical). Degraded, а не Unhealthy (рішення координатора):
+            // стенд лишається робочим, але стан не зелений і причина названа.
+            // Після Unhealthy-перевірок — вони важливіші за цей стан. Текст — той
+            // самий ключ каталогу, що й обмеження: факт той самий.
+            if (!keyProtection.IsProtected && environment?.IsProduction() == true)
+            {
+                var message = await Text(
+                    "health.db.limitation.dataProtectionKeys", UnprotectedKeysFallback, null, cancellationToken)
+                    .ConfigureAwait(false);
+                return HealthCheckResult.Degraded(message, data: data);
             }
 
             if (partitionsAhead < MinimumPartitionsAhead)
@@ -126,6 +154,21 @@ public sealed class DatabaseHealthCheck(
         return result;
     }
 
+    /// <summary>Чи увімкнено RCSI для поточної бази — зараз, а не на старті процесу.</summary>
+    /// <remarks>
+    /// ⚠ З <c>sys.databases</c>, як і проба старту (<c>SqlCapabilitiesProbe</c>, <c>Q-052</c>):
+    /// <c>DATABASEPROPERTYEX(…, 'IsReadCommittedSnapshotOn')</c> такої властивості не має.
+    /// </remarks>
+    private async Task<bool> ReadCommittedSnapshotOnAsync(CancellationToken cancellationToken)
+    {
+        var flags = await db.Database
+            .SqlQueryRaw<int>(
+                "SELECT CAST(is_read_committed_snapshot_on AS int) AS Value FROM sys.databases WHERE name = DB_NAME()")
+            .ToListAsync(cancellationToken).ConfigureAwait(false);
+
+        return flags.Count > 0 && flags[0] == 1;
+    }
+
     /// <summary>Скільки меж партиціонування лежить попереду поточного періоду.</summary>
     private async Task<int> PartitionsAheadAsync(CancellationToken cancellationToken)
     {
@@ -162,7 +205,7 @@ public sealed class DatabaseHealthCheck(
     /// `IsReadCommittedSnapshotOn`, `ArchiveBatchSize`) — рантайм-перевірка
     /// типу (`is SqlCapabilitiesProbe`) взагалі не потрібна.
     /// </remarks>
-    private async Task<IReadOnlyList<string>> LimitationsAsync(CancellationToken ct)
+    private async Task<IReadOnlyList<string>> LimitationsAsync(bool rcsi, CancellationToken ct)
     {
         var list = new List<string>();
 
@@ -182,7 +225,7 @@ public sealed class DatabaseHealthCheck(
                 null, ct).ConfigureAwait(false));
         }
 
-        if (!capabilities.IsReadCommittedSnapshotOn)
+        if (!rcsi)
         {
             list.Add(await Text(
                 "health.db.limitation.rcsi",
@@ -198,10 +241,7 @@ public sealed class DatabaseHealthCheck(
         if (!keyProtection.IsProtected)
         {
             list.Add(await Text(
-                "health.db.limitation.dataProtectionKeys",
-                "Session keys are stored unencrypted in sec.DataProtectionKey: no certificate is configured "
-                + "(Auth:DataProtection:CertificateThumbprint). Restrict the table to the service account with DENY for everyone else.",
-                null, ct).ConfigureAwait(false));
+                "health.db.limitation.dataProtectionKeys", UnprotectedKeysFallback, null, ct).ConfigureAwait(false));
         }
 
         list.Add(await Text(

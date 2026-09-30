@@ -53,7 +53,7 @@ const ServerDetail = 'підсумок перевірки прочитати н�
 const SavedFinding = 'Рядок R1: колонка C1 обов’язкова';
 
 /** Чим відповідає `GET …/validation`. */
-type ValidationMode = 'error' | 'notValidated' | 'saved';
+type ValidationMode = 'error' | 'notValidated' | 'legacy404' | 'saved';
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -108,8 +108,15 @@ function mockServer(mode: ValidationMode): void {
         }
 
         if (mode === 'notValidated') {
-          // ⚠ Саме `ECR-DOC-0404` — код, який віддає
-          // `DocumentsController.LastValidation`.
+          // ⚠ `X-32`: «ще не перевіряли» — `200` з `validated: false` і
+          // порожнім переліком, як віддає `DocumentsController.LastValidation`
+          // (доти — `404`, червоний рядок у консолі на КОЖНЕ відкриття).
+          return jsonResponse({ documentId: 1, periodKey: PeriodKey, messages: [], validated: false });
+        }
+
+        if (mode === 'legacy404') {
+          // ⚠ Старіший сервер: той самий стан кодом `404`. Екран мусить
+          // читати його так само, доки обидва сервери можуть зустрітися.
           return jsonResponse(
             {
               title: 'Not found',
@@ -270,23 +277,42 @@ describe('DocumentPage: невдале читання підсумку пере�
   );
 
   it(
-    'Б. ДЗЕРКАЛО: 404 і далі означає «ще не перевіряли» — жодного банера',
+    'Б. ДЗЕРКАЛО: validated: false означає «ще не перевіряли» — жодного банера й жодного «чисто»',
     async () => {
       mockServer('notValidated');
       const client = show();
 
-      // Спершу — що відмова СПРАВДІ прийшла, і лише потім питання про екран.
-      await awaitValidationSettled(client, 'error');
+      // ⚠ `X-32`: відповідь УСПІШНА — «ще не перевіряли» більше не відмова.
+      await awaitValidationSettled(client, 'success');
 
-      // ⛔ Мутаційний доказ: варто зняти виняток для `404` — і банер стане під
-      // кожним документом, якого ніхто не перевіряв. Панель при цьому
-      // лишається відсутньою (а не зеленою): «не перевіряли» — не «чисто».
-      expect(screen.queryByRole('alert')).toBeNull();
+      // ⛔ Мутаційний доказ: варто прочитати `validated: false` як звичайний
+      // порожній перелік — і під документом, якого ніхто не перевіряв, стане
+      // зелене «перевірено, зауважень немає». Саме ця неправда про готовність
+      // і тримала раніше код `404`.
+      expect(screen.queryByText('⟦document.validationClean⟧')).toBeNull();
       expect(screen.queryByText('⟦document.validationCleanHint⟧')).toBeNull();
+      expect(screen.queryByRole('alert')).toBeNull();
       expect(screen.queryByRole('button', { name: '⟦common.retry⟧' })).toBeNull();
 
       // ⚠ Сторінка при цьому змальована, а не «ще вантажиться»: інакше
       // відсутність банера нічого не доводила б.
+      expect(
+        screen.getByRole('button', { name: '⟦document.validate⟧' }),
+      ).toBeTruthy();
+    },
+    SlowEnvTimeout,
+  );
+
+  it(
+    'Б2. Старіший сервер: 404 і далі означає «ще не перевіряли» — жодного банера',
+    async () => {
+      mockServer('legacy404');
+      const client = show();
+
+      await awaitValidationSettled(client, 'error');
+
+      expect(screen.queryByRole('alert')).toBeNull();
+      expect(screen.queryByText('⟦document.validationCleanHint⟧')).toBeNull();
       expect(
         screen.getByRole('button', { name: '⟦document.validate⟧' }),
       ).toBeTruthy();

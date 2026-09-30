@@ -1,6 +1,7 @@
 import type { QueryClient, QueryKey } from '@tanstack/react-query';
 import { queryKeys } from '@/api/queryKeys';
-import type { RegistryDefinitionDto, TemplatePage, TemplateVersionPage } from '@/api/types';
+import type { RegistryDefinitionDto, TemplateCard, TemplatePage, TemplateVersionPage } from '@/api/types';
+import { templateCardKey } from '@/features/templates/templateCardQuery';
 import { localized } from '@/shared/i18n/localized';
 import type { RouteHandle } from './routes';
 
@@ -41,6 +42,15 @@ interface ResolverLookup {
   key: QueryKey | undefined;
   /** Дістає людиночитний рядок із даних кешу; порожній/`undefined` — вважається "нема значення". */
   read: (data: unknown) => string | undefined;
+  /**
+   * Друге джерело того самого значення, якщо в першому його немає.
+   *
+   * ⛔ Назва шаблону жила лише в кеші ПЕРЕЛІКУ шаблонів: з переліку крихта
+   * показувала `GEN99819007`, а пряме посилання чи оновлення сторінки версії —
+   * «Templates / Templates / 1.0.0.0» (повторний прохід UI 2026-09-24).
+   * Картку шаблону тепер вантажить `TemplateVersionLayout`, і крихта читає її.
+   */
+  fallback?: ResolverLookup;
 }
 
 function templateNameLookup(params: CrumbParams): ResolverLookup {
@@ -50,6 +60,10 @@ function templateNameLookup(params: CrumbParams): ResolverLookup {
   return {
     key: queryKeys.templates.list(),
     read: (data) => (data as TemplatePage).items.find((item) => item.id === templateId)?.code,
+    fallback: {
+      key: templateCardKey(templateId),
+      read: (data) => (data as TemplateCard).code,
+    },
   };
 }
 
@@ -114,13 +128,18 @@ export function resolveCrumbValue(
 ): CrumbResolution {
   if (resolveWith === undefined) return { status: 'unavailable' };
 
-  const { key, read } = lookups[resolveWith](params);
-  if (key === undefined) return { status: 'unavailable' };
+  let loading = false;
 
-  const data = queryClient.getQueryData(key);
-  const value = data === undefined ? undefined : read(data);
-  if (value !== undefined && value.length > 0) return { status: 'resolved', text: value };
+  for (let lookup: ResolverLookup | undefined = lookups[resolveWith](params); lookup; lookup = lookup.fallback) {
+    const { key, read } = lookup;
+    if (key === undefined) continue;
 
-  const state = queryClient.getQueryState(key);
-  return state?.fetchStatus === 'fetching' ? { status: 'loading' } : { status: 'unavailable' };
+    const data = queryClient.getQueryData(key);
+    const value = data === undefined ? undefined : read(data);
+    if (value !== undefined && value.length > 0) return { status: 'resolved', text: value };
+
+    loading ||= queryClient.getQueryState(key)?.fetchStatus === 'fetching';
+  }
+
+  return loading ? { status: 'loading' } : { status: 'unavailable' };
 }

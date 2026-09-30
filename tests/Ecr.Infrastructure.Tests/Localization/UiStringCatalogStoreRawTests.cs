@@ -13,7 +13,14 @@ namespace Ecr.Infrastructure.Tests.Localization;
 [Collection("SqlServer")]
 public sealed class UiStringCatalogStoreRawTests(SqlServerFixture sql)
 {
-    private const string Key = "uiStrings.title";
+    // ✎ 2026-09-29: сід тепер заводить базові переклади ru/kz (рішення людини),
+    // тож «прогалину» дають власні ключі тесту, а не посіяний `common.save`.
+    // ⚠ Посіяних рядків тест не чіпає зовсім: видалений переклад повертав би
+    // наступний сід — з інкрементом Revision, і
+    // `SeedTests.Повторний_запуск_без_нових_рядків_не_піднімає_Revision`
+    // падав би залежно від порядку тестів у колекції.
+    private const string Written = "test.rawStore.written";
+    private const string Gap = "test.rawStore.gap";
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
@@ -27,8 +34,15 @@ public sealed class UiStringCatalogStoreRawTests(SqlServerFixture sql)
 
         try
         {
+            foreach (var key in (string[])[Written, Gap])
+            {
+                await store.SetAsync(
+                    new UiStringWrite(key, "en", "Reference " + key, UiStringScope.Private, null, DateTime.UtcNow),
+                    CancellationToken.None);
+            }
+
             await store.SetAsync(
-                new UiStringWrite(Key, "ru", "Тексты интерфейса", UiStringScope.Private, null, DateTime.UtcNow),
+                new UiStringWrite(Written, "ru", "Тексты интерфейса", UiStringScope.Private, null, DateTime.UtcNow),
                 CancellationToken.None);
 
             var raw = await store.ListRawAsync("ru", CancellationToken.None);
@@ -38,24 +52,25 @@ public sealed class UiStringCatalogStoreRawTests(SqlServerFixture sql)
             Assert.Equal(english.Count, raw.Count);
             Assert.All(english, row => Assert.Equal(row.Reference, row.Value));
 
-            Assert.Equal("Тексты интерфейса", raw.Single(r => r.Key == Key).Value);
+            Assert.Equal("Тексты интерфейса", raw.Single(r => r.Key == Written).Value);
 
-            // ⛔ Сід російських рядків не має: усе, крім щойно записаного, — null.
-            var other = raw.Single(r => r.Key == "common.save");
-            Assert.Null(other.Value);
-            Assert.False(string.IsNullOrEmpty(other.Reference));
+            // ⛔ Ключ без російського рядка — null, а не англійський текст.
+            var gap = raw.Single(r => r.Key == Gap);
+            Assert.Null(gap.Value);
+            Assert.Equal("Reference " + Gap, gap.Reference);
 
             // Контроль: каталог для екрана ту саму прогалину закриває англійською.
             var screen = await store.GetAsync("ru", CancellationToken.None);
-            Assert.Equal(other.Reference, screen.Strings["common.save"]);
+            Assert.Equal(gap.Reference, screen.Strings[Gap]);
         }
         finally
         {
             await using var connection = new SqlConnection(sql.ConnectionString);
             await connection.OpenAsync();
             await using var command = connection.CreateCommand();
-            command.CommandText = "DELETE FROM sys_ecr.UiString WHERE [Key] = @key AND LanguageCode = N'ru';";
-            command.Parameters.AddWithValue("@key", Key);
+            command.CommandText = "DELETE FROM sys_ecr.UiString WHERE [Key] IN (@written, @gap);";
+            command.Parameters.AddWithValue("@written", Written);
+            command.Parameters.AddWithValue("@gap", Gap);
             await command.ExecuteNonQueryAsync();
         }
     }

@@ -1,5 +1,15 @@
 import type { JSX, ReactNode } from 'react';
-import { Button, Code, Group, Skeleton, Stack, Table, Text, VisuallyHidden } from '@mantine/core';
+import {
+  Button,
+  Code,
+  Group,
+  ScrollArea,
+  Skeleton,
+  Stack,
+  Table,
+  Text,
+  VisuallyHidden,
+} from '@mantine/core';
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { listNotificationDeliveries } from '@/features/notifications/api';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
@@ -109,47 +119,55 @@ export function DeliveriesPanel(): JSX.Element {
         </Stack>
       ) : (
         <>
-          <Table striped className="ecr-sticky-head">
-            <Table.Thead>
-              <Table.Tr>
-                <Table.Th>{t('notifications.at')}</Table.Th>
-                <Table.Th>{t('notifications.event')}</Table.Th>
-                <Table.Th>{t('notifications.channel')}</Table.Th>
-                <Table.Th>{t('notifications.status')}</Table.Th>
-                <Table.Th>{t('notifications.error')}</Table.Th>
-              </Table.Tr>
-            </Table.Thead>
-            <Table.Tbody>
-              {rows.map((row) => (
-                <Table.Tr key={row.id}>
-                  {/* ⛔ Лише `<Timestamp>`: сирий ISO у комірці — це
-                      `2026-09-20T08:15:42.1234567Z` там, де людині потрібні
-                      два числа з дев'яти. Точність не губиться — вона
-                      лишається в `dateTime`/`title` (`D15-09`). */}
-                  <Table.Td>
-                    <Timestamp value={row.at} />
-                  </Table.Td>
-
-                  {/* ⚠ Вид події — з каталогу, а не кодом сервера:
-                      `JobFailed` це член `enum`, він не перекладається. */}
-                  <Table.Td>{t(`notifications.event.${row.eventKind}`)}</Table.Td>
-
-                  <Table.Td>{channelCell(row.channelName, row.channelId)}</Table.Td>
-
-                  {/* ⛔ Єдине місце, де стан стає видимим, — набір. Власна
-                      трійка кольорів тут була б сімнадцятою за ліком і
-                      розійшлася б з рештою мовчки (директива №15 §2). */}
-                  <Table.Td>
-                    <StatusBadge kind="notificationDelivery" state={row.status} />
-                  </Table.Td>
-
-                  {/* ⚠ Прочерк, а не порожнеча: порожня комірка читається
-                      двояко — «причини немає» чи «не завантажилось». */}
-                  <Table.Td>{row.error ?? '—'}</Table.Td>
+          {/* ⛔ `X-19`: колонка «Error» несе сирий текст сервера без межі
+              довжини — з довгим повідомленням рядок ширшав за сторінку, і та
+              скролилась ГОРИЗОНТАЛЬНО ЦІЛКОМ, разом із заголовком блоку.
+              `KIT.md` §6.5: сторінка не скролиться горизонтально, широке — у
+              власному `overflow:auto` (той самий прийом, що й `ChannelsPanel`
+              поруч і `SecurityPage`/`PeriodsPage`). */}
+          <ScrollArea type="auto" offsetScrollbars>
+            <Table striped className="ecr-sticky-head">
+              <Table.Thead>
+                <Table.Tr>
+                  <Table.Th>{t('notifications.at')}</Table.Th>
+                  <Table.Th>{t('notifications.event')}</Table.Th>
+                  <Table.Th>{t('notifications.channel')}</Table.Th>
+                  <Table.Th>{t('notifications.status')}</Table.Th>
+                  <Table.Th>{t('notifications.error')}</Table.Th>
                 </Table.Tr>
-              ))}
-            </Table.Tbody>
-          </Table>
+              </Table.Thead>
+              <Table.Tbody>
+                {rows.map((row) => (
+                  <Table.Tr key={row.id}>
+                    {/* ⛔ Лише `<Timestamp>`: сирий ISO у комірці — це
+                        `2026-09-20T08:15:42.1234567Z` там, де людині потрібні
+                        два числа з дев'яти. Точність не губиться — вона
+                        лишається в `dateTime`/`title` (`D15-09`). */}
+                    <Table.Td>
+                      <Timestamp value={row.at} />
+                    </Table.Td>
+
+                    {/* ⚠ Вид події — з каталогу, а не кодом сервера:
+                        `JobFailed` це член `enum`, він не перекладається. */}
+                    <Table.Td>{t(`notifications.event.${row.eventKind}`)}</Table.Td>
+
+                    <Table.Td>{channelCell(row.channelName, row.channelId)}</Table.Td>
+
+                    {/* ⛔ Єдине місце, де стан стає видимим, — набір. Власна
+                        трійка кольорів тут була б сімнадцятою за ліком і
+                        розійшлася б з рештою мовчки (директива №15 §2). */}
+                    <Table.Td>
+                      <StatusBadge kind="notificationDelivery" state={row.status} />
+                    </Table.Td>
+
+                    {/* ⚠ Прочерк, а не порожнеча: порожня комірка читається
+                        двояко — «причини немає» чи «не завантажилось». */}
+                    <Table.Td>{row.error ?? '—'}</Table.Td>
+                  </Table.Tr>
+                ))}
+              </Table.Tbody>
+            </Table>
+          </ScrollArea>
 
           {/* ⚠ Кнопка живе рівно доти, доки сервер віддає курсор. Кнопка
               «показати ще», яка нічого не дочитує, обіцяє дані, яких немає. */}

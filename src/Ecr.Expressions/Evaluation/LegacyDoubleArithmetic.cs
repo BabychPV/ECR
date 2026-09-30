@@ -143,4 +143,18 @@ public sealed class LegacyDoubleArithmetic : IEvaluationArithmetic
             _ => ExpressionValue.Error(ExpressionErrors.BadValue),
         };
     }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⛔ У <see cref="double"/>, і це не вибір, а NCalc 1.3.8: рівність,
+    /// <c>in</c> і впорядкування там рахує <c>CompareUsingMostPreciseType</c>,
+    /// а параметри чинна збірка подає <c>double</c> (<c>Utilities.cs:188-215</c>).
+    /// Аудит A5: порівняння через <c>decimal</c> давало <c>0.1 + 0.2 = 0.3</c> →
+    /// TRUE (звуження округлює до 15 знаків), а NCalc дає FALSE — і <c>if</c>
+    /// обирав іншу гілку, ніж чинна система.
+    /// </remarks>
+    public int? CompareNumbers(ExpressionValue left, ExpressionValue right)
+        => left.AsDouble() is { } a && right.AsDouble() is { } b
+            ? a.CompareTo(b)
+            : null;
 }

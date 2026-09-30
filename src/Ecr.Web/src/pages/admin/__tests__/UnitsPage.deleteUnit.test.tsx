@@ -19,6 +19,8 @@ const SeededStrings: Record<string, string> = {
   'units.deleteUsedIn': 'Referenced in {total} place(s):',
   'common.cancel': 'Cancel',
   'common.delete': 'Remove',
+  'units.deleteTitle': 'Remove unit "{code}"?',
+  'units.deleteChecking': 'Checking where the unit is used…',
   'usageKind.templateColumn': 'Template column',
   'usageKind.derivedUnit': 'Derived unit',
   'usageKind.unitConversion': 'Unit conversion rule',
@@ -156,8 +158,8 @@ describe('UnitsPage: видалення одиниці (BE-15)', () => {
     expect(await within(dialog).findByText('Referenced in 23 place(s):')).toBeTruthy();
     expect(within(dialog).getByText('Fuel.Mass')).toBeTruthy();
 
-    // ⛔ Кнопки видалення немає: вона вела б у відому відмову.
-    expect(within(dialog).queryByRole('button', { name: 'Remove' })).toBeNull();
+    // ⚠ `ConfirmModal` (X-23): підтвердження є, але недоступне — вело б у відому відмову.
+    expect(within(dialog).getByRole('button', { name: 'Remove' })).toHaveProperty('disabled', true);
     expect(api.deleteCalls).toHaveLength(0);
   });
 
@@ -182,8 +184,8 @@ describe('UnitsPage: видалення одиниці (BE-15)', () => {
     const list = await within(dialog).findByTestId('unit-references');
 
     function badgeOf(label: string): HTMLElement {
-      const row = within(list).getByText(label);
-      const badge = row.querySelector('.mantine-Badge-root');
+      const row = within(list).getByText(label).parentElement;
+      const badge = row?.querySelector('.mantine-Badge-root') ?? null;
       if (badge === null) throw new Error(`бейджа виду в ${label} немає`);
       return badge as HTMLElement;
     }
@@ -195,6 +197,28 @@ describe('UnitsPage: видалення одиниці (BE-15)', () => {
     const unknown = badgeOf('X.Y');
     expect(unknown.querySelector('code')?.textContent).toBe('futureThing');
     expect(list.textContent).not.toContain('derivedUnit');
+
+    // ⛔ R-20: бейдж (`<div>`) більше не лежить усередині абзацу (`<p>`).
+    expect(list.querySelector('p .mantine-Badge-root')).toBeNull();
+  });
+
+  it('діалог називає одиницю, фокус на «Cancel», і перевірка видима, а не порожнеча (X-23)', async () => {
+    mockApi({
+      permissions: ['Uom.EditCatalog'],
+      usage: { total: 0, items: [] },
+      deleteStatus: 204,
+    });
+
+    const dialog = await openDialog();
+
+    expect(within(dialog).getByText('Remove unit "lb"?')).toBeTruthy();
+    await waitFor(() => {
+      expect(document.activeElement).toBe(within(dialog).getByRole('button', { name: 'Cancel' }));
+    });
+
+    // ⚠ Поки перевірка не повернулася, підтвердження недоступне.
+    await within(dialog).findByText('Nothing refers to this unit.');
+    expect(within(dialog).getByRole('button', { name: 'Remove' })).toHaveProperty('disabled', false);
   });
 
   it('одиниця без залежних видаляється і зникає з переліку', async () => {
@@ -233,7 +257,7 @@ describe('UnitsPage: видалення одиниці (BE-15)', () => {
 
     expect(await within(dialog).findByText('Fuel.Mass')).toBeTruthy();
     expect(within(dialog).getByText('Referenced in 1 place(s):')).toBeTruthy();
-    expect(within(dialog).queryByRole('button', { name: 'Remove' })).toBeNull();
+    expect(within(dialog).getByRole('button', { name: 'Remove' })).toHaveProperty('disabled', true);
     expect(within(dialog).queryByRole('button', { name: /retry/i })).toBeNull();
   });
 

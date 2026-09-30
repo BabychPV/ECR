@@ -136,3 +136,47 @@ CREATE TABLE arc.CalculationStep
     INDEX CCI_arc_CalculationStep CLUSTERED COLUMNSTORE
 ) ON [DATA_ARCHIVE];
 GO
+
+-- ⛔ Колонки, що з'явилися в `calc.*` ПІСЛЯ першого розгортання, додаються ЛИШЕ
+-- тут, а не в `CREATE TABLE` вище: той на розгорнутій базі не виконується
+-- (`IF OBJECT_ID … IS NULL`), і колонка в ньому дійшла б лише до свіжих баз.
+-- Додавання колонки — не `ALTER COLUMN` із шапки: на columnstore це зміна
+-- метаданих, а не переписування мільярдів рядків.
+--
+-- ⚠ Тип і NULL-придатність — рівно як у джерелі: сторож
+-- `ArchiveMirrorTests` звіряє кожну колонку `calc.CalculationResult` і
+-- `calc.CalculationStep` з її дзеркалом на розгорнутій базі.
+--
+-- HSE301 F6 (`D-175`): вид результату — вихід чи проміжне значення.
+IF COL_LENGTH(N'arc.CalculationResult', N'Kind') IS NULL
+    ALTER TABLE arc.CalculationResult
+        ADD Kind tinyint NOT NULL CONSTRAINT DF_arc_CRes_Kind DEFAULT (0);
+GO
+
+-- `H-24d-1`: причина маскування в нуль. Колонку `calc.CalculationStep` додали
+-- без дзеркала — знайдено сторожем `ArchiveMirrorTests` у кроці HSE301 F6.
+IF COL_LENGTH(N'arc.CalculationStep', N'MaskedZero') IS NULL
+    ALTER TABLE arc.CalculationStep
+        ADD MaskedZero tinyint NOT NULL CONSTRAINT DF_arc_CStep_Masked DEFAULT (0);
+GO
+
+-- HSE301 F6: адреса кроку трейсу — документ, рядок, речовина (§7.1).
+IF COL_LENGTH(N'arc.CalculationStep', N'DocumentId') IS NULL
+    ALTER TABLE arc.CalculationStep ADD DocumentId bigint NULL;
+GO
+
+IF COL_LENGTH(N'arc.CalculationStep', N'SourceRowKey') IS NULL
+    ALTER TABLE arc.CalculationStep ADD SourceRowKey nvarchar(100) NULL;
+GO
+
+IF COL_LENGTH(N'arc.CalculationStep', N'SubstanceEntryId') IS NULL
+    ALTER TABLE arc.CalculationStep ADD SubstanceEntryId int NULL;
+GO
+
+-- D4 аудиту: позначка осиротілого рядка (`doc.TableRow.IsOrphaned`). Без неї
+-- архівування+відновлення скидало прапорець у 0, і осиротілі рядки переставали
+-- блокувати подання (ECR-SUB-4221). Копіюють `usp_ArchiveYear`/`usp_RestoreYear`.
+IF COL_LENGTH(N'arc.TableRow', N'IsOrphaned') IS NULL
+    ALTER TABLE arc.TableRow
+        ADD IsOrphaned bit NOT NULL CONSTRAINT DF_arc_TableRow_Orph DEFAULT (0);
+GO

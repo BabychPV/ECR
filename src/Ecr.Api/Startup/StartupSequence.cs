@@ -48,14 +48,34 @@ public static partial class StartupSequence
         //    видно як невдалий старт, а не як 500 на кожен запит.
         await WaitForDatabaseAsync(db, logger).ConfigureAwait(false);
 
-        // 2–3) Схема. У проді застосунок DDL-прав не має (D-66), тому
-        //      Validate — це саме перевірка, а не тихе «домігруємо».
+        // 2) Можливості СУБД. Читаються один раз: редакція між запитами не
+        //    змінюється, а кожна перевірка коштує запиту. ⚠ ДО перевірки схеми:
+        //    валідатор вирішує про редакцію саме за цими даними, і з
+        //    непрочитаною пробою він бачив би нулі й пропускав будь-який сервер.
+        var capabilities = scope.ServiceProvider.GetRequiredService<ISqlCapabilities>();
+        await ProbeCapabilitiesAsync(app, db, capabilities, logger).ConfigureAwait(false);
+
+        // 3) Сумісність середовища (ФВ-7.9) — ЄДИНЕ джерело цих перевірок,
+        //    `SchemaValidator`. Зупиняє старт (`ECR-SYS-5031`): редакція/версія,
+        //    незастосовані міграції в Validate, база новіша за збірку, файлові
+        //    групи, функції й схеми партиціонування. Лише попереджає: RCSI,
+        //    зіставлення, запас партицій. У проді застосунок DDL-прав не має
+        //    (D-66), тому Validate — це саме перевірка, а не тихе «домігруємо».
         var mode = app.Configuration["Schema:StartupMode"] ?? "Validate";
-        await ApplySchemaModeAsync(db, mode, logger).ConfigureAwait(false);
+        var validator = new SchemaValidator(
+            db, capabilities, scope.ServiceProvider.GetRequiredService<Domain.Abstractions.IClock>());
+        await validator.ValidateAsync(mode, CancellationToken.None).ConfigureAwait(false);
+
+        foreach (var warning in validator.Warnings)
+        {
+            LogSchemaWarning(logger, warning);
+        }
+
+        LogSchemaValid(logger);
 
         // 4) Ідемпотентний seed. Без нього немає ні мов, ні прав, ні одиниць —
         //    застосунок формально піднімається і не робить нічого.
-        await new SeedRunner(db).RunAsync(CancellationToken.None).ConfigureAwait(false);
+        await new SeedRunner(db, logger).RunAsync(CancellationToken.None).ConfigureAwait(false);
         LogSeedDone(logger);
 
         // 4a) Bootstrap-адміністратор. ⛔ Крок був ОГОЛОШЕНИЙ (обробник є,
@@ -95,37 +115,7 @@ public static partial class StartupSequence
 
         LogBootstrapOutcome(logger, bootstrap.LastOutcome);
 
-        // 5) Можливості СУБД. Читаються один раз: редакція між запитами
-        //    не змінюється, а кожна перевірка коштує запиту.
-        var capabilities = scope.ServiceProvider.GetRequiredService<ISqlCapabilities>();
-        if (capabilities is SqlCapabilitiesProbe probe)
-        {
-            var connectionString = db.Database.GetConnectionString()
-                ?? throw new InvalidOperationException("У контексту немає рядка підключення.");
-
-            // ⛔ Q-223: раніше тут БУВ хардкод `SqlEditionMode.Auto` — ключ
-            // `Database:EditionMode` існував у appsettings.json (з іншим
-            // значенням у Development!) і НІКОЛИ не читався. Developer/
-            // Evaluation повідомляють EngineEdition = 3 й зовні невідрізнювані
-            // від Enterprise (`SqlCapabilitiesProbe`), тож у проді режим
-            // мусить бути заданий явно, а не вгаданий автовизначенням.
-            var configuredMode = Enum.TryParse<Domain.Enums.SqlEditionMode>(
-                app.Configuration["Database:EditionMode"], ignoreCase: true, out var parsed)
-                ? parsed
-                : Domain.Enums.SqlEditionMode.Auto;
-
-            await probe.ProbeAsync(connectionString, configuredMode, CancellationToken.None)
-                .ConfigureAwait(false);
-
-            LogSqlMode(logger, probe.EditionName, probe.EffectiveMode, probe.IsReadCommittedSnapshotOn);
-
-            foreach (var limitation in probe.Limitations())
-            {
-                LogLimitation(logger, limitation);
-            }
-        }
-
-        // 5a) ПОКИНУТІ фонові задачі. ⛔ Задача, яку виконував процес, що
+        // 5) ПОКИНУТІ фонові задачі. ⛔ Задача, яку виконував процес, що
         //     впав, лишається `Running`/`Queued` у базі НАЗАВЖДИ — процеса,
         //     який мав позначити її `Failed`, уже немає. Без цього кроку така
         //     задача показує оператору «виконується» місяцями, і ЗБІГ УВАГИ
@@ -138,31 +128,38 @@ public static partial class StartupSequence
         //     A. Інстанс у розгортанні не один (ціль — 100 одночасних
         //     користувачів), тож це був не крайній випадок, а щоденний
         //     наслідок будь-якого розгортання.
+        //
+        // ⚠ U4/U11: той самий прохід, що й періодичне прибирання
+        //     (`RecurringScheduleService.SweepOnceAsync`), — разом із журналами
+        //     прогонів збору й обслуговування, які раніше не прибирав ніхто.
+        //     Рядки ПОПЕРЕДНЬОГО процесу цієї ж машини закриваються НЕЗАЛЕЖНО від
+        //     свіжості биття — за `itg.JobProgress.InstanceId`; рядки інших машин
+        //     — як і раніше, лише за віком биття.
         var progress = scope.ServiceProvider.GetService<IJobProgressStore>();
         if (progress is not null)
         {
             var clock = scope.ServiceProvider.GetRequiredService<Domain.Abstractions.IClock>();
-            var failed = await progress
-                .FailStaleAsync("Застосунок перезапущено: задача не завершилася до зупинки процесу.",
-                    clock.UtcNow, CancellationToken.None)
+            var swept = await new Infrastructure.Jobs.AbandonedWorkSweeper(db, progress)
+                .SweepAsync(
+                    "Застосунок перезапущено: задача не завершилася до зупинки процесу.",
+                    clock.UtcNow,
+                    purge: false,
+                    CancellationToken.None,
+                    (Infrastructure.Persistence.JobProgressStore.CurrentHostName,
+                     Infrastructure.Persistence.JobProgressStore.CurrentRole,
+                     Infrastructure.Persistence.JobProgressStore.CurrentInstanceId))
                 .ConfigureAwait(false);
 
-            if (failed > 0)
+            if (swept.Any)
             {
-                LogStaleJobsFailed(logger, failed);
+                LogStaleJobsFailed(logger, swept.Jobs, swept.CollectionRuns, swept.MaintenanceRuns);
             }
         }
 
-        // 6) Запас партицій. Дізнатися про це треба на старті, а не вночі
-        //    під час архівації, коли межі вже не вистачає.
-        var ahead = await PartitionsAheadAsync(
-            db, scope.ServiceProvider.GetRequiredService<Domain.Abstractions.IClock>()).ConfigureAwait(false);
-        if (ahead < 2)
-        {
-            LogFewPartitions(logger, ahead);
-        }
+        // ⚠ Запас партицій окремим кроком тут більше не рахується: його
+        //    попередження дає `SchemaValidator` на кроці 3 (одне джерело).
 
-        // 7) Прогрів кешу метаданих — ПІСЛЯ валідації схеми і seed. Прогрітий
+        // 6) Прогрів кешу метаданих — ПІСЛЯ валідації схеми і seed. Прогрітий
         //    до перевірки кеш закешував би структуру, якої ніхто не перевіряв.
         //    Помилка прогріву старт не валить: це оптимізація, і застосунок,
         //    що не піднявся через непрогрітий кеш, гірший за повільний
@@ -174,7 +171,7 @@ public static partial class StartupSequence
 
         LogWarmupDone(logger, warmed);
 
-        // 8) Постійні розклади ставить окремий hosted service після того, як
+        // 7) Постійні розклади ставить окремий hosted service після того, як
         //    застосунок піднявся: планувальник Quartz стає придатним лише
         //    після ApplicationStarted (RecurringScheduleService).
     }
@@ -198,50 +195,39 @@ public static partial class StartupSequence
         }
     }
 
-    private static async Task ApplySchemaModeAsync(EcrDbContext db, string mode, ILogger logger)
+    private static async Task ProbeCapabilitiesAsync(
+        WebApplication app, EcrDbContext db, ISqlCapabilities capabilities, ILogger logger)
     {
-        var pending = (await db.Database.GetPendingMigrationsAsync().ConfigureAwait(false)).ToList();
-
-        if (string.Equals(mode, "Migrate", StringComparison.OrdinalIgnoreCase))
+        // ⚠ Проба — лише для справжнього SqlCapabilitiesProbe. Підмінені в
+        // тестах можливості вже «знають» відповідь, і питати сервер нема чого.
+        if (capabilities is not SqlCapabilitiesProbe probe)
         {
-            if (pending.Count > 0)
-            {
-                LogApplyingMigrations(logger, pending.Count);
-                await db.Database.MigrateAsync().ConfigureAwait(false);
-            }
-
             return;
         }
 
-        // Validate. Працювати на невідповідній схемі гірше, ніж не працювати:
-        // запити мовчки повертатимуть не те, і виявиться це в звіті.
-        if (pending.Count > 0)
+        var connectionString = db.Database.GetConnectionString()
+            ?? throw new InvalidOperationException("У контексту немає рядка підключення.");
+
+        // ⛔ Q-223: раніше тут БУВ хардкод `SqlEditionMode.Auto` — ключ
+        // `Database:EditionMode` існував у appsettings.json (з іншим
+        // значенням у Development!) і НІКОЛИ не читався. Developer/
+        // Evaluation повідомляють EngineEdition = 3 й зовні невідрізнювані
+        // від Enterprise (`SqlCapabilitiesProbe`), тож у проді режим
+        // мусить бути заданий явно, а не вгаданий автовизначенням.
+        var configuredMode = Enum.TryParse<Domain.Enums.SqlEditionMode>(
+            app.Configuration["Database:EditionMode"], ignoreCase: true, out var parsed)
+            ? parsed
+            : Domain.Enums.SqlEditionMode.Auto;
+
+        await probe.ProbeAsync(connectionString, configuredMode, CancellationToken.None)
+            .ConfigureAwait(false);
+
+        LogSqlMode(logger, probe.EditionName, probe.EffectiveMode, probe.IsReadCommittedSnapshotOn);
+
+        foreach (var limitation in probe.Limitations())
         {
-            throw new InvalidOperationException(
-                $"Схема БД застаріла: не застосовано міграцій — {pending.Count} " +
-                $"({string.Join(", ", pending)}). У режимі Validate застосунок не стартує.");
+            LogLimitation(logger, limitation);
         }
-
-        LogSchemaValid(logger);
-    }
-
-    private static async Task<int> PartitionsAheadAsync(EcrDbContext db, Domain.Abstractions.IClock clock)
-    {
-        var now = clock.UtcNow;
-        var currentKey = (now.Year * 100) + now.Month;
-
-        var result = await db.Database
-            .SqlQueryRaw<int>(
-                """
-                SELECT COUNT(*) AS Value
-                FROM sys.partition_range_values rv
-                JOIN sys.partition_functions pf ON pf.function_id = rv.function_id
-                WHERE pf.name = 'pf_ByPeriodKey' AND CAST(rv.value AS int) > {0}
-                """,
-                currentKey)
-            .ToListAsync().ConfigureAwait(false);
-
-        return result.Count > 0 ? result[0] : 0;
     }
 
     // ⚠ Логування через згенеровані делегати, а не через LogInformation(...):
@@ -255,17 +241,20 @@ public static partial class StartupSequence
     [LoggerMessage(Level = LogLevel.Warning, Message = "Старт: база недоступна, спроба {Attempt} з {Total}.")]
     private static partial void LogDatabaseWaiting(ILogger logger, int attempt, int total);
 
-    [LoggerMessage(Level = LogLevel.Information, Message = "Старт: застосовую {Count} міграцій.")]
-    private static partial void LogApplyingMigrations(ILogger logger, int count);
-
     [LoggerMessage(Level = LogLevel.Information, Message = "Старт: схема відповідає моделі.")]
     private static partial void LogSchemaValid(ILogger logger);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Старт (попередження): {Warning}")]
+    private static partial void LogSchemaWarning(ILogger logger, string warning);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Старт: seed виконано.")]
     private static partial void LogSeedDone(ILogger logger);
 
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Старт: {Count} застарілих задач позначено Failed.")]
-    private static partial void LogStaleJobsFailed(ILogger logger, int count);
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "Старт: застарілих задач позначено Failed — {Count}; прогонів збору закрито — {CollectionRuns}; "
+            + "прогонів обслуговування закрито — {MaintenanceRuns}.")]
+    private static partial void LogStaleJobsFailed(ILogger logger, int count, int collectionRuns, int maintenanceRuns);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Старт: {Warning}")]
     private static partial void LogBootstrapWarning(ILogger logger, string warning);
@@ -283,10 +272,6 @@ public static partial class StartupSequence
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Обмеження режиму: {Limitation}")]
     private static partial void LogLimitation(ILogger logger, string limitation);
-
-    [LoggerMessage(Level = LogLevel.Warning,
-        Message = "Старт: попереду лише {Ahead} партицій. Виконайте 04-partition-maintenance.sql.")]
-    private static partial void LogFewPartitions(ILogger logger, int ahead);
 
     [LoggerMessage(Level = LogLevel.Warning,
         Message = "Старт: не вдалося видалити одноразовий файл bootstrap-пароля: {Error}. " +

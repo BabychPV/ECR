@@ -29,7 +29,8 @@ namespace Ecr.Scenarios.Tests;
 internal static class Provisioning
 {
     private const string InitialBootstrapPassword = "Scenario-Bootstrap-2026-Initial!";
-    private const string WorkingBootstrapPassword = "Scenario-Bootstrap-2026-Working!";
+    // ⚠ S15: без імені входу («bootstrap») — інакше зміну пароля відхиляє політика.
+    private const string WorkingBootstrapPassword = "Scenario-Bstrp-2026-Working!";
     private const string IssuedUserPassword = "Scenario-Issued-2026!";
     private const string WorkUserPassword = "Scenario-Work-2026!";
 
@@ -245,15 +246,35 @@ internal static class Provisioning
                 $"викликайте {nameof(GrantManyAsync)} одним запитом.");
         }
 
-        var response = await bootstrap
-            .PutAsJsonAsync(
-                new Uri($"/api/v1/roles/{roleId}/grants", UriKind.Relative),
+        var response = await PutGrantsAsync(
+                bootstrap, roleId, existing.Headers.ETag?.Tag,
                 new { grants = new[] { new { resourceKind, resourceId, level, isDeny } } })
             .ConfigureAwait(false);
 
         Assert.True(
             response.IsSuccessStatusCode,
             $"грант {resourceKind}:{resourceId}={level} ролі {roleId}: {response.StatusCode}: {app.ErrorsText}");
+    }
+
+    /// <summary>
+    /// <c>PUT /roles/{id}/grants</c> з <c>If-Match</c> — версією набору з
+    /// <c>ETag</c> відповіді <c>GET</c>; без заголовка сервер відповідає <c>422</c>.
+    /// </summary>
+    private static async Task<HttpResponseMessage> PutGrantsAsync(
+        HttpClient client, int roleId, string? version, object body)
+    {
+        var uri = new Uri($"/api/v1/roles/{roleId}/grants", UriKind.Relative);
+
+        if (version is null)
+        {
+            using var read = await client.GetAsync(uri).ConfigureAwait(false);
+            version = read.Headers.ETag?.Tag;
+        }
+
+        using var request = new HttpRequestMessage(HttpMethod.Put, uri) { Content = JsonContent.Create(body) };
+        request.Headers.TryAddWithoutValidation("If-Match", version);
+
+        return await client.SendAsync(request).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -274,9 +295,8 @@ internal static class Provisioning
         ArgumentNullException.ThrowIfNull(grants);
 
         var bootstrap = await BootstrapAdministratorAsync(app).ConfigureAwait(false);
-        var response = await bootstrap
-            .PutAsJsonAsync(
-                new Uri($"/api/v1/roles/{roleId}/grants", UriKind.Relative),
+        var response = await PutGrantsAsync(
+                bootstrap, roleId, version: null,
                 new
                 {
                     grants = grants.Select(g => new

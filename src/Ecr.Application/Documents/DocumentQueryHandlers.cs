@@ -54,7 +54,9 @@ public sealed class ListDocumentsHandler(
         // документів у чужих, — а сторінка віддавала менше за `page.Limit`
         // видимих елементів, поки `NextCursor` вказував далі в НЕфільтрованій
         // послідовності.
-        var visibleProjects = ReadableProjects(profile);
+        // ⛔ ФВ-6.14: лише проєкти, де є і грант, і саме право перегляду —
+        // оператор з областю «A» бачить документи лише A.
+        var visibleProjects = ReadableProjects(profile, Permission);
 
         var all = await documents
             .ListAsync(projectId, new PeriodKeyFilter(periodKey), filter, page, visibleProjects, ct)
@@ -64,7 +66,7 @@ public sealed class ListDocumentsHandler(
         // проєкту — це вже відомості про те, які об'єкти звітують і як часто, і
         // помилка в побудові фільтра запиту не має цього відкривати.
         var visible = all.Items
-            .Where(d => profile.LevelFor(ResourceKind.Project, d.ProjectId) >= GrantLevel.Read)
+            .Where(d => profile.SeesDocumentsOf(d.ProjectId) && profile.Has(Permission, d.ProjectId))
             .ToList();
 
         // ⛔ `all.TotalCount` НЕ проводиться далі як є — саме це й було дірою:
@@ -146,29 +148,37 @@ public sealed class ListDocumentsHandler(
         return ids;
     }
 
-    /// <summary>Профіль користувача з перевіркою функціонального права.</summary>
-    internal static async Task<AccessProfile> ProfileAsync(
-        IAccessDecisionService access, ICurrentUser currentUser, string permission, CancellationToken ct)
+    /// <summary>
+    /// Проєкти з грантом читання, у яких є ще й проєктне право
+    /// <paramref name="permission"/> (ФВ-6.14).
+    /// </summary>
+    /// <param name="profile">Профіль.</param>
+    /// <param name="permission">Проєктне право (напр. <c>Document.View</c>).</param>
+    /// <remarks>
+    /// ⚠ D-214: і проєкти, де документ відкриває лише роль, звужена аркушами
+    /// чи періодами (<see cref="AccessProfile.SeesDocumentsOf"/>) — перелік
+    /// документів належить рівню документа.
+    /// </remarks>
+    internal static HashSet<int> ReadableProjects(AccessProfile profile, string permission)
     {
-        var userId = currentUser.UserId
-                     ?? throw new AccessDeniedException(
-                         "ECR-AUTH-0401", "Потрібна автентифікація.",
-                         new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.signInRequired" });
-
-        var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
-        if (!profile.Has(permission))
-        {
-            throw new AccessDeniedException(
-                "ECR-AUTH-0403", $"Потрібне право {permission}.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-AUTH-0403.permission",
-                    ["permission"] = permission,
-                });
-        }
-
-        return profile;
+        var ids = ReadableProjects(profile);
+        ids.UnionWith(profile.Scoped.Keys.Where(profile.SeesDocumentsOf));
+        ids.RemoveWhere(id => !profile.Has(permission, id));
+        return ids;
     }
+
+    /// <summary>
+    /// Профіль користувача з ВХІДНОЮ перевіркою проєктного права — бодай у
+    /// якомусь проєкті (ФВ-6.14).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Викликач зобов'язаний далі перевірити право в проєкті ресурсу
+    /// (<see cref="AccessProfile.Has(string, int)"/>) — сторож
+    /// <c>ProjectPermissionCheckTests</c> вимагає цього в тому самому методі.
+    /// </remarks>
+    internal static Task<AccessProfile> ProfileAsync(
+        IAccessDecisionService access, ICurrentUser currentUser, string permission, CancellationToken ct)
+        => PermissionCheck.RequireInAnyProjectAsync(access, currentUser, permission, ct);
 }
 
 /// <summary>Документ і стан його аркушів. Право <c>Document.View</c>.</summary>
@@ -193,8 +203,10 @@ public sealed class GetDocumentHandler(
         // ⚠ Документ без гранта віддається як «не знайдено», а не «заборонено».
         // Різниця між 403 і 404 тут сама по собі є відомістю: за нею видно,
         // які документи існують у проєктах, доступу до яких немає.
+        // ⛔ ФВ-6.14: без права перегляду В ЦЬОМУ проєкті — так само невидимий.
         return document is null
-               || profile.LevelFor(ResourceKind.Project, document.ProjectId) < GrantLevel.Read
+               || !profile.SeesDocumentsOf(document.ProjectId)
+               || !profile.Has(ListDocumentsHandler.Permission, document.ProjectId)
             ? null
             : document;
     }

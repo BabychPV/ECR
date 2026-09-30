@@ -1,5 +1,6 @@
 using Ecr.Application.Ports;
 using Ecr.Domain.Enums;
+using Ecr.Domain.Errors;
 using Ecr.Infrastructure.Persistence;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
@@ -7,9 +8,56 @@ using Microsoft.EntityFrameworkCore;
 namespace Ecr.Infrastructure.Startup;
 
 /// <summary>
+/// Середовище несумісне зі збіркою: старт зупинено (ФВ-7.9, <c>ECR-SYS-5031</c>).
+/// </summary>
+/// <remarks>
+/// ⚠ Нащадок <see cref="InvalidOperationException"/>, а не <c>EcrException</c>:
+/// цей виняток ніколи не доходить до HTTP — його кидає крок старту ДО того,
+/// як застосунок почав приймати запити, тож арму в
+/// <c>ExceptionHandlingMiddleware</c> і <c>messageKey</c> він не потребує
+/// (каталог рядків на цей момент ще навіть не засіяно). Код несе
+/// <see cref="ErrorCode"/> і перший фрагмент <see cref="Exception.Message"/> —
+/// саме його адміністратор побачить у журналі старту.
+/// </remarks>
+public sealed class SchemaIncompatibleException : InvalidOperationException
+{
+    /// <summary>Створює виняток без тексту.</summary>
+    public SchemaIncompatibleException()
+    {
+    }
+
+    /// <summary>Створює виняток із текстом причини.</summary>
+    /// <param name="message">Що несумісне і що виконати.</param>
+    public SchemaIncompatibleException(string message)
+        : base(message)
+    {
+    }
+
+    /// <summary>Створює виняток із текстом причини і першопричиною.</summary>
+    /// <param name="message">Що несумісне і що виконати.</param>
+    /// <param name="innerException">Першопричина.</param>
+    public SchemaIncompatibleException(string message, Exception innerException)
+        : base(message, innerException)
+    {
+    }
+
+    /// <summary>Код зупинки старту — завжди <c>ECR-SYS-5031</c>.</summary>
+    public string ErrorCode { get; } = ErrorCodes.StartupSchemaIncompatible;
+}
+
+/// <summary>
 /// Перевірки при старті (ФВ-7.9). Мета — **впасти зрозуміло**, а не працювати
 /// на несумісному середовищі й з'ясувати це на першому записі.
 /// </summary>
+/// <remarks>
+/// Класифікація: помилка (зупинка старту, <see cref="SchemaIncompatibleException"/>)
+/// — непідтримувана редакція/версія, рівень сумісності бази нижче 130,
+/// незастосовані міграції в Validate, база
+/// новіша за збірку, немає файлових груп, функцій чи схем партиціонування.
+/// Попередження (<see cref="Warnings"/>) — вимкнений RCSI, чутливе до регістру
+/// зіставлення, запас партицій менше двох: це виправляє DBA, не застосунок.
+/// Викликається з <c>StartupSequence</c> — єдине джерело цих перевірок.
+/// </remarks>
 public sealed class SchemaValidator(
     EcrDbContext db, ISqlCapabilities capabilities, Domain.Abstractions.IClock clock)
 {
@@ -24,9 +72,28 @@ public sealed class SchemaValidator(
     /// </remarks>
     private const int MinimumMajorVersion = 13;
 
+    /// <summary>
+    /// Найнижчий рівень сумісності бази (130 = SQL Server 2016).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ <c>OPENJSON</c> (пошук, збір, зведення кампаній, читання архіву,
+    /// методологія — <c>Persistence/*Store.cs</c>) існує лише за
+    /// <c>COMPATIBILITY_LEVEL ≥ 130</c> — навіть на сервері 2019: база,
+    /// відновлена зі старого бекапу чи створена з <c>model</c> на 120, лишає
+    /// рівень старим. Без цієї перевірки застосунок стартує, а падає на першому
+    /// записі з «Invalid object name 'OPENJSON'». Перевірка тут, а не в
+    /// <c>01-filegroups.sql</c>: рівень може змінити DBA ПІСЛЯ розгортання, а
+    /// старт — єдине місце, яке бачить базу щоразу.
+    /// </remarks>
+    private const int MinimumCompatibilityLevel = 130;
+
     /// <summary>Файлові групи, без яких фізична модель не існує.</summary>
     private static readonly string[] RequiredFilegroups =
         ["DATA_HOT", "DATA_ARCHIVE", "AUDIT", "INDEXES"];
+
+    /// <summary>Функції партиціонування, на яких стоять схеми нижче.</summary>
+    private static readonly string[] RequiredPartitionFunctions =
+        ["pf_ByPeriodKey", "pf_AuditByMonth"];
 
     /// <summary>Схеми партиціонування, без яких не працює архівація.</summary>
     private static readonly string[] RequiredPartitionSchemes =
@@ -48,6 +115,10 @@ public sealed class SchemaValidator(
         _warnings.Clear();
 
         await ValidateEditionAsync().ConfigureAwait(false);
+
+        // ⚠ ДО міграцій: у режимі Migrate вони самі використовують OPENJSON і
+        // на рівні 120 падали б посеред DDL із текстом, що не каже, як виправити.
+        await ValidateCompatibilityLevelAsync(ct).ConfigureAwait(false);
         await ValidateMigrationsAsync(startupMode, ct).ConfigureAwait(false);
         await ValidatePhysicalModelAsync(ct).ConfigureAwait(false);
         await ValidateRuntimeOptionsAsync(ct).ConfigureAwait(false);
@@ -59,7 +130,7 @@ public sealed class SchemaValidator(
         if (capabilities.EffectiveMode == SqlEditionMode.Standard
             && capabilities.ProductMajorVersion is > 0 and < MinimumMajorVersion)
         {
-            throw new InvalidOperationException(
+            throw Incompatible(
                 $"SQL Server {capabilities.ProductMajorVersion} ({capabilities.EditionName}) " +
                 "у режимі Standard не підтримує партиціонування, columnstore і компресію — " +
                 "модель архівації на ньому не працює. Потрібен SQL Server 2016 SP1 або новіший " +
@@ -67,6 +138,24 @@ public sealed class SchemaValidator(
         }
 
         return Task.CompletedTask;
+    }
+
+    /// <summary>Рівень сумісності бази: нижче 130 немає <c>OPENJSON</c>.</summary>
+    private async Task ValidateCompatibilityLevelAsync(CancellationToken ct)
+    {
+        var levels = await db.Database
+            .SqlQueryRaw<int>(
+                "SELECT CAST(compatibility_level AS int) AS Value FROM sys.databases WHERE name = DB_NAME()")
+            .ToListAsync(ct).ConfigureAwait(false);
+
+        if (levels.Count > 0 && levels[0] < MinimumCompatibilityLevel)
+        {
+            throw Incompatible(
+                $"Рівень сумісності бази {levels[0]} нижчий за {MinimumCompatibilityLevel}: " +
+                "без нього немає OPENJSON, і пошук, збір та читання даних не працюватимуть. Виконайте (DBA): " +
+                $"ALTER DATABASE CURRENT SET COMPATIBILITY_LEVEL = {MinimumCompatibilityLevel}; " +
+                "або вище, до рівня версії сервера.");
+        }
     }
 
     /// <summary>Стан міграцій.</summary>
@@ -82,7 +171,7 @@ public sealed class SchemaValidator(
         var unknown = applied.Except(known).ToList();
         if (unknown.Count > 0)
         {
-            throw new InvalidOperationException(
+            throw Incompatible(
                 $"У базі є міграції, яких немає у збірці: {string.Join(", ", unknown)}. " +
                 "Схоже на відкат версії застосунку на новішу базу. Старт зупинено.");
         }
@@ -95,8 +184,11 @@ public sealed class SchemaValidator(
 
         if (!string.Equals(startupMode, "Migrate", StringComparison.OrdinalIgnoreCase))
         {
-            throw new InvalidOperationException(
-                $"Не застосовано міграцій: {pending.Count} ({string.Join(", ", pending)}). " +
+            // ⚠ Початок речення «Схема БД застаріла» — той самий, що давав
+            // старий крок `StartupSequence.ApplySchemaModeAsync`: на нього
+            // спирається тест реального старту (`StartupSchemaCheckTests`).
+            throw Incompatible(
+                $"Схема БД застаріла: не застосовано міграцій — {pending.Count} ({string.Join(", ", pending)}). " +
                 "У режимі Validate застосунок не стартує: працювати на невідповідній схемі " +
                 "гірше, ніж не працювати (D-66).");
         }
@@ -141,9 +233,24 @@ public sealed class SchemaValidator(
 
         if (missingGroups.Count > 0)
         {
-            throw new InvalidOperationException(
+            throw Incompatible(
                 $"Немає файлових груп: {string.Join(", ", missingGroups)}. " +
                 "Виконайте src/Ecr.Infrastructure/Persistence/Sql/01-filegroups.sql.");
+        }
+
+        var functions = await db.Database
+            .SqlQueryRaw<string>("SELECT name AS Value FROM sys.partition_functions")
+            .ToListAsync(ct).ConfigureAwait(false);
+
+        var missingFunctions = RequiredPartitionFunctions
+            .Where(pf => !functions.Contains(pf, StringComparer.OrdinalIgnoreCase))
+            .ToList();
+
+        if (missingFunctions.Count > 0)
+        {
+            throw Incompatible(
+                $"Немає функцій партиціонування: {string.Join(", ", missingFunctions)}. " +
+                "Виконайте src/Ecr.Infrastructure/Persistence/Sql/02-partitions.sql.");
         }
 
         var schemes = await db.Database
@@ -156,11 +263,15 @@ public sealed class SchemaValidator(
 
         if (missingSchemes.Count > 0)
         {
-            throw new InvalidOperationException(
+            throw Incompatible(
                 $"Немає схем партиціонування: {string.Join(", ", missingSchemes)}. " +
                 "Виконайте src/Ecr.Infrastructure/Persistence/Sql/02-partitions.sql.");
         }
     }
+
+    /// <summary>Зупинка старту: код попереду тексту, щоб його було видно в журналі.</summary>
+    private static SchemaIncompatibleException Incompatible(string text)
+        => new($"{ErrorCodes.StartupSchemaIncompatible}: {text}");
 
     /// <summary>RCSI і запас партицій — це попередження, а не зупинка.</summary>
     /// <remarks>

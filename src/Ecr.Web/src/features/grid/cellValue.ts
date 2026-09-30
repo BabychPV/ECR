@@ -1,5 +1,5 @@
 import type { ColumnDto } from '@/api/types';
-import { normalizeDecimal } from '@/shared/format';
+import { formatDate, normalizeDecimal } from '@/shared/format';
 // ⚠ Глибокий імпорт рівно на одну функцію, і це названо, а не сховано:
 // `formatDecimal` з'явився в `shared/format/number.ts` цією ж роботою, а
 // дописати його в бар'єл (`shared/format/index.ts`) не можна — файл поза
@@ -7,7 +7,6 @@ import { normalizeDecimal } from '@/shared/format';
 // Правило теки дотримано по суті: `Intl` лишився всередині `shared/format`,
 // сюди приходить готова функція. Рядок у бар'єл — перший пункт «далі».
 import { formatDecimal } from '@/shared/format/number';
-import { roundDecimalText } from './rounding';
 
 /**
  * Значення комірки, коли `decimal` приходить РЯДКОМ (коміт `e470777a`).
@@ -101,13 +100,65 @@ export function cellText(value: unknown): string {
 }
 
 /**
+ * Значення комірки, як його отримує РЕДАКТОР (`U-24`).
+ *
+ * ⛔ Заміряно на живому стенді: на екрані `610.5291`, а подвійний клік
+ * відкривав поле з `610.5291000000000000` (формат сховища `decimal(34,16)`), і
+ * курсор у кінці — тож будь-яке дописування йшло ПІСЛЯ шістнадцяти нулів:
+ * `123` дав `931.9250000000000000123`, яке сервер ще й «прийняв». Людина
+ * бачила одне число, а редагувала інший запис.
+ *
+ * ⛔ Канон `normalizeDecimal` — і НІЧОГО більше. Зрізаються лише хвостові
+ * нулі та ведучі нулі цілої частини, тобто те саме число іншим записом.
+ * Значущий знак понад `scale` (вихід `Formula`/`Calculated`, `U-05`)
+ * лишається: тут немає ні округлення, ні `Number`.
+ *
+ * ⚠ БЕЗ групування розрядів і без доповнення нулями до `scale`, хоч показ
+ * (`cellDisplay`) має обидва: роздільник тисяч у полі вводу — символ, який
+ * людина мусить обходити курсором і який `coerce` прочитав би як десяткову
+ * кому (`1,234` → `1.234`); а нулі формату — рівно та сама вада, лише коротша.
+ *
+ * ⚠ Число (`Int` їде JSON-числом) і недесятковий рядок (`'н/д'`, якого
+ * сервер ще не відхилив) лишаються як є: оператор редагує те, що ввів.
+ * Нечислові колонки не чіпаються взагалі.
+ *
+ * ⚠ Запису це не породжує: `captureEdit` звіряє введене з коміркою ЗРІЗУ
+ * через `sameCellValue`, тож `610.5291` проти `610.5291000000000000` —
+ * «не змінилося», і PATCH не йде.
+ */
+export function editorValueOf(value: unknown, column: ColumnDto): unknown {
+  // ⚠ Дата — без години опівночі сховища: поле редактора з
+  // `2026-09-15T00:00:00` читається як дата-і-час, а колонка — лише дата.
+  if (column.dataType === 'Date') return dateOnlyOf(value) ?? value;
+
+  if (!isNumericColumn(column) || typeof value !== 'string') return value;
+
+  return normalizeDecimal(value) ?? value;
+}
+
+/**
  * Типи колонок, чиє значення показується як ЧИСЛО.
  *
  * ⚠ `Formula` і `Calculated` тут поруч із `Decimal` навмисно: їхній результат —
  * той самий `decimal`, що приїжджає тим самим рядком. Помилки вони не додають:
  * значення, яке не є десятковим, `cellDisplay` віддає текстом як є.
+ *
+ * ⛔ `Int` доданий (`U-05`), і це виправлення, а не розширення. Ціла колонка
+ * малювалася тим, що робить із значення сама сітка, — тобто БЕЗ групування
+ * розрядів, — а сусідня десяткова поруч у тому ж рядку групування мала. Дві
+ * подачі числа в одній таблиці: `4242` і `4,242`. Оператор читає їх як різні
+ * величини рівно тоді, коли колонки вузькі, а чисел багато.
+ *
+ * ⚠ `Lookup` сюди НЕ входить, хоч і несе число: у комірці лежить
+ * `ValueRegistryEntryId` (`edits.coerce`), і згрупований `1,204` замість
+ * назви запису читався б як вимірювання. Її шаблон — `lookupCellDisplay`.
  */
-const NumericColumnTypes: ReadonlySet<string> = new Set(['Decimal', 'Formula', 'Calculated']);
+const NumericColumnTypes: ReadonlySet<string> = new Set([
+  'Decimal',
+  'Int',
+  'Formula',
+  'Calculated',
+]);
 
 /** Чи показувати значення цієї колонки як число (для `cellTemplate` сітки). */
 export function isNumericColumn(column: ColumnDto): boolean {
@@ -124,6 +175,31 @@ export function isNumericColumn(column: ColumnDto): boolean {
  * ⚠ Локаль — продукту (`shared/format`), і другого правила тут не заводиться:
  * `en` → `1,234.5`, `ru`/`kk` → `1 234,5`.
  *
+ * ⛔ ОДНЕ правило подачі числа на всю таблицю (`U-05`): групування розрядів
+ * локаллю плюс НЕ МЕНШЕ `scale` знаків після коми. Воно однакове для значення
+ * зі сховища, для щойно введеного (`pendingStore` кладе рядок у ту саму
+ * модель) і для рядка підсумків (`gridTotals` кладе суму в ту саму модель, і
+ * шаблон у колонки один). Доти в одній таблиці співіснували три подачі, і
+ * причини були різні: ціла колонка не мала шаблону взагалі, а показ
+ * десяткової ще й ОБРІЗАВ значення до `scale`.
+ *
+ * ⛔ Обрізання прибрано (`✎ 2026-09-23`, уточнення координатора), і це
+ * скасовує рішення від 2026-09-22 «рівно N знаків — це й округлення показу».
+ * Підстава — не смак, а перевірка сервера: масштаб звіряється в
+ * `ColumnDef.Validate` п. 7 ПІД УМОВОЮ `DataType == CellDataType.Decimal`,
+ * тобто значення десяткової колонки, довше за `scale`, сервер узагалі не
+ * приймає (`ECR-CELL-0422`) — там округлення показу нічого не робило. А для
+ * `Formula`/`Calculated` цієї перевірки немає: вихід рахується з масштабом
+ * ПРИВ'ЯЗКИ методології (`NumericPolicy.RoundOutput`, `binding.OutputScales`),
+ * який не зобов'язаний дорівнювати `Scale` колонки-приймача. Отже округлення
+ * показу спрацьовувало РІВНО там, де знаки справжні, — і ховало їх. Для даних
+ * про викиди втрата значущого знака гірша за негарний стовпець.
+ *
+ * ⚠ Тому `scale` тут — НИЖНЯ межа подачі (доповнення нулями, як формат
+ * комірки в Excel), а не верхня. Значення, довше за оголошений масштаб, — це
+ * розбіжність даних і оголошення; воно лишається видимим повністю, і саме
+ * тому його видно кому треба.
+ *
  * ⚠ Нечислове значення в числовій колонці показується ТЕКСТОМ як є. Так у
  * сітку потрапляє те, що `coerce()` не розпізнало як число (`'н/д'`): сервер
  * відповість `ECR-CELL-0422`, і до того моменту оператор має бачити саме те,
@@ -131,19 +207,21 @@ export function isNumericColumn(column: ColumnDto): boolean {
  */
 export function cellDisplay(value: unknown, column: ColumnDto): string {
   if (value === null || value === undefined) return '';
+
+  // ⛔ Дата після перезавантаження показувалась як `2026-09-15T00:00:00` —
+  // сирий запис сховища. Тепер — `formatDate` (`shared/format`), тим самим
+  // форматом, що й решта продукту. Нерозпізнаний текст — як є.
+  if (column.dataType === 'Date') {
+    const date = dateOnlyOf(value);
+
+    return date === null ? String(value) : formatDate(date);
+  }
+
   if (!isNumericColumn(column)) return String(value);
 
   const scale = displayScaleOf(column);
 
-  // ⚠ «Рівно N знаків» — це й округлення показу (типово `Formula`/`Calculated`
-  // із довшим дробом), тим самим правилом, що й на вводі. Модель, редактор,
-  // PATCH і буфер лишають повне значення: округлюється лише текст шаблону.
-  const shown =
-    scale !== null && (typeof value === 'string' || typeof value === 'number')
-      ? (roundDecimalText(String(value), scale) ?? value)
-      : value;
-
-  return formatDecimal(shown, undefined, undefined, scale ?? 0) ?? String(value);
+  return formatDecimal(value, undefined, undefined, scale ?? 0) ?? String(value);
 }
 
 /**
@@ -154,11 +232,42 @@ export function cellDisplay(value: unknown, column: ColumnDto): string {
  * (`cellText`) нулів не отримують — вони йдуть від сирого значення, не від
  * цього шаблону.
  *
- * ⚠ Колонка без масштабу — `null`: ні доповнення, ні округлення, як до цієї
- * зміни. Довший дріб округлюється до `scale` (AwayFromZero) — лише в показі.
+ * ⚠ Колонка без масштабу — `null`: доповнення немає. Довший дріб НЕ
+ * обрізається (`U-05`, коментар `cellDisplay`): `scale` — нижня межа подачі.
  */
 function displayScaleOf(column: ColumnDto): number | null {
   const scale = column.scale;
 
   return typeof scale === 'number' && Number.isInteger(scale) && scale >= 0 ? scale : null;
+}
+
+/**
+ * Календарна дата `yyyy-MM-dd` із запису комірки `Date`; `null` — не дата або
+ * дата з НЕнульовим часом (її не спрощуємо: це вже інше значення).
+ *
+ * ⚠ Сервер віддає `DateTime` опівночі (`2026-09-15T00:00:00`), клієнт шле
+ * `2026-09-15`; обидва — та сама дата.
+ */
+export function dateOnlyOf(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+
+  const match = DateOnlyPattern.exec(value.trim());
+
+  return match === null ? null : (match[1] ?? null);
+}
+
+const DateOnlyPattern = /^(\d{4}-\d{2}-\d{2})(?:[T ]00:00(?::00(?:\.0+)?)?(?:Z|[+-]00:00)?)?$/;
+
+/**
+ * Чи два значення комірки `Date` — та сама дата.
+ *
+ * ⛔ Без цього вихід із редактора без змін (`2026-09-15` проти
+ * `2026-09-15T00:00:00` у зрізі) ставав би «правкою» і позначав комірку
+ * незбереженою — той самий клас, що й `5` проти `5.0000000000`.
+ */
+export function sameDateValue(left: unknown, right: unknown): boolean {
+  const a = dateOnlyOf(left);
+  const b = dateOnlyOf(right);
+
+  return a !== null && b !== null ? a === b : sameCellValue(left, right);
 }

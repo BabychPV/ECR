@@ -2,6 +2,7 @@
 using Ecr.Api.Errors;
 using Ecr.Api.Middleware;
 using Ecr.Api.Observability;
+using Ecr.Api.Options;
 using Ecr.Api.Security;
 using Ecr.Api.Startup;
 using Ecr.Application;
@@ -25,6 +26,10 @@ var builder = WebApplication.CreateBuilder(args);
 // вмикає цю поведінку лише тоді, коли процес і справді піднятий SCM.
 builder.Host.UseWindowsService();
 
+// ⛔ U15 (R-03): журнал подій — під джерелом, яке реєструє MSI (`ECR`), а не під
+// ім'ям застосунку. Пояснення — в `EventLogSource`.
+builder.Services.AddEcrEventLogSource();
+
 // Персистентна конфігурація майданчика (НЕсекретні значення — Q-213):
 // інсталятор кладе сюди копію appsettings.Production.json і більше НЕ
 // перезаписує при оновленнях (NeverOverwrite, docs/build/10-installer.md,
@@ -47,7 +52,7 @@ builder.Configuration.AddEnvironmentVariables(prefix: "ECR_");
 builder.Logging.AddEcrFileLog();
 
 builder.Services.AddEcrInfrastructure(builder.Configuration);
-builder.Services.AddEcrCalculations();
+builder.Services.AddEcrCalculations(builder.Configuration.GetSection(CalculationLimits.SectionName).Get<CalculationLimits>());
 builder.Services.AddExcelAdapters();
 builder.Services.AddPiAfAdapters();
 // ⚠ Окремим викликом, а не всередині AddPiAfAdapters: SQL-джерело (FLERT,
@@ -65,8 +70,11 @@ builder.Services.AddHttpContextAccessor();
 // TemplateVersionsController), без цієї реєстрації просто не
 // створювалися б — і 500 отримували б усі їхні ендпоінти.
 builder.Services.AddScoped<CurrentUser>();
-builder.Services.AddScoped<Ecr.Application.Common.ICurrentUser>(
-    sp => sp.GetRequiredService<CurrentUser>());
+// ⛔ F-01: за інтерфейсом — обгортка, що у фоновій задачі віддає її АВТОРА
+// (`JobActorScope`, встановлює задача), а в запиті — користувача cookie. Без
+// неї запис комірок із задачі бачив анонімного користувача (HTTP-запиту
+// немає) і великий імпорт не проходив ніколи. Спільне з Ecr.Worker (I1).
+builder.Services.AddEcrJobActor<CurrentUser>();
 // BE-08: кореляція запиту доїжджає до itg.JobProgress через планувальник.
 builder.Services.AddSingleton<Ecr.Application.Ports.ICorrelationIdAccessor,
     Ecr.Api.Middleware.HttpCorrelationIdAccessor>();
@@ -74,6 +82,7 @@ builder.Services.AddSingleton<Ecr.Application.Ports.ICorrelationIdAccessor,
 // треба не забути дописати, рано чи пізно не дописується. До цього
 // `EcrMetrics` існував і не викликався жодного разу (аудит Етапу 5).
 builder.Services.AddSingleton<Ecr.Api.Observability.EcrMetrics>();
+builder.Services.AddEcrTelemetry(builder.Configuration);
 // ⚠ ConsistencyCheckJob живе в Ecr.Infrastructure, яка Ecr.Api не бачить:
 // адаптер закриває EcrMetrics портом IConsistencyMetrics, щоб задача могла
 // викликати метрику, не порушуючи напрямок залежностей (директива №11, T10
@@ -94,6 +103,31 @@ builder.Services
     // кожному розійшлася б непомітно.
     .AddJsonOptions(options => Ecr.Api.Startup.EcrJsonSerialization.Configure(options.JsonSerializerOptions));
 
+// ⛔ B-15 (UX-аудит, четвертий раунд): БЕЗ цього виклику невалідний JSON-body
+// чи тип, що не зв'язується (наприклад, рядок у полі int), відповідає
+// `[ApiController]` САМ, ДО того, як запит дійде до дії контролера — типовим
+// `ValidationProblemDetails`, у якому немає ні `errorCode`, ні `messageKey`.
+// Клієнт (`problemOf`, `src/Ecr.Web/src/api/client.ts`) розрізняє відмови
+// лише за `errorCode`; без нього ця відмова виглядає як `ControllerErrorContractTests`
+// уже ловить для контролерів — «HTTP 400» і нічого більше, хоча причина тут
+// на клієнта, а не на сервер.
+//
+// ⚠ Кидок, а не власноруч зібраний `IActionResult`: `InvalidModelStateResponseFactory`
+// викликається зсередини конвеєра дій MVC, тобто ВСЕРЕДИНІ `next(context)`
+// `ExceptionHandlingMiddleware` — виняток доїжджає до НЬОГО так само, як і з
+// будь-якого обробника, і дістає ту саму локалізацію (`Title` з каталогу,
+// `Detail` за `messageKey`), а не окрему копію того самого коду.
+//
+// ⚠ Код — наявний `ECR-REQ-0422` («параметр самого запиту не проходить
+// перевірку», §7), не новий: причина та сама, що й для розміру сторінки чи
+// вікна аудиту — сам запит, а не дані, які він мав повернути.
+builder.Services.Configure<Microsoft.AspNetCore.Mvc.ApiBehaviorOptions>(options =>
+    options.InvalidModelStateResponseFactory = _ =>
+        throw new Ecr.Application.Errors.BusinessRuleException(
+            Ecr.Domain.Errors.ErrorCodes.RequestInvalid,
+            "Запит не відповідає очікуваній формі: перевірте типи полів і синтаксис JSON.",
+            new Dictionary<string, object?> { ["messageKey"] = "err.ECR-REQ-0422.malformedRequest" }));
+
 // ⚠ Ті самі налаштування — і для генератора OpenAPI. Він читає JSON-опції
 // мінімальних API (`Microsoft.AspNetCore.Http.Json`), а не MVC: без цього
 // рядка сервер віддавав би імена, а схема описувала б числа — і згенерований
@@ -104,6 +138,14 @@ builder.Services.ConfigureHttpJsonOptions(
 // Quartz стає придатним лише після ApplicationStarted. Без цієї реєстрації
 // вночі мовчазно не відбувалася б жодна перевірка.
 builder.Services.AddHostedService<Ecr.Api.Startup.RecurringScheduleService>();
+// ⛔ U8: стандартні 30 с зупинки хоста обривали перерахунок, імпорт чи збір
+// посеред роботи. Тепер задачі отримують скасування на зупинці
+// (`RecurringScheduleService.StopAsync`, до Quartz), а хост чекає, поки вони запишуть `Cancelled`
+// і Quartz (`WaitForJobsToComplete`) їх відпустить. 120 с — судження: з
+// запасом на пакет, що добігає до межі скасування.
+builder.Services.Configure<HostOptions>(options =>
+    options.ShutdownTimeout = TimeSpan.FromSeconds(
+        builder.Configuration.GetValue("Jobs:ShutdownTimeoutSeconds", defaultValue: 120)));
 // ⚠ Трансформер словників обов'язковий: без нього `RowDto.cells` описано як
 // об'єкт без дозволених властивостей, і згенерований клієнт не може покласти
 // в комірку жодного значення (див. DictionarySchemaTransformer).
@@ -156,16 +198,24 @@ builder.Services.Configure<GzipCompressionProviderOptions>(
 // композицією і конвеєром, розходиться першою ж правкою.
 builder.Services.AddEcrRateLimiting(builder.Configuration);
 
+builder.Services.AddScoped<Ecr.Api.Health.IRecalculationWorkerProbe, Ecr.Api.Health.RecalculationWorkerProbe>();
 builder.Services.AddHealthChecks()
     .AddCheck<Ecr.Api.Health.DatabaseHealthCheck>("db", tags: ["db", "ready"])
     .AddCheck<Ecr.Api.Health.JobsHealthCheck>("jobs", tags: ["ready"])
-    .AddCheck<Ecr.Api.Health.SourcesHealthCheck>("sources", tags: ["ready"]);
+    .AddCheck<Ecr.Api.Health.SourcesHealthCheck>("sources", tags: ["ready"])
+    .AddCheck<Ecr.Api.Health.RecalculationWorkerHealthCheck>("worker", tags: ["ready"]);
 
 var app = builder.Build();
 
 // ⚠ ДО послідовності старту: якщо в теку журналу не вдається писати, про це
 // треба сказати раніше, ніж старт упаде з іншої причини й пояснення не лишиться.
 app.ReportFileLog();
+
+// ⛔ U19: недійсне значення конфігурації валить старт з ім'ям ключа — ДО бази,
+// а не тихо падає на дефолт. ⚠ Після `Build()`, а не на `builder.Configuration`:
+// лише тут видно всі джерела (зокрема ті, що додає хост тестів), і вже є логер,
+// тобто причина лягає в журнал подій і файл, а не лише у виняток процесу.
+app.ValidateEcrConfiguration();
 
 // ⚠ ПОСЛІДОВНІСТЬ СТАРТУ (B01 §6.3) — порядок значущий:
 // 1) retry-очікування БД  2) звірка міграцій  3) Validate/Migrate
@@ -241,6 +291,7 @@ app.UseStaticFiles(staticFileOptions);
 app.UseAuthentication();
 app.UseMiddleware<SecurityStampMiddleware>();   // після автентифікації, до авторизації
 app.UseMiddleware<PasswordChangeMiddleware>();   // разовий пароль закриває все, крім його зміни
+app.UseMiddleware<SimulationReadOnlyMiddleware>(); // симуляція «очима користувача» — лише читання (V-06)
 app.UseAuthorization();
 
 // ⚠ Обмежувач — ПІСЛЯ автентифікації й авторизації: межа пошуку (BE-19)
@@ -309,7 +360,7 @@ app.MapFallback("/scalar/{**_}", () => Results.NotFound());
 // реально відсутній статичний файл (наприклад, видалену картинку) так
 // само лишається 404 від UseStaticFiles вище, а не підміняється
 // сторінкою застосунку.
-app.MapFallbackToFile("index.html");
+app.MapFallbackToFile("index.html", staticFileOptions);
 
 app.Run();
 

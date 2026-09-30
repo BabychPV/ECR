@@ -12,6 +12,7 @@ import {
   type CollectionRunDetail,
   type CollectionRunView,
 } from './collectionRunsApi';
+import { collectionRunErrorText } from './collectionRunMessage';
 import { t } from '@/shared/i18n';
 
 /**
@@ -80,7 +81,7 @@ function CollectionRunDetailContent({
           показується заглушкою «помилок немає» на успішному прогоні. */}
       {detail.errorMessage !== null && (
         <Alert color="statusError" title={t('collectionRuns.error')} role="alert">
-          <Text size="sm">{detail.errorMessage}</Text>
+          <Text size="sm">{collectionRunErrorText(detail.errorMessage)}</Text>
         </Alert>
       )}
 

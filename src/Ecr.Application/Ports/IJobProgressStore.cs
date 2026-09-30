@@ -133,8 +133,81 @@ public interface IJobProgressStore
     ///
     /// ⚠ Биття НЕ є прогресом: <c>Percent</c>, <c>Message</c> і
     /// <c>UpdatedAt</c> лишаються недоторканими.
+    ///
+    /// ⚠ Повертає <c>false</c>, коли рядок уже НЕ активний (не
+    /// <c>Running</c>/<c>Queued</c>): його закрили ззовні — скасуванням з
+    /// іншого інстанса (<see cref="CancelActiveAsync"/>) чи прибиранням. Власник
+    /// за цією відповіддю перевіряє, чи не попросили його зупинитися.
     /// </remarks>
-    public Task HeartbeatAsync(string jobId, DateTime utcNow, CancellationToken ct);
+    public Task<bool> HeartbeatAsync(string jobId, DateTime utcNow, CancellationToken ct);
+
+    /// <summary>
+    /// Биття за задачі, які цей процес ТРИМАЄ в черзі, але ще не виконує.
+    /// </summary>
+    /// <param name="jobIds">Ідентифікатори задач із локального планувальника.</param>
+    /// <param name="utcNow">Момент биття в UTC.</param>
+    /// <param name="ct">Скасування.</param>
+    /// <returns>Скільки активних рядків підтверджено.</returns>
+    /// <remarks>
+    /// ⛔ Без цього періодичне прибирання (<see cref="FailStaleAsync"/>) валило б
+    /// ЖИВІ задачі, що просто довго стоять у черзі (пул Quartz зайнятий
+    /// збором) або чекають ретраю: у черзі биття не б'є ніхто, крім постановки.
+    /// Черга in-memory, тож рядок, який не підтверджує жоден процес, справді
+    /// покинутий — його черга згоріла разом із процесом.
+    /// </remarks>
+    public Task<int> KeepAliveAsync(IReadOnlyCollection<string> jobIds, DateTime utcNow, CancellationToken ct);
+
+    /// <summary>
+    /// Позначає задачу <c>Cancelled</c>, якщо вона ще активна (U3).
+    /// </summary>
+    /// <param name="jobId">Ідентифікатор задачі.</param>
+    /// <param name="utcNow">Момент скасування в UTC.</param>
+    /// <param name="ct">Скасування.</param>
+    /// <returns><c>true</c> — рядок був <c>Running</c>/<c>Queued</c> і став <c>Cancelled</c>.</returns>
+    /// <remarks>
+    /// ⚠ Умовний запис: завершена задача (<c>Succeeded</c>/<c>Failed</c>) своїм
+    /// станом лишається — скасування запізнилось, і правда за результатом.
+    /// Цей самий запис — сигнал іншому інстансу: його биття
+    /// (<see cref="HeartbeatAsync"/>) бачить неактивний рядок і скасовує
+    /// задачу у себе, а постановка в черзі не стартує взагалі.
+    /// </remarks>
+    public Task<bool> CancelActiveAsync(string jobId, DateTime utcNow, CancellationToken ct);
+
+    /// <summary>
+    /// Скільки активних задач без биття довше за <see cref="StaleAfter"/> (U16).
+    /// </summary>
+    /// <param name="utcNow">Поточний момент у UTC.</param>
+    /// <param name="ct">Скасування.</param>
+    public Task<StaleJobsSummary> SummarizeStaleAsync(DateTime utcNow, CancellationToken ct);
+
+    /// <summary>
+    /// Скільки задач закрито <c>Failed</c> з конвертом <paramref name="messageKey"/> від
+    /// <paramref name="sinceUtc"/> (Д-2 огляду O1: вичерпана стеля відкладень).
+    /// </summary>
+    /// <param name="messageKey">Ключ каталогу в конверті <c>Message</c>.</param>
+    /// <param name="sinceUtc">Нижня межа <c>UpdatedAt</c> (UTC).</param>
+    /// <param name="ct">Скасування.</param>
+    public Task<int> CountFailedWithMessageKeyAsync(string messageKey, DateTime sinceUtc, CancellationToken ct);
+
+    /// <summary>
+    /// Видаляє ЗАВЕРШЕНІ записи, старші за <paramref name="olderThan"/> (аудит P2).
+    /// </summary>
+    /// <param name="olderThan">Межа: завершені до цього моменту видаляються.</param>
+    /// <param name="batch">Скільки рядків за один виклик.</param>
+    /// <param name="ct">Скасування.</param>
+    /// <returns>Скільки видалено.</returns>
+    public Task<int> PurgeFinishedAsync(DateTime olderThan, int batch, CancellationToken ct);
+
+    /// <summary>
+    /// Скільки тримати завершені записи прогресу (аудит P2).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Судження, не вимога: 30 діб покривають звітний місяць і розбір
+    /// інциденту за ним. Стрічку <c>/jobs</c> опитують кожні 3–30 с, а кожна
+    /// правка комірки ставить задачу перерахунку — без межі таблиця росте на
+    /// кількість правок за день назавжди.
+    /// </remarks>
+    public static readonly TimeSpan RetainFinishedFor = TimeSpan.FromDays(30);
 
     /// <summary>
     /// Позначає ПОКИНУТІ <c>Running</c>/<c>Queued</c> задачі <c>Failed</c>.
@@ -144,10 +217,13 @@ public interface IJobProgressStore
     /// <param name="ct">Скасування.</param>
     /// <returns>Скільки записів позначено.</returns>
     /// <remarks>
-    /// ⛔ Викликається один раз при СТАРТІ застосунку. Задача, яку процес
+    /// ⛔ Викликається при СТАРТІ застосунку і ПЕРІОДИЧНО (U4, прибирання в
+    /// <c>RecurringScheduleService</c>). Задача, яку процес
     /// виконував у момент падіння, лишається `Running` у базі назавжди — сам
     /// процес, який мав позначити її `Failed`, уже не існує. Без цього методу
     /// такий запис показує оператору задачу, що «виконується» місяцями.
+    /// Лише на старті — мало: перезапуск коротший за <see cref="StaleAfter"/>
+    /// лишав покинуті рядки живими до НАСТУПНОГО довгого перезапуску.
     ///
     /// ⛔ Попередня версія не мала ЖОДНОГО предиката застарілості: вона
     /// валила кожен рядок `Running`/`Queued`, який бачила. Інстансів у
@@ -157,6 +233,44 @@ public interface IJobProgressStore
     /// насправді доробила успішно. Тепер покинутою вважається лише задача,
     /// чиє биття (<see cref="HeartbeatAsync"/>) застигло довше за
     /// <see cref="StaleAfter"/>.
+    ///
+    /// ⛔ Рядки черги в базі (<c>Lane IS NOT NULL</c>) — поза цим методом (P3,
+    /// контракт черги §1): їх закриває лише прострочена оренда.
     /// </remarks>
     public Task<int> FailStaleAsync(string reason, DateTime utcNow, CancellationToken ct);
+
+    /// <summary>
+    /// Позначає <c>Failed</c> активні задачі ПОПЕРЕДНІХ процесів цієї машини й
+    /// ЦІЄЇ Ж РОЛІ — незалежно від свіжості биття.
+    /// </summary>
+    /// <param name="machineName">
+    /// ПОВНЕ ім'я цієї машини: з нього реалізація будує і скорочене ім'я префікса
+    /// <c>InstanceId</c>, і ім'я рядків старого формату.
+    /// </param>
+    /// <param name="role">
+    /// Роль процесу (<c>api</c>, <c>wrk</c>; P3). Рядки іншої ролі тієї ж машини
+    /// не чіпаються: Api й воркер на одному хості не закривають задачі один
+    /// одного. Роль <c>api</c> закриває ще й рядки старого формату
+    /// <c>{машина}/{GUID}</c> — їх писав лише Api.
+    /// </param>
+    /// <param name="currentInstanceId">Ідентифікатор поточного процесу — його рядки не чіпаються.</param>
+    /// <param name="reason">Причина, що йде в <c>Error</c>.</param>
+    /// <param name="utcNow">Момент позначення в UTC.</param>
+    /// <param name="ct">Скасування.</param>
+    /// <returns>Скільки записів позначено.</returns>
+    /// <remarks>
+    /// ⛔ Лише на СТАРТІ. Перезапуск, коротший за <see cref="StaleAfter"/>,
+    /// інакше лишав рядки попереднього процесу «живими» ще ~6 хв. Рядки інших
+    /// машин і рядки без <c>InstanceId</c> — поза цим методом
+    /// (<see cref="FailStaleAsync"/>). Рядки черги в базі (<c>Lane IS NOT NULL</c>)
+    /// — теж поза ним: їх закриває лише прострочена оренда.
+    /// </remarks>
+    public Task<int> FailPreviousInstanceAsync(
+        string machineName, string role, string currentInstanceId, string reason, DateTime utcNow,
+        CancellationToken ct);
 }
+
+/// <summary>Активні задачі без биття довше за <see cref="IJobProgressStore.StaleAfter"/>.</summary>
+/// <param name="Count">Скільки їх.</param>
+/// <param name="OldestHeartbeatAt">Найстаріше биття; <c>null</c> — таких немає або биття не було ніколи.</param>
+public sealed record StaleJobsSummary(int Count, DateTime? OldestHeartbeatAt);

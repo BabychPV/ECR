@@ -19,13 +19,20 @@ namespace Ecr.Application.Security;
 /// <param name="DangerousPermissions">
 /// Небезпечні права серед них — показуються окремо, бо їх видають поіменно.
 /// </param>
+/// <param name="NameL10n">
+/// Назва мовами каталогу (<c>sec.Role.NameL10n</c>) — те, що адміністратор
+/// задав при створенні чи перейменуванні. Сховище заповнює її завжди;
+/// <c>null</c> лише в підробках, що назви не моделюють. Клієнт без назви
+/// показує код.
+/// </param>
 public sealed record RoleView(
     int Id,
     string Code,
     bool IsBuiltIn,
     bool IsActive,
     IReadOnlyList<string> Permissions,
-    IReadOnlyList<string> DangerousPermissions);
+    IReadOnlyList<string> DangerousPermissions,
+    LocalizedText? NameL10n = null);
 
 /// <summary>Межі чинності одного призначення — підміна ролі на час відпустки (ФВ-6.16).</summary>
 /// <param name="ValidFrom">Початок дії; <c>null</c> — від завжди.</param>
@@ -37,6 +44,18 @@ public sealed record RoleView(
 /// ОДНОМУ місці (<see cref="ReplaceUserRolesHandler"/>).
 /// </remarks>
 public sealed record RoleValidityWindow(DateOnly? ValidFrom, DateOnly? ValidTo);
+
+/// <summary>Особисте призначення ролі користувачу — з межами чинності й областю дії.</summary>
+/// <param name="RoleCode">Код ролі.</param>
+/// <param name="ValidFrom">Початок дії; <c>null</c> — від завжди.</param>
+/// <param name="ValidTo">Кінець дії; <c>null</c> — безстроково.</param>
+/// <param name="Scope">
+/// Область дії (ФВ-6.14); <c>null</c> — роль діє в усіх проєктах. Порожній
+/// перелік — збережена область не розбирається, і роль не діє ніде
+/// (<see cref="Ecr.Domain.Entities.Security.RoleAssignment.ScopedProjectIds"/>).
+/// </param>
+public sealed record UserRoleAssignmentView(
+    string RoleCode, DateOnly? ValidFrom, DateOnly? ValidTo, RoleScopeDto? Scope);
 
 /// <summary>Обліковий запис у переліку.</summary>
 /// <remarks>⛔ Ні хеша пароля, ні солі, ні <c>SecurityStamp</c> тут немає (ФВ-6.11).</remarks>
@@ -235,7 +254,9 @@ public sealed class ReplaceUserRolesHandler(
     ICurrentUser currentUser,
     IAuditWriter audit,
     Domain.Abstractions.IClock clock,
-    DisableBootstrapAdminHandler disableBootstrap)
+    DisableBootstrapAdminHandler disableBootstrap,
+    IDocumentStore documents,
+    IResourceNameResolver sheetCatalog)
 {
     /// <summary>Право керування користувачами.</summary>
     public const string Permission = "Security.ManageUsers";
@@ -248,12 +269,19 @@ public sealed class ReplaceUserRolesHandler(
     /// без запису тут або відсутній словник — роль безстрокова, як і
     /// раніше.
     /// </param>
+    /// <param name="scopes">
+    /// Області дії за кодом ролі (ФВ-6.14). <c>null</c> — області наявних
+    /// призначень ЗБЕРІГАЮТЬСЯ (клієнт, що про поле не знає, не має мовчки
+    /// розширити роль до всіх проєктів); словник — повна відповідь: роль без
+    /// запису в ньому діє в усіх проєктах.
+    /// </param>
     /// <param name="ct">Токен скасування.</param>
     /// <returns>Скільки ролей тепер призначено.</returns>
     public async Task<int> HandleAsync(
         int userId,
         IReadOnlyList<string> roleCodes,
         IReadOnlyDictionary<string, RoleValidityWindow>? validity,
+        IReadOnlyDictionary<string, RoleScopeDto>? scopes,
         CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(roleCodes);
@@ -277,28 +305,68 @@ public sealed class ReplaceUserRolesHandler(
 
         ValidateValidity(roleCodes, validity);
 
+        // ⛔ ФВ-6.14: область перевіряється ДО будь-якої зміни — і на
+        // існування проєкту, і на право ним керувати.
+        Dictionary<string, RoleAssignmentScope>? domainScopes = null;
+        if (scopes is not null)
+        {
+            domainScopes = new Dictionary<string, RoleAssignmentScope>(StringComparer.Ordinal);
+            foreach (var (code, scope) in scopes)
+            {
+                if (!roleCodes.Contains(code, StringComparer.Ordinal))
+                {
+                    throw new BusinessRuleException(
+                        ErrorCodes.RequestInvalid,
+                        $"Область дії задано для ролі «{code}», якої немає в наборі, що призначається.",
+                        new Dictionary<string, object?> { ["messageKey"] = "err.ECR-REQ-0422", ["code"] = code });
+                }
+
+                domainScopes[code] = await RoleAssignmentScopeRules
+                    .ValidateAsync(scope, code, profile, documents, sheetCatalog, ct)
+                    .ConfigureAwait(false);
+            }
+        }
+
         var before = await users.ListUserRolesAsync(userId, ct).ConfigureAwait(false);
-        var count = await users.ReplaceRolesAsync(userId, roleCodes, validity, ct).ConfigureAwait(false);
+        var count = await users.ReplaceRolesAsync(userId, roleCodes, validity, domainScopes, ct).ConfigureAwait(false);
 
         // ⛔ Зміна повноважень — подія безпеки, і вона мусить бути в журналі
         // з обома наборами. «Хто це йому видав» — питання, на яке через рік
         // має бути відповідь, а не здогад.
-        await audit.WriteSecurityEventAsync(
-            new SecurityEventRecord(
-                ChangedAt: clock.UtcNow,
-                EventType: "UserRolesReplaced",
-                TargetUserId: userId,
-                TargetRoleId: null,
-                DetailsJson: System.Text.Json.JsonSerializer.Serialize(new
-                {
-                    from = before,
-                    to = roleCodes,
-                }),
-                ChangedByUserId: actorId,
-                CorrelationId: currentUser.CorrelationId),
-            ct).ConfigureAwait(false);
+        // ⛔ C4: подія й призначення — одним комітом; область дії — в події.
+        await uow.ExecuteInTransactionAsync(
+            async token =>
+            {
+                await audit.WriteSecurityEventAsync(
+                    new SecurityEventRecord(
+                        ChangedAt: clock.UtcNow,
+                        EventType: "UserRolesReplaced",
+                        TargetUserId: userId,
+                        TargetRoleId: null,
+                        DetailsJson: System.Text.Json.JsonSerializer.Serialize(new
+                        {
+                            from = before,
+                            to = roleCodes,
+                            scopes = domainScopes?.ToDictionary(
+                                s => s.Key, s => s.Value.ProjectIds, StringComparer.Ordinal),
 
-        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+                            // D-214: звуження аркушами й періодами — окремим
+                            // полем, щоб форма `scopes` для наявних читачів журналу
+                            // не змінилась.
+                            narrowing = domainScopes?
+                                .Where(s => s.Value.IsNarrowed)
+                                .ToDictionary(
+                                    s => s.Key,
+                                    s => new { sheets = s.Value.SheetCodes, from = s.Value.PeriodFrom?.Value, to = s.Value.PeriodTo?.Value },
+                                    StringComparer.Ordinal),
+                        }),
+                        ChangedByUserId: actorId,
+                        CorrelationId: currentUser.CorrelationId),
+                    token).ConfigureAwait(false);
+
+                await uow.SaveChangesAsync(token).ConfigureAwait(false);
+            },
+            ct).ConfigureAwait(false);
 
         // ⚠ Той самий виклик, що й після кожного призначення ролі при
         // створенні (`CreateUserHandler`, D-97): заміна набору — це так само
@@ -373,7 +441,53 @@ public sealed class ListUserRolesHandler(
     {
         await PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
 
-        return await users.ListUserRolesAsync(userId, ct).ConfigureAwait(false);
+        var roles = await users.ListUserRolesAsync(userId, ct).ConfigureAwait(false);
+
+        // ⛔ B-07: неіснуючий користувач давав `200 []` — «ролей немає» на
+        // адресі, якої не існує. Питаємо лише коли порожньо.
+        if (roles.Count == 0 && await users.FindByIdAsync(userId, ct).ConfigureAwait(false) is null)
+        {
+            throw new NotFoundException(
+                Domain.Errors.ErrorCodes.SecurityPrincipalNotFound,
+                $"Користувача {userId} не існує.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-SEC-0404.userNotFound",
+                    ["userId"] = userId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
+        }
+
+        return roles;
+    }
+
+    /// <summary>
+    /// Особисті призначення користувача з межами й областю дії (ФВ-6.14).
+    /// </summary>
+    /// <param name="userId">Користувач.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ Без цього читання форма ролей не могла показати області, а
+    /// <c>PUT …/roles</c> зі словником <c>scopes</c> — повна відповідь: клієнт,
+    /// що шле його наосліп, мовчки знімав би чужі області. Право те саме, що й
+    /// на запис набору ролей.
+    /// </remarks>
+    public async Task<IReadOnlyList<UserRoleAssignmentView>> ListAssignmentsAsync(int userId, CancellationToken ct)
+    {
+        await PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
+
+        if (await users.FindByIdAsync(userId, ct).ConfigureAwait(false) is null)
+        {
+            throw new NotFoundException(
+                Domain.Errors.ErrorCodes.SecurityPrincipalNotFound,
+                $"Користувача {userId} не існує.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-SEC-0404.userNotFound",
+                    ["userId"] = userId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
+        }
+
+        return await users.ListUserRoleAssignmentsAsync(userId, ct).ConfigureAwait(false);
     }
 }
 
@@ -386,15 +500,46 @@ public sealed class ListUserRolesHandler(
 /// порожній перелік адресатів, тобто сповіщення (<c>ФВ-12</c>) не надходили
 /// нікому, а перемикач «отримувати сповіщення» був вічно неактивним і
 /// виглядав як налаштування, яке просто вимкнули.
+///
+/// ⛔ S20 (аудит безпеки): зміна адреси — подія безпеки <see cref="EventType"/>
+/// в тій самій транзакції, що й зміна. Адреса — канал сповіщень і, отже,
+/// спосіб перехопити їх; без сліду в журналі підміну не видно. Адреси в
+/// журналі МАСКОВАНІ (<see cref="MaskEmail"/>): журнал читає ширше коло, ніж
+/// картку користувача.
 /// </remarks>
 public sealed class SetUserEmailHandler(
     IUserStore users,
     IAccessDecisionService access,
     IUnitOfWork uow,
-    ICurrentUser currentUser)
+    ICurrentUser currentUser,
+    IAuditWriter audit,
+    IClock clock)
 {
     /// <summary>Право керування користувачами.</summary>
     public const string Permission = "Security.ManageUsers";
+
+    /// <summary>Тип події в <c>aud.SecurityEvent</c>.</summary>
+    public const string EventType = "UserEmailChanged";
+
+    /// <summary>
+    /// Маска адреси для журналу: перші два символи локальної частини й домен
+    /// (<c>jo***@example.com</c>); <c>null</c> — адреси немає.
+    /// </summary>
+    /// <param name="email">Адреса.</param>
+    public static string? MaskEmail(string? email)
+    {
+        if (string.IsNullOrWhiteSpace(email))
+        {
+            return null;
+        }
+
+        var trimmed = email.Trim();
+        var at = trimmed.LastIndexOf('@');
+        var local = at < 0 ? trimmed : trimmed[..at];
+        var domain = at < 0 ? string.Empty : trimmed[at..];
+
+        return string.Concat(local.AsSpan(0, Math.Min(2, local.Length)), "***", domain);
+    }
 
     /// <summary>Задає або прибирає адресу.</summary>
     /// <param name="userId">Користувач.</param>
@@ -428,6 +573,8 @@ public sealed class SetUserEmailHandler(
                            ["userId"] = userId.ToString(System.Globalization.CultureInfo.InvariantCulture),
                        });
 
+        var before = user.Email;
+
         // ⚠ Прибирання адреси знімає і прапорець сповіщень: прапорець без
         // пошти беззмістовний і виглядав би як налаштований адресат, якому
         // нічого не надсилається.
@@ -437,7 +584,38 @@ public sealed class SetUserEmailHandler(
             user.SetReceivesAlerts(false);
         }
 
-        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+        // Та сама адреса — не зміна: подія без зміни засмічувала б журнал.
+        if (string.Equals(before, user.Email, StringComparison.Ordinal))
+        {
+            await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+            return;
+        }
+
+        var after = user.Email;
+
+        // ⛔ Зміна й подія — ОДНА транзакція: журнал не має казати про зміну,
+        // якої не сталося, і зміна не має пройти без запису.
+        await uow.ExecuteInTransactionAsync(
+            async token =>
+            {
+                await audit.WriteSecurityEventAsync(
+                    new SecurityEventRecord(
+                        ChangedAt: clock.UtcNow,
+                        EventType: EventType,
+                        TargetUserId: userId,
+                        TargetRoleId: null,
+                        DetailsJson: JsonSerializer.Serialize(new
+                        {
+                            oldEmail = MaskEmail(before),
+                            newEmail = MaskEmail(after),
+                        }),
+                        ChangedByUserId: actorId,
+                        CorrelationId: currentUser.CorrelationId),
+                    token).ConfigureAwait(false);
+
+                await uow.SaveChangesAsync(token).ConfigureAwait(false);
+            },
+            ct).ConfigureAwait(false);
     }
 }
 
@@ -629,21 +807,12 @@ public sealed class CreateUserHandler(
             // і саме цей пароль (не обраний самим користувачем) ніколи
             // повторно не перевіряється довжиною — до першої зміни він і є
             // чинним паролем облікового запису.
+            //
+            // ⚠ S15: та сама перевірка, що й у `ChangePasswordHandler` —
+            // правило не залежить від того, чи пароль разовий (видає
+            // адміністратор), чи свій.
             var policy = await users.GetPolicyAsync(user, ct).ConfigureAwait(false);
-            if (initialPassword.Length < policy.MinLength)
-            {
-                // ⚠ Той самий факт, що й у `ChangePasswordHandler`: ключ
-                // перевикористаний, «коротший за N символів» не залежить від
-                // того, чи пароль розовий (видає адміністратор), чи свій.
-                throw new BusinessRuleException(
-                    "ECR-PWD-0422",
-                    $"Разовий пароль коротший за {policy.MinLength} символів.",
-                    new Dictionary<string, object?>
-                    {
-                        ["messageKey"] = "err.ECR-PWD-0422.tooShort",
-                        ["minLength"] = policy.MinLength.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                    });
-            }
+            PasswordPolicyCheck.Ensure(policy, initialPassword, userName, "Разовий пароль");
 
             user.SetPassword(hasher.Hash(initialPassword));
 

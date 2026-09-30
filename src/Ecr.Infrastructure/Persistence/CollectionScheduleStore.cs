@@ -26,7 +26,7 @@ public sealed class CollectionScheduleStore(EcrDbContext db) : ICollectionSchedu
                   join d in db.DataSources.AsNoTracking() on e.DataSourceId equals d.Id
                   where dataSourceCode == null || d.Code == dataSourceCode
                   orderby e.Code
-                  select new ScheduledSourceEntity(s, e.Code, e.DisplayName, d.Id, d.Code))
+                  select new ScheduledSourceEntity(s, e.Code, e.DisplayName, d.Id, d.Code, e.SourceKind))
             .Take(MaxSchedules)
             .ToListAsync(ct)
             .ConfigureAwait(false);
@@ -42,7 +42,7 @@ public sealed class CollectionScheduleStore(EcrDbContext db) : ICollectionSchedu
                   join e in db.SourceEntities on s.SourceEntityId equals e.Id
                   join d in db.DataSources on e.DataSourceId equals d.Id
                   where s.Id == collectionScheduleId
-                  select new ScheduledSourceEntity(s, e.Code, e.DisplayName, d.Id, d.Code))
+                  select new ScheduledSourceEntity(s, e.Code, e.DisplayName, d.Id, d.Code, e.SourceKind))
             .FirstOrDefaultAsync(ct)
             .ConfigureAwait(false);
 
@@ -58,7 +58,7 @@ public sealed class CollectionScheduleStore(EcrDbContext db) : ICollectionSchedu
                   join s in db.CollectionSchedules.AsNoTracking() on e.Id equals s.SourceEntityId into schedules
                   from s in schedules.DefaultIfEmpty()
                   select new SourceEntityScheduling(
-                      e.Code, e.DisplayName, s == null ? null : s.Id, d.Id, d.Code))
+                      e.Code, e.DisplayName, s == null ? null : s.Id, d.Id, d.Code, e.SourceKind))
             .FirstOrDefaultAsync(ct)
             .ConfigureAwait(false);
 

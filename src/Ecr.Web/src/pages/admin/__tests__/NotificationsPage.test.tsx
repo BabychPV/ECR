@@ -5,23 +5,35 @@ import type { NotificationChannel, NotificationRuleMatrix } from '@/features/not
 import { renderWithQuery } from '@/test/render';
 
 /**
- * `/admin/notifications`: заголовок між `ChannelsPanel` і `RulesMatrixPanel`.
+ * `/admin/notifications`: заголовок між `ChannelsPanel` і `RulesMatrixPanel`,
+ * і власний текст кожного блоку на порожньому стенді.
  *
- * ⛔ Дефект, який ловить цей файл. На порожньому стенді (каналів ще нуль)
- * `ChannelsPanel` і `RulesMatrixPanel` показують ОДИН І ТОЙ САМИЙ текст —
- * `notifications.noChannels` / `notifications.noChannelsHint`: перший каже
- * «каналів немає», другий — «матриця правил порожня, бо каналів немає». Це
- * два різні факти, але без заголовка між блоками вони виглядають як
- * зламаний рендер, що надрукував той самий блок двічі.
+ * ⛔ Два дефекти, які ловить цей файл.
+ *
+ * 1. (закрито заголовком між блоками) Без заголовка між блоками два різні
+ *    факти — «каналів немає» (`ChannelsPanel`) і «правил немає, бо каналів
+ *    немає» (`RulesMatrixPanel`) — виглядали б як один блок, надрукований
+ *    двічі.
+ * 2. (закрито окремим ключем каталогу) `RulesMatrixPanel` брав чужий текст
+ *    `notifications.noChannels` / `notifications.noChannelsHint` — той самий,
+ *    що й `ChannelsPanel` над ним, — замість власного
+ *    `notifications.rulesNoChannels` / `notifications.rulesNoChannelsHint`.
+ *    Навіть із заголовком між блоками це читалось як копіпаста: під написом
+ *    «Rules» стояв текст «No channels yet».
  *
  * ⚠ `RulesMatrixPanel` навмисно НЕ малює власного заголовка (коментар над
  * `aria-label` таблиці в `RulesMatrixPanel.tsx`: окремий `<Title>` усередині
  * блоку рвав би `heading-order`, гейти `a11y (dark)`/`a11y (light)`) — «рівень
- * задає сторінка». Тому фікс не в панелі, а рівно в `NotificationsPage.tsx`.
+ * задає сторінка». Тому заголовок — у `NotificationsPage.tsx`, а власний
+ * текст блоку — у `RulesMatrixPanel.tsx` (ключі каталогу, `09-seed.sql`).
  *
- * Доказ побудований на порядку вузлів у DOM, а не лише на наявності
- * заголовка: мутація, яка додає заголовок кудись-небудь (наприклад, під
- * обидва блоки або перед обома), мала б лишити цей тест червоним.
+ * Доказ дефекту (1) побудований на порядку вузлів у DOM, а не лише на
+ * наявності заголовка: мутація, яка додає заголовок кудись-небудь (наприклад,
+ * під обидва блоки або перед обома), мала б лишити цей тест червоним.
+ * Доказ дефекту (2) — на РІЗНИХ ключах під двома заголовками: тест не мокає
+ * каталог `ui-strings`, тож `t()` віддає позначений ключ (`⟦ключ⟧`), і
+ * мутація, що поверне `RulesMatrixPanel` до `notifications.noChannels`,
+ * зробить обидва блоки знову однаковими — тест почервоніє.
  */
 
 const Matrix: NotificationRuleMatrix = {
@@ -62,35 +74,34 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe('NotificationsPage: заголовок розділяє однакові тексти ChannelsPanel і RulesMatrixPanel', () => {
-  it('порожній стенд — між двома однаковими блоками «каналів немає» стоїть заголовок «Rules»', async () => {
+describe('NotificationsPage: заголовок розділяє тексти ChannelsPanel і RulesMatrixPanel, і тексти різні', () => {
+  it('порожній стенд — блок Rules показує ВЛАСНИЙ текст, не текст блоку Channels', async () => {
     mockEmptyStand();
     show();
 
-    // Обидва блоки показують ту саму фразу — доказ, що дублікат справді є.
-    const noChannelsBlocks = await waitFor(
-      () => {
-        const found = screen.getAllByText('⟦notifications.noChannels⟧');
-        expect(found).toHaveLength(2);
-        return found;
-      },
+    // ⛔ Головне твердження проти дефекту (2): ключі під заголовками РІЗНІ.
+    // До фіксу тут стояв би той самий `⟦notifications.noChannels⟧` двічі.
+    const channelsBlock = await waitFor(
+      () => screen.getByText('⟦notifications.noChannels⟧'),
       { timeout: 10_000 },
     );
+    const rulesBlock = screen.getByText('⟦notifications.rulesNoChannels⟧');
+
+    expect(screen.getByText('⟦notifications.noChannelsHint⟧')).toBeDefined();
+    expect(screen.getByText('⟦notifications.rulesNoChannelsHint⟧')).toBeDefined();
 
     // Заголовок секції правил — з ключа каталогу `notifications.rules`
     // (значення `Rules` у `09-seed.sql`), рівня `<h2>`, як і в `ChannelsPanel`.
     const rulesHeading = screen.getByRole('heading', { name: '⟦notifications.rules⟧' });
     expect(rulesHeading.tagName).toBe('H2');
 
-    // ⛔ Головне твердження: заголовок стоїть СТРОГО між двома дублікатами
-    // тексту, а не деінде на сторінці (до обох чи після обох).
-    const [channelsBlock, rulesBlock] = noChannelsBlocks;
-
+    // ⛔ Доказ дефекту (1): заголовок стоїть СТРОГО між блоком Channels і
+    // блоком Rules, а не деінде на сторінці (до обох чи після обох).
     expect(
-      channelsBlock!.compareDocumentPosition(rulesHeading) & Node.DOCUMENT_POSITION_FOLLOWING,
+      channelsBlock.compareDocumentPosition(rulesHeading) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
     expect(
-      rulesHeading.compareDocumentPosition(rulesBlock!) & Node.DOCUMENT_POSITION_FOLLOWING,
+      rulesHeading.compareDocumentPosition(rulesBlock) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
   });
 
@@ -99,7 +110,8 @@ describe('NotificationsPage: заголовок розділяє однаков�
     show();
 
     await waitFor(() => {
-      expect(screen.getAllByText('⟦notifications.noChannels⟧')).toHaveLength(2);
+      expect(screen.getByText('⟦notifications.noChannels⟧')).toBeDefined();
+      expect(screen.getByText('⟦notifications.rulesNoChannels⟧')).toBeDefined();
     });
 
     const headings = screen.getAllByRole('heading');
@@ -178,9 +190,12 @@ describe('NotificationsPage: ChannelsPanel і RulesMatrixPanel діляться 
     // ⛔ Єдиний виклик рендеру за весь тест — див. коментар над `describe`.
     show();
 
-    // Стартовий, порожній стенд: обидва блоки кажуть «каналів немає».
+    // Стартовий, порожній стенд: обидва блоки кажуть «каналів немає» — кожен
+    // СВОЇМ ключем (`ChannelsPanel` — `notifications.noChannels`,
+    // `RulesMatrixPanel` — `notifications.rulesNoChannels`).
     await waitFor(() => {
-      expect(screen.getAllByText('⟦notifications.noChannels⟧')).toHaveLength(2);
+      expect(screen.getByText('⟦notifications.noChannels⟧')).toBeDefined();
+      expect(screen.getByText('⟦notifications.rulesNoChannels⟧')).toBeDefined();
     });
 
     fireEvent.click(screen.getByText(/notifications\.addChannel⟧/));
@@ -194,13 +209,14 @@ describe('NotificationsPage: ChannelsPanel і RulesMatrixPanel діляться 
     await screen.findByRole('cell', { name: 'Ops mailbox' });
 
     /*
-     * ⛔ Головне твердження. До фіксу тут лишалось би
-     * `⟦notifications.noChannels⟧` у `RulesMatrixPanel` — ключ кешу, за яким
-     * інвалідувала мутація `ChannelsPanel`, не збігався з ключем, за яким
-     * читав `RulesMatrixPanel`, тож другий запит на дані взагалі не йшов.
+     * ⛔ Головне твердження. До фіксу спільного кешу тут лишалось би
+     * `⟦notifications.rulesNoChannels⟧` у `RulesMatrixPanel` — ключ кешу, за
+     * яким інвалідувала мутація `ChannelsPanel`, не збігався з ключем, за
+     * яким читав `RulesMatrixPanel`, тож другий запит на дані взагалі не йшов.
      */
     await waitFor(() => {
       expect(screen.queryByText('⟦notifications.noChannels⟧')).toBeNull();
+      expect(screen.queryByText('⟦notifications.rulesNoChannels⟧')).toBeNull();
     });
 
     expect(screen.getByRole('columnheader', { name: 'Ops mailbox' })).toBeDefined();

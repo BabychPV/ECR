@@ -48,18 +48,15 @@ const templates = {
  * ⚠ Номер версії, її ідентифікатор і ревізія не збігаються ніде, тож
  * переплутані переліки видно з будь-якої клітинки: `9.9 · r2` біля `BRAVO`
  * означає, що рядок узяв чужу відповідь.
+ *
+ * ⚠ BR-07: тепер це ОДНА пакетна відповідь (`TemplateVersionsForTemplate[]`,
+ * `GET /api/v1/templates/versions?ids=...`), а не сторінка на кожен шаблон
+ * окремо — форма `{templateId, versions}` замінила `{items, nextCursor,
+ * totalCount}` per-template.
  */
-const versionsByTemplate: Record<string, unknown> = {
-  '7': {
-    items: [{ id: 70, version: '1.0', status: 'Published', presentationRevision: 1 }],
-    nextCursor: null,
-    totalCount: 1,
-  },
-  '3': {
-    items: [{ id: 30, version: '9.9', status: 'Draft', presentationRevision: 2 }],
-    nextCursor: null,
-    totalCount: 1,
-  },
+const versionsByTemplate: Record<string, { id: number; version: string; status: string; presentationRevision: number }[]> = {
+  '7': [{ id: 70, version: '1.0', status: 'Published', presentationRevision: 1 }],
+  '3': [{ id: 30, version: '9.9', status: 'Draft', presentationRevision: 2 }],
 };
 
 /** Що відповідає `GET /api/v1/templates`: перелік, порожньо або відмова. */
@@ -88,13 +85,18 @@ function mockApi(reply: TemplatesReply): void {
         });
       }
 
-      // ⚠ Порядок гілок значущий: адреса версій МІСТИТЬ `/api/v1/templates` як
-      // префікс. Зворотний порядок віддав би перелік шаблонів у відповідь на
-      // запит версій — і тест падав би не з тієї причини, яку перевіряє.
-      const versionsOf = /\/api\/v1\/templates\/(\d+)\/versions/.exec(url);
+      // ⚠ Порядок гілок значущий: адреса пакетних версій МІСТИТЬ
+      // `/api/v1/templates` як префікс. Зворотний порядок віддав би перелік
+      // шаблонів у відповідь на запит версій — і тест падав би не з тієї
+      // причини, яку перевіряє.
+      //
+      // ⚠ BR-07: один запит на ВЕСЬ видимий перелік (`?ids=7&ids=3`), а не по
+      // одному на шаблон — відповідь тут будується з усіх `ids=` рядка запиту,
+      // не з одного захопленого сегмента шляху.
+      if (/\/api\/v1\/templates\/versions(\?|$)/.test(url)) {
+        const ids = [...url.matchAll(/[?&]ids=(\d+)/g)].map((m) => m[1] ?? '');
 
-      if (versionsOf !== null) {
-        return json(versionsByTemplate[versionsOf[1] ?? ''] ?? { items: [], totalCount: 0 });
+        return json(ids.map((id) => ({ templateId: Number(id), versions: versionsByTemplate[id] ?? [] })));
       }
 
       if (url.includes('/api/v1/templates')) {
@@ -324,5 +326,43 @@ describe('TemplatesPage на DataTable: порожньо й відмова ли�
 
     expect(within(alert).getByText('Template catalogue is unavailable')).toBeDefined();
     expect(screen.queryByText(/templates\.empty⟧/)).toBeNull();
+  });
+});
+
+describe('TemplatesPage: версії — ОДИН запит на перелік, не по одному на шаблон (BR-07)', () => {
+  /**
+   * Мутаційний доказ N+1: два шаблони фікстури (`BRAVO`, `ALPHA`) — і рівно
+   * ОДИН виклик `/api/v1/templates/versions`, не два.
+   *
+   * ⛔ До цього переліку `useQueries` бив по одному запиту версій на КОЖЕН
+   * шаблон: два шаблони — два виклики `/api/v1/templates/{id}/versions`.
+   * Поверніть цей код (замініть пакетний `useQuery` назад на `useQueries` з
+   * `queryFn` за `template.id`) — і перевірка нижче порахує ДВА виклики
+   * `/api/v1/templates/versions` замість одного (а насправді жодного —
+   * маршрут стане іншим, `{id}/versions`), тобто впаде.
+   */
+  it('перелік із двох шаблонів дає рівно один запит версій', async () => {
+    show({ kind: 'list' });
+
+    const table = await screen.findByRole('table');
+    await within(table).findByText('BRAVO');
+
+    // ⚠ Обидва рядки мають дійти до екрана з ВЛАСНИМИ версіями — інакше
+    // «один запит» було б дешевою (і хибною) перемогою: запит один, бо
+    // даних немає.
+    await within(table).findByText('1.0');
+    await within(table).findByText('9.9');
+
+    const versionCalls = vi
+      .mocked(globalThis.fetch)
+      .mock.calls.filter(([input]) => /\/api\/v1\/templates\/versions(\?|$)/.test(String(input)));
+
+    expect(versionCalls).toHaveLength(1);
+
+    // ⚠ Дзеркало головного твердження: обидва ідентифікатори — В ОДНОМУ
+    // запиті, а не «один запит, що просить лише перший шаблон».
+    const requestedUrl = String(versionCalls[0]?.[0] ?? '');
+    expect(requestedUrl).toContain('ids=7');
+    expect(requestedUrl).toContain('ids=3');
   });
 });

@@ -1,8 +1,10 @@
 // src/Ecr.Api/Security/LoginRateLimiting.cs
 
 using System.Globalization;
+using System.Security.Claims;
 using System.Text.Json;
 using System.Threading.RateLimiting;
+using Ecr.Api.Auth;
 using Ecr.Api.Errors;
 using Ecr.Api.Middleware;
 using Ecr.Application.Common;
@@ -81,7 +83,7 @@ public static class LoginRateLimiting
     /// </remarks>
     public const int DefaultLoginPermitPerMinute = 60;
 
-    /// <summary>Префікс шляхів входу — єдине, що обмежується.</summary>
+    /// <summary>Префікс шляхів входу; друге, що обмежує глобальний обмежувач, — <see cref="ChangePasswordPath"/>.</summary>
     /// <remarks>
     /// ⚠ Обидва входи, не лише локальний. <c>login/windows</c> вимагає
     /// Negotiate, тобто анонімним не є, але так само ходить у базу на кожен
@@ -89,8 +91,50 @@ public static class LoginRateLimiting
     /// </remarks>
     public const string LoginPathPrefix = "/api/v1/login";
 
+    /// <summary>Шлях зміни власного пароля — друге місце, де перевіряється пароль (S9).</summary>
+    public const string ChangePasswordPath = "/api/v1/auth/change-password";
+
+    /// <summary>Скільки спроб зміни пароля дозволено ОДНОМУ користувачеві за хвилину (S9).</summary>
+    /// <remarks>
+    /// ⛔ До S9 межа покривала лише <see cref="LoginPathPrefix"/>, а
+    /// <c>change-password</c> теж коштує PBKDF2 (перевірка чинного пароля) і
+    /// теж відповідає «підійшов / ні» — тобто відкритий сеанс (залишений
+    /// браузер, викрадена cookie) був необмеженим оракулом пароля.
+    ///
+    /// ⚠ Розділ — КОРИСТУВАЧ, а не адреса: ендпоінт вимагає сеансу, і за
+    /// корпоративним NAT межа на адресу різала б сусідів (той самий аргумент,
+    /// що й у <see cref="SearchRateLimitPolicy"/>). Без ідентифікатора в
+    /// заявці — розділ за адресою, щоб запит без сеансу не йшов повз межу.
+    ///
+    /// ⚠ 10/хв: людина міняє пароль раз, плюс кілька відмов політики довжини.
+    /// Підбір чинного пароля зупиняє раніше блокування запису (п'ять хибних —
+    /// ФВ-6.4a, спільний лічильник із входом); межа ж тримає ціну PBKDF2 і
+    /// запити, що до лічильника не доходять.
+    /// </remarks>
+    public const int DefaultChangePasswordPermitPerMinute = 10;
+
     /// <summary>Ключ конфігурації: межа спроб за хвилину.</summary>
     private const string PermitKey = "Security:RateLimit:LoginPermitPerMinute";
+
+    /// <summary>Ключ конфігурації: межа зміни пароля на користувача за хвилину.</summary>
+    private const string ChangePasswordPermitKey = "Security:RateLimit:ChangePasswordPermitPerMinute";
+
+    /// <summary>Префікс розділу зміни пароля — щоб не збігтися з розділами входу за адресою.</summary>
+    private const string ChangePasswordPartitionPrefix = "change-password:";
+
+    /// <summary>
+    /// Ключ каталогу для подробиці відмови зміни пароля.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Власний рядок, а не подробиця входу: та каже «з цієї адреси», а межа
+    /// тут на КОРИСТУВАЧА. Записаний повним літералом — сторож
+    /// <c>ErrorTitleCatalogTests</c> шукає саме літерал (див. <see cref="RejectionDetailKey"/>).
+    /// </remarks>
+    private const string ChangePasswordRejectionDetailKey = "err.ECR-REQ-0429.tooManyPasswordChanges";
+
+    /// <summary>Запасна подробиця відмови зміни пароля — коли каталог недоступний.</summary>
+    private const string ChangePasswordRejectionDetail =
+        "Too many password change attempts. Try again later.";
 
     /// <summary>Ключ конфігурації: чи довіряти <c>X-Forwarded-For</c>.</summary>
     private const string TrustForwardedForKey = "Security:RateLimit:TrustForwardedFor";
@@ -176,6 +220,8 @@ public static class LoginRateLimiting
         ArgumentNullException.ThrowIfNull(configuration);
 
         var permitPerMinute = configuration.GetValue(PermitKey, DefaultLoginPermitPerMinute);
+        var changePasswordPermit = configuration.GetValue(
+            ChangePasswordPermitKey, DefaultChangePasswordPermitPerMinute);
         var trustForwardedFor = configuration.GetValue(TrustForwardedForKey, defaultValue: false);
 
         services.AddRateLimiter(options =>
@@ -183,20 +229,28 @@ public static class LoginRateLimiting
             options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
 
             options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(context =>
-                context.Request.Path.StartsWithSegments(LoginPathPrefix, StringComparison.OrdinalIgnoreCase)
-                    ? RateLimitPartition.GetFixedWindowLimiter(
-                        ClientKey(context, trustForwardedFor),
-                        _ => new FixedWindowRateLimiterOptions
-                        {
-                            PermitLimit = permitPerMinute,
-                            Window = TimeSpan.FromMinutes(1),
-                            QueueLimit = 0,
-                            AutoReplenishment = true,
-                        })
-                    : RateLimitPartition.GetNoLimiter(UnlimitedPartition));
+            {
+                if (context.Request.Path.StartsWithSegments(LoginPathPrefix, StringComparison.OrdinalIgnoreCase))
+                {
+                    return PerMinute(ClientKey(context, trustForwardedFor), permitPerMinute);
+                }
 
-            options.OnRejected = static (rejection, ct) =>
-                new ValueTask(RejectAsync(rejection, RejectionCode, RejectionDetailKey, RejectionDetail, ct));
+                if (IsChangePassword(context))
+                {
+                    return PerMinute(ChangePasswordKey(context, trustForwardedFor), changePasswordPermit);
+                }
+
+                return RateLimitPartition.GetNoLimiter(UnlimitedPartition);
+            });
+
+            // ⚠ Відмова одна на глобальний обмежувач, тож код і подробиця
+            // обираються за шляхом: 0429 входу каже про АДРЕСУ, а межа зміни
+            // пароля — на користувача (ECR-REQ-0429, «забагато запитів»).
+            options.OnRejected = static (rejection, ct) => IsChangePassword(rejection.HttpContext)
+                ? new ValueTask(RejectAsync(
+                    rejection, ErrorCodes.TooManyRequests,
+                    ChangePasswordRejectionDetailKey, ChangePasswordRejectionDetail, ct))
+                : new ValueTask(RejectAsync(rejection, RejectionCode, RejectionDetailKey, RejectionDetail, ct));
 
             // Межа пошуку (BE-19) — іменована політика: їй потрібен користувач,
             // тобто вона діє лише після автентифікації (див. `Program.cs`).
@@ -204,6 +258,37 @@ public static class LoginRateLimiting
         });
 
         return services;
+    }
+
+    /// <summary>Фіксоване хвилинне вікно без черги — однакове для входу й зміни пароля.</summary>
+    private static RateLimitPartition<string> PerMinute(string key, int permit)
+        => RateLimitPartition.GetFixedWindowLimiter(
+            key,
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = permit,
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0,
+                AutoReplenishment = true,
+            });
+
+    /// <summary>Чи запит — зміна власного пароля.</summary>
+    private static bool IsChangePassword(HttpContext context)
+        => context.Request.Path.Equals(ChangePasswordPath, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Розділ зміни пароля: користувач із заявки, без неї — адреса.</summary>
+    /// <remarks>
+    /// ⚠ Обмежувач стоїть ПІСЛЯ автентифікації (див. опис класу), тож заявка
+    /// тут уже є. Ідентифікатор — наш <c>UserId</c>, а не ім'я: ім'я не
+    /// міняється, але саме Id — ключ усього аудиту (D-86).
+    /// </remarks>
+    private static string ChangePasswordKey(HttpContext context, bool trustForwardedFor)
+    {
+        var userId = context.User.FindFirstValue(AuthenticationSetup.UserIdClaim);
+
+        return string.IsNullOrEmpty(userId)
+            ? ChangePasswordPartitionPrefix + "ip:" + ClientKey(context, trustForwardedFor)
+            : ChangePasswordPartitionPrefix + "user:" + userId;
     }
 
     /// <summary>
@@ -320,6 +405,11 @@ public static class LoginRateLimiting
 
         problem.Extensions["errorCode"] = code;
         problem.Extensions["correlationId"] = correlationId;
+
+        // ⚠ Клієнт (`ErrorAlert`, рішення 2026-09-20) показує подробицю лише
+        // тоді, коли сервер позначив її ключем каталогу; без ключа користувач
+        // бачив би самий заголовок «Too many requests» (S9).
+        problem.Extensions["messageKey"] = detailKey;
 
         context.Response.ContentType = ProblemJson;
 

@@ -28,6 +28,8 @@ import {
 } from '@/features/grid/lostEdits';
 import { safeReturnPath } from '@/shared/safeReturnPath';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
+import { passwordToggleProps } from '@/shared/ui/a11yLabels';
+import { useTranslatedLanguages } from '@/shared/ui/LanguageSwitcher';
 import {
   isCatalogFailed,
   isCatalogResolved,
@@ -48,14 +50,16 @@ import { useEffect } from 'react';
  * (`⟦...⟧`) замість пояснення причини — рівно той дефект, від якого це
  * повідомлення й рятує. `EcrApiError` узято тому, що `ErrorAlert` показує
  * `problem.title`/`message` напряму, у ЦЕЙ каталог не заглядаючи.
+ *
+ * ✎ `X-26`: літерал англійською — мовою за замовчуванням (`DefaultLanguage`).
+ * Тут стояла українська, якої серед мов продукту немає взагалі (`D-95`).
  */
 const CATALOG_LOAD_FAILED = new EcrApiError({
-  title: 'Переклади інтерфейсу не завантажилися',
+  title: 'Interface texts could not be loaded',
   status: 0,
   errorCode: 'ECR-I18N-CATALOG-FAILED',
   correlationId: '-',
-  detail:
-    'Не вдалося завантажити текстовий каталог інтерфейсу. Перевірте з’єднання з мережею та оновіть сторінку.',
+  detail: 'The interface text catalogue did not load. Check the network connection and reload the page.',
 });
 
 /**
@@ -67,13 +71,10 @@ const CATALOG_LOAD_FAILED = new EcrApiError({
  * явний `tabIndex: 0` повертає зупинку табом. Без цього тумблер існував лише
  * для миші: клавіатура й читалка його не бачили взагалі.
  *
- * ⚠ Напис — ЛІТЕРАЛ, не `t()`, з тієї ж причини, що й `CATALOG_LOAD_FAILED`
- * вище: рядки цього застосунку йдуть із серверного каталогу
- * (`09-seed.sql`), а цей файл — DDL/сід, виключно оркестраторський. Ключа
- * під цей напис там ще немає; голий `t()` без рядка в каталозі показав би
- * читалці позначений ключ (`⟦...⟧`) замість опису кнопки.
+ * ✎ `X-26`: напис — із каталогу (`common.togglePasswordVisibility`, публічна
+ * область) з англійським запасним на випадок, коли каталог не доїхав
+ * (`a11yLabels.ts`); раніше — англійський літерал для всіх мов.
  */
-const passwordToggleProps = { 'aria-label': 'Toggle password visibility', tabIndex: 0 } as const;
 
 /**
  * Підпис перемикача мови на екрані входу (`BE-07`).
@@ -156,6 +157,9 @@ export function LoginPage(): JSX.Element {
   // і хук після `if (…) return` — це помилка, яка проявляється лише в момент,
   // коли гілка змінюється.
   const bootstrap = usePublicBootstrap();
+
+  // ✎ `R-16`: лише мови з перекладом (публічний зріз — до входу іншого немає).
+  const offeredLanguages = useTranslatedLanguages(bootstrap.languages, 'public');
 
   // Публічний каталог рядків тягнеться ДО входу: сторінка входу не може
   // показувати ключі замість написів (D-114).
@@ -357,6 +361,10 @@ export function LoginPage(): JSX.Element {
             {bootstrap.windowsSignInEnabled && (
               <Button
                 type="button"
+                // ⚠ `X-29`: одна заповнена кнопка на екрані. Коли поруч є форма
+                // локального входу, основна — її «Sign in» (його запускає
+                // Enter), а доменний вхід — поруч, контурною.
+                variant={bootstrap.localSignInEnabled ? 'default' : 'filled'}
                 onClick={() => void submit('/api/v1/login/windows')}
                 loading={busy}
               >
@@ -382,10 +390,13 @@ export function LoginPage(): JSX.Element {
                   value={password}
                   onChange={(event) => setPassword(event.currentTarget.value)}
                   autoComplete="current-password"
-                  visibilityToggleButtonProps={passwordToggleProps}
+                  visibilityToggleButtonProps={passwordToggleProps()}
                 />
 
-                <Button type="submit" variant="default" loading={busy}>
+                {/* ⛔ `X-29`: основна дія екрана — заповнена кнопка. Тут стояв
+                    `variant="default"`: «Sign in» виглядав сірим, як
+                    другорядна дія, хоча саме його запускає Enter у полі. */}
+                <Button type="submit" variant="filled" loading={busy}>
                   {t('login.submit')}
                 </Button>
               </>
@@ -407,13 +418,13 @@ export function LoginPage(): JSX.Element {
               *
               * ⚠ Ховається на одній мові: вибір з одного пункту не є вибором.
               */}
-            {bootstrap.languages.length > 1 && (
+            {offeredLanguages.length > 1 && (
               <NativeSelect
                 size="xs"
                 variant="unstyled"
                 aria-label={LANGUAGE_LABEL}
                 value={preferredLanguage()}
-                data={bootstrap.languages.map((item) => ({
+                data={offeredLanguages.map((item) => ({
                   value: item.code,
                   label: item.nameNative,
                 }))}

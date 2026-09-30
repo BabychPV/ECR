@@ -60,6 +60,10 @@ public sealed class CreateDocumentHandlerTests
                 TemplateVersionId, Arg.Any<IReadOnlyList<int>>(), Arg.Any<CancellationToken>())
             .Returns(new List<CompositionViolation>());
 
+        // ⛔ `V-11`: версію документа визначає ПРОЄКТ — обробник питає її тут.
+        _documents.FindProjectTemplateVersionIdAsync(AccessBuilder.ProjectId, Arg.Any<CancellationToken>())
+            .Returns(TemplateVersionId);
+
         _documents.NextBusinessKeyAsync(
                 AccessBuilder.ProjectId, TemplateVersionId, Arg.Any<CancellationToken>())
             .Returns("P10-V2-0001");

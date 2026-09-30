@@ -58,12 +58,26 @@ public sealed class ExcelImporterTemplateVersionTests
     {
         _user.UserId.Returns(9);
         _access.BuildProfileAsync(9, Arg.Any<CancellationToken>()).Returns(Profile());
+        _access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
+            .Returns(EditDecision.Allow());
+
+        // S6: межі читання — «бачить усе»; про заборони — ImportDiffBuilderHiddenColumnTests
+        // і DenyReadTests.ImportPreview (Api).
+        _access.ReadScopeAsync(Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
+            .Returns(_ => ReadScopes.Everything(BuildSnapshot()));
 
         // ⚠ Порожній словник рішень — жодна адреса не заборонена явно
         // (той самий прийом, що й у PatchCellsTests): ImportDiffBuilder
         // трактує відсутність запису як «дозволено».
-        _access.CanEditSliceAsync(Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
-            .Returns(new Dictionary<CellAddress, EditDecision>());
+        //
+        // ⚠ P8: перегляд питає рішення ОДНИМ пакетним викликом на всю книгу —
+        // по порожньому словнику на кожен запитаний екземпляр.
+        _access.CanEditSlicesAsync(
+                Arg.Any<AccessProfile>(), Arg.Any<IReadOnlyCollection<long>>(), Arg.Any<CancellationToken>())
+            .Returns(call => (IReadOnlyDictionary<long, IReadOnlyDictionary<CellAddress, EditDecision>>)
+                call.ArgAt<IReadOnlyCollection<long>>(1).Distinct().ToDictionary(
+                    id => id,
+                    _ => (IReadOnlyDictionary<CellAddress, EditDecision>)new Dictionary<CellAddress, EditDecision>()));
 
         // ⛔ Поточна (жива) версія шаблону — ЄДИНЕ, що відповідає за
         // TemplateVersionId цього документа. Файл каже інше (111), і саме
@@ -89,7 +103,7 @@ public sealed class ExcelImporterTemplateVersionTests
                 [CurrentTableInstanceId] = new Dictionary<string, string> { ["R1"] = "0xAA" },
             });
 
-        _cellStore.ReadSlicesAsync(Arg.Any<IReadOnlyList<long>>(), Arg.Any<CancellationToken>())
+        _cellStore.ReadSlicesAsync(Arg.Any<IReadOnlyList<long>>(), Period, Arg.Any<CancellationToken>())
             .Returns(new Dictionary<long, IReadOnlyList<CellRecord>>());
     }
 
@@ -180,14 +194,14 @@ public sealed class ExcelImporterTemplateVersionTests
                 methodologies, patchRegistries, patchHeaders,
                 Substitute.For<IAuditWriter>(), Substitute.For<IAuditReader>(),
                 Substitute.For<IBackgroundJobScheduler>(), Substitute.For<IUnitOfWork>(),
-                Substitute.For<ICurrentUser>(), Substitute.For<IClock>()),
+                Substitute.For<ICurrentUser>(), Substitute.For<IClock>(), Substitute.For<ISheetEditGate>(), NSubstitute.Substitute.For<Ecr.Application.Ports.IUnitCatalog>()),
             new ImportDiffBuilder(), _cellStore, _rowStore,
             // ⚠ `DAT-05`: імпортер тепер сам відкриває транзакцію на всю книгу
             // і сам ставить задачу перерахунку. Ці тести — про `PreviewAsync`,
             // тобто до транзакції не доходять; саб віддає працюючу заглушку,
             // щоб причина падіння в майбутньому тесті не виглядала як дефект
             // продукту.
-            FakeUnitOfWork.Passthrough(), Substitute.For<IBackgroundJobScheduler>());
+            FakeUnitOfWork.Passthrough(), Substitute.For<IBackgroundJobScheduler>(), Substitute.For<ISheetEditGate>());
     }
 
     /// <summary>Саб <see cref="IUnitOfWork"/>, чия «транзакція» просто виконує тіло.</summary>
@@ -249,7 +263,41 @@ public sealed class ExcelImporterTemplateVersionTests
         // TableInstanceId (той самий шаблон, інший документ/проєкт) читала б
         // чужі дані ще до будь-якого рішення про доступ.
         await _cellStore.Received(1).ReadSlicesAsync(
-            Arg.Is<IReadOnlyList<long>>(ids => ids.Count == 0), Arg.Any<CancellationToken>());
+            Arg.Is<IReadOnlyList<long>>(ids => ids.Count == 0), Period, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait("Finding", "P8")]
+    public async Task Перегляд_питає_доступ_одним_пакетом_а_не_зрізом_на_таблицю()
+    {
+        using var workbook = BuildWorkbook(CurrentTableInstanceId);
+
+        _ = await Importer().PreviewAsync(DocumentId, workbook, CancellationToken.None);
+
+        await _access.Received(1).CanEditSlicesAsync(
+            Arg.Any<AccessProfile>(),
+            Arg.Is<IReadOnlyCollection<long>>(ids => ids.SequenceEqual(new[] { CurrentTableInstanceId })),
+            Arg.Any<CancellationToken>());
+        await _access.DidNotReceiveWithAnyArgs().CanEditSliceAsync(default!, default, default);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait("Finding", "P8")]
+    public async Task Пакет_без_рішень_на_екземпляр_це_відмова_а_не_дозвіл()
+    {
+        // ⛔ `ImportDiffBuilder` читає відсутнє рішення як «заборони немає».
+        // Пакет, що мовчки загубив екземпляр, не сміє перетворитися на
+        // перегляд, де всі комірки цієї таблиці виглядають дозволеними.
+        _access.CanEditSlicesAsync(
+                Arg.Any<AccessProfile>(), Arg.Any<IReadOnlyCollection<long>>(), Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<long, IReadOnlyDictionary<CellAddress, EditDecision>>());
+
+        using var workbook = BuildWorkbook(CurrentTableInstanceId);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => Importer().PreviewAsync(DocumentId, workbook, CancellationToken.None));
     }
 
     /// <summary>

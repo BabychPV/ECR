@@ -2,6 +2,7 @@
 using System.Globalization;
 using System.Text.Json;
 using Ecr.Application.Errors;
+using Ecr.Application.Localization;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Enums;
 using Ecr.Domain.Services;
@@ -38,6 +39,45 @@ public static class CellValueReader
 {
     /// <summary>Код помилки невідповідності типу (`02-contracts.md` §7).</summary>
     public const string TypeMismatch = "ECR-CELL-0422";
+
+    /// <summary>
+    /// Масштаб сховища числа комірки: <c>doc.CellValue.ValueNumeric decimal(34,16)</c>
+    /// (<c>D-148</c>; <c>NormalizedCellStore.NumericScale</c>,
+    /// <c>CellValueConfiguration</c>, <c>doc.CellValueTvp</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ `U-23`. Знаків після коми, більших за цю межу, сховище не тримає:
+    /// <c>SqlMetaData.Adjust</c> округлює їх на КЛІЄНТІ ще до відправки, тож
+    /// СУБД чесно зберігає вже огризок, а запит закінчується «Saved». Доти
+    /// межу перевіряв лише оголошений <c>ColumnDef.Scale</c> — колонка без
+    /// нього (більшість звітних) приймала <c>931.9250000000000000123</c> і
+    /// мовчки записувала <c>931.9250000000000000</c>.
+    /// </remarks>
+    public const int StorageScale = 16;
+
+    /// <summary>
+    /// Розрядів цілої частини, які тримає сховище: <c>decimal(34,16)</c> — це
+    /// <c>34 − 16 = 18</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ На відміну від зайвих знаків після коми (`U-23`), переповнення цілої
+    /// частини не губиться мовчки: SqlClient віддає його СУБД, і та падає з
+    /// <c>Arithmetic overflow</c> — тобто HTTP 500 замість пояснення. Межа
+    /// перевіряється тут, до запису, тим самим механізмом відмови.
+    /// </remarks>
+    public const int StorageIntegerDigits = 18;
+
+    /// <summary>Найменше число, ціла частина якого вже не вміщується в сховище (10¹⁸).</summary>
+    private const decimal IntegerLimit = 1_000_000_000_000_000_000m;
+
+    /// <summary>Чи вміщується ціла частина числа в сховище (не більше <see cref="StorageIntegerDigits"/> розрядів).</summary>
+    /// <remarks>
+    /// Публічна, бо ту саму межу застосовують шапка документа
+    /// (<c>HeaderValueReader</c>) і прев'ю імпорту (<c>ImportDiffBuilder</c>):
+    /// одна межа, а не три копії числа.
+    /// </remarks>
+    /// <param name="number">Число.</param>
+    public static bool IntegerPartFits(decimal number) => Math.Abs(number) < IntegerLimit;
 
     /// <summary>
     /// Розгортає значення до примітиву CLR.
@@ -77,11 +117,17 @@ public static class CellValueReader
     /// </summary>
     /// <param name="raw">Значення з запиту.</param>
     /// <param name="column">Опис колонки; його <c>DataType</c> і вирішує.</param>
+    /// <param name="culture">
+    /// Культура користувача для числа, що прийшло ТЕКСТОМ
+    /// (<see cref="NumberCulture.ForLanguage"/>, рішення 2026-09-29);
+    /// <c>null</c> — машинний запис (Invariant, без розрядів): інтеграції,
+    /// повторне читання вже розібраного.
+    /// </param>
     /// <returns>Значення для запису; <c>null</c> — комірку треба стерти (R-B4).</returns>
     /// <exception cref="BusinessRuleException">
     /// Значення не відповідає типу колонки — <c>ECR-CELL-0422</c>.
     /// </exception>
-    public static CellValueData? Read(object? raw, ColumnDef column)
+    public static CellValueData? Read(object? raw, ColumnDef column, CultureInfo? culture = null)
     {
         ArgumentNullException.ThrowIfNull(column);
 
@@ -95,7 +141,7 @@ public static class CellValueReader
         return column.DataType switch
         {
             CellDataType.Int or CellDataType.Decimal or CellDataType.Formula or CellDataType.Calculated
-                => new CellValueData { ValueNumeric = Number(value, column) },
+                => new CellValueData { ValueNumeric = Storable(Number(value, column, culture), column) },
 
             CellDataType.Bool => new CellValueData { ValueBool = Boolean(value, column) },
             CellDataType.Date => new CellValueData { ValueDate = Date(value, column) },
@@ -104,8 +150,18 @@ public static class CellValueReader
             // (R-A4). Код запису в неї не кладеться: його резолвить той, хто
             // будує запит, — імпорт робить це явно, і саме тому там є доступ
             // до довідника, а тут його немає.
-            CellDataType.Lookup => new CellValueData { ValueRegistryEntryId = Identifier(value, column) },
-            CellDataType.Unit => new CellValueData { ValueUnitId = Identifier(value, column) },
+            CellDataType.Lookup => new CellValueData
+            {
+                ValueRegistryEntryId = Identifier(value, column, ExpectedType.Identifier),
+            },
+
+            // ⛔ X-31: власне очікування, а не спільне з `Lookup`. Відмова
+            // казала «очікує ідентифікатор запису довідника» про колонку
+            // одиниць — і людина шукала запис у довіднику, якого тут немає.
+            CellDataType.Unit => new CellValueData
+            {
+                ValueUnitId = Identifier(value, column, ExpectedType.UnitIdentifier),
+            },
 
             _ => new CellValueData { ValueString = Text(value) },
         };
@@ -116,7 +172,7 @@ public static class CellValueReader
     /// ⛔ Нерозпізнане число — <b>відмова</b>, а не нуль і не текст у числовій
     /// колонці. Нуль у звіті читається як вимірювання, якого не робили.
     /// </remarks>
-    private static decimal Number(object value, ColumnDef column) => value switch
+    private static decimal Number(object value, ColumnDef column, CultureInfo? culture) => value switch
     {
         decimal number => number,
         int number => number,
@@ -125,17 +181,109 @@ public static class CellValueReader
         double number => (decimal)number,
         float number => (decimal)number,
         bool flag => flag ? 1m : 0m,
-        string text when decimal.TryParse(text, NumberStyles.Number, CultureInfo.InvariantCulture, out var parsed)
-            => parsed,
-        _ => throw Mismatch(column, value, "число"),
+        // ⛔ `C1`: без культури — `Float`, не `Number`. `AllowThousands` під
+        // Invariant викидав кожну кому, і «12,5» через PATCH лягало як 125.
+        // Машинний запис (інтеграція) коми не має, тож кома там — відмова.
+        string text when culture is null
+            => decimal.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed)
+                ? parsed
+                : throw Mismatch(column, value, ExpectedType.Number),
+        // ✎ 2026-09-29, рішення людини: текст людини читається за культурою
+        // її мови (en-US, ru-RU, kk-KZ); канонічний рядок клієнта (`1234.5`)
+        // читається однаково в будь-якій. Неоднозначне — відмова з обома
+        // прочитаннями, а не вгадування.
+        string text => CultureNumberReader.Read(text, culture) switch
+        {
+            { Kind: NumberTextKind.Number } reading => reading.Value,
+            { Kind: NumberTextKind.Ambiguous } reading => throw Ambiguous(column, value, reading),
+            _ => throw Mismatch(column, value, ExpectedType.Number),
+        },
+        _ => throw Mismatch(column, value, ExpectedType.Number),
     };
+
+    /// <summary>
+    /// Відмова для неоднозначного числа: той самий код, що й «очікує число», але
+    /// ВЛАСНИЙ ключ <see cref="AmbiguousMessageKey"/> — число є, лише двозначне, і
+    /// «не число» вводило б людину в оману. Причина, текст і обидва прочитання —
+    /// у подробицях (підстановки тексту каталогу).
+    /// </summary>
+    private static BusinessRuleException Ambiguous(ColumnDef column, object value, NumberTextReading reading)
+        => new(
+            TypeMismatch,
+            $"Колонка «{column.Code}»: «{value}» читається як {reading.AsGroup} або {reading.AsDecimal} "
+            + "(роздільник — розряди чи десятковий).",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = AmbiguousMessageKey,
+                ["columnCode"] = column.Code,
+                ["expected"] = ExpectedType.Number.Code,
+                ["actualKind"] = value.GetType().Name,
+                ["value"] = value as string,
+                ["reason"] = AmbiguousSeparator,
+                ["asGroup"] = reading.AsGroup,
+                ["asDecimal"] = reading.AsDecimal,
+            });
+
+    /// <summary>Причина відмови в <c>Details["reason"]</c>: роздільник читається двояко.</summary>
+    public const string AmbiguousSeparator = "ambiguousSeparator";
+
+    /// <summary>Ключ каталогу неоднозначного числа в комірці (код — <see cref="TypeMismatch"/>).</summary>
+    public const string AmbiguousMessageKey = "err.ECR-CELL-0422.ambiguousSeparator";
+
+    /// <summary>
+    /// Число, яке сховище збереже БЕЗ втрати; інакше — відмова (`U-23`).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Відмова, а не округлення: це вже прийняте правило продукту
+    /// (<c>ФВ-9.16c</c>, <c>D-116</c>, <c>features/grid/rounding.ts</c>) —
+    /// «ручне введення і API зайвого знака не отримують, сервер відхиляє»;
+    /// округлює лише ВСТАВКА, і робить це клієнт — видимо, з позначкою й
+    /// лічильником. Округлити тут означало б тихо записати інше число, ніж
+    /// бачить користувач: сітка після збереження показує ВЛАСНЕ введення
+    /// оператора (<c>sliceApply.ts</c>), а не перечитане зі сховища.
+    ///
+    /// ⚠ Межа — масштаб СХОВИЩА, а не оголошений <c>ColumnDef.Scale</c>.
+    /// Оголошений масштаб і далі перевіряє <c>ColumnDef.ValidateValue</c> (п. 7),
+    /// тут він не дублюється; але він може бути й більшим за 16 — і тоді
+    /// саме ця перевірка єдина стоїть між введенням і мовчазним огризком.
+    ///
+    /// ⚠ Нулі в хвості не рахуються: <c>1.50000000000000000000</c> —
+    /// те саме число, і сховище збереже його без втрати.
+    ///
+    /// ⚠ Імпорт із Excel сюди з двійковим хвостом не доходить: його
+    /// нормалізує <c>ImportDiffBuilder.Read</c> ДО прев'ю, бо
+    /// <c>0.1 + 0.2</c> в аркуші — це <c>0.30000000000000004</c>, і відхиляти
+    /// такі числа означало б зробити непридатним головний шлях введення.
+    /// </remarks>
+    private static decimal Storable(decimal number, ColumnDef column)
+        => !IntegerPartFits(number)
+            ? throw new BusinessRuleException(
+                TypeMismatch,
+                $"Колонка «{column.Code}» зберігає не більше {StorageIntegerDigits} розрядів до коми.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CELL-0422.tooManyIntegerDigits",
+                    ["columnCode"] = column.Code,
+                    ["maxIntegerDigits"] = StorageIntegerDigits.ToString(CultureInfo.InvariantCulture),
+                })
+            : decimal.Round(number, StorageScale, MidpointRounding.AwayFromZero) == number
+            ? number
+            : throw new BusinessRuleException(
+                TypeMismatch,
+                $"Колонка «{column.Code}» зберігає не більше {StorageScale} знаків після коми.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CELL-0422.tooManyDecimals",
+                    ["columnCode"] = column.Code,
+                    ["maxScale"] = StorageScale.ToString(CultureInfo.InvariantCulture),
+                });
 
     private static bool Boolean(object value, ColumnDef column) => value switch
     {
         bool flag => flag,
         decimal number => number != 0m,
         string text when bool.TryParse(text, out var parsed) => parsed,
-        _ => throw Mismatch(column, value, "булеве значення"),
+        _ => throw Mismatch(column, value, ExpectedType.Boolean),
     };
 
     /// <summary>Дата; через JSON вона завжди приходить рядком.</summary>
@@ -151,11 +299,11 @@ public static class CellValueReader
         DateTime date => date,
         DateTimeOffset offset => offset.UtcDateTime,
         string text when CellDateParser.TryParse(text, out var parsed) => parsed,
-        _ => throw Mismatch(column, value, "дата"),
+        _ => throw Mismatch(column, value, ExpectedType.Date),
     };
 
     /// <summary>Ідентифікатор запису довідника або одиниці.</summary>
-    private static int Identifier(object value, ColumnDef column) => value switch
+    private static int Identifier(object value, ColumnDef column, ExpectedType expected) => value switch
     {
         int identifier => identifier,
         long identifier when identifier is >= int.MinValue and <= int.MaxValue => (int)identifier,
@@ -164,7 +312,7 @@ public static class CellValueReader
             => (int)identifier,
         string text when int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed)
             => parsed,
-        _ => throw Mismatch(column, value, "ідентифікатор"),
+        _ => throw Mismatch(column, value, expected),
     };
 
     private static string Text(object value) => value switch
@@ -177,21 +325,64 @@ public static class CellValueReader
     };
 
     /// <summary>
+    /// Очікуваний тип значення: ключ каталогу + запасне українське слово.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Очікуваний тип — частина КЛЮЧА, а не підстановка в нього. Резолвер
+    /// (<c>UiStringResolver.Format</c>) підставляє рядки як є і другого рівня
+    /// розв'язання ключів не має: передати <c>{expected}</c> значенням
+    /// означало б або лишити в англійському реченні українське «число», або
+    /// завести поруч другий механізм локалізації. Чотири суфіксовані ключі
+    /// дають ще й граматично правильне речення в кожній мові, чого підстановка
+    /// одного слова не дає в принципі.
+    ///
+    /// ⚠ <see cref="Code"/> їде клієнтові полем <c>expected</c> у
+    /// <c>problem+json</c> (<c>ExceptionHandlingMiddleware</c> копіює
+    /// <c>Details</c> у розширення), тому це стале КОДОВЕ слово — як
+    /// <c>{status}</c> і <c>{reason}</c> у сусідніх шаблонах сіду, — а не
+    /// текст для показу. Раніше там лежало українське «число».
+    /// </remarks>
+    private sealed record ExpectedType(string Code, string MessageKey, string Fallback)
+    {
+        public static readonly ExpectedType Number =
+            new("Number", "err.ECR-CELL-0422.expectsNumber", "число");
+
+        public static readonly ExpectedType Boolean =
+            new("Boolean", "err.ECR-CELL-0422.expectsBoolean", "булеве значення");
+
+        public static readonly ExpectedType Date =
+            new("Date", "err.ECR-CELL-0422.expectsDate", "дата");
+
+        public static readonly ExpectedType Identifier =
+            new("Identifier", "err.ECR-CELL-0422.expectsIdentifier", "ідентифікатор");
+
+        public static readonly ExpectedType UnitIdentifier =
+            new("UnitIdentifier", "err.ECR-CELL-0422.expectsUnitIdentifier", "ідентифікатор одиниці");
+    }
+
+    /// <summary>
     /// Відмова з назвою колонки і тим, що саме очікувалося.
     /// </summary>
     /// <remarks>
     /// ⚠ У повідомленні є <b>код колонки й очікуваний тип</b>, але немає
     /// самого значення: воно може бути персональними даними, а текст помилки
     /// іде і в лог, і клієнту (ФВ-6.11).
+    ///
+    /// ⛔ <c>messageKey</c> (`U-02`). Це найчастіша інтерактивна відмова
+    /// продукту — її бачить кожен, хто набрав не той тип у комірку, — і доти
+    /// вона їхала на екран готовим українським реченням під англійським
+    /// заголовком. Речення лишається запасним: резолвер повертається до нього,
+    /// коли ключа в каталозі немає.
     /// </remarks>
-    private static BusinessRuleException Mismatch(ColumnDef column, object value, string expected)
+    private static BusinessRuleException Mismatch(ColumnDef column, object value, ExpectedType expected)
         => new(
             TypeMismatch,
-            $"Колонка «{column.Code}» очікує {expected}.",
+            $"Колонка «{column.Code}» очікує {expected.Fallback}.",
             new Dictionary<string, object?>
             {
+                ["messageKey"] = expected.MessageKey,
                 ["columnCode"] = column.Code,
-                ["expected"] = expected,
+                ["expected"] = expected.Code,
                 ["actualKind"] = value.GetType().Name,
             });
 }

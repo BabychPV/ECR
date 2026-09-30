@@ -1,5 +1,7 @@
 // src/Ecr.Application/Calculations/MethodologyReferenceResolver.cs
 using Ecr.Application.Ports;
+using Ecr.Domain.Entities.Calculations;
+using Ecr.Domain.Enums;
 
 namespace Ecr.Application.Calculations;
 
@@ -108,3 +110,259 @@ public sealed record MethodologyReference(
     int? FormulaId,
     int? MethodologyId,
     IReadOnlyList<string> Candidates);
+
+/// <summary>
+/// Транзитивне замикання бібліотечних формул версії (HSE301 L): які формули
+/// імпортованих методологій справді потрібні її виразам і куди веде кожне ім'я.
+/// </summary>
+/// <remarks>
+/// ⛔ Одне визначення на прогін і публікацію. Модуль рахує саме те, що тут зібрано, а
+/// публікація перевіряє саме це (режими, області, аргументи); два окремі обходи
+/// розійшлися б на першому ж ланцюгу «бібліотека → бібліотека».
+/// <para>
+/// ⚠ Правило резолвінгу — те саме, що в <see cref="MethodologyReferenceResolver"/>:
+/// спершу формула своєї версії (своя перекриває бібліотечну), потім рівно один імпорт.
+/// Ім'я, знайдене у двох імпортах або ніде, у замикання не йде — прогін дасть
+/// <c>#REF</c>, а публікація таку версію не пропускає (<c>ambiguousReference</c>,
+/// <c>formulaNotFound</c>).
+/// </para>
+/// <para>
+/// ⛔ Цикл ловиться ТУТ, під час завантаження: імпорт, що веде в методологію, яка вже є
+/// на шляху від викликача, стає посиланням <see cref="LibraryLink.IsCycle"/>, і далі
+/// обхід не йде. Бібліотеку можуть перевидати з посиланням назад уже ПІСЛЯ публікації
+/// викликача — без цієї межі завантаження ходило б по колу.
+/// </para>
+/// <para>
+/// ⚠ За імпортами бібліотеки обхід іде лише тоді, коли ПОТРІБНА формула посилається за
+/// її межу: версія, що нічого не імпортує, не коштує жодного звернення до сховища.
+/// </para>
+/// </remarks>
+public static class MethodologyLibraryClosure
+{
+    /// <summary>Будує замикання для формул версії на бізнес-дату.</summary>
+    /// <param name="store">Сховище методологій.</param>
+    /// <param name="engine">Рушій — розбір і обхід залежностей виразу.</param>
+    /// <param name="methodologyId">Методологія викликача — корінь шляху для циклу.</param>
+    /// <param name="methodologyVersionId">Версія викликача — чиї імпорти читати.</param>
+    /// <param name="formulas">Формули версії викликача.</param>
+    /// <param name="onDate">Бізнес-дата: версія бібліотеки — чинна на неї.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Замикання; <c>null</c> — жодне ім'я за межу версії не веде.</returns>
+    public static async Task<CalculationLibraries?> LoadAsync(
+        IMethodologyStore store,
+        IFormulaEngine engine,
+        int methodologyId,
+        int methodologyVersionId,
+        IReadOnlyList<MethodologyFormula> formulas,
+        DateOnly onDate,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(store);
+        ArgumentNullException.ThrowIfNull(engine);
+        ArgumentNullException.ThrowIfNull(formulas);
+
+        var root = new Scope(methodologyId, string.Empty, methodologyVersionId, null, null, formulas, [], [methodologyId]);
+        var scopes = new Dictionary<int, Scope>();
+        var found = new List<Scope>();
+        var pending = new Queue<(Scope Scope, MethodologyFormula Formula)>();
+
+        foreach (var formula in formulas)
+        {
+            pending.Enqueue((root, formula));
+        }
+
+        while (pending.TryDequeue(out var item))
+        {
+            var (scope, formula) = item;
+
+            foreach (var name in References(engine, formula.Expression))
+            {
+                if (scope.FormulasByCode.ContainsKey(name))
+                {
+                    // Своя формула кореня рахується модулем як завжди; своя формула
+                    // бібліотеки — частина замикання.
+                    if (!ReferenceEquals(scope, root) && scope.Need(name) is { } local)
+                    {
+                        pending.Enqueue((scope, local));
+                    }
+
+                    continue;
+                }
+
+                if (scope.Links.ContainsKey(name)
+                    || await LinkAsync(store, scope, name, onDate, scopes, found, ct).ConfigureAwait(false) is not { } link)
+                {
+                    continue;
+                }
+
+                scope.Links[name] = link;
+
+                if (!link.IsCycle && scopes[link.MethodologyVersionId].Need(name) is { } imported)
+                {
+                    pending.Enqueue((scopes[link.MethodologyVersionId], imported));
+                }
+            }
+        }
+
+        if (root.Links.Count == 0)
+        {
+            return null;
+        }
+
+        return new CalculationLibraries(
+            root.Links,
+            [.. found.Select(s => new CalculationLibrary(
+                s.MethodologyId,
+                s.Code,
+                s.VersionId,
+                s.NumericMode ?? NumericMode.Strict,
+                s.CalendarMode ?? CalendarMode.Actual,
+                [.. s.Needed.OrderBy(f => f.EvaluationOrder).ThenBy(f => f.Id)],
+                s.Constants
+                    .GroupBy(c => c.Code, StringComparer.OrdinalIgnoreCase)
+                    .ToDictionary(
+                        g => g.Key,
+                        g => (IReadOnlyList<MethodologyConstant>)[.. g.OrderBy(c => c.Id)],
+                        StringComparer.OrdinalIgnoreCase),
+                s.Links))]);
+    }
+
+    /// <summary>Куди веде ім'я, якого немає серед формул області; <c>null</c> — нікуди або в кілька.</summary>
+    private static async Task<LibraryLink?> LinkAsync(
+        IMethodologyStore store,
+        Scope scope,
+        string name,
+        DateOnly onDate,
+        Dictionary<int, Scope> scopes,
+        List<Scope> found,
+        CancellationToken ct)
+    {
+        scope.Imports ??= await store
+            .GetLibraryContentsAsync(scope.VersionId, onDate, ct)
+            .ConfigureAwait(false);
+
+        var matches = scope.Imports
+            .Where(c => c.Library.MethodologyVersionId is not null
+                        && c.Formulas.Any(f => string.Equals(f.Code, name, StringComparison.OrdinalIgnoreCase)))
+            .ToList();
+
+        if (matches.Count != 1)
+        {
+            return null;
+        }
+
+        var content = matches[0];
+        var library = content.Library;
+        var versionId = library.MethodologyVersionId!.Value;
+
+        if (scope.Path.Contains(library.MethodologyId))
+        {
+            return new LibraryLink(library.MethodologyId, library.MethodologyCode, versionId, IsCycle: true);
+        }
+
+        if (!scopes.ContainsKey(versionId))
+        {
+            var next = new Scope(
+                library.MethodologyId,
+                library.MethodologyCode,
+                versionId,
+                content.NumericMode,
+                content.CalendarMode,
+                content.Formulas,
+                content.Constants,
+                [.. scope.Path, library.MethodologyId]);
+
+            scopes[versionId] = next;
+            found.Add(next);
+        }
+
+        return new LibraryLink(library.MethodologyId, library.MethodologyCode, versionId, IsCycle: false);
+    }
+
+    /// <summary>Імена <c>!Name</c> виразу — обходом рушія (<c>H-3</c>), як у публікації.</summary>
+    private static List<string> References(IFormulaEngine engine, string expression)
+    {
+        var parsed = engine.Parse(expression, ExpressionDialect.Methodology);
+        if (parsed.Expression is null)
+        {
+            return [];
+        }
+
+        return engine
+            .ExtractDependencies(
+                parsed.Expression,
+                snapshot: null,
+                new DependencyContext(CurrentTableDefId: 0, CurrentRowKey: null, CurrentColumnDefId: null))
+            .Dependencies
+            .Select(d => d.FormulaCode)
+            .OfType<string>()
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    /// <summary>Область імен: версія викликача (корінь) або версія бібліотеки.</summary>
+    private sealed class Scope
+    {
+        public Scope(
+            int methodologyId,
+            string code,
+            int versionId,
+            NumericMode? numericMode,
+            CalendarMode? calendarMode,
+            IReadOnlyList<MethodologyFormula> formulas,
+            IReadOnlyList<MethodologyConstant> constants,
+            HashSet<int> path)
+        {
+            MethodologyId = methodologyId;
+            Code = code;
+            VersionId = versionId;
+            NumericMode = numericMode;
+            CalendarMode = calendarMode;
+            Constants = constants;
+            Path = path;
+
+            foreach (var formula in formulas)
+            {
+                FormulasByCode.TryAdd(formula.Code, formula);
+            }
+        }
+
+        public int MethodologyId { get; }
+
+        public string Code { get; }
+
+        public int VersionId { get; }
+
+        public NumericMode? NumericMode { get; }
+
+        public CalendarMode? CalendarMode { get; }
+
+        public IReadOnlyList<MethodologyConstant> Constants { get; }
+
+        /// <summary>Методології від викликача до цієї області включно.</summary>
+        public HashSet<int> Path { get; }
+
+        public Dictionary<string, MethodologyFormula> FormulasByCode { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+        public Dictionary<string, LibraryLink> Links { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+        public List<MethodologyFormula> Needed { get; } = [];
+
+        /// <summary>Імпорти цієї версії — читаються лише тоді, коли знадобилися.</summary>
+        public IReadOnlyList<MethodologyLibraryContent>? Imports { get; set; }
+
+        private readonly HashSet<string> _needed = new(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>Позначає формулу потрібною; <c>null</c> — вже була або такої немає.</summary>
+        public MethodologyFormula? Need(string code)
+        {
+            if (!FormulasByCode.TryGetValue(code, out var formula) || !_needed.Add(formula.Code))
+            {
+                return null;
+            }
+
+            Needed.Add(formula);
+            return formula;
+        }
+    }
+}

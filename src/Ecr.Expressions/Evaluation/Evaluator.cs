@@ -273,6 +273,7 @@ public sealed class Evaluator(
                 FunctionNode function => Function(function, context, dialect, budget),
                 SymbolReferenceNode symbol => Symbol(symbol, context),
                 PeriodPropertyNode period => Period(period, context),
+                RowFieldNode row => RegistryForms.RowField(row, context),
                 CellReferenceNode reference => Evaluate(reference, context, dialect, budget),
                 _ => ExpressionValue.Error(ExpressionErrors.BadValue),
             };
@@ -312,15 +313,28 @@ public sealed class Evaluator(
             return ExpressionValue.Null;
         }
 
+        // ⛔ Аудит A4: заперечення НЕ звужує. Доти тут стояло
+        // `operand.AsNumber()` — `(decimal)double` із округленням до 15
+        // значущих цифр, — і `Legacy`-значення посеред формули ставало
+        // `decimal`: `-(1/3)*3` давало −0.999999999999999 замість −1 (NCalc
+        // 1.3.8 рахує `0 - x` у типі операнда), а `-(1/0)` — `#VALUE` замість
+        // −∞. Заперечення точне в обох поданнях, тож подання зберігається.
         switch (node.Operator)
         {
             case UnaryOperator.Negate:
-                return operand.AsNumber() is { } negate
-                    ? ExpressionValue.Number(-negate)
-                    : ExpressionValue.Error(ExpressionErrors.BadValue);
+                if (operand.Type != ExpressionValueType.Number)
+                {
+                    return ExpressionValue.Error(ExpressionErrors.BadValue);
+                }
 
+                return operand.Value is double d
+                    ? ExpressionValue.LegacyNumber(-d)
+                    : ExpressionValue.Number(-(decimal)operand.Value!);
+
+            // ⚠ Перевірка типу, а не `AsNumber() is not null`: той дає `null` і
+            // для `±∞`/`NaN`, і для |x| > 7.9e28, тобто відкидав числа `Legacy`.
             case UnaryOperator.Plus:
-                return operand.AsNumber() is not null
+                return operand.Type == ExpressionValueType.Number
                     ? operand
                     : ExpressionValue.Error(ExpressionErrors.BadValue);
 
@@ -565,8 +579,22 @@ public sealed class Evaluator(
     /// рядка. Формула, що публікується без помилок і ніколи не дає числа, —
     /// найгірший із двох варіантів; узгодження в бік «працює як у SQL і Excel»
     /// дешевше за заборону, яка зламала б уже опубліковані методології.
+    ///
+    /// ⛔ Аудит A6: числа впорядковує АРИФМЕТИКА режиму
+    /// (<see cref="IEvaluationArithmetic.CompareNumbers"/>) — та сама, що рахує
+    /// рівність (<see cref="AreEqual"/>), у БУДЬ-ЯКОМУ діалекті. Доти
+    /// впорядкування завжди йшло в <c>double</c>, а рівність — у <c>decimal</c>,
+    /// і для <c>1.0000000000000001</c> проти <c>1</c> виходило <c>&gt;=</c>,
+    /// <c>&lt;=</c> і <c>&lt;&gt;</c> при <c>NOT &gt;</c>. <c>Strict</c>, шаблони
+    /// і звіти — <c>decimal</c>; <c>Legacy</c> — <c>double</c>, там це і є NCalc.
+    ///
+    /// ⚠ Шаблони і звіти переведено в <c>decimal</c> рішенням координатора:
+    /// сервер — джерело істини. Клієнтська підказка (<c>evaluate.ts</c>, JS
+    /// <c>number</c>) на літералах із 16+ значущими цифрами — наближення; такі
+    /// вирази — явні винятки <c>clientApproximation</c> у
+    /// <c>expression-equivalence.json</c>.
     /// </remarks>
-    private static ExpressionValue Compare(ExpressionValue left, ExpressionValue right, BinaryOperator op)
+    private ExpressionValue Compare(ExpressionValue left, ExpressionValue right, BinaryOperator op)
     {
         int order;
         if (left.AsDouble() is { } a && right.AsDouble() is { } b)
@@ -579,7 +607,7 @@ public sealed class Evaluator(
                 return ExpressionValue.Error(ExpressionErrors.BadValue);
             }
 
-            order = a.CompareTo(b);
+            order = arithmetic.CompareNumbers(left, right)!.Value;
         }
         else if (left.Type == ExpressionValueType.Boolean && right.Type == ExpressionValueType.Boolean)
         {
@@ -619,16 +647,22 @@ public sealed class Evaluator(
         return ExpressionValue.Boolean(op == BinaryOperator.And ? a && b : a || b);
     }
 
-    private static bool AreEqual(ExpressionValue left, ExpressionValue right)
+    /// <remarks>
+    /// ⛔ Числа порівнює АРИФМЕТИКА режиму, а не <c>AsNumber()</c> (аудит A5):
+    /// звуження <c>double</c> до <c>decimal</c> округлювало до 15 знаків, і в
+    /// <c>Legacy</c> <c>0.1 + 0.2 = 0.3</c> давало TRUE, а NCalc 1.3.8 — FALSE.
+    /// У <c>Strict</c> і діалекті шаблонів це й далі <c>decimal</c>.
+    /// </remarks>
+    private bool AreEqual(ExpressionValue left, ExpressionValue right)
     {
         if (left.IsNull || right.IsNull)
         {
             return left.IsNull && right.IsNull;
         }
 
-        if (left.AsNumber() is { } a && right.AsNumber() is { } b)
+        if (arithmetic.CompareNumbers(left, right) is { } order)
         {
-            return a == b;
+            return order == 0;
         }
 
         if (left.Type != right.Type)
@@ -665,11 +699,38 @@ public sealed class Evaluator(
             : EvaluateScalar(node.WhenFalse, context, dialect, budget);
     }
 
+    /// <remarks>
+    /// ⛔ Функції довідників (<see cref="RegistryForms"/>) перехоплюються ДО
+    /// обох каталогів і в обох діалектах: <c>REGONE</c> обчислює умову над
+    /// кожним рядком довідника ліниво, у власній області <c>ROW</c>, тож
+    /// обчислити аргументи заздалегідь, як для звичайної функції, не можна.
+    /// </remarks>
     private ExpressionValue Function(
         FunctionNode node, IEvaluationContext context, ExpressionDialect dialect, EvaluationBudget budget)
-        => dialect == ExpressionDialect.Methodology
+    {
+        if (RegistryForms.Handles(node.Name, dialect))
+        {
+            return RegistryCall(node, context, dialect, budget);
+        }
+
+        return dialect == ExpressionDialect.Methodology
             ? MethodologyCall(node, context, budget)
             : TemplateCall(node, context, dialect, budget);
+    }
+
+    /// <summary>
+    /// Виклик спецформи довідника (FEATURE-REGISTRY-TABLES §5.4).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Підвирази обчислюються через <see cref="EvaluateScalar"/> з ТИМ САМИМ
+    /// бюджетом: кожен спуск проходить крізь сторожа глибини, а кожен рядок
+    /// <c>REGONE</c> — крізь лічильник кроків. Контекст підвиразу може бути
+    /// іншим — областю рядка, яку будує <see cref="RegistryForms"/>.
+    /// </remarks>
+    private ExpressionValue RegistryCall(
+        FunctionNode node, IEvaluationContext context, ExpressionDialect dialect, EvaluationBudget budget)
+        => RegistryForms.Invoke(
+            node, context, budget, (argument, scope) => EvaluateScalar(argument, scope, dialect, budget));
 
     /// <remarks>
     /// ⚠ Діалект ПЕРЕДАЄТЬСЯ далі, а не підміняється на <c>Template</c>: цим

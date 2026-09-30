@@ -34,7 +34,14 @@ public sealed class GetUiStringsHandler(IUiStringCatalog catalog, ICurrentUser c
         {
             throw new AccessDeniedException(
                 "ECR-AUTH-0401",
-                "Приватна область каталогу доступна лише після входу.");
+                "Приватна область каталогу доступна лише після входу.",
+                new Dictionary<string, object?>
+                {
+                    // Наявний ключ: той самий факт «потрібно увійти», що вже
+                    // несе решта читань, захищених входом (RoleAndUserHandlers,
+                    // ListProjectsHandler, 2026-09-22/23).
+                    ["messageKey"] = "err.ECR-AUTH-0401.signInRequired",
+                });
         }
 
         // Кеш за ключем {lang}:{scope}:{revision} і сам fallback — у сховищі:

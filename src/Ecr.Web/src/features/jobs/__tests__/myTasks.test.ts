@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { JobSummary } from '@/api/types';
-import { ActiveJobStates, activeJobCount, isActiveJob } from '@/features/jobs/myTasks';
+import {
+  ActiveJobStates,
+  activeJobCount,
+  isActiveJob,
+  isShownInMyTasks,
+  myTaskMessage,
+} from '@/features/jobs/myTasks';
 
 /**
  * Лічильник позначки «My tasks» (`UI-07`, `UX-09`).
@@ -50,5 +56,44 @@ describe('activeJobCount', () => {
 
   it('перелік активних станів — рівно два, як у CancelJobHandler.Active', () => {
     expect([...ActiveJobStates].sort()).toEqual(['Queued', 'Running']);
+  });
+});
+
+describe('F-27: що і як показує «My tasks»', () => {
+  const base = {
+    jobId: 'x',
+    percent: 100,
+    startedAt: '2026-09-22T10:00:00Z',
+    updatedAt: '2026-09-22T10:00:00Z',
+  };
+
+  it('успішний перерахунок формул не показується, провалений і активний — так', () => {
+    const recalc = (state: string): JobSummary =>
+      ({ ...base, jobCode: 'Ecr.Application.Ports.IFormulaRecalculationJob', state }) as JobSummary;
+
+    // ⛔ Мутація: `isShownInMyTasks` повертає `true` завжди — перший вираз червоний.
+    expect(isShownInMyTasks(recalc('Succeeded'))).toBe(false);
+    expect(isShownInMyTasks(recalc('Failed'))).toBe(true);
+    expect(isShownInMyTasks(recalc('Running'))).toBe(true);
+    expect(isShownInMyTasks(job('Succeeded'))).toBe(true);
+  });
+
+  it('ідентифікатор файлу експорту замінено людським текстом, решта повідомлень — як є', () => {
+    const exported = {
+      ...job('Succeeded'),
+      message: '3f1c0b0e9a2d4c6e8b7a5f4d3c2b1a09',
+    } as JobSummary;
+
+    // ⛔ Мутація: повертати `job.message` як є — тут hex.
+    expect(myTaskMessage(exported)).toBe('⟦jobs.exportReady⟧');
+    expect(myTaskMessage({ ...exported, message: 'Exporting sheet 2 of 5' } as JobSummary)).toBe(
+      'Exporting sheet 2 of 5',
+    );
+    expect(myTaskMessage({ ...exported, message: null } as JobSummary)).toBeNull();
+
+    // Той самий hex у НЕ-експорті — не наш випадок, лишається як є.
+    expect(
+      myTaskMessage({ ...exported, jobCode: 'Ecr.Application.Ports.IExcelImportJob' } as JobSummary),
+    ).toBe('3f1c0b0e9a2d4c6e8b7a5f4d3c2b1a09');
   });
 });

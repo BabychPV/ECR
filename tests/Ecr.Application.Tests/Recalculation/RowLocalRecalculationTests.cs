@@ -199,8 +199,9 @@ public sealed class RowLocalRecalculationTests
     /// <summary>Комірки, які служба віддала на запис (по всіх екземплярах).</summary>
     private IReadOnlyList<CellRecord> Applied()
         => [.. _cells.ReceivedCalls()
-            .Where(c => c.GetMethodInfo().Name == nameof(ICellStore.ApplyAsync))
-            .SelectMany(c => ((CellChangeSet)c.GetArguments()[0]!).Upserts)];
+            .Where(c => c.GetMethodInfo().Name == nameof(ICellStore.ApplyBatchAsync))
+            .SelectMany(c => (IReadOnlyCollection<CellChangeSet>)c.GetArguments()[0]!)
+            .SelectMany(set => set.Upserts)];
 
     private RecalculationService Service()
     {
@@ -219,7 +220,7 @@ public sealed class RowLocalRecalculationTests
             _headers,
             _audit,
             new TestClock(new DateTime(2026, 2, 1, 0, 0, 0, DateTimeKind.Utc)),
-            _uow);
+            _uow, Substitute.For<Ecr.Application.Ports.ISheetEditGate>());
     }
 
     /// <summary>
@@ -344,7 +345,7 @@ public sealed class RowLocalRecalculationTests
                 new CellValueData { ValueNumeric = 100m }));
         }
 
-        _cells.ReadSlicesAsync(Arg.Any<IReadOnlyList<long>>(), Arg.Any<CancellationToken>())
+        _cells.ReadSlicesAsync(Arg.Any<IReadOnlyList<long>>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
             .Returns(new Dictionary<long, IReadOnlyList<CellRecord>>
             {
                 [MainInstance] = slice,

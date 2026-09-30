@@ -45,8 +45,29 @@ public sealed class FormulaTranslator
     /// одна залежність, яка вміє розходитися з тією, за якою будували книгу.
     /// </remarks>
     public string ToExcel(string expression, IReadOnlyDictionary<(string, string, string), string> coordinates)
+        => ToExcel(expression, coordinates, new FormulaContext(null, null));
+
+    /// <summary>Наш вираз → формула Excel для КОНКРЕТНОЇ комірки книги.</summary>
+    /// <param name="expression">Вираз у нашій граматиці.</param>
+    /// <param name="coordinates">Мапа <c>(TableCode, RowKey, ColumnCode)</c> → адреса комірки Excel.</param>
+    /// <param name="context">
+    /// Таблиця й рядок комірки, куди лягає формула: ними розв'язуються
+    /// посилання без таблиці (<c>[A]</c> — «колонка A моєї таблиці») і
+    /// поточний рядок (<c>[A]</c> у формулі колонки — «A цього ж рядка»).
+    /// </param>
+    /// <remarks>
+    /// ⛔ `V-10`. Без контексту обидва види посилань — а це саме те, як пишуться
+    /// формули шаблону (<c>[CDEC] * 2</c>, <c>[R1].[CDEC] + [R2].[CDEC]</c>) —
+    /// ставали <c>#REF!</c>, і книга показувала помилку там, де в системі
+    /// стоїть число.
+    /// </remarks>
+    public string ToExcel(
+        string expression,
+        IReadOnlyDictionary<(string, string, string), string> coordinates,
+        FormulaContext context)
     {
         ArgumentNullException.ThrowIfNull(coordinates);
+        ArgumentNullException.ThrowIfNull(context);
 
         if (string.IsNullOrWhiteSpace(expression))
         {
@@ -64,7 +85,7 @@ public sealed class FormulaTranslator
         }
 
         var builder = new System.Text.StringBuilder();
-        Write(parsed.Expression.Root, coordinates, builder);
+        Write(parsed.Expression.Root, coordinates, context, builder);
 
         return builder.Length == 0 ? string.Empty : "=" + builder;
     }
@@ -176,12 +197,21 @@ public sealed class FormulaTranslator
     private static void Write(
         AstNode node,
         IReadOnlyDictionary<(string, string, string), string> coordinates,
+        FormulaContext context,
         System.Text.StringBuilder builder)
     {
         switch (node)
         {
             case LiteralNode literal:
                 builder.Append(Literal(literal));
+                break;
+
+            case UnaryNode { Operator: UnaryOperator.Not } negation:
+                // ⚠ Заперечення в Excel — функція NOT, а не `!`: знак оклику
+                // там відділяє ім'я аркуша, і формула з ним не відкривається.
+                builder.Append("NOT(");
+                Write(negation.Operand, coordinates, context, builder);
+                builder.Append(')');
                 break;
 
             case UnaryNode unary:
@@ -191,7 +221,7 @@ public sealed class FormulaTranslator
                     UnaryOperator.Not => '!',
                     _ => '+',
                 });
-                Write(unary.Operand, coordinates, builder);
+                Write(unary.Operand, coordinates, context, builder);
                 break;
 
             case BinaryNode { Operator: BinaryOperator.Modulo } modulo:
@@ -199,36 +229,36 @@ public sealed class FormulaTranslator
                 // відповідника немає, і '%' в Excel означає відсоток: вираз
                 // a % b порахував би зовсім інше й не впав би.
                 builder.Append("MOD(");
-                Write(modulo.Left, coordinates, builder);
+                Write(modulo.Left, coordinates, context, builder);
                 builder.Append(',');
-                Write(modulo.Right, coordinates, builder);
+                Write(modulo.Right, coordinates, context, builder);
                 builder.Append(')');
                 break;
 
             case BinaryNode binary:
                 builder.Append('(');
-                Write(binary.Left, coordinates, builder);
+                Write(binary.Left, coordinates, context, builder);
                 builder.Append(Operator(binary.Operator));
-                Write(binary.Right, coordinates, builder);
+                Write(binary.Right, coordinates, context, builder);
                 builder.Append(')');
                 break;
 
             case ConditionalNode conditional:
                 builder.Append("IF(");
-                Write(conditional.Condition, coordinates, builder);
+                Write(conditional.Condition, coordinates, context, builder);
                 builder.Append(',');
-                Write(conditional.WhenTrue, coordinates, builder);
+                Write(conditional.WhenTrue, coordinates, context, builder);
                 builder.Append(',');
-                Write(conditional.WhenFalse, coordinates, builder);
+                Write(conditional.WhenFalse, coordinates, context, builder);
                 builder.Append(')');
                 break;
 
             case FunctionNode function:
-                WriteFunction(function, coordinates, builder);
+                WriteFunction(function, coordinates, context, builder);
                 break;
 
             case CellReferenceNode reference:
-                builder.Append(Reference(reference, coordinates));
+                builder.Append(Reference(reference, coordinates, context));
                 break;
 
             default:
@@ -243,6 +273,7 @@ public sealed class FormulaTranslator
     private static void WriteFunction(
         FunctionNode function,
         IReadOnlyDictionary<(string, string, string), string> coordinates,
+        FormulaContext context,
         System.Text.StringBuilder builder)
     {
         // ⚠ CONVERT перетворюється на саме значення без множника: коефіцієнт
@@ -252,7 +283,7 @@ public sealed class FormulaTranslator
         if (string.Equals(function.Name, "CONVERT", StringComparison.OrdinalIgnoreCase)
             && function.Arguments.Count > 0)
         {
-            Write(function.Arguments[0], coordinates, builder);
+            Write(function.Arguments[0], coordinates, context, builder);
             return;
         }
 
@@ -271,7 +302,7 @@ public sealed class FormulaTranslator
                 builder.Append(',');
             }
 
-            Write(function.Arguments[i], coordinates, builder);
+            Write(function.Arguments[i], coordinates, context, builder);
         }
 
         builder.Append(')');
@@ -279,13 +310,27 @@ public sealed class FormulaTranslator
 
     /// <summary>Посилання на комірку або діапазон у координатах книги.</summary>
     private static string Reference(
-        CellReferenceNode reference, IReadOnlyDictionary<(string, string, string), string> coordinates)
+        CellReferenceNode reference,
+        IReadOnlyDictionary<(string, string, string), string> coordinates,
+        FormulaContext context)
     {
-        var table = reference.TableCode ?? string.Empty;
+        // ⚠ Посилання на ІНШИЙ період (`PeriodOffset`) у книзі одного періоду
+        // координати не має: попереднього місяця в ній немає.
+        if (reference.PeriodOffset != 0)
+        {
+            return MissingReference;
+        }
+
+        var table = reference.TableCode ?? context.TableCode ?? string.Empty;
         var column = reference.ColumnSelector;
 
         switch (reference.Row)
         {
+            case RowSelector.Current when context.RowKey is { } current:
+                return coordinates.TryGetValue((table, current, column), out var own)
+                    ? own
+                    : MissingReference;
+
             case RowSelector.Single single:
                 return coordinates.TryGetValue((table, single.RowKey, column), out var one)
                     ? one
@@ -340,8 +385,22 @@ public sealed class FormulaTranslator
         _ => "+",
     };
 
+    /// <summary>Чи містить формула посилання, якого книга не має.</summary>
+    /// <remarks>
+    /// ⛔ `V-10`: така формула в книгу НЕ пишеться — комірка лишається зі
+    /// значенням. Excel не має показувати <c>#REF!</c> там, де система тримає
+    /// число, а формула, яка «майже» відтворює правило, гірша за її відсутність.
+    /// </remarks>
+    public static bool IsBroken(string formula)
+        => formula.Contains(MissingReference, StringComparison.Ordinal);
+
     /// <summary>Адреса без знаків абсолютності: <c>$B$7</c> і <c>B7</c> — одна комірка.</summary>
     private static string Normalize(string address)
         => address.Replace("$", string.Empty, StringComparison.Ordinal).ToUpperInvariant();
 }
 #pragma warning restore CA1822
+
+/// <summary>Комірка книги, для якої транслюється формула.</summary>
+/// <param name="TableCode">Таблиця комірки; <c>null</c> — невідома.</param>
+/// <param name="RowKey">Рядок комірки; <c>null</c> — невідомий.</param>
+public sealed record FormulaContext(string? TableCode, string? RowKey);

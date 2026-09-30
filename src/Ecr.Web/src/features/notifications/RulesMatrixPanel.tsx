@@ -1,5 +1,15 @@
-import { useEffect, useState, type JSX } from 'react';
-import { Button, Checkbox, Group, Select, Skeleton, Stack, Table, Text } from '@mantine/core';
+import { useEffect, useRef, useState, type JSX } from 'react';
+import {
+  Button,
+  Checkbox,
+  Group,
+  ScrollArea,
+  Select,
+  Skeleton,
+  Stack,
+  Table,
+  Text,
+} from '@mantine/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   getNotificationRules,
@@ -10,16 +20,20 @@ import {
   type NotificationRule,
   type NotificationRuleMatrix,
 } from '@/features/notifications/api';
+import {
+  cellKey,
+  changedCells,
+  draftOf,
+  type Cell,
+  type Draft,
+  type EventKind,
+  type Severity,
+} from '@/features/notifications/rulesDraft';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { statusKey } from '@/shared/ui/StatusBadge';
 import { showApiError, showDone } from '@/shared/ui/notify';
+import { registerUnsavedSource } from '@/shared/ui/unsavedSources';
 import { t } from '@/shared/i18n';
-
-/** Подія, про яку сповіщають; перелік приходить із сервера (`BE-33b`). */
-type EventKind = NotificationRule['eventKind'];
-
-/** Межа серйозності правила. */
-type Severity = NotificationRule['minSeverity'];
 
 /**
  * Варіанти межі серйозності.
@@ -57,27 +71,6 @@ const RulesKey = ['notifications', 'rules'] as const;
  * див. коментар при визначенні константи.
  */
 
-/** Клітинка чернетки: чи діє правило і з якою межею. */
-interface Cell {
-  readonly isEnabled: boolean;
-  readonly minSeverity: Severity;
-}
-
-/** Адреса клітинки в чернетці. */
-function cellKey(eventKind: EventKind, channelId: number): string {
-  return `${eventKind}:${String(channelId)}`;
-}
-
-/** Чернетка з відповіді сервера. */
-function draftOf(rules: readonly NotificationRule[]): ReadonlyMap<string, Cell> {
-  return new Map(
-    rules.map((rule) => [
-      cellKey(rule.eventKind, rule.channelId),
-      { isEnabled: rule.isEnabled, minSeverity: rule.minSeverity },
-    ]),
-  );
-}
-
 /**
  * Матриця правил сповіщень «подія × канал» (`BE-33b`, екран
  * `/admin/notifications`).
@@ -112,20 +105,85 @@ export function RulesMatrixPanel(): JSX.Element {
     queryFn: listNotificationChannels,
   });
 
-  const [draft, setDraft] = useState<ReadonlyMap<string, Cell>>(new Map());
+  const [draft, setDraft] = useState<Draft>(new Map());
+  /**
+   * Точка відліку — відповідь сервера, на якій почали правити.
+   *
+   * ⛔ Аудит U14a: до фіксу чернетку перезаписувала КОЖНА нова `rules.data`
+   * (фокус вікна — `refetchOnWindowFocus` увімкнений за замовчуванням), ознаки
+   * «змінено» не було, а вихід зі сторінки мовчки губив правки.
+   */
+  const [seed, setSeed] = useState<Draft | null>(null);
+
+  const changed = seed === null ? 0 : changedCells(seed, draft);
+  const dirty = changed > 0;
+
+  // ⚠ Знімок для ефекту наповнення: він читає стан у момент відповіді, а не в
+  // момент оголошення, і не мусить залежати від `draft` (інакше кожна правка
+  // перезапускала б його).
+  const latest = useRef({ draft, dirty });
+  useEffect(() => {
+    latest.current = { draft, dirty };
+  });
 
   /*
-   * ⚠ Чернетка наповнюється ВІДПОВІДДЮ, а не заводиться раз. Після збереження
-   * сюди приїжджає матриця, яку повернув сервер (див. `onSuccess`), тож на
-   * екрані лишається його правда, а не наше уявлення про неї.
+   * ⛔ Відповідь сервера наповнює чернетку лише тоді, коли в ній нема чого
+   * втрачати: не змінена — або вже дорівнює відповіді. Незмінена чернетка йде
+   * за сервером (нова відповідь — нова точка відліку); змінену фоновий
+   * перезапит НЕ чіпає.
    */
   useEffect(() => {
-    if (rules.data !== undefined) setDraft(draftOf(rules.data.rules));
+    if (rules.data === undefined) return;
+
+    const incoming = draftOf(rules.data.rules);
+    const current = latest.current;
+    if (current.dirty && changedCells(incoming, current.draft) > 0) return;
+
+    setDraft(incoming);
+    setSeed(incoming);
   }, [rules.data]);
+
+  /*
+   * ⚠ Джерело для `UnsavedGuard` існує, лише ПОКИ чернетка змінена. `flush`
+   * навмисно немає: мовчазний `PUT` усієї матриці при переході (без версії —
+   * U14b) міг би непомітно перезаписати чужу правку й вимкнути алерти; тож
+   * сторож показує діалог, як і для `grants`.
+   */
+  useEffect(() => {
+    if (!dirty) return undefined;
+
+    return registerUnsavedSource('notification-rules', {
+      hasUnsaved: () => true,
+      unsavedCount: () => changed,
+    });
+  }, [dirty, changed]);
+
+  // ⚠ Закриття чи перезавантаження вкладки роутер не блокує — тут штатне
+  // питання браузера, і лише поки є що втрачати.
+  useEffect(() => {
+    if (!dirty) return undefined;
+
+    const warn = (event: BeforeUnloadEvent): void => {
+      event.preventDefault();
+      // Старі браузери показують питання лише за непорожнього `returnValue`.
+      event.returnValue = '';
+    };
+
+    window.addEventListener('beforeunload', warn);
+
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [dirty]);
 
   const save = useMutation({
     mutationFn: (next: NotificationRule[]) => replaceNotificationRules(next),
     onSuccess: (saved: NotificationRuleMatrix) => {
+      // ⚠ Збережене стає новою точкою відліку ДО оновлення кешу: інакше
+      // відповідь, що хоч чимось відрізняється від чернетки, лишила б її
+      // «зміненою» і ефект наповнення її б не взяв.
+      const savedDraft = draftOf(saved.rules);
+      setDraft(savedDraft);
+      setSeed(savedDraft);
+
       // ⚠ Відповідь PUT — це ВЖЕ вся матриця (`NotificationRuleMatrix`), тож
       // інвалідація з повторним GET була б зайвим запитом за тими самими
       // даними — і зайвою миттю, коли екран показує старе.
@@ -185,12 +243,19 @@ export function RulesMatrixPanel(): JSX.Element {
   // ⛔ Крок 3 — ПОРОЖНЬО, і це успішна відповідь, а не збій: каналів справді
   // жодного. Вісь матриці порожня, тож таблиці немає — але причина названа
   // словами, а не відсутністю колонок.
+  //
+  // ⚠ Власний ключ (`notifications.rulesNoChannels`/`…Hint`), НЕ
+  // `notifications.noChannels`/`notifications.noChannelsHint` із `ChannelsPanel`
+  // над цим блоком: той каже «каналів немає», цей — «правил немає, бо каналів
+  // немає». Однаковий текст під різними заголовками читався б як зламаний
+  // рендер, що надрукував один блок двічі (перевірено живим переглядом
+  // `/admin/notifications` на порожньому стенді).
   if (channelList.length === 0) {
     return (
       <Stack gap="xs">
-        <Text>{t('notifications.noChannels')}</Text>
+        <Text>{t('notifications.rulesNoChannels')}</Text>
         <Text size="sm" c="dimmed">
-          {t('notifications.noChannelsHint')}
+          {t('notifications.rulesNoChannelsHint')}
         </Text>
       </Stack>
     );
@@ -244,104 +309,139 @@ export function RulesMatrixPanel(): JSX.Element {
        * рве `AsyncBoundary`, і саме через це її тут немає. Заголовок екрана
        * ставить сторінка.
        */}
-      <Table striped withTableBorder aria-label={t('notifications.rules')} className="ecr-sticky-head">
-        <Table.Thead>
-          <Table.Tr>
-            <Table.Th>{t('notifications.event')}</Table.Th>
-            {channelList.map((channel) => (
-              <Table.Th key={channel.id}>{channel.name}</Table.Th>
-            ))}
-          </Table.Tr>
-        </Table.Thead>
-        <Table.Tbody>
-          {/*
-           * ⛔ Рядки — `eventKinds` СЕРВЕРА, а не події, на які правило вже є.
-           * Матриця з самих лише заповнених рядків не давала б завести перше
-           * правило на подію: «правила немає» виглядало б як «події не існує»
-           * (саме це й сказано в контракті `NotificationRuleMatrix`).
-           */}
-          {matrix.eventKinds.map((eventKind) => {
-            const eventLabel = t(`notifications.event.${eventKind}`);
+      {/* ⛔ `X-19`: колонка на КОЖЕН канал (прапорець + `Select` 120 px) —
+          матриця ширша за сторінку вже при трьох каналах при 1280 px, і
+          сторінка скролилась ГОРИЗОНТАЛЬНО ЦІЛКОМ разом із заголовками блоків
+          над нею. `KIT.md` §6.5: сторінка не скролиться горизонтально, широке
+          — у власному `overflow:auto` (той самий прийом, що й `ChannelsPanel`/
+          `DeliveriesPanel` поруч і `SecurityPage`/`PeriodsPage`). */}
+      <ScrollArea type="auto" offsetScrollbars>
+        <Table striped withTableBorder aria-label={t('notifications.rules')} className="ecr-sticky-head">
+          <Table.Thead>
+            <Table.Tr>
+              <Table.Th>{t('notifications.event')}</Table.Th>
+              {channelList.map((channel) => (
+                <Table.Th key={channel.id}>{channel.name}</Table.Th>
+              ))}
+            </Table.Tr>
+          </Table.Thead>
+          <Table.Tbody>
+            {/*
+             * ⛔ Рядки — `eventKinds` СЕРВЕРА, а не події, на які правило вже є.
+             * Матриця з самих лише заповнених рядків не давала б завести перше
+             * правило на подію: «правила немає» виглядало б як «події не існує»
+             * (саме це й сказано в контракті `NotificationRuleMatrix`).
+             */}
+            {matrix.eventKinds.map((eventKind) => {
+              const eventLabel = t(`notifications.event.${eventKind}`);
 
-            return (
-              <Table.Tr key={eventKind}>
-                <Table.Th scope="row">{eventLabel}</Table.Th>
+              return (
+                <Table.Tr key={eventKind}>
+                  <Table.Th scope="row">{eventLabel}</Table.Th>
 
-                {channelList.map((channel) => {
-                  const cell = draft.get(cellKey(eventKind, channel.id)) ?? {
-                    isEnabled: false,
-                    minSeverity: DefaultSeverity,
-                  };
+                  {channelList.map((channel) => {
+                    const cell = draft.get(cellKey(eventKind, channel.id)) ?? {
+                      isEnabled: false,
+                      minSeverity: DefaultSeverity,
+                    };
 
-                  return (
-                    <Table.Td key={channel.id}>
-                      <Group gap="xs" wrap="nowrap">
-                        {/*
-                         * ⚠ Підпис — `aria-label`, і він називає ОБИДВІ
-                         * координати клітинки. Читалка не пов'язує `<th>`
-                         * рядка й стовпця з полем усередині `<td>`: без імені
-                         * користувач чує «прапорець» стільки разів, скільки в
-                         * матриці клітинок, і жодного разу не дізнається, який
-                         * із них який.
-                         */}
-                        <Checkbox
-                          size="xs"
-                          aria-label={`${eventLabel} · ${channel.name}`}
-                          checked={cell.isEnabled}
-                          onChange={(event) =>
-                            setCell(eventKind, channel.id, {
-                              ...cell,
-                              isEnabled: event.currentTarget.checked,
-                            })
-                          }
-                        />
+                    return (
+                      <Table.Td key={channel.id}>
+                        <Group gap="xs" wrap="nowrap">
+                          {/*
+                           * ⚠ Підпис — `aria-label`, і він називає ОБИДВІ
+                           * координати клітинки. Читалка не пов'язує `<th>`
+                           * рядка й стовпця з полем усередині `<td>`: без імені
+                           * користувач чує «прапорець» стільки разів, скільки в
+                           * матриці клітинок, і жодного разу не дізнається, який
+                           * із них який.
+                           */}
+                          <Checkbox
+                            size="xs"
+                            aria-label={`${eventLabel} · ${channel.name}`}
+                            checked={cell.isEnabled}
+                            onChange={(event) =>
+                              setCell(eventKind, channel.id, {
+                                ...cell,
+                                isEnabled: event.currentTarget.checked,
+                              })
+                            }
+                          />
 
-                        {/*
-                         * ⛔ Підписи варіантів — `t(statusKey('severity', …))`,
-                         * а не самі коди: `Info`/`Warning`/`Error` — члени
-                         * переліку сервера, вони не перекладаються й не несуть
-                         * тону (директива №15 §2, той самий ключ, яким малює
-                         * `StatusBadge`).
-                         *
-                         * ⚠ Межа недоступна, доки клітинка вимкнена: правило,
-                         * якого не буде в матриці, не має межі — а поле, що
-                         * приймає значення й мовчки його викидає, обіцяє
-                         * більше, ніж робить.
-                         */}
-                        <Select
-                          size="xs"
-                          miw={120}
-                          aria-label={`${t('notifications.minSeverity')} · ${eventLabel} · ${channel.name}`}
-                          data={Severities.map((value) => ({
-                            value,
-                            label: t(statusKey('severity', value)),
-                          }))}
-                          value={cell.minSeverity}
-                          disabled={!cell.isEnabled}
-                          allowDeselect={false}
-                          onChange={(value) => {
-                            if (value === null) return;
+                          {/*
+                           * ⛔ Підписи варіантів — `t(statusKey('severity', …))`,
+                           * а не самі коди: `Info`/`Warning`/`Error` — члени
+                           * переліку сервера, вони не перекладаються й не несуть
+                           * тону (директива №15 §2, той самий ключ, яким малює
+                           * `StatusBadge`).
+                           *
+                           * ⚠ Межа недоступна, доки клітинка вимкнена: правило,
+                           * якого не буде в матриці, не має межі — а поле, що
+                           * приймає значення й мовчки його викидає, обіцяє
+                           * більше, ніж робить.
+                           */}
+                          <Select
+                            size="xs"
+                            miw={120}
+                            aria-label={`${t('notifications.minSeverity')} · ${eventLabel} · ${channel.name}`}
+                            data={Severities.map((value) => ({
+                              value,
+                              label: t(statusKey('severity', value)),
+                            }))}
+                            value={cell.minSeverity}
+                            disabled={!cell.isEnabled}
+                            allowDeselect={false}
+                            onChange={(value) => {
+                              if (value === null) return;
 
-                            setCell(eventKind, channel.id, {
-                              ...cell,
-                              minSeverity: value as Severity,
-                            });
-                          }}
-                        />
-                      </Group>
-                    </Table.Td>
-                  );
-                })}
-              </Table.Tr>
-            );
-          })}
-        </Table.Tbody>
-      </Table>
+                              setCell(eventKind, channel.id, {
+                                ...cell,
+                                minSeverity: value as Severity,
+                              });
+                            }}
+                          />
+                        </Group>
+                      </Table.Td>
+                    );
+                  })}
+                </Table.Tr>
+              );
+            })}
+          </Table.Tbody>
+        </Table>
+      </ScrollArea>
 
       <Group gap="xs">
-        <Button loading={save.isPending} onClick={() => save.mutate(enabledRules())}>
+        {/* ⚠ Без змін зберігати нічого: активна кнопка тут лише перезаписала б
+            матрицю тим, що вже є, — або чужою правкою, яку екран ще не бачив. */}
+        <Button
+          loading={save.isPending}
+          disabled={!dirty}
+          onClick={() => save.mutate(enabledRules())}
+        >
           {t('notifications.saveRules')}
         </Button>
+
+        {/* Скасування повертає чернетку до ОСТАННЬОЇ відповіді сервера, а не до
+            старої точки відліку: відкидаючи свої правки, людина хоче бачити
+            чинний стан. */}
+        <Button
+          variant="default"
+          disabled={!dirty || save.isPending}
+          onClick={() => {
+            const current = draftOf(matrix.rules);
+            setDraft(current);
+            setSeed(current);
+          }}
+        >
+          {t('common.cancel')}
+        </Button>
+
+        {dirty && (
+          <Text size="xs" c="dimmed" fs="italic" data-testid="notification-rules-unsaved">
+            {t('notifications.rulesUnsaved')}
+          </Text>
+        )}
       </Group>
     </Stack>
   );

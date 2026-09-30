@@ -55,7 +55,6 @@ public sealed class CollectionRunnerTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
-    [Trait("Requirement", "ФВ-12.8")]
     public async Task Успішний_збір_пише_покриття_і_завершує_прогін_успіхом()
     {
         var world = new World();
@@ -77,6 +76,7 @@ public sealed class CollectionRunnerTests
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait("Requirement", "ФВ-16.9")]
+    [Trait("Requirement", "ФВ-12.9")]
     public async Task Зміна_UOM_атрибута_ставить_на_паузу_лише_його_мапінг_а_решта_збирається()
     {
         var world = new World();
@@ -111,13 +111,50 @@ public sealed class CollectionRunnerTests
 
         await world.Store.Received().FinishRunAsync(
             Arg.Any<long>(), "Degraded", Arg.Is<int>(n => n > 0),
-            Arg.Is<string?>(m => m != null && m.StartsWith("ECR-INT-0422", StringComparison.Ordinal)),
+            Arg.Is<string?>(m => CollectionRunnerMessageEnvelopeTests.IsReason(
+                m, "jobs.collectionUnitChanged", "ECR-INT-0422")),
             Arg.Any<CancellationToken>());
 
         // Інтервал непокритий: після рішення людини його забере наздоганяння.
         await world.Store.DidNotReceive().WriteCoverageAsync(
             Arg.Any<long>(), Arg.Any<int>(),
             Arg.Is<IReadOnlyList<TimeInterval>>(i => i.Count > 0), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-11.7")]
+    public async Task Збирач_передає_в_сховище_точку_в_одиниці_джерела_а_не_в_цільовій()
+    {
+        // Мапінг оголошує: у джерелі кілограми, у документі — тонни. Джерело
+        // повертає саме кілограми, тобто розбіжності немає і пауза не потрібна.
+        var world = new World();
+        world.Maps.Add(Map(sourceUnitId: KilogramId));
+        world.Source.ReadAsync(Arg.Any<CollectionRequest>(), Arg.Any<CancellationToken>())
+            .Returns(new CollectionResult(
+                [new SourceDataPoint("tag", Now.AddHours(-2), 2500m, null, "kg", "Good")], [], null));
+
+        await world.Runner.RunAsync(
+            SourceEntityId, Now.AddDays(-1), Now, world.Progress, CancellationToken.None);
+
+        // ⛔ У сирий шар іде рівно те, що дало джерело: 2500 кг, а не 2.5 т.
+        // Конверсія — справа матеріалізації (ФВ-16.10), не збору.
+        // МУТАЦІЙНИЙ ДОКАЗ: у `CollectionRunner.SaveAsync` перевести прийняті
+        // точки в цільову одиницю мапінгу перед `UpsertRawPointsAsync` →
+        // червоніє саме це твердження.
+        // ⚠ Викликів може бути кілька (наздоганяння + запитаний діапазон
+        // читаються окремо), тому перевіряється, що КОЖЕН запис — в одиниці
+        // джерела, а не лише що один такий був.
+        await world.Store.Received().UpsertRawPointsAsync(
+            Arg.Any<long>(), SourceEntityId,
+            Arg.Is<IReadOnlyList<SourceDataPoint>>(p =>
+                p.Count == 1 && p[0].ValueNumeric == 2500m && p[0].SourceUnitSymbol == "kg"),
+            Arg.Any<CancellationToken>());
+        await world.Store.DidNotReceive().UpsertRawPointsAsync(
+            Arg.Any<long>(), Arg.Any<int>(),
+            Arg.Is<IReadOnlyList<SourceDataPoint>>(p =>
+                p.Any(x => x.ValueNumeric != 2500m || x.SourceUnitSymbol != "kg")),
+            Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -181,7 +218,9 @@ public sealed class CollectionRunnerTests
             Arg.Any<int>(),
             Arg.Is<string?>(m => m != null
                                  && m.Contains("STACK-1", StringComparison.Ordinal)
-                                 && CollectionFailure.IsAuthenticationRefusal(m)),
+                                 && CollectionFailure.IsAuthenticationRefusal(m)
+                                 && CollectionRunnerMessageEnvelopeTests.IsReason(
+                                     m, CollectionFailure.AuthenticationRefusedKey, null)),
             Arg.Any<CancellationToken>());
 
         Assert.Contains("STACK-1", error.Message, StringComparison.Ordinal);
@@ -302,7 +341,7 @@ public sealed class CollectionRunnerTests
         // той самий статус, що й за звичайної відмови джерела.
         await world.Store.Received().FinishRunAsync(
             Arg.Any<long>(), "Degraded", Arg.Any<int>(),
-            Arg.Is<string?>(m => m != null && m.Contains("ліміт", StringComparison.Ordinal)),
+            Arg.Is<string?>(m => CollectionRunnerMessageEnvelopeTests.IsReason(m, "jobs.collectionTimeout", "ECR-INT-0503")),
             Arg.Any<CancellationToken>());
 
         // Покриття НЕ пишеться за інтервал, що не встиг прочитатися: дірка

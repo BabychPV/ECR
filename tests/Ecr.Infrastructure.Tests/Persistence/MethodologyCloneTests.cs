@@ -207,6 +207,101 @@ public sealed class MethodologyCloneTests(SqlServerFixture sql)
             .Map(listed.Single(v => v.Id == sourceId)).IsEditable);
     }
 
+    /// <remarks>
+    /// HSE301 A3a (борг F6, <c>D-175</c>, <c>D-176</c>): область, видимість формули й
+    /// «вихід раз на рядок» — вміст версії. Значення джерела — НЕ типові (<c>Row</c>,
+    /// видима, <c>IsPerSubstance = false</c>): лише так видно клон, що бере їх із
+    /// конструктора. Мутація: не переносити <c>Scope</c> у <c>CopyChildrenAsync</c> — червоний.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-9.1")]
+    public async Task Клон_переносить_область_видимість_і_вихід_раз_на_рядок()
+    {
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var tag = Guid.NewGuid().ToString("N")[..8];
+
+        int sourceId;
+
+        await using (var seed = builder.CreateContext())
+        {
+            var unitId = await seed.Units.OrderBy(u => u.Id).Select(u => u.Id).FirstAsync();
+
+            var methodology = new Methodology(EcrCode.Create($"A3A_{tag}"), Name("scope clone probe"));
+            seed.Methodologies.Add(methodology);
+            await seed.SaveChangesAsync();
+
+            var source = new MethodologyVersion(methodology.Id, "1.0", CalculationLevel.Configuration, 1, Now);
+            seed.MethodologyVersions.Add(source);
+            await seed.SaveChangesAsync();
+            sourceId = source.Id;
+
+            var row = source.AddFormula(EcrCode.Create("M_t"), "@Volume * 2", FormulaResultType.Number, unitId);
+            row.SetScope(MethodologyFormulaScope.Row);
+            row.SetVisible(true);
+
+            var perSubstance = source.AddFormula(
+                EcrCode.Create("tons"), "!M_t * 3", FormulaResultType.Number, unitId);
+
+            var output = new MethodologyOutput(sourceId, EcrCode.Create("M_t"), unitId, 1);
+            output.SetPerSubstance(false);
+
+            seed.MethodologyFormulas.AddRange(row, perSubstance);
+            seed.MethodologyOutputs.AddRange(output, new MethodologyOutput(sourceId, EcrCode.Create("tons"), unitId, 2));
+            await seed.SaveChangesAsync();
+
+            // Клонують опубліковану — той самий стан, що й у тесті вище.
+            var aggregate = await seed.Methodologies
+                .Include(m => m.Versions)
+                .FirstAsync(m => m.Id == methodology.Id);
+
+            aggregate.PublishVersion(
+                aggregate.Versions.Single(v => v.Id == sourceId),
+                publishedByUserId: 2,
+                changeReason: "Первинна публікація",
+                effectiveFrom: new DateOnly(2026, 1, 1),
+                testsPassed: true,
+                Now);
+
+            await seed.SaveChangesAsync();
+        }
+
+        int draftId;
+
+        await using (var write = builder.CreateContext())
+        {
+            var source = await write.MethodologyVersions.FirstAsync(v => v.Id == sourceId);
+            var aggregate = await write.Methodologies
+                .Include(m => m.Versions)
+                .FirstAsync(m => m.Id == source.MethodologyId);
+
+            var draft = aggregate.Versions.Single(v => v.Id == sourceId).CloneAsDraft("2.0", 1, Now);
+            aggregate.AddVersion(draft);
+
+            draftId = await new MethodologyDraftStore(write).SaveDraftAsync(draft, sourceId, default);
+        }
+
+        await using var read = builder.CreateContext();
+
+        var formulas = await read.MethodologyFormulas.AsNoTracking()
+            .Where(f => f.MethodologyVersionId == draftId).OrderBy(f => f.Code).ToListAsync();
+
+        Assert.Equal(2, formulas.Count);
+        Assert.Equal(MethodologyFormulaScope.Row, formulas.Single(f => f.Code == "M_t").Scope);
+        Assert.True(formulas.Single(f => f.Code == "M_t").IsVisible);
+
+        // Типові значення переносяться як типові — клон не «підвищує» формулу речовини.
+        Assert.Equal(MethodologyFormulaScope.Substance, formulas.Single(f => f.Code == "tons").Scope);
+        Assert.False(formulas.Single(f => f.Code == "tons").IsVisible);
+
+        var outputs = await read.MethodologyOutputs.AsNoTracking()
+            .Where(o => o.MethodologyVersionId == draftId).ToListAsync();
+
+        Assert.False(outputs.Single(o => o.Code == "M_t").IsPerSubstance);
+        Assert.True(outputs.Single(o => o.Code == "tons").IsPerSubstance);
+    }
+
     private static LocalizedText Name(string value)
         => new(new Dictionary<string, string>(StringComparer.Ordinal) { ["en"] = value });
 }

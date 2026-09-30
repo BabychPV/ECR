@@ -75,9 +75,12 @@ public sealed class ExcelImporterAtomicApplyTests
 
     public ExcelImporterAtomicApplyTests()
     {
+        BatchStoreStubs.DelegateToSingle(_rows, _cells, _access);
         _clock.UtcNow.Returns(new DateTime(2026, 1, 20, 9, 0, 0, DateTimeKind.Utc));
         _user.UserId.Returns(9);
         _access.BuildProfileAsync(9, Arg.Any<CancellationToken>()).Returns(Profile());
+        _access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
+            .Returns(EditDecision.Allow());
         _metadata.GetAsync(TemplateVersionId, Arg.Any<CancellationToken>()).Returns(Snapshot());
         _methodologies.GetMethodologyIdsBoundToTableAsync(TableDefId, Arg.Any<CancellationToken>())
                       .Returns(Task.FromResult<IReadOnlyList<int>>([]));
@@ -91,11 +94,23 @@ public sealed class ExcelImporterAtomicApplyTests
 
             _rows.ResolveTableInstanceAsync(instance, Arg.Any<CancellationToken>())
                  .Returns(new TableInstanceRef(instance, DocumentId, TableDefId, TemplateVersionId, Period));
-            _rows.GetRowIdsAsync(instance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
-                 .Returns(new Dictionary<string, long> { ["R1"] = rowId });
+            _rows.GetRowsAsync(instance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+                 .Returns(new List<RowState> { new("R1", rowId, "0xAA", IsOrphaned: false) });
             _rows.GetRowVersionsAsync(instance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
                  .Returns(new Dictionary<string, string> { ["R1"] = "0xAA" });
             _access.CanEditSliceAsync(Arg.Any<AccessProfile>(), instance, Arg.Any<CancellationToken>())
+                   .Returns(new Dictionary<CellAddress, EditDecision>
+                   {
+                       [new CellAddress(PeriodKey.Parse(Period), rowId, VolumeColumnId)] = EditDecision.Allow(),
+                   });
+
+            // ⚠ WR-03: `ExcelImporter` тримає ВЛАСНИЙ попередній перегляд через
+            // `CanEditSliceAsync` (лишається як є), а вкладений РЕАЛЬНИЙ
+            // `PatchCellsHandler` (той самий `_access`) тепер питає лише адреси
+            // батчу через `CanEditCellsAsync`.
+            _access.CanEditCellsAsync(
+                       Arg.Any<AccessProfile>(), instance, Arg.Any<PeriodKey>(),
+                       Arg.Any<IReadOnlyCollection<CellAddress>>(), Arg.Any<CancellationToken>())
                    .Returns(new Dictionary<CellAddress, EditDecision>
                    {
                        [new CellAddress(PeriodKey.Parse(Period), rowId, VolumeColumnId)] = EditDecision.Allow(),
@@ -155,7 +170,8 @@ public sealed class ExcelImporterAtomicApplyTests
         _cells.When(c => c.ApplyAsync(Arg.Any<CellChangeSet>(), Arg.Any<CancellationToken>()))
               .Do(call => _trace.Add($"write:{call.ArgAt<CellChangeSet>(0).TableInstanceId}"));
 
-        _jobs.When(j => j.EnqueueAsync<IFormulaRecalculationJob>(Arg.Any<object>(), Arg.Any<CancellationToken>()))
+        _jobs.When(j => j.EnqueueCoalescedAsync<IFormulaRecalculationJob>(
+                 Arg.Any<string>(), Arg.Any<object>(), Arg.Any<CancellationToken>()))
              .Do(_ => _trace.Add("enqueue"));
 
         _previews.FindAsync(Token, Arg.Any<CancellationToken>()).Returns(Plan());
@@ -212,8 +228,8 @@ public sealed class ExcelImporterAtomicApplyTests
                 _cells, _rows, _documents, _periods, _metadata, _access,
                 new Ecr.Application.Validation.ValidationEngine(new RealFormulaEngine()),
                 _methodologies, _registries, _headers, _audit, Substitute.For<IAuditReader>(),
-                _jobs, _uow, _user, _clock),
-            new ImportDiffBuilder(), _cells, _rows, _uow, _jobs);
+                _jobs, _uow, _user, _clock, Substitute.For<ISheetEditGate>(), NSubstitute.Substitute.For<Ecr.Application.Ports.IUnitCatalog>()),
+            new ImportDiffBuilder(), _cells, _rows, _uow, _jobs, Substitute.For<ISheetEditGate>());
 
     private static IDocumentHeaderStore CreateHeaderStore()
     {
@@ -238,8 +254,8 @@ public sealed class ExcelImporterAtomicApplyTests
         Assert.Single(_trace, e => string.Equals(e, "tx:open", StringComparison.Ordinal));
 
         // ⛔ ОДНА задача перерахунку на документ, а не три.
-        await _jobs.Received(1).EnqueueAsync<IFormulaRecalculationJob>(
-            Arg.Any<object>(), Arg.Any<CancellationToken>());
+        await _jobs.Received(1).EnqueueCoalescedAsync<IFormulaRecalculationJob>(
+            Arg.Any<string>(), Arg.Any<object>(), Arg.Any<CancellationToken>());
 
         // ⚠ І саме ПІСЛЯ коміту: поставлена всередині, вона стартувала б у
         // воркері раніше, ніж записане стане видимим під RCSI.
@@ -251,8 +267,8 @@ public sealed class ExcelImporterAtomicApplyTests
         // останньої таблиці виглядала б так само «одна», а перерахунок двох
         // інших не стався б ніколи.
         var payload = _jobs.ReceivedCalls()
-            .Single(c => c.GetMethodInfo().Name == nameof(IBackgroundJobScheduler.EnqueueAsync))
-            .GetArguments()[0];
+            .Single(c => c.GetMethodInfo().Name == nameof(IBackgroundJobScheduler.EnqueueCoalescedAsync))
+            .GetArguments()[1];
 
         var json = JsonSerializer.Serialize(payload, Options);
         Assert.Contains("\"rowId\":1001", json, StringComparison.Ordinal);
@@ -260,6 +276,35 @@ public sealed class ExcelImporterAtomicApplyTests
         Assert.Contains("\"rowId\":1003", json, StringComparison.Ordinal);
 
         await _previews.Received(1).RemoveAsync(Token, Arg.Any<CancellationToken>());
+    }
+
+    /// <summary>
+    /// MI-02 (в), умова «Аудиту» 2: черга в базі — постановка ОСТАННІМ
+    /// оператором транзакції книги, після всього запису (<c>SaveChanges</c>) і до коміту.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Постановка на ціль тримає HOLDLOCK слоту до кінця транзакції — лише
+    /// в самому кінці це мілісекунди. Мутації: поставити на початку замикання
+    /// (або до запису книги) — «enqueue» перед «write»; після коміту — після
+    /// «tx:commit»; обидва червоні.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "MI-02")]
+    public async Task Черга_в_базі_постановка_останній_оператор_транзакції_книги()
+    {
+        _jobs.EnlistsInCallerTransaction.Returns(true);
+        _uow.When(u => u.SaveChangesAsync(Arg.Any<CancellationToken>())).Do(_ => _trace.Add("save"));
+        _audit.When(a => a.WriteCellChangesAsync(Arg.Any<IReadOnlyList<CellChangeRecord>>(), Arg.Any<CancellationToken>()))
+              .Do(_ => _trace.Add("audit"));
+
+        await Importer().ApplyAsync(DocumentId, Token, CancellationToken.None);
+
+        Assert.Equal(
+            ["tx:open", "write:501", "write:502", "write:503", "audit", "save", "enqueue", "tx:commit"],
+            _trace);
+        await _jobs.Received(1).EnqueueCoalescedAsync<IFormulaRecalculationJob>(
+            Arg.Any<string>(), Arg.Any<object>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -290,8 +335,8 @@ public sealed class ExcelImporterAtomicApplyTests
         Assert.Equal("err.ECR-CELL-0409.batchStale", error.Details["messageKey"]);
 
         // ⛔ Нуль задач перерахунку: жодної на вже записану першу таблицю.
-        await _jobs.DidNotReceive().EnqueueAsync<IFormulaRecalculationJob>(
-            Arg.Any<object>(), Arg.Any<CancellationToken>());
+        await _jobs.DidNotReceive().EnqueueCoalescedAsync<IFormulaRecalculationJob>(
+            Arg.Any<string>(), Arg.Any<object>(), Arg.Any<CancellationToken>());
 
         // ⛔ Відмова стається ВСЕРЕДИНІ транзакції — саме це й відкочує запис
         // першої таблиці. «tx:commit» у журналі означав би, що перша таблиця
@@ -301,5 +346,48 @@ public sealed class ExcelImporterAtomicApplyTests
         // Перегляд не прибирається: користувач має змогу застосувати його ще
         // раз, а не будувати наново з файлу, якого може вже не бути під рукою.
         await _previews.DidNotReceive().RemoveAsync(Arg.Any<string>(), Arg.Any<CancellationToken>());
+    }
+
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "F-24")]
+    [InlineData(5, 0)]
+    [InlineData(6, 1)]
+    public async Task Конфлікт_імпорту_перелічує_лише_комірки_що_змінилися_після_перегляду(
+        int theirValue, int expectedConflicts)
+    {
+        // Перегляд бачив у R1.Volume число 5. Конфлікт версії — рядковий, і
+        // обробник запису кладе в перелік КОЖНУ комірку батчу розбіжного рядка.
+        _previews.FindAsync(Token, Arg.Any<CancellationToken>()).Returns(JsonSerializer.Serialize(
+            new ImportPlan(
+                DocumentId,
+                Period,
+                [
+                    new TableDiff(
+                        Instances[0], Period, [new ImportChange("R1", "Volume", 5m, 10m)], [],
+                        new Dictionary<string, string> { ["R1"] = "0xAA" }),
+                ]),
+            Options));
+
+        _cells.When(c => c.ApplyAsync(Arg.Any<CellChangeSet>(), Arg.Any<CancellationToken>()))
+              .Do(_ => throw new ConcurrencyConflictException(
+                  "ECR-CELL-0409", "Батч відхилено.",
+                  new Dictionary<string, object?>
+                  {
+                      ["messageKey"] = "err.ECR-CELL-0409.batchStale",
+                      ["conflicts"] = new List<CellConflictDto>
+                      {
+                          new("R1", "Volume", 10m, (decimal)theirValue, "Other", "UserEdit", null, "0xBB"),
+                      },
+                  }));
+
+        var error = await Assert.ThrowsAsync<ConcurrencyConflictException>(
+            () => Importer().ApplyAsync(DocumentId, Token, CancellationToken.None));
+
+        // ⛔ Мутація: прибрати звуження в `Blame` — при 5 (ніхто, крім імпорту,
+        // комірки не міняв) перелік знову міститиме її.
+        var conflicts = Assert.IsAssignableFrom<IEnumerable<CellConflictDto>>(error.Details!["conflicts"]);
+        Assert.Equal(expectedConflicts, conflicts.Count());
+        Assert.Equal("err.ECR-CELL-0409.batchStale", error.Details["messageKey"]);
     }
 }

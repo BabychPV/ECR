@@ -23,8 +23,13 @@ public sealed class SetEntryValidityHandler(
     IAuditWriter audit,
     Security.IAccessDecisionService access,
     ICurrentUser currentUser,
-    IClock clock)
+    IClock clock,
+    Keys.RegistryKeyService? keys = null)
 {
+    // ⚠ `keys` необов'язковий лише для тестів, що будують обробник руками (як в
+    // `UpsertRegistryEntryHandler`); контейнер підставляє `RegistryKeyService` завжди. Що
+    // на справжньому шляху вікно перевіряється, тримає `RegistryKeyLifecycleHttpTests`.
+
     /// <summary>Право на зміну даних довідника (`02-contracts.md` §9).</summary>
     public const string Permission = "Registry.EditData";
 
@@ -66,11 +71,19 @@ public sealed class SetEntryValidityHandler(
         var previousFrom = entry.ValidFrom;
         var previousTo = entry.ValidTo;
 
+        // ⚠ Опис — ДО зміни вікна: він потрібен гарду D-211.
+        var definition = await registries.FindDefinitionByIdAsync(entry.RegistryDefId, ct).ConfigureAwait(false);
+
+        // ⛔ D-211: вікно чинності запису External-довідника — теж дані AF.
+        if (definition is not null)
+        {
+            ExternalRegistryGuard.EnsureManualEditAllowed(definition);
+        }
+
         // Порожнє вікно відхиляє сутність (ECR-REG-0422) — до будь-яких змін
         // у документах.
         entry.SetValidity(from, to);
 
-        var definition = await registries.FindDefinitionByIdAsync(entry.RegistryDefId, ct).ConfigureAwait(false);
         definition?.BumpDataRevision();
 
         int affected = 0;
@@ -105,6 +118,15 @@ public sealed class SetEntryValidityHandler(
         // базу коректно.
         await uow.ExecuteInTransactionAsync(async innerCt =>
         {
+            // ⛔ RT-10b (§4.4): рядки ключів ДЗЕРКАЛЯТЬ вікно запису, тож перераховуються тут,
+            // у тій самій транзакції, — інакше в `dic.RegistryEntryKey` лишилося б старе вікно.
+            // І перевіряються: нове вікно може перетнутися з дублем ключа, якого старе не
+            // зачіпало, — тоді 409 `keyWindowOverlap`, і вікно не змінюється.
+            if (keys is not null && definition is not null)
+            {
+                await keys.ApplyAsync(definition, entry, innerCt).ConfigureAwait(false);
+            }
+
             await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
 
             affected = await scanner.RescanForEntryAsync(registryEntryId, innerCt).ConfigureAwait(false);

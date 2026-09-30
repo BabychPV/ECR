@@ -23,10 +23,15 @@ internal enum ServiceAccountMode
 /// <summary>
 /// Спільний стан майстра — кожен крок читає з нього відповіді попередніх
 /// кроків (передусім крок "Огляд") і записує власні відповіді через
-/// <see cref="IWizardStep.Apply"/>. Паролі зберігаються як <see cref="SecureString"/>
-/// від моменту введення до виклику <see cref="DeployRunner"/> — у відкритому
+/// <c>IWizardStep.Apply</c>. Паролі зберігаються як <see cref="SecureString"/>
+/// від моменту введення до виклику <c>DeployRunner</c> — у відкритому
 /// вигляді вони існують лише всередині побудови рядка підключення.
 /// </summary>
+/// <remarks>
+/// ⚠ <c>&lt;c&gt;</c>, а не <c>cref</c>, на типи WinForms/PowerShell-частини
+/// майстра: цей файл також компілюється в <c>Ecr.Architecture.Tests</c>
+/// (S11), де тих типів немає.
+/// </remarks>
 internal sealed class WizardState
 {
     // Крок 1 — режим.
@@ -49,4 +54,25 @@ internal sealed class WizardState
 
     // Крок 4 — пароль адміністратора (лише для FirstDeployment).
     public SecureString? BootstrapPassword { get; set; }
+
+    // Крок «Сертифікат Data Protection» (S11): відбиток із Cert:\LocalMachine\My.
+    // Не секрет — хеш публічного сертифіката; тому звичайний рядок.
+    private string? _dataProtectionThumbprint;
+
+    public string? DataProtectionThumbprint
+    {
+        get => _dataProtectionThumbprint;
+        set
+        {
+            var normalized = DataProtectionCertificateRules.Normalize(value);
+            _dataProtectionThumbprint = normalized.Length == 0 ? null : normalized;
+        }
+    }
+
+    /// <summary>
+    /// Чи годиться збережений відбиток зараз (S11) — перед стартом
+    /// розгортання, а не лише при виборі на кроці.
+    /// </summary>
+    public bool TryValidateDataProtection(ICertificateSource source, DateTime now, out string error)
+        => DataProtectionCertificateRules.TryValidate(DataProtectionThumbprint, source, now, out error);
 }

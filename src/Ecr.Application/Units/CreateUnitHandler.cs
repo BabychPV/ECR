@@ -102,7 +102,12 @@ public sealed class CreateUnitHandler(
         if (!await units.DimensionExistsAsync(dimensionId, ct).ConfigureAwait(false))
         {
             throw new NotFoundException(
-                ErrorCodes.UnitDimensionNotFound, $"Розмірності з ідентифікатором {dimensionId} немає в довіднику.");
+                ErrorCodes.UnitDimensionNotFound, $"Розмірності з ідентифікатором {dimensionId} немає в довіднику.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-UOM-4041.dimensionId",
+                    ["dimensionId"] = dimensionId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
         }
 
         var unit = new Unit(

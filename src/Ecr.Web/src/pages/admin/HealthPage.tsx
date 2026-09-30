@@ -1,5 +1,5 @@
 ﻿import type { JSX, ReactNode } from 'react';
-import { Button, Card, Group, SimpleGrid, Stack, Table, Text } from '@mantine/core';
+import { Alert, Button, Card, Group, SimpleGrid, Stack, Table, Text } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import type { components } from '@/api/schema';
@@ -10,7 +10,8 @@ import { showApiError, showDone } from '@/shared/ui/notify';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { StatusBadge } from '@/shared/ui/StatusBadge';
 import { Timestamp } from '@/shared/ui/Timestamp';
-import { t } from '@/shared/i18n';
+import { hasText, t } from '@/shared/i18n';
+import { fetchReadiness } from '@/pages/admin/healthReadiness';
 
 type SystemFacts = components['schemas']['SystemFactsResponse'];
 
@@ -47,9 +48,11 @@ async function copyPartitionScript(): Promise<void> {
  * половини того, на що розрахований регламент.
  */
 export function HealthPage(): JSX.Element {
+  // ⛔ `fetchReadiness`, а не `apiFetch`: `503` зі звітом — це стан системи,
+  // а не відмова запиту (аудит U2, див. `healthReadiness.ts`).
   const ready = useQuery({
     queryKey: ['health', 'ready'],
-    queryFn: () => apiFetch<HealthReport>('/health/ready'),
+    queryFn: fetchReadiness,
     refetchInterval: 30_000,
   });
 
@@ -77,10 +80,16 @@ export function HealthPage(): JSX.Element {
                фарбувала власна `badgeColor` цієї сторінки — п'ята з п'яти
                розбіжних копій такого рішення (перелік — у шапці
                `StatusBadge.tsx`). */
-            <StatusBadge kind="health" state={ready.data.status} />
+            <StatusBadge kind="health" state={ready.data.report.status} />
           )
         }
       />
+
+      {ready.data?.ready === false && (
+        <Alert color="statusError" mb="md" data-health-not-ready="">
+          {t('health.notReady')}
+        </Alert>
+      )}
 
       {/*
        * ⛔ Через `<AsyncBoundary>`, а не через `?? {}`. Саме `?? {}` і був
@@ -90,7 +99,7 @@ export function HealthPage(): JSX.Element {
       <AsyncBoundary<HealthReport>
         isPending={ready.isPending}
         error={ready.error}
-        data={ready.data}
+        data={ready.data?.report}
         isEmpty={(report) => report.checks.length === 0}
         emptyTitle={t('health.noChecks')}
         emptyHint={t('health.noChecksHint')}
@@ -101,7 +110,12 @@ export function HealthPage(): JSX.Element {
             {report.checks.map((check) => (
               <Card key={check.name} withBorder>
                 <Group justify="space-between">
-                  <Text fw={600}>{check.name}</Text>
+                  {/* ⛔ Тут стояло `{check.name}` — `db`, `jobs`, `sources`,
+                      тобто внутрішні ідентифікатори перевірок із
+                      `Program.cs` (`AddCheck<…>("db", …)`), маленькими
+                      літерами, під цілком людським реченням («Database is
+                      available.»). `U-14`. */}
+                  <Text fw={600}>{checkLabel(check.name)}</Text>
                   <StatusBadge kind="health" state={check.status} />
                 </Group>
                 {check.description !== null && (
@@ -242,6 +256,26 @@ function fieldLabel(key: string): string {
   const translationKey = FieldLabelKeys[key];
 
   return translationKey === undefined ? key : t(translationKey);
+}
+
+/**
+ * Людська назва перевірки стану (`U-14`).
+ *
+ * ⛔ Перевірки реєструються іменами `db`, `jobs`, `sources` (`Program.cs`), і
+ * саме вони стояли заголовками карток — внутрішній ідентифікатор над реченням,
+ * написаним для людини. Той самий клас, що #437/#438/#440/#441: значення
+ * сервера не є текстом інтерфейсу й не перекладається (`D-95`).
+ *
+ * ⛔ Запасний варіант — САМ ІДЕНТИФІКАТОР, а не `⟦health.check.…⟧`: набір
+ * перевірок задає сервер (`AddCheck<…>`), і четверта перевірка з'явиться в
+ * звіті раніше, ніж рядок під неї в `09-seed.sql`. Позначений ключ на місці
+ * зрозумілого `smtp` був би погіршенням, а не сигналом — той самий аргумент,
+ * що у `permissionLabel.ts`.
+ */
+export function checkLabel(name: string): string {
+  const key = `health.check.${name}`;
+
+  return hasText(key) ? t(key) : name;
 }
 
 /**

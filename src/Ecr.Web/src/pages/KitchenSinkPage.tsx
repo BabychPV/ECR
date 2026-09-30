@@ -41,6 +41,10 @@ import { cellState } from '@/shared/theme/theme';
 import { loadCatalog, preferredLanguage } from '@/shared/i18n';
 import { useCatalog } from '@/shared/i18n/useCatalog';
 
+// Зразки станів комірок (`cellStateClass`) потребують цього файлу; з `App.tsx`
+// він переїхав (бюджет маршруту, `D-132`) — у вхідному чанку його більше немає.
+import '@/shared/theme/cell-states.css';
+
 /**
  * Каталог компонентів (`ЕТАП 7`, модуль 7.8; розширено `UI-10`).
  *

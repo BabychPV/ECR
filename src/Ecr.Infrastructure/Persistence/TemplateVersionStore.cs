@@ -50,8 +50,63 @@ public sealed class TemplateVersionStore(EcrDbContext db) : ITemplateVersionStor
 
         var result = await command.ExecuteScalarAsync(ct).ConfigureAwait(false);
         return result is null or DBNull
-            ? throw new NotFoundException("ECR-TMPL-0404", $"Версії шаблону {templateVersionId} не існує.")
+            ? throw new NotFoundException(
+                "ECR-TMPL-0404",
+                $"Версії шаблону {templateVersionId} не існує.",
+                new Dictionary<string, object?>
+                {
+                    // Той самий ключ, що Repository<T,TId>.GetAsync/CreateDocumentHandler/
+                    // TableRelationHandlers та решта: той самий факт «версії немає».
+                    ["messageKey"] = "err.ECR-TMPL-0404.templateVersion",
+                    ["versionId"] = templateVersionId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                })
             : (int)result;
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⛔ Блокуюче читання (<c>UPDLOCK</c>) обходить версіонування рядків
+    /// RCSI: звичайний <c>SELECT</c> тут віддав би знімок до чужого коміту й
+    /// не чекав би ні на кого — тобто не серіалізував би нічого. <c>HOLDLOCK</c>
+    /// тримає блок до кінця транзакції навіть для відсутнього рядка.
+    ///
+    /// ⚠ Поза транзакцією блок звільнився б одразу після statement — виклик
+    /// без неї є помилкою програміста, а не станом даних, тому
+    /// <see cref="InvalidOperationException"/>, а не мовчазне «ніби заблоковано».
+    /// </remarks>
+    public async Task<Domain.Enums.TemplateVersionStatus> LockVersionForUpdateAsync(
+        int templateVersionId, CancellationToken ct)
+    {
+        var tx = db.Database.CurrentTransaction
+            ?? throw new InvalidOperationException(
+                "LockVersionForUpdateAsync викликано поза транзакцією: блок рядка версії звільнився б одразу.");
+
+        var connection = (SqlConnection)db.Database.GetDbConnection();
+        if (connection.State != System.Data.ConnectionState.Open)
+        {
+            await connection.OpenAsync(ct).ConfigureAwait(false);
+        }
+
+        await using var command = connection.CreateCommand();
+        command.Transaction = (SqlTransaction)tx.GetDbTransaction();
+        command.CommandText = """
+            SELECT Status
+            FROM   cfg.TemplateVersion WITH (UPDLOCK, HOLDLOCK, ROWLOCK)
+            WHERE  Id = @id;
+            """;
+        command.Parameters.AddWithValue("@id", templateVersionId);
+
+        var result = await command.ExecuteScalarAsync(ct).ConfigureAwait(false);
+        return result is null or DBNull
+            ? throw new NotFoundException(
+                "ECR-TMPL-0404",
+                $"Версії шаблону {templateVersionId} не існує.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-TMPL-0404.templateVersion",
+                    ["versionId"] = templateVersionId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                })
+            : (Domain.Enums.TemplateVersionStatus)Convert.ToByte(result, System.Globalization.CultureInfo.InvariantCulture);
     }
 
     /// <inheritdoc />
@@ -70,21 +125,32 @@ public sealed class TemplateVersionStore(EcrDbContext db) : ITemplateVersionStor
              .AnyAsync(id => id == templateVersionId, ct);
 
     /// <inheritdoc />
+    /// <remarks>Той самий шлях через проєкт, що <see cref="HasDocumentsAsync"/>.</remarks>
+    public Task<int> CountDocumentsAsync(int templateVersionId, CancellationToken ct)
+        => db.Documents
+             .AsNoTracking()
+             .Join(db.Projects.AsNoTracking(),
+                   d => d.ProjectId,
+                   p => p.Id,
+                   (d, p) => p.TemplateVersionId)
+             .CountAsync(id => id == templateVersionId, ct);
+
+    /// <inheritdoc />
     public async Task<int> CreateDraftAsync(
         int templateId, string versionNumber, int userId, DateTime utcNow, CancellationToken ct)
     {
         if (!await db.Templates.AnyAsync(t => t.Id == templateId, ct).ConfigureAwait(false))
         {
-            throw new NotFoundException("ECR-TMPL-0404", $"Шаблон {templateId} не знайдено.");
+            throw new NotFoundException(
+                "ECR-TMPL-0404", $"Шаблон {templateId} не знайдено.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-TMPL-0404.template",
+                    ["templateId"] = templateId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
         }
 
-        if (await db.TemplateVersions
-                .AnyAsync(v => v.TemplateId == templateId && v.Version == versionNumber, ct)
-                .ConfigureAwait(false))
-        {
-            throw new Application.Errors.BusinessRuleException(
-                "ECR-TMPL-0409", $"Версія {versionNumber} у цьому шаблоні вже існує.");
-        }
+        await EnsureVersionNumberFreeAsync(templateId, versionNumber, ct).ConfigureAwait(false);
 
         var version = new TemplateVersion(templateId, versionNumber, userId, utcNow);
         db.TemplateVersions.Add(version);
@@ -116,7 +182,13 @@ public sealed class TemplateVersionStore(EcrDbContext db) : ITemplateVersionStor
                .FirstOrDefaultAsync(v => v.Id == templateVersionId, ct)
                .ConfigureAwait(false)
            ?? throw new NotFoundException(
-               "ECR-TMPL-0404", $"Версії шаблону {templateVersionId} не існує.");
+               "ECR-TMPL-0404",
+               $"Версії шаблону {templateVersionId} не існує.",
+               new Dictionary<string, object?>
+               {
+                   ["messageKey"] = "err.ECR-TMPL-0404.templateVersion",
+                   ["versionId"] = templateVersionId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+               });
 
     /// <inheritdoc />
     public async Task<int> CloneAsync(
@@ -139,22 +211,82 @@ public sealed class TemplateVersionStore(EcrDbContext db) : ITemplateVersionStor
             .AsSplitQuery()
             .FirstOrDefaultAsync(v => v.Id == sourceVersionId, ct)
             .ConfigureAwait(false)
-            ?? throw new NotFoundException("ECR-TMPL-0404", $"Версії шаблону {sourceVersionId} не існує.");
+            ?? throw new NotFoundException(
+                "ECR-TMPL-0404",
+                $"Версії шаблону {sourceVersionId} не існує.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-TMPL-0404.templateVersion",
+                    ["versionId"] = sourceVersionId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
+
+        // ⛔ X-30 (UX-прохід, четвертий раунд): номер, що вже є в шаблоні, —
+        // `409` з ключем, а не `UQ_TemplateVersion` → голий `500`. Цей шлях
+        // перевірки не мав зовсім, на відміну від `CreateDraftAsync` поруч.
+        // Шаблон — той, що в ДЖЕРЕЛА: саме в нього клон і ляже.
+        await EnsureVersionNumberFreeAsync(source.TemplateId, newVersion, ct).ConfigureAwait(false);
 
         var clonedFrom = source.Id;
         var (clone, links) = TemplateVersionCloner.Prepare(source, newVersion, userId, utcNow);
 
+        // ⛔ V-05: два збереження — одна транзакція. Формули посилаються на
+        // колонки й рядки ЧИСЛОМ, а не навігацією, тож EF не може вставити їх
+        // у тому самому пакеті, що й колонки (CK_Formula_Scope вимагає ключ
+        // одразу). Спершу структура без формул, потім формули з новими
+        // ключами. Без транзакції падіння другого кроку лишило б у базі
+        // чернетку-сироту без формул — тобто «успішний» клон, який тихо
+        // загубив обчислення.
+        if (db.Database.CurrentTransaction is not null)
+        {
+            await SaveCloneAsync(clone, links, clonedFrom, ct).ConfigureAwait(false);
+            return clone.Id;
+        }
+
+        var strategy = db.Database.CreateExecutionStrategy();
+        await strategy.ExecuteAsync(async () =>
+        {
+            await using var tx = await db.Database.BeginTransactionAsync(ct).ConfigureAwait(false);
+            await SaveCloneAsync(clone, links, clonedFrom, ct).ConfigureAwait(false);
+            await tx.CommitAsync(ct).ConfigureAwait(false);
+        }).ConfigureAwait(false);
+
+        return clone.Id;
+    }
+
+    /// <summary>
+    /// Номер версії вільний у шаблоні; інакше <c>409 ECR-TMPL-0409</c> з ключем.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Перевірка-передумова, а не заміна <c>UQ_TemplateVersion</c>: дві
+    /// одночасні спроби з тим самим номером обидві її пройдуть, і друга впаде на
+    /// індексі. Це гонитва двох адміністраторів над одним шаблоном — рідкісна, і
+    /// її ціна (одна невдала спроба) нижча за блокування шаблону на час клону.
+    /// </remarks>
+    private async Task EnsureVersionNumberFreeAsync(int templateId, string versionNumber, CancellationToken ct)
+    {
+        if (await db.TemplateVersions
+                .AnyAsync(v => v.TemplateId == templateId && v.Version == versionNumber, ct)
+                .ConfigureAwait(false))
+        {
+            throw new Application.Errors.BusinessRuleException(
+                "ECR-TMPL-0409", $"Версія {versionNumber} у цьому шаблоні вже існує.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-TMPL-0409.versionNumberTaken",
+                    ["version"] = versionNumber,
+                });
+        }
+    }
+
+    private async Task SaveCloneAsync(
+        TemplateVersion clone, TemplateVersionCloner.CloneLinks links, int clonedFrom, CancellationToken ct)
+    {
         db.TemplateVersions.Add(clone);
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
 
-        // Формули посилаються на колонки і рядки ЧИСЛОМ, а не навігацією, тому
-        // EF їх не перев'язує: це доводиться робити після того, як база
-        // призначила нові ключі.
-        TemplateVersionCloner.Relink(clone, links);
+        db.FormulaDefs.AddRange(TemplateVersionCloner.Relink(links));
         SetClonedFrom(clone, clonedFrom);
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
-
-        return clone.Id;
     }
 
     /// <inheritdoc />
@@ -191,6 +323,50 @@ public sealed class TemplateVersionStore(EcrDbContext db) : ITemplateVersionStor
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// ⚠ Ліміт на шаблон — у SQL (корельований `Take` на шаблон дає
+    /// `ROW_NUMBER() OVER (PARTITION BY TemplateId ...)`), а не в пам'яті:
+    /// інакше один шаблон із тисячею версій тягнув би їх усі заради сотні.
+    /// `GroupBy(...).SelectMany(g => g.Take(n))` EF не перекладає — звідси
+    /// корень запиту від <c>Templates</c>.
+    /// </remarks>
+    public async Task<IReadOnlyDictionary<int, IReadOnlyList<TemplateVersionSummary>>> ListVersionsForTemplatesAsync(
+        IReadOnlyCollection<int> templateIds, int perTemplateLimit, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(templateIds);
+        ArgumentOutOfRangeException.ThrowIfLessThan(perTemplateLimit, 1);
+
+        if (templateIds.Count == 0)
+        {
+            return new Dictionary<int, IReadOnlyList<TemplateVersionSummary>>();
+        }
+
+        var ids = templateIds.Distinct().ToList();
+
+        var rows = await db.Templates
+            .AsNoTracking()
+            .Where(t => ids.Contains(t.Id))
+            .SelectMany(t => db.TemplateVersions
+                .Where(v => v.TemplateId == t.Id)
+                .OrderBy(v => v.Id)
+                .Take(perTemplateLimit))
+            .Select(v => new
+            {
+                v.TemplateId,
+                Summary = new TemplateVersionSummary(
+                    v.Id, v.Version, v.Status, v.PresentationRevision, v.ClonedFromVersionId, v.PublishedAt),
+            })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        return rows
+            .GroupBy(r => r.TemplateId)
+            .ToDictionary(
+                g => g.Key,
+                g => (IReadOnlyList<TemplateVersionSummary>)[.. g.Select(r => r.Summary).OrderBy(s => s.Id)]);
+    }
+
+    /// <inheritdoc />
     public async Task<int> CreateTemplateAsync(
         string code,
         IReadOnlyDictionary<string, string> name,
@@ -203,7 +379,13 @@ public sealed class TemplateVersionStore(EcrDbContext db) : ITemplateVersionStor
         if (await db.Templates.AnyAsync(t => t.Code == code, ct).ConfigureAwait(false))
         {
             throw new Application.Errors.BusinessRuleException(
-                "ECR-TMPL-0409", $"Шаблон з кодом «{code}» уже існує.");
+                "ECR-TMPL-0409",
+                $"Шаблон з кодом «{code}» уже існує.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-TMPL-0409.templateCodeTaken",
+                    ["code"] = code,
+                });
         }
 
         var template = new Template(
@@ -481,7 +663,13 @@ public sealed class TemplateVersionStore(EcrDbContext db) : ITemplateVersionStor
             {
                 throw new BusinessRuleException(
                     "ECR-TMPL-0422",
-                    $"Поле {change.EntityType}.{change.Field} не належить презентаційному шару.");
+                    $"Поле {change.EntityType}.{change.Field} не належить презентаційному шару.",
+                    new Dictionary<string, object?>
+                    {
+                        ["messageKey"] = "err.ECR-TMPL-0422.presentationFieldUnknown",
+                        ["entityType"] = change.EntityType,
+                        ["field"] = change.Field,
+                    });
             }
 
             await using var command = connection.CreateCommand();
@@ -504,7 +692,14 @@ public sealed class TemplateVersionStore(EcrDbContext db) : ITemplateVersionStor
             {
                 throw new NotFoundException(
                     "ECR-TMPL-0404",
-                    $"{change.EntityType} {change.EntityId} не належить версії {templateVersionId}.");
+                    $"{change.EntityType} {change.EntityId} не належить версії {templateVersionId}.",
+                    new Dictionary<string, object?>
+                    {
+                        ["messageKey"] = "err.ECR-TMPL-0404.presentationTarget",
+                        ["entityType"] = change.EntityType,
+                        ["entityId"] = change.EntityId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                        ["versionId"] = templateVersionId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    });
             }
 
             affected += rows;

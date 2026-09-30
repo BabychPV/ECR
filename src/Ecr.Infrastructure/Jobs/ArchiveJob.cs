@@ -2,6 +2,8 @@ using System.Globalization;
 using Ecr.Application.Ports;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Enums;
+using Ecr.Domain.Services;
+using Ecr.Domain.ValueObjects;
 using Ecr.Infrastructure.Persistence;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
@@ -81,11 +83,23 @@ public sealed class ArchiveJob(
                 + "фізична архівація йде лише для позначеного заархівованим.");
         }
 
-        var grace = project.ClosedAt?.AddDays(project.YearGraceOffsetDays);
-        if (grace is { } until && clock.UtcNow < until)
+        // ⛔ ФВ-1.8 / АРХ-1: відлік — від КІНЦЯ РОКУ проєкту (`PeriodEnd`, 31.12)
+        // у поясі майданчика, а не від `ClosedAt`. Доти ворота рахувались від
+        // моменту позначки «заархівовано»: пізня позначка відсувала архівацію
+        // без причини, а рання (одразу після 31.12, якби всі періоди вже
+        // закрились) — ні від чого не залежала. Вікно — те саме, що тримає
+        // періоди року в `Grace` (`YearGraceWindow`), тож архівація не
+        // починається, доки дані року ще правляться.
+        var window = YearGraceWindow.For(
+            project.PeriodEnd,
+            project.YearGraceOffsetDays,
+            SiteTimeZone.Create(project.TimeZoneId).ToTimeZoneInfo());
+
+        if (clock.UtcNow < window.EndsAtUtc)
         {
             throw new InvalidOperationException(
-                $"Річний грейс проєкту {request.ProjectId} триває до {until:yyyy-MM-dd}: "
+                $"Річний грейс проєкту {request.ProjectId} триває до {window.LastDay:yyyy-MM-dd} включно "
+                + $"(кінець року {project.PeriodEnd:yyyy-MM-dd} + {project.YearGraceOffsetDays} дн.): "
                 + "архівація передчасна.");
         }
 

@@ -1,17 +1,10 @@
 import { useState, type JSX } from 'react';
 import { Button, Checkbox, Group, Modal, Select, Stack, Text } from '@mantine/core';
-import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
-import { queryKeys } from '@/api/queryKeys';
-import type {
-  CreateDocumentRequest,
-  DocumentIdResponse,
-  PagedProjects,
-  TemplatePage,
-  TemplateStructureDto,
-  TemplateVersionPage,
-} from '@/api/types';
+import type { components } from '@/api/schema';
+import type { CreateDocumentRequest, DocumentIdResponse, PagedProjects } from '@/api/types';
 import { groupRuleViolations } from './groupRuleViolations';
 import { localized } from '@/shared/i18n/localized';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
@@ -31,9 +24,18 @@ import { t } from '@/shared/i18n';
  * `RequiresOne` — рівно одного. Тому тут немає «створити з усіма» — вибір
  * робить людина, а правило складу підтверджує або відхиляє його з поясненням.
  *
- * ⚠ Версія шаблону береться **опублікована**: чернетка не має ані
- * замороженої структури, ані гарантії, що комірки знайдуть свої описи.
+ * ⛔ Версію шаблону визначає ПРОЄКТ, а не вибір людини (V-12, V-11). Тут
+ * стояли `GET /templates` і `GET /template-versions/{id}/structure` — обидва
+ * вимагають `Template.View`, і оператор із `Document.Create` бачив «You do not
+ * have permission», хоча `POST /documents` від нього — 201. До того ж діалог
+ * пропонував версії всіх шаблонів, а документ на версії, іншій за версію
+ * проєкту, відкривався без аркушів. Тепер — `GET /projects/{id}/document-template`
+ * (те саме право, що й на створення): версія проєкту, її аркуші й правила
+ * складу.
  */
+
+// ⚠ Прямо зі схеми: `api/types.ts` — спільний файл.
+type DocumentTemplateDto = components['schemas']['DocumentTemplateDto'];
 export function CreateDocumentModal({
   opened,
   onClose,
@@ -45,7 +47,6 @@ export function CreateDocumentModal({
   const navigate = useNavigate();
 
   const [projectId, setProjectId] = useState<string | null>(null);
-  const [versionId, setVersionId] = useState<string | null>(null);
   const [sheets, setSheets] = useState<number[]>([]);
 
   // ⛔ Опційне: `BusinessKey` лишається унікальним технічним ключем
@@ -58,49 +59,14 @@ export function CreateDocumentModal({
     enabled: opened,
   });
 
-  const templates = useQuery({
-    queryKey: queryKeys.templates.list(),
-    queryFn: () => apiFetch<TemplatePage>('/api/v1/templates?limit=100'),
-    enabled: opened,
-  });
-
-  const templateItems = templates.data?.items ?? [];
-
-  // ⚠ Версії читаються по кожному шаблону: маршрут контракту —
-  // `GET /templates/{id}/versions`, окремого «усі версії» немає і не треба.
-  //
-  // ⛔ Q-275: той самий ендпоінт — курсорний (Q-225), відповідь
-  // `{items, nextCursor, totalCount}`, а НЕ голий масив. Тут стояв тип
-  // `TemplateVersionSummary[]`, тож `.data` при пагінованій відповіді був
-  // ОБ'ЄКТОМ, не `undefined` — `?? []` не рятував, і `.filter` нижче падав
-  // на кожному відкритті «Новий документ» (той самий дефект, що Q-274 в
-  // `CreateProjectModal.tsx`). Взірець — `TemplatesPage.tsx`/`CreateProjectModal.tsx`:
-  // `TemplateVersionPage`, `?limit=100`, `.data?.items`.
-  const versionQueries = useQueries({
-    queries: templateItems.map((template) => ({
-      queryKey: queryKeys.templates.versionsOf(template.id),
-      queryFn: () =>
-        apiFetch<TemplateVersionPage>(`/api/v1/templates/${template.id}/versions?limit=100`),
-      enabled: opened,
-    })),
-  });
-
-  /** Опубліковані версії всіх шаблонів, підписані кодом шаблону. */
-  const publishedVersions = templateItems.flatMap((template, index) =>
-    (versionQueries[index]?.data?.items ?? [])
-      .filter((version) => version.status === 'Published')
-      .map((version) => ({
-        value: String(version.id),
-        label: `${template.code} · ${version.version}`,
-      })),
-  );
-
-  const structure = useQuery({
-    queryKey: queryKeys.templates.version(Number(versionId)),
+  const template = useQuery({
+    queryKey: ['projects', Number(projectId), 'document-template'],
     queryFn: () =>
-      apiFetch<TemplateStructureDto>(`/api/v1/template-versions/${versionId ?? ''}/structure`),
-    enabled: opened && versionId !== null,
+      apiFetch<DocumentTemplateDto>(`/api/v1/projects/${projectId ?? ''}/document-template`),
+    enabled: opened && projectId !== null,
   });
+
+  const versionId = template.data?.templateVersionId ?? null;
 
   const create = useMutation({
     mutationFn: () =>
@@ -136,7 +102,7 @@ export function CreateDocumentModal({
     onError: showApiError,
   });
 
-  const available = (structure.data?.sheets ?? []).map((sheet) => ({
+  const available = (template.data?.sheets ?? []).map((sheet) => ({
     id: sheet.id,
     label: `${localized(sheet.nameL10n) || sheet.code} (${sheet.code})`,
   }));
@@ -145,39 +111,20 @@ export function CreateDocumentModal({
   // порушення складу дізнавалися лише після відхиленого `POST /documents`.
   // Кнопка «Save» нижче НЕ блокується — сервер лишається останньою лінією
   // правди про всяк випадок, якщо ця копія колись розійдеться з оригіналом.
-  const violations = groupRuleViolations(structure.data, sheets);
+  const violations = groupRuleViolations(template.data, sheets);
 
   /*
-   * ⛔ Обидва верхні переліки — проєкт і версія шаблону — збиралися через
-   * `?? []`, тобто відмова сервера робила їх порожніми і мовчала.
-   *
-   * ⚠ Нижче вже стоїть `ErrorAlert` на `structure.error`, і коментар біля
-   * нього каже: «`AsyncBoundary` тут не потрібна — „вантажиться“ вже видно по
-   * порожньому переліку». Для аркушів це правда, бо їхню відмову показує той
-   * самий банер. Для ЦИХ двох запитів — ні: порожній перелік однаково означав
-   * і «ще їде», і «сервер відмовив», і другий випадок не показувало ніщо.
-   *
-   * ⚠ Наслідок той самий, що в `CreateProjectModal`: людина читає порожній
-   * перелік як «активних проєктів немає» чи «опублікованих версій немає» — і
-   * йде заводити ще один проєкт або публікувати ще одну версію.
+   * ⛔ Перелік проєктів збирався через `?? []`, тобто відмова сервера робила
+   * його порожнім і мовчала: людина читала його як «активних проєктів немає»
+   * — і йшла заводити ще один (той самий дефект, що в `CreateProjectModal`).
    */
-  const sourceError =
-    projects.error ??
-    templates.error ??
-    versionQueries.find((query) => query.error !== null)?.error ??
-    null;
-
-  const refetchSources = (): void => {
-    void projects.refetch();
-    void templates.refetch();
-    versionQueries.forEach((query) => void query.refetch());
-  };
+  const sourceError = projects.error ?? null;
 
   return (
     <Modal opened={opened} onClose={onClose} title={t('documents.create')} size="lg">
       {/* ⛔ Перед полями: причину видно ДО того, як людина почне гадати, чому
           переліки порожні. Решта діалогу лишається робочою. */}
-      {sourceError !== null && <ErrorAlert error={sourceError} onRetry={refetchSources} />}
+      {sourceError !== null && <ErrorAlert error={sourceError} onRetry={() => void projects.refetch()} />}
 
       <Select
         label={t('documents.project')}
@@ -188,25 +135,30 @@ export function CreateDocumentModal({
           .filter((project) => project.status === 'Active')
           .map((project) => ({ value: String(project.id), label: project.code }))}
         value={projectId}
-        onChange={setProjectId}
-        data-autofocus
-      />
-
-      <Select
-        mt="sm"
-        label={t('documents.version')}
-        description={t('documents.versionHint')}
-        placeholder={t('documents.pickVersion')}
-        data={publishedVersions}
-        value={versionId}
         onChange={(value) => {
-          setVersionId(value);
+          setProjectId(value);
 
-          // Аркуші належать конкретній версії: залишений вибір від попередньої
+          // Аркуші належать версії проєкту: залишений вибір від попереднього
           // послав би на сервер ідентифікатори з чужої структури.
           setSheets([]);
         }}
+        data-autofocus
       />
+
+      {/*
+        ⚠ Відмова цього запиту — окремим банером: без нього «немає права» чи
+        збій сервера виглядали б як проєкт без аркушів.
+      */}
+      {template.error !== null && (
+        <ErrorAlert error={template.error} onRetry={() => void template.refetch()} />
+      )}
+
+      {/* ⚠ Лише показ: версію визначає проєкт, обирати її нема з чого. */}
+      {template.data !== undefined && (
+        <Text size="sm" mt="sm">
+          {t('documents.version')}: {template.data.templateCode} · {template.data.version}
+        </Text>
+      )}
 
       <Stack gap="xs" mt="sm">
         <LocalizedInput
@@ -225,28 +177,6 @@ export function CreateDocumentModal({
           <Text size="xs" c="dimmed" mb="xs">
             {t('documents.sheetsHint')}
           </Text>
-
-          {/*
-            ⛔ Аудит 2026-09-16 §10.8: цього блоку не було, і `available =
-            structure.data?.sheets ?? []` перетворював ВІДМОВУ запиту на
-            «аркушів немає» — рівно той взірець, проти якого існує
-            `AsyncBoundary` («`data?.items ?? []` у п'ятнадцяти областях — це
-            п'ятнадцять місць, де невдалий запит перетворюється на "даних
-            немає"»). 500 чи обрив мережі давали порожній перелік чекбоксів під
-            заголовком «Аркуші», і людина робила висновок, що винна
-            конфігурація шаблону; кнопка «Save» при цьому лишалася
-            заблокованою (`sheets.length === 0`) без жодного пояснення.
-
-            ⚠ `ErrorAlert`, а не власна подача: код помилки й кореляція — те
-            саме «куди звернутись», що й на решті екранів, і другий вигляд
-            помилки означав би, що людина не знає, чого чекати. Повна
-            `AsyncBoundary` тут не потрібна — «вантажиться» вже видно по
-            порожньому переліку, а порожнього стану в цієї відповіді не буває:
-            опублікована версія без аркушів не існує.
-          */}
-          {structure.error !== null && (
-            <ErrorAlert error={structure.error} onRetry={() => void structure.refetch()} />
-          )}
 
           <Stack gap="xs">
             {available.map((sheet) => (

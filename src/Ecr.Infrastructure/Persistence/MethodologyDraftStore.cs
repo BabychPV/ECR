@@ -299,6 +299,13 @@ public sealed class MethodologyDraftStore(EcrDbContext db) : IMethodologyDraftSt
             // тобто саме там, де описку в імені токена ще можна виправити.
             clone.SetArguments(source.ArgumentsCsv);
 
+            // ⛔ HSE301 A3a (борг F6): область і видимість — теж вміст формули. Клон
+            // без них повертав би Row-формулу до типового `Substance` — `M_t` знову
+            // лягав би N разів, по разу на речовину, — і мовчки ховав би проміжні
+            // значення, які методолог свідомо показав.
+            clone.SetScope(source.Scope);
+            clone.SetVisible(source.IsVisible);
+
             // ⚠ `EvaluationOrder` НЕ переноситься: він топологічний і
             // рахується при публікації (ФВ-9.4). Скопійований, він виглядав би
             // як уже порахований для складу формул, якого ще ніхто не перевіряв.
@@ -361,8 +368,14 @@ public sealed class MethodologyDraftStore(EcrDbContext db) : IMethodologyDraftSt
                      db.MethodologyOutputs.Where(o => o.MethodologyVersionId == sourceVersionId), ct)
                      .ConfigureAwait(false))
         {
-            db.MethodologyOutputs.Add(new MethodologyOutput(
-                targetVersionId, EcrCode.Create(source.Code), source.UnitId, source.Ordinal));
+            var clone = new MethodologyOutput(
+                targetVersionId, EcrCode.Create(source.Code), source.UnitId, source.Ordinal);
+
+            // ⛔ HSE301 A3a (борг F6): типове `true` у конструкторі — поведінка до
+            // D-176; вихід «раз на рядок» мусить лишитися таким і в клоні.
+            clone.SetPerSubstance(source.IsPerSubstance);
+
+            db.MethodologyOutputs.Add(clone);
         }
 
         foreach (var source in await ChildrenAsync(
@@ -384,12 +397,20 @@ public sealed class MethodologyDraftStore(EcrDbContext db) : IMethodologyDraftSt
     /// запис версії» довелося б оголосити в домені заради читання в
     /// інфраструктурі — тобто вписати в модель предметної області подробицю
     /// однієї вибірки.
+    /// <para>
+    /// ⚠ Порядок за <c>Id</c> — порядок створення в джерелі: клон вставляє
+    /// копії в тому самому порядку, а на стелі <c>Take</c> бере ті самі
+    /// записи, а не довільну вибірку плану (EF 10102). Обмеження
+    /// <see cref="Domain.Abstractions.Entity{TId}"/> — не нова залежність
+    /// домену, а наявний базовий тип усіх восьми наборів.
+    /// </para>
     /// </remarks>
     private static async Task<List<TChild>> ChildrenAsync<TChild>(
         IQueryable<TChild> source, CancellationToken ct)
-        where TChild : class
+        where TChild : Domain.Abstractions.Entity<int>
         => await source
             .AsNoTracking()
+            .OrderBy(c => c.Id)
             .Take(MaxChildren)
             .ToListAsync(ct)
             .ConfigureAwait(false);

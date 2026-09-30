@@ -165,8 +165,18 @@ describe('DocumentPage: заповненість видно на сторінц�
       const count = await screen.findByTestId('sheet-fill-count', {}, { timeout: SettleTimeout });
 
       // ⛔ Саме текст, а не сама лише присутність вузла: панель, що показує
-      // «0 / 0» на непорожньому документі, — той самий дефект, лише тихіший.
-      expect(count.textContent?.replace(/\s+/gu, ' ').trim()).toBe('1 / 2');
+      // «0 з 0» на непорожньому документі, — той самий дефект, лише тихіший.
+      //
+      // ✎ `U-06`: числа тепер їдуть параметрами підпису
+      // (`document.tablesFilled`), а не окремим дробом — каталог у тестах
+      // порожній, тож `t()` віддає `⟦ключ (filled=1, total=2)⟧`. Ключ
+      // перевіряється разом із числами навмисно: підпис, що загубив слова,
+      // — це і є вада, заради якої цей рядок змінили.
+      const shown = count.textContent?.replace(/\s+/gu, ' ').trim() ?? '';
+
+      expect(shown).toContain('document.tablesFilled');
+      expect(shown).toContain('filled=1');
+      expect(shown).toContain('total=2');
 
       expect(screen.queryByTestId('sheet-fill-error-dot')).not.toBeNull();
     },

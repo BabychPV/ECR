@@ -36,8 +36,11 @@ function Harness(): JSX.Element {
       <PeriodAccessRuleManager
         ruleId={ruleId}
         draft={draft}
+        structure={undefined}
+        roles={null}
         disabled={false}
         saving={false}
+        deleting={false}
         onRuleIdChange={setRuleId}
         onChange={() => {}}
         onSave={() => {}}

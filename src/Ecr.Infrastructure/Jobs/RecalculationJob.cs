@@ -37,13 +37,27 @@ namespace Ecr.Infrastructure.Jobs;
 /// контрольною сумою від застарілих чисел. Неправильне число без жодної
 /// ознаки неправильності (директива №10 `W10.1`).
 /// </para>
+/// <para>
+/// ⛔ P4 ФВ-9.8 (D-206, CAL-01): перерахунок ПРОЄКТУ (<c>DocumentId &lt;= 0</c> —
+/// нічний розклад, <c>RunCalculationHandler</c>) більше НЕ рахує сам, а лише
+/// розкладає роботу на ДОКУМЕНТНІ задачі — по одній на документ, через
+/// <see cref="IBackgroundJobScheduler.EnqueueCoalescedAsync{TJob}"/>. Доти
+/// документи йшли послідовно в одній задачі, і річний перерахунок 300 документів
+/// не вкладався в 10 хвилин ПРД-13 за жодної кількості воркерів. Документна задача
+/// рахує лише свій документ (усі періоди скоупу по порядку) і створює прогін
+/// «документ × період», тож паралельні документи не витісняють актуальність один
+/// одного (<c>UX_CalculationRun_Current</c> уже містить <c>DocumentId</c>).
+/// Без планувальника (<paramref name="jobs"/> <c>null</c> — тести, утиліти) —
+/// колишній послідовний шлях у цій самій задачі.
+/// </para>
 /// </remarks>
 public sealed class RecalculationJob(
     EcrDbContext db,
     ICalculationRunner orchestrator,
     RunCalculationHandler runs,
     RecalculationService formulas,
-    Domain.Abstractions.IClock clock) : IRecalculationJob
+    Domain.Abstractions.IClock clock,
+    IBackgroundJobScheduler? jobs = null) : IRecalculationJob
 {
     /// <summary>Стеля прив'язок на прогін: методологій у системі — десятки.</summary>
     private const int MaxBindings = 5_000;
@@ -89,8 +103,68 @@ public sealed class RecalculationJob(
                 .FirstOrDefaultAsync(ct)
                 .ConfigureAwait(false);
 
-        var run = new Domain.Entities.Calculations.CalculationRun(
-            projectId, request.PeriodKey, request.TriggeredByUserId, clock.UtcNow);
+        // ⛔ P4 ФВ-9.8: проєкт — лише розклад на документні задачі, без прогону тут.
+        if (request.DocumentId <= 0 && jobs is not null)
+        {
+            await FanOutAsync(jobs, request with { ProjectId = projectId }, progress, ct).ConfigureAwait(false);
+            return;
+        }
+
+        // ⛔ Серіалізація ЗА ДОКУМЕНТОМ (P4, борг перед I2). Річна задача
+        // (`doc{id}-year`) і поперіодна (`doc{id}-p{period}`) мають різні ключі
+        // цілі, тож черга пускала їх одночасно. Річна перемикає актуальність УСІХ
+        // своїх прогонів у кінці: коли поперіодна (новіший прогін) завершувалась
+        // раніше, річна падала на `UX_CalculationRun_Current` — порушення
+        // обмеження не ретраїться, і `Failed` ставали прогони всіх її періодів
+        // (`RecalculationJobDocumentSerializationTests`). Лок сесійний, на окремому
+        // з'єднанні: задача живе кількома транзакціями, і транзакційний лок не
+        // накрив би її цілком; черга й пул лишаються як є.
+        await using var documentLock = await AcquireDocumentLockAsync(request.DocumentId, ct).ConfigureAwait(false);
+
+        // ⛔ «CalculationRun ховає результати сусідніх документів» (третя
+        // хвиля UX-PASS R4): прогін ОДНОГО документа (`request.DocumentId > 0`,
+        // маршрут `RecalculateDocumentHandler`) несе свій `DocumentId`, щоб
+        // `SwitchCurrentRunAsync` знімав актуальність лише в межах ЦЬОГО
+        // документа, а не всього `(ProjectId, PeriodKey)`. Прогін усього
+        // проєкту (`DocumentId <= 0` — нічний розклад чи адміністративна
+        // команда) лишається `DocumentId = null`, як і завжди: він рахує ВСІ
+        // документи проєкту заново, тож законно перекриває їх усіх.
+        //
+        // ⛔⛔ ОДИН ПРОГІН НА ПЕРІОД, а не один на рік. Прогін «на весь рік»
+        // (`PeriodKey = null`, нічний розклад) раніше створював ОДИН
+        // `CalculationRun` без періоду, а оркестратор пише результати без
+        // ключа періоду (`ICalculationResultStore.WriteResultsAsync`) — сховище
+        // бере його з прогону, `run.PeriodKey ?? 0`. Тобто кожне число нічного
+        // перерахунку лягало в «період 0», якого не читає ні
+        // `ReadCurrentAsync`, ні зріз `rpt.*`: нічний перерахунок рахував і
+        // не показував нічого (`RecalculationJobYearRunResultsVisibilityTests`).
+        // Прогін на кожен період дає і правильну партицію результатів, і
+        // правильне перемикання актуальності (`SwitchCurrentRunAsync` — за
+        // `(ProjectId, PeriodKey)`): ручний прогін січня перекриває нічний
+        // лише в січні, а не лишає два актуальні прогони з подвоєними рядками.
+        // Модель `CalculationRun` не змінюється — `PeriodKey` лишається
+        // nullable для прогону, якому немає чого рахувати (див. нижче).
+        var startedAt = clock.UtcNow;
+        var periodRuns = new SortedDictionary<int, (Domain.Entities.Calculations.CalculationRun Run, ModuleProfile Profile)>();
+        Domain.Entities.Calculations.CalculationRun? yearRun = null;
+
+        Domain.Entities.Calculations.CalculationRun NewRun(int? periodKey)
+            => new(
+                projectId, periodKey, request.TriggeredByUserId, startedAt,
+                documentId: request.DocumentId > 0 ? request.DocumentId : null);
+
+        async Task<(Domain.Entities.Calculations.CalculationRun Run, ModuleProfile Profile)> RunForAsync(int periodKey)
+        {
+            if (!periodRuns.TryGetValue(periodKey, out var entry))
+            {
+                entry = (NewRun(periodKey), new ModuleProfile());
+                periodRuns.Add(periodKey, entry);
+                db.CalculationRuns.Add(entry.Run);
+                await db.SaveChangesAsync(ct).ConfigureAwait(false);
+            }
+
+            return entry;
+        }
 
         try
         {
@@ -99,8 +173,12 @@ public sealed class RecalculationJob(
             // так і сталося з `ProjectId = 0` вище), виняток летів МИМО catch
             // нижче — і задача лишалася `Running` назавжди, хоча catch
             // виглядав так, ніби мав це перехопити.
-            db.CalculationRuns.Add(run);
-            await db.SaveChangesAsync(ct).ConfigureAwait(false);
+            //
+            // ⚠ Названий період — прогін створюється ОДРАЗУ, як і завжди.
+            if (request.PeriodKey is { } requestedPeriod)
+            {
+                await RunForAsync(requestedPeriod).ConfigureAwait(false);
+            }
 
             // ⛔ Q-151/Q-162 (аудит фази 1). `RunCalculationHandler` УЖЕ ставив
             // у чергу payload без `DocumentId` (нуль після розбору JSON) —
@@ -113,8 +191,6 @@ public sealed class RecalculationJob(
             var documentIds = request.DocumentId > 0
                 ? (IReadOnlyList<long>)[request.DocumentId]
                 : await ProjectDocumentIdsAsync(projectId, ct).ConfigureAwait(false);
-
-            var totalProfile = new ModuleProfile();
 
             for (var i = 0; i < documentIds.Count; i++)
             {
@@ -207,12 +283,12 @@ public sealed class RecalculationJob(
                         ct)
                     .ConfigureAwait(false);
 
-                // ⛔ ОДИН прогін (`run.Id`) на всі документи — `CalculationRun`
-                // прив'язаний до проєкту й періоду (`FK_CalculationRun_Project`),
-                // не до документа. Профілі модулів зводяться в один сумарний
-                // запис нижче — `ModuleProfile.Record` акумулює за кодом
-                // модуля, тож повторний виклик на кожен документ саме те, для
-                // чого метод і існує.
+                // ⛔ ОДИН прогін на ПЕРІОД (`RunForAsync`) на всі документи —
+                // `CalculationRun` прив'язаний до проєкту й періоду
+                // (`FK_CalculationRun_Project`), не до документа. Профілі модулів
+                // зводяться в сумарний запис прогону періоду —
+                // `ModuleProfile.Record` акумулює за кодом модуля, тож повторний
+                // виклик на кожен документ саме те, для чого метод і існує.
                 //
                 // ⛔⛔ ПОПЕРІОДНО, а не одним викликом на весь прогін. Раніше
                 // тут стояло `new PeriodKey(request.PeriodKey ?? 0)`: один
@@ -276,6 +352,8 @@ public sealed class RecalculationJob(
                     var periodCeiling =
                         formulaCeiling + ((ceiling - formulaCeiling) * (p + 1) / methodologyPeriods.Count);
 
+                    var (run, runProfile) = await RunForAsync(period).ConfigureAwait(false);
+
                     var profile = await orchestrator
                         .RunAsync(
                             run.Id,
@@ -286,16 +364,35 @@ public sealed class RecalculationJob(
                                 : [],
                             new PhaseProgress(
                                 progress, periodFloor, periodCeiling, "jobs.phaseMethodologies"),
+
+                            // RT-23a: довідники — станом на момент прогону (AC-7).
+                            run.RegistryAsOfUtc,
                             ct)
                         .ConfigureAwait(false);
 
-                    totalProfile.Merge(profile);
+                    runProfile.Merge(profile);
                 }
             }
 
+            // ⚠ Рік, у якому немає жодного періоду в скоупі (жодного
+            // екземпляра таблиць або всі періоди закриті), лишає по собі один
+            // прогін без періоду — як і раніше: задача за розкладом мусить
+            // лишати слід (профіль пишеться завжди, J-1), а результатів у
+            // такого прогону немає, тож «періоду 0» він не наповнить.
+            if (periodRuns.Count == 0)
+            {
+                yearRun = NewRun(periodKey: null);
+                db.CalculationRuns.Add(yearRun);
+                await db.SaveChangesAsync(ct).ConfigureAwait(false);
+                await runs.CompleteAsync(yearRun.Id, new ModuleProfile(), ct).ConfigureAwait(false);
+            }
+
             // Завершення — прикладний сценарій: профіль і перемикання
-            // актуальності однією транзакцією (ФВ-9.11).
-            await runs.CompleteAsync(run.Id, totalProfile, ct).ConfigureAwait(false);
+            // актуальності однією транзакцією (ФВ-9.11) — на кожен період.
+            foreach (var (run, profile) in periodRuns.Values)
+            {
+                await runs.CompleteAsync(run.Id, profile, ct).ConfigureAwait(false);
+            }
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -314,15 +411,93 @@ public sealed class RecalculationJob(
             // Прогін позначається `Failed` лише якщо його `INSERT` УСПІШНО
             // відбувся (`run.Id` призначений базою): позначати нема чого,
             // якщо самого рядка в базі немає.
-            if (run.Id > 0)
+            //
+            // ⚠ Прогонів тут може бути кілька (по одному на період): позначаються
+            // вставлені й НЕ завершені. Уже завершений прогін періоду став
+            // актуальним і зняв актуальність із попереднього — позначити його
+            // `Failed` означало б лишити той період без актуальних результатів.
+            var started = periodRuns.Values
+                .Select(entry => entry.Run)
+                .Append(yearRun)
+                .OfType<Domain.Entities.Calculations.CalculationRun>()
+                .Where(run => run.Id > 0 && run.Status == "Running")
+                .ToList();
+
+            if (started.Count > 0)
             {
-                db.CalculationRuns.Attach(run);
-                run.Complete("Failed", clock.UtcNow, profileJson: null, errorMessage: ex.Message);
+                foreach (var run in started)
+                {
+                    db.CalculationRuns.Attach(run);
+                    run.Complete("Failed", clock.UtcNow, profileJson: null, errorMessage: ex.Message);
+                }
+
                 await db.SaveChangesAsync(ct).ConfigureAwait(false);
             }
 
             throw;
         }
+    }
+
+    /// <summary>
+    /// Розкладає перерахунок проєкту на документні задачі (P4 ФВ-9.8) і
+    /// завершується, не чекаючи їх.
+    /// </summary>
+    /// <param name="scheduler">Планувальник.</param>
+    /// <param name="request">Завдання проєкту з уже визначеним <c>ProjectId</c>.</param>
+    /// <param name="progress">Канал прогресу батьківської задачі.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ Дочірня задача несе ВСЕ завдання батька, крім <c>DocumentId</c>: період,
+    /// автора й погодження (<c>ApprovedBy</c>, <c>ApprovalId</c>,
+    /// <c>ApprovalReason</c>, аудит S1). Погодження використане ОДИН раз —
+    /// обробником, до постановки батька; дочірні лише несуть його факт, інакше
+    /// гейт стану періоду (<see cref="RefusedPeriodsAsync"/>) відмовив би кожному
+    /// документу законно погодженого перерахунку закритого періоду.
+    /// <para>
+    /// ⚠ Злиття, а не витіснення: повторний нічний запуск, поки документна задача
+    /// ще в черзі, не ставить другу (<c>EnqueueCoalescedAsync</c>), і не перериває
+    /// ту, що вже рахує. Ціль названого періоду — та сама, що в кнопки документа
+    /// (<see cref="Ecr.Application.Documents.RecalculateDocumentHandler.TargetOf"/>):
+    /// нічний і ручний перерахунок того самого документа й періоду — одна робота.
+    /// </para>
+    /// <para>
+    /// ⚠ Батько не чекає дочірніх: задача, що тримає слот пулу в очікуванні задач
+    /// того самого пулу, за малого пулу (черга в базі — 4 слоти) блокує саме тих,
+    /// кого чекає. Стан кожного документа видно окремим рядком черги.
+    /// </para>
+    /// </remarks>
+    private async Task FanOutAsync(
+        IBackgroundJobScheduler scheduler,
+        RecalculationRequest request,
+        IJobProgress progress,
+        CancellationToken ct)
+    {
+        var documentIds = await ProjectDocumentIdsAsync(request.ProjectId, ct).ConfigureAwait(false);
+
+        foreach (var documentId in documentIds)
+        {
+            var child = request with { DocumentId = documentId };
+
+            var target = child.PeriodKey is { } period
+                ? Ecr.Application.Documents.RecalculateDocumentHandler.TargetOf(documentId, new PeriodKey(period))
+                : Ecr.Application.Documents.RecalculateDocumentHandler.YearTargetOf(documentId);
+
+            await scheduler
+                .EnqueueCoalescedAsync<IRecalculationJob>(target, child, ct, child.TriggeredByUserId)
+                .ConfigureAwait(false);
+        }
+
+        await progress
+            .ReportAsync(
+                100,
+                JobProgressMessageCodec.Encode(new JobProgressMessageEnvelope(
+                    "jobs.recalcFannedOut",
+                    new Dictionary<string, string>(StringComparer.Ordinal)
+                    {
+                        ["count"] = documentIds.Count.ToString(CultureInfo.InvariantCulture),
+                    })),
+                ct)
+            .ConfigureAwait(false);
     }
 
     /// <summary>Повний перерахунок формул шаблону для документа й періодів завдання.</summary>
@@ -398,25 +573,67 @@ public sealed class RecalculationJob(
     private async Task<IReadOnlyList<int>> ScopePeriodsAsync(
         RecalculationRequest request, IReadOnlySet<int> refused, CancellationToken ct)
     {
-        var scopesQuery = db.TableInstances
-            .AsNoTracking()
-            .Where(i => i.DocumentId == request.DocumentId
-                        && (request.PeriodKey == null || i.PeriodKeyValue == request.PeriodKey));
-
-        if (request.SheetDefId is { } scopeSheetId)
+        Task<List<int>> ScopesAsync(IQueryable<Ecr.Domain.Entities.Documents.TableInstance> instances)
         {
-            scopesQuery = scopesQuery.Where(i =>
-                db.TableDefs.Any(td => td.Id == i.TableDefId && td.SheetDefId == scopeSheetId));
+            var scopesQuery = instances
+                .Where(i => request.PeriodKey == null || i.PeriodKeyValue == request.PeriodKey);
+
+            if (request.SheetDefId is { } scopeSheetId)
+            {
+                scopesQuery = scopesQuery.Where(i =>
+                    db.TableDefs.Any(td => td.Id == i.TableDefId && td.SheetDefId == scopeSheetId));
+            }
+
+            return scopesQuery
+                .Select(i => i.PeriodKeyValue)
+                .Distinct()
+                // За зростанням ДО стелі: на межі беруться найраніші періоди —
+                // ті, від яких рахуються наступні (`[Period:-1]`), — а не
+                // довільні (EF 10102).
+                .OrderBy(key => key)
+                .Take(MaxBindings)
+                .ToListAsync(ct);
         }
 
-        var scopes = await scopesQuery
-            .Select(i => i.PeriodKeyValue)
-            .Distinct()
-            .Take(MaxBindings)
-            .ToListAsync(ct)
-            .ConfigureAwait(false);
+        // ⚠ O3d: з ключем партиції (DocumentInstancesQuery). Порожньо — колишній пошук
+        // без ключа: документ, чиї екземпляри лежать лише в періодах без рядка в
+        // doc.Period, дає той самий скоуп, що й до O3d.
+        var scopes = await ScopesAsync(DocumentInstancesQuery(db, request.DocumentId)).ConfigureAwait(false);
+        if (scopes.Count == 0)
+        {
+            scopes = await ScopesAsync(db.TableInstances.AsNoTracking().Where(i => i.DocumentId == request.DocumentId))
+                .ConfigureAwait(false);
+        }
 
         return [.. scopes.Where(key => !refused.Contains(key)).OrderBy(key => key)];
+    }
+
+    /// <summary>
+    /// Екземпляри таблиць документа з ключем партиції (O3d, I2-2 ФВ-9.8).
+    /// </summary>
+    /// <param name="db">Контекст.</param>
+    /// <param name="documentId">Документ.</param>
+    /// <returns>Незавершений запит; фільтри й проєкцію добирає викликач.</returns>
+    /// <remarks>
+    /// ⛔ Ключі <c>doc.TableInstance</c> — <c>(PeriodKey, …)</c> в усіх індексах
+    /// (<c>PK</c> — <c>PeriodKey, Id</c>; <c>UQ</c> — <c>PeriodKey, DocumentId, TableDefId</c>),
+    /// і предикат лише за <c>DocumentId</c> сканує <c>UQ_TableInstance</c> у всіх 25
+    /// партиціях. <c>PeriodKey IN (SELECT PeriodKey FROM doc.Period)</c> — як у
+    /// <c>RowStore.TableInstancesByIdQuery</c> — дає по seek'у на період. Замір на
+    /// <c>EcrPerfI2</c> (док 326, фактичний план): скоуп періодів 1 984 читання / 70 мс ЦП →
+    /// 66 / 0 мс (24 партиції з seek'ом замість скану 25).
+    /// <para>⚠ Екземпляр, чийого періоду немає в <c>doc.Period</c>, цей запит не знайде
+    /// (FK на <c>doc.Period</c> немає) — тому викликачі мають запасний шлях без ключа.</para>
+    /// </remarks>
+    public static IQueryable<Ecr.Domain.Entities.Documents.TableInstance> DocumentInstancesQuery(
+        EcrDbContext db, long documentId)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+
+        return db.TableInstances
+            .AsNoTracking()
+            .Where(i => db.Periods.Select(p => p.PeriodKeyValue).Contains(i.PeriodKeyValue)
+                        && i.DocumentId == documentId);
     }
 
     /// <summary>Прив'язки методологій до таблиць документа, РОЗКЛАДЕНІ ЗА ПЕРІОДАМИ.</summary>
@@ -457,6 +674,10 @@ public sealed class RecalculationJob(
         // тут і у фазі формул, розійтися більше не можуть.
         var scopeKeys = periods.ToList();
 
+        // ⚠ O3d: ключ партиції тут УЖЕ є — `PeriodKey IN (@scopeKeys1, …)` (EF 10 —
+        // окремі параметри): фактичний план на EcrPerfI2, док 326 — 12 seek'ів, 40 читань.
+        // Додатковий `IN (SELECT PeriodKey FROM doc.Period)` дав би 24 seek'и / 64 читання,
+        // тобто гірше, — тому не доданий.
         var instancesQuery = db.TableInstances
             .AsNoTracking()
             .Where(i => i.DocumentId == request.DocumentId
@@ -469,6 +690,8 @@ public sealed class RecalculationJob(
         }
 
         var instances = await instancesQuery
+            .OrderBy(i => i.PeriodKeyValue)
+            .ThenBy(i => i.Id)
             .Take(MaxBindings)
             .Select(i => new InstanceRow(i.Id, i.TableDefId, i.PeriodKeyValue))
             .ToListAsync(ct)
@@ -484,6 +707,7 @@ public sealed class RecalculationJob(
         var bindings = await db.CalculationBindings
             .AsNoTracking()
             .Where(b => b.IsActive && tableDefIds.Contains(b.TableDefId))
+            .OrderBy(b => b.Id)
             .Take(MaxBindings)
             .Select(b => new BindingRow(b.TableDefId, b.MethodologyId))
             .ToListAsync(ct)
@@ -596,6 +820,21 @@ public sealed class RecalculationJob(
         return refused;
     }
 
+    /// <summary>Ресурс <c>sp_getapplock</c> для перерахунку документа.</summary>
+    /// <param name="documentId">Документ.</param>
+    /// <returns>Ім'я ресурсу.</returns>
+    public static string DocumentLockResource(long documentId) => RecalculationDocumentLock.Resource(documentId);
+
+    /// <summary>Бере ексклюзивний лок документа на весь час задачі.</summary>
+    /// <returns><c>null</c> — лок не потрібен (перерахунок проєкту без планувальника, не SQL Server).</returns>
+    /// <remarks>
+    /// ⛔ O1 (I2 ФВ-9.8): очікування — лише <see cref="RecalculationDocumentLock.BusyWait"/>,
+    /// а не 15 хв. Документ рахує інша задача — <see cref="JobDeferredException"/>:
+    /// виконавець повертає задачу в чергу, звільнивши слот, без спроби ретраю.
+    /// </remarks>
+    private Task<SqlDistributedLock?> AcquireDocumentLockAsync(long documentId, CancellationToken ct)
+        => RecalculationDocumentLock.AcquireAsync(db, documentId, RecalculationDocumentLock.BusyWait, ct);
+
     /// <summary>Усі документи проєкту — для перерахунку «на весь проєкт».</summary>
     /// <remarks>
     /// Q-151/Q-162: саме цей перелік замінює «нуль документів» на «усі
@@ -605,6 +844,7 @@ public sealed class RecalculationJob(
         => await db.Documents
             .AsNoTracking()
             .Where(d => d.ProjectId == projectId)
+            .OrderBy(d => d.Id)
             .Select(d => d.Id)
             .ToListAsync(ct)
             .ConfigureAwait(false);
@@ -745,10 +985,19 @@ public sealed class RecalculationJob(
 /// звузити читання означало б порахувати з частково застарілих входів —
 /// тихо неправильне число замість «кнопка ширша за назву» (Q-327).
 /// </param>
+/// <param name="ApprovalId">
+/// Використане погодження (<c>calc.RecalculationApproval</c>); кладе
+/// <c>RunCalculationHandler</c>. ⚠ P4 ФВ-9.8: поле існує, щоб дочірні документні
+/// задачі несли слід погодження разом з <paramref name="ApprovedBy"/>, а не
+/// губили його при розборі.
+/// </param>
+/// <param name="ApprovalReason">Причина погодження — той самий слід, що й <paramref name="ApprovalId"/>.</param>
 public sealed record RecalculationRequest(
     int ProjectId,
     long DocumentId,
     int? PeriodKey,
     int? TriggeredByUserId,
     int? SheetDefId = null,
-    int? ApprovedBy = null);
+    int? ApprovedBy = null,
+    long? ApprovalId = null,
+    string? ApprovalReason = null);

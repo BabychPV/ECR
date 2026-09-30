@@ -61,6 +61,23 @@ export const PackageEditorCss = readFileSync(
   'utf8',
 );
 
+/**
+ * CSS шапки — ще один файл того самого пакета.
+ *
+ * ⚠ Він потрібен у каскаді з тієї самої причини, що й два вище: вигляд
+ * `.rgHeaderCell` складають ОБИДВА файли пакета (`revogr-header-style.css`
+ * задає `display: flex` і `align-*`, `revo-grid-style.css` — тему `compact`),
+ * і перевірка, що наше правило їх переважає, без одного з них доводила б
+ * менше, ніж стверджує.
+ */
+export const PackageHeaderCss = readFileSync(
+  path.resolve(
+    WebRoot,
+    'node_modules/@revolist/revogrid/dist/collection/components/header/revogr-header-style.css',
+  ),
+  'utf8',
+);
+
 /** Наш CSS станів комірки. */
 export const AppCss = readFileSync(
   path.resolve(WebRoot, 'src/shared/theme/cell-states.css'),
@@ -108,7 +125,12 @@ export function parseCss(css: string): Rule[] {
  * сподіватися на порядок завантаження.
  */
 export function gridCascade(): Rule[] {
-  return [...parseCss(PackageCss), ...parseCss(PackageEditorCss), ...parseCss(AppCss)];
+  return [
+    ...parseCss(PackageCss),
+    ...parseCss(PackageEditorCss),
+    ...parseCss(PackageHeaderCss),
+    ...parseCss(AppCss),
+  ];
 }
 
 /** Токени одного компаунда селектора. */

@@ -31,6 +31,7 @@ const SeededStrings: Record<string, string> = {
   'headerFields.code': 'Code',
   'headerFields.label': 'Label',
   'headerFields.dataType': 'Data type',
+  'enum.dataType.Decimal': 'Number',
   'headerFields.required': 'Required',
   'headerFields.empty': 'No header fields yet.',
   'headerFields.save': 'Save field',
@@ -167,7 +168,9 @@ describe('TemplateVersionPage: поля шапки документа', () => {
 
     expect(await screen.findByText('(Contractor)')).not.toBeNull();
     expect(screen.getByText('(Area)')).not.toBeNull();
-    expect(screen.getByText('Decimal')).not.toBeNull();
+    // ⛔ X-16: тип — підписом каталогу, а не сирим `Decimal`.
+    expect(screen.getByText('Number')).not.toBeNull();
+    expect(screen.queryByText('Decimal')).toBeNull();
   });
 
   it('версія-чернетка (isEditable: true) показує «Додати поле» і «Правити»', async () => {

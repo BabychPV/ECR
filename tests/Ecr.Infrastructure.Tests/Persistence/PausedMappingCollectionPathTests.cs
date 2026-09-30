@@ -71,7 +71,9 @@ public sealed class PausedMappingCollectionPathTests(SqlServerFixture sql)
                 Arg.Any<IReadOnlyList<IntegrationCellValue>>(), Arg.Any<CancellationToken>())
             .Returns(new IntegrationWriteResult(1, []));
 
-        var job = new MaterializeCollectedDataJob(db, patcher, Substitute.For<ICoverageJournal>());
+        var job = new MaterializeCollectedDataJob(
+            db, patcher, Substitute.For<ICoverageJournal>(),
+            new IntegrationActor(db, new Ecr.Application.Common.JobActorScope()));
 
         await job.ExecuteAsync(
             new MaterializeTask(

@@ -1,7 +1,7 @@
 import type { JSX } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { MantineProvider } from '@mantine/core';
+import { MantineProvider, Menu } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import type { DocumentSummary } from '@/api/types';
@@ -66,7 +66,15 @@ function Harness(props: {
   return (
     <div>
       <h1>{props.document.businessKey}</h1>
-      {deletion.trigger}
+      {/* ⚠ Пункт живе в меню «More» сторінки (`DocumentToolbar`); тут меню
+          відкрите завжди, щоб перевіряти сам пункт, а не механіку меню. */}
+      <Menu opened withinPortal={false}>
+        <Menu.Target>
+          <span>menu</span>
+        </Menu.Target>
+        <Menu.Dropdown>{deletion.menuItem}</Menu.Dropdown>
+      </Menu>
+      {deletion.dialog}
       {deletion.refusal}
     </div>
   );
@@ -110,7 +118,7 @@ function show(
 const DeleteButton = { name: '⟦documents.delete⟧' };
 
 async function confirmDeletion(): Promise<void> {
-  fireEvent.click(screen.getByRole('button', DeleteButton));
+  fireEvent.click(screen.getByRole('menuitem', DeleteButton));
   fireEvent.click(await screen.findByTestId('confirm-verb'));
 }
 
@@ -137,7 +145,7 @@ describe('useDeleteDocumentAction: показ кнопки', () => {
   it('є право і чернетка — кнопка є', () => {
     show();
 
-    expect(screen.getByRole('button', DeleteButton)).toBeDefined();
+    expect(screen.getByRole('menuitem', DeleteButton)).toBeDefined();
   });
 
   it('без права Document.Delete — кнопки НЕМАЄ', () => {
@@ -146,7 +154,7 @@ describe('useDeleteDocumentAction: показ кнопки', () => {
     // Спершу — що харнес узагалі намальований, інакше «кнопки немає» було б
     // правдою з іншої причини.
     expect(screen.getByRole('heading', { name: 'DOC-0042' })).toBeDefined();
-    expect(screen.queryByRole('button', DeleteButton)).toBeNull();
+    expect(screen.queryByRole('menuitem', DeleteButton)).toBeNull();
   });
 
   it('не чернетка (аркуш поданий) — кнопки НЕМАЄ', () => {
@@ -155,7 +163,7 @@ describe('useDeleteDocumentAction: показ кнопки', () => {
     });
 
     expect(screen.getByRole('heading', { name: 'DOC-0042' })).toBeDefined();
-    expect(screen.queryByRole('button', DeleteButton)).toBeNull();
+    expect(screen.queryByRole('menuitem', DeleteButton)).toBeNull();
   });
 });
 
@@ -164,7 +172,7 @@ describe('useDeleteDocumentAction: підтвердження', () => {
     mockServer(204);
     show();
 
-    fireEvent.click(screen.getByRole('button', DeleteButton));
+    fireEvent.click(screen.getByRole('menuitem', DeleteButton));
 
     const dialog = await screen.findByRole('dialog');
     expect(dialog.textContent).toContain('Boiler house · DOC-0042');

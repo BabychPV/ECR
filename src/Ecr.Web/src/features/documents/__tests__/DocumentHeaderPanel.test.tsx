@@ -1,9 +1,10 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi, beforeAll } from 'vitest';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { DocumentHeaderPanel } from '@/features/documents/DocumentHeaderPanel';
 import { showDone } from '@/shared/ui/notify';
+import { flushUnsaved, hasUnsavedChanges, unsavedCount } from '@/shared/ui/unsavedSources';
 import { testTheme } from '@/test/render';
 
 /**
@@ -20,6 +21,12 @@ vi.mock('@/shared/ui/notify', async (importOriginal) => ({
 }));
 
 const DocumentId = 11;
+
+/** Версія шапки з `GET` — її панель зобов'язана повернути в `baseVersion` (C2). */
+const HeaderVersion = 'HDR-V1';
+
+/** Версія після успішного `PATCH`. */
+const SavedVersion = 'HDR-V2';
 
 interface HeaderField {
   code: string;
@@ -91,6 +98,12 @@ interface Sent {
 
 const sent: Sent[] = [];
 
+/** Одиниці — фікстура `GET /api/v1/units` (`UnitRef`). */
+const UnitsFixture = [
+  { id: 21, code: 'kg', dimensionCode: 'Mass', dimensionId: 1, factorToBase: '1', offsetToBase: '0' },
+  { id: 22, code: 't', dimensionCode: 'Mass', dimensionId: 1, factorToBase: '1000', offsetToBase: '0' },
+];
+
 /** Кожен GET `…/entries`: код довідника і сирий рядок запиту (без `?`). */
 interface EntriesRequest {
   code: string;
@@ -99,6 +112,9 @@ interface EntriesRequest {
 
 const entriesRequests: EntriesRequest[] = [];
 
+/** Скільки разів панель читала шапку (`GET …/header`). */
+const headerGets = { count: 0 };
+
 function mockServer(
   fields: HeaderField[],
   patchResponse?: { status: number; body?: unknown },
@@ -106,6 +122,7 @@ function mockServer(
 ): void {
   sent.length = 0;
   entriesRequests.length = 0;
+  headerGets.count = 0;
 
   vi.stubGlobal(
     'fetch',
@@ -114,7 +131,8 @@ function mockServer(
       const method = String(init?.method ?? 'GET');
 
       if (url.endsWith(`/api/v1/documents/${String(DocumentId)}/header`) && method === 'GET') {
-        return new Response(JSON.stringify({ fields }), {
+        headerGets.count += 1;
+        return new Response(JSON.stringify({ fields, version: HeaderVersion }), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
         });
@@ -127,7 +145,7 @@ function mockServer(
           body: init?.body === undefined ? undefined : (JSON.parse(String(init.body)) as unknown),
         });
 
-        const response = patchResponse ?? { status: 200, body: { fields } };
+        const response = patchResponse ?? { status: 200, body: { fields, version: SavedVersion } };
 
         return response.body === undefined
           ? new Response(null, { status: response.status })
@@ -164,6 +182,14 @@ function mockServer(
         });
       }
 
+      // ⚠ `R-01`: перелік одиниць для полів `Unit`.
+      if (url.endsWith('/api/v1/units') && method === 'GET') {
+        return new Response(JSON.stringify(UnitsFixture), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
       throw new Error(`неочікуваний запит у тесті: ${method} ${url}`);
     }),
   );
@@ -193,6 +219,18 @@ function show(options: {
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.mocked(showDone).mockClear();
+});
+
+
+/**
+ * ⛔ Прогрів чанка поля дати. Холодний `import('@mantine/dates')` під
+ * навантаженням повного прогону — понад секунду, тобто довше за типовий
+ * `waitFor`, і тест «Date рендериться» падав не через код. Поле й далі
+ * монтується через `lazy()` — прогрівається модуль, не обхід (як у
+ * `PeriodsPage.reopenWindow.test.tsx`).
+ */
+beforeAll(async () => {
+  await import('@/shared/dates/DateInputWithStyles');
 });
 
 describe('DocumentHeaderPanel: порожній перелік полів', () => {
@@ -316,9 +354,40 @@ describe('DocumentHeaderPanel: збереження', () => {
     // рядок почервоніє, бо `B` з'явиться в тілі запиту.
     expect(sent[0]?.body).toEqual({
       fields: [{ code: 'A', isEmpty: false, value: 'нова' }],
+      baseVersion: HeaderVersion,
     });
 
     expect(showDone).toHaveBeenCalled();
+  });
+
+  it('409 ECR-DOC-0409: показує причину і перечитує шапку — чернетка стає значенням сервера', async () => {
+    show({
+      fields: [field({ code: 'A', dataType: 'String', value: 'стара' })],
+      patchResponse: {
+        status: 409,
+        body: {
+          title: 'Conflict',
+          status: 409,
+          errorCode: 'ECR-DOC-0409',
+          correlationId: 'cid-hdr-409',
+          detail: 'Someone else changed the document header after you opened it.',
+          messageKey: 'err.ECR-DOC-0409.headerStale',
+        },
+      },
+    });
+
+    const input = await screen.findByLabelText('Label');
+    fireEvent.change(input, { target: { value: 'моя' } });
+    fireEvent.click(await screen.findByRole('button', { name: '⟦common.save⟧' }));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toContain('Someone else changed the document header');
+
+    // ⛔ Мутаційний доказ: без перечитування після конфлікту панель лишила б
+    // стару версію, і повторне «Зберегти» знову впало б у 409 — або, гірше,
+    // людина не побачила б чужого значення, яке збирається перезаписати.
+    await waitFor(() => expect(headerGets.count).toBe(2));
+    await waitFor(() => expect((input as HTMLInputElement).value).toBe('стара'));
   });
 
   it('непорушене поле без значення НЕ вважається зміненим (порожній текст ≡ null)', async () => {
@@ -359,6 +428,7 @@ describe('DocumentHeaderPanel: збереження', () => {
     await waitFor(() => expect(sent.length).toBe(1));
     expect(sent[0]?.body).toEqual({
       fields: [{ code: 'AMOUNT', isEmpty: false, value: '6' }],
+      baseVersion: HeaderVersion,
     });
   });
 
@@ -371,7 +441,7 @@ describe('DocumentHeaderPanel: збереження', () => {
 
     // `DateInput` — окремий чанк; дочекатись, доки Suspense розв'яжеться і
     // поле з'явиться.
-    await waitFor(() => expect(screen.queryByLabelText('Date')).not.toBeNull());
+    await waitFor(() => expect(screen.queryByLabelText('Date')).not.toBeNull(), { timeout: 10_000 });
   });
 });
 
@@ -453,6 +523,7 @@ describe('DocumentHeaderPanel: Lookup-поле — picker за довідник�
     // цей рядок почервоніє.
     expect(sent[0]?.body).toEqual({
       fields: [{ code: 'UNIT', isEmpty: false, value: 43 }],
+      baseVersion: HeaderVersion,
     });
   });
 
@@ -572,5 +643,197 @@ describe('DocumentHeaderPanel: Lookup-поле — picker за довідник�
     // надсилати) — цей рядок почервоніє: query-параметр зникне або
     // з'явиться для нетемпорального тесту вище.
     expect(request?.query).toBe(expected);
+  });
+});
+
+/**
+ * ⛔ Аудит U13: змінена шапка — джерело незбережених змін для `UnsavedGuard`.
+ * Доти перехід у меню зі зміненими полями шапки губив їх мовчки: сторож знав
+ * лише сітку й гранти.
+ */
+describe('DocumentHeaderPanel: незбережені зміни (U13)', () => {
+  function twoFields(): HeaderField[] {
+    return [
+      field({ code: 'A', dataType: 'String', value: 'стара', label: { values: { en: 'A' } } }),
+      field({ code: 'B', dataType: 'String', value: 'інша', label: { values: { en: 'B' } } }),
+    ];
+  }
+
+  it('зміна поля реєструє джерело; лічильник — кількість змінених полів', async () => {
+    show({ fields: twoFields() });
+
+    const a = await screen.findByLabelText('A');
+    expect(hasUnsavedChanges()).toBe(false);
+
+    fireEvent.change(a, { target: { value: 'нова' } });
+
+    // ⛔ Мутаційний доказ: прибери `registerUnsavedSource` із панелі — тут червоне.
+    await waitFor(() => expect(hasUnsavedChanges()).toBe(true));
+    expect(unsavedCount()).toBe(1);
+
+    fireEvent.change(await screen.findByLabelText('B'), { target: { value: 'ще' } });
+    await waitFor(() => expect(unsavedCount()).toBe(2));
+
+    // Повернення значення назад — поле більше не змінене.
+    fireEvent.change(a, { target: { value: 'стара' } });
+    await waitFor(() => expect(unsavedCount()).toBe(1));
+  });
+
+  it('flush (вихід через UnsavedGuard) зберігає змінені поля і знімає джерело', async () => {
+    show({ fields: twoFields() });
+
+    fireEvent.change(await screen.findByLabelText('A'), { target: { value: 'нова' } });
+    await waitFor(() => expect(hasUnsavedChanges()).toBe(true));
+
+    await expect(flushUnsaved(5_000)).resolves.toBe(true);
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0]?.body).toEqual({
+      fields: [{ code: 'A', isEmpty: false, value: 'нова' }],
+      baseVersion: HeaderVersion,
+    });
+
+    // ⛔ Мутаційний доказ: не знімати реєстрацію після збереження — тут червоне.
+    await waitFor(() => expect(hasUnsavedChanges()).toBe(false));
+  });
+
+  it('flush, який сервер відхилив (422 на невалідне поле), — false, чернетка лишається', async () => {
+    show({
+      fields: [field({ code: 'QTY', dataType: 'Int', value: 5 })],
+      patchResponse: {
+        status: 422,
+        body: { title: 'Unprocessable Entity', status: 422, errorCode: 'ECR-HDR-0422', detail: 'x' },
+      },
+    });
+
+    const input = await screen.findByLabelText('Label');
+    fireEvent.change(input, { target: { value: 'abc' } });
+    await waitFor(() => expect(hasUnsavedChanges()).toBe(true));
+
+    // Відмова — `false`: сторож покаже діалог, а не піде мовчки.
+    await expect(flushUnsaved(5_000)).resolves.toBe(false);
+    expect(sent).toHaveLength(1);
+    expect(hasUnsavedChanges()).toBe(true);
+    expect((input as HTMLInputElement).value).toBe('abc');
+  });
+
+  it('збереження кнопкою знімає джерело', async () => {
+    show({ fields: twoFields() });
+
+    fireEvent.change(await screen.findByLabelText('A'), { target: { value: 'нова' } });
+    await waitFor(() => expect(hasUnsavedChanges()).toBe(true));
+
+    fireEvent.click(await screen.findByRole('button', { name: '⟦common.save⟧' }));
+
+    await waitFor(() => expect(sent).toHaveLength(1));
+    await waitFor(() => expect(hasUnsavedChanges()).toBe(false));
+  });
+
+  it('скасування знімає джерело і повертає значення сервера', async () => {
+    show({ fields: twoFields() });
+
+    const a = await screen.findByLabelText('A');
+    fireEvent.change(a, { target: { value: 'нова' } });
+    await waitFor(() => expect(hasUnsavedChanges()).toBe(true));
+
+    fireEvent.click(await screen.findByRole('button', { name: '⟦common.cancel⟧' }));
+
+    await waitFor(() => expect(hasUnsavedChanges()).toBe(false));
+    expect((a as HTMLInputElement).value).toBe('стара');
+  });
+
+  it('розмонтування знімає джерело', async () => {
+    show({ fields: twoFields() });
+
+    fireEvent.change(await screen.findByLabelText('A'), { target: { value: 'нова' } });
+    await waitFor(() => expect(hasUnsavedChanges()).toBe(true));
+
+    cleanup();
+
+    expect(hasUnsavedChanges()).toBe(false);
+  });
+
+  it('закриття вкладки зі зміненою шапкою — рідне питання браузера; без змін — ні', async () => {
+    show({ fields: twoFields() });
+
+    const a = await screen.findByLabelText('A');
+    const clean = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(clean);
+    expect(clean.defaultPrevented).toBe(false);
+
+    fireEvent.change(a, { target: { value: 'нова' } });
+    await waitFor(() => expect(hasUnsavedChanges()).toBe(true));
+
+    const dirtyEvent = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(dirtyEvent);
+    expect(dirtyEvent.defaultPrevented).toBe(true);
+  });
+
+  it('перезапит НЕ затирає змінену чернетку, і збереження несе версію, на якій правили', async () => {
+    const fields = twoFields();
+    const client = show({ fields });
+
+    const a = await screen.findByLabelText('A');
+    fireEvent.change(a, { target: { value: 'моя' } });
+    await waitFor(() => expect(hasUnsavedChanges()).toBe(true));
+
+    // Хтось інший змінив поле — фоновий перезапит приносить нове значення.
+    fields[0] = { ...fields[0]!, value: 'чужа' };
+    await client.invalidateQueries({ queryKey: ['document-header', DocumentId] });
+    await waitFor(() => expect(headerGets.count).toBe(2));
+
+    // ⛔ Мутаційний доказ: наповнювати чернетку КОЖНОЮ відповіддю — тут червоне.
+    expect((a as HTMLInputElement).value).toBe('моя');
+    expect(hasUnsavedChanges()).toBe(true);
+
+    fireEvent.click(await screen.findByRole('button', { name: '⟦common.save⟧' }));
+    await waitFor(() => expect(sent).toHaveLength(1));
+    expect(sent[0]?.body).toEqual({
+      fields: [{ code: 'A', isEmpty: false, value: 'моя' }],
+      baseVersion: HeaderVersion,
+    });
+  });
+
+  it('незмінена чернетка йде за перезапитом і не вважається зміненою', async () => {
+    const fields = twoFields();
+    const client = show({ fields });
+
+    const a = await screen.findByLabelText('A');
+
+    fields[0] = { ...fields[0]!, value: 'чужа' };
+    await client.invalidateQueries({ queryKey: ['document-header', DocumentId] });
+
+    // ⛔ Доти поле лишалось «стара» і ставало «зміненим» проти нової відповіді —
+    // «Зберегти» мовчки повернуло б чуже значення назад.
+    await waitFor(() => expect((a as HTMLInputElement).value).toBe('чужа'));
+    expect(hasUnsavedChanges()).toBe(false);
+    expect((await screen.findByRole('button', { name: '⟦common.save⟧' })).hasAttribute('disabled')).toBe(true);
+  });
+});
+
+describe('DocumentHeaderPanel: поле Unit (R-01)', () => {
+  /**
+   * ⛔ Живцем на стенді: поле одиниці шапки було текстовим полем — `kg`
+   * набрати можна, а сервер відмовляв «expects the identifier». Тепер це
+   * вибір зі списку одиниць за кодом, а в PATCH іде ідентифікатор.
+   */
+  it('показує код обраної одиниці і шле в PATCH її ідентифікатор, а не код', async () => {
+    show({
+      fields: [field({ code: 'HUNIT', dataType: 'Unit', value: 21, label: { values: { en: 'Header unit' } } })],
+    });
+
+    const select = await screen.findByLabelText('Header unit');
+    await waitFor(() => expect(select.hasAttribute('disabled')).toBe(false));
+    expect((select as HTMLInputElement).value).toBe('kg · Mass');
+
+    fireEvent.click(select);
+    fireEvent.click(await screen.findByRole('option', { name: 't · Mass' }));
+    fireEvent.click(await screen.findByRole('button', { name: '⟦common.save⟧' }));
+
+    await waitFor(() => expect(sent.length).toBe(1));
+    expect(sent[0]?.body).toEqual({
+      fields: [{ code: 'HUNIT', isEmpty: false, value: 22 }],
+      baseVersion: HeaderVersion,
+    });
   });
 });

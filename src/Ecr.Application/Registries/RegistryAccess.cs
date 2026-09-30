@@ -22,7 +22,7 @@ namespace Ecr.Application.Registries;
 /// Той самий клас "OR", що вже є для <c>Integration.Manage</c>/<c>Integration.View</c>
 /// (<see cref="PermissionCheck.RequireAnyAsync"/>) — тут лише альтернатива не
 /// друге глобальне право, а ресурсний грант, тож рішення не зводиться до
-/// списку кодів права: перевіряються <see cref="AccessProfile.Has"/> і
+/// списку кодів права: перевіряються <see cref="AccessProfile.Has(string)"/> і
 /// <see cref="AccessProfile.LevelFor"/> — те саме, чим уже перевіряються
 /// гранти на проєкт (<c>ResourceKind.Project</c>) у документах.
 /// </para>

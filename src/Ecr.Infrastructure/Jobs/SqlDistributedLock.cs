@@ -44,8 +44,21 @@ public sealed class SqlDistributedLock : IAsyncDisposable
     /// Пробує взяти лок негайно, без очікування. <c>null</c> — інший
     /// інстанс/сесія вже тримає той самий ресурс просто зараз.
     /// </summary>
-    public static async Task<SqlDistributedLock?> TryAcquireAsync(
+    public static Task<SqlDistributedLock?> TryAcquireAsync(
         string connectionString, string resource, CancellationToken ct)
+        => AcquireAsync(connectionString, resource, TimeSpan.Zero, ct);
+
+    /// <summary>
+    /// Бере лок, чекаючи не довше за <paramref name="timeout"/>. <c>null</c> — не
+    /// дочекалися: ресурс досі тримає інша сесія.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Скасування <paramref name="ct"/> під час очікування — <see cref="OperationCanceledException"/>,
+    /// а не <see cref="SqlException"/> «operation cancelled»: витіснена задача
+    /// (<c>EnqueueExclusiveAsync</c>) мусить виглядати скасованою, а не зламаною.
+    /// </remarks>
+    public static async Task<SqlDistributedLock?> AcquireAsync(
+        string connectionString, string resource, TimeSpan timeout, CancellationToken ct)
     {
         var connection = new SqlConnection(connectionString);
         try
@@ -56,14 +69,26 @@ public sealed class SqlDistributedLock : IAsyncDisposable
             acquire.CommandText =
                 "DECLARE @result int; " +
                 "EXEC @result = sp_getapplock @Resource = @Resource, @LockMode = 'Exclusive', " +
-                "@LockOwner = 'Session', @LockTimeout = 0; " +
+                "@LockOwner = 'Session', @LockTimeout = @Timeout; " +
                 "SELECT @result;";
             acquire.Parameters.AddWithValue("@Resource", resource);
+            acquire.Parameters.AddWithValue("@Timeout", (int)timeout.TotalMilliseconds);
 
-            var result = (int)(await acquire.ExecuteScalarAsync(ct).ConfigureAwait(false))!;
+            // Команда не має впасти за власним таймаутом раніше, ніж лок за своїм.
+            acquire.CommandTimeout = (int)Math.Ceiling(timeout.TotalSeconds) + 30;
+
+            int result;
+            try
+            {
+                result = (int)(await acquire.ExecuteScalarAsync(ct).ConfigureAwait(false))!;
+            }
+            catch (SqlException) when (ct.IsCancellationRequested)
+            {
+                throw new OperationCanceledException(ct);
+            }
 
             // sp_getapplock: 0/1 — узято (1 — були інші охочі); від'ємне —
-            // не взято (тут очікувано -1, "зайнято", бо @LockTimeout = 0).
+            // не взято (-1 — «зайнято» / не дочекалися в межах @LockTimeout).
             if (result < 0)
             {
                 await connection.DisposeAsync().ConfigureAwait(false);

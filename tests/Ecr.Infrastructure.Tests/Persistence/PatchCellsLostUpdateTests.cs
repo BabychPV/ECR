@@ -180,13 +180,19 @@ public sealed class PatchCellsLostUpdateTests(SqlServerFixture sql)
             Denies = new HashSet<string>(), RoleIds = new HashSet<int>(),
         };
         access.BuildProfileAsync(1, Arg.Any<CancellationToken>()).Returns(profile);
+        access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
+            .Returns(EditDecision.Allow());
         // ⛔ Рішення на КОЖНУ пару (рядок, колонка) зрізу — саме так поводиться
         // справжній `AccessDecisionService.CanEditSliceAsync` (`:280-295`:
         // подвійний цикл по рядках і колонках, без пропусків). Тут стояв
         // ПОРОЖНІЙ словник, і тест проходив лише тому, що обробник трактував
         // відсутність рішення як дозвіл (`DAT-04`). Предмет цього файлу — не
         // права, тож передумова тепер названа явно, а не отримана з дефекту.
-        access.CanEditSliceAsync(Arg.Any<AccessProfile>(), doc.TableInstanceId, Arg.Any<CancellationToken>())
+        // ⚠ WR-03: `EnsureAccessAsync` тепер запитує лише адреси батчу через
+        // `CanEditCellsAsync`, не весь зріз через `CanEditSliceAsync`.
+        access.CanEditCellsAsync(
+                  Arg.Any<AccessProfile>(), doc.TableInstanceId, Arg.Any<PeriodKey>(),
+                  Arg.Any<IReadOnlyCollection<CellAddress>>(), Arg.Any<CancellationToken>())
               .Returns(doc.RowIds
                   .SelectMany(rowId => doc.ColumnDefIds
                       .Select(columnId => new CellAddress(doc.PeriodKey, rowId, columnId)))
@@ -217,7 +223,7 @@ public sealed class PatchCellsLostUpdateTests(SqlServerFixture sql)
         return new PatchCellsHandler(
             cellStore, rowStore, documentStore, periods, metadata, access,
             new Ecr.Application.Validation.ValidationEngine(new RealFormulaEngine()),
-            methodologies, registries, headers, auditWriter, new AuditReader(db), jobs, uow, user, clock);
+            methodologies, registries, headers, auditWriter, new AuditReader(db), jobs, uow, user, clock, new SheetEditGate(db), new Ecr.Infrastructure.Persistence.UnitCatalog(db));
     }
 
     private static ColumnDef ColumnDefFor(TestDocument doc, int ordinal, CellDataType type)

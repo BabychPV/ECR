@@ -96,6 +96,7 @@ export type StatusKind =
   | 'health'
   | 'severity'
   | 'collectionRun'
+  | 'coverage'
   | 'snapshot'
   | 'notificationDelivery';
 
@@ -217,6 +218,57 @@ export const statusTable: Readonly<Record<StatusKind, Readonly<Record<string, St
     Succeeded: 'neutral',
     Degraded: 'warning',
     Failed: 'danger',
+  },
+
+  /**
+   * Подія журналу покриття (`CollectionCoverage.KnownStatuses`, `D-118`):
+   * інтервал зібрано, але в комірки він не ліг.
+   *
+   * ⚠ `SkippedPointCeiling` — `danger`: значення за поле не лягло зовсім, і
+   * виправити це може лише людина. `SkippedPeriodClosed` — `warning`: період
+   * закрито навмисно, але пізні дані все одно треба звірити. `ConflictKeptManual`
+   * — `info`: ручне значення збережено за правилом, це не збій.
+   * `SkippedWriteConflict` — `warning`: значення не записано, хоч наступний
+   * прогін і спробує знову. `SkippedNeedsConfirmation` — `warning`, а не
+   * `info`: значення не записано, і без дії людини (підтвердження) воно не
+   * ляже; `info` тут означав би «нічого робити не треба», як у `ConflictKeptManual`.
+   *
+   * Події синку довідника (`RegistrySyncJob`, FEATURE-REGISTRY-SYNC S5):
+   * `RegistryValueRejected` — `danger` (значення джерела не лягло б у поле ніколи
+   * без правки мапінгу чи джерела); `RegistryDiverged`, `RegistrySourceMissing`,
+   * `RegistryElementUnlinked` — `warning` (довідник і джерело розійшлися, потрібне
+   * рішення людини: звірити, прив'язати); `RegistryConflictKeptManual` і
+   * `RegistryPendingUpdate` — `info`: перше — правило `D-118`, друге — лише звірка
+   * S5, синк ще не пише.
+   *
+   * `SourceDataRefused` (збір, `CollectionRunner`) — `danger`: джерело відповідає,
+   * але дані інтервалу віддати не може (напр. нечитабельна мітка часу), і
+   * наздоганяння без правки джерела чи запиту не допоможе.
+   *
+   * Синк за політикою `D-212`: `RegistryAutoCreated` — `info` (синк `External`
+   * зробив свою роботу); `RegistryDeactivated`, `RegistryReactivated`,
+   * `RegistryRuleViolation`, `RegistryExternalKeyRelinked` — `warning`: довідник
+   * змінився без людини або чекає її рішення. Та сама вага, що в
+   * `NotificationJob.SeverityOf`.
+   */
+  coverage: {
+    SkippedPointCeiling: 'danger',
+    SkippedPeriodClosed: 'warning',
+    SkippedWriteConflict: 'warning',
+    SkippedNeedsConfirmation: 'warning',
+    ConflictKeptManual: 'info',
+    RegistryDiverged: 'warning',
+    RegistryConflictKeptManual: 'info',
+    RegistrySourceMissing: 'warning',
+    RegistryElementUnlinked: 'warning',
+    RegistryValueRejected: 'danger',
+    RegistryPendingUpdate: 'info',
+    SourceDataRefused: 'danger',
+    RegistryAutoCreated: 'info',
+    RegistryDeactivated: 'warning',
+    RegistryReactivated: 'warning',
+    RegistryRuleViolation: 'warning',
+    RegistryExternalKeyRelinked: 'warning',
   },
 
   /**
@@ -362,11 +414,63 @@ export function StatusBadge({ kind, state, quiet = false, title }: StatusBadgePr
    * `SnapshotsPage.statusBadgeMinWidth`), тобто наступна таблиця забула б
    * його втретє. Обрізаний до однієї літери статус не буває бажаним: підпис —
    * другий носій змісту (`ФВ-14.18`), і без нього лишається сам колір.
+   *
+   * ⛔ **2026-09-25: абзац вище описував лише ОДНОСЛІВНИЙ підпис — і саме тому
+   * фікс мовчки не рятував двослівний.** Живий вимір на `/admin/periods`
+   * (обидві теми, `document.querySelectorAll('[data-status-kind="period"]')`
+   * + `getBoundingClientRect`/`clientWidth`/`scrollWidth` на
+   * `.mantine-Badge-label`): `period/Grace` («Grace period») і
+   * `period/Scheduled` («Not open yet») лишались обрізаними навіть із
+   * `miw="fit-content"` — `labelClientWidth` 47px проти `labelScrollWidth`
+   * 76px і 73px відповідно.
+   *
+   * Причина — у самому Mantine (v7.15, `@mantine/core/styles.css`,
+   * `.mantine-Badge-root`): корінь `Badge` (`display: inline-grid`) має
+   * ВЛАСНЕ класове правило `width: fit-content` (не `min-width`), а формула
+   * CSS `fit-content(available) = min(max-content, max(min-content,
+   * available))`. Для односкладового «Scheduled» (пробілів немає, переносити
+   * нема де) `min-content == max-content`, тож формула завжди дає
+   * `max-content` НЕЗАЛЕЖНО від `available` — інакше кажучи, `miw="fit-
+   * content"` для цього випадку лише повторював те, що корінь і так уже
+   * порахував, і виглядав як робочий фікс випадково. Для «Grace period»/«Not
+   * open yet» (є пробіл — є точка переносу) `min-content` — ширина
+   * найдовшого СЛОВА, набагато менша за `max-content`; коли `available`
+   * (ширина, яку в цей момент пропонує колонка `table-layout: auto`, до того
+   * як таблиця остаточно зведе ширини) падає між ними, `fit-content`
+   * резолвиться в число МЕНШЕ за повний текст. А `min-width: fit-content` на
+   * тому самому елементі рахується за ТІЄЮ САМОЮ формулою з тим самим
+   * `available` і дає те саме число — тобто нічого не піднімає понад те, що
+   * вже стоїть у `width`.
+   *
+   * Тому до `miw` додано ще одну властивість, що примушує ширину кореня
+   * ЗАВЖДИ дорівнювати повній ширині тексту, а не значенню, що залежить від
+   * `available`, — і тим самим прибирає циклічну залежність від
+   * `table-layout: auto` для будь-якої кількості слів у підписі, не лише для
+   * одного. `miw="fit-content"` лишено: він нешкідливий (`max(max-content,
+   * fit-content) === max-content`) і документує первісне рішення проблеми —
+   * прибирати його немає причин, а звужувати набір пропів, які тримають цей
+   * інваріант, ризиковано.
+   *
+   * ⚠ Записано як `style={{ width: 'max-content' }}`, НЕ як проп-шорткат
+   * `w="max-content"` — хоч обидва дають той самий інлайн-стиль. Причина —
+   * `ФВ-14.30` (`eslint.config.js`): лінтер забороняє `w` саме на `Badge` й
+   * подібних, бо ФІКСОВАНА ширина (`w={260}`) обрізає довший переклад
+   * (казахська й російська на 20–40 % довші за англійську, `D-95`).
+   * Селектор правила зіставляє лише ІМ'Я пропу, не його значення — тобто
+   * гарантовано зловив би й це використання, хоча `max-content` не є тим
+   * дефектом, від якого рятує правило: він НЕ фіксований, а завжди дорівнює
+   * повній ширині ПОТОЧНОГО тексту, якою мовою його не давай. Приглушення
+   * лінтера тут означало б звужувати список придушень, який стереже
+   * `lintRules.test.ts`, — поза межами цього файлу, дозволеними завданням.
+   * `style` обходить це чесно: той самий результат, той самий механізм
+   * (інлайн-стиль перекриває клас), без конфлікту з правилом, чий намір тут
+   * і так дотримано.
    */
   return (
     <Badge
       size="sm"
       miw="fit-content"
+      style={{ width: 'max-content' }}
       c={fill.text}
       title={title}
       data-status-kind={kind}

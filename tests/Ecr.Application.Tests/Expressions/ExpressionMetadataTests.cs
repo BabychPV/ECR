@@ -46,7 +46,7 @@ public sealed class ExpressionMetadataTests(SqlServerFixture sql)
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "ФВ-9.15a")]
-    public async Task Діалект_шаблону_дає_рівно_свої_тринадцять_функцій()
+    public async Task Діалект_шаблону_дає_рівно_свої_двадцять_функцій()
     {
         await using var db = Context();
         var result = await Handler(db)
@@ -55,9 +55,16 @@ public sealed class ExpressionMetadataTests(SqlServerFixture sql)
         // ⚠ Набір закритий (`02b` §7): розширення — зміна контракту. Число тут
         // не «поточне», а домовлене, і його зміна мусить бути помічена.
         // 2026-09-23: тринадцять, REGFIELD додано прямим дорученням задачі.
-        Assert.Equal(13, result.Functions.Count);
+        // 2026-09-27: п'ятнадцять, REGFIND і REGONE — функції довідників
+        // (RT-20a, D-159; 02b «Функції довідників»).
+        // 2026-09-28: двадцять, агрегати REGSUM/REGAVG/REGMIN/REGMAX/REGCOUNT (RT-20b).
+        Assert.Equal(20, result.Functions.Count);
         Assert.Contains(result.Functions, f => f.Name == "CONVERT");
         Assert.Contains(result.Functions, f => f.Name == "REGFIELD");
+        Assert.Contains(result.Functions, f => f.Name == "REGFIND");
+        Assert.Contains(result.Functions, f => f.Name == "REGONE");
+        Assert.Contains(result.Functions, f => f.Name == "REGSUM");
+        Assert.Contains(result.Functions, f => f.Name == "REGCOUNT");
 
         // ⛔ `VLOOKUP` відсутній НАВМИСНО: усі 429 його входжень у чинному
         // шаблоні — звернення до довідників, замінені посиланням на реєстр.
@@ -99,7 +106,10 @@ public sealed class ExpressionMetadataTests(SqlServerFixture sql)
         var result = await Handler(db)
             .HandleAsync(ExpressionDialect.Methodology, null, null, CancellationToken.None);
 
-        Assert.Equal(26, result.Functions.Count);
+        // ⚠ 22 ядра + 12 розширень: Ln, ifs, CONVERT, SUBSTANCE, з RT-20a
+        // REGFIND, REGONE, REGFIELD і з RT-20b REGSUM, REGAVG, REGMIN, REGMAX,
+        // REGCOUNT (функції довідників, ярус Extension).
+        Assert.Equal(34, result.Functions.Count);
         Assert.Equal(22, result.Functions.Count(f => f.Tier == "Core"));
 
         Assert.Contains(result.Functions, f => f.Name == "SUBSTANCE");
@@ -148,7 +158,9 @@ public sealed class ExpressionMetadataTests(SqlServerFixture sql)
         var strict = await Handler(db)
             .HandleAsync(ExpressionDialect.Methodology, null, strictVersion.VersionId, CancellationToken.None);
 
-        Assert.Equal(26, strict.Functions.Count);
+        Assert.Equal(34, strict.Functions.Count);
+        Assert.DoesNotContain(legacy.Functions, f => f.Name == "REGFIND");
+        Assert.DoesNotContain(legacy.Functions, f => f.Name == "REGSUM");
         Assert.Equal("Extension", Assert.Single(strict.Functions, f => f.Name == "Ln").Tier);
         Assert.Equal("Core", Assert.Single(strict.Functions, f => f.Name == "Pow").Tier);
     }
@@ -177,23 +189,26 @@ public sealed class ExpressionMetadataTests(SqlServerFixture sql)
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "ФВ-9.15a")]
-    public async Task Шапка_це_лише_ділові_ключі_і_поля_області()
+    public async Task Шапка_це_поля_шапки_версії_а_не_колонки_з_діловим_ключем()
     {
-        // ⛔ Фільтр саме такий, як у `02b` §3.3 п. 4. Підказати звичайну
-        // колонку як `HDR.` означало б навчити писати посилання, яке не
-        // резолвиться, — і дізнався б про це користувач при публікації.
+        // ⛔ `HDR.` резолвить публікація над `snapshot.HeaderFields`
+        // (`ReferenceResolver.ResolveHeader`), і те саме читає рушій у рантаймі.
+        // Підказка мусить брати ТЕ САМЕ джерело: до 2026-09-24 вона брала
+        // колонки з `IsBusinessKey`/`IsScopeField` і пропонувала `Train` — ім'я,
+        // на яке публікація відповідала «Поля шапки 'Train' немає», — а справжніх
+        // полів шапки не пропонувала взагалі.
         //
-        // ⚠ Колонки тепер СПРАВЖНІ і приходять зі сховища. Це не формальність:
-        // саме тут колись і був дефект — `GET /expressions/metadata` на версії
-        // з трьома колонками віддавав `"headers":[]`, бо версія вантажилася без
-        // навігацій. Мок такої версії не віддавав ніколи.
+        // ⚠ Порядок — `Ordinal` поля (так їх бачить автор у формі шапки), а
+        // видалене поле не пропонується: воно й не резолвиться.
         var version = await TemplateVersionAsync();
 
         await using var db = Context();
         var result = await Handler(db)
             .HandleAsync(ExpressionDialect.Template, version.VersionId, null, CancellationToken.None);
 
-        Assert.Equal(["Train"], result.Headers.Select(h => h.Name));
+        Assert.Equal(["ReportDate", "Area"], result.Headers.Select(h => h.Name));
+        Assert.Equal("Date", result.Headers[0].Note);
+        Assert.DoesNotContain(result.Headers, h => h.Name == "Train");
     }
 
     [Fact]
@@ -318,6 +333,13 @@ public sealed class ExpressionMetadataTests(SqlServerFixture sql)
         // рефлексією по полю: так значення проходить тим самим мапінгом, яким
         // його потім і прочитають.
         db.Entry(train).Property(nameof(ColumnDef.IsBusinessKey)).CurrentValue = true;
+
+        // Поля шапки: два живі (порядок за `Ordinal`, а не за іменем) і одне видалене.
+        db.HeaderFieldDefs.Add(new HeaderFieldDef(version.Id, EcrCode.Create("Area"), Name("Area"), 2, CellDataType.String));
+        db.HeaderFieldDefs.Add(new HeaderFieldDef(version.Id, EcrCode.Create("ReportDate"), Name("Report date"), 1, CellDataType.Date));
+        var gone = new HeaderFieldDef(version.Id, EcrCode.Create("Gone"), Name("Gone"), 3, CellDataType.String);
+        gone.SoftDelete(9, Now);
+        db.HeaderFieldDefs.Add(gone);
         await db.SaveChangesAsync();
 
         return new TemplateFixture(version.Id, table.Id);

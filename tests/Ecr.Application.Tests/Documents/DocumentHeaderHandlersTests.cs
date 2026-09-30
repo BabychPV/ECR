@@ -1,13 +1,16 @@
+using System.Reflection;
 using Ecr.Application.Common;
 using Ecr.Application.Documents;
 using Ecr.Application.Documents.Dto;
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
+using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Configuration;
+using Ecr.Domain.Entities.Documents;
+using Ecr.Domain.Entities.Workflow;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
-using Ecr.Expressions.Evaluation;
 using Ecr.TestKit;
 using NSubstitute;
 using Xunit;
@@ -19,19 +22,36 @@ namespace Ecr.Application.Tests.Documents;
 /// шапки документа. Право на <c>PATCH</c> — грант <c>Write</c> на проєкт
 /// (той самий рівень грануляції, що <see cref="ChangeDocumentKeyHandler"/>),
 /// БЕЗ окремого функціонального права — той самий підхід, що
-/// <c>PatchCellsHandler</c>.
+/// <c>PatchCellsHandler</c>. Стан, аудит, перерахунок і версія — <c>C2</c>
+/// enterprise-аудиту; наскрізно їх же перевіряє <c>DocumentHeaderPatchTests</c>
+/// (`Ecr.Api.Tests`, справжній HTTP і SQL Server).
 /// </summary>
 public sealed class DocumentHeaderHandlersTests
 {
     private const long DocumentId = 501;
     private const int ProjectId = 10;
     private const int TemplateVersionId = 1;
+    private const int SheetDefId = 20;
+
+    private static readonly DateTime Now = new(2026, 2, 10, 9, 0, 0, DateTimeKind.Utc);
 
     private readonly IDocumentStore _documents = Substitute.For<IDocumentStore>();
     private readonly IMetadataCache _metadataCache = Substitute.For<IMetadataCache>();
     private readonly IDocumentHeaderStore _headers = Substitute.For<IDocumentHeaderStore>();
     private readonly IAccessDecisionService _access = Substitute.For<IAccessDecisionService>();
     private readonly ICurrentUser _user = Substitute.For<ICurrentUser>();
+    private readonly IPeriodStore _periods = Substitute.For<IPeriodStore>();
+    private readonly IDocumentKeyStore _documentLock = Substitute.For<IDocumentKeyStore>();
+    private readonly IDocumentDeletionStore _workflowFacts = Substitute.For<IDocumentDeletionStore>();
+    private readonly IUnitOfWork _uow = Substitute.For<IUnitOfWork>();
+    private readonly IAuditWriter _audit = Substitute.For<IAuditWriter>();
+    private readonly IBackgroundJobScheduler _jobs = Substitute.For<IBackgroundJobScheduler>();
+    private readonly IClock _clock = Substitute.For<IClock>();
+
+    private readonly Project _project = NewProject();
+
+    /// <summary>Чи виконується зараз тіло <see cref="IUnitOfWork.ExecuteInTransactionAsync"/>.</summary>
+    private bool _inTransaction;
 
     private readonly HeaderFieldDef _area = new(
         TemplateVersionId, EcrCode.Create("Area"),
@@ -51,7 +71,15 @@ public sealed class DocumentHeaderHandlersTests
     {
         _permit.SetLookup(PermitRegistryDefId);
 
+        // ⚠ Ідентифікатори, як їх дала б база: запис і журнал ключують поле за Id.
+        var id = typeof(Entity<int>).GetProperty("Id")!;
+        id.SetValue(_area, 1);
+        id.SetValue(_count, 2);
+        id.SetValue(_permit, 3);
+
         _user.UserId.Returns(9);
+        _user.CorrelationId.Returns("corr-1");
+        _clock.UtcNow.Returns(Now);
 
         _documents.FindAsync(DocumentId, Arg.Any<PeriodKeyFilter>(), Arg.Any<CancellationToken>())
             .Returns(new DocumentSummary(
@@ -75,10 +103,93 @@ public sealed class DocumentHeaderHandlersTests
 
         _headers.GetValuesAsync(DocumentId, Arg.Any<CancellationToken>())
             .Returns(new Dictionary<int, DocumentHeaderValueData>());
+
+        _periods.FindProjectAsync(ProjectId, Arg.Any<CancellationToken>()).Returns(_project);
+        _workflowFacts.LockWorkflowFactsAsync(DocumentId, Arg.Any<CancellationToken>())
+            .Returns(new DocumentWorkflowFacts([], HasWorkflowHistory: false));
+
+        _uow.ExecuteInTransactionAsync(Arg.Any<Func<CancellationToken, Task>>(), Arg.Any<CancellationToken>())
+            .Returns(async call =>
+            {
+                _inTransaction = true;
+                try
+                {
+                    await call.ArgAt<Func<CancellationToken, Task>>(0)(call.ArgAt<CancellationToken>(1));
+                }
+                finally
+                {
+                    _inTransaction = false;
+                }
+            });
     }
 
     private GetDocumentHeaderHandler Get() => new(_documents, _metadataCache, _headers, _access, _user);
-    private PatchDocumentHeaderHandler Patch() => new(_documents, _metadataCache, _headers, _access, _user);
+
+    private PatchDocumentHeaderHandler Patch() => new(
+        _documents, _metadataCache, _headers, _access, _user,
+        _periods, _documentLock, _workflowFacts, _uow, _audit, _jobs, _clock);
+
+    /// <summary>Версія, яку клієнт отримав би з <c>GET</c> на цьому стані шапки.</summary>
+    private async Task<string> VersionOfAsync(Dictionary<int, DocumentHeaderValueData> values)
+    {
+        _headers.GetValuesAsync(DocumentId, Arg.Any<CancellationToken>()).Returns(values);
+        return (await Get().HandleAsync(DocumentId, CancellationToken.None)).Version;
+    }
+
+    /// <summary>Стан шапки до правки (читання в транзакції) і після неї (відповідь).</summary>
+    private void Values(Dictionary<int, DocumentHeaderValueData> before, Dictionary<int, DocumentHeaderValueData> after)
+        => _headers.GetValuesAsync(DocumentId, Arg.Any<CancellationToken>()).Returns(before, after);
+
+    private static PatchDocumentHeaderRequest Request(string version, params PatchHeaderField[] fields)
+        => new(fields, version);
+
+    private static Project NewProject()
+    {
+        var project = new Project(
+            EcrCode.Create("PRJ"), new LocalizedText(new Dictionary<string, string> { ["en"] = "Project" }),
+            new DateOnly(2026, 1, 1), new DateOnly(2026, 12, 31),
+            TemplateVersionId, PeriodKind.Monthly, 1, "Asia/Almaty");
+        typeof(Entity<int>).GetProperty("Id")!.SetValue(project, ProjectId);
+        return project;
+    }
+
+    /// <summary>Додає проєкту період у заданому стані (EF робить це навігацією).</summary>
+    private void AddPeriod(int periodKey, PeriodState state)
+    {
+        var key = new PeriodKey(periodKey);
+        var period = new Period(
+            ProjectId, key, (byte)key.Sequence,
+            new DateOnly(key.Year, key.Sequence, 1),
+            new DateOnly(key.Year, key.Sequence, DateTime.DaysInMonth(key.Year, key.Sequence)));
+        period.AdvanceTo(state, Now);
+
+        var periods = (List<Period>)typeof(Project)
+            .GetField("_periods", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .GetValue(_project)!;
+        periods.Add(period);
+    }
+
+    private void SheetIs(DocumentStatus status)
+    {
+        var state = new ApprovalState(DocumentId, SheetDefId, 202601);
+        state.Submit(1, Now);
+        if (status == DocumentStatus.Approved)
+        {
+            state.Approve(1, Now);
+        }
+
+        _workflowFacts.LockWorkflowFactsAsync(DocumentId, Arg.Any<CancellationToken>())
+            .Returns(new DocumentWorkflowFacts([state], HasWorkflowHistory: true));
+    }
+
+    private async Task AssertNothingWrittenAsync()
+    {
+        await _headers.DidNotReceive().SaveValuesAsync(
+            Arg.Any<long>(), Arg.Any<IReadOnlyDictionary<int, DocumentHeaderValueData>>(), Arg.Any<CancellationToken>());
+        await _audit.DidNotReceive().WriteSecurityEventAsync(Arg.Any<SecurityEventRecord>(), Arg.Any<CancellationToken>());
+        await _jobs.DidNotReceive().EnqueueExclusiveAsync<IRecalculationJob>(
+            Arg.Any<string>(), Arg.Any<object?>(), Arg.Any<CancellationToken>(), Arg.Any<int?>());
+    }
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
@@ -121,6 +232,24 @@ public sealed class DocumentHeaderHandlersTests
         Assert.Equal("Kashagan", Assert.Single(result.Fields, f => f.Code == "Area").Value);
     }
 
+    /// <summary>
+    /// Версія залежить від ЗНАЧЕННЯ, а не від форми його запису: число з
+    /// шістнадцятьма нулями з бази — та сама версія, що й без них.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    public async Task GET_версія_змінюється_зі_значенням_і_не_залежить_від_масштабу_числа()
+    {
+        var empty = await VersionOfAsync([]);
+        var a = await VersionOfAsync(new() { [_count.Id] = new() { ValueNumeric = 12.5m } });
+        var scaled = await VersionOfAsync(new() { [_count.Id] = new() { ValueNumeric = 12.5000000000000000m } });
+        var b = await VersionOfAsync(new() { [_count.Id] = new() { ValueNumeric = 13m } });
+        var cleared = await VersionOfAsync(new() { [_count.Id] = DocumentHeaderValueData.Empty });
+
+        Assert.Equal(a, scaled);
+        Assert.Equal(4, new[] { empty, a, b, cleared }.Distinct(StringComparer.Ordinal).Count());
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     public async Task GET_без_доступу_до_документа_відхиляється()
@@ -128,24 +257,20 @@ public sealed class DocumentHeaderHandlersTests
         _access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), DocumentId, Arg.Any<CancellationToken>())
             .Returns(EditDecision.Deny(EditDenyReason.NoGrant));
 
-        await Assert.ThrowsAsync<AccessDeniedException>(() => Get().HandleAsync(DocumentId, CancellationToken.None));
+        // ⛔ B-08: невидимий документ — 404, як і відсутній, а не 403.
+        var notFound = await Assert.ThrowsAsync<NotFoundException>(() => Get().HandleAsync(DocumentId, CancellationToken.None));
+        Assert.Equal("ECR-DOC-0404", notFound.ErrorCode);
     }
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     public async Task PATCH_записує_значення_і_повертає_оновлений_стан()
     {
-        // ⚠ Store — не мок значень: SaveValuesAsync лише перевіряється на
-        // виклик з очікуваним словником, а GetValuesAsync (друге читання
-        // всередині обробника) підмінюється настроєним результатом — так
-        // само, як PatchCellsHandler-тести не тримають справжнє сховище.
-        _headers.GetValuesAsync(DocumentId, Arg.Any<CancellationToken>())
-            .Returns(new Dictionary<int, DocumentHeaderValueData> { [_area.Id] = new() { ValueString = "Kashagan" } });
+        var version = await VersionOfAsync([]);
+        Values([], new() { [_area.Id] = new() { ValueString = "Kashagan" } });
 
         var result = await Patch().HandleAsync(
-            DocumentId,
-            new PatchDocumentHeaderRequest([new PatchHeaderField("Area", "Kashagan", false)]),
-            CancellationToken.None);
+            DocumentId, Request(version, new PatchHeaderField("Area", "Kashagan", false)), CancellationToken.None);
 
         await _headers.Received(1).SaveValuesAsync(
             DocumentId,
@@ -155,6 +280,7 @@ public sealed class DocumentHeaderHandlersTests
 
         Assert.Equal("Kashagan", Assert.Single(result.Fields, f => f.Code == "Area").Value);
         Assert.Equal(PermitRegistryDefId, Assert.Single(result.Fields, f => f.Code == "Permit").LookupRegistryDefId);
+        Assert.NotEqual(version, result.Version);
     }
 
     [Fact]
@@ -162,15 +288,12 @@ public sealed class DocumentHeaderHandlersTests
     public async Task PATCH_невідомий_код_поля_дає_ECR_HDR_0404()
     {
         var error = await Assert.ThrowsAsync<NotFoundException>(() => Patch().HandleAsync(
-            DocumentId,
-            new PatchDocumentHeaderRequest([new PatchHeaderField("NoSuchField", "x", false)]),
-            CancellationToken.None));
+            DocumentId, Request("v", new PatchHeaderField("NoSuchField", "x", false)), CancellationToken.None));
 
         Assert.Equal("ECR-HDR-0404", error.ErrorCode);
         Assert.Equal("err.ECR-HDR-0404.headerField", error.Details!["messageKey"]);
 
-        await _headers.DidNotReceive().SaveValuesAsync(
-            Arg.Any<long>(), Arg.Any<IReadOnlyDictionary<int, DocumentHeaderValueData>>(), Arg.Any<CancellationToken>());
+        await AssertNothingWrittenAsync();
     }
 
     [Fact]
@@ -182,9 +305,7 @@ public sealed class DocumentHeaderHandlersTests
         // приймає будь-яке значення через ToString — тому мішень тут саме
         // числове поле, а не Area).
         var error = await Assert.ThrowsAsync<BusinessRuleException>(() => Patch().HandleAsync(
-            DocumentId,
-            new PatchDocumentHeaderRequest([new PatchHeaderField("Count", "not-a-number", false)]),
-            CancellationToken.None));
+            DocumentId, Request("v", new PatchHeaderField("Count", "not-a-number", false)), CancellationToken.None));
 
         Assert.Equal("ECR-HDR-0422", error.ErrorCode);
     }
@@ -193,13 +314,12 @@ public sealed class DocumentHeaderHandlersTests
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     public async Task PATCH_явна_порожнеча_стирає_значення()
     {
-        _headers.GetValuesAsync(DocumentId, Arg.Any<CancellationToken>())
-            .Returns(new Dictionary<int, DocumentHeaderValueData> { [_area.Id] = DocumentHeaderValueData.Empty });
+        var before = new Dictionary<int, DocumentHeaderValueData> { [_area.Id] = new() { ValueString = "Kashagan" } };
+        var version = await VersionOfAsync(before);
+        Values(before, new() { [_area.Id] = DocumentHeaderValueData.Empty });
 
         await Patch().HandleAsync(
-            DocumentId,
-            new PatchDocumentHeaderRequest([new PatchHeaderField("Area", null, true)]),
-            CancellationToken.None);
+            DocumentId, Request(version, new PatchHeaderField("Area", null, true)), CancellationToken.None);
 
         await _headers.Received(1).SaveValuesAsync(
             DocumentId,
@@ -215,12 +335,9 @@ public sealed class DocumentHeaderHandlersTests
             .Returns(new AccessBuilder { UserId = 9 }.Grant(ResourceKind.Project, ProjectId, GrantLevel.Read).Build());
 
         await Assert.ThrowsAsync<AccessDeniedException>(() => Patch().HandleAsync(
-            DocumentId,
-            new PatchDocumentHeaderRequest([new PatchHeaderField("Area", "x", false)]),
-            CancellationToken.None));
+            DocumentId, Request("v", new PatchHeaderField("Area", "x", false)), CancellationToken.None));
 
-        await _headers.DidNotReceive().SaveValuesAsync(
-            Arg.Any<long>(), Arg.Any<IReadOnlyDictionary<int, DocumentHeaderValueData>>(), Arg.Any<CancellationToken>());
+        await AssertNothingWrittenAsync();
     }
 
     [Fact]
@@ -231,10 +348,191 @@ public sealed class DocumentHeaderHandlersTests
             .Returns((DocumentSummary?)null);
 
         var error = await Assert.ThrowsAsync<NotFoundException>(() => Patch().HandleAsync(
-            DocumentId,
-            new PatchDocumentHeaderRequest([new PatchHeaderField("Area", "x", false)]),
-            CancellationToken.None));
+            DocumentId, Request("v", new PatchHeaderField("Area", "x", false)), CancellationToken.None));
 
         Assert.Equal("ECR-DOC-0404", error.ErrorCode);
+    }
+
+    [Theory]
+    [InlineData(DocumentStatus.Submitted)]
+    [InlineData(DocumentStatus.Approved)]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    public async Task PATCH_шапки_поданого_чи_затвердженого_документа_відхиляється_як_комірка(DocumentStatus status)
+    {
+        var version = await VersionOfAsync([]);
+        SheetIs(status);
+
+        var error = await Assert.ThrowsAsync<AccessDeniedException>(() => Patch().HandleAsync(
+            DocumentId, Request(version, new PatchHeaderField("Area", "x", false)), CancellationToken.None));
+
+        Assert.Equal("ECR-ACCS-0403", error.ErrorCode);
+        Assert.Equal("err.ECR-ACCS-0403.headerLocked", error.Details!["messageKey"]);
+        Assert.Equal($"Document{status}", error.Details["reason"]);
+        await AssertNothingWrittenAsync();
+    }
+
+    /// <summary>
+    /// Симуляція відмовляє ДО блокувань — правило <see cref="EditRules"/> питається
+    /// першим разом без стану аркушів.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    public async Task PATCH_у_сеансі_симуляції_відхиляється_без_блокувань()
+    {
+        _access.BuildProfileAsync(9, Arg.Any<CancellationToken>())
+            .Returns(new AccessBuilder { UserId = 9 }
+                .Grant(ResourceKind.Project, ProjectId, GrantLevel.Write)
+                .Build(simulation: true, simulatedFor: 44));
+
+        var error = await Assert.ThrowsAsync<AccessDeniedException>(() => Patch().HandleAsync(
+            DocumentId, Request("v", new PatchHeaderField("Area", "x", false)), CancellationToken.None));
+
+        Assert.Equal(nameof(EditDenyReason.SimulationReadOnly), error.Details!["reason"]);
+        await _workflowFacts.DidNotReceive().LockWorkflowFactsAsync(Arg.Any<long>(), Arg.Any<CancellationToken>());
+        await AssertNothingWrittenAsync();
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    public async Task PATCH_коли_закрито_всі_періоди_відхиляється_а_один_закритий_не_заважає()
+    {
+        AddPeriod(202601, PeriodState.Closed);
+
+        var closed = await Assert.ThrowsAsync<AccessDeniedException>(() => Patch().HandleAsync(
+            DocumentId, Request("v", new PatchHeaderField("Area", "x", false)), CancellationToken.None));
+        Assert.Equal(nameof(EditDenyReason.PeriodClosed), closed.Details!["reason"]);
+
+        AddPeriod(202602, PeriodState.Open);
+        var version = await VersionOfAsync([]);
+        Values([], new() { [_area.Id] = new() { ValueString = "x" } });
+
+        await Patch().HandleAsync(
+            DocumentId, Request(version, new PatchHeaderField("Area", "x", false)), CancellationToken.None);
+
+        await _headers.Received(1).SaveValuesAsync(
+            DocumentId, Arg.Any<IReadOnlyDictionary<int, DocumentHeaderValueData>>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    public async Task PATCH_із_застарілою_версією_дає_409_і_нічого_не_пише()
+    {
+        var stale = await VersionOfAsync([]);
+        var current = new Dictionary<int, DocumentHeaderValueData> { [_area.Id] = new() { ValueString = "Tengiz" } };
+        _headers.GetValuesAsync(DocumentId, Arg.Any<CancellationToken>()).Returns(current);
+
+        var error = await Assert.ThrowsAsync<ConcurrencyConflictException>(() => Patch().HandleAsync(
+            DocumentId, Request(stale, new PatchHeaderField("Area", "Kashagan", false)), CancellationToken.None));
+
+        Assert.Equal("ECR-DOC-0409", error.ErrorCode);
+        Assert.Equal("err.ECR-DOC-0409.headerStale", error.Details!["messageKey"]);
+        await AssertNothingWrittenAsync();
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    public async Task PATCH_без_baseVersion_дає_422()
+    {
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(() => Patch().HandleAsync(
+            DocumentId, Request(" ", new PatchHeaderField("Area", "x", false)), CancellationToken.None));
+
+        Assert.Equal("ECR-REQ-0422", error.ErrorCode);
+        Assert.Equal("err.ECR-REQ-0422.headerBaseVersion", error.Details!["messageKey"]);
+        await AssertNothingWrittenAsync();
+    }
+
+    /// <summary>
+    /// Подія журналу — у ТІЙ САМІЙ транзакції, що й запис, зі старим і новим значенням.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    public async Task PATCH_пише_подію_журналу_всередині_транзакції()
+    {
+        var before = new Dictionary<int, DocumentHeaderValueData> { [_count.Id] = new() { ValueNumeric = 12.5000000000000000m } };
+        var version = await VersionOfAsync(before);
+        Values(before, new() { [_count.Id] = new() { ValueNumeric = 13m } });
+
+        SecurityEventRecord? written = null;
+        var writtenInTransaction = false;
+        await _audit.WriteSecurityEventAsync(
+            Arg.Do<SecurityEventRecord>(e =>
+            {
+                written = e;
+                writtenInTransaction = _inTransaction;
+            }),
+            Arg.Any<CancellationToken>());
+
+        await Patch().HandleAsync(
+            DocumentId, Request(version, new PatchHeaderField("Count", 13, false)), CancellationToken.None);
+
+        Assert.NotNull(written);
+        Assert.True(writtenInTransaction, "Подія журналу записана поза транзакцією запису.");
+        Assert.Equal(PatchDocumentHeaderHandler.EventType, written.EventType);
+        Assert.Equal(9, written.ChangedByUserId);
+        Assert.Equal("corr-1", written.CorrelationId);
+
+        var details = System.Text.Json.JsonDocument.Parse(written.DetailsJson!).RootElement;
+        Assert.Equal(DocumentId, details.GetProperty("documentId").GetInt64());
+        var field = Assert.Single(details.GetProperty("fields").EnumerateArray());
+        Assert.Equal("Count", field.GetProperty("code").GetString());
+        Assert.Equal("12.5", field.GetProperty("oldValue").GetString());
+        Assert.Equal("13", field.GetProperty("newValue").GetString());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    public async Task PATCH_того_самого_значення_не_пише_журналу_й_не_ставить_перерахунку()
+    {
+        AddPeriod(202601, PeriodState.Open);
+        var before = new Dictionary<int, DocumentHeaderValueData> { [_area.Id] = new() { ValueString = "Kashagan" } };
+        var version = await VersionOfAsync(before);
+        Values(before, before);
+
+        var result = await Patch().HandleAsync(
+            DocumentId, Request(version, new PatchHeaderField("Area", "Kashagan", false)), CancellationToken.None);
+
+        Assert.Equal(version, result.Version);
+        await AssertNothingWrittenAsync();
+    }
+
+    /// <summary>
+    /// <c>HDR.*</c> читають формули — після зміни шапки перераховуються всі
+    /// періоди, куди перерахунок має право писати, і лише вони.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    public async Task PATCH_ставить_повний_перерахунок_на_кожен_відкритий_період_і_лише_на_них()
+    {
+        AddPeriod(202601, PeriodState.Closed);
+        AddPeriod(202602, PeriodState.Grace);
+        AddPeriod(202603, PeriodState.Open);
+        AddPeriod(202604, PeriodState.Scheduled);
+
+        var version = await VersionOfAsync([]);
+        Values([], new() { [_area.Id] = new() { ValueString = "Tengiz" } });
+
+        var enqueuedInTransaction = false;
+        var targets = new List<string>();
+        _jobs.EnqueueExclusiveAsync<IRecalculationJob>(
+                Arg.Do<string>(t =>
+                {
+                    targets.Add(t);
+                    enqueuedInTransaction |= _inTransaction;
+                }),
+                Arg.Any<object?>(), Arg.Any<CancellationToken>(), Arg.Any<int?>())
+            .Returns("IRecalculationJob#1");
+
+        await Patch().HandleAsync(
+            DocumentId, Request(version, new PatchHeaderField("Area", "Tengiz", false)), CancellationToken.None);
+
+        Assert.Equal(
+            [
+                RecalculateDocumentHandler.TargetOf(DocumentId, new PeriodKey(202602)),
+                RecalculateDocumentHandler.TargetOf(DocumentId, new PeriodKey(202603)),
+            ],
+            targets);
+        Assert.False(enqueuedInTransaction, "Перерахунок поставлено до коміту — задача прочитала б стару шапку.");
+        await _jobs.Received(2).EnqueueExclusiveAsync<IRecalculationJob>(
+            Arg.Any<string>(), Arg.Any<object?>(), Arg.Any<CancellationToken>(), 9);
     }
 }

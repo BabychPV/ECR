@@ -127,13 +127,19 @@ public sealed class PatchCellsAtomicityTests(SqlServerFixture sql)
             Denies = new HashSet<string>(), RoleIds = new HashSet<int>(),
         };
         access.BuildProfileAsync(1, Arg.Any<CancellationToken>()).Returns(profile);
+        access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
+            .Returns(EditDecision.Allow());
         // ⛔ Рішення на КОЖНУ пару (рядок, колонка) зрізу — саме так поводиться
         // справжній `AccessDecisionService.CanEditSliceAsync` (`:280-295`:
         // подвійний цикл по рядках і колонках, без пропусків). Тут стояв
         // ПОРОЖНІЙ словник, і тест проходив лише тому, що обробник трактував
         // відсутність рішення як дозвіл (`DAT-04`). Предмет цього файлу — не
         // права, тож передумова тепер названа явно, а не отримана з дефекту.
-        access.CanEditSliceAsync(Arg.Any<AccessProfile>(), doc.TableInstanceId, Arg.Any<CancellationToken>())
+        // ⚠ WR-03: `EnsureAccessAsync` тепер запитує лише адреси батчу через
+        // `CanEditCellsAsync`, не весь зріз через `CanEditSliceAsync`.
+        access.CanEditCellsAsync(
+                  Arg.Any<AccessProfile>(), doc.TableInstanceId, Arg.Any<PeriodKey>(),
+                  Arg.Any<IReadOnlyCollection<CellAddress>>(), Arg.Any<CancellationToken>())
               .Returns(doc.RowIds
                   .SelectMany(rowId => doc.ColumnDefIds
                       .Select(columnId => new CellAddress(doc.PeriodKey, rowId, columnId)))
@@ -168,7 +174,7 @@ public sealed class PatchCellsAtomicityTests(SqlServerFixture sql)
             cells, rows, documents, periods, metadata, access,
             new Ecr.Application.Validation.ValidationEngine(new RealFormulaEngine()),
             methodologies, registries, headers, audit, Substitute.For<IAuditReader>(),
-            jobs, uow, user, clock);
+            jobs, uow, user, clock, Substitute.For<ISheetEditGate>(), NSubstitute.Substitute.For<Ecr.Application.Ports.IUnitCatalog>());
     }
 
     private static ColumnDef ColumnDefFor(TestDocument doc, int ordinal, CellDataType type)
@@ -236,17 +242,32 @@ public sealed class PatchCellsAtomicityTests(SqlServerFixture sql)
         public Task<IReadOnlyList<CellRecord>> ReadSliceAsync(long tableInstanceId, CancellationToken ct)
             => inner.ReadSliceAsync(tableInstanceId, ct);
 
+        public Task<IReadOnlyList<CellRecord>> ReadSliceAsync(
+            long tableInstanceId, PeriodKey periodKey, CancellationToken ct)
+            => inner.ReadSliceAsync(tableInstanceId, periodKey, ct);
+
         public Task<IReadOnlyDictionary<long, IReadOnlyList<CellRecord>>> ReadSlicesAsync(
             IReadOnlyList<long> tableInstanceIds, CancellationToken ct)
             => inner.ReadSlicesAsync(tableInstanceIds, ct);
+
+        public Task<IReadOnlyDictionary<long, IReadOnlyList<CellRecord>>> ReadSlicesAsync(
+            IReadOnlyList<long> tableInstanceIds, PeriodKey periodKey, CancellationToken ct)
+            => inner.ReadSlicesAsync(tableInstanceIds, periodKey, ct);
 
         public Task<IReadOnlyDictionary<CellAddress, CellValueData>> ReadCellsAsync(
             IReadOnlyCollection<CellAddress> addresses, CancellationToken ct)
             => inner.ReadCellsAsync(addresses, ct);
 
-        public async Task ApplyAsync(CellChangeSet changes, CancellationToken ct)
+        public async Task<IReadOnlyDictionary<long, string>> ApplyAsync(CellChangeSet changes, CancellationToken ct)
         {
             await inner.ApplyAsync(changes, ct).ConfigureAwait(false);
+            throw new InvalidOperationException(FaultMarker);
+        }
+
+        public async Task<IReadOnlyDictionary<long, IReadOnlyDictionary<long, string>>> ApplyBatchAsync(
+            IReadOnlyCollection<CellChangeSet> changes, CancellationToken ct)
+        {
+            await inner.ApplyBatchAsync(changes, ct).ConfigureAwait(false);
             throw new InvalidOperationException(FaultMarker);
         }
     }

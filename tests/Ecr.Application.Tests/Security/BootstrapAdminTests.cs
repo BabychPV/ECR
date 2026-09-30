@@ -74,7 +74,7 @@ public sealed class BootstrapAdminTests
     public void Доки_MustChangePassword_інші_запити_дають_ECR_PWD_0428()
     {
         var error = Assert.Throws<BusinessRuleException>(
-            () => PasswordChangeGate.Ensure(mustChangePassword: true, "/api/v1/documents/7"));
+            () => PasswordChangeGate.Ensure(mustChangePassword: true, "GET", "/api/v1/documents/7"));
 
         Assert.Equal("ECR-PWD-0428", error.ErrorCode);
 
@@ -87,21 +87,22 @@ public sealed class BootstrapAdminTests
         // не існує: тест підтверджував, що ворота пропускають вигаданий шлях,
         // і мовчав про те, що справжній вони закривають. Що ці шляхи існують,
         // окремо стежить архітектурний сторож.
-        PasswordChangeGate.Ensure(true, "/api/v1/auth/change-password");
-        PasswordChangeGate.Ensure(true, "/api/v1/logout");
-        PasswordChangeGate.Ensure(true, "/api/v1/ui-strings/en?scope=public");
+        PasswordChangeGate.Ensure(true, "POST", "/api/v1/auth/change-password");
+        PasswordChangeGate.Ensure(true, "POST", "/api/v1/logout");
+        PasswordChangeGate.Ensure(true, "GET", "/api/v1/ui-strings/en?scope=public");
 
         // ⚠ `/me` — теж дозволений: саме з нього клієнт дізнається, що треба
         // на зміну пароля. Закритий, він робить вхід нескінченним колом.
-        PasswordChangeGate.Ensure(true, "/api/v1/me");
+        PasswordChangeGate.Ensure(true, "GET", "/api/v1/me");
 
         // А ось те, чого немає, ворота НЕ пропускають — інакше помилка в
         // переліку знову лишилася б непоміченою.
         Assert.Throws<BusinessRuleException>(
-            () => PasswordChangeGate.Ensure(true, "/api/v1/auth/logout"));
+            () => PasswordChangeGate.Ensure(true, "POST", "/api/v1/auth/logout"));
 
         // Без прапорця не блокується нічого.
-        PasswordChangeGate.Ensure(false, "/api/v1/documents/7");
+        PasswordChangeGate.Ensure(false, "GET", "/api/v1/documents/7");
+        PasswordChangeGate.Ensure(false, "PUT", "/api/v1/ui-strings/en/common.save");
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
@@ -124,18 +125,52 @@ public sealed class BootstrapAdminTests
                  })
         {
             var blocked = Assert.Throws<BusinessRuleException>(
-                () => PasswordChangeGate.Ensure(mustChangePassword: true, path));
+                () => PasswordChangeGate.Ensure(mustChangePassword: true, "GET", path));
             Assert.Equal("ECR-PWD-0428", blocked.ErrorCode);
         }
 
         // А справжні дозволені маршрути — разом із підшляхами, запитом і
         // фрагментом — лишаються відкритими: інакше вхід став би колом.
-        PasswordChangeGate.Ensure(true, "/api/v1/me");
-        PasswordChangeGate.Ensure(true, "/api/v1/me?include=grants");
-        PasswordChangeGate.Ensure(true, "/api/v1/me/grants");
-        PasswordChangeGate.Ensure(true, "/api/v1/ui-strings/uk");
-        PasswordChangeGate.Ensure(true, "/api/v1/logout");
+        PasswordChangeGate.Ensure(true, "GET", "/api/v1/me");
+        PasswordChangeGate.Ensure(true, "GET", "/api/v1/me?include=grants");
+        PasswordChangeGate.Ensure(true, "GET", "/api/v1/me/grants");
+        PasswordChangeGate.Ensure(true, "GET", "/api/v1/ui-strings/uk");
+        PasswordChangeGate.Ensure(true, "POST", "/api/v1/logout");
     }
+
+    [Theory]
+    [InlineData("PUT", "/api/v1/ui-strings/en/common.save")]
+    [InlineData("POST", "/api/v1/ui-strings/import?lang=en&dryRun=false")]
+    [InlineData("POST", "/api/v1/ui-strings/en")]
+    [InlineData("DELETE", "/api/v1/ui-strings/en")]
+    [InlineData("GET", "/api/v1/ui-strings")]
+    [InlineData("GET", "/api/v1/ui-strings?lang=en&missingOnly=true")]
+    [InlineData("GET", "/api/v1/ui-strings/coverage")]
+    [InlineData("GET", "/api/v1/ui-strings/export.csv?lang=en")]
+    [InlineData("GET", "/api/v1/ui-strings/en/common.save")]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "ФВ-6.18")]
+    [Trait("Finding", "S16")]
+    public void Разовий_пароль_не_пускає_ні_на_запис_ні_на_адмінські_зрізи_каталогу(string method, string path)
+    {
+        // ⛔ S16: префікс без методу пускав PUT і POST import — тобто власник
+        // разового пароля (його знає й адміністратор, що видав) міг переписати
+        // тексти інтерфейсу для всіх, ще не змінивши пароль.
+        var blocked = Assert.Throws<BusinessRuleException>(
+            () => PasswordChangeGate.Ensure(mustChangePassword: true, method, path));
+
+        Assert.Equal("ECR-PWD-0428", blocked.ErrorCode);
+    }
+
+    [Theory]
+    [InlineData("GET", "/api/v1/ui-strings/en")]
+    [InlineData("GET", "/api/v1/ui-strings/kz?scope=private")]
+    [InlineData("HEAD", "/api/v1/ui-strings/ru?scope=public")]
+    [InlineData("get", "/API/V1/UI-STRINGS/en")]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Finding", "S16")]
+    public void Разовий_пароль_читає_тексти_екрана_однієї_мови(string method, string path)
+        => PasswordChangeGate.Ensure(mustChangePassword: true, method, path);
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
     public async Task Зміна_пароля_знімає_прапорець_і_крутить_SecurityStamp()
@@ -155,7 +190,7 @@ public sealed class BootstrapAdminTests
         Assert.Equal(FakePasswordHasher.Prefix + "Новий-Пароль-2026", created.PasswordHash);
 
         // Тепер закриті напрямки відкриті.
-        PasswordChangeGate.Ensure(created.MustChangePassword, "/api/v1/documents/7");
+        PasswordChangeGate.Ensure(created.MustChangePassword, "GET", "/api/v1/documents/7");
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]

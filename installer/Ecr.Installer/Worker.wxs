@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+
+  <!--
+    Служба EcrWorker — наглядач пулу воркерів перерахунку (ФВ-9.8, D-206):
+    Ecr.Worker.exe у ролі наглядача (аргумент служби «supervisor» з двома
+    дефісами — у коментарі XML їх писати не можна) тримає дочірні процеси під Windows Job
+    Object з межами пам'яті (src/Ecr.Worker). Та сама тека, що й EcrApi:
+    exe публікується в той самий PublishDir (tools/build-msi.ps1).
+
+    ТИПОВО УВІМКНЕНА (з I2-2): WORKER_ENABLED = 1 (Package.wxs) — служба
+    реєструється і стартує на свіжій установці й на оновленні. Вимкнути:
+    `msiexec /i Ecr.msi WORKER_ENABLED=0 …` або `deploy-ecr.ps1 -DisableWorker`
+    (docs/build/10-installer.md §1.6).
+
+    ⛔ Ecr.Worker.exe — KeyPath САМЕ цього компонента, а не частина AppFiles:
+    Windows Installer бере бінарник служби з ключового файлу компонента, в
+    якому стоїть ServiceInstall (таблиця ServiceInstall не має власного
+    шляху). Тому exe ставиться лише разом зі службою, тобто лише за
+    WORKER_ENABLED=1. Решта файлів воркера (Ecr.Worker.dll, *.deps.json,
+    worker.settings.json) — у AppFiles і ставляться завжди: без exe їх ніщо
+    не запускає. Типове значення 1 робить exe звичайною частиною установки.
+
+    ⚠ Transitive="yes": умову компонента Windows Installer обчислює лише при
+    ПЕРШІЙ установці, якщо компонент не транзитивний. З ним повторна
+    установка того самого MSI (`REINSTALL=ALL REINSTALLMODE=vomus
+    WORKER_ENABLED=1|0`) вмикає чи прибирає службу без видалення продукту
+    (docs/admin/operations-runbook.md §10).
+
+    ⚠ WORKER_ENABLED не запам'ятовується між установками — так само, як
+    SERVICE_ACCOUNT: оновлення без властивості = типове 1, служба є. Свідоме
+    вимкнення треба повторювати на кожному оновленні (WORKER_ENABLED=0);
+    deploy-ecr.ps1 передає властивість щоразу явно.
+  -->
+  <Fragment>
+    <ComponentGroup Id="WorkerService" Directory="INSTALLFOLDER">
+
+      <Component Id="EcrWorkerService" Guid="3b7e9c24-5a1f-4d86-b0e3-8c2f6a9d1e47"
+                 Condition="WORKER_ENABLED = &quot;1&quot;" Transitive="yes">
+
+        <File Id="EcrWorkerExe" Source="$(PublishDir)\Ecr.Worker.exe" KeyPath="yes" />
+
+        <!--
+          Обліковий запис — той самий, що EcrApi: воркер ходить у ту саму базу
+          тим самим рядком підключення (deploy-ecr.ps1 пише його в
+          Services\EcrWorker\Environment) і пише в ту саму теку логів.
+        -->
+        <ServiceInstall Id="EcrWorkerServiceInstall"
+                        Name="EcrWorker"
+                        DisplayName="!(loc.WorkerServiceDisplayName)"
+                        Description="!(loc.WorkerServiceDescription)"
+                        Type="ownProcess"
+                        Start="auto"
+                        ErrorControl="normal"
+                        Account="[SERVICE_ACCOUNT]"
+                        Password="[SERVICE_PASSWORD]"
+                        Arguments="--supervisor"
+                        Vital="yes">
+
+          <!-- Та сама політика відновлення, що в EcrApi (Service.wxs): три спроби, без вічного циклу. -->
+          <util:ServiceConfig FirstFailureActionType="restart"
+                              SecondFailureActionType="restart"
+                              ThirdFailureActionType="none"
+                              RestartServiceDelayInSeconds="30"
+                              ResetPeriodInDays="1" />
+        </ServiceInstall>
+
+        <!-- DelayedAutoStart — реєстром, з тієї ж причини, що в Service.wxs (WIX1149). -->
+        <RegistryValue Root="HKLM"
+                       Key="SYSTEM\CurrentControlSet\Services\EcrWorker"
+                       Name="DelayedAutoStart"
+                       Type="integer"
+                       Value="1" />
+
+        <!--
+          Stop/Remove безумовні в межах компонента: оновлення зупиняє службу
+          (інакше exe заблоковано й MSI просить перезавантаження), видалення
+          компонента — зокрема транзитивне за WORKER_ENABLED=0 — прибирає її.
+        -->
+        <ServiceControl Id="EcrWorkerServiceControl"
+                        Name="EcrWorker"
+                        Stop="both"
+                        Remove="uninstall"
+                        Wait="yes" />
+      </Component>
+
+      <!--
+        Старт — окремим компонентом, як EcrServiceAutoStart у Service.wxs:
+        ServiceControl/@Condition компілятор не приймає (WIX0004). Порожній
+        SERVICE_ACCOUNT = служба зареєстрована, але не запущена — та сама
+        документована поведінка, що в EcrApi (10-installer.md §1.4).
+        ⚠ Явний GUID: компонент без File (WIX0230).
+      -->
+      <Component Id="EcrWorkerAutoStart" Guid="e5a0c7d3-1f94-4b2e-8d6a-47c9b3f10e82"
+                 Condition="WORKER_ENABLED = &quot;1&quot; AND SERVICE_ACCOUNT" Transitive="yes">
+        <ServiceControl Id="EcrWorkerServiceStart" Name="EcrWorker" Start="install" Wait="yes" />
+      </Component>
+
+    </ComponentGroup>
+  </Fragment>
+</Wix>

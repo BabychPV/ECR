@@ -57,6 +57,26 @@ export async function saveColumn(
   );
 }
 
+/**
+ * Повний склад колонки — те, що приймає `PUT` вище (X-02). Форма правки
+ * відкривається лише з цієї відповіді: чернетка з бідної структури версії
+ * стирала б розширені поля при збереженні.
+ */
+export function getColumn(templateVersionId: number, tableId: number, code: string): Promise<ColumnDefDto> {
+  return apiFetch<ColumnDefDto>(
+    `/api/v1/template-versions/${String(templateVersionId)}/tables/${String(tableId)}/columns/${encodeURIComponent(code)}`,
+  );
+}
+
+/** Ключ запиту {@link getColumn} — локальний, як `columnUsageKey`. */
+export function columnKey(
+  templateVersionId: number,
+  tableId: number,
+  code: string,
+): readonly ['templates', 'column', number, number, string] {
+  return ['templates', 'column', templateVersionId, tableId, code] as const;
+}
+
 /** Прибирає колонку з чернетки (м'яко, `ФВ-7.6`). */
 export function deleteColumn(templateVersionId: number, tableId: number, code: string): Promise<void> {
   return apiFetch<void>(

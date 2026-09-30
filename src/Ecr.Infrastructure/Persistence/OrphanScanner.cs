@@ -234,6 +234,8 @@ public sealed class OrphanScanner : IOrphanScanner
         var periods = await _db.Periods
             .AsNoTracking()
             .Where(p => p.State == PeriodState.Open || p.State == PeriodState.Grace)
+            .OrderBy(p => p.PeriodKeyValue)
+            .ThenBy(p => p.Id)
             .Select(p => new { p.PeriodKeyValue, p.State, p.PeriodEnd })
             .Take(MaxOpenPeriods)
             .ToListAsync(ct)
@@ -552,6 +554,7 @@ public sealed class OrphanScanner : IOrphanScanner
             var entries = await _db.RegistryEntries
                 .AsNoTracking()
                 .Where(e => ids.Contains(e.Id))
+                .OrderBy(e => e.Id)
                 .Take(ids.Length)
                 .ToListAsync(ct)
                 .ConfigureAwait(false);

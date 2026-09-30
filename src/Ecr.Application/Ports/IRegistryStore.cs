@@ -91,6 +91,25 @@ public interface IRegistryStore
     public Task<IReadOnlySet<long>> FindExistingEntryIdsAsync(
         IReadOnlyCollection<long> registryEntryIds, CancellationToken ct);
 
+    /// <summary>
+    /// Стан обігу переданих записів — <b>одним запитом</b>: довідник,
+    /// активність, логічне видалення, вікно чинності.
+    /// </summary>
+    /// <param name="registryEntryIds">Записи; порожній набір — порожній результат.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>
+    /// Ті, що існують. Відсутній у результаті ідентифікатор — запису немає
+    /// (та сама відповідь, що й <see cref="FindExistingEntryIdsAsync"/>).
+    /// </returns>
+    /// <remarks>
+    /// ⛔ <c>C7</c>: шлях запису комірки <c>Lookup</c> перевіряв лише ІСНУВАННЯ
+    /// запису, тож приймав запис чужого довідника, вимкнений, видалений чи
+    /// нечинний на дату періоду — усе, чого пікер не пропонує. Рішення
+    /// «придатний» ухвалює викликач: сховище не знає ні колонки, ні періоду.
+    /// </remarks>
+    public Task<IReadOnlyList<RegistryEntryStanding>> FindEntryStandingsAsync(
+        IReadOnlyCollection<long> registryEntryIds, CancellationToken ct);
+
     /// <summary>Запис за кодом у межах довідника; <c>null</c> — немає.</summary>
     public Task<RegistryEntry?> FindEntryByCodeAsync(int registryDefId, string code, CancellationToken ct);
 
@@ -102,9 +121,63 @@ public interface IRegistryStore
         int registryDefId, CancellationToken ct);
 
     /// <summary>
-    /// Скільки комірок посилається на запис. Нуль — видаляти можна.
+    /// Хто посилається на запис — за видами. Усі нулі — видаляти можна.
     /// </summary>
-    public Task<int> CountReferencesAsync(long registryEntryId, CancellationToken ct);
+    /// <remarks>
+    /// ⛔ V-08 (третій раунд UX, 2026-09-24). Доти рахувалися самі комірки
+    /// документів, і видалення запису, на який посилались інші записи
+    /// (<c>dic.RegistryValue.ValueRefEntryId</c>, поле Lookup) чи константи
+    /// методологій (<c>calc.MethodologyConstant.SubstanceEntryId</c>),
+    /// проходило мовчки (<c>204</c>, <c>IsDeleted = 1</c>). Зовнішні ключі цього
+    /// не ловлять: видалення логічне, рядок лишається, і посилання мовчки
+    /// починає вказувати на запис поза обігом.
+    /// </remarks>
+    public Task<RegistryEntryReferences> CountReferencesAsync(long registryEntryId, CancellationToken ct);
+
+    /// <summary>
+    /// Хто посилається на НАБІР записів <b>ззовні</b> набору — за видами (RT-12, каскадне
+    /// видалення композиції, FEATURE-REGISTRY-TABLES §4.8).
+    /// </summary>
+    /// <param name="registryEntryIds">Записи, що видаляються разом: батько й усі його частини.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ Посилання членів набору один на одного НЕ рахуються: частина композиції посилається на
+    /// свого батька полем <c>Lookup</c>, і без цього виключення каскад не видалив би жодного
+    /// батька з частинами — підрахунок іде запитом до бази, де незбережене видалення частин ще
+    /// не видно. Посилання ззовні (комірка документа на частину, запис іншого довідника,
+    /// частина з <c>Restrict</c>, яка в набір не входить) рахуються як у
+    /// <see cref="CountReferencesAsync(long, CancellationToken)"/>.
+    /// </remarks>
+    public Task<RegistryEntryReferences> CountReferencesFromOutsideAsync(
+        IReadOnlyCollection<long> registryEntryIds, CancellationToken ct);
+
+    /// <summary>
+    /// Живі (не видалені логічно) частини композиції переданих батьків — <b>з відстеженням</b>
+    /// і з політикою видалення поля композиції (RT-12, <c>D-155</c>).
+    /// </summary>
+    /// <param name="parentEntryIds">Батьки; порожній набір — порожній результат.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⚠ З відстеженням: каскад видаляє знайдене логічно (<c>SoftDelete</c>) і зберігає. Частина —
+    /// це запис, значення поля композиції (<c>RelationKind = Composition</c>) якого вказує на
+    /// батька.
+    /// </remarks>
+    public Task<IReadOnlyList<RegistryCompositionChild>> ListCompositionChildrenAsync(
+        IReadOnlyCollection<long> parentEntryIds, CancellationToken ct);
+
+    /// <summary>
+    /// Резервує <paramref name="count"/> послідовних номерів <c>dic.RegistryEntryCodeSeq</c> —
+    /// коди нових записів довідника з <c>CodeMode = Auto</c> (<c>D-157</c>) — одним зверненням.
+    /// </summary>
+    /// <param name="count">Скільки номерів; більше нуля.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Перший номер діапазону; далі — <paramref name="count"/> − 1 наступних.</returns>
+    /// <remarks>
+    /// ⚠ Невикористані номери (рядок пакета відхилено, пакет не збережено) пропадають: код
+    /// унікальний лише в межах довідника, і дірка в шкалі нічого не ламає — так само, як у
+    /// будь-якої послідовності.
+    /// </remarks>
+    public Task<long> NextEntryCodesAsync(int count, CancellationToken ct);
 
     /// <summary>
     /// «Де використано» ВИЗНАЧЕННЯ довідника: хто посилається на сам довідник,
@@ -194,7 +267,77 @@ public interface IRegistryStore
     /// <param name="ct">Токен скасування.</param>
     public Task<IReadOnlyList<RegistryLinkKindStat>> ListLinkKindsAsync(
         int registryDefId, CancellationToken ct);
+
+    /// <summary>
+    /// Записи довідника за набором бізнес-кодів — пакетом, а не по одному
+    /// (<c>B-10</c>, імпорт CSV).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ З відстеженням, як <see cref="FindEntryByCodeAsync"/>, який цей метод
+    /// замінює в циклі: імпорт змінює знайдені записи й зберігає їх.
+    /// Порівняння кодів — колацією бази (регістронезалежне), тобто тим самим,
+    /// що й у <see cref="FindEntryByCodeAsync"/>. Видалені логічно записи
+    /// теж повертаються — рішення про них за викликачем.
+    /// </remarks>
+    /// <param name="registryDefId">Довідник.</param>
+    /// <param name="codes">Коди; дублікати й порожній набір допустимі.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<IReadOnlyList<RegistryEntry>> FindEntriesByCodesAsync(
+        int registryDefId, IReadOnlyCollection<string> codes, CancellationToken ct);
+
+    /// <summary>
+    /// Значення полів набору записів — пакетом (<c>B-10</c>), з відстеженням,
+    /// як <see cref="ListValuesAsync"/>.
+    /// </summary>
+    /// <param name="registryEntryIds">Записи.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<IReadOnlyList<RegistryValue>> ListValuesForEntriesAsync(
+        IReadOnlyCollection<long> registryEntryIds, CancellationToken ct);
+
+    /// <summary>
+    /// Переписує ребра <c>cfg.RegistryUse</c> правил довідника (<c>SourceKind = 2</c>, RT-17a): ребра
+    /// ВСІХ правил довідника <paramref name="ruleRegistryDefId"/> (і вимкнених теж) прибираються,
+    /// <paramref name="uses"/> ставляться в чергу вставки.
+    /// </summary>
+    /// <param name="ruleRegistryDefId">Довідник, якому належать правила.</param>
+    /// <param name="uses">
+    /// Нові ребра — лише <see cref="Domain.Entities.Configuration.RegistryUse.ForRegistryRule"/>
+    /// правил цього довідника (id правил уже відомі).
+    /// </param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⚠ Зберігає викликач (<c>SaveChanges</c> у транзакції збереження опису): видалення й вставка
+    /// лягають одним збереженням, тож проміжного стану «ребер немає» ніхто не бачить.
+    /// </remarks>
+    public Task ReplaceRuleUsesAsync(
+        int ruleRegistryDefId, IReadOnlyCollection<Domain.Entities.Configuration.RegistryUse> uses, CancellationToken ct);
 }
+
+/// <summary>Стан обігу запису довідника (<c>C7</c>).</summary>
+/// <param name="Id">Запис.</param>
+/// <param name="RegistryDefId">Довідник, до якого належить запис.</param>
+/// <param name="IsActive">Чи активний.</param>
+/// <param name="IsDeleted">Чи видалений логічно.</param>
+/// <param name="ValidFrom">Перший чинний день; <c>null</c> — від початку.</param>
+/// <param name="ValidTo">Перший НЕчинний день (виключно); <c>null</c> — без обмеження.</param>
+public sealed record RegistryEntryStanding(
+    long Id, int RegistryDefId, bool IsActive, bool IsDeleted, DateOnly? ValidFrom, DateOnly? ValidTo)
+{
+    /// <summary>Чинний на дату — те саме вікно, що <c>RegistryEntry.IsValidOn</c>.</summary>
+    /// <param name="date">Дата.</param>
+    /// <remarks>
+    /// ⛔ Умова не переписується, а береться з <see cref="Ecr.Domain.ValueObjects.ValidityWindow"/>:
+    /// друге формулювання розійшлося б із пікером на межі дня.
+    /// </remarks>
+    public bool IsValidOn(DateOnly date) => new Ecr.Domain.ValueObjects.ValidityWindow(ValidFrom, ValidTo).Contains(date);
+}
+
+/// <summary>Частина композиції (<c>D-155</c>) — запис, що належить батькові.</summary>
+/// <param name="Entry">Запис-частина (відстежуваний).</param>
+/// <param name="ParentEntryId">Батько, на якого вказує поле композиції.</param>
+/// <param name="OnParentDelete">Що робити з частиною, коли видаляють батька.</param>
+public sealed record RegistryCompositionChild(
+    RegistryEntry Entry, long ParentEntryId, Ecr.Domain.Enums.ParentDeletePolicy OnParentDelete);
 
 /// <summary>Вид зв'язку M:N і скільки таких зв'язків у довіднику.</summary>
 /// <param name="LinkKind">Вид відношення: <c>permit-water-body</c>, <c>permit-pollutant</c>.</param>
@@ -221,3 +364,61 @@ public sealed record RegistryFieldMapping(
     string? SourceUnitCode,
     string? TargetUnitCode,
     bool IsActive);
+
+/// <summary>Посилання на запис довідника за видами (<c>ФВ-8.6</c>, V-08).</summary>
+/// <param name="Cells">Комірки документів (<c>doc.CellValue</c>).</param>
+/// <param name="HeaderValues">Поля шапки документів (<c>doc.DocumentHeaderValue</c>).</param>
+/// <param name="RegistryValues">
+/// Значення полів Lookup інших ЖИВИХ записів довідників (<c>dic.RegistryValue</c>).
+/// </param>
+/// <param name="ChildEntries">Живі дочірні записи ієрархії (<c>ParentEntryId</c>).</param>
+/// <param name="Links">Зв'язки каскаду й M:N (<c>dic.RegistryEntryLink</c>), з будь-якого боку.</param>
+/// <param name="MethodologyConstants">Константи методологій, звужені цією речовиною.</param>
+/// <param name="MethodologySubstances">Речовини, оголошені у версіях методологій.</param>
+/// <remarks>
+/// ⚠ Посилання з записів, які самі вже видалені логічно, не рахуються: інакше
+/// два записи, що посилаються один на одного, не видалити ніколи.
+/// </remarks>
+public sealed record RegistryEntryReferences(
+    int Cells,
+    int HeaderValues,
+    int RegistryValues,
+    int ChildEntries,
+    int Links,
+    int MethodologyConstants,
+    int MethodologySubstances)
+{
+    /// <summary>Посилань немає.</summary>
+    public static RegistryEntryReferences None { get; } = new(0, 0, 0, 0, 0, 0, 0);
+
+    /// <summary>Усього посилань.</summary>
+    public int Total =>
+        Cells + HeaderValues + RegistryValues + ChildEntries + Links + MethodologyConstants + MethodologySubstances;
+
+    /// <summary>
+    /// Ненульові види за стабільними ключами — те, що клієнт показує переліком
+    /// (<c>registries.referenceKind.{ключ}</c>).
+    /// </summary>
+    public IReadOnlyDictionary<string, int> ByKind()
+    {
+        var kinds = new Dictionary<string, int>(StringComparer.Ordinal);
+
+        void Add(string kind, int count)
+        {
+            if (count > 0)
+            {
+                kinds[kind] = count;
+            }
+        }
+
+        Add("cells", Cells);
+        Add("headerValues", HeaderValues);
+        Add("registryValues", RegistryValues);
+        Add("childEntries", ChildEntries);
+        Add("links", Links);
+        Add("methodologyConstants", MethodologyConstants);
+        Add("methodologySubstances", MethodologySubstances);
+
+        return kinds;
+    }
+}

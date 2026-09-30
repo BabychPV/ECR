@@ -49,6 +49,12 @@ public sealed class AuditCellFiltersTests(SqlServerFixture sql)
 
     private readonly string _tag = Guid.NewGuid().ToString("N")[..8];
 
+    /// <summary>Справжні колонки шаблону (S6); до <c>ArrangeAsync</c> — порожньо.</summary>
+    private int[] _columns = [];
+
+    /// <summary>Колонка сценарію за номером 1..4 — замість колишніх вигаданих 11/12/13/22.</summary>
+    private int C(int number) => _columns[number - 1];
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
@@ -60,20 +66,20 @@ public sealed class AuditCellFiltersTests(SqlServerFixture sql)
 
         // Три сусіди, які відрізняються РІВНО одним складником адреси: той
         // самий рядок в іншій колонці, та сама колонка в іншому рядку.
-        await WriteChangeAsync(arranged.DocumentId, "R1", 11, author: 1, UserEdit, late: false);
-        await WriteChangeAsync(arranged.DocumentId, "R1", 22, author: 1, UserEdit, late: false);
-        await WriteChangeAsync(arranged.DocumentId, "R2", 11, author: 1, UserEdit, late: false);
+        await WriteChangeAsync(arranged.DocumentId, "R1", C(1), author: 1, UserEdit, late: false);
+        await WriteChangeAsync(arranged.DocumentId, "R1", C(4), author: 1, UserEdit, late: false);
+        await WriteChangeAsync(arranged.DocumentId, "R2", C(1), author: 1, UserEdit, late: false);
 
         var items = await ReadAsync(
             arranged.Client, app,
-            $"documentId={arranged.DocumentId}&rowKey=R1&columnDefId=11");
+            $"documentId={arranged.DocumentId}&rowKey=R1&columnDefId={C(1)}");
 
         // ⛔ Мутаційний доказ: прибрати з `AuditReader` умову `RowKey = @rowKey`
         // — і сюди приїде рядок `R2`, тобто ЧУЖИЙ рядок того самого документа.
         // Прибрати `ColumnDefId = @columnDefId` — приїде колонка 22.
         var only = Assert.Single(items);
         Assert.Equal("R1", only.GetProperty("rowKey").GetString());
-        Assert.Equal(11, only.GetProperty("columnDefId").GetInt32());
+        Assert.Equal(C(1), only.GetProperty("columnDefId").GetInt32());
     }
 
     [Fact]
@@ -85,8 +91,8 @@ public sealed class AuditCellFiltersTests(SqlServerFixture sql)
         using var app = new EcrApiFactory(sql);
         var arranged = await ArrangeAsync(app, ["Security.ViewAudit"]);
 
-        await WriteChangeAsync(arranged.DocumentId, "R1", 11, author: 1, UserEdit, late: false);
-        await WriteChangeAsync(arranged.DocumentId, "R1", 12, author: 1, UserEdit, late: true);
+        await WriteChangeAsync(arranged.DocumentId, "R1", C(1), author: 1, UserEdit, late: false);
+        await WriteChangeAsync(arranged.DocumentId, "R1", C(2), author: 1, UserEdit, late: true);
 
         var late = await ReadAsync(
             arranged.Client, app, $"documentId={arranged.DocumentId}&lateOnly=true");
@@ -108,9 +114,9 @@ public sealed class AuditCellFiltersTests(SqlServerFixture sql)
         using var app = new EcrApiFactory(sql);
         var arranged = await ArrangeAsync(app, ["Security.ViewAudit"]);
 
-        await WriteChangeAsync(arranged.DocumentId, "R1", 11, author: 41, UserEdit, late: false);
-        await WriteChangeAsync(arranged.DocumentId, "R1", 12, author: 42, UserEdit, late: false);
-        await WriteChangeAsync(arranged.DocumentId, "R1", 13, author: 41, "Import", late: false);
+        await WriteChangeAsync(arranged.DocumentId, "R1", C(1), author: 41, UserEdit, late: false);
+        await WriteChangeAsync(arranged.DocumentId, "R1", C(2), author: 42, UserEdit, late: false);
+        await WriteChangeAsync(arranged.DocumentId, "R1", C(3), author: 41, "Import", late: false);
 
         // ⛔ Мутація: прибрати `ChangedByUserId = @changedBy` — 3 замість 2.
         var byAuthor = await ReadAsync(
@@ -185,11 +191,11 @@ public sealed class AuditCellFiltersTests(SqlServerFixture sql)
         // Жодного `Security.ViewAudit` — рівно те, що має пересічний оператор.
         var arranged = await ArrangeAsync(app, ["Document.View"]);
 
-        await WriteChangeAsync(arranged.DocumentId, "R1", 11, author: 1, UserEdit, late: false);
+        await WriteChangeAsync(arranged.DocumentId, "R1", C(1), author: 1, UserEdit, late: false);
 
         var history = await arranged.Client
             .GetAsync(new Uri(
-                Url($"documentId={arranged.DocumentId}&rowKey=R1&columnDefId=11"), UriKind.Relative))
+                Url($"documentId={arranged.DocumentId}&rowKey=R1&columnDefId={C(1)}"), UriKind.Relative))
             .ConfigureAwait(true);
 
         // ⛔ Мутація: прибрати з обробника гілку `single && profile.Has(
@@ -339,6 +345,27 @@ public sealed class AuditCellFiltersTests(SqlServerFixture sql)
 
         // periodPolicyId 1 — сіяна політика "ECR-Standard" (той самий факт, на
         // який спирається `DocumentTouchConcurrencyTests`).
+        // ⚠ S6: колонки журналу — СПРАВЖНІ колонки шаблону. Історія колонки,
+        // якої немає в структурі, тепер не віддається (межа читання закрита за
+        // замовчуванням), тож вигадані 11/12/13/22 перестали б бути видимими.
+        var sheet = new SheetDef(version.Id, EcrCode.Create($"AUDSH_{_tag}"), Text("Sheet"), 1);
+        db.SheetDefs.Add(sheet);
+        await db.SaveChangesAsync().ConfigureAwait(false);
+
+        var table = new TableDef(
+            sheet.Id, EcrCode.Create($"AUDTB_{_tag}"), Text("Table"), 1,
+            TableLayoutKind.PerPeriodInstance, TableRowMode.Fixed);
+        db.TableDefs.Add(table);
+        await db.SaveChangesAsync().ConfigureAwait(false);
+
+        var columns = Enumerable.Range(1, 4)
+            .Select(i => new ColumnDef(
+                table.Id, EcrCode.Create($"AUDC{i}_{_tag}"), Text($"Col {i}"), i, CellDataType.Decimal))
+            .ToList();
+        db.ColumnDefs.AddRange(columns);
+        await db.SaveChangesAsync().ConfigureAwait(false);
+        _columns = [.. columns.Select(c => c.Id)];
+
         var project = new Project(
             EcrCode.Create($"AUDPRJ_{_tag}"), Text("Project"),
             new DateOnly(2026, 1, 1), new DateOnly(2026, 12, 31),

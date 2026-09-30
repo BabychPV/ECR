@@ -326,19 +326,15 @@ function CrumbLabel({ entry }: { entry: CrumbEntry }): JSX.Element {
  * Розкриваюча кнопка усіченого ланцюжка (акцептанс: «усікати середину... з
  * розкриттям, а не ламати верстку»).
  *
- * ⛔ Текст — не через `t()`. Той самий компроміс, що й `SkipToContentLink`
- * (`AppLayout.tsx`, Q-263): каталог рядків живе в
- * `Ecr.Infrastructure/Persistence/Sql/09-seed.sql`, а ця картка (як і Q-263)
- * навмисно обмежена файлами клієнта — новий ключ каталогу вимагав би правки
- * seed-файлу, спільного з паралельними лініями, поза межами картки.
- * Судження зафіксоване тут одним рядком: англійський літерал лишається доти,
- * доки окрема картка не заведе ключ.
+ * ✎ `X-26`: напис — із каталогу (`nav.showAllCrumbs`), а не англійський
+ * літерал для всіх мов. Крихти живуть лише в `AppLayout`, тобто після
+ * приватного каталогу.
  */
 function ExpandButton({ onClick }: { onClick: () => void }): JSX.Element {
   return (
     <UnstyledButton
       onClick={onClick}
-      aria-label="Show all breadcrumbs"
+      aria-label={t('nav.showAllCrumbs')}
       aria-expanded={false}
       c="dimmed"
       px="xs"

@@ -36,12 +36,40 @@ public sealed class CollectFromSourceHandler(
     /// <param name="ct">Скасування.</param>
     /// <returns>Ідентифікатор задачі.</returns>
     /// <exception cref="NotFoundException">Сутності джерела немає або вона вимкнена.</exception>
+    /// <exception cref="BusinessRuleException">Проміжок порожній або перевернутий.</exception>
     public async Task<string> HandleAsync(
         int sourceEntityId, DateTime? fromUtc, DateTime? toUtc, CancellationToken ct)
     {
+        // ⚠ Права — ПЕРШИМИ: відмова за змістом запиту (422) не має
+        // випереджати відмову за правом (403) тому, хто збирати не може.
         await ListTemplatesHandler
             .RequireAsync(access, currentUser, Permission, ct)
             .ConfigureAwait(false);
+
+        // ⛔ Аудит 2026-09-28, B7. Час без зони (`Unspecified`) і час зі
+        // зміщенням (`Local`, у поясі СЕРВЕРА) ішли в задачу як є: Web API
+        // перераховував їх у UTC за поясом сервера (`ToUniversalTime`), а
+        // покриття писалося за сирими значеннями як UTC — «покрито» те, що не
+        // прочитано, і наздоганяння цієї дірки вже не бачить. PiSqlClient
+        // узагалі передавав без конверсії, тобто транспорти розходились.
+        // Нормалізація — так само, як у `CollectionRunsController`.
+        var from = ToUtc(fromUtc);
+        var to = ToUtc(toUtc);
+
+        // Перевернутий або порожній проміжок не «виправляється» обміном меж: той,
+        // хто його надіслав, помилився в одному з полів.
+        if (from is { } start && to is { } end && start >= end)
+        {
+            throw new BusinessRuleException(
+                ErrorCodes.RequestInvalid,
+                $"Проміжок збору порожній: початок {start:O} не раніший за кінець {end:O}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-REQ-0422.collectionRunRange",
+                    ["from"] = start.ToString("O", CultureInfo.InvariantCulture),
+                    ["to"] = end.ToString("O", CultureInfo.InvariantCulture),
+                });
+        }
 
         // ⚠ Існування сутності перевіряється ТУТ. Задача, поставлена на
         // неіснуючу сутність, завершилася б помилкою через хвилину, і
@@ -58,9 +86,17 @@ public sealed class CollectFromSourceHandler(
                 });
 
         return await jobs
-            .EnqueueAsync<ICollectionJob>(new CollectionTask(sourceEntityId, fromUtc, toUtc), ct)
+            .EnqueueAsync<ICollectionJob>(new CollectionTask(sourceEntityId, from, to), ct)
             .ConfigureAwait(false);
     }
+
+    /// <summary>Час без зони читається як UTC; зі зміщенням — переводиться в UTC.</summary>
+    private static DateTime? ToUtc(DateTime? value) => value switch
+    {
+        null => null,
+        { Kind: DateTimeKind.Unspecified } v => DateTime.SpecifyKind(v, DateTimeKind.Utc),
+        { } v => v.ToUniversalTime(),
+    };
 }
 
 /// <summary>Завдання на збір.</summary>
@@ -222,7 +258,9 @@ public static class JobResultUrl
             || documentId is not { } doc
             || rawMessage is not { Length: 32 } exportId
             || !exportId.All(Uri.IsHexDigit)
-            || !profile.Has(Documents.DownloadExportHandler.Permission))
+            // ⚠ ФВ-6.14: лише підказка-посилання; саме завантаження
+            // (`DownloadExportHandler`) перевіряє право в проєкті документа.
+            || !profile.HasInAnyProject(Documents.DownloadExportHandler.Permission))
         {
             return null;
         }

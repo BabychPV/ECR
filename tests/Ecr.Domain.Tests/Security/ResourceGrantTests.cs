@@ -74,6 +74,8 @@ public sealed class ResourceGrantTests
     public void Deny_на_колонці_перекриває_Write_на_таблиці()
     {
         var profile = Profile(
+            // передумова S2: дрібніші гранти діють лише у видимому проєкті
+            Grant(ResourceKind.Project, AccessBuilder.ProjectId, GrantLevel.Read),
             Grant(ResourceKind.Table, AccessBuilder.TableId, GrantLevel.Write),
             Grant(ResourceKind.Column, AccessBuilder.ColumnId, GrantLevel.None, deny: true));
 

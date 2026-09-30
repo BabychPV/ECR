@@ -25,9 +25,10 @@ namespace Ecr.Application.Tests.Calculations;
 /// Перша: 149 посилань із <c>HSE400</c> і 116 з <c>Flert</c> у <c>Common</c>
 /// перестають резолвитися — публікація відхиляє цілком правильний корпус.
 /// Друга, тихіша: посилання резолвиться, але ребра
-/// <c>calc.MethodologyDependency</c> не з'являється, і <c>HSE400</c> рахується
-/// раніше за <c>Common</c>, читаючи торішній результат. Число правдоподібне,
-/// помилки немає.
+/// <c>calc.MethodologyDependency</c> не з'являється, і перевидана <c>Common</c> не
+/// тягне перерахунку <c>HSE400</c> (✎ HSE301 L: результат <c>Common</c> викликач не
+/// читає — формулу обчислює в своєму рядку, — тож ребро потрібне для інвалідації).
+/// Число правдоподібне, помилки немає.
 /// </remarks>
 public sealed class MethodologyImportResolutionTests
 {
@@ -133,26 +134,10 @@ public sealed class MethodologyImportResolutionTests
                  });
     }
 
-    [Fact]
-    [Trait(TestCategories.Stage, TestCategories.Stage2)]
-    [Trait("Requirement", "ФВ-9.4")]
-    public async Task Посилання_у_бібліотеку_резолвиться_і_дає_ребро_між_методологіями()
-    {
-        // ⛔ Упаде, якщо `!` знову шукатиме лише у власній версії: 265 посилань
-        // корпусу стануть нерезолвленими. І впаде вдруге, якщо резолвінг є, а
-        // ребра немає, — тоді `HSE400` порахується раніше за `Common`.
-        Formulas([Formula(ReferencingId, "Total", $"!{Shared} * 2")]);
-        Imports([Library(CommonId, "Common", 910, [Shared])]);
-
-        await Handler().HandleAsync(VersionId, "Уточнення", From, CancellationToken.None);
-
-        Assert.Equal([CommonId], _edges);
-
-        // ⚠ Формула бібліотеки НЕ входить у топологічний порядок цієї версії:
-        // її рахує своя методологія, і чуже ребро тут стало б посиланням на
-        // ідентифікатор із іншої нумерації.
-        Assert.Empty(_nodes.Single(n => n.FormulaDefId == ReferencingId).DependsOnFormulaDefIds);
-    }
+    // ⚠ Посилання у бібліотеку й ребро між методологіями перевіряє
+    // `ImportedFormulaReferencePublishTests`: з HSE301 L така публікація знову
+    // проходить (модуль обчислює формулу бібліотеки), а замикання перевіряється
+    // там само — цикл імпортів, режими, область, аргументи.
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]

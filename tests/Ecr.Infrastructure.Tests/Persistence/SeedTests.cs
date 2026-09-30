@@ -17,7 +17,7 @@ public sealed class SeedTests(SqlServerFixture sql)
     /// сюди, тест впаде — і це правильно. Право, якого немає в цьому списку,
     /// ніхто не перевіряв.
     /// </remarks>
-    private const int ExpectedPermissions = 41;
+    private const int ExpectedPermissions = 42;
 
     private const int ExpectedDangerous = 11;
 
@@ -182,7 +182,87 @@ public sealed class SeedTests(SqlServerFixture sql)
                 $"SELECT COUNT(*) FROM sec.Permission WHERE Code = N'{code}'"));
         }
 
-        Assert.Equal(41, await ScalarAsync("SELECT COUNT(*) FROM sec.Permission"));
+        Assert.Equal(ExpectedPermissions, await ScalarAsync("SELECT COUNT(*) FROM sec.Permission"));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-6.12")]
+    public async Task Вміст_регуляторного_зрізу_має_лише_переглядач_звітів_аудитор_погоджувач_і_адміністратор()
+    {
+        // ⛔ Рішення людини 2026-09-29 («ні, додай роль»): вміст зрізу —
+        // окреме право `Report.ViewSnapshot`, безпечне (шаблони його беруть).
+        Assert.Equal(1, await ScalarAsync(
+            "SELECT COUNT(*) FROM sec.Permission WHERE Code = N'Report.ViewSnapshot' AND IsDangerous = 0"));
+
+        // Роль «Переглядач звітів» — вбудована, і рівно з тим, що треба для
+        // перегляду: сторінка й перелік, вміст, книга.
+        Assert.Equal(
+            "Report.Export,Report.ViewRegulatory,Report.ViewSnapshot",
+            await StringAsync("""
+                SELECT STRING_AGG(rp.PermissionCode, N',') WITHIN GROUP (ORDER BY rp.PermissionCode)
+                FROM sec.RolePermission AS rp
+                JOIN sec.Role AS r ON r.Id = rp.RoleId
+                WHERE r.Code = N'ReportViewer' AND r.IsBuiltIn = 1
+                """));
+
+        // ⛔ Хто будує й погоджує звіти — має (шаблони `Report.%` і `%`); хто
+        // лише читає чи вводить дані — НІ, хоч `Report.ViewRegulatory` /
+        // `Report.Export` у них лишились. ✎ Аудитор — має (рішення людини
+        // 2026-09-29, 15:29: «бачить вміст за замовчуванням — так»), але
+        // книги (`Report.Export`) йому не додано.
+        Assert.Equal(
+            "Approver,Auditor,ReportViewer,SystemAdministrator",
+            await StringAsync("""
+                SELECT STRING_AGG(r.Code, N',') WITHIN GROUP (ORDER BY r.Code)
+                FROM sec.RolePermission AS rp
+                JOIN sec.Role AS r ON r.Id = rp.RoleId AND r.IsBuiltIn = 1
+                WHERE rp.PermissionCode = N'Report.ViewSnapshot'
+                """));
+        Assert.Equal(0, await ScalarAsync("""
+            SELECT COUNT(*)
+            FROM sec.RolePermission AS rp
+            JOIN sec.Role AS r ON r.Id = rp.RoleId
+            WHERE r.Code = N'Auditor' AND rp.PermissionCode = N'Report.Export'
+            """));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-6.12")]
+    public async Task Розгорнута_база_без_права_на_вміст_зрізу_отримує_його_повторним_seed()
+    {
+        // ⚠ Стара база: ні права, ні ролі, ні роздач. `SeedRunner` на наступному
+        // старті мусить завести все сам — без окремого скрипта оновлення.
+        await ExecuteAsync("""
+            DELETE FROM sec.RolePermission WHERE PermissionCode = N'Report.ViewSnapshot';
+            DELETE rp FROM sec.RolePermission AS rp
+            JOIN sec.Role AS r ON r.Id = rp.RoleId WHERE r.Code = N'ReportViewer';
+            DELETE FROM sec.Permission WHERE Code = N'Report.ViewSnapshot';
+            """);
+
+        await using (var db = CreateContext())
+        {
+            await new SeedRunner(db).RunAsync(CancellationToken.None);
+        }
+
+        Assert.Equal(1, await ScalarAsync(
+            "SELECT COUNT(*) FROM sec.Permission WHERE Code = N'Report.ViewSnapshot'"));
+        Assert.Equal(4, await ScalarAsync("""
+            SELECT COUNT(*)
+            FROM sec.RolePermission AS rp
+            JOIN sec.Role AS r ON r.Id = rp.RoleId
+            WHERE rp.PermissionCode = N'Report.ViewSnapshot'
+              AND r.Code IN (N'Approver', N'SystemAdministrator', N'ReportViewer', N'Auditor')
+            """));
+        Assert.Equal(3, await ScalarAsync("""
+            SELECT COUNT(*)
+            FROM sec.RolePermission AS rp
+            JOIN sec.Role AS r ON r.Id = rp.RoleId
+            WHERE r.Code = N'ReportViewer'
+            """));
     }
 
     [Fact]
@@ -226,6 +306,11 @@ public sealed class SeedTests(SqlServerFixture sql)
         // симуляцію або відкриття періоду, видане розгортанням, не має автора
         // в аудиті — а саме автор й потрібен, коли потім з'ясовують, звідки
         // взялася можливість.
+        //
+        // ✎ 2026-09-28: другий поіменний виняток — `Approver` ×
+        // `Report.EditDefinition` (рішення людини на Q-153, `D-203`). Він
+        // виданий окремим MERGE, а не послабленням фільтра, і тест тримає
+        // саме це: крім цієї пари небезпечного в складених ролях НЕМАЄ.
         Assert.Equal(0, await ScalarAsync($"""
             SELECT COUNT(*)
             FROM sec.RolePermission AS rp
@@ -233,6 +318,7 @@ public sealed class SeedTests(SqlServerFixture sql)
             JOIN sec.Permission AS p ON p.Code = rp.PermissionCode
             WHERE p.IsDangerous = 1
               AND r.Code <> N'{BootstrapAdmin.RoleCode}'
+              AND NOT (r.Code = N'Approver' AND p.Code = N'Report.EditDefinition')
             """));
 
         // ⚠ Виняток рівно один і названий. Він не послаблення правила, а його
@@ -261,7 +347,8 @@ public sealed class SeedTests(SqlServerFixture sql)
         // ⚠ І водночас ролі НЕ порожні: роль без жодного права виглядає
         // як робоча конфігурація і мовчки не працює — це той самий клас
         // дефекту, що й «робота, якої ніхто не робить».
-        Assert.Equal(8, await ScalarAsync("""
+        // ✎ 2026-09-29: дев'ята — `ReportViewer` (рішення людини, секція `SEC:RPT`).
+        Assert.Equal(9, await ScalarAsync("""
             SELECT COUNT(DISTINCT rp.RoleId)
             FROM sec.RolePermission AS rp
             JOIN sec.Role AS r ON r.Id = rp.RoleId AND r.IsBuiltIn = 1
@@ -272,6 +359,83 @@ public sealed class SeedTests(SqlServerFixture sql)
         // первинного налаштування.
         Assert.Equal(0, await ScalarAsync(
             "SELECT COUNT(*) FROM sec.RolePermission WHERE PermissionCode = N'Security.Simulate'"));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-6.12")]
+    [Trait("Requirement", "ФВ-10.4")]
+    public async Task Погоджувач_отримує_Report_EditDefinition_явно_а_шаблони_його_не_роздають()
+    {
+        // ✎ Q-153, рішення людини 2026-09-28 (`D-203`): «Чи може погоджувач
+        // (Approver) редагувати описи державних звітів — ТАК».
+        Assert.Equal(1, await ScalarAsync("""
+            SELECT COUNT(*)
+            FROM sec.RolePermission AS rp
+            JOIN sec.Role AS r ON r.Id = rp.RoleId
+            WHERE r.Code = N'Approver' AND rp.PermissionCode = N'Report.EditDefinition'
+            """));
+
+        // ⛔ Право лишається НЕБЕЗПЕЧНИМ. Зняти позначку — найкоротший шлях
+        // «видати погоджувачу», але тоді шаблон `%` SystemAdministrator і будь-
+        // який майбутній `Report.%` роздали б авторство державної форми мовчки.
+        Assert.Equal(1, await ScalarAsync(
+            "SELECT COUNT(*) FROM sec.Permission WHERE Code = N'Report.EditDefinition' AND IsDangerous = 1"));
+
+        // ⛔ Жодна інша вбудована роль його не має — зокрема SystemAdministrator
+        // (шаблон `%`), DataEntry і Viewer.
+        Assert.Equal(0, await ScalarAsync("""
+            SELECT COUNT(*)
+            FROM sec.RolePermission AS rp
+            JOIN sec.Role AS r ON r.Id = rp.RoleId
+            WHERE rp.PermissionCode = N'Report.EditDefinition' AND r.Code <> N'Approver'
+            """));
+
+        // ⚠ Шаблон `Report.%` погоджувача й далі НЕ бере небезпечного: сусіднє
+        // `Report.ViewCampaign` (`Q15-07`) до нього не приїхало.
+        Assert.Equal(0, await ScalarAsync("""
+            SELECT COUNT(*)
+            FROM sec.RolePermission AS rp
+            JOIN sec.Role       AS r ON r.Id   = rp.RoleId
+            JOIN sec.Permission AS p ON p.Code = rp.PermissionCode
+            WHERE r.Code = N'Approver' AND p.IsDangerous = 1
+              AND p.Code <> N'Report.EditDefinition'
+            """));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-6.12")]
+    public async Task Розгорнута_база_без_права_погоджувача_отримує_його_повторним_seed()
+    {
+        // ⚠ Стара база: розгорнута до рішення Q-153, пари немає. MERGE роздач
+        // лише додає, і саме це тут і перевіряється — наявна роль отримує
+        // відсутнє призначення на наступному старті (`SeedRunner`), без
+        // окремого скрипта оновлення.
+        await ExecuteAsync("""
+            DELETE rp
+            FROM sec.RolePermission AS rp
+            JOIN sec.Role AS r ON r.Id = rp.RoleId
+            WHERE r.Code = N'Approver' AND rp.PermissionCode = N'Report.EditDefinition';
+            """);
+
+        Assert.Equal(0, await ApproverEditDefinitionAsync());
+
+        await using (var db = CreateContext())
+        {
+            await new SeedRunner(db).RunAsync(CancellationToken.None);
+        }
+
+        Assert.Equal(1, await ApproverEditDefinitionAsync());
+
+        Task<int> ApproverEditDefinitionAsync() => ScalarAsync("""
+            SELECT COUNT(*)
+            FROM sec.RolePermission AS rp
+            JOIN sec.Role AS r ON r.Id = rp.RoleId
+            WHERE r.Code = N'Approver' AND rp.PermissionCode = N'Report.EditDefinition'
+            """);
     }
 
     [Fact]
@@ -312,10 +476,11 @@ public sealed class SeedTests(SqlServerFixture sql)
     [Trait("Requirement", "ФВ-16.2")]
     public async Task Кожна_розмірність_має_рівно_одну_базову_одиницю()
     {
-        // Базові розмірності (1..7) мають базову одиницю; похідні (8..11) —
+        // Первинні розмірності (1..7; 12, 14, 15 — HSE301 F1: StdVolume,
+        // Velocity, Area) мають базову одиницю; похідні (8..11, 13, 16..19) —
         // ні, бо складаються з чисельника і знаменника.
-        Assert.Equal(7, await ScalarAsync("SELECT COUNT(*) FROM uom.Unit WHERE IsBase = 1"));
-        Assert.Equal(7, await ScalarAsync("SELECT COUNT(*) FROM uom.Dimension WHERE BaseUnitId IS NOT NULL"));
+        Assert.Equal(10, await ScalarAsync("SELECT COUNT(*) FROM uom.Unit WHERE IsBase = 1"));
+        Assert.Equal(10, await ScalarAsync("SELECT COUNT(*) FROM uom.Dimension WHERE BaseUnitId IS NOT NULL"));
 
         // Двох базових в одній розмірності бути не може — це тримає
         // фільтрований унікальний індекс UX_Unit_BasePerDimension, тобто
@@ -333,7 +498,7 @@ public sealed class SeedTests(SqlServerFixture sql)
     {
         // Складаються ПОСИЛАННЯМИ, а не розбором рядка «g_per_s» (ФВ-16.2):
         // розбір коду означав би, що перейменування одиниці ламає конверсію.
-        Assert.Equal(6, await ScalarAsync(
+        Assert.Equal(14, await ScalarAsync(
             "SELECT COUNT(*) FROM uom.Unit WHERE NumeratorUnitId IS NOT NULL AND DenominatorUnitId IS NOT NULL"));
 
         // Половина посилання — це не похідна одиниця, а зіпсований запис.
@@ -408,15 +573,106 @@ public sealed class SeedTests(SqlServerFixture sql)
         // round-trip для кожного клієнта на кожному рестарті — навіть коли
         // жодного нового рядка не додалося.
         var before = await ScalarAsync("SELECT Revision FROM sys_ecr.UiStringRevision WHERE Id = 1");
+        var rowsBefore = await ScalarAsync("SELECT COUNT(*) FROM sys_ecr.UiString");
 
+        // ⚠ Двічі на ОДНОМУ контексті, тобто на одному з'єднанні: переклади
+        // йдуть через тимчасову `#I18N`, яка живе, доки живе з'єднання. Другий
+        // прогін без її прибирання впав би на «There is already an object
+        // named '#I18N'».
         await using (var db = CreateContext())
         {
+            await new SeedRunner(db).RunAsync(CancellationToken.None);
             await new SeedRunner(db).RunAsync(CancellationToken.None);
         }
 
         var after = await ScalarAsync("SELECT Revision FROM sys_ecr.UiStringRevision WHERE Id = 1");
 
         Assert.Equal(before, after);
+        Assert.Equal(rowsBefore, await ScalarAsync("SELECT COUNT(*) FROM sys_ecr.UiString"));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-14.9")]
+    public async Task Сід_заводить_базові_переклади_ru_і_kz_з_областю_англійського_рядка()
+    {
+        // ✎ Рішення людини 2026-09-29: «переклади робить людина, але базові
+        // тексти, які вже є, — зробити зараз, і при встановленні вони мають бути
+        // в БД». Мова — не лише рядок у `sys_ecr.Language`: без рядків каталогу
+        // вибір ru/kz у перемикачі показував би англійський інтерфейс.
+        Assert.Equal("Сохранить", await StringAsync(
+            "SELECT Value FROM sys_ecr.UiString WHERE [Key] = N'common.save' AND LanguageCode = N'ru'"));
+        Assert.Equal("Сақтау", await StringAsync(
+            "SELECT Value FROM sys_ecr.UiString WHERE [Key] = N'common.save' AND LanguageCode = N'kz'"));
+
+        // ⚠ Область перекладу — та сама, що в англійського рядка: публічний
+        // `common.save` (0) видно до входу, приватний `profile.language` (1) — ні.
+        // Переклад із іншою областю або витік би анонімно, або зник би зі
+        // сторінки входу.
+        Assert.Equal(0, await ScalarAsync("""
+            SELECT COUNT(*)
+            FROM sys_ecr.UiString AS t
+            JOIN sys_ecr.UiString AS e ON e.[Key] = t.[Key] AND e.LanguageCode = N'en'
+            WHERE t.LanguageCode IN (N'ru', N'kz')
+              AND t.[Key] IN (N'common.save', N'profile.language', N'login.submit', N'err.ECR-AUTH-0423')
+              AND t.Scope <> e.Scope
+            """));
+        Assert.Equal(8, await ScalarAsync("""
+            SELECT COUNT(*) FROM sys_ecr.UiString
+            WHERE LanguageCode IN (N'ru', N'kz')
+              AND [Key] IN (N'common.save', N'profile.language', N'login.submit', N'err.ECR-AUTH-0423')
+            """));
+
+        // ⛔ Переклад без англійського оригіналу сід не заводить (JOIN у блоці `I18N:`).
+        Assert.Equal(0, await ScalarAsync("""
+            SELECT COUNT(*) FROM sys_ecr.UiString AS t
+            WHERE t.LanguageCode IN (N'ru', N'kz')
+              AND t.ModifiedByUserId IS NULL
+              AND NOT EXISTS (SELECT 1 FROM sys_ecr.UiString AS e WHERE e.[Key] = t.[Key] AND e.LanguageCode = N'en')
+            """));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-14.9")]
+    public async Task Розгорнута_база_без_перекладу_отримує_його_а_переклад_людини_сід_не_затирає()
+    {
+        // ⚠ Стара база: розгорнута до 2026-09-29, перекладу `common.save` немає, а
+        // `common.cancel` людина вже переклала по-своєму через `/admin/ui-strings`.
+        var seeded = await StringAsync(
+            "SELECT Value FROM sys_ecr.UiString WHERE [Key] = N'common.cancel' AND LanguageCode = N'ru'");
+        await ExecuteAsync("""
+            DELETE FROM sys_ecr.UiString WHERE [Key] = N'common.save' AND LanguageCode = N'ru';
+            UPDATE sys_ecr.UiString SET Value = N'Отменить действие'
+            WHERE [Key] = N'common.cancel' AND LanguageCode = N'ru';
+            """);
+        var before = await ScalarAsync("SELECT Revision FROM sys_ecr.UiStringRevision WHERE Id = 1");
+
+        try
+        {
+            await using (var db = CreateContext())
+            {
+                await new SeedRunner(db).RunAsync(CancellationToken.None);
+            }
+
+            Assert.Equal("Сохранить", await StringAsync(
+                "SELECT Value FROM sys_ecr.UiString WHERE [Key] = N'common.save' AND LanguageCode = N'ru'"));
+            Assert.Equal("Отменить действие", await StringAsync(
+                "SELECT Value FROM sys_ecr.UiString WHERE [Key] = N'common.cancel' AND LanguageCode = N'ru'"));
+
+            // ⛔ Без інкременту клієнт із чинним ETag не побачив би нового перекладу.
+            var after = await ScalarAsync("SELECT Revision FROM sys_ecr.UiStringRevision WHERE Id = 1");
+            Assert.True(after > before, $"Revision не змінився: було {before}, стало {after}.");
+        }
+        finally
+        {
+            await ExecuteAsync($"""
+                UPDATE sys_ecr.UiString SET Value = N'{seeded!.Replace("'", "''", StringComparison.Ordinal)}'
+                WHERE [Key] = N'common.cancel' AND LanguageCode = N'ru';
+                """);
+        }
     }
 
     private EcrDbContext CreateContext()
@@ -453,6 +709,15 @@ public sealed class SeedTests(SqlServerFixture sql)
         await using var command = connection.CreateCommand();
         command.CommandText = query;
         return (decimal)(await command.ExecuteScalarAsync().ConfigureAwait(false))!;
+    }
+
+    private async Task<string?> StringAsync(string query)
+    {
+        await using var connection = new SqlConnection(sql.ConnectionString);
+        await connection.OpenAsync().ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText = query;
+        return await command.ExecuteScalarAsync().ConfigureAwait(false) as string;
     }
 
     private async Task ExecuteAsync(string query)

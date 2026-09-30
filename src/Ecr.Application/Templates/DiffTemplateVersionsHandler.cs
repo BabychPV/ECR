@@ -23,11 +23,25 @@ public sealed class DiffTemplateVersionsHandler(
     Security.IAccessDecisionService access,
     Common.ICurrentUser currentUser)
 {
-    /// <summary>Порівнює дві версії.</summary>
-    /// <param name="fromVersionId">Версія-джерело.</param>
-    /// <param name="toVersionId">Версія-ціль.</param>
+    /// <summary>Порівнює дві версії одного шаблону.</summary>
+    /// <param name="versionId">Версія, з якої відкрили порівняння.</param>
+    /// <param name="otherVersionId">Друга версія того самого шаблону.</param>
     /// <param name="ct">Токен скасування.</param>
-    public async Task<TemplateDiffDto> HandleAsync(int fromVersionId, int toVersionId, CancellationToken ct)
+    /// <remarks>
+    /// ⛔ R-08: напрям порівняння — ЗАВЖДИ від старшої версії до новішої,
+    /// незалежно від того, з якої з двох його відкрили. Доти «від» була
+    /// версія адресного рядка: з нової версії порівняння зі старою показувало
+    /// додану колонку як «Removed», а питання «що зміниться при переході»
+    /// отримувало відповідь навпаки. Старша — менший ідентифікатор: версії
+    /// заводяться лише вперед (створення, клон), і порядок ідентифікаторів —
+    /// це порядок появи.
+    /// </remarks>
+    /// <exception cref="Errors.NotFoundException">Однієї з версій немає — <c>ECR-TMPL-0404</c>.</exception>
+    /// <exception cref="Errors.BusinessRuleException">
+    /// R-09: версії належать різним шаблонам — <c>ECR-TMPL-0422</c>. Порівняння
+    /// структур двох різних форм за кодами дає перелік збігів імен, а не змін.
+    /// </exception>
+    public async Task<TemplateDiffDto> HandleAsync(int versionId, int otherVersionId, CancellationToken ct)
     {
         // ⛔ Право перевіряється ТУТ (`A7-53`). До цього ендпоінт мав лише
         // `[Authorize]`, тобто оголошене контрактом право не перевіряв ніхто.
@@ -35,18 +49,56 @@ public sealed class DiffTemplateVersionsHandler(
             .RequireAsync(access, currentUser, "Template.View", ct)
             .ConfigureAwait(false);
 
+        var template = await TemplateOfAsync(versionId, ct).ConfigureAwait(false);
+        var otherTemplate = await TemplateOfAsync(otherVersionId, ct).ConfigureAwait(false);
+
+        if (template != otherTemplate)
+        {
+            throw new Errors.BusinessRuleException(
+                Domain.Errors.ErrorCodes.TemplateInvalid,
+                $"Версії {versionId} і {otherVersionId} належать різним шаблонам: порівнюються лише версії одного шаблону.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-TMPL-0422.diffOtherTemplate",
+                    ["versionId"] = versionId.ToString(CultureInfo.InvariantCulture),
+                    ["otherVersionId"] = otherVersionId.ToString(CultureInfo.InvariantCulture),
+                });
+        }
+
+        var fromVersionId = Math.Min(versionId, otherVersionId);
+        var toVersionId = Math.Max(versionId, otherVersionId);
+
         var from = await metadata.GetAsync(fromVersionId, ct).ConfigureAwait(false);
         var to = await metadata.GetAsync(toVersionId, ct).ConfigureAwait(false);
 
-        // ⚠ Вплив рахується від ВИХІДНОЇ версії: питання «що станеться, якщо
-        // перейти» має сенс лише разом із «скільки документів це зачепить».
-        // Diff без впливу — це список рядків, за яким рішення не ухвалюють.
-        var hasDocuments = await versions.HasDocumentsAsync(fromVersionId, ct).ConfigureAwait(false);
+        // ⚠ Вплив рахується від ВИХІДНОЇ (старшої) версії: питання «що
+        // станеться, якщо перейти» має сенс лише разом із «скільки документів
+        // це зачепить».
+        // ⛔ X-12: СПРАВЖНЯ кількість, а не прапорець. Доти тут стояло
+        // `hasDocuments ? 1 : 0`, і «зачеплено документів: 1» показувалося і
+        // для одного, і для тисячі.
+        var affected = await versions.CountDocumentsAsync(fromVersionId, ct).ConfigureAwait(false);
 
         var changes = new List<TemplateChangeDto>();
-        Compare(from, to, hasDocuments, changes);
+        Compare(from, to, affected > 0, changes);
 
-        return new TemplateDiffDto(changes, hasDocuments ? 1 : 0);
+        return new TemplateDiffDto(changes, affected, fromVersionId, toVersionId);
+    }
+
+    /// <summary>Шаблон версії; версії немає — <c>404</c>.</summary>
+    private async Task<int> TemplateOfAsync(int templateVersionId, CancellationToken ct)
+    {
+        var template = await versions.FindTemplateOfVersionAsync(templateVersionId, ct).ConfigureAwait(false)
+            ?? throw new Errors.NotFoundException(
+                Domain.Errors.ErrorCodes.TemplateNotFound,
+                $"Версії шаблону {templateVersionId} не існує.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-TMPL-0404.templateVersion",
+                    ["versionId"] = templateVersionId.ToString(CultureInfo.InvariantCulture),
+                });
+
+        return template.Id;
     }
 
     /// <summary>Порівнює аркуші, таблиці, колонки і рядки за ідентичностями.</summary>

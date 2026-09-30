@@ -66,6 +66,27 @@ public interface IMethodologyStore
         int methodologyVersionId, DateOnly onDate, CancellationToken ct);
 
     /// <summary>
+    /// Те саме, що <see cref="ResolveImportsAsync"/>, але разом зі СКЛАДОМ обраної версії
+    /// кожної бібліотеки: формули, константи й режими (HSE301 L).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Версія бібліотеки — рівно та, яку дає <see cref="ResolveImportsAsync"/> на ту саму
+    /// дату: «остання з <c>EffectiveFrom ≤ дата</c>». Друге правило вибору тут розійшлося б
+    /// із публікацією на першому ж перевиданні <c>Common</c>, і прогін рахував би не ту
+    /// редакцію, яку перевірив золотий набір.
+    ///
+    /// ⚠ Лише один рівень — імпорти ЦІЄЇ версії. Транзитивне замикання будує викликач
+    /// (<c>MethodologyLibraryClosure</c>): він знає, які формули справді потрібні, і
+    /// ходить за імпортами бібліотеки лише тоді, коли потрібна формула туди посилається.
+    /// </remarks>
+    /// <param name="methodologyVersionId">Версія, що оголосила імпорти.</param>
+    /// <param name="onDate">Бізнес-дата: кінець періоду в прогоні, дата чинності в публікації.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Імпорти в порядку коду методології; без чинної версії — з порожнім складом.</returns>
+    public Task<IReadOnlyList<MethodologyLibraryContent>> GetLibraryContentsAsync(
+        int methodologyVersionId, DateOnly onDate, CancellationToken ct);
+
+    /// <summary>
     /// Замінює ребра <c>calc.MethodologyDependency</c>, що виходять із методології.
     /// </summary>
     /// <remarks>
@@ -73,9 +94,11 @@ public interface IMethodologyStore
     /// й ребро: інакше граф накопичує залежності, яких у виразах уже немає, і
     /// перерахунок щоразу тягне за собою методологію, з якою давно розв'язався.
     ///
-    /// ⚠ Ребро будується і для посилань у бібліотеку (поправка 10). Без нього
-    /// топологічний порядок неповний, і методологія читає торішній результат
-    /// <c>Common</c> — без жодної помилки в журналі.
+    /// ⚠ Ребро будується і для посилань у бібліотеку (поправка 10). ✎ HSE301 L:
+    /// записаний результат <c>Common</c> викликач не читає — формулу бібліотеки
+    /// модуль обчислює в контексті його рядка, тож на порядок прогону ребро не
+    /// впливає. Воно потрібне для інвалідації: перевидана <c>Common</c> мусить
+    /// потягнути перерахунок усіх, хто на неї посилається.
     /// </remarks>
     /// <param name="fromMethodologyId">Методологія, що посилається.</param>
     /// <param name="toMethodologyIds">Методології, на які вона посилається.</param>
@@ -111,6 +134,66 @@ public interface IMethodologyStore
     /// </remarks>
     public Task<IReadOnlyList<int>> GetMethodologyIdsBoundToTableAsync(
         int tableDefId, CancellationToken ct);
+
+    /// <summary>
+    /// Методології, активно прив'язані бодай однією колонкою до БУДЬ-ЯКОЇ з
+    /// названих таблиць (<c>cfg.CalculationBinding</c>) — одним зверненням.
+    /// </summary>
+    /// <param name="tableDefIds">Таблиці (наприклад, усі таблиці аркуша).</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>
+    /// Різні ідентифікатори за зростанням — об'єднання того, що дав би
+    /// <see cref="GetMethodologyIdsBoundToTableAsync"/> по кожній таблиці;
+    /// порожньо — жодна з таблиць не прив'язана.
+    /// </returns>
+    /// <remarks>
+    /// ⚠ Потрібно поданню аркуша (<c>SubmitSheetHandler</c>): прив'язки питались
+    /// поштучно по таблицях аркуша під винятковим блокуванням подання — N
+    /// звернень на аркуш із N таблиць (<c>SubmitSheetQueryCountTests</c>).
+    /// </remarks>
+    public Task<IReadOnlyList<int>> GetMethodologyIdsBoundToTablesAsync(
+        IReadOnlyCollection<int> tableDefIds, CancellationToken ct);
+
+    /// <summary>
+    /// Активні прив'язки виходів методологій до колонок названих таблиць —
+    /// разом з усіма версіями кожної методології (F-02).
+    /// </summary>
+    /// <param name="tableDefIds">Таблиці документа, що читаються.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Прив'язки; порожньо — жодна колонка цих таблиць не отримує результату.</returns>
+    public Task<IReadOnlyList<ColumnResultBinding>> GetColumnResultBindingsAsync(
+        IReadOnlyCollection<int> tableDefIds, CancellationToken ct);
+
+    /// <summary>
+    /// Чи змінилися входи документа після прогону, що дав його актуальні числа (F-05).
+    /// </summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="periodKey">Період.</param>
+    /// <param name="tableDefIds">
+    /// Лише зміни входів у колонках цих таблиць рахуються зміною входів;
+    /// <c>null</c> — увесь документ (дисплей F-05). Порожній перелік — жодна
+    /// зміна не рахується. ⚠ Потрібно поданню аркуша: застарілість прив'язаної
+    /// таблиці ІНШОГО аркуша того самого документа+періоду не мусить блокувати
+    /// цей аркуш.
+    /// </param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Свіжість; <c>CalculatedAt = null</c> — актуальних чисел немає.</returns>
+    public Task<CalculationFreshness> GetCalculationFreshnessAsync(
+        long documentId, int periodKey, IReadOnlyCollection<int>? tableDefIds, CancellationToken ct);
+
+    /// <summary>Код методології й номер версії — для підпису числа (F-21).</summary>
+    /// <param name="methodologyVersionIds">Версії.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Підписи; невідомої версії в результаті немає.</returns>
+    public Task<IReadOnlyDictionary<int, MethodologyVersionLabel>> GetVersionLabelsAsync(
+        IReadOnlyCollection<int> methodologyVersionIds, CancellationToken ct);
+
+    /// <summary>Журнал публікацій версій методології, найновіші першими (F-16).</summary>
+    /// <param name="methodologyId">Методологія.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Записи журналу.</returns>
+    public Task<IReadOnlyList<MethodologyPublicationEntry>> ListPublicationsAsync(
+        int methodologyId, CancellationToken ct);
 
     /// <summary>
     /// Методологія-контейнер разом з усіма своїми версіями; <c>null</c> — версії немає.
@@ -178,6 +261,21 @@ public sealed record MethodologyLibrary(
     int? MethodologyVersionId,
     IReadOnlyList<string> FormulaCodes);
 
+/// <summary>
+/// Імпорт, розв'язаний на дату, разом зі складом обраної версії бібліотеки (HSE301 L).
+/// </summary>
+/// <param name="Library">Імпорт: методологія, обрана версія, коди формул.</param>
+/// <param name="NumericMode">Арифметика обраної версії; <c>null</c> — версії немає.</param>
+/// <param name="CalendarMode">Календар обраної версії; <c>null</c> — версії немає.</param>
+/// <param name="Formulas">Формули обраної версії в порядку <c>EvaluationOrder</c>.</param>
+/// <param name="Constants">Усі константи обраної версії — кандидати для вибору на речовину й дату.</param>
+public sealed record MethodologyLibraryContent(
+    MethodologyLibrary Library,
+    Domain.Enums.NumericMode? NumericMode,
+    Domain.Enums.CalendarMode? CalendarMode,
+    IReadOnlyList<MethodologyFormula> Formulas,
+    IReadOnlyList<MethodologyConstant> Constants);
+
 /// <summary>Символи, видимі виразам версії методології.</summary>
 /// <param name="Constants">Константи — префікс <c>CST.</c>.</param>
 /// <param name="Formulas">Формули тієї самої версії — префікс <c>!</c>.</param>
@@ -216,3 +314,61 @@ public sealed record MethodologyTestCase(
     CalculationInput Input,
     IReadOnlyDictionary<string, decimal> Expected,
     decimal Tolerance);
+
+/// <summary>
+/// Активна прив'язка виходу методології до колонки — у формі, потрібній
+/// накладанню результатів на документ (F-02).
+/// </summary>
+/// <param name="TableDefId">Таблиця колонки.</param>
+/// <param name="ColumnDefId">Колонка-приймач.</param>
+/// <param name="MethodologyId">Методологія-джерело.</param>
+/// <param name="OutputCode">Вихід.</param>
+/// <param name="MatchJson">Предикат рядків; <c>{}</c> — уся таблиця.</param>
+/// <param name="VersionIds">
+/// Усі версії методології — будь-яка з них могла дати число цього періоду
+/// (версія резолвиться за датою періоду, ФВ-9.3).
+/// </param>
+public sealed record ColumnResultBinding(
+    int TableDefId,
+    int ColumnDefId,
+    int MethodologyId,
+    string OutputCode,
+    string MatchJson,
+    IReadOnlyList<int> VersionIds);
+
+/// <summary>Свіжість результатів методологій документа за період (F-05).</summary>
+/// <param name="CalculatedAt">Коли завершився прогін, що дав актуальні числа.</param>
+/// <param name="InputsChangedAt">
+/// Остання зміна ВХОДІВ (ручний запис, імпорт) після початку цього прогону;
+/// <c>null</c> — числа відповідають даним.
+/// </param>
+public sealed record CalculationFreshness(DateTime? CalculatedAt, DateTime? InputsChangedAt)
+{
+    /// <summary>Чи змінилися входи після розрахунку — числа застарілі.</summary>
+    public bool IsStale => InputsChangedAt is not null;
+}
+
+/// <summary>Підпис версії методології для людини: код методології й номер версії (F-21).</summary>
+/// <param name="MethodologyVersionId">Версія.</param>
+/// <param name="MethodologyCode">Код методології.</param>
+/// <param name="Version">Номер версії («1.2.0»).</param>
+public sealed record MethodologyVersionLabel(int MethodologyVersionId, string MethodologyCode, string Version);
+
+/// <summary>Одна публікація версії методології з журналу <c>aud.PublicationEvent</c> (F-16).</summary>
+/// <param name="Id">Запис журналу.</param>
+/// <param name="ChangedAt">Коли опубліковано (UTC).</param>
+/// <param name="MethodologyVersionId">Опублікована версія.</param>
+/// <param name="Version">Номер версії.</param>
+/// <param name="ChangeReason">Причина зміни (ФВ-14.7).</param>
+/// <param name="ChangedByUserId">Хто опублікував.</param>
+/// <param name="ChangedByName">Ім'я того, хто опублікував; <c>null</c> — облікового запису вже немає.</param>
+/// <param name="ResultDiffJson">Diff результатів на золотому наборі (ФВ-9.6), як записано.</param>
+public sealed record MethodologyPublicationEntry(
+    long Id,
+    DateTime ChangedAt,
+    int MethodologyVersionId,
+    string Version,
+    string? ChangeReason,
+    int ChangedByUserId,
+    string? ChangedByName,
+    string? ResultDiffJson);

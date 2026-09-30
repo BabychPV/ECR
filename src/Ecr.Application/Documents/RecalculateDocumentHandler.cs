@@ -68,7 +68,7 @@ public sealed class RecalculateDocumentHandler(
         long documentId, PeriodKey periodKey, int? sheetDefId, CancellationToken ct)
     {
         var profile = await Security.PermissionCheck
-            .RequireAsync(access, currentUser, Permission, ct)
+            .RequireInAnyProjectAsync(access, currentUser, Permission, ct)
             .ConfigureAwait(false);
 
         // ⛔ І ГРАНТ на проєкт документа (Q-174, аудит фази 2). Право саме по
@@ -76,18 +76,10 @@ public sealed class RecalculateDocumentHandler(
         // ЦЬОГО документа». Без цієї перевірки користувач із
         // `Calculation.Recalculate` на власний проєкт міг поставити в чергу
         // перезапис обчислених значень чужого документа.
-        var read = await access.CanReadDocumentAsync(profile, documentId, ct).ConfigureAwait(false);
-        if (!read.IsAllowed)
-        {
-            throw new Errors.AccessDeniedException(
-                "ECR-AUTH-0403", $"Немає доступу до документа {documentId}: {read.Reason}.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-AUTH-0403.noDocumentAccess",
-                    ["documentId"] = documentId.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                    ["reason"] = read.Reason.ToString(),
-                });
-        }
+        // ⛔ B-08: невидимий документ — 404, як і `GET /documents/{id}`, а не 403
+        // «NoGrant»: різниця відповідей сама розкривала б, що документ існує.
+        // ФВ-6.14: і право — у проєкті документа.
+        await DocumentVisibility.RequireVisibleAsync(access, profile, documentId, Permission, ct).ConfigureAwait(false);
 
         // ⛔ Q-331: аркуш мусить входити в СКЛАД документа — той самий гейт,
         // що вже стоїть перед `SubmitSheetHandler` (`ФВ-3.2`). Без нього
@@ -199,4 +191,18 @@ public sealed class RecalculateDocumentHandler(
         => string.Create(
             System.Globalization.CultureInfo.InvariantCulture,
             $"doc{documentId}-p{periodKey.Value}");
+
+    /// <summary>Ціль перерахунку документа за ВЕСЬ рік (нічний розклад, P4 ФВ-9.8).</summary>
+    /// <param name="documentId">Документ.</param>
+    /// <returns>Ключ цілі для злиття постановок.</returns>
+    /// <remarks>
+    /// ⚠ Окрема від <see cref="TargetOf"/>: річна задача рахує всі періоди документа
+    /// по черзі (<c>[Period:-1]</c>), і розкласти її на пари «документ + період»
+    /// означало б втратити порядок. Два нічні запуски, поки перший ще в черзі,
+    /// зливаються саме за цим ключем.
+    /// </remarks>
+    public static string YearTargetOf(long documentId)
+        => string.Create(
+            System.Globalization.CultureInfo.InvariantCulture,
+            $"doc{documentId}-year");
 }

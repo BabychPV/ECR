@@ -12,6 +12,12 @@ namespace Ecr.Application.Ports;
 /// </remarks>
 public interface IProjectStore
 {
-    /// <summary>Сторінка проєктів.</summary>
-    public Task<PagedResult<ProjectSummary>> ListAsync(CursorRequest page, CancellationToken ct);
+    /// <summary>Сторінка проєктів серед <paramref name="visibleIds"/>.</summary>
+    /// <remarks>
+    /// ⛔ Фільтр доступу — ЧАСТИНА запиту, а не пост-обробка сторінки: інакше
+    /// сторінка з N перших проєктів бази, відфільтрована після `Take`, лишає
+    /// користувача з грантом на (N+1)-й проєкт із порожнім переліком.
+    /// </remarks>
+    public Task<PagedResult<ProjectSummary>> ListAsync(
+        CursorRequest page, IReadOnlyCollection<int> visibleIds, CancellationToken ct);
 }

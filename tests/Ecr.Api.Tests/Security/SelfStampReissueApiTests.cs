@@ -34,9 +34,16 @@ public sealed class SelfStampReissueApiTests(SqlServerFixture sql)
         using var admin = await SignedInAsync(app, $"adm_{_tag}").ConfigureAwait(true);
         using var member = await SignedInAsync(app, $"mem_{_tag}").ConfigureAwait(true);
 
-        var put = await admin.PutAsJsonAsync(
-            new Uri($"/api/v1/roles/{ids.ManageRoles}/grants", UriKind.Relative),
-            new { grants = Array.Empty<object>() }).ConfigureAwait(true);
+        var grants = new Uri($"/api/v1/roles/{ids.ManageRoles}/grants", UriKind.Relative);
+        using var read = await admin.GetAsync(grants).ConfigureAwait(true);
+        using var request = new HttpRequestMessage(HttpMethod.Put, grants)
+        {
+            Content = JsonContent.Create(new { grants = Array.Empty<object>() }),
+        };
+        // `If-Match` обов'язковий: версія набору — `ETag` відповіді GET.
+        request.Headers.TryAddWithoutValidation("If-Match", read.Headers.ETag?.Tag);
+
+        var put = await admin.SendAsync(request).ConfigureAwait(true);
         Assert.True(put.StatusCode == HttpStatusCode.NoContent, $"{put.StatusCode}: {app.ErrorsText}");
 
         Assert.Equal(HttpStatusCode.OK, (await admin.GetAsync(new Uri("/api/v1/me", UriKind.Relative))).StatusCode);

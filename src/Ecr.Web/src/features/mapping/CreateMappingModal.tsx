@@ -1,9 +1,8 @@
 import { useState, type JSX } from 'react';
 import { Button, Modal, NumberInput, Select, Stack, TextInput } from '@mantine/core';
-import { notifications } from '@mantine/notifications';
 import { useMutation } from '@tanstack/react-query';
-import { EcrApiError } from '@/api/client';
 import type { AggregationKind, FieldTargetKind } from '@/api/types';
+import { showApiError, showDone } from '@/shared/ui/notify';
 import { createEntityFieldMap } from './api';
 import { PiAfCatalogButton } from './PiAfCatalogPicker';
 import { PiAfProbeAction } from './PiAfProbeAction';
@@ -75,16 +74,14 @@ export function CreateMappingModal({
         aggregation,
       }),
     onSuccess: () => {
-      notifications.show({ message: t('mapping.created') });
+      showDone(t('mapping.created'));
       onCreated();
       onClose();
     },
-    onError: (error) => {
-      notifications.show({
-        color: 'statusError',
-        message: error instanceof EcrApiError ? error.message : String(error),
-      });
-    },
+    // ⛔ `X-08`: тут стояв `error.message` — сирий `detail` сервера
+    // (українською без `messageKey`) або `TypeError: …` для мережі. Той самий
+    // розбір, що й скрізь (`problemText`): подробиця — лише локалізована.
+    onError: showApiError,
   });
 
   const canSubmit = sourceField.trim().length > 0 && targetId !== '';

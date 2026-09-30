@@ -229,6 +229,138 @@ public sealed class ConsistencyCheckJobDetectionTests(SqlServerFixture sql)
         Assert.Null(await FindIssueAsync("UNBOUND_CALCULATED_COLUMN", "cfg.ColumnDef", columnId));
     }
 
+    [Theory]
+    [InlineData(TemplateVersionStatus.Published)]
+    [InlineData(TemplateVersionStatus.Deprecated)]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Виявляє_колонку_Formula_без_джерела_на_опублікованій_версії(TemplateVersionStatus status)
+    {
+        // ⛔ HSE301 C5c. Публікація (`ECR-TMPL-4226`) і відв'язка (`D-215`) не
+        // пропускають такого стану, але дані до цих гейтів і прямий SQL —
+        // пропускають, і тоді ловити його лишається лише нічній перевірці.
+        //
+        // ⚠ Мутаційний доказ: прибери виклик `UnsourcedFormulaColumnsAsync` із
+        // `CheckAsync` — цей тест почервоніє на `Assert.NotNull`.
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var doc = await builder.BuildAsync(rowCount: 1, ct: CancellationToken.None);
+
+        var (columnId, tableCode, columnCode) = await AddColumnAsync(builder, doc, CellDataType.Formula);
+        await SetVersionStatusAsync(builder, doc, status);
+
+        await RunJobAsync();
+
+        var issue = await FindIssueAsync("UNSOURCED_FORMULA_COLUMN", "cfg.ColumnDef", columnId);
+
+        Assert.NotNull(issue);
+        Assert.Equal(2, issue.Value.Severity);
+        Assert.Contains($"{tableCode}.{columnCode}", issue.Value.Message, StringComparison.Ordinal);
+
+        // ⚠ Вид знахідки — свій, а не `Calculated`-ний: у колонки Formula два
+        // джерела, і змішати їх в одному коді означало б плутати поради.
+        Assert.Null(await FindIssueAsync("UNBOUND_CALCULATED_COLUMN", "cfg.ColumnDef", columnId));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Колонка_Formula_із_чинною_прив_язкою_знахідки_не_дає()
+    {
+        // ⚠ Прив'язка методології — одне з двох джерел (`PublishChecks.CheckComputedColumns`).
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var doc = await builder.BuildAsync(rowCount: 1, ct: CancellationToken.None);
+
+        var (columnId, _, _) = await AddColumnAsync(builder, doc, CellDataType.Formula);
+        await SetVersionStatusAsync(builder, doc, TemplateVersionStatus.Published);
+        await BindMethodologyAsync(builder, doc, columnId);
+
+        await RunJobAsync();
+
+        Assert.Null(await FindIssueAsync("UNSOURCED_FORMULA_COLUMN", "cfg.ColumnDef", columnId));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Колонка_Formula_із_формулою_шаблону_знахідки_не_дає()
+    {
+        // ⚠ Друге джерело — формула шаблону на цій колонці. Мутаційний доказ:
+        // прибери з `UnsourcedFormulaColumnsAsync` умову `!db.FormulaDefs.Any(...)`
+        // — цей тест почервоніє на `Assert.Null`.
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var doc = await builder.BuildAsync(rowCount: 1, ct: CancellationToken.None);
+
+        var (columnId, _, _) = await AddColumnAsync(builder, doc, CellDataType.Formula);
+
+        await using (var db = builder.CreateContext())
+        {
+            var formula = new FormulaDef(doc.TableDefId, FormulaScope.Column, "1", ExpressionDialect.Template);
+            formula.AssignColumn(columnId);
+            db.FormulaDefs.Add(formula);
+            await db.SaveChangesAsync(CancellationToken.None);
+        }
+
+        await SetVersionStatusAsync(builder, doc, TemplateVersionStatus.Published);
+
+        await RunJobAsync();
+
+        Assert.Null(await FindIssueAsync("UNSOURCED_FORMULA_COLUMN", "cfg.ColumnDef", columnId));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Колонка_Formula_без_джерела_в_чернетці_знахідки_не_дає()
+    {
+        // ⚠ Чернетку ще пишуть: формула в ній з'являється законно пізніше, а
+        // відсутню відхилить публікація. Мутаційний доказ: прибери фільтр стану
+        // версії — цей тест почервоніє.
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var doc = await builder.BuildAsync(rowCount: 1, ct: CancellationToken.None);
+
+        var (columnId, _, _) = await AddColumnAsync(builder, doc, CellDataType.Formula);
+
+        await RunJobAsync();
+
+        Assert.Null(await FindIssueAsync("UNSOURCED_FORMULA_COLUMN", "cfg.ColumnDef", columnId));
+    }
+
+    /// <summary>
+    /// Переводить версію документа в <paramref name="status"/> доменними
+    /// переходами (<c>Deprecated</c> — через <c>Published</c>).
+    /// </summary>
+    private static async Task SetVersionStatusAsync(
+        TestDocumentBuilder builder, TestDocument doc, TemplateVersionStatus status)
+    {
+        await using var db = builder.CreateContext();
+        var version = await db.TemplateVersions.SingleAsync(v => v.Id == doc.TemplateVersionId, CancellationToken.None);
+        var now = new DateTime(2026, 1, 20, 10, 0, 0, DateTimeKind.Utc);
+
+        version.Publish(1, now);
+        if (status == TemplateVersionStatus.Deprecated)
+        {
+            version.Deprecate(1, now);
+        }
+
+        await db.SaveChangesAsync(CancellationToken.None);
+    }
+
+    /// <summary>Прив'язує вихід нової методології до колонки.</summary>
+    private static async Task BindMethodologyAsync(TestDocumentBuilder builder, TestDocument doc, int columnId)
+    {
+        await using var db = builder.CreateContext();
+
+        var methodology = new Methodology(
+            EcrCode.Create($"M{columnId}"),
+            new LocalizedText(new Dictionary<string, string> { ["en"] = "Bound methodology" }));
+        db.Methodologies.Add(methodology);
+        await db.SaveChangesAsync(CancellationToken.None);
+
+        db.CalculationBindings.Add(new CalculationBinding(
+            doc.TableDefId, columnId, methodology.Id, "OUT", "{}"));
+        await db.SaveChangesAsync(CancellationToken.None);
+    }
+
     /// <summary>
     /// Додає в таблицю документа колонку типу <c>Calculated</c> і повертає її
     /// ідентифікатор разом із кодами таблиці й колонки.
@@ -239,8 +371,13 @@ public sealed class ConsistencyCheckJobDetectionTests(SqlServerFixture sql)
     /// будівник означало б змінити структуру, на яку спираються всі інші
     /// тести колекції.
     /// </remarks>
-    private static async Task<(int ColumnId, string TableCode, string ColumnCode)> AddCalculatedColumnAsync(
+    private static Task<(int ColumnId, string TableCode, string ColumnCode)> AddCalculatedColumnAsync(
         TestDocumentBuilder builder, TestDocument doc)
+        => AddColumnAsync(builder, doc, CellDataType.Calculated);
+
+    /// <summary>Додає в таблицю документа колонку заданого типу.</summary>
+    private static async Task<(int ColumnId, string TableCode, string ColumnCode)> AddColumnAsync(
+        TestDocumentBuilder builder, TestDocument doc, CellDataType dataType)
     {
         await using var db = builder.CreateContext();
 
@@ -256,7 +393,7 @@ public sealed class ConsistencyCheckJobDetectionTests(SqlServerFixture sql)
             EcrCode.Create(columnCode),
             new LocalizedText(new Dictionary<string, string> { ["en"] = "Methodology output" }),
             99,
-            CellDataType.Calculated);
+            dataType);
 
         db.ColumnDefs.Add(column);
         await db.SaveChangesAsync(CancellationToken.None);

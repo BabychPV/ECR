@@ -21,7 +21,6 @@ import type { components } from '@/api/schema';
 import type {
   BuildSnapshotRequest,
   JobStatus,
-  PagedProjects,
   ReportDefinition,
   ReportSnapshotSummary,
 } from '@/api/types';
@@ -48,10 +47,12 @@ import { PageHeader } from '@/shared/ui/PageHeader';
 import { PeriodPicker } from '@/shared/ui/PeriodPicker';
 import { StatusBadge } from '@/shared/ui/StatusBadge';
 import { Timestamp } from '@/shared/ui/Timestamp';
-import { showApiError, showDone } from '@/shared/ui/notify';
+import { notificationCloseButtonProps, showApiError, showDone } from '@/shared/ui/notify';
+import { errorCodeText } from '@/shared/ui/problemText';
 import { useUrlNumber } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
 import { localized } from '@/shared/i18n/localized';
+import { fetchAllProjects } from '@/features/projects/allProjects';
 
 // ⚠ За `import()`: бюджет маршруту тісний, а рядки зрізу відкривають рідко.
 const SnapshotRowsModal = lazy(() => import('@/features/reports/SnapshotRowsModal'));
@@ -67,7 +68,7 @@ const SnapshotRowsModal = lazy(() => import('@/features/reports/SnapshotRowsModa
  * зрізів, нема за що — рівно той аргумент, яким винесений Monaco.
  */
 const DateInput = lazy(async () => {
-  const module = await import('@mantine/dates');
+  const module = await import('@/shared/dates/DateInputWithStyles');
 
   return { default: module.DateInput };
 });
@@ -105,7 +106,8 @@ export function SnapshotsPage(): JSX.Element {
 
   const projects = useQuery({
     queryKey: ['projects'],
-    queryFn: () => apiFetch<PagedProjects>('/api/v1/projects?limit=200'),
+    // ⛔ `X-07`: усі сторінки, а не перші 200 мовчки (`fetchAllProjects`).
+    queryFn: fetchAllProjects,
   });
 
   // ⛔ Аудит-пас 5: рядок списку показував голий `snapshot.projectId`
@@ -113,6 +115,9 @@ export function SnapshotsPage(): JSX.Element {
   // завантажено для селектора вище, лишалося лише звести id → код.
   const projectCodeOf = (projectId: number): string =>
     projects.data?.items.find((project) => project.id === projectId)?.code ?? String(projectId);
+
+  // `X-34`: періодичність обраного проєкту — для підпису й кроку вибору періоду.
+  const selectedProjectKind = projects.data?.items.find((project) => project.id === projectId)?.periodKind;
 
   // ⛔ Перелік описів звітів, а не поле для набору коду руками (`W7`). До
   // цього єдиним способом вказати звіт було ВГАДАТИ його код: описів у базі
@@ -249,6 +254,9 @@ export function SnapshotsPage(): JSX.Element {
   // D-52a: рядки зрізу в застосунку — другий споживач `rpt.*` поруч із SSRS.
   const [viewing, setViewing] = useState<number | null>(null);
 
+  // Рішення людини 2026-09-29: вміст зрізу (рядки й книга) — окреме право.
+  const canViewContent = can(session.data, 'Report.ViewSnapshot');
+
   const verify = useMutation({
     mutationFn: (snapshotId: number) =>
       apiFetch<SnapshotVerifyResponse>(`/api/v1/reports/snapshots/${snapshotId}/verify`, {
@@ -275,16 +283,19 @@ export function SnapshotsPage(): JSX.Element {
       void queryClient.invalidateQueries({ queryKey: ['snapshots'] });
       showDone(t('snapshots.built'));
     } else if (outcome === 'failed') {
+      // ⛔ `X-04`: причина — за КОДОМ з каталогу, а не сирий `error`
+      // (`ex.Message` сервера — українською чи мовою СУБД).
       notifications.show({
         color: 'statusError',
-        message: job.data?.error ?? t('snapshots.buildFailed'),
+        message: errorCodeText(job.data?.errorCode, t('snapshots.buildFailed')),
+        closeButtonProps: notificationCloseButtonProps,
       });
     }
 
     // ⛔ `unknown` (стан прочитати не вдалося, брак `System.ViewHealth`) —
     // навмисно без тосту, той самий прецедент, що й `ExportButton.tsx`:
     // причина — брак права на читання задачі, а не збій побудови.
-  }, [jobId, outcome, job.data?.error, queryClient]);
+  }, [jobId, outcome, job.data?.errorCode, queryClient]);
 
   return (
     <>
@@ -310,7 +321,15 @@ export function SnapshotsPage(): JSX.Element {
                 періоду», запит до `/api/v1/reports/snapshots` тоді йде без
                 параметра); `setPeriodKey` уже приймає `number | null`, тож
                 підставляється напряму, без обгортки `typeof`. */}
-            <PeriodPicker size="xs" miw={110} value={periodKey} onChange={setPeriodKey} />
+            {/* ⚠ `X-34`: періодичність обраного проєкту — квартал 202504 підписано
+                «Q4 2025», а не «April 2025». */}
+            <PeriodPicker
+              size="xs"
+              miw={110}
+              value={periodKey}
+              onChange={setPeriodKey}
+              periodKind={selectedProjectKind}
+            />
 
             {/* ⛔ Вікно описів на відмові показало б «описів немає» — і запросило б
                 завести дублікат. Вимкнено, доки перелік не приїде. */}
@@ -385,13 +404,22 @@ export function SnapshotsPage(): JSX.Element {
                   <Table.Td>
                     <Group gap="xs" wrap="nowrap">
                       {snapshot.rowCount}
-                      <Button
-                        size="compact-xs"
-                        variant="default"
-                        onClick={() => setViewing(snapshot.id)}
-                      >
-                        {t('snapshots.viewRows')}
-                      </Button>
+                      {/*
+                        ⛔ Рішення людини 2026-09-29: вміст регуляторного зрізу
+                        (рядки й книга) — за окремим правом `Report.ViewSnapshot`.
+                        Без нього сервер відповідає 403, тож дії не показуються
+                        зовсім: перелік, кількість рядків і перевірка суми
+                        лишаються (їм досить `Report.ViewRegulatory`).
+                      */}
+                      {canViewContent && (
+                        <Button
+                          size="compact-xs"
+                          variant="default"
+                          onClick={() => setViewing(snapshot.id)}
+                        >
+                          {t('snapshots.viewRows')}
+                        </Button>
+                      )}
 
                       {/*
                         ⛔ Посилання, а не `fetch` із кнопки: вивантаження
@@ -417,7 +445,7 @@ export function SnapshotsPage(): JSX.Element {
                         (`aria-describedby`) і показано на фокусі — кнопка «i»
                         поруч додала б другу зупинку заради того самого тексту.
                       */}
-                      {can(session.data, 'Report.Export') && (
+                      {canViewContent && can(session.data, 'Report.Export') && (
                         <Hint label={t('snapshots.exportHint')}>
                           <Anchor size="xs" href={snapshotExportUrl(snapshot.id)} download>
                             {t('snapshots.export')}
@@ -502,6 +530,7 @@ export function SnapshotsPage(): JSX.Element {
           <PeriodPicker
             value={buildPeriod}
             onChange={(value) => setBuildPeriod(value ?? buildPeriod)}
+            periodKind={selectedProjectKind}
           />
         </Box>
 

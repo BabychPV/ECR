@@ -3,6 +3,7 @@ using Ecr.Application.Common;
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Application.Registries.Dto;
+using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Entities.Dictionaries;
 using Ecr.Domain.Enums;
 
@@ -79,7 +80,15 @@ public sealed class GetRegistryEntriesHandler(
         // DateOnly` без значення резолвиться у `default` — дату, на яку жоден
         // темпоральний запис не чинний, — і мовчазна підстановка збрехала б
         // про «довідник порожній» там, де насправді забули дату періоду.
-        if (definition.IsTemporal && asOf == default)
+        // ⛔ RT-11 (борг RT-12, D-155): частину композиції видно рівно тоді, коли видно батька —
+        // рекурсивно вгору. Тому ланцюжок батьківських довідників читається ДО ключа кешу: їхні
+        // ревізії входять у ключ, інакше видалення кейсу не сховало б його склад у пікері, доки
+        // не зміниться сам довідник складу.
+        var chain = await CompositionChainAsync(definition, ct).ConfigureAwait(false);
+
+        // ⚠ Дата потрібна й тоді, коли темпоральний не сам довідник, а його батько композиції:
+        // перелік частин залежить від того, чи чинний батько на дату періоду.
+        if ((definition.IsTemporal || chain.Exists(link => link.Parent.IsTemporal)) && asOf == default)
         {
             throw new BusinessRuleException(
                 Domain.Errors.ErrorCodes.RequestInvalid,
@@ -98,7 +107,10 @@ public sealed class GetRegistryEntriesHandler(
         //
         // asOf теж у ключі: той самий довідник на різні дати — різні списки, і
         // спільний запис віддавав би березневий перелік у жовтневому документі.
-        var key = $"reg:{definition.Code}:r{definition.DataRevision}:{asOf:yyyy-MM-dd}:p{parentEntryId?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "-"}";
+        var parents = string.Concat(chain.Select(link =>
+            $":c{link.Parent.Id.ToString(System.Globalization.CultureInfo.InvariantCulture)}"
+            + $"r{link.Parent.DataRevision.ToString(System.Globalization.CultureInfo.InvariantCulture)}"));
+        var key = $"reg:{definition.Code}:r{definition.DataRevision}{parents}:{asOf:yyyy-MM-dd}:p{parentEntryId?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "-"}";
 
         var selected = await cache.GetOrAddAsync(
             key,
@@ -112,7 +124,14 @@ public sealed class GetRegistryEntriesHandler(
                     ? []
                     : await registries.ListInboundLinksAsync(definition.Id, token).ConfigureAwait(false);
 
-                return resolver.Select(entries, links, asOf, parentEntryId);
+                var own = resolver.Select(entries, links, asOf, parentEntryId);
+                if (chain.Count == 0 || own.Count == 0)
+                {
+                    return own;
+                }
+
+                var visible = await CompositionVisibilityAsync(entries, chain, asOf, token).ConfigureAwait(false);
+                return own.Where(e => visible(e.Id)).ToList();
             },
             ct).ConfigureAwait(false);
 
@@ -128,4 +147,82 @@ public sealed class GetRegistryEntriesHandler(
                 e.ValidTo))
             .ToList();
     }
+
+    /// <summary>
+    /// Ланцюжок композиції вгору: довідник-дитина → поле композиції → довідник-батько → … (<c>D-155</c>).
+    /// Порожній — довідник не є частиною іншого.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Цикл композицій забороняє опис (<c>RegistryCompositionRules</c>), але дані могли прийти
+    /// повз нього — обхід зупиняється на вже баченому довіднику, а не зациклюється.
+    /// </remarks>
+    private async Task<List<CompositionLink>> CompositionChainAsync(RegistryDef definition, CancellationToken ct)
+    {
+        var chain = new List<CompositionLink>();
+        var seen = new HashSet<int> { definition.Id };
+        var child = definition;
+
+        while (child.Fields.FirstOrDefault(f => f.RelationKind == RegistryRelationKind.Composition
+                                                && f.RefRegistryDefId is not null) is { } field
+               && seen.Add(field.RefRegistryDefId!.Value)
+               && await registries.FindDefinitionByIdAsync(field.RefRegistryDefId.Value, ct).ConfigureAwait(false) is { } parent)
+        {
+            chain.Add(new CompositionLink(child, field, parent));
+            child = parent;
+        }
+
+        return chain;
+    }
+
+    /// <summary>
+    /// Предикат «запис видно разом із батьками композиції» — одне правило на всіх споживачів
+    /// (<see cref="RegistryResolver.VisibleWithCompositionParents"/>, той самий, що в знімку для формул).
+    /// </summary>
+    private async Task<Func<long, bool>> CompositionVisibilityAsync(
+        IReadOnlyList<RegistryEntry> entries,
+        IReadOnlyList<CompositionLink> chain,
+        DateOnly asOf,
+        CancellationToken ct)
+    {
+        var byId = new Dictionary<long, RegistryEntry>();
+        var registryOf = new Dictionary<long, int>();
+        var parentOf = new Dictionary<long, long?>();
+        var children = chain.Select(link => link.Child.Id).ToHashSet();
+
+        void Remember(IEnumerable<RegistryEntry> set)
+        {
+            foreach (var entry in set)
+            {
+                byId[entry.Id] = entry;
+                registryOf[entry.Id] = entry.RegistryDefId;
+            }
+        }
+
+        Remember(entries);
+        IReadOnlyList<RegistryEntry> level = entries;
+
+        foreach (var link in chain)
+        {
+            // Значення поля композиції кожного запису рівня — його батько.
+            var values = await registries
+                .ListValuesForEntriesAsync([.. level.Select(e => e.Id)], ct)
+                .ConfigureAwait(false);
+            foreach (var value in values.Where(v => v.RegistryFieldDefId == link.Field.Id))
+            {
+                parentOf[value.RegistryEntryId] = value.ValueRefEntryId;
+            }
+
+            level = await registries.ListEntriesAsync(link.Parent.Id, ct).ConfigureAwait(false);
+            Remember(level);
+        }
+
+        return resolver.VisibleWithCompositionParents(
+            id => byId.TryGetValue(id, out var entry) && resolver.IsSelectable(entry, asOf),
+            id => registryOf.TryGetValue(id, out var registry) && children.Contains(registry)
+                ? (true, parentOf.GetValueOrDefault(id))
+                : (false, null));
+    }
+
+    /// <summary>Ланка композиції: довідник-дитина, його поле композиції і довідник-батько.</summary>
+    private sealed record CompositionLink(RegistryDef Child, RegistryFieldDef Field, RegistryDef Parent);
 }

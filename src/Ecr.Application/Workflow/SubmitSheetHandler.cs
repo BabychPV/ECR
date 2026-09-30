@@ -7,6 +7,7 @@ using Ecr.Application.Security;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Workflow;
 using Ecr.Domain.Enums;
+using Ecr.Domain.Errors;
 using Ecr.Domain.ValueObjects;
 
 namespace Ecr.Application.Workflow;
@@ -36,7 +37,38 @@ public sealed class SubmitSheetHandler(
     Reporting.ReportSnapshotSync reports,
     IUnitOfWork uow,
     ICurrentUser currentUser,
-    IClock clock)
+    IClock clock,
+    ISheetEditGate sheetGate,
+
+    // ⛔ Формули аркуша рахуються ТУТ, під винятковим блокуванням і до
+    // валідації та зрізу (`SubmitRecalculationRaceTests`): каскадна задача
+    // після правки стоїть у черзі й після подання поданий аркуш пропускає.
+    Recalculation.ISubmitRecalculation recalculation,
+
+    // ⛔ Застарілість результатів методологій (F-02/F-05, коміт `c98c90a8`).
+    // Доти `IsStale` був ЛИШЕ візуальною позначкою в сітці й експорті:
+    // `SubmitSheetHandler`/`ApproveSheetHandler` про неї не знали, і аркуш із
+    // застарілим прив'язаним числом методології подавався й погоджувався так
+    // само, як і свіжий. Перерахунок формул аркуша (`recalculation` вище) її
+    // не закриває — це інший механізм (ФОРМУЛИ ШАБЛОНУ), методологічних
+    // прив'язок (`calc.CalculationResult`, `cfg.CalculationBinding`) він не
+    // чіпає (`D-69`).
+    //
+    // ✎ Той самий порт тепер дає й `GetMethodologyIdsBoundToTablesAsync` —
+    // звуження перевірки `IsStale` до аркушів, що мають хоч одну методологічну
+    // прив'язку (див. коментар над перевіркою нижче).
+    IMethodologyStore methodologies,
+
+    // ⛔ Граф залежностей формул версії (`cfg.FormulaDependency`) — той самий,
+    // яким живе каскадний перерахунок (`RecalculationService`,
+    // `RecalculationReadScope`). Потрібен, щоб перевірка застарілості
+    // методологій бачила таблиці ІНШИХ аркушів, які формули цього аркуша
+    // читають (див. `FreshnessTablesAsync`).
+    ITemplateVersionStore versions,
+
+    // ⛔ D16-04: знімок полів довідника для `REGFIELD` у правилах — той самий,
+    // що будує «Перевірити» (`TableValidation.RunAsync`).
+    IRegistryStore registries)
 {
     /// <summary>Подає аркуш на погодження.</summary>
     /// <param name="documentId">Документ.</param>
@@ -45,7 +77,9 @@ public sealed class SubmitSheetHandler(
     /// <param name="ct">Токен скасування.</param>
     /// <exception cref="NotFoundException">Аркуша немає в складі документа.</exception>
     /// <exception cref="AccessDeniedException">Немає рівня <c>Submit</c>.</exception>
-    /// <exception cref="BusinessRuleException">Валідація або осиротілі рядки.</exception>
+    /// <exception cref="BusinessRuleException">
+    /// Валідація, осиротілі рядки або застарілі результати методологій.
+    /// </exception>
     public async Task HandleAsync(long documentId, int sheetDefId, int periodKey, CancellationToken ct)
     {
         var userId = currentUser.UserId
@@ -53,7 +87,20 @@ public sealed class SubmitSheetHandler(
                          "ECR-AUTH-0401", "Анонімний запит не може подавати аркуші.",
                          new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.signInRequired" });
 
-        var key = new PeriodKey(periodKey);
+        // B-16 (UX-аудит, четвертий раунд): було `new PeriodKey(periodKey)` —
+        // первинний конструктор нічого не перевіряє (він же матеріалізує
+        // збережені значення), тож `periodKey=0` чи від'ємний проходив далі,
+        // не 422. `Parse` — той самий спільний валідатор зовнішнього ключа
+        // періоду, що вже стоїть у `CanRecallAsync` того самого модуля
+        // (`RecallSheetHandler`) і в `GetDocumentTablesHandler`/
+        // `GetWorkflowHistoryHandler`.
+        var key = PeriodKey.Parse(periodKey);
+
+        // ⛔ S2 / B-08: видимість документа — ПЕРШОЮ, до перевірки складу. Інакше
+        // невидимий документ відповідав би `403` (рішення про подання) або
+        // `404 sheetNotInDocument` — і те, і те каже, що документ існує.
+        var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
+        await Documents.DocumentVisibility.RequireVisibleAsync(access, profile, documentId, ct).ConfigureAwait(false);
 
         // ⛔ Аркуш мусить входити в СКЛАД документа. Без цієї перевірки
         // `POST …/submit` на довільний `sheetDefId` — навіть той, якого в
@@ -74,8 +121,36 @@ public sealed class SubmitSheetHandler(
                 });
         }
 
-        var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
+        // ⛔ Уся перевірка й сам зріз — ПІД винятковим блокуванням аркуша × періоду,
+        // однією транзакцією (`ISheetEditGate`, `SubmitEditRaceTests`). Доти
+        // транзакція відкривалась лише навколо запису зрізу і не брала жодного
+        // блокування до `SaveChanges`: правка того самого аркуша, що приходила,
+        // поки подання ще не зафіксоване, бачила під RCSI стан `Draft` і
+        // проходила — у зріз не потрапляла, а в живій комірці й журналі лишалась
+        // (`docs/build/UX-PASS-2026-09-23.md`).
+        //
+        // ⚠ Блокування береться ДО перевірки прав і валідації, а не лише навколо
+        // зрізу: інакше правка між валідацією і зрізом дала б зріз, якого
+        // валідація не бачила. Ціна — правки ЦЬОГО аркуша за ЦЕЙ період чекають
+        // секунди подання; правки сусідніх аркушів і інших періодів — ні.
+        await uow.ExecuteInTransactionAsync(
+            async innerCt =>
+            {
+                await sheetGate.EnterSubmitAsync(documentId, sheetDefId, key, innerCt).ConfigureAwait(false);
+                await SubmitUnderLockAsync(documentId, sheetDefId, periodKey, key, userId, profile, innerCt)
+                    .ConfigureAwait(false);
+            },
+            ct).ConfigureAwait(false);
+    }
 
+    /// <summary>
+    /// Права, осиротілі рядки, валідація і зріз — під блокуванням, яке взяв
+    /// <see cref="HandleAsync"/>.
+    /// </summary>
+    private async Task SubmitUnderLockAsync(
+        long documentId, int sheetDefId, int periodKey, PeriodKey key, int userId, AccessProfile profile,
+        CancellationToken ct)
+    {
         var decision = await access.CanSubmitAsync(profile, documentId, sheetDefId, key, ct)
                                    .ConfigureAwait(false);
         if (!decision.IsAllowed)
@@ -101,18 +176,161 @@ public sealed class SubmitSheetHandler(
         var orphaned = await rowStore.GetOrphanedRowIdsAsync(documentId, key, ct).ConfigureAwait(false);
         if (orphaned.Count > 0)
         {
+            // ⛔ S6 (ФВ-6.6): блокують УСІ сироти документа, але тіло відмови
+            // називає лише рядки таблиць, які подавач бачить. Рядки прихованих
+            // таблиць не входять ні в `rowIds`, ні в число; коли видимих немає —
+            // одне знеособлене зауваження без числа й адреси (як у валідації).
+            // Межі читання й відповідність «рядок → таблиця» — лише на шляху
+            // відмови: успішне подання не платить за них жодним запитом.
+            var visibleOrphans = await VisibleOrphansAsync(profile, documentId, key, orphaned, ct)
+                .ConfigureAwait(false);
+            if (visibleOrphans.Count == 0)
+            {
+                throw new BusinessRuleException(
+                    ErrorCodes.SubmitBlocked,
+                    "Подання неможливе: є зауваження поза вашою видимістю.",
+                    new Dictionary<string, object?>
+                    {
+                        ["messageKey"] = Validation.HiddenValidationIssues.MessageKey,
+                    });
+            }
+
             throw new BusinessRuleException(
-                "ECR-SUB-4221",
-                $"Подання неможливе: рядків із втраченим посиланням на реєстр — {orphaned.Count}.",
+                ErrorCodes.SubmitBlocked,
+                $"Подання неможливе: рядків із втраченим посиланням на реєстр — {visibleOrphans.Count}.",
                 new Dictionary<string, object?>
                 {
                     ["messageKey"] = "err.ECR-SUB-4221.orphanedRows",
-                    ["rowCount"] = orphaned.Count.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                    ["rowIds"] = orphaned,
+                    ["rowCount"] = visibleOrphans.Count.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["rowIds"] = visibleOrphans,
                 });
         }
 
+        // ⛔ Структура АРКУША, який подають, потрібна вже тут — до перевірки
+        // застарілості методологій нижче, — щоб звузити ту перевірку до
+        // таблиць САМЕ цього аркуша. Раніше цей блок (`templateVersionId` /
+        // `snapshot` / `tables`) рахувався лише перед валідацією (див. нижче
+        // за текстом); тепер рахується один раз тут і використовується в
+        // обох місцях.
         var instances = await rowStore.GetTableInstancesAsync(documentId, key, ct).ConfigureAwait(false);
+        var templateVersionId = await TemplateVersionOfAsync(documentId, instances, ct).ConfigureAwait(false);
+        var snapshot = await metadata.GetAsync(templateVersionId, ct).ConfigureAwait(false);
+
+        var sheet = snapshot.Sheets.FirstOrDefault(s => s.Id == sheetDefId);
+        var tables = sheet?.Tables.Where(t => !t.IsDeleted).ToDictionary(t => t.Id)
+                     ?? new Dictionary<int, Domain.Entities.Configuration.TableDef>();
+
+        // ⛔ ЗАСТАРІЛІСТЬ РЕЗУЛЬТАТІВ МЕТОДОЛОГІЙ (F-02/F-05, пряме інженерне
+        // рішення). Факт: `IsStale` — стан, що НЕ минає сам. Його дає
+        // `GetCalculationFreshnessAsync`: чи є після початку поточного
+        // («Current») прогону запис у `aud.CellChange` для цього документа й
+        // періоду. Прогін стає «Current» лише через явний запуск розрахунку
+        // (`RunCalculationHandler`/`RecalculateDocumentHandler`, право
+        // `Calculation.Recalculate`) — жодної фонової задачі, що сама б це
+        // зняла, у системі немає. Отже, застаріле число лишається застарілим,
+        // доки хтось не перерахує вручну, — точнісінько той клас стану, для
+        // якого директива вимагає БЛОКУВАННЯ, а не попередження.
+        //
+        // ✎ ЗВУЖЕННЯ (мінімальне, наступний крок над початковим фіксом):
+        // перевірку `IsStale` пропускаємо ЦІЛКОМ, якщо в АРКУШІ, що подають,
+        // немає ЖОДНОЇ таблиці з методологічною прив'язкою
+        // (`IMethodologyStore.GetMethodologyIdsBoundToTablesAsync` на всі
+        // таблиці аркуша разом).
+        // Аркуш, до жодної методології не причетний, більше не блокується
+        // застарілістю ЧУЖОГО прив'язаного результату в сусідньому аркуші
+        // того самого документа+періоду.
+        //
+        // ✎ ЗВУЖЕННЯ ДО АРКУША: для аркуша З прив'язкою свіжість питаємо лише
+        // по таблицях ЦЬОГО аркуша (`tableDefIds`) — зміна входів у таблиці
+        // іншого аркуша того самого документа+періоду його більше не блокує.
+        // ⚠ Передаються ВСІ таблиці аркуша, а не лише прив'язані: зміна в
+        // неприв'язаній таблиці того самого аркуша може бути входом
+        // методології (консервативно — блокувати зайве, ніж подати застаріле).
+        // Дисплей (`GetCalculationResultsHandler`) і далі питає по всьому
+        // документу (`null`).
+        // ⚠ До таблиць аркуша додається замикання міжтабличних (зокрема
+        // крос-аркушевих) залежностей їхніх формул — див. `FreshnessTablesAsync`.
+        //
+        // ⚠ Результат методології НЕ входить у зріз подання (`D-69`,
+        // `SnapshotPayloadAsync` нижче копіює лише клітинки), тобто застаріле
+        // число лишалося б видимим на поданому й навіть ЗАТВЕРДЖЕНОМУ аркуші
+        // назавжди (посилання живе, а не копія) — і це вирішальний аргумент
+        // за блокуванням, а не попередженням: попередження на екрані «Подати»
+        // ніхто не побачить УДРУГЕ на екрані «Погоджено».
+        //
+        // ✎ P3: прив'язки — ОДНИМ зверненням на всі таблиці аркуша
+        // (`GetMethodologyIdsBoundToTablesAsync`), не циклом по таблицях: цикл
+        // робив N походів у базу під винятковим блокуванням подання
+        // (`SubmitSheetQueryCountTests`). Семантика та сама — «бодай одна
+        // таблиця аркуша прив'язана».
+        var sheetHasMethodologyBinding = false;
+        if (tables.Count > 0)
+        {
+            var boundMethodologyIds = await methodologies
+                .GetMethodologyIdsBoundToTablesAsync(tables.Keys, ct)
+                .ConfigureAwait(false);
+            sheetHasMethodologyBinding = boundMethodologyIds is { Count: > 0 };
+        }
+
+        if (sheetHasMethodologyBinding)
+        {
+            // ⛔ Не лише таблиці аркуша, а їхнє ЗАМИКАННЯ за графом формул.
+            // Формула таблиці цього аркуша може читати таблицю ІНШОГО аркуша
+            // (`FormulaDef.IsCrossSheet`); похідна клітинка тоді — вхід
+            // методології, але її перезапис каскадом має `Origin =
+            // Recalculation`, який стор навмисно не рахує, а сама правка лежить
+            // у чужій таблиці. Без замикання подання проходило із застарілим
+            // числом методології.
+            var freshnessTables = await FreshnessTablesAsync(
+                snapshot, templateVersionId, tables.Keys, ct).ConfigureAwait(false);
+            var freshness = await methodologies
+                .GetCalculationFreshnessAsync(documentId, periodKey, freshnessTables, ct)
+                .ConfigureAwait(false);
+            if (freshness.IsStale)
+            {
+                // ⛔ S6 (ФВ-6.6): `inputsChangedAt` — час правки, яка могла лежати
+                // в прихованій таблиці замикання. Подавач, що не бачить бодай
+                // однієї таблиці замикання, отримує те саме блокування без цього
+                // часу (`null`). `calculatedAt` — час прогону, не даних таблиць.
+                // Замикання `null` — перевірка по всьому документу, тож і
+                // видимим мусить бути весь документ.
+                var readable = await access.ReadScopeAsync(profile, documentId, ct).ConfigureAwait(false);
+                var seesAllInputs = freshnessTables is null
+                    ? readable.HiddenTableIds().Count == 0
+                    : freshnessTables.All(readable.CanReadTable);
+
+                throw new BusinessRuleException(
+                    ErrorCodes.SubmitBlocked,
+                    "Подання неможливе: результати методологій застаріли — "
+                    + "входи документа змінилися після прогону розрахунку.",
+                    new Dictionary<string, object?>
+                    {
+                        ["messageKey"] = "err.ECR-SUB-4221.staleMethodologyResults",
+                        ["calculatedAt"] = freshness.CalculatedAt,
+                        ["inputsChangedAt"] = seesAllInputs ? freshness.InputsChangedAt : null,
+                    });
+            }
+        }
+
+        // ⛔ ПЕРЕРАХУНОК ФОРМУЛ АРКУША — до валідації й зрізу. Що було: правка
+        // входу комітилась і ставила каскадний перерахунок у ЧЕРГУ; «Подати»
+        // одразу після неї фіксувало в зрізі свіжий вхід і ЗАСТАРІЛЕ обчислене
+        // число, а задача з черги після подання поданий аркуш уже пропускає
+        // (ФВ-9.17) — тобто застаріле число лишалося назавжди, до Reopen.
+        //
+        // ⚠ Під ВИНЯТКОВИМ блокуванням цього аркуша: правки й інші перерахунки
+        // цього аркуша стоять, тож рахується рівно те, що потім подається.
+        // Спільного блокування цього аркуша прогін не бере (той самий власник).
+        //
+        // ⚠ Формула аркуша має право читати ІНШІ аркуші документа — вони
+        // читаються в останньому зафіксованому стані БЕЗ блокувань, і цього
+        // досить: зріз фіксує аркуш, порахований із того, що було правдою на
+        // момент подання, а пізніші зміни сусіда поданого аркуша не змінюють
+        // (ФВ-9.17). Блокувати сусідів, тримаючи виняткове, означало б дедлок
+        // двох подань, що читають одне одного (X(A)+S(B) проти X(B)+S(A)).
+        await recalculation
+            .RecalculateSheetUnderSubmitLockAsync(documentId, sheetDefId, key, ct)
+            .ConfigureAwait(false);
 
         // ⛔ ВАЛІДАЦІЯ АРКУША, який подають (`ФВ-5.4`, директива №09 `W8` п.5).
         // Це те, чого тут не було зовсім: подання перевіряло лише осиротілі
@@ -130,12 +348,9 @@ public sealed class SubmitSheetHandler(
         // гранулярність робочого процесу — `аркуш × період` (`D-38`), і
         // блокувати подання одного аркуша помилкою сусіднього означало б
         // зробити багатоаркушевий документ неподаваним по частинах.
-        var templateVersionId = await TemplateVersionOfAsync(documentId, instances, ct).ConfigureAwait(false);
-        var snapshot = await metadata.GetAsync(templateVersionId, ct).ConfigureAwait(false);
-
-        var sheet = snapshot.Sheets.FirstOrDefault(s => s.Id == sheetDefId);
-        var tables = sheet?.Tables.Where(t => !t.IsDeleted).ToDictionary(t => t.Id)
-                     ?? new Dictionary<int, Domain.Entities.Configuration.TableDef>();
+        //
+        // ⚠ `templateVersionId`/`snapshot`/`tables` уже прочитані вище (для
+        // звуження перевірки застарілості) — тут вони лише використовуються.
 
         // ⛔ Шапка документа читається РЕАЛЬНО — той самий дефект, що й у
         // ValidateDocumentHandler/PatchCellsHandler: подання зобов'язане
@@ -153,6 +368,17 @@ public sealed class SubmitSheetHandler(
 
         var blocking = new List<Validation.ValidationMessage>();
 
+        // ⛔ Обов'язкова колонка (`ColumnDef.IsRequired`), якої НІКОЛИ не
+        // торкались редагуванням, не лишає запису в `doc.CellValue`
+        // (ФВ-3.8) — і тому не проходить через жодну перевірку на шляху
+        // запису: `PatchCellsHandler` перевіряє `IsRequired` лише в
+        // момент явного `PATCH` цієї самої клітинки. Рядок із порожнім
+        // обов'язковим полем, якого ніхто не торкався, спокійно проходив
+        // подання. Перевірка тут читає САМІ РЯДКИ екземпляра
+        // (`IRowStore.GetRowIdsBatchAsync`), а не клітинки, — інакше рядок без
+        // жодного запису в зрізі був би для неї «не існує взагалі».
+        var toValidate = new List<(TableInstanceRef Instance, Domain.Entities.Configuration.TableDef Table,
+            List<Domain.Entities.Configuration.ColumnDef> RequiredColumns)>();
         foreach (var instance in instances)
         {
             if (!tables.TryGetValue(instance.TableDefId, out var table))
@@ -160,29 +386,51 @@ public sealed class SubmitSheetHandler(
                 continue;
             }
 
-            // ⛔ Обов'язкова колонка (`ColumnDef.IsRequired`), якої НІКОЛИ не
-            // торкались редагуванням, не лишає запису в `doc.CellValue`
-            // (ФВ-3.8) — і тому не проходить через жодну перевірку на шляху
-            // запису: `PatchCellsHandler` перевіряє `IsRequired` лише в
-            // момент явного `PATCH` цієї самої клітинки. Рядок із порожнім
-            // обов'язковим полем, якого ніхто не торкався, спокійно проходив
-            // подання. Перевірка тут читає САМІ РЯДКИ екземпляра
-            // (`IRowStore.GetRowIdsAsync`), а не клітинки, — інакше рядок без
-            // жодного запису в зрізі був би для неї «не існує взагалі».
             var requiredColumns = table.Columns.Where(c => !c.IsDeleted && c.IsRequired).ToList();
             if (table.ValidationRules.Count == 0 && requiredColumns.Count == 0)
             {
                 continue;
             }
 
-            var cells = await cellStore.ReadSliceAsync(instance.TableInstanceId, ct).ConfigureAwait(false);
-            var rowIds = await rowStore.GetRowIdsAsync(instance.TableInstanceId, key, ct).ConfigureAwait(false);
+            toValidate.Add((instance, table, requiredColumns));
+        }
+
+        // ⛔ P3 (перф-аудит): зріз і рядки — ДВОМА пакетними запитами на всі
+        // таблиці аркуша, а не парою запитів на КОЖНУ. Тут стояв цикл
+        // `ReadSliceAsync` + `GetRowIdsAsync` по екземплярах — і все це під
+        // винятковим блокуванням аркуша (`EnterSubmitAsync` вище), тобто
+        // правки цього аркуша чекали на кожен похід у базу. Той самий прийом,
+        // що вже закрив Q-165/Q-168 у `ValidateDocumentHandler`.
+        // Храповик — `SubmitSheetQueryCountTests`.
+        IReadOnlyDictionary<long, IReadOnlyList<CellRecord>> cellsByInstance =
+            new Dictionary<long, IReadOnlyList<CellRecord>>();
+        IReadOnlyDictionary<long, IReadOnlyDictionary<string, long>> rowIdsByInstance =
+            new Dictionary<long, IReadOnlyDictionary<string, long>>();
+        if (toValidate.Count > 0)
+        {
+            var validateIds = toValidate.ConvertAll(v => v.Instance.TableInstanceId);
+            cellsByInstance = await cellStore.ReadSlicesAsync(validateIds, key, ct).ConfigureAwait(false);
+            rowIdsByInstance = await rowStore.GetRowIdsBatchAsync(validateIds, key, ct).ConfigureAwait(false);
+        }
+
+        var rowIdsByTable = new Dictionary<int, IReadOnlyDictionary<string, long>>();
+
+        foreach (var (instance, table, requiredColumns) in toValidate)
+        {
+            var cells = cellsByInstance.TryGetValue(instance.TableInstanceId, out var slice)
+                ? slice
+                : [];
+            var rowIds = rowIdsByInstance.TryGetValue(instance.TableInstanceId, out var ids)
+                ? ids
+                : new Dictionary<string, long>(StringComparer.Ordinal);
+            rowIdsByTable[table.Id] = rowIds;
 
             if (table.ValidationRules.Count > 0)
             {
-                blocking.AddRange(Validation.TableValidation
-                    .Run(validation, table, cells, rowIds, headerValues)
-                    .Where(m => m.Severity == ValidationSeverity.Error));
+                var tableMessages = await Validation.TableValidation
+                    .RunAsync(validation, registries, snapshot, table, cells, rowIds, headerValues, currentUser.Language, ct)
+                    .ConfigureAwait(false);
+                blocking.AddRange(tableMessages.Where(m => m.Severity == ValidationSeverity.Error));
             }
 
             blocking.AddRange(MissingRequiredColumnMessages(table, requiredColumns, cells, rowIds));
@@ -190,17 +438,55 @@ public sealed class SubmitSheetHandler(
 
         if (blocking.Count > 0)
         {
+            // ⛔ Порядок у тілі 422 — ЯВНИЙ, як на екрані: таблиця аркуша →
+            // рядок → колонка. Доти він ішов за порядком рядків із БД без
+            // `ORDER BY` (словник рядків) і за `TableInstance.Id` (порядок
+            // створення екземплярів, а не таблиць на аркуші) — тобто міг
+            // змінитися від плану запиту на тих самих даних.
+            blocking = OrderAsOnScreen(blocking, tables, rowIdsByTable);
+
+            // ⛔ S6 (ФВ-6.6): подання рахує аркуш ЦІЛКОМ, але тіло відмови читає
+            // той, хто подає, — і таблиці й колонки під його забороною в ньому
+            // не називаються. Приховані помилки — одним знеособленим
+            // зауваженням без числа й адреси (`HiddenValidationIssues`).
+            var anyPeriod = await access.ReadScopeAsync(profile, documentId, ct).ConfigureAwait(false);
+            DocumentReadScope? readable = null;
+            var shown = Validation.HiddenValidationIssues.ForViewer(
+                blocking, m => (readable ??= anyPeriod.InPeriod(key)).CanReadAt(m.TableDefId, m.ColumnCode));
+            var onlyHidden = shown.Count == 1 && Validation.HiddenValidationIssues.IsPlaceholder(shown[0]);
+
+            // ⚠ Число — лише разом із видимими: `messageCount` рахує рядки
+            // переліку (знеособлене — один рядок), а коли видимих немає, число
+            // не несе нічого, крім натяку на обсяг прихованого, — його немає.
+            var details = new Dictionary<string, object?>
+            {
+                ["messageKey"] = onlyHidden
+                    ? Validation.HiddenValidationIssues.MessageKey
+                    : "err.ECR-SUB-4221.validationBlocked",
+                ["messages"] = shown
+                    .Select(m => new
+                    {
+                        m.RuleCode,
+                        m.Message,
+                        m.RowKey,
+                        m.ColumnCode,
+                        MessageKey = Validation.HiddenValidationIssues.IsPlaceholder(m)
+                            ? Validation.HiddenValidationIssues.MessageKey
+                            : null,
+                    })
+                    .ToList(),
+            };
+            if (!onlyHidden)
+            {
+                details["messageCount"] = shown.Count.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            }
+
             throw new BusinessRuleException(
-                "ECR-SUB-4221",
-                $"Подання неможливе: блокувальних помилок валідації — {blocking.Count}.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-SUB-4221.validationBlocked",
-                    ["messageCount"] = blocking.Count.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                    ["messages"] = blocking
-                        .Select(m => new { m.RuleCode, m.Message, m.RowKey, m.ColumnCode })
-                        .ToList(),
-                });
+                ErrorCodes.SubmitBlocked,
+                onlyHidden
+                    ? "Подання неможливе: є зауваження поза вашою видимістю."
+                    : $"Подання неможливе: блокувальних помилок валідації — {shown.Count}.",
+                details);
         }
 
         // ⛔ `DAT-06`. Зріз, стан аркуша й проведення в звітність — ОДНИМ
@@ -220,6 +506,29 @@ public sealed class SubmitSheetHandler(
             innerCt => SubmitCoreAsync(
                 documentId, sheetDefId, periodKey, key, userId, templateVersionId, instances, headerFieldCodes, innerCt),
             ct).ConfigureAwait(false);
+    }
+
+    /// <summary>Осиротілі рядки, які подавач має право бачити (S6).</summary>
+    /// <remarks>
+    /// ⚠ Документ без жодної прихованої таблиці — список як є, без запиту
+    /// «рядок → таблиця». Інакше рядок невідомої таблиці — невидимий (закрито
+    /// за замовчуванням, як у <see cref="DocumentReadScope"/>).
+    /// </remarks>
+    private async Task<IReadOnlyList<long>> VisibleOrphansAsync(
+        AccessProfile profile, long documentId, PeriodKey key, IReadOnlyList<long> orphaned, CancellationToken ct)
+    {
+        var readable = await access.ReadScopeAsync(profile, documentId, ct).ConfigureAwait(false);
+        if (readable.HiddenTableIds().Count == 0)
+        {
+            return orphaned;
+        }
+
+        var tableOfRow = await rowStore.GetTableDefIdsOfRowsAsync(orphaned, key, ct).ConfigureAwait(false);
+        return
+        [
+            .. orphaned.Where(rowId => tableOfRow.TryGetValue(rowId, out var tableDefId)
+                                       && readable.CanReadTable(tableDefId)),
+        ];
     }
 
     /// <summary>Зріз, стан аркуша й проведення в звітність — усе під транзакцією.</summary>
@@ -337,7 +646,10 @@ public sealed class SubmitSheetHandler(
             .ToHashSet();
 
         var messages = new List<Validation.ValidationMessage>();
-        foreach (var (rowKey, rowId) in rowIds)
+
+        // ⚠ Порядок рядків — явний (`TableRow.Id`), а не порядок словника:
+        // той дорівнює порядку рядків із БД без `ORDER BY`. Див. `OrderAsOnScreen`.
+        foreach (var (rowKey, rowId) in rowIds.OrderBy(kv => kv.Value))
         {
             foreach (var column in requiredColumns)
             {
@@ -358,6 +670,126 @@ public sealed class SubmitSheetHandler(
         }
 
         return messages;
+    }
+
+    /// <summary>
+    /// Блокувальні повідомлення в детермінованому порядку: таблиця аркуша
+    /// (<c>TableDef.Ordinal</c>, далі <c>Id</c>) → рядок → колонка
+    /// (<c>ColumnDef.Ordinal</c>) → код правила.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Повідомлення без рядка (правила рівня таблиці й документа) — після
+    /// рядкових своєї таблиці; без колонки — після колонкових свого рядка.
+    /// Сортування стабільне (<c>OrderBy</c>), тож рівні ключі зберігають
+    /// порядок, у якому їх видав двигун правил.
+    /// </remarks>
+    private static List<Validation.ValidationMessage> OrderAsOnScreen(
+        List<Validation.ValidationMessage> messages,
+        Dictionary<int, Domain.Entities.Configuration.TableDef> tables,
+        Dictionary<int, IReadOnlyDictionary<string, long>> rowIdsByTable)
+    {
+        int TablePosition(Validation.ValidationMessage m)
+            => tables.TryGetValue(m.TableDefId, out var table) ? table.Ordinal : int.MaxValue;
+
+        // ⚠ НАБЛИЖЕННЯ: ключ рядка — `TableRow.Id`, тобто порядок СТВОРЕННЯ
+        // рядків. Він розходиться з порядком на екрані (`TableRow.Ordinal`)
+        // після вставки рядка посередині чи перестановки; пакетного `Ordinal`
+        // у `IRowStore` немає ([debt]).
+        long RowPosition(Validation.ValidationMessage m)
+            => m.RowKey is { } rowKey
+               && rowIdsByTable.TryGetValue(m.TableDefId, out var rowIds)
+               && rowIds.TryGetValue(rowKey, out var rowId)
+                ? rowId
+                : long.MaxValue;
+
+        int ColumnPosition(Validation.ValidationMessage m)
+            => m.ColumnCode is { } code
+               && tables.TryGetValue(m.TableDefId, out var table)
+               && table.Columns.FirstOrDefault(c => string.Equals(c.Code, code, StringComparison.Ordinal)) is { } column
+                ? column.Ordinal
+                : int.MaxValue;
+
+        return
+        [
+            .. messages
+                .OrderBy(TablePosition)
+                .ThenBy(m => m.TableDefId)
+                .ThenBy(RowPosition)
+                .ThenBy(m => m.RowKey is null ? 1 : 0)
+                .ThenBy(m => m.RowKey, StringComparer.Ordinal)
+                .ThenBy(ColumnPosition)
+                .ThenBy(m => m.RuleCode, StringComparer.Ordinal),
+        ];
+    }
+
+    /// <summary>
+    /// Таблиці, зміна входів у яких робить результат методології аркуша
+    /// застарілим: таблиці аркуша плюс транзитивне замикання того, що читають
+    /// їхні формули (<c>cfg.FormulaDependency</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Замикання будується тим самим <see cref="Recalculation.RecalculationReadScope.Compute"/>,
+    /// що звужує читання каскадного перерахунку, — другого графа тут немає.
+    /// Один крок <c>Compute</c> дає прямі читання формул; повторюємо, доки
+    /// набір таблиць росте (A читає B, B читає C → правка в C каскадом
+    /// переписує B, потім A, і всі перезаписи — <c>Recalculation</c>).
+    ///
+    /// ⚠ Граф версії порожній, а формули в замиканні Є — версія, для якої граф
+    /// не наповнювали (до <c>A7-63</c>): що формули читають, невідомо, тож
+    /// перевірка йде по всьому документу (<c>null</c>), як до звуження.
+    /// </remarks>
+    private async Task<IReadOnlyCollection<int>?> FreshnessTablesAsync(
+        Domain.Entities.Configuration.TemplateVersionSnapshot snapshot,
+        int templateVersionId,
+        IEnumerable<int> sheetTableIds,
+        CancellationToken ct)
+    {
+        var scope = new HashSet<int>(sheetTableIds);
+
+        var tableByFormula = snapshot.Sheets
+            .SelectMany(s => s.Tables)
+            .Where(t => !t.IsDeleted)
+            .SelectMany(t => t.Formulas.Where(f => !f.IsDeleted).Select(f => (FormulaId: f.Id, TableId: t.Id)))
+            .ToDictionary(p => p.FormulaId, p => p.TableId);
+
+        IReadOnlyList<Domain.Entities.Configuration.FormulaDependency>? dependencies = null;
+
+        while (true)
+        {
+            var targets = tableByFormula
+                .Where(p => scope.Contains(p.Value))
+                .Select(p => p.Key)
+                .ToList();
+            if (targets.Count == 0)
+            {
+                break;
+            }
+
+            // Граф читається лише тоді, коли в замиканні взагалі є формули.
+            dependencies ??= await versions
+                .ListFormulaDependenciesAsync(templateVersionId, ct)
+                .ConfigureAwait(false) ?? [];
+            if (dependencies.Count == 0)
+            {
+                return null;
+            }
+
+            var reads = Recalculation.RecalculationReadScope.Compute(
+                dependencies, targets, tableByFormula, targetsWithUnknownReads: []);
+            if (reads.TableDefIds is null)
+            {
+                return null;
+            }
+
+            var before = scope.Count;
+            scope.UnionWith(reads.TableDefIds);
+            if (scope.Count == before)
+            {
+                break;
+            }
+        }
+
+        return [.. scope.Order()];
     }
 
     /// <summary>Версія шаблону, за якою живе документ.</summary>
@@ -406,12 +838,26 @@ public sealed class SubmitSheetHandler(
         IReadOnlyDictionary<int, string> headerFieldCodes,
         CancellationToken ct)
     {
+        // ⛔ P3 (перф-аудит): ОДИН пакетний запит на всі екземпляри замість
+        // запиту на кожен — під винятковим блокуванням аркуша це ~90
+        // послідовних походів у базу на типовому документі. Порядок, у якому
+        // пакет повертає комірки, на payload не впливає: `SubmissionPayload.Write`
+        // сам сортує за (рядок, колонка), тож `ContentHash` для тих самих даних
+        // той самий байт-у-байт. Храповик — `SubmitSheetQueryCountTests`.
         var cells = new List<CellRecord>();
 
-        foreach (var instance in instances)
+        if (instances.Count > 0)
         {
-            cells.AddRange(await cellStore
-                .ReadSliceAsync(instance.TableInstanceId, ct).ConfigureAwait(false));
+            var slices = await cellStore
+                .ReadSlicesAsync([.. instances.Select(i => i.TableInstanceId)], periodKey, ct)
+                .ConfigureAwait(false);
+            foreach (var instance in instances)
+            {
+                if (slices.TryGetValue(instance.TableInstanceId, out var slice))
+                {
+                    cells.AddRange(slice);
+                }
+            }
         }
 
         var headerRaw = await headers.GetValuesAsync(documentId, ct).ConfigureAwait(false);

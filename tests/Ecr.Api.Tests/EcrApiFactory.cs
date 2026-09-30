@@ -2,11 +2,13 @@ using System.Collections.Concurrent;
 using System.Net;
 using System.Text;
 using Ecr.Adapters.PiAf;
+using Ecr.Infrastructure.Caching;
 using Ecr.Infrastructure.Notifications;
 using Ecr.TestKit;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
@@ -23,7 +25,14 @@ namespace Ecr.Api.Tests;
 /// ⚠ Файла немає в дереві `05-skeleton.md` §1 (`Q-053`): без нього жоден
 /// тест `Ecr.Api.Tests` не може підняти застосунок із реальною базою.
 /// </remarks>
-public sealed class EcrApiFactory(SqlServerFixture sql, int stampCacheSeconds = 0)
+/// <param name="sql">Фікстура бази.</param>
+/// <param name="stampCacheSeconds">Кеш штампа сеансу, с (<c>Auth:StampCacheSeconds</c>).</param>
+/// <param name="revisionWindow">
+/// Вікно мемоїзації ревізії шаблону (<see cref="CacheLifetimes.Revision"/>);
+/// <c>null</c> — продуктивне (5 с). Ручки в конфігурації в нього немає, тому
+/// підміняється реєстрація <see cref="CacheLifetimes"/>.
+/// </param>
+public sealed class EcrApiFactory(SqlServerFixture sql, int stampCacheSeconds = 0, TimeSpan? revisionWindow = null)
     : WebApplicationFactory<Program>
 {
     /// <summary>
@@ -76,6 +85,20 @@ public sealed class EcrApiFactory(SqlServerFixture sql, int stampCacheSeconds = 
     /// чекав би три спроби по 30 с на адресу, якої не існує.
     /// </remarks>
     public ConcurrentQueue<Uri> SourceCalls { get; } = new();
+
+    /// <summary>
+    /// Ті самі спроби, що в <see cref="SourceCalls"/>, разом із заголовком
+    /// <c>Authorization</c>, який на них поїхав (S3: куди йде секрет джерела).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Хост <c>refused.test</c> відповідає відмовою з'єднання (з текстом
+    /// <see cref="RefusedMarker"/> у винятку), <c>denied.test</c> — <c>401</c>:
+    /// так тест бачить, що проба віддає категорію, а не текст винятку.
+    /// </remarks>
+    public ConcurrentQueue<(Uri Uri, string? Authorization)> SourceRequests { get; } = new();
+
+    /// <summary>Текст винятку «відмова з'єднання» на хості <c>refused.test</c>.</summary>
+    public const string RefusedMarker = "RAW-refused-10.0.0.7:443-banner";
 
     /// <inheritdoc />
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -158,13 +181,26 @@ public sealed class EcrApiFactory(SqlServerFixture sql, int stampCacheSeconds = 
             // не заводить другий.
             services
                 .AddHttpClient<PiWebApiDataSource>()
-                .ConfigurePrimaryHttpMessageHandler(() => new OfflineSourceHandler(SourceCalls));
+                .ConfigurePrimaryHttpMessageHandler(() => new OfflineSourceHandler(SourceCalls, SourceRequests));
+
+            // ⚠ Решта строків — з конфігурації, як у проді; підмінюється лише
+            // вікно ревізії. Пізніша реєстрація виграє в `GetRequiredService`.
+            if (revisionWindow is { } window)
+            {
+                services.AddSingleton(sp =>
+                {
+                    var configured = CacheLifetimes.FromConfiguration(sp.GetRequiredService<IConfiguration>());
+                    return new CacheLifetimes(configured.Metadata, configured.AccessProfile, window);
+                });
+            }
         });
     }
 
     /// <summary>Каталог джерела з однієї позиції; у мережу не ходить.</summary>
     /// <param name="calls">Куди записати адресу спроби.</param>
-    private sealed class OfflineSourceHandler(ConcurrentQueue<Uri> calls) : HttpMessageHandler
+    /// <param name="requests">Куди записати адресу разом із заголовком автентифікації.</param>
+    private sealed class OfflineSourceHandler(
+        ConcurrentQueue<Uri> calls, ConcurrentQueue<(Uri Uri, string? Authorization)> requests) : HttpMessageHandler
     {
         /// <summary>Відповідь у формі PI Web API: <c>Items</c> з одним елементом.</summary>
         private const string Catalog =
@@ -178,6 +214,19 @@ public sealed class EcrApiFactory(SqlServerFixture sql, int stampCacheSeconds = 
             if (request.RequestUri is { } uri)
             {
                 calls.Enqueue(uri);
+                requests.Enqueue((uri, request.Headers.Authorization?.ToString()));
+
+                if (string.Equals(uri.Host, "refused.test", StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new HttpRequestException(
+                        HttpRequestError.ConnectionError, RefusedMarker,
+                        new System.Net.Sockets.SocketException(10061));
+                }
+
+                if (string.Equals(uri.Host, "denied.test", StringComparison.OrdinalIgnoreCase))
+                {
+                    return Task.FromResult(new HttpResponseMessage(HttpStatusCode.Unauthorized));
+                }
             }
 
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)

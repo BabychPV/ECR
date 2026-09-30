@@ -1,6 +1,12 @@
 // src/Ecr.Application/Integration/DataSourceHandlers.cs
 using System.Collections.Concurrent;
+using System.Data.Common;
 using System.Globalization;
+using System.Net.Http;
+using System.Net.Sockets;
+using System.Security.Authentication;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using Ecr.Application.Common;
 using Ecr.Application.Errors;
@@ -11,6 +17,7 @@ using Ecr.Domain.Entities.External;
 using Ecr.Domain.Enums;
 using Ecr.Domain.Errors;
 using Ecr.Domain.ValueObjects;
+using Microsoft.Extensions.Logging;
 
 namespace Ecr.Application.Integration;
 
@@ -41,6 +48,18 @@ public sealed record DataSourceView(
     string RowVersion);
 
 /// <summary>Наслідок перевірки з'єднання; <c>Entities</c> — розмір каталогу джерела.</summary>
+/// <remarks>
+/// ⛔ <c>Error</c> — НОРМАЛІЗОВАНА категорія відмови
+/// (<see cref="TestDataSourceConnectionHandler.FailureCategories"/>), а не текст
+/// винятку транспорту (<c>S3</c> аудиту безпеки). Сирий текст розрізняв
+/// «connection refused», «timeout», «TLS» і тексти чужого сервера — тобто
+/// перетворював кнопку «перевірити» на сканер внутрішньої мережі. Сирий текст
+/// лишається лише в серверному журналі.
+/// </remarks>
+/// <param name="Ok">Чи джерело відповіло.</param>
+/// <param name="Error">Категорія відмови; <c>null</c> — успіх.</param>
+/// <param name="Entities">Розмір кореневого каталогу джерела.</param>
+/// <param name="MessageKey">Ключ каталогу з причиною відмови.</param>
 public sealed record DataSourceTestResult(bool Ok, string? Error, int Entities, string? MessageKey = null);
 
 /// <summary>
@@ -139,6 +158,11 @@ public sealed class ListDataSourcesHandler(
 /// коду (<c>DataSource.&lt;CODE&gt;</c>) і лишається точкою розширення: якщо
 /// секрет колись знадобиться, його задають змінною середовища
 /// <c>ECR_Secrets__DataSource.&lt;CODE&gt;</c>, і жоден рядок API не міняється.
+///
+/// ⛔ Єдине поле, що стосується секрету, — <c>secretConfirmation</c> (S3): не
+/// «задати секрет», а довести, що його знаєш, коли секрет, заданий у
+/// середовищі, мав би поїхати на нову адресу. Значення лише звіряється і
+/// ніде не зберігається.
 /// </remarks>
 public sealed class SaveDataSourceHandler(
     IDataSourceStore store,
@@ -167,7 +191,15 @@ public sealed class SaveDataSourceHandler(
     /// <summary>Тип події в журналі безпеки.</summary>
     public const string EventType = "DataSourceSaved";
 
+    /// <summary>Ключ відмови: адреса змінюється, а секрет не підтверджено.</summary>
+    public const string SecretReentryRequiredKey = "err.ECR-REQ-0422.dataSourceSecretReentryRequired";
+
     /// <summary>Заводить джерело; код має бути вільним.</summary>
+    /// <remarks>
+    /// <c>secretConfirmation</c> — значення секрету середовища під це джерело,
+    /// лише коли він там заданий (див. <see cref="RequireSecretConfirmation"/>).
+    /// Не зберігається.
+    /// </remarks>
     public async Task<DataSourceView> CreateAsync(
         string code,
         IReadOnlyDictionary<string, string>? name,
@@ -176,6 +208,7 @@ public sealed class SaveDataSourceHandler(
         string? secondaryEndpoint,
         string? catalog,
         int? maxParallel,
+        string? secretConfirmation,
         CancellationToken ct)
     {
         var profile = await PermissionCheck
@@ -185,6 +218,11 @@ public sealed class SaveDataSourceHandler(
         var parsed = await ValidateAsync(
             ecrCode.Value, name, transport, endpoint, secondaryEndpoint, maxParallel, exceptId: null, ct)
             .ConfigureAwait(false);
+
+        // ⛔ Створення — теж прив'язка секрету до адреси: ім'я секрету виводиться
+        // з КОДУ, і секрет, що лишився в середовищі після видаленого джерела,
+        // інакше поїхав би на будь-яку адресу нового джерела з тим самим кодом.
+        RequireSecretConfirmation(SecretNamePrefix + ecrCode.Value, secretConfirmation, ecrCode.Value);
 
         var source = new DataSource(
             ecrCode, parsed.Name, transport, parsed.Endpoint, SecretNamePrefix + ecrCode.Value);
@@ -200,6 +238,11 @@ public sealed class SaveDataSourceHandler(
     }
 
     /// <summary>Змінює джерело; код і ім'я секрету лишаються.</summary>
+    /// <remarks>
+    /// <c>secretConfirmation</c> — значення секрету середовища; обов'язкове, коли
+    /// змінюється адреса (<see cref="DataSourceAddress.SameTarget"/>) джерела,
+    /// під яке секрет заданий. Не зберігається й не пишеться нікуди.
+    /// </remarks>
     public async Task<DataSourceView> UpdateAsync(
         int id,
         IReadOnlyDictionary<string, string>? name,
@@ -210,6 +253,7 @@ public sealed class SaveDataSourceHandler(
         int? maxParallel,
         bool isActive,
         string? ifMatch,
+        string? secretConfirmation,
         CancellationToken ct)
     {
         var profile = await PermissionCheck
@@ -221,11 +265,50 @@ public sealed class SaveDataSourceHandler(
         var parsed = await ValidateAsync(
             source.Code, name, transport, endpoint, secondaryEndpoint, maxParallel, id, ct).ConfigureAwait(false);
 
+        // ⛔ S3 аудиту безпеки: секрет середовища прив'язаний до ІМЕНІ джерела,
+        // а не до адреси, і адаптери чіпляють його до будь-якої адреси, що
+        // стоїть у рядку (`Authorization`, `Password`, `PWD`). Без цієї
+        // перевірки право `Integration.Manage` означало «надішли службовий
+        // секрет куди скажу»: PUT на чужий хост, потім «перевірити з'єднання».
+        var addressChanged = !DataSourceAddress.SameTarget(
+            source.Transport, source.Endpoint, source.SecondaryEndpoint,
+            transport, parsed.Endpoint, parsed.SecondaryEndpoint);
+
+        if (addressChanged)
+        {
+            RequireSecretConfirmation(source.SecretName, secretConfirmation, source.Code);
+        }
+
+        // Старі значення — ДО зміни: після `Update` сутність їх уже не пам'ятає.
+        var oldTransport = source.Transport;
+        var oldEndpoint = source.Endpoint;
+        var oldSecondary = source.SecondaryEndpoint;
+
         source.Update(parsed.Name, transport, parsed.Endpoint, isActive);
         source.Configure(parsed.SecondaryEndpoint, Trim(catalog), parsed.MaxParallel);
 
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
-        await AuditAsync(profile.UserId, new { id, code = source.Code, isActive }, ct).ConfigureAwait(false);
+
+        // ⛔ Стара й нова адреса — у журнал (S3/S20): без них журнал не
+        // відповідав на питання «куди джерело дивилося вчора». Адреса не несе
+        // секрету за побудовою — `RequireNoCredentials` відхиляє такі ДО запису.
+        // Значення секрету (і підтвердження) сюди не потрапляє ніколи.
+        await AuditAsync(
+            profile.UserId,
+            new
+            {
+                id,
+                code = source.Code,
+                isActive,
+                oldTransport = oldTransport.ToString(),
+                newTransport = transport.ToString(),
+                oldEndpoint,
+                newEndpoint = parsed.Endpoint,
+                oldSecondaryEndpoint = oldSecondary,
+                newSecondaryEndpoint = parsed.SecondaryEndpoint,
+                addressChanged,
+            },
+            ct).ConfigureAwait(false);
 
         var usage = await store.CountUsageAsync(id, ct).ConfigureAwait(false);
 
@@ -353,6 +436,53 @@ public sealed class SaveDataSourceHandler(
         return at > 0 && (slash < 0 || at < slash) && rest[..at].Contains(':', StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// Прив'язати секрет середовища до (нової) адреси може лише той, хто цей
+    /// секрет знає.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Рішення (S3): <b>повторне введення в тому ж запиті</b>, а не
+    /// «скидання» прив'язки. Скинути нічого: секрет живе в конфігурації
+    /// процесу, а не в базі (<c>Q15-06</c>), <c>SecretName</c> — обов'язкова
+    /// колонка, і відв'язка потребувала б міграції та окремої дії «прив'язати
+    /// знову», якої в API немає. Повторне введення — це доказ знання: хто має
+    /// лише <c>Integration.Manage</c>, не має секрету, тож і перенаправити його
+    /// не може; хто секрет знає — переносить джерело одним запитом.
+    ///
+    /// ⚠ Секрету в середовищі немає (типовий стан, Windows-автентифікація) —
+    /// перевірки немає: переносити нічого.
+    ///
+    /// ⚠ Одна відмова на «не ввели» і «ввели не те» — без оракула, який
+    /// дозволив би підбирати значення, дивлячись на різницю відповідей.
+    /// Порівняння — за сталий час. Значення не потрапляє ні в текст відмови,
+    /// ні в журнал.
+    /// </remarks>
+    private void RequireSecretConfirmation(string secretName, string? confirmation, string code)
+    {
+        if (secrets.Find(secretName) is not { Length: > 0 } bound)
+        {
+            return;
+        }
+
+        var matches = confirmation is { Length: > 0 }
+                      && CryptographicOperations.FixedTimeEquals(
+                          Encoding.UTF8.GetBytes(confirmation), Encoding.UTF8.GetBytes(bound));
+
+        if (!matches)
+        {
+            throw new BusinessRuleException(
+                ErrorCodes.RequestInvalid,
+                $"Адреса джерела «{code}» нова, тож його секрет треба ввести повторно: "
+                + "секрет середовища йде лише на адресу, яку підтвердив той, хто його знає.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = SecretReentryRequiredKey,
+                    ["field"] = "secretConfirmation",
+                    ["code"] = code,
+                });
+        }
+    }
+
     private static string? Trim(string? value)
         => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
@@ -362,6 +492,83 @@ public sealed class SaveDataSourceHandler(
                 clock.UtcNow, EventType, TargetUserId: null, TargetRoleId: null,
                 JsonSerializer.Serialize(details), byUserId, currentUser.CorrelationId),
             ct);
+}
+
+/// <summary>
+/// Що вважається «тією самою адресою» джерела — межа, за якою секрет треба
+/// підтвердити повторно (S3).
+/// </summary>
+/// <remarks>
+/// ⛔ Правило консервативне: сумнів — це зміна. Зайве повторне введення
+/// коштує адміністраторові хвилину, пропущена зміна — службового секрету.
+/// <list type="bullet">
+/// <item>Інший транспорт — зміна: та сама стрічка читається іншим адаптером
+/// і означає іншу ціль.</item>
+/// <item>URL (<c>http</c>/<c>https</c>, транспорт PI Web API): порівнюються
+/// схема, хост, порт, шлях і рядок запиту. Не зміна — лише регістр схеми й
+/// хоста, явний типовий порт (<c>:443</c>) і кінцева <c>/</c>. Шлях — зміна:
+/// на тому самому хості за іншим шляхом може стояти інший застосунок
+/// (зворотний проксі). Фрагмент (<c>#…</c>) не йде в мережу й ігнорується.</item>
+/// <item>Рядок з'єднання (<c>Sql</c>, <c>PiSqlClient</c>): порівнюються ВСІ
+/// пари «ключ=значення»; не зміна — лише порядок ключів, пробіли й регістр
+/// назв ключів. Білого списку «безпечних» ключів немає навмисно: секрет
+/// перенаправляють не лише <c>Server</c>, а й <c>Failover Partner</c>,
+/// <c>Network Library</c>, а <c>Encrypt</c>/<c>TrustServerCertificate</c>
+/// роблять його видимим у мережі.</item>
+/// <item>Запасна адреса — за тими самими правилами: адаптер, що колись почне
+/// нею користуватися, понесе туди той самий секрет.</item>
+/// </list>
+/// Каталог (<c>Catalog</c>) не адреса: він обирає базу на ТОМУ САМОМУ сервері.
+/// </remarks>
+public static class DataSourceAddress
+{
+    /// <summary>Чи дві конфігурації ведуть секрет в одне й те саме місце.</summary>
+    public static bool SameTarget(
+        ExternalTransport oldTransport, string? oldEndpoint, string? oldSecondary,
+        ExternalTransport newTransport, string? newEndpoint, string? newSecondary)
+        => oldTransport == newTransport
+           && string.Equals(Canonical(oldEndpoint), Canonical(newEndpoint), StringComparison.Ordinal)
+           && string.Equals(Canonical(oldSecondary), Canonical(newSecondary), StringComparison.Ordinal);
+
+    /// <summary>Канонічна форма адреси; <c>null</c> — адреси немає.</summary>
+    public static string? Canonical(string? address)
+    {
+        if (string.IsNullOrWhiteSpace(address))
+        {
+            return null;
+        }
+
+        var text = address.Trim();
+
+        if (Uri.TryCreate(text, UriKind.Absolute, out var uri)
+            && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps))
+        {
+            return string.Create(
+                CultureInfo.InvariantCulture,
+                $"{uri.Scheme}://{uri.IdnHost.ToUpperInvariant()}:{uri.Port}{uri.AbsolutePath.TrimEnd('/')}{uri.Query}");
+        }
+
+        try
+        {
+            var builder = new DbConnectionStringBuilder { ConnectionString = text };
+
+            if (builder.Count > 0)
+            {
+                return string.Join(
+                    ";",
+                    builder.Keys.Cast<string>()
+                        .Select(key => (Key: key.ToUpperInvariant(), Value: Convert.ToString(builder[key], CultureInfo.InvariantCulture)))
+                        .OrderBy(pair => pair.Key, StringComparer.Ordinal)
+                        .Select(pair => $"{pair.Key}={pair.Value}"));
+            }
+        }
+        catch (ArgumentException)
+        {
+            // Не розбирається як рядок з'єднання — порівнюється як є.
+        }
+
+        return text;
+    }
 }
 
 /// <summary>
@@ -464,15 +671,40 @@ public sealed class SourceProbeGate
 /// ⚠ Причина ОБОВ'ЯЗКОВА і йде в журнал безпеки — той самий вибір, що в
 /// <see cref="Consistency.RunConsistencyCheckHandler"/>.
 /// </remarks>
-public sealed class TestDataSourceConnectionHandler(
+public sealed partial class TestDataSourceConnectionHandler(
     IDataSourceStore store,
     IEnumerable<IExternalDataSource> adapters,
     SourceProbeGate gate,
     IAccessDecisionService access,
     IAuditWriter audit,
     ICurrentUser currentUser,
-    IClock clock)
+    IClock clock,
+    ILogger<TestDataSourceConnectionHandler> logger)
 {
+    /// <summary>Відмовило в автентифікації (<c>401</c>/<c>403</c>, «Login failed»).</summary>
+    public const string FailureAuth = "auth";
+
+    /// <summary>TCP-з'єднання не встановилося, ім'я не резолвиться, джерело відповіло помилкою.</summary>
+    public const string FailureUnreachable = "unreachable";
+
+    /// <summary>TLS-рукостискання не вдалося (сертифікат, протокол).</summary>
+    public const string FailureTls = "tls";
+
+    /// <summary>Джерело не відповіло вчасно.</summary>
+    public const string FailureTimeout = "timeout";
+
+    /// <summary>Будь-що інше.</summary>
+    public const string FailureOther = "other";
+
+    /// <summary>Транспорт джерела не має адаптера.</summary>
+    public const string FailureAdapterNotRegistered = "adapterNotRegistered";
+
+    /// <summary>Усі категорії відмови, які може віддати проба.</summary>
+    public static readonly IReadOnlyList<string> FailureCategories =
+    [
+        FailureAuth, FailureUnreachable, FailureTls, FailureTimeout, FailureOther, FailureAdapterNotRegistered,
+    ];
+
     /// <summary>Код відмови: перевірка цього джерела вже виконується.</summary>
     public const string AlreadyRunningErrorCode = ErrorCodes.JobStateConflict;
 
@@ -546,8 +778,7 @@ public sealed class TestDataSourceConnectionHandler(
         if (adapter is null)
         {
             return new DataSourceTestResult(
-                false, $"No adapter is registered for the {source.Transport} transport.", 0,
-                "integration.test.adapterNotRegistered");
+                false, FailureAdapterNotRegistered, 0, "integration.test.adapterNotRegistered");
         }
 
         try
@@ -556,11 +787,81 @@ public sealed class TestDataSourceConnectionHandler(
 
             return new DataSourceTestResult(true, null, catalog.Count);
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
 #pragma warning disable CA1031 // Відмова джерела — це й є відповідь проби, а не аварія запиту.
-        catch (Exception e) when (e is not OperationCanceledException)
+        catch (Exception e)
 #pragma warning restore CA1031
         {
-            return new DataSourceTestResult(false, e.Message, 0);
+            var category = Classify(e);
+
+            // ⛔ Сирий текст — ЛИШЕ сюди (S3). Він потрібен тому, хто лагодить
+            // з'єднання, і він же — відповідь сканера мережі, якщо віддати його
+            // в тіло: «connection refused» проти «timeout» проти «TLS» проти
+            // банера чужого сервера.
+            LogProbeFailed(logger, e, source.Code, category);
+
+            return new DataSourceTestResult(false, category, 0, "integration.test.failed." + category);
         }
+    }
+
+    /// <summary>Рядок серверного журналу з винятком адаптера — єдине місце його тексту.</summary>
+    /// <param name="logger">Журнал.</param>
+    /// <param name="error">Виняток адаптера.</param>
+    /// <param name="dataSource">Код джерела.</param>
+    /// <param name="category">Категорія, яку побачив клієнт.</param>
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "Перевірка з'єднання з джерелом {DataSource} не пройшла: {Category}.")]
+    private static partial void LogProbeFailed(ILogger logger, Exception error, string dataSource, string category);
+
+    /// <summary>Виняток адаптера → одна з кількох категорій; текст винятку не читається.</summary>
+    /// <remarks>
+    /// ⚠ За ТИПОМ і кодом, а не за текстом: текст залежить від мови ОС і
+    /// сервера. Порядок має значення: TLS-відмова приходить як
+    /// <see cref="HttpRequestException"/> з <see cref="AuthenticationException"/>
+    /// всередині, тож перевіряється раніше за «недоступність»; таймаут
+    /// <c>HttpClient</c> — це <see cref="TaskCanceledException"/>, не
+    /// скасування запиту (те відсіяне вище за <c>ct</c>).
+    /// </remarks>
+    /// <param name="error">Виняток адаптера.</param>
+    public static string Classify(Exception error)
+    {
+        ArgumentNullException.ThrowIfNull(error);
+
+        var chain = new List<Exception>();
+
+        for (var e = error; e is not null && chain.Count < 16; e = e.InnerException)
+        {
+            chain.Add(e);
+        }
+
+        if (chain.Exists(e => e is SourceAuthenticationException))
+        {
+            return FailureAuth;
+        }
+
+        if (chain.Exists(e => e is AuthenticationException
+                              || e is HttpRequestException { HttpRequestError: HttpRequestError.SecureConnectionError }))
+        {
+            return FailureTls;
+        }
+
+        if (chain.Exists(e => e is TimeoutException or TaskCanceledException
+                              || (e is SocketException socket && socket.SocketErrorCode == SocketError.TimedOut)
+                              || (e is EcrException ecr && ecr.Details?.GetValueOrDefault("reason") is "timeout")))
+        {
+            return FailureTimeout;
+        }
+
+        if (chain.Exists(e => e is HttpRequestException or SocketException or DbException or IOException
+                              || (e is EcrException ecr && ecr.ErrorCode == ErrorCodes.SourceUnavailable)))
+        {
+            return FailureUnreachable;
+        }
+
+        return FailureOther;
     }
 }

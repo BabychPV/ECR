@@ -5,6 +5,36 @@ import { logSuppressedDetail, problemText } from './problemText';
 import { t } from '@/shared/i18n';
 
 /**
+ * Технічна подробиця — згорнута, під розгортанням (`X-04`, `X-27`).
+ *
+ * ⛔ Не на екрані поруч із поясненням. Сирий текст (`ex.Message` задачі,
+ * `TypeError: …` рендера) — не для людини: він чужою мовою або мовою СУБД.
+ * Але й не зникає: адміністратор, який розбирає збій, розгортає його і
+ * копіює в звернення.
+ *
+ * ⚠ Рідний `<details>`: розгортання працює з клавіатури й читалкою без
+ * жодного стану React, і його зміст не заважає, доки згорнутий.
+ */
+export function TechnicalDetails({
+  label,
+  children,
+}: {
+  label: string;
+  children: string;
+}): JSX.Element {
+  return (
+    <details data-technical-details="">
+      <Text component="summary" size="xs" c="dimmed" style={{ cursor: 'pointer' }}>
+        {label}
+      </Text>
+      <Code block mt="xs" style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+        {children}
+      </Code>
+    </details>
+  );
+}
+
+/**
  * Показ помилки — **єдине місце** на весь застосунок.
  *
  * ⛔ «Щось пішло не так» заборонено (`07-checkpoints`, Етап 6). Користувач

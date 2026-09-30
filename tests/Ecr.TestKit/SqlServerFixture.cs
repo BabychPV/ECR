@@ -41,7 +41,45 @@ public sealed class SqlServerFixture : IAsyncLifetime
     /// <summary>Префікс імені тестової бази. Перевизначається <c>ECR_TEST_DB</c>.</summary>
     private const string DatabaseNamePrefix = "EcrTest";
 
+    /// <summary>
+    /// Таймаут команд сіду — той самий, що в застосунку.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Константи в застосунку немає: значення живе дефолтом
+    /// <c>ReadInt(configuration, "Database:CommandTimeoutSeconds", 60)</c> у
+    /// <c>src/Ecr.Infrastructure/DependencyInjection.cs</c> (і тим самим числом у
+    /// <c>appsettings.json</c>). <see cref="SeedRunner"/> бере таймаут із контексту;
+    /// без нього контекст фікстури віддавав <c>null</c>, і кожен батч сіду мав
+    /// дефолтні 30 с SqlClient — удвічі менше, ніж застосунок, тож під
+    /// навантаженням фікстура падала там, де старт застосунку пройшов би.
+    /// </remarks>
+    private const int AppCommandTimeoutSeconds = 60;
+
+    private readonly string _nameSuffix = string.Empty;
+
     private MsSqlContainer? _container;
+
+    /// <summary>Сторож попереджень EF — до першого ж запиту будь-якого тесту з базою.</summary>
+    static SqlServerFixture() => EfWarningGuard.Install();
+
+    /// <summary>Фікстура колекції: база з іменем за замовчуванням.</summary>
+    public SqlServerFixture()
+    {
+    }
+
+    private SqlServerFixture(string nameSuffix) => _nameSuffix = nameSuffix;
+
+    /// <summary>
+    /// Окрема, штатно розгорнута база з суфіксом у імені — для тестів, які
+    /// змінюють саму схему і не мають права робити це на спільній базі колекції.
+    /// </summary>
+    /// <param name="nameSuffix">Суфікс імені бази, напр. <c>_rerun</c>.</param>
+    /// <remarks>
+    /// Життєвим циклом керує тест: <see cref="InitializeAsync"/> /
+    /// <see cref="DisposeAsync"/>. Конструктор приватний навмисно — xUnit
+    /// вимагає в фікстури колекції рівно один публічний конструктор.
+    /// </remarks>
+    public static SqlServerFixture WithOwnDatabase(string nameSuffix) => new(nameSuffix);
 
     /// <summary>Рядок підключення до тестової БД.</summary>
     public string ConnectionString { get; private set; } = string.Empty;
@@ -52,7 +90,7 @@ public sealed class SqlServerFixture : IAsyncLifetime
     /// <inheritdoc />
     public async Task InitializeAsync()
     {
-        DatabaseName = Environment.GetEnvironmentVariable("ECR_TEST_DB") ?? DefaultDatabaseName();
+        DatabaseName = (Environment.GetEnvironmentVariable("ECR_TEST_DB") ?? DefaultDatabaseName()) + _nameSuffix;
 
         var serverConnection = Environment.GetEnvironmentVariable(LocalServerVariable);
         if (string.IsNullOrWhiteSpace(serverConnection))
@@ -110,7 +148,31 @@ public sealed class SqlServerFixture : IAsyncLifetime
             ? DatabaseNamePrefix
             : $"{DatabaseNamePrefix}_{suffix}";
 
-        return $"{name}_{WorkspaceTag()}";
+        return $"{name}_{WorkspaceTag()}{ShardSuffix()}";
+    }
+
+    /// <summary>
+    /// Суфікс <c>_s&lt;N&gt;</c> для паралельного шарда з <c>ECR_TEST_SHARD</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Той самий клас дефекту, що <c>Q-055</c> і <see cref="WorkspaceTag"/>,
+    /// ще на рівень нижче: <c>tools/verify-all.ps1 -ApiParallel K</c> запускає
+    /// K процесів <c>dotnet test</c> на ОДНУ й ту саму DLL з одного каталогу
+    /// збірки. Мітка каталогу в них однакова, тож без суфікса кожен процес
+    /// скидав би базу з-під сусіда.
+    ///
+    /// ⚠ Шардуються саме процеси, а не колекції в одному процесі:
+    /// <c>EcrApiFactory</c> передає рядок з'єднання через змінну оточення
+    /// (глобально на процес), а Quartz тримає статичні реєстри.
+    ///
+    /// ⚠ Без змінної ім'я не змінюється ні на символ — прогони без шардів
+    /// працюють із тією самою базою, що й раніше. <c>ECR_TEST_DB</c>, як і
+    /// раніше, перекриває ім'я цілком — разом із суфіксом.
+    /// </remarks>
+    private static string ShardSuffix()
+    {
+        var shard = Environment.GetEnvironmentVariable("ECR_TEST_SHARD");
+        return string.IsNullOrWhiteSpace(shard) ? string.Empty : $"_s{shard.Trim()}";
     }
 
     /// <summary>
@@ -386,6 +448,7 @@ public sealed class SqlServerFixture : IAsyncLifetime
         await RunScriptAsync("06-rcsi.sql").ConfigureAwait(false);
 
         await using var seedDb = CreateContext();
+        seedDb.Database.SetCommandTimeout(AppCommandTimeoutSeconds);
         await new SeedRunner(seedDb).RunAsync(CancellationToken.None).ConfigureAwait(false);
     }
 
@@ -400,8 +463,8 @@ public sealed class SqlServerFixture : IAsyncLifetime
     /// </remarks>
     public EcrDbContext CreateContext()
     {
-        var options = new DbContextOptionsBuilder<EcrDbContext>()
-            .UseSqlServer(ConnectionString, o => o.MigrationsHistoryTable("__EFMigrationsHistory", "dbo"))
+        var options = EfWarningGuard.Apply(new DbContextOptionsBuilder<EcrDbContext>()
+            .UseSqlServer(ConnectionString, o => o.MigrationsHistoryTable("__EFMigrationsHistory", "dbo")))
             .Options;
 
         return new EcrDbContext(options);

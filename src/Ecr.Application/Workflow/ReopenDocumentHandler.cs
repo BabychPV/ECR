@@ -42,12 +42,25 @@ public sealed class ReopenDocumentHandler(
                          "ECR-AUTH-0401", "Анонімний запит не може відкривати аркуші.",
                          new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.signInRequired" });
 
-        var key = new PeriodKey(periodKey);
+        // B-16: спільний валідатор зовнішнього ключа періоду (`PeriodKey.Parse`),
+        // а не первинний конструктор — той нічого не перевіряє (він же матеріалізує
+        // збережені значення), і `periodKey=0` доходив би далі як «звичайний період».
+        var key = PeriodKey.Parse(periodKey);
         var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
+
+        // ⛔ S2 / B-08: видимість — ПЕРШОЮ, ще до функціонального права: відмова
+        // «немає Document.Reopen» на невидимому документі теж підтверджувала б,
+        // що він існує. Невидимий документ — `404`, як на кожному маршруті.
+        await Documents.DocumentVisibility.RequireVisibleAsync(access, profile, documentId, ct).ConfigureAwait(false);
 
         // Право небезпечне і тому перевіряється окремо від грантів: воно дає
         // змогу змінити вже подані числа (ФВ-6.12).
-        if (!profile.Has(Permission))
+        // ⛔ ФВ-6.14: у проєкті ЦЬОГО документа — роль з областю діє лише там.
+        // Проєкт питається лише тоді, коли права немає глобально.
+        var allowed = profile.Has(Permission)
+                      || (await access.DocumentProjectIdAsync(documentId, ct).ConfigureAwait(false) is { } documentProject
+                          && profile.Has(Permission, documentProject));
+        if (!allowed)
         {
             throw new AccessDeniedException(
                 "ECR-ACCS-0403", $"Потрібне право {Permission}.",

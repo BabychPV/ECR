@@ -52,6 +52,33 @@ public interface ICollectionStore
         IReadOnlyList<TimeInterval> covered, CancellationToken ct);
 
     /// <summary>
+    /// Записує в журнал покриття ПОДІЮ зі статусом про інтервал, який збір
+    /// прочитати не зміг (<c>CollectionCoverage.SourceDataRefused</c>).
+    /// </summary>
+    /// <param name="sourceEntityId">Сутність джерела.</param>
+    /// <param name="sourcePath">Атрибут, що відмовив; <c>null</c> — уся сутність.</param>
+    /// <param name="fromUtc">Початок непрочитаного інтервалу.</param>
+    /// <param name="toUtc">Кінець непрочитаного інтервалу.</param>
+    /// <param name="status">Статус події з <c>CollectionCoverage.KnownStatuses</c>.</param>
+    /// <param name="errorCode">Код відмови — частина ключа дедуплікації.</param>
+    /// <param name="reason">Пояснення конвертом (<c>Q-326</c>) — лягає в <c>Details</c>.</param>
+    /// <param name="ct">Скасування.</param>
+    /// <returns><c>true</c> — подію записано; <c>false</c> — така сама вже є.</returns>
+    /// <remarks>
+    /// ⛔ Подія НЕ є покриттям: рядок має статус, а острови покриття й
+    /// наздоганяння читають лише <c>Status IS NULL</c> — інтервал лишається
+    /// прогалиною і після запису події.
+    /// <para>
+    /// ⚠ Ідемпотентно: та сама (сутність, атрибут, інтервал, статус, код) на
+    /// кожному наступному прогоні нової події не дає — інакше щогодинне
+    /// наздоганяння засипало б журнал копіями однієї відмови.
+    /// </para>
+    /// </remarks>
+    public Task<bool> RecordCoverageEventAsync(
+        int sourceEntityId, string? sourcePath, DateTime fromUtc, DateTime toUtc,
+        string status, string errorCode, JobProgressMessageEnvelope reason, CancellationToken ct);
+
+    /// <summary>
     /// Покриті інтервали від <paramref name="notBefore"/> — основа для пошуку
     /// прогалин. Ознака здоров'я інтеграції — саме журнал покриття, а не тиша (ІНТ-3.3).
     /// </summary>
@@ -140,8 +167,20 @@ public interface ICollectionStore
     /// <summary>Колонка-ціль існує і не м'яко видалена.</summary>
     public Task<bool> ColumnDefExistsAsync(int columnDefId, CancellationToken ct);
 
-    /// <summary>Поле реєстру-ціль існує.</summary>
-    public Task<bool> RegistryFieldDefExistsAsync(int registryFieldDefId, CancellationToken ct);
+    /// <summary>
+    /// Проєкти, у які може писати мапінг на цю колонку (S3 аудиту безпеки).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Обидва шляхи в ОДНОМУ запиті: проєкти з екземплярами таблиці колонки
+    /// (наявні документи, зокрема на старих версіях шаблону) і проєкти, чия
+    /// поточна версія шаблону цю колонку містить (документи, яких ще немає).
+    /// Колонки — ідентифікатори версії шаблону, а версію ділять проєкти, тож
+    /// один мапінг пише в кожен із них.
+    /// </remarks>
+    /// <param name="columnDefId">Колонка-ціль.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Ідентифікатори проєктів без повторів; порожньо — колонку ніхто не використовує.</returns>
+    public Task<IReadOnlyList<int>> FindProjectIdsUsingColumnAsync(int columnDefId, CancellationToken ct);
 
     /// <summary>Одиниця межі інтеграції (ФВ-16.9) існує.</summary>
     public Task<bool> UnitExistsAsync(int unitId, CancellationToken ct);
@@ -163,6 +202,31 @@ public interface ICollectionStore
     /// </para>
     /// </remarks>
     public Task<IReadOnlyList<SourceEntityStatus>> ListSourceEntitiesAsync(CancellationToken ct);
+
+    /// <summary>
+    /// У з'єднання вже є сутність збору з цим кодом — активна чи вимкнена
+    /// (унікальний індекс <c>UQ_SourceEntity</c> не дивиться на <c>IsActive</c>).
+    /// </summary>
+    public Task<bool> SourceEntityCodeExistsAsync(int dataSourceId, string code, CancellationToken ct);
+
+    /// <summary>Заводить сутність збору (<c>ФВ-13.11</c>) і повертає її з присвоєним <c>Id</c>.</summary>
+    public Task<SourceEntity> AddSourceEntityAsync(SourceEntity entity, CancellationToken ct);
+
+    /// <summary>
+    /// Зберігає зміни відстежуваної сутності, прочитаної через
+    /// <see cref="FindSourceEntityAsync"/>.
+    /// </summary>
+    public Task SaveSourceEntityAsync(SourceEntity entity, CancellationToken ct);
+
+    /// <summary>Довідник існує.</summary>
+    public Task<bool> RegistryDefExistsAsync(int registryDefId, CancellationToken ct);
+
+    /// <summary>Довідник, якому належить поле; <c>null</c> — поля немає.</summary>
+    /// <remarks>
+    /// ⚠ Одним запитом відповідає і на «чи є поле», і на «чиє воно» — мапінг
+    /// на поле довідника перевіряє обидва (<c>ФВ-8.11</c>).
+    /// </remarks>
+    public Task<int?> FindRegistryFieldOwnerAsync(int registryFieldDefId, CancellationToken ct);
 }
 
 /// <summary>Сутність збору разом зі станом останнього прогону.</summary>
@@ -176,6 +240,7 @@ public interface ICollectionStore
 /// <param name="OldestGap">Початок найстарішої непокритої прогалини; <c>null</c> — покриття суцільне.</param>
 /// <param name="DataSourceId">З'єднання, якому належить сутність.</param>
 /// <param name="DataSourceCode">Код цього з'єднання.</param>
+/// <param name="RegistryDefId">Довідник, до якого прив'язана сутність; <c>null</c> — не прив'язана.</param>
 public sealed record SourceEntityStatus(
     int Id,
     string Code,
@@ -186,7 +251,8 @@ public sealed record SourceEntityStatus(
     CollectionRunStatus? LastRun,
     DateTime? OldestGap,
     int DataSourceId,
-    string DataSourceCode);
+    string DataSourceCode,
+    int? RegistryDefId = null);
 
 /// <summary>Що джерело вже віддало за одним полем мапінгу (<c>BE-27</c>).</summary>
 /// <param name="Points">Скільки точок у <c>ext.RawDataPoint</c>.</param>

@@ -37,7 +37,8 @@ export type DenyReason =
   | 'ArchivingInProgress'
   | 'BusinessRule'
   | 'SimulationReadOnly'
-  | 'OutsidePermitWindow';
+  | 'OutsidePermitWindow'
+  | 'InsufficientGrantLevel';
 
 /** Рішення про комірку. */
 export interface CellDecision {
@@ -76,6 +77,7 @@ const Hints: Record<DenyReason, string> = {
   BusinessRule: 'deny.BusinessRule',
   SimulationReadOnly: 'deny.SimulationReadOnly',
   OutsidePermitWindow: 'deny.OutsidePermitWindow',
+  InsufficientGrantLevel: 'deny.InsufficientGrantLevel',
 };
 
 /** Ключ комірки у словнику прав, який віддає сервер. */
@@ -159,6 +161,19 @@ function reasonOf(permission: string): DenyReason | null {
   return permission in Hints ? (permission as DenyReason) : null;
 }
 
+/**
+ * Текст причини заборони за її серверною назвою — або `null` для невідомої.
+ *
+ * ⚠ Той самий текст, що в підказці сірої комірки: відмова прев'ю імпорту
+ * (`deny.<EditDenyReason>`, `V-10`) і сіра комірка сітки — одна й та сама
+ * причина, і двох формулювань в неї бути не повинно.
+ */
+export function denyText(reason: string): string | null {
+  const known = reasonOf(reason);
+
+  return known === null ? null : deny(known).hint;
+}
+
 function deny(reason: DenyReason): CellDecision {
   // ⚠ Текст береться в момент рішення, а не при завантаженні модуля: каталог
   // приходить із сервера пізніше за імпорти, і таблиця, обчислена наперед,
@@ -186,6 +201,17 @@ export function confirmationOf(
   column: ColumnDto,
 ): string | null {
   return slice.cellConfirmations[cellKey(rowKey, column.code)] ?? null;
+}
+
+/**
+ * Комірки пакета (вставка, протягування), що вимагають підтвердження
+ * (`ФВ-2.16`) — один діалог на пакет називає саме їхню кількість.
+ */
+export function cellsNeedingConfirmation<T extends { rowKey: string; columnCode: string }>(
+  slice: TableSliceDto,
+  cells: readonly T[],
+): T[] {
+  return cells.filter((cell) => slice.cellConfirmations[cellKey(cell.rowKey, cell.columnCode)] !== undefined);
 }
 
 /**

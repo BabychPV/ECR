@@ -4,7 +4,6 @@ using Ecr.Application.Common;
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
-using Ecr.Application.Templates;
 using Ecr.Domain.Entities.External;
 using Ecr.Domain.Errors;
 
@@ -52,7 +51,9 @@ public sealed class CreateEntityFieldMapHandler(
     {
         ArgumentNullException.ThrowIfNull(command);
 
-        await ListTemplatesHandler
+        // ⚠ Той самий «право або 403 permission», що був, — але з профілем:
+        // він потрібен для гранта на проєкти цілі (S3).
+        var profile = await PermissionCheck
             .RequireAsync(access, currentUser, Permission, ct)
             .ConfigureAwait(false);
 
@@ -66,7 +67,7 @@ public sealed class CreateEntityFieldMapHandler(
         // ⚠ Існування сутності джерела перевіряється ТУТ — так само, як у
         // CollectFromSourceHandler: мапінг на неіснуючу чи вимкнену сутність
         // виглядав би заведеним, а збір за ним не запустився б ніколи.
-        _ = await sources.FindSourceEntityAsync(sourceEntityId, ct).ConfigureAwait(false)
+        var entity = await sources.FindSourceEntityAsync(sourceEntityId, ct).ConfigureAwait(false)
             ?? throw new NotFoundException(
                 ErrorCodes.SourceEntityNotFound,
                 $"Сутності джерела {sourceEntityId} немає або вона вимкнена.",
@@ -76,7 +77,7 @@ public sealed class CreateEntityFieldMapHandler(
                     ["id"] = sourceEntityId.ToString(CultureInfo.InvariantCulture),
                 });
 
-        var map = await BuildTargetAsync(sourceEntityId, command, ct).ConfigureAwait(false);
+        var map = await BuildTargetAsync(profile, sourceEntityId, entity, command, ct).ConfigureAwait(false);
 
         await ApplyUnitsAsync(map, command, ct).ConfigureAwait(false);
 
@@ -94,7 +95,8 @@ public sealed class CreateEntityFieldMapHandler(
 
     /// <summary>Будує мапінг на потрібний вид цілі, перевіривши, що вона існує.</summary>
     private async Task<EntityFieldMap> BuildTargetAsync(
-        int sourceEntityId, CreateEntityFieldMapCommand command, CancellationToken ct)
+        AccessProfile profile, int sourceEntityId, SourceEntity entity, CreateEntityFieldMapCommand command,
+        CancellationToken ct)
     {
         switch (command.TargetKind)
         {
@@ -131,6 +133,8 @@ public sealed class CreateEntityFieldMapHandler(
                         });
                 }
 
+                await RequireProjectGrantsAsync(profile, columnDefId, ct).ConfigureAwait(false);
+
                 return EntityFieldMap.ToColumn(sourceEntityId, command.SourceField, columnDefId);
 
             case FieldTargetKind.RegistryField:
@@ -154,14 +158,47 @@ public sealed class CreateEntityFieldMapHandler(
                             ["messageKey"] = "err.ECR-REQ-0422.entityFieldMapRegistryFieldRequired",
                         });
 
-                if (!await sources.RegistryFieldDefExistsAsync(registryFieldDefId, ct).ConfigureAwait(false))
+                // ⛔ ФВ-8.11: рядок-адресат і згортка адресують РЯДОК ТАБЛИЦІ
+                // документа; у поля довідника рядка немає. Прийняти їх мовчки
+                // означало б мапінг, який виглядає матеріалізованим, а
+                // матеріалізувати його нікуди.
+                if (command.TargetRowKey is not null || command.Aggregation is not null)
                 {
-                    throw new NotFoundException(
+                    throw new BusinessRuleException(
+                        ErrorCodes.RequestInvalid,
+                        "Мапінг на поле реєстру не приймає targetRowKey і aggregation.",
+                        new Dictionary<string, object?>
+                        {
+                            ["messageKey"] = "err.ECR-REQ-0422.entityFieldMapRegistryFieldMaterialization",
+                        });
+                }
+
+                var owner = await sources.FindRegistryFieldOwnerAsync(registryFieldDefId, ct).ConfigureAwait(false)
+                    ?? throw new NotFoundException(
                         ErrorCodes.EntityFieldMapTargetNotFound,
                         $"Поля реєстру {registryFieldDefId} немає.",
                         new Dictionary<string, object?>
                         {
                             ["messageKey"] = "err.ECR-INT-0405.registryField",
+                            ["registryFieldDefId"] = registryFieldDefId.ToString(CultureInfo.InvariantCulture),
+                        });
+
+                // ⛔ ФВ-8.11: сутність наповнює РІВНО той довідник, до якого
+                // прив'язана. Поле сусіднього довідника (або будь-яке поле, поки
+                // сутність не прив'язана) — це синхронізація, що пише в чужі записи.
+                if (entity.RegistryDefId != owner)
+                {
+                    throw new BusinessRuleException(
+                        ErrorCodes.RequestInvalid,
+                        entity.RegistryDefId is null
+                            ? $"Сутність джерела {sourceEntityId} не прив'язана до довідника."
+                            : $"Поле реєстру {registryFieldDefId} належить іншому довіднику, ніж прив'язаний до сутності {sourceEntityId}.",
+                        new Dictionary<string, object?>
+                        {
+                            ["messageKey"] = entity.RegistryDefId is null
+                                ? "err.ECR-REQ-0422.entityFieldMapRegistryNotBound"
+                                : "err.ECR-REQ-0422.entityFieldMapRegistryFieldForeign",
+                            ["sourceEntityId"] = sourceEntityId.ToString(CultureInfo.InvariantCulture),
                             ["registryFieldDefId"] = registryFieldDefId.ToString(CultureInfo.InvariantCulture),
                         });
                 }
@@ -176,6 +213,44 @@ public sealed class CreateEntityFieldMapHandler(
                         ["messageKey"] = "err.ECR-REQ-0422.entityFieldMapTargetKindUnknown",
                         ["targetKind"] = command.TargetKind.ToString(),
                     });
+        }
+    }
+
+    /// <summary>
+    /// Мапінг на колонку — це запис у документи КОЖНОГО проєкту, що
+    /// використовує колонку: на кожен потрібен грант <c>Manage</c> (S3).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Збір пише від імені integration writer, який має <c>Write</c> усюди,
+    /// де немає явного <c>IsDeny</c>. Без цієї перевірки <c>Integration.Manage</c>
+    /// означало «пиши довільні значення у відкриті періоди будь-якого проєкту»:
+    /// підмінене джерело плюс мапінг. Грант — на конкретний проєкт, як в
+    /// активації проєкту (Q-179): глобальне право каже «керує інтеграцією»,
+    /// грант — «саме цими проєктами».
+    ///
+    /// ⚠ Рішення: колонку, якої не використовує жоден проєкт, мапити МОЖНА —
+    /// мапінг нікого не зачіпає. Вимога глобального права тут закрила б
+    /// налаштування нової версії шаблону до появи першого проєкту.
+    ///
+    /// ⚠ Відмова називає ПЕРШИЙ проєкт без гранта (найменший id), а не
+    /// перелік: перелік чужих проєктів розкривав би, де ще живе шаблон.
+    /// </remarks>
+    private async Task RequireProjectGrantsAsync(AccessProfile profile, int columnDefId, CancellationToken ct)
+    {
+        var projects = await sources.FindProjectIdsUsingColumnAsync(columnDefId, ct).ConfigureAwait(false);
+
+        foreach (var projectId in projects.Order())
+        {
+            if (profile.LevelFor(Domain.Enums.ResourceKind.Project, projectId) < Domain.Enums.GrantLevel.Manage)
+            {
+                throw new AccessDeniedException(
+                    "ECR-AUTH-0403", $"Немає гранта Manage на проєкт {projectId}, у який писав би мапінг.",
+                    new Dictionary<string, object?>
+                    {
+                        ["messageKey"] = "err.ECR-AUTH-0403.noProjectManageGrant",
+                        ["projectId"] = projectId.ToString(CultureInfo.InvariantCulture),
+                    });
+            }
         }
     }
 

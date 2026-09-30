@@ -87,9 +87,17 @@ public sealed class GetExpressionMetadataHandler(
 
     /// <summary>Поля шапки документа — <c>HDR.</c> (<c>02b</c> §3.3 п. 4).</summary>
     /// <remarks>
-    /// ⚠ Фільтр саме такий, як у вимозі: діловий ключ або поле області. Решта
-    /// колонок шапкою не є, і підказати їх означало б навчити писати
-    /// посилання, яке не резолвиться.
+    /// ⛔ Джерело — <see cref="HeaderFieldDef"/> версії, тобто РІВНО те, проти
+    /// чого резолвить посилання публікація (<c>ReferenceResolver.ResolveHeader</c>
+    /// над <c>snapshot.HeaderFields</c>) і що читає рушій у рантаймі
+    /// (<c>HeaderValueMapping</c>). До 2026-09-24 тут стояли колонки з
+    /// <c>IsBusinessKey</c>/<c>IsScopeField</c> — формулювання <c>02b</c> з часів,
+    /// коли окремих полів шапки ще не було. Наслідок: на версії з трьома полями
+    /// шапки <c>HDR.</c> не підказував нічого, а на версії з діловим ключем —
+    /// підказував ім'я, на яке публікація відповідала «Поля шапки … немає».
+    ///
+    /// ⚠ <c>Note</c> — тип даних поля: одиниці поле шапки не має, а назва
+    /// локалізована і мовою користувача тут не вибирається.
     /// </remarks>
     private async Task<IReadOnlyList<ExpressionSymbolDto>> HeadersAsync(
         int templateVersionId, CancellationToken ct)
@@ -99,21 +107,17 @@ public sealed class GetExpressionMetadataHandler(
             .ConfigureAwait(false);
 
         // ⛔ `GetWithStructureAsync`, а не `IRepository.GetAsync`: другий вантажить
-        // версію БЕЗ навігацій, і знімок виходив порожнім. Наслідок був не
-        // тонкий: `GET /expressions/metadata` на версії з трьома колонками
-        // віддавав `"headers":[]`, а перевірка виразу — `ECR-TMPL-4222`
-        // «таблиці, у якій живе формула, немає у знімку».
+        // версію БЕЗ навігацій, і знімок виходив порожнім.
         var version = await versions.GetWithStructureAsync(templateVersionId, ct).ConfigureAwait(false);
 
         return
         [
-            .. PublishChecks.Snapshot(version).ColumnsById.Values
-                .Where(c => !c.IsDeleted && (c.IsBusinessKey || c.IsScopeField))
-                .Select(c => c.Code)
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .OrderBy(code => code, StringComparer.Ordinal)
+            .. PublishChecks.Snapshot(version).HeaderFields
+                .Where(f => !f.IsDeleted)
+                .OrderBy(f => f.Ordinal)
+                .ThenBy(f => f.Code, StringComparer.Ordinal)
                 .Take(MaxHeaders)
-                .Select(code => new ExpressionSymbolDto(code, null, null)),
+                .Select(f => new ExpressionSymbolDto(f.Code, null, f.DataType.ToString())),
         ];
     }
 

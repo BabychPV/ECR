@@ -18,13 +18,14 @@ public sealed class GetDocumentListSummaryHandler(
         int? projectId, int periodKey, CancellationToken ct)
     {
         var profile = await PermissionCheck
-            .RequireAsync(access, currentUser, ListDocumentsHandler.Permission, ct)
+            .RequireInAnyProjectAsync(access, currentUser, ListDocumentsHandler.Permission, ct)
             .ConfigureAwait(false);
 
         // ⛔ Межа видимості — ТА САМА функція, що й у переліку, і йде вона в
         // ЗАПИТ: смуга, порахована по всіх проєктах, розійшлася б із таблицею
         // під нею і розкрила б, скільки документів у чужих проєктах (§3.3).
-        var visibleProjects = ListDocumentsHandler.ReadableProjects(profile);
+        // ФВ-6.14: лише проєкти, де є і право перегляду.
+        var visibleProjects = ListDocumentsHandler.ReadableProjects(profile, ListDocumentsHandler.Permission);
 
         return await summary
             .SummarizeAsync(projectId, PeriodKey.Parse(periodKey).Value, visibleProjects, ct)

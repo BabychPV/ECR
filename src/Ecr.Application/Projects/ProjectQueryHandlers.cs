@@ -48,7 +48,7 @@ public sealed class ListProjectsHandler(
                          new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.signInRequired" });
 
         var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
-        if (!profile.Has(Permission))
+        if (!profile.HasInAnyProject(Permission))
         {
             throw new AccessDeniedException(
                 "ECR-AUTH-0403", $"Потрібне право {Permission}.",
@@ -74,17 +74,37 @@ public sealed class ListProjectsHandler(
                 });
         }
 
-        var all = await projects.ListAsync(page, ct).ConfigureAwait(false);
+        // ⛔ Фільтр за грантами — У ЗАПИТІ, не після сторінки (UX-прохід
+        // 2026-09-24). До цього `ListAsync` брав N перших проєктів БАЗИ, а
+        // грант перевірявся вже над ними: користувач із грантом лише на
+        // (N+1)-й проєкт бачив порожній перелік і курсор «є ще», тобто екран
+        // «немає проєктів» при наявному доступі. Гранти вже розгорнуті в
+        // профілі, тож множина id береться звідти, а не другим походом у базу.
+        // Перелік проєктів без доступу — розвідка структури підприємства,
+        // тому фільтр обов'язковий.
+        var visibleIds = profile.Grants.Keys
+            .Select(ProjectIdOf)
+            .OfType<int>()
+            .Where(id => profile.LevelFor(ResourceKind.Project, id) >= GrantLevel.Read)
 
-        // ⚠ Фільтр за грантами робиться ТУТ, а не запитом: гранти вже
-        // розгорнуті в профілі, і другий похід у базу за тим самим нічого не
-        // додав би. Але фільтр обов'язковий: перелік проєктів, до яких немає
-        // доступу, — це вже розвідка структури підприємства.
-        var visible = all.Items
-            .Where(p => profile.LevelFor(ResourceKind.Project, p.Id) >= GrantLevel.Read)
+            // ⛔ ФВ-6.14: і право перегляду — в самому проєкті (оператор
+            // з областю «A» бачить у переліку лише A).
+            .Where(id => profile.Has(Permission, id))
             .ToList();
 
-        return new PagedResult<ProjectSummary>(visible, all.NextCursor, all.TotalCount);
+        return await projects.ListAsync(page, visibleIds, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>Id проєкту з ключа гранта <c>"Project:{id}"</c>; інший ресурс — <c>null</c>.</summary>
+    private static int? ProjectIdOf(string grantKey)
+    {
+        const string prefix = nameof(ResourceKind.Project) + ":";
+
+        return grantKey.StartsWith(prefix, StringComparison.Ordinal)
+               && int.TryParse(grantKey.AsSpan(prefix.Length), System.Globalization.NumberStyles.None,
+                   System.Globalization.CultureInfo.InvariantCulture, out var id)
+            ? id
+            : null;
     }
 }
 
@@ -195,18 +215,35 @@ public sealed class CreatePeriodPolicyHandler(
 }
 
 /// <summary>
-/// Зміна offsets наявної політики періодів (T6/#37). Право <c>Project.Manage</c>.
+/// Зміна offsets наявної політики періодів (T6/#37). Право <c>Project.Manage</c>
+/// і грант <c>Manage</c> у КОЖНОМУ проєкті, що її використовує (S19).
 /// </summary>
 /// <remarks>
 /// ⚠ Проєкти, які вже посилаються на цю політику, не перераховують межі
 /// автоматично: наступний ідемпотентний виклик <c>GET …/periods</c>
 /// (<c>BuildPeriodCalendarHandler</c>) підхопить нові offsets сам.
+///
+/// ⛔ S19 (аудит безпеки). Політика СПІЛЬНА: її зсуви діють на межі періодів
+/// усіх проєктів, що на неї посилаються. Доти вистачало глобального
+/// <c>Project.Manage</c> — власник одного проєкту зсував відкриття й закриття
+/// періодів чужих, і в журналі не лишалося нічого. Тепер: право й грант
+/// <c>Manage</c> на кожен такий проєкт; політика без жодного проєкту —
+/// глобальне <c>Project.Manage</c>, як і її створення. Зміна й запис
+/// <c>StructureChange</c> (старі й нові зсуви) — одна транзакція.
 /// </remarks>
 public sealed class UpdatePeriodPolicyHandler(
-    IPeriodStore periods, IAccessDecisionService access, ICurrentUser currentUser, IUnitOfWork uow)
+    IPeriodStore periods,
+    IAccessDecisionService access,
+    ICurrentUser currentUser,
+    IUnitOfWork uow,
+    IAuditWriter audit,
+    IClock clock)
 {
     /// <summary>Право керування проєктами.</summary>
     public const string Permission = "Project.Manage";
+
+    /// <summary>Тип сутності в <c>aud.StructureChange</c>.</summary>
+    public const string AuditEntityType = "PeriodPolicy";
 
     /// <summary>Змінює offsets політики.</summary>
     /// <param name="id">Політика.</param>
@@ -216,6 +253,11 @@ public sealed class UpdatePeriodPolicyHandler(
     /// <param name="yearGraceOffsetDays">Пільговий строк після кінця року.</param>
     /// <param name="ct">Токен скасування.</param>
     /// <exception cref="NotFoundException">Політики немає (<c>ECR-PRD-0422</c>).</exception>
+    /// <exception cref="AccessDeniedException">
+    /// <c>ECR-AUTH-0403</c> — немає права чи гранта <c>Manage</c> бодай на один
+    /// проєкт політики (<c>periodPolicyShared</c>, лише кількість таких проєктів —
+    /// без id, щоб не розповідати про невидимі).
+    /// </exception>
     /// <exception cref="DomainException">
     /// <c>ECR-PRD-4225</c> — пільговий строк довший за жорстке закриття, або
     /// річний пільговий строк від'ємний.
@@ -224,15 +266,102 @@ public sealed class UpdatePeriodPolicyHandler(
         int id, int openOffsetDays, int graceOffsetDays, int hardCloseOffsetDays,
         int yearGraceOffsetDays, CancellationToken ct)
     {
-        await PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
+        var profile = await PermissionCheck
+            .RequireInAnyProjectAsync(access, currentUser, Permission, ct)
+            .ConfigureAwait(false);
 
-        var policy = await periods.GetPolicyAsync(id, ct).ConfigureAwait(false);
-        policy.UpdateOffsets(openOffsetDays, graceOffsetDays, hardCloseOffsetDays, yearGraceOffsetDays);
+        var userId = currentUser.UserId
+                     ?? throw new AccessDeniedException(
+                         "ECR-AUTH-0401", "Анонімний запит не може змінювати політику періодів.",
+                         new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.anonymousWrite" });
 
-        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+        PeriodPolicyDto? result = null;
 
-        return PeriodPolicyMapping.ToDto(policy);
+        await uow.ExecuteInTransactionAsync(async innerCt =>
+        {
+            var policy = await periods.GetPolicyAsync(id, innerCt).ConfigureAwait(false);
+            var projectIds = await periods.ListProjectIdsUsingPolicyAsync(id, innerCt).ConfigureAwait(false);
+
+            // ⚠ Перевірки — саме тут, у тілі `HandleAsync`, а не в окремому
+            // методі: сторож `ProjectPermissionCheckTests` (IL) парує вхід «хоч у
+            // якомусь проєкті» з перевіркою в проєкті В ТОМУ САМОМУ методі.
+            if (projectIds.Count == 0)
+            {
+                // Політика ні на що не діє — як і її створення, це дія поза
+                // будь-яким проєктом (`GlobalUseOfProjectCode`).
+                if (!profile.Has(Permission))
+                {
+                    throw new AccessDeniedException(
+                        "ECR-AUTH-0403", $"Потрібне право {Permission}.",
+                        new Dictionary<string, object?>
+                        {
+                            ["messageKey"] = "err.ECR-AUTH-0403.permission",
+                            ["permission"] = Permission,
+                        });
+                }
+            }
+            else
+            {
+                var unmanaged = projectIds.Count(pid =>
+                    !profile.Has(Permission, pid)
+                    || profile.LevelFor(ResourceKind.Project, pid) < GrantLevel.Manage);
+
+                if (unmanaged > 0)
+                {
+                    // ⚠ Лише КІЛЬКІСТЬ, без id: серед них можуть бути проєкти,
+                    // яких людина не бачить (S17 — їхнє існування не розкривається).
+                    throw new AccessDeniedException(
+                        "ECR-AUTH-0403",
+                        $"Політику використовують проєкти ({unmanaged}), якими ви не керуєте.",
+                        new Dictionary<string, object?>
+                        {
+                            ["messageKey"] = "err.ECR-AUTH-0403.periodPolicyShared",
+                            ["projectCount"] = unmanaged.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                        });
+                }
+            }
+
+            var before = PeriodPolicyMapping.ToDto(policy);
+            policy.UpdateOffsets(openOffsetDays, graceOffsetDays, hardCloseOffsetDays, yearGraceOffsetDays);
+            var after = PeriodPolicyMapping.ToDto(policy);
+
+            // ⛔ Журнал — у тій самій транзакції, що й зміна: збій збереження не
+            // лишає запису про зміну, якої не сталося, і навпаки.
+            await audit.WriteStructureChangeAsync(
+                new StructureChangeRecord(
+                    clock.UtcNow,
+
+                    // ⚠ Нуль, як і для інших сутностей поза шаблоном: політика
+                    // спільна для проєктів різних версій.
+                    TemplateVersionId: 0,
+                    EntityType: AuditEntityType,
+                    EntityId: policy.Id,
+                    ChangeClass: ChangeClass.Guarded,
+                    Operation: "UpdateOffsets",
+                    OldJson: OffsetsJson(before, projectIds),
+                    NewJson: OffsetsJson(after, projectIds),
+                    ChangeReason: null,
+                    ChangedByUserId: userId,
+                    CorrelationId: currentUser.CorrelationId),
+                innerCt).ConfigureAwait(false);
+
+            await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+
+            result = after;
+        }, ct).ConfigureAwait(false);
+
+        return result!;
     }
+
+    private static string OffsetsJson(PeriodPolicyDto dto, IReadOnlyList<int> projectIds)
+        => System.Text.Json.JsonSerializer.Serialize(new
+        {
+            openOffsetDays = dto.OpenOffsetDays,
+            graceOffsetDays = dto.GraceOffsetDays,
+            hardCloseOffsetDays = dto.HardCloseOffsetDays,
+            yearGraceOffsetDays = dto.YearGraceOffsetDays,
+            projectIds,
+        });
 }
 
 /// <summary>Спільне перетворення сутності в DTO для обох обробників CRUD політик.</summary>
@@ -320,9 +449,18 @@ public sealed class CreateProjectHandler(
         // відкрити документ.
         if (templateVersionId <= 0)
         {
+            // ⛔ B-19 (UX-аудит, четвертий раунд): код був `ECR-TMPL-0404`
+            // («шаблон або версія не знайдені», §7 контракту — 404), хоча
+            // виняток — `BusinessRuleException`, який без власного арма в
+            // `ExceptionHandlingMiddleware.Map` доїжджає як 422. Клієнт, що
+            // читає HTTP-статус раніше за код, бачив 422 у відповіді на код,
+            // що обіцяє 404, — розбіжність між статус-рядком і кодом у тілі.
+            // Причина не «нічого не знайдено» — templateVersionId узагалі не
+            // обрано, це помилка ВВЕДЕННЯ форми створення проєкту, тобто той
+            // самий код, що й решта структурних відмов шаблону.
             throw new BusinessRuleException(
-                "ECR-TMPL-0404", "Проєкт неможливо створити без версії шаблону.",
-                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-TMPL-0404.versionRequired" });
+                ErrorCodes.TemplateInvalid, "Проєкт неможливо створити без версії шаблону.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-TMPL-0422.versionRequired" });
         }
 
         if (periodPolicyId <= 0)
@@ -350,7 +488,7 @@ public sealed class CreateProjectHandler(
         // ігнорується, тож виклик безпечний завжди.
         var validatedCustomCount = Domain.Services.PeriodCalendar.CountFor(periodKind, customPeriodCount ?? 0);
 
-        var project = new Project(
+        Project Build() => new(
             EcrCode.Create(code),
             new LocalizedText(name.ToDictionary(StringComparer.Ordinal)),
             new DateOnly(reportingYear, 1, 1),
@@ -369,8 +507,8 @@ public sealed class CreateProjectHandler(
             // друге джерело істини про те саме число.
             periodKind == PeriodKind.Custom ? validatedCustomCount : null);
 
-        await periods.AddProjectAsync(project, ct).ConfigureAwait(false);
-        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+        // ⚠ Помилки введення (код, назва) — до транзакції, а не всередині неї.
+        _ = Build();
 
         // ⛔ Виявлено ПІСЛЯ `Q-179`: якщо є право створити проєкт — є право
         // ним володіти. До цього творець не отримував ЖОДНОГО гранта на
@@ -378,13 +516,26 @@ public sealed class CreateProjectHandler(
         // погодження (усі перевіряють `GrantLevel.Manage` на конкретний
         // `projectId` після `Q-179`) відмовляли б власному творцю доти,
         // доки хтось не видасть грант окремим кроком.
-        await GrantOwnershipAsync(profile, project.Id, ct).ConfigureAwait(false);
-
-        return project.Id;
+        //
+        // ⛔ Проєкт і грант власності — ОДИН коміт. Доти проєкт комітився
+        // першим, грант — окремою транзакцією: збій на гранті лишав проєкт
+        // без власника, якого ніхто не бачив і не міг навіть видалити.
+        return await CreateOwnedAsync(
+            profile,
+            async token =>
+            {
+                // Будується всередині: повтор транзакції стратегією не має
+                // додавати вже відстежувану (і відкочену) сутність удруге.
+                var project = Build();
+                await periods.AddProjectAsync(project, token).ConfigureAwait(false);
+                await uow.SaveChangesAsync(token).ConfigureAwait(false);
+                return project.Id;
+            },
+            ct).ConfigureAwait(false);
     }
 
     /// <summary>
-    /// Видає щойно створений проєкт у володіння творцю.
+    /// Записує проєкт і видає його у володіння творцю — однією транзакцією.
     /// </summary>
     /// <remarks>
     /// ⛔ Грант прив'язаний до РОЛІ (`sec.ResourceGrant.RoleId`), не до
@@ -413,10 +564,11 @@ public sealed class CreateProjectHandler(
     /// хв) або новому вході — так само, як будь-яка інша зміна грантів, що
     /// не супроводжується ротацією штампа.
     /// </remarks>
-    private Task GrantOwnershipAsync(AccessProfile profile, int projectId, CancellationToken ct)
-        => ProjectOwnershipGrant.GrantAsync(
+    private Task<int> CreateOwnedAsync(
+        AccessProfile profile, Func<CancellationToken, Task<int>> createProject, CancellationToken ct)
+        => ProjectOwnershipGrant.CreateOwnedAsync(
             users, access, audit, uow, currentUser, clock,
-            profile, projectId, Permission, "CreateProjectOwnership", ct);
+            profile, Permission, "CreateProjectOwnership", createProject, ct);
 }
 
 /// <summary>
@@ -447,8 +599,13 @@ public sealed class ActivateProjectHandler(
     IUnitOfWork uow,
     Domain.Services.PeriodStateCalculator periodStates,
     IClock clock,
-    Periods.PeriodCalendarMaterializer calendar)
+    Periods.PeriodCalendarMaterializer calendar,
+    IMaterializationScheduler? materialization = null)
 {
+    // ⚠ `materialization` необов'язковий лише заради наявних прямих
+    // конструювань обробника в тестах; у застосунку порт зареєстровано
+    // (`Ecr.Infrastructure.DependencyInjection`), і контейнер його передає.
+
     /// <summary>Право на активацію.</summary>
     public const string Permission = "Project.Manage";
 
@@ -462,31 +619,30 @@ public sealed class ActivateProjectHandler(
     public async Task HandleAsync(int projectId, CancellationToken ct)
     {
         var profile = await Security.PermissionCheck
-            .RequireAsync(access, currentUser, Permission, ct)
+            .RequireInAnyProjectAsync(access, currentUser, Permission, ct)
             .ConfigureAwait(false);
 
         // ⛔ Родина PRJ, а не ROW (`P-25`, рядок 2). `ROW` — це рядок ТАБЛИЦІ
         // ДОКУМЕНТА, і «проєкту немає» доїжджало до обробника помилок сітки,
         // якої на екрані переліку проєктів немає взагалі.
         //
-        // ⚠ Існування перевіряється ДО гранта: грант на неіснуючий `projectId`
-        // не буває виданий нікому за визначенням, і зворотний порядок
-        // перетворив би КОЖЕН запит на неіснуючий проєкт на `403`, приховуючи
-        // справжню причину (`ECR-PRJ-0404`) за помилковим кодом гранта.
+        // ⛔ S17: невидимий проєкт (немає гранта Read) — та сама відповідь, що
+        // й неіснуючий (`ProjectVisibility`). Доти існування перевірялося ДО
+        // гранта, і різниця 404/403 розповідала, які id проєктів існують.
+        // `403` нижче — лише для ВИДИМОГО проєкту, якому бракує рівня.
+        ProjectVisibility.RequireVisible(profile, projectId);
+
         var project = await periods.FindProjectAsync(projectId, ct).ConfigureAwait(false)
-            ?? throw new NotFoundException(
-                ErrorCodes.ProjectNotFound, $"Проєкту {projectId} не існує.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-PRJ-0404.project",
-                    ["projectId"] = projectId.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                });
+            ?? throw ProjectVisibility.NotFound(projectId);
 
         // ⛔ Q-179 (аудит фази 2, авторизація): грант на КОНКРЕТНИЙ проєкт,
         // не лише глобальне `Project.Manage` — рішення людини. Глобальне
         // право каже «ця людина взагалі керує проєктами», грант — «саме
         // цим». Той самий патерн, що вже застосований до `CreateDocumentHandler`
         // (`Q-176`) і сусідів.
+        // ⛔ ФВ-6.14: право — у ЦЬОМУ проєкті.
+        Security.PermissionCheck.RequireIn(profile, Permission, projectId);
+
         if (profile.LevelFor(ResourceKind.Project, projectId) < GrantLevel.Manage)
         {
             throw new AccessDeniedException(
@@ -586,9 +742,24 @@ public sealed class ActivateProjectHandler(
         // транзакції — а не побічним ефектом чужого маршруту.
         var zone = Domain.ValueObjects.SiteTimeZone.Create(project.TimeZoneId).ToTimeZoneInfo();
 
-        foreach (var (period, target) in periodStates.Plan(allPeriods, now, zone))
+        var toMaterialize = new List<int>();
+
+        // ⚠ ФВ-1.8: те саме річне вікно, що передає `PeriodStateJob`: активація
+        // в межах вікна переводить періоди року в `Grace` (D-204 — усі, що вже
+        // пройшли власний пільговий строк), як і наступний прогін задачі.
+        // Закритих періодів у чернетки немає; системний Reopen закритого
+        // (`YearReopens`) робить лише задача — вона пише аудит.
+        var yearGrace = Domain.Services.YearGraceWindow.For(project.PeriodEnd, project.YearGraceOffsetDays, zone);
+
+        foreach (var (period, target) in periodStates.Plan(allPeriods, now, zone, yearGrace))
         {
+            var before = period.State;
             period.AdvanceTo(target, now);
+
+            if (PeriodMaterializationTrigger.Requires(before, period.State))
+            {
+                toMaterialize.Add(period.PeriodKeyValue);
+            }
         }
 
         // ⚠ Поточний період — теж зараз, а не за годину: інакше щойно
@@ -602,6 +773,17 @@ public sealed class ActivateProjectHandler(
         }
 
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+
+        // ⛔ Матеріалізація PI для періодів, які перевела сама активація, — ПІСЛЯ
+        // коміту (черга не транзакційна). Точки, зібрані поки проєкт був
+        // чернеткою, а період `Scheduled`, інакше чекали б збору з вікном, що
+        // перетинає період, — а за вимкненого розкладу не дочекалися б ніколи.
+        // Для періодів, що активація одразу закрила, задача лишить
+        // `SkippedPeriodClosed` у журналі покриття замість мовчання.
+        if (materialization is not null)
+        {
+            await materialization.EnqueueAfterTransitionAsync(projectId, toMaterialize, ct).ConfigureAwait(false);
+        }
     }
 }
 
@@ -637,22 +819,20 @@ public sealed class ArchiveProjectHandler(
     public async Task HandleAsync(int projectId, CancellationToken ct)
     {
         var profile = await Security.PermissionCheck
-            .RequireAsync(access, currentUser, Permission, ct)
+            .RequireInAnyProjectAsync(access, currentUser, Permission, ct)
             .ConfigureAwait(false);
 
-        // ⚠ Існування — ДО гранта (див. пояснення в `ActivateProjectHandler`):
-        // грант на неіснуючий `projectId` не буває виданий нікому.
+        // ⛔ S17: невидимий проєкт — як неіснуючий (див. `ActivateProjectHandler`).
+        ProjectVisibility.RequireVisible(profile, projectId);
+
         var project = await periods.FindProjectAsync(projectId, ct).ConfigureAwait(false)
-            ?? throw new NotFoundException(
-                ErrorCodes.ProjectNotFound, $"Проєкту {projectId} не існує.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-PRJ-0404.project",
-                    ["projectId"] = projectId.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                });
+            ?? throw ProjectVisibility.NotFound(projectId);
 
         // ⛔ Q-179 (аудит фази 2, авторизація): грант на КОНКРЕТНИЙ проєкт,
         // не лише глобальне `Project.Manage` — рішення людини.
+        // ⛔ ФВ-6.14: право — у ЦЬОМУ проєкті.
+        Security.PermissionCheck.RequireIn(profile, Permission, projectId);
+
         if (profile.LevelFor(ResourceKind.Project, projectId) < GrantLevel.Manage)
         {
             throw new AccessDeniedException(
@@ -664,11 +844,37 @@ public sealed class ArchiveProjectHandler(
                 });
         }
 
+        // ⛔ F-08: стан — на `clock.UtcNow`, а не збережений годинною задачею.
+        // Перевідкритий період, чий `ReopenedUntil` минув, ще до години
+        // блокував архівацію «незакритим періодом». Переходи, що вже мали
+        // статися, фіксуються тут же — інакше в архівному проєкті (його
+        // `PeriodStateJob` не обробляє) період назавжди лишився б `Grace`.
+        var now = clock.UtcNow;
+        var states = new Domain.Services.PeriodStateCalculator();
+
+        // ⚠ ФВ-1.8: те саме річне вікно, що в задачі станів і в рішенні про
+        // запис: у вікні грудень ще `Grace`, і архівація його не закриває повз вікно.
+        var yearGrace = Domain.Services.YearGraceWindow.For(
+            project.PeriodEnd,
+            project.YearGraceOffsetDays,
+            Domain.ValueObjects.SiteTimeZone.Create(project.TimeZoneId).ToTimeZoneInfo());
+
+        foreach (var period in project.Periods)
+        {
+            period.AdvanceTo(states.Effective(period, now, yearGrace), now);
+        }
+
         // ⚠ Перелік незакритих повертається В ПОДРОБИЦЯХ, а не ховається за
         // текстом: людині треба знати, які саме періоди закрити, а не що
         // «щось відкрите».
+        //
+        // ⚠ D-204: у вікні року ЗАКРИТИЙ період року теж не закритий — задача
+        // станів відкриє його системним Reopen найближчим прогоном. Без цієї
+        // умови архівація між опівніччю 31.12 і тим прогоном позначила б рік
+        // заархівованим, і `PeriodStateJob` (лише активні проєкти) його вже не
+        // відкрив би.
         var open = project.Periods
-            .Where(p => p.State is not (Domain.Enums.PeriodState.Closed))
+            .Where(p => p.State is not (Domain.Enums.PeriodState.Closed) || yearGrace.HoldsInGrace(p, now))
             .Select(p => p.PeriodKeyValue)
             .Order()
             .ToList();
@@ -686,7 +892,7 @@ public sealed class ArchiveProjectHandler(
                 });
         }
 
-        project.Archive(clock.UtcNow);
+        project.Archive(now);
 
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
     }
@@ -731,23 +937,21 @@ public sealed class ChangeProjectTimeZoneHandler(
     public async Task HandleAsync(int projectId, string timeZoneId, CancellationToken ct)
     {
         var profile = await PermissionCheck
-            .RequireAsync(access, currentUser, Permission, ct)
+            .RequireInAnyProjectAsync(access, currentUser, Permission, ct)
             .ConfigureAwait(false);
 
-        // ⚠ Існування — ДО гранта (див. пояснення в `ActivateProjectHandler`):
-        // грант на неіснуючий `projectId` не буває виданий нікому.
+        // ⛔ S17: невидимий проєкт — як неіснуючий (див. `ActivateProjectHandler`).
+        ProjectVisibility.RequireVisible(profile, projectId);
+
         var project = await periods.FindProjectAsync(projectId, ct).ConfigureAwait(false)
-            ?? throw new NotFoundException(
-                ErrorCodes.ProjectNotFound, $"Проєкту {projectId} не існує.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-PRJ-0404.project",
-                    ["projectId"] = projectId.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                });
+            ?? throw ProjectVisibility.NotFound(projectId);
 
         // ⛔ Той самий патерн гранта на КОНКРЕТНИЙ проєкт, що й
         // Activate/Archive/Clone (Q-179): глобальне `Project.Manage` каже «ця
         // людина взагалі керує проєктами», грант — «саме цим».
+        // ⛔ ФВ-6.14: право — у ЦЬОМУ проєкті.
+        Security.PermissionCheck.RequireIn(profile, Permission, projectId);
+
         if (profile.LevelFor(ResourceKind.Project, projectId) < GrantLevel.Manage)
         {
             throw new AccessDeniedException(

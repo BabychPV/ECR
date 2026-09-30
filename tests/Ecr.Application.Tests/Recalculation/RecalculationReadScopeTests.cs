@@ -103,9 +103,10 @@ public sealed class RecalculationReadScopeTests
 
         Assert.Single(_sliceReads);
 
-        // ⚠ Заразом і рядки: другий прохід коштував не лише комірок. Два
-        // виклики — це побудова плану в `RunAsync` і читання поточного періоду.
-        await _rows.Received(2).GetRowIdsBatchAsync(
+        // ⚠ Заразом і рядки: другий прохід коштував не лише комірок. Один
+        // виклик — побудова плану в `RunAsync`; читання поточного періоду з O2
+        // бере вже прочитані рядки, а не ходить по них удруге.
+        await _rows.Received(1).GetRowIdsBatchAsync(
             Arg.Any<IReadOnlyList<long>>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>());
 
         await _rows.DidNotReceive().GetTableInstancesAsync(
@@ -206,9 +207,9 @@ public sealed class RecalculationReadScopeTests
     private IReadOnlyList<CellRecord> Applied()
     {
         var call = _cells.ReceivedCalls()
-            .Single(c => c.GetMethodInfo().Name == nameof(ICellStore.ApplyAsync));
+            .Single(c => c.GetMethodInfo().Name == nameof(ICellStore.ApplyBatchAsync));
 
-        return ((CellChangeSet)call.GetArguments()[0]!).Upserts;
+        return [.. ((IReadOnlyCollection<CellChangeSet>)call.GetArguments()[0]!).SelectMany(set => set.Upserts)];
     }
 
     private RecalculationService Service()
@@ -228,7 +229,7 @@ public sealed class RecalculationReadScopeTests
             _headers,
             _audit,
             new TestClock(new DateTime(2026, 2, 1, 0, 0, 0, DateTimeKind.Utc)),
-            _uow);
+            _uow, Substitute.For<Ecr.Application.Ports.ISheetEditGate>());
     }
 
     /// <summary>
@@ -301,14 +302,13 @@ public sealed class RecalculationReadScopeTests
         // тест мовчки отримував би значення таблиць, яких не просив, і
         // твердження «прочитано рівно два» не мало б наслідків для числа.
         //
-        // ⚠ Період розрізняється за ПОРЯДКОМ виклику: `ReadSlicesAsync` періоду
-        // не приймає (екземпляр таблиці належить одному періоду за побудовою),
-        // а `LoadValuesAsync` іде спершу в поточний, потім у попередній.
-        _cells.ReadSlicesAsync(Arg.Any<IReadOnlyList<long>>(), Arg.Any<CancellationToken>())
+        // ⚠ O3b: період тепер приходить аргументом (ключ партиції), тож зріз
+        // будується для ЗАПИТАНОГО періоду, а не вгадується за порядком виклику.
+        _cells.ReadSlicesAsync(Arg.Any<IReadOnlyList<long>>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
             .Returns(callInfo =>
             {
                 var asked = (IReadOnlyList<long>)callInfo[0]!;
-                var period = _sliceReads.Count == 0 ? Period : Previous;
+                var period = (PeriodKey)callInfo[1]!;
                 _sliceReads.Add([.. asked]);
 
                 return (IReadOnlyDictionary<long, IReadOnlyList<CellRecord>>)asked.ToDictionary(

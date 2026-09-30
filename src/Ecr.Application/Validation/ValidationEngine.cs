@@ -28,14 +28,33 @@ public sealed class ValidationEngine(IFormulaEngine formulaEngine)
     /// Значення шапки документа, ключовані кодом поля — для <c>HDR.X</c> у
     /// виразі правила; порожній словник — прогін без шапки.
     /// </param>
+    /// <param name="language">
+    /// Мова запиту (<c>en</c>/<c>ru</c>/<c>kz</c>) — <c>ValidationMessage.Message</c>
+    /// їде клієнту НАПРЯМУ, без проходу крізь резолвер <c>messageKey</c>
+    /// (B-11, UX-аудит, четвертий раунд): ці повідомлення несуть готовий
+    /// текст УЖЕ, і клієнт показує його як є.
+    /// </param>
+    /// <param name="registryFields">
+    /// Знімок полів довідника для <c>REGFIELD</c> у правилі (D16-04) — будує
+    /// <see cref="TableValidation.LoadRegistryFieldsAsync"/>; <c>null</c> —
+    /// порожній знімок, <c>REGFIELD</c> дасть <c>#REF</c>.
+    /// </param>
     public IReadOnlyList<ValidationMessage> ValidateCell(
         ColumnDef column, Domain.ValueObjects.CellValueData value, IReadOnlyList<ValidationRule> rules,
-        IReadOnlyDictionary<string, ExpressionValue> headers)
+        IReadOnlyDictionary<string, ExpressionValue> headers, string language,
+        IReadOnlyDictionary<long, IReadOnlyDictionary<string, ExpressionValue>>? registryFields = null)
     {
         ArgumentNullException.ThrowIfNull(column);
         ArgumentNullException.ThrowIfNull(value);
         ArgumentNullException.ThrowIfNull(rules);
         ArgumentNullException.ThrowIfNull(headers);
+
+        // ⚠ М'який запасний варіант, а не ArgumentException: на відміну від
+        // решти конвеєра (де мову несе HTTP-запит і вона гарантовано непорожня,
+        // ICurrentUser.CurrentUser.Language), тут викликач — код запису
+        // комірки, і порожня мова НЕ має права заблокувати збереження даних.
+        // Той самий fallback, що вже дає LocalizedText.Get(language, "en").
+        language = string.IsNullOrWhiteSpace(language) ? "en" : language;
 
         var messages = new List<ValidationMessage>();
 
@@ -44,7 +63,7 @@ public sealed class ValidationEngine(IFormulaEngine formulaEngine)
         if (column.ValidateValue(value) is { } structural)
         {
             messages.Add(new ValidationMessage(
-                ValidationSeverity.Error, "ECR-CELL-0422", StructuralMessage(column, value, structural),
+                ValidationSeverity.Error, "ECR-CELL-0422", StructuralMessage(column, value, structural, language),
                 column.TableDefId, null, column.Code, BlocksSave: true));
         }
 
@@ -55,7 +74,7 @@ public sealed class ValidationEngine(IFormulaEngine formulaEngine)
                 continue;
             }
 
-            Evaluate(rule, CellContext(column, value, headers), column.TableDefId, null, column.Code, messages);
+            Evaluate(rule, CellContext(column, value, headers, registryFields), column.TableDefId, null, column.Code, language, messages);
         }
 
         // ⚠ Повертаються ВСІ порушення, а не перше: користувач має побачити
@@ -71,22 +90,86 @@ public sealed class ValidationEngine(IFormulaEngine formulaEngine)
     /// Значення шапки документа, ключовані кодом поля — для <c>HDR.X</c> у
     /// виразі правила; порожній словник — прогін без шапки.
     /// </param>
+    /// <param name="language">Мова запиту (B-11) — див. <see cref="ValidateCell"/>.</param>
+    /// <param name="registryFields">Знімок довідника для <c>REGFIELD</c> — див. <see cref="ValidateCell"/>.</param>
     public IReadOnlyList<ValidationMessage> ValidateScope(
         byte scope, IReadOnlyList<ValidationRule> rules, IValidationContext context,
-        IReadOnlyDictionary<string, ExpressionValue> headers)
+        IReadOnlyDictionary<string, ExpressionValue> headers, string language,
+        IReadOnlyDictionary<long, IReadOnlyDictionary<string, ExpressionValue>>? registryFields = null)
     {
         ArgumentNullException.ThrowIfNull(rules);
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(headers);
 
+        language = string.IsNullOrWhiteSpace(language) ? "en" : language;
+
         var messages = new List<ValidationMessage>();
 
         foreach (var rule in rules.Where(r => r.IsActive && r.Scope == scope))
         {
-            Evaluate(rule, new ScopeContext(context) { Headers = headers }, rule.TableDefId, null, null, messages);
+            Evaluate(rule, new ScopeContext(context, registryFields) { Headers = headers }, rule.TableDefId, null, null, language, messages);
         }
 
         return messages;
+    }
+
+    /// <summary>
+    /// Які поля довідника читають правила таблиці через <c>REGFIELD</c>:
+    /// пари (Lookup-колонка, код поля).
+    /// </summary>
+    /// <param name="table">Таблиця з правилами.</param>
+    /// <param name="snapshot">Версія шаблону — для резолвінгу посилань.</param>
+    /// <remarks>
+    /// ⚠ Видобування — СПРАВЖНІЙ <see cref="Ecr.Expressions.Binding.DependencyExtractor"/>
+    /// (Registry-ребро, <c>KindRegistry</c>), той самий, що будує
+    /// <c>cfg.FormulaDependency</c> формул шаблону: у правил рядків там немає.
+    /// Правило без літерала <c>REGFIELD</c> навіть не розбирається — нуль
+    /// роботи для таблиць без нього.
+    ///
+    /// ⚠ Лише посилання на СВОЮ таблицю: контекст правила читає колонку за
+    /// кодом у своїй таблиці (<c>ScopeContext</c>), чужих таблиць він не бачить.
+    /// </remarks>
+    public IReadOnlyList<(int ColumnDefId, string FieldCode)> RegistryFieldReads(
+        TableDef table, Domain.Entities.Configuration.TemplateVersionSnapshot snapshot)
+    {
+        ArgumentNullException.ThrowIfNull(table);
+        ArgumentNullException.ThrowIfNull(snapshot);
+
+        var found = new HashSet<(int ColumnDefId, string FieldCode)>();
+        Ecr.Expressions.Binding.DependencyExtractor? extractor = null;
+
+        foreach (var rule in table.ValidationRules)
+        {
+            if (!rule.IsActive
+                || rule.Expression.IndexOf("REGFIELD", StringComparison.OrdinalIgnoreCase) < 0)
+            {
+                continue;
+            }
+
+            var parsed = formulaEngine.Parse(rule.Expression, ExpressionDialect.Template);
+            if (!parsed.IsSuccess || parsed.Expression is null)
+            {
+                // Зламане правило звітує `Evaluate` (ECR-VAL-RULE) — тут нема що читати.
+                continue;
+            }
+
+            extractor ??= new Ecr.Expressions.Binding.DependencyExtractor(
+                new Ecr.Expressions.Binding.ReferenceResolver(snapshot),
+                new Ecr.Expressions.Binding.RangeExpander());
+
+            foreach (var dependency in extractor.Extract(parsed.Expression.Root, table.Id, currentRowKey: null))
+            {
+                if (dependency.DependsOnKind == Ecr.Expressions.Binding.DependencyExtractor.KindRegistry
+                    && dependency.TableDefId == table.Id
+                    && dependency.ColumnDefId is { } columnDefId
+                    && dependency.FilterJson is { } fieldCode)
+                {
+                    found.Add((columnDefId, fieldCode));
+                }
+            }
+        }
+
+        return [.. found];
     }
 
     private void Evaluate(
@@ -95,13 +178,17 @@ public sealed class ValidationEngine(IFormulaEngine formulaEngine)
         int tableDefId,
         string? rowKey,
         string? columnCode,
+        string language,
         List<ValidationMessage> messages)
     {
         var parsed = formulaEngine.Parse(rule.Expression, ExpressionDialect.Template);
         if (!parsed.IsSuccess || parsed.Expression is null)
         {
             messages.Add(Broken(rule, tableDefId, rowKey, columnCode,
-                $"Правило '{rule.Code}' не розбирається: {(parsed.Diagnostics.Count > 0 ? parsed.Diagnostics[0].Message : string.Empty)}"));
+                L(language,
+                    en: $"Rule '{rule.Code}' does not parse: {(parsed.Diagnostics.Count > 0 ? parsed.Diagnostics[0].Message : string.Empty)}",
+                    ru: $"Правило '{rule.Code}' не разбирается: {(parsed.Diagnostics.Count > 0 ? parsed.Diagnostics[0].Message : string.Empty)}",
+                    kz: $"'{rule.Code}' ережесі талдана алмайды: {(parsed.Diagnostics.Count > 0 ? parsed.Diagnostics[0].Message : string.Empty)}")));
             return;
         }
 
@@ -114,8 +201,12 @@ public sealed class ValidationEngine(IFormulaEngine formulaEngine)
         // до конфігурації — тобто не той, хто зараз заповнює звіт.
         if (value.IsError || value.Type != ExpressionValueType.Boolean)
         {
+            var reason = value.ErrorCode ?? value.Type.ToString();
             messages.Add(Broken(rule, tableDefId, rowKey, columnCode,
-                $"Правило '{rule.Code}' не дало логічної відповіді: {value.ErrorCode ?? value.Type.ToString()}"));
+                L(language,
+                    en: $"Rule '{rule.Code}' did not return a logical answer: {reason}",
+                    ru: $"Правило '{rule.Code}' не дало логического ответа: {reason}",
+                    kz: $"'{rule.Code}' ережесі логикалық жауап бермеді: {reason}")));
             return;
         }
 
@@ -124,8 +215,13 @@ public sealed class ValidationEngine(IFormulaEngine formulaEngine)
             return;
         }
 
+        // ⛔ B-11 (UX-аудит, четвертий раунд): було жорстко `.Get("en")`
+        // незалежно від того, якою мовою прийшов запит — RU/KZ-користувач
+        // бачив АНГЛІЙСЬКИЙ текст правила, хоча методолог, який писав правило,
+        // переклад дав. `LocalizedText.Get` сам робить fallback на `en`, коли
+        // перекладу для мови запиту немає.
         messages.Add(new ValidationMessage(
-            rule.Severity, rule.Code, rule.MessageL10n.Get("en") ?? rule.Code, tableDefId, rowKey, columnCode,
+            rule.Severity, rule.Code, rule.MessageL10n.Get(language) ?? rule.Code, tableDefId, rowKey, columnCode,
             // Блокує запис ЛИШЕ комірковий Error (R-B3, D-90): заборона
             // зберегти проміжний стан зробила б роботу з великою таблицею
             // неможливою.
@@ -155,20 +251,47 @@ public sealed class ValidationEngine(IFormulaEngine formulaEngine)
     /// Розширювати цей метод на решту причин — окрема задача, не ця.
     /// </remarks>
     private static string StructuralMessage(
-        ColumnDef column, Domain.ValueObjects.CellValueData value, string structuralCode)
+        ColumnDef column, Domain.ValueObjects.CellValueData value, string structuralCode, string language)
         => structuralCode == "ECR-CELL-0422" && column.IsRequired && value.IsEmpty && value.IsWellFormed()
-            ? $"Колонка «{column.Code}» обов'язкова."
+            ? L(language,
+                en: $"Column \"{column.Code}\" is required.",
+                ru: $"Колонка «{column.Code}» обязательна.",
+                kz: $"«{column.Code}» бағаны міндетті.")
             : structuralCode;
 
+    /// <summary>
+    /// Три готові речення двигуна (не з <c>ValidationRule.MessageL10n</c> —
+    /// їх ніхто не авторить, вони описують сам механізм валідації), обрані за
+    /// мовою запиту (B-11).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Не через каталог <c>sys_ecr.UiString</c>/<c>messageKey</c>:
+    /// <c>ValidationMessage.Message</c> — не деталь виключення, а поле
+    /// НОРМАЛЬНОЇ (200) відповіді, яку клієнт показує як є (<c>ValidateCell</c>/
+    /// <c>ValidateScope</c> синхронні, каталог читається лише асинхронно). Три
+    /// мови продукту — фіксований, закритий список (D-95), тож `switch`
+    /// без резолвера — не борг, а форма, симетрична самому переліку мов.
+    /// </remarks>
+    private static string L(string language, string en, string ru, string kz) => language switch
+    {
+        "ru" => ru,
+        "kz" => kz,
+        _ => en,
+    };
+
     private static SingleCellContext CellContext(
-        ColumnDef column, Domain.ValueObjects.CellValueData value, IReadOnlyDictionary<string, ExpressionValue> headers)
-        => new SingleCellContext(column.Code, CellValueMapping.ToExpressionValue(value, ExpressionValue.Null))
+        ColumnDef column, Domain.ValueObjects.CellValueData value, IReadOnlyDictionary<string, ExpressionValue> headers,
+        IReadOnlyDictionary<long, IReadOnlyDictionary<string, ExpressionValue>>? registryFields)
+        => new SingleCellContext(column.Code, CellValueMapping.ToExpressionValue(value, ExpressionValue.Null), registryFields)
         {
             Headers = headers,
         };
 
     /// <summary>Контекст правила рівня комірки: видно рівно одну колонку.</summary>
-    private sealed class SingleCellContext(string columnCode, ExpressionValue value) : ValidationEvaluationContext
+    private sealed class SingleCellContext(
+        string columnCode, ExpressionValue value,
+        IReadOnlyDictionary<long, IReadOnlyDictionary<string, ExpressionValue>>? registryFields)
+        : ValidationEvaluationContext(registryFields)
     {
         public override IReadOnlyList<ExpressionValue> Read(CellReferenceNode reference)
         {
@@ -180,7 +303,10 @@ public sealed class ValidationEngine(IFormulaEngine formulaEngine)
     }
 
     /// <summary>Контекст правила рівня рядка і вище.</summary>
-    private sealed class ScopeContext(IValidationContext inner) : ValidationEvaluationContext
+    private sealed class ScopeContext(
+        IValidationContext inner,
+        IReadOnlyDictionary<long, IReadOnlyDictionary<string, ExpressionValue>>? registryFields)
+        : ValidationEvaluationContext(registryFields)
     {
         public override IReadOnlyList<ExpressionValue> Read(CellReferenceNode reference)
         {
@@ -193,11 +319,16 @@ public sealed class ValidationEngine(IFormulaEngine formulaEngine)
             return [FromObject(raw)];
         }
 
+        // ⛔ `long` — id запису довідника з Lookup-комірки
+        // (`CellValueMapping.ToRuleValue`). Без цієї гілки він ішов у `Text`, і
+        // `REGFIELD` на «Перевірити»/поданні давав `#VALUE` (D16-04). `int` —
+        // `ValueUnitId`; інших цілих `ToRuleValue` не віддає.
         private static ExpressionValue FromObject(object? raw)
             => raw switch
             {
                 null => ExpressionValue.Null,
                 decimal number => ExpressionValue.Number(number),
+                long number => ExpressionValue.Number(number),
                 int number => ExpressionValue.Number(number),
                 bool flag => ExpressionValue.Boolean(flag),
                 DateTime date => ExpressionValue.Date(date),

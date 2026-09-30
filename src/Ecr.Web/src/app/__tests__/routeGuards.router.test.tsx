@@ -121,7 +121,8 @@ function renderAt(
 }
 
 const cases = [
-  { path: '/admin/templates', testId: 'templates-content', permission: 'Template.Edit' },
+  // ✎ `X-38`: перелік шаблонів читається з `Template.View` — як на сервері.
+  { path: '/admin/templates', testId: 'templates-content', permission: 'Template.View' },
   { path: '/admin/security', testId: 'security-content', permission: 'Security.ManageRoles' },
   { path: '/admin/audit', testId: 'audit-content', permission: 'Security.ViewAudit' },
 ] as const;

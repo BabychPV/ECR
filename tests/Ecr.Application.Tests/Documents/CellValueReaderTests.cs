@@ -131,6 +131,26 @@ public sealed class CellValueReaderTests
         Assert.Equal(7, data.ValueUnitId);
     }
 
+    /// <summary>
+    /// X-31: не-ідентифікатор у колонці одиниць відхиляється ВЛАСНИМ ключем —
+    /// «очікує ідентифікатор одиниці», а не «запису довідника».
+    /// </summary>
+    [Theory]
+    [InlineData(CellDataType.Unit, "err.ECR-CELL-0422.expectsUnitIdentifier", "UnitIdentifier")]
+    [InlineData(CellDataType.Lookup, "err.ECR-CELL-0422.expectsIdentifier", "Identifier")]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "X-31")]
+    public void Не_ідентифікатор_у_колонці_Unit_і_Lookup_відхиляється_кожен_своїм_ключем(
+        CellDataType type, string messageKey, string expected)
+    {
+        var error = Assert.Throws<BusinessRuleException>(
+            () => CellValueReader.Read(FromWire("kg"), Column(type)));
+
+        Assert.Equal("ECR-CELL-0422", error.ErrorCode);
+        Assert.Equal(messageKey, error.Details!["messageKey"]);
+        Assert.Equal(expected, error.Details["expected"]);
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     [Trait("Requirement", "ФВ-6.11")]
@@ -145,6 +165,87 @@ public sealed class CellValueReaderTests
         // значення: воно може бути персональними даними (ФВ-6.11).
         Assert.Contains("C1", error.Message, StringComparison.Ordinal);
         Assert.DoesNotContain("н/д", error.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// `U-23`: знаків після коми більше, ніж тримає сховище, — відмова, а не
+    /// мовчазне округлення.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Колонка БЕЗ оголошеного масштабу — саме той випадок, що проходив:
+    /// оголошений <c>ColumnDef.Scale</c> перевіряє <c>ValidateValue</c>, а межі
+    /// сховища (<c>decimal(34,16)</c>) не перевіряв ніхто, і SqlClient
+    /// округлював значення на клієнті до відправки. Обидві форми з дроту —
+    /// число JSON і рядок (сервер приймає decimal рядком, `e470777a`).
+    /// </remarks>
+    [Theory]
+    [InlineData("string")]
+    [InlineData("number")]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    public void Надлишкові_знаки_відхиляються_а_не_округлюються_мовчки(string form)
+    {
+        object wire = form == "string"
+            ? FromWire("931.9250000000000000123")!
+            : FromWire(931.9250000000000000123m)!;
+
+        var error = Assert.Throws<BusinessRuleException>(
+            () => CellValueReader.Read(wire, Column(CellDataType.Decimal)));
+
+        Assert.Equal("ECR-CELL-0422", error.ErrorCode);
+        var details = Assert.IsAssignableFrom<IReadOnlyDictionary<string, object?>>(error.Details);
+        Assert.Equal("err.ECR-CELL-0422.tooManyDecimals", details["messageKey"]);
+        Assert.Equal("C1", details["columnCode"]);
+        Assert.Equal("16", details["maxScale"]);
+    }
+
+    /// <summary>
+    /// Ціла частина понад 18 розрядів (<c>decimal(34,16)</c>) — відмова з ключем,
+    /// а не <c>Arithmetic overflow</c> від СУБД.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Від'ємне значення — окремий випадок: перевірка «&lt; 10¹⁸» без модуля
+    /// пропускала б будь-яке від'ємне число, і воно так само валило б запис.
+    /// </remarks>
+    [Theory]
+    [InlineData("string", "1000000000000000000")]
+    [InlineData("string", "-1000000000000000000")]
+    [InlineData("string", "12345678901234567890.5")]
+    [InlineData("number", "1000000000000000000")]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    public void Ціла_частина_понад_межу_сховища_відхиляється(string form, string text)
+    {
+        var number = decimal.Parse(text, System.Globalization.CultureInfo.InvariantCulture);
+        object wire = form == "string" ? FromWire(text)! : FromWire(number)!;
+
+        var error = Assert.Throws<BusinessRuleException>(
+            () => CellValueReader.Read(wire, Column(CellDataType.Decimal)));
+
+        Assert.Equal("ECR-CELL-0422", error.ErrorCode);
+        var details = Assert.IsAssignableFrom<IReadOnlyDictionary<string, object?>>(error.Details);
+        Assert.Equal("err.ECR-CELL-0422.tooManyIntegerDigits", details["messageKey"]);
+        Assert.Equal("C1", details["columnCode"]);
+        Assert.Equal("18", details["maxIntegerDigits"]);
+    }
+
+    /// <summary>Межа — рівно шістнадцять знаків; нулі в хвості втратою не є.</summary>
+    /// <remarks>
+    /// ⚠ Другий бік `U-23`: сторож, який відхиляє ВСЕ довше за 16 символів
+    /// дробу, зламав би законні значення — `1.50000000000000000000` є тим
+    /// самим числом, і сховище збереже його без втрати.
+    /// </remarks>
+    [Theory]
+    [InlineData("931.9250000000000001")]
+    [InlineData("1.50000000000000000000")]
+    [InlineData("-0.0000000000000001")]
+    [InlineData("999999999999999999.9999999999")]
+    [InlineData("-999999999999999999")]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    public void Значення_що_вміщається_у_сховище_приймається_без_змін(string text)
+    {
+        var data = CellValueReader.Read(FromWire(text), Column(CellDataType.Decimal));
+
+        Assert.NotNull(data);
+        Assert.Equal(decimal.Parse(text, System.Globalization.CultureInfo.InvariantCulture), data.ValueNumeric);
     }
 
     [Fact]

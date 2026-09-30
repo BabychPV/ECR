@@ -65,7 +65,12 @@ public sealed class ProjectConfiguration : IEntityTypeConfiguration<Project>
         // Пояс обов'язковий і видимий, тож вставка без нього має падати гучно,
         // а не отримувати чужий +06:00.
 
-        builder.Property(x => x.CurrentPeriodMode).HasDefaultValueSql("0", "DF_Project_CPMode");
+        // ⚠ `ValueGeneratedNever`: значення ЗАВЖДИ надсилається з коду, а
+        // DEFAULT лишається лише для вставок повз EF. Без цього EF (20601) не
+        // надсилав би CLR-замовчування (0) і підставляв би DEFAULT схеми;
+        // тут вони збігаються (0), тож втрати не було — але правило одне для
+        // всіх переліків із DEFAULT, щоб наступна зміна DEFAULT не відкрила її.
+        builder.Property(x => x.CurrentPeriodMode).HasDefaultValueSql("0", "DF_Project_CPMode").ValueGeneratedNever();
         builder.Property(x => x.IsArchiving).HasDefaultValue(false, "DF_Project_Arch");
         builder.Navigation(x => x.Periods).UsePropertyAccessMode(PropertyAccessMode.Field);
 
@@ -292,6 +297,17 @@ public sealed class TableRowConfiguration : IEntityTypeConfiguration<TableRow>
 
         builder.HasIndex(x => new { x.PeriodKeyValue, x.TableInstanceId, x.RowKeyValue })
                .IsUnique().HasDatabaseName("UQ_TableRow_Key");
+
+        // ⚠ B-18: живі рядки екземпляра — предикат `PeriodKey + TableInstanceId
+        // + IsDeleted = 0` у RowStore (ключі, версії, сироти) і в TableFillStore.
+        // UQ_TableRow_Key має той самий префікс, але не має IsDeleted, тож
+        // кожен рядок платив key lookup: на 700-рядковому екземплярі стенда
+        // 1548 читань на запит (1816 викликів у кеші планів). Тут — 6.
+        // Вирівняний по ps_ByPeriodKey (міграція B18HotPathIndexes).
+        builder.HasIndex(x => new { x.PeriodKeyValue, x.TableInstanceId })
+               .HasDatabaseName("IX_TableRow_Live")
+               .IncludeProperties(x => x.RowKeyValue)
+               .HasFilter("[IsDeleted] = 0");
 
         builder.HasOne<TableInstance>()
                .WithMany()

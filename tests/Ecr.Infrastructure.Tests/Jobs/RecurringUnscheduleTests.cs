@@ -18,14 +18,32 @@ namespace Ecr.Infrastructure.Tests.Jobs;
 /// <see cref="ExclusiveEnqueueTests"/>): перевіряється сховище задач і
 /// тригерів, бази не треба.
 /// </remarks>
-public sealed class RecurringUnscheduleTests
+public sealed class RecurringUnscheduleTests : IAsyncLifetime
 {
     private const string Hourly = "0 5 * * * ?";
     private const string Nightly = "0 15 2 * * ?";
 
     private static readonly CollectionTask Payload = new(41, null, null);
 
-    private static async Task<(QuartzJobScheduler Jobs, IScheduler Quartz)> SchedulerAsync()
+    /// <summary>Планувальники тесту — зупиняються після нього (<see cref="DisposeAsync"/>).</summary>
+    private readonly List<IScheduler> schedulers = [];
+
+    /// <inheritdoc />
+    public Task InitializeAsync() => Task.CompletedTask;
+
+    /// <summary>
+    /// ⚠ Незупинений планувальник лишається в статичному реєстрі Quartz разом
+    /// зі своїми потоками до кінця процесу — на всі наступні тести збірки.
+    /// </summary>
+    public async Task DisposeAsync()
+    {
+        foreach (var scheduler in schedulers)
+        {
+            await scheduler.Shutdown(waitForJobsToComplete: false).ConfigureAwait(false);
+        }
+    }
+
+    private async Task<(QuartzJobScheduler Jobs, IScheduler Quartz)> SchedulerAsync()
     {
         var factory = new StdSchedulerFactory(new System.Collections.Specialized.NameValueCollection
         {
@@ -33,7 +51,10 @@ public sealed class RecurringUnscheduleTests
             ["quartz.threadPool.threadCount"] = "1",
         });
 
-        return (new QuartzJobScheduler(factory), await factory.GetScheduler().ConfigureAwait(false));
+        var scheduler = await factory.GetScheduler().ConfigureAwait(false);
+        schedulers.Add(scheduler);
+
+        return (new QuartzJobScheduler(factory), scheduler);
     }
 
     private static async Task<List<ICronTrigger>> CronTriggersAsync(IScheduler quartz)

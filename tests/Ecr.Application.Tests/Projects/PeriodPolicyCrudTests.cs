@@ -23,6 +23,8 @@ public sealed class PeriodPolicyCrudTests
     private readonly IAccessDecisionService _access = Substitute.For<IAccessDecisionService>();
     private readonly IUnitOfWork _uow = Substitute.For<IUnitOfWork>();
     private readonly ICurrentUser _user = Substitute.For<ICurrentUser>();
+    private readonly IAuditWriter _audit = Substitute.For<IAuditWriter>();
+    private readonly IClock _clock = Substitute.For<IClock>();
 
     public PeriodPolicyCrudTests()
     {
@@ -30,7 +32,15 @@ public sealed class PeriodPolicyCrudTests
         _access.BuildProfileAsync(9, Arg.Any<CancellationToken>())
             .Returns(new AccessBuilder { UserId = 9 }.Permission("Project.Manage").Build());
         _periods.ListPoliciesAsync(Arg.Any<CancellationToken>()).Returns(new List<PeriodPolicy>());
+
+        // S19: зміна політики — у транзакції; політика без проєктів — глобальне право.
+        _uow.ExecuteInTransactionAsync(Arg.Any<Func<CancellationToken, Task>>(), Arg.Any<CancellationToken>())
+            .Returns(call => call.ArgAt<Func<CancellationToken, Task>>(0)(call.ArgAt<CancellationToken>(1)));
+        _periods.ListProjectIdsUsingPolicyAsync(Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(new List<int>());
     }
+
+    private UpdatePeriodPolicyHandler Updater() => new(_periods, _access, _user, _uow, _audit, _clock);
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
@@ -87,7 +97,7 @@ public sealed class PeriodPolicyCrudTests
         var policy = new PeriodPolicy(EcrCode.Create("STD"), 0, 15, 45, 45);
         _periods.GetPolicyAsync(1, Arg.Any<CancellationToken>()).Returns(policy);
 
-        var handler = new UpdatePeriodPolicyHandler(_periods, _access, _user, _uow);
+        var handler = Updater();
         var dto = await handler.HandleAsync(1, 2, 20, 60, 90, CancellationToken.None);
 
         Assert.Equal(2, dto.OpenOffsetDays);
@@ -105,7 +115,7 @@ public sealed class PeriodPolicyCrudTests
         var policy = new PeriodPolicy(EcrCode.Create("STD"), 0, 15, 45, 45);
         _periods.GetPolicyAsync(1, Arg.Any<CancellationToken>()).Returns(policy);
 
-        var handler = new UpdatePeriodPolicyHandler(_periods, _access, _user, _uow);
+        var handler = Updater();
 
         var error = await Assert.ThrowsAsync<DomainException>(
             () => handler.HandleAsync(1, 0, graceOffsetDays: 100, hardCloseOffsetDays: 45,
@@ -127,7 +137,7 @@ public sealed class PeriodPolicyCrudTests
             .Returns<PeriodPolicy>(_ => throw new NotFoundException(
                 "ECR-PRD-0422", "Політику періодів 999 не знайдено."));
 
-        var handler = new UpdatePeriodPolicyHandler(_periods, _access, _user, _uow);
+        var handler = Updater();
 
         var error = await Assert.ThrowsAsync<NotFoundException>(
             () => handler.HandleAsync(999, 0, 15, 45, 45, CancellationToken.None));
@@ -147,11 +157,9 @@ public sealed class PeriodPolicyCrudTests
         var denied = await Assert.ThrowsAsync<AccessDeniedException>(
             () => handler.HandleAsync("NEW", 0, 15, 45, 45, CancellationToken.None));
 
-        // ⚠ Немає messageKey навмисно: `PermissionCheck.RequireAsync` уже
-        // локалізує цей код через окремий точковий шлях у
-        // `ExceptionHandlingMiddleware` (поле `permission`, не messageKey) —
-        // тому рядок лишається в `contracts/localization-debt.md`.
+        // messageKey доданий для узгодженості з рештою викликів того самого
+        // факту («бракує права X») після B-14 Security (adfbcf9d).
         Assert.Equal("ECR-AUTH-0403", denied.ErrorCode);
-        Assert.False(denied.Details!.ContainsKey("messageKey"));
+        Assert.Equal("err.ECR-AUTH-0403.permission", Assert.Contains("messageKey", denied.Details!));
     }
 }

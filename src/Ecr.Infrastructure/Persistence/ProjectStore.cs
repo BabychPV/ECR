@@ -9,9 +9,16 @@ namespace Ecr.Infrastructure.Persistence;
 public sealed class ProjectStore(EcrDbContext db) : IProjectStore
 {
     /// <inheritdoc />
-    public async Task<PagedResult<ProjectSummary>> ListAsync(CursorRequest page, CancellationToken ct)
+    public async Task<PagedResult<ProjectSummary>> ListAsync(
+        CursorRequest page, IReadOnlyCollection<int> visibleIds, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(page);
+        ArgumentNullException.ThrowIfNull(visibleIds);
+
+        if (visibleIds.Count == 0)
+        {
+            return new PagedResult<ProjectSummary>([], null, TotalCount: null);
+        }
 
         var after = Cursor.Decode(page.Cursor);
 
@@ -20,7 +27,7 @@ public sealed class ProjectStore(EcrDbContext db) : IProjectStore
         // на екрані.
         var rows = await db.Projects
             .AsNoTracking()
-            .Where(p => p.Id > after)
+            .Where(p => p.Id > after && visibleIds.Contains(p.Id))
             .OrderBy(p => p.Id)
             .Take(page.Limit + 1)
             .Select(p => new ProjectSummary(

@@ -6,8 +6,9 @@ import type { ConvertUnitRequest, ConvertUnitResponse, UnitRef } from '@/api/typ
 import { createUnit, deleteUnit, unitReferences, unitUsage } from '@/features/units/api';
 import { UnitEditModal } from '@/features/units/UnitEditModal';
 import { UsageKindLabel } from '@/features/usage/UsageKindLabel';
-import { decimalEquals, normalizeDecimal } from '@/shared/format';
+import { decimalEquals, formatDecimal, normalizeDecimal } from '@/shared/format';
 import { can, useSession } from '@/shared/session/useSession';
+import { ConfirmModal } from '@/shared/ui/ConfirmModal';
 import { DataTable, type DataTableColumn } from '@/shared/ui/DataTable';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { showApiError, showDone } from '@/shared/ui/notify';
@@ -311,8 +312,17 @@ export function UnitsPage(): JSX.Element {
             </Button>
 
             {result !== null && (
+              // ⛔ `X-36`: результат конверсії йшов на екран СИРИМ рядком
+              // сервера (`decimal(28,16)`, наприклад «0.4535923700000000»)
+              // — без розділювача тисяч і без зрізання хвостових нулів,
+              // тоді як довідник поруч (`factorToBase`/`offsetToBase`,
+              // колонки нижче) і решта продукту (`DataTable`,
+              // `SnapshotRowsModal`) показують те саме подання лише через
+              // канонічний `formatDecimal`. `?? result.value` — деградація
+              // в бік показу: не-десяткове значення (не мало б статись,
+              // сервер віддає `decimal`) лишається видним, а не зникає.
               <Text size="sm" fw={600}>
-                {result.value} {result.unit}
+                {formatDecimal(result.value) ?? result.value} {result.unit}
               </Text>
             )}
 
@@ -360,15 +370,39 @@ export function UnitsPage(): JSX.Element {
         onRetry={() => void units.refetch()}
       />
 
-      <Modal
+      {/*
+       * ⛔ X-23: тут стояв голий `<Modal>` — фокус падав на хрестик (Enter
+       * закривав, а не скасовував, і навпаки), заголовок «Remove kg» не казав,
+       * що саме це одиниця, а доки йшла перевірка «де використано», діалог
+       * ~2 с стояв ПОРОЖНІМ. Тепер — `ConfirmModal` (фокус на «Cancel», назва
+       * об'єкта в заголовку) і видимий стан перевірки.
+       *
+       * ⚠ Кнопка підтвердження недоступна, доки не відомо, що залежних немає:
+       * вона вела б у відому відмову `409`.
+       */}
+      <ConfirmModal
         opened={deleting !== null}
+        title={t('units.deleteTitle', { code: deleting?.code ?? '' })}
+        verb={t('common.delete')}
+        confirmDisabled={dependents?.total !== 0}
+        isPending={remove.isPending}
+        onConfirm={() => {
+          if (deleting !== null) {
+            remove.mutate(deleting.id);
+          }
+        }}
         onClose={() => setDeleting(null)}
-        title={`${t('common.delete')} ${deleting?.code ?? ''}`}
       >
         <Stack gap="sm">
           {usage.error !== null && remove.error === null && (
             <Text size="sm" c="statusError">
               {usage.error.message}
+            </Text>
+          )}
+
+          {dependents === undefined && usage.error === null && (
+            <Text size="sm" c="dimmed" data-testid="unit-usage-pending">
+              {t('units.deleteChecking')}
             </Text>
           )}
 
@@ -379,13 +413,15 @@ export function UnitsPage(): JSX.Element {
               <>
                 <Text size="sm">{t('units.deleteUsedIn', { total: dependents.total })}</Text>
                 <Stack gap="xs" data-testid="unit-references">
+                  {/* ⛔ R-20: рядок був `<Text>` (тобто `<p>`) з `<Badge>` (`<div>`)
+                      усередині — недійсна розмітка, про яку React кричав у консоль. */}
                   {dependents.items.map((item) => (
-                    <Text size="sm" key={`${item.kind}:${item.id}`}>
-                      <Badge size="xs" variant="light" mr="xs">
+                    <Group gap="xs" wrap="nowrap" key={`${item.kind}:${item.id}`}>
+                      <Badge size="xs" variant="light">
                         <UsageKindLabel kind={item.kind} />
                       </Badge>
-                      {item.label}
-                    </Text>
+                      <Text size="sm">{item.label}</Text>
+                    </Group>
                   ))}
                 </Stack>
               </>
@@ -397,28 +433,8 @@ export function UnitsPage(): JSX.Element {
               {remove.error.message}
             </Text>
           )}
-
-          <Group justify="flex-end" mt="sm">
-            <Button variant="default" onClick={() => setDeleting(null)}>
-              {t('common.cancel')}
-            </Button>
-            {/* ⛔ Кнопки немає, доки є залежні: вона вела б у відому відмову. */}
-            {dependents?.total === 0 && (
-              <Button
-                color="statusError"
-                loading={remove.isPending}
-                onClick={() => {
-                  if (deleting !== null) {
-                    remove.mutate(deleting.id);
-                  }
-                }}
-              >
-                {t('common.delete')}
-              </Button>
-            )}
-          </Group>
         </Stack>
-      </Modal>
+      </ConfirmModal>
 
       <UnitEditModal unitId={editing?.id ?? null} code={editing?.code ?? ''} onClose={() => setEditing(null)} />
 

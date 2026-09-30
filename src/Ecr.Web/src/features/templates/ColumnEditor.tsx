@@ -3,7 +3,7 @@ import { Alert, Button, Group, NumberInput, Select, Skeleton, Stack, Switch, Tex
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
-import type { RegistryDefDto } from '@/api/types';
+import type { RegistryDefDto, UnitRef } from '@/api/types';
 import { t } from '@/shared/i18n';
 import { localized } from '@/shared/i18n/localized';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
@@ -11,9 +11,11 @@ import { LocalizedInput } from '@/shared/ui/LocalizedInput';
 import {
   type ColumnBlocker,
   type ColumnDraft,
+  columnTakesUnit,
   EditableColumnDataTypes,
   whyCannotSaveColumn,
 } from './column';
+import { dataTypeLabel } from './enumLabels';
 import { emptyStyleDraft, styleDraftOf, type StyleDefDto } from './style';
 
 /**
@@ -67,6 +69,26 @@ export function ColumnEditor({
   const blocker = whyCannotSaveColumn(draft);
   const isDecimal = draft.dataType === 'Decimal';
   const isLookup = draft.dataType === 'Lookup';
+  const takesUnit = columnTakesUnit(draft.dataType);
+
+  // ⛔ R-07: одиницю колонки не було де задати — форма її не показувала, а
+  // `unitId` лише носився від сервера назад. Той самий ключ і строк
+  // свіжості, що в `CalculationResultsPanel`: каталог одиниць міняється рідко.
+  const units = useQuery({
+    queryKey: ['units'],
+    queryFn: () => apiFetch<UnitRef[]>('/api/v1/units'),
+    staleTime: 60 * 60 * 1000,
+    enabled: takesUnit,
+  });
+
+  const unitOptions = useMemo(
+    () =>
+      (units.data ?? []).map((unit) => ({
+        value: String(unit.id),
+        label: `${unit.code} (${unit.dimensionCode})`,
+      })),
+    [units.data],
+  );
 
   // ⛔ Директива registry-lookup, PR A3: колонку `Lookup` конфігурували
   // сирим числовим `RegistryDefId` — автор шаблону мав знати ідентифікатор
@@ -158,7 +180,8 @@ export function ColumnEditor({
       <Select
         label={t('columns.dataType')}
         description={t('columns.dataTypeHint')}
-        data={EditableColumnDataTypes}
+        // ⛔ X-16: у переліку стояли сирі значення переліку (`Decimal`, `Lookup`).
+        data={EditableColumnDataTypes.map((type) => ({ value: type, label: dataTypeLabel(type) }))}
         value={draft.dataType}
         disabled={disabled || !draft.isNew}
         allowDeselect={false}
@@ -234,6 +257,33 @@ export function ColumnEditor({
             onChange={(value) => onChange({ ...draft, scale: typeof value === 'number' ? value : null })}
           />
         </Group>
+      )}
+
+      {takesUnit && units.error !== null && (
+        <ErrorAlert error={units.error} onRetry={() => void units.refetch()} />
+      )}
+
+      {takesUnit && units.error === null && units.isPending && (
+        <Skeleton height={60} radius="sm" data-unit-select="pending" />
+      )}
+
+      {takesUnit && units.error === null && !units.isPending && (
+        <Select
+          label={t('columns.unit')}
+          description={t('columns.unitHint')}
+          disabled={disabled}
+          searchable
+          // ⚠ Прибрати одиницю можна лише в НОВОЇ колонки: сервер читає
+          // `unitId: null` як «не змінювати» (`SaveColumnDefHandler.ApplyOptionalFields`),
+          // тож «очищене» поле наявної колонки після збереження мовчки
+          // повернулося б — обіцянка, якої форма не виконає.
+          clearable={draft.isNew}
+          allowDeselect={draft.isNew}
+          nothingFoundMessage={t('columns.unitEmpty')}
+          data={unitOptions}
+          value={draft.unitId === null ? null : String(draft.unitId)}
+          onChange={(value) => onChange({ ...draft, unitId: value === null ? null : Number(value) })}
+        />
       )}
 
       {/*
@@ -315,10 +365,6 @@ export function ColumnEditor({
             onChange={(style) => onChange({ ...draft, style })}
           />
         </Suspense>
-      )}
-
-      {!draft.hasFullData && (
-        <Alert color="statusWarning">{t('columns.partialDataWarning')}</Alert>
       )}
 
       {blocker !== null && <Alert color="statusWarning">{blockerLabel(blocker)}</Alert>}

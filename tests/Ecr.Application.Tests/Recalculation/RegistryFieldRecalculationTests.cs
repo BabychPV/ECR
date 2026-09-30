@@ -110,7 +110,8 @@ public sealed class RegistryFieldRecalculationTests
 
         Assert.Equal(0, written);
         Assert.DoesNotContain(
-            _cells.ReceivedCalls(), c => c.GetMethodInfo().Name == nameof(ICellStore.ApplyAsync));
+            _cells.ReceivedCalls(), c => c.GetMethodInfo().Name
+                is nameof(ICellStore.ApplyAsync) or nameof(ICellStore.ApplyBatchAsync));
     }
 
     [Fact]
@@ -187,7 +188,7 @@ public sealed class RegistryFieldRecalculationTests
                 new CellValueData { ValueRegistryEntryId = EntryId }),
         };
 
-        _cells.ReadSlicesAsync(Arg.Any<IReadOnlyList<long>>(), Arg.Any<CancellationToken>())
+        _cells.ReadSlicesAsync(Arg.Any<IReadOnlyList<long>>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
             .Returns(new Dictionary<long, IReadOnlyList<CellRecord>> { [TableInstance] = slice });
 
         _uow.ExecuteInTransactionAsync(Arg.Any<Func<CancellationToken, Task>>(), Arg.Any<CancellationToken>())
@@ -284,7 +285,7 @@ public sealed class RegistryFieldRecalculationTests
                 new CellValueData { ValueRegistryEntryId = EntryId }),
         };
 
-        _cells.ReadSlicesAsync(Arg.Any<IReadOnlyList<long>>(), Arg.Any<CancellationToken>())
+        _cells.ReadSlicesAsync(Arg.Any<IReadOnlyList<long>>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
             .Returns(new Dictionary<long, IReadOnlyList<CellRecord>> { [TableInstance] = slice });
 
         _uow.ExecuteInTransactionAsync(Arg.Any<Func<CancellationToken, Task>>(), Arg.Any<CancellationToken>())
@@ -341,14 +342,14 @@ public sealed class RegistryFieldRecalculationTests
             _headers,
             _audit,
             new TestClock(new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)),
-            _uow);
+            _uow, Substitute.For<Ecr.Application.Ports.ISheetEditGate>());
     }
 
     private IReadOnlyList<CellRecord> Applied()
     {
         var call = _cells.ReceivedCalls()
-            .Single(c => c.GetMethodInfo().Name == nameof(ICellStore.ApplyAsync));
+            .Single(c => c.GetMethodInfo().Name == nameof(ICellStore.ApplyBatchAsync));
 
-        return ((CellChangeSet)call.GetArguments()[0]!).Upserts;
+        return [.. ((IReadOnlyCollection<CellChangeSet>)call.GetArguments()[0]!).SelectMany(set => set.Upserts)];
     }
 }

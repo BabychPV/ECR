@@ -114,6 +114,10 @@ export default defineConfig({
     globals: true,
     setupFiles: ['./src/test/setup.ts'],
 
+    // ⚠ Межа тесту вища за межу очікувань `asyncUtilTimeout` (5 с, `src/test/setup.ts`):
+    // інакше тест із одним повільним `findBy` упирався б у власну межу раніше.
+    testTimeout: 15_000,
+
     /*
      * ⛔ `vmThreads` замість дефолтного `forks` — зміна ЗАМІРЯНА, не за
      * порадою з документації. Машина: Windows, Node 24.19.0, 156 файлів /

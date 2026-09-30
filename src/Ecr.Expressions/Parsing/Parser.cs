@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Collections.Frozen;
 using System.Collections.ObjectModel;
 using System.Globalization;
 using Ecr.Domain.Enums;
@@ -7,6 +8,32 @@ using Ecr.Expressions.Functions;
 using Ecr.Expressions.Lexing;
 
 namespace Ecr.Expressions.Parsing;
+
+/// <summary>
+/// Де живе вираз: у формулі (шаблону, методології, звіту) чи в правилі
+/// довідника (FEATURE-REGISTRY-TABLES §6).
+/// </summary>
+/// <remarks>
+/// ⚠ Окрема вісь, а не третій <see cref="ExpressionParseMode"/> і не новий
+/// <c>ExpressionDialect</c>. Режим відповідає на «хто читає текст» (редактор чи
+/// імпортер), діалект — на «чия граматика й функції»; правило довідника пише
+/// людина в редакторі, граматикою шаблону (§6), і відрізняється рівно одним —
+/// у ньому є запис, що перевіряється (<c>THIS</c>), а верхньорівневий
+/// <c>ROW.x</c> — його поле.
+///
+/// ⛔ Значення за замовчуванням — <see cref="Formula"/>: послаблення граматики
+/// мусить бути явним проханням (той самий принцип, що в
+/// <see cref="ExpressionParseMode.Editor"/>), інакше <c>THIS</c> тихо став би
+/// допустимим у формулі, де йому нема чого означати.
+/// </remarks>
+public enum ExpressionHost : byte
+{
+    /// <summary>Формула шаблону, методології чи звіту: <c>THIS</c> немає.</summary>
+    Formula = 0,
+
+    /// <summary>Правило довідника: <c>THIS</c> — запис, що перевіряється.</summary>
+    RegistryRule = 1,
+}
 
 /// <summary>
 /// Парсер рекурсивного спуску. Один парсер на обидва діалекти.
@@ -84,16 +111,40 @@ public sealed class Parser
     private static readonly FunctionRegistry Functions = new();
 
     /// <summary>
-    /// Розібрані вирази: <c>(текст, діалект, режим) → результат</c>.
+    /// Функції, аргументи яких (з другого) — область рядка <c>ROW</c>
+    /// (FEATURE-REGISTRY-TABLES §5.4: <c>f</c> і <c>e</c> «над <c>ROW.*</c>»).
     /// </summary>
     /// <remarks>
-    /// ⛔ Ключ складений із ТРЬОХ частин, і жодна з них не зайва. Діалект:
+    /// ⛔ Перелік тут, а не в каталозі функцій, бо область — властивість
+    /// ГРАМАТИКИ: парсер мусить знати її ще до того, як функцію взагалі
+    /// впізнано. Самих функцій до RT-20a/b немає, і виклик будь-якої з них
+    /// сьогодні — «невідома функція»; але <c>ROW.</c> усередині такого виклику
+    /// вже не отримує другої, хибної відмови про область.
+    ///
+    /// ⚠ <c>REGFIND</c> і <c>REGFIELD</c> тут НЕМАЄ навмисно: їхні аргументи —
+    /// значення ЗОВНІШНЬОГО виразу (частини ключа, запис), а не умова над рядком.
+    /// Регістр не значущий: у діалекті методологій неправильне написання однаково
+    /// дасть «невідома функція» з порадою, і друга відмова про область там зайва.
+    /// </remarks>
+    private static readonly FrozenSet<string> RowScopeFunctions = new[]
+    {
+        "REGONE", "REGSUM", "REGAVG", "REGMIN", "REGMAX", "REGCOUNT",
+    }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Розібрані вирази: <c>(текст, діалект, режим, господар) → результат</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Ключ складений із ЧОТИРЬОХ частин, і жодна з них не зайва. Діалект:
     /// <c>"2 ^ 3"</c> у шаблоні — степінь, у методології — відмова
     /// <c>ECR-CALC-0431</c> (там <c>^</c> це XOR); спільний запис означав би,
     /// що формула методології порахувалася за правилами шаблонів. Режим:
     /// <c>Import</c> приймає голе ім'я параметра, <c>Editor</c> — ні
     /// (директива №05 §4, пункт 5), тож той самий текст там або дерево, або
-    /// діагностика.
+    /// діагностика. Господар (<see cref="ExpressionHost"/>): <c>THIS</c> у
+    /// правилі довідника — запис, що перевіряється, у формулі — відмова
+    /// <c>expr.thisOutsideRule</c>; спільний запис дав би правилу чужу відмову
+    /// або формулі — чужий дозвіл, залежно від того, хто розібрав текст першим.
     ///
     /// ⛔ Кешувати можна ЛИШЕ тому, що <see cref="ParseResult"/> і дерево
     /// незмінні: вузли — <c>record</c> з <c>init</c>-властивостями, а обидві
@@ -136,6 +187,12 @@ public sealed class Parser
     /// <c>@Name</c> у дереві. За замовчуванням — <c>Editor</c>: послаблення
     /// граматики мусить бути явним проханням, інакше воно тихо стає правилом.
     /// </param>
+    /// <param name="host">
+    /// Де живе вираз. <see cref="ExpressionHost.RegistryRule"/> дозволяє
+    /// <c>THIS</c> і <c>ROW.</c> на верхньому рівні (FEATURE-REGISTRY-TABLES §6) і
+    /// має сенс лише з діалектом <c>Template</c>: граматика правил — граматика
+    /// шаблону.
+    /// </param>
     /// <returns>
     /// Результат із AST або з діагностиками. Помилка синтаксису — **результат**,
     /// а не виняток: конфігуратор має показати проблему, а не впасти.
@@ -152,14 +209,27 @@ public sealed class Parser
     /// <see cref="_cache"/>. Поява бодай одного <c>set</c> у вузлі AST робить
     /// цей кеш неправильним, а не лише «трохи ризикованим».
     /// </remarks>
+    /// <exception cref="ArgumentException">
+    /// <see cref="ExpressionHost.RegistryRule"/> з діалектом, відмінним від <c>Template</c>.
+    /// </exception>
     public ParseResult Parse(
         string expression,
         ExpressionDialect dialect,
-        ExpressionParseMode mode = ExpressionParseMode.Editor)
+        ExpressionParseMode mode = ExpressionParseMode.Editor,
+        ExpressionHost host = ExpressionHost.Formula)
     {
         ArgumentNullException.ThrowIfNull(expression);
 
-        var key = new CacheKey(expression, dialect, mode);
+        // ⛔ Відмова викликачеві, а не діагностика: комбінацію обирає код, а не
+        // автор виразу. Правило довідника в діалекті методологій означало б
+        // `@Arg`/`CST.` у правилі, яких §6 не має, — і мовчазну згоду з цим.
+        if (host == ExpressionHost.RegistryRule && dialect != ExpressionDialect.Template)
+        {
+            throw new ArgumentException(
+                $"Правило довідника розбирається лише діалектом Template, а не {dialect}.", nameof(host));
+        }
+
+        var key = new CacheKey(expression, dialect, mode, host);
         if (_cache.TryGetValue(key, out var cached))
         {
             return cached;
@@ -174,14 +244,15 @@ public sealed class Parser
         // той самий текст двічі, але назовні обидва мусять отримати ОДИН
         // екземпляр — інакше обіцянка «той самий вираз — той самий об'єкт»
         // була б правдою лише в один потік.
-        return _cache.GetOrAdd(key, static k => ParseUncached(k.Text, k.Dialect, k.Mode));
+        return _cache.GetOrAdd(key, static k => ParseUncached(k.Text, k.Dialect, k.Mode, k.Host));
     }
 
     /// <summary>Власне розбір — без кешу.</summary>
     private static ParseResult ParseUncached(
         string expression,
         ExpressionDialect dialect,
-        ExpressionParseMode mode)
+        ExpressionParseMode mode,
+        ExpressionHost host)
     {
         var diagnostics = new List<ExpressionDiagnostic>();
         var syntax = DialectSyntax.Of(dialect, mode);
@@ -198,7 +269,7 @@ public sealed class Parser
             return new ParseResult(false, null, Frozen(diagnostics));
         }
 
-        var state = new State(tokens, dialect, syntax, diagnostics);
+        var state = new State(tokens, dialect, syntax, host, diagnostics);
         AstNode root;
         try
         {
@@ -235,8 +306,9 @@ public sealed class Parser
     private static ReadOnlyCollection<T> Frozen<T>(List<T> items)
         => new([.. items]);
 
-    /// <summary>Ключ кеша розбору: текст, діалект і режим разом.</summary>
-    private readonly record struct CacheKey(string Text, ExpressionDialect Dialect, ExpressionParseMode Mode);
+    /// <summary>Ключ кеша розбору: текст, діалект, режим і господар разом.</summary>
+    private readonly record struct CacheKey(
+        string Text, ExpressionDialect Dialect, ExpressionParseMode Mode, ExpressionHost Host);
 
     // ——— рівні пріоритету, від найслабшого до найсильнішого (02b §2) ———
 
@@ -611,6 +683,16 @@ public sealed class Parser
     {
         var token = s.Current;
 
+        // ROW.a.b — поле рядка довідника (FEATURE-REGISTRY-TABLES §5.2).
+        // ⚠ Лише з крапкою й кодом після неї, як `CST.`/`HDR.`: голе `ROW` лишається
+        // тим, чим було, — невідомим ідентифікатором (або параметром в імпорті).
+        if (token.Text.Equals("ROW", StringComparison.OrdinalIgnoreCase)
+            && s.Peek(1).Type == TokenType.Dot
+            && s.Peek(2).Type == TokenType.Identifier)
+        {
+            return ParseRowField(s);
+        }
+
         // CST.X і HDR.X — префікси символів, а не функції.
         if (s.Peek(1).Type == TokenType.Dot && s.Peek(2).Type == TokenType.Identifier)
         {
@@ -649,6 +731,16 @@ public sealed class Parser
             return ParseFunctionCall(s);
         }
 
+        // THIS — запис, що перевіряє правило довідника (§5.2).
+        // ⛔ Крім імпорту: там голе ім'я — ПАРАМЕТР чинної системи (нижче), і
+        // параметр `This` у корпусі мусить лишитися параметром. Саме це
+        // FEATURE-REGISTRY-TABLES §5.2 має на увазі словами «поза імпортом»:
+        // правила довідника імпортер не читає ніколи.
+        if (token.Text.Equals("THIS", StringComparison.OrdinalIgnoreCase) && !s.Syntax.BareNameIsArgument)
+        {
+            return ParseThis(s);
+        }
+
         // ⛔ Голе ім'я — це параметр, і приймає його ЛИШЕ імпортер (директива
         // №05 §4, пункт 5). У корпусі `Total` і `@Total` стоять в одній
         // формулі, тобто `@` там необов'язковий; відмовити означало б не
@@ -683,6 +775,81 @@ public sealed class Parser
         throw new ParseAbort();
     }
 
+    /// <summary>
+    /// <c>ROW.code {.code}</c> — поле рядка довідника (FEATURE-REGISTRY-TABLES §5.2).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Поза областю рядка — діагностика з позицією, а не мовчазне дерево
+    /// (перевірка 18 §5.5). Досі <c>ROW.X</c> був синтаксичною помилкою
+    /// («невідомий ідентифікатор»); без цієї перевірки він став би ДЕРЕВОМ, яке
+    /// жоден зв'язувач не впізнає (<c>TypeChecker</c> дає вузлу тип <c>Null</c>,
+    /// сумісний з усім), тобто формула з ним публікувалася б і в рантаймі давала
+    /// <c>#VALUE</c> — розбір став би поблажливішим, ніж був. Область рядка —
+    /// лексична (аргументи агрегатів, правило довідника), тож перевіряє її той,
+    /// хто бачить вкладеність, — парсер.
+    ///
+    /// ⚠ Розбір після діагностики ПРОДОВЖУЄТЬСЯ, як у <see cref="ForbidInReport"/>:
+    /// редактор підсвічує саме посилання, а не «зайвий текст» за ним.
+    /// </remarks>
+    private static RowFieldNode ParseRowField(State s)
+    {
+        var token = s.Current;
+        s.Advance();                                     // ROW
+
+        var path = new List<string>();
+        var end = token.Position + token.Length;
+        while (s.Current.Type == TokenType.Dot && s.Peek(1).Type == TokenType.Identifier)
+        {
+            s.Advance();                                 // '.'
+            path.Add(s.Current.Text);
+            end = s.Current.Position + s.Current.Length;
+            s.Advance();
+        }
+
+        var construct = "ROW." + string.Join('.', path);
+        var length = end - token.Position;
+
+        ForbidInReport(s, construct, token.Position, length);
+
+        if (s.Dialect != ExpressionDialect.Report && s.Host != ExpressionHost.RegistryRule && s.RowScopeDepth == 0)
+        {
+            s.Error(
+                ExpressionErrors.Unresolved,
+                "expr.rowReferenceOutsideScope", Param("construct", construct),
+                $"\"{construct}\" refers to a registry row and is allowed only inside a registry aggregate "
+                + "(REGSUM, REGAVG, REGMIN, REGMAX, REGCOUNT), REGONE or a registry rule.",
+                token.Position, length);
+        }
+
+        return new RowFieldNode(path) { Position = token.Position };
+    }
+
+    /// <summary><c>THIS</c> — запис, що перевіряє правило довідника (FEATURE-REGISTRY-TABLES §5.2).</summary>
+    /// <remarks>
+    /// ⛔ Поза правилом — діагностика <c>expr.thisOutsideRule</c> з позицією самого
+    /// слова (перевірка 18 §5.5), і розбір триває: у формулі шаблону чи методології
+    /// «запису, що перевіряється», немає, і мовчазне дерево тут дало б
+    /// <c>#VALUE</c> у рантаймі замість помилки в редакторі.
+    /// </remarks>
+    private static ThisNode ParseThis(State s)
+    {
+        var token = s.Current;
+        s.Advance();
+
+        ForbidInReport(s, token.Text, token.Position, token.Length);
+
+        if (s.Dialect != ExpressionDialect.Report && s.Host != ExpressionHost.RegistryRule)
+        {
+            s.Error(
+                ExpressionErrors.Unresolved,
+                "expr.thisOutsideRule", null,
+                "\"THIS\" is allowed only in a registry rule, where it stands for the entry being checked.",
+                token.Position, token.Length);
+        }
+
+        return new ThisNode { Position = token.Position };
+    }
+
     private static FunctionNode ParseFunctionCall(State s)
     {
         var token = s.Current;
@@ -690,13 +857,30 @@ public sealed class Parser
         s.Advance();
         s.Advance();                                     // '('
 
+        // ⚠ Перший аргумент агрегату — код довідника, і він стоїть ПОЗА областю
+        // рядка; решта (`f`, `e`) — над `ROW.*` (FEATURE-REGISTRY-TABLES §5.4).
+        // Вкладений агрегат лише поглиблює ту саму область: внутрішній `ROW`
+        // затіняє зовнішній, і це вже питання обчислення, а не граматики.
+        var opensRowScope = RowScopeFunctions.Contains(name);
+
         var args = new List<AstNode>();
         if (s.Current.Type != TokenType.RParen)
         {
             args.Add(ParseExpression(s));
+
+            if (opensRowScope)
+            {
+                s.RowScopeDepth++;
+            }
+
             while (s.Match(TokenType.ArgumentSeparator))
             {
                 args.Add(ParseExpression(s));
+            }
+
+            if (opensRowScope)
+            {
+                s.RowScopeDepth--;
             }
         }
 
@@ -768,22 +952,44 @@ public sealed class Parser
     /// як є, той самий шлях, яким сьогодні йдуть усі діагностики зв'язування
     /// (<c>TypeChecker</c>, <c>UnitChecker</c> і сусіди), яких ця картка теж
     /// свідомо не торкається.
+    /// <para>
+    /// ⛔ V-20 (третій раунд UX): рішення вище переглянуто. Діагностика з
+    /// порадою йшла ПОВНІСТЮ українською (<c>IF(1 &gt; 0, 'a', 'b')</c> →
+    /// «Функція 'IF' недоступна в діалекті Methodology…») за будь-якої мови
+    /// інтерфейсу. Тепер порада — окремий ключ на кожен вид: регістр
+    /// (<c>expr.unknownFunctionCase</c>, з правильним написанням параметром) і
+    /// заміна (<c>expr.unknownFunctionReplacement.*</c>, по ключу на ім'я — повне
+    /// речення, а не вставка).
+    /// </para>
     /// </remarks>
     private static void ReportUnknownFunction(State s, string name, Token token)
     {
-        var advice = s.Dialect == ExpressionDialect.Methodology ? DialectCatalog.Advice(name) : null;
+        var methodology = s.Dialect == ExpressionDialect.Methodology;
+        var dialect = s.Dialect.ToString();
 
-        if (advice is null)
+        if (methodology && DialectCatalog.CaseCorrection(name) is { } exact)
         {
             s.Error(
-                "expr.unknownFunction", Params(("name", name), ("dialect", s.Dialect.ToString())),
-                $"Function \"{name}\" is not available in the {s.Dialect} dialect.",
+                "expr.unknownFunctionCase", Params(("name", name), ("dialect", dialect), ("exact", exact)),
+                $"Function \"{name}\" is not available in the {dialect} dialect. In the legacy engine "
+                + $"(NCalc 1.3.8) names are case-sensitive: write \"{exact}\".",
+                token.Position, token.Length);
+            return;
+        }
+
+        if (methodology && DialectCatalog.Replacement(name) is { } replacement)
+        {
+            s.Error(
+                replacement.MessageKey, Params(("name", name), ("dialect", dialect)),
+                $"Function \"{name}\" is not available in the {dialect} dialect. In the legacy engine "
+                + $"(NCalc 1.3.8) use {replacement.Text} instead.",
                 token.Position, token.Length);
             return;
         }
 
         s.Error(
-            $"Функція '{name}' недоступна в діалекті {s.Dialect}. У наборі чинного рушія (NCalc 1.3.8) {advice}.",
+            "expr.unknownFunction", Params(("name", name), ("dialect", dialect)),
+            $"Function \"{name}\" is not available in the {dialect} dialect.",
             token.Position, token.Length);
     }
 
@@ -1054,12 +1260,27 @@ public sealed class Parser
         IReadOnlyList<Token> tokens,
         ExpressionDialect dialect,
         DialectSyntax syntax,
+        ExpressionHost host,
         List<ExpressionDiagnostic> diagnostics)
     {
         private int _index;
         private int _depth;
 
         public ExpressionDialect Dialect => dialect;
+
+        /// <summary>Де живе вираз: формула чи правило довідника.</summary>
+        public ExpressionHost Host => host;
+
+        /// <summary>
+        /// Скільки аргументів агрегатів довідника (<see cref="RowScopeFunctions"/>)
+        /// охоплюють поточну позицію; <c>0</c> — поза областю рядка.
+        /// </summary>
+        /// <remarks>
+        /// ⚠ Парного <c>finally</c> немає з тієї самої причини, що в
+        /// <see cref="LeaveNesting"/>: єдиний вихід повз декремент —
+        /// <see cref="ParseAbort"/>, після якого стан не вживається.
+        /// </remarks>
+        public int RowScopeDepth { get; set; }
 
         /// <summary>
         /// Заходить на рівень вкладеності глибше; вичерпаний бюджет — відмова.

@@ -70,6 +70,48 @@ public sealed class MethodologyFormula : Entity<int>
     /// </remarks>
     public string? ArgumentsCsv { get; private set; }
 
+    /// <summary>
+    /// Область формули: на кожну речовину чи раз на рядок (<c>D-176</c>, V-7).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Типове — <see cref="MethodologyFormulaScope.Substance"/>, тобто рівно
+    /// поведінка до цього поля: рушій рахує кожну формулу на кожну речовину.
+    /// Інше типове значення тихо змінило б кожну наявну методологію — Row-формула
+    /// не бачить <c>SUBSTANCE(…)</c> і констант, заданих по речовинах.
+    /// </remarks>
+    public MethodologyFormulaScope Scope { get; private set; } = MethodologyFormulaScope.Substance;
+
+    /// <summary>
+    /// Показувати значення формули як проміжний результат (<c>D-175</c>, V-6):
+    /// рядок <c>calc.CalculationResult</c> з <c>Kind = Intermediate</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Типове — <c>false</c>: без явного прапорця обсяг <c>calc.*</c> не росте
+    /// на жодній наявній методології (HR-8).
+    /// </remarks>
+    public bool IsVisible { get; private set; }
+
+    /// <summary>Задає область формули.</summary>
+    /// <param name="scope">Речовина або рядок.</param>
+    /// <exception cref="ArgumentOutOfRangeException">Значення поза переліком.</exception>
+    /// <remarks>
+    /// ⚠ Перевірка «Row-формула не посилається на Substance» — справа публікації
+    /// (<c>PublishMethodologyHandler</c>): формула не бачить сусідніх формул.
+    /// </remarks>
+    public void SetScope(MethodologyFormulaScope scope)
+    {
+        if (!Enum.IsDefined(scope))
+        {
+            throw new ArgumentOutOfRangeException(nameof(scope), scope, "Невідома область формули.");
+        }
+
+        Scope = scope;
+    }
+
+    /// <summary>Вмикає або вимикає показ формули як проміжного результату.</summary>
+    /// <param name="isVisible"><c>true</c> — значення пишеться в результати.</param>
+    public void SetVisible(bool isVisible) => IsVisible = isVisible;
+
     /// <summary>Оголошує список аргументів формули.</summary>
     /// <param name="argumentsCsv"><c>;</c>-список; <c>null</c> — списку немає.</param>
     public void SetArguments(string? argumentsCsv) => ArgumentsCsv = argumentsCsv;

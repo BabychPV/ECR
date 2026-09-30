@@ -37,6 +37,14 @@ namespace Ecr.Application.Ports;
 /// Чи є в журналі правки з позначкою <c>IsLateEdit</c> (<c>D-70</c>) — за період,
 /// якщо його задано, інакше за будь-який (<c>BE-09b</c>).
 /// </param>
+/// <param name="Sheets">
+/// Аркуші складу з назвою і станом — ті самі рядки, що в
+/// <paramref name="SheetStates"/>, але В ПОРЯДКУ аркушів (<c>SheetDef.Ordinal</c>)
+/// і з людською назвою. Потрібне переліку: без назви в колонці «State» стояв
+/// внутрішній код аркуша (<c>S99819007</c>). ⚠ Адитивне поле: словник
+/// <paramref name="SheetStates"/> лишається як був. <c>null</c> — шлях читання
+/// його не несе (сховище заповнює завжди; як і стан — порожньо без періоду).
+/// </param>
 public sealed record DocumentSummary(
     long Id,
     int ProjectId,
@@ -49,7 +57,14 @@ public sealed record DocumentSummary(
     string? ModifiedByDisplayName = null,
     int? ErrorCount = null,
     int? WarningCount = null,
-    bool HasLateEdits = false);
+    bool HasLateEdits = false,
+    IReadOnlyList<DocumentSheetState>? Sheets = null);
+
+/// <summary>Аркуш складу документа в переліку: код, назва, стан за період.</summary>
+/// <param name="Code">Код аркуша (<c>SheetDef.Code</c>); він же ключ у <c>DocumentSummary.SheetStates</c>.</param>
+/// <param name="NameL10n">Назва аркуша мовами каталогу.</param>
+/// <param name="State">Стан робочого процесу; аркуш без рядка стану — <c>Draft</c>.</param>
+public sealed record DocumentSheetState(string Code, LocalizedText NameL10n, string State);
 
 /// <summary>Фільтри переліку документів (<c>BE-09b</c>); <c>default</c> — без фільтрів.</summary>
 /// <param name="State">Зведений стан документа за період; <c>null</c> — будь-який.</param>
@@ -190,6 +205,24 @@ public interface IDocumentStore
     /// <c>IRowStore.ResolveTableInstanceAsync</c>).
     /// </remarks>
     public Task<int> GetTemplateVersionIdAsync(long documentId, CancellationToken ct);
+
+    /// <summary>Версія шаблону ПРОЄКТУ; <c>null</c> — проєкту немає.</summary>
+    /// <remarks>
+    /// ⛔ `V-11`: версія документа — це версія його проєкту (документ власної
+    /// версії не зберігає; <see cref="GetTemplateVersionIdAsync"/> і
+    /// <c>RowStore</c> читають її з проєкту). Тому створення документа бере
+    /// версію ЗВІДСИ, а не з тіла запиту.
+    /// </remarks>
+    public Task<int?> FindProjectTemplateVersionIdAsync(int projectId, CancellationToken ct);
+
+    /// <summary>Стан ПРОЄКТУ; <c>null</c> — проєкту немає.</summary>
+    /// <remarks>
+    /// ⛔ F-11: створення документа не питало стану проєкту взагалі, і
+    /// <c>POST /documents</c> в АРХІВОВАНОМУ проєкті відповідав <c>201</c>.
+    /// Окремий вузький запит, а не сутність проєкту: створенню потрібне одне
+    /// поле, а <c>IPeriodStore.FindProjectAsync</c> тягне ще й усі періоди.
+    /// </remarks>
+    public Task<Domain.Enums.ProjectStatus?> FindProjectStatusAsync(int projectId, CancellationToken ct);
 
     /// <summary>
     /// Фіксує зміну документа: <c>ModifiedAt</c> і <c>ModifiedByUserId</c>.

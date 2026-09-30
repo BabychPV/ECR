@@ -121,8 +121,15 @@ describe('D14-11 — помилка рендера сторінки', () => {
     expect(alert.textContent).toContain(RenderErrorCode);
 
     // Технічний текст помилки доходить до екрана — «щось пішло не так»
-    // заборонено (`07-checkpoints`, Етап 6).
-    expect(alert.textContent).toContain('падіння сторінки під час рендера');
+    // заборонено (`07-checkpoints`, Етап 6)…
+    //
+    // ✎ `X-27`: …але НЕ в поясненні, а під згорнутим «Technical details».
+    // Мутація «повернути `Technical detail: ${technical}` у `detail`» кладе
+    // `Error: …` у сам alert — і перший рядок нижче червоніє.
+    expect(alert.textContent).not.toContain('падіння сторінки під час рендера');
+    const technical = screen.getByText('Error: падіння сторінки під час рендера');
+    expect(technical.closest('details')).not.toBeNull();
+    expect(technical.closest('details')?.open).toBe(false);
 
     // Ідентифікатор кореляції показується завжди — інакше скаргу користувача
     // нема з чим зіставити.

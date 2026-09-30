@@ -44,7 +44,8 @@ public sealed class SecurityStampMiddleware(RequestDelegate next)
 
             throw new Application.Errors.AccessDeniedException(
                 ErrorCodes.Unauthorized,
-                "Сесія втратила чинність: права користувача змінилися.");
+                "Сесія втратила чинність: права користувача змінилися.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.securityStampStale" });
         }
 
         if (!HttpMethods.IsGet(context.Request.Method) && !HttpMethods.IsHead(context.Request.Method))

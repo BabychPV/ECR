@@ -31,12 +31,16 @@ public sealed class CloneTemplateVersionHandler(
     /// </remarks>
     public async Task<int> CloneAsync(int sourceVersionId, string newVersion, int userId, CancellationToken ct)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(newVersion);
         // ⛔ Право перевіряється ТУТ (`A7-53`). До цього ендпоінт мав лише
         // `[Authorize]`, тобто оголошене контрактом право не перевіряв ніхто.
+        //
+        // ⛔ B-04: і ПЕРШИМ. `ArgumentException.ThrowIfNullOrWhiteSpace` стояв
+        // перед ним і давав `500` на порожній номер будь-кому, ще до права.
         await Security.PermissionCheck
-            .RequireAsync(access, currentUser, "Template.Edit", ct)
+            .RequireAsync(access, currentUser, CreateTemplateVersionHandler.Permission, ct)
             .ConfigureAwait(false);
+
+        CreateTemplateVersionHandler.RequireVersionNumber(newVersion);
 
         var versionId = await versions
             .CloneAsync(sourceVersionId, newVersion, userId, clock.UtcNow, ct)

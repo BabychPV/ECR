@@ -8,6 +8,7 @@ using Ecr.Domain.Errors;
 using Ecr.Domain.ValueObjects;
 using Ecr.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 
 namespace Ecr.Infrastructure.Security;
 
@@ -129,16 +130,49 @@ public sealed class UserStore(EcrDbContext db) : IUserStore
             .ConfigureAwait(false);
 
     /// <inheritdoc />
+    public async Task<IReadOnlyList<Ecr.Application.Security.UserRoleAssignmentView>> ListUserRoleAssignmentsAsync(
+        int userId, CancellationToken ct)
+    {
+        var rows = await db.RoleAssignments
+            .AsNoTracking()
+            .Where(a => a.UserId == userId)
+            .Join(db.Roles, a => a.RoleId, r => r.Id, (a, r) => new { r.Code, Assignment = a })
+            .OrderBy(x => x.Code)
+            .Take(MaxRoles)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        // ⚠ Область розбирає ДОМЕН (`RoleScopeDto.FromStored` → `RoleAssignmentScope.TryParse`,
+        // з аркушами й періодами D-214): зіпсований JSON дає
+        // порожній перелік — «не діє ніде», — а не `null`, що читалося б як
+        // «діє скрізь».
+        return rows
+            .Select(x => new Ecr.Application.Security.UserRoleAssignmentView(
+                x.Code,
+                x.Assignment.ValidFrom,
+                x.Assignment.ValidTo,
+                Ecr.Application.Security.RoleScopeDto.FromStored(x.Assignment.ScopeJson)))
+            .ToList();
+    }
+
+    /// <inheritdoc />
     public async Task<int> ReplaceRolesAsync(
         int userId,
         IReadOnlyList<string> roleCodes,
         IReadOnlyDictionary<string, Ecr.Application.Security.RoleValidityWindow>? validity,
+        IReadOnlyDictionary<string, RoleAssignmentScope>? scopes,
         CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(roleCodes);
 
         var user = await db.Users.FirstOrDefaultAsync(u => u.Id == userId, ct).ConfigureAwait(false)
-                   ?? throw new Application.Errors.NotFoundException("ECR-SEC-0404", $"Користувача {userId} не знайдено.");
+                   ?? throw new Application.Errors.NotFoundException(
+                       "ECR-SEC-0404", $"Користувача {userId} не знайдено.",
+                       new Dictionary<string, object?>
+                       {
+                           ["messageKey"] = "err.ECR-SEC-0404.userNotFound",
+                           ["userId"] = userId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                       });
 
         // ⛔ Коди розв'язуються ДО будь-якої зміни: невідома роль у наборі
         // означає помилку в переліку, і призначити «те, що знайшлося» гірше
@@ -158,7 +192,12 @@ public sealed class UserStore(EcrDbContext db) : IUserStore
         if (unknown.Count > 0)
         {
             throw new Application.Errors.NotFoundException(
-                "ECR-SEC-0404", $"Ролей не існує або вони вимкнені: {string.Join(", ", unknown)}.");
+                "ECR-SEC-0404", $"Ролей не існує або вони вимкнені: {string.Join(", ", unknown)}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-SEC-0404.rolesUnknown",
+                    ["roles"] = string.Join(", ", unknown),
+                });
         }
 
         // ⚠ Кожна роль набору йде в одну з двох груп (`#48`, ФВ-6.16): якщо
@@ -191,9 +230,19 @@ public sealed class UserStore(EcrDbContext db) : IUserStore
 
         db.RoleAssignments.RemoveRange(permanent);
 
+        // ⛔ ФВ-6.14: без словника областей (клієнт про них не знає) область
+        // переназначеної ролі ЗБЕРІГАЄТЬСЯ. Інакше звичайне «зберегти форму»
+        // перетворило б роль «лише в проєкті A» на роль у всіх проєктах.
+        var keptScopes = permanent
+            .Where(a => a.ScopeJson is not null)
+            .GroupBy(a => a.RoleId)
+            .ToDictionary(g => g.Key, g => g.First());
+
         foreach (var role in permanentRoles)
         {
-            db.RoleAssignments.Add(new RoleAssignment(role.Id, user));
+            var assignment = new RoleAssignment(role.Id, user);
+            ApplyScope(assignment, role.Code, scopes, keptScopes.GetValueOrDefault(role.Id));
+            db.RoleAssignments.Add(assignment);
         }
 
         // Строкові — заміна ПОРОЛЬНО: попереднє строкове призначення саме цієї
@@ -202,7 +251,7 @@ public sealed class UserStore(EcrDbContext db) : IUserStore
         // групові — не чіпаються. Це та сама обіцянка, що й раніше («заміна
         // набору не має скасовувати те, що поставили окремим рішенням»), лише
         // тепер «окреме рішення» може бути і цим самим викликом для іншої ролі.
-        foreach (var (roleId, _, from, to) in datedRoles)
+        foreach (var (roleId, code, from, to) in datedRoles)
         {
             var existingDated = await db.RoleAssignments
                 .Where(a => a.UserId == userId && a.RoleId == roleId
@@ -214,6 +263,7 @@ public sealed class UserStore(EcrDbContext db) : IUserStore
 
             var assignment = new RoleAssignment(roleId, user);
             assignment.SetValidity(from, to);
+            ApplyScope(assignment, code, scopes, existingDated.Find(a => a.ScopeJson is not null));
             db.RoleAssignments.Add(assignment);
         }
 
@@ -226,6 +276,25 @@ public sealed class UserStore(EcrDbContext db) : IUserStore
         user.RefreshSecurityStamp();
 
         return roles.Count;
+    }
+
+    /// <summary>Область дії нового призначення (ФВ-6.14).</summary>
+    /// <param name="assignment">Нове призначення.</param>
+    /// <param name="roleCode">Код його ролі.</param>
+    /// <param name="scopes">Області з виклику; <c>null</c> — зберегти попередню.</param>
+    /// <param name="kept">Попереднє призначення тієї ж ролі з областю; <c>null</c> — не було.</param>
+    private static void ApplyScope(
+        RoleAssignment assignment, string roleCode,
+        IReadOnlyDictionary<string, RoleAssignmentScope>? scopes, RoleAssignment? kept)
+    {
+        if (scopes is not null)
+        {
+            assignment.SetScope(scopes.GetValueOrDefault(roleCode));
+        }
+        else if (kept is not null)
+        {
+            assignment.CarryScopeFrom(kept);
+        }
     }
 
     /// <inheritdoc />
@@ -289,6 +358,8 @@ public sealed class UserStore(EcrDbContext db) : IUserStore
             .AsNoTracking()
             .Join(db.Permissions, rp => rp.PermissionCode, p => p.Id,
                   (rp, p) => new { rp.RoleId, Code = p.Id, p.IsDangerous })
+            .OrderBy(x => x.RoleId)
+            .ThenBy(x => x.Code)
             .Take(MaxRoles * MaxPermissions)
             .ToListAsync(ct)
             .ConfigureAwait(false);
@@ -304,7 +375,8 @@ public sealed class UserStore(EcrDbContext db) : IUserStore
                 return new RoleView(
                     r.Id, r.Code, r.IsBuiltIn, r.IsActive,
                     [.. mine.Select(p => p.Code).Order(StringComparer.Ordinal)],
-                    [.. mine.Where(p => p.IsDangerous).Select(p => p.Code).Order(StringComparer.Ordinal)]);
+                    [.. mine.Where(p => p.IsDangerous).Select(p => p.Code).Order(StringComparer.Ordinal)],
+                    r.NameL10n);
             })
             .ToList();
     }
@@ -400,7 +472,9 @@ public sealed class UserStore(EcrDbContext db) : IUserStore
     public async Task<Ecr.Application.Security.RoleUsage> CountRoleUsageAsync(int roleId, CancellationToken ct)
         => new(
             await db.RoleAssignments.CountAsync(a => a.RoleId == roleId, ct).ConfigureAwait(false),
-            await db.ResourceGrants.CountAsync(g => g.RoleId == roleId, ct).ConfigureAwait(false));
+            await db.ResourceGrants.CountAsync(g => g.RoleId == roleId, ct).ConfigureAwait(false),
+            await db.ApprovalSteps.CountAsync(s => s.RoleId == roleId, ct).ConfigureAwait(false),
+            await db.PeriodAccessRules.CountAsync(r => r.RoleId == roleId, ct).ConfigureAwait(false));
 
     /// <inheritdoc />
     public async Task RenameRoleAsync(
@@ -464,12 +538,23 @@ public sealed class UserStore(EcrDbContext db) : IUserStore
     }
 
     /// <inheritdoc />
+    public Task<bool> LockRoleForUpdateAsync(int roleId, CancellationToken ct)
+        // ⚠ ROWLOCK — щоб блокування не розповзалося на сторінку і не
+        // зупиняло правку грантів сусідніх ролей. EF обгортає запит у EXISTS
+        // над похідною таблицею — підказки діють на доступ до sec.Role і там.
+        => db.Database
+            .SqlQuery<int>($"SELECT Id AS [Value] FROM sec.Role WITH (UPDLOCK, ROWLOCK) WHERE Id = {roleId}")
+            .AnyAsync(ct);
+
+    /// <inheritdoc />
     public async Task<int> RotateStampsForRoleAsync(int roleId, CancellationToken ct)
     {
         // ⚠ Носії беруться і за прямим призначенням, і за призначенням на
         // групу AD: у другому випадку конкретних користувачів у таблиці немає,
         // і їхні сеанси доводиться лишати на звичайну перевірку штампа.
-        // Прокрутити можна лише тих, кого система знає поіменно.
+        // Прокрутити можна лише тих, кого система знає поіменно. Членів групи
+        // покриває ревізія грантів у відбитку груп ключа профілю
+        // (`AccessDecisionService.GroupsFingerprintAsync`), а не цей метод.
         var userIds = await db.RoleAssignments
             .AsNoTracking()
             .Where(a => a.RoleId == roleId && a.UserId != null)
@@ -521,6 +606,7 @@ public sealed class UserStore(EcrDbContext db) : IUserStore
             .AsNoTracking()
             .Where(a => a.UserId == userId || (a.PrincipalSid != null && groupSids.Contains(a.PrincipalSid)))
             .Join(db.Roles, a => a.RoleId, r => r.Id, (a, r) => new { Assignment = a, r.Code })
+            .OrderByDescending(x => x.Assignment.Id)
             .Take(MaxAssignments)
             .ToListAsync(ct)
             .ConfigureAwait(false);
@@ -547,17 +633,23 @@ public sealed class UserStore(EcrDbContext db) : IUserStore
 
     /// <inheritdoc />
     public async Task<IReadOnlyList<GroupRoleAssignmentView>> ListGroupRoleAssignmentsAsync(CancellationToken ct)
-        => await db.RoleAssignments
+    {
+        var rows = await db.RoleAssignments
             .AsNoTracking()
             .Where(a => a.PrincipalSid != null)
             .Join(db.Roles, a => a.RoleId, r => r.Id, (a, r) => new { a, r.Code })
             .OrderBy(x => x.a.PrincipalSid)
             .ThenBy(x => x.Code)
             .Take(MaxRoles)
-            .Select(x => new GroupRoleAssignmentView(
-                x.a.Id, x.a.RoleId, x.Code, x.a.PrincipalSid!, null, x.a.ValidFrom, x.a.ValidTo))
             .ToListAsync(ct)
             .ConfigureAwait(false);
+
+        // ⚠ Область (ФВ-6.14) розбирає ДОМЕН — той самий розбір, що й у
+        // профілі: зіпсована область показується порожньою, як і діє.
+        return [.. rows.Select(x => new GroupRoleAssignmentView(
+            x.a.Id, x.a.RoleId, x.Code, x.a.PrincipalSid!, null, x.a.ValidFrom, x.a.ValidTo,
+            Ecr.Application.Security.RoleScopeDto.FromStored(x.a.ScopeJson)))];
+    }
 
     /// <inheritdoc />
     public void AddGroupAssignment(RoleAssignment assignment) => db.RoleAssignments.Add(assignment);
@@ -640,6 +732,46 @@ public sealed class UserStore(EcrDbContext db) : IUserStore
     }
 
     /// <inheritdoc />
+    public async Task<SimulationTargetPrivileges> GetSimulationTargetPrivilegesAsync(
+        int userId, DateTime utcNow, CancellationToken ct)
+    {
+        // ⚠ Роль не фільтрується за IsActive: профіль доступу (`AccessDecisionService.LoadAsync`)
+        // бере права й вимкненої ролі, тож і стеля симуляції мусить їх бачити.
+        var rows = await (
+                from assignment in db.RoleAssignments.AsNoTracking()
+                join role in db.Roles.AsNoTracking() on assignment.RoleId equals role.Id
+                where assignment.UserId == userId
+                from permission in db.RolePermissions.AsNoTracking()
+                    .Where(rp => rp.RoleId == role.Id
+                                 && db.Permissions.Any(p => p.Id == rp.PermissionCode && p.IsDangerous))
+                    .Select(rp => rp.PermissionCode)
+                    .DefaultIfEmpty()
+                select new { Assignment = assignment, role.Code, Permission = permission })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        // Прострочене не дає нічого; чинне і ще не чинне — рахуються. Чинність — доменним
+        // методом (`IsEffectiveOn`), а не копією умови в SQL (`H-23a`).
+        var today = DateOnly.FromDateTime(utcNow);
+        var live = rows
+            .Where(r => r.Assignment.IsEffectiveOn(today) || r.Assignment.ValidFrom > today)
+            .ToList();
+
+        var isBootstrap = live.Exists(r => string.Equals(r.Code, BootstrapAdmin.RoleCode, StringComparison.Ordinal))
+                          || await db.Users.AsNoTracking()
+                              .AnyAsync(u => u.Id == userId && u.IsBootstrapAdmin, ct)
+                              .ConfigureAwait(false);
+
+        return new SimulationTargetPrivileges(
+            isBootstrap,
+            [.. live
+                .Where(r => r.Permission is not null)
+                .Select(r => r.Permission!)
+                .Distinct(StringComparer.Ordinal)
+                .Order(StringComparer.Ordinal)]);
+    }
+
+    /// <inheritdoc />
     public async Task<PasswordPolicy> GetPolicyAsync(User user, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(user);
@@ -654,5 +786,91 @@ public sealed class UserStore(EcrDbContext db) : IUserStore
         // ⛔ Відсутня політика — це НЕ «без обмежень». Порожнє поле не має бути
         // тихим способом вимкнути перевірку довжини пароля.
         return policy ?? new PasswordPolicy(DefaultPolicyCode, minLength: 12, maxFailedAttempts: 5);
+    }
+
+    /// <summary>Типова тривалість блокування, коли політика її не задає.</summary>
+    /// <remarks>Те саме число, що й у <c>User.RegisterFailedAttempt</c>.</remarks>
+    private const int DefaultLockoutMinutes = 15;
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⛔ Один <c>UPDATE</c>: SQL Server тримає на рядку блокування оновлення,
+    /// тож паралельні спроби серіалізуються на ньому і кожна бачить лічильник
+    /// попередньої. Маркер паралельності (<c>rowversion</c>) дав би те саме
+    /// лише разом із міграцією й повтором на конфлікті.
+    ///
+    /// ⚠ Праві частини <c>SET</c> читають значення ДО оновлення — тому «новий
+    /// лічильник» записано двічі, а не посиланням на щойно присвоєний.
+    ///
+    /// ⚠ <c>OUTPUT … INTO</c> табличну змінну, а не голий <c>OUTPUT</c>: другий
+    /// SQL Server відхиляє на таблиці з тригером, і поява тригера аудиту на
+    /// <c>sec.User</c> тихо зламала б вхід.
+    /// </remarks>
+    public async Task<FailedAttemptOutcome> RegisterFailedAttemptAsync(
+        int userId, int maxFailedAttempts, int lockoutMinutes, DateTime utcNow, CancellationToken ct)
+    {
+        var lockUntil = utcNow.AddMinutes(lockoutMinutes <= 0 ? DefaultLockoutMinutes : lockoutMinutes);
+
+        await db.Database.OpenConnectionAsync(ct).ConfigureAwait(false);
+        try
+        {
+            await using var command = db.Database.GetDbConnection().CreateCommand();
+            command.Transaction = db.Database.CurrentTransaction?.GetDbTransaction();
+            command.CommandText = """
+                DECLARE @out TABLE (FailedAttempts int NOT NULL, LockedUntil datetime2(3) NULL, LockedNow bit NOT NULL);
+
+                UPDATE sec.[User]
+                SET FailedAttempts =
+                        CASE WHEN LockedUntil IS NOT NULL AND LockedUntil <= @now THEN 1
+                             ELSE FailedAttempts + 1 END,
+                    LockedUntil =
+                        CASE WHEN LockedUntil IS NOT NULL AND LockedUntil > @now THEN LockedUntil
+                             WHEN @max > 0
+                                  AND CASE WHEN LockedUntil IS NOT NULL AND LockedUntil <= @now THEN 1
+                                           ELSE FailedAttempts + 1 END >= @max
+                                  THEN @until
+                             ELSE NULL END
+                OUTPUT inserted.FailedAttempts,
+                       inserted.LockedUntil,
+                       CASE WHEN inserted.LockedUntil IS NOT NULL AND inserted.LockedUntil > @now
+                                 AND (deleted.LockedUntil IS NULL OR deleted.LockedUntil <= @now)
+                            THEN CAST(1 AS bit) ELSE CAST(0 AS bit) END
+                INTO @out
+                WHERE Id = @id;
+
+                SELECT FailedAttempts, LockedUntil, LockedNow FROM @out;
+                """;
+
+            Add(command, "@id", System.Data.DbType.Int32, userId);
+            Add(command, "@max", System.Data.DbType.Int32, maxFailedAttempts);
+            Add(command, "@now", System.Data.DbType.DateTime2, utcNow);
+            Add(command, "@until", System.Data.DbType.DateTime2, lockUntil);
+
+            await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
+            if (!await reader.ReadAsync(ct).ConfigureAwait(false))
+            {
+                // Запису немає (видалили між читанням і спробою) — рахувати нема чого.
+                return default;
+            }
+
+            return new FailedAttemptOutcome(
+                reader.GetInt32(0),
+                reader.IsDBNull(1) ? null : DateTime.SpecifyKind(reader.GetDateTime(1), DateTimeKind.Utc),
+                reader.GetBoolean(2));
+        }
+        finally
+        {
+            await db.Database.CloseConnectionAsync().ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>Типізований параметр команди.</summary>
+    private static void Add(System.Data.Common.DbCommand command, string name, System.Data.DbType type, object value)
+    {
+        var parameter = command.CreateParameter();
+        parameter.ParameterName = name;
+        parameter.DbType = type;
+        parameter.Value = value;
+        command.Parameters.Add(parameter);
     }
 }

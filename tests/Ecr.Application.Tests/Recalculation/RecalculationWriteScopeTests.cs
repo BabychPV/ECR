@@ -196,6 +196,7 @@ public sealed class RecalculationWriteScopeTests
 
         Assert.Equal(0, written);
         await _cells.DidNotReceiveWithAnyArgs().ApplyAsync(null!, default);
+        await _cells.DidNotReceiveWithAnyArgs().ApplyBatchAsync(null!, default);
         await _audit.DidNotReceiveWithAnyArgs().WriteCellChangesAsync(null!, default);
         await _uow.DidNotReceiveWithAnyArgs().ExecuteInTransactionAsync(null!, default);
     }
@@ -212,10 +213,11 @@ public sealed class RecalculationWriteScopeTests
     /// <summary>Набір змін, який служба віддала сховищу.</summary>
     private CellChangeSet AppliedSet()
     {
+        // O2: один пакет на документо-період; екземпляр тут один — отже й набір.
         var call = _cells.ReceivedCalls()
-            .Single(c => c.GetMethodInfo().Name == nameof(ICellStore.ApplyAsync));
+            .Single(c => c.GetMethodInfo().Name == nameof(ICellStore.ApplyBatchAsync));
 
-        return (CellChangeSet)call.GetArguments()[0]!;
+        return Assert.Single((IReadOnlyCollection<CellChangeSet>)call.GetArguments()[0]!);
     }
 
     private IReadOnlyList<CellRecord> Applied() => AppliedSet().Upserts;
@@ -259,7 +261,7 @@ public sealed class RecalculationWriteScopeTests
             _headers,
             _audit,
             new TestClock(new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)),
-            _uow);
+            _uow, Substitute.For<Ecr.Application.Ports.ISheetEditGate>());
     }
 
     /// <summary>
@@ -326,7 +328,7 @@ public sealed class RecalculationWriteScopeTests
             }
         }
 
-        _cells.ReadSlicesAsync(Arg.Any<IReadOnlyList<long>>(), Arg.Any<CancellationToken>())
+        _cells.ReadSlicesAsync(Arg.Any<IReadOnlyList<long>>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
             .Returns(new Dictionary<long, IReadOnlyList<CellRecord>> { [TableInstance] = slice });
 
         _cells.ReadCellsAsync(Arg.Any<IReadOnlyCollection<CellAddress>>(), Arg.Any<CancellationToken>())
@@ -355,6 +357,8 @@ public sealed class RecalculationWriteScopeTests
         _cells.WhenForAnyArgs(c => c.ReadCellsAsync(null!, default))
               .Do(_ => Note("read"));
         _cells.WhenForAnyArgs(c => c.ApplyAsync(null!, default))
+              .Do(_ => Note("apply"));
+        _cells.WhenForAnyArgs(c => c.ApplyBatchAsync(null!, default))
               .Do(_ => Note("apply"));
         _audit.WhenForAnyArgs(a => a.WriteCellChangesAsync(null!, default))
               .Do(_ => Note("audit"));

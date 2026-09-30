@@ -1,4 +1,5 @@
 import { createTheme, type MantineColorsTuple } from '@mantine/core';
+import { closeNotificationButtonProps } from '@/shared/ui/a11yLabels';
 
 /**
  * Основний колір — кортеж макета `--brand-50…900`
@@ -480,7 +481,10 @@ export const theme = createTheme({
     // `CreateMappingModal.tsx`, `SourcesPage.tsx`, `PeriodsPage.tsx`,
     // `SnapshotsPage.tsx`, `GrantsPanel.tsx`). Виправлення лише в обгортці
     // закрило б два виклики з тринадцяти і читалося б як «F8 закрито».
-    Notification: { defaultProps: { closeButtonProps: { 'aria-label': 'Close notification' } } },
+    //
+    // ✎ `X-26`: напис — із каталогу, з англійським запасним (`a11yLabels.ts`);
+    // геттер читає каталог у момент рендера тоста, а не імпорту теми.
+    Notification: { defaultProps: { closeButtonProps: closeNotificationButtonProps } },
     Drawer: { defaultProps: { transitionProps: { duration: 150 } } },
     Tooltip: { defaultProps: { transitionProps: { duration: 80 } } },
   },

@@ -18,18 +18,48 @@ namespace Ecr.Calculations;
 /// модуль рахує в пам'яті воркера, і похід у сховище на кожен <c>CONVERT</c>
 /// зруйнував би бюджет 10 хвилин на річний перерахунок.
 /// </para>
+/// <para>
+/// ✎ HSE301 L: публічний, щоб захист від циклу (<see cref="GetFormulaResult"/>)
+/// перевірявся модульним тестом напряму, а не лише через модуль.
+/// </para>
 /// </remarks>
-internal sealed class MethodologyEvaluationContext(
+/// <param name="period">Календарний контекст періоду.</param>
+/// <param name="arguments">Аргументи рядка (<c>@Arg</c>).</param>
+/// <param name="constants">Розв'язані константи (<c>CST.X</c>).</param>
+/// <param name="units">Довідник одиниць у пам'яті.</param>
+/// <param name="registries">Знімок довідників; <c>null</c> — <c>REG*</c> дають <c>#REF</c>.</param>
+/// <param name="resolve">
+/// ✎ HSE301 L: звідки брати <c>!Code</c>, якого немає серед записаних результатів, —
+/// формулу імпортованої методології (бібліотеки), обчислену в її власному контексті.
+/// Повертає <c>null</c>, якщо ім'я нікуди не веде. <c>null</c> замість резолвера —
+/// лише формули своєї версії, як до кроку.
+/// </param>
+public sealed class MethodologyEvaluationContext(
     PeriodContext period,
     IReadOnlyDictionary<string, ExpressionValue> arguments,
     IReadOnlyDictionary<string, ExpressionValue> constants,
-    UnitTable units) : IEvaluationContext
+    UnitTable units,
+    IRegistrySnapshot? registries = null,
+    Func<string, ExpressionValue?>? resolve = null) : IEvaluationContext
 {
     private readonly Dictionary<string, ExpressionValue> _formulaResults =
         new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>Імена, які саме зараз резолвляться через <c>resolve</c>, — захист від циклу.</summary>
+    private readonly HashSet<string> _resolving = new(StringComparer.OrdinalIgnoreCase);
+
     /// <inheritdoc />
     public PeriodContext Period { get; } = period;
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ✎ RT-23a: знімок довідників прив'язки (<c>CalculationBindingContext.Registries</c>),
+    /// завантажений у <c>GenericCalculationModule.PrepareAsync</c> ДО обчислення
+    /// (<c>D-162</c>). Це не порушує переносності методології (02b §3.4): довідник — дані
+    /// системи, спільні для всіх проєктів, а не комірки конкретного шаблону. <c>null</c> —
+    /// формули версії довідників не читають, і <c>REG*</c> дають <c>#REF</c>.
+    /// </remarks>
+    public IRegistrySnapshot? Registries { get; } = registries;
 
     /// <summary>Записує результат формули, доступний далі як <c>!Code</c>.</summary>
     /// <param name="code">Код формули.</param>
@@ -84,10 +114,52 @@ internal sealed class MethodologyEvaluationContext(
             : ExpressionValue.Error(ExpressionErrors.BadReference);
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Спершу — записані результати своєї версії. Промах іде в резолвер
+    /// (HSE301 L): формула бібліотеки, обчислена в її власному контексті, і її
+    /// значення запам'ятовується тут — другий <c>!Code</c> того самого рядка
+    /// не рахує її вдруге. Резолвера немає або ім'я нікуди не веде — <c>#REF</c>,
+    /// як до кроку.
+    /// <para>
+    /// ⛔ Захист від циклу — тут, а не лише на публікації. Бібліотеку можуть
+    /// перевидати ПІСЛЯ публікації викликача з посиланням назад, і цикл з'явиться
+    /// лише в рантаймі. Ім'я, що вже резолвиться в цьому контексті, повертає
+    /// <c>#CYCLE</c> замість рекурсії без кінця (<c>StackOverflow</c> убив би
+    /// процес воркера разом з усім прогоном).
+    /// </para>
+    /// </remarks>
     public ExpressionValue GetFormulaResult(string name)
-        => _formulaResults.TryGetValue(name, out var value)
-            ? value
-            : ExpressionValue.Error(ExpressionErrors.BadReference);
+    {
+        if (_formulaResults.TryGetValue(name, out var value))
+        {
+            return value;
+        }
+
+        if (resolve is null)
+        {
+            return ExpressionValue.Error(ExpressionErrors.BadReference);
+        }
+
+        if (!_resolving.Add(name))
+        {
+            return ExpressionValue.Error(ExpressionErrors.RuntimeCycle);
+        }
+
+        try
+        {
+            if (resolve(name) is not { } resolved)
+            {
+                return ExpressionValue.Error(ExpressionErrors.BadReference);
+            }
+
+            _formulaResults[name] = resolved;
+            return resolved;
+        }
+        finally
+        {
+            _resolving.Remove(name);
+        }
+    }
 
     /// <inheritdoc />
     /// <remarks>
@@ -111,17 +183,20 @@ internal sealed class MethodologyEvaluationContext(
 
     /// <inheritdoc />
     /// <remarks>
-    /// ⛔ Поля довідника методологія теж не бачить — З ТІЄЇ САМОЇ причини, що
-    /// й комірки та шапку: <c>REGFIELD</c> бере id запису з Lookup-КОМІРКИ
-    /// документа, а методологія комірок не читає за побудовою (02b §3.4).
-    /// Парсер відхиляє посилання ще при розборі (<c>expr.
-    /// cellReferencesForbiddenInMethodology</c>), тож REGFIELD у діалекті
-    /// методологій сюди дійти не може взагалі — цей метод лишається реальним,
-    /// а не мертвим кодом, тому що <c>IEvaluationContext</c> — один контракт
-    /// на всі діалекти, і його симетрія важливіша за один недосяжний рядок.
+    /// ✎ RT-23a: поле запису — за ЗНІМКОМ (<see cref="Registries"/>), а не з бази. Id
+    /// запису приходить не з комірки (методологія комірок не читає, 02b §3.4), а як
+    /// <c>EntryRef</c>: аргумент <c>Lookup</c>-колонки у версії <c>Strict</c> (<c>D-161</c>)
+    /// або результат <c>REGFIND</c>/<c>REGONE</c>. <c>REGFIELD</c> методологій іде через
+    /// <c>RegistryForms</c> і читає знімок сам; цей метод — та сама відповідь для всіх,
+    /// хто питає через контракт контексту.
+    ///
+    /// ⚠ Без знімка — <c>#REF</c>, як і до кроку: запис невидимий так само, як поле, якого
+    /// немає.
     /// </remarks>
     public ExpressionValue GetRegistryField(long registryEntryId, string fieldCode)
-        => ExpressionValue.Error(ExpressionErrors.BadReference);
+        => Registries is { } snapshot
+            ? snapshot.GetField(registryEntryId, fieldCode)
+            : ExpressionValue.Error(ExpressionErrors.BadReference);
 
     /// <inheritdoc />
     public ExpressionValue Convert(ExpressionValue value, string fromUnitCode, string toUnitCode)
@@ -216,6 +291,12 @@ public sealed class UnitTable
     /// Використовується там, де прогін іде без бази — у симуляції й тестах.
     /// Коефіцієнти збігаються з seed навмисно: інакше «те саме» обчислення
     /// давало б різні числа залежно від того, звідки взяли довідник.
+    /// <para>
+    /// ⚠ Дзеркало ПОВНЕ, і це звіряє <c>Hse301UnitsTests</c> по тексту сіду.
+    /// Множники — такі, як їх зберігає <c>decimal(38,18)</c>: літерал
+    /// <c>t_per_year</c> у сіді має 19 знаків і в базі округлюється, а
+    /// <c>Sm3_per_h</c> (1/3600) там записано вже округленим до 18.
+    /// </para>
     /// </remarks>
     public static UnitTable Seed()
     {
@@ -227,9 +308,43 @@ public sealed class UnitTable
         table.Add("mg", dimension: 1, factorToBase: 0.000001m);
         table.Add("m3", dimension: 2, factorToBase: 1m);
         table.Add("l", dimension: 2, factorToBase: 0.001m);
+        table.Add("J", dimension: 3, factorToBase: 1m);
+        table.Add("GJ", dimension: 3, factorToBase: 1_000_000_000m);
+        table.Add("MWh", dimension: 3, factorToBase: 3_600_000_000m);
         table.Add("s", dimension: 4, factorToBase: 1m);
+        table.Add("min", dimension: 4, factorToBase: 60m);
+        table.Add("h", dimension: 4, factorToBase: 3600m);
+        table.Add("day", dimension: 4, factorToBase: 86_400m);
+        table.Add("year", dimension: 4, factorToBase: 31_536_000m);
         table.Add("K", dimension: 5, factorToBase: 1m);
         table.Add("degC", dimension: 5, factorToBase: 1m, offsetToBase: 273.15m);
+        table.Add("mol", dimension: 6, factorToBase: 1m);
+        table.Add("one", dimension: 7, factorToBase: 1m);
+        table.Add("g_per_s", dimension: 8, factorToBase: 0.001m);
+        table.Add("t_per_year", dimension: 8, factorToBase: 0.000031709791983765m);
+        table.Add("kg_per_t", dimension: 9, factorToBase: 0.001m);
+        table.Add("g_per_GJ", dimension: 10, factorToBase: 0.000000000001m);
+        table.Add("mg_per_m3", dimension: 11, factorToBase: 0.000001m);
+        table.Add("kg_per_m3", dimension: 11, factorToBase: 1m);
+
+        // HSE301:F1 — секція `-- HSE301:F1` сіду. ⛔ Sm3 — розмірність 12
+        // (StdVolume), а не 2 (Volume): V-12.
+        table.Add("kt", dimension: 1, factorToBase: 1_000_000m);
+        table.Add("MJ", dimension: 3, factorToBase: 1_000_000m);
+        table.Add("TJ", dimension: 3, factorToBase: 1_000_000_000_000m);
+        table.Add("pct_vol", dimension: 7, factorToBase: 0.01m);
+        table.Add("pct_wt", dimension: 9, factorToBase: 0.01m);
+        table.Add("t_per_t", dimension: 9, factorToBase: 1m);
+        table.Add("kg_per_TJ", dimension: 10, factorToBase: 0.000000000001m);
+        table.Add("Sm3", dimension: 12, factorToBase: 1m);
+        table.Add("Sm3_per_s", dimension: 13, factorToBase: 1m);
+        table.Add("Sm3_per_h", dimension: 13, factorToBase: 0.000277777777777778m);
+        table.Add("m_per_s", dimension: 14, factorToBase: 1m);
+        table.Add("m2", dimension: 15, factorToBase: 1m);
+        table.Add("kg_per_Sm3", dimension: 16, factorToBase: 1m);
+        table.Add("MJ_per_Sm3", dimension: 17, factorToBase: 1_000_000m);
+        table.Add("MJ_per_kg", dimension: 18, factorToBase: 1_000_000m);
+        table.Add("g_per_mol", dimension: 19, factorToBase: 0.001m);
 
         return table;
     }

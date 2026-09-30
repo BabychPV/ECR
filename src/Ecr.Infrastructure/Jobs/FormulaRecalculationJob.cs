@@ -3,6 +3,8 @@ using System.Text.Json;
 using Ecr.Application.Ports;
 using Ecr.Application.Recalculation;
 using Ecr.Domain.ValueObjects;
+using Ecr.Infrastructure.Persistence;
+using Microsoft.EntityFrameworkCore;
 
 namespace Ecr.Infrastructure.Jobs;
 
@@ -22,7 +24,7 @@ namespace Ecr.Infrastructure.Jobs;
 /// методологій — у <c>calc.CalculationResult</c> (<c>D-69</c>). Плутати ці два
 /// шляхи не можна, і саме плутанина й сталася.
 /// </remarks>
-public sealed class FormulaRecalculationJob(RecalculationService recalculation) : IFormulaRecalculationJob
+public sealed class FormulaRecalculationJob(RecalculationService recalculation, EcrDbContext db) : IFormulaRecalculationJob
 {
     /// <summary>Налаштування розбору завдання; спільні на всі виклики.</summary>
     private static readonly JsonSerializerOptions PayloadOptions = new(JsonSerializerDefaults.Web);
@@ -52,6 +54,23 @@ public sealed class FormulaRecalculationJob(RecalculationService recalculation) 
             return;
         }
 
+        // ⛔ Лок документа — той самий, що в повного перерахунку
+        // (`RecalculationDocumentLock`). Повний читає входи поза транзакцією запису;
+        // без лока він, прочитавши вхід ДО цього PATCH, записував своє старіше
+        // похідне число ПІСЛЯ нашого свіжого (`FormulaRecalculationDocumentLockTests`).
+        // Під локом порядок один: хто б не був першим, останнім пише той, хто
+        // читав останній вхід. Лок береться тут, у задачі, а не в транзакції
+        // PATCH: там лише постановка в чергу.
+        //
+        // ⛔ O1 (I2 ФВ-9.8): не чекаємо довгого власника лока, тримаючи слот
+        // виконавця. Зайнято довше за `BusyWait` — `JobDeferredException`, і
+        // виконавець повертає задачу в чергу через `DeferDelay`, не рахуючи спроби.
+        var documentId = await DocumentOfAsync(request, ct).ConfigureAwait(false);
+
+        var busyWait = RecalculationDocumentLock.BusyWait;
+        await using var documentLock =
+            await RecalculationDocumentLock.AcquireAsync(db, documentId, busyWait, ct).ConfigureAwait(false);
+
         var written = await recalculation
             .RecalculateAsync(request.TableInstanceId, dirty, ct)
             .ConfigureAwait(false);
@@ -67,6 +86,19 @@ public sealed class FormulaRecalculationJob(RecalculationService recalculation) 
                 ct)
             .ConfigureAwait(false);
     }
+
+    /// <summary>Документ екземпляра таблиці; <c>0</c> — екземпляра немає.</summary>
+    /// <remarks>
+    /// ⚠ З ключем періоду: <c>doc.TableInstance</c> партиціонована за ним. Немає
+    /// екземпляра — лок не береться, а <see cref="RecalculationService.RecalculateAsync"/>
+    /// нижче відмовить власним повідомленням.
+    /// </remarks>
+    private Task<long> DocumentOfAsync(FormulaRecalculationRequest request, CancellationToken ct)
+        => db.TableInstances
+            .AsNoTracking()
+            .Where(i => i.Id == request.TableInstanceId && i.PeriodKeyValue == request.PeriodKey)
+            .Select(i => i.DocumentId)
+            .FirstOrDefaultAsync(ct);
 
     private static FormulaRecalculationRequest Parse(object? payload)
     {

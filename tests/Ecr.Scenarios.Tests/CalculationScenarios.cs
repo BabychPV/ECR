@@ -376,6 +376,17 @@ public sealed class CalculationScenarios(SqlServerFixture sql)
         var structure = await ArrangeStructureAsync(app, admin.Client, "S23");
         var methodologyId = await CreateMethodologyAsync(app, admin.Client, "S23");
 
+        // ⚠ F-09 (четвертий раунд UX): прив'язка приймається лише для виходу,
+        // оголошеного хоч однією версією методології — інакше вона чекала б
+        // числа, якого ніхто не порахує. Тож вихід EMISSION заводиться першим.
+        var units = await admin.Client.GetAsync(new Uri("/api/v1/units", UriKind.Relative));
+        Assert.Equal(HttpStatusCode.OK, units.StatusCode);
+        var unitId = (await units.Content.ReadFromJsonAsync<JsonElement>()).EnumerateArray()
+            .First(u => string.Equals(u.GetProperty("code").GetString(), "t", StringComparison.Ordinal))
+            .GetProperty("id").GetInt32();
+        var versionId = await CreateDraftVersionAsync(app, admin.Client, methodologyId, "1.0.0");
+        await SaveOutputAsync(app, admin.Client, methodologyId, versionId, "EMISSION", unitId);
+
         var address =
             $"/api/v1/methodologies/{methodologyId}/bindings/{structure.ResultColumnId}/EMISSION";
 
@@ -430,6 +441,34 @@ public sealed class CalculationScenarios(SqlServerFixture sql)
         Assert.Equal(bindingId, updated.GetProperty("id").GetInt32());
         Assert.Equal("""{"kind":"stack"}""", updated.GetProperty("matchJson").GetString());
         Assert.False(updated.GetProperty("isActive").GetBoolean());
+
+        // ⛔ F-10: обидві зміни — у журналі структурних змін справжньої бази,
+        // створення й правка окремими рядками (див. `SaveCalculationBindingHandler`).
+        Assert.Equal(["Create", "Update"], await BindingJournalAsync(bindingId));
+    }
+
+    /// <summary>Операції журналу структурних змін однієї прив'язки — прямим ADO: <c>aud.*</c> поза моделлю EF.</summary>
+    private async Task<List<string>> BindingJournalAsync(int bindingId)
+    {
+        await using var connection = new Microsoft.Data.SqlClient.SqlConnection(sql.ConnectionString);
+        await connection.OpenAsync();
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT Operation FROM aud.StructureChange
+            WHERE EntityType = N'cfg.CalculationBinding' AND EntityId = @id
+            ORDER BY ChangedAt, Id;
+            """;
+        command.Parameters.AddWithValue("@id", bindingId);
+
+        var operations = new List<string>();
+        await using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            operations.Add(reader.GetString(0));
+        }
+
+        return operations;
     }
 
     /// <summary>
@@ -487,6 +526,68 @@ public sealed class CalculationScenarios(SqlServerFixture sql)
         Assert.Equal(10m, JsonNumber.AsDecimal(emission.GetProperty("value")));
         Assert.Equal(stand.RowKey, emission.GetProperty("sourceRowKey").GetString());
         Assert.Equal(versionId, emission.GetProperty("methodologyVersionId").GetInt32());
+    }
+
+    /// <summary>
+    /// Результат методології видно В СІТЦІ, а після зміни входів він позначений
+    /// застарілим (F-02, F-05, четвертий раунд UX).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Відтворено на стенді: панель показувала R1 = 20, а колонка
+    /// <c>EMISSION</c> у сітці — порожня (зріз віддавав лише A і B); після зміни
+    /// входу панель і далі показувала старе число як чинне. Мутації: прибрати
+    /// накладання в <c>GetTableSliceHandler</c> — у зрізі немає EMISSION; прибрати
+    /// <c>GetCalculationFreshnessAsync</c> з <c>GetCalculationResultsHandler</c> —
+    /// <c>isStale</c> лишається <c>false</c>.
+    /// </remarks>
+    [Fact]
+    [Trait("Category", "Integration")]
+    [Trait("Scenario", "S-24c")]
+    public async Task Результат_методології_видно_в_сітці_й_він_застаріває_після_зміни_входів()
+    {
+        var stand = await ArrangeStandAsync(sql, "S24c", argument: 4m, divisor: 2m);
+        using var app = stand.App;
+
+        var methodologyId = await CreateMethodologyAsync(app, stand.Admin.Client, "S24c");
+        var versionId = await CreateDraftVersionAsync(app, stand.Admin.Client, methodologyId, "1.0.0");
+
+        await SaveConstantAsync(app, stand.Admin.Client, methodologyId, versionId, "EF", 2.5m, stand.UnitId);
+        await SaveFormulaAsync(app, stand.Admin.Client, methodologyId, versionId, "EMISSION", "@A * CST.EF", "A", stand.UnitId);
+        await SaveOutputAsync(app, stand.Admin.Client, methodologyId, versionId, "EMISSION", stand.UnitId);
+        await SaveRuleAsync(app, stand.Admin.Client, methodologyId, versionId, "ALL_ROWS", "{}", priority: 1);
+        await SaveTestCaseAsync(
+            app, stand.Admin.Client, methodologyId, versionId, "GOLDEN",
+            Input(stand, argument: 4m, divisor: 2m), """{"EMISSION":10}""");
+        await SaveBindingAsync(app, stand.Admin.Client, methodologyId, stand.ResultColumnId, "EMISSION");
+        await PublishAsync(app, stand.Publisher.Client, methodologyId, versionId, EffectiveFrom(stand.PeriodKey, yearsBack: 1));
+
+        await RecalculateAsync(app, stand.Admin, stand.DocumentId, stand.PeriodKey);
+
+        // F-02: число методології — у тій самій колонці зрізу, з якої малює сітка.
+        var inGrid = await ReadCellAsync(stand.Admin.Client, stand.DocumentId, stand.TableInstanceId, stand.RowKey, "EMISSION");
+        Assert.Equal(10m, inGrid);
+
+        var fresh = await ReadResultsAsync(app, stand.Admin.Client, stand.DocumentId, stand.PeriodKey);
+        var freshEmission = fresh.EnumerateArray().Single(
+            r => string.Equals(r.GetProperty("outputCode").GetString(), "EMISSION", StringComparison.Ordinal));
+        Assert.False(freshEmission.GetProperty("isStale").GetBoolean(), fresh.GetRawText());
+        Assert.Equal("1.0.0", freshEmission.GetProperty("methodologyVersion").GetString());
+
+        // F-05: вхід змінено — число те саме (перерахунку не було), але вже застаріле.
+        await WriteInputsAsync(
+            app, stand.Admin.Client, stand.DocumentId, stand.TableInstanceId, stand.PeriodKey, stand.RowKey, 8m, 2m);
+
+        var stale = await ReadResultsAsync(app, stand.Admin.Client, stand.DocumentId, stand.PeriodKey);
+        var staleEmission = stale.EnumerateArray().Single(
+            r => string.Equals(r.GetProperty("outputCode").GetString(), "EMISSION", StringComparison.Ordinal));
+        Assert.True(staleEmission.GetProperty("isStale").GetBoolean(), stale.GetRawText());
+
+        // Після перерахунку — нове число і знову свіже.
+        await RecalculateAsync(app, stand.Admin, stand.DocumentId, stand.PeriodKey);
+
+        Assert.Equal(20m, await ReadCellAsync(stand.Admin.Client, stand.DocumentId, stand.TableInstanceId, stand.RowKey, "EMISSION"));
+        var recalculated = await ReadResultsAsync(app, stand.Admin.Client, stand.DocumentId, stand.PeriodKey);
+        Assert.All(recalculated.EnumerateArray(), r => Assert.False(r.GetProperty("isStale").GetBoolean()));
     }
 
     /// <summary>

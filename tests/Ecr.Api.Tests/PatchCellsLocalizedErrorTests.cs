@@ -3,6 +3,7 @@ using Ecr.Api.Errors;
 using Ecr.Application.Common;
 using Ecr.Application.Documents;
 using Ecr.Application.Documents.Dto;
+using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
 using Ecr.Application.Validation;
@@ -105,12 +106,19 @@ public sealed class PatchCellsLocalizedErrorTests
         _metadata.GetAsync(2, Arg.Any<CancellationToken>()).Returns(snapshot);
         _methodologies.GetMethodologyIdsBoundToTableAsync(3, Arg.Any<CancellationToken>())
                       .Returns(Task.FromResult<IReadOnlyList<int>>([]));
-        _rows.GetRowVersionsAsync(TableInstance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
-             .Returns(new Dictionary<string, string> { [RowKeyValue] = "0x0A" });
-        _rows.GetRowIdsAsync(TableInstance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
-             .Returns(new Dictionary<string, long> { [RowKeyValue] = 1001L });
+        _rows.GetRowsAsync(TableInstance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+             .Returns(new List<RowState> { new(RowKeyValue, 1001L, "0x0A", IsOrphaned: false) });
         _access.BuildProfileAsync(9, Arg.Any<CancellationToken>()).Returns(Profile());
-        _access.CanEditSliceAsync(Arg.Any<AccessProfile>(), TableInstance, Arg.Any<CancellationToken>())
+        _access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
+            .Returns(EditDecision.Allow());
+        // S6: межі читання — «бачить усе»; про заборони — DenyReadTests.
+        _access.ReadScopeAsync(Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
+            .Returns(ReadScopes.Everything(snapshot));
+        // ⚠ WR-03: `EnsureAccessAsync` тепер запитує лише адреси батчу через
+        // `CanEditCellsAsync`, не весь зріз через `CanEditSliceAsync`.
+        _access.CanEditCellsAsync(
+                   Arg.Any<AccessProfile>(), TableInstance, Arg.Any<PeriodKey>(),
+                   Arg.Any<IReadOnlyCollection<CellAddress>>(), Arg.Any<CancellationToken>())
                .Returns(new Dictionary<CellAddress, EditDecision>());
     }
 
@@ -124,7 +132,8 @@ public sealed class PatchCellsLocalizedErrorTests
     private PatchCellsHandler Handler()
         => new(_cells, _rows, _documents, _periods, _metadata, _access,
                new ValidationEngine(new RealFormulaEngine()),
-               _methodologies, _registries, _headers, _audit, _auditReader, _jobs, _uow, _user, _clock);
+               _methodologies, _registries, _headers, _audit, _auditReader, _jobs, _uow, _user, _clock,
+               Substitute.For<ISheetEditGate>(), NSubstitute.Substitute.For<Ecr.Application.Ports.IUnitCatalog>());
 
     private static IDocumentHeaderStore CreateHeaderStore()
     {
@@ -202,6 +211,39 @@ public sealed class PatchCellsLocalizedErrorTests
 
         Assert.Equal("An anonymous request cannot change data: sign in again.", detail);
         AssertNoCyrillic(detail);
+    }
+
+    /// <summary>
+    /// Відмова на заборонену комірку не несе в подробицях <c>detail</c> — і в
+    /// тілі відповіді рівно один <c>detail</c>, англійський (B-06).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Перша половина дивиться на ВИНЯТОК обробника, а не на JSON: конвеєр
+    /// тепер сам відкидає зарезервовані імена (<c>ProblemReservedMembersTests</c>),
+    /// тож без неї повернення <c>["detail"]</c> в обробник лишилося б невидимим.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public async Task Заборонена_комірка_не_кладе_detail_у_подробиці_і_доїжджає_англійською()
+    {
+        // `CanEditCellsAsync` повертає порожній словник — рішення на комірку
+        // немає, отже відмова `NoGrant` з українським `Detail` рішення.
+        var request = new PatchCellsRequest(
+            TableInstance, Period, "UserEdit",
+            [new PatchRow(RowKeyValue, "0x0A", [new PatchCell("Volume", 1m)])]);
+
+        var denied = await Assert.ThrowsAsync<AccessDeniedException>(
+            () => Handler().HandleAsync(request, CancellationToken.None));
+
+        Assert.Equal("err.ECR-ACCS-0403.deniedCells", denied.Details!["messageKey"]);
+        Assert.False(denied.Details.ContainsKey("detail"), "Подробиці несуть зарезервований член `detail`.");
+
+        var body = await ProblemReservedMembersTests.ProblemTextAsync(denied);
+
+        Assert.Single(System.Text.RegularExpressions.Regex.Matches(body, "\"detail\""));
+        Assert.Equal(
+            "Cells you may not edit in this batch: 1. Reason for the first: NoGrant.",
+            JsonDocument.Parse(body).RootElement.GetProperty("detail").GetString());
     }
 
     /// <summary>

@@ -13,7 +13,7 @@ import { JobsPage } from '@/pages/admin/JobsPage';
  * `JobRetry`/`JobResultLink` уже існували й стояли в шухляді «My tasks»
  * (`MyTasksDrawer.test.tsx`), але не в загальній таблиці задач. Той самий
  * критерій показу, ті самі компоненти `JobFacts`, той самий каталог рядків
- * (`jobs.restart`, `document.exportReady`) — нових ключів це не додає.
+ * (`jobs.restart`, `jobs.resultDownload`) — нових ключів це не додає.
  *
  * ⚠ `hasViewHealth` у `JobsPage.tsx` — буквально `true`: маршрут
  * `/admin/jobs` уже вимагає `System.ViewHealth` (`routes.ts`, `RouteGuard`),
@@ -171,7 +171,7 @@ describe('JobsPage: посилання на файл результату в п�
     show();
 
     const link = within(await findRowOfState('Succeeded')).getByRole('link', {
-      name: '⟦document.exportReady⟧',
+      name: '⟦jobs.resultDownload⟧',
     });
 
     /*
@@ -189,10 +189,10 @@ describe('JobsPage: посилання на файл результату в п�
     await findRowOfState('Failed');
 
     expect(
-      within(rowOfState('Failed')).queryByRole('link', { name: '⟦document.exportReady⟧' }),
+      within(rowOfState('Failed')).queryByRole('link', { name: '⟦jobs.resultDownload⟧' }),
     ).toBeNull();
     expect(
-      within(rowOfState('Running')).queryByRole('link', { name: '⟦document.exportReady⟧' }),
+      within(rowOfState('Running')).queryByRole('link', { name: '⟦jobs.resultDownload⟧' }),
     ).toBeNull();
   });
 });

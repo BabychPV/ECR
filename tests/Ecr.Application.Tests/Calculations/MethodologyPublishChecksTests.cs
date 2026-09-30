@@ -42,7 +42,7 @@ public sealed class MethodologyPublishChecksTests
             [Label("k1_Season_", "<1500")],
             []);
 
-        Assert.Contains(problems, p => p.Contains("k1_Season_", StringComparison.Ordinal));
+        Assert.Contains(problems, p => p.Text.Contains("k1_Season_", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -76,7 +76,7 @@ public sealed class MethodologyPublishChecksTests
             [Text("n_ECW_C11_13_", "-")],
             []);
 
-        Assert.Contains(problems, p => p.Contains("арифметичній", StringComparison.Ordinal));
+        Assert.Contains(problems, p => p.Text.Contains("арифметичній", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -92,7 +92,7 @@ public sealed class MethodologyPublishChecksTests
 
         var problems = Check([Formula("Total", "1 + 2", FormulaResultType.Number)], [dash], []);
 
-        Assert.Contains(problems, p => p.Contains("n_ECW_C11_13_", StringComparison.Ordinal));
+        Assert.Contains(problems, p => p.Text.Contains("n_ECW_C11_13_", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -105,7 +105,14 @@ public sealed class MethodologyPublishChecksTests
         // ⛔ Оголошена числовою, така формула пише текст у
         // `calc.CalculationResult.Value decimal(34,16)`.
         var wrong = Check([Formula("Verdict", verdict, FormulaResultType.Number)], [], []);
-        Assert.Contains(wrong, p => p.Contains("лише текст", StringComparison.Ordinal));
+        Assert.Contains(wrong, p => p.Text.Contains("лише текст", StringComparison.Ordinal));
+
+        // ⛔ F-15/B-12: пункт несе КЛЮЧ і підстановки — клієнт перекладає його
+        // сам. Мутація: повернути голий рядок замість `PublishProblem` — не
+        // скомпілюється; прибрати `("formula", …)` — червоне.
+        var problem = Assert.Single(wrong);
+        Assert.Equal("publish.problem.numberReturnsText", problem.MessageKey);
+        Assert.Equal("Verdict", problem.Args["formula"]);
 
         // ⚠ Межа правила: та сама формула з правильним оголошенням проходить.
         Assert.Empty(Check([Formula("Verdict", verdict, FormulaResultType.Text)], [], []));
@@ -121,7 +128,7 @@ public sealed class MethodologyPublishChecksTests
         var problems = Check(
             [Formula("Total", "@Fuel * 2", FormulaResultType.Text)], [], []);
 
-        Assert.Contains(problems, p => p.Contains("повертає число", StringComparison.Ordinal));
+        Assert.Contains(problems, p => p.Text.Contains("повертає число", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -137,7 +144,7 @@ public sealed class MethodologyPublishChecksTests
             [],
             [new MethodologyOutput(VersionId, EcrCode.Create("Verdict"), TonneUnit)]);
 
-        Assert.Contains(problems, p => p.Contains("числовій колонці", StringComparison.Ordinal));
+        Assert.Contains(problems, p => p.Text.Contains("числовій колонці", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -204,7 +211,7 @@ public sealed class MethodologyPublishChecksTests
 
     // ─────────────────────────────────────────────────────────────────────────
 
-    private IReadOnlyList<string> Check(
+    private IReadOnlyList<PublishProblem> Check(
         IReadOnlyList<(string Code, string Expression, FormulaResultType ResultType)> formulas,
         IReadOnlyList<MethodologyConstant> constants,
         IReadOnlyList<MethodologyOutput> outputs)
@@ -214,7 +221,7 @@ public sealed class MethodologyPublishChecksTests
             outputs);
 
     /// <summary>Одна формула з оголошеним <c>;</c>-списком аргументів.</summary>
-    private IReadOnlyList<string> CheckWithArguments(
+    private IReadOnlyList<PublishProblem> CheckWithArguments(
         string code, string expression, string declaration, ICollection<string>? warnings = null)
         => MethodologyPublishChecks.Check(
             [

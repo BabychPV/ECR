@@ -73,7 +73,7 @@ public sealed class ValidateDocumentHandlerTests
         // окремі тести `TableValidation`/`ValidationEngine`). Без рядків
         // цикл усередині `TableValidation.Run` не виконується жодного разу
         // і формульний рушій не потрібен.
-        _cells.ReadSlicesAsync(Arg.Any<IReadOnlyList<long>>(), Arg.Any<CancellationToken>())
+        _cells.ReadSlicesAsync(Arg.Any<IReadOnlyList<long>>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
               .Returns(new Dictionary<long, IReadOnlyList<CellRecord>>
               {
                   [Instance1] = [],
@@ -127,7 +127,7 @@ public sealed class ValidateDocumentHandlerTests
 
     private ValidateDocumentHandler Handler() => new(
         _cells, _rows, _metadata, _results, new ValidationEngine(Substitute.For<IFormulaEngine>()),
-        _headers, _clock, _uow, _access, _user);
+        _headers, _clock, _uow, _access, _user, Substitute.For<IRegistryStore>());
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
@@ -138,7 +138,10 @@ public sealed class ValidateDocumentHandlerTests
 
         // ⛔ Q-165: рівно ОДИН пакетний виклик на весь документ, скільки б
         // таблиць у ньому не було з правилами валідації.
-        await _cells.Received(1).ReadSlicesAsync(Arg.Any<IReadOnlyList<long>>(), Arg.Any<CancellationToken>());
+        // O3c: з ключем партиції документо-періоду, не пошуком по всіх.
+        await _cells.Received(1).ReadSlicesAsync(
+            Arg.Any<IReadOnlyList<long>>(), new PeriodKey(Period), Arg.Any<CancellationToken>());
+        await _cells.DidNotReceive().ReadSlicesAsync(Arg.Any<IReadOnlyList<long>>(), Arg.Any<CancellationToken>());
         await _rows.Received(1).GetRowIdsBatchAsync(
             Arg.Any<IReadOnlyList<long>>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>());
 
@@ -161,6 +164,7 @@ public sealed class ValidateDocumentHandlerTests
             Arg.Is<IReadOnlyList<long>>(ids => ids.Count == 2
                 && ids.Contains(Instance1) && ids.Contains(Instance2)
                 && !ids.Contains(InstanceNoRules)),
+            new PeriodKey(Period),
             Arg.Any<CancellationToken>());
     }
 
@@ -175,7 +179,8 @@ public sealed class ValidateDocumentHandlerTests
             () => Handler().HandleAsync(DocumentId, new PeriodKey(Period), CancellationToken.None));
 
         Assert.Equal("ECR-AUTH-0403", denied.ErrorCode);
-        await _cells.DidNotReceive().ReadSlicesAsync(Arg.Any<IReadOnlyList<long>>(), Arg.Any<CancellationToken>());
+        await _cells.DidNotReceive().ReadSlicesAsync(
+            Arg.Any<IReadOnlyList<long>>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -185,9 +190,10 @@ public sealed class ValidateDocumentHandlerTests
         _access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), DocumentId, Arg.Any<CancellationToken>())
             .Returns(EditDecision.Deny(EditDenyReason.NoGrant));
 
-        var denied = await Assert.ThrowsAsync<AccessDeniedException>(
+        // ⛔ B-08: невидимий документ — 404, як і відсутній, а не 403.
+        var denied = await Assert.ThrowsAsync<NotFoundException>(
             () => Handler().HandleAsync(DocumentId, new PeriodKey(Period), CancellationToken.None));
 
-        Assert.Equal("ECR-AUTH-0403", denied.ErrorCode);
+        Assert.Equal("ECR-DOC-0404", denied.ErrorCode);
     }
 }

@@ -35,7 +35,7 @@
                              №13, Q-215, `BootstrapSecretFile.cs`).
       5. Конфігурація     — appsettings.Production.json у %ProgramData%\ECR\
                              config: НЕсекретні значення (наприклад,
-                             Telemetry:OtlpEndpoint), пише лише в ПОРОЖНІЙ
+                             Logging:File:Directory), пише лише в ПОРОЖНІЙ
                              заповнювач, ніколи не перезаписує заповнений
                              (`Folders.wxs`: NeverOverwrite; той самий
                              принцип тут — на рівні оркестратора, а не MSI).
@@ -46,7 +46,25 @@
                              записати секрети кроком 4 — свіжозаписане
                              оточення побачить лише новий запуск процесу,
                              не вже працюючий.
-      7. Здоров'я         — GET /health/live.
+      7. Здоров'я         — GET /health/live, потім GET /health/ready до
+                             `Healthy`/`Degraded` (не довше -ReadyTimeoutSeconds).
+                             Перевірки, що не Healthy, друкуються. Unhealthy
+                             лише через `sources` (зовнішнє джерело PI/SQL) —
+                             попередження, не провал; будь-яка інша Unhealthy
+                             після тайм-ауту — провал розгортання.
+
+    ФВ-9.8 / D-206 (P2) додали до кроків:
+      1. редакція й версія SQL Server (SERVERPROPERTY): друкується; нижче
+         2016 SP1 — зупинка; Express — зупинка без -AllowExpress;
+      3. WORKER_ENABLED=1|0 у msiexec (служба EcrWorker): з I2-2 ТИПОВО 1,
+         крім SQL Server Express і -DisableWorker (Resolve-WorkerDeployment);
+      4. рядок підключення — ще й у Services\EcrWorker\Environment;
+      5. Database:EditionMode — визначене значення в Environment служб, якщо
+         оператор не задав його явно (-EditionMode, файл майданчика, Environment);
+         режим перерахунку Api (Jobs:Queue:Mode, Jobs:Recalculation:Executor) —
+         у Environment EcrApi за ФАКТОМ служби: Database + Worker лише разом із
+         EcrWorker, без неї — InProcess (Resolve-JobExecutionConfig);
+      6. перезапуск EcrWorker і перевірка, що він не впав одразу.
 
     Крок схеми виконується під `-SqlLogin`/інтегрованими обліковими даними
     ВИКОНАВЦЯ скрипта (DBA), НІКОЛИ під `-ServiceAccount`: сервісний
@@ -142,12 +160,33 @@
     працює лише для вже відомого домен-користувача з роллю в системі, а
     такого на порожній базі ще немає.
 
+.PARAMETER DataProtectionThumbprint
+    ⛔ S11 (аудит безпеки, 2026-09-29): ОБОВ'ЯЗКОВИЙ. Відбиток сертифіката з
+    закритим ключем у `Cert:\LocalMachine\My`, яким застосунок шифрує ключі
+    кільця DataProtection у `sec.DataProtectionKey`. Служба працює в
+    середовищі Production, а там без сертифіката застосунок НЕ СТАРТУЄ: ключі
+    у відкритому вигляді дали б кожному, хто читає базу чи її бекап, підробити
+    cookie сеансу будь-якого користувача. Перевіряється на кроці 1 — ДО
+    встановлення служби: сертифікат є в `Cert:\LocalMachine\My` і має закритий
+    ключ (`HasPrivateKey`). Пишеться в реєстр служби змінною
+    `ECR_Auth__DataProtection__CertificateThumbprint` тим самим каналом, що й
+    рядок підключення (крок 4).
+
+    ⚠ Вузлів за балансувальником кілька (D-32) — сертифікат ОДИН і той самий
+    на всіх (експорт/імпорт PFX), інакше вузли не розшифрують ключі один
+    одного. Обліковому запису служби (`-ServiceAccount`) потрібне право
+    читання закритого ключа (certlm.msc → Усі завдання → Керування закритими
+    ключами) — цього скрипт не надає. Згоди на незахищене кільце для
+    одноразових стендів цей скрипт не ставить ніколи (сторож в
+    Ecr.Architecture.Tests).
+
 .PARAMETER AppPort
     Порт Kestrel і правило брандмауера. За замовчуванням 5000.
 
 .PARAMETER ConfigValues
     Шлях до JSON-файлу з НЕсекретними значеннями appsettings.Production.json
-    цього майданчика (наприклад, Telemetry:OtlpEndpoint) — НІКОЛИ рядок
+    цього майданчика (наприклад, Logging:File:Directory; ⚠ не
+    Telemetry:OtlpEndpoint — експорту OTLP у цій версії немає) — НІКОЛИ рядок
     підключення чи інший секрет, для нього -ConnectionString (D-11).
     Записується ЛИШЕ якщо цільовий файл ще заповнювач (порожній об'єкт) —
     інакше крок 5 попереджає і нічого не чіпає.
@@ -171,10 +210,47 @@
     "перше це чи ні" належить тому, хто розгортає, а не евристиці, яка
     вгадує за відсутністю таблиць.
 
+.PARAMETER ReadyTimeoutSeconds
+    Скільки секунд кроку 7 чекати, поки /health/ready стане Healthy або
+    Degraded (після того, як /health/live уже відповів). За замовчуванням 180.
+
+.PARAMETER EnableWorker
+    Службу EcrWorker — наглядач пулу воркерів перерахунку (ФВ-9.8, D-206;
+    `installer/Ecr.Installer/Worker.wxs`) — з I2-2 скрипт ставить і так,
+    ТИПОВО. Прапорець лишився для сумісності (майстер `Ecr-Setup` передає його,
+    якщо служба вже є) і має значення лише на SQL Server Express: там без нього
+    воркера не буде. Секрети — той самий рядок підключення, у
+    `HKLM:\SYSTEM\CurrentControlSet\Services\EcrWorker\Environment`; обліковий
+    запис — той самий -ServiceAccount. Разом із службою в Environment EcrApi
+    пишеться Jobs:Queue:Mode = Database і Jobs:Recalculation:Executor = Worker.
+
+.PARAMETER DisableWorker
+    Не ставити службу EcrWorker: у msiexec іде WORKER_ENABLED=0 (наявну службу
+    MSI прибере — крок 3 попереджає), а EcrApi отримує
+    Jobs:Recalculation:Executor = InProcess — перерахунок у процесі Api, як до
+    I2-2. Стан командного рядка = бажаний стан: MSI властивість не пам'ятає,
+    тож для вимкненого воркера прапорець потрібен на КОЖНОМУ оновленні.
+
+.PARAMETER EditionMode
+    Явний `Database:EditionMode` (Auto | Standard | Enterprise) — пишеться в
+    Environment служб як ECR_Database__EditionMode і перекриває все.
+    Без параметра скрипт визначає редакцію SQL Server сам (крок 1) і пише
+    визначене значення, ЛИШЕ якщо оператор не задав його раніше: ні в
+    `%ProgramData%\ECR\config\appsettings.Production.json` (Database:EditionMode),
+    ні в Environment служби EcrApi. Змінна оточення перекриває файл, тому
+    запис поверх явного значення у файлі тихо його скасував би — цього скрипт
+    не робить ніколи.
+
+.PARAMETER AllowExpress
+    Дозволити SQL Server Express — лише для dev/стенда. Без прапорця Express
+    зупиняє розгортання на кроці 1: SQL Server Agent там немає (регламентні
+    завдання 14-agent-jobs.sql не створюються), межа — 10 ГБ на базу.
+
 .EXAMPLE
     # Побачити повний план, нічого не роблячи в системі
     .\tools\deploy-ecr.ps1 -SqlInstance NCATUATV12 -Database ECR `
-        -ServiceAccount 'DOMAIN\ecr-svc$' -Version 1.0.0 -WhatIf
+        -ServiceAccount 'DOMAIN\ecr-svc$' -Version 1.0.0 `
+        -DataProtectionThumbprint '<відбиток з Cert:\LocalMachine\My>' -WhatIf
 
 .EXAMPLE
     # Перше розгортання на чистому сервері (порожня база — потрібен bootstrap)
@@ -182,6 +258,7 @@
     $bp = Read-Host -AsSecureString -Prompt 'Пароль bootstrap-адміністратора'
     .\tools\deploy-ecr.ps1 -SqlInstance NCATUATV12 -Database ECR `
         -ServiceAccount 'DOMAIN\ecr-svc$' -Version 1.0.0 -ConnectionString $cs `
+        -DataProtectionThumbprint '<відбиток з Cert:\LocalMachine\My>' `
         -BootstrapPassword $bp -ConfigValues .\uat-config.json -FirstDeployment
 
 .NOTES
@@ -208,13 +285,19 @@ param(
     [System.Security.SecureString] $ServicePassword,
     [System.Security.SecureString] $ConnectionString,
     [System.Security.SecureString] $BootstrapPassword,
+    [string] $DataProtectionThumbprint,
     [int] $AppPort = 5000,
     [string] $ConfigValues,
     [string] $MsiPath,
     [ValidatePattern('^\d+\.\d+\.\d+$')] [string] $Version,
     [switch] $SkipSchema,
     [switch] $FirstDeployment,
-    [switch] $CreateDatabaseIfMissing
+    [switch] $CreateDatabaseIfMissing,
+    [ValidateRange(10, 3600)] [int] $ReadyTimeoutSeconds = 180,
+    [switch] $EnableWorker,
+    [switch] $DisableWorker,
+    [ValidateSet('Auto', 'Standard', 'Enterprise')] [string] $EditionMode,
+    [switch] $AllowExpress
 )
 
 $ErrorActionPreference = 'Stop'
@@ -378,6 +461,294 @@ function Test-ConfigIsPlaceholder {
     }
 }
 
+# ⚠ Чиста функція (D-134): рішення про редакцію SQL Server без мережі —
+# перевіряється на готових значеннях SERVERPROPERTY, а не лише на живому
+# інстансі (Standard/Express/2014 на машині розробника немає).
+# Вхід — EngineEdition, ProductVersion, Edition (рядок). Вихід:
+#   Name  — людська назва (Standard / Enterprise / Developer / Evaluation / Express),
+#   Mode  — значення Database:EditionMode для запису, або $null (не записувати),
+#   Stop  — причина зупинки розгортання, або $null,
+#   Note  — пояснення вибору для друку.
+#
+# ⛔ Developer і Evaluation мають EngineEdition = 3, як Enterprise (04-environment.md
+# §6), але відрізняються рядком Edition. Для них — Standard: це стенди, а
+# ліцензія продуктиву, під яку їх наближають, невідома; Standard — базова
+# редакція, бюджет має витримуватися на ній (D-103). Enterprise пишеться лише
+# за справжнього «Enterprise Edition».
+function Resolve-SqlEdition {
+    param(
+        [Parameter(Mandatory)] [int] $EngineEdition,
+        [Parameter(Mandatory)] [string] $ProductVersion,
+        [string] $Edition = '',
+        [switch] $AllowExpress
+    )
+
+    $parts = $ProductVersion.Split('.')
+    $major = 0
+    $build = 0
+    [void] [int]::TryParse($parts[0], [ref] $major)
+    if ($parts.Count -gt 2) { [void] [int]::TryParse($parts[2], [ref] $build) }
+
+    $name = switch ($EngineEdition) {
+        2 { 'Standard' }
+        3 {
+            if ($Edition -match 'Developer') { 'Developer' }
+            elseif ($Edition -match 'Evaluation') { 'Evaluation' }
+            else { 'Enterprise' }
+        }
+        4 { 'Express' }
+        default { "EngineEdition $EngineEdition" }
+    }
+
+    $result = [pscustomobject]@{ Name = $name; Major = $major; Mode = $null; Stop = $null; Note = '' }
+
+    # ⛔ Підлога — 2016 SP1 (13.0.4001): до SP1 партиціонування, columnstore і
+    # компресія лише в Enterprise, OPENJSON і CREATE OR ALTER — з 2016 SP1.
+    if ($major -lt 13 -or ($major -eq 13 -and $build -lt 4001)) {
+        $result.Stop = "SQL Server $ProductVersion ($name) нижче мінімальної версії 2016 SP1 (13.0.4001): " +
+            "модель архівації (партиціонування, columnstore, компресія) і OPENJSON там недоступні."
+        return $result
+    }
+
+    switch ($name) {
+        'Standard'   { $result.Mode = 'Standard' }
+        'Enterprise' { $result.Mode = 'Enterprise' }
+        'Developer'  { $result.Mode = 'Standard'; $result.Note = 'Developer = Enterprise за можливостями, але це стенд: режим Standard (D-103).' }
+        'Evaluation' { $result.Mode = 'Standard'; $result.Note = 'Evaluation = Enterprise на 180 днів: режим Standard, щоб не залежати від тимчасової ліцензії.' }
+        'Express' {
+            if ($AllowExpress) {
+                $result.Mode = 'Standard'
+                $result.Note = 'Express дозволено -AllowExpress (dev): завдань SQL Agent не буде, межа 10 ГБ на базу.'
+            }
+            else {
+                $result.Stop = "SQL Server Express непридатний для розгортання: немає SQL Server Agent " +
+                    "(регламентні завдання 14-agent-jobs.sql не створюються), межа 10 ГБ на базу. " +
+                    "Для dev-стенда — явний дозвіл -AllowExpress."
+            }
+        }
+        default {
+            $result.Note = "Невідома редакція ($name) — Database:EditionMode не записується, застосунок визначить сам (Auto)."
+        }
+    }
+
+    return $result
+}
+
+# ⚠ Чиста функція (D-134): чи писати ECR_Database__EditionMode і яке значення.
+# Порядок пріоритету — явне завжди сильніше за визначене:
+#   1. -EditionMode              → писати його;
+#   2. значення у файлі майданчика → НЕ писати (змінна оточення перекрила б
+#      файл, ProgramDataConfiguration.cs);
+#   3. значення вже в Environment → НЕ писати (оператор чи попереднє розгортання);
+#   4. визначена редакція         → писати її;
+#   5. інакше                     → не писати (застосунок — Auto).
+function Resolve-EditionModeWrite {
+    param(
+        [string] $Explicit,
+        [string] $Detected,
+        [string] $FileValue,
+        [string] $EnvironmentValue
+    )
+
+    if ($Explicit) { return [pscustomobject]@{ Write = $true; Value = $Explicit; Reason = "явно, -EditionMode $Explicit" } }
+    if ($FileValue) { return [pscustomobject]@{ Write = $false; Value = $FileValue; Reason = "задано у appsettings.Production.json ($FileValue) — не перезаписую" } }
+    if ($EnvironmentValue) { return [pscustomobject]@{ Write = $false; Value = $EnvironmentValue; Reason = "уже в Environment служби ($EnvironmentValue) — не перезаписую" } }
+    if ($Detected) { return [pscustomobject]@{ Write = $true; Value = $Detected; Reason = "визначено за редакцією SQL Server" } }
+    return [pscustomobject]@{ Write = $false; Value = $null; Reason = 'редакцію не визначено — застосунок визначить сам (Auto)' }
+}
+
+# Database:EditionMode з файлу майданчика або $null. Файл, що не парситься, —
+# теж $null: крок 5 уже попередив про нього, вгадувати не беремося.
+function Get-ConfiguredEditionMode {
+    param([string] $Path)
+
+    if (-not (Test-Path $Path)) { return $null }
+    try { $json = Get-Content $Path -Raw | ConvertFrom-Json -ErrorAction Stop }
+    catch { return $null }
+    if (-not $json -or -not $json.PSObject.Properties['Database']) { return $null }
+    $database = $json.Database
+    if (-not $database -or -not $database.PSObject.Properties['EditionMode']) { return $null }
+    $value = [string] $database.EditionMode
+    if ([string]::IsNullOrWhiteSpace($value)) { return $null }
+    return $value
+}
+
+# Значення змінної з Environment служби або $null (служби ще немає — теж $null).
+function Get-ServiceEnvironmentValue {
+    param(
+        [Parameter(Mandatory)] [string] $ServiceName,
+        [Parameter(Mandatory)] [string] $Name
+    )
+
+    $keyPath = "HKLM:\SYSTEM\CurrentControlSet\Services\$ServiceName"
+    $prop = Get-ItemProperty -Path $keyPath -Name Environment -ErrorAction SilentlyContinue
+    if (-not $prop) { return $null }
+    $entry = @($prop.Environment) | Where-Object { $_ -like "$Name=*" } | Select-Object -First 1
+    if (-not $entry) { return $null }
+    return $entry.Substring($Name.Length + 1)
+}
+
+# ⚠ Чиста функція (як Merge-ServiceEnvironmentEntry): прибрати запис $Name,
+# чужі — незаймані. Та сама кома в `return ,(...)` і з тієї ж причини.
+function Remove-ServiceEnvironmentEntry {
+    param(
+        [string[]] $Existing,
+        [Parameter(Mandatory)] [string] $Name
+    )
+
+    return ,([string[]] @($Existing | Where-Object { $_ -notlike "$Name=*" }))
+}
+
+function Remove-ServiceEnvironmentVariable {
+    param(
+        [Parameter(Mandatory)] [string] $ServiceName,
+        [Parameter(Mandatory)] [string] $Name
+    )
+
+    $keyPath = "HKLM:\SYSTEM\CurrentControlSet\Services\$ServiceName"
+    $prop = Get-ItemProperty -Path $keyPath -Name Environment -ErrorAction SilentlyContinue
+    if (-not $prop) { return }
+    $updated = Remove-ServiceEnvironmentEntry -Existing @($prop.Environment) -Name $Name
+    if ($updated.Count -eq 0) { Remove-ItemProperty -Path $keyPath -Name Environment }
+    else { Set-ItemProperty -Path $keyPath -Name Environment -Value $updated -Type MultiString }
+}
+
+# Значення вкладеного ключа з файлу майданчика (наприклад, Jobs → Queue → Mode)
+# або $null: немає файлу, не парситься, немає ключа, порожнє значення.
+function Get-ConfiguredValue {
+    param(
+        [string] $Path,
+        [Parameter(Mandatory)] [string[]] $Keys
+    )
+
+    if (-not $Path -or -not (Test-Path $Path)) { return $null }
+    try { $node = Get-Content $Path -Raw | ConvertFrom-Json -ErrorAction Stop }
+    catch { return $null }
+    foreach ($key in $Keys) {
+        if ($null -eq $node -or -not $node.PSObject.Properties[$key]) { return $null }
+        $node = $node.$key
+    }
+    $value = [string] $node
+    if ([string]::IsNullOrWhiteSpace($value)) { return $null }
+    return $value
+}
+
+# ⛔ I2-2 (чиста функція): ставити службу EcrWorker чи ні. Типово — так
+# (замір I2-2: ізоляція лейну default, межа пам'яті процесу, Api 162 МБ проти
+# 367). Винятки:
+#   -DisableWorker          → ні;
+#   -EnableWorker           → так, навіть на Express (явний вибір для стенда);
+#   SQL Server Express      → ні: dev-стенд (-AllowExpress), перерахунок у
+#                             процесі Api, як до I2-2;
+#   редакція невідома (-WhatIf, SERVERPROPERTY не виконувався) → так, з приміткою.
+function Resolve-WorkerDeployment {
+    param(
+        [switch] $EnableWorker,
+        [switch] $DisableWorker,
+        [string] $EditionName
+    )
+
+    if ($EnableWorker -and $DisableWorker) {
+        throw '-EnableWorker і -DisableWorker разом — оберіть одне.'
+    }
+    if ($DisableWorker) {
+        return [pscustomobject]@{ Enabled = $false; Reason = 'вимкнено явно (-DisableWorker)' }
+    }
+    if ($EnableWorker) {
+        return [pscustomobject]@{ Enabled = $true; Reason = 'явно (-EnableWorker)' }
+    }
+    if ($EditionName -eq 'Express') {
+        return [pscustomobject]@{ Enabled = $false
+            Reason = 'SQL Server Express — dev-стенд: перерахунок у процесі Api (увімкнути — -EnableWorker)' }
+    }
+    if (-not $EditionName) {
+        return [pscustomobject]@{ Enabled = $true
+            Reason = 'типово; редакцію SQL Server не визначено (-WhatIf) — на Express воркера не буде' }
+    }
+    return [pscustomobject]@{ Enabled = $true; Reason = 'типово (I2-2)' }
+}
+
+# ⛔ I2-2 (чиста функція): режим перерахунку Api визначається ФАКТОМ виконавця,
+# а не лише конфігом. Api з Executor = Worker лейн перерахунку НЕ бере
+# (JobLaneMap.ApiLanes), тож Worker без служби = перерахунок без виконавця.
+# Тому значення пишуться в Environment EcrApi (перекриває файл майданчика й
+# appsettings.json) щоразу:
+#   служба є  → Mode = Database, Executor = Worker (Worker без Database нічого
+#               не дає: у режимі Quartz перерахунок однаково йде в Api);
+#   служби нема → Executor = InProcess завжди; Mode = Quartz (варіант B заміру
+#               I2-2), АЛЕ якщо файл майданчика задає Mode сам — запис Mode з
+#               Environment прибирається, щоб рішення файлу діяло.
+# Значення у файлі, що суперечать факту служби, не мовчки перекриваються — попередження.
+function Resolve-JobExecutionConfig {
+    param(
+        [Parameter(Mandatory)] [bool] $WorkerEnabled,
+        [string] $FileMode,
+        [string] $FileExecutor
+    )
+
+    $modeName = 'ECR_Jobs__Queue__Mode'
+    $executorName = 'ECR_Jobs__Recalculation__Executor'
+    $set = [ordered]@{}
+    $remove = @()
+    $warnings = @()
+
+    if ($WorkerEnabled) {
+        $set[$modeName] = 'Database'
+        $set[$executorName] = 'Worker'
+        if ($FileMode -and $FileMode -ne 'Database') {
+            $warnings += "appsettings.Production.json задає Jobs:Queue:Mode = $FileMode, але служба EcrWorker є: Environment EcrApi перекриває його на Database (вимкнути воркер — -DisableWorker)."
+        }
+        if ($FileExecutor -and $FileExecutor -ne 'Worker') {
+            $warnings += "appsettings.Production.json задає Jobs:Recalculation:Executor = $FileExecutor, але служба EcrWorker є: Environment EcrApi перекриває його на Worker (вимкнути воркер — -DisableWorker)."
+        }
+    }
+    else {
+        $set[$executorName] = 'InProcess'
+        if ($FileExecutor -and $FileExecutor -ne 'InProcess') {
+            $warnings += "appsettings.Production.json задає Jobs:Recalculation:Executor = $FileExecutor, а служби EcrWorker немає: перерахунок лишився б без виконавця — Environment EcrApi перекриває його на InProcess."
+        }
+        if ($FileMode) { $remove += $modeName }
+        else { $set[$modeName] = 'Quartz' }
+    }
+
+    return [pscustomobject]@{ Set = $set; Remove = [string[]] $remove; Warnings = [string[]] $warnings }
+}
+
+# ⛔ S11: відбиток у тому вигляді, в якому його шукає застосунок
+# (`AuthenticationSetup.FindCertificate`): без пробілів і нерозривних пробілів —
+# з вікна сертифіката Windows його копіюють групами по два символи.
+function ConvertTo-NormalizedThumbprint {
+    param([string] $Thumbprint)
+    if (-not $Thumbprint) { return '' }
+    return (-join ($Thumbprint.ToCharArray() | Where-Object { [char]::IsLetterOrDigit($_) })).ToUpperInvariant()
+}
+
+# ⚠ Чиста функція (як Get-ReadinessVerdict): рішення кроку 1 про сертифікат
+# Data Protection перевіряється на готовому об'єкті, без сховища сертифікатів.
+# Вхід — нормалізований відбиток і знайдений сертифікат ($null — не знайдено).
+# Вихід — текст причини відмови або $null, якщо все гаразд.
+function Get-DataProtectionCertificateProblem {
+    param(
+        [string] $Thumbprint,
+        $Certificate
+    )
+
+    if (-not $Thumbprint) {
+        return ("-DataProtectionThumbprint не задано. Служба працює в Production, а там без сертифіката " +
+            "застосунок не стартує (S11): ключі DataProtection у sec.DataProtectionKey у відкритому вигляді " +
+            "дали б кожному, хто читає базу чи бекап, підробити сеанс будь-якого користувача. Постав сертифікат " +
+            "із закритим ключем у Cert:\LocalMachine\My (ОДИН на всі вузли) і передай його відбиток.")
+    }
+    if (-not $Certificate) {
+        return "Сертифіката з відбитком $Thumbprint немає в Cert:\LocalMachine\My. Імпортуй PFX (із закритим ключем) у сховище машини."
+    }
+    if (-not $Certificate.HasPrivateKey) {
+        return ("Сертифікат $Thumbprint у Cert:\LocalMachine\My без закритого ключа (HasPrivateKey = False): " +
+            "ним можна зашифрувати ключі кільця, але не розшифрувати — жоден сеанс не відкриється. Імпортуй PFX із закритим ключем.")
+    }
+    return $null
+}
+
 # ⚠ ПЕРЕДУМОВИ — до будь-якої зміни системи (дешевша відмова тут, ніж на
 # кроці 3 з наполовину встановленою службою).
 Write-Step "Крок 1/7: передумови"
@@ -406,13 +777,114 @@ if ($ServicePassword) {
 if ($ConfigValues -and -not (Test-Path $ConfigValues)) {
     throw "ConfigValues вказує на неіснуючий файл: $ConfigValues"
 }
+if ($EnableWorker -and $DisableWorker) {
+    throw '-EnableWorker і -DisableWorker разом — оберіть одне.'
+}
 if (-not $ConnectionString) {
     Write-Warning ("-ConnectionString не задано — застосунок впаде з InvalidOperationException " +
         "(D-11) при першій спробі стартувати, поки ECR_ConnectionStrings__Ecr не буде додано " +
         "вручну в HKLM:\SYSTEM\CurrentControlSet\Services\EcrApi\Environment.")
 }
 
+# ⛔ S11: сертифікат Data Protection — ДО схеми й MSI. Служба без нього в
+# Production не стартує, і дізнатися про це на кроці 6 означало б уже
+# встановлену, але мертву службу. Лише читання сховища — тому й під -WhatIf.
+$DataProtectionThumbprint = ConvertTo-NormalizedThumbprint $DataProtectionThumbprint
+$dataProtectionCertificate = $null
+if ($DataProtectionThumbprint) {
+    $certPath = "Cert:\LocalMachine\My\$DataProtectionThumbprint"
+    if (Test-Path $certPath) { $dataProtectionCertificate = Get-Item $certPath }
+}
+$certificateProblem = Get-DataProtectionCertificateProblem -Thumbprint $DataProtectionThumbprint `
+    -Certificate $dataProtectionCertificate
+if ($certificateProblem) { throw $certificateProblem }
+Write-Host ("Сертифікат Data Protection: $DataProtectionThumbprint ($($dataProtectionCertificate.Subject)), " +
+    "закритий ключ є. Обліковому запису служби потрібне право читання закритого ключа.") -ForegroundColor Green
+
 $sqlAuth = if ($SqlLogin) { @('-U', $SqlLogin) } else { @('-E') }
+
+# ⚠ Чиста функція (як Merge-ServiceEnvironmentEntry): без мережі, щоб рішення
+# кроку 7 перевірялося на готових відповідях (D-134), а не лише на живому стенді.
+# Вхід — код відповіді /health/ready і тіло (HealthReportDto: status, checks[]).
+# Вихід — Outcome: 'Ready' (Healthy/Degraded), 'Warning' (Unhealthy ЛИШЕ через
+# `sources`), 'Wait' (ще не готово — або відповіді немає, або Unhealthy інша);
+# Status — загальний статус; Details — рядки про перевірки, що не Healthy.
+#
+# ⚠ `sources` — не провал розгортання: це зовнішній PI/SQL, недоступний з
+# причин поза цим сервером, і ручне введення без нього працює (аудит, п. 7).
+function Get-ReadinessVerdict {
+    param(
+        [int] $StatusCode,
+        [string] $Body
+    )
+
+    $details = @()
+    if ($StatusCode -eq 0 -or [string]::IsNullOrWhiteSpace($Body)) {
+        return [pscustomobject]@{ Outcome = 'Wait'; Status = 'немає відповіді'; Details = $details }
+    }
+
+    try { $report = $Body | ConvertFrom-Json -ErrorAction Stop }
+    catch { return [pscustomobject]@{ Outcome = 'Wait'; Status = "HTTP $StatusCode, тіло не JSON"; Details = $details } }
+
+    # ⚠ Set-StrictMode Latest: звернення до відсутньої властивості — виняток.
+    $status = if ($report.PSObject.Properties['status']) { [string] $report.status } else { '' }
+    $checks = @()
+    if ($report.PSObject.Properties['checks'] -and $report.checks) { $checks = @($report.checks) }
+
+    foreach ($check in $checks) {
+        if ([string] $check.status -ne 'Healthy') {
+            $details += "$($check.name): $($check.status) — $($check.description)"
+        }
+    }
+
+    $outcome = switch ($status) {
+        'Healthy'  { 'Ready' }
+        'Degraded' { 'Ready' }
+        'Unhealthy' {
+            $failing = @($checks | Where-Object { [string] $_.status -eq 'Unhealthy' } | ForEach-Object { [string] $_.name })
+            if ($failing.Count -gt 0 -and @($failing | Where-Object { $_ -ne 'sources' }).Count -eq 0) { 'Warning' } else { 'Wait' }
+        }
+        default { 'Wait' }
+    }
+
+    return [pscustomobject]@{ Outcome = $outcome; Status = $status; Details = $details }
+}
+
+# Мережева половина кроку 7: код і тіло /health/ready, зокрема при 503 —
+# Invoke-WebRequest на 503 кидає виняток, а звіт перевірок лежить саме в тілі.
+function Invoke-ReadyProbe {
+    param([Parameter(Mandatory)] [string] $Url)
+
+    try {
+        $resp = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec 10
+        return [pscustomobject]@{ StatusCode = [int] $resp.StatusCode; Body = [string] $resp.Content }
+    }
+    catch {
+        $code = 0
+        $body = $null
+        $webResponse = $null
+        if ($_.Exception.PSObject.Properties['Response']) { $webResponse = $_.Exception.Response }
+        if ($webResponse) {
+            $code = [int] $webResponse.StatusCode
+            # ⚠ Windows PowerShell 5.1: ErrorDetails.Message на 503 порожній
+            # (перевірено живим HttpListener), тіло є лише в потоці відповіді —
+            # і читати його треба явно як UTF-8, бо описи перевірок кириличні.
+            if ($webResponse -is [System.Net.HttpWebResponse]) {
+                try {
+                    $stream = $webResponse.GetResponseStream()
+                    if ($stream.CanSeek) { $stream.Position = 0 }
+                    $reader = New-Object System.IO.StreamReader($stream, [System.Text.Encoding]::UTF8)
+                    try { $body = $reader.ReadToEnd() } finally { $reader.Dispose() }
+                }
+                catch { $body = $null }
+            }
+            if ([string]::IsNullOrWhiteSpace($body) -and $_.ErrorDetails -and $_.ErrorDetails.Message) {
+                $body = $_.ErrorDetails.Message                     # PowerShell 7
+            }
+        }
+        return [pscustomobject]@{ StatusCode = $code; Body = $body }
+    }
+}
 
 function Invoke-DeploySql {
     param(
@@ -440,6 +912,34 @@ function Invoke-DeploySql {
     }
 }
 
+# Запит із результатом (рядки виводу sqlcmd без заголовків, стовпці через '|').
+# Під ShouldProcess, як і Invoke-DeploySql: -WhatIf — жодного sqlcmd. $null,
+# якщо не виконувався.
+function Invoke-DeployQuery {
+    param(
+        [Parameter(Mandatory)] [string] $TargetDb,
+        [Parameter(Mandatory)] [string] $Query
+    )
+
+    $arguments = @('-S', $SqlInstance) + $sqlAuth + @('-C', '-b', '-I', '-h', '-1', '-W', '-s', '|', '-d', $TargetDb, '-Q', $Query)
+    if (-not $PSCmdlet.ShouldProcess("$SqlInstance / $TargetDb", "sqlcmd -Q $Query")) { return $null }
+
+    $previousEap = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $output = & sqlcmd @arguments
+    }
+    finally {
+        $ErrorActionPreference = $previousEap
+    }
+    if ($LASTEXITCODE -ne 0) {
+        throw "sqlcmd повернув $LASTEXITCODE на запиті: $Query`n$($output -join "`n")"
+    }
+    return , @($output | Where-Object { $_ -and $_.Trim() })
+}
+
+$detectedEdition = $null
+
 try {
     # ⛔ Q-232: пароль виставляється ПЕРЕД першим-ліпшим викликом sqlcmd,
     # не після. Перевірка з'єднання нижче так само потребує автентифікації,
@@ -450,6 +950,29 @@ try {
     # Перевірка з'єднання — читає, нічого не змінює, але й вона під ShouldProcess:
     # контракт -WhatIf каже прямо «жодного sqlcmd», без винятків для читання.
     Invoke-DeploySql -TargetDb 'master' -Query 'SELECT 1;'
+
+    # ── Редакція і версія SQL Server (D-206: система підлаштовується під
+    # Standard або Enterprise, визначається під час інсталяції). До будь-якої
+    # зміни: непридатний сервер зупиняє розгортання тут, а не на 01-filegroups.
+    $editionRows = Invoke-DeployQuery -TargetDb 'master' -Query (
+        "SET NOCOUNT ON; SELECT CAST(SERVERPROPERTY('EngineEdition') AS int), " +
+        "CAST(SERVERPROPERTY('ProductVersion') AS nvarchar(128)), " +
+        "CAST(SERVERPROPERTY('ProductMajorVersion') AS nvarchar(16)), " +
+        "CAST(SERVERPROPERTY('Edition') AS nvarchar(128));")
+    if ($null -eq $editionRows) {
+        Write-Host "  Редакцію SQL Server буде визначено запитом SERVERPROPERTY (-WhatIf: не виконується)." -ForegroundColor DarkGray
+    }
+    else {
+        $fields = ([string] $editionRows[0]).Split('|')
+        if ($fields.Count -lt 4) { throw "Неочікувана відповідь на запит редакції: $($editionRows -join ' / ')" }
+        $detectedEdition = Resolve-SqlEdition -EngineEdition ([int] $fields[0].Trim()) `
+            -ProductVersion $fields[1].Trim() -Edition $fields[3].Trim() -AllowExpress:$AllowExpress
+
+        Write-Host ("  SQL Server: $($detectedEdition.Name), версія $($fields[1].Trim()) " +
+            "(ProductMajorVersion $($fields[2].Trim()), EngineEdition $($fields[0].Trim()), «$($fields[3].Trim())»).")
+        if ($detectedEdition.Note) { Write-Host "  $($detectedEdition.Note)" -ForegroundColor Yellow }
+        if ($detectedEdition.Stop) { throw $detectedEdition.Stop }
+    }
 
     if ($CreateDatabaseIfMissing) {
         # ⛔ Q-232 (директива людини, 2026-09-11): раніше відсутня база
@@ -525,6 +1048,13 @@ finally {
     if ($env:SQLCMDPASSWORD) { Remove-Item Env:\SQLCMDPASSWORD -ErrorAction SilentlyContinue }
 }
 
+# ── Воркер перерахунку (I2-2): рішення ДО msiexec — від нього залежать і
+# WORKER_ENABLED, і режим Api на кроці 5.
+$workerDecision = Resolve-WorkerDeployment -EnableWorker:$EnableWorker -DisableWorker:$DisableWorker `
+    -EditionName $(if ($detectedEdition) { $detectedEdition.Name } else { $null })
+$workerEnabled = [bool] $workerDecision.Enabled
+Write-Host ("Воркер перерахунку (EcrWorker): $(if ($workerEnabled) { 'так' } else { 'ні' }) — $($workerDecision.Reason).")
+
 # ---------------------------------------------------------------------
 Write-Step "Крок 3/7: MSI"
 
@@ -549,6 +1079,17 @@ if ($ServiceAccount) {
 }
 $msiArgs      += "APP_PORT=$AppPort"
 $msiArgsShown += "APP_PORT=$AppPort"
+
+# ⚠ WORKER_ENABLED передається ЗАВЖДИ, і 0 теж: MSI не пам'ятає властивість між
+# установками (Worker.wxs), тож стан командного рядка = бажаний стан. Вимкнений
+# воркер при наявній службі — MSI її прибирає; кажемо вголос.
+$workerFlag = if ($workerEnabled) { '1' } else { '0' }
+$msiArgs      += "WORKER_ENABLED=$workerFlag"
+$msiArgsShown += "WORKER_ENABLED=$workerFlag"
+if (-not $workerEnabled -and (Get-Service -Name EcrWorker -ErrorAction SilentlyContinue)) {
+    Write-Warning ("Служба EcrWorker зараз встановлена, а воркер вимкнено ($($workerDecision.Reason)): MSI її ПРИБЕРЕ, " +
+        "а EcrApi перейде на Jobs:Recalculation:Executor = InProcess (крок 5).")
+}
 if ($ServicePassword) {
     $msiArgs      += "SERVICE_PASSWORD=$(ConvertFrom-SecureStringPlain $ServicePassword)"
     $msiArgsShown += 'SERVICE_PASSWORD=***'   # ніколи не в плані/логу, лише в реальному виклику
@@ -557,6 +1098,13 @@ if ($ServicePassword) {
 if ($PSCmdlet.ShouldProcess($MsiPath, "msiexec $($msiArgsShown -join ' ')")) {
     $proc = Start-Process msiexec -ArgumentList $msiArgs -Wait -PassThru
     if ($proc.ExitCode -notin 0, 3010) { throw "msiexec повернув $($proc.ExitCode) — див. ecr-install.log" }
+
+    # ⛔ I2-2: режим Api (крок 5) пишеться за ФАКТОМ служби, а не за наміром.
+    # Служби немає після WORKER_ENABLED=1 — зупинка тут, до запису Executor = Worker.
+    if ($workerEnabled -and -not (Get-Service -Name EcrWorker -ErrorAction SilentlyContinue)) {
+        throw ("Служби EcrWorker немає після msiexec з WORKER_ENABLED=1 — див. ecr-install.log. " +
+            "Режим перерахунку EcrApi не змінено. Без воркера — повтори з -DisableWorker.")
+    }
 }
 
 # ---------------------------------------------------------------------
@@ -566,11 +1114,22 @@ if (-not $ConnectionString) {
     Write-Host ("ECR_ConnectionStrings__Ecr не записано (-ConnectionString не задано) — " +
         "служба впаде при старті, поки значення не буде додано вручну.") -ForegroundColor Yellow
 }
-elseif ($PSCmdlet.ShouldProcess('HKLM:\SYSTEM\CurrentControlSet\Services\EcrApi\Environment',
-        'записати ECR_ConnectionStrings__Ecr')) {
-    Set-ServiceEnvironmentVariable -ServiceName 'EcrApi' -Name 'ECR_ConnectionStrings__Ecr' `
-        -Value (ConvertFrom-SecureStringPlain $ConnectionString)
-    Write-Host "Рядок підключення записано." -ForegroundColor Green
+else {
+    if ($PSCmdlet.ShouldProcess('HKLM:\SYSTEM\CurrentControlSet\Services\EcrApi\Environment',
+            'записати ECR_ConnectionStrings__Ecr')) {
+        Set-ServiceEnvironmentVariable -ServiceName 'EcrApi' -Name 'ECR_ConnectionStrings__Ecr' `
+            -Value (ConvertFrom-SecureStringPlain $ConnectionString)
+        Write-Host "Рядок підключення записано." -ForegroundColor Green
+    }
+
+    # Воркер ходить у ту саму базу тим самим рядком (Worker.wxs: той самий
+    # обліковий запис) — той самий канал, окремий ключ служби.
+    if ($workerEnabled -and $PSCmdlet.ShouldProcess('HKLM:\SYSTEM\CurrentControlSet\Services\EcrWorker\Environment',
+            'записати ECR_ConnectionStrings__Ecr')) {
+        Set-ServiceEnvironmentVariable -ServiceName 'EcrWorker' -Name 'ECR_ConnectionStrings__Ecr' `
+            -Value (ConvertFrom-SecureStringPlain $ConnectionString)
+        Write-Host "Рядок підключення записано й для EcrWorker." -ForegroundColor Green
+    }
 }
 
 # ⛔ Q-221: без цього Kestrel слухає лише вбудований дефолт ASP.NET Core —
@@ -586,6 +1145,16 @@ if ($PSCmdlet.ShouldProcess('HKLM:\SYSTEM\CurrentControlSet\Services\EcrApi\Envi
     Set-ServiceEnvironmentVariable -ServiceName 'EcrApi' -Name 'ASPNETCORE_URLS' `
         -Value "http://+:$AppPort"
     Write-Host "ASPNETCORE_URLS записано (http://+:$AppPort) — служба слухає всі інтерфейси, не лише localhost." -ForegroundColor Green
+}
+
+# ⛔ S11: відбиток сертифіката Data Protection — тим самим каналом (реєстр
+# служби), що й ASPNETCORE_URLS. Не секрет (відбиток — це хеш публічного
+# сертифіката), але без нього служба в Production не стартує.
+if ($PSCmdlet.ShouldProcess('HKLM:\SYSTEM\CurrentControlSet\Services\EcrApi\Environment',
+        'записати ECR_Auth__DataProtection__CertificateThumbprint')) {
+    Set-ServiceEnvironmentVariable -ServiceName 'EcrApi' -Name 'ECR_Auth__DataProtection__CertificateThumbprint' `
+        -Value $DataProtectionThumbprint
+    Write-Host "ECR_Auth__DataProtection__CertificateThumbprint записано ($DataProtectionThumbprint)." -ForegroundColor Green
 }
 
 if ($BootstrapPassword) {
@@ -626,11 +1195,60 @@ else {
     }
 }
 
+# ── Режим редакції (Database:EditionMode). ПІСЛЯ запису файлу вище: значення
+# з -ConfigValues теж явне, і його має бути видно рішенню нижче.
+# ⚠ -WhatIf: файл не записано — рішення показує стан ДО розгортання.
+$editionDecision = Resolve-EditionModeWrite -Explicit $EditionMode `
+    -Detected $(if ($detectedEdition) { $detectedEdition.Mode } else { $null }) `
+    -FileValue (Get-ConfiguredEditionMode -Path $configPath) `
+    -EnvironmentValue (Get-ServiceEnvironmentValue -ServiceName 'EcrApi' -Name 'ECR_Database__EditionMode')
+
+if (-not $editionDecision.Write) {
+    Write-Host "Database:EditionMode: $($editionDecision.Reason)." -ForegroundColor DarkGray
+}
+else {
+    $editionServices = @('EcrApi') + $(if ($workerEnabled) { @('EcrWorker') } else { @() })
+    foreach ($serviceName in $editionServices) {
+        if ($PSCmdlet.ShouldProcess("HKLM:\SYSTEM\CurrentControlSet\Services\$serviceName\Environment",
+                "записати ECR_Database__EditionMode=$($editionDecision.Value)")) {
+            Set-ServiceEnvironmentVariable -ServiceName $serviceName -Name 'ECR_Database__EditionMode' `
+                -Value $editionDecision.Value
+        }
+    }
+    Write-Host "Database:EditionMode = $($editionDecision.Value) ($($editionDecision.Reason))." -ForegroundColor Green
+}
+
+# ── Режим перерахунку EcrApi (I2-2) — за фактом служби EcrWorker (крок 3 уже
+# перевірив, що вона є, коли $workerEnabled). ПІСЛЯ запису файлу — з тієї ж
+# причини, що й EditionMode: значення з -ConfigValues теж явне.
+$jobDecision = Resolve-JobExecutionConfig -WorkerEnabled $workerEnabled `
+    -FileMode (Get-ConfiguredValue -Path $configPath -Keys 'Jobs', 'Queue', 'Mode') `
+    -FileExecutor (Get-ConfiguredValue -Path $configPath -Keys 'Jobs', 'Recalculation', 'Executor')
+
+foreach ($warning in $jobDecision.Warnings) { Write-Warning $warning }
+foreach ($name in $jobDecision.Set.Keys) {
+    if ($PSCmdlet.ShouldProcess('HKLM:\SYSTEM\CurrentControlSet\Services\EcrApi\Environment',
+            "записати $name=$($jobDecision.Set[$name])")) {
+        Set-ServiceEnvironmentVariable -ServiceName 'EcrApi' -Name $name -Value $jobDecision.Set[$name]
+    }
+}
+foreach ($name in $jobDecision.Remove) {
+    if ($PSCmdlet.ShouldProcess('HKLM:\SYSTEM\CurrentControlSet\Services\EcrApi\Environment', "прибрати $name")) {
+        Remove-ServiceEnvironmentVariable -ServiceName 'EcrApi' -Name $name
+    }
+}
+Write-Host ("Перерахунок: " + $(if ($workerEnabled) { 'служба EcrWorker (Jobs:Queue:Mode = Database, Executor = Worker).' }
+        else { 'у процесі EcrApi (Executor = InProcess).' })) -ForegroundColor Green
+
 # ---------------------------------------------------------------------
 Write-Step "Крок 6/7: старт служби"
 
 if (-not $ServiceAccount) {
     Write-Host "SERVICE_ACCOUNT не задано — служба зареєстрована, але не стартує (навмисно, docs/build/10-installer.md §1.4)." -ForegroundColor Yellow
+    if ($workerEnabled) {
+        Write-Host ("  ⚠ EcrWorker теж не стартує, а EcrApi вже налаштовано на Executor = Worker: запускай ОБИДВІ служби, " +
+            "інакше перерахунок стоятиме в черзі (перевірка worker на /health/ready — Degraded).") -ForegroundColor Yellow
+    }
 }
 else {
     # ⛔ БЕЗУМОВНИЙ перезапуск, не "старт, якщо не Running": MSI (Q-212)
@@ -643,6 +1261,25 @@ else {
     }
     elseif (-not $svc -and $PSCmdlet.ShouldProcess('EcrApi', 'Start-Service')) {
         Start-Service -Name EcrApi
+    }
+
+    # Воркер — з тієї ж причини безумовний перезапуск: MSI міг підняти його
+    # до того, як крок 4 записав рядок підключення.
+    if ($workerEnabled -and $PSCmdlet.ShouldProcess('EcrWorker', 'Restart-Service')) {
+        $worker = Get-Service -Name EcrWorker -ErrorAction SilentlyContinue
+        if (-not $worker) { throw 'Служби EcrWorker немає після msiexec з WORKER_ENABLED=1 — див. ecr-install.log.' }
+        Restart-Service -Name EcrWorker -Force
+
+        # Наглядач не має HTTP — «здоров'я» тут лише те, що процес не впав
+        # одразу: недійсна конфігурація Jobs:Workers:* дає код 3 за секунди.
+        Start-Sleep -Seconds 5
+        $worker.Refresh()
+        if ($worker.Status -ne 'Running') {
+            throw ("EcrWorker не працює (стан $($worker.Status)) через 5 с після старту. " +
+                "Причина — журнал подій Application (Get-WinEvent) або ручний запуск " +
+                "`"Ecr.Worker.exe --supervisor`" з теки застосунку; вимкнути воркер — docs/admin/operations-runbook.md §10.")
+        }
+        Write-Host "EcrWorker працює." -ForegroundColor Green
     }
 }
 
@@ -661,6 +1298,35 @@ if ($PSCmdlet.ShouldProcess($healthUrl, 'GET /health/live')) {
     }
     if (-not $ok) { throw "Служба не відповіла на $healthUrl за відведений час. Перевір Event Log (джерело ECR) і %ProgramData%\ECR\logs." }
     Write-Host "Служба відповідає на $healthUrl." -ForegroundColor Green
+}
+
+# ⛔ U21: `live` доводить лише, що процес відповідає. Стенд без RCSI, без
+# файлових груп чи з мертвим планувальником проходив би далі як «Готово» —
+# саме тому після `live` чекаємо `ready` і друкуємо перевірки, що не Healthy.
+$readyUrl = "http://localhost:$AppPort/health/ready"
+if ($PSCmdlet.ShouldProcess($readyUrl, 'GET /health/ready')) {
+    $deadline = (Get-Date).AddSeconds($ReadyTimeoutSeconds)
+    do {
+        $response = Invoke-ReadyProbe -Url $readyUrl
+        $verdict  = Get-ReadinessVerdict -StatusCode $response.StatusCode -Body $response.Body
+        if ($verdict.Outcome -ne 'Wait') { break }
+        Start-Sleep -Seconds 3
+    } while ((Get-Date) -lt $deadline)
+
+    foreach ($line in $verdict.Details) { Write-Host "  $line" -ForegroundColor Yellow }
+
+    switch ($verdict.Outcome) {
+        'Ready'   { Write-Host "Служба готова (${readyUrl}: $($verdict.Status))." -ForegroundColor Green }
+        'Warning' {
+            Write-Warning ("Служба готова до роботи, але $readyUrl — $($verdict.Status) лише через зовнішні " +
+                "джерела даних (sources): ручне введення працює, збір — ні. Стан джерел — /admin/sources.")
+        }
+        default {
+            throw ("Служба не стала готовою за $ReadyTimeoutSeconds с (${readyUrl}: $($verdict.Status)). " +
+                "Перевірки вище; подробиці БД — /health/db після входу, причини — Event Log (джерело ECR) " +
+                "і %ProgramData%\ECR\logs. Типові збої — docs/admin/operations-runbook.md §5.")
+        }
+    }
 }
 
 Write-Host ""

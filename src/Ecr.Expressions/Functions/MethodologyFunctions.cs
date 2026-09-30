@@ -83,7 +83,7 @@ public static class MethodologyFunctions
         // «інакше».
         if (string.Equals(name, "in", StringComparison.Ordinal))
         {
-            return In(args);
+            return In(args, arithmetic);
         }
 
         // CONVERT сам вирішує, що робити з null і помилкою: для нього «не
@@ -158,7 +158,7 @@ public static class MethodologyFunctions
     /// значення довідника (<c>'No - Нет'</c>), а не текст користувача, і
     /// зведення регістру перевело б рядки з однієї гілки <c>if</c> в іншу.
     /// </remarks>
-    private static ExpressionValue In(IReadOnlyList<ExpressionValue> args)
+    private static ExpressionValue In(IReadOnlyList<ExpressionValue> args, IEvaluationArithmetic arithmetic)
     {
         if (args.Count < 2)
         {
@@ -177,7 +177,7 @@ public static class MethodologyFunctions
 
         for (var i = 1; i < args.Count; i++)
         {
-            if (AreEqual(args[0], args[i]))
+            if (AreEqual(args[0], args[i], arithmetic))
             {
                 return ExpressionValue.Boolean(true);
             }
@@ -242,7 +242,13 @@ public static class MethodologyFunctions
     }
 
     /// <summary>Рівність значень для <c>in</c>.</summary>
-    private static bool AreEqual(ExpressionValue left, ExpressionValue right)
+    /// <remarks>
+    /// ⛔ Числа порівнює арифметика режиму (аудит A5): у <c>Legacy</c> —
+    /// <c>double</c>, як <c>in</c> у NCalc 1.3.8 (<c>CompareUsingMostPreciseType</c>),
+    /// у <c>Strict</c> — <c>decimal</c>. Доти тут було звуження <c>AsNumber()</c>
+    /// в обох режимах — та сама вада, що й в операторі <c>=</c>.
+    /// </remarks>
+    private static bool AreEqual(ExpressionValue left, ExpressionValue right, IEvaluationArithmetic arithmetic)
     {
         if (left.IsNull || right.IsNull)
         {
@@ -250,9 +256,9 @@ public static class MethodologyFunctions
             return left.IsNull && right.IsNull;
         }
 
-        if (left.AsNumber() is { } leftNumber && right.AsNumber() is { } rightNumber)
+        if (arithmetic.CompareNumbers(left, right) is { } order)
         {
-            return leftNumber == rightNumber;
+            return order == 0;
         }
 
         // ⚠ Порівняння рядків ordinal, не за культурою: код речовини

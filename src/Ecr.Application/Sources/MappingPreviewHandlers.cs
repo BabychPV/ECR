@@ -34,11 +34,22 @@ namespace Ecr.Application.Sources;
 /// якого перенос не запише.
 /// </para>
 /// </remarks>
+/// <param name="preview">Сховище сирого матеріалу перегляду.</param>
+/// <param name="access">Рішення доступу.</param>
+/// <param name="currentUser">Поточний користувач.</param>
+/// <param name="clock">Годинник.</param>
+/// <param name="units">
+/// Довідник одиниць для конверсії на межі (HSE301 F3, ФВ-16.10); <c>null</c> —
+/// значення показуються в одиниці джерела, а інтеграл за часом не показується.
+/// ⚠ Необов'язковий, щоб не ламати наявні конструктори; контейнер його
+/// передає (<c>IUnitCatalog</c> зареєстровано в інфраструктурі).
+/// </param>
 public sealed class PreviewMappingHandler(
     IMappingPreviewStore preview,
     IAccessDecisionService access,
     ICurrentUser currentUser,
-    IClock clock)
+    IClock clock,
+    Ports.IUnitCatalog? units = null)
 {
     /// <summary>Право на керування інтеграцією (`02-contracts.md` §9).</summary>
     public const string Permission = "Integration.Manage";
@@ -113,18 +124,27 @@ public sealed class PreviewMappingHandler(
                     ["id"] = sourceEntityId.ToString(CultureInfo.InvariantCulture),
                 });
 
-        return Compose(data, from, to);
+        var snapshot = units is not null && data.Maps.Any(NeedsCatalog)
+            ? await units.GetAsync(ct).ConfigureAwait(false)
+            : null;
+
+        return Compose(data, from, to, snapshot);
     }
 
     /// <summary>Складає відповідь із сирого матеріалу.</summary>
     /// <param name="data">Сутність, мапінги, реальні точки і колонки цілей.</param>
     /// <param name="fromUtc">Початок вікна.</param>
     /// <param name="toUtc">Кінець вікна.</param>
+    /// <param name="unitCatalog">
+    /// Знімок довідника для конверсії на межі; <c>null</c> — без конверсії
+    /// (значення в одиниці джерела, інтеграл за часом — <c>null</c>).
+    /// </param>
     /// <remarks>
     /// Метод відкритий навмисно: уся логіка розривів перевіряється тут,
     /// без бази і без HTTP.
     /// </remarks>
-    public static MappingPreview Compose(MappingPreviewData data, DateTime fromUtc, DateTime toUtc)
+    public static MappingPreview Compose(
+        MappingPreviewData data, DateTime fromUtc, DateTime toUtc, Ports.UnitCatalogSnapshot? unitCatalog = null)
     {
         ArgumentNullException.ThrowIfNull(data);
 
@@ -154,27 +174,42 @@ public sealed class PreviewMappingHandler(
             toUtc,
             data.Points.Count,
             data.IsTruncated,
-            Fields(data),
+            Fields(data, fromUtc, toUtc, unitCatalog),
             Rows(data, byField),
             Unmapped(data, byField),
             Uncovered(data));
     }
 
     /// <summary>Підсумок на кожен мапінг: що саме він поклав би в комірку.</summary>
-    private static List<MappedFieldPreview> Fields(MappingPreviewData data)
+    private static List<MappedFieldPreview> Fields(
+        MappingPreviewData data, DateTime fromUtc, DateTime toUtc, Ports.UnitCatalogSnapshot? unitCatalog)
     {
         var result = new List<MappedFieldPreview>(data.Maps.Count);
 
         foreach (var map in data.Maps)
         {
-            var series = new List<decimal>();
+            // Згортки точок — лише точки з числом (як і до F3); згортки за
+            // часом бачать і точки без числа: ті роблять відрізки прогалиною.
+            var numeric = new List<TimedPoint>();
+            var timed = new List<TimedPoint>();
             foreach (var point in data.Points)
             {
-                if (point.ValueNumeric is { } value
-                    && string.Equals(point.SourcePath, map.SourceField, StringComparison.Ordinal))
+                if (!string.Equals(point.SourcePath, map.SourceField, StringComparison.Ordinal))
                 {
-                    series.Add(value);
+                    continue;
                 }
+
+                if (point.ValueNumeric is { } value)
+                {
+                    numeric.Add(new TimedPoint(point.Timestamp, value));
+                }
+
+                timed.Add(new TimedPoint(
+                    point.Timestamp,
+                    point.ValueNumeric ?? 0m,
+                    point.ValueNumeric is not null
+                    && (point.Quality is null
+                        || string.Equals(point.Quality, WindowFold.GoodQuality, StringComparison.OrdinalIgnoreCase))));
             }
 
             var kind = Parse(map.Aggregation);
@@ -183,21 +218,21 @@ public sealed class PreviewMappingHandler(
             // Мапінг без агрегації число не дає — і не має давати: домен його
             // з рядком-адресатом не приймає, а без адресата воно нікуди не
             // лягає.
-            var folded = series.Count > 0 && kind is { } known
-                ? PeriodFold.Fold(known, series)
-                : (decimal?)null;
+            var folded = kind is { } known
+                ? Fold(known, IsTimeFold(known) ? timed : numeric, fromUtc, toUtc, map, unitCatalog)
+                : null;
 
             result.Add(new MappedFieldPreview(
                 map.Id,
                 map.SourceField,
-                FieldOutcome(map, series.Count),
+                FieldOutcome(map, numeric.Count),
                 map.TargetRowKey,
                 map.TargetColumnDefId,
                 map.TargetColumnCode,
                 map.Aggregation,
                 map.SourceUnitCode,
                 map.TargetUnitCode,
-                series.Count,
+                numeric.Count,
                 folded,
                 map.IsActive,
                 map.PendingSourceUnitChange));
@@ -343,6 +378,75 @@ public sealed class PreviewMappingHandler(
     /// <summary>Спосіб згортання з мапінгу; <c>null</c> — не заданий.</summary>
     private static AggregationKind? Parse(string? aggregation)
         => Enum.TryParse<AggregationKind>(aggregation, out var kind) ? kind : null;
+
+    /// <summary>
+    /// Згортка вікна й конверсія на межі — ті самі <see cref="PeriodFold"/> і
+    /// <see cref="BoundaryUnitConversion"/>, що в нічному перенесенні.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// ⚠ Межі вікна перегляду — без точок до й після нього: сховище перегляду
+    /// читає лише <c>[from, to)</c>, тож краї вікна для згорток за часом —
+    /// прогалина (без екстраполяції), а ряд вважається лінійним (<c>IsStep</c>
+    /// до перегляду не доходить). Число може бути меншим за матеріалізоване на
+    /// ширину країв — але не іншим за природою.
+    /// </para>
+    /// <para>
+    /// ⛔ Несумісні одиниці або інтеграл без довідника — <c>null</c>, а не число
+    /// в одиниці джерела: перегляд показує те, що ляже в комірку, і
+    /// «Sm3/h × с» у колонці Sm3 було б саме тим хибним числом, якого він
+    /// має не допустити.
+    /// </para>
+    /// </remarks>
+    private static decimal? Fold(
+        AggregationKind kind,
+        List<TimedPoint> series,
+        DateTime fromUtc,
+        DateTime toUtc,
+        FieldMapRef map,
+        Ports.UnitCatalogSnapshot? unitCatalog)
+    {
+        if (series.Count == 0 || toUtc <= fromUtc)
+        {
+            return null;
+        }
+
+        if (PeriodFold.Fold(kind, series, fromUtc, toUtc, isStep: false).Value is not { } folded)
+        {
+            return null;
+        }
+
+        if (unitCatalog is null)
+        {
+            return kind == AggregationKind.TimeIntegral ? null : folded;
+        }
+
+        try
+        {
+            return BoundaryUnitConversion.ConvertFolded(
+                kind, folded, UnitId(unitCatalog, map.SourceUnitCode), UnitId(unitCatalog, map.TargetUnitCode), unitCatalog)
+                .Value;
+        }
+        catch (Exception ex) when (ex is DomainException or EcrException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>Ідентифікатор одиниці за кодом; <c>null</c> — код не заданий.</summary>
+    /// <remarks>Код, якого немає в довіднику, дає <c>-1</c>: конверсія відмовить, а не пропустить.</remarks>
+    private static int? UnitId(Ports.UnitCatalogSnapshot unitCatalog, string? code)
+        => code is null ? null : unitCatalog.Units.TryGetValue(code, out var unit) ? unit.Id : -1;
+
+    /// <summary>Чи згортка за часом.</summary>
+    private static bool IsTimeFold(AggregationKind kind)
+        => kind is AggregationKind.TimeWeightedAvg or AggregationKind.TimeIntegral;
+
+    /// <summary>Чи потрібен довідник одиниць: інтеграл або дві різні оголошені одиниці.</summary>
+    private static bool NeedsCatalog(FieldMapRef map)
+        => Parse(map.Aggregation) == AggregationKind.TimeIntegral
+           || (map.SourceUnitCode is { } from && map.TargetUnitCode is { } to
+               && !string.Equals(from, to, StringComparison.OrdinalIgnoreCase));
 }
 
 /// <summary>Що станеться з рядком джерела або з мапінгом.</summary>

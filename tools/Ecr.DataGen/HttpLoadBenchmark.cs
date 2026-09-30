@@ -82,7 +82,8 @@ public sealed class HttpLoadBenchmark
     private const string WorkPassword = "Gate-Work-2026!";
 
     /// <summary>Робочий пароль bootstrap після зміни разового.</summary>
-    private const string BootstrapWorkPassword = "Gate-Bootstrap-Work-2026!";
+    /// <remarks>⚠ S15: без імені входу («bootstrap») — інакше зміну відхиляє політика пароля.</remarks>
+    private const string BootstrapWorkPassword = "Gate-Bstrp-Work-2026!";
 
     /// <summary>
     /// Різні розміри батчу <c>PATCH</c> — саме вони роблять ваду <c>WR-01</c> видимою.
@@ -112,6 +113,10 @@ public sealed class HttpLoadBenchmark
     [
         "Document.View", "Document.Create", "Project.Manage",
         "Calculation.View", "Security.ManageRoles", "System.ViewHealth",
+
+        // I2 ФВ-9.8: перерахунок проєкту ставить той самий оператор, що й
+        // навантаження, — bootstrap цього права не має (D-121).
+        "Calculation.Recalculate",
     ];
 
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
@@ -156,6 +161,14 @@ public sealed class HttpLoadBenchmark
     /// </remarks>
     public int Workers { get; init; }
 
+    /// <summary>Куди писати кожен запит вікна рядком CSV; <c>null</c> — не писати.</summary>
+    /// <remarks>
+    /// I2 ФВ-9.8: вікно навантаження й вікно перерахунку не збігаються, тож
+    /// p50/p95 «під час перерахунку» рахуються з сирих вибірок за часом
+    /// завершення, а не з підсумку всього вікна.
+    /// </remarks>
+    public string? SamplesOut { get; init; }
+
     /// <summary>Виконує повний прогін: підготовка → зондування → навантаження.</summary>
     /// <param name="ct">Токен скасування.</param>
     /// <returns>Виміряні числа, порушення бюджету §8.2 і застереження.</returns>
@@ -180,6 +193,7 @@ public sealed class HttpLoadBenchmark
                       $env:ECR_ConnectionStrings__Ecr = "<той самий рядок>"
                       $env:ECR_Bootstrap__Password    = "<разовий пароль>"
                       $env:ECR_Auth__RequireHttps     = "false"    ⛔ по HTTP без цього cookie не повертається
+                      $env:ECR_Auth__DataProtection__AllowUnprotectedKeys = "true"    ⛔ S11: без сертифіката Production не стартує
                       $env:ASPNETCORE_URLS            = "{BaseAddress.GetLeftPart(UriPartial.Authority)}"
                       dotnet run --project src\Ecr.Api --no-launch-profile
                 """));
@@ -436,7 +450,11 @@ public sealed class HttpLoadBenchmark
             throw new HttpRequestException("у базі немає жодного проєкту: спершу запустіть генератор");
         }
 
-        await session.PutAsync(Fmt($"/api/v1/roles/{roleId}/grants"), new
+        // ⛔ `If-Match` обов'язковий (без нього — 422): версія набору — `ETag` GET.
+        var grantsUrl = Fmt($"/api/v1/roles/{roleId}/grants");
+        var version = await session.ETagAsync(grantsUrl, ct).ConfigureAwait(false);
+
+        await session.PutAsync(grantsUrl, new
         {
             grants = projects.Select(id => new
             {
@@ -445,7 +463,7 @@ public sealed class HttpLoadBenchmark
                 level = "Manage",
                 isDeny = false,
             }).ToArray(),
-        }, ct).ConfigureAwait(false);
+        }, ct, version).ConfigureAwait(false);
     }
 
     private async Task<List<int>> ProjectIdsAsync(CancellationToken ct)
@@ -849,7 +867,10 @@ public sealed class HttpLoadBenchmark
             {
                 tableInstanceId = table.InstanceId,
                 periodKey = target.PeriodKey,
-                origin = "Manual",
+                // ✎ 2026-09-29 (I2): «Manual» сервер відхиляє 422 ECR-REQ-0422
+                // (cellOriginNotAllowed, клієнт може лише UserEdit) — усі записи
+                // навантаження йшли відмовами, і p95 PATCH міряв швидку відмову.
+                origin = "UserEdit",
                 rows,
             },
             ct).ConfigureAwait(false);
@@ -990,7 +1011,8 @@ public sealed class HttpLoadBenchmark
                             (call.IsWrite ? writes : reads).Add(new Sample(
                                 Math.Max(0, (finishedAt - call.Due).TotalMilliseconds),
                                 (finishedAt - startedAt).TotalMilliseconds,
-                                finishedAt));
+                                finishedAt,
+                                (int)status));
                         }
                     }
                     catch (OperationCanceledException)
@@ -1000,6 +1022,10 @@ public sealed class HttpLoadBenchmark
                 },
                 CancellationToken.None))
             .ToArray();
+
+        // I2: абсолютна мітка старту вікна — щоб зіставити вибірки з часом перерахунку в базі.
+        var windowStartedUtc = DateTime.UtcNow;
+        Console.WriteLine(Fmt($"Навантаження стартувало: {windowStartedUtc:O}, {TargetRps} RPS, {LoadSeconds} с."));
 
         var scheduled = await ProduceAsync(channel.Writer, ct).ConfigureAwait(false);
 
@@ -1020,6 +1046,17 @@ public sealed class HttpLoadBenchmark
         }
 
         var after = await CountersAsync(ct).ConfigureAwait(false);
+
+        if (SamplesOut is not null)
+        {
+            var lines = new List<string> { "kind,status,finished_utc,latency_ms,service_ms" };
+            lines.AddRange(reads.Select(s => Line("read", s)));
+            lines.AddRange(writes.Select(s => Line("write", s)));
+            await File.WriteAllLinesAsync(SamplesOut, lines, ct).ConfigureAwait(false);
+
+            string Line(string kind, Sample s) => Fmt(
+                $"{kind},{s.Status},{windowStartedUtc + s.FinishedAt:O},{s.LatencyMs:F1},{s.ServiceMs:F1}");
+        }
 
         return new LoadOutcome(
             [.. reads], [.. writes], statuses, conflicts, scheduled, before, after,
@@ -1074,6 +1111,8 @@ public sealed class HttpLoadBenchmark
         measurements["scheduled"] = load.Scheduled;
         measurements["unserved"] = load.Scheduled - completed;
 
+        measurements["get_slice_p50_ms"] = Percentile(load.Reads, 0.50, s => s.ServiceMs);
+        measurements["patch_p50_ms"] = Percentile(load.Writes, 0.50, s => s.ServiceMs);
         measurements["get_slice_p95_ms"] = Percentile(load.Reads, 0.95, s => s.ServiceMs);
         measurements["get_slice_p99_ms"] = Percentile(load.Reads, 0.99, s => s.ServiceMs);
         measurements["patch_p95_ms"] = Percentile(load.Writes, 0.95, s => s.ServiceMs);
@@ -1461,9 +1500,33 @@ public sealed class HttpLoadBenchmark
             throw new HttpRequestException(Fmt($"POST {url} → {(int)response.StatusCode}: {text}"));
         }
 
-        public async Task PutAsync(string url, object body, CancellationToken ct)
+        /// <summary><c>ETag</c> відповіді <c>GET</c> — версія для <c>If-Match</c>.</summary>
+        /// <param name="url">Адреса.</param>
+        /// <param name="ct">Токен скасування.</param>
+        public async Task<string> ETagAsync(string url, CancellationToken ct)
         {
-            using var response = await _client.PutAsJsonAsync(url, body, Json, ct).ConfigureAwait(false);
+            using var response = await _client.GetAsync(new Uri(url, UriKind.Relative), ct).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode || response.Headers.ETag is null)
+            {
+                throw new HttpRequestException(Fmt($"GET {url} → {(int)response.StatusCode}, ETag: {response.Headers.ETag}"));
+            }
+
+            return response.Headers.ETag.Tag;
+        }
+
+        public async Task PutAsync(string url, object body, CancellationToken ct, string? ifMatch = null)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Put, url)
+            {
+                Content = JsonContent.Create(body, options: Json),
+            };
+
+            if (ifMatch is not null)
+            {
+                request.Headers.TryAddWithoutValidation("If-Match", ifMatch);
+            }
+
+            using var response = await _client.SendAsync(request, ct).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
             {
                 var text = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
@@ -1532,7 +1595,7 @@ public sealed class HttpLoadBenchmark
 
     private sealed record Call(TimeSpan Due, bool IsWrite);
 
-    private sealed record Sample(double LatencyMs, double ServiceMs, TimeSpan FinishedAt);
+    private sealed record Sample(double LatencyMs, double ServiceMs, TimeSpan FinishedAt, int Status = 0);
 
     private sealed record PatchOutcome(HttpStatusCode Status, bool IsConflict);
 

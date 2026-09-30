@@ -6,6 +6,7 @@ using Ecr.Application.Ports;
 using Ecr.Application.Security;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.External;
+using Ecr.Domain.Enums;
 using Ecr.TestKit;
 using NSubstitute;
 using Xunit;
@@ -50,7 +51,7 @@ public sealed class CollectionScheduleHandlersTests
         var schedule = Add(Hourly);
 
         var refused = await Assert.ThrowsAsync<BusinessRuleException>(
-            () => Save().HandleAsync(schedule.Id, Unsupported, isEnabled: true, Version(schedule), CancellationToken.None));
+            () => Save().HandleAsync(schedule.Id, Unsupported, isEnabled: true, lookbackDays: null, Version(schedule), CancellationToken.None));
 
         Assert.Equal("ECR-REQ-0422", refused.ErrorCode);
         Assert.Equal("err.ECR-REQ-0422.collectionScheduleCron", refused.Details!["messageKey"]);
@@ -76,9 +77,9 @@ public sealed class CollectionScheduleHandlersTests
         var tooLong = new string('*', 101);
 
         var long_ = await Assert.ThrowsAsync<BusinessRuleException>(
-            () => Save().HandleAsync(schedule.Id, tooLong, isEnabled: true, Version(schedule), CancellationToken.None));
+            () => Save().HandleAsync(schedule.Id, tooLong, isEnabled: true, lookbackDays: null, Version(schedule), CancellationToken.None));
         var empty = await Assert.ThrowsAsync<BusinessRuleException>(
-            () => Save().HandleAsync(schedule.Id, "   ", isEnabled: true, Version(schedule), CancellationToken.None));
+            () => Save().HandleAsync(schedule.Id, "   ", isEnabled: true, lookbackDays: null, Version(schedule), CancellationToken.None));
 
         Assert.Equal("err.ECR-REQ-0422.collectionScheduleCronLength", long_.Details!["messageKey"]);
         Assert.Equal("err.ECR-REQ-0422.collectionScheduleCronLength", empty.Details!["messageKey"]);
@@ -93,9 +94,9 @@ public sealed class CollectionScheduleHandlersTests
         var schedule = Add(Hourly);
 
         var stale = await Assert.ThrowsAsync<ConcurrencyConflictException>(
-            () => Save().HandleAsync(schedule.Id, Nightly, isEnabled: true, "AAAAAAAAAAE=", CancellationToken.None));
+            () => Save().HandleAsync(schedule.Id, Nightly, isEnabled: true, lookbackDays: null, "AAAAAAAAAAE=", CancellationToken.None));
         var headerless = await Assert.ThrowsAsync<BusinessRuleException>(
-            () => Save().HandleAsync(schedule.Id, Nightly, isEnabled: true, ifMatch: null, CancellationToken.None));
+            () => Save().HandleAsync(schedule.Id, Nightly, isEnabled: true, lookbackDays: null, ifMatch: null, CancellationToken.None));
 
         Assert.Equal("ECR-JOB-0409", stale.ErrorCode);
         Assert.Equal("err.ECR-JOB-0409.collectionScheduleChanged", stale.Details!["messageKey"]);
@@ -104,7 +105,7 @@ public sealed class CollectionScheduleHandlersTests
 
         // Своя версія проходить і в лапках, і без них — обидві форми ETag живі.
         var saved = await Save().HandleAsync(
-            schedule.Id, Nightly, isEnabled: true, $"\"{Version(schedule)}\"", CancellationToken.None);
+            schedule.Id, Nightly, isEnabled: true, lookbackDays: null, $"\"{Version(schedule)}\"", CancellationToken.None);
 
         Assert.Equal(Nightly, saved.Cron);
     }
@@ -118,7 +119,7 @@ public sealed class CollectionScheduleHandlersTests
         schedule.MarkInvalid("попередня постановка не вдалася", Now);
 
         var enabled = await Save().HandleAsync(
-            schedule.Id, Nightly, isEnabled: true, Version(schedule), CancellationToken.None);
+            schedule.Id, Nightly, isEnabled: true, lookbackDays: null, Version(schedule), CancellationToken.None);
 
         Assert.Equal((Nightly, true, (string?)null), (enabled.Cron, enabled.IsEnabled, enabled.LastError));
         Assert.Equal("ENT-1", enabled.SourceEntityCode);
@@ -128,7 +129,7 @@ public sealed class CollectionScheduleHandlersTests
         Assert.Equal(CollectionScheduleApplier.PayloadOf(schedule.SourceEntityId), placed.Payload);
 
         var disabled = await Save().HandleAsync(
-            schedule.Id, Nightly, isEnabled: false, Version(schedule), CancellationToken.None);
+            schedule.Id, Nightly, isEnabled: false, lookbackDays: null, Version(schedule), CancellationToken.None);
 
         Assert.False(disabled.IsEnabled);
         Assert.Equal(CollectionScheduleApplier.PayloadOf(schedule.SourceEntityId), _scheduler.Unscheduled.Single());
@@ -143,7 +144,7 @@ public sealed class CollectionScheduleHandlersTests
         _scheduler.RefuseSchedule = true;
 
         var refused = await Assert.ThrowsAsync<BusinessRuleException>(
-            () => Save().HandleAsync(schedule.Id, Nightly, isEnabled: true, Version(schedule), CancellationToken.None));
+            () => Save().HandleAsync(schedule.Id, Nightly, isEnabled: true, lookbackDays: null, Version(schedule), CancellationToken.None));
 
         Assert.Equal("err.ECR-REQ-0422.collectionScheduleNotApplied", refused.Details!["messageKey"]);
 
@@ -177,11 +178,12 @@ public sealed class CollectionScheduleHandlersTests
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
     [Trait("Requirement", "BE-21c")]
+    [Trait("Requirement", "ФВ-13.11")]
     public async Task Створення_заводить_розклад_ставить_його_в_планувальник_а_другий_на_ту_саму_сутність_дає_409()
     {
         _store.Entities[77] = ("ENT-77", "Entity 77");
 
-        var created = await Create().HandleAsync(77, Nightly, isEnabled: true, CancellationToken.None);
+        var created = await Create().HandleAsync(77, Nightly, isEnabled: true, lookbackDays: null, CancellationToken.None);
 
         Assert.Equal((77, Nightly, true), (created.SourceEntityId, created.Cron, created.IsEnabled));
         Assert.Equal(("ENT-77", "Entity 77"), (created.SourceEntityCode, created.SourceEntityName));
@@ -194,12 +196,40 @@ public sealed class CollectionScheduleHandlersTests
         // тригер планувальника з ТИМ САМИМ завданням, тобто подвійний збір,
         // якого не видно ніде, крім кількості прогонів.
         var duplicate = await Assert.ThrowsAsync<ConcurrencyConflictException>(
-            () => Create().HandleAsync(77, Hourly, isEnabled: true, CancellationToken.None));
+            () => Create().HandleAsync(77, Hourly, isEnabled: true, lookbackDays: null, CancellationToken.None));
 
         Assert.Equal("ECR-JOB-0409", duplicate.ErrorCode);
         Assert.Equal("err.ECR-JOB-0409.collectionScheduleExists", duplicate.Details!["messageKey"]);
         Assert.Single(_store.Rows);
         Assert.Single(_scheduler.Scheduled);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "ФВ-13.15")]
+    [Trait("Requirement", "ФВ-12.8")]
+    public async Task Дві_сутності_отримують_два_незалежні_тригери_кожна_зі_своєю_частотою()
+    {
+        // ⛔ Розклад — на сутність, не один на систему: частота опитування
+        // «природна для класу даних» (ФВ-12.8), тож концентрація й добовий
+        // обсяг мають різні cron, і кожен тригер збирає лише СВОЮ сутність.
+        _store.Entities[77] = ("STACK-77", null);
+        _store.Entities[78] = ("FLOW-78", null);
+
+        await Create().HandleAsync(77, Hourly, isEnabled: true, lookbackDays: null, CancellationToken.None);
+        await Create().HandleAsync(78, Nightly, isEnabled: true, lookbackDays: null, CancellationToken.None);
+
+        // МУТАЦІЙНИЙ ДОКАЗ: у `CollectionScheduleApplier.ApplyAsync` ставити
+        // один сталий cron замість `schedule.CronExpression` (одна частота на
+        // систему) → твердження червоніє на другому тригері.
+        Assert.Equal(
+            new (string Cron, object? Payload)[]
+            {
+                (Hourly, CollectionScheduleApplier.PayloadOf(77)),
+                (Nightly, CollectionScheduleApplier.PayloadOf(78)),
+            },
+            _scheduler.Scheduled);
+        Assert.NotEqual(CollectionScheduleApplier.PayloadOf(77), CollectionScheduleApplier.PayloadOf(78));
     }
 
     [Fact]
@@ -210,9 +240,9 @@ public sealed class CollectionScheduleHandlersTests
         _store.Entities[77] = ("ENT-77", null);
 
         var badCron = await Assert.ThrowsAsync<BusinessRuleException>(
-            () => Create().HandleAsync(77, Unsupported, isEnabled: true, CancellationToken.None));
+            () => Create().HandleAsync(77, Unsupported, isEnabled: true, lookbackDays: null, CancellationToken.None));
         var missing = await Assert.ThrowsAsync<NotFoundException>(
-            () => Create().HandleAsync(999, Nightly, isEnabled: true, CancellationToken.None));
+            () => Create().HandleAsync(999, Nightly, isEnabled: true, lookbackDays: null, CancellationToken.None));
 
         Assert.Equal("err.ECR-REQ-0422.collectionScheduleCron", badCron.Details!["messageKey"]);
         Assert.Equal("err.ECR-INT-0404.sourceEntity", missing.Details!["messageKey"]);
@@ -234,9 +264,9 @@ public sealed class CollectionScheduleHandlersTests
         await Assert.ThrowsAsync<AccessDeniedException>(
             () => new ListCollectionSchedulesHandler(_store, _access, _user).HandleAsync(null, CancellationToken.None));
         await Assert.ThrowsAsync<AccessDeniedException>(
-            () => Create().HandleAsync(77, Nightly, isEnabled: true, CancellationToken.None));
+            () => Create().HandleAsync(77, Nightly, isEnabled: true, lookbackDays: null, CancellationToken.None));
         await Assert.ThrowsAsync<AccessDeniedException>(
-            () => Save().HandleAsync(schedule.Id, Nightly, isEnabled: false, Version(schedule), CancellationToken.None));
+            () => Save().HandleAsync(schedule.Id, Nightly, isEnabled: false, lookbackDays: null, Version(schedule), CancellationToken.None));
         await Assert.ThrowsAsync<AccessDeniedException>(
             () => Delete().HandleAsync(schedule.Id, Version(schedule), CancellationToken.None));
 
@@ -244,6 +274,120 @@ public sealed class CollectionScheduleHandlersTests
         Assert.Single(_store.Rows);
         Assert.Empty(_store.Removed);
         Assert.Empty(_scheduler.Unscheduled);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "ФВ-13.15")]
+    public async Task ФВ_13_15_вікно_збору_зберігається_правкою_і_створенням_а_без_поля_лишається_наявним()
+    {
+        var schedule = Add(Hourly);
+        Assert.Equal(7, schedule.LookbackDays);
+
+        var saved = await Save().HandleAsync(
+            schedule.Id, Hourly, isEnabled: true, lookbackDays: 30, Version(schedule), CancellationToken.None);
+
+        Assert.Equal(30, schedule.LookbackDays);
+        Assert.Equal(30, saved.LookbackDays);
+
+        // Поле не прийшло (старий клієнт) — вікно не скидається на типове.
+        var untouched = await Save().HandleAsync(
+            schedule.Id, Nightly, isEnabled: true, lookbackDays: null, Version(schedule), CancellationToken.None);
+
+        Assert.Equal(30, untouched.LookbackDays);
+
+        _store.Entities[77] = ("ENT-77", null);
+        var created = await Create().HandleAsync(77, Nightly, isEnabled: true, lookbackDays: 366, CancellationToken.None);
+
+        Assert.Equal(366, created.LookbackDays);
+        Assert.Equal(366, _store.Rows.Single(r => r.Schedule.SourceEntityId == 77).Schedule.LookbackDays);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "ФВ-13.15")]
+    public async Task ФВ_13_15_вікно_поза_1_366_днів_відхиляється_422_ДО_бази()
+    {
+        var schedule = Add(Hourly);
+        _store.Entities[77] = ("ENT-77", null);
+
+        // ⚠ Межі ЛІТЕРАЛАМИ, а не від констант домену: твердження проти
+        // константи поїхало б разом із нею.
+        foreach (var bad in new[] { 0, -1, 367 })
+        {
+            var refused = await Assert.ThrowsAsync<BusinessRuleException>(
+                () => Save().HandleAsync(
+                    schedule.Id, Hourly, isEnabled: true, lookbackDays: bad, Version(schedule), CancellationToken.None));
+
+            Assert.Equal("ECR-REQ-0422", refused.ErrorCode);
+            Assert.Equal("err.ECR-REQ-0422.collectionScheduleLookback", refused.Details!["messageKey"]);
+            Assert.Equal(("1", "366"), (refused.Details["min"], refused.Details["max"]));
+
+            var refusedCreate = await Assert.ThrowsAsync<BusinessRuleException>(
+                () => Create().HandleAsync(77, Hourly, isEnabled: true, lookbackDays: bad, CancellationToken.None));
+
+            Assert.Equal("err.ECR-REQ-0422.collectionScheduleLookback", refusedCreate.Details!["messageKey"]);
+        }
+
+        Assert.Equal(7, schedule.LookbackDays);
+        Assert.Single(_store.Rows);
+        await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
+
+        // Самі межі проходять.
+        var lowest = await Save().HandleAsync(
+            schedule.Id, Hourly, isEnabled: true, lookbackDays: 1, Version(schedule), CancellationToken.None);
+
+        Assert.Equal(1, lowest.LookbackDays);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "ФВ-12.8")]
+    public async Task ФВ_12_8_розклад_для_власної_форми_не_створюється_навіть_вимкненим()
+    {
+        _store.Entities[77] = ("OWN-77", null);
+        _store.LocalEntities.Add(77);
+
+        foreach (var enabled in new[] { true, false })
+        {
+            var refused = await Assert.ThrowsAsync<BusinessRuleException>(
+                () => Create().HandleAsync(77, Nightly, enabled, lookbackDays: null, CancellationToken.None));
+
+            Assert.Equal("ECR-REQ-0422", refused.ErrorCode);
+            Assert.Equal("err.ECR-REQ-0422.scheduleForLocalEntity", refused.Details!["messageKey"]);
+            Assert.Equal("OWN-77", refused.Details["code"]);
+        }
+
+        Assert.Empty(_store.Rows);
+        Assert.Empty(_scheduler.Scheduled);
+        await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "ФВ-12.8")]
+    public async Task ФВ_12_8_наявний_розклад_власної_форми_не_вмикається_але_вимикається()
+    {
+        var schedule = Add(Hourly, RegistrySourceKind.Local);
+        schedule.Disable();
+
+        var refused = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Save().HandleAsync(
+                schedule.Id, Nightly, isEnabled: true, lookbackDays: null, Version(schedule), CancellationToken.None));
+
+        Assert.Equal("err.ECR-REQ-0422.scheduleForLocalEntity", refused.Details!["messageKey"]);
+        Assert.False(schedule.IsEnabled);
+        Assert.Equal(Hourly, schedule.CronExpression);
+        Assert.Empty(_scheduler.Scheduled);
+        await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
+
+        // ⚠ Вимкнути (і так прибрати зайвий тригер) — можна: заведений до
+        // правила розклад не має ставати незнімним.
+        var disabled = await Save().HandleAsync(
+            schedule.Id, Nightly, isEnabled: false, lookbackDays: null, Version(schedule), CancellationToken.None);
+
+        Assert.False(disabled.IsEnabled);
+        Assert.Equal(CollectionScheduleApplier.PayloadOf(schedule.SourceEntityId), _scheduler.Unscheduled.Single());
     }
 
     private void Allow(string permission)
@@ -261,7 +405,7 @@ public sealed class CollectionScheduleHandlersTests
     private static string Version(CollectionSchedule schedule) => Convert.ToBase64String(schedule.RowVersion);
 
     /// <summary>Розклад із присвоєним ключем і версією рядка, як його віддала б база.</summary>
-    private CollectionSchedule Add(string cron)
+    private CollectionSchedule Add(string cron, RegistrySourceKind kind = RegistrySourceKind.External)
     {
         var id = _store.Rows.Count + 1;
         var schedule = new CollectionSchedule(sourceEntityId: 40 + id, cron);
@@ -270,7 +414,7 @@ public sealed class CollectionScheduleHandlersTests
         typeof(CollectionSchedule).GetProperty(nameof(CollectionSchedule.RowVersion))!
             .SetValue(schedule, new byte[] { 0, 0, 0, 0, 0, 0, 7, (byte)id });
 
-        _store.Rows.Add(new ScheduledSourceEntity(schedule, $"ENT-{id}", $"Entity {id}", 3, "SRC-3"));
+        _store.Rows.Add(new ScheduledSourceEntity(schedule, $"ENT-{id}", $"Entity {id}", 3, "SRC-3", kind));
 
         return schedule;
     }
@@ -283,6 +427,12 @@ public sealed class CollectionScheduleHandlersTests
 
         /// <summary>Сутності джерела, які «є в базі»: ключ → код і підпис.</summary>
         public Dictionary<int, (string Code, string? Name)> Entities { get; } = [];
+
+        /// <summary>Сутності-власні форми (ФВ-12.8); решта — <see cref="RegistrySourceKind.External"/>.</summary>
+        public HashSet<int> LocalEntities { get; } = [];
+
+        public RegistrySourceKind KindOf(int sourceEntityId)
+            => LocalEntities.Contains(sourceEntityId) ? RegistrySourceKind.Local : RegistrySourceKind.External;
 
         public Task<IReadOnlyList<ScheduledSourceEntity>> ListAsync(string? dataSourceCode, CancellationToken ct)
             => Task.FromResult<IReadOnlyList<ScheduledSourceEntity>>(Rows);
@@ -298,7 +448,8 @@ public sealed class CollectionScheduleHandlersTests
                         entity.Name,
                         Rows.Find(r => r.Schedule.SourceEntityId == sourceEntityId)?.Schedule.Id,
                         3,
-                        "SRC-3")
+                        "SRC-3",
+                        KindOf(sourceEntityId))
                     : null);
 
         /// <summary>Ключ присвоюється одразу — базу тут заміняє цей список.</summary>
@@ -308,7 +459,8 @@ public sealed class CollectionScheduleHandlersTests
                 .SetValue(schedule, Rows.Count + 1);
 
             var entity = Entities[schedule.SourceEntityId];
-            Rows.Add(new ScheduledSourceEntity(schedule, entity.Code, entity.Name, 3, "SRC-3"));
+            Rows.Add(new ScheduledSourceEntity(
+                schedule, entity.Code, entity.Name, 3, "SRC-3", KindOf(schedule.SourceEntityId)));
         }
 
         public void Remove(CollectionSchedule schedule)
@@ -376,6 +528,10 @@ public sealed class CollectionScheduleHandlersTests
             where TJob : IBackgroundJob => throw new NotSupportedException();
 
         public Task<string> EnqueueExclusiveAsync<TJob>(
+            string targetKey, object? payload, CancellationToken ct, int? createdByUserId = null)
+            where TJob : IBackgroundJob => throw new NotSupportedException();
+
+        public Task<string> EnqueueCoalescedAsync<TJob>(
             string targetKey, object? payload, CancellationToken ct, int? createdByUserId = null)
             where TJob : IBackgroundJob => throw new NotSupportedException();
 

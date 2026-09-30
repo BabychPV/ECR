@@ -85,7 +85,7 @@ public sealed class RegistryValueAuditTests
         _audit.WriteSecurityEventAsync(Arg.Do<SecurityEventRecord>(r => captured = r), Arg.Any<CancellationToken>())
             .Returns(Task.CompletedTask);
 
-        var handler = new UpsertRegistryEntryHandler(_registries, _uow, _audit, _access, _user, _clock);
+        var handler = new UpsertRegistryEntryHandler(_registries, _access, _user, new RegistryEntryWriter(_registries, _uow, _audit, _user, _clock));
 
         await handler.HandleAsync(
             new RegistryEntryUpsertDto(
@@ -127,7 +127,7 @@ public sealed class RegistryValueAuditTests
 
         Arrange(definition, entry, [existingValue]);
 
-        var handler = new UpsertRegistryEntryHandler(_registries, _uow, _audit, _access, _user, _clock);
+        var handler = new UpsertRegistryEntryHandler(_registries, _access, _user, new RegistryEntryWriter(_registries, _uow, _audit, _user, _clock));
 
         await handler.HandleAsync(
             new RegistryEntryUpsertDto(
@@ -172,7 +172,7 @@ public sealed class RegistryValueAuditTests
         _audit.WriteSecurityEventAsync(Arg.Do<SecurityEventRecord>(r => captured = r), Arg.Any<CancellationToken>())
             .Returns(Task.CompletedTask);
 
-        var handler = new UpsertRegistryEntryHandler(_registries, _uow, _audit, _access, _user, _clock);
+        var handler = new UpsertRegistryEntryHandler(_registries, _access, _user, new RegistryEntryWriter(_registries, _uow, _audit, _user, _clock));
 
         await handler.HandleAsync(
             new RegistryEntryUpsertDto(

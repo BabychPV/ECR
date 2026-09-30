@@ -115,6 +115,15 @@ function show(options: {
   );
 }
 
+/** Діюча кнопка «Submit» — не вимкнена пояснювальна (`F-17`). */
+function activeSubmit(): HTMLElement | null {
+  return (
+    screen
+      .queryAllByRole('button', { name: /submit/i })
+      .find((button) => button.getAttribute('aria-disabled') !== 'true') ?? null
+  );
+}
+
 /** Чекає на якір і повертає керування, коли профіль уже застосовано. */
 async function anchor(): Promise<void> {
   await screen.findByRole('button', { name: /recalculate/i }, { timeout: SlowEnvTimeout });
@@ -143,6 +152,21 @@ describe('effectiveGrant: дзеркало EditRules.Effective для аркуш
     const grant = effectiveGrant(me({ 'Project:7': 'Manage', 'Sheet:42': 'Read' }), ProjectId, SheetDefId);
 
     expect(grant).toBe('Read');
+  });
+
+  it('S2: грант на аркуш без гранта на проєкт документа — None', () => {
+    // ⛔ Мутаційний доказ: прибери передумову проєкту в `effectiveGrant` — тут
+    // буде 'Approve' («аркуш S із проєкту A» показав би кнопку в проєкті B).
+    expect(effectiveGrant(me({ 'Project:8': 'Read', 'Sheet:42': 'Approve' }), ProjectId, SheetDefId)).toBe('None');
+  });
+
+  it('S2: грант на проєкт рівня None чи невідомого — не передумова', () => {
+    expect(effectiveGrant(me({ 'Project:7': 'None', 'Sheet:42': 'Approve' }), ProjectId, SheetDefId)).toBe('None');
+    expect(effectiveGrant(me({ 'Project:7': 'Superuser', 'Sheet:42': 'Approve' }), ProjectId, SheetDefId)).toBe('None');
+  });
+
+  it('S2: під видимим проєктом грант на аркуш ПІДНІМАЄ рівень', () => {
+    expect(effectiveGrant(me({ 'Project:7': 'Read', 'Sheet:42': 'Approve' }), ProjectId, SheetDefId)).toBe('Approve');
   });
 
   it('явна заборона перемагає будь-який дозвіл (ФВ-6.6)', () => {
@@ -195,8 +219,12 @@ describe('SheetActions: «Submit» закрито тим самим порого
       await anchor();
 
       // ⛔ Мутаційний доказ: поверни умову показу на саме `isAllowed('submit',
-      // state)` — і цей рядок стане червоним, бо кнопка з'явиться.
-      expect(screen.queryByRole('button', { name: /submit/i })).toBeNull();
+      // state)` — і цей рядок стане червоним, бо з'явиться ДІЮЧА кнопка.
+      //
+      // ✎ `F-17`: кнопка тепер є, але вимкнена й пояснена (`submit-needs-grant`)
+      // — зникнення без причини було другою половиною дефекту.
+      expect(activeSubmit()).toBeNull();
+      expect(screen.getByTestId('submit-needs-grant').getAttribute('aria-disabled')).toBe('true');
     },
     SlowEnvTimeout,
   );
@@ -219,7 +247,7 @@ describe('SheetActions: «Submit» закрито тим самим порого
       show({ grants: { 'Project:7': 'Manage', 'Sheet:42': 'Write' }, state: 'Draft' });
       await anchor();
 
-      expect(screen.queryByRole('button', { name: /submit/i })).toBeNull();
+      expect(activeSubmit()).toBeNull();
     },
     SlowEnvTimeout,
   );

@@ -109,7 +109,9 @@ public sealed class GetAccessDiagnosticsHandler(
     public async Task<AccessDiagnosticsView> HandleAsync(int? subjectUserId, CancellationToken ct)
     {
         var actorId = currentUser.UserId
-                      ?? throw new AccessDeniedException("ECR-AUTH-0401", "Потрібна автентифікація.");
+                      ?? throw new AccessDeniedException(
+                          "ECR-AUTH-0401", "Потрібна автентифікація.",
+                          new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.signInRequired" });
 
         var subjectId = subjectUserId ?? actorId;
         var own = subjectId == actorId;
@@ -123,7 +125,13 @@ public sealed class GetAccessDiagnosticsHandler(
             : await PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
 
         var user = await users.FindByIdAsync(subjectId, ct).ConfigureAwait(false)
-                   ?? throw new NotFoundException("ECR-SEC-0404", $"Користувача {subjectId} не знайдено.");
+                   ?? throw new NotFoundException(
+                       "ECR-SEC-0404", $"Користувача {subjectId} не знайдено.",
+                       new Dictionary<string, object?>
+                       {
+                           ["messageKey"] = "err.ECR-SEC-0404.userNotFound",
+                           ["userId"] = subjectId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                       });
 
         // ⛔ Групи беруться З КВИТКА і лише для власної сесії (`ФВ-6.15a`,
         // `P-02`). Для чужого запису перелік порожній НЕ тому, що людина ні в

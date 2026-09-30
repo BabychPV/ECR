@@ -1,4 +1,5 @@
 using Ecr.Domain.Enums;
+using Ecr.Domain.ValueObjects;
 
 namespace Ecr.Application.Security;
 
@@ -35,7 +36,20 @@ public readonly record struct CellAccessContext(
     DocumentStatus SheetStatus,
     bool ColumnIsComputed,
     bool ColumnIsReadOnly,
-    bool RowIsReadOnly);
+    bool RowIsReadOnly)
+{
+    /// <summary>
+    /// Код аркуша (<see cref="SheetDefId"/>); <c>null</c> — невідомий. Потрібен
+    /// ролям, звуженим аркушами (D-214): без нього вони тут не діють.
+    /// </summary>
+    public string? SheetCode { get; init; }
+
+    /// <summary>
+    /// Звітний період рішення; <c>null</c> — рішення не про період. Потрібен
+    /// ролям, звуженим періодами (D-214): без нього вони тут не діють.
+    /// </summary>
+    public PeriodKey? Period { get; init; }
+}
 
 /// <summary>
 /// Правила доступу як **чиста функція**: жодних запитів, жодного часу.
@@ -46,6 +60,12 @@ public readonly record struct CellAccessContext(
 /// функція дозволяє прогнати всі п'ятнадцять сценаріїв <c>02c §6</c> і
 /// <c>tz/07</c> §7.6 за мілісекунди й без бази. Служба лишає собі те, що вміє
 /// лише вона: дістати дані.
+///
+/// ⚠ Перевірка <c>ProjectStatus.Archived</c>/<c>IsArchiving</c> — спільна для
+/// ВСІХ чотирьох рішень (<see cref="CanEdit"/>, <see cref="CanSubmit"/>,
+/// <see cref="CanApprove"/>, <see cref="CanReopen"/>), одразу після
+/// симуляції: архівація — термінальний стан проєкту, і робочий процес має
+/// зупинятись так само, як і редагування (<c>tz/07</c> §7.4).
 /// </remarks>
 public static class EditRules
 {
@@ -130,9 +150,21 @@ public static class EditRules
             return EditDecision.Deny(EditDenyReason.RowReadOnly);
         }
 
-        return Effective(profile, context) >= GrantLevel.Write
-            ? EditDecision.Allow()
-            : EditDecision.Deny(EditDenyReason.NoGrant);
+        // ⛔ Та сама різниця причин, що в CanSubmit/CanApprove: грант
+        // ВІДСУТНІЙ (None, включно із забороною на будь-якому рівні) і грант
+        // Є, але нижчий за Write (Read), — різні відповіді для користувача:
+        // «просити грант» проти «просити підвищення рівня».
+        var effective = Effective(profile, context);
+        if (effective < GrantLevel.Write)
+        {
+            return effective == GrantLevel.None
+                ? EditDecision.Deny(EditDenyReason.NoGrant)
+                : EditDecision.Deny(
+                    EditDenyReason.InsufficientGrantLevel,
+                    $"Наявний рівень гранта — {effective}; для редагування потрібен {GrantLevel.Write}.");
+        }
+
+        return EditDecision.Allow();
     }
 
     /// <summary>Чи можна подати аркуш на погодження.</summary>
@@ -146,6 +178,21 @@ public static class EditRules
         if (profile.IsSimulation)
         {
             return EditDecision.Deny(EditDenyReason.SimulationReadOnly);
+        }
+
+        if (profile.IsIntegrationWriter)
+        {
+            return IntegrationIsNotAWorkflowActor("подання");
+        }
+
+        if (context.ProjectStatus == ProjectStatus.Archived)
+        {
+            return EditDecision.Deny(EditDenyReason.ProjectArchived);
+        }
+
+        if (context.IsArchiving)
+        {
+            return EditDecision.Deny(EditDenyReason.ArchivingInProgress);
         }
 
         if (context.PeriodState == PeriodState.Closed)
@@ -163,9 +210,21 @@ public static class EditRules
 
         // ⚠ Подання потребує рівня Submit, а не Write: право заповнювати і
         // право відповідати за подане — різні повноваження (02c A11).
-        if (Effective(profile, context) < GrantLevel.Submit)
+        //
+        // ⛔ Грант ВІДСУТНІЙ (None) і грант Є, але закороткий, — дві різні
+        // причини відмовити, і до цього обидві поверталися як NoGrant.
+        // Користувачеві з рівнем View/Write це читалося як «у вас немає
+        // жодного доступу», хоча насправді доступ є — бракує саме рівня
+        // Submit, і дія користувача інша: просити підвищення гранта, а не
+        // грант із нуля.
+        var effective = Effective(profile, context);
+        if (effective < GrantLevel.Submit)
         {
-            return EditDecision.Deny(EditDenyReason.NoGrant);
+            return effective == GrantLevel.None
+                ? EditDecision.Deny(EditDenyReason.NoGrant)
+                : EditDecision.Deny(
+                    EditDenyReason.InsufficientGrantLevel,
+                    $"Наявний рівень гранта — {effective}; для подання потрібен {GrantLevel.Submit}.");
         }
 
         return hasBlockingErrors
@@ -190,6 +249,21 @@ public static class EditRules
             return EditDecision.Deny(EditDenyReason.SimulationReadOnly);
         }
 
+        if (profile.IsIntegrationWriter)
+        {
+            return IntegrationIsNotAWorkflowActor("затвердження");
+        }
+
+        if (context.ProjectStatus == ProjectStatus.Archived)
+        {
+            return EditDecision.Deny(EditDenyReason.ProjectArchived);
+        }
+
+        if (context.IsArchiving)
+        {
+            return EditDecision.Deny(EditDenyReason.ArchivingInProgress);
+        }
+
         // Затверджувати можна лише подане: затвердження чернетки означало б,
         // що ніхто не заявив її готовою.
         if (context.SheetStatus != DocumentStatus.Submitted)
@@ -206,16 +280,32 @@ public static class EditRules
         // ⚠ Параметр необов'язковий, і за замовчуванням поведінка **не
         // змінюється**: маршрутів у seed немає, система без них працює як
         // раніше, і жоден наявний тест затвердження не правився.
-        if (requiredRoleId is { } roleId && !profile.RoleIds.Contains(roleId))
+        // ⚠ Роль — чинна в ЦЬОМУ проєкті (ФВ-6.14): роль з областю «проєкт A»
+        // не робить людину учасником маршруту проєкту B.
+        // ⚠ D-214: роль, звужена аркушами чи періодами, — учасник маршруту лише
+        // на своєму аркуші у своєму періоді.
+        if (requiredRoleId is { } roleId
+            && !profile.RoleIdsAt(context.ProjectId, context.SheetCode, context.Period).Contains(roleId))
         {
             return EditDecision.Deny(
                 EditDenyReason.NoGrant,
                 $"Крок маршруту погодження вимагає ролі {roleId}; зараз черга не ваша.");
         }
 
-        return Effective(profile, context) >= GrantLevel.Approve
-            ? EditDecision.Allow()
-            : EditDecision.Deny(EditDenyReason.NoGrant);
+        // ⛔ Та сама різниця причин, що в CanSubmit вище: грант ВІДСУТНІЙ і
+        // грант Є, але нижчий за Approve, — не одне й те саме для
+        // користувача, який читає відмову.
+        var effective = Effective(profile, context);
+        if (effective < GrantLevel.Approve)
+        {
+            return effective == GrantLevel.None
+                ? EditDecision.Deny(EditDenyReason.NoGrant)
+                : EditDecision.Deny(
+                    EditDenyReason.InsufficientGrantLevel,
+                    $"Наявний рівень гранта — {effective}; для затвердження потрібен {GrantLevel.Approve}.");
+        }
+
+        return EditDecision.Allow();
     }
 
     /// <summary>Чи можна повернути поданий/затверджений аркуш у <c>Draft</c>.</summary>
@@ -236,16 +326,97 @@ public static class EditRules
             return EditDecision.Deny(EditDenyReason.SimulationReadOnly);
         }
 
+        if (profile.IsIntegrationWriter)
+        {
+            return IntegrationIsNotAWorkflowActor("повернення в роботу");
+        }
+
+        if (context.ProjectStatus == ProjectStatus.Archived)
+        {
+            return EditDecision.Deny(EditDenyReason.ProjectArchived);
+        }
+
+        if (context.IsArchiving)
+        {
+            return EditDecision.Deny(EditDenyReason.ArchivingInProgress);
+        }
+
         if (context.SheetStatus is not (DocumentStatus.Submitted or DocumentStatus.Approved))
         {
             return EditDecision.Deny(
                 EditDenyReason.BusinessRule, $"Аркуш у стані {context.SheetStatus}, а не Submitted/Approved.");
         }
 
-        return Effective(profile, context) >= GrantLevel.Approve
-            ? EditDecision.Allow()
-            : EditDecision.Deny(EditDenyReason.NoGrant);
+        // ⛔ Та сама різниця причин, що в CanApprove: грант ВІДСУТНІЙ і грант
+        // Є, але нижчий за Approve, — не одне й те саме для користувача.
+        var effective = Effective(profile, context);
+        if (effective < GrantLevel.Approve)
+        {
+            return effective == GrantLevel.None
+                ? EditDecision.Deny(EditDenyReason.NoGrant)
+                : EditDecision.Deny(
+                    EditDenyReason.InsufficientGrantLevel,
+                    $"Наявний рівень гранта — {effective}; для повернення в роботу потрібен {GrantLevel.Approve}.");
+        }
+
+        return EditDecision.Allow();
     }
+
+    /// <summary>Відмова інтеграції в дії робочого процесу.</summary>
+    /// <param name="action">Назва дії для подробиці.</param>
+    /// <remarks>
+    /// ⛔ Окремо й ДО гранта, а не «через» <see cref="Effective"/> (там у
+    /// інтеграції <c>Write</c>, нижче порога цих дій): поріг — властивість
+    /// рівнів, яку можна переставити, а відповідальність за звіт перед
+    /// перевіряльником — ні. Подати, затвердити чи повернути може лише людина.
+    /// </remarks>
+    private static EditDecision IntegrationIsNotAWorkflowActor(string action)
+        => EditDecision.Deny(
+            EditDenyReason.NoGrant,
+            $"Технічний запис інтеграції лише пише значення збору; {action} — дія людини.");
+
+    /// <summary>Чи бачить профіль ресурс документа (аркуш, таблицю, колонку) — S6.</summary>
+    /// <param name="profile">Профіль прав.</param>
+    /// <param name="projectId">Проєкт документа.</param>
+    /// <param name="sheetDefId">Аркуш.</param>
+    /// <param name="tableDefId">Таблиця.</param>
+    /// <param name="columnDefId">Колонка; <c>0</c> — рішення про таблицю цілком.</param>
+    /// <remarks>
+    /// ⛔ S6 (enterprise-аудит безпеки, 2026-09-28). Читання дивилося лише на
+    /// рівень ПРОЄКТУ (<c>CanReadDocumentAsync</c>), і <c>IsDeny</c> на аркуш,
+    /// таблицю чи колонку лише сірив редагування: значення віддавав і зріз, і
+    /// порівняння версій. ФВ-6.6 — «<c>IsDeny</c> виграє завжди, на будь-якому
+    /// рівні» — стосується рівня доступу загалом, а не лише запису.
+    ///
+    /// ⚠ Те саме формулювання, що й для запису (<see cref="Effective"/>), лише з
+    /// порогом <see cref="GrantLevel.Read"/>: друга копія правила «заборона →
+    /// найдрібніший грант → проєкт» розійшлася б із першою на першій же правці.
+    /// Стан періоду, аркуша й колонки тут НЕ беруть участі — закрите й подане
+    /// лишаються видимими.
+    /// </remarks>
+    public static bool CanRead(AccessProfile profile, int projectId, int sheetDefId, int tableDefId, int columnDefId)
+        => CanReadIn(profile, projectId, sheetDefId, sheetCode: null, tableDefId, columnDefId, period: null);
+
+    /// <summary>Те саме, з кодом аркуша й періодом — для ролей, звужених ними (D-214).</summary>
+    /// <param name="profile">Профіль прав.</param>
+    /// <param name="projectId">Проєкт документа.</param>
+    /// <param name="sheetDefId">Аркуш.</param>
+    /// <param name="sheetCode">Код аркуша; <c>null</c> — невідомий.</param>
+    /// <param name="tableDefId">Таблиця.</param>
+    /// <param name="columnDefId">Колонка; <c>0</c> — рішення про таблицю цілком.</param>
+    /// <param name="period">Період; <c>null</c> — рішення не про період.</param>
+    public static bool CanReadIn(
+        AccessProfile profile, int projectId, int sheetDefId, string? sheetCode, int tableDefId, int columnDefId,
+        PeriodKey? period)
+        => Effective(profile, default(CellAccessContext) with
+        {
+            ProjectId = projectId,
+            SheetDefId = sheetDefId,
+            TableDefId = tableDefId,
+            ColumnDefId = columnDefId,
+            SheetCode = sheetCode,
+            Period = period,
+        }) >= GrantLevel.Read;
 
     /// <summary>
     /// Ефективний рівень: найдрібніший оголошений рівень перемагає, заборона —
@@ -275,19 +446,101 @@ public static class EditRules
             (ResourceKind.Column, context.ColumnDefId),
         };
 
+        // ⛔ ФВ-6.14: гранти й заборони ролей з областю дії — лише з ЦЬОГО
+        // проєкту (див. `AccessProfile.Scoped`). Заборона ролі з областю діє
+        // лише в її області, але там — так само «виграє завжди».
+        profile.Scoped.TryGetValue(context.ProjectId, out var scoped);
+
+        // ⛔ D-214: ролі, звужені аркушами чи періодами, — лише ті шари, чия
+        // область містить аркуш і період рішення. Поза ними роль для цього
+        // рішення не існує: ні її грантів, ні її заборон.
+        var layers = scoped is null || scoped.Narrowed.Count == 0
+            ? []
+            : scoped.Narrowed.Where(l => l.AppliesTo(context.SheetCode, context.Period)).ToList();
+
         foreach (var (kind, id) in scopes)
         {
-            if (profile.Denies.Contains($"{kind}:{id}"))
+            var key = $"{kind}:{id}";
+            if (profile.Denies.Contains(key)
+                || (scoped is not null && scoped.Denies.Contains(key))
+                || layers.Exists(l => l.Denies.Contains(key)))
             {
                 return GrantLevel.None;
             }
         }
 
-        // Від найдрібнішого до найширшого: перший оголошений і виграє.
+        // ⛔ Інтеграція: `Write` — і рівно `Write`, ПІСЛЯ заборон. Сюди рішення
+        // доходить лише тоді, коли всі заборони комірки (закритий період,
+        // поданий/затверджений аркуш, обчислювана чи readonly колонка, вікно
+        // доступу) уже пропустили — у `CanEdit` рівень рахується ОСТАННІМ, а
+        // правила періоду (`PeriodAccessRules`) застосовує служба поверх
+        // дозволу. Явна заборона на ресурс (`IsDeny` вище) діє й на інтеграцію:
+        // це спосіб адміністратора вимкнути запис збору в конкретний проєкт.
+        //
+        // ⚠ Не вище за `Write`, навіть якщо в запису є ширший грант: подання,
+        // затвердження й повернення в роботу — дії людини.
+        if (profile.IsIntegrationWriter)
+        {
+            return GrantLevel.Write;
+        }
+
+        // ⛔ S2 (enterprise-аудит безпеки, 2026-09-28). Грант на аркуш, таблицю
+        // чи колонку діє ЛИШЕ в проєкті, який користувач бачить (грант на
+        // проєкт ≥ Read). Причина — модель даних, а не смак: `SheetDefId`,
+        // `TableDefId`, `ColumnDefId` — ідентифікатори ВЕРСІЇ ШАБЛОНУ, а версію
+        // ділять усі проєкти шаблону (клон копіює `TemplateVersionId`), і в
+        // `sec.ResourceGrant` немає `ProjectId`. Без цієї умови `Sheet:S =
+        // Approve`, виданий «для проєкту A», затверджував той самий аркуш у
+        // проєкті B, на який у людини не було жодного гранта.
+        //
+        // ⚠ Звужує, а не розширює: дрібніший грант і далі може ЗНИЗИТИ рівень
+        // проєкту (колонка Read під проєктом Manage) чи ПІДНЯТИ його (аркуш
+        // Approve під проєктом Read) — але лише всередині видимого проєкту.
+        // Той самий поріг, що й `CanReadDocumentAsync`: невидимий документ не
+        // може бути редагованим.
+        //
+        // ⚠ Прив'язати грант до КОНКРЕТНОГО проєкту (а не до «будь-якого
+        // видимого») без колонки `ProjectId` у гранті неможливо — це окрема
+        // зміна схеми.
+        //
+        // ⚠ D-214: грант на проєкт від звуженої ролі відкриває проєкт лише в
+        // межах її аркушів і періодів — тобто лише тоді, коли її шар діє тут.
+        var projectKey = $"{ResourceKind.Project}:{context.ProjectId}";
+        var projectVisible =
+            (profile.Grants.TryGetValue(projectKey, out var projectLevel) && projectLevel >= GrantLevel.Read)
+            || layers.Exists(l => l.Grants.TryGetValue(projectKey, out var layerLevel) && layerLevel >= GrantLevel.Read);
+
+        if (!projectVisible)
+        {
+            return GrantLevel.None;
+        }
+
+        // Від найдрібнішого до найширшого: перший оголошений і виграє. На
+        // одному рівні гранти ролей без області, з областю цього проєкту й
+        // звужених шарів, що діють тут, складаються так само, як дві ролі без
+        // області, — ширший рівень.
         for (var i = scopes.Length - 1; i >= 0; i--)
         {
             var (kind, id) = scopes[i];
-            if (profile.Grants.TryGetValue($"{kind}:{id}", out var level))
+            var key = $"{kind}:{id}";
+            var found = profile.Grants.TryGetValue(key, out var level);
+
+            if (scoped is not null && scoped.Grants.TryGetValue(key, out var scopedLevel))
+            {
+                level = found && level > scopedLevel ? level : scopedLevel;
+                found = true;
+            }
+
+            foreach (var layer in layers)
+            {
+                if (layer.Grants.TryGetValue(key, out var layerLevel))
+                {
+                    level = found && level > layerLevel ? level : layerLevel;
+                    found = true;
+                }
+            }
+
+            if (found)
             {
                 return level;
             }

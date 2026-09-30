@@ -75,6 +75,9 @@ public sealed class CloneProjectTests
                 Permissions: ["Project.Manage"], DangerousPermissions: [])]);
         _users.ListGrantsAsync(ManagerRoleId, Arg.Any<CancellationToken>())
             .Returns(new List<ResourceGrantDto>());
+
+        // Грант власності — під UPDLOCK на рядку ролі.
+        _users.LockRoleForUpdateAsync(ManagerRoleId, Arg.Any<CancellationToken>()).Returns(true);
     }
 
     private readonly IAccessDecisionService _access = Substitute.For<IAccessDecisionService>();
@@ -203,8 +206,12 @@ public sealed class CloneProjectTests
         // ⛔ Q-179 (аудит фази 2, авторизація). Глобальне `Project.Manage`
         // саме по собі не давало права клонувати БУДЬ-ЯКИЙ проєкт — потрібен
         // грант на КОНКРЕТНЕ джерело.
+        // ⚠ S17: грант Read — джерело видиме, бракує рівня Manage (без гранта — 404).
         _access.BuildProfileAsync(9, Arg.Any<CancellationToken>())
-            .Returns(new AccessBuilder { UserId = 9 }.Permission("Project.Manage").Build());
+            .Returns(new AccessBuilder { UserId = 9 }
+                .Permission("Project.Manage")
+                .Grant(ResourceKind.Project, 1, GrantLevel.Read)
+                .Build());
 
         var denied = await Assert.ThrowsAsync<Application.Errors.AccessDeniedException>(
             () => Handler().HandleAsync(1, "KASH_2027", CancellationToken.None));

@@ -35,9 +35,26 @@
     Скільки вільного місця вимагати на диску даних; передається в
     `setup-dev-db.ps1`. Не задано — обчислюється за профілем; `0` — без перевірки.
 
+.PARAMETER ExistingDatabase
+    Прогнати сценарій на НАЯВНІЙ базі (перевірка оновлення, CLAUDE.md
+    «✎ 2026-09-29»): без розгортання, без позначки тимчасової бази і без її
+    видалення наприкінці. Схему заздалегідь оновлює
+    `setup-dev-db.ps1 -Upgrade` — окремим кроком, щоб його результат було
+    видно окремо. Кроки, що мають сенс лише на свіжій базі (зміна разового
+    пароля bootstrap), пропускаються з рядком «пропущено: наявна база»;
+    роль і оператор створюються з унікальним суфіксом, поданий попереднім
+    прогоном аркуш повертається в роботу (`Document.Reopen`), а записані
+    значення унікальні — інакше «читання назад» і книга знаходили б старі.
+
+.PARAMETER AdminPassword
+    Лише з `-ExistingDatabase`: чинний пароль `bootstrap`. Умовчання —
+    пароль, який сам цей сценарій ставить bootstrap на свіжій базі
+    (крок «зміна разового пароля»), тобто база після звичайного прогону.
+
 .EXAMPLE
     powershell -File tools/smoke.ps1
     powershell -File tools/smoke.ps1 -Server localhost -DataPath F:\EcrData
+    powershell -File tools/smoke.ps1 -Server localhost -Database EcrUpgrade -ExistingDatabase
 #>
 [CmdletBinding()]
 param(
@@ -49,7 +66,12 @@ param(
     # запуск без параметра поводиться рівно як раніше (умовчання вирішує
     # `setup-dev-db.ps1`, а не дублюється тут і не розходиться з ним).
     [string] $DataPath,
-    [double] $RequireFreeGb = -1
+    [double] $RequireFreeGb = -1,
+
+    # ⚠ Див. `.PARAMETER ExistingDatabase`. Без перемикача поведінка рівно та
+    # сама, що й до його появи.
+    [switch] $ExistingDatabase,
+    [string] $AdminPassword = 'Smoke-Real-2026!'
 )
 
 # ⚠ Масив аргументів, а не сплат: `setup-dev-db.ps1` викликається окремим
@@ -69,6 +91,33 @@ $root = Split-Path -Parent $PSScriptRoot
 $base = "http://localhost:$Port"
 $password = 'Smoke-Bootstrap-2026!'
 $step = 0
+
+# ⚠ На наявній базі роль `SmokeOperator` і користувач `smoke` уже можуть
+# існувати (попередній прогін), а записане значення — уже лежати в комірці.
+# Тому імена й значення унікальні на прогін: повторне створення дало б 409, а
+# «читання назад» знайшло б СТАРЕ число навіть тоді, коли запис не пройшов.
+$roleCode = 'SmokeOperator'
+$operatorName = 'smoke'
+$writtenNumber = [decimal] 4242.42
+$writtenText = 'наскрізна перевірка'
+if ($ExistingDatabase) {
+    $stamp = (Get-Date).ToString('yyMMddHHmmss')
+    $roleCode = "SmokeOperator$stamp"
+    $operatorName = "smoke$stamp"
+    $writtenNumber = [decimal] ('{0}.{1:D2}' -f (Get-Random -Minimum 1000 -Maximum 9999), (Get-Random -Minimum 1 -Maximum 99))
+    $writtenText = "наскрізна перевірка $stamp"
+
+    if ($PSBoundParameters.ContainsKey('DataPath') -or $PSBoundParameters.ContainsKey('RequireFreeGb')) {
+        Write-Host '-DataPath/-RequireFreeGb ігноруються: з -ExistingDatabase розгортання немає.' -ForegroundColor Yellow
+    }
+}
+
+function Skip {
+    param([string] $Name)
+
+    $script:step++
+    Write-Host ("  {0,2}. {1} — пропущено: наявна база" -f $script:step, $Name) -ForegroundColor DarkGray
+}
 
 function Step {
     param([string] $Name)
@@ -92,7 +141,8 @@ function Call {
         [string] $Method,
         [string] $Path,
         $Body,
-        [int[]] $Expect = @(200, 201, 204)
+        [int[]] $Expect = @(200, 201, 204),
+        [hashtable] $Headers
     )
 
     $arguments = @{
@@ -102,6 +152,8 @@ function Call {
         UseBasicParsing = $true
         TimeoutSec      = 120
     }
+
+    if ($null -ne $Headers) { $arguments.Headers = $Headers }
 
     if ($null -ne $Body) {
         $arguments.ContentType = 'application/json; charset=utf-8'
@@ -129,37 +181,67 @@ Write-Host ''
 Write-Host "Наскрізний сценарій на базі $Database" -ForegroundColor Cyan
 
 # ── Розгортання ──────────────────────────────────────────────────────────
-Step 'чиста база і розгортання через sqlcmd'
-# ⚠ `-Documents 1` не для обсягу, а заради СТРУКТУРИ ШАБЛОНУ: створити
-# аркуші, таблиці й колонки через API неможливо — структура приходить із
-# `tools/Ecr.Bootstrap.Excel`, який поки заглушка. Це відома межа сценарію, а
-# не спрощення: усе, що після структури, іде саме по HTTP.
-$previousEap = $ErrorActionPreference
-$ErrorActionPreference = 'Continue'
-try {
-    & powershell -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'setup-dev-db.ps1') `
-        -Server $Server -Database $Database -Documents 1 -BootstrapPassword $password @setupExtra | Out-Null
-}
-finally {
-    $ErrorActionPreference = $previousEap
-}
-if ($LASTEXITCODE -ne 0) { Fail 'розгортання не пройшло' }
+if ($ExistingDatabase) {
+    # ⚠ Схему тут НЕ оновлюємо: це робить `setup-dev-db.ps1 -Upgrade` окремим
+    # кроком, і його результат (міграції, скрипти, звіт сіду) мусить бути
+    # видно окремо від результату сценарію. Лише складання: застосунок нижче
+    # іде з `--no-build`, і без нього виконалася б попередня збірка.
+    Step 'наявна база: без розгортання, лише складання дерева'
+    $previousEap = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $exists = (& sqlcmd -S $Server -E -C -b -h -1 -W -d master `
+            -Q "SET NOCOUNT ON; SELECT CASE WHEN DB_ID('$Database') IS NULL THEN 0 ELSE 1 END;") `
+            | Select-Object -Last 1
+    }
+    finally {
+        $ErrorActionPreference = $previousEap
+    }
+    if ("$exists".Trim() -ne '1') { Fail "бази $Database на $Server немає, а -ExistingDatabase її не створює" }
 
-# ⛔ Q-222 (аудит): без цієї позначки прибирання нижче видаляло б БУДЬ-ЯКУ
-# базу, названу в `-Database`, — включно з чиєюсь справжньою dev-базою
-# (`setup-dev-db.ps1` так само обслуговує персистентні бази розробників,
-# не лише одноразові). Той самий сторож, що вже в `e2e-stand.ps1`/
-# `br07-load-test.ps1`.
-$previousEapTag = $ErrorActionPreference
-$ErrorActionPreference = 'Continue'
-try {
-    & sqlcmd -S $Server -E -C -b -d $Database `
-        -Q "EXEC sys.sp_addextendedproperty @name = N'Ecr_Smoke_Temp', @value = 1;" | Out-Null
+    $previousEap = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        & dotnet build (Join-Path $root 'Ecr.sln') -v q --nologo | Out-Null
+    }
+    finally {
+        $ErrorActionPreference = $previousEap
+    }
+    if ($LASTEXITCODE -ne 0) { Fail 'складання не пройшло' }
 }
-finally {
-    $ErrorActionPreference = $previousEapTag
+else {
+    Step 'чиста база і розгортання через sqlcmd'
+    # ⚠ `-Documents 1` не для обсягу, а заради СТРУКТУРИ ШАБЛОНУ: створити
+    # аркуші, таблиці й колонки через API неможливо — структура приходить із
+    # `tools/Ecr.Bootstrap.Excel`, який поки заглушка. Це відома межа сценарію, а
+    # не спрощення: усе, що після структури, іде саме по HTTP.
+    $previousEap = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        & powershell -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'setup-dev-db.ps1') `
+            -Server $Server -Database $Database -Documents 1 -BootstrapPassword $password @setupExtra | Out-Null
+    }
+    finally {
+        $ErrorActionPreference = $previousEap
+    }
+    if ($LASTEXITCODE -ne 0) { Fail 'розгортання не пройшло' }
+
+    # ⛔ Q-222 (аудит): без цієї позначки прибирання нижче видаляло б БУДЬ-ЯКУ
+    # базу, названу в `-Database`, — включно з чиєюсь справжньою dev-базою
+    # (`setup-dev-db.ps1` так само обслуговує персистентні бази розробників,
+    # не лише одноразові). Той самий сторож, що вже в `e2e-stand.ps1`/
+    # `br07-load-test.ps1`.
+    $previousEapTag = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        & sqlcmd -S $Server -E -C -b -d $Database `
+            -Q "EXEC sys.sp_addextendedproperty @name = N'Ecr_Smoke_Temp', @value = 1;" | Out-Null
+    }
+    finally {
+        $ErrorActionPreference = $previousEapTag
+    }
+    if ($LASTEXITCODE -ne 0) { Fail 'не вдалося позначити тимчасову базу' }
 }
-if ($LASTEXITCODE -ne 0) { Fail 'не вдалося позначити тимчасову базу' }
 
 $connection = "Server=$Server;Database=$Database;Trusted_Connection=True;TrustServerCertificate=True"
 $log = Join-Path $root 'artifacts/smoke.api.log'
@@ -172,6 +254,11 @@ $env:ASPNETCORE_URLS = $base
 # по HTTP не надсилається — вхід проходив би, а наступний виклик отримував 401.
 # Це НЕ послаблення проду: змінна діє лише на цей тимчасовий процес.
 $env:ECR_Auth__RequireHttps = 'false'
+
+# ⛔ S11: процес іде без launch-профілю, тобто в Production, а там без
+# сертифіката Data Protection застосунок не стартує. Одноразовий стенд — явна
+# згода на незахищене кільце (тоді старт пише Critical, а db — Degraded).
+$env:ECR_Auth__DataProtection__AllowUnprotectedKeys = 'true'
 
 Step 'старт застосунку'
 $api = Start-Process -PassThru -WindowStyle Hidden dotnet `
@@ -196,49 +283,70 @@ try {
     if (-not $ready) { Fail "застосунок не піднявся; лог: $log" }
 
     # ── Первинне налаштування ────────────────────────────────────────────
-    Step 'вхід bootstrap разовим паролем'
-    Call POST '/api/v1/login/local' @{ userName = 'bootstrap'; password = $password } | Out-Null
+    if ($ExistingDatabase) {
+        # ⚠ Разовий пароль bootstrap змінено ще першим прогоном: вхід — чинним
+        # паролем, і саме він доводить, що оновлення не зламало облікові записи.
+        Step 'вхід bootstrap чинним паролем'
+        Call POST '/api/v1/login/local' @{ userName = 'bootstrap'; password = $AdminPassword } | Out-Null
+        Call GET '/api/v1/me' | Out-Null
 
-    Step 'зміна разового пароля'
-    Call POST '/api/v1/auth/change-password' `
-        @{ currentPassword = $password; newPassword = 'Smoke-Real-2026!' } | Out-Null
+        Skip 'зміна разового пароля'
+        Skip 'вхід новим паролем одразу після зміни'
+    }
+    else {
+        Step 'вхід bootstrap разовим паролем'
+        Call POST '/api/v1/login/local' @{ userName = 'bootstrap'; password = $password } | Out-Null
 
-    # ⛔ Вхід ОДРАЗУ після зміни: `A7-21` — кеш штампа тримав старе значення,
-    # і застосунок виходив із сеансу, який щойно створив.
-    Step 'вхід новим паролем одразу після зміни'
-    $session = New-Object Microsoft.PowerShell.Commands.WebRequestSession
-    Call POST '/api/v1/login/local' @{ userName = 'bootstrap'; password = 'Smoke-Real-2026!' } | Out-Null
-    Call GET '/api/v1/me' | Out-Null
+        Step 'зміна разового пароля'
+        Call POST '/api/v1/auth/change-password' `
+            @{ currentPassword = $password; newPassword = 'Smoke-Real-2026!' } | Out-Null
+
+        # ⛔ Вхід ОДРАЗУ після зміни: `A7-21` — кеш штампа тримав старе значення,
+        # і застосунок виходив із сеансу, який щойно створив.
+        Step 'вхід новим паролем одразу після зміни'
+        $session = New-Object Microsoft.PowerShell.Commands.WebRequestSession
+        Call POST '/api/v1/login/local' @{ userName = 'bootstrap'; password = 'Smoke-Real-2026!' } | Out-Null
+        Call GET '/api/v1/me' | Out-Null
+    }
 
     Step 'роль із небезпечними правами'
+    # ⚠ Три права `Report.*` — заради кроку «зріз звітності» наприкінці.
+    # Вивантаження зрізу вимагає саме `Report.Export`, окремо від
+    # `Report.ViewRegulatory`: книга ВИХОДИТЬ ІЗ СИСТЕМИ (`R7`), і сценарій
+    # мусить іти тим самим шляхом, що й оператор, а не в обхід права.
+    # ✎ 2026-09-29: плюс `Report.ViewSnapshot` — вміст зрізу (рядки й книга)
+    # за окремим правом, рішення людини.
+    $permissionCodes = @(
+        'Template.View', 'Template.Edit', 'Template.Publish',
+        'Document.View', 'Document.Create', 'Document.Export',
+        'Project.Manage', 'Period.Configure',
+        'Calculation.View', 'Calculation.Publish', 'Calculation.Recalculate',
+        'Report.ViewRegulatory', 'Report.BuildSnapshot', 'Report.Export', 'Report.ViewSnapshot',
+        'Security.ManageUsers', 'Security.ManageRoles', 'System.ViewHealth')
+
+    # ⚠ Наявна база: аркуш, поданий попереднім прогоном, треба повернути в
+    # роботу, а відкликати подання може лише його автор (`RecallSheetHandler`),
+    # тобто не новий оператор. Тому — `Reopen`, окреме право зі своїм слідом.
+    if ($ExistingDatabase) { $permissionCodes += 'Document.Reopen' }
+
     Call POST '/api/v1/roles' @{
-        code            = 'SmokeOperator'
+        code            = $roleCode
         nameL10n        = @{ en = 'Smoke operator' }
-        # ⚠ Три права `Report.*` — заради кроку «зріз звітності» наприкінці.
-        # Вивантаження зрізу вимагає саме `Report.Export`, окремо від
-        # `Report.ViewRegulatory`: книга ВИХОДИТЬ ІЗ СИСТЕМИ (`R7`), і сценарій
-        # мусить іти тим самим шляхом, що й оператор, а не в обхід права.
-        permissionCodes = @(
-            'Template.View', 'Template.Edit', 'Template.Publish',
-            'Document.View', 'Document.Create', 'Document.Export',
-            'Project.Manage', 'Period.Configure',
-            'Calculation.View', 'Calculation.Publish', 'Calculation.Recalculate',
-            'Report.ViewRegulatory', 'Report.BuildSnapshot', 'Report.Export',
-            'Security.ManageUsers', 'Security.ManageRoles', 'System.ViewHealth')
+        permissionCodes = $permissionCodes
     } | Out-Null
 
     $roles = Call GET '/api/v1/roles'
-    $roleId = ($roles | Where-Object { $_.code -eq 'SmokeOperator' }).id
+    $roleId = ($roles | Where-Object { $_.code -eq $roleCode }).id
     if (-not $roleId) { Fail 'роль не створилася' }
 
     Step 'іменований користувач'
     Call POST '/api/v1/users' @{
-        userName        = 'smoke'
+        userName        = $operatorName
         provider        = 'Local'
         sid             = $null
         displayName     = 'Smoke operator'
-        initialPassword = 'Smoke-Operator-2026!'
-        roleCodes       = @('SmokeOperator')
+        initialPassword = 'Smk-Operator-2026!'
+        roleCodes       = @($roleCode)
     } | Out-Null
 
     # ⚠ Далі все робить ОПЕРАТОР. Bootstrap має рівно два права (`D-121`): він
@@ -246,24 +354,28 @@ try {
     # проєкт дає 403, і це правильно.
     Step 'вхід оператором і зміна разового пароля'
     $session = New-Object Microsoft.PowerShell.Commands.WebRequestSession
-    Call POST '/api/v1/login/local' @{ userName = 'smoke'; password = 'Smoke-Operator-2026!' } | Out-Null
+    Call POST '/api/v1/login/local' @{ userName = $operatorName; password = 'Smk-Operator-2026!' } | Out-Null
     Call POST '/api/v1/auth/change-password' `
-        @{ currentPassword = 'Smoke-Operator-2026!'; newPassword = 'Smoke-Work-2026!' } | Out-Null
+        @{ currentPassword = 'Smk-Operator-2026!'; newPassword = 'Smk-Work-2026!' } | Out-Null
 
     $session = New-Object Microsoft.PowerShell.Commands.WebRequestSession
-    Call POST '/api/v1/login/local' @{ userName = 'smoke'; password = 'Smoke-Work-2026!' } | Out-Null
+    Call POST '/api/v1/login/local' @{ userName = $operatorName; password = 'Smk-Work-2026!' } | Out-Null
 
     # ⛔ Без гранта перелік порожній для всіх, включно з власником усіх прав
     # (`A7-22`). Оператор має `Security.ManageRoles` і видає грант своїй ролі.
     Step 'ресурсний грант на проєкт'
+    # ⛔ `If-Match` обов'язковий (без нього — 422): версія набору — `ETag`
+    # відповіді GET, як це робить екран грантів.
+    $grantsVersion = (Invoke-WebRequest -Uri "$base/api/v1/roles/$roleId/grants" -WebSession $session -UseBasicParsing -TimeoutSec 120).Headers['ETag']
+    if (-not $grantsVersion) { Fail "GET /api/v1/roles/$roleId/grants не віддав ETag" }
     Call PUT "/api/v1/roles/$roleId/grants" @{
         grants = @(@{ resourceKind = 'Project'; resourceId = 1; level = 'Manage'; isDeny = $false })
-    } | Out-Null
+    } -Headers @{ 'If-Match' = $grantsVersion } | Out-Null
 
     # ⚠ Грант прокручує штамп безпеки носіям ролі (`A7-23`) — сеанс треба
     # перевидати, як це зробить браузер, отримавши 401.
     $session = New-Object Microsoft.PowerShell.Commands.WebRequestSession
-    Call POST '/api/v1/login/local' @{ userName = 'smoke'; password = 'Smoke-Work-2026!' } | Out-Null
+    Call POST '/api/v1/login/local' @{ userName = $operatorName; password = 'Smk-Work-2026!' } | Out-Null
 
     Step 'проєкт видно у переліку'
     $projects = Call GET '/api/v1/projects'
@@ -295,6 +407,28 @@ try {
 
     $instance = $tables[10].tableInstanceId
 
+    # ⚠ Наявна база: аркуш міг бути поданий попереднім прогоном, і тоді запис
+    # і подання нижче дали б відмову стану, а не перевірку оновлення. Стан —
+    # з `sheetStates` документа за КОДОМ аркуша, як це робить екран документа.
+    if ($ExistingDatabase) {
+        Step 'повернення поданих аркушів у роботу (Document.Reopen)'
+        $states = $documents.items[0].sheetStates
+        $reopened = 0
+        foreach ($sheet in @($tables[10], $tables[0]) | Sort-Object sheetDefId -Unique) {
+            $state = $null
+            if ($states) { $state = $states.($sheet.sheetCode) }
+            if ($state -in @('Submitted', 'Approved')) {
+                Call POST "/api/v1/documents/$documentId/reopen" @{
+                    sheetDefId = $sheet.sheetDefId
+                    periodKey  = $periodKey
+                    reason     = "smoke -ExistingDatabase $stamp"
+                } | Out-Null
+                $reopened++
+            }
+        }
+        Write-Host "      повернуто аркушів: $reopened"
+    }
+
     Step 'зріз таблиці'
     $slice = Call GET "/api/v1/documents/$documentId/tables/$instance`?periodKey=$periodKey"
     if ($slice.rows.Count -eq 0) { Fail 'у зрізі немає рядків' }
@@ -305,13 +439,13 @@ try {
     Call PATCH "/api/v1/documents/$documentId/cells" @{
         tableInstanceId = $instance
         periodKey       = $periodKey
-        origin          = 'Manual'
+        origin          = 'UserEdit'
         rows            = @(@{
             rowKey      = $row.rowKey
             baseVersion = $row.rowVersion
             cells       = @(
-                @{ columnCode = 'C2'; value = 4242.42 },
-                @{ columnCode = 'C1'; value = 'наскрізна перевірка' })
+                @{ columnCode = 'C2'; value = $writtenNumber },
+                @{ columnCode = 'C1'; value = $writtenText })
         })
     } | Out-Null
 
@@ -326,7 +460,7 @@ try {
     $after = Call GET "/api/v1/documents/$documentId/tables/$instance`?periodKey=$periodKey"
     $written = ($after.rows | Where-Object { $_.rowKey -eq $row.rowKey }).cells.C2
 
-    if ([decimal] $written -ne [decimal] 4242.42) { Fail "прочитано '$written' замість 4242.42" }
+    if ([decimal] $written -ne $writtenNumber) { Fail "прочитано '$written' замість $writtenNumber" }
 
     # ⛔ Перерахунок і ЧЕКАННЯ КІНЦЕВОГО СТАНУ, а не самого лише `202`. Задача
     # ставилася в чергу з payload, що губив `ProjectId`, і `SaveChangesAsync`
@@ -424,7 +558,7 @@ try {
         if ($cells -lt 2) { Fail "у книзі $cells комірок" }
 
         $strings = Read-Entry 'xl/sharedStrings.xml'
-        if ($strings -notmatch 'наскрізна перевірка') {
+        if ($strings -notmatch [regex]::Escape($writtenText)) {
             Fail 'у книзі немає введеного значення'
         }
 
@@ -470,7 +604,11 @@ try {
     # Час побудови друкуємо завжди: «зелено, але 4 хвилини» — теж знахідка.
     Write-Host "      зріз побудовано за $([math]::Round($snapshotWait.Elapsed.TotalSeconds, 1)) с"
 
-    $snapshots = @(Call GET "/api/v1/reports/snapshots?projectId=$projectId&periodKey=$periodKey")
+    # ⛔ `ForEach-Object` розгортає масив. `ConvertFrom-Json` у Windows
+    # PowerShell 5.1 віддає JSON-масив ОДНИМ об'єктом, і `@(…)` загортав його
+    # ще раз: `$snapshots[0]` був усім переліком. На свіжій базі зріз один, і
+    # це не видно; на наявній їх два, і шлях ставав `/snapshots/2 1/rows` → 404.
+    $snapshots = @(Call GET "/api/v1/reports/snapshots?projectId=$projectId&periodKey=$periodKey" | ForEach-Object { $_ })
     if ($snapshots.Count -eq 0) { Fail 'зрізів немає, хоча побудова відзвітувала успіх' }
 
     # Перелік іде найновішими вперед — щойно побудований зріз перший.
@@ -561,7 +699,9 @@ finally {
         $ErrorActionPreference = $previousEapExists
     }
 
-    if ($exists -eq '1') {
+    # ⛔ `-ExistingDatabase`: база чужа за визначенням — навіть якщо на ній
+    # лишилася позначка `Ecr_Smoke_Temp` від прогону, що її колись створив.
+    if ($exists -eq '1' -and -not $ExistingDatabase) {
         $previousEapMine = $ErrorActionPreference
         $ErrorActionPreference = 'Continue'
         try {

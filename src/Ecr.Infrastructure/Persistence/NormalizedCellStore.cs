@@ -21,8 +21,12 @@ namespace Ecr.Infrastructure.Persistence;
 /// Ці числа і є критерієм гейта Етапу 0: якщо не проходить після індексів і
 /// стиснення — вибірково по таблицях вмикається гібрид, а не глобально.
 /// </remarks>
-public sealed class NormalizedCellStore(EcrDbContext db) : ICellStore
+public sealed class NormalizedCellStore(EcrDbContext db, ArchiveAwareCellReader? archive = null) : ICellStore
 {
+    // ⚠ F-13. `archive` необов'язковий — той самий компроміс, що й у
+    // `RowStore` (див. коментар там): десятки тестів конструюють
+    // `NormalizedCellStore(db)` одним аргументом поза списком файлів цього
+    // фіксу. `null` вимикає архівний фолбек, не ламає виклик.
     /// <summary>
     /// Скільки адрес іде в один запит там, де кожна несе власні параметри.
     /// </summary>
@@ -188,15 +192,109 @@ public sealed class NormalizedCellStore(EcrDbContext db) : ICellStore
     public int LastUpsertRowsAffected { get; private set; }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// ⚠ O3b (<c>WR-05</c>). Період викликачеві невідомий, тож екземпляр
+    /// шукається через <see cref="RowStore.TableInstancesByIdQuery"/> — seek на
+    /// кожну партицію замість скану <c>UQ_TableInstance</c> по всіх
+    /// (<c>EcrPerfI2</c>: 61 читання <c>doc.TableInstance</c> замість 1 984,
+    /// ЦП 7 мс замість 101). Той запит не бачить екземпляра, чийого періоду
+    /// немає в <c>doc.Period</c>; щоб зріз від цього не спорожнів, порожній
+    /// результат перевіряється ще одним seek'ом, і лише коли екземпляра там
+    /// немає — колишнім запитом без ключа. Непорожній зріз, як і раніше, — ОДИН
+    /// запит.
+    /// </remarks>
     public async Task<IReadOnlyList<CellRecord>> ReadSliceAsync(long tableInstanceId, CancellationToken ct)
     {
-        // ОДИН запит. TableInstance приєднаний не заради своїх полів, а заради
-        // PeriodKey: він дає оптимізатору кореляцію, за якою відсікається
-        // партиція. Без нього довелося б або читати період окремим запитом,
-        // або сканувати всі 25 партицій.
-        var rows = await (
-            from instance in db.TableInstances.AsNoTracking()
-            where instance.Id == tableInstanceId
+        IReadOnlyCollection<long> ids = [tableInstanceId];
+
+        var rows = await SliceRowsAsync(RowStore.TableInstancesByIdQuery(db, ids), ct).ConfigureAwait(false);
+
+        if (rows.Count == 0
+            && !await RowStore.TableInstancesByIdQuery(db, ids).AnyAsync(ct).ConfigureAwait(false))
+        {
+            // Екземпляра немає серед періодів `doc.Period` — або його немає
+            // взагалі (архів, неіснуючий Id), або його період без рядка
+            // періоду. Колишній запит без ключа розрізняє ці випадки так само,
+            // як до O3b.
+            rows = await SliceRowsAsync(
+                    db.TableInstances.AsNoTracking().Where(t => t.Id == tableInstanceId), ct)
+                .ConfigureAwait(false);
+        }
+
+        return await SliceOrArchiveAsync(tableInstanceId, rows, ct).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⚠ O3b: рівність за обома стовпцями ключа партиції
+    /// (<see cref="RowStore.TableInstancesInPeriodQuery"/>) — один seek в одній
+    /// партиції (<c>EcrPerfI2</c>: 2 читання замість 1 984, ЦП 6 мс замість 101).
+    /// </remarks>
+    public async Task<IReadOnlyList<CellRecord>> ReadSliceAsync(
+        long tableInstanceId, PeriodKey periodKey, CancellationToken ct)
+    {
+        var rows = await SliceRowsAsync(
+                RowStore.TableInstancesInPeriodQuery(db, [tableInstanceId], periodKey), ct)
+            .ConfigureAwait(false);
+
+        return await SliceOrArchiveAsync(tableInstanceId, rows, ct).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⚠ O3b: цей пакет лишився БЕЗ ключа партиції навмисно. Заміряно на
+    /// <c>EcrPerfI2</c> (90 екземплярів документо-періоду):
+    /// <see cref="RowStore.TableInstancesByIdQuery"/> дає 24 × 90 seek'ів —
+    /// 4 321 читання <c>doc.TableInstance</c> і ~700 мс ЦП проти 1 984 і ~440 мс
+    /// скану. Викликач, що знає період, бере перевантаження з
+    /// <see cref="PeriodKey"/> (181 читання, ~220 мс).
+    /// </remarks>
+    public async Task<IReadOnlyDictionary<long, IReadOnlyList<CellRecord>>> ReadSlicesAsync(
+        IReadOnlyList<long> tableInstanceIds, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(tableInstanceIds);
+        if (tableInstanceIds.Count == 0)
+        {
+            return new Dictionary<long, IReadOnlyList<CellRecord>>();
+        }
+
+        var rows = await SliceRowsAsync(
+                db.TableInstances.AsNoTracking().Where(t => tableInstanceIds.Contains(t.Id)), ct)
+            .ConfigureAwait(false);
+
+        return await SlicesOrArchiveAsync(tableInstanceIds, rows, ct).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyDictionary<long, IReadOnlyList<CellRecord>>> ReadSlicesAsync(
+        IReadOnlyList<long> tableInstanceIds, PeriodKey periodKey, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(tableInstanceIds);
+        if (tableInstanceIds.Count == 0)
+        {
+            return new Dictionary<long, IReadOnlyList<CellRecord>>();
+        }
+
+        var rows = await SliceRowsAsync(
+                RowStore.TableInstancesInPeriodQuery(db, tableInstanceIds, periodKey), ct)
+            .ConfigureAwait(false);
+
+        return await SlicesOrArchiveAsync(tableInstanceIds, rows, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Непорожні комірки невидалених рядків заданих екземплярів — ОДИН запит.
+    /// </summary>
+    /// <remarks>
+    /// TableInstance приєднаний не заради своїх полів, а заради PeriodKey: він
+    /// дає оптимізатору кореляцію, за якою відсікаються партиції
+    /// <c>doc.TableRow</c>/<c>doc.CellValue</c>. Партицію самого
+    /// <c>doc.TableInstance</c> відсікає лише предикат у
+    /// <paramref name="instances"/> — тому його вибирає викликач.
+    /// </remarks>
+    private Task<List<SliceRow>> SliceRowsAsync(
+        IQueryable<Domain.Entities.Documents.TableInstance> instances, CancellationToken ct)
+        => (from instance in instances
             join row in db.TableRows.AsNoTracking()
                 on new { P = instance.PeriodKeyValue, I = instance.Id }
                 equals new { P = row.PeriodKeyValue, I = row.TableInstanceId }
@@ -204,26 +302,64 @@ public sealed class NormalizedCellStore(EcrDbContext db) : ICellStore
                 on new { P = row.PeriodKeyValue, R = row.Id }
                 equals new { P = cell.PeriodKeyValue, R = cell.TableRowId }
             where !row.IsDeleted
-            select new
+            select new SliceRow
             {
-                cell.PeriodKeyValue,
-                cell.TableRowId,
-                cell.ColumnDefId,
-                cell.TableDefId,
-                cell.ValueString,
-                cell.ValueNumeric,
-                cell.ValueDate,
-                cell.ValueBool,
-                cell.ValueRegistryEntryId,
-                cell.ValueUnitId,
-                cell.IsCalculated,
-                cell.IsEmpty,
-            }).ToListAsync(ct).ConfigureAwait(false);
+                TableInstanceId = instance.Id,
+                PeriodKeyValue = cell.PeriodKeyValue,
+                TableRowId = cell.TableRowId,
+                ColumnDefId = cell.ColumnDefId,
+                TableDefId = cell.TableDefId,
+                ValueString = cell.ValueString,
+                ValueNumeric = cell.ValueNumeric,
+                ValueDate = cell.ValueDate,
+                ValueBool = cell.ValueBool,
+                ValueRegistryEntryId = cell.ValueRegistryEntryId,
+                ValueUnitId = cell.ValueUnitId,
+                IsCalculated = cell.IsCalculated,
+                IsEmpty = cell.IsEmpty,
+            }).ToListAsync(ct);
+
+    private async Task<IReadOnlyList<CellRecord>> SliceOrArchiveAsync(
+        long tableInstanceId, List<SliceRow> rows, CancellationToken ct)
+    {
+        if (rows.Count == 0 && archive is not null)
+        {
+            // ⚠ F-13. Гарячий джойн повернув нуль рядків — це і «зрізу
+            // немає взагалі», і «період заархівований» (`arc.usp_ArchiveYear`
+            // truncate'ить `doc.TableInstance`/`doc.TableRow`/`doc.CellValue`
+            // разом, тож сам `TableInstance` теж зникає з гарячої схеми, і
+            // подальший join у нього вже не потрапляє). Різницю видає лише
+            // запит до `arc.*`.
+            return await archive.ReadArchivedSliceAsync(tableInstanceId, ct).ConfigureAwait(false);
+        }
 
         // Порожніх комірок у базі не існує взагалі — клієнт бере
         // ColumnDef.DefaultValue (ФВ-3.8). Явна порожнеча — це рядок із
         // IsEmpty = 1, і він повертається (R-B4).
-        return [.. rows.Select(r => new CellRecord(
+        return [.. rows.Select(ToRecord)];
+    }
+
+    private async Task<IReadOnlyDictionary<long, IReadOnlyList<CellRecord>>> SlicesOrArchiveAsync(
+        IReadOnlyList<long> tableInstanceIds, List<SliceRow> rows, CancellationToken ct)
+    {
+        if (rows.Count == 0 && archive is not null)
+        {
+            // ⚠ F-13. Той самий слід архівації, що й у ReadSliceAsync поруч
+            // — і той самий фолбек: перевіряємо ВСІ запитані екземпляри
+            // разом, а не кожен окремо, бо порожній гарячий результат тут
+            // типово означає «весь батч з одного документа/періоду».
+            return await archive.ReadArchivedSlicesAsync(tableInstanceIds, ct).ConfigureAwait(false);
+        }
+
+        return rows
+            .GroupBy(r => r.TableInstanceId)
+            .ToDictionary(
+                g => g.Key,
+                IReadOnlyList<CellRecord> (g) => [.. g.Select(ToRecord)]);
+    }
+
+    private static CellRecord ToRecord(SliceRow r)
+        => new(
             new CellAddress(new PeriodKey(r.PeriodKeyValue), r.TableRowId, r.ColumnDefId),
             r.TableDefId,
             new CellValueData
@@ -236,64 +372,36 @@ public sealed class NormalizedCellStore(EcrDbContext db) : ICellStore
                 ValueUnitId = r.ValueUnitId,
                 IsCalculated = r.IsCalculated,
                 IsEmpty = r.IsEmpty,
-            }))];
-    }
+            });
 
-    /// <inheritdoc />
-    public async Task<IReadOnlyDictionary<long, IReadOnlyList<CellRecord>>> ReadSlicesAsync(
-        IReadOnlyList<long> tableInstanceIds, CancellationToken ct)
+    /// <summary>Рядок результату <see cref="SliceRowsAsync"/>.</summary>
+    private sealed class SliceRow
     {
-        ArgumentNullException.ThrowIfNull(tableInstanceIds);
-        if (tableInstanceIds.Count == 0)
-        {
-            return new Dictionary<long, IReadOnlyList<CellRecord>>();
-        }
+        public long TableInstanceId { get; init; }
 
-        var rows = await (
-            from instance in db.TableInstances.AsNoTracking()
-            where tableInstanceIds.Contains(instance.Id)
-            join row in db.TableRows.AsNoTracking()
-                on new { P = instance.PeriodKeyValue, I = instance.Id }
-                equals new { P = row.PeriodKeyValue, I = row.TableInstanceId }
-            join cell in db.CellValues.AsNoTracking()
-                on new { P = row.PeriodKeyValue, R = row.Id }
-                equals new { P = cell.PeriodKeyValue, R = cell.TableRowId }
-            where !row.IsDeleted
-            select new
-            {
-                instance.Id,
-                cell.PeriodKeyValue,
-                cell.TableRowId,
-                cell.ColumnDefId,
-                cell.TableDefId,
-                cell.ValueString,
-                cell.ValueNumeric,
-                cell.ValueDate,
-                cell.ValueBool,
-                cell.ValueRegistryEntryId,
-                cell.ValueUnitId,
-                cell.IsCalculated,
-                cell.IsEmpty,
-            }).ToListAsync(ct).ConfigureAwait(false);
+        public int PeriodKeyValue { get; init; }
 
-        return rows
-            .GroupBy(r => r.Id)
-            .ToDictionary(
-                g => g.Key,
-                IReadOnlyList<CellRecord> (g) => [.. g.Select(r => new CellRecord(
-                    new CellAddress(new PeriodKey(r.PeriodKeyValue), r.TableRowId, r.ColumnDefId),
-                    r.TableDefId,
-                    new CellValueData
-                    {
-                        ValueString = r.ValueString,
-                        ValueNumeric = r.ValueNumeric,
-                        ValueDate = r.ValueDate,
-                        ValueBool = r.ValueBool,
-                        ValueRegistryEntryId = r.ValueRegistryEntryId,
-                        ValueUnitId = r.ValueUnitId,
-                        IsCalculated = r.IsCalculated,
-                        IsEmpty = r.IsEmpty,
-                    }))]);
+        public long TableRowId { get; init; }
+
+        public int ColumnDefId { get; init; }
+
+        public int TableDefId { get; init; }
+
+        public string? ValueString { get; init; }
+
+        public decimal? ValueNumeric { get; init; }
+
+        public DateTime? ValueDate { get; init; }
+
+        public bool? ValueBool { get; init; }
+
+        public long? ValueRegistryEntryId { get; init; }
+
+        public int? ValueUnitId { get; init; }
+
+        public bool IsCalculated { get; init; }
+
+        public bool IsEmpty { get; init; }
     }
 
     /// <inheritdoc />
@@ -384,9 +492,47 @@ public sealed class NormalizedCellStore(EcrDbContext db) : ICellStore
     /// <c>RecalculationService</c>, який власної транзакції не відкриває) —
     /// поведінка та сама, що й раніше: коротка власна транзакція, свій коміт.
     /// </remarks>
-    public async Task ApplyAsync(CellChangeSet changes, CancellationToken ct)
+    public async Task<IReadOnlyDictionary<long, string>> ApplyAsync(CellChangeSet changes, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(changes);
+
+        return (await ApplyBatchAsync([changes], ct).ConfigureAwait(false))[changes.TableInstanceId];
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⚠ P8: єдина реалізація і для одного екземпляра (<see cref="ApplyAsync"/>),
+    /// і для книги імпорту. Ті самі чотири кроки в тому самому порядку —
+    /// захоплення, видалення, <c>MERGE</c>, «дотик», — але кожен ОДИН на весь
+    /// пакет: захоплення і «дотик» групуються за періодом (ключ партиції), а
+    /// видалення й <c>MERGE</c> адресують комірку повністю
+    /// (<c>PeriodKey, TableRowId, ColumnDefId</c>) і групування не потребують.
+    ///
+    /// ⚠ Транзакція — та сама, що й у поштучного (Q-243): ambient — приєднатися
+    /// й не комітити; немає — коротка власна на ВЕСЬ пакет.
+    /// </remarks>
+    public async Task<IReadOnlyDictionary<long, IReadOnlyDictionary<long, string>>> ApplyBatchAsync(
+        IReadOnlyCollection<CellChangeSet> changes, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(changes);
+
+        var sets = changes.ToList();
+        if (sets.Select(s => s.TableInstanceId).Distinct().Count() != sets.Count)
+        {
+            // ⚠ Два набори одного екземпляра поштучно дали б інше: другий
+            // звіряв би версії, які перший уже змінив. Злиття — справа викликача.
+            throw new ArgumentException("Екземпляр таблиці повторюється в пакеті змін.", nameof(changes));
+        }
+
+        LastUpsertRowsAffected = 0;
+
+        // ⚠ `WR-04` п. 4: нові версії рядків збирають самі «дотики» —
+        // захоплення і `TouchRowsAsync` — через `OUTPUT inserted.RowVersion`.
+        var versions = sets.ToDictionary(s => s.TableInstanceId, _ => new Dictionary<long, string>());
+        if (sets.Count == 0)
+        {
+            return Result(versions);
+        }
 
         var connection = (SqlConnection)db.Database.GetDbConnection();
         if (connection.State != ConnectionState.Open)
@@ -394,17 +540,18 @@ public sealed class NormalizedCellStore(EcrDbContext db) : ICellStore
             await connection.OpenAsync(ct).ConfigureAwait(false);
         }
 
-        LastUpsertRowsAffected = 0;
+        IReadOnlyList<CellAddress> deletes = sets.Count == 1 ? sets[0].Deletes : [.. sets.SelectMany(s => s.Deletes)];
+        IReadOnlyList<CellRecord> upserts = sets.Count == 1 ? sets[0].Upserts : [.. sets.SelectMany(s => s.Upserts)];
 
         var ambient = db.Database.CurrentTransaction;
         if (ambient is not null)
         {
             var joined = (SqlTransaction)ambient.GetDbTransaction();
-            await ClaimRowsAsync(connection, joined, changes, ct).ConfigureAwait(false);
-            await DeleteAsync(connection, joined, changes.Deletes, ct).ConfigureAwait(false);
-            LastUpsertRowsAffected = await UpsertAsync(connection, joined, changes.Upserts, ct).ConfigureAwait(false);
-            await TouchRowsAsync(connection, joined, changes, ct).ConfigureAwait(false);
-            return;
+            await ClaimRowsAsync(connection, joined, sets, versions, ct).ConfigureAwait(false);
+            await DeleteAsync(connection, joined, deletes, ct).ConfigureAwait(false);
+            LastUpsertRowsAffected = await UpsertAsync(connection, joined, upserts, ct).ConfigureAwait(false);
+            await TouchRowsAsync(connection, joined, sets, versions, ct).ConfigureAwait(false);
+            return Result(versions);
         }
 
         // ⚠ Транзакція коротка навмисно. Під RCSI кожна відкрита транзакція
@@ -412,12 +559,18 @@ public sealed class NormalizedCellStore(EcrDbContext db) : ICellStore
         // store так, що страждає вся база, а не лише цей запит (D-29).
         await using var tx = (SqlTransaction)await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
 
-        await ClaimRowsAsync(connection, tx, changes, ct).ConfigureAwait(false);
-        await DeleteAsync(connection, tx, changes.Deletes, ct).ConfigureAwait(false);
-        LastUpsertRowsAffected = await UpsertAsync(connection, tx, changes.Upserts, ct).ConfigureAwait(false);
-        await TouchRowsAsync(connection, tx, changes, ct).ConfigureAwait(false);
+        await ClaimRowsAsync(connection, tx, sets, versions, ct).ConfigureAwait(false);
+        await DeleteAsync(connection, tx, deletes, ct).ConfigureAwait(false);
+        LastUpsertRowsAffected = await UpsertAsync(connection, tx, upserts, ct).ConfigureAwait(false);
+        await TouchRowsAsync(connection, tx, sets, versions, ct).ConfigureAwait(false);
 
         await tx.CommitAsync(ct).ConfigureAwait(false);
+
+        return Result(versions);
+
+        static IReadOnlyDictionary<long, IReadOnlyDictionary<long, string>> Result(
+            Dictionary<long, Dictionary<long, string>> byInstance)
+            => byInstance.ToDictionary(p => p.Key, IReadOnlyDictionary<long, string> (p) => p.Value);
     }
 
     /// <summary>
@@ -466,21 +619,96 @@ public sealed class NormalizedCellStore(EcrDbContext db) : ICellStore
     /// <c>TableRow.Id</c>.
     /// </exception>
     private static async Task ClaimRowsAsync(
-        SqlConnection connection, SqlTransaction tx, CellChangeSet changes, CancellationToken ct)
+        SqlConnection connection,
+        SqlTransaction tx,
+        List<CellChangeSet> sets,
+        Dictionary<long, Dictionary<long, string>> newVersions,
+        CancellationToken ct)
     {
-        var expected = changes.ExpectedRowVersions;
-        if (expected is null || expected.Count == 0)
+        // ⚠ P8: заявлені версії УСІХ наборів пакета, згруповані за періодом
+        // набору (ключ партиції) — один захоплювальний UPDATE на чанк групи, а
+        // не на екземпляр. Власник рядка — екземпляр його набору.
+        var owner = new Dictionary<long, long>();
+        var groups = new Dictionary<int, List<KeyValuePair<long, string>>>();
+        var unfiltered = new List<KeyValuePair<long, string>>();
+
+        foreach (var set in sets)
+        {
+            if (set.ExpectedRowVersions is not { Count: > 0 } expected)
+            {
+                continue;
+            }
+
+            var periodKey = PeriodKeyOf(set);
+            var target = unfiltered;
+            if (periodKey is not null && !groups.TryGetValue(periodKey.Value, out target))
+            {
+                target = [];
+                groups[periodKey.Value] = target;
+            }
+
+            foreach (var pair in expected)
+            {
+                owner[pair.Key] = set.TableInstanceId;
+                target!.Add(pair);
+            }
+        }
+
+        var stale = new List<long>();
+        foreach (var (periodKey, claims) in groups.Select(g => ((int?)g.Key, g.Value)).Append((null, unfiltered)))
+        {
+            if (claims.Count > 0)
+            {
+                await ClaimGroupAsync(connection, tx, periodKey, claims, owner, newVersions, stale, ct)
+                    .ConfigureAwait(false);
+            }
+        }
+
+        if (stale.Count == 0)
         {
             return;
         }
 
-        var periodKey = PeriodKeyOf(changes);
+        // ⚠ Винний — ПЕРШИЙ у порядку входу набір із застарілими рядками: саме
+        // на ньому впав би поштучний виклик у циклі. Перелік — лише його рядки.
+        var staleSet = stale.ToHashSet();
+        var culprit = sets.First(s => s.ExpectedRowVersions is { Count: > 0 } e && e.Keys.Any(staleSet.Contains));
+        var culpritStale = stale.Where(id => owner[id] == culprit.TableInstanceId).ToList();
 
+        var details = new Dictionary<string, object?>
+        {
+            [CellChangeSet.StaleRowIdsDetail] = culpritStale,
+            ["messageKey"] = "err.ECR-CELL-0409.batchStale",
+            ["rowCount"] = culpritStale.Count.ToString(CultureInfo.InvariantCulture),
+        };
+
+        if (sets.Count > 1)
+        {
+            // Той самий ключ і формат, що додає ExcelImporter.Blame.
+            details["tableInstanceId"] = culprit.TableInstanceId.ToString(CultureInfo.InvariantCulture);
+        }
+
+        throw new ConcurrencyConflictException(
+            ErrorCodes.CellConflict,
+            $"Версія рядка змінилася між читанням і записом: рядків — {culpritStale.Count}.",
+            details);
+    }
+
+    /// <summary>Захоплення рядків однієї групи періоду — по чанку на запит.</summary>
+    private static async Task ClaimGroupAsync(
+        SqlConnection connection,
+        SqlTransaction tx,
+        int? periodKey,
+        List<KeyValuePair<long, string>> group,
+        Dictionary<long, long> owner,
+        Dictionary<long, Dictionary<long, string>> newVersions,
+        List<long> stale,
+        CancellationToken ct)
+    {
         // ⚠ Порядок за Id — сталий порядок захоплення блокувань. Два батчі, що
         // перетинаються рядками, інакше беруть їх у порядку словника (тобто в
         // порядку ключів рядків клієнта) і складаються у взаємне блокування.
-        var claims = expected.OrderBy(pair => pair.Key).ToArray();
-        var stale = new List<long>();
+        var claims = group.OrderBy(pair => pair.Key).ToArray();
 
         foreach (var chunk in claims.Chunk(ParameterChunkSize))
         {
@@ -512,15 +740,18 @@ public sealed class NormalizedCellStore(EcrDbContext db) : ICellStore
                 AddInt32(command, "@pk", periodKey.Value);
             }
 
+            // ⚠ `WR-04` п. 4: `inserted.RowVersion` — НОВА версія рядка, яку
+            // клієнт отримає у відповіді; доти її перечитували окремим запитом
+            // після коміту.
             command.CommandText = $"""
-                DECLARE @claimed TABLE (Id bigint PRIMARY KEY);
+                DECLARE @claimed TABLE (Id bigint PRIMARY KEY, RowVersion binary(8) NOT NULL);
                 UPDATE r SET ModifiedAt = SYSUTCDATETIME()
-                OUTPUT inserted.Id INTO @claimed (Id)
+                OUTPUT inserted.Id, inserted.RowVersion INTO @claimed (Id, RowVersion)
                 FROM doc.TableRow AS r
                 INNER JOIN (VALUES {values}) AS source (Id, RowVersion)
                     ON r.Id = source.Id AND r.RowVersion = source.RowVersion
                 {periodFilter};
-                SELECT Id FROM @claimed;
+                SELECT Id, RowVersion FROM @claimed;
                 """;
 
             var claimed = new HashSet<long>();
@@ -528,7 +759,9 @@ public sealed class NormalizedCellStore(EcrDbContext db) : ICellStore
             {
                 while (await reader.ReadAsync(ct).ConfigureAwait(false))
                 {
-                    claimed.Add(reader.GetInt64(0));
+                    var id = reader.GetInt64(0);
+                    claimed.Add(id);
+                    newVersions[owner[id]][id] = Convert.ToBase64String(reader.GetFieldValue<byte[]>(1));
                 }
             }
 
@@ -536,14 +769,6 @@ public sealed class NormalizedCellStore(EcrDbContext db) : ICellStore
             // випадки для автора батчу означають одне: те, від чого він
             // відштовхувався, більше не є правдою.
             stale.AddRange(chunk.Where(pair => !claimed.Contains(pair.Key)).Select(pair => pair.Key));
-        }
-
-        if (stale.Count > 0)
-        {
-            throw new ConcurrencyConflictException(
-                ErrorCodes.CellConflict,
-                $"Версія рядка змінилася між читанням і записом: рядків — {stale.Count}.",
-                new Dictionary<string, object?> { [CellChangeSet.StaleRowIdsDetail] = stale });
         }
     }
 
@@ -819,20 +1044,59 @@ public sealed class NormalizedCellStore(EcrDbContext db) : ICellStore
     /// версії від чого відштовхуватись не було, а «дотик» потрібен так само.
     /// </remarks>
     private static async Task TouchRowsAsync(
-        SqlConnection connection, SqlTransaction tx, CellChangeSet changes, CancellationToken ct)
+        SqlConnection connection,
+        SqlTransaction tx,
+        List<CellChangeSet> sets,
+        Dictionary<long, Dictionary<long, string>> newVersions,
+        CancellationToken ct)
     {
-        var claimed = changes.ExpectedRowVersions;
-        IReadOnlyList<long> pending = claimed is null || claimed.Count == 0
-            ? changes.TouchedRowIds
-            : [.. changes.TouchedRowIds.Where(id => !claimed.ContainsKey(id))];
+        // ⚠ P8: як і захоплення — рядки всіх наборів, згруповані за періодом.
+        var owner = new Dictionary<long, long>();
+        var groups = new Dictionary<int, List<long>>();
+        var unfiltered = new List<long>();
 
-        if (pending.Count == 0)
+        foreach (var set in sets)
         {
-            return;
+            var claimed = set.ExpectedRowVersions;
+            var periodKey = PeriodKeyOf(set);
+            var target = unfiltered;
+            if (periodKey is not null && !groups.TryGetValue(periodKey.Value, out target))
+            {
+                target = [];
+                groups[periodKey.Value] = target;
+            }
+
+            foreach (var id in set.TouchedRowIds)
+            {
+                if (claimed is { Count: > 0 } && claimed.ContainsKey(id))
+                {
+                    continue;
+                }
+
+                owner[id] = set.TableInstanceId;
+                target!.Add(id);
+            }
         }
 
-        var periodKey = PeriodKeyOf(changes);
+        foreach (var (periodKey, pending) in groups.Select(g => ((int?)g.Key, g.Value)).Append((null, unfiltered)))
+        {
+            if (pending.Count > 0)
+            {
+                await TouchGroupAsync(connection, tx, periodKey, pending, owner, newVersions, ct).ConfigureAwait(false);
+            }
+        }
+    }
 
+    /// <summary>«Дотик» рядків однієї групи періоду — по чанку на запит.</summary>
+    private static async Task TouchGroupAsync(
+        SqlConnection connection,
+        SqlTransaction tx,
+        int? periodKey,
+        List<long> pending,
+        Dictionary<long, long> owner,
+        Dictionary<long, Dictionary<long, string>> newVersions,
+        CancellationToken ct)
+    {
         foreach (var chunk in pending.Chunk(ParameterChunkSize))
         {
             await using var command = connection.CreateCommand();
@@ -856,10 +1120,24 @@ public sealed class NormalizedCellStore(EcrDbContext db) : ICellStore
                 AddInt32(command, "@pk", periodKey.Value);
             }
 
-            command.CommandText =
-                $"UPDATE doc.TableRow SET ModifiedAt = SYSUTCDATETIME() WHERE {periodFilter}Id IN ({ids});";
+            // ⚠ `WR-04` п. 4: `OUTPUT … INTO` (як у захопленні вище, з тієї ж
+            // причини — голий OUTPUT ламається від першого тригера) — нові версії
+            // нових рядків і рядків без заявленої версії приходять тим самим
+            // зверненням, без читання після коміту.
+            command.CommandText = $"""
+                DECLARE @touched TABLE (Id bigint PRIMARY KEY, RowVersion binary(8) NOT NULL);
+                UPDATE doc.TableRow SET ModifiedAt = SYSUTCDATETIME()
+                OUTPUT inserted.Id, inserted.RowVersion INTO @touched (Id, RowVersion)
+                WHERE {periodFilter}Id IN ({ids});
+                SELECT Id, RowVersion FROM @touched;
+                """;
 
-            await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
+            while (await reader.ReadAsync(ct).ConfigureAwait(false))
+            {
+                var id = reader.GetInt64(0);
+                newVersions[owner[id]][id] = Convert.ToBase64String(reader.GetFieldValue<byte[]>(1));
+            }
         }
     }
 

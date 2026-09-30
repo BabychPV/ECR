@@ -73,7 +73,9 @@ public sealed class DocumentDataExporter(
     ICellStore cellStore,
     IRowStore rowStore,
     IMetadataCache metadata,
-    IRegistryStore registries)
+    IRegistryStore registries,
+    IMethodologyStore? methodologies = null,
+    ICalculationResultStore? results = null)
 {
     private const string RowKeyHeader = "rowKey";
 
@@ -92,10 +94,35 @@ public sealed class DocumentDataExporter(
     /// текст <c>FormulaDef.Expression</c> мовою редактора виразів проєкту.
     /// </param>
     /// <param name="ct">Токен скасування.</param>
-    public async Task<byte[]> ExportAsync(
+    public Task<byte[]> ExportAsync(
         long documentId, int periodKey, string format, bool includeFormulas, CancellationToken ct)
+        => ExportAsync(documentId, periodKey, format, includeFormulas, hiddenTables: null, hiddenColumns: null, ct);
+
+    /// <summary>Будує файл вивантаження без таблиць і колонок під забороною (S6, ФВ-6.6).</summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="periodKey">Період вивантаження.</param>
+    /// <param name="format"><c>csv</c> чи <c>json</c> (ФВ-4.2).</param>
+    /// <param name="includeFormulas">Додати формули (ФВ-4.2).</param>
+    /// <param name="hiddenTables">
+    /// Таблиці, яких немає у файлі; <c>null</c> — завдання до S6 (без фільтра).
+    /// </param>
+    /// <param name="hiddenColumns">Колонки, яких немає у файлі.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public async Task<byte[]> ExportAsync(
+        long documentId, int periodKey, string format, bool includeFormulas,
+        IReadOnlyCollection<int>? hiddenTables, IReadOnlyCollection<int>? hiddenColumns, CancellationToken ct)
     {
-        var key = new PeriodKey(periodKey);
+        // B-16: спільний валідатор зовнішнього ключа періоду (`PeriodKey.Parse`),
+        // не первинний конструктор — інші читання того самого документа
+        // (`GetDocumentTablesHandler`) вже відмовляють на невірному
+        // `periodKey`, а вивантаження CSV/JSON мовчки приймало його.
+        var key = PeriodKey.Parse(periodKey);
+        // ⛔ Екземпляри таблиць створюються при ПЕРШОМУ відкритті документа
+        // (`GetDocumentTablesHandler`, `A7-30`). Документ, створений і ще не
+        // відкритий, їх не має, і вивантаження CSV/JSON відмовляв «документа не існує або він
+        // порожній» — хоча документ є і шаблон дає йому таблиці (UX-прохід
+        // 2026-09-24, живий стенд). Виклик ідемпотентний.
+        await rowStore.EnsureTableInstancesAsync(documentId, key, ct).ConfigureAwait(false);
         var instances = await rowStore.GetTableInstancesAsync(documentId, key, ct).ConfigureAwait(false);
         if (instances.Count == 0)
         {
@@ -111,10 +138,26 @@ public sealed class DocumentDataExporter(
         }
 
         var snapshot = await metadata.GetAsync(instances[0].TemplateVersionId, ct).ConfigureAwait(false);
+
+        // ⛔ S6 (ФВ-6.6): таблиці під забороною вилучаються ДО читання — ні
+        // файлу CSV, ні об'єкта JSON, ні значень. Той самий фільтр, що й у xlsx
+        // (`ExcelExporter`).
+        var hidden = hiddenTables?.ToHashSet() ?? [];
+        instances = [.. instances.Where(i => !hidden.Contains(i.TableDefId))];
+
         var byTableDef = instances.ToDictionary(i => i.TableDefId);
         var ids = instances.Select(i => i.TableInstanceId).ToList();
         var rowIds = await rowStore.GetRowIdsBatchAsync(ids, key, ct).ConfigureAwait(false);
-        var slices = await cellStore.ReadSlicesAsync(ids, ct).ConfigureAwait(false);
+        var slices = await cellStore.ReadSlicesAsync(ids, key, ct).ConfigureAwait(false);
+
+        // ⛔ F-02: колонка `Calculated` — числом методології, як у сітці й xlsx
+        // (`CalculatedCellOverlay`). Порти необов'язкові лише заради тестів.
+        if (methodologies is not null && results is not null)
+        {
+            slices = await new Calculations.CalculatedCellOverlay(methodologies, results)
+                .ApplyAsync(documentId, periodKey, snapshot, instances, rowIds, slices, ct)
+                .ConfigureAwait(false);
+        }
         var lookups = await LookupsAsync(snapshot, ct).ConfigureAwait(false);
 
         var tables = new List<ExportTable>();
@@ -127,7 +170,8 @@ public sealed class DocumentDataExporter(
                     sheet, table, snapshot, lookups,
                     rowIds.GetValueOrDefault(instanceId) ?? new Dictionary<string, long>(),
                     slices.GetValueOrDefault(instanceId) ?? [],
-                    includeFormulas));
+                    includeFormulas,
+                    hiddenColumns));
             }
         }
 
@@ -179,9 +223,15 @@ public sealed class DocumentDataExporter(
         IReadOnlyDictionary<int, IReadOnlyDictionary<long, string>> lookups,
         IReadOnlyDictionary<string, long> rowIds,
         IReadOnlyList<CellRecord> cells,
-        bool includeFormulas)
+        bool includeFormulas,
+        IReadOnlyCollection<int>? hiddenColumns)
     {
-        var columns = table.Columns.Where(c => !c.IsDeleted && !c.IsHidden).OrderBy(c => c.Ordinal).ToList();
+        // ⛔ S6: колонка під забороною — як прихована: ні коду в заголовку, ні
+        // значень, ні виразу формули.
+        var columns = table.Columns
+            .Where(c => !c.IsDeleted && !c.IsHidden && hiddenColumns?.Contains(c.Id) != true)
+            .OrderBy(c => c.Ordinal)
+            .ToList();
         var byColumn = columns.ToDictionary(c => c.Id);
         var keys = rowIds.Keys
             .OrderBy(k => snapshot.RowsByKey.TryGetValue((table.Id, k), out var def) ? def.Ordinal : int.MaxValue)

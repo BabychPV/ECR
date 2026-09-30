@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Ecr.Domain.Enums;
 using Ecr.Expressions.Ast;
 using Ecr.Expressions.Evaluation;
@@ -20,12 +21,37 @@ namespace Ecr.Expressions.Tests;
 ///
 /// Реалізація: набір виразів і очікувань зберігається у спільному JSON, який
 /// читають і цей тест, і vitest-тест на клієнті (див. `06e`).
+///
+/// ⛔ Клієнтська підказка — наближення. Сервер порівнює в <c>decimal</c>, клієнт — у
+/// JS <c>number</c>; на літералах із 16+ значущими цифрами вони законно
+/// розходяться, і такі вирази винесені в явні винятки (<c>clientApproximation</c>),
+/// де звіряється лише сервер.
 /// </remarks>
 public sealed class ClientServerEquivalenceTests
 {
     private static readonly JsonElement Fixture = Load();
 
     private static readonly JsonElement Cases = Fixture.GetProperty("cases");
+
+    private static readonly JsonElement ApproximationCases =
+        Fixture.GetProperty("clientApproximation").GetProperty("cases");
+
+    /// <summary>
+    /// Найбільша кількість значущих цифр серед числових літералів виразу: від
+    /// першої ненульової до останньої ненульової, крапка не рахується.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Текстові літерали (<c>'…'</c>) вирізаються наперед: цифри в них — не числа.
+    /// </remarks>
+    private static int MaxSignificantDigits(string expression)
+    {
+        var withoutText = Regex.Replace(expression, "'[^']*'|\"[^\"]*\"", string.Empty);
+
+        return Regex.Matches(withoutText, @"\d+(?:\.\d+)?")
+            .Select(m => m.Value.Replace(".", string.Empty, StringComparison.Ordinal).Trim('0').Length)
+            .DefaultIfEmpty(0)
+            .Max();
+    }
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
@@ -64,6 +90,64 @@ public sealed class ClientServerEquivalenceTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public void Винятки_наближення_сервер_рахує_в_decimal()
+    {
+        // ⛔ Клієнтська підказка — наближення (заголовок фікстури). Тут звіряється
+        // лише СЕРВЕР: відповідь, яку він дає на літералах за межею точності
+        // double, — правильна (порівняння в decimal, як і рівність; продовження
+        // аудиту A6). Клієнтський vitest цього розділу не читає.
+        var failures = new List<string>();
+
+        foreach (var item in ApproximationCases.EnumerateArray())
+        {
+            var expression = item.GetProperty("expression").GetString()!;
+            var kind = item.GetProperty("kind").GetString()!;
+            var expected = item.GetProperty("expected").GetString()!;
+
+            var value = Expr.Eval(expression);
+            var actual = value.Type == ExpressionValueType.Boolean
+                ? ("boolean", (bool)value.Value! ? "true" : "false")
+                : (value.Type.ToString(), value.ErrorCode ?? value.Value?.ToString() ?? string.Empty);
+
+            if (actual.Item1 != kind || actual.Item2 != expected)
+            {
+                failures.Add($"{expression} → {actual.Item1}:{actual.Item2}, очікувалося {kind}:{expected}");
+            }
+        }
+
+        Assert.NotEmpty(ApproximationCases.EnumerateArray());
+        Assert.Empty(failures);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public void Спільний_набір_не_містить_літералів_за_межею_точності_double()
+    {
+        // ⚠ Літерал до 15 значущих цифр double подає без втрати, і дві різні
+        // десяткові такі величини лишаються різними й так само впорядкованими.
+        // Понад 15 — сервер (decimal) і клієнт (JS number) законно розходяться,
+        // і такий вираз мусить стояти в clientApproximation, а не в cases:
+        // інакше клієнтський тест почервоніє не через дефект, а через наближення.
+        // І навпаки: виняток без жодного довгого літерала — не виняток, а
+        // сховане розходження.
+        var limit = Fixture.GetProperty("clientApproximation").GetProperty("significantDigitsLimit").GetInt32();
+
+        var tooLong = Cases.EnumerateArray()
+            .Select(c => c.GetProperty("expression").GetString()!)
+            .Where(e => MaxSignificantDigits(e) > limit)
+            .ToList();
+
+        var notExceptions = ApproximationCases.EnumerateArray()
+            .Select(c => c.GetProperty("expression").GetString()!)
+            .Where(e => MaxSignificantDigits(e) <= limit)
+            .ToList();
+
+        Assert.Empty(tooLong);
+        Assert.Empty(notExceptions);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
     public void Набір_покриває_усі_функції_діалекту_шаблонів()
     {
         var covered = Cases.EnumerateArray()
@@ -80,11 +164,17 @@ public sealed class ClientServerEquivalenceTests
         // («клієнт не резолвить посилань на комірки» — коментар нижче,
         // `evaluate.ts`), тож підказка під час введення однаково не порахує
         // REGFIELD, і розходитися тут нічому так само, як із CONVERT.
-        var shared = declared.Except(["CONVERT", "REGFIELD"], StringComparer.OrdinalIgnoreCase);
+        // REGFIND і REGONE (RT-20a, 02b «Функції довідників») — з тієї самої
+        // причини: даних довідника в клієнтської підказки немає й не буде.
+        // Агрегати REGSUM/REGAVG/REGMIN/REGMAX/REGCOUNT (RT-20b) — так само:
+        // перебирають рядки знімка довідника, якого клієнт не має.
+        var shared = declared.Except(
+            ["CONVERT", "REGFIELD", "REGFIND", "REGONE", "REGSUM", "REGAVG", "REGMIN", "REGMAX", "REGCOUNT"],
+            StringComparer.OrdinalIgnoreCase);
 
         // Функція, якої немає в наборі, — це функція, чию поведінку клієнт і
         // сервер ніде не звіряють. Саме там і з'явиться перше розходження.
-        Assert.Equal(13, declared.Count);
+        Assert.Equal(20, declared.Count);
         Assert.Empty(shared.Except(covered, StringComparer.OrdinalIgnoreCase));
     }
 

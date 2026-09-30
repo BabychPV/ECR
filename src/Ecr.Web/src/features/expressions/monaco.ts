@@ -26,7 +26,16 @@ import {
   type ExpressionPalette,
 } from '@/shared/theme/expressionTheme';
 import { buildLanguageConfiguration, buildMonarchLanguage } from './language';
-import { completionAt, completionsFor, signatureOf, type CompletionItem } from './completion';
+import {
+  signatureOf,
+  suggestionsAt,
+  TriggerCharacters,
+  type CompletionItem,
+  type CompletionKind,
+  type EditorSymbols,
+} from './completion';
+import { docMarkdown, hintText, hoverDoc, itemDoc } from './describe';
+import { hoverAt } from './hover';
 import { markersFor } from './markers';
 import { t } from '@/shared/i18n';
 import type { ExpressionDialect, ExpressionMetadataDto } from '@/api/types';
@@ -65,8 +74,31 @@ export const DarkTheme = 'ecr-dark';
  */
 export type MetadataSource = () => ExpressionMetadataDto | undefined;
 
+/**
+ * Джерело всього, з чого складаються підказки ОДНОГО редактора: склад мови,
+ * структура версії, таблиця виразу.
+ *
+ * ⛔ Прив'язується до МОДЕЛІ, а не до мови. Провайдери реєструються один раз на
+ * мову, і раніше вони замикали джерело ПЕРШОГО редактора, що її зареєстрував.
+ * Другий редактор тієї самої мови (діалог формули після `/admin/expressions`,
+ * формула іншої версії методології) отримував підказки з метаданих першого —
+ * тобто імена чужої версії, без жодного натяку на причину.
+ */
+export type SymbolSource = () => EditorSymbols;
+
 let themesDefined = false;
 const registered = new Set<string>();
+
+/** Джерело підказок кожної живої моделі — за її `uri`. */
+const sources = new Map<string, SymbolSource>();
+
+function symbolsOf(
+  model: monaco.editor.ITextModel,
+  dialect: ExpressionDialect,
+  fallback: MetadataSource,
+): EditorSymbols {
+  return sources.get(model.uri.toString())?.() ?? { dialect, metadata: fallback() };
+}
 
 // ⛔ Воркер оголошується РАЗОМ із модулем Monaco, а не в `index.html` і не
 // глобально. Без нього Monaco мовчки підміняє воркер заглушкою в головному
@@ -113,8 +145,9 @@ export function prepare(dialect: ExpressionDialect, source: MetadataSource): str
   );
 
   applyGrammar(languageId, dialect, source);
-  registerCompletion(languageId, source);
-  registerSignatureHelp(languageId, source);
+  registerCompletion(languageId, dialect, source);
+  registerSignatureHelp(languageId, dialect, source);
+  registerHover(languageId, dialect, source);
 
   return languageId;
 }
@@ -149,9 +182,36 @@ export function applyGrammar(
  */
 export function create(
   host: HTMLElement,
-  options: { value: string; language: string; theme: string; ariaLabel: string },
+  options: {
+    value: string;
+    language: string;
+    theme: string;
+    ariaLabel: string;
+    /** Звідки цей редактор бере підказки (`SymbolSource`). */
+    symbols?: SymbolSource | undefined;
+    readOnly?: boolean | undefined;
+  },
 ): monaco.editor.IStandaloneCodeEditor {
-  return monaco.editor.create(host, {
+  // ⛔ Перелік підказок, наведення і підказка сигнатури живуть у вузлі на рівні
+  // `body`, а не всередині редактора. Редактор стоїть у модальних діалогах
+  // (формула колонки, правило валідації, формула методології), а Mantine
+  // лишає на вмісті діалогу `transform` після анімації появи — і
+  // `position: fixed` віджетів рахується від діалогу, а не від вікна: перелік
+  // з'являвся на пів екрана праворуч і нижче від курсора (виміряно на стенді,
+  // зсув дорівнював лівому краю діалогу).
+  //
+  // ⚠ Клас `monaco-editor` на вузлі обов'язковий: стилі й кольори теми Monaco
+  // прив'язані до нього, без класу перелік був би безбарвним.
+  const overflow = document.createElement('div');
+  overflow.className = 'monaco-editor ecr-expression-overflow';
+  overflow.style.position = 'absolute';
+  overflow.style.top = '0';
+  overflow.style.left = '0';
+  // Вище за модальний діалог Mantine (200) і його спливні списки (300).
+  overflow.style.zIndex = '1000';
+  document.body.appendChild(overflow);
+
+  const editor = monaco.editor.create(host, {
     value: options.value,
     language: options.language,
     theme: options.theme,
@@ -174,14 +234,71 @@ export function create(
     wordWrap: 'on',
     automaticLayout: true,
     fixedOverflowWidgets: true,
+    overflowWidgetsDomNode: overflow,
 
     // ⚠ Контекстне меню вимкнене: у ньому дії, яких у цій мові немає, —
     // «перейти до визначення», «змінити всі входження», «форматувати».
     // Кожна з них обіцяє те, чого редактор не вміє.
     contextmenu: false,
 
+    // ⛔ Підказки з'являються САМІ, без Ctrl+Space: і під час набору слова, і
+    // після символів-тригерів (`[`, `.`, `@`, `!`). Про автодоповнення, що
+    // відкривається лише за комбінацією клавіш, дізнається тільки той, хто про
+    // нього вже знає. Рядкові літерали виключено: там пишуть текст, а не код.
+    quickSuggestions: { other: true, comments: false, strings: false },
+    suggestOnTriggerCharacters: true,
+    // ⚠ Слова з самого тексту не пропонуються: у виразі на один рядок це лише
+    // повтор набраного, а поруч зі справжніми іменами — шум.
+    wordBasedSuggestions: 'off',
+    hover: { enabled: 'on', delay: 300 },
+    readOnly: options.readOnly ?? false,
+
     scrollbar: { vertical: 'auto', horizontal: 'auto' },
   });
+
+  editor.onDidDispose(() => overflow.remove());
+
+  // ⛔ Escape, що закриває перелік підказок, НЕ повинен закривати діалог. Без
+  // цього Mantine отримував той самий натиск і закривав модальне вікно разом
+  // із незбереженою формулою — а тепер, коли перелік відкривається сам після
+  // кожного `[`, `.` і `@`, Escape став найчастішою клавішею в цьому полі.
+  //
+  // ⚠ `data-mantine-stop-propagation` на полі вводу — штатний спосіб Mantine
+  // сказати «цей Escape не для тебе». Ставиться ЗАЗДАЛЕГІДЬ, щойно віджет
+  // з'явився: Mantine слухає `keydown` на `window` у фазі перехоплення, тобто
+  // раніше за будь-який обробник на самому редакторі.
+  const syncEscape = (): void => {
+    const open = '.suggest-widget.visible, .parameter-hints-widget.visible';
+    const widgetOpen = overflow.querySelector(open) !== null || host.querySelector(open) !== null;
+
+    for (const input of host.querySelectorAll('textarea, .native-edit-context, [contenteditable]')) {
+      if (widgetOpen) input.setAttribute('data-mantine-stop-propagation', 'true');
+      else input.removeAttribute('data-mantine-stop-propagation');
+    }
+  };
+
+  const widgets = new MutationObserver(syncEscape);
+  widgets.observe(overflow, { subtree: true, childList: true, attributes: true, attributeFilter: ['class'] });
+  editor.onDidDispose(() => widgets.disconnect());
+
+  const model = editor.getModel();
+
+  if (model !== null && options.symbols !== undefined) {
+    const key = model.uri.toString();
+    sources.set(key, options.symbols);
+    editor.onDidDispose(() => sources.delete(key));
+  }
+
+  return editor;
+}
+
+/** Перемикає мову моделі — коли на тому самому редакторі змінили діалект. */
+export function switchLanguage(
+  editor: monaco.editor.IStandaloneCodeEditor,
+  languageId: string,
+): void {
+  const model = editor.getModel();
+  if (model !== null) monaco.editor.setModelLanguage(model, languageId);
 }
 
 /** Перемикає тему редактора. */
@@ -227,56 +344,149 @@ function define(name: string, base: 'vs' | 'vs-dark', palette: ExpressionPalette
   });
 }
 
-function registerCompletion(languageId: string, source: MetadataSource): void {
+function registerCompletion(
+  languageId: string,
+  dialect: ExpressionDialect,
+  source: MetadataSource,
+): void {
   monaco.languages.registerCompletionItemProvider(languageId, {
-    // ⚠ Крапка, знак оклику і собака — символи, після яких перелік має
-    // з'явитися САМ. Чекати на Ctrl+Space означало б, що про автодоповнення
-    // дізнається лише той, хто про нього вже знає.
-    triggerCharacters: ['.', '!', '@'],
+    // ⚠ Квадратна дужка, крапка, знак оклику і собака — символи, після яких
+    // перелік має з'явитися САМ. Чекати на Ctrl+Space означало б, що про
+    // автодоповнення дізнається лише той, хто про нього вже знає.
+    triggerCharacters: [...TriggerCharacters],
 
     provideCompletionItems(model, position) {
       const text = model.getValue();
       const offset = model.getOffsetAt(position);
-      const context = completionAt(text, offset);
+      const found = suggestionsAt(text, offset, symbolsOf(model, dialect, source));
 
-      if (context === null) {
+      if (found === null) {
         return { suggestions: [] };
       }
 
+      const { context, items } = found;
       const start = model.getPositionAt(context.replaceFrom);
 
-      const range: monaco.IRange = {
+      const toCursor: monaco.IRange = {
         startLineNumber: start.lineNumber,
         startColumn: start.column,
         endLineNumber: position.lineNumber,
         endColumn: position.column,
       };
 
-      // ⚠ Необов'язкові поля саме ДОДАЮТЬСЯ, а не присвоюються `undefined`:
-      // при `exactOptionalPropertyTypes` це різні речі, і другий варіант не
-      // компілюється.
-      const suggestions = completionsFor(context, source()).map((item) => ({
-        label: item.label,
-        kind: kindOf(item.kind),
-        insertText: item.kind === 'function' ? `${item.insert}($0)` : item.insert,
-        range,
-        ...(item.kind === 'function'
-          ? { insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet }
-          : {}),
-        ...detail(item),
+      // ⚠ Автозакриття вже поставило `]` за курсором. Підстановка, що закриває
+      // ланку, заміняє і її — інакше виходило б `[C1]]`.
+      const throughBracket: monaco.IRange =
+        context.bracket?.closed === true ? { ...toCursor, endColumn: position.column + 1 } : toCursor;
 
-        // ⛔ Простий рядок, а не `IMarkdownString`. Опис приходить із бази, де
-        // його редагує адміністратор; віддати його розмітці означало б
-        // зробити підказку редактора місцем рендерингу чужого вмісту.
-        ...(item.documentation === undefined ? {} : { documentation: item.documentation }),
-      }));
+      const suggestions = items.map((item) =>
+        suggestion(item, item.close === true ? throughBracket : toCursor, context.typed),
+      );
 
       return { suggestions };
     },
   });
 }
 
-function registerSignatureHelp(languageId: string, source: MetadataSource): void {
+/**
+ * Один варіант Monaco з нашого `CompletionItem`.
+ *
+ * ⚠ Необов'язкові поля саме ДОДАЮТЬСЯ, а не присвоюються `undefined`: при
+ * `exactOptionalPropertyTypes` це різні речі, і другий варіант не компілюється.
+ */
+function suggestion(
+  item: CompletionItem,
+  range: monaco.IRange,
+  typed: string,
+): monaco.languages.CompletionItem {
+  const snippet = monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet;
+
+  if (item.kind === 'hint' && item.hint !== undefined) {
+    // ⛔ Пояснення, а не підстановка: вибір нічого не вставляє. Фільтр — рівно
+    // набране, щоб Monaco не сховав рядок як «не збігається».
+    return {
+      label: hintText(item.hint),
+      kind: monaco.languages.CompletionItemKind.Text,
+      insertText: '',
+      filterText: typed,
+      sortText: '!',
+      range,
+    };
+  }
+
+  const insert =
+    item.kind === 'function'
+      ? { insertText: `${item.insert}($0)`, insertTextRules: snippet }
+      : item.chain === true
+        ? {
+            insertText: `${escapeSnippet(item.insert)}].[$0]`,
+            insertTextRules: snippet,
+            // Наступна ланка: перелік відкривається знову, уже для неї.
+            command: { id: 'editor.action.triggerSuggest', title: '' },
+          }
+        : { insertText: item.close === true ? `${item.insert}]` : item.insert };
+
+  const documentation = itemDoc(item);
+
+  return {
+    label:
+      item.description === undefined || item.description === '' || item.description === item.label
+        ? item.label
+        : { label: item.label, description: item.description },
+    kind: kindOf(item.kind),
+    range,
+    ...insert,
+    ...(item.sort === undefined ? {} : { sortText: item.sort }),
+    ...detail(item),
+
+    // ⛔ Простий рядок, а не `IMarkdownString`. Опис приходить із бази, де
+    // його редагує адміністратор; віддати його розмітці означало б
+    // зробити підказку редактора місцем рендерингу чужого вмісту.
+    ...(documentation === undefined ? {} : { documentation }),
+  };
+}
+
+/** Екранує текст для вставки як сніпета (`$`, `}`, `\` мають там значення). */
+function escapeSnippet(text: string): string {
+  return text.replace(/[$}\\]/g, '\\$&');
+}
+
+function registerHover(languageId: string, dialect: ExpressionDialect, source: MetadataSource): void {
+  monaco.languages.registerHoverProvider(languageId, {
+    provideHover(model, position) {
+      const info = hoverAt(
+        model.getValue(),
+        model.getOffsetAt(position),
+        symbolsOf(model, dialect, source),
+      );
+
+      if (info === null) return null;
+
+      const from = model.getPositionAt(info.from);
+      const to = model.getPositionAt(info.to);
+
+      return {
+        range: {
+          startLineNumber: from.lineNumber,
+          startColumn: from.column,
+          endLineNumber: to.lineNumber,
+          endColumn: to.column,
+        },
+        // ⛔ Markdown тут — лише рамка: увесь текст із бази екранується
+        // (`docMarkdown`), HTML вимкнено, команди недовірені.
+        contents: [
+          { value: docMarkdown(hoverDoc(info.symbol)), isTrusted: false, supportHtml: false },
+        ],
+      };
+    },
+  });
+}
+
+function registerSignatureHelp(
+  languageId: string,
+  dialect: ExpressionDialect,
+  source: MetadataSource,
+): void {
   monaco.languages.registerSignatureHelpProvider(languageId, {
     signatureHelpTriggerCharacters: ['(', ','],
 
@@ -291,16 +501,27 @@ function registerSignatureHelp(languageId: string, source: MetadataSource): void
       // написання показувало б підказку не тієї функції. Запасний прохід
       // потрібен діалекту шаблонів: там імена ексельні й регістронезалежні,
       // тобто `sum(` і `SUM(` — те саме слово.
-      const functions = source()?.functions ?? [];
+      const functions = symbolsOf(model, dialect, source).metadata?.functions ?? [];
       const fn =
         functions.find((f) => f.name === name) ??
         functions.find((f) => f.name.toUpperCase() === name.toUpperCase());
 
       if (fn === undefined) return null;
 
+      const documentation = itemDoc({ insert: fn.name, label: fn.name, kind: 'function', fn })
+        ?.split('\n')
+        .slice(1)
+        .join('\n');
+
       return {
         value: {
-          signatures: [{ label: signatureOf(fn), parameters: [] }],
+          signatures: [
+            {
+              label: signatureOf(fn),
+              parameters: [],
+              ...(documentation === undefined || documentation === '' ? {} : { documentation }),
+            },
+          ],
           activeSignature: 0,
           activeParameter: 0,
         },
@@ -367,7 +588,7 @@ function detail(item: CompletionItem): { detail?: string } {
   return { detail: item.detail === undefined ? mark : `${item.detail} · ${mark}` };
 }
 
-function kindOf(kind: string): monaco.languages.CompletionItemKind {
+function kindOf(kind: CompletionKind): monaco.languages.CompletionItemKind {
   switch (kind) {
     case 'function':
       return monaco.languages.CompletionItemKind.Function;
@@ -377,6 +598,16 @@ function kindOf(kind: string): monaco.languages.CompletionItemKind {
       return monaco.languages.CompletionItemKind.Variable;
     case 'formula':
       return monaco.languages.CompletionItemKind.Reference;
+    case 'row':
+      return monaco.languages.CompletionItemKind.EnumMember;
+    case 'table':
+      return monaco.languages.CompletionItemKind.Struct;
+    case 'sheet':
+      return monaco.languages.CompletionItemKind.Module;
+    case 'keyword':
+      return monaco.languages.CompletionItemKind.Keyword;
+    case 'hint':
+      return monaco.languages.CompletionItemKind.Text;
     default:
       return monaco.languages.CompletionItemKind.Field;
   }

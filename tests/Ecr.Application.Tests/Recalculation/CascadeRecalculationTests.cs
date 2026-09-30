@@ -182,6 +182,7 @@ public sealed class CascadeRecalculationTests
 
         Assert.Equal(0, written);
         await _cells.DidNotReceiveWithAnyArgs().ApplyAsync(null!, default);
+        await _cells.DidNotReceiveWithAnyArgs().ApplyBatchAsync(null!, default);
     }
 
     [Fact]
@@ -217,6 +218,7 @@ public sealed class CascadeRecalculationTests
 
         Assert.Equal(0, written);
         await _cells.DidNotReceiveWithAnyArgs().ApplyAsync(null!, default);
+        await _cells.DidNotReceiveWithAnyArgs().ApplyBatchAsync(null!, default);
     }
 
     [Fact]
@@ -293,7 +295,7 @@ public sealed class CascadeRecalculationTests
                 [instance2] = new Dictionary<string, long> { ["R1"] = row2Id },
             });
 
-        _cells.ReadSlicesAsync(Arg.Any<IReadOnlyList<long>>(), Arg.Any<CancellationToken>())
+        _cells.ReadSlicesAsync(Arg.Any<IReadOnlyList<long>>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
             .Returns(new Dictionary<long, IReadOnlyList<CellRecord>>
             {
                 [instance1] =
@@ -373,10 +375,11 @@ public sealed class CascadeRecalculationTests
         // Два незалежні проходи існували вже ДО фіксу (побудова плану в
         // RunAsync і завантаження значень у LoadValuesAsync) — Q-166 не про
         // їх злиття, а про те, що кожен із них ходив у базу окремо НА КОЖНУ
-        // таблицю. Тепер кожен прохід — рівно один пакетний виклик.
-        await _rows.Received(2).GetRowIdsBatchAsync(
+        // таблицю. O2 злив і їх: завантаження поточного періоду бере рядки,
+        // уже прочитані для плану, — один пакетний виклик на прогін.
+        await _rows.Received(1).GetRowIdsBatchAsync(
             Arg.Any<IReadOnlyList<long>>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>());
-        await _cells.Received(1).ReadSlicesAsync(Arg.Any<IReadOnlyList<long>>(), Arg.Any<CancellationToken>());
+        await _cells.Received(1).ReadSlicesAsync(Arg.Any<IReadOnlyList<long>>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>());
 
         await _rows.DidNotReceive().GetRowIdsAsync(
             Arg.Any<long>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>());
@@ -496,7 +499,7 @@ public sealed class CascadeRecalculationTests
                 [summaryInstance] = new Dictionary<string, long> { ["totals"] = summaryRowId },
             });
 
-        _cells.ReadSlicesAsync(Arg.Any<IReadOnlyList<long>>(), Arg.Any<CancellationToken>())
+        _cells.ReadSlicesAsync(Arg.Any<IReadOnlyList<long>>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
             .Returns(new Dictionary<long, IReadOnlyList<CellRecord>>
             {
                 [itemsInstance] =
@@ -574,16 +577,18 @@ public sealed class CascadeRecalculationTests
             _headers,
             _audit,
             new TestClock(new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)),
-            _uow);
+            _uow, Substitute.For<Ecr.Application.Ports.ISheetEditGate>());
     }
 
     /// <summary>Комірки, які служба віддала на запис.</summary>
     private IReadOnlyList<CellRecord> Applied()
     {
+        // O2: документо-період пишеться ОДНИМ пакетом (`ApplyBatchAsync`), і
+        // саме один виклик тут і вимагається.
         var call = _cells.ReceivedCalls()
-            .Single(c => c.GetMethodInfo().Name == nameof(ICellStore.ApplyAsync));
+            .Single(c => c.GetMethodInfo().Name == nameof(ICellStore.ApplyBatchAsync));
 
-        return ((CellChangeSet)call.GetArguments()[0]!).Upserts;
+        return [.. ((IReadOnlyCollection<CellChangeSet>)call.GetArguments()[0]!).SelectMany(set => set.Upserts)];
     }
 
     /// <summary>
@@ -670,7 +675,7 @@ public sealed class CascadeRecalculationTests
 
         _cells.ReadSliceAsync(TableInstance, Arg.Any<CancellationToken>()).Returns(slice);
 
-        _cells.ReadSlicesAsync(Arg.Any<IReadOnlyList<long>>(), Arg.Any<CancellationToken>())
+        _cells.ReadSlicesAsync(Arg.Any<IReadOnlyList<long>>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
             .Returns(new Dictionary<long, IReadOnlyList<CellRecord>>
             {
                 [TableInstance] = slice,

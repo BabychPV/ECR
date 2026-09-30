@@ -51,8 +51,38 @@ public sealed class RoleAssignment : Entity<int>
     /// <summary>SID AD-групи. Це **не** авторство — воно завжди `UserId` (D-86).</summary>
     public string? PrincipalSid { get; private set; }
 
-    /// <summary>Область дії: проєкт, аркуш, період (ФВ-6.14).</summary>
+    /// <summary>
+    /// Область дії (ФВ-6.14); <c>null</c> — призначення діє в усіх проєктах,
+    /// як і до появи областей. Формат — <see cref="RoleAssignmentScope"/>.
+    /// </summary>
     public string? ScopeJson { get; private set; }
+
+    /// <summary>Задає або знімає область дії.</summary>
+    /// <param name="scope">Область; <c>null</c> — діє в усіх проєктах.</param>
+    public void SetScope(RoleAssignmentScope? scope) => ScopeJson = scope?.ToJson();
+
+    /// <summary>Переносить область попереднього призначення без змін.</summary>
+    /// <param name="previous">Призначення, яке заміняється.</param>
+    /// <remarks>
+    /// ⚠ Дослівно, а не через розбір: зіпсований JSON має лишитися
+    /// зіпсованим (роль не діє ніде), а не загубитися (роль діяла б скрізь).
+    /// </remarks>
+    public void CarryScopeFrom(RoleAssignment previous)
+    {
+        ArgumentNullException.ThrowIfNull(previous);
+        ScopeJson = previous.ScopeJson;
+    }
+
+    /// <summary>
+    /// Проєкти, у яких діє призначення; <c>null</c> — області немає, діє скрізь.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Зіпсований <see cref="ScopeJson"/> дає ПОРОЖНІЙ перелік (роль не діє
+    /// ніде), а не <c>null</c>: помилка в даних має відбирати права, а не
+    /// роздавати їх по всіх проєктах.
+    /// </remarks>
+    public IReadOnlyList<int>? ScopedProjectIds()
+        => ScopeJson is null ? null : RoleAssignmentScope.TryParse(ScopeJson)?.ProjectIds ?? [];
 
     /// <summary>Початок дії призначення; <c>null</c> — від завжди.</summary>
     /// <remarks>

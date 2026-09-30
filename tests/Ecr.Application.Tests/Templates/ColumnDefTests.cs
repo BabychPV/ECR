@@ -36,6 +36,7 @@ public sealed class ColumnDefTests
     private readonly IClock _clock = Substitute.For<IClock>();
     private readonly IAccessDecisionService _access = Substitute.For<IAccessDecisionService>();
     private readonly ICurrentUser _user = Substitute.For<ICurrentUser>();
+    private readonly IUnitCatalog _units = Substitute.For<IUnitCatalog>();
 
     private readonly TemplateBuilder _builder = new() { TemplateVersionId = 1 };
 
@@ -66,6 +67,12 @@ public sealed class ColumnDefTests
 
         _store.GetWithStructureAsync(1, Arg.Any<CancellationToken>()).Returns(_draft);
         _store.HasDocumentsAsync(1, Arg.Any<CancellationToken>()).Returns(false);
+
+        // HSE301 U1: одиниця колонки звіряється з довідником. 12 — та, що бере
+        // тест читання нижче; 777 навмисно немає.
+        _units.GetAsync(Arg.Any<CancellationToken>()).Returns(new UnitCatalogSnapshot(
+            new Dictionary<string, UnitRef>(StringComparer.OrdinalIgnoreCase) { ["t"] = new(12, "t", 1) },
+            new Dictionary<string, int>(StringComparer.Ordinal)));
     }
 
     private static Dictionary<string, string> Header(string en) => new(StringComparer.OrdinalIgnoreCase) { ["en"] = en };
@@ -82,7 +89,7 @@ public sealed class ColumnDefTests
             lookupRegistryDefId, lookupFilter, unitId);
 
     private SaveColumnDefHandler Save()
-        => new(_store, new ChangeClassifier(), _metadataCache, _audit, _uow, _clock, _access, _user);
+        => new(_store, new ChangeClassifier(), _metadataCache, _audit, _uow, _clock, _access, _user, _units);
 
     private DeleteColumnDefHandler Delete()
         => new(_store, new ChangeClassifier(), _metadataCache, _audit, _uow, _clock, _access, _user);
@@ -159,6 +166,48 @@ public sealed class ColumnDefTests
 
         Assert.Equal("ECR-TMPL-0422", error.ErrorCode);
         Assert.Equal("err.ECR-TMPL-0422.lookupRequiresLookupType", error.Details!["messageKey"]);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Directive", "HSE301-U1")]
+    public async Task Неіснуюча_одиниця_колонки_422_з_ключем_і_колонка_не_змінюється(bool existing)
+    {
+        // ⛔ HSE301 U1 (аудит C6 п.1). Доти UnitId колонки не звірявся ні з чим: ключа
+        // на uom.Unit не було, і описка в номері одиниці записувалась мовчки, а
+        // виринала в перерахунку. Тепер ключ FK_ColumnDef_Unit є — без перевірки в
+        // обробнику та сама описка дала б голий 500 на 547. Обидва шляхи: створення і
+        // зміна наявної колонки. Мутація: прибрати виклик RequireKnownUnitAsync → запис
+        // проходить, SaveChanges викликається — червоне.
+        if (existing)
+        {
+            await Save().HandleAsync(1, _table.Id, "Limit", Command(unitId: 12), CancellationToken.None);
+            _uow.ClearReceivedCalls();
+            _audit.ClearReceivedCalls();
+        }
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Save().HandleAsync(1, _table.Id, "Limit", Command(unitId: 777), CancellationToken.None));
+
+        Assert.Equal("ECR-TMPL-0422", error.ErrorCode);
+        Assert.Equal("err.ECR-TMPL-0422.unknownUnit", error.Details!["messageKey"]);
+        Assert.Equal("Limit", error.Details["columnCode"]);
+        Assert.Equal("777", error.Details["unitId"]);
+
+        // Відмова ДО запису: ні аудиту, ні збереження; наявна колонка — у старій одиниці.
+        await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
+        await _audit.DidNotReceive().WriteStructureChangeAsync(
+            Arg.Any<StructureChangeRecord>(), Arg.Any<CancellationToken>());
+        if (existing)
+        {
+            Assert.Equal(12, Assert.Single(_table.Columns).UnitId);
+        }
+        else
+        {
+            Assert.Empty(_table.Columns);
+        }
     }
 
     [Fact]
@@ -290,5 +339,83 @@ public sealed class ColumnDefTests
             () => Save().HandleAsync(1, _table.Id, "Jan", Command(), CancellationToken.None));
 
         Assert.Empty(_table.Columns);
+    }
+
+    private GetColumnDefHandler Get()
+        => new(_store, _access, _user);
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "ФВ-2.1")]
+    public async Task Читання_колонки_віддає_всі_поля_які_приймає_PUT()
+    {
+        // ⛔ X-02: форма правки будувала чернетку з бідного опису структури, і
+        // повторний PUT (заміна цілком) стирав точність, одиницю, значення за
+        // замовчуванням і стиль. Читання мусить віддавати рівно те, що PUT
+        // приймає, — інакше форма знову не матиме звідки їх узяти.
+        await Save().HandleAsync(
+            1, _table.Id, "Limit",
+            Command(precision: 18, scale: 4, defaultValue: "0", displayFormat: "N2", styleId: 3, unitId: 12),
+            CancellationToken.None);
+
+        _access.BuildProfileAsync(9, Arg.Any<CancellationToken>())
+            .Returns(new AccessBuilder { UserId = 9 }.Permission("Template.View").Build());
+
+        var read = await Get().HandleAsync(1, _table.Id, "Limit", CancellationToken.None);
+
+        Assert.Equal("Limit", read.Code);
+        Assert.Equal((byte)18, read.Precision);
+        Assert.Equal((byte)4, read.Scale);
+        Assert.Equal("0", read.DefaultValue);
+        Assert.Equal("N2", read.DisplayFormat);
+        Assert.Equal(3, read.StyleId);
+        Assert.Equal(12, read.UnitId);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    public async Task Читання_колонки_Lookup_віддає_довідник_і_фільтр()
+    {
+        await Save().HandleAsync(
+            1, _table.Id, "Substance",
+            Command(dataType: CellDataType.Lookup, lookupRegistryDefId: 5, lookupFilter: "kind=gas"),
+            CancellationToken.None);
+
+        _access.BuildProfileAsync(9, Arg.Any<CancellationToken>())
+            .Returns(new AccessBuilder { UserId = 9 }.Permission("Template.View").Build());
+
+        var read = await Get().HandleAsync(1, _table.Id, "Substance", CancellationToken.None);
+
+        Assert.Equal(5, read.LookupRegistryDefId);
+        Assert.Equal("kind=gas", read.LookupFilter);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    public async Task Читання_видаленої_колонки_404()
+    {
+        await Save().HandleAsync(1, _table.Id, "Gone", Command(), CancellationToken.None);
+        await Delete().HandleAsync(1, _table.Id, "Gone", CancellationToken.None);
+
+        _access.BuildProfileAsync(9, Arg.Any<CancellationToken>())
+            .Returns(new AccessBuilder { UserId = 9 }.Permission("Template.View").Build());
+
+        var error = await Assert.ThrowsAsync<NotFoundException>(
+            () => Get().HandleAsync(1, _table.Id, "Gone", CancellationToken.None));
+
+        Assert.Equal("err.ECR-TMPL-0404.columnCode", error.Details!["messageKey"]);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    public async Task Без_права_Template_View_колонка_не_читається()
+    {
+        await Save().HandleAsync(1, _table.Id, "Jan", Command(), CancellationToken.None);
+
+        _access.BuildProfileAsync(9, Arg.Any<CancellationToken>())
+            .Returns(new AccessBuilder { UserId = 9 }.Build());
+
+        await Assert.ThrowsAsync<AccessDeniedException>(
+            () => Get().HandleAsync(1, _table.Id, "Jan", CancellationToken.None));
     }
 }

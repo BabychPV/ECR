@@ -41,7 +41,6 @@ public sealed class PeriodStateCalculatorTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
-    [Trait("Requirement", "ФВ-1.6")]
     public void До_дати_відкриття_період_у_стані_Scheduled()
     {
         var state = Calculator.Calculate(January(), SiteMidnight(2025, 12, 20), Site);
@@ -97,7 +96,6 @@ public sealed class PeriodStateCalculatorTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
-    [Trait("Requirement", "ФВ-1.8")]
     public void Після_HardClose_стан_Closed()
     {
         var state = Calculator.Calculate(January(), SiteMidnight(2026, 3, 1), Site);
@@ -234,4 +232,152 @@ public sealed class PeriodStateCalculatorTests
             PeriodState.Grace => [PeriodState.Open, PeriodState.Grace],
             _ => [PeriodState.Open, PeriodState.Grace, PeriodState.Closed],
         };
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Finding", "F-08")]
+    public void Ефективний_стан_перевідкритого_періоду_після_until_Closed_без_задачі()
+    {
+        var period = January();
+        period.AdvanceTo(PeriodState.Closed, SiteMidnight(2026, 2, 21));
+
+        var until = SiteMidnight(2026, 3, 1);
+        period.Reopen(until, "correction", SiteMidnight(2026, 2, 25));
+
+        // Збережений стан — `Grace` доти, доки задача не прогнана.
+        Assert.Equal(PeriodState.Grace, period.State);
+
+        Assert.Equal(PeriodState.Grace, Calculator.Effective(period, until.AddSeconds(-1)));
+
+        // ⛔ Мутація: `Effective` віддає `period.State` — тут `Grace`.
+        Assert.Equal(PeriodState.Closed, Calculator.Effective(period, until.AddSeconds(18)));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Finding", "F-08")]
+    public void Ефективний_стан_не_відкриває_закритого_і_не_йде_назад()
+    {
+        // Закритий достроково: за датами ще `Open`, але назад — лише Reopen.
+        var closed = January();
+        closed.AdvanceTo(PeriodState.Closed, SiteMidnight(2026, 1, 10));
+        Assert.Equal(PeriodState.Closed, Calculator.Effective(closed, SiteMidnight(2026, 1, 15)));
+
+        // Збережений `Grace` раніше за дати — лишається `Grace`, не `Open`.
+        var grace = January();
+        grace.AdvanceTo(PeriodState.Grace, SiteMidnight(2026, 1, 10));
+        Assert.Equal(PeriodState.Grace, Calculator.Effective(grace, SiteMidnight(2026, 1, 15)));
+
+        // А відстала задача не заважає просунути вперед: `Scheduled` після
+        // відкриття — вже `Open`.
+        Assert.Equal(PeriodState.Open, Calculator.Effective(January(), SiteMidnight(2026, 1, 15)));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Finding", "F-08")]
+    public void Без_порахованих_меж_ефективний_стан_збережений()
+    {
+        // ⚠ Нульові межі дали б `Closed` будь-якому періоду.
+        var period = new Period(
+            projectId: 1, new PeriodKey(202601), sequence: 1,
+            new DateOnly(2026, 1, 1), new DateOnly(2026, 1, 31));
+        period.AdvanceTo(PeriodState.Open, SiteMidnight(2026, 1, 1));
+
+        Assert.Equal(PeriodState.Open, Calculator.Effective(period, SiteMidnight(2026, 9, 1)));
+    }
+
+    /// <summary>Січень за політикою з іншими зсувами — «адміністратор змінив політику».</summary>
+    private static void ChangePolicy(Period period, int openOffsetDays, int graceOffsetDays, int hardCloseOffsetDays)
+        => period.RecomputeBoundaries(
+            new PeriodPolicy(EcrCode.Create("NEW"), openOffsetDays, graceOffsetDays,
+                             hardCloseOffsetDays, yearGraceOffsetDays: 45),
+            Site);
+
+    /// <summary>
+    /// ⛔ Дефект: адміністратор подовжив пільговий строк, межі перераховано, і
+    /// за новими межами період, що вже в <c>Grace</c>, «мав би» бути
+    /// <c>Open</c>. План пропускав зворотний перехід лише з <c>Closed</c>, тож
+    /// <c>Grace → Open</c> потрапляв у план, <c>Period.TransitionTo</c> кидав
+    /// <c>ECR-PRD-0409</c>, і <c>PeriodStateJob</c> падав на цьому проєкті
+    /// щогодини.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "ФВ-1.10")]
+    public void Подовжений_пільговий_строк_не_повертає_Grace_в_Open()
+    {
+        var period = January(); // пільга до 5 лютого
+        period.AdvanceTo(PeriodState.Grace, SiteMidnight(2026, 2, 10));
+
+        // Пільговий строк подовжено до 25 лютого: за датами 10 лютого — Open.
+        ChangePolicy(period, openOffsetDays: 0, graceOffsetDays: 25, hardCloseOffsetDays: 40);
+        var now = SiteMidnight(2026, 2, 12);
+        Assert.Equal(PeriodState.Open, Calculator.Calculate(period, now, Site));
+
+        // ⛔ МУТАЦІЙНИЙ ДОКАЗ: повернути в `Plan` перевірку «лише з Closed» →
+        // тут план `Grace → Open`, і задача падала б на `TransitionTo`.
+        Assert.Empty(Calculator.Plan([period], now, Site));
+
+        var plan = Calculator.PlanTransitions([period], now, Site);
+        Assert.Empty(plan.Transitions);
+
+        // Не мовчки: пропуск описано — що, звідки, куди і чому.
+        var skipped = Assert.Single(plan.Skipped);
+        Assert.Same(period, skipped.Period);
+        Assert.Equal(PeriodState.Grace, skipped.Current);
+        Assert.Equal(PeriodState.Open, skipped.Computed);
+        Assert.Contains("Reopen", SkippedPeriodTransition.Reason, StringComparison.Ordinal);
+
+        // Стан не змінено — план нічого не застосовує.
+        Assert.Equal(PeriodState.Grace, period.State);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "ФВ-1.10")]
+    public void Відсунуте_закриття_не_відкриває_Closed_назад_у_Grace()
+    {
+        var period = January(); // жорстке закриття 20 лютого
+        period.AdvanceTo(PeriodState.Closed, SiteMidnight(2026, 3, 1));
+
+        // Закриття відсунуто до 12 березня: за датами 1 березня — Grace.
+        ChangePolicy(period, openOffsetDays: 0, graceOffsetDays: 5, hardCloseOffsetDays: 40);
+        var now = SiteMidnight(2026, 3, 2);
+        Assert.Equal(PeriodState.Grace, Calculator.Calculate(period, now, Site));
+
+        // Відкрити закритий період — лише Reopen людини з причиною (ФВ-1.10).
+        Assert.Empty(Calculator.Plan([period], now, Site));
+
+        var skipped = Assert.Single(Calculator.PlanTransitions([period], now, Site).Skipped);
+        Assert.Equal(PeriodState.Closed, skipped.Current);
+        Assert.Equal(PeriodState.Grace, skipped.Computed);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "ФВ-1.10")]
+    public void Відсунуте_відкриття_не_повертає_Open_у_Scheduled_а_вперед_план_іде_як_і_раніше()
+    {
+        var open = January();
+        open.AdvanceTo(PeriodState.Open, SiteMidnight(2026, 1, 5));
+
+        // Відкриття відсунуто на 10 днів: 5 січня за датами — Scheduled.
+        ChangePolicy(open, openOffsetDays: 10, graceOffsetDays: 5, hardCloseOffsetDays: 20);
+
+        // Контроль: сусідній період без зміни політики йде вперед, як і йшов.
+        var scheduled = January();
+        var now = SiteMidnight(2026, 1, 6);
+
+        var plan = Calculator.PlanTransitions([open, scheduled], now, Site);
+
+        var transition = Assert.Single(plan.Transitions);
+        Assert.Same(scheduled, transition.Period);
+        Assert.Equal(PeriodState.Open, transition.Target);
+
+        var skipped = Assert.Single(plan.Skipped);
+        Assert.Same(open, skipped.Period);
+        Assert.Equal(PeriodState.Open, skipped.Current);
+        Assert.Equal(PeriodState.Scheduled, skipped.Computed);
+    }
 }

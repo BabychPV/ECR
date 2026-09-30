@@ -51,6 +51,16 @@ public sealed class SourceEntityConfiguration : IEntityTypeConfiguration<SourceE
         builder.Property(x => x.SourceKind).HasDefaultValue(Domain.Enums.RegistrySourceKind.External);
         builder.Property(x => x.IsActive).HasDefaultValue(true);
 
+        // D-212: політика синку довідника. ⚠ Без HasDefaultValue у моделі:
+        // умовчання (0 / false) дорівнює CLR-умовчанню, і EF кладе DEFAULT у
+        // AddColumn сам — для наявних рядків цього досить, а модель не
+        // отримує sentinel-пастки «значення 0 не відправляється».
+        builder.Property(x => x.OnMissingInSource).HasColumnType("tinyint");
+        builder.Property(x => x.ValidFromAttribute).HasMaxLength(SourceEntity.MaxValidityAttributeLength);
+        builder.Property(x => x.ValidToAttribute).HasMaxLength(SourceEntity.MaxValidityAttributeLength);
+        builder.ToTable("SourceEntity", "ext", t => t.HasCheckConstraint(
+            "CK_SE_OnMissingInSource", "[OnMissingInSource] IN (0, 1, 2)"));
+
         builder.HasIndex(x => new { x.DataSourceId, x.Code })
                .IsUnique().HasDatabaseName("UQ_SourceEntity");
 
@@ -83,8 +93,10 @@ public sealed class EntityFieldMapConfiguration : IEntityTypeConfiguration<Entit
                 // ⛔ Перелік закритий (`D-118`). Довільний код перетворення —
                 // це можливість вписати щось, чого обробник не знає, і
                 // дізнатися про це під час збору, а не при налаштуванні.
+                // HSE301 M1: + згортки за часом (`D-172`), у кінець переліку.
                 "TransformCode IS NULL OR TransformCode IN "
-                + "(N'Sum', N'Avg', N'Min', N'Max', N'Last', N'First')"));
+                + "(N'Sum', N'Avg', N'Min', N'Max', N'Last', N'First', "
+                + "N'TimeWeightedAvg', N'TimeIntegral')"));
 
         builder.ToTable("EntityFieldMap", "ext", t => t.HasCheckConstraint(
                 "CK_EFM_Materialization",
@@ -103,6 +115,9 @@ public sealed class EntityFieldMapConfiguration : IEntityTypeConfiguration<Entit
         // довший за той, на який він посилається, не знайшов би нічого.
         builder.Property(x => x.TargetRowKey).HasMaxLength(100);
         builder.Property(x => x.IsActive).HasDefaultValue(true);
+
+        // HSE301 §4.1: форма ряду між точками; наявні мапінги — лінійні.
+        builder.Property(x => x.IsStep).HasDefaultValue(false);
 
         // ФВ-16.9: позначка «чекає рішення про одиницю». Id без FK навмисно:
         // одиницю можуть прибрати з довідника до рішення, і тоді «прийняти»
@@ -327,6 +342,12 @@ public sealed class CollectionCoverageConfiguration : IEntityTypeConfiguration<C
         // Деталь прогону: покриття одного прогону в порядку CoveredFrom — seek без сортування.
         builder.HasIndex(x => new { x.CollectionRunId, x.CoveredFrom }, "IX_CollectionCoverage_CollectionRunId")
                .IncludeProperties(x => x.CoveredTo);
+
+        // Острови покриття джерела (P5, `CollectionStore.ReadCoverageIslandsAsync`):
+        // успішні інтервали (`Status IS NULL`) однієї сутності в порядку CoveredTo.
+        builder.HasIndex(x => new { x.SourceEntityId, x.CoveredTo }, "IX_CollectionCoverage_SourceEntity_CoveredTo")
+               .IncludeProperties(x => x.CoveredFrom)
+               .HasFilter("[Status] IS NULL");
     }
 }
 
@@ -427,6 +448,61 @@ public sealed class JobProgressConfiguration : IEntityTypeConfiguration<JobProgr
         // старті фільтрує саме за парою (State, HeartbeatAt), і без індексу
         // воно сканувало б усю історію задач, яка не видаляється.
         builder.HasIndex(x => new { x.State, x.HeartbeatAt }).HasDatabaseName("IX_JobProgress_Stale");
+
+        // Процес-власник: «{машина}/{GUID}». nvarchar — ім'я хоста не зобов'язане бути ASCII.
+        builder.Property(x => x.InstanceId).HasMaxLength(JobProgress.MaxInstanceIdLength);
+
+        // ⚠ «Мої задачі» (`ListRecentAsync`, шапка опитує кожні 3–30 с):
+        // `WHERE CreatedByUserId = @u [AND State/JobCode] ORDER BY UpdatedAt DESC`
+        // + TOP. `IX_JobProgress_Stale` веде за State і автора не бачить —
+        // без цього індексу кожне опитування сканує всю історію задач.
+        // State/JobCode у INCLUDE — необов'язкові фільтри екрана черги
+        // перевіряються в індексі, до key lookup лише TOP рядків.
+        // Нефільтрований: предиката на активні стани запит не має.
+        builder.HasIndex(x => new { x.CreatedByUserId, x.UpdatedAt }, "IX_JobProgress_CreatedBy_UpdatedAt")
+               .IsDescending(false, true)
+               .IncludeProperties(x => new { x.State, x.JobCode });
+
+        ConfigureQueue(builder);
+    }
+
+    /// <summary>Колонки й індекси черги в базі (MI-02, D-208).</summary>
+    /// <remarks>
+    /// ⚠ Усі фільтровані індекси вимагають <c>SET QUOTED_IDENTIFIER ON</c> і
+    /// <c>ANSI_NULLS ON</c> у сесії, що пише в таблицю: SqlClient має їх
+    /// типово, <c>sqlcmd</c> — лише з <c>-I</c> (так і йде розгортання,
+    /// <c>setup-dev-db.ps1</c>, <c>verify-sql-scripts.ps1</c>).
+    /// </remarks>
+    private static void ConfigureQueue(EntityTypeBuilder<JobProgress> builder)
+    {
+        // Рядок черги (Lane NOT NULL) без AvailableAt ніхто б ніколи не взяв:
+        // claim фільтрує `AvailableAt <= SYSUTCDATETIME()`, а NULL не проходить.
+        builder.ToTable(t => t.HasCheckConstraint(
+            "CK_JobProgress_QueueShape", "[Lane] IS NULL OR [AvailableAt] IS NOT NULL"));
+
+        builder.Property(x => x.Lane).HasMaxLength(JobProgress.MaxLaneLength).IsUnicode(false);
+        builder.Property(x => x.Payload).HasColumnType("nvarchar(max)");
+        builder.Property(x => x.AvailableAt).HasColumnType("datetime2(3)");
+        builder.Property(x => x.LeaseUntil).HasColumnType("datetime2(3)");
+        builder.Property(x => x.CancelRequestedAt).HasColumnType("datetime2(3)");
+        builder.Property(x => x.TargetKey).HasMaxLength(JobProgress.MaxTargetKeyLength);
+
+        // ⛔ Два індекси, а не один на (TargetKey) за активним станом: на ціль
+        // дозволено рівно «1 Running + 1 Queued позаду». Running-індекс — справжній
+        // запобіжник claim (правка А «Аудиту»): NOT EXISTS іде без READPAST, а
+        // гонитву, яку він пропустить, база відбиває 2601/2627.
+        builder.HasIndex(x => x.TargetKey, "UX_JobProgress_Target_Queued")
+               .IsUnique()
+               .HasFilter("[State] = 'Queued' AND [TargetKey] IS NOT NULL");
+        builder.HasIndex(x => x.TargetKey, "UX_JobProgress_Target_Running")
+               .IsUnique()
+               .HasFilter("[State] = 'Running' AND [TargetKey] IS NOT NULL");
+
+        // Claim: WHERE Lane IN (…) AND State = … AND AvailableAt <= now ORDER BY
+        // AvailableAt, JobId. Фільтр відсікає історію задач і дзеркало Quartz.
+        builder.HasIndex(x => new { x.Lane, x.State, x.AvailableAt }, "IX_JobProgress_Claim")
+               .IncludeProperties(x => new { x.TargetKey, x.LeaseUntil, x.Attempt, x.ReclaimCount })
+               .HasFilter("[Lane] IS NOT NULL AND [State] IN ('Queued', 'Running')");
     }
 }
 

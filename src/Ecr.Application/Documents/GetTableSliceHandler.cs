@@ -1,4 +1,4 @@
-﻿using Ecr.Application.Documents.Dto;
+using Ecr.Application.Documents.Dto;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
 using Ecr.Domain.Entities.Calculations;
@@ -24,6 +24,11 @@ namespace Ecr.Application.Documents;
 /// замовчуванням існує лише заради тестів, що конструюють обробник вручну, і
 /// вимикає кеш, а не підміняє його тихою заглушкою.
 /// </param>
+/// <param name="results">
+/// Числа методологій (F-02). ⚠ Необов'язковий лише заради тестів, що
+/// конструюють обробник вручну: у контейнері розв'язується завжди, і без нього
+/// колонка <c>Calculated</c> була б порожньою — рівно дефект, який тут закрито.
+/// </param>
 public sealed class GetTableSliceHandler(
     IRowStore rowStore,
     ICellStore cellStore,
@@ -33,7 +38,8 @@ public sealed class GetTableSliceHandler(
     IMethodologyStore methodologies,
     IPeriodStore periods,
     IStyleCatalog styles,
-    IMemoryCache? memory = null)
+    IMemoryCache? memory = null,
+    ICalculationResultStore? results = null)
 {
     private readonly MethodologyRequiredColumnsCache _required = new(memory);
 
@@ -56,7 +62,7 @@ public sealed class GetTableSliceHandler(
         // ⛔ Право перевіряється ТУТ (`A7-53`). Контролер будував профіль і
         // передавав його далі, не питаючи нічого: `[Authorize]` пропускав
         // будь-кого, хто увійшов.
-        if (!profile.Has("Document.View"))
+        if (!profile.HasInAnyProject("Document.View"))
         {
             throw new Errors.AccessDeniedException(
                 "ECR-AUTH-0403", "Потрібне право Document.View.",
@@ -72,18 +78,10 @@ public sealed class GetTableSliceHandler(
         // ЯКИМИ. Без другої перевірки ресурсна модель — включно з `IsDeny`
         // (`ФВ-6.6`) — не діяла на читанні зовсім: `CanReadDocumentAsync`
         // існувала і не мала жодного виклику.
-        var read = await access.CanReadDocumentAsync(profile, documentId, ct).ConfigureAwait(false);
-        if (!read.IsAllowed)
-        {
-            throw new Errors.AccessDeniedException(
-                "ECR-AUTH-0403", $"Немає доступу до документа {documentId}: {read.Reason}.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-AUTH-0403.noDocumentAccess",
-                    ["documentId"] = documentId.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                    ["reason"] = read.Reason.ToString(),
-                });
-        }
+        // ⛔ B-08: невидимий документ — 404, як і `GET /documents/{id}`, а не 403
+        // «NoGrant»: різниця відповідей сама розкривала б, що документ існує.
+        // ФВ-6.14: і право — у проєкті документа.
+        await DocumentVisibility.RequireVisibleAsync(access, profile, documentId, "Document.View", ct).ConfigureAwait(false);
 
         var instance = await rowStore.ResolveTableInstanceAsync(tableInstanceId, ct).ConfigureAwait(false);
 
@@ -107,16 +105,50 @@ public sealed class GetTableSliceHandler(
                 });
         }
 
+        // ⛔ S6 (ФВ-6.6): заборона на аркуш чи таблицю діє й на ЧИТАННЯ. До
+        // цього зріз дивився лише на проєкт, і `IsDeny` на таблицю сірив
+        // редагування, а числа віддавав. Прихована таблиця — той самий 404, що
+        // й неіснуючий екземпляр (`RowStore.ResolveTableInstanceAsync`): 403
+        // «заборонено» сам розповідав би, що таблиця є (той самий принцип, що й
+        // B-08 для документа).
+        var readable = (await access.ReadScopeAsync(profile, documentId, ct).ConfigureAwait(false))
+            .InPeriod(new Ecr.Domain.ValueObjects.PeriodKey(instance.PeriodKey));
+
+        if (!readable.CanReadTable(instance.TableDefId))
+        {
+            throw new Errors.NotFoundException(
+                "ECR-DOC-0404",
+                $"Екземпляра таблиці {tableInstanceId} не знайдено.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-DOC-0404.tableInstance",
+                    ["tableInstanceId"] = tableInstanceId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
+        }
+
         // 1. Метадані — зі знімка, без звернення до БД (D-16).
         var snapshot = await metadata.GetAsync(instance.TemplateVersionId, ct).ConfigureAwait(false);
         var table = snapshot.Sheets.SelectMany(sh => sh.Tables)
                         .FirstOrDefault(t => t.Id == instance.TableDefId)
+                    // ⚠ Той самий факт, що й `ColumnDefHandlers.FindTable`/
+                    // `ValidationRuleHandlers` (2026-09-23): «таблиці з таким Id
+                    // немає в цій версії» — тому наявний ключ, а не новий.
                     ?? throw new Errors.NotFoundException(
-                        "ECR-TMPL-0404", $"Таблиці {instance.TableDefId} немає в структурі версії.");
+                        "ECR-TMPL-0404", $"Таблиці {instance.TableDefId} немає в структурі версії.",
+                        new Dictionary<string, object?>
+                        {
+                            ["messageKey"] = "err.ECR-TMPL-0404.table",
+                            ["tableDefId"] = instance.TableDefId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                            ["versionId"] = instance.TemplateVersionId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                        });
 
         // 2. Значення — ОДИН запит на весь зріз. N+1 тут коштує бюджету
         //    1.5 с на 500×60 (tz/08 §8.2).
-        var cells = await cellStore.ReadSliceAsync(tableInstanceId, ct).ConfigureAwait(false);
+        //    ⚠ O3b: з періодом екземпляра — seek в одній партиції замість
+        //    скану `doc.TableInstance` по всіх (1 984 → 2 читання).
+        var cells = await cellStore
+            .ReadSliceAsync(tableInstanceId, new Domain.ValueObjects.PeriodKey(instance.PeriodKey), ct)
+            .ConfigureAwait(false);
 
         // 3. Права — ОДИН виклик на весь зріз, не по комірці.
         var decisions = await access.CanEditSliceAsync(profile, tableInstanceId, ct).ConfigureAwait(false);
@@ -126,6 +158,29 @@ public sealed class GetTableSliceHandler(
         var versions = await rowStore.GetRowVersionsAsync(tableInstanceId, new Domain.ValueObjects.PeriodKey(instance.PeriodKey), ct)
                                      .ConfigureAwait(false);
         var keyById = rowIds.ToDictionary(kv => kv.Value, kv => kv.Key);
+
+        // ⛔ F-02 (четвертий раунд UX): колонка `Calculated` отримує число
+        // методології ПОСИЛАННЯМ (`D-69`) — тут, у зрізі, з якого малює сітка.
+        // Доти зріз віддавав лише введені колонки, і `EMISSION` була порожньою,
+        // хоча панель результатів показувала R1 = 20. Таблиця без такої колонки
+        // не робить жодного додаткового запиту.
+        var calculated = table.Columns
+            .Where(c => !c.IsDeleted && c.DataType == Domain.Enums.CellDataType.Calculated)
+            .Select(c => c.Id)
+            .ToHashSet();
+
+        if (results is not null && calculated.Count > 0)
+        {
+            var overlaid = await new Calculations.CalculatedCellOverlay(methodologies, results)
+                .ApplyAsync(
+                    documentId,
+                    instance.PeriodKey,
+                    [new Calculations.OverlayTable(tableInstanceId, table.Id, rowIds, cells, calculated)],
+                    ct)
+                .ConfigureAwait(false);
+
+            cells = overlaid[tableInstanceId];
+        }
         var orphans = await rowStore.GetOrphanFlagsAsync(tableInstanceId, new Domain.ValueObjects.PeriodKey(instance.PeriodKey), ct)
                                     .ConfigureAwait(false);
 
@@ -160,8 +215,16 @@ public sealed class GetTableSliceHandler(
         // шістдесят колонок не повинні коштувати шістдесяти походів у базу.
         var styleById = await styles.GetAsync(instance.TemplateVersionId, ct).ConfigureAwait(false);
 
+        // ⛔ `V-14`: прихована колонка (Appearance → Hidden) приходила в зріз, і
+        // сітка показувала її та давала редагувати — хоча експорт її вже
+        // пропускає (`DocumentDataExporter`). Приховане не віддається тут, і
+        // «видно оператору» означає одне й те саме в сітці та в книзі.
+        //
+        // ⛔ S6: колонка під забороною (ФВ-6.6) не віддається ЗОВСІМ — ні
+        // значенням, ні описом (код, заголовок, одиниця — теж її дані), так
+        // само, як прихована: сітка малює рівно ті колонки, що прийшли.
         var columns = table.Columns
-            .Where(c => !c.IsDeleted)
+            .Where(c => !c.IsDeleted && !c.IsHidden && readable.CanReadColumn(c.Id))
             .OrderBy(c => c.Ordinal)
             .Select(c => new ColumnDto(
                 c.Id, c.Code, c.HeaderL10n.Get(language) ?? c.Code, c.DataType.ToString(),
@@ -185,7 +248,12 @@ public sealed class GetTableSliceHandler(
         // документ віддавав ПОРОЖНЮ фіксовану таблицю, у яку нема куди
         // вводити перше число. Порожнеча була не станом даних, а наслідком
         // способу побудови відповіді.
+        //
+        // ⛔ S6: значення заборонених колонок відкидаються ТУТ — після накладення
+        // чисел методологій, щоб і обчислена колонка під забороною не
+        // повернулась у відповідь.
         var cellsByRow = cells
+            .Where(c => readable.CanReadColumn(c.Address.ColumnDefId))
             .GroupBy(c => c.Address.TableRowId)
             .ToDictionary(g => g.Key, g => g.ToList());
 
@@ -231,7 +299,9 @@ public sealed class GetTableSliceHandler(
             {
                 continue;
             }
-            if (!columnCodeById.TryGetValue(address.ColumnDefId, out var code))
+            // ⚠ S6: причина відмови на заборонену колонку теж розкривала б її код.
+            if (!readable.CanReadColumn(address.ColumnDefId)
+                || !columnCodeById.TryGetValue(address.ColumnDefId, out var code))
             {
                 continue;
             }

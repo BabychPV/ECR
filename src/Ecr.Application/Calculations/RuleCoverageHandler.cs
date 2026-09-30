@@ -1,6 +1,7 @@
 using System.Globalization;
 using Ecr.Application.Calculations.Dto;
 using Ecr.Application.Common;
+using Ecr.Application.Documents;
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
@@ -16,8 +17,12 @@ namespace Ecr.Application.Calculations;
 /// <remarks>
 /// Осі — distinct-комбінації значень колонок, які згадують правила, по живих рядках
 /// таблиць прив'язок методології за вікно періодів. Класифікація — та сама, що в
-/// прогоні (<see cref="MethodologyRuleMatcher.Classify"/>). Назовні лише коди значень
-/// і лічильники, без чисел звітності.
+/// прогоні (<see cref="MethodologyRuleMatcher.Classify"/>). Назовні — значення колонок,
+/// які згадують правила (зазвичай коди, але й числа, якщо правило ключує числову
+/// колонку), і лічильники рядків/документів.
+///
+/// ⛔ Рядки — лише з проєктів, які користувач може читати (аудит S7): значення комірок
+/// і лічильники — це дані проєкту, а <c>Calculation.View</c> — право на методологію.
 /// </remarks>
 public sealed class RuleCoverageHandler(
     IMethodologyDraftStore drafts,
@@ -49,7 +54,7 @@ public sealed class RuleCoverageHandler(
         int? periodTo,
         CancellationToken ct)
     {
-        await PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
+        var profile = await PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
         await MethodologyVersionGuard
             .RequireOwnAsync(drafts, methodologyId, [methodologyVersionId], ct)
             .ConfigureAwait(false);
@@ -91,7 +96,15 @@ public sealed class RuleCoverageHandler(
             .Order()
             .ToList();
 
-        var read = await reader.ReadAsync(tables, columns, from, to, MaxCombinations, ct).ConfigureAwait(false);
+        // ⛔ Аудит S7: `Calculation.View` — право на методологію, не на дані проєктів.
+        // Рядки беруться лише з проєктів, які користувач може читати, — той самий
+        // набір, що в переліку документів і пошуку (`ReadableProjects`, заборони
+        // включно). Немає жодного гранта — порожня матриця (200), а не 403: так само
+        // поводяться перелік документів, пошук і перелік зрізів звітності.
+        var projects = ListDocumentsHandler.ReadableProjects(profile);
+        IReadOnlyList<RuleCoverageCombination> read = projects.Count == 0
+            ? []
+            : await reader.ReadAsync(tables, columns, projects, from, to, MaxCombinations, ct).ConfigureAwait(false);
 
         var combinations = read
             .Take(MaxCombinations)

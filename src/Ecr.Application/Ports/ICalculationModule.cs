@@ -27,7 +27,7 @@ public interface ICalculationModule
     /// </summary>
     /// <remarks>
     /// ⛔ Окремий крок, а не ліниве поле всередині модуля. Склад версії
-    /// (формули, речовини, виходи) і межі періоду однакові для всієї
+    /// (формули, речовини, виходи, константи) і межі періоду однакові для всієї
     /// прив'язки «методологія × період», а <see cref="ExecuteAsync(
     /// CalculationBindingContext, CalculationInput, CancellationToken)"/>
     /// викликають на КОЖЕН рядок таблиці. Доти три читання сховища й один
@@ -48,10 +48,37 @@ public interface ICalculationModule
         MethodologyDescriptor methodology, long documentId, PeriodKey periodKey, CancellationToken ct);
 
     /// <summary>
+    /// Те саме, що <see cref="PrepareAsync(MethodologyDescriptor, long, PeriodKey, CancellationToken)"/>,
+    /// але знімок довідників береться з кешу ПРОГОНУ (RT-23a, FEATURE-REGISTRY-TABLES §5.7).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Кеш — окремий параметр, а не поле модуля: модуль живе рівно стільки, скільки
+    /// гілка пакета (<c>Q-249</c>), а знімок спільний для ВСІХ прив'язок прогону. Той самий
+    /// аргумент, що вже стоїть вище про склад версії.
+    ///
+    /// ⚠ Типова реалізація відкидає кеш: модуль, що довідників не читає, нічого не
+    /// перевизначає, і поведінка лишається тією, що була до кроку.
+    /// </remarks>
+    /// <param name="methodology">Версія методології, яку виконують.</param>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="periodKey">Період.</param>
+    /// <param name="registries">Кеш знімків прогону; <c>null</c> — модуль вантажить сам.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<CalculationBindingContext> PrepareAsync(
+        MethodologyDescriptor methodology,
+        long documentId,
+        PeriodKey periodKey,
+        RegistrySnapshotCache? registries,
+        CancellationToken ct)
+        => PrepareAsync(methodology, documentId, periodKey, ct);
+
+    /// <summary>
     /// Виконує розрахунок одного рядка в уже готовому контексті прив'язки.
     /// Не пише в БД — повертає результат.
     /// </summary>
-    /// <param name="binding">Контекст із <see cref="PrepareAsync"/>.</param>
+    /// <param name="binding">
+    /// Контекст із <see cref="PrepareAsync(MethodologyDescriptor, long, PeriodKey, CancellationToken)"/>.
+    /// </param>
     /// <param name="input">Рядок документа з аргументами.</param>
     /// <param name="ct">Токен скасування.</param>
     public Task<CalculationOutput> ExecuteAsync(
@@ -98,6 +125,23 @@ public interface ICalculationModule
 /// <c>null</c> — колонка масштабу не оголошує, і береться
 /// <c>NumericPolicy.DefaultOutputScale</c>.
 /// </param>
+/// <param name="Constants">
+/// Код константи → УСІ її кандидати у версії (темпоральні, за речовиною, за
+/// категорією), прочитані одним запитом (аудит P1). Вибір серед них — у
+/// <c>ConstantResolver.Resolve</c>, у пам'яті, на кожну речовину. Коду немає
+/// в словнику — константи немає, формула читає <c>#REF</c>.
+/// </param>
+/// <param name="Registries">
+/// Знімок довідників, які читають формули версії (RT-23a, <c>D-162</c>); <c>null</c> —
+/// формули довідників не читають, і функції <c>REG*</c> дали б <c>#REF</c>.
+/// ⛔ Завантажується тут, у підготовці, а не на рядку: під час обчислення звернень до
+/// БД немає жодного.
+/// </param>
+/// <param name="Libraries">
+/// ✎ HSE301 L: формули імпортованих методологій, на які транзитивно посилається версія,
+/// з версіями бібліотек, чинними на бізнес-дату прив'язки; <c>null</c> — версія за межу
+/// своїх формул не посилається.
+/// </param>
 public sealed record CalculationBindingContext(
     MethodologyDescriptor Methodology,
     long DocumentId,
@@ -106,7 +150,134 @@ public sealed record CalculationBindingContext(
     IReadOnlyList<MethodologySubstance> Substances,
     IReadOnlyList<MethodologyOutput> Outputs,
     Ecr.Expressions.PeriodContext Period,
-    IReadOnlyDictionary<string, byte?> OutputScales);
+    IReadOnlyDictionary<string, byte?> OutputScales,
+    IReadOnlyDictionary<string, IReadOnlyList<MethodologyConstant>> Constants,
+    Ecr.Expressions.Evaluation.IRegistrySnapshot? Registries = null,
+    CalculationLibraries? Libraries = null);
+
+/// <summary>
+/// Замикання бібліотечних формул версії (HSE301 L): що з імпортованих методологій
+/// рахується в контексті рядка викликача.
+/// </summary>
+/// <remarks>
+/// ⛔ Формула бібліотеки рахується В КОНТЕКСТІ РЯДКА ВИКЛИКАЧА: аргументи — рядка
+/// викликача, константи — версії бібліотеки (з кандидатами на поточну речовину),
+/// посилання — у просторі імен бібліотеки. Результат бібліотеки, записаний її власним
+/// прогоном, не читається: у бібліотеки рядків немає, і число залежало б від того,
+/// хто рахувався першим.
+/// </remarks>
+/// <param name="Imports">Імена <c>!Code</c> викликача, що ведуть за межу його версії.</param>
+/// <param name="Versions">Версії бібліотек у порядку, в якому їх знайдено.</param>
+public sealed record CalculationLibraries(
+    IReadOnlyDictionary<string, LibraryLink> Imports,
+    IReadOnlyList<CalculationLibrary> Versions);
+
+/// <summary>Одна версія бібліотеки в замиканні — лише потрібні формули.</summary>
+/// <param name="MethodologyId">Методологія-бібліотека.</param>
+/// <param name="MethodologyCode">Її код — джерело кроку в трейсі.</param>
+/// <param name="MethodologyVersionId">Версія, чинна на дату.</param>
+/// <param name="NumericMode">Арифметика версії (публікація звіряє з викликачем).</param>
+/// <param name="CalendarMode">Календар версії (публікація звіряє з викликачем).</param>
+/// <param name="Formulas">Потрібні формули в порядку <c>EvaluationOrder</c> бібліотеки.</param>
+/// <param name="Constants">Код константи → усі кандидати версії бібліотеки.</param>
+/// <param name="Imports">Імена цієї бібліотеки, що ведуть далі — в її власні імпорти.</param>
+public sealed record CalculationLibrary(
+    int MethodologyId,
+    string MethodologyCode,
+    int MethodologyVersionId,
+    NumericMode NumericMode,
+    CalendarMode CalendarMode,
+    IReadOnlyList<MethodologyFormula> Formulas,
+    IReadOnlyDictionary<string, IReadOnlyList<MethodologyConstant>> Constants,
+    IReadOnlyDictionary<string, LibraryLink> Imports);
+
+/// <summary>Куди веде <c>!Code</c> за межею своєї версії.</summary>
+/// <param name="MethodologyId">Методологія, у формулу якої веде ім'я.</param>
+/// <param name="MethodologyCode">Її код.</param>
+/// <param name="MethodologyVersionId">Її версія, чинна на дату.</param>
+/// <param name="IsCycle">
+/// Імпорт веде назад у методологію, що вже є на шляху від викликача: обчислення дасть
+/// <c>#CYCLE</c>, а не рекурсію. Так виглядає бібліотека, перевидана з посиланням назад
+/// уже після публікації викликача.
+/// </param>
+public sealed record LibraryLink(
+    int MethodologyId,
+    string MethodologyCode,
+    int MethodologyVersionId,
+    bool IsCycle);
+
+/// <summary>
+/// Кеш знімків довідників ОДНОГО прогону: ключ — (довідники, бізнес-дата, момент
+/// <c>AS OF</c>) (RT-23a, FEATURE-REGISTRY-TABLES §5.7).
+/// </summary>
+/// <remarks>
+/// ⛔ Один момент на прогін (<c>CalculationRun.RegistryAsOfUtc</c>, <c>D-158</c>): усі
+/// прив'язки бачать довідник у тому самому стані, тож повтор прогону відтворює числа
+/// побітно (AC-7). Момент задає той, хто створює кеш, — модуль його не вибирає.
+///
+/// ⚠ Потокобезпечний: прив'язки одного пакета йдуть паралельно
+/// (<c>CalculationOrchestrator</c>, <c>MaxParallelism</c>), і дві гілки з тим самим
+/// ключем чекають ОДНОГО завантаження, а не роблять два. Завантажує гілка, яка прийшла
+/// першою, своїм власним завантажувачем (власний scope, <c>Q-249</c>); знімок
+/// незмінний, тож ділити його між гілками безпечно (<c>IRegistrySnapshot</c>).
+///
+/// ⚠ Невдале завантаження з кешу прибирається: наступна прив'язка спробує знову, а не
+/// отримає чужий виняток.
+/// </remarks>
+/// <param name="registryAsOfUtc">
+/// Системний момент знімка; <c>null</c> — поточні дані (прогін без моменту, §3.5).
+/// </param>
+public sealed class RegistrySnapshotCache(DateTime? registryAsOfUtc)
+{
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, Lazy<Task<Ecr.Expressions.Evaluation.IRegistrySnapshot>>> _snapshots =
+        new(StringComparer.Ordinal);
+
+    /// <summary>Системний момент знімків цього прогону.</summary>
+    public DateTime? RegistryAsOfUtc { get; } = registryAsOfUtc;
+
+    /// <summary>Скільки різних знімків завантажено (для перевірки спільності кешу).</summary>
+    public int Count => _snapshots.Count;
+
+    /// <summary>Знімок із кешу або завантажений заданим завантажувачем.</summary>
+    /// <param name="registryDefIds">Довідники, які читають формули.</param>
+    /// <param name="businessDate">Бізнес-дата — останній день періоду.</param>
+    /// <param name="loader">Завантажувач гілки, яка питає.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<Ecr.Expressions.Evaluation.IRegistrySnapshot> GetOrLoadAsync(
+        IReadOnlyCollection<int> registryDefIds,
+        DateOnly businessDate,
+        IRegistrySnapshotLoader loader,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(registryDefIds);
+        ArgumentNullException.ThrowIfNull(loader);
+
+        var ids = registryDefIds.Distinct().Order().ToList();
+        var key = string.Join(',', ids) + "|" + businessDate.ToString("O", System.Globalization.CultureInfo.InvariantCulture)
+                  + "|" + (RegistryAsOfUtc?.Ticks.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "-");
+
+        var entry = _snapshots.GetOrAdd(
+            key,
+            _ => new Lazy<Task<Ecr.Expressions.Evaluation.IRegistrySnapshot>>(
+                () => loader.LoadAsync(ids, businessDate, RegistryAsOfUtc, ct)));
+
+        return AwaitAsync(key, entry);
+    }
+
+    private async Task<Ecr.Expressions.Evaluation.IRegistrySnapshot> AwaitAsync(
+        string key, Lazy<Task<Ecr.Expressions.Evaluation.IRegistrySnapshot>> entry)
+    {
+        try
+        {
+            return await entry.Value.ConfigureAwait(false);
+        }
+        catch
+        {
+            _snapshots.TryRemove(new KeyValuePair<string, Lazy<Task<Ecr.Expressions.Evaluation.IRegistrySnapshot>>>(key, entry));
+            throw;
+        }
+    }
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Типи, яких у пакеті не було (Q-014). Чернетка на затвердження.
@@ -187,11 +358,18 @@ public sealed record CalculationInput(
 /// <param name="Value">Числове значення; <c>null</c> — порожньо.</param>
 /// <param name="ValueString">Текстове значення для нечислових аргументів.</param>
 /// <param name="UnitId">Одиниця значення; <c>null</c> — безрозмірне.</param>
+/// <param name="EntryId">
+/// Запис довідника з <c>Lookup</c>-комірки — <c>EntryRef</c> аргументу (RT-23a, §5.3).
+/// ⛔ Заповнюється ЛИШЕ для версій <c>Strict</c> (<c>D-161</c>): у <c>Legacy</c> аргумент
+/// лишається побітно таким, як до кроку, бо чинна система id запису в формулу не
+/// передавала, і <c>Legacy</c> мусить відтворювати саме її числа.
+/// </param>
 public sealed record CalculationArgument(
     string ArgumentCode,
     decimal? Value,
     string? ValueString,
-    int? UnitId);
+    int? UnitId,
+    long? EntryId = null);
 
 /// <summary>
 /// Результат розрахунку одного рядка: <b>усі</b> виходи методології плюс трейс.
@@ -211,24 +389,37 @@ public sealed record CalculationArgument(
 /// <param name="SourceRowKey">Рядок документа.</param>
 /// <param name="Values">Обчислені виходи.</param>
 /// <param name="Trace">Кроки трейсу; порожній список, якщо <c>TraceLevel = Off</c>.</param>
+/// <param name="Inputs">
+/// Аргументи рядка, які прочитали записані кроки, — рядки <c>calc.CalculationInput</c>
+/// (HSE301 A3b, FEATURE-HSE301-VIEW §7.1), у одиниці джерела. <c>null</c> чи порожньо — входів
+/// не пишемо (<c>TraceLevel = Off</c> або жодного кроку).
+/// </param>
 public sealed record CalculationOutput(
     long DocumentId,
     string? SourceRowKey,
     IReadOnlyList<CalculationOutputValue> Values,
-    IReadOnlyList<CalculationTraceStep> Trace);
+    IReadOnlyList<CalculationTraceStep> Trace,
+    IReadOnlyList<CalculationArgument>? Inputs = null);
 
 /// <summary>Один обчислений вихід — рядок <c>calc.CalculationResult</c>.</summary>
 /// <param name="MethodologyVersionId">Версія, що дала число.</param>
 /// <param name="SubstanceEntryId">Речовина; <c>null</c> для виходів без речовини.</param>
-/// <param name="OutputCode">Код виходу з <c>calc.MethodologyOutput</c>.</param>
+/// <param name="OutputCode">
+/// Код виходу з <c>calc.MethodologyOutput</c>; для проміжного значення — код видимої формули.
+/// </param>
 /// <param name="Value">Значення. <c>float</c> заборонений (D-30).</param>
 /// <param name="UnitId">Одиниця результату — обов'язкова (ФВ-16.6).</param>
+/// <param name="Kind">
+/// Вихід чи значення видимої формули (<c>D-175</c>, V-6). ⚠ Типове — вихід: модуль, що
+/// про проміжні нічого не знає, пише рівно те, що писав до кроку A3a.
+/// </param>
 public sealed record CalculationOutputValue(
     int MethodologyVersionId,
     int? SubstanceEntryId,
     string OutputCode,
     decimal Value,
-    int UnitId);
+    int UnitId,
+    CalculationResultKind Kind = CalculationResultKind.Output);
 
 /// <summary>Крок трейсу — рядок <c>calc.CalculationStep</c>.</summary>
 /// <remarks>
@@ -239,11 +430,25 @@ public sealed record CalculationOutputValue(
 /// <param name="StepCode">Код кроку — зазвичай код формули або виходу.</param>
 /// <param name="Expression">Вираз як його бачив рушій.</param>
 /// <param name="Value">Значення кроку.</param>
-/// <param name="TraceJson">Довільна деталізація: підставлені аргументи, константи.</param>
+/// <param name="TraceJson">
+/// Код помилки-значення кроку (<c>#ARG</c>, <c>#REF</c>); <c>null</c> — крок порахувався.
+/// ⚠ Назва історична: сюди завжди клався лише код, і так його читає симуляція
+/// (<c>MethodologyQueryHandlers</c>). Повна деталізація — у <paramref name="Detail"/>.
+/// </param>
 /// <param name="Masked">
 /// Чому значення стало нулем (<c>H-24d-1</c>). Чинна система маскує
 /// <c>NaN</c> і <c>±∞</c> у нуль мовчки; число ми віддаємо те саме, а причину
 /// пишемо — саме за нею такі випадки можна перелічити.
+/// </param>
+/// <param name="Detail">
+/// Крок у схемі <c>TraceJson</c> v1 (HSE301 A3b, FEATURE-HSE301-VIEW §7.2): вираз, результат,
+/// одиниця, помилка й входи. Саме він лягає в <c>calc.CalculationStep.TraceJson</c>;
+/// <c>null</c> — модуль схеми не знає, і пишеться <paramref name="TraceJson"/>, як до кроку.
+/// </param>
+/// <param name="SubstanceEntryId">
+/// Речовина кроку; <c>null</c> — рівень рядка. Разом із документом і рядком
+/// <see cref="CalculationOutput"/> це адреса кроку (<c>calc.CalculationStep</c>, HSE301 A3b),
+/// за якою він знаходить свій результат.
 /// </param>
 public sealed record CalculationTraceStep(
     int StepOrder,
@@ -251,4 +456,6 @@ public sealed record CalculationTraceStep(
     string? Expression,
     decimal? Value,
     string? TraceJson,
-    Domain.Enums.MaskedZeroReason Masked = Domain.Enums.MaskedZeroReason.None);
+    Domain.Enums.MaskedZeroReason Masked = Domain.Enums.MaskedZeroReason.None,
+    string? Detail = null,
+    long? SubstanceEntryId = null);

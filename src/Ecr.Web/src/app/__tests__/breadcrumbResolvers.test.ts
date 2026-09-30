@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { QueryClient } from '@tanstack/react-query';
 import { queryKeys } from '@/api/queryKeys';
 import { resolveCrumbValue } from '@/app/breadcrumbResolvers';
+import { templateCardKey } from '@/features/templates/templateCardQuery';
 
 /**
  * Резолвер динамічних крихт breadcrumbs (`PR nav-arch #3`).
@@ -79,6 +80,26 @@ describe('resolveCrumbValue — templateName', () => {
       status: 'resolved',
       text: 'TPL2',
     });
+  });
+
+  it('пряме посилання: переліку в кеші немає, але є картка шаблону — резолвиться з картки', () => {
+    // ⛔ Повторний прохід UI 2026-09-24: з переліку крихта показувала код, а
+    // пряме посилання на версію — «Templates / Templates / 1.0.0.0», бо назва
+    // жила лише в кеші переліку. Картку вантажить `TemplateVersionLayout`.
+    const client = new QueryClient();
+    client.setQueryData(templateCardKey(7), { id: 7, code: 'GEN99819007' });
+
+    expect(resolveCrumbValue(client, 'templateName', { id: '7' })).toEqual({
+      status: 'resolved',
+      text: 'GEN99819007',
+    });
+  });
+
+  it('картка шаблону ще вантажиться (переліку немає) — loading, а не unavailable', () => {
+    const client = new QueryClient();
+    void client.fetchQuery({ queryKey: templateCardKey(7), queryFn: () => new Promise(() => {}) });
+
+    expect(resolveCrumbValue(client, 'templateName', { id: '7' })).toEqual({ status: 'loading' });
   });
 
   it('холодний кеш без активного запиту — unavailable, не вічний скелет і не сирий :id', () => {

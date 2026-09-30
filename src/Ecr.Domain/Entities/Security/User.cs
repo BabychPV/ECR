@@ -28,6 +28,35 @@ public sealed class User : Entity<int>
     }
 
     public string UserName { get; private set; } = null!;
+
+    /// <summary>Логін технічного запису інтеграції — той самий, що в <c>09-seed.sql</c>.</summary>
+    public const string IntegrationServiceUserName = "svc-integration";
+
+    /// <summary>Чи ім'я належить службовому запису, яким не входять.</summary>
+    /// <param name="userName">Ім'я входу.</param>
+    /// <remarks>
+    /// ⚠ Без урахування регістру: база порівнює логіни так само (колація), і
+    /// «SVC-Integration» у формі входу знайшов би той самий запис.
+    /// </remarks>
+    public static bool IsServiceAccountName(string? userName)
+        => string.Equals(userName?.Trim(), IntegrationServiceUserName, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Службовий запис: автор фонових змін, яким НЕ можна увійти ні паролем, ні
+    /// Windows, ні наявною cookie.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Відсутності пароля недосить: адміністратор може скинути пароль будь-якому
+    /// запису (<c>ResetPassword</c>), і після цього «ніхто не знає пароля»
+    /// перестає бути правдою. Тому вхід відкидає сам запис, а не лише пароль.
+    ///
+    /// ⚠ Ознака за логіном, а не колонкою: логін незмінний (сетера немає), а
+    /// права запису інтеграції від цієї ознаки НЕ залежать — їх дає лише
+    /// контекст задачі (<c>JobActorScope.EnterIntegration</c>). Тут ім'я
+    /// тільки ЗАБОРОНЯЄ, і помилка в ньому нічого не відкриває.
+    /// </remarks>
+    public bool IsServiceAccount => IsServiceAccountName(UserName);
+
     public string DisplayName { get; private set; } = null!;
     public string? Email { get; private set; }
 
@@ -72,7 +101,12 @@ public sealed class User : Entity<int>
         {
             throw new Abstractions.DomainException(
                 ErrorCodes.UserInvalid,
-                $"Користувач «{UserName}» не має пошти: вмикати отримання алертів немає куди.");
+                $"Користувач «{UserName}» не має пошти: вмикати отримання алертів немає куди.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-USR-0422.receivesAlertsRequiresEmail",
+                    ["userName"] = UserName,
+                });
         }
 
         ReceivesAlerts = value;
@@ -210,12 +244,32 @@ public sealed class User : Entity<int>
     /// ⚠ Лічильник живе в домені, а не в обробнику входу. Інакше кожен новий
     /// спосіб автентифікації довелося б навчати рахувати спроби заново — і
     /// один із них неминуче навчити забули б.
+    ///
+    /// ⛔ S8(б): блокування, що вже МИНУЛО, скидає лічильник перед інкрементом.
+    /// Без цього перша ж хибна спроба після блокування знову давала лічильник
+    /// понад межу і блокувала ще на 15 хв — одна спроба на чверть години
+    /// тримала законного власника зачиненим безстроково.
+    ///
+    /// ⚠ ЧИННЕ блокування спроба не скорочує і не подовжує: інакше хибний
+    /// пароль перетворював би адміністративне «доки не розблокують» (BE-12) на
+    /// 15 хвилин.
+    ///
+    /// ⚠ Обробник входу рахує спробу не цим методом, а одним <c>UPDATE</c>
+    /// сховища (<c>IUserStore.RegisterFailedAttemptAsync</c>, S8(в) —
+    /// атомарність під паралельними спробами). Правило там те саме; їхню
+    /// рівність тримає <c>FailedAttemptAtomicTests</c>.
     /// </remarks>
     public bool RegisterFailedAttempt(int maxFailedAttempts, int lockoutMinutes, DateTime utcNow)
     {
+        if (LockedUntil is { } until && until <= utcNow)
+        {
+            FailedAttempts = 0;
+            LockedUntil = null;
+        }
+
         FailedAttempts++;
 
-        if (maxFailedAttempts <= 0 || FailedAttempts < maxFailedAttempts)
+        if (maxFailedAttempts <= 0 || FailedAttempts < maxFailedAttempts || IsLockedOut(utcNow))
         {
             return false;
         }

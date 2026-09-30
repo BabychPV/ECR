@@ -155,8 +155,17 @@ public sealed class MetadataCache(
 
         if (revision is null)
         {
-            throw new InvalidOperationException(
-                $"Версії шаблону {templateVersionId} не існує.");
+            // ⛔ V-17: раніше голий InvalidOperationException, тобто 500
+            // «внутрішня помилка» на diff/структуру неіснуючої версії — хоча
+            // причина користувацька (застаріле посилання, опечатка в id).
+            throw new Ecr.Application.Errors.NotFoundException(
+                "ECR-TMPL-0404",
+                $"Версії шаблону {templateVersionId} не існує.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-TMPL-0404.templateVersion",
+                    ["versionId"] = templateVersionId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
         }
 
         if (window > TimeSpan.Zero)

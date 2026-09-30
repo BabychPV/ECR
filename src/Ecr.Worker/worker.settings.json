@@ -1,0 +1,23 @@
+{
+  // Пул воркерів перерахунку (ФВ-9.8, D-206). Дефолти — цільовий профіль
+  // сервера застосунку: 24 ядра, 32 ГБ ОЗП, SQL Server окремо. Пул 22 ГБ
+  // лишає ~4 ГБ застосунку й ~3 ГБ ОС. Перекриваються змінними оточення
+  // служби ECR_Jobs__Workers__<Ключ>.
+  "Jobs": {
+    "Workers": {
+      "Count": 10,
+      "MemoryLimitMb": 2048,
+      "JobMemoryLimitMb": 22528,
+      "MaxDuration": "00:30:00"
+    }
+  },
+  // Рівні журналу — як у appsettings.json Ecr.Api. Без цього розділу воркер
+  // писав кожну SQL-команду EF на Information: 173 МБ за річний перерахунок
+  // 300 документів (замір I2-2, docs/build/perf/I2-annual-recalc-2026-09-30-r2.md).
+  "Logging": {
+    "LogLevel": {
+      "Default": "Information",
+      "Microsoft.EntityFrameworkCore.Database.Command": "Warning"
+    }
+  }
+}

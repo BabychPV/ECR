@@ -1,5 +1,6 @@
 // src/Ecr.Application/Ports/ICollectionScheduleStore.cs
 using Ecr.Domain.Entities.External;
+using Ecr.Domain.Enums;
 
 namespace Ecr.Application.Ports;
 
@@ -63,8 +64,17 @@ public interface ICollectionScheduleStore
 /// <param name="ScheduleId">Розклад, який у неї вже є; <c>null</c> — розкладу немає.</param>
 /// <param name="DataSourceId">З'єднання, якому належить сутність.</param>
 /// <param name="DataSourceCode">Код цього з'єднання.</param>
+/// <param name="SourceKind">
+/// Хто master для даних сутності; <see cref="RegistrySourceKind.Local"/> — власна
+/// форма ECR, розкладу для неї бути не може (ФВ-12.8).
+/// </param>
 public sealed record SourceEntityScheduling(
-    string Code, string? Name, int? ScheduleId, int DataSourceId, string DataSourceCode);
+    string Code,
+    string? Name,
+    int? ScheduleId,
+    int DataSourceId,
+    string DataSourceCode,
+    RegistrySourceKind SourceKind);
 
 /// <summary>Розклад збору разом із сутністю джерела, якій він належить.</summary>
 /// <param name="Schedule">Сам розклад.</param>
@@ -72,9 +82,14 @@ public sealed record SourceEntityScheduling(
 /// <param name="SourceEntityName">Підпис сутності; <c>null</c> — каталог джерела його не дав.</param>
 /// <param name="DataSourceId">З'єднання, якому належить сутність.</param>
 /// <param name="DataSourceCode">Код цього з'єднання.</param>
+/// <param name="SourceKind">
+/// Хто master для даних сутності; <see cref="RegistrySourceKind.Local"/> — власна
+/// форма ECR, увімкнути розклад для неї не можна (ФВ-12.8).
+/// </param>
 public sealed record ScheduledSourceEntity(
     CollectionSchedule Schedule,
     string SourceEntityCode,
     string? SourceEntityName,
     int DataSourceId,
-    string DataSourceCode);
+    string DataSourceCode,
+    RegistrySourceKind SourceKind);

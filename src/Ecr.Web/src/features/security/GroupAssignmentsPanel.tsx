@@ -1,14 +1,40 @@
 import { useState, type JSX } from 'react';
-import { Alert, Button, Code, Group, Select, Stack, Table, Text, TextInput, Title } from '@mantine/core';
+import {
+  Alert,
+  Button,
+  Code,
+  Group,
+  Select,
+  Skeleton,
+  Stack,
+  Table,
+  Text,
+  TextInput,
+  Title,
+} from '@mantine/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { EcrApiError, apiFetch } from '@/api/client';
 import type { components } from '@/api/schema';
 import type { RoleView } from '@/api/types';
 import { DateInput } from '@mantine/dates';
+import '@mantine/dates/styles.css';
+import { ConfirmModal } from '@/shared/ui/ConfirmModal';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { showApiError, showDone } from '@/shared/ui/notify';
 import { Timestamp } from '@/shared/ui/Timestamp';
 import { t } from '@/shared/i18n';
+import {
+  EmptyScope,
+  ScopeFields,
+  ScopeGlobalWarning,
+  ScopeNarrowedWarning,
+  ScopeSummary,
+  scopeToDto,
+  scopeValid,
+  useGrantableProjects,
+  useProjectSheets,
+  type ScopeEntry,
+} from './roleScope';
 
 type Assignment = components['schemas']['GroupRoleAssignmentView'];
 type AssignRequest = components['schemas']['AssignGroupRoleRequest'];
@@ -57,6 +83,19 @@ export function GroupAssignmentsPanel({ roles }: { roles: RoleView[] }): JSX.Ele
   const [validFrom, setValidFrom] = useState<Date | null>(null);
   const [validTo, setValidTo] = useState<Date | null>(null);
 
+  // ФВ-6.14: область дії; порожні проєкти — усі проєкти (поле `scope` не
+  // шлеться). D-214: аркуші й періоди звужують роль усередині проєктів.
+  // ⚠ Змінити область наявного призначення можна лише «відкликати й
+  // призначити знову» — так і на сервері, окремого редагування немає.
+  const [scope, setScope] = useState<ScopeEntry>(EmptyScope);
+  const { projects } = useGrantableProjects(true);
+  const { sheets } = useProjectSheets(true);
+  const scopeDto = scopeToDto(scope);
+
+  // ⛔ R-06/X-01: відкликання ролі в групи йшло одним натисканням — а це
+  // права ВСІХ членів групи каталогу одразу.
+  const [revoking, setRevoking] = useState<Assignment | null>(null);
+
   const from = toMachineDate(validFrom);
   const to = toMachineDate(validTo);
   // `YYYY-MM-DD` порівнюється як рядок; рівні дати дозволені — `validTo` включно.
@@ -79,6 +118,7 @@ export function GroupAssignmentsPanel({ roles }: { roles: RoleView[] }): JSX.Ele
           // Незадана межа не шлеться взагалі: для сервера це те саме, що `null`.
           ...(from !== null && { validFrom: from }),
           ...(to !== null && { validTo: to }),
+          ...(scopeDto !== null && { scope: scopeDto }),
         } satisfies AssignRequest),
       }),
     onSuccess: async (result) => {
@@ -86,6 +126,7 @@ export function GroupAssignmentsPanel({ roles }: { roles: RoleView[] }): JSX.Ele
       setPrincipal('');
       setValidFrom(null);
       setValidTo(null);
+      setScope(EmptyScope);
       showDone(t(result.effectiveAfterNextSignIn ? 'groupRoles.assignedNextSignIn' : 'groupRoles.assigned'));
     },
     onError: (error) => {
@@ -99,6 +140,7 @@ export function GroupAssignmentsPanel({ roles }: { roles: RoleView[] }): JSX.Ele
       apiFetch<void>(`/api/v1/security/group-assignments/${id}`, { method: 'DELETE' }),
     onSuccess: async () => {
       await refresh();
+      setRevoking(null);
       showDone(t('groupRoles.revoked'));
     },
     onError: showApiError,
@@ -115,7 +157,19 @@ export function GroupAssignmentsPanel({ roles }: { roles: RoleView[] }): JSX.Ele
           переліку не залежить. */}
       <ErrorAlert error={list.error} onRetry={() => void list.refetch()} />
 
-      {list.error === null && (
+      {/* ⛔ X-14: доти перелік у дорозі й порожній перелік виглядали однаково —
+          голий заголовок таблиці без жодного рядка. */}
+      {list.error === null && list.isPending && (
+        <Skeleton height={80} radius="sm" data-group-assignments="pending" />
+      )}
+
+      {list.error === null && !list.isPending && list.data.length === 0 && (
+        <Text size="sm" c="dimmed" data-group-assignments="empty">
+          {t('groupRoles.empty')}
+        </Text>
+      )}
+
+      {list.error === null && !list.isPending && list.data.length > 0 && (
       <Table striped>
         <Table.Thead>
           <Table.Tr>
@@ -123,11 +177,12 @@ export function GroupAssignmentsPanel({ roles }: { roles: RoleView[] }): JSX.Ele
             <Table.Th>{t('security.role')}</Table.Th>
             <Table.Th>{t('groupRoles.validFrom')}</Table.Th>
             <Table.Th>{t('groupRoles.validTo')}</Table.Th>
+            <Table.Th>{t('groupRoles.scope')}</Table.Th>
             <Table.Th />
           </Table.Tr>
         </Table.Thead>
         <Table.Tbody>
-          {(list.data ?? []).map((row) => (
+          {list.data.map((row) => (
             <Table.Tr key={row.id}>
               <Table.Td>
                 {row.principalName !== null && <Text size="sm">{row.principalName}</Text>}
@@ -140,13 +195,21 @@ export function GroupAssignmentsPanel({ roles }: { roles: RoleView[] }): JSX.Ele
               <Table.Td>
                 <Timestamp value={row.validTo} dateOnly fallback={Unbounded} />
               </Table.Td>
+              <Table.Td data-column="scope">
+                <ScopeSummary
+                  projectIds={row.scope?.projects}
+                  projects={projects}
+                  sheets={row.scope?.sheets}
+                  periods={row.scope?.periods}
+                />
+              </Table.Td>
               <Table.Td>
                 <Button
                   size="compact-xs"
                   variant="subtle"
                   color="statusError"
                   loading={revoke.isPending && revoke.variables === row.id}
-                  onClick={() => revoke.mutate(row.id)}
+                  onClick={() => setRevoking(row)}
                 >
                   {t('groupRoles.revoke')}
                 </Button>
@@ -189,23 +252,66 @@ export function GroupAssignmentsPanel({ roles }: { roles: RoleView[] }): JSX.Ele
           onChange={setValidTo}
           error={orderBroken ? t('groupRoles.validityOrder') : undefined}
         />
+        <ScopeFields
+          value={scope}
+          onChange={setScope}
+          projects={projects}
+          sheets={sheets}
+          hint={t('groupRoles.scopeChangeHint')}
+        />
         <Button
-          disabled={roleId === null || principal.trim().length === 0 || orderBroken}
-          loading={assign.isPending}
+          disabled={
+            roleId === null ||
+            principal.trim().length === 0 ||
+            orderBroken ||
+            !scopeValid(scope) ||
+            (assign.isPending && assign.variables === true)
+          }
+          // ⚠ Лише своя дія: «Assign anyway» нижче — та сама мутація з іншим
+          // аргументом, і крутитися має саме та кнопка, яку натиснули.
+          loading={assign.isPending && assign.variables === false}
           onClick={() => assign.mutate(false)}
         >
           {t('groupRoles.assign')}
         </Button>
       </Group>
 
+      {scopeDto !== null && <ScopeGlobalWarning />}
+      {scopeDto !== null && (scopeDto.sheets !== undefined || scopeDto.periods !== undefined) && (
+        <ScopeNarrowedWarning />
+      )}
+
       {dangerous !== null && (
         <Alert color="statusError" title={t('groupRoles.dangerousTitle')}>
           <Text size="sm">{dangerous.join(', ')}</Text>
-          <Button mt="xs" size="xs" color="statusError" onClick={() => assign.mutate(true)}>
+          <Button
+            mt="xs"
+            size="xs"
+            color="statusError"
+            // ⛔ X-14: без `loading` друге натискання поки летить перше давало
+            // ДВА призначення небезпечної ролі.
+            loading={assign.isPending && assign.variables === true}
+            onClick={() => assign.mutate(true)}
+          >
             {t('groupRoles.assignAnyway')}
           </Button>
         </Alert>
       )}
+
+      <ConfirmModal
+        opened={revoking !== null}
+        title={t('groupRoles.revokeTitle', {
+          role: revoking?.roleCode ?? '',
+          group: revoking?.principalName ?? revoking?.principalSid ?? '',
+        })}
+        text={t('groupRoles.revokeText')}
+        verb={t('groupRoles.revoke')}
+        isPending={revoke.isPending}
+        onConfirm={() => {
+          if (revoking !== null) revoke.mutate(revoking.id);
+        }}
+        onClose={() => setRevoking(null)}
+      />
     </Stack>
   );
 }

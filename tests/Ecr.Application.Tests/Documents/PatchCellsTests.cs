@@ -49,6 +49,9 @@ public sealed class PatchCellsTests
     private readonly ICurrentUser _user = Substitute.For<ICurrentUser>();
     private readonly IClock _clock = Substitute.For<IClock>();
 
+    /// <summary>Блокування аркуша — `C3b` перевіряє, ЯКЕ з двох бере батч.</summary>
+    private readonly ISheetEditGate _gate = Substitute.For<ISheetEditGate>();
+
     public PatchCellsTests()
     {
         var column = new ColumnDef(
@@ -102,11 +105,18 @@ public sealed class PatchCellsTests
         // які не про методологію, лишається РІВНО такою, як до gate-у.
         _methodologies.GetMethodologyIdsBoundToTableAsync(3, Arg.Any<CancellationToken>())
                        .Returns(Task.FromResult<IReadOnlyList<int>>([]));
+        // ⚠ `WR-04` п. 3: стан рядків до запису — одним `GetRowsAsync`;
+        // `GetRowVersionsAsync` лишається джерелом версій для відповіді.
+        _rows.GetRowsAsync(TableInstance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+             .Returns(RowStates(("7001001", 1001L, "0x0A")));
         _rows.GetRowVersionsAsync(TableInstance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
              .Returns(new Dictionary<string, string> { ["7001001"] = "0x0A" });
-        _rows.GetRowIdsAsync(TableInstance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
-             .Returns(new Dictionary<string, long> { ["7001001"] = 1001L });
         _access.BuildProfileAsync(9, Arg.Any<CancellationToken>()).Returns(Profile());
+        _access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
+            .Returns(EditDecision.Allow());
+        // S6: межі читання — «бачить усе»; про заборони — DenyReadTests (Api).
+        _access.ReadScopeAsync(Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
+            .Returns(async _ => ReadScopes.Everything(await _metadata.GetAsync(2, CancellationToken.None)));
         // ⛔ Тут стояв ПОРОЖНІЙ словник, і всі тести нижче проходили — бо
         // обробник трактував відсутність рішення про доступ як ДОЗВІЛ
         // (`DIRECTIVE-14-ARCH.md`, `DAT-04`; `S-15` частини 1). Після
@@ -116,7 +126,11 @@ public sealed class PatchCellsTests
         // ⚠ Тепер передумова названа явно: рішення на адреси, які тести
         // чіпають, ІСНУЮТЬ і дозволяють. Це не послаблення перевірки, а
         // повернення їй предмета — заборону підставляє той тест, що про неї.
-        _access.CanEditSliceAsync(Arg.Any<AccessProfile>(), TableInstance, Arg.Any<CancellationToken>())
+        // ⚠ WR-03: `EnsureAccessAsync` тепер запитує лише адреси батчу через
+        // `CanEditCellsAsync`, не весь зріз через `CanEditSliceAsync`.
+        _access.CanEditCellsAsync(
+                   Arg.Any<AccessProfile>(), TableInstance, Arg.Any<PeriodKey>(),
+                   Arg.Any<IReadOnlyCollection<CellAddress>>(), Arg.Any<CancellationToken>())
                .Returns(new Dictionary<CellAddress, EditDecision>
                {
                    [new CellAddress(PeriodKey.Parse(Period), 1001L, VolumeColumnId)] = EditDecision.Allow(),
@@ -150,9 +164,17 @@ public sealed class PatchCellsTests
         // ⛔ Директива registry-lookup, PR A2: за замовчуванням усе, про що
         // питають, «існує» — тести, які не про Lookup-посилання, не мають
         // падати на новій перевірці. Той тест, що про неї, підставляє інше.
-        _registries.FindExistingEntryIdsAsync(Arg.Any<IReadOnlyCollection<long>>(), Arg.Any<CancellationToken>())
-                   .Returns(call => call.ArgAt<IReadOnlyCollection<long>>(0).ToHashSet());
+        // ⚠ `C7`: «існує» тепер означає ще й «придатний» — запис того
+        // довідника, що в колонці (`SetLookup(1)`), активний, без меж чинності.
+        _registries.FindEntryStandingsAsync(Arg.Any<IReadOnlyCollection<long>>(), Arg.Any<CancellationToken>())
+                   .Returns(call => call.ArgAt<IReadOnlyCollection<long>>(0)
+                       .Select(id => new RegistryEntryStanding(id, 1, true, false, null, null))
+                       .ToList());
     }
+
+    /// <summary>Стан рядків таблиці так, як його віддає <c>IRowStore.GetRowsAsync</c>.</summary>
+    private static IReadOnlyList<RowState> RowStates(params (string Key, long Id, string Version)[] rows)
+        => [.. rows.Select(r => new RowState(r.Key, r.Id, r.Version, IsOrphaned: false))];
 
     private static void SetId(ColumnDef column, int id)
         => typeof(Ecr.Domain.Abstractions.Entity<int>)
@@ -168,7 +190,8 @@ public sealed class PatchCellsTests
     private PatchCellsHandler Handler()
         => new(_cells, _rows, _documents, _periods, _metadata, _access,
                new Ecr.Application.Validation.ValidationEngine(new RealFormulaEngine()),
-               _methodologies, _registries, _headers, _audit, _auditReader, _jobs, _uow, _user, _clock);
+               _methodologies, _registries, _headers, _audit, _auditReader, _jobs, _uow, _user, _clock,
+               _gate, Units());
 
     private static IDocumentHeaderStore CreateHeaderStore()
     {
@@ -195,10 +218,10 @@ public sealed class PatchCellsTests
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
     public async Task Значення_записується_і_повертається_нова_версія_рядка()
     {
-        _rows.GetRowVersionsAsync(TableInstance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
-             .Returns(
-                 new Dictionary<string, string> { ["7001001"] = "0x0A" },
-                 new Dictionary<string, string> { ["7001001"] = "0x0B" });
+        // Стан до запису — 0x0A (конструктор, `GetRowsAsync`); нову версію
+        // називає саме сховище, тим самим зверненням, що й записує (`WR-04` п. 4).
+        _cells.ApplyAsync(Arg.Any<CellChangeSet>(), Arg.Any<CancellationToken>())
+              .Returns(new Dictionary<long, string> { [1001L] = "0x0B" });
 
         var response = await Handler().HandleAsync(
             Request(new PatchRow("7001001", "0x0A", [new PatchCell("Volume", 12500m)])),
@@ -212,6 +235,108 @@ public sealed class PatchCellsTests
 
         await _cells.Received(1).ApplyAsync(
             Arg.Is<CellChangeSet>(c => c.Upserts.Count == 1 && c.Deletes.Count == 0), Arg.Any<CancellationToken>());
+
+        // ⛔ `WR-04` п. 4: після коміту версії НЕ перечитуються. Мутація «лишити
+        // перечитування» — цей рядок червоний.
+        await _rows.DidNotReceive().GetRowVersionsAsync(
+            Arg.Any<long>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>());
+    }
+
+    /// <summary>
+    /// <c>WR-04</c> п. 4: нові рядки батчу теж отримують версію з самого запису,
+    /// а рядки, яких батч не торкався, — ту, що була на початку запиту.
+    /// </summary>
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "WR-04")]
+    public async Task Новий_рядок_отримує_версію_з_запису_без_перечитування()
+    {
+        _rows.GetRowsAsync(TableInstance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+             .Returns(RowStates(("7001001", 1001L, "0x0A"), ("7001002", 1002L, "0x0C")));
+        _rows.CreateRowsAsync(
+                 TableInstance, Arg.Any<PeriodKey>(), Arg.Any<IReadOnlyList<RowKey>>(), Arg.Any<int>(),
+                 Arg.Any<CancellationToken>())
+             .Returns(new List<long> { 2001L });
+        _cells.ApplyAsync(Arg.Any<CellChangeSet>(), Arg.Any<CancellationToken>())
+              .Returns(new Dictionary<long, string> { [1001L] = "0x0B", [2001L] = "0x0D" });
+
+        var response = await Handler().HandleAsync(
+            Request(
+                new PatchRow("7001001", "0x0A", [new PatchCell("Volume", 1m)]),
+                new PatchRow("NEW-1", BaseVersion: null, [new PatchCell("Volume", 2m)])),
+            CancellationToken.None);
+
+        Assert.Equal("0x0B", response.RowVersions["7001001"]);
+        Assert.Equal("0x0D", response.RowVersions["NEW-1"]);
+
+        // Рядок поза батчем лишається у відповіді — форма та сама, що й до WR-04.
+        Assert.Equal("0x0C", response.RowVersions["7001002"]);
+
+        await _rows.DidNotReceive().GetRowVersionsAsync(
+            Arg.Any<long>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>());
+    }
+
+    /// <summary>
+    /// <c>WR-04</c> п. 4: сховище не назвало версію «торкнутого» рядка — тоді
+    /// й лише тоді відповідь збирається перечитуванням, як до <c>WR-04</c>.
+    /// </summary>
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "WR-04")]
+    public async Task Без_версії_від_сховища_відповідь_перечитує_версії()
+    {
+        _cells.ApplyAsync(Arg.Any<CellChangeSet>(), Arg.Any<CancellationToken>())
+              .Returns(new Dictionary<long, string>());
+        _rows.GetRowVersionsAsync(TableInstance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+             .Returns(new Dictionary<string, string> { ["7001001"] = "0x0E" });
+
+        var response = await Handler().HandleAsync(
+            Request(new PatchRow("7001001", "0x0A", [new PatchCell("Volume", 1m)])),
+            CancellationToken.None);
+
+        Assert.Equal("0x0E", response.RowVersions["7001001"]);
+        await _rows.Received(1).GetRowVersionsAsync(
+            TableInstance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>());
+    }
+
+    /// <summary>
+    /// <c>WR-04</c> п. 2: екземпляр, розв'язаний контролером, не розв'язується
+    /// вдруге.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Мутація, від якої тест падає: ігнорувати <c>resolvedInstance</c> і
+    /// завжди кликати <c>ResolveTableInstanceAsync</c> — <c>DidNotReceive</c>
+    /// стає червоним.
+    /// </remarks>
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "WR-04")]
+    public async Task Переданий_екземпляр_таблиці_не_розвязується_вдруге()
+    {
+        var instance = new TableInstanceRef(TableInstance, DocumentId: 700, TableDefId: 3, TemplateVersionId: 2, PeriodKey: Period);
+
+        var response = await Handler().HandleAsync(
+            Request(new PatchRow("7001001", "0x0A", [new PatchCell("Volume", 12500m)])),
+            CancellationToken.None,
+            resolvedInstance: instance);
+
+        Assert.Equal(1, response.AppliedCells);
+        await _rows.DidNotReceive().ResolveTableInstanceAsync(Arg.Any<long>(), Arg.Any<CancellationToken>());
+    }
+
+    /// <summary>
+    /// <c>WR-04</c> п. 2: переданий екземпляр чужої таблиці — помилка
+    /// викликача, а не тихий запис за правами іншого екземпляра.
+    /// </summary>
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "WR-04")]
+    public async Task Переданий_екземпляр_іншої_таблиці_відхиляється_до_запису()
+    {
+        var other = new TableInstanceRef(TableInstance + 1, DocumentId: 700, TableDefId: 3, TemplateVersionId: 2, PeriodKey: Period);
+
+        await Assert.ThrowsAsync<ArgumentException>(() => Handler().HandleAsync(
+            Request(new PatchRow("7001001", "0x0A", [new PatchCell("Volume", 12500m)])),
+            CancellationToken.None,
+            resolvedInstance: other));
+
+        await _cells.DidNotReceive().ApplyAsync(Arg.Any<CellChangeSet>(), Arg.Any<CancellationToken>());
     }
 
     /// <summary>
@@ -332,7 +457,7 @@ public sealed class PatchCellsTests
         WithTable(TableRowMode.Dynamic, maxDynamicRows: 1);
 
         // У таблиці вже є один рядок (7001001, з дефолтного фікстурного
-        // GetRowIdsAsync) — другий створюваний перевищив би межу в 1.
+        // GetRowsAsync) — другий створюваний перевищив би межу в 1.
         var ex = await Assert.ThrowsAsync<BusinessRuleException>(() => Handler().HandleAsync(
             Request(new PatchRow("DYN-2", BaseVersion: null, [new PatchCell("Volume", 1m)])),
             CancellationToken.None));
@@ -340,6 +465,66 @@ public sealed class PatchCellsTests
         Assert.Equal("ECR-ROW-0409", ex.ErrorCode);
         await _rows.DidNotReceive().CreateRowsAsync(
             Arg.Any<long>(), Arg.Any<PeriodKey>(), Arg.Any<IReadOnlyList<RowKey>>(), Arg.Any<int>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    public async Task C3b_стеля_перевіряється_повторно_під_винятковим_блокуванням()
+    {
+        // Швидкий шлях бачить 1 рядок із 2 дозволених — пропускає. Під
+        // блокуванням рядків уже 2: хтось устиг додати, поки ми чекали.
+        WithTable(TableRowMode.Dynamic, maxDynamicRows: 2);
+        _rows.GetRowIdsAsync(TableInstance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+             .Returns(new Dictionary<string, long> { ["7001001"] = 1001L, ["DYN-X"] = 1002L });
+
+        var ex = await Assert.ThrowsAsync<BusinessRuleException>(() => Handler().HandleAsync(
+            Request(new PatchRow("DYN-2", BaseVersion: null, [new PatchCell("Volume", 1m)])),
+            CancellationToken.None));
+
+        Assert.Equal("ECR-ROW-0409", ex.ErrorCode);
+        Assert.Equal("err.ECR-ROW-0409.dynamicRowLimit", ex.Details?["messageKey"]?.ToString());
+        Received.InOrder(() =>
+        {
+            _gate.EnterSubmitAsync(700, 1, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>());
+            _gate.EnterEditAsync(700, 1, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>());
+            _rows.GetRowIdsAsync(TableInstance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>());
+        });
+        await _rows.DidNotReceive().CreateRowsAsync(
+            Arg.Any<long>(), Arg.Any<PeriodKey>(), Arg.Any<IReadOnlyList<RowKey>>(), Arg.Any<int>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    public async Task C3b_правка_без_нових_рядків_лишається_під_спільним_блокуванням()
+    {
+        WithTable(TableRowMode.Dynamic, maxDynamicRows: 5);
+        _cells.ApplyAsync(Arg.Any<CellChangeSet>(), Arg.Any<CancellationToken>())
+              .Returns(new Dictionary<long, string> { [1001L] = "0x0B" });
+
+        await Handler().HandleAsync(
+            Request(new PatchRow("7001001", "0x0A", [new PatchCell("Volume", 1m)])),
+            CancellationToken.None);
+
+        await _gate.Received(1).EnterEditAsync(700, 1, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>());
+        await _gate.DidNotReceive().EnterSubmitAsync(
+            Arg.Any<long>(), Arg.Any<int>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>());
+        await _rows.DidNotReceive().GetRowIdsAsync(
+            Arg.Any<long>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    public async Task C3b_нові_рядки_без_стелі_лишаються_під_спільним_блокуванням()
+    {
+        // Без `MaxDynamicRows` захищати нічого — серіалізувати нема чого.
+        _rows.CreateRowsAsync(TableInstance, Arg.Any<PeriodKey>(), Arg.Any<IReadOnlyList<RowKey>>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+             .Returns([3001L]);
+
+        await Handler().HandleAsync(
+            Request(new PatchRow("DYN-2", BaseVersion: null, [new PatchCell("Volume", 1m)])),
+            CancellationToken.None);
+
+        await _gate.DidNotReceive().EnterSubmitAsync(
+            Arg.Any<long>(), Arg.Any<int>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>());
+        await _rows.Received(1).CreateRowsAsync(
+            TableInstance, Arg.Any<PeriodKey>(), Arg.Any<IReadOnlyList<RowKey>>(), Arg.Any<int>(), Arg.Any<CancellationToken>());
     }
 
     /// <summary>Підміняє знімок метаданих таблицею з обраним RowMode.</summary>
@@ -452,10 +637,8 @@ public sealed class PatchCellsTests
     [Trait("Requirement", "ФВ-3.7")]
     public async Task Конфлікт_в_одному_рядку_відхиляє_весь_батч_із_переліком_конфліктів()
     {
-        _rows.GetRowVersionsAsync(TableInstance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
-             .Returns(new Dictionary<string, string> { ["7001001"] = "0x0A", ["7001002"] = "0xFF" });
-        _rows.GetRowIdsAsync(TableInstance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
-             .Returns(new Dictionary<string, long> { ["7001001"] = 1001L, ["7001002"] = 1002L });
+        _rows.GetRowsAsync(TableInstance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+             .Returns(RowStates(("7001001", 1001L, "0x0A"), ("7001002", 1002L, "0xFF")));
 
         var ex = await Assert.ThrowsAsync<ConcurrencyConflictException>(() => Handler().HandleAsync(
             Request(
@@ -492,7 +675,6 @@ public sealed class PatchCellsTests
     /// рівно таку пару.
     /// </remarks>
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
-    [Trait("Requirement", "ФВ-14.29")]
     public async Task Чужий_період_у_тілі_відхиляється_кодом_а_не_падінням()
     {
         // Екземпляр таблиці належить періоду 202601 (див. `_rows.Resolve…`),
@@ -540,7 +722,9 @@ public sealed class PatchCellsTests
     {
         // Порожній словник рішень при НЕпорожньому батчі — рівно та ситуація,
         // що раніше означала «можна».
-        _access.CanEditSliceAsync(Arg.Any<AccessProfile>(), TableInstance, Arg.Any<CancellationToken>())
+        _access.CanEditCellsAsync(
+                   Arg.Any<AccessProfile>(), TableInstance, Arg.Any<PeriodKey>(),
+                   Arg.Any<IReadOnlyCollection<CellAddress>>(), Arg.Any<CancellationToken>())
                .Returns(new Dictionary<CellAddress, EditDecision>());
 
         var ex = await Assert.ThrowsAsync<AccessDeniedException>(() => Handler().HandleAsync(
@@ -560,7 +744,9 @@ public sealed class PatchCellsTests
     public async Task Заборонена_комірка_відхиляє_батч_із_причиною()
     {
         var address = new CellAddress(new PeriodKey(Period), 1001L, VolumeColumnId);
-        _access.CanEditSliceAsync(Arg.Any<AccessProfile>(), TableInstance, Arg.Any<CancellationToken>())
+        _access.CanEditCellsAsync(
+                   Arg.Any<AccessProfile>(), TableInstance, Arg.Any<PeriodKey>(),
+                   Arg.Any<IReadOnlyCollection<CellAddress>>(), Arg.Any<CancellationToken>())
                .Returns(new Dictionary<CellAddress, EditDecision>
                {
                    [address] = EditDecision.Deny(EditDenyReason.PeriodClosed, "Період закрито 05.02.2026")
@@ -576,6 +762,114 @@ public sealed class PatchCellsTests
         // сіра, інакше він піде до адміністратора, а той — до розробника.
         Assert.Equal(nameof(EditDenyReason.PeriodClosed), ex.Details!["reason"]);
         await _cells.DidNotReceive().ApplyAsync(Arg.Any<CellChangeSet>(), Arg.Any<CancellationToken>());
+    }
+
+    /// <summary>Рішення на <c>Volume</c> наявного рядка — дозвіл із підтвердженням.</summary>
+    private void VolumeRequiresConfirmation()
+        => _access.CanEditCellsAsync(
+                   Arg.Any<AccessProfile>(), TableInstance, Arg.Any<PeriodKey>(),
+                   Arg.Any<IReadOnlyCollection<CellAddress>>(), Arg.Any<CancellationToken>())
+               .Returns(new Dictionary<CellAddress, EditDecision>
+               {
+                   [new CellAddress(PeriodKey.Parse(Period), 1001L, VolumeColumnId)] =
+                       EditDecision.AllowWithConfirmation("Поза вікном дозволу"),
+                   [new CellAddress(PeriodKey.Parse(Period), 1001L, RegistryLinkColumnId)] = EditDecision.Allow(),
+               });
+
+    /// <summary>
+    /// <c>ФВ-2.16</c>: комірка <c>AllowWithConfirmation</c> без прапорця
+    /// підтвердження — відмова ВСЬОГО батчу, і нічого не записано.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Доти підтвердження жило лише в діалозі клієнта: сервер рішення
+    /// <c>RequiresConfirmation</c> не читав, і вставка, протягування чи прямий
+    /// запит писали таку комірку мовчки. Мутація «прибрати
+    /// <c>EnsureConfirmed</c>» — цей тест червоний.
+    /// </remarks>
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "ФВ-2.16")]
+    public async Task Комірка_з_підтвердженням_без_прапорця_відхиляє_весь_батч()
+    {
+        VolumeRequiresConfirmation();
+
+        var ex = await Assert.ThrowsAsync<AccessDeniedException>(() => Handler().HandleAsync(
+            Request(new PatchRow("7001001", "0x0A",
+                [new PatchCell("Volume", 1m), new PatchCell("RegistryLink", 5L)])),
+            CancellationToken.None));
+
+        Assert.Equal("ECR-ACCS-0403", ex.ErrorCode);
+        Assert.Equal("ConfirmationRequired", ex.Details!["reason"]);
+        Assert.Equal("err.ECR-ACCS-0403.confirmationRequired", ex.Details["messageKey"]);
+        Assert.Equal("1", ex.Details["confirmationCount"]);
+
+        // ⛔ Батч відхилено ЦІЛКОМ — і звичайна комірка поруч теж не записана.
+        await _cells.DidNotReceive().ApplyAsync(Arg.Any<CellChangeSet>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "ФВ-2.16")]
+    public async Task Комірка_з_підтвердженням_і_прапорцем_записується()
+    {
+        VolumeRequiresConfirmation();
+
+        var response = await Handler().HandleAsync(
+            Request(new PatchRow("7001001", "0x0A", [new PatchCell("Volume", 1m)])) with { Confirmed = true },
+            CancellationToken.None);
+
+        Assert.Equal(1, response.AppliedCells);
+        await _cells.Received(1).ApplyAsync(Arg.Any<CellChangeSet>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "ФВ-2.16")]
+    public async Task Звичайна_комірка_без_прапорця_записується_як_і_раніше()
+    {
+        VolumeRequiresConfirmation();
+
+        // ⚠ Регрес: прапорець потрібен ЛИШЕ там, де рішення його вимагає.
+        var response = await Handler().HandleAsync(
+            Request(new PatchRow("7001001", "0x0A", [new PatchCell("RegistryLink", 5L)])),
+            CancellationToken.None);
+
+        Assert.Equal(1, response.AppliedCells);
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "ФВ-2.16")]
+    public async Task Створення_рядка_з_коміркою_з_підтвердженням_без_прапорця_відхиляється()
+    {
+        // ⚠ Створення питається окремим викликом (`CanCreateRowsAsync`) — друга
+        // половина `EnsureAccessAsync`, яку перевірка мусить покривати так само.
+        _access.CanCreateRowsAsync(
+                   Arg.Any<AccessProfile>(), TableInstance,
+                   Arg.Any<IReadOnlyCollection<string>>(), Arg.Any<CancellationToken>())
+               .Returns(call => NewRows(
+                   call.ArgAt<IReadOnlyCollection<string>>(2),
+                   EditDecision.Allow(),
+                   EditDecision.AllowWithConfirmation("Поза вікном дозволу")));
+
+        var ex = await Assert.ThrowsAsync<AccessDeniedException>(() => Handler().HandleAsync(
+            Request(new PatchRow("NEW-1", BaseVersion: null, [new PatchCell("Volume", 2m)])),
+            CancellationToken.None));
+
+        Assert.Equal("ConfirmationRequired", ex.Details!["reason"]);
+        await _cells.DidNotReceive().ApplyAsync(Arg.Any<CellChangeSet>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "ФВ-2.16")]
+    public async Task Системне_походження_не_вимагає_підтвердження()
+    {
+        // ⚠ Імпорт/інтеграція кличуть обробник поза HTTP — питати там нема кого.
+        // Через HTTP інше, ніж `UserEdit`, походження заявити не можна
+        // (`CellChangeOrigins.RequireClientOrigin`).
+        VolumeRequiresConfirmation();
+
+        var response = await Handler().HandleAsync(
+            Request(new PatchRow("7001001", "0x0A", [new PatchCell("Volume", 1m)])) with { Origin = "Import" },
+            CancellationToken.None);
+
+        Assert.Equal(1, response.AppliedCells);
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
@@ -730,8 +1024,8 @@ public sealed class PatchCellsTests
             // ⚠ `BE-05`: третій аргумент — `createdByUserId`. Без `Arg.Any<int?>()`
             // збіг вимагав би саме `null`, тобто перевірка мовчки перестала б
             // бачити виклик, щойно обробник почав називати автора правки.
-            _jobs.EnqueueAsync<IFormulaRecalculationJob>(
-                Arg.Any<object>(), Arg.Any<CancellationToken>(), Arg.Any<int?>());
+            _jobs.EnqueueCoalescedAsync<IFormulaRecalculationJob>(
+                Arg.Any<string>(), Arg.Any<object>(), Arg.Any<CancellationToken>(), Arg.Any<int?>());
         });
     }
 
@@ -759,6 +1053,19 @@ public sealed class PatchCellsTests
         // Той самий блок, що й комірковий Error (R-B3): нічого не записано.
         await _cells.DidNotReceive().ApplyAsync(Arg.Any<CellChangeSet>(), Arg.Any<CancellationToken>());
         await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
+
+    /// <summary>
+    /// Довідник одиниць, у якому є одиниця <c>7</c> — та, яку пишуть тести
+    /// цього файлу (B-02: неіснуюча одиниця тепер відхиляється до запису).
+    /// </summary>
+    private static IUnitCatalog Units()
+    {
+        var units = Substitute.For<IUnitCatalog>();
+        units.GetAsync(Arg.Any<CancellationToken>()).Returns(new UnitCatalogSnapshot(
+            new Dictionary<string, UnitRef>(StringComparer.OrdinalIgnoreCase) { ["kg"] = new(7, "kg", 1) },
+            new Dictionary<string, int>(StringComparer.Ordinal)));
+        return units;
     }
 
     [Theory]
@@ -824,6 +1131,78 @@ public sealed class PatchCellsTests
         Assert.Contains("Category", warning.Message, StringComparison.Ordinal);
     }
 
+    /// <summary>Межі читання, де колонка <paramref name="columnDefId"/> під забороною (S6).</summary>
+    private void HiddenColumn(int columnDefId)
+        => _access.ReadScopeAsync(Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
+            .Returns(async _ => DocumentReadScope.For(
+                new AccessBuilder()
+                    .Grant(ResourceKind.Project, AccessBuilder.ProjectId, GrantLevel.Read)
+                    .Deny(ResourceKind.Column, columnDefId)
+                    .Build(),
+                AccessBuilder.ProjectId,
+                await _metadata.GetAsync(2, CancellationToken.None)));
+
+    /// <summary>
+    /// S6: попередження про обов'язковий вхід у колонці, якої автор не бачить,
+    /// у відповідь не їде — ні код, ні адреса, ні текст із назвою колонки.
+    /// </summary>
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-6.6")]
+    public async Task Попередження_про_приховану_колонку_не_їде_у_відповідь()
+    {
+        var categoryId = WithMethodology(RequiredInputSeverity.Warn);
+        HiddenColumn(categoryId);
+
+        var response = await Handler().HandleAsync(
+            Request(new PatchRow("7001001", "0x0A", [new PatchCell("Volume", 12500m)])),
+            CancellationToken.None);
+
+        await _cells.Received(1).ApplyAsync(Arg.Any<CellChangeSet>(), Arg.Any<CancellationToken>());
+        Assert.DoesNotContain(response.Validation, m => m.RuleCode == "ECR-CALC-0437");
+        Assert.DoesNotContain("Category", System.Text.Json.JsonSerializer.Serialize(response), StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// S6: блокування те саме — запис, що не заповнив обов'язковий вхід у
+    /// прихованій колонці, відхиляється, але відмова колонки не називає.
+    /// </summary>
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-6.6")]
+    public async Task Блокування_через_приховану_колонку_лишається_але_без_її_назви()
+    {
+        var categoryId = WithMethodology(RequiredInputSeverity.Block);
+        HiddenColumn(categoryId);
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Handler().HandleAsync(
+                Request(new PatchRow("7001001", "0x0A", [new PatchCell("Volume", 12500m)])),
+                CancellationToken.None));
+
+        Assert.Equal("ECR-CALC-0437", error.ErrorCode);
+        var details = System.Text.Json.JsonSerializer.Serialize(error.Details);
+        Assert.DoesNotContain("Category", details, StringComparison.Ordinal);
+        Assert.DoesNotContain("ECW_TEST", details, StringComparison.Ordinal);
+        Assert.DoesNotContain("Category", error.Message, StringComparison.Ordinal);
+        await _cells.DidNotReceive().ApplyAsync(Arg.Any<CellChangeSet>(), Arg.Any<CancellationToken>());
+    }
+
+    /// <summary>
+    /// S6, храповик звернень: повідомлення лише про записані колонки — межі
+    /// читання не питаються (<c>PatchCellsQueryCountTests</c>, стеля 22).
+    /// </summary>
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public async Task Повідомлення_лише_про_записані_колонки_не_питають_меж_читання()
+    {
+        WithRule(ValidationSeverity.Warning, scope: 0, "[Volume] < 0");
+
+        var response = await Handler().HandleAsync(
+            Request(new PatchRow("7001001", "0x0A", [new PatchCell("Volume", 5m)])),
+            CancellationToken.None);
+
+        Assert.NotEmpty(response.Validation);
+        await _access.DidNotReceiveWithAnyArgs().ReadScopeAsync(default!, default, default);
+    }
+
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage7)]
     public async Task Рядок_без_прив_язаної_методології_ігнорує_gate_обов_язкових_входів()
     {
@@ -873,8 +1252,8 @@ public sealed class PatchCellsTests
         // ⛔ Дефолт конструктора («усе, про що питають, існує») тут навмисно
         // замінений на порожню множину — жоден запит про існування не
         // повертає жодного id.
-        _registries.FindExistingEntryIdsAsync(Arg.Any<IReadOnlyCollection<long>>(), Arg.Any<CancellationToken>())
-                   .Returns(new HashSet<long>());
+        _registries.FindEntryStandingsAsync(Arg.Any<IReadOnlyCollection<long>>(), Arg.Any<CancellationToken>())
+                   .Returns(new List<RegistryEntryStanding>());
 
         var error = await Assert.ThrowsAsync<BusinessRuleException>(
             () => Handler().HandleAsync(
@@ -938,7 +1317,9 @@ public sealed class PatchCellsTests
         // `ProjectId`/`DocumentId`, а надсилався `TableInstanceId`. Розбір
         // давав нулі, і задача не робила нічого — а цей тест був зелений, бо
         // питав лише «чи поставили в чергу» (`A7-63`).
-        await _jobs.Received(1).EnqueueAsync<IFormulaRecalculationJob>(
+        // ⚠ O1: злиттям за документо-періодом і автором — `doc{id}-p{period}-formula-u{user}`.
+        await _jobs.Received(1).EnqueueCoalescedAsync<IFormulaRecalculationJob>(
+            Arg.Is<string>(t => t.EndsWith("-formula-u9", StringComparison.Ordinal)),
             Arg.Any<object>(), Arg.Any<CancellationToken>(), Arg.Any<int?>());
 
         await _jobs.DidNotReceive().EnqueueAsync<IRecalculationJob>(
@@ -948,13 +1329,14 @@ public sealed class PatchCellsTests
         // перерахунок був би повним на кожну правку, і граф залежностей
         // коштував би, не даючи нічого.
         var payload = _jobs.ReceivedCalls()
-            .Where(c => c.GetMethodInfo().Name == nameof(IBackgroundJobScheduler.EnqueueAsync))
-            .Select(c => c.GetArguments()[0])
+            .Where(c => c.GetMethodInfo().Name == nameof(IBackgroundJobScheduler.EnqueueCoalescedAsync))
+            .Select(c => c.GetArguments()[1])
             .Last();
 
         var json = System.Text.Json.JsonSerializer.Serialize(payload);
         Assert.Contains("\"Cells\"", json, StringComparison.Ordinal);
         Assert.Contains("\"TableInstanceId\"", json, StringComparison.Ordinal);
+        Assert.Contains("\"DocumentId\"", json, StringComparison.Ordinal);
 
         // ⚠ Черга — ПІСЛЯ commit і поза транзакцією: воркер інакше почав би
         // читати рядки, яких ще не видно, і отримав би або старі значення,
@@ -962,71 +1344,61 @@ public sealed class PatchCellsTests
         Received.InOrder(() =>
         {
             _uow.SaveChangesAsync(Arg.Any<CancellationToken>());
-            _jobs.EnqueueAsync<IFormulaRecalculationJob>(
-                Arg.Any<object>(), Arg.Any<CancellationToken>(), Arg.Any<int?>());
+            _jobs.EnqueueCoalescedAsync<IFormulaRecalculationJob>(
+                Arg.Any<string>(), Arg.Any<object>(), Arg.Any<CancellationToken>(), Arg.Any<int?>());
         });
     }
 
     /// <summary>
-    /// `DAT-05`: з переданою колекцією обробник НЕ ставить задачу сам, а
-    /// віддає насіння каскаду викликачеві.
+    /// MI-02 (в): момент постановки задає планувальник — черга в базі ставить
+    /// ВСЕРЕДИНІ транзакції запису, Quartz — ПІСЛЯ її завершення.
     /// </summary>
     /// <remarks>
-    /// ⛔ Це половина контракту тимчасового параметра
-    /// <c>deferRecalculationUntilMi02</c>. Друга половина — що викликач
-    /// (<c>ExcelImporter</c>) справді ставить ОДНУ задачу після коміту —
-    /// доводиться в <c>Ecr.Adapters.Tests</c> і наскрізно в
-    /// <c>Ecr.Scenarios.Tests</c>. Порізно ці дві перевірки нічого не варті:
-    /// «не поставив» без «хтось поставив» означало б, що перерахунок після
-    /// імпорту не відбувається взагалі.
+    /// ⚠ Тут — лише «де» відносно замикання транзакції; що відкат справді
+    /// відкочує задачу і що до коміту її не видно іншому з'єднанню, доводить
+    /// <c>PatchCellsTransactionalEnqueueTests</c> на справжній базі. Мутації: у
+    /// режимі бази поставити після коміту — рядок <c>true</c> червоний; у
+    /// Quartz — всередину — рядок <c>false</c>.
     /// </remarks>
-    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)]
-    [Trait("Requirement", "DAT-05")]
-    public async Task Відкладений_перерахунок_не_ставить_задачу_а_віддає_насіння()
+    [Theory] [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "MI-02")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Перерахунок_ставиться_в_транзакції_лише_коли_черга_в_ній(bool enlists)
     {
-        var seeds = new List<RecalculationSeed>();
+        _jobs.EnlistsInCallerTransaction.Returns(enlists);
 
-        await Handler().HandleAsync(
+        var inTransaction = false;
+        bool? enqueuedInTransaction = null;
+        _uow.ExecuteInTransactionAsync(Arg.Any<Func<CancellationToken, Task>>(), Arg.Any<CancellationToken>())
+            .Returns(async call =>
+            {
+                inTransaction = true;
+                await call.ArgAt<Func<CancellationToken, Task>>(0)(call.ArgAt<CancellationToken>(1));
+                inTransaction = false;
+            });
+        _jobs.EnqueueCoalescedAsync<IFormulaRecalculationJob>(
+                 Arg.Any<string>(), Arg.Any<object>(), Arg.Any<CancellationToken>(), Arg.Any<int?>())
+             .Returns(_ =>
+             {
+                 enqueuedInTransaction = inTransaction;
+                 return "IFormulaRecalculationJob#78";
+             });
+
+        var response = await Handler().HandleAsync(
             Request(new PatchRow("7001001", "0x0A", [new PatchCell("Volume", 12500m)])),
-            CancellationToken.None,
-            deferRecalculationUntilMi02: seeds);
+            CancellationToken.None);
 
-        // ⛔ Жодної задачі: поставлена звідси, вона стартувала б усередині ще
-        // не закоміченої транзакції імпорту — і під RCSI прочитала б старі
-        // дані або дані, яких після відкату не буде взагалі.
-        await _jobs.DidNotReceive().EnqueueAsync<IFormulaRecalculationJob>(
-            Arg.Any<object>(), Arg.Any<CancellationToken>(), Arg.Any<int?>());
+        Assert.Equal(enlists, enqueuedInTransaction);
+        Assert.Equal("IFormulaRecalculationJob#78", response.RecalculationJobId);
 
-        // ⚠ Насіння — не «щось непорожнє», а РІВНО та комірка, яку записали:
-        // перелік, зібраний із іншого джерела, одного дня розійшовся б із тим,
-        // що насправді лежить у базі.
-        var seed = Assert.Single(seeds);
-        Assert.Equal(1001L, seed.RowId);
-        Assert.Equal(VolumeColumnId, seed.ColumnDefId);
-
-        // Запис при цьому відбувся: відкладається постановка задачі, а не робота.
-        await _cells.Received(1).ApplyAsync(Arg.Any<CellChangeSet>(), Arg.Any<CancellationToken>());
-    }
-
-    /// <summary>
-    /// `DAT-05`: без параметра поведінка не змінилася — одна задача на батч.
-    /// </summary>
-    /// <remarks>
-    /// ⚠ Опудало проти «полагодив імпорт — зламав сітку»: звичайний
-    /// <c>PATCH</c> із сітки документа передає <c>null</c>, і перерахунок
-    /// мусить ставитися так само, як до `DAT-05`.
-    /// </remarks>
-    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)]
-    [Trait("Requirement", "DAT-05")]
-    public async Task Без_відкладання_задача_ставиться_як_і_раніше()
-    {
-        await Handler().HandleAsync(
-            Request(new PatchRow("7001001", "0x0A", [new PatchCell("Volume", 12500m)])),
-            CancellationToken.None,
-            deferRecalculationUntilMi02: null);
-
-        await _jobs.Received(1).EnqueueAsync<IFormulaRecalculationJob>(
-            Arg.Any<object>(), Arg.Any<CancellationToken>(), Arg.Any<int?>());
+        // В обох режимах — після всього запису.
+        Received.InOrder(() =>
+        {
+            _uow.SaveChangesAsync(Arg.Any<CancellationToken>());
+            _jobs.EnqueueCoalescedAsync<IFormulaRecalculationJob>(
+                Arg.Any<string>(), Arg.Any<object>(), Arg.Any<CancellationToken>(), Arg.Any<int?>());
+        });
     }
 
     /// <summary>
@@ -1052,8 +1424,8 @@ public sealed class PatchCellsTests
     {
         const string JobId = "IFormulaRecalculationJob#77";
 
-        _jobs.EnqueueAsync<IFormulaRecalculationJob>(
-                 Arg.Any<object>(), Arg.Any<CancellationToken>(), Arg.Any<int?>())
+        _jobs.EnqueueCoalescedAsync<IFormulaRecalculationJob>(
+                 Arg.Any<string>(), Arg.Any<object>(), Arg.Any<CancellationToken>(), Arg.Any<int?>())
              .Returns(JobId);
 
         var response = await Handler().HandleAsync(
@@ -1065,37 +1437,8 @@ public sealed class PatchCellsTests
         // ⛔ Саме `9` — `_user.UserId` цього набору. `Arg.Any<int?>()` тут
         // пропустив би `null`, тобто системну задачу без автора: рівно те, що
         // повертає редактору `403` на власний перерахунок.
-        await _jobs.Received(1).EnqueueAsync<IFormulaRecalculationJob>(
-            Arg.Any<object>(), Arg.Any<CancellationToken>(), 9);
-    }
-
-    /// <summary>
-    /// `BE-05` + `DAT-05`: у гілці відкладання поле — рівно <c>null</c>, а не
-    /// порожній рядок.
-    /// </summary>
-    /// <remarks>
-    /// ⛔ Різниця не косметична. <c>null</c> клієнт читає як «стежити нема за
-    /// чим» і мовчить; порожній рядок пройшов би перевірку «поле є» і послав
-    /// статус-рядок опитувати <c>GET /api/v1/jobs/</c> — адресу без сегмента,
-    /// тобто перелік задач замість стану однієї, під правом
-    /// <c>System.ViewHealth</c>, якого в редактора немає.
-    /// </remarks>
-    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)]
-    [Trait("Requirement", "BE-05")]
-    public async Task Відкладений_перерахунок_дає_recalculationJobId_рівно_null()
-    {
-        // ⚠ Підробка ГОТОВА віддати ідентифікатор — саме тому тест доводить, що
-        // `null` тут від гілки відкладання, а не від ненаповненого substitute.
-        _jobs.EnqueueAsync<IFormulaRecalculationJob>(
-                 Arg.Any<object>(), Arg.Any<CancellationToken>(), Arg.Any<int?>())
-             .Returns("IFormulaRecalculationJob#77");
-
-        var response = await Handler().HandleAsync(
-            Request(new PatchRow("7001001", "0x0A", [new PatchCell("Volume", 12500m)])),
-            CancellationToken.None,
-            deferRecalculationUntilMi02: []);
-
-        Assert.Null(response.RecalculationJobId);
+        await _jobs.Received(1).EnqueueCoalescedAsync<IFormulaRecalculationJob>(
+            Arg.Any<string>(), Arg.Any<object>(), Arg.Any<CancellationToken>(), 9);
     }
 
     [Fact]
@@ -1186,6 +1529,52 @@ public sealed class PatchCellsTests
         Assert.Equal("7001001", record.RowKey);
         Assert.Equal("5", record.OldValue);
         Assert.Equal("7", record.NewValue);
+    }
+
+    /// <summary>
+    /// `U-22`: запис того самого значення не дає рядка «зміни» в журналі — у
+    /// тому числі тоді, коли старе приходить зі сховища в іншому масштабі.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Сховище віддає число в масштабі стовпця (<c>931.9250000000000000</c>),
+    /// користувач надсилає <c>931.925</c>. Доти журнал отримував рядок з
+    /// <c>OldValue ≠ NewValue</c> для незмінного числа — регуляторний артефакт
+    /// стверджував зміну, якої не було.
+    ///
+    /// ⚠ Другий бік — справжня зміна в тому самому батчі ЖУРНАЛЮЄТЬСЯ: інакше
+    /// фікс просто глушив би журнал, а не робив його правдивим.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "R-A2")]
+    public async Task Правка_що_нічого_не_змінила_не_дає_рядка_журналу()
+    {
+        _cells.ReadCellsAsync(Arg.Any<IReadOnlyCollection<CellAddress>>(), Arg.Any<CancellationToken>())
+              .Returns(new Dictionary<CellAddress, CellValueData>
+              {
+                  [new CellAddress(new PeriodKey(Period), 1001L, VolumeColumnId)] =
+                      new CellValueData { ValueNumeric = 931.9250000000000000m },
+              });
+
+        await Handler().HandleAsync(
+            Request(new PatchRow("7001001", "0x0A", [new PatchCell("Volume", "931.925")])),
+            CancellationToken.None);
+
+        Assert.Empty(Audited());
+
+        // Та сама комірка, справжня зміна, — рядок є, і в ньому саме ті числа.
+        await Handler().HandleAsync(
+            Request(new PatchRow("7001001", "0x0A", [new PatchCell("Volume", "931.926")])),
+            CancellationToken.None);
+
+        var record = Assert.Single(
+            _audit.ReceivedCalls()
+                .Where(c => c.GetMethodInfo().Name == nameof(IAuditWriter.WriteCellChangesAsync))
+                .Select(c => (IReadOnlyList<CellChangeRecord>)c.GetArguments()[0]!)
+                .Last());
+
+        Assert.Equal("931.9250000000000000", record.OldValue);
+        Assert.Equal("931.926", record.NewValue);
     }
 
     [Fact]

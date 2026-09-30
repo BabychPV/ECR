@@ -82,8 +82,14 @@ describe('AppLayout: «Пропустити навігацію» (Q-263)', () =>
         const url = String(input);
 
         if (url.includes('/api/v1/me')) return jsonResponse(MeResponse);
+        // ✎ `X-26`: напис посилання — із каталогу (`nav.skipToContent`), тож
+        // рядок подається тут; без каталогу було б `⟦nav.skipToContent⟧`.
         if (url.includes('/ui-strings/')) {
-          return jsonResponse({ languageCode: 'en', revision: 1, strings: {} });
+          return jsonResponse({
+            languageCode: 'en',
+            revision: 1,
+            strings: { 'nav.skipToContent': 'Перейти к содержимому' },
+          });
         }
 
         return jsonResponse(null);
@@ -99,7 +105,7 @@ describe('AppLayout: «Пропустити навігацію» (Q-263)', () =>
     renderAppLayout();
 
     // Дочекатися: сесія приїхала, каркас домалювався (нав видно).
-    const skipLink = await screen.findByRole('link', { name: /skip to main content/i });
+    const skipLink = await screen.findByRole('link', { name: 'Перейти к содержимому' });
 
     const user = userEvent.setup();
 

@@ -33,22 +33,31 @@ import { expect, test, type Page } from '@playwright/test';
  * `DocumentGrid.onPaste` (`features/grid/DocumentGrid.tsx`) читає
  * `cellPermissions` зрізу, який рахує `EditRules.CanEdit`
  * (`Ecr.Application/Security/EditRules.cs`) за порогом `GrantLevel.Write`
- * (`Effective(profile, context) >= GrantLevel.Write`) — тобто саме тим
+ * (`Effective(profile, context)` проти `GrantLevel.Write`) — тобто саме тим
  * рішенням, яке міняє PUT `/roles/{id}/grants`. Рівня `Write` немає — вставка
  * відхиляється ЦІЛИМ пакетом (`ФВ-4.1`, "Some cells were not saved") із
- * причиною `deny.NoGrant` (вона й для «зовсім немає гранта», і для
- * «є, але нижче порогу» — `EditRules.CanEdit` не розрізняє); є — комірка
+ * причиною `deny.InsufficientGrantLevel`: грант `Read` Є, але нижчий за
+ * поріг (`deny.NoGrant` `EditRules.CanEdit` лишає для СПРАВЖНЬОЇ відсутності
+ * гранта, `Effective == None`); є — комірка
  * зберігається, і панель показує `data-save-status="saved"`
  * (`useCellPatch.ts`).
  *
  * ⚠ Паролі тут ТЕСТОВІ й існують лише в тимчасовій базі, яку стенд же й
  * видаляє (`tools/e2e-stand.ps1`).
  */
-const Admin = { user: 'e2e-admin', password: 'E2E-Admin-Work-2026!' };
-const Operator = { user: 'e2e-operator', password: 'E2E-Operator-Work-2026!' };
+const Admin = { user: 'e2e-admin', password: 'E2E-Adm1n-Work-2026!' };
+const Operator = { user: 'e2e-operator', password: 'E2E-Oper8tor-Work-2026!' };
 
-/** Роль оператора, заведена стендом (`tools/e2e-stand.ps1`, крок «роль оператора»). */
-const OperatorRole = 'E2EOperator';
+/**
+ * Роль оператора, заведена стендом (`tools/e2e-stand.ps1`, крок «роль
+ * оператора»: код `E2EOperator`, `nameL10n.en = 'E2E operator'`).
+ *
+ * ⚠ Вибираємо за НАЗВОЮ, яку бачить людина, а не за кодом: опція селектора
+ * ролі в `GrantsPanel.tsx` підписана `roleLabel()` — назвою з `GET /roles`,
+ * а код лише запасний, коли назви немає. Регулярка з прив'язкою до країв —
+ * щоб не зачепити «E2E operator …» чи іншу роль із таким підрядком.
+ */
+const OperatorRole = /^E2E operator$/i;
 
 /** Проєкт і документ приходять зі стенда: зашите число ламалося б у січні. */
 const PeriodKey = process.env['ECR_E2E_PERIOD'] ?? '';
@@ -126,7 +135,8 @@ test.describe('Гранти на /admin/security діють на сесію оп
    * за алфавітом, тож наступний у черзі `zz-walkthrough.spec.ts` відкривав той
    * самий документ БЕЗ права запису. Наслідок було видно за десять хвилин і в
    * іншому місці: `DocumentGrid.onPaste` відхиляв вставку цілим пакетом
-   * (`deny.NoGrant`), лишав відкритою модалку «Some cells were not saved», і
+   * (тоді — `deny.NoGrant`; відтоді грант `Read` дає
+   * `deny.InsufficientGrantLevel`), лишав відкритою модалку «Some cells were not saved», і
    * `validate.click()` у WALK 2 чекав 579.8 с, доки оверлей перестане
    * перехоплювати вказівник. Продукт при цьому поводився ПРАВИЛЬНО: документ
    * справді був лише для читання, і система це чесно пояснила.
@@ -214,7 +224,7 @@ async function signOut(page: Page, userName: string): Promise<void> {
 }
 
 /** Відкриває вкладку «Grants» і обирає роль у випадаючому списку. */
-async function openGrantsFor(page: Page, roleCode: string): Promise<void> {
+async function openGrantsFor(page: Page, roleName: RegExp): Promise<void> {
   // ⚠ Вкладка — в адресі (`useUrlState('tab')`, `SecurityPage.tsx`): пряме
   // відкриття URL — той самий шлях, що й клік у `SegmentedControl`, лише без
   // зайвого проміжного кліку, який тут нічого не доводить.
@@ -229,7 +239,8 @@ async function openGrantsFor(page: Page, roleCode: string): Promise<void> {
     timeout: 30_000,
   });
   await roleSelect.click();
-  await page.getByRole('option', { name: roleCode, exact: true }).click();
+  // Опція ролі — це назва (`roleLabel()`), не код; див. `OperatorRole`.
+  await page.getByRole('option', { name: roleName }).click();
 
   // ⚠ Панель гранта завантажилась: або є рядок «Remove», або порожній стан
   // «This role has no grants». Обидва — ознака того, що запит на гранти
@@ -271,11 +282,23 @@ async function addGrant(
   // дефолтним `Project` (`GrantsPanel.tsx`: новий рядок заводиться саме з
   // ним) — вибирати нема чого, документ і стенд узгоджені саме на цьому виді
   // ресурсу.
-  const resourceIdField = page.getByLabel('Resource id 1');
-  await expect(resourceIdField, 'немає поля Resource id щойно доданого рядка').toBeVisible({
+  //
+  // ⛔ Аудит U6: числового поля id більше немає — проєкт обирається за КОДОМ.
+  // Код не сталий: `Ecr.DataGen` (`BuildScaffoldAsync`) дає `P<8 цифр із
+  // часу>`, тож він не вписується літералом. Той самий id, що й стенд
+  // (`e2e-stand.ps1`: `resourceId = 1`), перекладається в код через API під
+  // сесією адміністратора (`page.request` ділить куки з вкладкою) — так грант
+  // іде на ТОЙ САМИЙ проєкт, а не на «перший, що трапився в списку».
+  const label = await projectLabel(page, grant.resourceId);
+
+  const projectField = page.getByRole('textbox', { name: 'Project 1', exact: true });
+  await projectField.click();
+  await page.getByRole('option', { name: label, exact: true }).click();
+  // ⚠ Не `getByRole('cell', { name: code })`: доступне ім'я комірки пікера
+  // теж містить значення поля, і локатор резолвився б у ДВІ комірки.
+  await expect(projectField, 'пікер не показує обраний проєкт').toHaveValue(label, {
     timeout: 10_000,
   });
-  await resourceIdField.fill(String(grant.resourceId));
 
   // ⚠ Той самий нюанс, що й у ролі вище: `getByLabel` став би неоднозначним
   // щойно список відкриється (`aria-label` тут стоїть прямо на полі, а не на
@@ -283,6 +306,34 @@ async function addGrant(
   // текст як власну доступну назву).
   await page.getByRole('textbox', { name: 'Level 1', exact: true }).click();
   await page.getByRole('option', { name: grant.level, exact: true }).click();
+}
+
+/**
+ * Мітка проєкту стенда в пікері гранта за його id.
+ *
+ * ⚠ Джерело — той самий довідник, що й у пікера (`GET /api/v1/security/projects`,
+ * D-207 п.2), і та сама форма мітки: «назва (код)», або код, коли назви немає
+ * чи вона збігається з кодом (`ResourcePicker.tsx`, `nameWithCode`). Стенд
+ * працює англійською.
+ */
+async function projectLabel(page: Page, projectId: number): Promise<string> {
+  const response = await page.request.get('/api/v1/security/projects');
+  expect(response.ok(), `довідник проєктів: ${response.status()}`).toBe(true);
+
+  const body = (await response.json()) as {
+    id: number;
+    code: string;
+    nameL10n: { values?: Record<string, string> | null };
+  }[];
+  const project = body.find((item) => item.id === projectId);
+  if (project === undefined) {
+    throw new Error(`проєкту ${projectId} немає в довіднику — грант стенда не діє`);
+  }
+
+  const values = project.nameL10n.values ?? {};
+  const name = values['en'] ?? Object.values(values).find((v) => v.length > 0) ?? '';
+
+  return name.length > 0 && name !== project.code ? `${name} (${project.code})` : project.code;
 }
 
 /** Зберігає чернетку гранта і чекає підтвердження сервера. */
@@ -417,15 +468,19 @@ async function expectPasteDenied(page: Page): Promise<void> {
   // комірок — не мовчазний збій і не той самий екран, що показує успіх.
   await expect(
     page.getByText('Some cells were not saved'),
-    'вставку мали відхилити — гранта немає, а модалка відмови не з\'явилася',
+    'вставку мали відхилити — рівня Write немає, а модалка відмови не з\'явилася',
   ).toBeVisible({ timeout: 15_000 });
 
-  // ⚠ Причина — рівно `deny.NoGrant`, а не будь-яка відмова: перевіряємо
-  // текст, а не лише факт модалки, інакше цей самий тест пройшов би і на
-  // геть іншій, непов'язаній причині заборони.
+  // ⚠ Причина — рівно `deny.InsufficientGrantLevel` (`09-seed.sql`), а не
+  // будь-яка відмова: у оператора грант `Read` Є, але нижчий за `Write`.
+  // Перевіряємо текст, а не лише факт модалки, інакше цей самий тест пройшов
+  // би і на геть іншій причині — зокрема на `deny.NoGrant`, яка означала б,
+  // що `EditRules.CanEdit` знову злив «немає гранта» і «грант замалий».
   await expect(
-    page.getByText('You do not have permission to edit this cell.'),
-    'причина відмови не збігається з очікуваною (deny.NoGrant)',
+    page.getByText(
+      'Your grant level is too low for this action: ask for a higher grant level, not a new grant.',
+    ),
+    'причина відмови не збігається з очікуваною (deny.InsufficientGrantLevel)',
   ).toBeVisible();
 
   await page.keyboard.press('Escape');

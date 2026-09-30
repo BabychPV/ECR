@@ -1,5 +1,5 @@
 import { useState, type JSX } from 'react';
-import { Button, Group, Modal, NumberInput, Stack, Table, TextInput } from '@mantine/core';
+import { Button, Group, Modal, NumberInput, Stack, Table, TextInput, VisuallyHidden } from '@mantine/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import type { CreatePeriodPolicyRequest, PeriodPolicyDto, UpdatePeriodPolicyRequest } from '@/api/types';
@@ -137,7 +137,10 @@ export function PeriodPolicyManager(): JSX.Element {
                   <Table.Th>{t('periods.policyGraceOffset')}</Table.Th>
                   <Table.Th>{t('periods.policyHardClose')}</Table.Th>
                   <Table.Th>{t('periods.policyYearGrace')}</Table.Th>
-                  <Table.Th />
+                  {/* ⚠ `X-29`: колонка дій — з назвою для читалки, а не порожня клітинка. */}
+                  <Table.Th>
+                    <VisuallyHidden>{t('common.actions')}</VisuallyHidden>
+                  </Table.Th>
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
@@ -265,9 +268,12 @@ export function PeriodPolicyManager(): JSX.Element {
           </Group>
         </Stack>
 
+        {/* ⛔ `X-29`: «Close», а не «Cancel». Рядки вище зберігаються кожен
+            своєю кнопкою одразу, тож «Cancel» обіцяв скасування того, що вже
+            записано, — а робив лише закриття вікна. */}
         <Group justify="flex-end" mt="md">
           <Button variant="default" onClick={() => setOpened(false)}>
-            {t('common.cancel')}
+            {t('common.close')}
           </Button>
         </Group>
       </Modal>

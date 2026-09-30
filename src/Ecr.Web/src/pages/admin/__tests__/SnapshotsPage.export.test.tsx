@@ -98,7 +98,7 @@ describe('SnapshotsPage: вивантаження зрізу в книгу (R7)'
   it(
     'із правом Report.Export — посилання на саме цей зріз, із названою межею Excel',
     async () => {
-      mockFetch(['Report.ViewRegulatory', 'Report.Export']);
+      mockFetch(['Report.ViewRegulatory', 'Report.ViewSnapshot', 'Report.Export']);
       show();
 
       const link = await screen.findByRole(
@@ -129,7 +129,7 @@ describe('SnapshotsPage: вивантаження зрізу в книгу (R7)'
   it(
     'без права Report.Export дії немає зовсім, а перегляд рядків лишається',
     async () => {
-      mockFetch(['Report.ViewRegulatory']);
+      mockFetch(['Report.ViewRegulatory', 'Report.ViewSnapshot']);
       show();
 
       /*
@@ -141,6 +141,29 @@ describe('SnapshotsPage: вивантаження зрізу в книгу (R7)'
       const cell = rows.closest('td');
 
       expect(cell).not.toBeNull();
+      expect(within(cell as HTMLElement).queryByRole('link')).toBeNull();
+    },
+    SlowEnvTimeout,
+  );
+
+  it(
+    'без права Report.ViewSnapshot немає ні перегляду рядків, ні книги — перелік лишається',
+    async () => {
+      /*
+       * ⛔ Рішення людини 2026-09-29: вміст регуляторного зрізу — окреме право.
+       * `Report.Export` без нього книгу не відкриває (сервер відповість 403),
+       * тож і посилання показувати не можна.
+       */
+      mockFetch(['Report.ViewRegulatory', 'Report.Export']);
+      show();
+
+      // ⚠ Спершу дочекатися самого рядка зрізу (кількість рядків — лише в ньому),
+      // інакше «кнопки немає» було б зеленим до приїзду таблиці.
+      const count = await screen.findByText('10', {}, { timeout: SlowEnvTimeout });
+      const cell = count.closest('td');
+
+      expect(cell).not.toBeNull();
+      expect(within(cell as HTMLElement).queryByText(/snapshots\.viewRows⟧/)).toBeNull();
       expect(within(cell as HTMLElement).queryByRole('link')).toBeNull();
     },
     SlowEnvTimeout,

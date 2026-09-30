@@ -142,7 +142,7 @@ describe('/admin/sources — прямий перехід (RouteGuard)', () => {
   });
 
   it('ні того, ні того — редирект на /403, явна відмова з назвою права, як на інших маршрутах', () => {
-    visitSources(meWith(['Template.Edit']));
+    visitSources(meWith(['Template.View']));
 
     expect(screen.queryByTestId('sources-content')).toBeNull();
     // Відмова (тепер на `/403`, `RouteGuard.tsx`: `<Navigate .../>`) називає
@@ -169,7 +169,7 @@ describe('/admin/sources — пункт навбару (AppLayout)', () => {
   });
 
   it('ні того, ні того — пункту немає', async () => {
-    renderNav(['Template.Edit']);
+    renderNav(['Template.View']);
     await navReady();
 
     // Орієнтир, що фільтр уже відпрацював саме з цим профілем.

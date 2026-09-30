@@ -24,10 +24,15 @@ public sealed class GroupRoleAssignmentTests
     private readonly IUnitOfWork _uow = Substitute.For<IUnitOfWork>();
     private readonly ICurrentUser _user = Substitute.For<ICurrentUser>();
     private readonly IClock _clock = Substitute.For<IClock>();
+    private readonly IDocumentStore _documents = Substitute.For<IDocumentStore>();
 
     public GroupRoleAssignmentTests()
     {
         _clock.UtcNow.Returns(new DateTime(2026, 9, 20, 8, 0, 0, DateTimeKind.Utc));
+
+        // Транзакція виконує операцію, як справжня: інакше журнал усередині неї не видно.
+        _uow.ExecuteInTransactionAsync(Arg.Any<Func<CancellationToken, Task>>(), Arg.Any<CancellationToken>())
+            .Returns(call => call.Arg<Func<CancellationToken, Task>>()(CancellationToken.None));
         _user.UserId.Returns(Actor);
         Allow("Security.ManageUsers");
 
@@ -41,8 +46,8 @@ public sealed class GroupRoleAssignmentTests
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     public async Task Імя_групи_зберігається_як_SID_з_подією_в_журналі_і_перше_призначення_діє_з_наступного_входу()
     {
-        var first = await Assign().HandleAsync(1, Name, null, new DateOnly(2026, 12, 31), false, CancellationToken.None);
-        var second = await Assign().HandleAsync(2, Name, null, null, confirmDangerous: true, CancellationToken.None);
+        var first = await Assign().HandleAsync(1, Name, null, new DateOnly(2026, 12, 31), false, scope: null, CancellationToken.None);
+        var second = await Assign().HandleAsync(2, Name, null, null, confirmDangerous: true, scope: null, CancellationToken.None);
 
         Assert.Equal(Sid, first.PrincipalSid);
         Assert.Equal(Name, first.PrincipalName);
@@ -66,15 +71,15 @@ public sealed class GroupRoleAssignmentTests
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     public async Task SID_приймається_без_резолву_імені_а_імя_що_не_резолвиться_дає_422()
     {
-        var bySid = await Assign().HandleAsync(1, "s-1-5-21-9-9-9-500", null, null, false, CancellationToken.None);
+        var bySid = await Assign().HandleAsync(1, "s-1-5-21-9-9-9-500", null, null, false, scope: null, CancellationToken.None);
 
         Assert.Equal("S-1-5-21-9-9-9-500", bySid.PrincipalSid);
         Assert.Null(bySid.PrincipalName);
 
         var unknown = await Assert.ThrowsAsync<BusinessRuleException>(
-            () => Assign().HandleAsync(1, @"CORP\NoSuchGroup", null, null, false, CancellationToken.None));
+            () => Assign().HandleAsync(1, @"CORP\NoSuchGroup", null, null, false, scope: null, CancellationToken.None));
         var malformed = await Assert.ThrowsAsync<BusinessRuleException>(
-            () => Assign().HandleAsync(1, "S-1-abc", null, null, false, CancellationToken.None));
+            () => Assign().HandleAsync(1, "S-1-abc", null, null, false, scope: null, CancellationToken.None));
 
         Assert.Equal("ECR-REQ-0422", unknown.ErrorCode);
         Assert.Equal("err.ECR-REQ-0422.principalNotResolved", unknown.Details!["messageKey"]);
@@ -88,7 +93,7 @@ public sealed class GroupRoleAssignmentTests
     public async Task Роль_із_небезпечними_правами_групі_лише_з_підтвердженням()
     {
         var error = await Assert.ThrowsAsync<BusinessRuleException>(
-            () => Assign().HandleAsync(2, Sid, null, null, confirmDangerous: false, CancellationToken.None));
+            () => Assign().HandleAsync(2, Sid, null, null, confirmDangerous: false, scope: null, CancellationToken.None));
 
         Assert.Equal("ECR-SEC-0409", error.ErrorCode);
         Assert.Equal("err.ECR-SEC-0409.dangerousRoleNeedsConfirmation", error.Details!["messageKey"]);
@@ -96,7 +101,7 @@ public sealed class GroupRoleAssignmentTests
         Assert.Empty(_users.GroupAssignments);
         await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
 
-        await Assign().HandleAsync(2, Sid, null, null, confirmDangerous: true, CancellationToken.None);
+        await Assign().HandleAsync(2, Sid, null, null, confirmDangerous: true, scope: null, CancellationToken.None);
         Assert.Single(_users.GroupAssignments);
     }
 
@@ -104,12 +109,12 @@ public sealed class GroupRoleAssignmentTests
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     public async Task Дублікат_і_переплутані_межі_відхиляються()
     {
-        await Assign().HandleAsync(1, Sid, null, null, false, CancellationToken.None);
+        await Assign().HandleAsync(1, Sid, null, null, false, scope: null, CancellationToken.None);
 
         var duplicate = await Assert.ThrowsAsync<BusinessRuleException>(
-            () => Assign().HandleAsync(1, Name, null, null, false, CancellationToken.None));
+            () => Assign().HandleAsync(1, Name, null, null, false, scope: null, CancellationToken.None));
         var dates = await Assert.ThrowsAsync<BusinessRuleException>(
-            () => Assign().HandleAsync(1, "S-1-5-32-544", new DateOnly(2026, 2, 1), new DateOnly(2026, 1, 1), false, CancellationToken.None));
+            () => Assign().HandleAsync(1, "S-1-5-32-544", new DateOnly(2026, 2, 1), new DateOnly(2026, 1, 1), false, scope: null, CancellationToken.None));
 
         Assert.Equal("err.ECR-SEC-0409.groupAssignmentExists", duplicate.Details!["messageKey"]);
         Assert.Equal("err.ECR-REQ-0422.validityOrder", dates.Details!["messageKey"]);
@@ -120,7 +125,7 @@ public sealed class GroupRoleAssignmentTests
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     public async Task Відкликання_прибирає_призначення_з_подією_а_невідомий_Id_дає_404()
     {
-        var assigned = await Assign().HandleAsync(1, Sid, null, null, false, CancellationToken.None);
+        var assigned = await Assign().HandleAsync(1, Sid, null, null, false, scope: null, CancellationToken.None);
 
         await Revoke().HandleAsync(assigned.Id, CancellationToken.None);
 
@@ -143,7 +148,7 @@ public sealed class GroupRoleAssignmentTests
 
         await Assert.ThrowsAsync<AccessDeniedException>(() => List().HandleAsync(CancellationToken.None));
         await Assert.ThrowsAsync<AccessDeniedException>(
-            () => Assign().HandleAsync(1, "S-1-5-32-544", null, null, false, CancellationToken.None));
+            () => Assign().HandleAsync(1, "S-1-5-32-544", null, null, false, scope: null, CancellationToken.None));
         await Assert.ThrowsAsync<AccessDeniedException>(() => Revoke().HandleAsync(5, CancellationToken.None));
 
         Assert.Single(_users.GroupAssignments);
@@ -155,7 +160,8 @@ public sealed class GroupRoleAssignmentTests
 
     private ListGroupRoleAssignmentsHandler List() => new(_users, _resolver, _access, _user);
 
-    private AssignGroupRoleHandler Assign() => new(_users, _resolver, _access, _uow, _audit, _user, _clock);
+    private AssignGroupRoleHandler Assign()
+        => new(_users, _resolver, _access, _uow, _audit, _user, _clock, _documents, Substitute.For<IResourceNameResolver>());
 
     private RevokeGroupRoleHandler Revoke() => new(_users, _access, _uow, _audit, _user, _clock);
 }

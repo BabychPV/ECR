@@ -1,6 +1,7 @@
 // src/Ecr.Application/Documents/HeaderValueReader.cs
 using System.Globalization;
 using Ecr.Application.Errors;
+using Ecr.Application.Localization;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Enums;
 using Ecr.Domain.Errors;
@@ -27,7 +28,11 @@ public static class HeaderValueReader
     /// <exception cref="BusinessRuleException">
     /// Значення не відповідає типу поля — <c>ECR-HDR-0422</c>.
     /// </exception>
-    public static DocumentHeaderValueData? Read(object? raw, HeaderFieldDef field)
+    /// <param name="culture">
+    /// Культура користувача для числа, що прийшло текстом (рішення 2026-09-29,
+    /// див. <see cref="CellValueReader.Read"/>); <c>null</c> — машинний запис.
+    /// </param>
+    public static DocumentHeaderValueData? Read(object? raw, HeaderFieldDef field, CultureInfo? culture = null)
     {
         ArgumentNullException.ThrowIfNull(field);
 
@@ -41,7 +46,7 @@ public static class HeaderValueReader
         return field.DataType switch
         {
             CellDataType.Int or CellDataType.Decimal
-                => new DocumentHeaderValueData { ValueNumeric = Number(value, field) },
+                => new DocumentHeaderValueData { ValueNumeric = Storable(Number(value, field, culture), field) },
 
             CellDataType.Bool => new DocumentHeaderValueData { ValueBool = Boolean(value, field) },
             CellDataType.Date => new DocumentHeaderValueData { ValueDate = Date(value, field) },
@@ -52,7 +57,7 @@ public static class HeaderValueReader
         };
     }
 
-    private static decimal Number(object value, HeaderFieldDef field) => value switch
+    private static decimal Number(object value, HeaderFieldDef field, CultureInfo? culture) => value switch
     {
         decimal number => number,
         int number => number,
@@ -61,9 +66,32 @@ public static class HeaderValueReader
         double number => (decimal)number,
         float number => (decimal)number,
         bool flag => flag ? 1m : 0m,
-        string text when decimal.TryParse(text, NumberStyles.Number, CultureInfo.InvariantCulture, out var parsed)
-            => parsed,
-        _ => throw Mismatch(field, value, "число"),
+        // ⛔ `C1`: без культури — `Float`, не `Number` — те саме правило, що в
+        // `CellValueReader`: кома в машинному числі — відмова, а не тисячі
+        // («12,5» доти лягало як 125).
+        string text when culture is null
+            => decimal.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed)
+                ? parsed
+                : throw Mismatch(field, value, ExpectedType.Number),
+        // ✎ 2026-09-29: текст людини — за культурою її мови; неоднозначне —
+        // відмова з обома прочитаннями (правила — `CultureNumberReader`).
+        string text => CultureNumberReader.Read(text, culture) switch
+        {
+            { Kind: NumberTextKind.Number } reading => reading.Value,
+            { Kind: NumberTextKind.Ambiguous } reading => throw Mismatch(
+                field, value, ExpectedType.Number,
+                new Dictionary<string, object?>
+                {
+                    // Число є, лише двозначне: власний ключ, а не «очікує число».
+                    ["messageKey"] = "err.ECR-HDR-0422.ambiguousSeparator",
+                    ["value"] = text,
+                    ["reason"] = CellValueReader.AmbiguousSeparator,
+                    ["asGroup"] = reading.AsGroup,
+                    ["asDecimal"] = reading.AsDecimal,
+                }),
+            _ => throw Mismatch(field, value, ExpectedType.Number),
+        },
+        _ => throw Mismatch(field, value, ExpectedType.Number),
     };
 
     private static bool Boolean(object value, HeaderFieldDef field) => value switch
@@ -71,7 +99,7 @@ public static class HeaderValueReader
         bool flag => flag,
         decimal number => number != 0m,
         string text when bool.TryParse(text, out var parsed) => parsed,
-        _ => throw Mismatch(field, value, "булеве значення"),
+        _ => throw Mismatch(field, value, ExpectedType.Boolean),
     };
 
     private static DateTime Date(object value, HeaderFieldDef field) => value switch
@@ -79,7 +107,7 @@ public static class HeaderValueReader
         DateTime date => date,
         DateTimeOffset offset => offset.UtcDateTime,
         string text when CellDateParser.TryParse(text, out var parsed) => parsed,
-        _ => throw Mismatch(field, value, "дата"),
+        _ => throw Mismatch(field, value, ExpectedType.Date),
     };
 
     private static long Identifier(object value, HeaderFieldDef field) => value switch
@@ -89,7 +117,7 @@ public static class HeaderValueReader
         decimal identifier when decimal.Truncate(identifier) == identifier => (long)identifier,
         string text when long.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed)
             => parsed,
-        _ => throw Mismatch(field, value, "ідентифікатор"),
+        _ => throw Mismatch(field, value, ExpectedType.Identifier),
     };
 
     /// <summary>Ідентифікатор одиниці — той самий діапазон, що <c>int</c>-колонка UOM.</summary>
@@ -102,7 +130,7 @@ public static class HeaderValueReader
             => (int)identifier,
         string text when int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed)
             => parsed,
-        _ => throw Mismatch(field, value, "ідентифікатор"),
+        _ => throw Mismatch(field, value, ExpectedType.Identifier),
     };
 
     private static string Text(object value) => value switch
@@ -114,15 +142,86 @@ public static class HeaderValueReader
         _ => value.ToString() ?? string.Empty,
     };
 
-    private static BusinessRuleException Mismatch(HeaderFieldDef field, object value, string expected)
-        => new(
-            ErrorCodes.HeaderValueInvalid,
-            $"Поле шапки «{field.Code}» очікує {expected}.",
-            new Dictionary<string, object?>
-            {
-                ["messageKey"] = "err.ECR-HDR-0422.typeMismatch",
-                ["headerFieldCode"] = field.Code,
-                ["expected"] = expected,
-                ["actualKind"] = value.GetType().Name,
-            });
+    /// <summary>
+    /// Очікуваний тип поля: ключ каталогу + запасне українське слово.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Той самий дефект, що `U-02` у <see cref="CellValueReader"/>, лише
+    /// тонший: ключ тут БУВ (<c>err.ECR-HDR-0422.typeMismatch</c>), але шаблон
+    /// підставляв <c>{expected}</c>, а значенням <c>expected</c> їхало
+    /// українське слово. Користувач бачив «Header field "QTY" expects a
+    /// число.» — англійське речення з українським словом усередині й
+    /// неузгодженим артиклем. Резолвер (<c>UiStringResolver.Format</c>)
+    /// другого рівня розв'язання ключів не має, тож тип — частина КЛЮЧА.
+    ///
+    /// ⚠ <see cref="Code"/> їде клієнту полем <c>expected</c> у
+    /// <c>problem+json</c> — тому це стале кодове слово, а не текст.
+    /// </remarks>
+    private sealed record ExpectedType(string Code, string MessageKey, string Fallback)
+    {
+        public static readonly ExpectedType Number =
+            new("Number", "err.ECR-HDR-0422.expectsNumber", "число");
+
+        public static readonly ExpectedType Boolean =
+            new("Boolean", "err.ECR-HDR-0422.expectsBoolean", "булеве значення");
+
+        public static readonly ExpectedType Date =
+            new("Date", "err.ECR-HDR-0422.expectsDate", "дата");
+
+        public static readonly ExpectedType Identifier =
+            new("Identifier", "err.ECR-HDR-0422.expectsIdentifier", "ідентифікатор");
+    }
+
+    /// <summary>
+    /// Число, яке сховище шапки збереже без втрати; інакше — відмова.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Той самий дефект, що `U-23` для комірки: <c>doc.DocumentHeaderValue.ValueNumeric</c>
+    /// теж <c>decimal(34,16)</c> (<c>DocumentHeaderValueConfiguration</c>), і
+    /// зайві знаки SqlClient округлював мовчки. Межа й правило — ті самі
+    /// (<see cref="CellValueReader.StorageScale"/>, відмова, а не округлення,
+    /// ФВ-9.16c); нулі в хвості втратою не є.
+    /// </remarks>
+    private static decimal Storable(decimal number, HeaderFieldDef field)
+        => !CellValueReader.IntegerPartFits(number)
+            ? throw new BusinessRuleException(
+                ErrorCodes.HeaderValueInvalid,
+                $"Поле шапки «{field.Code}» зберігає не більше {CellValueReader.StorageIntegerDigits} розрядів до коми.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-HDR-0422.tooManyIntegerDigits",
+                    ["headerFieldCode"] = field.Code,
+                    ["maxIntegerDigits"] = CellValueReader.StorageIntegerDigits.ToString(CultureInfo.InvariantCulture),
+                })
+            : decimal.Round(number, CellValueReader.StorageScale, MidpointRounding.AwayFromZero) == number
+            ? number
+            : throw new BusinessRuleException(
+                ErrorCodes.HeaderValueInvalid,
+                $"Поле шапки «{field.Code}» зберігає не більше {CellValueReader.StorageScale} знаків після коми.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-HDR-0422.tooManyDecimals",
+                    ["headerFieldCode"] = field.Code,
+                    ["maxScale"] = CellValueReader.StorageScale.ToString(CultureInfo.InvariantCulture),
+                });
+
+    private static BusinessRuleException Mismatch(
+        HeaderFieldDef field, object value, ExpectedType expected, Dictionary<string, object?>? extra = null)
+    {
+        var details = new Dictionary<string, object?>
+        {
+            ["messageKey"] = expected.MessageKey,
+            ["headerFieldCode"] = field.Code,
+            ["expected"] = expected.Code,
+            ["actualKind"] = value.GetType().Name,
+        };
+
+        foreach (var (key, item) in extra ?? [])
+        {
+            details[key] = item;
+        }
+
+        return new BusinessRuleException(
+            ErrorCodes.HeaderValueInvalid, $"Поле шапки «{field.Code}» очікує {expected.Fallback}.", details);
+    }
 }

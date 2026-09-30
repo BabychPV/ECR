@@ -19,6 +19,7 @@ public sealed class DownloadExportAccessTests
 {
     private const string ExportId = "export-1";
     private const long DocumentId = 700;
+    private const int Owner = 9;
 
     private readonly IExportStore _exports = Substitute.For<IExportStore>();
     private readonly IAccessDecisionService _access = Substitute.For<IAccessDecisionService>();
@@ -56,14 +57,15 @@ public sealed class DownloadExportAccessTests
     public async Task Без_гранта_на_документ_завантаження_відхиляється()
     {
         _exports.FindAsync(ExportId, Arg.Any<CancellationToken>())
-            .Returns(new ExportedBook(DocumentId, [1, 2, 3]));
+            .Returns(new ExportedBook(DocumentId, Owner,[1, 2, 3]));
         _access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), DocumentId, Arg.Any<CancellationToken>())
             .Returns(EditDecision.Deny(EditDenyReason.NoGrant));
 
-        var denied = await Assert.ThrowsAsync<AccessDeniedException>(
+        // ⛔ B-08: невидимий документ — 404, як і відсутній, а не 403.
+        var denied = await Assert.ThrowsAsync<NotFoundException>(
             () => Handler().HandleAsync(ExportId, CancellationToken.None));
 
-        Assert.Equal("ECR-AUTH-0403", denied.ErrorCode);
+        Assert.Equal("ECR-DOC-0404", denied.ErrorCode);
     }
 
     [Fact]
@@ -72,7 +74,7 @@ public sealed class DownloadExportAccessTests
     {
         var content = new byte[] { 9, 8, 7 };
         _exports.FindAsync(ExportId, Arg.Any<CancellationToken>())
-            .Returns(new ExportedBook(DocumentId, content));
+            .Returns(new ExportedBook(DocumentId, Owner,content));
         _access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), DocumentId, Arg.Any<CancellationToken>())
             .Returns(EditDecision.Allow());
 
@@ -81,5 +83,34 @@ public sealed class DownloadExportAccessTests
         Assert.Equal(content, result);
     }
 
-    private DownloadExportHandler Handler() => new(_exports, _access, _user);
+    /// <summary>
+    /// S6: книга, замовлена іншим користувачем, — та сама 404, що й неіснуюча,
+    /// навіть коли документ видимий. Грант документа при цьому не питається:
+    /// відповідь не має залежати від того, чи бачить читач документ.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-6.6")]
+    public async Task Чужа_книга_дає_ту_саму_404_що_й_неіснуюча()
+    {
+        _exports.FindAsync(ExportId, Arg.Any<CancellationToken>())
+            .Returns(new ExportedBook(DocumentId, Owner + 1, [1, 2, 3]));
+        _access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), DocumentId, Arg.Any<CancellationToken>())
+            .Returns(EditDecision.Allow());
+
+        var foreign = await Assert.ThrowsAsync<NotFoundException>(
+            () => Handler().HandleAsync(ExportId, CancellationToken.None));
+
+        _exports.FindAsync("missing", Arg.Any<CancellationToken>()).Returns((ExportedBook?)null);
+        var missing = await Assert.ThrowsAsync<NotFoundException>(
+            () => Handler().HandleAsync("missing", CancellationToken.None));
+
+        Assert.Equal(missing.ErrorCode, foreign.ErrorCode);
+        Assert.Equal(missing.Message, foreign.Message);
+        Assert.Equal(missing.Details!["messageKey"], foreign.Details!["messageKey"]);
+        await _access.DidNotReceiveWithAnyArgs().CanReadDocumentAsync(default!, default, default);
+    }
+
+    private DownloadExportHandler Handler()
+        => new(_exports, _access, _user, Substitute.For<IAuditWriter>(), Substitute.For<Ecr.Domain.Abstractions.IClock>());
 }

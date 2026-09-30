@@ -3,8 +3,9 @@ import { deletePreference, putPreference, type UserPreference } from './api';
 /**
  * Одне налаштування, що синхронізується з сервером (`BE-20`).
  *
- * ⛔ Ширин колонок сітки тут немає і не буде: вони залежать від екрана
- * конкретного браузера. `sessionStorage` (`lostEdits`, симуляція) — теж ні.
+ * ⚠ Ширини колонок сітки — окремо, у `columnWidthsSync.ts` (`D-201`): ключ на
+ * кожну таблицю і відкладений запис не вкладаються в цю модель одного значення.
+ * `sessionStorage` (`lostEdits`, симуляція) на сервер не йде.
  */
 export interface PreferenceBinding {
   /** Ключ на сервері. */

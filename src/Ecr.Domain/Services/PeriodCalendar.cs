@@ -43,7 +43,13 @@ public static class PeriodCalendar
         {
             throw new DomainException(
                 "ECR-PRD-4224",
-                $"Кількість періодів {count} поза межами 1..{MaxSequence} (D-108).");
+                $"Кількість періодів {count} поза межами 1..{MaxSequence} (D-108).",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-PRD-4224.countOutOfRange",
+                    ["count"] = count.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["max"] = MaxSequence.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
         }
 
         // ⛔ T6/#36: кількість МУСИТЬ ділити рік нарівно. `Bounds()` нижче
@@ -60,7 +66,12 @@ public static class PeriodCalendar
             throw new DomainException(
                 "ECR-PRD-4224",
                 $"Кількість періодів {count} не ділить рік нарівно: 12 має ділитися на неї без "
-                + "остачі, інакше частина року лишиться без жодного періоду (D-108).");
+                + "остачі, інакше частина року лишиться без жодного періоду (D-108).",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-PRD-4224.countNotDivisor",
+                    ["count"] = count.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
         }
 
         return count;
@@ -76,7 +87,13 @@ public static class PeriodCalendar
         {
             throw new DomainException(
                 "ECR-PRD-4224",
-                $"Порядковий номер періоду {sequence} поза межами 1..{MaxSequence} (D-108).");
+                $"Порядковий номер періоду {sequence} поза межами 1..{MaxSequence} (D-108).",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-PRD-4224.sequenceOutOfRange",
+                    ["sequence"] = sequence.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["max"] = MaxSequence.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
         }
 
         return PeriodKey.Create(year, sequence);

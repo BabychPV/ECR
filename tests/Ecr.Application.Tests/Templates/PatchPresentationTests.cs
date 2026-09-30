@@ -51,6 +51,7 @@ public sealed class PatchPresentationTests(SqlServerFixture sql)
 
     private readonly IAccessDecisionService _access = Substitute.For<IAccessDecisionService>();
     private readonly ICurrentUser _user = Substitute.For<ICurrentUser>();
+    private readonly Ecr.Application.Ports.IMetadataCache _cache = Substitute.For<Ecr.Application.Ports.IMetadataCache>();
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
@@ -355,6 +356,23 @@ public sealed class PatchPresentationTests(SqlServerFixture sql)
         Assert.Empty(await AuditRowsAsync(version.VersionId));
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-7.2")]
+    public async Task Успішний_патч_інвалідує_кеш_метаданих_версії()
+    {
+        // ⛔ R-11: без інвалідації `GET …/structure` віддавав прогрітий знімок зі
+        // старою ревізією й старим підписом — екран відставав на крок.
+        var version = await BareVersionAsync();
+
+        await using var db = Context();
+        await Handler(db).PatchAsync(
+            version.VersionId, HeaderPatch(version.ColumnDefId), userId: 9, CancellationToken.None);
+
+        await _cache.Received(1).InvalidateAsync(version.VersionId, Arg.Any<CancellationToken>());
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
 
     private PatchPresentationHandler Handler(
@@ -368,6 +386,7 @@ public sealed class PatchPresentationTests(SqlServerFixture sql)
             new Repository<TemplateVersion, int>(db),
             new TemplateVersionStore(db),
             new ChangeClassifier(),
+            _cache,
             audit ?? new AuditWriter(db),
             new UnitOfWork(db),
             new TestClock(Now),

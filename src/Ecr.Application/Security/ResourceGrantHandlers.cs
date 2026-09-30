@@ -29,6 +29,63 @@ public sealed record ResourceGrantDto(
     ResourceKind ResourceKind, int ResourceId, GrantLevel Level, bool IsDeny,
     string? ResourceName = null);
 
+/// <summary>Проєкт у довіднику для видачі грантів: лише ідентичність.</summary>
+/// <param name="Id">Ідентифікатор — те, що йде в <c>resourceId</c> гранта.</param>
+/// <param name="Code">Код проєкту.</param>
+/// <param name="NameL10n">Назва мовами каталогу.</param>
+/// <remarks>
+/// ⛔ Рішення людини 2026-09-29 (D-207 п.2, варіант B): адміністратор безпеки
+/// без грантів на проєкти бачить КОД і НАЗВУ всіх проєктів — і нічого більше.
+/// Стан, пояс, поточний період, власник — поза цим записом навмисно.
+/// </remarks>
+public sealed record GrantableProject(int Id, string Code, Ecr.Domain.ValueObjects.LocalizedText NameL10n);
+
+/// <summary>Аркуш чинної версії шаблону проєкту — для області призначення ролі (D-214).</summary>
+/// <param name="ProjectId">Проєкт.</param>
+/// <param name="Code">Код аркуша — те, що йде в <c>scope.sheets</c>.</param>
+/// <param name="NameL10n">Назва мовами каталогу.</param>
+/// <remarks>⛔ Лише ідентичність аркуша: ні таблиць, ні колонок, ні даних.</remarks>
+public sealed record GrantableSheet(int ProjectId, string Code, Ecr.Domain.ValueObjects.LocalizedText NameL10n);
+
+/// <summary>Версія набору грантів ролі — для <c>ETag</c> / <c>If-Match</c>.</summary>
+/// <remarks>
+/// ⚠ Хеш НАБОРУ, а не лічильник: токена конкурентності в <c>sec.Role</c> і
+/// <c>sec.ResourceGrant</c> немає, а міграція поза цією задачею (токен
+/// міграцій черговий). Той самий прийом, що <c>HeaderVersion.Of</c> для шапки
+/// документа (C2). Наслідок чесний: правка, що повернула рівно той самий
+/// набір (A → B → A), конфліктом не вважається — затирати тут нічого.
+///
+/// ⚠ Хешуються лише чотири поля гранта: <c>ResourceName</c> — розв'язана
+/// назва для показу, вона змінюється від перейменування ресурсу, а не від
+/// правки грантів.
+/// </remarks>
+public static class ResourceGrantsVersion
+{
+    /// <summary>Хеш відсортованого набору грантів (hex, 32 символи).</summary>
+    /// <param name="grants">Набір грантів ролі.</param>
+    public static string Of(IEnumerable<ResourceGrantDto> grants)
+    {
+        ArgumentNullException.ThrowIfNull(grants);
+
+        var text = new System.Text.StringBuilder();
+        foreach (var grant in grants
+                     .OrderBy(g => (int)g.ResourceKind)
+                     .ThenBy(g => g.ResourceId)
+                     .ThenBy(g => (int)g.Level)
+                     .ThenBy(g => g.IsDeny))
+        {
+            text.Append(((int)grant.ResourceKind).ToString(System.Globalization.CultureInfo.InvariantCulture))
+                .Append('|').Append(grant.ResourceId.ToString(System.Globalization.CultureInfo.InvariantCulture))
+                .Append('|').Append(((int)grant.Level).ToString(System.Globalization.CultureInfo.InvariantCulture))
+                .Append('|').Append(grant.IsDeny ? '1' : '0')
+                .Append('\n');
+        }
+
+        var hash = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(text.ToString()));
+        return Convert.ToHexString(hash.AsSpan(0, 16));
+    }
+}
+
 /// <summary>Перелік грантів ролі. Право <c>Security.ManageRoles</c>.</summary>
 /// <remarks>
 /// ⛔ <c>Q-299</c>: `Sheet`/`Table`/`Column` адресуються лише в дереві
@@ -61,6 +118,21 @@ public sealed class ListResourceGrantsHandler(
 
         if (grants.Count == 0)
         {
+            // ⛔ B-07: неіснуюча роль давала `200 []` — «грантів немає» на
+            // адресі, якої не існує. Роль із грантами існує за побудовою, тож
+            // питаємо лише тут.
+            if ((await users.ListRolesAsync(ct).ConfigureAwait(false)).All(r => r.Id != roleId))
+            {
+                throw new NotFoundException(
+                    ErrorCodes.SecurityPrincipalNotFound,
+                    $"Ролі {roleId} не існує.",
+                    new Dictionary<string, object?>
+                    {
+                        ["messageKey"] = "err.ECR-SEC-0404.roleNotFound",
+                        ["roleId"] = roleId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    });
+            }
+
             return grants;
         }
 
@@ -74,6 +146,84 @@ public sealed class ListResourceGrantsHandler(
         })];
     }
 
+    /// <summary>
+    /// Код і назва всіх проєктів — для вибору ресурсу гранта. Право
+    /// <c>Security.ManageRoles</c> (глобальне, <c>PermissionScopes.Global</c>).
+    /// </summary>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ D-207 п.2, варіант B. Доти адміністратор безпеки без грантів на
+    /// проєкти бачив ПОРОЖНІЙ вибір проєкту (<c>GET /projects</c> фільтрує за
+    /// грантами й вимагає <c>Document.View</c>) — і не міг видати грант на
+    /// проєкт нікому, включно з собою. Перелік НЕ відкриває даних: зріз,
+    /// документи й перелік документів проєкту лишаються за грантами.
+    ///
+    /// ⚠ Метод цього обробника, а не окремий обробник: той самий порт
+    /// (<see cref="IResourceNameResolver"/>), те саме право і той самий екран —
+    /// вибір ресурсу гранта.
+    /// </remarks>
+    public async Task<IReadOnlyList<GrantableProject>> ListProjectsAsync(CancellationToken ct)
+    {
+        // ✎ Рішення координатора 2026-09-29: той самий довідник потрібен формі
+        // ролей користувача для області дії (ФВ-6.14), а вона живе під
+        // `Security.ManageUsers`. Досить ОДНОГО з двох прав; даних проєкту
+        // перелік однаково не відкриває.
+        var userId = currentUser.UserId
+            ?? throw new AccessDeniedException(
+                "ECR-AUTH-0401", "Потрібна автентифікація.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.signInRequired" });
+
+        var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
+        if (!profile.Has(Permission) && !profile.Has(ProjectCatalogAltPermission))
+        {
+            throw new AccessDeniedException(
+                "ECR-AUTH-0403", $"Потрібне право {Permission} або {ProjectCatalogAltPermission}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-AUTH-0403.permission",
+                    ["permission"] = Permission,
+                });
+        }
+
+        return await nameResolver.ListProjectsAsync(ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Код і назва аркушів чинної версії шаблону кожного проєкту — для області
+    /// призначення ролі за аркушами (D-214). Ті самі права, що й у довідника
+    /// проєктів.
+    /// </summary>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ Лише ідентичність аркуша: ні таблиць, ні колонок, ні даних — та сама
+    /// межа, що в <see cref="ListProjectsAsync"/>. Форма вибирає з нього коди
+    /// аркушів проєктів, обраних в області.
+    /// </remarks>
+    public async Task<IReadOnlyList<GrantableSheet>> ListProjectSheetsAsync(CancellationToken ct)
+    {
+        var userId = currentUser.UserId
+            ?? throw new AccessDeniedException(
+                "ECR-AUTH-0401", "Потрібна автентифікація.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.signInRequired" });
+
+        var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
+        if (!profile.Has(Permission) && !profile.Has(ProjectCatalogAltPermission))
+        {
+            throw new AccessDeniedException(
+                "ECR-AUTH-0403", $"Потрібне право {Permission} або {ProjectCatalogAltPermission}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-AUTH-0403.permission",
+                    ["permission"] = Permission,
+                });
+        }
+
+        return await nameResolver.ListProjectSheetsAsync(projectIds: null, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>Друге право, що відкриває довідник проєктів: область призначення ролі (ФВ-6.14).</summary>
+    public const string ProjectCatalogAltPermission = "Security.ManageUsers";
+
     /// <summary>Перевіряє право поточного користувача.</summary>
     /// <param name="access">Служба рішень доступу.</param>
     /// <param name="currentUser">Поточний користувач.</param>
@@ -82,7 +232,9 @@ public sealed class ListResourceGrantsHandler(
         IAccessDecisionService access, ICurrentUser currentUser, CancellationToken ct)
     {
         var userId = currentUser.UserId
-            ?? throw new AccessDeniedException("ECR-AUTH-0401", "Потрібна автентифікація.");
+            ?? throw new AccessDeniedException(
+                "ECR-AUTH-0401", "Потрібна автентифікація.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.signInRequired" });
 
         var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
 
@@ -90,7 +242,11 @@ public sealed class ListResourceGrantsHandler(
             ? userId
             : throw new AccessDeniedException(
                 "ECR-AUTH-0403", $"Потрібне право {Permission}.",
-                new Dictionary<string, object?> { ["permission"] = Permission });
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-AUTH-0403.permission",
+                    ["permission"] = Permission,
+                });
     }
 }
 
@@ -111,6 +267,23 @@ public sealed class ListResourceGrantsHandler(
 /// відповідь має бути видима одним поглядом. Часткові правки дають стан, у
 /// якому ніхто не скаже напевно, звідки саме взявся доступ, — а це рівно те,
 /// проти чого написане ФВ-6.6.
+///
+/// ⛔ Конкурентність (lost update). Доти два адміністратори, що відкрили
+/// гранти однієї ролі, зберігали по черзі — і другий мовчки затирав набір
+/// першого: заміна цілком не лишала від чужої правки нічого. Тепер клієнт
+/// шле <c>If-Match</c> з версією набору (<see cref="ResourceGrantsVersion"/>,
+/// <c>ETag</c> відповіді <c>GET</c>), і звірка йде ПІД <c>UPDLOCK</c> на рядку
+/// <c>sec.Role</c> у тій самій транзакції, що й запис, штампи й аудит: дві
+/// одночасні заміни з однієї версії — одна <c>204</c>, друга <c>409
+/// ECR-SEC-0409</c>. Без блокування обидві проходять звірку до коміту одна
+/// одної і пишуть обидві (об'єднання наборів — теж втрачена правка).
+///
+/// ⛔ Версія ОБОВ'ЯЗКОВА: без <c>If-Match</c> — <c>422 ECR-REQ-0422</c>
+/// (<c>err.ECR-REQ-0422.roleGrantsIfMatch</c>), як для одиниць, джерел і
+/// розкладів. Запит без заголовка — запит того, хто набору не читав; мовчки
+/// пропустити його означало б лишити «останній перемагає» для кожного
+/// клієнта, який просто забув заголовок. Перехідний режим (Warning у журнал)
+/// знято разом з оновленням екрана грантів (U6a).
 /// </remarks>
 public sealed class ReplaceResourceGrantsHandler(
     IUserStore users,
@@ -123,11 +296,21 @@ public sealed class ReplaceResourceGrantsHandler(
     /// <summary>Замінює набір грантів ролі.</summary>
     /// <param name="roleId">Роль.</param>
     /// <param name="grants">Новий набір; порожній — прибрати всі.</param>
+    /// <param name="ifMatch">
+    /// Значення <c>If-Match</c> — версія, з якої почалася правка (<c>ETag</c>
+    /// відповіді <c>GET</c>). Обов'язкове.
+    /// </param>
     /// <param name="ct">Токен скасування.</param>
+    /// <returns>Версія щойно збереженого набору (новий <c>ETag</c>).</returns>
     /// <exception cref="NotFoundException">Ролі немає.</exception>
-    /// <exception cref="BusinessRuleException">Дублікат ресурсу в наборі.</exception>
-    public async Task HandleAsync(
-        int roleId, IReadOnlyList<ResourceGrantDto> grants, CancellationToken ct)
+    /// <exception cref="BusinessRuleException">
+    /// Дублікат ресурсу в наборі; немає <c>If-Match</c> — <c>ECR-REQ-0422</c>.
+    /// </exception>
+    /// <exception cref="ConcurrencyConflictException">
+    /// Версія застаріла — <c>ECR-SEC-0409</c>, актуальна у <c>details.version</c>.
+    /// </exception>
+    public async Task<string> HandleAsync(
+        int roleId, IReadOnlyList<ResourceGrantDto> grants, string? ifMatch, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(grants);
 
@@ -140,7 +323,13 @@ public sealed class ReplaceResourceGrantsHandler(
             // ⛔ Родина SEC, а не ROW (`P-25`, рядок 2): суб'єкт відмови —
             // запис каталогу безпеки, а `ROW` маршрутизує на клієнті в
             // обробник помилок рядка таблиці документа.
-            ?? throw new NotFoundException(ErrorCodes.SecurityPrincipalNotFound, $"Ролі {roleId} не існує.");
+            ?? throw new NotFoundException(
+                ErrorCodes.SecurityPrincipalNotFound, $"Ролі {roleId} не існує.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-SEC-0404.roleNotFound",
+                    ["roleId"] = roleId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
 
         // ⛔ Дублікат ловиться ТУТ, а не унікальним індексом: `UQ_ResourceGrant`
         // дав би 500 «внутрішня помилка» замість пояснення, який саме ресурс
@@ -151,11 +340,86 @@ public sealed class ReplaceResourceGrantsHandler(
 
         if (duplicate is not null)
         {
+            // ⛔ Родина SEC, а не ROW (`P-25`, рядок 3, той самий прецедент,
+            // що й `UserDuplicate` вище в `ErrorCodes.cs`): суб'єкт конфлікту —
+            // запис каталогу безпеки (роль/грант), а не рядок таблиці
+            // документа. `ROW` тут раніше маршрутизував на клієнті в
+            // обробник помилок сітки документа (`DocumentGrid.tsx`), де
+            // сторінки грантів ролі немає взагалі.
             throw new BusinessRuleException(
-                "ECR-ROW-0409",
-                $"Ресурс {duplicate.Key.ResourceKind} {duplicate.Key.ResourceId} названо в наборі двічі.");
+                ErrorCodes.SecurityConflict,
+                $"Ресурс {duplicate.Key.ResourceKind} {duplicate.Key.ResourceId} названо в наборі двічі.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-SEC-0409.resourceGrantDuplicate",
+                    ["resourceKind"] = duplicate.Key.ResourceKind.ToString(),
+                    ["resourceId"] = duplicate.Key.ResourceId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
         }
 
+        var expected = Integration.ListCollectionSchedulesHandler.NormalizeETag(ifMatch)
+                       ?? throw new BusinessRuleException(
+                           ErrorCodes.RequestInvalid,
+                           "Заміна грантів ролі має нести заголовок If-Match з ETag прочитаного набору.",
+                           new Dictionary<string, object?>
+                           {
+                               ["messageKey"] = "err.ECR-REQ-0422.roleGrantsIfMatch",
+                           });
+
+        // ⛔ Звірка, заміна, штампи й аудит — ОДНА транзакція під UPDLOCK на
+        // рядку ролі (C4 для аудиту). Блокування береться ПЕРШИМ: друга
+        // одночасна заміна чекає тут, а не після звірки, і читає вже
+        // зафіксований набір першої.
+        await uow.ExecuteInTransactionAsync(
+            async token =>
+            {
+                await LockAndCheckVersionAsync(roleId, expected, token).ConfigureAwait(false);
+
+                await WriteAsync(role, roleId, grants, actorId, token).ConfigureAwait(false);
+            },
+            ct).ConfigureAwait(false);
+
+        return ResourceGrantsVersion.Of(grants);
+    }
+
+    private async Task LockAndCheckVersionAsync(int roleId, string expected, CancellationToken ct)
+    {
+        if (!await users.LockRoleForUpdateAsync(roleId, ct).ConfigureAwait(false))
+        {
+            throw new NotFoundException(
+                ErrorCodes.SecurityPrincipalNotFound, $"Ролі {roleId} не існує.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-SEC-0404.roleNotFound",
+                    ["roleId"] = roleId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
+        }
+
+        // ⚠ Читання ПІСЛЯ блокування: під RCSI знімок береться на початку
+        // оператора, тож він бачить заміну, що зафіксувалася, поки ми чекали.
+        var actual = ResourceGrantsVersion.Of(
+            await users.ListGrantsAsync(roleId, ct).ConfigureAwait(false));
+
+        if (!string.Equals(actual, expected, StringComparison.OrdinalIgnoreCase))
+        {
+            // ⚠ Ключ — загальний `err.ECR-SEC-0409` («конфлікт із налаштуваннями
+            // безпеки»): окремого ключа «гранти застаріли» в каталозі немає, а
+            // нових ключів ця правка не заводить. Актуальна версія — у details.
+            throw new ConcurrencyConflictException(
+                ErrorCodes.SecurityConflict,
+                $"Гранти ролі {roleId} змінили після того, як їх прочитали.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-SEC-0409",
+                    ["roleId"] = roleId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["version"] = actual,
+                });
+        }
+    }
+
+    private async Task WriteAsync(
+        RoleView role, int roleId, IReadOnlyList<ResourceGrantDto> grants, int actorId, CancellationToken ct)
+    {
         await users.ReplaceGrantsAsync(roleId, grants, ct).ConfigureAwait(false);
 
         // ⛔ Обов'язково і в тій самій транзакції. Профіль доступу кешується
@@ -163,11 +427,16 @@ public sealed class ReplaceResourceGrantsHandler(
         // зміна не діяла б: виданий доступ не з'являвся, знятий не зникав
         // (`A7-23`). Другий випадок — це доступ, який адміністратор уже
         // вважає закритим.
+        // ⚠ Штамп крутиться лише ПРЯМИМ носіям. Носіїв через групу AD система
+        // поіменно не знає — для них зміну ловить ревізія грантів у відбитку
+        // груп ключа профілю (`GroupsFingerprintAsync`) на наступному запиті.
         await users.RotateStampsForRoleAsync(roleId, ct).ConfigureAwait(false);
 
         // ⚠ Зміна доступу пишеться в журнал безпеки ЗАВЖДИ і повним набором:
         // «хто тепер це бачить» відновлюється лише так. Різницю не рахуємо —
         // попередній стан уже є в попередньому записі журналу.
+        // ⛔ C4: подія, гранти й штампи — одним комітом (транзакція — у
+        // виклику, разом зі звіркою версії).
         await audit.WriteSecurityEventAsync(
             new SecurityEventRecord(
                 clock.UtcNow,

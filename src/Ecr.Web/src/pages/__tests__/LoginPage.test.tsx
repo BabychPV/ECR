@@ -88,7 +88,7 @@ describe('LoginPage: каталог перекладів не завантажи
     );
 
     const alert = await screen.findByRole('alert');
-    expect(alert.textContent).toContain('Переклади інтерфейсу не завантажилися');
+    expect(alert.textContent).toContain('Interface texts could not be loaded');
 
     // ⛔ Головне заперечення: жодного позначеного ключа на екрані. До
     // виправлення тут стояли б `⟦login.title⟧`, `⟦login.submit⟧` тощо.

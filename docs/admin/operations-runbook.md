@@ -16,6 +16,7 @@ Get-Service EcrApi
 Stop-Service EcrApi
 Start-Service EcrApi
 Invoke-WebRequest http://localhost:5000/health/live -UseBasicParsing   # 200 = процес живий
+Invoke-WebRequest http://localhost:5000/health/ready -UseBasicParsing  # 200 = готовий; 503 = див. п. 3.1
 ```
 
 Порт задає `ASPNETCORE_URLS` у середовищі служби (дефолт `-AppPort 5000`).
@@ -29,6 +30,26 @@ Invoke-WebRequest http://localhost:5000/health/live -UseBasicParsing   # 200 = �
 
 Якщо з цих кроків падає будь-який, служба не стартує. Причину шукайте в лозі
 (п. 3.2) і в журналі подій Windows.
+
+### 1.1. Одна служба кожної ролі на базу на одному хості
+
+⚠ На **одному** хості не запускайте одночасно дві служби ECR **однієї ролі**
+(дві Api, або IIS-пул із перекритим рециклом, overlapped recycle; чи два
+воркери) на **ту саму** базу. Старт другого процесу закриває як покинуті всі
+задачі `Running`/`Queued` попереднього процесу цієї машини й цієї ролі — навіть
+якщо той ще живий: власника задачі визначає `itg.JobProgress.InstanceId` =
+`{MachineName}/{роль}/{GUID процесу}` (роль — `api` або `wrk`; ім'я машини
+до 27 символів — як є, довше — перші 18 символів, `~` і 8 hex SHA-256 повного
+імені, тож хости ферми зі спільним початком імені не збігаються; разом рівно
+64 — межа стовпця), а на старті
+закриваються всі рядки з тим самим `MachineName`, тією самою роллю й чужим GUID.
+Дві служби на **різні** бази — безпечно.
+
+Api й воркер на **одному** хості — різні ролі й задачі одне одного **не**
+закривають (P3, ФВ-9.8). Рядки старого формату `{MachineName}/{GUID}` (до P3)
+вважаються рядками Api: їх закриває перший старт нової Api на цій машині.
+Рядки черги задач у базі (`Lane` заданий) старт не чіпає взагалі — їх
+повертає в чергу або закриває лише прострочена оренда.
 
 ## 2. Конфігурація
 
@@ -56,7 +77,7 @@ Invoke-WebRequest http://localhost:5000/health/live -UseBasicParsing   # 200 = �
 |---|---|---|
 | `ConnectionStrings:Ecr` | порожньо | рядок підключення до SQL Server. **Секрет**: `ECR_ConnectionStrings__Ecr` |
 | `Schema:StartupMode` | `Validate` | `Validate` — не стартувати, якщо є незастосовані міграції EF. `Migrate` — застосувати їх на старті |
-| `Database:EditionMode` | `Auto` | режим редакції SQL Server (Express / повна). `Auto` — визначити самостійно |
+| `Database:EditionMode` | `Auto` | режим редакції SQL Server (`Standard` / `Enterprise`). `Auto` — визначити самостійно на старті. `deploy-ecr.ps1` записує визначене при установці значення в `ECR_Database__EditionMode`, якщо його не задано явно (`docs/build/11-install-guide.md` §2.5) |
 | `Database:CommandTimeoutSeconds` | 60 | таймаут команди SQL, с |
 | `Database:BulkBatchSize` | 50000 | розмір пачки масового запису |
 | `Cache:SchemaName` / `Cache:TableName` | `dbo` / `Cache` | таблиця розподіленого кешу |
@@ -67,7 +88,8 @@ Invoke-WebRequest http://localhost:5000/health/live -UseBasicParsing   # 200 = �
 | `Auth:RequireHttps` | `true` | cookie лише через HTTPS |
 | `Auth:EnableNegotiate` | `true` | вхід Windows (Negotiate) |
 | `Auth:StampCacheSeconds` | 5 | як швидко блокування чи зміна ролей діє на відкриті сесії, с |
-| `Auth:DataProtection:CertificateThumbprint` | немає | відбиток сертифіката з `LocalMachine\My` для захисту ключів Data Protection (п. 6.2) |
+| `Auth:DataProtection:CertificateThumbprint` | немає | відбиток сертифіката з `LocalMachine\My` для захисту ключів Data Protection (п. 6.2). ⛔ **З 2026-09-29 (S11) у Production обов'язковий**: без нього служба не стартує. Один і той самий сертифікат (із закритим ключем, з правом читання для облікового запису служби) — на всіх вузлах |
+| `Auth:DataProtection:AllowUnprotectedKeys` | `false` | лише для одноразових стендів (`smoke.ps1`, `e2e-stand.ps1`, `setup-dev-db.ps1`): дозволяє старт у Production без сертифіката. На майданчику не вмикати: старт пише Critical у журнал подій (джерело `ECR`), `db` — Degraded з причиною. `deploy-ecr.ps1` його не ставить ніколи |
 | `Security:RateLimit:LoginPermitPerMinute` | 60 | спроб входу за хвилину |
 | `Security:RateLimit:TrustForwardedFor` | `false` | брати IP із `X-Forwarded-For`. Вмикати лише за довіреним проксі |
 | `Security:RateLimit:SearchPermit` / `SearchWindowSeconds` | 30 / 10 | обмеження пошуку |
@@ -80,19 +102,61 @@ Invoke-WebRequest http://localhost:5000/health/live -UseBasicParsing   # 200 = �
 | `Smtp:UseStartTls` | (`true`) | |
 | `Smtp:User`, `Smtp:SecretName` | немає | автентифікація. Пароль — секрет `Secrets:<SecretName>` |
 | `Secrets:<ім'я>` | немає | секрети джерел і каналів. **Лише змінні оточення** |
-| `PiSqlClient:CatalogQuery` / `TemplateQuery` / `ValueQuery` | немає (вбудовані) | перевизначення запитів адаптера PI SQL Client |
+| `PiSqlClient:CatalogQuery` / `TemplateQuery` / `ValueQuery` | немає (вбудовані) | перевизначення запитів адаптера PI SQL Client. `InterpolatedQuery`, `SummaryQuery`, `CurrentValueQuery`, `ElementListQuery`, `EventQuery`, `EventTemplateQuery` — без вбудованого тексту |
+| `PiSqlClient:<код джерела>:<Query>` | немає | запит для ОДНОГО джерела (інша база AF на тому ж сервері), перекриває спільний `PiSqlClient:<Query>` — для будь-якого із запитів вище; напр. `PiSqlClient:AIR:ElementListQuery`. ⚠ Усі `PiSqlClient:*` адаптер читає через канал секретів, тобто фізично це `Secrets:PiSqlClient:…` — змінна `ECR_Secrets__PiSqlClient__AIR__ElementListQuery` |
 | `Sql:CatalogQuery` / `Sql:ValueQuery` | немає (вбудовані) | те саме для SQL-джерела |
 | `Bootstrap:Password` | немає | запасний пароль `bootstrap`. Основний шлях — файл `bootstrap.secret` |
-| `Telemetry:ServiceName` | `ecr-api` | ім'я служби в телеметрії |
-| `Telemetry:OtlpEndpoint` | порожньо | OTLP-колектор. Порожньо — не експортувати |
+| `Telemetry:Enabled` | `false` | експорт метрик по OTLP (п. 3.4). Вимкнено — не реєструється нічого з OpenTelemetry, навантаження нуль. Вмикається лише рядком `true` |
+| `Telemetry:OtlpEndpoint` | порожньо | адреса OTLP-колектора, напр. `http://collector:4317` (gRPC) чи `http://collector:4318` (HTTP). **Обов'язкова**, коли `Telemetry:Enabled=true`: без неї або з недійсною адресою служба не стартує. Задана при вимкненому експорті — ігнорується, старт пише попередження |
+| `Telemetry:OtlpProtocol` | `Grpc` | `Grpc` (порт колектора 4317) або `HttpProtobuf` (4318). Інше значення зупиняє старт |
+| `Telemetry:ExportIntervalSeconds` | 60 | як часто відсилати метрики, с. Не менше 5 |
+| `Telemetry:ServiceName` | `ecr-api` | `service.name` у ресурсі OTLP — під цим іменем служба видна в колекторі |
 | `Logging:LogLevel:*` | `Information`, `Microsoft.AspNetCore` = `Warning` | рівні логування |
 | `Logging:File:Directory` | `%ProgramData%\ECR\logs` | тека логів. Порожньо — без файлового логу |
 | `Logging:File:RetainedFiles` | 30 | скільки файлів зберігати |
 | `Logging:File:FileSizeLimitMb` | 100 | розмір файлу, після якого починається новий |
+| `Logging:File:Json` | `true` | поруч писати `ecr-yyyyMMdd.json` — рядок JSON на запис (п. 3.2) |
 | `AllowedHosts` | `*` | |
 
-⚠ **потрібне рішення замовника:** SMTP, OTLP-колектор, сертифікат для Data
+Числові, булеві ключі й ключі з переліком значень (`Schema:StartupMode`,
+`Database:EditionMode`) перевіряються на старті: недійсне значення зупиняє
+службу з назвою ключа (п. 5), а не мовчки замінюється дефолтом. Порожнє
+значення — «не задано», тобто дефолт.
+
+⚠ **потрібне рішення замовника:** SMTP, OTLP-колектор (і чи вмикати експорт метрик), сертифікат для Data
 Protection і HTTPS, адреси джерел PI. Дефолти коду — «вимкнено» або порожньо.
+
+### 2.2. SQL-джерело: місцевий час у колонці `Ts` без поясу
+
+У налаштуваннях SQL-джерела немає поля часового поясу (`ext.DataSource`), і
+текст запиту значень (`Sql:ValueQuery`) адаптер бере як є. Колонку `Ts` він
+читає так: `datetimeoffset` **конвертується** в UTC; `datetime`, `datetime2`,
+`smalldatetime`, `date` (значення без поясу) **вважаються** UTC без жодної
+конвертації. Якщо джерело фактично пише місцевий час (наприклад, Атирау,
+UTC+5), увесь ряд буде зсунутий на зсув поясу — дані самі по собі виглядають
+правильними, але зміщеними в часі.
+
+Лагодиться це в тексті запиту `Sql:ValueQuery`: переведіть колонку `Ts` через
+`AT TIME ZONE` у `datetimeoffset` — тоді адаптер конвертує її в UTC коректно.
+Ім'я поясу Windows перевіряйте по `sys.time_zone_info`; для Атирау (UTC+5) це
+`West Asia Standard Time`:
+
+```sql
+SELECT
+    [Ts] AT TIME ZONE 'West Asia Standard Time' AS [Ts],
+    [Val], [Uom], [Quality]
+FROM dbo.Readings
+WHERE [EntityPath] = @path AND [Ts] >= @from AND [Ts] < @to
+ORDER BY [Ts];
+```
+
+Пояс у прикладі — лише ілюстрація: у якому поясі пишуть мітки ваші джерела,
+треба з'ясувати в їхніх власників; підставте свій пояс (список імен —
+`SELECT name, current_utc_offset FROM sys.time_zone_info`).
+
+⛔ `ORDER BY [Ts]` у тексті запиту обов'язковий незалежно від поясу: мітки
+мають іти неспадно, інакше адаптер відмовляє помилкою `ECR-INT-0422`
+(`timestampsOutOfOrder`) замість мовчазного сортування в пам'яті.
 
 ## 3. Моніторинг і логи
 
@@ -121,6 +185,13 @@ HTTP-код: `Healthy` і `Degraded` дають **200**, `Unhealthy` — **503**
   стартує. Перевіряйте права облікового запису служби.
 - Формат рядка:
   `2026-09-22 10:00:00.000 +03:00 [ERR] [<CorrelationId>] [uid:<UserId>] [<машина>] <джерело>: <повідомлення>`
+- Поруч — `ecr-yyyyMMdd.json` (вимикається `Logging:File:Json=false`): той самий
+  потік записів, рядок JSON на запис, для SIEM. Поля: `@t` (UTC), `@l` (рівень),
+  `@mt` (шаблон), `@m` (повідомлення), `@x` (виняток), далі властивості запису —
+  `CorrelationId`, `UserId`, `MachineName`, `SourceContext`, `Code` (код помилки
+  відмови, напр. `ECR-AUTH-…`). Ротація й строк зберігання — ті самі.
+- Журнал подій Windows: канал `Application`, джерело **`ECR`** (його реєструє MSI),
+  рівень `Warning` і вище. Сюди ж лягає недійсна конфігурація на старті.
 
 ### 3.3. Як знайти запит або задачу
 
@@ -136,6 +207,57 @@ Select-String -Path "$env:ProgramData\ECR\logs\ecr-*.log" -Pattern '<correlation
 Фонова задача: стан і помилку можна отримати через `GET /api/v1/jobs/{jobId}`
 (`#` кодується як `%23`) або з таблиці `itg.JobProgress`. Далі шукайте
 `jobId` у лозі.
+
+### 3.4. Метрики
+
+Служба пише власні метрики в лічильник `Meter "Ecr"` (`ecr.cells.read`,
+`ecr.cells.write`, `ecr.formula.evaluate`, `ecr.job.duration`,
+`ecr.job.start_latency`, `ecr.conflict.count`, `ecr.consistency.issues`,
+`ecr.budget.count` тощо — перелік у `EcrMetrics.cs`). Прочитати їх можна двома
+способами.
+
+**На сервері, без налаштувань** — `dotnet-counters`:
+
+```powershell
+dotnet-counters monitor --counters Ecr -n Ecr.Api
+```
+
+**Експорт по OTLP у колектор** (Prometheus, Grafana, Azure Monitor — через
+OpenTelemetry Collector). За замовчуванням **вимкнено**: вимкнений експорт не
+реєструє нічого з OpenTelemetry й не навантажує сервер. Увімкнути — у
+`%ProgramData%\ECR\config\appsettings.Production.json`:
+
+```json
+{
+  "Telemetry": {
+    "Enabled": true,
+    "OtlpEndpoint": "http://collector:4317",
+    "OtlpProtocol": "Grpc",
+    "ExportIntervalSeconds": 60
+  }
+}
+```
+
+або змінними оточення служби `ECR_Telemetry__Enabled=true`,
+`ECR_Telemetry__OtlpEndpoint=http://collector:4317`, далі `Restart-Service EcrApi`.
+
+- Протокол — `Telemetry:OtlpProtocol`: **`Grpc`** за замовчуванням (порт колектора
+  4317) або `HttpProtobuf` (4318). Для `HttpProtobuf` адреса без шляху
+  (`http://collector:4318`) доповнюється до `…/v1/metrics`; адреса зі шляхом
+  береться як є. Експортуються лише метрики
+  `Meter "Ecr"`; трас, логів і метрик ASP.NET/HTTP/рантайму через OTLP немає.
+- `Enabled=true` без `OtlpEndpoint` або з адресою не `http://`/`https://` —
+  служба **не стартує**, причина з назвою ключа — у журналі подій `ECR` і в
+  `ecr-*.log` (п. 3.2, п. 5).
+- `OtlpEndpoint` заданий, а `Enabled` ≠ `true` — служба стартує, у журналі
+  попередження «експорт метрик OTLP вимкнено, значення ігнорується».
+
+**Як перевірити, що дійшло:** через `ExportIntervalSeconds` після старту в
+колекторі з'являються метрики `ecr.*` з ресурсом `service.name` =
+`Telemetry:ServiceName` (типово `ecr-api`). Для колектора з
+`debug`-експортером — рядки `ecr.` у його виводі. Колектор недоступний —
+служба працює далі, експорт за цей інтервал може загубитися (на диск служба
+метрики не накопичує).
 
 ## 4. Розклади
 
@@ -166,13 +288,18 @@ SQL Server Agent (`14-agent-jobs.sql`) ставиться лише з `deploy-ec
 |---|---|---|
 | `/health/ready` 503, `db` Unhealthy | БД недоступна або змінився рядок підключення | перевірити SQL Server і `ECR_ConnectionStrings__Ecr` у реєстрі служби, перезапустити `EcrApi` |
 | служба не стартує, у лозі незастосовані міграції | оновили код без схеми, а `StartupMode=Validate` | застосувати схему (п. 8) і запустити службу |
+| служба не стартує: «Production: ключі кільця DataProtection … не захищені» | не задано `Auth:DataProtection:CertificateThumbprint` (S11) | встановити сертифікат із закритим ключем у `LocalMachine\My` на кожному вузлі, дати права облікового запису служби, задати `ECR_Auth__DataProtection__CertificateThumbprint` (`deploy-ecr.ps1 -DataProtectionThumbprint`). Старі відкриті ключі в таблиці лишаються чинними до кінця строку — після ввімкнення захисту ротація, п. 6.4 |
 | служба не стартує після зміни відбитка | немає сертифіката `Auth:DataProtection:CertificateThumbprint` у `LocalMachine\My` | встановити сертифікат із закритим ключем і дати права облікового запису служби |
 | `db` Degraded: менше 2 партицій попереду | не працює Agent-задача (Express) | `EXEC arc.usp_EnsurePartitions @MonthsAhead = 6;` або скрипт `GET /api/v1/health/partitions/script` |
-| `db` Unhealthy: RCSI | базу відновили або створили без `06-rcsi.sql` | виконати `06-rcsi.sql` |
+| `db` Unhealthy: RCSI | базу відновили або створили без `06-rcsi.sql` | виконати `06-rcsi.sql`. Перезапуск не потрібен: перевірка читає RCSI щоразу, а не з проби старту |
+| служба не стартує: «Недійсна конфігурація — служба не стартує» | значення ключа не того типу чи поза межами (`"60s"` замість `60`, друкарська помилка в `Database:EditionMode`) | виправити названий ключ у `appsettings.Production.json` або в `ECR_…` змінній служби. Той самий текст — у журналі подій (джерело `ECR`) і в лозі |
 | `sources` Unhealthy | PI/SQL-джерело недоступне або змінився секрет | стан на `/admin/sources`, помилка в `GET /api/v1/jobs/{id}`, секрет `ECR_Secrets__<ім'я>` |
-| `jobs` Unhealthy | планувальник зупинився | лог за `Quartz`, перезапуск служби |
+| `jobs` Degraded, `schedulerStopped: true` (✎ 2026-09-28, U7: було Unhealthy; `/health/ready` більше не 503 — тло не виводить інстанс із ротації) | планувальник зупинився: API працює, фонові задачі — ні | лог за `Quartz`, перезапуск служби |
+| `jobs` Degraded, `staleJobs` / `cleanupStalled: true` | задачі без биття серця (процес зник); `cleanupStalled` — прибирання їх не закриває | `/admin/jobs`; якщо `cleanupStalled` тримається — лог за `RecurringScheduleService` (прохід прибирання раз на хвилину) |
 | розгортання: `01-filegroups.sql`, `Msg 5149 … error 112` | немає місця на диску даних | звільнити місце. Файлові групи займають ~14 ГБ на повній редакції (п. 6.1) |
 | збірка чи оновлення: `The file is locked by: "Ecr.Api (<pid>)"` | DLL тримає запущена служба | `Stop-Service EcrApi`, потім оновлення |
+| оновлення: `Msg 50148 … Передперевірка D148` на `migration.sql` | у базі до 2026-09-20 є значення з модулем ≥ 1e12 | п. 8.1 |
+| оновлення: `Msg 50301 … Передперевірка U1` на `migration.sql` | колонка шаблону чи поле довідника посилається на видалену одиницю | п. 8.2 |
 | `404` на `GET /api/v1/jobs/…` | `#` в ідентифікаторі не закодовано | кодувати `%23` |
 | пошта не йде | не задано `Smtp:Host`/`Smtp:From` | задати й перевірити `POST /api/v1/notifications/channels/{id}/test` |
 
@@ -183,7 +310,7 @@ SQL Server Agent (`14-agent-jobs.sql`) ставиться лише з `deploy-ec
 | Що | Де | Чому |
 |---|---|---|
 | **база ECR** (усі файлові групи: `PRIMARY`, `DATA_HOT`, `DATA_ARCHIVE`, `AUDIT`, `INDEXES` і журнал) | SQL Server | усі дані, аудит, архів. Бекапити **повною базою**. Часткове відновлення файлових груп не перевірялось |
-| **ключі Data Protection** | таблиця `dbo.DataProtectionKeys` **в тій самій БД** | потрапляють у бекап бази. Без них недійсні всі сесії й **не розшифровуються секрети каналів сповіщень** |
+| **ключі Data Protection** | таблиця `sec.DataProtectionKey` **в тій самій БД** | потрапляють у бекап бази. Без них недійсні всі сесії й **не розшифровуються секрети каналів сповіщень** |
 | **сертифікат** `Auth:DataProtection:CertificateThumbprint` (з закритим ключем) | `LocalMachine\My` | якщо ключі захищені сертифікатом, без нього бекап бази не відкриє їх. Експортуйте PFX окремо |
 | конфіг майданчика | `%ProgramData%\ECR\config\appsettings.Production.json` | налаштування майданчика |
 | змінні оточення служби | `HKLM:\SYSTEM\CurrentControlSet\Services\EcrApi\Environment` | рядок підключення, секрети. Зберігайте в сховищі секретів, не поруч із бекапом |
@@ -238,6 +365,60 @@ BACKUP LOG      [Ecr] TO DISK = N'<шлях>\Ecr_log.trn'  WITH CHECKSUM, COMPRE
 ⚠ Процедура відновлення **на стенді не перевірялась**. Перевірте її до
 приймання.
 
+### 6.4. Ротація відкритих ключів Data Protection (S11)
+
+**Коли:** один раз — після першого розгортання з сертифікатом
+(`deploy-ecr.ps1 -DataProtectionThumbprint`) на майданчику, де служба
+раніше працювала без нього.
+
+**Чому:** з сертифікатом **нові** ключі кільця пишуться в
+`sec.DataProtectionKey` зашифрованими, але **старі**, записані відкрито,
+застосунок і далі читає й приймає до кінця їхнього строку (типово 90 днів).
+Доки старий ключ у таблиці — будь-хто з доступом на читання до бази або до
+будь-якого бекапу, зробленого раніше, може підробити cookie сеансу будь-якого
+користувача.
+
+⛔ **Попередження — наслідки для користувачів:**
+
+- **усі користувачі вийдуть із системи**: сеанси, підписані старими ключами,
+  стануть недійсними;
+- **секрети каналів сповіщень доведеться ввести наново**: вони зашифровані
+  тими самими ключами і після ротації не розшифровуються. Перелік каналів —
+  `/admin/notifications`; перед ротацією підготуйте їхні секрети.
+
+Узгодьте вікно з користувачами.
+
+**Кроки** (на всіх вузлах одночасно):
+
+1. Переконатися, що служба вже стартувала з сертифікатом: у реєстрі служби є
+   `ECR_Auth__DataProtection__CertificateThumbprint`, `/health/db` не містить
+   обмеження «Session keys are stored unencrypted».
+2. Повний бекап бази (п. 6.2).
+3. Зупинити службу на **кожному** вузлі: `Stop-Service EcrApi`.
+4. Подивитися, які ключі відкриті:
+
+   ```sql
+   SELECT Id, FriendlyName FROM sec.DataProtectionKey
+   WHERE Xml NOT LIKE N'%encryptedSecret%';
+   ```
+
+5. Видалити відкриті ключі:
+
+   ```sql
+   DELETE FROM sec.DataProtectionKey WHERE Xml NOT LIKE N'%encryptedSecret%';
+   ```
+
+   Якщо після цього в таблиці не лишилося жодного ключа — це нормально:
+   застосунок створить новий, уже зашифрований, під час першого старту.
+6. `Start-Service EcrApi` на всіх вузлах, потім `/health/ready` і `/health/db`.
+7. Увійти в систему й ввести наново секрети каналів сповіщень
+   (`/admin/notifications`, перевірка — `POST /api/v1/notifications/channels/{id}/test`).
+8. **Бекапи, зроблені до кроку 5, містять відкриті ключі.** Обмежте доступ до
+   них або знищіть їх відповідно до політики зберігання: для них ротація
+   нічого не змінює.
+
+⚠ Процедура **на стенді не перевірялась**. Перевірте її до приймання.
+
 ## 7. Архівація років
 
 `arc.usp_ArchiveYear @ProjectId, @FromPeriodKey, @ToPeriodKey, @BatchSize = 500000`
@@ -251,6 +432,59 @@ BACKUP LOG      [Ecr] TO DISK = N'<шлях>\Ecr_log.trn'  WITH CHECKSUM, COMPRE
 | 50014 | прогалина в діапазоні |
 
 Повернення: `arc.usp_RestoreYear` (50011 — не збіглася кількість рядків).
+
+### 7.1. Що робить `usp_RestoreYear`
+
+- Повертає період **цілком — для всіх проєктів діапазону**, а не лише для
+  `@ProjectId`. Журнал `itg.ArchiveRun` отримує запис `FromArchive` на
+  **кожен** повернутий проєкт; у сусідніх — примітка, заради якого проєкту
+  запускали. Фільтра за проєктом немає навмисно: наступна архівація очищає
+  `arc.*` на весь діапазон і знищила б архів сусіда.
+- Працює **однією транзакцією**. Збій (зокрема 50011) — відкат: у гарячій
+  схемі нічого не з'являється, архів лишається на місці, запис журналу —
+  `Failed` із текстом помилки; для 50011 додатково знахідка
+  `RESTORE_CHECKSUM` на `/admin/consistency`. Виправте причину й запустіть
+  процедуру ще раз.
+- Після успішної звірки (кількість екземплярів, рядків, комірок і сума)
+  **прибирає `arc.*` діапазону**. Тому повтор безпечний: другий виклик
+  бачить порожній архів і завершується `Completed` з приміткою «Архів
+  діапазону порожній: період уже повернуто або не архівувався».
+
+### 7.2. Позначка «осиротілий рядок» у роках, заархівованих до D4
+
+До виправлення D4 (коміт `21d7c4f1`) архів не зберігав позначку
+`IsOrphaned` (рядок посилається на запис довідника, нечинний у своєму
+періоді; такі рядки блокують подання, `ECR-SUB-4221`). Колонку
+`arc.TableRow.IsOrphaned` додає `12-archive-tables.sql` зі значенням **0**
+для всього, що вже лежить в архіві. Роки, заархівовані **після**
+оновлення, відновлюються зі справжньою позначкою.
+
+Для **старого** року це означає: після `usp_RestoreYear` усі рядки мають
+`IsOrphaned = 0`, і осиротілі рядки **не блокують подання**, доки позначку
+не перерахують.
+
+Хто її ставить — `IOrphanScanner`, його викликають дві задачі:
+
+- нічні `OrphanScanJob` (`orphan-scan`) і `ConsistencyCheckJob`
+  (`consistency-check`), щоночі о 02:15 (п. 4);
+- вручну — `POST /api/v1/consistency/run` (право `System.RunJob`) або
+  кнопка запуску на `/admin/consistency`: ставить `ConsistencyCheckJob`,
+  яка серед іншого робить той самий перерахунок.
+
+⚠ Перерахунок чіпає лише періоди в стані **Open** або **Grace**. Старий
+рік зазвичай `Closed` — там позначка не ставиться, але й подати в
+закритий період нічого не можна, тож ризику немає. Ризик з'являється,
+коли такий період **перевідкривають** (`Reopen` → `Grace`): тоді
+
+1. після перевідкриття запустіть перевірку вручну (або дочекайтесь
+   нічного прогону) **до того**, як користувачі почнуть подавати;
+2. перевірте в журналі задачі `orphan-scan`/`consistency-check`, що обхід
+   **замкнувся** (параметр `cycles`, повідомлення «обхід набору
+   ЗАМКНУВСЯ»): прогін має бюджет рядків і часу, і великий рік може
+   потребувати кількох прогонів.
+
+Незалежно від позначки `ConsistencyCheckJob` записує знахідки
+`ORPHANED_CELL` і для закритих періодів — їх видно на `/admin/consistency`.
 
 ⛔ Архівація **не замінює** резервного копіювання (`08-nfr.md`). Перед архівацією
 зробіть повний бекап.
@@ -272,6 +506,29 @@ BACKUP LOG      [Ecr] TO DISK = N'<шлях>\Ecr_log.trn'  WITH CHECKSUM, COMPRE
 
 `09-seed.sql` виконує застосунок на старті. Скрипти запускати не треба.
 
+⛔ **Перед оновленням на цю версію (S11, 2026-09-29) — один раз.** Служба в
+Production більше не стартує, доки ключі кільця Data Protection не захищені
+сертифікатом (п. 2.1). До оновлення:
+
+1. Імпортувати **один** сертифікат **із закритим ключем** (PFX) у
+   `Cert:\LocalMachine\My` на **кожному** вузлі — той самий на всіх.
+2. Дати обліковому запису служби право **читати закритий ключ**
+   (`certlm.msc` → сертифікат → «Усі завдання» → «Керування закритими
+   ключами…» → «Читання»).
+3. Передати відбиток: `deploy-ecr.ps1 -DataProtectionThumbprint '<відбиток>'`
+   або крок «Сертифікат Data Protection» у майстрі `tools/Ecr.Setup`.
+
+`deploy-ecr.ps1` без відбитка (або з відбитком сертифіката, якого немає чи
+який без закритого ключа) зупиняється на кроці 1/7 «передумови» — **до**
+схеми й MSI, тож працююча служба не зупиняється. Ризик лише в **ручному
+оновленні MSI** без `deploy-ecr.ps1` і без відбитка в реєстрі служби: нова
+версія встановиться, а служба не стартне (п. 5, «ключі кільця
+DataProtection … не захищені»). ⚠ Згоду
+`Auth:DataProtection:AllowUnprotectedKeys` на майданчику **не вмикати**: ключі
+лишаються відкритими в базі й бекапах, старт пише `Critical`, `db` постійно
+`Degraded` — вона лише для одноразових стендів. Після першого старту з
+сертифікатом — ротація старих відкритих ключів, п. 6.4.
+
 Процедура:
 
 1. Повний бекап (п. 6.2).
@@ -279,24 +536,343 @@ BACKUP LOG      [Ecr] TO DISK = N'<шлях>\Ecr_log.trn'  WITH CHECKSUM, COMPRE
 
    ```powershell
    powershell -ExecutionPolicy Bypass -File tools\deploy-ecr.ps1 `
-     -SqlInstance <сервер> -Database <база> -MsiPath <шлях до .msi> -WhatIf
+     -SqlInstance <сервер> -Database <база> -MsiPath <шлях до .msi> `
+     -DataProtectionThumbprint <відбиток> -WhatIf
    ```
 
    Спершу запустіть із `-WhatIf`, потім без нього. Кроки скрипта: передумови,
    схема, MSI (`msiexec /qn`), змінні служби, конфіг (лише якщо ще заглушка),
-   перезапуск служби, перевірка `GET /health/live`.
-3. Перевірити `/health/ready` і `/health/db`.
+   перезапуск служби, перевірка `GET /health/live`, потім очікування
+   `GET /health/ready` до `Healthy`/`Degraded` (не довше `-ReadyTimeoutSeconds`,
+   дефолт 180 с). Перевірки, що не `Healthy`, скрипт друкує. `Unhealthy` лише
+   через `sources` — попередження (зовнішнє джерело, ручне введення працює);
+   будь-яка інша `Unhealthy` після тайм-ауту — розгортання провалене, «Готово»
+   не друкується.
+3. Перевірити `/health/db`.
 
 Графічний майстер `tools/Ecr.Setup` запускає той самий `deploy-ecr.ps1`.
+
+### 8.1. Помилка 50148: «Передперевірка D148»
+
+**Кого стосується.** Лише бази, розгорнуті до 2026-09-20, тобто до міграції
+`20260920223149_D148CellValueScale16`. Нові бази й бази, де D148 уже
+застосовано, цю перевірку не проходять узагалі.
+
+**Що сталося.** Три міграції `D148*Scale16` переводять десять стовпців із
+`decimal(28,10)` у `decimal(28,16)`. Ціла частина на цьому кроці скорочується з
+18 розрядів до 12. Наступні `D148*Precision34` повертають 18 розрядів
+(`decimal(34,16)`). Тобто межа 1e12 **не є межею домену**: кінцевий тип
+вміщує значення до 1e18. Це обмеження лише проміжного кроку. Приклад такого
+значення — 1 ТДж у джоулях.
+
+Без перевірки SQL Server зупинив би `ALTER COLUMN` помилкою
+`Msg 8115 Arithmetic overflow`. Вона не називає ні стовпця, ні рядків.
+Перевірка йде першою командою в кожній із трьох міграцій, тобто **до зміни
+схеми**. Вона перелічує стовпці, кількість рядків і максимум за модулем:
+
+```
+Msg 50148 … Передперевірка D148: оновлення зупинено ДО зміни схеми. …
+Поза межею:
+  doc.CellValue.ValueNumeric: рядків 1, max |x| = 1000000000000.0000000000
+Схему й дані не змінено. …
+```
+
+Після цієї помилки `deploy-ecr.ps1` зупиняється на кроці 2/7. MSI не
+ставиться, стара версія лишається робочою, схема й дані — без змін.
+
+**Що робити.** Суть процедури: тимчасово відкласти ці значення, пройти всю
+серію D148 і повернути їх. Служба весь цей час зупинена.
+
+1. `Stop-Service EcrApi`, повний бекап (п. 6.2).
+2. Для **кожного** стовпця з повідомлення відкласти значення в таблицю
+   `dbo.D148Hold_<схема>_<таблиця>` за первинним ключем і поставити 0.
+   Приклад для `doc.CellValue`:
+
+   ```sql
+   SET XACT_ABORT ON;
+   BEGIN TRANSACTION;
+   SELECT PeriodKey, TableRowId, ColumnDefId, ValueNumeric AS OldValue
+   INTO dbo.D148Hold_doc_CellValue
+   FROM doc.CellValue
+   WHERE ValueNumeric >= 1000000000000 OR ValueNumeric <= -1000000000000;
+
+   UPDATE t SET ValueNumeric = 0
+   FROM doc.CellValue AS t
+   JOIN dbo.D148Hold_doc_CellValue AS h
+     ON h.PeriodKey = t.PeriodKey AND h.TableRowId = t.TableRowId AND h.ColumnDefId = t.ColumnDefId;
+   COMMIT;
+   ```
+
+   ⚠ Межу пишіть цілим літералом `1000000000000`, не `1e12`. Літерал `1e12` у
+   T-SQL має тип `float`, і значення біля межі (`999999999999.9999999999`)
+   округлюються до нього, тобто відкладаються зайві рядки.
+
+   Ключі решти стовпців:
+
+   | Стовпець | Первинний ключ |
+   |---|---|
+   | `doc.CellValue.ValueNumeric` | `PeriodKey, TableRowId, ColumnDefId` |
+   | `doc.DocumentIndexValue.ValueNumeric` | `Id` |
+   | `rpt.ReportRow.ValueNumeric` | `SnapshotId, RowNo, ColumnCode` |
+   | `ext.RawDataPoint.ValueNumeric` | `Id` |
+   | `dic.RegistryValue.ValueNumeric` | `Id` |
+   | `calc.CalculationResult.Value` | `PeriodKey, Id` |
+   | `calc.CalculationInput.Value` | `PeriodKey, Id` |
+   | `calc.CalculationStep.Value` | `PeriodKey, Id` |
+   | `calc.MethodologyConstant.Value` | `Id` |
+   | `calc.TestCase.Tolerance` | `Id` |
+
+3. Застосувати `01-filegroups.sql`, `02-partitions.sql` і `migration.sql`.
+   Прапорці ті самі, що в `deploy-ecr.ps1`:
+   `sqlcmd -S <сервер> -E -C -b -I -d <база> -i <файл>`. Тепер `migration.sql`
+   проходить до кінця, стовпці стають `decimal(34,16)`.
+4. Повернути значення за ключем:
+   `UPDATE t SET ValueNumeric = h.OldValue FROM … JOIN dbo.D148Hold_… AS h ON …`.
+   Потім перевірити, що розбіжностей немає:
+   `SELECT COUNT(*) … WHERE t.ValueNumeric <> h.OldValue` → `0`.
+5. Видалити таблиці `dbo.D148Hold_*`.
+6. Звичайне розгортання (п. 8, крок 2). `migration.sql` ідемпотентний, тож
+   застосовані міграції він пропускає.
+
+✎ 2026-09-28: процедуру перевірено на стенді для `doc.CellValue` (`1e12`) і
+`calc.CalculationResult` (`-2.5e13`, `NOT NULL`). Шлях: `sqlcmd` з прапорцями
+`deploy-ecr.ps1` → 50148 → відкладення → `migration.sql` → повернення. Значення
+повернулися без змін, тип `34,16`, розбіжностей 0. Решту восьми стовпців
+вручну не проходили. Передперевірку для всіх десяти тримає тест
+`D148ScalePrecheckTests`.
+
+⛔ Не редагуйте міграції й не видаляйте рядки, щоб «пройти» перевірку. Це
+справжні дані, і кінцевий тип їх вміщує.
+
+### 8.2. Міграція U1: помилка 50301 «Передперевірка U1» і вікно для індексу
+
+**Кого стосується.** Бази, розгорнуті до міграції
+`20260928224103_U1UnitForeignKeys`. Нові бази цю перевірку проходять порожньою.
+
+**Що робить міграція.** Три речі:
+
+- `FK_ColumnDef_Unit`: одиниця колонки шаблону (`cfg.ColumnDef.UnitId`) → `uom.Unit`;
+- `FK_RegField_Unit`: одиниця поля довідника (`cfg.RegistryFieldDef.UnitId`) → `uom.Unit`;
+- індекс `IX_CalculationResult_UnitId` під наявний `FK_CRes_Unit`.
+
+До U1 ці дві одиниці ключа не мали. Тому видалення одиниці могло лишити колонку
+чи поле з номером одиниці, якої вже немає. Такий рядок SQL Server відхилив би на
+`ADD CONSTRAINT` помилкою `547` без переліку. Перевірка йде **першою командою
+міграції, до зміни схеми**, і перелічує все, що висить:
+
+```
+Msg 50301 … Передперевірка U1: оновлення зупинено ДО зміни схеми. …
+Висячі посилання:
+  cfg.ColumnDef.UnitId: рядків 2; одиниць немає: 57, 58; перші рядки: Id 1204 CO2 (TableDefId 88, UnitId 57), …
+  cfg.RegistryFieldDef.UnitId: рядків 1; одиниць немає: 57; перші рядки: Id 31 LIMIT (RegistryDefId 4, UnitId 57)
+Схему й дані не змінено. …
+```
+
+Показано до десяти одиниць і до десяти рядків на таблицю. Повний перелік дає
+запит із кроку 2. Після помилки `deploy-ecr.ps1` зупиняється на кроці 2/7. MSI не
+ставиться, стара версія лишається робочою, схема й дані не змінені.
+
+**Чому перевірка не обнуляє сама.** Значення в документах вводилися й
+рахувалися в тій одиниці, на яку посилається колонка. Яка одиниця правильна,
+вирішує методолог, а не міграція. Тихе `UnitId = NULL` зробило б числа
+безрозмірними, і перерахунок чи конвертація дали б інший результат без жодної
+помилки.
+
+**Що робити.**
+
+1. `Stop-Service EcrApi`, повний бекап (п. 6.2).
+2. Повний перелік висячих посилань:
+
+   ```sql
+   SELECT N'cfg.ColumnDef' AS [Table], c.Id, c.Code, c.TableDefId AS OwnerId, c.UnitId
+   FROM cfg.ColumnDef AS c
+   WHERE c.UnitId IS NOT NULL AND NOT EXISTS (SELECT 1 FROM uom.Unit AS u WHERE u.Id = c.UnitId)
+   UNION ALL
+   SELECT N'cfg.RegistryFieldDef', f.Id, f.Code, f.RegistryDefId, f.UnitId
+   FROM cfg.RegistryFieldDef AS f
+   WHERE f.UnitId IS NOT NULL AND NOT EXISTS (SELECT 1 FROM uom.Unit AS u WHERE u.Id = f.UnitId)
+   ORDER BY 1, 2;
+   ```
+
+3. Для **кожного** відсутнього `UnitId` методолог обирає одне з трьох:
+
+   - **Повернути одиницю з тим самим `Id`.** Це основний варіант: дані лишаються
+     в тій одиниці, в якій їх вводили. Код, розмірність, множник і зсув беруть із
+     бекапу, зробленого до видалення одиниці:
+
+     ```sql
+     SET IDENTITY_INSERT uom.Unit ON;
+     INSERT INTO uom.Unit (Id, Code, SymbolL10n, NameL10n, DimensionId, IsBase, FactorToBase, OffsetToBase)
+     VALUES (57, N'<код>', N'<символ JSON>', N'<назва JSON>', <розмірність>, 0, <множник>, <зсув>);
+     SET IDENTITY_INSERT uom.Unit OFF;
+     ```
+
+     Якщо код тим часом зайняла нова одиниця (`UQ_Unit_Code`), дайте повернутій
+     інший код. Посилання тримаються за `Id`, не за кодом.
+
+   - **Перевести на іншу наявну одиницю.** Лише якщо методолог підтвердив, що
+     введені значення насправді в ній:
+     `UPDATE cfg.RegistryFieldDef SET UnitId = <нова> WHERE UnitId = <висяча>;`
+     Для `cfg.ColumnDef` **опублікованої** версії шаблону тригер
+     `TR_ColumnDef_Immutable` таку зміну відхилить (`50001`), і так і має бути:
+     опублікована структура незмінна (ФВ-7.1). Для таких колонок лишається
+     перший варіант.
+   - **Зняти одиницю (`NULL`)** — лише для колонки чи поля, де одиниця
+     справді не потрібна (текст, дата), і лише в чернетці шаблону.
+
+4. Повторити запит із кроку 2 → порожньо.
+5. Звичайне розгортання (п. 8, крок 2). `migration.sql` ідемпотентний, тож
+   застосовані міграції пропускає.
+
+⛔ Не редагуйте міграцію й не видаляйте рядки, щоб «пройти» перевірку.
+
+**Вікно обслуговування для індексу.** `IX_CalculationResult_UnitId` будується на
+всій `calc.CalculationResult`, тобто на мільйонах рядків за рік розрахунків.
+Міграція сама визначає редакцію сервера (`SERVERPROPERTY('EngineEdition')`):
+
+| `EngineEdition` | Редакція | Як будується |
+|---|---|---|
+| 3 | Enterprise, Developer, Evaluation | `WITH (ONLINE = ON)`: таблиця доступна весь час |
+| 5, 8 | Azure SQL Database, Managed Instance | `WITH (ONLINE = ON)` |
+| 2, 4 | Standard, Express | офлайн: на час побудови таблиця заблокована |
+
+На Standard і Express запис і читання результатів розрахунку чекають, доки
+індекс не збудується. `deploy-ecr.ps1` застосовує схему, поки стара служба ще
+працює, тому таке оновлення проводьте **у вікні обслуговування**, коли не йде
+перерахунок і ніхто не відкриває звітів. Тривалість на конкретній базі
+заздалегідь невідома. Її дає пробний прогін на копії з бекапу. Прод-сервери
+замовника — Enterprise (`D-101`), тож там вікно не потрібне.
+
+✎ 2026-09-29: передперевірку й обидва шляхи застосування (`MigrateAsync` і
+`migration.sql --idempotent`) тримає тест `U1UnitForeignKeysMigrationTests`.
+Гілку індексу без `ONLINE` тест виконує наживо на Developer, підставляючи
+редакцію 4. Справжнього Standard чи Express у перевірці не було.
 
 ## 9. Відкат
 
 Окремого механізму відкату в коді **немає**. Міграції EF назад не застосовуються,
 і `deploy-ecr.ps1` відкату не робить.
 
-1. `Stop-Service EcrApi`.
+1. `Stop-Service EcrApi` (і `Stop-Service EcrWorker`, якщо воркер увімкнено, п. 10).
 2. Відновити базу з бекапу, зробленого перед оновленням (п. 6.3).
-3. Встановити попередній MSI.
+3. Встановити попередній MSI (з `WORKER_ENABLED=1`, якщо воркер був і
+   попередня версія його має; до I2-2 типове там було `0`). Попередня
+   версія без воркера — прибрати з `Services\EcrApi\Environment`
+   `ECR_Jobs__Recalculation__Executor` (або поставити `InProcess`), інакше
+   перерахунок лишиться без виконавця (п. 10.1).
 4. `Start-Service EcrApi` і перевірити health.
 
 Дані, введені після оновлення, при такому відкаті втрачаються.
+
+## 10. Воркер перерахунку (служба `EcrWorker`)
+
+Друга служба — наглядач пулу процесів перерахунку (ФВ-9.8, `D-206`):
+`Ecr.Worker.exe --supervisor` у теці застосунку тримає дочірні процеси під
+Windows Job Object з межами пам'яті. ✎ 2026-09-30 (I2-2): **типово
+встановлюється** — і MSI (`WORKER_ENABLED` типово `1`), і `deploy-ecr.ps1`
+(крім `-DisableWorker` і SQL Server Express), `docs/build/11-install-guide.md`
+§2.6. Той самий обліковий запис, що `EcrApi`; рядок підключення — у
+`HKLM:\SYSTEM\CurrentControlSet\Services\EcrWorker\Environment`.
+
+⛔ **Зв'язка з `EcrApi`.** Разом зі службою `deploy-ecr.ps1` пише в
+`Services\EcrApi\Environment` `ECR_Jobs__Queue__Mode=Database` і
+`ECR_Jobs__Recalculation__Executor=Worker`. У цьому режимі Api лейн
+перерахунку **не бере**: зупинений чи знятий воркер = перерахунок стоїть у
+черзі. Тому вимкнення воркера (10.1) — завжди разом із перемиканням Api на
+`InProcess`. Стан видно на `/health/ready`, перевірка `worker`: `Degraded` з
+поясненням, якщо Api на `Worker`, а служби немає, вона `Disabled` чи задачі
+чекають понад 5 хв без жодної виконуваної. Поточний режим — поля `queueMode`
+і `executor` цієї перевірки.
+
+```powershell
+Get-Service EcrWorker
+Get-CimInstance Win32_Service -Filter "Name='EcrWorker'" | Select-Object State, StartMode, StartName, PathName
+Get-CimInstance Win32_Process -Filter "Name='Ecr.Worker.exe'" | Select-Object ProcessId, ParentProcessId, CommandLine
+```
+
+Норма: один процес `--supervisor` і `Jobs:Workers:Count` дочірніх `--child`.
+
+**Налаштування пулу** — змінні `ECR_Jobs__Workers__Count`, `__MemoryLimitMb`,
+`__JobMemoryLimitMb`, `__MaxDuration` у `Environment` служби (перекривають
+`worker.settings.json` поруч з exe, який оновлення перезаписує). Недійсне
+значення — служба не стартує (код виходу 3, перелік недійсних ключів — у
+stderr і журналі); після зміни — `Restart-Service EcrWorker`.
+
+### 10.1. Вимкнути воркер
+
+Найпростіше — повторити `deploy-ecr.ps1 … -DisableWorker -SkipSchema` з тим
+самим `-ConnectionString`: MSI з `WORKER_ENABLED=0` і Api на `InProcess` —
+разом.
+
+Швидко, без MSI, — служба лишається зареєстрованою, але не стартує, зокрема
+після перезавантаження; ⛔ і ОДРАЗУ перемкнути Api на перерахунок у власному
+процесі (Executor — у `Environment` служби EcrApi, той самий прийом злиття,
+що в `docs/build/11-install-guide.md` §9):
+
+```powershell
+Stop-Service EcrWorker
+Set-Service EcrWorker -StartupType Disabled
+
+$key = 'HKLM:\SYSTEM\CurrentControlSet\Services\EcrApi'
+$vars = @((Get-ItemProperty $key -Name Environment).Environment |
+    Where-Object { $_ -notlike 'ECR_Jobs__Recalculation__Executor=*' -and $_ -notlike 'ECR_Jobs__Queue__Mode=*' })
+Set-ItemProperty $key -Name Environment -Type MultiString -Value ([string[]] ($vars + 'ECR_Jobs__Recalculation__Executor=InProcess' + 'ECR_Jobs__Queue__Mode=Quartz'))
+Restart-Service EcrApi
+```
+
+Дочірні процеси закриваються разом із наглядачем (Job Object з
+`KILL_ON_JOB_CLOSE`), окремо їх зупиняти не треба — перевірка: запит
+`Win32_Process` вище порожній.
+
+Прибрати службу зовсім — тим самим MSI, що встановлено (компоненти воркера
+транзитивні, `docs/build/10-installer.md` §1.6):
+
+```powershell
+msiexec /i Ecr.msi /qn /l*v worker-off.log REINSTALL=ALL REINSTALLMODE=vomus WORKER_ENABLED=0 SERVICE_ACCOUNT=DOMAIN\ecr-svc$
+```
+
+⚠ `SERVICE_ACCOUNT` — той самий, що при установці: властивості MSI не
+запам'ятовуються, і REINSTALL без нього перереєструє службу під `LocalSystem`.
+
+### 10.2. Увімкнути назад
+
+Якщо вимикали через `Set-Service` — служба назад, потім Api на пул (зворотне
+до 10.1: `ECR_Jobs__Queue__Mode=Database`, `ECR_Jobs__Recalculation__Executor=Worker`
+і `Restart-Service EcrApi`):
+
+```powershell
+Set-Service EcrWorker -StartupType Automatic
+Start-Service EcrWorker
+```
+
+Якщо службу прибирали (чи ніколи не ставили) — найпростіше повторити
+`deploy-ecr.ps1 … -SkipSchema` (без `-DisableWorker`) з тим самим
+`-ConnectionString`: MSI з `WORKER_ENABLED=1`, рядок підключення в
+`Environment`, режим Api, перезапуск і перевірка — разом. Вручну — той самий
+MSI, що в 10.1, з `WORKER_ENABLED=1`, потім рядок підключення
+(`docs/build/11-install-guide.md` §9, служба `EcrWorker`),
+`Restart-Service EcrWorker` і режим Api, як вище.
+
+⚠ Той самий MSI-файл, що вже встановлено, без `REINSTALL=ALL
+REINSTALLMODE=vomus` нічого не перемикає: це режим обслуговування, умови
+компонентів не переобчислюються.
+
+### 10.3. Відкат воркера
+
+Воркер не змінює схему бази й не має власних даних, тож його відкат — це
+вимкнення (10.1): `EcrApi` працює й без нього — **за `Executor=InProcess`**.
+
+1. Блок «швидко, без MSI» з 10.1 — службу вимкнути й Api перемкнути
+   на `InProcess` разом, негайно.
+2. Причина: журнал подій Application; ручний прогін
+   `& "C:\Program Files\ECR\Api\Ecr.Worker.exe" --supervisor` від
+   адміністратора — вивід у консоль, Ctrl+C зупиняє разом із дочірніми.
+3. Коли причину усунуто — 10.2. Прибрати службу зовсім —
+   `deploy-ecr.ps1 -DisableWorker` (10.1), і наступні оновлення — теж
+   з `-DisableWorker`.
+
+⚠ ✎ I2-2: оновлення продукту **без** `-DisableWorker` / `WORKER_ENABLED=0`
+ставить службу воркера назад (типове — так), а `deploy-ecr.ps1` ще й
+перемикає Api на `Worker`. Вимкнений воркер — прапорець на кожному
+оновленні. Прямий `msiexec` без властивості службу поставить, але режим Api
+не змінить — Api лишиться на тому, що в його `Environment`.

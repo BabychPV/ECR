@@ -236,12 +236,14 @@ describe("З'єднання: створення", () => {
     expect(post?.body).toEqual({
       code: 'LAB',
       nameL10n: { [language()]: 'Lab feed' },
-      transport: 'PiWebApi',
+      // D-212: транспорт не вибирали — типовий PI SQL (views — основний канал).
+      transport: 'PiSqlClient',
       endpoint: 'Server=lab;Database=Lims',
       secondaryEndpoint: null,
       catalog: 'Lims',
       maxParallel: null,
       isActive: true,
+      secretConfirmation: null,
     });
 
     await waitFor(() => expect(listReads()).toBeGreaterThan(before));
@@ -375,6 +377,7 @@ describe("З'єднання: правка", () => {
       catalog: 'ProdAF',
       maxParallel: 4,
       isActive: false,
+      secretConfirmation: null,
     });
 
     // ⛔ `If-Match` — версія ПОКАЗАНОГО рядка: без неї сервер дає `422`, а
@@ -435,6 +438,105 @@ describe("З'єднання: правка", () => {
     });
 
     await waitFor(() => expect(document.querySelector('[data-data-source-form]')).toBeNull());
+  });
+
+  it('S3: нова адреса з\'єднання із секретом — поле «секрет ще раз», без нього зберегти не можна; PUT несе введене', async () => {
+    respond({ list: () => [{ ...Connection, hasSecret: true }] });
+    show('/admin/sources?panel=PI-MAIN');
+
+    const scope = await openEdit();
+    const save = (): HTMLButtonElement =>
+      within(scope).getByRole('button', { name: /common\.save/ }) as HTMLButtonElement;
+
+    // Адреса та сама — поля немає.
+    expect(scope.querySelector('input[type="password"]')).toBeNull();
+
+    type(scope, /^.*sources\.endpoint/, 'https://pi2.example.invalid/piwebapi');
+
+    const secret = field(scope, /sources\.secretConfirmation/);
+    expect(secret.type).toBe('password');
+    expect(scope.textContent).toContain('sources.secretConfirmationHint');
+    expect(save().disabled).toBe(true);
+
+    // Адресу повернули — поле зникло: переносити нічого.
+    type(scope, /^.*sources\.endpoint/, Connection.endpoint);
+    expect(scope.querySelector('input[type="password"]')).toBeNull();
+    expect(save().disabled).toBe(false);
+
+    type(scope, /^.*sources\.endpoint/, 'https://pi2.example.invalid/piwebapi');
+    type(scope, /sources\.secretConfirmation/, 'Bearer s3cr3t');
+    expect(save().disabled).toBe(false);
+
+    fireEvent.click(save());
+    await waitFor(() => expect(changes()).toHaveLength(1));
+
+    expect(changes()[0]?.body).toMatchObject({
+      endpoint: 'https://pi2.example.invalid/piwebapi',
+      secretConfirmation: 'Bearer s3cr3t',
+    });
+  });
+
+  it('S3: правка без зміни адреси з\'єднання із секретом — поля немає, секрет не шлеться', async () => {
+    respond({ list: () => [{ ...Connection, hasSecret: true }] });
+    show('/admin/sources?panel=PI-MAIN');
+
+    const scope = await openEdit();
+
+    type(scope, /sources\.catalog/, 'OtherAF');
+    expect(scope.querySelector('input[type="password"]')).toBeNull();
+
+    fireEvent.click(within(scope).getByRole('button', { name: /common\.save/ }));
+    await waitFor(() => expect(changes()).toHaveLength(1));
+
+    expect(changes()[0]?.body).toMatchObject({ catalog: 'OtherAF', secretConfirmation: null });
+  });
+
+  it('S3: 422 dataSourceSecretReentryRequired при створенні — поле секрету з причиною, повтор несе введене', async () => {
+    const posts: Call[] = [];
+
+    respond({
+      change: (call) => {
+        posts.push(call);
+
+        return posts.length === 1
+          ? json(
+              {
+                title: 'Invalid request',
+                status: 422,
+                errorCode: 'ECR-REQ-0422',
+                correlationId: 'c-422',
+                messageKey: 'err.ECR-REQ-0422.dataSourceSecretReentryRequired',
+                field: 'secretConfirmation',
+                code: 'LAB',
+              },
+              422,
+            )
+          : json({ ...Connection, id: 9, code: 'LAB' }, 201);
+      },
+    });
+    show();
+
+    await screen.findByText('Main PI server');
+    const scope = await openCreate();
+
+    type(scope, /sources\.code/, 'LAB');
+    type(scope, /sources\.name/, 'Lab feed');
+    type(scope, /^.*sources\.endpoint/, 'https://lab.example.invalid/piwebapi');
+    fireEvent.click(within(scope).getByRole('button', { name: /sources\.create/ }));
+
+    // Клієнт не знає, що під код LAB уже є секрет, — поле відкриває відмова сервера.
+    const secret = await waitFor(() => field(scope, /sources\.secretConfirmation/));
+    await waitFor(() =>
+      expect(errorOf(secret)).toContain('err.ECR-REQ-0422.dataSourceSecretReentryRequired'),
+    );
+    expect(secret.getAttribute('aria-invalid')).toBe('true');
+    expect(within(scope).queryByRole('alert')).toBeNull();
+
+    type(scope, /sources\.secretConfirmation/, 'Bearer s3cr3t');
+    fireEvent.click(within(scope).getByRole('button', { name: /sources\.create/ }));
+
+    await waitFor(() => expect(posts).toHaveLength(2));
+    expect(posts[1]?.body).toMatchObject({ code: 'LAB', secretConfirmation: 'Bearer s3cr3t' });
   });
 
   it('відмова правки не губить чернетку й показує причину', async () => {

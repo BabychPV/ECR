@@ -6,6 +6,7 @@ using Ecr.Application.Ports;
 using Ecr.Application.Security;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.External;
+using Ecr.Domain.Enums;
 using Ecr.Domain.Errors;
 
 namespace Ecr.Application.Integration;
@@ -28,6 +29,10 @@ namespace Ecr.Application.Integration;
 /// </param>
 /// <param name="DataSourceId">З'єднання, якому належить сутність джерела.</param>
 /// <param name="DataSourceCode">Код цього з'єднання — значення фільтра <c>?dataSource=</c>.</param>
+/// <param name="LookbackDays">
+/// Вікно збору назад від моменту запуску, днів (ФВ-13.15): кожен прогін перечитує
+/// саме стільки, і пропущені вікна закриваються повтором, а не станом.
+/// </param>
 public sealed record CollectionScheduleView(
     int Id,
     int SourceEntityId,
@@ -40,7 +45,8 @@ public sealed record CollectionScheduleView(
     DateTime? LastErrorAt,
     string RowVersion,
     int DataSourceId,
-    string DataSourceCode);
+    string DataSourceCode,
+    int LookbackDays);
 
 /// <summary>
 /// Перелік розкладів збору. Право <c>Integration.EditSchedule</c>.
@@ -90,7 +96,8 @@ public sealed class ListCollectionSchedulesHandler(
             row.Schedule.LastErrorAt,
             VersionOf(row.Schedule),
             row.DataSourceId,
-            row.DataSourceCode);
+            row.DataSourceCode,
+            row.Schedule.LookbackDays);
 
     internal static async Task<ScheduledSourceEntity> FindAsync(
         ICollectionScheduleStore store, int id, CancellationToken ct)
@@ -198,6 +205,58 @@ public sealed class ListCollectionSchedulesHandler(
         return text;
     }
 
+    /// <summary>Перевіряє вікно збору назад ДО бази (ФВ-13.15).</summary>
+    /// <param name="lookbackDays">Днів; <c>null</c> — поле не прийшло, перевіряти нічого.</param>
+    /// <exception cref="BusinessRuleException">Поза межами — 422.</exception>
+    /// <remarks>
+    /// ⛔ Саме тут, а не лише в домені: доменна межа кидає
+    /// <c>ArgumentOutOfRangeException</c>, а той доїжджає до людини як <c>500</c>.
+    /// </remarks>
+    internal static void RequireValidLookback(int? lookbackDays)
+    {
+        if (lookbackDays is { } days
+            && (days < CollectionSchedule.MinLookbackDays || days > CollectionSchedule.MaxLookbackDays))
+        {
+            throw new BusinessRuleException(
+                ErrorCodes.RequestInvalid,
+                $"Вікно збору має бути від {CollectionSchedule.MinLookbackDays} до {CollectionSchedule.MaxLookbackDays} днів, а не {days}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-REQ-0422.collectionScheduleLookback",
+                    ["min"] = CollectionSchedule.MinLookbackDays.ToString(CultureInfo.InvariantCulture),
+                    ["max"] = CollectionSchedule.MaxLookbackDays.ToString(CultureInfo.InvariantCulture),
+                    ["value"] = days.ToString(CultureInfo.InvariantCulture),
+                });
+        }
+    }
+
+    /// <summary>
+    /// Відмовляє в розкладі для власної форми ECR (ФВ-12.8, <c>D-106</c>).
+    /// </summary>
+    /// <param name="sourceKind">Хто master для даних сутності.</param>
+    /// <param name="sourceEntityCode">Код сутності — для тексту відмови.</param>
+    /// <exception cref="BusinessRuleException">Сутність — власна форма — 422.</exception>
+    /// <remarks>
+    /// ⛔ <see cref="RegistrySourceKind.Local"/> означає, що master даних — сам
+    /// ECR (ФВ-8.9): дані приходять записом із наших форм і одразу запускають
+    /// перерахунок. Розклад для такої сутності опитував би власну базу про те,
+    /// що ми самі щойно в неї поклали.
+    /// </remarks>
+    internal static void RequireCollectableSource(RegistrySourceKind sourceKind, string sourceEntityCode)
+    {
+        if (sourceKind == RegistrySourceKind.Local)
+        {
+            throw new BusinessRuleException(
+                ErrorCodes.RequestInvalid,
+                $"Сутність «{sourceEntityCode}» — власна форма ECR: розклад збору для неї заборонено (ФВ-12.8).",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-REQ-0422.scheduleForLocalEntity",
+                    ["code"] = sourceEntityCode,
+                });
+        }
+    }
+
     /// <summary>
     /// Доводить уже збережений розклад до планувальника; невдача лишається в
     /// рядку і у відповіді.
@@ -290,24 +349,43 @@ public sealed class SaveCollectionScheduleHandler(
     /// <param name="id">Розклад.</param>
     /// <param name="cron">Новий вираз cron (формат Quartz).</param>
     /// <param name="isEnabled">Чи має розклад стояти в планувальнику.</param>
+    /// <param name="lookbackDays">Вікно збору назад, днів (ФВ-13.15); <c>null</c> — лишити наявне.</param>
     /// <param name="ifMatch">Заголовок <c>If-Match</c> зі значенням <c>rowVersion</c>.</param>
     /// <param name="ct">Скасування.</param>
-    /// <exception cref="BusinessRuleException">Cron порожній, задовгий або невалідний — 422.</exception>
+    /// <exception cref="BusinessRuleException">
+    /// Cron порожній, задовгий або невалідний; вікно поза межами; увімкнення
+    /// розкладу власної форми (ФВ-12.8) — 422.
+    /// </exception>
     /// <exception cref="ConcurrencyConflictException">Розклад змінили паралельно — 409.</exception>
     /// <exception cref="NotFoundException">Розкладу немає — 404.</exception>
+    /// <remarks>
+    /// ⚠ Для власної форми відмовляє лише УВІМКНЕННЯ: розклад, заведений до
+    /// правила, має лишатися можливим вимкнути й прибрати.
+    /// </remarks>
     public async Task<CollectionScheduleView> HandleAsync(
-        int id, string cron, bool isEnabled, string? ifMatch, CancellationToken ct)
+        int id, string cron, bool isEnabled, int? lookbackDays, string? ifMatch, CancellationToken ct)
     {
         await PermissionCheck
             .RequireAsync(access, currentUser, ListCollectionSchedulesHandler.Permission, ct)
             .ConfigureAwait(false);
 
         var text = ListCollectionSchedulesHandler.RequireValidCron(scheduler, cron);
+        ListCollectionSchedulesHandler.RequireValidLookback(lookbackDays);
 
         var row = await ListCollectionSchedulesHandler.FindAsync(store, id, ct).ConfigureAwait(false);
         ListCollectionSchedulesHandler.RequireCurrentVersion(row.Schedule, ifMatch);
 
+        if (isEnabled)
+        {
+            ListCollectionSchedulesHandler.RequireCollectableSource(row.SourceKind, row.SourceEntityCode);
+        }
+
         row.Schedule.Reschedule(text);
+
+        if (lookbackDays is { } days)
+        {
+            row.Schedule.SetLookback(days);
+        }
 
         if (isEnabled)
         {
@@ -364,18 +442,27 @@ public sealed class CreateCollectionScheduleHandler(
     /// <param name="sourceEntityId">Сутність джерела, яку збиратимуть.</param>
     /// <param name="cron">Вираз cron (формат Quartz).</param>
     /// <param name="isEnabled">Чи має розклад одразу стояти в планувальнику.</param>
+    /// <param name="lookbackDays">Вікно збору назад, днів (ФВ-13.15); <c>null</c> — типове.</param>
     /// <param name="ct">Скасування.</param>
-    /// <exception cref="BusinessRuleException">Cron порожній, задовгий або невалідний — 422.</exception>
+    /// <exception cref="BusinessRuleException">
+    /// Cron порожній, задовгий або невалідний; вікно поза межами; сутність —
+    /// власна форма ECR (ФВ-12.8) — 422.
+    /// </exception>
     /// <exception cref="NotFoundException">Сутності джерела немає — 404.</exception>
     /// <exception cref="ConcurrencyConflictException">Розклад у сутності вже є — 409.</exception>
+    /// <remarks>
+    /// ⛔ Власній формі відмовляє і ВИМКНЕНЕ створення: ФВ-12.8 забороняє
+    /// заводити розклад, а не лише запускати його.
+    /// </remarks>
     public async Task<CollectionScheduleView> HandleAsync(
-        int sourceEntityId, string cron, bool isEnabled, CancellationToken ct)
+        int sourceEntityId, string cron, bool isEnabled, int? lookbackDays, CancellationToken ct)
     {
         await PermissionCheck
             .RequireAsync(access, currentUser, ListCollectionSchedulesHandler.Permission, ct)
             .ConfigureAwait(false);
 
         var text = ListCollectionSchedulesHandler.RequireValidCron(scheduler, cron);
+        ListCollectionSchedulesHandler.RequireValidLookback(lookbackDays);
 
         var entity = await store.FindSourceEntityAsync(sourceEntityId, ct).ConfigureAwait(false)
                      ?? throw new NotFoundException(
@@ -399,7 +486,14 @@ public sealed class CreateCollectionScheduleHandler(
                 });
         }
 
+        ListCollectionSchedulesHandler.RequireCollectableSource(entity.SourceKind, entity.Code);
+
         var schedule = new CollectionSchedule(sourceEntityId, text);
+
+        if (lookbackDays is { } days)
+        {
+            schedule.SetLookback(days);
+        }
 
         if (!isEnabled)
         {
@@ -414,7 +508,7 @@ public sealed class CreateCollectionScheduleHandler(
 
         return ListCollectionSchedulesHandler.ToView(
             new ScheduledSourceEntity(
-                schedule, entity.Code, entity.Name, entity.DataSourceId, entity.DataSourceCode));
+                schedule, entity.Code, entity.Name, entity.DataSourceId, entity.DataSourceCode, entity.SourceKind));
     }
 }
 

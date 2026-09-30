@@ -31,6 +31,7 @@ internal static class TableValidation
     /// Значення шапки документа, ключовані кодом поля — для <c>HDR.X</c> у
     /// правилах усіх трьох рівнів; порожній словник — прогін без шапки.
     /// </param>
+    /// <param name="language">Мова запиту — <see cref="ValidationEngine.ValidateScope"/> (B-11).</param>
     /// <remarks>
     /// ⛔ Рівень РЯДКА виконується ПО РЯДКАХ, а кожне повідомлення отримує
     /// свій <c>RowKey</c> (директива №09 `W8` п.3, `S-19`). Доти всі три рівні
@@ -42,12 +43,19 @@ internal static class TableValidation
     /// ⚠ Рівень таблиці й документа адреси рядка не мають за визначенням і
     /// лишаються з <c>null</c> — це не пропуск, а їхня природа.
     /// </remarks>
-    public static IReadOnlyList<ValidationMessage> Run(
+    /// <param name="registries">Сховище довідників — для знімка <c>REGFIELD</c> (D16-04).</param>
+    /// <param name="snapshot">Версія шаблону таблиці — для резолвінгу посилань правил.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public static async Task<IReadOnlyList<ValidationMessage>> RunAsync(
         ValidationEngine engine,
+        IRegistryStore registries,
+        TemplateVersionSnapshot snapshot,
         TableDef table,
         IReadOnlyList<CellRecord> cells,
         IReadOnlyDictionary<string, long> rowIds,
-        IReadOnlyDictionary<string, Ecr.Expressions.Evaluation.ExpressionValue> headers)
+        IReadOnlyDictionary<string, Ecr.Expressions.Evaluation.ExpressionValue> headers,
+        string language,
+        CancellationToken ct)
     {
         var messages = new List<ValidationMessage>();
 
@@ -56,12 +64,18 @@ internal static class TableValidation
             return messages;
         }
 
+        // ⛔ D16-04: без знімка `REGFIELD` у правилі давав `#REF`, правило
+        // деградувало у Warning `ECR-VAL-RULE`, і Error-правило не блокувало
+        // подання. «Перевірити» і подання йдуть сюди обидва — знімок один.
+        var registryFields = await LoadRegistryFieldsAsync(engine, registries, snapshot, table, cells, ct)
+            .ConfigureAwait(false);
+
         var slice = new SliceContext(table, cells, rowIds);
 
         foreach (var rowKey in rowIds.Keys.Order(StringComparer.Ordinal))
         {
             messages.AddRange(engine
-                .ValidateScope(scope: 1, table.ValidationRules, slice.ForRow(rowKey), headers)
+                .ValidateScope(scope: 1, table.ValidationRules, slice.ForRow(rowKey), headers, language, registryFields)
                 .Select(m => m with { RowKey = rowKey }));
         }
 
@@ -69,10 +83,66 @@ internal static class TableValidation
         // означало б повторити те саме порушення N разів.
         foreach (var scope in AboveRowLevels)
         {
-            messages.AddRange(engine.ValidateScope(scope, table.ValidationRules, slice, headers));
+            messages.AddRange(engine.ValidateScope(scope, table.ValidationRules, slice, headers, language, registryFields));
         }
 
         return messages;
+    }
+
+    /// <summary>
+    /// Знімок полів довідника, які правила таблиці читають через <c>REGFIELD</c>,
+    /// для записів, на які показують Lookup-комірки зрізу.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Завантаження — спільний <see cref="Registries.RegistryFieldSnapshotLoader"/>,
+    /// той самий, що в перерахунку формул; тут лише визначається, ЩО просити.
+    /// Правила без <c>REGFIELD</c> — нуль звернень до довідника.
+    ///
+    /// ⚠ Беруться записи з УСІХ рядків зрізу, а не лише з тих, які правило
+    /// адресує явно: правило рівня рядка читає свій рядок, таблиці — перший,
+    /// а <c>[Рядок].[Колонка]</c> — названий; усе це підмножина зрізу.
+    /// </remarks>
+    public static async Task<IReadOnlyDictionary<long, IReadOnlyDictionary<string, Ecr.Expressions.Evaluation.ExpressionValue>>?>
+        LoadRegistryFieldsAsync(
+            ValidationEngine engine,
+            IRegistryStore registries,
+            TemplateVersionSnapshot snapshot,
+            TableDef table,
+            IReadOnlyList<CellRecord> cells,
+            CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(engine);
+        ArgumentNullException.ThrowIfNull(table);
+        ArgumentNullException.ThrowIfNull(cells);
+
+        var reads = engine.RegistryFieldReads(table, snapshot);
+        if (reads.Count == 0)
+        {
+            return null;
+        }
+
+        var requests = new List<Registries.RegistryFieldRequest>();
+
+        foreach (var (columnDefId, fieldCode) in reads)
+        {
+            var column = table.Columns.FirstOrDefault(c => c.Id == columnDefId && !c.IsDeleted);
+            if (column?.LookupRegistryDefId is not { } registryDefId)
+            {
+                continue;
+            }
+
+            foreach (var cell in cells)
+            {
+                if (cell.Address.ColumnDefId == columnDefId
+                    && cell.Value is { IsEmpty: false, ValueRegistryEntryId: { } entryId })
+                {
+                    requests.Add(new Registries.RegistryFieldRequest(entryId, registryDefId, fieldCode));
+                }
+            }
+        }
+
+        return await Registries.RegistryFieldSnapshotLoader
+            .LoadAsync(registries, requests, ct).ConfigureAwait(false);
     }
 
     /// <summary>Значення зрізу як джерело для виразів правил.</summary>

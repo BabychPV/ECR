@@ -54,7 +54,17 @@ public sealed class RecallSheetHandler(
                          "ECR-AUTH-0401", "Анонімний запит не може відкликати аркуші.",
                          new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.signInRequired" });
 
-        var key = new PeriodKey(periodKey);
+        // B-16: `Parse`, а не первинний конструктор — той самий валідатор, що
+        // вже стоїть у `CanRecallAsync` НИЖЧЕ в цьому самому файлі. Було
+        // непослідовно: перевірка «чи можна відкликати» (кнопка) відмовляла
+        // на невірному періоді, а сама дія відкликання — ні.
+        var key = PeriodKey.Parse(periodKey);
+
+        // ⛔ S2 / B-08: видимість документа — ПЕРШОЮ, до перевірки складу, як у
+        // `SubmitSheetHandler`: невидимий документ — `404 document`, а не
+        // `404 sheetNotInDocument` чи `403 recallDenied`.
+        var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
+        await Documents.DocumentVisibility.RequireVisibleAsync(access, profile, documentId, ct).ConfigureAwait(false);
 
         // ⛔ Та сама перевірка складу, що й у поданні: `GetOrCreateAsync` створює
         // рядок стану для БУДЬ-ЯКОГО ідентифікатора аркуша (`S-17`).
@@ -71,7 +81,6 @@ public sealed class RecallSheetHandler(
                 });
         }
 
-        var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
         var projectId = await documents.FindProjectIdAsync(documentId, ct).ConfigureAwait(false);
 
         if (!HasSubmitGrant(profile, projectId, sheetDefId))

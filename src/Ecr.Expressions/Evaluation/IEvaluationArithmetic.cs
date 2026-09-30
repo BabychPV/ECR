@@ -76,4 +76,27 @@ public interface IEvaluationArithmetic
     /// <param name="right">Другий аргумент.</param>
     /// <param name="function">Ім'я з <c>DialectCatalog</c>, з урахуванням регістру.</param>
     public ExpressionValue Binary(ExpressionValue left, ExpressionValue right, string function);
+
+    /// <summary>
+    /// Порядок двох чисел у числовій семантиці режиму.
+    /// </summary>
+    /// <param name="left">Ліве значення.</param>
+    /// <param name="right">Праве значення.</param>
+    /// <returns>
+    /// Від'ємне, нуль або додатне; <c>null</c>, якщо хоч одне значення не число.
+    /// </returns>
+    /// <remarks>
+    /// ⛔ Аудит A5/A6: рівність, <c>in</c> і впорядкування рахувалися ПОЗА
+    /// арифметикою — рівність у <see cref="decimal"/> (через звуження
+    /// <c>AsNumber()</c>), впорядкування в <see cref="double"/>, незалежно від
+    /// режиму. <c>Legacy</c> через це бачив <c>0.1 + 0.2 = 0.3</c> там, де NCalc
+    /// 1.3.8 бачить нерівність, а <c>Strict</c> міг казати одночасно
+    /// <c>a &gt;= b</c> і <c>a &lt;&gt; b</c> при <c>NOT a &gt; b</c>. Одна точка
+    /// задання на режим — одна числова семантика для всіх порівнянь.
+    ///
+    /// ⚠ <c>NaN</c> тут не відсіюється: <c>double.CompareTo</c> вважає його
+    /// рівним собі й меншим за все — так само, як <c>Comparer.Default</c> у
+    /// NCalc. Що робити з <c>NaN</c> у ВПОРЯДКУВАННІ, вирішує обчислювач.
+    /// </remarks>
+    public int? CompareNumbers(ExpressionValue left, ExpressionValue right);
 }

@@ -142,7 +142,7 @@
 | S-09 | В | ◐ | `ArchiveJob.cs:81-89` | `EXEC arc.usp_ArchiveYear` під глобальним `CommandTimeout = 60 с`. Таймаут гарантований; ретраї запускають до трьох паралельних архівацій на сервері | W1.6 |
 | S-10 | В | ◐ | `Program.cs`; `AuthController.cs:63-77` | Rate limiting відсутній. `POST /login/local` анонімний і коштує 210k ітерацій PBKDF2 навіть для неіснуючого імені → анонімне вичерпання CPU; lockout захищає обліковку, не сервер | W1.7 |
 | S-11 | В | ✔ | `DependencyInjection.cs:52,90` ↔ `appsettings.json:8-12` | Код читає `Sql:CommandTimeoutSeconds`/`Sql:BulkBatchSize`, файл містить `Database:*`. **Обидва ключі не читаються ніколи**: батч 5 000 замість 50 000 | D14-06 |
-| S-12 | С | ◐ | `EcrMetrics.cs`; `Ecr.Api.csproj` | `Meter("Ecr")` пише, експортера немає, `Telemetry:OtlpEndpoint` не читає ніхто — а `deploy-ecr.ps1:37,150` наводить його як головний приклад для адміністратора | D14-06 |
+| S-12 | С | ~~◐~~ ✔ | `EcrMetrics.cs`; `Ecr.Api.csproj` | ~~`Meter("Ecr")` пише, експортера немає, `Telemetry:OtlpEndpoint` не читає ніхто — а `deploy-ecr.ps1:37,150` наводить його як головний приклад для адміністратора~~ ✎ 2026-09-29 (`U17`): експорт OTLP є — `Observability/TelemetrySetup.cs`, вмикається `Telemetry:Enabled=true` (дефолт `false`: нуль реєстрацій OpenTelemetry), `Telemetry:OtlpEndpoint` обов'язковий за увімкненого експорту, `Telemetry:OtlpProtocol`/`ExportIntervalSeconds`/`ServiceName` читаються; runbook §3.4 | D14-06 |
 | S-13 | С | ◐ | `appsettings.json:13-27,44` | Мертві ключі: `Cache:*SlidingMinutes` (у коді жорстко 30 хв), `Api:*PageSize`, `AllowedHosts` без `UseHostFiltering`. Конфігурація бреше про свою дію | D14-06 |
 | S-14 | С | ◐ | `SubmitSheetHandler.cs:203-243`; `ApproveSheetHandler.cs:46-110` | Зріз подання і зміна стану — два коміти без транзакції | W1.5 |
 | S-15 | С | ◐ | `PatchCellsHandler.cs:389-391` ↔ `:406-411` | «Немає рішення про доступ»: для оновлень = дозволено, для створень = відмова. Дві протилежні політики в одному методі | W1.3 |
@@ -336,9 +336,15 @@ D14-09). Сторож в `Ecr.Architecture.Tests`: кожен листовий �
 `appsettings.json` зустрічається як рядок у `src/**/*.cs` (через
 `GetValue`/`GetSection`/`Bind`), і навпаки — кожен читаний ключ із дефолтом
 присутній у файлі. **Метрики:** `OpenTelemetry.Extensions.Hosting` + OTLP
-експортер, вмикається лише за непорожнім `Telemetry:OtlpEndpoint`; ліцензія
+експортер, ~~вмикається лише за непорожнім `Telemetry:OtlpEndpoint`~~; ліцензія
 Apache-2.0 — перевірити гейтом ліцензій (`D-12`). Якщо гейт не пропустить —
 видалити ключ і згадки з `deploy-ecr.ps1`/`11-install-guide.md`.
+✎ 2026-09-29 (`U17`): зроблено інакше — рішення людини «передбач відключення
+через конфігурацію, щоб не навантажувати сервер». Вмикач — окремий
+`Telemetry:Enabled` (дефолт `false`), а не непорожня адреса; за `true` без
+`Telemetry:OtlpEndpoint` служба не стартує. Протокол — `Telemetry:OtlpProtocol`
+(`Grpc`|`HttpProtobuf`). Код — `src/Ecr.Api/Observability/TelemetrySetup.cs`,
+експлуатація — `docs/admin/operations-runbook.md` §3.4.
 
 ### D14-07. Системний запис не краде версію рядка в користувача
 

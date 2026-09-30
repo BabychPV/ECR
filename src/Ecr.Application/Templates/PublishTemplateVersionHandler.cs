@@ -59,8 +59,35 @@ public sealed class PublishTemplateVersionHandler(
             throw new BusinessRuleException(
                 "ECR-TMPL-0422",
                 "Публікацію відхилено: причина обов'язкова — порожній рядок нічого не "
-                + "пояснює тому, хто за рік питає, чому цю версію ввели в обіг.");
+                + "пояснює тому, хто за рік питає, чому цю версію ввели в обіг.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-TMPL-0422.publishReasonRequired" });
         }
+
+        // ⛔ C5: УСЯ публікація — одна транзакція, і перша її дія — блок рядка
+        // версії. Доти знімок для перевірок читався без жодного блоку, а
+        // перехід стану комітився окремо, пізніше: колонка чи формула,
+        // закомічена паралельною правкою чернетки між цими моментами, лягала
+        // в опубліковану версію неперевіреною, а `cfg.FormulaDependency` про
+        // нову формулу не знав. Тепер правка, що почалася раніше, комітиться
+        // до читання знімка й потрапляє в перевірки; правка, що прийшла
+        // пізніше, чекає коміту публікації й бачить `Published` (див.
+        // `DraftVersionLock`). Порядок блокувань — версія першою, як у всіх
+        // структурних обробниках.
+        await uow.ExecuteInTransactionAsync(
+            token => PublishLockedAsync(templateVersionId, userId, reason, token),
+            ct).ConfigureAwait(false);
+
+        await metadataCache.InvalidateAsync(templateVersionId, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>Публікація під блоком рядка версії, усередині транзакції.</summary>
+    private async Task PublishLockedAsync(int templateVersionId, int userId, string reason, CancellationToken ct)
+    {
+        // ⚠ Стан, повернений блоком, тут не перевіряється окремо: відмову
+        // для вже опублікованої версії дає `version.Publish` нижче тим самим
+        // кодом `ECR-TMPL-0409`, і сутність читається вже ПІСЛЯ блоку, тобто
+        // несе закомічений стан.
+        await versionStore.LockVersionForUpdateAsync(templateVersionId, ct).ConfigureAwait(false);
 
         // ⛔ Саме `GetWithStructureAsync`, а не `IRepository.GetAsync`. Другий —
         // це `FindAsync` без жодного `Include` при вимкненому лінивому
@@ -106,6 +133,13 @@ public sealed class PublishTemplateVersionHandler(
         // відмова на правила означала б два кола виправлень замість одного.
         diagnostics = [.. diagnostics, .. PublishChecks.CheckRules(version)];
 
+        // ⛔ V-03: дві формули в одну комірку — відхиляється тут, до
+        // перерахунку, який на такій конфігурації падав на PRIMARY KEY.
+        diagnostics = [.. diagnostics, .. FormulaTargetConflicts.Check(version, formulaEngine)];
+
+        // ⛔ V-19: вирази правил валідації публікація досі не розбирала взагалі.
+        diagnostics = [.. diagnostics, .. RuleExpressionChecks.Check(version, formulaEngine)];
+
         // ⛔ Плюс перевірка СТРУКТУРИ: версія без жодного аркуша публікувалася
         // кодом `204`, і ні домен, ні сервер цього не бачили (директива №09
         // §6.5, `S-09`). `TemplateVersion.Publish` навмисно не перевіряє це
@@ -126,15 +160,15 @@ public sealed class PublishTemplateVersionHandler(
         {
             // Усі проблеми одразу, а не перша: інакше користувач публікував би
             // версію десятки разів, виправляючи по одній.
-            throw new BusinessRuleException(
-                "ECR-TMPL-0422",
-                $"Публікацію відхилено: знайдено проблем — {diagnostics.Count}.",
-                new Dictionary<string, object?>
-                {
-                    ["diagnostics"] = diagnostics
-                        .Select(d => new DiagnosticInfo(d.Code, d.Message, d.Position, d.Length))
-                        .ToList(),
-                });
+            //
+            // ⛔ V-19: відмова несе КОНКРЕТНУ причину з ключем (ключ першого
+            // зауваження, що його має, з підстановками), а не лише загальне
+            // «does not pass validation» — причина раніше лежала тільки в
+            // `diagnostics` українським реченням.
+            throw ExpressionRejection.Build(
+                diagnostics,
+                "err.ECR-TMPL-0422.publishRejected",
+                $"Публікацію відхилено: знайдено проблем — {diagnostics.Count}.");
         }
 
         // ⛔ Граф залежностей фіксується САМЕ ТУТ і зберігається. Діапазони
@@ -154,17 +188,18 @@ public sealed class PublishTemplateVersionHandler(
         // виняток виходить назовні до SaveChanges, тому часткових змін немає.
         version.Publish(userId, clock.UtcNow);
 
+        // Аудит і зміна стану — в одній транзакції: подія публікації без
+        // публікації (і навпаки) зробила б журнал недостовірним.
+        // ⛔ C4: коментар тут стояв і раніше, а транзакції не було — `INSERT`
+        // аудиту автокомітився до `SaveChangesAsync`. ⛔ C5: транзакція тепер
+        // охоплює й блок, і читання знімка, і перевірки (див. `PublishAsync`).
         await audit.WritePublicationEventAsync(
             new PublicationEventRecord(
                 clock.UtcNow, EntityType: "TemplateVersion", EntityId: templateVersionId,
                 ResultDiffJson: null, ChangeReason: reason, ChangedByUserId: userId),
             ct).ConfigureAwait(false);
 
-        // Аудит і зміна стану — в одній транзакції: подія публікації без
-        // публікації (і навпаки) зробила б журнал недостовірним.
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
-
-        await metadataCache.InvalidateAsync(templateVersionId, ct).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -197,13 +232,19 @@ public sealed class PublishTemplateVersionHandler(
 
         version.Deprecate(userId, clock.UtcNow);
 
-        await audit.WritePublicationEventAsync(
-            new PublicationEventRecord(
-                clock.UtcNow, EntityType: "TemplateVersion", EntityId: templateVersionId,
-                ResultDiffJson: null, ChangeReason: reason, ChangedByUserId: userId),
-            ct).ConfigureAwait(false);
+        // ⛔ C4: подія й зміна стану — одним комітом.
+        await uow.ExecuteInTransactionAsync(
+            async token =>
+            {
+                await audit.WritePublicationEventAsync(
+                    new PublicationEventRecord(
+                        clock.UtcNow, EntityType: "TemplateVersion", EntityId: templateVersionId,
+                        ResultDiffJson: null, ChangeReason: reason, ChangedByUserId: userId),
+                    token).ConfigureAwait(false);
 
-        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+                await uow.SaveChangesAsync(token).ConfigureAwait(false);
+            },
+            ct).ConfigureAwait(false);
 
         // Ключ кешу не змінився — змінився СТАН версії, а структура ні. Але
         // знімок несе і статус, і саме за ним конфігуратор вирішує, чи

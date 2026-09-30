@@ -1,4 +1,5 @@
 // tests/Ecr.Application.Tests/Workflow/WorkflowTransactionTests.ApprovalEvents.cs
+using Ecr.Application.Common;
 using Ecr.Application.Ports;
 using Ecr.Application.Reporting;
 using Ecr.Application.Security;
@@ -49,10 +50,19 @@ public sealed partial class WorkflowTransactionTests
 
         Assert.All(events, e =>
         {
-            Assert.Equal(UserId, e.ByUserId);
             Assert.Equal(Now, e.At);
             Assert.Equal(world.SheetDefId, e.SheetDefId);
         });
+
+        // ⚠ F-25: `Submit`/`Reopen` — автор (`UserId`); `ApproveStep`/`Approve` —
+        // ІНШИЙ погоджувач (`ApproverId`), бо той самий користувач більше не
+        // може подати й погодити власний аркуш.
+        Assert.All(
+            events.Where(e => e.Action is ApprovalAction.Submit or ApprovalAction.Reopen),
+            e => Assert.Equal(UserId, e.ByUserId));
+        Assert.All(
+            events.Where(e => e.Action is ApprovalAction.ApproveStep or ApprovalAction.Approve),
+            e => Assert.Equal(ApproverId, e.ByUserId));
     }
 
     [Fact]
@@ -65,7 +75,10 @@ public sealed partial class WorkflowTransactionTests
         var world = await ArrangeAsync().ConfigureAwait(true);
 
         await SubmitAsync(world).ConfigureAwait(true);
-        await ApproveAsync(world, step: null, approved: false, RejectReason).ConfigureAwait(true);
+        // ⚠ F-25 не забороняє ВІДХИЛЕННЯ власного подання (лише затвердження),
+        // тож тут навмисно лишається той самий `UserId`, що й у `SubmitAsync`
+        // — сценарій, який тест і перевіряє (`rejected.ByUserId` нижче).
+        await ApproveAsync(world, step: null, approved: false, RejectReason, userId: UserId).ConfigureAwait(true);
         await SubmitAsync(world).ConfigureAwait(true);
 
         // Контроль передумови: на рядку стану причини вже справді немає.
@@ -112,9 +125,11 @@ public sealed partial class WorkflowTransactionTests
                  });
 
         await using var db = CreateContext();
+        // ⚠ F-25: `Approver()` — `world` подано від `UserId` (`ArrangeAsync`),
+        // і той самий користувач більше не може себе ж і погодити.
         var handler = new ApproveSheetHandler(
             new WorkflowStore(db), AccessAt(step: null), new ReportSnapshotSync(snapshots, Documents(world)),
-            new UnitOfWork(db), User(), new TestClock(Now), new AuditWriter(db));
+            new UnitOfWork(db), Approver(), new TestClock(Now), new AuditWriter(db));
 
         await Assert.ThrowsAsync<Ecr.Application.Errors.ConcurrencyConflictException>(
             () => handler.HandleAsync(
@@ -136,12 +151,19 @@ public sealed partial class WorkflowTransactionTests
             .ConfigureAwait(false);
     }
 
-    private async Task ApproveAsync(World world, ApprovalStepView? step, bool approved, string? reason)
+    private async Task ApproveAsync(
+        World world, ApprovalStepView? step, bool approved, string? reason, int userId = ApproverId)
     {
         await using var db = CreateContext();
+        // ⚠ F-25: за замовчуванням `ApproverId`, а не `UserId` — той самий
+        // користувач не може погодити власне подання (`SubmitAsync` подає від
+        // `UserId`). Виклик на ВІДХИЛЕННЯ (`Причина_відхилення_переживає_…`)
+        // підставляє `UserId` сам: відмова стосується лише затвердження.
+        var user = Substitute.For<ICurrentUser>();
+        user.UserId.Returns(userId);
         var handler = new ApproveSheetHandler(
             new WorkflowStore(db), AccessAt(step), new ReportSnapshotSync(NoSnapshots(), Documents(world)),
-            new UnitOfWork(db), User(), new TestClock(Now), new AuditWriter(db));
+            new UnitOfWork(db), user, new TestClock(Now), new AuditWriter(db));
 
         await handler
             .HandleAsync(world.DocumentId, world.SheetDefId, PeriodKeyValue, approved, reason, CancellationToken.None)
@@ -190,8 +212,13 @@ public sealed partial class WorkflowTransactionTests
     {
         var access = Access();
 
-        access.BuildProfileAsync(UserId, Arg.Any<CancellationToken>())
-              .Returns(new AccessBuilder { UserId = UserId }.Permission(ReopenDocumentHandler.Permission).Build());
+        // ⚠ Будь-який `userId`: `SubmitAsync`/`ApproveAsync`/`ReopenAsync` цього
+        // файлу відтепер кличуть із РІЗНИМИ користувачами (`UserId`,
+        // `ApproverId` — F-25), і профіль мусить будуватися для того, хто
+        // насправді викликає.
+        access.BuildProfileAsync(Arg.Any<int>(), Arg.Any<CancellationToken>())
+              .Returns(call => new AccessBuilder { UserId = call.Arg<int>() }
+                  .Permission(ReopenDocumentHandler.Permission).Build());
         access.CanReopenAsync(
                   Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<int>(), Arg.Any<PeriodKey>(),
                   Arg.Any<CancellationToken>())

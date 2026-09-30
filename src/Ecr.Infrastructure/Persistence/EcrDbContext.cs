@@ -45,6 +45,16 @@ public sealed class EcrDbContext(DbContextOptions<EcrDbContext> options)
     public DbSet<RegistryFieldDef> RegistryFieldDefs => Set<RegistryFieldDef>();
     public DbSet<RegistryRuleDef> RegistryRuleDefs => Set<RegistryRuleDef>();
     public DbSet<RegistryDefinitionDraft> RegistryDefinitionDrafts => Set<RegistryDefinitionDraft>();
+
+    /// <summary>Складені ключі довідників і їхні частини (FEATURE-REGISTRY-TABLES, RT-01).</summary>
+    public DbSet<RegistryKeyDef> RegistryKeyDefs => Set<RegistryKeyDef>();
+    public DbSet<RegistryKeyField> RegistryKeyFields => Set<RegistryKeyField>();
+
+    /// <summary>Хто використовує довідник: формули й правила (FEATURE-REGISTRY-TABLES, RT-05).</summary>
+    public DbSet<RegistryUse> RegistryUses => Set<RegistryUse>();
+
+    /// <summary>Профілі імпорту довідників (FEATURE-REGISTRY-TABLES, RT-06).</summary>
+    public DbSet<RegistryImportProfile> RegistryImportProfiles => Set<RegistryImportProfile>();
     public DbSet<CalculationBinding> CalculationBindings => Set<CalculationBinding>();
 
     // uom
@@ -57,6 +67,9 @@ public sealed class EcrDbContext(DbContextOptions<EcrDbContext> options)
     public DbSet<RegistryValue> RegistryValues => Set<RegistryValue>();
     public DbSet<RegistryEntryLink> RegistryEntryLinks => Set<RegistryEntryLink>();
     public DbSet<RegistryExternalKey> RegistryExternalKeys => Set<RegistryExternalKey>();
+
+    /// <summary>Похідні рядки унікальності ключів (RT-01); пише лише служба ключів.</summary>
+    public DbSet<RegistryEntryKey> RegistryEntryKeys => Set<RegistryEntryKey>();
 
     // doc
     public DbSet<Project> Projects => Set<Project>();
@@ -93,6 +106,7 @@ public sealed class EcrDbContext(DbContextOptions<EcrDbContext> options)
     public DbSet<MethodologyVersion> MethodologyVersions => Set<MethodologyVersion>();
     public DbSet<MethodologyFormula> MethodologyFormulas => Set<MethodologyFormula>();
     public DbSet<MethodologyConstant> MethodologyConstants => Set<MethodologyConstant>();
+    public DbSet<RecalculationApproval> RecalculationApprovals => Set<RecalculationApproval>();
 
     /// <summary>Тести методології: вхід, очікуваний вихід, допуск (ФВ-13.7).</summary>
     public DbSet<MethodologyTestCaseEntity> MethodologyTestCases => Set<MethodologyTestCaseEntity>();
@@ -130,6 +144,11 @@ public sealed class EcrDbContext(DbContextOptions<EcrDbContext> options)
     public DbSet<LegacyTableMapping> LegacyTableMappings => Set<LegacyTableMapping>();
     public DbSet<LegacyRowMapping> LegacyRowMappings => Set<LegacyRowMapping>();
     public DbSet<LegacyColumnMapping> LegacyColumnMappings => Set<LegacyColumnMapping>();
+
+    /// <summary>Прив'язки «атрибут → колонка, вікно = рядок» і їхній провенанс (HSE301 §4.4).</summary>
+    public DbSet<RowWindowMap> RowWindowMaps => Set<RowWindowMap>();
+    public DbSet<RowWindowSource> RowWindowSources => Set<RowWindowSource>();
+    public DbSet<RowWindowValue> RowWindowValues => Set<RowWindowValue>();
 
     // itg
     public DbSet<CollectionRun> CollectionRuns => Set<CollectionRun>();
@@ -222,10 +241,18 @@ public sealed class EcrDbContext(DbContextOptions<EcrDbContext> options)
             fk.DeleteBehavior = DeleteBehavior.Restrict;
         }
 
+        // `V-13`: моменти часу читаються з Kind=Utc і йдуть у JSON із «Z»;
+        // календарні дати (`ValueDate`) — ні. Класифікація й межа — у
+        // `UtcDateTimeColumns`.
+        UtcDateTimeColumns.Apply(modelBuilder);
+
         // Id для партиційованих таблиць беруться з SEQUENCE, а не з IDENTITY:
         // значення потрібне ДО вставки, щоб завантажити TableRow і CellValue
         // одним проходом SqlBulkCopy (B02 §2.3). CACHE 1000 — компроміс між
         // круглими втратами при перезапуску і зверненнями до системних таблиць.
+        // ⚠ Кеш задає міграція `WR09SequenceCache` сирим ALTER SEQUENCE: EF
+        // Core 10 не має API кешу послідовності, тож у моделі його не видно.
+        // Прибереш міграцію — `SequenceCacheTests` почервоніє.
         //
         // Оголошуються лише для SQL Server. Послідовність тут — фізичний
         // об'єкт SQL Server, який читається через sp_sequence_get_range, і в
@@ -253,6 +280,21 @@ public sealed class EcrDbContext(DbContextOptions<EcrDbContext> options)
             // того, як усі числа пораховані.
             modelBuilder.HasSequence<long>("CalculationResultSeq", "calc").StartsAt(1).IncrementsBy(1);
         }
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⚠ Генератор SQL міграцій замінюється ТУТ, а не в DI: контекст будують
+    /// і <c>DependencyInjection</c>, і <c>EcrDbContextFactory</c> (<c>dotnet ef
+    /// migrations script</c>, яким розгортають прод), і тести. Передперевірка
+    /// <c>D148ScalePrecheck</c> мусить бути в SQL кожного з цих шляхів.
+    /// </remarks>
+    protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+    {
+        ArgumentNullException.ThrowIfNull(optionsBuilder);
+
+        optionsBuilder.ReplaceService<
+            Microsoft.EntityFrameworkCore.Migrations.IMigrationsSqlGenerator, EcrMigrationsSqlGenerator>();
     }
 
     /// <inheritdoc />

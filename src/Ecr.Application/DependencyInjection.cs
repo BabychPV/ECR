@@ -74,6 +74,7 @@ public static class DependencyInjection
         // Третій і четвертий зрізи — колонка й рядок таблиці (ФВ-2.1..ФВ-2.5,
         // W5.2), за зразком аркуша й таблиці вище.
         services.AddScoped<SaveColumnDefHandler>();
+        services.AddScoped<GetColumnDefHandler>();
         services.AddScoped<DeleteColumnDefHandler>();
         services.AddScoped<SaveRowDefHandler>();
         services.AddScoped<DeleteRowDefHandler>();
@@ -101,6 +102,7 @@ public static class DependencyInjection
         // PeriodAccessRuleHandlers.cs).
         services.AddScoped<SaveValidationRuleHandler>();
         services.AddScoped<DeleteValidationRuleHandler>();
+        services.AddScoped<ListValidationRulesHandler>();
         services.AddScoped<CreatePeriodAccessRuleHandler>();
         services.AddScoped<SavePeriodAccessRuleHandler>();
         services.AddScoped<DeletePeriodAccessRuleHandler>();
@@ -124,6 +126,7 @@ public static class DependencyInjection
 
         // Документи і комірки (модуль 1.8)
         services.AddScoped<CreateDocumentHandler>();
+        services.AddScoped<GetDocumentTemplateHandler>();
         services.AddScoped<ListDocumentsHandler>();
         services.AddScoped<GetDocumentListSummaryHandler>();
         services.AddScoped<GetDocumentHandler>();
@@ -133,6 +136,11 @@ public static class DependencyInjection
         // Вирази, валідація і перерахунок (модулі 2.6–2.8)
         services.AddScoped<Validation.ValidationEngine>();
         services.AddScoped<Recalculation.RecalculationService>();
+
+        // ⚠ Той самий екземпляр у межах скоупу: подання мусить рахувати ТИМ
+        // САМИМ `EcrDbContext`, у транзакції якого воно тримає блокування.
+        services.AddScoped<Recalculation.ISubmitRecalculation>(
+            sp => sp.GetRequiredService<Recalculation.RecalculationService>());
         services.AddScoped<ValidateDocumentHandler>();
         services.AddScoped<GetValidationResultHandler>();
         services.AddScoped<Templates.PublishTemplateVersionHandler>();
@@ -207,6 +215,7 @@ public static class DependencyInjection
         services.AddScoped<Registries.CreateRegistryHandler>();
         services.AddScoped<Registries.GetRegistryEntriesHandler>();
         services.AddScoped<Registries.UpsertRegistryEntryHandler>();
+        services.AddScoped<Registries.GetRegistryEntryHandler>();
         services.AddScoped<Registries.SetEntryValidityHandler>();
         services.AddScoped<Registries.SwitchRegistrySourceHandler>();
         services.AddScoped<Registries.DeleteRegistryEntryHandler>();
@@ -233,6 +242,25 @@ public static class DependencyInjection
         services.AddScoped<Registries.GetRegistryHistoryHandler>();
         services.AddScoped<Registries.GetRegistryUsageHandler>();
         services.AddScoped<Registries.ImportRegistryEntriesHandler>();
+        services.AddScoped<Registries.ListRegistryExternalKeysHandler>(); // FEATURE-REGISTRY-SYNC S2
+        services.AddScoped<Registries.BindRegistryExternalKeyHandler>();
+        services.AddScoped<Registries.UnbindRegistryExternalKeyHandler>();
+
+        // ── FEATURE-REGISTRY-TABLES: append-only блоки треків (RT-01) ──
+        // Крок дописує реєстрації ЛИШЕ під свій маркер; власники —
+        // docs/build/FEATURE-REGISTRY-TABLES.md §9.0 і §9.1.
+        // RT: keys
+        services.AddScoped<Registries.Keys.RegistryKeyService>(); // RT-10a
+        services.AddScoped<Registries.Keys.CheckRegistryKeyHandler>(); // RT-11
+
+        // RT: data
+        services.AddScoped<Registries.RegistryEntryWriter>(); // S6
+        services.AddScoped<Registries.Rows.GetRegistryRowsHandler>(); // RT-13
+        services.AddScoped<Registries.Rows.RegistryBatchHandler>(); // RT-14
+        services.AddScoped<Registries.Rules.RegistryRuleCompiler>(); // RT-17a
+        services.AddScoped<Registries.Rules.IRegistryRuleEngine, Registries.Rules.RegistryRuleEngine>(); // RT-17a
+
+        // RT: expressions
 
         // Редактор виразів (`ФВ-9.15a`): перевірка тексту і склад мови.
         services.AddScoped<Expressions.ValidateExpressionHandler>();
@@ -242,10 +270,14 @@ public static class DependencyInjection
         services.AddScoped<Calculations.PublishMethodologyHandler>();
         services.AddScoped<Calculations.SimulateMethodologyHandler>();
         services.AddScoped<Calculations.ListMethodologyVersionsHandler>();
+        services.AddScoped<Calculations.ListMethodologyPublicationsHandler>();
         services.AddScoped<Calculations.CreateMethodologyVersionHandler>();
         services.AddScoped<Calculations.ListMethodologyFormulasHandler>();
         services.AddScoped<Calculations.SaveMethodologyFormulaHandler>();
         services.AddScoped<Calculations.DeleteMethodologyFormulaHandler>();
+
+        // B-07: версія з маршруту мусить належати методології з маршруту.
+        services.AddScoped<Calculations.MethodologyVersionScope>();
 
         // Авторство методології з нуля (директива №09, `W6`): сама методологія,
         // константи, правила відбору, виходи, золотий набір, режими і прив'язка
@@ -270,6 +302,7 @@ public static class DependencyInjection
         services.AddScoped<Calculations.CompareMethodologyVersionsHandler>();
         services.AddScoped<Documents.GetCalculationResultsHandler>();
         services.AddScoped<Calculations.RunCalculationHandler>();
+        services.AddScoped<Calculations.RecalculationApprovalHandlers>();
         services.AddScoped<Localization.SetUiStringHandler>();
         services.AddScoped<Localization.GetUiStringCoverageHandler>();
         services.AddScoped<Localization.ListUiStringsHandler>();
@@ -339,12 +372,18 @@ public static class DependencyInjection
         // Журнал прогонів збору (ФВ-5.23).
         services.AddScoped<Integration.ListCollectionRunsHandler>();
         services.AddScoped<Integration.GetCollectionRunHandler>();
+        services.AddScoped<Integration.ListCoverageEventsHandler>();
 
         // Перегляд мапінгу на реальних рядках джерела (`ФВ-13.14`).
         services.AddScoped<Sources.PreviewMappingHandler>();
 
         // Заведення мапінгу поля джерела (Прогалина 1 директиви паритету).
         services.AddScoped<Sources.CreateEntityFieldMapHandler>();
+
+        // ФВ-13.11: сутність збору заводиться з вебу; прив'язка до довідника (ФВ-8.11).
+        services.AddScoped<Sources.CreateSourceEntityHandler>();
+        services.AddScoped<Sources.BindSourceEntityRegistryHandler>();
+        services.AddScoped<Sources.SetSourceEntityRegistryPolicyHandler>(); // D-212: політика синку довідника
 
         // BE-27: дії над наявним мапінгом — пауза/відновлення, приймання зміни
         // одиниці джерела (ФВ-16.9), видалення з перевіркою наслідків.

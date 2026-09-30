@@ -29,7 +29,15 @@ public sealed class ListTemplatesHandler(
         if (!page.IsValid)
         {
             throw new BusinessRuleException(
-                ErrorCodes.RequestInvalid, $"Розмір сторінки поза межами 1..{CursorRequest.MaxLimit}.");
+                ErrorCodes.RequestInvalid,
+                $"Розмір сторінки поза межами 1..{CursorRequest.MaxLimit}.",
+                new Dictionary<string, object?>
+                {
+                    // Наявний ключ, той самий патерн, що DocumentQueryHandlers/
+                    // ListProjectsHandler для тієї самої перевірки курсорної сторінки.
+                    ["messageKey"] = "err.ECR-REQ-0422.pageSizeOutOfRange",
+                    ["max"] = CursorRequest.MaxLimit.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
         }
 
         return await templates.ListTemplatesAsync(page, ct).ConfigureAwait(false);
@@ -46,14 +54,21 @@ public sealed class ListTemplatesHandler(
         IAccessDecisionService access, ICurrentUser currentUser, string permission, CancellationToken ct)
     {
         var userId = currentUser.UserId
-                     ?? throw new AccessDeniedException("ECR-AUTH-0401", "Потрібна автентифікація.");
+                     ?? throw new AccessDeniedException(
+                         "ECR-AUTH-0401",
+                         "Потрібна автентифікація.",
+                         new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.signInRequired" });
 
         var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
         if (!profile.Has(permission))
         {
             throw new AccessDeniedException(
                 "ECR-AUTH-0403", $"Потрібне право {permission}.",
-                new Dictionary<string, object?> { ["permission"] = permission });
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-AUTH-0403.permission",
+                    ["permission"] = permission,
+                });
         }
     }
 }
@@ -110,9 +125,96 @@ public sealed class ListTemplateVersionsHandler(
         if (!page.IsValid)
         {
             throw new BusinessRuleException(
-                ErrorCodes.RequestInvalid, $"Розмір сторінки поза межами 1..{CursorRequest.MaxLimit}.");
+                ErrorCodes.RequestInvalid,
+                $"Розмір сторінки поза межами 1..{CursorRequest.MaxLimit}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-REQ-0422.pageSizeOutOfRange",
+                    ["max"] = CursorRequest.MaxLimit.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
         }
 
-        return await templates.ListVersionsAsync(templateId, page, ct).ConfigureAwait(false);
+        var versions = await templates.ListVersionsAsync(templateId, page, ct).ConfigureAwait(false);
+
+        // ⛔ B-07: неіснуючий шаблон давав `200` з порожньою сторінкою —
+        // «версій немає» на адресі, якої не існує. Питаємо лише коли порожньо:
+        // шаблон без жодної версії законний, але існувати мусить.
+        if (versions.Items.Count == 0
+            && await templates.FindTemplateAsync(templateId, ct).ConfigureAwait(false) is null)
+        {
+            throw new NotFoundException(
+                ErrorCodes.TemplateNotFound,
+                $"Шаблон {templateId} не знайдено.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-TMPL-0404.template",
+                    ["templateId"] = templateId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
+        }
+
+        return versions;
+    }
+
+    /// <summary>Ліміт версій на ОДИН шаблон у пакетній відповіді (`HandleBatchAsync`).</summary>
+    /// <remarks>Той самий одноразовий ліміт, що клієнт раніше передавав окремо кожному запиту.</remarks>
+    private const int PerTemplateVersionLimit = 100;
+
+    /// <summary>
+    /// Версії ДЕКІЛЬКОХ шаблонів ОДНИМ HTTP-зверненням (`BR-07`). Право <c>Template.View</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Уникає N+1 на РІВНІ HTTP-запитів клієнта: перелік шаблонів
+    /// (`/admin/templates`) до цього бив по одному запиту версій на КОЖЕН
+    /// рядок переліку (`TemplatesPage.tsx`, `useQueries`) — підтверджений
+    /// 2026-09-25 пробіл продуктивності.
+    ///
+    /// ⛔ І на рівні SQL теж: версії всіх шаблонів беруться ОДНИМ викликом
+    /// <see cref="ITemplateVersionStore.ListVersionsForTemplatesAsync"/>
+    /// (`WHERE TemplateId IN (...)`). Раніше тут був цикл
+    /// <see cref="ITemplateVersionStore.ListVersionsAsync"/> по одному на
+    /// шаблон — N SQL-запитів в одному HTTP-виклику. Порядок відповіді —
+    /// порядок <paramref name="templateIds"/> (без повторів), його відновлює
+    /// цей обробник, не сховище.
+    ///
+    /// ⛔ На відміну від <see cref="HandleAsync"/>, невідомий <paramref
+    /// name="templateIds"/> НЕ дає `404`: пакетний запит адресує МНОЖИНУ
+    /// шаблонів, і семантика «чого немає — те просто відсутнє в результаті»
+    /// той самий патерн, що вже в <c>ListMethodologiesHandler</c>
+    /// (`GET /api/v1/methodologies?ids=`, `RD-06`). Повтори в
+    /// <paramref name="templateIds"/> звужуються до одного виклику на
+    /// шаблон.
+    /// </remarks>
+    /// <param name="templateIds">Шаблони, чиї версії цікавлять.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public async Task<IReadOnlyList<TemplateVersionsForTemplate>> HandleBatchAsync(
+        IReadOnlyList<int> templateIds, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(templateIds);
+
+        await ListTemplatesHandler
+            .RequireAsync(access, currentUser, ListTemplatesHandler.Permission, ct)
+            .ConfigureAwait(false);
+
+        var unique = templateIds.Distinct().ToList();
+        if (unique.Count == 0)
+        {
+            return [];
+        }
+
+        var byTemplate = await templates
+            .ListVersionsForTemplatesAsync(unique, PerTemplateVersionLimit, ct)
+            .ConfigureAwait(false);
+
+        return
+        [
+            .. unique.Select(templateId => new TemplateVersionsForTemplate(
+                templateId,
+                byTemplate.TryGetValue(templateId, out var versions) ? versions : [])),
+        ];
     }
 }
+
+/// <summary>Версії одного шаблону в межах пакетної відповіді (`ListTemplateVersionsHandler.HandleBatchAsync`, `BR-07`).</summary>
+/// <param name="TemplateId">Шаблон, якому належать версії.</param>
+/// <param name="Versions">Версії шаблону, у тому самому порядку, що й <see cref="ListTemplateVersionsHandler.HandleAsync"/>.</param>
+public sealed record TemplateVersionsForTemplate(int TemplateId, IReadOnlyList<TemplateVersionSummary> Versions);

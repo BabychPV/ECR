@@ -29,14 +29,19 @@ const templates = {
   totalCount: 1,
 };
 
-const versions = {
-  items: [
-    { id: 1, version: '1.0', status: 'Deprecated', presentationRevision: 2 },
-    { id: 2, version: '2.0', status: 'Published', presentationRevision: 1 },
-  ],
-  nextCursor: null,
-  totalCount: 2,
-};
+// ⚠ BR-07: версії тепер приходять ОДНИМ пакетним запитом
+// (`GET /api/v1/templates/versions?ids=...`), відповідь — масив, ЗГРУПОВАНИЙ
+// по шаблону (`TemplateVersionsForTemplate`), а не гола сторінка одного
+// шаблону.
+const versionsBatch = [
+  {
+    templateId: 7,
+    versions: [
+      { id: 1, version: '1.0', status: 'Deprecated', presentationRevision: 2 },
+      { id: 2, version: '2.0', status: 'Published', presentationRevision: 1 },
+    ],
+  },
+];
 
 function respond(): void {
   vi.stubGlobal(
@@ -61,12 +66,12 @@ function respond(): void {
         );
       }
 
-      // ⚠ Порядок важливий: адреса версій містить `/api/v1/templates` як
-      // префікс, тож вужчу гілку перевіряємо ПЕРШОЮ. Зворотний порядок віддав
-      // би перелік шаблонів у відповідь на запит версій — і тест упав би не з
-      // тієї причини, яку перевіряє.
-      if (/\/api\/v1\/templates\/\d+\/versions/.test(url)) {
-        return new Response(JSON.stringify(versions), {
+      // ⚠ Порядок важливий: адреса пакетних версій містить `/api/v1/templates`
+      // як префікс, тож вужчу гілку перевіряємо ПЕРШОЮ. Зворотний порядок
+      // віддав би перелік шаблонів у відповідь на запит версій — і тест упав
+      // би не з тієї причини, яку перевіряє.
+      if (/\/api\/v1\/templates\/versions(\?|$)/.test(url)) {
+        return new Response(JSON.stringify(versionsBatch), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
         });
@@ -109,6 +114,13 @@ describe('TemplatesPage: статус версії — з набору, не к�
 
     await screen.findByText('AIR');
 
+    // ⚠ BR-07: версії тепер приходять ОКРЕМИМ пакетним запитом
+    // (`/api/v1/templates/versions`), що стартує лише ПІСЛЯ переліку
+    // шаблонів, — чекаємо саме на позначку версії, а не лише на код
+    // шаблону, інакше твердження нижче могло б піймати проміжний стан
+    // «версії ще не завантажилися».
+    await screen.findByText('1.0');
+
     /*
      * ⛔ Головне твердження. `data-status-state` кладе `StatusBadge` — тобто
      * стан пройшов через таблицю набору (`statusTable.version`), а не був
@@ -127,6 +139,7 @@ describe('TemplatesPage: статус версії — з набору, не к�
     show();
 
     await screen.findByText('AIR');
+    await screen.findByText('1.0');
 
     /*
      * ⚠ Підпис береться з каталогу за ключем `status.version.<стан>`, а без

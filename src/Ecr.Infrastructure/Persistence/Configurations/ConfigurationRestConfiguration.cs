@@ -36,7 +36,12 @@ public sealed class FormulaDefConfiguration : IEntityTypeConfiguration<FormulaDe
         // DEFAULT-и з іменами за 02a-db-schema.md: безіменне обмеження
         // неможливо прибрати скриптом, не з'ясувавши спершу його
         // випадкове ім'я на конкретній базі.
-        builder.Property(x => x.Dialect).HasDefaultValueSql("0", "DF_Formula_Dialect");
+        // ⚠ `ValueGeneratedNever`: значення ЗАВЖДИ надсилається з коду, а
+        // DEFAULT лишається лише для вставок повз EF. Без цього EF (20601) не
+        // надсилав би CLR-замовчування (0) і підставляв би DEFAULT схеми;
+        // тут вони збігаються (0), тож втрати не було — але правило одне для
+        // всіх переліків із DEFAULT, щоб наступна зміна DEFAULT не відкрила її.
+        builder.Property(x => x.Dialect).HasDefaultValueSql("0", "DF_Formula_Dialect").ValueGeneratedNever();
         builder.Property(x => x.EvaluationOrder).HasDefaultValue(0, "DF_Formula_Order");
         builder.Property(x => x.IsCrossSheet).HasDefaultValue(false, "DF_Formula_Cross");
         builder.Property(x => x.IsSnapshot).HasDefaultValue(false, "DF_Formula_Snap");
@@ -247,10 +252,24 @@ public sealed class RegistryDefConfiguration : IEntityTypeConfiguration<Registry
         // неможливо прибрати скриптом, не з'ясувавши спершу його
         // випадкове ім'я на конкретній базі.
         builder.Property(x => x.IsTemporal).HasDefaultValue(false, "DF_RegDef_Temp");
-        builder.Property(x => x.SourceKind).HasDefaultValueSql("2", "DF_RegDef_Src");
+        // ⛔ `ValueGeneratedNever`: значення ЗАВЖДИ надсилається з коду, а
+        // DEFAULT лишається лише для вставок повз EF. Без цього EF (20601)
+        // вважав `External` (= 0, CLR-замовчування) «незаданим» і на INSERT
+        // мовчки підставляв DEFAULT схеми (`2` = `Local`). Конструктор
+        // сутності задає значення явно, тож на DEFAULT схеми код не
+        // покладається.
+        builder.Property(x => x.SourceKind).HasDefaultValueSql("2", "DF_RegDef_Src").ValueGeneratedNever();
         builder.Property(x => x.DataRevision).HasDefaultValue(0, "DF_RegDef_Rev");
         builder.Property(x => x.DefinitionVersion).HasDefaultValue(1, "DF_RegDef_Ver");
         builder.Property(x => x.IsActive).HasDefaultValue(true, "DF_RegDef_Act");
+
+        // RK02 (D-157, D-163). `ValueGeneratedNever` — з тієї самої причини, що
+        // й `SourceKind` вище: значення завжди йде з коду, DEFAULT лише для
+        // вставок повз EF.
+        builder.Property(x => x.CodeMode).HasConversion<byte>()
+               .HasDefaultValueSql("0", "DF_RegDef_CodeMode").ValueGeneratedNever();
+        builder.Property(x => x.DataChangedAt).HasColumnType("datetime2(3)");
+
         builder.HasIndex(x => x.Code).IsUnique().HasDatabaseName("UQ_RegistryDef");
         builder.Navigation(x => x.Fields).UsePropertyAccessMode(PropertyAccessMode.Field);
     }
@@ -264,7 +283,17 @@ public sealed class RegistryFieldDefConfiguration : IEntityTypeConfiguration<Reg
     {
         ArgumentNullException.ThrowIfNull(builder);
 
-        builder.ToTable("RegistryFieldDef", "cfg");
+        // ⛔ Композиція — лише на полі `Lookup` (`DataType = 5`, D-155): база
+        // тримає інваріант і для вставок повз домен (імпорт, скрипти). Без
+        // нього «частиною батька» ставало б поле, в якому батька немає, — і
+        // каскад видалення та видимість дітей шукали б посилання в порожнечі.
+        builder.ToTable("RegistryFieldDef", "cfg", t =>
+        {
+            t.HasCheckConstraint(
+                "CK_RegField_Rel",
+                "RelationKind BETWEEN 0 AND 1 AND OnParentDelete BETWEEN 0 AND 1");
+            t.HasCheckConstraint("CK_RegField_Composition", "RelationKind = 0 OR DataType = 5");
+        });
         builder.HasKey(x => x.Id);
         builder.Property(x => x.Code).HasMaxLength(64).IsRequired();
         builder.Property(x => x.DataType).HasConversion<byte>();
@@ -274,12 +303,23 @@ public sealed class RegistryFieldDefConfiguration : IEntityTypeConfiguration<Reg
         // випадкове ім'я на конкретній базі.
         builder.Property(x => x.IsRequired).HasDefaultValue(false, "DF_RegField_Req");
         builder.Property(x => x.IsKey).HasDefaultValue(false, "DF_RegField_Key");
+        builder.Property(x => x.RelationKind).HasConversion<byte>()
+               .HasDefaultValueSql("0", "DF_RegField_Rel").ValueGeneratedNever();
+        builder.Property(x => x.OnParentDelete).HasConversion<byte>()
+               .HasDefaultValueSql("0", "DF_RegField_OnDel").ValueGeneratedNever();
         builder.HasIndex(x => new { x.RegistryDefId, x.Code })
                .IsUnique().HasDatabaseName("UQ_RegistryFieldDef");
         // .WithMany(r => r.Fields) обов'язково: інакше RegistryDef.Fields стає
         // другим зв'язком і тягне за собою тіньову колонку RegistryDefId1.
         builder.HasOne<RegistryDef>().WithMany(r => r.Fields).HasForeignKey(x => x.RegistryDefId)
                .HasConstraintName("FK_RegField_Registry");
+
+        // ⛔ HSE301 U1 (аудит C6 п.1): одиниця поля — зовнішній ключ, як у
+        // ColumnDef (FK_ColumnDef_Unit). Видалення одиниці — NO ACTION.
+        // ⚠ Індексу під ключ немає навмисно: таблиця мала (поля описів довідників),
+        // і перевірка ключа при видаленні одиниці сканує її за мілісекунди.
+        builder.HasOne<Unit>().WithMany().HasForeignKey(x => x.UnitId)
+               .HasConstraintName("FK_RegField_Unit");
     }
 }
 

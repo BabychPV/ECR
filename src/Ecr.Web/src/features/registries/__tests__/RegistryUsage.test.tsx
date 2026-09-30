@@ -254,12 +254,12 @@ describe('Конструктор довідника: «де використан
  * без рядка тут покаже сире значення в `<code>` — не порожнечу.
  */
 describe('«де використано»: назва роду залежного', () => {
+  // ⚠ `data` — окремо нижче: у нього немає підпису-імені (X-11).
   const Kinds = [
     'templateColumn',
     'registryField',
     'methodologySubstance',
     'sourceEntity',
-    'data',
   ] as const;
 
   function badgeOf(label: string): HTMLElement {
@@ -289,6 +289,17 @@ describe('«де використано»: назва роду залежног�
       const badge = badgeOf(`L-${kind}`);
       expect(badge.textContent).toBe(`⟦usageKind.${kind}⟧`);
     }
+  });
+
+  it('дані в документах — речення, а не ім\'я таблиці сховища (X-11)', () => {
+    // ⛔ Сервер доти віддавав `doc.CellValue` і як підпис, і як ідентифікатор:
+    // людина читала «STORED DATA · doc.CellValue».
+    list([{ kind: 'data', id: 'doc.CellValue', label: 'doc.CellValue', route: null }]);
+
+    const row = screen.getByText('⟦registries.usageDataInDocuments⟧').closest('li');
+    expect(row).not.toBeNull();
+    expect(row?.textContent).not.toContain('doc.CellValue');
+    expect(row?.querySelector('.mantine-Badge-root')?.textContent).toBe('⟦usageKind.data⟧');
   });
 
   it('невідомий рід — сире значення в <code>, не порожньо й не вигадана назва', () => {

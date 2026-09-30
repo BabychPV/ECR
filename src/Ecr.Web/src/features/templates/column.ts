@@ -1,5 +1,4 @@
 import type { components } from '@/api/schema';
-import type { TemplateColumnDto } from '@/api/types';
 import type { LocalizedValue } from '@/shared/ui/LocalizedInput';
 import { normalizeDecimal } from '@/shared/format';
 import { type StyleDraft, whyCannotSaveStyle } from './style';
@@ -81,14 +80,13 @@ export type SaveColumnDefRequest = Schemas['SaveColumnDefRequest'];
 /**
  * Чернетка колонки в редакторі.
  *
- * ⚠ `precision`/`scale`/`defaultValue`/`lookupRegistryDefId`/`unitId` —
- * розширені поля. `TemplateColumnDto` (структура версії,
- * `Dto/TemplateStructureDto.cs`) навмисно бідніший — він для екрана
- * презентаційної правки й цих полів не носить (`Q-012`). Тому чернетку
- * існуючої колонки, яку в ЦЬОМУ СЕАНСІ ще не зберігали через цей редактор,
- * будує `columnDraftOf` БЕЗ них — і позначає це `hasFullData: false`, щоб
- * форма попередила людину, а не тихо скинула лукап чи точність на `PUT`
- * (`PUT` — заміна цілком, `D2-147`; часткового патча в цього маршруту нема).
+ * ⛔ X-02 (четвертий раунд UX): чернетку НАЯВНОЇ колонки будує лише
+ * `columnDraftOf` з ПОВНОЇ відповіді `GET …/tables/{tableId}/columns/{code}`.
+ * Доти вона будувалася з `TemplateColumnDto` структури, який не носить
+ * точності, одиниці, довідника, фільтра, значення за замовчуванням і стилю, —
+ * і `PUT` (заміна цілком, `D2-147`) стирав їх при кожному повторному
+ * збереженні, а форма сама попереджала «Saving will clear them». Тепер
+ * незмінене поле їде назад незмінним, і попереджати нема про що.
  */
 export interface ColumnDraft {
   readonly code: string;
@@ -103,6 +101,12 @@ export interface ColumnDraft {
   readonly defaultValue: string;
   readonly displayFormat: string;
   readonly lookupRegistryDefId: number | null;
+
+  /**
+   * Звуження списку довідника. Форма його не редагує — лише несе збережене
+   * значення назад, щоб `PUT` не стер його (X-02: тут завжди їхав `null`).
+   */
+  readonly lookupFilter: string | null;
   readonly unitId: number | null;
   readonly isNew: boolean;
 
@@ -122,9 +126,6 @@ export interface ColumnDraft {
    * і лише потім — колонку з отриманим `styleId`.
    */
   readonly style: StyleDraft | null;
-
-  /** `false` — розширені поля вище невідомі клієнту (див. коментар типу). */
-  readonly hasFullData: boolean;
 }
 
 /** Порожня чернетка нової колонки. */
@@ -142,64 +143,52 @@ export function emptyColumnDraft(nextOrdinal: number): ColumnDraft {
     defaultValue: '',
     displayFormat: '',
     lookupRegistryDefId: null,
+    lookupFilter: null,
     unitId: null,
     styleId: null,
     style: null,
     isNew: true,
-    hasFullData: true,
   };
 }
 
 /**
  * Чернетка з наявної колонки — для правки.
  *
- * @param column Опис колонки зі структури версії (`GET …/structure`).
- * @param full Повна відповідь цього PUT з ЦЬОГО сеансу, якщо колонку вже
- * зберігали через цей редактор відтоді, як сторінку відкрили. Коли є —
- * розширені поля читаються звідси, а не губляться.
+ * @param full Повна відповідь `GET …/tables/{tableId}/columns/{code}` — ті самі
+ * поля, що приймає `PUT`, тож збереження без правок нічого не змінює.
  */
-export function columnDraftOf(column: TemplateColumnDto, full?: ColumnDefDto): ColumnDraft {
-  if (full !== undefined) {
-    return {
-      code: full.code,
-      headerL10n: { ...(full.headerL10n.values ?? {}) },
-      ordinal: full.ordinal,
-      dataType: full.dataType,
-      isRequired: full.isRequired,
-      isReadOnly: full.isReadOnly,
-      isHidden: full.isHidden,
-      precision: full.precision,
-      scale: full.scale,
-      defaultValue: full.defaultValue ?? '',
-      displayFormat: full.displayFormat ?? '',
-      lookupRegistryDefId: full.lookupRegistryDefId,
-      unitId: full.unitId,
-      styleId: full.styleId,
-      style: null,
-      isNew: false,
-      hasFullData: true,
-    };
-  }
-
+export function columnDraftOf(full: ColumnDefDto): ColumnDraft {
   return {
-    code: column.code,
-    headerL10n: { ...(column.headerL10n.values ?? {}) },
-    ordinal: column.ordinal,
-    dataType: column.dataType as CellDataType,
-    isRequired: column.isRequired,
-    isReadOnly: column.isReadOnly,
-    isHidden: column.isHidden,
-    precision: null,
-    scale: null,
-    defaultValue: '',
-    displayFormat: column.displayFormat ?? '',
-    lookupRegistryDefId: null,
-    unitId: null,
-    styleId: null,
+    code: full.code,
+    headerL10n: { ...(full.headerL10n.values ?? {}) },
+    ordinal: full.ordinal,
+    dataType: full.dataType,
+    isRequired: full.isRequired,
+    isReadOnly: full.isReadOnly,
+    isHidden: full.isHidden,
+    precision: full.precision,
+    scale: full.scale,
+    defaultValue: full.defaultValue ?? '',
+    displayFormat: full.displayFormat ?? '',
+    lookupRegistryDefId: full.lookupRegistryDefId,
+    lookupFilter: full.lookupFilter,
+    unitId: full.unitId,
+    styleId: full.styleId,
     style: null,
     isNew: false,
-    hasFullData: false,
   };
+}
+
+/**
+ * Чи має колонка цього типу одиницю КОЛОНКИ (R-07).
+ *
+ * ⚠ Дзеркалить `ColumnDef.SetUnit` на сервері: колонка типу `Unit` несе
+ * одиницю на РЯДОК (`doc.CellValue.ValueUnitId`), і одиницю колонки їй домен
+ * відхиляє (`err.ECR-TMPL-0422.unitColumnHasRowUnit`). Серед решти одиниця має
+ * сенс лише для чисел — рядку чи даті її не пояснить жоден звіт.
+ */
+export function columnTakesUnit(dataType: CellDataType): boolean {
+  return dataType === 'Decimal' || dataType === 'Int' || dataType === 'Formula' || dataType === 'Calculated';
 }
 
 /**
@@ -284,7 +273,7 @@ export function columnBody(draft: ColumnDraft): SaveColumnDefRequest {
     // ніколи не було).
     styleId: draft.styleId,
     lookupRegistryDefId: draft.lookupRegistryDefId,
-    lookupFilter: null,
-    unitId: draft.unitId,
+    lookupFilter: draft.lookupFilter,
+    unitId: columnTakesUnit(draft.dataType) ? draft.unitId : null,
   };
 }

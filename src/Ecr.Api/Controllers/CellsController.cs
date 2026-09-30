@@ -62,6 +62,15 @@ public sealed class CellsController(
     {
         ArgumentNullException.ThrowIfNull(request);
 
+        // ⛔ B-05: `origin` з тіла — лише людський. Системні походження
+        // (`Import`, `Integration`, `Recalculation`) приходять у обробник
+        // іншими шляхами, і через HTTP заявити їх означало б підробити журнал.
+        CellChangeOrigins.RequireClientOrigin(request.Origin);
+
+        // ⛔ `WR-11`: стеля комірок батчу — до першого звернення до бази
+        // (`ResolveTableInstanceAsync` нижче).
+        request.EnsureWithinCellLimit();
+
         // ⚠ Належність екземпляра таблиці документові перевіряється ТУТ і до
         // будь-якої роботи. Без цієї перевірки шлях у URL стає декоративним:
         // клієнт указав би чужий TableInstanceId і писав би в чужий документ,
@@ -94,7 +103,12 @@ public sealed class CellsController(
 
         // Винятки перетворює ExceptionHandlingMiddleware — ловити їх тут не
         // треба: конфлікт baseVersion має піти клієнту як 409 із переліком.
-        var response = await patchHandler.HandleAsync(request, ct).ConfigureAwait(false);
+        //
+        // ⚠ `WR-04` п. 2: розв'язаний тут екземпляр іде в обробник — другого
+        // такого самого запиту там немає.
+        var response = await patchHandler
+            .HandleAsync(request, ct, resolvedInstance: owner)
+            .ConfigureAwait(false);
 
         // Кількість записаних комірок — у метрику бюджету (аудит §9).
         Observability.EcrMetrics.ReportCount(HttpContext, response.AppliedCells);
@@ -128,7 +142,8 @@ public sealed class CellsController(
     private Task<AccessProfile> ProfileAsync(CancellationToken ct)
         => access.BuildProfileAsync(
             currentUser.UserId ?? throw new Application.Errors.AccessDeniedException(
-                ErrorCodes.Unauthorized, "Сесія не містить користувача."),
+                ErrorCodes.Unauthorized, "Сесія не містить користувача.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.anonymousWrite" }),
             ct);
 }
 

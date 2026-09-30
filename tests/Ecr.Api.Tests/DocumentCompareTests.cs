@@ -125,10 +125,13 @@ public sealed class DocumentCompareTests(SqlServerFixture sql)
     public async Task Понад_1000_змін_обрізається_до_1000_з_truncated()
     {
         var s = await ArrangeAsync(GrantLevel.Read).ConfigureAwait(true);
-        var row = s.Document.RowIds[0];
+        var column = s.Document.ColumnDefIds[0];
 
-        var v1 = await SnapshotAsync(s, Payload(row, "1")).ConfigureAwait(true);
-        var v2 = await SnapshotAsync(s, Payload(row, "2")).ConfigureAwait(true);
+        // ⚠ S6: 1001 РЯДОК однієї справжньої колонки, а не 1001 вигадана колонка
+        // одного рядка — колонка, якої немає в структурі шаблону, у порівнянні
+        // не показується (межа читання закрита за замовчуванням).
+        var v1 = await SnapshotAsync(s, Payload(column, "1")).ConfigureAwait(true);
+        var v2 = await SnapshotAsync(s, Payload(column, "2")).ConfigureAwait(true);
 
         using var app = new EcrApiFactory(sql);
         using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
@@ -139,8 +142,8 @@ public sealed class DocumentCompareTests(SqlServerFixture sql)
         Assert.Equal(1000, diff.GetProperty("changes").GetArrayLength());
         Assert.True(diff.GetProperty("truncated").GetBoolean());
 
-        static string Payload(long rowId, string value) => JsonSerializer.Serialize(
-            Enumerable.Range(1, 1001).Select(c => new { row = rowId, column = c, value }));
+        static string Payload(int columnId, string value) => JsonSerializer.Serialize(
+            Enumerable.Range(1, 1001).Select(r => new { row = (long)r, column = columnId, value }));
     }
 
     [Fact]
@@ -215,21 +218,24 @@ public sealed class DocumentCompareTests(SqlServerFixture sql)
     [Trait(TestCategories.Category, TestCategories.Integration)]
     public async Task Між_версіями_тип_входить_у_порівняння_а_число_як_decimal()
     {
-        var s = await ArrangeAsync(GrantLevel.Read).ConfigureAwait(true);
+        // ⚠ S6: колонки — справжні колонки шаблону (п'ять), а не вигадані 1…5:
+        // невідома структурі колонка в порівнянні не показується.
+        var s = await ArrangeAsync(GrantLevel.Read, columnCount: 5).ConfigureAwait(true);
         var row = s.Document.RowIds[0];
+        var c = s.Document.ColumnDefIds;
 
         var v1 = await SnapshotAsync(s, Payload(
-            new(row, 1, "true", null),                                  // текст
-            new(row, 2, "1.5", null),
-            new(row, 3, "5", SubmissionPayload.RegistryEntry),
-            new(row, 4, "2026-01-02T00:00:00", SubmissionPayload.Date),
-            new(row, 5, "7", SubmissionPayload.Unit))).ConfigureAwait(true);
+            new(row, c[0], "true", null),                                  // текст
+            new(row, c[1], "1.5", null),
+            new(row, c[2], "5", SubmissionPayload.RegistryEntry),
+            new(row, c[3], "2026-01-02T00:00:00", SubmissionPayload.Date),
+            new(row, c[4], "7", SubmissionPayload.Unit))).ConfigureAwait(true);
         var v2 = await SnapshotAsync(s, Payload(
-            new(row, 1, "true", SubmissionPayload.Bool),                // те саме значення, інший тип
-            new(row, 2, "1.50", null),                                  // та сама величина
-            new(row, 3, "6", SubmissionPayload.RegistryEntry),          // інший запис довідника
-            new(row, 4, "2026-01-02T00:00:00.0000000", SubmissionPayload.Date), // та сама дата
-            new(row, 5, "7", SubmissionPayload.Unit))).ConfigureAwait(true);
+            new(row, c[0], "true", SubmissionPayload.Bool),                // те саме значення, інший тип
+            new(row, c[1], "1.50", null),                                  // та сама величина
+            new(row, c[2], "6", SubmissionPayload.RegistryEntry),          // інший запис довідника
+            new(row, c[3], "2026-01-02T00:00:00.0000000", SubmissionPayload.Date), // та сама дата
+            new(row, c[4], "7", SubmissionPayload.Unit))).ConfigureAwait(true);
 
         using var app = new EcrApiFactory(sql);
         using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
@@ -441,10 +447,10 @@ public sealed class DocumentCompareTests(SqlServerFixture sql)
     }
 
     /// <summary>Документ на три рядки й дві колонки та користувач із <c>Document.View</c>.</summary>
-    private async Task<Scenario> ArrangeAsync(GrantLevel? grant)
+    private async Task<Scenario> ArrangeAsync(GrantLevel? grant, int columnCount = 2)
     {
         var builder = new TestDocumentBuilder(sql.ConnectionString);
-        var document = await builder.BuildAsync(columnCount: 2, rowCount: 3).ConfigureAwait(false);
+        var document = await builder.BuildAsync(columnCount: columnCount, rowCount: 3).ConfigureAwait(false);
 
         await using var db = builder.CreateContext();
         db.DocumentSheets.Add(new DocumentSheet(document.DocumentId, document.SheetDefId));

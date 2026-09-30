@@ -8,7 +8,7 @@ import { Timestamp } from '@/shared/ui/Timestamp';
 import { t } from '@/shared/i18n';
 import { jobKindLabel } from '@/features/workflow/jobLabel';
 import { JobAttempt, JobDocumentLink, JobFailure, JobResultLink, JobRetry } from './JobFacts';
-import { isActiveJob } from './myTasks';
+import { isActiveJob, isShownInMyTasks, myTaskMessage } from './myTasks';
 
 /**
  * Шухляда «My tasks» — перелік ВЛАСНИХ фонових задач із шапки (`UI-07`).
@@ -94,7 +94,7 @@ export function MyTasksDrawer({
       <AsyncBoundary<readonly JobSummary[]>
         isPending={isPending}
         error={error}
-        data={jobs}
+        data={jobs?.filter(isShownInMyTasks)}
         isEmpty={(list) => list.length === 0}
         emptyTitle={t('jobs.recentEmpty')}
         emptyHint={t('jobs.myTasksHint')}
@@ -137,6 +137,7 @@ function MyTaskRow({ job }: { readonly job: JobSummary }): JSX.Element {
    * випадок реалізації планувальника, що журналу не веде.
    */
   const queuedAt = job.createdAt ?? job.startedAt;
+  const message = myTaskMessage(job);
 
   return (
     <Card withBorder padding="sm" data-my-task="" data-job-id={job.jobId}>
@@ -155,10 +156,9 @@ function MyTaskRow({ job }: { readonly job: JobSummary }): JSX.Element {
         <JobAttempt attempt={job.attempt} maxAttempts={job.maxAttempts} />
 
         {/* ⛔ Текст уже перекладено сервером мовою читача — показується як є.
-            `t()` над ним дав би `⟦…⟧` замість повідомлення. */}
-        {job.message !== null && job.message !== undefined && job.message !== '' && (
-          <Text size="sm">{job.message}</Text>
-        )}
+            `t()` над ним дав би `⟦…⟧` замість повідомлення. Виняток —
+            ідентифікатор файлу експорту (F-27, `myTaskMessage`). */}
+        {message !== null && <Text size="sm">{message}</Text>}
 
         <JobFailure
           state={job.state}

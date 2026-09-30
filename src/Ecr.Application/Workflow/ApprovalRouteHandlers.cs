@@ -33,15 +33,27 @@ public sealed class GetApprovalRouteHandler(
     /// <param name="ct">Токен скасування.</param>
     public async Task<ApprovalRouteDto> HandleAsync(int projectId, CancellationToken ct)
     {
-        var profile = await PermissionCheck.RequireAsync(access, currentUser, Permission, ct)
+        var profile = await PermissionCheck.RequireInAnyProjectAsync(access, currentUser, Permission, ct)
                                             .ConfigureAwait(false);
+
+        // ⛔ S17: невидимий проєкт — `404 ECR-PRJ-0404`, як неіснуючий, і ДО
+        // перевірок права/рівня: інакше відмова розповідала б про чужий проєкт.
+        Projects.ProjectVisibility.RequireVisible(profile, projectId);
+
+        // ⛔ ФВ-6.14: право — у ЦЬОМУ проєкті.
+        PermissionCheck.RequireIn(profile, Permission, projectId);
 
         // ⛔ Q-179 (аудит фази 2, авторизація): грант на КОНКРЕТНИЙ проєкт,
         // не лише глобальне `Project.Manage` — рішення людини.
         if (profile.LevelFor(ResourceKind.Project, projectId) < GrantLevel.Manage)
         {
             throw new AccessDeniedException(
-                "ECR-AUTH-0403", $"Немає гранта Manage на проєкт {projectId}.");
+                "ECR-AUTH-0403", $"Немає гранта Manage на проєкт {projectId}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-AUTH-0403.noProjectManageGrant",
+                    ["projectId"] = projectId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
         }
 
         var route = await workflow.FindProjectRouteAsync(projectId, ct).ConfigureAwait(false);
@@ -84,15 +96,26 @@ public sealed class ReplaceApprovalRouteHandler(
     {
         ArgumentNullException.ThrowIfNull(roleIds);
 
-        var profile = await PermissionCheck.RequireAsync(access, currentUser, Permission, ct)
+        var profile = await PermissionCheck.RequireInAnyProjectAsync(access, currentUser, Permission, ct)
                                             .ConfigureAwait(false);
+
+        // ⛔ S17: невидимий проєкт — як неіснуючий (див. `GetApprovalRouteHandler`).
+        Projects.ProjectVisibility.RequireVisible(profile, projectId);
+
+        // ⛔ ФВ-6.14: право — у ЦЬОМУ проєкті.
+        PermissionCheck.RequireIn(profile, Permission, projectId);
 
         // ⛔ Q-179 (аудит фази 2, авторизація): грант на КОНКРЕТНИЙ проєкт,
         // не лише глобальне `Project.Manage` — рішення людини.
         if (profile.LevelFor(ResourceKind.Project, projectId) < GrantLevel.Manage)
         {
             throw new AccessDeniedException(
-                "ECR-AUTH-0403", $"Немає гранта Manage на проєкт {projectId}.");
+                "ECR-AUTH-0403", $"Немає гранта Manage на проєкт {projectId}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-AUTH-0403.noProjectManageGrant",
+                    ["projectId"] = projectId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
         }
 
         // ⛔ Ролі перевіряються ДО будь-якої зміни. Крок на неіснуючу роль дав
@@ -102,7 +125,13 @@ public sealed class ReplaceApprovalRouteHandler(
         {
             if (!await workflow.RoleExistsAsync(roleId, ct).ConfigureAwait(false))
             {
-                throw new NotFoundException("ECR-SEC-0404", $"Ролі {roleId} не існує.");
+                throw new NotFoundException(
+                    "ECR-SEC-0404", $"Ролі {roleId} не існує.",
+                    new Dictionary<string, object?>
+                    {
+                        ["messageKey"] = "err.ECR-SEC-0404.roleNotFound",
+                        ["roleId"] = roleId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    });
             }
         }
 
@@ -117,7 +146,14 @@ public sealed class ReplaceApprovalRouteHandler(
                 throw new BusinessRuleException(
                     "ECR-DOC-0422",
                     $"Кроки {i} і {i + 1} мають ту саму роль {roleIds[i]}: другий пройде той самий "
-                    + "користувач одразу за першим, тобто погодження не додасться.");
+                    + "користувач одразу за першим, тобто погодження не додасться.",
+                    new Dictionary<string, object?>
+                    {
+                        ["messageKey"] = "err.ECR-DOC-0422.approvalRouteConsecutiveRole",
+                        ["stepA"] = i.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                        ["stepB"] = (i + 1).ToString(System.Globalization.CultureInfo.InvariantCulture),
+                        ["roleId"] = roleIds[i].ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    });
             }
         }
 

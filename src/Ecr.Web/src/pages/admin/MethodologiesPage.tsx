@@ -26,6 +26,7 @@ import type {
   SimulationResultDto,
 } from '@/api/types';
 import { createMethodology } from '@/features/methodologies/api';
+import { showPublishError } from '@/features/methodologies/publishError';
 import { localized } from '@/shared/i18n/localized';
 import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
@@ -128,7 +129,7 @@ export function MethodologiesPage(): JSX.Element {
       setDiff(published);
       showDone(t('methodologies.published'));
     },
-    onError: showApiError,
+    onError: showPublishError,
   });
 
   /**

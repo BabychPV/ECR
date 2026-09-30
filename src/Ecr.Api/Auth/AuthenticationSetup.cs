@@ -1,9 +1,13 @@
+using System.Globalization;
+using System.Security.Claims;
 using System.Security.Cryptography.X509Certificates;
 using Ecr.Api.Health;
 using Ecr.Infrastructure.Persistence;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.Negotiate;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.DataProtection.KeyManagement;
 
 namespace Ecr.Api.Auth;
 
@@ -24,7 +28,7 @@ namespace Ecr.Api.Auth;
 /// той самий принцип обмеження Negotiate одним маршрутом лишається, просто
 /// немає окремого рівня IIS, де його ще й треба вимкнути вручну.
 /// </remarks>
-public static class AuthenticationSetup
+public static partial class AuthenticationSetup
 {
     /// <summary>Claim із <c>SecurityStamp</c>: перевіряється на кожен запит.</summary>
     public const string SecurityStampClaim = "ecr:stamp";
@@ -39,6 +43,36 @@ public static class AuthenticationSetup
     /// cookie з прапорцем перестає бути дійсною тієї ж миті.
     /// </remarks>
     public const string MustChangePasswordClaim = "ecr:mustchg";
+
+    /// <summary>Claim із відкритим сеансом симуляції «очима користувача» (ФВ-6.16a, V-06).</summary>
+    /// <remarks>
+    /// ⚠ У cookie, а не запитом «чи є відкритий сеанс» на КОЖЕН запит: сеанс
+    /// рідкісний, і платити за нього мають лише ті запити, що його несуть.
+    /// Ставиться на початку сеансу, знімається завершенням; вихід закриває сеанс.
+    /// </remarks>
+    public const string SimulationSessionClaim = "ecr:sim";
+
+    /// <summary>Claim із моментом ВХОДУ (Unix-секунди, UTC) — для абсолютної межі сесії (S21).</summary>
+    /// <remarks>
+    /// ⚠ Не <c>AuthenticationProperties.IssuedUtc</c>: за ковзного строку той
+    /// оновлюється на кожному продовженні cookie і входу вже не пам'ятає.
+    /// Claim ставиться один раз на вході (<c>OnSigningIn</c>) і переноситься
+    /// перевиданнями cookie (штамп, симуляція), бо ті копіюють усі заявки.
+    /// </remarks>
+    public const string AuthTimeClaim = "ecr:authtime";
+
+    /// <summary>
+    /// Абсолютна межа сесії від входу, незалежно від активності (S21).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Ковзний строк (<c>Auth:SlidingHours</c>) сам по собі продовжує
+    /// сесію безкінечно, доки нею користуються: викрадена cookie, яку
+    /// «підтримують» запитами, не вмирала ніколи. Дванадцять годин — робоча
+    /// зміна з запасом: людина входить раз на день, а сесія довша за добу вже
+    /// не є «тією самою людиною за тим самим столом». Константа, а не
+    /// конфігурація, навмисно: межа безпеки не має тихо вимикатися ключем.
+    /// </remarks>
+    public static readonly TimeSpan AbsoluteSessionLifetime = TimeSpan.FromHours(12);
 
     /// <summary>
     /// Відбиток сертифіката, яким шифруються ключі кільця (`MI-01`, `D14-08`).
@@ -91,6 +125,10 @@ public static class AuthenticationSetup
                     context.Response.StatusCode = StatusCodes.Status403Forbidden;
                     return Task.CompletedTask;
                 };
+
+                // S21: момент входу — у cookie, абсолютна межа — на кожному запиті.
+                options.Events.OnSigningIn = StampAuthTime;
+                options.Events.OnValidatePrincipal = RejectIfPastAbsoluteLifetimeAsync;
             });
 
         // ⚠ Negotiate реєструється УМОВНО, і це не зручність для тестів.
@@ -108,6 +146,45 @@ public static class AuthenticationSetup
 
         services.AddAuthorization();
         return services;
+    }
+
+    /// <summary>Ставить момент входу, якщо його ще немає (перший вхід, не перевидання).</summary>
+    /// <param name="context">Контекст підпису cookie.</param>
+    private static Task StampAuthTime(CookieSigningInContext context)
+    {
+        if (context.Principal?.Identity is ClaimsIdentity identity && !identity.HasClaim(c => c.Type == AuthTimeClaim))
+        {
+            var now = (context.Options.TimeProvider ?? TimeProvider.System).GetUtcNow();
+            identity.AddClaim(new Claim(
+                AuthTimeClaim, now.ToUnixTimeSeconds().ToString(CultureInfo.InvariantCulture)));
+        }
+
+        return Task.CompletedTask;
+    }
+
+    /// <summary>Відкидає cookie, чий вхід старший за <see cref="AbsoluteSessionLifetime"/>.</summary>
+    /// <param name="context">Контекст перевірки cookie.</param>
+    /// <remarks>
+    /// ⚠ Cookie без моменту входу теж відкидається: інакше cookie, видана до
+    /// появи межі, жила б за ковзним строком безкінечно. Ціна одноразова —
+    /// після розгортання кожен увійде заново.
+    /// </remarks>
+    private static async Task RejectIfPastAbsoluteLifetimeAsync(CookieValidatePrincipalContext context)
+    {
+        var raw = context.Principal?.FindFirst(AuthTimeClaim)?.Value;
+        var now = (context.Options.TimeProvider ?? TimeProvider.System).GetUtcNow();
+
+        if (long.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out var seconds)
+            && now - DateTimeOffset.FromUnixTimeSeconds(seconds) < AbsoluteSessionLifetime)
+        {
+            return;
+        }
+
+        // Принципал знятий — запит іде далі анонімним і на [Authorize] отримує
+        // 401 (`OnRedirectToLogin`); мертва cookie стирається тією ж відповіддю.
+        context.RejectPrincipal();
+        await context.HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme)
+                     .ConfigureAwait(false);
     }
 
     /// <summary>
@@ -132,6 +209,13 @@ public static class AuthenticationSetup
     /// не хоче.</item>
     /// </list>
     ///
+    /// ⛔ S11 (аудит безпеки): у Production незахищене кільце — відмова старту
+    /// (<see cref="UnprotectedInProductionMessage"/>), бо відкритий ключ у
+    /// таблиці чи бекапі дає підробку cookie <c>ecr.auth</c> з <c>ecr:uid</c>
+    /// будь-кого. Захист — лише сертифікат: <c>ProtectKeysWithDpapi</c> (ключ
+    /// машини) на двох вузлах за балансувальником (D-32) дав би кожному вузлу
+    /// ключі, яких інший не розшифрує. Development і тести — як були.
+    ///
     /// ⚠ Відбиток заданий, а сертифіката немає — це відмова старту, а не
     /// відкат до незахищеного режиму. Мовчазний відкат дав би систему, яка
     /// вважає себе захищеною, і адміністратор дізнався б про це не з health, а
@@ -143,6 +227,17 @@ public static class AuthenticationSetup
             .SetApplicationName("Ecr")
             .PersistKeysToDbContext<EcrDbContext>();
 
+        // ⛔ S11: у Production незахищене кільце — відмова старту, а не рядок у
+        // health. Перевіряється ФАКТ (`XmlEncryptor` зібраних опцій), а не
+        // наявність ключа конфігурації — тим самим принципом, що й
+        // `DataProtectionKeyProtection`: «що застосунок зробив».
+        var allowUnprotected = configuration.GetValue(AllowUnprotectedKeysKey, defaultValue: false);
+        services.AddOptions<KeyManagementOptions>()
+            .Validate<IHostEnvironment, ILoggerFactory>(
+                (options, environment, loggers) => CheckKeyProtection(environment, options, allowUnprotected, loggers),
+                UnprotectedInProductionMessage)
+            .ValidateOnStart();
+
         var thumbprint = configuration[CertificateThumbprintKey];
         if (string.IsNullOrWhiteSpace(thumbprint))
         {
@@ -153,6 +248,64 @@ public static class AuthenticationSetup
         builder.ProtectKeysWithCertificate(FindCertificate(thumbprint));
         services.AddSingleton(DataProtectionKeyProtection.ProtectedBy(thumbprint));
     }
+
+    /// <summary>
+    /// Явна згода на незахищене кільце в Production — лише для одноразових
+    /// стендів (`tools/smoke.ps1`, `tools/e2e-stand.ps1`, `tools/setup-dev-db.ps1`).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Не тиха лазівка для майданчика: із цим ключем у Production старт
+    /// пише Critical із причиною, а перевірка <c>db</c> — <c>Degraded</c> із
+    /// тією самою причиною. <c>deploy-ecr.ps1</c> цей ключ не ставить ніколи —
+    /// це тримає сторож <c>DeployScriptNeverAllowsUnprotectedKeysTests</c>.
+    /// </remarks>
+    public const string AllowUnprotectedKeysKey = "Auth:DataProtection:AllowUnprotectedKeys";
+
+    /// <summary>Текст відмови старту в Production без захисту ключів (S11).</summary>
+    public const string UnprotectedInProductionMessage =
+        "Production: ключі кільця DataProtection у sec.DataProtectionKey не захищені — служба не стартує. "
+        + "Хто читає базу або її бекап, той підробляє cookie сеансу будь-якого користувача. "
+        + "Задай " + CertificateThumbprintKey + " (змінна ECR_Auth__DataProtection__CertificateThumbprint) — "
+        + "відбиток сертифіката з закритим ключем у LocalMachine\\My, ОДНОГО для всіх вузлів "
+        + "(DPAPI машини не підходить: вузлів за балансувальником два й більше, D-32). "
+        + "Лише для одноразового стенда: " + AllowUnprotectedKeysKey + " = true (тоді старт пише Critical, "
+        + "а /health/db — Degraded).";
+
+    /// <summary>Текст Critical на старті, коли Production іде без захисту за явною згодою (S11).</summary>
+    public const string UnprotectedByConsentMessage =
+        "Production: ключі кільця DataProtection у sec.DataProtectionKey НЕ захищені — старт дозволено лише "
+        + "явною згодою " + AllowUnprotectedKeysKey + " = true (одноразовий стенд). Хто читає базу або її бекап, "
+        + "той підробляє cookie сеансу будь-якого користувача. На майданчику: прибери згоду й задай "
+        + CertificateThumbprintKey + ".";
+
+    /// <summary>
+    /// Перевірка вимоги захисту ключів на старті (S11): <c>false</c> — відмова
+    /// старту; згода в Production — Critical у журнал і старт.
+    /// </summary>
+    /// <param name="environment">Середовище хоста.</param>
+    /// <param name="options">Зібрані опції керування ключами.</param>
+    /// <param name="allowUnprotected">Значення <see cref="AllowUnprotectedKeysKey"/>.</param>
+    /// <param name="loggers">Фабрика журналів.</param>
+    internal static bool CheckKeyProtection(
+        IHostEnvironment environment, KeyManagementOptions options, bool allowUnprotected, ILoggerFactory loggers)
+    {
+        if (!environment.IsProduction() || options.XmlEncryptor is not null)
+        {
+            return true;
+        }
+
+        if (!allowUnprotected)
+        {
+            return false;
+        }
+
+        var logger = loggers.CreateLogger("Ecr.Startup");
+        LogUnprotectedByConsent(logger, UnprotectedByConsentMessage);
+        return true;
+    }
+
+    [LoggerMessage(Level = LogLevel.Critical, Message = "{Message}")]
+    private static partial void LogUnprotectedByConsent(ILogger logger, string message);
 
     /// <summary>Сертифікат за відбитком у <c>LocalMachine\My</c> (`D14-08`).</summary>
     private static X509Certificate2 FindCertificate(string thumbprint)
@@ -187,8 +340,8 @@ public static class AuthenticationSetup
             throw new InvalidOperationException(
                 $"{CertificateThumbprintKey} = '{thumbprint}': сховище LocalMachine\\My недоступне "
                 + $"({unreachable.GetType().Name}: {unreachable.Message}). Або зроби його доступним "
-                + "обліковому запису служби, або прибери ключ — тоді ключі кільця лежатимуть у "
-                + "sec.DataProtectionKey відкрито, і /health/db про це скаже.",
+                + "обліковому запису служби, або (лише поза Production) прибери ключ — тоді ключі кільця "
+                + "лежатимуть у sec.DataProtectionKey відкрито, і /health/db про це скаже.",
                 unreachable);
         }
 
@@ -196,8 +349,8 @@ public static class AuthenticationSetup
         {
             throw new InvalidOperationException(
                 $"{CertificateThumbprintKey} = '{thumbprint}': сертифіката з таким відбитком немає в "
-                + "LocalMachine\\My. Або постав сертифікат, або прибери ключ — тоді ключі кільця "
-                + "лежатимуть у sec.DataProtectionKey відкрито, і /health/db про це скаже.");
+                + "LocalMachine\\My. Або постав сертифікат, або (лише поза Production) прибери ключ — тоді "
+                + "ключі кільця лежатимуть у sec.DataProtectionKey відкрито, і /health/db про це скаже.");
         }
 
         return found[0];

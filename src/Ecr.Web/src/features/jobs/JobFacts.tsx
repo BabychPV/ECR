@@ -211,14 +211,10 @@ export function JobRetry({
  * `fetch`+`blob`: та сама причина, що в `ExportButton` — автентифікація на
  * cookie, і навігація тим самим походженням несе її сама.
  *
- * ⚠ Текст — `document.exportReady` (наявний ключ каталогу, «Download the
- * workbook»/`ExportButton.tsx`), а не новий: тут те саме посилання на ту саму
- * книгу експорту документа, лише в іншому місці екрана (перелік/шухляда
- * задач замість кнопки експорту). Новий ключ довелося б додавати в
- * `09-seed.sql`, який ця робота свідомо не чіпає (сторож
- * `EndpointCoverageTests.Кожен_рядок_якого_просить_клієнт_є_в_каталозі` це й
- * підтвердив — без цього застереження збірка лишається зеленою, а прогін
- * тестів падає).
+ * ✎ `V-10`: текст — `jobs.resultDownload` («Download the file»), а не
+ * `document.exportReady` («Download the workbook»). Результатом експорту
+ * буває й ZIP-архів CSV, і JSON, а формату тут не видно (є лише готова
+ * адреса), тож підпис не має обіцяти книгу Excel.
  */
 export function JobResultLink({
   resultUrl,
@@ -229,7 +225,7 @@ export function JobResultLink({
 
   return (
     <Anchor href={resultUrl} size="xs" download data-job-result="">
-      {t('document.exportReady')}
+      {t('jobs.resultDownload')}
     </Anchor>
   );
 }

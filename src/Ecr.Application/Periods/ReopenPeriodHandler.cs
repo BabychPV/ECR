@@ -7,6 +7,7 @@ using Ecr.Application.Security;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Enums;
 using Ecr.Domain.Errors;
+using Microsoft.Extensions.Logging;
 
 namespace Ecr.Application.Periods;
 
@@ -14,14 +15,29 @@ namespace Ecr.Application.Periods;
 /// Адміністративне відкриття закритого періоду (ФВ-1.10). Право
 /// <c>Period.Reopen</c> — небезпечне, у складені ролі не входить (ФВ-6.12).
 /// </summary>
-public sealed class ReopenPeriodHandler(
+public sealed partial class ReopenPeriodHandler(
     IPeriodStore periods,
     IAccessDecisionService access,
     IUnitOfWork uow,
     IAuditWriter audit,
     ICurrentUser currentUser,
-    IClock clock)
+    IClock clock,
+    IMaterializationScheduler? materialization = null,
+    IBackgroundJobScheduler? jobs = null,
+    ILogger<ReopenPeriodHandler>? logger = null)
 {
+    /// <summary>Ціль витісняючої постановки пошуку осиротілих після ручного Reopen.</summary>
+    /// <remarks>
+    /// ⚠ Та сама, що в системного Reopen (<c>PeriodStateJob</c>), і той самий
+    /// маркер: сканер один на весь набір, тож кілька відкриттів поспіль дають
+    /// один прогін, а не чергу однакових.
+    /// </remarks>
+    public const string OrphanScanTarget = "period-reopen";
+
+    // ⚠ `materialization` необов'язковий лише заради наявних прямих
+    // конструювань обробника в тестах; у застосунку порт зареєстровано
+    // (`Ecr.Infrastructure.DependencyInjection`), і контейнер його передає.
+
     /// <summary>Право, без якого відкриття періоду неможливе.</summary>
     public const string Permission = "Period.Reopen";
 
@@ -38,7 +54,9 @@ public sealed class ReopenPeriodHandler(
                          new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.signInRequired" });
 
         var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
-        if (!profile.Has(Permission))
+        // ⛔ ФВ-6.14: вхід — «хоч у якомусь проєкті»; у проєкті періоду —
+        // `RequireIn` нижче, щойно проєкт відомий.
+        if (!profile.HasInAnyProject(Permission))
         {
             throw new AccessDeniedException(
                 "ECR-AUTH-0403", $"Потрібне право {Permission}.",
@@ -67,8 +85,15 @@ public sealed class ReopenPeriodHandler(
         // ⚠ `ExecuteInTransactionAsync` приєднується до вже відкритої
         // зовнішньої транзакції (`UnitOfWork.cs:174-178`), тож це обгортка,
         // а не перехоплення чужого коміту.
+        var projectId = 0;
+        var periodKey = 0;
+        var requiresMaterialization = false;
+
         await uow.ExecuteInTransactionAsync(async innerCt =>
         {
+            // ⚠ Стратегія повторів може виконати замикання вдруге.
+            requiresMaterialization = false;
+
             // ⚠ Період береться з UPDLOCK і перечитується В ТРАНЗАКЦІЇ: інакше
             // PeriodStateJob може закрити його посеред операції, і відкриття
             // застосується до стану, якого вже немає (ФВ-1.10a).
@@ -78,13 +103,17 @@ public sealed class ReopenPeriodHandler(
             // адміністратора, який відкриває період, це різниця між «помилився в
             // номері періоду» і «проєкт видалили».
             var period = await periods.LockAsync(periodId, innerCt).ConfigureAwait(false)
-                         ?? throw new NotFoundException(
-                             ErrorCodes.PeriodNotFound, $"Період {periodId} не знайдено.",
-                             new Dictionary<string, object?>
-                             {
-                                 ["messageKey"] = "err.ECR-PRD-0404.period",
-                                 ["periodId"] = periodId.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                             });
+                         ?? throw Projects.ProjectVisibility.PeriodNotFound(periodId);
+
+            // ⛔ S17: період НЕВИДИМОГО проєкту (немає гранта Read) — та сама
+            // відповідь, що й неіснуючий період. Доти тут був `403` «немає
+            // гранта Manage», а на неіснуючий id — `404`: перебором id видно
+            // було, які періоди (і отже проєкти) існують. `403` нижче лишається
+            // лише для видимого проєкту, якому бракує рівня Manage.
+            if (!Projects.ProjectVisibility.IsVisible(profile, period.ProjectId))
+            {
+                throw Projects.ProjectVisibility.PeriodNotFound(periodId);
+            }
 
             var project = await periods.FindProjectAsync(period.ProjectId, innerCt).ConfigureAwait(false)
                           ?? throw new NotFoundException(
@@ -94,6 +123,26 @@ public sealed class ReopenPeriodHandler(
                                   ["messageKey"] = "err.ECR-PRJ-0404.projectOfPeriod",
                                   ["periodId"] = periodId.ToString(System.Globalization.CultureInfo.InvariantCulture),
                               });
+
+            // ⛔ Право `Period.Reopen` — функціональне, воно не каже, ЧИЇ періоди
+            // можна відкривати. Без гранта на проєкт власник права відкривав би
+            // періоди проєктів, яких навіть не бачить (UX-прохід 2026-09-24,
+            // рішення людини). Рівень — Manage, як і в `SetCurrentPeriodHandler`:
+            // це структурна зміна проєкту, не правка даних. Перевірка стоїть ДО
+            // архівної: інакше відмова «проєкт архівований» розповідала б про
+            // чужий проєкт тому, хто його не бачить.
+            if (profile.LevelFor(ResourceKind.Project, project.Id) < GrantLevel.Manage)
+            {
+                throw new AccessDeniedException(
+                    "ECR-AUTH-0403", $"Немає гранта Manage на проєкт {project.Id}.",
+                    new Dictionary<string, object?>
+                    {
+                        ["messageKey"] = "err.ECR-AUTH-0403.noProjectManageGrant",
+                        ["projectId"] = project.Id.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    });
+            }
+
+            PermissionCheck.RequireIn(profile, Permission, project.Id);
 
             // Архівований проєкт — кінцевий стан: відкривати в ньому нема чого,
             // дані вже поїхали в архівні партиції (ФВ-1.10).
@@ -114,7 +163,12 @@ public sealed class ReopenPeriodHandler(
             // Closed → Grace, а не → Open: правки після закриття лишаються
             // ПІЗНІМИ і мають позначатися IsLateEdit (D-70). Відкриття «як було»
             // стерло б різницю між роботою в строк і після нього.
+            var before = period.State;
             period.Reopen(deadline, reason, now);
+
+            projectId = period.ProjectId;
+            periodKey = period.PeriodKeyValue;
+            requiresMaterialization = PeriodMaterializationTrigger.Requires(before, period.State);
 
             await audit.WriteStructureChangeAsync(
                 new StructureChangeRecord(
@@ -125,7 +179,9 @@ public sealed class ReopenPeriodHandler(
                     ChangeClass: ChangeClass.Guarded,
                     Operation: "Reopen",
                     OldJson: JsonSerializer.Serialize(new { state = nameof(PeriodState.Closed) }),
-                    NewJson: JsonSerializer.Serialize(new { state = period.State.ToString(), until = deadline }),
+                    // ⚠ Нормалізований доменом момент (UTC), а не сирий із запиту:
+                    // журнал має казати те, що збережено (аудит B6).
+                    NewJson: JsonSerializer.Serialize(new { state = period.State.ToString(), until = period.ReopenedUntil }),
                     ChangeReason: reason,
                     ChangedByUserId: userId,
                     CorrelationId: currentUser.CorrelationId),
@@ -133,7 +189,58 @@ public sealed class ReopenPeriodHandler(
 
             await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
         }, ct).ConfigureAwait(false);
+
+        // ⛔ Матеріалізація — ПІСЛЯ коміту (черга не транзакційна): точки,
+        // пропущені поки період був `Closed` (`SkippedPeriodClosed`), інакше
+        // чекали б збору з вікном, що перетинає період, — а для давно минулого
+        // періоду такого вікна не буде ніколи.
+        if (requiresMaterialization && materialization is not null)
+        {
+            await materialization.EnqueueAfterTransitionAsync(projectId, [periodKey], ct).ConfigureAwait(false);
+        }
+
+        await EnqueueOrphanScanAsync(periodId, ct).ConfigureAwait(false);
     }
+
+    /// <summary>Разовий пошук осиротілих рядків після відкриття — ПІСЛЯ коміту.</summary>
+    /// <remarks>
+    /// ⛔ Нічний <c>OrphanScanJob</c> обходить лише <c>Open</c>/<c>Grace</c>: поки
+    /// період був <c>Closed</c>, ознака <c>IsOrphaned</c> у ньому не оновлювалася,
+    /// і щойно відкритий період показує застарілі позначки до ночі (а за
+    /// бюджетом курсора — й довше).
+    /// <para>
+    /// ⚠ Після коміту: черга не транзакційна, і прогін, поставлений до коміту,
+    /// бачив би ще закритий період. Збій постановки НЕ валить відповідь —
+    /// відкриття вже закомічено й записано в аудит, і 500 на успішну дію
+    /// збрехав би людині; нічний прохід однаково дійде. Але й не мовчить — журнал.
+    /// </para>
+    /// </remarks>
+    private async Task EnqueueOrphanScanAsync(int periodId, CancellationToken ct)
+    {
+        if (jobs is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await jobs
+                .EnqueueExclusiveAsync<IOrphanScanJob>(OrphanScanTarget, payload: null, ct, currentUser.UserId)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            if (logger is not null)
+            {
+                LogOrphanScanNotEnqueued(logger, periodId, ex);
+            }
+        }
+    }
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "Період {PeriodId} відкрито, але пошук осиротілих рядків НЕ поставлено; позначки оновить нічний прохід.")]
+    private static partial void LogOrphanScanNotEnqueued(ILogger logger, int periodId, Exception exception);
 
     /// <summary>Кінець поточної доби в поясі майданчика, у UTC (D-68).</summary>
     /// <remarks>

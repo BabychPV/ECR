@@ -177,13 +177,32 @@ public sealed class FakeUserStore : IUserStore
     }
 
     /// <inheritdoc />
+    /// <remarks>Області дії підробка не моделює (див. <see cref="ReplaceRolesAsync"/>).</remarks>
+    public Task<IReadOnlyList<UserRoleAssignmentView>> ListUserRoleAssignmentsAsync(int userId, CancellationToken ct)
+    {
+        var user = _users.Find(u => u.Id == userId);
+
+        return Task.FromResult<IReadOnlyList<UserRoleAssignmentView>>(user is null
+            ? []
+            : [.. Grants.Where(g => g.UserName == user.UserName)
+                   .Select(g => new UserRoleAssignmentView(g.RoleCode, null, null, null)),
+               .. DatedGrants.Where(g => g.UserName == user.UserName)
+                   .Select(g => new UserRoleAssignmentView(g.RoleCode, g.ValidFrom, g.ValidTo, null))]);
+    }
+
+    /// <inheritdoc />
     public Task<int> ReplaceRolesAsync(
         int userId,
         IReadOnlyList<string> roleCodes,
         IReadOnlyDictionary<string, RoleValidityWindow>? validity,
+        IReadOnlyDictionary<string, Domain.Entities.Security.RoleAssignmentScope>? scopes,
         CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(roleCodes);
+
+        // ⚠ Області дії (ФВ-6.14) підробка не моделює: вони діють у
+        // AccessDecisionService, а його підробки не будують профіль із них.
+        _ = scopes;
 
         var user = _users.Find(u => u.Id == userId)
                    ?? throw new Application.Errors.NotFoundException(
@@ -267,7 +286,7 @@ public sealed class FakeUserStore : IUserStore
         ArgumentNullException.ThrowIfNull(permissionCodes);
 
         var id = Roles.Count + 1;
-        Roles.Add(new RoleView(id, role.Code, role.IsBuiltIn, role.IsActive, [.. permissionCodes], []));
+        Roles.Add(new RoleView(id, role.Code, role.IsBuiltIn, role.IsActive, [.. permissionCodes], [], role.NameL10n));
         return Task.FromResult(id);
     }
 
@@ -288,7 +307,11 @@ public sealed class FakeUserStore : IUserStore
         int roleId, string code, IReadOnlyDictionary<string, string>? name, CancellationToken ct)
     {
         var index = Roles.FindIndex(r => r.Id == roleId);
-        Roles[index] = Roles[index] with { Code = code };
+        Roles[index] = Roles[index] with
+        {
+            Code = code,
+            NameL10n = name is null ? Roles[index].NameL10n : new Domain.ValueObjects.LocalizedText(name.ToDictionary(StringComparer.Ordinal)),
+        };
         return Task.CompletedTask;
     }
 
@@ -323,6 +346,10 @@ public sealed class FakeUserStore : IUserStore
 
         return Task.CompletedTask;
     }
+
+    /// <inheritdoc />
+    public Task<bool> LockRoleForUpdateAsync(int roleId, CancellationToken ct)
+        => Task.FromResult(Roles.Any(r => r.Id == roleId));
 
     /// <inheritdoc />
     public Task<int> RotateStampsForRoleAsync(int roleId, CancellationToken ct)
@@ -521,7 +548,60 @@ public sealed class FakeUserStore : IUserStore
                     code, code.Split('.')[0], Dangerous.Contains(code)))]);
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Лише особисті призначення (<see cref="Grants"/> і <see cref="DatedGrants"/>, крім
+    /// прострочених) — як і бойове сховище; області підробка не моделює.
+    /// </remarks>
+    public Task<SimulationTargetPrivileges> GetSimulationTargetPrivilegesAsync(
+        int userId, DateTime utcNow, CancellationToken ct)
+    {
+        var user = _users.Find(u => u.Id == userId);
+        if (user is null)
+        {
+            return Task.FromResult(new SimulationTargetPrivileges(false, []));
+        }
+
+        var today = DateOnly.FromDateTime(utcNow);
+        var codes = Grants.Where(g => g.UserName == user.UserName).Select(g => g.RoleCode)
+            .Concat(DatedGrants
+                .Where(g => g.UserName == user.UserName && (g.ValidTo is null || g.ValidTo >= today))
+                .Select(g => g.RoleCode))
+            .ToHashSet(StringComparer.Ordinal);
+
+        var dangerous = Roles
+            .Where(r => codes.Contains(r.Code))
+            .SelectMany(r => r.Permissions)
+            .Where(Dangerous.Contains)
+            .Distinct(StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal)
+            .ToList();
+
+        return Task.FromResult(new SimulationTargetPrivileges(
+            user.IsBootstrapAdmin || codes.Contains(BootstrapAdmin.RoleCode), dangerous));
+    }
+
+    /// <inheritdoc />
     public Task<PasswordPolicy> GetPolicyAsync(User user, CancellationToken ct) => Task.FromResult(Policy);
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⚠ Фікстура рахує ДОМЕННИМ методом (<c>User.RegisterFailedAttempt</c>):
+    /// у пам'яті гонки немає, а правило має бути рівно те, що й у домені.
+    /// Рівність SQL бойового сховища з доменом тримає
+    /// <c>FailedAttemptAtomicTests</c> (Infrastructure).
+    /// </remarks>
+    public Task<FailedAttemptOutcome> RegisterFailedAttemptAsync(
+        int userId, int maxFailedAttempts, int lockoutMinutes, DateTime utcNow, CancellationToken ct)
+    {
+        var user = _users.Find(u => u.Id == userId);
+        if (user is null)
+        {
+            return Task.FromResult(default(FailedAttemptOutcome));
+        }
+
+        var locked = user.RegisterFailedAttempt(maxFailedAttempts, lockoutMinutes, utcNow);
+        return Task.FromResult(new FailedAttemptOutcome(user.FailedAttempts, user.LockedUntil, locked));
+    }
 
     /// <summary>Активний доменний користувач для сценаріїв входу.</summary>
     /// <param name="userName">Ім'я входу.</param>

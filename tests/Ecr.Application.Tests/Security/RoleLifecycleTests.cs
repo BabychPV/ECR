@@ -31,6 +31,10 @@ public sealed class RoleLifecycleTests
         _user.CorrelationId.Returns("test");
         Allow("Security.ManageRoles");
 
+        // C4: подія й зміна йдуть одним блоком — підробка його виконує.
+        _uow.ExecuteInTransactionAsync(Arg.Any<Func<CancellationToken, Task>>(), Arg.Any<CancellationToken>())
+            .Returns(call => call.ArgAt<Func<CancellationToken, Task>>(0)(call.ArgAt<CancellationToken>(1)));
+
         _users.Roles.Add(new RoleView(1, "SystemAdministrator", IsBuiltIn: true, IsActive: true, ["Security.ManageRoles"], []));
         _users.Roles.Add(new RoleView(2, "Reviewers", IsBuiltIn: false, IsActive: true, ["Document.View", "Template.View"], []));
     }

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, type JSX, type ReactNode } from 'react';
 import { Button, Group, Select, TextInput } from '@mantine/core';
 import { useSearchParams } from 'react-router-dom';
+import { useFieldDraft } from './useFieldDraft';
 import { useUrlParamsSetter, useUrlState } from './useUrlState';
 
 /**
@@ -210,13 +211,21 @@ function SearchField({
   readonly placeholder?: string | undefined;
 }): JSX.Element {
   const [value, setValue] = useUrlState(param);
+  // ⛔ Поле показує ВЛАСНЕ значення, а не адресу (`useFieldDraft`): кероване
+  // адресою, воно губило символи при повільному рендері — адреса оновлюється
+  // переходом і запізнюється (живий стенд, «Row key»/«Rule», 2026-09-24).
+  // «Clear filters» і навігація приймаються, коли поле не у фокусі.
+  const field = useFieldDraft(value ?? '');
 
   return (
     <TextInput
       label={label}
       placeholder={placeholder}
-      value={value ?? ''}
+      value={field.value}
+      onFocus={field.onFocus}
+      onBlur={field.onBlur}
       onChange={(event) => {
+        field.setValue(event.currentTarget.value);
         setValue(event.currentTarget.value);
       }}
     />

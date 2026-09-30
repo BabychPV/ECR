@@ -3,6 +3,7 @@ using Ecr.Application.Common;
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
+using Ecr.Domain.Entities.Integration;
 using Ecr.Domain.Errors;
 
 namespace Ecr.Application.Integration;
@@ -39,11 +40,7 @@ public sealed class ListCollectionRunsHandler(
 
         await PermissionCheck.RequireAnyAsync(access, currentUser, Permissions, ct).ConfigureAwait(false);
 
-        if (page.Limit is < 1 or > MaxLimit)
-        {
-            var max = MaxLimit.ToString(CultureInfo.InvariantCulture);
-            throw Invalid("err.ECR-REQ-0422.pageSizeOutOfRange", $"Розмір сторінки поза межами 1..{max}.", "max", max);
-        }
+        RequirePageSize(page);
 
         // ⛔ Невідомий стан — 422, а не порожній перелік: друкарська помилка у
         // фільтрі читалася б як «збоїв не було».
@@ -61,11 +58,67 @@ public sealed class ListCollectionRunsHandler(
         return await runs.ListAsync(filter with { Status = state }, page, ct).ConfigureAwait(false);
     }
 
-    private static BusinessRuleException Invalid(string messageKey, string message, string field, object? value)
+    /// <summary>Сторінка 1..<see cref="MaxLimit"/>; інакше — 422.</summary>
+    internal static void RequirePageSize(CursorRequest page)
+    {
+        if (page.Limit is < 1 or > MaxLimit)
+        {
+            var max = MaxLimit.ToString(CultureInfo.InvariantCulture);
+            throw Invalid("err.ECR-REQ-0422.pageSizeOutOfRange", $"Розмір сторінки поза межами 1..{max}.", "max", max);
+        }
+    }
+
+    internal static BusinessRuleException Invalid(string messageKey, string message, string field, object? value)
         => new(
             ErrorCodes.RequestInvalid,
             message,
             new Dictionary<string, object?> { ["messageKey"] = messageKey, [field] = value });
+}
+
+/// <summary>
+/// Події журналу покриття (ФВ-5.23, ІНТ-3.3, <c>D-118</c>): інтервал зібрано,
+/// але в комірки він не ліг. Право — як у журналу прогонів.
+/// </summary>
+/// <remarks>
+/// ⛔ Ці рядки не прив'язані до прогону (<c>CollectionRunId = null</c>, Q-186),
+/// тож деталь прогону їх не показує — і до цього обробника їх не бачив ніхто.
+/// Мовчазний пропуск тут найдорожчий: збір відпрацював, звіт склався, а числа
+/// за пізній інтервал у ньому немає.
+/// </remarks>
+public sealed class ListCoverageEventsHandler(
+    ICollectionRunReader runs, IAccessDecisionService access, ICurrentUser currentUser)
+{
+    /// <summary>Сторінка подій, новіші першими.</summary>
+    /// <exception cref="BusinessRuleException">Невідомий статус або розмір поза межами.</exception>
+    public async Task<PagedResult<CoverageEventView>> HandleAsync(
+        CoverageEventFilter filter, CursorRequest page, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(filter);
+        ArgumentNullException.ThrowIfNull(page);
+
+        // ⚠ Права названо тут, а не через `ListCollectionRunsHandler.Permissions`:
+        // сторож `Кожен_ендпоінт_перевіряє_саме_своє_право_СТАТИЧНО` читає тіло
+        // САМЕ цього обробника (так само, як у `GetCollectionRunHandler`).
+        await PermissionCheck.RequireAnyAsync(
+            access, currentUser, [ListDataSourcesHandler.Permission, SaveDataSourceHandler.Permission], ct)
+            .ConfigureAwait(false);
+
+        ListCollectionRunsHandler.RequirePageSize(page);
+
+        // ⛔ Невідомий статус — 422, а не порожній перелік: друкарська помилка
+        // у фільтрі читалася б як «пропусків не було».
+        var status = string.IsNullOrWhiteSpace(filter.Status)
+            ? null
+            : CollectionCoverage.KnownStatuses.FirstOrDefault(
+                  s => string.Equals(s, filter.Status.Trim(), StringComparison.OrdinalIgnoreCase))
+              ?? throw ListCollectionRunsHandler.Invalid(
+                  "err.ECR-REQ-0422.coverageEventStatus",
+                  $"Статусу події покриття «{filter.Status}» не існує.",
+                  "status",
+                  filter.Status);
+
+        return await runs.ListCoverageEventsAsync(filter with { Status = status }, page, ct).ConfigureAwait(false);
+    }
 }
 
 /// <summary>Деталь прогону збору. Право — як у журналу.</summary>
