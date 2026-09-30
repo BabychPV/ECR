@@ -16,7 +16,7 @@ import type {
   UnitRef,
 } from '@/api/types';
 import { useColumnWidths } from '@/features/preferences/columnWidthsSync';
-import { cellAppearanceClassOf, cellAppearanceOf } from './cellAppearance';
+import { cellAppearanceClassOf, cellAppearanceOf, withConditionalFormat } from './cellAppearance';
 import { cellDisplay, cellText, editorValueOf, isNumericColumn, sameCellValue } from './cellValue';
 import { parseClipboard, planPaste, toClipboard, type PasteRejection } from './clipboard';
 import { captureEdit, coerce, revertsToSaved, valueOf, withKnownVersions } from './edits';
@@ -2404,11 +2404,14 @@ export function gridColumns(
         // не заміна: рахується ЗАВЖДИ, незалежно від того, чи спрацював
         // хоч один з інших маркерів, — інакше жирна колонка без стилю
         // фарбувалась би, лише щойно комірку зроблено `dirty`.
-        const appearance = cellAppearanceOf(column.style);
+        // ФВ-2.6/2.7: умовне форматування — поверх стилю колонки (результат
+        // правил приходить зі зрізу готовий: `slice.cellFormats`).
+        const cellStyle = withConditionalFormat(column.style, slice.cellFormats?.[key]);
+        const appearance = cellAppearanceOf(cellStyle);
 
         // ⛔ `X-10`: колір і заливка автора — змінними й класами, які читає
         // `cellEditors.css`, а не inline-кольором (коментар `cellAppearanceOf`).
-        const appearanceClass = cellAppearanceClassOf(column.style);
+        const appearanceClass = cellAppearanceClassOf(cellStyle);
 
         /*
          * ⛔ `U-05`: повне значення має бути ДОСТУПНЕ, навіть коли воно

@@ -1,5 +1,5 @@
 import type { CSSProperties } from 'react';
-import type { CellStyleDto } from '@/api/types';
+import type { CellFormatDto, CellStyleDto } from '@/api/types';
 import { AA, contrast } from '@/shared/theme/contrast';
 import { themeSurface } from '@/shared/theme/theme';
 
@@ -67,6 +67,35 @@ export function cellAppearanceOf(style: CellStyleDto | null | undefined): CSSPro
   if (align !== undefined) css.textAlign = align;
 
   return Object.keys(css).length === 0 ? undefined : css;
+}
+
+/**
+ * Накладає результат умовного форматування (ФВ-2.6/2.7, `slice.cellFormats`;
+ * правило → стиль рахує сервер, одна функція з Excel-експортом) на стиль
+ * колонки: задані кольори й жирність перекривають колонкові, решта — лишається.
+ * Далі йде той самий `cellAppearanceOf`, тож контраст у темах рахується так
+ * само, як для стилю автора шаблону.
+ */
+export function withConditionalFormat(
+  base: CellStyleDto | null | undefined,
+  format: CellFormatDto | null | undefined,
+): CellStyleDto | null | undefined {
+  if (format === null || format === undefined) return base;
+
+  return {
+    isBold: format.isBold || (base?.isBold ?? false),
+    isItalic: base?.isItalic ?? false,
+    foregroundArgb: argbOfHex(format.foregroundHex) ?? base?.foregroundArgb ?? null,
+    backgroundArgb: argbOfHex(format.backgroundHex) ?? base?.backgroundArgb ?? null,
+    horizontalAlign: base?.horizontalAlign ?? null,
+    verticalAlign: base?.verticalAlign ?? null,
+    wrapText: base?.wrapText ?? false,
+  };
+}
+
+/** `#rrggbb` → ARGB (як `StyleDef`); `null` — колір теми. */
+function argbOfHex(hex: string | null): number | null {
+  return hex === null ? null : parseInt(hex.slice(1), 16);
 }
 
 /**

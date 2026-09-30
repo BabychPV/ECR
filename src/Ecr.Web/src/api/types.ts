@@ -31,6 +31,8 @@ export type ColumnDto = Schemas['ColumnDto'];
  * `ColumnDto.style` — `null`, якщо `ColumnDef.StyleId` не задано.
  */
 export type CellStyleDto = Schemas['CellStyleDto'];
+/** Результат умовного форматування комірки (ФВ-2.6/2.7): `TableSliceDto.cellFormats[rowKey:columnCode]`. */
+export type CellFormatDto = Schemas['CellFormatDto'];
 
 /**
  * Рядок зі значеннями; ключ у `cells` — код колонки.

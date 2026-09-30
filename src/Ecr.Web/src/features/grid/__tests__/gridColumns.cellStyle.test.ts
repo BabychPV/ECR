@@ -127,4 +127,23 @@ describe('gridColumns — стиль колонки в живій сітці (д
     expect(dirty.class).toContain('ecr-cell-filled');
     expect(dirty['data-cell-state']).toBe('dirty');
   });
+
+  it('ФВ-2.6/2.7: cellFormats зі зрізу фарбує лише свою комірку, а не всю колонку', () => {
+    const formatted = slice({
+      rows: [
+        { rowKey: 'R1', ordinal: 1, rowKind: 'Item', label: null, rowVersion: '0x01', cells: {}, isOrphaned: false },
+        { rowKey: 'R2', ordinal: 2, rowKind: 'Item', label: null, rowVersion: '0x01', cells: {}, isOrphaned: false },
+      ],
+      cellFormats: { 'R1:C1': { backgroundHex: '#ff0000', foregroundHex: null, isBold: true } },
+    });
+    const columns = gridColumns(formatted, false, NoLocalFlags, {}, noRequiredInput);
+
+    const hit = cellPropsOf(columns, 'R1');
+    expect(hit.class).toContain('ecr-cell-filled');
+    expect(hit.style).toMatchObject({ fontWeight: 'bold', '--ecr-cell-fill': '#ff0000' });
+
+    const miss = cellPropsOf(columns, 'R2');
+    expect(miss.class).not.toContain('ecr-cell-filled');
+    expect(miss).not.toHaveProperty('style');
+  });
 });
