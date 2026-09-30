@@ -171,6 +171,11 @@ const TemplateColumnUsage = lazy(async () => ({
   default: (await import('@/features/templates/ColumnUsage')).TemplateColumnUsage,
 }));
 
+/** Попередній перегляд таблиці (`ФВ-2.6`) — лінивий чанк, лише читання. */
+const TablePreview = lazy(async () => ({
+  default: (await import('@/features/templates/TablePreview')).TablePreview,
+}));
+
 /**
  * ⛔ `PresentationEditor` — єдиний із цих редакторів, що НЕ стоїть за
  * `{умова && …}`: він сам носить усередині `<Modal opened={column !== null}>`.
@@ -329,6 +334,9 @@ export function TemplateVersionPage(): JSX.Element {
 
   // ФВ-2.7: таблиця, для якої відкрито умовне форматування.
   const [conditionalFormatTable, setConditionalFormatTable] = useState<TemplateTable | null>(null);
+
+  // ФВ-2.6: таблиця, для якої відкрито попередній перегляд (доступний і без `Template.Edit`).
+  const [previewTable, setPreviewTable] = useState<TemplateTable | null>(null);
 
   // ⛔ Правила доступу до періоду (`ФВ-2.15`) не мають коду — форма
   // створення і форма правки наявного за `id` навмисно окремі, за тією самою
@@ -1075,9 +1083,14 @@ export function TemplateVersionPage(): JSX.Element {
                         return (
                           <>
                             <Group justify="space-between" mt="sm">
-                              <Text fw={600}>
-                                <TableTitle table={table} />
-                              </Text>
+                              <Group gap="xs">
+                                <Text fw={600}>
+                                  <TableTitle table={table} />
+                                </Text>
+                                <Button size="compact-xs" variant="subtle" onClick={() => setPreviewTable(table)}>
+                                  {t('tablePreview.open')}
+                                </Button>
+                              </Group>
                               {canEditSheets && (
                                 <Group gap="xs">
                                   <Button
@@ -1665,6 +1678,23 @@ export function TemplateVersionPage(): JSX.Element {
               </Suspense>
             )}
           </LocalDraft>
+        )}
+      </Modal>
+
+      <Modal
+        opened={previewTable !== null}
+        onClose={() => setPreviewTable(null)}
+        title={
+          previewTable === null
+            ? ''
+            : t('tablePreview.title', { name: localized(previewTable.nameL10n) || previewTable.code })
+        }
+        size="100%"
+      >
+        {previewTable !== null && (
+          <Suspense fallback={null}>
+            <TablePreview templateVersionId={id} table={previewTable} />
+          </Suspense>
         )}
       </Modal>
 
