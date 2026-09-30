@@ -1,4 +1,4 @@
-﻿using Ecr.Application.Documents;
+using Ecr.Application.Documents;
 using Ecr.Application.Templates;
 using Ecr.Domain.Services;
 using Microsoft.Extensions.DependencyInjection;
@@ -392,6 +392,10 @@ public static class DependencyInjection
         services.AddScoped<Sources.SetEntityFieldMapPausedHandler>();
         services.AddScoped<Sources.AcceptSourceUnitChangeHandler>();
         services.AddScoped<Sources.DeleteEntityFieldMapHandler>();
+
+        // HSE301 A6: API подій джерела — каталог шаблонів, проба, мапінг, таблиця подій, «Отримати з PI зараз».
+        services.AddScoped<Integration.SourceEvents.ListEventTemplatesHandler>();
+        services.AddScoped<Integration.SourceEvents.ProbeSourceEventsHandler>();
 
         // BE-07: публічні дані екрана входу. Єдиний обробник, який НЕ перевіряє
         // жодного права — бо викликається до автентифікації; склад полів і
