@@ -146,7 +146,8 @@ public sealed class GetJobStatusHandler(
     IBackgroundJobScheduler jobs,
     IAccessDecisionService access,
     ICurrentUser currentUser,
-    IUiStringCatalog catalog)
+    IUiStringCatalog catalog,
+    IJobProgressStore? progressStore = null)
 {
     /// <summary>Право на перегляд стану системи (`02-contracts.md` §9).</summary>
     public const string Permission = "System.ViewHealth";
@@ -219,12 +220,20 @@ public sealed class GetJobStatusHandler(
             .ResolveAsync(catalog, currentUser.Language, status.Message, ct)
             .ConfigureAwait(false);
 
+        // ⛔ Розклад на дочірні задачі (P4): батько `Succeeded` = «розкладено», не «пораховано».
+        // Похідний стан — при читанні, без схеми; для задачі без дочірніх не змінюється.
+        var fanOut = progressStore is null || status.State is not ("Succeeded" or "Running")
+            ? null
+            : await progressStore.GetFanOutAsync(jobId, ct).ConfigureAwait(false);
+
         return status with
         {
             Message = resolvedMessage,
             ResultUrl = JobResultUrl.For(
                 profile, jobId, null, status.State, status.Message, status.DocumentId),
             CreatedByUserId = createdByUserId,
+            FanOut = fanOut,
+            EffectiveState = fanOut?.EffectiveStateOf(status.State),
         };
     }
 }

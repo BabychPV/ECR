@@ -696,8 +696,11 @@ public sealed record JobHeartbeatSettings(TimeSpan Interval);
 /// клієнт, що опитує прогрес, потрапляє не обов'язково на той, який задачу
 /// виконує.
 /// </remarks>
-internal sealed class StoreJobProgress(IJobProgressStore? store, string jobId, IClock clock) : IJobProgress
+internal sealed class StoreJobProgress(IJobProgressStore? store, string jobId, IClock clock) : IJobProgress, IJobIdentity
 {
+    /// <inheritdoc />
+    public string JobId => jobId;
+
     /// <inheritdoc />
     public Task ReportAsync(int percent, string? message, CancellationToken ct)
         => store is null

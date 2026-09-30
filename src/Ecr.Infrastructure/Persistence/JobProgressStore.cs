@@ -279,6 +279,49 @@ public sealed class JobProgressStore(EcrDbContext db) : IJobProgressStore
         return true;
     }
 
+    /// <summary>Рядок групування дочірніх задач за станом.</summary>
+    private sealed class FanOutRow
+    {
+        public string State { get; set; } = string.Empty;
+
+        public int Cnt { get; set; }
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⚠ Схеми не змінено: дочірня задача несе <c>fanOutParentJobId</c> у Payload
+    /// (<c>RecalculationRequest.FanOutParentJobId</c>), звужується префіксом цілі
+    /// (<c>IRecalculationJob~doc…</c>) і лише рядками черги. Читання разове — за
+    /// опитуванням однієї задачі, не за переліком.
+    /// </remarks>
+    public async Task<FanOutStatus?> GetFanOutAsync(string parentJobId, CancellationToken ct)
+    {
+        var rows = await db.Database
+            .SqlQuery<FanOutRow>(
+                $"""
+                 SELECT State, COUNT(*) AS Cnt
+                   FROM itg.JobProgress
+                  WHERE Lane IS NOT NULL
+                    AND TargetKey LIKE N'IRecalculationJob~doc%'
+                    AND JSON_VALUE(Payload, '$.fanOutParentJobId') = {parentJobId}
+                  GROUP BY State
+                 """)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var total = rows.Sum(r => r.Cnt);
+
+        if (total == 0)
+        {
+            return null;
+        }
+
+        int Of(string state) => rows.Where(r => r.State == state).Sum(r => r.Cnt);
+
+        return new FanOutStatus(
+            total, Of("Queued"), Of("Running"), Of("Succeeded"), Of("Failed") + Of("Cancelled"));
+    }
+
     /// <inheritdoc />
     public async Task<JobStatus?> FindAsync(string jobId, CancellationToken ct)
         => await db.JobProgresses

@@ -4000,6 +4000,44 @@
           "Sql"
         ]
       },
+      "FanOutStatus": {
+        "description": "Підсумок дочірніх задач розкладу (P4 ФВ-9.8): скільки розкладено і що з ними зараз.",
+        "properties": {
+          "failed": {
+            "description": "Провалено або скасовано.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "queued": {
+            "description": "У черзі.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "running": {
+            "description": "Виконуються.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "succeeded": {
+            "description": "Виконано.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "total": {
+            "description": "Скільки дочірніх задач позначено цим батьком.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total",
+          "queued",
+          "running",
+          "succeeded",
+          "failed"
+        ],
+        "type": "object"
+      },
       "FieldTargetKind": {
         "description": "Куди лягає поле джерела.",
         "enum": [
@@ -4680,6 +4718,13 @@
               "integer"
             ]
           },
+          "effectiveState": {
+            "description": "Похідний стан для оператора: `FannedOut` / `Succeeded` /\n`SucceededWithErrors`; `null` — як string JobStatus.State.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
           "error": {
             "description": "Текст провалу.",
             "type": [
@@ -4692,6 +4737,17 @@
             "type": [
               "null",
               "string"
+            ]
+          },
+          "fanOut": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/FanOutStatus",
+                "description": "Підсумок дочірніх задач, розкладених цією (P4); `null` — дочірніх немає.\nЗаповнює `GetJobStatusHandler`."
+              }
             ]
           },
           "jobId": {

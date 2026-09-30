@@ -487,7 +487,12 @@ public sealed class RecalculationJob(
 
         foreach (var documentId in documentIds)
         {
-            var child = request with { DocumentId = documentId };
+            // Позначка батька — щоб статус показував «розкладено N, виконано M».
+            var child = request with
+            {
+                DocumentId = documentId,
+                FanOutParentJobId = (progress as IJobIdentity)?.JobId,
+            };
 
             var target = child.PeriodKey is { } period
                 ? Ecr.Application.Documents.RecalculateDocumentHandler.TargetOf(documentId, new PeriodKey(period))
@@ -1003,6 +1008,10 @@ public sealed class RecalculationJob(
 /// губили його при розборі.
 /// </param>
 /// <param name="ApprovalReason">Причина погодження — той самий слід, що й <paramref name="ApprovalId"/>.</param>
+/// <param name="FanOutParentJobId">
+/// Батьківська задача-розклад (P4): кладе <c>FanOutAsync</c> у дочірні, щоб статус
+/// батька рахував їх (<c>IJobProgressStore.GetFanOutAsync</c>, JSON <c>fanOutParentJobId</c>).
+/// </param>
 public sealed record RecalculationRequest(
     int ProjectId,
     long DocumentId,
@@ -1011,4 +1020,5 @@ public sealed record RecalculationRequest(
     int? SheetDefId = null,
     int? ApprovedBy = null,
     long? ApprovalId = null,
-    string? ApprovalReason = null);
+    string? ApprovalReason = null,
+    string? FanOutParentJobId = null);

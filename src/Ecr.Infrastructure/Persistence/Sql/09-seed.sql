@@ -553,6 +553,10 @@ UPDATE t
   FROM sys_ecr.UiString AS t
   JOIN (VALUES
     (N'common.loading',                  N'en', N'Loading…', N'Loading...'),
+    -- P4 ФВ-9.8: батько лише РОЗКЛАДАЄ документні задачі — «ще не пораховано».
+    (N'jobs.recalcFannedOut',            N'en', N'Queued document recalculation tasks: {count}.', N'Queued document recalculation tasks: {count}; not calculated yet.'),
+    (N'jobs.recalcFannedOut',            N'ru', N'Поставлено в очередь задач пересчёта документов: {count}.', N'Поставлено в очередь задач пересчёта документов: {count}; ещё не пересчитано.'),
+    (N'jobs.recalcFannedOut',            N'kz', N'Құжаттарды қайта есептеу тапсырмалары кезекке қойылды: {count}.', N'Құжаттарды қайта есептеу тапсырмалары кезекке қойылды: {count}; әлі есептелген жоқ.'),
     -- Назва продукту лишається англійською (рішення людини 2026-09-30).
     (N'login.title',                     N'ru', N'Отчётность по экологическому соответствию', N'Environmental Compliance Reporting'),
     (N'login.title',                     N'kz', N'Экологиялық сәйкестік бойынша есептілік', N'Environmental Compliance Reporting'),
@@ -4275,7 +4279,11 @@ USING (VALUES
     (N'coverageEvents.sourceDataRefused',       N'en', N'Attribute "{path}", interval [{from}, {to}) was not collected: {message}. The interval stays a gap; catch-up retries it on every run until the source data is fixed.', 1),
     -- COLL:coverage-refusal ── кінець секції ──
     -- COLL:p4-fanout ── Перерахунок проєкту розкладено на документні задачі (P4 ФВ-9.8, `RecalculationJob.FanOutAsync`) ──
-    (N'jobs.recalcFannedOut',                   N'en', N'Queued document recalculation tasks: {count}.', 1),
+    (N'jobs.recalcFannedOut',                   N'en', N'Queued document recalculation tasks: {count}; not calculated yet.', 1),
+    (N'jobs.fanOutProgress',                    N'en', N'Fanned out {total}, done {done} of {total}, errors {failed}.', 1),
+    (N'jobs.fanOutPending',                     N'en', N'Fanned out, not calculated yet', 1),
+    (N'jobs.fanOutDone',                        N'en', N'Done', 1),
+    (N'jobs.fanOutDoneWithErrors',              N'en', N'Done with errors ({failed})', 1),
     -- COLL:p4-fanout ── кінець секції ──
     -- COLL:calcrun-order ── Старіший прогін не перекриває новіший (борг P4, `CalculationResultStore.SwitchCurrentRunAsync`) ──
     -- Причина в `calc.CalculationRun.ErrorMessage` прогону, що завершився після новішого тієї ж області: `{runId}` — новіший, актуальний.
@@ -12219,8 +12227,16 @@ SELECT v.[Key], v.Lang, v.Val
     (N'jobs.leaseLostTooOften', N'kz', N'Тоқтатылды: орындаушы бұл тапсырманы қатарынан {reclaims} рет жоғалтты (әр жолы оның процесі тоқтады). Журналдарды тексеріп, тапсырманы қайта іске қосыңыз.'),
     (N'jobs.maxDurationExceeded', N'ru', N'Остановлена: задача выполнялась дольше лимита {limit}. Проверьте журналы, затем перезапустите задачу или увеличьте лимит.'),
     (N'jobs.maxDurationExceeded', N'kz', N'Тоқтатылды: тапсырма {limit} лимитінен ұзақ орындалды. Журналдарды тексеріп, тапсырманы қайта іске қосыңыз немесе лимитті арттырыңыз.'),
-    (N'jobs.recalcFannedOut', N'ru', N'Поставлено в очередь задач пересчёта документов: {count}.'),
-    (N'jobs.recalcFannedOut', N'kz', N'Құжаттарды қайта есептеу тапсырмалары кезекке қойылды: {count}.'),
+    (N'jobs.recalcFannedOut', N'ru', N'Поставлено в очередь задач пересчёта документов: {count}; ещё не пересчитано.'),
+    (N'jobs.fanOutProgress', N'ru', N'Разложено {total}, выполнено {done} из {total}, ошибок {failed}.'),
+    (N'jobs.fanOutPending', N'ru', N'Разложено, ещё не пересчитано'),
+    (N'jobs.fanOutDone', N'ru', N'Выполнено'),
+    (N'jobs.fanOutDoneWithErrors', N'ru', N'Выполнено с ошибками ({failed})'),
+    (N'jobs.recalcFannedOut', N'kz', N'Құжаттарды қайта есептеу тапсырмалары кезекке қойылды: {count}; әлі есептелген жоқ.'),
+    (N'jobs.fanOutProgress', N'kz', N'Бөлінді {total}, орындалды {done}/{total}, қате {failed}.'),
+    (N'jobs.fanOutPending', N'kz', N'Бөлінді, әлі есептелген жоқ'),
+    (N'jobs.fanOutDone', N'kz', N'Орындалды'),
+    (N'jobs.fanOutDoneWithErrors', N'kz', N'Қателермен орындалды ({failed})'),
     (N'jobs.recalcOverBudget', N'ru', N'Пересчёт завершён за {seconds} с — сверх лимита в {limit} с. Проверьте нагрузку на базу данных и пул исполнителей пересчёта.'),
     (N'jobs.recalcOverBudget', N'kz', N'Қайта есептеу {seconds} с ішінде аяқталды — {limit} с лимитінен асты. Дерекқордың жүктемесін және қайта есептеу орындаушыларының пулын тексеріңіз.'),
     (N'publish.problem.formulaNotFound', N'ru', N'Формула {formula}: ссылка !{name} в позиции {position} не соответствует ни одной формуле этой версии или импортированных методик, поэтому всегда давала бы #REF.'),

@@ -100,6 +100,13 @@ public interface IJobProgressStore
     /// <summary>Стан задачі; <c>null</c> — такої немає.</summary>
     public Task<JobStatus?> FindAsync(string jobId, CancellationToken ct);
 
+    /// <summary>
+    /// Підсумок дочірніх задач, розкладених цим батьком; <c>null</c> — дочірніх немає.
+    /// </summary>
+    /// <param name="parentJobId">Ідентифікатор батьківської задачі.</param>
+    /// <param name="ct">Скасування.</param>
+    public Task<FanOutStatus?> GetFanOutAsync(string parentJobId, CancellationToken ct);
+
     /// <summary>Хто поставив задачу; <c>null</c> — системна, або такої немає (Q-156).</summary>
     public Task<int?> GetCreatedByUserIdAsync(string jobId, CancellationToken ct);
 

@@ -18380,6 +18380,34 @@ export interface components {
          * @enum {unknown}
          */
         ExternalTransport: "PiWebApi" | "PiSqlClient" | "Sql";
+        /** @description Підсумок дочірніх задач розкладу (P4 ФВ-9.8): скільки розкладено і що з ними зараз. */
+        FanOutStatus: {
+            /**
+             * Format: int32
+             * @description Провалено або скасовано.
+             */
+            failed: number;
+            /**
+             * Format: int32
+             * @description У черзі.
+             */
+            queued: number;
+            /**
+             * Format: int32
+             * @description Виконуються.
+             */
+            running: number;
+            /**
+             * Format: int32
+             * @description Виконано.
+             */
+            succeeded: number;
+            /**
+             * Format: int32
+             * @description Скільки дочірніх задач позначено цим батьком.
+             */
+            total: number;
+        };
         /**
          * @description Куди лягає поле джерела.
          * @enum {unknown}
@@ -18669,10 +18697,14 @@ export interface components {
              * @description Документ задачі; `null` — не документна (BE-08).
              */
             documentId?: null | number;
+            /** @description Похідний стан для оператора: `FannedOut` / `Succeeded` /
+             *     `SucceededWithErrors`; `null` — як string JobStatus.State. */
+            effectiveState?: null | string;
             /** @description Текст провалу. */
             error: null | string;
             /** @description Код каталогу помилок провалу (BE-08). */
             errorCode?: null | string;
+            fanOut?: null | components["schemas"]["FanOutStatus"];
             /** @description Ідентифікатор. */
             jobId: string;
             /**
