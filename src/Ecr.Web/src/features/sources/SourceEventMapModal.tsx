@@ -13,9 +13,11 @@ import {
   Text,
   TextInput,
   Title,
+  VisuallyHidden,
 } from '@mantine/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { DocumentSummary } from '@/api/types';
+import { useReturnFocusOnUnmount } from '@/shared/a11y/focus';
 import { t } from '@/shared/i18n';
 import { Banner } from '@/shared/ui/Banner';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
@@ -168,6 +170,7 @@ function ValueMapEditor({
             size="compact-xs"
             variant="subtle"
             color="statusError"
+            aria-label={`${t('sourceEvents.remove')}: ${pair.sourceValue || String(index + 1)}`}
             onClick={() => onChange(pairs.filter((_, i) => i !== index))}
           >
             {t('sourceEvents.remove')}
@@ -214,6 +217,9 @@ export function SourceEventMapModal({
   readonly documents: readonly DocumentSummary[];
   readonly onClose: () => void;
 }): JSX.Element {
+  // ⛔ Діалог монтується за умовою (`SourceEventsTab`: `editing !== null && …`), а `Modal` повертає фокус лише
+  // на зміну `opened` — розмонтування його не повертає, і після «Скасувати»/«Зберегти» фокус падав на `<body>`.
+  useReturnFocusOnUnmount();
   const queryClient = useQueryClient();
   const [state, setState] = useState<MapFormState>(() => (map === null ? emptyForm() : formFromMap(map)));
   const patch = (next: Partial<MapFormState>): void => setState((current) => ({ ...current, ...next }));
@@ -426,7 +432,9 @@ export function SourceEventMapModal({
                 <Table.Th>{t('sourceEvents.fieldScope')}</Table.Th>
                 <Table.Th>{t('sourceEvents.fieldHow')}</Table.Th>
                 <Table.Th>{t('sourceEvents.fieldUnits')}</Table.Th>
-                <Table.Th />
+                <Table.Th>
+                  <VisuallyHidden>{t('sourceEvents.actions')}</VisuallyHidden>
+                </Table.Th>
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
@@ -548,6 +556,7 @@ export function SourceEventMapModal({
                         size="compact-xs"
                         variant="subtle"
                         color="statusError"
+                        aria-label={`${t('sourceEvents.remove')}: ${field.sourceAttribute || column?.code || String(state.fields.indexOf(field) + 1)}`}
                         onClick={() => patch({ fields: state.fields.filter((item) => item.key !== field.key) })}
                         data-source-event-field-remove=""
                       >

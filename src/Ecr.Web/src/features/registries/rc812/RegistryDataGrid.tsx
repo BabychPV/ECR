@@ -184,7 +184,12 @@ export function RegistryDataGrid(props: RegistryDataGridProps): JSX.Element {
                 aria-rowindex={r + 2}
                 data-row-key={rowKey}
                 data-deleted={deleted ? 'true' : undefined}
-                style={deleted ? { textDecoration: 'line-through', opacity: 0.6 } : undefined}
+                // ⛔ Без `opacity`: напівпрозорість множила контраст тексту рядка (і
+                // приглушеного — вже на межі 4.5) нижче AA в обох темах. Приглушення —
+                // `dimmed` (= `--ecr-muted`, контраст ≥ 4.5 на кожній поверхні тримає
+                // `cssVariables.test.ts`); «видалено» несе закреслення.
+                {...(deleted ? { c: 'dimmed' } : {})}
+                style={deleted ? { textDecoration: 'line-through' } : undefined}
               >
                 <Table.Td role="gridcell">
                   {row === undefined && props.manualCode && !readOnly ? (

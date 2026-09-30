@@ -12,6 +12,7 @@ import {
   Text,
   TextInput,
 } from '@mantine/core';
+import { useListFocus } from '@/shared/a11y/focus';
 import { t } from '@/shared/i18n';
 import {
   ConditionOperators,
@@ -72,6 +73,8 @@ export function ConditionalFormatPanel({
   const [sampleColumn, setSampleColumn] = useState(firstColumn);
   const [sample, setSample] = useState('');
 
+  const focus = useListFocus(rules.length);
+
   const update = (index: number, next: ConditionalRule): void =>
     setRules((previous) => previous.map((rule, i) => (i === index ? next : rule)));
 
@@ -83,7 +86,7 @@ export function ConditionalFormatPanel({
   }));
 
   return (
-    <Stack gap="sm">
+    <Stack gap="sm" ref={focus.container}>
       <Alert color="statusWarning" title={t('conditionalFormat.unavailableTitle')}>
         {t('conditionalFormat.unavailable')}
       </Alert>
@@ -94,7 +97,12 @@ export function ConditionalFormatPanel({
         const position = index + 1;
 
         return (
-          <Box key={index} role="group" aria-label={t('conditionalFormat.rule', { position })}>
+          <Box
+            key={index}
+            role="group"
+            aria-label={t('conditionalFormat.rule', { position })}
+            data-focus-row=""
+          >
             <Group grow align="flex-start">
               <Select
                 label={t('conditionalFormat.column')}
@@ -152,7 +160,10 @@ export function ConditionalFormatPanel({
               <Button
                 variant="subtle"
                 color="statusError"
-                onClick={() => setRules((previous) => previous.filter((_, i) => i !== index))}
+                onClick={() => {
+                  focus.removed();
+                  setRules((previous) => previous.filter((_, i) => i !== index));
+                }}
               >
                 {t('conditionalFormat.remove', { position })}
               </Button>
@@ -167,7 +178,14 @@ export function ConditionalFormatPanel({
       })}
 
       <Group>
-        <Button variant="default" onClick={() => setRules((previous) => [...previous, emptyRule(firstColumn)])}>
+        <Button
+          ref={focus.addButton}
+          variant="default"
+          onClick={() => {
+            focus.added();
+            setRules((previous) => [...previous, emptyRule(firstColumn)]);
+          }}
+        >
           {t('conditionalFormat.add')}
         </Button>
       </Group>

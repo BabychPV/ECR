@@ -16,6 +16,7 @@ import { Link } from "react-router-dom";
 import { EcrApiError } from "@/api/client";
 import type { DocumentSummary } from "@/api/types";
 import { formatDateTime, formatNumber } from "@/shared/format";
+import { useFocusAfterBusy } from "@/shared/a11y/focus";
 import { t } from "@/shared/i18n";
 import { ErrorAlert } from "@/shared/ui/ErrorAlert";
 import { PeriodPicker } from "@/shared/ui/PeriodPicker";
@@ -307,6 +308,9 @@ export function SourceEventsTable({
     },
   });
 
+  // ⚠ «Отримати з PI зараз» на час запиту `loading` (= `disabled`) — фокус повертається на кнопку.
+  const syncFocus = useFocusAfterBusy(sync.isPending);
+
   const rows = events.data?.pages.flatMap((page) => page.items) ?? [];
   const total = events.data?.pages[0]?.totalCount ?? null;
 
@@ -324,9 +328,13 @@ export function SourceEventsTable({
         <Title order={4}>{t("sourceEvents.title")}</Title>
         {canManage && (
           <Button
+            ref={syncFocus.ref}
             size="xs"
             loading={sync.isPending}
-            onClick={() => sync.mutate()}
+            onClick={() => {
+              syncFocus.arm();
+              sync.mutate();
+            }}
             data-source-events-sync=""
           >
             {t("sourceEvents.syncNow")}
@@ -451,7 +459,8 @@ export function SourceEventsTable({
       )}
 
       {total !== null && (
-        <Text size="xs" c="dimmed" data-source-events-total={total}>
+        // ⚠ `role="status"`: після зміни фільтра читач чує нову кількість, а не мовчання.
+        <Text size="xs" c="dimmed" role="status" data-source-events-total={total}>
           {t("sourceEvents.total", { count: formatNumber(total) })}
         </Text>
       )}

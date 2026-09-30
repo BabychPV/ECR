@@ -1,4 +1,4 @@
-import { useState, type CSSProperties, type DragEvent, type JSX, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type DragEvent, type JSX, type ReactNode } from 'react';
 import { ActionIcon, Box, Group } from '@mantine/core';
 import { t } from '@/shared/i18n';
 
@@ -121,6 +121,31 @@ export function ReorderCell({
 }: ReorderCellProps): JSX.Element {
   const handle = drag.handleProps(index);
 
+  // ⛔ Фокус іде за елементом, а не лишається на місці (WCAG 2.4.3). Під час
+  // запису кнопки `disabled` — браузер знімає з них фокус; після перестановки
+  // React переносить рядок у DOM — і фокус падає на `<body>`. Без цього
+  // клавіатурна людина після кожного «↓» шукала б рядок заново з початку
+  // сторінки. Тому запам'ятовуємо натиснутий напрямок і, щойно кнопки знову
+  // доступні, ставимо фокус на ту саму кнопку в новій позиції; на межі
+  // списку (вона там вимкнена) — на сусідню.
+  const up = useRef<HTMLButtonElement>(null);
+  const down = useRef<HTMLButtonElement>(null);
+  const pressed = useRef<'up' | 'down' | null>(null);
+
+  useEffect(() => {
+    if (pressed.current === null || disabled) return;
+    const wanted = pressed.current === 'up' ? up.current : down.current;
+    const other = pressed.current === 'up' ? down.current : up.current;
+    pressed.current = null;
+    const target = wanted !== null && !wanted.disabled ? wanted : other;
+    if (target !== null && !target.disabled) target.focus();
+  }, [index, disabled]);
+
+  const move = (direction: 'up' | 'down'): void => {
+    pressed.current = direction;
+    onMove(index, direction === 'up' ? index - 1 : index + 1);
+  };
+
   return (
     <Group gap="xs" wrap="nowrap">
       <Box
@@ -135,22 +160,24 @@ export function ReorderCell({
         ⠿
       </Box>
       <ActionIcon
+        ref={up}
         size="sm"
         variant="subtle"
         aria-label={t('reorder.moveUp', { name })}
         aria-describedby={describedBy}
         disabled={disabled || index === 0}
-        onClick={() => onMove(index, index - 1)}
+        onClick={() => move('up')}
       >
         ↑
       </ActionIcon>
       <ActionIcon
+        ref={down}
         size="sm"
         variant="subtle"
         aria-label={t('reorder.moveDown', { name })}
         aria-describedby={describedBy}
         disabled={disabled || index === count - 1}
-        onClick={() => onMove(index, index + 1)}
+        onClick={() => move('down')}
       >
         ↓
       </ActionIcon>

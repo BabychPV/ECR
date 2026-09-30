@@ -182,3 +182,28 @@ describe('Дані довідника: табличний редактор', () 
     ]);
   });
 });
+
+/**
+ * Контраст рядка, позначеного до видалення (WCAG 1.4.3).
+ *
+ * ⛔ Було `opacity: 0.6`: напівпрозорість множить контраст і приглушеного тексту (`--ecr-muted`, ≥ 4.5 лише
+ * без неї) — рядок падав нижче AA в обох темах. Мутаційний доказ (перевірено руками 2026-09-30): повернути
+ * `opacity: 0.6` у стиль рядка → червоний.
+ */
+describe('Дані довідника: рядок до видалення', () => {
+  it('закреслений і приглушений токеном, без напівпрозорості', async () => {
+    showDataPage();
+    await screen.findByRole('grid');
+
+    const target = cell(1, 0);
+    act(() => target.focus());
+    fireEvent.keyDown(target, { key: 'Delete', ctrlKey: true, shiftKey: true });
+
+    const row = target.closest('tr') as HTMLElement;
+    await vi.waitFor(() => expect(row.getAttribute('data-deleted')).toBe('true'));
+    expect(row.style.textDecoration).toBe('line-through');
+    expect(row.style.opacity).toBe('');
+    expect(row.style.getPropertyValue('--text-color') || row.style.color).toContain('dimmed');
+  });
+});
+

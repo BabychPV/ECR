@@ -353,3 +353,72 @@ describe('formatInZone', () => {
     expect(formatInZone(null, 'Asia/Atyrau', null)).toBe('');
   });
 });
+
+/**
+ * Клавіатура вкладки (WCAG 2.4.3, 2.4.6).
+ *
+ * ⛔ Мутаційні докази (перевірено руками 2026-09-30): прибрати `useReturnFocusOnUnmount()` у
+ * `SourceEventMapModal` → червоний «повернення фокуса»; прибрати `aria-label` у кнопок рядка мапінгу →
+ * червоний «ім'я з документом»; прибрати `toggleFocus.arm(...)` → червоний «пауза».
+ */
+describe('SourceEventsTab — клавіатура', () => {
+  const editButton = (): Promise<HTMLElement> =>
+    waitFor(() => {
+      const button = document.querySelector<HTMLElement>('[data-source-event-map-edit="12"]');
+      expect(button).not.toBeNull();
+      return button as HTMLElement;
+    });
+
+  it('повернення фокуса: «Скасувати» у формі мапінгу — фокус назад на «Змінити»', async () => {
+    respond();
+    show();
+
+    const edit = await editButton();
+    edit.focus();
+    fireEvent.click(edit);
+
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: '⟦common.cancel⟧' }));
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(edit));
+  });
+
+  it('ім\'я з документом: кнопки рядка мапінгу розрізняються', async () => {
+    respond();
+    show();
+
+    const edit = await editButton();
+    expect(edit.getAttribute('aria-label')).toMatch(/^⟦sourceEvents\.mapEdit⟧: .*DOC-000123/);
+    expect(document.querySelector('[data-source-event-map-toggle="12"]')?.getAttribute('aria-label')).toMatch(
+      /^⟦sourceEvents\.mapPause⟧: .*DOC-000123/,
+    );
+  });
+
+  it('пауза: після відповіді фокус назад на натиснуту кнопку, а не на <body>', async () => {
+    respond();
+    // ⚠ Відповідь не миттєва: миттєву React Query зводить в один рендер, і стану «запит іде» не буває.
+    const answer = globalThis.fetch;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (init?.method === 'PUT') await new Promise((resolve) => setTimeout(resolve, 50));
+        return answer(input, init);
+      }),
+    );
+    show();
+
+    const toggle = await waitFor(() => {
+      const button = document.querySelector<HTMLElement>('[data-source-event-map-toggle="12"]');
+      expect(button).not.toBeNull();
+      return button as HTMLElement;
+    });
+    toggle.focus();
+    fireEvent.click(toggle);
+    // Браузер знімає фокус із кнопки, що стала `loading` (= `disabled`); jsdom — ні.
+    toggle.blur();
+
+    await waitFor(() => expect(sent.some((s) => s.method === 'PUT')).toBe(true));
+    await waitFor(() => expect(document.activeElement).toBe(toggle));
+  });
+});
