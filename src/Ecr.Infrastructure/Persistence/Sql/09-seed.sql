@@ -722,7 +722,18 @@ DELETE t
     -- попереджати «прочитати не вдалося» більше нема про що.
     (N'sources.syncPolicyUnknown',                 N'en', N'The current policy of this entity could not be read, so the form shows the default one. Saving replaces the policy entirely.'),
     (N'sources.syncPolicyUnknown',                 N'ru', N'Текущую политику этой сущности прочитать не удалось, поэтому форма показывает политику по умолчанию. Сохранение заменяет политику целиком.'),
-    (N'sources.syncPolicyUnknown',                 N'kz', N'Осы нысанның ағымдағы саясатын оқу мүмкін болмады, сондықтан пішін әдепкі саясатты көрсетеді. Сақтау саясатты толығымен ауыстырады.')
+    (N'sources.syncPolicyUnknown',                 N'kz', N'Осы нысанның ағымдағы саясатын оқу мүмкін болмады, сондықтан пішін әдепкі саясатты көрсетеді. Сақтау саясатты толығымен ауыстырады.'),
+    -- CONDFMT:client (ФВ-2.7): збереження правил умовного форматування ввімкнене —
+    -- пояснення «сервер правил не зберігає» втратили місце на екрані.
+    (N'conditionalFormat.unavailableTitle',        N'en', N'Rules are not saved yet'),
+    (N'conditionalFormat.unavailableTitle',        N'ru', N'Правила пока не сохраняются'),
+    (N'conditionalFormat.unavailableTitle',        N'kz', N'Ережелер әзірге сақталмайды'),
+    (N'conditionalFormat.unavailable',             N'en', N'The server does not store conditional formatting rules yet. You can compose rules here and check them on a sample value, but they are lost when the window is closed.'),
+    (N'conditionalFormat.unavailable',             N'ru', N'Сервер пока не хранит правила условного форматирования. Здесь можно составить правила и проверить их на примере значения, но при закрытии окна они теряются.'),
+    (N'conditionalFormat.unavailable',             N'kz', N'Сервер әзірге шартты пішімдеу ережелерін сақтамайды. Мұнда ережелер құрып, оларды мән үлгісінде тексеруге болады, бірақ терезе жабылғанда олар жоғалады.'),
+    (N'conditionalFormat.saveUnavailable',         N'en', N'Saving is unavailable until the server stores conditional formatting rules.'),
+    (N'conditionalFormat.saveUnavailable',         N'ru', N'Сохранение недоступно, пока сервер не хранит правила условного форматирования.'),
+    (N'conditionalFormat.saveUnavailable',         N'kz', N'Сервер шартты пішімдеу ережелерін сақтамайынша, сақтау қолжетімсіз.')
   ) AS s ([Key], Lang, OldVal)
     ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
  WHERE t.Value = s.OldVal COLLATE Latin1_General_BIN2;
@@ -5597,8 +5608,6 @@ USING (VALUES
     (N'reorder.moved', N'en', N'{name} is now in position {position} of {count}.', 1),
     (N'reorder.rowsUnavailable', N'en', N'Rows cannot be reordered here yet: the server cannot change only a row''s order without resetting its translations. Use the Order field in the row form.', 1),
     (N'conditionalFormat.title', N'en', N'Conditional formatting', 1),
-    (N'conditionalFormat.unavailableTitle', N'en', N'Rules are not saved yet', 1),
-    (N'conditionalFormat.unavailable', N'en', N'The server does not store conditional formatting rules yet. You can compose rules here and check them on a sample value, but they are lost when the window is closed.', 1),
     (N'conditionalFormat.rule', N'en', N'Rule {position}', 1),
     (N'conditionalFormat.column', N'en', N'Column', 1),
     (N'conditionalFormat.operator', N'en', N'Condition', 1),
@@ -5625,7 +5634,6 @@ USING (VALUES
     (N'conditionalFormat.noMatch', N'en', N'No rule applies to this value.', 1),
     (N'conditionalFormat.matched', N'en', N'Rule {position} applies.', 1),
     (N'conditionalFormat.save', N'en', N'Save rules', 1),
-    (N'conditionalFormat.saveUnavailable', N'en', N'Saving is unavailable until the server stores conditional formatting rules.', 1),
     (N'err.ECR-TMPL-0422.ordinalInvalid', N'en', N'Order must be a whole number from 0 to 1000000, got "{value}".', 1),
     -- CONSTRUCTOR:dnd-format: кінець секції
     -- D16: ФВ-2.16 — підтвердження пакетних правок (вставка, протягування) і
@@ -5669,6 +5677,19 @@ USING (VALUES
     (N'err.ECR-CFG-0422.condFormatLimit', N'en', N'Too many conditional format rules: at most {max} per template version.', 1),
     -- ru/kz — окремою порцією `COLL:condformat` у блоці I18N нижче.
     -- COLL:condformat ── кінець секції ──
+    -- CONDFMT:client ── ФВ-2.7: збереження правил умовного форматування (`ConditionalFormatPanel`, If-Match) і підсвітка в сітці ──
+    (N'conditionalFormat.none', N'en', N'This table has no rules yet.', 1),
+    (N'conditionalFormat.saved', N'en', N'Conditional formatting rules saved.', 1),
+    (N'conditionalFormat.incomplete', N'en', N'Complete or remove the rules marked above before saving.', 1),
+    (N'conditionalFormat.readOnly', N'en', N'Rules can be changed only in a draft version and only with the right to edit templates.', 1),
+    (N'conditionalFormat.conflictTitle', N'en', N'Someone else changed the rules', 1),
+    (N'conditionalFormat.conflict', N'en', N'The rules of this template version were saved by someone else after you opened them. Your changes are kept here: Save replaces their rules with yours, Discard shows theirs.', 1),
+    (N'conditionalFormat.discard', N'en', N'Discard my changes', 1),
+    (N'conditionalFormat.blocker.Color', N'en', N'A colour must be written as #rrggbb.', 1),
+    (N'err.ECR-REQ-0422.condFormatIfMatch', N'en', N'This request needs an If-Match header carrying the ETag of the conditional formatting rules you read.', 1),
+    (N'err.ECR-TMPL-0409.condFormatChanged', N'en', N'The conditional formatting rules of this template version were changed after you read them. Reload them and repeat your change.', 1),
+    -- ru/kz — окремою порцією `CONDFMT:client` у блоці I18N нижче.
+    -- CONDFMT:client ── кінець секції ──
     -- JOBL ── людські назви видів фонових задач, яких бракувало в jobLabel.ts (KindKeys) ──
     (N'jobs.kind.sourceEventSync',  N'en', N'Source event sync', 1),
     (N'jobs.kind.consistencyCheck', N'en', N'Consistency check', 1),
@@ -12558,6 +12579,34 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:condformat ── кінець секції ──
+-- CONDFMT:client ── ru/kz збереження правил умовного форматування (ФВ-2.7); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'conditionalFormat.none', N'ru', N'У этой таблицы пока нет правил.'),
+    (N'conditionalFormat.none', N'kz', N'Бұл кестеде әзірге ережелер жоқ.'),
+    (N'conditionalFormat.saved', N'ru', N'Правила условного форматирования сохранены.'),
+    (N'conditionalFormat.saved', N'kz', N'Шартты пішімдеу ережелері сақталды.'),
+    (N'conditionalFormat.incomplete', N'ru', N'Перед сохранением дополните или удалите отмеченные выше правила.'),
+    (N'conditionalFormat.incomplete', N'kz', N'Сақтамас бұрын жоғарыда белгіленген ережелерді толықтырыңыз немесе жойыңыз.'),
+    (N'conditionalFormat.readOnly', N'ru', N'Правила можно менять только в черновой версии и только с правом редактирования шаблонов.'),
+    (N'conditionalFormat.readOnly', N'kz', N'Ережелерді тек жоба нұсқасында және үлгілерді өңдеу құқығымен ғана өзгертуге болады.'),
+    (N'conditionalFormat.conflictTitle', N'ru', N'Правила изменил кто-то другой'),
+    (N'conditionalFormat.conflictTitle', N'kz', N'Ережелерді басқа біреу өзгертті'),
+    (N'conditionalFormat.conflict', N'ru', N'Правила этой версии шаблона сохранил кто-то другой после того, как вы их открыли. Ваши изменения остались здесь: «Сохранить» заменит их правила вашими, «Отменить» покажет их правила.'),
+    (N'conditionalFormat.conflict', N'kz', N'Бұл үлгі нұсқасының ережелерін Сіз ашқаннан кейін басқа біреу сақтады. Сіздің өзгерістеріңіз осында қалды: «Сақтау» олардың ережелерін Сіздікімен ауыстырады, «Бас тарту» олардың ережелерін көрсетеді.'),
+    (N'conditionalFormat.discard', N'ru', N'Отменить мои изменения'),
+    (N'conditionalFormat.discard', N'kz', N'Менің өзгерістерімнен бас тарту'),
+    (N'conditionalFormat.blocker.Color', N'ru', N'Цвет нужно указать в виде #rrggbb.'),
+    (N'conditionalFormat.blocker.Color', N'kz', N'Түсті #rrggbb түрінде көрсету керек.'),
+    (N'err.ECR-REQ-0422.condFormatIfMatch', N'ru', N'Для этого запроса нужен заголовок If-Match с ETag прочитанных вами правил условного форматирования.'),
+    (N'err.ECR-REQ-0422.condFormatIfMatch', N'kz', N'Бұл сұрауға Сіз оқыған шартты пішімдеу ережелерінің ETag мәні бар If-Match тақырыбы қажет.'),
+    (N'err.ECR-TMPL-0409.condFormatChanged', N'ru', N'Правила условного форматирования этой версии шаблона изменились после того, как вы их прочитали. Загрузите их заново и повторите изменение.'),
+    (N'err.ECR-TMPL-0409.condFormatChanged', N'kz', N'Бұл үлгі нұсқасының шартты пішімдеу ережелері Сіз оларды оқығаннан кейін өзгерді. Оларды қайта жүктеп, өзгерісті қайталаңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- CONDFMT:client ── кінець секції ──
 -- COLL:rt25 ── ru/kz перерахунку документів, зачеплених правкою довідника (RT-25); власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
@@ -13124,10 +13173,6 @@ SELECT v.[Key], v.Lang, v.Val
     (N'reorder.rowsUnavailable', N'kz', N'Мұнда жолдардың ретін әзірге өзгерту мүмкін емес: сервер жолдың аудармаларын өшірмей, тек ретін өзгерте алмайды. Жол пішініндегі «Реті» өрісін пайдаланыңыз.'),
     (N'conditionalFormat.title', N'ru', N'Условное форматирование'),
     (N'conditionalFormat.title', N'kz', N'Шартты пішімдеу'),
-    (N'conditionalFormat.unavailableTitle', N'ru', N'Правила пока не сохраняются'),
-    (N'conditionalFormat.unavailableTitle', N'kz', N'Ережелер әзірге сақталмайды'),
-    (N'conditionalFormat.unavailable', N'ru', N'Сервер пока не хранит правила условного форматирования. Здесь можно составить правила и проверить их на примере значения, но при закрытии окна они теряются.'),
-    (N'conditionalFormat.unavailable', N'kz', N'Сервер әзірге шартты пішімдеу ережелерін сақтамайды. Мұнда ережелер құрып, оларды мән үлгісінде тексеруге болады, бірақ терезе жабылғанда олар жоғалады.'),
     (N'conditionalFormat.rule', N'ru', N'Правило {position}'),
     (N'conditionalFormat.rule', N'kz', N'{position}-ереже'),
     (N'conditionalFormat.column', N'ru', N'Колонка'),
@@ -13180,8 +13225,6 @@ SELECT v.[Key], v.Lang, v.Val
     (N'conditionalFormat.matched', N'kz', N'{position}-ереже қолданылады.'),
     (N'conditionalFormat.save', N'ru', N'Сохранить правила'),
     (N'conditionalFormat.save', N'kz', N'Ережелерді сақтау'),
-    (N'conditionalFormat.saveUnavailable', N'ru', N'Сохранение недоступно, пока сервер не хранит правила условного форматирования.'),
-    (N'conditionalFormat.saveUnavailable', N'kz', N'Сервер шартты пішімдеу ережелерін сақтамайынша, сақтау қолжетімсіз.'),
     (N'err.ECR-TMPL-0422.ordinalInvalid', N'ru', N'Порядок должен быть целым числом от 0 до 1000000, получено "{value}".'),
     (N'err.ECR-TMPL-0422.ordinalInvalid', N'kz', N'Рет 0-ден 1000000-ға дейінгі бүтін сан болуы керек, алынған мән "{value}".')
        ) AS v ([Key], Lang, Val)

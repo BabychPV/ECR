@@ -1,4 +1,5 @@
 using Ecr.Application.Common;
+using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
 using Ecr.Application.Templates;
@@ -24,6 +25,9 @@ public sealed class ConditionalFormatHandlersTests
     private readonly TemplateVersion _draft = new(templateId: 1, version: "1.0.0.0", createdByUserId: 7, utcNow: Now);
     private IReadOnlyList<ConditionalFormatRule>? _saved;
 
+    /// <summary><c>ETag</c> порожнього набору — з нього починається правка версії без правил.</summary>
+    private static readonly string Current = $"\"{ConditionalFormatsVersion.Of([])}\"";
+
     public ConditionalFormatHandlersTests()
     {
         var sheet = _builder.Sheet("Water");
@@ -39,6 +43,7 @@ public sealed class ConditionalFormatHandlersTests
             .Returns(_ => _draft.Status);
         _uow.ExecuteInTransactionAsync(Arg.Any<Func<CancellationToken, Task>>(), Arg.Any<CancellationToken>())
             .Returns(call => call.ArgAt<Func<CancellationToken, Task>>(0)(call.ArgAt<CancellationToken>(1)));
+        _rules.GetAsync(1, Arg.Any<CancellationToken>()).Returns([]);
         _rules.ReplaceAsync(1, Arg.Any<IReadOnlyList<ConditionalFormatRule>>(), Arg.Any<CancellationToken>())
             .Returns(call =>
             {
@@ -59,7 +64,7 @@ public sealed class ConditionalFormatHandlersTests
     public async Task Набір_замінюється_а_порядок_у_колонці_береться_з_порядку_запиту()
     {
         var result = await Save().HandleAsync(
-            1, [Rule("gt", "10"), Rule("between", "1", "5", bg: null), Rule("empty", null)], CancellationToken.None);
+            1, [Rule("gt", "10"), Rule("between", "1", "5", bg: null), Rule("empty", null)], Current, CancellationToken.None);
 
         Assert.Equal(3, result.Count);
         Assert.Equal([1, 2, 3], _saved!.Select(r => r.Ordinal));
@@ -71,7 +76,7 @@ public sealed class ConditionalFormatHandlersTests
     [Fact]
     public async Task Порожній_список_прибирає_усі_правила()
     {
-        var result = await Save().HandleAsync(1, [], CancellationToken.None);
+        var result = await Save().HandleAsync(1, [], Current, CancellationToken.None);
 
         Assert.Empty(result);
         Assert.Empty(_saved!);
@@ -87,7 +92,7 @@ public sealed class ConditionalFormatHandlersTests
         string op, string? value, string? valueTo, string? bg, string key)
     {
         var ex = await Assert.ThrowsAsync<DomainException>(
-            () => Save().HandleAsync(1, [Rule(op, value, valueTo, bg: bg)], CancellationToken.None));
+            () => Save().HandleAsync(1, [Rule(op, value, valueTo, bg: bg)], Current, CancellationToken.None));
 
         Assert.Equal("ECR-CFG-0422", ex.ErrorCode);
         Assert.Equal("err.ECR-CFG-0422." + key, ex.Details!["messageKey"]);
@@ -99,7 +104,7 @@ public sealed class ConditionalFormatHandlersTests
     public async Task Невідома_колонка_відхиляється()
     {
         var ex = await Assert.ThrowsAsync<DomainException>(
-            () => Save().HandleAsync(1, [Rule(column: "NOPE")], CancellationToken.None));
+            () => Save().HandleAsync(1, [Rule(column: "NOPE")], Current, CancellationToken.None));
 
         Assert.Equal("err.ECR-CFG-0422.condFormatColumn", ex.Details!["messageKey"]);
     }
@@ -110,7 +115,7 @@ public sealed class ConditionalFormatHandlersTests
         var many = Enumerable.Range(0, SaveConditionalFormatsHandler.MaxRules + 1).Select(_ => Rule()).ToList();
 
         var ex = await Assert.ThrowsAsync<DomainException>(
-            () => Save().HandleAsync(1, many, CancellationToken.None));
+            () => Save().HandleAsync(1, many, Current, CancellationToken.None));
 
         Assert.Equal("err.ECR-CFG-0422.condFormatLimit", ex.Details!["messageKey"]);
     }
@@ -122,7 +127,7 @@ public sealed class ConditionalFormatHandlersTests
         _draft.Publish(1, Now);
 
         var ex = await Assert.ThrowsAsync<DomainException>(
-            () => Save().HandleAsync(1, [Rule()], CancellationToken.None));
+            () => Save().HandleAsync(1, [Rule()], Current, CancellationToken.None));
 
         Assert.Equal("ECR-TMPL-0409", ex.ErrorCode);
         await _rules.DidNotReceive().ReplaceAsync(
@@ -135,7 +140,7 @@ public sealed class ConditionalFormatHandlersTests
         _access.BuildProfileAsync(9, Arg.Any<CancellationToken>())
             .Returns(new AccessBuilder { UserId = 9 }.Permission("Template.View").Build());
 
-        await Assert.ThrowsAnyAsync<Exception>(() => Save().HandleAsync(1, [Rule()], CancellationToken.None));
+        await Assert.ThrowsAnyAsync<Exception>(() => Save().HandleAsync(1, [Rule()], Current, CancellationToken.None));
         await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
     }
 
@@ -151,4 +156,79 @@ public sealed class ConditionalFormatHandlersTests
         var single = Assert.Single(list);
         Assert.Equal(("VOL", "ge", "5", true), (single.ColumnCode, single.Operator, single.Value, single.IsBold));
     }
+
+    [Fact]
+    [Trait("Requirement", "ФВ-2.7")]
+    public async Task Без_If_Match_набір_не_замінюється()
+    {
+        var ex = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Save().HandleAsync(1, [Rule()], null, CancellationToken.None));
+
+        Assert.Equal("ECR-REQ-0422", ex.ErrorCode);
+        Assert.Equal("err.ECR-REQ-0422.condFormatIfMatch", ex.Details!["messageKey"]);
+        await _rules.DidNotReceive().ReplaceAsync(
+            Arg.Any<int>(), Arg.Any<IReadOnlyList<ConditionalFormatRule>>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait("Requirement", "ФВ-2.7")]
+    public async Task Застаріла_версія_набору_дає_конфлікт_з_актуальною_версією()
+    {
+        // Хтось зберіг правило після того, як ця правка прочитала порожній набір.
+        var theirs = new ConditionalFormatRule(1, "VOL", 1, "lt", "0", null, "#0000ff", null, false);
+        _rules.GetAsync(1, Arg.Any<CancellationToken>()).Returns([theirs]);
+
+        var ex = await Assert.ThrowsAsync<ConcurrencyConflictException>(
+            () => Save().HandleAsync(1, [Rule()], Current, CancellationToken.None));
+
+        Assert.Equal("ECR-TMPL-0409", ex.ErrorCode);
+        Assert.Equal("err.ECR-TMPL-0409.condFormatChanged", ex.Details!["messageKey"]);
+        Assert.Equal(
+            ConditionalFormatsVersion.Of([new ConditionalFormatRuleDto("VOL", "lt", "0", null, "#0000ff", null, false)]),
+            ex.Details["version"]);
+        await _rules.DidNotReceive().ReplaceAsync(
+            Arg.Any<int>(), Arg.Any<IReadOnlyList<ConditionalFormatRule>>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait("Requirement", "ФВ-2.7")]
+    public async Task Версія_звіряється_під_блокуванням_версії_шаблону()
+    {
+        var theirs = new ConditionalFormatRule(1, "VOL", 1, "lt", "0", null, "#0000ff", null, false);
+        var read = ConditionalFormatsVersion.Of([ConditionalFormatMapperFor(theirs)]);
+        _rules.GetAsync(1, Arg.Any<CancellationToken>()).Returns([theirs]);
+
+        // ⚠ Слабкий `ETag` і регістр hex — та сама версія (`NormalizeETag`).
+        await Save().HandleAsync(1, [Rule()], $"W/\"{read.ToLowerInvariant()}\"", CancellationToken.None);
+
+        // ⚠ `Arg.Any<int>()`: блокується `version.Id` сутності, а в фікстурі вона не збережена (Id = 0).
+        Received.InOrder(() =>
+        {
+            _store.LockVersionForUpdateAsync(Arg.Any<int>(), Arg.Any<CancellationToken>());
+            _rules.GetAsync(1, Arg.Any<CancellationToken>());
+            _rules.ReplaceAsync(1, Arg.Any<IReadOnlyList<ConditionalFormatRule>>(), Arg.Any<CancellationToken>());
+        });
+    }
+
+    [Fact]
+    public void Версія_залежить_від_порядку_в_колонці_але_не_між_колонками()
+    {
+        var a1 = new ConditionalFormatRuleDto("A", "gt", "1", null, "#ff0000", null, false);
+        var a2 = new ConditionalFormatRuleDto("A", "lt", "0", null, "#0000ff", null, false);
+        var b1 = new ConditionalFormatRuleDto("B", "empty", null, null, null, null, true);
+
+        // Між колонками — той самий набір: GET сортує за колонкою, PUT повертає як у запиті.
+        Assert.Equal(ConditionalFormatsVersion.Of([a1, b1, a2]), ConditionalFormatsVersion.Of([b1, a1, a2]));
+
+        // Усередині колонки порядок — пріоритет правил, тобто інший набір.
+        Assert.NotEqual(ConditionalFormatsVersion.Of([a1, a2]), ConditionalFormatsVersion.Of([a2, a1]));
+
+        // Кожне поле правила — частина версії.
+        Assert.NotEqual(ConditionalFormatsVersion.Of([a1]), ConditionalFormatsVersion.Of([a1 with { IsBold = true }]));
+        Assert.NotEqual(ConditionalFormatsVersion.Of([a1]), ConditionalFormatsVersion.Of([a1 with { ForegroundHex = "#000000" }]));
+        Assert.NotEqual(ConditionalFormatsVersion.Of([a1]), ConditionalFormatsVersion.Of([a1 with { ValueTo = "5" }]));
+    }
+
+    private static ConditionalFormatRuleDto ConditionalFormatMapperFor(ConditionalFormatRule r)
+        => new(r.ColumnCode, r.Operator, r.Value, r.ValueTo, r.BackgroundHex, r.ForegroundHex, r.IsBold);
 }

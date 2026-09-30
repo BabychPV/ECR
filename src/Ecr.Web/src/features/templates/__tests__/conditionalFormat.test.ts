@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { emptyRule, firstMatchingRule, ruleMatches, whyRuleIncomplete, type ConditionalRule } from '../conditionalFormat';
+import {
+  emptyRule,
+  firstMatchingRule,
+  ruleFromWire,
+  ruleMatches,
+  ruleToWire,
+  whyRuleIncomplete,
+  type ConditionalRule,
+} from '../conditionalFormat';
 
 /**
  * Умовне форматування (`ФВ-2.7`): коли правило спрацьовує і яке з кількох.
@@ -8,7 +16,9 @@ import { emptyRule, firstMatchingRule, ruleMatches, whyRuleIncomplete, type Cond
  * — червоніє межа; у `between` прибрати `value <= upper` — червоніє «вище
  * межі»; у `firstMatchingRule` прибрати перевірку `whyRuleIncomplete` —
  * червоніє «неповне правило»; `eq` без числового порівняння — червоніє
- * «1.0 = 1».
+ * «1.0 = 1». Перевірено 2026-09-30 (`CONDFMT:client`): прибрати перевірку
+ * кольору — червоніє «умови ті самі, що на сервері»; прибрати межу 64 — теж;
+ * слати `valueTo` поза `between` — червоніє «операнд, якого оператор не бере».
  */
 const rule = (patch: Partial<ConditionalRule>): ConditionalRule => ({
   ...emptyRule('Q'),
@@ -57,7 +67,18 @@ describe('whyRuleIncomplete', () => {
     expect(whyRuleIncomplete(rule({ operator: 'between', value: '1', valueTo: '' }))).toBe('ValueTo');
     expect(whyRuleIncomplete(rule({ operator: 'between', value: '5', valueTo: '1' }))).toBe('Range');
     expect(whyRuleIncomplete(rule({ operator: 'empty', backgroundHex: '' }))).toBe('Style');
-    expect(whyRuleIncomplete(rule({ operator: 'eq', value: 'Так' }))).toBeNull();
+    expect(whyRuleIncomplete(rule({ operator: 'eq', value: '1' }))).toBeNull();
+  });
+
+  it('умови ті самі, що на сервері: «дорівнює» — теж число, колір — #rrggbb, операнд ≤ 64', () => {
+    // ⛔ Сервер відхиляє текстовий операнд і для eq/ne (`condFormatOperand`).
+    expect(whyRuleIncomplete(rule({ operator: 'eq', value: 'Так' }))).toBe('Value');
+    expect(whyRuleIncomplete(rule({ operator: 'ne', value: 'Так' }))).toBe('Value');
+    expect(whyRuleIncomplete(rule({ operator: 'gt', value: '1'.repeat(65) }))).toBe('Value');
+    expect(whyRuleIncomplete(rule({ operator: 'gt', value: '1'.repeat(64) }))).toBeNull();
+    expect(whyRuleIncomplete(rule({ operator: 'gt', value: '1', backgroundHex: '#fff' }))).toBe('Color');
+    expect(whyRuleIncomplete(rule({ operator: 'gt', value: '1', foregroundHex: 'red' }))).toBe('Color');
+    expect(whyRuleIncomplete(rule({ operator: 'gt', value: '1', foregroundHex: '#00AAff' }))).toBeNull();
   });
 });
 
@@ -78,5 +99,43 @@ describe('firstMatchingRule', () => {
   it('неповне правило не застосовується, навіть якщо умова збігається', () => {
     const noStyle = rule({ operator: 'gt', value: '0', backgroundHex: '' });
     expect(firstMatchingRule([noStyle, yellow], 'Q', '70')).toBe(yellow);
+  });
+});
+
+describe('ruleFromWire / ruleToWire', () => {
+  it('null з сервера — порожньо на клієнті, і назад', () => {
+    const wire = {
+      columnCode: 'Q',
+      operator: 'between',
+      value: '1',
+      valueTo: '5',
+      backgroundHex: null,
+      foregroundHex: '#112233',
+      isBold: true,
+    };
+
+    const local = ruleFromWire(wire);
+    expect(local).toEqual({
+      columnCode: 'Q',
+      operator: 'between',
+      value: '1',
+      valueTo: '5',
+      backgroundHex: '',
+      foregroundHex: '#112233',
+      isBold: true,
+    });
+    expect(ruleToWire(local!)).toEqual(wire);
+  });
+
+  it('невідомий оператор не вгадується', () => {
+    expect(ruleFromWire({ columnCode: 'Q', operator: 'contains', isBold: false })).toBeNull();
+  });
+
+  it('операнд, якого оператор не бере, не шлеться', () => {
+    // Людина перемкнула «між» на «більше» — `valueTo` лишився в стані, але не на екрані.
+    const wire = ruleToWire(rule({ operator: 'gt', value: ' 10 ', valueTo: '20' }));
+    expect(wire.value).toBe('10');
+    expect(wire.valueTo).toBeNull();
+    expect(ruleToWire(rule({ operator: 'empty', value: '3' })).value).toBeNull();
   });
 });
