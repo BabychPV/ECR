@@ -302,14 +302,13 @@ public sealed class RecalculationReadScopeTests
         // тест мовчки отримував би значення таблиць, яких не просив, і
         // твердження «прочитано рівно два» не мало б наслідків для числа.
         //
-        // ⚠ Період розрізняється за ПОРЯДКОМ виклику: `ReadSlicesAsync` періоду
-        // не приймає (екземпляр таблиці належить одному періоду за побудовою),
-        // а `LoadValuesAsync` іде спершу в поточний, потім у попередній.
-        _cells.ReadSlicesAsync(Arg.Any<IReadOnlyList<long>>(), Arg.Any<CancellationToken>())
+        // ⚠ O3b: період тепер приходить аргументом (ключ партиції), тож зріз
+        // будується для ЗАПИТАНОГО періоду, а не вгадується за порядком виклику.
+        _cells.ReadSlicesAsync(Arg.Any<IReadOnlyList<long>>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
             .Returns(callInfo =>
             {
                 var asked = (IReadOnlyList<long>)callInfo[0]!;
-                var period = _sliceReads.Count == 0 ? Period : Previous;
+                var period = (PeriodKey)callInfo[1]!;
                 _sliceReads.Add([.. asked]);
 
                 return (IReadOnlyDictionary<long, IReadOnlyList<CellRecord>>)asked.ToDictionary(

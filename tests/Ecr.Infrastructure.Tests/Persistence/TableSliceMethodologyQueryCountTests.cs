@@ -231,6 +231,7 @@ public sealed class TableSliceMethodologyQueryCountTests(SqlServerFixture sql)
     {
         var cells = Substitute.For<ICellStore>();
         cells.ReadSliceAsync(TableInstance, Arg.Any<CancellationToken>()).Returns([]);
+        cells.ReadSliceAsync(TableInstance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>()).Returns([]);
 
         return cells;
     }

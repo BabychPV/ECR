@@ -97,6 +97,12 @@ public sealed class OrphanScanTests
                   new(new CellAddress(new PeriodKey(Period), Row1, VolumeId), 3,
                       new CellValueData { ValueNumeric = 12500m }),
               });
+        _cells.ReadSliceAsync(Arg.Any<long>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+              .Returns(new List<CellRecord>
+              {
+                  new(new CellAddress(new PeriodKey(Period), Row1, VolumeId), 3,
+                      new CellValueData { ValueNumeric = 12500m }),
+              });
 
         // ⛔ Читання зрізу тепер вимагає і права `Document.View`, і ГРАНТА на
         // проєкт (`A7-53`, `A7-55`). Фікстура видає обидва явно: предмет цих

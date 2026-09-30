@@ -94,7 +94,7 @@ public interface IRowStore
     /// </summary>
     /// <remarks>
     /// ⛔ Q-165 (аудит фази 2, продуктивність), той самий випадок, що й
-    /// <see cref="ICellStore.ReadSlicesAsync"/> поруч: <see cref="GetRowIdsAsync"/>
+    /// <see cref="ICellStore.ReadSlicesAsync(IReadOnlyList{long}, CancellationToken)"/> поруч: <see cref="GetRowIdsAsync"/>
     /// у циклі по таблицях документа коштує другого походу в базу НА КОЖНУ з
     /// ~90 таблиць.
     /// </remarks>

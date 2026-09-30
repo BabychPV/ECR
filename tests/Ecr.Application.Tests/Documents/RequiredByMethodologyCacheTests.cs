@@ -74,6 +74,7 @@ public sealed class RequiredByMethodologyCacheTests : IDisposable
         _rows.GetOrphanFlagsAsync(TableInstance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
              .Returns(new Dictionary<long, bool>());
         _cells.ReadSliceAsync(TableInstance, Arg.Any<CancellationToken>()).Returns([]);
+        _cells.ReadSliceAsync(TableInstance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>()).Returns([]);
 
         _metadata.GetAsync(2, Arg.Any<CancellationToken>()).Returns(
             new TemplateVersionSnapshot(2, 0, [sheet],

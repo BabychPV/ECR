@@ -70,6 +70,7 @@ public sealed class RequiredByMethodologyColumnTests
         _rows.GetOrphanFlagsAsync(TableInstance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
              .Returns(new Dictionary<long, bool>());
         _cells.ReadSliceAsync(TableInstance, Arg.Any<CancellationToken>()).Returns([]);
+        _cells.ReadSliceAsync(TableInstance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>()).Returns([]);
 
         _access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
                .Returns(EditDecision.Allow());

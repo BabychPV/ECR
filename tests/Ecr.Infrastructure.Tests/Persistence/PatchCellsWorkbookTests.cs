@@ -811,9 +811,17 @@ public sealed class PatchCellsWorkbookTests(SqlServerFixture sql) : IDisposable
         public Task<IReadOnlyList<CellRecord>> ReadSliceAsync(long tableInstanceId, CancellationToken ct)
             => inner.ReadSliceAsync(tableInstanceId, ct);
 
+        public Task<IReadOnlyList<CellRecord>> ReadSliceAsync(
+            long tableInstanceId, PeriodKey periodKey, CancellationToken ct)
+            => inner.ReadSliceAsync(tableInstanceId, periodKey, ct);
+
         public Task<IReadOnlyDictionary<long, IReadOnlyList<CellRecord>>> ReadSlicesAsync(
             IReadOnlyList<long> tableInstanceIds, CancellationToken ct)
             => inner.ReadSlicesAsync(tableInstanceIds, ct);
+
+        public Task<IReadOnlyDictionary<long, IReadOnlyList<CellRecord>>> ReadSlicesAsync(
+            IReadOnlyList<long> tableInstanceIds, PeriodKey periodKey, CancellationToken ct)
+            => inner.ReadSlicesAsync(tableInstanceIds, periodKey, ct);
 
         public Task<IReadOnlyDictionary<CellAddress, CellValueData>> ReadCellsAsync(
             IReadOnlyCollection<CellAddress> addresses, CancellationToken ct)

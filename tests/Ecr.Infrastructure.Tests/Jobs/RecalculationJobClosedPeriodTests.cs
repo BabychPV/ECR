@@ -412,7 +412,7 @@ public sealed class RecalculationJobClosedPeriodTests(SqlServerFixture sql)
                 },
             });
 
-        _cells.ReadSlicesAsync(Arg.Any<IReadOnlyList<long>>(), Arg.Any<CancellationToken>())
+        _cells.ReadSlicesAsync(Arg.Any<IReadOnlyList<long>>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
             .Returns(callInfo => new Dictionary<long, IReadOnlyList<CellRecord>>
             {
                 [document.TableInstanceId] =

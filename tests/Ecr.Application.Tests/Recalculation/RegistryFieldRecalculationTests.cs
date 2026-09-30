@@ -188,7 +188,7 @@ public sealed class RegistryFieldRecalculationTests
                 new CellValueData { ValueRegistryEntryId = EntryId }),
         };
 
-        _cells.ReadSlicesAsync(Arg.Any<IReadOnlyList<long>>(), Arg.Any<CancellationToken>())
+        _cells.ReadSlicesAsync(Arg.Any<IReadOnlyList<long>>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
             .Returns(new Dictionary<long, IReadOnlyList<CellRecord>> { [TableInstance] = slice });
 
         _uow.ExecuteInTransactionAsync(Arg.Any<Func<CancellationToken, Task>>(), Arg.Any<CancellationToken>())
@@ -285,7 +285,7 @@ public sealed class RegistryFieldRecalculationTests
                 new CellValueData { ValueRegistryEntryId = EntryId }),
         };
 
-        _cells.ReadSlicesAsync(Arg.Any<IReadOnlyList<long>>(), Arg.Any<CancellationToken>())
+        _cells.ReadSlicesAsync(Arg.Any<IReadOnlyList<long>>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
             .Returns(new Dictionary<long, IReadOnlyList<CellRecord>> { [TableInstance] = slice });
 
         _uow.ExecuteInTransactionAsync(Arg.Any<Func<CancellationToken, Task>>(), Arg.Any<CancellationToken>())

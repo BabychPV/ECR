@@ -250,7 +250,7 @@ public sealed class ExpressionBudgetReachabilityTests
                 [MainInstance] = mainRowIds,
             });
 
-        _cells.ReadSlicesAsync(Arg.Any<IReadOnlyList<long>>(), Arg.Any<CancellationToken>())
+        _cells.ReadSlicesAsync(Arg.Any<IReadOnlyList<long>>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
             .Returns(new Dictionary<long, IReadOnlyList<CellRecord>>
             {
                 [ItemsInstance] = itemCells,

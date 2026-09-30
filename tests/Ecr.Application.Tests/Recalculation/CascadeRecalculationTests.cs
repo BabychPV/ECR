@@ -295,7 +295,7 @@ public sealed class CascadeRecalculationTests
                 [instance2] = new Dictionary<string, long> { ["R1"] = row2Id },
             });
 
-        _cells.ReadSlicesAsync(Arg.Any<IReadOnlyList<long>>(), Arg.Any<CancellationToken>())
+        _cells.ReadSlicesAsync(Arg.Any<IReadOnlyList<long>>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
             .Returns(new Dictionary<long, IReadOnlyList<CellRecord>>
             {
                 [instance1] =
@@ -379,7 +379,7 @@ public sealed class CascadeRecalculationTests
         // уже прочитані для плану, — один пакетний виклик на прогін.
         await _rows.Received(1).GetRowIdsBatchAsync(
             Arg.Any<IReadOnlyList<long>>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>());
-        await _cells.Received(1).ReadSlicesAsync(Arg.Any<IReadOnlyList<long>>(), Arg.Any<CancellationToken>());
+        await _cells.Received(1).ReadSlicesAsync(Arg.Any<IReadOnlyList<long>>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>());
 
         await _rows.DidNotReceive().GetRowIdsAsync(
             Arg.Any<long>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>());
@@ -499,7 +499,7 @@ public sealed class CascadeRecalculationTests
                 [summaryInstance] = new Dictionary<string, long> { ["totals"] = summaryRowId },
             });
 
-        _cells.ReadSlicesAsync(Arg.Any<IReadOnlyList<long>>(), Arg.Any<CancellationToken>())
+        _cells.ReadSlicesAsync(Arg.Any<IReadOnlyList<long>>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
             .Returns(new Dictionary<long, IReadOnlyList<CellRecord>>
             {
                 [itemsInstance] =
@@ -675,7 +675,7 @@ public sealed class CascadeRecalculationTests
 
         _cells.ReadSliceAsync(TableInstance, Arg.Any<CancellationToken>()).Returns(slice);
 
-        _cells.ReadSlicesAsync(Arg.Any<IReadOnlyList<long>>(), Arg.Any<CancellationToken>())
+        _cells.ReadSlicesAsync(Arg.Any<IReadOnlyList<long>>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
             .Returns(new Dictionary<long, IReadOnlyList<CellRecord>>
             {
                 [TableInstance] = slice,

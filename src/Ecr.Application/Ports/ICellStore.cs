@@ -18,19 +18,42 @@ public interface ICellStore
     public Task<IReadOnlyList<CellRecord>> ReadSliceAsync(long tableInstanceId, CancellationToken ct);
 
     /// <summary>
+    /// Те саме, що <see cref="ReadSliceAsync(long, CancellationToken)"/>, коли
+    /// період екземпляра викликачеві вже відомий.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ O3b (<c>WR-05</c>). Період — ключ партиції <c>doc.TableInstance</c>;
+    /// без нього пошук екземпляра за <c>Id</c> читає всі партиції. Передавати
+    /// треба період САМОГО екземпляра: з чужим результат порожній.
+    /// </remarks>
+    public Task<IReadOnlyList<CellRecord>> ReadSliceAsync(
+        long tableInstanceId, PeriodKey periodKey, CancellationToken ct);
+
+    /// <summary>
     /// Зрізи кількох таблиць ОДНИМ запитом; екземпляр без жодної непорожньої
     /// комірки в результат не потрапляє (шукай його ключ через
     /// <see cref="IReadOnlyDictionary{TKey,TValue}.TryGetValue"/>, а не
     /// індексатор).
     /// </summary>
     /// <remarks>
-    /// ⛔ Q-165 (аудит фази 2, продуктивність). <see cref="ReadSliceAsync"/> у
+    /// ⛔ Q-165 (аудит фази 2, продуктивність). <see cref="ReadSliceAsync(long, CancellationToken)"/> у
     /// циклі по таблицях документа — це похід у базу на кожну з ~90 таблиць;
     /// сам метод-виклювач (<c>ValidateDocumentHandler</c>) вже документує
     /// бюджет 3с p95 на документ, у який ~90 запитів не вкладаються.
     /// </remarks>
     public Task<IReadOnlyDictionary<long, IReadOnlyList<CellRecord>>> ReadSlicesAsync(
         IReadOnlyList<long> tableInstanceIds, CancellationToken ct);
+
+    /// <summary>
+    /// Те саме, що <see cref="ReadSlicesAsync(IReadOnlyList{long}, CancellationToken)"/>,
+    /// коли всі екземпляри — одного відомого періоду (документо-період
+    /// перерахунку).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ O3b (<c>WR-05</c>): екземпляр ІНШОГО періоду в результат не потрапляє.
+    /// </remarks>
+    public Task<IReadOnlyDictionary<long, IReadOnlyList<CellRecord>>> ReadSlicesAsync(
+        IReadOnlyList<long> tableInstanceIds, PeriodKey periodKey, CancellationToken ct);
 
     /// <summary>Значення конкретних комірок.</summary>
     public Task<IReadOnlyDictionary<CellAddress, CellValueData>> ReadCellsAsync(

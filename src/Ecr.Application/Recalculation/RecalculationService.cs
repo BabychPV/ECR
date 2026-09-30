@@ -1094,7 +1094,9 @@ public sealed class RecalculationService(
         // на кожне редагування комірки (`LoadValuesAsync` читає ДВА періоди).
         var rowIdsBatch = known?.RowIds
                           ?? await rowStore.GetRowIdsBatchAsync(instanceIds, periodKey, ct).ConfigureAwait(false);
-        var cellsBatch = await cellStore.ReadSlicesAsync(instanceIds, ct).ConfigureAwait(false);
+        // ⚠ O3b: усі екземпляри — цього періоду, тож ключ партиції відомий
+        // (EcrPerfI2, 90 екземплярів: 1 984 → 181 читання doc.TableInstance).
+        var cellsBatch = await cellStore.ReadSlicesAsync(instanceIds, periodKey, ct).ConfigureAwait(false);
 
         foreach (var table in instances)
         {

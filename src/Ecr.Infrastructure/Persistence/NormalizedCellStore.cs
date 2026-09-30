@@ -192,15 +192,109 @@ public sealed class NormalizedCellStore(EcrDbContext db, ArchiveAwareCellReader?
     public int LastUpsertRowsAffected { get; private set; }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// ⚠ O3b (<c>WR-05</c>). Період викликачеві невідомий, тож екземпляр
+    /// шукається через <see cref="RowStore.TableInstancesByIdQuery"/> — seek на
+    /// кожну партицію замість скану <c>UQ_TableInstance</c> по всіх
+    /// (<c>EcrPerfI2</c>: 61 читання <c>doc.TableInstance</c> замість 1 984,
+    /// ЦП 7 мс замість 101). Той запит не бачить екземпляра, чийого періоду
+    /// немає в <c>doc.Period</c>; щоб зріз від цього не спорожнів, порожній
+    /// результат перевіряється ще одним seek'ом, і лише коли екземпляра там
+    /// немає — колишнім запитом без ключа. Непорожній зріз, як і раніше, — ОДИН
+    /// запит.
+    /// </remarks>
     public async Task<IReadOnlyList<CellRecord>> ReadSliceAsync(long tableInstanceId, CancellationToken ct)
     {
-        // ОДИН запит. TableInstance приєднаний не заради своїх полів, а заради
-        // PeriodKey: він дає оптимізатору кореляцію, за якою відсікається
-        // партиція. Без нього довелося б або читати період окремим запитом,
-        // або сканувати всі 25 партицій.
-        var rows = await (
-            from instance in db.TableInstances.AsNoTracking()
-            where instance.Id == tableInstanceId
+        IReadOnlyCollection<long> ids = [tableInstanceId];
+
+        var rows = await SliceRowsAsync(RowStore.TableInstancesByIdQuery(db, ids), ct).ConfigureAwait(false);
+
+        if (rows.Count == 0
+            && !await RowStore.TableInstancesByIdQuery(db, ids).AnyAsync(ct).ConfigureAwait(false))
+        {
+            // Екземпляра немає серед періодів `doc.Period` — або його немає
+            // взагалі (архів, неіснуючий Id), або його період без рядка
+            // періоду. Колишній запит без ключа розрізняє ці випадки так само,
+            // як до O3b.
+            rows = await SliceRowsAsync(
+                    db.TableInstances.AsNoTracking().Where(t => t.Id == tableInstanceId), ct)
+                .ConfigureAwait(false);
+        }
+
+        return await SliceOrArchiveAsync(tableInstanceId, rows, ct).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⚠ O3b: рівність за обома стовпцями ключа партиції
+    /// (<see cref="RowStore.TableInstancesInPeriodQuery"/>) — один seek в одній
+    /// партиції (<c>EcrPerfI2</c>: 2 читання замість 1 984, ЦП 6 мс замість 101).
+    /// </remarks>
+    public async Task<IReadOnlyList<CellRecord>> ReadSliceAsync(
+        long tableInstanceId, PeriodKey periodKey, CancellationToken ct)
+    {
+        var rows = await SliceRowsAsync(
+                RowStore.TableInstancesInPeriodQuery(db, [tableInstanceId], periodKey), ct)
+            .ConfigureAwait(false);
+
+        return await SliceOrArchiveAsync(tableInstanceId, rows, ct).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⚠ O3b: цей пакет лишився БЕЗ ключа партиції навмисно. Заміряно на
+    /// <c>EcrPerfI2</c> (90 екземплярів документо-періоду):
+    /// <see cref="RowStore.TableInstancesByIdQuery"/> дає 24 × 90 seek'ів —
+    /// 4 321 читання <c>doc.TableInstance</c> і ~700 мс ЦП проти 1 984 і ~440 мс
+    /// скану. Викликач, що знає період, бере перевантаження з
+    /// <see cref="PeriodKey"/> (181 читання, ~220 мс).
+    /// </remarks>
+    public async Task<IReadOnlyDictionary<long, IReadOnlyList<CellRecord>>> ReadSlicesAsync(
+        IReadOnlyList<long> tableInstanceIds, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(tableInstanceIds);
+        if (tableInstanceIds.Count == 0)
+        {
+            return new Dictionary<long, IReadOnlyList<CellRecord>>();
+        }
+
+        var rows = await SliceRowsAsync(
+                db.TableInstances.AsNoTracking().Where(t => tableInstanceIds.Contains(t.Id)), ct)
+            .ConfigureAwait(false);
+
+        return await SlicesOrArchiveAsync(tableInstanceIds, rows, ct).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyDictionary<long, IReadOnlyList<CellRecord>>> ReadSlicesAsync(
+        IReadOnlyList<long> tableInstanceIds, PeriodKey periodKey, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(tableInstanceIds);
+        if (tableInstanceIds.Count == 0)
+        {
+            return new Dictionary<long, IReadOnlyList<CellRecord>>();
+        }
+
+        var rows = await SliceRowsAsync(
+                RowStore.TableInstancesInPeriodQuery(db, tableInstanceIds, periodKey), ct)
+            .ConfigureAwait(false);
+
+        return await SlicesOrArchiveAsync(tableInstanceIds, rows, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Непорожні комірки невидалених рядків заданих екземплярів — ОДИН запит.
+    /// </summary>
+    /// <remarks>
+    /// TableInstance приєднаний не заради своїх полів, а заради PeriodKey: він
+    /// дає оптимізатору кореляцію, за якою відсікаються партиції
+    /// <c>doc.TableRow</c>/<c>doc.CellValue</c>. Партицію самого
+    /// <c>doc.TableInstance</c> відсікає лише предикат у
+    /// <paramref name="instances"/> — тому його вибирає викликач.
+    /// </remarks>
+    private Task<List<SliceRow>> SliceRowsAsync(
+        IQueryable<Domain.Entities.Documents.TableInstance> instances, CancellationToken ct)
+        => (from instance in instances
             join row in db.TableRows.AsNoTracking()
                 on new { P = instance.PeriodKeyValue, I = instance.Id }
                 equals new { P = row.PeriodKeyValue, I = row.TableInstanceId }
@@ -208,22 +302,26 @@ public sealed class NormalizedCellStore(EcrDbContext db, ArchiveAwareCellReader?
                 on new { P = row.PeriodKeyValue, R = row.Id }
                 equals new { P = cell.PeriodKeyValue, R = cell.TableRowId }
             where !row.IsDeleted
-            select new
+            select new SliceRow
             {
-                cell.PeriodKeyValue,
-                cell.TableRowId,
-                cell.ColumnDefId,
-                cell.TableDefId,
-                cell.ValueString,
-                cell.ValueNumeric,
-                cell.ValueDate,
-                cell.ValueBool,
-                cell.ValueRegistryEntryId,
-                cell.ValueUnitId,
-                cell.IsCalculated,
-                cell.IsEmpty,
-            }).ToListAsync(ct).ConfigureAwait(false);
+                TableInstanceId = instance.Id,
+                PeriodKeyValue = cell.PeriodKeyValue,
+                TableRowId = cell.TableRowId,
+                ColumnDefId = cell.ColumnDefId,
+                TableDefId = cell.TableDefId,
+                ValueString = cell.ValueString,
+                ValueNumeric = cell.ValueNumeric,
+                ValueDate = cell.ValueDate,
+                ValueBool = cell.ValueBool,
+                ValueRegistryEntryId = cell.ValueRegistryEntryId,
+                ValueUnitId = cell.ValueUnitId,
+                IsCalculated = cell.IsCalculated,
+                IsEmpty = cell.IsEmpty,
+            }).ToListAsync(ct);
 
+    private async Task<IReadOnlyList<CellRecord>> SliceOrArchiveAsync(
+        long tableInstanceId, List<SliceRow> rows, CancellationToken ct)
+    {
         if (rows.Count == 0 && archive is not null)
         {
             // ⚠ F-13. Гарячий джойн повернув нуль рядків — це і «зрізу
@@ -238,7 +336,30 @@ public sealed class NormalizedCellStore(EcrDbContext db, ArchiveAwareCellReader?
         // Порожніх комірок у базі не існує взагалі — клієнт бере
         // ColumnDef.DefaultValue (ФВ-3.8). Явна порожнеча — це рядок із
         // IsEmpty = 1, і він повертається (R-B4).
-        return [.. rows.Select(r => new CellRecord(
+        return [.. rows.Select(ToRecord)];
+    }
+
+    private async Task<IReadOnlyDictionary<long, IReadOnlyList<CellRecord>>> SlicesOrArchiveAsync(
+        IReadOnlyList<long> tableInstanceIds, List<SliceRow> rows, CancellationToken ct)
+    {
+        if (rows.Count == 0 && archive is not null)
+        {
+            // ⚠ F-13. Той самий слід архівації, що й у ReadSliceAsync поруч
+            // — і той самий фолбек: перевіряємо ВСІ запитані екземпляри
+            // разом, а не кожен окремо, бо порожній гарячий результат тут
+            // типово означає «весь батч з одного документа/періоду».
+            return await archive.ReadArchivedSlicesAsync(tableInstanceIds, ct).ConfigureAwait(false);
+        }
+
+        return rows
+            .GroupBy(r => r.TableInstanceId)
+            .ToDictionary(
+                g => g.Key,
+                IReadOnlyList<CellRecord> (g) => [.. g.Select(ToRecord)]);
+    }
+
+    private static CellRecord ToRecord(SliceRow r)
+        => new(
             new CellAddress(new PeriodKey(r.PeriodKeyValue), r.TableRowId, r.ColumnDefId),
             r.TableDefId,
             new CellValueData
@@ -251,73 +372,36 @@ public sealed class NormalizedCellStore(EcrDbContext db, ArchiveAwareCellReader?
                 ValueUnitId = r.ValueUnitId,
                 IsCalculated = r.IsCalculated,
                 IsEmpty = r.IsEmpty,
-            }))];
-    }
+            });
 
-    /// <inheritdoc />
-    public async Task<IReadOnlyDictionary<long, IReadOnlyList<CellRecord>>> ReadSlicesAsync(
-        IReadOnlyList<long> tableInstanceIds, CancellationToken ct)
+    /// <summary>Рядок результату <see cref="SliceRowsAsync"/>.</summary>
+    private sealed class SliceRow
     {
-        ArgumentNullException.ThrowIfNull(tableInstanceIds);
-        if (tableInstanceIds.Count == 0)
-        {
-            return new Dictionary<long, IReadOnlyList<CellRecord>>();
-        }
+        public long TableInstanceId { get; init; }
 
-        var rows = await (
-            from instance in db.TableInstances.AsNoTracking()
-            where tableInstanceIds.Contains(instance.Id)
-            join row in db.TableRows.AsNoTracking()
-                on new { P = instance.PeriodKeyValue, I = instance.Id }
-                equals new { P = row.PeriodKeyValue, I = row.TableInstanceId }
-            join cell in db.CellValues.AsNoTracking()
-                on new { P = row.PeriodKeyValue, R = row.Id }
-                equals new { P = cell.PeriodKeyValue, R = cell.TableRowId }
-            where !row.IsDeleted
-            select new
-            {
-                instance.Id,
-                cell.PeriodKeyValue,
-                cell.TableRowId,
-                cell.ColumnDefId,
-                cell.TableDefId,
-                cell.ValueString,
-                cell.ValueNumeric,
-                cell.ValueDate,
-                cell.ValueBool,
-                cell.ValueRegistryEntryId,
-                cell.ValueUnitId,
-                cell.IsCalculated,
-                cell.IsEmpty,
-            }).ToListAsync(ct).ConfigureAwait(false);
+        public int PeriodKeyValue { get; init; }
 
-        if (rows.Count == 0 && archive is not null)
-        {
-            // ⚠ F-13. Той самий слід архівації, що й у ReadSliceAsync поруч
-            // — і той самий фолбек: перевіряємо ВСІ запитані екземпляри
-            // разом, а не кожен окремо, бо порожній гарячий результат тут
-            // типово означає «весь батч з одного документа/періоду».
-            return await archive.ReadArchivedSlicesAsync(tableInstanceIds, ct).ConfigureAwait(false);
-        }
+        public long TableRowId { get; init; }
 
-        return rows
-            .GroupBy(r => r.Id)
-            .ToDictionary(
-                g => g.Key,
-                IReadOnlyList<CellRecord> (g) => [.. g.Select(r => new CellRecord(
-                    new CellAddress(new PeriodKey(r.PeriodKeyValue), r.TableRowId, r.ColumnDefId),
-                    r.TableDefId,
-                    new CellValueData
-                    {
-                        ValueString = r.ValueString,
-                        ValueNumeric = r.ValueNumeric,
-                        ValueDate = r.ValueDate,
-                        ValueBool = r.ValueBool,
-                        ValueRegistryEntryId = r.ValueRegistryEntryId,
-                        ValueUnitId = r.ValueUnitId,
-                        IsCalculated = r.IsCalculated,
-                        IsEmpty = r.IsEmpty,
-                    }))]);
+        public int ColumnDefId { get; init; }
+
+        public int TableDefId { get; init; }
+
+        public string? ValueString { get; init; }
+
+        public decimal? ValueNumeric { get; init; }
+
+        public DateTime? ValueDate { get; init; }
+
+        public bool? ValueBool { get; init; }
+
+        public long? ValueRegistryEntryId { get; init; }
+
+        public int? ValueUnitId { get; init; }
+
+        public bool IsCalculated { get; init; }
+
+        public bool IsEmpty { get; init; }
     }
 
     /// <inheritdoc />

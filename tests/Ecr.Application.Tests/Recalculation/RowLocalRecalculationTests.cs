@@ -345,7 +345,7 @@ public sealed class RowLocalRecalculationTests
                 new CellValueData { ValueNumeric = 100m }));
         }
 
-        _cells.ReadSlicesAsync(Arg.Any<IReadOnlyList<long>>(), Arg.Any<CancellationToken>())
+        _cells.ReadSlicesAsync(Arg.Any<IReadOnlyList<long>>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
             .Returns(new Dictionary<long, IReadOnlyList<CellRecord>>
             {
                 [MainInstance] = slice,

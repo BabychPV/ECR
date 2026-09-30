@@ -915,6 +915,32 @@ public sealed class RowStore(
     }
 
     /// <summary>
+    /// Екземпляри таблиць за <c>Id</c>, коли період викликачеві ВІДОМИЙ (O3b).
+    /// </summary>
+    /// <param name="db">Контекст.</param>
+    /// <param name="tableInstanceIds">Ідентифікатори екземплярів.</param>
+    /// <param name="periodKey">Період — він же ключ партиції.</param>
+    /// <returns>Незавершений запит; з'єднання й проєкцію добирає викликач.</returns>
+    /// <remarks>
+    /// ⛔ Рівність за обома стовпцями кластерного ключа <c>(PeriodKey, Id)</c> —
+    /// один seek в одній партиції. Замір на <c>EcrPerfI2</c> (зріз 2 088
+    /// комірок): 2 читання <c>doc.TableInstance</c> замість 1 984, ЦП запиту
+    /// 6 мс замість 101. Для пакета це ще й єдиний дешевий шлях:
+    /// <see cref="TableInstancesByIdQuery"/> на 90 <c>Id</c> робить 24 × 90
+    /// seek'ів (4 321 читання) — дорожче за скан, який він мав прибрати.
+    /// </remarks>
+    public static IQueryable<TableInstance> TableInstancesInPeriodQuery(
+        EcrDbContext db, IReadOnlyCollection<long> tableInstanceIds, PeriodKey periodKey)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(tableInstanceIds);
+
+        return db.TableInstances
+            .AsNoTracking()
+            .Where(t => t.PeriodKeyValue == periodKey.Value && tableInstanceIds.Contains(t.Id));
+    }
+
+    /// <summary>
     /// Екземпляри таблиць за <c>Id</c>: спершу з ключем партиції
     /// (<see cref="TableInstancesByIdQuery"/>), для незнайдених — колишнім
     /// пошуком без ключа.

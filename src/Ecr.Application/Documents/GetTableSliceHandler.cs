@@ -144,7 +144,11 @@ public sealed class GetTableSliceHandler(
 
         // 2. Значення — ОДИН запит на весь зріз. N+1 тут коштує бюджету
         //    1.5 с на 500×60 (tz/08 §8.2).
-        var cells = await cellStore.ReadSliceAsync(tableInstanceId, ct).ConfigureAwait(false);
+        //    ⚠ O3b: з періодом екземпляра — seek в одній партиції замість
+        //    скану `doc.TableInstance` по всіх (1 984 → 2 читання).
+        var cells = await cellStore
+            .ReadSliceAsync(tableInstanceId, new Domain.ValueObjects.PeriodKey(instance.PeriodKey), ct)
+            .ConfigureAwait(false);
 
         // 3. Права — ОДИН виклик на весь зріз, не по комірці.
         var decisions = await access.CanEditSliceAsync(profile, tableInstanceId, ct).ConfigureAwait(false);

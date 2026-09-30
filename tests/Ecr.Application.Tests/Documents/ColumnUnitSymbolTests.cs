@@ -76,6 +76,7 @@ public sealed class ColumnUnitSymbolTests
         _rows.GetOrphanFlagsAsync(TableInstance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
              .Returns(new Dictionary<long, bool>());
         _cells.ReadSliceAsync(TableInstance, Arg.Any<CancellationToken>()).Returns([]);
+        _cells.ReadSliceAsync(TableInstance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>()).Returns([]);
 
         // ⛔ Читання зрізу тепер вимагає і права `Document.View`, і ГРАНТА на
         // проєкт (`A7-53`, `A7-55`). Фікстура видає обидва явно: предмет цих
