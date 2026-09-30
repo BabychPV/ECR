@@ -597,7 +597,23 @@ export function DocumentPage(): JSX.Element {
           питає. Тобто невідомість кнопки не ВІДКРИВАЄ — вона лише лишала
           оператора без єдиного попередження перед натисканням; банер вище це
           й закриває. Гейт подання за помилками — на сервері (`ECR-SUB-*`). */}
-      <ValidationPanel messages={shownValidation?.messages ?? null} />
+      <ValidationPanel
+        messages={shownValidation?.messages ?? null}
+        onSelect={(finding) => {
+          // ⛔ `ФВ-5.6`: спершу аркуш зауваження, потім запит переходу. Модуль
+          // переходу — за `import()`: він живе в чанку сітки, не сторінки
+          // (`D-132`), і сітки однаково без нього не з'являться.
+          const target = tables.data?.find((table) => table.tableDefId === finding.tableDefId);
+          if (target === undefined) return;
+
+          // ⚠ Лише коли аркуш інший: зміна адреси — це навігація, і на
+          // активному аркуші вона нічого не дає, крім зайвого рендеру сторінки.
+          if (target.sheetCode !== active?.code) setSheet(target.sheetCode);
+          void import('@/features/grid/cellNavigation').then((module) =>
+            module.requestCellNavigation(finding),
+          );
+        }}
+      />
 
       {/* `BE-11b`. Над вкладками з тієї ж причини, що й панель вище: журнал —
           про всі аркуші документа за період. Згорнутий, і до розгортання

@@ -5340,6 +5340,9 @@ USING (VALUES
     (N'import.inFile', N'en', N'In the file', 1),
     (N'err.ECR-CELL-0422.importPrecision', N'en', N'The number has more digits than the column allows, even after rounding to the column''s decimal places.', 1),
     -- IMP:rounding: кінець секції
+    -- NAV:cell-click ── ФВ-5.6: перехід від зауваження перевірки до комірки (`ValidationPanel`).
+    (N'document.validationGoTo', N'en', N'Show in the table', 1),
+    -- NAV:cell-click: кінець секції
     -- D16: ФВ-2.16 — підтвердження пакетних правок (вставка, протягування) і
     -- серверна відмова батчу без підтвердження (`PatchCellsHandler.EnsureConfirmed`).
     (N'grid.batchConfirmBody', N'en', N'{count} cell(s) in this change are outside the allowed editing window and need your confirmation. Apply the whole change?', 1),
@@ -12350,6 +12353,17 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- IMP:rounding ── кінець секції ──
+
+-- NAV:cell-click ── ru/kz переходу від зауваження перевірки до комірки (ФВ-5.6); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'document.validationGoTo', N'ru', N'Показать в таблице'),
+    (N'document.validationGoTo', N'kz', N'Кестеде көрсету')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- NAV:cell-click ── кінець секції ──
 
 -- JOBL ── ru/kz назв видів задач (jobLabel.ts, KindKeys); власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)

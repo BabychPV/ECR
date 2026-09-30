@@ -70,6 +70,13 @@ import {
   type GridSelection,
 } from './selection';
 import { publishFocus } from './focusStore';
+import {
+  NavigationHighlightMs,
+  cellCoordinateOf,
+  completeCellNavigation,
+  revealGridCell,
+  type CellNavigationRequest,
+} from './cellNavigation';
 import { GridFormulaBar } from './GridFormulaBar';
 import {
   columnTotals,
@@ -142,6 +149,14 @@ interface DocumentGridProps {
 
   /** Стеля кількості рядків; `null` — без стелі. */
   maxDynamicRows: number | null;
+
+  /**
+   * Запит переходу до комірки цієї таблиці (`ФВ-5.6`); `null` — немає.
+   *
+   * ⚠ Приходить від `SheetTables` лише ЦІЛЬОВІЙ сітці: решта сіток аркуша не
+   * перемальовуються від кліку по зауваженню чужої таблиці.
+   */
+  navigateTo?: CellNavigationRequest | null;
 }
 
 /** Рядок у моделі grid: значення за кодами колонок плюс службовий ключ. */
@@ -284,6 +299,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     readOnly,
     allowsDynamicRows,
     maxDynamicRows,
+    navigateTo = null,
   } = props;
 
   const slice = useQuery({
@@ -731,6 +747,16 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
 
   const data = slice.data;
 
+  /**
+   * Підсвічена ціль переходу від зауваження (`ФВ-5.6`).
+   *
+   * ⚠ Разом із номером запиту: повторний перехід до ТІЄЇ САМОЇ комірки має
+   * наново запустити і підсвітку, і її таймер — інакше другий клік гасив би
+   * підсвітку за залишком першого.
+   */
+  const [navigated, setNavigated] = useState<{ key: string; seq: number } | null>(null);
+  const navigatedCell = navigated?.key ?? null;
+
   // ⚠ Позначки клієнта — окремо від зрізу: сервер не знає ні про незбережені
   // правки, ні про те, що значення округлилося при вставці саме тут.
   const flags = useMemo<LocalCellFlags>(
@@ -975,6 +1001,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
             totals,
             lookupPending,
             units.data ?? null,
+            navigatedCell,
           ),
     [
       data,
@@ -987,6 +1014,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
       totals,
       lookupPending,
       units.data,
+      navigatedCell,
     ],
   );
 
@@ -1693,10 +1721,12 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
   const rowSize = useRowHeight();
 
   const gridListenersCleanup = useRef<(() => void)[]>([]);
+  const gridContainer = useRef<HTMLDivElement | null>(null);
   const gridContainerRef = useCallback(
     (node: HTMLDivElement | null) => {
       for (const cleanup of gridListenersCleanup.current) cleanup();
       gridListenersCleanup.current = [];
+      gridContainer.current = node;
 
       if (node === null) return;
 
@@ -1717,6 +1747,49 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     },
     [tableInstanceId, periodKey],
   );
+
+  /*
+   * ⛔ `ФВ-5.6`: перехід від зауваження перевірки до комірки. Чекає ЗРІЗУ, а не
+   * лише монтування: до його приходу немає ні рядків, щоб знайти `rowKey`, ні
+   * самої `revo-grid` (вона рендериться всередині `AsyncBoundary`).
+   *
+   * ⚠ Рядка в зрізі немає (видалений динамічний рядок, зауваження старішої
+   * перевірки) — перехід завершується тим, що вже зроблено: `SheetTables`
+   * прокрутив до таблиці. Вигадувати «найближчий» рядок — гірше, ніж чесно
+   * лишитися на таблиці.
+   */
+  useEffect(() => {
+    if (navigateTo === null || navigateTo.rowKey === null || data === undefined) return;
+
+    const node = gridContainer.current;
+    if (node === null) return;
+
+    const request = navigateTo;
+    const labeled = hasRowLabels(data);
+    const coordinate = cellCoordinateOf(data, labeled, navigateTo.rowKey, navigateTo.columnCode);
+
+    if (coordinate === null) {
+      completeCellNavigation(request.seq);
+      return;
+    }
+
+    const column = data.columns[dataColumnIndexOf(coordinate.x, data)];
+    if (column !== undefined) {
+      setNavigated({ key: cellKey(navigateTo.rowKey, column.code), seq: request.seq });
+    }
+
+    void revealGridCell(node, coordinate).finally(() => completeCellNavigation(request.seq));
+  }, [navigateTo, data]);
+
+  // ⚠ Таймер окремо від переходу: запит завершується одразу після фокуса, і
+  // прибирання ефекту переходу гасило б підсвітку ще до того, як її побачать.
+  useEffect(() => {
+    if (navigated === null) return;
+
+    const timer = setTimeout(() => setNavigated(null), NavigationHighlightMs);
+
+    return () => clearTimeout(timer);
+  }, [navigated]);
 
   return (
     /*
@@ -2107,6 +2180,10 @@ export function gridColumns(
 
   // ⛔ `R-01`: перелік одиниць для колонок `Unit`; `null` — ще не приїхав.
   units: readonly UnitRef[] | null = null,
+
+  // ⛔ `ФВ-5.6`: комірка, до якої щойно перейшли від зауваження перевірки
+  // (`cellNavigation.ts`); `null` — підсвічувати нічого.
+  navigatedCell: string | null = null,
 ): ColumnRegular[] {
   // ⚠ Тип оголошений ЯВНО, а не виведений із `map`. Без нього лямбди
   // всередині (`readonly`, `cellProperties`, `cellTemplate`) втрачають
@@ -2317,6 +2394,11 @@ export function gridColumns(
         const saveErrorMessage = saveErrorByCell.get(key) ?? null;
         const saveErrorClass = saveErrorMessage === null ? null : 'ecr-cell-save-error';
 
+        // ⛔ `ФВ-5.6`: підсвітка цілі переходу — ще один маркер ПОВЕРХ стану,
+        // не заміна: комірка з помилкою збереження лишається такою і після
+        // переходу до неї.
+        const navigationClass = navigatedCell === key ? 'ecr-cell-nav-target' : null;
+
         // ⛔ Директива registry-lookup / cell-style, PR B2: оформлення
         // автора шаблону — ШАР ПІД будь-яким станом (`cellStateOf` вище),
         // не заміна: рахується ЗАВЖДИ, незалежно від того, чи спрацював
@@ -2347,7 +2429,13 @@ export function gridColumns(
         const fullValueHint =
           numericClass === null ? null : cellDisplay((model as GridRow)[column.code], column);
 
-        if (state === null && requiredInputClass === null && saveErrorClass === null && appearance === undefined) {
+        if (
+          state === null &&
+          requiredInputClass === null &&
+          saveErrorClass === null &&
+          navigationClass === null &&
+          appearance === undefined
+        ) {
           return numericClass === null
             ? {}
             : {
@@ -2382,6 +2470,7 @@ export function gridColumns(
             state === null ? 'ecr-cell' : cellStateClass(state),
             requiredInputClass,
             saveErrorClass,
+            navigationClass,
             numericClass,
             appearanceClass,
           ]

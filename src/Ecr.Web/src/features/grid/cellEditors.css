@@ -121,3 +121,31 @@
   background-color: var(--ecr-cell-fill);
   color: var(--ecr-cell-fill-fg);
 }
+
+/*
+ * ── Ціль переходу від зауваження перевірки (`ФВ-5.6`) ───────────────────
+ *
+ * ⚠ Рамка ВСЕРЕДИНІ комірки (`inset`), а не `outline`: сусідні комірки
+ * RevoGrid малюються поверх і зрізали б зовнішню рамку з двох боків. Колір —
+ * основний колір теми, той самий, що й кільце фокуса: людина шукає «куди
+ * мене привело», і це має читатися як фокус, а не як ще один стан комірки.
+ *
+ * ⚠ Пульс — два такти й зупинка; за `prefers-reduced-motion` — нерухома
+ * рамка. Прибирає клас сама сітка (`NavigationHighlightMs`).
+ */
+:root revo-grid[theme] revogr-data .rgCell.ecr-cell-nav-target {
+  box-shadow: inset 0 0 0 2px var(--mantine-primary-color-filled);
+  animation: ecr-cell-nav-pulse 0.8s ease-in-out 2;
+}
+
+@keyframes ecr-cell-nav-pulse {
+  50% {
+    box-shadow: inset 0 0 0 4px var(--mantine-primary-color-filled);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root revo-grid[theme] revogr-data .rgCell.ecr-cell-nav-target {
+    animation: none;
+  }
+}
