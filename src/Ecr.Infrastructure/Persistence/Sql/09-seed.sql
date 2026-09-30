@@ -5615,6 +5615,7 @@ USING (VALUES
     (N'conditionalFormat.matched', N'en', N'Rule {position} applies.', 1),
     (N'conditionalFormat.save', N'en', N'Save rules', 1),
     (N'conditionalFormat.saveUnavailable', N'en', N'Saving is unavailable until the server stores conditional formatting rules.', 1),
+    (N'err.ECR-TMPL-0422.ordinalInvalid', N'en', N'Order must be a whole number from 0 to 1000000, got "{value}".', 1),
     -- CONSTRUCTOR:dnd-format: кінець секції
     -- D16: ФВ-2.16 — підтвердження пакетних правок (вставка, протягування) і
     -- серверна відмова батчу без підтвердження (`PatchCellsHandler.EnsureConfirmed`).
@@ -13126,7 +13127,9 @@ SELECT v.[Key], v.Lang, v.Val
     (N'conditionalFormat.save', N'ru', N'Сохранить правила'),
     (N'conditionalFormat.save', N'kz', N'Ережелерді сақтау'),
     (N'conditionalFormat.saveUnavailable', N'ru', N'Сохранение недоступно, пока сервер не хранит правила условного форматирования.'),
-    (N'conditionalFormat.saveUnavailable', N'kz', N'Сервер шартты пішімдеу ережелерін сақтамайынша, сақтау қолжетімсіз.')
+    (N'conditionalFormat.saveUnavailable', N'kz', N'Сервер шартты пішімдеу ережелерін сақтамайынша, сақтау қолжетімсіз.'),
+    (N'err.ECR-TMPL-0422.ordinalInvalid', N'ru', N'Порядок должен быть целым числом от 0 до 1000000, получено "{value}".'),
+    (N'err.ECR-TMPL-0422.ordinalInvalid', N'kz', N'Рет 0-ден 1000000-ға дейінгі бүтін сан болуы керек, алынған мән "{value}".')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO

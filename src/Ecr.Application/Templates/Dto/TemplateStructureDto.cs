@@ -152,6 +152,7 @@ public sealed record TemplateColumnDto(
 /// порожня, і клієнт не міг би відрізнити «немає значення» від «тут значень
 /// не буває».
 /// </remarks>
+/// <param name="Id">Ідентифікатор; ним адресується презентаційний патч (`ФВ-2.6`, порядок рядків).</param>
 /// <param name="RowKey">Стабільна бізнес-ідентичність (`R-B6`).</param>
 /// <param name="Ordinal">Порядок відображення; презентаційне поле.</param>
 /// <param name="RowKind">Вид рядка: <c>Item</c>, <c>Group</c>, <c>Balance</c>, <c>Note</c>.</param>
@@ -166,6 +167,7 @@ public sealed record TemplateColumnDto(
 /// Діалект <see cref="FormulaExpression"/>; заповнений лише разом із ним.
 /// </param>
 public sealed record TemplateRowDto(
+    int Id,
     string RowKey,
     int Ordinal,
     string RowKind,
