@@ -36,8 +36,10 @@ namespace Ecr.Infrastructure.Jobs;
 /// і оновлює його.
 /// </para>
 /// <para>
-/// ⚠ Крок 7 §4.7.4 (автоперерахунок, <c>ICalculationTrigger</c>, A4) ще не підключено: інтерфейсу
-/// немає у вершині. Записані значення перераховуються кнопкою «Перерахувати» до появи A4.
+/// ⚠ Крок 7 §4.7.4 (A4): записане (<c>Applied &gt; 0</c>) ставить автоперерахунок документа за
+/// період (<see cref="ICalculationTrigger"/>) — один раз на зачеплений період за прогін мапінгу.
+/// <c>recalculation</c> необов'язковий лише для прямого конструювання в тестах; контейнер його
+/// завжди передає.
 /// </para>
 /// </remarks>
 public sealed class SourceEventSyncJob(
@@ -46,7 +48,8 @@ public sealed class SourceEventSyncJob(
     ICellPatcher patcher,
     ICoverageJournal coverage,
     IntegrationActor actor,
-    IClock clock) : ISourceEventSyncJob
+    IClock clock,
+    ICalculationTrigger? recalculation = null) : ISourceEventSyncJob
 {
     /// <summary>Код задачі в черзі.</summary>
     public static string Code => "source-event-sync";
@@ -248,7 +251,8 @@ public sealed class SourceEventSyncJob(
             : null;
 
         // ── Етап 1: запис рядків.
-        var writes = await WriteRowsAsync(map, plan, fields, tz, units, ct).ConfigureAwait(false);
+        var appliedPeriods = new HashSet<int>();
+        var writes = await WriteRowsAsync(map, plan, fields, tz, units, appliedPeriods, ct).ConfigureAwait(false);
 
         // ── Етап 2: зв'язки.
         var events = new List<CoverageEvent>();
@@ -269,6 +273,17 @@ public sealed class SourceEventSyncJob(
         if (events.Count > 0)
         {
             await coverage.RecordManyAsync(events, ct).ConfigureAwait(false);
+        }
+
+        // ⛔ Автоперерахунок (§4.7.4 крок 7, A4): ОДИН виклик на зачеплений період за прогін мапінгу,
+        // не на подію й не на групу; нуль записаного — нуль викликів. Черга зливає дублікати без
+        // витіснення, тригер сам не ставить для закритого, Scheduled чи поданого періоду.
+        if (recalculation is not null)
+        {
+            foreach (var periodKey in appliedPeriods.Order())
+            {
+                await recalculation.RequestAsync(map.DocumentId, new PeriodKey(periodKey), ct).ConfigureAwait(false);
+            }
         }
     }
 
@@ -428,6 +443,7 @@ public sealed class SourceEventSyncJob(
         IReadOnlyList<SourceEventFieldPlan> fields,
         TimeZoneInfo tz,
         UnitCatalogSnapshot? units,
+        HashSet<int> appliedPeriods,
         CancellationToken ct)
     {
         var outcomes = new Dictionary<string, RowOutcome>(StringComparer.OrdinalIgnoreCase);
@@ -473,8 +489,13 @@ public sealed class SourceEventSyncJob(
             var keys = rows.Select(r => r.RowKey).ToList();
             var before = await ExistingRowsAsync(group.Key.Instance, group.Key.PeriodKey, keys, ct).ConfigureAwait(false);
 
-            await WriteGroupAsync(map.DocumentId, group.Key.Instance, group.Key.PeriodKey, rows, outcomes, cellsByRow, columnIds, ct)
+            var applied = await WriteGroupAsync(
+                    map.DocumentId, group.Key.Instance, group.Key.PeriodKey, rows, outcomes, cellsByRow, columnIds, ct)
                 .ConfigureAwait(false);
+            if (applied > 0)
+            {
+                appliedPeriods.Add(group.Key.PeriodKey);
+            }
 
             var after = await ExistingRowsAsync(group.Key.Instance, group.Key.PeriodKey, keys, ct).ConfigureAwait(false);
             foreach (var key in keys)
@@ -492,7 +513,8 @@ public sealed class SourceEventSyncJob(
     /// Пише групу одним пакетом; якщо обробник відхилив пакет (стеля рядків, валідація) — по одному рядку,
     /// щоб знати, котрий саме винен, і щоб один поганий рядок не блокував решту.
     /// </summary>
-    private async Task WriteGroupAsync(
+    /// <returns>Скільки комірок записано (для автоперерахунку).</returns>
+    private async Task<int> WriteGroupAsync(
         long documentId,
         long tableInstanceId,
         int periodKey,
@@ -508,13 +530,25 @@ public sealed class SourceEventSyncJob(
                 .ApplyIntegrationRowsAsync(documentId, tableInstanceId, new PeriodKey(periodKey), rows, ct)
                 .ConfigureAwait(false);
             Distribute(result, outcomes, cellsByRow, columnIds);
-            return;
+            return result.Applied;
+        }
+        catch (AccessDeniedException ex)
+        {
+            // Період закрили між планом і записом (чи екземпляр недоступний): усі рядки групи однаково
+            // заборонені — по одному не розводимо; наступний прогін побачить закритий період у плані.
+            foreach (var row in rows)
+            {
+                outcomes[row.RowKey].Failure = ex.Message;
+            }
+
+            return 0;
         }
         catch (Exception ex) when (ex is BusinessRuleException or DomainException)
         {
             // Пакет відхилено цілком (нічого не записано): розводимо по одному.
         }
 
+        var applied = 0;
         foreach (var row in rows)
         {
             try
@@ -523,6 +557,7 @@ public sealed class SourceEventSyncJob(
                     .ApplyIntegrationRowsAsync(documentId, tableInstanceId, new PeriodKey(periodKey), [row], ct)
                     .ConfigureAwait(false);
                 Distribute(result, outcomes, cellsByRow, columnIds);
+                applied += result.Applied;
             }
             catch (BusinessRuleException ex) when (ex.Details?.GetValueOrDefault("messageKey") as string == RowLimitKey)
             {
@@ -533,6 +568,8 @@ public sealed class SourceEventSyncJob(
                 outcomes[row.RowKey].Failure = ex.Message;
             }
         }
+
+        return applied;
     }
 
     /// <summary>Розкладає результат патчера («ключ:колонка») по подіях.</summary>
