@@ -72,6 +72,14 @@ const TemplateCardPage = lazy(async () => ({
 }));
 
 /**
+ * Редактор master-detail довідника (`ФВ-8.16`) — лінивий чанк, як і картка шаблону вище: сюди
+ * заходять із конструктора довідника, а не з навбару, тож реєстру прогріву він не потрібен.
+ */
+const CompositionEditorPage = lazy(async () => ({
+  default: (await import('@/features/registries/rc816/CompositionEditorPage')).CompositionEditorPage,
+}));
+
+/**
  * Межа очікування для маршрутів поза каркасом.
  *
  * ⚠ Сторінка входу рендериться поза `AppLayout`, тобто поза його `<Suspense>`.
@@ -290,6 +298,11 @@ export const router = createBrowserRouter([
             path: relativePath(routes.adminRegistryDefinition, 'admin'),
             element: guarded(routes.adminRegistryDefinition.handle, <RegistryConstructorPage />),
             handle: routes.adminRegistryDefinition.handle,
+          },
+          {
+            path: relativePath(routes.adminRegistryComposition, 'admin'),
+            element: guarded(routes.adminRegistryComposition.handle, <CompositionEditorPage />),
+            handle: routes.adminRegistryComposition.handle,
           },
           {
             path: relativePath(routes.adminMethodologies, 'admin'),

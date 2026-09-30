@@ -277,6 +277,21 @@ export const routes = {
       },
     },
   },
+  adminRegistryComposition: {
+    id: 'admin-registry-composition',
+    path: '/admin/registries/:code/composition',
+    handle: {
+      labelKey: 'registries.rc816.title',
+      // Читання — `Registry.View` (`GET …/rows`); правка вимагає `Registry.EditData`, і без нього
+      // сторінка лише показує (ФВ-8.16).
+      permission: 'Registry.View',
+      crumb: {
+        ancestorIds: ['admin-registries'],
+        resolveParam: 'code',
+        resolveWith: 'registryName',
+      },
+    },
+  },
   adminMethodologies: {
     id: 'admin-methodologies',
     path: '/admin/methodologies',
