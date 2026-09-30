@@ -5432,7 +5432,7 @@ USING (VALUES
     (N'jobs.kind.orphanScan',       N'en', N'Orphaned data scan', 1),
     -- JOBL ── кінець секції ──
     -- SEC:effective-access ── Розріз «ресурс → рівень → грант якої ролі» (ФВ-6.16, D-220, `EffectiveAccessPanel`, GET /security/users/{id}/effective-access) ──
-    (N'err.ECR-REQ-0422.effectiveAccessResource', N'en', N'The resource must be given as Registry:{id} or Project:{id}, with a positive number.', 1),
+    (N'err.ECR-REQ-0422.effectiveAccessResource', N'en', N'The resource must be given as a type and a positive number, for example Registry:5 or Project:3.', 1),
     (N'effectiveAccess.show',            N'en', N'Show effective access', 1),
     (N'effectiveAccess.hide',            N'en', N'Hide effective access', 1),
     (N'effectiveAccess.title',           N'en', N'Effective access to a resource', 1),

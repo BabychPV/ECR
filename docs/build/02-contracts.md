@@ -3235,6 +3235,12 @@ public interface IRecalculationApprovalStore
 }
 ```
 
+#### `IEffectiveAccessStore`
+
+Джерела доступу до ресурсу (довідник, проєкт) для розрізу «ресурс → рівень → грант ролі» (`ФВ-6.16`,
+`D-220`): `ResourceExistsAsync` і `ListSourcesAsync` (призначення людини плюс те, що їхні ролі кажуть
+про ресурс). Нічого не вирішує — рівень дає `AccessProfile`.
+
 #### `IUserStore`
 
 Доступ до облікових записів для use-cases безпеки.

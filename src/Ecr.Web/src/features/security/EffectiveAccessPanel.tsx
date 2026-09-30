@@ -8,14 +8,21 @@ import { t } from '@/shared/i18n';
 
 type Kind = 'Registry' | 'Project';
 
-/** Ключ каталогу для області внеску (`EffectiveAccessContribution.scope`). */
-const ScopeKeys: Record<string, string> = {
-  Unscoped: 'effectiveAccess.scopeUnscoped',
-  InScope: 'effectiveAccess.scopeInScope',
-  Narrowed: 'effectiveAccess.scopeNarrowed',
-  OutOfScope: 'effectiveAccess.scopeOutOfScope',
-  Expired: 'effectiveAccess.scopeExpired',
-};
+/** Підпис області внеску (`EffectiveAccessContribution.scope`); ключі — літерали, щоб їх бачив сторож каталогу. */
+function scopeLabel(scope: string): string {
+  switch (scope) {
+    case 'Unscoped':
+      return t('effectiveAccess.scopeUnscoped');
+    case 'InScope':
+      return t('effectiveAccess.scopeInScope');
+    case 'Narrowed':
+      return t('effectiveAccess.scopeNarrowed');
+    case 'Expired':
+      return t('effectiveAccess.scopeExpired');
+    default:
+      return t('effectiveAccess.scopeOutOfScope');
+  }
+}
 
 /**
  * Розріз «ресурс → підсумковий рівень → який грант якої ролі його дав» (`ФВ-6.16`, `D-220`).
@@ -161,7 +168,7 @@ function ContributionRow({ c }: { c: EffectiveAccessContribution }): JSX.Element
           : t('effectiveAccess.viaGroup', { sid: c.principalSid })}
       </Table.Td>
       <Table.Td>{c.isDeny ? t('effectiveAccess.deny') : c.level}</Table.Td>
-      <Table.Td>{t(ScopeKeys[c.scope] ?? 'effectiveAccess.scopeOutOfScope')}</Table.Td>
+      <Table.Td>{scopeLabel(c.scope)}</Table.Td>
       <Table.Td>{c.counted ? t('effectiveAccess.counted') : t('effectiveAccess.notCounted')}</Table.Td>
     </Table.Tr>
   );
