@@ -133,6 +133,10 @@ public sealed class AccessDenialAuditApiTests(SqlServerFixture sql)
         var (client, userId, _) = await SignInAsync(failing).ConfigureAwait(true);
         using var _ = client;
 
+        // Знімок ДО запиту: старт хоста міг залогувати Error від чужого стану спільної бази
+        // (напр. RecurringScheduleService із розкладом з невалідним cron). Це не наш збій.
+        var errorsBefore = app.ServerErrors.Count;
+
         var denied = await client.GetAsync(Facts).ConfigureAwait(true);
 
         // Статус і тіло — ті самі, що без збою: 403 з кодом і причиною, не 500.
@@ -144,7 +148,9 @@ public sealed class AccessDenialAuditApiTests(SqlServerFixture sql)
 
         // Збій — лише в лозі, рівнем Warning; помилок сервера немає.
         Assert.Contains(app.ServerLog, line => line.Contains("Відмову в доступі не записано", StringComparison.Ordinal));
-        Assert.True(app.ServerErrors.IsEmpty, app.ErrorsText);
+        // Помилок сервера НА ЦЕЙ запит немає (записи, що були до нього, — чужі й не рахуються).
+        var newErrors = app.ServerErrors.Skip(errorsBefore).ToList();
+        Assert.True(newErrors.Count == 0, string.Join("\n", newErrors));
 
         Assert.Empty(await EventsAsync(userId).ConfigureAwait(true));
     }
