@@ -19,12 +19,17 @@ export function historyChangeLabel(item: RegistryEntryHistoryItem, fields: reado
       const field = fields.find((f) => f.code === item.field);
       return (field === undefined ? '' : localized(field.nameL10n)) || item.field || '';
     }
+    // ⚠ Ключі — літералами: сторож `EndpointCoverageTests` має бачити кожен рядок, що доходить до `t()`.
     case 'created':
+      return t('registries.entryHistory.kind.created');
     case 'name':
+      return t('registries.entryHistory.kind.name');
     case 'validity':
+      return t('registries.entryHistory.kind.validity');
     case 'active':
+      return t('registries.entryHistory.kind.active');
     case 'deleted':
-      return t(`registries.entryHistory.kind.${item.kind}`);
+      return t('registries.entryHistory.kind.deleted');
     default:
       // Новий вид зміни, якого клієнт ще не знає: код, а не `⟦…⟧`.
       return item.kind;
