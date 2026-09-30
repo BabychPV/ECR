@@ -22,7 +22,8 @@ namespace Ecr.Api.Controllers;
 [Authorize]
 public sealed class SourceEventsController(
     ListEventTemplatesHandler templates,
-    ProbeSourceEventsHandler probe) : ControllerBase
+    ProbeSourceEventsHandler probe,
+    SyncSourceEventsHandler sync) : ControllerBase
 {
     /// <summary>
     /// Каталог шаблонів подій джерела й їхніх атрибутів. Право <c>Integration.View</c> або <c>Integration.Manage</c>.
@@ -56,4 +57,21 @@ public sealed class SourceEventsController(
     public async Task<IActionResult> ProbeEvents(
         int id, [FromBody] SourceEventProbeRequest request, CancellationToken ct)
         => Ok(await probe.HandleAsync(id, request, ct).ConfigureAwait(false));
+
+    /// <summary>
+    /// «Отримати з PI зараз»: ставить синхронізацію подій сутності в чергу. Право <c>Integration.Manage</c>.
+    /// </summary>
+    /// <param name="id">Сутність-шаблон подій.</param>
+    /// <param name="ct">Скасування.</param>
+    /// <remarks>
+    /// Повторне натискання зливається з задачею, що вже чекає чи виконується (ціль <c>source-events-e{id}</c>), — та
+    /// сама задача, що й за розкладом. Немає активного мапінгу подій — <c>422</c>.
+    /// </remarks>
+    [HttpPost("sources/{id:int}/source-events/sync")]
+    [ProducesResponseType<Contracts.JobAcceptedResponse>(StatusCodes.Status202Accepted)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> Sync(int id, CancellationToken ct)
+        => Accepted(new Contracts.JobAcceptedResponse(await sync.HandleAsync(id, ct).ConfigureAwait(false)));
 }
