@@ -278,7 +278,51 @@ HSE301).
   Відмова переліку — виняток адаптера: прогін `Failed` з його кодом і `messageKey`, подій не пише.
 - `Value()` у PI SQL Client: дата — ISO 8601 (`"O"`), не `ToString()` за культурою потоку.
 
-### 5.5 D-212 PR-8 — інтерфейс політики синку (2026-09-30)
+### 5.5 D-212 PR-7 — вікно дії запису з дат AF (2026-09-30)
+
+Коміти `bd721b93` (writer), `39ae26aa` (планувальник), `f58b2d3e` (задача), `7ad8bf58` (API політики).
+Міграції немає: `RegistryEntry.ValidFrom`/`ValidTo` (напівінтервал `[From, To)`) уже були.
+
+- **Коли діє:** лише для **темпорального** довідника і лише коли в політиці сутності задано атрибути дат
+  (`ValidFromAttribute`/`ValidToAttribute`). Без атрибутів `RegistrySyncInput.Validity = null` — дати не
+  читаються й не пишуться (типово). Нетемпоральний довідник дат не читає; `PUT
+  /api/v1/sources/{id}/registry/policy` з атрибутами дат для нього — `422 ECR-REQ-0422`
+  `err.ECR-REQ-0422.registrySyncPolicyNotTemporal` (параметр `registry`), нічого не записано; та сама
+  політика без дат — `200`. Атрибути читаються тим самим `ReadCurrentAsync`, що й змаплені поля.
+- **Формат дати** (`RegistrySyncValidity`): ISO 8601 — `yyyy-MM-ddTHH:mm:ss[.f…][Z|±hh:mm]`,
+  `yyyy-MM-ddTHH:mm[Z|±hh:mm]` або `yyyy-MM-dd` (так віддає `PiSqlClientDataSource.Value()`, PR-1). Інше
+  (число, дата за культурою) — подія `ValueRejected` `err.ECR-REG-0422.validityDateInvalid` на полі
+  `@validFrom`/`@validTo`, межа **не чіпається**. ⚠ Які формати дає AF замовника — факт PI-адміністратора;
+  ISO — дефолт до відповіді.
+- **Пояс AF** — ключ `Integration:AfTimeZoneId` (Windows або IANA; порожньо чи немає — UTC). Момент із поясом
+  переводиться в пояс AF і лише тоді стає днем; момент без поясу — уже місцевий час AF. Невідомий пояс
+  зупиняє **старт служби** з ім'ям ключа (`EcrConfigurationValidation`); якщо він усе ж дійшов до задачі —
+  `InvalidOperationException`, прогін `Failed`. У `appsettings.json` ключа немає.
+- **Межі:** початок — день моменту; кінець із `ValidToInclusive` — день + 1; виключний кінець — північ
+  лишається днем, інший час — наступний день (частково чинний день — чинний). Атрибута немає в знімку —
+  межа лишається як є; порожнє значення — межу знято (`null`). Кінець не пізніше початку — `ValueRejected`
+  `err.ECR-REG-0422.validityWindowEmptyInSource` на `@validity`.
+- **Політика за `SourceKind`** — як для змапленого поля: `External` пише (`Plan.ValidityChanges`); `Hybrid`,
+  якщо останню правку рядка зробила людина (`WindowLastWriterIsHuman`), — `ConflictKeptManual`; `Local` —
+  `Diverged`. Автостворення (`Creates`) бере вікно в `RegistrySyncCreate.Validity`.
+- **Запис:** `RegistryEntryWrite.Validity` / `RegistryEntryUpdate.Validity` (`null` — не змінювати). Writer
+  ставить вікно (`RegistryEntry.SetValidity`) **до** звірки ключів пакета; фактична зміна — у тій самій події
+  аудиту `RegistryValueChanged` полем `@validity` (`"[2024-01-01, 2025-01-01)"`); порожнє вікно — помилка
+  рядка `err.validityWindowEmpty`, нічого не записано.
+- **Осиротілі рядки:** після збереження, у тій самій транзакції, `IOrphanScanner.RescanForEntryAsync` для кожного
+  запису зі зміненим вікном (ФВ-8.13a, як `SetEntryValidityHandler`): звуження ставить `IsOrphaned` рядкам поза
+  датою, розширення — знімає. Новий ввід поза вікном і далі відхиляє `PatchCellsHandler`
+  (`ECR-CELL-4223 entryNotValidOnDate`).
+- **Тексти:** секція `COLL:d212-dates` у `09-seed.sql` (en), ru/kz — порція `#I18N`.
+- Тести: `RegistryEntryWriterSyncTests` (+4), `RegistrySyncValidityTests` (25 випадків),
+  `RegistrySyncValidityJobTests` (SQL), `SourceRegistryPolicyEndpointTests`.
+- ⚠ **Не підтверджено:** чи `Actual_End_Date` в AF — останній день дії чи перший після (відкрите питання
+  PI-адміністратору, TESTER-GUIDE §7.3) — від цього залежить, чи вмикати `ValidToInclusive`.
+
+### 5.6 D-212 PR-8 — інтерфейс політики синку (2026-09-30)
+
+Коміти `8cf386ee`, `0e8b6fcc`, `a2a19d35`, `1d93d5cb`, `408231d3` (стилі форми), документація `d0b9e7ed`,
+`825b0898`.
 
 - **Де:** `/admin/sources` → шухляда з'єднання → вкладка **Entities** → колонка «Sync policy»: кнопка
   лише в прив'язаної до довідника сутності й лише з правом, дзеркальним серверному
@@ -331,7 +375,7 @@ HSE301).
 | RSQ-10 | Чи переносити наявні GUID із `Configuration!J3` (S11) | ні, доки не підтверджено |
 
 ✎ 2026-09-30, `D-212`: **RSQ-6** — тепер налаштування сутності, а не дефолт коду: політика
-`MarkOrphaned`/`Ignore`/`Deactivate` у UI (§5.5), типова `MarkOrphaned`. **RSQ-7** — для `External`
+`MarkOrphaned`/`Ignore`/`Deactivate` у UI (§5.6), типова `MarkOrphaned`. **RSQ-7** — для `External`
 запис створюється синком (`Creates`, §4.1), для `Hybrid`/`Local` лишається подія `RegistryElementUnlinked`.
 
 ## 8. Ризики
