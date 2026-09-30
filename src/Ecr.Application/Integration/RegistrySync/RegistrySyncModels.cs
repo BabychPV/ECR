@@ -60,10 +60,20 @@ public sealed record RegistrySyncCurrentValue(object? Value, bool LastWriterIsHu
 /// <param name="RegistryEntryId">Запис довідника.</param>
 /// <param name="Values">Поточні значення за <c>RegistryFieldDefId</c>; поля без значення можна не передавати.</param>
 /// <param name="IsActive">Запис увімкнено (<c>RegistryEntry.IsActive</c>); вимкнений — кандидат на повернення (<c>D-212</c> Q6).</param>
+/// <param name="ValidFrom">Поточний початок вікна дії (<c>RegistryEntry.ValidFrom</c>).</param>
+/// <param name="ValidTo">Поточний виключний кінець вікна дії (<c>RegistryEntry.ValidTo</c>).</param>
+/// <param name="WindowLastWriterIsHuman">
+/// Рядок запису останньою змінювала людина (<c>RegistryEntry.ChangedByUserId</c> — не
+/// <c>svc-integration</c> або невідомий): у <c>Hybrid</c> вікно тоді не перезаписується
+/// (<c>D-118</c>, <c>D-212</c> (2)). Для <c>External</c> не діє.
+/// </param>
 public sealed record RegistrySyncEntryState(
     long RegistryEntryId,
     IReadOnlyDictionary<int, RegistrySyncCurrentValue> Values,
-    bool IsActive = true);
+    bool IsActive = true,
+    DateOnly? ValidFrom = null,
+    DateOnly? ValidTo = null,
+    bool WindowLastWriterIsHuman = false);
 
 /// <summary>Мапінг «атрибут джерела → поле довідника» (<c>ext.EntityFieldMap</c>, <c>ФВ-8.11</c>).</summary>
 /// <param name="RegistryFieldDefId">Поле довідника.</param>
@@ -123,6 +133,10 @@ public sealed record RegistrySyncLookupCode(int RegistryDefId, string Code);
 /// Що робити з записом, чий елемент зник із ПОВНОГО знімка
 /// (<c>ext.SourceEntity.OnMissingInSource</c>, <c>D-212</c> (3), Q5).
 /// </param>
+/// <param name="Validity">
+/// Вікно дії з атрибутів AF (<c>D-212</c> (8), PR-7); <c>null</c> — вікно не синхронізується
+/// (мапінг дат вимкнений — дефолт, або довідник не темпоральний).
+/// </param>
 public sealed record RegistrySyncInput(
     int RegistryDefId,
     RegistrySourceKind SourceKind,
@@ -133,7 +147,8 @@ public sealed record RegistrySyncInput(
     IReadOnlyList<RegistrySyncFieldMapping> Mappings,
     IReadOnlyDictionary<int, IReadOnlyDictionary<string, long>>? LookupCodes = null,
     RegistryCodeMode CodeMode = RegistryCodeMode.Manual,
-    RegistryMissingPolicy OnMissingInSource = RegistryMissingPolicy.MarkOrphaned);
+    RegistryMissingPolicy OnMissingInSource = RegistryMissingPolicy.MarkOrphaned,
+    RegistrySyncValiditySource? Validity = null);
 
 /// <summary>Одна зміна поля, яку синк має записати через <c>RegistryEntryWriter</c>.</summary>
 /// <param name="RegistryEntryId">Запис довідника.</param>
@@ -181,7 +196,11 @@ public sealed record RegistrySyncCreate(
     string? ExternalPath,
     string? Code,
     string DisplayName,
-    IReadOnlyList<RegistrySyncFieldValue> Values);
+    IReadOnlyList<RegistrySyncFieldValue> Values)
+{
+    /// <summary>Вікно дії з атрибутів AF (<c>D-212</c> PR-7); <c>null</c> — без обмеження.</summary>
+    public Ecr.Domain.ValueObjects.ValidityWindow? Validity { get; init; }
+}
 
 /// <summary>
 /// Зв'язок <c>dic.RegistryExternalKey</c>, на якому треба поставити
@@ -307,8 +326,12 @@ public sealed record RegistrySyncPlan(
     /// <summary><c>External</c>: увімкнути запис, чий елемент повернувся (<c>D-212</c> Q6).</summary>
     public IReadOnlyList<RegistrySyncActivation> Reactivations { get; init; } = [];
 
+    /// <summary>Змінити вікно дії записів (<c>D-212</c> PR-7; <c>External</c>/<c>Hybrid</c>).</summary>
+    public IReadOnlyList<RegistrySyncValidityChange> ValidityChanges { get; init; } = [];
+
     /// <summary>Нічого писати й нічого повідомляти — ідемпотентний прогін.</summary>
     public bool IsEmpty => Updates.Count == 0 && PathChanges.Count == 0 && Events.Count == 0
                            && Creates.Count == 0 && Relinks.Count == 0 && MissingMarks.Count == 0
-                           && MissingClears.Count == 0 && Deactivations.Count == 0 && Reactivations.Count == 0;
+                           && MissingClears.Count == 0 && Deactivations.Count == 0 && Reactivations.Count == 0
+                           && ValidityChanges.Count == 0;
 }

@@ -5,6 +5,7 @@ using Ecr.Application.Documents;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Dictionaries;
 using Ecr.Domain.Enums;
+using Ecr.Domain.ValueObjects;
 
 namespace Ecr.Application.Integration.RegistrySync;
 
@@ -127,6 +128,7 @@ public static class RegistrySyncPlanner
         var clears = new List<RegistrySyncLinkMark>();
         var deactivations = new List<RegistrySyncActivation>();
         var reactivations = new List<RegistrySyncActivation>();
+        var windows = new List<RegistrySyncValidityChange>();
 
         // D-212 (7): зіставлення за ExternalPath — ДО обходу елементів: інакше кандидат
         // став би «новим» (автостворення в External — дубль запису). Лише повний знімок:
@@ -207,6 +209,8 @@ public static class RegistrySyncPlanner
             {
                 PlanField(input, element, entry, mapping, updates, events);
             }
+
+            PlanWindow(input, element, entry, windows, events);
         }
 
         if (input.IsCompleteSnapshot)
@@ -242,7 +246,48 @@ public static class RegistrySyncPlanner
             MissingClears = clears,
             Deactivations = deactivations,
             Reactivations = reactivations,
+            ValidityChanges = windows,
         };
+    }
+
+    /// <summary>
+    /// Вікно дії прив'язаного запису з атрибутів AF (<c>D-212</c> (8), PR-7) — за тією ж політикою
+    /// <see cref="RegistrySourceKind"/>, що й поле з активним мапінгом.
+    /// </summary>
+    /// <remarks>
+    /// <c>Local</c> — розбіжність подією <see cref="RegistrySyncEventKind.Diverged"/>; <c>Hybrid</c>, де
+    /// рядок запису останньою правила людина, — <see cref="RegistrySyncEventKind.ConflictKeptManual"/>;
+    /// інакше — <see cref="RegistrySyncPlan.ValidityChanges"/>.
+    /// </remarks>
+    private static void PlanWindow(
+        RegistrySyncInput input,
+        RegistrySyncSourceElement element,
+        RegistrySyncEntryState entry,
+        List<RegistrySyncValidityChange> windows,
+        List<RegistrySyncEvent> events)
+    {
+        var current = new ValidityWindow(entry.ValidFrom, entry.ValidTo);
+        if (RegistrySyncValidity.Plan(input.Validity, element, current, entry.RegistryEntryId, events) is not { } window)
+        {
+            return;
+        }
+
+        var kind = input.SourceKind switch
+        {
+            RegistrySourceKind.Local => RegistrySyncEventKind.Diverged,
+            RegistrySourceKind.Hybrid when entry.WindowLastWriterIsHuman => RegistrySyncEventKind.ConflictKeptManual,
+            _ => (RegistrySyncEventKind?)null,
+        };
+
+        if (kind is { } eventKind)
+        {
+            events.Add(new RegistrySyncEvent(
+                eventKind, element.ExternalId, entry.RegistryEntryId, RegistrySyncValidity.WindowFieldCode,
+                RegistrySyncValidity.Text(current), RegistrySyncValidity.Text(window)));
+            return;
+        }
+
+        windows.Add(new RegistrySyncValidityChange(entry.RegistryEntryId, element.ExternalId, current, window));
     }
 
     /// <summary>
@@ -391,7 +436,11 @@ public static class RegistrySyncPlanner
         }
 
         var code = input.CodeMode == RegistryCodeMode.Auto ? null : name;
-        return new RegistrySyncCreate(element.ExternalId, element.ExternalPath, code, name, values);
+
+        // D-212 PR-7: вікно дії нового запису — з атрибутів; невалідна дата — подія, межа відкрита.
+        var window = RegistrySyncValidity.Plan(input.Validity, element, ValidityWindow.Always, null, events);
+
+        return new RegistrySyncCreate(element.ExternalId, element.ExternalPath, code, name, values) { Validity = window };
     }
 
     private static void PlanField(
