@@ -4395,6 +4395,8 @@ USING (VALUES
     (N'workflow.submitAnyway',                  N'en', N'Submit anyway', 1),
     -- ФВ-1.11: розбіжність періоду на шляху запису комірок — `ECR-PRD-0422` (було `ECR-REQ-0422.periodMismatch`, `PatchCellsHandler.EnsurePeriodMatches`).
     (N'err.ECR-PRD-0422.periodMismatch',        N'en', N'The period {periodKey} in the request does not match period {expectedPeriodKey} of table instance {tableInstanceId}.', 1),
+    -- ФВ-5.9: правило валідації бачить лише свою таблицю за поточний період (`RuleExpressionChecks`, збереження й публікація).
+    (N'expr.ruleReferenceUnsupported',          N'en', N'A validation rule sees only its own table for the current period: the reference {reference} to another table, sheet or period is not supported.', 1),
     -- ru/kz — окремою порцією `COLL:req-g2` у блоці I18N нижче.
     -- COLL:req-g2 ── кінець секції ──
     (N'health.sources.notRegistered',          N'en', N'The collection store is not registered in the container.', 1),

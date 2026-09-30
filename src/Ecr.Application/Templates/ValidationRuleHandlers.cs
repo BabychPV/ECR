@@ -104,6 +104,10 @@ public sealed class SaveValidationRuleHandler(
             formulaEngine, version, command.Expression, ExpressionDialect.Template,
             new ExpressionSite(table.Id, null, command.ColumnDefId));
 
+        // ⛔ ФВ-5.9: посилання на іншу таблицю/аркуш/період контекст правила читає
+        // не тим, чим воно є, — відмова на збереженні, а не тиха неправда в рантаймі.
+        RuleExpressionChecks.RequireSupportedReferences(formulaEngine, command.Expression);
+
         var ecrCode = EcrCode.Create(code);
         var message = new LocalizedText(new Dictionary<string, string>(command.MessageL10n, StringComparer.OrdinalIgnoreCase));
 
