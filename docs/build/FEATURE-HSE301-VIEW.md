@@ -1925,8 +1925,16 @@ FEATURE-REGISTRY-TABLES (`IRegistrySnapshotLoader`, §5.7, `RT-22`), а не в�
   констант / 6506 значень; `!`-посилань 3746 (265 через межу — збіг із 149+116 з `open-questions-pi-admin`),
   `CST.` 7974 (у Common: Flert 821, HSE400 1269, Thermaloxidizer 1188; у файлі питань було 3276 — розбіжність 2 не
   розібрана); нерезолвних 17 (6 різних токенів), циклів 0. Блокер лишається: імпорт по червоному не робити.
-- **Не зроблено:** `export` пакета `ecr-methodology-package v1`, запис у БД (`POST /methodologies/import?dryRun`
-  у продукті ще немає), розбір дат, порядок формул (B13 §7 крок 6), правила (`Rules`), налаштування (`Settings`).
+- **`export <AF.xml> --out package.json [--allow-blockers]`** пише пакет `ecr-methodology-package` v1 (без запису в БД,
+  детермінований; на справжньому файлі 3.4 МБ). ⚠ Схему пакета ввів цей інструмент (раніше її ніде не було) —
+  її треба узгодити зі споживачем (крок V, `POST /methodologies/import?dryRun`): `{format, version: 1, library,
+  methodologies: [{name, versions: [{version, formulas: [{name, version, arguments, text, startDate, endDate,
+  isAvailable, report}], constants: [{name, parameter, unit, values: [{category, version, value, startDate,
+  endDate}]}]}]}], blockers: []}`. Дати — рядки AF як є (пояс і півінтервал `[from, to)` вирішує імпортер).
+  За наявності блокерів пакет не пишеться (код 2); `--allow-blockers` пише його з непорожнім `blockers`, і
+  імпортер зобов'язаний відмовити.
+- **Не зроблено:** запис у БД (`POST /methodologies/import?dryRun` у продукті ще немає), розбір дат, порядок
+  формул (B13 §7 крок 6), правила (`Rules`, 321 елемент), налаштування (`Settings`).
 
 ---
 
