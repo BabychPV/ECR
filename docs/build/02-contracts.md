@@ -3593,6 +3593,72 @@ public sealed class NotFoundException(string errorCode, string message)
 | `ECR-SIM-4031` | 403 | ціль «View as» (`Security.Simulate`) заборонена політикою (`D-210`): bootstrap-адміністратор (`bootstrapTarget`) або власник хоча б одного небезпечного права `sec.Permission.IsDangerous` з будь-якого чинного чи майбутнього особистого призначення, з областю чи без (`dangerousTarget`; групові призначення чужого запису невідомі — `P-02` — і в профіль сеансу не входять); сеанс не відкривається, спроба пишеться подією `SimulationDenied`. Константа каталогу — `ErrorCodes.SimulationTargetForbidden` |
 | `ECR-TMPL-4091` | 409 | відв'язка (`PUT …/bindings/…`, `isActive=false`) забрала б у колонки типу `Formula` опублікованої (`Published`/`Deprecated`) версії шаблону останнє джерело — ні формули шаблону, ні іншої активної прив'язки (HSE301 C5b, `D-215`, `lastSourceOfPublishedColumn`); джерела рахуються ПІСЛЯ зміни під блоком версії, тож заміна «прив'язати нове → відв'язати старе» проходить. Константа — `ErrorCodes.LastSourceOfPublishedColumn` |
 
+### 7.1 Суфікси `messageKey` (`err.<код>.<суфікс>`) нових випадків
+
+Код у таблиці вище лишається стабільним; випадок каже суфікс `messageKey`
+(ключ каталогу `err.<код>.<суфікс>` у `09-seed.sql`, en/ru/kz). Тут — суфікси,
+додані після `c6f6ff44` (enterprise-прохід №2, зауваження 7). Рядок — на суфікс;
+колонка першою не починається з `` `ECR-… ` ``, тому сторож §7 (код ↔ `src/`) їх не
+рахує як коди.
+
+| `messageKey` | HTTP | Коли |
+|---|---|---|
+| `err.ECR-CALC-0422.methodologyImportBlocked` | 422 | пакет методологій має блокери (нерезолвні посилання тощо) — запис не виконується (`POST /methodologies/import`) |
+| `err.ECR-CALC-0422.methodologyImportTimeZone` | 422 | пояс дат AF в імпорті пакета невідомий |
+| `err.ECR-CALC-0409.methodologyImportConflict` | 409 | пакет змінює вже наявну версію методології без нового номера версії |
+| `err.ECR-CELL-0422.importPrecision` | 422 | імпорт `.xlsx`: значення після округлення до `Scale` не вміщується в `Precision` колонки (ФВ-9.16b) |
+| `err.ECR-CFG-0422.condFormatColor` | 422 | правило умовного форматування: колір не у форматі `#rrggbb` |
+| `err.ECR-CFG-0422.condFormatColumn` | 422 | правило умовного форматування посилається на неіснуючу колонку таблиці |
+| `err.ECR-CFG-0422.condFormatLimit` | 422 | правил умовного форматування більше за ліміт (500) |
+| `err.ECR-CFG-0422.condFormatOperand` | 422 | операнд правила не відповідає оператору чи типу колонки (нечислове значення, верхня межа менша за нижню) |
+| `err.ECR-CFG-0422.condFormatOperator` | 422 | невідомий оператор умовного форматування |
+| `err.ECR-REQ-0422.condFormatIfMatch` | 422 | `PUT …/conditional-formats` без `If-Match` (зміну випадку «змінили між читанням і записом» дає `ECR-TMPL-0409 condFormatChanged`) |
+| `err.ECR-DOC-0409.migrateProjectArchived` | 409 | перенос документів на нову версію шаблону: проєкт в архіві (ФВ-7.5) |
+| `err.ECR-DOC-0409.migrateSheetsLocked` | 409 | перенос версії: у проєкті є подані/затверджені аркуші |
+| `err.ECR-SCHM-0422.migrateDataLoss` | 422 | перенос версії в режимі `Safe` втратив би дані |
+| `err.ECR-SCHM-0422.migrateStructural` | 422 | перенос версії в режимі `Presentation` відхилено через структурну зміну |
+| `err.ECR-TMPL-0422.migrateOtherTemplate` | 422 | цільова версія належить іншому шаблону |
+| `err.ECR-TMPL-0422.migrateSameVersion` | 422 | цільова версія збігається з поточною |
+| `err.ECR-TMPL-0422.migrateTargetNotPublished` | 422 | цільова версія не опублікована |
+| `err.ECR-TMPL-0422.ordinalInvalid` | 422 | порядковий номер колонки (перестановка в конструкторі) поза допустимим діапазоном |
+| `err.ECR-INT-0404.eventMap` | 404 | мапінг подій PI (`source-event-maps`) не знайдено |
+| `err.ECR-INT-0404.rowWindowMap` | 404 | прив'язку вікна рядка (`row-window-maps`) не знайдено |
+| `err.ECR-INT-0405.registryEntry` | 404 | запис довідника, на який вказує ціль мапінгу, не існує |
+| `err.ECR-INT-0409.eventMapColumnTaken` | 409 | колонка таблиці вже зайнята іншим мапінгом подій |
+| `err.ECR-INT-0409.eventMapExists` | 409 | мапінг подій для цієї пари документ–таблиця вже існує |
+| `err.ECR-INT-0409.eventMapHasLinks` | 409 | видалення мапінгу подій, за яким уже синхронізовано рядки (вихід — пауза `isActive=false`) |
+| `err.ECR-INT-0409.eventMapSourceValueTaken` | 409 | значення джерела в `ValueMap` повторюється |
+| `err.ECR-INT-0409.rowWindowConcurrency` | 409 | прив'язку вікна рядка змінено іншим після читання (`rowVersion`) |
+| `err.ECR-INT-0409.rowWindowMapHasValues` | 409 | видалення прив'язки вікна рядка, за якою вже накопичено значення (вихід — пауза) |
+| `err.ECR-INT-0409.rowWindowTargetTaken` | 409 | колонка-ціль уже має прив'язку вікна рядка |
+| `err.ECR-INT-0422.eventLinkTransitionInvalid` | 422 | недопустимий перехід стану зв'язку «подія ↔ рядок» |
+| `err.ECR-INT-0422.eventMapColumnNotInTable` | 422 | колонка мапінгу подій не належить таблиці |
+| `err.ECR-INT-0422.eventMapFilterIncomplete` | 422 | фільтр звуження мапінгу подій заповнено не повністю |
+| `err.ECR-INT-0422.eventMapReservedAttributeInvalid` | 422 | службовий атрибут мапінгу (`$start`/`$end` тощо) вказано неправильно |
+| `err.ECR-INT-0422.eventMapStartEndNotDate` | 422 | `$start`/`$end` прив'язані до колонок не типу Date |
+| `err.ECR-INT-0422.eventMapStartEndRequired` | 422 | мапінг подій без `$start` і `$end` |
+| `err.ECR-INT-0422.eventMapTableNotInDocument` | 422 | таблиця мапінгу подій не входить до документа |
+| `err.ECR-INT-0422.eventMapTargetNotDynamic` | 422 | ціль мапінгу подій — не динамічна таблиця |
+| `err.ECR-INT-0422.eventMapValueKindMismatch` | 422 | тип значення атрибута не відповідає типу колонки |
+| `err.ECR-INT-0422.eventMapValueMapNotAllowed` | 422 | `ValueMap` недопустимий для цього типу колонки |
+| `err.ECR-INT-0422.eventSyncNoMap` | 422 | «Отримати з PI зараз» без активного мапінгу подій |
+| `err.ECR-INT-0422.rowWindowTargetNotInTable` | 422 | колонка-ціль вікна рядка не належить таблиці |
+| `err.ECR-REQ-0422.probeEventsInvalid` | 422 | параметри проби подій (`probe-events`) поза межами |
+| `err.ECR-REQ-0422.rowWindowSourceInvalid` | 422 | джерело прив'язки вікна рядка задано невалідно |
+| `err.ECR-REQ-0422.rowWindowSummaryUnknown` | 422 | невідомий режим підсумовування прив'язки вікна рядка |
+| `err.ECR-REG-0422.impactDocumentNotAffected` | 422 | документ не входить до впливу правки довідника (також документ закритого періоду) |
+| `err.ECR-REG-0422.impactNothingToRecalculate` | 422 | перерахунок за впливом довідника: нічого перераховувати |
+| `err.ECR-REQ-0422.impactReasonRequired` | 422 | перерахунок за впливом довідника без причини |
+| `err.ECR-REQ-0422.impactReasonTooLong` | 422 | причина перерахунку довша за 400 символів |
+| `err.ECR-REG-0422.unitCodeUnknown` | 422 | CSV-імпорт записів довідника: невідомий код одиниці |
+| `err.ECR-REQ-0422.batchItemNewOnly` | 422 | елемент пакета `POST …/entries/batch` дозволяє лише створення |
+| `err.ECR-REQ-0422.registryExportFormatUnknown` | 422 | формат експорту довідника не `csv`/`xlsx` |
+| `err.ECR-REQ-0422.registryExportTooLarge` | 422 | експорт довідника більший за `Registries:ExportMaxRows` |
+| `err.ECR-REQ-0422.registryRowsIdsTooMany` | 422 | у запиті рядків довідника забагато ідентифікаторів |
+| `err.ECR-REQ-0422.effectiveAccessResource` | 422 | розріз ефективного доступу: невідомий тип ресурсу чи ідентифікатор без типу |
+| `err.ECR-REQ-0422.reportPublishReason` | 422 | публікація версії звіту без причини |
+| `err.ECR-REQ-0422.validationScope` | 422 | область виконання перевірок (validation) задано невалідно |
+
 ---
 
 <a id="api-conventions"></a>
