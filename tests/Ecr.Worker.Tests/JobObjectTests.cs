@@ -75,27 +75,54 @@ public sealed class JobObjectTests
         using var job = JobObject.Create(limits);
         try
         {
-            first = Start(Command("--child", "--eat-mb", "150"));
-            job.Assign(first);
-            second = Start(Command("--child", "--eat-mb", "150"));
-            job.Assign(second);
+            // ⚠ Послідовно, а не разом. Коли обидва їли одночасно, стелю пулу міг
+            // зачепити будь-який коміт будь-якого з двох — і не лише масив у
+            // EatOrExit, а й сторінку стека чи службову пам'ять рантайму. Тоді
+            // процес падав не з ExitOutOfMemory, а з STATUS_STACK_OVERFLOW
+            // (-1073741571 = 0xC00000FD; CI worker (windows), runs 36661226035,
+            // 36663774685). Перший спершу досягає свого обсягу й затихає;
+            // понад стелю тоді виходить лише другий — і саме на масиві.
+            first = job.Start(Command("--child", "--eat-mb", "150"));
+            WaitSettled(first, 150 * Megabyte);
 
-            // ⛔ Без JOB_OBJECT_LIMIT_JOB_MEMORY обидва живуть.
-            var deadline = Stopwatch.StartNew();
-            while (!first.HasExited && !second.HasExited && deadline.Elapsed < TimeSpan.FromSeconds(30))
-            {
-                Thread.Sleep(100);
-            }
+            second = job.Start(Command("--child", "--eat-mb", "150"));
 
-            var fallen = first.HasExited ? first : second;
-            Assert.True(fallen.HasExited, "один із процесів мав упертися в стелю пулу");
-            Assert.Equal(ChildStub.ExitOutOfMemory, fallen.ExitCode);
+            // ⛔ Без JOB_OBJECT_LIMIT_JOB_MEMORY другий теж живе (150 + рантайм < 256
+            // на процес) — тоді тут червоне.
+            Assert.True(second.WaitForExit(30_000), "другий процес мав упертися в стелю пулу");
+            Assert.Equal(ChildStub.ExitOutOfMemory, second.ExitCode);
+            Assert.False(first.HasExited, "перший у своїй межі й під стелею пулу мав лишитися живим");
         }
         finally
         {
             Kill(first);
             Kill(second);
         }
+    }
+
+    /// <summary>
+    /// Чекає, доки процес закомітить щонайменше <paramref name="bytes"/> і перестане
+    /// рости (два заміри поспіль без приросту понад 1 МБ).
+    /// </summary>
+    private static void WaitSettled(Process process, long bytes)
+    {
+        var deadline = Stopwatch.StartNew();
+        var previous = -1L;
+        while (deadline.Elapsed < TimeSpan.FromSeconds(30))
+        {
+            Assert.False(process.HasExited, $"процес завершився до стелі пулу з кодом {(process.HasExited ? process.ExitCode : 0)}");
+            process.Refresh();
+            var now = process.PrivateMemorySize64;
+            if (now >= bytes && now - previous < Megabyte)
+            {
+                return;
+            }
+
+            previous = now;
+            Thread.Sleep(200);
+        }
+
+        Assert.Fail($"процес не закомітив {bytes / Megabyte} МБ за 30 с");
     }
 
     [Fact]
