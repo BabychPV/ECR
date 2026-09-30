@@ -72,7 +72,13 @@ public sealed partial class ExceptionHandlingMiddleware(
 
         var (status, code, message, details) = Map(exception);
 
-        if (status >= StatusCodes.Status500InternalServerError)
+        // ФВ-12.7: ecr.conflict.count — один раз на запит (сюди доходить вже фінальний виняток).
+        if (exception is ConcurrencyConflictException)
+        {
+            context.RequestServices.GetService<Observability.EcrMetrics>()?.RecordConflict();
+        }
+
+        if (status >=StatusCodes.Status500InternalServerError)
         {
             // Стек іде В ЛОГ, і тільки туди. Клієнт отримує CorrelationId —
             // цього досить, щоб знайти цей самий запис.
