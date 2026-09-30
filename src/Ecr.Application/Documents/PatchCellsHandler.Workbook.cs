@@ -223,7 +223,9 @@ public sealed partial class PatchCellsHandler
         await EnsureWorkbookReferencesAsync(active, previous, Bounds, ct).ConfigureAwait(false);
 
         var now = clock.UtcNow;
-        var isLateEdit = await DetermineIsLateEditAsync(documentId, period.Value, ct).ConfigureAwait(false);
+        var isLateEdit = await DetermineIsLateEditAsync(
+                documentId, [.. active.Select(x => x.Context.Table.SheetDefId).Distinct()], period.Value, ct)
+            .ConfigureAwait(false);
 
         await uow.ExecuteInTransactionAsync(
             innerCt => PersistWorkbookAsync(

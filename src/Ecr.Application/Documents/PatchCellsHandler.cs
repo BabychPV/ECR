@@ -138,7 +138,8 @@ public sealed partial class PatchCellsHandler(
         await EnsureUnitReferencesExistAsync(context, changes, ct).ConfigureAwait(false);
 
         var now = clock.UtcNow;
-        var isLateEdit = await DetermineIsLateEditAsync(context.Instance.DocumentId, request.PeriodKey, ct)
+        var isLateEdit = await DetermineIsLateEditAsync(
+                context.Instance.DocumentId, [context.Table.SheetDefId], request.PeriodKey, ct)
             .ConfigureAwait(false);
 
         // ⚠ `BE-05`: ідентифікатор поставленої задачі їде клієнтові у відповіді.
@@ -1975,15 +1976,26 @@ public sealed partial class PatchCellsHandler(
     /// колонки: він відповідає на питання, і відповідає неправдою.
     /// </summary>
     /// <remarks>
-    /// ⚠ <c>Reopen</c> теж сюди входить: він переводить період саме в
-    /// <c>Grace</c> (<c>Period.Reopen</c>), тому окремої умови не потрібно.
+    /// ⚠ <c>Reopen</c> ПЕРІОДУ входить сюди сам: він переводить період у
+    /// <c>Grace</c> (<c>Period.Reopen</c>). А <c>Reopen</c> АРКУША (ФВ-5.20a,
+    /// <c>D-70</c> б) період не чіпає — він лишається <c>Open</c>, тож окрема
+    /// умова: аркуш відкрито й відтоді не затверджено знову
+    /// (<see cref="IPeriodStore.HasReopenedSheetAsync"/>).
     /// </remarks>
-    private async Task<bool> DetermineIsLateEditAsync(long documentId, int periodKeyValue, CancellationToken ct)
+    private async Task<bool> DetermineIsLateEditAsync(
+        long documentId, IReadOnlyCollection<int> sheetDefIds, int periodKeyValue, CancellationToken ct)
     {
         var periodState = await periods
             .FindPeriodStateAsync(documentId, periodKeyValue, ct)
             .ConfigureAwait(false);
-        return periodState == PeriodState.Grace;
+        if (periodState == PeriodState.Grace)
+        {
+            return true;
+        }
+
+        return await periods
+            .HasReopenedSheetAsync(documentId, sheetDefIds, periodKeyValue, ct)
+            .ConfigureAwait(false);
     }
 
     /// <summary>

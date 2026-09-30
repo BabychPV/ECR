@@ -379,6 +379,10 @@ public sealed class ReopenPeriodTransactionTests(SqlServerFixture sql)
 
         public Task<PeriodState?> FindPeriodStateAsync(long documentId, int periodKey, CancellationToken ct)
             => inner.FindPeriodStateAsync(documentId, periodKey, ct);
+
+        public Task<bool> HasReopenedSheetAsync(
+            long documentId, IReadOnlyCollection<int> sheetDefIds, int periodKey, CancellationToken ct)
+            => inner.HasReopenedSheetAsync(documentId, sheetDefIds, periodKey, ct);
     }
 
     /// <summary>
