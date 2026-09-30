@@ -145,7 +145,7 @@ Draft ──Submit──→ Submitted ──Approve──→ Approved
 |---|---|
 | `aud.CellChange` | старе/нове значення, автор, час, джерело зміни |
 | `aud.StructureChange` | зміни метаданих і адміністративні дії |
-| `aud.AccessDenied` | відмови в доступі з причиною і ресурсом (ФВ-5.24) |
+| подія `AccessDenied` в `aud.SecurityEvent` | відмови в доступі з причиною і ресурсом (ФВ-5.24, `D-225`) |
 
 - Автор — **`ChangedByUserId` → `sec.User(Id)`**, не SID (D-37, D-86): у
   локальних користувачів SID немає взагалі.
