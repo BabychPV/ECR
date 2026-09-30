@@ -524,7 +524,26 @@ public sealed class MethodologyPublishTests
     };
 
     private PublishMethodologyHandler Handler()
-        => new(_module, _store, new RealFormulaEngine(), _bindings, _uow, _audit, _access, _user, _clock);
+        => new(
+            _module, _store, new RealFormulaEngine(), _bindings, MassUnits(), _uow, _audit, _access, _user, _clock);
+
+    /// <summary>
+    /// Довідник одиниць із <c>kg</c> і <c>g</c>: набір пише <c>CONVERT(!MassKg, 'kg', 'g')</c>, і
+    /// перевірка одиниць при публікації (ФВ-16.6) резолвить обидва коди. Самі одиниці тут не
+    /// предмет — їх веде <c>MethodologyUnitPublishTests</c>.
+    /// </summary>
+    private static IUnitCatalog MassUnits()
+    {
+        var units = Substitute.For<IUnitCatalog>();
+        units.GetAsync(Arg.Any<CancellationToken>()).Returns(new UnitCatalogSnapshot(
+            new Dictionary<string, UnitRef>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["kg"] = new(1, "kg", 1),
+                ["g"] = new(2, "g", 1, 0.001m),
+            },
+            new Dictionary<string, int>(StringComparer.Ordinal)));
+        return units;
+    }
 
     private MethodologyVersion AddVersion(int id, string number)
     {

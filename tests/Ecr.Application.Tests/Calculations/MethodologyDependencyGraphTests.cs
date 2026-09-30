@@ -200,7 +200,16 @@ public sealed class MethodologyDependencyGraphTests
     // ─────────────────────────────────────────────────────────────────────────
 
     private PublishMethodologyHandler Handler()
-        => new(_module, _store, _formulas, _bindings, _uow, _audit, _access, _user, _clock);
+        => new(
+            _module, _store, _formulas, _bindings, EmptyUnits(), _uow, _audit, _access, _user, _clock);
+
+    /// <summary>Порожній довідник одиниць: одиниці тут не предмет (їх веде <c>MethodologyUnitPublishTests</c>).</summary>
+    private static IUnitCatalog EmptyUnits()
+    {
+        var units = Substitute.For<IUnitCatalog>();
+        units.GetAsync(Arg.Any<CancellationToken>()).Returns(UnitCatalogSnapshot.Empty);
+        return units;
+    }
 
     /// <summary>Профіль із небезпечним правом публікації методології.</summary>
     private static AccessProfile Profile() => new()

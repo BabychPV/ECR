@@ -86,8 +86,11 @@ public sealed class LibraryPublishGoldenTests
         var clock = Substitute.For<IClock>();
         clock.UtcNow.Returns(Now);
 
+        var units = Substitute.For<IUnitCatalog>();
+        units.GetAsync(Arg.Any<CancellationToken>()).Returns(UnitCatalogSnapshot.Empty);
+
         var handler = new PublishMethodologyHandler(
-            stand.Module(), stand.Store, new RealFormulaEngine(), bindings,
+            stand.Module(), stand.Store, new RealFormulaEngine(), bindings, units,
             Substitute.For<IUnitOfWork>(), Substitute.For<IAuditWriter>(), access, user, clock);
 
         // Червоний золотий набір тут кинув би goldenSetDiverged з обома числами.
