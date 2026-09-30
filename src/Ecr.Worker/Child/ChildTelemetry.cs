@@ -75,7 +75,6 @@ internal static class ChildTelemetry
             configuration["Telemetry:ExportIntervalSeconds"], NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed)
             ? Math.Max(parsed, MinExportIntervalSeconds)
             : DefaultExportIntervalSeconds;
-        var serviceName = configuration["Telemetry:WorkerServiceName"];
 
         services.Configure<OtlpExporterOptions>(o =>
         {
@@ -85,7 +84,7 @@ internal static class ChildTelemetry
         services.Configure<MetricReaderOptions>(r =>
             r.PeriodicExportingMetricReaderOptions.ExportIntervalMilliseconds = interval * 1000);
         services.AddOpenTelemetry()
-            .ConfigureResource(r => r.AddService(string.IsNullOrWhiteSpace(serviceName) ? DefaultServiceName : serviceName.Trim()))
+            .ConfigureResource(r => r.AddService(DefaultServiceName))
             .WithMetrics(m => m.AddMeter(Ecr.Infrastructure.Observability.InfrastructureMetrics.MeterName).AddOtlpExporter());
         return services;
     }
