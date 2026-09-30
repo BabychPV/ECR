@@ -24,6 +24,9 @@ export const SourceEventsKeys = {
   /** Префікс усіх сторінок і фільтрів подій сутності — для інвалідації після синку й правки мапінгу. */
   eventsOf: (sourceEntityId: number) => ['source-events', 'events', sourceEntityId] as const,
   maps: (sourceEntityId: number) =>['source-events', 'maps', sourceEntityId] as const,
+  /** Префікс усіх переліків прив'язок вікна рядка — для інвалідації після збереження, паузи, видалення. */
+  rowWindowMapsAll: ['source-events', 'row-window-maps'] as const,
+  rowWindowMaps: (sourceEntityId: number) => ['source-events', 'row-window-maps', sourceEntityId] as const,
   templates: (dataSourceId: number) => ['source-events', 'templates', dataSourceId] as const,
   documents: ['source-events', 'documents'] as const,
   tables: (documentId: number) => ['source-events', 'tables', documentId] as const,
