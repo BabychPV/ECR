@@ -56,6 +56,7 @@ public static partial class EcrConfigurationValidation
         ("Audit:ExportMaxRows", 1),
         ("Localization:ImportMaxBytes", 1),
         ("Registries:ImportMaxBytes", 1),
+        ("Registries:ExportMaxRows", 1),
         ("Campaign:AtRiskDays", 0),
         ("Integration:CatalogTimeoutSeconds", 1),
         ("Logging:File:RetainedFiles", 1),
