@@ -54,8 +54,9 @@ public sealed class SchemaIncompatibleException : InvalidOperationException
 /// — непідтримувана редакція/версія, рівень сумісності бази нижче 130,
 /// незастосовані міграції в Validate, база
 /// новіша за збірку, немає файлових груп, функцій чи схем партиціонування.
-/// Попередження (<see cref="Warnings"/>) — вимкнений RCSI, чутливе до регістру
-/// зіставлення, запас партицій менше двох: це виправляє DBA, не застосунок.
+/// Критично без зупинки (<see cref="Critical"/>) — вимкнений RCSI (D-102).
+/// Попередження (<see cref="Warnings"/>) — чутливе до регістру зіставлення, запас
+/// партицій менше двох: це виправляє DBA, не застосунок.
 /// Викликається з <c>StartupSequence</c> — єдине джерело цих перевірок.
 /// </remarks>
 public sealed class SchemaValidator(
@@ -102,7 +103,21 @@ public sealed class SchemaValidator(
     /// <summary>Попередження, які не зупиняють старт, але мають бути видні.</summary>
     public IReadOnlyList<string> Warnings => _warnings;
 
+    /// <summary>
+    /// Критичні знахідки (ФВ-7.9, D-102): старт НЕ зупиняють, але пишуться в журнал
+    /// рівнем Critical, а <c>/health/ready</c> у цьому стані — 503.
+    /// </summary>
+    /// <remarks>
+    /// Зараз тут лише вимкнений RCSI. Не виняток: скрипт розгортання
+    /// (<c>deploy-ecr</c>, <c>setup-dev-db</c>, фікстура тестів) виконує
+    /// <c>06-rcsi.sql</c> ДО першого старту застосунку, а на чинній базі його вмикає
+    /// DBA у вікні обслуговування — зупинений старт цього не виправив би.
+    /// </remarks>
+    public IReadOnlyList<string> Critical => _critical;
+
     private readonly List<string> _warnings = [];
+
+    private readonly List<string> _critical = [];
 
     /// <summary>Виконує послідовність перевірок.</summary>
     /// <param name="startupMode"><c>Validate</c> у прод, <c>Migrate</c> у dev/test.</param>
@@ -113,6 +128,7 @@ public sealed class SchemaValidator(
     public async Task ValidateAsync(string startupMode, CancellationToken ct)
     {
         _warnings.Clear();
+        _critical.Clear();
 
         await ValidateEditionAsync().ConfigureAwait(false);
 
@@ -273,20 +289,23 @@ public sealed class SchemaValidator(
     private static SchemaIncompatibleException Incompatible(string text)
         => new($"{ErrorCodes.StartupSchemaIncompatible}: {text}");
 
-    /// <summary>RCSI і запас партицій — це попередження, а не зупинка.</summary>
+    /// <summary>RCSI — критичний стан без зупинки; зіставлення й запас партицій — попередження.</summary>
     /// <remarks>
     /// ⚠ Вмикання RCSI — операція DBA і потребує вікна (<c>ALTER DATABASE …
     /// WITH ROLLBACK IMMEDIATE</c> обриває чужі сеанси). Зупиняти старт через
     /// те, чого застосунок не має права виправити, означало б зробити його
-    /// незапускним без DBA. Тому — критичний стан у health і запис у журнал.
+    /// незапускним без DBA. Тому — <see cref="Critical"/> у журналі (D-102: «перевірка
+    /// при старті лишається Critical») і Unhealthy у <c>/health/ready</c>
+    /// (<c>DatabaseHealthCheck</c>, живий запит), а не виняток.
     /// </remarks>
     private async Task ValidateRuntimeOptionsAsync(CancellationToken ct)
     {
         if (!capabilities.IsReadCommittedSnapshotOn)
         {
-            _warnings.Add(
-                "RCSI вимкнено: у пік останнього дня періоду читання блокуватимуть запис (D-29). " +
-                "Виконайте 06-rcsi.sql у вікні обслуговування.");
+            _critical.Add(
+                "RCSI вимкнено: у пік останнього дня періоду читання блокуватимуть запис (D-29), " +
+                "черга задач не захоплюватиме задачі, /health/ready відповідатиме 503. " +
+                "Виконайте Sql/06-rcsi.sql у вікні обслуговування (розгортання deploy-ecr робить це до старту).");
         }
 
         // ⚠ Зіставлення бази перевіряється саме тут, а не в `01-filegroups.sql`:

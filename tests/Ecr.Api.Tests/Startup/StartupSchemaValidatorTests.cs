@@ -26,7 +26,7 @@ namespace Ecr.Api.Tests;
 /// <c>StartupSequence</c> — застосунок стартує на несумісному середовищі, і
 /// тести зупинки червоніють; (2) зробити вимкнений RCSI помилкою в
 /// <c>SchemaValidator.ValidateRuntimeOptionsAsync</c> — старт падає, і тест
-/// попередження червоніє.
+/// Critical-у для RCSI червоніє.
 /// </remarks>
 [Collection("SqlServer")]
 public sealed class StartupSchemaValidatorTests(SqlServerFixture sql)
@@ -92,10 +92,14 @@ public sealed class StartupSchemaValidatorTests(SqlServerFixture sql)
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "ФВ-7.9")]
-    public async Task Вимкнений_RCSI_старт_піднімається_з_попередженням_у_журналі()
+    [Trait("Requirement", "D-102")]
+    public async Task Вимкнений_RCSI_старт_піднімається_з_Critical_у_журналі()
     {
-        // ⚠ Попередження, а не зупинка: вмикання RCSI — операція DBA у вікні
-        // обслуговування, застосунок сам цього виправити не може.
+        // ⚠ Не зупинка: вмикання RCSI — операція DBA у вікні обслуговування,
+        // застосунок сам цього виправити не може (а розгортання виконує 06-rcsi.sql
+        // ДО старту). Але й не «попередження» (було до D-102/ФВ-7.9): рівень Critical
+        // потрапляє в ServerErrors (Error і вище), а /health/ready дає 503 —
+        // окремий тест DatabaseHealthRcsiOffTests.
         using var baseFactory = new EcrApiFactory(sql);
         using var factory = baseFactory.WithWebHostBuilder(b => b.ConfigureTestServices(
             s => Replace(s, new FakeCapabilities(SqlEditionMode.Enterprise, Major: 16, Rcsi: false))));
@@ -105,10 +109,14 @@ public sealed class StartupSchemaValidatorTests(SqlServerFixture sql)
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Contains(baseFactory.ServerLog,
-            l => l.Contains("Старт (попередження): RCSI вимкнено", StringComparison.Ordinal));
+            l => l.Contains("Старт (критично): RCSI вимкнено", StringComparison.Ordinal)
+                 && l.Contains("06-rcsi.sql", StringComparison.Ordinal));
 
-        // Попередження не видається за помилку.
-        Assert.DoesNotContain(baseFactory.ServerErrors, l => l.Contains("RCSI", StringComparison.Ordinal));
+        // Той самий рядок — серед помилок (рівень >= Error), а не серед попереджень.
+        Assert.Contains(baseFactory.ServerErrors,
+            l => l.Contains("Старт (критично): RCSI вимкнено", StringComparison.Ordinal));
+        Assert.DoesNotContain(baseFactory.ServerLog,
+            l => l.Contains("Старт (попередження): RCSI", StringComparison.Ordinal));
     }
 
     /// <summary>Піднімає застосунок і повертає виняток старту (або <c>null</c>).</summary>

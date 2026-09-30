@@ -58,13 +58,19 @@ public static partial class StartupSequence
         // 3) Сумісність середовища (ФВ-7.9) — ЄДИНЕ джерело цих перевірок,
         //    `SchemaValidator`. Зупиняє старт (`ECR-SYS-5031`): редакція/версія,
         //    незастосовані міграції в Validate, база новіша за збірку, файлові
-        //    групи, функції й схеми партиціонування. Лише попереджає: RCSI,
-        //    зіставлення, запас партицій. У проді застосунок DDL-прав не має
+        //    групи, функції й схеми партиціонування. Без зупинки: RCSI —
+        //    Critical у журналі (і Unhealthy на /health/ready, D-102);
+        //    зіставлення, запас партицій — попередження. У проді застосунок DDL-прав не має
         //    (D-66), тому Validate — це саме перевірка, а не тихе «домігруємо».
         var mode = app.Configuration["Schema:StartupMode"] ?? "Validate";
         var validator = new SchemaValidator(
             db, capabilities, scope.ServiceProvider.GetRequiredService<Domain.Abstractions.IClock>());
         await validator.ValidateAsync(mode, CancellationToken.None).ConfigureAwait(false);
+
+        foreach (var finding in validator.Critical)
+        {
+            LogSchemaCritical(logger, finding);
+        }
 
         foreach (var warning in validator.Warnings)
         {
@@ -243,6 +249,9 @@ public static partial class StartupSequence
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Старт: схема відповідає моделі.")]
     private static partial void LogSchemaValid(ILogger logger);
+
+    [LoggerMessage(Level = LogLevel.Critical, Message = "Старт (критично): {Finding}")]
+    private static partial void LogSchemaCritical(ILogger logger, string finding);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Старт (попередження): {Warning}")]
     private static partial void LogSchemaWarning(ILogger logger, string warning);
