@@ -383,6 +383,16 @@ public static class DependencyInjection
         // активним `SourceEventMap`) — за маркером, як решту задач у черзі.
         services.AddScoped<ISourceEventSyncJob, Jobs.SourceEventSyncJob>();
 
+        // HSE301:A1 — підтягування значень PI за вікном рядка (§4.4). Задачу ставить хук запису комірок
+        // (`IRowWindowTrigger` у `PatchCellsHandler`) і щогодинний `RowWindowRefetchJob` (конкретний клас — як
+        // `PeriodStateJob`, ставиться розкладом у `RecurringScheduleService`). Знімок колонок вікна — одиночка:
+        // хук питає його на кожен запис комірок.
+        services.AddScoped<IRowWindowFetchJob, Jobs.RowWindowFetchJob>();
+        services.AddScoped<Jobs.RowWindowRefetchJob>();
+        services.AddSingleton<Application.Ports.IRowWindowColumnIndex, Jobs.RowWindowColumnIndex>();
+        services.AddScoped<Application.Ports.IRowWindowTrigger, Application.Integration.RowWindowTrigger>();
+        // HSE301:A1 — кінець
+
         // ⚠ Та сама задача, що вже зареєстрована по типу вище: нічний розклад
         // ставить її конкретним класом, а `POST /consistency/run` — маркером
         // (`BE-30`). Без цього рядка ручний прогін приймався б у чергу й не

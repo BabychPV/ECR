@@ -28,6 +28,7 @@ const KindKeys: Record<string, string> = {
   IReportSnapshotJob: 'jobs.kind.reportSnapshot',
   ICollectionJob: 'jobs.kind.collection',
   ISourceEventSyncJob: 'jobs.kind.sourceEventSync',
+  IRowWindowFetchJob: 'jobs.kind.rowWindowFetch',
   IConsistencyCheckJob: 'jobs.kind.consistencyCheck',
   IOrphanScanJob: 'jobs.kind.orphanScan',
 };

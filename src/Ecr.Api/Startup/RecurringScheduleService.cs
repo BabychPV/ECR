@@ -327,6 +327,11 @@ public sealed partial class RecurringScheduleService(
             .ScheduleAsync<Infrastructure.Jobs.NotificationJob>(HourlyCron, null, CancellationToken.None)
             .ConfigureAwait(false);
 
+        // HSE301 A1: повтор підтягування вікон рядків за пізніми даними PI (§4.4).
+        await scheduler
+            .ScheduleAsync<Infrastructure.Jobs.RowWindowRefetchJob>(HourlyCron, null, CancellationToken.None)
+            .ConfigureAwait(false);
+
         var db = scope.ServiceProvider.GetRequiredService<EcrDbContext>();
 
         // ⛔ Прогалини 4+5 директиви паритету зі старою системою (Q-327 →
