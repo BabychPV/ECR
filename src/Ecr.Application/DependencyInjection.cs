@@ -396,6 +396,7 @@ public static class DependencyInjection
         // HSE301 A6: API подій джерела — каталог шаблонів, проба, мапінг, таблиця подій, «Отримати з PI зараз».
         services.AddScoped<Integration.SourceEvents.ListEventTemplatesHandler>();
         services.AddScoped<Integration.SourceEvents.ProbeSourceEventsHandler>();
+        services.AddScoped<Integration.SourceEvents.ListSourceEventsHandler>();
         services.AddScoped<Integration.SourceEvents.SyncSourceEventsHandler>();
 
         // BE-07: публічні дані екрана входу. Єдиний обробник, який НЕ перевіряє

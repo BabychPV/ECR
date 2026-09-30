@@ -23,6 +23,7 @@ namespace Ecr.Api.Controllers;
 public sealed class SourceEventsController(
     ListEventTemplatesHandler templates,
     ProbeSourceEventsHandler probe,
+    ListSourceEventsHandler events,
     SyncSourceEventsHandler sync) : ControllerBase
 {
     /// <summary>
@@ -59,6 +60,42 @@ public sealed class SourceEventsController(
         => Ok(await probe.HandleAsync(id, request, ct).ConfigureAwait(false));
 
     /// <summary>
+    /// Таблиця подій сутності: стан зв'язку «подія ↔ рядок», час у поясі проєкту й UTC, ключ рядка, документ і
+    /// період. Права — <c>Read</c> на документ мапінгу; невидимі документи для користувача не існують.
+    /// </summary>
+    /// <param name="id">Сутність-шаблон подій.</param>
+    /// <param name="mapId">Лише цей мапінг.</param>
+    /// <param name="documentId">Лише цей документ.</param>
+    /// <param name="status">Лише ці стани (можна повторювати); порожньо — усі.</param>
+    /// <param name="fromUtc">Початок події не раніше (UTC, включно).</param>
+    /// <param name="toUtc">Початок події раніше (UTC, виключно).</param>
+    /// <param name="periodKey">Лише цей період.</param>
+    /// <param name="cursor">Курсор наступної сторінки.</param>
+    /// <param name="limit">Розмір сторінки 1..500; <c>0</c> — типове 50.</param>
+    /// <param name="ct">Скасування.</param>
+    [HttpGet("sources/{id:int}/source-events")]
+    [ProducesResponseType<PagedResult<SourceEventRowDto>>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> SourceEvents(
+        int id,
+        [FromQuery] int? mapId,
+        [FromQuery] long? documentId,
+        [FromQuery] SourceEventLinkStatus[]? status,
+        [FromQuery] DateTime? fromUtc,
+        [FromQuery] DateTime? toUtc,
+        [FromQuery] int? periodKey,
+        [FromQuery] string? cursor,
+        [FromQuery] int limit,
+        CancellationToken ct)
+        => Ok(await events
+            .HandleAsync(
+                new SourceEventsFilter(id, mapId, documentId, status, AsUtc(fromUtc), AsUtc(toUtc), periodKey),
+                new CursorRequest(limit == 0 ? 50 : limit, cursor),
+                ct)
+            .ConfigureAwait(false));
+
+    /// <summary>
     /// «Отримати з PI зараз»: ставить синхронізацію подій сутності в чергу. Право <c>Integration.Manage</c>.
     /// </summary>
     /// <param name="id">Сутність-шаблон подій.</param>
@@ -74,4 +111,13 @@ public sealed class SourceEventsController(
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     public async Task<IActionResult> Sync(int id, CancellationToken ct)
         => Accepted(new Contracts.JobAcceptedResponse(await sync.HandleAsync(id, ct).ConfigureAwait(false)));
+
+    private static DateTime? AsUtc(DateTime? value) => value is { } v
+        ? v.Kind switch
+        {
+            DateTimeKind.Utc => v,
+            DateTimeKind.Local => v.ToUniversalTime(),
+            _ => DateTime.SpecifyKind(v, DateTimeKind.Utc),
+        }
+        : null;
 }
