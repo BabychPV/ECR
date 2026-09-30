@@ -131,7 +131,11 @@ public sealed class TestDocumentBuilder(string connectionString)
         // BulkCellLoader, тож фікстура повторює бойовий шлях.
         var loader = new BulkCellLoader(connectionString, 1000);
         var instanceId = await loader.ReserveIdsAsync("doc.TableInstanceSeq", 1, ct).ConfigureAwait(false);
-        var firstRowId = await loader.ReserveIdsAsync("doc.TableRowSeq", rowCount, ct).ConfigureAwait(false);
+        // ⚠ rowCount = 0 — динамічна таблиця без жодного рядка (HSE301 A5b): резервувати нічого,
+        // а `ReserveIdsAsync` нуль відхиляє.
+        var firstRowId = rowCount > 0
+            ? await loader.ReserveIdsAsync("doc.TableRowSeq", rowCount, ct).ConfigureAwait(false)
+            : 0;
 
         var instance = new TableInstance(key, instanceId, document.Id, table.Id, now);
         db.TableInstances.Add(instance);

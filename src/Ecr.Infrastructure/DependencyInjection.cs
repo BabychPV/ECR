@@ -378,6 +378,10 @@ public static class DependencyInjection
         services.AddScoped<IReportSnapshotJob, Jobs.ReportSnapshotJob>();
         services.AddScoped<ICollectionJob, Jobs.CollectionJob>();
 
+        // HSE301 A5b: синк подій джерела в рядки таблиць. Ставить його `CollectionJob` (сутність із
+        // активним `SourceEventMap`) — за маркером, як решту задач у черзі.
+        services.AddScoped<ISourceEventSyncJob, Jobs.SourceEventSyncJob>();
+
         // ⚠ Та сама задача, що вже зареєстрована по типу вище: нічний розклад
         // ставить її конкретним класом, а `POST /consistency/run` — маркером
         // (`BE-30`). Без цього рядка ручний прогін приймався б у чергу й не
