@@ -107,15 +107,36 @@
 RegistrySyncPlan RegistrySyncPlanner.Plan(RegistrySyncInput input);
 
 RegistrySyncInput(RegistryDefId, SourceKind, IsCompleteSnapshot,
-    Elements: RegistrySyncSourceElement(ExternalId, ExternalPath, Attributes[атрибут → значення]),
-    Links:    RegistrySyncLink(ExternalId, RegistryEntryId, ExternalPath),
-    Entries:  RegistrySyncEntryState(RegistryEntryId, Values[FieldDefId → (Value, LastWriterIsHuman)]),
-    Mappings: RegistrySyncFieldMapping(RegistryFieldDefId, FieldCode, DataType, UnitId, SourceAttribute, IsActive))
+    Elements: RegistrySyncSourceElement(ExternalId, ExternalPath, Attributes[атрибут → значення], Name?),
+    Links:    RegistrySyncLink(ExternalId, RegistryEntryId, ExternalPath, MissingInSourceSince?),
+    Entries:  RegistrySyncEntryState(RegistryEntryId, Values[FieldDefId → (Value, LastWriterIsHuman)], IsActive),
+    Mappings: RegistrySyncFieldMapping(RegistryFieldDefId, FieldCode, DataType, UnitId, SourceAttribute, IsActive,
+                                       RefRegistryDefId?),
+    LookupCodes: RegistryDefId → (код → EntryId),   // розв'язує задача ДО Plan (Planner.LookupCodes)
+    CodeMode,                                      // Auto — код видасть writer, Manual — ім'я елемента
+    OnMissingInSource)                             // MarkOrphaned | Deactivate | Ignore (ext.SourceEntity)
 
 RegistrySyncPlan(Updates: (EntryId, FieldDefId, FieldCode, Old, New),
                  PathChanges: (ExternalId, EntryId, OldPath, NewPath),
                  Events: (Kind, ExternalId, EntryId, FieldCode, Current, Source, ErrorCode, MessageKey))
+    { Creates, Relinks, MissingMarks, MissingClears, Deactivations, Reactivations }
 ```
+
+✎ 2026-09-30, після D-212 PR-4/PR-6 — що змінилось у контракті:
+
+- `LastWriterIsHuman` діє лише для `Hybrid` (`D-118`); для `External` ручного запису немає (`D-211`), синк
+  перезаписує.
+- **`Creates`** — лише `External`, лише повний знімок і елемент з іменем: запис + `RegistryExternalKey` в
+  одній транзакції (writer «лише створювати»); подію `AutoCreated` пише задача після успіху. `Hybrid`/`Local`
+  — подія `ElementUnlinked`.
+- **`Relinks`** — елемент перестворено з новим GUID: рівно один кандидат за `ExternalPath` у повному
+  знімку, старого GUID у знімку немає → `Relink` + `ExternalKeyRelinked`.
+- **Зникнення** (повний знімок): `MarkOrphaned` → `MissingMarks` + `SourceMissing`; `Ignore` → лише
+  `SourceMissing`; `Deactivate` → `MissingMarks` + `Deactivations`. Повернення елемента → `MissingClears`;
+  вимкнений синком запис `External` → `Reactivations`, `Hybrid` → `Diverged` на полі активності (вмикає
+  людина).
+- Код запису `Lookup`-поля з джерела розв'язується в `Id`; немає — `ValueRejected`
+  `err.ECR-REG-0422.entryRefNotFound`, поле не чіпається. Порушення правила довідника — `RuleViolation`.
 
 Приведення типу — тим самим механізмом, що ручний запис і імпорт: `CellValueReader.Normalize` +
 `RegistryValue.Set`. ⚠ Проєкція типізованого значення (6 рядків) повторює приватний
@@ -257,6 +278,33 @@ HSE301).
   Відмова переліку — виняток адаптера: прогін `Failed` з його кодом і `messageKey`, подій не пише.
 - `Value()` у PI SQL Client: дата — ISO 8601 (`"O"`), не `ToString()` за культурою потоку.
 
+### 5.5 D-212 PR-8 — інтерфейс політики синку (2026-09-30)
+
+- **Де:** `/admin/sources` → шухляда з'єднання → вкладка **Entities** → колонка «Sync policy»: кнопка
+  лише в прив'язаної до довідника сутності й лише з правом, дзеркальним серверному
+  (`Integration.Manage` і `Registry.EditData` або грант `Write`+ на `Registry:{id}`, заборона виграє) —
+  `canEditRegistrySyncPolicy` у `features/sources/RegistrySyncPolicyModal.tsx`.
+- **Форма:** три варіанти зниклого елемента з поясненням (`MarkOrphaned` — позначити, `Ignore` — лише
+  подія, `Deactivate` — вимкнути запис; повернення: `External` вмикає сам, `Hybrid` чекає людину),
+  атрибути дат «від/до» (порожнє — `null`, не синхронізувати) і «межа до включно» (без атрибута кінця
+  вимкнена й іде `false`). Збереження — `PUT /api/v1/sources/{id}/registry/policy` цілком; відмови
+  `403`/`404`/`422` — текст сервера за `messageKey` у формі, форма лишається відкритою.
+- ⚠ **Чинна політика в переліку не читається:** `GET /api/v1/sources` (`SourceEntityStatus`) полів
+  політики не віддає, окремого читання немає; їх несе лише `SourceEntityDto` (відповідь прив'язки й
+  збереження). Форма бере політику з рядка переліку, якщо поля там з'являться, інакше — з останньої
+  такої відповіді в сеансі, інакше показує типову з попередженням `sources.syncPolicyUnknown`
+  («збереження замінить політику цілком»). Борг: додати чотири поля в `SourceEntityStatus`.
+- **Панель зовнішніх ідентифікаторів** запису (`RegistryExternalKeysPanel`): колонка «Missing in source»
+  — позначка «Since {дата}» з `RegistryExternalKeyView.MissingInSourceSince`.
+- **Нове з'єднання** (`DataSourceFormModal`): типовий транспорт `PiSqlClient` — PI SQL views основний
+  канал; `PiWebApi` і `Sql` обираються явно.
+- Тексти — секція `COLL:d212-ui` у `09-seed.sql` (en у MERGE, ru/kz — власна порція `#I18N`).
+- Тести: `features/sources/__tests__/RegistrySyncPolicyModal.test.tsx`,
+  `RegistryExternalKeysPanel.test.tsx`, `DataSourceCrud.test.tsx`. Мутації (2026-09-30, кожна окремо,
+  відкат і контрольний прогін): переставити атрибут у тілі `PUT` → червоний; прибрати перевірку права в
+  UI → червоні обидва тести права; прибрати показ відмови → червоні 422 і 403; типовий `PiWebApi` →
+  червоний; прибрати позначку зникнення → червоний.
+
 ## 6. Журнал покриття
 
 | Вимога | Що покриває | Стан |
@@ -282,6 +330,10 @@ HSE301).
 | RSQ-8 | Бізнес-ключ для первинного зіставлення (тег, код, `LEGACY_ID`?) | альтернативний ключ довідника, пропозиція — не автоприв'язка (S9) |
 | RSQ-9 | Хто отримує сповіщення про події синку | ті, хто має `Integration.Manage` (як `J-4`) |
 | RSQ-10 | Чи переносити наявні GUID із `Configuration!J3` (S11) | ні, доки не підтверджено |
+
+✎ 2026-09-30, `D-212`: **RSQ-6** — тепер налаштування сутності, а не дефолт коду: політика
+`MarkOrphaned`/`Ignore`/`Deactivate` у UI (§5.5), типова `MarkOrphaned`. **RSQ-7** — для `External`
+запис створюється синком (`Creates`, §4.1), для `Hybrid`/`Local` лишається подія `RegistryElementUnlinked`.
 
 ## 8. Ризики
 
