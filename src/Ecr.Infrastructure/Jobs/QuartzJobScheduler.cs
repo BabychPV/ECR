@@ -357,6 +357,38 @@ public sealed class QuartzJobScheduler(
         }
     }
 
+    /// <summary>
+    /// Перепостановка комірок задачі злиття, що вичерпала стелю відкладень (Д-1 огляду O1):
+    /// та сама ціль, що в <paramref name="failedJobId"/>, звичайним злиттям — у задачу цілі,
+    /// що чекає, або новою.
+    /// </summary>
+    /// <param name="instance">Планувальник задачі, що впала.</param>
+    /// <param name="failedJobId">Задача злиття (<c>префікс цілі + GUID</c>).</param>
+    /// <param name="payloadJson">Тіло перепостановки (<see cref="JobDeferral.RequeuePayload"/>).</param>
+    /// <param name="createdByUserId">Автор задачі, що впала.</param>
+    /// <param name="ct">Скасування.</param>
+    /// <returns>Задача, що виконає комірки.</returns>
+    internal async Task<string> RequeueDeferralExhaustedAsync(
+        IScheduler instance, string failedJobId, string payloadJson, int? createdByUserId, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(instance);
+        ArgumentException.ThrowIfNullOrWhiteSpace(payloadJson);
+
+        // Хвіст ідентифікатора задачі злиття — Guid "N" (MergeAsync).
+        const int GuidLength = 32;
+        if (failedJobId is not { Length: > GuidLength })
+        {
+            throw new ArgumentException("Не ідентифікатор задачі злиття.", nameof(failedJobId));
+        }
+
+        using var payload = JsonDocument.Parse(payloadJson);
+
+        return await MergeAsync<IFormulaRecalculationJob>(
+                instance, failedJobId[..^GuidLength], FormulaRecalculationTarget.MergedArrayPath,
+                payload.RootElement.Clone(), createdByUserId, ct)
+            .ConfigureAwait(false);
+    }
+
     /// <summary>Злиття на ціль; <paramref name="finishedJobId"/> — задача, що щойно завершилась (не рахується).</summary>
     private async Task<string> CoalesceAsync<TJob>(
         IScheduler instance, string prefix, object? payload, int? createdByUserId, string? finishedJobId,
@@ -975,9 +1007,10 @@ internal static class QuartzPayloadMerges
                 && ByJob.TryGetValue(openId, out var open)
                 && !open.Taken)
             {
-                if (JobPayloadMerge.Merge(open.Payload, json, path) is { } merged)
+                if (JobPayloadMerge.Merge(open.Payload, json, path, out var fresh) is { } merged)
                 {
                     open.Payload = merged;
+                    open.Fresh |= fresh;
                     return (openId, false);
                 }
 
@@ -993,15 +1026,23 @@ internal static class QuartzPayloadMerges
 
     /// <summary>Адаптер бере тіло задачі на старті; далі злиття в неї не йде.</summary>
     /// <returns><c>null</c> — задача не злиття (тіло — у <c>JobDataMap</c>).</returns>
-    public static string? Take(string jobId)
+    /// <param name="jobId">Задача.</param>
+    /// <param name="fresh">
+    /// Від попереднього взяття в тіло злито НОВІ комірки (Д-1 огляду O1): відлік стелі
+    /// відкладень, що живе в триґері, для цього прогону починається заново.
+    /// </param>
+    public static string? Take(string jobId, out bool fresh)
     {
         lock (Gate)
         {
+            fresh = false;
             if (!ByJob.TryGetValue(jobId, out var entry))
             {
                 return null;
             }
 
+            fresh = entry.Fresh;
+            entry.Fresh = false;
             entry.Taken = true;
             if (OpenByTarget.TryGetValue(entry.Target, out var open) && string.Equals(open, jobId, StringComparison.Ordinal))
             {
@@ -1046,5 +1087,8 @@ internal static class QuartzPayloadMerges
         public required string Payload { get; set; }
 
         public bool Taken { get; set; }
+
+        /// <summary>Злиття додало нові комірки після останнього <see cref="Take"/>.</summary>
+        public bool Fresh { get; set; }
     }
 }

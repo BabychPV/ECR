@@ -378,6 +378,9 @@ public sealed partial class JobWorker(
             var since = JobDeferral.SinceOf(job.PayloadJson);
             if (JobDeferral.IsExhausted(since, clock.UtcNow, options.MaxDeferral))
             {
+                // Д-1 (огляд O1): комірки задачі злиття — у нову задачу цілі ДО Failed. Навпаки
+                // збій між двома записами губив би їх; так — щонайбільше зайвий перерахунок.
+                await RequeueExhaustedAsync(job).ConfigureAwait(false);
                 await FailDeferralExhaustedAsync(job, deferred, clock.UtcNow - since!.Value, clock).ConfigureAwait(false);
                 return;
             }
@@ -526,6 +529,43 @@ public sealed partial class JobWorker(
             .ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Стелю вичерпала задача злиття (Д-1 огляду O1): її комірки — нова задача на ту саму
+    /// ціль, раз (<see cref="JobDeferral.RequeuePayload"/>).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Поки ця задача <c>Running</c>, нова стоїть <c>Queued</c> позаду (claim не бере ціль
+    /// з <c>Running</c>) або зливається в ту, що вже чекає. Збій — у журнал: задача однаково
+    /// закривається <c>Failed</c> з конвертом.
+    /// </remarks>
+    private async Task RequeueExhaustedAsync(ClaimedJob job)
+    {
+        if (!string.Equals(job.JobCode, JobPayloadMerge.MergeableJobCode, StringComparison.Ordinal)
+            || JobDeferral.RequeuePayload(job.PayloadJson) is not { } again)
+        {
+            return;
+        }
+
+        try
+        {
+            await using var scope = scopes.CreateAsyncScope();
+            var requeued = await scope.ServiceProvider.GetRequiredService<IJobQueue>()
+                .EnqueueAsync(
+                    new JobEnqueueRequest(
+                        job.JobCode, job.Lane, again, job.TargetKey, job.CreatedByUserId, job.CorrelationId,
+                        job.DocumentId),
+                    CancellationToken.None)
+                .ConfigureAwait(false);
+            LogDeferralRequeued(logger, job.Claim.JobId, requeued.JobId);
+        }
+#pragma warning disable CA1031 // Перепостановка — страховка; провал задачі записується нижче в будь-якому разі.
+        catch (Exception ex)
+#pragma warning restore CA1031
+        {
+            LogDeferralRequeueFailed(logger, job.Claim.JobId, ex);
+        }
+    }
+
     /// <summary>Завершальна дія власника оренди у власному scope; <c>false</c> — оренду вже втрачено.</summary>
     private async Task SettleAsync(string jobId, Func<IJobQueue, Task<bool>> action)
     {
@@ -604,6 +644,12 @@ public sealed partial class JobWorker(
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Задача {JobId} ({TypeName}) відкладалась {Waited}, чекаючи ресурс {Resource}; стеля відкладень вичерпана, стан Failed.")]
     private static partial void LogDeferralExhausted(ILogger logger, string jobId, string typeName, string resource, string waited);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Комірки задачі {JobId}, що вичерпала стелю відкладень, перепоставлено задачею {RequeuedJobId}.")]
+    private static partial void LogDeferralRequeued(ILogger logger, string jobId, string requeuedJobId);
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "Не вдалося перепоставити комірки задачі {JobId}, що вичерпала стелю відкладень.")]
+    private static partial void LogDeferralRequeueFailed(ILogger logger, string jobId, Exception exception);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Оренду задачі {JobId} втрачено: її виконує інший виконавець; результат цього виконання не записано.")]
     private static partial void LogLeaseLost(ILogger logger, string jobId);

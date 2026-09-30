@@ -48,7 +48,8 @@ public sealed partial class QuartzJobAdapter(
         var typeName = context.JobDetail.JobDataMap.GetString(QuartzJobScheduler.JobCodeKey);
         // ⚠ O1: задача злиття (IFormulaRecalculationJob) несе актуальне тіло в
         // QuartzPayloadMerges — з масивами постановок, злитих, поки вона чекала.
-        var payload = QuartzPayloadMerges.Take(jobId)
+        // Д-1: `freshCells` — з минулого прогону злито нові комірки, відлік стелі з триґера не діє.
+        var payload = QuartzPayloadMerges.Take(jobId, out var freshCells)
                       ?? context.JobDetail.JobDataMap.GetString(QuartzJobScheduler.PayloadKey);
 
         using var scope = services.CreateScope();
@@ -194,7 +195,8 @@ public sealed partial class QuartzJobAdapter(
             // ⛔ O1 (I2 ФВ-9.8): ресурс зайнятий — новий триґер через відступ з ТИМ
             // САМИМ лічильником спроби, і потік пулу вільний одразу. Очікування лока
             // всередині задачі тримало б потік: у I2 так стояли всі 10 потоків Quartz.
-            var since = DeferredSince(context);
+            // ⛔ Д-1 (огляд O1): свіжа дельта — нова серія, а не чужий відлік з триґера.
+            var since = freshCells ? null : DeferredSince(context);
             var now = clock.UtcNow;
 
             // ⛔ Стеля (борг O1): лок, що не звільняється, — Failed, а не вічні триґери.
@@ -220,6 +222,8 @@ public sealed partial class QuartzJobAdapter(
                             })
                         .ConfigureAwait(false);
                 }
+
+                await RequeueExhaustedAsync(context, jobId, typeName, payload, progress, clock).ConfigureAwait(false);
 
                 // ⚠ Деталь лишається (дурабельна) — для ручного перезапуску, як у провалу нижче.
                 throw new JobExecutionException(deferred, refireImmediately: false);
@@ -502,6 +506,39 @@ public sealed partial class QuartzJobAdapter(
     }
 
     /// <summary>
+    /// Стелю вичерпала задача злиття (Д-1 огляду O1): її комірки перепоставляються на
+    /// ту саму ціль раз (<see cref="JobDeferral.RequeuePayload"/>), а сама вона — <c>Failed</c>.
+    /// </summary>
+    /// <remarks>⚠ Збій перепостановки — у журнал: задача однаково Failed з конвертом.</remarks>
+    private async Task RequeueExhaustedAsync(
+        IJobExecutionContext context, string jobId, string? typeName, string? payload, IJobProgressStore? progress,
+        IClock clock)
+    {
+        if (!string.Equals(typeName, JobPayloadMerge.MergeableJobCode, StringComparison.Ordinal)
+            || JobDeferral.RequeuePayload(payload) is not { } again)
+        {
+            return;
+        }
+
+        try
+        {
+            var author = progress is null
+                ? null
+                : (await progress.FindAsync(jobId, CancellationToken.None).ConfigureAwait(false))?.CreatedByUserId;
+            var requeued = await new QuartzJobScheduler(progress: progress, clock: clock)
+                .RequeueDeferralExhaustedAsync(context.Scheduler, jobId, again, author, CancellationToken.None)
+                .ConfigureAwait(false);
+            LogDeferralRequeued(logger, jobId, requeued);
+        }
+#pragma warning disable CA1031 // Перепостановка — страховка; провал задачі вже записано.
+        catch (Exception ex)
+#pragma warning restore CA1031
+        {
+            LogDeferralRequeueFailed(logger, jobId, ex);
+        }
+    }
+
+    /// <summary>
     /// Виконує запис у сховище прогресу так, щоб ЙОГО власний збій не підмінив
     /// собою результат задачі.
     /// </summary>
@@ -602,6 +639,12 @@ public sealed partial class QuartzJobAdapter(
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Задача {JobId} ({TypeName}) відкладалась {Waited}, чекаючи ресурс {Resource}; стеля відкладень вичерпана, стан Failed.")]
     private static partial void LogDeferralExhausted(ILogger logger, string jobId, string typeName, string resource, string waited);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Комірки задачі {JobId}, що вичерпала стелю відкладень, перепоставлено задачею {RequeuedJobId}.")]
+    private static partial void LogDeferralRequeued(ILogger logger, string jobId, string requeuedJobId);
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "Не вдалося перепоставити комірки задачі {JobId}, що вичерпала стелю відкладень.")]
+    private static partial void LogDeferralRequeueFailed(ILogger logger, string jobId, Exception exception);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Задача {JobId} ({TypeName}) впала; заплановано повтор.")]
     private static partial void LogJobRetrying(ILogger logger, string jobId, string typeName, Exception exception);

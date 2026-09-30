@@ -23,6 +23,14 @@ namespace Ecr.Infrastructure.Jobs;
 /// <see cref="QuartzSinceKey"/> у <c>JobDataMap</c> триґера. Ретрай після провалу
 /// і ручний перезапуск починають відлік заново.
 /// </para>
+/// <para>
+/// ⛔ Д-1 огляду O1: свіжа дельта не успадковує чужий відлік. Злиття, що додає
+/// НОВІ комірки в задачу злиття (<c>IFormulaRecalculationJob</c>), знімає момент
+/// відкладення (і позначку <see cref="RequeuedProperty"/>); поглинання повернутої
+/// задачі задачею позаду свій момент туди не переносить. Інакше правка о t0+29 хв
+/// падала б разом із задачею о t0+30 і не рахувалася б до нічного прогону. Другий
+/// захист — <see cref="RequeuePayload"/>: вичерпана стеля перепоставляє комірки раз.
+/// </para>
 /// </remarks>
 public static class JobDeferral
 {
@@ -34,6 +42,12 @@ public static class JobDeferral
 
     /// <summary>Ключ <c>JobDataMap</c> триґера Quartz: момент першого відкладення, тіки UTC.</summary>
     public const string QuartzSinceKey = "ecr.deferredSince";
+
+    /// <summary>
+    /// Властивість payload задачі злиття, перепоставленої після вичерпаної стелі
+    /// (<see cref="RequeuePayload"/>): друга стеля — вже <c>Failed</c> без перепостановки.
+    /// </summary>
+    public const string RequeuedProperty = "ecrDeferralRequeued";
 
     /// <summary>
     /// Найдовший сумарний час відкладень однієї задачі (<c>Jobs:Recalculation:MaxDeferral</c>,
@@ -63,6 +77,44 @@ public static class JobDeferral
     /// <summary>Тривалість для тексту: <c>hh:mm:ss</c> без дробу секунд.</summary>
     public static string Format(TimeSpan waited)
         => TimeSpan.FromSeconds(Math.Floor(Math.Max(0, waited.TotalSeconds))).ToString("c", CultureInfo.InvariantCulture);
+
+    /// <summary>
+    /// Payload перепостановки задачі злиття, що вичерпала стелю (Д-1 огляду O1): без моменту
+    /// відкладення (нова серія) і з позначкою <see cref="RequeuedProperty"/>.
+    /// </summary>
+    /// <param name="payloadJson">Payload задачі, що вичерпала стелю.</param>
+    /// <returns><c>null</c> — не перепоставляти: вже перепоставлена раз або payload не об'єкт.</returns>
+    /// <remarks>
+    /// ⛔ Рівно одна перепостановка на серію. Лок, що не звільняється ніколи, інакше
+    /// давав би нескінченний ланцюг «стеля → нова задача → стеля» кожні 30 хв. Позначку
+    /// знімає лише злиття НОВИХ комірок (свіжа правка — нова серія), тож ланцюг
+    /// обмежений правками людей, а не часом.
+    /// </remarks>
+    public static string? RequeuePayload(string? payloadJson)
+    {
+        if (string.IsNullOrWhiteSpace(payloadJson))
+        {
+            return null;
+        }
+
+        try
+        {
+            if (System.Text.Json.Nodes.JsonNode.Parse(payloadJson) is not System.Text.Json.Nodes.JsonObject payload
+                || payload.ContainsKey(RequeuedProperty))
+            {
+                return null;
+            }
+
+            payload.Remove(PayloadProperty);
+            payload[RequeuedProperty] = true;
+
+            return payload.ToJsonString();
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
 
     /// <summary>Момент першого відкладення з payload черги в базі; <c>null</c> — немає або не читається.</summary>
     /// <param name="payloadJson">Payload задачі.</param>

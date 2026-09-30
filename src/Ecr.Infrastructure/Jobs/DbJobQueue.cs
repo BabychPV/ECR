@@ -158,6 +158,11 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock) : IJobQueue
         BEGIN
             SET @addPayload = @payload;
         """ + "\n" + MergeArraysSql + "\n" + """
+            -- Д-1 (O1): НОВІ комірки — нова серія: чужий відлік стелі й позначку перепостановки знято.
+            IF @merged IS NOT NULL
+               AND (JSON_VALUE(@basePayload, @sincePath) IS NOT NULL OR JSON_VALUE(@basePayload, @requeuedPath) IS NOT NULL)
+               AND EXISTS (SELECT [value] FROM OPENJSON(@addArray) EXCEPT SELECT [value] FROM OPENJSON(@oldArray))
+                SET @merged = JSON_MODIFY(JSON_MODIFY(@merged, @sincePath, NULL), @requeuedPath, NULL);
             IF @merged IS NOT NULL
                 UPDATE itg.JobProgress SET Payload = @merged WHERE JobId = @jobId;
             ELSE
@@ -245,6 +250,7 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock) : IJobQueue
                     p.Add("@delayMs", SqlDbType.Int).Value = checked((int)delay.TotalMilliseconds);
                     p.Add("@supersede", SqlDbType.Bit).Value = request.SupersedeRunning;
                     BindMerge(p, JobPayloadMerge.ArrayPathOf(request.JobCode));
+                    BindDeferral(p);
                     AddShown(p);
                 }, async r =>
                 {
@@ -432,8 +438,7 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock) : IJobQueue
             FROM itg.JobProgress WITH (UPDLOCK) {OwnedBy};
             -- Стеля відкладень (борг O1): момент ПЕРШОГО відкладення — у payload-об'єкті;
             -- відкладення ставить його, якщо немає, ретрай після провалу знімає.
-            DECLARE @oldSince nvarchar(40) = NULL, @since nvarchar(40) = NULL, @ownPayload nvarchar(max) = NULL,
-                    @behindPayload nvarchar(max) = NULL;
+            DECLARE @oldSince nvarchar(40) = NULL, @since nvarchar(40) = NULL, @ownPayload nvarchar(max) = NULL;
             IF ISJSON(@addPayload) = 1 AND LEFT(LTRIM(@addPayload), 1) = NCHAR(123)
             BEGIN
                 SET @oldSince = JSON_VALUE(@addPayload, @sincePath);
@@ -467,19 +472,11 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock) : IJobQueue
                 SET [State] = 'Cancelled', LeaseUntil = NULL, UpdatedAt = @shown,
                     [Message] = REPLACE(@absorbed, N'{AbsorbedMarker}', STRING_ESCAPE(@behind, 'json'))
                 {OwnedBy};
+                -- ⛔ Д-1 (O1): свій відлік стелі в задачу позаду НЕ переноситься — у ній
+                -- свіжа правка, і чужий відлік валив би її раніше, ніж та чекала б сама.
                 UPDATE itg.JobProgress
                 SET AvailableAt = CASE WHEN AvailableAt > @available THEN @available ELSE AvailableAt END
                 WHERE JobId = @behind;
-                -- Задача позаду чекає той самий ресурс: відлік стелі не починається заново.
-                IF @since IS NOT NULL
-                BEGIN
-                    SELECT @behindPayload = Payload FROM itg.JobProgress WHERE JobId = @behind;
-                    IF ISJSON(@behindPayload) = 1 AND LEFT(LTRIM(@behindPayload), 1) = NCHAR(123)
-                        IF JSON_VALUE(@behindPayload, @sincePath) IS NULL
-                            UPDATE itg.JobProgress
-                            SET Payload = JSON_MODIFY(@behindPayload, @sincePath, @since)
-                            WHERE JobId = @behind;
-                END
             END
             ELSE IF @ok = 1
                 UPDATE itg.JobProgress
@@ -771,7 +768,8 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock) : IJobQueue
     private void BindDeferral(SqlParameterCollection p)
     {
         p.Add("@sincePath", SqlDbType.NVarChar, 100).Value = "$." + JobDeferral.PayloadProperty;
-        p.Add("@now", SqlDbType.NVarChar, 40).Value = clock.UtcNow.ToString("O", CultureInfo.InvariantCulture);
+        p.Add("@requeuedPath", SqlDbType.NVarChar, 100).Value = "$." + JobDeferral.RequeuedProperty;
+        p.Add("@now",SqlDbType.NVarChar, 40).Value = clock.UtcNow.ToString("O", CultureInfo.InvariantCulture);
     }
 
     /// <summary>Параметри <see cref="MergeArraysSql"/>; <paramref name="path"/> <c>null</c> — злиття немає.</summary>
@@ -832,9 +830,21 @@ internal static class JobPayloadMerge
     /// з <paramref name="addJson"/>.
     /// </summary>
     /// <returns><c>null</c> — не зливається (немає масиву, чужа форма, понад межу payload).</returns>
-    public static string? Merge(string baseJson, string addJson, string path)
+    public static string? Merge(string baseJson, string addJson, string path) => Merge(baseJson, addJson, path, out _);
+
+    /// <inheritdoc cref="Merge(string, string, string)"/>
+    /// <param name="baseJson">Тіло задачі, що чекає.</param>
+    /// <param name="addJson">Тіло нової постановки.</param>
+    /// <param name="path">Шлях масиву злиття.</param>
+    /// <param name="fresh">
+    /// Злиття додало елементи, яких у масиві не було (Д-1 огляду O1) — тоді з тіла зняті
+    /// <see cref="JobDeferral.PayloadProperty"/> і <see cref="JobDeferral.RequeuedProperty"/>,
+    /// як у <c>DbJobQueue.EnqueueSql</c>.
+    /// </param>
+    public static string? Merge(string baseJson, string addJson, string path, out bool fresh)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        fresh = false;
 
         var property = path.StartsWith("$.", StringComparison.Ordinal) ? path[2..] : path;
 
@@ -848,10 +858,20 @@ internal static class JobPayloadMerge
                 return null;
             }
 
+            var known = new HashSet<string>(
+                into.Select(e => e?.ToJsonString() ?? "null"), StringComparer.Ordinal);
+
             foreach (var item in from.ToList())
             {
+                fresh |= known.Add(item?.ToJsonString() ?? "null");
                 from.Remove(item);
                 into.Add(item);
+            }
+
+            if (fresh)
+            {
+                target.Remove(JobDeferral.PayloadProperty);
+                target.Remove(JobDeferral.RequeuedProperty);
             }
 
             var merged = target.ToJsonString();
