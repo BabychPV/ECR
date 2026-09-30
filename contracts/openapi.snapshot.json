@@ -4427,6 +4427,9 @@
           "oldValue": {
             "description": "Поточне значення; `null` — порожньо."
           },
+          "roundedFrom": {
+            "description": "Число з файлу ДО округлення до `Scale` колонки (ФВ-9.16b); `null` — не\nокруглювалось. `NewValue` — вже округлене: саме воно буде записано."
+          },
           "rowKey": {
             "description": "Рядок.",
             "type": "string"

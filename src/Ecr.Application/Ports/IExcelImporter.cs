@@ -50,13 +50,18 @@ public sealed record ImportPreview(
 /// правки.
 /// </param>
 /// <param name="TableNameL10n">Назва таблиці мовами каталогу — для показу.</param>
+/// <param name="RoundedFrom">
+/// Число з файлу ДО округлення до `Scale` колонки (ФВ-9.16b); <c>null</c> — не
+/// округлювалось. <c>NewValue</c> — вже округлене: саме воно буде записано.
+/// </param>
 public sealed record ImportChange(
     string RowKey,
     string ColumnCode,
     object? OldValue,
     object? NewValue,
     string? TableCode = null,
-    Ecr.Domain.ValueObjects.LocalizedText? TableNameL10n = null);
+    Ecr.Domain.ValueObjects.LocalizedText? TableNameL10n = null,
+    object? RoundedFrom = null);
 
 /// <summary>Відхилена комірка з причиною — користувач має бачити, які саме (ФВ-4.4).</summary>
 /// <param name="RowKey">Рядок; <c>—</c> — причина не про рядок.</param>

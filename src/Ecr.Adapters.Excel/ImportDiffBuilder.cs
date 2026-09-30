@@ -184,7 +184,15 @@ public sealed class ImportDiffBuilder
                 // з наявним — двічі: до округлення (незмінена книга з історичним
                 // значенням понад Scale не стає «зміною») і після (`1.234` → `1.23`
                 // при наявному `1.23` — не зміна). Обчислювані відсіяні вище.
+                var fromFile = incoming;
                 incoming = RoundToColumnScale(incoming, definition);
+
+                // ✎ ФВ-9.16b: округлення видно в перегляді — людина має знати, що
+                // записано не те число, яке стоїть у її книзі. `1.230` → `1.23`
+                // числом не змінюється, тож позначки не дає.
+                var roundedFrom = fromFile is decimal before && incoming is decimal after && before != after
+                    ? fromFile
+                    : null;
 
                 if (Same(incoming, existing, definition))
                 {
@@ -239,6 +247,23 @@ public sealed class ImportDiffBuilder
                     continue;
                 }
 
+                // ⛔ ФВ-9.16b: точність — ПІСЛЯ округлення до `Scale`, тим самим
+                // правилом, що п. 7 `ColumnDef.ValidateValue` на застосуванні.
+                // Округлення може додати розряд (`99.999` → `100.00` при `(4,2)`),
+                // і таке число доходило б до `PATCH`, що відхиляв усю книгу вже
+                // після погодженого перегляду. Відмова — тут, однією коміркою.
+                if (incoming is decimal fitted
+                    && definition.DataType == CellDataType.Decimal
+                    && !definition.FitsPrecision(fitted))
+                {
+                    rejected.Add(new ImportRejection(
+                        row.RowKey, column.Code, CellValueReader.TypeMismatch,
+                        $"The number does not fit the column precision ({definition.Precision}, scale {definition.Scale}) after rounding to the column scale.",
+                        table.Code, table.NameL10n, ImportMessageKeys.Precision));
+
+                    continue;
+                }
+
                 // ⛔ F-06: тип перевіряє ТОЙ САМИЙ читач, що й запис
                 // (`CellValueReader.Read` у `PatchCellsHandler`). Доти `abc` у
                 // числовій колонці ставав звичайною зміною, Apply був активний, а
@@ -275,7 +300,8 @@ public sealed class ImportDiffBuilder
                 }
 
                 changes.Add(new ImportChange(
-                    row.RowKey, column.Code, Display(existing, definition), incoming, table.Code, table.NameL10n));
+                    row.RowKey, column.Code, Display(existing, definition), incoming, table.Code, table.NameL10n,
+                    roundedFrom));
             }
         }
 
@@ -623,6 +649,9 @@ public static class ImportMessageKeys
 
     /// <summary>Ціла частина числа не вміщується в сховище.</summary>
     public const string IntegerDigits = "err.ECR-CELL-0422.importIntegerDigits";
+
+    /// <summary>Число після округлення до <c>Scale</c> не вміщується в <c>Precision</c> колонки (ФВ-9.16b).</summary>
+    public const string Precision = "err.ECR-CELL-0422.importPrecision";
 
     /// <summary>Екземпляра таблиці з файлу немає в документі за цей період.</summary>
     public const string InstanceMissing = "err.ECR-IMP-0422.importInstanceMissing";

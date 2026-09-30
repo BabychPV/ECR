@@ -17919,6 +17919,9 @@ export interface components {
             newValue: unknown;
             /** @description Поточне значення; `null` — порожньо. */
             oldValue: unknown;
+            /** @description Число з файлу ДО округлення до `Scale` колонки (ФВ-9.16b); `null` — не
+             *     округлювалось. `NewValue` — вже округлене: саме воно буде записано. */
+            roundedFrom?: unknown;
             /** @description Рядок. */
             rowKey: string;
             /** @description Таблиця зміни. ⛔ `V-10`: у 91 таблиці шаблону ключі рядків і коди колонок
