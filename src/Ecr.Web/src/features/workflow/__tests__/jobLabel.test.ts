@@ -30,6 +30,12 @@ describe('jobKindLabel', () => {
     );
   });
 
+  it('підтягування вікон рядків з PI має власну назву, а не сирий тип', () => {
+    expect(jobKindLabel('Ecr.Application.Ports.IRowWindowFetchJob')).toBe(
+      '⟦jobs.kind.rowWindowFetch⟧',
+    );
+  });
+
   it('невідомий тип — повертає просте ім\'я, а не вигадує підпис', () => {
     expect(jobKindLabel('Ecr.Application.Ports.ISomeNewJob')).toBe('ISomeNewJob');
   });

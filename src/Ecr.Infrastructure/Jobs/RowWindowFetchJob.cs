@@ -402,7 +402,7 @@ public sealed class RowWindowFetchJob(
             // Період закрили між перевіркою й записом: нічого не пишемо й не журналюємо — наступний прогін побачить стан.
             foreach (var item in items)
             {
-                item.Skip = true;
+                item.Abandoned = true;
             }
 
             return 0;
@@ -432,7 +432,7 @@ public sealed class RowWindowFetchJob(
     private async Task RecordAsync(
         RowWindowMap map, TableInstance instance, List<Item> items, RowContext context, DateTime now, CancellationToken ct)
     {
-        var recorded = items.Where(i => !i.Skip).ToList();
+        var recorded = items.Where(i => !i.Abandoned).ToList();
         if (recorded.Count == 0)
         {
             return;
@@ -518,7 +518,7 @@ public sealed class RowWindowFetchJob(
         public bool Reads { get; init; }
 
         /// <summary>Не журналювати: запис комірок відмовлено (період закрили).</summary>
-        public bool Skip { get; set; }
+        public bool Abandoned { get; set; }
 
         public RowWindowValueStatus Status { get; private set; } = fold?.Status ?? RowWindowValueStatus.InvalidWindow;
 
