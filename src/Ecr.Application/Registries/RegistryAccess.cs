@@ -197,7 +197,7 @@ public static class RegistryAccess
 
         var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
 
-        if (profile.Has(permission))
+        if (PermissionCheck.IsGranted(profile, permission))
         {
             // ⛔ S18: глобальне право НЕ перекриває заборону на довідник. Резолвер
             // питається лише коли заборони на довідники в профілі взагалі є: решта

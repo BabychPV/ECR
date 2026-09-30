@@ -89,7 +89,7 @@ public sealed class ListProjectsHandler(
 
             // ⛔ ФВ-6.14: і право перегляду — в самому проєкті (оператор
             // з областю «A» бачить у переліку лише A).
-            .Where(id => profile.Has(Permission, id))
+            .Where(id => PermissionCheck.IsGrantedIn(profile, Permission, id))
             .ToList();
 
         return await projects.ListAsync(page, visibleIds, ct).ConfigureAwait(false);
@@ -289,7 +289,7 @@ public sealed class UpdatePeriodPolicyHandler(
             {
                 // Політика ні на що не діє — як і її створення, це дія поза
                 // будь-яким проєктом (`GlobalUseOfProjectCode`).
-                if (!profile.Has(Permission))
+                if (!PermissionCheck.IsGranted(profile, Permission))
                 {
                     throw new AccessDeniedException(
                         "ECR-AUTH-0403", $"Потрібне право {Permission}.",
@@ -303,7 +303,7 @@ public sealed class UpdatePeriodPolicyHandler(
             else
             {
                 var unmanaged = projectIds.Count(pid =>
-                    !profile.Has(Permission, pid)
+                    !PermissionCheck.IsGrantedIn(profile, Permission, pid)
                     || profile.LevelFor(ResourceKind.Project, pid) < GrantLevel.Manage);
 
                 if (unmanaged > 0)

@@ -22,10 +22,6 @@ public sealed partial class DirectProfileHasRatchetTests
     /// <summary>Файли з прямим <c>profile.Has(</c> на момент введення храповика.</summary>
     private static readonly string[] Debt =
     [
-        "src/Ecr.Application/Projects/ProjectQueryHandlers.cs",
-        "src/Ecr.Application/Registries/RegistryAccess.cs",
-        "src/Ecr.Application/Reporting/ExportSnapshotHandler.cs",
-        "src/Ecr.Application/Reporting/ReportSnapshotHandlers.cs",
         "src/Ecr.Application/Search/SearchHandler.cs",
         "src/Ecr.Application/Security/AccessDiagnostics.cs",
         "src/Ecr.Application/Security/PermissionCheck.cs",

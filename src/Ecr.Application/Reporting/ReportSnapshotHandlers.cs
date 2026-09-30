@@ -49,7 +49,7 @@ public sealed class ListReportSnapshotsHandler(
             .ConfigureAwait(false);
 
         // ⛔ ФВ-6.14: лише проєкти, де є і грант, і право перегляду звітів.
-        var visible = VisibleProjects(profile).Where(id => profile.Has(Permission, id)).ToList();
+        var visible = VisibleProjects(profile).Where(id => PermissionCheck.IsGrantedIn(profile, Permission, id)).ToList();
 
         // ⚠ Позначку формату (`HashFormat`) перелік бере зі збереженої колонки й
         // нічого не перераховує: перерахунок читає всі рядки зрізу (рішення 2026-09-21).
@@ -227,7 +227,7 @@ public sealed class VerifyReportSnapshotHandler(
             || profile.LevelFor(ResourceKind.Project, project) < GrantLevel.Read
 
             // ⛔ ФВ-6.14: без права в проєкті зрізу — так само «немає».
-            || !profile.Has(ListReportSnapshotsHandler.Permission, project))
+            || !PermissionCheck.IsGrantedIn(profile, ListReportSnapshotsHandler.Permission, project))
         {
             throw NotFound(snapshotId);
         }
@@ -346,7 +346,7 @@ public sealed class GetSnapshotRowsHandler(
             || profile.LevelFor(ResourceKind.Project, project) < GrantLevel.Read
 
             // ⛔ ФВ-6.14: без права в проєкті зрізу — так само «немає».
-            || !profile.Has(ListReportSnapshotsHandler.Permission, project))
+            || !PermissionCheck.IsGrantedIn(profile, ListReportSnapshotsHandler.Permission, project))
         {
             throw NotFound(snapshotId);
         }
