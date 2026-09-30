@@ -5,6 +5,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useParams } from 'react-router-dom';
 import { queryKeys } from '@/api/queryKeys';
 import { isExternalRegistry } from '@/features/registries/RegistryEntryEditor';
+import { RegistryExportButton } from '@/features/registries/export/RegistryExportButton';
 import { saveBatch, type RegistryBatchResult, type RegistryRow } from '@/features/registries/rows/api';
 import { localized } from '@/shared/i18n/localized';
 import { t } from '@/shared/i18n';
@@ -345,6 +346,8 @@ export function RegistryDataPage(): JSX.Element {
               {t('registries.newEntry')}
             </Button>
           )}
+          {/* RT-16: експорт — записи, чинні на ту саму дату, що й сітка. */}
+          <RegistryExportButton registryCode={code} asOf={asOf} />
         </Group>
         <Text size="sm" c="dimmed" aria-live="polite" data-testid="registry-data-status">
           {[status, checkSummary].filter((s) => s !== '').join(' · ')}

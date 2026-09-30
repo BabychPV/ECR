@@ -14,6 +14,9 @@ import type { RegistryField } from './rowModel';
 
 const DateInput = lazy(async () => ({ default: (await import('@/shared/dates/DateInputWithStyles')).DateInput }));
 
+/** Журнал змін запису (RT-15) — окремим чанком, лише коли відкрили вкладку «Історія». */
+const EntryHistoryLog = lazy(() => import('./EntryHistoryLog'));
+
 /** Значення шторки `?panel=` для запису. */
 export const entryPanelId = (id: number): string => `entry-${String(id)}`;
 
@@ -36,16 +39,17 @@ export interface EntryDrawerProps {
 }
 
 /**
- * Шторка запису (§8.5): подробиці й значення «станом на» момент системного часу.
+ * Шторка запису (§8.5): подробиці, журнал змін і значення «станом на» момент системного часу.
  *
- * ⚠ Журналу змін запису (хто і що змінив, `GET …/entries/{id}/history`, RT-15) сервер ще не має.
- * Історію тут показує те, що сервер уже вміє: значення запису станом на обраний день
- * (`GET …/rows?asOfUtc=`), поруч із поточними — змінене видно рядком.
+ * Вкладка «Історія» — журнал змін (хто, коли, що, «було» → «стало»; `GET …/entries/{id}/history`,
+ * RT-15), а під ним — значення запису станом на обраний день (`GET …/rows?asOfUtc=`) поруч із
+ * поточними.
  */
 export function EntryDrawer({ registry, row, fields, asOf, readOnly }: EntryDrawerProps): JSX.Element {
   const queryClient = useQueryClient();
   const [day, setDay] = useState<Date | null>(null);
   const [editing, setEditing] = useState<'name' | 'validity' | null>(null);
+  const [tab, setTab] = useState<string | null>('details');
   const asOfUtc = day === null ? null : endOfLocalDayUtc(day);
 
   const past = useQuery({
@@ -69,7 +73,7 @@ export function EntryDrawer({ registry, row, fields, asOf, readOnly }: EntryDraw
       closeLabel={t('common.close')}
       size="lg"
     >
-      <Tabs defaultValue="details">
+      <Tabs value={tab} onChange={setTab}>
         <Tabs.List>
           <Tabs.Tab value="details">{t('registries.data.details')}</Tabs.Tab>
           <Tabs.Tab value="history">{t('registries.tabHistory')}</Tabs.Tab>
@@ -104,6 +108,15 @@ export function EntryDrawer({ registry, row, fields, asOf, readOnly }: EntryDraw
 
         <Tabs.Panel value="history" pt="md">
           <Stack gap="sm">
+            <Text size="sm" fw={600}>{t('registries.entryHistory.title')}</Text>
+            {/* ⚠ Лише на відкритій вкладці: `Tabs` тримає панелі змонтованими, і без умови чанк і запит
+                журналу йшли б на кожне відкриття шторки. */}
+            {tab === 'history' && (
+              <Suspense fallback={<Text size="sm" c="dimmed">{t('common.loading')}</Text>}>
+                <EntryHistoryLog registryCode={registry.code} entryId={row.id} fields={fields} />
+              </Suspense>
+            )}
+
             <Suspense fallback={null}>
               <DateInput
                 size="xs"

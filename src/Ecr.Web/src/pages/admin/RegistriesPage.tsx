@@ -17,6 +17,7 @@ import {
   isExternalRegistry,
 } from '@/features/registries/RegistryEntryEditor';
 import { RegistryImportPanel } from '@/features/registries/RegistryImportPanel';
+import { RegistryExportButton } from '@/features/registries/export/RegistryExportButton';
 import { EntryUsageButton } from '@/features/registries/rc814/EntryUsageButton';
 import { SourceKindSwitch } from '@/features/registries/SourceKindSwitch';
 import { localized } from '@/shared/i18n/localized';
@@ -397,6 +398,9 @@ export function RegistriesPage(): JSX.Element {
                 {t('registries.externalReadOnly')}
               </Text>
             )}
+
+            {/* RT-16: експорт записів, чинних на ту саму дату, що й перелік (темпоральний — сьогодні). */}
+            {selected !== undefined && <RegistryExportButton registryCode={selected.code} asOf={asOf} />}
 
             {/* ФВ-8.12: табличний редактор даних довідника (`rc812`). */}
             {selected !== undefined && (
