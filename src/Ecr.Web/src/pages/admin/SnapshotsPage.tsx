@@ -29,6 +29,7 @@ import { humanizeJobId } from '@/features/workflow/jobLabel';
 import { ReportDefinitionsModal } from '@/features/reports/ReportDefinitionsModal';
 import { snapshotExportUrl } from '@/features/reports/api';
 import { SnapshotFormatBadge } from '@/features/reports/SnapshotFormatBadge';
+import { SnapshotStaleBadge } from '@/features/reports/SnapshotStaleBadge';
 import {
   NoParameters,
   defaultDraft,
@@ -466,9 +467,12 @@ export function SnapshotsPage(): JSX.Element {
                     {/* ⚠ Формат чисел (2026-09-21): поданий зріз не
                         перебудовується, тож старий показує менше знаків —
                         позначка каже, що це формат, а не дефект. */}
+                    {/* ⚠ ФВ-10.5: після зрізу перераховано його проєкт і період —
+                        числа зрізу старі, сам зріз не змінено. */}
                     <Group gap="xs" wrap="nowrap">
                       <StatusBadge kind="snapshot" state={snapshot.status} />
                       <SnapshotFormatBadge format={snapshot.hashFormat} />
+                      <SnapshotStaleBadge stale={snapshot.isStale} />
                     </Group>
                   </Table.Td>
                   <Table.Td>

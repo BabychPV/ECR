@@ -4554,6 +4554,11 @@ USING (VALUES
     (N'sourceEvents.volumeRowWindow',                N'en', N'PI total over the row window', 1),
     -- ru/kz — окремою порцією `COLL:a6-ui` у блоці I18N нижче.
     -- COLL:a6-ui ── кінець секції ──
+    -- RPT:stale ── позначка застарілого зрізу в переліку (ФВ-10.5, `SnapshotStaleBadge.tsx`) ──
+    (N'snapshots.stale',                   N'en', N'Outdated', 1),
+    (N'snapshots.staleHint',               N'en', N'The project and period were recalculated after this snapshot was built. Its numbers are kept exactly as they were; build a new snapshot to see the current ones.', 1),
+    -- ru/kz — окремою порцією `RPT:stale` у блоці I18N нижче.
+    -- RPT:stale ── кінець секції ──
     (N'health.sources.notRegistered',          N'en', N'The collection store is not registered in the container.', 1),
     (N'health.sources.noneActive',              N'en', N'No active collection sources.', 1),
     (N'health.sources.failedCount',             N'en', N'Sources with a failed last run: {count}.', 1),
@@ -12379,6 +12384,19 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- JOBL ── кінець секції ──
+
+-- RPT:stale ── ru/kz позначки застарілого зрізу (ФВ-10.5); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'snapshots.stale', N'ru', N'Устарел'),
+    (N'snapshots.staleHint', N'ru', N'После формирования этого среза проект и период были пересчитаны. Его числа сохранены в точности такими, какими были; чтобы увидеть текущие, сформируйте новый срез.'),
+    (N'snapshots.stale', N'kz', N'Ескірген'),
+    (N'snapshots.staleHint', N'kz', N'Бұл кесінді құрылғаннан кейін жоба мен кезең қайта есептелді. Оның сандары бұрынғыдай дәл сақталған; ағымдағыларын көру үшін жаңа кесінді құрыңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- RPT:stale ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t
