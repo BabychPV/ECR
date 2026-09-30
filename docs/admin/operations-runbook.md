@@ -756,7 +756,10 @@ Msg 50301 … Передперевірка U1: оновлення зупинен
 1. `Stop-Service EcrApi` (і `Stop-Service EcrWorker`, якщо воркер увімкнено, п. 10).
 2. Відновити базу з бекапу, зробленого перед оновленням (п. 6.3).
 3. Встановити попередній MSI (з `WORKER_ENABLED=1`, якщо воркер був і
-   попередня версія його має).
+   попередня версія його має; до I2-2 типове там було `0`). Попередня
+   версія без воркера — прибрати з `Services\EcrApi\Environment`
+   `ECR_Jobs__Recalculation__Executor` (або поставити `InProcess`), інакше
+   перерахунок лишиться без виконавця (п. 10.1).
 4. `Start-Service EcrApi` і перевірити health.
 
 Дані, введені після оновлення, при такому відкаті втрачаються.
@@ -765,11 +768,21 @@ Msg 50301 … Передперевірка U1: оновлення зупинен
 
 Друга служба — наглядач пулу процесів перерахунку (ФВ-9.8, `D-206`):
 `Ecr.Worker.exe --supervisor` у теці застосунку тримає дочірні процеси під
-Windows Job Object з межами пам'яті. **Типово не встановлюється**; вмикається
-при установці (`deploy-ecr.ps1 -EnableWorker` або `WORKER_ENABLED=1` у
-`msiexec`, `docs/build/11-install-guide.md` §2.6). Той самий обліковий запис,
-що `EcrApi`; рядок підключення — у
+Windows Job Object з межами пам'яті. ✎ 2026-09-30 (I2-2): **типово
+встановлюється** — і MSI (`WORKER_ENABLED` типово `1`), і `deploy-ecr.ps1`
+(крім `-DisableWorker` і SQL Server Express), `docs/build/11-install-guide.md`
+§2.6. Той самий обліковий запис, що `EcrApi`; рядок підключення — у
 `HKLM:\SYSTEM\CurrentControlSet\Services\EcrWorker\Environment`.
+
+⛔ **Зв'язка з `EcrApi`.** Разом зі службою `deploy-ecr.ps1` пише в
+`Services\EcrApi\Environment` `ECR_Jobs__Queue__Mode=Database` і
+`ECR_Jobs__Recalculation__Executor=Worker`. У цьому режимі Api лейн
+перерахунку **не бере**: зупинений чи знятий воркер = перерахунок стоїть у
+черзі. Тому вимкнення воркера (10.1) — завжди разом із перемиканням Api на
+`InProcess`. Стан видно на `/health/ready`, перевірка `worker`: `Degraded` з
+поясненням, якщо Api на `Worker`, а служби немає, вона `Disabled` чи задачі
+чекають понад 5 хв без жодної виконуваної. Поточний режим — поля `queueMode`
+і `executor` цієї перевірки.
 
 ```powershell
 Get-Service EcrWorker
@@ -787,12 +800,24 @@ stderr і журналі); після зміни — `Restart-Service EcrWorker`
 
 ### 10.1. Вимкнути воркер
 
+Найпростіше — повторити `deploy-ecr.ps1 … -DisableWorker -SkipSchema` з тим
+самим `-ConnectionString`: MSI з `WORKER_ENABLED=0` і Api на `InProcess` —
+разом.
+
 Швидко, без MSI, — служба лишається зареєстрованою, але не стартує, зокрема
-після перезавантаження:
+після перезавантаження; ⛔ і ОДРАЗУ перемкнути Api на перерахунок у власному
+процесі (Executor — у `Environment` служби EcrApi, той самий прийом злиття,
+що в `docs/build/11-install-guide.md` §9):
 
 ```powershell
 Stop-Service EcrWorker
 Set-Service EcrWorker -StartupType Disabled
+
+$key = 'HKLM:\SYSTEM\CurrentControlSet\Services\EcrApi'
+$vars = @((Get-ItemProperty $key -Name Environment).Environment |
+    Where-Object { $_ -notlike 'ECR_Jobs__Recalculation__Executor=*' -and $_ -notlike 'ECR_Jobs__Queue__Mode=*' })
+Set-ItemProperty $key -Name Environment -Type MultiString -Value ([string[]] ($vars + 'ECR_Jobs__Recalculation__Executor=InProcess' + 'ECR_Jobs__Queue__Mode=Quartz'))
+Restart-Service EcrApi
 ```
 
 Дочірні процеси закриваються разом із наглядачем (Job Object з
@@ -811,7 +836,9 @@ msiexec /i Ecr.msi /qn /l*v worker-off.log REINSTALL=ALL REINSTALLMODE=vomus WOR
 
 ### 10.2. Увімкнути назад
 
-Якщо вимикали через `Set-Service`:
+Якщо вимикали через `Set-Service` — служба назад, потім Api на пул (зворотне
+до 10.1: `ECR_Jobs__Queue__Mode=Database`, `ECR_Jobs__Recalculation__Executor=Worker`
+і `Restart-Service EcrApi`):
 
 ```powershell
 Set-Service EcrWorker -StartupType Automatic
@@ -819,11 +846,12 @@ Start-Service EcrWorker
 ```
 
 Якщо службу прибирали (чи ніколи не ставили) — найпростіше повторити
-`deploy-ecr.ps1 … -EnableWorker -SkipSchema` з тим самим `-ConnectionString`:
-MSI з `WORKER_ENABLED=1`, рядок підключення в `Environment`, перезапуск і
-перевірка — разом. Вручну — той самий MSI, що в 10.1, з `WORKER_ENABLED=1`,
-потім рядок підключення (`docs/build/11-install-guide.md` §9, служба
-`EcrWorker`) і `Restart-Service EcrWorker`.
+`deploy-ecr.ps1 … -SkipSchema` (без `-DisableWorker`) з тим самим
+`-ConnectionString`: MSI з `WORKER_ENABLED=1`, рядок підключення в
+`Environment`, режим Api, перезапуск і перевірка — разом. Вручну — той самий
+MSI, що в 10.1, з `WORKER_ENABLED=1`, потім рядок підключення
+(`docs/build/11-install-guide.md` §9, служба `EcrWorker`),
+`Restart-Service EcrWorker` і режим Api, як вище.
 
 ⚠ Той самий MSI-файл, що вже встановлено, без `REINSTALL=ALL
 REINSTALLMODE=vomus` нічого не перемикає: це режим обслуговування, умови
@@ -832,16 +860,19 @@ REINSTALLMODE=vomus` нічого не перемикає: це режим об�
 ### 10.3. Відкат воркера
 
 Воркер не змінює схему бази й не має власних даних, тож його відкат — це
-вимкнення (10.1): `EcrApi` працює й без нього.
+вимкнення (10.1): `EcrApi` працює й без нього — **за `Executor=InProcess`**.
 
-1. `Stop-Service EcrWorker; Set-Service EcrWorker -StartupType Disabled` —
-   негайно, без MSI.
+1. Блок «швидко, без MSI» з 10.1 — службу вимкнути й Api перемкнути
+   на `InProcess` разом, негайно.
 2. Причина: журнал подій Application; ручний прогін
    `& "C:\Program Files\ECR\Api\Ecr.Worker.exe" --supervisor` від
    адміністратора — вивід у консоль, Ctrl+C зупиняє разом із дочірніми.
-3. Коли причину усунуто — 10.2. Прибрати службу зовсім — MSI з
-   `WORKER_ENABLED=0` (10.1), наступні оновлення — без `-EnableWorker`.
+3. Коли причину усунуто — 10.2. Прибрати службу зовсім —
+   `deploy-ecr.ps1 -DisableWorker` (10.1), і наступні оновлення — теж
+   з `-DisableWorker`.
 
-⚠ Оновлення продукту **без** `-EnableWorker` / `WORKER_ENABLED=1` прибирає
-службу воркера (`deploy-ecr.ps1` попереджає перед `msiexec`). Це не збій —
-так сказано командним рядком.
+⚠ ✎ I2-2: оновлення продукту **без** `-DisableWorker` / `WORKER_ENABLED=0`
+ставить службу воркера назад (типове — так), а `deploy-ecr.ps1` ще й
+перемикає Api на `Worker`. Вимкнений воркер — прапорець на кожному
+оновленні. Прямий `msiexec` без властивості службу поставить, але режим Api
+не змінить — Api лишиться на тому, що в його `Environment`.
