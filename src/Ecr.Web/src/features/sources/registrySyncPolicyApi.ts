@@ -12,8 +12,8 @@ export type SourceEntityWithPolicy = components['schemas']['SourceEntityDto'];
  * `Кожна_дія_сервера_має_споживача_в_інтерфейсі` шукає літерал `/api/v1/…`
  * разом із методом поруч.
  *
- * ⚠ Екрана налаштування політики ще немає (D-212, наступні PR): це мінімальний
- * споживач контракту, щоб форма лягла на готовий виклик.
+ * Споживач — форма `RegistrySyncPolicyModal.tsx` з вкладки Entities шухляди
+ * з'єднання (`SourceEntitiesTab.tsx`, D-212 PR-8).
  */
 
 /**
