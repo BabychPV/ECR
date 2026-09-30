@@ -4361,6 +4361,10 @@ USING (VALUES
     (N'health.reportviews.failed',              N'en', N'Report views rpt.v_* were not created for some published template versions; SSRS does not see them: {details}. Publication is not affected. Fix the template (at most 250 columns per table; unique template/sheet/table codes) and restart the application or run EXEC rpt.usp_GenerateTemplateViews.', 1),
     -- ru/kz — окремою порцією `I18N` (COLL:rpt-views-health).
     -- COLL:rpt-views-health ── кінець секції ──
+    -- COLL:req-g4 ── REQ-CLOSURE G4: область правила валідації (ФВ-5.3), причина публікації звіту (ФВ-14.7) ──
+    (N'err.ECR-REQ-0422.validationScope',       N'en', N'The rule scope must be 0 (cell), 1 (row), 2 (table) or 3 (document): any other value would save a rule that never runs.', 1),
+    -- ru/kz — окремою порцією `COLL:req-g4` у блоці I18N нижче.
+    -- COLL:req-g4 ── кінець секції ──
     -- D16:recalc-budget ── Перерахунок вийшов за бюджет ПРД-13 (`RecalculationBudgetMonitor`, `JobsHealthCheck`) ──
     -- Конверт у `itg.JobProgress.Message` успішної задачі: `{seconds}` — тривалість, `{limit}` — поріг `Calculations:FullYearWarnSeconds`.
     (N'jobs.recalcOverBudget',                  N'en', N'Recalculation finished in {seconds} s, over the {limit} s budget. Check the database load and the recalculation worker pool.', 1),
