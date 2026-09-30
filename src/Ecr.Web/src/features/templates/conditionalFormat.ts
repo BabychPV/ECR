@@ -1,16 +1,14 @@
-import { normalizeDecimal } from '@/shared/format';
+import { normalizeDecimal } from "@/shared/format";
 
 /**
  * Умовне форматування комірок за правилами шаблону (`ФВ-2.7`) — клієнтська
  * модель правила й перевірка «чи спрацьовує правило на значенні».
  *
- * ⛔ СЕРВЕР ПРАВИЛ НЕ ЗБЕРІГАЄ. Ні `StyleDef`, ні `ColumnDef`, ні окрема
- * сутність не мають місця під умову (`D-234`, звіт лінії
- * `constructor-dnd-format`): потрібна схема (`cfg.ConditionalFormatRule` —
- * міграція EF), CRUD-ендпоінти й поле в структурі версії. Тому редактор
- * (`ConditionalFormatPanel.tsx`) дає скласти правила й перевірити їх на
- * прикладі значення, але збереження вимкнене і так і підписане. Модель тут —
- * те, що редактор і майбутнє застосування в сітці мають розуміти однаково.
+ * Сервер зберігає правила (`cfg.ConditionalFormatRule`, `GET/PUT
+ * /template-versions/{id}/conditional-formats`, транспорт — `conditionalFormatApi.ts`).
+ * Порожнє значення в API — `null`, у моделі редактора — `''`; перетворення —
+ * `fromWire`/`toWire`. Модель тут — те, що редактор і застосування в сітці
+ * мають розуміти однаково.
  *
  * ⚠ Порівняння — через `Number` після `normalizeDecimal`: для вибору кольору
  * межа точності `double` не має значення, а для збереження значень ця
@@ -18,26 +16,18 @@ import { normalizeDecimal } from '@/shared/format';
  */
 
 export type ConditionOperator =
-  | 'gt'
-  | 'ge'
-  | 'lt'
-  | 'le'
-  | 'eq'
-  | 'ne'
-  | 'between'
-  | 'empty'
-  | 'notEmpty';
+  "gt" | "ge" | "lt" | "le" | "eq" | "ne" | "between" | "empty" | "notEmpty";
 
 export const ConditionOperators: readonly ConditionOperator[] = [
-  'gt',
-  'ge',
-  'lt',
-  'le',
-  'eq',
-  'ne',
-  'between',
-  'empty',
-  'notEmpty',
+  "gt",
+  "ge",
+  "lt",
+  "le",
+  "eq",
+  "ne",
+  "between",
+  "empty",
+  "notEmpty",
 ];
 
 export interface ConditionalRule {
@@ -53,46 +43,93 @@ export interface ConditionalRule {
   readonly isBold: boolean;
 }
 
-export function emptyRule(columnCode = ''): ConditionalRule {
+/** Форма правила в API (`ConditionalFormatRuleDto`): порожнє — `null`, не `''`. */
+export interface ConditionalRuleWire {
+  backgroundHex: string | null;
+  columnCode: string;
+  foregroundHex: string | null;
+  isBold: boolean;
+  operator: string;
+  value: string | null;
+  valueTo: string | null;
+}
+
+const orEmpty = (text: string | null): string => text ?? "";
+const orNull = (text: string): string | null =>
+  text.trim() === "" ? null : text.trim();
+
+/** З API до моделі редактора: `null` → `''`. */
+export function fromWire(dto: ConditionalRuleWire): ConditionalRule {
+  return {
+    columnCode: dto.columnCode,
+    operator: dto.operator as ConditionOperator,
+    value: orEmpty(dto.value),
+    valueTo: orEmpty(dto.valueTo),
+    backgroundHex: orEmpty(dto.backgroundHex),
+    foregroundHex: orEmpty(dto.foregroundHex),
+    isBold: dto.isBold,
+  };
+}
+
+/**
+ * З моделі до API: `''` → `null`; операнди, яких оператор не потребує, теж
+ * `null` (сервер відхиляє зайве значення в `empty`/`notEmpty`).
+ */
+export function toWire(rule: ConditionalRule): ConditionalRuleWire {
+  const count = operandCount(rule.operator);
+
+  return {
+    columnCode: rule.columnCode,
+    operator: rule.operator,
+    value: count >= 1 ? orNull(rule.value) : null,
+    valueTo: count === 2 ? orNull(rule.valueTo) : null,
+    backgroundHex: orNull(rule.backgroundHex),
+    foregroundHex: orNull(rule.foregroundHex),
+    isBold: rule.isBold,
+  };
+}
+
+export function emptyRule(columnCode = ""): ConditionalRule {
   return {
     columnCode,
-    operator: 'gt',
-    value: '',
-    valueTo: '',
-    backgroundHex: '',
-    foregroundHex: '',
+    operator: "gt",
+    value: "",
+    valueTo: "",
+    backgroundHex: "",
+    foregroundHex: "",
     isBold: false,
   };
 }
 
 /** Чи потрібне операторові значення (і скільки). */
 export function operandCount(operator: ConditionOperator): 0 | 1 | 2 {
-  if (operator === 'empty' || operator === 'notEmpty') return 0;
-  return operator === 'between' ? 2 : 1;
+  if (operator === "empty" || operator === "notEmpty") return 0;
+  return operator === "between" ? 2 : 1;
 }
 
-export type RuleBlocker = 'Column' | 'Value' | 'ValueTo' | 'Range' | 'Style';
+export type RuleBlocker = "Column" | "Value" | "ValueTo" | "Range" | "Style";
 
 /** Чому правило ще не повне; `null` — повне. */
 export function whyRuleIncomplete(rule: ConditionalRule): RuleBlocker | null {
-  if (rule.columnCode.trim().length === 0) return 'Column';
+  if (rule.columnCode.trim().length === 0) return "Column";
 
   const count = operandCount(rule.operator);
-  const isOrdering = rule.operator !== 'eq' && rule.operator !== 'ne';
+  const isOrdering = rule.operator !== "eq" && rule.operator !== "ne";
 
   if (count >= 1) {
-    if (rule.value.trim().length === 0) return 'Value';
+    if (rule.value.trim().length === 0) return "Value";
     // ⚠ «більше/менше/між» має сенс лише для чисел; «дорівнює» — і для тексту.
-    if (isOrdering && normalizeDecimal(rule.value) === null) return 'Value';
+    if (isOrdering && normalizeDecimal(rule.value) === null) return "Value";
   }
 
   if (count === 2) {
     const to = normalizeDecimal(rule.valueTo);
-    if (to === null) return 'ValueTo';
-    if (Number(to) < Number(normalizeDecimal(rule.value))) return 'Range';
+    if (to === null) return "ValueTo";
+    if (Number(to) < Number(normalizeDecimal(rule.value))) return "Range";
   }
 
-  if (rule.backgroundHex === '' && rule.foregroundHex === '' && !rule.isBold) return 'Style';
+  if (rule.backgroundHex === "" && rule.foregroundHex === "" && !rule.isBold)
+    return "Style";
 
   return null;
 }
@@ -103,34 +140,40 @@ function numberOf(text: string): number | null {
 }
 
 /** Чи спрацьовує правило на значенні комірки (`null` — порожня комірка). */
-export function ruleMatches(rule: ConditionalRule, cell: string | null): boolean {
-  const text = cell?.trim() ?? '';
+export function ruleMatches(
+  rule: ConditionalRule,
+  cell: string | null,
+): boolean {
+  const text = cell?.trim() ?? "";
 
-  if (rule.operator === 'empty') return text.length === 0;
-  if (rule.operator === 'notEmpty') return text.length > 0;
+  if (rule.operator === "empty") return text.length === 0;
+  if (rule.operator === "notEmpty") return text.length > 0;
   if (text.length === 0) return false;
 
   const value = numberOf(text);
   const operand = numberOf(rule.value);
 
-  if (rule.operator === 'eq' || rule.operator === 'ne') {
+  if (rule.operator === "eq" || rule.operator === "ne") {
     // Обидва числа — порівнюємо як числа (`1.0` = `1`), інакше як текст.
-    const equal = value !== null && operand !== null ? value === operand : text === rule.value.trim();
-    return rule.operator === 'eq' ? equal : !equal;
+    const equal =
+      value !== null && operand !== null
+        ? value === operand
+        : text === rule.value.trim();
+    return rule.operator === "eq" ? equal : !equal;
   }
 
   if (value === null || operand === null) return false;
 
   switch (rule.operator) {
-    case 'gt':
+    case "gt":
       return value > operand;
-    case 'ge':
+    case "ge":
       return value >= operand;
-    case 'lt':
+    case "lt":
       return value < operand;
-    case 'le':
+    case "le":
       return value <= operand;
-    case 'between': {
+    case "between": {
       const upper = numberOf(rule.valueTo);
       return upper !== null && value >= operand && value <= upper;
     }
@@ -151,7 +194,10 @@ export function firstMatchingRule(
 ): ConditionalRule | null {
   return (
     rules.find(
-      (rule) => rule.columnCode === columnCode && whyRuleIncomplete(rule) === null && ruleMatches(rule, cell),
+      (rule) =>
+        rule.columnCode === columnCode &&
+        whyRuleIncomplete(rule) === null &&
+        ruleMatches(rule, cell),
     ) ?? null
   );
 }

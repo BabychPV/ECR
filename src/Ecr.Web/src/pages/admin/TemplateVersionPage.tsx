@@ -52,6 +52,11 @@ import { emptyColumnDraft, type ColumnDraft } from '@/features/templates/column'
 import { ExistingColumn } from '@/features/templates/ExistingColumn';
 import { ReorderCell, ReorderableRows } from '@/features/templates/ReorderControls';
 import { reorderColumns } from '@/features/templates/reorderApi';
+import {
+  getConditionalFormats,
+  saveConditionalFormats,
+} from '@/features/templates/conditionalFormatApi';
+import { fromWire, toWire, type ConditionalRule } from '@/features/templates/conditionalFormat';
 import { dataTypeLabel, rowKindLabel, rowModeLabel } from '@/features/templates/enumLabels';
 import { getHeaderFields, saveHeaderField } from '@/features/templates/headerFieldApi';
 import {
@@ -534,6 +539,29 @@ export function TemplateVersionPage(): JSX.Element {
           count: columns.length,
         }),
       );
+    },
+    onError: showApiError,
+  });
+
+  /**
+   * Правила умовного форматування (`ФВ-2.7`). Запит — лише поки відкрито
+   * діалог (не важить на завантаженні сторінки). `PUT` замінює набір цілої
+   * версії, тож правила колонок ІНШИХ таблиць переносимо без змін.
+   */
+  const conditionalFormats = useQuery({
+    queryKey: queryKeys.templates.conditionalFormatsOf(id),
+    queryFn: () => getConditionalFormats(id),
+    enabled: conditionalFormatTable !== null,
+  });
+  const saveConditionalFormatsMutation = useMutation({
+    mutationFn: async (args: { tableColumns: ReadonlySet<string>; rules: readonly ConditionalRule[] }) => {
+      const current = await getConditionalFormats(id);
+      const others = current.filter((rule) => !args.tableColumns.has(rule.columnCode));
+      return saveConditionalFormats(id, [...others, ...args.rules.map(toWire)]);
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.templates.conditionalFormatsOf(id) });
+      showDone(t('conditionalFormat.saved'));
     },
     onError: showApiError,
   });
@@ -1677,18 +1705,38 @@ export function TemplateVersionPage(): JSX.Element {
        */}
       <Modal
         opened={conditionalFormatTable !== null}
-        onClose={() => setConditionalFormatTable(null)}
+        onClose={() => {
+          setConditionalFormatTable(null);
+          // Без кешу: наступне відкриття бере правила з сервера, а не зі знімка.
+          queryClient.removeQueries({ queryKey: queryKeys.templates.conditionalFormatsOf(id) });
+        }}
         title={t('conditionalFormat.title')}
         size="xl"
       >
         {conditionalFormatTable !== null && (
           <Suspense fallback={null}>
-            <ConditionalFormatPanel
-              columns={conditionalFormatTable.columns.map((column) => ({
-                code: column.code,
-                label: localized(column.headerL10n) || column.code,
-              }))}
-            />
+            {conditionalFormats.data !== undefined && (
+              <ConditionalFormatPanel
+                key={conditionalFormatTable.id}
+                columns={conditionalFormatTable.columns.map((column) => ({
+                  code: column.code,
+                  label: localized(column.headerL10n) || column.code,
+                }))}
+                initialRules={conditionalFormats.data
+                  .filter((rule) =>
+                    conditionalFormatTable.columns.some((column) => column.code === rule.columnCode),
+                  )
+                  .map(fromWire)}
+                saving={saveConditionalFormatsMutation.isPending}
+                readOnly={versionStatus !== 'Draft'}
+                onSave={(rules) =>
+                  saveConditionalFormatsMutation.mutate({
+                    tableColumns: new Set(conditionalFormatTable.columns.map((column) => column.code)),
+                    rules,
+                  })
+                }
+              />
+            )}
           </Suspense>
         )}
       </Modal>

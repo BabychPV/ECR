@@ -5586,8 +5586,6 @@ USING (VALUES
     (N'reorder.moved', N'en', N'{name} is now in position {position} of {count}.', 1),
     (N'reorder.rowsUnavailable', N'en', N'Rows cannot be reordered here yet: the server cannot change only a row''s order without resetting its translations. Use the Order field in the row form.', 1),
     (N'conditionalFormat.title', N'en', N'Conditional formatting', 1),
-    (N'conditionalFormat.unavailableTitle', N'en', N'Rules are not saved yet', 1),
-    (N'conditionalFormat.unavailable', N'en', N'The server does not store conditional formatting rules yet. You can compose rules here and check them on a sample value, but they are lost when the window is closed.', 1),
     (N'conditionalFormat.rule', N'en', N'Rule {position}', 1),
     (N'conditionalFormat.column', N'en', N'Column', 1),
     (N'conditionalFormat.operator', N'en', N'Condition', 1),
@@ -5614,7 +5612,7 @@ USING (VALUES
     (N'conditionalFormat.noMatch', N'en', N'No rule applies to this value.', 1),
     (N'conditionalFormat.matched', N'en', N'Rule {position} applies.', 1),
     (N'conditionalFormat.save', N'en', N'Save rules', 1),
-    (N'conditionalFormat.saveUnavailable', N'en', N'Saving is unavailable until the server stores conditional formatting rules.', 1),
+    (N'conditionalFormat.saved', N'en', N'Conditional formatting rules saved.', 1),
     (N'err.ECR-TMPL-0422.ordinalInvalid', N'en', N'Order must be a whole number from 0 to 1000000, got "{value}".', 1),
     -- CONSTRUCTOR:dnd-format: кінець секції
     -- D16: ФВ-2.16 — підтвердження пакетних правок (вставка, протягування) і
@@ -13070,10 +13068,6 @@ SELECT v.[Key], v.Lang, v.Val
     (N'reorder.rowsUnavailable', N'kz', N'Мұнда жолдардың ретін әзірге өзгерту мүмкін емес: сервер жолдың аудармаларын өшірмей, тек ретін өзгерте алмайды. Жол пішініндегі «Реті» өрісін пайдаланыңыз.'),
     (N'conditionalFormat.title', N'ru', N'Условное форматирование'),
     (N'conditionalFormat.title', N'kz', N'Шартты пішімдеу'),
-    (N'conditionalFormat.unavailableTitle', N'ru', N'Правила пока не сохраняются'),
-    (N'conditionalFormat.unavailableTitle', N'kz', N'Ережелер әзірге сақталмайды'),
-    (N'conditionalFormat.unavailable', N'ru', N'Сервер пока не хранит правила условного форматирования. Здесь можно составить правила и проверить их на примере значения, но при закрытии окна они теряются.'),
-    (N'conditionalFormat.unavailable', N'kz', N'Сервер әзірге шартты пішімдеу ережелерін сақтамайды. Мұнда ережелер құрып, оларды мән үлгісінде тексеруге болады, бірақ терезе жабылғанда олар жоғалады.'),
     (N'conditionalFormat.rule', N'ru', N'Правило {position}'),
     (N'conditionalFormat.rule', N'kz', N'{position}-ереже'),
     (N'conditionalFormat.column', N'ru', N'Колонка'),
@@ -13126,8 +13120,8 @@ SELECT v.[Key], v.Lang, v.Val
     (N'conditionalFormat.matched', N'kz', N'{position}-ереже қолданылады.'),
     (N'conditionalFormat.save', N'ru', N'Сохранить правила'),
     (N'conditionalFormat.save', N'kz', N'Ережелерді сақтау'),
-    (N'conditionalFormat.saveUnavailable', N'ru', N'Сохранение недоступно, пока сервер не хранит правила условного форматирования.'),
-    (N'conditionalFormat.saveUnavailable', N'kz', N'Сервер шартты пішімдеу ережелерін сақтамайынша, сақтау қолжетімсіз.'),
+    (N'conditionalFormat.saved', N'ru', N'Правила условного форматирования сохранены.'),
+    (N'conditionalFormat.saved', N'kz', N'Шартты пішімдеу ережелері сақталды.'),
     (N'err.ECR-TMPL-0422.ordinalInvalid', N'ru', N'Порядок должен быть целым числом от 0 до 1000000, получено "{value}".'),
     (N'err.ECR-TMPL-0422.ordinalInvalid', N'kz', N'Рет 0-ден 1000000-ға дейінгі бүтін сан болуы керек, алынған мән "{value}".')
        ) AS v ([Key], Lang, Val)

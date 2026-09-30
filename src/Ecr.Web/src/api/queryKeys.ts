@@ -93,6 +93,9 @@ const templates = {
    * draft→publish контракт, що колонки, `W5.2`).
    */
   headerFieldsOf: (versionId: number) => ['templates', 'headerFieldsOf', versionId] as const,
+  /** Правила умовного форматування версії шаблону (ФВ-2.7). */
+  conditionalFormatsOf: (versionId: number) =>
+    ['templates', 'conditionalFormatsOf', versionId] as const,
 };
 
 /** Домен `registries`: перелік довідників, записи, опис (definition), історія. */
