@@ -1,5 +1,5 @@
 import { useState, type JSX } from 'react';
-import { Alert, Button, Checkbox, Group, Modal, Radio, Stack, Text, TextInput } from '@mantine/core';
+import { Alert, Button, Checkbox, Group, Modal, SegmentedControl, Stack, Text, TextInput } from '@mantine/core';
 import { useMutation } from '@tanstack/react-query';
 import { meetsGrant, type GrantLevelName } from '@/features/workflow/SheetActions';
 import { t } from '@/shared/i18n';
@@ -123,23 +123,23 @@ export function RegistrySyncPolicyModal({
           </Alert>
         )}
 
-        <Radio.Group
-          label={t('sources.syncPolicyMissing')}
-          value={missing}
-          onChange={(value) => setMissing(value as RegistryMissingPolicy)}
-        >
-          <Stack gap="xs" mt="xs">
-            {MissingPolicies.map((policy) => (
-              <Radio
-                key={policy.value}
-                value={policy.value}
-                label={policy.label()}
-                description={policy.hint()}
-                data-sync-policy-option={policy.value}
-              />
-            ))}
-          </Stack>
-        </Radio.Group>
+        {/* ⚠ SegmentedControl, не Radio: стилі Radio відсічені (`mantineCssPrune.ts`),
+            а повернути їх — +1 КБ у вхідний CSS і DocumentPage за межею D-132 (251/250). */}
+        <Stack gap="xs">
+          <Text size="sm" fw={500} id={`sync-policy-missing-${String(entityId)}`}>
+            {t('sources.syncPolicyMissing')}
+          </Text>
+          <SegmentedControl
+            aria-labelledby={`sync-policy-missing-${String(entityId)}`}
+            value={missing}
+            onChange={(value) => setMissing(value as RegistryMissingPolicy)}
+            data={MissingPolicies.map((policy) => ({ value: policy.value, label: policy.label() }))}
+            data-sync-policy-missing=""
+          />
+          <Text size="xs" c="dimmed" data-sync-policy-option={missing}>
+            {MissingPolicies.find((policy) => policy.value === missing)?.hint()}
+          </Text>
+        </Stack>
 
         <Text size="xs" c="dimmed">
           {t('sources.syncPolicyAttributeHint')}
