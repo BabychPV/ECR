@@ -114,7 +114,12 @@ public sealed class SourceEventsController(
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     public async Task<IActionResult> Sync(int id, CancellationToken ct)
-        => Accepted(new Contracts.JobAcceptedResponse(await sync.HandleAsync(id, ct).ConfigureAwait(false)));
+    {
+        // ⚠ 202 з jobId (сторож ApiConventionTests читає саме літерал у тілі дії).
+        var jobId = await sync.HandleAsync(id, ct).ConfigureAwait(false);
+
+        return Accepted(new Contracts.JobAcceptedResponse(jobId));
+    }
 
     /// <summary>Мапінги подій; за <paramref name="sourceEntityId"/> — лише сутності. Право <c>Integration.View</c> або <c>Integration.Manage</c>.</summary>
     /// <param name="sourceEntityId">Сутність-шаблон подій; <c>null</c> — усі.</param>
