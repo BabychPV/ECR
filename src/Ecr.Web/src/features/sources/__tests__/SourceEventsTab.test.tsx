@@ -276,6 +276,45 @@ describe('SourceEventsTab', () => {
     expect(document.querySelector('[data-source-event-map="12"]')).not.toBeNull();
   });
 
+  const firstPageReads = (): number =>
+    sent.filter((s) => s.method === 'GET' && s.path === '/api/v1/sources/42/source-events' && !s.search.includes('cursor')).length;
+
+  it('успішний «Отримати з PI зараз» — список подій перечитується (інвалідація ключа подій)', async () => {
+    respond();
+    show();
+    await firstRow();
+    expect(firstPageReads()).toBe(1);
+
+    fireEvent.click(screen.getByRole('button', { name: '⟦sourceEvents.syncNow⟧' }));
+
+    await waitFor(() => expect(firstPageReads()).toBe(2));
+  });
+
+  it('пауза мапінгу — список подій перечитується разом із мапінгами', async () => {
+    respond();
+    show();
+    await firstRow();
+    expect(firstPageReads()).toBe(1);
+
+    fireEvent.click(await waitFor(() => {
+      const button = document.querySelector<HTMLElement>('[data-source-event-map-toggle="12"]');
+      expect(button).not.toBeNull();
+      return button as HTMLElement;
+    }));
+
+    await waitFor(() => expect(firstPageReads()).toBe(2));
+  });
+
+  it('UTC-час — видимим текстом рядка, а не лише в title', async () => {
+    respond();
+    show();
+
+    const row = await firstRow();
+
+    expect(row.querySelector('[data-event-start-utc]')?.textContent).toMatch(/4:00:00.*UTC/);
+    expect(row.querySelector('[data-event-end-utc]')?.textContent).toMatch(/4:15:00.*UTC/);
+  });
+
   it('без Integration.Manage — ні створення, ні зміни, ні паузи, ні «Отримати з PI зараз»', async () => {
     respond();
     show(false);

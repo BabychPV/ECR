@@ -21,7 +21,9 @@ import type { MapColumn } from './sourceEventMapForm';
 export const SourceEventsKeys = {
   all: ['source-events'] as const,
   events: (sourceEntityId: number, filters: unknown) => ['source-events', 'events', sourceEntityId, filters] as const,
-  maps: (sourceEntityId: number) => ['source-events', 'maps', sourceEntityId] as const,
+  /** Префікс усіх сторінок і фільтрів подій сутності — для інвалідації після синку й правки мапінгу. */
+  eventsOf: (sourceEntityId: number) => ['source-events', 'events', sourceEntityId] as const,
+  maps: (sourceEntityId: number) =>['source-events', 'maps', sourceEntityId] as const,
   templates: (dataSourceId: number) => ['source-events', 'templates', dataSourceId] as const,
   documents: ['source-events', 'documents'] as const,
   tables: (documentId: number) => ['source-events', 'tables', documentId] as const,

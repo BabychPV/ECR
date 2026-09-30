@@ -11,7 +11,7 @@ import {
   Title,
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
-import { useInfiniteQuery, useMutation } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { EcrApiError } from "@/api/client";
 import type { DocumentSummary } from "@/api/types";
@@ -154,22 +154,26 @@ function EventRow({ row }: { readonly row: SourceEventRow }): JSX.Element {
       <Table.Td>
         {/* ⚠ UTC — у `title`, а не в `Tooltip`: Mantine `Tooltip` тут виносив спільний чанк у вхідний і зсував
             бюджет `DocumentPage` (248.6 → 253.5 КБ, `D-132`). */}
-        <Text size="sm" title={formatUtc(row.startUtc)} data-event-start="">
+        <Text size="sm" data-event-start="">
           {formatInZone(row.startUtc, row.timeZoneId, row.startLocal)}
+        </Text>
+        {/* UTC — видимим текстом (не лише `title`): доступний з клавіатури й сенсорних. */}
+        <Text size="xs" c="dimmed" data-event-start-utc="">
+          {formatUtc(row.startUtc)}
         </Text>
         {row.endUtc === null ? (
           <Text size="xs" c="dimmed">
             {t("sourceEvents.stillOpen")}
           </Text>
         ) : (
-          <Text
-            size="xs"
-            c="dimmed"
-            title={formatUtc(row.endUtc)}
-            data-event-end=""
-          >
-            {formatInZone(row.endUtc, row.timeZoneId, row.endLocal)}
-          </Text>
+          <>
+            <Text size="xs" c="dimmed" data-event-end="">
+              {formatInZone(row.endUtc, row.timeZoneId, row.endLocal)}
+            </Text>
+            <Text size="xs" c="dimmed" data-event-end-utc="">
+              {formatUtc(row.endUtc)}
+            </Text>
+          </>
         )}
       </Table.Td>
       <Table.Td>
@@ -274,6 +278,7 @@ export function SourceEventsTable({
   readonly canManage: boolean;
   readonly onCreateMap: () => void;
 }): JSX.Element {
+  const queryClient = useQueryClient();
   const [filters, setFilters] = useState<Filters>(NoFilters);
   const query = useMemo(() => eventsQuery(filters), [filters]);
 
@@ -291,6 +296,9 @@ export function SourceEventsTable({
   const sync = useMutation({
     mutationFn: () => syncSourceEvents(sourceEntityId),
     onSuccess: (accepted) => {
+      void queryClient.invalidateQueries({
+        queryKey: SourceEventsKeys.eventsOf(sourceEntityId),
+      });
       notifications.show({
         message: t("sourceEvents.syncQueued", {
           job: humanizeJobId(accepted.jobId),

@@ -290,6 +290,7 @@ export function SourceEventMapModal({
         : updateSourceEventMap(map.id, toUpdateRequest(state)),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: SourceEventsKeys.maps(sourceEntityId) });
+      void queryClient.invalidateQueries({ queryKey: SourceEventsKeys.eventsOf(sourceEntityId) });
       showDone(map === null ? t('sourceEvents.mapCreated') : t('sourceEvents.mapSaved'));
       onClose();
     },

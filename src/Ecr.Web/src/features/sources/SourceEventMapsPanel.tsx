@@ -55,6 +55,7 @@ export function SourceEventMapsPanel({
 
   const refresh = (): void => {
     void queryClient.invalidateQueries({ queryKey: SourceEventsKeys.maps(sourceEntityId) });
+    void queryClient.invalidateQueries({ queryKey: SourceEventsKeys.eventsOf(sourceEntityId) });
   };
 
   const toggle = useMutation({
