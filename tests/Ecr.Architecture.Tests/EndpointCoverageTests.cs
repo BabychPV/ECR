@@ -406,7 +406,7 @@ public sealed partial class EndpointCoverageTests
             ],
             "Підказка сірої комірки за причиною заборони."),
 
-        new("features/workflow/jobLabel.ts", "key", 2, "features/workflow/jobLabel.ts",
+        new("features/workflow/jobLabel.ts", "key", 3, "features/workflow/jobLabel.ts",
             [
                 "jobs.kind.recalculation", "jobs.kind.formulaRecalculation", "jobs.kind.excelExport",
                 "jobs.kind.excelImport", "jobs.kind.materializeCollectedData", "jobs.kind.reportSnapshot",
