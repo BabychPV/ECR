@@ -160,6 +160,41 @@ public sealed class JobsHealthStaleTests(SqlServerFixture sql)
         Assert.Equal("Degraded", jobs.GetProperty("status").GetString());
     }
 
+    /// <remarks>
+    /// Д-2 огляду O1: задача, що вичерпала стелю відкладень, жовтить <c>jobs</c> добу.
+    /// Мутація: прибрати блок лічильника в <c>JobsHealthCheck</c> → «за годину» Healthy, червоний.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Вичерпана_стеля_відкладень_жовтить_jobs_добу_з_лічильником()
+    {
+        var at = T.AddDays(3);
+        await SweepAtAsync(at);
+
+        var jobId = $"deferred-{Guid.NewGuid():N}";
+        var failedAt = at.AddHours(-1);
+        await using (var db = sql.CreateContext())
+        {
+            var store = new JobProgressStore(db);
+            await store.StartAsync(jobId, "Ecr.Test.DeferredJob", failedAt, CancellationToken.None);
+            await store.ReportAsync(
+                jobId, 0, Infrastructure.Jobs.JobDeferral.Envelope("ecr:recalc:doc:1", TimeSpan.FromMinutes(31)),
+                failedAt, CancellationToken.None);
+            await store.FinishAsync(jobId, "Failed", "deferred", failedAt, CancellationToken.None);
+        }
+
+        var degraded = await CheckAtAsync(at);
+        Assert.Equal(HealthStatus.Degraded, degraded.Status);
+        Assert.Equal(1, degraded.Data["deferralExhausted"]);
+        Assert.Contains("1", degraded.Description, StringComparison.Ordinal);
+
+        // Через добу — поза вікном: зелений сам (прибирання чужих завислих — перед перевіркою).
+        var later = at.Add(JobsHealthCheck.DeferralExhaustedWindow);
+        await SweepAtAsync(later);
+        Assert.Equal(HealthStatus.Healthy, (await CheckAtAsync(later)).Status);
+    }
+
     private async Task<Infrastructure.Jobs.SweepOutcome> SweepAtAsync(DateTime at)
     {
         var services = new ServiceCollection();

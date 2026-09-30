@@ -181,6 +181,15 @@ public interface IJobProgressStore
     public Task<StaleJobsSummary> SummarizeStaleAsync(DateTime utcNow, CancellationToken ct);
 
     /// <summary>
+    /// Скільки задач закрито <c>Failed</c> з конвертом <paramref name="messageKey"/> від
+    /// <paramref name="sinceUtc"/> (Д-2 огляду O1: вичерпана стеля відкладень).
+    /// </summary>
+    /// <param name="messageKey">Ключ каталогу в конверті <c>Message</c>.</param>
+    /// <param name="sinceUtc">Нижня межа <c>UpdatedAt</c> (UTC).</param>
+    /// <param name="ct">Скасування.</param>
+    public Task<int> CountFailedWithMessageKeyAsync(string messageKey, DateTime sinceUtc, CancellationToken ct);
+
+    /// <summary>
     /// Видаляє ЗАВЕРШЕНІ записи, старші за <paramref name="olderThan"/> (аудит P2).
     /// </summary>
     /// <param name="olderThan">Межа: завершені до цього моменту видаляються.</param>

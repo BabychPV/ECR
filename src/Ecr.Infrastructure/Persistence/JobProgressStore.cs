@@ -430,6 +430,24 @@ public sealed class JobProgressStore(EcrDbContext db) : IJobProgressStore
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// ⚠ Пошук ключа в лапках: конверт — компактний JSON (<c>JobProgressMessageCodec</c>),
+    /// і ключ каталогу в ньому — рядкове значення. <c>Failed</c> за 30 діб зберігання —
+    /// небагато рядків, шукаються за префіксом <c>IX_JobProgress_Stale</c> (State).
+    /// </remarks>
+    public Task<int> CountFailedWithMessageKeyAsync(string messageKey, DateTime sinceUtc, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(messageKey);
+        var quoted = "\"" + messageKey + "\"";
+
+        return db.JobProgresses
+            .AsNoTracking()
+            .CountAsync(
+                p => p.State == "Failed" && p.UpdatedAt >= sinceUtc && p.Message != null && p.Message.Contains(quoted),
+                ct);
+    }
+
+    /// <inheritdoc />
     public async Task<int> PurgeFinishedAsync(DateTime olderThan, int batch, CancellationToken ct)
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(batch, 1);

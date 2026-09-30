@@ -80,6 +80,12 @@ public sealed class QuartzJobScheduler(
     /// </remarks>
     public const string RecurringKey = "ecr.recurring";
 
+    /// <summary>
+    /// Скільки тіл задач злиття, що впали остаточно, тримає процес для ручного перезапуску
+    /// (огляд O1, косметика) — далі найстаріше забувається.
+    /// </summary>
+    public const int MaxFailedMergeBodies = 256;
+
     /// <inheritdoc />
     /// <remarks>⚠ Черга в пам'яті: постановка — лише ПІСЛЯ коміту викликача (MI-02 (в)).</remarks>
     public bool EnlistsInCallerTransaction => false;
@@ -994,6 +1000,39 @@ internal static class QuartzPayloadMerges
     /// <summary>Ціль → задача, що приймає злиття (щонайбільше одна).</summary>
     private static readonly Dictionary<string, string> OpenByTarget = new(StringComparer.Ordinal);
 
+    /// <summary>Тіла задач, що впали остаточно, від найстарішого (<see cref="MarkFailed"/>).</summary>
+    private static readonly LinkedList<string> FailedOrder = new();
+
+    private static readonly Dictionary<string, LinkedListNode<string>> FailedById = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Задача злиття впала остаточно: тіло лишається для ручного перезапуску, але не вічно —
+    /// понад <see cref="QuartzJobScheduler.MaxFailedMergeBodies"/> найстаріше забувається.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Без межі сховище росло б на кожну Failed задачу формул до рестарту процесу (огляд O1,
+    /// косметика). Забуте тіло не ламає перезапуск: адаптер бере payload першої постановки
+    /// з <c>JobDataMap</c>, а комірки вичерпаної стелі вже перепоставлено (Д-1).
+    /// </remarks>
+    public static void MarkFailed(string jobId)
+    {
+        lock (Gate)
+        {
+            if (!ByJob.ContainsKey(jobId) || FailedById.ContainsKey(jobId))
+            {
+                return;
+            }
+
+            FailedById[jobId] = FailedOrder.AddLast(jobId);
+
+            while (FailedOrder.Count > QuartzJobScheduler.MaxFailedMergeBodies)
+            {
+                var oldest = FailedOrder.First!.Value;
+                ForgetLocked(oldest);
+            }
+        }
+    }
+
     /// <summary>Зливає масив у задачу цілі, що чекає, або реєструє <paramref name="newJobId"/>.</summary>
     /// <returns>Задача, що виконає роботу; <c>Created</c> — її треба поставити в Quartz.</returns>
     public static (string JobId, bool Created) MergeOrOpen(
@@ -1044,6 +1083,7 @@ internal static class QuartzPayloadMerges
             fresh = entry.Fresh;
             entry.Fresh = false;
             entry.Taken = true;
+            Revive(jobId);
             if (OpenByTarget.TryGetValue(entry.Target, out var open) && string.Equals(open, jobId, StringComparison.Ordinal))
             {
                 OpenByTarget.Remove(entry.Target);
@@ -1071,12 +1111,28 @@ internal static class QuartzPayloadMerges
     {
         lock (Gate)
         {
-            if (ByJob.Remove(jobId, out var entry)
-                && OpenByTarget.TryGetValue(entry.Target, out var open)
-                && string.Equals(open, jobId, StringComparison.Ordinal))
-            {
-                OpenByTarget.Remove(entry.Target);
-            }
+            ForgetLocked(jobId);
+        }
+    }
+
+    /// <summary>Знімає позначку «впала остаточно» (перезапуск: задача знову жива).</summary>
+    private static void Revive(string jobId)
+    {
+        if (FailedById.Remove(jobId, out var node))
+        {
+            FailedOrder.Remove(node);
+        }
+    }
+
+    private static void ForgetLocked(string jobId)
+    {
+        Revive(jobId);
+
+        if (ByJob.Remove(jobId, out var entry)
+            && OpenByTarget.TryGetValue(entry.Target, out var open)
+            && string.Equals(open, jobId, StringComparison.Ordinal))
+        {
+            OpenByTarget.Remove(entry.Target);
         }
     }
 

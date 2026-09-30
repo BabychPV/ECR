@@ -224,6 +224,7 @@ public sealed partial class QuartzJobAdapter(
                 }
 
                 await RequeueExhaustedAsync(context, jobId, typeName, payload, progress, clock).ConfigureAwait(false);
+                QuartzPayloadMerges.MarkFailed(jobId);
 
                 // ⚠ Деталь лишається (дурабельна) — для ручного перезапуску, як у провалу нижче.
                 throw new JobExecutionException(deferred, refireImmediately: false);
@@ -281,6 +282,9 @@ public sealed partial class QuartzJobAdapter(
                 .ConfigureAwait(false);
 
             LogJobFailed(logger, jobId, typeName ?? "—", ex);
+
+            // Тіло задачі злиття — для ручного перезапуску, але в межах (огляд O1, косметика).
+            QuartzPayloadMerges.MarkFailed(jobId);
 
             // ⛔ Деталь задачі НЕ видаляється тут. Дурабельна саме на цей
             // випадок (QuartzJobScheduler.EnqueueCoreAsync): без неї

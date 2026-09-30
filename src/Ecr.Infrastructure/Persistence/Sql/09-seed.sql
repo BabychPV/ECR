@@ -4251,6 +4251,10 @@ USING (VALUES
     (N'jobs.deferralExhausted',                 N'en', N'Stopped: the job waited {waited} for resource {resource} to be released, longer than the deferral limit. Check what holds the resource, then restart the job.', 1),
     -- ru/kz — окремою порцією `COLL:defer-cap` у блоці I18N нижче.
     -- COLL:defer-cap ── кінець секції ──
+    -- COLL:defer-health ── Вичерпана стеля відкладень у перевірці `jobs` (Д-2 огляду O1, `JobsHealthCheck`) ──
+    (N'health.jobs.deferralExhausted',          N'en', N'Background jobs stopped on the deferral limit in the last 24 hours: {count}. See the job list for the held resource.', 1),
+    -- ru/kz — окремою порцією `COLL:defer-health` у блоці I18N нижче.
+    -- COLL:defer-health ── кінець секції ──
     (N'health.sources.notRegistered',           N'en', N'The collection store is not registered in the container.', 1),
     (N'health.sources.noneActive',              N'en', N'No active collection sources.', 1),
     (N'health.sources.failedCount',             N'en', N'Sources with a failed last run: {count}.', 1),
@@ -11187,6 +11191,17 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:defer-cap ── кінець секції ──
+
+-- COLL:defer-health ── ru/kz вичерпаної стелі відкладень у перевірці jobs (Д-2 огляду O1); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'health.jobs.deferralExhausted', N'ru', N'Фоновые задачи, остановленные по пределу откладывания за последние 24 часа: {count}. Удерживаемый ресурс — в списке задач.'),
+    (N'health.jobs.deferralExhausted', N'kz', N'Соңғы 24 сағатта кейінге қалдыру шегі бойынша тоқтатылған фондық тапсырмалар: {count}. Ұсталып тұрған ресурс — тапсырмалар тізімінде.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:defer-health ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

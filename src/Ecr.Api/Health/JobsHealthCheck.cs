@@ -42,6 +42,12 @@ public sealed class JobsHealthCheck(
     /// </remarks>
     public static readonly TimeSpan UnsweptAfter = IJobProgressStore.StaleAfter + TimeSpan.FromMinutes(6);
 
+    /// <summary>
+    /// Вікно лічильника задач, що вичерпали стелю відкладень (Д-2 огляду O1): доба —
+    /// жовтий гасне сам наступного дня, якщо нових таких немає.
+    /// </summary>
+    public static readonly TimeSpan DeferralExhaustedWindow = TimeSpan.FromDays(1);
+
     /// <inheritdoc />
     public async Task<HealthCheckResult> CheckHealthAsync(
         HealthCheckContext context,
@@ -132,6 +138,32 @@ public sealed class JobsHealthCheck(
                     // зависле ТЛО — і однаковий стан спільної бази зняв би так
                     // само всі інстанси разом (рішення координатора). Тяжкість
                     // розрізняють текст і `cleanupStalled`, а не код відповіді.
+                    return HealthCheckResult.Degraded(text, data: data);
+                }
+
+                // ⛔ Д-2 огляду O1: задача, що вичерпала стелю відкладень, закривається Failed
+                // тихо — рядок Error у журналі і конверт у /jobs. Без цього жовтого вічно
+                // зайнятий лок документа помічали б лише за непорахованими формулами.
+                var exhausted = await progress
+                    .CountFailedWithMessageKeyAsync(
+                        Infrastructure.Jobs.JobDeferral.ExhaustedKey, now - DeferralExhaustedWindow, cancellationToken)
+                    .ConfigureAwait(false);
+
+                if (exhausted > 0)
+                {
+                    var data = Data(jobs.Count, triggers.Count);
+                    data["deferralExhausted"] = exhausted;
+                    var text = await Text(
+                            "health.jobs.deferralExhausted",
+                            "Background jobs stopped on the deferral limit in the last 24 hours: {count}. See the job list for the held resource.",
+                            cancellationToken,
+                            new Dictionary<string, string>(StringComparer.Ordinal)
+                            {
+                                ["count"] = exhausted.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                            })
+                        .ConfigureAwait(false);
+
+                    // Лише Degraded — той самий принцип, що для завислих задач вище.
                     return HealthCheckResult.Degraded(text, data: data);
                 }
             }
