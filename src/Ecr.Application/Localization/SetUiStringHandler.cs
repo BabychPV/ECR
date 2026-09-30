@@ -5,6 +5,7 @@ using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Errors;
+using Ecr.Application.Security;
 
 namespace Ecr.Application.Localization;
 
@@ -61,7 +62,7 @@ public sealed class SetUiStringHandler(
         // область каталогу віддається анонімно, тому чужий текст у ній — це текст
         // на сторінці входу для всіх відвідувачів.
         var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
-        if (!profile.Has(Permission))
+        if (!PermissionCheck.IsGranted(profile, Permission))
         {
             throw new AccessDeniedException(
                 "ECR-AUTH-0403", $"Потрібне право {Permission}.",

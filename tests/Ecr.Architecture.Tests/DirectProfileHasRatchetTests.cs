@@ -22,12 +22,10 @@ public sealed partial class DirectProfileHasRatchetTests
     /// <summary>Файли з прямим <c>profile.Has(</c> на момент введення храповика.</summary>
     private static readonly string[] Debt =
     [
-        "src/Ecr.Application/Audit/GetCellChangesHandler.cs",
         "src/Ecr.Application/Documents/DocumentQueryHandlers.cs",
         "src/Ecr.Application/Documents/DocumentVisibility.cs",
         "src/Ecr.Application/Integration/IntegrationHandlers.cs",
         "src/Ecr.Application/Integration/SourceEvents/SourceEventsTableHandlers.cs",
-        "src/Ecr.Application/Localization/SetUiStringHandler.cs",
         "src/Ecr.Application/Projects/ProjectQueryHandlers.cs",
         "src/Ecr.Application/Registries/RegistryAccess.cs",
         "src/Ecr.Application/Reporting/ExportSnapshotHandler.cs",
@@ -37,8 +35,6 @@ public sealed partial class DirectProfileHasRatchetTests
         "src/Ecr.Application/Security/PermissionCheck.cs",
         "src/Ecr.Application/Security/ResourceGrantHandlers.cs",
         "src/Ecr.Application/Security/RoleAndUserHandlers.cs",
-        "src/Ecr.Application/Templates/TemplateQueryHandlers.cs",
-        "src/Ecr.Application/Workflow/ReopenDocumentHandler.cs",
     ];
 
     [GeneratedRegex(@"\bprofile\.Has\(")]

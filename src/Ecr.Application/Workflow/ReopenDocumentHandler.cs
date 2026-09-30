@@ -57,9 +57,9 @@ public sealed class ReopenDocumentHandler(
         // змогу змінити вже подані числа (ФВ-6.12).
         // ⛔ ФВ-6.14: у проєкті ЦЬОГО документа — роль з областю діє лише там.
         // Проєкт питається лише тоді, коли права немає глобально.
-        var allowed = profile.Has(Permission)
+        var allowed = PermissionCheck.IsGranted(profile, Permission)
                       || (await access.DocumentProjectIdAsync(documentId, ct).ConfigureAwait(false) is { } documentProject
-                          && profile.Has(Permission, documentProject));
+                          && PermissionCheck.IsGrantedIn(profile, Permission, documentProject));
         if (!allowed)
         {
             throw new AccessDeniedException(

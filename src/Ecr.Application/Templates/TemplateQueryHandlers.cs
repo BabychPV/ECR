@@ -60,7 +60,7 @@ public sealed class ListTemplatesHandler(
                          new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.signInRequired" });
 
         var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
-        if (!profile.Has(permission))
+        if (!PermissionCheck.IsGranted(profile, permission))
         {
             throw new AccessDeniedException(
                 "ECR-AUTH-0403", $"Потрібне право {permission}.",

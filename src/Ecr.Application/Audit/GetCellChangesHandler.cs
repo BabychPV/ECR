@@ -83,7 +83,7 @@ public sealed class GetCellChangesHandler(
         // History в інспекторі комірки була б порожньою для всіх, крім
         // аудиторів: `Security.ViewAudit` має мізерна частка ролей.
         var single = filter.IsSingleCell;
-        if (!profile.Has(Permission) && !(single && profile.HasInAnyProject(CellHistoryPermission)))
+        if (!PermissionCheck.IsGranted(profile, Permission) && !(single && profile.HasInAnyProject(CellHistoryPermission)))
         {
             // ⚠ Називається право, якого бракує САМЕ ДЛЯ ЦЬОГО запиту: сказати
             // власникові `Document.View` «потрібне Security.ViewAudit» на
@@ -190,9 +190,9 @@ public sealed class GetCellChangesHandler(
             // взагалі), лише ПОТІМ межі читання S6. Навпаки — і запит без права
             // на прихованій колонці отримав би «порожньо» замість 403, тобто
             // відповідь залежала б від заборони, а не від права.
-            if (!profile.Has(Permission)
+            if (!PermissionCheck.IsGranted(profile, Permission)
                 && await access.DocumentProjectIdAsync(id, ct).ConfigureAwait(false) is { } projectId
-                && !profile.Has(CellHistoryPermission, projectId))
+                && !PermissionCheck.IsGrantedIn(profile, CellHistoryPermission, projectId))
             {
                 throw new AccessDeniedException(
                     "ECR-AUTH-0403", $"Потрібне право {CellHistoryPermission}.",
