@@ -4246,6 +4246,11 @@ USING (VALUES
     (N'status.coverage.RegistryExternalKeyRelinked', N'en', N'Relinked by source path', 1),
     -- ru/kz — окремою порцією `COLL:d212-statuses` у блоці I18N нижче.
     -- COLL:d212-statuses ── кінець секції ──
+    -- COLL:defer-cap ── Стеля відкладень задачі, що чекає зайнятий ресурс (борг O1, `JobDeferral`, `JobWorker`, `QuartzJobAdapter`) ──
+    -- `{resource}` — ім'я лока (`ecr:recalc:doc:{id}`), `{waited}` — hh:mm:ss від першого відкладення. Failed без ретраю.
+    (N'jobs.deferralExhausted',                 N'en', N'Stopped: the job waited {waited} for resource {resource} to be released, longer than the deferral limit. Check what holds the resource, then restart the job.', 1),
+    -- ru/kz — окремою порцією `COLL:defer-cap` у блоці I18N нижче.
+    -- COLL:defer-cap ── кінець секції ──
     (N'health.sources.notRegistered',           N'en', N'The collection store is not registered in the container.', 1),
     (N'health.sources.noneActive',              N'en', N'No active collection sources.', 1),
     (N'health.sources.failedCount',             N'en', N'Sources with a failed last run: {count}.', 1),
@@ -11171,6 +11176,17 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:d212-statuses ── кінець секції ──
+
+-- COLL:defer-cap ── ru/kz стелі відкладень задачі (борг O1); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'jobs.deferralExhausted', N'ru', N'Остановлено: задача ждала освобождения ресурса {resource} {waited} — дольше предела откладывания. Проверьте, что удерживает ресурс, и перезапустите задачу.'),
+    (N'jobs.deferralExhausted', N'kz', N'Тоқтатылды: тапсырма {resource} ресурсының босауын {waited} күтті — кейінге қалдыру шегінен ұзақ. Ресурсты не ұстап тұрғанын тексеріп, тапсырманы қайта іске қосыңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:defer-cap ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

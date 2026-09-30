@@ -194,8 +194,48 @@ public sealed partial class QuartzJobAdapter(
             // ⛔ O1 (I2 ФВ-9.8): ресурс зайнятий — новий триґер через відступ з ТИМ
             // САМИМ лічильником спроби, і потік пулу вільний одразу. Очікування лока
             // всередині задачі тримало б потік: у I2 так стояли всі 10 потоків Quartz.
+            var since = DeferredSince(context);
+            var now = clock.UtcNow;
+
+            // ⛔ Стеля (борг O1): лок, що не звільняється, — Failed, а не вічні триґери.
+            if (JobDeferral.IsExhausted(since, now, JobDeferral.MaxDeferral))
+            {
+                var waited = now - since!.Value;
+                LogDeferralExhausted(logger, jobId, typeName ?? "—", deferred.Resource ?? "—", JobDeferral.Format(waited));
+
+                if (progress is not null)
+                {
+                    await WriteProgressAsync(
+                            jobId,
+                            async () =>
+                            {
+                                await progress.ReportAsync(
+                                        jobId, 0, JobDeferral.Envelope(deferred.Resource, waited), now, CancellationToken.None)
+                                    .ConfigureAwait(false);
+                                await FinishAsync(
+                                        progress, jobId, "Failed",
+                                        $"The job was deferred for {JobDeferral.Format(waited)} waiting for resource {deferred.Resource ?? "—"} and was stopped.",
+                                        clock, CancellationToken.None)
+                                    .ConfigureAwait(false);
+                            })
+                        .ConfigureAwait(false);
+                }
+
+                // ⚠ Деталь лишається (дурабельна) — для ручного перезапуску, як у провалу нижче.
+                throw new JobExecutionException(deferred, refireImmediately: false);
+            }
+
             LogJobDeferred(logger, jobId, typeName ?? "—", deferred.Delay);
-            await ScheduleDeferredAsync(context, correlationId, clock, deferred.Delay).ConfigureAwait(false);
+            await ScheduleDeferredAsync(context, correlationId, clock, deferred.Delay, since ?? now).ConfigureAwait(false);
+
+            // Задача чекає в черзі, а не виконується: стан — Queued до наступного триґера.
+            if (progress is not null)
+            {
+                await WriteProgressAsync(
+                        jobId,
+                        () => progress.QueueAsync(jobId, typeName!, now, CancellationToken.None, correlationId: correlationId))
+                    .ConfigureAwait(false);
+            }
 
             // Задача знову чекає — злиття масиву йде в неї (O1).
             QuartzPayloadMerges.Reopen(jobId);
@@ -340,6 +380,21 @@ public sealed partial class QuartzJobAdapter(
             : 0;
     }
 
+    /// <summary>Момент першого відкладення з триґера; <c>null</c> — прогін не з відкладення.</summary>
+    private static DateTime? DeferredSince(IJobExecutionContext context)
+    {
+        var map = context.Trigger?.JobDataMap;
+
+        return map is not null
+               && map.ContainsKey(JobDeferral.QuartzSinceKey)
+               && long.TryParse(
+                   map.GetString(JobDeferral.QuartzSinceKey), NumberStyles.Integer, CultureInfo.InvariantCulture,
+                   out var ticks)
+               && ticks > 0 && ticks <= DateTime.MaxValue.Ticks
+            ? new DateTime(ticks, DateTimeKind.Utc)
+            : null;
+    }
+
     /// <summary>
     /// Кореляція прогону: триґер (ретрай, ручний перезапуск) → задача
     /// (постановка) → нова (розклад: нічний прогін не має запиту-причини).
@@ -428,7 +483,7 @@ public sealed partial class QuartzJobAdapter(
     /// <see cref="QuartzJobScheduler.RetryAttemptKey"/> — спроба не рахується.
     /// </summary>
     private static async Task ScheduleDeferredAsync(
-        IJobExecutionContext context, string correlationId, IClock clock, TimeSpan delay)
+        IJobExecutionContext context, string correlationId, IClock clock, TimeSpan delay, DateTime since)
     {
         var jobId = context.JobDetail.Key.Name;
 
@@ -438,6 +493,8 @@ public sealed partial class QuartzJobAdapter(
             .UsingJobData(
                 QuartzJobScheduler.RetryAttemptKey, CurrentAttempt(context).ToString(CultureInfo.InvariantCulture))
             .UsingJobData(QuartzJobScheduler.CorrelationKey, correlationId)
+            // Момент ПЕРШОГО відкладення — далі з триґера в триґер (стеля, борг O1).
+            .UsingJobData(JobDeferral.QuartzSinceKey, since.Ticks.ToString(CultureInfo.InvariantCulture))
             .StartAt(new DateTimeOffset(clock.UtcNow, TimeSpan.Zero).Add(delay))
             .Build();
 
@@ -542,6 +599,9 @@ public sealed partial class QuartzJobAdapter(
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Задача {JobId} ({TypeName}) відкладена на {Delay}: ресурс зайнятий; спробу не зараховано.")]
     private static partial void LogJobDeferred(ILogger logger, string jobId, string typeName, TimeSpan delay);
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "Задача {JobId} ({TypeName}) відкладалась {Waited}, чекаючи ресурс {Resource}; стеля відкладень вичерпана, стан Failed.")]
+    private static partial void LogDeferralExhausted(ILogger logger, string jobId, string typeName, string resource, string waited);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Задача {JobId} ({TypeName}) впала; заплановано повтор.")]
     private static partial void LogJobRetrying(ILogger logger, string jobId, string typeName, Exception exception);

@@ -87,7 +87,8 @@ public static class RecalculationDocumentLock
                    DeferDelay,
                    string.Create(
                        CultureInfo.InvariantCulture,
-                       $"Документ {documentId} перераховує інша задача; відкладено на {DeferDelay.TotalSeconds:0} с."));
+                       $"Документ {documentId} перераховує інша задача; відкладено на {DeferDelay.TotalSeconds:0} с."),
+                   Resource(documentId));
     }
 }
 
@@ -99,11 +100,16 @@ public static class RecalculationDocumentLock
 /// ⛔ Не провал і не ретрай: спроба (<c>Attempt</c>, <c>RetryAttemptKey</c>) не
 /// збільшується, <c>JobRetryPolicy</c> цей виняток не бачить. Інакше задача, що
 /// чесно чекає довгий повний перерахунок, вичерпала б ретраї й упала б <c>Failed</c>.
+/// Межа відкладень — окрема: <see cref="JobDeferral.MaxDeferral"/> від першого.
 /// </remarks>
 /// <param name="delay">Через скільки повторити.</param>
 /// <param name="message">Причина — для журналу.</param>
-public sealed class JobDeferredException(TimeSpan delay, string message) : Exception(message)
+/// <param name="resource">Зайнятий ресурс (ім'я лока) — у конверт <see cref="JobDeferral.ExhaustedKey"/>.</param>
+public sealed class JobDeferredException(TimeSpan delay, string message, string? resource = null) : Exception(message)
 {
     /// <summary>Через скільки задачу варто спробувати знову.</summary>
     public TimeSpan Delay { get; } = delay;
+
+    /// <summary>Зайнятий ресурс; <c>null</c> — не названо.</summary>
+    public string? Resource { get; } = resource;
 }

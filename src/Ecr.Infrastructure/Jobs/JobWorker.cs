@@ -56,6 +56,13 @@ public sealed record JobWorkerOptions
     /// закривається <c>Failed</c> з конвертом <see cref="MaxDurationKey"/>.
     /// </summary>
     public TimeSpan? MaxDuration { get; init; }
+
+    /// <summary>
+    /// Стеля сумарного відкладення однієї задачі від першого (борг O1,
+    /// <see cref="JobDeferral.MaxDeferral"/>): перевищила — <c>Failed</c> з конвертом
+    /// <see cref="JobDeferral.ExhaustedKey"/>, без ретраю.
+    /// </summary>
+    public TimeSpan MaxDeferral { get; init; } = JobDeferral.MaxDeferral;
 }
 
 /// <summary>
@@ -367,6 +374,14 @@ public sealed partial class JobWorker(
         // очікування чужого прогону.
         if (deferred is not null)
         {
+            // ⛔ Стеля (борг O1): лок, що не звільняється, — не вічні повтори, а Failed.
+            var since = JobDeferral.SinceOf(job.PayloadJson);
+            if (JobDeferral.IsExhausted(since, clock.UtcNow, options.MaxDeferral))
+            {
+                await FailDeferralExhaustedAsync(job, deferred, clock.UtcNow - since!.Value, clock).ConfigureAwait(false);
+                return;
+            }
+
             LogJobDeferred(logger, claim.JobId, job.JobCode, deferred.Delay);
             await SettleAsync(claim.JobId, q => q.DeferAsync(claim, deferred.Delay, CancellationToken.None))
                 .ConfigureAwait(false);
@@ -489,6 +504,28 @@ public sealed partial class JobWorker(
             .ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Відкладення вичерпало <see cref="JobWorkerOptions.MaxDeferral"/>: <c>Failed</c> без
+    /// ретраю, конверт <see cref="JobDeferral.ExhaustedKey"/> у <c>Message</c>.
+    /// </summary>
+    private async Task FailDeferralExhaustedAsync(
+        ClaimedJob job, JobDeferredException deferred, TimeSpan waited, IClock clock)
+    {
+        var claim = job.Claim;
+        var shown = JobDeferral.Format(waited);
+        LogDeferralExhausted(logger, claim.JobId, job.JobCode, deferred.Resource ?? "—", shown);
+
+        await WriteProgressAsync(claim.JobId, store => store.ReportAsync(
+                claim.JobId, 0, JobDeferral.Envelope(deferred.Resource, waited), clock.UtcNow, CancellationToken.None))
+            .ConfigureAwait(false);
+
+        await SettleAsync(claim.JobId, q => q.FailAsync(
+                claim,
+                $"The job was deferred for {shown} waiting for resource {deferred.Resource ?? "—"} and was stopped.",
+                errorCode: null, CancellationToken.None))
+            .ConfigureAwait(false);
+    }
+
     /// <summary>Завершальна дія власника оренди у власному scope; <c>false</c> — оренду вже втрачено.</summary>
     private async Task SettleAsync(string jobId, Func<IJobQueue, Task<bool>> action)
     {
@@ -564,6 +601,9 @@ public sealed partial class JobWorker(
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Задача {JobId} ({TypeName}) відкладена на {Delay}: ресурс зайнятий; спробу не зараховано.")]
     private static partial void LogJobDeferred(ILogger logger, string jobId, string typeName, TimeSpan delay);
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "Задача {JobId} ({TypeName}) відкладалась {Waited}, чекаючи ресурс {Resource}; стеля відкладень вичерпана, стан Failed.")]
+    private static partial void LogDeferralExhausted(ILogger logger, string jobId, string typeName, string resource, string waited);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Оренду задачі {JobId} втрачено: її виконує інший виконавець; результат цього виконання не записано.")]
     private static partial void LogLeaseLost(ILogger logger, string jobId);

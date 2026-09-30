@@ -430,6 +430,20 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock) : IJobQueue
             {MergeDeclarations}
             SELECT @target = TargetKey, @ok = 1, @code = JobCode, @addPayload = Payload
             FROM itg.JobProgress WITH (UPDLOCK) {OwnedBy};
+            -- Стеля відкладень (борг O1): момент ПЕРШОГО відкладення — у payload-об'єкті;
+            -- відкладення ставить його, якщо немає, ретрай після провалу знімає.
+            DECLARE @oldSince nvarchar(40) = NULL, @since nvarchar(40) = NULL, @ownPayload nvarchar(max) = NULL,
+                    @behindPayload nvarchar(max) = NULL;
+            IF ISJSON(@addPayload) = 1 AND LEFT(LTRIM(@addPayload), 1) = NCHAR(123)
+            BEGIN
+                SET @oldSince = JSON_VALUE(@addPayload, @sincePath);
+                IF @restoreAttempt = 1
+                    SET @since = ISNULL(@oldSince, @now);
+                IF @restoreAttempt = 1 AND @oldSince IS NULL
+                    SET @ownPayload = JSON_MODIFY(@addPayload, @sincePath, @since);
+                IF @restoreAttempt = 0 AND @oldSince IS NOT NULL
+                    SET @ownPayload = JSON_MODIFY(@addPayload, @sincePath, NULL);
+            END
             IF @ok = 1 AND @target IS NOT NULL
                 SELECT @behind = JobId, @basePayload = Payload
                 FROM itg.JobProgress WITH (UPDLOCK, HOLDLOCK, INDEX(UX_JobProgress_Target_Queued))
@@ -456,11 +470,21 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock) : IJobQueue
                 UPDATE itg.JobProgress
                 SET AvailableAt = CASE WHEN AvailableAt > @available THEN @available ELSE AvailableAt END
                 WHERE JobId = @behind;
+                -- Задача позаду чекає той самий ресурс: відлік стелі не починається заново.
+                IF @since IS NOT NULL
+                BEGIN
+                    SELECT @behindPayload = Payload FROM itg.JobProgress WHERE JobId = @behind;
+                    IF ISJSON(@behindPayload) = 1 AND LEFT(LTRIM(@behindPayload), 1) = NCHAR(123)
+                        IF JSON_VALUE(@behindPayload, @sincePath) IS NULL
+                            UPDATE itg.JobProgress
+                            SET Payload = JSON_MODIFY(@behindPayload, @sincePath, @since)
+                            WHERE JobId = @behind;
+                END
             END
             ELSE IF @ok = 1
                 UPDATE itg.JobProgress
                 SET [State] = 'Queued', AvailableAt = @available, ClaimToken = NULL, LeaseUntil = NULL,
-                    UpdatedAt = @shown, HeartbeatAt = @shown,
+                    UpdatedAt = @shown, HeartbeatAt = @shown, Payload = ISNULL(@ownPayload, Payload),
                     Attempt = CASE WHEN @restoreAttempt = 1 AND ISNULL(Attempt, 0) > 0 THEN Attempt - 1 ELSE Attempt END,
                     -- Позаду на ціль уже стоїть інша Queued: дві Queued на ціль не пускає UX_JobProgress_Target_Queued.
                     TargetKey = CASE WHEN @behind IS NULL THEN TargetKey ELSE NULL END
@@ -476,6 +500,7 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock) : IJobQueue
                 p.Add("@restoreAttempt", SqlDbType.Bit).Value = restoreAttempt;
                 p.Add("@delayMs", SqlDbType.Int).Value = checked((int)delay.TotalMilliseconds);
                 p.Add("@absorbed", SqlDbType.NVarChar, JobProgressMessageCodec.MaxEncodedLength).Value = absorbed;
+                BindDeferral(p);
                 AddShown(p);
             },
             async r => await r.ReadAsync(ct).ConfigureAwait(false) && r.GetInt32(0) == 1,
@@ -562,13 +587,17 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock) : IJobQueue
                 UPDATE itg.JobProgress
                 SET [State] = 'Queued', Attempt = 0, ReclaimCount = 0, AvailableAt = SYSUTCDATETIME(),
                     ClaimToken = NULL, LeaseUntil = NULL, CancelRequestedAt = NULL, [Percent] = 0,
-                    [Message] = NULL, Error = NULL, ErrorCode = NULL, UpdatedAt = @shown, HeartbeatAt = @shown
+                    [Message] = NULL, Error = NULL, ErrorCode = NULL, UpdatedAt = @shown, HeartbeatAt = @shown,
+                    -- Нова серія — і новий відлік стелі відкладень (борг O1).
+                    Payload = CASE WHEN ISJSON(Payload) = 1 AND LEFT(LTRIM(Payload), 1) = N'{'
+                                   THEN JSON_MODIFY(Payload, @sincePath, NULL) ELSE Payload END
                 OUTPUT 1
                 WHERE JobId = @id AND Lane IS NOT NULL AND [State] IN ('Failed', 'Cancelled');
                 """,
                 p =>
                 {
                     p.Add("@id", SqlDbType.NVarChar, 100).Value = jobId;
+                    BindDeferral(p);
                     AddShown(p);
                 },
                 r => r.ReadAsync(ct),
@@ -734,6 +763,16 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock) : IJobQueue
 
     private void AddShown(SqlParameterCollection p)
         => p.Add("@shown", SqlDbType.DateTime2).Value = clock.UtcNow;
+
+    /// <summary>
+    /// Параметри стелі відкладень: шлях властивості <see cref="JobDeferral.PayloadProperty"/>
+    /// і «зараз» за <see cref="IClock"/> — той самий годинник, яким <c>JobWorker</c> міряє стелю.
+    /// </summary>
+    private void BindDeferral(SqlParameterCollection p)
+    {
+        p.Add("@sincePath", SqlDbType.NVarChar, 100).Value = "$." + JobDeferral.PayloadProperty;
+        p.Add("@now", SqlDbType.NVarChar, 40).Value = clock.UtcNow.ToString("O", CultureInfo.InvariantCulture);
+    }
 
     /// <summary>Параметри <see cref="MergeArraysSql"/>; <paramref name="path"/> <c>null</c> — злиття немає.</summary>
     private static void BindMerge(SqlParameterCollection p, string? path)
