@@ -263,6 +263,21 @@ export const routes = {
     handle: { labelKey: 'nav.registries', permission: 'Registry.View', icon: 'registries' },
     showInNav: true,
   },
+  // ФВ-8.12: дані довідника — табличний редактор (`features/registries/rc812`).
+  adminRegistryData: {
+    id: 'admin-registry-data',
+    path: '/admin/registries/:code/entries',
+    handle: {
+      labelKey: 'registries.data.title',
+      // Читання рядків — `Registry.View`; правка — `Registry.EditData` усередині сторінки.
+      permission: 'Registry.View',
+      crumb: {
+        ancestorIds: ['admin-registries'],
+        resolveParam: 'code',
+        resolveWith: 'registryName',
+      },
+    },
+  },
   adminRegistryDefinition: {
     id: 'admin-registry-definition',
     path: '/admin/registries/:code/definition',

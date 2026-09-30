@@ -59,6 +59,14 @@ import { childPath, relativePath, routes, type RouteHandle } from './routes';
 const LoginPage = lazy(async () => ({ default: (await import('@/pages/LoginPage')).LoginPage }));
 
 /**
+ * Дані довідника (`ФВ-8.12`) — лінивий чанк; заходять із переліку довідників, тому, як і картка
+ * шаблону нижче, поза реєстром прогріву навбару.
+ */
+const RegistryDataPage = lazy(async () => ({
+  default: (await import('@/features/registries/rc812/RegistryDataPage')).RegistryDataPage,
+}));
+
+/**
  * Картка шаблону (`UI-09`) — лінива, як і решта сторінок.
  *
  * ⚠ Оголошена ТУТ, а не в `routePrefetch.ts`, свідомо: той реєстр існує для
@@ -293,6 +301,11 @@ export const router = createBrowserRouter([
             path: relativePath(routes.adminRegistries, 'admin'),
             element: guarded(routes.adminRegistries.handle, <RegistriesPage />),
             handle: routes.adminRegistries.handle,
+          },
+          {
+            path: relativePath(routes.adminRegistryData, 'admin'),
+            element: guarded(routes.adminRegistryData.handle, <RegistryDataPage />),
+            handle: routes.adminRegistryData.handle,
           },
           {
             path: relativePath(routes.adminRegistryDefinition, 'admin'),

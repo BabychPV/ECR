@@ -530,6 +530,9 @@ public sealed partial class EndpointCoverageTests
 
         // Ключі із сервера.
         new("features/expressions/markers.ts", "diagnostic.messageKey", 1, null, [], "messageKey діагностики виразу."),
+        new("features/registries/rc812/RegistryDataGrid.tsx", "problem.messageKey", 1, null, [],
+            "messageKey рядка звіту пакета записів довідника (ФВ-8.12, RegistryBatchRowError) — "
+            + "ключі валідації RegistryBatchHandler/UpsertRegistryEntryHandler, клієнт їх не перелічує."),
         new("shared/ui/problemText.ts", "problem.title", 1, null, [], "title problem+json, коли він — ключ каталогу."),
         new("features/notifications/ChannelsPanel.tsx", "key", 1, null, [], "messageKey проби каналу."),
         new("features/integration/TestDataSourceModal.tsx", "key", 1, null, [], "messageKey проби джерела."),
@@ -567,6 +570,7 @@ public sealed partial class EndpointCoverageTests
         "nav.expressions", "nav.units", "nav.security", "nav.periods", "nav.sources", "nav.mapping", "nav.pipeline",
         "nav.jobs", "nav.snapshots", "nav.campaign", "nav.audit", "nav.consistency", "nav.uiStrings",
         "nav.notifications", "nav.health", "nav.myGroups", "documents.title",
+        "registries.data.title",
     ];
 
     /// <summary>Назви прав <c>permission.&lt;Code&gt;</c> — 42 права каталогу <c>sec.Permission</c>.</summary>

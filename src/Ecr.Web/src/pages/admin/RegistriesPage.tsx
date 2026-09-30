@@ -380,6 +380,18 @@ export function RegistriesPage(): JSX.Element {
               </Text>
             )}
 
+            {/* ФВ-8.12: табличний редактор даних довідника (`rc812`). */}
+            {selected !== undefined && (
+              <Button
+                component={Link}
+                to={`/admin/registries/${encodeURIComponent(selected.code)}/entries`}
+                size="xs"
+                variant="default"
+              >
+                {t('registries.data.open')}
+              </Button>
+            )}
+
             {/* ⛔ Вхід у конструктор (`ФВ-8.12`). Опис довідника — поля,
                 зв'язки, правила, мапінг — не мав в інтерфейсі жодного
                 споживача: подивитися, за яким правилом довідник перевіряє
