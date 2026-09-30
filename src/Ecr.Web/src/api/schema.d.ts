@@ -10426,7 +10426,14 @@ export interface paths {
                 };
                 cookie?: never;
             };
-            requestBody?: never;
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["PublishReportVersionRequest"];
+                    "application/json": components["schemas"]["PublishReportVersionRequest"];
+                    "text/json": components["schemas"]["PublishReportVersionRequest"];
+                };
+            };
             responses: {
                 /** @description OK */
                 200: {
@@ -10452,6 +10459,17 @@ export interface paths {
                 };
                 /** @description Conflict */
                 409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -19565,6 +19583,12 @@ export interface components {
         PublishRegistryDefinitionRequest: {
             /** @description Версія чернетки, яку публікують. */
             rowVersion: string;
+        };
+        /** @description Запит на публікацію версії опису звіту (ФВ-14.7). */
+        PublishReportVersionRequest: {
+            /** @description Причина публікації; обов'язкова, порожня відхиляється (`ECR-REQ-0422`) і потрапляє в
+             *     журнал структурних змін. */
+            reason: string;
         };
         /** @description Запит на публікацію версії. */
         PublishVersionRequest: {

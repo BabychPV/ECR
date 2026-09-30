@@ -100,9 +100,9 @@ public sealed class OutputScenarios(SqlServerFixture sql)
         Assert.Equal(HttpStatusCode.NotFound, tooEarly.StatusCode);
 
         // Крок 3: публікація версії.
-        var publish = await admin.Client.PostAsync(
+        var publish = await admin.Client.PostAsJsonAsync(
             new Uri($"/api/v1/reports/{definitionId}/versions/{versionId}/publish", UriKind.Relative),
-            content: null);
+            new { reason = "Сценарій: перша публікація" });
         Assert.True(publish.IsSuccessStatusCode, $"публікація версії: {publish.StatusCode}: {app.ErrorsText}");
         Assert.Equal(
             "Published",
@@ -209,9 +209,9 @@ public sealed class OutputScenarios(SqlServerFixture sql)
         var definitionId = definition.GetProperty("id").GetInt32();
         var versionId = definition.GetProperty("versions")[0].GetProperty("id").GetInt32();
 
-        var publish = await owner.Client.PostAsync(
+        var publish = await owner.Client.PostAsJsonAsync(
             new Uri($"/api/v1/reports/{definitionId}/versions/{versionId}/publish", UriKind.Relative),
-            content: null);
+            new { reason = "Сценарій: перша публікація" });
         Assert.True(publish.IsSuccessStatusCode, $"публікація версії: {publish.StatusCode}: {app.ErrorsText}");
 
         var projectId = await ProjectAndPeriodScenarios.CreateProjectAsync(owner.Client, "Q239", "Asia/Atyrau");

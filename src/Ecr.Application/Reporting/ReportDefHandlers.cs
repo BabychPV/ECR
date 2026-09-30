@@ -504,7 +504,9 @@ public sealed class PublishReportVersionHandler(
     IRepository<ReportVersion, int> versions,
     IUnitOfWork uow,
     IAccessDecisionService access,
-    ICurrentUser currentUser)
+    ICurrentUser currentUser,
+    IAuditWriter audit,
+    IClock clock)
 {
     /// <summary>Право на авторство опису звіту (`02-contracts.md` §9).</summary>
     public const string Permission = "Report.EditDefinition";
@@ -512,14 +514,31 @@ public sealed class PublishReportVersionHandler(
     /// <summary>Публікує версію.</summary>
     /// <param name="reportDefId">Опис звіту — власник версії.</param>
     /// <param name="reportVersionId">Версія.</param>
+    /// <param name="reason">Причина публікації (ФВ-14.7); обов'язкова, іде в журнал структурних змін.</param>
     /// <param name="ct">Скасування.</param>
     /// <returns>Опублікована версія.</returns>
     /// <exception cref="NotFoundException">Версії немає, або вона належить іншому опису.</exception>
     /// <exception cref="DomainException">Версія вже не чернетка.</exception>
     public async Task<ReportVersionDto> HandleAsync(
-        int reportDefId, int reportVersionId, CancellationToken ct)
+        int reportDefId, int reportVersionId, string reason, CancellationToken ct)
     {
         await PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
+
+        // ⛔ ФВ-14.7: причина — ПЕРШОЮ після права, як у `PublishTemplateVersionHandler`: порожній
+        // рядок нічого не пояснить тому, хто через рік спитає, чому цю версію звіту ввели в обіг.
+        if (string.IsNullOrWhiteSpace(reason))
+        {
+            throw new BusinessRuleException(
+                ErrorCodes.RequestInvalid,
+                "Публікацію відхилено: причина обов'язкова.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-REQ-0422.reportPublishReason" });
+        }
+
+        var userId = currentUser.UserId
+            ?? throw new AccessDeniedException(
+                ErrorCodes.Unauthorized,
+                "Сесія не містить користувача.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.anonymousWrite" });
 
         var version = await versions.FindAsync(reportVersionId, ct).ConfigureAwait(false)
             ?? throw new NotFoundException(
@@ -547,8 +566,29 @@ public sealed class PublishReportVersionHandler(
                 });
         }
 
-        version.Publish();
-        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+        // ⛔ Публікація і її слід — одна транзакція: без журналу «хто й чому» причина, яку ми
+        // вимагали, нікуди б не потрапила.
+        await uow.ExecuteInTransactionAsync(async innerCt =>
+        {
+            version.Publish();
+
+            await audit.WriteStructureChangeAsync(
+                new StructureChangeRecord(
+                    clock.UtcNow,
+                    TemplateVersionId: 0,
+                    EntityType: "ReportVersion",
+                    EntityId: version.Id,
+                    ChangeClass: Domain.Enums.ChangeClass.Guarded,
+                    Operation: "Publish",
+                    OldJson: null,
+                    NewJson: JsonSerializer.Serialize(new { reportDefId, version = version.Version }),
+                    ChangeReason: reason.Trim(),
+                    ChangedByUserId: userId,
+                    CorrelationId: currentUser.CorrelationId),
+                innerCt).ConfigureAwait(false);
+
+            await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+        }, ct).ConfigureAwait(false);
 
         return new ReportVersionDto(
             version.Id, version.Version, version.Status.ToString(),

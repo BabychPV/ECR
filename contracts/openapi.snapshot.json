@@ -8060,6 +8060,19 @@
         ],
         "type": "object"
       },
+      "PublishReportVersionRequest": {
+        "description": "Запит на публікацію версії опису звіту (ФВ-14.7).",
+        "properties": {
+          "reason": {
+            "description": "Причина публікації; обов'язкова, порожня відхиляється (`ECR-REQ-0422`) і потрапляє в\nжурнал структурних змін.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "type": "object"
+      },
       "PublishVersionRequest": {
         "description": "Запит на публікацію версії.",
         "properties": {
@@ -29097,6 +29110,27 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublishReportVersionRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublishReportVersionRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublishReportVersionRequest"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
         "responses": {
           "200": {
             "content": {
@@ -29157,6 +29191,26 @@
               }
             },
             "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
           }
         },
         "summary": "Публікує версію опису звіту. Право `Report.EditDefinition`.",
