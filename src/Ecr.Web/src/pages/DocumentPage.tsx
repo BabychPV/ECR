@@ -21,6 +21,7 @@ import {
   useDeleteDocumentAction,
 } from '@/features/documents/DeleteDocumentAction';
 import { ActionGroup, DocumentToolbar } from '@/features/documents/DocumentToolbar';
+import { useVersionMigrationAction } from '@/features/documents/VersionMigrationAction';
 import { DocumentLockBanner } from '@/features/documents/DocumentLockBanner';
 import { documentLockOf, locksDataActions } from '@/features/documents/documentLock';
 import { SheetFillSummary } from '@/features/documents/SheetFillSummary';
@@ -416,6 +417,10 @@ export function DocumentPage(): JSX.Element {
     periodKey,
   });
 
+  // Перенос на нову версію шаблону (ФВ-7.5): пункт — у меню «More», звіт сухого
+  // прогону й відмови — у самому діалозі.
+  const versionMigration = useVersionMigrationAction({ documentId, document: summary.data });
+
   return (
     /*
      * ⛔ Обгортка навколо ВСЬОГО екрана: заголовок — це бізнес-ключ документа,
@@ -472,7 +477,7 @@ export function DocumentPage(): JSX.Element {
           небезпечні (зміна ключа, видалення) — у меню «More» праворуч.
           Діалоги обох — поза меню: меню розмонтовує вміст, щойно
           закривається, тобто саме тоді, коли діалог мав би відкритися. */}
-      <DocumentToolbar more={[businessKeyChange.menuItem, deletion.menuItem]}>
+      <DocumentToolbar more={[businessKeyChange.menuItem, versionMigration.menuItem, deletion.menuItem]}>
         <ActionGroup name="check">
           <Button
             size="xs"
@@ -523,6 +528,8 @@ export function DocumentPage(): JSX.Element {
       <DocumentLockBanner lock={lock} periodKey={periodKey} />
 
       {businessKeyChange.dialog}
+
+      {versionMigration.dialog}
 
       {deletion.dialog}
 

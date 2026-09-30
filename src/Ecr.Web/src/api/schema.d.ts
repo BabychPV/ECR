@@ -2793,6 +2793,128 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/documents/{id}/migrate-version": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Версії, на які можна перенести документ (ФВ-7.5). Право `Template.Edit`. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DocumentVersionMigrationTargetsDto"];
+                        "text/json": components["schemas"]["DocumentVersionMigrationTargetsDto"];
+                        "text/plain": components["schemas"]["DocumentVersionMigrationTargetsDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        /**
+         * Переносить документ на нову версію шаблону (ФВ-7.5). Право `Template.Edit`.
+         * @description ⚠ Версія шаблону живе на проєкті, тож переносяться всі документи проєкту
+         *     разом — звіт каже скільки (`documentCount`). `dryRun = true`
+         *     лише рахує наслідки й нічого не змінює. Режим `Safe` відмовляє, якщо
+         *     зникло б або змінило тлумачення бодай одне введене значення,
+         *     `Presentation` — на будь-яку структурну різницю версій
+         *     (`422 ECR-SCHM-0422`). Подані чи затверджені аркуші — `409 ECR-DOC-0409`.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["MigrateDocumentVersionRequest"];
+                    "application/json": components["schemas"]["MigrateDocumentVersionRequest"];
+                    "text/json": components["schemas"]["MigrateDocumentVersionRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DocumentVersionMigrationDto"];
+                        "text/json": components["schemas"]["DocumentVersionMigrationDto"];
+                        "text/plain": components["schemas"]["DocumentVersionMigrationDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/documents/{id}/recalculate": {
         parameters: {
             query?: never;
@@ -17263,6 +17385,89 @@ export interface components {
             /** Format: int64 */
             versionId: number;
         };
+        /** @description Звіт переносу документа на нову версію шаблону (ФВ-7.5). */
+        DocumentVersionMigrationDto: {
+            /** @description Перенос виконано. */
+            applied: boolean;
+            /** @description Режим дозволяє перенос. */
+            canApply: boolean;
+            /**
+             * Format: int32
+             * @description Скільки документів проєкту переноситься.
+             */
+            documentCount: number;
+            /**
+             * Format: int64
+             * @description Документ, з якого відкрили перенос.
+             */
+            documentId: number;
+            /** @description Сухий прогін: нічого не змінено. */
+            dryRun: boolean;
+            /** @description Її номер. */
+            fromVersion: string;
+            /**
+             * Format: int32
+             * @description Поточна версія.
+             */
+            fromVersionId: number;
+            /**
+             * Format: int64
+             * @description Скільки введених значень змінили б тлумачення.
+             */
+            guardedValues: number;
+            /** @description Відмінності версій, спершу ті, що зачіпають дані. */
+            items: components["schemas"]["VersionMigrationItem"][];
+            /** @description Перелік обрізано стелею int MigrateDocumentVersionHandler.MaxItems. */
+            itemsTruncated: boolean;
+            /**
+             * Format: int32
+             * @description Скільки пар «аркуш × період» подано або затверджено.
+             */
+            lockedSheets: number;
+            /**
+             * Format: int64
+             * @description Скільки введених значень зникло б.
+             */
+            lostValues: number;
+            /** @description Режим. */
+            mode: components["schemas"]["VersionMigrationMode"];
+            /**
+             * Format: int32
+             * @description Його проєкт — версія живе на проєкті, тож переносяться всі його документи.
+             */
+            projectId: number;
+            /** @description Причини відмови: `structural`, `dataLoss`, `guardedWithData`, `sheetsLocked`, `projectArchived`. */
+            refusals: string[];
+            /** @description Її номер. */
+            toVersion: string;
+            /**
+             * Format: int32
+             * @description Цільова версія.
+             */
+            toVersionId: number;
+            /**
+             * Format: int64
+             * @description Скільки введених значень переїде.
+             */
+            transferredValues: number;
+        };
+        /** @description Куди можна перенести документ: поточна версія й опубліковані версії того самого шаблону. */
+        DocumentVersionMigrationTargetsDto: {
+            /** @description Її номер. */
+            currentVersion: string;
+            /**
+             * Format: int32
+             * @description Поточна версія проєкту.
+             */
+            currentVersionId: number;
+            /**
+             * Format: int32
+             * @description Проєкт документа — переноситься весь.
+             */
+            projectId: number;
+            /** @description Опубліковані версії того самого шаблону, крім поточної, від новішої. */
+            targets: components["schemas"]["TemplateVersionSummary"][];
+        };
         /**
          * @description Причина відмови в доступі. Повертається замість `bool` (ФВ-6.8).
          * @enum {unknown}
@@ -18339,6 +18544,17 @@ export interface components {
             traceLevel: components["schemas"]["TraceLevel"];
             /** @description Номер версії. */
             versionNumber: string;
+        };
+        /** @description Запит на перенос документа на нову версію шаблону (ФВ-7.5). */
+        MigrateDocumentVersionRequest: {
+            /** @description `true` — лише звіт, без змін. */
+            dryRun: boolean;
+            mode: null | components["schemas"]["VersionMigrationMode"];
+            /**
+             * Format: int32
+             * @description Опублікована версія того самого шаблону.
+             */
+            targetVersionId: number;
         };
         /**
          * @description Транспорт каналу сповіщень. Числа зберігаються в базі — не перенумеровувати.
@@ -22269,6 +22485,34 @@ export interface components {
              */
             versionId: number;
         };
+        /** @description Одна відмінність між версіями, як її бачить перенос. */
+        VersionMigrationItem: {
+            /** @description Клас зміни (ФВ-7.3). */
+            changeClass: components["schemas"]["ChangeClass"];
+            /** @description Змінене поле для `Modified`/`Presentation`. */
+            field?: null | string;
+            /** @description `Added` — нове в цільовій версії; `Removed` — зникає без даних;
+             *             `Lost` — зникає разом із введеними значеннями; `Modified` —
+             *             змінюється тлумачення (тип, одиниця, довідник, обов'язковість);
+             *             `Presentation` — лише вигляд. */
+            kind: string;
+            /** @description Стане. */
+            newValue?: null | string;
+            /** @description Було. */
+            oldValue?: null | string;
+            /** @description Шлях за кодами: `SHEET.TABLE.COLUMN`, `SHEET.TABLE#ROW`, `header.CODE`. */
+            path: string;
+            /**
+             * Format: int64
+             * @description Скільки введених значень зачіпає відмінність.
+             */
+            values: number;
+        };
+        /**
+         * @description Режим переносу документів на нову версію шаблону (ФВ-7.5).
+         * @enum {unknown}
+         */
+        VersionMigrationMode: "Safe" | "Presentation";
         /** @description Подія журналу переходів стану аркуша (`BE-11b`). */
         WorkflowEventDto: {
             /** @description Дія (`ApprovalAction`). */

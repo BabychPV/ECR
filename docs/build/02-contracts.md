@@ -3173,6 +3173,20 @@ public interface IValidationResultStore
 
 Версії документа для порівняння (ФВ-5.22): зрізи подання `calc.SubmissionSnapshot`, поточні комірки в тій самій формі, підписи рядків (зокрема видалених) і коди колонок. Сигнатури — у `src/Ecr.Application/Ports/IDocumentVersionStore.cs`.
 
+#### `IDocumentVersionMigrationStore`
+
+Перенос документів на нову версію шаблону (ФВ-7.5, `GET`/`POST /api/v1/documents/{id}/migrate-version`,
+право `Template.Edit`). Версія шаблону живе на проєкті, тому переносяться всі документи
+проєкту документа однією транзакцією: рядок проєкту під `UPDLOCK`, план перераховується
+під блоком (`VersionMigrationPlanner`, відповідність лише за кодами), далі один пакет SQL
+переносить комірки, рядки, екземпляри таблиць, шапку, індекс пошуку, склад аркушів і
+стани погодження й перемикає `Project.TemplateVersionId`. `dryRun = true` лише рахує звіт.
+Режим `Safe` відмовляє, якщо зникло б чи змінило тлумачення бодай одне введене значення,
+`Presentation` — на будь-яку структурну різницю: `422 ECR-SCHM-0422`. Подані чи
+затверджені аркуші або архівований проєкт — `409 ECR-DOC-0409`. Ціль не опублікована,
+з іншого шаблону чи та сама — `422 ECR-TMPL-0422`. Подія — `aud.SecurityEvent`
+(`DocumentVersionMigrated`). Сигнатури — у `src/Ecr.Application/Ports/IDocumentVersionMigrationStore.cs`.
+
 #### `IWorkflowStore`
 
 Доступ до стану робочого процесу і періоду для операцій подання, затвердження і повернення в роботу.
@@ -3326,7 +3340,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `ECR-REQ-0422` | 422 | параметр самого запиту поза межами: розмір сторінки, ширина або напрям вікна аудиту |
 | `ECR-REQ-0429` | 429 | КОРИСТУВАЧ вичерпав межу частоти запитів (пошук `GET /api/v1/search`, типово 30 за 10 с, `Security:RateLimit:SearchPermit`/`SearchWindowSeconds`); у відповіді `Retry-After` |
 | `ECR-SCHM-0409` | 409 | `Breaking`-зміна у версії з документами (ФВ-7.4) |
-| `ECR-SCHM-0422` | 422 | `Guarded`-зміна без стратегії міграції |
+| `ECR-SCHM-0422` | 422 | `Guarded`-зміна без стратегії міграції; режим переносу документа на нову версію (ФВ-7.5) не має стратегії для змін |
 | `ECR-DOC-0404` | 404 | документ не знайдено |
 | `ECR-DOC-0409` | 409 | документ подано; потрібен `Reopen` (D-67) |
 | `ECR-DOC-4091` | 409 | аркуш зайнятий поданням або правкою (блокування аркуша × періоду не взято вчасно); повторити запит за мить |
@@ -3521,6 +3535,8 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/documents/{id}` | `Document.View` | 1 |
 | `DELETE` | `/api/v1/documents/{id}` | `Document.Delete` | 6 |
 | `POST` | `/api/v1/documents/{id}/business-key` | `Document.ChangeKey` | 6 |
+| `GET` | `/api/v1/documents/{id}/migrate-version` | `Template.Edit` | 8 |
+| `POST` | `/api/v1/documents/{id}/migrate-version` | `Template.Edit` | 8 |
 | `GET` | `/api/v1/documents/{id}/header` | `Document.View` | 8 |
 | `PATCH` | `/api/v1/documents/{id}/header` | — (через грант Write на проєкт) | 8 |
 | `GET` | `/api/v1/documents/{id}/tables/{tableInstanceId}` | `Document.View` | 1 |

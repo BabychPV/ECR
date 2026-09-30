@@ -37,7 +37,8 @@ public sealed class DocumentsController(
     DeleteDocumentHandler delete,
     ChangeDocumentKeyHandler changeKey,
     GetDocumentHeaderHandler getHeader,
-    PatchDocumentHeaderHandler patchHeader) : ControllerBase
+    PatchDocumentHeaderHandler patchHeader,
+    Application.Documents.VersionMigration.MigrateDocumentVersionHandler migrateVersion) : ControllerBase
 {
     /// <summary>
     /// Стеля тіла запиту перегляду імпорту — рівно стандартна межа Kestrel
@@ -329,6 +330,45 @@ public sealed class DocumentsController(
         return Accepted(new Contracts.RecalculationAcceptedResponse(jobId, id, periodKey));
     }
 
+    /// <summary>
+    /// Версії, на які можна перенести документ (ФВ-7.5). Право <c>Template.Edit</c>.
+    /// </summary>
+    [HttpGet("{id:long}/migrate-version")]
+    [ProducesResponseType<Application.Documents.VersionMigration.DocumentVersionMigrationTargetsDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<Application.Documents.VersionMigration.DocumentVersionMigrationTargetsDto>> MigrationTargets(
+        long id, CancellationToken ct)
+        => Ok(await migrateVersion.ListTargetsAsync(id, ct).ConfigureAwait(false));
+
+    /// <summary>
+    /// Переносить документ на нову версію шаблону (ФВ-7.5). Право <c>Template.Edit</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Версія шаблону живе на проєкті, тож переносяться всі документи проєкту
+    /// разом — звіт каже скільки (<c>documentCount</c>). <c>dryRun = true</c>
+    /// лише рахує наслідки й нічого не змінює. Режим <c>Safe</c> відмовляє, якщо
+    /// зникло б або змінило тлумачення бодай одне введене значення,
+    /// <c>Presentation</c> — на будь-яку структурну різницю версій
+    /// (<c>422 ECR-SCHM-0422</c>). Подані чи затверджені аркуші — <c>409 ECR-DOC-0409</c>.
+    /// </remarks>
+    [HttpPost("{id:long}/migrate-version")]
+    [ProducesResponseType<Application.Documents.VersionMigration.DocumentVersionMigrationDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<Application.Documents.VersionMigration.DocumentVersionMigrationDto>> MigrateVersion(
+        long id, [FromBody] MigrateDocumentVersionRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        return Ok(await migrateVersion
+            .HandleAsync(
+                id, request.TargetVersionId,
+                request.Mode ?? Application.Documents.VersionMigration.VersionMigrationMode.Safe,
+                request.DryRun, ct)
+            .ConfigureAwait(false));
+    }
+
     /// <summary>Подання аркуша на погодження.</summary>
     [HttpPost("{id:long}/submit")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
@@ -605,6 +645,15 @@ public sealed record ReopenDocumentRequest(int SheetDefId, int PeriodKey, string
 /// <param name="ExpectedBusinessKey">Чинний ключ, який бачила людина; розбіжність — 409.</param>
 /// <param name="Reason">Причина; обов'язкова, лягає в аудит.</param>
 public sealed record ChangeDocumentKeyRequest(string? BusinessKey, string? ExpectedBusinessKey, string? Reason);
+
+/// <summary>Запит на перенос документа на нову версію шаблону (ФВ-7.5).</summary>
+/// <param name="TargetVersionId">Опублікована версія того самого шаблону.</param>
+/// <param name="Mode">Режим; без нього — <c>Safe</c>.</param>
+/// <param name="DryRun"><c>true</c> — лише звіт, без змін.</param>
+public sealed record MigrateDocumentVersionRequest(
+    int TargetVersionId,
+    Application.Documents.VersionMigration.VersionMigrationMode? Mode,
+    bool DryRun);
 
 /// <summary>Запит на експорт.</summary>
 /// <param name="IncludeFormulas">

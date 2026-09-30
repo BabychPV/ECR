@@ -3445,6 +3445,152 @@
         ],
         "type": "object"
       },
+      "DocumentVersionMigrationDto": {
+        "description": "Звіт переносу документа на нову версію шаблону (ФВ-7.5).",
+        "properties": {
+          "applied": {
+            "description": "Перенос виконано.",
+            "type": "boolean"
+          },
+          "canApply": {
+            "description": "Режим дозволяє перенос.",
+            "type": "boolean"
+          },
+          "documentCount": {
+            "description": "Скільки документів проєкту переноситься.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "documentId": {
+            "description": "Документ, з якого відкрили перенос.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "dryRun": {
+            "description": "Сухий прогін: нічого не змінено.",
+            "type": "boolean"
+          },
+          "fromVersion": {
+            "description": "Її номер.",
+            "type": "string"
+          },
+          "fromVersionId": {
+            "description": "Поточна версія.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "guardedValues": {
+            "description": "Скільки введених значень змінили б тлумачення.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "items": {
+            "description": "Відмінності версій, спершу ті, що зачіпають дані.",
+            "items": {
+              "$ref": "#/components/schemas/VersionMigrationItem"
+            },
+            "type": "array"
+          },
+          "itemsTruncated": {
+            "description": "Перелік обрізано стелею int MigrateDocumentVersionHandler.MaxItems.",
+            "type": "boolean"
+          },
+          "lockedSheets": {
+            "description": "Скільки пар «аркуш × період» подано або затверджено.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "lostValues": {
+            "description": "Скільки введених значень зникло б.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "mode": {
+            "$ref": "#/components/schemas/VersionMigrationMode",
+            "description": "Режим."
+          },
+          "projectId": {
+            "description": "Його проєкт — версія живе на проєкті, тож переносяться всі його документи.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "refusals": {
+            "description": "Причини відмови: `structural`, `dataLoss`, `guardedWithData`, `sheetsLocked`, `projectArchived`.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "toVersion": {
+            "description": "Її номер.",
+            "type": "string"
+          },
+          "toVersionId": {
+            "description": "Цільова версія.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "transferredValues": {
+            "description": "Скільки введених значень переїде.",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "documentId",
+          "projectId",
+          "documentCount",
+          "fromVersionId",
+          "fromVersion",
+          "toVersionId",
+          "toVersion",
+          "mode",
+          "dryRun",
+          "applied",
+          "canApply",
+          "refusals",
+          "transferredValues",
+          "lostValues",
+          "guardedValues",
+          "lockedSheets",
+          "items",
+          "itemsTruncated"
+        ],
+        "type": "object"
+      },
+      "DocumentVersionMigrationTargetsDto": {
+        "description": "Куди можна перенести документ: поточна версія й опубліковані версії того самого шаблону.",
+        "properties": {
+          "currentVersion": {
+            "description": "Її номер.",
+            "type": "string"
+          },
+          "currentVersionId": {
+            "description": "Поточна версія проєкту.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "projectId": {
+            "description": "Проєкт документа — переноситься весь.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "targets": {
+            "description": "Опубліковані версії того самого шаблону, крім поточної, від новішої.",
+            "items": {
+              "$ref": "#/components/schemas/TemplateVersionSummary"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "projectId",
+          "currentVersionId",
+          "currentVersion",
+          "targets"
+        ],
+        "type": "object"
+      },
       "EditDenyReason": {
         "description": "Причина відмови в доступі. Повертається замість `bool` (ФВ-6.8).",
         "enum": [
@@ -5845,6 +5991,37 @@
           "numericMode",
           "calendarMode",
           "traceLevel"
+        ],
+        "type": "object"
+      },
+      "MigrateDocumentVersionRequest": {
+        "description": "Запит на перенос документа на нову версію шаблону (ФВ-7.5).",
+        "properties": {
+          "dryRun": {
+            "description": "`true` — лише звіт, без змін.",
+            "type": "boolean"
+          },
+          "mode": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/VersionMigrationMode",
+                "description": "Режим; без нього — `Safe`."
+              }
+            ]
+          },
+          "targetVersionId": {
+            "description": "Опублікована версія того самого шаблону.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "targetVersionId",
+          "mode",
+          "dryRun"
         ],
         "type": "object"
       },
@@ -14310,6 +14487,63 @@
         ],
         "type": "object"
       },
+      "VersionMigrationItem": {
+        "description": "Одна відмінність між версіями, як її бачить перенос.",
+        "properties": {
+          "changeClass": {
+            "$ref": "#/components/schemas/ChangeClass",
+            "description": "Клас зміни (ФВ-7.3)."
+          },
+          "field": {
+            "description": "Змінене поле для `Modified`/`Presentation`.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "kind": {
+            "description": "`Added` — нове в цільовій версії; `Removed` — зникає без даних;\n        `Lost` — зникає разом із введеними значеннями; `Modified` —\n        змінюється тлумачення (тип, одиниця, довідник, обов'язковість);\n        `Presentation` — лише вигляд.",
+            "type": "string"
+          },
+          "newValue": {
+            "description": "Стане.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "oldValue": {
+            "description": "Було.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "path": {
+            "description": "Шлях за кодами: `SHEET.TABLE.COLUMN`, `SHEET.TABLE#ROW`, `header.CODE`.",
+            "type": "string"
+          },
+          "values": {
+            "description": "Скільки введених значень зачіпає відмінність.",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "path",
+          "kind",
+          "changeClass",
+          "values"
+        ],
+        "type": "object"
+      },
+      "VersionMigrationMode": {
+        "description": "Режим переносу документів на нову версію шаблону (ФВ-7.5).",
+        "enum": [
+          "Safe",
+          "Presentation"
+        ]
+      },
       "WorkflowEventDto": {
         "description": "Подія журналу переходів стану аркуша (`BE-11b`).",
         "properties": {
@@ -18167,6 +18401,189 @@
           }
         },
         "summary": "Попередній перегляд імпорту. Право `Document.Import`.",
+        "tags": [
+          "Documents"
+        ]
+      }
+    },
+    "/api/v1/documents/{id}/migrate-version": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentVersionMigrationTargetsDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentVersionMigrationTargetsDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentVersionMigrationTargetsDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Версії, на які можна перенести документ (ФВ-7.5). Право `Template.Edit`.",
+        "tags": [
+          "Documents"
+        ]
+      },
+      "post": {
+        "description": "⚠ Версія шаблону живе на проєкті, тож переносяться всі документи проєкту\nразом — звіт каже скільки (`documentCount`). `dryRun = true`\nлише рахує наслідки й нічого не змінює. Режим `Safe` відмовляє, якщо\nзникло б або змінило тлумачення бодай одне введене значення,\n`Presentation` — на будь-яку структурну різницю версій\n(`422 ECR-SCHM-0422`). Подані чи затверджені аркуші — `409 ECR-DOC-0409`.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/MigrateDocumentVersionRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MigrateDocumentVersionRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MigrateDocumentVersionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentVersionMigrationDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentVersionMigrationDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentVersionMigrationDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Переносить документ на нову версію шаблону (ФВ-7.5). Право `Template.Edit`.",
         "tags": [
           "Documents"
         ]

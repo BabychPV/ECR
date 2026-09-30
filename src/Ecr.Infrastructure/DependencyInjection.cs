@@ -92,6 +92,7 @@ public static class DependencyInjection
             ReadInt(configuration, "Database:SheetLockTimeoutSeconds", SheetEditGatePolicy.DefaultLockTimeoutSeconds),
             1, 300))));
         services.AddScoped<IDocumentVersionStore, DocumentVersionStore>();
+        services.AddScoped<IDocumentVersionMigrationStore, DocumentVersionMigrationStore>();
         services.AddScoped<IPeriodStore, PeriodStore>();
         services.AddScoped<IAuditReader, AuditReader>();
         services.AddScoped<IConsistencyIssueReader, ConsistencyIssueReader>();
