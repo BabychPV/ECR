@@ -23,6 +23,7 @@ public sealed class PublishMethodologyHandler(
     IMethodologyStore methodologies,
     IFormulaEngine formulaEngine,
     ICalculationBindingStore bindings,
+    IUnitCatalog units,
     IUnitOfWork uow,
     IAuditWriter audit,
     Security.IAccessDecisionService access,
@@ -47,7 +48,8 @@ public sealed class PublishMethodologyHandler(
     /// <exception cref="NotFoundException">Версії немає.</exception>
     /// <exception cref="BusinessRuleException">
     /// <c>ECR-CALC-0409</c> — публікує автор або дата зайнята;
-    /// <c>ECR-CALC-0422</c> — немає причини, дати, зеленого тесту або є цикл.
+    /// <c>ECR-CALC-0422</c> — немає причини, дати, зеленого тесту або є цикл;
+    /// <c>ECR-TMPL-4223</c> — несумісні одиниці без явного <c>CONVERT</c> (ФВ-16.7).
     /// </exception>
     public async Task<MethodologyPublicationDiff> HandleAsync(
         int methodologyVersionId, string changeReason, DateOnly? effectiveFrom, CancellationToken ct)
@@ -304,6 +306,13 @@ public sealed class PublishMethodologyHandler(
             warnings));
 
         Reject(problems);
+
+        // ⛔ ФВ-16.6/16.7: т + кг без CONVERT — відмова `ECR-TMPL-4223` до
+        // продуктиву. Після перевірки типів: одиниця текстової константи —
+        // питання, яке не має сенсу ставити, доки вона стоїть в арифметиці.
+        var catalogue = await units.GetAsync(ct).ConfigureAwait(false);
+        MethodologyUnitChecks.RequireCompatibleUnits(
+            parsed, new MethodologyUnitContext(constants, formulas, catalogue));
 
         var ordering = formulaEngine.BuildEvaluationOrder(nodes);
         if (!ordering.IsSuccess)
