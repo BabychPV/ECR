@@ -18,7 +18,9 @@ public interface IRegistryImpactStore
 
     /// <summary>
     /// Документи ВІДКРИТИХ періодів (<c>Open</c>/<c>Grace</c>), чий актуальний прогін дав числа
-    /// за версією методології, що читає довідник (<c>cfg.RegistryUse</c>, <c>SourceKind = 1</c>).
+    /// за версією методології, що читає довідник (<c>cfg.RegistryUse</c>, <c>SourceKind = 1</c>),
+    /// і почався ДО останньої правки даних довідника (<c>DataChangedAt</c>): перерахований після правки
+    /// документ уже свіжий і в перелік не входить.
     /// </summary>
     /// <param name="registryDefId">Довідник.</param>
     /// <param name="take">Скільки рядків узяти щонайбільше (не більше <see cref="MaxRows"/>).</param>

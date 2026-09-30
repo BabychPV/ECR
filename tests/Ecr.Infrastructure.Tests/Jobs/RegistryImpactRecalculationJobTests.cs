@@ -84,6 +84,9 @@ public sealed class RegistryImpactRecalculationJobTests(SqlServerFixture sql)
             EcrCode.Create($"RJ{Guid.NewGuid().ToString("N")[..8].ToUpperInvariant()}"),
             new LocalizedText(new Dictionary<string, string> { ["en"] = "Registry" }),
             isTemporal: false);
+
+        // Правка після прогонів документів (`Now`): інакше вони не застарілі й не зачеплені.
+        registry.MarkDataChanged(Now.AddHours(1));
         db.RegistryDefs.Add(registry);
         await db.SaveChangesAsync();
         return registry.Id;

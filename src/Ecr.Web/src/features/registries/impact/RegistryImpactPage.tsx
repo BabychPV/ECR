@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type JSX } from 'react';
+import { useCallback, useEffect, useRef, useState, type JSX } from 'react';
 import { Alert, Anchor, Button, Card, Checkbox, Group, Progress, Stack, Table, Text } from '@mantine/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router-dom';
@@ -68,7 +68,15 @@ function impactKey(code: string): readonly unknown[] {
 /** Довше за перехід Mantine-модалки (≈200 мс): після нього повернення фокуса вже відбулося. */
 const FocusAfterModalMs = 300;
 
-function ImpactJob({ jobId, canOpenJobs }: { readonly jobId: string; readonly canOpenJobs: boolean }): JSX.Element {
+function ImpactJob({
+  jobId,
+  canOpenJobs,
+  onSettled,
+}: {
+  readonly jobId: string;
+  readonly canOpenJobs: boolean;
+  readonly onSettled: () => void;
+}): JSX.Element {
   const job = useQuery({
     queryKey: ['job', jobId],
     queryFn: () => apiFetch<JobStatus>(`/api/v1/jobs/${encodeURIComponent(jobId)}`),
@@ -78,6 +86,13 @@ function ImpactJob({ jobId, canOpenJobs }: { readonly jobId: string; readonly ca
 
   const status = job.data;
   const fan = status?.fanOut;
+  const settled = status !== undefined && impactPollInterval(status) === false;
+
+  // ⛔ Перерахунок завершився (разом із дочірніми) — документи вже свіжі, і сервер їх більше не
+  // повертає. Без повторного читання перелік показував би вже перераховані документи як зачеплені.
+  useEffect(() => {
+    if (settled) onSettled();
+  }, [settled, onSettled]);
 
   // ⛔ Після «Перерахувати» діалог причини закривається, а кнопка сторінки на час запиту `loading`
   // (= `disabled`) — фокус падав на `<body>`, і про поставлену задачу читач не дізнавався. Тепер фокус — на
@@ -161,15 +176,20 @@ export function RegistryImpactPage(): JSX.Element {
     enabled: code !== '',
   });
 
+  const refreshAfterRecalculation = useCallback((): void => {
+    void client.invalidateQueries({ queryKey: impactKey(code) });
+    void client.invalidateQueries({ predicate: isCalculationResultsQuery });
+  }, [client, code]);
+
   const recalculate = useMutation({
     mutationFn: (reason: string) =>
       recalculateImpacted(code, { documentIds: selected.size === 0 ? null : [...selected].sort((a, b) => a - b), reason }),
     onSuccess: (accepted) => {
       setJobId(accepted.jobId);
       // ⚠ Перелік зачеплених і банер «довідник змінено» в панелі результатів читають кеш: без
-      // інвалідації вони показують стан ДО постановки перерахунку (RT-25).
-      void client.invalidateQueries({ queryKey: impactKey(code) });
-      void client.invalidateQueries({ predicate: isCalculationResultsQuery });
+      // інвалідації вони показують стан ДО постановки перерахунку (RT-25). Ще раз — коли задача
+      // завершиться (`ImpactJob.onSettled`): лише тоді перераховані документи зникають із переліку.
+      refreshAfterRecalculation();
     },
   });
 
@@ -220,7 +240,9 @@ export function RegistryImpactPage(): JSX.Element {
         {/* ⛔ `L10`: відмова постановки видима з кодом і текстом сервера, а не тостом, що зникає. */}
         <ErrorAlert error={recalculate.error} />
 
-        {jobId !== null && <ImpactJob jobId={jobId} canOpenJobs={canOpenJobs} />}
+        {jobId !== null && (
+          <ImpactJob jobId={jobId} canOpenJobs={canOpenJobs} onSettled={refreshAfterRecalculation} />
+        )}
 
         <AsyncBoundary<RegistryImpactResponse>
           isPending={impact.isPending}

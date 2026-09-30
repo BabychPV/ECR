@@ -16,7 +16,9 @@ namespace Ecr.Infrastructure.Tests.Persistence;
 /// <remarks>
 /// Мутаційні докази: прибрати фільтр стану періоду → <see cref="Impact_без_закритих_періодів"/> червоний;
 /// прибрати <c>run.Status == Current</c> → <see cref="Застарілий_прогін_не_рахується"/> червоний;
-/// прибрати фільтр <c>SourceKind</c> → <see cref="Ребро_шаблону_чи_правила_не_дає_зачепленості"/> червоний.
+/// прибрати фільтр <c>SourceKind</c> → <see cref="Ребро_шаблону_чи_правила_не_дає_зачепленості"/> червоний;
+/// прибрати <c>run.StartedAt &lt; DataChangedAt</c> → <see cref="Перерахований_після_правки_документ_не_зачеплений"/>
+/// і <see cref="Довідник_без_правок_нічого_не_зачепив"/> червоні.
 /// </remarks>
 [Collection("SqlServer")]
 public sealed class RegistryImpactStoreTests(SqlServerFixture sql)
@@ -84,6 +86,30 @@ public sealed class RegistryImpactStoreTests(SqlServerFixture sql)
         Assert.Empty(await ImpactAsync(f.RegistryId));
     }
 
+    /// <summary>
+    /// Прогін почався ПІСЛЯ правки довідника — результати вже свіжі: «Перерахувати зачеплені» не має
+    /// лишати документ у переліку (той самий критерій, що й банер свіжості).
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Перерахований_після_правки_документ_не_зачеплений()
+    {
+        var f = await ArrangeAsync(PeriodState.Open, registryChangedMinutesAfterRun: -5);
+
+        Assert.Empty(await ImpactAsync(f.RegistryId));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Довідник_без_правок_нічого_не_зачепив()
+    {
+        var f = await ArrangeAsync(PeriodState.Open, registryChanged: false);
+
+        Assert.Empty(await ImpactAsync(f.RegistryId));
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
@@ -95,6 +121,7 @@ public sealed class RegistryImpactStoreTests(SqlServerFixture sql)
             EcrCode.Create($"IO{_tag}"),
             new LocalizedText(new Dictionary<string, string> { ["en"] = "Other" }),
             isTemporal: false);
+        other.MarkDataChanged(Now.AddHours(1));
         db.RegistryDefs.Add(other);
         await db.SaveChangesAsync();
 
@@ -110,10 +137,14 @@ public sealed class RegistryImpactStoreTests(SqlServerFixture sql)
 
     private sealed record Fixture(TestDocument Document, int RegistryId, string MethodologyCode);
 
+    // registryChangedMinutesAfterRun — правка довідника відносно старту прогону (за замовчуванням після:
+    // документ застарів); registryChanged = false — довідник не правили жодного разу (DataChangedAt = null).
     private async Task<Fixture> ArrangeAsync(
         PeriodState state,
         string runStatus = CalculationRun.CurrentStatus,
-        byte useKind = RegistryUse.MethodologyVersionSource)
+        byte useKind = RegistryUse.MethodologyVersionSource,
+        int registryChangedMinutesAfterRun = 60,
+        bool registryChanged = true)
     {
         var builder = new TestDocumentBuilder(sql.ConnectionString);
         var document = await builder.BuildAsync();
@@ -140,6 +171,11 @@ public sealed class RegistryImpactStoreTests(SqlServerFixture sql)
             EcrCode.Create($"IR{_tag}"),
             new LocalizedText(new Dictionary<string, string> { ["en"] = "Registry" }),
             isTemporal: false);
+        if (registryChanged)
+        {
+            registry.MarkDataChanged(Now.AddMinutes(registryChangedMinutesAfterRun));
+        }
+
         db.RegistryDefs.Add(registry);
 
         var methodology = new Methodology(

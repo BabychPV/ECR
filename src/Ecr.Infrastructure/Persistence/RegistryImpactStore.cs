@@ -20,6 +20,12 @@ public sealed class RegistryImpactStore(EcrDbContext db) : IRegistryImpactStore
     /// <para>
     /// ⛔ Фільтр стану періоду — суть виміру: <c>Open</c>/<c>Grace</c>, без <c>Closed</c> (<c>D-39</c>).
     /// </para>
+    /// <para>
+    /// ⛔ Зачеплений — лише прогін, що ПОЧАВСЯ до правки довідника (<c>DataChangedAt &gt; StartedAt</c>),
+    /// тим самим правилом, що й банер свіжості (<c>MethodologyStore.GetCalculationFreshnessAsync</c>).
+    /// Доти перелік показував кожен документ, що колись читав довідник, і перерахований документ
+    /// лишався в ньому назавжди. Довідник без жодної правки (<c>DataChangedAt = null</c>) не зачепив нічого.
+    /// </para>
     /// </remarks>
     public async Task<IReadOnlyList<RegistryImpactRow>> ListImpactedAsync(
         int registryDefId, int take, CancellationToken ct)
@@ -27,13 +33,24 @@ public sealed class RegistryImpactStore(EcrDbContext db) : IRegistryImpactStore
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(take);
         var limit = Math.Min(take, IRegistryImpactStore.MaxRows);
 
+        var changedAt = await db.RegistryDefs.AsNoTracking()
+            .Where(r => r.Id == registryDefId)
+            .Select(r => r.DataChangedAt)
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+
+        if (changedAt is null)
+        {
+            return [];
+        }
+
         var query =
             from use in db.RegistryUses.AsNoTracking()
             where use.SourceKind == RegistryUse.MethodologyVersionSource && use.RegistryDefId == registryDefId
             join result in db.CalculationResults.AsNoTracking()
                 on use.SourceId equals result.MethodologyVersionId
             join run in db.CalculationRuns.AsNoTracking() on result.CalculationRunId equals run.Id
-            where run.Status == CalculationRun.CurrentStatus
+            where run.Status == CalculationRun.CurrentStatus && run.StartedAt < changedAt
             join document in db.Documents.AsNoTracking() on result.DocumentId equals document.Id
             join period in db.Periods.AsNoTracking()
                 on new { document.ProjectId, result.PeriodKey }

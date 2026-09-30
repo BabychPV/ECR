@@ -45,6 +45,7 @@ public sealed class RegistryImpactScanTests(SqlServerFixture sql)
         period.TransitionTo(PeriodState.Open, Now);
 
         var registry = new RegistryDef(EcrCode.Create($"IS{_tag}"), Text("Registry"), isTemporal: false);
+        registry.MarkDataChanged(Now.AddHours(1));
         db.RegistryDefs.Add(registry);
         var target = new Methodology(EcrCode.Create($"IT_{_tag}"), Text("target"));
         var foreign = new Methodology(EcrCode.Create($"IF_{_tag}"), Text("foreign"));
