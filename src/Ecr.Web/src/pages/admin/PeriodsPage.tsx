@@ -568,7 +568,9 @@ export function PeriodsPage(): JSX.Element {
     queryKey: ['job', recalcJobId],
     queryFn: () => apiFetch<JobStatus>(`/api/v1/jobs/${encodeURIComponent(recalcJobId ?? '')}`),
     enabled: recalcJobId !== null,
-    refetchInterval: (query) => pollInterval(query.state.data?.state),
+    // ⛔ P4 ФВ-9.8: батько-розклад уже `Succeeded`, коли документи ще рахуються
+    // (`effectiveState = FannedOut`) — опитування триває до кінця ДОЧІРНІХ.
+    refetchInterval: (query) => pollInterval(query.state.data?.state, query.state.data?.effectiveState),
 
     // ⚠ `GET /jobs/{id}` вимагає `System.ViewHealth` (Q-156) — без нього
     // оператор лишається з поставленою задачею, а не з червоним сповіщенням
@@ -578,9 +580,12 @@ export function PeriodsPage(): JSX.Element {
 
   const recalcOutcome = recalcJobId === null
     ? null
-    : outcomeOf(recalcJob.data?.state, recalcJob.isError);
+    : outcomeOf(recalcJob.data?.state, recalcJob.isError, recalcJob.data?.effectiveState);
 
   const recalcRunning = recalcOutcome === 'running';
+
+  // «Розкладено N, виконано M з N, помилок K» — правдивий стан проєктної задачі.
+  const recalcFan = recalcJobId === null ? null : (recalcJob.data?.fanOut ?? null);
 
   const recalcReported = useRef<string | null>(null);
 
@@ -591,8 +596,25 @@ export function PeriodsPage(): JSX.Element {
 
     recalcReported.current = recalcJobId;
 
-    if (recalcOutcome === 'succeeded') {
-      showDone(t('workflow.recalcDone'));
+    if (recalcOutcome === 'succeeded' || recalcOutcome === 'partial') {
+      // ⛔ «Завершено» — лише коли виконано M = N і помилок K = 0. Батько-розклад
+      // `Succeeded` одразу після розкладу; раніше тут і з'являвся тост
+      // «перерахунок завершено» над жодним ще не порахованим документом.
+      if (recalcOutcome === 'succeeded') {
+        showDone(t('workflow.recalcDone'));
+      } else {
+        const fan = recalcJob.data?.fanOut;
+
+        notifications.show({
+          color: 'statusWarning',
+          message: t('workflow.recalcDoneWithErrors', {
+            total: fan?.total ?? 0,
+            done: fan?.succeeded ?? 0,
+            failed: fan?.failed ?? 0,
+          }),
+          closeButtonProps: notificationCloseButtonProps,
+        });
+      }
 
       // ⚠ Кеш сіток скидається САМЕ тут, а не на постановці в чергу: раніше
       // означало б показати старі числа під написом «перераховано».
@@ -618,7 +640,7 @@ export function PeriodsPage(): JSX.Element {
       message: errorCodeText(recalcJob.data?.errorCode, t('workflow.recalcFailed')),
       closeButtonProps: notificationCloseButtonProps,
     });
-  }, [recalcJobId, recalcOutcome, recalcJob.data?.errorCode, queryClient]);
+  }, [recalcJobId, recalcOutcome, recalcJob.data?.errorCode, recalcJob.data?.fanOut, queryClient]);
 
   /*
    * ⚠ Пояс МАЙДАНЧИКА, а не той, у якому сидить адміністратор: строк
@@ -763,6 +785,16 @@ export function PeriodsPage(): JSX.Element {
               >
                 {recalcRunning ? t('workflow.recalcRunning') : t('workflow.recalculate')}
               </Button>
+            )}
+
+            {recalcFan !== null && (
+              <Text size="xs" c="dimmed" role="status" data-recalc-fanout={recalcJob.data?.effectiveState ?? ''}>
+                {t('jobs.fanOutProgress', {
+                  total: recalcFan.total,
+                  done: recalcFan.succeeded,
+                  failed: recalcFan.failed,
+                })}
+              </Text>
             )}
 
             {/* ⚠ Архівація пропонується лише активному проєкту: чернетку

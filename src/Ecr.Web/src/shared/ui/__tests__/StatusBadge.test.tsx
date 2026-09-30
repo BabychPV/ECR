@@ -160,6 +160,8 @@ const expected: readonly (readonly [StatusKind, string, StatusTone])[] = [
   ['job', 'Cancelled', 'muted'],
   ['job', 'Unknown', 'warning'],
   ['job', 'Unavailable', 'warning'],
+  ['job', 'FannedOut', 'info'],
+  ['job', 'SucceededWithErrors', 'warning'],
 
   ['version', 'Draft', 'neutral'],
   ['version', 'Published', 'neutral'],
@@ -232,8 +234,8 @@ describe('StatusBadge: стан → тон', () => {
    * коли й тут забули рядок: два переліки розійшлися б, а тест лишився б
    * зеленим на тому, що від них лишилося.
    */
-  it('перелік вичерпний: 53 пари, і таблиця компонента не має жодної зайвої', () => {
-    expect(expected).toHaveLength(53);
+  it('перелік вичерпний: 55 пар, і таблиця компонента не має жодної зайвої', () => {
+    expect(expected).toHaveLength(55);
     expect(expected.every(([kind, state]) => isKnownStatus(kind, state))).toBe(true);
 
     const inComponent = Object.entries(statusTable).flatMap(([kind, states]) =>

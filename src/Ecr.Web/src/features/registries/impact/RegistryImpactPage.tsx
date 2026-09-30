@@ -5,7 +5,7 @@ import { Link, useParams } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
 import type { JobStatus } from '@/api/types';
 import { isCalculationResultsQuery } from '@/features/methodologies/calculationResultsKey';
-import { PollMs } from '@/features/workflow/jobFollow';
+import { PollMs, badgeStateOf } from '@/features/workflow/jobFollow';
 import { humanizeJobId } from '@/features/workflow/jobLabel';
 import { useFocusAfterBusy } from '@/shared/a11y/focus';
 import { t } from '@/shared/i18n';
@@ -99,7 +99,7 @@ function ImpactJob({ jobId, canOpenJobs }: { readonly jobId: string; readonly ca
           <Text ref={heading} tabIndex={-1} fw={600} data-impact-job-heading="">
             {t('registries.impact.jobQueued', { jobId: humanizeJobId(jobId) })}
           </Text>
-          {status !== undefined && <StatusBadge kind="job" state={status.state} />}
+          {status !== undefined && <StatusBadge kind="job" state={badgeStateOf(status)} />}
         </Group>
 
         {job.isError && (

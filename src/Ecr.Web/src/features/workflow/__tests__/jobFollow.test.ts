@@ -1,5 +1,5 @@
 ﻿import { describe, it, expect } from 'vitest';
-import { PollMs, outcomeOf, pollInterval } from '../jobFollow';
+import { FannedOut, PollMs, SucceededWithErrors, outcomeOf, pollInterval } from '../jobFollow';
 
 /**
  * Стеження за фоновою задачею (директива №09 `W8` п.7).
@@ -38,5 +38,37 @@ describe('стеження за фоновою задачею', () => {
     // «перераховується» на задачі, стан якої йому просто не показують.
     expect(outcomeOf(undefined, true)).toBe('unknown');
     expect(outcomeOf('Running', true)).toBe('unknown');
+  });
+});
+
+/**
+ * P4 ФВ-9.8: батько-розклад `Succeeded` одразу після розкладу — документи ще не
+ * пораховані. «Завершено» — лише коли виконано M = N і помилок K = 0.
+ */
+describe('стеження за розкладом перерахунку проєкту', () => {
+  it('розкладено, дочірні ще рахуються — опитування триває, підсумок «виконується»', () => {
+    // ⛔ Мутація «без `effectiveState`» дає тут `false` і `succeeded`.
+    expect(pollInterval('Succeeded', FannedOut)).toBe(PollMs);
+    expect(outcomeOf('Succeeded', false, FannedOut)).toBe('running');
+  });
+
+  it('усі дочірні виконано — «виконано», опитування зупиняється', () => {
+    expect(pollInterval('Succeeded', 'Succeeded')).toBe(false);
+    expect(outcomeOf('Succeeded', false, 'Succeeded')).toBe('succeeded');
+  });
+
+  it('частина дочірніх з помилками — `partial`, не «виконано»', () => {
+    expect(pollInterval('Succeeded', SucceededWithErrors)).toBe(false);
+    expect(outcomeOf('Succeeded', false, SucceededWithErrors)).toBe('partial');
+  });
+
+  it('провалений батько не маскується похідним станом, нечитабельний — `unknown`', () => {
+    expect(outcomeOf('Failed', false, 'Failed')).toBe('failed');
+    expect(outcomeOf('Succeeded', true, FannedOut)).toBe('unknown');
+  });
+
+  it('задача без розкладу (`effectiveState` відсутній) — як раніше', () => {
+    expect(outcomeOf('Succeeded', false, null)).toBe('succeeded');
+    expect(pollInterval('Succeeded', null)).toBe(false);
   });
 });

@@ -114,4 +114,21 @@ describe('JobsPage: розклад на дочірні задачі', () => {
     },
     SlowEnvTimeout,
   );
+
+  it(
+    'бейдж стану — похідний стан розкладу, а не «Succeeded» батька',
+    async () => {
+      respond({
+        ...Parent,
+        effectiveState: 'FannedOut',
+        fanOut: { total: 3, queued: 2, running: 0, succeeded: 1, failed: 0 },
+      });
+      show();
+
+      // ⛔ Мутація «бейдж за `status.state`» показує тут «Succeeded» над непорахованими документами.
+      expect(await screen.findByText('⟦status.job.FannedOut⟧', {}, { timeout: SlowEnvTimeout })).toBeTruthy();
+      expect(screen.queryByText('⟦status.job.Succeeded⟧')).toBeNull();
+    },
+    SlowEnvTimeout,
+  );
 });

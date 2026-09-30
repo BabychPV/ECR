@@ -380,7 +380,7 @@ export function SheetActions({
 
     // ⚠ Правило опитування — у чистому модулі `jobFollow.ts`: саме його не
     // було, і саме його треба перевіряти окремо від компонента.
-    refetchInterval: (query) => pollInterval(query.state.data?.state),
+    refetchInterval: (query) => pollInterval(query.state.data?.state, query.state.data?.effectiveState),
 
     // ⚠ `retry: false` і мовчазна зупинка на відмові: `GET /jobs/{id}` вимагає
     // окремого права (`System.ViewHealth`, `Q-156`), і оператор без нього має
@@ -398,7 +398,7 @@ export function SheetActions({
    */
   const outcome = recalcJobId === null
     ? null
-    : outcomeOf(recalcJob.data?.state, recalcJob.isError);
+    : outcomeOf(recalcJob.data?.state, recalcJob.isError, recalcJob.data?.effectiveState);
 
   // ⛔ §10.6: «виконується» — про ЦЕЙ екран, а не про будь-яку задачу в
   // пам'яті компонента. Кнопка на іншому аркуші/періоді мусить бути звичайною

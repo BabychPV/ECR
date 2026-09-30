@@ -196,6 +196,29 @@ describe('RegistryImpactPage: зачеплені документи і їх пе
     expect(document.querySelector('[data-impact-fanout]')?.textContent).toContain('done=2');
   });
 
+  it('бейдж стану — похідний стан розкладу: з помилками не читається як «Succeeded»', async () => {
+    mockServer(['Registry.View', 'Calculation.Recalculate'], Impact, () =>
+      json({
+        jobId: 'IRegistryImpactRecalculationJob#1',
+        state: 'Succeeded',
+        effectiveState: 'SucceededWithErrors',
+        percent: 100,
+        message: null,
+        error: null,
+        fanOut: { total: 2, queued: 0, running: 0, succeeded: 1, failed: 1 },
+      }),
+    );
+    show();
+
+    await screen.findByRole('link', { name: 'DOC5' });
+    fireEvent.click(await screen.findByRole('button', { name: /registries\.impact\.recalculateAll/ }));
+    await confirmWithReason('причина');
+
+    // ⛔ Мутація «бейдж за `status.state`» показує тут «Succeeded».
+    expect(await screen.findByText(/status\.job\.SucceededWithErrors/)).toBeTruthy();
+    expect(screen.queryByText(/status\.job\.Succeeded⟧/)).toBeNull();
+  });
+
   it('стан задачі не прочитати — так і сказано, а не вічний прогрес', async () => {
     mockServer(['Registry.View', 'Calculation.Recalculate'], Impact, () =>
       json({ title: 'Forbidden', status: 403 }, 403),

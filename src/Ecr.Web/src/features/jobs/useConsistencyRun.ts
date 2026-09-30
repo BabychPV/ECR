@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch, EcrApiError } from '@/api/client';
 import type { JobStatus } from '@/api/types';
-import { outcomeOf, pollInterval, type JobOutcome } from '@/features/workflow/jobFollow';
+import { outcomeOf, pollInterval, type PlainJobOutcome } from '@/features/workflow/jobFollow';
 import { problemText } from '@/shared/ui/problemText';
 import { runConsistencyCheck } from './api';
 
@@ -56,7 +56,7 @@ export interface ConsistencyRun {
   startError: unknown;
 
   /** Підсумок стеження; `null` — у цьому сеансі екрана нічого не ставили. */
-  outcome: JobOutcome | null;
+  outcome: PlainJobOutcome | null;
 
   /** Текст сервера про збій задачі, якщо він є. */
   failure: string | null;

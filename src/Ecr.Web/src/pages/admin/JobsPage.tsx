@@ -36,6 +36,7 @@ import { humanizeJobId, jobKindLabel } from '@/features/workflow/jobLabel';
 import { t } from '@/shared/i18n';
 import { generatePath } from 'react-router-dom';
 import { routes } from '@/app/routes';
+import { badgeStateOf } from '@/features/workflow/jobFollow';
 
 /** Адреса документа задачі — з реєстру маршрутів (`JobFacts` про маршрути не знає). */
 function documentHrefOf(id: number): string {
@@ -213,7 +214,8 @@ export function JobsPage(): JSX.Element {
                   ідентифікатора вже немає — `QuartzJobScheduler.cs`) малювалися
                   тим самим кольором, що й `Queued`: відмова відповісти про
                   задачу виглядала як задача в черзі. Набір дає їм `warning`. */}
-              <StatusBadge kind="job" state={status.state} />
+              {/* ⛔ Похідний стан розкладу: батько `Succeeded`, коли документи ще рахуються. */}
+              <StatusBadge kind="job" state={badgeStateOf(status)} />
             </Group>
 
             {/* ⚠ BE-08: спроба, момент постановки й документ задачі. Картка —

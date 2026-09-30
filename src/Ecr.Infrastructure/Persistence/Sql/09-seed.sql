@@ -4297,6 +4297,11 @@ USING (VALUES
     (N'jobs.fanOutDone',                        N'en', N'Done', 1),
     (N'jobs.fanOutDoneWithErrors',              N'en', N'Done with errors ({failed})', 1),
     -- COLL:p4-fanout ── кінець секції ──
+    -- RECALC:periods-status ── Правдивий стан перерахунку проєкту на екранах (P4 ФВ-9.8: «завершено» лише коли M = N і K = 0) ──
+    (N'workflow.recalcDoneWithErrors',          N'en', N'Recalculation is not complete: done {done} of {total} documents, errors {failed}. Figures of the failed documents are not up to date.', 1),
+    (N'status.job.FannedOut',                   N'en', N'Calculating documents', 1),
+    (N'status.job.SucceededWithErrors',         N'en', N'Done with errors', 1),
+    -- RECALC:periods-status ── кінець секції ──
     -- COLL:calcrun-order ── Старіший прогін не перекриває новіший (борг P4, `CalculationResultStore.SwitchCurrentRunAsync`) ──
     -- Причина в `calc.CalculationRun.ErrorMessage` прогону, що завершився після новішого тієї ж області: `{runId}` — новіший, актуальний.
     (N'jobs.calculationRunSupersededByNewer',   N'en', N'The run finished after a newer run {runId} of the same scope and did not replace its results: those are more recent.', 1),
@@ -13743,6 +13748,20 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- REG:history-export-ui ── кінець секції ──
+-- RECALC:periods-status ── ru/kz правдивого стану перерахунку проєкту (P4 ФВ-9.8); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'workflow.recalcDoneWithErrors', N'ru', N'Пересчёт не завершён: выполнено {done} из {total} документов, ошибок {failed}. Показатели документов с ошибками не актуальны.'),
+    (N'workflow.recalcDoneWithErrors', N'kz', N'Қайта есептеу аяқталмады: {total} құжаттың {done} орындалды, қате {failed}. Қатесі бар құжаттардың көрсеткіштері өзекті емес.'),
+    (N'status.job.FannedOut', N'ru', N'Документы пересчитываются'),
+    (N'status.job.FannedOut', N'kz', N'Құжаттар қайта есептелуде'),
+    (N'status.job.SucceededWithErrors', N'ru', N'Выполнено с ошибками'),
+    (N'status.job.SucceededWithErrors', N'kz', N'Қателермен орындалды')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- RECALC:periods-status ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

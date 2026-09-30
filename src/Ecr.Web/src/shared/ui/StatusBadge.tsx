@@ -156,6 +156,10 @@ export const statusTable: Readonly<Record<StatusKind, Readonly<Record<string, St
     Cancelled: 'muted',
     Unknown: 'warning',
     Unavailable: 'warning',
+    // ⛔ Похідні стани розкладу (P4 ФВ-9.8, `JobStatus.effectiveState`): батько вже
+    // `Succeeded`, а документи ще рахуються / частина впала — це не «успішно».
+    FannedOut: 'info',
+    SucceededWithErrors: 'warning',
   },
 
   /**
