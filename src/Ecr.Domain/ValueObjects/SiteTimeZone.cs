@@ -6,7 +6,7 @@ using Ecr.Domain.Errors;
 namespace Ecr.Domain.ValueObjects;
 
 /// <summary>
-/// Часовий пояс майданчика — **ідентифікатор IANA** (<c>Asia/Aqtau</c>), а не
+/// Часовий пояс майданчика — **ідентифікатор IANA** (<c>Asia/Atyrau</c>), а не
 /// зсув і не Windows-ідентифікатор (директива ПК-1 №06 §3).
 /// </summary>
 /// <remarks>
@@ -32,7 +32,7 @@ public readonly record struct SiteTimeZone
 {
     private SiteTimeZone(string id) => Id = id;
 
-    /// <summary>Ідентифікатор IANA, як його записали: <c>Asia/Aqtau</c>.</summary>
+    /// <summary>Ідентифікатор IANA, як його записали: <c>Asia/Atyrau</c>.</summary>
     public string Id { get; }
 
     /// <summary>

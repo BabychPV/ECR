@@ -83,7 +83,7 @@ public sealed class Project : Entity<int>
     public int YearGraceOffsetDays { get; private set; }
 
     /// <summary>
-    /// Пояс майданчика — ідентифікатор IANA (<c>Asia/Aqtau</c>). У ньому
+    /// Пояс майданчика — ідентифікатор IANA (<c>Asia/Atyrau</c>). У ньому
     /// рахуються межі періодів, offsets і <c>IsLateEdit</c> — не в UTC (D-68).
     /// </summary>
     /// <remarks>

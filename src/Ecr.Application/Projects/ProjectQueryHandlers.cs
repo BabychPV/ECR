@@ -388,7 +388,7 @@ public sealed class CreateProjectHandler(
     /// <summary>Створює проєкт на звітний рік.</summary>
     /// <param name="code">Код проєкту.</param>
     /// <param name="name">Назва мовами каталогу.</param>
-    /// <param name="timeZoneId">Пояс майданчика — ідентифікатор IANA (<c>Asia/Aqtau</c>).</param>
+    /// <param name="timeZoneId">Пояс майданчика — ідентифікатор IANA (<c>Asia/Atyrau</c>).</param>
     /// <param name="periodKind">Періодичність.</param>
     /// <param name="year">Звітний рік; <c>null</c> — поточний **у поясі майданчика**.</param>
     /// <param name="templateVersionId">Версія шаблону.</param>
@@ -435,8 +435,8 @@ public sealed class CreateProjectHandler(
         var zone = SiteTimeZone.Create(timeZoneId);
 
         // ⛔ Рік беремо в поясі МАЙДАНЧИКА, а не сервера. Тут стояло
-        // `clock.UtcNow.Year`, і для майданчика на `Asia/Almaty` (UTC+6)
-        // проєкт, створений 1 січня о 03:00 за місцем (це 31 грудня 21:00
+        // `clock.UtcNow.Year`, і для майданчика на `Asia/Atyrau` (UTC+5)
+        // проєкт, створений 1 січня о 02:00 за місцем (це 31 грудня 21:00
         // UTC), отримував МИНУЛИЙ рік: дванадцять періодів із ключами
         // `YYYY*100+N` не того року. `PeriodKey` — ключ партиціонування (R-A6),
         // тож дані поїхали б у чужі партиції й у чужий архів, а виглядало б це
