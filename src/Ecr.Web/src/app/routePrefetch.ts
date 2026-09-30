@@ -99,6 +99,11 @@ const MappingPreviewPageLoader = async () => ({
 });
 export const MappingPreviewPage = lazy(MappingPreviewPageLoader);
 
+const PipelinePageLoader = async () => ({
+  default: (await import('@/pages/admin/PipelinePage')).PipelinePage,
+});
+export const PipelinePage = lazy(PipelinePageLoader);
+
 const JobsPageLoader = async () => ({ default: (await import('@/pages/admin/JobsPage')).JobsPage });
 export const JobsPage = lazy(JobsPageLoader);
 
@@ -165,6 +170,7 @@ const routeChunkLoaders: Partial<Record<string, () => Promise<unknown>>> = {
   [routes.adminPeriods.id]: PeriodsPageLoader,
   [routes.adminSources.id]: SourcesPageLoader,
   [routes.adminMapping.id]: MappingPreviewPageLoader,
+  [routes.adminPipeline.id]: PipelinePageLoader,
   [routes.adminJobs.id]: JobsPageLoader,
   [routes.adminSnapshots.id]: SnapshotsPageLoader,
   [routes.adminAudit.id]: AuditPageLoader,

@@ -345,6 +345,17 @@ export const routes = {
     handle: { labelKey: 'nav.mapping', permission: 'Integration.Manage', icon: 'mapping' },
     showInNav: true,
   },
+  /**
+   * Редактор конвеєра даних (`ФВ-14.3`, область 9; `B21` §7). Право — те саме,
+   * що й у перегляду мапінгу: конвеєр читає `/api/v1/sources` і перегляд
+   * мапінгу, а обидва сервер віддає лише з `Integration.Manage`.
+   */
+  adminPipeline: {
+    id: 'admin-pipeline',
+    path: '/admin/pipeline',
+    handle: { labelKey: 'nav.pipeline', permission: 'Integration.Manage', icon: 'pipeline' },
+    showInNav: true,
+  },
   adminJobs: {
     id: 'admin-jobs',
     path: '/admin/jobs',
