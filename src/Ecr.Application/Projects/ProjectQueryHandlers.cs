@@ -325,6 +325,22 @@ public sealed class UpdatePeriodPolicyHandler(
             policy.UpdateOffsets(openOffsetDays, graceOffsetDays, hardCloseOffsetDays, yearGraceOffsetDays);
             var after = PeriodPolicyMapping.ToDto(policy);
 
+            // ⛔ ФВ-1.6: збережені `Computed*At` наявних періодів перераховуються В ТІЙ САМІЙ
+            // транзакції — раніше вони мінялися лише при перебудові календаря, і новий зсув
+            // «діяв» лише на майбутні періоди. Закриті не чіпаємо (`PeriodBoundaryRefresh`).
+            foreach (var projectId in projectIds)
+            {
+                var project = await periods.FindProjectAsync(projectId, innerCt).ConfigureAwait(false);
+                if (project is null)
+                {
+                    continue;
+                }
+
+                Periods.PeriodBoundaryRefresh.Apply(
+                    project.Periods, policy,
+                    Domain.ValueObjects.SiteTimeZone.Create(project.TimeZoneId).ToTimeZoneInfo());
+            }
+
             // ⛔ Журнал — у тій самій транзакції, що й зміна: збій збереження не
             // лишає запису про зміну, якої не сталося, і навпаки.
             await audit.WriteStructureChangeAsync(
@@ -967,6 +983,13 @@ public sealed class ChangeProjectTimeZoneHandler(
         // зміни після відкриття першого періоду обидва йдуть звідти
         // (`Project.ChangeTimeZone`), обробник нічого не дублює.
         project.ChangeTimeZone(timeZoneId);
+
+        // ⛔ ФВ-1.6: пояс змінюється лише поки всі періоди Scheduled, але їхні збережені
+        // `Computed*At` уже пораховані в СТАРОМУ поясі — перераховуємо в новому.
+        Periods.PeriodBoundaryRefresh.Apply(
+            project.Periods,
+            await periods.GetPolicyAsync(project.PeriodPolicyId, ct).ConfigureAwait(false),
+            Domain.ValueObjects.SiteTimeZone.Create(project.TimeZoneId).ToTimeZoneInfo());
 
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
     }
