@@ -56,10 +56,14 @@
     ФВ-9.8 / D-206 (P2) додали до кроків:
       1. редакція й версія SQL Server (SERVERPROPERTY): друкується; нижче
          2016 SP1 — зупинка; Express — зупинка без -AllowExpress;
-      3. WORKER_ENABLED=1|0 у msiexec за -EnableWorker (служба EcrWorker);
+      3. WORKER_ENABLED=1|0 у msiexec (служба EcrWorker): з I2-2 ТИПОВО 1,
+         крім SQL Server Express і -DisableWorker (Resolve-WorkerDeployment);
       4. рядок підключення — ще й у Services\EcrWorker\Environment;
       5. Database:EditionMode — визначене значення в Environment служб, якщо
          оператор не задав його явно (-EditionMode, файл майданчика, Environment);
+         режим перерахунку Api (Jobs:Queue:Mode, Jobs:Recalculation:Executor) —
+         у Environment EcrApi за ФАКТОМ служби: Database + Worker лише разом із
+         EcrWorker, без неї — InProcess (Resolve-JobExecutionConfig);
       6. перезапуск EcrWorker і перевірка, що він не впав одразу.
 
     Крок схеми виконується під `-SqlLogin`/інтегрованими обліковими даними
@@ -211,14 +215,21 @@
     Degraded (після того, як /health/live уже відповів). За замовчуванням 180.
 
 .PARAMETER EnableWorker
-    Встановити й запустити службу EcrWorker — наглядач пулу воркерів
-    перерахунку (ФВ-9.8, D-206; `installer/Ecr.Installer/Worker.wxs`).
-    Передається в msiexec як WORKER_ENABLED=1; без прапорця — WORKER_ENABLED=0,
-    тобто стан командного рядка = бажаний стан: оновлення БЕЗ -EnableWorker
-    прибирає раніше встановлену службу воркера (крок 3 про це попереджає).
-    Секрети — той самий рядок підключення, у
+    Службу EcrWorker — наглядач пулу воркерів перерахунку (ФВ-9.8, D-206;
+    `installer/Ecr.Installer/Worker.wxs`) — з I2-2 скрипт ставить і так,
+    ТИПОВО. Прапорець лишився для сумісності (майстер `Ecr-Setup` передає його,
+    якщо служба вже є) і має значення лише на SQL Server Express: там без нього
+    воркера не буде. Секрети — той самий рядок підключення, у
     `HKLM:\SYSTEM\CurrentControlSet\Services\EcrWorker\Environment`; обліковий
-    запис — той самий -ServiceAccount.
+    запис — той самий -ServiceAccount. Разом із службою в Environment EcrApi
+    пишеться Jobs:Queue:Mode = Database і Jobs:Recalculation:Executor = Worker.
+
+.PARAMETER DisableWorker
+    Не ставити службу EcrWorker: у msiexec іде WORKER_ENABLED=0 (наявну службу
+    MSI прибере — крок 3 попереджає), а EcrApi отримує
+    Jobs:Recalculation:Executor = InProcess — перерахунок у процесі Api, як до
+    I2-2. Стан командного рядка = бажаний стан: MSI властивість не пам'ятає,
+    тож для вимкненого воркера прапорець потрібен на КОЖНОМУ оновленні.
 
 .PARAMETER EditionMode
     Явний `Database:EditionMode` (Auto | Standard | Enterprise) — пишеться в
@@ -284,6 +295,7 @@ param(
     [switch] $CreateDatabaseIfMissing,
     [ValidateRange(10, 3600)] [int] $ReadyTimeoutSeconds = 180,
     [switch] $EnableWorker,
+    [switch] $DisableWorker,
     [ValidateSet('Auto', 'Standard', 'Enterprise')] [string] $EditionMode,
     [switch] $AllowExpress
 )
@@ -576,6 +588,132 @@ function Get-ServiceEnvironmentValue {
     return $entry.Substring($Name.Length + 1)
 }
 
+# ⚠ Чиста функція (як Merge-ServiceEnvironmentEntry): прибрати запис $Name,
+# чужі — незаймані. Та сама кома в `return ,(...)` і з тієї ж причини.
+function Remove-ServiceEnvironmentEntry {
+    param(
+        [string[]] $Existing,
+        [Parameter(Mandatory)] [string] $Name
+    )
+
+    return ,([string[]] @($Existing | Where-Object { $_ -notlike "$Name=*" }))
+}
+
+function Remove-ServiceEnvironmentVariable {
+    param(
+        [Parameter(Mandatory)] [string] $ServiceName,
+        [Parameter(Mandatory)] [string] $Name
+    )
+
+    $keyPath = "HKLM:\SYSTEM\CurrentControlSet\Services\$ServiceName"
+    $prop = Get-ItemProperty -Path $keyPath -Name Environment -ErrorAction SilentlyContinue
+    if (-not $prop) { return }
+    $updated = Remove-ServiceEnvironmentEntry -Existing @($prop.Environment) -Name $Name
+    if ($updated.Count -eq 0) { Remove-ItemProperty -Path $keyPath -Name Environment }
+    else { Set-ItemProperty -Path $keyPath -Name Environment -Value $updated -Type MultiString }
+}
+
+# Значення вкладеного ключа з файлу майданчика (наприклад, Jobs → Queue → Mode)
+# або $null: немає файлу, не парситься, немає ключа, порожнє значення.
+function Get-ConfiguredValue {
+    param(
+        [string] $Path,
+        [Parameter(Mandatory)] [string[]] $Keys
+    )
+
+    if (-not $Path -or -not (Test-Path $Path)) { return $null }
+    try { $node = Get-Content $Path -Raw | ConvertFrom-Json -ErrorAction Stop }
+    catch { return $null }
+    foreach ($key in $Keys) {
+        if ($null -eq $node -or -not $node.PSObject.Properties[$key]) { return $null }
+        $node = $node.$key
+    }
+    $value = [string] $node
+    if ([string]::IsNullOrWhiteSpace($value)) { return $null }
+    return $value
+}
+
+# ⛔ I2-2 (чиста функція): ставити службу EcrWorker чи ні. Типово — так
+# (замір I2-2: ізоляція лейну default, межа пам'яті процесу, Api 162 МБ проти
+# 367). Винятки:
+#   -DisableWorker          → ні;
+#   -EnableWorker           → так, навіть на Express (явний вибір для стенда);
+#   SQL Server Express      → ні: dev-стенд (-AllowExpress), перерахунок у
+#                             процесі Api, як до I2-2;
+#   редакція невідома (-WhatIf, SERVERPROPERTY не виконувався) → так, з приміткою.
+function Resolve-WorkerDeployment {
+    param(
+        [switch] $EnableWorker,
+        [switch] $DisableWorker,
+        [string] $EditionName
+    )
+
+    if ($EnableWorker -and $DisableWorker) {
+        throw '-EnableWorker і -DisableWorker разом — оберіть одне.'
+    }
+    if ($DisableWorker) {
+        return [pscustomobject]@{ Enabled = $false; Reason = 'вимкнено явно (-DisableWorker)' }
+    }
+    if ($EnableWorker) {
+        return [pscustomobject]@{ Enabled = $true; Reason = 'явно (-EnableWorker)' }
+    }
+    if ($EditionName -eq 'Express') {
+        return [pscustomobject]@{ Enabled = $false
+            Reason = 'SQL Server Express — dev-стенд: перерахунок у процесі Api (увімкнути — -EnableWorker)' }
+    }
+    if (-not $EditionName) {
+        return [pscustomobject]@{ Enabled = $true
+            Reason = 'типово; редакцію SQL Server не визначено (-WhatIf) — на Express воркера не буде' }
+    }
+    return [pscustomobject]@{ Enabled = $true; Reason = 'типово (I2-2)' }
+}
+
+# ⛔ I2-2 (чиста функція): режим перерахунку Api визначається ФАКТОМ виконавця,
+# а не лише конфігом. Api з Executor = Worker лейн перерахунку НЕ бере
+# (JobLaneMap.ApiLanes), тож Worker без служби = перерахунок без виконавця.
+# Тому значення пишуться в Environment EcrApi (перекриває файл майданчика й
+# appsettings.json) щоразу:
+#   служба є  → Mode = Database, Executor = Worker (Worker без Database нічого
+#               не дає: у режимі Quartz перерахунок однаково йде в Api);
+#   служби нема → Executor = InProcess завжди; Mode = Quartz (варіант B заміру
+#               I2-2), АЛЕ якщо файл майданчика задає Mode сам — запис Mode з
+#               Environment прибирається, щоб рішення файлу діяло.
+# Значення у файлі, що суперечать факту служби, не мовчки перекриваються — попередження.
+function Resolve-JobExecutionConfig {
+    param(
+        [Parameter(Mandatory)] [bool] $WorkerEnabled,
+        [string] $FileMode,
+        [string] $FileExecutor
+    )
+
+    $modeName = 'ECR_Jobs__Queue__Mode'
+    $executorName = 'ECR_Jobs__Recalculation__Executor'
+    $set = [ordered]@{}
+    $remove = @()
+    $warnings = @()
+
+    if ($WorkerEnabled) {
+        $set[$modeName] = 'Database'
+        $set[$executorName] = 'Worker'
+        if ($FileMode -and $FileMode -ne 'Database') {
+            $warnings += "appsettings.Production.json задає Jobs:Queue:Mode = $FileMode, але служба EcrWorker є: Environment EcrApi перекриває його на Database (вимкнути воркер — -DisableWorker)."
+        }
+        if ($FileExecutor -and $FileExecutor -ne 'Worker') {
+            $warnings += "appsettings.Production.json задає Jobs:Recalculation:Executor = $FileExecutor, але служба EcrWorker є: Environment EcrApi перекриває його на Worker (вимкнути воркер — -DisableWorker)."
+        }
+    }
+    else {
+        $set[$executorName] = 'InProcess'
+        if ($FileExecutor -and $FileExecutor -ne 'InProcess') {
+            $warnings += "appsettings.Production.json задає Jobs:Recalculation:Executor = $FileExecutor, а служби EcrWorker немає: перерахунок лишився б без виконавця — Environment EcrApi перекриває його на InProcess."
+        }
+        if ($FileMode) { $remove += $modeName }
+        else { $set[$modeName] = 'Quartz' }
+    }
+
+    return [pscustomobject]@{ Set = $set; Remove = [string[]] $remove; Warnings = [string[]] $warnings }
+}
+
 # ⛔ S11: відбиток у тому вигляді, в якому його шукає застосунок
 # (`AuthenticationSetup.FindCertificate`): без пробілів і нерозривних пробілів —
 # з вікна сертифіката Windows його копіюють групами по два символи.
@@ -638,6 +776,9 @@ if ($ServicePassword) {
 }
 if ($ConfigValues -and -not (Test-Path $ConfigValues)) {
     throw "ConfigValues вказує на неіснуючий файл: $ConfigValues"
+}
+if ($EnableWorker -and $DisableWorker) {
+    throw '-EnableWorker і -DisableWorker разом — оберіть одне.'
 }
 if (-not $ConnectionString) {
     Write-Warning ("-ConnectionString не задано — застосунок впаде з InvalidOperationException " +
@@ -907,6 +1048,13 @@ finally {
     if ($env:SQLCMDPASSWORD) { Remove-Item Env:\SQLCMDPASSWORD -ErrorAction SilentlyContinue }
 }
 
+# ── Воркер перерахунку (I2-2): рішення ДО msiexec — від нього залежать і
+# WORKER_ENABLED, і режим Api на кроці 5.
+$workerDecision = Resolve-WorkerDeployment -EnableWorker:$EnableWorker -DisableWorker:$DisableWorker `
+    -EditionName $(if ($detectedEdition) { $detectedEdition.Name } else { $null })
+$workerEnabled = [bool] $workerDecision.Enabled
+Write-Host ("Воркер перерахунку (EcrWorker): $(if ($workerEnabled) { 'так' } else { 'ні' }) — $($workerDecision.Reason).")
+
 # ---------------------------------------------------------------------
 Write-Step "Крок 3/7: MSI"
 
@@ -933,14 +1081,14 @@ $msiArgs      += "APP_PORT=$AppPort"
 $msiArgsShown += "APP_PORT=$AppPort"
 
 # ⚠ WORKER_ENABLED передається ЗАВЖДИ, і 0 теж: MSI не пам'ятає властивість між
-# установками (Worker.wxs), тож стан командного рядка = бажаний стан. Оновлення
-# без -EnableWorker прибирає раніше встановлену службу воркера — кажемо вголос.
-$workerFlag = if ($EnableWorker) { '1' } else { '0' }
+# установками (Worker.wxs), тож стан командного рядка = бажаний стан. Вимкнений
+# воркер при наявній службі — MSI її прибирає; кажемо вголос.
+$workerFlag = if ($workerEnabled) { '1' } else { '0' }
 $msiArgs      += "WORKER_ENABLED=$workerFlag"
 $msiArgsShown += "WORKER_ENABLED=$workerFlag"
-if (-not $EnableWorker -and (Get-Service -Name EcrWorker -ErrorAction SilentlyContinue)) {
-    Write-Warning ("Служба EcrWorker зараз встановлена, а -EnableWorker не задано: MSI її ПРИБЕРЕ. " +
-        "Щоб лишити воркер — повтори з -EnableWorker.")
+if (-not $workerEnabled -and (Get-Service -Name EcrWorker -ErrorAction SilentlyContinue)) {
+    Write-Warning ("Служба EcrWorker зараз встановлена, а воркер вимкнено ($($workerDecision.Reason)): MSI її ПРИБЕРЕ, " +
+        "а EcrApi перейде на Jobs:Recalculation:Executor = InProcess (крок 5).")
 }
 if ($ServicePassword) {
     $msiArgs      += "SERVICE_PASSWORD=$(ConvertFrom-SecureStringPlain $ServicePassword)"
@@ -950,6 +1098,13 @@ if ($ServicePassword) {
 if ($PSCmdlet.ShouldProcess($MsiPath, "msiexec $($msiArgsShown -join ' ')")) {
     $proc = Start-Process msiexec -ArgumentList $msiArgs -Wait -PassThru
     if ($proc.ExitCode -notin 0, 3010) { throw "msiexec повернув $($proc.ExitCode) — див. ecr-install.log" }
+
+    # ⛔ I2-2: режим Api (крок 5) пишеться за ФАКТОМ служби, а не за наміром.
+    # Служби немає після WORKER_ENABLED=1 — зупинка тут, до запису Executor = Worker.
+    if ($workerEnabled -and -not (Get-Service -Name EcrWorker -ErrorAction SilentlyContinue)) {
+        throw ("Служби EcrWorker немає після msiexec з WORKER_ENABLED=1 — див. ecr-install.log. " +
+            "Режим перерахунку EcrApi не змінено. Без воркера — повтори з -DisableWorker.")
+    }
 }
 
 # ---------------------------------------------------------------------
@@ -969,7 +1124,7 @@ else {
 
     # Воркер ходить у ту саму базу тим самим рядком (Worker.wxs: той самий
     # обліковий запис) — той самий канал, окремий ключ служби.
-    if ($EnableWorker -and $PSCmdlet.ShouldProcess('HKLM:\SYSTEM\CurrentControlSet\Services\EcrWorker\Environment',
+    if ($workerEnabled -and $PSCmdlet.ShouldProcess('HKLM:\SYSTEM\CurrentControlSet\Services\EcrWorker\Environment',
             'записати ECR_ConnectionStrings__Ecr')) {
         Set-ServiceEnvironmentVariable -ServiceName 'EcrWorker' -Name 'ECR_ConnectionStrings__Ecr' `
             -Value (ConvertFrom-SecureStringPlain $ConnectionString)
@@ -1052,7 +1207,7 @@ if (-not $editionDecision.Write) {
     Write-Host "Database:EditionMode: $($editionDecision.Reason)." -ForegroundColor DarkGray
 }
 else {
-    $editionServices = @('EcrApi') + $(if ($EnableWorker) { @('EcrWorker') } else { @() })
+    $editionServices = @('EcrApi') + $(if ($workerEnabled) { @('EcrWorker') } else { @() })
     foreach ($serviceName in $editionServices) {
         if ($PSCmdlet.ShouldProcess("HKLM:\SYSTEM\CurrentControlSet\Services\$serviceName\Environment",
                 "записати ECR_Database__EditionMode=$($editionDecision.Value)")) {
@@ -1063,11 +1218,37 @@ else {
     Write-Host "Database:EditionMode = $($editionDecision.Value) ($($editionDecision.Reason))." -ForegroundColor Green
 }
 
+# ── Режим перерахунку EcrApi (I2-2) — за фактом служби EcrWorker (крок 3 уже
+# перевірив, що вона є, коли $workerEnabled). ПІСЛЯ запису файлу — з тієї ж
+# причини, що й EditionMode: значення з -ConfigValues теж явне.
+$jobDecision = Resolve-JobExecutionConfig -WorkerEnabled $workerEnabled `
+    -FileMode (Get-ConfiguredValue -Path $configPath -Keys 'Jobs', 'Queue', 'Mode') `
+    -FileExecutor (Get-ConfiguredValue -Path $configPath -Keys 'Jobs', 'Recalculation', 'Executor')
+
+foreach ($warning in $jobDecision.Warnings) { Write-Warning $warning }
+foreach ($name in $jobDecision.Set.Keys) {
+    if ($PSCmdlet.ShouldProcess('HKLM:\SYSTEM\CurrentControlSet\Services\EcrApi\Environment',
+            "записати $name=$($jobDecision.Set[$name])")) {
+        Set-ServiceEnvironmentVariable -ServiceName 'EcrApi' -Name $name -Value $jobDecision.Set[$name]
+    }
+}
+foreach ($name in $jobDecision.Remove) {
+    if ($PSCmdlet.ShouldProcess('HKLM:\SYSTEM\CurrentControlSet\Services\EcrApi\Environment', "прибрати $name")) {
+        Remove-ServiceEnvironmentVariable -ServiceName 'EcrApi' -Name $name
+    }
+}
+Write-Host ("Перерахунок: " + $(if ($workerEnabled) { 'служба EcrWorker (Jobs:Queue:Mode = Database, Executor = Worker).' }
+        else { 'у процесі EcrApi (Executor = InProcess).' })) -ForegroundColor Green
+
 # ---------------------------------------------------------------------
 Write-Step "Крок 6/7: старт служби"
 
 if (-not $ServiceAccount) {
     Write-Host "SERVICE_ACCOUNT не задано — служба зареєстрована, але не стартує (навмисно, docs/build/10-installer.md §1.4)." -ForegroundColor Yellow
+    if ($workerEnabled) {
+        Write-Host ("  ⚠ EcrWorker теж не стартує, а EcrApi вже налаштовано на Executor = Worker: запускай ОБИДВІ служби, " +
+            "інакше перерахунок стоятиме в черзі (перевірка worker на /health/ready — Degraded).") -ForegroundColor Yellow
+    }
 }
 else {
     # ⛔ БЕЗУМОВНИЙ перезапуск, не "старт, якщо не Running": MSI (Q-212)
@@ -1084,7 +1265,7 @@ else {
 
     # Воркер — з тієї ж причини безумовний перезапуск: MSI міг підняти його
     # до того, як крок 4 записав рядок підключення.
-    if ($EnableWorker -and $PSCmdlet.ShouldProcess('EcrWorker', 'Restart-Service')) {
+    if ($workerEnabled -and $PSCmdlet.ShouldProcess('EcrWorker', 'Restart-Service')) {
         $worker = Get-Service -Name EcrWorker -ErrorAction SilentlyContinue
         if (-not $worker) { throw 'Служби EcrWorker немає після msiexec з WORKER_ENABLED=1 — див. ecr-install.log.' }
         Restart-Service -Name EcrWorker -Force
