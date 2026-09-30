@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using Ecr.Application.Common;
 using Ecr.Application.Documents;
 using Ecr.Application.Documents.Dto;
@@ -359,6 +359,40 @@ public sealed class PatchCellsWorkbookTests(SqlServerFixture sql) : IDisposable
     private sealed record Run(IReadOnlyList<PatchCellsResponse> Responses, List<RecalculationSeed> Seeds);
 
     /// <summary>
+    /// HSE301 A1: імпорт книги ставить підтягування вікон рядків так само, як поштучний PATCH —
+    /// один виклик хука на таблицю; без колонки вікна — нічого в черзі.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Мутація: приберіть виклик <c>rowWindows.RowsChangedAsync</c> у <c>HandleWorkbookAsync</c> —
+    /// червоніє <see cref="Імпорт_книги_зі_зміною_колонки_вікна_ставить_задачу_по_одній_на_таблицю"/>.
+    /// </remarks>
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "HSE301-A1")]
+    [InlineData(true, 3)]
+    [InlineData(false, 0)]
+    public async Task Імпорт_книги_зі_зміною_колонки_вікна_ставить_задачу_по_одній_на_таблицю(bool windowColumn, int expectedJobs)
+    {
+        var world = await ArrangeAsync([2]);
+        var requests = Requests(world, await VersionsAsync(world));
+        var index = Substitute.For<IRowWindowColumnIndex>();
+        index.WindowColumnsAsync(Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(c => windowColumn
+                ? world.Tables.First(t => t.TableDefId == c.ArgAt<int>(0)).ColumnIds.Take(0).Append(
+                    world.Tables.First(t => t.TableDefId == c.ArgAt<int>(0)).ColumnIds[^1]).ToHashSet()
+                : new HashSet<int>());
+        var jobs = Substitute.For<IBackgroundJobScheduler>();
+        var trigger = new Ecr.Application.Integration.RowWindowTrigger(
+            index, jobs, Microsoft.Extensions.Logging.Abstractions.NullLogger<Ecr.Application.Integration.RowWindowTrigger>.Instance);
+
+        _ = await RunWorkbookAsync(world, Writer(world), requests, rowWindows: trigger);
+
+        Assert.Equal(
+            expectedJobs == 0 ? 0 : world.Tables.Count,
+            jobs.ReceivedCalls().Count(c => c.GetMethodInfo().Name == nameof(IBackgroundJobScheduler.EnqueueCoalescedAsync)));
+    }
+    /// <summary>
     /// Книга так, як її застосує <c>ExcelImporter</c>: одна транзакція, першою
     /// дією — спільні блокування всіх аркушів, далі — книжковий шлях (повторне
     /// спільне блокування того самого власника видається одразу).
@@ -368,10 +402,11 @@ public sealed class PatchCellsWorkbookTests(SqlServerFixture sql) : IDisposable
         AccessProfile profile,
         List<PatchCellsRequest> requests,
         Func<ICellStore, ICellStore>? cells = null,
-        Func<ISheetEditGate, ISheetEditGate>? gate = null)
+        Func<ISheetEditGate, ISheetEditGate>? gate = null,
+        IRowWindowTrigger? rowWindows = null)
     {
         await using var db = world.Builder.CreateContext();
-        var handler = Handler(db, profile, cells, gate);
+        var handler = Handler(db, profile, cells, gate, rowWindows: rowWindows);
         var seeds = new List<RecalculationSeed>();
         IReadOnlyList<PatchCellsResponse> responses = [];
 
@@ -433,7 +468,8 @@ public sealed class PatchCellsWorkbookTests(SqlServerFixture sql) : IDisposable
         AccessProfile profile,
         Func<ICellStore, ICellStore>? cells = null,
         Func<ISheetEditGate, ISheetEditGate>? gate = null,
-        IBackgroundJobScheduler? jobs = null)
+        IBackgroundJobScheduler? jobs = null,
+        IRowWindowTrigger? rowWindows = null)
     {
         var clock = new TestClock(Now);
         var metadata = new MetadataCache(_memory, db);
@@ -494,7 +530,8 @@ public sealed class PatchCellsWorkbookTests(SqlServerFixture sql) : IDisposable
             user,
             clock,
             gate?.Invoke(sheetGate) ?? sheetGate,
-            new UnitCatalog(db));
+            new UnitCatalog(db),
+            rowWindows);
     }
 
     private RowStore Rows(EcrDbContext db, IClock? clock = null)

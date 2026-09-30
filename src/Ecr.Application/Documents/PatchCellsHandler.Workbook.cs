@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using Ecr.Application.Documents.Dto;
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
@@ -147,6 +147,20 @@ public sealed partial class PatchCellsHandler
                 recalculationSeeds.Add(seed);
             }
 
+            // HSE301 A1: імпорт книги — та сама єдина точка, що й у HandleAsync; після запису, один виклик на таблицю.
+            if (rowWindows is not null)
+            {
+                var instance = item.Context.Instance;
+                await rowWindows
+                    .RowsChangedAsync(
+                        new RowWindowChange(
+                            instance.TableInstanceId,
+                            instance.PeriodKey,
+                            instance.TableDefId,
+                            [.. applied.Upserts.Select(u => u.Address.ColumnDefId).Concat(applied.Deletes.Select(d => d.ColumnDefId)).Distinct()]),
+                        ct)
+                    .ConfigureAwait(false);
+            }
             var versions = (IReadOnlyDictionary<string, string>?)MergedRowVersions(item.Context, applied)
                            ?? await rowStore.GetRowVersionsAsync(item.Id, period, ct).ConfigureAwait(false);
             responses.Add(ToResponse(
