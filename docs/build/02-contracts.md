@@ -3579,6 +3579,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `PUT` | `/api/v1/units/{id}` | `Uom.EditCatalog` | 4 |
 | `GET` | `/api/v1/methodologies` | `Calculation.View` | 4 |
 | `POST` | `/api/v1/methodologies` | `Calculation.EditFormula` | 7 |
+| `POST` | `/api/v1/methodologies/import` | `Calculation.EditFormula` | 7 |
 | `GET` | `/api/v1/methodologies/{id}/versions` | `Calculation.View` | 7 |
 | `POST` | `/api/v1/methodologies/{id}/versions` | `Calculation.EditFormula` | 7 |
 | `GET` | `/api/v1/methodologies/{id}/versions/{vid}/formulas` | `Calculation.View` | 7 |

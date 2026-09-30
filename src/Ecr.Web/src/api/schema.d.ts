@@ -4868,6 +4868,86 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/methodologies/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Імпортує пакет `ecr-methodology-package` v1: методології, версії-чернетки,
+         *     формули, константи, імпорти між методологіями. Права `Calculation.EditFormula` і
+         *     `Calculation.EditConstant`.
+         * @description ⛔ Лише чернетки: публікує інша людина звичайною дією публікації (чотири ока, золотий
+         *     набір). Блокери — `422`, розбіжність із наявною версією — `409`; обидва зі
+         *     звітом у `report` і без жодного запису. Повторний імпорт того самого пакета —
+         *     `200` з `outcome = unchanged`.
+         */
+        post: {
+            parameters: {
+                query?: {
+                    /** @description `true` — нічого не писати, лише звіт (зокрема з блокерами). */
+                    dryRun?: boolean;
+                    /** @description Пояс майданчика (IANA) для дат AF; за замовчуванням `Asia/Atyrau`. */
+                    timeZone?: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["MethodologyPackageDto"];
+                    "application/json": components["schemas"]["MethodologyPackageDto"];
+                    "text/json": components["schemas"]["MethodologyPackageDto"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MethodologyImportReportDto"];
+                        "text/json": components["schemas"]["MethodologyImportReportDto"];
+                        "text/plain": components["schemas"]["MethodologyImportReportDto"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/methodologies/{id}/bindings": {
         parameters: {
             query?: never;
@@ -18290,6 +18370,117 @@ export interface components {
             /** @description Число чи текст. */
             resultType: components["schemas"]["FormulaResultType"];
         };
+        /** @description Рядок звіту: блокер, конфлікт або попередження. */
+        MethodologyImportIssueDto: {
+            /** @description Посилання, значення або пояснення. */
+            detail: null | string;
+            /** @description Вид (стабільний ключ, напр. `unresolvedFormula`). */
+            kind: string;
+            /** @description Методологія; `null` — пакет цілком. */
+            methodology: null | string;
+            /** @description Формула чи константа, де знайдено. */
+            subject: null | string;
+            /** @description Версія методології. */
+            version: null | string;
+        };
+        /** @description Методологія у звіті імпорту. */
+        MethodologyImportMethodologyDto: {
+            /** @description `create` або `existing`. */
+            action: string;
+            /** @description Код. */
+            code: string;
+            /** @description Природа методології. */
+            kind: components["schemas"]["MethodologyKind"];
+            /**
+             * Format: int32
+             * @description Ідентифікатор; `null` — ще не створено.
+             */
+            methodologyId: null | number;
+            /** @description Версії. */
+            versions: components["schemas"]["MethodologyImportVersionDto"][];
+        };
+        /** @description Звіт імпорту пакета методологій — однаковий для сухого прогону й запису. */
+        MethodologyImportReportDto: {
+            /** @description Чи записано хоч щось. */
+            applied: boolean;
+            /** @description Блокери: нерезолвні посилання, недопустимі коди, блокери експортера. */
+            blockers: components["schemas"]["MethodologyImportIssueDto"][];
+            /** @description Версії, які вже є з іншим вмістом. */
+            conflicts: components["schemas"]["MethodologyImportIssueDto"][];
+            /** @description Чи був це сухий прогін. */
+            dryRun: boolean;
+            /** @description План по методологіях. */
+            methodologies: components["schemas"]["MethodologyImportMethodologyDto"][];
+            /** @description `created` — є що створити (або створено); `unchanged` — усе вже є, без змін;
+             *             `blocked` — блокери; `conflict` — розбіжність із наявними версіями. */
+            outcome: string;
+            /** @description Підсумки. */
+            totals: components["schemas"]["MethodologyImportTotalsDto"];
+            /** @description Попередження, що не зупиняють імпорт. */
+            warnings: components["schemas"]["MethodologyImportIssueDto"][];
+        };
+        /** @description Підсумки імпорту. */
+        MethodologyImportTotalsDto: {
+            /**
+             * Format: int32
+             * @description Рядків констант у нових версіях.
+             */
+            constants: number;
+            /**
+             * Format: int32
+             * @description Формул у нових версіях.
+             */
+            formulas: number;
+            /**
+             * Format: int32
+             * @description Імпортів між методологіями в нових версіях.
+             */
+            imports: number;
+            /**
+             * Format: int32
+             * @description Нових методологій.
+             */
+            methodologiesToCreate: number;
+            /**
+             * Format: int32
+             * @description Нових версій-чернеток.
+             */
+            versionsToCreate: number;
+            /**
+             * Format: int32
+             * @description Версій, що вже є з тим самим вмістом.
+             */
+            versionsUnchanged: number;
+        };
+        /** @description Версія у звіті імпорту. */
+        MethodologyImportVersionDto: {
+            /** @description `create`, `unchanged` або `conflict`. */
+            action: string;
+            /**
+             * Format: int32
+             * @description Скільки рядків констант (значень).
+             */
+            constants: number;
+            /**
+             * Format: int32
+             * @description Скільки рядків констант скопійовано з бібліотеки.
+             */
+            constantsFromLibrary: number;
+            /**
+             * Format: int32
+             * @description Скільки формул.
+             */
+            formulas: number;
+            /** @description Методології, чиї формули версія імпортує (`!`). */
+            imports: string[];
+            /** @description Номер версії. */
+            version: string;
+            /**
+             * Format: int32
+             * @description Ідентифікатор; `null` — ще не створено.
+             */
+            versionId: null | number;
+        };
         /**
          * @description Природа методології (директива ПК-1 №05, поправка 6).
          * @enum {unknown}
@@ -18330,6 +18521,82 @@ export interface components {
              * @description Одиниця результату; обов'язкова.
              */
             unitId: number;
+        };
+        /** @description Константа пакета. */
+        MethodologyPackageConstantDto: {
+            /** @description Ім'я — те, що стоїть після `CST.`. */
+            name: string;
+            /** @description Параметр AF (опис). */
+            parameter: null | string;
+            /** @description Одиниця AF; шукається в каталозі за кодом. */
+            unit: null | string;
+            /** @description Значення за категоріями й версіями. */
+            values: components["schemas"]["MethodologyPackageConstantValueDto"][];
+        };
+        /** @description Значення константи пакета. */
+        MethodologyPackageConstantValueDto: {
+            /** @description Категорія (Location/набір); порожня — спільна. */
+            category: null | string;
+            /** @description Кінець чинності (рядок AF). */
+            endDate: null | string;
+            /** @description Початок чинності (рядок AF). */
+            startDate: null | string;
+            /** @description Сирий рядок `CInfo_Value`. */
+            value: null | string;
+            /** @description Версія значення AF. */
+            version: null | string;
+        };
+        /** @description Пакет `ecr-methodology-package` v1 — вихід `tools/Ecr.MethodologyImport export`
+         *     (FEATURE-HSE301-VIEW §11.6), вхід `POST /api/v1/methodologies/import`. */
+        MethodologyPackageDto: {
+            /** @description Блокери, знайдені експортером; непорожній — імпорт відмовляє. */
+            blockers: null | string[];
+            /** @description Має бути `ecr-methodology-package`. */
+            format: string;
+            /** @description Методологія-бібліотека, куди резолвляться чужі посилання (`Common`). */
+            library: string;
+            /** @description Методології з версіями. */
+            methodologies: components["schemas"]["MethodologyPackageMethodologyDto"][];
+            /**
+             * Format: int32
+             * @description Версія формату; приймається лише 1.
+             */
+            version: number;
+        };
+        /** @description Формула пакета — одна версія формули AF. */
+        MethodologyPackageFormulaDto: {
+            /** @description `;`-список `FInfo_Arguments`, як є. */
+            arguments: null | string;
+            /** @description Кінець дії (рядок AF). */
+            endDate: null | string;
+            /** @description Прапорець AF. */
+            isAvailable: boolean;
+            /** @description Ім'я — стає кодом формули. */
+            name: string;
+            /** @description Позначка звіту AF. */
+            report: null | string;
+            /** @description Початок дії (рядок AF). */
+            startDate: null | string;
+            /** @description Вираз. */
+            text: null | string;
+            /** @description Версія формули AF. */
+            version: string;
+        };
+        /** @description Методологія пакета. */
+        MethodologyPackageMethodologyDto: {
+            /** @description Ім'я в AF — стає кодом методології. */
+            name: string;
+            /** @description Версії методології. */
+            versions: components["schemas"]["MethodologyPackageVersionDto"][];
+        };
+        /** @description Версія методології пакета. */
+        MethodologyPackageVersionDto: {
+            /** @description Константи зі значеннями. */
+            constants: components["schemas"]["MethodologyPackageConstantDto"][];
+            /** @description Формули (усі версії формул AF). */
+            formulas: components["schemas"]["MethodologyPackageFormulaDto"][];
+            /** @description Номер версії в AF. */
+            version: string;
         };
         /** @description Diff публікації: що саме зміниться в числах. */
         MethodologyPublicationDiff: {

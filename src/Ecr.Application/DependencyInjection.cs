@@ -284,6 +284,7 @@ public static class DependencyInjection
         // константи, правила відбору, виходи, золотий набір, режими і прив'язка
         // до колонки документа.
         services.AddScoped<Calculations.CreateMethodologyHandler>();
+        services.AddScoped<Calculations.ImportMethodologyPackageHandler>();
         services.AddScoped<Calculations.ListMethodologyConstantsHandler>();
         services.AddScoped<Calculations.SaveMethodologyConstantHandler>();
         services.AddScoped<Calculations.ListMethodologyRulesHandler>();

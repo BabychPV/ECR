@@ -5496,6 +5496,248 @@
         ],
         "type": "object"
       },
+      "MethodologyImportIssueDto": {
+        "description": "Рядок звіту: блокер, конфлікт або попередження.",
+        "properties": {
+          "detail": {
+            "description": "Посилання, значення або пояснення.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "kind": {
+            "description": "Вид (стабільний ключ, напр. `unresolvedFormula`).",
+            "type": "string"
+          },
+          "methodology": {
+            "description": "Методологія; `null` — пакет цілком.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "subject": {
+            "description": "Формула чи константа, де знайдено.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "version": {
+            "description": "Версія методології.",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "kind",
+          "methodology",
+          "version",
+          "subject",
+          "detail"
+        ],
+        "type": "object"
+      },
+      "MethodologyImportMethodologyDto": {
+        "description": "Методологія у звіті імпорту.",
+        "properties": {
+          "action": {
+            "description": "`create` або `existing`.",
+            "type": "string"
+          },
+          "code": {
+            "description": "Код.",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/MethodologyKind",
+            "description": "Природа методології."
+          },
+          "methodologyId": {
+            "description": "Ідентифікатор; `null` — ще не створено.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "versions": {
+            "description": "Версії.",
+            "items": {
+              "$ref": "#/components/schemas/MethodologyImportVersionDto"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "code",
+          "kind",
+          "action",
+          "methodologyId",
+          "versions"
+        ],
+        "type": "object"
+      },
+      "MethodologyImportReportDto": {
+        "description": "Звіт імпорту пакета методологій — однаковий для сухого прогону й запису.",
+        "properties": {
+          "applied": {
+            "description": "Чи записано хоч щось.",
+            "type": "boolean"
+          },
+          "blockers": {
+            "description": "Блокери: нерезолвні посилання, недопустимі коди, блокери експортера.",
+            "items": {
+              "$ref": "#/components/schemas/MethodologyImportIssueDto"
+            },
+            "type": "array"
+          },
+          "conflicts": {
+            "description": "Версії, які вже є з іншим вмістом.",
+            "items": {
+              "$ref": "#/components/schemas/MethodologyImportIssueDto"
+            },
+            "type": "array"
+          },
+          "dryRun": {
+            "description": "Чи був це сухий прогін.",
+            "type": "boolean"
+          },
+          "methodologies": {
+            "description": "План по методологіях.",
+            "items": {
+              "$ref": "#/components/schemas/MethodologyImportMethodologyDto"
+            },
+            "type": "array"
+          },
+          "outcome": {
+            "description": "`created` — є що створити (або створено); `unchanged` — усе вже є, без змін;\n        `blocked` — блокери; `conflict` — розбіжність із наявними версіями.",
+            "type": "string"
+          },
+          "totals": {
+            "$ref": "#/components/schemas/MethodologyImportTotalsDto",
+            "description": "Підсумки."
+          },
+          "warnings": {
+            "description": "Попередження, що не зупиняють імпорт.",
+            "items": {
+              "$ref": "#/components/schemas/MethodologyImportIssueDto"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "dryRun",
+          "applied",
+          "outcome",
+          "methodologies",
+          "blockers",
+          "conflicts",
+          "warnings",
+          "totals"
+        ],
+        "type": "object"
+      },
+      "MethodologyImportTotalsDto": {
+        "description": "Підсумки імпорту.",
+        "properties": {
+          "constants": {
+            "description": "Рядків констант у нових версіях.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "formulas": {
+            "description": "Формул у нових версіях.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "imports": {
+            "description": "Імпортів між методологіями в нових версіях.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "methodologiesToCreate": {
+            "description": "Нових методологій.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "versionsToCreate": {
+            "description": "Нових версій-чернеток.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "versionsUnchanged": {
+            "description": "Версій, що вже є з тим самим вмістом.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "methodologiesToCreate",
+          "versionsToCreate",
+          "versionsUnchanged",
+          "formulas",
+          "constants",
+          "imports"
+        ],
+        "type": "object"
+      },
+      "MethodologyImportVersionDto": {
+        "description": "Версія у звіті імпорту.",
+        "properties": {
+          "action": {
+            "description": "`create`, `unchanged` або `conflict`.",
+            "type": "string"
+          },
+          "constants": {
+            "description": "Скільки рядків констант (значень).",
+            "format": "int32",
+            "type": "integer"
+          },
+          "constantsFromLibrary": {
+            "description": "Скільки рядків констант скопійовано з бібліотеки.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "formulas": {
+            "description": "Скільки формул.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "imports": {
+            "description": "Методології, чиї формули версія імпортує (`!`).",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "version": {
+            "description": "Номер версії.",
+            "type": "string"
+          },
+          "versionId": {
+            "description": "Ідентифікатор; `null` — ще не створено.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          }
+        },
+        "required": [
+          "version",
+          "action",
+          "versionId",
+          "formulas",
+          "constants",
+          "constantsFromLibrary",
+          "imports"
+        ],
+        "type": "object"
+      },
       "MethodologyKind": {
         "description": "Природа методології (директива ПК-1 №05, поправка 6).",
         "enum": [
@@ -5575,6 +5817,247 @@
           "code",
           "unitId",
           "ordinal"
+        ],
+        "type": "object"
+      },
+      "MethodologyPackageConstantDto": {
+        "description": "Константа пакета.",
+        "properties": {
+          "name": {
+            "description": "Ім'я — те, що стоїть після `CST.`.",
+            "type": "string"
+          },
+          "parameter": {
+            "description": "Параметр AF (опис).",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "unit": {
+            "description": "Одиниця AF; шукається в каталозі за кодом.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "values": {
+            "description": "Значення за категоріями й версіями.",
+            "items": {
+              "$ref": "#/components/schemas/MethodologyPackageConstantValueDto"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "name",
+          "parameter",
+          "unit",
+          "values"
+        ],
+        "type": "object"
+      },
+      "MethodologyPackageConstantValueDto": {
+        "description": "Значення константи пакета.",
+        "properties": {
+          "category": {
+            "description": "Категорія (Location/набір); порожня — спільна.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "endDate": {
+            "description": "Кінець чинності (рядок AF).",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "startDate": {
+            "description": "Початок чинності (рядок AF).",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "value": {
+            "description": "Сирий рядок `CInfo_Value`.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "version": {
+            "description": "Версія значення AF.",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "category",
+          "version",
+          "value",
+          "startDate",
+          "endDate"
+        ],
+        "type": "object"
+      },
+      "MethodologyPackageDto": {
+        "description": "Пакет `ecr-methodology-package` v1 — вихід `tools/Ecr.MethodologyImport export`\n(FEATURE-HSE301-VIEW §11.6), вхід `POST /api/v1/methodologies/import`.",
+        "properties": {
+          "blockers": {
+            "description": "Блокери, знайдені експортером; непорожній — імпорт відмовляє.",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "format": {
+            "description": "Має бути `ecr-methodology-package`.",
+            "type": "string"
+          },
+          "library": {
+            "description": "Методологія-бібліотека, куди резолвляться чужі посилання (`Common`).",
+            "type": "string"
+          },
+          "methodologies": {
+            "description": "Методології з версіями.",
+            "items": {
+              "$ref": "#/components/schemas/MethodologyPackageMethodologyDto"
+            },
+            "type": "array"
+          },
+          "version": {
+            "description": "Версія формату; приймається лише 1.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "format",
+          "version",
+          "library",
+          "methodologies",
+          "blockers"
+        ],
+        "type": "object"
+      },
+      "MethodologyPackageFormulaDto": {
+        "description": "Формула пакета — одна версія формули AF.",
+        "properties": {
+          "arguments": {
+            "description": "`;`-список `FInfo_Arguments`, як є.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "endDate": {
+            "description": "Кінець дії (рядок AF).",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "isAvailable": {
+            "description": "Прапорець AF.",
+            "type": "boolean"
+          },
+          "name": {
+            "description": "Ім'я — стає кодом формули.",
+            "type": "string"
+          },
+          "report": {
+            "description": "Позначка звіту AF.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "startDate": {
+            "description": "Початок дії (рядок AF).",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "text": {
+            "description": "Вираз.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "version": {
+            "description": "Версія формули AF.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "version",
+          "arguments",
+          "text",
+          "startDate",
+          "endDate",
+          "isAvailable",
+          "report"
+        ],
+        "type": "object"
+      },
+      "MethodologyPackageMethodologyDto": {
+        "description": "Методологія пакета.",
+        "properties": {
+          "name": {
+            "description": "Ім'я в AF — стає кодом методології.",
+            "type": "string"
+          },
+          "versions": {
+            "description": "Версії методології.",
+            "items": {
+              "$ref": "#/components/schemas/MethodologyPackageVersionDto"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "name",
+          "versions"
+        ],
+        "type": "object"
+      },
+      "MethodologyPackageVersionDto": {
+        "description": "Версія методології пакета.",
+        "properties": {
+          "constants": {
+            "description": "Константи зі значеннями.",
+            "items": {
+              "$ref": "#/components/schemas/MethodologyPackageConstantDto"
+            },
+            "type": "array"
+          },
+          "formulas": {
+            "description": "Формули (усі версії формул AF).",
+            "items": {
+              "$ref": "#/components/schemas/MethodologyPackageFormulaDto"
+            },
+            "type": "array"
+          },
+          "version": {
+            "description": "Номер версії в AF.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "formulas",
+          "constants"
         ],
         "type": "object"
       },
@@ -20921,6 +21404,116 @@
         ]
       }
     },
+    "/api/v1/methodologies/import": {
+      "post": {
+        "description": "⛔ Лише чернетки: публікує інша людина звичайною дією публікації (чотири ока, золотий\nнабір). Блокери — `422`, розбіжність із наявною версією — `409`; обидва зі\nзвітом у `report` і без жодного запису. Повторний імпорт того самого пакета —\n`200` з `outcome = unchanged`.",
+        "parameters": [
+          {
+            "description": "`true` — нічого не писати, лише звіт (зокрема з блокерами).",
+            "in": "query",
+            "name": "dryRun",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "Пояс майданчика (IANA) для дат AF; за замовчуванням `Asia/Atyrau`.",
+            "in": "query",
+            "name": "timeZone",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/MethodologyPackageDto"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MethodologyPackageDto"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MethodologyPackageDto"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MethodologyImportReportDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MethodologyImportReportDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/MethodologyImportReportDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Імпортує пакет `ecr-methodology-package` v1: методології, версії-чернетки,\nформули, константи, імпорти між методологіями. Права `Calculation.EditFormula` і\n`Calculation.EditConstant`.",
+        "tags": [
+          "MethodologyImport"
+        ]
+      }
+    },
     "/api/v1/methodologies/{id}/bindings": {
       "get": {
         "description": "⚠ Прив'язка живе на МЕТОДОЛОГІЇ, а не на версії: вона переживає всі її\nверсії одразу і клонуванням не копіюється. Тому маршрут без `vid`.",
@@ -35673,6 +36266,9 @@
     },
     {
       "name": "Methodologies"
+    },
+    {
+      "name": "MethodologyImport"
     },
     {
       "name": "MethodologyPublications"
