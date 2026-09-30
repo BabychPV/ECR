@@ -476,8 +476,9 @@ public sealed class SourceEventValueMap : Entity<int>
     public string SourceValue { get; private set; } = null!;
 
     /// <summary>
-    /// Запис довідника. ⚠ <c>bigint</c>, а не <c>int</c> плану §4.7.3:
-    /// <c>dic.RegistryEntry.Id</c> — <c>bigint</c>, і ключ мусить мати той самий тип.
+    /// Запис довідника. ⚠ У домені <c>long</c> (<c>RegistryEntry : Entity&lt;long&gt;</c>), у базі
+    /// <c>int</c> (<c>dic.RegistryEntry.Id</c> — <c>int</c>, звуження — <c>HasConversion&lt;int&gt;</c>,
+    /// як у <c>RegistryEntryKey</c>): колонка мусить мати тип ключа, на який вказує.
     /// </summary>
     public long RegistryEntryId { get; private set; }
 }
