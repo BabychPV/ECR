@@ -62,6 +62,39 @@ public sealed class CliExitCodeTests : IDisposable
     }
 
     [Fact]
+    public void Export_без_блокерів_пише_пакет_і_дає_код_0()
+    {
+        var path = Write(new AfXmlBuilder().Formula("M", "V1", "A", "", "1").Build());
+        var package = Path.Combine(_dir, "package.json");
+
+        var (exit, _) = Run("export", path, "--out", package);
+
+        Assert.Equal(0, exit);
+        Assert.Contains("\"format\": \"ecr-methodology-package\"", File.ReadAllText(package), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Export_за_блокерів_не_пише_пакет_код_2_а_з_allow_blockers_пише_разом_із_блокерами()
+    {
+        var path = Write(new AfXmlBuilder().Formula("M", "V1", "A", "!Nope", "1").Build());
+        var package = Path.Combine(_dir, "package.json");
+
+        Assert.Equal(2, Run("export", path, "--out", package).Exit);
+        Assert.False(File.Exists(package));
+
+        Assert.Equal(2, Run("export", path, "--out", package, "--allow-blockers").Exit);
+        Assert.Contains("UNRESOLVED_REFERENCES: 1", File.ReadAllText(package), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Export_без_out_дає_код_1()
+    {
+        var path = Write(new AfXmlBuilder().Formula("M", "V1", "A", "", "1").Build());
+
+        Assert.Equal(1, Run("export", path).Exit);
+    }
+
+    [Fact]
     public void Відсутній_файл_і_некоректний_xml_дають_код_1()
     {
         Assert.Equal(1, Run("analyze", Path.Combine(_dir, "немає.xml")).Exit);
