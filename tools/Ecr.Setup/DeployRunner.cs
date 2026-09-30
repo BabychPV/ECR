@@ -54,14 +54,14 @@ internal sealed class DeployRunner
             }
         }
 
-        // ⛔ ФВ-9.8 / D-206 (P2): MSI не пам'ятає WORKER_ENABLED, а
-        // deploy-ecr.ps1 без -EnableWorker передає WORKER_ENABLED=0 — тобто
-        // оновлення через майстер мовчки ПРИБРАЛО б уже встановлений воркер.
-        // Обрано простіше з двох варіантів: зберегти поточний стан (служба
-        // EcrWorker є → -EnableWorker), а не окремий вибір на екрані.
-        // Увімкнення воркера вперше лишається рішенням адміністратора —
-        // `deploy-ecr.ps1 -EnableWorker` (11-install-guide.md §2.6); майстер
-        // його ні вмикає, ні вимикає.
+        // ⛔ ФВ-9.8 / D-206 (P2): MSI не пам'ятає WORKER_ENABLED. З I2-2
+        // deploy-ecr.ps1 ставить воркер ТИПОВО (WORKER_ENABLED=1), крім SQL
+        // Server Express, де без -EnableWorker іде WORKER_ENABLED=0 — тобто
+        // оновлення через майстер на Express мовчки ПРИБРАЛО б уже
+        // встановлений воркер. Тому поточний стан зберігається: служба
+        // EcrWorker є → -EnableWorker. Відмова від воркера — рішення
+        // адміністратора: `deploy-ecr.ps1 -DisableWorker`
+        // (11-install-guide.md §2.6); майстер його не вимикає.
         // ⚠ -AllowExpress НЕ передається навмисно: на Express майстер має
         // зупинитись на кроці 1 з поясненням скрипта, як і сам скрипт.
         if (IsWorkerServiceInstalled())
