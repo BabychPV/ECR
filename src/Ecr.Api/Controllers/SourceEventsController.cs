@@ -24,7 +24,9 @@ public sealed class SourceEventsController(
     ListEventTemplatesHandler templates,
     ProbeSourceEventsHandler probe,
     ListSourceEventsHandler events,
-    SyncSourceEventsHandler sync) : ControllerBase
+    SyncSourceEventsHandler sync,
+    ListSourceEventMapsHandler maps,
+    CreateSourceEventMapHandler create) : ControllerBase
 {
     /// <summary>
     /// Каталог шаблонів подій джерела й їхніх атрибутів. Право <c>Integration.View</c> або <c>Integration.Manage</c>.
@@ -111,6 +113,44 @@ public sealed class SourceEventsController(
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     public async Task<IActionResult> Sync(int id, CancellationToken ct)
         => Accepted(new Contracts.JobAcceptedResponse(await sync.HandleAsync(id, ct).ConfigureAwait(false)));
+
+    /// <summary>Мапінги подій; за <paramref name="sourceEntityId"/> — лише сутності. Право <c>Integration.View</c> або <c>Integration.Manage</c>.</summary>
+    /// <param name="sourceEntityId">Сутність-шаблон подій; <c>null</c> — усі.</param>
+    /// <param name="ct">Скасування.</param>
+    [HttpGet("source-event-maps")]
+    [ProducesResponseType<IReadOnlyList<SourceEventMapDto>>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    public async Task<IActionResult> ListMaps([FromQuery] int? sourceEntityId, CancellationToken ct)
+        => Ok(await maps.ListAsync(sourceEntityId, ct).ConfigureAwait(false));
+
+    /// <summary>Один мапінг подій з полями й відповідностями значень. Право <c>Integration.View</c> або <c>Integration.Manage</c>.</summary>
+    /// <param name="id">Мапінг.</param>
+    /// <param name="ct">Скасування.</param>
+    [HttpGet("source-event-maps/{id:int}")]
+    [ProducesResponseType<SourceEventMapDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetMap(int id, CancellationToken ct)
+        => Ok(await maps.GetAsync(id, ct).ConfigureAwait(false));
+
+    /// <summary>
+    /// Заводить мапінг подій «шаблон → динамічна таблиця документа». Право <c>Integration.Manage</c> і грант
+    /// <c>Manage</c> на проєкт документа.
+    /// </summary>
+    /// <param name="request">Сутність, документ, таблиця, режим об'єму, звуження, поля.</param>
+    /// <param name="ct">Скасування.</param>
+    /// <remarks>
+    /// Поля обов'язково містять <c>$start</c> і <c>$end</c> на Date-колонки (<c>422 ECR-INT-0422</c>). Слід — у
+    /// журналі структурних змін.
+    /// </remarks>
+    [HttpPost("source-event-maps")]
+    [ProducesResponseType<SourceEventMapDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> CreateMap([FromBody] CreateSourceEventMapCommand request, CancellationToken ct)
+        => Ok(await create.HandleAsync(request, ct).ConfigureAwait(false));
 
     private static DateTime? AsUtc(DateTime? value) => value is { } v
         ? v.Kind switch

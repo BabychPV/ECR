@@ -33,6 +33,9 @@ internal static class IntegrationConfigAudit
     /// <summary>Тип сутності: розклад збору.</summary>
     public const string ScheduleType = "ext.CollectionSchedule";
 
+    /// <summary>Тип сутності: мапінг подій джерела (HSE301 A6).</summary>
+    public const string EventMapType = "ext.SourceEventMap";
+
     // Web = camelCase, як у відповідях API; перелічення — рядками, щоб журнал читався без довідника значень.
     private static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web)
     {
@@ -41,6 +44,9 @@ internal static class IntegrationConfigAudit
 
     /// <summary>Знімок мапінгу для журналу (той самий вигляд, що й у відповіді API).</summary>
     public static string Snapshot(EntityFieldMap map) => JsonSerializer.Serialize(EntityFieldMapLifecycle.Map(map), Options);
+
+    /// <summary>Знімок мапінгу подій для журналу (той самий вигляд, що й у відповіді API).</summary>
+    public static string Snapshot(SourceEventMapDto map) => JsonSerializer.Serialize(map, Options);
 
     /// <summary>Знімок сутності збору для журналу.</summary>
     public static string Snapshot(SourceEntity entity) => JsonSerializer.Serialize(SourceEntityDto.From(entity), Options);

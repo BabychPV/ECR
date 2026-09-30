@@ -398,6 +398,8 @@ public static class DependencyInjection
         services.AddScoped<Integration.SourceEvents.ProbeSourceEventsHandler>();
         services.AddScoped<Integration.SourceEvents.ListSourceEventsHandler>();
         services.AddScoped<Integration.SourceEvents.SyncSourceEventsHandler>();
+        services.AddScoped<Sources.ListSourceEventMapsHandler>();
+        services.AddScoped<Sources.CreateSourceEventMapHandler>();
 
         // BE-07: публічні дані екрана входу. Єдиний обробник, який НЕ перевіряє
         // жодного права — бо викликається до автентифікації; склад полів і
