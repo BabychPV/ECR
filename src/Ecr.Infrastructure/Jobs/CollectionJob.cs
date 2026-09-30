@@ -63,6 +63,31 @@ public sealed class CollectionJob(
 
             return;
         }
+
+        // HSE301 A5b: сутність — шаблон ПОДІЙ (є активний `SourceEventMap`). Точок вона не має:
+        // збирач шукав би за її кодом-шаблоном сирий тег. Без мапінгів атрибутів точок збір
+        // замінює синк подій (той самий розклад і та сама кнопка); з мапінгами — після збору.
+        var hasEventMap = await db.SourceEventMaps
+            .AsNoTracking()
+            .AnyAsync(m => m.SourceEntityId == request.SourceEntityId && m.IsActive, ct)
+            .ConfigureAwait(false);
+
+        if (hasEventMap
+            && !await db.EntityFieldMaps.AsNoTracking()
+                .AnyAsync(m => m.SourceEntityId == request.SourceEntityId, ct)
+                .ConfigureAwait(false))
+        {
+            await EnqueueEventSyncAsync(request, ct).ConfigureAwait(false);
+
+            if (schedule is not null)
+            {
+                // Прогін фіксується, watermark — ні: «зібраного до» моменту в синку подій немає.
+                await SaveRunAsync(db, schedule, now, watermark: null, ct).ConfigureAwait(false);
+            }
+
+            return;
+        }
+
         var to = request.ToUtc ?? now;
 
         // ⚠ Початок береться з LookbackDays, а НЕ з Watermark. Watermark —
@@ -114,7 +139,24 @@ public sealed class CollectionJob(
         }
 
         await EnqueueMaterializationAsync(request.SourceEntityId, from, to, ct).ConfigureAwait(false);
+
+        if (hasEventMap)
+        {
+            await EnqueueEventSyncAsync(request, ct).ConfigureAwait(false);
+        }
     }
+
+    /// <summary>
+    /// Ставить синк подій сутності (HSE301 A5b): ціль — сутність, БЕЗ витіснення — сплеск постановок
+    /// (розклад плюс кнопка) зливається в одну задачу, а виконувана не переривається.
+    /// </summary>
+    /// <param name="request">Завдання збору: вікно, якщо його задано, іде в синк без змін.</param>
+    /// <param name="ct">Токен скасування.</param>
+    private Task<string> EnqueueEventSyncAsync(CollectionJobRequest request, CancellationToken ct)
+        => jobs.EnqueueCoalescedAsync<ISourceEventSyncJob>(
+            SourceEventSyncTarget.Of(request.SourceEntityId),
+            new SourceEventSyncRequest(request.SourceEntityId, request.FromUtc, request.ToUtc),
+            ct);
 
     /// <summary>
     /// Ставить у чергу і НЕГАЙНО надсилає алерт про відмову в автентифікації.
