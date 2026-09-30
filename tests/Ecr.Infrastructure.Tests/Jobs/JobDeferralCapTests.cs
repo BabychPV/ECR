@@ -124,11 +124,20 @@ public sealed class JobDeferralCapTests(SqlServerFixture sql) : DbJobQueueTestsB
         var clock = new TestClock(new DateTime(start.Ticks - (start.Ticks % TimeSpan.TicksPerSecond), DateTimeKind.Utc));
         var t0 = clock.UtcNow;
         var witness = new WitnessJob();
+        var jobId = $"deferral-cap-{Guid.NewGuid():N}";
+
+        // ⚠ Триґер відкладення в минулому спрацьовує одразу, і Queued живе лише
+        // мілісекунди між записом і наступним стартом (Running на BusyWait 1 с).
+        // Опитування раз на 50 мс ловило це вікно не завжди: у CI 30 с поспіль
+        // бачило лише Running (runs 36660742577, 36664182265). Шлюз тримає
+        // єдиний потік Quartz одразу після запису Queued — стан стоїть, доки
+        // тест його не перевірить і не посуне годинник.
+        using var gate = new QueuedGate(jobId);
 
         var services = new ServiceCollection();
         services.AddScoped(_ => Sql.CreateContext());
         services.AddSingleton<IClock>(clock);
-        services.AddScoped<IJobProgressStore>(sp => new JobProgressStore(sp.GetRequiredService<EcrDbContext>()));
+        services.AddScoped(sp => gate.Wrap(new JobProgressStore(sp.GetRequiredService<EcrDbContext>())));
         services.AddScoped(sp => new LockedDocumentJob(sp.GetRequiredService<EcrDbContext>(), documentId));
         services.AddSingleton(witness);
         await using var provider = services.BuildServiceProvider();
@@ -140,7 +149,6 @@ public sealed class JobDeferralCapTests(SqlServerFixture sql) : DbJobQueueTestsB
         });
         var quartz = await factory.GetScheduler();
         quartz.JobFactory = new AdapterFactory(provider);
-        var jobId = $"deferral-cap-{Guid.NewGuid():N}";
 
         try
         {
@@ -148,12 +156,20 @@ public sealed class JobDeferralCapTests(SqlServerFixture sql) : DbJobQueueTestsB
             await quartz.Start();
 
             // Відкладення показується як Queued, не Running.
-            await WaitAsync(jobId, r => r.State == "Queued" && r.UpdatedAt == t0);
+            Assert.Equal(t0, await gate.NextAsync(Patience));
+            var queued = await RowAsync(jobId);
+            Assert.Equal("Queued", queued?.State);
+            Assert.Equal(t0, queued?.UpdatedAt);
 
             clock.Advance(TimeSpan.FromMinutes(29));
-            await WaitAsync(jobId, r => r.State == "Queued" && r.UpdatedAt == clock.UtcNow);
+            gate.Release();
+            Assert.Equal(clock.UtcNow, await gate.NextAsync(Patience));
+            queued = await RowAsync(jobId);
+            Assert.Equal("Queued", queued?.State);
+            Assert.Equal(clock.UtcNow, queued?.UpdatedAt);
 
             clock.Advance(TimeSpan.FromMinutes(2));
+            gate.Open();
             var row = await WaitAsync(jobId, r => r.State is "Failed" or "Succeeded" or "Cancelled");
 
             Assert.Equal("Failed", row.State);
@@ -168,6 +184,7 @@ public sealed class JobDeferralCapTests(SqlServerFixture sql) : DbJobQueueTestsB
         }
         finally
         {
+            gate.Open();
             await quartz.Shutdown(waitForJobsToComplete: false);
         }
     }
@@ -323,5 +340,95 @@ public sealed class LockedDocumentJob(EcrDbContext db, long documentId) : IBackg
         await using var held = await RecalculationDocumentLock
             .AcquireAsync(db, documentId, RecalculationDocumentLock.BusyWait, ct)
             .ConfigureAwait(false);
+    }
+}
+
+/// <summary>
+/// Шлюз відкладення: після кожного запису <c>Queued</c> задачі <c>jobId</c>
+/// (<see cref="IJobProgressStore.QueueAsync"/>) віддає момент запису й тримає
+/// виконавця, доки тест не відпустить (<see cref="Release"/>) чи не відчинить
+/// шлюз назавжди (<see cref="Open"/>). Решта викликів сховища — наскрізні.
+/// </summary>
+internal sealed class QueuedGate(string jobId) : IDisposable
+{
+    private readonly System.Threading.Channels.Channel<DateTime> queued =
+        System.Threading.Channels.Channel.CreateUnbounded<DateTime>();
+
+    private readonly SemaphoreSlim release = new(0);
+    private volatile bool open;
+
+    /// <summary>Обгортає справжнє сховище.</summary>
+    public IJobProgressStore Wrap(IJobProgressStore inner)
+    {
+        var proxy = System.Reflection.DispatchProxy.Create<IJobProgressStore, GatedProgressStore>();
+        ((GatedProgressStore)(object)proxy).Attach(inner, this);
+        return proxy;
+    }
+
+    /// <summary>Момент наступного запису <c>Queued</c> (виконавець уже тримається).</summary>
+    public async Task<DateTime> NextAsync(TimeSpan patience)
+        => await queued.Reader.ReadAsync().AsTask().WaitAsync(patience).ConfigureAwait(false);
+
+    /// <summary>Відпускає виконавця один раз.</summary>
+    public void Release() => release.Release();
+
+    /// <summary>Більше не тримає нікого.</summary>
+    public void Open()
+    {
+        open = true;
+        release.Release(64);
+    }
+
+    /// <inheritdoc />
+    public void Dispose() => release.Dispose();
+
+    internal async Task AfterQueuedAsync(string id, DateTime utcNow)
+    {
+        if (open || !string.Equals(id, jobId, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        await queued.Writer.WriteAsync(utcNow).ConfigureAwait(false);
+        await release.WaitAsync(TimeSpan.FromMinutes(2)).ConfigureAwait(false);
+    }
+}
+
+/// <summary>Проксі <see cref="IJobProgressStore"/> для <see cref="QueuedGate"/>.</summary>
+public class GatedProgressStore : System.Reflection.DispatchProxy
+{
+    private IJobProgressStore inner = null!;
+    private QueuedGate gate = null!;
+
+    internal void Attach(IJobProgressStore target, QueuedGate owner)
+    {
+        inner = target;
+        gate = owner;
+    }
+
+    /// <inheritdoc />
+    protected override object? Invoke(System.Reflection.MethodInfo? targetMethod, object?[]? args)
+    {
+        ArgumentNullException.ThrowIfNull(targetMethod);
+        object? result;
+        try
+        {
+            result = targetMethod.Invoke(inner, args);
+        }
+        catch (System.Reflection.TargetInvocationException ex) when (ex.InnerException is not null)
+        {
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(ex.InnerException);
+            throw;
+        }
+
+        return targetMethod.Name == nameof(IJobProgressStore.QueueAsync)
+            ? GateAsync((Task)result!, (string)args![0]!, (DateTime)args[2]!)
+            : result;
+    }
+
+    private async Task GateAsync(Task write, string jobId, DateTime utcNow)
+    {
+        await write.ConfigureAwait(false);
+        await gate.AfterQueuedAsync(jobId, utcNow).ConfigureAwait(false);
     }
 }
