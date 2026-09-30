@@ -291,9 +291,6 @@ export const surfaces = {
   },
 } as const;
 
-/** Назва поверхні макета. */
-export type SurfaceName = keyof typeof surfaces.light;
-
 /**
  * Поверхня й текст **сітки документа** — те, проти чого рахується контраст
  * комірки (`ФВ-14.17`).
@@ -316,9 +313,6 @@ export const themeSurface = {
   light: { body: '#ffffff', text: '#000000' },
   dark: { body: '#242424', text: '#c9c9c9' },
 } as const;
-
-/** Назва стану комірки. */
-export type CellStateName = keyof typeof cellState;
 
 /**
  * Тема — **єдине джерело** всіх візуальних значень (`ФВ-14.11`, `D-126`).

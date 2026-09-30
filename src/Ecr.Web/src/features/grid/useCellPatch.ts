@@ -32,11 +32,6 @@ export interface PendingEdit {
   baseVersion: string | null;
 }
 
-/** Ключ комірки в накопичувачі. */
-function keyOf(edit: Pick<PendingEdit, 'rowKey' | 'columnCode'>): string {
-  return `${edit.rowKey}:${edit.columnCode}`;
-}
-
 /**
  * Збирає накопичені зміни в один запит.
  *
@@ -518,6 +513,3 @@ export function sendPatchBeacon(documentId: number, request: PatchCellsRequest):
     swallow();
   }
 }
-
-/** Ключ комірки — експортується, щоб накопичувач і grid не розходилися. */
-export { keyOf as cellEditKey };

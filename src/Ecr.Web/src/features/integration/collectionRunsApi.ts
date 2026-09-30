@@ -19,12 +19,10 @@ import type { components } from '@/api/schema';
  */
 export type CollectionRunView = components['schemas']['CollectionRunView'];
 export type CollectionRunDetail = components['schemas']['CollectionRunDetail'];
-export type CollectionRunCoverage = components['schemas']['CollectionRunCoverage'];
 export type CollectionRunPage = components['schemas']['PagedResultOfCollectionRunView'];
 
 /** Стани прогону — рівно перелік сервера (`ListCollectionRunsHandler.KnownStates`). */
 export const CollectionRunStates = ['Running', 'Succeeded', 'Degraded', 'Failed'] as const;
-export type CollectionRunState = (typeof CollectionRunStates)[number];
 
 /** Фільтр журналу — усі поля необов'язкові, `null`/відсутнє поле в запит не йде. */
 export interface CollectionRunFilters {

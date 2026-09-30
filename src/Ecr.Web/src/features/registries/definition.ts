@@ -59,9 +59,6 @@ export type RuleKind = (typeof RuleKinds)[number];
 /** Рівні порушення правила. */
 export const Severities = ['Info', 'Warning', 'Error'] as const;
 
-/** Рівень порушення. */
-export type Severity = (typeof Severities)[number];
-
 /**
  * Правило в стані редагування.
  *

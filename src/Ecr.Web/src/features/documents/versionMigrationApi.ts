@@ -4,9 +4,6 @@ import type { components } from '@/api/schema';
 /** Звіт переносу документа на нову версію шаблону (ФВ-7.5) — тип зі згенерованої схеми. */
 export type VersionMigrationReport = components['schemas']['DocumentVersionMigrationDto'];
 
-/** Одна відмінність версій у звіті. */
-export type VersionMigrationItem = components['schemas']['VersionMigrationItem'];
-
 /** Поточна версія і версії, на які можна перенести документ. */
 export type VersionMigrationTargets = components['schemas']['DocumentVersionMigrationTargetsDto'];
 

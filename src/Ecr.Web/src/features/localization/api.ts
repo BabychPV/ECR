@@ -18,9 +18,6 @@ import { DefaultLanguage, t } from '@/shared/i18n';
 /** Звіт імпорту — форма **згенерована** зі знімка OpenAPI, не описана тут. */
 export type UiStringImportReport = components['schemas']['UiStringImportReport'];
 
-/** Одна відхилена стрічка файлу. */
-export type UiStringImportError = components['schemas']['UiStringImportError'];
-
 /** Ім'я файлу, коли сервер не надіслав `Content-Disposition`. */
 export const FallbackExportFileName = 'ui-strings.csv';
 

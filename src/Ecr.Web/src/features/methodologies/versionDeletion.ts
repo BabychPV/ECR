@@ -11,9 +11,6 @@ import type { MethodologyDraftVersionDto } from '@/api/types';
  * за `messageKey`, і її показує стандартний `ErrorAlert`.
  */
 
-/** Право, під яким сервер приймає `DELETE …/versions/{vid}`. */
-export const DeleteVersionPermission = 'Calculation.EditFormula';
-
 /**
  * Чи показувати кнопку видалення в рядку версії.
  *
