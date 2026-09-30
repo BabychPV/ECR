@@ -215,6 +215,8 @@ builder.Services.AddHealthChecks()
     .AddCheck<Ecr.Api.Health.JobsHealthCheck>("jobs", tags: ["ready"])
     .AddCheck<Ecr.Api.Health.SourcesHealthCheck>("sources", tags: ["ready"])
     .AddCheck<Ecr.Api.Health.RecalculationWorkerHealthCheck>("worker", tags: ["ready"])
+    // Вʼюхи rpt.v_* для SSRS: збій генерації (>250 колонок, зіткнення імен) — жовтий, публікацію не відкочує.
+    .AddCheck<Ecr.Api.Health.ReportViewsHealthCheck>("reportviews", tags: ["ready"])
     .AddCheck<Ecr.Api.Health.TimeZoneDatabaseHealthCheck>("tzdata", tags: ["ready"])
     // D14-08: Production по HTTP без Secure-cookie і строк сертифіката HTTPS — жовтим, не 503.
     .AddCheck<Ecr.Api.Health.TransportHealthCheck>("transport", tags: ["ready"]);

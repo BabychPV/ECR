@@ -426,7 +426,7 @@ public sealed partial class EndpointCoverageTests
         // ⚠ Запасний варіант — сам ідентифікатор (`hasText(key) ? t(key) : name`),
         // тож перевірка без рядка в сіді не дає `⟦…⟧`; але п'ять відомих — названі тут.
         new("pages/admin/HealthPage.tsx", "key", 1, "pages/admin/HealthPage.tsx",
-            ["health.check.db", "health.check.jobs", "health.check.sources", "health.check.worker", "health.check.tzdata", "health.check.transport"],
+            ["health.check.db", "health.check.jobs", "health.check.sources", "health.check.worker", "health.check.tzdata", "health.check.transport", "health.check.reportviews"],
             "Назва картки перевірки стану (checkLabel, U-14): ім'я з AddCheck<…> у Program.cs."),
 
         // ⚠ Ключі — увесь каталог sec.Permission із 09-seed.sql станом на 2026-09-23.

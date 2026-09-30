@@ -397,6 +397,7 @@ public static class DependencyInjection
         services.AddScoped<IStyleCatalog, StyleCatalog>();
         services.AddScoped<IReportDefinitionStore, ReportDefinitionStore>();
         services.AddScoped<IReportSnapshotBuilder, Reporting.ReportSnapshotBuilder>();
+        services.AddSingleton<IReportViewStatus, Reporting.ReportViewStatus>();
         services.AddScoped<IReportViewGenerator, Reporting.ReportViewGenerator>();
         services.AddSingleton<ISecretProvider, ConfigurationSecretProvider>();
 

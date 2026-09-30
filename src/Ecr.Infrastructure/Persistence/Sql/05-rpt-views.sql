@@ -24,6 +24,11 @@ JOIN rpt.ReportDef      d ON d.Id = v.ReportDefId
 WHERE d.Code = N'WaterReport'
   AND s.IsCurrent = 1
   AND s.Status IN (1, 2);   -- Approved, Submitted
+-- ⛔ Нумерація ЗРІЗУ (`rpt.ReportSnapshot.Status` = SnapshotStatus, D-65):
+-- 0 Draft, 1 Approved, 2 Submitted. Вона НЕ збігається з нумерацією подання
+-- аркуша нижче (`wf.ApprovalState.Status` = DocumentStatus: 0 Draft,
+-- 1 Submitted, 2 Approved, 3 Rejected): одиниця тут — Approved, там — Submitted.
+-- Обидві фіксує `tests/Ecr.Architecture.Tests/StatusNumberingTests.cs`.
 GO
 
 
@@ -76,7 +81,9 @@ WHERE cv.IsEmpty = 0;
 GO
 
 -- ⛔ D-14/D-66: застосунок DDL НЕ виконує. Він лише ВИКЛИКАЄ процедуру (при
--- публікації версії шаблону — у тій самій транзакції — і на старті), а
+-- публікації версії шаблону — ПІСЛЯ коміту публікації, «найкращим зусиллям»:
+-- збій не відкочує публікацію, а лягає в журнал і в /health/ready; і на
+-- старті), а
 -- CREATE VIEW робить вона від імені ВЛАСНИКА (`EXECUTE AS OWNER`): обліковому
 -- запису застосунку досить EXECUTE. Той самий шлях, що й
 -- `arc.usp_EnsurePartitions`. DBA може викликати й сам:
@@ -170,6 +177,10 @@ BEGIN
     -- решта генерується, а наприкінці — помилка з іменем. Порівняння —
     -- зіставленням бази, тобто так само, як сервер порівнює імена об'єктів.
     DECLARE @clash nvarchar(400) = (SELECT TOP (1) ViewName FROM @tables GROUP BY ViewName HAVING COUNT(*) > 1);
+    -- Перелік заголовків зіткнених таблиць — у повідомлення (для журналу й health).
+    DECLARE @clashWho nvarchar(1500) = STUFF((
+        SELECT N'; ' + t2.Header FROM @tables AS t2 WHERE t2.ViewName = @clash ORDER BY t2.TableDefId
+        FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), 1, 2, N'');
     DELETE FROM @tables
      WHERE ViewName IN (SELECT t2.ViewName FROM @tables AS t2 GROUP BY t2.ViewName HAVING COUNT(*) > 1);
 
@@ -220,8 +231,10 @@ LEFT JOIN doc.CellValue AS ' + @alias + N' ON ' + @alias + N'.PeriodKey = r.Peri
         BEGIN
             -- ⚠ Не THROW тут: на старті (виклик без параметра) одна задовга
             -- таблиця не має лишати без вʼюх усі інші. Помилка — наприкінці.
-            SET @failure = COALESCE(@failure, CONCAT(N'rpt.usp_GenerateTemplateViews: таблиця ', @id, N' має ', @n,
-                                  N' колонок, вʼюха вміщує щонайбільше 250.'));
+            -- ⚠ У повідомленні — заголовок (шаблон, версія, аркуш, таблиця): його
+            -- читає /health/ready і журнал публікації, там голий Id нічого не каже.
+            SET @failure = COALESCE(@failure, CONCAT(N'rpt.usp_GenerateTemplateViews: ', @header, N' (таблиця ', @id,
+                                  N') має ', @n, N' колонок, вʼюха вміщує щонайбільше 250.'));
             GOTO next_table;
         END
 
@@ -275,7 +288,7 @@ next_table:
     BEGIN
         SET @message = CONCAT(
             N'rpt.usp_GenerateTemplateViews: дві таблиці дають одне ім''я вʼюхи rpt.', @clash,
-            N'. Змініть код шаблону, аркуша чи таблиці так, щоб вони відрізнялися не лише розділовими знаками чи регістром.');
+            N' (', @clashWho, N'). Змініть код шаблону, аркуша чи таблиці так, щоб вони відрізнялися не лише розділовими знаками чи регістром.');
         THROW 50409, @message, 1;
     END
 

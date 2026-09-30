@@ -2792,7 +2792,8 @@ public interface IReportSnapshotBuilder
 опублікованої версії шаблону, колонка = код колонки шаблону, службові
 колонки з `_`. Широкі створює процедура `rpt.usp_GenerateTemplateViews` від
 імені власника; застосунок її лише викликає (D-14, D-66) — при публікації
-версії шаблону (в одній транзакції з публікацією) і на старті після seed.
+версії шаблону (ПІСЛЯ коміту публікації, «найкращим зусиллям»: збій публікацію
+не відкочує, а лягає в журнал і в `IReportViewStatus`) і на старті після seed.
 Ідемпотентна: незмінну вʼюху не чіпає; нова версія = нові вʼюхи, старі
 лишаються (D-53). Читання — роль бази `rpt_reader` (SELECT на схему `rpt`).
 
@@ -2800,6 +2801,23 @@ public interface IReportSnapshotBuilder
 public interface IReportViewGenerator
 {
     public Task GenerateAsync(int? templateVersionId, CancellationToken ct);
+}
+```
+
+#### `IReportViewStatus`
+
+Останній стан генерації вʼюх для `/health/ready` (картка `reportviews`,
+лише `Degraded`). У памʼяті (singleton): старт перегенеровує вʼюхи по всіх
+версіях, тож після рестарту стан відновлюється без таблиці й міграції.
+Збій: `50422` (таблиця > 250 колонок), `50409` (зіткнення імен вʼюх);
+повтор — старт застосунку або `EXEC rpt.usp_GenerateTemplateViews`.
+
+```csharp
+public interface IReportViewStatus
+{
+    public void Failed(ReportViewFailure failure);
+    public void Succeeded(int? templateVersionId);
+    public IReadOnlyList<ReportViewFailure> Snapshot();
 }
 ```
 
