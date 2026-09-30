@@ -225,8 +225,9 @@ describe('ConditionalFormatPanel', () => {
  */
 describe('ConditionalFormatPanel — фокус', () => {
   it('додати: фокус у першому полі нового правила', async () => {
-    renderWithMantine(<ConditionalFormatPanel columns={columns} />);
+    renderPanel();
     const user = userEvent.setup();
+    await screen.findByRole('group', { name: /conditionalFormat\.rule/ });
 
     await user.click(screen.getByRole('button', { name: /conditionalFormat\.add/ }));
 
@@ -235,8 +236,9 @@ describe('ConditionalFormatPanel — фокус', () => {
   });
 
   it('прибрати: фокус на «Додати правило», а не на <body>', async () => {
-    renderWithMantine(<ConditionalFormatPanel columns={columns} />);
+    renderPanel();
     const user = userEvent.setup();
+    await screen.findByRole('group', { name: /conditionalFormat\.rule/ });
 
     await user.click(screen.getByRole('button', { name: /conditionalFormat\.remove/ }));
 

@@ -65,6 +65,9 @@ function impactKey(code: string): readonly unknown[] {
  * ⛔ «Стан прочитати не вдалося» — не «виконується»: без права бачити задачу (`GET /jobs/{id}` —
  * автор або `System.ViewHealth`) показуємо ідентифікатор і причину, а не вічний прогрес.
  */
+/** Довше за перехід Mantine-модалки (≈200 мс): після нього повернення фокуса вже відбулося. */
+const FocusAfterModalMs = 300;
+
 function ImpactJob({ jobId, canOpenJobs }: { readonly jobId: string; readonly canOpenJobs: boolean }): JSX.Element {
   const job = useQuery({
     queryKey: ['job', jobId],
@@ -81,8 +84,12 @@ function ImpactJob({ jobId, canOpenJobs }: { readonly jobId: string; readonly ca
   // заголовок картки задачі: він озвучується, і наступний `Tab` веде до посилання на задачу.
   const heading = useRef<HTMLParagraphElement>(null);
 
+  // ⚠ Із затримкою: діалог причини (`ReasonModal`) повертає фокус на кнопку сторінки з власним таймером
+  // переходу, і при швидкій відповіді сервера цей таймер спрацьовував ПІСЛЯ фокуса на заголовку й
+  // забирав його назад (виявлено при зведенні з `dev/integration`, де діалог уже за `import()`).
   useEffect(() => {
-    heading.current?.focus();
+    const timer = window.setTimeout(() => heading.current?.focus(), FocusAfterModalMs);
+    return () => window.clearTimeout(timer);
   }, [jobId]);
 
   return (
