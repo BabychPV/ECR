@@ -246,6 +246,7 @@ public sealed record CalculationBindingDto(
 /// </param>
 /// <param name="CalculatedAt">Коли завершився прогін (UTC).</param>
 /// <param name="InputsChangedAt">Остання зміна входів після прогону (UTC); <c>null</c> — не змінювались.</param>
+/// <param name="ChangedRegistries">Коди довідників, змінених після прогону й прочитаних методологією (RT-25); порожньо — не змінювались.</param>
 public sealed record CalculationResultDto(
     int MethodologyVersionId,
     string? SourceRowKey,
@@ -257,4 +258,5 @@ public sealed record CalculationResultDto(
     string? MethodologyVersion = null,
     bool IsStale = false,
     DateTime? CalculatedAt = null,
-    DateTime? InputsChangedAt = null);
+    DateTime? InputsChangedAt = null,
+    IReadOnlyList<string>? ChangedRegistries = null);

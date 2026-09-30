@@ -462,6 +462,7 @@ public sealed class MethodologyStore(EcrDbContext db, int constantCap) : IMethod
         var rows = await db.Database
             .SqlQuery<FreshnessRow>($"""
                 SELECT TOP (1)
+                       r.Id AS RunId, r.StartedAt AS StartedAt,
                        r.FinishedAt AS CalculatedAt,
                        (SELECT MAX(c.ChangedAt)
                           FROM aud.CellChange AS c
@@ -488,9 +489,45 @@ public sealed class MethodologyStore(EcrDbContext db, int constantCap) : IMethod
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
-        return rows.Count == 0
-            ? new CalculationFreshness(null, null)
-            : new CalculationFreshness(rows[0].CalculatedAt, rows[0].InputsChangedAt);
+        if (rows.Count == 0)
+        {
+            return new CalculationFreshness(null, null);
+        }
+
+        var row = rows[0];
+
+        // RT-25 (ФВ-9.19): правка ДОВІДНИКА, який читає методологія цього документа, теж робить
+        // число застарілим. Лише для вікна «увесь документ» (панель результатів): фільтр таблиць —
+        // це шлях подання аркуша, і блокувати подання правкою довідника в чужому аркуші — зміна
+        // поведінки, якої ніхто не просив. Автоматичного перерахунку це НЕ запускає (R-14):
+        // перерахунок ставить людина через `recalculate-impacted`.
+        // ⚠ Ребра — `cfg.RegistryUse` версій методології (SourceKind = 1) для версій, що дали
+        // результати ЦЬОГО документа в цьому прогоні; ребра шаблону (SourceKind = 0) з'являться з RT-24.
+        var changed = filterTables
+            ? []
+            : await db.Database
+                .SqlQuery<RegistryChangeRow>($"""
+                    SELECT TOP (50) rd.Code AS Code, rd.DataChangedAt AS ChangedAt
+                      FROM cfg.RegistryDef AS rd
+                     WHERE rd.DataChangedAt > {row.StartedAt}
+                       AND EXISTS (SELECT 1
+                                     FROM cfg.RegistryUse AS u
+                                     JOIN calc.CalculationResult AS cr ON cr.MethodologyVersionId = u.SourceId
+                                    WHERE u.RegistryDefId = rd.Id
+                                      AND u.SourceKind = 1
+                                      AND cr.CalculationRunId = {row.RunId}
+                                      AND cr.PeriodKey = {periodKey}
+                                      AND cr.DocumentId = {documentId})
+                     ORDER BY rd.Code
+                    """)
+                .ToListAsync(ct)
+                .ConfigureAwait(false);
+
+        var inputsChangedAt = changed.Count == 0
+            ? row.InputsChangedAt
+            : new[] { row.InputsChangedAt, changed.Max(c => c.ChangedAt) }.Max();
+
+        return new CalculationFreshness(row.CalculatedAt, inputsChangedAt, [.. changed.Select(c => c.Code)]);
     }
 
     /// <inheritdoc />
@@ -544,7 +581,10 @@ public sealed class MethodologyStore(EcrDbContext db, int constantCap) : IMethod
             .ConfigureAwait(false);
 
     /// <summary>Рядок запиту свіжості.</summary>
-    public sealed record FreshnessRow(DateTime? CalculatedAt, DateTime? InputsChangedAt);
+    public sealed record FreshnessRow(long RunId, DateTime StartedAt, DateTime? CalculatedAt, DateTime? InputsChangedAt);
+
+    /// <summary>Довідник, змінений після прогону (RT-25).</summary>
+    public sealed record RegistryChangeRow(string Code, DateTime ChangedAt);
 
     /// <inheritdoc />
     /// <remarks>

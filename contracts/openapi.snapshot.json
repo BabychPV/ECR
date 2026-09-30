@@ -577,6 +577,16 @@
               "string"
             ]
           },
+          "changedRegistries": {
+            "description": "Коди довідників, змінених після прогону й прочитаних методологією (RT-25); порожньо — не змінювались.",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
           "inputsChangedAt": {
             "description": "Остання зміна входів після прогону (UTC); `null` — не змінювались.",
             "format": "date-time",

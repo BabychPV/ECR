@@ -17425,6 +17425,8 @@ export interface components {
              * @description Коли завершився прогін (UTC).
              */
             calculatedAt?: null | string;
+            /** @description Коди довідників, змінених після прогону й прочитаних методологією (RT-25); порожньо — не змінювались. */
+            changedRegistries?: null | string[];
             /**
              * Format: date-time
              * @description Остання зміна входів після прогону (UTC); `null` — не змінювались.

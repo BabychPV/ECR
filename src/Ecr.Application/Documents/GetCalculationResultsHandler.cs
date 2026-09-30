@@ -100,7 +100,8 @@ public sealed class GetCalculationResultsHandler(
                 label?.Version,
                 freshness.IsStale,
                 freshness.CalculatedAt,
-                freshness.InputsChangedAt);
+                freshness.InputsChangedAt,
+                freshness.ChangedRegistryCodes);
         })];
     }
 }
