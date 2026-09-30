@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { render, waitFor } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { CalculationResultsPanel, changedRegistriesOf } from '@/features/methodologies/CalculationResultsPanel';
+import { CalculationResultsPanel, changedRegistriesOf, registryDisplayName } from '@/features/methodologies/CalculationResultsPanel';
 import type { CalculationResultDto } from '@/api/types';
 import { testTheme } from '@/test/render';
 
@@ -17,7 +17,12 @@ function json(body: unknown): Response {
   return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
 }
 
-function mockServer(results: unknown[]): void {
+function registry(code: string, en: string): unknown {
+  return { id: code.length, code, fields: [], isHierarchical: false, isTemporal: false, nameL10n: { values: { en } }, sourceKind: 'Local' };
+}
+
+/** `registries` — відповідь каталогу; `'forbidden'` — 403 (немає `Registry.View`). */
+function mockServer(results: unknown[], registries: unknown[] | 'forbidden' = []): void {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL) => {
@@ -25,6 +30,14 @@ function mockServer(results: unknown[]): void {
 
       if (path.endsWith('/api/v1/units')) return json([{ id: 8, code: 't', nameL10n: { values: {} } }]);
       if (path.endsWith('/calculation-results')) return json(results);
+      if (path.endsWith('/api/v1/registries')) {
+        return registries === 'forbidden'
+          ? new Response(JSON.stringify({ status: 403, errorCode: 'ECR-AUTH-0403' }), {
+              status: 403,
+              headers: { 'Content-Type': 'application/problem+json' },
+            })
+          : json(registries);
+      }
 
       return json(null);
     }),
@@ -94,6 +107,48 @@ describe('CalculationResultsPanel: довідник змінено після р
 
     await waitFor(() => expect(document.querySelector('[data-results-stale]')).not.toBeNull());
     expect(document.querySelector('[data-results-stale-registry]')).toBeNull();
+  });
+
+  /** Мутація: у банер іде `code` замість `registryDisplayName` — людина бачить код, а не назву. */
+  it('банер називає довідник назвою з каталогу, а не кодом', async () => {
+    mockServer([row('CO2', ['GAS_COMPOSITION'])], [registry('GAS_COMPOSITION', 'Gas composition')]);
+    show();
+
+    await waitFor(() =>
+      expect(document.querySelector('[data-results-stale-registry="GAS_COMPOSITION"]')?.textContent).toContain(
+        'name=Gas composition',
+      ),
+    );
+  });
+
+  it('без права на каталог банер показує код і не ламає панель', async () => {
+    mockServer([row('CO2', ['GAS_COMPOSITION'])], 'forbidden');
+    show();
+
+    await waitFor(() =>
+      expect(document.querySelector('[data-results-stale-registry="GAS_COMPOSITION"]')?.textContent).toContain(
+        'name=GAS_COMPOSITION',
+      ),
+    );
+    expect(document.querySelector('[data-results-stale]')).not.toBeNull();
+  });
+
+  it('назва: каталог → назва; немає в каталозі чи порожня назва → код', () => {
+    const list = [registry('A', 'Alpha'), registry('B', '')] as Parameters<typeof registryDisplayName>[1];
+
+    expect(registryDisplayName('A', list)).toBe('Alpha');
+    expect(registryDisplayName('B', list)).toBe('B');
+    expect(registryDisplayName('C', list)).toBe('C');
+    expect(registryDisplayName('A', undefined)).toBe('A');
+  });
+
+  it('без змінених довідників каталог не запитується', async () => {
+    mockServer([row('CO2', [], true)]);
+    show();
+
+    await waitFor(() => expect(document.querySelector('[data-results-stale]')).not.toBeNull());
+    const calls = (fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls;
+    expect(calls.some(([input]) => String(input).split('?')[0]?.endsWith('/api/v1/registries'))).toBe(false);
   });
 
   it('старий сервер без поля — нічого не ламається', () => {

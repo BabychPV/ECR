@@ -1,10 +1,12 @@
 import type { JSX } from 'react';
 import { Alert, Code, Skeleton, Stack, Table, Text } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
-import type { CalculationResultDto, UnitRef } from '@/api/types';
+import type { CalculationResultDto, RegistryDefDto, UnitRef } from '@/api/types';
 import { apiFetch } from '@/api/client';
+import { queryKeys } from '@/api/queryKeys';
 import { formatDecimal } from '@/shared/format';
 import { t } from '@/shared/i18n';
+import { localized } from '@/shared/i18n/localized';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { calculationResults } from './api';
@@ -18,6 +20,15 @@ import { calculationResultsKey } from './calculationResultsKey';
  */
 export function changedRegistriesOf(list: readonly CalculationResultDto[]): string[] {
   return [...new Set(list.flatMap((result) => result.changedRegistries ?? []))].sort();
+}
+
+/**
+ * Назва довідника для банера застарілості: назва мовою користувача з каталогу довідників, а код —
+ * лише запасний варіант (каталог ще їде, недоступний без права або довідника там немає).
+ */
+export function registryDisplayName(code: string, registries: readonly RegistryDefDto[] | undefined): string {
+  const name = localized(registries?.find((registry) => registry.code === code)?.nameL10n);
+  return name === '' ? code : name;
 }
 
 /**
@@ -51,6 +62,17 @@ export function CalculationResultsPanel({
   const results = useQuery({
     queryKey: calculationResultsKey(documentId, periodKey),
     queryFn: () => calculationResults(documentId, periodKey),
+  });
+
+  // ⚠ Каталог довідників — лише коли банеру є кого називати, і під спільним ключем переліку
+  // (його вже читають сітка й шапка документа), щоб не множити запитів. Відмова (немає
+  // `Registry.View`) — не помилка панелі: банер покаже код.
+  const changedCodes = changedRegistriesOf(results.data ?? []);
+  const registries = useQuery({
+    queryKey: queryKeys.registries.list(),
+    queryFn: () => apiFetch<RegistryDefDto[]>('/api/v1/registries'),
+    enabled: changedCodes.length > 0,
+    retry: false,
   });
 
   const units = useQuery({
@@ -100,7 +122,7 @@ export function CalculationResultsPanel({
                 {t('documents.calculationResultsStaleHint')}
                 {changedRegistriesOf(list).map((code) => (
                   <Text key={code} size="sm" mt="xs" data-results-stale-registry={code}>
-                    {t('calculation.staleRegistry', { name: code })}
+                    {t('calculation.staleRegistry', { name: registryDisplayName(code, registries.data) })}
                   </Text>
                 ))}
               </Alert>
