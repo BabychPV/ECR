@@ -31,8 +31,13 @@ public sealed class DeployAuditUpgradeSqlcmdTests
         {
             var cs = database.ConnectionString;
 
-            // Модель бази «до ФВ-2.16».
+            // Модель бази «до ФВ-2.16»: ні колонки, ні індексу значка на ній
+            // (`IX_CellChange_OutOfWindow` тримає колонку — без DROP INDEX
+            // SQL Server колонку не віддасть).
             await ExecAsync(cs, """
+                IF EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_CellChange_OutOfWindow'
+                           AND object_id = OBJECT_ID(N'aud.CellChange'))
+                    DROP INDEX IX_CellChange_OutOfWindow ON aud.CellChange;
                 DECLARE @df sysname = (SELECT dc.name FROM sys.default_constraints dc
                     JOIN sys.columns c ON c.object_id = dc.parent_object_id AND c.column_id = dc.parent_column_id
                     WHERE dc.parent_object_id = OBJECT_ID(N'aud.CellChange') AND c.name = N'IsOutOfWindow');
@@ -54,6 +59,12 @@ public sealed class DeployAuditUpgradeSqlcmdTests
                     JOIN sys.columns c ON c.object_id = dc.parent_object_id AND c.column_id = dc.parent_column_id
                     WHERE dc.parent_object_id = OBJECT_ID(N'aud.CellChange') AND c.name = N'IsOutOfWindow'
                     """));
+
+            // Оновлена база отримує й індекс значка в зрізі (той самий скрипт).
+            Assert.NotNull(await ScalarAsync(cs, """
+                SELECT filter_definition FROM sys.indexes
+                 WHERE object_id = OBJECT_ID(N'aud.CellChange') AND name = N'IX_CellChange_OutOfWindow'
+                """));
         }
         finally
         {
