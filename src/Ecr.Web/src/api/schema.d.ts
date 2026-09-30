@@ -24160,6 +24160,11 @@ export interface components {
             /** @description Текст наявної формули рядка, якщо вона є; `null` — формули ще
              *     немає. Той самий фікс, що й string? TemplateColumnDto.FormulaExpression. */
             formulaExpression: null | string;
+            /**
+             * Format: int32
+             * @description Ідентифікатор; ним адресується презентаційний патч (`ФВ-2.6`, порядок рядків).
+             */
+            id: number;
             /** @description Рядок недоступний для введення. */
             isReadOnly: boolean;
             /** @description Локалізований підпис. */

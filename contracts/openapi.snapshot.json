@@ -15174,6 +15174,11 @@
               "string"
             ]
           },
+          "id": {
+            "description": "Ідентифікатор; ним адресується презентаційний патч (`ФВ-2.6`, порядок рядків).",
+            "format": "int32",
+            "type": "integer"
+          },
           "isReadOnly": {
             "description": "Рядок недоступний для введення.",
             "type": "boolean"
@@ -15207,6 +15212,7 @@
           }
         },
         "required": [
+          "id",
           "rowKey",
           "ordinal",
           "rowKind",

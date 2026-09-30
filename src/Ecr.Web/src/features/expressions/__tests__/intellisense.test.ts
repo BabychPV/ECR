@@ -327,6 +327,7 @@ function row(
   label: string,
 ): TemplateStructureDto['sheets'][number]['tables'][number]['rows'][number] {
   return {
+    id: ordinal,
     ordinal,
     rowKey,
     label,
