@@ -285,10 +285,28 @@ public sealed class TemplateVersionStore(EcrDbContext db) : ITemplateVersionStor
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
 
         db.FormulaDefs.AddRange(TemplateVersionCloner.Relink(links));
+        await CloneConditionalFormatsAsync(clone.Id, clonedFrom, ct).ConfigureAwait(false);
         SetClonedFrom(clone, clonedFrom);
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Правила умовного форматування — частина структури: клон несе їх із собою
+    /// (ФВ-2.7), інакше правила зникали б при кожній новій версії. Вони не мають
+    /// навігації з <see cref="TemplateVersion"/>, тож копіюються окремо.
+    /// </summary>
+    private async Task CloneConditionalFormatsAsync(int cloneId, int sourceId, CancellationToken ct)
+    {
+        var source = await db.ConditionalFormatRules
+            .AsNoTracking()
+            .Where(r => r.TemplateVersionId == sourceId)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        db.ConditionalFormatRules.AddRange(source.Select(r => new ConditionalFormatRule(
+            cloneId, r.ColumnCode, r.Ordinal, r.Operator, r.Value, r.ValueTo,
+            r.BackgroundHex, r.ForegroundHex, r.IsBold)));
+    }
     /// <inheritdoc />
     /// <remarks>
     /// ⛔ Q-225: раніше `page.Cursor` НІКОЛИ не читався — лише `Take(page.

@@ -2945,6 +2945,18 @@ public interface IStyleCatalog
 }
 ```
 
+#### `IConditionalFormatStore`
+
+Правила умовного форматування версії шаблону (cfg.ConditionalFormatRule, ФВ-2.6/2.7):
+читання набору й заміна набору цілком (коміт — спільним `IUnitOfWork`).
+
+```csharp
+public interface IConditionalFormatStore
+{
+    public Task<IReadOnlyList<ConditionalFormatRule>> GetAsync(int templateVersionId, CancellationToken ct);
+    public Task ReplaceAsync(int templateVersionId, IReadOnlyList<ConditionalFormatRule> rules, CancellationToken ct);
+}
+```
 #### `ITableFillStore`
 
 Заповненість таблиць документа за період (`BE-10`): скільки рядків
@@ -3638,6 +3650,8 @@ public sealed class NotFoundException(string errorCode, string message)
 | `PUT` | `/api/v1/template-versions/{id}/header-fields/{code}` | `Template.Edit` | 8 |
 | `GET` | `/api/v1/template-versions/{id}/styles` | `Template.View` | 8 |
 | `PUT` | `/api/v1/template-versions/{id}/styles/{code}` | `Template.Edit` | 8 |
+| `GET` | `/api/v1/template-versions/{id}/conditional-formats` | `Template.View` | 8 |
+| `PUT` | `/api/v1/template-versions/{id}/conditional-formats` | `Template.Edit` | 8 |
 | `PUT` | `/api/v1/template-versions/{id}/tables/{tableId}/rows/{code}` | `Template.Edit` | 7 |
 | `DELETE` | `/api/v1/template-versions/{id}/tables/{tableId}/rows/{code}` | `Template.Edit` | 7 |
 | `PUT` | `/api/v1/template-versions/{id}/tables/{tableDefId}/formulas/{scope}/{target}` | `Template.Edit` | 7 |

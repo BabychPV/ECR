@@ -414,6 +414,7 @@ public static class DependencyInjection
         services.AddScoped<ICollectionRunReader, CollectionRunReader>();
         services.AddScoped<Ecr.Application.Sources.IMappingPreviewStore, MappingPreviewStore>();
         services.AddScoped<IStyleCatalog, StyleCatalog>();
+        services.AddScoped<IConditionalFormatStore, ConditionalFormatStore>();
         services.AddScoped<IReportDefinitionStore, ReportDefinitionStore>();
         services.AddScoped<IReportSnapshotBuilder, Reporting.ReportSnapshotBuilder>();
         services.AddSingleton<IReportViewStatus, Reporting.ReportViewStatus>();

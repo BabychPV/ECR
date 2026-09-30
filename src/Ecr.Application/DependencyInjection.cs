@@ -91,6 +91,8 @@ public static class DependencyInjection
         // стилю — той самий патерн, що колонка/рядок вище.
         services.AddScoped<SaveStyleDefHandler>();
         services.AddScoped<ListStyleDefsHandler>();
+        services.AddScoped<SaveConditionalFormatsHandler>();
+        services.AddScoped<GetConditionalFormatsHandler>();
 
         // П'ятий зріз — формула колонки чи рядка (W5.3), за зразком вище.
         services.AddScoped<SaveFormulaDefHandler>();

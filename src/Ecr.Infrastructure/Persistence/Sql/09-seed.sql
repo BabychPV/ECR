@@ -5610,6 +5610,14 @@ USING (VALUES
     (N'jobs.sourceEventsWriting', N'en', N'Writing event rows', 1),
     (N'jobs.sourceEventsDone', N'en', N'Created {created}, updated {updated}, kept manual {keptManual}, missing {missing}, open {open}, unmapped {unmapped}, period closed {closed}, pending {pending}', 1),
     -- HSE301:a5b ── кінець секції ───────────────────────────────────────────────────────────
+    -- COLL:condformat ── Правила умовного форматування версії шаблону: відмови PUT …/conditional-formats (ФВ-2.6/2.7, `ConditionalFormatRule`) ──
+    (N'err.ECR-CFG-0422.condFormatOperator', N'en', N'Conditional format rule {index} (column {columnCode}): unknown operator {operator}.', 1),
+    (N'err.ECR-CFG-0422.condFormatOperand', N'en', N'Conditional format rule {index} (column {columnCode}): operator {operator} needs numeric value(s) up to 64 characters.', 1),
+    (N'err.ECR-CFG-0422.condFormatColor', N'en', N'Conditional format rule {index} (column {columnCode}): colour must be #rrggbb.', 1),
+    (N'err.ECR-CFG-0422.condFormatColumn', N'en', N'Conditional format rule {index}: column {columnCode} does not exist in this template version.', 1),
+    (N'err.ECR-CFG-0422.condFormatLimit', N'en', N'Too many conditional format rules: at most {max} per template version.', 1),
+    -- ru/kz — окремою порцією `COLL:condformat` у блоці I18N нижче.
+    -- COLL:condformat ── кінець секції ──
     -- JOBL ── людські назви видів фонових задач, яких бракувало в jobLabel.ts (KindKeys) ──
     (N'jobs.kind.sourceEventSync',  N'en', N'Source event sync', 1),
     (N'jobs.kind.consistencyCheck', N'en', N'Consistency check', 1),
@@ -12429,6 +12437,24 @@ OPTION (RECOMPILE);
 GO
 -- COLL:transport-health ── кінець секції ──
 
+-- COLL:condformat ── ru/kz відмов PUT …/conditional-formats (ФВ-2.6/2.7); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-CFG-0422.condFormatOperator', N'ru', N'Правило условного форматирования {index} (колонка {columnCode}): неизвестный оператор {operator}.'),
+    (N'err.ECR-CFG-0422.condFormatOperator', N'kz', N'Шартты пішімдеу ережесі {index} ({columnCode} бағаны): {operator} операторы белгісіз.'),
+    (N'err.ECR-CFG-0422.condFormatOperand', N'ru', N'Правило условного форматирования {index} (колонка {columnCode}): оператору {operator} нужны числовые значения до 64 символов.'),
+    (N'err.ECR-CFG-0422.condFormatOperand', N'kz', N'Шартты пішімдеу ережесі {index} ({columnCode} бағаны): {operator} операторына 64 таңбаға дейінгі сандық мәндер қажет.'),
+    (N'err.ECR-CFG-0422.condFormatColor', N'ru', N'Правило условного форматирования {index} (колонка {columnCode}): цвет должен быть #rrggbb.'),
+    (N'err.ECR-CFG-0422.condFormatColor', N'kz', N'Шартты пішімдеу ережесі {index} ({columnCode} бағаны): түс #rrggbb форматында болуы керек.'),
+    (N'err.ECR-CFG-0422.condFormatColumn', N'ru', N'Правило условного форматирования {index}: колонки {columnCode} нет в этой версии шаблона.'),
+    (N'err.ECR-CFG-0422.condFormatColumn', N'kz', N'Шартты пішімдеу ережесі {index}: {columnCode} бағаны осы үлгі нұсқасында жоқ.'),
+    (N'err.ECR-CFG-0422.condFormatLimit', N'ru', N'Слишком много правил условного форматирования: не более {max} на версию шаблона.'),
+    (N'err.ECR-CFG-0422.condFormatLimit', N'kz', N'Шартты пішімдеу ережелері тым көп: үлгі нұсқасына {max}-тен көп емес.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:condformat ── кінець секції ──
 -- DOC:migrate-version ── ru/kz переносу документів на нову версію шаблону (ФВ-7.5); власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val

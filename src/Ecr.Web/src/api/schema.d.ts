@@ -13043,6 +13043,124 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/template-versions/{id}/conditional-formats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Правила версії: колонка → порядок застосування. Право `Template.View`. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Версія шаблону. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ConditionalFormatRuleDto"][];
+                        "text/json": components["schemas"]["ConditionalFormatRuleDto"][];
+                        "text/plain": components["schemas"]["ConditionalFormatRuleDto"][];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        /** Замінює набір правил версії-чернетки (порожній список — прибрати всі).
+         *     Право `Template.Edit`; у замороженій версії — `409 ECR-TMPL-0409`. */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Версія-чернетка. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["SaveConditionalFormatsRequest"];
+                    "application/json": components["schemas"]["SaveConditionalFormatsRequest"];
+                    "text/json": components["schemas"]["SaveConditionalFormatsRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ConditionalFormatRuleDto"][];
+                        "text/json": components["schemas"]["ConditionalFormatRuleDto"][];
+                        "text/plain": components["schemas"]["ConditionalFormatRuleDto"][];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/template-versions/{id}/deprecate": {
         parameters: {
             query?: never;
@@ -17816,6 +17934,23 @@ export interface components {
             unitId: null | number;
             unitSymbol: null | string;
         };
+        /** @description Правило умовного форматування (дзеркало клієнтського `ConditionalRule`). */
+        ConditionalFormatRuleDto: {
+            /** @description `#rrggbb` або `null` — колір теми. */
+            backgroundHex: null | string;
+            /** @description Код колонки версії. */
+            columnCode: string;
+            /** @description `#rrggbb` або `null`. */
+            foregroundHex: null | string;
+            /** @description Жирний. */
+            isBold: boolean;
+            /** @description gt, ge, lt, le, eq, ne, between, empty, notEmpty. */
+            operator: string;
+            /** @description Операнд (число); не потрібен для empty/notEmpty. */
+            value: null | string;
+            /** @description Верхня межа — лише для between. */
+            valueTo: null | string;
+        };
         /** @description Знахідка перевірки узгодженості, як її бачить читач. */
         ConsistencyIssueView: {
             /**
@@ -22403,6 +22538,11 @@ export interface components {
              * @description Одиниця значень колонки (ФВ-16.1); не для типу `Unit`.
              */
             unitId: null | number;
+        };
+        /** @description Тіло `PUT …/conditional-formats`. */
+        SaveConditionalFormatsRequest: {
+            /** @description Повний набір правил версії. */
+            rules: components["schemas"]["ConditionalFormatRuleDto"][];
         };
         /** @description Тіло створення і зміни джерела. */
         SaveDataSourceRequest: {

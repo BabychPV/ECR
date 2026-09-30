@@ -1795,6 +1795,61 @@
         ],
         "type": "object"
       },
+      "ConditionalFormatRuleDto": {
+        "description": "Правило умовного форматування (дзеркало клієнтського `ConditionalRule`).",
+        "properties": {
+          "backgroundHex": {
+            "description": "`#rrggbb` або `null` — колір теми.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "columnCode": {
+            "description": "Код колонки версії.",
+            "type": "string"
+          },
+          "foregroundHex": {
+            "description": "`#rrggbb` або `null`.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "isBold": {
+            "description": "Жирний.",
+            "type": "boolean"
+          },
+          "operator": {
+            "description": "gt, ge, lt, le, eq, ne, between, empty, notEmpty.",
+            "type": "string"
+          },
+          "value": {
+            "description": "Операнд (число); не потрібен для empty/notEmpty.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "valueTo": {
+            "description": "Верхня межа — лише для between.",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "columnCode",
+          "operator",
+          "value",
+          "valueTo",
+          "backgroundHex",
+          "foregroundHex",
+          "isBold"
+        ],
+        "type": "object"
+      },
       "ConsistencyIssueView": {
         "description": "Знахідка перевірки узгодженості, як її бачить читач.",
         "properties": {
@@ -11718,6 +11773,22 @@
           "lookupRegistryDefId",
           "lookupFilter",
           "unitId"
+        ],
+        "type": "object"
+      },
+      "SaveConditionalFormatsRequest": {
+        "description": "Тіло `PUT …/conditional-formats`.",
+        "properties": {
+          "rules": {
+            "description": "Повний набір правил версії.",
+            "items": {
+              "$ref": "#/components/schemas/ConditionalFormatRuleDto"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "rules"
         ],
         "type": "object"
       },
@@ -34240,6 +34311,209 @@
         ]
       }
     },
+    "/api/v1/template-versions/{id}/conditional-formats": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Версія шаблону.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ConditionalFormatRuleDto"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ConditionalFormatRuleDto"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ConditionalFormatRuleDto"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Правила версії: колонка → порядок застосування. Право `Template.View`.",
+        "tags": [
+          "ConditionalFormats"
+        ]
+      },
+      "put": {
+        "parameters": [
+          {
+            "description": "Версія-чернетка.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveConditionalFormatsRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveConditionalFormatsRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveConditionalFormatsRequest"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ConditionalFormatRuleDto"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ConditionalFormatRuleDto"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ConditionalFormatRuleDto"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Замінює набір правил версії-чернетки (порожній список — прибрати всі).\nПраво `Template.Edit`; у замороженій версії — `409 ECR-TMPL-0409`.",
+        "tags": [
+          "ConditionalFormats"
+        ]
+      }
+    },
     "/api/v1/template-versions/{id}/deprecate": {
       "post": {
         "description": "⛔ Відкат (`ФВ-7.8`) — це переведення в `Deprecated`, а НЕ\nвидалення: на версію посилаються проєкти, подані форми, зрізи й\nаудит. Стан існував від Етапу 1 і був недосяжний — перевести\nверсію в нього не міг ніхто, тобто відкат був неможливий у\nпринципі, а єдиним «відкатом» лишалося видалення.",
@@ -39544,6 +39818,9 @@
     },
     {
       "name": "ColumnDefs"
+    },
+    {
+      "name": "ConditionalFormats"
     },
     {
       "name": "Consistency"
