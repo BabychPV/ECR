@@ -145,6 +145,8 @@ function adapterRefusal(key: string, params: Record<string, string>): string | n
       return t('err.ECR-INT-0503.piWebApiErrorStatus', params);
     case 'err.ECR-INT-0503.piWebApiTimeout':
       return t('err.ECR-INT-0503.piWebApiTimeout', params);
+    case 'err.ECR-INT-0503.piWebApiResponseTooLarge':
+      return t('err.ECR-INT-0503.piWebApiResponseTooLarge', params);
     case 'err.ECR-INT-0503.controlCharacterInName':
       return t('err.ECR-INT-0503.controlCharacterInName', params);
     default:

@@ -39,6 +39,12 @@ public sealed partial class PiWebApiDataSource(
     /// <summary>Базова затримка між спробами; далі подвоюється.</summary>
     public static TimeSpan RetryDelay => TimeSpan.FromSeconds(2);
 
+    /// <summary>Типова межа тіла відповіді PI Web API — 50 МБ.</summary>
+    public const long DefaultMaxResponseBytes = 50L * 1024 * 1024;
+
+    /// <summary>Межа тіла однієї відповіді, байт; більше — відмова збору без повторів.</summary>
+    public long MaxResponseBytes { get; init; } = DefaultMaxResponseBytes;
+
     private const string SourceUnavailable = "ECR-INT-0503";
 
     /// <summary>Джерело відмовило в автентифікації — не те саме, що недоступність (<c>H-20</c>).</summary>
@@ -476,7 +482,7 @@ public sealed partial class PiWebApiDataSource(
                 }
                 else
                 {
-                    var body = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+                    using var body = await ReadBoundedAsync(response, path, ct).ConfigureAwait(false);
                     return await JsonDocument.ParseAsync(body, cancellationToken: ct).ConfigureAwait(false);
                 }
             }
@@ -523,6 +529,54 @@ public sealed partial class PiWebApiDataSource(
 
             await Task.Delay(delay, ct).ConfigureAwait(false);
             delay += delay;
+        }
+    }
+
+    /// <summary>
+    /// Читає тіло відповіді не далі за <see cref="MaxResponseBytes"/>: джерело (у
+    /// тому числі підставлене адреса, SSRF) не може вичерпати пам'ять збирача
+    /// нескінченною відповіддю. Перевищення — відмова збору без повторів.
+    /// </summary>
+    private async Task<MemoryStream> ReadBoundedAsync(HttpResponseMessage response, string path, CancellationToken ct)
+    {
+        BusinessRuleException TooLarge() => new(
+            SourceUnavailable,
+            $"PI Web API на {path} віддав відповідь понад {MaxResponseBytes} байт: збір відхилено.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-INT-0503.piWebApiResponseTooLarge",
+                ["path"] = path,
+                ["limitBytes"] = MaxResponseBytes.ToString(CultureInfo.InvariantCulture),
+            });
+
+        if (response.Content.Headers.ContentLength is { } declared && declared > MaxResponseBytes)
+        {
+            throw TooLarge();
+        }
+
+        var result = new MemoryStream();
+        try
+        {
+            await using var source = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+            var buffer = new byte[81920];
+            int read;
+            while ((read = await source.ReadAsync(buffer, ct).ConfigureAwait(false)) > 0)
+            {
+                if (result.Length + read > MaxResponseBytes)
+                {
+                    throw TooLarge();
+                }
+
+                result.Write(buffer, 0, read);
+            }
+
+            result.Position = 0;
+            return result;
+        }
+        catch
+        {
+            await result.DisposeAsync().ConfigureAwait(false);
+            throw;
         }
     }
 
