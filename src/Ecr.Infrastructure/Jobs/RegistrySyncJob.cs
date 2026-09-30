@@ -20,7 +20,7 @@ namespace Ecr.Infrastructure.Jobs;
 
 /// <summary>
 /// Синхронізація довідника із зовнішнім джерелом для сутності збору з
-/// <c>RegistryDefId</c> (<c>ФВ-8.10</c>, <c>ФВ-8.11</c>; FEATURE-REGISTRY-SYNC S5, S7).
+/// <c>RegistryDefId</c> (<c>ФВ-8.10</c>, <c>ФВ-8.11</c>; FEATURE-REGISTRY-SYNC S5, S7; <c>D-212</c>).
 /// </summary>
 /// <remarks>
 /// Окремий інтерфейс, а не маркер черги: задачу ставить <see cref="CollectionJob"/>
@@ -29,7 +29,7 @@ namespace Ecr.Infrastructure.Jobs;
 /// </remarks>
 public interface IRegistrySyncJob
 {
-    /// <summary>Звіряє довідник сутності з джерелом і (для <c>External</c>/<c>Hybrid</c>) застосовує оновлення.</summary>
+    /// <summary>Звіряє довідник сутності з джерелом і (для <c>External</c>/<c>Hybrid</c>) застосовує план.</summary>
     /// <param name="sourceEntityId">Сутність джерела, прив'язана до довідника.</param>
     /// <param name="ct">Скасування.</param>
     public Task ExecuteAsync(int sourceEntityId, CancellationToken ct);
@@ -37,38 +37,29 @@ public interface IRegistrySyncJob
 
 /// <summary>
 /// Читає джерело й довідник, будує план <see cref="RegistrySyncPlanner"/>, для
-/// <c>External</c>/<c>Hybrid</c> застосовує його через <see cref="RegistryEntryWriter"/>
-/// (S7), а події пише в журнал покриття.
+/// <c>External</c>/<c>Hybrid</c> виконує його ПОВНІСТЮ (<c>D-212</c> PR-6), а події пише в
+/// журнал покриття.
 /// </summary>
 /// <remarks>
-/// ⛔ У <c>dic.RegistryValue</c> задача пише ЛИШЕ через <see cref="RegistryEntryWriter.UpdateAsync"/>
-/// (лише оновлення, адресація за Id) від <c>svc-integration</c>: ревізія даних, ключі, аудит
-/// <c>RegistryValueChanged</c> і автор <c>ChangedByUserId</c> (RT-04) — ті самі, що в ручного
-/// запису. Пакет на довідник — в ОКРЕМОМУ DI-scope зі своїм автором; після <c>Applied = false</c>
-/// scope закривається без <c>SaveChanges</c>.
+/// ⛔ У <c>dic.RegistryEntry</c>/<c>dic.RegistryValue</c> задача пише ЛИШЕ через
+/// <see cref="RegistryEntryWriter"/> від <c>svc-integration</c>:
+/// оновлення — <see cref="RegistryEntryWriter.UpdateAsync"/> (адресація за Id). Ревізія даних, ключі,
+/// аудит <c>RegistryValueChanged</c> і автор <c>ChangedByUserId</c> (RT-04) — ті самі, що в ручного запису.
 /// <para>
-/// ⚠ <c>Local</c> — лише звірка (<c>D-49</c>): у <c>dic.*</c> не пишеться нічого, зміна шляху
-/// журналюється подією <see cref="CollectionCoverage.RegistryPendingUpdate"/>. Для
-/// <c>External</c>/<c>Hybrid</c> зміна шляху — <c>RegistryExternalKey.MarkSynced(newPath)</c>.
+/// ⛔ Одна СПРОБА — один DI-scope і ОДНА транзакція: оновлення й операції над ключами (шляхи). Збій
+/// будь-де в спробі — відкат усього; не «дані» (не <c>BusinessRule</c>/<c>Domain</c>/<c>Concurrency</c>)
+/// — падіння прогону (<c>Failed</c> у черзі), журнал не пишеться зовсім.
 /// </para>
 /// <para>
 /// ⚠ «Все або нічого» writer'а (рішення S7): відмова рядків → ці записи йдуть подією
-/// <see cref="CollectionCoverage.RegistryValueRejected"/>, решта пакета — ОДНИМ повтором;
-/// відмова на весь пакет (<c>ECR-REG-4092</c>, зокрема <c>keyTakenConcurrently</c> від індексу) або
-/// невдалий повтор → решта поштучно, кожен у власному scope. Один поганий запис не блокує
-/// довідник, а кількість спроб обмежена. Два записи пакета з тим самим ключем — помилки обох
-/// рядків (<c>keyDuplicateInBatch</c>) від writer'а, а не падіння прогону.
-/// </para>
-/// <para>
-/// ⚠ Дедуп подій: у <c>Details</c> — ключ <c>key=&lt;предмет&gt;:&lt;значення&gt;</c>. Предмет —
-/// статус + елемент + запис + поле, значення — значення джерела (+ код і ключ відмови). Подія не
-/// пишеться, якщо ОСТАННЯ подія того самого предмета цієї сутності має те саме значення (один
-/// запит на прогін). Обмеження: подія без значення (зниклий/неприв'язаний елемент), що зникла й
-/// повернулась, повторно не пишеться — ознаки «розв'язано» журнал не має.
+/// <see cref="CollectionCoverage.RegistryValueRejected"/>, решта пакета — ОДНИМ
+/// повтором; відмова на весь пакет (<c>ECR-REG-4092</c>, зокрема <c>keyTakenConcurrently</c>) або
+/// невдалий повтор → операції над ключами окремою спробою, далі кожен запис поштучно, у власній
+/// спробі. Один поганий запис не блокує довідник, а кількість спроб обмежена.
 /// </para>
 /// <para>
 /// ⚠ Елемент, чий GUID уже прив'язаний у цьому джерелі до запису ІНШОГО довідника
-/// (<c>UQ_RegistryExternalKey</c>), у план не йде зовсім — ні створення, ні перепривʼязки: лише
+/// (<c>UQ_RegistryExternalKey</c>), у план не йде зовсім — ні перепривʼязки, ні (далі) створення: лише
 /// подія <see cref="CollectionCoverage.RegistryElementUnlinked"/> з
 /// <c>err.ECR-REG-0409.externalKeyTaken</c>, без Id чужого запису.
 /// </para>
@@ -77,9 +68,18 @@ public interface IRegistrySyncJob
 /// запису (<c>D-212</c> (5)): коди розв'язуються в Id одним запитом на довідник до планування.
 /// </para>
 /// <para>
-/// ⚠ «Останній автор — людина» (<c>D-118</c>): автор є і це не <c>svc-integration</c>, АБО автор
-/// невідомий (<c>null</c> — значення до RT-04). Невідомий = людина: значення лишається, подія
-/// <see cref="CollectionCoverage.RegistryConflictKeptManual"/> (дефолт координатора).
+/// ⚠ <c>Local</c> — лише звірка (<c>D-49</c>): у <c>dic.*</c> не пишеться нічого, зміна шляху
+/// журналюється подією <see cref="CollectionCoverage.RegistryPendingUpdate"/>.
+/// </para>
+/// <para>
+/// ⚠ Дедуп подій: у <c>Details</c> — ключ <c>key=&lt;предмет&gt;:&lt;значення&gt;</c>. Подія не
+/// пишеться, якщо ОСТАННЯ подія того самого предмета цієї сутності має те саме значення (один
+/// запит на прогін). Обмеження: подія без значення (зниклий/неприв'язаний елемент), що зникла й
+/// повернулась, повторно не пишеться — ознаки «розв'язано» журнал не має.
+/// </para>
+/// <para>
+/// ⚠ «Останній автор — людина» (<c>D-118</c>) — лише <c>Hybrid</c>: автор є і це не
+/// <c>svc-integration</c>, АБО автор невідомий (<c>null</c> — значення до RT-04).
 /// </para>
 /// <para>
 /// ⚠ Приведення одиниць на межі (<c>D-173</c>) ще не існує в коді: значення
@@ -157,6 +157,8 @@ public sealed class RegistrySyncJob(
 
         var entries = await EntriesAsync(links, mappings, ct).ConfigureAwait(false);
 
+        var now = clock.UtcNow;
+
         // GUID, прив'язаний у цьому джерелі до ІНШОГО довідника, — не наш елемент: створити чи
         // перепривʼязати його означало б порушити UQ_RegistryExternalKey або вкрасти чужий зв'язок.
         var foreign = await ForeignAsync(dataSource.Id, snapshot.Elements, links, ct).ConfigureAwait(false);
@@ -174,7 +176,7 @@ public sealed class RegistrySyncJob(
         var lookupCodes = await ResolveCodesAsync(RegistrySyncPlanner.LookupCodes(input), ct).ConfigureAwait(false);
         var plan = RegistrySyncPlanner.Plan(input with { LookupCodes = lookupCodes });
 
-        var now = clock.UtcNow;
+        var context = new ApplyContext(registryDefId, dataSource.Id, now, links);
         var events = new List<SyncEvent>();
 
         events.AddRange(snapshot.Rejections.Select(r => new SyncEvent(
@@ -187,25 +189,18 @@ public sealed class RegistrySyncJob(
 
         // TODO PR-6: перепривʼязку задача ще не виконує — доти журнал той самий, що до
         // D-212 (зниклий старий GUID і неприв'язаний новий), а не мовчить про обидва.
-        // Creates, MissingMarks, MissingClears, Deactivations, Reactivations — теж PR-6; поки
-        // задача не передає Name, IsActive, MissingInSourceSince і політику, вони порожні, а
-        // MissingMarks (MarkOrphaned) супроводжує подія SourceMissing з plan.Events.
+        // MissingMarks, MissingClears, Deactivations, Reactivations — теж PR-6; поки задача не
+        // передає IsActive, MissingInSourceSince і політику, MissingMarks (MarkOrphaned)
+        // супроводжує подія SourceMissing з plan.Events.
         events.AddRange(plan.Relinks.SelectMany(r => new[]
         {
             Event(new RegistrySyncEvent(RegistrySyncEventKind.SourceMissing, r.OldExternalId, r.RegistryEntryId)),
             Event(new RegistrySyncEvent(RegistrySyncEventKind.ElementUnlinked, r.NewExternalId, null)),
         }));
 
-        var pathsChanged = false;
-
         if (registry.SourceKind is RegistrySourceKind.External or RegistrySourceKind.Hybrid)
         {
-            var externalIds = links
-                .GroupBy(l => l.RegistryEntryId)
-                .ToDictionary(g => g.Key, g => g.First().ExternalId);
-
-            events.AddRange(await ApplyUpdatesAsync(registryDefId, plan.Updates, externalIds, ct).ConfigureAwait(false));
-            pathsChanged = await MarkPathsAsync(dataSource.Id, plan.PathChanges, now, ct).ConfigureAwait(false);
+            events.AddRange(await ApplyAsync(context, plan, ct).ConfigureAwait(false));
         }
         else
         {
@@ -216,7 +211,7 @@ public sealed class RegistrySyncJob(
 
         var fresh = await DeduplicateAsync(entity.Id, events, ct).ConfigureAwait(false);
 
-        if (fresh.Count == 0 && !pathsChanged)
+        if (fresh.Count == 0)
         {
             return;
         }
@@ -227,221 +222,218 @@ public sealed class RegistrySyncJob(
     }
 
     /// <summary>
-    /// Застосовує оновлення планувальника через writer — пакет на довідник, у власному scope,
-    /// з обмеженим повтором (див. <see cref="RegistrySyncJob"/>).
+    /// Виконує план: спроба на весь пакет, при відмові рядків — один повтор без них, далі
+    /// ключі окремо й записи поштучно (див. <see cref="RegistrySyncJob"/>).
     /// </summary>
-    /// <returns>Події відмов writer'а.</returns>
-    private async Task<List<SyncEvent>> ApplyUpdatesAsync(
-        int registryDefId,
-        IReadOnlyList<RegistrySyncUpdate> updates,
-        IReadOnlyDictionary<long, string> externalIds,
-        CancellationToken ct)
+    /// <returns>Події дій (після коміту) і відмов.</returns>
+    private async Task<List<SyncEvent>> ApplyAsync(ApplyContext context, RegistrySyncPlan plan, CancellationToken ct)
     {
-        var rejected = new List<SyncEvent>();
+        var events = new List<SyncEvent>();
+        var updates = Updates(plan);
+        var keys = new KeyOps(plan.PathChanges);
+        var outcomes = new List<Outcome>();
+        var externalIds = context.ExternalIds();
 
-        if (updates.Count == 0)
+        if (updates.Count > 0 || !keys.IsEmpty)
         {
-            return rejected;
+            var single = false;
+            var done = false;
+
+            for (var attempt = 0; attempt < 2 && !done && !single; attempt++)
+            {
+                try
+                {
+                    var result = await AttemptAsync(context, updates, keys, ct).ConfigureAwait(false);
+                    if (result.Outcome is { } outcome)
+                    {
+                        outcomes.Add(outcome);
+                        done = true;
+                        break;
+                    }
+
+                    // Відмова рядків: вони — у журнал, решта пакета — одним повтором.
+                    events.AddRange(result.UpdateErrors.Select(e => Rejected(updates[e.Row - 1], e, externalIds)));
+                    updates = Without(updates, result.UpdateErrors);
+                    single = attempt == 1;
+                }
+                catch (Exception ex) when (IsBatchFailure(ex))
+                {
+                    single = true;
+                }
+            }
+
+            if (single)
+            {
+                // Ключі — окремо: від відмови запису вони не залежать. Відмова тут — збій прогону.
+                if (!keys.IsEmpty)
+                {
+                    var result = await AttemptAsync(context, [], keys, ct).ConfigureAwait(false);
+                    outcomes.Add(result.Outcome!);
+                }
+
+                foreach (var update in updates)
+                {
+                    try
+                    {
+                        var result = await AttemptAsync(context, [update], KeyOps.None, ct).ConfigureAwait(false);
+                        if (result.Outcome is { } outcome)
+                        {
+                            outcomes.Add(outcome);
+                        }
+                        else
+                        {
+                            events.AddRange(result.UpdateErrors.Select(e => Rejected(update, e, externalIds)));
+                        }
+                    }
+                    catch (Exception ex) when (IsBatchFailure(ex))
+                    {
+                        events.Add(Rejected(update, ex, externalIds));
+                    }
+                }
+            }
         }
 
-        List<RegistryEntryUpdate> remaining = [.. updates
-            .GroupBy(u => u.RegistryEntryId)
-            .Select(g => new RegistryEntryUpdate(
-                g.Key,
-                g.ToDictionary(u => u.FieldCode, u => u.NewValue, StringComparer.Ordinal)))];
-
-        var outcome = await TryWriteAsync(registryDefId, remaining, ct).ConfigureAwait(false);
-        if (outcome.Succeeded)
-        {
-            return rejected;
-        }
-
-        if (outcome.Failure is null)
-        {
-            // Відмова рядків: вони — у журнал, решта пакета — одним повтором.
-            var failedRows = outcome.Errors.Select(e => e.Row).ToHashSet();
-            rejected.AddRange(outcome.Errors.Select(e => Rejected(remaining[e.Row - 1], e, externalIds)));
-            remaining = [.. remaining.Where((_, i) => !failedRows.Contains(i + 1))];
-
-            if (remaining.Count == 0)
-            {
-                return rejected;
-            }
-
-            outcome = await TryWriteAsync(registryDefId, remaining, ct).ConfigureAwait(false);
-            if (outcome.Succeeded)
-            {
-                return rejected;
-            }
-        }
-
-        // Відмова на весь пакет (ключ, 4092) або невдалий повтор — решта поштучно.
-        foreach (var single in remaining)
-        {
-            var one = await TryWriteAsync(registryDefId, [single], ct).ConfigureAwait(false);
-            if (one.Succeeded)
-            {
-                continue;
-            }
-
-            if (one.Failure is { } failure)
-            {
-                rejected.Add(Rejected(single, failure, externalIds));
-            }
-            else
-            {
-                rejected.AddRange(one.Errors.Select(e => Rejected(single, e, externalIds)));
-            }
-        }
-
-        return rejected;
+        return events;
     }
 
-    /// <summary>Одна спроба запису пакета — у власному DI-scope від <c>svc-integration</c>.</summary>
+    /// <summary>
+    /// Одна спроба: власний DI-scope від <c>svc-integration</c> і ОДНА транзакція на оновлення й ключі.
+    /// </summary>
+    /// <returns>
+    /// Виконане (<see cref="AttemptResult.Outcome"/>) або відмови рядків writer'а — тоді транзакцію
+    /// відкочено й scope закрито без збереження.
+    /// </returns>
     /// <remarks>
-    /// ⛔ Scope закривається без <c>SaveChanges</c>, що б не повернув writer: при
-    /// <c>Applied = true</c> він уже зберіг сам, при <c>false</c> — відстежені зміни мусять пропасти.
+    /// ⛔ Відмова на весь пакет (<c>BusinessRule</c>, <c>Domain</c>, <c>ConcurrencyConflict</c>) і будь-який
+    /// інший виняток летять далі — транзакція вже відкочена. ⚠ Контекст спроби очищується на
+    /// початку тіла транзакції: стратегія повторів <c>ExecuteInTransactionAsync</c> на
+    /// транзієнтному збої виконує тіло ще раз, і відстежене з першого разу вставилося б удруге.
     /// </remarks>
-    private async Task<WriteOutcome> TryWriteAsync(
-        int registryDefId, IReadOnlyList<RegistryEntryUpdate> batch, CancellationToken ct)
+    private async Task<AttemptResult> AttemptAsync(
+        ApplyContext context,
+        List<RegistryEntryUpdate> updates,
+        KeyOps keys,
+        CancellationToken ct)
     {
         await using var scope = scopes.CreateAsyncScope();
         var services = scope.ServiceProvider;
 
         using var author = await services.GetRequiredService<IntegrationActor>().EnterAsync(ct).ConfigureAwait(false);
 
+        var scoped = services.GetRequiredService<EcrDbContext>();
+        var uow = services.GetRequiredService<IUnitOfWork>();
+        var writer = services.GetRequiredService<RegistryEntryWriter>();
+
+        Outcome? outcome = null;
+        IReadOnlyList<RegistryEntryImportError> updateErrors = [];
+
         try
         {
-            var result = await services.GetRequiredService<RegistryEntryWriter>()
-                .UpdateAsync(new RegistryEntryUpdateBatch(registryDefId, batch), ct)
-                .ConfigureAwait(false);
+            await uow.ExecuteInTransactionAsync(
+                async tx =>
+                {
+                    scoped.ChangeTracker.Clear();
 
-            return new WriteOutcome(result.Errors, Failure: null);
+                    if (updates.Count > 0)
+                    {
+                        var result = await writer.UpdateAsync(
+                            new RegistryEntryUpdateBatch(context.RegistryDefId, updates), tx).ConfigureAwait(false);
+
+                        if (result.Errors.Count > 0)
+                        {
+                            updateErrors = result.Errors;
+                            throw new RollbackAttempt();
+                        }
+                    }
+
+                    await ApplyKeysAsync(scoped, context, keys, tx).ConfigureAwait(false);
+                    await uow.SaveChangesAsync(tx).ConfigureAwait(false);
+
+                    outcome = new Outcome(updates);
+                },
+                ct).ConfigureAwait(false);
         }
-        // ⛔ ConcurrencyConflictException — теж відмова пакета, не падіння прогону: індекс
-        // UX_RegistryEntryKey_Live (keyTakenConcurrently) спрацьовує, коли паралельний запис
-        // випередив блокування (справжня гонка). Обмін ключами між записами пакета (A: k1→k2,
-        // B: k2→k1) до індексу вже не доходить — служба ключів пише їх у дві фази (RT-14).
-        // Поштучний повтор розводить гонку. Інші EcrException (немає автора, немає довідника) —
-        // збій прогону, а не дані: їх не ковтаємо.
-        catch (Exception ex) when (ex is BusinessRuleException or DomainException or ConcurrencyConflictException)
+        catch (RollbackAttempt)
         {
-            return new WriteOutcome([], ex);
+            // Задуманий відкат: відмова рядків writer'а.
         }
+
+        return new AttemptResult(outcome, updateErrors);
     }
 
-    /// <summary>Зміни шляхів — <c>RegistryExternalKey.MarkSynced</c> на відстежених ключах.</summary>
-    /// <returns>Чи змінено хоч один ключ (тоді потрібне збереження).</returns>
-    private async Task<bool> MarkPathsAsync(
-        int dataSourceId, IReadOnlyList<RegistrySyncPathChange> changes, DateTime now, CancellationToken ct)
+    /// <summary>Операції над ключами на відстежених рядках контексту спроби: шляхи.</summary>
+    private static async Task ApplyKeysAsync(EcrDbContext scoped, ApplyContext context, KeyOps keys, CancellationToken ct)
     {
-        if (changes.Count == 0)
+        if (keys.IsEmpty)
         {
-            return false;
+            return;
         }
 
-        var byExternalId = changes.ToDictionary(c => c.ExternalId, StringComparer.OrdinalIgnoreCase);
-        var changed = false;
+        var ids = keys.Paths.Select(p => p.ExternalId)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
 
-        foreach (var chunk in byExternalId.Keys.Chunk(ChunkSize))
+        var byExternalId = new Dictionary<string, RegistryExternalKey>(StringComparer.OrdinalIgnoreCase);
+        foreach (var chunk in ids.Chunk(ChunkSize))
         {
-            var ids = chunk.ToList();
-            var keys = await db.RegistryExternalKeys
-                .Where(k => k.DataSourceId == dataSourceId && ids.Contains(k.ExternalId))
+            var list = chunk.ToList();
+            var rows = await scoped.RegistryExternalKeys
+                .Where(k => k.DataSourceId == context.DataSourceId && list.Contains(k.ExternalId))
                 .ToListAsync(ct)
                 .ConfigureAwait(false);
 
-            foreach (var key in keys)
+            foreach (var row in rows)
             {
-                if (byExternalId.TryGetValue(key.ExternalId, out var change) && key.RegistryEntryId == change.RegistryEntryId)
-                {
-                    key.MarkSynced(change.NewPath, now);
-                    changed = true;
-                }
+                byExternalId.TryAdd(row.ExternalId, row);
             }
         }
 
-        return changed;
+        // Ключ мусить і досі вести на той самий запис: між читанням і записом його могли
+        // перев'язати вручну — тоді синк його не чіпає.
+        RegistryExternalKey? Find(string externalId, long entryId)
+            => byExternalId.TryGetValue(externalId, out var key) && key.RegistryEntryId == entryId ? key : null;
+
+        foreach (var path in keys.Paths)
+        {
+            Find(path.ExternalId, path.RegistryEntryId)?.MarkSynced(path.NewPath, context.Now);
+        }
+    }
+
+    /// <summary>Оновлення на запис — одним рядком writer'а, у порядку першої появи запису в плані.</summary>
+    private static List<RegistryEntryUpdate> Updates(RegistrySyncPlan plan)
+    {
+        var order = new List<long>();
+        var values = new Dictionary<long, Dictionary<string, object?>>();
+
+        foreach (var update in plan.Updates)
+        {
+            if (!values.TryGetValue(update.RegistryEntryId, out var fields))
+            {
+                fields = new Dictionary<string, object?>(StringComparer.Ordinal);
+                values[update.RegistryEntryId] = fields;
+                order.Add(update.RegistryEntryId);
+            }
+
+            fields[update.FieldCode] = update.NewValue;
+        }
+
+        return [.. order.Select(id => new RegistryEntryUpdate(id, values[id]))];
+    }
+
+    private static List<T> Without<T>(IReadOnlyList<T> items, IReadOnlyList<RegistryEntryImportError> errors)
+    {
+        var failed = errors.Select(e => e.Row).ToHashSet();
+        return [.. items.Where((_, i) => !failed.Contains(i + 1))];
     }
 
     /// <summary>
-    /// Відкидає події, для яких ОСТАННЯ подія того самого предмета цієї сутності має те саме
-    /// значення. Один запит на прогін.
+    /// Відмова на весь пакет — дані, а не збій прогону. ⛔ <c>ConcurrencyConflictException</c> —
+    /// індекс <c>UX_RegistryEntryKey_Live</c> (<c>keyTakenConcurrently</c>), коли паралельний запис
+    /// випередив блокування; поштучний повтор розводить гонку. Інші <c>EcrException</c> (немає автора,
+    /// немає довідника) — збій прогону: їх не ковтаємо.
     /// </summary>
-    private async Task<List<SyncEvent>> DeduplicateAsync(int sourceEntityId, List<SyncEvent> events, CancellationToken ct)
-    {
-        if (events.Count == 0)
-        {
-            return events;
-        }
-
-        var statuses = CollectionCoverage.RegistryStatuses.ToList();
-        var journal = await db.CollectionCoverages
-            .AsNoTracking()
-            .Where(c => c.SourceEntityId == sourceEntityId
-                        && c.PeriodKey == null
-                        && c.Status != null
-                        && statuses.Contains(c.Status)
-                        && c.Details != null
-                        && c.Details.Contains(DedupKeyPrefix))
-            .OrderBy(c => c.Id)
-            .Select(c => c.Details!)
-            .ToListAsync(ct)
-            .ConfigureAwait(false);
-
-        // Предмет → значення ОСТАННЬОЇ його події (порядок за Id: пізніша перезаписує).
-        var latest = new Dictionary<string, string>(StringComparer.Ordinal);
-        foreach (var details in journal)
-        {
-            if (ParseKey(details) is { } key)
-            {
-                latest[key.Subject] = key.Value;
-            }
-        }
-
-        var fresh = new List<SyncEvent>();
-        foreach (var e in events)
-        {
-            if (latest.TryGetValue(e.Key.Subject, out var value) && value == e.Key.Value)
-            {
-                continue;
-            }
-
-            latest[e.Key.Subject] = e.Key.Value;
-            fresh.Add(e);
-        }
-
-        return fresh;
-    }
-
-    /// <summary>Мапінги сутності на поля ЦЬОГО довідника — і активні, і вимкнені (планувальнику потрібні обидва).</summary>
-    private async Task<List<RegistrySyncFieldMapping>> MappingsAsync(
-        int sourceEntityId,
-        Dictionary<int, Domain.Entities.Configuration.RegistryFieldDef> fields,
-        CancellationToken ct)
-    {
-        var maps = await db.EntityFieldMaps
-            .AsNoTracking()
-            .Where(m => m.SourceEntityId == sourceEntityId
-                        && m.TargetKind == FieldTargetKind.RegistryField
-                        && m.TargetRegistryFieldDefId != null)
-            .OrderBy(m => m.Id)
-            .ToListAsync(ct)
-            .ConfigureAwait(false);
-
-        // Поле чужого довідника пропускається: мапінг на нього відхиляє вже
-        // створення мапінгу (S3), а писати в чужий довідник синк не має права.
-        // ⚠ RefRegistryDefId поля Lookup — атрибут несе КОД запису (D-212 (5)).
-        return [.. maps
-            .Where(m => fields.ContainsKey(m.TargetRegistryFieldDefId!.Value))
-            .Select(m =>
-            {
-                var field = fields[m.TargetRegistryFieldDefId!.Value];
-                return new RegistrySyncFieldMapping(
-                    field.Id, field.Code, field.DataType, field.UnitId, m.SourceField, m.IsActive,
-                    field.DataType == CellDataType.Lookup ? field.RefRegistryDefId : null);
-            })];
-    }
+    private static bool IsBatchFailure(Exception ex)
+        => ex is BusinessRuleException or DomainException or ConcurrencyConflictException;
 
     /// <summary>Коди записів інших довідників → Id: живі записи, регістронезалежно (як колація бази).</summary>
     private async Task<IReadOnlyDictionary<int, IReadOnlyDictionary<string, long>>> ResolveCodesAsync(
@@ -499,6 +491,35 @@ public sealed class RegistrySyncJob(
         }
 
         return taken;
+    }
+
+    /// <summary>Мапінги сутності на поля ЦЬОГО довідника — і активні, і вимкнені (планувальнику потрібні обидва).</summary>
+    private async Task<List<RegistrySyncFieldMapping>> MappingsAsync(
+        int sourceEntityId,
+        Dictionary<int, Domain.Entities.Configuration.RegistryFieldDef> fields,
+        CancellationToken ct)
+    {
+        var maps = await db.EntityFieldMaps
+            .AsNoTracking()
+            .Where(m => m.SourceEntityId == sourceEntityId
+                        && m.TargetKind == FieldTargetKind.RegistryField
+                        && m.TargetRegistryFieldDefId != null)
+            .OrderBy(m => m.Id)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        // Поле чужого довідника пропускається: мапінг на нього відхиляє вже
+        // створення мапінгу (S3), а писати в чужий довідник синк не має права.
+        // ⚠ RefRegistryDefId поля Lookup — атрибут несе КОД запису (D-212 (5)).
+        return [.. maps
+            .Where(m => fields.ContainsKey(m.TargetRegistryFieldDefId!.Value))
+            .Select(m =>
+            {
+                var field = fields[m.TargetRegistryFieldDefId!.Value];
+                return new RegistrySyncFieldMapping(
+                    field.Id, field.Code, field.DataType, field.UnitId, m.SourceField, m.IsActive,
+                    field.DataType == CellDataType.Lookup ? field.RefRegistryDefId : null);
+            })];
     }
 
     /// <summary>Знімок джерела: елементи під коренем сутності й поточні значення змаплених атрибутів.</summary>
@@ -676,6 +697,56 @@ public sealed class RegistrySyncJob(
     }
 
     /// <summary>
+    /// Відкидає події, для яких ОСТАННЯ подія того самого предмета цієї сутності має те саме
+    /// значення. Один запит на прогін.
+    /// </summary>
+    private async Task<List<SyncEvent>> DeduplicateAsync(int sourceEntityId, List<SyncEvent> events, CancellationToken ct)
+    {
+        if (events.Count == 0)
+        {
+            return events;
+        }
+
+        var statuses = CollectionCoverage.RegistryStatuses.ToList();
+        var journal = await db.CollectionCoverages
+            .AsNoTracking()
+            .Where(c => c.SourceEntityId == sourceEntityId
+                        && c.PeriodKey == null
+                        && c.Status != null
+                        && statuses.Contains(c.Status)
+                        && c.Details != null
+                        && c.Details.Contains(DedupKeyPrefix))
+            .OrderBy(c => c.Id)
+            .Select(c => c.Details!)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        // Предмет → значення ОСТАННЬОЇ його події (порядок за Id: пізніша перезаписує).
+        var latest = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var details in journal)
+        {
+            if (ParseKey(details) is { } key)
+            {
+                latest[key.Subject] = key.Value;
+            }
+        }
+
+        var fresh = new List<SyncEvent>();
+        foreach (var e in events)
+        {
+            if (latest.TryGetValue(e.Key.Subject, out var value) && value == e.Key.Value)
+            {
+                continue;
+            }
+
+            latest[e.Key.Subject] = e.Key.Value;
+            fresh.Add(e);
+        }
+
+        return fresh;
+    }
+
+    /// <summary>
     /// Автор — людина: відомий і не <c>svc-integration</c>, або НЕВІДОМИЙ (<c>null</c>, значення
     /// до RT-04). ⛔ Невідомий = людина (<c>D-118</c>, дефолт координатора S7): синк не перетирає
     /// значення, про автора якого нічого не відомо.
@@ -795,6 +866,12 @@ public sealed class RegistrySyncJob(
     private static SyncEvent Rejected(
         RegistryEntryUpdate update, Exception failure, IReadOnlyDictionary<long, string> externalIds)
     {
+        var (code, messageKey, field) = Describe(failure);
+        return Rejected(update, field, code, messageKey, externalIds);
+    }
+
+    private static (string? Code, string? MessageKey, string? Field) Describe(Exception failure)
+    {
         var (code, details) = failure switch
         {
             EcrException ecr => (ecr.ErrorCode, ecr.Details),
@@ -804,7 +881,7 @@ public sealed class RegistrySyncJob(
 
         var messageKey = details?.GetValueOrDefault("messageKey") as string;
         var field = details?.GetValueOrDefault("fieldCode") as string ?? details?.GetValueOrDefault("fields") as string;
-        return Rejected(update, field, code, messageKey, externalIds);
+        return (code, messageKey, field);
     }
 
     private static SyncEvent Rejected(
@@ -899,9 +976,49 @@ public sealed class RegistrySyncJob(
     /// <summary>Подія до запису в журнал.</summary>
     private sealed record SyncEvent(string Status, string Details, DedupKey Key);
 
-    /// <summary>Результат однієї спроби запису: помилки рядків або відмова на весь пакет.</summary>
-    private sealed record WriteOutcome(IReadOnlyList<RegistryEntryImportError> Errors, Exception? Failure)
+    /// <summary>Спільне для всіх спроб прогону.</summary>
+    /// <param name="RegistryDefId">Довідник.</param>
+    /// <param name="DataSourceId">Джерело.</param>
+    /// <param name="Now">Момент прогону.</param>
+    /// <param name="Links">Зв'язки на момент читання.</param>
+    private sealed record ApplyContext(
+        int RegistryDefId,
+        int DataSourceId,
+        DateTime Now,
+        IReadOnlyList<RegistrySyncLink> Links)
     {
-        public bool Succeeded => Failure is null && Errors.Count == 0;
+        /// <summary>Запис → елемент (для подій).</summary>
+        public Dictionary<long, string> ExternalIds()
+        {
+            var map = new Dictionary<long, string>();
+            foreach (var link in Links)
+            {
+                map.TryAdd(link.RegistryEntryId, link.ExternalId);
+            }
+
+            return map;
+        }
+    }
+
+    /// <summary>Операції над ключами одного прогону.</summary>
+    private sealed record KeyOps(IReadOnlyList<RegistrySyncPathChange> Paths)
+    {
+        public static KeyOps None { get; } = new([]);
+
+        public bool IsEmpty => Paths.Count == 0;
+    }
+
+    /// <summary>Закомічена спроба.</summary>
+    /// <param name="Updates">Застосовані оновлення.</param>
+    private sealed record Outcome(IReadOnlyList<RegistryEntryUpdate> Updates);
+
+    /// <summary>Результат спроби: виконане або відмови рядків (тоді відкочено).</summary>
+    private sealed record AttemptResult(
+        Outcome? Outcome,
+        IReadOnlyList<RegistryEntryImportError> UpdateErrors);
+
+    /// <summary>Сигнал відкату транзакції спроби: відмова рядків writer'а.</summary>
+    private sealed class RollbackAttempt : Exception
+    {
     }
 }
