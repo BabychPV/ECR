@@ -573,29 +573,67 @@ public sealed class RecalculationJob(
     private async Task<IReadOnlyList<int>> ScopePeriodsAsync(
         RecalculationRequest request, IReadOnlySet<int> refused, CancellationToken ct)
     {
-        var scopesQuery = db.TableInstances
-            .AsNoTracking()
-            .Where(i => i.DocumentId == request.DocumentId
-                        && (request.PeriodKey == null || i.PeriodKeyValue == request.PeriodKey));
-
-        if (request.SheetDefId is { } scopeSheetId)
+        Task<List<int>> ScopesAsync(IQueryable<Ecr.Domain.Entities.Documents.TableInstance> instances)
         {
-            scopesQuery = scopesQuery.Where(i =>
-                db.TableDefs.Any(td => td.Id == i.TableDefId && td.SheetDefId == scopeSheetId));
+            var scopesQuery = instances
+                .Where(i => request.PeriodKey == null || i.PeriodKeyValue == request.PeriodKey);
+
+            if (request.SheetDefId is { } scopeSheetId)
+            {
+                scopesQuery = scopesQuery.Where(i =>
+                    db.TableDefs.Any(td => td.Id == i.TableDefId && td.SheetDefId == scopeSheetId));
+            }
+
+            return scopesQuery
+                .Select(i => i.PeriodKeyValue)
+                .Distinct()
+                // За зростанням ДО стелі: на межі беруться найраніші періоди —
+                // ті, від яких рахуються наступні (`[Period:-1]`), — а не
+                // довільні (EF 10102).
+                .OrderBy(key => key)
+                .Take(MaxBindings)
+                .ToListAsync(ct);
         }
 
-        var scopes = await scopesQuery
-            .Select(i => i.PeriodKeyValue)
-            .Distinct()
-            // За зростанням ДО стелі: на межі беруться найраніші періоди —
-            // ті, від яких рахуються наступні (`[Period:-1]`), — а не
-            // довільні (EF 10102).
-            .OrderBy(key => key)
-            .Take(MaxBindings)
-            .ToListAsync(ct)
-            .ConfigureAwait(false);
+        // ⚠ O3d: з ключем партиції (DocumentInstancesQuery). Порожньо — колишній пошук
+        // без ключа: документ, чиї екземпляри лежать лише в періодах без рядка в
+        // doc.Period, дає той самий скоуп, що й до O3d.
+        var scopes = await ScopesAsync(DocumentInstancesQuery(db, request.DocumentId)).ConfigureAwait(false);
+        if (scopes.Count == 0)
+        {
+            scopes = await ScopesAsync(db.TableInstances.AsNoTracking().Where(i => i.DocumentId == request.DocumentId))
+                .ConfigureAwait(false);
+        }
 
         return [.. scopes.Where(key => !refused.Contains(key)).OrderBy(key => key)];
+    }
+
+    /// <summary>
+    /// Екземпляри таблиць документа з ключем партиції (O3d, I2-2 ФВ-9.8).
+    /// </summary>
+    /// <param name="db">Контекст.</param>
+    /// <param name="documentId">Документ.</param>
+    /// <returns>Незавершений запит; фільтри й проєкцію добирає викликач.</returns>
+    /// <remarks>
+    /// ⛔ Ключі <c>doc.TableInstance</c> — <c>(PeriodKey, …)</c> в усіх індексах
+    /// (<c>PK</c> — <c>PeriodKey, Id</c>; <c>UQ</c> — <c>PeriodKey, DocumentId, TableDefId</c>),
+    /// і предикат лише за <c>DocumentId</c> сканує <c>UQ_TableInstance</c> у всіх 25
+    /// партиціях. <c>PeriodKey IN (SELECT PeriodKey FROM doc.Period)</c> — як у
+    /// <c>RowStore.TableInstancesByIdQuery</c> — дає по seek'у на період. Замір на
+    /// <c>EcrPerfI2</c> (док 326, фактичний план): скоуп періодів 1 984 читання / 70 мс ЦП →
+    /// 66 / 0 мс (24 партиції з seek'ом замість скану 25).
+    /// <para>⚠ Екземпляр, чийого періоду немає в <c>doc.Period</c>, цей запит не знайде
+    /// (FK на <c>doc.Period</c> немає) — тому викликачі мають запасний шлях без ключа.</para>
+    /// </remarks>
+    public static IQueryable<Ecr.Domain.Entities.Documents.TableInstance> DocumentInstancesQuery(
+        EcrDbContext db, long documentId)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+
+        return db.TableInstances
+            .AsNoTracking()
+            .Where(i => db.Periods.Select(p => p.PeriodKeyValue).Contains(i.PeriodKeyValue)
+                        && i.DocumentId == documentId);
     }
 
     /// <summary>Прив'язки методологій до таблиць документа, РОЗКЛАДЕНІ ЗА ПЕРІОДАМИ.</summary>
@@ -636,6 +674,10 @@ public sealed class RecalculationJob(
         // тут і у фазі формул, розійтися більше не можуть.
         var scopeKeys = periods.ToList();
 
+        // ⚠ O3d: ключ партиції тут УЖЕ є — `PeriodKey IN (@scopeKeys1, …)` (EF 10 —
+        // окремі параметри): фактичний план на EcrPerfI2, док 326 — 12 seek'ів, 40 читань.
+        // Додатковий `IN (SELECT PeriodKey FROM doc.Period)` дав би 24 seek'и / 64 читання,
+        // тобто гірше, — тому не доданий.
         var instancesQuery = db.TableInstances
             .AsNoTracking()
             .Where(i => i.DocumentId == request.DocumentId
