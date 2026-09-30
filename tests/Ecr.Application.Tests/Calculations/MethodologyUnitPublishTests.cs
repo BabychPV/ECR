@@ -266,6 +266,42 @@ public sealed class MethodologyUnitPublishTests
         Assert.True(_version.IsPublished);
     }
 
+    /// <summary>Результат у масі, а оголошено об'єм — відмова (третя клауза ФВ-16.6).</summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "ФВ-16.6")]
+    public async Task Результат_в_іншій_розмірності_ніж_оголошений_відхиляється()
+    {
+        Formulas([Formula(1, "M", "CST.A * 2", unit: CubicMetre)]);
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(Publish);
+
+        Assert.Equal("ECR-TMPL-4223", error.ErrorCode);
+        Assert.Equal("expr.unit.dimensionMismatch", error.Details!["messageKey"]);
+        Assert.Equal("M", error.Details["formula"]);
+        Assert.False(_version.IsPublished);
+    }
+
+    /// <remarks>
+    /// Невідомий результат (коефіцієнт × маса, без похідної) і однакова
+    /// розмірність не судяться: інакше відмова заблокувала б легальні формули.
+    /// </remarks>
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "ФВ-16.6")]
+    [InlineData("CST.A * 2", Tonne)]
+    [InlineData("CST.A * 2", Kilogram)]
+    [InlineData("CST.EF * CST.A", CubicMetre)]
+    [InlineData("@x", CubicMetre)]
+    public async Task Збіг_або_невідомий_результат_з_оголошеним_публікується(string expression, int unit)
+    {
+        Formulas([Formula(1, "M", expression, unit: unit, arguments: "x")]);
+
+        await Publish();
+
+        Assert.True(_version.IsPublished);
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
 
     private Task<MethodologyPublicationDiff> Publish()

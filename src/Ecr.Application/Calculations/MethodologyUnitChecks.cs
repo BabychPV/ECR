@@ -112,7 +112,27 @@ public static class MethodologyUnitChecks
         foreach (var formula in formulas.Where(f => f.Root is not null))
         {
             var diagnostics = new List<ExpressionDiagnostic>();
-            checker.Check(formula.Root!, context, diagnostics);
+            var result = checker.Check(formula.Root!, context, diagnostics);
+
+            // ⛔ ФВ-16.6, третя клауза: результат формули в іншій РОЗМІРНОСТІ, ніж
+            // оголошений `OutputUnitId`. Не порівнюється, якщо одна зі сторін
+            // невідома (`null` — «не судиться») або її одиниці немає в довіднику.
+            // ⚠ Однакова розмірність, але інша одиниця (т замість кг) поки не
+            // блокує: для неї немає окремого ключа `expr.unit.*`.
+            if (result is { } actual
+                && context.GetFormulaUnit(formula.Code) is { } declared
+                && actual != declared
+                && context.GetDimension(actual) is var actualDimension and not 0
+                && context.GetDimension(declared) is var declaredDimension and not 0
+                && actualDimension != declaredDimension)
+            {
+                diagnostics.Add(new ExpressionDiagnostic(
+                    Ecr.Expressions.ExpressionErrors.UnitMismatch,
+                    "The formula result has a different dimension than the declared output unit.",
+                    formula.Root!.Position,
+                    1,
+                    "expr.unit.dimensionMismatch"));
+            }
 
             found.AddRange(diagnostics
                 .Where(d => d.MessageKey is not null && BlockingKeys.Contains(d.MessageKey))
