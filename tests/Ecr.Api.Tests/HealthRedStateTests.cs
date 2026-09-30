@@ -256,7 +256,11 @@ public sealed class HealthRedStateTests
                 : new CollectionRunStatus(DateTime.UtcNow, lastRunStatus, 10),
             OldestGap: gap,
             DataSourceId: 1,
-            DataSourceCode: "PI");
+            DataSourceCode: "PI",
+            OnMissingInSource: Ecr.Domain.Enums.RegistryMissingPolicy.MarkOrphaned,
+            ValidFromAttribute: null,
+            ValidToAttribute: null,
+            ValidToInclusive: false);
 
     private static ICollectionStore StoreWith(params SourceEntityStatus[] sources)
     {

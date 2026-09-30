@@ -21118,6 +21118,8 @@ export interface components {
              * @description Початок найстарішої непокритої прогалини; `null` — покриття суцільне.
              */
             oldestGap: null | string;
+            /** @description Політика синку: зникнення елемента в джерелі (`D-212`). */
+            onMissingInSource: components["schemas"]["RegistryMissingPolicy"];
             /**
              * Format: int32
              * @description Довідник, до якого прив'язана сутність; `null` — не прив'язана.
@@ -21125,6 +21127,12 @@ export interface components {
             registryDefId?: null | number;
             /** @description Транспорт джерела (ФВ-11.2). */
             transport: string;
+            /** @description Атрибут початку чинності; `null` — не синхронізується. */
+            validFromAttribute: null | string;
+            /** @description Атрибут кінця чинності; `null` — не синхронізується. */
+            validToAttribute: null | string;
+            /** @description Кінець у джерелі — останній чинний день. */
+            validToInclusive: boolean;
         };
         /** @description Наслідок пробного читання одного значення мапінгу (ФВ-13.17). */
         SourcePathProbeResult: {

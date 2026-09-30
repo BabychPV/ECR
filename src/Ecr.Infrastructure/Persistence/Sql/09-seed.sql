@@ -670,7 +670,12 @@ DELETE t
     -- X-32: «ще не перевіряли» — `200` з `validated: false`, а не відмова `404`.
     (N'err.ECR-DOC-0404.notValidated',             N'en', N'Document {documentId} has not been validated for period {periodKey} yet.'),
     -- HSE301 L: формулу імпортованої методології розрахунок тепер обчислює — заборону A3 знято.
-    (N'publish.problem.importedFormulaNotEvaluated', N'en', N'Formula {formula}: reference !{name} at position {position} points to a formula of imported methodology {library}, but calculations do not evaluate imported formulas, so it would always give #REF. Copy the formula into this version.')
+    (N'publish.problem.importedFormulaNotEvaluated', N'en', N'Formula {formula}: reference !{name} at position {position} points to a formula of imported methodology {library}, but calculations do not evaluate imported formulas, so it would always give #REF. Copy the formula into this version.'),
+    -- D-212 PR-8: `GET /api/v1/sources` тепер віддає чинну політику синку —
+    -- попереджати «прочитати не вдалося» більше нема про що.
+    (N'sources.syncPolicyUnknown',                 N'en', N'The current policy of this entity could not be read, so the form shows the default one. Saving replaces the policy entirely.'),
+    (N'sources.syncPolicyUnknown',                 N'ru', N'Текущую политику этой сущности прочитать не удалось, поэтому форма показывает политику по умолчанию. Сохранение заменяет политику целиком.'),
+    (N'sources.syncPolicyUnknown',                 N'kz', N'Осы нысанның ағымдағы саясатын оқу мүмкін болмады, сондықтан пішін әдепкі саясатты көрсетеді. Сақтау саясатты толығымен ауыстырады.')
   ) AS s ([Key], Lang, OldVal)
     ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
  WHERE t.Value = s.OldVal COLLATE Latin1_General_BIN2;
@@ -4269,7 +4274,6 @@ USING (VALUES
     (N'sources.syncPolicy',                     N'en', N'Sync policy', 1),
     (N'sources.syncPolicyTitle',                N'en', N'Registry sync policy: {entity}', 1),
     (N'sources.syncPolicyHint',                 N'en', N'How registry sync treats elements of this entity that disappear from the source, and which element attributes carry the validity dates of a record.', 1),
-    (N'sources.syncPolicyUnknown',              N'en', N'The current policy of this entity could not be read, so the form shows the default one. Saving replaces the policy entirely.', 1),
     (N'sources.syncPolicyMissing',              N'en', N'When an element disappears from the source', 1),
     (N'sources.syncPolicyMarkOrphaned',         N'en', N'Mark as missing', 1),
     (N'sources.syncPolicyMarkOrphanedHint',     N'en', N'The record stays active; its link is marked missing in source since the run date, and an event is written.', 1),
@@ -11273,8 +11277,6 @@ SELECT v.[Key], v.Lang, v.Val
     (N'sources.syncPolicyTitle', N'kz', N'Анықтамалықты синхрондау саясаты: {entity}'),
     (N'sources.syncPolicyHint', N'ru', N'Как синхронизация справочника обходится с элементами этой сущности, исчезнувшими из источника, и какие атрибуты элемента несут даты действия записи.'),
     (N'sources.syncPolicyHint', N'kz', N'Анықтамалықты синхрондау осы нысанның деректер көзінен жоғалған элементтерімен не істейді және элементтің қай атрибуттары жазбаның қолданылу күндерін береді.'),
-    (N'sources.syncPolicyUnknown', N'ru', N'Текущую политику этой сущности прочитать не удалось, поэтому форма показывает политику по умолчанию. Сохранение заменяет политику целиком.'),
-    (N'sources.syncPolicyUnknown', N'kz', N'Осы нысанның ағымдағы саясатын оқу мүмкін болмады, сондықтан пішін әдепкі саясатты көрсетеді. Сақтау саясатты толығымен ауыстырады.'),
     (N'sources.syncPolicyMissing', N'ru', N'Когда элемент исчезает из источника'),
     (N'sources.syncPolicyMissing', N'kz', N'Элемент деректер көзінен жоғалғанда'),
     (N'sources.syncPolicyMarkOrphaned', N'ru', N'Отметить как отсутствующий'),

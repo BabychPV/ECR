@@ -1,5 +1,5 @@
 import { useState, type JSX } from 'react';
-import { Alert, Button, Checkbox, Group, Modal, SegmentedControl, Stack, Text, TextInput } from '@mantine/core';
+import { Button, Checkbox, Group, Modal, SegmentedControl, Stack, Text, TextInput } from '@mantine/core';
 import { useMutation } from '@tanstack/react-query';
 import { meetsGrant, type GrantLevelName } from '@/features/workflow/SheetActions';
 import { t } from '@/shared/i18n';
@@ -31,14 +31,6 @@ const MissingPolicies: readonly { value: RegistryMissingPolicy; label: () => str
   },
 ];
 
-/** Політика, якою сервер заводить сутність (`SourceEntity`: типове `MarkOrphaned`, дат немає). */
-export const DefaultRegistrySyncPolicy: RegistrySyncPolicy = {
-  onMissingInSource: 'MarkOrphaned',
-  validFromAttribute: null,
-  validToAttribute: null,
-  validToInclusive: false,
-};
-
 /**
  * Чи може користувач змінити політику синку довідника `registryDefId`.
  *
@@ -68,10 +60,9 @@ function attribute(value: string): string | null {
  * Політика синку довідника з AF для сутності збору (`D-212`,
  * `PUT /api/v1/sources/{id}/registry/policy`).
  *
- * ⚠ `current = null` — клієнт не знає чинної політики: перелік сутностей
- * (`GET /api/v1/sources`) її не віддає, а окремого читання немає. Форма тоді
- * стартує з типової і прямо про це попереджає: `PUT` — повна заміна, тож
- * мовчки показана типова затерла б чинні атрибути дат.
+ * ⚠ `current` — ЧИННА політика з рядка переліку `GET /api/v1/sources`
+ * (`SourceEntityStatus` несе її обов'язковими полями). `PUT` — повна заміна,
+ * тож форма, що стартувала б із типової, мовчки затерла б атрибути дат.
  *
  * ⚠ Чернетка живе стільки, скільки змонтована форма: викликач монтує її на
  * відкриття (з `key` сутності), тож кожне відкриття — з чинної політики.
@@ -86,17 +77,15 @@ export function RegistrySyncPolicyModal({
 }: {
   readonly entityId: number;
   readonly entityLabel: string;
-  readonly current: RegistrySyncPolicy | null;
+  readonly current: RegistrySyncPolicy;
   readonly opened: boolean;
   readonly onClose: () => void;
   readonly onSaved: (entity: SourceEntityWithPolicy) => void;
 }): JSX.Element {
-  const start = current ?? DefaultRegistrySyncPolicy;
-
-  const [missing, setMissing] = useState<RegistryMissingPolicy>(start.onMissingInSource);
-  const [validFrom, setValidFrom] = useState(start.validFromAttribute ?? '');
-  const [validTo, setValidTo] = useState(start.validToAttribute ?? '');
-  const [inclusive, setInclusive] = useState(start.validToInclusive);
+  const [missing, setMissing] = useState<RegistryMissingPolicy>(current.onMissingInSource);
+  const [validFrom, setValidFrom] = useState(current.validFromAttribute ?? '');
+  const [validTo, setValidTo] = useState(current.validToAttribute ?? '');
+  const [inclusive, setInclusive] = useState(current.validToInclusive);
 
   const save = useMutation({
     mutationFn: (policy: RegistrySyncPolicy) => setRegistrySyncPolicy(entityId, policy),
@@ -116,12 +105,6 @@ export function RegistrySyncPolicyModal({
         <Text size="sm" c="dimmed">
           {t('sources.syncPolicyHint')}
         </Text>
-
-        {current === null && (
-          <Alert color="statusWarning" data-sync-policy-unknown="">
-            {t('sources.syncPolicyUnknown')}
-          </Alert>
-        )}
 
         {/* ⚠ SegmentedControl, не Radio: стилі Radio відсічені (`mantineCssPrune.ts`),
             а повернути їх — +1 КБ у вхідний CSS і DocumentPage за межею D-132 (251/250). */}

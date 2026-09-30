@@ -12059,6 +12059,10 @@
               "string"
             ]
           },
+          "onMissingInSource": {
+            "$ref": "#/components/schemas/RegistryMissingPolicy",
+            "description": "Політика синку: зникнення елемента в джерелі (`D-212`)."
+          },
           "registryDefId": {
             "description": "Довідник, до якого прив'язана сутність; `null` — не прив'язана.",
             "format": "int32",
@@ -12070,6 +12074,24 @@
           "transport": {
             "description": "Транспорт джерела (ФВ-11.2).",
             "type": "string"
+          },
+          "validFromAttribute": {
+            "description": "Атрибут початку чинності; `null` — не синхронізується.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "validToAttribute": {
+            "description": "Атрибут кінця чинності; `null` — не синхронізується.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "validToInclusive": {
+            "description": "Кінець у джерелі — останній чинний день.",
+            "type": "boolean"
           }
         },
         "required": [
@@ -12082,7 +12104,11 @@
           "lastRun",
           "oldestGap",
           "dataSourceId",
-          "dataSourceCode"
+          "dataSourceCode",
+          "onMissingInSource",
+          "validFromAttribute",
+          "validToAttribute",
+          "validToInclusive"
         ],
         "type": "object"
       },

@@ -1,6 +1,7 @@
 // src/Ecr.Application/Ports/ICollectionStore.cs
 
 using Ecr.Domain.Entities.External;
+using Ecr.Domain.Enums;
 
 namespace Ecr.Application.Ports;
 
@@ -240,7 +241,16 @@ public interface ICollectionStore
 /// <param name="OldestGap">Початок найстарішої непокритої прогалини; <c>null</c> — покриття суцільне.</param>
 /// <param name="DataSourceId">З'єднання, якому належить сутність.</param>
 /// <param name="DataSourceCode">Код цього з'єднання.</param>
+/// <param name="OnMissingInSource">Політика синку: зникнення елемента в джерелі (<c>D-212</c>).</param>
+/// <param name="ValidFromAttribute">Атрибут початку чинності; <c>null</c> — не синхронізується.</param>
+/// <param name="ValidToAttribute">Атрибут кінця чинності; <c>null</c> — не синхронізується.</param>
+/// <param name="ValidToInclusive">Кінець у джерелі — останній чинний день.</param>
 /// <param name="RegistryDefId">Довідник, до якого прив'язана сутність; <c>null</c> — не прив'язана.</param>
+/// <remarks>
+/// ⚠ Чотири поля політики синку — обов'язкові: <c>PUT …/registry/policy</c> —
+/// повна заміна, і форма мусить стартувати з ЧИННОЇ політики, а не з типової
+/// (інакше мовчки затерла б атрибути дат).
+/// </remarks>
 public sealed record SourceEntityStatus(
     int Id,
     string Code,
@@ -252,6 +262,10 @@ public sealed record SourceEntityStatus(
     DateTime? OldestGap,
     int DataSourceId,
     string DataSourceCode,
+    RegistryMissingPolicy OnMissingInSource,
+    string? ValidFromAttribute,
+    string? ValidToAttribute,
+    bool ValidToInclusive,
     int? RegistryDefId = null);
 
 /// <summary>Що джерело вже віддало за одним полем мапінгу (<c>BE-27</c>).</summary>

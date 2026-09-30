@@ -77,6 +77,50 @@ public sealed class SourceRegistryPolicyEndpointTests(SqlServerFixture sql)
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Decision", "D-212")]
+    public async Task Перелік_сутностей_віддає_чинну_політику_синку()
+    {
+        // ⛔ PUT — повна заміна. Без політики в `GET /api/v1/sources` форма після
+        // перезавантаження стартувала з типової й мовчки затерла б атрибути дат.
+        using var app = new EcrApiFactory(sql);
+        var stand = await StandAsync(bound: true).ConfigureAwait(true);
+        var untouched = await StandAsync(bound: true).ConfigureAwait(true);
+
+        try
+        {
+            using var client = await SignedInAsync(app, stand.RegistryId).ConfigureAwait(true);
+            var saved = await client.PutAsJsonAsync(
+                Uri(stand.EntityId),
+                new { onMissingInSource = "Deactivate", validFromAttribute = "Start", validToAttribute = "End", validToInclusive = true });
+            Assert.Equal(HttpStatusCode.OK, saved.StatusCode);
+
+            var list = await JsonAsync(
+                await client.GetAsync(new Uri("/api/v1/sources", UriKind.Relative)).ConfigureAwait(true)).ConfigureAwait(true);
+            var rows = list.EnumerateArray().ToList();
+
+            var row = rows.Single(r => r.GetProperty("id").GetInt32() == stand.EntityId);
+            Assert.Equal("Deactivate", row.GetProperty("onMissingInSource").GetString());
+            Assert.Equal("Start", row.GetProperty("validFromAttribute").GetString());
+            Assert.Equal("End", row.GetProperty("validToAttribute").GetString());
+            Assert.True(row.GetProperty("validToInclusive").GetBoolean());
+
+            // Типова політика теж віддається явно, а не пропуском полів.
+            var fresh = rows.Single(r => r.GetProperty("id").GetInt32() == untouched.EntityId);
+            Assert.Equal("MarkOrphaned", fresh.GetProperty("onMissingInSource").GetString());
+            Assert.Equal(JsonValueKind.Null, fresh.GetProperty("validFromAttribute").ValueKind);
+            Assert.Equal(JsonValueKind.Null, fresh.GetProperty("validToAttribute").ValueKind);
+            Assert.False(fresh.GetProperty("validToInclusive").GetBoolean());
+        }
+        finally
+        {
+            await DeactivateAsync(stand.DataSourceId).ConfigureAwait(true);
+            await DeactivateAsync(untouched.DataSourceId).ConfigureAwait(true);
+        }
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "D-212")]
     public async Task Без_права_на_прив_язаний_довідник_чи_без_Integration_Manage_403_і_нічого_не_пише()
     {
         using var app = new EcrApiFactory(sql);
