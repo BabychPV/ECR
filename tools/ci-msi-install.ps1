@@ -159,12 +159,17 @@ if (-not (Get-Command sqlcmd -ErrorAction SilentlyContinue)) {
 $cert = New-SelfSignedCertificate -Subject 'CN=ecr-ci-dataprotection' -CertStoreLocation 'Cert:\LocalMachine\My' -KeyExportPolicy Exportable
 try {
     $cases = @(
-        @{ Name = 'D1a. -WhatIf типово: WORKER_ENABLED=1, Mode=Database, Executor=Worker'; Extra = @()
-           Must = @('WORKER_ENABLED=1', 'ECR_Jobs__Queue__Mode=Database', 'ECR_Jobs__Recalculation__Executor=Worker')
+        # D14-08: транспорт обирається ЯВНО — без -HttpsThumbprint/-BehindHttpsProxy/-AllowHttp скрипт зупиняється,
+        # тож кожен випадок його задає (CI-стенд — -AllowHttp; D1c — HTTPS зі справжнім сертифікатом ранера).
+        @{ Name = 'D1a. -WhatIf типово: WORKER_ENABLED=1, Mode=Database, Executor=Worker'; Extra = @('-AllowHttp')
+           Must = @('WORKER_ENABLED=1', 'ECR_Jobs__Queue__Mode=Database', 'ECR_Jobs__Recalculation__Executor=Worker', 'ASPNETCORE_URLS = http://+:5000')
            MustNot = @('WORKER_ENABLED=0', 'ECR_Jobs__Recalculation__Executor=InProcess') },
-        @{ Name = 'D1b. -WhatIf -DisableWorker: WORKER_ENABLED=0, Executor=InProcess'; Extra = @('-DisableWorker')
+        @{ Name = 'D1b. -WhatIf -DisableWorker: WORKER_ENABLED=0, Executor=InProcess'; Extra = @('-DisableWorker', '-AllowHttp')
            Must = @('WORKER_ENABLED=0', 'ECR_Jobs__Recalculation__Executor=InProcess')
-           MustNot = @('WORKER_ENABLED=1', 'ECR_Jobs__Recalculation__Executor=Worker') }
+           MustNot = @('WORKER_ENABLED=1', 'ECR_Jobs__Recalculation__Executor=Worker') },
+        @{ Name = 'D1c. -WhatIf -HttpsThumbprint: ASPNETCORE_URLS=https, RequireHttps=true'; Extra = @('-HttpsThumbprint', $cert.Thumbprint)
+           Must = @('ASPNETCORE_URLS = https://+:5000', 'ECR_Auth__RequireHttps = true')
+           MustNot = @('ASPNETCORE_URLS = http://', 'ECR_Auth__RequireHttps = false') }
     )
     $i = 0
     foreach ($case in $cases) {
