@@ -190,6 +190,15 @@ public interface IJobProgressStore
     public Task<int> CountFailedWithMessageKeyAsync(string messageKey, DateTime sinceUtc, CancellationToken ct);
 
     /// <summary>
+    /// Скільки задач закрито <c>Succeeded</c> з конвертом <paramref name="messageKey"/> від
+    /// <paramref name="sinceUtc"/> (ПРД-13: перерахунок вийшов за бюджет, але завершився).
+    /// </summary>
+    /// <param name="messageKey">Ключ каталогу в конверті <c>Message</c>.</param>
+    /// <param name="sinceUtc">Нижня межа <c>UpdatedAt</c> (UTC).</param>
+    /// <param name="ct">Скасування.</param>
+    public Task<int> CountSucceededWithMessageKeyAsync(string messageKey, DateTime sinceUtc, CancellationToken ct);
+
+    /// <summary>
     /// Видаляє ЗАВЕРШЕНІ записи, старші за <paramref name="olderThan"/> (аудит P2).
     /// </summary>
     /// <param name="olderThan">Межа: завершені до цього моменту видаляються.</param>

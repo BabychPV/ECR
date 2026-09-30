@@ -436,6 +436,18 @@ public sealed class JobProgressStore(EcrDbContext db) : IJobProgressStore
     /// небагато рядків, шукаються за префіксом <c>IX_JobProgress_Stale</c> (State).
     /// </remarks>
     public Task<int> CountFailedWithMessageKeyAsync(string messageKey, DateTime sinceUtc, CancellationToken ct)
+        => CountWithMessageKeyAsync("Failed", messageKey, sinceUtc, ct);
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⚠ `Message` успішної задачі переживає `Finish` (той пише лише `Error`), і `CompleteAsync`
+    /// черги в базі теж його не чіпає — тому конверт, записаний задачею наприкінці, лишається
+    /// в рядку до прибирання (30 діб).
+    /// </remarks>
+    public Task<int> CountSucceededWithMessageKeyAsync(string messageKey, DateTime sinceUtc, CancellationToken ct)
+        => CountWithMessageKeyAsync("Succeeded", messageKey, sinceUtc, ct);
+
+    private Task<int> CountWithMessageKeyAsync(string state, string messageKey, DateTime sinceUtc, CancellationToken ct)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(messageKey);
         var quoted = "\"" + messageKey + "\"";
@@ -443,7 +455,7 @@ public sealed class JobProgressStore(EcrDbContext db) : IJobProgressStore
         return db.JobProgresses
             .AsNoTracking()
             .CountAsync(
-                p => p.State == "Failed" && p.UpdatedAt >= sinceUtc && p.Message != null && p.Message.Contains(quoted),
+                p => p.State == state && p.UpdatedAt >= sinceUtc && p.Message != null && p.Message.Contains(quoted),
                 ct);
     }
 

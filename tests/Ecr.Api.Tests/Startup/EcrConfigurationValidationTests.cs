@@ -53,6 +53,9 @@ public sealed class EcrConfigurationValidationTests(SqlServerFixture sql)
     [InlineData("Calculations:MaxParallelism", "4 потоки")]
     [InlineData("Calculations:MaxInputCellsPerBinding", "0")]
     [InlineData("Calculations:MaxInputCellsPerBinding", "300k")]
+    [InlineData("Calculations:FullYearWarnSeconds", "0")]
+    [InlineData("Calculations:FullYearWarnSeconds", "-600")]
+    [InlineData("Calculations:FullYearWarnSeconds", "10 хв")]
     public void Недійсний_ліміт_перерахунку_зупиняє_старт(string key, string value)
     {
         var problem = Assert.Single(EcrConfigurationValidation.Validate(Config((key, value))));

@@ -57,7 +57,8 @@ public sealed class RecalculationJob(
     RunCalculationHandler runs,
     RecalculationService formulas,
     Domain.Abstractions.IClock clock,
-    IBackgroundJobScheduler? jobs = null) : IRecalculationJob
+    IBackgroundJobScheduler? jobs = null,
+    RecalculationBudgetMonitor? budget = null) : IRecalculationJob
 {
     /// <summary>Стеля прив'язок на прогін: методологій у системі — десятки.</summary>
     private const int MaxBindings = 5_000;
@@ -435,6 +436,16 @@ public sealed class RecalculationJob(
             }
 
             throw;
+        }
+
+        // ПРД-13 (НФ-8.6.4): вимір ПІСЛЯ завершення — лише читає годинник, логіки перерахунку не торкається.
+        // Провалена задача сюди не доходить: тривалість до відмови не є тривалістю перерахунку.
+        if (budget is not null)
+        {
+            await budget
+                .ObserveAsync(
+                    projectId, request.DocumentId, fullYear: request.PeriodKey is null, clock.UtcNow - startedAt, progress, ct)
+                .ConfigureAwait(false);
         }
     }
 

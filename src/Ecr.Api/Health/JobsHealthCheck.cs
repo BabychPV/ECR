@@ -48,6 +48,9 @@ public sealed class JobsHealthCheck(
     /// </summary>
     public static readonly TimeSpan DeferralExhaustedWindow = TimeSpan.FromDays(1);
 
+    /// <summary>Вікно лічильника перерахунків, що вийшли за бюджет ПРД-13: доба, як і вище.</summary>
+    public static readonly TimeSpan RecalcOverBudgetWindow = TimeSpan.FromDays(1);
+
     /// <inheritdoc />
     public async Task<HealthCheckResult> CheckHealthAsync(
         HealthCheckContext context,
@@ -164,6 +167,34 @@ public sealed class JobsHealthCheck(
                         .ConfigureAwait(false);
 
                     // Лише Degraded — той самий принцип, що для завислих задач вище.
+                    return HealthCheckResult.Degraded(text, data: data);
+                }
+
+                // ⛔ ПРД-13 (НФ-8.6.4): перерахунок, що завершився, але вийшов за бюджет (за
+                // замовчуванням 600 с), — не помилка задачі, тож у `Failed` його немає. Слід —
+                // конверт у Message, який лишає `RecalculationBudgetMonitor`. Без цього бюджет
+                // видно лише тому, хто дивиться на графік, а не в готовності інстанса.
+                var overBudget = await progress
+                    .CountSucceededWithMessageKeyAsync(
+                        Infrastructure.Jobs.RecalculationBudgetMonitor.OverBudgetKey, now - RecalcOverBudgetWindow,
+                        cancellationToken)
+                    .ConfigureAwait(false);
+
+                if (overBudget > 0)
+                {
+                    var data = Data(jobs.Count, triggers.Count);
+                    data["recalcOverBudget"] = overBudget;
+                    var text = await Text(
+                            "health.jobs.recalcOverBudget",
+                            "Recalculation jobs that ran over the time budget in the last 24 hours: {count}. See the job list for the duration.",
+                            cancellationToken,
+                            new Dictionary<string, string>(StringComparer.Ordinal)
+                            {
+                                ["count"] = overBudget.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                            })
+                        .ConfigureAwait(false);
+
+                    // Лише Degraded: повільний перерахунок не виводить інстанс із ротації.
                     return HealthCheckResult.Degraded(text, data: data);
                 }
             }

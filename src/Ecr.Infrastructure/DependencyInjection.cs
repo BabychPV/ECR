@@ -294,6 +294,9 @@ public static class DependencyInjection
         // ⚠ Задача реєструється як МАРКЕР IRecalculationJob, бо саме ним її
         // називає use-case. Без цього рядка `EnqueueAsync<IRecalculationJob>`
         // приймав би завдання, і не виконувалося б нічого.
+        // ПРД-13: вимір бюджету перерахунку — і в Api, і в Ecr.Worker (обидва беруть це складання).
+        services.AddSingleton(Jobs.RecalculationBudgetOptions.Read(configuration));
+        services.AddSingleton<Jobs.RecalculationBudgetMonitor>();
         services.AddScoped<IRecalculationJob, Jobs.RecalculationJob>();
         services.AddScoped<IFormulaRecalculationJob, Jobs.FormulaRecalculationJob>();
 

@@ -27,8 +27,12 @@ public sealed class EcrMetrics
     /// <summary>Тривалість фонової або довгої синхронної операції.</summary>
     public const string JobDuration = "ecr.job.duration";
 
-    /// <summary>Повний річний перерахунок; бюджет 600 с (ПРД-13).</summary>
-    public const string CalcFullYear = "ecr.calc.full_year";
+    /// <summary>
+    /// Повний річний перерахунок; бюджет 600 с (ПРД-13). Інструмент створює і наповнює
+    /// <c>RecalculationBudgetMonitor</c> (Ecr.Infrastructure): перерахунок виконує й Ecr.Worker,
+    /// який на Ecr.Api не посилається.
+    /// </summary>
+    public const string CalcFullYear = Ecr.Infrastructure.Jobs.RecalculationBudgetMonitor.InstrumentName;
 
     /// <summary>Конфлікти паралельного редагування.</summary>
     public const string ConflictCount = "ecr.conflict.count";
@@ -59,7 +63,6 @@ public sealed class EcrMetrics
     private readonly Histogram<double> _formulaEvaluate;
     private readonly Histogram<double> _accessProfileBuild;
     private readonly Histogram<double> _jobDuration;
-    private readonly Histogram<double> _calcFullYear;
     private readonly Counter<long> _conflicts;
     private readonly Counter<long> _consistencyIssues;
 
@@ -72,7 +75,6 @@ public sealed class EcrMetrics
         _formulaEvaluate = meter.CreateHistogram<double>(FormulaEvaluate, "ms", "Перерахунок формул таблиці");
         _accessProfileBuild = meter.CreateHistogram<double>(AccessProfileBuild, "ms", "Побудова AccessProfile");
         _jobDuration = meter.CreateHistogram<double>(JobDuration, "s", "Тривалість фонової задачі");
-        _calcFullYear = meter.CreateHistogram<double>(CalcFullYear, "s", "Повний річний перерахунок");
         _conflicts = meter.CreateCounter<long>(ConflictCount, "1", "Конфлікти паралельного редагування");
         _consistencyIssues = meter.CreateCounter<long>(ConsistencyIssues, "1", "Знахідки ConsistencyCheckJob");
         _jobStartLatency = meter.CreateHistogram<double>(
@@ -150,13 +152,6 @@ public sealed class EcrMetrics
 
         _cellsWrite.Record(ms);
     }
-
-    /// <summary>
-    /// Фіксує повний річний перерахунок. **Бюджет — 600 с** (ПРД-13);
-    /// перевищення має бути видно на графіку одразу.
-    /// </summary>
-    public void RecordFullYearCalculation(double seconds, int documentCount)
-        => _calcFullYear.Record(seconds, new KeyValuePair<string, object?>("documents", documentCount));
 
     /// <summary>Фіксує конфлікт.</summary>
     public void RecordConflict() => _conflicts.Add(1);

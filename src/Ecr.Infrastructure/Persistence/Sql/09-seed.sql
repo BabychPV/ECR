@@ -4317,6 +4317,11 @@ USING (VALUES
     (N'health.transport.certificateExpired',    N'en', N'The HTTPS certificate expired on {date}: browsers refuse to open the application. Install a renewed certificate and repeat deploy-ecr.ps1 with the new -HttpsThumbprint.', 1),
     -- ru/kz — окремою порцією `COLL:transport-health` у блоці I18N нижче.
     -- COLL:transport-health ── кінець секції ──
+    -- D16:recalc-budget ── Перерахунок вийшов за бюджет ПРД-13 (`RecalculationBudgetMonitor`, `JobsHealthCheck`) ──
+    -- Конверт у `itg.JobProgress.Message` успішної задачі: `{seconds}` — тривалість, `{limit}` — поріг `Calculations:FullYearWarnSeconds`.
+    (N'jobs.recalcOverBudget',                  N'en', N'Recalculation finished in {seconds} s, over the {limit} s budget. Check the database load and the recalculation worker pool.', 1),
+    (N'health.jobs.recalcOverBudget',           N'en', N'Recalculation jobs that ran over the time budget in the last 24 hours: {count}. See the job list for the duration.', 1),
+    -- D16:recalc-budget ── кінець секції ──
     (N'health.sources.notRegistered',          N'en', N'The collection store is not registered in the container.', 1),
     (N'health.sources.noneActive',              N'en', N'No active collection sources.', 1),
     (N'health.sources.failedCount',             N'en', N'Sources with a failed last run: {count}.', 1),

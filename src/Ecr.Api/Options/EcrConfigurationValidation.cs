@@ -66,6 +66,9 @@ public static partial class EcrConfigurationValidation
         ("Calculations:MaxParallelism", 1),
         ("Calculations:MaxInputCellsPerBinding", 1),
 
+        // ПРД-13: поріг сигналу «перерахунок довший за бюджет»; нуль зробив би сигналом кожну задачу.
+        (Ecr.Infrastructure.Jobs.RecalculationBudgetOptions.WarnSecondsKey, 1),
+
         // U17: частіше за 5 с експорт лише навантажує сервер і колектор.
         (Ecr.Api.Observability.TelemetrySetup.ExportIntervalKey, Ecr.Api.Observability.TelemetrySetup.MinExportIntervalSeconds),
     ];
