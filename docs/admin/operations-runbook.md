@@ -778,6 +778,84 @@ Msg 50301 … Передперевірка U1: оновлення зупинен
 Гілку індексу без `ONLINE` тест виконує наживо на Developer, підставляючи
 редакцію 4. Справжнього Standard чи Express у перевірці не було.
 
+### 8.3. Міграція Q222: помилка 50222 «Передперевірка Q222» (дублі під унікальні індекси)
+
+**Кого стосується.** Бази, розгорнуті до міграції
+`20260910231342_Q222MissingForeignKeysAndConstraints` (10.09.2026) і ще не
+оновлені. Нові бази й бази, де Q222 уже застосовано, цю перевірку не бачать.
+
+**Що робить міграція (щодо унікальності).** Три унікальні індекси на наявних
+таблицях:
+
+| Індекс | Таблиця | Ключ |
+|---|---|---|
+| `UQ_RoleAssignment_Sid` (фільтр `PrincipalSid IS NOT NULL`) | `sec.RoleAssignment` | `(PrincipalSid, RoleId)` |
+| `UQ_RoleAssignment_User` (фільтр `UserId IS NOT NULL`) | `sec.RoleAssignment` | `(UserId, RoleId)` |
+| `UQ_MethodologyConstant` | `calc.MethodologyConstant` | `(MethodologyVersionId, Code, ISNULL(Category, ''), ISNULL(ValidFrom, 1900-01-01))` |
+
+До Q222 база цих ключів не тримала. Дубль SQL Server відхилив би на
+`CREATE UNIQUE INDEX` помилкою `1505` без переліку. Перевірка йде **першою
+командою міграції, до зміни схеми**:
+
+```
+Msg 50222 … Передперевірка Q222: оновлення зупинено ДО зміни схеми. …
+Дублі (кількість груп; перші групи):
+  UQ_RoleAssignment_Sid (sec.RoleAssignment): 1 груп; (SID S-1-5-21-…, роль 3) x2
+  UQ_MethodologyConstant (calc.MethodologyConstant): 1 груп; (версія методології 7, код K1, категорія , діє з 1900-01-01) x2
+Схему й дані не змінено, автоматичного видалення немає. …
+```
+
+Показано до десяти груп на індекс. Після помилки `deploy-ecr.ps1` зупиняється на
+кроці 2/7. MSI не ставиться, стара версія лишається робочою.
+
+**Чому перевірка не видаляє дублі сама.** Яка з двох констант чи призначень
+правильна, залежить від змісту: у константах різні `Value`, `UnitId` й
+`TextValue` дають різні розрахунки. Тихе видалення змінило б результати без
+помилки.
+
+**Що робити.**
+
+1. `Stop-Service EcrApi`, повний бекап (п. 6.2).
+2. Повний перелік дублів (кожен запит має повернути порожньо, коли все чисто):
+
+   ```sql
+   -- призначення ролі групі AD
+   SELECT PrincipalSid, RoleId, COUNT(*) AS Cnt, MIN(Id) AS FirstId, MAX(Id) AS LastId
+   FROM sec.RoleAssignment WHERE PrincipalSid IS NOT NULL
+   GROUP BY PrincipalSid, RoleId HAVING COUNT(*) > 1;
+
+   -- призначення ролі особі
+   SELECT UserId, RoleId, COUNT(*) AS Cnt, MIN(Id) AS FirstId, MAX(Id) AS LastId
+   FROM sec.RoleAssignment WHERE UserId IS NOT NULL
+   GROUP BY UserId, RoleId HAVING COUNT(*) > 1;
+
+   -- константи методології (Category і ValidFrom необов'язкові: NULL = порожньо / 1900-01-01)
+   SELECT MethodologyVersionId, Code, ISNULL(Category, N'') AS Category,
+          ISNULL(ValidFrom, CONVERT(date, '19000101', 112)) AS ValidFrom, COUNT(*) AS Cnt
+   FROM calc.MethodologyConstant
+   GROUP BY MethodologyVersionId, Code, ISNULL(Category, N''), ISNULL(ValidFrom, CONVERT(date, '19000101', 112))
+   HAVING COUNT(*) > 1;
+   ```
+
+3. Для кожної групи подивіться всі її рядки (`SELECT * FROM … WHERE <ключ>`) і
+   лишіть один.
+   - `sec.RoleAssignment`: рядки з однаковою особою чи групою й роллю
+     рівнозначні, якщо збігаються `ScopeJson`, `ValidFrom` і `ValidTo`. Тоді видаліть
+     зайві: `DELETE FROM sec.RoleAssignment WHERE Id IN (…)`. Якщо ці стовпці
+     різні, це не дубль за змістом: обговоріть із власником ролі, перш ніж
+     видаляти.
+   - `calc.MethodologyConstant`: порівняйте `Value`, `TextValue`, `UnitId`, `ValidTo`.
+     Лишіть той, який застосовує розрахунок (`calc.CalculationInput`/`CalculationStep`
+     посилаються на константи за кодом); якщо значення різні, рішення за методологом.
+     Ідентичні рядки видаляйте.
+4. Повторіть запити з кроку 2: порожньо.
+5. Звичайне розгортання (п. 8, крок 2). `migration.sql` ідемпотентний.
+
+⛔ Не редагуйте міграцію й не знімайте індекс, щоб «пройти» перевірку.
+
+✎ 2026-09-30: передперевірку й обидва шляхи застосування (`MigrateAsync` і
+`migration.sql --idempotent`) тримає тест `Q222UniquePrecheckTests`.
+
 ## 9. Відкат
 
 Окремого механізму відкату в коді **немає**. Міграції EF назад не застосовуються,
