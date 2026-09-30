@@ -84,16 +84,16 @@ public static partial class StartupSequence
         await new SeedRunner(db, logger).RunAsync(CancellationToken.None).ConfigureAwait(false);
         LogSeedDone(logger);
 
-        // 4b) Вʼюхи rpt.v_* для SSRS (ФВ-10.2, ФВ-10.4). ⚠ ПІСЛЯ seed: seed
-        //     заводить опубліковану державну форму, і без цього кроку чиста
-        //     база мала б звіт, який SSRS прочитати не може. Процедура
-        //     ідемпотентна — незмінні вʼюхи не чіпає. ⚠ Відмова — попередження,
-        //     а не зупинка старту: вʼюхи потрібні SSRS, а не застосунку, і
-        //     зламаний опис одного звіту не має гасити всю систему.
+        // 4b) Вʼюхи сирих даних rpt.v_* для SSRS (ФВ-10.2, ФВ-10.4) по
+        //     кожній таблиці опублікованих версій шаблонів. ⚠ ПІСЛЯ seed і на
+        //     кожному старті: так вʼюхи отримують і версії, опубліковані до
+        //     появи генератора, і база після оновлення. Процедура ідемпотентна —
+        //     незмінні вʼюхи не чіпає. ⚠ Відмова — попередження, а не зупинка
+        //     старту: вʼюхи потрібні SSRS, а не застосунку.
         try
         {
             await scope.ServiceProvider.GetRequiredService<IReportViewGenerator>()
-                .GenerateAsync(reportDefId: null, CancellationToken.None).ConfigureAwait(false);
+                .GenerateAsync(templateVersionId: null, CancellationToken.None).ConfigureAwait(false);
         }
         catch (SqlException ex)
         {
@@ -276,8 +276,8 @@ public static partial class StartupSequence
     private static partial void LogSeedDone(ILogger logger);
 
     [LoggerMessage(Level = LogLevel.Warning,
-        Message = "Старт: вʼюхи rpt.v_* не згенеровано: {Error}. SSRS не бачить нових версій звітів, "
-            + "доки DBA не виконає EXEC rpt.usp_GenerateReportViews.")]
+        Message = "Старт: вʼюхи rpt.v_* не згенеровано: {Error}. SSRS не бачить нових версій шаблонів, "
+            + "доки DBA не виконає EXEC rpt.usp_GenerateTemplateViews.")]
     private static partial void LogReportViewsFailed(ILogger logger, string error);
 
     [LoggerMessage(

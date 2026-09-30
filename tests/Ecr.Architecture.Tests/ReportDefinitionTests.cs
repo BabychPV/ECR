@@ -62,7 +62,15 @@ public sealed partial class ReportDefinitionTests
         var views = File.ReadAllText(Path.Combine(
             SolutionRoot(), "src", "Ecr.Infrastructure", "Persistence", "Sql", "05-rpt-views.sql"));
 
-        foreach (Match view in ViewRegex.Matches(views))
+        // ⚠ Правило — про вʼюхи ЗРІЗІВ (`rpt.ReportSnapshot`). Шар сирих даних
+        // документів (`rpt.v_DocumentCells`, рішення людини 2026-09-30: «для
+        // SSRS ми маємо просто підготувати сирі дані») віддає статус аркуша
+        // КОЛОНКОЮ: сирі дані — усі, а звіт регулятору обирає статус сам.
+        var snapshotViews = ViewRegex.Matches(views)
+            .Where(v => v.Groups["body"].Value.Contains("rpt.ReportSnapshot", StringComparison.Ordinal))
+            .ToList();
+
+        foreach (var view in snapshotViews)
         {
             var body = view.Groups["body"].Value;
 
@@ -79,7 +87,7 @@ public sealed partial class ReportDefinitionTests
 
         // Порожній файл теж пройшов би цикл — а він означав би, що регулятор
         // не бачить нічого.
-        Assert.NotEmpty(ViewRegex.Matches(views));
+        Assert.NotEmpty(snapshotViews);
     }
 
     private static string SolutionRoot()
