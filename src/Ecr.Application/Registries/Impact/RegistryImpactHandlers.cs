@@ -68,8 +68,13 @@ public sealed class GetRegistryImpactHandler(
         var definition = await registries.FindDefinitionAsync(code, ct).ConfigureAwait(false)
             ?? throw RegistryAccess.NotFound(code);
 
+        // ⛔ S18: лише документи, які викликач БАЧИТЬ і де має право на результати, — фільтр іде у
+        // вибірку, до стелі. Роль без області дає право всюди, але без гранта на проєкт (чи з
+        // забороною) документи проєкту невидимі: перелік розкривав би їх бізнес-ключі.
+        var projects = Documents.ListDocumentsHandler.ReadableProjects(profile, CalculationPermission);
+
         var rows = await impact
-            .ListImpactedAsync(definition.Id, IRegistryImpactStore.MaxRows, ct)
+            .ListImpactedAsync(definition.Id, projects, IRegistryImpactStore.MaxRows, ct)
             .ConfigureAwait(false);
 
         // ⚠ Групування по «документ × період»: документ, зачеплений двома методологіями, — один
@@ -79,8 +84,10 @@ public sealed class GetRegistryImpactHandler(
 
         foreach (var row in rows)
         {
-            // ⛔ Право саме в проєкті документа (ФВ-6.14), а не «десь».
-            if (!PermissionCheck.IsGrantedIn(profile, CalculationPermission, row.ProjectId))
+            // ⛔ Право саме в проєкті документа (ФВ-6.14), а не «десь», і видимість документа (S18) —
+            // другий рубіж після фільтра вибірки.
+            if (!profile.SeesDocumentsOf(row.ProjectId)
+                || !PermissionCheck.IsGrantedIn(profile, CalculationPermission, row.ProjectId))
             {
                 continue;
             }

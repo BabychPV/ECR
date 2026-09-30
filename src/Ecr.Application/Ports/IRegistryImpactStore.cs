@@ -23,6 +23,10 @@ public interface IRegistryImpactStore
     /// документ уже свіжий і в перелік не входить.
     /// </summary>
     /// <param name="registryDefId">Довідник.</param>
+    /// <param name="projectIds">
+    /// Проєкти, документи яких можна повертати; <c>null</c> — усі (лише для задачі в черзі, яка не знає
+    /// користувача й звіряє вже перевірений набір).
+    /// </param>
     /// <param name="take">Скільки рядків узяти щонайбільше (не більше <see cref="MaxRows"/>).</param>
     /// <param name="ct">Токен скасування.</param>
     /// <returns>Рядки, впорядковані за документом і періодом; один рядок на методологію.</returns>
@@ -30,8 +34,14 @@ public interface IRegistryImpactStore
     /// ⛔ Закриті періоди тут НЕ повертаються взагалі (<c>D-39</c>): їх не перераховують
     /// автоматично, і пропонувати їх у переліку означало б обіцяти дію, якої не буде.
     /// <see cref="PeriodState.Scheduled"/> теж поза переліком — чисел там ще немає.
+    /// <para>
+    /// ⛔ Фільтр <paramref name="projectIds"/> — у ЗАПИТІ, до стелі <paramref name="take"/> (S18): обрізання до
+    /// фільтра давало порожній перелік, коли перші рядки належали чужим проєктам, а ознака «обрізано»
+    /// розкривала, що документів у невидимих проєктах більше за стелю.
+    /// </para>
     /// </remarks>
-    public Task<IReadOnlyList<RegistryImpactRow>> ListImpactedAsync(int registryDefId, int take, CancellationToken ct);
+    public Task<IReadOnlyList<RegistryImpactRow>> ListImpactedAsync(
+        int registryDefId, IReadOnlyCollection<int>? projectIds, int take, CancellationToken ct);
 }
 
 /// <summary>Один зачеплений документ у періоді, через одну методологію.</summary>

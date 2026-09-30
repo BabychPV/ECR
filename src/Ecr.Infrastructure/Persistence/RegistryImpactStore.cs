@@ -28,10 +28,15 @@ public sealed class RegistryImpactStore(EcrDbContext db) : IRegistryImpactStore
     /// </para>
     /// </remarks>
     public async Task<IReadOnlyList<RegistryImpactRow>> ListImpactedAsync(
-        int registryDefId, int take, CancellationToken ct)
+        int registryDefId, IReadOnlyCollection<int>? projectIds, int take, CancellationToken ct)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(take);
         var limit = Math.Min(take, IRegistryImpactStore.MaxRows);
+
+        if (projectIds is { Count: 0 })
+        {
+            return [];
+        }
 
         var changedAt = await db.RegistryDefs.AsNoTracking()
             .Where(r => r.Id == registryDefId)
@@ -51,7 +56,7 @@ public sealed class RegistryImpactStore(EcrDbContext db) : IRegistryImpactStore
                 on use.SourceId equals result.MethodologyVersionId
             join run in db.CalculationRuns.AsNoTracking() on result.CalculationRunId equals run.Id
             where run.Status == CalculationRun.CurrentStatus && run.StartedAt < changedAt
-            join document in db.Documents.AsNoTracking() on result.DocumentId equals document.Id
+            join document in Visible(projectIds) on result.DocumentId equals document.Id
             join period in db.Periods.AsNoTracking()
                 on new { document.ProjectId, result.PeriodKey }
                 equals new { period.ProjectId, PeriodKey = period.PeriodKeyValue }
@@ -77,5 +82,18 @@ public sealed class RegistryImpactStore(EcrDbContext db) : IRegistryImpactStore
 
         return [.. rows.Select(r => new RegistryImpactRow(
             r.Id, r.BusinessKey, r.ProjectId, r.PeriodKey, r.State, r.MethodologyCode))];
+    }
+
+    /// <summary>Документи дозволених проєктів — фільтр іде в SQL, до <c>TOP</c> (S18).</summary>
+    private IQueryable<Ecr.Domain.Entities.Documents.Document> Visible(IReadOnlyCollection<int>? projectIds)
+    {
+        var documents = db.Documents.AsNoTracking();
+        if (projectIds is null)
+        {
+            return documents;
+        }
+
+        var ids = projectIds.ToList();
+        return documents.Where(d => ids.Contains(d.ProjectId));
     }
 }

@@ -18,7 +18,8 @@ namespace Ecr.Infrastructure.Tests.Persistence;
 /// прибрати <c>run.Status == Current</c> → <see cref="Застарілий_прогін_не_рахується"/> червоний;
 /// прибрати фільтр <c>SourceKind</c> → <see cref="Ребро_шаблону_чи_правила_не_дає_зачепленості"/> червоний;
 /// прибрати <c>run.StartedAt &lt; DataChangedAt</c> → <see cref="Перерахований_після_правки_документ_не_зачеплений"/>
-/// і <see cref="Довідник_без_правок_нічого_не_зачепив"/> червоні.
+/// і <see cref="Довідник_без_правок_нічого_не_зачепив"/> червоні; прибрати фільтр проєктів у запиті (S18) →
+/// <see cref="Фільтр_проєктів_застосовується_до_стелі"/> червоний.
 /// </remarks>
 [Collection("SqlServer")]
 public sealed class RegistryImpactStoreTests(SqlServerFixture sql)
@@ -129,10 +130,33 @@ public sealed class RegistryImpactStoreTests(SqlServerFixture sql)
         Assert.NotEmpty(await ImpactAsync(f.RegistryId));
     }
 
+    /// <summary>
+    /// S18: фільтр проєктів — у SQL, до стелі. Документ невидимого проєкту стоїть ПЕРШИМ у порядку
+    /// (менший Id), тож обрізання до фільтра з <c>take = 1</c> дало б порожній перелік.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Фільтр_проєктів_застосовується_до_стелі()
+    {
+        var hidden = await ArrangeAsync(PeriodState.Open);
+        var visible = await ArrangeAsync(PeriodState.Open, registryId: hidden.RegistryId);
+        Assert.True(hidden.Document.DocumentId < visible.Document.DocumentId);
+        Assert.NotEqual(hidden.Document.ProjectId, visible.Document.ProjectId);
+
+        await using var db = Context();
+        var rows = await new RegistryImpactStore(db).ListImpactedAsync(
+            visible.RegistryId, [visible.Document.ProjectId], 1, CancellationToken.None);
+
+        Assert.Equal(visible.Document.DocumentId, Assert.Single(rows).DocumentId);
+        Assert.Empty(await new RegistryImpactStore(db).ListImpactedAsync(
+            visible.RegistryId, [], 100, CancellationToken.None));
+    }
+
     private async Task<IReadOnlyList<Ecr.Application.Ports.RegistryImpactRow>> ImpactAsync(int registryId)
     {
         await using var db = Context();
-        return await new RegistryImpactStore(db).ListImpactedAsync(registryId, 100, CancellationToken.None);
+        return await new RegistryImpactStore(db).ListImpactedAsync(registryId, null, 100, CancellationToken.None);
     }
 
     private sealed record Fixture(TestDocument Document, int RegistryId, string MethodologyCode);
@@ -144,7 +168,8 @@ public sealed class RegistryImpactStoreTests(SqlServerFixture sql)
         string runStatus = CalculationRun.CurrentStatus,
         byte useKind = RegistryUse.MethodologyVersionSource,
         int registryChangedMinutesAfterRun = 60,
-        bool registryChanged = true)
+        bool registryChanged = true,
+        int? registryId = null)
     {
         var builder = new TestDocumentBuilder(sql.ConnectionString);
         var document = await builder.BuildAsync();
@@ -167,19 +192,26 @@ public sealed class RegistryImpactStoreTests(SqlServerFixture sql)
             period.TransitionTo(PeriodState.Closed, Now);
         }
 
-        var registry = new RegistryDef(
-            EcrCode.Create($"IR{_tag}"),
-            new LocalizedText(new Dictionary<string, string> { ["en"] = "Registry" }),
-            isTemporal: false);
-        if (registryChanged)
+        // registryId — другий документ того самого довідника (власний проєкт і методологія).
+        var registry = registryId is { } existing
+            ? await db.RegistryDefs.SingleAsync(r => r.Id == existing)
+            : new RegistryDef(
+                EcrCode.Create($"IR{_tag}"),
+                new LocalizedText(new Dictionary<string, string> { ["en"] = "Registry" }),
+                isTemporal: false);
+        if (registryId is null)
         {
-            registry.MarkDataChanged(Now.AddMinutes(registryChangedMinutesAfterRun));
+            if (registryChanged)
+            {
+                registry.MarkDataChanged(Now.AddMinutes(registryChangedMinutesAfterRun));
+            }
+
+            db.RegistryDefs.Add(registry);
         }
 
-        db.RegistryDefs.Add(registry);
-
         var methodology = new Methodology(
-            EcrCode.Create($"IM_{_tag}"), new LocalizedText(new Dictionary<string, string> { ["en"] = "m" }));
+            EcrCode.Create($"IM_{_tag}{(registryId is null ? string.Empty : "_2")}"),
+            new LocalizedText(new Dictionary<string, string> { ["en"] = "m" }));
         db.Methodologies.Add(methodology);
         await db.SaveChangesAsync();
 

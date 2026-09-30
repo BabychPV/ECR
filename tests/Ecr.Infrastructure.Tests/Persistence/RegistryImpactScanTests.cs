@@ -77,7 +77,7 @@ public sealed class RegistryImpactScanTests(SqlServerFixture sql)
         // Поведінка запиту не змінилась (один документ), а читання шляху доступу «версія → результати»
         // міряються окремо: на малій тестовій базі оптимізатор може вести повний запит від документа
         // (seek по `IX_CalculationResult_Lookup`), тож лише доступ за версією прив'язаний до індексу однозначно.
-        Assert.Single(await new RegistryImpactStore(db).ListImpactedAsync(registry.Id, 100, CancellationToken.None));
+        Assert.Single(await new RegistryImpactStore(db).ListImpactedAsync(registry.Id, null, 100, CancellationToken.None));
         var before = await ReadsAsync(targetVersion.Id);
         Assert.Equal(1, before.Rows);
 
@@ -90,7 +90,7 @@ public sealed class RegistryImpactScanTests(SqlServerFixture sql)
         Assert.True(
             after.Reads <= before.Reads + Slack,
             $"Доступ за версією методології: читань {before.Reads} -> {after.Reads} після {ForeignRows} чужих результатів.");
-        Assert.Single(await new RegistryImpactStore(db).ListImpactedAsync(registry.Id, 100, CancellationToken.None));
+        Assert.Single(await new RegistryImpactStore(db).ListImpactedAsync(registry.Id, null, 100, CancellationToken.None));
     }
 
     /// <summary>Доступ запиту виміру до результатів і його логічні читання (<c>sys.dm_exec_sessions.logical_reads</c>).</summary>

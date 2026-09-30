@@ -36,8 +36,9 @@ public sealed class RegistryImpactRecalculationJob(
 
         await progress.ReportKeyAsync(10, "jobs.registryImpactReading", ct).ConfigureAwait(false);
 
+        // Усі проєкти: набір уже перевірено правами людини в обробнику, задача лише звіряє його зі станом.
         var rows = await impact
-            .ListImpactedAsync(request.RegistryDefId, IRegistryImpactStore.MaxRows, ct)
+            .ListImpactedAsync(request.RegistryDefId, projectIds: null, IRegistryImpactStore.MaxRows, ct)
             .ConfigureAwait(false);
 
         // Документ × період: одна методологія — один рядок, а перерахунок від неї не залежить.

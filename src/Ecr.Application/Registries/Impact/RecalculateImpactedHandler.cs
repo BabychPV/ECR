@@ -89,12 +89,17 @@ public sealed class RecalculateImpactedHandler(
         var definition = await registries.FindDefinitionAsync(code, ct).ConfigureAwait(false)
             ?? throw RegistryAccess.NotFound(code);
 
+        // ⛔ S18: набір — лише з проєктів, документи яких викликач БАЧИТЬ. Невидимий документ для нього
+        // відсутній: явно названий, він дає ту саму 422 «не зачеплений», що й неіснуючий, а не 403,
+        // яка підтверджувала б його існування. Видимий без права — 403 з причиною, як і було.
+        var visible = Documents.ListDocumentsHandler.VisibleProjects(profile);
+
         var rows = await impact
-            .ListImpactedAsync(definition.Id, IRegistryImpactStore.MaxRows, ct)
+            .ListImpactedAsync(definition.Id, visible, IRegistryImpactStore.MaxRows, ct)
             .ConfigureAwait(false);
 
         var projectOf = new Dictionary<long, int>();
-        foreach (var row in rows)
+        foreach (var row in rows.Where(r => profile.SeesDocumentsOf(r.ProjectId)))
         {
             projectOf[row.DocumentId] = row.ProjectId;
         }

@@ -161,9 +161,21 @@ public sealed class ListDocumentsHandler(
     /// </remarks>
     internal static HashSet<int> ReadableProjects(AccessProfile profile, string permission)
     {
+        var ids = VisibleProjects(profile);
+        ids.RemoveWhere(id => !PermissionCheck.IsGrantedIn(profile, permission, id));
+        return ids;
+    }
+
+    /// <summary>
+    /// Проєкти, документи яких профіль БАЧИТЬ (<see cref="AccessProfile.SeesDocumentsOf"/>), без
+    /// жодного проєктного права — для шляхів, де видимий документ без права дає <c>403</c> із причиною,
+    /// а невидимий відсутній (B-08).
+    /// </summary>
+    /// <param name="profile">Профіль.</param>
+    internal static HashSet<int> VisibleProjects(AccessProfile profile)
+    {
         var ids = ReadableProjects(profile);
         ids.UnionWith(profile.Scoped.Keys.Where(profile.SeesDocumentsOf));
-        ids.RemoveWhere(id => !PermissionCheck.IsGrantedIn(profile, permission, id));
         return ids;
     }
 

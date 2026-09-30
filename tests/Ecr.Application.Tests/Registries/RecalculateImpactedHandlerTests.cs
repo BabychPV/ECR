@@ -21,6 +21,9 @@ namespace Ecr.Application.Tests.Registries;
 /// Мутаційні докази: прибрати перевірку «документ є в impact» → <see cref="Документ_поза_переліком_зачеплених_відмовляється_422"/>
 /// червоний; замінити <c>EnqueueCoalescedAsync</c> на <c>EnqueueExclusiveAsync</c> → <see cref="Ставиться_одна_задача_злиттям_без_витіснення"/>
 /// червоний; прибрати <c>RequireIn</c> → <see cref="Явний_документ_чужого_проєкту_це_403"/> червоний.
+/// S18: передати сховищу <c>null</c> замість видимих проєктів →
+/// <see cref="Сховище_отримує_видимі_проєкти_а_не_лише_ті_де_є_право"/> червоний; прибрати <c>SeesDocumentsOf</c>
+/// з постфільтра → <see cref="Невидимий_документ_відсутній_навіть_коли_сховище_його_віддало"/> червоний.
 /// </remarks>
 public sealed class RecalculateImpactedHandlerTests
 {
@@ -29,6 +32,7 @@ public sealed class RecalculateImpactedHandlerTests
     private const string Code = "COMPONENT";
     private const int MyProject = 10;
     private const int OtherProject = 11;
+    private const int HiddenProject = 12;
 
     private readonly IRegistryStore _registries = Substitute.For<IRegistryStore>();
     private readonly IRegistryImpactStore _impact = Substitute.For<IRegistryImpactStore>();
@@ -148,10 +152,87 @@ public sealed class RecalculateImpactedHandlerTests
         return (RegistryImpactRecalculationRequest)call.GetArguments()[1]!;
     }
 
+    /// <summary>
+    /// S18: документ проєкту, якого викликач не бачить, для нього відсутній — та сама 422 «не зачеплений»,
+    /// що й на неіснуючий, а не 403, яка підтверджувала б, що документ є й залежить від довідника.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    public async Task Явний_невидимий_документ_це_та_сама_422_що_й_неіснуючий()
+    {
+        GlobalRoleProfile();
+        Rows(Row(1, MyProject), Row(3, HiddenProject));
+
+        var hidden = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Handler().HandleAsync(Code, new RecalculateImpactedRequest([3], "r"), default));
+        var missing = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Handler().HandleAsync(Code, new RecalculateImpactedRequest([99], "r"), default));
+
+        Assert.Equal(missing.ErrorCode, hidden.ErrorCode);
+        Assert.Equal(missing.Details!["messageKey"], hidden.Details!["messageKey"]);
+        await _jobs.DidNotReceiveWithAnyArgs().EnqueueCoalescedAsync<IRegistryImpactRecalculationJob>(default!, default, default);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    public async Task Без_documentIds_невидимі_проєкти_не_беруться_навіть_з_правом_без_області()
+    {
+        GlobalRoleProfile();
+        Rows(Row(1, MyProject), Row(3, HiddenProject));
+
+        await Handler().HandleAsync(Code, new RecalculateImpactedRequest(null, "r"), default);
+
+        Assert.Equal([1L], Enqueued().DocumentIds);
+    }
+
+    /// <summary>
+    /// Видимий без права проєкт іде у вибірку (явний документ з нього — 403 з причиною), невидимий — ні.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    public async Task Сховище_отримує_видимі_проєкти_а_не_лише_ті_де_є_право()
+    {
+        await Handler().HandleAsync(Code, new RecalculateImpactedRequest(null, "r"), default);
+
+        await _impact.Received(1).ListImpactedAsync(
+            RegistryId,
+            Arg.Is<IReadOnlyCollection<int>?>(p => p != null && p.Order().SequenceEqual(new[] { MyProject, OtherProject })),
+            IRegistryImpactStore.MaxRows,
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    public async Task Невидимий_документ_відсутній_навіть_коли_сховище_його_віддало()
+    {
+        GlobalRoleProfile();
+        _impact.ListImpactedAsync(
+                RegistryId, Arg.Any<IReadOnlyCollection<int>?>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns([Row(1, MyProject), Row(3, HiddenProject)]);
+
+        var ex = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Handler().HandleAsync(Code, new RecalculateImpactedRequest([3], "r"), default));
+
+        Assert.Equal("err.ECR-REG-0422.impactDocumentNotAffected", ex.Details!["messageKey"]);
+    }
+
     private RecalculateImpactedHandler Handler() => new(_registries, _impact, _jobs, _access, _user);
 
+    /// <summary>Сховище, що поводиться як справжнє: фільтр проєктів — до стелі.</summary>
     private void Rows(params RegistryImpactRow[] rows)
-        => _impact.ListImpactedAsync(RegistryId, Arg.Any<int>(), Arg.Any<CancellationToken>()).Returns(rows);
+        => _impact.ListImpactedAsync(
+                RegistryId, Arg.Any<IReadOnlyCollection<int>?>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(ci => Task.FromResult<IReadOnlyList<RegistryImpactRow>>(
+                [.. rows.Where(r => ci.ArgAt<IReadOnlyCollection<int>?>(1) is not { } p || p.Contains(r.ProjectId))]));
+
+    /// <summary>Обидва права ролями без області, грант читання — лише на <see cref="MyProject"/>.</summary>
+    private void GlobalRoleProfile()
+        => _access.BuildProfileAsync(UserId, Arg.Any<CancellationToken>()).Returns(
+            new AccessBuilder { UserId = UserId }
+                .Permission("Registry.View")
+                .Permission("Calculation.Recalculate")
+                .Grant(ResourceKind.Project, MyProject, GrantLevel.Read)
+                .Build());
 
     private static RegistryImpactRow Row(long doc, int project)
         => new(doc, $"DOC{doc}", project, 202601, PeriodState.Open, "HSE301");
@@ -159,7 +240,11 @@ public sealed class RecalculateImpactedHandlerTests
     /// <summary><c>Registry.View</c> глобально, <c>Calculation.Recalculate</c> — лише в одному проєкті.</summary>
     private void Profile()
     {
-        var basic = new AccessBuilder().Permission("Registry.View").Build();
+        var basic = new AccessBuilder()
+            .Permission("Registry.View")
+            .Grant(ResourceKind.Project, MyProject, GrantLevel.Read)
+            .Grant(ResourceKind.Project, OtherProject, GrantLevel.Read)
+            .Build();
         var scoped = new AccessProfile
         {
             CacheKey = basic.CacheKey,
