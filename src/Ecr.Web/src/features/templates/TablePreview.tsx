@@ -21,7 +21,7 @@ import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import type { ConditionalRule } from './conditionalFormat';
 import type { ConditionalFormatRuleDto } from './conditionalFormatApi';
 import { dataTypeLabel, rowKindLabel } from './enumLabels';
-import { buildTablePreview, cellLook, previewCellLook, type PreviewColumn } from './tablePreview';
+import { buildTablePreview, cellLook, previewCellLook, type PreviewColumn } from './tablePreviewModel';
 
 /**
  * Ключ правил версії для перегляду. ⚠ Локальний і окремий від ключа редактора

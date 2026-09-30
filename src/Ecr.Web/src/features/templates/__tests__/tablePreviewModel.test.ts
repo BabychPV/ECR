@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { TableDto } from '@/api/types';
 import { themeSurface } from '@/shared/theme/theme';
 import type { ConditionalFormatRuleDto } from '../conditionalFormatApi';
-import { buildTablePreview, cellLook, MaxPreviewRows, previewCellLook, ruleOfDto } from '../tablePreview';
+import { buildTablePreview, cellLook, MaxPreviewRows, previewCellLook, ruleOfDto } from '../tablePreviewModel';
 
 /**
  * Модель попереднього перегляду таблиці шаблону (`ФВ-2.6`).
