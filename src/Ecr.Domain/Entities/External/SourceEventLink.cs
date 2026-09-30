@@ -285,6 +285,23 @@ public sealed class SourceEventLink : Entity<long>
         LastSyncAt = nowUtc;
     }
 
+    /// <summary>
+    /// Джерело перестворило подію з новим ID: зв'язок (і його рядок) лишається, ключем стає новий ID
+    /// (HSE301 A5b — EFID лише кеш, зіставлення за природним ключем).
+    /// </summary>
+    /// <param name="newSourceEventId">Новий ID події в джерелі.</param>
+    /// <remarks>
+    /// ⚠ <see cref="RowKey"/> НЕ змінюється: рядок — той самий, а ключ <c>EF-…</c> лишається від
+    /// першого ID. Унікальність нового ID в мапінгу (<c>UQ_SEL_Event</c>) гарантує викликач.
+    /// </remarks>
+    public void RekeyTo(string newSourceEventId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(newSourceEventId);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(newSourceEventId.Length, MaxSourceEventIdLength, nameof(newSourceEventId));
+
+        SourceEventId = newSourceEventId;
+    }
+
     private void MoveTo(SourceEventLinkStatus target)
     {
         // Новий зв'язок (FirstSeen…) ще не має стану, з якого переходить: його

@@ -206,6 +206,24 @@ public sealed class SourceEventLinkTests
     public void Таблиця_переходів(SourceEventLinkStatus from, SourceEventLinkStatus to, bool hasRow, bool allowed)
         => Assert.Equal(allowed, SourceEventLink.IsTransitionAllowed(from, to, hasRow));
 
+    /// <remarks>
+    /// Мутаційний доказ (A5b): у <c>RekeyTo</c> замінити присвоєння на <c>RowKey = …</c> — рядок втратить
+    /// ключ від першого ID, і тест червоніє.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Directive", "HSE301-A5b")]
+    public void Перестворена_подія_міняє_ключ_зв_язку_а_рядок_лишається()
+    {
+        var link = Written();
+
+        link.RekeyTo("new-id");
+
+        Assert.Equal(("new-id", "EF-9b1c", (long?)55, SourceEventLinkStatus.Synced), (link.SourceEventId, link.RowKey, link.TableInstanceId, link.Status));
+        Assert.Throws<ArgumentException>(() => link.RekeyTo(" "));
+        Assert.Throws<ArgumentOutOfRangeException>(() => link.RekeyTo(new string('x', SourceEventLink.MaxSourceEventIdLength + 1)));
+    }
+
     private static SourceEventLink Written()
         => SourceEventLink.FirstSeenWritten(Map, Closed(), Row, keptManualJson: null, unmappedJson: null, Now);
 
