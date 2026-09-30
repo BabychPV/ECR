@@ -424,9 +424,9 @@ public sealed partial class EndpointCoverageTests
             "Підпис поля /health/db (FieldLabelKeys)."),
 
         // ⚠ Запасний варіант — сам ідентифікатор (`hasText(key) ? t(key) : name`),
-        // тож перевірка без рядка в сіді не дає `⟦…⟧`; але три відомі — названі тут.
+        // тож перевірка без рядка в сіді не дає `⟦…⟧`; але чотири відомі — названі тут.
         new("pages/admin/HealthPage.tsx", "key", 1, "pages/admin/HealthPage.tsx",
-            ["health.check.db", "health.check.jobs", "health.check.sources"],
+            ["health.check.db", "health.check.jobs", "health.check.sources", "health.check.worker"],
             "Назва картки перевірки стану (checkLabel, U-14): ім'я з AddCheck<…> у Program.cs."),
 
         // ⚠ Ключі — увесь каталог sec.Permission із 09-seed.sql станом на 2026-09-23.
