@@ -2209,6 +2209,21 @@ public interface ISourceEventSyncJob : IBackgroundJob;
 public sealed record SourceEventSyncRequest(int SourceEntityId, DateTime? FromUtc = null, DateTime? ToUtc = null);
 ```
 
+#### `IRowWindowFetchJob`, `IRowWindowTrigger`
+
+Підтягування значень PI за вікном рядка (HSE301 A1, FEATURE-HSE301-VIEW §4.4). Хук `IRowWindowTrigger` — одна точка виклику в `PatchCellsHandler` після запису: коли правка зачепила колонку Початку/Кінця/селектора активної прив'язки (`ext.RowWindowMap`), ставить `IRowWindowFetchJob` — `EnqueueCoalescedAsync` (не `EnqueueExclusiveAsync`) на ціль `RowWindowFetchTarget.Of(tableInstanceId)` (`row-windows-i{id}`). Задача працює на весь екземпляр таблиці й сама відбирає рядки, вікно яких змінилося чи ще не дочитане (тому payload не несе ключів рядків — злиття постановок нічого не губить). Вікно береться з комірок у часі проєкту й переводиться в UTC лише для запиту; запис — через `ICellPatcher.ApplyIntegrationAsync` (ручна правка → `KeptManual`); провенанс — `ext.RowWindowValue`; після запису — один `ICalculationTrigger`. Щогодинний `RowWindowRefetchJob` (конкретний клас, як `PeriodStateJob`) ставить ту саму задачу на екземпляри з неповними чи недочитаними значеннями. `IRowWindowColumnIndex` — знімок колонок вікна (TTL 60 с), щоб хук не додавав звернень до бази на кожен запис.
+
+```csharp
+public interface IRowWindowFetchJob : IBackgroundJob;
+
+public sealed record RowWindowFetchRequest(long TableInstanceId, int PeriodKey);
+
+public interface IRowWindowTrigger
+{
+    public Task RowsChangedAsync(RowWindowChange change, CancellationToken ct);
+}
+```
+
 #### `IMaterializationScheduler`
 
 Постановка матеріалізації PI (D-118) з місця переходу періоду, для якого `PeriodMaterializationTrigger.Requires(before, after)`: `Scheduled → Open/Grace` (відкриття), `Scheduled → … → Closed` за один прогін (задача лишає `SkippedPeriodClosed` у журналі покриття — пропуск не мовчазний), `Closed → Grace` (перевідкриття підхоплює пропущені точки). Викликати лише ПІСЛЯ коміту переходу (`PeriodStateJob`, `ActivateProjectHandler`, `ReopenPeriodHandler`).
@@ -2778,6 +2793,20 @@ public interface IRegistryUseStore
 {
     public Task ReplaceMethodologyUsesAsync(
         int methodologyVersionId, IReadOnlyCollection<RegistryUse> uses, CancellationToken ct);
+}
+```
+
+#### `IRegistryImpactStore`
+
+«Які документи зачепила правка довідника» (RT-25, FEATURE-REGISTRY-TABLES §5.10): документи
+ВІДКРИТИХ періодів (`Open`/`Grace`), чий актуальний прогін дав числа за версією методології, що
+читає довідник (`cfg.RegistryUse`, `SourceKind = 1`). Закриті періоди не повертаються (`D-39`).
+
+```csharp
+public interface IRegistryImpactStore
+{
+    public Task<IReadOnlyList<RegistryImpactRow>> ListImpactedAsync(
+        int registryDefId, int take, CancellationToken ct);
 }
 ```
 
@@ -3788,6 +3817,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/registries/{code}/definition/publish` | `Registry.Publish` | 8 |
 | `GET` | `/api/v1/registries/{code}/history` | `Registry.View` | 8 |
 | `GET` | `/api/v1/registries/{code}/usage` | `Registry.EditDefinition` | 8 |
+| `GET` | `/api/v1/registries/{code}/impact` | `Registry.View` + `Calculation.View` | 8 |
 | `POST` | `/api/v1/registries/{code}/entries/import?dryRun=` | `Registry.EditData` | 8 |
 | `POST` | `/api/v1/registries` | `Registry.EditDefinition` | 8 |
 | `POST` | `/api/v1/registries/{code}/keys/check` | `Registry.EditDefinition` | 8 |

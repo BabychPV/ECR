@@ -34,6 +34,23 @@ public sealed class CacheHitRatioMetricTests
         Assert.Equal(InfrastructureMetrics.AccessProfileCacheName, hit["cache"]);
     }
 
+    /// <remarks>Мутація: прибрати <c>RecordAccessProfileBuild</c> у <c>BuildAsync</c> — червоне; записувати й на влучанні — червоне.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    public async Task Побудова_профілю_дає_один_запис_тривалості_а_профіль_із_кешу_ні()
+    {
+        using var capture = new InfrastructureMetricsCapture();
+        using var memory = new MemoryCache(new MemoryCacheOptions());
+        var cache = new AccessProfileCache(memory);
+
+        await cache.GetOrCreateAsync(7, "s1", "", _ => Task.FromResult(NewProfile()), CancellationToken.None);
+        var build = Assert.Single(capture.Of(InfrastructureMetrics.AccessProfileBuild));
+        Assert.True((double)build["value"]! >= 0);
+
+        await cache.GetOrCreateAsync(7, "s1", "", _ => Task.FromResult(NewProfile()), CancellationToken.None);
+        Assert.Single(capture.Of(InfrastructureMetrics.AccessProfileBuild));
+    }
+
     private static AccessProfile NewProfile()
     {
         var profile = new AccessBuilder { UserId = 7 }.Build();

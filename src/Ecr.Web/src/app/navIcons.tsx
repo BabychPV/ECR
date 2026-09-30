@@ -157,6 +157,18 @@ function MappingIcon(): JSX.Element {
   );
 }
 
+/** Pipeline — три вузли, з'єднані в ланцюг (кроки конвеєра даних). */
+function PipelineIcon(): JSX.Element {
+  return (
+    <Icon>
+      <circle cx="5" cy="12" r="2" />
+      <circle cx="12" cy="12" r="2" />
+      <circle cx="19" cy="12" r="2" />
+      <path d="M7 12h3M14 12h3" />
+    </Icon>
+  );
+}
+
 /** Jobs — шестерня (фонові процеси). */
 function JobsIcon(): JSX.Element {
   return (
@@ -265,6 +277,7 @@ const navIcons: Record<string, () => JSX.Element> = {
   periods: PeriodsIcon,
   sources: SourcesIcon,
   mapping: MappingIcon,
+  pipeline: PipelineIcon,
   jobs: JobsIcon,
   snapshots: SnapshotsIcon,
   audit: AuditIcon,

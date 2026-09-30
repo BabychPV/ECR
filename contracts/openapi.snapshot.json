@@ -9414,6 +9414,71 @@
         ],
         "type": "object"
       },
+      "RegistryImpactItemDto": {
+        "description": "Документ відкритого періоду, зачеплений правкою довідника.",
+        "properties": {
+          "businessKey": {
+            "description": "Бізнес-ключ документа.",
+            "type": "string"
+          },
+          "documentId": {
+            "description": "Документ.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "periodKey": {
+            "description": "Період результатів.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "periodState": {
+            "description": "`Open` або `Grace`.",
+            "type": "string"
+          },
+          "via": {
+            "description": "Через що: `methodology:&lt;код&gt;`, впорядковано.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "documentId",
+          "businessKey",
+          "periodKey",
+          "periodState",
+          "via"
+        ],
+        "type": "object"
+      },
+      "RegistryImpactResponse": {
+        "description": "Відповідь `GET /registries/{code}/impact`.",
+        "properties": {
+          "items": {
+            "description": "Зачеплені документи, які бачить викликач.",
+            "items": {
+              "$ref": "#/components/schemas/RegistryImpactItemDto"
+            },
+            "type": "array"
+          },
+          "total": {
+            "description": "Скільки їх усього (без обрізання переліку, але в межах bool RegistryImpactResponse.Truncated).",
+            "format": "int32",
+            "type": "integer"
+          },
+          "truncated": {
+            "description": "`true` — вибірка вперлась у стелю, реальних документів більше.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "truncated"
+        ],
+        "type": "object"
+      },
       "RegistryKeyCheckRequest": {
         "description": "Запит живої перевірки дублікатів ключа до збереження (§4.5).",
         "properties": {
@@ -29388,6 +29453,88 @@
         ]
       }
     },
+    "/api/v1/registries/{code}/impact": {
+      "get": {
+        "description": "Закриті періоди не повертаються ніколи; перерахунок цей виклик не ставить.",
+        "parameters": [
+          {
+            "description": "Код довідника.",
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistryImpactResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistryImpactResponse"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistryImpactResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Документи ВІДКРИТИХ періодів, чиї результати пораховано методологією, що читає довідник.\nПрава `Registry.View` і `Calculation.View` (у проєкті документа).",
+        "tags": [
+          "RegistryImpact"
+        ]
+      }
+    },
     "/api/v1/registries/{code}/keys/check": {
       "post": {
         "description": "⛔ Той самий алгоритм, що й публікація ключа: «дублікатів немає» тут означає, що публікація\nне відмовить `409 existingDuplicates` на тих самих даних.",
@@ -38334,6 +38481,9 @@
     },
     {
       "name": "RegistryExternalKeys"
+    },
+    {
+      "name": "RegistryImpact"
     },
     {
       "name": "RegistryRows"

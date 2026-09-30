@@ -47,7 +47,11 @@ public sealed partial class PatchCellsHandler(
 
     // ⛔ B-02: довідник одиниць — щоб неіснуюча одиниця в комірці `Unit`
     // відхилялася ДО запису, а не сирим `FK_CellValue_Unit` (`500`).
-    IUnitCatalog units)
+    IUnitCatalog units,
+
+    // ⛔ HSE301 A1: хук підтягування вікон рядків з PI — ОДНА точка виклику нижче, після запису.
+    // Необов'язковий лише для прямого конструювання в тестах запису; контейнер його завжди передає.
+    IRowWindowTrigger? rowWindows = null)
 {
     /// <summary>Застосовує зміни.</summary>
     /// <exception cref="ConcurrencyConflictException">
@@ -163,6 +167,21 @@ public sealed partial class PatchCellsHandler(
         if (!enlist)
         {
             await EnqueueAsync(changes, ct).ConfigureAwait(false);
+        }
+
+        // ⛔ HSE301 A1 (єдина точка): змінені колонки — порту; він сам відсіює все, що не Початок/Кінець/селектор
+        // вікна рядка, без звернень до бази. Після запису: відкат не ставить підтягування.
+        if (rowWindows is not null)
+        {
+            await rowWindows
+                .RowsChangedAsync(
+                    new RowWindowChange(
+                        context.Instance.TableInstanceId,
+                        context.Instance.PeriodKey,
+                        context.Instance.TableDefId,
+                        [.. changes.Upserts.Select(u => u.Address.ColumnDefId).Concat(changes.Deletes.Select(d => d.ColumnDefId)).Distinct()]),
+                    ct)
+                .ConfigureAwait(false);
         }
 
         return await BuildResponseAsync(request, context, changes, messages, recalculationJobId, ct)

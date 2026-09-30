@@ -410,8 +410,8 @@ public sealed partial class EndpointCoverageTests
             [
                 "jobs.kind.recalculation", "jobs.kind.formulaRecalculation", "jobs.kind.excelExport",
                 "jobs.kind.excelImport", "jobs.kind.materializeCollectedData", "jobs.kind.reportSnapshot",
-                "jobs.kind.collection", "jobs.kind.sourceEventSync", "jobs.kind.consistencyCheck",
-                "jobs.kind.orphanScan",
+                "jobs.kind.collection", "jobs.kind.sourceEventSync", "jobs.kind.rowWindowFetch",
+                "jobs.kind.consistencyCheck", "jobs.kind.orphanScan",
             ],
             "Назва типу фонової задачі (KindKeys)."),
 
@@ -561,7 +561,7 @@ public sealed partial class EndpointCoverageTests
     [
         "nav.documents", "password.title", "nav.templates", "version.title", "tables.relationsTitle",
         "nav.registries", "registries.constructor", "nav.methodologies", "methodologies.versionsTitle",
-        "nav.expressions", "nav.units", "nav.security", "nav.periods", "nav.sources", "nav.mapping",
+        "nav.expressions", "nav.units", "nav.security", "nav.periods", "nav.sources", "nav.mapping", "nav.pipeline",
         "nav.jobs", "nav.snapshots", "nav.campaign", "nav.audit", "nav.consistency", "nav.uiStrings",
         "nav.notifications", "nav.health", "nav.myGroups", "documents.title",
     ];

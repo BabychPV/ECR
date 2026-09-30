@@ -28,7 +28,8 @@ internal sealed class InfrastructureMetricsCapture : IDisposable
         {
             if (instrument.Meter.Name == InfrastructureMetrics.MeterName
                 && instrument.Name is InfrastructureMetrics.JobFailed
-                    or InfrastructureMetrics.CacheHit or InfrastructureMetrics.CacheMiss)
+                    or InfrastructureMetrics.CacheHit or InfrastructureMetrics.CacheMiss
+                    or InfrastructureMetrics.AccessProfileBuild)
             {
                 l.EnableMeasurementEvents(instrument);
             }
@@ -46,6 +47,17 @@ internal sealed class InfrastructureMetricsCapture : IDisposable
                 : Equals(map.GetValueOrDefault("job"), jobCode);
             if (mine && value == 1)
             {
+                lock (gate)
+                {
+                    seen.Add((instrument.Name, map));
+                }
+            }
+        });
+        listener.SetMeasurementEventCallback<double>((instrument, value, tags, _) =>
+        {
+            if (jobCode is null && ReferenceEquals(Flow.Value, flowMark))
+            {
+                var map = new Dictionary<string, object?> { ["value"] = value };
                 lock (gate)
                 {
                     seen.Add((instrument.Name, map));

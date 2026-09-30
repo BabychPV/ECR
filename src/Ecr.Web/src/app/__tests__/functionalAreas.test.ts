@@ -19,9 +19,10 @@ import { router } from '@/app/router';
  *  - 15 «Операційний дашборд» — стан (`/admin/health`) і консистентність
  *    (`/admin/consistency`).
  *
- * ⛔ Область 9 «Редактор конвеєра» екрана НЕ МАЄ (`DIRECTIVE-14.md` T-03).
- * Тест це фіксує явно, а не мовчки пропускає рядок: коли екран з'явиться,
- * останнє твердження почервоніє — і область треба перенести в таблицю.
+ * ✎ 2026-09-30: область 9 «Редактор конвеєра» отримала екран
+ * `/admin/pipeline` (`D-235`, `T-03`). До того тест фіксував її відсутність
+ * явним твердженням `leafPath('/admin/pipeline') === '*'` — воно й почервоніло,
+ * щойно маршрут з'явився, і область перенесено в таблицю.
  */
 const areas: readonly (readonly [number, string, readonly string[]])[] = [
   [1, 'Grid-редактор', ['/documents/1']],
@@ -32,6 +33,7 @@ const areas: readonly (readonly [number, string, readonly string[]])[] = [
   [6, 'Workflow, імпорт/експорт, i18n', ['/documents/1', '/admin/ui-strings']],
   [7, "Редактор зв'язків таблиць", ['/admin/templates/1/versions/2/relations']],
   [8, 'Конфігуратор джерел', ['/admin/sources']],
+  [9, 'Редактор конвеєра', ['/admin/pipeline']],
   [10, 'Редактор виразів', ['/admin/expressions']],
   [11, "Правила прив'язки", ['/admin/mapping']],
   [12, 'Періоди і матриця доступу', ['/admin/periods']],
@@ -69,8 +71,7 @@ describe('Склад інтерфейсу: функціональні облас
     // в дереві немає зовсім і перевірка нічого не розрізняє.
     expect(leafPath('/admin/no-such-screen')).toBe('*');
 
-    // 14 з 15: область 9 (редактор конвеєра) відсутня — див. коментар угорі.
-    expect(new Set(areas.map(([number]) => number)).size).toBe(14);
-    expect(leafPath('/admin/pipeline')).toBe('*');
+    // Усі 15 областей `ФВ-14.3` (`09-delivery.md:112`).
+    expect(new Set(areas.map(([number]) => number)).size).toBe(15);
   });
 });
