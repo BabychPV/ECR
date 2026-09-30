@@ -1066,6 +1066,13 @@ powershell -File tools\smoke.ps1 -Server localhost -Database EcrSmokeX -Port 509
 | Л-8 | **Тимчасова** база; доступ до неї прямим SQL (DBA), у т. ч. від імені `db_owner`; в аудиті є хоч один запис (зміна комірки, подія безпеки) | 1) `UPDATE aud.CellChange SET … WHERE …` 2) `DELETE FROM aud.SecurityEvent WHERE …` (те саме для `aud.StructureChange`, `aud.PublicationEvent`) 3) `SELECT name, is_disabled FROM sys.triggers WHERE parent_id IN (SELECT object_id FROM sys.tables WHERE schema_id = SCHEMA_ID('aud'))` 4) для `aud.SimulationSession`: закрити відкритий сеанс (`EndedAt` з `NULL`), потім повторно змінити його й видалити 5) звичайна робота застосунку (запис змін, подій) після пунктів 1–4 | п. 1–2: помилка `50060` («Журнал aud.… незмінний: UPDATE і DELETE заборонені», ФВ-5.21), рядок лишається; п. 3: п'ять тригерів `TR_CellChange_Immutable`, `TR_StructureChange_Immutable`, `TR_SecurityEvent_Immutable`, `TR_PublicationEvent_Immutable`, `TR_SimulationSession_Immutable` увімкнені; п. 4: єдине дозволене оновлення — закриття `EndedAt` з `NULL`, повторна правка й `DELETE` — `50060`; п. 5: `INSERT` працює. ⚠ Свідомо **не** захищено: `aud.ConsistencyIssue` (має життєвий цикл `ResolvedAt`), `TRUNCATE`/`SWITCH`/`SPLIT` партицій (DDL DBA), `DISABLE TRIGGER` (свідома дія DBA); `DENY UPDATE, DELETE ON SCHEMA::aud` система не задає — його може додати DBA. Ці операції виконуйте **лише на тимчасовій базі** | ФВ-5.21 | ✅ (тести `AuditImmutabilityTests`; вручну не пройдено) |
 | Л-9 | Служба з `Telemetry:Enabled=true` і доступним OTLP-колектором (за замовчуванням експорт метрик **вимкнено**, п. 5.2а) | 1) штучний збій задачі до вичерпання ретраїв (Д-6) 2) кілька відкриттів документів (кеш метаданих, кеш профілю доступу) 3) річний/великий перерахунок (Д-7) 4) прочитати метрики в колекторі | метрики `ecr.job.failed` (остаточно провалена задача +1, з тегами), `ecr.cache.hit` / `ecr.cache.miss` (перше читання — промах, повторне — влучання), `ecr.calc.full_year` (тривалість повного перерахунку), `ecr.job.start_latency` (в т. ч. в режимі `Database`/`Worker`). ⚠ **Не** емітуються `ecr.conflict.count` і `ecr.access.profile.build` (оголошені, викликачів нема), глибини черги нема. Емісію доведено тестами з `MeterListener`, на живому OTLP-колекторі — **не перевірено** | ФВ-12.7, ФВ-12.2, НФ-8.6.2, ПРД-13 | 🟨 (ФВ-12.7 закрито частково) |
 
+### 6.13 Нові екрани й можливості 29.09–01.10
+
+Покрокові сценарії для подій PI, конвеєра даних, конструктора й експорту
+довідників, впливу довідника, умовного форматування, переносу версії шаблону,
+імпортів і розрізу ефективного доступу — окремим файлом:
+[TESTER-SCENARIOS-2026-10-01.md](TESTER-SCENARIOS-2026-10-01.md).
+
 ---
 
 ## 7. Відомі обмеження і відкриті питання
