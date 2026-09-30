@@ -2497,7 +2497,7 @@ public sealed partial class PatchCellsHandler(
                           ?? await rowStore.GetRowVersionsAsync(request.TableInstanceId, context.PeriodKey, ct)
                               .ConfigureAwait(false);
 
-        return ToResponse(changes, messages, recalculationJobId, newVersions);
+        return ToResponse(changes, messages, recalculationJobId, newVersions, OutOfWindowKeys(context, changes));
     }
 
     /// <summary>
@@ -2528,7 +2528,8 @@ public sealed partial class PatchCellsHandler(
         CellChangeLists changes,
         List<Validation.ValidationMessage> messages,
         string? recalculationJobId,
-        IReadOnlyDictionary<string, string> newVersions)
+        IReadOnlyDictionary<string, string> newVersions,
+        IReadOnlyList<string>? outOfWindow = null)
     {
         return new PatchCellsResponse(
             AppliedCells: changes.Upserts.Count + changes.Deletes.Count,
@@ -2542,7 +2543,30 @@ public sealed partial class PatchCellsHandler(
 
             // ⚠ `BE-05`: передається ЯК Є, без перетворення порожнього рядка на
             // `null` і навпаки. Джерело значення одне — гілка постановки вище.
-            RecalculationJobId: recalculationJobId);
+            RecalculationJobId: recalculationJobId,
+            OutOfWindow: outOfWindow);
+    }
+
+    /// <summary>
+    /// <c>rowKey:columnCode</c> записаних комірок, позначених <c>Warn</c> поза
+    /// вікном (<c>ФВ-2.16</c>, <c>D-239</c>); порядок стабільний.
+    /// </summary>
+    private static List<string> OutOfWindowKeys(RequestContext context, CellChangeLists changes)
+    {
+        if (context.OutOfWindow.Count == 0)
+        {
+            return [];
+        }
+
+        var codeById = context.Columns.ToDictionary(c => c.Value, c => c.Key);
+        var written = changes.Upserts.Select(u => u.Address).Concat(changes.Deletes).ToHashSet();
+
+        return [.. context.OutOfWindow
+            .Where(a => written.Contains(a)
+                        && changes.RowKeyById.ContainsKey(a.TableRowId)
+                        && codeById.ContainsKey(a.ColumnDefId))
+            .Select(a => $"{changes.RowKeyById[a.TableRowId]}:{codeById[a.ColumnDefId]}")
+            .Order(StringComparer.Ordinal)];
     }
 
     /// <summary>Валідує змінені комірки і правила рівня рядка.</summary>

@@ -149,7 +149,8 @@ public sealed partial class PatchCellsHandler
 
             var versions = (IReadOnlyDictionary<string, string>?)MergedRowVersions(item.Context, applied)
                            ?? await rowStore.GetRowVersionsAsync(item.Id, period, ct).ConfigureAwait(false);
-            responses.Add(ToResponse(applied, item.Messages, recalculationJobId: null, versions));
+            responses.Add(ToResponse(
+                applied, item.Messages, recalculationJobId: null, versions, OutOfWindowKeys(item.Context, applied)));
         }
 
         return responses;

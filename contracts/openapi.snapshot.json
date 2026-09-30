@@ -982,6 +982,11 @@
             "description": "Зміна в `Grace` або після `Reopen` (D-70).",
             "type": "boolean"
           },
+          "isOutOfWindow": {
+            "default": false,
+            "description": "Правка за політикою `Warn` поза вікном доступу (`ФВ-2.16`, `D-239`).",
+            "type": "boolean"
+          },
           "newValue": {
             "description": "Нове значення.",
             "type": [
@@ -7779,6 +7784,16 @@
             "description": "Скільки комірок записано.",
             "format": "int32",
             "type": "integer"
+          },
+          "outOfWindow": {
+            "description": "Адреси `rowKey:columnCode` комірок, записаних за політикою `Warn`\nпоза вікном доступу (`ФВ-2.16`, `D-239`): у журналі вони\nпозначені `IsOutOfWindow`. Порожній — таких не було.",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
           },
           "recalculationJobId": {
             "description": "Ідентифікатор поставленої задачі перерахунку формул; `null` —\nперерахунку НЕ поставлено (`BE-05`).",

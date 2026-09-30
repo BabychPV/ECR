@@ -459,6 +459,12 @@ const CellChangesTable = memo(function CellChangesTable({
                   {t('audit.late')}
                 </Badge>
               )}
+              {/* ФВ-2.16 / D-239: правка за політикою Warn поза вікном доступу. */}
+              {change.isOutOfWindow && (
+                <Badge ml="xs" size="xs" color="statusWarning" variant="outline">
+                  {t('audit.outOfWindow')}
+                </Badge>
+              )}
             </Table.Td>
             {/* ⛔ `R-18`: імена з сервера, а не «user 3 · Document 1 · 2».
                 Номер лишається підказкою (`title`) — фільтри журналу

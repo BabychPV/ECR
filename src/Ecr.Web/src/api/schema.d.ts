@@ -17666,6 +17666,11 @@ export interface components {
             documentNameL10n?: null | components["schemas"]["LocalizedText"];
             /** @description Зміна в `Grace` або після `Reopen` (D-70). */
             isLateEdit: boolean;
+            /**
+             * @description Правка за політикою `Warn` поза вікном доступу (`ФВ-2.16`, `D-239`).
+             * @default false
+             */
+            isOutOfWindow: boolean;
             /** @description Нове значення. */
             newValue: null | string;
             /** @description Старе значення. */
@@ -20739,6 +20744,10 @@ export interface components {
              * @description Скільки комірок записано.
              */
             appliedCells: number;
+            /** @description Адреси `rowKey:columnCode` комірок, записаних за політикою `Warn`
+             *     поза вікном доступу (`ФВ-2.16`, `D-239`): у журналі вони
+             *     позначені `IsOutOfWindow`. Порожній — таких не було. */
+            outOfWindow?: null | string[];
             /** @description Ідентифікатор поставленої задачі перерахунку формул; `null` —
              *     перерахунку НЕ поставлено (`BE-05`). */
             recalculationJobId?: null | string;

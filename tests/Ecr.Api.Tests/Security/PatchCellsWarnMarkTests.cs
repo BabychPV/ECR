@@ -52,6 +52,11 @@ public sealed class PatchCellsWarnMarkTests(SqlServerFixture sql)
         Assert.Equal(11m, await StoredAsync(s, s.MonthColumnId).ConfigureAwait(true));
         Assert.Equal(22m, await StoredAsync(s, s.PlainColumnId).ConfigureAwait(true));
 
+        // Відповідь називає рівно комірку поза вікном (клієнту - для значка).
+        using var json = JsonDocument.Parse(body);
+        var marked = json.RootElement.GetProperty("outOfWindow").EnumerateArray().Select(e => e.GetString()).ToArray();
+        Assert.Equal(new[] { $"{s.RowKey}:{s.MonthColumnCode}" }, marked);
+
         // Позначка лише на комірці поза вікном.
         var monthMarks = await MarksAsync(s, s.MonthColumnId).ConfigureAwait(true);
         Assert.True(monthMarks.SequenceEqual(new[] { true }), string.Join(',', monthMarks));

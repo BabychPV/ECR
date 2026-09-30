@@ -3364,6 +3364,7 @@ USING (VALUES
     (N'audit.cell',                      N'en', N'Row and column', 1),
     (N'audit.origin',                    N'en', N'Origin', 1),
     (N'audit.late',                      N'en', N'late', 1),
+    (N'audit.outOfWindow',               N'en', N'outside window', 1),
     (N'audit.empty',                     N'en', N'No changes in this window', 1),
     (N'audit.emptyHint',                 N'en', N'The window is required: the journal is partitioned by change time, and a query without one would scan every partition.', 1),
 
@@ -13274,6 +13275,17 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- SEC:effective-access ── кінець секції ──
+
+-- COLL:warn ── ru/kz позначки «поза вікном» в журналі змін (ФВ-2.16, D-239); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'audit.outOfWindow', N'ru', N'вне окна'),
+    (N'audit.outOfWindow', N'kz', N'терезеден тыс')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:warn ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t
