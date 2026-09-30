@@ -290,6 +290,7 @@ public sealed class SourceEventsApiTests(SqlServerFixture sql)
             l1.GetProperty("periodKey").GetInt32(),
             l1.GetProperty("tableInstanceId").GetInt64(),
             l1.GetProperty("documentId").GetInt64()));
+        Assert.Equal("PLANT/L1", l1.GetProperty("primaryElement").GetString());
         Assert.Equal("VOLUME", l1.GetProperty("keptManual")[0].GetString());
         Assert.Equal("V99", all.GetProperty("items")[4].GetProperty("unmapped")[0].GetProperty("value").GetString());
 
@@ -527,7 +528,8 @@ public sealed class SourceEventsApiTests(SqlServerFixture sql)
             .Join(db.SourceEventMaps, t => t.DocumentId, m => m.DocumentId, (t, m) => new { t.Id, t.PeriodKeyValue, MapId = m.Id })
             .FirstAsync(x => x.MapId == mapId);
         var now = new DateTime(2026, 2, 5, 9, 0, 0, DateTimeKind.Utc);
-        var observation = new SourceEventObservation(eventId, $"Flaring {eventId}", start, open ? null : start.AddMinutes(15), null);
+        var observation = new SourceEventObservation(
+            eventId, $"Flaring {eventId}", start, open ? null : start.AddMinutes(15), null, $"plant/{eventId}");
 
         SourceEventLink link;
         if (written)

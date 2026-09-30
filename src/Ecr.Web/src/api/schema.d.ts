@@ -22659,6 +22659,8 @@ export interface components {
              * @description Період рядка; `null` — рядка немає.
              */
             periodKey: null | number;
+            /** @description Первинний елемент події (Location/Equipment) у ключовому вигляді — верхній регістр; `null` — не зберігся. */
+            primaryElement: null | string;
             /** @description Ключ рядка (`EF-…`). */
             rowKey: null | string;
             /** @description ID події в джерелі. */

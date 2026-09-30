@@ -114,7 +114,7 @@ public sealed class ListSourceEventsHandlerTests
     {
         var link = SourceEventLink.FirstSeenWritten(
             10,
-            new SourceEventObservation("E1", "Flaring", Start, Start.AddMinutes(15), null),
+            new SourceEventObservation("E1", "Flaring", Start, Start.AddMinutes(15), null, " flare/fl-370 "),
             new SourceEventRowRef(202602, 777, "EF-E1"),
             "[\"VOLUME\"]",
             "[{\"column\":\"CATEGORY\",\"value\":\"V99\"}]",
@@ -133,6 +133,7 @@ public sealed class ListSourceEventsHandlerTests
         Assert.Equal(Start, row.StartUtc);
         Assert.Equal(new DateTimeOffset(2026, 2, 1, 0, 15, 0, TimeSpan.FromHours(5)), row.EndLocal);
         Assert.Equal(("EF-E1", 202602, 777L, "DOC-42"), (row.RowKey, row.PeriodKey, row.TableInstanceId, row.DocumentKey));
+        Assert.Equal("FLARE/FL-370", row.PrimaryElement);
         Assert.Equal(["VOLUME"], row.KeptManual);
         Assert.Equal(new SourceEventUnmappedItem("CATEGORY", "V99"), Assert.Single(row.Unmapped));
         Assert.Equal(1, page.TotalCount);

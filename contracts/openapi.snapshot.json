@@ -13444,6 +13444,13 @@
               "integer"
             ]
           },
+          "primaryElement": {
+            "description": "Первинний елемент події (Location/Equipment) у ключовому вигляді — верхній регістр; `null` — не зберігся.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
           "rowKey": {
             "description": "Ключ рядка (`EF-…`).",
             "type": [
@@ -13507,6 +13514,7 @@
           "sourceEventMapId",
           "sourceEventId",
           "eventName",
+          "primaryElement",
           "status",
           "startUtc",
           "startLocal",

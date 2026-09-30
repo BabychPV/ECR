@@ -23,6 +23,7 @@ public sealed record SourceEventUnmappedItem(string Column, string? Value);
 /// <param name="SourceEventMapId">Мапінг подій.</param>
 /// <param name="SourceEventId">ID події в джерелі.</param>
 /// <param name="EventName">Назва події.</param>
+/// <param name="PrimaryElement">Первинний елемент події (Location/Equipment) у ключовому вигляді — верхній регістр; <c>null</c> — не зберігся.</param>
 /// <param name="Status">Стан синхронізації.</param>
 /// <param name="StartUtc">Початок події, UTC.</param>
 /// <param name="StartLocal">Початок у поясі проєкту (зі зсувом).</param>
@@ -45,6 +46,7 @@ public sealed record SourceEventRowDto(
     int SourceEventMapId,
     string SourceEventId,
     string? EventName,
+    string? PrimaryElement,
     SourceEventLinkStatus Status,
     DateTime StartUtc,
     DateTimeOffset StartLocal,
@@ -211,6 +213,7 @@ public sealed class ListSourceEventsHandler(
             link.SourceEventMapId,
             link.SourceEventId,
             link.EventName,
+            link.PrimaryElement,
             link.Status,
             link.StartUtc,
             Local(link.StartUtc, tz),
