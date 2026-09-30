@@ -1,5 +1,6 @@
 using System.Xml;
 using Ecr.MethodologyImport.Analysis;
+using Ecr.MethodologyImport.Model;
 using Ecr.MethodologyImport.Reporting;
 using Xunit;
 
@@ -37,7 +38,8 @@ public sealed class MethodologyAnalysisTests
         Assert.Equal("Common_X", model.Formulas.First(f => f.Methodology == "Common").Name);
         Assert.Equal("Common", model.Formulas.First(f => f.Name == "Common_X").Methodology);
         Assert.Equal("V1", model.Formulas.First(f => f.Name == "Common_X").MethodologyVersion);
-        Assert.Equal("k1_", model.Constants.Single().Name);
+        Assert.All(model.Constants, c => Assert.Equal("k1_", c.Name));
+        Assert.Equal("CST.k1_", model.Formulas.Single(f => f.Name == "Common_X").Arguments);
         Assert.True(report.TrimmedFields > 0);
         Assert.True(report.TrimmedArgumentTokens >= 3);
         Assert.Equal(1, report.FormulaReferences.Resolved);
@@ -184,13 +186,53 @@ public sealed class MethodologyAnalysisTests
     [Fact]
     public void Невідомі_теги_лічаться_а_не_валять_розбір()
     {
-        var xml = Baseline().Raw("<AFPort><Name>x</Name></AFPort><AFWeird/>").Build()
-            .Replace("<AFElement><Name>Methodologies</Name>", "<AFElement><Name>Methodologies</Name><AFAnalysisRule>r</AFAnalysisRule>", StringComparison.Ordinal);
+        // Відомі, але зайві теги (Description, VersionID, AFAnalysis…) мовчки пропускаються, невідомі — лічаться.
+        var xml = Baseline()
+            .Raw("<AFElement><Name>Odd</Name><AFAnalysisRule>r</AFAnalysisRule><AFAnalysisRule>r</AFAnalysisRule><Foo>1</Foo><AFAnalysis><Name>a</Name></AFAnalysis></AFElement>")
+            .Build();
 
         var report = Analyze(xml);
 
-        Assert.Equal(1, report.Reader.Unrecognized["AFAnalysisRule"]);
+        Assert.Equal(2, report.Reader.Unrecognized["AFAnalysisRule"]);
+        Assert.Equal(1, report.Reader.Unrecognized["Foo"]);
+        Assert.False(report.Reader.Unrecognized.ContainsKey("Description"));
+        Assert.False(report.Reader.Unrecognized.ContainsKey("AFAnalysis"));
         Assert.Equal(2, report.Formulas);
+    }
+
+    [Fact]
+    public void Контейнер_формули_не_є_формулою_а_Rules_і_корінь_методології_пропускаються()
+    {
+        // Реальна структура: Formulas\Ім'я (Formula_El, лише FInfo_Name/MInfo_*) і Formulas\Ім'я\V1 (тіло).
+        var xml = new AfXmlBuilder()
+            .Formula("M", "V1", "F", "", "1")
+            .Raw(AfXmlBuilder.Element("Methodologies\\M\\V1\\Rules\\Rule_001\\V1", "EmissionCalculationWork_Rules_V", AfXmlBuilder.Value("RuleArg_Parameters", "a;b")))
+            .Raw(AfXmlBuilder.Element("Air\\Plant", "Air_Area", AfXmlBuilder.Value("Name", "x")))
+            .Build();
+
+        var report = Analyze(xml);
+
+        Assert.Equal(1, report.Formulas);
+        Assert.Equal(1, report.Reader.FormulaVersionElements);
+        Assert.Equal(1, report.Reader.FormulaContainers);
+        Assert.Equal(1, report.Reader.SkippedMethodologyElements["Rules"]);
+        Assert.Equal(3, report.Reader.SkippedMethodologyElements["(корінь методології)"]); // Methodologies, M, M\V1
+        Assert.Equal(1, report.Reader.ElementsOutsideMethodologies);
+    }
+
+    [Fact]
+    public void Нерезолвне_у_недоступній_формулі_лічиться_окремо_але_лишається_блокером()
+    {
+        var xml = new AfXmlBuilder()
+            .Formula("M", "V1", "On", "!Nope1", "1")
+            .Formula("M", "V1", "Off", "!Nope2", "1", available: "False")
+            .Build();
+
+        var report = Analyze(xml);
+
+        Assert.Equal(2, report.Unresolved.Count);
+        Assert.Equal(1, report.UnresolvedInAvailableFormulas);
+        Assert.True(report.HasBlockers);
     }
 
     [Fact]
@@ -217,32 +259,62 @@ public sealed class MethodologyAnalysisTests
     [Fact]
     public void Методологія_і_версія_розкриваються_з_ConfigString_і_зі_шляху()
     {
-        // MInfo_Version = "%..\..\..\Element%" (версія методології), FInfo_Version = "%Element%" (версія формули);
-        // сміттєвий MInfo_Name на кшталт "..\..\|Status" — не ім'я: береться сегмент шляху.
+        // Вкладена методологія (ECW): ім'я — не другий сегмент шляху, а те, що дає MInfo_Name = "%..\..\..\..\Element%";.
+        // FInfo_UniqueName ('MInfo_Name';_;'FInfo_Name') — обчислюваний String Builder: не використовується.
+        var xml = new AfXmlBuilder()
+            .Formula("EmissionCalculationWork\\ECW_C05_Stationary_Equipment\\ECW_C05_01", "V1", "ECW_EC_gsec", "", "1")
+            .Constant("EmissionCalculationWork\\ECW_C05_Stationary_Equipment\\ECW_C05_01", "V1", "k1_")
+            .Build();
+
+        var (model, report) = AnalyzeCommand.Run(AfXmlBuilder.ToStream(xml));
+
+        var f = Assert.Single(model.Formulas);
+        Assert.Equal("ECW_C05_01", f.Methodology);
+        Assert.Equal("V1", f.MethodologyVersion);
+        Assert.Equal("ECW_EC_gsec", f.Name);
+        Assert.Equal("V1", f.Version);
+        Assert.All(model.Constants, c => Assert.Equal("ECW_C05_01", c.Methodology));
+        Assert.Equal("Common", model.Constants.Single(c => c.HasValue).Category);
+        Assert.Equal(0, report.Reader.MethodologyFromPath);
+        Assert.Equal(0, report.Reader.MethodologyPathMismatch);
+        Assert.True(report.Reader.ResolvedFromConfigString > 0);
+        Assert.Equal(0, report.Reader.ComputedConfigStrings); // потрібні поля розкрито; обчислюваний UniqueName ніхто не читає
+        Assert.Equal(1, report.Methodologies);
+    }
+
+    [Fact]
+    public void Вкладені_AFElement_нескладеного_експорту_теж_читаються()
+    {
         const string xml = """
-            <AFDatabase><AFElement><Name>Methodologies</Name>
+            <AF><AFDatabase><AFElement><Name>Methodologies</Name>
              <AFElement><Name>Common</Name><AFElement><Name>V1</Name><AFElement><Name>Formulas</Name>
               <AFElement><Name>Common_F</Name><AFElement><Name>V1</Name>
-               <AFAttribute><Name>FInfo_Name</Name><ConfigString>%..\Element%</ConfigString></AFAttribute>
-               <AFAttribute><Name>FInfo_Version</Name><ConfigString>%Element%</ConfigString></AFAttribute>
+               <AFAttribute><Name>FInfo_Arguments</Name><Value>CST.k</Value></AFAttribute>
                <AFAttribute><Name>FInfo_Text</Name><Value>1</Value></AFAttribute>
-               <AFAttribute><Name>MInfo_Name</Name><Value>..\..\..\..\|Status</Value></AFAttribute>
-               <AFAttribute><Name>MInfo_Version</Name><ConfigString>%..\..\..\Element%</ConfigString></AFAttribute>
+               <AFAttribute><Name>MInfo_Name</Name><Value>Common</Value></AFAttribute>
+               <AFAttribute><Name>MInfo_Version</Name><Value>V1</Value></AFAttribute>
               </AFElement></AFElement>
              </AFElement></AFElement></AFElement>
-            </AFElement></AFDatabase>
+            </AFElement></AFDatabase></AF>
             """;
 
         var (model, report) = AnalyzeCommand.Run(AfXmlBuilder.ToStream(xml));
 
         var f = Assert.Single(model.Formulas);
-        Assert.Equal("Common", f.Methodology);
-        Assert.Equal("V1", f.MethodologyVersion);
-        Assert.Equal("Common_F", f.Name);
-        Assert.Equal("V1", f.Version);
-        Assert.Equal(3, report.Reader.ResolvedFromConfigString);
-        Assert.Equal(1, report.Reader.MethodologyFromPath);
-        Assert.Equal(0, report.Reader.UnresolvedConfigStrings);
+        Assert.Equal("Common/V1/Common_F/V1", f.Key);
+        Assert.Equal(0, report.Reader.MethodologyFromPath);
+    }
+
+    [Fact]
+    public void Літерал_String_Builder_розкривається_а_складений_вираз_ні()
+    {
+        var path = new[] { "Methodologies", "Common", "V1", "Formulas", "F", "V1" };
+
+        Assert.Equal("V1", MethodologyModelBuilder.ResolveConfig("\"%Element%\";\r\n", path));
+        Assert.Equal("F", MethodologyModelBuilder.ResolveConfig("\"%..\\Element%\";", path));
+        Assert.Equal("Common", MethodologyModelBuilder.ResolveConfig("\"%..\\..\\..\\..\\Element%\";", path));
+        Assert.Null(MethodologyModelBuilder.ResolveConfig("'CInfo_Parameter';_;'CInfo_Gas';", path));
+        Assert.Null(MethodologyModelBuilder.ResolveConfig("\"%..\\..\\..\\..\\..\\..\\..\\Element%\";", path));
     }
 
     [Fact]
@@ -269,7 +341,7 @@ public sealed class MethodologyAnalysisTests
             count++;
         });
 
-        Assert.Equal(5000, count);
+        Assert.Equal(10_003, count); // 5000 × (контейнер + версія) + Methodologies, M, M\V1
         Assert.InRange(positionAtFirst, 1, bytes.Length / 10);
     }
 }

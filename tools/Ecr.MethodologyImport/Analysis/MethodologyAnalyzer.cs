@@ -115,6 +115,7 @@ public static partial class MethodologyAnalyzer
                         if (!string.Equals(formulas[targets[0]].Methodology, f.Methodology, StringComparison.Ordinal))
                         {
                             fCross++;
+                            counters.CrossFormulaRefs++;
                         }
 
                         (edges[i] ??= []).AddRange(targets);
@@ -124,7 +125,7 @@ public static partial class MethodologyAnalyzer
                         counters.Unresolved++;
                         unresolved.Add(new UnresolvedReference(
                             ReferenceKind.Formula, f.Methodology, f.MethodologyVersion, f.Name, f.Version,
-                            name, raw, FormulaHint(f, name, formulaScope, formulasByName, formulas), f.Path));
+                            name, raw, FormulaHint(f, name, formulaScope, formulasByName, formulas), f.Path, f.Available));
                     }
                 }
                 else if (token.StartsWith(ConstantPrefix, StringComparison.Ordinal))
@@ -141,6 +142,7 @@ public static partial class MethodologyAnalyzer
                         if (!inOwn)
                         {
                             cCross++;
+                            counters.LibraryConstantRefs++;
                         }
                     }
                     else
@@ -148,7 +150,7 @@ public static partial class MethodologyAnalyzer
                         counters.Unresolved++;
                         unresolved.Add(new UnresolvedReference(
                             ReferenceKind.Constant, f.Methodology, f.MethodologyVersion, f.Name, f.Version,
-                            name, raw, ConstantHint(name, constantsByName, constantsByParameter), f.Path));
+                            name, raw, ConstantHint(name, constantsByName, constantsByParameter), f.Path, f.Available));
                     }
                 }
                 else
@@ -180,9 +182,9 @@ public static partial class MethodologyAnalyzer
             .ThenBy(u => u.Token, StringComparer.Ordinal)
             .ToList();
 
-        foreach (var c in model.Constants)
+        foreach (var ((methodology, version), names) in constantScope)
         {
-            Counters(perVersion, (c.Methodology, c.MethodologyVersion)).Constants++;
+            Counters(perVersion, (methodology, version)).Constants = names.Count;
         }
 
         foreach (var f in formulas)
@@ -198,7 +200,8 @@ public static partial class MethodologyAnalyzer
                 g.OrderBy(kv => kv.Key.Item2, StringComparer.Ordinal)
                     .Select(kv => new VersionSummary(
                         kv.Key.Item2, kv.Value.Formulas, kv.Value.Constants,
-                        kv.Value.FormulaRefs, kv.Value.ConstantRefs, kv.Value.Unresolved))
+                        kv.Value.FormulaRefs, kv.Value.ConstantRefs, kv.Value.Unresolved,
+                        kv.Value.CrossFormulaRefs, kv.Value.LibraryConstantRefs))
                     .ToList()))
             .ToList();
 
@@ -221,16 +224,19 @@ public static partial class MethodologyAnalyzer
         var reader = new ReaderSummary(
             readStats.Elements, readStats.Attributes, readStats.ElementsWithoutName, readStats.DuplicateAttributes,
             new SortedDictionary<string, long>(readStats.Unrecognized, StringComparer.Ordinal),
-            model.BuildStats.FormulaElements, model.BuildStats.ConstantElements,
-            model.BuildStats.OtherElementsWithAttributes, model.BuildStats.MethodologyFromPath,
-            model.BuildStats.ResolvedFromConfigString, model.BuildStats.UnresolvedConfigStrings);
+            model.BuildStats.FormulaVersionElements, model.BuildStats.FormulaContainers,
+            model.BuildStats.ConstantDefinitions, model.BuildStats.ConstantValueElements,
+            new SortedDictionary<string, long>(model.BuildStats.SkippedMethodologyElements, StringComparer.Ordinal),
+            model.BuildStats.ElementsOutsideMethodologies, model.BuildStats.MethodologyFromPath,
+            model.BuildStats.MethodologyPathMismatch, model.BuildStats.ResolvedFromConfigString,
+            model.BuildStats.ComputedConfigStrings);
 
         return new AnalysisReport(
             Methodologies: byMethodology.Count,
             MethodologyVersions: byMethodology.Sum(m => m.Versions.Count),
             Formulas: formulas.Count,
-            Constants: model.Constants.Count,
-            DistinctConstantNames: constantsByName.Count,
+            Constants: constantScope.Values.Sum(s => s.Count),
+            ConstantValueRows: model.Constants.Count(c => c.HasValue),
             FormulaReferences: new ReferenceTotals(fTotal, fResolved, fTotal - fResolved, fCross),
             ConstantReferences: new ReferenceTotals(cTotal, cResolved, cTotal - cResolved, cCross),
             ParameterArguments: paramArgs,
@@ -240,6 +246,7 @@ public static partial class MethodologyAnalyzer
             DuplicateFormulaKeys: (int)model.BuildStats.DuplicateFormulaKeys,
             ByMethodology: byMethodology,
             Unresolved: orderedUnresolved,
+            UnresolvedInAvailableFormulas: orderedUnresolved.Count(u => u.SourceAvailable),
             UnresolvedTokens: Top(orderedUnresolved.GroupBy(u => Prefix(u.Kind) + u.Token, StringComparer.Ordinal)
                 .ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal)),
             UndeclaredInTextTotal: undeclared.Values.Sum(),
@@ -462,5 +469,7 @@ public static partial class MethodologyAnalyzer
         public int FormulaRefs;
         public int ConstantRefs;
         public int Unresolved;
+        public int CrossFormulaRefs;
+        public int LibraryConstantRefs;
     }
 }

@@ -38,7 +38,7 @@ public static class ReportWriter
 
         sb.AppendLine();
         sb.AppendLine(ci, $"Методологій: {r.Methodologies} (версій: {r.MethodologyVersions})");
-        sb.AppendLine(ci, $"Формул: {r.Formulas}; констант (елементів): {r.Constants}; різних імен констант: {r.DistinctConstantNames}");
+        sb.AppendLine(ci, $"Формул (версійних елементів): {r.Formulas}; констант (імен у версіях методологій): {r.Constants}; рядків значень констант: {r.ConstantValueRows}");
         sb.AppendLine(ci, $"Посилання на формули (!Ім'я): {r.FormulaReferences.Total}, резолвних {r.FormulaReferences.Resolved}, нерезолвних {r.FormulaReferences.Unresolved}, через межу методології {r.FormulaReferences.CrossMethodology}");
         sb.AppendLine(ci, $"Посилання на константи (CST.Ім'я): {r.ConstantReferences.Total}, резолвних {r.ConstantReferences.Resolved}, нерезолвних {r.ConstantReferences.Unresolved}, у бібліотеці {r.ConstantReferences.CrossMethodology}");
         sb.AppendLine(ci, $"Аргументи-параметри (@…): {r.ParameterArguments}; інші аргументи: {r.OtherArguments}");
@@ -52,12 +52,12 @@ public static class ReportWriter
         {
             foreach (var v in m.Versions)
             {
-                sb.AppendLine(ci, $"  {m.Name}/{v.Version}: формул {v.Formulas}, констант {v.Constants}, посилань !: {v.FormulaRefs}, CST.: {v.ConstantRefs}, нерезолвних {v.Unresolved}");
+                sb.AppendLine(ci, $"  {m.Name}/{v.Version}: формул {v.Formulas}, констант {v.Constants}, посилань !: {v.FormulaRefs} (у Common {v.CrossFormulaRefs}), CST.: {v.ConstantRefs} (у Common {v.LibraryConstantRefs}), нерезолвних {v.Unresolved}");
             }
         }
 
         sb.AppendLine();
-        sb.AppendLine(ci, $"Нерезолвні посилання: {r.Unresolved.Count} (перші {Math.Min(top, r.Unresolved.Count)}):");
+        sb.AppendLine(ci, $"Нерезолвні посилання: {r.Unresolved.Count}, з них у формулах з IsAvailable=True: {r.UnresolvedInAvailableFormulas} (перші {Math.Min(top, r.Unresolved.Count)}):");
         foreach (var u in r.Unresolved.Take(top))
         {
             var prefix = u.Kind == ReferenceKind.Formula ? "!" : "CST.";
@@ -84,8 +84,9 @@ public static class ReportWriter
         sb.AppendLine("Читач AF XML:");
         var rd = r.Reader;
         sb.AppendLine(ci, $"  елементів {rd.Elements}, атрибутів {rd.Attributes}, елементів без імені {rd.ElementsWithoutName}, дублікатів атрибутів {rd.DuplicateAttributes}");
-        sb.AppendLine(ci, $"  віднесено до формул {rd.FormulaElements}, до констант {rd.ConstantElements}, інших елементів з атрибутами {rd.OtherElementsWithAttributes}");
-        sb.AppendLine(ci, $"  методологію взято зі шляху: {rd.MethodologyFromPath}; значень із ConfigString: {rd.ResolvedFromConfigString}; нерозкритих ConfigString: {rd.UnresolvedConfigStrings}");
+        sb.AppendLine(ci, $"  формул (версійних елементів) {rd.FormulaVersionElements}, контейнерів формул {rd.FormulaContainers}, визначень констант {rd.ConstantDefinitions}, елементів значень констант {rd.ConstantValueElements}");
+        sb.AppendLine(ci, $"  пропущено в методологіях: {(rd.SkippedMethodologyElements.Count == 0 ? "немає" : string.Join(", ", rd.SkippedMethodologyElements.Select(kv => $"{kv.Key}×{kv.Value}")))}; елементів поза Methodologies: {rd.ElementsOutsideMethodologies}");
+        sb.AppendLine(ci, $"  методологію взято зі шляху: {rd.MethodologyFromPath}; суперечність MInfo_* і шляху: {rd.MethodologyPathMismatch}; значень із ConfigString: {rd.ResolvedFromConfigString}; обчислюваних ConfigString (не використано): {rd.ComputedConfigStrings}");
         sb.AppendLine(ci, $"  непізнане (теги): {(rd.Unrecognized.Count == 0 ? "немає" : string.Join(", ", rd.Unrecognized.Select(kv => $"{kv.Key}×{kv.Value}")))}");
 
         sb.AppendLine();

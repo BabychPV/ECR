@@ -12,7 +12,8 @@ namespace Ecr.MethodologyImport.Reading;
 public sealed record AfElementRecord(
     IReadOnlyList<string> Path,
     IReadOnlyDictionary<string, string> Values,
-    IReadOnlyDictionary<string, string> ConfigStrings);
+    IReadOnlyDictionary<string, string> ConfigStrings,
+    string Template = "");
 
 /// <summary>Лічильники читача — «що прочитано» й «що не впізнано» (толерантний розбір).</summary>
 public sealed class AfReadStats
@@ -31,9 +32,12 @@ public sealed class AfReadStats
 
 /// <summary>
 /// Потоковий читач AF XML (експорт PI System Explorer): <c>XmlReader</c>, без DOM — файл ~200 МБ.
-/// ⚠ Формат виведено з документів і структури AF, а НЕ зі справжнього файла: очікується вкладена
-/// структура <c>AFElement</c> → (<c>Name</c>, <c>AFAttribute</c>[<c>Name</c>, <c>Value</c>|<c>ConfigString</c>],
-/// вкладені <c>AFElement</c>). Усе, що читач не знає, лічиться в <see cref="AfReadStats.Unrecognized"/>.
+/// Формат звірено зі справжнім <c>ECR_01_Air.xml</c> (AF 3.1, <c>ExportMode="…Flat…"</c>): корінь <c>AF</c> →
+/// <c>AFDatabase</c> → ПЛОСКИЙ перелік <c>AFElement</c>, де <c>Name</c> — повний шлях із <c>\</c>
+/// (<c>Methodologies\Common\V1\Formulas\X\V1</c>), <c>Template</c>, <c>AFAttribute</c>
+/// (<c>Name</c>, <c>Value</c> [<c>type</c>, <c>default</c>] або <c>ConfigString</c> для <c>String Builder</c>).
+/// Вкладені <c>AFElement</c> (нескладений експорт) теж підтримані: шлях = шлях батька + ім'я.
+/// Усе, що читач не знає, лічиться в <see cref="AfReadStats.Unrecognized"/>.
 /// Уся прив'язка до формату — у цьому файлі; модель і аналіз про XML нічого не знають.
 /// </summary>
 public static class AfXmlReader
@@ -44,8 +48,12 @@ public static class AfXmlReader
     // Діти елемента, які читач свідомо пропускає й не вважає «непізнаним».
     private static readonly HashSet<string> KnownIgnored = new(StringComparer.Ordinal)
     {
-        "ID", "Id", "Description", "Template", "CategoryRefs", "Categories", "Security",
-        "ExtendedProperties", "Type", "Modified", "Created",
+        "id", "ID", "Id", "Description", "CategoryRefs", "Categories", "Security", "ExtendedProperties", "Type",
+        "Modified", "Created",
+        // Спостережено в ECR_01_Air.xml (елементи AFDatabase), для методологій не потрібні:
+        "IsAnnotated", "VersionID", "Modifier", "Comment", "EffectiveDate", "ObsoleteDate", "SecurityAccessControl",
+        "DefaultAttribute", "DefaultInputPort", "DefaultOutputPort", "DefaultUndirectedPort",
+        "AFElementCategoryRef", "AFAnalysis", "AFNotificationRule",
     };
 
     /// <summary>Читає потік і викликає <paramref name="onElement"/> для кожного елемента з ≥ 1 атрибутом.</summary>
@@ -92,6 +100,7 @@ public static class AfXmlReader
         var configs = new Dictionary<string, string>(StringComparer.Ordinal);
         string? name = null;
         string? explicitPath = null;
+        string? template = null;
 
         if (r.IsEmptyElement)
         {
@@ -122,6 +131,10 @@ public static class AfXmlReader
                 {
                     name = ReadText(r);
                 }
+                else if (tag == "Template")
+                {
+                    template = ReadText(r);
+                }
                 else if (tag == "Path")
                 {
                     explicitPath = ReadText(r);
@@ -142,7 +155,8 @@ public static class AfXmlReader
 
         if (values.Count > 0 || configs.Count > 0)
         {
-            sink(new AfElementRecord(OwnPath(parentPath, name, explicitPath, stats, countMissing: true), values, configs));
+            sink(new AfElementRecord(
+                OwnPath(parentPath, name, explicitPath, stats, countMissing: true), values, configs, template?.Trim() ?? string.Empty));
         }
     }
 
@@ -157,6 +171,12 @@ public static class AfXmlReader
         if (string.IsNullOrWhiteSpace(name) && countMissing)
         {
             stats.ElementsWithoutName++;
+        }
+
+        // Плоский експорт: Name уже є повним шляхом («Methodologies\Common\V1»).
+        if (name is not null && name.Contains('\\', StringComparison.Ordinal))
+        {
+            return name.Split('\\', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         }
 
         var path = new string[parentPath.Count + 1];

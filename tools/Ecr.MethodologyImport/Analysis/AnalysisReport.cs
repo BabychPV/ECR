@@ -19,7 +19,8 @@ public sealed record UnresolvedReference(
     string Token,
     string RawToken,
     string Hint,
-    string Path);
+    string Path,
+    bool SourceAvailable);
 
 /// <summary>Цикл посилань між формулами: перелік ключів формул (відсортований).</summary>
 public sealed record ReferenceCycle(IReadOnlyList<string> Formulas);
@@ -32,7 +33,9 @@ public sealed record VersionSummary(
     int Constants,
     int FormulaRefs,
     int ConstantRefs,
-    int Unresolved);
+    int Unresolved,
+    int CrossFormulaRefs,
+    int LibraryConstantRefs);
 
 public sealed record MethodologySummary(string Name, IReadOnlyList<VersionSummary> Versions);
 
@@ -48,12 +51,16 @@ public sealed record ReaderSummary(
     long ElementsWithoutName,
     long DuplicateAttributes,
     IReadOnlyDictionary<string, long> Unrecognized,
-    long FormulaElements,
-    long ConstantElements,
-    long OtherElementsWithAttributes,
+    long FormulaVersionElements,
+    long FormulaContainers,
+    long ConstantDefinitions,
+    long ConstantValueElements,
+    IReadOnlyDictionary<string, long> SkippedMethodologyElements,
+    long ElementsOutsideMethodologies,
     long MethodologyFromPath,
+    long MethodologyPathMismatch,
     long ResolvedFromConfigString,
-    long UnresolvedConfigStrings);
+    long ComputedConfigStrings);
 
 /// <summary>
 /// Звіт сухого прогону. Без часу виконання й шляхів середовища: той самий вхід дає той самий
@@ -64,7 +71,7 @@ public sealed record AnalysisReport(
     int MethodologyVersions,
     int Formulas,
     int Constants,
-    int DistinctConstantNames,
+    int ConstantValueRows,
     ReferenceTotals FormulaReferences,
     ReferenceTotals ConstantReferences,
     int ParameterArguments,
@@ -74,6 +81,7 @@ public sealed record AnalysisReport(
     int DuplicateFormulaKeys,
     IReadOnlyList<MethodologySummary> ByMethodology,
     IReadOnlyList<UnresolvedReference> Unresolved,
+    int UnresolvedInAvailableFormulas,
     IReadOnlyList<TokenCount> UnresolvedTokens,
     int UndeclaredInTextTotal,
     IReadOnlyList<TokenCount> UndeclaredInText,
