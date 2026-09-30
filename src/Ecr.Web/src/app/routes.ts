@@ -307,6 +307,22 @@ export const routes = {
       },
     },
   },
+  // RT-25: вплив правки довідника на документи відкритих періодів.
+  adminRegistryImpact: {
+    id: 'admin-registry-impact',
+    path: '/admin/registries/:code/impact',
+    handle: {
+      labelKey: 'registries.impact.title',
+      // Перелік — `Registry.View` (+ `Calculation.View` у проєкті, фільтрує сервер);
+      // кнопка «Перерахувати» — `Calculation.Recalculate` усередині сторінки.
+      permission: 'Registry.View',
+      crumb: {
+        ancestorIds: ['admin-registries'],
+        resolveParam: 'code',
+        resolveWith: 'registryName',
+      },
+    },
+  },
   adminMethodologies: {
     id: 'admin-methodologies',
     path: '/admin/methodologies',

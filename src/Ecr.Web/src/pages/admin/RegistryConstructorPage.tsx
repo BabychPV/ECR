@@ -20,6 +20,7 @@ import {
 } from '@/features/registries/RegistryConstructor';
 import { RegistryDraftPanel } from '@/features/registries/RegistryDraftPanel';
 import { CompositionEditorLink } from '@/features/registries/rc816/CompositionEditorLink';
+import { RegistryImpactLink } from '@/features/registries/impact/RegistryImpactLink';
 import { RegistryUsagePanel } from '@/features/registries/RegistryUsage';
 import {
   buildSaveRequest,
@@ -248,6 +249,7 @@ export function RegistryConstructorPage(): JSX.Element {
               <Badge variant="light">{loaded.sourceKind}</Badge>
               {loaded.isTemporal && <Badge variant="light">{t('registries.temporal')}</Badge>}
               <CompositionEditorLink code={loaded.code} />
+              <RegistryImpactLink code={loaded.code} />
             </Group>
 
             {/* ⛔ Чернетка і публікація стоять ПЕРЕД вкладками, а не в шапці

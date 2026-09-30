@@ -85,6 +85,15 @@ export function CalculationResultsPanel({
               </Alert>
             )}
 
+            {/* RT-25 (ФВ-9.19): довідник, який читала методологія, змінено після прогону. */}
+            {list.some((result) => (result.changedRegistries?.length ?? 0) > 0) && (
+              <Alert color="statusWarning" data-results-stale-registry="">
+                {t('calculation.staleRegistry', {
+                  registries: [...new Set(list.flatMap((result) => result.changedRegistries ?? []))].join(', '),
+                })}
+              </Alert>
+            )}
+
             {units.error !== null && (
               <ErrorAlert error={units.error} onRetry={() => void units.refetch()} />
             )}
