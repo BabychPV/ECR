@@ -174,7 +174,7 @@ public sealed class ListResourceGrantsHandler(
                 new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.signInRequired" });
 
         var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
-        if (!profile.Has(Permission) && !profile.Has(ProjectCatalogAltPermission))
+        if (!PermissionCheck.IsGranted(profile, Permission) && !PermissionCheck.IsGranted(profile, ProjectCatalogAltPermission))
         {
             throw new AccessDeniedException(
                 "ECR-AUTH-0403", $"Потрібне право {Permission} або {ProjectCatalogAltPermission}.",
@@ -207,7 +207,7 @@ public sealed class ListResourceGrantsHandler(
                 new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.signInRequired" });
 
         var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
-        if (!profile.Has(Permission) && !profile.Has(ProjectCatalogAltPermission))
+        if (!PermissionCheck.IsGranted(profile, Permission) && !PermissionCheck.IsGranted(profile, ProjectCatalogAltPermission))
         {
             throw new AccessDeniedException(
                 "ECR-AUTH-0403", $"Потрібне право {Permission} або {ProjectCatalogAltPermission}.",
@@ -238,7 +238,7 @@ public sealed class ListResourceGrantsHandler(
 
         var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
 
-        return profile.Has(Permission)
+        return PermissionCheck.IsGranted(profile, Permission)
             ? userId
             : throw new AccessDeniedException(
                 "ECR-AUTH-0403", $"Потрібне право {Permission}.",

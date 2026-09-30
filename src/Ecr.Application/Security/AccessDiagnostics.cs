@@ -176,7 +176,7 @@ public sealed class GetAccessDiagnosticsHandler(
         // ⚠ Каталог групових призначень — це відомість «яка AD-група дає
         // адміністративну роль». Рядовому користувачеві вона нічого не
         // пояснює, а зловмисникові називає ціль, тож їде лише носієві права.
-        var catalogue = profile.Has(Permission)
+        var catalogue = PermissionCheck.IsGranted(profile, Permission)
             ? await GroupCatalogueAsync(today, ct).ConfigureAwait(false)
             : [];
 

@@ -22,11 +22,7 @@ public sealed partial class DirectProfileHasRatchetTests
     /// <summary>Файли з прямим <c>profile.Has(</c> на момент введення храповика.</summary>
     private static readonly string[] Debt =
     [
-        "src/Ecr.Application/Search/SearchHandler.cs",
-        "src/Ecr.Application/Security/AccessDiagnostics.cs",
         "src/Ecr.Application/Security/PermissionCheck.cs",
-        "src/Ecr.Application/Security/ResourceGrantHandlers.cs",
-        "src/Ecr.Application/Security/RoleAndUserHandlers.cs",
     ];
 
     [GeneratedRegex(@"\bprofile\.Has\(")]

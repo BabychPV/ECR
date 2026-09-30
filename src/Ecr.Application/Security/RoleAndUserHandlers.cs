@@ -99,7 +99,7 @@ public sealed class ListRolesHandler(IUserStore users, IAccessDecisionService ac
                          new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.signInRequired" });
 
         var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
-        if (!profile.Has(Permission))
+        if (!PermissionCheck.IsGranted(profile, Permission))
         {
             throw new AccessDeniedException(
                 "ECR-AUTH-0403", $"Потрібне право {Permission}.",
@@ -143,7 +143,7 @@ public sealed class CreateRoleHandler(
                          new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.signInRequired" });
 
         var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
-        if (!profile.Has(ListRolesHandler.Permission))
+        if (!PermissionCheck.IsGranted(profile, ListRolesHandler.Permission))
         {
             throw new AccessDeniedException(
                 "ECR-AUTH-0403", $"Потрібне право {ListRolesHandler.Permission}.",
@@ -292,7 +292,7 @@ public sealed class ReplaceUserRolesHandler(
                           new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.signInRequired" });
 
         var profile = await access.BuildProfileAsync(actorId, ct).ConfigureAwait(false);
-        if (!profile.Has(Permission))
+        if (!PermissionCheck.IsGranted(profile, Permission))
         {
             throw new AccessDeniedException(
                 "ECR-AUTH-0403", $"Потрібне право {Permission}.",
@@ -553,7 +553,7 @@ public sealed class SetUserEmailHandler(
                           new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.signInRequired" });
 
         var profile = await access.BuildProfileAsync(actorId, ct).ConfigureAwait(false);
-        if (!profile.Has(Permission))
+        if (!PermissionCheck.IsGranted(profile, Permission))
         {
             throw new AccessDeniedException(
                 "ECR-AUTH-0403", $"Потрібне право {Permission}.",
@@ -657,7 +657,7 @@ public sealed class ListUsersHandler(IUserStore users, IAccessDecisionService ac
                          new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.signInRequired" });
 
         var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
-        if (!profile.Has(Permission))
+        if (!PermissionCheck.IsGranted(profile, Permission))
         {
             throw new AccessDeniedException(
                 "ECR-AUTH-0403", $"Потрібне право {Permission}.",
@@ -710,7 +710,7 @@ public sealed class CreateUserHandler(
                           new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.signInRequired" });
 
         var profile = await access.BuildProfileAsync(actorId, ct).ConfigureAwait(false);
-        if (!profile.Has(ListUsersHandler.Permission))
+        if (!PermissionCheck.IsGranted(profile, ListUsersHandler.Permission))
         {
             throw new AccessDeniedException(
                 "ECR-AUTH-0403", $"Потрібне право {ListUsersHandler.Permission}.",
@@ -888,7 +888,7 @@ public sealed class SetReceivesAlertsHandler(
                 new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.signInRequired" });
 
         var profile = await access.BuildProfileAsync(actorId, ct).ConfigureAwait(false);
-        if (!profile.Has(Permission))
+        if (!PermissionCheck.IsGranted(profile, Permission))
         {
             throw new AccessDeniedException(
                 "ECR-AUTH-0403", $"Потрібне право {Permission}.",
