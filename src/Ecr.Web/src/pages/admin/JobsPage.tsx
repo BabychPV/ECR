@@ -58,6 +58,40 @@ function isCancellable(state: string): boolean {
   return CancellableStates.includes(state);
 }
 
+/**
+ * Похідний стан батька-розкладу (P4): «розкладено N, виконано M з N, помилок K».
+ *
+ * ⛔ Збережений стан такого батька — `Succeeded`, хоча дочірні ще не пораховані;
+ * без цього рядка оператор читав би «виконано» замість «ще не пораховано».
+ */
+function FanOutSummary({ status }: { readonly status: JobStatus }): JSX.Element | null {
+  const fan = status.fanOut;
+
+  if (fan === null || fan === undefined) return null;
+
+  const label =
+    status.effectiveState === 'FannedOut'
+      ? t('jobs.fanOutPending')
+      : status.effectiveState === 'SucceededWithErrors'
+        ? t('jobs.fanOutDoneWithErrors', { failed: fan.failed })
+        : t('jobs.fanOutDone');
+
+  return (
+    <Stack gap="xs" data-job-fanout={status.effectiveState ?? ''}>
+      <Text size="sm" fw={600}>
+        {label}
+      </Text>
+      <Text size="xs" c="dimmed">
+        {t('jobs.fanOutProgress', {
+          total: fan.total,
+          done: fan.succeeded,
+          failed: fan.failed,
+        })}
+      </Text>
+    </Stack>
+  );
+}
+
 /** Як часто опитувати стан задачі, поки вона виконується. */
 const PollMs = 1500;
 
@@ -85,7 +119,10 @@ export function JobsPage(): JSX.Element {
     refetchInterval: (query) => {
       const state = query.state.data?.state;
 
-      return state === 'Queued' || state === 'Running' ? PollMs : false;
+      // ⚠ Батько-розклад (P4) уже `Succeeded`, але дочірні ще рахуються — опитування триває.
+      return state === 'Queued' || state === 'Running' || query.state.data?.effectiveState === 'FannedOut'
+        ? PollMs
+        : false;
     },
     retry: false,
   });
@@ -194,6 +231,8 @@ export function JobsPage(): JSX.Element {
             <Progress value={status.percent} animated={status.state === 'Running'} />
 
             {status.message !== null && <Text size="sm">{status.message}</Text>}
+
+            <FanOutSummary status={status} />
 
             <JobFailure
               state={status.state}
