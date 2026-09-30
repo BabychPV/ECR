@@ -15,9 +15,8 @@ import { locksDataActions, type DocumentLock } from '@/features/documents/docume
 import { invalidateSlices } from '@/features/grid/sliceCache';
 import { JobFailure } from '@/features/jobs/JobFacts';
 import { can, useSession, type MeDto } from '@/shared/session/useSession';
-import { ConfirmModal } from '@/shared/ui/ConfirmModal';
+import { LazyConfirmModal, LazyReasonModal } from './lazyDialogs';
 import { Hint } from '@/shared/ui/Hint';
-import { ReasonModal } from '@/shared/ui/ReasonModal';
 import { showApiError, showDone } from '@/shared/ui/notify';
 import { useRecallAvailability, type RecallSheetRequest } from './api';
 import { outcomeOf, pollInterval } from './jobFollow';
@@ -684,7 +683,7 @@ export function SheetActions({
         </Button>
       )}
 
-      <ConfirmModal
+      <LazyConfirmModal
         opened={warnings !== null}
         title={t('workflow.submitWarningsTitle')}
         text={t('workflow.submitWarningsHint')}
@@ -696,7 +695,7 @@ export function SheetActions({
         onClose={() => setWarnings(null)}
       />
 
-      <ConfirmModal
+      <LazyConfirmModal
         opened={asking === 'approve'}
         title={t('workflow.approveTitle')}
         text={t('workflow.approveHint')}
@@ -707,7 +706,7 @@ export function SheetActions({
         onClose={() => setAsking(null)}
       />
 
-      <ReasonModal
+      <LazyReasonModal
         opened={asking === 'recall'}
         title={t('workflow.recallTitle')}
         label={t('workflow.reason')}
@@ -718,7 +717,7 @@ export function SheetActions({
         onClose={() => setAsking(null)}
       />
 
-      <ReasonModal
+      <LazyReasonModal
         opened={asking === 'reject'}
         title={t('workflow.rejectTitle')}
         label={t('workflow.reason')}
@@ -729,7 +728,7 @@ export function SheetActions({
         onClose={() => setAsking(null)}
       />
 
-      <ReasonModal
+      <LazyReasonModal
         opened={asking === 'reopen'}
         title={t('workflow.reopenTitle')}
         label={t('workflow.reason')}
