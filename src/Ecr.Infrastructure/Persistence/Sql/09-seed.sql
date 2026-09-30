@@ -5510,6 +5510,9 @@ USING (VALUES
     -- NAV:cell-click ── ФВ-5.6: перехід від зауваження перевірки до комірки (`ValidationPanel`).
     (N'document.validationGoTo', N'en', N'Show in the table', 1),
     -- NAV:cell-click: кінець секції
+    -- COLL:warn-grid ── ФВ-2.16 (D-239): значок «правка поза вікном» на комірці сітки (`DocumentGrid`, `outOfWindowMarks.ts`).
+    (N'grid.outOfWindowHint', N'en', N'Saved after the access window closed (Warn policy); the change is marked in the change log.', 1),
+    -- COLL:warn-grid: кінець секції
     -- REGCTOR816 ── ФВ-8.16: композиція в конструкторі довідника і редактор master-detail (`features/registries/rc816`).
     (N'registries.rc816.title', N'en', N'Master-detail editor', 1),
     (N'registries.rc816.openEditor', N'en', N'Edit with parts (master-detail)', 1),
@@ -13407,6 +13410,17 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:warn ── кінець секції ──
+
+-- COLL:warn-grid ── ru/kz значка «правка поза вікном» на комірці сітки (ФВ-2.16, D-239); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'grid.outOfWindowHint', N'ru', N'Сохранено после закрытия окна доступа (политика Warn); правка отмечена в журнале изменений.'),
+    (N'grid.outOfWindowHint', N'kz', N'Қолжетімділік терезесі жабылғаннан кейін сақталды (Warn саясаты); түзету өзгерістер журналында белгіленді.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:warn-grid ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t
