@@ -385,7 +385,8 @@ public sealed class SubmitApproveTests
                NSubstitute.Substitute.For<Ecr.Application.Recalculation.ISubmitRecalculation>(),
                _methodologies,
                _versions,
-               _registries);
+               _registries,
+               _audit);
 
     /// <summary>Довідник для <c>REGFIELD</c> у правилах (D16-04); за замовчуванням порожній.</summary>
     private readonly IRegistryStore _registries = Substitute.For<IRegistryStore>();
@@ -737,11 +738,103 @@ public sealed class SubmitApproveTests
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait("Requirement", "ФВ-5.4")]
-    public async Task Попередження_валідації_подання_не_блокує()
+    [Trait("Requirement", "ФВ-5.19")]
+    public async Task Попередження_валідації_із_підтвердженням_подання_не_блокує()
     {
         // ⚠ Блокує лише `Error`. Попередження — привід подивитися, а не
-        // причина не подати звіт у строк (R-B3, D-90).
+        // причина не подати звіт у строк (R-B3, D-90): після підтвердження
+        // (ФВ-5.19) подання проходить.
         WithRule("[Volume] <= 100", ValidationSeverity.Warning);
+
+        await Submit().HandleAsync(Document, Water, Period, acknowledgeWarnings: true, CancellationToken.None);
+
+        Assert.Equal(DocumentStatus.Submitted, _sheets[Water].Status);
+    }
+
+    /// <summary>
+    /// ФВ-5.19: попередження без підтвердження — відмова з переліком і без
+    /// жодного сліду (ні зрізу, ні зміни стану, ні запису аудиту).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ МУТАЦІЙНИЙ ДОКАЗ: прибрати умову <c>!acknowledgeWarnings</c> у
+    /// <c>SubmitSheetHandler</c> (кидок при будь-якому Warning не відбувається) — червоніє.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "ФВ-5.19")]
+    public async Task Попередження_без_підтвердження_відхиляє_подання_з_переліком()
+    {
+        WithRule("[Volume] <= 100", ValidationSeverity.Warning);
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Submit().HandleAsync(Document, Water, Period, CancellationToken.None));
+
+        Assert.Equal("ECR-SUB-4221", error.ErrorCode);
+        Assert.Equal("err.ECR-SUB-4221.warningsNeedConfirmation", error.Details!["messageKey"]);
+        Assert.Equal("1", error.Details["messageCount"]);
+
+        var body = System.Text.Json.JsonSerializer.Serialize(error.Details);
+        Assert.Contains("CAP", body, StringComparison.Ordinal);
+
+        Assert.Empty(_snapshots);
+        Assert.Equal(DocumentStatus.Draft, _sheets[Water].Status);
+        await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
+        await _audit.DidNotReceive().WriteSecurityEventAsync(Arg.Any<SecurityEventRecord>(), Arg.Any<CancellationToken>());
+    }
+
+    /// <summary>ФВ-5.19: підтверджене попередження лягає в аудит тією самою транзакцією.</summary>
+    /// <remarks>
+    /// ⛔ МУТАЦІЙНИЙ ДОКАЗ: прибрати блок <c>audit.WriteSecurityEventAsync</c> у
+    /// <c>SubmitCoreAsync</c> — червоніє.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "ФВ-5.19")]
+    public async Task Підтверджене_попередження_пишеться_в_аудит()
+    {
+        WithRule("[Volume] <= 100", ValidationSeverity.Warning);
+
+        await Submit().HandleAsync(Document, Water, Period, acknowledgeWarnings: true, CancellationToken.None);
+
+        var evt = Assert.Single(_audit.ReceivedCalls()
+            .Where(c => c.GetMethodInfo().Name == nameof(IAuditWriter.WriteSecurityEventAsync))
+            .Select(c => (SecurityEventRecord)c.GetArguments()[0]!));
+        Assert.Equal(SubmitSheetHandler.WarningsAcknowledgedEventType, evt.EventType);
+        Assert.Equal(9, evt.ChangedByUserId);
+        Assert.Contains("\"CAP\"", evt.DetailsJson, StringComparison.Ordinal);
+        Assert.Contains($"\"sheetDefId\":{Water}", evt.DetailsJson, StringComparison.Ordinal);
+    }
+
+    /// <summary>ФВ-5.19: без попереджень прапор нічого не змінює й в аудит нічого не пише.</summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "ФВ-5.19")]
+    public async Task Підтвердження_без_попереджень_подає_і_аудиту_не_пише()
+    {
+        await Submit().HandleAsync(Document, Water, Period, acknowledgeWarnings: true, CancellationToken.None);
+
+        Assert.Equal(DocumentStatus.Submitted, _sheets[Water].Status);
+        await _audit.DidNotReceive().WriteSecurityEventAsync(Arg.Any<SecurityEventRecord>(), Arg.Any<CancellationToken>());
+    }
+
+    /// <summary>
+    /// ФВ-5.19: попередження в таблиці під забороною читання не вимагає підтвердження —
+    /// подавач його не бачить (припущення: підтверджують лише видиме).
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "ФВ-5.19")]
+    public async Task Приховане_попередження_підтвердження_не_вимагає()
+    {
+        WithRule("[Volume] <= 100", ValidationSeverity.Warning);
+        _access.ReadScopeAsync(Arg.Any<AccessProfile>(), Document, Arg.Any<CancellationToken>())
+            .Returns(async _ => DocumentReadScope.For(
+                new AccessBuilder()
+                    .Grant(ResourceKind.Project, AccessBuilder.ProjectId, GrantLevel.Read)
+                    .Deny(ResourceKind.Table, 3)
+                    .Build(),
+                AccessBuilder.ProjectId,
+                await _metadata.GetAsync(TemplateVersion, CancellationToken.None)));
 
         await Submit().HandleAsync(Document, Water, Period, CancellationToken.None);
 

@@ -3389,7 +3389,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `ECR-PRD-4224` | 422 | `Sequence` поза діапазоном `1…12` (ФВ-1.5a, D-108); **або** кількість періодів `Custom` не ділить рік нарівно |
 | `ECR-PRD-4225` | 422 | політика періодів: пільговий строк довший за жорстке закриття, або річний пільговий строк від'ємний (T6/#37) |
 | `ECR-PRD-4091` | 409 | політика періодів із таким кодом уже існує (`UQ_PeriodPolicy`, T6/#37) |
-| `ECR-SUB-4221` | 422 | `Submit` при наявності рядків `IsOrphaned` (ФВ-8.13) |
+| `ECR-SUB-4221` | 422 | `Submit` при наявності рядків `IsOrphaned` (ФВ-8.13); також блокувальні помилки валідації, застарілі результати методологій і — `messageKey = err.ECR-SUB-4221.warningsNeedConfirmation` — попередження (`Warning`) без `acknowledgeWarnings = true` у тілі `POST …/submit` (ФВ-5.19; підтвердження пишеться в `aud.SecurityEvent`, `SheetSubmitWarningsAcknowledged`) |
 | `ECR-SIM-0403` | 403 | спроба запису в сеансі симуляції (`SimulationReadOnly`, ФВ-6.16a) |
 | `ECR-SIM-0422` | 422 | симуляція самого себе або без причини |
 | `ECR-PWD-0428` | 428 | потрібна зміна пароля: доки `MustChangePassword`, доступні лише зміна пароля і вихід (ФВ-6.18) |

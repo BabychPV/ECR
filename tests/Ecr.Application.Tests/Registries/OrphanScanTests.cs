@@ -362,7 +362,8 @@ public sealed class OrphanScanTests
             NSubstitute.Substitute.For<Ecr.Application.Recalculation.ISubmitRecalculation>(),
             _methodologies,
             NSubstitute.Substitute.For<ITemplateVersionStore>(),
-            NSubstitute.Substitute.For<IRegistryStore>());
+            NSubstitute.Substitute.For<IRegistryStore>(),
+            NSubstitute.Substitute.For<IAuditWriter>());
 
     private static RegistryDef Definition()
         => new(EcrCode.Create("PERMITS"), Text("Permits"), isTemporal: true);

@@ -370,6 +370,11 @@ public sealed class DocumentsController(
     }
 
     /// <summary>Подання аркуша на погодження.</summary>
+    /// <remarks>
+    /// ФВ-5.19: при непідтверджених попередженнях — <c>422</c> <c>ECR-SUB-4221</c> з
+    /// <c>messageKey = err.ECR-SUB-4221.warningsNeedConfirmation</c> і переліком;
+    /// повтор із <c>acknowledgeWarnings = true</c> подає й пише підтвердження в аудит.
+    /// </remarks>
     [HttpPost("{id:long}/submit")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
@@ -379,7 +384,9 @@ public sealed class DocumentsController(
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        await submit.HandleAsync(id, request.SheetDefId, request.PeriodKey, ct).ConfigureAwait(false);
+        await submit
+            .HandleAsync(id, request.SheetDefId, request.PeriodKey, request.AcknowledgeWarnings, ct)
+            .ConfigureAwait(false);
         return NoContent();
     }
 
@@ -625,7 +632,11 @@ public sealed record RecalculateDocumentRequest(int PeriodKey, int? SheetDefId =
 /// <summary>Аркуш × період — адреса операції робочого процесу.</summary>
 /// <param name="SheetDefId">Аркуш.</param>
 /// <param name="PeriodKey">Період.</param>
-public sealed record SheetWorkflowRequest(int SheetDefId, int PeriodKey);
+/// <param name="AcknowledgeWarnings">
+/// Подавач підтвердив попередження валідації (ФВ-5.19); без цього подання
+/// аркуша з попередженнями відхиляється з їхнім переліком.
+/// </param>
+public sealed record SheetWorkflowRequest(int SheetDefId, int PeriodKey, bool AcknowledgeWarnings = false);
 
 /// <summary>Запит на погодження аркуша.</summary>
 /// <param name="SheetDefId">Аркуш.</param>

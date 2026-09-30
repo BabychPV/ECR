@@ -556,7 +556,9 @@ public static class ErrorCodes
     /// помилки валідації аркуша;</item>
     /// <item><c>err.ECR-SUB-4221.hiddenIssues</c> — блокувальні помилки лише в
     /// таблицях чи колонках під забороною читача (S6): знеособлено, без числа
-    /// й адреси (<c>HiddenValidationIssues</c>).</item>
+    /// й адреси (<c>HiddenValidationIssues</c>);</item>
+    /// <item><c>err.ECR-SUB-4221.warningsNeedConfirmation</c> — попередження
+    /// валідації без підтвердження подавача (<c>acknowledgeWarnings</c>, ФВ-5.19).</item>
     /// </list>
     /// </summary>
     /// <remarks>

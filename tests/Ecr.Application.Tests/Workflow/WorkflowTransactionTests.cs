@@ -250,7 +250,8 @@ public sealed partial class WorkflowTransactionTests(SqlServerFixture sql)
             NSubstitute.Substitute.For<Ecr.Application.Recalculation.ISubmitRecalculation>(),
             methodologies,
             NSubstitute.Substitute.For<ITemplateVersionStore>(),
-            NSubstitute.Substitute.For<IRegistryStore>());
+            NSubstitute.Substitute.For<IRegistryStore>(),
+            new AuditWriter(db));
     }
 
     private ApproveSheetHandler Approve(World world, EcrDbContext db, IReportSnapshotBuilder snapshots)

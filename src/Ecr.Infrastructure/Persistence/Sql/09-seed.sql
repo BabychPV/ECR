@@ -4388,6 +4388,13 @@ USING (VALUES
     (N'methodologies.importDone', N'en', N'Package imported: draft versions created — {versions}.', 1),
     -- ru/kz — окремою порцією `MIMP` у блоці I18N нижче.
     -- MIMP: кінець секції ──
+    -- COLL:req-g2 ── Подання з попередженнями валідації: підтвердження подавача (ФВ-5.19, `SubmitSheetHandler`, `SheetActions`) ──
+    (N'err.ECR-SUB-4221.warningsNeedConfirmation', N'en', N'The sheet has {messageCount} validation warning(s). Review them and confirm to submit anyway.', 1),
+    (N'workflow.submitWarningsTitle',           N'en', N'Submit with warnings?', 1),
+    (N'workflow.submitWarningsHint',            N'en', N'Validation found warnings on this sheet. They do not block submission, but by submitting you confirm that you have reviewed them. The confirmation is recorded in the audit log.', 1),
+    (N'workflow.submitAnyway',                  N'en', N'Submit anyway', 1),
+    -- ru/kz — окремою порцією `COLL:req-g2` у блоці I18N нижче.
+    -- COLL:req-g2 ── кінець секції ──
     (N'health.sources.notRegistered',          N'en', N'The collection store is not registered in the container.', 1),
     (N'health.sources.noneActive',              N'en', N'No active collection sources.', 1),
     (N'health.sources.failedCount',             N'en', N'Sources with a failed last run: {count}.', 1),
