@@ -228,6 +228,89 @@ public sealed class RegistryEntryWriterSyncTests
         Assert.False(entry.IsActive);
     }
 
+    // ─── D-212 PR-7: вікно дії ──────────────────────────────────────────────
+
+    [Fact]
+    [Trait("Requirement", "D-212")]
+    public async Task Validity_змінює_вікно_наявного_запису_і_пише_аудит_validity()
+    {
+        var entry = Entry(501L, "E1");
+        entry.SetValidity(new DateOnly(2024, 1, 1), null);
+        _registries.FindEntryAsync(501L, Arg.Any<CancellationToken>()).Returns(entry);
+
+        var result = await Writer().UpdateAsync(
+            new RegistryEntryUpdateBatch(RegistryId, [new RegistryEntryUpdate(501L, new Dictionary<string, object?>())
+            {
+                Validity = new ValidityWindow(new DateOnly(2024, 1, 1), new DateOnly(2025, 1, 1)),
+            }]),
+            CancellationToken.None);
+
+        Assert.True(result.Applied);
+        Assert.Equal((0, 1, 0), (result.Added, result.Updated, result.Unchanged));
+        Assert.Equal(new ValidityWindow(new DateOnly(2024, 1, 1), new DateOnly(2025, 1, 1)), entry.Window);
+        var change = Assert.Single(Changes(Assert.Single(_events)));
+        Assert.Equal(RegistryEntryWriter.ValidityFieldCode, change.GetProperty("field").GetString());
+        Assert.Equal("[2024-01-01, ∞)", change.GetProperty("oldValue").GetString());
+        Assert.Equal("[2024-01-01, 2025-01-01)", change.GetProperty("newValue").GetString());
+    }
+
+    [Fact]
+    [Trait("Requirement", "D-212")]
+    public async Task Validity_без_фактичної_зміни_нічого_не_записує()
+    {
+        var entry = Entry(501L, "E1");
+        entry.SetValidity(new DateOnly(2024, 1, 1), new DateOnly(2025, 1, 1));
+        _registries.FindEntryAsync(501L, Arg.Any<CancellationToken>()).Returns(entry);
+
+        var result = await Writer().UpdateAsync(
+            new RegistryEntryUpdateBatch(RegistryId, [new RegistryEntryUpdate(501L, new Dictionary<string, object?>())
+            {
+                Validity = new ValidityWindow(new DateOnly(2024, 1, 1), new DateOnly(2025, 1, 1)),
+            }]),
+            CancellationToken.None);
+
+        Assert.False(result.Applied);
+        Assert.Empty(_events);
+        await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait("Requirement", "D-212")]
+    public async Task Validity_порожнє_вікно_це_помилка_рядка_і_вікно_не_змінено()
+    {
+        var entry = Entry(501L, "E1");
+        _registries.FindEntryAsync(501L, Arg.Any<CancellationToken>()).Returns(entry);
+
+        var result = await Writer().UpdateAsync(
+            new RegistryEntryUpdateBatch(RegistryId, [new RegistryEntryUpdate(501L, new Dictionary<string, object?>())
+            {
+                Validity = new ValidityWindow(new DateOnly(2025, 1, 1), new DateOnly(2025, 1, 1)),
+            }]),
+            CancellationToken.None);
+
+        Assert.False(result.Applied);
+        Assert.Equal(
+            [new RegistryEntryImportError(1, "E1", RegistryEntryWriter.ValidityFieldCode, "err.validityWindowEmpty")],
+            result.Errors);
+        Assert.Equal(ValidityWindow.Always, entry.Window);
+        await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait("Requirement", "D-212")]
+    public async Task CreateOnly_з_Validity_ставить_вікно_новому_запису()
+    {
+        var result = await Writer().WriteAsync(
+            new RegistryEntryWriteBatch(
+                RegistryId,
+                [new RegistryEntryWrite("NEW1", Values(1m)) { Validity = new ValidityWindow(new DateOnly(2026, 1, 1), null) }])
+            { CreateOnly = true },
+            CancellationToken.None);
+
+        Assert.True(result.Applied);
+        Assert.Equal(new ValidityWindow(new DateOnly(2026, 1, 1), null), Assert.Single(_addedEntries).Window);
+    }
+
     private static void AssertActiveChange(SecurityEventRecord record, bool oldValue, bool newValue)
     {
         Assert.Equal(RegistryEntryWriter.ValueChangedEventType, record.EventType);

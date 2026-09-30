@@ -55,6 +55,12 @@ public sealed record RegistryEntryWrite(string Code, IReadOnlyDictionary<string,
     /// <c>null</c> або порожня — назва дорівнює коду, як і досі. Наявного запису не перейменовує.
     /// </summary>
     public string? DisplayName { get; init; }
+
+    /// <summary>
+    /// Вікно дії запису (<c>D-212</c> PR-7: синк — дати AF). <c>null</c> — не змінювати. Порожнє
+    /// вікно — помилка рядка <c>err.validityWindowEmpty</c> (<c>RegistryEntry.SetValidity</c>).
+    /// </summary>
+    public ValidityWindow? Validity { get; init; }
 }
 
 /// <summary>Пакет записів ОДНОГО довідника для <see cref="RegistryEntryWriter.WriteAsync"/>.</summary>
@@ -103,6 +109,15 @@ public sealed record RegistryEntryUpdate(long RegistryEntryId, IReadOnlyDictiona
     /// <see cref="RegistryEntryWriter.ActiveFieldCode"/>.
     /// </summary>
     public bool? IsActive { get; init; }
+
+    /// <summary>
+    /// Нове вікно дії (<c>D-212</c> PR-7); <c>null</c> — не змінювати. Фактична зміна — у тій самій
+    /// події аудиту полем <see cref="RegistryEntryWriter.ValidityFieldCode"/>; рядки ключів
+    /// дзеркалять нове вікно в тій самій транзакції (RT-10b). ⚠ Перерахунок <c>IsOrphaned</c>
+    /// (<c>ФВ-8.13a</c>) робить виклик — writer про документи не знає (як і
+    /// <c>SetEntryValidityHandler</c>).
+    /// </summary>
+    public ValidityWindow? Validity { get; init; }
 }
 
 /// <summary>Пакет оновлень ОДНОГО довідника для <see cref="RegistryEntryWriter.UpdateAsync"/>.</summary>
@@ -207,6 +222,9 @@ public sealed class RegistryEntryWriter(
     /// (<c>EcrCode</c>), тож збігу зі справжнім полем немає.
     /// </summary>
     public const string ActiveFieldCode = "@active";
+
+    /// <summary>Код «поля» вікна дії в події аудиту (<see cref="RegistryEntryUpdate.Validity"/>).</summary>
+    public const string ValidityFieldCode = "@validity";
 
     /// <summary>Служба ключів, з якою працює writer; <c>null</c> — лише в тестах без ключів.</summary>
     internal RegistryKeyService? Keys => keys;
@@ -339,6 +357,7 @@ public sealed class RegistryEntryWriter(
             {
                 MustCreate = batch.CreateOnly,
                 DisplayName = item.DisplayName,
+                Validity = item.Validity,
             })
             .ToList();
 
@@ -405,6 +424,7 @@ public sealed class RegistryEntryWriter(
                 item.Values ?? new Dictionary<string, object?>())
             {
                 IsActive = item.IsActive,
+                Validity = item.Validity,
             });
         }
 
@@ -542,6 +562,24 @@ public sealed class RegistryEntryWriter(
                 changes = [.. changes, new RegistryValueFieldChange(ActiveFieldCode, wasActive, active)];
             }
 
+            // D-212 PR-7: вікно дії — ДО звірки ключів нижче: рядки ключа дзеркалять вікно (RT-10b), і
+            // темпоральний дубль має звірятися з НОВИМ вікном. Порожнє вікно — помилка рядка.
+            if (target.Validity is { } window && entry.Window != window)
+            {
+                var old = entry.Window;
+                try
+                {
+                    entry.SetValidity(window.FromInclusive, window.ToExclusive);
+                }
+                catch (DomainException ex)
+                {
+                    errors.Add(new RegistryEntryImportError(row, code, ValidityFieldCode, MessageKeyOf(ex)));
+                    continue;
+                }
+
+                changes = [.. changes, new RegistryValueFieldChange(ValidityFieldCode, WindowText(old), WindowText(window))];
+            }
+
             staged.Add(entry);
             if (changes.Count > 0)
             {
@@ -594,6 +632,11 @@ public sealed class RegistryEntryWriter(
 
         return new RegistryEntryWriteResult(added, updated, unchanged, errors, Applied: true) { Rows = written };
     }
+
+    /// <summary>Вікно для аудиту: <c>[2024-01-01, ∞)</c>.</summary>
+    private static string WindowText(ValidityWindow window)
+        => $"[{window.FromInclusive?.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture) ?? "-∞"}, "
+           + $"{window.ToExclusive?.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture) ?? "∞"})";
 
     private int RequireUserId()
         => currentUser.UserId
@@ -991,6 +1034,9 @@ public sealed class RegistryEntryWriter(
 
         /// <summary>Стан запису після оновлення; <c>null</c> — не змінювати.</summary>
         public bool? IsActive { get; init; }
+
+        /// <summary>Вікно дії після запису; <c>null</c> — не змінювати.</summary>
+        public ValidityWindow? Validity { get; init; }
     }
 
     /// <summary>Рядок, що пройшов перевірку значень, — для звірки ключів у межах пакета.</summary>
