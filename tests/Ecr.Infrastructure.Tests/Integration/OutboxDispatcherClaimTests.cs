@@ -230,7 +230,6 @@ public sealed class OutboxDispatcherClaimTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
-    [Trait("Requirement", "ФВ-12.4a")]
     public async Task SMTP_без_адресанта_лишає_подію_в_черзі_без_спроби()
     {
         // ⚠ Найраніша дата — щоб під мутацією подія точно потрапила в партію

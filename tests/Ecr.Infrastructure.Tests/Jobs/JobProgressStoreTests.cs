@@ -43,7 +43,6 @@ public sealed class JobProgressStoreTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
-    [Trait("Requirement", "ФВ-12.7")]
     public async Task Постановка_старт_прогрес_і_завершення_дають_один_запис_а_не_чотири()
     {
         await using var db = sql.CreateContext();
@@ -101,7 +100,6 @@ public sealed class JobProgressStoreTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
-    [Trait("Requirement", "ФВ-12.7")]
     public async Task Прибирання_на_старті_валить_покинуті_задачі_і_НЕ_чіпає_живі_чужого_інстанса()
     {
         // ⛔ Саме цей дефект ловить тест. `FailStaleAsync` не мала предиката
@@ -151,7 +149,6 @@ public sealed class JobProgressStoreTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
-    [Trait("Requirement", "ФВ-12.7")]
     public async Task Задача_що_стартувала_ПІД_ЧАС_прибирання_не_валиться()
     {
         // ⚠ Нова межа, яку легко проґавити, лагодячи попередню: задача, яку
@@ -179,7 +176,6 @@ public sealed class JobProgressStoreTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
-    [Trait("Requirement", "ФВ-12.7")]
     public async Task Биття_серця_рятує_довгу_мовчазну_задачу_від_прибирання()
     {
         // ⛔ Без цього биття виправлення нагородило б новим дефектом замість
@@ -214,7 +210,6 @@ public sealed class JobProgressStoreTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
-    [Trait("Requirement", "ФВ-12.7")]
     public async Task Биття_НЕ_воскрешає_вже_завершену_задачу()
     {
         // ⚠ Насос биття зупиняється у `finally`, тобто вже після того, як

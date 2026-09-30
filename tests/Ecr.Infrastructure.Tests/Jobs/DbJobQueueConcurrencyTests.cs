@@ -53,6 +53,7 @@ public sealed class DbJobQueueConcurrencyTests(SqlServerFixture sql) : DbJobQueu
     }
 
     [Fact]
+    [Trait("Requirement", "ФВ-12.3")]
     public async Task Два_хости_по_чотири_воркери_беруть_кожну_з_50_задач_рівно_раз()
     {
         for (var i = 0; i < 50; i++)

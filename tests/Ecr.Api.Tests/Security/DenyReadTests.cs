@@ -53,6 +53,7 @@ public sealed partial class DenyReadTests(SqlServerFixture sql)
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "ФВ-6.6")]
+    [Trait("Requirement", "ФВ-14.2")]
     public async Task Перелік_таблиць_і_статус_без_прихованих_таблиць()
     {
         var s = await ArrangeAsync().ConfigureAwait(true);
@@ -216,6 +217,7 @@ public sealed partial class DenyReadTests(SqlServerFixture sql)
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "ФВ-6.6")]
+    [Trait("Requirement", "ФВ-14.2")]
     public async Task Заборонена_таблиця_і_таблиця_забороненого_аркуша_виглядають_як_неіснуючі()
     {
         var s = await ArrangeAsync().ConfigureAwait(true);

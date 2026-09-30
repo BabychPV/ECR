@@ -72,7 +72,6 @@ public sealed class ConsistencyCheckJobDetectionTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
-    [Trait("Requirement", "ФВ-8.7")]
     public async Task Виявляє_порушений_FK_у_гібридному_режимі()
     {
         // ⚠ У нормалізованій моделі FK_TableRow_Instance якраз ЗАБОРОНЯЄ цей
@@ -137,7 +136,6 @@ public sealed class ConsistencyCheckJobDetectionTests(SqlServerFixture sql)
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
-    [Trait("Requirement", "ФВ-8.14")]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     public async Task Звіряє_архів_із_джерелом_за_контрольними_сумами()
     {
@@ -165,6 +163,7 @@ public sealed class ConsistencyCheckJobDetectionTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-13.16")]
     public async Task Виявляє_колонку_Calculated_без_жодної_прив_язки()
     {
         // ⛔ Діра, яку лишив по собі `#284`. `#276` вимагав джерело від БУДЬ-ЯКОЇ

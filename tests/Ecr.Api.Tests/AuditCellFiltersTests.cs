@@ -59,6 +59,7 @@ public sealed class AuditCellFiltersTests(SqlServerFixture sql)
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Directive", "BE-03")]
+    [Trait("Requirement", "ФВ-5.22")]
     public async Task Фільтр_за_коміркою_повертає_рядки_лише_цієї_комірки()
     {
         using var app = new EcrApiFactory(sql);
@@ -109,6 +110,7 @@ public sealed class AuditCellFiltersTests(SqlServerFixture sql)
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Directive", "BE-03")]
+    [Trait("Requirement", "ФВ-5.22")]
     public async Task Фільтри_автора_і_походження_звужують_видачу_кожен_окремо()
     {
         using var app = new EcrApiFactory(sql);

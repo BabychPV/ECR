@@ -348,7 +348,6 @@ public sealed class MetadataCacheTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
-    [Trait("Requirement", "ФВ-2.6")]
     public async Task Знімок_містить_індекси_колонок_і_рядків_для_швидкого_доступу()
     {
         var doc = await ArrangeAsync();

@@ -112,6 +112,7 @@ public sealed class MethodologyAuthoringValidationTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage4)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-13.5")]
     public async Task Симуляція_з_місяцем_проходить()
     {
         using var app = new EcrApiFactory(sql);

@@ -96,7 +96,6 @@ public sealed class MaterializeTimeWeightedTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
-    [Trait("Requirement", "ФВ-16.12")]
     public async Task Avg_старого_мапінгу_побітно_той_самий()
     {
         // Точка ДО періоду є, але згортка точок її не бачить — як і до F3.

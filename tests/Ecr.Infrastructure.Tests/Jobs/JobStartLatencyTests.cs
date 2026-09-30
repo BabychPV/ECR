@@ -45,7 +45,6 @@ public sealed class JobStartLatencyTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
-    [Trait("Requirement", "ФВ-12.1")]
     public async Task Затримка_старту_доходить_до_метрики()
     {
         var metrics = Substitute.For<IJobStartMetrics>();
@@ -58,7 +57,6 @@ public sealed class JobStartLatencyTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
-    [Trait("Requirement", "ФВ-12.1")]
     public async Task Без_мітки_постановки_метрика_НЕ_пишеться()
     {
         var metrics = Substitute.For<IJobStartMetrics>();
@@ -73,7 +71,6 @@ public sealed class JobStartLatencyTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
-    [Trait("Requirement", "ФВ-12.1")]
     public async Task Розбіжність_годинників_не_дає_відʼємної_затримки()
     {
         var metrics = Substitute.For<IJobStartMetrics>();
@@ -86,7 +83,6 @@ public sealed class JobStartLatencyTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
-    [Trait("Requirement", "ФВ-12.1")]
     public async Task Мітку_ставить_САМ_планувальник_а_не_тест()
     {
         // ⛔ Три тести вище беруть ключ мітки з тієї самої константи, що й

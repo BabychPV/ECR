@@ -34,6 +34,7 @@ public sealed class TemplateVersionCloneFormulaTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-2.8")]
     public async Task Клон_версії_з_формулами_колонки_рядка_і_комірки_перев_язує_їх_на_власні_колонки_й_рядки()
     {
         var ct = CancellationToken.None;

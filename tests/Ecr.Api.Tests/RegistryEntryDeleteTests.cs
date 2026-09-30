@@ -88,6 +88,7 @@ public sealed class RegistryEntryDeleteTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-8.6")]
     public async Task Запис_на_який_посилається_комірка_не_видаляється_а_дає_409_з_кількістю()
     {
         using var app = new EcrApiFactory(sql);
@@ -140,6 +141,7 @@ public sealed class RegistryEntryDeleteTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-8.6")]
     public async Task Запис_на_який_посилається_поле_Lookup_іншого_запису_дає_409_з_видом_посилання()
     {
         using var app = new EcrApiFactory(sql);
@@ -159,6 +161,7 @@ public sealed class RegistryEntryDeleteTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-8.6")]
     public async Task Запис_на_який_посилається_константа_методології_дає_409_з_видом_посилання()
     {
         using var app = new EcrApiFactory(sql);

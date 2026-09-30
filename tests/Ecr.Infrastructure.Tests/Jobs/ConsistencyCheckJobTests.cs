@@ -22,7 +22,6 @@ public sealed partial class ConsistencyCheckJobTests
     // `ConsistencyCheckJob.ExecuteAsync` проти живих рядків на SQLEXPRESS.
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage5)]
-    [Trait("Requirement", "ФВ-13.16")]
     public void Ставить_і_знімає_IsOrphaned_в_обидва_боки()
     {
         // ⚠ Механізм СИМЕТРИЧНИЙ: те, що ставить ознаку, її ж і знімає.
@@ -48,7 +47,6 @@ public sealed partial class ConsistencyCheckJobTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage5)]
-    [Trait("Requirement", "ФВ-10.8")]
     public void Не_чіпає_закриті_періоди()
     {
         var decision = OrphanScanPlan.Plan(

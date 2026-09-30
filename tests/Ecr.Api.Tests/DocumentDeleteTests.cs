@@ -30,6 +30,7 @@ public sealed class DocumentDeleteTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage6)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-6.3")]
     public async Task Чернетка_видаляється_разом_із_даними_і_лишає_слід_у_журналі_безпеки()
     {
         var s = await ArrangeAsync(DeleteDocumentHandler.Permission, GrantLevel.Write).ConfigureAwait(true);

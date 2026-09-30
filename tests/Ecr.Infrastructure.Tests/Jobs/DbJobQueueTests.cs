@@ -118,6 +118,7 @@ public sealed class DbJobQueueTests(SqlServerFixture sql) : DbJobQueueTestsBase(
     }
 
     [Fact]
+    [Trait("Requirement", "ФВ-12.3")]
     public async Task Прострочена_оренда_переклеймлюється_тим_самим_JobId_а_старий_токен_втрачає_все()
     {
         var jobId = await EnqueueAsync();

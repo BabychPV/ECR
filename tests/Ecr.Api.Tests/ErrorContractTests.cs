@@ -89,7 +89,6 @@ public sealed class ErrorContractTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
-    [Trait("Requirement", "ФВ-6.11")]
     public async Task Внутрішня_помилка_не_розкриває_стек_і_текст_винятку()
     {
         using var app = new EcrApiFactory(sql);
@@ -107,7 +106,6 @@ public sealed class ErrorContractTests(SqlServerFixture sql)
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
-    [Trait("Requirement", "ФВ-6.11")]
     public void Усі_коди_з_каталогу_мають_унікальні_значення()
     {
         var codes = typeof(ErrorCodes)
@@ -234,7 +232,6 @@ public sealed class ErrorContractTests(SqlServerFixture sql)
 
     [Theory]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
-    [Trait("Requirement", "ФВ-6.11")]
     [InlineData("ECR-DOC-0409", 409)]
     [InlineData("ECR-TMPL-0409", 409)]
     [InlineData("ECR-CALC-0409", 409)]

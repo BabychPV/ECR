@@ -24,7 +24,6 @@ public sealed class SeedTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
-    [Trait("Requirement", "ФВ-2.17")]
     public async Task Повторний_запуск_не_створює_дублікатів()
     {
         var before = await CountsAsync();

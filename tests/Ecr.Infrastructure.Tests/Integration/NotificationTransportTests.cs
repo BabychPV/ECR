@@ -90,7 +90,6 @@ public sealed class NotificationTransportTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
-    [Trait("Requirement", "ФВ-12.5")]
     public async Task Порожній_перелік_адресатів_відхиляється()
     {
         var sender = Sender(("Smtp:Host", "smtp.example.local"), ("Smtp:From", "ecr@example.local"));
@@ -118,7 +117,6 @@ public sealed class NotificationTransportTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
-    [Trait("Requirement", "ФВ-12.4a")]
     public async Task Недоступний_сервер_дає_ВИНЯТОК_щоб_подія_лишилася_в_черзі()
     {
         // ⛔ Головна перевірка `D-124`. Виняток мусить дійти до задачі: саме

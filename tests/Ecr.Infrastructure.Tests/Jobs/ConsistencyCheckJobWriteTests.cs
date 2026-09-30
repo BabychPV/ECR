@@ -27,6 +27,7 @@ public sealed class ConsistencyCheckJobWriteTests(SqlServerFixture sql)
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "ФВ-7.7")]
+    [Trait("Requirement", "ФВ-13.16")]
     public async Task Кілька_знахідок_записуються_одним_запитом()
     {
         var builder = new TestDocumentBuilder(sql.ConnectionString);

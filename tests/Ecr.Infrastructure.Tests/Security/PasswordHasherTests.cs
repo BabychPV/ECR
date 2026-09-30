@@ -51,7 +51,6 @@ public sealed class PasswordHasherTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
-    [Trait("Requirement", "ФВ-6.4")]
     public void NeedsRehash_істинний_після_зміни_параметрів()
     {
         var current = _hasher.Hash(Password);
