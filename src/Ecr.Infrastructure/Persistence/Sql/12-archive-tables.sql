@@ -100,8 +100,15 @@ CREATE TABLE arc.CellChange
     Origin          nvarchar(32)   NOT NULL,
     IsLateEdit      bit            NOT NULL,
     CorrelationId   nvarchar(64)   NULL,
+    IsOutOfWindow   bit            NOT NULL CONSTRAINT DF_arc_CellChange_OutOfWindow DEFAULT (0),
     INDEX CCI_arc_CellChange CLUSTERED COLUMNSTORE
 ) ON [DATA_ARCHIVE];
+GO
+
+-- ФВ-2.16 / D-239: дзеркало ud.CellChange.IsOutOfWindow для наявних баз.
+IF COL_LENGTH(N'arc.CellChange', N'IsOutOfWindow') IS NULL
+    ALTER TABLE arc.CellChange
+        ADD IsOutOfWindow bit NOT NULL CONSTRAINT DF_arc_CellChange_OutOfWindow DEFAULT (0);
 GO
 
 IF OBJECT_ID(N'arc.CalculationResult', N'U') IS NULL

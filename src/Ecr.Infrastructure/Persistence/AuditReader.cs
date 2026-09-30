@@ -106,11 +106,12 @@ public sealed class AuditReader(EcrDbContext db) : IAuditReader
         command.CommandText = $"""
             SELECT a.Id, a.ChangedAt, a.PeriodKey, a.DocumentId, a.RowKey, a.ColumnDefId,
                    a.OldValue, a.NewValue, a.ChangedByUserId, a.Origin, a.IsLateEdit,
-                   u.DisplayName, d.BusinessKey, d.NameL10n, c.Code, c.HeaderL10n, c.DataType
+                   u.DisplayName, d.BusinessKey, d.NameL10n, c.Code, c.HeaderL10n, c.DataType,
+                   a.IsOutOfWindow
               FROM (
                     SELECT TOP (@take)
                            Id, ChangedAt, PeriodKey, DocumentId, RowKey, ColumnDefId,
-                           OldValue, NewValue, ChangedByUserId, Origin, IsLateEdit
+                           OldValue, NewValue, ChangedByUserId, Origin, IsLateEdit, IsOutOfWindow
                       FROM aud.CellChange
                      WHERE {where}
                      ORDER BY Id
@@ -154,7 +155,8 @@ public sealed class AuditReader(EcrDbContext db) : IAuditReader
                         LocalizedOrNull(reader, 15),
                         reader.IsDBNull(16)
                             ? null
-                            : ((Ecr.Domain.Enums.CellDataType)reader.GetByte(16)).ToString())));
+                            : ((Ecr.Domain.Enums.CellDataType)reader.GetByte(16)).ToString(),
+                        reader.GetBoolean(17))));
             }
         }
 

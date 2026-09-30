@@ -522,7 +522,7 @@ public sealed partial class PatchCellsHandler
         await audit.WriteCellChangesAsync(
             [.. active.SelectMany(x => BuildAuditRecords(
                 x.Request, x.Applied!.Upserts, x.Applied.Deletes, userId, now, documentId,
-                x.Applied.RowKeyById, previous, isLateEdit))],
+                x.Applied.RowKeyById, previous, isLateEdit, x.Context.OutOfWindow))],
             ct).ConfigureAwait(false);
 
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);

@@ -13,6 +13,7 @@ namespace Ecr.Application.Ports;
 /// <param name="ChangedByUserId">Автор — <b>UserId</b>, не SID (R-A2, D-86).</param>
 /// <param name="Origin">Звідки зміна: правка, імпорт, перерахунок, міграція.</param>
 /// <param name="IsLateEdit">Зміна в <c>Grace</c> або після <c>Reopen</c> (D-70).</param>
+/// <param name="IsOutOfWindow">Правка за політикою <c>Warn</c> поза вікном доступу (<c>ФВ-2.16</c>, <c>D-239</c>).</param>
 /// <param name="ChangedByDisplayName">
 /// Ім'я автора (<c>sec.User.DisplayName</c>); <c>null</c> — запису користувача
 /// вже немає (`R-18`). ⛔ Не логін: логін і SID показувати людині заборонено
@@ -44,7 +45,8 @@ public sealed record CellChangeView(
     Ecr.Domain.ValueObjects.LocalizedText? DocumentNameL10n = null,
     string? ColumnCode = null,
     Ecr.Domain.ValueObjects.LocalizedText? ColumnHeaderL10n = null,
-    string? ColumnDataType = null);
+    string? ColumnDataType = null,
+    bool IsOutOfWindow = false);
 
 /// <summary>Структурна зміна в журналі, як її бачить читач.</summary>
 /// <param name="ChangedAt">Момент зміни в UTC.</param>

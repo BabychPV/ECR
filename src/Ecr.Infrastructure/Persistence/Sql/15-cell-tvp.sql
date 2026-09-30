@@ -159,6 +159,20 @@ GO
 -- дійде до `SqlDataRecord`, тож тихого обрізання бути не може, а точний тип
 -- знімає неявну конверсію.
 -- -----------------------------------------------------------------------------
+-- ФВ-2.16 / D-239: тип без IsOutOfWindow (база до цього кроку) знімається й
+-- створюється заново — змінити TABLE TYPE на місці не можна. Посилаються на нього
+-- лише параметри команд застосунку, не процедури, тож DROP TYPE проходить.
+IF TYPE_ID(N'aud.CellChangeTvp') IS NOT NULL
+   AND NOT EXISTS (
+        SELECT 1
+        FROM sys.table_types AS tt
+        JOIN sys.columns     AS c ON c.object_id = tt.type_table_object_id
+        WHERE tt.name = N'CellChangeTvp'
+          AND SCHEMA_NAME(tt.schema_id) = N'aud'
+          AND c.name = N'IsOutOfWindow')
+    DROP TYPE aud.CellChangeTvp;
+GO
+
 IF TYPE_ID(N'aud.CellChangeTvp') IS NULL
     EXEC(N'
 CREATE TYPE aud.CellChangeTvp AS TABLE
@@ -174,6 +188,7 @@ CREATE TYPE aud.CellChangeTvp AS TABLE
     ChangedByUserId int            NOT NULL,
     Origin          nvarchar(32)   NOT NULL,
     IsLateEdit      bit            NOT NULL,
-    CorrelationId   nvarchar(64)   NULL
+    CorrelationId   nvarchar(64)   NULL,
+    IsOutOfWindow   bit            NOT NULL
 );');
 GO

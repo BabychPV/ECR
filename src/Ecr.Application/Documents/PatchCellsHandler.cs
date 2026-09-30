@@ -1,4 +1,4 @@
-﻿using Ecr.Application.Common;
+using Ecr.Application.Common;
 using Ecr.Application.Documents.Dto;
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
@@ -234,7 +234,18 @@ public sealed partial class PatchCellsHandler(
         IReadOnlyDictionary<string, string> Versions,
         IReadOnlyDictionary<string, long> RowIds,
         List<PatchRow> Creations,
-        List<PatchRow> Updates);
+        List<PatchRow> Updates)
+    {
+        /// <summary>
+        /// Адреси комірок, правку яких дозволено політикою <c>Warn</c> поза вікном
+        /// доступу (<c>ФВ-2.16</c>, <c>D-239</c>): наповнює <c>CheckAccess</c>,
+        /// читає <c>BuildAuditRecords</c> (<c>IsOutOfWindow = 1</c>).
+        /// </summary>
+        /// <remarks>
+        /// ⚠ Лише оновлення наявних комірок: у нових рядків адреси ще немає.
+        /// </remarks>
+        public HashSet<CellAddress> OutOfWindow { get; } = [];
+    }
 
     /// <summary>Розподіл змін по upsert/delete разом із супутнім станом.</summary>
     /// <param name="Upserts">Комірки для запису або оновлення.</param>
@@ -952,6 +963,10 @@ public sealed partial class PatchCellsHandler(
                 else if (decision.RequiresConfirmation)
                 {
                     needsConfirmation++;
+                }
+                else if (decision.OutOfWindowMark)
+                {
+                    context.OutOfWindow.Add(address);
                 }
             }
         }
@@ -2387,7 +2402,7 @@ public sealed partial class PatchCellsHandler(
         await audit.WriteCellChangesAsync(
             BuildAuditRecords(
                 request, changes.Upserts, changes.Deletes, context.UserId, now, context.Instance.DocumentId,
-                changes.RowKeyById, previous, isLateEdit),
+                changes.RowKeyById, previous, isLateEdit, context.OutOfWindow),
             ct).ConfigureAwait(false);
     }
 
@@ -2717,7 +2732,8 @@ public sealed partial class PatchCellsHandler(
         List<CellAddress> deletes, int userId, DateTime now, long documentId,
         IReadOnlyDictionary<long, string> rowKeyById,
         IReadOnlyDictionary<CellAddress, CellValueData> previous,
-        bool isLateEdit)
+        bool isLateEdit,
+        HashSet<CellAddress>? outOfWindow = null)
     {
         var records = new List<CellChangeRecord>(upserts.Count + deletes.Count);
 
@@ -2751,7 +2767,8 @@ public sealed partial class PatchCellsHandler(
                 now, u.Address, DocumentId: documentId,
                 RowKey: rowKeyById.GetValueOrDefault(u.Address.TableRowId, string.Empty),
                 OldValue: Was(previous, u.Address), NewValue: Describe(u.Value),
-                userId, request.Origin, isLateEdit, CorrelationId: null));
+                userId, request.Origin, isLateEdit, CorrelationId: null,
+                IsOutOfWindow: outOfWindow?.Contains(u.Address) == true));
         }
 
         foreach (var d in deletes)
@@ -2760,7 +2777,8 @@ public sealed partial class PatchCellsHandler(
                 now, d, DocumentId: documentId,
                 RowKey: rowKeyById.GetValueOrDefault(d.TableRowId, string.Empty),
                 OldValue: Was(previous, d), NewValue: null,
-                userId, request.Origin, isLateEdit, CorrelationId: null));
+                userId, request.Origin, isLateEdit, CorrelationId: null,
+                IsOutOfWindow: outOfWindow?.Contains(d) == true));
         }
 
         return records;

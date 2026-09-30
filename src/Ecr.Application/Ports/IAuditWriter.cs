@@ -66,6 +66,11 @@ public interface IAuditWriter
 /// <param name="Origin">UserEdit | Import | Recalculation | Migration.</param>
 /// <param name="IsLateEdit">Зміна в <c>Grace</c> або після <c>Reopen</c> (D-70).</param>
 /// <param name="CorrelationId">Наскрізний ідентифікатор запиту.</param>
+/// <param name="IsOutOfWindow">
+/// Правка дозволена політикою <c>Warn</c> («дозволити з позначкою») поза вікном
+/// доступу до періоду (<c>ФВ-2.16</c>, <c>D-239</c>). Не плутати з
+/// <paramref name="IsLateEdit"/>.
+/// </param>
 public sealed record CellChangeRecord(
     DateTime ChangedAt,
     CellAddress Address,
@@ -76,7 +81,8 @@ public sealed record CellChangeRecord(
     int ChangedByUserId,
     string Origin,
     bool IsLateEdit,
-    string? CorrelationId);
+    string? CorrelationId,
+    bool IsOutOfWindow = false);
 
 /// <summary>Структурна зміна метаданих.</summary>
 public sealed record StructureChangeRecord(
