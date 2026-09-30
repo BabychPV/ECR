@@ -41,6 +41,113 @@ public sealed class RegistrySyncExecuteTests(SqlServerFixture sql)
 
     private readonly string _tag = Guid.NewGuid().ToString("N")[..8];
 
+    // ─── Автостворення ──────────────────────────────────────────────────────
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "D-212")]
+    public async Task External_Manual_створює_запис_з_кодом_і_назвою_з_імені_елемента_і_ключем()
+    {
+        var stand = await ArrangeAsync(RegistrySourceKind.External);
+        var g9 = stand.Add("Stack9", 3m);
+        await using var provider = BuildProvider();
+
+        try
+        {
+            await RunAsync(provider, stand);
+
+            var created = await EntryAsync(stand, "Stack9");
+            Assert.NotNull(created);
+            Assert.Equal("Stack9", created.DisplayL10n.Values["en"]);
+            Assert.Equal(3m, await CapAsync(stand, created.Id));
+            Assert.Equal(stand.SvcId, created.CreatedByUserId);
+
+            var key = await KeyAsync(stand, g9);
+            Assert.Equal(created.Id, key.RegistryEntryId);
+            Assert.Equal($@"{stand.Parent}\Stack9", key.ExternalPath);
+
+            var auto = Assert.Single(await EventsAsync(stand), e => e.Status == CollectionCoverage.RegistryAutoCreated);
+            Assert.Contains($"element={g9}; entry={created.Id}", auto.Details, StringComparison.Ordinal);
+
+            // Повтор: елемент уже прив'язаний — ні другого запису, ні другої події.
+            var count = (await EventsAsync(stand)).Count;
+            await RunAsync(provider, stand);
+            Assert.Equal(1, await CountEntriesAsync(stand, "Stack9"));
+            Assert.Equal(count, (await EventsAsync(stand)).Count);
+        }
+        finally
+        {
+            await DeactivateAsync(stand);
+        }
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "D-212")]
+    public async Task External_Auto_бере_код_із_послідовності_а_назву_з_імені()
+    {
+        var stand = await ArrangeAsync(RegistrySourceKind.External, codeMode: RegistryCodeMode.Auto);
+        var g9 = stand.Add("Stack9", 3m);
+        await using var provider = BuildProvider();
+
+        try
+        {
+            await RunAsync(provider, stand);
+
+            var key = await KeyAsync(stand, g9);
+            await using var db = Context();
+            var created = await db.RegistryEntries.AsNoTracking().SingleAsync(e => e.Id == key.RegistryEntryId);
+            Assert.Matches("^E[0-9]{9,}$", created.Code);
+            Assert.Equal("Stack9", created.DisplayL10n.Values["en"]);
+        }
+        finally
+        {
+            await DeactivateAsync(stand);
+        }
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "D-212")]
+    public async Task Зайнятий_код_не_створює_і_не_привʼязує_а_подія_з_Id_тримача()
+    {
+        var stand = await ArrangeAsync(RegistrySourceKind.External);
+        var g9 = stand.Add("Stack9", 3m);
+        var holder = await AddEntryAsync(stand, "Stack9");
+        await using var provider = BuildProvider();
+
+        try
+        {
+            await RunAsync(provider, stand);
+
+            // ⛔ CreateOnly: наявний запис із тим самим кодом не «переймається» елементом.
+            Assert.Equal(1, await CountEntriesAsync(stand, "Stack9"));
+            await using (var db = Context())
+            {
+                Assert.False(await db.RegistryExternalKeys.AnyAsync(k => k.ExternalId == g9));
+                Assert.False(await db.RegistryValues.AnyAsync(v => v.RegistryEntryId == holder));
+            }
+
+            var events = await EventsAsync(stand);
+            Assert.DoesNotContain(events, e => e.Status == CollectionCoverage.RegistryAutoCreated);
+            var refused = Assert.Single(events, e => e.Status == CollectionCoverage.RegistryElementUnlinked);
+            Assert.Contains($"element={g9}", refused.Details, StringComparison.Ordinal);
+            Assert.Contains($"id={holder};", refused.Details, StringComparison.Ordinal);
+            Assert.Contains($"messageKey={RegistryEntryWriter.EntryCodeTakenKey}", refused.Details, StringComparison.Ordinal);
+
+            // Дедуп: той самий стан — жодної нової події.
+            await RunAsync(provider, stand);
+            Assert.Single(await EventsAsync(stand), e => e.Status == CollectionCoverage.RegistryElementUnlinked);
+        }
+        finally
+        {
+            await DeactivateAsync(stand);
+        }
+    }
+
     // ─── Lookup за кодом ────────────────────────────────────────────────────
 
     [Fact]
@@ -293,6 +400,7 @@ public sealed class RegistrySyncExecuteTests(SqlServerFixture sql)
     {
         var stand = await ArrangeAsync(RegistrySourceKind.External);
         stand.Put("Stack1", "Capacity", 11m);
+        var g9 = stand.Add("Stack9", 3m);
         var rules = new FakeRules(fail: false);
         await using var provider = BuildProvider(rules);
 
@@ -300,15 +408,18 @@ public sealed class RegistrySyncExecuteTests(SqlServerFixture sql)
         {
             await RunAsync(provider, stand);
 
-            // ⛔ ThrowIfErrors НЕ викликається: джерело — правда, рядок лишається.
+            // ⛔ ThrowIfErrors НЕ викликається: джерело — правда, рядки лишаються.
             Assert.Equal(11m, await CapAsync(stand, stand.E1));
+            var created = (await KeyAsync(stand, g9)).RegistryEntryId;
 
-            // Оцінено саме записане цим прогоном: оновлений E1 (E2 без змін).
-            Assert.Equal(new[] { stand.E1 }, rules.Seen);
+            // Оцінено саме записане цим прогоном: оновлений E1 і створений запис, одним викликом.
+            Assert.Equal(new[] { stand.E1, created }, rules.Seen.Order());
 
-            var violation = Assert.Single(await EventsAsync(stand), e => e.Status == CollectionCoverage.RegistryRuleViolation);
-            Assert.Contains($"element={stand.G1}; entry={stand.E1}", violation.Details, StringComparison.Ordinal);
-            Assert.Contains("rule=R_MAX; severity=Error", violation.Details, StringComparison.Ordinal);
+            var violations = (await EventsAsync(stand)).Where(e => e.Status == CollectionCoverage.RegistryRuleViolation).ToList();
+            Assert.Equal(2, violations.Count);
+            Assert.Contains(violations, e => e.Details!.Contains($"element={stand.G1}; entry={stand.E1}", StringComparison.Ordinal)
+                                             && e.Details.Contains("rule=R_MAX; severity=Error", StringComparison.Ordinal));
+            Assert.Contains(violations, e => e.Details!.Contains($"element={g9}; entry={created}", StringComparison.Ordinal));
         }
         finally
         {

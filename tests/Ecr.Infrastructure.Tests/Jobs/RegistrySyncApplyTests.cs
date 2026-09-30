@@ -33,6 +33,11 @@ namespace Ecr.Infrastructure.Tests.Jobs;
 /// одиниця роботи, аудит і темпоральна історія — ті самі, що в проді. Підроблені лише джерело й
 /// каталог.
 /// <para>
+/// ⚠ D-212 PR-6 (2026-09-30): External на повному знімку тепер СТВОРЮЄ запис для неприв'язаного g9
+/// (у тестах ключів g9 прибрано), а елемент із GUID іншого довідника — подія «ключ зайнято».
+/// Сценарії PR-6 — <c>RegistrySyncExecuteTests</c>.
+/// </para>
+/// <para>
 /// Мутаційні докази (у власному worktree, 2026-09-28/29; кожна мутація окремо, після неї — відкат і
 /// контрольний прогін <c>RegistrySync*</c> 9/9). Усі чотири доведено: М1 — червоні External (рядок
 /// ревізії: очікувано +1, фактично без зміни) і тест відмови; М2 — червоні всі чотири тести цього
@@ -106,9 +111,10 @@ public sealed class RegistrySyncApplyTests(SqlServerFixture sql)
             Assert.Equal(V(12.5m, stand.SvcId), values[stand.E1]);
             Assert.Equal(V(30m, stand.SvcId), values[stand.E2]);
 
-            // ⛔ Через writer: ревізія (RT-03) +1 на пакет, подія аудиту від svc-integration
+            // ⛔ Через writer: ревізія (RT-03) рухається на кожен виклик writer'а — тут їх два в одній
+            // спробі (D-212 PR-6: автостворення g9 + оновлення E1/E2), подія аудиту від svc-integration
             // на кожен запис, у темпоральній історії — попередні версії обох значень.
-            Assert.Equal(revision + 1, await RevisionAsync(stand));
+            Assert.Equal(revision + 2, await RevisionAsync(stand));
             Assert.Equal(1, await CountAsync(AuditQuery(stand.E1, stand.SvcId)));
             Assert.Equal(1, await CountAsync(AuditQuery(stand.E2, stand.SvcId)));
             Assert.Equal(historyBefore + 2, await CountAsync(HistoryQuery(stand)));
@@ -118,7 +124,9 @@ public sealed class RegistrySyncApplyTests(SqlServerFixture sql)
 
             var events = await EventsAsync(stand.EntityId);
             Assert.DoesNotContain(events, e => e.Status == CollectionCoverage.RegistryPendingUpdate);
-            Assert.Single(events, e => e.Status == CollectionCoverage.RegistryElementUnlinked);
+            // D-212 (1): External на повному знімку створює запис для g9, а не лише повідомляє.
+            Assert.DoesNotContain(events, e => e.Status == CollectionCoverage.RegistryElementUnlinked);
+            Assert.Single(events, e => e.Status == CollectionCoverage.RegistryAutoCreated);
 
             // ── Повторний прогін: джерело те саме → нічого не змінюється, подій не додається.
             var fingerprint = await FingerprintAsync(stand);
@@ -459,7 +467,7 @@ public sealed class RegistrySyncApplyTests(SqlServerFixture sql)
             var events = await EventsAsync(stand.EntityId);
             Assert.DoesNotContain(events, e => e.Details!.Split("; ").Contains($"entry={xb}"));
 
-            // ⛔ D-212 PR-6: A НЕ створює й не перепривʼязує запис для gx — GUID уже тримає довідник B
+            // ⛔ D-212 PR-6: External A НЕ створює запис для gx — GUID уже тримає довідник B
             // (UQ_RegistryExternalKey). Лише подія «ключ зайнято», без Id чужого запису.
             await using (var db = Context())
             {
@@ -524,6 +532,8 @@ public sealed class RegistrySyncApplyTests(SqlServerFixture sql)
     /// (шлях застарів) і E2 ↔ g2, обидва в джерелі; g9 у джерелі без зв'язку. E1.CAP = 10 (автор
     /// <paramref name="e1Author"/>), E2.CAP = 20 (svc). Джерело: g1 12.5, g2 30; з
     /// <paramref name="withRef"/> — g1.Ref = неіснуючий Id, g2.Ref — Id самого E2 (живий запис).
+    /// ⚠ З <paramref name="keyed"/> g9 у джерелі немає: з D-212 PR-6 External створив би для нього
+    /// запис із ключем CAP = 3 у тому ж пакеті, і тести ключів міряли б не те.
     /// </summary>
     private async Task<Stand> ArrangeAsync(
         RegistrySourceKind kind, Author e1Author, bool withRef = false, KeyedSetup? keyed = null)
@@ -623,8 +633,12 @@ public sealed class RegistrySyncApplyTests(SqlServerFixture sql)
         {
             new("Stack1", null, $@"{parent}\Stack1", null, "Element", g1),
             new("Stack2", null, $@"{parent}\Stack2", null, "Element", g2),
-            new("Stack9", null, $@"{parent}\Stack9", null, "Element", g9),
         };
+
+        if (keyed is null)
+        {
+            children.Add(new("Stack9", null, $@"{parent}\Stack9", null, "Element", g9));
+        }
 
         var values = new Dictionary<string, SourceDataPoint>(StringComparer.OrdinalIgnoreCase);
         void Put(string path, decimal value) => values[path] = Point(path, value);

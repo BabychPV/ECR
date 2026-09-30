@@ -45,12 +45,14 @@ public interface IRegistrySyncJob
 /// </summary>
 /// <remarks>
 /// ⛔ У <c>dic.RegistryEntry</c>/<c>dic.RegistryValue</c> задача пише ЛИШЕ через
-/// <see cref="RegistryEntryWriter"/> від <c>svc-integration</c>:
+/// <see cref="RegistryEntryWriter"/> від <c>svc-integration</c>: автостворення —
+/// <see cref="RegistryEntryWriter.WriteAsync"/> з <see cref="RegistryEntryWriteBatch.CreateOnly"/>,
 /// оновлення й увімкнення/вимкнення — <see cref="RegistryEntryWriter.UpdateAsync"/> (адресація за Id,
 /// <see cref="RegistryEntryUpdate.IsActive"/>). Ревізія даних, ключі, аудит <c>RegistryValueChanged</c>
 /// і автор <c>ChangedByUserId</c> (RT-04) — ті самі, що в ручного запису.
 /// <para>
-/// ⛔ Одна СПРОБА — один DI-scope і ОДНА транзакція: оновлення, вимкнення/увімкнення, операції над ключами
+/// ⛔ Одна СПРОБА — один DI-scope і ОДНА транзакція: створення записів + їхні
+/// <c>dic.RegistryExternalKey</c>, оновлення, вимкнення/увімкнення, операції над ключами
 /// (перепривʼязка з рядком <c>aud.StructureChange</c>, позначки зникнення, шляхи) і
 /// <see cref="IRegistryRuleEngine.EvaluateAsync"/> на записаних записах. Збій будь-де в спробі —
 /// відкат усього, подій дій немає; не «дані» (не <c>BusinessRule</c>/<c>Domain</c>/<c>Concurrency</c>) —
@@ -62,21 +64,22 @@ public interface IRegistrySyncJob
 /// <see cref="CollectionCoverage.RegistryRuleViolation"/>.
 /// </para>
 /// <para>
-/// ⚠ «Все або нічого» writer'а (рішення S7): відмова рядків → ці записи йдуть подією
-/// <see cref="CollectionCoverage.RegistryValueRejected"/>, решта пакета — ОДНИМ
+/// ⚠ «Все або нічого» writer'а (рішення S7): відмова рядків → ці записи йдуть подією (оновлення —
+/// <see cref="CollectionCoverage.RegistryValueRejected"/>, створення —
+/// <see cref="CollectionCoverage.RegistryElementUnlinked"/> з кодом відмови), решта пакета — ОДНИМ
 /// повтором; відмова на весь пакет (<c>ECR-REG-4092</c>, зокрема <c>keyTakenConcurrently</c>) або
 /// невдалий повтор → операції над ключами окремою спробою, далі кожен запис поштучно, у власній
 /// спробі. Один поганий запис не блокує довідник, а кількість спроб обмежена.
 /// </para>
 /// <para>
-/// ⚠ Події ДІЙ (<c>ExternalKeyRelinked</c>, <c>Deactivated</c>,
+/// ⚠ Події ДІЙ (<c>AutoCreated</c>, <c>ExternalKeyRelinked</c>, <c>Deactivated</c>,
 /// <c>Reactivated</c>, <c>RuleViolation</c>) пишуться лише ПІСЛЯ коміту спроби, що їх виконала.
 /// Журнал — окремим збереженням у контексті задачі після всіх спроб: збій між комітом спроби й
 /// журналом втратить подію, а не дані (журнал відновиться наступною зміною).
 /// </para>
 /// <para>
 /// ⚠ Елемент, чий GUID уже прив'язаний у цьому джерелі до запису ІНШОГО довідника
-/// (<c>UQ_RegistryExternalKey</c>), у план не йде зовсім — ні перепривʼязки, ні (далі) створення: лише
+/// (<c>UQ_RegistryExternalKey</c>), у план не йде зовсім — ні створення, ні перепривʼязки: лише
 /// подія <see cref="CollectionCoverage.RegistryElementUnlinked"/> з
 /// <c>err.ECR-REG-0409.externalKeyTaken</c>, без Id чужого запису.
 /// </para>
@@ -193,6 +196,7 @@ public sealed class RegistrySyncJob(
             links,
             entries,
             mappings,
+            CodeMode: registry.CodeMode,
             OnMissingInSource: entity.OnMissingInSource);
 
         // D-212 (5): коди записів інших довідників → Id, одним запитом на довідник.
@@ -243,12 +247,29 @@ public sealed class RegistrySyncJob(
     private async Task<List<SyncEvent>> ApplyAsync(ApplyContext context, RegistrySyncPlan plan, CancellationToken ct)
     {
         var events = new List<SyncEvent>();
+        var refused = new List<CreateRefusal>();
+
+        // Manual: код = ім'я елемента. Два елементи з тим самим ім'ям дали б writer'у дубль коду в
+        // пакеті (помилка виклику) — другий і далі відмовляються як «код зайнято» першим.
+        var creates = new List<RegistrySyncCreate>();
+        var codes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var create in plan.Creates)
+        {
+            if (create.Code is { } code && !codes.Add(code))
+            {
+                refused.Add(new CreateRefusal(create, ErrorCodes.RegistryEntryInUse, RegistryEntryWriter.EntryCodeTakenKey));
+                continue;
+            }
+
+            creates.Add(create);
+        }
+
         var updates = Updates(plan);
         var keys = new KeyOps(plan.Relinks, plan.MissingMarks, plan.MissingClears, plan.PathChanges);
         var outcomes = new List<Outcome>();
         var externalIds = context.ExternalIds(plan);
 
-        if (updates.Count > 0 || !keys.IsEmpty)
+        if (creates.Count > 0 || updates.Count > 0 || !keys.IsEmpty)
         {
             var single = false;
             var done = false;
@@ -257,7 +278,7 @@ public sealed class RegistrySyncJob(
             {
                 try
                 {
-                    var result = await AttemptAsync(context, updates, keys, ct).ConfigureAwait(false);
+                    var result = await AttemptAsync(context, creates, updates, keys, ct).ConfigureAwait(false);
                     if (result.Outcome is { } outcome)
                     {
                         outcomes.Add(outcome);
@@ -266,7 +287,9 @@ public sealed class RegistrySyncJob(
                     }
 
                     // Відмова рядків: вони — у журнал, решта пакета — одним повтором.
+                    refused.AddRange(result.CreateErrors.Select(e => Refusal(creates[e.Row - 1], e)));
                     events.AddRange(result.UpdateErrors.Select(e => Rejected(updates[e.Row - 1], e, externalIds)));
+                    creates = Without(creates, result.CreateErrors);
                     updates = Without(updates, result.UpdateErrors);
                     single = attempt == 1;
                 }
@@ -281,15 +304,35 @@ public sealed class RegistrySyncJob(
                 // Ключі — окремо: від відмови запису вони не залежать. Відмова тут — збій прогону.
                 if (!keys.IsEmpty)
                 {
-                    var result = await AttemptAsync(context, [], keys, ct).ConfigureAwait(false);
+                    var result = await AttemptAsync(context, [], [], keys, ct).ConfigureAwait(false);
                     outcomes.Add(result.Outcome!);
+                }
+
+                foreach (var create in creates)
+                {
+                    try
+                    {
+                        var result = await AttemptAsync(context, [create], [], KeyOps.None, ct).ConfigureAwait(false);
+                        if (result.Outcome is { } outcome)
+                        {
+                            outcomes.Add(outcome);
+                        }
+                        else
+                        {
+                            refused.AddRange(result.CreateErrors.Select(e => Refusal(create, e)));
+                        }
+                    }
+                    catch (Exception ex) when (IsBatchFailure(ex))
+                    {
+                        refused.Add(Refusal(create, ex));
+                    }
                 }
 
                 foreach (var update in updates)
                 {
                     try
                     {
-                        var result = await AttemptAsync(context, [update], KeyOps.None, ct).ConfigureAwait(false);
+                        var result = await AttemptAsync(context, [], [update], KeyOps.None, ct).ConfigureAwait(false);
                         if (result.Outcome is { } outcome)
                         {
                             outcomes.Add(outcome);
@@ -309,6 +352,12 @@ public sealed class RegistrySyncJob(
 
         foreach (var outcome in outcomes)
         {
+            foreach (var (create, entryId) in outcome.Created)
+            {
+                externalIds[entryId] = create.ExternalId;
+                events.Add(Event(new RegistrySyncEvent(RegistrySyncEventKind.AutoCreated, create.ExternalId, entryId)));
+            }
+
             events.AddRange(outcome.Relinks.Select(Relinked));
 
             foreach (var update in outcome.Updates.Where(u => u.IsActive is not null))
@@ -321,12 +370,13 @@ public sealed class RegistrySyncJob(
             events.AddRange(outcome.Violations.Select(v => Violation(v, externalIds)));
         }
 
+        events.AddRange(await RefusedAsync(context.RegistryDefId, refused, ct).ConfigureAwait(false));
         return events;
     }
 
     /// <summary>
-    /// Одна спроба: власний DI-scope від <c>svc-integration</c> і ОДНА транзакція на оновлення,
-    /// ключі й оцінку правил.
+    /// Одна спроба: власний DI-scope від <c>svc-integration</c> і ОДНА транзакція на створення,
+    /// оновлення, ключі й оцінку правил.
     /// </summary>
     /// <returns>
     /// Виконане (<see cref="AttemptResult.Outcome"/>) або відмови рядків writer'а — тоді транзакцію
@@ -340,6 +390,7 @@ public sealed class RegistrySyncJob(
     /// </remarks>
     private async Task<AttemptResult> AttemptAsync(
         ApplyContext context,
+        List<RegistrySyncCreate> creates,
         List<RegistryEntryUpdate> updates,
         KeyOps keys,
         CancellationToken ct)
@@ -354,6 +405,7 @@ public sealed class RegistrySyncJob(
         var writer = services.GetRequiredService<RegistryEntryWriter>();
 
         Outcome? outcome = null;
+        IReadOnlyList<RegistryEntryImportError> createErrors = [];
         IReadOnlyList<RegistryEntryImportError> updateErrors = [];
 
         try
@@ -362,7 +414,31 @@ public sealed class RegistrySyncJob(
                 async tx =>
                 {
                     scoped.ChangeTracker.Clear();
+                    var created = new List<(RegistrySyncCreate Create, long EntryId)>();
                     var changed = new HashSet<long>();
+
+                    if (creates.Count > 0)
+                    {
+                        var result = await writer.WriteAsync(
+                            new RegistryEntryWriteBatch(context.RegistryDefId, [.. creates.Select(Write)]) { CreateOnly = true },
+                            tx).ConfigureAwait(false);
+
+                        if (result.Errors.Count > 0)
+                        {
+                            createErrors = result.Errors;
+                            throw new RollbackAttempt();
+                        }
+
+                        foreach (var row in result.Rows)
+                        {
+                            var create = creates[row.Row - 1];
+                            var key = new RegistryExternalKey(row.Entry.Id, context.DataSourceId, create.ExternalId);
+                            key.MarkSynced(create.ExternalPath, context.Now);
+                            scoped.RegistryExternalKeys.Add(key);
+                            created.Add((create, row.Entry.Id));
+                            changed.Add(row.Entry.Id);
+                        }
+                    }
 
                     if (updates.Count > 0)
                     {
@@ -406,7 +482,7 @@ public sealed class RegistrySyncJob(
                             .ConfigureAwait(false)).Violations;
                     }
 
-                    outcome = new Outcome(updates, [.. relinked.Select(r => r.Relink)], violations);
+                    outcome = new Outcome(created, updates, [.. relinked.Select(r => r.Relink)], violations);
                 },
                 ct).ConfigureAwait(false);
         }
@@ -415,7 +491,7 @@ public sealed class RegistrySyncJob(
             // Задуманий відкат: відмова рядків writer'а.
         }
 
-        return new AttemptResult(outcome, updateErrors);
+        return new AttemptResult(outcome, createErrors, updateErrors);
     }
 
     /// <summary>
@@ -514,6 +590,15 @@ public sealed class RegistrySyncJob(
             dataSourceId = context.DataSourceId,
             externalId,
         });
+
+    /// <summary>Рядок пакета створення для writer'а: код (порожній — Auto), назва, значення.</summary>
+    private static RegistryEntryWrite Write(RegistrySyncCreate create)
+        => new(
+            create.Code ?? string.Empty,
+            create.Values.ToDictionary(v => v.FieldCode, v => (object?)v.Value, StringComparer.Ordinal))
+        {
+            DisplayName = create.DisplayName,
+        };
 
     /// <summary>
     /// Оновлення на запис: поля планувальника + увімкнення/вимкнення (<see cref="RegistryEntryUpdate.IsActive"/>)
@@ -626,6 +711,46 @@ public sealed class RegistrySyncJob(
         }
 
         return taken;
+    }
+
+    /// <summary>
+    /// Події відмов створення. <c>entryCodeTaken</c> — з Id запису, що тримає код (шаблон тексту
+    /// має <c>{id}</c>, а помилка рядка writer'а параметрів не несе): читається тут одним запитом.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Id, а не інший ключ: код у тексті вже є, а Id — те, за чим адміністратор знайде запис, що
+    /// заважає (зокрема видалений логічно: код за ним лишається, і в переліку він не видний).
+    /// </remarks>
+    private async Task<List<SyncEvent>> RefusedAsync(int registryDefId, List<CreateRefusal> refused, CancellationToken ct)
+    {
+        var codes = refused
+            .Where(r => r.MessageKey == RegistryEntryWriter.EntryCodeTakenKey && r.Create.Code is not null)
+            .Select(r => r.Create.Code!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var holders = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+        foreach (var chunk in codes.Chunk(ChunkSize))
+        {
+            var list = chunk.ToList();
+            var rows = await db.RegistryEntries
+                .AsNoTracking()
+                .Where(e => e.RegistryDefId == registryDefId && list.Contains(e.Code))
+                .OrderBy(e => e.Id)
+                .Select(e => new { e.Code, e.Id })
+                .ToListAsync(ct)
+                .ConfigureAwait(false);
+
+            foreach (var row in rows)
+            {
+                holders.TryAdd(row.Code, row.Id);
+            }
+        }
+
+        return [.. refused.Select(r => Refused(
+            r, r.MessageKey == RegistryEntryWriter.EntryCodeTakenKey && r.Create.Code is { } code
+                ? holders.TryGetValue(code, out var id) ? id : null
+                : null))];
     }
 
     /// <summary>Мапінги сутності на поля ЦЬОГО довідника — і активні, і вимкнені (планувальнику потрібні обидва).</summary>
@@ -746,13 +871,15 @@ public sealed class RegistrySyncJob(
             }
         }
 
+        // ⚠ Ім'я елемента — назва (і в Manual — код) автоствореного запису (D-212 Q4).
         var snapshot = elements.Values
             .Select(e => new RegistrySyncSourceElement(
                 e.ExternalId,
                 e.Path,
                 values.TryGetValue(e.ExternalId, out var byAttribute)
                     ? byAttribute
-                    : new Dictionary<string, object?>(StringComparer.Ordinal)))
+                    : new Dictionary<string, object?>(StringComparer.Ordinal),
+                e.Name))
             .ToList();
 
         return new Snapshot(snapshot, complete, rejections);
@@ -1014,6 +1141,29 @@ public sealed class RegistrySyncJob(
             KeyOf(status, $"element={externalId}; foreign", "taken"));
     }
 
+    /// <summary>Запис для нового елемента не створено: відмова writer'а.</summary>
+    private static SyncEvent Refused(CreateRefusal r, long? holderId)
+    {
+        var status = CollectionCoverage.RegistryElementUnlinked;
+        var id = holderId?.ToString(CultureInfo.InvariantCulture);
+        var value = $"code={r.Create.Code}; id={id}; field={r.Field}; error={r.ErrorCode}; messageKey={r.MessageKey}";
+
+        return new SyncEvent(
+            status,
+            Truncate($"element={r.Create.ExternalId}; code={r.Create.Code ?? "—"}; id={id ?? "—"}; field={r.Field ?? "—"}; "
+                     + $"error={r.ErrorCode ?? "—"}; messageKey={r.MessageKey ?? "—"}; not created (writer)"),
+            KeyOf(status, $"element={r.Create.ExternalId}; create", value));
+    }
+
+    private static CreateRefusal Refusal(RegistrySyncCreate create, RegistryEntryImportError error)
+        => new(create, ErrorCodeOf(error.MessageKey), error.MessageKey) { Field = error.Field };
+
+    private static CreateRefusal Refusal(RegistrySyncCreate create, Exception failure)
+    {
+        var (code, messageKey, field) = Describe(failure);
+        return new CreateRefusal(create, code, messageKey) { Field = field };
+    }
+
     private static SyncEvent Pending(RegistrySyncUpdate u)
     {
         var subject = $"entry={u.RegistryEntryId.ToString(CultureInfo.InvariantCulture)}; field={u.FieldCode}";
@@ -1228,10 +1378,12 @@ public sealed class RegistrySyncJob(
     }
 
     /// <summary>Закомічена спроба.</summary>
+    /// <param name="Created">Створені записи з Id.</param>
     /// <param name="Updates">Застосовані оновлення (зокрема увімкнення/вимкнення).</param>
     /// <param name="Relinks">Виконані перепривʼязки.</param>
     /// <param name="Violations">Порушення правил довідника після запису.</param>
     private sealed record Outcome(
+        IReadOnlyList<(RegistrySyncCreate Create, long EntryId)> Created,
         IReadOnlyList<RegistryEntryUpdate> Updates,
         IReadOnlyList<RegistrySyncRelink> Relinks,
         IReadOnlyList<RegistryRuleViolationDto> Violations);
@@ -1239,7 +1391,15 @@ public sealed class RegistrySyncJob(
     /// <summary>Результат спроби: виконане або відмови рядків (тоді відкочено).</summary>
     private sealed record AttemptResult(
         Outcome? Outcome,
+        IReadOnlyList<RegistryEntryImportError> CreateErrors,
         IReadOnlyList<RegistryEntryImportError> UpdateErrors);
+
+    /// <summary>Запис для нового елемента не створено.</summary>
+    private sealed record CreateRefusal(RegistrySyncCreate Create, string? ErrorCode, string? MessageKey)
+    {
+        /// <summary>Поле, назване у відмові.</summary>
+        public string? Field { get; init; }
+    }
 
     /// <summary>Сигнал відкату транзакції спроби: відмова рядків writer'а.</summary>
     private sealed class RollbackAttempt : Exception
