@@ -187,6 +187,10 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock, IMemory
             query = query.Where(s => visible.Contains(s.ProjectId));
         }
 
+        // ⚠ Застарілість (ФВ-10.5) — підзапит у тому самому SELECT, а не другий
+        // прохід: визначення одне для переліку й журналу (`ReportSnapshotStaleness`).
+        var stale = ReportSnapshotStaleness.StaleSnapshotIds(db);
+
         return await query
             .OrderByDescending(s => s.BuiltAt)
             .Take(MaxSnapshots)
@@ -206,6 +210,7 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock, IMemory
                 s.BuiltAt)
             {
                 HashFormat = s.HashFormat ?? VerifyReportSnapshotHandler.FormatUnknown,
+                IsStale = stale.Contains(s.Id),
             })
             .ToListAsync(ct)
             .ConfigureAwait(false);

@@ -241,9 +241,67 @@ public sealed class RunCalculationHandler(
             .SwitchCurrentRunAsync(calculationRunId, profile.ToJson(), ct)
             .ConfigureAwait(false);
 
-        await results.InvalidateReportSnapshotsAsync(calculationRunId, ct).ConfigureAwait(false);
+        var invalidated = await results
+            .InvalidateReportSnapshotsAsync(calculationRunId, ct)
+            .ConfigureAwait(false);
+
+        // ⚠ Журнал — у ТІЙ САМІЙ транзакції, що й перемикання (C4): відкат
+        // перемикання не лишає запису «зріз застарів», а запис не губиться,
+        // якщо перемикання закомітилось.
+        var utcNow = clock.UtcNow;
+        foreach (var snapshot in invalidated)
+        {
+            await audit
+                .WriteStructureChangeAsync(SnapshotInvalidatedRecord(snapshot, calculationRunId, utcNow), ct)
+                .ConfigureAwait(false);
+        }
+
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
     }
+
+    /// <summary>Тип сутності в журналі для застарілості зрізу (ФВ-10.5).</summary>
+    public const string SnapshotAuditEntityType = "ReportSnapshot";
+
+    /// <summary>Операція журналу: зріз застарів після перерахунку (ФВ-10.5).</summary>
+    public const string SnapshotInvalidatedOperation = "Invalidated";
+
+    /// <summary>Автор системної події — та сама умовність, що й у <c>RecalculationService</c>.</summary>
+    private const int SystemUserId = 0;
+
+    /// <summary>Запис журналу «зріз застарів» (ФВ-10.5).</summary>
+    /// <remarks>
+    /// ⚠ Автор — система, а не той, хто запустив перерахунок: зріз застарів
+    /// як наслідок, а не як його дія, і так само застаріває після нічного
+    /// розкладу, де людини немає. Хто запустив — видно за прогоном
+    /// (<c>calculationRunId</c> у <c>NewJson</c> і в <c>CorrelationId</c>).
+    /// <para>
+    /// <c>ChangeClass.Safe</c>: вміст зрізу не змінюється — змінюється лише те,
+    /// що про нього можна сказати.
+    /// </para>
+    /// </remarks>
+    private static StructureChangeRecord SnapshotInvalidatedRecord(
+        InvalidatedReportSnapshot snapshot, long calculationRunId, DateTime utcNow)
+        => new(
+            utcNow,
+            TemplateVersionId: snapshot.TemplateVersionId,
+            EntityType: SnapshotAuditEntityType,
+            EntityId: checked((int)snapshot.SnapshotId),
+            ChangeClass: ChangeClass.Safe,
+            Operation: SnapshotInvalidatedOperation,
+            OldJson: System.Text.Json.JsonSerializer.Serialize(new { isStale = false }),
+            NewJson: System.Text.Json.JsonSerializer.Serialize(new
+            {
+                isStale = true,
+                calculationRunId,
+                reportVersionId = snapshot.ReportVersionId,
+                projectId = snapshot.ProjectId,
+                periodKey = snapshot.PeriodKey,
+                status = snapshot.Status,
+                builtAt = snapshot.BuiltAt,
+            }),
+            ChangeReason: "calculation-run-current",
+            ChangedByUserId: SystemUserId,
+            CorrelationId: string.Create(CultureInfo.InvariantCulture, $"calc-run:{calculationRunId}"));
 
     /// <summary>
     /// Використовує погодження: атомарно, один раз, лише своє, лише на цей

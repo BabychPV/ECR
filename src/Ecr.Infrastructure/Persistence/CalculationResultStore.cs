@@ -336,12 +336,68 @@ public sealed class CalculationResultStore(EcrDbContext db, IClock clock) : ICal
 
     /// <inheritdoc />
     /// <remarks>
-    /// Зрізи <c>rpt.*</c> будуються Етапом 5; поки їх немає, інвалідувати
-    /// нічого. Метод існує, щоб послідовність завершення прогону була повною
-    /// вже зараз — інакше на Етапі 5 довелося б згадати про неї самому.
+    /// ⚠ Кличеться ПІСЛЯ <see cref="SwitchCurrentRunAsync"/> у тій самій
+    /// транзакції (<c>RunCalculationHandler.CompleteAsync</c>), до
+    /// <c>SaveChanges</c>: прогін читається ВІДСТЕЖУВАНИМ запитом, щоб бачити
+    /// щойно поставлені в памʼяті <c>Status</c> і <c>FinishedAt</c>, а не ще
+    /// не збережені значення бази.
+    /// <para>
+    /// Лише ПОТОЧНІ зрізи: журнал — для людини, яка дивиться на звіт, а
+    /// замінений зріз уже замінено новішим. Застарілість замінених однаково
+    /// видно в переліку (<see cref="ReportSnapshotStaleness"/>).
+    /// </para>
     /// </remarks>
-    public Task InvalidateReportSnapshotsAsync(long calculationRunId, CancellationToken ct)
-        => Task.CompletedTask;
+    public async Task<IReadOnlyList<InvalidatedReportSnapshot>> InvalidateReportSnapshotsAsync(
+        long calculationRunId, CancellationToken ct)
+    {
+        var run = await db.CalculationRuns
+            .FirstOrDefaultAsync(r => r.Id == calculationRunId, ct)
+            .ConfigureAwait(false);
+
+        // ⛔ Прогін, що не став актуальним (старіший за вже актуальний новіший),
+        // чисел звітові не дає — і нічого не старить.
+        if (run is not { IsCurrent: true, FinishedAt: { } becameCurrentAt })
+        {
+            return [];
+        }
+
+        var projectId = run.ProjectId;
+        var periodKey = run.PeriodKey;
+
+        // ⚠ «Застарів саме через цей прогін» = не був застарілим через інші.
+        // Інакше кожен наступний перерахунок заносив би в журнал ті самі зрізи
+        // знову, і журнал перестав би відповідати на питання «коли застарів».
+        var staleWithoutThisRun = ReportSnapshotStaleness.StaleSnapshotIds(db, exceptRunId: calculationRunId);
+
+        return await (
+                from snapshot in db.ReportSnapshots.AsNoTracking()
+                join project in db.Projects.AsNoTracking() on snapshot.ProjectId equals project.Id
+                where snapshot.ProjectId == projectId
+                      && snapshot.IsCurrent
+                      && (periodKey == null || snapshot.PeriodKey == null || snapshot.PeriodKey == periodKey)
+                      && snapshot.BuiltAt < becameCurrentAt
+                      && !staleWithoutThisRun.Contains(snapshot.Id)
+                orderby snapshot.Id
+                select new InvalidatedReportSnapshot(
+                    snapshot.Id,
+                    snapshot.ReportVersionId,
+                    snapshot.ProjectId,
+                    project.TemplateVersionId,
+                    snapshot.PeriodKey,
+                    snapshot.Status.ToString(),
+                    snapshot.BuiltAt))
+            .Take(MaxInvalidatedSnapshots)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>Стеля записів журналу застарілості на один прогін.</summary>
+    /// <remarks>
+    /// Поточний зріз один на «версію × проєкт × період»; тисяча — з великим
+    /// запасом на всі версії звітів проєкту. Стеля — від нескінченного журналу,
+    /// а не від законного обсягу; сама застарілість від неї не залежить.
+    /// </remarks>
+    private const int MaxInvalidatedSnapshots = 1_000;
 
     /// <inheritdoc />
     public async Task SwitchCurrentRunAsync(
