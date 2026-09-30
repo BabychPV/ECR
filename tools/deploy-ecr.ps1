@@ -714,6 +714,26 @@ function Resolve-JobExecutionConfig {
     return [pscustomobject]@{ Set = $set; Remove = [string[]] $remove; Warnings = [string[]] $warnings }
 }
 
+# ⛔ Чиста функція: чи потрібен .NET SDK цьому запуску. Його кличуть у двох місцях —
+# `build-msi.ps1` (коли -MsiPath не задано) і `dotnet ef migrations script` (крок 2,
+# коли схема не з пакета й немає -SkipSchema). Більше ніде: пакований запуск із
+# готовим MSI обходиться без SDK (install-guide §2.1).
+function Get-DotnetRequirement {
+    param(
+        [Parameter(Mandatory)] [bool] $HasMsiPath,
+        [Parameter(Mandatory)] [bool] $SkipSchema,
+        [Parameter(Mandatory)] [bool] $IsPackagedSchema
+    )
+
+    $reasons = @()
+    if (-not $HasMsiPath) { $reasons += 'build-msi.ps1 (-MsiPath не задано)' }
+    if (-not $SkipSchema -and -not $IsPackagedSchema) {
+        $reasons += 'dotnet ef migrations script (схема не з пакета, без -SkipSchema)'
+    }
+
+    return [pscustomobject]@{ Required = ($reasons.Count -gt 0); Reasons = [string[]] $reasons }
+}
+
 # ⛔ S11: відбиток у тому вигляді, в якому його шукає застосунок
 # (`AuthenticationSetup.FindCertificate`): без пробілів і нерозривних пробілів —
 # з вікна сертифіката Windows його копіюють групами по два символи.
@@ -756,8 +776,15 @@ Write-Step "Крок 1/7: передумови"
 if (-not (Get-Command sqlcmd -ErrorAction SilentlyContinue)) {
     throw "sqlcmd не знайдено. Ним DBA виконує розгортання — без нього продовжувати нема сенсу."
 }
-if (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) {
-    throw ".NET SDK не знайдено."
+# ⛔ .NET SDK потрібен лише там, де його реально кличуть (Get-DotnetRequirement):
+# на чистому сервері з пакованою схемою і готовим MSI його немає й бути не мусить
+# (install-guide §2.1, Q-219) — безумовна вимога тут зупиняла б саме цей сценарій.
+$dotnetNeed = Get-DotnetRequirement -HasMsiPath ([bool] $MsiPath) -SkipSchema ([bool] $SkipSchema) `
+    -IsPackagedSchema ([bool] $isPackagedSchema)
+if ($dotnetNeed.Required -and -not (Get-Command dotnet -ErrorAction SilentlyContinue)) {
+    throw (".NET SDK не знайдено, а він потрібен для: $($dotnetNeed.Reasons -join '; '). " +
+        "На чистому сервері передай готовий -MsiPath і запускай із пакета майстра (sql\ і migration.sql поруч зі скриптом) " +
+        "або -SkipSchema, якщо схему вже накотив DBA.")
 }
 if (-not $MsiPath -and -not $Version) {
     throw "Треба або -MsiPath (готовий Ecr.msi), або -Version (сам зберу через build-msi.ps1)."
