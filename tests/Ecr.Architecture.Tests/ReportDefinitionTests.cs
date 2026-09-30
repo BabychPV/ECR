@@ -67,8 +67,18 @@ public sealed partial class ReportDefinitionTests
         // SSRS ми маємо просто підготувати сирі дані») віддає статус аркуша
         // КОЛОНКОЮ: сирі дані — усі, а звіт регулятору обирає статус сам.
         var snapshotViews = ViewRegex.Matches(views)
-            .Where(v => v.Groups["body"].Value.Contains("rpt.ReportSnapshot", StringComparison.Ordinal))
+            .Where(v => !IsRawDocumentView(v.Groups["body"].Value))
             .ToList();
+
+        // ⛔ Виняток — ЛИШЕ вʼюха, що читає сирі комірки `doc.CellValue`. Раніше
+        // сторож перевіряв тільки вʼюхи з `rpt.ReportSnapshot`, тож нова вʼюха
+        // над `rpt.ReportRow` (без зрізу) чи над чимось іншим оминала б
+        // фільтр мовчки. Тепер без фільтра статусу проходить лише шар сирих
+        // документів; усе інше в файлі — під правилом.
+        foreach (var raw in ViewRegex.Matches(views).Where(v => IsRawDocumentView(v.Groups["body"].Value)))
+        {
+            Assert.DoesNotContain("rpt.Report", raw.Groups["body"].Value, StringComparison.Ordinal);
+        }
 
         foreach (var view in snapshotViews)
         {
@@ -89,6 +99,9 @@ public sealed partial class ReportDefinitionTests
         // не бачить нічого.
         Assert.NotEmpty(snapshotViews);
     }
+
+    private static bool IsRawDocumentView(string body) =>
+        body.Contains("doc.CellValue", StringComparison.Ordinal);
 
     private static string SolutionRoot()
     {
