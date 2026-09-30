@@ -4393,6 +4393,8 @@ USING (VALUES
     (N'workflow.submitWarningsTitle',           N'en', N'Submit with warnings?', 1),
     (N'workflow.submitWarningsHint',            N'en', N'Validation found warnings on this sheet. They do not block submission, but by submitting you confirm that you have reviewed them. The confirmation is recorded in the audit log.', 1),
     (N'workflow.submitAnyway',                  N'en', N'Submit anyway', 1),
+    -- ФВ-1.11: розбіжність періоду на шляху запису комірок — `ECR-PRD-0422` (було `ECR-REQ-0422.periodMismatch`, `PatchCellsHandler.EnsurePeriodMatches`).
+    (N'err.ECR-PRD-0422.periodMismatch',        N'en', N'The period {periodKey} in the request does not match period {expectedPeriodKey} of table instance {tableInstanceId}.', 1),
     -- ru/kz — окремою порцією `COLL:req-g2` у блоці I18N нижче.
     -- COLL:req-g2 ── кінець секції ──
     (N'health.sources.notRegistered',          N'en', N'The collection store is not registered in the container.', 1),

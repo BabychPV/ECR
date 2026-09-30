@@ -686,12 +686,14 @@ public sealed class PatchCellsTests
         var ex = await Assert.ThrowsAsync<BusinessRuleException>(
             () => Handler().HandleAsync(request, CancellationToken.None));
 
-        Assert.Equal(Ecr.Domain.Errors.ErrorCodes.RequestInvalid, ex.ErrorCode);
+        // ФВ-1.11: код меж періоду — той самий `ECR-PRD-0422`, що й у Reopen/Recall.
+        Assert.Equal(Ecr.Domain.Errors.ErrorCodes.PeriodOutOfProject, ex.ErrorCode);
+        Assert.Equal("ECR-PRD-0422", ex.ErrorCode);
 
         // ⛔ Ключ каталогу обов'язковий: без нього відмова поїде українським
         // реченням мовою, якої немає серед мов продукту (`D-95`).
         Assert.NotNull(ex.Details);
-        Assert.Equal("err.ECR-REQ-0422.periodMismatch", ex.Details!["messageKey"]);
+        Assert.Equal("err.ECR-PRD-0422.periodMismatch", ex.Details!["messageKey"]);
 
         // Нічого не записано: розбіжність зупиняє запит, а не супроводжує його.
         await _cells.DidNotReceive().ApplyAsync(Arg.Any<CellChangeSet>(), Arg.Any<CancellationToken>());

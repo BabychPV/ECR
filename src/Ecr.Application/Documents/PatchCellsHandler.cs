@@ -370,11 +370,13 @@ public sealed partial class PatchCellsHandler(
         if (instance.PeriodKey != request.PeriodKey)
         {
             throw new BusinessRuleException(
-                ErrorCodes.RequestInvalid,
+                // ФВ-1.11: порушення меж періоду документа — `ECR-PRD-0422` на всіх
+                // шляхах (раніше тут був `ECR-REQ-0422`; D-223 переглянуто).
+                ErrorCodes.PeriodOutOfProject,
                 $"Період {request.PeriodKey} не збігається з періодом {instance.PeriodKey} екземпляра таблиці {request.TableInstanceId}.",
                 new Dictionary<string, object?>(StringComparer.Ordinal)
                 {
-                    ["messageKey"] = "err.ECR-REQ-0422.periodMismatch",
+                    ["messageKey"] = "err.ECR-PRD-0422.periodMismatch",
                     ["periodKey"] = request.PeriodKey.ToString(System.Globalization.CultureInfo.InvariantCulture),
                     ["expectedPeriodKey"] = instance.PeriodKey.ToString(System.Globalization.CultureInfo.InvariantCulture),
                     ["tableInstanceId"] = request.TableInstanceId.ToString(System.Globalization.CultureInfo.InvariantCulture),
