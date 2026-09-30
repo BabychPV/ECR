@@ -7,12 +7,11 @@ import { registryExportErrorText } from './exportError';
 /**
  * Чи сервер уже вміє `?includeChildren=true` (частини композиції, ФВ-8.16).
  *
- * ⚠ `false` свідомо: параметр живе в `lane/cloud/registry-export-children-topbe3` (`ebff2367`) і ще
- * не у вершині `dev/integration`. Сервер без нього мовчки віддав би файл БЕЗ частин — людина
- * вирішила б, що їх немає. Тому прапорець видно, але вимкнено з поясненням. Коли гілка доїде:
- * `true` тут і `includeChildren` четвертим аргументом `fetchRegistryExport` нижче.
+ * ⚠ `true`: серверний `GET /registries/{code}/export?includeChildren=true` у вершині
+ * `dev/integration` (`65f70ec0`, контракт `98ae5eb8`). CSV із частинами — ZIP (`01-БАТЬКО.csv`…),
+ * XLSX — аркуш на довідник; ім'я файлу — з `Content-Disposition`, запасне для ZIP — `.zip`.
  */
-export const IncludeChildrenAvailable = false;
+export const IncludeChildrenAvailable = true;
 
 export interface RegistryExportMenuProps {
   readonly registryCode: string;
@@ -41,8 +40,10 @@ export default function RegistryExportMenu({ registryCode, asOf }: RegistryExpor
     setError(null);
 
     try {
-      const file = await fetchRegistryExport(registryCode, format, asOf ?? undefined);
-      saveBlob(file.blob, file.fileName ?? `registry-${registryCode}.${format}`);
+      const withChildren = IncludeChildrenAvailable && includeChildren;
+      const file = await fetchRegistryExport(registryCode, format, asOf ?? undefined, withChildren);
+      const extension = withChildren && format === 'csv' ? 'zip' : format;
+      saveBlob(file.blob, file.fileName ?? `registry-${registryCode}.${extension}`);
       setOpened(false);
     } catch (e) {
       setError(e);

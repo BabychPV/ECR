@@ -18,7 +18,8 @@ import { registryExportErrorText } from '../exportError';
  *   - ім'я файлу завжди запасне (без `file.fileName`) → «CSV: формат і дата…»;
  *   - гілку `403` прибрано → «403 — речення про право читання…»;
  *   - підказку стелі прибрано (`hint: null`) → «422 стелі — текст сервера і підказка…»;
- *   - `IncludeChildrenAvailable = true` → «прапорець частин композиції вимкнено…».
+ *   - `includeChildren` не передається четвертим аргументом → «з частинами композиції: includeChildren=true…»;
+ *   - запасне ім'я ZIP без `.zip` → «з частинами композиції: includeChildren=true…».
  */
 
 function json(body: unknown, status = 200, type = 'application/json'): Response {
@@ -145,19 +146,32 @@ describe('Експорт довідника (RT-16)', () => {
     expect(downloads).toEqual([]);
   });
 
-  it('прапорець частин композиції вимкнено з поясненням, поки сервер не вміє includeChildren', async () => {
+  it('без прапорця частин композиції запит не містить includeChildren', async () => {
     show();
     await open();
 
     const box = screen.getByRole('checkbox', { name: 'With child parts (composition)' });
-    expect(box.hasAttribute('disabled')).toBe(true);
-    expect(screen.getByText('Not available yet: the server does not export composition parts.')).toBeDefined();
+    expect(box.hasAttribute('disabled')).toBe(false);
 
     fireEvent.click(screen.getByRole('button', { name: 'CSV (can be imported back)' }));
     await waitFor(() => {
       expect(exportUrls).toHaveLength(1);
     });
     expect(exportUrls[0]).not.toContain('includeChildren');
+  });
+
+  it('з частинами композиції: includeChildren=true в запиті, ZIP без імені від сервера — запасне .zip', async () => {
+    exportReply = () => new Response('PK', { status: 200, headers: { 'Content-Type': 'application/zip' } });
+    show();
+    await open();
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'With child parts (composition)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'CSV (can be imported back)' }));
+
+    await waitFor(() => {
+      expect(downloads).toEqual(['registry-GAS.zip']);
+    });
+    expect(exportUrls).toEqual(['/api/v1/registries/GAS/export?format=csv&asOf=2026-09-30&includeChildren=true']);
   });
 
   it('не наша відмова (мережа) — загальна назва, без підказки стелі', () => {
