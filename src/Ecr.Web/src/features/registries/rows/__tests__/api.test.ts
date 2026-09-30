@@ -220,6 +220,32 @@ describe('експорт довідника', () => {
     expect(await file.blob.text()).toBe('code,T\r\nE1,1.5\r\n');
   });
 
+  it('includeChildren — параметр лише тоді, коли просили частини композиції', async () => {
+    const urls: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        urls.push(String(input));
+        return new Response('PK', {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/zip',
+            'Content-Disposition': "attachment; filename=registry-GAS-20260930.zip; filename*=UTF-8''registry-GAS-20260930.zip",
+          },
+        });
+      }),
+    );
+
+    const file = await fetchRegistryExport('GAS', 'csv', '2026-09-30', true);
+    await fetchRegistryExport('GAS', 'xlsx', undefined, false);
+
+    expect(urls).toEqual([
+      '/api/v1/registries/GAS/export?format=csv&asOf=2026-09-30&includeChildren=true',
+      '/api/v1/registries/GAS/export?format=xlsx',
+    ]);
+    expect(file.fileName).toBe('registry-GAS-20260930.zip');
+  });
+
   it('відмова сервера — помилка з кодом, а не файл із JSON', async () => {
     vi.stubGlobal(
       'fetch',

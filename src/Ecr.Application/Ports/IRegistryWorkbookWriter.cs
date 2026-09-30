@@ -3,7 +3,10 @@ using Ecr.Domain.Enums;
 
 namespace Ecr.Application.Ports;
 
-/// <summary>Книга експорту записів довідника (RT-16, FEATURE-REGISTRY-TABLES §7.1): один плаский аркуш.</summary>
+/// <summary>
+/// Книга експорту записів довідника (RT-16, FEATURE-REGISTRY-TABLES §7.1): плаский аркуш на довідник —
+/// один, або батько й частини композиції (<c>includeChildren</c>, ФВ-8.16).
+/// </summary>
 /// <remarks>
 /// ⚠ Окремий порт, а не <see cref="ISnapshotWorkbookWriter"/>: там колонки й підсумки звіту, тут —
 /// типи полів довідника і правило «число без втрати знаків».
@@ -11,16 +14,16 @@ namespace Ecr.Application.Ports;
 public interface IRegistryWorkbookWriter
 {
     /// <summary>Формує книгу; потік віддається читачу з початку.</summary>
-    /// <param name="workbook">Колонки й рядки.</param>
+    /// <param name="sheets">Аркуші в порядку показу (≥ 1); однакові після скорочення назви розводяться суфіксом.</param>
     /// <param name="ct">Скасування.</param>
     /// <returns>
     /// Потік книги. ⚠ Викликач <b>зобов'язаний</b> його закрити: вміст лежить у тимчасовому ФАЙЛІ,
     /// і той зникає саме при закритті.
     /// </returns>
-    public Task<Stream> WriteAsync(RegistryWorkbook workbook, CancellationToken ct);
+    public Task<Stream> WriteAsync(IReadOnlyList<RegistryWorkbook> sheets, CancellationToken ct);
 }
 
-/// <summary>Записи довідника, готові до запису в книгу.</summary>
+/// <summary>Записи довідника, готові до запису в книгу, — один аркуш.</summary>
 /// <param name="SheetName">Назва аркуша — код довідника.</param>
 /// <param name="Columns">Колонки в порядку показу.</param>
 /// <param name="Rows">Рядки; значення — у поданні <c>GET …/rows</c> (число інваріантно, дата <c>yyyy-MM-dd</c>).</param>

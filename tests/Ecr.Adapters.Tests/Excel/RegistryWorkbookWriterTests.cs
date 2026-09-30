@@ -14,7 +14,8 @@ namespace Ecr.Adapters.Tests.Excel;
 /// </summary>
 /// <remarks>
 /// Мутаційний доказ: <c>IsExactInDouble</c> → <c>true</c> завжди → <see cref="Точне_число_текстом_коротке_числом"/>
-/// червоний (26 цифр стають числом і обрізаються до 15).
+/// червоний (26 цифр стають числом і обрізаються до 15); <c>UniqueSheetName</c> без суфікса →
+/// <see cref="Аркуш_на_довідник_однакові_назви_розведено"/> червоний (ClosedXML відмовляє книзі).
 /// </remarks>
 public sealed class RegistryWorkbookWriterTests
 {
@@ -76,7 +77,7 @@ public sealed class RegistryWorkbookWriterTests
             [new("code", CellDataType.String), new("V", CellDataType.String)],
             [["A", value]]);
 
-        await using var stream = await new RegistryWorkbookWriter().WriteAsync(workbook, default);
+        await using var stream = await new RegistryWorkbookWriter().WriteAsync([workbook], default);
         var bytes = new MemoryStream();
         await stream.CopyToAsync(bytes);
         bytes.Position = 0;
@@ -93,5 +94,23 @@ public sealed class RegistryWorkbookWriterTests
         Assert.False(cell.HasFormula);
         Assert.Equal(XLDataType.Text, cell.DataType);
         Assert.Equal(value, cell.GetString());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Requirement", "ФВ-8.16")]
+    public async Task Аркуш_на_довідник_однакові_назви_розведено()
+    {
+        // Два коди, однакові в перших 31 символі, і третій, що відрізняється лише регістром.
+        var parent = new string('P', 31);
+        RegistryWorkbook Sheet(string name, string value)
+            => new(name, [new("code", CellDataType.String)], [[value]]);
+
+        await using var stream = await new RegistryWorkbookWriter().WriteAsync(
+            [Sheet(parent + "_A", "a"), Sheet(parent + "_B", "b"), Sheet(parent.ToLowerInvariant(), "c")], default);
+        using var book = new XLWorkbook(stream);
+
+        Assert.Equal([parent, new string('P', 29) + "~2", new string('p', 29) + "~3"], [.. book.Worksheets.Select(s => s.Name)]);
+        Assert.Equal(["a", "b", "c"], [.. book.Worksheets.Select(s => s.Cell(2, 1).GetString())]);
     }
 }

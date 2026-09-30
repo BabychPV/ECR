@@ -139,6 +139,9 @@ export interface RegistryExportFile {
  * Експорт записів довідника, чинних на `asOf` (RT-16): CSV (приймає назад імпорт) або XLSX. Посилання —
  * кодами. Споживач — меню експорту редактора даних (RT-33).
  *
+ * `includeChildren` додає частини композиції (ФВ-8.16), рекурсивно: CSV приходить архівом ZIP
+ * (`01-БАТЬКО.csv`, `02-ЧАСТИНА.csv`… — номер задає порядок імпорту), XLSX — аркуш на довідник.
+ *
  * ⛔ `fetch` → blob, а не посилання: за посиланням браузер показав би відмову (`422`, `403`) сирим JSON.
  *
  * ⚠ `method: 'GET'` названо явно: сторож `EndpointCoverageTests` виводить метод із назви функції, а
@@ -148,9 +151,11 @@ export async function fetchRegistryExport(
   code: string,
   format: RegistryExportFormat,
   asOf?: string,
+  includeChildren = false,
 ): Promise<RegistryExportFile> {
   const params = new URLSearchParams({ format });
   if (asOf) params.set('asOf', asOf);
+  if (includeChildren) params.set('includeChildren', 'true');
 
   const response = await apiFetchResponse(
     `/api/v1/registries/${encodeURIComponent(code)}/export?${params.toString()}`,

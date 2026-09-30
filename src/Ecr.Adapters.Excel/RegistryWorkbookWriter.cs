@@ -6,7 +6,7 @@ using Ecr.Domain.Enums;
 
 namespace Ecr.Adapters.Excel;
 
-/// <summary>Книга експорту довідника (RT-16): один плаский аркуш, заголовок — коди колонок.</summary>
+/// <summary>Книга експорту довідника (RT-16): плаский аркуш на довідник, заголовок — коди колонок.</summary>
 /// <remarks>
 /// ⛔ Число лягає ЧИСЛОМ лише тоді, коли <c>double</c> Excel тримає його без втрат; інакше — текстом
 /// рядка сервера (D-30). <c>decimal(34,16)</c> має до 34 значущих цифр, <c>double</c> — 15–17: число,
@@ -24,35 +24,30 @@ public sealed class RegistryWorkbookWriter : IRegistryWorkbookWriter
     /// <summary>Найдовша назва аркуша в Excel.</summary>
     private const int MaxSheetName = 31;
 
-    /// <inheritdoc/>
-    public async Task<Stream> WriteAsync(RegistryWorkbook workbook, CancellationToken ct)
+    /// <summary>Книга з одного аркуша.</summary>
+    /// <param name="workbook">Колонки й рядки.</param>
+    /// <param name="ct">Скасування.</param>
+    public Task<Stream> WriteAsync(RegistryWorkbook workbook, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(workbook);
+        return WriteAsync([workbook], ct);
+    }
+
+    /// <inheritdoc/>
+    public async Task<Stream> WriteAsync(IReadOnlyList<RegistryWorkbook> sheets, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(sheets);
+        if (sheets.Count == 0)
+        {
+            throw new ArgumentException("Книга без аркушів.", nameof(sheets));
+        }
 
         using var book = new XLWorkbook();
-        var sheet = book.AddWorksheet(SheetName(workbook.SheetName));
-
-        for (var c = 0; c < workbook.Columns.Count; c++)
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var workbook in sheets)
         {
-            sheet.Cell(1, c + 1).Value = workbook.Columns[c].Header;
-        }
-
-        sheet.Row(1).Style.Font.Bold = true;
-        sheet.SheetView.FreezeRows(1);
-
-        for (var r = 0; r < workbook.Rows.Count; r++)
-        {
-            ct.ThrowIfCancellationRequested();
-            var row = workbook.Rows[r];
-            for (var c = 0; c < workbook.Columns.Count && c < row.Count; c++)
-            {
-                Write(sheet.Cell(r + 2, c + 1), row[c], workbook.Columns[c].Kind);
-            }
-        }
-
-        if (workbook.Columns.Count > 0)
-        {
-            sheet.Columns(1, workbook.Columns.Count).AdjustToContents(1, 1);
+            ArgumentNullException.ThrowIfNull(workbook);
+            Fill(book.AddWorksheet(UniqueSheetName(workbook.SheetName, names)), workbook, ct);
         }
 
         var output = new FileStream(
@@ -75,6 +70,33 @@ public sealed class RegistryWorkbookWriter : IRegistryWorkbookWriter
         }
 
         return output;
+    }
+
+    /// <summary>Заголовок і рядки одного аркуша.</summary>
+    private static void Fill(IXLWorksheet sheet, RegistryWorkbook workbook, CancellationToken ct)
+    {
+        for (var c = 0; c < workbook.Columns.Count; c++)
+        {
+            sheet.Cell(1, c + 1).Value = workbook.Columns[c].Header;
+        }
+
+        sheet.Row(1).Style.Font.Bold = true;
+        sheet.SheetView.FreezeRows(1);
+
+        for (var r = 0; r < workbook.Rows.Count; r++)
+        {
+            ct.ThrowIfCancellationRequested();
+            var row = workbook.Rows[r];
+            for (var c = 0; c < workbook.Columns.Count && c < row.Count; c++)
+            {
+                Write(sheet.Cell(r + 2, c + 1), row[c], workbook.Columns[c].Kind);
+            }
+        }
+
+        if (workbook.Columns.Count > 0)
+        {
+            sheet.Columns(1, workbook.Columns.Count).AdjustToContents(1, 1);
+        }
     }
 
     /// <summary>Комірка за типом колонки; нерозбірне значення лягає текстом, як є.</summary>
@@ -126,6 +148,23 @@ public sealed class RegistryWorkbookWriter : IRegistryWorkbookWriter
                    CultureInfo.InvariantCulture,
                    out var shown)
                && shown == value;
+    }
+
+    /// <summary>
+    /// Назва аркуша, якої ще немає в книзі (Excel не розрізняє регістр): два коди, однакові в перших
+    /// 31 символі, отримують суфікс <c>~2</c>, <c>~3</c>… — інакше ClosedXML відмовив би всій книзі.
+    /// </summary>
+    private static string UniqueSheetName(string name, HashSet<string> taken)
+    {
+        var baseName = SheetName(name);
+        var candidate = baseName;
+        for (var n = 2; !taken.Add(candidate); n++)
+        {
+            var suffix = "~" + n.ToString(CultureInfo.InvariantCulture);
+            candidate = (baseName.Length + suffix.Length <= MaxSheetName ? baseName : baseName[..(MaxSheetName - suffix.Length)]) + suffix;
+        }
+
+        return candidate;
     }
 
     /// <summary>Назва аркуша: без заборонених Excel символів і не довша за 31.</summary>

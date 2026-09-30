@@ -132,15 +132,19 @@ public sealed class RegistryRowsController(
     /// Формат — <c>?format=csv|xlsx</c>; без нього — за <c>Accept</c> (<c>text/csv</c> або тип книги
     /// Excel), інакше CSV. CSV приймає назад імпорт (<c>POST …/entries/import</c>) без змін. Стеля —
     /// <c>Registries:ExportMaxRows</c> (50 000): понад неї — <c>422</c>, а не обрізаний файл.
+    /// <c>?includeChildren=true</c> додає дочірні довідники композиції (ФВ-8.16), рекурсивно: CSV — архів
+    /// ZIP (<c>01-БАТЬКО.csv</c>, <c>02-ЧАСТИНА.csv</c>…, номер — порядок імпорту), XLSX — аркуш на
+    /// довідник. Кожен дочірній вимагає того самого читання; стеля — на всі довідники разом.
     /// </remarks>
     /// <param name="code">Код довідника.</param>
     /// <param name="format"><c>csv</c> або <c>xlsx</c>.</param>
     /// <param name="asOf">Бізнес-дата чинності; без неї — сьогодні (UTC).</param>
+    /// <param name="includeChildren">Разом із частинами композиції.</param>
     /// <param name="ct">Токен скасування.</param>
     [HttpGet("{code}/export")]
     // ⚠ Відповідь — ФАЙЛ, а не JSON: схеми в неї немає і бути не може.
     [ProducesResponseType(StatusCodes.Status200OK, Type = typeof(FileResult))]
-    [Produces(ExportRegistryHandler.CsvContentType, ExportRegistryHandler.XlsxContentType)]
+    [Produces(ExportRegistryHandler.CsvContentType, ExportRegistryHandler.XlsxContentType, ExportRegistryHandler.ZipContentType)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
@@ -148,11 +152,12 @@ public sealed class RegistryRowsController(
         string code,
         [FromQuery] string? format,
         [FromQuery] DateOnly? asOf,
+        [FromQuery] bool includeChildren = false,
         CancellationToken ct = default)
     {
         var maxRows = configuration.GetValue("Registries:ExportMaxRows", ExportRegistryHandler.DefaultExportMaxRows);
         var file = await export
-            .HandleAsync(code, format ?? FormatFromAccept(), asOf, maxRows, ct)
+            .HandleAsync(code, format ?? FormatFromAccept(), asOf, includeChildren, maxRows, ct)
             .ConfigureAwait(false);
 
         // ⚠ Потік, а не байти: книга лежить у тимчасовому файлі, і FileResult закриває його сам.

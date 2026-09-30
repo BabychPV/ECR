@@ -1,5 +1,6 @@
 // src/Ecr.Application/Registries/Export/ExportRegistryHandler.cs
 using System.Globalization;
+using System.IO.Compression;
 using System.Text;
 using System.Text.Json;
 using Ecr.Application.Common;
@@ -9,6 +10,7 @@ using Ecr.Application.Registries.Rows;
 using Ecr.Application.Security;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Configuration;
+using Ecr.Domain.Entities.Dictionaries;
 using Ecr.Domain.Enums;
 using Ecr.Domain.Errors;
 
@@ -38,6 +40,12 @@ public sealed record RegistryExportFile(string FileName, string ContentType, Str
 /// інваріантно без втрати знаків, дати <c>yyyy-MM-dd</c>. Експорт → імпорт того самого файлу нічого не
 /// змінює. Книга XLSX — для людини: додатково назва й вікно чинності (<c>@name</c>, <c>@validFrom</c>,
 /// <c>@validTo</c>; <c>@</c> не буває в коді поля).
+/// </para>
+/// <para>
+/// ⚠ <c>includeChildren</c> (ФВ-8.16): частини композиції їдуть ОКРЕМИМИ таблицями, а не колонками
+/// батька — інакше файл не імпортувався б назад. Кожна таблиця — той самий CSV, що експорт дочірнього
+/// довідника окремо; поле композиції несе КОД батька, тож частина після імпорту батька розв'язується
+/// на той самий запис.
 /// </para>
 /// <para>
 /// Подія <see cref="ExportedEventType"/> — до віддачі файлу, незалежна від транзакції (C4): дані
@@ -72,6 +80,9 @@ public sealed class ExportRegistryHandler(
     /// <summary>Тип вмісту CSV.</summary>
     public const string CsvContentType = "text/csv";
 
+    /// <summary>Тип вмісту архіву CSV з частинами композиції (<c>includeChildren</c>).</summary>
+    public const string ZipContentType = "application/zip";
+
     /// <summary>Тип вмісту XLSX.</summary>
     public const string XlsxContentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 
@@ -101,8 +112,28 @@ public sealed class ExportRegistryHandler(
     /// <c>ECR-REQ-0422</c>: невідомий формат (<c>registryExportFormatUnknown</c>) або записів понад
     /// стелю (<c>registryExportTooLarge</c>).
     /// </exception>
-    public async Task<RegistryExportFile> HandleAsync(
+    public Task<RegistryExportFile> HandleAsync(
         string registryCode, string? format, DateOnly? asOf, int maxRows, CancellationToken ct)
+        => HandleAsync(registryCode, format, asOf, includeChildren: false, maxRows, ct);
+
+    /// <summary>Будує файл експорту; з <paramref name="includeChildren"/> — разом із частинами композиції.</summary>
+    /// <param name="registryCode">Код довідника.</param>
+    /// <param name="format"><c>csv</c> або <c>xlsx</c> (без регістру).</param>
+    /// <param name="asOf">Бізнес-дата чинності; <c>null</c> — сьогодні (UTC).</param>
+    /// <param name="includeChildren">
+    /// Додати дочірні довідники композиції (ФВ-8.16), рекурсивно: CSV — архів ZIP із файлом на
+    /// довідник, XLSX — аркуш на довідник. Батько завжди перший — у порядку імпорту.
+    /// </param>
+    /// <param name="maxRows">Стеля записів — на ВСІ довідники файлу разом.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <exception cref="NotFoundException"><c>ECR-REG-0404</c>: довідника немає або дочірній заборонено.</exception>
+    /// <exception cref="AccessDeniedException">Немає читання дочірнього довідника.</exception>
+    /// <exception cref="BusinessRuleException">
+    /// <c>ECR-REQ-0422</c>: невідомий формат (<c>registryExportFormatUnknown</c>) або записів понад
+    /// стелю (<c>registryExportTooLarge</c>).
+    /// </exception>
+    public async Task<RegistryExportFile> HandleAsync(
+        string registryCode, string? format, DateOnly? asOf, bool includeChildren, int maxRows, CancellationToken ct)
     {
         await RegistryAccess
             .RequireAsync(access, currentUser, Permission, GrantLevel.Read, new RegistryLookup(registries, registryCode), ct)
@@ -122,29 +153,128 @@ public sealed class ExportRegistryHandler(
         }
 
         var date = asOf ?? DateOnly.FromDateTime(clock.UtcNow);
-        var request = new RegistryRowsRequest(
-            registryCode, date, AsOfUtc: null, ParentEntryId: null, Search: null,
-            new Dictionary<string, string>(), new CursorRequest(Chunk));
+        var root = await rows.SelectAsync(Request(registryCode, date), ct).ConfigureAwait(false);
+        var selected = new List<(RegistryDef Definition, List<RegistryEntry> Ordered)> { root };
 
-        var (definition, ordered) = await rows.SelectAsync(request, ct).ConfigureAwait(false);
+        if (includeChildren)
+        {
+            foreach (var child in await ChildrenAsync(root.Definition, ct).ConfigureAwait(false))
+            {
+                // ⛔ Читання КОЖНОГО дочірнього — та сама перевірка, що й для батька: грант на батька
+                // не відкриває його частин, а заборона на частину не обходиться експортом батька.
+                await RegistryAccess
+                    .RequireAsync(access, currentUser, Permission, GrantLevel.Read, child.Id, ct)
+                    .ConfigureAwait(false);
+
+                // Частину видно рівно тоді, коли видно батька (D-155): усі видимі частини на asOf — це
+                // рівно частини записів батька, які вже лягли у файл.
+                selected.Add(await rows.SelectAsync(Request(child.Code, date), ct).ConfigureAwait(false));
+            }
+        }
 
         // Стеля — ДО читання значень і до файлу: 422, а не обрізаний файл.
-        if (ordered.Count > maxRows)
+        var total = selected.Sum(s => s.Ordered.Count);
+        if (total > maxRows)
         {
             throw new BusinessRuleException(
                 ErrorCodes.RequestInvalid,
-                $"У довіднику «{definition.Code}» на {date:yyyy-MM-dd} записів {ordered.Count}, а стеля експорту — {maxRows}.",
+                $"У довіднику «{root.Definition.Code}» на {date:yyyy-MM-dd} записів {total}, а стеля експорту — {maxRows}.",
                 new Dictionary<string, object?>
                 {
                     ["messageKey"] = "err.ECR-REQ-0422.registryExportTooLarge",
-                    ["registryCode"] = definition.Code,
-                    ["total"] = ordered.Count.ToString(CultureInfo.InvariantCulture),
+                    ["registryCode"] = root.Definition.Code,
+                    ["total"] = total.ToString(CultureInfo.InvariantCulture),
                     ["max"] = maxRows.ToString(CultureInfo.InvariantCulture),
                 });
         }
 
-        var fields = definition.Fields.OrderBy(f => f.Ordinal).ThenBy(f => f.Id).ToList();
         var xlsx = kind == Xlsx;
+        var sheets = new List<(RegistryDef Definition, List<RegistryFieldDef> Fields, List<IReadOnlyList<string?>> Table)>();
+        foreach (var (definition, ordered) in selected)
+        {
+            var fields = definition.Fields.OrderBy(f => f.Ordinal).ThenBy(f => f.Id).ToList();
+            sheets.Add((definition, fields, await TableAsync(definition, fields, ordered, xlsx, ct).ConfigureAwait(false)));
+        }
+
+        // ⛔ C4: подія-СПРОБА (дані покидають систему), а не результат зміни.
+        await audit.WriteIndependentSecurityEventAsync(
+            new SecurityEventRecord(
+                clock.UtcNow,
+                ExportedEventType,
+                TargetUserId: null,
+                TargetRoleId: null,
+                JsonSerializer.Serialize(new
+                {
+                    registryDefId = root.Definition.Id,
+                    registryCode = root.Definition.Code,
+                    format = kind,
+                    asOf = date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                    rows = total,
+                    includeChildren,
+                    registries = sheets.Select(s => new { code = s.Definition.Code, rows = s.Table.Count }).ToList(),
+                }),
+                currentUser.UserId ?? 0,
+                currentUser.CorrelationId),
+            ct).ConfigureAwait(false);
+
+        var baseName = $"registry-{root.Definition.Code}-{date:yyyyMMdd}";
+        if (!xlsx)
+        {
+            if (!includeChildren)
+            {
+                var (_, fields, table) = sheets[0];
+                return new RegistryExportFile($"{baseName}.csv", CsvContentType, ToCsv(fields, table), total);
+            }
+
+            return new RegistryExportFile($"{baseName}.zip", ZipContentType, ToZip(sheets), total);
+        }
+
+        var book = await workbooks
+            .WriteAsync([.. sheets.Select(s => Workbook(s.Definition, s.Fields, s.Table))], ct)
+            .ConfigureAwait(false);
+        return new RegistryExportFile($"{baseName}.xlsx", XlsxContentType, book, total);
+    }
+
+    /// <summary>
+    /// Дочірні довідники композиції, рекурсивно, у порядку імпорту: батько раніше за свої частини,
+    /// сусіди — за кодом. Цикл у даних (його не пускає опис) зупиняє обхід.
+    /// </summary>
+    private async Task<List<RegistryDef>> ChildrenAsync(RegistryDef root, CancellationToken ct)
+    {
+        var all = await registries.ListDefinitionsAsync(ct).ConfigureAwait(false);
+        var byParent = all
+            .Select(d => (Child: d, Field: d.Fields.FirstOrDefault(f =>
+                f.RelationKind == RegistryRelationKind.Composition && f.RefRegistryDefId is not null)))
+            .Where(x => x.Field is not null)
+            .ToLookup(x => x.Field!.RefRegistryDefId!.Value, x => x.Child);
+
+        var result = new List<RegistryDef>();
+        var seen = new HashSet<int> { root.Id };
+        void Walk(int parentId)
+        {
+            foreach (var child in byParent[parentId].OrderBy(d => d.Code, StringComparer.Ordinal))
+            {
+                if (seen.Add(child.Id))
+                {
+                    result.Add(child);
+                    Walk(child.Id);
+                }
+            }
+        }
+
+        Walk(root.Id);
+        return result;
+    }
+
+    /// <summary>Запит відбору: той самий, що в сітки на <c>asOf</c>, без пошуку й фільтрів.</summary>
+    private static RegistryRowsRequest Request(string registryCode, DateOnly date)
+        => new(registryCode, date, AsOfUtc: null, ParentEntryId: null, Search: null,
+            new Dictionary<string, string>(), new CursorRequest(Chunk));
+
+    /// <summary>Рядки файлу одного довідника: <c>code</c>, (для книги — службові колонки), поля.</summary>
+    private async Task<List<IReadOnlyList<string?>>> TableAsync(
+        RegistryDef definition, List<RegistryFieldDef> fields, List<RegistryEntry> ordered, bool xlsx, CancellationToken ct)
+    {
         var table = new List<IReadOnlyList<string?>>(ordered.Count);
 
         foreach (var chunk in ordered.Chunk(Chunk))
@@ -176,31 +306,13 @@ public sealed class ExportRegistryHandler(
             }
         }
 
-        // ⛔ C4: подія-СПРОБА (дані покидають систему), а не результат зміни.
-        await audit.WriteIndependentSecurityEventAsync(
-            new SecurityEventRecord(
-                clock.UtcNow,
-                ExportedEventType,
-                TargetUserId: null,
-                TargetRoleId: null,
-                JsonSerializer.Serialize(new
-                {
-                    registryDefId = definition.Id,
-                    registryCode = definition.Code,
-                    format = kind,
-                    asOf = date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
-                    rows = table.Count,
-                }),
-                currentUser.UserId ?? 0,
-                currentUser.CorrelationId),
-            ct).ConfigureAwait(false);
+        return table;
+    }
 
-        var fileName = $"registry-{definition.Code}-{date:yyyyMMdd}.{kind}";
-        if (!xlsx)
-        {
-            return new RegistryExportFile(fileName, CsvContentType, ToCsv(fields, table), table.Count);
-        }
-
+    /// <summary>Аркуш книги одного довідника.</summary>
+    private static RegistryWorkbook Workbook(
+        RegistryDef definition, List<RegistryFieldDef> fields, List<IReadOnlyList<string?>> table)
+    {
         var columns = new List<RegistryWorkbookColumn>
         {
             new(CodeColumn, CellDataType.String),
@@ -210,11 +322,7 @@ public sealed class ExportRegistryHandler(
         };
         columns.AddRange(fields.Select(f => new RegistryWorkbookColumn(
             f.Code, f.DataType is CellDataType.Lookup or CellDataType.Unit ? CellDataType.String : f.DataType)));
-
-        var book = await workbooks
-            .WriteAsync(new RegistryWorkbook(definition.Code, columns, table), ct)
-            .ConfigureAwait(false);
-        return new RegistryExportFile(fileName, XlsxContentType, book, table.Count);
+        return new RegistryWorkbook(definition.Code, columns, table);
     }
 
     /// <summary>Значення комірки: посилання — кодом, решта — у поданні <c>GET …/rows</c>.</summary>
@@ -239,6 +347,10 @@ public sealed class ExportRegistryHandler(
 
     /// <summary>CSV за RFC 4180, UTF-8 із BOM (інакше Excel читає кирилицю як cp1251).</summary>
     private static MemoryStream ToCsv(IReadOnlyList<RegistryFieldDef> fields, List<IReadOnlyList<string?>> table)
+        => new(CsvBytes(fields, table), writable: false);
+
+    /// <summary>Байти CSV одного довідника — рівно те, що приймає <c>POST …/entries/import</c>.</summary>
+    private static byte[] CsvBytes(IReadOnlyList<RegistryFieldDef> fields, List<IReadOnlyList<string?>> table)
     {
         var text = new StringBuilder();
         text.Append(CsvFormat.Row([CodeColumn, .. fields.Select(f => f.Code)]));
@@ -248,12 +360,35 @@ public sealed class ExportRegistryHandler(
         }
 
         var encoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: true);
+        return [.. encoding.GetPreamble(), .. encoding.GetBytes(text.ToString())];
+    }
+
+    /// <summary>
+    /// Архів CSV із частинами композиції: <c>01-БАТЬКО.csv</c>, <c>02-ЧАСТИНА.csv</c>… — номер задає
+    /// порядок імпорту (батько раніше, інакше посилання частини на нього не розв'яжеться).
+    /// </summary>
+    private static MemoryStream ToZip(
+        List<(RegistryDef Definition, List<RegistryFieldDef> Fields, List<IReadOnlyList<string?>> Table)> sheets)
+    {
         var stream = new MemoryStream();
-        stream.Write(encoding.GetPreamble());
-        stream.Write(encoding.GetBytes(text.ToString()));
+        using (var zip = new ZipArchive(stream, ZipArchiveMode.Create, leaveOpen: true, Encoding.UTF8))
+        {
+            for (var i = 0; i < sheets.Count; i++)
+            {
+                var (definition, fields, table) = sheets[i];
+                var entry = zip.CreateEntry(ZipEntryName(i, definition.Code), CompressionLevel.Optimal);
+                using var output = entry.Open();
+                output.Write(CsvBytes(fields, table));
+            }
+        }
+
         stream.Position = 0;
         return stream;
     }
+
+    /// <summary>Ім'я файлу довідника в архіві: номер у порядку імпорту і код.</summary>
+    internal static string ZipEntryName(int index, string registryCode)
+        => $"{(index + 1).ToString("D2", CultureInfo.InvariantCulture)}-{registryCode}.csv";
 
     private static string? Iso(DateOnly? value) => value?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
 }

@@ -224,7 +224,7 @@ public sealed class RegistryDenyOverridesGlobalRightTests
 
         Assert.Equal("ECR-REG-0404", denied.ErrorCode);
         await _registries.DidNotReceive().ListEntriesAsync(Arg.Any<int>(), Arg.Any<CancellationToken>());
-        await workbooks.DidNotReceive().WriteAsync(Arg.Any<RegistryWorkbook>(), Arg.Any<CancellationToken>());
+        await workbooks.DidNotReceive().WriteAsync(Arg.Any<IReadOnlyList<RegistryWorkbook>>(), Arg.Any<CancellationToken>());
         await _audit.DidNotReceive().WriteIndependentSecurityEventAsync(Arg.Any<SecurityEventRecord>(), Arg.Any<CancellationToken>());
     }
 
