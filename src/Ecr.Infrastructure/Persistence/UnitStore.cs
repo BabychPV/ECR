@@ -169,6 +169,18 @@ public sealed class UnitStore(EcrDbContext db) : IUnitStore
                 .Select(m => new Hit(m.Id, m.SourceField, "/admin/mapping")))
             .ConfigureAwait(false);
 
+        // HSE301 F9: мапінг подій джерела тримає одиницю атрибута і одиницю колонки
+        // (FK_SEFM_SourceUnit / FK_SEFM_TargetUnit) — це теж відповідність «поле джерела →
+        // колонка», тому вид той самий, що в EntityFieldMap. Сторінки мапінгу подій ще немає,
+        // маршруту нема; ідентифікатор — власний у своїй таблиці, а мітка називає мапінг подій.
+        await AddAsync(
+            UsageKinds.FieldMap,
+            db.SourceEventFieldMaps
+                .Where(m => m.SourceUnitId == unitId || m.TargetUnitId == unitId)
+                .OrderBy(m => m.Id)
+                .Select(m => new Hit(m.Id, "event:" + m.SourceAttribute, null)))
+            .ConfigureAwait(false);
+
         await AddAsync(
             UsageKinds.UnitConversion,
             from c in db.UnitConversions

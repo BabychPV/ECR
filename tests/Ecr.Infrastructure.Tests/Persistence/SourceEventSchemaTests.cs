@@ -1,8 +1,10 @@
 // tests/Ecr.Infrastructure.Tests/Persistence/SourceEventSchemaTests.cs
 using System.Data.Common;
 using System.Globalization;
+using Ecr.Application.Common;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Entities.External;
+using Ecr.Domain.Entities.Units;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
 using Ecr.Infrastructure.Persistence;
@@ -228,6 +230,51 @@ public sealed class SourceEventSchemaTests(SqlServerFixture sql)
             """));
 
         Assert.Contains("UQ_SEFM_Target", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "HSE301-F9")]
+    public async Task Одиниця_поля_мапінгу_подій_видна_в_переліку_використань()
+    {
+        // FK_SEFM_SourceUnit / FK_SEFM_TargetUnit без запиту в UnitStore.FindUnitUsageAsync
+        // дали б видалення одиниці голим 500 замість 409 (UnitUsageForeignKeyTests це ловить
+        // по схемі; тут - що запит читає САМЕ поля мапінгу подій і по обох стовпцях).
+        var arranged = await ArrangeAsync();
+        var mapId = await SavedMapIdAsync(arranged);
+        var tag = Guid.NewGuid().ToString("N")[..8].ToLowerInvariant();
+
+        int sourceUnitId, targetUnitId;
+        await using (var db = sql.CreateContext())
+        {
+            var dimension = await db.Dimensions.OrderBy(d => d.Id).FirstAsync();
+            var source = new Unit(EcrCode.Create($"f9s{tag}"), Name("s"), Name("Source"), dimension.Id, false, 2m, 0m);
+            var target = new Unit(EcrCode.Create($"f9t{tag}"), Name("t"), Name("Target"), dimension.Id, false, 3m, 0m);
+            db.Units.AddRange(source, target);
+            await db.SaveChangesAsync();
+            sourceUnitId = source.Id;
+            targetUnitId = target.Id;
+        }
+
+        // Одиниці — повз домен: домен не пускає їх на Date-колонку, а вимірюється тут лише запит.
+        await ExecuteAsync($"""
+            UPDATE ext.SourceEventFieldMap SET SourceUnitId = {sourceUnitId}, TargetUnitId = {targetUnitId}
+            WHERE SourceEventMapId = {mapId} AND SourceAttribute = N'$name'
+            """);
+        var fieldId = (await QueryAsync(
+            $"SELECT CAST(Id AS nvarchar(20)) FROM ext.SourceEventFieldMap WHERE SourceEventMapId = {mapId} AND SourceAttribute = N'$name'"))
+            .Single();
+
+        foreach (var unitId in new[] { sourceUnitId, targetUnitId })
+        {
+            await using var db = sql.CreateContext();
+            var usage = await new UnitStore(db).FindUnitUsageAsync(unitId, 10, CancellationToken.None);
+
+            Assert.Equal(1, usage.Total);
+            var item = Assert.Single(usage.Items);
+            Assert.Equal((UsageKinds.FieldMap, fieldId, "event:$name"), (item.Kind, item.Id, item.Label));
+        }
     }
 
     private async Task<int> SavedMapIdAsync(Arranged arranged)
