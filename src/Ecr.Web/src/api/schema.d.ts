@@ -7147,7 +7147,7 @@ export interface paths {
          *     першого періоду (`ECR-PRD-0409`): межі періодів рахуються в поясі
          *     майданчика, і зміна поясу заднім числом зсунула б уже подану звітність.
          *
-         *     ⛔ Тільки ідентифікатор IANA (`Asia/Aqtau`). Windows-ідентифікатор
+         *     ⛔ Тільки ідентифікатор IANA (`Asia/Atyrau`). Windows-ідентифікатор
          *     (`Central Asia Standard Time`) і зсув (`+05:00`) — це
          *     `ECR-CFG-4221`: зсув міняється переходом на літній час, а
          *     Windows-ідентифікатор на зворотному шляху втрачає державу
@@ -16142,7 +16142,7 @@ export interface components {
         };
         /** @description Запит на зміну поясу майданчика проєкту (T6/#52). */
         ChangeProjectTimeZoneRequest: {
-            /** @description Новий пояс — ідентифікатор IANA (`Asia/Aqtau`). */
+            /** @description Новий пояс — ідентифікатор IANA (`Asia/Atyrau`). */
             timeZoneId: string;
         };
         /** @description Запит на клонування проєкту. */
@@ -16678,7 +16678,7 @@ export interface components {
              * @description Версія шаблону, за якою заповнюються документи.
              */
             templateVersionId?: null | number;
-            /** @description Пояс майданчика — ідентифікатор IANA (`Asia/Aqtau`). Обов'язковий; після
+            /** @description Пояс майданчика — ідентифікатор IANA (`Asia/Atyrau`). Обов'язковий; після
              *     відкриття періоду не змінюється. Windows-ідентифікатор або зсув —
              *     `ECR-CFG-4221`. */
             timeZoneId: string;
@@ -18789,7 +18789,7 @@ export interface components {
              * @description Проєкт.
              */
             projectId: number;
-            /** @description Пояс майданчика — ідентифікатор IANA (`Asia/Aqtau`), у якому пораховані
+            /** @description Пояс майданчика — ідентифікатор IANA (`Asia/Atyrau`), у якому пораховані
              *     межі. Клієнт отримує саме ідентифікатор, а не зсув: зсув чинний лише на
              *     момент відповіді і збрехав би на межі переходу на літній час. */
             timeZoneId: string;
@@ -18986,7 +18986,7 @@ export interface components {
             periodKind: components["schemas"]["PeriodKind"];
             /** @description Стан проєкту. */
             status: components["schemas"]["ProjectStatus"];
-            /** @description Пояс майданчика — ідентифікатор IANA (`Asia/Aqtau`). */
+            /** @description Пояс майданчика — ідентифікатор IANA (`Asia/Atyrau`). */
             timeZoneId: string;
         };
         /** @description Публічні дані екрана входу. */

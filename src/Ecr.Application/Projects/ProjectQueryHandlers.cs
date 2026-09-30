@@ -15,7 +15,7 @@ namespace Ecr.Application.Projects;
 /// <param name="Id">Ідентифікатор.</param>
 /// <param name="Code">Код.</param>
 /// <param name="Status">Стан проєкту.</param>
-/// <param name="TimeZoneId">Пояс майданчика — ідентифікатор IANA (`Asia/Aqtau`).</param>
+/// <param name="TimeZoneId">Пояс майданчика — ідентифікатор IANA (`Asia/Atyrau`).</param>
 /// <param name="PeriodKind">Періодичність.</param>
 /// <param name="CurrentPeriodId">Поточний період — підказка UI, не правило доступу (D-77).</param>
 /// <param name="PeriodCount">Скільки періодів у календарі.</param>
