@@ -346,6 +346,11 @@ public sealed class UnitTable
         table.Add("MJ_per_kg", dimension: 18, factorToBase: 1_000_000m);
         table.Add("g_per_mol", dimension: 19, factorToBase: 0.001m);
 
+        // UNITS:ecr-derived — секція `-- UNITS:ecr-derived` сіду. 1/86400
+        // так, як його зберігає decimal(38,18).
+        table.Add("mg_per_Sm3", dimension: 16, factorToBase: 0.000001m);
+        table.Add("Sm3_per_day", dimension: 13, factorToBase: 0.000011574074074074m);
+
         return table;
     }
 }

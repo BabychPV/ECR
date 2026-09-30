@@ -34,12 +34,14 @@ public static partial class UnitRecognizer
     {
         "g_per_s", "t_per_year", "kg_per_t", "g_per_GJ", "mg_per_m3", "kg_per_m3",
         "Sm3_per_s", "Sm3_per_h", "kg_per_Sm3", "MJ_per_Sm3", "MJ_per_kg", "t_per_t", "kg_per_TJ", "g_per_mol",
+        "mg_per_Sm3", "Sm3_per_day",
     };
 
     /// <summary>Позначення простих одиниць (нормалізовані: нижній регістр, без пробілів і крапок).</summary>
     private static readonly Dictionary<string, string> Simple = new(StringComparer.Ordinal)
     {
         ["т"] = "t", ["t"] = "t", ["тонн"] = "t", ["тонна"] = "t", ["тонни"] = "t",
+        ["tonne"] = "t", ["tonnes"] = "t",
         ["кг"] = "kg", ["kg"] = "kg",
         ["г"] = "g", ["g"] = "g", ["гр"] = "g",
         ["мг"] = "mg", ["mg"] = "mg",

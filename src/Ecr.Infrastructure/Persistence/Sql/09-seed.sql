@@ -268,6 +268,41 @@ WHERE d.BaseUnitId IS NULL AND d.Id IN (12, 14, 15);
 GO
 -- HSE301:F1 ── кінець секції ───────────────────────────────────────────────
 
+-- UNITS:ecr-derived ── похідні одиниці з реальних книг замовника ──────────
+-- Сухі прогони bootstrap-excel (HSE372: «mg/Nm3», «Nm3/day») назвали дві
+-- похідні одиниці, яких немає в каталозі. Лише дописування: наявні одиниці й
+-- розмірності не змінюються; нових розмірностей немає (Id розмірностей 1–19
+-- зайняті, використано наявні 13 і 16); Id одиниць — IDENTITY, не фіксовані.
+--
+-- ⛔ Це лише метричні множники всередині ОДНІЄЇ розмірності, без жодного
+-- припущення про умови приведення об'єму:
+--   mg_per_Sm3  = 1e-6 kg/Sm3  (мг → кг; Sm3 — база StdVolume, множник 1);
+--   Sm3_per_day = 1/86400 Sm3/s (доба = 86400 с; літерал — як його зберігає
+--                 decimal(38,18), 1/86400 = 0.0000115740740740740740…).
+-- Конверсії в/з працюючий м3 (mg_per_m3, m3_per_day) НЕМАЄ навмисно: розмірності
+-- 16 і 11 різні (V-12), і CONVERT дає #UNIT, а не правдоподібне число.
+-- ⚠ Sm3 у каталозі — єдиний «стандартний» кубометр; книги замовника пишуть
+-- і «Nm3» (0 °C), і «Sm3» (15/20 °C), а множника між ними каталог не має.
+-- Бачить це `UnitRecognizer` (tools/Ecr.Bootstrap.Excel): «nm3» → Sm3.
+-- Факт замовника: чи тотожні для його методологій Nm3 і Sm3 (див. звіт).
+-- Дзеркало в пам'яті воркера — `UnitTable.Seed` (Ecr.Calculations); його
+-- звіряє `Hse301UnitsTests`.
+MERGE uom.Unit AS t
+USING (VALUES
+  (N'mg_per_Sm3',  16, N'mg',  N'Sm3', 0.000001),
+  (N'Sm3_per_day', 13, N'Sm3', N'day', 0.000011574074074074)   -- 1 / 86400
+) AS s (Code, DimensionId, NumCode, DenCode, Factor)
+ON t.Code = s.Code
+WHEN NOT MATCHED THEN INSERT
+     (Code, SymbolL10n, NameL10n, DimensionId, IsBase, FactorToBase, OffsetToBase,
+      NumeratorUnitId, DenominatorUnitId)
+     VALUES (s.Code, N'{"en":"' + s.Code + N'"}', N'{"en":"' + s.Code + N'"}',
+             s.DimensionId, 0, s.Factor, 0,
+             (SELECT Id FROM uom.Unit WHERE Code = s.NumCode),
+             (SELECT Id FROM uom.Unit WHERE Code = s.DenCode));
+GO
+-- UNITS:ecr-derived ── кінець секції ───────────────────────────────────────
+
 -- Політика паролів і вбудовані ролі
 MERGE sec.PasswordPolicy AS t USING (VALUES (N'Default')) AS s (Code) ON t.Code = s.Code
 WHEN NOT MATCHED THEN INSERT (Code) VALUES (s.Code);
