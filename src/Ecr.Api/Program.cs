@@ -199,11 +199,14 @@ builder.Services.Configure<GzipCompressionProviderOptions>(
 builder.Services.AddEcrRateLimiting(builder.Configuration);
 
 builder.Services.AddScoped<Ecr.Api.Health.IRecalculationWorkerProbe, Ecr.Api.Health.RecalculationWorkerProbe>();
+// F-4: база часових поясів ОС — лише попередження (Degraded), старт не блокується.
+builder.Services.AddSingleton<Ecr.Api.Health.ITimeZoneOffsetProvider, Ecr.Api.Health.SystemTimeZoneOffsetProvider>();
 builder.Services.AddHealthChecks()
     .AddCheck<Ecr.Api.Health.DatabaseHealthCheck>("db", tags: ["db", "ready"])
     .AddCheck<Ecr.Api.Health.JobsHealthCheck>("jobs", tags: ["ready"])
     .AddCheck<Ecr.Api.Health.SourcesHealthCheck>("sources", tags: ["ready"])
-    .AddCheck<Ecr.Api.Health.RecalculationWorkerHealthCheck>("worker", tags: ["ready"]);
+    .AddCheck<Ecr.Api.Health.RecalculationWorkerHealthCheck>("worker", tags: ["ready"])
+    .AddCheck<Ecr.Api.Health.TimeZoneDatabaseHealthCheck>("tzdata", tags: ["ready"]);
 
 var app = builder.Build();
 
@@ -216,6 +219,9 @@ app.ReportFileLog();
 // лише тут видно всі джерела (зокрема ті, що додає хост тестів), і вже є логер,
 // тобто причина лягає в журнал подій і файл, а не лише у виняток процесу.
 app.ValidateEcrConfiguration();
+
+// F-4: попередження про застарілу базу часових поясів (лише лог, ніколи не кидає).
+app.ReportTimeZoneDatabase();
 
 // ⚠ ПОСЛІДОВНІСТЬ СТАРТУ (B01 §6.3) — порядок значущий:
 // 1) retry-очікування БД  2) звірка міграцій  3) Validate/Migrate

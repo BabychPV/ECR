@@ -28,7 +28,7 @@ public sealed class HealthTests(SqlServerFixture sql)
     /// — завалити тест. Інакше підсистема тихо випадає зі спостереження, а
     /// звіт лишається зеленим.
     /// </remarks>
-    private static readonly string[] ExpectedChecks = ["db", "jobs", "sources", "worker"];
+    private static readonly string[] ExpectedChecks = ["db", "jobs", "sources", "tzdata", "worker"];
 
     private const string Password = "Api-Health-Probe-2026!";
 
