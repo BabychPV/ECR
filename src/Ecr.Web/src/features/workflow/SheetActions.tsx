@@ -2,7 +2,7 @@
 import { Button, Divider } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { apiEnqueue, apiFetch } from '@/api/client';
+import { apiEnqueue, apiFetch, EcrApiError } from '@/api/client';
 import type {
   ApproveSheetRequest,
   DocumentSummary,
@@ -195,20 +195,37 @@ export function SheetActions({
     await queryClient.invalidateQueries({ queryKey: ['document', documentId, periodKey] });
   };
 
+  // ФВ-5.19: попередження, які сервер попросив підтвердити; `null` — діалог закритий.
+  const [warnings, setWarnings] = useState<string[] | null>(null);
+
   const submit = useMutation({
-    mutationFn: () =>
+    mutationFn: (acknowledgeWarnings: boolean) =>
       apiFetch(`/api/v1/documents/${documentId}/submit`, {
         method: 'POST',
-        body: JSON.stringify({ sheetDefId, periodKey } satisfies SheetWorkflowRequest),
+        body: JSON.stringify({
+          sheetDefId,
+          periodKey,
+          acknowledgeWarnings,
+        } satisfies SheetWorkflowRequest),
       }),
     onSuccess: async () => {
+      setWarnings(null);
       await refresh();
       showDone(t('document.submitted'));
     },
     // ⚠ Причина показується як є: Submit при осиротілих рядках
     // (`ECR-SUB-4221`) — це не «помилка сервера», а перелік того, що треба
-    // виправити.
-    onError: showApiError,
+    // виправити. Виняток — «попередження без підтвердження» (ФВ-5.19): це
+    // питання, а не відмова, тож замість тосту — діалог із переліком.
+    onError: (error) => {
+      const pending = warningsToConfirm(error);
+      if (pending === null) {
+        setWarnings(null);
+        showApiError(error);
+        return;
+      }
+      setWarnings(pending);
+    },
   });
 
   const decide = useMutation({
@@ -594,7 +611,7 @@ export function SheetActions({
       )}
 
       {canSubmit && (
-        <Button size="xs" loading={submit.isPending} onClick={() => submit.mutate()}>
+        <Button size="xs" loading={submit.isPending} onClick={() => submit.mutate(false)}>
           {t('document.submit')}
         </Button>
       )}
@@ -668,6 +685,18 @@ export function SheetActions({
       )}
 
       <ConfirmModal
+        opened={warnings !== null}
+        title={t('workflow.submitWarningsTitle')}
+        text={t('workflow.submitWarningsHint')}
+        consequences={warnings ?? []}
+        verb={t('workflow.submitAnyway')}
+        danger={false}
+        isPending={submit.isPending}
+        onConfirm={() => submit.mutate(true)}
+        onClose={() => setWarnings(null)}
+      />
+
+      <ConfirmModal
         opened={asking === 'approve'}
         title={t('workflow.approveTitle')}
         text={t('workflow.approveHint')}
@@ -712,6 +741,23 @@ export function SheetActions({
       />
     </>
   );
+}
+
+/**
+ * Тексти попереджень із відмови «потрібне підтвердження» (ФВ-5.19):
+ * `422 ECR-SUB-4221`, `messageKey = err.ECR-SUB-4221.warningsNeedConfirmation`,
+ * перелік у `messages[].message` (локалізований сервером). `null` — це інша відмова.
+ */
+export function warningsToConfirm(error: unknown): string[] | null {
+  if (!(error instanceof EcrApiError) || error.problem.errorCode !== 'ECR-SUB-4221') return null;
+
+  const extensions = error.problem.extensions2;
+  if (extensions?.['messageKey'] !== 'err.ECR-SUB-4221.warningsNeedConfirmation') return null;
+
+  const messages = extensions['messages'];
+  if (!Array.isArray(messages)) return [];
+
+  return messages.map((m: { message?: unknown }) => String(m.message ?? ''));
 }
 
 /** Чи має аркуш у цьому стані бути доступним для правки. */
