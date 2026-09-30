@@ -9,9 +9,9 @@
     Object з межами пам'яті (src/Ecr.Worker). Та сама тека, що й EcrApi:
     exe публікується в той самий PublishDir (tools/build-msi.ps1).
 
-    ТИПОВО ВИМКНЕНА: WORKER_ENABLED = 0 (Package.wxs) — служба не
-    реєструється і не стартує, установка поводиться рівно як до P2. Увімкнути:
-    `msiexec /i Ecr.msi WORKER_ENABLED=1 …` або `deploy-ecr.ps1 -EnableWorker`
+    ТИПОВО УВІМКНЕНА (з I2-2): WORKER_ENABLED = 1 (Package.wxs) — служба
+    реєструється і стартує на свіжій установці й на оновленні. Вимкнути:
+    `msiexec /i Ecr.msi WORKER_ENABLED=0 …` або `deploy-ecr.ps1 -DisableWorker`
     (docs/build/10-installer.md §1.6).
 
     ⛔ Ecr.Worker.exe — KeyPath САМЕ цього компонента, а не частина AppFiles:
@@ -20,7 +20,7 @@
     шляху). Тому exe ставиться лише разом зі службою, тобто лише за
     WORKER_ENABLED=1. Решта файлів воркера (Ecr.Worker.dll, *.deps.json,
     worker.settings.json) — у AppFiles і ставляться завжди: без exe їх ніщо
-    не запускає.
+    не запускає. Типове значення 1 робить exe звичайною частиною установки.
 
     ⚠ Transitive="yes": умову компонента Windows Installer обчислює лише при
     ПЕРШІЙ установці, якщо компонент не транзитивний. З ним повторна
@@ -29,8 +29,9 @@
     (docs/admin/operations-runbook.md §10).
 
     ⚠ WORKER_ENABLED не запам'ятовується між установками — так само, як
-    SERVICE_ACCOUNT: оновлення без властивості = служба без воркера.
-    deploy-ecr.ps1 передає її щоразу з -EnableWorker.
+    SERVICE_ACCOUNT: оновлення без властивості = типове 1, служба є. Свідоме
+    вимкнення треба повторювати на кожному оновленні (WORKER_ENABLED=0);
+    deploy-ecr.ps1 передає властивість щоразу явно.
   -->
   <Fragment>
     <ComponentGroup Id="WorkerService" Directory="INSTALLFOLDER">

@@ -66,9 +66,11 @@ Test-Case 'S1. Ecr.Worker.exe і worker.settings.json у MSI' {
     }
 }
 
-Test-Case 'S2. WORKER_ENABLED типово 0' {
+# I2-2 (2026-09-30): типово 1 — служба є на свіжій установці й на оновленні без
+# властивостей; інакше оновлення мовчки знімало б виконавця перерахунку.
+Test-Case 'S2. WORKER_ENABLED типово 1' {
     $rows = Get-MsiRows "SELECT ``Value`` FROM ``Property`` WHERE ``Property`` = 'WORKER_ENABLED'" 1
-    if ($rows.Count -ne 1 -or $rows[0][0] -ne '0') { throw "WORKER_ENABLED = '$($rows | ForEach-Object { $_[0] })', очікували '0'" }
+    if ($rows.Count -ne 1 -or $rows[0][0] -ne '1') { throw "WORKER_ENABLED = '$($rows | ForEach-Object { $_[0] })', очікували '1'" }
     $secure = Get-MsiRows "SELECT ``Value`` FROM ``Property`` WHERE ``Property`` = 'SecureCustomProperties'" 1
     if ($secure.Count -ne 1 -or ($secure[0][0] -split ';') -notcontains 'WORKER_ENABLED') {
         throw 'WORKER_ENABLED не в SecureCustomProperties — з /qn під UAC значення не дійде до серверної частини'
@@ -123,23 +125,35 @@ Test-Case '1. Чиста установка' {
     Invoke-Msi "/i `"$MsiPath`" /qn /l*v c1.log SERVICE_ACCOUNT=$ServiceAccount"
     $s = Get-Service EcrApi -ErrorAction Stop
     if ($s.StartType -ne 'Automatic') { throw "StartType = $($s.StartType)" }
-    # D-206: без WORKER_ENABLED установка рівно як до воркера.
-    if (Get-Service EcrWorker -ErrorAction SilentlyContinue) { throw 'EcrWorker зареєстровано без WORKER_ENABLED=1' }
-}
-
-Test-Case 'W1. Той самий MSI, WORKER_ENABLED=1 (REINSTALL, транзитивний компонент)' {
-    Invoke-Msi "/i `"$MsiPath`" /qn /l*v cw1.log REINSTALL=ALL REINSTALLMODE=vomus WORKER_ENABLED=1 SERVICE_ACCOUNT=$ServiceAccount"
+    # I2-2: без WORKER_ENABLED служба воркера є — типове значення 1.
     $w = Get-CimInstance Win32_Service -Filter "Name='EcrWorker'"
-    if (-not $w) { throw 'EcrWorker не зареєстровано' }
+    if (-not $w) { throw 'EcrWorker не зареєстровано без WORKER_ENABLED (типове 1)' }
     if ($w.PathName -notmatch 'Ecr\.Worker\.exe"?\s+--supervisor') { throw "PathName = $($w.PathName)" }
     $api = Get-CimInstance Win32_Service -Filter "Name='EcrApi'"
     if ($w.StartName -ne $api.StartName) { throw "обліковий запис EcrWorker '$($w.StartName)' ≠ EcrApi '$($api.StartName)'" }
 }
 
-Test-Case 'W2. WORKER_ENABLED=0 прибирає службу, EcrApi лишається' {
-    Invoke-Msi "/i `"$MsiPath`" /qn /l*v cw2.log REINSTALL=ALL REINSTALLMODE=vomus WORKER_ENABLED=0 SERVICE_ACCOUNT=$ServiceAccount"
+Test-Case 'W1. WORKER_ENABLED=0 прибирає службу, EcrApi лишається (REINSTALL, транзитивний компонент)' {
+    Invoke-Msi "/i `"$MsiPath`" /qn /l*v cw1.log REINSTALL=ALL REINSTALLMODE=vomus WORKER_ENABLED=0 SERVICE_ACCOUNT=$ServiceAccount"
     if (Get-Service EcrWorker -ErrorAction SilentlyContinue) { throw 'EcrWorker лишився' }
     Get-Service EcrApi -ErrorAction Stop | Out-Null
+}
+
+Test-Case 'W2. Той самий MSI, WORKER_ENABLED=1 повертає службу' {
+    Invoke-Msi "/i `"$MsiPath`" /qn /l*v cw2.log REINSTALL=ALL REINSTALLMODE=vomus WORKER_ENABLED=1 SERVICE_ACCOUNT=$ServiceAccount"
+    if (-not (Get-Service EcrWorker -ErrorAction SilentlyContinue)) { throw 'EcrWorker не зареєстровано' }
+}
+
+# I2-2: оновлення з попередньої версії БЕЗ властивостей — служба воркера є
+# (попередня версія могла ставити без неї: тоді це саме той випадок, де
+# Executor = Worker лишився б без виконавця, якби типове було 0).
+if ($PreviousMsiPath) {
+    Test-Case 'W3. Оновлення з попередньої версії без WORKER_ENABLED — служба є' {
+        Invoke-Msi "/x `"$MsiPath`" /qn /l*v cw3x.log"
+        Invoke-Msi "/i `"$((Resolve-Path $PreviousMsiPath).Path)`" /qn /l*v cw3a.log WORKER_ENABLED=0 SERVICE_ACCOUNT=$ServiceAccount"
+        Invoke-Msi "/i `"$MsiPath`" /qn /l*v cw3b.log SERVICE_ACCOUNT=$ServiceAccount"
+        if (-not (Get-Service EcrWorker -ErrorAction SilentlyContinue)) { throw 'після оновлення EcrWorker немає' }
+    }
 }
 
 Test-Case '5. Та сама версія поверх' {
