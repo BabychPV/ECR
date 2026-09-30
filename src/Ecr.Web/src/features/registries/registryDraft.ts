@@ -6,6 +6,7 @@ import {
   type FieldDraft,
   type RuleDraft,
 } from './definition';
+import { compositionFromSave } from './rc816/composition';
 
 /** Чернетка опису довідника (`BE-24` крок 2). */
 type RegistryDraftDto = components['schemas']['RegistryDefinitionDraftDto'];
@@ -241,5 +242,6 @@ export function draftNewFields(draft: RegistryDraftDto, language: string): Field
       isKey: field.isKey,
       lookupRegistryDefId: field.lookupRegistryDefId,
       unitId: field.unitId,
+      ...compositionFromSave(field),
     }));
 }

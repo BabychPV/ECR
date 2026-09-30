@@ -30,6 +30,7 @@ import {
 import { localized } from '@/shared/i18n/localized';
 import { Timestamp } from '@/shared/ui/Timestamp';
 import { t } from '@/shared/i18n';
+import { CompositionFieldOptions } from './rc816/CompositionFieldOptions';
 
 /**
  * Поля довідника (`ФВ-8.3`, `ФВ-8.12`).
@@ -186,6 +187,7 @@ export function RegistryFields({
 
                 <Table.Td>
                   {isLookup ? (
+                    <>
                     <NativeSelect
                       size="xs"
                       label={t('registries.lookup')}
@@ -200,6 +202,14 @@ export function RegistryFields({
                         })
                       }
                     />
+                    <CompositionFieldOptions
+                      definition={definition}
+                      draft={draft}
+                      otherNew={newFields}
+                      canEdit={canEdit}
+                      onChange={(next) => onChangeField(index, next)}
+                    />
+                    </>
                   ) : (
                     '—'
                   )}

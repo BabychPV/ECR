@@ -5,6 +5,7 @@
   RegistryRuleSaveDto,
   SaveRegistryDefinitionDto,
 } from '@/api/types';
+import { compositionSave, type CompositionDraft } from './rc816/composition';
 
 /**
  * Типи поля, які людина обирає у формі «додати поле» — за зразком
@@ -171,6 +172,8 @@ export function buildSaveRequest(
     isKey: draft.isKey,
     lookupRegistryDefId: draft.dataType === 'Lookup' ? draft.lookupRegistryDefId : null,
     unitId: NumericFieldTypes.includes(draft.dataType) ? draft.unitId : null,
+    // ФВ-8.16: композиція (`relationKind`, `onParentDelete`; поле композиції обов'язкове).
+    ...compositionSave(draft),
   }));
 
   const saved: RegistryRuleSaveDto[] = rules.map((rule) => ({
@@ -223,7 +226,7 @@ export function emptyRule(ruleKind: RuleKind): RuleDraft {
  * тут поле додається в рядку таблиці, і мову решти назв так само вводили б
  * послідовно, одну по одній, а не всі одразу.
  */
-export interface FieldDraft {
+export interface FieldDraft extends CompositionDraft {
   readonly code: string;
   readonly name: string;
   readonly dataType: FieldDataType;
