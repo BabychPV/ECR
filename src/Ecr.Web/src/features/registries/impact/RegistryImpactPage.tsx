@@ -1,9 +1,10 @@
 import { useState, type JSX } from 'react';
 import { Alert, Anchor, Button, Card, Checkbox, Group, Progress, Stack, Table, Text } from '@mantine/core';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
 import type { JobStatus } from '@/api/types';
+import { isCalculationResultsQuery } from '@/features/methodologies/calculationResultsKey';
 import { PollMs } from '@/features/workflow/jobFollow';
 import { humanizeJobId } from '@/features/workflow/jobLabel';
 import { t } from '@/shared/i18n';
@@ -130,6 +131,7 @@ function ImpactJob({ jobId, canOpenJobs }: { readonly jobId: string; readonly ca
 export function RegistryImpactPage(): JSX.Element {
   const { code = '' } = useParams<{ code: string }>();
   const session = useSession();
+  const client = useQueryClient();
   const [selected, setSelected] = useState<ReadonlySet<number>>(new Set());
   const [asking, setAsking] = useState(false);
   const [jobId, setJobId] = useState<string | null>(null);
@@ -143,7 +145,13 @@ export function RegistryImpactPage(): JSX.Element {
   const recalculate = useMutation({
     mutationFn: (reason: string) =>
       recalculateImpacted(code, { documentIds: selected.size === 0 ? null : [...selected].sort((a, b) => a - b), reason }),
-    onSuccess: (accepted) => setJobId(accepted.jobId),
+    onSuccess: (accepted) => {
+      setJobId(accepted.jobId);
+      // ⚠ Перелік зачеплених і банер «довідник змінено» в панелі результатів читають кеш: без
+      // інвалідації вони показують стан ДО постановки перерахунку (RT-25).
+      void client.invalidateQueries({ queryKey: impactKey(code) });
+      void client.invalidateQueries({ predicate: isCalculationResultsQuery });
+    },
   });
 
   const canRecalculate = can(session.data, RecalculatePermission);

@@ -8,6 +8,7 @@ import { t } from '@/shared/i18n';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { calculationResults } from './api';
+import { calculationResultsKey } from './calculationResultsKey';
 
 /**
  * Коди довідників, змінених після прогону (RT-25), без повторів і впорядковані.
@@ -48,7 +49,7 @@ export function CalculationResultsPanel({
   // кожна зміна робочого процесу; доти панель жила під окремим ключем, і після
   // перерахунку показувала старі числа до перезавантаження сторінки.
   const results = useQuery({
-    queryKey: ['document', documentId, periodKey, 'calculation-results'],
+    queryKey: calculationResultsKey(documentId, periodKey),
     queryFn: () => calculationResults(documentId, periodKey),
   });
 
