@@ -169,3 +169,92 @@ BEGIN
     );
 END
 GO
+
+-- ⛔ ФВ-5.21 / REQ-CLOSURE №4: журнали незмінні НА РІВНІ БД, а не лише тим, що
+-- порт `IAuditWriter` уміє тільки писати. AFTER-тригери відхиляють будь-який
+-- UPDATE і DELETE (`THROW 50060`) — навіть від db_owner і повз застосунок
+-- (щоб їх обійти, треба свідомо DISABLE TRIGGER).
+--
+-- ЧОМУ ТРИГЕРИ, А НЕ `DENY … ON SCHEMA::aud`: у репозиторії немає жодного
+-- `CREATE USER`/`GRANT` — обліковий запис служби створює DBA, тож DENY нема до
+-- кого прив'язати, а DENY, накладений вручну, не перевіряється тестом і
+-- мовчки зникає на новій базі. Тригер їде разом зі схемою. DBA може додатково
+-- накласти `DENY UPDATE, DELETE ON SCHEMA::aud TO <служба>` (02a-db-schema §15).
+--
+-- ЛЕГАЛЬНІ ШЛЯХИ, яким це не заважає: INSERT (AuditWriter, сід — лише вставка);
+-- `aud.ConsistencyIssue` НЕ входить (має `ResolvedAt` — журнал знахідок із
+-- життєвим циклом); `aud.SimulationSession` дозволяє єдине оновлення —
+-- `EndedAt` з NULL (`SimulationService.EndAsync`), DELETE заборонений.
+-- Архівація (`arc.usp_ArchiveYear`) `aud.*` не чіпає (НФ-8.4b); TRUNCATE/SWITCH/
+-- SPLIT партицій тригери не запускають — це DDL DBA, а не DML застосунку.
+CREATE OR ALTER TRIGGER aud.TR_CellChange_Immutable
+ON aud.CellChange
+AFTER UPDATE, DELETE
+AS
+BEGIN
+    SET NOCOUNT ON;
+    THROW 50060, N'Журнал aud.CellChange незмінний: UPDATE і DELETE заборонені (ФВ-5.21).', 1;
+END;
+GO
+
+CREATE OR ALTER TRIGGER aud.TR_StructureChange_Immutable
+ON aud.StructureChange
+AFTER UPDATE, DELETE
+AS
+BEGIN
+    SET NOCOUNT ON;
+    THROW 50060, N'Журнал aud.StructureChange незмінний: UPDATE і DELETE заборонені (ФВ-5.21).', 1;
+END;
+GO
+
+CREATE OR ALTER TRIGGER aud.TR_SecurityEvent_Immutable
+ON aud.SecurityEvent
+AFTER UPDATE, DELETE
+AS
+BEGIN
+    SET NOCOUNT ON;
+    THROW 50060, N'Журнал aud.SecurityEvent незмінний: UPDATE і DELETE заборонені (ФВ-5.21).', 1;
+END;
+GO
+
+CREATE OR ALTER TRIGGER aud.TR_PublicationEvent_Immutable
+ON aud.PublicationEvent
+AFTER UPDATE, DELETE
+AS
+BEGIN
+    SET NOCOUNT ON;
+    THROW 50060, N'Журнал aud.PublicationEvent незмінний: UPDATE і DELETE заборонені (ФВ-5.21).', 1;
+END;
+GO
+
+-- Сеанс симуляції: єдина легальна правка — закриття (`EndedAt` NULL → значення).
+CREATE OR ALTER TRIGGER aud.TR_SimulationSession_Immutable
+ON aud.SimulationSession
+AFTER UPDATE, DELETE
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF EXISTS (
+        SELECT 1 FROM deleted d
+        WHERE NOT EXISTS (SELECT 1 FROM inserted i WHERE i.Id = d.Id)
+    )
+    BEGIN
+        THROW 50060, N'Журнал aud.SimulationSession незмінний: DELETE заборонений (ФВ-5.21, D-25).', 1;
+    END
+
+    IF EXISTS (
+        SELECT 1
+        FROM inserted i
+        JOIN deleted d ON d.Id = i.Id
+        WHERE d.EndedAt IS NOT NULL
+           OR i.ActorUserId   <> d.ActorUserId
+           OR i.SubjectUserId <> d.SubjectUserId
+           OR i.Reason        <> d.Reason
+           OR i.StartedAt     <> d.StartedAt
+    )
+    BEGIN
+        THROW 50060, N'Журнал aud.SimulationSession незмінний: дозволено лише закриття (EndedAt з NULL) (ФВ-5.21).', 1;
+    END
+END;
+GO

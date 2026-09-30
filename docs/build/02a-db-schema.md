@@ -3321,6 +3321,19 @@ GO
 ---
 
 <a id="archive-proc"></a>
+> ✎ **2026-09-30, ФВ-5.21.** Журнали аудиту незмінні на рівні БД:
+> `aud.TR_{CellChange,StructureChange,SecurityEvent,PublicationEvent}_Immutable`
+> (AFTER UPDATE, DELETE → `THROW 50060`) і `aud.TR_SimulationSession_Immutable`
+> (дозволено лише закриття EndedAt з NULL; DELETE заборонено) — в кінці
+> `Sql/11-audit-tables.sql` (аудит-таблиці створюються після `10-triggers.sql`).
+> `aud.ConsistencyIssue` не входить (має `ResolvedAt`). Це тригери, а не
+> `DENY`: обліковий запис служби створює DBA, у репозиторії немає `CREATE
+> USER`/`GRANT`. DBA **може додатково** накласти
+> `DENY UPDATE, DELETE ON SCHEMA::aud TO [<служба>]` (тоді `aud.SimulationSession`
+> треба виключити: `GRANT UPDATE ON aud.SimulationSession (EndedAt)`) — тригери
+> працюють і без цього, навіть для db_owner. `TRUNCATE`/SWITCH партицій —
+> DDL DBA, тригерами не блокується.
+
 ## 16. Процедура архівації
 
 ```sql
