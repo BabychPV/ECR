@@ -215,10 +215,20 @@ public sealed class AcceptSourceUnitChangeHandler(
                 });
         }
 
+        var before = IntegrationConfigAudit.Snapshot(map);
         var previousUnitId = map.AcceptSourceUnitChange(requestedSourceUnitId);
         var newSourceUnitId = map.SourceUnitId!.Value;
 
-        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+        // ФВ-12.10: старий і новий стан мапінгу — у журналі структурних змін, в одній транзакції зі зміною.
+        await uow.ExecuteInTransactionAsync(async innerCt =>
+        {
+            await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+            await IntegrationConfigAudit.WriteAsync(
+                audit, clock, currentUser, IntegrationConfigAudit.FieldMapType, map.Id, AcceptedEventType,
+                before, IntegrationConfigAudit.Snapshot(map),
+                $"Мапінг поля «{map.SourceField}»: прийнято нову одиницю джерела.",
+                innerCt).ConfigureAwait(false);
+        }, ct).ConfigureAwait(false);
 
         // Коди читаються ПІСЛЯ збереження й обидва: журнал має відповісти на
         // «з якої на яку» без другого запиту в довідник, якого на той момент

@@ -289,6 +289,32 @@ public sealed class EntityFieldMapLifecycleTests(SqlServerFixture sql)
     }
 
     [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-12.10")]
+    public async Task ФВ_12_10_прийняття_зміни_одиниці_лишає_запис_структурних_змін_зі_старою_і_новою_одиницею()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, Manage).ConfigureAwait(true);
+        var stand = await ArrangeAsync(collectPoints: 0).ConfigureAwait(true);
+
+        var accepted = await client.PostAsJsonAsync(
+            new Uri($"/api/v1/entity-field-maps/{stand.FieldMapId}/accept-unit-change", UriKind.Relative),
+            new { sourceUnitId = stand.NewUnitId });
+        Assert.Equal(HttpStatusCode.OK, accepted.StatusCode);
+
+        // ⛔ МУТАЦІЙНИЙ ДОКАЗ: прибрати `IntegrationConfigAudit.WriteAsync` в
+        // `AcceptSourceUnitChangeHandler` — журнал порожній, тест червоний.
+        var journal = await StructureChangeProbe.ReadAsync(sql.ConnectionString, "ext.EntityFieldMap", stand.FieldMapId)
+            .ConfigureAwait(true);
+
+        var entry = Assert.Single(journal);
+        Assert.Equal(Ecr.Application.Sources.AcceptSourceUnitChangeHandler.AcceptedEventType, entry.Operation);
+        Assert.Contains($"\"sourceUnitId\":{stand.OldUnitId}", entry.OldJson, StringComparison.Ordinal);
+        Assert.Contains($"\"sourceUnitId\":{stand.NewUnitId}", entry.NewJson, StringComparison.Ordinal);
+    }
+
+    [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "ФВ-6.12")]
