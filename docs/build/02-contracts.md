@@ -2796,6 +2796,20 @@ public interface IRegistryUseStore
 }
 ```
 
+#### `IRegistryImpactStore`
+
+«Які документи зачепила правка довідника» (RT-25, FEATURE-REGISTRY-TABLES §5.10): документи
+ВІДКРИТИХ періодів (`Open`/`Grace`), чий актуальний прогін дав числа за версією методології, що
+читає довідник (`cfg.RegistryUse`, `SourceKind = 1`). Закриті періоди не повертаються (`D-39`).
+
+```csharp
+public interface IRegistryImpactStore
+{
+    public Task<IReadOnlyList<RegistryImpactRow>> ListImpactedAsync(
+        int registryDefId, int take, CancellationToken ct);
+}
+```
+
 #### `IReportDefinitionStore`
 
 Описи звітів (rpt.ReportDef) та їхні версії.
@@ -3803,6 +3817,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/registries/{code}/definition/publish` | `Registry.Publish` | 8 |
 | `GET` | `/api/v1/registries/{code}/history` | `Registry.View` | 8 |
 | `GET` | `/api/v1/registries/{code}/usage` | `Registry.EditDefinition` | 8 |
+| `GET` | `/api/v1/registries/{code}/impact` | `Registry.View` + `Calculation.View` | 8 |
 | `POST` | `/api/v1/registries/{code}/entries/import?dryRun=` | `Registry.EditData` | 8 |
 | `POST` | `/api/v1/registries` | `Registry.EditDefinition` | 8 |
 | `POST` | `/api/v1/registries/{code}/keys/check` | `Registry.EditDefinition` | 8 |

@@ -9861,6 +9861,73 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/registries/{code}/impact": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Документи ВІДКРИТИХ періодів, чиї результати пораховано методологією, що читає довідник.
+         *     Права `Registry.View` і `Calculation.View` (у проєкті документа).
+         * @description Закриті періоди не повертаються ніколи; перерахунок цей виклик не ставить.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Код довідника. */
+                    code: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RegistryImpactResponse"];
+                        "text/json": components["schemas"]["RegistryImpactResponse"];
+                        "text/plain": components["schemas"]["RegistryImpactResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/registries/{code}/keys/check": {
         parameters: {
             query?: never;
@@ -20873,6 +20940,37 @@ export interface components {
             oldJson: null | string;
             /** @description Дія: `SaveDefinition`, `SwitchSourceSet`. */
             operation: string;
+        };
+        /** @description Документ відкритого періоду, зачеплений правкою довідника. */
+        RegistryImpactItemDto: {
+            /** @description Бізнес-ключ документа. */
+            businessKey: string;
+            /**
+             * Format: int64
+             * @description Документ.
+             */
+            documentId: number;
+            /**
+             * Format: int32
+             * @description Період результатів.
+             */
+            periodKey: number;
+            /** @description `Open` або `Grace`. */
+            periodState: string;
+            /** @description Через що: `methodology:&lt;код&gt;`, впорядковано. */
+            via: string[];
+        };
+        /** @description Відповідь `GET /registries/{code}/impact`. */
+        RegistryImpactResponse: {
+            /** @description Зачеплені документи, які бачить викликач. */
+            items: components["schemas"]["RegistryImpactItemDto"][];
+            /**
+             * Format: int32
+             * @description Скільки їх усього (без обрізання переліку, але в межах bool RegistryImpactResponse.Truncated).
+             */
+            total: number;
+            /** @description `true` — вибірка вперлась у стелю, реальних документів більше. */
+            truncated: boolean;
         };
         /** @description Запит живої перевірки дублікатів ключа до збереження (§4.5). */
         RegistryKeyCheckRequest: {
