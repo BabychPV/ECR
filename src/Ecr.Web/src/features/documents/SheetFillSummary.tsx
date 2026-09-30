@@ -4,7 +4,7 @@ import { summarize, useTableStatus } from '@/features/documents/api';
 import { t } from '@/shared/i18n';
 
 /** Який документ і за який період підсумовувати. */
-export interface SheetFillSummaryProps {
+interface SheetFillSummaryProps {
   /** Документ. */
   documentId: number;
 

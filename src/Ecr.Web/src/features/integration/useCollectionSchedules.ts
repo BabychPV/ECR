@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { listCollectionSchedules } from '@/features/integration/scheduleApi';
 
 /** Префікс ключів переліку розкладів збору — для інвалідизації всіх з'єднань разом. */
-export const CollectionSchedulesKey = ['collection-schedules'] as const;
+const CollectionSchedulesKey = ['collection-schedules'] as const;
 
 /**
  * Ключ переліку розкладів ОДНОГО з'єднання.

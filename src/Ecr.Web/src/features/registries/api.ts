@@ -64,7 +64,7 @@ export function entryReferences(error: unknown): number | null {
 }
 
 /** Вид посилання на запис і скільки таких посилань (`V-08`). */
-export interface EntryReferenceKind {
+interface EntryReferenceKind {
   readonly kind: string;
   readonly count: number;
 }

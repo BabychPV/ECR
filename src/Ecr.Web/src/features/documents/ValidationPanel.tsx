@@ -5,7 +5,7 @@ import { t } from '@/shared/i18n';
 import { StatusBadge } from '@/shared/ui/StatusBadge';
 
 /** Що показувати в панелі зауважень. */
-export interface ValidationPanelProps {
+interface ValidationPanelProps {
   /**
    * Повідомлення останньої перевірки; `null` — перевірку ще не запускали.
    *

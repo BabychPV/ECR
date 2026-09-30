@@ -6,7 +6,7 @@ import { t } from '@/shared/i18n';
 import { can, useSession } from '@/shared/session/useSession';
 
 /** Рядок журналу з автором — спільна форма журналу комірок і структури. */
-export interface AuthoredRow {
+interface AuthoredRow {
   readonly changedByUserId: number;
   readonly changedByDisplayName?: string | null | undefined;
 }

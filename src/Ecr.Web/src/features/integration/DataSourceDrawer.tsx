@@ -54,7 +54,7 @@ export function freshVersionOf(error: unknown): string | null {
  * ⚠ `null` у `secondaryEndpoint`/`catalog` рядка не дає: `KeyValue` сам не
  * малює пару без значення.
  */
-export function connectionItems(source: DataSource): KeyValueItem[] {
+function connectionItems(source: DataSource): KeyValueItem[] {
   return [
     { label: t('sources.transport'), value: source.transport },
     { label: t('sources.endpoint'), value: source.endpoint, mono: true },

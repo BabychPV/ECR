@@ -19,7 +19,7 @@ import type { components } from '@/api/schema';
  */
 export type CollectionRunView = components['schemas']['CollectionRunView'];
 export type CollectionRunDetail = components['schemas']['CollectionRunDetail'];
-export type CollectionRunPage = components['schemas']['PagedResultOfCollectionRunView'];
+type CollectionRunPage = components['schemas']['PagedResultOfCollectionRunView'];
 
 /** Стани прогону — рівно перелік сервера (`ListCollectionRunsHandler.KnownStates`). */
 export const CollectionRunStates = ['Running', 'Succeeded', 'Degraded', 'Failed'] as const;
@@ -38,7 +38,7 @@ export interface CollectionRunFilters {
 }
 
 /** Розмір сторінки за замовчуванням — той самий, що бере сервер на `limit=0`. */
-export const CollectionRunsDefaultLimit = 50;
+const CollectionRunsDefaultLimit = 50;
 
 /**
  * Ключ запиту переліку — стабільний масив полів фільтра, БЕЗ курсора.
@@ -104,7 +104,7 @@ export function getCollectionRunDetail(id: number): Promise<CollectionRunDetail>
  * комірки він не ліг. Право те саме, що в журналу прогонів.
  */
 export type CoverageEventView = components['schemas']['CoverageEventView'];
-export type CoverageEventPage = components['schemas']['PagedResultOfCoverageEventView'];
+type CoverageEventPage = components['schemas']['PagedResultOfCoverageEventView'];
 
 /** Статуси подій — рівно перелік сервера (`CollectionCoverage.KnownStatuses`). */
 export const CoverageEventStatuses = [

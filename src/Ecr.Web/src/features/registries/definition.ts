@@ -54,7 +54,7 @@ export const NumericFieldTypes: readonly FieldDataType[] = ['Int', 'Decimal'];
 export const RuleKinds = ['RequiredWhen', 'UniqueWithin', 'Expression', 'CrossRegistry'] as const;
 
 /** Вид правила довідника. */
-export type RuleKind = (typeof RuleKinds)[number];
+type RuleKind = (typeof RuleKinds)[number];
 
 /** Рівні порушення правила. */
 export const Severities = ['Info', 'Warning', 'Error'] as const;

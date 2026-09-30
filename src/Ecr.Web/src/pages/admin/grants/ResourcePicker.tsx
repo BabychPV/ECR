@@ -43,7 +43,7 @@ export interface PickPath {
 
 export const EmptyPath: PickPath = { templateId: null, versionId: null, sheetId: null, tableId: null };
 
-export interface PickResult {
+interface PickResult {
   /** `0` — ресурс ще не обрано до кінця. */
   readonly resourceId: number;
   /** Код обраного ресурсу — та сама форма, що й `resourceName` від сервера. */

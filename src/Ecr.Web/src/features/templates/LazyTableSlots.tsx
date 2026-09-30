@@ -45,7 +45,7 @@ import { Box, Text } from '@mantine/core';
  * Tab не «перестрибував» незмонтовані таблиці, фокус усередині таблиці N
  * монтує таблицю N+1 — до того, як людина до неї дійде.
  */
-export interface LazyTableSlotsProps<T extends { readonly id: number }> {
+interface LazyTableSlotsProps<T extends { readonly id: number }> {
   readonly items: readonly T[];
   /** Аркуш розгорнутий — лише тоді діє `eager`. */
   readonly active: boolean;
@@ -67,7 +67,7 @@ export const TemplateTableSlotAttribute = 'data-template-table-slot';
  * запиту зрізу, лише рендер, і таблиця коштує кілька мілісекунд — дешевше
  * змонтувати трохи раніше, ніж показати заповнювач при швидкій прокрутці.
  */
-export const TemplateTableMountAhead = '600px 0px';
+const TemplateTableMountAhead = '600px 0px';
 
 /**
  * Геометрія таблиці структури (Mantine `Table striped withTableBorder`,

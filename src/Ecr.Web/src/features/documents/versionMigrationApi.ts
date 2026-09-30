@@ -5,7 +5,7 @@ import type { components } from '@/api/schema';
 export type VersionMigrationReport = components['schemas']['DocumentVersionMigrationDto'];
 
 /** Поточна версія і версії, на які можна перенести документ. */
-export type VersionMigrationTargets = components['schemas']['DocumentVersionMigrationTargetsDto'];
+type VersionMigrationTargets = components['schemas']['DocumentVersionMigrationTargetsDto'];
 
 /** Режим переносу: `Safe` — без втрати даних, `Presentation` — лише зміни вигляду. */
 export type VersionMigrationMode = components['schemas']['VersionMigrationMode'];
@@ -25,7 +25,7 @@ export function getVersionMigrationTargets(documentId: number): Promise<VersionM
 }
 
 /** Параметри переносу. */
-export interface MigrateDocumentVersionParams {
+interface MigrateDocumentVersionParams {
   readonly documentId: number;
   readonly targetVersionId: number;
   readonly mode: VersionMigrationMode;

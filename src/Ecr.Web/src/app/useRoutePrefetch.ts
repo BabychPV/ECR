@@ -9,7 +9,7 @@ import { prefetchRoute } from './routePrefetch';
  */
 const IntentDelayMs = 150;
 
-export interface RoutePrefetchHandlers {
+interface RoutePrefetchHandlers {
   onMouseEnter: () => void;
   onMouseLeave: () => void;
   onFocus: () => void;

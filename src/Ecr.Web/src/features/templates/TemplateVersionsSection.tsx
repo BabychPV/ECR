@@ -12,7 +12,7 @@ import { t } from '@/shared/i18n';
 import { NewTemplateVersionModal } from './NewTemplateVersionModal';
 
 /** Адреса сторінки структури версії — та сама, що й у переліку шаблонів. */
-export function templateVersionHref(templateId: number, versionId: number): string {
+function templateVersionHref(templateId: number, versionId: number): string {
   return `/admin/templates/${String(templateId)}/versions/${String(versionId)}`;
 }
 

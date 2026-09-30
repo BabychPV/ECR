@@ -2,8 +2,8 @@ import { apiFetch } from '@/api/client';
 import type { components } from '@/api/schema';
 
 /** Сутність збору у відповіді на заведення чи прив'язку (`ФВ-13.11`). */
-export type SourceEntity = components['schemas']['SourceEntityDto'];
-export type CreateSourceEntityBody = components['schemas']['CreateSourceEntityRequest'];
+type SourceEntity = components['schemas']['SourceEntityDto'];
+type CreateSourceEntityBody = components['schemas']['CreateSourceEntityRequest'];
 
 /** Ключ кешу переліку сутностей — той самий, що в таблиці й вкладці розкладу. */
 export const SourceEntitiesQueryKey = ['sources'] as const;

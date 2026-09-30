@@ -17,7 +17,7 @@ import type { ExpressionDialect } from '@/api/types';
  * спільної точки, за яку довелося б змагатися.
  */
 export type FormulaDto = components['schemas']['FormulaDto'];
-export type SaveFormulaDefRequest = components['schemas']['SaveFormulaDefRequest'];
+type SaveFormulaDefRequest = components['schemas']['SaveFormulaDefRequest'];
 export type FormulaScope = components['schemas']['FormulaScope'];
 
 /**

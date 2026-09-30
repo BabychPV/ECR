@@ -35,7 +35,7 @@ export function createLookupCellEditor(entries: readonly RegistryEntryDto[] | nu
  * ⚠ Мемоїзація — за самим масивом записів (`WeakMap`): довідник на 50 000
  * записів не перебудовується у варіанти на кожне відкриття редактора.
  */
-export function lookupOptionsOf(entries: readonly RegistryEntryDto[]): readonly ListOption[] {
+function lookupOptionsOf(entries: readonly RegistryEntryDto[]): readonly ListOption[] {
   const known = optionsCache.get(entries);
   if (known !== undefined) return known;
 

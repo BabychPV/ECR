@@ -37,7 +37,7 @@ export function isKnownDraft(
   );
 }
 
-export interface DeleteDocumentActionArgs {
+interface DeleteDocumentActionArgs {
   readonly documentId: number;
 
   /** `undefined` — документ ще не приїхав: кнопки немає, бо назви немає. */
@@ -50,7 +50,7 @@ export interface DeleteDocumentActionArgs {
   readonly allowed: boolean;
 }
 
-export interface DeleteDocumentAction {
+interface DeleteDocumentAction {
   /**
    * Пункт меню «More» на сторінці документа; `null`, якщо дії немає.
    *

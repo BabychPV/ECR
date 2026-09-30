@@ -15,7 +15,7 @@ type RenameRoleRequest = components['schemas']['RenameRoleRequest'];
 const ROLE_CONFLICT = 'ECR-SEC-0409';
 
 /** Що тримається на ролі, якщо відмова саме про це. */
-export interface RoleUsage {
+interface RoleUsage {
   assignments: number;
   grants: number;
   /** Кроки маршрутів погодження з цією роллю (V-09). */
@@ -33,7 +33,7 @@ export interface RoleUsage {
  *
  * ⚠ Числа в розширеннях сервер пише рядками — звідси `Number(...)`.
  */
-export function roleUsage(error: unknown): RoleUsage | null {
+function roleUsage(error: unknown): RoleUsage | null {
   if (!(error instanceof EcrApiError) || error.problem.errorCode !== ROLE_CONFLICT) return null;
 
   const assignments = Number(error.problem.extensions2?.['assignments']);

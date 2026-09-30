@@ -33,10 +33,10 @@ import type { PendingEdit } from './useCellPatch';
  * лишилася б у вкладці, у якій встиг попрацювати попередній бандл, і читалася
  * б як «правок нуль» — банер без жодної правки гірший за відсутній.
  */
-export const LostEditsKeyPrefix = 'ecr.lostEdits.v2:';
+const LostEditsKeyPrefix = 'ecr.lostEdits.v2:';
 
 /** Ключ сховища для користувача. */
-export function lostEditsKey(userId: number): string {
+function lostEditsKey(userId: number): string {
   return `${LostEditsKeyPrefix}${String(userId)}`;
 }
 
@@ -61,7 +61,7 @@ export function lostEditsKey(userId: number): string {
  * скільки вміщено. Мовчки зрізати різницю не можна: це та сама мовчазна
  * втрата, від якої весь цей модуль.
  */
-export const MaxRestoredEdits = 500;
+const MaxRestoredEdits = 500;
 
 /** Правки одного зрізу — адреса плюс самі значення. */
 export interface RestoreSlice {

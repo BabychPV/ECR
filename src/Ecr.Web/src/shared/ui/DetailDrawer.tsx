@@ -28,7 +28,7 @@ import { useUrlState } from '@/shared/ui/useUrlState';
  */
 
 /** Ім'я параметра адреси. Одне місце на весь застосунок. */
-export const DetailPanelParam = 'panel';
+const DetailPanelParam = 'panel';
 
 /**
  * Межа «широкого» екрана.

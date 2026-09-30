@@ -77,7 +77,7 @@ export function roundToScale(
  * ⚠ Спільне для вводу (`roundToScale`, лише `Decimal`) і для ПОКАЗУ
  * (`cellDisplay`, усі числові типи зі `scale`) — одне правило, не дві копії.
  */
-export function roundDecimalText(
+function roundDecimalText(
   text: string,
   scale: number,
   locale: string = formatLocale(),

@@ -17,7 +17,7 @@ export interface PreferenceBinding {
 }
 
 /** Запис на сервер — підміняється в тестах. */
-export interface PreferenceTransport {
+interface PreferenceTransport {
   put(key: string, value: unknown): Promise<unknown>;
   remove(key: string): Promise<unknown>;
 }

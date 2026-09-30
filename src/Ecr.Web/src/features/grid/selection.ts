@@ -28,7 +28,7 @@
  */
 
 /** Прямокутник виділення в індексах зрізу; межі включні. */
-export interface SelectionRange {
+interface SelectionRange {
   readonly fromRow: number;
   readonly toRow: number;
   readonly fromColumn: number;

@@ -6,7 +6,7 @@ import { t } from '@/shared/i18n';
 import { statusKey, statusTone, toneFills, type StatusTone } from '@/shared/ui/StatusBadge';
 import type { DocumentListFilters } from './documentListFilters';
 
-export interface DocumentListSummaryStripProps {
+interface DocumentListSummaryStripProps {
   /** За який період зводити; `null` — період не обрано. */
   readonly periodKey: number | null;
 

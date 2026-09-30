@@ -8,19 +8,19 @@ import {
 } from './definition';
 
 /** Чернетка опису довідника (`BE-24` крок 2). */
-export type RegistryDraftDto = components['schemas']['RegistryDefinitionDraftDto'];
+type RegistryDraftDto = components['schemas']['RegistryDefinitionDraftDto'];
 
 /** Стан чернетки: опублікована версія + сама чернетка або `null`. */
-export type RegistryDraftState = components['schemas']['RegistryDefinitionDraftStateResponse'];
+type RegistryDraftState = components['schemas']['RegistryDefinitionDraftStateResponse'];
 
 /** Тіло `PUT …/definition/draft`. */
-export type SaveRegistryDraftRequest = components['schemas']['SaveRegistryDefinitionDraftRequest'];
+type SaveRegistryDraftRequest = components['schemas']['SaveRegistryDefinitionDraftRequest'];
 
 /** Тіло прямого `PUT …/definition` — те саме, що й вміст чернетки. */
-export type SaveRegistryDefinition = components['schemas']['SaveRegistryDefinitionDto'];
+type SaveRegistryDefinition = components['schemas']['SaveRegistryDefinitionDto'];
 
 /** Відповідь публікації: нова версія опублікованого опису. */
-export type RegistryDefinitionVersion = components['schemas']['RegistryDefinitionVersionResponse'];
+type RegistryDefinitionVersion = components['schemas']['RegistryDefinitionVersionResponse'];
 
 /**
  * Ключ запиту чернетки.

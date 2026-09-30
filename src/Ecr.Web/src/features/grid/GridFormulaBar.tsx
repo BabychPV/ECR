@@ -24,7 +24,7 @@ import type { TotalsEdit } from './gridTotals';
  * сервер його зрізом не віддає. Рядок формули каже це словами, а не показує
  * порожнє місце, яке читається як «формули немає».
  */
-export interface GridFormulaBarProps {
+interface GridFormulaBarProps {
   readonly tableInstanceId: number;
   readonly periodKey: number;
   readonly slice: TableSliceDto;

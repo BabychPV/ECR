@@ -37,7 +37,7 @@ export type CompletionKind =
   | 'hint';
 
 /** Що розпізнано в позиції: символ за префіксом, функція або ланка `[…]`. */
-export type ContextKind = 'constant' | 'formula' | 'argument' | 'header' | 'function' | 'cell';
+type ContextKind = 'constant' | 'formula' | 'argument' | 'header' | 'function' | 'cell';
 
 /**
  * Пояснення замість порожнього переліку.
@@ -128,7 +128,7 @@ export interface EditorSymbols {
 export const TriggerCharacters: readonly string[] = ['[', '.', '!', '@'];
 
 /** Що доповнюємо і який фрагмент тексту замінюємо. */
-export interface CompletionContext {
+interface CompletionContext {
   /** Розпізнаний вид. */
   readonly kind: ContextKind;
   /** Початок фрагмента, який заміняє підстановка (зміщення в символах). */
@@ -234,7 +234,7 @@ export function completionAt(
 }
 
 /** Перелік для позиції разом із контекстом, що визначає межі заміни. */
-export interface Suggestions {
+interface Suggestions {
   readonly context: CompletionContext;
   readonly items: readonly CompletionItem[];
 }

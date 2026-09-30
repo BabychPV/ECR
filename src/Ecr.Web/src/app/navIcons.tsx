@@ -254,7 +254,7 @@ function CampaignIcon(): JSX.Element {
  * Ключ → компонент. Ключі відповідають рядковим значенням `handle.icon` у
  * `routes.ts` — один нав-пункт, один ключ, одна іконка.
  */
-export const navIcons: Record<string, () => JSX.Element> = {
+const navIcons: Record<string, () => JSX.Element> = {
   documents: DocumentsIcon,
   templates: TemplatesIcon,
   registries: RegistriesIcon,

@@ -23,7 +23,7 @@ import { RegistryExternalKeysPanel } from './RegistryExternalKeysPanel';
 type RegistryEntryDetailDto = components['schemas']['RegistryEntryDetailDto'];
 
 /** Ключ `GET …/entries/{id}` — під префіксом `entries(code)`, тож інвалідується з переліком. */
-export function registryEntryKey(
+function registryEntryKey(
   code: string,
   entryId: number,
 ): readonly ['registries', 'entries', string, 'detail', number] {
@@ -31,7 +31,7 @@ export function registryEntryKey(
 }
 
 /** Стан форми запису. */
-export interface EntryFormState {
+interface EntryFormState {
   readonly code: string;
   readonly display: LocalizedValue;
   readonly values: Readonly<Record<string, string>>;
@@ -50,7 +50,7 @@ export function isExternalRegistry(registry: Pick<RegistryDefDto, 'sourceKind'> 
 }
 
 /** Стан форми з повного запису (X-03, R-04). */
-export function entryFormOf(detail: RegistryEntryDetailDto): EntryFormState {
+function entryFormOf(detail: RegistryEntryDetailDto): EntryFormState {
   const values: Record<string, string> = {};
 
   for (const [field, value] of Object.entries(detail.values)) {

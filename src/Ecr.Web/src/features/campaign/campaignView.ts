@@ -17,7 +17,7 @@ import type { CampaignProgress, CampaignProject } from '@/features/campaign/api'
 const HoldingUp: readonly CampaignProgress[] = ['Overdue', 'AtRisk'];
 
 /** Чи затримує проєкт кампанію — за класом, який назвав сервер. */
-export function isHoldingUp(project: CampaignProject): boolean {
+function isHoldingUp(project: CampaignProject): boolean {
   return HoldingUp.includes(project.progress);
 }
 

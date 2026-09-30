@@ -20,7 +20,7 @@ import { showApiError } from '@/shared/ui/notify';
  * відновлюють числа, і питання «яким прогоном пораховано цей звіт» отримало б
  * відповіді, яких ніхто не запускав.
  */
-export interface TestCaseRunnerProps {
+interface TestCaseRunnerProps {
   /** Методологія, чиї тести проганяємо. */
   readonly methodologyId: number;
   /** Версія методології. */

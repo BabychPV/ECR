@@ -13,16 +13,16 @@ type Schemas = components['schemas'];
 export type StyleDefDto = Schemas['StyleDefDto'];
 
 /** Тіло запиту `PUT …/styles/{code}`. */
-export type SaveStyleDefRequest = Schemas['SaveStyleDefRequest'];
+type SaveStyleDefRequest = Schemas['SaveStyleDefRequest'];
 
 /** Товщина рамки: `0` немає, `1` тонка, `2` середня, `3` товста (`StyleMapper.ApplyBorders`). */
 export type BorderWeight = 0 | 1 | 2 | 3;
 
 /** `0` Left, `1` Center, `2` Right, `3` Justify (`StyleMapper.Horizontal`). */
-export type HorizontalAlign = 0 | 1 | 2 | 3;
+type HorizontalAlign = 0 | 1 | 2 | 3;
 
 /** `0` Top, `1` Center, `2` Bottom (`StyleMapper.Vertical`). */
-export type VerticalAlign = 0 | 1 | 2;
+type VerticalAlign = 0 | 1 | 2;
 
 /**
  * Чернетка стилю.
@@ -103,7 +103,7 @@ export function styleDraftOf(style: StyleDefDto): StyleDraft {
 }
 
 /** Чому чернетку стилю ще не можна зберегти; `null` — можна. */
-export type StyleBlocker = 'CodeEmpty' | 'CodeInvalid';
+type StyleBlocker = 'CodeEmpty' | 'CodeInvalid';
 
 /**
  * Валідація коду — той самий регекс, що й `whyCannotSaveColumn` (`column.ts`):

@@ -327,7 +327,7 @@ export function moreConflictsOf(error: EcrApiError): number {
 export const RecalculationPollMs = 2000;
 
 /** Видимий підсумок перерахунку для статус-рядка сітки. */
-export interface RecalculationStatus {
+interface RecalculationStatus {
   /** Стан задачі; `undefined` — відповіді ще немає. */
   state: string | undefined;
 

@@ -5,7 +5,7 @@ import { statusKey } from '@/shared/ui/StatusBadge';
 import type { DocumentStateFilter } from './api';
 import { DocumentStateFilters, parseStateFilter, type DocumentListFilters } from './documentListFilters';
 
-export interface DocumentListFilterBarProps {
+interface DocumentListFilterBarProps {
   /** Обраний період; `null` — фільтр стану недоступний. */
   readonly periodKey: number | null;
 

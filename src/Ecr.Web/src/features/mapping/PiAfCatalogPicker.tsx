@@ -93,7 +93,7 @@ export function PiAfCatalogButton({
  * полем стоїть запит у чужу систему з межею очікування 10 с, і запит на
  * кожен натиск клавіші — це десяток одночасних звернень до PI на одне слово.
  */
-export function PiAfCatalogPicker({
+function PiAfCatalogPicker({
   dataSourceId,
   opened,
   onClose,

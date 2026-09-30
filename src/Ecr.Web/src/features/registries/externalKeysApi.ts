@@ -3,8 +3,8 @@ import type { components } from '@/api/schema';
 
 /** Зв'язок запису довідника з елементом зовнішнього джерела (`ФВ-8.10`). */
 export type RegistryExternalKey = components['schemas']['RegistryExternalKeyView'];
-export type RegistryExternalKeyPage = components['schemas']['PagedResultOfRegistryExternalKeyView'];
-export type BindRegistryExternalKeyBody = components['schemas']['BindRegistryExternalKeyCommand'];
+type RegistryExternalKeyPage = components['schemas']['PagedResultOfRegistryExternalKeyView'];
+type BindRegistryExternalKeyBody = components['schemas']['BindRegistryExternalKeyCommand'];
 
 /*
  * ⛔ Адреси записані повністю, а не збираються з помічника — той самий прийом,

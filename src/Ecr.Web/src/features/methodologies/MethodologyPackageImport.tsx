@@ -13,7 +13,7 @@ type Issue = MethodologyImportReportDto['blockers'][number];
  * Звіт із відмови запису (422 — блокери, 409 — конфлікти): сервер кладе його в
  * `report`, у корені problem+json або в `extensions2`.
  */
-export function reportFromError(error: unknown): MethodologyImportReportDto | null {
+function reportFromError(error: unknown): MethodologyImportReportDto | null {
   if (!(error instanceof EcrApiError)) return null;
 
   const report =

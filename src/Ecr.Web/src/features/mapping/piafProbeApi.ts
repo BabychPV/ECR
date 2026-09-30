@@ -28,10 +28,10 @@ export function probeSourcePath(dataSourceId: number, path: string): Promise<Sou
 }
 
 /** «Шляху немає в каталозі джерела» — той самий код, що в `ErrorCodes.cs`. */
-export const ProbePathNotFoundCode = 'ECR-INT-0404';
+const ProbePathNotFoundCode = 'ECR-INT-0404';
 
 /** `messageKey`, яким сервер позначає саме цю відмову (а не «джерела немає взагалі»). */
-export const ProbePathNotFoundKey = 'err.ECR-INT-0404.sourcePathNotFound';
+const ProbePathNotFoundKey = 'err.ECR-INT-0404.sourcePathNotFound';
 
 /**
  * Чи це відмова «шляху немає в каталозі джерела» — сервер додав до неї

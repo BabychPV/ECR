@@ -18,14 +18,14 @@ const VersionMigrationDialog = lazy(async () => ({
   default: (await loadVersionMigrationDialog()).VersionMigrationDialog,
 }));
 
-export interface VersionMigrationActionArgs {
+interface VersionMigrationActionArgs {
   readonly documentId: number;
 
   /** `undefined` — документ ще не приїхав: пункту немає. */
   readonly document: DocumentSummary | undefined;
 }
 
-export interface VersionMigrationAction {
+interface VersionMigrationAction {
   /** Пункт меню «More» сторінки документа; `null`, якщо права немає. */
   readonly menuItem: JSX.Element | null;
 

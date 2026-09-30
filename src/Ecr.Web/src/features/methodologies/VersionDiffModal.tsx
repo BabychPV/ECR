@@ -15,7 +15,7 @@ import { t } from '@/shared/i18n';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { toneFills, type StatusTone } from '@/shared/ui/StatusBadge';
 
-export interface VersionDiffModalProps {
+interface VersionDiffModalProps {
   readonly methodologyId: number;
   readonly versions: readonly MethodologyDraftVersionDto[];
 
@@ -112,7 +112,7 @@ function DiffBody({
 }
 
 /** Результат порівняння; порожній перелік — окреме речення, без жодного бейджа. */
-export function DiffResult({ items }: { items: readonly MethodologyDiffItem[] }): JSX.Element {
+function DiffResult({ items }: { items: readonly MethodologyDiffItem[] }): JSX.Element {
   if (items.length === 0) {
     return (
       <Text size="sm" data-testid="version-diff-same">

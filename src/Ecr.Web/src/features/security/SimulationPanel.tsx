@@ -24,7 +24,7 @@ import { t } from '@/shared/i18n';
 const SessionKey = 'ecr.simulation.sessionId';
 
 /** Читає збережений номер сеансу; `null` — сховище недоступне або порожнє. */
-export function storedSessionId(): string | null {
+function storedSessionId(): string | null {
   try {
     return globalThis.sessionStorage?.getItem(SessionKey) ?? null;
   } catch {

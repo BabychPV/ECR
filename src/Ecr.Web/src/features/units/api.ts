@@ -4,7 +4,7 @@ import type { CreateUnitRequest, UnitRef } from '@/api/types';
 
 /** «Де використовується» — єдина форма `GET /…/{id}/usage` (директива №15, BE-15). */
 export type UsageResponse = components['schemas']['UsageResponse'];
-export type UsageItem = components['schemas']['UsageItemDto'];
+type UsageItem = components['schemas']['UsageItemDto'];
 
 /** Код відмови «на одиницю посилаються». */
 const UNIT_IN_USE = 'ECR-UOM-0409';
@@ -55,7 +55,7 @@ export function unitReferences(error: unknown): UsageResponse | null {
 
 /** Одиниця для правки: зі словниками мов і версією вмісту (BE-15). */
 export type UnitDetail = components['schemas']['UnitDetail'];
-export type UpdateUnitBody = components['schemas']['UpdateUnitRequest'];
+type UpdateUnitBody = components['schemas']['UpdateUnitRequest'];
 
 /** Одиниця для форми правки; право `Uom.EditCatalog`. */
 export function getUnit(unitId: number): Promise<UnitDetail> {

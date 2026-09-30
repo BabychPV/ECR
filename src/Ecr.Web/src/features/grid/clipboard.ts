@@ -11,7 +11,7 @@ import { formatLocale } from '@/shared/format';
 import { t } from '@/shared/i18n';
 
 /** Розібраний буфер: рядки × колонки. */
-export type ClipboardMatrix = string[][];
+type ClipboardMatrix = string[][];
 
 /**
  * Роздільник колонок в Excel.
@@ -61,7 +61,7 @@ export function toClipboard(matrix: ClipboardMatrix): string {
  *   інтерфейсу не знімає неоднозначності (`1,234` в `en`). Вгадувати не можна.
  * - `text` — не число взагалі.
  */
-export type NumberReading =
+type NumberReading =
   | { kind: 'number'; text: string }
   | { kind: 'ambiguous'; asGroup: string; asDecimal: string }
   | { kind: 'text' };
@@ -218,7 +218,7 @@ export function parseNumber(raw: string, locale: string = formatLocale()): numbe
 }
 
 /** Комірка, у яку лягає вставлене значення. */
-export interface PasteTarget {
+interface PasteTarget {
   rowKey: string;
   columnCode: string;
   value: string;
@@ -232,7 +232,7 @@ export interface PasteRejection {
 }
 
 /** Результат розкладки буфера по сітці. */
-export interface PastePlan {
+interface PastePlan {
   /** Що буде записано; порожньо, якщо є хоч одна заборонена комірка. */
   targets: PasteTarget[];
   /** Заборонені комірки з причинами — їх показують користувачеві. */
@@ -240,7 +240,7 @@ export interface PastePlan {
 }
 
 /** Чи можна писати в комірку і чому ні. */
-export type CellGuard = (rowKey: string, columnCode: string) => string | null;
+type CellGuard = (rowKey: string, columnCode: string) => string | null;
 
 /**
  * Причина відмови для неоднозначного числа; `null` — значення однозначне.

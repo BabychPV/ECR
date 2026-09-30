@@ -50,7 +50,7 @@ export interface FilterSpec {
 }
 
 /** Поле вільного пошуку. */
-export interface FilterBarSearch {
+interface FilterBarSearch {
   /** Підпис поля. */
   readonly label: string;
 
@@ -61,7 +61,7 @@ export interface FilterBarSearch {
   readonly placeholder?: string | undefined;
 }
 
-export interface FilterBarProps {
+interface FilterBarProps {
   /** Поле вільного пошуку; без нього поля немає зовсім (`D15-06`). */
   readonly search?: FilterBarSearch | undefined;
 

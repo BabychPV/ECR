@@ -10,14 +10,14 @@ import { ConfirmModal } from '@/shared/ui/ConfirmModal';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { showDone } from '@/shared/ui/notify';
 
-export interface DeleteVersionActionArgs {
+interface DeleteVersionActionArgs {
   readonly methodologyId: number;
 
   /** Чи має сесія право `Calculation.EditFormula`. */
   readonly allowed: boolean;
 }
 
-export interface DeleteVersionAction {
+interface DeleteVersionAction {
   /** Кнопка для рядка версії; `null`, якщо версію видаляти не можна. */
   readonly triggerFor: (version: MethodologyDraftVersionDto) => JSX.Element | null;
 

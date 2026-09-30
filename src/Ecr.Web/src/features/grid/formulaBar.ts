@@ -32,7 +32,7 @@ import type { TotalsEdit } from './gridTotals';
  */
 
 /** Комірка під курсором, як її показує рядок формули. */
-export interface FormulaBarModel {
+interface FormulaBarModel {
   readonly rowKey: string;
   /** Підпис рядка з моделі сітки (`rowLabelOf`), або технічний ключ. */
   readonly rowLabel: string;
@@ -49,7 +49,7 @@ export interface FormulaBarModel {
 }
 
 /** Звідки рядок формули бере комірку. */
-export interface FormulaBarInput {
+interface FormulaBarInput {
   readonly slice: TableSliceDto;
   /** Колонки, які отримала сітка, — у тому самому порядку, у якому вона їх нумерує. */
   readonly columns: readonly { readonly prop?: string | number }[];

@@ -26,7 +26,7 @@ import { PreferencesQueryKey } from './usePreferenceSync';
 export const ColumnWidthsDebounceMs = 500;
 
 /** Ширини: код колонки → пікселі. */
-export type ColumnWidthMap = Readonly<Record<string, number>>;
+type ColumnWidthMap = Readonly<Record<string, number>>;
 
 /** Ключ налаштування на сервері. */
 export function columnWidthsKey(tableDefId: number): string {
@@ -42,7 +42,7 @@ export function columnWidthsCacheKey(tableDefId: number): string {
  * Лишає лише придатні ширини; сміття (чужий вміст, пошкоджений JSON із
  * сервера) — не ширина. Налаштування вигляду не має права ламати таблицю.
  */
-export function sanitizeWidths(value: unknown): Record<string, number> {
+function sanitizeWidths(value: unknown): Record<string, number> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return {};
 
   const widths: Record<string, number> = {};
@@ -54,7 +54,7 @@ export function sanitizeWidths(value: unknown): Record<string, number> {
 }
 
 /** Лише відхилення від типової ширини: типова не зберігається ніде. */
-export function widthDeviations(
+function widthDeviations(
   widths: ColumnWidthMap,
   defaultWidth: number = DefaultColumnWidth,
 ): Record<string, number> {
@@ -84,7 +84,7 @@ export function serverColumnWidths(
 }
 
 /** Кеш першого рендера. Ніколи не падає. */
-export function readCachedWidths(tableDefId: number): Record<string, number> {
+function readCachedWidths(tableDefId: number): Record<string, number> {
   try {
     const raw = globalThis.localStorage?.getItem(columnWidthsCacheKey(tableDefId));
     if (raw === null || raw === undefined) return {};
@@ -96,7 +96,7 @@ export function readCachedWidths(tableDefId: number): Record<string, number> {
 }
 
 /** Записує кеш; порожні ширини прибирають ключ. */
-export function writeCachedWidths(tableDefId: number, widths: ColumnWidthMap): void {
+function writeCachedWidths(tableDefId: number, widths: ColumnWidthMap): void {
   try {
     const key = columnWidthsCacheKey(tableDefId);
     if (Object.keys(widths).length === 0) globalThis.localStorage?.removeItem(key);
@@ -107,7 +107,7 @@ export function writeCachedWidths(tableDefId: number, widths: ColumnWidthMap): v
 }
 
 /** Залежності запису — підміняються в тестах. */
-export interface ColumnWidthsWriterDeps {
+interface ColumnWidthsWriterDeps {
   /**
    * Останнє відоме серверне значення: `undefined` — ключа немає,
    * `null` — стан сервера невідомий (запит не прийшов або впав).
@@ -194,7 +194,7 @@ export class ColumnWidthsWriter {
 }
 
 /** Що хук віддає сітці. */
-export interface ColumnWidths {
+interface ColumnWidths {
   /** Відхилення від типової ширини; решта колонок — `DefaultColumnWidth`. */
   readonly widths: ColumnWidthMap;
   /** Зміна ширин (результат `widthsFromEvent`). */

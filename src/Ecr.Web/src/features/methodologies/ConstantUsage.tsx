@@ -11,7 +11,7 @@ import { methodologyConstantUsage } from './api';
  * ⚠ Локальний, а не в спільній фабриці `queryKeys.ts` — той самий вибір, що
  * й для `registryUsageKey`: єдиний споживач тут, у цій панелі.
  */
-export function constantUsageKey(
+function constantUsageKey(
   versionId: number,
   code: string,
 ): readonly ['methodologies', 'constantUsage', number, string] {

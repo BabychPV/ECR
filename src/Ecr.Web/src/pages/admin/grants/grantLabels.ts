@@ -16,7 +16,7 @@ import type { ResourceGrantDto } from '@/api/types';
  */
 
 export type ResourceKind = ResourceGrantDto['resourceKind'];
-export type GrantLevel = ResourceGrantDto['level'];
+type GrantLevel = ResourceGrantDto['level'];
 
 /**
  * ⚠ `Registry` тут є, хоча старий перелік його не пропонував: сервер знає такий

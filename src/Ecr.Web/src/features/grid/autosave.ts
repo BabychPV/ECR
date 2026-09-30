@@ -58,7 +58,7 @@ import {
  */
 
 /** Відкладений виклик: кожен новий `trigger()` скасовує попередній план. */
-export interface Debouncer {
+interface Debouncer {
   /** Планує виклик через `delayMs` тиші; попередній план скасовується. */
   trigger(): void;
   /** Знімає запланований виклик, нічого не викликаючи. */
@@ -131,7 +131,7 @@ type PendingSlice = ReturnType<typeof pendingSlices>[number];
  * обов'язкових вхідних колонок належать її екрану. Доки вона на місці —
  * зберігає вона.
  */
-export type SliceSaver = (edits: readonly PendingEdit[]) => void;
+type SliceSaver = (edits: readonly PendingEdit[]) => void;
 
 /**
  * Хто зберігає зріз, чиєї сітки вже НЕМА на екрані.
@@ -172,7 +172,7 @@ export function registerSliceSaver(
 }
 
 /** Ставить зберігача безхазяйних зрізів; повертає зняття. */
-export function installOrphanSaver(save: OrphanSaver): () => void {
+function installOrphanSaver(save: OrphanSaver): () => void {
   orphanSaver = save;
 
   return () => {
@@ -211,7 +211,7 @@ export function cancelAutosave(): void {
  * ⚠ Обхід іде по СХОВИЩУ, а не по змонтованих сітках: зріз, чия сітка зникла
  * з екрана, у переліку однаково є — і саме він потрапляє до `orphanSaver`.
  */
-export function flushAutosave(): void {
+function flushAutosave(): void {
   scheduler.cancel();
 
   // ⛔ `V-01`: лише те, що не тримає відмова сервера. Відхилена правка в пакеті
@@ -273,7 +273,7 @@ export function holdRejectedEdits(
  * користувача тиснути «вийти» не читаючи, тобто ламає саме те, заради чого
  * діалог існує.
  */
-export const AutosaveSettleMs = UnsavedSettleMs;
+const AutosaveSettleMs = UnsavedSettleMs;
 
 /**
  * Зберігає все незбережене і чекає на результат.
@@ -292,7 +292,7 @@ export const AutosaveSettleMs = UnsavedSettleMs;
  *
  * @returns `true` — незбереженого не лишилось; `false` — лишилось.
  */
-export async function flushAutosaveAndSettle(
+async function flushAutosaveAndSettle(
   timeoutMs: number = AutosaveSettleMs,
 ): Promise<boolean> {
   flushAutosave();

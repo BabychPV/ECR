@@ -22,7 +22,7 @@ import { t } from '@/shared/i18n';
  * Тобто захист, який правило `L6` описує, там просто не реалізований, і
  * жоден тест цього не ловив. Саме цю форму компонент і замінює.
  */
-export interface ConfirmConsequence {
+interface ConfirmConsequence {
   readonly text: string;
 
   /**
@@ -32,7 +32,7 @@ export interface ConfirmConsequence {
   readonly note?: boolean | undefined;
 }
 
-export interface TypeToConfirm {
+interface TypeToConfirm {
   /** Рядок, який треба ввести дослівно (зазвичай — назва об'єкта). */
   readonly value: string;
 
@@ -44,7 +44,7 @@ export interface TypeToConfirm {
   readonly label: string;
 }
 
-export interface ConfirmModalProps {
+interface ConfirmModalProps {
   readonly opened: boolean;
 
   /** ⚠ Із НАЗВОЮ ОБ'ЄКТА: «Delete role “Night shift”?», не «Are you sure?». */

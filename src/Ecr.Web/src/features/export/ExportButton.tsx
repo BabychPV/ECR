@@ -10,7 +10,7 @@ import { errorCodeText } from '@/shared/ui/problemText';
 import { t } from '@/shared/i18n';
 
 /** Що і за який період експортувати. */
-export interface ExportButtonProps {
+interface ExportButtonProps {
   /** Документ. */
   documentId: number;
   /** Період. */

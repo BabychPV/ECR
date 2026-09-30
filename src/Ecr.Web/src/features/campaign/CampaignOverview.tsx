@@ -18,7 +18,7 @@ import { StatStrip } from '@/shared/ui/StatStrip';
 import { statusKey, toneFills, type StatusTone } from '@/shared/ui/StatusBadge';
 
 /** За який період зводити кампанію; `null` — період не обрано. */
-export interface CampaignOverviewProps {
+interface CampaignOverviewProps {
   readonly periodKey: number | null;
 }
 

@@ -22,7 +22,7 @@ interface TriggerProps {
   readonly onKeyDown?: ((event: KeyboardEvent<HTMLElement>) => void) | undefined;
 }
 
-export interface HintProps {
+interface HintProps {
   /** Текст підказки — уже перекладений (`t(...)`). */
   readonly label: string;
 

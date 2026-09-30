@@ -118,7 +118,7 @@ function periodEndDateIso(periodKey: number): string | null {
 }
 
 /** Властивості grid. */
-export interface DocumentGridProps {
+interface DocumentGridProps {
   /** Документ. */
   documentId: number;
   /** Екземпляр таблиці. */

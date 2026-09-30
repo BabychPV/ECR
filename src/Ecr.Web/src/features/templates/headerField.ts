@@ -23,7 +23,7 @@ type Schemas = components['schemas'];
 export type HeaderFieldDefDto = Schemas['HeaderFieldDefDto'];
 
 /** Тіло запиту `PUT …/header-fields/{code}`. */
-export type SaveHeaderFieldDefRequest = Schemas['SaveHeaderFieldDefRequest'];
+type SaveHeaderFieldDefRequest = Schemas['SaveHeaderFieldDefRequest'];
 
 export interface HeaderFieldDraft {
   readonly code: string;

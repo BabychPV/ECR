@@ -20,7 +20,7 @@ import { scheduleAutosave } from './autosave';
  */
 
 /** Чому правку не застосовано. */
-export type RestoreConflictReason =
+type RestoreConflictReason =
   /** Версія рядка змінилася, доки сесія лежала. */
   | 'version'
   /** Зріз прочитати не вдалося — версії невідомі, а гадати ми не будемо. */
@@ -37,14 +37,14 @@ export interface RestoreConflict {
 }
 
 /** Правка, яку повертаємо в сховище незбереженого. */
-export interface RestoreApplied {
+interface RestoreApplied {
   readonly tableInstanceId: number;
   readonly periodKey: number;
   readonly edit: PendingEdit;
 }
 
 /** Що буде зроблено, якщо натиснути «Застосувати». */
-export interface RestorePlan {
+interface RestorePlan {
   readonly applied: readonly RestoreApplied[];
   readonly conflicts: readonly RestoreConflict[];
 }

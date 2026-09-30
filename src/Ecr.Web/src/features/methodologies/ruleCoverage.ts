@@ -27,7 +27,7 @@ export type RuleCoverageState = components['schemas']['RuleCoverageState'];
  * ⚠ `tableDefId: null` — це НЕ «нічого не обрано», а «усі таблиці прив'язок»:
  * саме так сервер трактує відсутній параметр (`RuleCoverageHandler`).
  */
-export interface RuleCoverageWindow {
+interface RuleCoverageWindow {
   readonly tableDefId: number | null;
   readonly periodFrom: number;
   readonly periodTo: number;

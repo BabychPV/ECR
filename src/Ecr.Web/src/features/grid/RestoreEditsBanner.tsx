@@ -35,7 +35,7 @@ import {
  * заводить інтегратор у `09-seed.sql`, доти видно позначені ключі (`⟦…⟧`). Це
  * усвідомлений борг, названий в описі PR, а не недогляд.
  */
-export interface RestoreEditsBannerProps {
+interface RestoreEditsBannerProps {
   readonly documentId: number;
 
   /**

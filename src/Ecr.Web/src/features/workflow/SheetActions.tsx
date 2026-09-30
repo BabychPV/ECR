@@ -26,7 +26,7 @@ import { isAllowed, type WorkflowAction } from './transitions';
 import { t } from '@/shared/i18n';
 
 /** Аркуш, над яким виконуються дії робочого процесу. */
-export interface SheetActionsProps {
+interface SheetActionsProps {
   /** Документ. */
   documentId: number;
   /** Аркуш; гранулярність робочого процесу — `аркуш × період` (D-38). */

@@ -21,7 +21,7 @@ export function createUnitCellEditor(units: readonly UnitRef[] | null) {
 }
 
 /** Варіанти вибору одиниці: «очистити» плюс по одному на одиницю. */
-export function unitOptionsOf(units: readonly UnitRef[]): readonly ListOption[] {
+function unitOptionsOf(units: readonly UnitRef[]): readonly ListOption[] {
   const known = optionsCache.get(units);
   if (known !== undefined) return known;
 

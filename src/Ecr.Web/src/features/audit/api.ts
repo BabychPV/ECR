@@ -64,7 +64,7 @@ function instant(value: string, plusDays: number): string {
 }
 
 /** Початок вікна: північ названої дати в поясі браузера. */
-export function windowStart(value: string): string {
+function windowStart(value: string): string {
   return instant(value, 0);
 }
 
@@ -77,12 +77,12 @@ export function windowStart(value: string): string {
  * дивляться журнал теж сьогодні («хто щойно це змінив») — і він відповідав
  * «змін не було», тобто неправдою.
  */
-export function windowEnd(value: string): string {
+function windowEnd(value: string): string {
   return instant(value, 1);
 }
 
 /** Фільтр журналу змін комірок. */
-export interface CellChangeFilter {
+interface CellChangeFilter {
   /** Початок вікна (`YYYY-MM-DD` або ISO); **обов'язковий**. Дата — ВКЛЮЧНО. */
   readonly from: string;
   /** Кінець вікна; **обов'язковий**. Дата — ВКЛЮЧНО: названий день у вікні (див. `windowEnd`). */
@@ -173,7 +173,7 @@ export function cellChangesQuery(filter: CellChangeFilter): string {
 export type StructureChangePage = components['schemas']['PagedResultOfStructureChangeView'];
 
 /** Фільтр журналу структурних змін; вікно **обов'язкове**, як у журналі комірок. */
-export interface StructureChangeFilter {
+interface StructureChangeFilter {
   /** Початок вікна; дата — ВКЛЮЧНО. */
   readonly from: string;
   /** Кінець вікна; дата — ВКЛЮЧНО, як у `CellChangeFilter`. */
@@ -215,7 +215,7 @@ export function structureChangesQuery(filter: StructureChangeFilter): string {
  * Рядок запиту CSV-експорту: ті самі фільтри, що в переліку, але БЕЗ `limit` і
  * `cursor` — експорт віддає всю видачу фільтра, а не сторінку.
  */
-export function structureExportQuery(filter: StructureChangeFilter): string {
+function structureExportQuery(filter: StructureChangeFilter): string {
   const params = new URLSearchParams(structureChangesQuery({ ...filter, cursor: null }));
   params.delete('limit');
 
@@ -223,7 +223,7 @@ export function structureExportQuery(filter: StructureChangeFilter): string {
 }
 
 /** Завантажений CSV: тіло й ім'я, яке запропонував сервер (або `null`). */
-export interface StructureExportFile {
+interface StructureExportFile {
   readonly blob: Blob;
   readonly fileName: string | null;
 }

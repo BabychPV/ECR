@@ -26,7 +26,7 @@ import type { DocumentTableDto } from '@/api/types';
  */
 
 /** Скільки зріз вважається свіжим (`CL-02`: `staleTime` ≥ 5 хв). */
-export const SliceStaleTime = 5 * 60_000;
+const SliceStaleTime = 5 * 60_000;
 
 /**
  * Політика кешу зрізів: без перезапиту на фокус вікна, свіжість 5 хв.
@@ -52,7 +52,7 @@ export function applySliceCachePolicy(client: QueryClient): void {
 }
 
 /** Куди дісталася зміна. */
-export interface SliceScope {
+interface SliceScope {
   /** Період; зрізи інших періодів перезапитувати нема причини. */
   readonly periodKey: number;
 
@@ -74,7 +74,7 @@ export interface SliceScope {
  * тоді намір звужується лише періодом — стара поведінка в межах одного
  * періоду, не гірша за неї.
  */
-export function tablesInScope(client: QueryClient, scope: SliceScope): ReadonlySet<number> | null {
+function tablesInScope(client: QueryClient, scope: SliceScope): ReadonlySet<number> | null {
   if (scope.documentId === undefined) return null;
 
   const tables = client.getQueryData<DocumentTableDto[]>([
