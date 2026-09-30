@@ -303,6 +303,14 @@ public sealed partial class JobWorker(
         }
 
         var clock = provider.GetRequiredService<IClock>();
+
+        // ФВ-12.2: скільки задача чекала в черзі до початку виконання (від AvailableAt, годинник
+        // СУБД). Метрики в процесі може не бути (дочірній воркер) — тоді просто пропуск.
+        if (job.QueueWaitMs is { } waitedMs)
+        {
+            provider.GetService<IJobStartMetrics>()?.RecordStartLatency((double)waitedMs, job.JobCode, job.Lane);
+        }
+
         var lease = new LeaseWatch();
         using var jobCancel = CancellationTokenSource.CreateLinkedTokenSource(stopping);
         using var renewStop = new CancellationTokenSource();

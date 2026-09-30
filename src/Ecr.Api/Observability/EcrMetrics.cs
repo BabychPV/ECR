@@ -210,6 +210,19 @@ public sealed class EcrMetrics
     /// комірки мусить починатися за секунди, а нічна архівація може чекати
     /// вікна обслуговування і бути при цьому цілком справною.
     /// </remarks>
-    public void RecordJobStartLatency(double milliseconds, string jobCode)
-        => _jobStartLatency.Record(milliseconds, new KeyValuePair<string, object?>("job", jobCode));
+    public void RecordJobStartLatency(double milliseconds, string jobCode, string? lane = null)
+    {
+        // ⚠ Тег lane лише коли він відомий (шлях черги в базі): задача Quartz лейна не має, і
+        // підставлений «default» приписав би їй чергу, якої вона не бачила.
+        if (lane is null)
+        {
+            _jobStartLatency.Record(milliseconds, new KeyValuePair<string, object?>("job", jobCode));
+            return;
+        }
+
+        _jobStartLatency.Record(
+            milliseconds,
+            new KeyValuePair<string, object?>("job", jobCode),
+            new KeyValuePair<string, object?>("lane", lane));
+    }
 }

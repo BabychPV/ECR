@@ -68,7 +68,7 @@ public sealed class JobStartLatencyTests
         // перцентиль саме тим, що виглядає як ідеальний замір.
         await ExecuteAsync(metrics, startedAt: EnqueuedAt.AddMilliseconds(3500), withStamp: false);
 
-        metrics.DidNotReceiveWithAnyArgs().RecordStartLatency(default, default!);
+        metrics.DidNotReceiveWithAnyArgs().RecordStartLatency(default, default!, default);
     }
 
     [Fact]

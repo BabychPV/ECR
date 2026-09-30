@@ -15,6 +15,6 @@ namespace Ecr.Api.Observability;
 public sealed class JobStartMetricsAdapter(EcrMetrics metrics) : IJobStartMetrics
 {
     /// <inheritdoc />
-    public void RecordStartLatency(double milliseconds, string jobCode)
-        => metrics.RecordJobStartLatency(milliseconds, jobCode);
+    public void RecordStartLatency(double milliseconds, string jobCode, string? lane = null)
+        => metrics.RecordJobStartLatency(milliseconds, jobCode, lane);
 }
