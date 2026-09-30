@@ -89,7 +89,7 @@ public sealed class ProjectTimeZoneIanaTests
             () => project.ChangeTimeZone("Central Asia Standard Time"));
 
         Assert.Equal("ECR-CFG-4221", error.ErrorCode);
-        Assert.Equal("Asia/Almaty", project.TimeZoneId);
+        Assert.Equal("Asia/Atyrau", project.TimeZoneId);
     }
 
     [Fact]

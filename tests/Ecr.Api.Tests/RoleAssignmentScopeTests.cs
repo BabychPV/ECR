@@ -397,7 +397,7 @@ public sealed class RoleAssignmentScopeTests(SqlServerFixture sql)
         var projectA = new Project(
             EcrCode.Create($"PA{tag}"), Name("FV-6.14 project A"),
             new DateOnly(2026, 1, 1), new DateOnly(2026, 12, 31),
-            b.TemplateVersionId, PeriodKind.Monthly, policyId, "Asia/Almaty");
+            b.TemplateVersionId, PeriodKind.Monthly, policyId, "Asia/Atyrau");
         db.Projects.Add(projectA);
 
         // Аркуш у складі документа B: без цього подання відмовляє раніше за права.

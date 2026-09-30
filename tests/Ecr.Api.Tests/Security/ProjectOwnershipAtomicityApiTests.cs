@@ -145,7 +145,7 @@ public sealed class ProjectOwnershipAtomicityApiTests(SqlServerFixture sql)
             {
                 code,
                 nameL10n = new Dictionary<string, string> { ["en"] = "Ownership atomicity" },
-                timeZoneId = "Asia/Almaty",
+                timeZoneId = "Asia/Atyrau",
                 periodKind = "Monthly",
                 year = 2026,
                 templateVersionId,

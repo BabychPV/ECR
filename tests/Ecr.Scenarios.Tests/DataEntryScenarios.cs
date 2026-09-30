@@ -961,7 +961,7 @@ public sealed class DataEntryScenarios(SqlServerFixture sql)
     internal static async Task<(Provisioning.Administrator Admin, int ProjectId, long DocumentId, int PeriodKey)> ArrangeDocumentAsync(
         EcrApiFactory app, Provisioning.Administrator admin, string prefix)
     {
-        var projectId = await ProjectAndPeriodScenarios.CreateProjectAsync(admin.Client, prefix, "Asia/Almaty");
+        var projectId = await ProjectAndPeriodScenarios.CreateProjectAsync(admin.Client, prefix, "Asia/Atyrau");
         // ⚠ Грант Manage вже видано самим створенням проєкту: Activate
         // вимагає його на конкретний projectId, а не лише глобальне
         // Project.Manage.
@@ -1348,7 +1348,7 @@ public sealed class DataEntryScenarios(SqlServerFixture sql)
             {
                 code,
                 nameL10n = new Dictionary<string, string> { ["en"] = $"{prefix} project" },
-                timeZoneId = "Asia/Almaty",
+                timeZoneId = "Asia/Atyrau",
                 periodKind = "Monthly",
                 year = DateTime.UtcNow.Year,
                 templateVersionId = structure.VersionId,
@@ -1414,7 +1414,7 @@ public sealed class DataEntryScenarios(SqlServerFixture sql)
             {
                 code,
                 nameL10n = new Dictionary<string, string> { ["en"] = $"{prefix} project" },
-                timeZoneId = "Asia/Almaty",
+                timeZoneId = "Asia/Atyrau",
                 periodKind = "Monthly",
                 year = 2019,
                 templateVersionId = effectiveVersionId,

@@ -112,7 +112,7 @@ public sealed class CampaignSummaryHandlerTests
             $"P{projectId}",
             new LocalizedText(new Dictionary<string, string> { ["en"] = $"Project {projectId}" }),
             Documents: 1, Draft: 1, Submitted: 0, Approved: 0, Rejected: 0, Snapshots: 0,
-            SubmissionDeadlineUtc: null, TimeZoneId: "Asia/Almaty");
+            SubmissionDeadlineUtc: null, TimeZoneId: "Asia/Atyrau");
 
     private GetCampaignSummaryHandler Handler()
         => new(_store, _access, _user, new TestClock(new DateTime(2026, 1, 20, 9, 0, 0, DateTimeKind.Utc)),

@@ -142,7 +142,7 @@ public sealed class DocumentTouchConcurrencyTests(SqlServerFixture sql)
         var project = new Project(
             EcrCode.Create($"TCHPRJ_{_tag}"), Text("Project"),
             new DateOnly(2026, 1, 1), new DateOnly(2026, 12, 31),
-            version.Id, PeriodKind.Monthly, periodPolicyId: 1, "Asia/Almaty");
+            version.Id, PeriodKind.Monthly, periodPolicyId: 1, "Asia/Atyrau");
         db.Projects.Add(project);
         await db.SaveChangesAsync();
 

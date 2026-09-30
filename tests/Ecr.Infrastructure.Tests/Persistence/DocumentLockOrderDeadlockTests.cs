@@ -261,7 +261,7 @@ public sealed class DocumentLockOrderDeadlockTests(SqlServerFixture sql)
         var project = new Project(
             EcrCode.Create($"PRJ{doc.ProjectId}"), new LocalizedText(new Dictionary<string, string> { ["en"] = "P" }),
             new DateOnly(2026, 1, 1), new DateOnly(2026, 12, 31),
-            doc.TemplateVersionId, PeriodKind.Monthly, 1, "Asia/Almaty");
+            doc.TemplateVersionId, PeriodKind.Monthly, 1, "Asia/Atyrau");
         typeof(Entity<int>).GetProperty("Id")!.SetValue(project, doc.ProjectId);
         var periods = Substitute.For<IPeriodStore>();
         periods.FindProjectAsync(doc.ProjectId, Arg.Any<CancellationToken>()).Returns(project);

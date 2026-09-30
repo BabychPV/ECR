@@ -106,11 +106,13 @@ public sealed class TestDocumentBuilder(string connectionString)
             EcrCode.Create($"PRJ{tag}"), Name($"Project {tag}"),
             new DateOnly(2026, 1, 1), new DateOnly(2026, 12, 31),
             // IANA, а не `Central Asia Standard Time`: Windows-ідентифікатор
-            // домен більше не приймає (директива ПК-1 №06 §3). Обраний саме
-            // `Asia/Almaty` — це те, у що сама платформа переводить колишнє
-            // значення (виміряно `TryConvertWindowsIdToIanaId`), тож жодна
-            // порахована в тестах межа не зсунулася ні на секунду.
-            version.Id, PeriodKind.Monthly, policyId, "Asia/Almaty");
+            // домен більше не приймає (директива ПК-1 №06 §3). Обраний
+            // `Asia/Atyrau` (майданчик NCOC, +05:00 з 2004 року без переходів):
+            // його зсув не залежить від редакції бази поясів машини. Раніше
+            // тут стояв `Asia/Almaty`, зсув якого змінився 2024-03-01 (+06:00
+            // → +05:00), тож межі в тестах залежали від того, чи оновлено
+            // tzdata/Windows (F-4).
+            version.Id, PeriodKind.Monthly, policyId, "Asia/Atyrau");
         db.Projects.Add(project);
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
 

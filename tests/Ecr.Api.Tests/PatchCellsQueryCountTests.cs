@@ -81,7 +81,7 @@ public sealed class PatchCellsQueryCountTests(SqlServerFixture sql)
     /// <summary>Скільки теплих записів міряється.</summary>
     private const int MeasuredRounds = 3;
 
-    private static readonly TimeZoneInfo SiteZone = SiteTimeZone.Create("Asia/Almaty").ToTimeZoneInfo();
+    private static readonly TimeZoneInfo SiteZone = SiteTimeZone.Create("Asia/Atyrau").ToTimeZoneInfo();
 
     private static readonly AsyncLocal<StrongBox<bool>?> Measuring = new();
 

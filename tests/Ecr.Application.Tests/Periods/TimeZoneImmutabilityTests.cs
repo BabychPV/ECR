@@ -47,7 +47,7 @@ public sealed class TimeZoneImmutabilityTests
         // який був вчасним, став би пізнім заднім числом.
         Assert.Equal("ECR-PRD-0409", error.ErrorCode);
         Assert.Equal("err.ECR-PRD-0409.timeZoneLocked", error.Details!["messageKey"]);
-        Assert.Equal("Asia/Almaty", project.TimeZoneId);
+        Assert.Equal("Asia/Atyrau", project.TimeZoneId);
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]

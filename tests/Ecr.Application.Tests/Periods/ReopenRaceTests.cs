@@ -356,7 +356,7 @@ public sealed class ReopenRaceTests(SqlServerFixture sql)
             EcrCode.Create($"P{tag}"),
             new LocalizedText(new Dictionary<string, string> { ["en"] = "Race" }),
             new DateOnly(2026, 1, 1), new DateOnly(2026, 12, 31),
-            templateVersionId: templateVersion.Id, PeriodKind.Monthly, periodPolicyId: 1, "Asia/Almaty");
+            templateVersionId: templateVersion.Id, PeriodKind.Monthly, periodPolicyId: 1, "Asia/Atyrau");
 
         db.Projects.Add(project);
         await db.SaveChangesAsync().ConfigureAwait(false);

@@ -309,7 +309,7 @@ public sealed class ReopenPeriodTransactionTests(SqlServerFixture sql)
             EcrCode.Create($"P{tag}"),
             new LocalizedText(new Dictionary<string, string> { ["en"] = "Reopen period" }),
             new DateOnly(2026, 1, 1), new DateOnly(2026, 12, 31),
-            templateVersionId: version.Id, PeriodKind.Monthly, periodPolicyId: 1, "Asia/Almaty");
+            templateVersionId: version.Id, PeriodKind.Monthly, periodPolicyId: 1, "Asia/Atyrau");
         db.Projects.Add(project);
         await db.SaveChangesAsync().ConfigureAwait(false);
 

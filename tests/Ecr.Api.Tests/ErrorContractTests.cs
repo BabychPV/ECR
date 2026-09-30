@@ -591,7 +591,7 @@ public sealed class ErrorContractTests(SqlServerFixture sql)
                 new Dictionary<string, string> { ["en"] = "Contract" }),
             new DateOnly(2026, 1, 1), new DateOnly(2026, 12, 31),
             templateVersionId: version.Id, Ecr.Domain.Enums.PeriodKind.Monthly,
-            periodPolicyId: 1, "Asia/Almaty");
+            periodPolicyId: 1, "Asia/Atyrau");
 
         db.Projects.Add(project);
         await db.SaveChangesAsync().ConfigureAwait(false);

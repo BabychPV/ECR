@@ -87,7 +87,7 @@ public sealed class OutputScenarios(SqlServerFixture sql)
         // опубліковане, а опис звіту правлять тоді, коли ще не впевнені в ньому.
         Assert.Equal("Draft", versions[0].GetProperty("status").GetString());
 
-        var projectId = await ProjectAndPeriodScenarios.CreateProjectAsync(admin.Client, "S27", "Asia/Almaty");
+        var projectId = await ProjectAndPeriodScenarios.CreateProjectAsync(admin.Client, "S27", "Asia/Atyrau");
         admin = await ProjectAndPeriodScenarios.ActivateProjectAsync(admin, projectId);
         var periodKey = (DateTime.UtcNow.Year * 100) + 1;
 
@@ -214,7 +214,7 @@ public sealed class OutputScenarios(SqlServerFixture sql)
             content: null);
         Assert.True(publish.IsSuccessStatusCode, $"публікація версії: {publish.StatusCode}: {app.ErrorsText}");
 
-        var projectId = await ProjectAndPeriodScenarios.CreateProjectAsync(owner.Client, "Q239", "Asia/Almaty");
+        var projectId = await ProjectAndPeriodScenarios.CreateProjectAsync(owner.Client, "Q239", "Asia/Atyrau");
         owner = await ProjectAndPeriodScenarios.ActivateProjectAsync(owner, projectId);
         var periodKey = (DateTime.UtcNow.Year * 100) + 1;
 

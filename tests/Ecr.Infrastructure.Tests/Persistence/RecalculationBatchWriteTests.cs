@@ -462,7 +462,7 @@ public sealed class RecalculationBatchWriteTests(SqlServerFixture sql, ITestOutp
         var policyId = await db.PeriodPolicies.Select(p => p.Id).FirstAsync();
         var project = new Project(
             EcrCode.Create($"PRJO2{tag}"), Name("O2"), new DateOnly(2026, 1, 1), new DateOnly(2027, 12, 31),
-            version.Id, PeriodKind.Monthly, policyId, "Asia/Almaty");
+            version.Id, PeriodKind.Monthly, policyId, "Asia/Atyrau");
         db.Projects.Add(project);
         await db.SaveChangesAsync();
 

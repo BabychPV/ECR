@@ -35,7 +35,7 @@ public sealed class ProjectLifecycleRequirementTests
             EcrCode.Create("LIFE_2026"),
             new LocalizedText(new Dictionary<string, string> { ["en"] = "Lifecycle" }),
             new DateOnly(2026, 1, 1), new DateOnly(2026, 12, 31),
-            templateVersionId: 1, PeriodKind.Monthly, periodPolicyId: 1, "Asia/Almaty");
+            templateVersionId: 1, PeriodKind.Monthly, periodPolicyId: 1, "Asia/Atyrau");
 
         // Стани переліку — рівно ті, до яких веде перехід (D-123).
         Assert.Equal(

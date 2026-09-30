@@ -42,7 +42,7 @@ public sealed class CloneProjectTests
         templateVersionId: 42,
         PeriodKind.Monthly,
         periodPolicyId: 7,
-        timeZoneId: "Asia/Almaty");
+        timeZoneId: "Asia/Atyrau");
 
     public CloneProjectTests()
     {
@@ -121,7 +121,7 @@ public sealed class CloneProjectTests
 
         // ⚠ Пояс — майданчика, а не сервера: межі періоду рахуються в ньому
         // (`D-6`), і клон, який втратив би пояс, зсунув би кінець місяця.
-        Assert.Equal("Asia/Almaty", clone.TimeZoneId);
+        Assert.Equal("Asia/Atyrau", clone.TimeZoneId);
     }
 
     [Fact]

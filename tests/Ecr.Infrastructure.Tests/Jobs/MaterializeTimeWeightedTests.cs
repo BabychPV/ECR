@@ -47,7 +47,7 @@ public sealed class MaterializeTimeWeightedTests(SqlServerFixture sql)
     {
         // Постійні 3.6 Sm3/h; точки лише ПОЗА січнем і одна всередині — значення
         // на межах періоду інтерполюються з них (§4.1). Січень у поясі проєкту
-        // (Asia/Almaty, без переходу на літній час) — 744 год: 3.6 × 744 = 2 678.4 Sm3.
+        // (Asia/Atyrau, без переходу на літній час) — 744 год: 3.6 × 744 = 2 678.4 Sm3.
         var stand = await ArrangeAsync(
             new Field("INT", AggregationKind.TimeIntegral, "Sm3_per_h", "Sm3",
             [

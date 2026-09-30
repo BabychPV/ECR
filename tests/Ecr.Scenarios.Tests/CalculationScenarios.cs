@@ -1312,7 +1312,7 @@ public sealed class CalculationScenarios(SqlServerFixture sql)
             {
                 code,
                 nameL10n = new Dictionary<string, string> { ["en"] = $"{prefix} project" },
-                timeZoneId = "Asia/Almaty",
+                timeZoneId = "Asia/Atyrau",
                 periodKind = "Monthly",
                 year = DateTime.UtcNow.Year,
                 templateVersionId,

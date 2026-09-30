@@ -38,7 +38,7 @@ namespace Ecr.Infrastructure.Tests.Jobs;
 /// <remarks>
 /// Справжня SQL-база, справжні <c>PeriodStateJob</c>, <c>AuditWriter</c>,
 /// <c>PeriodStore</c>, <c>AccessDecisionService</c>, сховища запису і
-/// <c>RecalculationService</c>. Пояс проєкту будівника — <c>Asia/Almaty</c>;
+/// <c>RecalculationService</c>. Пояс проєкту будівника — <c>Asia/Atyrau</c>;
 /// політика коротка (<c>grace 15</c>, <c>hard-close 30</c>): листопад 2026
 /// закривається 30.12.2026 за власними межами, тобто ДО кінця року; вікно +45
 /// — 01.01…14.02.2027 включно.
@@ -57,7 +57,7 @@ public sealed class YearGraceSystemReopenWiringTests(SqlServerFixture sql) : IDi
 {
     private const int November = 202611;
 
-    private static readonly TimeZoneInfo Site = SiteTimeZone.Create("Asia/Almaty").ToTimeZoneInfo();
+    private static readonly TimeZoneInfo Site = SiteTimeZone.Create("Asia/Atyrau").ToTimeZoneInfo();
 
     private static readonly YearGraceWindow Window = YearGraceWindow.For(new DateOnly(2026, 12, 31), 45, Site);
 

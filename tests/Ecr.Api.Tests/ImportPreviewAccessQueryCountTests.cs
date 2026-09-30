@@ -49,7 +49,7 @@ public sealed class ImportPreviewAccessQueryCountTests(SqlServerFixture sql)
 {
     private const string Password = "Api-Import-Ratchet-2026!";
 
-    private static readonly TimeZoneInfo SiteZone = SiteTimeZone.Create("Asia/Almaty").ToTimeZoneInfo();
+    private static readonly TimeZoneInfo SiteZone = SiteTimeZone.Create("Asia/Atyrau").ToTimeZoneInfo();
 
     private static readonly JsonSerializerOptions MapOptions = new(JsonSerializerDefaults.Web);
 
