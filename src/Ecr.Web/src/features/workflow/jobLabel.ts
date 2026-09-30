@@ -27,6 +27,9 @@ const KindKeys: Record<string, string> = {
   IMaterializeCollectedDataJob: 'jobs.kind.materializeCollectedData',
   IReportSnapshotJob: 'jobs.kind.reportSnapshot',
   ICollectionJob: 'jobs.kind.collection',
+  ISourceEventSyncJob: 'jobs.kind.sourceEventSync',
+  IConsistencyCheckJob: 'jobs.kind.consistencyCheck',
+  IOrphanScanJob: 'jobs.kind.orphanScan',
 };
 
 /** Просте ім'я типу з повного (`Ecr.Application.Ports.IRecalculationJob`). */
@@ -48,6 +51,16 @@ export function jobKindLabel(jobCode: string): string {
 const InstanceIdPattern = /^([A-Za-z]\w*)-([0-9a-fA-F]{32})$/;
 
 /**
+ * Формат `jobId` постановки з ціллю в Quartz — `Тип~ціль~GUID32`
+ * (`QuartzJobScheduler.TargetPrefixOf`: `~` неможливий ні в коді цілі, ні в
+ * GUID). Так ставляться злиті задачі (`EnqueueCoalescedAsync`,
+ * `EnqueueSupersedingAsync`) — синк подій джерела лише так і ставиться.
+ * Черга в базі (`DbBackgroundJobScheduler`) тримає ціль окремою колонкою і дає
+ * звичайний `Тип-GUID32`.
+ */
+const TargetedIdPattern = /^([A-Za-z]\w*)(~[^~]*~[0-9a-fA-F]{32})$/;
+
+/**
  * `jobId` з людським видом типу, але ТИМ САМИМ GUID екземпляра — рядок
  * лишається придатним для впізнання конкретної задачі (скопіювати, вставити
  * у пошук на `/admin/jobs`), а не лише перекладом «якийсь перерахунок».
@@ -58,11 +71,20 @@ const InstanceIdPattern = /^([A-Za-z]\w*)-([0-9a-fA-F]{32})$/;
  * що й `jobKindLabel` вище: не вигадувати вигляд для того, чого не впізнано.
  */
 export function humanizeJobId(jobId: string): string {
-  const match = InstanceIdPattern.exec(jobId);
-  if (match === null) return jobId;
+  const instance = InstanceIdPattern.exec(jobId);
+  if (instance !== null) {
+    const [, typeName, guid] = instance;
+    const key = KindKeys[typeName!];
 
-  const [, typeName, guid] = match;
+    return key === undefined ? jobId : `${t(key)}-${guid}`;
+  }
+
+  // ⚠ Ціль і GUID лишаються дослівно: за ними задачу й шукають.
+  const targeted = TargetedIdPattern.exec(jobId);
+  if (targeted === null) return jobId;
+
+  const [, typeName, rest] = targeted;
   const key = KindKeys[typeName!];
 
-  return key === undefined ? jobId : `${t(key)}-${guid}`;
+  return key === undefined ? jobId : `${t(key)}${rest}`;
 }

@@ -24,6 +24,12 @@ describe('jobKindLabel', () => {
     expect(jobKindLabel('ICollectionJob')).toBe('⟦jobs.kind.collection⟧');
   });
 
+  it('синк подій джерела має власну назву, а не сирий тип', () => {
+    expect(jobKindLabel('Ecr.Application.Ports.ISourceEventSyncJob')).toBe(
+      '⟦jobs.kind.sourceEventSync⟧',
+    );
+  });
+
   it('невідомий тип — повертає просте ім\'я, а не вигадує підпис', () => {
     expect(jobKindLabel('Ecr.Application.Ports.ISomeNewJob')).toBe('ISomeNewJob');
   });
@@ -51,5 +57,22 @@ describe('humanizeJobId', () => {
   it('невідомий тип у знайомому форматі — jobId без змін', () => {
     const guid = 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4';
     expect(humanizeJobId(`ISomeNewJob-${guid}`)).toBe(`ISomeNewJob-${guid}`);
+  });
+
+  it(
+    // ⛔ Мутаційний доказ: прибрати гілку `TargetedIdPattern` у `humanizeJobId` —
+    // злита задача Quartz знову показує `ISourceEventSyncJob~…` на `/admin/jobs`.
+    'постановка з ціллю (Тип~ціль~GUID) — тип замінено, ціль і GUID дослівно',
+    () => {
+      const guid = 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4';
+      expect(humanizeJobId(`ISourceEventSyncJob~source-events-e7~${guid}`)).toBe(
+        `⟦jobs.kind.sourceEventSync⟧~source-events-e7~${guid}`,
+      );
+    },
+  );
+
+  it('постановка з ціллю невідомого типу — без змін', () => {
+    const id = 'ISomeNewJob~t1~a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4';
+    expect(humanizeJobId(id)).toBe(id);
   });
 });
