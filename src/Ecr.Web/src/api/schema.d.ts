@@ -11112,6 +11112,335 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/row-window-maps": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Прив'язки; за tableDefId і/чи sourceEntityId — лише відповідні. Право `Integration.View` або `Integration.Manage`. */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Таблиця; `null` — усі. */
+                    tableDefId?: number;
+                    /** @description Сутність джерела, що має джерело в прив'язці; `null` — будь-яка. */
+                    sourceEntityId?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RowWindowMapDto"][];
+                        "text/json": components["schemas"]["RowWindowMapDto"][];
+                        "text/plain": components["schemas"]["RowWindowMapDto"][];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        /**
+         * Заводить прив'язку вікна рядка. Право `Integration.Manage` і грант `Manage` на кожен проєкт, що
+         *     використовує колонку-ціль.
+         * @description Вікно — колонки типу `Date`, ціль — `Decimal` (`422 ECR-INT-0422`); друга прив'язка на ту саму
+         *     колонку-ціль — `409 ECR-INT-0409`. Слід — у журналі структурних змін.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            /** @description Скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["CreateRowWindowMapCommand"];
+                    "application/json": components["schemas"]["CreateRowWindowMapCommand"];
+                    "text/json": components["schemas"]["CreateRowWindowMapCommand"];
+                };
+            };
+            responses: {
+                /** @description Created */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RowWindowMapDto"];
+                        "text/json": components["schemas"]["RowWindowMapDto"];
+                        "text/plain": components["schemas"]["RowWindowMapDto"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/row-window-maps/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Одна прив'язка з джерелами. Право `Integration.View` або `Integration.Manage`. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Прив'язка. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RowWindowMapDto"];
+                        "text/json": components["schemas"]["RowWindowMapDto"];
+                        "text/plain": components["schemas"]["RowWindowMapDto"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        /** Повна заміна налаштувань прив'язки: вікно, селектор, згортка, пороги, `isActive` (пауза й відновлення),
+         *     джерела. Таблиця й колонка-ціль не змінюються. Право `Integration.Manage` і грант `Manage`. */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Прив'язка. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            /** @description Скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["UpdateRowWindowMapCommand"];
+                    "application/json": components["schemas"]["UpdateRowWindowMapCommand"];
+                    "text/json": components["schemas"]["UpdateRowWindowMapCommand"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RowWindowMapDto"];
+                        "text/json": components["schemas"]["RowWindowMapDto"];
+                        "text/plain": components["schemas"]["RowWindowMapDto"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        /**
+         * Видаляє прив'язку, за якою ще нічого не підтягнуто. Право `Integration.Manage` і грант `Manage`.
+         * @description Прив'язка із записами провенансу — `409 ECR-INT-0409`: вихід — пауза (`isActive = false`).
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Прив'язка. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/search": {
         parameters: {
             query?: never;
@@ -17829,6 +18158,60 @@ export interface components {
              */
             tableInstanceId: number;
         };
+        /** @description Створення прив'язки. */
+        CreateRowWindowMapCommand: {
+            /**
+             * Format: int32
+             * @description Колонка кінця вікна (`Date`).
+             */
+            endColumnDefId: number;
+            /** @description Ряд ступінчастий. */
+            isStep: boolean;
+            /**
+             * Format: int32
+             * @description Поріг прогалини, секунди; `null` — порога немає.
+             */
+            maxGapSeconds: null | number;
+            /**
+             * Format: decimal
+             * @description Покриття 0–100; `null` — типове 95.
+             */
+            minPercentGood: null | string;
+            /**
+             * Format: int32
+             * @description Діб повтору 0–366; `null` — типове 7.
+             */
+            refetchWithinDays: null | number;
+            /**
+             * Format: int32
+             * @description Колонка-селектор; `null` — один атрибут на всі рядки.
+             */
+            selectorColumnDefId: null | number;
+            /** @description Джерела; порожньо — прив'язка без джерел (рядки матимуть `NotApplicable`). */
+            sources: null | components["schemas"]["RowWindowSourceInput"][];
+            /**
+             * Format: int32
+             * @description Колонка початку вікна (`Date`).
+             */
+            startColumnDefId: number;
+            /** @description Спосіб згортки. */
+            summary: components["schemas"]["RowWindowSummaryKind"];
+            /**
+             * Format: int32
+             * @description Таблиця прив'язки; збігається з таблицею колонки-цілі.
+             */
+            tableDefId: number;
+            /**
+             * Format: int32
+             * @description Колонка-ціль (`Decimal`); одна прив'язка на колонку.
+             */
+            targetColumnDefId: number;
+            /**
+             * Format: int32
+             * @description Одиниця колонки-цілі.
+             */
+            targetUnitId: number;
+        };
         /** @description Нова сутність збору — позиція каталогу джерела. */
         CreateSourceEntityRequest: {
             /** @description Код у джерелі. */
@@ -21777,6 +22160,121 @@ export interface components {
          * @enum {unknown}
          */
         RowKind: "Group" | "Item" | "Balance" | "Note" | "Header";
+        /** @description Прив'язка «атрибут PI → колонка, вікно = рядок» у відповіді (HSE301 §4.4). */
+        RowWindowMapDto: {
+            /** @description Код колонки кінця. */
+            endColumnCode: string;
+            /**
+             * Format: int32
+             * @description Колонка кінця вікна (`Date`).
+             */
+            endColumnDefId: number;
+            /**
+             * Format: int32
+             * @description Ідентифікатор `ext.RowWindowMap`.
+             */
+            id: number;
+            /** @description Чи діє прив'язка (пауза — `false`). */
+            isActive: boolean;
+            /** @description Ряд ступінчастий. */
+            isStep: boolean;
+            /**
+             * Format: int32
+             * @description Поріг прогалини, секунди; `null` — порога немає.
+             */
+            maxGapSeconds: null | number;
+            /**
+             * Format: decimal
+             * @description Покриття 0–100, нижче якого — `Partial`.
+             */
+            minPercentGood: string;
+            /**
+             * Format: int32
+             * @description Діб повтору за пізніми даними.
+             */
+            refetchWithinDays: number;
+            /** @description Версія для оптимістичного блокування (hex). */
+            rowVersion: string;
+            /** @description Код колонки-селектора. */
+            selectorColumnCode: null | string;
+            /**
+             * Format: int32
+             * @description Колонка-селектор; `null` — один атрибут на всі рядки.
+             */
+            selectorColumnDefId: null | number;
+            /** @description Джерела. */
+            sources: components["schemas"]["RowWindowSourceDto"][];
+            /** @description Код колонки початку. */
+            startColumnCode: string;
+            /**
+             * Format: int32
+             * @description Колонка початку вікна (`Date`).
+             */
+            startColumnDefId: number;
+            /** @description Спосіб згортки. */
+            summary: components["schemas"]["RowWindowSummaryKind"];
+            /**
+             * Format: int32
+             * @description Таблиця прив'язки.
+             */
+            tableDefId: number;
+            /** @description Код колонки-цілі. */
+            targetColumnCode: string;
+            /**
+             * Format: int32
+             * @description Колонка-ціль (`Decimal`).
+             */
+            targetColumnDefId: number;
+            /**
+             * Format: int32
+             * @description Одиниця, у якій значення лягає в колонку.
+             */
+            targetUnitId: number;
+        };
+        /** @description Джерело прив'язки «значення селектора → атрибут» у відповіді. */
+        RowWindowSourceDto: {
+            /**
+             * Format: int32
+             * @description Ідентифікатор `ext.RowWindowSource`.
+             */
+            id: number;
+            /** @description Значення колонки-селектора; `null` — для всіх рядків. */
+            selectorValue: null | string;
+            /**
+             * Format: int32
+             * @description Сутність джерела.
+             */
+            sourceEntityId: number;
+            /** @description Шлях атрибута в джерелі. */
+            sourceField: string;
+            /**
+             * Format: int32
+             * @description Одиниця, у якій віддає значення джерело.
+             */
+            sourceUnitId: number;
+        };
+        /** @description Джерело у запиті на збереження прив'язки. */
+        RowWindowSourceInput: {
+            /** @description Значення колонки-селектора; `null` чи порожнє — для всіх рядків. */
+            selectorValue: null | string;
+            /**
+             * Format: int32
+             * @description Сутність джерела.
+             */
+            sourceEntityId: number;
+            /** @description Шлях атрибута в джерелі. */
+            sourceField: string;
+            /**
+             * Format: int32
+             * @description Одиниця джерела.
+             */
+            sourceUnitId: number;
+        };
+        /**
+         * @description Спосіб згортки вікна рядка (HSE301 §4.3–4.4, `D-171`).
+         * @enum {unknown}
+         */
+        RowWindowSummaryKind: "Total" | "Average" | "Minimum" | "Maximum" | "Count";
         /** @description Одна комбінація значень (коди, не числа звітності) і що з нею роблять правила. */
         RuleCoverageCombinationDto: {
             /**
@@ -23841,6 +24339,54 @@ export interface components {
              * @description Пільговий строк після кінця року.
              */
             yearGraceOffsetDays: number;
+        };
+        /** @description Повна заміна налаштувань прив'язки; таблиця й колонка-ціль — її ключ і не змінюються. */
+        UpdateRowWindowMapCommand: {
+            /**
+             * Format: int32
+             * @description Колонка кінця вікна.
+             */
+            endColumnDefId: number;
+            /** @description Чи діє прив'язка (пауза — `false`). */
+            isActive: boolean;
+            /** @description Ряд ступінчастий. */
+            isStep: boolean;
+            /**
+             * Format: int32
+             * @description Поріг прогалини, секунди.
+             */
+            maxGapSeconds: null | number;
+            /**
+             * Format: decimal
+             * @description Покриття 0–100; `null` — типове 95.
+             */
+            minPercentGood: null | string;
+            /**
+             * Format: int32
+             * @description Діб повтору 0–366; `null` — типове 7.
+             */
+            refetchWithinDays: null | number;
+            /** @description Версія, яку бачив клієнт; інша — `409`; `null` — без перевірки. */
+            rowVersion: null | string;
+            /**
+             * Format: int32
+             * @description Колонка-селектор.
+             */
+            selectorColumnDefId: null | number;
+            /** @description Нові джерела замість усіх наявних. */
+            sources: null | components["schemas"]["RowWindowSourceInput"][];
+            /**
+             * Format: int32
+             * @description Колонка початку вікна.
+             */
+            startColumnDefId: number;
+            /** @description Спосіб згортки. */
+            summary: components["schemas"]["RowWindowSummaryKind"];
+            /**
+             * Format: int32
+             * @description Одиниця колонки-цілі.
+             */
+            targetUnitId: number;
         };
         /** @description Повна заміна налаштувань мапінгу подій; документ і таблиця лишаються. */
         UpdateSourceEventMapCommand: {
