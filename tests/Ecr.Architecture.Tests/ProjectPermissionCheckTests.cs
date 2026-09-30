@@ -71,6 +71,7 @@ public sealed class ProjectPermissionCheckTests
         ("Ecr.Application.Security.PermissionCheck", "RequireAnyAsync", 4, CheckKind.Global),
         ("Ecr.Application.Security.PermissionCheck", "RequireInAnyProjectAsync", 4, CheckKind.Anywhere),
         ("Ecr.Application.Security.PermissionCheck", "RequireIn", 3, CheckKind.Project),
+        ("Ecr.Application.Security.PermissionCheck", "IsGrantedIn", 3, CheckKind.Project),
         ("Ecr.Application.Documents.ListDocumentsHandler", "ProfileAsync", 4, CheckKind.Anywhere),
         ("Ecr.Application.Documents.ListDocumentsHandler", "ReadableProjects", 2, CheckKind.Project),
         ("Ecr.Application.Documents.DocumentVisibility", "RequireVisibleAsync", 5, CheckKind.Project),

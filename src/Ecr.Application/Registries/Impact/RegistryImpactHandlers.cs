@@ -80,7 +80,7 @@ public sealed class GetRegistryImpactHandler(
         foreach (var row in rows)
         {
             // ⛔ Право саме в проєкті документа (ФВ-6.14), а не «десь».
-            if (!profile.Has(CalculationPermission, row.ProjectId))
+            if (!PermissionCheck.IsGrantedIn(profile, CalculationPermission, row.ProjectId))
             {
                 continue;
             }

@@ -29,7 +29,6 @@ public sealed partial class DirectProfileHasRatchetTests
         "src/Ecr.Application/Integration/SourceEvents/SourceEventsTableHandlers.cs",
         "src/Ecr.Application/Localization/SetUiStringHandler.cs",
         "src/Ecr.Application/Projects/ProjectQueryHandlers.cs",
-        "src/Ecr.Application/Registries/Impact/RegistryImpactHandlers.cs",
         "src/Ecr.Application/Registries/RegistryAccess.cs",
         "src/Ecr.Application/Reporting/ExportSnapshotHandler.cs",
         "src/Ecr.Application/Reporting/ReportSnapshotHandlers.cs",
