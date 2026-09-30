@@ -300,8 +300,8 @@ Bundle» перетворює установку на переговори з а
 | Вимкнути | `WORKER_ENABLED=0` у msiexec або `deploy-ecr.ps1 -DisableWorker` (§10); `deploy-ecr.ps1` на SQL Server Express вимикає сам |
 | Обліковий запис | той самий `SERVICE_ACCOUNT`/`SERVICE_PASSWORD`, що в `EcrApi`; порожній → служба зареєстрована, але не стартує (§1.4) |
 | Старт, відновлення | `auto` + `DelayedAutoStart`, три спроби рестарту, як у `EcrApi` |
-| Секрети | рядок підключення — `HKLM\...\Services\EcrWorker\Environment` (`deploy-ecr.ps1`), не файл (D-11) |
-| Налаштування пулу | `worker.settings.json` поруч з exe — **типові значення збірки**, оновлення його перезаписує (як `appsettings.json`). Майданчик — `ECR_Jobs__Workers__Count`/`__MemoryLimitMb`/`__JobMemoryLimitMb`/`__MaxDuration` у тому ж `Environment`: перекривають файл і переживають оновлення |
+| Секрети | рядок підключення — `HKLM\...\Services\EcrWorker\Environment` (`deploy-ecr.ps1`), не файл (D-11). ⛔ **`Environment` служби НЕ переживає оновлення MSI** (перевірено джобом `msi-install`, див. нижче): після кожного оновлення — повторити `deploy-ecr.ps1` |
+| Налаштування пулу | `worker.settings.json` поруч з exe — **типові значення збірки**, оновлення його перезаписує (як `appsettings.json`). Майданчик — `ECR_Jobs__Workers__Count`/`__MemoryLimitMb`/`__JobMemoryLimitMb`/`__MaxDuration` у тому ж `Environment` служби `EcrWorker`: перекривають файл, але ✎ 2026-09-30 **разом з рештою `Environment` НЕ переживають оновлення MSI** (`MajorUpgrade` перевстановлює службу; `deploy-ecr.ps1` цих змінних не пише — після оновлення їх треба виставити знову вручну, `docs/admin/operations-runbook.md` §10.3). Стійке до оновлення місце для них — лише `worker.settings.json`, і то як типові значення збірки (оновлення його перезаписує), тож стійкого місця для налаштувань майданчика немає |
 
 **Рішення й чому так:**
 
@@ -562,6 +562,8 @@ msiexec /i Ecr.msi /qn /l*v install.log SERVICE_ACCOUNT=DOMAIN\ecr-svc$ APP_PORT
 ```bash
 # Оновлення — та сама команда, MajorUpgrade зробить решту
 msiexec /i Ecr-1.1.0.msi /qn /l*v upgrade.log
+# ⛔ Але НЕ змінні служби: Environment (рядок підключення, режим Api) оновлення
+#    стирає (перевірено джобом msi-install) — далі повторити tools\deploy-ecr.ps1 (§10)
 
 # Відновлення (файл пошкоджено, службу знесли руками)
 msiexec /f Ecr.msi /qn
@@ -607,7 +609,7 @@ msiexec /x {ProductCode} /qn
 | W0 | Установка без `WORKER_ENABLED` | `/i /qn SERVICE_ACCOUNT=...` | ✎ I2-2: `EcrWorker` **є** (типове `1`), `ImagePath` `…\Ecr.Worker.exe" --supervisor`, обліковий запис = `EcrApi`, `Running` |
 | W1 | Вимкнути воркер тим самим MSI | `/i /qn REINSTALL=ALL REINSTALLMODE=vomus WORKER_ENABLED=0 SERVICE_ACCOUNT=...` | `EcrWorker` знято; `EcrApi` на місці й працює |
 | W2 | Увімкнути назад тим самим MSI | те саме з `WORKER_ENABLED=1` | `EcrWorker` зареєстровано |
-| W3 | Оновлення БЕЗ `WORKER_ENABLED` | `/i` нового MSI (попередня версія — будь-яка, зокрема без воркера) | ✎ I2-2: `EcrWorker` **є** — до I2-2 тут його знімало; `Environment` служби `deploy-ecr.ps1` пише кроками 4–5 щоразу, як і для `EcrApi` — не покладатися на те, що він пережив `MajorUpgrade` |
+| W3 | Оновлення БЕЗ `WORKER_ENABLED` | `/i` нового MSI (попередня версія — будь-яка, зокрема без воркера) | ✎ I2-2: `EcrWorker` **є** — до I2-2 тут його знімало; ⛔ `Environment` служби **НЕ переживає** `MajorUpgrade` (✎ 2026-09-30, перевірено джобом `msi-install (windows)`, D3: тестовий маркер у `Environment` `EcrApi` зник, run 36676739674) — після оновлення **обов'язково** повторити `deploy-ecr.ps1` (він пише `Environment` кроками 4–5 щоразу): без цього Api лишається на типовому Quartz/`InProcess` без рядка підключення, а `EcrWorker` стоїть без роботи (безпечно, але режим D-216 не діє) |
 | W4 | Оновлення з `WORKER_ENABLED=0` | `/i` нового MSI | `EcrWorker` знято; `deploy-ecr.ps1 -DisableWorker` попереджає заздалегідь і перемикає Api на `InProcess` |
 
 `tools/verify-msi.ps1` автоматично проганяє сценарії 1 (разом із W0), W1,
@@ -634,8 +636,14 @@ MSI по-справжньому на ефемерному `windows-latest` че�
   `DeployWorkerModeTests`) проти **справжнього** реєстру встановленої служби:
   `EcrWorker` є → `Environment` `EcrApi` має `Mode=Database`, `Executor=Worker`;
   після `REINSTALL … WORKER_ENABLED=0` → `Executor=InProcess`, `Mode=Quartz`;
-- довідково (не падає): чи пережив `Environment` `EcrApi` оновлення MSI без
-  повторного `deploy-ecr.ps1` (W3 у матриці вище).
+- D3, довідково (сам крок не падає, лише повідомляє): чи пережив `Environment`
+  `EcrApi` оновлення MSI без повторного `deploy-ecr.ps1` (W3 у матриці вище).
+  ✎ 2026-09-30, **перевірено справжнім прогоном** (run 36676739674, лог кроку
+  D3): **не переживає** — `MajorUpgrade` перевстановлює службу, і тестовий
+  маркер зник. Отже після оновлення MSI `deploy-ecr.ps1` повторюють завжди
+  (§10). Для `EcrWorker` вимірювання окремо не робилося; той самий механізм
+  (`ServiceInstall` перевстановлюється), тож вважати його `Environment`
+  втраченим так само.
 
 ⚠ Не перевіряє: старт служб і `/health` (SQL на ранері немає, `SERVICE_ACCOUNT`
 порожній → служби зареєстровані, але зупинені, §1.4), повний прогін
