@@ -109,7 +109,7 @@ async function show(allowed: boolean): Promise<void> {
     <MantineProvider theme={withTestDefaults(theme)}>
       <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
         <MemoryRouter>
-          <EntityPipeline entity={Entity} allowed={allowed} />
+          <EntityPipeline entity={Entity} allowed={allowed} sourcesHref="/admin/sources" />
         </MemoryRouter>
       </QueryClientProvider>
     </MantineProvider>,

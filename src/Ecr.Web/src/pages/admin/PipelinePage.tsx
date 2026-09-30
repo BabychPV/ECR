@@ -3,6 +3,7 @@ import { Select, Text } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import type { SourceEntityStatus } from '@/api/types';
+import { routes } from '@/app/routes';
 import { EntityPipeline } from '@/features/pipeline/EntityPipeline';
 import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
@@ -77,6 +78,7 @@ export function PipelinePage(): JSX.Element {
           key={entity.id}
           entity={entity}
           allowed={can(session.data, 'Integration.Manage')}
+          sourcesHref={routes.adminSources.path}
         />
       )}
     </>

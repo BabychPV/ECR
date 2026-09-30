@@ -3,7 +3,6 @@ import { Alert, Button, Group, Stack, Text } from '@mantine/core';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router';
 import type { MappingPreview, SourceEntityStatus } from '@/api/types';
-import { routes } from '@/app/routes';
 import { CollectionRunStateBadge } from '@/features/integration/CollectionRunStateBadge';
 import { CollectionScheduleTab } from '@/features/integration/CollectionScheduleTab';
 import { listCollectionSchedules } from '@/features/integration/scheduleApi';
@@ -30,9 +29,13 @@ import { t } from '@/shared/i18n';
 export function EntityPipeline({
   entity,
   allowed,
+  sourcesHref,
 }: {
   readonly entity: SourceEntityStatus;
   readonly allowed: boolean;
+
+  /** Адреса екрана з'єднань; приходить від сторінки — `features` не імпортує `app/routes`. */
+  readonly sourcesHref: string;
 }): JSX.Element {
   const queryClient = useQueryClient();
   const [createOpened, setCreateOpened] = useState(false);
@@ -67,7 +70,7 @@ export function EntityPipeline({
       </Text>
 
       <Stack gap="md">
-        <SourceStep step={head[0] as PipelineStep} entity={entity} />
+        <SourceStep step={head[0] as PipelineStep} entity={entity} sourcesHref={sourcesHref} />
 
         <PipelineStepCard
           step={head[1] as PipelineStep}
@@ -151,9 +154,11 @@ export function EntityPipeline({
 function SourceStep({
   step,
   entity,
+  sourcesHref,
 }: {
   readonly step: PipelineStep;
   readonly entity: SourceEntityStatus;
+  readonly sourcesHref: string;
 }): JSX.Element {
   const run = entity.lastRun;
 
@@ -184,7 +189,7 @@ function SourceStep({
         ]}
       />
       <Group>
-        <Button size="xs" variant="default" component={Link} to={routes.adminSources.path}>
+        <Button size="xs" variant="default" component={Link} to={sourcesHref}>
           {t('pipeline.openSources')}
         </Button>
       </Group>
