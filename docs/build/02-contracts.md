@@ -3900,6 +3900,19 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/registries/{code}/external-keys` | `Registry.EditData` | 8 |
 | `DELETE` | `/api/v1/registries/{code}/external-keys/{id}` | `Registry.EditData` | 8 |
 
+> ✎ 2026-09-30 (ФВ-2.6/2.7): `GET /documents/{id}/tables/{tableInstanceId}` → `TableSliceDto.cellFormats`
+> (необов'язкове; `null`/відсутнє = правил немає) — `{ "{rowKey}:{columnCode}": { backgroundHex, foregroundHex, isBold } }`,
+> той самий ключ, що `cellPermissions`. Це ГОТОВИЙ результат правил версії шаблону
+> (`cfg.ConditionalFormatRule`): сервер рахує єдиною чистою функцією
+> `ConditionalFormatEvaluator.Evaluate` (Application), яку викликає й Excel-експорт, тож клієнт
+> правил НЕ обчислює — лише фарбує комірки з ключем. Колір `#rrggbb` або `null` (колір теми);
+> комірки без спрацювання в мапі немає. Операнди числові (кома = крапка), `between` включно й
+> без залежності від порядку меж; текст/дата/булеве числових операторів не задовольняють;
+> `empty`/`notEmpty` — `null` або пробіли; перше правило за `ordinal` виграє. Порожня
+> (нематеріалізована) комірка оцінюється як `null`. Значення беруться з ЗБЕРЕЖЕНОГО
+> стану: ще не збережена правка в мапі не відображена до повторного читання зрізу.
+> Excel-експорт (зі `IncludeStyles`) кладе заливку/колір шрифту/жирність тими ж правилами.
+
 > ✎ 2026-09-29 (RT-13): `GET /registries/{code}/rows` — `PagedResult<RegistryRowDto>`, курсор за
 > `Id`, `limit` 1…500 (інакше `422 pageSizeOutOfRange`). `asOf` — бізнес-дата чинності
 > (обов'язкова для темпорального довідника чи частини темпорального батька — `422 asOfRequired`);
