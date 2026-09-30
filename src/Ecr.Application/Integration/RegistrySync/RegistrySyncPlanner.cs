@@ -36,7 +36,10 @@ namespace Ecr.Application.Integration.RegistrySync;
 /// якщо останнім поле записала людина, а джерело каже інше —
 /// <see cref="RegistrySyncEventKind.ConflictKeptManual"/>, без запису. У
 /// <c>External</c> ручного запису немає (<c>D-211</c>) — синк перезаписує.
-/// Зниклий елемент — лише подія (запис не видаляється). Новий елемент без
+/// Зниклий елемент — за <c>OnMissingInSource</c> (<see cref="PlanMissing"/>), запис не
+/// видаляється; його повернення — <see cref="RegistrySyncPlan.MissingClears"/> і для
+/// <c>External</c> — <see cref="RegistrySyncPlan.Reactivations"/>. Перестворений у AF
+/// елемент (новий GUID, той самий шлях) — <see cref="RegistrySyncPlan.Relinks"/>. Новий елемент без
 /// зв'язку: <c>External</c> на повному знімку — автостворення
 /// (<see cref="RegistrySyncPlan.Creates"/>, <c>D-212</c> (1), Q4), інакше — лише подія.
 /// </para>
@@ -56,6 +59,12 @@ public static class RegistrySyncPlanner
 
     /// <summary>Ключ каталогу: у довіднику, на який посилається поле, немає запису з таким кодом.</summary>
     public const string EntryRefNotFoundKey = "err.ECR-REG-0422.entryRefNotFound";
+
+    /// <summary>
+    /// «Поле» події <see cref="RegistrySyncEventKind.Diverged"/> про ввімкненість запису
+    /// (<c>Hybrid</c>, <c>D-212</c> Q6) — як <c>@active</c> в аудиті writer'а.
+    /// </summary>
+    public const string ActiveFieldCode = "@active";
 
     private static readonly IReadOnlyDictionary<string, long> NoCodes = new Dictionary<string, long>();
 
@@ -108,15 +117,40 @@ public static class RegistrySyncPlanner
             .ThenBy(m => m.SourceAttribute, StringComparer.Ordinal)
             .ToList();
 
+        var writes = input.SourceKind != RegistrySourceKind.Local;
         var updates = new List<RegistrySyncUpdate>();
         var paths = new List<RegistrySyncPathChange>();
         var events = new List<RegistrySyncEvent>();
         var creates = new List<RegistrySyncCreate>();
+        var relinks = new List<RegistrySyncRelink>();
+        var marks = new List<RegistrySyncLinkMark>();
+        var clears = new List<RegistrySyncLinkMark>();
+        var deactivations = new List<RegistrySyncActivation>();
+        var reactivations = new List<RegistrySyncActivation>();
+
+        // D-212 (7): зіставлення за ExternalPath — ДО обходу елементів: інакше кандидат
+        // став би «новим» (автостворення в External — дубль запису). Лише повний знімок:
+        // у неповному «старого GUID немає» нічого не доводить. Local не пише — не зіставляє.
+        var (takenLinks, takenElements) = writes && input.IsCompleteSnapshot
+            ? MatchByPath(elements, links, relinks)
+            : (new Dictionary<string, bool>(), new Dictionary<string, bool>());
 
         foreach (var element in elements.Values.OrderBy(e => e.ExternalId, StringComparer.Ordinal))
         {
             if (!links.TryGetValue(element.ExternalId, out var link))
             {
+                if (takenElements.TryGetValue(element.ExternalId, out var relinked))
+                {
+                    // Перепривʼязаний — план у Relinks. Неоднозначний — нічого не пишемо,
+                    // лише подія: котрий із кандидатів «той самий», вирішує людина.
+                    if (!relinked)
+                    {
+                        events.Add(new RegistrySyncEvent(RegistrySyncEventKind.ElementUnlinked, element.ExternalId, null));
+                    }
+
+                    continue;
+                }
+
                 // D-212 (1): External на ПОВНОМУ знімку створює запис. Неповний знімок
                 // автостворення не дає: елемент, чий старий GUID не прочитався, став би
                 // дублем уже наявного запису.
@@ -134,11 +168,34 @@ public static class RegistrySyncPlanner
                 continue;
             }
 
+            // Елемент знову є: позначку зникнення знято (сам зв'язок живий, хоч би що з записом).
+            if (writes && link.MissingInSourceSince is not null)
+            {
+                clears.Add(new RegistrySyncLinkMark(link.ExternalId, link.RegistryEntryId));
+            }
+
             // Запис, якого немає в стані (видалений логічно чи поза вибіркою), не
             // плануємо: писати в нього синк однаково не має права.
             if (!entries.TryGetValue(link.RegistryEntryId, out var entry))
             {
                 continue;
+            }
+
+            // D-212 Q6: повернення після Deactivate — вимкнений запис зі знятою тепер
+            // позначкою. External вмикає сам; Hybrid — лише подія, вмикає людина.
+            // Вимкнений без позначки вимкнула людина — синк його не чіпає.
+            if (writes && link.MissingInSourceSince is not null && !entry.IsActive)
+            {
+                if (input.SourceKind == RegistrySourceKind.External)
+                {
+                    reactivations.Add(new RegistrySyncActivation(entry.RegistryEntryId, element.ExternalId));
+                }
+                else
+                {
+                    events.Add(new RegistrySyncEvent(
+                        RegistrySyncEventKind.Diverged, element.ExternalId, entry.RegistryEntryId,
+                        ActiveFieldCode, CurrentValue: false, SourceValue: true));
+                }
             }
 
             if (element.ExternalPath is { } path && !string.Equals(path, link.ExternalPath, StringComparison.Ordinal))
@@ -156,15 +213,138 @@ public static class RegistrySyncPlanner
         {
             foreach (var link in links.Values.OrderBy(l => l.ExternalId, StringComparer.Ordinal))
             {
-                if (!elements.ContainsKey(link.ExternalId))
+                if (elements.ContainsKey(link.ExternalId))
                 {
-                    events.Add(new RegistrySyncEvent(
-                        RegistrySyncEventKind.SourceMissing, link.ExternalId, link.RegistryEntryId));
+                    continue;
                 }
+
+                if (takenLinks.TryGetValue(link.ExternalId, out var relinked))
+                {
+                    // Неоднозначна перепривʼязка — лише подія, без позначки й вимкнення.
+                    if (!relinked)
+                    {
+                        events.Add(new RegistrySyncEvent(
+                            RegistrySyncEventKind.SourceMissing, link.ExternalId, link.RegistryEntryId));
+                    }
+
+                    continue;
+                }
+
+                PlanMissing(input, link, entries, events, marks, deactivations);
             }
         }
 
-        return new RegistrySyncPlan(updates, paths, events) { Creates = creates };
+        return new RegistrySyncPlan(updates, paths, events)
+        {
+            Creates = creates,
+            Relinks = relinks,
+            MissingMarks = marks,
+            MissingClears = clears,
+            Deactivations = deactivations,
+            Reactivations = reactivations,
+        };
+    }
+
+    /// <summary>
+    /// Зниклий із повного знімка елемент за <see cref="RegistrySyncInput.OnMissingInSource"/>
+    /// (<c>D-212</c> (3), Q5). Запис не видаляється ніколи.
+    /// </summary>
+    /// <remarks>
+    /// <list type="bullet">
+    /// <item><c>MarkOrphaned</c> — позначка зв'язку (якщо ще немає) + подія <c>SourceMissing</c>.</item>
+    /// <item><c>Deactivate</c> — позначка + вимкнення запису; подію <c>Deactivated</c> пише
+    /// виконавець після успіху. ⚠ <c>Hybrid</c>: запис, який людина ввімкнула вже ПІСЛЯ
+    /// позначки, синк не вимикає вдруге — людина виграє (<c>D-212</c> (2)); <c>External</c>
+    /// вимикає щоразу, коли запис увімкнено.</item>
+    /// <item><c>Ignore</c> — запис і зв'язок не чіпаються, подія <c>SourceMissing</c> пишеться (Q5).</item>
+    /// <item><c>Local</c> — лише подія: звірка нічого не пише (<c>D-49</c>).</item>
+    /// </list>
+    /// </remarks>
+    private static void PlanMissing(
+        RegistrySyncInput input,
+        RegistrySyncLink link,
+        Dictionary<long, RegistrySyncEntryState> entries,
+        List<RegistrySyncEvent> events,
+        List<RegistrySyncLinkMark> marks,
+        List<RegistrySyncActivation> deactivations)
+    {
+        var missing = new RegistrySyncEvent(RegistrySyncEventKind.SourceMissing, link.ExternalId, link.RegistryEntryId);
+
+        if (input.SourceKind == RegistrySourceKind.Local || input.OnMissingInSource == RegistryMissingPolicy.Ignore)
+        {
+            events.Add(missing);
+            return;
+        }
+
+        var alreadyMarked = link.MissingInSourceSince is not null;
+        if (!alreadyMarked)
+        {
+            marks.Add(new RegistrySyncLinkMark(link.ExternalId, link.RegistryEntryId));
+        }
+
+        if (input.OnMissingInSource == RegistryMissingPolicy.Deactivate)
+        {
+            if (entries.TryGetValue(link.RegistryEntryId, out var entry)
+                && entry.IsActive
+                && (input.SourceKind == RegistrySourceKind.External || !alreadyMarked))
+            {
+                deactivations.Add(new RegistrySyncActivation(link.RegistryEntryId, link.ExternalId));
+            }
+
+            return;
+        }
+
+        events.Add(missing);
+    }
+
+    /// <summary>
+    /// Зіставлення за запасним ключем <c>ExternalPath</c> (<c>D-212</c> (7)): зниклий зі
+    /// знімка зв'язок і неприв'язаний елемент із тим самим шляхом. Рівно один на один —
+    /// перепривʼязка; інакше — неоднозначно, нічого не пишеться.
+    /// </summary>
+    /// <returns>
+    /// Зачеплені зв'язки й елементи: <c>true</c> — перепривʼязано, <c>false</c> — неоднозначно.
+    /// Шлях AF регістронезалежний, тож і порівняння таке.
+    /// </returns>
+    private static (Dictionary<string, bool> Links, Dictionary<string, bool> Elements) MatchByPath(
+        Dictionary<string, RegistrySyncSourceElement> elements,
+        Dictionary<string, RegistrySyncLink> links,
+        List<RegistrySyncRelink> relinks)
+    {
+        var takenLinks = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+        var takenElements = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+
+        var candidates = elements.Values
+            .Where(e => e.ExternalPath is not null && !links.ContainsKey(e.ExternalId))
+            .ToLookup(e => e.ExternalPath!, StringComparer.OrdinalIgnoreCase);
+
+        var lostByPath = links.Values
+            .Where(l => l.ExternalPath is not null && !elements.ContainsKey(l.ExternalId))
+            .GroupBy(l => l.ExternalPath!, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(g => g.Key, StringComparer.Ordinal);
+
+        foreach (var lost in lostByPath)
+        {
+            var found = candidates[lost.Key].OrderBy(e => e.ExternalId, StringComparer.Ordinal).ToList();
+            if (found.Count == 0)
+            {
+                continue;
+            }
+
+            var gone = lost.OrderBy(l => l.ExternalId, StringComparer.Ordinal).ToList();
+            var single = found.Count == 1 && gone.Count == 1;
+
+            if (single)
+            {
+                relinks.Add(new RegistrySyncRelink(
+                    gone[0].RegistryEntryId, gone[0].ExternalId, found[0].ExternalId, found[0].ExternalPath!));
+            }
+
+            gone.ForEach(l => takenLinks[l.ExternalId] = single);
+            found.ForEach(e => takenElements[e.ExternalId] = single);
+        }
+
+        return (takenLinks, takenElements);
     }
 
     /// <summary>

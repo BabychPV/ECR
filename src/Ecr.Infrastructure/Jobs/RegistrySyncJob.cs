@@ -159,6 +159,17 @@ public sealed class RegistrySyncJob(
             CollectionCoverage.RegistryValueRejected, r, KeyOf(CollectionCoverage.RegistryValueRejected, r, value: string.Empty))));
         events.AddRange(plan.Events.Select(Event));
 
+        // TODO PR-6: перепривʼязку задача ще не виконує — доти журнал той самий, що до
+        // D-212 (зниклий старий GUID і неприв'язаний новий), а не мовчить про обидва.
+        // Creates, MissingMarks, MissingClears, Deactivations, Reactivations — теж PR-6; поки
+        // задача не передає Name, IsActive, MissingInSourceSince і політику, вони порожні, а
+        // MissingMarks (MarkOrphaned) супроводжує подія SourceMissing з plan.Events.
+        events.AddRange(plan.Relinks.SelectMany(r => new[]
+        {
+            Event(new RegistrySyncEvent(RegistrySyncEventKind.SourceMissing, r.OldExternalId, r.RegistryEntryId)),
+            Event(new RegistrySyncEvent(RegistrySyncEventKind.ElementUnlinked, r.NewExternalId, null)),
+        }));
+
         var pathsChanged = false;
 
         if (registry.SourceKind is RegistrySourceKind.External or RegistrySourceKind.Hybrid)

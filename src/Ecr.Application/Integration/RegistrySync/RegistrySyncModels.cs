@@ -31,11 +31,16 @@ public sealed record RegistrySyncSourceElement(
 /// </summary>
 /// <param name="ExternalId">Ідентифікатор елемента в джерелі.</param>
 /// <param name="RegistryEntryId">Запис довідника.</param>
-/// <param name="ExternalPath">Шлях, збережений під час останньої синхронізації.</param>
+/// <param name="ExternalPath">Шлях, збережений під час останньої синхронізації; запасний ключ перепривʼязки (<c>D-212</c> (7)).</param>
+/// <param name="MissingInSourceSince">
+/// Відколи елемента немає в джерелі (<c>RegistryExternalKey.MissingInSourceSince</c>);
+/// <c>null</c> — є або не перевірялося.
+/// </param>
 public sealed record RegistrySyncLink(
     string ExternalId,
     long RegistryEntryId,
-    string? ExternalPath);
+    string? ExternalPath,
+    DateTime? MissingInSourceSince = null);
 
 /// <summary>Поточне значення одного поля запису довідника.</summary>
 /// <param name="Value">
@@ -54,9 +59,11 @@ public sealed record RegistrySyncCurrentValue(object? Value, bool LastWriterIsHu
 /// <summary>Поточний стан запису довідника, прив'язаного до елемента джерела.</summary>
 /// <param name="RegistryEntryId">Запис довідника.</param>
 /// <param name="Values">Поточні значення за <c>RegistryFieldDefId</c>; поля без значення можна не передавати.</param>
+/// <param name="IsActive">Запис увімкнено (<c>RegistryEntry.IsActive</c>); вимкнений — кандидат на повернення (<c>D-212</c> Q6).</param>
 public sealed record RegistrySyncEntryState(
     long RegistryEntryId,
-    IReadOnlyDictionary<int, RegistrySyncCurrentValue> Values);
+    IReadOnlyDictionary<int, RegistrySyncCurrentValue> Values,
+    bool IsActive = true);
 
 /// <summary>Мапінг «атрибут джерела → поле довідника» (<c>ext.EntityFieldMap</c>, <c>ФВ-8.11</c>).</summary>
 /// <param name="RegistryFieldDefId">Поле довідника.</param>
@@ -112,6 +119,10 @@ public sealed record RegistrySyncLookupCode(int RegistryDefId, string Code);
 /// Звідки код автоствореного запису (<c>D-212</c> Q4): <c>Auto</c> — видасть writer
 /// із послідовності, <c>Manual</c> — ім'я елемента.
 /// </param>
+/// <param name="OnMissingInSource">
+/// Що робити з записом, чий елемент зник із ПОВНОГО знімка
+/// (<c>ext.SourceEntity.OnMissingInSource</c>, <c>D-212</c> (3), Q5).
+/// </param>
 public sealed record RegistrySyncInput(
     int RegistryDefId,
     RegistrySourceKind SourceKind,
@@ -121,7 +132,8 @@ public sealed record RegistrySyncInput(
     IReadOnlyList<RegistrySyncEntryState> Entries,
     IReadOnlyList<RegistrySyncFieldMapping> Mappings,
     IReadOnlyDictionary<int, IReadOnlyDictionary<string, long>>? LookupCodes = null,
-    RegistryCodeMode CodeMode = RegistryCodeMode.Manual);
+    RegistryCodeMode CodeMode = RegistryCodeMode.Manual,
+    RegistryMissingPolicy OnMissingInSource = RegistryMissingPolicy.MarkOrphaned);
 
 /// <summary>Одна зміна поля, яку синк має записати через <c>RegistryEntryWriter</c>.</summary>
 /// <param name="RegistryEntryId">Запис довідника.</param>
@@ -171,6 +183,35 @@ public sealed record RegistrySyncCreate(
     string DisplayName,
     IReadOnlyList<RegistrySyncFieldValue> Values);
 
+/// <summary>
+/// Зв'язок <c>dic.RegistryExternalKey</c>, на якому треба поставити
+/// (<c>MarkMissing</c>) або зняти (<c>ClearMissing</c>) позначку зникнення.
+/// </summary>
+/// <param name="ExternalId">Елемент джерела.</param>
+/// <param name="RegistryEntryId">Прив'язаний запис.</param>
+public sealed record RegistrySyncLinkMark(string ExternalId, long RegistryEntryId);
+
+/// <summary>
+/// Вимкнути (<c>RegistryEntry.Deactivate</c>) або ввімкнути (<c>Activate</c>) запис.
+/// Подію <see cref="RegistrySyncEventKind.Deactivated"/>/<see cref="RegistrySyncEventKind.Reactivated"/>
+/// пише виконавець (PR-6) після успіху.
+/// </summary>
+/// <param name="RegistryEntryId">Запис.</param>
+/// <param name="ExternalId">Елемент джерела — для події.</param>
+public sealed record RegistrySyncActivation(long RegistryEntryId, string ExternalId);
+
+/// <summary>
+/// Перепривʼязка за запасним ключем <c>ExternalPath</c> (<c>D-212</c> (7)): елемент
+/// перестворено в AF з новим GUID — <c>RegistryExternalKey.Relink(new)</c> +
+/// <c>MarkSynced(path)</c>. Подію <see cref="RegistrySyncEventKind.ExternalKeyRelinked"/>
+/// пише виконавець (PR-6) після успіху.
+/// </summary>
+/// <param name="RegistryEntryId">Запис.</param>
+/// <param name="OldExternalId">Зниклий ідентифікатор (поточний у зв'язку).</param>
+/// <param name="NewExternalId">Ідентифікатор елемента зі знімка.</param>
+/// <param name="Path">Спільний шлях (зі знімка).</param>
+public sealed record RegistrySyncRelink(long RegistryEntryId, string OldExternalId, string NewExternalId, string Path);
+
 /// <summary>Вид події синхронізації.</summary>
 public enum RegistrySyncEventKind
 {
@@ -178,13 +219,20 @@ public enum RegistrySyncEventKind
     /// Значення в джерелі інше, ніж у ECR, а писати синк не має права: довідник
     /// <c>Local</c> (лише звірка, <c>D-49</c>) або поле довідника <c>External</c>
     /// з вимкненим мапінгом. Нічого не пишеться.
+    /// ⚠ Також <c>Hybrid</c>: елемент повернувся, а запис вимкнено синком — поле
+    /// <see cref="RegistrySyncPlanner.ActiveFieldCode"/>, ECR <c>false</c>, джерело
+    /// <c>true</c>; вмикає людина (<c>D-212</c> Q6).
     /// </summary>
     Diverged,
 
     /// <summary>Джерело змінило поле, яке останньою правила людина: лишається людське (<c>D-118</c>).</summary>
     ConflictKeptManual,
 
-    /// <summary>Прив'язаного елемента немає в повному знімку джерела. Запис не видаляється.</summary>
+    /// <summary>
+    /// Прив'язаного елемента немає в повному знімку джерела. Запис не видаляється.
+    /// Політика <c>MarkOrphaned</c> (плюс позначка зв'язку), <c>Ignore</c> (запис не
+    /// чіпається, Q5), <c>Local</c> і неоднозначна перепривʼязка.
+    /// </summary>
     SourceMissing,
 
     /// <summary>
@@ -244,7 +292,23 @@ public sealed record RegistrySyncPlan(
     /// <summary>Автостворення записів (<c>External</c>, повний знімок).</summary>
     public IReadOnlyList<RegistrySyncCreate> Creates { get; init; } = [];
 
+    /// <summary>Перепривʼязки за <c>ExternalPath</c> (повний знімок, рівно один кандидат).</summary>
+    public IReadOnlyList<RegistrySyncRelink> Relinks { get; init; } = [];
+
+    /// <summary>Позначити зв'язок зниклим (<c>MarkOrphaned</c>, <c>Deactivate</c>); лише ще не позначені.</summary>
+    public IReadOnlyList<RegistrySyncLinkMark> MissingMarks { get; init; } = [];
+
+    /// <summary>Зняти позначку зникнення: елемент знову є в знімку.</summary>
+    public IReadOnlyList<RegistrySyncLinkMark> MissingClears { get; init; } = [];
+
+    /// <summary>Вимкнути запис (<c>Deactivate</c>); лише ще ввімкнені.</summary>
+    public IReadOnlyList<RegistrySyncActivation> Deactivations { get; init; } = [];
+
+    /// <summary><c>External</c>: увімкнути запис, чий елемент повернувся (<c>D-212</c> Q6).</summary>
+    public IReadOnlyList<RegistrySyncActivation> Reactivations { get; init; } = [];
+
     /// <summary>Нічого писати й нічого повідомляти — ідемпотентний прогін.</summary>
     public bool IsEmpty => Updates.Count == 0 && PathChanges.Count == 0 && Events.Count == 0
-                           && Creates.Count == 0;
+                           && Creates.Count == 0 && Relinks.Count == 0 && MissingMarks.Count == 0
+                           && MissingClears.Count == 0 && Deactivations.Count == 0 && Reactivations.Count == 0;
 }
