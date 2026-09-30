@@ -104,7 +104,7 @@ public sealed class RowWindowMapsApiTests(SqlServerFixture sql)
         await ExpectAsync(manager, Body(stand, stand.TargetA, end: stand.Start), 422, "err.ECR-INT-0422.windowColumnsSame");
         await ExpectAsync(manager, Body(stand, stand.TargetA, selector: stand.ForeignColumn), 422, "err.ECR-INT-0422.selectorNotInTable");
         await ExpectAsync(manager, Body(stand, stand.TargetA, tableDefId: stand.ForeignTableDefId), 422, "err.ECR-INT-0422.rowWindowTargetNotInTable");
-        await ExpectAsync(manager, Body(stand, stand.TargetA, minPercentGood: 101m), 422, "err.ECR-INT-0422.rowWindowPolicyOutOfRange");
+        await ExpectAsync(manager, Body(stand, stand.TargetA, minPercentGood: "101"), 422, "err.ECR-INT-0422.rowWindowPolicyOutOfRange");
         await ExpectAsync(manager, Body(stand, stand.TargetA, sources: [Source("A", stand.EntityId, "  ", stand.UnitSource)]), 422, "err.ECR-REQ-0422.rowWindowSourceInvalid");
         await ExpectAsync(manager, Body(stand, stand.TargetA, selector: null, sources: [Source("A", stand.EntityId, "Flare.Total", stand.UnitSource)]), 422, "err.ECR-INT-0422.rowWindowSelectorWithoutColumn");
         await ExpectAsync(manager, Body(stand, stand.TargetA, sources: [Source("A", stand.EntityId, "F1", stand.UnitSource), Source("a", stand.EntityId, "F2", stand.UnitSource)]), 409, "err.ECR-INT-0409.rowWindowSelectorTaken");
@@ -181,7 +181,7 @@ public sealed class RowWindowMapsApiTests(SqlServerFixture sql)
                 summary: "Average",
                 isStep: true,
                 isActive: false,
-                minPercentGood: 80m,
+                minPercentGood: "80",
                 refetchWithinDays: 3,
                 maxGapSeconds: 600,
                 rowVersion: version,
@@ -290,7 +290,7 @@ public sealed class RowWindowMapsApiTests(SqlServerFixture sql)
         int? end = null,
         int? selector = -1,
         int? tableDefId = null,
-        decimal? minPercentGood = null,
+        string? minPercentGood = null,
         int? targetUnit = null,
         object[]? sources = null)
         => new
@@ -314,7 +314,7 @@ public sealed class RowWindowMapsApiTests(SqlServerFixture sql)
         string summary = "Total",
         bool isStep = false,
         bool isActive = true,
-        decimal? minPercentGood = null,
+        string? minPercentGood = null,
         int? refetchWithinDays = null,
         int? maxGapSeconds = null,
         int? targetUnit = null,
@@ -352,7 +352,7 @@ public sealed class RowWindowMapsApiTests(SqlServerFixture sql)
         Assert.Equal(messageKey, JsonDocument.Parse(text).RootElement.GetProperty("messageKey").GetString());
     }
 
-    // Decimal у відповідях — рядком (глобальний конвертер), у запитах приймається й числом.
+    // Decimal у контракті — рядок (глобальний конвертер): і відповідь, і запит.
     private static decimal Dec(JsonElement value)
         => value.ValueKind == JsonValueKind.String ? decimal.Parse(value.GetString()!, CultureInfo.InvariantCulture) : value.GetDecimal();
 
