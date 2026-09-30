@@ -25,6 +25,11 @@ public sealed class UnitRecognizerTests
     [InlineData("Енергія (ГДж)", "Енергія", "GJ")]
     [InlineData("Температура (°C)", "Температура", "degC")]
     [InlineData("Маса (t_per_year)", "Маса", "t_per_year")]
+    [InlineData("Концентрація, mg/Nm3", "Концентрація", "mg_per_Sm3")]
+    [InlineData("Витрата, Nm3/day", "Витрата", "Sm3_per_day")]
+    [InlineData("Витрата (нм3/доба)", "Витрата", "Sm3_per_day")]
+    [InlineData("Викид, tonnes", "Викид", "t")]
+    [InlineData("Маса (tonne)", "Маса", "t")]
     public void Розпізнана_одиниця_відокремлюється_від_заголовка(string raw, string header, string code)
     {
         var result = UnitRecognizer.Parse(raw);
@@ -77,6 +82,25 @@ public sealed class UnitRecognizerTests
         Assert.Equal(raw, result.Header);
         Assert.Null(result.UnitText);
         Assert.Null(result.UnitCode);
+    }
+
+    /// <summary>
+    /// Умови приведення об'єму («20°С., 1 атм.») і мітка сценарію («МТБ», «HMB») —
+    /// не одиниці вимірювання. Інструмент їх не вгадує: колонка лишається без
+    /// одиниці, позначення йде у звіт, а «°С» у складі рядка не робить з нього
+    /// градуси (degC).
+    /// </summary>
+    [Theory]
+    [InlineData("Густина (20°С., 1 атм.)", "20°С., 1 атм.")]
+    [InlineData("Густина (0°С., 1 атм.)", "0°С., 1 атм.")]
+    [InlineData("Метод (МТБ)", "МТБ")]
+    public void Умови_приведення_і_мітки_не_є_одиницями(string raw, string unitText)
+    {
+        var result = UnitRecognizer.Parse(raw);
+
+        Assert.Equal(unitText, result.UnitText);
+        Assert.Null(result.UnitCode);
+        Assert.NotNull(result.Problem);
     }
 
     [Fact]

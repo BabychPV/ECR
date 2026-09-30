@@ -498,8 +498,20 @@ public sealed class SeedTests(SqlServerFixture sql)
     {
         // Складаються ПОСИЛАННЯМИ, а не розбором рядка «g_per_s» (ФВ-16.2):
         // розбір коду означав би, що перейменування одиниці ламає конверсію.
-        Assert.Equal(14, await ScalarAsync(
+        // 14 (ФВ-16.2 і HSE301:F1) + mg_per_Sm3 і Sm3_per_day (UNITS:ecr-derived).
+        Assert.Equal(16, await ScalarAsync(
             "SELECT COUNT(*) FROM uom.Unit WHERE NumeratorUnitId IS NOT NULL AND DenominatorUnitId IS NOT NULL"));
+
+        // UNITS:ecr-derived: чисельник і знаменник — саме ті, що в коді, а не
+        // здогадка з рядка; множник — метричний / 1/86400 без умов приведення.
+        Assert.Equal(2, await ScalarAsync(
+            "SELECT COUNT(*) FROM uom.Unit u " +
+            "JOIN uom.Unit n ON n.Id = u.NumeratorUnitId JOIN uom.Unit d ON d.Id = u.DenominatorUnitId " +
+            "JOIN uom.Dimension m ON m.Id = u.DimensionId " +
+            "WHERE (u.Code = N'mg_per_Sm3' AND n.Code = N'mg' AND d.Code = N'Sm3' " +
+            "       AND m.Code = N'MassPerStdVolume' AND u.FactorToBase = 0.000001) " +
+            "   OR (u.Code = N'Sm3_per_day' AND n.Code = N'Sm3' AND d.Code = N'day' " +
+            "       AND m.Code = N'StdVolumeFlow' AND u.FactorToBase = 0.000011574074074074)"));
 
         // Половина посилання — це не похідна одиниця, а зіпсований запис.
         // (У T-SQL булеве не є значенням, тому порівнюємо через CASE.)
