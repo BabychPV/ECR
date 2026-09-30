@@ -24221,6 +24221,12 @@ export interface components {
             };
             /** @description Опис колонок таблиці. */
             columns: components["schemas"]["ColumnDto"][];
+            /** @description Комірки, чия остання зміна — правка за політикою `Warn` поза вікном
+             *     доступу (`ФВ-2.16`, `D-239`); формат — той самий
+             *     `"{rowKey}:{columnCode}"`, що й `PatchCellsResponse.OutOfWindow`.
+             *     Порожній — таких немає. Читається з `aud.CellChange.IsOutOfWindow`
+             *     одним запитом на зріз, тож значок на сітці переживає перезавантаження. */
+            outOfWindowCells?: null | string[];
             /**
              * Format: int32
              * @description Період екземпляра.

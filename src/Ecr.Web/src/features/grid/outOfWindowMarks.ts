@@ -1,4 +1,4 @@
-import { useSyncExternalStore } from 'react';
+import { useMemo, useSyncExternalStore } from 'react';
 
 /**
  * Комірки, записані за політикою `Warn` поза вікном доступу (`ФВ-2.16`, `D-239`).
@@ -14,9 +14,14 @@ import { useSyncExternalStore } from 'react';
  * `DocumentGrid` — вона й так живе в лінивому чанку сітки.
  *
  * ⚠ Позначки лише додаються, доки жива вкладка: правка поза вікном лишається
- * такою і після наступного збереження тієї самої комірки. Після перезаходу
- * позначка видна в журналі змін (`AuditPage`, фільтр однієї комірки), а не на
- * сітці — зріз цієї ознаки не несе.
+ * такою і після наступного збереження тієї самої комірки.
+ *
+ * ⛔ Після перезавантаження значок приходить зі ЗРІЗУ
+ * (`TableSliceDto.outOfWindowCells`: комірки, чия остання зміна в
+ * `aud.CellChange` — поза вікном). Доти він жив лише в пам'яті вкладки й зникав
+ * після F5, хоча журнал змін його пам'ятав. `useOutOfWindowMarks` об'єднує обидва
+ * джерела: зріз — те, що було до відкриття сторінки, відповіді `PATCH` — те, що
+ * записано після.
  */
 
 const marks = new Map<string, ReadonlySet<string>>();
@@ -59,15 +64,39 @@ function subscribe(listener: () => void): () => void {
   };
 }
 
-/** Позначки зрізу для сітки; перемальовує її, щойно прийшла нова відповідь. */
+/**
+ * Об'єднання позначок зі зрізу й із відповідей `PATCH` цієї вкладки.
+ *
+ * ⚠ Повертає `recorded` тим самим об'єктом, коли зріз нічого не додає: сітка
+ * мемоізує колонки за посиланням, і новий `Set` на кожен рендер перебудовував
+ * би їх без причини.
+ */
+export function mergeOutOfWindow(
+  fromSlice: readonly string[] | null | undefined,
+  recorded: ReadonlySet<string>,
+): ReadonlySet<string> {
+  if (fromSlice == null || fromSlice.length === 0) return recorded;
+
+  return new Set([...fromSlice, ...recorded]);
+}
+
+/**
+ * Позначки зрізу для сітки; перемальовує її, щойно прийшла нова відповідь.
+ *
+ * @param fromSlice `TableSliceDto.outOfWindowCells` — позначки, збережені
+ *   сервером; саме вони переживають перезавантаження сторінки.
+ */
 export function useOutOfWindowMarks(
   tableInstanceId: number,
   periodKey: number,
+  fromSlice?: readonly string[] | null,
 ): ReadonlySet<string> {
   const snapshot = (): ReadonlySet<string> =>
     outOfWindowMarksOf(tableInstanceId, periodKey);
 
-  return useSyncExternalStore(subscribe, snapshot, snapshot);
+  const recorded = useSyncExternalStore(subscribe, snapshot, snapshot);
+
+  return useMemo(() => mergeOutOfWindow(fromSlice, recorded), [fromSlice, recorded]);
 }
 
 /** Лише для тестів: скидає стан модуля між випадками. */

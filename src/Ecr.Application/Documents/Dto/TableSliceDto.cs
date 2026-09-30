@@ -30,6 +30,13 @@ namespace Ecr.Application.Documents.Dto;
 /// спрацьованого правила колонки. Комірки, якої тут немає, правила не
 /// зачіпають. Обчислено сервером тією самою функцією, що й Excel-експорт.
 /// </param>
+/// <param name="OutOfWindowCells">
+/// Комірки, чия остання зміна — правка за політикою <c>Warn</c> поза вікном
+/// доступу (<c>ФВ-2.16</c>, <c>D-239</c>); формат — той самий
+/// <c>"{rowKey}:{columnCode}"</c>, що й <c>PatchCellsResponse.OutOfWindow</c>.
+/// Порожній — таких немає. Читається з <c>aud.CellChange.IsOutOfWindow</c>
+/// одним запитом на зріз, тож значок на сітці переживає перезавантаження.
+/// </param>
 public sealed record TableSliceDto(
     long TableInstanceId,
     int PeriodKey,
@@ -37,7 +44,8 @@ public sealed record TableSliceDto(
     IReadOnlyList<RowDto> Rows,
     IReadOnlyDictionary<string, string> CellPermissions,
     IReadOnlyDictionary<string, string> CellConfirmations,
-    IReadOnlyDictionary<string, Ecr.Application.Templates.CellFormatDto>? CellFormats = null);
+    IReadOnlyDictionary<string, Ecr.Application.Templates.CellFormatDto>? CellFormats = null,
+    IReadOnlyList<string>? OutOfWindowCells = null);
 
 /// <summary>Опис колонки для клієнта.</summary>
 /// <remarks>

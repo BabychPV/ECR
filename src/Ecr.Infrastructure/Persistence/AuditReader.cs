@@ -462,6 +462,60 @@ public sealed class AuditReader(EcrDbContext db) : IAuditReader
             """;
     }
 
+    /// <inheritdoc />
+    public async Task<IReadOnlyCollection<(long TableRowId, int ColumnDefId)>> ReadOutOfWindowCellsAsync(
+        long documentId, int periodKey, CancellationToken ct)
+    {
+        await using var connection = new SqlConnection(db.Database.GetConnectionString());
+        await connection.OpenAsync(ct).ConfigureAwait(false);
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = OutOfWindowCellsSql;
+        command.Parameters.Add("@documentId", SqlDbType.BigInt).Value = documentId;
+        command.Parameters.Add("@periodKey", SqlDbType.Int).Value = periodKey;
+
+        var result = new List<(long TableRowId, int ColumnDefId)>();
+        await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            result.Add((reader.GetInt64(0), reader.GetInt32(1)));
+        }
+
+        return result;
+    }
+
+    /// <summary>Текст запиту <see cref="ReadOutOfWindowCellsAsync"/>.</summary>
+    /// <remarks>
+    /// ⚠ Кандидати — лише рядки з <c>IsOutOfWindow = 1</c>: їх несе
+    /// фільтрований індекс <c>IX_CellChange_OutOfWindow</c> (ключ
+    /// <c>DocumentId, PeriodKey, TableRowId, ColumnDefId</c>, а <c>ChangedAt</c>
+    /// і <c>Id</c> додає сам кластерний ключ), тож звичайні правки документа,
+    /// яких тисячі, зовнішня частина не читає зовсім. Предикат — літерал
+    /// <c>1</c>, а не параметр: інакше оптимізатор не має права взяти
+    /// фільтрований індекс.
+    ///
+    /// ⚠ <c>NOT EXISTS</c> — «пізнішої зміни тієї самої комірки немає»; засічка
+    /// по <c>IX_CellChange_Cell (DocumentId, TableRowId, ColumnDefId,
+    /// ChangedAt DESC)</c>. Однакові <c>ChangedAt</c> (datetime2(3), пакет)
+    /// розводить <c>Id</c>, тож на кожну комірку лишається рівно один рядок —
+    /// без <c>DISTINCT</c>.
+    /// </remarks>
+    public const string OutOfWindowCellsSql = """
+        SELECT o.TableRowId, o.ColumnDefId
+          FROM aud.CellChange AS o
+         WHERE o.DocumentId = @documentId
+           AND o.PeriodKey = @periodKey
+           AND o.IsOutOfWindow = 1
+           AND NOT EXISTS (
+                 SELECT 1
+                   FROM aud.CellChange AS later
+                  WHERE later.DocumentId = o.DocumentId
+                    AND later.TableRowId = o.TableRowId
+                    AND later.ColumnDefId = o.ColumnDefId
+                    AND (later.ChangedAt > o.ChangedAt
+                         OR (later.ChangedAt = o.ChangedAt AND later.Id > o.Id)));
+        """;
+
     private static string? StringOrNull(SqlDataReader reader, int ordinal)
         => reader.IsDBNull(ordinal) ? null : reader.GetString(ordinal);
 

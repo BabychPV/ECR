@@ -63,6 +63,39 @@ public sealed class PatchCellsWarnMarkTests(SqlServerFixture sql)
         var plainMarks = await MarksAsync(s, s.PlainColumnId).ConfigureAwait(true);
         Assert.True(plainMarks.SequenceEqual(new[] { false }), string.Join(',', plainMarks));
     }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-2.16")]
+    public async Task Значок_поза_вікном_приходить_у_зрізі_після_перезавантаження()
+    {
+        var s = await ArrangeAsync().ConfigureAwait(true);
+
+        using var app = new EcrApiFactory(sql);
+        var client = await SignInAsync(app, s.UserName).ConfigureAwait(true);
+        var before = await SliceAsync(client, s).ConfigureAwait(true);
+
+        // До правки значків немає.
+        Assert.Empty(OutOfWindowCells(before));
+
+        var response = await PatchAsync(client, s, RowVersion(before, s.RowKey), confirmed: null,
+            (s.MonthColumnCode, 11m), (s.PlainColumnCode, 22m)).ConfigureAwait(true);
+        Assert.True(response.StatusCode == HttpStatusCode.OK,
+            $"{response.StatusCode}: {await response.Content.ReadAsStringAsync().ConfigureAwait(true)}\n{app.ErrorsText}");
+
+        // ⛔ «Перезавантаження» — НОВИЙ вхід і свіжий GET зрізу: відповіді PATCH
+        // клієнт уже не має, і значок може прийти лише звідси. Доти поля не було,
+        // і комірка після F5 виглядала звичайною.
+        var reloaded = await SignInAsync(app, s.UserName).ConfigureAwait(true);
+        var after = await SliceAsync(reloaded, s).ConfigureAwait(true);
+
+        Assert.Equal(new[] { $"{s.RowKey}:{s.MonthColumnCode}" }, OutOfWindowCells(after));
+    }
+
+    private static string?[] OutOfWindowCells(JsonElement slice)
+        => [.. slice.GetProperty("outOfWindowCells").EnumerateArray().Select(e => e.GetString())];
+
     private static async Task<JsonElement> SliceAsync(HttpClient client, Scenario s)
     {
         var response = await client

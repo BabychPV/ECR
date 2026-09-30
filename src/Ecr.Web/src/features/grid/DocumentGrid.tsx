@@ -689,8 +689,13 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
   const rejections = usePendingRejections(tableInstanceId, periodKey);
 
   // ⚠ `ФВ-2.16`: комірки, які сервер записав за `Warn` поза вікном доступу
-  // (`PatchCellsResponse.outOfWindow`, `outOfWindowMarks.ts`).
-  const outOfWindow = useOutOfWindowMarks(tableInstanceId, periodKey);
+  // (`PatchCellsResponse.outOfWindow`, `outOfWindowMarks.ts`), і ті, що сервер
+  // пам'ятає з журналу (`TableSliceDto.outOfWindowCells`) — після F5 теж.
+  const outOfWindow = useOutOfWindowMarks(
+    tableInstanceId,
+    periodKey,
+    slice.data?.outOfWindowCells,
+  );
 
   // ⚠ Лічильник змін історії. Стек живе в `ref` — інакше кожна правка
   // перестворювала б його і губила глибину; але тоді React не знає, що

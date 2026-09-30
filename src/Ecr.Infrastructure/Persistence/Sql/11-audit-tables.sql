@@ -77,6 +77,21 @@ BEGIN
 END
 GO
 
+-- ФВ-2.16 / D-239: значок «правка поза вікном» у зрізі сітки
+-- (`AuditReader.OutOfWindowCellsSql`). Фільтрований: такі правки рідкісні, тож
+-- індекс майже порожній, а зріз не читає звичайних правок документа. Вирівняний
+-- по ps_AuditByMonth, як і решта індексів таблиці (перевірка THROW 50031 у 07).
+-- Ідемпотентний: наявні бази отримують його тим самим скриптом.
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_CellChange_OutOfWindow'
+               AND object_id = OBJECT_ID(N'aud.CellChange'))
+BEGIN
+    CREATE INDEX IX_CellChange_OutOfWindow
+        ON aud.CellChange (DocumentId, PeriodKey, TableRowId, ColumnDefId)
+        WHERE IsOutOfWindow = 1
+        ON ps_AuditByMonth(ChangedAt);
+END
+GO
+
 IF OBJECT_ID(N'aud.StructureChange', N'U') IS NULL
 BEGIN
     CREATE TABLE aud.StructureChange

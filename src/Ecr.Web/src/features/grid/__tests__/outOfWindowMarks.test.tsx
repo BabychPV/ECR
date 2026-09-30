@@ -11,6 +11,7 @@ import { gridColumns } from '../DocumentGrid';
 import { NoLocalFlags } from '../cellState';
 import { applyPatchLocally } from '../useCellPatch';
 import {
+  mergeOutOfWindow,
   outOfWindowMarksOf,
   recordOutOfWindow,
   resetOutOfWindowMarks,
@@ -183,5 +184,42 @@ describe('useOutOfWindowMarks', () => {
 
     act(() => recordOutOfWindow(7, 202609, ['R2:C1']));
     expect([...result.current].sort()).toEqual(['R1:C1', 'R2:C1']);
+  });
+
+  it('позначки зрізу видно без жодного PATCH — тобто після перезавантаження', () => {
+    // ⛔ Мутація «ігнорувати fromSlice» (стан до ФВ-2.16 у зрізі) лишає набір порожнім.
+    const { result } = renderHook(() => useOutOfWindowMarks(7, 202609, ['R2:C1']));
+    expect([...result.current]).toEqual(['R2:C1']);
+
+    act(() => recordOutOfWindow(7, 202609, ['R1:C1']));
+    expect([...result.current].sort()).toEqual(['R1:C1', 'R2:C1']);
+  });
+
+  it('той самий об\'єкт між рендерами, доки ні зріз, ні відповіді не змінилися', () => {
+    const fromSlice = ['R2:C1'];
+    const { result, rerender } = renderHook(() => useOutOfWindowMarks(7, 202609, fromSlice));
+    const first = result.current;
+
+    rerender();
+
+    // ⚠ Сітка мемоізує колонки за посиланням: новий Set на кожен рендер
+    // перебудовував би їх без причини.
+    expect(result.current).toBe(first);
+  });
+});
+
+describe('mergeOutOfWindow', () => {
+  it('без позначок зрізу повертає позначки вкладки тим самим об\'єктом', () => {
+    const recorded = new Set(['R1:C1']);
+
+    expect(mergeOutOfWindow(undefined, recorded)).toBe(recorded);
+    expect(mergeOutOfWindow(null, recorded)).toBe(recorded);
+    expect(mergeOutOfWindow([], recorded)).toBe(recorded);
+  });
+
+  it('об\'єднує позначки зрізу й вкладки без дублікатів', () => {
+    const merged = mergeOutOfWindow(['R1:C1', 'R2:C1'], new Set(['R1:C1', 'R3:C1']));
+
+    expect([...merged].sort()).toEqual(['R1:C1', 'R2:C1', 'R3:C1']);
   });
 });

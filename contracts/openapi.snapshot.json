@@ -14998,6 +14998,16 @@
             },
             "type": "array"
           },
+          "outOfWindowCells": {
+            "description": "Комірки, чия остання зміна — правка за політикою `Warn` поза вікном\nдоступу (`ФВ-2.16`, `D-239`); формат — той самий\n`\"{rowKey}:{columnCode}\"`, що й `PatchCellsResponse.OutOfWindow`.\nПорожній — таких немає. Читається з `aud.CellChange.IsOutOfWindow`\nодним запитом на зріз, тож значок на сітці переживає перезавантаження.",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
           "periodKey": {
             "description": "Період екземпляра.",
             "format": "int32",

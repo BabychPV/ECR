@@ -260,4 +260,32 @@ public interface IAuditReader
         IReadOnlyCollection<(long TableRowId, int ColumnDefId)> cells,
         DateTime since,
         CancellationToken ct);
+
+    /// <summary>
+    /// Комірки документа за період, чия ОСТАННЯ зміна в журналі — правка
+    /// поза вікном доступу (<c>ФВ-2.16</c>, <c>D-239</c>), ОДНИМ запитом.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Потрібне зрізу (<c>GetTableSliceHandler</c>): значок «поза вікном»
+    /// ставився лише з відповіді <c>PATCH</c> і зникав після перезавантаження
+    /// сторінки, хоча позначка давно лежить у <c>aud.CellChange.IsOutOfWindow</c>.
+    ///
+    /// ⚠ «Остання», а не «хоч раз»: пізніша звичайна зміна (імпорт, правка в
+    /// перевідкритому вікні) означає, що в комірці вже інше значення, і значок
+    /// про нього збрехав би.
+    ///
+    /// ⚠ Вікна часу тут немає, на відміну від <see cref="ReadLastChangesAsync"/>:
+    /// межа твердження — «остання зміна взагалі», і вікно її обрізало б. Ціну
+    /// тримає фільтрований індекс <c>IX_CellChange_OutOfWindow</c>
+    /// (<c>11-audit-tables.sql</c>): такі правки рідкісні, тож у кожній партиції
+    /// засічка по майже порожньому індексу.
+    ///
+    /// ⚠ Документ цілком, а не екземпляр таблиці: <c>aud.CellChange</c>
+    /// екземпляра не знає. Відсікає чужі таблиці викликач — за рядками зрізу.
+    /// </remarks>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="periodKey">Звітний період.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<IReadOnlyCollection<(long TableRowId, int ColumnDefId)>> ReadOutOfWindowCellsAsync(
+        long documentId, int periodKey, CancellationToken ct);
 }
