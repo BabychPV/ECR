@@ -3150,7 +3150,12 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Подання аркуша на погодження. */
+        /**
+         * Подання аркуша на погодження.
+         * @description ФВ-5.19: при непідтверджених попередженнях — `422` `ECR-SUB-4221` з
+         *     `messageKey = err.ECR-SUB-4221.warningsNeedConfirmation` і переліком;
+         *     повтор із `acknowledgeWarnings = true` подає й пише підтвердження в аудит.
+         */
         post: {
             parameters: {
                 query?: never;
@@ -21434,6 +21439,12 @@ export interface components {
         };
         /** @description Аркуш × період — адреса операції робочого процесу. */
         SheetWorkflowRequest: {
+            /**
+             * @description Подавач підтвердив попередження валідації (ФВ-5.19); без цього подання
+             *     аркуша з попередженнями відхиляється з їхнім переліком.
+             * @default false
+             */
+            acknowledgeWarnings: boolean;
             /**
              * Format: int32
              * @description Період.

@@ -12209,6 +12209,11 @@
       "SheetWorkflowRequest": {
         "description": "Аркуш × період — адреса операції робочого процесу.",
         "properties": {
+          "acknowledgeWarnings": {
+            "default": false,
+            "description": "Подавач підтвердив попередження валідації (ФВ-5.19); без цього подання\nаркуша з попередженнями відхиляється з їхнім переліком.",
+            "type": "boolean"
+          },
           "periodKey": {
             "description": "Період.",
             "format": "int32",
@@ -19385,6 +19390,7 @@
     },
     "/api/v1/documents/{id}/submit": {
       "post": {
+        "description": "ФВ-5.19: при непідтверджених попередженнях — `422` `ECR-SUB-4221` з\n`messageKey = err.ECR-SUB-4221.warningsNeedConfirmation` і переліком;\nповтор із `acknowledgeWarnings = true` подає й пише підтвердження в аудит.",
         "parameters": [
           {
             "in": "path",
