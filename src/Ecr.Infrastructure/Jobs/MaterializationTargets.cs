@@ -220,6 +220,10 @@ internal static class MaterializationTargets
         // ⚠ Результат обмежений входом (не більше рядка на пару), а не `Take`:
         // `Take` без `OrderBy` над сирим SQL дає попередження EF, а порядок тут
         // не має значення. Параметр — `SqlParameter`, тексту з даних у запиті немає.
+        // ⚠ R2a: EXISTS іде від МАТЕРІАЛІЗОВАНИХ мапінгів сутності (ті самі умови, що у FindAsync) і
+        // б'є в UQ_RawDataPoint за (SourceEntityId, SourcePath) — раніше діапазон часу без шляху читав
+        // усю історію сутності. Точка немапленого шляху матеріалізації не дає, тож для фільтра «є що
+        // матеріалізувати» вона й не потрібна.
         var hits = await db.Database
             .SqlQueryRaw<RawPointHit>("""
                 SELECT b.SourceEntityId, b.ProjectId, b.PeriodKey
@@ -230,8 +234,14 @@ internal static class MaterializationTargets
                            StartUtc datetime2(7) '$.s',
                            EndUtc datetime2(7) '$.t') AS b
                 WHERE EXISTS (SELECT 1
-                              FROM ext.RawDataPoint AS r
-                              WHERE r.SourceEntityId = b.SourceEntityId
+                              FROM ext.EntityFieldMap AS m
+                              JOIN ext.RawDataPoint AS r
+                                ON r.SourceEntityId = m.SourceEntityId
+                               AND r.SourcePath = m.SourceField
+                              WHERE m.SourceEntityId = b.SourceEntityId
+                                AND m.IsActive = 1
+                                AND m.TargetRowKey IS NOT NULL
+                                AND m.TargetColumnDefId IS NOT NULL
                                 AND r.[Timestamp] >= b.StartUtc
                                 AND r.[Timestamp] < b.EndUtc)
                 """,

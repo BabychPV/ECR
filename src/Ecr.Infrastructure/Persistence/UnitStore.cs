@@ -236,7 +236,7 @@ public sealed class UnitStore(EcrDbContext db) : IUnitStore
             ("doc.DocumentHeaderValue", () => db.DocumentHeaderValues.AnyAsync(x => x.ValueUnitId == unitId, ct)),
             ("dic.RegistryValue", () => db.RegistryValues.AnyAsync(x => x.ValueUnitId == unitId, ct)),
             ("calc.CalculationResult", () => db.CalculationResults.AnyAsync(x => x.UnitId == unitId, ct)),
-            ("ext.RawData", () => db.RawDataPoints.AnyAsync(x => x.UnitId == unitId, ct)),
+            ("ext.RawData", () => RawPointsUseUnitAsync(unitId, ct)),
             ("ext.RowWindowValue", () => db.RowWindowValues.AnyAsync(x => x.TargetUnitId == unitId, ct)),
         })
         {
@@ -254,6 +254,66 @@ public sealed class UnitStore(EcrDbContext db) : IUnitStore
 
         return new UsageResponse(total, items);
     }
+
+    /// <summary>
+    /// Чи тримає одиницю хоч одна сира точка — БЕЗ сканування <c>ext.RawDataPoint</c> (R2a).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Було <c>RawDataPoints.AnyAsync(UnitId == …)</c>: індексу за <c>UnitId</c> немає, тож для
+    /// невикористаної одиниці (саме її й видаляють) це ПОВНИЙ скан таблиці, що росте на ~263 млн
+    /// рядків на рік, а під <c>SERIALIZABLE</c> (<see cref="FindUnitUsageForUpdateAsync"/>) ще й
+    /// діапазонне блокування всієї таблиці — збирач чекав би на вставках.
+    /// <para>
+    /// Тепер: від мапінгів, що називають одиницю джерелом (<c>SourceUnitId</c>), — seek у
+    /// <c>UQ_RawDataPoint</c> за <c>(SourceEntityId, SourcePath = SourceField)</c>. Вартість
+    /// залежить від точок ЦИХ шляхів, а не від чужих рядків. Точки лягають лише по змаплених
+    /// шляхах (<c>CollectionRunner</c> зіставляє <c>SourceField == SourcePath</c>), а їхня одиниця —
+    /// символ джерела, що збігається з <c>SourceUnitId</c> мапінгу. <c>PendingSourceUnitId</c> сюди
+    /// не входить: на ньому немає FK, а храповик <c>UnitUsageForeignKeyTests</c> не приймає читання
+    /// стовпців без ключа.
+    /// </para>
+    /// <para>
+    /// ⚠ Свідомий компроміс без індексу (індекс <c>UnitId</c> відкладено до реструктуризації R2b):
+    /// «осиротілі» точки — мапінг згодом видалено або йому змінили <c>SourceUnitId</c> — цим
+    /// запитом не видно; такі точки лишаються під захистом <c>FK_RDP_Unit</c> (547), а не 409 з
+    /// переліком. Точна перевірка повернеться разом з індексом чи кластером R2b.
+    /// </para>
+    /// </remarks>
+    private async Task<bool> RawPointsUseUnitAsync(int unitId, CancellationToken ct)
+    {
+        // ⚠ Пари (сутність, шлях) — ОКРЕМИМ запитом, далі по запиту на пару з параметрами:
+        // корельований EXISTS / CROSS APPLY оптимізатор компілює в скан кластерного індексу
+        // (виміряно: читання ростуть з чужими рядками), а рівність за двома провідними стовпцями
+        // UQ_RawDataPoint з параметрами дає seek. Порожній набір пар таблицю не читає.
+        var pairs = await db.EntityFieldMaps
+            .AsNoTracking()
+            .Where(m => m.SourceUnitId == unitId)
+            .Select(m => new { m.SourceEntityId, m.SourceField })
+            .Distinct()
+            .OrderBy(x => x.SourceEntityId)
+            .ThenBy(x => x.SourceField)
+            .Take(MaxRawPairs)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        foreach (var pair in pairs)
+        {
+            var entityId = pair.SourceEntityId;
+            var path = pair.SourceField;
+
+            if (await db.RawDataPoints.AnyAsync(
+                    p => p.SourceEntityId == entityId && p.SourcePath == path && p.UnitId == unitId, ct)
+                .ConfigureAwait(false))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>Стеля пар «сутність × шлях» мапінгів, за якими шукаються сирі точки одиниці.</summary>
+    private const int MaxRawPairs = 1_000;
 
     /// <summary>Проміжний рядок пошуку посилань.</summary>
     private sealed record Hit(int Id, string Label, string? Route);

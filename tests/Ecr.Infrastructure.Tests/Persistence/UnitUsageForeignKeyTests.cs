@@ -101,7 +101,9 @@ public sealed partial class UnitUsageForeignKeyTests(SqlServerFixture sql)
             .Options))
         {
             // take = 0: сторінка не потрібна, але підрахунок і перевірки «чи є» йдуть однаково.
-            await new UnitStore(db).FindUnitUsageAsync(-1, 0, CancellationToken.None);
+            // R2a: сирі точки читаються від мапінгів, що називають одиницю джерелом, тож одиниця
+            // мусить мати мапінг — інакше запит до ext.RawDataPoint не випускається взагалі.
+            await new UnitStore(db).FindUnitUsageAsync(await UnitWithFieldMapAsync(), 0, CancellationToken.None);
         }
 
         var read = ReadUnitColumns(recorder.Commands).Order(StringComparer.Ordinal).ToList();
@@ -270,6 +272,18 @@ public sealed partial class UnitUsageForeignKeyTests(SqlServerFixture sql)
         Assert.True(await read.Units.AnyAsync(u => u.Id == unitId));
     }
 
+    /// <summary>Одиниця, яку називає джерелом мапінг поля (потрібна для читання сирих точок).</summary>
+    private async Task<int> UnitWithFieldMapAsync()
+    {
+        var arranged = await ArrangeRowWindowAsync();
+        var unitId = await NewUnitAsync("m");
+        await using var db = sql.CreateContext();
+        var map = EntityFieldMap.ToColumn(arranged.EntityId, $"Path_{_tag}", arranged.TargetId);
+        map.SetUnits(unitId, null);
+        db.EntityFieldMaps.Add(map);
+        await db.SaveChangesAsync();
+        return unitId;
+    }
     /// <summary>Небазова одиниця без жодного посилання.</summary>
     private async Task<int> NewUnitAsync(string suffix)
     {
