@@ -24,6 +24,33 @@ import {
 } from './conditionalFormat';
 
 /**
+ * Підпис оператора. ⚠ Кожен ключ — літералом, без шаблонного рядка: сторож
+ * `EndpointCoverageTests` перевіряє, що кожен ключ каталогу видно в коді.
+ */
+function operatorLabel(operator: ConditionOperator): string {
+  switch (operator) {
+    case 'gt':
+      return t('conditionalFormat.op.gt');
+    case 'ge':
+      return t('conditionalFormat.op.ge');
+    case 'lt':
+      return t('conditionalFormat.op.lt');
+    case 'le':
+      return t('conditionalFormat.op.le');
+    case 'eq':
+      return t('conditionalFormat.op.eq');
+    case 'ne':
+      return t('conditionalFormat.op.ne');
+    case 'between':
+      return t('conditionalFormat.op.between');
+    case 'empty':
+      return t('conditionalFormat.op.empty');
+    case 'notEmpty':
+      return t('conditionalFormat.op.notEmpty');
+  }
+}
+
+/**
  * Умовне форматування таблиці шаблону (`ФВ-2.7`).
  *
  * ⛔ ЗБЕРЕЖЕННЯ ВИМКНЕНЕ — сервер правил не зберігає (див. `conditionalFormat.ts`).
@@ -52,7 +79,7 @@ export function ConditionalFormatPanel({
   const columnOptions = columns.map((column) => ({ value: column.code, label: column.label }));
   const operatorOptions = ConditionOperators.map((operator) => ({
     value: operator,
-    label: t(`conditionalFormat.op.${operator}`),
+    label: operatorLabel(operator),
   }));
 
   return (
@@ -99,7 +126,7 @@ export function ConditionalFormatPanel({
                   value={rule.valueTo}
                   error={
                     blocker === 'ValueTo' || blocker === 'Range'
-                      ? t(`conditionalFormat.blocker.${blocker}`)
+                      ? t(blocker === 'Range' ? 'conditionalFormat.blocker.Range' : 'conditionalFormat.blocker.ValueTo')
                       : undefined
                   }
                   onChange={(event) => update(index, { ...rule, valueTo: event.currentTarget.value })}
