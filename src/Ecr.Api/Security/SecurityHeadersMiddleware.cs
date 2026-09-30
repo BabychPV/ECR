@@ -55,18 +55,46 @@ namespace Ecr.Api.Security;
 /// неможливо (потрібен браузерний прогін <c>e2e-stand.ps1</c>), а «здається,
 /// працює» — не доказ. Тому вони їдуть звітними: порушення видно в консолі
 /// браузера, і жодна сторінка від них не гасне.
+///
+/// ⛔ <c>S14</c>: звітна політика тепер ВИМІРНА. До <c>report-uri</c> порушення
+/// бачив лише той, хто відкрив консоль браузера, тобто ніхто. Звіти йдуть на
+/// <c>POST /api/v1/csp-report</c> (<c>CspReportController</c>). Ручки —
+/// <see cref="CspSettings"/> (<c>Security:Csp:*</c>); <c>Enforce</c> лише
+/// задел, типово вимкнений.
+///
+/// ⚠ <c>report-to</c>/<c>Reporting-Endpoints</c> — лише на HTTPS-запиті, за тим
+/// самим міркуванням, що й HSTS. Reporting API працює тільки в захищеному
+/// контексті, а Chrome, побачивши <c>report-to</c>, ІГНОРУЄ <c>report-uri</c>:
+/// на сьогоднішньому <c>http://</c> (<c>R-01</c>) обидва канали мовчали б.
+/// Тому поверх HTTP їде лише <c>report-uri</c>, поверх HTTPS — обидва.
 /// </remarks>
-/// <param name="next">Наступний обробник конвеєра.</param>
-public sealed class SecurityHeadersMiddleware(RequestDelegate next)
+public sealed class SecurityHeadersMiddleware
 {
     /// <summary>Примусова CSP: лише директиви, що не можуть зламати SPA.</summary>
+    /// <remarks>Байт-у-байт незмінна: <c>S14</c> її не чіпає.</remarks>
     public const string ContentSecurityPolicy =
         "base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'";
 
-    /// <summary>Звітна CSP: те, що ще не доведене браузерним прогоном.</summary>
+    /// <summary>
+    /// Звітна CSP — повна, сувора: те, що ще не доведене браузерним прогоном.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Узгоджена зі збіркою клієнта (Vite): жодних вбудованих скриптів
+    /// (<c>index.html</c> має один <c>&lt;script type="module" src&gt;</c>), шрифти
+    /// self-hosted (<c>@fontsource</c>), <c>connect-src</c> — той самий сервер.
+    /// <c>style-src 'unsafe-inline'</c> лишається: Mantine пише <c>&lt;style&gt;</c> і
+    /// <c>style=""</c> під час виконання.
+    /// </remarks>
     public const string ReportOnlyContentSecurityPolicy =
         "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
-        + "img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'";
+        + "img-src 'self' data:; font-src 'self'; connect-src 'self'; "
+        + "frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'";
+
+    /// <summary>Ім'я групи звітів у <c>Reporting-Endpoints</c> і в <c>report-to</c>.</summary>
+    public const string ReportingGroup = "csp-endpoint";
+
+    /// <summary>Заголовок Reporting API.</summary>
+    public const string ReportingEndpointsHeader = "Reporting-Endpoints";
 
     /// <summary>HSTS на рік, без <c>includeSubDomains</c> і <c>preload</c>.</summary>
     public const string StrictTransportSecurity = "max-age=31536000";
@@ -82,6 +110,44 @@ public sealed class SecurityHeadersMiddleware(RequestDelegate next)
     /// застосунку немає.
     /// </remarks>
     public const string ReferrerPolicy = "no-referrer";
+
+    private readonly RequestDelegate _next;
+    private readonly CspSettings _csp;
+
+    /// <summary>Політика, що їде примусово: типово базова, за <c>Enforce</c> — повна.</summary>
+    private readonly PolicyPair _enforced;
+
+    /// <summary>Звітна політика; <c>null</c> — звітного заголовка немає.</summary>
+    private readonly PolicyPair? _reportOnly;
+
+    /// <summary>Створює middleware; політики збираються один раз, на старті.</summary>
+    /// <param name="next">Наступний обробник конвеєра.</param>
+    /// <param name="configuration">Конфігурація застосунку (<c>Security:Csp:*</c>).</param>
+    public SecurityHeadersMiddleware(RequestDelegate next, IConfiguration configuration)
+    {
+        ArgumentNullException.ThrowIfNull(next);
+
+        _next = next;
+        _csp = CspSettings.From(configuration);
+
+        // ⚠ Значення, що не пройшло перевірку, ігнорується, а не дописується в
+        // заголовок: старт із таким значенням і так падає
+        // (`EcrConfigurationValidation`), це друга смуга для тестового хоста.
+        var reportUri = CspSettings.IsValidReportUri(_csp.ReportUri) ? _csp.ReportUri : string.Empty;
+
+        if (_csp.Enforce)
+        {
+            _enforced = PolicyPair.For(ReportOnlyContentSecurityPolicy, reportUri);
+            _reportOnly = null;
+        }
+        else
+        {
+            _enforced = new PolicyPair(ContentSecurityPolicy, ContentSecurityPolicy, null);
+            _reportOnly = _csp.ReportOnly
+                ? PolicyPair.For(ReportOnlyContentSecurityPolicy, reportUri)
+                : null;
+        }
+    }
 
     /// <summary>Обробляє запит.</summary>
     /// <param name="context">Контекст запиту.</param>
@@ -101,8 +167,20 @@ public sealed class SecurityHeadersMiddleware(RequestDelegate next)
             headers.XContentTypeOptions = "nosniff";
             headers.XFrameOptions = "DENY";
             headers[ReferrerPolicyHeader] = ReferrerPolicy;
-            headers.ContentSecurityPolicy = ContentSecurityPolicy;
-            headers.ContentSecurityPolicyReportOnly = ReportOnlyContentSecurityPolicy;
+            headers.ContentSecurityPolicy = isHttps ? _enforced.Https : _enforced.Http;
+
+            if (_reportOnly is { } reportOnly)
+            {
+                headers.ContentSecurityPolicyReportOnly = isHttps ? reportOnly.Https : reportOnly.Http;
+            }
+
+            // ⚠ Група для `report-to` оголошується лише разом із самою директивою
+            // (HTTPS) і лише коли є куди слати.
+            if (isHttps && _csp.ReportUri.Length > 0 && CspSettings.IsValidReportUri(_csp.ReportUri)
+                && (_reportOnly is not null || _csp.Enforce))
+            {
+                headers[ReportingEndpointsHeader] = $"{ReportingGroup}=\"{_csp.ReportUri}\"";
+            }
 
             if (isHttps)
             {
@@ -112,6 +190,21 @@ public sealed class SecurityHeadersMiddleware(RequestDelegate next)
             return Task.CompletedTask;
         });
 
-        await next(context).ConfigureAwait(false);
+        await _next(context).ConfigureAwait(false);
+    }
+
+    /// <summary>Готовий текст політики для HTTP і HTTPS-запиту.</summary>
+    /// <param name="Http">Значення заголовка поверх HTTP (лише <c>report-uri</c>).</param>
+    /// <param name="Https">Значення заголовка поверх HTTPS (<c>report-uri</c> і <c>report-to</c>).</param>
+    /// <param name="ReportUri">Адреса звітів; <c>null</c> — політика без звітування.</param>
+    private sealed record PolicyPair(string Http, string Https, string? ReportUri)
+    {
+        public static PolicyPair For(string policy, string reportUri)
+            => reportUri.Length == 0
+                ? new PolicyPair(policy, policy, null)
+                : new PolicyPair(
+                    $"{policy}; report-uri {reportUri}",
+                    $"{policy}; report-uri {reportUri}; report-to {ReportingGroup}",
+                    reportUri);
     }
 }

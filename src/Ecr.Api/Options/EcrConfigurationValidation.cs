@@ -51,6 +51,7 @@ public static partial class EcrConfigurationValidation
         ("Security:RateLimit:LoginPermitPerMinute", 1),
         ("Security:RateLimit:SearchPermit", 1),
         ("Security:RateLimit:SearchWindowSeconds", 1),
+        ("Security:RateLimit:CspReportPermitPerMinute", 1),
         ("Jobs:ShutdownTimeoutSeconds", 1),
         ("Audit:ExportMaxRows", 1),
         ("Localization:ImportMaxBytes", 1),
@@ -75,6 +76,8 @@ public static partial class EcrConfigurationValidation
         "Auth:RequireHttps",
         "Auth:EnableNegotiate",
         "Security:RateLimit:TrustForwardedFor",
+        "Security:Csp:ReportOnly",
+        "Security:Csp:Enforce",
         "Jobs:NightlyRecalculation:Enabled",
         "Logging:File:Json",
         Ecr.Api.Observability.TelemetrySetup.EnabledKey,
@@ -94,6 +97,12 @@ public static partial class EcrConfigurationValidation
 
     /// <summary>Ключ адреси OTLP-колектора.</summary>
     public const string OtlpEndpointKey = "Telemetry:OtlpEndpoint";
+
+    /// <summary>Ключ адреси приймача звітів CSP.</summary>
+    public const string CspReportUriKey = "Security:Csp:ReportUri";
+
+    /// <summary>Ключ примусового режиму CSP.</summary>
+    public const string CspEnforceKey = "Security:Csp:Enforce";
 
     /// <summary>Недійсні значення — по рядку на ключ; порожньо, якщо все гаразд.</summary>
     /// <param name="configuration">Зведена конфігурація застосунку.</param>
@@ -138,6 +147,16 @@ public static partial class EcrConfigurationValidation
             }
         }
 
+        // S14: значення дописується в заголовок політики — `;`, пробіл чи керівний
+        // символ розщепили б його (див. CspSettings.IsValidReportUri).
+        if (Value(configuration, CspReportUriKey) is { } reportUri
+            && !Ecr.Api.Security.CspSettings.IsValidReportUri(reportUri))
+        {
+            problems.Add(Describe(
+                CspReportUriKey, reportUri,
+                "очікується відносний шлях (/api/v1/csp-report) або абсолютна адреса http(s) без пробілів, ; , і лапок; порожнє значення вимикає звітування"));
+        }
+
         // D-212 PR-7: невідомий пояс AF інакше зупиняв би кожен синк довідника з датами вже вночі,
         // а не старт служби з ім'ям ключа.
         var zoneKey = Application.Integration.RegistrySync.RegistrySyncValidity.TimeZoneKey;
@@ -180,11 +199,27 @@ public static partial class EcrConfigurationValidation
     {
         ArgumentNullException.ThrowIfNull(configuration);
 
-        return Value(configuration, OtlpEndpointKey) is { } endpoint
-               && !Ecr.Api.Observability.TelemetrySetup.IsEnabled(configuration)
-            ? [$"{OtlpEndpointKey} = «{endpoint}», але {Ecr.Api.Observability.TelemetrySetup.EnabledKey} ≠ true — "
-               + "експорт метрик OTLP вимкнено, значення ігнорується (runbook §3.4)."]
-            : [];
+        var warnings = new List<string>();
+
+        if (Value(configuration, OtlpEndpointKey) is { } endpoint
+            && !Ecr.Api.Observability.TelemetrySetup.IsEnabled(configuration))
+        {
+            warnings.Add(
+                $"{OtlpEndpointKey} = «{endpoint}», але {Ecr.Api.Observability.TelemetrySetup.EnabledKey} ≠ true — "
+                + "експорт метрик OTLP вимкнено, значення ігнорується (runbook §3.4).");
+        }
+
+        // ⚠ S14: примусова CSP не проганялася браузерним набором (e2e-stand.ps1) —
+        // вмикати її можна лише після прогону і спостереження за ecr.csp.violations.
+        if (Value(configuration, CspEnforceKey) is { } enforce
+            && bool.TryParse(enforce, out var enforced) && enforced)
+        {
+            warnings.Add(
+                $"{CspEnforceKey} = true: повна Content-Security-Policy застосовується примусово. "
+                + "Переконайтеся, що e2e-набір пройшов під нею, а ecr.csp.violations порожній (runbook §3.4).");
+        }
+
+        return warnings;
     }
 
     /// <summary>Перевіряє конфігурацію; на недійсній — пише Critical і зупиняє старт.</summary>

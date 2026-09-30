@@ -99,6 +99,10 @@ Api й воркер на **одному** хості — різні ролі й 
 | `Security:RateLimit:LoginPermitPerMinute` | 60 | спроб входу за хвилину |
 | `Security:RateLimit:TrustForwardedFor` | `false` | брати IP із `X-Forwarded-For`. Вмикати лише за довіреним проксі |
 | `Security:RateLimit:SearchPermit` / `SearchWindowSeconds` | 30 / 10 | обмеження пошуку |
+| `Security:RateLimit:CspReportPermitPerMinute` | 120 | звітів про порушення CSP за хвилину з однієї адреси (`POST /api/v1/csp-report`); понад межу — `429` без тіла |
+| `Security:Csp:ReportOnly` | `true` | віддавати сувору політику заголовком `Content-Security-Policy-Report-Only` (лише звіти, сторінки не блокуються). Порушення — рядки журналу `CSP violation: …` і лічильник `ecr.csp.violations` (тег `directive`) |
+| `Security:Csp:ReportUri` | `/api/v1/csp-report` | куди браузер шле звіти (`report-uri`, а на HTTPS ще й `report-to`). Порожньо — без звітування. Без `;`, пробілів і ком |
+| `Security:Csp:Enforce` | `false` | ⛔ лише задел: `true` робить повну політику примусовою (звітний заголовок зникає). Не вмикати, доки e2e-набір не пройшов під нею, а `ecr.csp.violations` не порожній |
 | `Jobs:NightlyRecalculation:Enabled` | `false` | нічний перерахунок о 03:30. Вмикається лише рядком `true` |
 | `Audit:ExportMaxRows` | 100000 | межа експорту аудиту CSV |
 | `Campaign:AtRiskDays` | 3 | за скільки днів до терміну проєкт вважається «під загрозою» |
@@ -220,6 +224,7 @@ Select-String -Path "$env:ProgramData\ECR\logs\ecr-*.log" -Pattern '<correlation
 Служба пише власні метрики в лічильник `Meter "Ecr"` (`ecr.cells.read`,
 `ecr.cells.write`, `ecr.formula.evaluate`, `ecr.job.duration`,
 `ecr.job.start_latency`, `ecr.conflict.count`, `ecr.consistency.issues`,
+`ecr.csp.violations` (порушення CSP за звітами браузерів, тег `directive`),
 `ecr.budget.count` тощо — перелік у `EcrMetrics.cs`). Прочитати їх можна двома
 способами.
 
