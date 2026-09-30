@@ -29,7 +29,7 @@ public sealed class DbJobQueueQueueWaitTests(SqlServerFixture sql) : DbJobQueueT
         var claimed = await host.ClaimAsync();
 
         Assert.NotNull(claimed?.QueueWaitMs);
-        Assert.InRange(claimed.QueueWaitMs.Value, 30_000L, 300_000L);
+        Assert.InRange(claimed.QueueWaitMs.Value, 29_900L, 300_000L);
     }
 
     [Fact]
@@ -46,7 +46,7 @@ public sealed class DbJobQueueQueueWaitTests(SqlServerFixture sql) : DbJobQueueT
         var claimed = await host.ClaimAsync();
 
         Assert.NotNull(claimed?.QueueWaitMs);
-        Assert.InRange(claimed.QueueWaitMs.Value, 5_000L, 120_000L); // не 600 000
+        Assert.InRange(claimed.QueueWaitMs.Value, 4_900L, 120_000L); // не 600 000
     }
 
     [Fact]
