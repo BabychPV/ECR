@@ -74,6 +74,179 @@ public sealed class RegistrySyncExecuteTests(SqlServerFixture sql)
         }
     }
 
+    // ─── Зниклий елемент і повернення ───────────────────────────────────────
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "D-212")]
+    public async Task MarkOrphaned_позначає_ключ_і_дедуп_за_since_новий_епізод_нова_подія()
+    {
+        var stand = await ArrangeAsync(RegistrySourceKind.External);
+        stand.Remove("Stack2");
+        await using var provider = BuildProvider();
+
+        try
+        {
+            await RunAsync(provider, stand);
+            await RunAsync(provider, stand, Now.AddHours(1));
+
+            Assert.Equal(Now, (await KeyAsync(stand, stand.G2)).MissingInSourceSince);
+            Assert.True(await ActiveAsync(stand.E2));
+            var missing = Assert.Single(await EventsAsync(stand), e => e.Status == CollectionCoverage.RegistrySourceMissing);
+            Assert.Contains("since=2026-09-30T05:00:00Z", missing.Details, StringComparison.Ordinal);
+
+            // Повернувся — позначку знято; зник знову — НОВИЙ епізод, нова подія.
+            var g2 = stand.Add("Stack2", 20m, stand.G2);
+            await RunAsync(provider, stand, Now.AddHours(2));
+            Assert.Null((await KeyAsync(stand, g2)).MissingInSourceSince);
+
+            stand.Remove("Stack2");
+            await RunAsync(provider, stand, Now.AddHours(3));
+            Assert.Equal(Now.AddHours(3), (await KeyAsync(stand, g2)).MissingInSourceSince);
+            Assert.Equal(2, (await EventsAsync(stand)).Count(e => e.Status == CollectionCoverage.RegistrySourceMissing));
+        }
+        finally
+        {
+            await DeactivateAsync(stand);
+        }
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "D-212")]
+    public async Task Ignore_не_чіпає_ні_запис_ні_ключ_а_подія_є()
+    {
+        var stand = await ArrangeAsync(RegistrySourceKind.External, RegistryMissingPolicy.Ignore);
+        stand.Remove("Stack2");
+        await using var provider = BuildProvider();
+
+        try
+        {
+            await RunAsync(provider, stand);
+
+            Assert.Null((await KeyAsync(stand, stand.G2)).MissingInSourceSince);
+            Assert.True(await ActiveAsync(stand.E2));
+            Assert.Single(await EventsAsync(stand), e => e.Status == CollectionCoverage.RegistrySourceMissing);
+        }
+        finally
+        {
+            await DeactivateAsync(stand);
+        }
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "D-212")]
+    public async Task External_Deactivate_вимикає_з_аудитом_а_повернення_вмикає_з_подією()
+    {
+        var stand = await ArrangeAsync(RegistrySourceKind.External, RegistryMissingPolicy.Deactivate);
+        stand.Remove("Stack2");
+        await using var provider = BuildProvider();
+
+        try
+        {
+            await RunAsync(provider, stand);
+
+            Assert.False(await ActiveAsync(stand.E2));
+            Assert.Equal(Now, (await KeyAsync(stand, stand.G2)).MissingInSourceSince);
+            Assert.Equal(1, await CountAsync(ActiveAuditQuery(stand.E2, stand.SvcId)));
+            var events = await EventsAsync(stand);
+            var deactivated = Assert.Single(events, e => e.Status == CollectionCoverage.RegistryDeactivated);
+            Assert.Contains($"element={stand.G2}; entry={stand.E2}", deactivated.Details, StringComparison.Ordinal);
+            Assert.DoesNotContain(events, e => e.Status == CollectionCoverage.RegistrySourceMissing);
+
+            // Повернувся — External вмикає сам (Q6).
+            stand.Add("Stack2", 20m, stand.G2);
+            await RunAsync(provider, stand, Now.AddHours(1));
+
+            Assert.True(await ActiveAsync(stand.E2));
+            Assert.Null((await KeyAsync(stand, stand.G2)).MissingInSourceSince);
+            Assert.Equal(2, await CountAsync(ActiveAuditQuery(stand.E2, stand.SvcId)));
+            var reactivated = Assert.Single(await EventsAsync(stand), e => e.Status == CollectionCoverage.RegistryReactivated);
+            Assert.Contains("since=2026-09-30T05:00:00Z", reactivated.Details, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await DeactivateAsync(stand);
+        }
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "D-212")]
+    public async Task Hybrid_повернення_не_вмикає_а_Diverged_active()
+    {
+        var stand = await ArrangeAsync(RegistrySourceKind.Hybrid, RegistryMissingPolicy.Deactivate);
+        stand.Remove("Stack2");
+        await using var provider = BuildProvider();
+
+        try
+        {
+            await RunAsync(provider, stand);
+            Assert.False(await ActiveAsync(stand.E2));
+
+            stand.Add("Stack2", 20m, stand.G2);
+            await RunAsync(provider, stand, Now.AddHours(1));
+
+            // D-212 Q6: вмикає людина — запис лишається вимкненим, позначку знято, подія Diverged.
+            Assert.False(await ActiveAsync(stand.E2));
+            Assert.Null((await KeyAsync(stand, stand.G2)).MissingInSourceSince);
+            var events = await EventsAsync(stand);
+            Assert.DoesNotContain(events, e => e.Status == CollectionCoverage.RegistryReactivated);
+            var diverged = Assert.Single(events, e => e.Status == CollectionCoverage.RegistryDiverged);
+            Assert.Contains("field=@active; ecr=False; source=True", diverged.Details, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await DeactivateAsync(stand);
+        }
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "D-187")]
+    public async Task Неповний_знімок_без_створення_перепривʼязки_і_позначок_а_оновлення_йдуть()
+    {
+        var stand = await ArrangeAsync(RegistrySourceKind.External, RegistryMissingPolicy.Deactivate);
+        stand.Put("Stack1", "Capacity", 11m);
+        stand.Add("Stack9", 3m);
+        stand.Remove("Stack2");
+        var g2b = stand.Add("Stack2", 20m);
+        stand.Complete = false;
+        await using var provider = BuildProvider();
+
+        try
+        {
+            await RunAsync(provider, stand);
+
+            Assert.Equal(11m, await CapAsync(stand, stand.E1));
+            Assert.Equal(0, await CountEntriesAsync(stand, "Stack9"));
+            var key = await KeyAsync(stand, stand.G2);
+            Assert.Null(key.MissingInSourceSince);
+            Assert.True(await ActiveAsync(stand.E2));
+            await using (var db = Context())
+            {
+                Assert.False(await db.RegistryExternalKeys.AnyAsync(k => k.ExternalId == g2b));
+            }
+
+            var events = await EventsAsync(stand);
+            Assert.DoesNotContain(events, e => e.Status is CollectionCoverage.RegistryAutoCreated
+                or CollectionCoverage.RegistryExternalKeyRelinked
+                or CollectionCoverage.RegistrySourceMissing
+                or CollectionCoverage.RegistryDeactivated);
+            Assert.Equal(2, events.Count(e => e.Status == CollectionCoverage.RegistryElementUnlinked));
+        }
+        finally
+        {
+            await DeactivateAsync(stand);
+        }
+    }
+
     // ─── Стенд ──────────────────────────────────────────────────────────────
 
     private async Task<Stand> ArrangeAsync(

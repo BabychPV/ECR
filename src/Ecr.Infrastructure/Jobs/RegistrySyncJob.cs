@@ -43,12 +43,14 @@ public interface IRegistrySyncJob
 /// <remarks>
 /// ⛔ У <c>dic.RegistryEntry</c>/<c>dic.RegistryValue</c> задача пише ЛИШЕ через
 /// <see cref="RegistryEntryWriter"/> від <c>svc-integration</c>:
-/// оновлення — <see cref="RegistryEntryWriter.UpdateAsync"/> (адресація за Id). Ревізія даних, ключі,
-/// аудит <c>RegistryValueChanged</c> і автор <c>ChangedByUserId</c> (RT-04) — ті самі, що в ручного запису.
+/// оновлення й увімкнення/вимкнення — <see cref="RegistryEntryWriter.UpdateAsync"/> (адресація за Id,
+/// <see cref="RegistryEntryUpdate.IsActive"/>). Ревізія даних, ключі, аудит <c>RegistryValueChanged</c>
+/// і автор <c>ChangedByUserId</c> (RT-04) — ті самі, що в ручного запису.
 /// <para>
-/// ⛔ Одна СПРОБА — один DI-scope і ОДНА транзакція: оновлення й операції над ключами (шляхи). Збій
-/// будь-де в спробі — відкат усього; не «дані» (не <c>BusinessRule</c>/<c>Domain</c>/<c>Concurrency</c>)
-/// — падіння прогону (<c>Failed</c> у черзі), журнал не пишеться зовсім.
+/// ⛔ Одна СПРОБА — один DI-scope і ОДНА транзакція: оновлення, вимкнення/увімкнення й операції над
+/// ключами (позначки зникнення, шляхи). Збій будь-де в спробі — відкат усього, подій дій немає; не
+/// «дані» (не <c>BusinessRule</c>/<c>Domain</c>/<c>Concurrency</c>) — падіння прогону (<c>Failed</c> у
+/// черзі), журнал не пишеться зовсім.
 /// </para>
 /// <para>
 /// ⚠ «Все або нічого» writer'а (рішення S7): відмова рядків → ці записи йдуть подією
@@ -56,6 +58,11 @@ public interface IRegistrySyncJob
 /// повтором; відмова на весь пакет (<c>ECR-REG-4092</c>, зокрема <c>keyTakenConcurrently</c>) або
 /// невдалий повтор → операції над ключами окремою спробою, далі кожен запис поштучно, у власній
 /// спробі. Один поганий запис не блокує довідник, а кількість спроб обмежена.
+/// </para>
+/// <para>
+/// ⚠ Події ДІЙ (<c>Deactivated</c>, <c>Reactivated</c>) пишуться лише ПІСЛЯ коміту спроби, що їх виконала.
+/// Журнал — окремим збереженням у контексті задачі після всіх спроб: збій між комітом спроби й
+/// журналом втратить подію, а не дані (журнал відновиться наступною зміною).
 /// </para>
 /// <para>
 /// ⚠ Елемент, чий GUID уже прив'язаний у цьому джерелі до запису ІНШОГО довідника
@@ -74,8 +81,11 @@ public interface IRegistrySyncJob
 /// <para>
 /// ⚠ Дедуп подій: у <c>Details</c> — ключ <c>key=&lt;предмет&gt;:&lt;значення&gt;</c>. Подія не
 /// пишеться, якщо ОСТАННЯ подія того самого предмета цієї сутності має те саме значення (один
-/// запит на прогін). Обмеження: подія без значення (зниклий/неприв'язаний елемент), що зникла й
-/// повернулась, повторно не пишеться — ознаки «розв'язано» журнал не має.
+/// запит на прогін). Для зникнення (<c>SourceMissing</c>, <c>Deactivated</c>, <c>Reactivated</c>)
+/// значення містить <c>since=</c> — момент <c>MissingInSourceSince</c>: той самий епізод
+/// зникнення — одна подія, новий епізод (елемент повернувся й зник знову) — нова. Без позначки
+/// (<c>Ignore</c>, <c>Local</c>) <c>since=</c> немає, і обмеження лишається: зникла й повернулась —
+/// повторно не пишеться.
 /// </para>
 /// <para>
 /// ⚠ «Останній автор — людина» (<c>D-118</c>) — лише <c>Hybrid</c>: автор є і це не
@@ -157,7 +167,9 @@ public sealed class RegistrySyncJob(
 
         var entries = await EntriesAsync(links, mappings, ct).ConfigureAwait(false);
 
-        var now = clock.UtcNow;
+        // ⚠ Цілі секунди: MissingInSourceSince — datetime2(3), і `since=` у ключі дедупу мусить
+        // збігатися з тим, що повернеться з бази наступним прогоном.
+        var now = WholeSeconds(clock.UtcNow);
 
         // GUID, прив'язаний у цьому джерелі до ІНШОГО довідника, — не наш елемент: створити чи
         // перепривʼязати його означало б порушити UQ_RegistryExternalKey або вкрасти чужий зв'язок.
@@ -170,13 +182,14 @@ public sealed class RegistrySyncJob(
             [.. snapshot.Elements.Where(e => !foreign.Contains(e.ExternalId))],
             links,
             entries,
-            mappings);
+            mappings,
+            OnMissingInSource: entity.OnMissingInSource);
 
         // D-212 (5): коди записів інших довідників → Id, одним запитом на довідник.
         var lookupCodes = await ResolveCodesAsync(RegistrySyncPlanner.LookupCodes(input), ct).ConfigureAwait(false);
         var plan = RegistrySyncPlanner.Plan(input with { LookupCodes = lookupCodes });
 
-        var context = new ApplyContext(registryDefId, dataSource.Id, now, links);
+        var context = new ApplyContext(registryDefId, registry.Code, dataSource.Id, now, links, plan.MissingMarks);
         var events = new List<SyncEvent>();
 
         events.AddRange(snapshot.Rejections.Select(r => new SyncEvent(
@@ -185,13 +198,12 @@ public sealed class RegistrySyncJob(
             .Where(e => foreign.Contains(e.ExternalId))
             .OrderBy(e => e.ExternalId, StringComparer.Ordinal)
             .Select(e => Foreign(e.ExternalId)));
-        events.AddRange(plan.Events.Select(Event));
+        events.AddRange(plan.Events.Select(e => e.Kind == RegistrySyncEventKind.SourceMissing
+            ? Event(e, context.SinceOf(e.ExternalId))
+            : Event(e)));
 
-        // TODO PR-6: перепривʼязку задача ще не виконує — доти журнал той самий, що до
+        // TODO PR-6 (4/5): перепривʼязку задача ще не виконує — доти журнал той самий, що до
         // D-212 (зниклий старий GUID і неприв'язаний новий), а не мовчить про обидва.
-        // MissingMarks, MissingClears, Deactivations, Reactivations — теж PR-6; поки задача не
-        // передає IsActive, MissingInSourceSince і політику, MissingMarks (MarkOrphaned)
-        // супроводжує подія SourceMissing з plan.Events.
         events.AddRange(plan.Relinks.SelectMany(r => new[]
         {
             Event(new RegistrySyncEvent(RegistrySyncEventKind.SourceMissing, r.OldExternalId, r.RegistryEntryId)),
@@ -230,9 +242,9 @@ public sealed class RegistrySyncJob(
     {
         var events = new List<SyncEvent>();
         var updates = Updates(plan);
-        var keys = new KeyOps(plan.PathChanges);
+        var keys = new KeyOps(plan.MissingMarks, plan.MissingClears, plan.PathChanges);
         var outcomes = new List<Outcome>();
-        var externalIds = context.ExternalIds();
+        var externalIds = context.ExternalIds(plan);
 
         if (updates.Count > 0 || !keys.IsEmpty)
         {
@@ -290,6 +302,16 @@ public sealed class RegistrySyncJob(
                         events.Add(Rejected(update, ex, externalIds));
                     }
                 }
+            }
+        }
+
+        foreach (var outcome in outcomes)
+        {
+            foreach (var update in outcome.Updates.Where(u => u.IsActive is not null))
+            {
+                var element = externalIds.GetValueOrDefault(update.RegistryEntryId);
+                var kind = update.IsActive!.Value ? RegistrySyncEventKind.Reactivated : RegistrySyncEventKind.Deactivated;
+                events.Add(Event(new RegistrySyncEvent(kind, element, update.RegistryEntryId), context.SinceOf(element)));
             }
         }
 
@@ -361,7 +383,10 @@ public sealed class RegistrySyncJob(
         return new AttemptResult(outcome, updateErrors);
     }
 
-    /// <summary>Операції над ключами на відстежених рядках контексту спроби: шляхи.</summary>
+    /// <summary>
+    /// Операції над ключами на відстежених рядках контексту спроби: шляхи, зняття й постановка
+    /// позначки зникнення.
+    /// </summary>
     private static async Task ApplyKeysAsync(EcrDbContext scoped, ApplyContext context, KeyOps keys, CancellationToken ct)
     {
         if (keys.IsEmpty)
@@ -369,7 +394,9 @@ public sealed class RegistrySyncJob(
             return;
         }
 
-        var ids = keys.Paths.Select(p => p.ExternalId)
+        var ids = keys.Marks.Select(m => m.ExternalId)
+            .Concat(keys.Clears.Select(c => c.ExternalId))
+            .Concat(keys.Paths.Select(p => p.ExternalId))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
 
@@ -397,13 +424,27 @@ public sealed class RegistrySyncJob(
         {
             Find(path.ExternalId, path.RegistryEntryId)?.MarkSynced(path.NewPath, context.Now);
         }
+
+        foreach (var clear in keys.Clears)
+        {
+            Find(clear.ExternalId, clear.RegistryEntryId)?.ClearMissing();
+        }
+
+        foreach (var mark in keys.Marks)
+        {
+            Find(mark.ExternalId, mark.RegistryEntryId)?.MarkMissing(context.Now);
+        }
     }
 
-    /// <summary>Оновлення на запис — одним рядком writer'а, у порядку першої появи запису в плані.</summary>
+    /// <summary>
+    /// Оновлення на запис: поля планувальника + увімкнення/вимкнення (<see cref="RegistryEntryUpdate.IsActive"/>)
+    /// — одним рядком writer'а, у порядку першої появи запису в плані.
+    /// </summary>
     private static List<RegistryEntryUpdate> Updates(RegistrySyncPlan plan)
     {
         var order = new List<long>();
         var values = new Dictionary<long, Dictionary<string, object?>>();
+        var active = new Dictionary<long, bool>();
 
         foreach (var update in plan.Updates)
         {
@@ -417,7 +458,22 @@ public sealed class RegistrySyncJob(
             fields[update.FieldCode] = update.NewValue;
         }
 
-        return [.. order.Select(id => new RegistryEntryUpdate(id, values[id]))];
+        foreach (var (activation, isActive) in plan.Deactivations.Select(d => (d, false))
+                     .Concat(plan.Reactivations.Select(r => (r, true))))
+        {
+            if (!values.ContainsKey(activation.RegistryEntryId) && !active.ContainsKey(activation.RegistryEntryId))
+            {
+                order.Add(activation.RegistryEntryId);
+            }
+
+            active[activation.RegistryEntryId] = isActive;
+        }
+
+        return [.. order.Select(id => new RegistryEntryUpdate(
+            id, values.GetValueOrDefault(id) ?? new Dictionary<string, object?>(StringComparer.Ordinal))
+        {
+            IsActive = active.TryGetValue(id, out var isActive) ? isActive : null,
+        })];
     }
 
     private static List<T> Without<T>(IReadOnlyList<T> items, IReadOnlyList<RegistryEntryImportError> errors)
@@ -630,11 +686,11 @@ public sealed class RegistrySyncJob(
                 join entry in db.RegistryEntries.AsNoTracking() on key.RegistryEntryId equals entry.Id
                 where key.DataSourceId == dataSourceId && entry.RegistryDefId == registryDefId
                 orderby key.Id
-                select new RegistrySyncLink(key.ExternalId, key.RegistryEntryId, key.ExternalPath))
+                select new RegistrySyncLink(key.ExternalId, key.RegistryEntryId, key.ExternalPath, key.MissingInSourceSince))
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
-    /// <summary>Поточні значення змаплених полів прив'язаних ЖИВИХ записів.</summary>
+    /// <summary>Поточні значення змаплених полів і стан (увімкнено) прив'язаних ЖИВИХ записів.</summary>
     private async Task<List<RegistrySyncEntryState>> EntriesAsync(
         IReadOnlyList<RegistrySyncLink> links,
         IReadOnlyList<RegistrySyncFieldMapping> mappings,
@@ -653,7 +709,7 @@ public sealed class RegistrySyncJob(
             .FirstOrDefaultAsync(ct)
             .ConfigureAwait(false);
 
-        var alive = new List<long>();
+        var alive = new List<(long Id, bool IsActive)>();
         var stored = new List<RegistryValue>();
 
         foreach (var chunk in linked.Chunk(ChunkSize))
@@ -662,12 +718,13 @@ public sealed class RegistrySyncJob(
 
             // ⚠ Видалений логічно запис у стан не йде: планувальник його не
             // планує, а писати в нього синк однаково не має права.
-            alive.AddRange(await db.RegistryEntries
+            var rows = await db.RegistryEntries
                 .AsNoTracking()
                 .Where(e => ids.Contains(e.Id) && !e.IsDeleted)
-                .Select(e => e.Id)
+                .Select(e => new { e.Id, e.IsActive })
                 .ToListAsync(ct)
-                .ConfigureAwait(false));
+                .ConfigureAwait(false);
+            alive.AddRange(rows.Select(r => (r.Id, r.IsActive)));
 
             if (fieldIds.Count > 0)
             {
@@ -681,9 +738,9 @@ public sealed class RegistrySyncJob(
 
         var byEntry = stored.ToLookup(v => v.RegistryEntryId);
 
-        return [.. alive.Select(id => new RegistrySyncEntryState(
-            id,
-            byEntry[id]
+        return [.. alive.Select(e => new RegistrySyncEntryState(
+            e.Id,
+            byEntry[e.Id]
                 .GroupBy(v => v.RegistryFieldDefId)
                 .ToDictionary(
                     g => g.Key,
@@ -693,7 +750,8 @@ public sealed class RegistrySyncJob(
                         return new RegistrySyncCurrentValue(
                             Typed(types[value.RegistryFieldDefId], value),
                             IsHuman(value.ChangedByUserId, svcId));
-                    })))];
+                    }),
+            e.IsActive))];
     }
 
     /// <summary>
@@ -785,7 +843,13 @@ public sealed class RegistrySyncJob(
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Невідомий вид події синку."),
     };
 
-    private static SyncEvent Event(RegistrySyncEvent e)
+    /// <summary>Подія планувальника або виконавця.</summary>
+    /// <param name="e">Подія.</param>
+    /// <param name="since">
+    /// Момент зникнення (<c>MissingInSourceSince</c>) — у пояснення й у ЗНАЧЕННЯ ключа дедупу: новий
+    /// епізод зникнення дає нову подію. <c>null</c> — без позначки.
+    /// </param>
+    private static SyncEvent Event(RegistrySyncEvent e, DateTime? since = null)
     {
         var status = Status(e.Kind);
         var parts = new List<string> { $"element={e.ExternalId ?? "—"}" };
@@ -812,11 +876,17 @@ public sealed class RegistrySyncJob(
             parts.Add($"messageKey={e.MessageKey}");
         }
 
+        var sinceText = since is { } moment ? $"since={Moment(moment)}" : null;
+        if (sinceText is not null)
+        {
+            parts.Add(sinceText);
+        }
+
         // ⚠ Значення в ECR (`ecr=`) у ключ НЕ входить: людина, що змінила своє значення, не
         // робить незмінне джерело новою подією.
         var subject = $"element={e.ExternalId}; entry={e.RegistryEntryId}; field={e.FieldCode}";
         var value = e.FieldCode is null
-            ? string.Empty
+            ? sinceText ?? string.Empty
             : $"source={Text(e.SourceValue)}; error={e.ErrorCode}; messageKey={e.MessageKey}";
 
         return new SyncEvent(status, string.Join("; ", parts), KeyOf(status, subject, value));
@@ -950,6 +1020,12 @@ public sealed class RegistrySyncJob(
         _ => value.ToString() ?? "∅",
     };
 
+    private static string Moment(DateTime moment)
+        => moment.ToString("yyyy-MM-ddTHH:mm:ss", CultureInfo.InvariantCulture) + "Z";
+
+    private static DateTime WholeSeconds(DateTime utc)
+        => new(utc.Ticks - (utc.Ticks % TimeSpan.TicksPerSecond), DateTimeKind.Utc);
+
     private static string Truncate(string text)
         => text.Length > CollectionCoverage.MaxDetailsLength ? text[..CollectionCoverage.MaxDetailsLength] : text;
 
@@ -964,7 +1040,7 @@ public sealed class RegistrySyncJob(
             });
 
     /// <summary>Прочитаний знімок джерела.</summary>
-    /// <param name="Elements">Елементи з GUID і прочитаними атрибутами.</param>
+    /// <param name="Elements">Елементи з GUID, іменем і прочитаними атрибутами.</param>
     /// <param name="IsComplete">Чи можна за ним судити про зникнення елементів.</param>
     /// <param name="Rejections">Пояснення відмов читання окремих шляхів.</param>
     private sealed record Snapshot(
@@ -978,17 +1054,36 @@ public sealed class RegistrySyncJob(
 
     /// <summary>Спільне для всіх спроб прогону.</summary>
     /// <param name="RegistryDefId">Довідник.</param>
+    /// <param name="RegistryCode">Код довідника — для <c>aud.StructureChange</c>.</param>
     /// <param name="DataSourceId">Джерело.</param>
-    /// <param name="Now">Момент прогону.</param>
+    /// <param name="Now">Момент прогону (цілі секунди).</param>
     /// <param name="Links">Зв'язки на момент читання.</param>
+    /// <param name="Marks">Позначки зникнення, які ставить цей прогін.</param>
     private sealed record ApplyContext(
         int RegistryDefId,
+        string RegistryCode,
         int DataSourceId,
         DateTime Now,
-        IReadOnlyList<RegistrySyncLink> Links)
+        IReadOnlyList<RegistrySyncLink> Links,
+        IReadOnlyList<RegistrySyncLinkMark> Marks)
     {
-        /// <summary>Запис → елемент (для подій).</summary>
-        public Dictionary<long, string> ExternalIds()
+        private readonly Dictionary<string, RegistrySyncLink> _links =
+            Links.ToDictionary(l => l.ExternalId, StringComparer.OrdinalIgnoreCase);
+
+        private readonly HashSet<string> _marked =
+            Marks.Select(m => m.ExternalId).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// Момент зникнення елемента: позначку ставить цей прогін — <see cref="Now"/>; вона вже
+        /// була — збережена. Для повернення — та, що знімається.
+        /// </summary>
+        public DateTime? SinceOf(string? externalId)
+            => externalId is null
+                ? null
+                : _marked.Contains(externalId) ? Now : _links.GetValueOrDefault(externalId)?.MissingInSourceSince;
+
+        /// <summary>Запис → елемент: зв'язки й елементи плану (для подій).</summary>
+        public Dictionary<long, string> ExternalIds(RegistrySyncPlan plan)
         {
             var map = new Dictionary<long, string>();
             foreach (var link in Links)
@@ -996,20 +1091,28 @@ public sealed class RegistrySyncJob(
                 map.TryAdd(link.RegistryEntryId, link.ExternalId);
             }
 
+            foreach (var activation in plan.Deactivations.Concat(plan.Reactivations))
+            {
+                map[activation.RegistryEntryId] = activation.ExternalId;
+            }
+
             return map;
         }
     }
 
     /// <summary>Операції над ключами одного прогону.</summary>
-    private sealed record KeyOps(IReadOnlyList<RegistrySyncPathChange> Paths)
+    private sealed record KeyOps(
+        IReadOnlyList<RegistrySyncLinkMark> Marks,
+        IReadOnlyList<RegistrySyncLinkMark> Clears,
+        IReadOnlyList<RegistrySyncPathChange> Paths)
     {
-        public static KeyOps None { get; } = new([]);
+        public static KeyOps None { get; } = new([], [], []);
 
-        public bool IsEmpty => Paths.Count == 0;
+        public bool IsEmpty => Marks.Count == 0 && Clears.Count == 0 && Paths.Count == 0;
     }
 
     /// <summary>Закомічена спроба.</summary>
-    /// <param name="Updates">Застосовані оновлення.</param>
+    /// <param name="Updates">Застосовані оновлення (зокрема увімкнення/вимкнення).</param>
     private sealed record Outcome(IReadOnlyList<RegistryEntryUpdate> Updates);
 
     /// <summary>Результат спроби: виконане або відмови рядків (тоді відкочено).</summary>
