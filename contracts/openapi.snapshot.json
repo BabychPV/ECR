@@ -15961,6 +15961,31 @@
         ]
       }
     },
+    "/api/v1/csp-report": {
+      "post": {
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "description": "Bad Request"
+          },
+          "413": {
+            "description": "Payload Too Large"
+          },
+          "415": {
+            "description": "Unsupported Media Type"
+          },
+          "429": {
+            "description": "Too Many Requests"
+          }
+        },
+        "summary": "Приймає звіт (чи масив звітів Reporting API).",
+        "tags": [
+          "CspReport"
+        ]
+      }
+    },
     "/api/v1/data-sources": {
       "get": {
         "description": "⚠ Віддаються і вимкнені джерела: екран, з якого джерело вмикають назад,\nбез них показував би порожнє місце замість причини.",
@@ -35198,6 +35223,9 @@
     },
     {
       "name": "Consistency"
+    },
+    {
+      "name": "CspReport"
     },
     {
       "name": "DataSources"

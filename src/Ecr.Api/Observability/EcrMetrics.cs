@@ -47,6 +47,12 @@ public sealed class EcrMetrics
     /// </remarks>
     public const string JobStartLatency = "ecr.job.start_latency";
 
+    /// <summary>
+    /// Порушення Content-Security-Policy, про які повідомили браузери (<c>S14</c>).
+    /// </summary>
+    public const string CspViolations = "ecr.csp.violations";
+
+    private readonly Counter<long> _cspViolations;
     private readonly Histogram<double> _jobStartLatency;
     private readonly Histogram<double> _cellsRead;
     private readonly Histogram<double> _cellsWrite;
@@ -71,7 +77,17 @@ public sealed class EcrMetrics
         _consistencyIssues = meter.CreateCounter<long>(ConsistencyIssues, "1", "Знахідки ConsistencyCheckJob");
         _jobStartLatency = meter.CreateHistogram<double>(
             JobStartLatency, "ms", "Затримка від постановки задачі в чергу до її старту");
+        _cspViolations = meter.CreateCounter<long>(CspViolations, "1", "Порушення CSP за звітами браузерів");
     }
+
+    /// <summary>Фіксує одне порушення CSP (<c>S14</c>).</summary>
+    /// <param name="directive">
+    /// Ім'я директиви — ЛИШЕ зі закритого переліку (<c>CspReportParser.DirectiveName</c>):
+    /// тег приходить від анонімного джерела, а вільний рядок у тезі — це
+    /// необмежена кількість часових рядів.
+    /// </param>
+    public void RecordCspViolation(string directive)
+        => _cspViolations.Add(1, new KeyValuePair<string, object?>("directive", directive));
 
     /// <summary>
     /// Ключ у <c>HttpContext.Items</c>, яким дія повідомляє фільтру, скільки

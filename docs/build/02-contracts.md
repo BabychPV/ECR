@@ -3619,6 +3619,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/reports/{code}/build` | `Report.BuildSnapshot` | 5 |
 | `GET` | `/api/v1/languages` | — (будь-який автентифікований) | 3 |
 | `GET` | `/api/v1/public/bootstrap` | — (анонімний) | 7 |
+| `POST` | `/api/v1/csp-report` | — (анонімний; приймач звітів CSP від браузера, S14) | 7 |
 | `GET` | `/api/v1/ui-strings/{lang}?scope=public` | — (анонімний) | 3 |
 | `GET` | `/api/v1/ui-strings/{lang}?scope=private` | — (будь-який автентифікований) | 3 |
 | `PUT` | `/api/v1/ui-strings/{lang}/{key}` | `System.ManageLocalization` | 3 |

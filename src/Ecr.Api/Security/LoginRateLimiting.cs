@@ -136,6 +136,22 @@ public static class LoginRateLimiting
     private const string ChangePasswordRejectionDetail =
         "Too many password change attempts. Try again later.";
 
+    /// <summary>Скільки звітів CSP з однієї адреси дозволено за хвилину (<c>S14</c>).</summary>
+    /// <remarks>
+    /// ⚠ Ендпоінт звітів анонімний і дешевий (лише рядок журналу й лічильник, бази
+    /// немає), тож межа не про процесор, а про ЖУРНАЛ: без неї одна вкладка з
+    /// порушенням у циклі писала б рядок на кожен кадр. Число більше за вхід:
+    /// одна сторінка легально дає кілька порушень за завантаження, а за
+    /// корпоративним NAT адреса спільна для всього майданчика.
+    /// </remarks>
+    public const int DefaultCspReportPermitPerMinute = 120;
+
+    /// <summary>Ключ конфігурації: межа звітів CSP за хвилину.</summary>
+    private const string CspReportPermitKey = "Security:RateLimit:CspReportPermitPerMinute";
+
+    /// <summary>Префікс розділу звітів CSP — щоб не збігтися з розділами входу за адресою.</summary>
+    private const string CspReportPartitionPrefix = "csp-report:";
+
     /// <summary>Ключ конфігурації: чи довіряти <c>X-Forwarded-For</c>.</summary>
     private const string TrustForwardedForKey = "Security:RateLimit:TrustForwardedFor";
 
@@ -222,6 +238,8 @@ public static class LoginRateLimiting
         var permitPerMinute = configuration.GetValue(PermitKey, DefaultLoginPermitPerMinute);
         var changePasswordPermit = configuration.GetValue(
             ChangePasswordPermitKey, DefaultChangePasswordPermitPerMinute);
+        var cspReportPermit = configuration.GetValue(
+            CspReportPermitKey, DefaultCspReportPermitPerMinute);
         var trustForwardedFor = configuration.GetValue(TrustForwardedForKey, defaultValue: false);
 
         services.AddRateLimiter(options =>
@@ -235,6 +253,12 @@ public static class LoginRateLimiting
                     return PerMinute(ClientKey(context, trustForwardedFor), permitPerMinute);
                 }
 
+                if (IsCspReport(context))
+                {
+                    return PerMinute(
+                        CspReportPartitionPrefix + ClientKey(context, trustForwardedFor), cspReportPermit);
+                }
+
                 if (IsChangePassword(context))
                 {
                     return PerMinute(ChangePasswordKey(context, trustForwardedFor), changePasswordPermit);
@@ -246,11 +270,23 @@ public static class LoginRateLimiting
             // ⚠ Відмова одна на глобальний обмежувач, тож код і подробиця
             // обираються за шляхом: 0429 входу каже про АДРЕСУ, а межа зміни
             // пароля — на користувача (ECR-REQ-0429, «забагато запитів»).
-            options.OnRejected = static (rejection, ct) => IsChangePassword(rejection.HttpContext)
-                ? new ValueTask(RejectAsync(
-                    rejection, ErrorCodes.TooManyRequests,
-                    ChangePasswordRejectionDetailKey, ChangePasswordRejectionDetail, ct))
-                : new ValueTask(RejectAsync(rejection, RejectionCode, RejectionDetailKey, RejectionDetail, ct));
+            //
+            // ⚠ Звіти CSP — голе 429 із `Retry-After`, без тіла: `RejectAsync` ходить
+            // у каталог рядків (тобто в базу), а це анонімний шлях скидання
+            // навантаження, і браузер тіла однаково не читає.
+            options.OnRejected = static (rejection, ct) =>
+            {
+                if (IsCspReport(rejection.HttpContext))
+                {
+                    return RejectBare(rejection);
+                }
+
+                return IsChangePassword(rejection.HttpContext)
+                    ? new ValueTask(RejectAsync(
+                        rejection, ErrorCodes.TooManyRequests,
+                        ChangePasswordRejectionDetailKey, ChangePasswordRejectionDetail, ct))
+                    : new ValueTask(RejectAsync(rejection, RejectionCode, RejectionDetailKey, RejectionDetail, ct));
+            };
 
             // Межа пошуку (BE-19) — іменована політика: їй потрібен користувач,
             // тобто вона діє лише після автентифікації (див. `Program.cs`).
@@ -275,6 +311,26 @@ public static class LoginRateLimiting
     /// <summary>Чи запит — зміна власного пароля.</summary>
     private static bool IsChangePassword(HttpContext context)
         => context.Request.Path.Equals(ChangePasswordPath, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Чи запит — звіт CSP (<c>S14</c>).</summary>
+    private static bool IsCspReport(HttpContext context)
+        => context.Request.Path.Equals(
+            Controllers.CspReportController.RoutePath, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>429 без тіла, з <c>Retry-After</c>.</summary>
+    private static ValueTask RejectBare(OnRejectedContext rejection)
+    {
+        var response = rejection.HttpContext.Response;
+        response.StatusCode = StatusCodes.Status429TooManyRequests;
+
+        if (rejection.Lease.TryGetMetadata(MetadataName.RetryAfter, out var retryAfter))
+        {
+            response.Headers.RetryAfter = ((int)Math.Ceiling(retryAfter.TotalSeconds))
+                .ToString(CultureInfo.InvariantCulture);
+        }
+
+        return ValueTask.CompletedTask;
+    }
 
     /// <summary>Розділ зміни пароля: користувач із заявки, без неї — адреса.</summary>
     /// <remarks>
