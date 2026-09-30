@@ -164,7 +164,7 @@ public sealed class ListDataSourcesHandler(
 /// середовищі, мав би поїхати на нову адресу. Значення лише звіряється і
 /// ніде не зберігається.
 /// </remarks>
-public sealed class SaveDataSourceHandler(
+public sealed partial class SaveDataSourceHandler(
     IDataSourceStore store,
     ISecretProvider secrets,
     IAccessDecisionService access,
@@ -172,8 +172,15 @@ public sealed class SaveDataSourceHandler(
     IAuditWriter audit,
     ICurrentUser currentUser,
     IClock clock,
-    IEndpointNetwork? network = null)
+    IEndpointNetwork? network = null,
+    ILogger<SaveDataSourceHandler>? logger = null)
 {
+    /// <summary>Negotiate-джерело збережено без allowlist хостів: службові облікові дані підуть на будь-який дозволений блок-листом хост.</summary>
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "Джерело {DataSource} з Windows-автентифікацією збережено без PiWebApi:AllowedHosts: адреса обмежена лише блок-листом.")]
+    private static partial void LogNegotiateWithoutAllowlist(ILogger logger, string dataSource);
+
     /// <summary>Право на керування інтеграцією (`02-contracts.md` §9).</summary>
     public const string Permission = "Integration.Manage";
 
@@ -361,6 +368,11 @@ public sealed class SaveDataSourceHandler(
                             || string.Equals(bound.Trim(), "Negotiate", StringComparison.OrdinalIgnoreCase);
 
             await RequireAllowedEndpointAsync(address, "endpoint", negotiate, ct).ConfigureAwait(false);
+
+            if (negotiate && logger is not null && network?.AllowedHosts is not { Count: > 0 })
+            {
+                LogNegotiateWithoutAllowlist(logger, code);
+            }
 
             if (spare is { Length: > 0 })
             {
