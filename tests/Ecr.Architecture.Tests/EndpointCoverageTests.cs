@@ -539,6 +539,9 @@ public sealed partial class EndpointCoverageTests
         new("features/registries/RegistryImportPanel.tsx", "error.messageKey", 1, null, [],
             "messageKey рядка звіту імпорту записів довідника (BE-24, RegistryEntryImportError) — "
             + "реюзить відкритий набір ключів валідації UpsertRegistryEntryHandler, клієнт його не перелічує."),
+        new("features/registries/rc816/serverMessage.ts", "messageKey", 1, null, [],
+            "ФВ-8.16: messageKey помилки рядка пакета записів довідника (RegistryBatchRowError) і порушення "
+            + "правила довідника (RegistryRuleViolationDto) у редакторі master-detail — відкритий набір сервера."),
 
         // F-15/B-12 (четвертий раунд UX): перелік проблем публікації методології —
         // закритий набір, що його породжує сервер (MethodologyPublishChecks).
