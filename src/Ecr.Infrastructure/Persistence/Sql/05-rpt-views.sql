@@ -26,225 +26,236 @@ WHERE d.Code = N'WaterReport'
   AND s.Status IN (1, 2);   -- Approved, Submitted
 GO
 
--- ── Генератор пласких вʼюх rpt.v_<Звіт>_v<Версія> (ФВ-10.2, ФВ-10.4) ───────
--- Одна вʼюха на КОЖНУ опубліковану (і застарілу) версію звіту: колонка вʼюхи =
--- колонка версії (`ColumnsJson`), тип = тип значення в `rpt.ReportRow`
--- (text → ValueString, number → ValueNumeric, date → ValueDate).
+
+-- ══ Шар СИРИХ даних документів для SSRS ════════════════════════════════════
+-- Рішення людини 2026-09-30: «для SSRS ми маємо просто підготувати сирі дані
+-- на основі яких він буде формувати звіти сам». Отже тут — лише дані
+-- документів як вони є, без агрегацій і без звітної логіки; групує, рахує й
+-- фільтрує SSRS. Два види вʼюх:
+--   rpt.v_DocumentCells — одна «довга» вʼюха: комірка = рядок, усі шаблони;
+--   rpt.v_<Шаблон>_<Аркуш>_<Таблиця>_v<Версія> — «широка» вʼюха на кожну
+--     таблицю опублікованої версії шаблону: рядок таблиці = рядок вʼюхи,
+--     колонка шаблону = колонка вʼюхи з її КОДОМ (генерує процедура нижче).
 --
--- ⛔ D-14/D-66: застосунок DDL НЕ виконує. Він лише ВИКЛИКАЄ цю процедуру
--- (при публікації версії й на старті), а DDL робить процедура від імені
--- ВЛАСНИКА (`EXECUTE AS OWNER`) — обліковий запис застосунку лишається без
--- прав на CREATE VIEW, потрібне йому лише EXECUTE на процедуру. Той самий
--- шлях, що й `arc.usp_EnsurePartitions`. DBA може викликати її і сам:
---     EXEC rpt.usp_GenerateReportViews;                  -- усі звіти
---     EXEC rpt.usp_GenerateReportViews @ReportDefId = 7; -- один звіт
+-- ⚠ Статус подання аркуша (`Status`: 0 Draft, 1 Submitted, 2 Approved,
+-- 3 Rejected; немає стану — 0) — КОЛОНКА, а не фільтр: сирі дані віддаються
+-- всі, а звіт регулятору обирає `Status = 2` сам. Це свідоме відхилення від
+-- «фільтр у вʼюсі» (ФВ-10.11), яке стосувалося зрізів rpt.ReportSnapshot, —
+-- їхня вʼюха вище фільтр тримає.
 --
--- ⚠ Версійність вʼюх (ФВ-10.12, D-53): ім'я несе ВЕРСІЮ, а опублікована версія
--- структурно незмінна (D-16). Тому нова версія звіту — НОВА вʼюха, а стара
--- лишається з тими самими колонками: RDL, прив'язаний до `_v1_0`, не ламається
--- від публікації `2.0`. Вʼюхи процедура не видаляє ніколи.
+-- ⚠ Лише ЖИВІ дані `doc.*`: роки, винесені в архів (`arc.usp_ArchiveYear`),
+-- сюди не потрапляють.
+CREATE OR ALTER VIEW rpt.v_DocumentCells
+AS
+SELECT p.Id AS ProjectId, p.Code AS ProjectCode,
+       t.Code AS TemplateCode, tv.[Version] AS TemplateVersion,
+       d.Id AS DocumentId, d.BusinessKey AS DocumentKey,
+       cv.PeriodKey,
+       sd.Code AS SheetCode, td.Code AS TableCode,
+       r.Id AS RowId, r.RowKey, r.Ordinal AS RowOrdinal,
+       cd.Code AS ColumnCode, cd.DataType,
+       cv.ValueString, cv.ValueNumeric, cv.ValueDate, cv.ValueBool,
+       cv.ValueRegistryEntryId, cv.ValueUnitId, vu.Code AS ValueUnitCode,
+       cu.Code AS ColumnUnitCode,
+       cv.IsCalculated,
+       CAST(COALESCE(a.Status, 0) AS tinyint) AS Status
+FROM doc.CellValue          AS cv
+JOIN doc.TableRow           AS r  ON r.PeriodKey = cv.PeriodKey AND r.Id = cv.TableRowId AND r.IsDeleted = 0
+JOIN doc.TableInstance      AS ti ON ti.PeriodKey = r.PeriodKey AND ti.Id = r.TableInstanceId
+JOIN doc.Document           AS d  ON d.Id = ti.DocumentId
+JOIN doc.Project            AS p  ON p.Id = d.ProjectId
+JOIN cfg.ColumnDef          AS cd ON cd.Id = cv.ColumnDefId
+JOIN cfg.TableDef           AS td ON td.Id = ti.TableDefId
+JOIN cfg.SheetDef           AS sd ON sd.Id = td.SheetDefId
+JOIN cfg.TemplateVersion    AS tv ON tv.Id = sd.TemplateVersionId
+JOIN cfg.Template           AS t  ON t.Id = tv.TemplateId
+LEFT JOIN uom.Unit          AS vu ON vu.Id = cv.ValueUnitId
+LEFT JOIN uom.Unit          AS cu ON cu.Id = cd.UnitId
+LEFT JOIN wf.ApprovalState  AS a  ON a.DocumentId = d.Id AND a.SheetDefId = sd.Id AND a.PeriodKey = cv.PeriodKey
+WHERE cv.IsEmpty = 0;
+GO
+
+-- ⛔ D-14/D-66: застосунок DDL НЕ виконує. Він лише ВИКЛИКАЄ процедуру (при
+-- публікації версії шаблону — у тій самій транзакції — і на старті), а
+-- CREATE VIEW робить вона від імені ВЛАСНИКА (`EXECUTE AS OWNER`): обліковому
+-- запису застосунку досить EXECUTE. Той самий шлях, що й
+-- `arc.usp_EnsurePartitions`. DBA може викликати й сам:
+--     EXEC rpt.usp_GenerateTemplateViews;                        -- усі версії
+--     EXEC rpt.usp_GenerateTemplateViews @TemplateVersionId = 7; -- одна
 --
--- ⚠ Ідемпотентна: текст вʼюхи — чиста функція опису версії; якщо в базі вже
--- стоїть рівно такий самий, ALTER не виконується (немає Sch-M-блокування
--- посеред читання SSRS). Повторна публікація й повторний старт нічого не
--- змінюють.
+-- ⚠ Версійність (ФВ-10.12, D-53): ім'я несе версію шаблону, а опублікована
+-- версія структурно незмінна (D-16). Нова версія — нові вʼюхи; старі
+-- лишаються з тими самими колонками й не видаляються ніколи.
 --
--- ⚠ Предикат зрізу — за КОДОМ звіту й РЯДКОМ версії, не за Id: Id різні в
--- різних середовищах, а текст вʼюхи має бути однаковим у DEV і PROD.
+-- ⚠ Ідемпотентна: текст вʼюхи — чиста функція структури версії; якщо в базі
+-- вже рівно такий, ALTER не виконується (без Sch-M посеред читання SSRS).
 --
--- ⛔ Фільтр статусу — у вʼюсі (ФВ-10.11, D-65): регуляторний звіт бачить лише
--- Approved/Submitted, решта — усі зрізи, включно з Draft (ФВ-10.10).
+-- ⚠ Службові колонки починаються з `_` — код колонки шаблону (`EcrCode`)
+-- починається з літери, тож зіткнутися з ними не може. Колонки шаблону
+-- унікальні в таблиці без урахування регістру (`UQ_ColumnDef`).
 --
--- ⚠ Службові колонки мають префікс `Snapshot` (крім `RowNo`): колонка звіту
--- `PeriodKey` — законне поле джерела (`ReportSourceColumns`), і без префікса
--- вона зіткнулася б із періодом зрізу. Період рядка й період зрізу — різні
--- речі: річний зріз (`SnapshotPeriodKey` = NULL) несе місячні рядки.
-CREATE OR ALTER PROCEDURE rpt.usp_GenerateReportViews
-    @ReportDefId int = NULL
+-- Тип колонки — за `ColumnDef.DataType`: String → ValueString; Int, Decimal,
+-- Formula, Calculated → ValueNumeric; Bool → ValueBool; Date → ValueDate;
+-- Lookup → ValueRegistryEntryId; Unit → ValueUnitId. ⚠ `Calculated` —
+-- лише те, що матеріалізовано в `doc.CellValue`; результати методологій
+-- живуть у `calc.*` і сюди не підтягуються.
+CREATE OR ALTER PROCEDURE rpt.usp_GenerateTemplateViews
+    @TemplateVersionId int = NULL
 WITH EXECUTE AS OWNER
 AS
 BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
 
-    DECLARE @result TABLE (ReportVersionId int NOT NULL, ViewName sysname NOT NULL, Action nvarchar(16) NOT NULL);
-    DECLARE @cols TABLE (Ordinal int NOT NULL, Code nvarchar(64) NULL, Kind nvarchar(16) NULL);
-    DECLARE @versions TABLE (
-        ReportVersionId int NOT NULL PRIMARY KEY,
-        ReportDefId     int NOT NULL,
-        ReportCode      nvarchar(64) NOT NULL,
-        [Version]       nvarchar(20) NOT NULL,
-        IsRegulatory    bit NOT NULL,
-        ColumnsJson     nvarchar(max) NOT NULL,
-        ViewName        sysname NULL);
+    DECLARE @result TABLE (TableDefId int NOT NULL, ViewName sysname NOT NULL, Action nvarchar(16) NOT NULL);
+    DECLARE @tables TABLE (
+        TableDefId        int NOT NULL PRIMARY KEY,
+        SheetDefId        int NOT NULL,
+        TemplateVersionId int NOT NULL,
+        Header            nvarchar(400) NOT NULL,
+        ViewName          nvarchar(400) NOT NULL);
 
-    -- ⚠ Імена рахуються для ВСІХ опублікованих версій, а не лише для звіту
-    -- з параметра: зіткнення імені може бути й між різними звітами
-    -- (код `A_v1` версії `2` і код `A` версії `1_v2` → `v_A_v1_v2`).
-    INSERT INTO @versions (ReportVersionId, ReportDefId, ReportCode, [Version], IsRegulatory, ColumnsJson)
-    SELECT v.Id, d.Id, d.Code, v.[Version], d.IsRegulatory, v.ColumnsJson
-      FROM rpt.ReportVersion AS v
-      JOIN rpt.ReportDef     AS d ON d.Id = v.ReportDefId
-     WHERE v.Status IN (1, 2);   -- Published, Deprecated: застаріла версія вʼюху НЕ втрачає
+    -- ⚠ Імена рахуються для ВСІХ опублікованих версій, а не лише для заданої:
+    -- зіткнення можливе й між різними шаблонами (шаблон `A_B` аркуш `C` і
+    -- шаблон `A` аркуш `B_C` дають одне ім'я).
+    INSERT INTO @tables (TableDefId, SheetDefId, TemplateVersionId, Header, ViewName)
+    SELECT td.Id, sd.Id, tv.Id,
+           CONCAT(N'шаблон ', t.Code, N', версія ', tv.[Version], N', аркуш ', sd.Code, N', таблиця ', td.Code),
+           CONCAT(N'v_', t.Code, N'_', sd.Code, N'_', td.Code, N'_v', tv.[Version])
+      FROM cfg.TableDef        AS td
+      JOIN cfg.SheetDef        AS sd ON sd.Id = td.SheetDefId
+      JOIN cfg.TemplateVersion AS tv ON tv.Id = sd.TemplateVersionId
+      JOIN cfg.Template        AS t  ON t.Id = tv.TemplateId
+     WHERE tv.Status IN (1, 2)   -- Published, Deprecated: застаріла версія вʼюх НЕ втрачає
+       AND td.IsDeleted = 0 AND sd.IsDeleted = 0;
 
-    -- Ім'я: v_<Код>_v<Версія>, де все, що не [A-Za-z0-9_], стає `_` ("1.0" → "1_0").
-    DECLARE @id int, @raw nvarchar(200), @pos int;
-    DECLARE cur_names CURSOR LOCAL FAST_FORWARD FOR SELECT ReportVersionId FROM @versions;
+    -- Усе, що не [A-Za-z0-9_], стає `_` ("1.0.0.0" → "1_0_0_0"); CR/LF у
+    -- заголовку-коментарі — пробілами.
+    DECLARE @id int, @raw nvarchar(400), @pos int;
+    DECLARE cur_names CURSOR LOCAL FAST_FORWARD FOR SELECT TableDefId FROM @tables;
     OPEN cur_names;
     FETCH NEXT FROM cur_names INTO @id;
     WHILE @@FETCH_STATUS = 0
     BEGIN
-        SELECT @raw = N'v_' + ReportCode + N'_v' + [Version] FROM @versions WHERE ReportVersionId = @id;
+        SELECT @raw = ViewName FROM @tables WHERE TableDefId = @id;
         SET @pos = PATINDEX(N'%[^A-Za-z0-9_]%', @raw COLLATE Latin1_General_BIN2);
         WHILE @pos > 0
         BEGIN
             SET @raw = STUFF(@raw, @pos, 1, N'_');
             SET @pos = PATINDEX(N'%[^A-Za-z0-9_]%', @raw COLLATE Latin1_General_BIN2);
         END
-        UPDATE @versions SET ViewName = @raw WHERE ReportVersionId = @id;
+
+        -- ⚠ Ім'я об'єкта — не довше 128. Довше скорочується детерміновано:
+        -- початок + 12 знаків SHA-256 повного імені, тож те саме ім'я
+        -- виходить у кожному середовищі й на кожному прогоні.
+        IF LEN(@raw) > 128
+            SET @raw = LEFT(@raw, 115) + N'_'
+                     + LEFT(CONVERT(varchar(64), HASHBYTES('SHA2_256', @raw), 2), 12);
+
+        UPDATE @tables
+           SET ViewName = @raw,
+               Header = REPLACE(REPLACE(Header, NCHAR(13), N' '), NCHAR(10), N' ')
+         WHERE TableDefId = @id;
         FETCH NEXT FROM cur_names INTO @id;
     END
     CLOSE cur_names;
     DEALLOCATE cur_names;
 
-    DELETE FROM @versions WHERE @ReportDefId IS NOT NULL AND ReportDefId <> @ReportDefId
-                            AND ViewName NOT IN (SELECT t.ViewName FROM @versions AS t WHERE t.ReportDefId = @ReportDefId);
+    DELETE FROM @tables
+     WHERE @TemplateVersionId IS NOT NULL AND TemplateVersionId <> @TemplateVersionId
+       AND ViewName NOT IN (SELECT t2.ViewName FROM @tables AS t2 WHERE t2.TemplateVersionId = @TemplateVersionId);
 
-    -- ⛔ Дві версії з одним ім'ям ("1.0" і "1_0") переписували б одна одній
-    -- вʼюху по черзі — RDL бачив би то одну, то іншу. Відмова, а не вибір:
-    -- жодна з двох вʼюху не отримує, решта генерується, а наприкінці —
-    -- помилка з іменем. Порівняння — зіставленням бази, тобто так само, як
-    -- сервер порівнює імена об'єктів. ⚠ Решта генерується саме тому, що
-    -- виклик без параметра йде на старті: одна невдала пара версій не має
-    -- лишати без вʼюх усі інші звіти.
-    DECLARE @clash sysname = (SELECT TOP (1) ViewName FROM @versions GROUP BY ViewName HAVING COUNT(*) > 1);
-    DELETE FROM @versions
-     WHERE ViewName IN (SELECT t.ViewName FROM @versions AS t GROUP BY t.ViewName HAVING COUNT(*) > 1);
+    -- ⛔ Дві таблиці з одним ім'ям вʼюхи переписували б одна одній вʼюху по
+    -- черзі — SSRS читав би то одну, то іншу. Жодна з них вʼюху не отримує,
+    -- решта генерується, а наприкінці — помилка з іменем. Порівняння —
+    -- зіставленням бази, тобто так само, як сервер порівнює імена об'єктів.
+    DECLARE @clash nvarchar(400) = (SELECT TOP (1) ViewName FROM @tables GROUP BY ViewName HAVING COUNT(*) > 1);
+    DELETE FROM @tables
+     WHERE ViewName IN (SELECT t2.ViewName FROM @tables AS t2 GROUP BY t2.ViewName HAVING COUNT(*) > 1);
 
-    DELETE FROM @versions WHERE @ReportDefId IS NOT NULL AND ReportDefId <> @ReportDefId;
+    DELETE FROM @tables WHERE @TemplateVersionId IS NOT NULL AND TemplateVersionId <> @TemplateVersionId;
 
-    DECLARE @code nvarchar(64), @version nvarchar(20), @regulatory bit, @columns nvarchar(max), @view sysname;
+    DECLARE @sheet int, @header nvarchar(400), @view sysname;
     DECLARE @select nvarchar(max), @joins nvarchar(max), @sql nvarchar(max), @existing nvarchar(max), @message nvarchar(2048);
-    DECLARE @bad nvarchar(200), @count int, @failure nvarchar(2048);
-    DECLARE @ordinal int, @colCode nvarchar(64), @colKind nvarchar(16), @alias nvarchar(16);
+    DECLARE @colId int, @colCode nvarchar(64), @colType tinyint, @alias nvarchar(16), @n int;
+    DECLARE @marker nvarchar(64) = N'-- Згенеровано rpt.usp_GenerateTemplateViews';
+    DECLARE @failure nvarchar(2048);
 
     DECLARE cur_views CURSOR LOCAL FAST_FORWARD FOR
-        SELECT ReportVersionId, ReportCode, [Version], IsRegulatory, ColumnsJson, ViewName
-          FROM @versions ORDER BY ReportVersionId;
+        SELECT TableDefId, SheetDefId, Header, ViewName FROM @tables ORDER BY TableDefId;
     OPEN cur_views;
-    FETCH NEXT FROM cur_views INTO @id, @code, @version, @regulatory, @columns, @view;
+    FETCH NEXT FROM cur_views INTO @id, @sheet, @header, @view;
     WHILE @@FETCH_STATUS = 0
     BEGIN
-        DELETE FROM @cols;
-        SET @message = NULL;
-
-        -- ⚠ Зламаний опис однієї версії — не причина лишити без вʼюх усі інші
-        -- (виклик без параметра йде на старті): версія пропускається, перша
-        -- причина запам'ятовується і стає помилкою процедури наприкінці.
-        IF ISJSON(@columns) = 0 OR LEFT(LTRIM(@columns), 1) <> N'['
-           OR EXISTS (SELECT 1 FROM OPENJSON(@columns) AS e WHERE e.[type] <> 5)
+        -- ⚠ Цикл, а не `STRING_AGG`: підлога сервера — 2016 SP1 (`D-101`).
+        SELECT @select = N'', @joins = N'', @n = 0;
+        SET @colId = (SELECT MIN(Id) FROM cfg.ColumnDef WHERE TableDefId = @id AND IsDeleted = 0);
+        WHILE @colId IS NOT NULL
         BEGIN
-            SET @message = CONCAT(N'rpt.usp_GenerateReportViews: ColumnsJson версії ', @id, N' не є масивом об''єктів JSON.');
-            GOTO next_version;
-        END
-
-        INSERT INTO @cols (Ordinal, Code, Kind)
-        SELECT CAST(j.[key] AS int), c.code, c.kind
-          FROM OPENJSON(@columns) AS j
-         CROSS APPLY OPENJSON(j.[value]) WITH (code nvarchar(64) '$.code', kind nvarchar(16) '$.kind') AS c;
-
-        SET @count = (SELECT COUNT(*) FROM @cols);
-
-        -- ⛔ Кожна перевірка нижче — відмова версії з іменем винного, а не
-        -- «пропущу колонку»: вʼюха, що мовчки не має колонки держформи, гірша за
-        -- відсутню, бо RDL упаде аж у SSRS, а не тут.
-        IF @count = 0
-        BEGIN
-            SET @message = CONCAT(N'rpt.usp_GenerateReportViews: версія ', @id, N' не має колонок.');
-            GOTO next_version;
-        END
-
-        -- Ліміт SQL Server — 256 таблиць у запиті; вʼюха бере 2 + по одній на колонку.
-        IF @count > 250
-        BEGIN
-            SET @message = CONCAT(N'rpt.usp_GenerateReportViews: версія ', @id, N' має ', @count,
-                                  N' колонок, вʼюха вміщує щонайбільше 250.');
-            GOTO next_version;
-        END
-
-        SET @bad = (SELECT TOP (1) COALESCE(Code, N'(без коду)') FROM @cols
-                     WHERE Code IS NULL OR Code COLLATE Latin1_General_BIN2 LIKE N'%[^A-Za-z0-9_]%'
-                        OR Kind IS NULL OR Kind NOT IN (N'text', N'number', N'date'));
-        IF @bad IS NOT NULL
-        BEGIN
-            SET @message = CONCAT(N'rpt.usp_GenerateReportViews: колонка «', @bad, N'» версії ', @id,
-                                  N' має недопустимий код або тип.');
-            GOTO next_version;
-        END
-
-        -- ⛔ Зіставлення бази нечутливе до регістру: `Value` і `value` — ОДНА
-        -- колонка вʼюхи. І код не може збігатися зі службовою колонкою.
-        SET @bad = (SELECT TOP (1) Code FROM @cols
-                     WHERE UPPER(Code) IN (N'SNAPSHOTID', N'SNAPSHOTPROJECTID', N'SNAPSHOTPERIODKEY', N'SNAPSHOTSTATUS',
-                                           N'SNAPSHOTBUILTAT', N'SNAPSHOTCALCULATIONRUNID', N'ROWNO')
-                        OR UPPER(Code) IN (SELECT UPPER(c2.Code) FROM @cols AS c2 GROUP BY UPPER(c2.Code)
-                                            HAVING COUNT(*) > 1));
-        IF @bad IS NOT NULL
-        BEGIN
-            SET @message = CONCAT(N'rpt.usp_GenerateReportViews: колонка «', @bad, N'» версії ', @id,
-                                  N' збігається зі службовою колонкою вʼюхи або з іншою колонкою без урахування регістру.');
-            GOTO next_version;
-        END
-
-        -- ⚠ Цикл, а не `STRING_AGG`: підлога сервера — 2016 SP1 (`D-101`),
-        -- `STRING_AGG` там немає (та сама причина, що в `01-filegroups.sql`).
-        SELECT @select = N'', @joins = N'', @ordinal = MIN(Ordinal) FROM @cols;
-        WHILE @ordinal IS NOT NULL
-        BEGIN
-            SELECT @colCode = Code, @colKind = Kind FROM @cols WHERE Ordinal = @ordinal;
-            SET @alias = N'c' + CAST(@ordinal AS nvarchar(10));
+            SELECT @colCode = Code, @colType = DataType FROM cfg.ColumnDef WHERE Id = @colId;
+            SET @n = @n + 1;
+            SET @alias = N'c' + CAST(@n AS nvarchar(10));
             SET @select = @select + N',
        ' + @alias + N'.'
-                + CASE @colKind WHEN N'text' THEN N'ValueString' WHEN N'number' THEN N'ValueNumeric' ELSE N'ValueDate' END
+                + CASE @colType
+                      WHEN 0 THEN N'ValueString'
+                      WHEN 3 THEN N'ValueBool'
+                      WHEN 4 THEN N'ValueDate'
+                      WHEN 5 THEN N'ValueRegistryEntryId'
+                      WHEN 7 THEN N'ValueUnitId'
+                      ELSE N'ValueNumeric'
+                  END
                 + N' AS ' + QUOTENAME(@colCode);
             SET @joins = @joins + N'
-LEFT JOIN rpt.ReportRow AS ' + @alias + N' ON ' + @alias + N'.SnapshotId = k.SnapshotId AND '
-                + @alias + N'.RowNo = k.RowNo AND ' + @alias + N'.ColumnCode = N''' + @colCode + N'''';
-            SET @ordinal = (SELECT MIN(Ordinal) FROM @cols WHERE Ordinal > @ordinal);
+LEFT JOIN doc.CellValue AS ' + @alias + N' ON ' + @alias + N'.PeriodKey = r.PeriodKey AND '
+                + @alias + N'.TableRowId = r.Id AND ' + @alias + N'.ColumnDefId = ' + CAST(@colId AS nvarchar(10));
+            SET @colId = (SELECT MIN(Id) FROM cfg.ColumnDef WHERE TableDefId = @id AND IsDeleted = 0 AND Id > @colId);
+        END
+
+        -- ⚠ Колонки — у порядку `Id`, а не `Ordinal`: `Ordinal` — лише
+        -- відображення (D-17), і перестановка колонок у новій версії не має
+        -- міняти порядок колонок уже опублікованої вʼюхи. Ліміт SQL Server —
+        -- 256 таблиць у запиті: 5 службових + по одній на колонку.
+        IF @n > 250
+        BEGIN
+            -- ⚠ Не THROW тут: на старті (виклик без параметра) одна задовга
+            -- таблиця не має лишати без вʼюх усі інші. Помилка — наприкінці.
+            SET @failure = COALESCE(@failure, CONCAT(N'rpt.usp_GenerateTemplateViews: таблиця ', @id, N' має ', @n,
+                                  N' колонок, вʼюха вміщує щонайбільше 250.'));
+            GOTO next_table;
         END
 
         SET @sql = CONCAT(
 N'CREATE OR ALTER VIEW rpt.', QUOTENAME(@view), N'
 AS
--- Згенеровано rpt.usp_GenerateReportViews: звіт ', REPLACE(REPLACE(@code, NCHAR(13), N' '), NCHAR(10), N' '), N', версія ', REPLACE(REPLACE(@version, NCHAR(13), N' '), NCHAR(10), N' '), N'. Не редагувати руками.
-SELECT s.Id AS SnapshotId, s.ProjectId AS SnapshotProjectId, s.PeriodKey AS SnapshotPeriodKey,
-       s.Status AS SnapshotStatus, s.BuiltAt AS SnapshotBuiltAt, s.CalculationRunId AS SnapshotCalculationRunId,
-       k.RowNo', @select, N'
-FROM rpt.ReportSnapshot AS s
-JOIN rpt.ReportVersion  AS v ON v.Id = s.ReportVersionId
-JOIN rpt.ReportDef      AS d ON d.Id = v.ReportDefId
-JOIN (SELECT r.SnapshotId, r.RowNo FROM rpt.ReportRow AS r GROUP BY r.SnapshotId, r.RowNo) AS k
-  ON k.SnapshotId = s.Id', @joins, N'
-WHERE d.Code = N''', REPLACE(@code, N'''', N''''''), N''' AND v.[Version] = N''', REPLACE(@version, N'''', N''''''), N'''
-  AND s.IsCurrent = 1
-  AND s.Status IN ', CASE WHEN @regulatory = 1 THEN N'(1, 2)' ELSE N'(0, 1, 2)' END, N';');
+', @marker, N': ', @header, N'. Не редагувати руками.
+SELECT p.Id AS _ProjectId, p.Code AS _ProjectCode,
+       d.Id AS _DocumentId, d.BusinessKey AS _DocumentKey,
+       r.PeriodKey AS _PeriodKey,
+       CAST(COALESCE(a.Status, 0) AS tinyint) AS _Status,
+       r.Id AS _RowId, r.RowKey AS _RowKey, r.Ordinal AS _RowOrdinal', @select, N'
+FROM doc.TableInstance AS ti
+JOIN doc.TableRow      AS r ON r.PeriodKey = ti.PeriodKey AND r.TableInstanceId = ti.Id AND r.IsDeleted = 0
+JOIN doc.Document      AS d ON d.Id = ti.DocumentId
+JOIN doc.Project       AS p ON p.Id = d.ProjectId
+LEFT JOIN wf.ApprovalState AS a ON a.DocumentId = d.Id AND a.SheetDefId = ', CAST(@sheet AS nvarchar(10)),
+N' AND a.PeriodKey = ti.PeriodKey', @joins, N'
+WHERE ti.TableDefId = ', CAST(@id AS nvarchar(10)), N';');
 
-        -- ⚠ Порівнюється тіло від позначки «Згенеровано», а не весь текст:
-        -- заголовок `CREATE OR ALTER VIEW` сервер не зобов'язаний зберігати
-        -- дослівно, а тіло — зберігає. Вʼюха з тим самим ім'ям, зроблена
-        -- руками (позначки немає), перезаписується.
+        -- ⚠ Порівнюється текст від позначки, а не весь: заголовок
+        -- `CREATE OR ALTER VIEW` сервер не зобов'язаний зберігати дослівно.
+        -- Вʼюха з тим самим ім'ям, зроблена руками (позначки немає), перезаписується.
         SET @existing = OBJECT_DEFINITION(OBJECT_ID(N'rpt.' + QUOTENAME(@view), N'V'));
-        SET @pos = CHARINDEX(N'-- Згенеровано rpt.usp_GenerateReportViews', @existing);
-        IF @pos > 0
-            SET @existing = SUBSTRING(@existing, @pos, LEN(@existing));
+        SET @pos = CHARINDEX(@marker, @existing);
 
         IF @existing IS NULL
         BEGIN
             EXEC sys.sp_executesql @sql;
             INSERT INTO @result VALUES (@id, @view, N'Created');
         END
-        ELSE IF @pos = 0 OR @existing COLLATE Latin1_General_BIN2
-                <> SUBSTRING(@sql, CHARINDEX(N'-- Згенеровано rpt.usp_GenerateReportViews', @sql), LEN(@sql)) COLLATE Latin1_General_BIN2
+        ELSE IF @pos = 0
+             OR SUBSTRING(@existing, @pos, LEN(@existing)) COLLATE Latin1_General_BIN2
+                <> SUBSTRING(@sql, CHARINDEX(@marker, @sql), LEN(@sql)) COLLATE Latin1_General_BIN2
         BEGIN
             EXEC sys.sp_executesql @sql;
             INSERT INTO @result VALUES (@id, @view, N'Altered');
@@ -254,11 +265,8 @@ WHERE d.Code = N''', REPLACE(@code, N'''', N''''''), N''' AND v.[Version] = N'''
             INSERT INTO @result VALUES (@id, @view, N'Unchanged');
         END
 
-next_version:
-        IF @message IS NOT NULL AND @failure IS NULL
-            SET @failure = @message;
-
-        FETCH NEXT FROM cur_views INTO @id, @code, @version, @regulatory, @columns, @view;
+next_table:
+        FETCH NEXT FROM cur_views INTO @id, @sheet, @header, @view;
     END
     CLOSE cur_views;
     DEALLOCATE cur_views;
@@ -266,14 +274,26 @@ next_version:
     IF @clash IS NOT NULL
     BEGIN
         SET @message = CONCAT(
-            N'rpt.usp_GenerateReportViews: дві опубліковані версії дають одне ім''я вʼюхи rpt.', @clash,
-            N'. Змініть код звіту або рядок версії так, щоб вони відрізнялися не лише розділовими знаками чи регістром.');
+            N'rpt.usp_GenerateTemplateViews: дві таблиці дають одне ім''я вʼюхи rpt.', @clash,
+            N'. Змініть код шаблону, аркуша чи таблиці так, щоб вони відрізнялися не лише розділовими знаками чи регістром.');
         THROW 50409, @message, 1;
     END
 
     IF @failure IS NOT NULL
         THROW 50422, @failure, 1;
 
-    SELECT ReportVersionId, N'rpt.' + ViewName AS ViewName, Action FROM @result ORDER BY ReportVersionId;
+    SELECT TableDefId, N'rpt.' + ViewName AS ViewName, Action FROM @result ORDER BY TableDefId;
 END;
+GO
+
+-- ⛔ Право читання для ОБЛІКОВОГО ЗАПИСУ SSRS — роль бази `rpt_reader`:
+-- SELECT на всю схему `rpt` і нічого більше. Вʼюхи й таблиці `doc`/`cfg`/`wf`/
+-- `uom` належать тому самому власнику (dbo), тож ланцюг власності не
+-- рветься і прямого доступу до них роль не отримує. Нові вʼюхи генератора
+-- право отримують автоматично — воно на схему, а не на об'єкт.
+-- DBA додає до ролі обліковий запис джерела даних SSRS:
+--     ALTER ROLE rpt_reader ADD MEMBER [DOMAIN\svc-ssrs];
+IF DATABASE_PRINCIPAL_ID(N'rpt_reader') IS NULL
+    CREATE ROLE rpt_reader;
+GRANT SELECT ON SCHEMA::rpt TO rpt_reader;
 GO

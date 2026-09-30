@@ -391,7 +391,8 @@ public sealed class ResultAuditTransactionTests(SqlServerFixture sql)
             _user,
             new AuditWriter(db),
             uow,
-            new TestClock(Now));
+            new TestClock(Now),
+            new Ecr.Infrastructure.Reporting.ReportViewGenerator(db));
 
     private IAccessDecisionService Allow(string permission)
     {

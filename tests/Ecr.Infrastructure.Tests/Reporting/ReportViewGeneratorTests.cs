@@ -1,265 +1,272 @@
 // tests/Ecr.Infrastructure.Tests/Reporting/ReportViewGeneratorTests.cs
+using System.Text.RegularExpressions;
 using Ecr.Domain.Entities.Configuration;
-using Ecr.Domain.Entities.Documents;
-using Ecr.Domain.Entities.Reporting;
+using Ecr.Domain.Entities.Workflow;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
 using Ecr.Infrastructure.Persistence;
 using Ecr.Infrastructure.Reporting;
 using Ecr.TestKit;
 using Microsoft.Data.SqlClient;
+using Microsoft.EntityFrameworkCore;
 using Xunit;
 
 namespace Ecr.Infrastructure.Tests.Reporting;
 
 /// <summary>
-/// Генератор пласких вʼюх <c>rpt.v_&lt;Звіт&gt;_v&lt;Версія&gt;</c> для SSRS
-/// (<c>ФВ-10.2</c>, <c>ФВ-10.4</c>): процедура <c>rpt.usp_GenerateReportViews</c>
-/// на живому SQL Server.
+/// Шар сирих даних документів для SSRS (<c>ФВ-10.2</c>, <c>ФВ-10.4</c>; рішення
+/// людини 2026-09-30): «довга» <c>rpt.v_DocumentCells</c> і «широкі» вʼюхи
+/// <c>rpt.usp_GenerateTemplateViews</c> на живому SQL Server.
 /// </summary>
 /// <remarks>
 /// ⚠ Перевіряється РОЗГОРНУТА вʼюха — її колонки в <c>sys.columns</c> і рядки,
 /// які вона віддає, — а не текст процедури: споживач (SSRS) бачить саме це.
-/// Кожен тест бере власний код звіту, тож вʼюхи тестів не перетинаються.
+/// Кожен тест будує власний шаблон, тож вʼюхи тестів не перетинаються.
 /// </remarks>
 [Collection("SqlServer")]
-public sealed class ReportViewGeneratorTests(SqlServerFixture sql)
+public sealed partial class ReportViewGeneratorTests(SqlServerFixture sql)
 {
-    private static readonly DateTime Now = new(2026, 4, 1, 10, 0, 0, DateTimeKind.Utc);
-
-    /// <summary>Колонки: текст, число, дата — по одній на кожен тип значення зрізу.</summary>
-    private const string ThreeColumns =
-        """[{"code":"RowKey","kind":"text"},{"code":"Value","kind":"number"},{"code":"MeasuredAt","kind":"date"}]""";
+    private static readonly DateTime Now = new(2026, 2, 1, 10, 0, 0, DateTimeKind.Utc);
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "ФВ-10.2")]
     [Trait("Requirement", "ФВ-10.4")]
-    [Trait("Requirement", "ФВ-10.11")]
-    public async Task Опублікована_версія_дає_пласку_вʼюху_і_регулятор_не_бачить_чернеток()
+    public async Task Публікація_шаблону_дає_широку_вʼюху_таблиці_з_кодами_колонок()
     {
-        var code = NewCode();
-        await using var db = sql.CreateContext();
-        var projectId = await ArrangeProjectAsync(db);
-        var defId = await DefAsync(db, code, isRegulatory: true);
-        var versionId = await VersionAsync(db, defId, "1.0", ThreeColumns, publish: true);
+        var (doc, view, codes) = await PublishedDocumentAsync();
 
-        await new ReportViewGenerator(db).GenerateAsync(defId, CancellationToken.None);
+        await using (var db = sql.CreateContext())
+        {
+            await new ReportViewGenerator(db).GenerateAsync(doc.TemplateVersionId, CancellationToken.None);
+        }
 
-        // ⛔ Контракт вʼюхи: службові колонки з префіксом, далі колонки звіту
-        // ЇХНІМИ КОДАМИ й у порядку опису, кожна — типом свого значення.
+        // ⛔ Контракт: службові колонки з `_`, далі колонки шаблону ЇХНІМИ
+        // КОДАМИ, кожна — типом свого значення (текст → nvarchar, число → decimal).
         Assert.Equal(
             [
-                ("SnapshotId", "bigint"), ("SnapshotProjectId", "int"), ("SnapshotPeriodKey", "int"),
-                ("SnapshotStatus", "tinyint"), ("SnapshotBuiltAt", "datetime2"),
-                ("SnapshotCalculationRunId", "bigint"), ("RowNo", "int"),
-                ("RowKey", "nvarchar"), ("Value", "decimal"), ("MeasuredAt", "datetime2"),
+                ("_ProjectId", "int"), ("_ProjectCode", "nvarchar"), ("_DocumentId", "bigint"),
+                ("_DocumentKey", "nvarchar"), ("_PeriodKey", "int"), ("_Status", "tinyint"),
+                ("_RowId", "bigint"), ("_RowKey", "nvarchar"), ("_RowOrdinal", "int"),
+                (codes[0], "nvarchar"), (codes[1], "decimal"), (codes[2], "decimal"),
             ],
-            await ColumnsAsync($"v_{code}_v1_0"));
+            await ColumnsAsync(view));
 
-        // Два поточні зрізи однієї версії: чернетка (січень) і затверджений (лютий).
-        var draft = await SnapshotAsync(db, versionId, projectId, 202601, SnapshotStatus.Draft);
-        var approved = await SnapshotAsync(db, versionId, projectId, 202602, SnapshotStatus.Approved);
-        await RowsAsync(db, draft, (1, "RowKey", "draft", null, null));
-        await RowsAsync(
-            db, approved,
-            (1, "RowKey", "a", null, null),
-            (1, "Value", null, 2.5m, null),
-            (1, "MeasuredAt", null, null, new DateTime(2026, 2, 3, 0, 0, 0, DateTimeKind.Unspecified)),
-            (2, "RowKey", "b", null, null));
+        // Рядок таблиці = рядок вʼюхи; відсутня комірка — NULL, а не зниклий
+        // рядок; статус подання аркуша — колонкою (Submitted = 1), без фільтра.
+        var rows = await QueryAsync<(string, byte, string?, decimal?)>(
+            $"SELECT _RowKey, _Status, [{codes[0]}], [{codes[1]}] FROM rpt.[{view}] "
+            + "WHERE _DocumentId = @doc ORDER BY _RowOrdinal",
+            doc.DocumentId,
+            r => (r.GetString(0), r.GetByte(1), r.IsDBNull(2) ? null : r.GetString(2), r.IsDBNull(3) ? null : r.GetDecimal(3)));
 
-        var rows = await QueryAsync($"v_{code}_v1_0", projectId);
-
-        // ⛔ ФВ-10.11: чернетка регуляторного звіту не видна — фільтр у вʼюсі.
-        // Рядок 2 без значення `Value` лишається рядком із NULL, а не зникає.
         Assert.Equal(
-            [
-                (202602, 1, "a", (decimal?)2.5m, (DateTime?)new DateTime(2026, 2, 3)),
-                (202602, 2, "b", (decimal?)null, (DateTime?)null),
-            ],
+            [(RowKeyOf(doc, 0), (byte)1, "a", 1.5m), (RowKeyOf(doc, 1), (byte)1, null, 2m)],
             rows);
     }
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
-    [Trait("Requirement", "ФВ-10.10")]
-    public async Task Нерегуляторний_звіт_бачить_і_чернетки()
+    [Trait("Requirement", "ФВ-10.2")]
+    public async Task Довга_вʼюха_віддає_кожну_комірку_з_адресою_і_статусом()
     {
-        var code = NewCode();
-        await using var db = sql.CreateContext();
-        var projectId = await ArrangeProjectAsync(db);
-        var defId = await DefAsync(db, code, isRegulatory: false);
-        var versionId = await VersionAsync(db, defId, "1", ThreeColumns, publish: true);
-        var draft = await SnapshotAsync(db, versionId, projectId, 202601, SnapshotStatus.Draft);
-        await RowsAsync(db, draft, (1, "RowKey", "draft", null, null));
+        var (doc, _, codes) = await PublishedDocumentAsync();
 
-        await new ReportViewGenerator(db).GenerateAsync(defId, CancellationToken.None);
+        var rows = await QueryAsync<(string, string, string?, decimal?, byte, int)>(
+            "SELECT RowKey, ColumnCode, ValueString, ValueNumeric, Status, PeriodKey FROM rpt.v_DocumentCells "
+            + "WHERE DocumentId = @doc ORDER BY RowOrdinal, ColumnCode",
+            doc.DocumentId,
+            r => (r.GetString(0), r.GetString(1), r.IsDBNull(2) ? null : r.GetString(2),
+                  r.IsDBNull(3) ? null : r.GetDecimal(3), r.GetByte(4), r.GetInt32(5)));
 
-        // ФВ-10.10: числа перевіряють ДО затвердження — внутрішній звіт це дає.
-        Assert.Equal([(202601, 1, "draft", (decimal?)null, (DateTime?)null)], await QueryAsync($"v_{code}_v1", projectId));
-    }
-
-    [Fact]
-    [Trait(TestCategories.Stage, TestCategories.Stage5)]
-    [Trait(TestCategories.Category, TestCategories.Integration)]
-    [Trait("Requirement", "ФВ-10.12")]
-    public async Task Повторна_генерація_нічого_не_змінює_а_нова_версія_дає_нову_вʼюху()
-    {
-        var code = NewCode();
-        await using var db = sql.CreateContext();
-        var defId = await DefAsync(db, code, isRegulatory: true);
-        await VersionAsync(db, defId, "1.0", ThreeColumns, publish: true);
-        await VersionAsync(db, defId, "1.1", ThreeColumns, publish: false);
-
-        Assert.Equal([$"v_{code}_v1_0:Created"], await ExecAsync(defId));
-
-        // ⚠ Повторна публікація / повторний старт: вʼюха не перестворюється.
-        Assert.Equal([$"v_{code}_v1_0:Unchanged"], await ExecAsync(defId));
-
-        // ⛔ D-53: нова версія — НОВА вʼюха; стара лишається зі своїми колонками,
-        // і RDL, прив'язаний до неї, не ламається.
-        await VersionAsync(db, defId, "2.0", """[{"code":"OutputCode","kind":"text"}]""", publish: true);
-
-        Assert.Equal([$"v_{code}_v1_0:Unchanged", $"v_{code}_v2_0:Created"], await ExecAsync(defId));
-        Assert.Equal(10, (await ColumnsAsync($"v_{code}_v1_0")).Count);
         Assert.Equal(
-            ("OutputCode", "nvarchar"),
-            (await ColumnsAsync($"v_{code}_v2_0"))[^1]);
-
-        // Чернетка (1.1) вʼюхи не отримує.
-        Assert.Empty(await ColumnsAsync($"v_{code}_v1_1"));
+            [
+                (RowKeyOf(doc, 0), codes[0], "a", null, (byte)1, doc.PeriodKey.Value),
+                (RowKeyOf(doc, 0), codes[1], null, 1.5m, (byte)1, doc.PeriodKey.Value),
+                (RowKeyOf(doc, 1), codes[1], null, 2m, (byte)1, doc.PeriodKey.Value),
+            ],
+            rows.OrderBy(r => r.Item1, StringComparer.Ordinal).ThenBy(r => r.Item2, StringComparer.Ordinal));
     }
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "ФВ-10.12")]
-    public async Task Дві_версії_з_одним_іменем_вʼюхи_відмовляють_а_не_переписують_одна_одну()
+    public async Task Чернетка_вʼюхи_не_має_а_повторна_генерація_нічого_не_змінює()
     {
-        var code = NewCode();
-        await using var db = sql.CreateContext();
-        var defId = await DefAsync(db, code, isRegulatory: true);
-        await VersionAsync(db, defId, "1.0", ThreeColumns, publish: true);
-        await VersionAsync(db, defId, "1_0", """[{"code":"OutputCode","kind":"text"}]""", publish: true);
+        var doc = await new TestDocumentBuilder(sql.ConnectionString).BuildAsync(columnCount: 2, rowCount: 1);
+        var view = await ViewNameAsync(doc);
 
-        var error = await Assert.ThrowsAsync<SqlException>(() => ExecAsync(defId));
+        // Чернетка — структура ще змінюється, вʼюха над нею була б неправдою.
+        Assert.Empty(await ExecAsync(doc.TemplateVersionId));
+        Assert.Empty(await ColumnsAsync(view));
+
+        await PublishAsync(doc.TemplateVersionId);
+
+        Assert.Equal([$"{view}:Created"], await ExecAsync(doc.TemplateVersionId));
+
+        // ⚠ Повторна публікація чи повторний старт: вʼюха не перестворюється.
+        Assert.Equal([$"{view}:Unchanged"], await ExecAsync(doc.TemplateVersionId));
+        Assert.Equal([$"{view}:Unchanged"], await ExecAsync(doc.TemplateVersionId));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-10.12")]
+    public async Task Дві_таблиці_з_одним_іменем_вʼюхи_відмовляють_а_не_переписують_одна_одну()
+    {
+        var tag = "Q" + Guid.NewGuid().ToString("N")[..8];
+
+        // `Q_X` / `S` / `T` і `Q` / `X_S` / `T` дають одне ім'я `v_Q_X_S_T_v1`.
+        await StructureAsync($"{tag}_X", "S", "T");
+        var second = await StructureAsync(tag, "X_S", "T");
+
+        var error = await Assert.ThrowsAsync<SqlException>(() => ExecAsync(second));
 
         Assert.Equal(50409, error.Number);
-        Assert.Contains($"v_{code}_v1_0", error.Message, StringComparison.Ordinal);
-        Assert.Empty(await ColumnsAsync($"v_{code}_v1_0"));
+        Assert.Contains($"v_{tag}_X_S_T_v1", error.Message, StringComparison.Ordinal);
+        Assert.Empty(await ColumnsAsync($"v_{tag}_X_S_T_v1"));
     }
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
-    [Trait("Requirement", "ФВ-10.4")]
-    public async Task Зламаний_опис_одного_звіту_не_лишає_без_вʼюх_решту()
+    [Trait("Requirement", "ФВ-10.2")]
+    public async Task Роль_rpt_reader_читає_вʼюхи_але_не_таблиці_документів()
     {
-        var good = NewCode();
-        var bad = NewCode();
+        var (doc, view, _) = await PublishedDocumentAsync();
+        await using (var db = sql.CreateContext())
+        {
+            await new ReportViewGenerator(db).GenerateAsync(doc.TemplateVersionId, CancellationToken.None);
+        }
+
+        await using var connection = new SqlConnection(sql.ConnectionString);
+        await connection.OpenAsync();
+        await ExecuteAsync(connection, """
+            IF USER_ID(N'rpt_probe') IS NULL CREATE USER rpt_probe WITHOUT LOGIN;
+            ALTER ROLE rpt_reader ADD MEMBER rpt_probe;
+            """);
+
+        // ⛔ Обліковий запис SSRS читає і довгу, і згенеровану вʼюху (право на
+        // СХЕМУ — нова вʼюха не потребує окремого GRANT), а таблиці `doc.*`
+        // напряму — ні: ланцюг власності пропускає лише крізь вʼюху.
+        await ExecuteAsync(connection, "EXECUTE AS USER = N'rpt_probe';");
+        try
+        {
+            Assert.Equal(3, await ScalarAsync(connection,
+                $"SELECT COUNT(*) FROM rpt.v_DocumentCells WHERE DocumentId = {doc.DocumentId}"));
+            Assert.Equal(2, await ScalarAsync(connection,
+                $"SELECT COUNT(*) FROM rpt.[{view}] WHERE _DocumentId = {doc.DocumentId}"));
+
+            var denied = await Assert.ThrowsAsync<SqlException>(
+                () => ScalarAsync(connection, "SELECT COUNT(*) FROM doc.CellValue"));
+            Assert.Equal(229, denied.Number);
+        }
+        finally
+        {
+            await ExecuteAsync(connection, "REVERT;");
+        }
+    }
+
+    /// <summary>
+    /// Документ на опублікованій версії: рядок 1 — текст <c>a</c> і число 1.5,
+    /// рядок 2 — лише число 2; аркуш поданий.
+    /// </summary>
+    private async Task<(TestDocument Doc, string View, string[] Codes)> PublishedDocumentAsync()
+    {
+        var doc = await new TestDocumentBuilder(sql.ConnectionString).BuildAsync(columnCount: 3, rowCount: 2);
+        await PublishAsync(doc.TemplateVersionId);
+
         await using var db = sql.CreateContext();
-        await VersionAsync(db, await DefAsync(db, good, isRegulatory: true), "1", ThreeColumns, publish: true);
-        await VersionAsync(
-            db, await DefAsync(db, bad, isRegulatory: true), "1", """[{"code":"Bad code","kind":"text"}]""",
-            publish: true);
+        var codes = await db.ColumnDefs
+            .Where(c => doc.ColumnDefIds.Contains(c.Id))
+            .OrderBy(c => c.Id)
+            .Select(c => c.Code)
+            .ToArrayAsync();
+        var tableDefId = doc.TableDefId;
 
-        // ⚠ Виклик для ВСІХ звітів — так його робить старт. Відмова лишається
-        // відмовою (старт її журналює), але справні звіти вʼюху отримують.
-        var error = await Assert.ThrowsAsync<SqlException>(
-            () => new ReportViewGenerator(db).GenerateAsync(reportDefId: null, CancellationToken.None));
-
-        Assert.True(error.Number is 50422 or 50409, error.Message);
-        Assert.Equal(10, (await ColumnsAsync($"v_{good}_v1")).Count);
-        Assert.Empty(await ColumnsAsync($"v_{bad}_v1"));
-    }
-
-    private static string NewCode() => "V" + Guid.NewGuid().ToString("N")[..10];
-
-    private static async Task<int> ArrangeProjectAsync(EcrDbContext db)
-    {
-        var tag = Guid.NewGuid().ToString("N")[..10];
-        var template = new Template(
-            EcrCode.Create($"T{tag}"),
-            new LocalizedText(new Dictionary<string, string> { ["en"] = "View template" }),
-            createdByUserId: 1, Now);
-        db.Templates.Add(template);
-        await db.SaveChangesAsync(CancellationToken.None);
-
-        var templateVersion = new TemplateVersion(template.Id, "1.0.0.0", createdByUserId: 1, Now);
-        db.TemplateVersions.Add(templateVersion);
-        await db.SaveChangesAsync(CancellationToken.None);
-
-        var project = new Project(
-            EcrCode.Create($"P{tag}"),
-            new LocalizedText(new Dictionary<string, string> { ["en"] = "View project" }),
-            new DateOnly(2026, 1, 1), new DateOnly(2026, 12, 31),
-            templateVersionId: templateVersion.Id, PeriodKind.Monthly, periodPolicyId: 1, "Asia/Atyrau");
-        db.Projects.Add(project);
-        await db.SaveChangesAsync(CancellationToken.None);
-
-        return project.Id;
-    }
-
-    private static async Task<int> DefAsync(EcrDbContext db, string code, bool isRegulatory)
-    {
-        var def = new ReportDef(
-            EcrCode.Create(code),
-            new LocalizedText(new Dictionary<string, string> { ["en"] = code }),
-            isRegulatory);
-        db.ReportDefs.Add(def);
-        await db.SaveChangesAsync(CancellationToken.None);
-        return def.Id;
-    }
-
-    private static async Task<int> VersionAsync(EcrDbContext db, int defId, string version, string columns, bool publish)
-    {
-        var entity = new ReportVersion(defId, version, columns, """{"rowSource":"CalculationResults"}""", Now);
-        if (publish)
+        await using (var connection = new SqlConnection(sql.ConnectionString))
         {
-            entity.Publish();
+            await connection.OpenAsync();
+            await ExecuteAsync(connection, $"""
+                INSERT INTO doc.CellValue (PeriodKey, TableRowId, ColumnDefId, TableDefId, ValueString, ValueNumeric)
+                VALUES ({doc.PeriodKey.Value}, {doc.RowIds[0]}, {doc.ColumnDefIds[0]}, {tableDefId}, N'a', NULL),
+                       ({doc.PeriodKey.Value}, {doc.RowIds[0]}, {doc.ColumnDefIds[1]}, {tableDefId}, NULL, 1.5),
+                       ({doc.PeriodKey.Value}, {doc.RowIds[1]}, {doc.ColumnDefIds[1]}, {tableDefId}, NULL, 2);
+                """);
         }
 
-        db.ReportVersions.Add(entity);
-        await db.SaveChangesAsync(CancellationToken.None);
-        return entity.Id;
+        var approval = new ApprovalState(doc.DocumentId, doc.SheetDefId, doc.PeriodKey.Value);
+        approval.Submit(userId: 1, Now);
+        db.ApprovalStates.Add(approval);
+        await db.SaveChangesAsync();
+
+        return (doc, await ViewNameAsync(doc), codes);
     }
 
-    private static async Task<long> SnapshotAsync(
-        EcrDbContext db, int versionId, int projectId, int period, SnapshotStatus status)
+    private async Task PublishAsync(int templateVersionId)
     {
-        var snapshot = new ReportSnapshot(versionId, projectId, period, status, Now, builtByUserId: null);
-        snapshot.Complete(rowCount: 1, contentHash: null, calculationRunId: null, parametersJson: null);
-        snapshot.MakeCurrent();
-        db.ReportSnapshots.Add(snapshot);
-        await db.SaveChangesAsync(CancellationToken.None);
-        return snapshot.Id;
+        await using var db = sql.CreateContext();
+        var version = await db.TemplateVersions.SingleAsync(v => v.Id == templateVersionId);
+        version.Publish(publishedByUserId: 1, Now);
+        await db.SaveChangesAsync();
     }
 
-    private static async Task RowsAsync(
-        EcrDbContext db, long snapshotId,
-        params (int RowNo, string Column, string? Text, decimal? Number, DateTime? Date)[] cells)
+    /// <summary>Опублікована версія <c>1</c> шаблону з одним аркушем, таблицею й колонкою.</summary>
+    private async Task<int> StructureAsync(string template, string sheet, string table)
     {
-        foreach (var cell in cells)
-        {
-            var row = new ReportRow(snapshotId, cell.RowNo, cell.Column);
-            row.SetValue(cell.Text, cell.Number, cell.Date);
-            db.ReportRows.Add(row);
-        }
+        await using var db = sql.CreateContext();
+        var t = new Template(EcrCode.Create(template), Name(template), 1, Now);
+        db.Templates.Add(t);
+        await db.SaveChangesAsync();
 
-        await db.SaveChangesAsync(CancellationToken.None);
+        var version = new TemplateVersion(t.Id, "1", 1, Now);
+        db.TemplateVersions.Add(version);
+        await db.SaveChangesAsync();
+
+        var s = new SheetDef(version.Id, EcrCode.Create(sheet), Name(sheet), 1);
+        db.SheetDefs.Add(s);
+        await db.SaveChangesAsync();
+
+        var td = new TableDef(s.Id, EcrCode.Create(table), Name(table), 1, TableLayoutKind.PerPeriodInstance, TableRowMode.Fixed);
+        db.TableDefs.Add(td);
+        await db.SaveChangesAsync();
+
+        db.ColumnDefs.Add(new ColumnDef(td.Id, EcrCode.Create("V"), Name("V"), 1, CellDataType.Decimal));
+        await db.SaveChangesAsync();
+
+        version.Publish(publishedByUserId: 1, Now);
+        await db.SaveChangesAsync();
+        return version.Id;
     }
+
+    /// <summary>Очікуване ім'я вʼюхи — з кодів у базі, тим самим правилом, що й процедура.</summary>
+    private async Task<string> ViewNameAsync(TestDocument doc)
+    {
+        await using var db = sql.CreateContext();
+        var version = await db.TemplateVersions.SingleAsync(v => v.Id == doc.TemplateVersionId);
+        var template = await db.Templates.SingleAsync(t => t.Id == version.TemplateId);
+        var table = await db.TableDefs.SingleAsync(t => t.Id == doc.TableDefId);
+
+        return NotIdentifier().Replace(
+            $"v_{template.Code}_{doc.SheetCode}_{table.Code}_v{version.Version}", "_");
+    }
+
+    private static string RowKeyOf(TestDocument doc, int index)
+        => $"R{index + 1}_{doc.SheetCode["SHEET".Length..]}";
 
     /// <summary>Виконує процедуру напряму й повертає <c>ім'я:дія</c> з її результату.</summary>
-    private async Task<List<string>> ExecAsync(int defId)
+    private async Task<List<string>> ExecAsync(int templateVersionId)
     {
         var result = new List<string>();
         await using var connection = new SqlConnection(sql.ConnectionString);
         await connection.OpenAsync();
         await using var command = connection.CreateCommand();
-        command.CommandText = "EXEC rpt.usp_GenerateReportViews @ReportDefId";
-        command.Parameters.AddWithValue("@ReportDefId", defId);
+        command.CommandText = "EXEC rpt.usp_GenerateTemplateViews @TemplateVersionId";
+        command.Parameters.AddWithValue("@TemplateVersionId", templateVersionId);
         await using var reader = await command.ExecuteReaderAsync();
         while (await reader.ReadAsync())
         {
@@ -271,52 +278,54 @@ public sealed class ReportViewGeneratorTests(SqlServerFixture sql)
 
     /// <summary>Колонки вʼюхи з розгорнутої бази; порожньо — вʼюхи немає.</summary>
     private async Task<List<(string Name, string Type)>> ColumnsAsync(string view)
-    {
-        var result = new List<(string, string)>();
-        await using var connection = new SqlConnection(sql.ConnectionString);
-        await connection.OpenAsync();
-        await using var command = connection.CreateCommand();
-        command.CommandText = """
+        => await QueryAsync<(string, string)>(
+            """
             SELECT c.name, t.name
               FROM sys.columns c
               JOIN sys.types t ON t.user_type_id = c.user_type_id
              WHERE c.object_id = OBJECT_ID(N'rpt.' + QUOTENAME(@view), N'V')
              ORDER BY c.column_id
-            """;
-        command.Parameters.AddWithValue("@view", view);
-        await using var reader = await command.ExecuteReaderAsync();
-        while (await reader.ReadAsync())
-        {
-            result.Add((reader.GetString(0), reader.GetString(1)));
-        }
+            """,
+            view,
+            r => (r.GetString(0), r.GetString(1)),
+            parameter: "@view");
 
-        return result;
-    }
-
-    private async Task<List<(int Period, int RowNo, string? RowKey, decimal? Value, DateTime? MeasuredAt)>> QueryAsync(
-        string view, int projectId)
+    private async Task<List<T>> QueryAsync<T>(
+        string text, object value, Func<SqlDataReader, T> read, string parameter = "@doc")
     {
-        var result = new List<(int, int, string?, decimal?, DateTime?)>();
+        var result = new List<T>();
         await using var connection = new SqlConnection(sql.ConnectionString);
         await connection.OpenAsync();
         await using var command = connection.CreateCommand();
 
-        // ⚠ Ім'я вʼюхи — з коду тесту (GUID), не з вводу; параметром його не передати.
-        command.CommandText =
-            $"SELECT SnapshotPeriodKey, RowNo, RowKey, Value, MeasuredAt FROM rpt.[{view}] "
-            + "WHERE SnapshotProjectId = @p ORDER BY SnapshotPeriodKey, RowNo";
-        command.Parameters.AddWithValue("@p", projectId);
+        // ⚠ Ім'я вʼюхи в тексті — з кодів тестового шаблону, не з вводу.
+        command.CommandText = text;
+        command.Parameters.AddWithValue(parameter, value);
         await using var reader = await command.ExecuteReaderAsync();
         while (await reader.ReadAsync())
         {
-            result.Add((
-                reader.GetInt32(0),
-                reader.GetInt32(1),
-                reader.IsDBNull(2) ? null : reader.GetString(2),
-                reader.IsDBNull(3) ? null : reader.GetDecimal(3),
-                reader.IsDBNull(4) ? null : reader.GetDateTime(4)));
+            result.Add(read(reader));
         }
 
         return result;
     }
+
+    private static async Task ExecuteAsync(SqlConnection connection, string text)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = text;
+        await command.ExecuteNonQueryAsync();
+    }
+
+    private static async Task<int> ScalarAsync(SqlConnection connection, string text)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = text;
+        return (int)(await command.ExecuteScalarAsync())!;
+    }
+
+    private static LocalizedText Name(string value) => new(new Dictionary<string, string> { ["en"] = value });
+
+    [GeneratedRegex("[^A-Za-z0-9_]")]
+    private static partial Regex NotIdentifier();
 }

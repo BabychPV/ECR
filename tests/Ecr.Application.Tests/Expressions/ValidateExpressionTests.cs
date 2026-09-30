@@ -251,7 +251,8 @@ public sealed class ValidateExpressionTests(SqlServerFixture sql)
             _user,
             new AuditWriter(db),
             new UnitOfWork(db),
-            new TestClock(Now));
+            new TestClock(Now),
+            new Ecr.Infrastructure.Reporting.ReportViewGenerator(db));
 
         var error = await Assert.ThrowsAsync<BusinessRuleException>(
             () => handler.PublishAsync(version.VersionId, userId: 9, reason: "Тест", CancellationToken.None));

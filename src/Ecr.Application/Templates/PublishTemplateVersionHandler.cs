@@ -24,7 +24,8 @@ public sealed class PublishTemplateVersionHandler(
     Common.ICurrentUser currentUser,
     IAuditWriter audit,
     IUnitOfWork uow,
-    IClock clock)
+    IClock clock,
+    IReportViewGenerator reportViews)
 {
     /// <summary>Право на публікацію версії шаблону (`02-contracts.md` §9).</summary>
     public const string Permission = "Template.Publish";
@@ -200,6 +201,14 @@ public sealed class PublishTemplateVersionHandler(
             ct).ConfigureAwait(false);
 
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+
+        // ⛔ Вʼюхи сирих даних для SSRS (ФВ-10.2, ФВ-10.4) — у ТІЙ САМІЙ
+        // транзакції і ПІСЛЯ збереження стану: процедура бере лише
+        // опубліковані версії. Опублікований шаблон, дані якого SSRS прочитати
+        // не може, виявив би автор звіту, а не той, хто публікував; тому
+        // відмова генерації відкочує публікацію. DDL робить процедура, не
+        // застосунок (D-66).
+        await reportViews.GenerateAsync(templateVersionId, ct).ConfigureAwait(false);
     }
 
     /// <summary>
