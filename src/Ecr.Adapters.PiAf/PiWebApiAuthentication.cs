@@ -95,9 +95,17 @@ public static class PiWebApiAuthentication
     /// ⚠ Для заголовкових режимів облікові дані процесу вимкнено явно: інакше
     /// невірний Basic/Bearer міг би «врятуватися» Kerberos-квитком служби, і
     /// помилка налаштування не проявилася б як помилка (<c>H-20</c>).
+    /// <para>
+    /// ⛔ Negotiate: <c>PreAuthenticate = false</c> — облікові дані йдуть лише у
+    /// відповідь на виклик <c>401</c> цього хоста, а не «наперед»; і
+    /// <c>AllowAutoRedirect = false</c> — перенаправлення на ІНШИЙ хост не
+    /// повинно тягти за собою Windows-автентифікацію службового облікового
+    /// запису: 3xx стає відмовою збору, а не тихим Kerberos/NTLM-обміном із
+    /// чужим сервером.
+    /// </para>
     /// </remarks>
     public static HttpMessageHandler CreatePrimaryHandler(PiWebApiAuthMode mode)
         => mode == PiWebApiAuthMode.Negotiate
-            ? new HttpClientHandler { UseDefaultCredentials = true, PreAuthenticate = true }
+            ? new HttpClientHandler { UseDefaultCredentials = true, PreAuthenticate = false, AllowAutoRedirect = false }
             : new HttpClientHandler { UseDefaultCredentials = false };
 }

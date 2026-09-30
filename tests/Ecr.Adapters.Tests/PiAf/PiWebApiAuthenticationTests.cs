@@ -72,6 +72,12 @@ public sealed class PiWebApiAuthenticationTests
         using var handler = Assert.IsType<HttpClientHandler>(PiWebApiAuthentication.CreatePrimaryHandler(mode));
 
         Assert.Equal(expected, handler.UseDefaultCredentials);
+        Assert.False(handler.PreAuthenticate);
+
+        // Windows-облікові дані не переходять за перенаправленням на інший хост;
+        // заголовкові режими поведінку не змінюють. Мутація: повернути
+        // AllowAutoRedirect = true (або PreAuthenticate = true) для Negotiate.
+        Assert.Equal(!expected, handler.AllowAutoRedirect);
     }
 
     /// <summary>
