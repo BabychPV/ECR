@@ -30,8 +30,8 @@ namespace Ecr.Application.Documents;
 /// колонка <c>Calculated</c> була б порожньою — рівно дефект, який тут закрито.
 /// </param>
 /// <param name="conditionalFormats">
-/// Правила умовного форматування версії (ФВ-2.7). ⚠ Необов'язковий з тієї ж
-/// причини, що й <paramref name="results"/>: у контейнері розв'язується завжди.
+/// Правила умовного форматування версії (ФВ-2.6/2.7); один запит на зріз.
+/// Необов'язковий лише заради тестів, що конструюють обробник вручну.
 /// </param>
 public sealed class GetTableSliceHandler(
     IRowStore rowStore,
@@ -220,14 +220,6 @@ public sealed class GetTableSliceHandler(
         // шістдесят колонок не повинні коштувати шістдесяти походів у базу.
         var styleById = await styles.GetAsync(instance.TemplateVersionId, ct).ConfigureAwait(false);
 
-        // ⛔ ФВ-2.7: правила умовного форматування — частина структури версії, і
-        // сітка читає їх ТУТ, разом зі стилем, а не окремим `GET
-        // …/conditional-formats`: той вимагає `Template.View`, якого в оператора
-        // може не бути. Один запит на всю версію, як і стилі; порядок у колонці —
-        // пріоритет (перше спрацьоване правило виграє).
-        var conditionalByColumn = await ConditionalFormatsByColumnAsync(instance.TemplateVersionId, ct)
-            .ConfigureAwait(false);
-
         // ⛔ `V-14`: прихована колонка (Appearance → Hidden) приходила в зріз, і
         // сітка показувала її та давала редагувати — хоча експорт її вже
         // пропускає (`DocumentDataExporter`). Приховане не віддається тут, і
@@ -243,8 +235,7 @@ public sealed class GetTableSliceHandler(
                 c.Id, c.Code, c.HeaderL10n.Get(language) ?? c.Code, c.DataType.ToString(),
                 c.Ordinal, c.IsReadOnly, c.IsRequired, c.DisplayFormat, c.DefaultValue,
                 c.LookupRegistryDefId, c.UnitId, SymbolOf(symbolById, c.UnitId),
-                c.Precision, c.Scale, requiredByMethodology.Contains(c.Id), StyleOf(styleById, c.StyleId),
-                conditionalByColumn.GetValueOrDefault(c.Code)))
+                c.Precision, c.Scale, requiredByMethodology.Contains(c.Id), StyleOf(styleById, c.StyleId)))
             .ToList();
 
         var columnCodeById = table.Columns.ToDictionary(c => c.Id, c => c.Code);
@@ -338,8 +329,53 @@ public sealed class GetTableSliceHandler(
             }
         }
 
+        // ФВ-2.6/2.7: умовне форматування — ОДИН запит на версію й та сама
+        // чиста функція, що в Excel-експорті (`ConditionalFormatEvaluator`).
+        var formats = await ConditionalFormatsAsync(instance.TemplateVersionId, columns, rows, ct)
+            .ConfigureAwait(false);
+
         return new TableSliceDto(
-            tableInstanceId, instance.PeriodKey, columns, rows, permissions, confirmations);
+            tableInstanceId, instance.PeriodKey, columns, rows, permissions, confirmations, formats);
+    }
+
+    /// <summary>
+    /// Результат правил умовного форматування по комірках зрізу: ключ
+    /// <c>"{rowKey}:{columnCode}"</c>. Комірки без спрацювання тут немає;
+    /// порожня комірка не матеріалізована, тож оцінюється як <c>null</c>
+    /// (правило <c>empty</c> спрацьовує й на ній).
+    /// </summary>
+    private async Task<IReadOnlyDictionary<string, Templates.CellFormatDto>> ConditionalFormatsAsync(
+        int templateVersionId, List<ColumnDto> columns, IReadOnlyList<RowDto> rows, CancellationToken ct)
+    {
+        var result = new Dictionary<string, Templates.CellFormatDto>(StringComparer.Ordinal);
+
+        if (conditionalFormats is null)
+        {
+            return result;
+        }
+
+        var all = await conditionalFormats.GetAsync(templateVersionId, ct).ConfigureAwait(false);
+        var byColumn = Templates.ConditionalFormatEvaluator.ByColumn(all);
+
+        foreach (var column in columns)
+        {
+            if (!byColumn.TryGetValue(column.Code, out var rules))
+            {
+                continue;
+            }
+
+            foreach (var row in rows)
+            {
+                row.Cells.TryGetValue(column.Code, out var value);
+
+                if (Templates.ConditionalFormatEvaluator.Evaluate(rules, value) is { } format)
+                {
+                    result[$"{row.RowKey}:{column.Code}"] = format;
+                }
+            }
+        }
+
+        return result;
     }
 
     /// <summary>
@@ -484,26 +520,6 @@ public sealed class GetTableSliceHandler(
     /// </remarks>
     private static string? SymbolOf(Dictionary<int, string> symbols, int? unitId)
         => unitId is { } id && symbols.TryGetValue(id, out var code) ? code : null;
-
-    /// <summary>Правила умовного форматування версії за кодом колонки, у порядку застосування (ФВ-2.7).</summary>
-    private async Task<IReadOnlyDictionary<string, IReadOnlyList<Templates.ConditionalFormatRuleDto>>>
-        ConditionalFormatsByColumnAsync(int templateVersionId, CancellationToken ct)
-    {
-        if (conditionalFormats is null)
-        {
-            return new Dictionary<string, IReadOnlyList<Templates.ConditionalFormatRuleDto>>(StringComparer.Ordinal);
-        }
-
-        var all = await conditionalFormats.GetAsync(templateVersionId, ct).ConfigureAwait(false);
-
-        return all
-            .GroupBy(r => r.ColumnCode, StringComparer.Ordinal)
-            .ToDictionary(
-                g => g.Key,
-                g => (IReadOnlyList<Templates.ConditionalFormatRuleDto>)g
-                    .OrderBy(r => r.Ordinal).Select(Templates.ConditionalFormatMapper.Map).ToList(),
-                StringComparer.Ordinal);
-    }
 
     /// <summary>
     /// Оформлення колонки для клієнта (директива registry-lookup /

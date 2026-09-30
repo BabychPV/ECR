@@ -201,9 +201,10 @@ public sealed class ConditionalFormatHandlersTests
         // ⚠ Слабкий `ETag` і регістр hex — та сама версія (`NormalizeETag`).
         await Save().HandleAsync(1, [Rule()], $"W/\"{read.ToLowerInvariant()}\"", CancellationToken.None);
 
+        // ⚠ `Arg.Any<int>()`: блокується `version.Id` сутності, а в фікстурі вона не збережена (Id = 0).
         Received.InOrder(() =>
         {
-            _store.LockVersionForUpdateAsync(1, Arg.Any<CancellationToken>());
+            _store.LockVersionForUpdateAsync(Arg.Any<int>(), Arg.Any<CancellationToken>());
             _rules.GetAsync(1, Arg.Any<CancellationToken>());
             _rules.ReplaceAsync(1, Arg.Any<IReadOnlyList<ConditionalFormatRule>>(), Arg.Any<CancellationToken>());
         });

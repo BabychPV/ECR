@@ -156,6 +156,15 @@ export function applyPatchLocally(
     queryKey: queryKeys.slices.one(request.tableInstanceId, request.periodKey),
     refetchType: 'none',
   });
+
+  // ⛔ `ФВ-2.16`: значок «поза вікном» — за `import()`, не статично (`D-132`,
+  // коментар `outOfWindowMarks.ts`); порожня відповідь модуля не тягне.
+  const outOfWindow = response.outOfWindow ?? [];
+  if (outOfWindow.length > 0) {
+    void import('./outOfWindowMarks').then((marks) =>
+      marks.recordOutOfWindow(request.tableInstanceId, request.periodKey, outOfWindow),
+    );
+  }
 }
 
 /**

@@ -5,11 +5,11 @@ import { normalizeDecimal } from '@/shared/format';
  * модель правила й перевірка «чи спрацьовує правило на значенні».
  *
  * Сервер зберігає правила в `cfg.ConditionalFormatRule` (`GET/PUT
- * …/template-versions/{id}/conditional-formats`, `D-234`) і віддає їх сітці
- * документа в зрізі таблиці (`ColumnDto.conditionalFormats`). Модель тут — те,
- * що редактор (`ConditionalFormatPanel.tsx`) і сітка (`DocumentGrid.tsx`)
- * розуміють однаково: той самий `firstMatchingRule` і в перегляді редактора, і
- * на живій комірці.
+ * …/template-versions/{id}/conditional-formats`, `D-234`) і сам рахує їх для
+ * сітки документа й Excel (`ConditionalFormatEvaluator`, `TableSliceDto.cellFormats`).
+ * Тут — модель редактора (`ConditionalFormatPanel.tsx`) і перевірка правила на
+ * значенні-прикладі, узгоджені з серверною: ті самі оператори, межі включно,
+ * перше спрацьоване правило виграє.
  *
  * ⚠ Порівняння — через `Number` після `normalizeDecimal`: для вибору кольору
  * межа точності `double` не має значення, а для збереження значень ця
@@ -172,7 +172,7 @@ export function firstMatchingRule(
 
 /**
  * Форма правила на дроті (`ConditionalFormatRuleDto`). ⚠ Своя, а не з
- * `schema.d.ts`: модуль живе в чанку сітки, і тип тут — лише опис полів.
+ * `schema.d.ts`: модулю досить опису полів, без залежності від контракту.
  */
 export interface ConditionalRuleWire {
   readonly columnCode: string;

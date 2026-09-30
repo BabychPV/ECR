@@ -24,13 +24,20 @@ namespace Ecr.Application.Documents.Dto;
 /// (<c>"{rowKey}:{columnCode}"</c>); значення — пояснення для діалогу
 /// підтвердження. Комірка, якої тут немає, підтвердження не потребує.
 /// </param>
+/// <param name="CellFormats">
+/// Умовне форматування (ФВ-2.6/2.7): ключ — той самий
+/// <c>"{rowKey}:{columnCode}"</c>; значення — колір/жирність першого
+/// спрацьованого правила колонки. Комірки, якої тут немає, правила не
+/// зачіпають. Обчислено сервером тією самою функцією, що й Excel-експорт.
+/// </param>
 public sealed record TableSliceDto(
     long TableInstanceId,
     int PeriodKey,
     IReadOnlyList<ColumnDto> Columns,
     IReadOnlyList<RowDto> Rows,
     IReadOnlyDictionary<string, string> CellPermissions,
-    IReadOnlyDictionary<string, string> CellConfirmations);
+    IReadOnlyDictionary<string, string> CellConfirmations,
+    IReadOnlyDictionary<string, Ecr.Application.Templates.CellFormatDto>? CellFormats = null);
 
 /// <summary>Опис колонки для клієнта.</summary>
 /// <remarks>
@@ -61,11 +68,6 @@ public sealed record TableSliceDto(
 /// ⚠ <see cref="Style"/> — оформлення, задане автором шаблону (директива
 /// registry-lookup / cell-style, PR B2); <c>null</c> —
 /// <see cref="ColumnDef.StyleId"/> не задано, комірка виглядає як завжди.
-///
-/// ⚠ <see cref="ConditionalFormats"/> — правила умовного форматування колонки
-/// (ФВ-2.7) у порядку застосування: перше спрацьоване на значенні комірки
-/// кладе свої колір і жирність ПОВЕРХ <see cref="Style"/>. <c>null</c> — правил
-/// немає.
 /// </remarks>
 public sealed record ColumnDto(
     int Id,
@@ -83,8 +85,7 @@ public sealed record ColumnDto(
     byte? Precision = null,
     byte? Scale = null,
     bool IsRequiredByMethodology = false,
-    CellStyleDto? Style = null,
-    IReadOnlyList<Ecr.Application.Templates.ConditionalFormatRuleDto>? ConditionalFormats = null);
+    CellStyleDto? Style = null);
 
 /// <summary>
 /// Підмножина <c>StyleDef</c>, потрібна ЖИВІЙ сітці (директива registry-

@@ -10,6 +10,16 @@ import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { calculationResults } from './api';
 
 /**
+ * Коди довідників, змінених після прогону (RT-25), без повторів і впорядковані.
+ *
+ * ⚠ Сервер кладе той самий перелік у кожен рядок (свіжість — на документ, не на число), тож
+ * без зведення банер повторив би кожен довідник стільки разів, скільки чисел у панелі.
+ */
+export function changedRegistriesOf(list: readonly CalculationResultDto[]): string[] {
+  return [...new Set(list.flatMap((result) => result.changedRegistries ?? []))].sort();
+}
+
+/**
  * Числа, які дав розрахунок методологій на цьому документі за цей період.
  *
  * ⛔ Окрема панель, а не колонка в сітці, і це `D-69`: результат методології
@@ -79,9 +89,19 @@ export function CalculationResultsPanel({
               даним. Доти панель показувала їх як чинні, і документ подавали з
               результатами, що рахували інші входи.
             */}
-            {list.some((result) => result.isStale) && (
+            {/*
+              ⛔ RT-25: причиною застарілості буває не лише введення, а й правка довідника,
+              який читає методологія (`changedRegistries`). Без назви довідника людина шукала
+              б зміну в документі, якої там немає.
+            */}
+            {(list.some((result) => result.isStale) || changedRegistriesOf(list).length > 0) && (
               <Alert color="statusWarning" data-results-stale="" title={t('documents.calculationResultsStale')}>
                 {t('documents.calculationResultsStaleHint')}
+                {changedRegistriesOf(list).map((code) => (
+                  <Text key={code} size="sm" mt="xs" data-results-stale-registry={code}>
+                    {t('calculation.staleRegistry', { name: code })}
+                  </Text>
+                ))}
               </Alert>
             )}
 

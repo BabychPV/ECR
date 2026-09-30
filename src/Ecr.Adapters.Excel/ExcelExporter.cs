@@ -26,7 +26,8 @@ public sealed class ExcelExporter(
     StyleMapper styleMapper,
     FormulaTranslator formulaTranslator,
     IMethodologyStore? methodologies = null,
-    ICalculationResultStore? results = null) : IExcelExporter
+    ICalculationResultStore? results = null,
+    IConditionalFormatStore? conditionalFormats = null) : IExcelExporter
 {
     /// <summary>Рядок, з якого починається перший блок аркуша.</summary>
     private const int FirstRow = 1;
@@ -90,6 +91,13 @@ public sealed class ExcelExporter(
             : new Dictionary<int, StyleDef>();
 
         var lookups = await LookupsAsync(snapshot, ct).ConfigureAwait(false);
+
+        // ФВ-2.6/2.7: умовне форматування — ті самі правила й та сама функція
+        // (`ConditionalFormatEvaluator`), що в сітці; це стиль, тож лише зі стилями.
+        var formatRules = options.IncludeStyles && conditionalFormats is not null
+            ? Ecr.Application.Templates.ConditionalFormatEvaluator.ByColumn(
+                await conditionalFormats.GetAsync(snapshot.TemplateVersionId, ct).ConfigureAwait(false))
+            : new Dictionary<string, IReadOnlyList<ConditionalFormatRule>>();
 
         // ⛔ S6 (ФВ-6.6): таблиці під забороною для того, хто замовив експорт, у
         // книгу не потрапляють зовсім — ні аркушем, ні блоком карти, ні
@@ -169,7 +177,8 @@ public sealed class ExcelExporter(
                 var block = WriteTable(
                     worksheet, name, table, instance, snapshot, styleMap, lookups, styleSource, options, row,
                     rowIdsBatch.GetValueOrDefault(instance.TableInstanceId, NoRows),
-                    slicesBatch.GetValueOrDefault(instance.TableInstanceId, NoCells));
+                    slicesBatch.GetValueOrDefault(instance.TableInstanceId, NoCells),
+                    formatRules);
 
                 blocks.Add(block);
                 headerRows.Add(block.HeaderRow);
@@ -297,7 +306,8 @@ public sealed class ExcelExporter(
         ExcelExportOptions options,
         int startRow,
         IReadOnlyDictionary<string, long> rowIds,
-        IReadOnlyList<CellRecord> cells)
+        IReadOnlyList<CellRecord> cells,
+        IReadOnlyDictionary<string, IReadOnlyList<ConditionalFormatRule>> formatRules)
     {
         // ⛔ S6: колонка під забороною — як прихована: ні заголовка, ні значень.
         // Формула, що посилається на неї, не транслюється (`#REF!` →
@@ -375,6 +385,7 @@ public sealed class ExcelExporter(
 
         StyleDataColumns(worksheet, columns, styleMap, styleSource, options, headerRow, keys.Count);
         WriteValues(worksheet, cells, rowIds, columns, columnNumbers, rowNumbers, lookups);
+        ApplyConditionalFormats(worksheet, cells, rowIds, columns, columnNumbers, rowNumbers, formatRules);
 
         return new ExcelTableBlock(
             instance.TableInstanceId, table.Id, table.Code, sheetName, headerRow, columnRefs, rowRefs);
@@ -496,6 +507,51 @@ public sealed class ExcelExporter(
                 byColumnId[cell.Address.ColumnDefId],
                 cell.Value,
                 lookups);
+        }
+    }
+
+    /// <summary>
+    /// Умовне форматування поверх стилю колонки (ФВ-2.6/2.7): лише колонки,
+    /// що мають правила; порожня комірка оцінюється як <c>null</c>, як у сітці.
+    /// </summary>
+    private void ApplyConditionalFormats(
+        IXLWorksheet worksheet,
+        IReadOnlyList<CellRecord> cells,
+        IReadOnlyDictionary<string, long> rowIds,
+        List<ColumnDef> columns,
+        Dictionary<int, int> columnNumbers,
+        Dictionary<string, int> rowNumbers,
+        IReadOnlyDictionary<string, IReadOnlyList<ConditionalFormatRule>> formatRules)
+    {
+        if (formatRules.Count == 0 || rowNumbers.Count == 0)
+        {
+            return;
+        }
+
+        var values = new Dictionary<(long RowId, int ColumnId), object?>(cells.Count);
+        foreach (var cell in cells)
+        {
+            values[(cell.Address.TableRowId, cell.Address.ColumnDefId)] =
+                Ecr.Expressions.Evaluation.CellValueMapping.ToRuleValue(cell.Value);
+        }
+
+        foreach (var column in columns)
+        {
+            if (!formatRules.TryGetValue(column.Code, out var rules))
+            {
+                continue;
+            }
+
+            foreach (var (rowKey, number) in rowNumbers)
+            {
+                values.TryGetValue((rowIds[rowKey], column.Id), out var value);
+
+                if (Ecr.Application.Templates.ConditionalFormatEvaluator.Evaluate(rules, value) is { } format)
+                {
+                    styleMapper.ApplyConditional(
+                        worksheet.Cell(number, columnNumbers[column.Id]).Style, format);
+                }
+            }
         }
     }
 

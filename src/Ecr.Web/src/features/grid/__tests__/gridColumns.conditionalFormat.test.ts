@@ -3,18 +3,20 @@ import type { CellStyleDto, ColumnDto, TableSliceDto } from '@/api/types';
 import { gridColumns } from '../DocumentGrid';
 import { cellKey } from '../permissions';
 import { NoLocalFlags, type LocalCellFlags } from '../cellState';
-import { conditionalMatchOf, conditionalRulesOf, withConditionalRule } from '../conditionalAppearance';
+import { withCellFormat } from '../conditionalAppearance';
 
 /**
- * Умовне форматування на живій сітці (`ФВ-2.7`): правила версії з
- * `ColumnDto.conditionalFormats` підсвічують комірку за її значенням.
+ * Умовне форматування на живій сітці (`ФВ-2.7`): результат правил, який
+ * сервер віддає в `TableSliceDto.cellFormats`, фарбує свою комірку.
  *
  * ⛔ Мутаційний доказ (перевірено руками 2026-09-30):
- *  - у `cellProperties` брати `column.style` замість стилю з правилом —
- *    червоніють «заливка правила» і «жирність правила»;
- *  - у `withConditionalRule` порожній колір правила не лишає колір автора
- *    (`argbOfHex('')`) — червоніє «правило задає лише своє»;
- *  - прибрати `data-conditional-rule` — червоніє «перше правило перемагає».
+ *  - у `cellProperties` брати `column.style` замість стилю з форматом —
+ *    червоніють «заливка» і «жирність»;
+ *  - у `withCellFormat` порожній колір формату затирає колір автора —
+ *    червоніє «формат задає лише своє»;
+ *  - шукати формат не за ключем комірки (`rowKey:columnCode`) — червоніє
+ *    «лише своя комірка»;
+ *  - прибрати `data-conditional-format` — червоніє «атрибут».
  */
 
 function column(overrides: Partial<ColumnDto> = {}): ColumnDto {
@@ -37,79 +39,73 @@ function column(overrides: Partial<ColumnDto> = {}): ColumnDto {
   };
 }
 
-const rules: NonNullable<ColumnDto['conditionalFormats']> = [
-  { columnCode: 'C1', operator: 'gt', value: '100', valueTo: null, backgroundHex: '#ff0000', foregroundHex: null, isBold: false },
-  { columnCode: 'C1', operator: 'gt', value: '50', valueTo: null, backgroundHex: null, foregroundHex: null, isBold: true },
-];
+const red = { backgroundHex: '#ff0000', foregroundHex: null, isBold: false };
+const bold = { backgroundHex: null, foregroundHex: null, isBold: true };
 
-function slice(cells: Record<string, unknown>, overrides: Partial<ColumnDto> = {}): TableSliceDto {
+function slice(cellFormats: TableSliceDto['cellFormats']): TableSliceDto {
   return {
     tableInstanceId: 1,
     periodKey: 202609,
-    columns: [column({ conditionalFormats: rules, ...overrides })],
-    rows: [{ rowKey: 'R1', ordinal: 1, rowKind: 'Item', label: null, rowVersion: '0x01', cells, isOrphaned: false }],
+    columns: [column()],
+    rows: [
+      { rowKey: 'R1', ordinal: 1, rowKind: 'Item', label: null, rowVersion: '0x01', cells: { C1: '150' }, isOrphaned: false },
+      { rowKey: 'R2', ordinal: 2, rowKind: 'Item', label: null, rowVersion: '0x01', cells: { C1: '10' }, isOrphaned: false },
+    ],
     cellPermissions: {},
     cellConfirmations: {},
+    ...(cellFormats === undefined ? {} : { cellFormats }),
   };
 }
 
 const noRequiredInput = { blocked: new Map<string, string>(), warning: new Map<string, string>() };
 
-function propsFor(value: unknown, flags: LocalCellFlags = NoLocalFlags, overrides: Partial<ColumnDto> = {}) {
-  const columns = gridColumns(slice({ C1: value }, overrides), false, flags, {}, noRequiredInput);
+function propsFor(
+  rowKey: string,
+  cellFormats: TableSliceDto['cellFormats'],
+  flags: LocalCellFlags = NoLocalFlags,
+) {
+  const columns = gridColumns(slice(cellFormats), false, flags, {}, noRequiredInput);
   const found = columns.find((c) => c.prop === 'C1');
   if (found === undefined || typeof found.cellProperties !== 'function') throw new Error('Немає колонки C1');
 
-  return found.cellProperties({ model: { __rowKey: 'R1', C1: value } } as never) ?? {};
+  return found.cellProperties({ model: { __rowKey: rowKey } } as never) ?? {};
 }
 
 describe('gridColumns — умовне форматування (ФВ-2.7)', () => {
-  it('заливка правила: клас ecr-cell-filled і змінна --ecr-cell-fill', () => {
-    const props = propsFor('150');
+  it('заливка формату: атрибут, клас ecr-cell-filled і змінна --ecr-cell-fill', () => {
+    const props = propsFor('R1', { 'R1:C1': red });
 
-    expect(props['data-conditional-rule']).toBe('1');
+    expect(props['data-conditional-format']).toBe('true');
     expect(props.class).toContain('ecr-cell-filled');
     expect((props.style as Record<string, string>)['--ecr-cell-fill']).toBe('#ff0000');
   });
 
-  it('перше правило перемагає; друге спрацьовує лише там, де перше — ні', () => {
-    expect(propsFor('150')['data-conditional-rule']).toBe('1');
-    expect(propsFor('70')['data-conditional-rule']).toBe('2');
+  it('жирність формату — font-weight: bold', () => {
+    expect((propsFor('R1', { 'R1:C1': bold }).style as Record<string, string>).fontWeight).toBe('bold');
   });
 
-  it('жирність правила — font-weight: bold', () => {
-    expect((propsFor('70').style as Record<string, string>).fontWeight).toBe('bold');
-  });
+  it('лише своя комірка: формат іншого рядка цю не фарбує', () => {
+    const props = propsFor('R2', { 'R1:C1': red });
 
-  it('жодне правило не спрацювало — ні атрибута, ні стилю', () => {
-    const props = propsFor('10');
-
-    expect(props).not.toHaveProperty('data-conditional-rule');
+    expect(props).not.toHaveProperty('data-conditional-format');
     expect(props).not.toHaveProperty('style');
   });
 
-  it('5.0000000000 зі сховища і число 5 (`Int`) — те саме значення', () => {
-    const exact = [{ ...rules[0]!, operator: 'eq', value: '5' }];
-
-    expect(propsFor('5.0000000000', NoLocalFlags, { conditionalFormats: exact })['data-conditional-rule']).toBe('1');
-    expect(propsFor(5, NoLocalFlags, { conditionalFormats: exact })['data-conditional-rule']).toBe('1');
-    expect(propsFor(150)['data-conditional-rule']).toBe('1');
+  it('зріз без cellFormats — як і був', () => {
+    expect(propsFor('R1', null)).not.toHaveProperty('data-conditional-format');
+    expect(propsFor('R1', undefined)).not.toHaveProperty('style');
   });
 
-  it('незбережена комірка лишається dirty і з правилом', () => {
+  it('незбережена комірка лишається dirty і з форматом', () => {
     const dirty: LocalCellFlags = { dirty: new Set([cellKey('R1', 'C1')]), rounded: new Set() };
-    const props = propsFor('150', dirty);
+    const props = propsFor('R1', { 'R1:C1': red }, dirty);
 
     expect(props['data-cell-state']).toBe('dirty');
-    expect(props['data-conditional-rule']).toBe('1');
-  });
-
-  it('колонка без правил — як і була', () => {
-    expect(propsFor('150', NoLocalFlags, { conditionalFormats: null })).not.toHaveProperty('data-conditional-rule');
+    expect(props['data-conditional-format']).toBe('true');
   });
 });
 
-describe('conditionalAppearance', () => {
+describe('withCellFormat', () => {
   const authored: CellStyleDto = {
     isBold: false,
     isItalic: true,
@@ -120,9 +116,8 @@ describe('conditionalAppearance', () => {
     wrapText: false,
   };
 
-  it('правило задає лише своє: порожній колір лишає колір автора, решта стилю не змінюється', () => {
-    const [first] = conditionalRulesOf({ conditionalFormats: rules });
-    const merged = withConditionalRule(authored, first!);
+  it('формат задає лише своє: порожній колір лишає колір автора, решта стилю не змінюється', () => {
+    const merged = withCellFormat(authored, red);
 
     expect(merged.backgroundArgb).toBe((0xffff0000 | 0) as number);
     expect(merged.foregroundArgb).toBe(authored.foregroundArgb);
@@ -130,17 +125,11 @@ describe('conditionalAppearance', () => {
     expect(merged.horizontalAlign).toBe(2);
   });
 
-  it('порожня комірка: лише «порожньо» спрацьовує', () => {
-    const empty = conditionalRulesOf({
-      conditionalFormats: [{ ...rules[0]!, operator: 'empty', value: null }],
-    });
+  it('без стилю автора — лише те, що задав формат', () => {
+    const merged = withCellFormat(null, { backgroundHex: null, foregroundHex: '#00ff00', isBold: true });
 
-    expect(conditionalMatchOf(empty, 'C1', null)?.position).toBe(1);
-    expect(conditionalMatchOf(empty, 'C1', undefined)?.position).toBe(1);
-    expect(conditionalMatchOf(empty, 'C1', '3')).toBeNull();
-  });
-
-  it('невідомий оператор із сервера пропускається, а не ламає сітку', () => {
-    expect(conditionalRulesOf({ conditionalFormats: [{ ...rules[0]!, operator: 'contains' }] })).toHaveLength(0);
+    expect(merged.foregroundArgb).toBe((0xff00ff00 | 0) as number);
+    expect(merged.backgroundArgb).toBeNull();
+    expect(merged.isBold).toBe(true);
   });
 });

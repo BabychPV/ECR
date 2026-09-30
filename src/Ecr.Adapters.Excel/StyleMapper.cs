@@ -120,6 +120,31 @@ public sealed class StyleMapper
         }
     }
 
+    /// <summary>Накладає результат умовного форматування (ФВ-2.6/2.7) на комірку.</summary>
+    /// <remarks>Лише задані складові: колір теми (<c>null</c>) лишає колір колонки.</remarks>
+    public void ApplyConditional(IXLStyle? target, Ecr.Application.Templates.CellFormatDto? format)
+    {
+        if (target is null || format is null)
+        {
+            return;
+        }
+
+        if (format.BackgroundHex is { } background)
+        {
+            target.Fill.BackgroundColor = XLColor.FromHtml(background);
+        }
+
+        if (format.ForegroundHex is { } foreground)
+        {
+            target.Font.FontColor = XLColor.FromHtml(foreground);
+        }
+
+        if (format.IsBold)
+        {
+            target.Font.Bold = true;
+        }
+    }
+
     /// <summary>Позначає комірку як таку, що рахується системою.</summary>
     public void MarkCalculated(IXLStyle? target)
     {

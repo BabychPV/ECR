@@ -425,6 +425,18 @@ export function RegistriesPage(): JSX.Element {
               </Button>
             )}
 
+            {/* RT-25: які документи відкритих періодів зачепить правка довідника, і їх перерахунок. */}
+            {selected !== undefined && (
+              <Button
+                component={Link}
+                to={`/admin/registries/${encodeURIComponent(selected.code)}/impact`}
+                size="xs"
+                variant="default"
+              >
+                {t('registries.impact.open')}
+              </Button>
+            )}
+
             {/* ⛔ Перемикання master набором (`ФВ-13.10`). Дія існувала на
                 сервері й не мала в інтерфейсі жодного споживача — тобто
                 поетапний перехід майстра (`ФВ-11.4`) був неможливий інакше,

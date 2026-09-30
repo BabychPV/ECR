@@ -1,68 +1,37 @@
-import type { CellStyleDto, ColumnDto } from '@/api/types';
-import { firstMatchingRule, ruleFromWire, type ConditionalRule } from '@/features/templates/conditionalFormat';
-import { cellText } from './cellValue';
+import type { CellStyleDto, TableSliceDto } from '@/api/types';
 
 /**
  * Умовне форматування на живій сітці документа (`ФВ-2.7`).
  *
- * Правила їдуть у зрізі разом зі стилем колонки (`ColumnDto.conditionalFormats`,
- * `GetTableSliceHandler`), а не окремим запитом: `GET …/conditional-formats`
- * вимагає `Template.View`, якого в оператора може не бути.
+ * Сервер рахує правила версії сам (`ConditionalFormatEvaluator`, та сама
+ * функція, що в Excel-експорті) і віддає ГОТОВИЙ результат у зрізі:
+ * `TableSliceDto.cellFormats`, ключ `"{rowKey}:{columnCode}"` (`02-contracts.md`,
+ * ✎ 2026-09-30). Клієнт правил не обчислює — лише фарбує комірки з ключем.
+ * ⚠ Результат — зі ЗБЕРЕЖЕНОГО стану: ще не збережена правка перефарбується
+ * після повторного читання зрізу.
  *
- * ⛔ Правило — ШАР ПОВЕРХ стилю автора (`cellAppearance.ts`), а не третій
- * механізм поруч: спрацьоване правило підміняє у `CellStyleDto` колонки лише
- * те, що задає саме (заливку, колір тексту, жирність), і далі все йде тим
- * самим шляхом — контраст під обидві теми, заливка лише на комірці без стану
- * (`X-10`). Тому незбережена чи заблокована комірка лишається впізнаваною і з
- * правилом.
+ * ⛔ Формат — ШАР ПОВЕРХ стилю автора (`cellAppearance.ts`), а не третій
+ * механізм поруч: він підміняє у `CellStyleDto` колонки лише те, що задає
+ * (заливку, колір тексту, жирність), і далі все йде тим самим шляхом —
+ * контраст під обидві теми, заливка лише на комірці без стану (`X-10`). Тому
+ * незбережена чи заблокована комірка лишається впізнаваною і з правилом.
  *
  * ⚠ Модуль живе в лінивому чанку сітки: статично його бере лише
  * `DocumentGrid`, тож вхідний чанк `DocumentPage` (`D-132`) він не розширює.
  */
 
-const NoRules: readonly ConditionalRule[] = [];
+export type CellFormat = NonNullable<TableSliceDto['cellFormats']>[string];
 
-/** Правила колонки в порядку застосування; невідомий оператор — пропускається. */
-export function conditionalRulesOf(column: Pick<ColumnDto, 'conditionalFormats'>): readonly ConditionalRule[] {
-  const wire = column.conditionalFormats;
-  if (wire === null || wire === undefined || wire.length === 0) return NoRules;
-
-  return wire.map(ruleFromWire).filter((rule): rule is ConditionalRule => rule !== null);
-}
-
-/** Спрацьоване правило і його позиція (1…) серед правил колонки. */
-export interface ConditionalMatch {
-  readonly rule: ConditionalRule;
-  readonly position: number;
+/** Результат правил для комірки; `null` — жодне правило не спрацювало. */
+export function cellFormatOf(slice: Pick<TableSliceDto, 'cellFormats'>, key: string): CellFormat | null {
+  return slice.cellFormats?.[key] ?? null;
 }
 
 /**
- * Перше правило колонки, що спрацьовує на значенні комірки; `null` — жодне.
- *
- * ⚠ Значення — канонічним текстом (`cellText`), тим самим, що йде в буфер
- * обміну: `5.0000000000` зі сховища і `5` з редактора — одне число.
+ * Стиль автора з накладеним результатом правила. Правило задає лише те, що
+ * задає: порожній колір лишає колір автора, жирність додається.
  */
-export function conditionalMatchOf(
-  rules: readonly ConditionalRule[],
-  columnCode: string,
-  value: unknown,
-): ConditionalMatch | null {
-  if (rules.length === 0) return null;
-
-  const text = value === null || value === undefined ? null : cellText(value);
-  const rule = firstMatchingRule(rules, columnCode, text);
-
-  return rule === null ? null : { rule, position: rules.indexOf(rule) + 1 };
-}
-
-/**
- * Стиль автора з накладеним правилом. Правило задає лише те, що задає:
- * порожній колір правила лишає колір автора, жирність додається.
- */
-export function withConditionalRule(
-  style: CellStyleDto | null | undefined,
-  rule: ConditionalRule,
-): CellStyleDto {
+export function withCellFormat(style: CellStyleDto | null | undefined, format: CellFormat): CellStyleDto {
   const base: CellStyleDto = style ?? {
     isBold: false,
     isItalic: false,
@@ -75,16 +44,19 @@ export function withConditionalRule(
 
   return {
     ...base,
-    isBold: base.isBold || rule.isBold,
-    foregroundArgb: rule.foregroundHex === '' ? base.foregroundArgb : argbOfHex(rule.foregroundHex),
-    backgroundArgb: rule.backgroundHex === '' ? base.backgroundArgb : argbOfHex(rule.backgroundHex),
+    isBold: base.isBold || format.isBold,
+    foregroundArgb: argbOfHex(format.foregroundHex) ?? base.foregroundArgb,
+    backgroundArgb: argbOfHex(format.backgroundHex) ?? base.backgroundArgb,
   };
 }
 
 /**
  * `#rrggbb` → ARGB зі знаком .NET `int` (непрозорий), дзеркало `hexOfArgb` у
  * `cellAppearance.ts`: `| 0` дає те саме від'ємне число, що й `StyleDef`.
+ * Порожньо або не `#rrggbb` — `null` (колір теми).
  */
-function argbOfHex(hex: string): number {
+function argbOfHex(hex: string | null | undefined): number | null {
+  if (hex === null || hex === undefined || !/^#[0-9a-fA-F]{6}$/.test(hex)) return null;
+
   return (0xff000000 | Number.parseInt(hex.slice(1), 16)) | 0;
 }

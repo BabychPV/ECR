@@ -17,7 +17,7 @@ import type {
 } from '@/api/types';
 import { useColumnWidths } from '@/features/preferences/columnWidthsSync';
 import { cellAppearanceClassOf, cellAppearanceOf } from './cellAppearance';
-import { conditionalMatchOf, conditionalRulesOf, withConditionalRule } from './conditionalAppearance';
+import { cellFormatOf, withCellFormat } from './conditionalAppearance';
 import { cellDisplay, cellText, editorValueOf, isNumericColumn, sameCellValue } from './cellValue';
 import { parseClipboard, planPaste, toClipboard, type PasteRejection } from './clipboard';
 import { captureEdit, coerce, revertsToSaved, valueOf, withKnownVersions } from './edits';
@@ -79,6 +79,7 @@ import {
   type CellNavigationRequest,
 } from './cellNavigation';
 import { GridFormulaBar } from './GridFormulaBar';
+import { useOutOfWindowMarks } from './outOfWindowMarks';
 import {
   columnTotals,
   isTotalsRow,
@@ -687,6 +688,10 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
   // або виправлено.
   const rejections = usePendingRejections(tableInstanceId, periodKey);
 
+  // ⚠ `ФВ-2.16`: комірки, які сервер записав за `Warn` поза вікном доступу
+  // (`PatchCellsResponse.outOfWindow`, `outOfWindowMarks.ts`).
+  const outOfWindow = useOutOfWindowMarks(tableInstanceId, periodKey);
+
   // ⚠ Лічильник змін історії. Стек живе в `ref` — інакше кожна правка
   // перестворювала б його і губила глибину; але тоді React не знає, що
   // «можна скасувати» змінилося, і кнопки лишалися б назавжди сірими.
@@ -1003,6 +1008,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
             lookupPending,
             units.data ?? null,
             navigatedCell,
+            outOfWindow,
           ),
     [
       data,
@@ -1016,6 +1022,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
       lookupPending,
       units.data,
       navigatedCell,
+      outOfWindow,
     ],
   );
 
@@ -2185,6 +2192,9 @@ export function gridColumns(
   // ⛔ `ФВ-5.6`: комірка, до якої щойно перейшли від зауваження перевірки
   // (`cellNavigation.ts`); `null` — підсвічувати нічого.
   navigatedCell: string | null = null,
+
+  // ⛔ `ФВ-2.16`, `D-239`: комірки, записані за `Warn` поза вікном доступу.
+  outOfWindow: ReadonlySet<string> = new Set(),
 ): ColumnRegular[] {
   // ⚠ Тип оголошений ЯВНО, а не виведений із `map`. Без нього лямбди
   // всередині (`readonly`, `cellProperties`, `cellTemplate`) втрачають
@@ -2200,10 +2210,6 @@ export function gridColumns(
     // до подання».
     const isRequired = column.isRequired || column.isRequiredByMethodology;
     const requiredHint = isRequired ? t('grid.columnRequiredHint') : null;
-
-    // ⛔ `ФВ-2.7`: правила умовного форматування колонки — раз на колонку, а
-    // не на кожну комірку; яке з них спрацювало, рахує `cellProperties`.
-    const conditionalRules = conditionalRulesOf(column);
 
     /*
      * ⛔ `U-05`: вирівнювання числа вирішує ТИП КОЛОНКИ з сервера
@@ -2404,16 +2410,23 @@ export function gridColumns(
         // переходу до неї.
         const navigationClass = navigatedCell === key ? 'ecr-cell-nav-target' : null;
 
+        // ⛔ `ФВ-2.16`: значок «правка поза вікном» — теж маркер ПОВЕРХ стану.
+        // Причина продубльована текстом у `title`, не лише знаком.
+        const isOutOfWindow = outOfWindow.has(key);
+        const outOfWindowClass = isOutOfWindow ? 'ecr-cell-out-of-window' : null;
+        const outOfWindowHint = isOutOfWindow ? t('grid.outOfWindowHint') : null;
+
         // ⛔ Директива registry-lookup / cell-style, PR B2: оформлення
         // автора шаблону — ШАР ПІД будь-яким станом (`cellStateOf` вище),
         // не заміна: рахується ЗАВЖДИ, незалежно від того, чи спрацював
         // хоч один з інших маркерів, — інакше жирна колонка без стилю
         // фарбувалась би, лише щойно комірку зроблено `dirty`.
         //
-        // ⛔ `ФВ-2.7`: спрацьоване правило умовного форматування — шар ПОВЕРХ
-        // стилю автора, тим самим шляхом (`conditionalAppearance.ts`).
-        const conditional = conditionalMatchOf(conditionalRules, column.code, (model as GridRow)[column.code]);
-        const style = conditional === null ? column.style : withConditionalRule(column.style, conditional.rule);
+        // ⛔ `ФВ-2.7`: результат правил умовного форматування (рахує сервер,
+        // `slice.cellFormats`) — шар ПОВЕРХ стилю автора, тим самим шляхом
+        // (`conditionalAppearance.ts`).
+        const conditional = cellFormatOf(slice, key);
+        const style = conditional === null ? column.style : withCellFormat(column.style, conditional);
         const appearance = cellAppearanceOf(style);
 
         // ⛔ `X-10`: колір і заливка автора — змінними й класами, які читає
@@ -2444,6 +2457,7 @@ export function gridColumns(
           requiredInputClass === null &&
           saveErrorClass === null &&
           navigationClass === null &&
+          outOfWindowClass === null &&
           appearance === undefined
         ) {
           return numericClass === null
@@ -2468,7 +2482,13 @@ export function gridColumns(
 
         // Стан доступний і ТЕКСТОМ, не лише кольором/формою: причина заборони
         // чи незаповненого входу вже є на сервері — читалка має її почути.
-        const hint = [decision.hint, submittedHint, requiredInputMessage, saveErrorMessage]
+        const hint = [
+          decision.hint,
+          submittedHint,
+          requiredInputMessage,
+          saveErrorMessage,
+          outOfWindowHint,
+        ]
           .filter((part) => !!part)
           .join(' ');
 
@@ -2481,6 +2501,7 @@ export function gridColumns(
             requiredInputClass,
             saveErrorClass,
             navigationClass,
+            outOfWindowClass,
             numericClass,
             appearanceClass,
           ]
@@ -2490,10 +2511,11 @@ export function gridColumns(
           // ⚠ Атрибут окремо від класу: тест читає саме його і тому доводить
           // розрізнення станів, не залежачи від жодного кольору (`ФВ-14.18`).
           ...(state === null ? {} : { 'data-cell-state': state }),
+          ...(isOutOfWindow ? { 'data-out-of-window': 'true' } : {}),
 
-          // ⚠ Яке правило спрацювало — атрибутом, не лише кольором: тест і
-          // людина з інструментами розробника бачать причину підсвітки.
-          ...(conditional === null ? {} : { 'data-conditional-rule': String(conditional.position) }),
+          // ⚠ Що комірку пофарбувало правило — атрибутом, не лише кольором: тест
+          // і людина з інструментами розробника бачать причину підсвітки.
+          ...(conditional === null ? {} : { 'data-conditional-format': 'true' }),
 
           // ⚠ Підказка СТАНУ має першість над підказкою ЗНАЧЕННЯ, і це
           // вибір, а не випадок: `title` на елементі один, а «сервер
