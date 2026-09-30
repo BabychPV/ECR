@@ -47,6 +47,7 @@ public static partial class EcrConfigurationValidation
         ("Cache:AccessProfileSlidingMinutes", 1),
         ("Auth:SlidingHours", 1),
         ("Auth:StampCacheSeconds", 0),
+        (Startup.HttpsTransport.PortKey, 0),
         ("Security:RateLimit:LoginPermitPerMinute", 1),
         ("Security:RateLimit:SearchPermit", 1),
         ("Security:RateLimit:SearchWindowSeconds", 1),

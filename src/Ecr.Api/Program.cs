@@ -46,6 +46,11 @@ builder.Configuration.AddProgramDataConfig(
 // (тому й секрети — лише сюди, ніколи в жоден із файлів вище, D-11).
 builder.Configuration.AddEnvironmentVariables(prefix: "ECR_");
 
+// ⛔ D14-08/R-01: сертифікат HTTPS за відбитком (Transport:Https:CertificateThumbprint,
+// пише deploy-ecr.ps1 -HttpsThumbprint). ПІСЛЯ змінних оточення — ключ приходить
+// звідти. Відбиток заданий, а сертифікат непридатний — відмова старту тут.
+builder.Services.AddSingleton(builder.ConfigureEcrHttps());
+
 // Файловий журнал (`D14-09`): під Windows-службою консолі немає, і без файлу
 // стек винятку з CorrelationId не зберігався ніде. Консоль і EventLog лишаються
 // типовими постачальниками хоста — файл додається поруч, не замість.
@@ -206,7 +211,9 @@ builder.Services.AddHealthChecks()
     .AddCheck<Ecr.Api.Health.JobsHealthCheck>("jobs", tags: ["ready"])
     .AddCheck<Ecr.Api.Health.SourcesHealthCheck>("sources", tags: ["ready"])
     .AddCheck<Ecr.Api.Health.RecalculationWorkerHealthCheck>("worker", tags: ["ready"])
-    .AddCheck<Ecr.Api.Health.TimeZoneDatabaseHealthCheck>("tzdata", tags: ["ready"]);
+    .AddCheck<Ecr.Api.Health.TimeZoneDatabaseHealthCheck>("tzdata", tags: ["ready"])
+    // D14-08: Production по HTTP без Secure-cookie і строк сертифіката HTTPS — жовтим, не 503.
+    .AddCheck<Ecr.Api.Health.TransportHealthCheck>("transport", tags: ["ready"]);
 
 var app = builder.Build();
 
@@ -222,6 +229,9 @@ app.ValidateEcrConfiguration();
 
 // F-4: попередження про застарілу базу часових поясів (лише лог, ніколи не кидає).
 app.ReportTimeZoneDatabase();
+
+// D14-08: транспорт у журнал старту — HTTP без Secure-cookie у Production і строк сертифіката.
+app.ReportTransport();
 
 // ⚠ ПОСЛІДОВНІСТЬ СТАРТУ (B01 §6.3) — порядок значущий:
 // 1) retry-очікування БД  2) звірка міграцій  3) Validate/Migrate
@@ -248,6 +258,10 @@ app.UseMiddleware<CorrelationIdMiddleware>();
 // «заголовки в кожній відповіді»: middleware ставить їх через `OnStarting`, який
 // виконується після `Response.Clear()` обробника помилок. Пояснення — у файлі.
 app.UseMiddleware<SecurityHeadersMiddleware>();
+
+// ⚠ Перенаправлення HTTP → HTTPS — лише коли задано Transport:Https:Port
+// (deploy-ecr.ps1 -HttpRedirectPort): без другого http-порту перенаправляти нікого.
+app.UseEcrHttpsRedirection();
 
 // ⚠ ПЕРЕД `UseStaticFiles`: інакше бандл і зріз їхали б нестисненими (`RD-01`).
 app.UseResponseCompression();
