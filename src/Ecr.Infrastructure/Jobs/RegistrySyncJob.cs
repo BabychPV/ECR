@@ -108,13 +108,23 @@ public interface IRegistrySyncJob
 /// ⚠ Приведення одиниць на межі (<c>D-173</c>) ще не існує в коді: значення
 /// йде в планувальник в одиниці джерела.
 /// </para>
+/// <para>
+/// ⚠ Вікно дії (<c>D-212</c> (8), PR-7) — лише для ТЕМПОРАЛЬНОГО довідника й лише за атрибутами
+/// політики сутності (<c>ValidFromAttribute</c>/<c>ValidToAttribute</c>; дефолт — вимкнено). Пояс
+/// AF — <see cref="RegistrySyncValidity.TimeZoneKey"/> (порожньо — UTC). Зміна вікна наявного запису
+/// перераховує <c>IsOrphaned</c> (<see cref="IOrphanScanner.RescanForEntryAsync"/>) у ТІЙ САМІЙ
+/// транзакції спроби — так само, як ручна зміна вікна (<c>SetEntryValidityHandler</c>).
+/// Конфігурація (останній параметр) <c>null</c> — UTC: так будують задачу руками тести;
+/// контейнер хоста підставляє свою завжди.
+/// </para>
 /// </remarks>
 public sealed class RegistrySyncJob(
     EcrDbContext db,
     IEnumerable<IExternalDataSource> sources,
     IntegrationActor actor,
     IClock clock,
-    IServiceScopeFactory scopes) : IRegistrySyncJob
+    IServiceScopeFactory scopes,
+    Microsoft.Extensions.Configuration.IConfiguration? configuration = null) : IRegistrySyncJob
 {
     /// <summary>Префікс ключа дедупу в <c>Details</c> події.</summary>
     public const string DedupKeyPrefix = "; key=";
@@ -174,9 +184,20 @@ public sealed class RegistrySyncJob(
 
         var mappings = await MappingsAsync(entity.Id, registry.Fields.ToDictionary(f => f.Id), ct).ConfigureAwait(false);
 
+        // D-212 PR-7: вікно дії — лише темпоральному довіднику (нетемпоральному політику з датами
+        // не дає задати PUT …/registry/policy; довідник, що перестав бути темпоральним, — не пишемо).
+        var validity = registry.IsTemporal && (entity.ValidFromAttribute is not null || entity.ValidToAttribute is not null)
+            ? new RegistrySyncValiditySource(
+                entity.ValidFromAttribute,
+                entity.ValidToAttribute,
+                entity.ValidToInclusive,
+                RegistrySyncValidity.ResolveTimeZone(configuration?[RegistrySyncValidity.TimeZoneKey]))
+            : null;
+
         var links = await LinksAsync(dataSource.Id, registryDefId, ct).ConfigureAwait(false);
 
-        var snapshot = await SnapshotAsync(adapter, dataSource.Id, entity, mappings, links.Count > 0, ct).ConfigureAwait(false);
+        string[] extra = validity is null ? [] : [.. new[] { validity.FromAttribute, validity.ToAttribute }.OfType<string>()];
+        var snapshot = await SnapshotAsync(adapter, dataSource.Id, entity, mappings, extra, links.Count > 0, ct).ConfigureAwait(false);
 
         var entries = await EntriesAsync(links, mappings, ct).ConfigureAwait(false);
 
@@ -197,7 +218,8 @@ public sealed class RegistrySyncJob(
             entries,
             mappings,
             CodeMode: registry.CodeMode,
-            OnMissingInSource: entity.OnMissingInSource);
+            OnMissingInSource: entity.OnMissingInSource,
+            Validity: validity);
 
         // D-212 (5): коди записів інших довідників → Id, одним запитом на довідник.
         var lookupCodes = await ResolveCodesAsync(RegistrySyncPlanner.LookupCodes(input), ct).ConfigureAwait(false);
@@ -457,6 +479,19 @@ public sealed class RegistrySyncJob(
                     var relinked = await ApplyKeysAsync(scoped, context, keys, tx).ConfigureAwait(false);
                     await uow.SaveChangesAsync(tx).ConfigureAwait(false);
 
+                    // ⛔ D-212 PR-7 (ФВ-8.13a): нове вікно вже збережене — перерахунок IsOrphaned рядків, що
+                    // посилаються на запис, у тій самій транзакції (як SetEntryValidityHandler). Новий запис
+                    // посилань не має; оновлення без Validity вікна не змінює.
+                    var rescan = updates.Where(u => u.Validity is not null).Select(u => u.RegistryEntryId).ToList();
+                    if (rescan.Count > 0)
+                    {
+                        var scanner = services.GetRequiredService<IOrphanScanner>();
+                        foreach (var entryId in rescan)
+                        {
+                            await scanner.RescanForEntryAsync(entryId, tx).ConfigureAwait(false);
+                        }
+                    }
+
                     if (relinked.Count > 0)
                     {
                         var audit = services.GetRequiredService<IAuditWriter>();
@@ -598,6 +633,7 @@ public sealed class RegistrySyncJob(
             create.Values.ToDictionary(v => v.FieldCode, v => (object?)v.Value, StringComparer.Ordinal))
         {
             DisplayName = create.DisplayName,
+            Validity = create.Validity,
         };
 
     /// <summary>
@@ -609,6 +645,7 @@ public sealed class RegistrySyncJob(
         var order = new List<long>();
         var values = new Dictionary<long, Dictionary<string, object?>>();
         var active = new Dictionary<long, bool>();
+        var windows = plan.ValidityChanges.ToDictionary(w => w.RegistryEntryId, w => w.New);
 
         foreach (var update in plan.Updates)
         {
@@ -633,10 +670,19 @@ public sealed class RegistrySyncJob(
             active[activation.RegistryEntryId] = isActive;
         }
 
+        foreach (var change in plan.ValidityChanges)
+        {
+            if (!values.ContainsKey(change.RegistryEntryId) && !active.ContainsKey(change.RegistryEntryId))
+            {
+                order.Add(change.RegistryEntryId);
+            }
+        }
+
         return [.. order.Select(id => new RegistryEntryUpdate(
             id, values.GetValueOrDefault(id) ?? new Dictionary<string, object?>(StringComparer.Ordinal))
         {
             IsActive = active.TryGetValue(id, out var isActive) ? isActive : null,
+            Validity = windows.TryGetValue(id, out var window) ? window : null,
         })];
     }
 
@@ -801,6 +847,7 @@ public sealed class RegistrySyncJob(
         int dataSourceId,
         SourceEntity entity,
         IReadOnlyList<RegistrySyncFieldMapping> mappings,
+        IReadOnlyList<string> validityAttributes,
         bool hasLinks,
         CancellationToken ct)
     {
@@ -823,8 +870,11 @@ public sealed class RegistrySyncJob(
             }
         }
 
+        // ⚠ Атрибути дат (D-212 PR-7) читаються тим самим запитом, що й змаплені: неприйнятий шлях
+        // робить знімок неповним так само.
         var attributes = mappings
             .Select(m => m.SourceAttribute)
+            .Concat(validityAttributes)
             .Distinct(StringComparer.Ordinal)
             .ToList();
 
@@ -915,7 +965,7 @@ public sealed class RegistrySyncJob(
             .FirstOrDefaultAsync(ct)
             .ConfigureAwait(false);
 
-        var alive = new List<(long Id, bool IsActive)>();
+        var alive = new List<(long Id, bool IsActive, DateOnly? ValidFrom, DateOnly? ValidTo, int? ChangedBy)>();
         var stored = new List<RegistryValue>();
 
         foreach (var chunk in linked.Chunk(ChunkSize))
@@ -927,10 +977,10 @@ public sealed class RegistrySyncJob(
             var rows = await db.RegistryEntries
                 .AsNoTracking()
                 .Where(e => ids.Contains(e.Id) && !e.IsDeleted)
-                .Select(e => new { e.Id, e.IsActive })
+                .Select(e => new { e.Id, e.IsActive, e.ValidFrom, e.ValidTo, e.ChangedByUserId })
                 .ToListAsync(ct)
                 .ConfigureAwait(false);
-            alive.AddRange(rows.Select(r => (r.Id, r.IsActive)));
+            alive.AddRange(rows.Select(r => (r.Id, r.IsActive, r.ValidFrom, r.ValidTo, r.ChangedByUserId)));
 
             if (fieldIds.Count > 0)
             {
@@ -957,7 +1007,10 @@ public sealed class RegistrySyncJob(
                             Typed(types[value.RegistryFieldDefId], value),
                             IsHuman(value.ChangedByUserId, svcId));
                     }),
-            e.IsActive))];
+            e.IsActive,
+            e.ValidFrom,
+            e.ValidTo,
+            IsHuman(e.ChangedBy, svcId)))];
     }
 
     /// <summary>
@@ -1227,7 +1280,9 @@ public sealed class RegistrySyncJob(
         // Поле названо — значення саме його; ні — усі значення пакета цього запису.
         var source = field is not null && update.Values.TryGetValue(field, out var raw)
             ? Text(raw)
-            : string.Join(",", update.Values.OrderBy(v => v.Key, StringComparer.Ordinal).Select(v => $"{v.Key}={Text(v.Value)}"));
+            : field == RegistryEntryWriter.ValidityFieldCode && update.Validity is { } window
+                ? RegistrySyncValidity.Text(window)
+                : string.Join(",", update.Values.OrderBy(v => v.Key, StringComparer.Ordinal).Select(v => $"{v.Key}={Text(v.Value)}"));
 
         var subject = $"element={element}; entry={entry}; field={field}";
         var value = $"source={source}; error={errorCode}; messageKey={messageKey}";

@@ -137,6 +137,15 @@ public static partial class EcrConfigurationValidation
             }
         }
 
+        // D-212 PR-7: невідомий пояс AF інакше зупиняв би кожен синк довідника з датами вже вночі,
+        // а не старт служби з ім'ям ключа.
+        var zoneKey = Application.Integration.RegistrySync.RegistrySyncValidity.TimeZoneKey;
+        if (Value(configuration, zoneKey) is { } zone
+            && !Application.Integration.RegistrySync.RegistrySyncValidity.TryResolveTimeZone(zone, out _))
+        {
+            problems.Add(Describe(zoneKey, zone, "очікується ідентифікатор часового поясу Windows чи IANA, напр. FLE Standard Time або Europe/Kyiv"));
+        }
+
         // ⛔ U17: увімкнений експорт без адреси колектора — не «експорт кудись за
         // замовчуванням» (localhost:4317 бібліотеки), а помилка адміністратора.
         if (Ecr.Api.Observability.TelemetrySetup.IsEnabled(configuration))
