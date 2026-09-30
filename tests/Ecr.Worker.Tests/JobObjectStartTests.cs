@@ -21,6 +21,34 @@ namespace Ecr.Worker.Tests;
 [Collection(WorkerProcessSerial.Name)]
 public sealed class JobObjectStartTests
 {
+    /// <summary>
+    /// ⚠ Початковий потік щойно створеного процесу ядро переводить у Wait/Suspended не
+    /// миттєво: перші мілісекунди він Initialized/Ready (на CI це давало хибне «уже
+    /// виконувався»). Чекаємо стан зі свіжим знімком; потік, що справді біжить
+    /// (мутація без CREATE_SUSPENDED), у Suspended не потрапить — це таймаут.
+    /// </summary>
+    private static bool WaitAllSuspended(Process p, TimeSpan timeout)
+    {
+        var deadline = DateTime.UtcNow + timeout;
+        while (true)
+        {
+            p.Refresh();
+            var threads = p.Threads.Cast<ProcessThread>().ToList();
+            if (threads.Count > 0 && threads.All(t =>
+                    t.ThreadState == System.Diagnostics.ThreadState.Wait && t.WaitReason == ThreadWaitReason.Suspended))
+            {
+                return true;
+            }
+
+            if (DateTime.UtcNow >= deadline)
+            {
+                return false;
+            }
+
+            Thread.Sleep(10);
+        }
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait("Requirement", "ФВ-9.8")]
@@ -42,8 +70,7 @@ public sealed class JobObjectStartTests
             process = job.Start(Command("--child", "--stub"), p =>
             {
                 inJobBeforeResume = job.Contains(p);
-                suspendedBeforeResume = p.Threads.Cast<ProcessThread>().All(t =>
-                    t.ThreadState == System.Diagnostics.ThreadState.Wait && t.WaitReason == ThreadWaitReason.Suspended);
+                suspendedBeforeResume = WaitAllSuspended(p, TimeSpan.FromSeconds(10));
             });
 
             // ⛔ Головне твердження: на мить відпуску процес уже в Job Object.
