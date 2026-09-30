@@ -2162,6 +2162,17 @@ public interface ICalculationRunner
 }
 ```
 
+#### `ICalculationTrigger`
+
+Автоперерахунок документа за період після запису без людини (HSE301 A4, V-5 → `D-174`). Ставить `IRecalculationJob` з ціллю `doc{id}-p{period}` через `EnqueueCoalescedAsync` (без витіснення); закритий період і поданий аркуш — нуль задач. Викликати один раз на прогін, не в циклі.
+
+```csharp
+public interface ICalculationTrigger
+{
+    public Task<string?> RequestAsync(long documentId, PeriodKey periodKey, CancellationToken ct);
+}
+```
+
 #### `ICellPatcher`
 
 Запис комірок від імені інтеграції (D-118).
