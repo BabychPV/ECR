@@ -31,6 +31,7 @@ const KindKeys: Record<string, string> = {
   IRowWindowFetchJob: 'jobs.kind.rowWindowFetch',
   IConsistencyCheckJob: 'jobs.kind.consistencyCheck',
   IOrphanScanJob: 'jobs.kind.orphanScan',
+  IRegistryImpactRecalculationJob: 'jobs.kind.registryImpactRecalculation',
 };
 
 /** Просте ім'я типу з повного (`Ecr.Application.Ports.IRecalculationJob`). */

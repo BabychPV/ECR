@@ -2810,6 +2810,20 @@ public interface IRegistryImpactStore
 }
 ```
 
+#### `IRegistryImpactRecalculationJob`
+
+Маркер батьківської задачі «перерахувати документи, зачеплені правкою довідника» (RT-25, FEATURE-REGISTRY-TABLES §5.10).
+Ставить її `POST /registries/{code}/recalculate-impacted` — `EnqueueCoalescedAsync` на ціль
+`RegistryImpactRecalculationTarget.Of(registryDefId, documentIds)` (`registry-impact-r{id}-{відбиток набору}`):
+однакові набори зливаються, різні — ні. Задача звіряє набір з поточним `IRegistryImpactStore` (закритий період випадає) і
+ставить `ICalculationTrigger.RequestAsync` на кожен документ × період — тож «готово» означає «поставлено в чергу».
+`EnqueueExclusive` заборонено: воно витісняє виконуваний перерахунок гарячого документа.
+
+```csharp
+public interface IRegistryImpactRecalculationJob : IBackgroundJob;
+
+public sealed record RegistryImpactRecalculationRequest(int RegistryDefId, IReadOnlyList<long> DocumentIds, string Reason);
+```
 #### `IReportDefinitionStore`
 
 Описи звітів (rpt.ReportDef) та їхні версії.
@@ -3871,6 +3885,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/registries/{code}/history` | `Registry.View` | 8 |
 | `GET` | `/api/v1/registries/{code}/usage` | `Registry.EditDefinition` | 8 |
 | `GET` | `/api/v1/registries/{code}/impact` | `Registry.View` + `Calculation.View` | 8 |
+| `POST` | `/api/v1/registries/{code}/recalculate-impacted` | `Calculation.Recalculate` | 8 |
 | `POST` | `/api/v1/registries/{code}/entries/import?dryRun=` | `Registry.EditData` | 8 |
 | `POST` | `/api/v1/registries` | `Registry.EditDefinition` | 8 |
 | `POST` | `/api/v1/registries/{code}/keys/check` | `Registry.EditDefinition` | 8 |

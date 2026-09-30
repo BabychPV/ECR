@@ -411,7 +411,7 @@ public sealed partial class EndpointCoverageTests
                 "jobs.kind.recalculation", "jobs.kind.formulaRecalculation", "jobs.kind.excelExport",
                 "jobs.kind.excelImport", "jobs.kind.materializeCollectedData", "jobs.kind.reportSnapshot",
                 "jobs.kind.collection", "jobs.kind.sourceEventSync", "jobs.kind.rowWindowFetch",
-                "jobs.kind.consistencyCheck", "jobs.kind.orphanScan",
+                "jobs.kind.consistencyCheck", "jobs.kind.orphanScan", "jobs.kind.registryImpactRecalculation",
             ],
             "Назва типу фонової задачі (KindKeys)."),
 

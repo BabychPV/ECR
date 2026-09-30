@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { registryImpact } from '@/features/registries/impact/api';
+import { recalculateImpacted, registryImpact } from '@/features/registries/impact/api';
 
 /**
  * Споживач `GET /api/v1/registries/{code}/impact` (RT-25). Предмет — адреса й форма відповіді:
@@ -9,6 +9,7 @@ import { registryImpact } from '@/features/registries/impact/api';
 interface Attempt {
   url: string;
   method: string;
+  body?: string | undefined;
 }
 
 function mockFetch(body: unknown): Attempt[] {
@@ -17,7 +18,11 @@ function mockFetch(body: unknown): Attempt[] {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      attempts.push({ url: String(input), method: (init?.method ?? 'GET').toUpperCase() });
+      attempts.push({
+        url: String(input),
+        method: (init?.method ?? 'GET').toUpperCase(),
+        body: typeof init?.body === 'string' ? init.body : undefined,
+      });
 
       return new Response(JSON.stringify(body), {
         status: 200,
@@ -72,5 +77,18 @@ describe('Зачеплені документи довідника', () => {
     expect(result.items[0]!.via).toEqual(['methodology:HSE301']);
     expect(result.total).toBe(1200);
     expect(result.truncated).toBe(true);
+  });
+});
+
+describe('Перерахунок зачеплених документів', () => {
+  it('шле POST на адресу довідника з причиною і переліком документів', async () => {
+    const attempts = mockFetch({ jobId: 'job-1' });
+
+    const result = await recalculateImpacted('A/B', { documentIds: [1, 2], reason: 'правка складу' });
+
+    expect(attempts[0]!.method).toBe('POST');
+    expect(attempts[0]!.url).toBe('/api/v1/registries/A%2FB/recalculate-impacted');
+    expect(JSON.parse(attempts[0]!.body!)).toEqual({ documentIds: [1, 2], reason: 'правка складу' });
+    expect(result.jobId).toBe('job-1');
   });
 });

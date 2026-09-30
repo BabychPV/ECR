@@ -246,6 +246,7 @@ public static class DependencyInjection
         services.AddScoped<Registries.GetRegistryHistoryHandler>();
         services.AddScoped<Registries.GetRegistryUsageHandler>();
         services.AddScoped<Registries.Impact.GetRegistryImpactHandler>(); // RT-25
+        services.AddScoped<Registries.Impact.RecalculateImpactedHandler>(); // RT-25
         services.AddScoped<Registries.ImportRegistryEntriesHandler>();
         services.AddScoped<Registries.ListRegistryExternalKeysHandler>(); // FEATURE-REGISTRY-SYNC S2
         services.AddScoped<Registries.BindRegistryExternalKeyHandler>();

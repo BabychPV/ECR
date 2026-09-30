@@ -8526,6 +8526,34 @@
         ],
         "type": "object"
       },
+      "RecalculateImpactedRequest": {
+        "description": "Тіло `POST /registries/{code}/recalculate-impacted`.",
+        "properties": {
+          "documentIds": {
+            "description": "Документи з переліку `impact`; `null` — усі, до яких є право.",
+            "items": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "reason": {
+            "description": "Причина — обов'язкова.",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "documentIds",
+          "reason"
+        ],
+        "type": "object"
+      },
       "RecalculationAcceptedResponse": {
         "description": "Прийнятий у чергу перерахунок.",
         "properties": {
@@ -30213,6 +30241,129 @@
         "summary": "Жива перевірка дублікатів майбутнього ключа на наявних записах. Право\n`Registry.EditDefinition`.",
         "tags": [
           "RegistryDefinitionTools"
+        ]
+      }
+    },
+    "/api/v1/registries/{code}/recalculate-impacted": {
+      "post": {
+        "description": "⚠ `202`: рахує черга, а не запит. Один `jobId` на набір; стан — GET /api/v1/jobs/{jobId}.",
+        "parameters": [
+          {
+            "description": "Код довідника.",
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecalculateImpactedRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecalculateImpactedRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecalculateImpactedRequest"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobAcceptedResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobAcceptedResponse"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobAcceptedResponse"
+                }
+              }
+            },
+            "description": "Accepted"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Ставить перерахунок зачеплених документів у чергу. Права `Calculation.Recalculate` у проєкті\nкожного документа і доступ до довідника.",
+        "tags": [
+          "RegistryImpact"
         ]
       }
     },

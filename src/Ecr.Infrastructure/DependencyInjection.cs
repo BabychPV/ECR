@@ -384,6 +384,7 @@ public static class DependencyInjection
         // HSE301 A5b: синк подій джерела в рядки таблиць. Ставить його `CollectionJob` (сутність із
         // активним `SourceEventMap`) — за маркером, як решту задач у черзі.
         services.AddScoped<ISourceEventSyncJob, Jobs.SourceEventSyncJob>();
+        services.AddScoped<IRegistryImpactRecalculationJob, Jobs.RegistryImpactRecalculationJob>(); // RT-25: батьківська задача перерахунку зачеплених
 
         // HSE301:A1 — підтягування значень PI за вікном рядка (§4.4). Задачу ставить хук запису комірок
         // (`IRowWindowTrigger` у `PatchCellsHandler`) і щогодинний `RowWindowRefetchJob` (конкретний клас — як
