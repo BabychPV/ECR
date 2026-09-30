@@ -44,7 +44,7 @@ public sealed class ListRegistryExternalKeysHandler(
 
         var lookup = new RegistryLookup(registries, registryCode);
         await RegistryAccess
-            .RequireAsync(access, currentUser, GetRegistryEntriesHandler.Permission, GrantLevel.Read, lookup.IdAsync, ct)
+            .RequireAsync(access, currentUser, GetRegistryEntriesHandler.Permission, GrantLevel.Read, lookup, ct)
             .ConfigureAwait(false);
         var definition = await lookup.RequireAsync(ct).ConfigureAwait(false);
 
@@ -98,7 +98,7 @@ public sealed class BindRegistryExternalKeyHandler(
 
         var lookup = new RegistryLookup(registries, registryCode);
         await RegistryAccess
-            .RequireAsync(access, currentUser, UpsertRegistryEntryHandler.Permission, GrantLevel.Write, lookup.IdAsync, ct)
+            .RequireAsync(access, currentUser, UpsertRegistryEntryHandler.Permission, GrantLevel.Write, lookup, ct)
             .ConfigureAwait(false);
         var definition = await lookup.RequireAsync(ct).ConfigureAwait(false);
         var userId = RegistryExternalKeyRules.UserId(currentUser);
@@ -194,7 +194,7 @@ public sealed class UnbindRegistryExternalKeyHandler(
 
         var lookup = new RegistryLookup(registries, registryCode);
         await RegistryAccess
-            .RequireAsync(access, currentUser, UpsertRegistryEntryHandler.Permission, GrantLevel.Write, lookup.IdAsync, ct)
+            .RequireAsync(access, currentUser, UpsertRegistryEntryHandler.Permission, GrantLevel.Write, lookup, ct)
             .ConfigureAwait(false);
         var definition = await lookup.RequireAsync(ct).ConfigureAwait(false);
         var userId = RegistryExternalKeyRules.UserId(currentUser);
@@ -238,48 +238,6 @@ public sealed class UnbindRegistryExternalKeyHandler(
 /// <param name="DataSourceId">Джерело (<c>ext.DataSource</c>).</param>
 /// <param name="ExternalId">Ідентифікатор у джерелі (WebId/GUID); до 200 символів.</param>
 public sealed record BindRegistryExternalKeyCommand(long EntryId, int DataSourceId, string? ExternalId);
-
-/// <summary>
-/// Довідник зі шляху запиту: читається щонайбільше раз — або ліниво всередині
-/// <see cref="RegistryAccess"/> (немає глобального права), або після перевірки права.
-/// </summary>
-/// <remarks>
-/// ⚠ Порядок той самий, що в решти маршрутів довідників: спершу право, потім 404.
-/// Без права відповідь — <c>403</c>, і про існування довідника вона не каже.
-/// Право обробник передає САМ, константою: сторож <c>ProjectPermissionCheckTests</c>
-/// читає код права в місці виклику <see cref="RegistryAccess.RequireAsync(IAccessDecisionService, ICurrentUser, string, GrantLevel, Func{CancellationToken, Task{int?}}, CancellationToken)"/>.
-/// </remarks>
-internal sealed class RegistryLookup(IRegistryStore registries, string registryCode)
-{
-    private RegistryDef? _definition;
-    private bool _loaded;
-
-    /// <summary>Резолвер для <see cref="RegistryAccess"/>.</summary>
-    internal async Task<int?> IdAsync(CancellationToken ct) => (await LoadAsync(ct).ConfigureAwait(false))?.Id;
-
-    /// <summary>Довідник або <c>404 err.ECR-REG-0404.registry</c>.</summary>
-    internal async Task<RegistryDef> RequireAsync(CancellationToken ct)
-        => await LoadAsync(ct).ConfigureAwait(false)
-           ?? throw new NotFoundException(
-               ErrorCodes.RegistryEntryNotFound,
-               $"Довідника «{registryCode}» не існує.",
-               new Dictionary<string, object?>
-               {
-                   ["messageKey"] = "err.ECR-REG-0404.registry",
-                   ["registryCode"] = registryCode,
-               });
-
-    private async Task<RegistryDef?> LoadAsync(CancellationToken ct)
-    {
-        if (!_loaded)
-        {
-            _definition = await registries.FindDefinitionAsync(registryCode, ct).ConfigureAwait(false);
-            _loaded = true;
-        }
-
-        return _definition;
-    }
-}
 
 /// <summary>Спільне для трьох обробників зовнішніх ключів.</summary>
 internal static class RegistryExternalKeyRules

@@ -113,8 +113,7 @@ public sealed class ImportRegistryEntriesHandler(
         await RegistryAccess
             .RequireAsync(
                 access, currentUser, UpsertRegistryEntryHandler.Permission, GrantLevel.Write,
-                async token => (await registries.FindDefinitionAsync(registryCode, token).ConfigureAwait(false))?.Id,
-                ct)
+                new RegistryLookup(registries, registryCode), ct)
             .ConfigureAwait(false);
 
         var userId = currentUser.UserId

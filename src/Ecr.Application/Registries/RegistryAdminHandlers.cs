@@ -33,7 +33,11 @@ public sealed class ListRegistriesHandler(
 
         var definitions = await registries.ListDefinitionsAsync(ct).ConfigureAwait(false);
 
+        // ⛔ S18: довідник із явною забороною в переліку немає — глобальне право його не повертає.
+        var profile = await access.BuildProfileAsync(currentUser.UserId!.Value, ct).ConfigureAwait(false);
+
         return definitions
+            .Where(d => !RegistryAccess.IsDenied(profile, d.Id))
             .Select(d => new RegistryDefDto(
                 d.Id,
                 d.Code,

@@ -39,7 +39,7 @@ public sealed class GetRegistryDefinitionHandler(
     /// <exception cref="NotFoundException">Довідника немає — <c>ECR-REG-0404</c>.</exception>
     public async Task<RegistryDefinitionDto> HandleAsync(string code, CancellationToken ct)
     {
-        await Security.PermissionCheck
+        var profile = await Security.PermissionCheck
             .RequireAsync(access, currentUser, Permission, ct)
             .ConfigureAwait(false);
 
@@ -48,6 +48,9 @@ public sealed class GetRegistryDefinitionHandler(
                 "ECR-REG-0404",
                 $"Довідника «{code}» не існує.",
                 new Dictionary<string, object?> { ["messageKey"] = "err.ECR-REG-0404.registry", ["registryCode"] = code });
+
+        // ⛔ S18: заборона на довідник перекриває глобальне Registry.View — 404, як неіснуючий.
+        RegistryAccess.EnsureNotDenied(profile, definition.Id, code);
 
         var all =await registries.ListDefinitionsAsync(ct).ConfigureAwait(false);
         var byId = all.ToDictionary(d => d.Id, d => d.Code);
@@ -186,7 +189,7 @@ public sealed class GetRegistryHistoryHandler(
     public async Task<IReadOnlyList<RegistryHistoryEntryDto>> HandleAsync(
         string code, CancellationToken ct)
     {
-        await Security.PermissionCheck
+        var profile = await Security.PermissionCheck
             .RequireAsync(access, currentUser, Permission, ct)
             .ConfigureAwait(false);
 
@@ -195,6 +198,9 @@ public sealed class GetRegistryHistoryHandler(
                 "ECR-REG-0404",
                 $"Довідника «{code}» не існує.",
                 new Dictionary<string, object?> { ["messageKey"] = "err.ECR-REG-0404.registry", ["registryCode"] = code });
+
+        // ⛔ S18: заборона на довідник перекриває глобальне Registry.View — 404, як неіснуючий.
+        RegistryAccess.EnsureNotDenied(profile, definition.Id, code);
 
         var own =await audit
             .ReadStructureChangesAsync(Types, definition.Id, Limit, ct)

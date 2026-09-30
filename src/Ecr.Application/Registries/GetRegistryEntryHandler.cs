@@ -46,10 +46,7 @@ public sealed class GetRegistryEntryHandler(
         string registryCode, long entryId, CancellationToken ct)
     {
         await RegistryAccess
-            .RequireAsync(
-                access, currentUser, Permission, GrantLevel.Read,
-                async token => (await registries.FindDefinitionAsync(registryCode, token).ConfigureAwait(false))?.Id,
-                ct)
+            .RequireAsync(access, currentUser, Permission, GrantLevel.Read, new RegistryLookup(registries, registryCode), ct)
             .ConfigureAwait(false);
 
         var definition = await registries.FindDefinitionAsync(registryCode, ct).ConfigureAwait(false)

@@ -63,9 +63,7 @@ public sealed class GetRegistryRowsHandler(
 
         await RegistryAccess
             .RequireAsync(
-                access, currentUser, Permission, GrantLevel.Read,
-                async token => (await registries.FindDefinitionAsync(request.RegistryCode, token).ConfigureAwait(false))?.Id,
-                ct)
+                access, currentUser, Permission, GrantLevel.Read, new RegistryLookup(registries, request.RegistryCode), ct)
             .ConfigureAwait(false);
 
         // ⚠ 422, а не 400: межа сторінки — правило (`ECR-REQ-0422`), як у решті курсорних переліків.

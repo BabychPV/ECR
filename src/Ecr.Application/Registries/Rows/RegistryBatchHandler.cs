@@ -73,10 +73,7 @@ public sealed partial class RegistryBatchHandler(
         var items = request.Items ?? [];
 
         await RegistryAccess
-            .RequireAsync(
-                access, currentUser, Permission, GrantLevel.Write,
-                async token => (await registries.FindDefinitionAsync(registryCode, token).ConfigureAwait(false))?.Id,
-                ct)
+            .RequireAsync(access, currentUser, Permission, GrantLevel.Write, new RegistryLookup(registries, registryCode), ct)
             .ConfigureAwait(false);
 
         Validate(items);

@@ -51,7 +51,10 @@ public sealed class SearchHandler(ISearchStore store, IAccessDecisionService acc
                 ? Documents.ListDocumentsHandler.ReadableProjects(profile, Documents.ListDocumentsHandler.Permission)
                 : null,
             profile.Has(Templates.ListTemplatesHandler.Permission),
-            profile.Has(Registries.ListRegistriesHandler.Permission));
+            profile.Has(Registries.ListRegistriesHandler.Permission),
+
+            // ⛔ S18: довідник із явною забороною не шукається (як і в його переліку).
+            Registries.RegistryAccess.DeniedIds(profile));
 
         var take = limit <= 0 ? DefaultLimit : Math.Min(limit, MaxLimit);
         var rows = await store.SearchAsync(term, scope, take, ct).ConfigureAwait(false);

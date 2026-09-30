@@ -7,7 +7,12 @@ namespace Ecr.Application.Ports;
 /// <param name="DocumentProjects">Проєкти, документи яких видно; <c>null</c> — документи не шукати.</param>
 /// <param name="Templates">Чи шукати шаблони.</param>
 /// <param name="Registries">Чи шукати довідники.</param>
-public sealed record SearchScope(IReadOnlyCollection<int>? DocumentProjects, bool Templates, bool Registries);
+/// <param name="DeniedRegistries">Довідники з явною забороною (S18): їх не шукати; <c>null</c> — заборон немає.</param>
+public sealed record SearchScope(
+    IReadOnlyCollection<int>? DocumentProjects,
+    bool Templates,
+    bool Registries,
+    IReadOnlyCollection<int>? DeniedRegistries = null);
 
 /// <summary>Сирий збіг пошуку до локалізації назви.</summary>
 /// <param name="Kind">Тип сутності: <c>document</c>, <c>template</c>, <c>registry</c>.</param>
