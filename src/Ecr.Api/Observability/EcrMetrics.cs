@@ -21,8 +21,8 @@ public sealed class EcrMetrics
     /// <summary>Перерахунок формул.</summary>
     public const string FormulaEvaluate = "ecr.formula.evaluate";
 
-    /// <summary>Побудова профілю доступу; має траплятися раз на сесію.</summary>
-    public const string AccessProfileBuild = "ecr.access.profile.build";
+    // ecr.access.profile.build емітує InfrastructureMetrics.RecordAccessProfileBuild (AccessProfileCache):
+    // другий інструмент з тим самим ім'ям у Meter "Ecr" дав би дубль гістограми.
 
     /// <summary>Тривалість фонової або довгої синхронної операції.</summary>
     public const string JobDuration = "ecr.job.duration";
@@ -61,7 +61,6 @@ public sealed class EcrMetrics
     private readonly Histogram<double> _cellsRead;
     private readonly Histogram<double> _cellsWrite;
     private readonly Histogram<double> _formulaEvaluate;
-    private readonly Histogram<double> _accessProfileBuild;
     private readonly Histogram<double> _jobDuration;
     private readonly Counter<long> _conflicts;
     private readonly Counter<long> _consistencyIssues;
@@ -73,7 +72,6 @@ public sealed class EcrMetrics
         _cellsRead = meter.CreateHistogram<double>(CellsRead, "ms", "Відкриття зрізу таблиці");
         _cellsWrite = meter.CreateHistogram<double>(CellsWrite, "ms", "Пакетний запис комірок");
         _formulaEvaluate = meter.CreateHistogram<double>(FormulaEvaluate, "ms", "Перерахунок формул таблиці");
-        _accessProfileBuild = meter.CreateHistogram<double>(AccessProfileBuild, "ms", "Побудова AccessProfile");
         _jobDuration = meter.CreateHistogram<double>(JobDuration, "s", "Тривалість фонової задачі");
         _conflicts = meter.CreateCounter<long>(ConflictCount, "1", "Конфлікти паралельного редагування");
         _consistencyIssues = meter.CreateCounter<long>(ConsistencyIssues, "1", "Знахідки ConsistencyCheckJob");
@@ -172,18 +170,6 @@ public sealed class EcrMetrics
 
         _formulaEvaluate.Record(ms);
     }
-
-    /// <summary>
-    /// Фіксує побудову профілю доступу.
-    /// </summary>
-    /// <param name="ms">Тривалість.</param>
-    /// <remarks>
-    /// ⚠ Метрика існує не заради часу, а заради ЧАСТОТИ: профіль будується раз
-    /// на сесію (ФВ-6.10). Сплеск кількості означає, що кеш не працює, і
-    /// бюджет прав у 50 мс на запит уже не тримається.
-    /// </remarks>
-    public void RecordAccessProfileBuild(double ms)
-        => _accessProfileBuild.Record(ms);
 
     /// <summary>Фіксує тривалість довгої операції.</summary>
     /// <param name="operation">Назва операції — тег на гістограмі.</param>

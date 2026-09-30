@@ -91,7 +91,10 @@ public sealed class AccessProfileCache(IMemoryCache memory, CacheLifetimes? life
             return ready;
         }
 
+        var started = System.Diagnostics.Stopwatch.GetTimestamp();
         var profile = await factory(ct).ConfigureAwait(false);
+        Observability.InfrastructureMetrics.RecordAccessProfileBuild(
+            System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalSeconds);
 
         // ⛔ Профіль симуляції в кеш не потрапляє НІКОЛИ (ФВ-6.16a п. 4).
         // Ключ складається з користувача і штампа — тобто профіль суб'єкта ліг

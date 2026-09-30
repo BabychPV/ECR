@@ -32,7 +32,12 @@ public static class InfrastructureMetrics
     /// <summary>Кеш профілю доступу — значення тегу <c>cache</c>.</summary>
     public const string AccessProfileCacheName = "access_profile";
 
+    /// <summary>Тривалість реальної побудови профілю доступу (не з кешу), секунди.</summary>
+    public const string AccessProfileBuild = "ecr.access.profile.build";
+
     private static readonly Meter Meter = new(MeterName);
+    private static readonly Histogram<double> ProfileBuild =
+        Meter.CreateHistogram<double>(AccessProfileBuild, "s", "Побудова AccessProfile");
     private static readonly Counter<long> Failed =
         Meter.CreateCounter<long>(JobFailed, "{job}", "Остаточно провалені фонові задачі");
     private static readonly Counter<long> Hits =
@@ -46,6 +51,9 @@ public static class InfrastructureMetrics
             1,
             new KeyValuePair<string, object?>("job", jobCode ?? "—"),
             new KeyValuePair<string, object?>("reason", reason));
+
+    /// <summary>Фіксує тривалість побудови профілю доступу.</summary>
+    public static void RecordAccessProfileBuild(double seconds) => ProfileBuild.Record(seconds);
 
     /// <summary>Фіксує влучання (<paramref name="hit"/>) чи промах кешу <paramref name="cache"/>.</summary>
     public static void RecordCache(string cache, bool hit)
