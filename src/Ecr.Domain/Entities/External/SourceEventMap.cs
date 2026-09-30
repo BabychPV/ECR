@@ -254,6 +254,52 @@ public sealed class SourceEventMap : Entity<int>
         return field;
     }
 
+    /// <summary>
+    /// Замінює всі поля мапінгу новим переліком (HSE301 A6: <c>PUT</c> мапінгу — повна заміна).
+    /// </summary>
+    /// <param name="fields">Нові поля; серед них обов'язково <c>$start</c> і <c>$end</c>.</param>
+    /// <exception cref="DomainException">Відмови <see cref="AddField"/> і <c>.eventMapStartEndRequired</c>.</exception>
+    /// <remarks>
+    /// ⚠ Атомарно: перелік спершу перевіряється на копії, тож відмова лишає поля мапінгу як були.
+    /// Окремі <see cref="RemoveField"/> + <see cref="AddField"/> тут не годяться — заміна
+    /// <c>$start</c> на інший атрибут проходила б через стан «без початку», який домен забороняє.
+    /// </remarks>
+    public void ReplaceFields(IEnumerable<SourceEventFieldSpec> fields)
+    {
+        ArgumentNullException.ThrowIfNull(fields);
+        var specs = fields.ToList();
+
+        EnsureFieldsAcceptable(specs);
+
+        _fields.Clear();
+        foreach (var spec in specs)
+        {
+            AddField(spec);
+        }
+    }
+
+    /// <summary>
+    /// Перевіряє перелік полів так, ніби мапінг створюється з ним, нічого в мапінгу не змінюючи.
+    /// </summary>
+    /// <param name="fields">Поля; серед них обов'язково <c>$start</c> і <c>$end</c>.</param>
+    /// <exception cref="DomainException">Відмови <see cref="AddField"/> і <c>.eventMapStartEndRequired</c>.</exception>
+    /// <remarks>
+    /// ⚠ Окремий крок, а не лише всередині <see cref="ReplaceFields"/>: сховищу треба знати, що заміна ПРОЙДЕ, перш ніж
+    /// позначати старі поля до видалення, — відмова після цього лишила б відстежені поля без власника.
+    /// </remarks>
+    public void EnsureFieldsAcceptable(IEnumerable<SourceEventFieldSpec> fields)
+    {
+        ArgumentNullException.ThrowIfNull(fields);
+
+        var scratch = new SourceEventMap(SourceEntityId, DocumentId, TableDefId, VolumeMode);
+        foreach (var spec in fields)
+        {
+            scratch.AddField(spec);
+        }
+
+        scratch.EnsureStartEnd(removing: null);
+    }
+
     /// <summary>Прибирає поле колонки.</summary>
     /// <param name="targetColumnDefId">Колонка поля.</param>
     /// <returns><c>true</c> — поле було й прибране.</returns>

@@ -259,6 +259,46 @@ public sealed class SourceEventMapTests
         Assert.Throws<ArgumentOutOfRangeException>(() => map.SetVolumeMode((SourceEventVolumeMode)9));
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Directive", "HSE301-A6")]
+    public void Заміна_полів_повна_і_дозволяє_поміняти_атрибут_початку_без_проміжного_стану()
+    {
+        var map = Create();
+
+        // «$start» переїжджає на іншу колонку: через RemoveField+AddField це був би стан «без початку».
+        map.ReplaceFields(
+        [
+            new(Column("START_2", CellDataType.Date, id: 5), "$start"),
+            End(),
+            new(Column("EVENT_NAME", CellDataType.String, id: 3), "$name"),
+        ]);
+
+        Assert.Equal(["$start", "$end", "$name"], map.Fields.Select(f => f.SourceAttribute));
+        Assert.Equal([5, 2, 3], map.Fields.Select(f => f.TargetColumnDefId));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Directive", "HSE301-A6")]
+    public void Відмовлена_заміна_полів_лишає_старі_поля_як_були()
+    {
+        var map = Create();
+
+        // Без «$end» — відмова; поля не стають порожніми чи напівзамінними.
+        AssertKey(
+            Assert.Throws<DomainException>(() => map.ReplaceFields([Start()])),
+            "ECR-INT-0422", "err.ECR-INT-0422.eventMapStartEndRequired");
+        Assert.Equal(["$start", "$end"], map.Fields.Select(f => f.SourceAttribute));
+
+        // Та сама колонка двічі — відмова домену, а не тиха втрата одного з полів.
+        AssertKey(
+            Assert.Throws<DomainException>(() => map.ReplaceFields(
+                [Start(), End(), new(Column("START_AT", CellDataType.Date, id: 1), "$name")])),
+            "ECR-INT-0409", "err.ECR-INT-0409.eventMapColumnTaken");
+        Assert.Equal(2, map.Fields.Count);
+    }
+
     private static SourceEventMap Create()
         => SourceEventMap.Create(EntityId, DocumentId, DynamicTable(), [Start(), End()], SourceEventVolumeMode.None);
 
