@@ -9662,6 +9662,9 @@ export interface paths {
          * @description Формат — `?format=csv|xlsx`; без нього — за `Accept` (`text/csv` або тип книги
          *     Excel), інакше CSV. CSV приймає назад імпорт (`POST …/entries/import`) без змін. Стеля —
          *     `Registries:ExportMaxRows` (50 000): понад неї — `422`, а не обрізаний файл.
+         *     `?includeChildren=true` додає дочірні довідники композиції (ФВ-8.16), рекурсивно: CSV — архів
+         *     ZIP (`01-БАТЬКО.csv`, `02-ЧАСТИНА.csv`…, номер — порядок імпорту), XLSX — аркуш на
+         *     довідник. Кожен дочірній вимагає того самого читання; стеля — на всі довідники разом.
          */
         get: {
             parameters: {
@@ -9670,6 +9673,8 @@ export interface paths {
                     format?: string;
                     /** @description Бізнес-дата чинності; без неї — сьогодні (UTC). */
                     asOf?: string;
+                    /** @description Разом із частинами композиції. */
+                    includeChildren?: boolean;
                 };
                 header?: never;
                 path: {
@@ -9687,6 +9692,7 @@ export interface paths {
                     };
                     content: {
                         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": components["schemas"]["FileResult"];
+                        "application/zip": components["schemas"]["FileResult"];
                         "text/csv": components["schemas"]["FileResult"];
                     };
                 };
@@ -9697,6 +9703,7 @@ export interface paths {
                     };
                     content: {
                         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": components["schemas"]["ProblemDetails"];
+                        "application/zip": components["schemas"]["ProblemDetails"];
                         "text/csv": components["schemas"]["ProblemDetails"];
                     };
                 };
@@ -9707,6 +9714,7 @@ export interface paths {
                     };
                     content: {
                         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": components["schemas"]["ProblemDetails"];
+                        "application/zip": components["schemas"]["ProblemDetails"];
                         "text/csv": components["schemas"]["ProblemDetails"];
                     };
                 };
@@ -9717,6 +9725,7 @@ export interface paths {
                     };
                     content: {
                         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": components["schemas"]["ProblemDetails"];
+                        "application/zip": components["schemas"]["ProblemDetails"];
                         "text/csv": components["schemas"]["ProblemDetails"];
                     };
                 };

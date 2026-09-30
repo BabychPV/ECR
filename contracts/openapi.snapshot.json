@@ -29945,7 +29945,7 @@
     },
     "/api/v1/registries/{code}/export": {
       "get": {
-        "description": "Формат — `?format=csv|xlsx`; без нього — за `Accept` (`text/csv` або тип книги\nExcel), інакше CSV. CSV приймає назад імпорт (`POST …/entries/import`) без змін. Стеля —\n`Registries:ExportMaxRows` (50 000): понад неї — `422`, а не обрізаний файл.",
+        "description": "Формат — `?format=csv|xlsx`; без нього — за `Accept` (`text/csv` або тип книги\nExcel), інакше CSV. CSV приймає назад імпорт (`POST …/entries/import`) без змін. Стеля —\n`Registries:ExportMaxRows` (50 000): понад неї — `422`, а не обрізаний файл.\n`?includeChildren=true` додає дочірні довідники композиції (ФВ-8.16), рекурсивно: CSV — архів\nZIP (`01-БАТЬКО.csv`, `02-ЧАСТИНА.csv`…, номер — порядок імпорту), XLSX — аркуш на\nдовідник. Кожен дочірній вимагає того самого читання; стеля — на всі довідники разом.",
         "parameters": [
           {
             "description": "Код довідника.",
@@ -29972,12 +29972,26 @@
               "format": "date",
               "type": "string"
             }
+          },
+          {
+            "description": "Разом із частинами композиції.",
+            "in": "query",
+            "name": "includeChildren",
+            "schema": {
+              "default": false,
+              "type": "boolean"
+            }
           }
         ],
         "responses": {
           "200": {
             "content": {
               "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileResult"
+                }
+              },
+              "application/zip": {
                 "schema": {
                   "$ref": "#/components/schemas/FileResult"
                 }
@@ -29997,6 +30011,11 @@
                   "$ref": "#/components/schemas/ProblemDetails"
                 }
               },
+              "application/zip": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
               "text/csv": {
                 "schema": {
                   "$ref": "#/components/schemas/ProblemDetails"
@@ -30012,6 +30031,11 @@
                   "$ref": "#/components/schemas/ProblemDetails"
                 }
               },
+              "application/zip": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
               "text/csv": {
                 "schema": {
                   "$ref": "#/components/schemas/ProblemDetails"
@@ -30023,6 +30047,11 @@
           "422": {
             "content": {
               "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/zip": {
                 "schema": {
                   "$ref": "#/components/schemas/ProblemDetails"
                 }
