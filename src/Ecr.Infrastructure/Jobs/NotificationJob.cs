@@ -219,6 +219,24 @@ public sealed class NotificationJob(
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
+        // ⛔ ФВ-12.4/12.5 (Q-149, REQ-CLOSURE №36): провал перерахунку, імпорту, експорту й
+        // знімка звіту — так само лише в `itg.JobProgress` зі станом `Failed` (після вичерпання
+        // ретраїв). Клієнт уже отримав `202`/`200`, а без цього запиту збій бачив би лише той,
+        // хто відкрив `/admin/jobs`: дані не перераховано, файл не вивантажено — і тиша.
+        // ⚠ Кількість спроб («3 ретраї = 4 спроби») цей запит не змінює — лише повідомляє про
+        // кінцевий `Failed`; проміжні спроби (`Requeue`) станом `Failed` не позначаються.
+        var alertedCodes = AlertedJobKinds.Keys.ToArray();
+        var jobFailures = (await db.JobProgresses
+                .AsNoTracking()
+                .Where(p => p.UpdatedAt >= since && p.State == "Failed" && alertedCodes.Contains(p.JobCode))
+                .OrderByDescending(p => p.UpdatedAt)
+                .Take(MaxDigestItems)
+                .Select(p => new { p.JobId, p.JobCode, p.State, p.Error, p.UpdatedAt })
+                .ToListAsync(ct)
+                .ConfigureAwait(false))
+            .Select(p => new DigestItem(AlertedJobKinds[p.JobCode], p.JobId, p.State, p.Error, p.UpdatedAt))
+            .ToList();
+
         var coverageItems = coverage
             .Select(c => new DigestItem(
                 CoverageKind,
@@ -234,6 +252,7 @@ public sealed class NotificationJob(
         var items = collection
             .Concat(maintenance)
             .Concat(materialization)
+            .Concat(jobFailures)
             .Concat(coverageItems)
             .Take(MaxDigestItems)
             .ToList();
@@ -370,6 +389,26 @@ public sealed class NotificationJob(
     /// </summary>
     private static readonly string MaterializeJobCode =
         typeof(IMaterializeCollectedDataJob).FullName!;
+
+    /// <summary>
+    /// Задачі, чий кінцевий <c>Failed</c> потрапляє в зведення (<c>ФВ-12.4/12.5</c>): код у
+    /// <c>itg.JobProgress</c> (повне ім'я маркера) → вид рядка зведення.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Перелік явний, а не «усі Failed»: збір і матеріалізація мають власні види, а
+    /// службові задачі (узгодженість, пошук осиротілих) — власні шляхи. Вид рядка не збігається
+    /// з <see cref="CollectionKind"/>, тож <see cref="EventKindOf"/> відносить їх до
+    /// <see cref="NotificationEventKind.JobFailed"/> — «збій задачі», а не «збій збору».
+    /// </remarks>
+    public static IReadOnlyDictionary<string, string> AlertedJobKinds { get; } =
+        new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            [typeof(IRecalculationJob).FullName!] = "recalculation",
+            [typeof(IFormulaRecalculationJob).FullName!] = "formula-recalculation",
+            [typeof(IExcelImportJob).FullName!] = "excel-import",
+            [typeof(IExcelExportJob).FullName!] = "excel-export",
+            [typeof(IReportSnapshotJob).FullName!] = "report-snapshot",
+        };
 
     /// <summary>
     /// Вид рядка зведення за текстом відмови прогону.
