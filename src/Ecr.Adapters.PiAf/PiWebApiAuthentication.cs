@@ -1,3 +1,4 @@
+using System.Net;
 using System.Net.Http.Headers;
 
 namespace Ecr.Adapters.PiAf;
@@ -106,6 +107,13 @@ public static class PiWebApiAuthentication
     /// </remarks>
     public static HttpMessageHandler CreatePrimaryHandler(PiWebApiAuthMode mode)
         => mode == PiWebApiAuthMode.Negotiate
-            ? new HttpClientHandler { UseDefaultCredentials = true, PreAuthenticate = false, AllowAutoRedirect = false }
-            : new HttpClientHandler { UseDefaultCredentials = false };
+            ? new SocketsHttpHandler
+            {
+                // Еквівалент HttpClientHandler.UseDefaultCredentials = true.
+                Credentials = CredentialCache.DefaultCredentials,
+                PreAuthenticate = false,
+                AllowAutoRedirect = false,
+                ConnectCallback = GuardedSocketConnect.ConnectAsync,
+            }
+            : new SocketsHttpHandler { Credentials = null, ConnectCallback = GuardedSocketConnect.ConnectAsync };
 }

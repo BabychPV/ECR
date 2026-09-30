@@ -69,10 +69,18 @@ public sealed class PiWebApiAuthenticationTests
     [InlineData(PiWebApiAuthMode.Bearer, false)]
     public void CreatePrimaryHandler_ЛишеNegotiateБереОбліковіДаніПроцесу(PiWebApiAuthMode mode, bool expected)
     {
-        using var handler = Assert.IsType<HttpClientHandler>(PiWebApiAuthentication.CreatePrimaryHandler(mode));
+        using var handler = Assert.IsType<SocketsHttpHandler>(PiWebApiAuthentication.CreatePrimaryHandler(mode));
 
-        Assert.Equal(expected, handler.UseDefaultCredentials);
+        Assert.Equal(expected, handler.Credentials is not null);
+        if (expected)
+        {
+            Assert.Same(System.Net.CredentialCache.DefaultCredentials, handler.Credentials);
+        }
+
         Assert.False(handler.PreAuthenticate);
+
+        // Перевірка IP у момент підключення (DNS-rebinding) — у всіх режимах.
+        Assert.NotNull(handler.ConnectCallback);
 
         // Windows-облікові дані не переходять за перенаправленням на інший хост;
         // заголовкові режими поведінку не змінюють. Мутація: повернути
@@ -99,7 +107,7 @@ public sealed class PiWebApiAuthenticationTests
             handler = delegating.InnerHandler!;
         }
 
-        Assert.Equal(defaultCredentials, Assert.IsType<HttpClientHandler>(handler).UseDefaultCredentials);
+        Assert.Equal(defaultCredentials, Assert.IsType<SocketsHttpHandler>(handler).Credentials is not null);
         Assert.Equal(
             TimeSpan.FromSeconds(30),
             provider.GetRequiredService<IHttpClientFactory>().CreateClient(clientName).Timeout);
