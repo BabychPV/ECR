@@ -6,6 +6,7 @@ using Ecr.Application.Integration;
 using Ecr.Application.Ports;
 using Ecr.Application.Registries;
 using Ecr.Application.Security;
+using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.External;
 using Ecr.Domain.Enums;
 using Ecr.Domain.Errors;
@@ -31,10 +32,16 @@ public sealed class CreateSourceEntityHandler(
     ICollectionStore sources,
     IDataSourceStore dataSources,
     IAccessDecisionService access,
-    ICurrentUser currentUser)
+    ICurrentUser currentUser,
+    IUnitOfWork uow,
+    IAuditWriter audit,
+    IClock clock)
 {
     /// <summary>Право на керування інтеграцією (`02-contracts.md` §9).</summary>
     public const string Permission = "Integration.Manage";
+
+    /// <summary>Операція в журналі структурних змін (<c>ФВ-12.10</c>).</summary>
+    public const string AuditOperation = "CreateSourceEntity";
 
     /// <summary>Стеля коду — ширина колонки <c>ext.SourceEntity.Code</c>.</summary>
     public const int MaxCodeLength = 200;
@@ -97,9 +104,20 @@ public sealed class CreateSourceEntityHandler(
         var entity = new SourceEntity(dataSource.Id, code, kind);
         entity.Describe(Blank(command.DisplayName), Blank(command.EntityPath));
 
-        var created = await sources.AddSourceEntityAsync(entity, ct).ConfigureAwait(false);
+        // ФВ-12.10: заведення сутності збору лишає слід у журналі структурних змін (в одній транзакції).
+        SourceEntity? created = null;
+        await uow.ExecuteInTransactionAsync(async innerCt =>
+        {
+            created = await sources.AddSourceEntityAsync(entity, innerCt).ConfigureAwait(false);
 
-        return SourceEntityDto.From(created);
+            await IntegrationConfigAudit.WriteAsync(
+                audit, clock, currentUser, IntegrationConfigAudit.SourceEntityType, created.Id, AuditOperation,
+                oldJson: null, newJson: IntegrationConfigAudit.Snapshot(created),
+                reason: $"Сутність збору «{created.Code}» заведено в з'єднанні «{dataSource.Code}».", innerCt)
+                .ConfigureAwait(false);
+        }, ct).ConfigureAwait(false);
+
+        return SourceEntityDto.From(created!);
     }
 
     private static string? Blank(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
@@ -118,8 +136,14 @@ public sealed class CreateSourceEntityHandler(
 public sealed class BindSourceEntityRegistryHandler(
     ICollectionStore sources,
     IAccessDecisionService access,
-    ICurrentUser currentUser)
+    ICurrentUser currentUser,
+    IUnitOfWork uow,
+    IAuditWriter audit,
+    IClock clock)
 {
+    /// <summary>Операція в журналі структурних змін (<c>ФВ-12.10</c>).</summary>
+    public const string AuditOperation = "BindSourceEntityRegistry";
+
     /// <summary>Прив'язує (<paramref name="registryDefId"/>) або відв'язує (<c>null</c>).</summary>
     /// <param name="sourceEntityId">Сутність збору.</param>
     /// <param name="registryDefId">Довідник; <c>null</c> — відв'язати.</param>
@@ -180,8 +204,29 @@ public sealed class BindSourceEntityRegistryHandler(
                 .ConfigureAwait(false);
         }
 
+        var before = IntegrationConfigAudit.Snapshot(entity);
         entity.BindRegistry(registryDefId);
-        await sources.SaveSourceEntityAsync(entity, ct).ConfigureAwait(false);
+
+        // ФВ-12.10: прив'язка/відв'язка довідника — зміна мапінгу на рівні сутності; старий і новий стан у журналі.
+        await uow.ExecuteInTransactionAsync(async innerCt =>
+        {
+            await sources.SaveSourceEntityAsync(entity, innerCt).ConfigureAwait(false);
+
+            // Повторна прив'язка до того самого довідника нічого не змінила — шуму в журналі не пишемо.
+            var after = IntegrationConfigAudit.Snapshot(entity);
+            if (string.Equals(before, after, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            await IntegrationConfigAudit.WriteAsync(
+                audit, clock, currentUser, IntegrationConfigAudit.SourceEntityType, entity.Id, AuditOperation,
+                before, after,
+                reason: registryDefId is null
+                    ? $"Сутність збору «{entity.Code}» відв'язано від довідника."
+                    : $"Сутність збору «{entity.Code}» прив'язано до довідника {registryDefId}.",
+                innerCt).ConfigureAwait(false);
+        }, ct).ConfigureAwait(false);
 
         return SourceEntityDto.From(entity);
     }

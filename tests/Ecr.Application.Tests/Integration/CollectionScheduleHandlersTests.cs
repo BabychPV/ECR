@@ -35,12 +35,42 @@ public sealed class CollectionScheduleHandlersTests
     private readonly IUnitOfWork _uow = Substitute.For<IUnitOfWork>();
     private readonly ICurrentUser _user = Substitute.For<ICurrentUser>();
     private readonly IClock _clock = Substitute.For<IClock>();
+    private readonly IAuditWriter _audit = Substitute.For<IAuditWriter>();
 
     public CollectionScheduleHandlersTests()
     {
         _clock.UtcNow.Returns(Now);
         _user.UserId.Returns(Actor);
         Allow("Integration.EditSchedule");
+
+        // Підробка UoW виконує замикання транзакції, інакше зміна й журнал (ФВ-12.10) не запустилися б узагалі.
+        _uow.ExecuteInTransactionAsync(Arg.Any<Func<CancellationToken, Task>>(), Arg.Any<CancellationToken>())
+            .Returns(call => call.Arg<Func<CancellationToken, Task>>()(call.Arg<CancellationToken>()));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "ФВ-12.10")]
+    public async Task ФВ_12_10_зміна_пише_старий_і_новий_розклад_а_відмова_cron_журналу_не_пише()
+    {
+        var schedule = Add(Hourly);
+
+        await Save().HandleAsync(schedule.Id, Nightly, isEnabled: false, lookbackDays: 5, Version(schedule), CancellationToken.None);
+
+        await _audit.Received(1).WriteStructureChangeAsync(
+            Arg.Is<StructureChangeRecord>(r =>
+                r.EntityType == "ext.CollectionSchedule" && r.EntityId == schedule.Id
+                && r.Operation == SaveCollectionScheduleHandler.AuditOperation
+                && r.OldJson!.Contains(Hourly, StringComparison.Ordinal) && r.OldJson.Contains("\"isEnabled\":true", StringComparison.Ordinal)
+                && r.NewJson!.Contains(Nightly, StringComparison.Ordinal) && r.NewJson.Contains("\"isEnabled\":false", StringComparison.Ordinal)
+                && r.NewJson.Contains("\"lookbackDays\":5", StringComparison.Ordinal)
+                && r.ChangedByUserId == Actor && r.ChangedAt == Now),
+            Arg.Any<CancellationToken>());
+
+        _audit.ClearReceivedCalls();
+        await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Save().HandleAsync(schedule.Id, Unsupported, isEnabled: true, lookbackDays: null, Version(schedule), CancellationToken.None));
+        await _audit.DidNotReceiveWithAnyArgs().WriteStructureChangeAsync(default!, default);
     }
 
     [Fact]
@@ -395,12 +425,12 @@ public sealed class CollectionScheduleHandlersTests
             .Returns(new AccessBuilder { UserId = Actor }.Permission(permission).Build());
 
     private CreateCollectionScheduleHandler Create()
-        => new(_store, _scheduler, new CollectionScheduleApplier(_scheduler), _access, _uow, _user, _clock);
+        => new(_store, _scheduler, new CollectionScheduleApplier(_scheduler), _access, _uow, _user, _clock, _audit);
 
     private SaveCollectionScheduleHandler Save()
-        => new(_store, _scheduler, new CollectionScheduleApplier(_scheduler), _access, _uow, _user, _clock);
+        => new(_store, _scheduler, new CollectionScheduleApplier(_scheduler), _access, _uow, _user, _clock, _audit);
 
-    private DeleteCollectionScheduleHandler Delete() => new(_store, _scheduler, _access, _uow, _user);
+    private DeleteCollectionScheduleHandler Delete() => new(_store, _scheduler, _access, _uow, _user, _clock, _audit);
 
     private static string Version(CollectionSchedule schedule) => Convert.ToBase64String(schedule.RowVersion);
 

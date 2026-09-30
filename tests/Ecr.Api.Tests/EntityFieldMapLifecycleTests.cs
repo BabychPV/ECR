@@ -253,6 +253,42 @@ public sealed class EntityFieldMapLifecycleTests(SqlServerFixture sql)
     }
 
     [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-12.10")]
+    public async Task ФВ_12_10_пауза_відновлення_і_видалення_мапінгу_лишають_журнал_зі_старим_і_новим_станом()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, Manage).ConfigureAwait(true);
+        var stand = await ArrangeAsync(collectPoints: 0).ConfigureAwait(true);
+
+        Assert.Equal(HttpStatusCode.OK, (await PostAsync(client, stand.FieldMapId, "pause").ConfigureAwait(true)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await PostAsync(client, stand.FieldMapId, "resume").ConfigureAwait(true)).StatusCode);
+
+        // Відмова (повторне відновлення — 409) не лишає запису: журнал не бреше про подію, якої не було.
+        Assert.Equal(HttpStatusCode.Conflict, (await PostAsync(client, stand.FieldMapId, "resume").ConfigureAwait(true)).StatusCode);
+
+        var deleted = await client.DeleteAsync(new Uri($"/api/v1/entity-field-maps/{stand.FieldMapId}", UriKind.Relative));
+        Assert.Equal(HttpStatusCode.NoContent, deleted.StatusCode);
+
+        var journal = await StructureChangeProbe.ReadAsync(sql.ConnectionString, "ext.EntityFieldMap", stand.FieldMapId)
+            .ConfigureAwait(true);
+
+        Assert.Equal(
+            ["MappingPaused", "MappingResumed", "MappingDeleted"],
+            journal.Select(j => j.Operation).ToArray());
+
+        Assert.Contains("\"isActive\":true", journal[0].OldJson, StringComparison.Ordinal);
+        Assert.Contains("\"isActive\":false", journal[0].NewJson, StringComparison.Ordinal);
+        Assert.Contains("\"isActive\":false", journal[1].OldJson, StringComparison.Ordinal);
+        Assert.Contains("\"isActive\":true", journal[1].NewJson, StringComparison.Ordinal);
+
+        // Видалення: що зникло — у старому стані, нового немає.
+        Assert.Contains("\"sourceEntityId\":", journal[2].OldJson, StringComparison.Ordinal);
+        Assert.Null(journal[2].NewJson);
+    }
+
+    [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "ФВ-6.12")]

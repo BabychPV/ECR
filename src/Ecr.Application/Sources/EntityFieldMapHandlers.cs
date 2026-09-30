@@ -4,6 +4,7 @@ using Ecr.Application.Common;
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
+using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.External;
 using Ecr.Domain.Errors;
 
@@ -30,10 +31,16 @@ namespace Ecr.Application.Sources;
 public sealed class CreateEntityFieldMapHandler(
     ICollectionStore sources,
     IAccessDecisionService access,
-    ICurrentUser currentUser)
+    ICurrentUser currentUser,
+    IUnitOfWork uow,
+    IAuditWriter audit,
+    IClock clock)
 {
     /// <summary>Право на керування інтеграцією (`02-contracts.md` §9).</summary>
     public const string Permission = "Integration.Manage";
+
+    /// <summary>Операція в журналі структурних змін (<c>ФВ-12.10</c>).</summary>
+    public const string AuditOperation = "CreateEntityFieldMap";
 
     /// <summary>Заводить мапінг.</summary>
     /// <param name="sourceEntityId">Сутність джерела.</param>
@@ -88,9 +95,20 @@ public sealed class CreateEntityFieldMapHandler(
             map.SetMaterialization(command.TargetRowKey, command.Aggregation);
         }
 
-        var created = await sources.AddFieldMapAsync(map, ct).ConfigureAwait(false);
+        // ФВ-12.10: створення мапінгу лишає слід у журналі структурних змін в одній транзакції із записом.
+        EntityFieldMap? created = null;
+        await uow.ExecuteInTransactionAsync(async innerCt =>
+        {
+            created = await sources.AddFieldMapAsync(map, innerCt).ConfigureAwait(false);
 
-        return Map(created);
+            await IntegrationConfigAudit.WriteAsync(
+                audit, clock, currentUser, IntegrationConfigAudit.FieldMapType, created.Id, AuditOperation,
+                oldJson: null, newJson: IntegrationConfigAudit.Snapshot(created),
+                reason: $"Мапінг поля «{created.SourceField}» сутності {sourceEntityId} створено.", innerCt)
+                .ConfigureAwait(false);
+        }, ct).ConfigureAwait(false);
+
+        return Map(created!);
     }
 
     /// <summary>Будує мапінг на потрібний вид цілі, перевіривши, що вона існує.</summary>

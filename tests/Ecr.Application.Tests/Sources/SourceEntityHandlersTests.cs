@@ -4,6 +4,7 @@ using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
 using Ecr.Application.Sources;
+using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.External;
 using Ecr.Domain.Enums;
 using Ecr.Domain.Errors;
@@ -33,10 +34,17 @@ public sealed class SourceEntityHandlersTests
     private readonly IAccessDecisionService _access = Substitute.For<IAccessDecisionService>();
     private readonly ICurrentUser _user = Substitute.For<ICurrentUser>();
     private readonly SourceEntity _entity = new(DataSourceId, "Flare_01", RegistrySourceKind.External);
+    private readonly IUnitOfWork _uow = Substitute.For<IUnitOfWork>();
+    private readonly IAuditWriter _audit = Substitute.For<IAuditWriter>();
+    private readonly IClock _clock = Substitute.For<IClock>();
 
     public SourceEntityHandlersTests()
     {
         _user.UserId.Returns(9);
+
+        // Підробка UoW виконує замикання транзакції, інакше запис і журнал (ФВ-12.10) не запустилися б.
+        _uow.ExecuteInTransactionAsync(Arg.Any<Func<CancellationToken, Task>>(), Arg.Any<CancellationToken>())
+            .Returns(call => call.Arg<Func<CancellationToken, Task>>()(call.Arg<CancellationToken>()));
         // ⚠ Registry.EditData — бо прив'язка вимагає права на дані довідника
         // (D-202, доповнення 2026-09-29); без нього перевіряють окремі тести нижче.
         _access.BuildProfileAsync(9, Arg.Any<CancellationToken>())
@@ -55,9 +63,38 @@ public sealed class SourceEntityHandlersTests
         _sources.RegistryDefExistsAsync(RegistryId, Arg.Any<CancellationToken>()).Returns(true);
     }
 
-    private CreateSourceEntityHandler Create() => new(_sources, _dataSources, _access, _user);
+    private CreateSourceEntityHandler Create() => new(_sources, _dataSources, _access, _user, _uow, _audit, _clock);
 
-    private BindSourceEntityRegistryHandler Bind() => new(_sources, _access, _user);
+    private BindSourceEntityRegistryHandler Bind() => new(_sources, _access, _user, _uow, _audit, _clock);
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "ФВ-12.10")]
+    public async Task ФВ_12_10_заведення_і_прив_язка_пишуть_журнал_зі_старим_і_новим_станом_повтор_без_змін_ні()
+    {
+        await Create().HandleAsync(Command(), CancellationToken.None);
+
+        await _audit.Received(1).WriteStructureChangeAsync(
+            Arg.Is<StructureChangeRecord>(r =>
+                r.EntityType == "ext.SourceEntity" && r.Operation == CreateSourceEntityHandler.AuditOperation
+                && r.OldJson == null && r.NewJson!.Contains("Flare_01", StringComparison.Ordinal) && r.ChangedByUserId == 9),
+            Arg.Any<CancellationToken>());
+
+        _audit.ClearReceivedCalls();
+        await Bind().HandleAsync(EntityId, RegistryId, CancellationToken.None);
+
+        await _audit.Received(1).WriteStructureChangeAsync(
+            Arg.Is<StructureChangeRecord>(r =>
+                r.Operation == BindSourceEntityRegistryHandler.AuditOperation
+                && r.OldJson!.Contains("\"registryDefId\":null", StringComparison.Ordinal)
+                && r.NewJson!.Contains($"\"registryDefId\":{RegistryId}", StringComparison.Ordinal)),
+            Arg.Any<CancellationToken>());
+
+        // Той самий довідник вдруге — стан не змінився, шуму в журналі немає.
+        _audit.ClearReceivedCalls();
+        await Bind().HandleAsync(EntityId, RegistryId, CancellationToken.None);
+        await _audit.DidNotReceiveWithAnyArgs().WriteStructureChangeAsync(default!, default);
+    }
 
     private static CreateSourceEntityCommand Command(
         string? code = "Flare_01", string? path = @"\\AF\ECR\Flare_01", RegistrySourceKind? kind = null)
