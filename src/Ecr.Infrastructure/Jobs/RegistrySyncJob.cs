@@ -2,10 +2,13 @@
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
+using Ecr.Application.Common;
 using Ecr.Application.Errors;
 using Ecr.Application.Integration.RegistrySync;
 using Ecr.Application.Ports;
 using Ecr.Application.Registries;
+using Ecr.Application.Registries.Rules;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Dictionaries;
 using Ecr.Domain.Entities.External;
@@ -47,10 +50,16 @@ public interface IRegistrySyncJob
 /// <see cref="RegistryEntryUpdate.IsActive"/>). Ревізія даних, ключі, аудит <c>RegistryValueChanged</c>
 /// і автор <c>ChangedByUserId</c> (RT-04) — ті самі, що в ручного запису.
 /// <para>
-/// ⛔ Одна СПРОБА — один DI-scope і ОДНА транзакція: оновлення, вимкнення/увімкнення й операції над
-/// ключами (позначки зникнення, шляхи). Збій будь-де в спробі — відкат усього, подій дій немає; не
-/// «дані» (не <c>BusinessRule</c>/<c>Domain</c>/<c>Concurrency</c>) — падіння прогону (<c>Failed</c> у
-/// черзі), журнал не пишеться зовсім.
+/// ⛔ Одна СПРОБА — один DI-scope і ОДНА транзакція: оновлення, вимкнення/увімкнення, операції над ключами
+/// (перепривʼязка з рядком <c>aud.StructureChange</c>, позначки зникнення, шляхи) і
+/// <see cref="IRegistryRuleEngine.EvaluateAsync"/> на записаних записах. Збій будь-де в спробі —
+/// відкат усього, подій дій немає; не «дані» (не <c>BusinessRule</c>/<c>Domain</c>/<c>Concurrency</c>) —
+/// падіння прогону (<c>Failed</c> у черзі), журнал не пишеться зовсім.
+/// </para>
+/// <para>
+/// ⚠ Правила довідника — ОЦІНКА, не відмова (рішення координатора): <c>ThrowIfErrors</c> не
+/// викликається, джерело — правда, рядок записано, а кожне порушення — подія
+/// <see cref="CollectionCoverage.RegistryRuleViolation"/>.
 /// </para>
 /// <para>
 /// ⚠ «Все або нічого» writer'а (рішення S7): відмова рядків → ці записи йдуть подією
@@ -60,7 +69,8 @@ public interface IRegistrySyncJob
 /// спробі. Один поганий запис не блокує довідник, а кількість спроб обмежена.
 /// </para>
 /// <para>
-/// ⚠ Події ДІЙ (<c>Deactivated</c>, <c>Reactivated</c>) пишуться лише ПІСЛЯ коміту спроби, що їх виконала.
+/// ⚠ Події ДІЙ (<c>ExternalKeyRelinked</c>, <c>Deactivated</c>,
+/// <c>Reactivated</c>, <c>RuleViolation</c>) пишуться лише ПІСЛЯ коміту спроби, що їх виконала.
 /// Журнал — окремим збереженням у контексті задачі після всіх спроб: збій між комітом спроби й
 /// журналом втратить подію, а не дані (журнал відновиться наступною зміною).
 /// </para>
@@ -202,14 +212,6 @@ public sealed class RegistrySyncJob(
             ? Event(e, context.SinceOf(e.ExternalId))
             : Event(e)));
 
-        // TODO PR-6 (4/5): перепривʼязку задача ще не виконує — доти журнал той самий, що до
-        // D-212 (зниклий старий GUID і неприв'язаний новий), а не мовчить про обидва.
-        events.AddRange(plan.Relinks.SelectMany(r => new[]
-        {
-            Event(new RegistrySyncEvent(RegistrySyncEventKind.SourceMissing, r.OldExternalId, r.RegistryEntryId)),
-            Event(new RegistrySyncEvent(RegistrySyncEventKind.ElementUnlinked, r.NewExternalId, null)),
-        }));
-
         if (registry.SourceKind is RegistrySourceKind.External or RegistrySourceKind.Hybrid)
         {
             events.AddRange(await ApplyAsync(context, plan, ct).ConfigureAwait(false));
@@ -242,7 +244,7 @@ public sealed class RegistrySyncJob(
     {
         var events = new List<SyncEvent>();
         var updates = Updates(plan);
-        var keys = new KeyOps(plan.MissingMarks, plan.MissingClears, plan.PathChanges);
+        var keys = new KeyOps(plan.Relinks, plan.MissingMarks, plan.MissingClears, plan.PathChanges);
         var outcomes = new List<Outcome>();
         var externalIds = context.ExternalIds(plan);
 
@@ -307,19 +309,24 @@ public sealed class RegistrySyncJob(
 
         foreach (var outcome in outcomes)
         {
+            events.AddRange(outcome.Relinks.Select(Relinked));
+
             foreach (var update in outcome.Updates.Where(u => u.IsActive is not null))
             {
                 var element = externalIds.GetValueOrDefault(update.RegistryEntryId);
                 var kind = update.IsActive!.Value ? RegistrySyncEventKind.Reactivated : RegistrySyncEventKind.Deactivated;
                 events.Add(Event(new RegistrySyncEvent(kind, element, update.RegistryEntryId), context.SinceOf(element)));
             }
+
+            events.AddRange(outcome.Violations.Select(v => Violation(v, externalIds)));
         }
 
         return events;
     }
 
     /// <summary>
-    /// Одна спроба: власний DI-scope від <c>svc-integration</c> і ОДНА транзакція на оновлення й ключі.
+    /// Одна спроба: власний DI-scope від <c>svc-integration</c> і ОДНА транзакція на оновлення,
+    /// ключі й оцінку правил.
     /// </summary>
     /// <returns>
     /// Виконане (<see cref="AttemptResult.Outcome"/>) або відмови рядків writer'а — тоді транзакцію
@@ -355,6 +362,7 @@ public sealed class RegistrySyncJob(
                 async tx =>
                 {
                     scoped.ChangeTracker.Clear();
+                    var changed = new HashSet<long>();
 
                     if (updates.Count > 0)
                     {
@@ -366,12 +374,39 @@ public sealed class RegistrySyncJob(
                             updateErrors = result.Errors;
                             throw new RollbackAttempt();
                         }
+
+                        changed.UnionWith(result.Rows.Where(r => r.IsChanged).Select(r => r.Entry.Id));
                     }
 
-                    await ApplyKeysAsync(scoped, context, keys, tx).ConfigureAwait(false);
+                    var relinked = await ApplyKeysAsync(scoped, context, keys, tx).ConfigureAwait(false);
                     await uow.SaveChangesAsync(tx).ConfigureAwait(false);
 
-                    outcome = new Outcome(updates);
+                    if (relinked.Count > 0)
+                    {
+                        var audit = services.GetRequiredService<IAuditWriter>();
+                        var user = services.GetRequiredService<ICurrentUser>();
+                        foreach (var (relink, keyId) in relinked)
+                        {
+                            await audit.WriteStructureChangeAsync(RelinkChange(context, relink, keyId, user), tx).ConfigureAwait(false);
+                        }
+                    }
+
+                    // ⛔ Правила — ПІСЛЯ збереження в тій самій транзакції (знімок бачить стан після запису),
+                    // і лише ОЦІНКА: ThrowIfErrors тут немає — порушення стають подіями.
+                    IReadOnlyList<RegistryRuleViolationDto> violations = [];
+                    if (changed.Count > 0)
+                    {
+                        var definition = await services.GetRequiredService<IRegistryStore>()
+                                             .FindDefinitionByIdAsync(context.RegistryDefId, tx)
+                                             .ConfigureAwait(false)
+                                         ?? throw new InvalidOperationException($"Довідника {context.RegistryDefId} не існує.");
+
+                        violations = (await services.GetRequiredService<IRegistryRuleEngine>()
+                            .EvaluateAsync(definition, [.. changed], [], businessDate: null, tx)
+                            .ConfigureAwait(false)).Violations;
+                    }
+
+                    outcome = new Outcome(updates, [.. relinked.Select(r => r.Relink)], violations);
                 },
                 ct).ConfigureAwait(false);
         }
@@ -385,16 +420,20 @@ public sealed class RegistrySyncJob(
 
     /// <summary>
     /// Операції над ключами на відстежених рядках контексту спроби: шляхи, зняття й постановка
-    /// позначки зникнення.
+    /// позначки зникнення, перепривʼязка.
     /// </summary>
-    private static async Task ApplyKeysAsync(EcrDbContext scoped, ApplyContext context, KeyOps keys, CancellationToken ct)
+    /// <returns>Виконані перепривʼязки з Id ключа — для <c>aud.StructureChange</c> після збереження.</returns>
+    private static async Task<List<(RegistrySyncRelink Relink, long KeyId)>> ApplyKeysAsync(
+        EcrDbContext scoped, ApplyContext context, KeyOps keys, CancellationToken ct)
     {
+        var relinked = new List<(RegistrySyncRelink Relink, long KeyId)>();
         if (keys.IsEmpty)
         {
-            return;
+            return relinked;
         }
 
-        var ids = keys.Marks.Select(m => m.ExternalId)
+        var ids = keys.Relinks.Select(r => r.OldExternalId)
+            .Concat(keys.Marks.Select(m => m.ExternalId))
             .Concat(keys.Clears.Select(c => c.ExternalId))
             .Concat(keys.Paths.Select(p => p.ExternalId))
             .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -434,7 +473,47 @@ public sealed class RegistrySyncJob(
         {
             Find(mark.ExternalId, mark.RegistryEntryId)?.MarkMissing(context.Now);
         }
+
+        foreach (var relink in keys.Relinks)
+        {
+            if (Find(relink.OldExternalId, relink.RegistryEntryId) is { } key)
+            {
+                key.Relink(relink.NewExternalId);
+                key.MarkSynced(relink.Path, context.Now);
+                relinked.Add((relink, key.Id));
+            }
+        }
+
+        return relinked;
     }
+
+    /// <summary>Рядок <c>aud.StructureChange</c> перепривʼязки — у форматі прив'язки/відв'язки вручну.</summary>
+    private static StructureChangeRecord RelinkChange(
+        ApplyContext context, RegistrySyncRelink relink, long keyId, ICurrentUser user)
+        => new(
+            ChangedAt: context.Now,
+            TemplateVersionId: 0,
+            EntityType: "dic.RegistryExternalKey",
+            EntityId: checked((int)keyId),
+            ChangeClass: ChangeClass.Guarded,
+            Operation: "Relink",
+            OldJson: RelinkJson(context, relink.RegistryEntryId, relink.OldExternalId),
+            NewJson: RelinkJson(context, relink.RegistryEntryId, relink.NewExternalId),
+            ChangeReason: $"Синк довідника «{context.RegistryCode}»: елемент AF перестворено з новим GUID "
+                          + $"(шлях {relink.Path}) — зв'язок запису {relink.RegistryEntryId.ToString(CultureInfo.InvariantCulture)} "
+                          + $"перев'язано з «{relink.OldExternalId}» на «{relink.NewExternalId}» (D-212 (7)).",
+            ChangedByUserId: user.UserId
+                             ?? throw new InvalidOperationException("Спроба синку без автора svc-integration."),
+            CorrelationId: user.CorrelationId);
+
+    private static string RelinkJson(ApplyContext context, long entryId, string externalId)
+        => JsonSerializer.Serialize(new
+        {
+            registry = context.RegistryCode,
+            entryId,
+            dataSourceId = context.DataSourceId,
+            externalId,
+        });
 
     /// <summary>
     /// Оновлення на запис: поля планувальника + увімкнення/вимкнення (<see cref="RegistryEntryUpdate.IsActive"/>)
@@ -892,6 +971,37 @@ public sealed class RegistrySyncJob(
         return new SyncEvent(status, string.Join("; ", parts), KeyOf(status, subject, value));
     }
 
+    /// <summary>Перепривʼязка виконана.</summary>
+    private static SyncEvent Relinked(RegistrySyncRelink r)
+    {
+        var status = CollectionCoverage.RegistryExternalKeyRelinked;
+        var entry = r.RegistryEntryId.ToString(CultureInfo.InvariantCulture);
+
+        return new SyncEvent(
+            status,
+            Truncate($"element={r.NewExternalId}; entry={entry}; old={r.OldExternalId}; path={r.Path}"),
+            KeyOf(status, $"element={r.NewExternalId}; entry={entry}; relink", $"old={r.OldExternalId}"));
+    }
+
+    /// <summary>Порушення правила довідника після запису синком (рядок записано).</summary>
+    private static SyncEvent Violation(RegistryRuleViolationDto v, IReadOnlyDictionary<long, string> externalIds)
+    {
+        var status = CollectionCoverage.RegistryRuleViolation;
+        var entry = v.EntryId.ToString(CultureInfo.InvariantCulture);
+        var element = externalIds.GetValueOrDefault(v.EntryId) ?? "—";
+        var message = v.Params.GetValueOrDefault("message");
+        var valueParam = v.Params.GetValueOrDefault("value");
+
+        return new SyncEvent(
+            status,
+            Truncate($"element={element}; entry={entry}; code={v.EntryCode}; rule={v.Rule}; severity={v.Severity}; "
+                     + $"messageKey={v.MessageKey}; message={message ?? "—"}"),
+            KeyOf(
+                status,
+                $"entry={entry}; rule={v.Rule}",
+                $"severity={v.Severity}; messageKey={v.MessageKey}; message={message}; value={valueParam}"));
+    }
+
     /// <summary>Елемент з GUID, прив'язаним до запису іншого довідника цього джерела.</summary>
     private static SyncEvent Foreign(string externalId)
     {
@@ -1096,24 +1206,35 @@ public sealed class RegistrySyncJob(
                 map[activation.RegistryEntryId] = activation.ExternalId;
             }
 
+            foreach (var relink in plan.Relinks)
+            {
+                map[relink.RegistryEntryId] = relink.NewExternalId;
+            }
+
             return map;
         }
     }
 
     /// <summary>Операції над ключами одного прогону.</summary>
     private sealed record KeyOps(
+        IReadOnlyList<RegistrySyncRelink> Relinks,
         IReadOnlyList<RegistrySyncLinkMark> Marks,
         IReadOnlyList<RegistrySyncLinkMark> Clears,
         IReadOnlyList<RegistrySyncPathChange> Paths)
     {
-        public static KeyOps None { get; } = new([], [], []);
+        public static KeyOps None { get; } = new([], [], [], []);
 
-        public bool IsEmpty => Marks.Count == 0 && Clears.Count == 0 && Paths.Count == 0;
+        public bool IsEmpty => Relinks.Count == 0 && Marks.Count == 0 && Clears.Count == 0 && Paths.Count == 0;
     }
 
     /// <summary>Закомічена спроба.</summary>
     /// <param name="Updates">Застосовані оновлення (зокрема увімкнення/вимкнення).</param>
-    private sealed record Outcome(IReadOnlyList<RegistryEntryUpdate> Updates);
+    /// <param name="Relinks">Виконані перепривʼязки.</param>
+    /// <param name="Violations">Порушення правил довідника після запису.</param>
+    private sealed record Outcome(
+        IReadOnlyList<RegistryEntryUpdate> Updates,
+        IReadOnlyList<RegistrySyncRelink> Relinks,
+        IReadOnlyList<RegistryRuleViolationDto> Violations);
 
     /// <summary>Результат спроби: виконане або відмови рядків (тоді відкочено).</summary>
     private sealed record AttemptResult(

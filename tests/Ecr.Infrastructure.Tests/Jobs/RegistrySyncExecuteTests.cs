@@ -74,6 +74,83 @@ public sealed class RegistrySyncExecuteTests(SqlServerFixture sql)
         }
     }
 
+    // ─── Перепривʼязка ──────────────────────────────────────────────────────
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "D-212")]
+    public async Task Перестворений_елемент_один_кандидат_перепривʼязується_з_подією_і_StructureChange()
+    {
+        var stand = await ArrangeAsync(RegistrySourceKind.External);
+        var keyId = (await KeyAsync(stand, stand.G2)).Id;
+        stand.Remove("Stack2");
+        var g2b = stand.Add("Stack2", 20m);
+        await using var provider = BuildProvider();
+
+        try
+        {
+            await RunAsync(provider, stand);
+
+            var key = await KeyAsync(stand, g2b);
+            Assert.Equal(keyId, key.Id);
+            Assert.Equal(stand.E2, key.RegistryEntryId);
+            Assert.Null(key.MissingInSourceSince);
+            Assert.Equal(0, await CountEntriesAsync(stand, "Stack2"));
+
+            var events = await EventsAsync(stand);
+            var relinked = Assert.Single(events, e => e.Status == CollectionCoverage.RegistryExternalKeyRelinked);
+            Assert.Contains($"element={g2b}; entry={stand.E2}; old={stand.G2}", relinked.Details, StringComparison.Ordinal);
+            Assert.DoesNotContain(events, e => e.Status == CollectionCoverage.RegistrySourceMissing);
+            Assert.DoesNotContain(events, e => e.Status == CollectionCoverage.RegistryAutoCreated);
+
+            Assert.Equal(1, await CountAsync(
+                "SELECT COUNT(*) AS [Value] FROM aud.StructureChange WHERE EntityType = N'dic.RegistryExternalKey' "
+                + $"AND Operation = N'Relink' AND EntityId = {keyId} AND ChangedByUserId = {stand.SvcId} "
+                + $"AND OldJson LIKE N'%{stand.G2}%' AND NewJson LIKE N'%{g2b}%'"));
+        }
+        finally
+        {
+            await DeactivateAsync(stand);
+        }
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "D-212")]
+    public async Task Кілька_кандидатів_на_шлях_нічого_не_пишуть()
+    {
+        var stand = await ArrangeAsync(RegistrySourceKind.External);
+        var keyId = (await KeyAsync(stand, stand.G2)).Id;
+        stand.Remove("Stack2");
+        var b = stand.Add("Stack2", 20m);
+        var c = stand.Add("Stack2", 21m);
+        await using var provider = BuildProvider();
+
+        try
+        {
+            await RunAsync(provider, stand);
+
+            var key = await KeyAsync(stand, stand.G2);
+            Assert.Equal(keyId, key.Id);
+            Assert.Null(key.MissingInSourceSince);
+            Assert.Equal(0, await CountEntriesAsync(stand, "Stack2"));
+            Assert.Equal(0, await CountAsync(
+                $"SELECT COUNT(*) AS [Value] FROM aud.StructureChange WHERE EntityType = N'dic.RegistryExternalKey' AND EntityId = {keyId}"));
+
+            var events = await EventsAsync(stand);
+            Assert.DoesNotContain(events, e => e.Status == CollectionCoverage.RegistryExternalKeyRelinked);
+            Assert.Contains(events, e => e.Status == CollectionCoverage.RegistrySourceMissing && e.Details!.Contains(stand.G2, StringComparison.Ordinal));
+            Assert.Contains(events, e => e.Status == CollectionCoverage.RegistryElementUnlinked && e.Details!.Contains(b, StringComparison.Ordinal));
+            Assert.Contains(events, e => e.Status == CollectionCoverage.RegistryElementUnlinked && e.Details!.Contains(c, StringComparison.Ordinal));
+        }
+        finally
+        {
+            await DeactivateAsync(stand);
+        }
+    }
+
     // ─── Зниклий елемент і повернення ───────────────────────────────────────
 
     [Fact]
@@ -199,6 +276,81 @@ public sealed class RegistrySyncExecuteTests(SqlServerFixture sql)
             Assert.DoesNotContain(events, e => e.Status == CollectionCoverage.RegistryReactivated);
             var diverged = Assert.Single(events, e => e.Status == CollectionCoverage.RegistryDiverged);
             Assert.Contains("field=@active; ecr=False; source=True", diverged.Details, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await DeactivateAsync(stand);
+        }
+    }
+
+    // ─── Правила довідника й атомарність ───────────────────────────────────
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "D-212")]
+    public async Task Порушення_правила_рівня_Error_подія_а_рядок_записано()
+    {
+        var stand = await ArrangeAsync(RegistrySourceKind.External);
+        stand.Put("Stack1", "Capacity", 11m);
+        var rules = new FakeRules(fail: false);
+        await using var provider = BuildProvider(rules);
+
+        try
+        {
+            await RunAsync(provider, stand);
+
+            // ⛔ ThrowIfErrors НЕ викликається: джерело — правда, рядок лишається.
+            Assert.Equal(11m, await CapAsync(stand, stand.E1));
+
+            // Оцінено саме записане цим прогоном: оновлений E1 (E2 без змін).
+            Assert.Equal(new[] { stand.E1 }, rules.Seen);
+
+            var violation = Assert.Single(await EventsAsync(stand), e => e.Status == CollectionCoverage.RegistryRuleViolation);
+            Assert.Contains($"element={stand.G1}; entry={stand.E1}", violation.Details, StringComparison.Ordinal);
+            Assert.Contains("rule=R_MAX; severity=Error", violation.Details, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await DeactivateAsync(stand);
+        }
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "D-212")]
+    public async Task Збій_посеред_спроби_відкочує_весь_пакет_і_не_пише_подій()
+    {
+        var stand = await ArrangeAsync(RegistrySourceKind.External);
+        var keyId = (await KeyAsync(stand, stand.G2)).Id;
+        stand.Put("Stack1", "Capacity", 11m);
+        stand.Add("Stack9", 3m);
+        stand.Remove("Stack2");
+        var g2b = stand.Add("Stack2", 20m);
+        await using var provider = BuildProvider(new FakeRules(fail: true));
+
+        try
+        {
+            var revision = await RevisionAsync(stand);
+
+            // Рушій правил падає ПІСЛЯ збереження створення, оновлення й перепривʼязки.
+            await Assert.ThrowsAsync<InvalidOperationException>(() => RunAsync(provider, stand));
+
+            Assert.Equal(10m, await CapAsync(stand, stand.E1));
+            Assert.Equal(0, await CountEntriesAsync(stand, "Stack9"));
+            var key = await KeyAsync(stand, stand.G2);
+            Assert.Equal(keyId, key.Id);
+            Assert.Equal(revision, await RevisionAsync(stand));
+            await using (var db = Context())
+            {
+                Assert.False(await db.RegistryExternalKeys.AnyAsync(k => k.ExternalId == g2b));
+            }
+
+            Assert.Equal(0, await CountAsync(
+                $"SELECT COUNT(*) AS [Value] FROM aud.StructureChange WHERE EntityType = N'dic.RegistryExternalKey' AND EntityId = {keyId}"));
+            Assert.Equal(0, await CountAsync(AuditQuery(stand.E1, stand.SvcId)));
+            Assert.Empty(await EventsAsync(stand));
         }
         finally
         {
@@ -541,6 +693,36 @@ public sealed class RegistrySyncExecuteTests(SqlServerFixture sql)
 
             // Атрибута немає — джерело про нього нічого не сказало (не відмова: знімок лишається повним).
             return Task.FromResult(new CurrentValuesResult(found, []));
+        }
+    }
+
+    /// <summary>
+    /// Рушій правил: або кожен записаний запис порушує правило рівня Error, або падає посеред спроби.
+    /// </summary>
+    private sealed class FakeRules(bool fail) : IRegistryRuleEngine
+    {
+        public List<long> Seen { get; } = [];
+
+        public Task<RegistryRuleCheck> EvaluateAsync(
+            RegistryDef definition,
+            IReadOnlyCollection<long> changed,
+            IReadOnlyCollection<long> removed,
+            DateOnly? businessDate,
+            CancellationToken ct)
+        {
+            if (fail)
+            {
+                throw new InvalidOperationException("Збій посеред спроби синку (тест атомарності).");
+            }
+
+            Seen.AddRange(changed);
+            return Task.FromResult(new RegistryRuleCheck([.. changed.Select(id => new RegistryRuleViolationDto(
+                id,
+                "?",
+                "R_MAX",
+                "Error",
+                RegistryRuleEngine.RuleViolatedErrorKey,
+                new Dictionary<string, string?> { ["message"] = "CAP > 5" }))]));
         }
     }
 
