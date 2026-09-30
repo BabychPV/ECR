@@ -29,6 +29,10 @@ namespace Ecr.Application.Documents;
 /// конструюють обробник вручну: у контейнері розв'язується завжди, і без нього
 /// колонка <c>Calculated</c> була б порожньою — рівно дефект, який тут закрито.
 /// </param>
+/// <param name="conditionalFormats">
+/// Правила умовного форматування версії (ФВ-2.6/2.7); один запит на зріз.
+/// Необов'язковий лише заради тестів, що конструюють обробник вручну.
+/// </param>
 public sealed class GetTableSliceHandler(
     IRowStore rowStore,
     ICellStore cellStore,
@@ -39,7 +43,8 @@ public sealed class GetTableSliceHandler(
     IPeriodStore periods,
     IStyleCatalog styles,
     IMemoryCache? memory = null,
-    ICalculationResultStore? results = null)
+    ICalculationResultStore? results = null,
+    IConditionalFormatStore? conditionalFormats = null)
 {
     private readonly MethodologyRequiredColumnsCache _required = new(memory);
 
@@ -324,8 +329,53 @@ public sealed class GetTableSliceHandler(
             }
         }
 
+        // ФВ-2.6/2.7: умовне форматування — ОДИН запит на версію й та сама
+        // чиста функція, що в Excel-експорті (`ConditionalFormatEvaluator`).
+        var formats = await ConditionalFormatsAsync(instance.TemplateVersionId, columns, rows, ct)
+            .ConfigureAwait(false);
+
         return new TableSliceDto(
-            tableInstanceId, instance.PeriodKey, columns, rows, permissions, confirmations);
+            tableInstanceId, instance.PeriodKey, columns, rows, permissions, confirmations, formats);
+    }
+
+    /// <summary>
+    /// Результат правил умовного форматування по комірках зрізу: ключ
+    /// <c>"{rowKey}:{columnCode}"</c>. Комірки без спрацювання тут немає;
+    /// порожня комірка не матеріалізована, тож оцінюється як <c>null</c>
+    /// (правило <c>empty</c> спрацьовує й на ній).
+    /// </summary>
+    private async Task<IReadOnlyDictionary<string, Templates.CellFormatDto>> ConditionalFormatsAsync(
+        int templateVersionId, List<ColumnDto> columns, IReadOnlyList<RowDto> rows, CancellationToken ct)
+    {
+        var result = new Dictionary<string, Templates.CellFormatDto>(StringComparer.Ordinal);
+
+        if (conditionalFormats is null)
+        {
+            return result;
+        }
+
+        var all = await conditionalFormats.GetAsync(templateVersionId, ct).ConfigureAwait(false);
+        var byColumn = Templates.ConditionalFormatEvaluator.ByColumn(all);
+
+        foreach (var column in columns)
+        {
+            if (!byColumn.TryGetValue(column.Code, out var rules))
+            {
+                continue;
+            }
+
+            foreach (var row in rows)
+            {
+                row.Cells.TryGetValue(column.Code, out var value);
+
+                if (Templates.ConditionalFormatEvaluator.Evaluate(rules, value) is { } format)
+                {
+                    result[$"{row.RowKey}:{column.Code}"] = format;
+                }
+            }
+        }
+
+        return result;
     }
 
     /// <summary>

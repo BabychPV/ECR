@@ -17716,6 +17716,13 @@ export interface components {
          * @enum {unknown}
          */
         CellDataType: "String" | "Int" | "Decimal" | "Bool" | "Date" | "Lookup" | "Formula" | "Unit" | "Calculated";
+        /** @description Результат спрацювання правила умовного форматування (ФВ-2.6/2.7): колір
+         *     `#rrggbb` (або `null` — колір теми) і жирність. */
+        CellFormatDto: {
+            backgroundHex: null | string;
+            foregroundHex: null | string;
+            isBold: boolean;
+        };
         /** @description Підмножина `StyleDef`, потрібна ЖИВІЙ сітці (директива registry-
          *     lookup / cell-style, PR B2) — рамки/формат числа тут НЕ несуться:
          *     перші читає лише Excel-експорт (`StyleMapper.cs`), другий сітка вже має
@@ -23964,6 +23971,13 @@ export interface components {
              *     підтвердження. Комірка, якої тут немає, підтвердження не потребує. */
             cellConfirmations: {
                 [key: string]: string;
+            };
+            /** @description Умовне форматування (ФВ-2.6/2.7): ключ — той самий
+             *     `"{rowKey}:{columnCode}"`; значення — колір/жирність першого
+             *     спрацьованого правила колонки. Комірки, якої тут немає, правила не
+             *     зачіпають. Обчислено сервером тією самою функцією, що й Excel-експорт. */
+            cellFormats?: null | {
+                [key: string]: components["schemas"]["CellFormatDto"];
             };
             /** @description Компактна мапа заборон: ключ — `"{rowKey}:{columnCode}"`, значення —
              *     назва EditDenyReason. Комірка, якої тут

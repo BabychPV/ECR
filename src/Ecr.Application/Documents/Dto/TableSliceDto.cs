@@ -24,13 +24,20 @@ namespace Ecr.Application.Documents.Dto;
 /// (<c>"{rowKey}:{columnCode}"</c>); значення — пояснення для діалогу
 /// підтвердження. Комірка, якої тут немає, підтвердження не потребує.
 /// </param>
+/// <param name="CellFormats">
+/// Умовне форматування (ФВ-2.6/2.7): ключ — той самий
+/// <c>"{rowKey}:{columnCode}"</c>; значення — колір/жирність першого
+/// спрацьованого правила колонки. Комірки, якої тут немає, правила не
+/// зачіпають. Обчислено сервером тією самою функцією, що й Excel-експорт.
+/// </param>
 public sealed record TableSliceDto(
     long TableInstanceId,
     int PeriodKey,
     IReadOnlyList<ColumnDto> Columns,
     IReadOnlyList<RowDto> Rows,
     IReadOnlyDictionary<string, string> CellPermissions,
-    IReadOnlyDictionary<string, string> CellConfirmations);
+    IReadOnlyDictionary<string, string> CellConfirmations,
+    IReadOnlyDictionary<string, Ecr.Application.Templates.CellFormatDto>? CellFormats = null);
 
 /// <summary>Опис колонки для клієнта.</summary>
 /// <remarks>
