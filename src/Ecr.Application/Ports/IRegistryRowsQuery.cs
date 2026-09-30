@@ -50,7 +50,77 @@ public interface IRegistryRowsQuery
     /// транзакції) відкинуто — їхнього стану ніхто ніколи не бачив.
     /// </remarks>
     public Task<RegistryEntryHistorySlice> ReadEntryHistoryAsync(long registryEntryId, CancellationToken ct);
+
+    /// <summary>
+    /// Сторінка видимих записів ПЛОСКОГО довідника (без композиції) за <c>Id</c>: відбір, порядок і
+    /// пагінація — у SQL (P1-4), а не над усім довідником у пам'яті.
+    /// </summary>
+    /// <param name="filter">Правило видимості й звуження.</param>
+    /// <param name="after">Курсор: лише <c>Id &gt; after</c>.</param>
+    /// <param name="take">Скільки записів узяти.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⚠ Видимість у SQL — те саме правило, що <c>RegistryResolver.Select</c> (чинність
+    /// <c>[ValidFrom, ValidTo)</c>, активний, не видалений, каскад); рівність двох формулювань
+    /// тримає тест <c>RegistryRowsSqlParityTests</c> на межах вікна.
+    /// </remarks>
+    public Task<VisibleEntryPage> PageVisibleEntriesAsync(
+        VisibleEntriesFilter filter, long after, int take, CancellationToken ct);
+
+    /// <summary>Видимі записи плоского довідника в стислому вигляді (без значень), за <c>Id</c>.</summary>
+    /// <param name="filter">Правило видимості й звуження.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<IReadOnlyList<RegistryEntrySlim>> ListVisibleSlimAsync(VisibleEntriesFilter filter, CancellationToken ct);
+
+    /// <summary>
+    /// Значення рядкових полів, що ВМІЩУЮТЬ підрядок (без урахування регістру й діакритики) — НАДМНОЖИНА
+    /// для пошуку: точну перевірку робить обробник.
+    /// </summary>
+    /// <param name="registryFieldDefIds">Рядкові поля.</param>
+    /// <param name="contains">Підрядок.</param>
+    /// <param name="asOfUtc">Системний момент; <c>null</c> — поточні дані.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<IReadOnlyList<RegistryRowValue>> ListTextMatchesAsync(
+        IReadOnlyCollection<int> registryFieldDefIds, string contains, DateTime? asOfUtc, CancellationToken ct);
+
+    /// <summary>
+    /// Значення поля, рівні каноничному значенню фільтра, — НАДМНОЖИНА (рядки порівнюються без регістру
+    /// й діакритики): точну перевірку робить обробник.
+    /// </summary>
+    /// <param name="registryFieldDefId">Поле.</param>
+    /// <param name="type">Тип поля.</param>
+    /// <param name="canonical">Значення в каноничному поданні (<c>Canonical</c> обробника).</param>
+    /// <param name="asOfUtc">Системний момент; <c>null</c> — поточні дані.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<IReadOnlyList<RegistryRowValue>> ListEqualMatchesAsync(
+        int registryFieldDefId, Domain.Enums.CellDataType type, string canonical, DateTime? asOfUtc, CancellationToken ct);
 }
+
+/// <summary>Правило відбору видимих записів плоского довідника.</summary>
+/// <param name="RegistryDefId">Довідник.</param>
+/// <param name="AsOf">Бізнес-дата чинності.</param>
+/// <param name="AsOfUtc">Системний момент; <c>null</c> — поточні дані.</param>
+/// <param name="CascadeParentId">Обраний батько каскаду; <c>null</c> — без звуження.</param>
+/// <param name="CascadeAllowed">Дозволені батьком записи (лише разом із <paramref name="CascadeParentId"/>).</param>
+/// <param name="EntryIds">Лише ці записи; <c>null</c> — усі.</param>
+public sealed record VisibleEntriesFilter(
+    int RegistryDefId,
+    DateOnly AsOf,
+    DateTime? AsOfUtc,
+    long? CascadeParentId,
+    IReadOnlyCollection<long> CascadeAllowed,
+    IReadOnlyCollection<long>? EntryIds);
+
+/// <summary>Сторінка видимих записів і їх загальна кількість (без урахування курсора).</summary>
+/// <param name="Items">Записи сторінки за <c>Id</c>.</param>
+/// <param name="Total">Скільки всього записів проходить фільтр.</param>
+public sealed record VisibleEntryPage(IReadOnlyList<RegistryEntry> Items, int Total);
+
+/// <summary>Запис без значень — для пошуку за назвою.</summary>
+/// <param name="Id">Ідентифікатор.</param>
+/// <param name="Code">Код.</param>
+/// <param name="DisplayL10n">Назва мовами каталогу.</param>
+public sealed record RegistryEntrySlim(long Id, string Code, Domain.ValueObjects.LocalizedText DisplayL10n);
 
 /// <summary>Значення одного поля запису — типізовані колонки <c>dic.RegistryValue</c>.</summary>
 /// <param name="RegistryEntryId">Запис.</param>

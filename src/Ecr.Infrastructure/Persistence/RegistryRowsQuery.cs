@@ -1,4 +1,4 @@
-// src/Ecr.Infrastructure/Persistence/RegistryRowsQuery.cs
+﻿// src/Ecr.Infrastructure/Persistence/RegistryRowsQuery.cs
 using Ecr.Application.Ports;
 using Ecr.Domain.Entities.Dictionaries;
 using Ecr.Infrastructure.Persistence.Configurations;
@@ -155,6 +155,123 @@ public sealed class RegistryRowsQuery(EcrDbContext db) : IRegistryRowsQuery
             : await Entries(null).Where(e => targets.Contains(e.Id)).ToListAsync(ct).ConfigureAwait(false);
 
         return new RegistryEntryHistorySlice(entries, values, names, referenced);
+    }
+
+    /// <inheritdoc />
+    public async Task<VisibleEntryPage> PageVisibleEntriesAsync(
+        VisibleEntriesFilter filter, long after, int take, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(filter);
+        var visible = Visible(filter);
+        var total = await visible.CountAsync(ct).ConfigureAwait(false);
+        var items = await visible.Where(e => e.Id > after).OrderBy(e => e.Id).Take(take)
+            .ToListAsync(ct).ConfigureAwait(false);
+        return new VisibleEntryPage(items, total);
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<RegistryEntrySlim>> ListVisibleSlimAsync(
+        VisibleEntriesFilter filter, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(filter);
+        return await Visible(filter).OrderBy(e => e.Id)
+            .Select(e => new RegistryEntrySlim(e.Id, e.Code, e.DisplayL10n))
+            .ToListAsync(ct).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<RegistryRowValue>> ListTextMatchesAsync(
+        IReadOnlyCollection<int> registryFieldDefIds, string contains, DateTime? asOfUtc, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(registryFieldDefIds);
+        if (registryFieldDefIds.Count == 0)
+        {
+            return [];
+        }
+
+        var fields = registryFieldDefIds.Distinct().ToList();
+        return await Plain(Values(asOfUtc).Where(v =>
+                fields.Contains(v.RegistryFieldDefId)
+                && v.ValueString != null
+                && EF.Functions.Collate(v.ValueString, LooseCollation).Contains(contains)))
+            .ToListAsync(ct).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<RegistryRowValue>> ListEqualMatchesAsync(
+        int registryFieldDefId, Domain.Enums.CellDataType type, string canonical, DateTime? asOfUtc, CancellationToken ct)
+    {
+        var values = Values(asOfUtc).Where(v => v.RegistryFieldDefId == registryFieldDefId);
+        var ci = System.Globalization.CultureInfo.InvariantCulture;
+        switch (type)
+        {
+            case Domain.Enums.CellDataType.String:
+                values = values.Where(v => v.ValueString != null
+                    && EF.Functions.Collate(v.ValueString, LooseCollation) == canonical);
+                break;
+            case Domain.Enums.CellDataType.Int or Domain.Enums.CellDataType.Decimal:
+                var number = decimal.Parse(canonical, System.Globalization.NumberStyles.Number, ci);
+                values = values.Where(v => v.ValueNumeric == number);
+                break;
+            case Domain.Enums.CellDataType.Bool:
+                var flag = bool.Parse(canonical);
+                values = values.Where(v => v.ValueBool == flag);
+                break;
+            case Domain.Enums.CellDataType.Date:
+                var from = DateTime.ParseExact(canonical, "yyyy-MM-dd", ci);
+                var to = from.AddDays(1);
+                values = values.Where(v => v.ValueDate >= from && v.ValueDate < to);
+                break;
+            case Domain.Enums.CellDataType.Lookup:
+                var target = long.Parse(canonical, ci);
+                values = values.Where(v => v.ValueRefEntryId == target);
+                break;
+            case Domain.Enums.CellDataType.Unit:
+                var unit = int.Parse(canonical, ci);
+                values = values.Where(v => v.ValueUnitId == unit);
+                break;
+            default:
+                return [];
+        }
+
+        return await Plain(values).ToListAsync(ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Без регістру й діакритики: ширше за <c>OrdinalIgnoreCase</c>, тож SQL дає НАДМНОЖИНУ, а не
+    /// залежить від колації бази (у «чутливій» базі точний збіг без цього губив би рядки).
+    /// </summary>
+    private const string LooseCollation = "Latin1_General_100_CI_AI";
+
+    /// <summary>Значення без з'єднання з одиницями — лише типізовані колонки.</summary>
+    private static IQueryable<RegistryRowValue> Plain(IQueryable<RegistryValue> values)
+        => values.Select(v => new RegistryRowValue(
+            v.RegistryEntryId, v.RegistryFieldDefId, v.ValueNumeric, v.ValueString, v.ValueDate,
+            v.ValueBool, v.ValueRefEntryId, v.ValueUnitId, null));
+
+    /// <summary>Видимі записи плоского довідника: те саме правило, що <c>RegistryResolver.Select</c>.</summary>
+    private IQueryable<RegistryEntry> Visible(VisibleEntriesFilter filter)
+    {
+        var asOf = filter.AsOf;
+        var query = Entries(filter.AsOfUtc).Where(e =>
+            e.RegistryDefId == filter.RegistryDefId
+            && e.IsActive && !e.IsDeleted
+            && (e.ValidFrom == null || e.ValidFrom <= asOf)
+            && (e.ValidTo == null || asOf < e.ValidTo));
+
+        if (filter.CascadeParentId is { } parent)
+        {
+            var allowed = filter.CascadeAllowed.ToList();
+            query = query.Where(e => allowed.Contains(e.Id) || e.ParentEntryId == parent);
+        }
+
+        if (filter.EntryIds is { } ids)
+        {
+            var wanted = ids.ToList();
+            query = query.Where(e => wanted.Contains(e.Id));
+        }
+
+        return query;
     }
 
     private static DateTime Utc(DateTime value) => DateTime.SpecifyKind(value, DateTimeKind.Utc);
