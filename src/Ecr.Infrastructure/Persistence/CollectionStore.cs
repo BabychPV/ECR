@@ -649,6 +649,24 @@ public sealed class CollectionStore(EcrDbContext db, IClock clock) : ICollection
         var coverage = (await ReadCoverageIslandsAsync(ids, gapWindowFrom, ct).ConfigureAwait(false))
             .ToLookup(c => c.SourceEntityId, c => new TimeInterval(c.FromUtc, c.ToUtc));
 
+        // ⛔ Б3 рев'ю «Аудита»: масове видалення подій заблоковано лімітом — це відмова джерела, яку не можна лишати
+        // «зеленою». Подія покриття — нульової довжини, тож прогалиною через острови вона не стає; сигнал — свіжа
+        // (за останню добу) подія `SourceDataRefused` з ключем `eventRemovalLimit`: блок повторюється кожним
+        // прогоном, поки людина не підтвердить видалення чи джерело не повернеться в норму.
+        var removalBlockFrom = now.AddHours(-RemovalBlockHealthHours);
+        var removalBlocked = (await db.CollectionCoverages
+                .AsNoTracking()
+                .Where(c => ids.Contains(c.SourceEntityId)
+                            && c.Status == CollectionCoverage.SourceDataRefused
+                            && c.CoveredFrom >= removalBlockFrom
+                            && c.Details != null
+                            && c.Details.Contains("coverageEvents.eventRemovalLimit"))
+                .GroupBy(c => c.SourceEntityId)
+                .Select(g => new { Id = g.Key, At = g.Min(c => c.CoveredFrom) })
+                .ToListAsync(ct)
+                .ConfigureAwait(false))
+            .ToDictionary(x => x.Id, x => x.At);
+
         var transportById = transports.ToDictionary(s => s.Id, s => s.Transport.ToString());
         var codeById = transports.ToDictionary(s => s.Id, s => s.Code);
 
@@ -676,7 +694,7 @@ public sealed class CollectionStore(EcrDbContext db, IClock clock) : ICollection
                 transportById.GetValueOrDefault(entity.DataSourceId, "—"),
                 entity.IsActive,
                 run is null ? null : new CollectionRunStatus(run.FinishedAt, run.Status, run.PointsRetrieved),
-                gaps.Count == 0 ? null : gaps[0].From,
+                gaps.Count > 0 ? gaps[0].From : removalBlocked.TryGetValue(entity.Id, out var blockedAt) ? blockedAt : null,
                 entity.DataSourceId,
                 codeById[entity.DataSourceId],
                 entity.OnMissingInSource,
@@ -735,6 +753,9 @@ public sealed class CollectionStore(EcrDbContext db, IClock clock) : ICollection
     /// обрії давали б екран, який показує «все добре», поки збирач наздоганяє.
     /// </remarks>
     private const int GapLookbackDays = 45;
+
+    /// <summary>Скільки годин блок масового видалення подій вважається чинним для здоров'я джерел.</summary>
+    private const int RemovalBlockHealthHours = 24;
 
     /// <summary>Одиниці джерела за їхніми символами — одним запитом на весь батч.</summary>
     /// <remarks>

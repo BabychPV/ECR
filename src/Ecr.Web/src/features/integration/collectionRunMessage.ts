@@ -124,6 +124,10 @@ function render(key: string, params: Record<string, string>): string | null {
       return t('coverageEvents.eventTemplateOverlap', params);
     case 'coverageEvents.eventRemovalKeptManual':
       return t('coverageEvents.eventRemovalKeptManual', params);
+    case 'coverageEvents.eventRemovalLimit':
+      return t('coverageEvents.eventRemovalLimit', params);
+    case 'coverageEvents.eventRemovalSheetSubmitted':
+      return t('coverageEvents.eventRemovalSheetSubmitted', params);
     default:
       return adapterRefusal(key, params);
   }

@@ -17,7 +17,12 @@ public interface ISourceEventSyncJob : IBackgroundJob;
 /// <param name="SourceEntityId">Сутність джерела — шаблон подій.</param>
 /// <param name="FromUtc">Початок вікна; <c>null</c> — за <c>LookbackDays</c> розкладу.</param>
 /// <param name="ToUtc">Кінець вікна, виключно; <c>null</c> — «зараз».</param>
-public sealed record SourceEventSyncRequest(int SourceEntityId, DateTime? FromUtc = null, DateTime? ToUtc = null)
+/// <param name="ConfirmRemoval">
+/// Ручне підтвердження масового видалення подій, зниклих з джерела (ліміт «повної звірки»): ставить лише обробник з
+/// правом <c>Integration.Manage</c>; розклад і збір його не ставлять.
+/// </param>
+public sealed record SourceEventSyncRequest(
+    int SourceEntityId, DateTime? FromUtc = null, DateTime? ToUtc = null, bool ConfirmRemoval = false)
 {
     private static readonly System.Text.Json.JsonSerializerOptions Options =
         new(System.Text.Json.JsonSerializerDefaults.Web);
@@ -57,4 +62,13 @@ public static class SourceEventSyncTarget
     /// <returns>Ключ цілі.</returns>
     public static string Of(int sourceEntityId)
         => string.Create(System.Globalization.CultureInfo.InvariantCulture, $"source-events-e{sourceEntityId}");
+
+    /// <summary>
+    /// Ціль підтвердженого масового видалення: власна, щоб злиття з уже поставленою звичайною синхронізацією не
+    /// губило прапор підтвердження.
+    /// </summary>
+    /// <param name="sourceEntityId">Сутність джерела.</param>
+    /// <returns>Ключ цілі.</returns>
+    public static string OfConfirmed(int sourceEntityId)
+        => string.Create(System.Globalization.CultureInfo.InvariantCulture, $"source-events-e{sourceEntityId}-confirm");
 }

@@ -37,7 +37,26 @@ public static class CoverageDetails
     public const string EventRemovalSourceEmptyKey = "coverageEvents.eventRemovalSourceEmpty";
     public const string EventRemovalKeptManualKey = "coverageEvents.eventRemovalKeptManual";
 
+    public const string EventRemovalLimitKey = "coverageEvents.eventRemovalLimit";
+    public const string EventRemovalSheetSubmittedKey = "coverageEvents.eventRemovalSheetSubmitted";
+
     public const string EventTemplateOverlapKey = "coverageEvents.eventTemplateOverlap";
+
+    /// <summary>Масове видалення зниклих подій перевищило ліміт: за мапінгом нічого не видалено до ручного підтвердження.</summary>
+    public static string EventRemovalLimit(int candidates, int limit, int linked)
+        => Encode(
+            EventRemovalLimitKey,
+            ("count", Text(candidates)),
+            ("limit", Text(limit)),
+            ("linked", Text(linked)));
+
+    /// <summary>Події немає в джерелі, але аркуш рядка поданий чи затверджений: рядок не видалено.</summary>
+    public static string EventRemovalSheetSubmitted(object eventId, object rowKey, object status)
+        => Encode(
+            EventRemovalSheetSubmittedKey,
+            ("eventId", Text(eventId)),
+            ("rowKey", Text(rowKey)),
+            ("status", Text(status)));
 
     /// <summary>Одна подія в двох братніх шаблонах з різними значеннями атрибутів; береться перший за порядком.</summary>
     public static string EventTemplateOverlap(object eventId, object template, object otherTemplate)
