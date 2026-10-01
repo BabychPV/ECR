@@ -334,6 +334,48 @@ describe("З'єднання: створення", () => {
 
     expect(secondary.value).toBe('https://user:pass@lab2.example.invalid/api');
   });
+
+  // D1: політика адреси (SSRF) — відмова біля поля адреси, а не загальним алертом.
+  it.each([
+    'dataSourceEndpointScheme',
+    'dataSourceEndpointHostForbidden',
+    'dataSourceEndpointMalformed',
+    'dataSourceEndpointHostNotAllowed',
+    'dataSourceEndpointSqlScheme',
+    'dataSourceEndpointSqlLinkLocal',
+  ])('422 %s — причина БІЛЯ поля адреси, без загального алерта', async (key) => {
+    respond({
+      change: () =>
+        json(
+          {
+            title: 'Invalid request',
+            status: 422,
+            errorCode: 'ECR-REQ-0422',
+            correlationId: 'c-422',
+            messageKey: `err.ECR-REQ-0422.${key}`,
+            field: 'endpoint',
+          },
+          422,
+        ),
+    });
+    show();
+
+    await screen.findByText('Main PI server');
+    const scope = await openCreate();
+
+    type(scope, /sources\.code/, 'LAB');
+    type(scope, /sources\.name/, 'Lab feed');
+    type(scope, /^.*sources\.endpoint/, 'http://127.0.0.1/x');
+
+    fireEvent.click(within(scope).getByRole('button', { name: /sources\.create/ }));
+
+    const endpoint = field(scope, /^.*sources\.endpoint/);
+
+    await waitFor(() => expect(errorOf(endpoint)).toContain(`err.ECR-REQ-0422.${key}`));
+    expect(endpoint.getAttribute('aria-invalid')).toBe('true');
+    expect(within(scope).queryByRole('alert')).toBeNull();
+    expect(endpoint.value).toBe('http://127.0.0.1/x');
+  });
 });
 
 describe("З'єднання: правка", () => {

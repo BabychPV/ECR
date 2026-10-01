@@ -41,6 +41,13 @@ type FailedField =
  */
 const FieldOfKey: Readonly<Record<string, FailedField>> = {
   'err.ECR-REQ-0422.dataSourceEndpointCarriesSecret': 'endpoint',
+  // D1: політика адреси (SSRF) — відмова стоїть біля поля адреси, а не загальним алертом.
+  'err.ECR-REQ-0422.dataSourceEndpointScheme': 'endpoint',
+  'err.ECR-REQ-0422.dataSourceEndpointHostForbidden': 'endpoint',
+  'err.ECR-REQ-0422.dataSourceEndpointMalformed': 'endpoint',
+  'err.ECR-REQ-0422.dataSourceEndpointHostNotAllowed': 'endpoint',
+  'err.ECR-REQ-0422.dataSourceEndpointSqlScheme': 'endpoint',
+  'err.ECR-REQ-0422.dataSourceEndpointSqlLinkLocal': 'endpoint',
   'err.ECR-REQ-0422.dataSourceCodeTaken': 'code',
   'err.ECR-REQ-0422.dataSourceSecretReentryRequired': 'secretConfirmation',
   'err.ECR-REQ-0422.dataSourceEndpointChangeUnconfirmed': 'confirmEndpointChange',
