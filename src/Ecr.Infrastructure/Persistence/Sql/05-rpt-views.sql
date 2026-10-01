@@ -325,3 +325,10 @@ IF IS_ROLEMEMBER(N'db_datareader', N'ecr_viewer') = 0
     ALTER ROLE db_datareader ADD MEMBER ecr_viewer;
 GRANT VIEW DEFINITION TO ecr_viewer;
 GO
+-- ⛔ Секрети — НЕ «дані звітності»: DENY має пріоритет над db_datareader.
+-- Хеші паролів і штамп сесії користувачів, ключі кільця Data Protection (XML).
+IF OBJECT_ID(N'sec.DataProtectionKey', N'U') IS NOT NULL
+    DENY SELECT ON OBJECT::sec.DataProtectionKey TO ecr_viewer;
+IF OBJECT_ID(N'sec.[User]', N'U') IS NOT NULL
+    DENY SELECT ON OBJECT::sec.[User] (PasswordHash, SecurityStamp) TO ecr_viewer;
+GO

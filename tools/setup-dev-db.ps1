@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     Готує базу розробника: схема, скрипти, seed і (за бажанням) дані.
 
@@ -380,6 +380,7 @@ foreach ($name in $scripts) {
 
 # AN-10: членство в `ecr_viewer` (роль створює 05-rpt-views.sql). Ідемпотентно.
 if ($ViewerAccount) {
+    if ($ViewerAccount -match '(?i)EcrApi|EcrWorker|^NT SERVICE\\') { throw "ViewerAccount '$ViewerAccount' - службовий акаунт (EcrApi/EcrWorker/NT SERVICE): ecr_viewer лише для довірених читачів." }
     $acct = $ViewerAccount.Replace("'", "''")
     $viewerSql = @"
 SET NOCOUNT ON;

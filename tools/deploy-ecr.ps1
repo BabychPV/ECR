@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     Один виклик: від чистого сервера до працюючої служби EcrApi.
 
@@ -1392,6 +1392,7 @@ END
 
     # AN-10: членство в `ecr_viewer` — і з -SkipSchema (роль уже накотив DBA).
     if ($ViewerAccount) {
+        if ($ViewerAccount -match '(?i)EcrApi|EcrWorker|^NT SERVICE\\') { throw "ViewerAccount '$ViewerAccount' - службовий акаунт (EcrApi/EcrWorker/NT SERVICE): ecr_viewer лише для довірених читачів." }
         $acct = $ViewerAccount.Replace("'", "''")
         Invoke-DeploySql -TargetDb $Database -Query @"
 SET NOCOUNT ON;

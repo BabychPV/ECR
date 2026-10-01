@@ -52,6 +52,7 @@ public sealed class ViewerRoleTests(SqlServerFixture sql)
                 FROM sys.objects o JOIN sys.schemas s ON s.schema_id = o.schema_id
                 WHERE o.type IN ('U','V') AND o.is_ms_shipped = 0
                   AND s.name NOT IN ('sys','INFORMATION_SCHEMA')
+                  AND NOT (s.name = 'sec' AND o.name IN ('DataProtectionKey','User'))
                 GROUP BY s.name;
                 """, connection))
             await using (var reader = await cmd.ExecuteReaderAsync())
@@ -111,6 +112,64 @@ public sealed class ViewerRoleTests(SqlServerFixture sql)
                 var write = await Assert.ThrowsAsync<SqlException>(
                     () => ExecAsync(connection, $"DELETE FROM [{writeSchema}].[{writeObject}];"));
                 Assert.Equal(229, write.Number);
+            }
+            finally
+            {
+                await ExecAsync(connection, "REVERT;");
+            }
+        }
+        finally
+        {
+            await ExecAsync(connection, $"IF DATABASE_PRINCIPAL_ID(N'{user}') IS NOT NULL DROP USER [{user}];");
+        }
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Член_ecr_viewer_не_читає_секрети_і_не_змінює_аудит()
+    {
+        await using var connection = await OpenAsync();
+        const string user = "viewer_probe_secrets";
+
+        await ExecAsync(connection, $"IF DATABASE_PRINCIPAL_ID(N'{user}') IS NOT NULL DROP USER [{user}];");
+        await ExecAsync(connection, $"CREATE USER [{user}] WITHOUT LOGIN; ALTER ROLE {Role} ADD MEMBER [{user}];");
+        try
+        {
+            var auditTable = await ScalarAsync<string>(connection,
+                "SELECT TOP 1 t.name FROM sys.tables t JOIN sys.schemas s ON s.schema_id = t.schema_id WHERE s.name = N'aud' ORDER BY t.name;");
+            Assert.False(string.IsNullOrEmpty(auditTable));
+            var auditColumn = await ScalarAsync<string>(connection,
+                $"SELECT TOP 1 c.name FROM sys.columns c WHERE c.object_id = OBJECT_ID(N'aud.[{auditTable}]') AND c.is_computed = 0 AND c.is_identity = 0 ORDER BY c.column_id;");
+            Assert.False(string.IsNullOrEmpty(auditColumn));
+
+            await ExecAsync(connection, $"EXECUTE AS USER = N'{user}';");
+            try
+            {
+                // Секрети: DENY перекриває db_datareader (відмова 229).
+                foreach (var query in new[]
+                {
+                    "SELECT TOP 1 * FROM sec.DataProtectionKey;",
+                    "SELECT TOP 1 [Xml] FROM sec.DataProtectionKey;",
+                    "SELECT TOP 1 PasswordHash FROM sec.[User];",
+                    "SELECT TOP 1 SecurityStamp FROM sec.[User];",
+                    "SELECT TOP 1 * FROM sec.[User];",
+                })
+                {
+                    var denied = await Assert.ThrowsAsync<SqlException>(() => ExecAsync(connection, query));
+                    Assert.True(denied.Number is 229 or 230, $"{query}: {denied.Number}"); // 229 об'єкт, 230 стовпець
+                }
+
+                // Решта sec.User і решта sec.* читаються («бачить усе» для даних).
+                await ExecAsync(connection, "SELECT TOP 1 Id, UserName, DisplayName FROM sec.[User];");
+                await ExecAsync(connection, "SELECT TOP 1 * FROM sec.Role;");
+
+                // Незмінність aud.*: ні UPDATE, ні DELETE (229).
+                var del = await Assert.ThrowsAsync<SqlException>(() => ExecAsync(connection, $"DELETE FROM aud.[{auditTable}];"));
+                Assert.Equal(229, del.Number);
+                var upd = await Assert.ThrowsAsync<SqlException>(
+                    () => ExecAsync(connection, $"UPDATE aud.[{auditTable}] SET [{auditColumn}] = [{auditColumn}];"));
+                Assert.Equal(229, upd.Number);
             }
             finally
             {

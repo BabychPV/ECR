@@ -1235,6 +1235,8 @@ EXEC rpt.usp_GenerateTemplateViews @TemplateVersionId = 7; -- одна
 | `rpt_reader` | обліковий запис SSRS | лише `SELECT` на схему `rpt` |
 | `ecr_viewer` | довірений DBA / діагностика | членство в `db_datareader` (`SELECT` на ВСІ схеми бази, зокрема майбутні) + `VIEW DEFINITION`; жодних `ALTER`/`CREATE`/`INSERT`/`UPDATE`/`DELETE`/`EXECUTE` |
 
+⛔ DENY на секрети: `ecr_viewer` НЕ читає `sec.DataProtectionKey` і стовпці `PasswordHash`, `SecurityStamp` у `sec.User` (DENY SELECT у `05-rpt-views.sql`; перекриває `db_datareader`). Скрипти відхиляють `-ViewerAccount` зі службовими іменами (EcrApi/EcrWorker/NT SERVICE\).
+
 ⛔ Членом `ecr_viewer` НЕ робити обліковий запис служби EcrApi/EcrWorker: ця роль лише читає, а службі потрібні власні права запису. Роль бачить усе, зокрема `sys_ecr` і `aud` — членство лише довіреним особам.
 
 Видати членство при розгортанні (необовʼязковий параметр, без нього роль лишається порожньою):
