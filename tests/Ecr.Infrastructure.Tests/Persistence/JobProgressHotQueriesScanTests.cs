@@ -1,4 +1,4 @@
-// tests/Ecr.Infrastructure.Tests/Persistence/JobProgressHotQueriesScanTests.cs
+﻿// tests/Ecr.Infrastructure.Tests/Persistence/JobProgressHotQueriesScanTests.cs
 using System.Globalization;
 using Ecr.Infrastructure.Persistence;
 using Ecr.TestKit;
@@ -97,8 +97,16 @@ public sealed class JobProgressHotQueriesScanTests(SqlServerFixture sql)
             return (reads, count);
         }
 
+        // ⛔ Порівняння «до/після» саме по собі хибнозелене: «до» — це скан усієї СПІЛЬНОЇ тестової
+        // бази (сотні сторінок чужого шуму), тож без індексу after ≈ before. Тому доказ — ПЛАН:
+        // запит мусить шукати (seek) за IX_JobProgress_State_UpdatedAt. Без індексу seeks не зростає.
+        var seeksBefore = await IndexSeeksAsync("IX_JobProgress_State_UpdatedAt");
         var before = await MeasureAsync();
         Assert.Equal(1, before.Count);
+        var seeksAfter = await IndexSeeksAsync("IX_JobProgress_State_UpdatedAt");
+        Assert.True(
+            seeksAfter > seeksBefore,
+            $"Лічильник готовності не шукає за IX_JobProgress_State_UpdatedAt (seeks {seeksBefore} -> {seeksAfter}): індекс прибрано чи план скан.");
 
         // Чужа історія за межами вікна (30 діб зберігання): доба не має її читати.
         await ExecAsync($$"""
@@ -126,6 +134,23 @@ public sealed class JobProgressHotQueriesScanTests(SqlServerFixture sql)
         command.CommandTimeout = 120;
         command.CommandText = commandText;
         await command.ExecuteNonQueryAsync();
+    }
+
+    private async Task<long> IndexSeeksAsync(string indexName)
+    {
+        await using var connection = new SqlConnection(sql.ConnectionString);
+        await connection.OpenAsync();
+        await using var q = connection.CreateCommand();
+        q.CommandText = """
+            SELECT ISNULL(SUM(CAST(us.user_seeks AS bigint)), 0)
+            FROM sys.indexes i
+            LEFT JOIN sys.dm_db_index_usage_stats us
+                   ON us.database_id = DB_ID() AND us.object_id = i.object_id AND us.index_id = i.index_id
+            WHERE i.object_id = OBJECT_ID(N'itg.JobProgress') AND i.name = @name
+            """;
+        q.Parameters.AddWithValue("@name", indexName);
+        var value = await q.ExecuteScalarAsync();
+        return Convert.ToInt64(value, CultureInfo.InvariantCulture);
     }
 
     private async Task<long> ReadsAsync(Func<EcrDbContext, Task> action)
