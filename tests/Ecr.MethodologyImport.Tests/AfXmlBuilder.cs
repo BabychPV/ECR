@@ -67,7 +67,8 @@ internal sealed class AfXmlBuilder
     }
 
     /// <summary>Константа: визначення (раз) і значення в категорії <paramref name="category"/>.</summary>
-    public AfXmlBuilder Constant(string m, string mv, string name, string value = "1", string category = "Common")
+    public AfXmlBuilder Constant(
+        string m, string mv, string name, string value = "1", string category = "Common", string parameter = "p")
     {
         var folder = FolderPath(m, mv, "Constants");
         EmitMethodology(m, mv);
@@ -84,7 +85,7 @@ internal sealed class AfXmlBuilder
         var valuePath = $"{definition}\\{category}\\V1";
         var vsegs = valuePath.Split('\\').Length;
         _elements.Add(Element(valuePath, "Constant_El_V", Value("CInfo_Value", value)
-            + Value("CInfo_Parameter", "p")
+            + Value("CInfo_Parameter", parameter)
             + Value("CInfo_StartDate", "2023-12-31T19:00:00Z")
             + Config("CInfo_Category", "%..\\Element%")
             + Config("MInfo_Name", "%" + Ups(vsegs - 1 - nameIdx) + "Element%")
