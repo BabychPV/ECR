@@ -14,7 +14,7 @@ import type {
 import { denyText } from '@/features/grid/permissions';
 import { invalidateSlices } from '@/features/grid/sliceCache';
 import { calculationResults } from '@/features/methodologies/api';
-import { calculationResultsKey } from '@/features/methodologies/calculationResultsKey';
+import { RecalculateHintId, calculationResultsKey } from '@/features/methodologies/calculationResultsKey';
 import { notificationCloseButtonProps, showApiError, showDone } from '@/shared/ui/notify';
 import { useDurationIndicator } from '@/shared/ui/useDurationIndicator';
 import { DurationProgress } from '@/shared/ui/DurationProgress';
@@ -100,8 +100,11 @@ export function ImportPanel({ documentId, periodKey }: ImportPanelProps): JSX.El
       // застарілими, і людина бачила «Imported» без жодного слова, що звіт
       // ще рахує старі входи. Підказка — за правдою сервера (`isStale`), а не
       // за здогадом клієнта про те, які колонки читає методологія.
+      // Один тост на тип: id прибирає дубль при повторних імпортах; знімає його і панель результатів.
+      notifications.hide(RecalculateHintId);
       if (await calculationResultsStale(queryClient, documentId, periodKey)) {
         notifications.show({
+          id: RecalculateHintId,
           color: 'statusWarning',
           title: t('import.recalculateTitle'),
           message: t('import.recalculateHint', { action: t('workflow.recalculate') }),

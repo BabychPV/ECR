@@ -1,4 +1,5 @@
-import type { JSX } from 'react';
+import { useEffect, type JSX } from 'react';
+import { notifications } from '@mantine/notifications';
 import { Alert, Code, Skeleton, Stack, Table, Text } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
 import type { CalculationResultDto, RegistryDefDto, UnitRef } from '@/api/types';
@@ -10,7 +11,7 @@ import { localized } from '@/shared/i18n/localized';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { calculationResults } from './api';
-import { calculationResultsKey } from './calculationResultsKey';
+import { RecalculateHintId, calculationResultsKey } from './calculationResultsKey';
 
 /**
  * Коди довідників, змінених після прогону (RT-25), без повторів і впорядковані.
@@ -63,6 +64,14 @@ export function CalculationResultsPanel({
     queryKey: calculationResultsKey(documentId, periodKey),
     queryFn: () => calculationResults(documentId, periodKey),
   });
+
+  // Правда про застарілість — на сервері: щойно свіжі числа дійшли, тост-підказка імпорту
+  // («Перерахуйте») втрачає сенс і знімається, а не висить до перезавантаження.
+  const fresh =
+    results.data !== undefined && !results.data.some((r) => r.isStale) && changedRegistriesOf(results.data).length === 0;
+  useEffect(() => {
+    if (fresh) notifications.hide(RecalculateHintId);
+  }, [fresh]);
 
   // ⚠ Каталог довідників — лише коли банеру є кого називати, і під спільним ключем переліку
   // (його вже читають сітка й шапка документа), щоб не множити запитів. Відмова (немає

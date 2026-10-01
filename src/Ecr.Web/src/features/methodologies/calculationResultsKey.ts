@@ -15,3 +15,6 @@ export function isCalculationResultsQuery(query: Pick<Query, 'queryKey'>): boole
   const key = query.queryKey;
   return key[0] === 'document' && key[3] === 'calculation-results';
 }
+
+/** Ідентифікатор тосту «Перерахуйте» після імпорту: один на тип, знімається, коли числа свіжі. */
+export const RecalculateHintId = 'import-recalculate-hint';
