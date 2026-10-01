@@ -98,6 +98,26 @@ function render(key: string, params: Record<string, string>): string | null {
     // інтервал і вкладена причина `jobs.collectionRunReason`.
     case 'coverageEvents.sourceDataRefused':
       return t('coverageEvents.sourceDataRefused', params);
+    // Події журналу покриття від задач (`CoverageDetails`): згортка збору й синк подій
+    // джерела. Ключі літералами — їх звіряє сторож `EndpointCoverageTests` із сідом.
+    case 'coverageEvents.periodClosed':
+      return t('coverageEvents.periodClosed', params);
+    case 'coverageEvents.periodMissing':
+      return t('coverageEvents.periodMissing', params);
+    case 'coverageEvents.pointCeiling':
+      return t('coverageEvents.pointCeiling', params);
+    case 'coverageEvents.keptManual':
+      return t('coverageEvents.keptManual', params);
+    case 'coverageEvents.writeConflict':
+      return t('coverageEvents.writeConflict', params);
+    case 'coverageEvents.needsConfirmation':
+      return t('coverageEvents.needsConfirmation', params);
+    case 'coverageEvents.eventWriteFailed':
+      return t('coverageEvents.eventWriteFailed', params);
+    case 'coverageEvents.eventWritePartial':
+      return t('coverageEvents.eventWritePartial', params);
+    case 'coverageEvents.eventRowNotCreated':
+      return t('coverageEvents.eventRowNotCreated', params);
     default:
       return adapterRefusal(key, params);
   }

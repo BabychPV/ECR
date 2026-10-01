@@ -173,7 +173,7 @@ public sealed class MaterializeCollectedDataJob(
         {
             await coverage
                 .RecordAsync(task.SourceEntityId, periodKey, CollectionCoverage.SkippedPeriodClosed,
-                    $"Період у стані {state?.ToString() ?? "невідомо"}: пізній збір лишається сирим.", ct)
+                    CoverageDetails.PeriodNotOpen(state), ct)
                 .ConfigureAwait(false);
 
             await progress.ReportKeyAsync(100, "jobs.materializePeriodClosed", ct).ConfigureAwait(false);
@@ -195,8 +195,7 @@ public sealed class MaterializeCollectedDataJob(
                 .RecordManyAsync(
                     [.. overCeiling.Select(field => new CoverageEvent(
                         task.SourceEntityId, periodKey, PointCeilingStatus,
-                        $"Поле {field}: понад {PointCeilingPerField.ToString(CultureInfo.InvariantCulture)} "
-                        + "точок за період — значення не записано, бо згортка неповного ряду дала б хибне число."))],
+                        CoverageDetails.PointCeiling(field, PointCeilingPerField)))],
                     ct)
                 .ConfigureAwait(false);
         }
@@ -235,17 +234,15 @@ public sealed class MaterializeCollectedDataJob(
 
         events.AddRange(written.KeptManual.Select(kept => new CoverageEvent(
             task.SourceEntityId, periodKey, CollectionCoverage.ConflictKeptManual,
-            $"Комірка {kept} має правку людини: значення збору не застосовано.")));
+            CoverageDetails.KeptManual(kept))));
 
         events.AddRange((written.WriteConflicts ?? []).Select(cell => new CoverageEvent(
             task.SourceEntityId, periodKey, CollectionCoverage.SkippedWriteConflict,
-            $"Комірка {cell}: рядок змінювали під час запису, повтори вичерпано — "
-            + "значення збору не записано; наступний прогін спробує знову.")));
+            CoverageDetails.WriteConflict(cell))));
 
         events.AddRange((written.AwaitingConfirmation ?? []).Select(cell => new CoverageEvent(
             task.SourceEntityId, periodKey, CollectionCoverage.SkippedNeedsConfirmation,
-            $"Комірка {cell}: правило періоду вимагає підтвердження людини — "
-            + "інтеграція не підтверджує, значення збору не записано.")));
+            CoverageDetails.NeedsConfirmation(cell))));
 
         if (events.Count > 0)
         {

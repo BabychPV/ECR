@@ -348,10 +348,9 @@ public sealed class SourceEventSyncJob(
                 outcome.Awaiting && !outcome.WriteConflict && outcome.Failure is null
                     ? CollectionCoverage.SkippedNeedsConfirmation
                     : CollectionCoverage.SkippedWriteConflict,
-                Cut(outcome.Failure is { } failure
-                    ? $"Подію {ev.EventId} не записано: {failure}"
-                    : $"Подію {ev.EventId} записано не повністю (рядок {item.RowKey}): "
-                      + "конфлікт запису чи підтвердження людини; наступний прогін спробує знову.")));
+                outcome.Failure is { } failure
+                    ? CoverageDetails.EventWriteFailed(ev.EventId, failure)
+                    : CoverageDetails.EventWritePartial(ev.EventId, item.RowKey)));
         }
 
         if (!outcome.RowExists)
@@ -370,7 +369,7 @@ public sealed class SourceEventSyncJob(
                         map.SourceEntityId,
                         periodKey,
                         CollectionCoverage.SkippedWriteConflict,
-                        Cut($"Подію {ev.EventId} не записано: рядок {item.RowKey} не створено, значення відхилено.")));
+                        CoverageDetails.EventRowNotCreated(ev.EventId, item.RowKey)));
                 }
 
                 totals.Pending++;
