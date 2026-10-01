@@ -22885,6 +22885,14 @@ export interface components {
             catalog?: null | string;
             /** @description Код джерела; при зміні ігнорується. */
             code: null | string;
+            /**
+             * @description Явне підтвердження зміни адреси джерела з Windows-автентифікацією (секрету
+             *     немає або він `Negotiate`): без нього — `422
+             *     err.ECR-REQ-0422.dataSourceEndpointChangeUnconfirmed`. Для джерел із
+             *     секретом ігнорується; при створенні не потрібне.
+             * @default false
+             */
+            confirmEndpointChange: boolean;
             /** @description Адреса або рядок з'єднання — без облікових даних. */
             endpoint: null | string;
             /**

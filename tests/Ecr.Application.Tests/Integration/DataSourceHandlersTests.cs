@@ -137,7 +137,7 @@ public sealed class DataSourceHandlersTests
         var spare = await Assert.ThrowsAsync<BusinessRuleException>(
             () => Save().UpdateAsync(
                 existing.Id, Named(), ExternalTransport.PiWebApi, Endpoint,
-                "https://svc:hunter2@pi2.corp.example", null, null, true, Version(existing), null, default));
+                "https://svc:hunter2@pi2.corp.example", null, null, true, Version(existing), null, false, default));
 
         // Відмова називає поле, у якому облікові дані, — не вміст.
         Assert.Equal("secondaryEndpoint", spare.Details!["field"]);
@@ -269,7 +269,7 @@ public sealed class DataSourceHandlersTests
 
         // Оборотна дія на її місці: збір спиняє `isActive = false`.
         var disabled = await Save().UpdateAsync(
-            source.Id, Named(), ExternalTransport.PiWebApi, Endpoint, null, null, null, false, Version(source), null, default);
+            source.Id, Named(), ExternalTransport.PiWebApi, Endpoint, null, null, null, false, Version(source), null, false, default);
 
         Assert.False(disabled.IsActive);
         Assert.Equal(12, disabled.SourceEntities);
@@ -310,7 +310,7 @@ public sealed class DataSourceHandlersTests
                 var refused = await Assert.ThrowsAsync<BusinessRuleException>(
                     () => Save().UpdateAsync(
                         source.Id, Named(), transport, endpoint, spare, null, null, true, Version(source),
-                        confirmation, default));
+                        confirmation, false, default));
 
                 Assert.Equal("ECR-REQ-0422", refused.ErrorCode);
                 Assert.Equal(SaveDataSourceHandler.SecretReentryRequiredKey, refused.Details!["messageKey"]);
@@ -326,7 +326,7 @@ public sealed class DataSourceHandlersTests
         await Assert.ThrowsAsync<BusinessRuleException>(
             () => Save().UpdateAsync(
                 flert.Id, Named(), ExternalTransport.Sql, "Server=flert;Database=Vol;Failover Partner=evil",
-                null, null, null, true, Version(flert), null, default));
+                null, null, null, true, Version(flert), null, false, default));
 
         // Нічого не записано й не зажурнальовано: адреса та сама, що була.
         Assert.Equal(Endpoint, source.Endpoint);
@@ -377,7 +377,7 @@ public sealed class DataSourceHandlersTests
         // Регістр схеми й хоста, явний типовий порт, кінцева `/` — та сама ціль.
         var saved = await Save().UpdateAsync(
             source.Id, Named(), ExternalTransport.PiWebApi, "HTTPS://PI.CORP.EXAMPLE:443/piwebapi/", null,
-            "OtherDb", 8, true, Version(source), null, default);
+            "OtherDb", 8, true, Version(source), null, false, default);
 
         Assert.True(saved.HasSecret);
         Assert.Equal("OtherDb", saved.Catalog);
@@ -388,7 +388,7 @@ public sealed class DataSourceHandlersTests
 
         var same = await Save().UpdateAsync(
             flert.Id, Named(), ExternalTransport.Sql, " database = Vol ; SERVER = flert ", null, null, null, true,
-            Version(flert), null, default);
+            Version(flert), null, false, default);
 
         Assert.True(same.HasSecret);
     }
@@ -404,7 +404,7 @@ public sealed class DataSourceHandlersTests
 
         await Save().UpdateAsync(
             source.Id, Named(), ExternalTransport.PiWebApi, moved, null, null, null, true, Version(source),
-            SecretValue, default);
+            SecretValue, false, default);
 
         Assert.Equal(moved, source.Endpoint);
 
@@ -420,16 +420,53 @@ public sealed class DataSourceHandlersTests
         Assert.DoesNotContain(SecretValue, recorded.DetailsJson, StringComparison.Ordinal);
         Assert.DoesNotContain("DataSource.PI_MAIN", recorded.DetailsJson, StringComparison.Ordinal);
 
-        // Без секрету в середовищі адреса змінюється вільно — поведінка Q15-06
-        // (Windows-автентифікація) не ламається, а журнал так само каже «звідки й куди».
+        // Без секрету в середовищі (Windows-автентифікація) адреса змінюється лише
+        // з явним `confirmEndpointChange`, а журнал так само каже «звідки й куди».
         var plain = Add("PI_PLAIN");
         await Save().UpdateAsync(
             plain.Id, Named(), ExternalTransport.PiWebApi, moved, null, null, null, true, Version(plain),
-            null, default);
+            null, true, default);
 
         var second = JsonDocument.Parse(_events[^1].DetailsJson ?? "{}").RootElement;
         Assert.Equal(Endpoint, second.GetProperty("oldEndpoint").GetString());
         Assert.Equal(moved, second.GetProperty("newEndpoint").GetString());
+    }
+
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "BE-21")]
+    [InlineData(null)]
+    [InlineData("Negotiate")]
+    public async Task Negotiate_нова_адреса_без_confirmEndpointChange_дає_422_і_нічого_не_змінює(string? bound)
+    {
+        var source = Add("PI_NEG");
+
+        if (bound is not null)
+        {
+            _secrets.Values["DataSource.PI_NEG"] = bound;
+        }
+
+        var refused = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Save().UpdateAsync(
+                source.Id, Named(), ExternalTransport.PiWebApi, "https://pi2.corp.example/piwebapi", null, null, null,
+                true, Version(source), null, false, default));
+
+        Assert.Equal("ECR-REQ-0422", refused.ErrorCode);
+        Assert.Equal(SaveDataSourceHandler.EndpointChangeUnconfirmedKey, refused.Details!["messageKey"]);
+        Assert.Equal("confirmEndpointChange", refused.Details!["field"]);
+        Assert.Equal(Endpoint, source.Endpoint);
+        await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
+
+        // Незмінна адреса підтвердження не вимагає; з підтвердженням — зберігається.
+        var same = await Save().UpdateAsync(
+            source.Id, Named(), ExternalTransport.PiWebApi, Endpoint, null, "Db", null, true, Version(source),
+            null, false, default);
+        Assert.Equal("Db", same.Catalog);
+
+        await Save().UpdateAsync(
+            source.Id, Named(), ExternalTransport.PiWebApi, "https://pi2.corp.example/piwebapi", null, null, null,
+            true, Version(source), null, true, default);
+        Assert.Equal("https://pi2.corp.example/piwebapi", source.Endpoint);
     }
 
     [Fact]

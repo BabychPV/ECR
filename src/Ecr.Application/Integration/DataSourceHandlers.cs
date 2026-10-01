@@ -202,6 +202,9 @@ public sealed partial class SaveDataSourceHandler(
     /// <summary>Ключ відмови: адреса змінюється, а секрет не підтверджено.</summary>
     public const string SecretReentryRequiredKey = "err.ECR-REQ-0422.dataSourceSecretReentryRequired";
 
+    /// <summary>Ключ відмови: адреса Negotiate-джерела змінюється без явного підтвердження.</summary>
+    public const string EndpointChangeUnconfirmedKey = "err.ECR-REQ-0422.dataSourceEndpointChangeUnconfirmed";
+
     /// <summary>Заводить джерело; код має бути вільним.</summary>
     /// <remarks>
     /// <c>secretConfirmation</c> — значення секрету середовища під це джерело,
@@ -262,6 +265,7 @@ public sealed partial class SaveDataSourceHandler(
         bool isActive,
         string? ifMatch,
         string? secretConfirmation,
+        bool confirmEndpointChange,
         CancellationToken ct)
     {
         var profile = await PermissionCheck
@@ -284,7 +288,26 @@ public sealed partial class SaveDataSourceHandler(
 
         if (addressChanged)
         {
-            RequireSecretConfirmation(source.SecretName, secretConfirmation, source.Code);
+            // ⛔ Negotiate-джерело (секрету немає або він «Negotiate») несе
+            // облікові дані СЛУЖБОВОГО акаунта процесу: повторно вводити нічого,
+            // тож доказом наміру є явне `confirmEndpointChange` (SSRF-аудит).
+            // Джерело із секретом-заголовком — як і раніше, повторне введення (S3).
+            if (!IsNegotiate(source.SecretName))
+            {
+                RequireSecretConfirmation(source.SecretName, secretConfirmation, source.Code);
+            }
+            else if (!confirmEndpointChange)
+            {
+                throw new BusinessRuleException(
+                    ErrorCodes.RequestInvalid,
+                    $"Адреса джерела «{source.Code}» з Windows-автентифікацією змінюється: потрібне явне підтвердження.",
+                    new Dictionary<string, object?>
+                    {
+                        ["messageKey"] = EndpointChangeUnconfirmedKey,
+                        ["field"] = "confirmEndpointChange",
+                        ["code"] = source.Code,
+                    });
+            }
         }
 
         // Старі значення — ДО зміни: після `Update` сутність їх уже не пам'ятає.
@@ -544,6 +567,14 @@ public sealed partial class SaveDataSourceHandler(
                     ["code"] = code,
                 });
         }
+    }
+
+    private bool IsNegotiate(string secretName)
+    {
+        var bound = secrets.Find(secretName);
+
+        return string.IsNullOrWhiteSpace(bound)
+               || string.Equals(bound.Trim(), "Negotiate", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string? Trim(string? value)

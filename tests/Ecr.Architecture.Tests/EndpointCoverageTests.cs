@@ -483,6 +483,7 @@ public sealed partial class EndpointCoverageTests
             [
                 "err.ECR-REQ-0422.dataSourceEndpointCarriesSecret", "err.ECR-REQ-0422.dataSourceCodeTaken",
                 "err.ECR-REQ-0422.dataSourceSecretReentryRequired",
+                "err.ECR-REQ-0422.dataSourceEndpointChangeUnconfirmed",
             ],
             "messageKey сервера, але лише з FieldOfKey — інші сюди не доходять."),
 

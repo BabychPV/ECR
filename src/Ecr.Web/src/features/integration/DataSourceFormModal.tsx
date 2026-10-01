@@ -1,5 +1,5 @@
 import { useState, type JSX } from 'react';
-import { Button, Group, Modal, NumberInput, Select, Stack, Switch, TextInput } from '@mantine/core';
+import { Button, Checkbox, Group, Modal, NumberInput, Select, Stack, Switch, TextInput } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { EcrApiError } from '@/api/client';
@@ -17,7 +17,12 @@ import { DataSourcesQueryKey } from './dataSourcesKey';
 /** Транспорти, які знає сервер (`ExternalTransport`). */
 const Transports: readonly SaveDataSourceBody['transport'][] = ['PiWebApi', 'PiSqlClient', 'Sql'];
 
-type FailedField = 'code' | 'endpoint' | 'secondaryEndpoint' | 'secretConfirmation';
+type FailedField =
+  | 'code'
+  | 'endpoint'
+  | 'secondaryEndpoint'
+  | 'secretConfirmation'
+  | 'confirmEndpointChange';
 
 /**
  * Відмови сервера, які належать КОНКРЕТНОМУ полю, — за `messageKey`.
@@ -37,6 +42,7 @@ const FieldOfKey: Readonly<Record<string, FailedField>> = {
   'err.ECR-REQ-0422.dataSourceEndpointCarriesSecret': 'endpoint',
   'err.ECR-REQ-0422.dataSourceCodeTaken': 'code',
   'err.ECR-REQ-0422.dataSourceSecretReentryRequired': 'secretConfirmation',
+  'err.ECR-REQ-0422.dataSourceEndpointChangeUnconfirmed': 'confirmEndpointChange',
 };
 
 interface FieldFailure {
@@ -74,6 +80,23 @@ interface Draft {
   isActive: boolean;
   /** Повторно введений секрет; живе лише в чернетці, у переліку не буває. */
   secretConfirmation: string;
+  /** Явне підтвердження зміни адреси джерела з Windows-автентифікацією (без секрету). */
+  confirmEndpointChange: boolean;
+}
+
+/** Чи змінює правка транспорт чи адресу (буквальне порівняння; остаточне слово — за сервером). */
+function addressChanged(draft: Draft, source: DataSource | null): boolean {
+  return (
+    source !== null &&
+    (draft.transport !== source.transport ||
+      draft.endpoint.trim() !== source.endpoint.trim() ||
+      draft.secondaryEndpoint.trim() !== (source.secondaryEndpoint ?? '').trim())
+  );
+}
+
+/** Правка адреси джерела БЕЗ секрету (Windows-автентифікація) потребує явного підтвердження. */
+export function needsEndpointConfirmation(draft: Draft, source: DataSource | null): boolean {
+  return source !== null && !source.hasSecret && addressChanged(draft, source);
 }
 
 /**
@@ -106,6 +129,7 @@ function draftOf(source: DataSource | null): Draft {
     maxParallel: source?.maxParallel ?? null,
     isActive: source?.isActive ?? true,
     secretConfirmation: '',
+    confirmEndpointChange: false,
   };
 }
 
@@ -132,6 +156,8 @@ export function bodyOf(draft: Draft, base: DataSource | null): SaveDataSourceBod
     isActive: base === null ? true : draft.isActive,
     // ⛔ Лише коли людина його ввела: сервер звіряє й не зберігає.
     secretConfirmation: draft.secretConfirmation.length === 0 ? null : draft.secretConfirmation,
+    // `true` лише коли людина підтвердила й це правка (при створенні не потрібне).
+    confirmEndpointChange: base !== null && draft.confirmEndpointChange,
   };
 }
 
@@ -201,6 +227,10 @@ function DataSourceForm({
   // відкритим до кінця діалогу, а не зникає на час наступного запиту.
   const [secretAsked, setSecretAsked] = useState(false);
 
+  // ⚠ Те саме для підтвердження зміни адреси (Negotiate-джерело): сервер знає
+  // про секрет-«Negotiate», клієнт — лише `hasSecret`.
+  const [endpointAsked, setEndpointAsked] = useState(false);
+
   const save = useMutation({
     mutationFn: (body: SaveDataSourceBody) =>
       source === null ? createDataSource(body) : updateDataSource(source.id, body, rowVersion),
@@ -210,7 +240,9 @@ function DataSourceForm({
       onDone();
     },
     onError: (error) => {
-      if (fieldFailureOf(error)?.field === 'secretConfirmation') setSecretAsked(true);
+      const failed = fieldFailureOf(error)?.field;
+      if (failed === 'secretConfirmation') setSecretAsked(true);
+      if (failed === 'confirmEndpointChange') setEndpointAsked(true);
     },
   });
 
@@ -233,11 +265,15 @@ function DataSourceForm({
   const secretNeeded = needsSecretReentry(draft, source);
   const secretShown = secretNeeded || secretAsked;
 
+  const confirmNeeded = needsEndpointConfirmation(draft, source);
+  const confirmShown = confirmNeeded || endpointAsked;
+
   const incomplete =
     draft.name.trim().length === 0 ||
     draft.endpoint.trim().length === 0 ||
     (source === null && draft.code.trim().length === 0) ||
-    (secretNeeded && draft.secretConfirmation.length === 0);
+    (secretNeeded && draft.secretConfirmation.length === 0) ||
+    (confirmShown && !draft.confirmEndpointChange);
 
   return (
     <Stack gap="sm" data-data-source-form="">
@@ -310,6 +346,18 @@ function DataSourceForm({
           required={secretNeeded}
           autoComplete="new-password"
           data-field="secretConfirmation"
+        />
+      )}
+
+      {/* ⛔ Адреса джерела з Windows-автентифікацією змінюється лише свідомо:
+          службова обліковка піде на новий хост. */}
+      {confirmShown && (
+        <Checkbox
+          label={t('sources.confirmEndpointChange')}
+          checked={draft.confirmEndpointChange}
+          onChange={(event) => set('confirmEndpointChange', event.currentTarget.checked)}
+          error={onField?.field === 'confirmEndpointChange' ? onField.text : undefined}
+          data-field="confirmEndpointChange"
         />
       )}
 

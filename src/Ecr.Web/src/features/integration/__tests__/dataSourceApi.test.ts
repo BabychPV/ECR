@@ -18,6 +18,7 @@ const body: SaveDataSourceBody = {
   transport: 'PiWebApi',
   endpoint: 'https://pi.corp.example/piwebapi',
   isActive: true,
+  confirmEndpointChange: false,
 };
 
 const RowVersion = 'AAAAAAAAB9E=';

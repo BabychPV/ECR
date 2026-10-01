@@ -12018,6 +12018,11 @@
               "string"
             ]
           },
+          "confirmEndpointChange": {
+            "default": false,
+            "description": "Явне підтвердження зміни адреси джерела з Windows-автентифікацією (секрету\nнемає або він `Negotiate`): без нього — `422\nerr.ECR-REQ-0422.dataSourceEndpointChangeUnconfirmed`. Для джерел із\nсекретом ігнорується; при створенні не потрібне.",
+            "type": "boolean"
+          },
           "endpoint": {
             "description": "Адреса або рядок з'єднання — без облікових даних.",
             "type": [

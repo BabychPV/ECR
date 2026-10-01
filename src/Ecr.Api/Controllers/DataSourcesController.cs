@@ -146,7 +146,8 @@ public sealed class DataSourcesController(
         return Ok(await save
             .UpdateAsync(
                 id, request.NameL10n, request.Transport, request.Endpoint, request.SecondaryEndpoint,
-                request.Catalog, request.MaxParallel, request.IsActive, ifMatch, request.SecretConfirmation, ct)
+                request.Catalog, request.MaxParallel, request.IsActive, ifMatch, request.SecretConfirmation,
+                request.ConfirmEndpointChange, ct)
             .ConfigureAwait(false));
     }
 
@@ -227,6 +228,12 @@ public sealed class DataSourcesController(
 /// транспорту, основної чи запасної адреси); інакше ігнорується. Не
 /// зберігається й не повертається.
 /// </param>
+/// <param name="ConfirmEndpointChange">
+/// Явне підтвердження зміни адреси джерела з Windows-автентифікацією (секрету
+/// немає або він <c>Negotiate</c>): без нього — <c>422
+/// err.ECR-REQ-0422.dataSourceEndpointChangeUnconfirmed</c>. Для джерел із
+/// секретом ігнорується; при створенні не потрібне.
+/// </param>
 public sealed record SaveDataSourceRequest(
     string? Code,
     IReadOnlyDictionary<string, string>? NameL10n,
@@ -236,7 +243,8 @@ public sealed record SaveDataSourceRequest(
     string? Catalog = null,
     int? MaxParallel = null,
     bool IsActive = true,
-    string? SecretConfirmation = null);
+    string? SecretConfirmation = null,
+    bool ConfirmEndpointChange = false);
 
 /// <summary>Тіло перевірки з'єднання.</summary>
 /// <param name="Reason">Причина; обов'язкова, потрапляє в журнал безпеки.</param>

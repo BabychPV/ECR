@@ -4705,6 +4705,8 @@ USING (VALUES
     (N'err.ECR-REQ-0422.dataSourceEndpointMalformed',    N'en', N'The data source address is empty or malformed: use a full http(s) address without a user name.', 1),
     (N'err.ECR-INT-0503.piWebApiResponseTooLarge',       N'en', N'PI Web API returned a response for {path} larger than {limitBytes} bytes: collection rejected.', 1),
     (N'health.sources.negotiateNoAllowlist',             N'en', N'Sources with Windows authentication and no allowed-hosts list (PiWebApi:AllowedHosts): {count}.', 1),
+    (N'err.ECR-REQ-0422.dataSourceEndpointChangeUnconfirmed', N'en', N'The address of data source "{code}" uses Windows authentication (the service account): confirm the address change explicitly.', 1),
+    (N'sources.confirmEndpointChange',                   N'en', N'I confirm that the service account may connect to the new address', 1),
     -- ru/kz — окремою порцією `COLL:ssrf` у блоці I18N нижче.
     -- COLL:ssrf ── кінець секції ──
     (N'health.sources.notRegistered',         N'en', N'The collection store is not registered in the container.', 1),
@@ -12449,7 +12451,11 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-INT-0503.piWebApiResponseTooLarge', N'ru', N'PI Web API вернул ответ на {path} размером больше {limitBytes} байт: сбор отклонён.'),
     (N'err.ECR-INT-0503.piWebApiResponseTooLarge', N'kz', N'PI Web API {path} үшін {limitBytes} байттан асатын жауап қайтарды: жинау қабылданбады.'),
     (N'health.sources.negotiateNoAllowlist', N'ru', N'Источники с Windows-аутентификацией без списка разрешённых хостов (PiWebApi:AllowedHosts): {count}.'),
-    (N'health.sources.negotiateNoAllowlist', N'kz', N'Windows аутентификациясы бар, рұқсат етілген хосттар тізімі жоқ көздер (PiWebApi:AllowedHosts): {count}.')
+    (N'err.ECR-REQ-0422.dataSourceEndpointChangeUnconfirmed', N'ru', N'Источник данных «{code}» использует Windows-аутентификацию (служебную учётную запись): подтвердите смену адреса явно.'),
+    (N'err.ECR-REQ-0422.dataSourceEndpointChangeUnconfirmed', N'kz', N'«{code}» деректер көзі Windows аутентификациясын (қызметтік тіркелгіні) пайдаланады: мекенжай ауысуын анық растаңыз.'),
+    (N'sources.confirmEndpointChange', N'ru', N'Подтверждаю: служебная учётная запись может подключаться к новому адресу'),
+    (N'sources.confirmEndpointChange', N'kz', N'Растаймын: қызметтік тіркелгі жаңа мекенжайға қосыла алады'),
+    (N'health.sources.negotiateNoAllowlist', N'kz',N'Windows аутентификациясы бар, рұқсат етілген хосттар тізімі жоқ көздер (PiWebApi:AllowedHosts): {count}.')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
