@@ -101,38 +101,34 @@ public sealed class SecurityHeadersTests(SqlServerFixture sql)
     [Trait(TestCategories.Category, TestCategories.Integration)]
     public async Task Статичний_файл_теж_несе_заголовки()
     {
-        // ⚠ Каталог береться з піднятого застосунку: `WebApplicationFactory`
-        // ставить корінь вмісту в каталог проєкту `Ecr.Api`, а не в теку
-        // збірки тестів (той самий урок, що в `StaticAssetsAndCompressionTests`).
-        string contentRoot;
+        // ⛔ Корінь веба — ВЛАСНИЙ тимчасовий каталог прогону (`UseWebRoot`, як у
+        // `SpaFallbackTests`), а не `src/Ecr.Api/wwwroot` дерева. Доти файл
+        // клався в спільну теку робочої копії, яку ділять: сусідній набір
+        // (`StaticAssetsAndCompressionTests`), паралельні процеси тієї самої DLL
+        // (`verify-all.ps1 -ApiParallel`) і всі сесії, що працюють у цьому
+        // чекауті (неігнорований `wwwroot` видно в `git status`, і `git clean`/
+        // `git stash -u` сусіда прибирає його посеред прогону). Будь-що з цього
+        // давало `чанк: NotFound` без жодного стосунку до заголовків — CL-1.
+        // Своя тека знімає й двохостовий прийом: каталог існує ДО старту хоста.
+        var webRoot = Directory.CreateTempSubdirectory("ecr-security-headers-").FullName;
+        var assets = Directory.CreateDirectory(Path.Combine(webRoot, "assets")).FullName;
+        const string name = "SecurityHeaders-chunk.js";
 
-        using (var probe = new EcrApiFactory(sql))
-        {
-            contentRoot = ((IWebHostEnvironment)probe.Services
-                .GetService(typeof(IWebHostEnvironment))!).ContentRootPath;
-        }
-
-        var assets = Path.Combine(contentRoot, "wwwroot", "assets");
-        Directory.CreateDirectory(assets);
-
-        // Власне ім'я файлу: сусідній набір підкладає свої файли в ту саму теку.
-        var name = $"SecurityHeaders-{Guid.NewGuid():N}.js";
-        var chunk = Path.Combine(assets, name);
-
-        await File.WriteAllTextAsync(chunk, "export const ok = 1;").ConfigureAwait(true);
+        await File.WriteAllTextAsync(Path.Combine(assets, name), "export const ok = 1;").ConfigureAwait(true);
 
         try
         {
             using var app = new EcrApiFactory(sql);
-            using var client = app.CreateClient();
+            using var client = app.WithWebHostBuilder(b => b.UseWebRoot(webRoot)).CreateClient();
 
-            var response = await client
+            using var response = await client
                 .GetAsync(new Uri($"/assets/{name}", UriKind.Relative))
                 .ConfigureAwait(true);
 
             // ⚠ Спершу — що файл узагалі віддано. Інакше твердження нижче були б
             // про заголовки відповіді `404`, і тест був би зелений із порожнечі.
             Assert.True(response.IsSuccessStatusCode, $"чанк: {response.StatusCode}");
+            Assert.Equal("export const ok = 1;", await response.Content.ReadAsStringAsync().ConfigureAwait(true));
 
             // ⛔ Мутаційний доказ: перенести `UseMiddleware<SecurityHeadersMiddleware>()`
             // ПІСЛЯ `UseStaticFiles` — цей рядок падає, бо статику віддає
@@ -141,7 +137,16 @@ public sealed class SecurityHeadersTests(SqlServerFixture sql)
         }
         finally
         {
-            File.Delete(chunk);
+            try
+            {
+                Directory.Delete(webRoot, recursive: true);
+            }
+            catch (IOException)
+            {
+                // Тимчасовий каталог прибере ОС (на Windows файл щойно відкривав
+                // антивірус чи індексатор). Падати на прибиранні означало б
+                // червоніти там, де перевірка вже відповіла.
+            }
         }
     }
 
