@@ -37,6 +37,12 @@ public interface IDataSourceStore
 
     /// <summary>Прибирає джерело.</summary>
     public void Remove(DataSource source);
+
+    /// <summary>
+    /// Забуває стан джерела в одиниці роботи (не видаляє з бази): повтор транзакції після
+    /// транзієнтного збою має будувати чи перечитувати джерело наново (ent4 P2-2).
+    /// </summary>
+    public void Forget(DataSource source);
 }
 
 /// <summary>Джерело разом із тим, що на нього спирається.</summary>

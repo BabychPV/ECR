@@ -593,6 +593,10 @@ public sealed class DataSourceHandlersTests
             Sources.RemoveAll(s => s.Id == source.Id);
         }
 
+        public void Forget(DataSource source)
+        {
+        }
+
         private DataSourceUsage UsageOf(int id)
             => Usage.TryGetValue(id, out var usage) ? usage : new DataSourceUsage(0, 0);
     }

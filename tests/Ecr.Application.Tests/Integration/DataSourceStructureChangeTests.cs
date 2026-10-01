@@ -56,7 +56,9 @@ public sealed class DataSourceStructureChangeTests
             Arg.Is<StructureChangeRecord>(r =>
                 r.EntityType == "ext.DataSource" && r.Operation == "Create" && r.OldJson == null
                 && r.NewJson!.Contains("https://pi.corp.example/piwebapi", StringComparison.Ordinal)
-                && r.ChangedByUserId == 9),
+                && r.ChangedByUserId == 9
+                // ent4 P3-1: причина — конверт із ключем каталогу, а не українська фраза.
+                && r.ChangeReason == """{"k":"integrationAudit.dataSourceCreated","p":{"connection":"SRC"}}"""),
             Arg.Any<CancellationToken>());
     }
 
@@ -83,7 +85,8 @@ public sealed class DataSourceStructureChangeTests
                 && r.NewJson!.Contains("new.corp.example", StringComparison.Ordinal)
                 && !r.OldJson.Contains(Secret, StringComparison.Ordinal)
                 && !r.NewJson.Contains(Secret, StringComparison.Ordinal)
-                && !r.NewJson.Contains("DataSource.SRC", StringComparison.Ordinal)),
+                && !r.NewJson.Contains("DataSource.SRC", StringComparison.Ordinal)
+                && r.ChangeReason == """{"k":"integrationAudit.dataSourceChanged","p":{"connection":"SRC"}}"""),
             Arg.Any<CancellationToken>());
     }
 

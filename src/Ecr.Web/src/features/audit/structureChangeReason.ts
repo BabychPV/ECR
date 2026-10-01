@@ -68,6 +68,10 @@ function render(key: string, params: Record<string, string>): string | null {
       return t('integrationAudit.eventMapDeleted', params);
     case 'integrationAudit.registryPolicyChanged':
       return t('integrationAudit.registryPolicyChanged', params);
+    case 'integrationAudit.dataSourceCreated':
+      return t('integrationAudit.dataSourceCreated', params);
+    case 'integrationAudit.dataSourceChanged':
+      return t('integrationAudit.dataSourceChanged', params);
     default:
       return null;
   }
