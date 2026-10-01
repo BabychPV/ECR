@@ -483,14 +483,19 @@ public sealed class RegistryEntryWriter(
             // Режим «лише оновлювати»: запису немає — помилка рядка, не створення.
             if (!target.MayCreate && target.Existing is null)
             {
-                errors.Add(new RegistryEntryImportError(row, code, null, "err.ECR-REG-0404.registryEntry"));
+                errors.Add(new RegistryEntryImportError(row, code, null, "err.ECR-REG-0404.registryEntry", Param("entryId", code)));
                 continue;
             }
 
             // Режим «лише створювати»: код уже зайнятий — помилка рядка, не оновлення чужого запису.
             if (target.MustCreate && target.Existing is not null)
             {
-                errors.Add(new RegistryEntryImportError(row, code, null, EntryCodeTakenKey));
+                errors.Add(new RegistryEntryImportError(row, code, null, EntryCodeTakenKey,
+                    new Dictionary<string, string>
+                    {
+                        ["code"] = code,
+                        ["id"] = target.Existing!.Id.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    }));
                 continue;
             }
 
@@ -507,7 +512,7 @@ public sealed class RegistryEntryWriter(
             }
             else if (!EcrCode.TryCreate(code, out ecrCode))
             {
-                errors.Add(new RegistryEntryImportError(row, code, null, "err.ECR-CFG-0422.invalidCode"));
+                errors.Add(new RegistryEntryImportError(row, code, null, "err.ECR-CFG-0422.invalidCode", Param("code", code)));
                 continue;
             }
 
@@ -515,7 +520,7 @@ public sealed class RegistryEntryWriter(
             // RegistryValue.Set не знає коду поля.
             if (Probe(definition, values) is { } probe)
             {
-                errors.Add(new RegistryEntryImportError(row, code, probe.Field, probe.MessageKey));
+                errors.Add(new RegistryEntryImportError(row, code, probe.Field, probe.MessageKey, probe.Params));
                 continue;
             }
 
@@ -541,7 +546,7 @@ public sealed class RegistryEntryWriter(
             }
             catch (Exception ex) when (ex is DomainException or BusinessRuleException)
             {
-                errors.Add(new RegistryEntryImportError(row, code, FieldOf(ex), MessageKeyOf(ex)));
+                errors.Add(new RegistryEntryImportError(row, code, FieldOf(ex), MessageKeyOf(ex), ParamsOf(ex)));
                 continue;
             }
 
@@ -573,7 +578,7 @@ public sealed class RegistryEntryWriter(
                 }
                 catch (DomainException ex)
                 {
-                    errors.Add(new RegistryEntryImportError(row, code, ValidityFieldCode, MessageKeyOf(ex)));
+                    errors.Add(new RegistryEntryImportError(row, code, ValidityFieldCode, MessageKeyOf(ex), ParamsOf(ex)));
                     continue;
                 }
 
@@ -882,6 +887,28 @@ public sealed class RegistryEntryWriter(
     internal static string MessageKeyOf(Exception ex) => Details(ex)?.GetValueOrDefault("messageKey") as string
         ?? "err.ECR-REG-0422.entryImportRowFailed";
 
+    /// <summary>Один плейсхолдер → значення (D1).</summary>
+    internal static IReadOnlyDictionary<string, string> Param(string name, string value)
+        => new Dictionary<string, string> { [name] = value };
+
+    /// <summary>
+    /// Значення плейсхолдерів тексту з подробиці винятку: усі пари, крім <c>messageKey</c>, текстом
+    /// (інваріантна культура); <c>null</c>, якщо подробиці порожні.
+    /// </summary>
+    internal static IReadOnlyDictionary<string, string>? ParamsOf(Exception ex)
+    {
+        var map = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var (key, value) in Details(ex) ?? new Dictionary<string, object?>())
+        {
+            if (key != "messageKey" && value is not null)
+            {
+                map[key] = Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty;
+            }
+        }
+
+        return map.Count == 0 ? null : map;
+    }
+
     /// <summary>Поле, назване в подробиці винятку (<c>fieldCode</c> одиночного поля, <c>fields</c> — перелік).</summary>
     internal static string? FieldOf(Exception ex)
     {
@@ -905,7 +932,7 @@ public sealed class RegistryEntryWriter(
     /// Пробний <see cref="RegistryValue.Set"/> кожного відомого не-<c>Lookup</c> значення на
     /// одноразовому об'єкті поза контекстом — помилка з кодом поля.
     /// </summary>
-    private static (string Field, string MessageKey)? Probe(
+    private static (string Field, string MessageKey, IReadOnlyDictionary<string, string>? Params)? Probe(
         RegistryDef definition, IReadOnlyDictionary<string, object?> values)
     {
         var fields = definition.Fields.ToDictionary(f => f.Code, StringComparer.Ordinal);
@@ -922,7 +949,7 @@ public sealed class RegistryEntryWriter(
             }
             catch (DomainException ex)
             {
-                return (field.Code, MessageKeyOf(ex));
+                return (field.Code, MessageKeyOf(ex), ParamsOf(ex));
             }
         }
 

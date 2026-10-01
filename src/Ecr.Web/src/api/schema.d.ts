@@ -21840,6 +21840,11 @@ export interface components {
             key: string;
             /** @description Ключ тексту відмови в каталозі. */
             messageKey: string;
+            /** @description Значення для плейсхолдерів `{…}` тексту каталогу (D1): без них клієнт показує сирий шаблон.
+             *     `null` — текст ключа плейсхолдерів не має. */
+            params?: null | {
+                [key: string]: string;
+            };
             /**
              * Format: int32
              * @description Номер рядка у файлі; заголовок — 1.

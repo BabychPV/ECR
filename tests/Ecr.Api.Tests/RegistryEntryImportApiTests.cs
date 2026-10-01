@@ -232,6 +232,11 @@ public sealed class RegistryEntryImportApiTests(SqlServerFixture sql)
         Assert.Equal("Amount", error.GetProperty("field").GetString());
         Assert.Equal("err.ECR-REG-0422.valueNotNumber", error.GetProperty("messageKey").GetString());
 
+        // D1: відповідь несе значення плейсхолдерів {value}/{dataType} — без них клієнт друкує шаблон.
+        var errorParams = error.GetProperty("params");
+        Assert.Equal("not-a-number", errorParams.GetProperty("value").GetString());
+        Assert.Equal("Decimal", errorParams.GetProperty("dataType").GetString());
+
         // Ані валідного, ані невалідного рядка в базі — і ревізія не зрушила.
         Assert.False(await EntryExistsAsync(fixture.DefinitionId, "BAD").ConfigureAwait(true));
         Assert.False(await EntryExistsAsync(fixture.DefinitionId, $"NEW{fixture.Tag}").ConfigureAwait(true));

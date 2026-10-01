@@ -78,6 +78,12 @@ public sealed class RegistryEntryImportCultureTests
 
         var error = Assert.Single(report.Errors);
         Assert.Equal("err.ECR-REG-0422.valueNotNumber", error.MessageKey);
+
+        // D1: плейсхолдери тексту {value} і {dataType} мають значення — інакше клієнт друкує шаблон.
+        // Мутація: прибрати Params у ResolveRowAsync — тест червоніє.
+        Assert.NotNull(error.Params);
+        Assert.Equal(cell.Trim('"'), error.Params["value"]);
+        Assert.False(string.IsNullOrEmpty(error.Params["dataType"]));
         Assert.Equal(1m, value.ValueNumeric);
     }
 
