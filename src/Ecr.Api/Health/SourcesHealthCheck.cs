@@ -58,12 +58,13 @@ public sealed class SourcesHealthCheck(
         }
 
         var failed = active.Count(e => e.LastRun?.Status is "Failed");
-        var withGaps = active.Count(e => e.OldestGap is not null);
 
-        // ⛔ Джерело, яке НІКОЛИ не запускалося, рахується як прогалина, а не
+        // ⛔ Сутність, яка НІКОЛИ не запускалася, рахується як прогалина, а не
         // як «поки що нічого». Саме так виглядає забуте налаштування: воно
         // мовчить, і мовчання приймають за спокій.
-        var neverRan = active.Count(e => e.LastRun is null);
+        // D5: рахуємо УНІКАЛЬНІ сутності (union): та, що має прогалину І ще не
+        // запускалась, раніше рахувалась двічі.
+        var gaps = active.Count(e => e.OldestGap is not null || e.LastRun is null);
 
         // Negotiate-джерело без PiWebApi:AllowedHosts: службові облікові дані
         // підуть на будь-який хост, не заборонений блок-листом (SSRF).
@@ -84,19 +85,19 @@ public sealed class SourcesHealthCheck(
         if (failed > 0)
         {
             var failedText = await Text(
-                "health.sources.failedCount", "Sources with a failed last run: {count}.",
+                "health.sources.failedCount", "Collection entities with a failed last run: {count}.",
                 Param("count", failed.ToString(CultureInfo.InvariantCulture)), cancellationToken)
                 .ConfigureAwait(false);
-            return HealthCheckResult.Unhealthy(failedText + negotiateSuffix, data: Data(active.Count, failed, withGaps + neverRan));
+            return HealthCheckResult.Unhealthy(failedText + negotiateSuffix, data: Data(active.Count, failed, gaps));
         }
 
-        if (withGaps + neverRan > 0)
+        if (gaps > 0)
         {
             var gapsText = await Text(
-                "health.sources.gapsCount", "Sources with a coverage gap: {count}.",
-                Param("count", (withGaps + neverRan).ToString(CultureInfo.InvariantCulture)), cancellationToken)
+                "health.sources.gapsCount", "Collection entities with a coverage gap: {count}.",
+                Param("count", gaps.ToString(CultureInfo.InvariantCulture)), cancellationToken)
                 .ConfigureAwait(false);
-            return HealthCheckResult.Degraded(gapsText + negotiateSuffix, data: Data(active.Count, 0, withGaps + neverRan));
+            return HealthCheckResult.Degraded(gapsText + negotiateSuffix, data: Data(active.Count, 0, gaps));
         }
 
         if (openNegotiate > 0)

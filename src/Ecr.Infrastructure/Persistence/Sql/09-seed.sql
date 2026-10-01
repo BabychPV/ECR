@@ -671,7 +671,14 @@ UPDATE t
     -- ECR-SUB-4221 кидається з трьох причин (осиротілі рядки, застарілі
     -- результати методологій, блокувальні помилки валідації); заголовок
     -- показується завжди, тож мусить бути правдивим для кожної.
-    (N'err.ECR-SUB-4221',                N'en', N'Orphaned rows block submission', N'Submission is blocked')
+    (N'err.ECR-SUB-4221',                N'en', N'Orphaned rows block submission', N'Submission is blocked'),
+    -- COLL:srcfix D5: health рахує унікальні СУТНОСТІ збору, а не «джерела» (з'єднання).
+    (N'health.sources.failedCount',      N'en', N'Sources with a failed last run: {count}.', N'Collection entities with a failed last run: {count}.'),
+    (N'health.sources.failedCount',      N'ru', N'Источники с неудачным последним запуском: {count}.', N'Сущности сбора с неудачным последним запуском: {count}.'),
+    (N'health.sources.failedCount',      N'kz', N'Соңғы іске қосуы сәтсіз деректер көздері: {count}.', N'Соңғы іске қосуы сәтсіз жинау нысандары: {count}.'),
+    (N'health.sources.gapsCount',        N'en', N'Sources with a coverage gap: {count}.', N'Collection entities with a coverage gap: {count}.'),
+    (N'health.sources.gapsCount',        N'ru', N'Источники с пробелом в покрытии: {count}.', N'Сущности сбора с пробелом в покрытии: {count}.'),
+    (N'health.sources.gapsCount',        N'kz', N'Қамтуында олқылығы бар деректер көздері: {count}.', N'Қамтуында олқылығы бар жинау нысандары: {count}.')
   ) AS s ([Key], Lang, OldVal, NewVal)
     ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
  WHERE t.Value = s.OldVal COLLATE Latin1_General_BIN2;
@@ -4715,8 +4722,8 @@ USING (VALUES
     -- COLL:ssrf ── кінець секції ──
     (N'health.sources.notRegistered',         N'en', N'The collection store is not registered in the container.', 1),
     (N'health.sources.noneActive',              N'en', N'No active collection sources.', 1),
-    (N'health.sources.failedCount',             N'en', N'Sources with a failed last run: {count}.', 1),
-    (N'health.sources.gapsCount',                N'en', N'Sources with a coverage gap: {count}.', 1),
+    (N'health.sources.failedCount',             N'en', N'Collection entities with a failed last run: {count}.', 1),
+    (N'health.sources.gapsCount',                N'en', N'Collection entities with a coverage gap: {count}.', 1),
     (N'health.sources.allCollectedNoGaps',      N'en', N'All active sources are collected with no gaps.', 1),
 
     -- /admin/jobs (lane6 медіум-аудиту, `Q-325` → `Q-326`): жоден тип фонової
@@ -8559,8 +8566,8 @@ SELECT v.[Key], v.Lang, v.Val
     (N'jobs.collectionAbandoned', N'ru', N'Запуск не закрыт: задача была отменена или процесс остановился до того, как запуск записал результат.'),
     (N'health.sources.notRegistered', N'ru', N'Хранилище сбора не зарегистрировано в контейнере.'),
     (N'health.sources.noneActive', N'ru', N'Нет активных источников сбора.'),
-    (N'health.sources.failedCount', N'ru', N'Источники с неудачным последним запуском: {count}.'),
-    (N'health.sources.gapsCount', N'ru', N'Источники с пробелом в покрытии: {count}.'),
+    (N'health.sources.failedCount', N'ru', N'Сущности сбора с неудачным последним запуском: {count}.'),
+    (N'health.sources.gapsCount', N'ru', N'Сущности сбора с пробелом в покрытии: {count}.'),
     (N'health.sources.allCollectedNoGaps', N'ru', N'Все активные источники собраны без пробелов.'),
     (N'jobs.recalcFormulas', N'ru', N'Пересчёт формул шаблона.'),
     (N'jobs.recalcFormulasDone', N'ru', N'Формулы шаблона: пересчитано ячеек — {cells}.'),
@@ -11587,8 +11594,8 @@ SELECT v.[Key], v.Lang, v.Val
     (N'jobs.collectionAbandoned', N'kz', N'Іске қосу жабылмады: тапсырмадан бас тартылды немесе процесс іске қосу нәтижесін жазғанға дейін тоқтады.'),
     (N'health.sources.notRegistered', N'kz', N'Жинау қоймасы контейнерде тіркелмеген.'),
     (N'health.sources.noneActive', N'kz', N'Белсенді жинау көздері жоқ.'),
-    (N'health.sources.failedCount', N'kz', N'Соңғы іске қосуы сәтсіз деректер көздері: {count}.'),
-    (N'health.sources.gapsCount', N'kz', N'Қамтуында олқылығы бар деректер көздері: {count}.'),
+    (N'health.sources.failedCount', N'kz', N'Соңғы іске қосуы сәтсіз жинау нысандары: {count}.'),
+    (N'health.sources.gapsCount', N'kz', N'Қамтуында олқылығы бар жинау нысандары: {count}.'),
     (N'health.sources.allCollectedNoGaps', N'kz', N'Барлық белсенді деректер көздері олқылықсыз жиналды.'),
     (N'jobs.recalcFormulas', N'kz', N'Үлгі формулаларын қайта есептеу.'),
     (N'jobs.recalcFormulasDone', N'kz', N'Үлгі формулалары: қайта есептелген ұяшықтар — {cells}.'),
