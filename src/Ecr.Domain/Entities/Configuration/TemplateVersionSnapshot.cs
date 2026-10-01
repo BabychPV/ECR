@@ -24,4 +24,11 @@ public sealed record TemplateVersionSnapshot(
     /// нормальний стан для версій без визначеної шапки.
     /// </summary>
     public IReadOnlyList<HeaderFieldDef> HeaderFields { get; init; } = [];
+
+    /// <summary>
+    /// D-230: у версії є активний зв'язок виду Rollup або Check. Прапор їде проєкцією в наявному запиті
+    /// аркушів (<c>MetadataCache.LoadAsync</c>) — нового звернення до бази він не додає; шлях без таких
+    /// зв'язків нічого зв'язкового не читає.
+    /// </summary>
+    public bool HasActiveRollupOrCheck { get; init; }
 }

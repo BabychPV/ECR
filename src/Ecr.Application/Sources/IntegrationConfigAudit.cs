@@ -45,6 +45,25 @@ internal static class IntegrationConfigAudit
         Converters = { new JsonStringEnumConverter() },
     };
 
+    /// <summary>Тип сутності: з'єднання з джерелом (адреса, транспорт) — SSRF-чутлива конфігурація.</summary>
+    public const string DataSourceType = "ext.DataSource";
+
+    /// <summary>
+    /// Знімок з'єднання для журналу: код, транспорт, адреси, стеля паралелізму, активність.
+    /// ⛔ Секретів немає за побудовою: ні значення, ні навіть ім'я секрету (<c>SecretName</c>).
+    /// </summary>
+    public static string Snapshot(DataSource source) => JsonSerializer.Serialize(
+        new
+        {
+            source.Code,
+            transport = source.Transport,
+            endpoint = source.Endpoint,
+            secondaryEndpoint = source.SecondaryEndpoint,
+            maxParallel = source.MaxParallel,
+            isActive = source.IsActive,
+        },
+        Options);
+
     /// <summary>Знімок мапінгу для журналу (той самий вигляд, що й у відповіді API).</summary>
     public static string Snapshot(EntityFieldMap map) => JsonSerializer.Serialize(EntityFieldMapLifecycle.Map(map), Options);
 
@@ -67,6 +86,15 @@ internal static class IntegrationConfigAudit
             schedule.LookbackDays,
         },
         Options);
+
+    /// <summary>
+    /// Причина запису КОНВЕРТОМ <c>{"k":…,"p":{…}}</c> (той самий кодек, що <c>JobProgressMessageCodec</c>),
+    /// а не готовою українською фразою: мова читача журналу в момент запису невідома, і
+    /// англійський інтерфейс бачив українську (P3 живого проходу екрана джерел). Клієнт
+    /// розгортає ключ <c>integrationAudit.*</c> мовою інтерфейсу (<c>structureChangeReason.ts</c>).
+    /// </summary>
+    public static string Reason(string key, params (string Name, object? Value)[] parameters)
+        => IntegrationAuditReason.Encode(key, parameters);
 
     /// <summary>Пише запис журналу; <paramref name="oldJson"/> = <c>null</c> — створення, <paramref name="newJson"/> = <c>null</c> — видалення.</summary>
     public static Task WriteAsync(

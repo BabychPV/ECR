@@ -201,8 +201,11 @@ public sealed class ExcelExporter(
             WriteFormulas(workbook, snapshot, blocks);
         }
 
+        // ⚠ P3 імпорту: відбитки обчислюваних комірок — ПІСЛЯ формул, тобто
+        // рівно того, що людина отримає в книзі. Імпорт за ними розрізняє
+        // «змінили обчислювану комірку» і «книга застаріла після перерахунку».
         WriteMap(workbook, new ExcelWorkbookMap(
-            documentId, options.PeriodKey, snapshot.TemplateVersionId, blocks));
+            documentId, options.PeriodKey, snapshot.TemplateVersionId, Fingerprinted(workbook, blocks)));
 
         // ⚠ Віддається Stream, а не байти: документ 500×60×12 у пам'яті — це
         // десятки МБ на кожен паралельний експорт, і саме вони кладуть процес
@@ -810,6 +813,18 @@ public sealed class ExcelExporter(
 
         sheet.Hide();
     }
+
+    /// <summary>Блоки карти з відбитками обчислюваних комірок кожного рядка.</summary>
+    private static List<ExcelTableBlock> Fingerprinted(XLWorkbook workbook, IReadOnlyList<ExcelTableBlock> blocks)
+        => [.. blocks.Select(block => block.Columns.Any(c => c.IsCalculated)
+            ? block with
+            {
+                Rows = [.. block.Rows.Select(row => row with
+                {
+                    Calc = CalculatedCellFingerprint.OfRow(workbook.Worksheet(block.SheetName), block.Columns, row.Number),
+                })],
+            }
+            : block)];
 
     /// <summary>Чи рахує комірки цієї колонки система.</summary>
     private static bool IsCalculated(ColumnDef column)

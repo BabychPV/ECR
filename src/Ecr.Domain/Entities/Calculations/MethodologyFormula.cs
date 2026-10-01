@@ -163,8 +163,26 @@ public sealed class MethodologyFormula : Entity<int>
                 });
         }
 
+        // ⛔ Межа колонки `calc.MethodologyFormula.Expression`: задовгий вираз доходив до
+        // `SaveChanges` і падав обрізанням рядка в SQL — тобто 500 без жодного натяку.
+        if (expression.Length > MaxExpressionLength)
+        {
+            throw new DomainException(
+                "ECR-CALC-0422",
+                $"Вираз формули «{Code}» довший за {MaxExpressionLength} символів.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0422.formulaTooLong",
+                    ["code"] = Code,
+                    ["maxLength"] = MaxExpressionLength,
+                });
+        }
+
         Expression = expression;
     }
+
+    /// <summary>Межа виразу — довжина колонки <c>Expression</c> у <c>MethodologyFormulaConfiguration</c>.</summary>
+    public const int MaxExpressionLength = 2000;
 
     /// <summary>Знімає одиницю результату.</summary>
     /// <remarks>

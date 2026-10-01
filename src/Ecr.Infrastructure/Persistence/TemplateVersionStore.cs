@@ -794,6 +794,7 @@ public sealed class TemplateVersionStore(EcrDbContext db) : ITemplateVersionStor
             [("ColumnDef", "DisplayFormat")] = Text(columnScope, "DisplayFormat"),
             [("ColumnDef", "IsHidden")] = Bit(columnScope, "IsHidden"),
             [("ColumnDef", "StyleId")] = Int(columnScope, "StyleId"),
+            [("ColumnDef", "WidthPx")] = Int(columnScope, "WidthPx"),
             [("RowDef", "LabelL10n")] = Text(rowScope, "LabelL10n"),
             [("RowDef", "Ordinal")] = Int(rowScope, "Ordinal"),
             [("SheetDef", "NameL10n")] = Text(sheetScope, "NameL10n"),

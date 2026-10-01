@@ -541,8 +541,29 @@ public sealed class MethodologyVersion : Entity<int>
         string code, string inputJson, string expectedJson, decimal tolerance)
     {
         RequireDraft("склад тестів");
+        RequireTolerance(code, tolerance);
 
         return new MethodologyTestCaseEntity(Id, code, inputJson, expectedJson, tolerance);
+    }
+
+    /// <summary>Від'ємний допуск — відмова з ключем, а не <c>ArgumentOutOfRangeException</c> сутності.</summary>
+    /// <remarks>
+    /// ⛔ Допуск приходить із тіла <c>PUT …/tests/{code}</c>: інваріант сутності тест не пропускав,
+    /// але кидав необроблений виняток — і клієнт отримував 500 замість «виправте поле».
+    /// </remarks>
+    private static void RequireTolerance(string code, decimal tolerance)
+    {
+        if (tolerance < 0)
+        {
+            throw new DomainException(
+                "ECR-CALC-0422",
+                $"Допуск тесту «{code}» від'ємний: такий тест не пройде ніколи.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0422.testToleranceNegative",
+                    ["code"] = code,
+                });
+        }
     }
 
     /// <summary>Змінює тест цієї версії. Лише для чернетки.</summary>
@@ -560,6 +581,7 @@ public sealed class MethodologyVersion : Entity<int>
 
         RequireDraft("тести");
         RequireOwn(testCase.MethodologyVersionId, "Тест", testCase.Code);
+        RequireTolerance(testCase.Code, tolerance);
 
         testCase.Update(inputJson, expectedJson, tolerance);
     }

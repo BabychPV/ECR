@@ -223,6 +223,9 @@ public sealed class Project : Entity<int>
         ClosedAt = utcNow;
     }
 
+    /// <summary>Межа причини фіксації — довжина колонки <c>CurrentPeriodPinnedReason</c>.</summary>
+    public const int MaxPinReasonLength = 400;
+
     /// <summary>
     /// Фіксує поточний період вручну. Причина обов'язкова: стан неочевидний
     /// і має бути видимим в UI.
@@ -253,6 +256,19 @@ public sealed class Project : Entity<int>
             throw new DomainException(
                 "ECR-PRD-0422", "Причина фіксації поточного періоду обов'язкова.",
                 new Dictionary<string, object?> { ["messageKey"] = "err.ECR-PRD-0422.pinReasonRequired" });
+        }
+
+        // ⛔ Межа колонки `CurrentPeriodPinnedReason`: задовга причина падала обрізанням рядка в
+        // SQL під час збереження — 500 замість «скоротіть причину».
+        if (reason.Length > MaxPinReasonLength)
+        {
+            throw new DomainException(
+                "ECR-PRD-0422", $"Причина фіксації поточного періоду довша за {MaxPinReasonLength} символів.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-PRD-0422.pinReasonTooLong",
+                    ["max"] = MaxPinReasonLength.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
         }
 
         CurrentPeriodMode = CurrentPeriodMode.Pinned;

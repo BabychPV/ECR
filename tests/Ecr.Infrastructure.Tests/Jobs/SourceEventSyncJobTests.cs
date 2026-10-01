@@ -1,4 +1,4 @@
-// tests/Ecr.Infrastructure.Tests/Jobs/SourceEventSyncJobTests.cs
+﻿// tests/Ecr.Infrastructure.Tests/Jobs/SourceEventSyncJobTests.cs
 using System.Globalization;
 using Ecr.Application;
 using Ecr.Application.Common;
@@ -21,6 +21,7 @@ using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using NSubstitute;
 using Xunit;
 
@@ -344,10 +345,129 @@ public sealed class SourceEventSyncJobTests(SqlServerFixture sql)
         Assert.Empty(trigger.ReceivedCalls());
     }
 
+    /// <remarks>
+    /// ⛔ МУТАЦІЙНИЙ ДОКАЗ (борг перерахунку): повернути виклик перерахунку ПІСЛЯ <c>SaveChangesAsync</c> без
+    /// <c>finally</c> — червоніє: рядок уже записано, зв'язки впали, а перерахунок не поставлено.
+    /// Збій зв'язків імітує тригер БД на <c>ext.SourceEventLink</c>.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "enterprise-2-P2-recalc-debt")]
+    public async Task Збій_збереження_зв_язків_після_запису_рядків_усе_одно_ставить_перерахунок()
+    {
+        await using var stand = await ArrangeAsync();
+        var trigger = Substitute.For<ICalculationTrigger>();
+        var source = new FakeEventSource(Ev("E1", Start, End));
+
+        await ExecuteAsync(
+            "CREATE OR ALTER TRIGGER ext.TR_rc4_SourceEventLink_fail ON ext.SourceEventLink AFTER INSERT AS THROW 51000, 'rc4 link save failure', 1;");
+        try
+        {
+            await Assert.ThrowsAnyAsync<Exception>(() => RunAsync(stand, source, trigger: trigger));
+        }
+        finally
+        {
+            await ExecuteAsync("DROP TRIGGER IF EXISTS ext.TR_rc4_SourceEventLink_fail;");
+        }
+
+        // Рядок уже в базі (закомічено патчером), зв'язку немає — і перерахунок усе одно поставлено.
+        Assert.Single(await RowsAsync(stand));
+        Assert.Empty(await LinksAsync(stand));
+        await trigger.Received(1).RequestAsync(stand.DocumentId, new PeriodKey(202601), Arg.Any<CancellationToken>());
+    }
+
+    /// <remarks>
+    /// ⛔ МУТАЦІЙНІ ДОКАЗИ (збій постановки не маскує початковий): прибрати try/catch у <c>finally</c> —
+    /// червоніє тест «…пробрасується_початковий_збій…»; замінити <c>catch … when (initial is not null)</c>
+    /// на безумовне проковтування — червоніє «…без_початкового_збою_постановка_падає…».
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "enterprise-2-P2-recalc-debt")]
+    public async Task Збій_збереження_і_збій_постановки_перерахунку_пробрасується_початковий_збій_а_постановка_логується()
+    {
+        await using var stand = await ArrangeAsync();
+        var trigger = Substitute.For<ICalculationTrigger>();
+        trigger.RequestAsync(Arg.Any<long>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+            .Returns<Task>(_ => throw new InvalidOperationException("recalc-enqueue-failure"));
+        var logger = new CollectingLogger();
+        var source = new FakeEventSource(Ev("E1", Start, End));
+
+        await ExecuteAsync(
+            "CREATE OR ALTER TRIGGER ext.TR_rc4_SourceEventLink_fail ON ext.SourceEventLink AFTER INSERT AS THROW 51000, 'rc4 link save failure', 1;");
+        Exception thrown;
+        try
+        {
+            thrown = await Assert.ThrowsAnyAsync<Exception>(() => RunAsync(stand, source, trigger: trigger, logger: logger));
+        }
+        finally
+        {
+            await ExecuteAsync("DROP TRIGGER IF EXISTS ext.TR_rc4_SourceEventLink_fail;");
+        }
+
+        Assert.IsAssignableFrom<DbUpdateException>(thrown);
+        Assert.DoesNotContain("recalc-enqueue-failure", thrown.ToString());
+        var entry = Assert.Single(logger.Entries);
+        Assert.Equal(LogLevel.Error, entry.Level);
+        Assert.Equal("recalc-enqueue-failure", entry.Exception?.Message);
+        Assert.Contains(stand.DocumentId.ToString(CultureInfo.InvariantCulture), entry.Message);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "enterprise-2-P2-recalc-debt")]
+    public async Task Без_початкового_збою_постановка_перерахунку_падає_і_не_ковтається()
+    {
+        await using var stand = await ArrangeAsync();
+        var trigger = Substitute.For<ICalculationTrigger>();
+        trigger.RequestAsync(Arg.Any<long>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+            .Returns<Task>(_ => throw new InvalidOperationException("recalc-enqueue-failure"));
+        var logger = new CollectingLogger();
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => RunAsync(stand, new FakeEventSource(Ev("E1", Start, End)), trigger: trigger, logger: logger));
+
+        Assert.Equal("recalc-enqueue-failure", ex.Message);
+        Assert.Empty(logger.Entries);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "enterprise-2-P2-recalc-debt")]
+    public async Task Без_збоїв_перерахунок_ставиться_зв_язок_збережено_лог_порожній()
+    {
+        await using var stand = await ArrangeAsync();
+        var trigger = Substitute.For<ICalculationTrigger>();
+        var logger = new CollectingLogger();
+
+        await RunAsync(stand, new FakeEventSource(Ev("E1", Start, End)), trigger: trigger, logger: logger);
+
+        Assert.Single(await LinksAsync(stand));
+        await trigger.Received(1).RequestAsync(stand.DocumentId, new PeriodKey(202601), Arg.Any<CancellationToken>());
+        Assert.Empty(logger.Entries);
+    }
+
+    private sealed class CollectingLogger : ILogger<SourceEventSyncJob>
+    {
+        public List<(LogLevel Level, string Message, Exception? Exception)> Entries { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+            => Entries.Add((logLevel, formatter(state, exception), exception));
+    }
     // ── Стенд ────────────────────────────────────────────────────────────────
 
     private async Task RunAsync(
-        Stand stand, FakeEventSource source, bool freshContainer = false, ICalculationTrigger? trigger = null)
+        Stand stand, FakeEventSource source, bool freshContainer = false, ICalculationTrigger? trigger = null,
+        ILogger<SourceEventSyncJob>? logger = null)
     {
         // ⚠ Метадані таблиці кешуються в контейнері: зміна стелі рядків у базі видна лише новому контейнеру.
         await using var fresh = freshContainer ? BuildProvider() : null;
@@ -364,7 +484,8 @@ public sealed class SourceEventSyncJobTests(SqlServerFixture sql)
             services.GetRequiredService<ICoverageJournal>(),
             services.GetRequiredService<IntegrationActor>(),
             clock,
-            trigger);
+            trigger,
+            logger);
 
         await job.ExecuteAsync(
             new SourceEventSyncRequest(stand.EntityId, From, Now), Substitute.For<IJobProgress>(), CancellationToken.None);

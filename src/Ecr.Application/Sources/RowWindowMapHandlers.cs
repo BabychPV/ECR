@@ -199,6 +199,18 @@ internal static class RowWindowMapSupport
         return found;
     }
 
+    /// <summary>
+    /// Колонки запиту для <see cref="RequireColumnsAsync"/>: обов'язкові — завжди, селектор — коли заданий.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Відкидати нуль можна лише в необов'язкового селектора. Раніше `!= 0` стояло на всіх
+    /// чотирьох, тож тіло без колонок (`{}`) проходило перевірку існування, і наступне
+    /// `columns[command.TargetColumnDefId]` падало `KeyNotFoundException` — тобто 500 замість
+    /// тієї самої відмови «колонки немає», що й на неіснуючий номер.
+    /// </remarks>
+    public static IEnumerable<int> RequestedColumnIds(int target, int start, int end, int? selector)
+        => selector is { } id ? [target, start, end, id] : [target, start, end];
+
     /// <summary>Форма запиту: відома згортка, непорожні й не задовгі рядки джерел.</summary>
     public static void RequireShape(RowWindowSummaryKind summary, IReadOnlyList<RowWindowSourceInput> inputs)
     {
@@ -358,8 +370,8 @@ public sealed class CreateRowWindowMapHandler(
         var columns = await RowWindowMapSupport
             .RequireColumnsAsync(
                 store,
-                new[] { command.TargetColumnDefId, command.StartColumnDefId, command.EndColumnDefId, command.SelectorColumnDefId ?? 0 }
-                    .Where(id => id != 0),
+                RowWindowMapSupport.RequestedColumnIds(
+                    command.TargetColumnDefId, command.StartColumnDefId, command.EndColumnDefId, command.SelectorColumnDefId),
                 ct)
             .ConfigureAwait(false);
 
@@ -410,7 +422,7 @@ public sealed class CreateRowWindowMapHandler(
             await IntegrationConfigAudit.WriteAsync(
                 audit, clock, currentUser, IntegrationConfigAudit.RowWindowMapType, created.Id, AuditOperation,
                 oldJson: null, newJson: IntegrationConfigAudit.Snapshot(RowWindowMapSupport.ToDto(created, columns)),
-                reason: $"Прив'язку вікна рядка на колонку «{target.Code}» створено.",
+                reason: IntegrationConfigAudit.Reason("integrationAudit.rowWindowCreated", ("column", target.Code)),
                 innerCt).ConfigureAwait(false);
         }, ct).ConfigureAwait(false);
 
@@ -477,8 +489,8 @@ public sealed class UpdateRowWindowMapHandler(
         var columns = await RowWindowMapSupport
             .RequireColumnsAsync(
                 store,
-                new[] { map.TargetColumnDefId, command.StartColumnDefId, command.EndColumnDefId, command.SelectorColumnDefId ?? 0 }
-                    .Where(columnId => columnId != 0),
+                RowWindowMapSupport.RequestedColumnIds(
+                    map.TargetColumnDefId, command.StartColumnDefId, command.EndColumnDefId, command.SelectorColumnDefId),
                 ct)
             .ConfigureAwait(false);
         await RowWindowMapSupport.RequireReferencesAsync(sources, command.TargetUnitId, inputs, ct).ConfigureAwait(false);
@@ -507,7 +519,7 @@ public sealed class UpdateRowWindowMapHandler(
             await IntegrationConfigAudit.WriteAsync(
                 audit, clock, currentUser, IntegrationConfigAudit.RowWindowMapType, map.Id, AuditOperation,
                 old, IntegrationConfigAudit.Snapshot(RowWindowMapSupport.ToDto(map, columns)),
-                $"Прив'язку вікна рядка {map.Id} змінено.", innerCt).ConfigureAwait(false);
+                IntegrationConfigAudit.Reason("integrationAudit.rowWindowChanged", ("id", map.Id)), innerCt).ConfigureAwait(false);
         }, ct).ConfigureAwait(false);
 
         // Колонки Початку/Кінця/селектора могли змінитися, а активність — вимкнутися: скидаємо знімок індексу.
@@ -573,7 +585,7 @@ public sealed class DeleteRowWindowMapHandler(
 
             await IntegrationConfigAudit.WriteAsync(
                 audit, clock, currentUser, IntegrationConfigAudit.RowWindowMapType, id, AuditOperation,
-                removed, newJson: null, $"Прив'язку вікна рядка {id} видалено.", innerCt)
+                removed, newJson: null, IntegrationConfigAudit.Reason("integrationAudit.rowWindowDeleted", ("id", id)), innerCt)
                 .ConfigureAwait(false);
         }, ct).ConfigureAwait(false);
 

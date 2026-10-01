@@ -104,7 +104,7 @@ public sealed class CreateEntityFieldMapHandler(
             await IntegrationConfigAudit.WriteAsync(
                 audit, clock, currentUser, IntegrationConfigAudit.FieldMapType, created.Id, AuditOperation,
                 oldJson: null, newJson: IntegrationConfigAudit.Snapshot(created),
-                reason: $"Мапінг поля «{created.SourceField}» сутності {sourceEntityId} створено.", innerCt)
+                reason: IntegrationConfigAudit.Reason("integrationAudit.fieldMapCreated", ("field", created.SourceField), ("entity", sourceEntityId)), innerCt)
                 .ConfigureAwait(false);
         }, ct).ConfigureAwait(false);
 

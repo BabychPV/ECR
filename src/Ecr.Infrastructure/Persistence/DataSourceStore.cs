@@ -97,4 +97,7 @@ public sealed class DataSourceStore(EcrDbContext db) : IDataSourceStore
 
     /// <inheritdoc />
     public void Remove(DataSource source) => db.DataSources.Remove(source);
+
+    /// <inheritdoc />
+    public void Forget(DataSource source) => db.Entry(source).State = EntityState.Detached;
 }

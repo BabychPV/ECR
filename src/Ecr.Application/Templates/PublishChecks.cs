@@ -593,7 +593,14 @@ public static class PublishChecks
                 + "формі це порожня клітинка, яку оператор не має права заповнити, і яку ніщо "
                 + "не заповнить за нього.",
                 0,
-                1));
+                1,
+                "err.ECR-TMPL-4226.calculatedWithoutSource",
+                new Dictionary<string, string>
+                {
+                    ["tableCode"] = table.Code,
+                    ["columnCode"] = column.Code,
+                    ["dataType"] = column.DataType.ToString(),
+                }));
         }
     }
 
@@ -638,7 +645,9 @@ public static class PublishChecks
             + "ній немає. В опублікованій формі це порожня таблиця, у яку оператор не зможе "
             + "ввести жодного значення.",
             0,
-            1));
+            1,
+            "err.ECR-TMPL-4228.fixedTableWithoutRows",
+            new Dictionary<string, string> { ["tableCode"] = table.Code }));
     }
 
     /// <summary>

@@ -177,8 +177,8 @@ describe('SnapshotsPage: параметри звіту при побудові �
       // зеленим просто тому, що опис ще не приїхав.
       await within(dialog).findByText(/snapshots\.parameters⟧/, {}, Wait);
 
-      expect(within(dialog).getByText(/snapshots\.parametersBlocked⟧/)).toBeDefined();
-      expect(buildButton(dialog).disabled).toBe(true);
+      expect(within(dialog).getByRole('alert').textContent).toMatch(/snapshots\.parametersBlocked⟧/);
+      expect(buildButton(dialog).getAttribute('aria-disabled')).toBe('true');
 
       // Обов'язковість названа словом, а не самою зірочкою — на ОБОХ
       // обов'язкових полях (`Year` і `Since`).
@@ -206,7 +206,7 @@ describe('SnapshotsPage: параметри звіту при побудові �
       fireEvent.click(within(dialog).getByLabelText(/^Draft/));
 
       await waitFor(() => {
-        expect(buildButton(dialog).disabled).toBe(false);
+        expect(buildButton(dialog).getAttribute('aria-disabled')).toBeNull();
       }, Wait);
 
       expect(within(dialog).queryByText(/snapshots\.parametersBlocked⟧/)).toBeNull();
@@ -269,7 +269,7 @@ describe('SnapshotsPage: параметри звіту при побудові �
       fireEvent.click(within(dialog).getByLabelText(/^Draft/));
 
       await waitFor(() => {
-        expect(buildButton(dialog).disabled).toBe(false);
+        expect(buildButton(dialog).getAttribute('aria-disabled')).toBeNull();
       }, Wait);
 
       fireEvent.click(buildButton(dialog));
@@ -294,9 +294,9 @@ describe('SnapshotsPage: параметри звіту при побудові �
 
       const dialog = await openDialogWithReport();
 
-      await within(dialog).findByText(/snapshots\.parametersUnknown⟧/, {}, Wait);
+      expect((await within(dialog).findByRole('alert', {}, Wait)).textContent).toMatch(/snapshots\.parametersUnknown⟧/);
 
-      expect(buildButton(dialog).disabled).toBe(true);
+      expect(buildButton(dialog).getAttribute('aria-disabled')).toBe('true');
 
       // ⛔ Причина саме ця, а не «заповніть обов'язкові»: порада заповнити поле,
       // якого немає на екрані, відправила б людину шукати неіснуюче.
@@ -320,7 +320,7 @@ describe('SnapshotsPage: параметри звіту при побудові �
       // ⚠ Дзеркальні твердження — ПІСЛЯ приходу даних: дочекатися стану, у
       // якому звіт уже обрано (кнопка ожила), і лише тоді казати «немає».
       await waitFor(() => {
-        expect(buildButton(dialog).disabled).toBe(false);
+        expect(buildButton(dialog).getAttribute('aria-disabled')).toBeNull();
       }, Wait);
 
       expect(within(dialog).queryByText(/snapshots\.parameters⟧/)).toBeNull();
@@ -336,6 +336,62 @@ describe('SnapshotsPage: параметри звіту при побудові �
       expect(sent.body !== null && typeof sent.body === 'object' && 'parameters' in sent.body).toBe(
         false,
       );
+    },
+    TestTimeout,
+  );
+});
+
+/**
+ * reports-walk: недоступна побудова називає, ЧОГО бракує.
+ *
+ * Раніше обидві кнопки «Build snapshot» були голим `disabled` — без фокуса,
+ * без наведення, без слова про причину.
+ *
+ * Мутаційний доказ: повернути `disabled={projectId === null}` без
+ * `DisabledReason` — перший тест червоний (немає опису причини); прибрати
+ * гілку `code === null` з причини діалогу — другий тест червоний.
+ */
+describe('SnapshotsPage: причина недоступної побудови (reports-walk)', () => {
+  /** Текст опису за `aria-describedby` — те, що читач озвучить разом із назвою. */
+  function description(element: Element): string {
+    const ids = element.getAttribute('aria-describedby')?.split(' ') ?? [];
+    return ids.map((id) => document.getElementById(id)?.textContent ?? '').join(' ').trim();
+  }
+
+  it(
+    'без проєкту: кнопка у фокусі, описана «pick a project», клік не відкриває діалог',
+    async () => {
+      mockApi(WithoutParameters);
+      show();
+
+      const build = await screen.findByRole('button', { name: /snapshots\.build⟧/ }, Wait);
+      expect(build.getAttribute('aria-disabled')).toBe('true');
+      expect((build as HTMLButtonElement).disabled).toBe(false);
+      expect(description(build)).toBe('⟦periods.pickProject⟧');
+
+      fireEvent.click(build);
+      expect(screen.queryByRole('dialog')).toBeNull();
+    },
+    TestTimeout,
+  );
+
+  it(
+    'діалог без обраного звіту: «Build» описана «pick a report», запит не йде',
+    async () => {
+      const sent = mockApi(WithoutParameters);
+      show();
+
+      fireEvent.click(await screen.findByLabelText(/documents\.project⟧/, {}, Wait));
+      fireEvent.click(await screen.findByRole('option', { name: 'KASH_2026' }, Wait));
+      fireEvent.click(await screen.findByRole('button', { name: /snapshots\.build⟧/ }, Wait));
+
+      const dialog = await screen.findByRole('dialog', {}, Wait);
+      const build = buildButton(dialog);
+      expect(build.getAttribute('aria-disabled')).toBe('true');
+      expect(description(build)).toBe('⟦snapshots.pickReport⟧');
+
+      fireEvent.click(build);
+      expect(sent.body).toBeUndefined();
     },
     TestTimeout,
   );

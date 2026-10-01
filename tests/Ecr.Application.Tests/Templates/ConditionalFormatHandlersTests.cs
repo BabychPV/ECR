@@ -110,6 +110,22 @@ public sealed class ConditionalFormatHandlersTests
     }
 
     [Fact]
+    [Trait("Scenario", "Н-Е2")]
+    public async Task Номер_правила_в_помилці_колонки_рахується_в_межах_колонки_як_і_в_решті_ключів()
+    {
+        var column = await Assert.ThrowsAsync<DomainException>(
+            () => Save().HandleAsync(1, [Rule(), Rule(), Rule(column: "NOPE")], Current, CancellationToken.None));
+        var operand = await Assert.ThrowsAsync<DomainException>(
+            () => Save().HandleAsync(1, [Rule(column: "VOL"), Rule("gt", "abc")], Current, CancellationToken.None));
+
+        Assert.Equal("err.ECR-CFG-0422.condFormatColumn", column.Details!["messageKey"]);
+        Assert.Equal(1, column.Details!["index"]);
+        Assert.Equal("NOPE", column.Details!["columnCode"]);
+        Assert.Equal("err.ECR-CFG-0422.condFormatOperand", operand.Details!["messageKey"]);
+        Assert.Equal(2, operand.Details!["index"]);
+    }
+
+    [Fact]
     public async Task Занадто_великий_набір_відхиляється()
     {
         var many = Enumerable.Range(0, SaveConditionalFormatsHandler.MaxRules + 1).Select(_ => Rule()).ToList();

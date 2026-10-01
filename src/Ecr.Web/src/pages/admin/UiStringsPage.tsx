@@ -333,6 +333,13 @@ export function UiStringsPage(): JSX.Element {
       {/* ⚠ `Array.isArray`, а не довіра типові: тип обіцяє компілятор, а не
           мережа, і відповідь іншої форми мала б лишити сторінку без лічильників,
           а не без таблиці. */}
+      {/* ⛔ ФВ-14.22: відмова покриття не малювалася ніде — лічильники мовчки
+          зникали, і збій виглядав як «рахувати нічого». Банер, а не падіння
+          сторінки: редактор нижче від покриття не залежить. */}
+      {coverage.error !== null && (
+        <ErrorAlert error={coverage.error} onRetry={() => void coverage.refetch()} />
+      )}
+
       {coverage.data !== undefined && Array.isArray(coverage.data.languages) && (
         <Group gap="md" mb="xs" data-testid="ui-strings-coverage">
           {coverage.data.languages.map((row) => (

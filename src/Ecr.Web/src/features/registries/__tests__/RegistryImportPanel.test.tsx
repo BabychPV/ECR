@@ -208,6 +208,13 @@ describe('RegistryImportPanel: імпорт записів довідника з
         errors: [
           { row: 2, key: 'XX', field: null, messageKey: 'err.ECR-REG-0422.unknownColumn' },
           { row: 5, key: 'KG', field: 'code', messageKey: 'err.ECR-REG-0422.duplicateCode' },
+          {
+            row: 7,
+            key: 'NM',
+            field: 'LIMIT',
+            messageKey: 'err.ECR-REG-0422.valueNotNumber',
+            params: { value: 'abc', dataType: 'Decimal' },
+          },
         ],
       });
 
@@ -230,6 +237,10 @@ describe('RegistryImportPanel: імпорт записів довідника з
       expect(screen.getByText('This code appears earlier in the same file.')).toBeTruthy();
       expect(screen.queryByText('err.ECR-REG-0422.unknownColumn')).toBeNull();
       expect(screen.queryByText('err.ECR-REG-0422.duplicateCode')).toBeNull();
+
+      // ⛔ Клас D1, мутаційний доказ: прибери `params` із `t(error.messageKey, …)` — речення
+      // лишиться з фігурними дужками «"{value}"… {dataType}».
+      expect(screen.getByText('The value "abc" is not a number for a field of type Decimal.')).toBeTruthy();
 
       // Причина блокування названа, і номери рядків на місці.
       expect(screen.getByText('This file cannot be applied as it is')).toBeTruthy();

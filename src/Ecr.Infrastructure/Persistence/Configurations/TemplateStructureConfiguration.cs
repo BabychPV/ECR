@@ -127,6 +127,7 @@ public sealed class ColumnDefConfiguration : IEntityTypeConfiguration<ColumnDef>
             t.HasTrigger("TR_ColumnDef_Immutable");
             t.HasCheckConstraint("CK_ColumnDef_Month", "IsMonthColumn = 0 OR MonthNumber BETWEEN 1 AND 12");
             t.HasCheckConstraint("CK_ColumnDef_Lookup", "DataType <> 5 OR LookupRegistryDefId IS NOT NULL");
+            t.HasCheckConstraint("CK_ColumnDef_WidthPx", "WidthPx IS NULL OR WidthPx BETWEEN 40 AND 800");
         });
         builder.HasKey(x => x.Id);
         builder.HasAlternateKey(x => new { x.TableDefId, x.Id }).HasName("UQ_ColumnDef_ForFk");

@@ -185,7 +185,7 @@ HTTP-код: `Healthy` і `Degraded` дають **200**, `Unhealthy` — **503**
 
 | Перевірка | Degraded | Unhealthy |
 |---|---|---|
-| `db` | попереду менше 2 партицій | RCSI вимкнено; немає файлової групи `DATA_HOT`, `DATA_ARCHIVE`, `AUDIT` або `INDEXES`; БД недоступна |
+| `db` | попереду менше 2 партицій; `ext.RawDataPoint` ≥ 80 % порога `Health:RawDataPointWarnRows` (типово 20 000 000 рядків, поріг перегляду R2; кількість з `sys.partitions`, кеш 10 хв; `health.collection.rawPointsApproaching`/`rawPointsOverThreshold`) | RCSI вимкнено; немає файлової групи `DATA_HOT`, `DATA_ARCHIVE`, `AUDIT` або `INDEXES`; БД недоступна |
 | `jobs` | у планувальника немає тригерів | планувальник не зареєстрований, зупинений або кидає помилку |
 | `sources` | джерело ще не запускалось, є прогалина покриття, або є активне джерело з Windows-автентифікацією (Negotiate) при порожньому `PiWebApi:AllowedHosts` (`health.sources.negotiateNoAllowlist`, п. 2.1) | останній запуск будь-якого активного джерела впав. Якщо активних джерел немає — Healthy |
 | `worker` | Api на `Executor=Worker`, а служби `EcrWorker` немає, вона `Disabled` або задачі чекають понад 5 хв без жодної виконуваної (п. 10) | — |
@@ -527,6 +527,68 @@ BACKUP LOG      [Ecr] TO DISK = N'<шлях>\Ecr_log.trn'  WITH CHECKSUM, COMPRE
 зробіть повний бекап.
 
 ⚠ **потрібне рішення замовника:** за скільки років дані лишаються «гарячими».
+
+### 7.3. Архівація аудиту `arc.usp_ArchiveAudit` (✎ 2026-10-01, `D-247`, `D-236`, `НФ-8.4b`)
+
+**Що робить.** Партиції `aud.CellChange`, `aud.StructureChange`, `aud.SecurityEvent`,
+`aud.PublicationEvent`, **повністю** старші за `@OlderThanMonths` (дефолт **24**, мінімум 1:
+поточний місяць не архівується ніколи), перемикає (`ALTER TABLE … SWITCH PARTITION`) у
+дзеркала `arc.AuditCellChange`, `arc.AuditStructureChange`, `arc.AuditSecurityEvent`,
+`arc.AuditPublicationEvent` (`12-archive-tables.sql`; та сама `ps_AuditByMonth`, ті самі
+індекси). Рядки не копіюються і не видаляються — це метаданкова операція; `Id` зберігаються.
+Це **не** `arc.CellChange` (columnstore на `DATA_ARCHIVE`): SWITCH у нього неможливий.
+
+**Незмінність.** Тригери `aud.TR_*_Immutable` (`THROW 50060` на `UPDATE`/`DELETE`) **не
+вимикаються**: `SWITCH` — DDL, DML-тригери не запускає. Архівні дзеркала мають такі самі
+тригери (`arc.TR_Audit*_Immutable`).
+
+**Хто й коли запускає.** Нічна задача `partition-check` (`PartitionCheckJob`) після
+продовження меж викликає `EXEC arc.usp_ArchiveAudit` (поріг 24 міс.); ідемпотентно, у C#
+DDL немає. Збій архівації не ховає перевірку запасу партицій: прогін `partition-check` стає
+`Degraded` з `auditArchiveFailed` у `DetailsJson`.
+
+**Вручну** (потрібне лише `EXECUTE` на процедуру; `WITH EXECUTE AS OWNER`):
+
+```sql
+DECLARE @p int, @r bigint;
+EXEC arc.usp_ArchiveAudit @OlderThanMonths = 24, @PartitionsSwitched = @p OUTPUT, @RowsSwitched = @r OUTPUT;
+SELECT @p AS Partitions, @r AS [Rows];
+```
+
+**Журнал** — `itg.MaintenanceRun`, `JobCode = 'audit-archive'`, рядок на кожну
+(таблиця, партиція): `Succeeded` — `DetailsJson` = таблиця, номер партиції, `periodStart`
+(початок місяця), `rows`, `by` (`ORIGINAL_LOGIN()`), `olderThanMonths`; `FinishedAt` — коли.
+Перенос і запис — одна транзакція. `Failed` — відкат + текст помилки (процедура кидає її
+далі). `Degraded` — у цілі вже є рядки цієї партиції (пізній запис у вже заархівований
+місяць): партицію **не перенесено**, потрібна ручна розв'язка. Порожні/вже перенесені
+партиції — без запису.
+
+**Відновити** (SWITCH назад; ціль `aud.*` у тій партиції має бути порожньою):
+
+```sql
+DECLARE @p int = $PARTITION.pf_AuditByMonth('2026-03-01');
+DECLARE @sql nvarchar(400) = N'ALTER TABLE arc.AuditSecurityEvent SWITCH PARTITION ' + CAST(@p AS nvarchar(10))
+    + N' TO aud.SecurityEvent PARTITION ' + CAST(@p AS nvarchar(10));
+EXEC sp_executesql @sql;
+```
+
+Після відновлення нічна задача знову заархівує партицію, якщо вона старша за поріг, — для
+утримання зніміть її з порогу (параметр) або відновлюйте лише на час аналізу.
+
+**Ризики.**
+- Читачі (`AuditReader`, історія комірки) дивляться лише в `aud.*`: заархівований період
+  зникає з UI історії. Тому дефолт 24 міс. — **припущення**, не вказане в `D-236`; потрібне
+  рішення замовника про глибину «гарячого» аудиту.
+- Дані лишаються у файловій групі `AUDIT`: переміщення на дешевший диск — окрема операція
+  DBA над файлами групи; SWITCH місця не звільняє.
+- SWITCH бере `SCH-M` на мить; `LOCK_TIMEOUT` 30 с — за довгою транзакцією прогін падає
+  (`Failed`), повторить наступна ніч.
+- Додаєш колонку чи індекс до `aud.*` — додай і до `arc.Audit*`: інакше SWITCH падає
+  (Msg 4943/4904…); сторож — `AuditArchiveSwitchTests`.
+- Бекап до архівації обов'язковий (див. вище).
+
+**Моніторинг:** `SELECT * FROM itg.MaintenanceRun WHERE JobCode = 'audit-archive' AND Status <> 'Succeeded' ORDER BY Id DESC;`
+і `partition-check` зі статусом `Degraded`.
 
 ## 8. Оновлення версії
 

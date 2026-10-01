@@ -550,6 +550,7 @@ public sealed class SubmitApproveTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "ФВ-5.19")]
     public async Task Подання_з_незакритими_помилками_валідації_відхиляється()
     {
         _access.CanSubmitAsync(Arg.Any<AccessProfile>(), Document, Water, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
@@ -660,6 +661,7 @@ public sealed class SubmitApproveTests
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait("Requirement", "ФВ-5.4")]
+    [Trait("Requirement", "ФВ-5.19")]
     public async Task Блокувальна_помилка_валідації_відхиляє_подання()
     {
         // Правило рівня РЯДКА: `[Volume] <= 100`, а в комірці 12500.
@@ -733,6 +735,29 @@ public sealed class SubmitApproveTests
         Assert.Equal("err.ECR-SUB-4221.validationBlocked", error.Details!["messageKey"]);
         Assert.Equal("1", error.Details["messageCount"]);
         Assert.Contains("CAP", System.Text.Json.JsonSerializer.Serialize(error.Details), StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// ФВ-5.19: «Info — інформативно». Порушене правило рівня <c>Info</c> не
+    /// блокує подання і не вимагає підтвердження: без <c>acknowledgeWarnings</c>
+    /// аркуш подається, зріз фіксується, запису про підтвердження в аудиті нема.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ МУТАЦІЙНИЙ ДОКАЗ: у <c>SubmitSheetHandler</c> віднести <c>Info</c> до
+    /// попереджень (<c>m.Severity != ValidationSeverity.Error</c> замість
+    /// <c>== ValidationSeverity.Warning</c>) або до блокувальних — червоніє.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "ФВ-5.19")]
+    public async Task Інформативне_повідомлення_валідації_не_блокує_і_не_потребує_підтвердження()
+    {
+        WithRule("[Volume] <= 100", ValidationSeverity.Info);
+
+        await Submit().HandleAsync(Document, Water, Period, acknowledgeWarnings: false, CancellationToken.None);
+
+        Assert.Equal(DocumentStatus.Submitted, _sheets[Water].Status);
+        Assert.Single(_snapshots);
     }
 
     [Fact]
@@ -1240,6 +1265,7 @@ public sealed class SubmitApproveTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "ФВ-5.20a")]
     public async Task Reopen_документа_при_закритому_періоді_відхиляється_ECR_PRD_4223()
     {
         await Submit().HandleAsync(Document, Water, Period, CancellationToken.None);
@@ -1293,6 +1319,7 @@ public sealed class SubmitApproveTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "ФВ-5.20a")]
     public async Task Старий_поданий_зріз_лишається_після_повторного_подання()
     {
         await Submit().HandleAsync(Document, Water, Period, CancellationToken.None);

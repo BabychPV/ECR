@@ -78,4 +78,14 @@ public sealed record ExcelColumnRef(
 /// <summary>Рядок блоку.</summary>
 /// <param name="RowKey">Ідентичність рядка в системі.</param>
 /// <param name="Number">Номер рядка в книзі, з одиниці.</param>
-public sealed record ExcelRowRef(string RowKey, int Number);
+/// <param name="Calc">
+/// Відбитки обчислюваних комірок рядка на момент експорту
+/// (<see cref="CalculatedCellFingerprint"/>); <c>null</c> — у блоці немає
+/// обчислюваних колонок або книгу вивантажено до появи поля.
+/// </param>
+public sealed record ExcelRowRef(
+    string RowKey,
+    int Number,
+    [property: System.Text.Json.Serialization.JsonIgnore(
+        Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    string? Calc = null);

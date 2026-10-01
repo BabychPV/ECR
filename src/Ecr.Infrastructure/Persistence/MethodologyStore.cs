@@ -641,6 +641,13 @@ public sealed class MethodologyStore(EcrDbContext db, int constantCap) : IMethod
         foreach (var row in rows)
         {
             var input = Deserialize<CalculationInput>(row.InputJson, row.Code, "вхід");
+
+            // Аудит ent3, P2: тести, записані до перевірки форми (`"{}"`), мають Arguments = null,
+            // і симуляція падала 500 на прогоні. Без аргументів прогін дасть червоний вердикт, а не збій.
+            if (input.Arguments is null)
+            {
+                input = input with { Arguments = [] };
+            }
             var expected = Deserialize<Dictionary<string, decimal>>(row.ExpectedJson, row.Code, "очікуваний вихід");
 
             result.Add(new MethodologyTestCase(row.Code, input, expected, row.Tolerance));

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -35,6 +35,26 @@ vi.mock('@/features/sources/SourceEventMapModal', async (importOriginal) => {
 });
 
 import { SourcesPage } from '@/pages/admin/SourcesPage';
+
+/**
+ * ⛔ Прогрів `@mantine/dates` — не прискорення, а причина зависання гейта `client` (2026-10-01: воркер vitest
+ * мовчав 36 хв на цьому файлі й помер з кодом 1, `testTimeout` не спрацював).
+ *
+ * Фоновий `CollectionRunsPanel` тягне `DateInput` через `lazy(import('@/shared/dates/DateInputWithStyles'))`.
+ * Холодний `import()` цього модуля довший за підняття шухляди, тож на момент `fireEvent.click(tab)` його межа
+ * `<Suspense>` ще чекає — і клік (синхронний `act`) застає ДВІ незавершені лінивості: цю й саму вкладку. React
+ * усередині синхронного скидання черги `act` рендерить дерево знову й знову (зміряно в налагоджувачі: жодного
+ * `scheduleUpdateOnFiber`, лише `handleThrow` з тим самим `Promise` по черзі в `FilterBar` і в `TabsPanel`), а
+ * мікрозадачі, що розв'язали б `import()`, не отримують ходу ніколи. Цикл синхронний, тому таймер межі тесту теж
+ * не отримує ходу. Залежало від того, чи встиг `import()` до кліку: локально (холодно) — зависання щоразу, у CI —
+ * зрідка.
+ *
+ * ⚠ Прогрівається лише спільний модуль дат, а НЕ модулі під перевіркою (`SourceEventsTable`,
+ * `SourceEventMapModal`, `RowWindowMapsPanel`): їхні позначки `probe` лишаються чесними.
+ */
+beforeAll(async () => {
+  await import('@/shared/dates/DateInputWithStyles');
+}, 60_000);
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });

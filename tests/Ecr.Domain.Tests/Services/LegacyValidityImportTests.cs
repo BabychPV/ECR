@@ -1,6 +1,6 @@
 // tests/Ecr.Domain.Tests/Services/LegacyValidityImportTests.cs
 using System.Globalization;
-using Ecr.Domain.Services;
+using Ecr.Domain.Services.External;
 using Ecr.TestKit;
 using Xunit;
 

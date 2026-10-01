@@ -54,6 +54,7 @@ import { useUrlNumber } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
 import { localized } from '@/shared/i18n/localized';
 import { fetchAllProjects } from '@/features/projects/allProjects';
+import { DisabledReason } from '@/features/common/DisabledReason';
 
 // ⚠ За `import()`: бюджет маршруту тісний, а рядки зрізу відкривають рідко.
 const SnapshotRowsModal = lazy(() => import('@/features/reports/SnapshotRowsModal'));
@@ -346,9 +347,11 @@ export function SnapshotsPage(): JSX.Element {
             )}
 
             {can(session.data, 'Report.BuildSnapshot') && (
-              <Button size="xs" disabled={projectId === null} onClick={() => setBuilding(true)}>
-                {t('snapshots.build')}
-              </Button>
+              <DisabledReason reason={projectId === null ? t('periods.pickProject') : null}>
+                <Button size="xs" onClick={() => setBuilding(true)}>
+                  {t('snapshots.build')}
+                </Button>
+              </DisabledReason>
             )}
           </Group>
         }
@@ -575,13 +578,23 @@ export function SnapshotsPage(): JSX.Element {
           <Button variant="default" onClick={() => setBuilding(false)}>
             {t('common.cancel')}
           </Button>
-          <Button
-            disabled={code === null || blockedReason !== null}
-            loading={build.isPending}
-            onClick={() => build.mutate()}
+          {/* ⚠ Без обраного звіту кнопка була просто сірою — без фокуса й без
+              слова, чого бракує. */}
+          <DisabledReason
+            reason={
+              code === null
+                ? t('snapshots.pickReport')
+                : blockedReason === 'snapshots.parametersUnknown'
+                  ? t('snapshots.parametersUnknown')
+                  : blockedReason === 'snapshots.parametersBlocked'
+                    ? t('snapshots.parametersBlocked')
+                    : null
+            }
           >
-            {t('snapshots.build')}
-          </Button>
+            <Button loading={build.isPending} onClick={() => build.mutate()}>
+              {t('snapshots.build')}
+            </Button>
+          </DisabledReason>
         </Group>
       </Modal>
 

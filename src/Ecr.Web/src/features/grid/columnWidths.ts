@@ -19,6 +19,17 @@
 export const DefaultColumnWidth = 140;
 
 /**
+ * Початкова ширина колонки: користувацька (D-201) → шаблонна `WidthPx`
+ * (D-234) → типова. Користувацька лише перекриває шаблонну, не змінює її.
+ */
+export function columnWidth(
+  userWidth: number | undefined,
+  templateWidth: number | null | undefined,
+): number {
+  return userWidth ?? templateWidth ?? DefaultColumnWidth;
+}
+
+/**
  * Розбирає подію зміни ширини RevoGrid.
  *
  * ⛔ Розбір винесено в чисту функцію навмисно. Подія типізована як

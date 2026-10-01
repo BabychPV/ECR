@@ -87,7 +87,8 @@ public sealed record AnalysisReport(
     IReadOnlyList<TokenCount> UndeclaredInText,
     IReadOnlyList<ReferenceCycle> Cycles,
     ReaderSummary Reader,
-    IReadOnlyList<string> Blockers)
+    IReadOnlyList<string> Blockers,
+    IReadOnlyList<NormalizationApplied>? Normalizations = null)
 {
     public bool HasBlockers => Blockers.Count > 0;
 }

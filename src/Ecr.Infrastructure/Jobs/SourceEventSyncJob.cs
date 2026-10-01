@@ -1,4 +1,4 @@
-// src/Ecr.Infrastructure/Jobs/SourceEventSyncJob.cs
+﻿// src/Ecr.Infrastructure/Jobs/SourceEventSyncJob.cs
 using System.Globalization;
 using System.Text.Json;
 using Ecr.Application.Errors;
@@ -11,6 +11,8 @@ using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
 using Ecr.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Ecr.Infrastructure.Jobs;
 
@@ -42,15 +44,18 @@ namespace Ecr.Infrastructure.Jobs;
 /// завжди передає.
 /// </para>
 /// </remarks>
-public sealed class SourceEventSyncJob(
+public sealed partial class SourceEventSyncJob(
     EcrDbContext db,
     IEnumerable<IExternalDataSource> sources,
     ICellPatcher patcher,
     ICoverageJournal coverage,
     IntegrationActor actor,
     IClock clock,
-    ICalculationTrigger? recalculation = null) : ISourceEventSyncJob
+    ICalculationTrigger? recalculation = null,
+    ILogger<SourceEventSyncJob>? logger = null) : ISourceEventSyncJob
 {
+    private readonly ILogger _logger = (ILogger?)logger ?? NullLogger.Instance;
+
     /// <summary>Код задачі в черзі.</summary>
     public static string Code => "source-event-sync";
 
@@ -268,22 +273,59 @@ public sealed class SourceEventSyncJob(
             totals.Missing++;
         }
 
-        await db.SaveChangesAsync(ct).ConfigureAwait(false);
-
-        if (events.Count > 0)
+        // ⛔ Борг перерахунку (enterprise-2 P2): рядки вже ЗАКОМІЧЕНО патчером у етапі 1, тож збій
+        // збереження зв'язків чи журналу покриття не повинен лишити документ без перерахунку — наступний
+        // прогін бачить рядок без змін і нічого не запише, тобто перерахунок уже ніхто б не поставив.
+        // ⛔ Збій постановки не маскує початковий виняток: є початковий — постановка лише логується й
+        // летить початковий; початкового немає — збій постановки летить сам (задача має впасти видимо).
+        Exception? initial = null;
+        try
         {
-            await coverage.RecordManyAsync(events, ct).ConfigureAwait(false);
+            await db.SaveChangesAsync(ct).ConfigureAwait(false);
+
+            if (events.Count > 0)
+            {
+                await coverage.RecordManyAsync(events, ct).ConfigureAwait(false);
+            }
+        }
+        catch (Exception ex)
+        {
+            initial = ex;
+            throw;
+        }
+        finally
+        {
+            try
+            {
+                await RequestRecalculationAsync(map.DocumentId, appliedPeriods, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (initial is not null)
+            {
+                LogRecalculationNotRequested(_logger, map.DocumentId, map.Id, ex);
+            }
+        }
+    }
+
+    [LoggerMessage(
+        Level = LogLevel.Error,
+        Message = "SourceEventSyncJob: перерахунок документа {DocumentId} (мапінг {MapId}) не поставлено після збою збереження; пробрасується початковий збій.")]
+    private static partial void LogRecalculationNotRequested(ILogger logger, long documentId, int mapId, Exception exception);
+
+    /// <summary>
+    /// ⛔ Автоперерахунок (§4.7.4 крок 7, A4): ОДИН виклик на зачеплений період за прогін мапінгу,
+    /// не на подію й не на групу; нуль записаного — нуль викликів. Черга зливає дублікати без
+    /// витіснення, тригер сам не ставить для закритого, Scheduled чи поданого періоду.
+    /// </summary>
+    private async Task RequestRecalculationAsync(long documentId, HashSet<int> appliedPeriods, CancellationToken ct)
+    {
+        if (recalculation is null)
+        {
+            return;
         }
 
-        // ⛔ Автоперерахунок (§4.7.4 крок 7, A4): ОДИН виклик на зачеплений період за прогін мапінгу,
-        // не на подію й не на групу; нуль записаного — нуль викликів. Черга зливає дублікати без
-        // витіснення, тригер сам не ставить для закритого, Scheduled чи поданого періоду.
-        if (recalculation is not null)
+        foreach (var periodKey in appliedPeriods.Order())
         {
-            foreach (var periodKey in appliedPeriods.Order())
-            {
-                await recalculation.RequestAsync(map.DocumentId, new PeriodKey(periodKey), ct).ConfigureAwait(false);
-            }
+            await recalculation.RequestAsync(documentId, new PeriodKey(periodKey), ct).ConfigureAwait(false);
         }
     }
 

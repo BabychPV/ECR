@@ -1,5 +1,5 @@
 import { useState, type JSX } from 'react';
-import { Button, Group, Stack, Table, Text, Title } from '@mantine/core';
+import { Button, Group, Stack, Table, Title } from '@mantine/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiEnqueue, apiFetch } from '@/api/client';
 import type { components } from '@/api/schema';
@@ -8,6 +8,7 @@ import { humanizeJobId } from '@/features/workflow/jobLabel';
 import { formatDateTime } from '@/shared/format';
 import { t } from '@/shared/i18n';
 import { useSession } from '@/shared/session/useSession';
+import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { ReasonModal } from '@/shared/ui/ReasonModal';
 import { showApiError, showDone } from '@/shared/ui/notify';
 
@@ -109,73 +110,83 @@ export function RecalculationApprovalsPanel({ projectId }: { projectId: number }
     onError: showApiError,
   });
 
-  const rows = Array.isArray(approvals.data) ? approvals.data : [];
-
   return (
     <Stack gap="xs" mt="md">
       <Title order={3}>{t('recalcApprovals.title')}</Title>
-      {rows.length === 0 ? (
-        <Text c="dimmed">{t('recalcApprovals.empty')}</Text>
-      ) : (
-        <Table striped>
-          <Table.Thead>
-            <Table.Tr>
-              <Table.Th>{t('recalcApprovals.period')}</Table.Th>
-              <Table.Th>{t('recalcApprovals.requestedBy')}</Table.Th>
-              <Table.Th>{t('recalcApprovals.reason')}</Table.Th>
-              <Table.Th>{t('recalcApprovals.state')}</Table.Th>
-              <Table.Th>{t('recalcApprovals.expires')}</Table.Th>
-              <Table.Th>{t('common.actions')}</Table.Th>
-            </Table.Tr>
-          </Table.Thead>
-          <Table.Tbody>
-            {rows.map((a) => {
-              const confirmed = a.confirmedByUserId !== null;
-              const mine = me !== null && a.requestedByUserId === me;
-
-              return (
-                <Table.Tr key={a.id}>
-                  <Table.Td>{a.periodKey}</Table.Td>
-                  <Table.Td>{a.requestedByName ?? `#${String(a.requestedByUserId)}`}</Table.Td>
-                  <Table.Td>{a.reason}</Table.Td>
-                  <Table.Td>
-                    {confirmed
-                      ? t('recalcApprovals.stateConfirmed', {
-                          name: a.confirmedByName ?? `#${String(a.confirmedByUserId)}`,
-                        })
-                      : t('recalcApprovals.statePending')}
-                  </Table.Td>
-                  <Table.Td>{formatDateTime(a.expiresAt)}</Table.Td>
-                  <Table.Td>
-                    <Group gap="xs" justify="flex-end">
-                      {!confirmed && !mine && manages && (
-                        <Button
-                          size="compact-xs"
-                          variant="subtle"
-                          loading={confirm.isPending}
-                          onClick={() => confirm.mutate(a.id)}
-                        >
-                          {t('recalcApprovals.confirm')}
-                        </Button>
-                      )}
-                      {confirmed && mine && (
-                        <Button
-                          size="compact-xs"
-                          variant="subtle"
-                          loading={run.isPending}
-                          onClick={() => run.mutate(a)}
-                        >
-                          {t('workflow.recalculate')}
-                        </Button>
-                      )}
-                    </Group>
-                  </Table.Td>
+      {/* ⛔ Була `Array.isArray(data) ? data : []`: відмова сервера і запит у
+          дорозі показували «погоджень немає», і друга людина не бачила, що
+          на неї чекають (`ФВ-14.22`). Межа станів розрізняє всі чотири. */}
+      <AsyncBoundary<Approval[]>
+        isPending={approvals.isPending}
+        error={approvals.error}
+        // ⚠ Відповідь іншої форми (не масив) — як і раніше, «порожньо», а не
+        // падіння рендеру: тип обіцяє компілятор, а не мережа.
+        data={approvals.data === undefined ? undefined : Array.isArray(approvals.data) ? approvals.data : []}
+        isEmpty={(rows) => rows.length === 0}
+        emptyTitle={t('recalcApprovals.empty')}
+        onRetry={() => void approvals.refetch()}
+      >
+        {(rows) => (
+            <Table striped>
+              <Table.Thead>
+                <Table.Tr>
+                  <Table.Th>{t('recalcApprovals.period')}</Table.Th>
+                  <Table.Th>{t('recalcApprovals.requestedBy')}</Table.Th>
+                  <Table.Th>{t('recalcApprovals.reason')}</Table.Th>
+                  <Table.Th>{t('recalcApprovals.state')}</Table.Th>
+                  <Table.Th>{t('recalcApprovals.expires')}</Table.Th>
+                  <Table.Th>{t('common.actions')}</Table.Th>
                 </Table.Tr>
-              );
-            })}
-          </Table.Tbody>
-        </Table>
-      )}
+              </Table.Thead>
+              <Table.Tbody>
+                {rows.map((a) => {
+                  const confirmed = a.confirmedByUserId !== null;
+                  const mine = me !== null && a.requestedByUserId === me;
+
+                  return (
+                    <Table.Tr key={a.id}>
+                      <Table.Td>{a.periodKey}</Table.Td>
+                      <Table.Td>{a.requestedByName ?? `#${String(a.requestedByUserId)}`}</Table.Td>
+                      <Table.Td>{a.reason}</Table.Td>
+                      <Table.Td>
+                        {confirmed
+                          ? t('recalcApprovals.stateConfirmed', {
+                              name: a.confirmedByName ?? `#${String(a.confirmedByUserId)}`,
+                            })
+                          : t('recalcApprovals.statePending')}
+                      </Table.Td>
+                      <Table.Td>{formatDateTime(a.expiresAt)}</Table.Td>
+                      <Table.Td>
+                        <Group gap="xs" justify="flex-end">
+                          {!confirmed && !mine && manages && (
+                            <Button
+                              size="compact-xs"
+                              variant="subtle"
+                              loading={confirm.isPending}
+                              onClick={() => confirm.mutate(a.id)}
+                            >
+                              {t('recalcApprovals.confirm')}
+                            </Button>
+                          )}
+                          {confirmed && mine && (
+                            <Button
+                              size="compact-xs"
+                              variant="subtle"
+                              loading={run.isPending}
+                              onClick={() => run.mutate(a)}
+                            >
+                              {t('workflow.recalculate')}
+                            </Button>
+                          )}
+                        </Group>
+                      </Table.Td>
+                    </Table.Tr>
+                  );
+                })}
+              </Table.Tbody>
+            </Table>
+        )}
+      </AsyncBoundary>
     </Stack>
   );
 }

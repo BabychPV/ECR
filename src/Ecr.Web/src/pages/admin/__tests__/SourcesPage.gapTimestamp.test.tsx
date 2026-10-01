@@ -209,4 +209,22 @@ describe('SourcesPage: початок найстарішої прогалини'
     },
     SlowEnvTimeout,
   );
+
+  it(
+    'бейдж не переводить дату у верхній регістр («AUG 17…») — той самий вигляд, що й скрізь',
+    async () => {
+      respond();
+      show();
+
+      await screen.findByText('Field weather feed', {}, { timeout: SlowEnvTimeout });
+
+      // ⛔ P3 живого проходу: Mantine `Badge` за замовчуванням `text-transform: uppercase`,
+      // і момент у ньому читався як «AUG 17, 2026» — не так, як `formatDateTime` деінде.
+      const badge = document.querySelector(`time[datetime="${Gap}"]`)?.closest('.mantine-Badge-root');
+
+      expect(badge, 'момент не в бейджі').not.toBeNull();
+      expect((badge as HTMLElement).style.textTransform).toBe('none');
+    },
+    SlowEnvTimeout,
+  );
 });

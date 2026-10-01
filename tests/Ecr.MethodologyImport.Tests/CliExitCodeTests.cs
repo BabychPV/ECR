@@ -87,6 +87,23 @@ public sealed class CliExitCodeTests : IDisposable
     }
 
     [Fact]
+    public void Unresolved_пише_markdown_з_рекомендацією_і_дає_код_2()
+    {
+        var path = Write(new AfXmlBuilder()
+            .Formula("Common", "V1", "Common_Flow", "", "1")
+            .Formula("M", "V1", "A", "!common_flow", "1")
+            .Build());
+        var report = Path.Combine(_dir, "unresolved.md");
+
+        var (exit, output) = Run("unresolved", path, "--out", report);
+
+        Assert.Equal(2, exit);
+        Assert.Equal(output, File.ReadAllText(report));
+        Assert.Contains("`Common_Flow`", output, StringComparison.Ordinal);
+        Assert.Contains("Усього: 1;", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Export_без_out_дає_код_1()
     {
         var path = Write(new AfXmlBuilder().Formula("M", "V1", "A", "", "1").Build());

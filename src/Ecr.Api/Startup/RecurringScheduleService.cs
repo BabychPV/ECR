@@ -27,7 +27,58 @@ public sealed partial class RecurringScheduleService(
     IConfiguration configuration) : IHostedService, IDisposable
 {
     /// <inheritdoc />
-    public void Dispose() => sweepStop.Dispose();
+    /// <remarks>
+    /// ⚠ Ідемпотентний: контейнер може звільнити сервіс до чи після <c>StopAsync</c>
+    /// (диспоз тестового хоста), і другий виклик не має кидати.
+    /// </remarks>
+    public void Dispose()
+    {
+        lock (sweepGate)
+        {
+            if (disposed)
+            {
+                return;
+            }
+
+            // ⚠ Спершу скасувати: цикл тримає токен, а звільнений без скасування
+            // CTS його вже ніколи не скасує — StopAsync після цього чекав би вічно.
+            sweepStop.Cancel();
+            sweepStop.Dispose();
+            disposed = true;
+        }
+    }
+
+    /// <summary>
+    /// Усі дії з <c>sweepStop</c> (скасування, токен, звільнення) — під одним замком:
+    /// паралельні <c>Cancel</c> і <c>Dispose</c> гублять реєстрації токена, і цикл
+    /// лишався нескасованим (StopAsync висів до наступного тіку хвилину).
+    /// </summary>
+    private readonly object sweepGate = new();
+
+    /// <summary><c>true</c> — <c>sweepStop</c> уже звільнено.</summary>
+    private bool disposed;
+
+    /// <summary>Скасовує цикл прибирання; після звільнення — нічого не робить.</summary>
+    private void CancelSweep()
+    {
+        lock (sweepGate)
+        {
+            if (!disposed)
+            {
+                sweepStop.Cancel();
+            }
+        }
+    }
+
+    /// <summary>Токен циклу прибирання; <c>false</c> — сервіс уже звільнено.</summary>
+    private bool TryGetSweepToken(out CancellationToken token)
+    {
+        lock (sweepGate)
+        {
+            token = disposed ? CancellationToken.None : sweepStop.Token;
+            return !disposed;
+        }
+    }
 
     /// <summary>Cron нічних перевірок: 02:15, поза вікном роботи людей.</summary>
     public const string NightlyCron = "0 15 2 * * ?";
@@ -74,7 +125,12 @@ public sealed partial class RecurringScheduleService(
         lifetime.ApplicationStarted.Register(() =>
         {
             _ = ScheduleSafelyAsync();
-            sweepLoop = SweepLoopAsync(sweepStop.Token);
+
+            // Хост міг бути зупинено раніше, ніж спрацював ApplicationStarted.
+            if (TryGetSweepToken(out var sweepToken))
+            {
+                sweepLoop = SweepLoopAsync(sweepToken);
+            }
         });
 
         return Task.CompletedTask;
@@ -97,7 +153,7 @@ public sealed partial class RecurringScheduleService(
     /// </remarks>
     public async Task StopAsync(CancellationToken cancellationToken)
     {
-        await sweepStop.CancelAsync().ConfigureAwait(false);
+        CancelSweep();
 
         try
         {

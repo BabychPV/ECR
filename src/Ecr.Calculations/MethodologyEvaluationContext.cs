@@ -351,6 +351,16 @@ public sealed class UnitTable
         table.Add("mg_per_Sm3", dimension: 16, factorToBase: 0.000001m);
         table.Add("Sm3_per_day", dimension: 13, factorToBase: 0.000011574074074074m);
 
+        // HSE301:NM3 — секція `-- HSE301:NM3` сіду. Nm3 (0 °C, 1 атм) у ТІЙ САМІЙ
+        // розмірності 12, що й Sm3 (20 °C, 1 атм): 1 Nm3 = 293.15 / 273.15 Sm3.
+        // ПРИПУЩЕННЯ — замінити фактом замовника (ідеальний газ, однаковий
+        // тиск); заміна — цей літерал і `FactorToBase` Nm3 у сіді.
+        table.Add("Nm3", dimension: 12, factorToBase: 1.073219842577338459m);
+        table.Add("Nm3_per_s", dimension: 13, factorToBase: 1.073219842577338459m);
+        table.Add("Nm3_per_h", dimension: 13, factorToBase: 0.000298116622938150m);
+        table.Add("Nm3_per_day", dimension: 13, factorToBase: 0.000012421525955756m);
+        table.Add("mg_per_Nm3", dimension: 16, factorToBase: 0.000000931775541532m);
+
         return table;
     }
 }

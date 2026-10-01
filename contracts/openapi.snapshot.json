@@ -1659,6 +1659,13 @@
               "null",
               "integer"
             ]
+          },
+          "widthPx": {
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
           }
         },
         "required": [
@@ -1817,6 +1824,13 @@
             "type": [
               "null",
               "string"
+            ]
+          },
+          "widthPx": {
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
             ]
           }
         },
@@ -4911,7 +4925,7 @@
             "type": "string"
           },
           "excelCell": {
-            "description": "Адреса комірки книги (`B3`) для значення, у якого немає рядка системи\n(`V-10`: поза рядками таблиці); інакше `null`.",
+            "description": "Адреса комірки книги (`B3`), у якій стоїть відхилене значення (P3);\nдля значення поза рядками таблиці (`V-10`) — єдиний її орієнтир.\n`null` — відмова цілої таблиці.",
             "type": [
               "null",
               "string"
@@ -5142,6 +5156,13 @@
             "type": [
               "null",
               "integer"
+            ]
+          },
+          "effectiveState": {
+            "description": "Похідний стан для оператора (`SucceededWithErrors` — дайджест сповіщень без\nжодної відправки, `JobCompletionWarning`); `null` — як `State`.",
+            "type": [
+              "null",
+              "string"
             ]
           },
           "errorCode": {
@@ -12008,6 +12029,14 @@
               "null",
               "integer"
             ]
+          },
+          "widthPx": {
+            "description": "Типова ширина, px, 40..800 (D-234); `null` — типова за типом.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
           }
         },
         "required": [
@@ -15344,6 +15373,14 @@
               "null",
               "string"
             ]
+          },
+          "widthPx": {
+            "description": "Типова ширина колонки, px (D-234); `null` — типова за типом; презентаційне поле.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
           }
         },
         "required": [
@@ -15830,6 +15867,16 @@
           "messageKey": {
             "description": "Ключ тексту відмови в каталозі.",
             "type": "string"
+          },
+          "params": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Підстановки для MessageKey; `null` — шаблон без плейсхолдерів.",
+            "type": [
+              "null",
+              "object"
+            ]
           },
           "row": {
             "description": "Номер запису у файлі; заголовок — 1.",
@@ -34302,7 +34349,7 @@
             "description": "OK"
           }
         },
-        "summary": "Перелік сутностей збору. Право `Integration.Manage`.",
+        "summary": "Перелік сутностей збору. Право `Integration.View` або `Integration.Manage` (D9).",
         "tags": [
           "Sources"
         ]

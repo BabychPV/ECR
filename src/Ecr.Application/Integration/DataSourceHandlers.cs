@@ -13,6 +13,7 @@ using Ecr.Application.Common;
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
+using Ecr.Application.Sources;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.External;
 using Ecr.Domain.Enums;
@@ -241,12 +242,43 @@ public sealed partial class SaveDataSourceHandler(
         // інакше поїхав би на будь-яку адресу нового джерела з тим самим кодом.
         RequireSecretConfirmation(SecretNamePrefix + ecrCode.Value, secretConfirmation, ecrCode.Value);
 
-        var source = new DataSource(
-            ecrCode, parsed.Name, transport, parsed.Endpoint, SecretNamePrefix + ecrCode.Value);
-        source.Configure(parsed.SecondaryEndpoint, Trim(catalog), parsed.MaxParallel);
+        DataSource NewSource()
+        {
+            var created = new DataSource(
+                ecrCode, parsed.Name, transport, parsed.Endpoint, SecretNamePrefix + ecrCode.Value);
+            created.Configure(parsed.SecondaryEndpoint, Trim(catalog), parsed.MaxParallel);
+            return created;
+        }
 
+        var source = NewSource();
         store.Add(source);
-        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+
+        // D8: створення з'єднання (адреса — SSRF-чутлива) лишає слід у журналі структурних
+        // змін В ТІЙ САМІЙ транзакції, що й збереження.
+        var attempt = 0;
+        await uow.ExecuteInTransactionAsync(async innerCt =>
+        {
+            // ⛔ ent4 P2-2: стратегія повторів (EnableRetryOnFailure) повторює замикання після
+            // транзієнтного збою. Якщо збій стався ПІСЛЯ SaveChanges (на журналі чи коміті),
+            // транзакцію відкочено, а трекер уже вважає джерело збереженим (Unchanged, Id
+            // відкоченої identity): повтор нічого б не вставив, записав би журнал про неіснуюче
+            // з'єднання і відповів 201. Тому повтор забуває стан попередньої спроби і будує
+            // джерело наново.
+            if (attempt++ > 0)
+            {
+                store.Forget(source);
+                source = NewSource();
+                store.Add(source);
+            }
+
+            await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+
+            await IntegrationConfigAudit.WriteAsync(
+                audit, clock, currentUser, IntegrationConfigAudit.DataSourceType, source.Id, "Create",
+                oldJson: null, newJson: IntegrationConfigAudit.Snapshot(source),
+                reason: IntegrationConfigAudit.Reason("integrationAudit.dataSourceCreated", ("connection", source.Code)),
+                innerCt).ConfigureAwait(false);
+        }, ct).ConfigureAwait(false);
 
         await AuditAsync(profile.UserId, new { id = source.Id, code = source.Code, created = true }, ct)
             .ConfigureAwait(false);
@@ -321,10 +353,48 @@ public sealed partial class SaveDataSourceHandler(
         var oldEndpoint = source.Endpoint;
         var oldSecondary = source.SecondaryEndpoint;
 
-        source.Update(parsed.Name, transport, parsed.Endpoint, isActive);
-        source.Configure(parsed.SecondaryEndpoint, Trim(catalog), parsed.MaxParallel);
+        var before = IntegrationConfigAudit.Snapshot(source);
 
-        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+        void Apply(DataSource target)
+        {
+            target.Update(parsed.Name, transport, parsed.Endpoint, isActive);
+            target.Configure(parsed.SecondaryEndpoint, Trim(catalog), parsed.MaxParallel);
+        }
+
+        Apply(source);
+
+        // D8: стан ДО і ПІСЛЯ — у журнал структурних змін, в одній транзакції зі збереженням.
+        // Лише справжня зміна налаштувань з'єднання (ім'я/каталог без зміни знімка шуму не дають).
+        var attempt = 0;
+        await uow.ExecuteInTransactionAsync(async innerCt =>
+        {
+            // ⛔ ent4 P2-2: повтор після збою, що стався ПІСЛЯ SaveChanges, бачив би джерело
+            // Unchanged з новими значеннями (у базі — відкочено до старих): нічого не зберіг би,
+            // а журнал записав би зміну, якої немає. Тому повтор перечитує джерело з бази, знову
+            // звіряє версію (If-Match: стан той самий, що перевірено вище) і застосовує зміну наново.
+            if (attempt++ > 0)
+            {
+                store.Forget(source);
+                source = await ListDataSourcesHandler.FindAsync(store, id, innerCt).ConfigureAwait(false);
+                ListDataSourcesHandler.RequireCurrentVersion(source, ifMatch);
+                before = IntegrationConfigAudit.Snapshot(source);
+                Apply(source);
+            }
+
+            await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+
+            var after = IntegrationConfigAudit.Snapshot(source);
+            if (string.Equals(before, after, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            await IntegrationConfigAudit.WriteAsync(
+                audit, clock, currentUser, IntegrationConfigAudit.DataSourceType, source.Id, "Update",
+                before, after,
+                reason: IntegrationConfigAudit.Reason("integrationAudit.dataSourceChanged", ("connection", source.Code)),
+                innerCt).ConfigureAwait(false);
+        }, ct).ConfigureAwait(false);
 
         // ⛔ Стара й нова адреса — у журнал (S3/S20): без них журнал не
         // відповідав на питання «куди джерело дивилося вчора». Адреса не несе
@@ -435,10 +505,19 @@ public sealed partial class SaveDataSourceHandler(
     private async Task RequireSqlServerAddressAsync(string address, string field, string code, CancellationToken ct)
     {
         var verdict = DataSourceEndpointPolicy.CheckSqlServerAddress(address);
-        var host = verdict == EndpointVerdict.Allowed ? DataSourceEndpointPolicy.SqlHostOf(address) : null;
 
-        if (host is not null && network is not null && !IPAddress.TryParse(host, out _))
+        // ⛔ ent4 P2-1: кожен сервер рядка з'єднання ODBC, а не весь рядок як «ім'я».
+        var hosts = verdict == EndpointVerdict.Allowed
+            ? DataSourceEndpointPolicy.SqlHostsOf(address) ?? []
+            : [];
+
+        foreach (var host in hosts)
         {
+            if (verdict != EndpointVerdict.Allowed || network is null || IPAddress.TryParse(host, out _))
+            {
+                continue;
+            }
+
             var resolved = await network.ResolveAsync(host, ct).ConfigureAwait(false);
 
             if (resolved.Any(DataSourceEndpointPolicy.IsLinkLocal))
@@ -449,8 +528,8 @@ public sealed partial class SaveDataSourceHandler(
 
         if (verdict == EndpointVerdict.Allowed)
         {
-            if (host is not null && logger is not null && network?.AllowedHosts is { Count: > 0 } allowed
-                && !DataSourceEndpointPolicy.IsHostAllowed(host, allowed))
+            if (logger is not null && network?.AllowedHosts is { Count: > 0 } allowed
+                && hosts.Any(host => !DataSourceEndpointPolicy.IsHostAllowed(host, allowed)))
             {
                 LogSqlHostOutsideAllowlist(logger, code);
             }

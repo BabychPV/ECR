@@ -177,8 +177,11 @@ public sealed partial class EndpointCoverageTests
             .Select(u => $"{u.Key} ({u.File}:{u.Line})"));
 
         // ⚠ `formatCount` бере категорію з `Intl.PluralRules` і НЕ падає на
-        // `.other`, коли бракує потрібної форми (`plural.ts`). `one` і `other`
-        // — мінімум, який існує в кожній мові каталогу.
+        // `.other`, коли бракує потрібної форми (`plural.ts`). Ключі каталогу
+        // спільні для всіх мов (переклад без en-рядка відкидається), тож
+        // вимагаються форми ОБ'ЄДНАННЯ мов: en/kz — `one`/`other`, ru — ще
+        // `few`/`many` (0, 2–4, 5–20…). ✎ 2026-10-01: доти тут були лише
+        // `one`/`other`, і російський інтерфейс показував `⟦…few⟧` на 2 і 5.
         missing.AddRange(scan.PluralBases
             .SelectMany(u => PluralForms.Select(form => (Key: $"{u.Key}.{form}", u.File, u.Line)))
             .Where(u => !seeded.Contains(u.Key))
@@ -370,7 +373,7 @@ public sealed partial class EndpointCoverageTests
     }
 
     /// <summary>Форми множини, які вимагаються для кожної основи <c>formatCount</c>.</summary>
-    private static readonly string[] PluralForms = ["one", "other"];
+    private static readonly string[] PluralForms = ["one", "few", "many", "other"];
 
     /// <summary>
     /// Місця, де клієнт передає ключ каталогу ЗМІННОЮ, і ключі, які туди
@@ -484,6 +487,9 @@ public sealed partial class EndpointCoverageTests
                 "err.ECR-REQ-0422.dataSourceEndpointCarriesSecret", "err.ECR-REQ-0422.dataSourceCodeTaken",
                 "err.ECR-REQ-0422.dataSourceSecretReentryRequired",
                 "err.ECR-REQ-0422.dataSourceEndpointChangeUnconfirmed",
+                "err.ECR-REQ-0422.dataSourceEndpointScheme", "err.ECR-REQ-0422.dataSourceEndpointHostForbidden",
+                "err.ECR-REQ-0422.dataSourceEndpointMalformed", "err.ECR-REQ-0422.dataSourceEndpointHostNotAllowed",
+                "err.ECR-REQ-0422.dataSourceEndpointSqlScheme", "err.ECR-REQ-0422.dataSourceEndpointSqlLinkLocal",
             ],
             "messageKey сервера, але лише з FieldOfKey — інші сюди не доходять."),
 

@@ -239,12 +239,27 @@ public sealed class MetadataCache(
     private async Task<TemplateVersionSnapshot> LoadAsync(
         int templateVersionId, int revision, CancellationToken ct)
     {
-        var sheets = await db.SheetDefs
+        // D-230: прапор «є активний Rollup/Check» — підзапитом-проєкцією В ЦЬОМУ Ж запиті аркушів
+        // (одна колонка на рядок), а не окремим зверненням: кількість запитів побудови кешу не росте.
+        var sheetRows = await db.SheetDefs
             .AsNoTracking()
-            .Where(s => s.TemplateVersionId == templateVersionId && !s.IsDeleted)
-            .OrderBy(s => s.Ordinal)
+            .Select(s => new
+            {
+                Sheet = s,
+                HasRelations = db.TableRelations.Any(r =>
+                    r.IsActive
+                    && (r.RelationKind == Ecr.Domain.Enums.TableRelationKind.Rollup
+                        || r.RelationKind == Ecr.Domain.Enums.TableRelationKind.Check)
+                    && db.TableDefs.Any(t => t.Id == r.SourceTableDefId
+                        && db.SheetDefs.Any(s2 => s2.Id == t.SheetDefId && s2.TemplateVersionId == templateVersionId))),
+            })
+            .Where(x => x.Sheet.TemplateVersionId == templateVersionId && !x.Sheet.IsDeleted)
+            .OrderBy(x => x.Sheet.Ordinal)
             .ToListAsync(ct)
             .ConfigureAwait(false);
+
+        var sheets = sheetRows.Select(x => x.Sheet).ToList();
+        var hasRelations = sheetRows.Any(x => x.HasRelations);
 
         var sheetIds = sheets.Select(s => s.Id).ToArray();
 
@@ -364,6 +379,7 @@ public sealed class MetadataCache(
             rows.ToDictionary(r => (r.TableDefId, r.RowKeyValue)))
         {
             HeaderFields = headerFields,
+            HasActiveRollupOrCheck = hasRelations,
         };
     }
 }

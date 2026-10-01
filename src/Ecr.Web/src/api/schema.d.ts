@@ -12734,7 +12734,7 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Перелік сутностей збору. Право `Integration.Manage`.
+         * Перелік сутностей збору. Право `Integration.View` або `Integration.Manage` (D9).
          * @description ⚠ Разом із кожною сутністю віддається найстаріша непокрита прогалина.
          *     Ознака здоров'я інтеграції — журнал покриття, а не тиша (ІНТ-3.3):
          *     джерело, яке щоночі успішно віддає нуль точок, і джерело, яке віддає
@@ -18232,6 +18232,8 @@ export interface components {
             styleId: null | number;
             /** Format: int32 */
             unitId: null | number;
+            /** Format: int32 */
+            widthPx?: null | number;
         };
         /** @description Одна знахідка пошуку колонки, у формі відповіді API. */
         ColumnDefSearchResultDto: {
@@ -18289,6 +18291,8 @@ export interface components {
             /** Format: int32 */
             unitId: null | number;
             unitSymbol: null | string;
+            /** Format: int32 */
+            widthPx?: null | number;
         };
         /** @description Правило умовного форматування (дзеркало клієнтського `ConditionalRule`). */
         ConditionalFormatRuleDto: {
@@ -19714,8 +19718,9 @@ export interface components {
         ImportRejection: {
             /** @description Колонка; для відмови цілої таблиці — її код. */
             columnCode: string;
-            /** @description Адреса комірки книги (`B3`) для значення, у якого немає рядка системи
-             *     (`V-10`: поза рядками таблиці); інакше `null`. */
+            /** @description Адреса комірки книги (`B3`), у якій стоїть відхилене значення (P3);
+             *     для значення поза рядками таблиці (`V-10`) — єдиний її орієнтир.
+             *     `null` — відмова цілої таблиці. */
             excelCell?: null | string;
             /** @description Діагностичний текст для журналу — НЕ для показу людині. */
             message: string;
@@ -19819,6 +19824,9 @@ export interface components {
              * @description Документ задачі; `null` — не документна (BE-08).
              */
             documentId?: null | number;
+            /** @description Похідний стан для оператора (`SucceededWithErrors` — дайджест сповіщень без
+             *     жодної відправки, `JobCompletionWarning`); `null` — як `State`. */
+            effectiveState?: null | string;
             /** @description Код каталогу помилок провалу (BE-08). */
             errorCode?: null | string;
             /** @description Код задачі (тип). */
@@ -22980,6 +22988,11 @@ export interface components {
              * @description Одиниця значень колонки (ФВ-16.1); не для типу `Unit`.
              */
             unitId: null | number;
+            /**
+             * Format: int32
+             * @description Типова ширина, px, 40..800 (D-234); `null` — типова за типом.
+             */
+            widthPx?: null | number;
         };
         /** @description Тіло `PUT …/conditional-formats`. */
         SaveConditionalFormatsRequest: {
@@ -24490,6 +24503,11 @@ export interface components {
             ordinal: number;
             /** @description Позначення одиниці, якщо задана. */
             unitSymbol: null | string;
+            /**
+             * Format: int32
+             * @description Типова ширина колонки, px (D-234); `null` — типова за типом; презентаційне поле.
+             */
+            widthPx?: null | number;
         };
         /** @description Скільки всього посилається на шаблон — ціна архівування. */
         TemplateDependents: {
@@ -24747,6 +24765,10 @@ export interface components {
             key: string;
             /** @description Ключ тексту відмови в каталозі. */
             messageKey: string;
+            /** @description Підстановки для MessageKey; `null` — шаблон без плейсхолдерів. */
+            params?: null | {
+                [key: string]: string;
+            };
             /**
              * Format: int32
              * @description Номер запису у файлі; заголовок — 1.

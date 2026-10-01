@@ -281,10 +281,9 @@ GO
 --                 decimal(38,18), 1/86400 = 0.0000115740740740740740…).
 -- Конверсії в/з працюючий м3 (mg_per_m3, m3_per_day) НЕМАЄ навмисно: розмірності
 -- 16 і 11 різні (V-12), і CONVERT дає #UNIT, а не правдоподібне число.
--- ⚠ Sm3 у каталозі — єдиний «стандартний» кубометр; книги замовника пишуть
--- і «Nm3» (0 °C), і «Sm3» (15/20 °C), а множника між ними каталог не має.
--- Бачить це `UnitRecognizer` (tools/Ecr.Bootstrap.Excel): «nm3» → Sm3.
--- Факт замовника: чи тотожні для його методологій Nm3 і Sm3 (див. звіт).
+-- ⚠ Sm3 тут — стандартний кубометр (20 °C, 1 атм). Нормальний Nm3 (0 °C,
+-- 1 атм) з множником до Sm3 — окрема секція `-- HSE301:NM3` нижче;
+-- `UnitRecognizer` (tools/Ecr.Bootstrap.Excel) мапить «nm3» → Nm3, не Sm3.
 -- Дзеркало в пам'яті воркера — `UnitTable.Seed` (Ecr.Calculations); його
 -- звіряє `Hse301UnitsTests`.
 MERGE uom.Unit AS t
@@ -302,6 +301,67 @@ WHEN NOT MATCHED THEN INSERT
              (SELECT Id FROM uom.Unit WHERE Code = s.DenCode));
 GO
 -- UNITS:ecr-derived ── кінець секції ───────────────────────────────────────
+
+-- HSE301:NM3 ── нормальний кубометр Nm3 (0 °C, 1 атм) окремо від Sm3 (20 °C, 1 атм) ──
+-- Nm3 — ТА САМА розмірність StdVolume (12), що й Sm3 (база, множник 1): обидва
+-- стандартні, тиск 1 атм однаковий, різниця лише в температурі, тож V-12 не
+-- порушено, а нової розмірності й міграції схеми немає. CONVERT(x,'Nm3','Sm3')
+-- іде через базу; Nm3 і Sm3 без явного CONVERT не змішуються (D-74).
+-- ПРИПУЩЕННЯ — замінити фактом замовника: 1 Nm3 = 293.15 / 273.15 Sm3
+-- = 1.073219842577338459 (ідеальний газ, однаковий тиск, Z не враховано).
+-- Факту (власної таблиці чи ГОСТ 22667-82) у замовника немає. Заміна — правка
+-- ДВОХ літералів: `FactorToBase` Nm3 нижче й дзеркала `UnitTable.Seed`
+-- (Ecr.Calculations); похідні нижче — зі степеня того самого фактора:
+--   Nm3_per_s = F;  Nm3_per_h = F / 3600;  Nm3_per_day = F / 86400;
+--   mg_per_Nm3 = 1e-6 / F  (до kg_per_Sm3, база MassPerStdVolume).
+-- ⚠ Нове число для БАЗ, що вже розгорнуті, потребує рядка UPDATE: MERGE
+-- нижче лише вставляє відсутні одиниці й наявного фактора не змінює.
+MERGE uom.Unit AS t
+USING (VALUES
+  (N'Nm3', 12, 0, 1.073219842577338459, 0.0)
+) AS s (Code, DimensionId, IsBase, Factor, [Offset])
+ON t.Code = s.Code
+WHEN NOT MATCHED THEN INSERT (Code, SymbolL10n, NameL10n, DimensionId, IsBase, FactorToBase, OffsetToBase)
+     VALUES (s.Code, N'{"en":"' + s.Code + N'"}', N'{"en":"' + s.Code + N'"}',
+             s.DimensionId, s.IsBase, s.Factor, s.[Offset]);
+GO
+
+MERGE uom.Unit AS t
+USING (VALUES
+  (N'Nm3_per_s',   13, N'Nm3', N's',   1.073219842577338459),
+  (N'Nm3_per_h',   13, N'Nm3', N'h',   0.000298116622938150),   -- F / 3600
+  (N'Nm3_per_day', 13, N'Nm3', N'day', 0.000012421525955756),   -- F / 86400
+  (N'mg_per_Nm3',  16, N'mg',  N'Nm3', 0.000000931775541532)    -- 1e-6 / F
+) AS s (Code, DimensionId, NumCode, DenCode, Factor)
+ON t.Code = s.Code
+WHEN NOT MATCHED THEN INSERT
+     (Code, SymbolL10n, NameL10n, DimensionId, IsBase, FactorToBase, OffsetToBase,
+      NumeratorUnitId, DenominatorUnitId)
+     VALUES (s.Code, N'{"en":"' + s.Code + N'"}', N'{"en":"' + s.Code + N'"}',
+             s.DimensionId, 0, s.Factor, 0,
+             (SELECT Id FROM uom.Unit WHERE Code = s.NumCode),
+             (SELECT Id FROM uom.Unit WHERE Code = s.DenCode));
+GO
+
+-- ru/kz символи й назви: лише поки в базі стоїть вставлений en-запис
+-- (правку адміністратора з /admin/units не затирає).
+UPDATE u SET SymbolL10n = s.Symbol, NameL10n = s.Name
+FROM uom.Unit u
+JOIN (VALUES
+  (N'Nm3',         N'{"en":"Nm3","ru":"Нм3","kz":"Нм3"}',
+                   N'{"en":"Normal cubic metre (0 °C, 1 atm)","ru":"Нормальный кубометр (0 °C, 1 атм)","kz":"Қалыпты текше метр (0 °C, 1 атм)"}'),
+  (N'Nm3_per_s',   N'{"en":"Nm3/s","ru":"Нм3/с","kz":"Нм3/с"}',
+                   N'{"en":"Normal cubic metre per second","ru":"Нормальный кубометр в секунду","kz":"Секундына қалыпты текше метр"}'),
+  (N'Nm3_per_h',   N'{"en":"Nm3/h","ru":"Нм3/ч","kz":"Нм3/сағ"}',
+                   N'{"en":"Normal cubic metre per hour","ru":"Нормальный кубометр в час","kz":"Сағатына қалыпты текше метр"}'),
+  (N'Nm3_per_day', N'{"en":"Nm3/day","ru":"Нм3/сут","kz":"Нм3/тәулік"}',
+                   N'{"en":"Normal cubic metre per day","ru":"Нормальный кубометр в сутки","kz":"Тәулігіне қалыпты текше метр"}'),
+  (N'mg_per_Nm3',  N'{"en":"mg/Nm3","ru":"мг/Нм3","kz":"мг/Нм3"}',
+                   N'{"en":"Milligram per normal cubic metre","ru":"Миллиграмм на нормальный кубометр","kz":"Қалыпты текше метрге миллиграмм"}')
+) AS s (Code, Symbol, Name) ON s.Code = u.Code
+WHERE u.SymbolL10n = N'{"en":"' + u.Code + N'"}' AND u.NameL10n = N'{"en":"' + u.Code + N'"}';
+GO
+-- HSE301:NM3 ── кінець секції ───────────────────────────────────────────────
 
 -- Політика паролів і вбудовані ролі
 MERGE sec.PasswordPolicy AS t USING (VALUES (N'Default')) AS s (Code) ON t.Code = s.Code
@@ -671,7 +731,128 @@ UPDATE t
     -- ECR-SUB-4221 кидається з трьох причин (осиротілі рядки, застарілі
     -- результати методологій, блокувальні помилки валідації); заголовок
     -- показується завжди, тож мусить бути правдивим для кожної.
-    (N'err.ECR-SUB-4221',                N'en', N'Orphaned rows block submission', N'Submission is blocked')
+    (N'err.ECR-SUB-4221',                N'en', N'Orphaned rows block submission', N'Submission is blocked'),
+    -- COLL:srcfix D5: health рахує унікальні СУТНОСТІ збору, а не «джерела» (з'єднання).
+    (N'health.sources.failedCount',      N'en', N'Sources with a failed last run: {count}.', N'Collection entities with a failed last run: {count}.'),
+    (N'health.sources.failedCount',      N'ru', N'Источники с неудачным последним запуском: {count}.', N'Сущности сбора с неудачным последним запуском: {count}.'),
+    (N'health.sources.failedCount',      N'kz', N'Соңғы іске қосуы сәтсіз деректер көздері: {count}.', N'Соңғы іске қосуы сәтсіз жинау нысандары: {count}.'),
+    (N'health.sources.gapsCount',        N'en', N'Sources with a coverage gap: {count}.', N'Collection entities with a coverage gap: {count}.'),
+    (N'health.sources.gapsCount',        N'ru', N'Источники с пробелом в покрытии: {count}.', N'Сущности сбора с пробелом в покрытии: {count}.'),
+    (N'health.sources.gapsCount',        N'kz', N'Қамтуында олқылығы бар деректер көздері: {count}.', N'Қамтуында олқылығы бар жинау нысандары: {count}.'),
+    -- COLL:srcfix D2: пояснено, що джерело без секрету = Windows (Negotiate); D4: що робити з порожнім allowlist.
+    (N'err.ECR-REQ-0422.dataSourceEndpointHostForbidden', N'en', N'This host is not allowed for a data source: loopback, link-local, metadata, unspecified and (for Windows authentication) private IP addresses are refused.', N'This host is not allowed for a data source: loopback, link-local, metadata and unspecified addresses are always refused. A source without a secret authenticates with Windows (Negotiate), and in that mode private IP-address literals are refused too: use the host name.'),
+    (N'err.ECR-REQ-0422.dataSourceEndpointHostForbidden', N'ru', N'Этот хост не допускается для источника данных: loopback, link-local, metadata, неопределённые и (для Windows-аутентификации) частные IP-адреса отклоняются.', N'Этот хост не допускается для источника данных: loopback, link-local, metadata и неопределённые адреса отклоняются всегда. Источник без секрета подключается по Windows-аутентификации (Negotiate), и в этом режиме литералы частных IP-адресов тоже запрещены: используйте имя хоста.'),
+    (N'err.ECR-REQ-0422.dataSourceEndpointHostForbidden', N'kz', N'Бұл хост деректер көзі үшін рұқсат етілмейді: loopback, link-local, metadata, анықталмаған және (Windows аутентификациясы үшін) жеке IP-мекенжайлар қабылданбайды.', N'Бұл хост деректер көзі үшін рұқсат етілмейді: loopback, link-local, metadata және анықталмаған мекенжайлар әрдайым қабылданбайды. Құпиясы жоқ көз Windows аутентификациясымен (Negotiate) қосылады, және бұл режимде жеке IP-мекенжай литералдары да тыйым салынған: хост атын пайдаланыңыз.'),
+    (N'health.sources.negotiateNoAllowlist', N'en', N'Sources with Windows authentication and no allowed-hosts list (PiWebApi:AllowedHosts): {count}.', N'Sources with Windows authentication and no allowed-hosts list: {count}. Set PiWebApi:AllowedHosts in the EcrApi configuration and restart EcrApi.'),
+    (N'health.sources.negotiateNoAllowlist', N'ru', N'Источники с Windows-аутентификацией без списка разрешённых хостов (PiWebApi:AllowedHosts): {count}.', N'Источники с Windows-аутентификацией без списка разрешённых хостов: {count}. Задайте PiWebApi:AllowedHosts в конфигурации EcrApi и перезапустите EcrApi.'),
+    (N'health.sources.negotiateNoAllowlist', N'kz', N'Windows аутентификациясы бар, рұқсат етілген хосттар тізімі жоқ көздер (PiWebApi:AllowedHosts): {count}.', N'Windows аутентификациясы бар, рұқсат етілген хосттар тізімі жоқ көздер: {count}. EcrApi конфигурациясында PiWebApi:AllowedHosts орнатып, EcrApi қайта іске қосыңыз.'),
+    -- kz-ru-quality 2026-10-01: єдині терміни (docs/i18n/glossary-ru-kz.md):
+    -- ru «столбец» замість «колонка»; kz «нобай» (draft, не «жоба» = проєкт),
+    -- «үлгі» (template) замість «шаблон», «константа» замість «тұрақты мән».
+    (N'methodologies.importHint', N'kz', N'Алдымен пакетті тексеріңіз: тексеру ештеңе жазбайды. Импорт тек жоба нұсқаларын жасайды; жариялау басқа адамның жеке қадамы болып қалады.',
+                                                N'Алдымен пакетті тексеріңіз: тексеру ештеңе жазбайды. Импорт тек нобай нұсқаларын жасайды; жариялау басқа адамның жеке қадамы болып қалады.'),
+    (N'methodologies.importTotals', N'kz', N'Жаңа әдістемелер: {methodologies}; жаңа жоба нұсқалары: {versions}; өзгеріссіз нұсқалар: {unchanged}; формулалар: {formulas}; тұрақты мәндер: {constants}; әдістемелер арасындағы импорттар: {imports}.',
+                                                N'Жаңа әдістемелер: {methodologies}; жаңа нобай нұсқалары: {versions}; өзгеріссіз нұсқалар: {unchanged}; формулалар: {formulas}; константалар: {constants}; әдістемелер арасындағы импорттар: {imports}.'),
+    (N'methodologies.importDone', N'kz', N'Пакет импортталды: жасалған жоба нұсқалары — {versions}.',
+                                                N'Пакет импортталды: жасалған нобай нұсқалары — {versions}.'),
+    (N'conditionalFormat.readOnly', N'kz', N'Ережелерді тек жоба нұсқасында және үлгілерді өңдеу құқығымен ғана өзгертуге болады.',
+                                                N'Ережелерді тек нобай нұсқасында және үлгілерді өңдеу құқығымен ғана өзгертуге болады.'),
+    (N'err.ECR-DOC-0409.migrateProjectArchived', N'kz', N'Жоба мұрағатталған: мұрағаттағы жобаның құжаттары шаблонның басқа нұсқасына көшірілмейді.',
+                                                N'Жоба мұрағатталған: мұрағаттағы жобаның құжаттары үлгінің басқа нұсқасына көшірілмейді.'),
+    (N'err.ECR-DOC-0409.migrateSheetsLocked', N'kz', N'Тапсырылған немесе бекітілген парақтар: {lockedSheets}. Құжаттарды шаблонның басқа нұсқасына көшірмес бұрын оларды жұмысқа қайтарыңыз.',
+                                                N'Тапсырылған немесе бекітілген парақтар: {lockedSheets}. Құжаттарды үлгінің басқа нұсқасына көшірмес бұрын оларды жұмысқа қайтарыңыз.'),
+    (N'err.ECR-TMPL-0422.migrateOtherTemplate', N'kz', N'{versionId} шаблон нұсқасы басқа шаблонға тиесілі: құжат тек өз шаблонының нұсқалары арасында көшіріледі.',
+                                                N'{versionId} үлгі нұсқасы басқа үлгіге тиесілі: құжат тек өз үлгісінің нұсқалары арасында көшіріледі.'),
+    (N'err.ECR-TMPL-0422.migrateSameVersion', N'kz', N'Құжат қазірдің өзінде {versionId} шаблон нұсқасында.',
+                                                N'Құжат қазірдің өзінде {versionId} үлгі нұсқасында.'),
+    (N'err.ECR-TMPL-0422.migrateTargetNotPublished', N'kz', N'Құжаттарды тек жарияланған шаблон нұсқасына көшіруге болады; {version} нұсқасы {status} күйінде.',
+                                                N'Құжаттарды тек жарияланған үлгі нұсқасына көшіруге болады; {version} нұсқасы {status} күйінде.'),
+    (N'documents.migrateVersion', N'kz', N'Шаблонның басқа нұсқасына көшіру',
+                                                N'Үлгінің басқа нұсқасына көшіру'),
+    (N'documents.migrateVersionTitle', N'kz', N'Құжаттарды шаблонның басқа нұсқасына көшіру',
+                                                N'Құжаттарды үлгінің басқа нұсқасына көшіру'),
+    (N'documents.migrateCurrentVersion', N'kz', N'Жобаның ағымдағы шаблон нұсқасы: {version}',
+                                                N'Жобаның ағымдағы үлгі нұсқасы: {version}'),
+    (N'documents.migrateNoTargets', N'kz', N'Бұл шаблонның басқа жарияланған нұсқасы жоқ.',
+                                                N'Бұл үлгінің басқа жарияланған нұсқасы жоқ.'),
+    (N'documents.migrateDone', N'kz', N'{version} шаблон нұсқасына көшірілген құжаттар: {count}.',
+                                                N'{version} үлгі нұсқасына көшірілген құжаттар: {count}.'),
+    (N'documents.migrateDocuments', N'kz', N'Шаблон нұсқасы жобаға тиесілі, сондықтан оның барлық құжаттары бірге көшіріледі. Құжаттар: {count}.',
+                                                N'Үлгі нұсқасы жобаға тиесілі, сондықтан оның барлық құжаттары бірге көшіріледі. Құжаттар: {count}.'),
+    (N'err.ECR-INT-0405.registryEntry', N'ru', N'Записи справочника {registryEntryId} не существует, либо она не принадлежит справочнику колонки «{targetColumn}».',
+                                                N'Записи справочника {registryEntryId} не существует, либо она не принадлежит справочнику столбца «{targetColumn}».'),
+    (N'sourceEvents.fieldAdd', N'ru', N'Сопоставить колонку',
+                                                N'Сопоставить столбец'),
+    (N'sourceEvents.fieldColumn', N'ru', N'Колонка',
+                                                N'Столбец'),
+    (N'sourceEvents.fieldsTitle', N'ru', N'Колонка ↔ атрибут',
+                                                N'Столбец ↔ атрибут'),
+    (N'sourceEvents.keptManualHint', N'ru', N'Эти колонки последним менял человек, поэтому синхронизация их не перезаписала.',
+                                                N'Эти столбцы последним менял человек, поэтому синхронизация их не перезаписала.'),
+    (N'sourceEvents.problem.duplicateColumn', N'ru', N'Одна колонка сопоставлена несколько раз.',
+                                                N'Один столбец сопоставлен несколько раз.'),
+    (N'sourceEvents.problem.fieldIncomplete', N'ru', N'В каждой строке нужны и колонка, и атрибут.',
+                                                N'В каждой строке нужны и столбец, и атрибут.'),
+    (N'sourceEvents.problem.startEndNotDate', N'ru', N'Начало и окончание события записываются только в колонки типа Date.',
+                                                N'Начало и окончание события записываются только в столбцы типа Date.'),
+    (N'sourceEvents.problem.startEndRequired', N'ru', N'Сопоставьте начало ($start) и окончание ($end) события с колонками.',
+                                                N'Сопоставьте начало ($start) и окончание ($end) события со столбцами.'),
+    (N'sourceEvents.targetUnit', N'ru', N'Единица колонки',
+                                                N'Единица столбца'),
+    (N'err.ECR-CFG-0422.condFormatOperator', N'ru', N'Правило условного форматирования {index} (колонка {columnCode}): неизвестный оператор {operator}.',
+                                                N'Правило условного форматирования {index} (столбец {columnCode}): неизвестный оператор {operator}.'),
+    (N'err.ECR-CFG-0422.condFormatOperand', N'ru', N'Правило условного форматирования {index} (колонка {columnCode}): оператору {operator} нужны числовые значения до 64 символов.',
+                                                N'Правило условного форматирования {index} (столбец {columnCode}): оператору {operator} нужны числовые значения до 64 символов.'),
+    (N'err.ECR-CFG-0422.condFormatColor', N'ru', N'Правило условного форматирования {index} (колонка {columnCode}): цвет должен быть #rrggbb.',
+                                                N'Правило условного форматирования {index} (столбец {columnCode}): цвет должен быть #rrggbb.'),
+    (N'err.ECR-CFG-0422.condFormatColumn', N'ru', N'Правило условного форматирования {index}: колонки {columnCode} нет в этой версии шаблона.',
+                                                N'Правило условного форматирования {index}: столбца {columnCode} нет в этой версии шаблона.'),
+    (N'import.roundedTitle', N'ru', N'Числа округлены до знаков после запятой колонки',
+                                                N'Числа округлены до знаков после запятой столбца'),
+    (N'import.roundedHint', N'ru', N'В этих числах из файла больше знаков после запятой, чем допускает колонка. Они округлены (половина — от нуля), и сохранено будет именно округлённое значение. Сверьте их с файлом перед применением.',
+                                                N'В этих числах из файла больше знаков после запятой, чем допускает столбец. Они округлены (половина — от нуля), и сохранено будет именно округлённое значение. Сверьте их с файлом перед применением.'),
+    (N'err.ECR-CELL-0422.importPrecision', N'ru', N'В числе больше цифр, чем допускает колонка, даже после округления до её знаков после запятой.',
+                                                N'В числе больше цифр, чем допускает столбец, даже после округления до его знаков после запятой.'),
+    (N'registries.entryUsage.columnsTitle', N'ru', N'Колонки шаблонов, берущие значения из этого справочника',
+                                                N'Столбцы шаблонов, берущие значения из этого справочника'),
+    (N'registries.entryUsage.columnsHint', N'ru', N'Эти колонки могут содержать эту запись; какие документы её действительно содержат, для отдельной записи не перечисляется.',
+                                                N'Эти столбцы могут содержать эту запись; какие документы её действительно содержат, для отдельной записи не перечисляется.'),
+    (N'conditionalFormat.column', N'ru', N'Колонка',
+                                                N'Столбец'),
+    (N'err.ECR-TMPL-4226.calculatedWithoutSource', N'ru', N'Колонка {tableCode}.{columnCode} имеет тип {dataType}, то есть должна считаться формулой шаблона, но в этой версии формулы нет. В опубликованной форме это пустая ячейка, которую оператор не вправе заполнить.',
+                                                N'Столбец {tableCode}.{columnCode} имеет тип {dataType}, то есть должен считаться формулой шаблона, но в этой версии формулы нет. В опубликованной форме это пустая ячейка, которую оператор не вправе заполнить.'),
+    (N'tablePreview.sampleHint', N'ru', N'Каждая ячейка показывает это значение и оформляется первым сработавшим правилом своей колонки.',
+                                                N'Каждая ячейка показывает это значение и оформляется первым сработавшим правилом своего столбца.'),
+    (N'tablePreview.hiddenColumns', N'ru', N'Скрытые колонки не показаны: {count}',
+                                                N'Скрытые столбцы не показаны: {count}'),
+    (N'tablePreview.ignoredRules', N'ru', N'Правила этой таблицы, которые не показаны (скрытая колонка, неизвестный оператор или неполное правило): {count}',
+                                                N'Правила этой таблицы, которые не показаны (скрытый столбец, неизвестный оператор или неполное правило): {count}'),
+    (N'tablePreview.monthsInColumns', N'ru', N'В документе эти колонки повторяются для каждого месяца периода.',
+                                                N'В документе эти столбцы повторяются для каждого месяца периода.'),
+    (N'err.ECR-AUTH-0403.columnUsedInHiddenProjects', N'ru', N'Колонку используют проекты, к которым у вас нет доступа уровня Manage.',
+                                                N'Столбец используют проекты, к которым у вас нет доступа уровня Manage.'),
+    (N'reportDefs.addBlocked', N'ru', N'Сначала заполните код, название, версию и код каждой колонки.',
+                                                N'Сначала заполните код, название, версию и код каждого столбца.'),
+    (N'reportDefs.removeColumnBlocked', N'ru', N'В отчёте должна быть хотя бы одна колонка.',
+                                                N'В отчёте должен остаться хотя бы один столбец.'),
+    -- COLL:ru-fix — ланцюг A → B → C: B уже могло дійти до баз попереднім рядком.
+    (N'reportDefs.removeColumnBlocked', N'ru', N'В отчёте должна быть хотя бы один столбец.',
+                                                N'В отчёте должен остаться хотя бы один столбец.'),
+    -- I18N:keys-audit 2026-10-01: узгодження роду після «колонка» → «столбец»
+    -- (removeColumnBlocked уже оновлено вище в COLL:ru-fix) і єдині терміни
+    -- глосарію (ru «методика», «столбец»; kz «константа») — docs/i18n/glossary-ru-kz.md.
+    (N'err.ECR-CELL-0422.importPrecision', N'ru', N'В числе больше цифр, чем допускает столбец, даже после округления до её знаков после запятой.',
+                                                N'В числе больше цифр, чем допускает столбец, даже после округления до его знаков после запятой.'),
+    (N'integrationAudit.rowWindowCreated', N'ru', N'Привязка окна строки к колонке «{column}» создана.',
+                                                N'Привязка окна строки к столбцу «{column}» создана.'),
+    (N'registries.entryUsage.substancesTitle', N'ru', N'Методологии, объявившие её веществом',
+                                                N'Методики, объявившие её веществом'),
+    (N'registries.entryUsage.substanceLink', N'ru', N'Версии методологии',
+                                                N'Версии методики'),
+    (N'registries.entryUsage.notListed', N'ru', N'Здесь для отдельной записи не перечисляются: ячейки и шапки документов, константы методологий и связи каскада. Удаление записи сообщает, сколько их, по видам.',
+                                                N'Здесь для отдельной записи не перечисляются: ячейки и шапки документов, константы методик и связи каскада. Удаление записи сообщает, сколько их, по видам.'),
+    (N'registries.entryUsage.notListed', N'kz', N'Мұнда жеке жазба үшін тізілмейді: құжат ұяшықтары мен тақырыптары, әдістеме тұрақтылары және каскад байланыстары. Жазбаны жою олардың қанша екенін түрлері бойынша хабарлайды.',
+                                                N'Мұнда жеке жазба үшін тізілмейді: құжат ұяшықтары мен тақырыптары, әдістеме константалары және каскад байланыстары. Жазбаны жою олардың қанша екенін түрлері бойынша хабарлайды.')
   ) AS s ([Key], Lang, OldVal, NewVal)
     ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
  WHERE t.Value = s.OldVal COLLATE Latin1_General_BIN2;
@@ -2639,6 +2820,12 @@ USING (VALUES
     -- тест «технічні ключі на екрані» в `npm run test:a11y`.
     (N'sources.testEntities.one',        N'en', N'The source catalog lists {count} entity.', 1),
     (N'sources.testEntities.other',      N'en', N'The source catalog lists {count} entities.', 1),
+    -- ⛔ `few`/`many` англійська не вибирає ніколи, але російська — на 0, 2–4, 5–20,
+    -- 22… (`plural.ts`): без цих рядків російський інтерфейс показував позначку
+    -- `⟦sources.testEntities.few⟧`. Рядок en — лише носій ключа й області для
+    -- перекладів (порції перекладів беруть `Scope` з en); текст = `other`.
+    (N'sources.testEntities.few',        N'en', N'The source catalog lists {count} entities.', 1),
+    (N'sources.testEntities.many',       N'en', N'The source catalog lists {count} entities.', 1),
     -- Створення, правка й видалення з'єднань (UI-09 крок 2). ⚠ `created` і
     -- `saved` ідуть через `t(умова ? … : …)` — сторож `EndpointCoverageTests`
     -- їх не бачить, тож єдина гарантія — цей рядок.
@@ -4704,19 +4891,19 @@ USING (VALUES
     -- COLL:rowwindow-crud ── кінець секції ──
     -- COLL:ssrf ── Політика адреси джерела PI Web API: схема, заборонений хост, allowlist (`DataSourceEndpointPolicy`) ──
     (N'err.ECR-REQ-0422.dataSourceEndpointScheme',       N'en', N'The data source address must use http or https.', 1),
-    (N'err.ECR-REQ-0422.dataSourceEndpointHostForbidden', N'en', N'This host is not allowed for a data source: loopback, link-local, metadata, unspecified and (for Windows authentication) private IP addresses are refused.', 1),
+    (N'err.ECR-REQ-0422.dataSourceEndpointHostForbidden', N'en', N'This host is not allowed for a data source: loopback, link-local, metadata and unspecified addresses are always refused. A source without a secret authenticates with Windows (Negotiate), and in that mode private IP-address literals are refused too: use the host name.', 1),
     (N'err.ECR-REQ-0422.dataSourceEndpointHostNotAllowed', N'en', N'This host is not in the list of allowed data source hosts (PiWebApi:AllowedHosts).', 1),
     (N'err.ECR-REQ-0422.dataSourceEndpointMalformed',    N'en', N'The data source address is empty or malformed: use a full http(s) address without a user name.', 1),
     (N'err.ECR-INT-0503.piWebApiResponseTooLarge',       N'en', N'PI Web API returned a response for {path} larger than {limitBytes} bytes: collection rejected.', 1),
-    (N'health.sources.negotiateNoAllowlist',             N'en', N'Sources with Windows authentication and no allowed-hosts list (PiWebApi:AllowedHosts): {count}.', 1),
+    (N'health.sources.negotiateNoAllowlist',             N'en', N'Sources with Windows authentication and no allowed-hosts list: {count}. Set PiWebApi:AllowedHosts in the EcrApi configuration and restart EcrApi.', 1),
     (N'err.ECR-REQ-0422.dataSourceEndpointChangeUnconfirmed', N'en', N'The address of data source "{code}" uses Windows authentication (the service account): confirm the address change explicitly.', 1),
     (N'sources.confirmEndpointChange',                   N'en', N'I confirm that the service account may connect to the new address', 1),
     -- ru/kz — окремою порцією `COLL:ssrf` у блоці I18N нижче.
     -- COLL:ssrf ── кінець секції ──
     (N'health.sources.notRegistered',         N'en', N'The collection store is not registered in the container.', 1),
     (N'health.sources.noneActive',              N'en', N'No active collection sources.', 1),
-    (N'health.sources.failedCount',             N'en', N'Sources with a failed last run: {count}.', 1),
-    (N'health.sources.gapsCount',                N'en', N'Sources with a coverage gap: {count}.', 1),
+    (N'health.sources.failedCount',             N'en', N'Collection entities with a failed last run: {count}.', 1),
+    (N'health.sources.gapsCount',                N'en', N'Collection entities with a coverage gap: {count}.', 1),
     (N'health.sources.allCollectedNoGaps',      N'en', N'All active sources are collected with no gaps.', 1),
 
     -- /admin/jobs (lane6 медіум-аудиту, `Q-325` → `Q-326`): жоден тип фонової
@@ -5726,11 +5913,63 @@ USING (VALUES
     (N'coverageEvents.eventRowNotCreated',      N'en', N'Event {eventId} was not written: row {rowKey} was not created, the value was rejected.', 1),
     -- ru/kz — окремою порцією `COLL:covenv` у блоці I18N нижче.
     -- COLL:covenv ── кінець секції ──
+    -- COLL:auditreason ── Причина зміни налаштувань збору конвертом (`IntegrationConfigAudit.Reason`, `structureChangeReason.ts`) ──
+    (N'integrationAudit.scheduleCreated', N'en', N'Collection schedule {id} created for entity "{entity}".', 1),
+    (N'integrationAudit.scheduleChanged', N'en', N'Collection schedule {id} of entity "{entity}" changed.', 1),
+    (N'integrationAudit.scheduleDeleted', N'en', N'Collection schedule {id} of entity "{entity}" deleted.', 1),
+    (N'integrationAudit.fieldMapCreated', N'en', N'Field mapping "{field}" of entity {entity} created.', 1),
+    (N'integrationAudit.fieldMapPaused', N'en', N'Field mapping "{field}" paused.', 1),
+    (N'integrationAudit.fieldMapResumed', N'en', N'Field mapping "{field}" returned to collection.', 1),
+    (N'integrationAudit.fieldMapUnitAccepted', N'en', N'Field mapping "{field}": the new source unit was accepted.', 1),
+    (N'integrationAudit.fieldMapDeleted', N'en', N'Field mapping "{field}" of entity {entity} deleted.', 1),
+    (N'integrationAudit.rowWindowCreated', N'en', N'Row window binding to column "{column}" created.', 1),
+    (N'integrationAudit.rowWindowChanged', N'en', N'Row window binding {id} changed.', 1),
+    (N'integrationAudit.rowWindowDeleted', N'en', N'Row window binding {id} deleted.', 1),
+    (N'integrationAudit.sourceEntityCreated', N'en', N'Collection entity "{entity}" added to connection "{connection}".', 1),
+    (N'integrationAudit.sourceEntityBound', N'en', N'Collection entity "{entity}" bound to registry {registry}.', 1),
+    (N'integrationAudit.sourceEntityUnbound', N'en', N'Collection entity "{entity}" unbound from the registry.', 1),
+    (N'integrationAudit.eventMapCreated', N'en', N'Event mapping of entity {entity} to document {document} created.', 1),
+    (N'integrationAudit.eventMapChanged', N'en', N'Event mapping {id} of entity {entity} changed.', 1),
+    (N'integrationAudit.eventMapDeleted', N'en', N'Event mapping {id} of entity {entity} deleted.', 1),
+    (N'integrationAudit.registryPolicyChanged', N'en', N'Sync policy of registry {registry} from entity "{entity}" changed.', 1),
+    -- ru/kz — окремою порцією `COLL:auditreason` у блоці I18N нижче.
+    -- COLL:auditreason ── кінець секції ──
+    -- COLL:ent4 ── Причини змін з'єднання з джерелом (D8) конвертом, а не українською фразою (`SaveDataSourceHandler`, `structureChangeReason.ts`) ──
+    (N'integrationAudit.dataSourceCreated', N'en', N'Connection "{connection}" created.', 1),
+    (N'integrationAudit.dataSourceChanged', N'en', N'Connection "{connection}" changed.', 1),
+    -- ru/kz — окремою порцією `COLL:ent4` у блоці I18N нижче.
+    -- COLL:ent4 ── кінець секції ──
     -- COLL:sqlpolicy ── Політика адреси джерела PiSqlClient: ім'я сервера, а не URL; link-local заборонено ──
     (N'err.ECR-REQ-0422.dataSourceEndpointSqlScheme',    N'en', N'A PiSqlClient source address must be a server name (server, server\instance, server,port or host:port), not a URL with a scheme.', 1),
     (N'err.ECR-REQ-0422.dataSourceEndpointSqlLinkLocal', N'en', N'This server address is not allowed: link-local and cloud metadata addresses (169.254.0.0/16, fe80::/10) are refused.', 1),
     -- ru/kz — окремою порцією `COLL:sqlpolicy` у блоці I18N нижче.
     -- COLL:sqlpolicy ── кінець секції ──
+    -- COLL:reqclose3-mtest ── див. ключі нижче ──
+    (N'err.ECR-CALC-0422.testCaseJsonInvalid', N'en', N'Test "{testCode}": field {field} is not valid JSON of the expected shape ({reason}).', 1),
+    -- ru/kz — окремою порцією $Section у блоці I18N нижче.
+    -- COLL:reqclose3-mtest ── кінець секції ──
+    -- COLL:reqclose3-tmplkeys ── див. ключі нижче ──
+    (N'err.ECR-TMPL-4228.fixedTableWithoutRows', N'en', N'Table {tableCode} is fixed (its rows are defined in the template) but has no rows. In the published form it would be an empty table the operator cannot enter anything into.', 1),
+    (N'err.ECR-TMPL-4226.calculatedWithoutSource', N'en', N'Column {tableCode}.{columnCode} has type {dataType}, so it must be computed by a template formula, but this version has none. In the published form it would be an empty cell the operator may not fill in.', 1),
+    -- ru/kz — окремою порцією $Section у блоці I18N нижче.
+    -- COLL:reqclose3-tmplkeys ── кінець секції ──
+    -- COLL:rawhealth ── Розмір ext.RawDataPoint у картці `db` (R2-rescope, `RawDataPointHealth`, поріг Health:RawDataPointWarnRows) ──
+    (N'health.collection.rawPointsApproaching', N'en', N'ext.RawDataPoint holds about {rows} rows and is approaching the R2 review threshold of {threshold}.', 1),
+    (N'health.collection.rawPointsOverThreshold', N'en', N'ext.RawDataPoint holds about {rows} rows: the R2 review threshold of {threshold} is exceeded. See docs/build/perf/R2-rawdatapoint-plan.md.', 1),
+    -- ru/kz — окремою порцією COLL:rawhealth у блоці I18N нижче.
+    -- COLL:rawhealth ── кінець секції ──
+    -- COLL:d230 ── Види зв'язків таблиць Rollup/Check (D-230, ФВ-2.12): відмова PUT …/relations/{code} за схемою MatchJson/MapJson (ПРИПУЩЕННЯ, `RelationSpecParser`) ──
+    (N'err.ECR-TMPL-0422.relationSpecInvalid', N'en', N'Relation "{relationCode}": {detail}', 1),
+    -- ru/kz — окремою порцією $Section у блоці I18N нижче.
+    -- COLL:d230 ── кінець секції ──
+    -- COLL:d234 ── Ширина колонки (D-234): відмова 422 і підписи форми колонки / скидання ширин у сітці ──
+    (N'err.ECR-TMPL-0422.widthOutOfRange', N'en', N'Column width must be a whole number from 40 to 800 px, got "{widthPx}".', 1),
+    (N'columns.width',                     N'en', N'Default width, px', 1),
+    (N'columns.widthHint',                 N'en', N'From 40 to 800; empty means the default for the data type. A width a user sets in the grid overrides it.', 1),
+    (N'columns.errWidth',                  N'en', N'Width must be a whole number from 40 to 800.', 1),
+    (N'grid.columnWidths.reset',           N'en', N'Reset column widths', 1),
+    -- ru/kz — окремою порцією `COLL:d234` у блоці I18N нижче.
+    -- COLL:d234 ── кінець секції ──
     -- JOBL ── людські назви видів фонових задач, яких бракувало в jobLabel.ts (KindKeys) ──
     (N'jobs.kind.sourceEventSync',  N'en', N'Source event sync', 1),
     (N'jobs.kind.consistencyCheck', N'en', N'Consistency check', 1),
@@ -5872,9 +6111,26 @@ USING (VALUES
     (N'reportDefs.removeColumnBlocked', N'en', N'A report needs at least one column.', 1),
     (N'registries.rc816.selectionLocked', N'en', N'Save or discard the changes in the levels below first.', 1),
     (N'methodologies.importApplyBlocked', N'en', N'Check the package first: importing becomes available after a check that would create the methodology.', 1),
-    (N'registries.noFields', N'en', N'This registry has no fields yet', 1)
+    (N'registries.noFields', N'en', N'This registry has no fields yet', 1),
+    (N'reportDefs.newVersionBlocked', N'en', N'Enter the number of the new version first.', 1),
     -- ru/kz — окремою порцією `UI:dead-buttons` у блоці I18N нижче.
     -- UI:dead-buttons ── кінець секції ──
+    -- IMPORT:hints ── підказки імпорту Excel (P3): застаріла книга, адреса комірки, перерахунок ──
+    (N'err.ECR-CELL-4221.importCalculatedStale', N'en', N'The system recalculated this cell after the workbook was exported, so the workbook is out of date. Export the document again and repeat your changes in the new workbook.', 1),
+    (N'import.excelCell', N'en', N'Cell in file', 1),
+    (N'import.recalculateTitle', N'en', N'Calculation results are out of date', 1),
+    (N'import.recalculateHint', N'en', N'The import changed inputs of a methodology. Press «{action}» to update the calculation results.', 1),
+    -- ru/kz — окремою порцією `IMPORT:hints` у блоці I18N нижче.
+    -- IMPORT:hints ── кінець секції ──
+    -- API:negative-path ── відмови замість 500 на некоректних полях запиту (прохід по відмовах API) ──
+    (N'err.ECR-CALC-0422.versionNumber', N'en', N'The methodology version number must be from 1 to {maxLength} characters.', 1),
+    (N'err.ECR-CALC-0422.formulaTooLong', N'en', N'The expression of formula "{code}" is longer than {maxLength} characters.', 1),
+    (N'err.ECR-CALC-0422.testToleranceNegative', N'en', N'The tolerance of test "{code}" cannot be negative: such a test would never pass.', 1),
+    (N'err.ECR-PRD-4225.offsetOutOfRange', N'en', N'Offset {field} ({value} days) must be between -{max} and {max} days.', 1),
+    (N'err.ECR-PRD-0422.pinReasonTooLong', N'en', N'The reason for pinning the current period is longer than {max} characters.', 1),
+    (N'err.ECR-PWD-0422.tooLong', N'en', N'The password is longer than {maxLength} characters.', 1)
+    -- ru/kz — окремою порцією `API:negative-path` у блоці I18N нижче.
+    -- API:negative-path ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -8534,8 +8790,8 @@ SELECT v.[Key], v.Lang, v.Val
     (N'jobs.collectionAbandoned', N'ru', N'Запуск не закрыт: задача была отменена или процесс остановился до того, как запуск записал результат.'),
     (N'health.sources.notRegistered', N'ru', N'Хранилище сбора не зарегистрировано в контейнере.'),
     (N'health.sources.noneActive', N'ru', N'Нет активных источников сбора.'),
-    (N'health.sources.failedCount', N'ru', N'Источники с неудачным последним запуском: {count}.'),
-    (N'health.sources.gapsCount', N'ru', N'Источники с пробелом в покрытии: {count}.'),
+    (N'health.sources.failedCount', N'ru', N'Сущности сбора с неудачным последним запуском: {count}.'),
+    (N'health.sources.gapsCount', N'ru', N'Сущности сбора с пробелом в покрытии: {count}.'),
     (N'health.sources.allCollectedNoGaps', N'ru', N'Все активные источники собраны без пробелов.'),
     (N'jobs.recalcFormulas', N'ru', N'Пересчёт формул шаблона.'),
     (N'jobs.recalcFormulasDone', N'ru', N'Формулы шаблона: пересчитано ячеек — {cells}.'),
@@ -11562,8 +11818,8 @@ SELECT v.[Key], v.Lang, v.Val
     (N'jobs.collectionAbandoned', N'kz', N'Іске қосу жабылмады: тапсырмадан бас тартылды немесе процесс іске қосу нәтижесін жазғанға дейін тоқтады.'),
     (N'health.sources.notRegistered', N'kz', N'Жинау қоймасы контейнерде тіркелмеген.'),
     (N'health.sources.noneActive', N'kz', N'Белсенді жинау көздері жоқ.'),
-    (N'health.sources.failedCount', N'kz', N'Соңғы іске қосуы сәтсіз деректер көздері: {count}.'),
-    (N'health.sources.gapsCount', N'kz', N'Қамтуында олқылығы бар деректер көздері: {count}.'),
+    (N'health.sources.failedCount', N'kz', N'Соңғы іске қосуы сәтсіз жинау нысандары: {count}.'),
+    (N'health.sources.gapsCount', N'kz', N'Қамтуында олқылығы бар жинау нысандары: {count}.'),
     (N'health.sources.allCollectedNoGaps', N'kz', N'Барлық белсенді деректер көздері олқылықсыз жиналды.'),
     (N'jobs.recalcFormulas', N'kz', N'Үлгі формулаларын қайта есептеу.'),
     (N'jobs.recalcFormulasDone', N'kz', N'Үлгі формулалары: қайта есептелген ұяшықтар — {cells}.'),
@@ -12020,7 +12276,7 @@ INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
   FROM (VALUES
     (N'err.ECR-INT-0404.eventMap', N'ru', N'Сопоставление событий {eventMapId} не существует.'),
-    (N'err.ECR-INT-0405.registryEntry', N'ru', N'Записи справочника {registryEntryId} не существует, либо она не принадлежит справочнику колонки «{targetColumn}».'),
+    (N'err.ECR-INT-0405.registryEntry', N'ru', N'Записи справочника {registryEntryId} не существует, либо она не принадлежит справочнику столбца «{targetColumn}».'),
     (N'err.ECR-INT-0409.eventMapExists', N'ru', N'Сопоставление событий для этой сущности источника, документа и таблицы уже есть: измените его, а не создавайте второе.'),
     (N'err.ECR-INT-0409.eventMapHasLinks', N'ru', N'Через это сопоставление уже синхронизировано событий: {links}. Удаление оставило бы их строки без объяснения. Приостановите сопоставление.'),
     (N'err.ECR-INT-0422.eventMapTableNotInDocument', N'ru', N'Таблица {tableDefId} не принадлежит версии шаблона проекта документа {documentId}, поэтому события в неё записать нельзя.'),
@@ -12060,14 +12316,14 @@ SELECT v.[Key], v.Lang, v.Val
     (N'sourceEvents.emptyValue', N'ru', N'(пусто)'),
     (N'sourceEvents.entity', N'ru', N'Шаблон событий'),
     (N'sourceEvents.entityHint', N'ru', N'Сущность источника этого соединения; её код — имя шаблона событий PI.'),
-    (N'sourceEvents.fieldAdd', N'ru', N'Сопоставить колонку'),
+    (N'sourceEvents.fieldAdd', N'ru', N'Сопоставить столбец'),
     (N'sourceEvents.fieldAttribute', N'ru', N'Атрибут PI'),
-    (N'sourceEvents.fieldColumn', N'ru', N'Колонка'),
+    (N'sourceEvents.fieldColumn', N'ru', N'Столбец'),
     (N'sourceEvents.fieldCount', N'ru', N'Поля'),
     (N'sourceEvents.fieldHow', N'ru', N'Как'),
     (N'sourceEvents.fieldScope', N'ru', N'Где'),
     (N'sourceEvents.fieldUnits', N'ru', N'Единицы'),
-    (N'sourceEvents.fieldsTitle', N'ru', N'Колонка ↔ атрибут'),
+    (N'sourceEvents.fieldsTitle', N'ru', N'Столбец ↔ атрибут'),
     (N'sourceEvents.filterAll', N'ru', N'Все'),
     (N'sourceEvents.filterAttribute', N'ru', N'Только события, где'),
     (N'sourceEvents.filterAttributeHint', N'ru', N'Сужение: атрибут и значение вместе либо ни одного.'),
@@ -12078,7 +12334,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'sourceEvents.filterToUtc', N'ru', N'По (UTC)'),
     (N'sourceEvents.filterValue', N'ru', N'равно'),
     (N'sourceEvents.keptManual', N'ru', N'Оставлено за человеком:'),
-    (N'sourceEvents.keptManualHint', N'ru', N'Эти колонки последним менял человек, поэтому синхронизация их не перезаписала.'),
+    (N'sourceEvents.keptManualHint', N'ru', N'Эти столбцы последним менял человек, поэтому синхронизация их не перезаписала.'),
     (N'sourceEvents.mapActive', N'ru', N'Активно'),
     (N'sourceEvents.mapActiveSwitch', N'ru', N'Синхронизировать через это сопоставление'),
     (N'sourceEvents.mapCreate', N'ru', N'Создать сопоставление'),
@@ -12116,11 +12372,11 @@ SELECT v.[Key], v.Lang, v.Val
     (N'sourceEvents.probeUnmatched', N'ru', N'Значения {attribute} без пары:'),
     (N'sourceEvents.probeWindow', N'ru', N'Окно {from} – {to} UTC: событий {count}.'),
     (N'sourceEvents.problem.documentRequired', N'ru', N'Выберите документ.'),
-    (N'sourceEvents.problem.duplicateColumn', N'ru', N'Одна колонка сопоставлена несколько раз.'),
-    (N'sourceEvents.problem.fieldIncomplete', N'ru', N'В каждой строке нужны и колонка, и атрибут.'),
+    (N'sourceEvents.problem.duplicateColumn', N'ru', N'Один столбец сопоставлен несколько раз.'),
+    (N'sourceEvents.problem.fieldIncomplete', N'ru', N'В каждой строке нужны и столбец, и атрибут.'),
     (N'sourceEvents.problem.filterIncomplete', N'ru', N'Для сужения нужны и атрибут, и значение.'),
-    (N'sourceEvents.problem.startEndNotDate', N'ru', N'Начало и окончание события записываются только в колонки типа Date.'),
-    (N'sourceEvents.problem.startEndRequired', N'ru', N'Сопоставьте начало ($start) и окончание ($end) события с колонками.'),
+    (N'sourceEvents.problem.startEndNotDate', N'ru', N'Начало и окончание события записываются только в столбцы типа Date.'),
+    (N'sourceEvents.problem.startEndRequired', N'ru', N'Сопоставьте начало ($start) и окончание ($end) события со столбцами.'),
     (N'sourceEvents.problem.tableRequired', N'ru', N'Выберите динамическую таблицу.'),
     (N'sourceEvents.problem.valueKindMismatch', N'ru', N'Поиск по коду, по названию и таблица соответствий — только для колонок Lookup.'),
     (N'sourceEvents.problem.valueMapIncomplete', N'ru', N'Таблице соответствий нужна хотя бы одна пара, и в каждой — значение PI и запись справочника.'),
@@ -12152,7 +12408,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'sourceEvents.tab', N'ru', N'События из PI'),
     (N'sourceEvents.table', N'ru', N'Динамическая таблица'),
     (N'sourceEvents.tableHint', N'ru', N'Каждое событие становится строкой этой таблицы.'),
-    (N'sourceEvents.targetUnit', N'ru', N'Единица колонки'),
+    (N'sourceEvents.targetUnit', N'ru', N'Единица столбца'),
     (N'sourceEvents.templateMissing', N'ru', N'Шаблона «{template}» нет в каталоге источника: атрибуты нельзя выбрать, пока он там не появится.'),
     (N'sourceEvents.title', N'ru', N'События из PI'),
     (N'sourceEvents.total', N'ru', N'Событий: {count}'),
@@ -12483,20 +12739,20 @@ SELECT v.[Key], v.Lang, v.Val
   FROM (VALUES
     (N'err.ECR-REQ-0422.dataSourceEndpointScheme', N'ru', N'Адрес источника данных должен использовать http или https.'),
     (N'err.ECR-REQ-0422.dataSourceEndpointScheme', N'kz', N'Деректер көзінің мекенжайы http немесе https пайдалануы тиіс.'),
-    (N'err.ECR-REQ-0422.dataSourceEndpointHostForbidden', N'ru', N'Этот хост не допускается для источника данных: loopback, link-local, metadata, неопределённые и (для Windows-аутентификации) частные IP-адреса отклоняются.'),
-    (N'err.ECR-REQ-0422.dataSourceEndpointHostForbidden', N'kz', N'Бұл хост деректер көзі үшін рұқсат етілмейді: loopback, link-local, metadata, анықталмаған және (Windows аутентификациясы үшін) жеке IP-мекенжайлар қабылданбайды.'),
+    (N'err.ECR-REQ-0422.dataSourceEndpointHostForbidden', N'ru', N'Этот хост не допускается для источника данных: loopback, link-local, metadata и неопределённые адреса отклоняются всегда. Источник без секрета подключается по Windows-аутентификации (Negotiate), и в этом режиме литералы частных IP-адресов тоже запрещены: используйте имя хоста.'),
+    (N'err.ECR-REQ-0422.dataSourceEndpointHostForbidden', N'kz', N'Бұл хост деректер көзі үшін рұқсат етілмейді: loopback, link-local, metadata және анықталмаған мекенжайлар әрдайым қабылданбайды. Құпиясы жоқ көз Windows аутентификациясымен (Negotiate) қосылады, және бұл режимде жеке IP-мекенжай литералдары да тыйым салынған: хост атын пайдаланыңыз.'),
     (N'err.ECR-REQ-0422.dataSourceEndpointHostNotAllowed', N'ru', N'Этого хоста нет в списке разрешённых хостов источников данных (PiWebApi:AllowedHosts).'),
     (N'err.ECR-REQ-0422.dataSourceEndpointHostNotAllowed', N'kz', N'Бұл хост деректер көздерінің рұқсат етілген хосттар тізімінде жоқ (PiWebApi:AllowedHosts).'),
     (N'err.ECR-REQ-0422.dataSourceEndpointMalformed', N'ru', N'Адрес источника данных пуст или некорректен: укажите полный адрес http(s) без имени пользователя.'),
     (N'err.ECR-REQ-0422.dataSourceEndpointMalformed', N'kz', N'Деректер көзінің мекенжайы бос немесе қате: пайдаланушы атынсыз толық http(s) мекенжайын көрсетіңіз.'),
     (N'err.ECR-INT-0503.piWebApiResponseTooLarge', N'ru', N'PI Web API вернул ответ на {path} размером больше {limitBytes} байт: сбор отклонён.'),
     (N'err.ECR-INT-0503.piWebApiResponseTooLarge', N'kz', N'PI Web API {path} үшін {limitBytes} байттан асатын жауап қайтарды: жинау қабылданбады.'),
-    (N'health.sources.negotiateNoAllowlist', N'ru', N'Источники с Windows-аутентификацией без списка разрешённых хостов (PiWebApi:AllowedHosts): {count}.'),
+    (N'health.sources.negotiateNoAllowlist', N'ru', N'Источники с Windows-аутентификацией без списка разрешённых хостов: {count}. Задайте PiWebApi:AllowedHosts в конфигурации EcrApi и перезапустите EcrApi.'),
     (N'err.ECR-REQ-0422.dataSourceEndpointChangeUnconfirmed', N'ru', N'Источник данных «{code}» использует Windows-аутентификацию (служебную учётную запись): подтвердите смену адреса явно.'),
     (N'err.ECR-REQ-0422.dataSourceEndpointChangeUnconfirmed', N'kz', N'«{code}» деректер көзі Windows аутентификациясын (қызметтік тіркелгіні) пайдаланады: мекенжай ауысуын анық растаңыз.'),
     (N'sources.confirmEndpointChange', N'ru', N'Подтверждаю: служебная учётная запись может подключаться к новому адресу'),
     (N'sources.confirmEndpointChange', N'kz', N'Растаймын: қызметтік тіркелгі жаңа мекенжайға қосыла алады'),
-    (N'health.sources.negotiateNoAllowlist', N'kz',N'Windows аутентификациясы бар, рұқсат етілген хосттар тізімі жоқ көздер (PiWebApi:AllowedHosts): {count}.')
+    (N'health.sources.negotiateNoAllowlist', N'kz',N'Windows аутентификациясы бар, рұқсат етілген хосттар тізімі жоқ көздер: {count}. EcrApi конфигурациясында PiWebApi:AllowedHosts орнатып, EcrApi қайта іске қосыңыз.')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
@@ -12701,13 +12957,13 @@ GO
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
   FROM (VALUES
-    (N'err.ECR-CFG-0422.condFormatOperator', N'ru', N'Правило условного форматирования {index} (колонка {columnCode}): неизвестный оператор {operator}.'),
+    (N'err.ECR-CFG-0422.condFormatOperator', N'ru', N'Правило условного форматирования {index} (столбец {columnCode}): неизвестный оператор {operator}.'),
     (N'err.ECR-CFG-0422.condFormatOperator', N'kz', N'Шартты пішімдеу ережесі {index} ({columnCode} бағаны): {operator} операторы белгісіз.'),
-    (N'err.ECR-CFG-0422.condFormatOperand', N'ru', N'Правило условного форматирования {index} (колонка {columnCode}): оператору {operator} нужны числовые значения до 64 символов.'),
+    (N'err.ECR-CFG-0422.condFormatOperand', N'ru', N'Правило условного форматирования {index} (столбец {columnCode}): оператору {operator} нужны числовые значения до 64 символов.'),
     (N'err.ECR-CFG-0422.condFormatOperand', N'kz', N'Шартты пішімдеу ережесі {index} ({columnCode} бағаны): {operator} операторына 64 таңбаға дейінгі сандық мәндер қажет.'),
-    (N'err.ECR-CFG-0422.condFormatColor', N'ru', N'Правило условного форматирования {index} (колонка {columnCode}): цвет должен быть #rrggbb.'),
+    (N'err.ECR-CFG-0422.condFormatColor', N'ru', N'Правило условного форматирования {index} (столбец {columnCode}): цвет должен быть #rrggbb.'),
     (N'err.ECR-CFG-0422.condFormatColor', N'kz', N'Шартты пішімдеу ережесі {index} ({columnCode} бағаны): түс #rrggbb форматында болуы керек.'),
-    (N'err.ECR-CFG-0422.condFormatColumn', N'ru', N'Правило условного форматирования {index}: колонки {columnCode} нет в этой версии шаблона.'),
+    (N'err.ECR-CFG-0422.condFormatColumn', N'ru', N'Правило условного форматирования {index}: столбца {columnCode} нет в этой версии шаблона.'),
     (N'err.ECR-CFG-0422.condFormatColumn', N'kz', N'Шартты пішімдеу ережесі {index}: {columnCode} бағаны осы үлгі нұсқасында жоқ.'),
     (N'err.ECR-CFG-0422.condFormatLimit', N'ru', N'Слишком много правил условного форматирования: не более {max} на версию шаблона.'),
     (N'err.ECR-CFG-0422.condFormatLimit', N'kz', N'Шартты пішімдеу ережелері тым көп: үлгі нұсқасына {max}-тен көп емес.')
@@ -12726,7 +12982,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'conditionalFormat.incomplete', N'ru', N'Перед сохранением дополните или удалите отмеченные выше правила.'),
     (N'conditionalFormat.incomplete', N'kz', N'Сақтамас бұрын жоғарыда белгіленген ережелерді толықтырыңыз немесе жойыңыз.'),
     (N'conditionalFormat.readOnly', N'ru', N'Правила можно менять только в черновой версии и только с правом редактирования шаблонов.'),
-    (N'conditionalFormat.readOnly', N'kz', N'Ережелерді тек жоба нұсқасында және үлгілерді өңдеу құқығымен ғана өзгертуге болады.'),
+    (N'conditionalFormat.readOnly', N'kz', N'Ережелерді тек нобай нұсқасында және үлгілерді өңдеу құқығымен ғана өзгертуге болады.'),
     (N'conditionalFormat.conflictTitle', N'ru', N'Правила изменил кто-то другой'),
     (N'conditionalFormat.conflictTitle', N'kz', N'Ережелерді басқа біреу өзгертті'),
     (N'conditionalFormat.conflict', N'ru', N'Правила этой версии шаблона сохранил кто-то другой после того, как вы их открыли. Ваши изменения остались здесь: «Сохранить» заменит их правила вашими, «Отменить» покажет их правила.'),
@@ -12806,17 +13062,17 @@ SELECT v.[Key], v.Lang, v.Val
     (N'documents.migrateItemKind', N'ru', N'Изменение'),
     (N'documents.migrateItemValues', N'ru', N'Введённых значений'),
     (N'documents.migrateMoreItems', N'ru', N'Ещё различий не показано: {count}.'),
-    (N'err.ECR-DOC-0409.migrateProjectArchived', N'kz', N'Жоба мұрағатталған: мұрағаттағы жобаның құжаттары шаблонның басқа нұсқасына көшірілмейді.'),
-    (N'err.ECR-DOC-0409.migrateSheetsLocked', N'kz', N'Тапсырылған немесе бекітілген парақтар: {lockedSheets}. Құжаттарды шаблонның басқа нұсқасына көшірмес бұрын оларды жұмысқа қайтарыңыз.'),
+    (N'err.ECR-DOC-0409.migrateProjectArchived', N'kz', N'Жоба мұрағатталған: мұрағаттағы жобаның құжаттары үлгінің басқа нұсқасына көшірілмейді.'),
+    (N'err.ECR-DOC-0409.migrateSheetsLocked', N'kz', N'Тапсырылған немесе бекітілген парақтар: {lockedSheets}. Құжаттарды үлгінің басқа нұсқасына көшірмес бұрын оларды жұмысқа қайтарыңыз.'),
     (N'err.ECR-SCHM-0422.migrateDataLoss', N'kz', N'{mode} режимі бұл құжаттарды көшіре алмайды: енгізілген мәндердің {lostValues} жоғалар еді, {guardedValues} мағынасын өзгертер еді.'),
     (N'err.ECR-SCHM-0422.migrateStructural', N'kz', N'{mode} режимі құжаттарды тек безендіруі ерекшеленетін нұсқалар арасында көшіреді; бұл нұсқалардың құрылымы әртүрлі.'),
-    (N'err.ECR-TMPL-0422.migrateOtherTemplate', N'kz', N'{versionId} шаблон нұсқасы басқа шаблонға тиесілі: құжат тек өз шаблонының нұсқалары арасында көшіріледі.'),
-    (N'err.ECR-TMPL-0422.migrateSameVersion', N'kz', N'Құжат қазірдің өзінде {versionId} шаблон нұсқасында.'),
-    (N'err.ECR-TMPL-0422.migrateTargetNotPublished', N'kz', N'Құжаттарды тек жарияланған шаблон нұсқасына көшіруге болады; {version} нұсқасы {status} күйінде.'),
-    (N'documents.migrateVersion', N'kz', N'Шаблонның басқа нұсқасына көшіру'),
-    (N'documents.migrateVersionTitle', N'kz', N'Құжаттарды шаблонның басқа нұсқасына көшіру'),
-    (N'documents.migrateCurrentVersion', N'kz', N'Жобаның ағымдағы шаблон нұсқасы: {version}'),
-    (N'documents.migrateNoTargets', N'kz', N'Бұл шаблонның басқа жарияланған нұсқасы жоқ.'),
+    (N'err.ECR-TMPL-0422.migrateOtherTemplate', N'kz', N'{versionId} үлгі нұсқасы басқа үлгіге тиесілі: құжат тек өз үлгісінің нұсқалары арасында көшіріледі.'),
+    (N'err.ECR-TMPL-0422.migrateSameVersion', N'kz', N'Құжат қазірдің өзінде {versionId} үлгі нұсқасында.'),
+    (N'err.ECR-TMPL-0422.migrateTargetNotPublished', N'kz', N'Құжаттарды тек жарияланған үлгі нұсқасына көшіруге болады; {version} нұсқасы {status} күйінде.'),
+    (N'documents.migrateVersion', N'kz', N'Үлгінің басқа нұсқасына көшіру'),
+    (N'documents.migrateVersionTitle', N'kz', N'Құжаттарды үлгінің басқа нұсқасына көшіру'),
+    (N'documents.migrateCurrentVersion', N'kz', N'Жобаның ағымдағы үлгі нұсқасы: {version}'),
+    (N'documents.migrateNoTargets', N'kz', N'Бұл үлгінің басқа жарияланған нұсқасы жоқ.'),
     (N'documents.migrateTarget', N'kz', N'Мақсатты нұсқа'),
     (N'documents.migrateModeSafe', N'kz', N'Қауіпсіз'),
     (N'documents.migrateModePresentation', N'kz', N'Тек безендіру'),
@@ -12824,8 +13080,8 @@ SELECT v.[Key], v.Lang, v.Val
     (N'documents.migrateModePresentationHint', N'kz', N'Жаңа нұсқа тек белгілерімен, ретімен, пішімдерімен және көрінуімен ерекшеленуі мүмкін.'),
     (N'documents.migrateDryRun', N'kz', N'Алдын ала қарау'),
     (N'documents.migrateApply', N'kz', N'Құжаттарды көшіру'),
-    (N'documents.migrateDone', N'kz', N'{version} шаблон нұсқасына көшірілген құжаттар: {count}.'),
-    (N'documents.migrateDocuments', N'kz', N'Шаблон нұсқасы жобаға тиесілі, сондықтан оның барлық құжаттары бірге көшіріледі. Құжаттар: {count}.'),
+    (N'documents.migrateDone', N'kz', N'{version} үлгі нұсқасына көшірілген құжаттар: {count}.'),
+    (N'documents.migrateDocuments', N'kz', N'Үлгі нұсқасы жобаға тиесілі, сондықтан оның барлық құжаттары бірге көшіріледі. Құжаттар: {count}.'),
     (N'documents.migrateCounts', N'kz', N'Көшірілетін мәндер: {transferred}. Жоғалатыны: {lost}. Мағынасы өзгеретіні: {guarded}.'),
     (N'documents.migrateCanApply', N'kz', N'Көшіру мүмкін: енгізілген бірде-бір мән жоғалмайды.'),
     (N'documents.migrateRefusalStructural', N'kz', N'Нұсқалардың безендіруі ғана емес, құрылымы да әртүрлі.'),
@@ -12862,7 +13118,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'methodologies.importTitle', N'ru', N'Импорт пакета методик'),
     (N'methodologies.importTitle', N'kz', N'Әдістемелер пакетін импорттау'),
     (N'methodologies.importHint', N'ru', N'Сначала проверьте пакет: проверка ничего не записывает. Импорт создаёт только черновые версии; публикация остаётся отдельным шагом другого человека.'),
-    (N'methodologies.importHint', N'kz', N'Алдымен пакетті тексеріңіз: тексеру ештеңе жазбайды. Импорт тек жоба нұсқаларын жасайды; жариялау басқа адамның жеке қадамы болып қалады.'),
+    (N'methodologies.importHint', N'kz', N'Алдымен пакетті тексеріңіз: тексеру ештеңе жазбайды. Импорт тек нобай нұсқаларын жасайды; жариялау басқа адамның жеке қадамы болып қалады.'),
     (N'methodologies.importFile', N'ru', N'Файл пакета (ecr-methodology-package, JSON)'),
     (N'methodologies.importFile', N'kz', N'Пакет файлы (ecr-methodology-package, JSON)'),
     (N'methodologies.importInvalidFile', N'ru', N'Файл не является корректным JSON.'),
@@ -12880,7 +13136,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'methodologies.importOutcomeConflict', N'ru', N'Некоторые версии уже есть с другим содержимым'),
     (N'methodologies.importOutcomeConflict', N'kz', N'Кейбір нұсқалар басқа мазмұнмен бұрыннан бар'),
     (N'methodologies.importTotals', N'ru', N'Новых методик: {methodologies}; новых черновых версий: {versions}; версий без изменений: {unchanged}; формул: {formulas}; значений констант: {constants}; импортов между методиками: {imports}.'),
-    (N'methodologies.importTotals', N'kz', N'Жаңа әдістемелер: {methodologies}; жаңа жоба нұсқалары: {versions}; өзгеріссіз нұсқалар: {unchanged}; формулалар: {formulas}; тұрақты мәндер: {constants}; әдістемелер арасындағы импорттар: {imports}.'),
+    (N'methodologies.importTotals', N'kz', N'Жаңа әдістемелер: {methodologies}; жаңа нобай нұсқалары: {versions}; өзгеріссіз нұсқалар: {unchanged}; формулалар: {formulas}; константалар: {constants}; әдістемелер арасындағы импорттар: {imports}.'),
     (N'methodologies.importBlockers', N'ru', N'Блокеры'),
     (N'methodologies.importBlockers', N'kz', N'Бөгеттер'),
     (N'methodologies.importConflicts', N'ru', N'Конфликты'),
@@ -12888,7 +13144,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'methodologies.importWarnings', N'ru', N'Предупреждения'),
     (N'methodologies.importWarnings', N'kz', N'Ескертулер'),
     (N'methodologies.importDone', N'ru', N'Пакет импортирован: создано черновых версий — {versions}.'),
-    (N'methodologies.importDone', N'kz', N'Пакет импортталды: жасалған жоба нұсқалары — {versions}.')
+    (N'methodologies.importDone', N'kz', N'Пакет импортталды: жасалған нобай нұсқалары — {versions}.')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
@@ -13124,13 +13380,13 @@ SELECT v.[Key], v.Lang, v.Val
     (N'import.rounded', N'kz', N'Дөңгелектелді: {count}'),
     (N'import.roundedMark', N'ru', N'округлено из {value}'),
     (N'import.roundedMark', N'kz', N'{value} мәнінен дөңгелектелді'),
-    (N'import.roundedTitle', N'ru', N'Числа округлены до знаков после запятой колонки'),
+    (N'import.roundedTitle', N'ru', N'Числа округлены до знаков после запятой столбца'),
     (N'import.roundedTitle', N'kz', N'Сандар бағанның үтірден кейінгі таңбаларына дейін дөңгелектелді'),
-    (N'import.roundedHint', N'ru', N'В этих числах из файла больше знаков после запятой, чем допускает колонка. Они округлены (половина — от нуля), и сохранено будет именно округлённое значение. Сверьте их с файлом перед применением.'),
+    (N'import.roundedHint', N'ru', N'В этих числах из файла больше знаков после запятой, чем допускает столбец. Они округлены (половина — от нуля), и сохранено будет именно округлённое значение. Сверьте их с файлом перед применением.'),
     (N'import.roundedHint', N'kz', N'Файлдағы бұл сандарда баған рұқсат ететіннен көп үтірден кейінгі таңба бар. Олар дөңгелектелді (жартысы — нөлден алысқа), және дәл дөңгелектелген мән сақталады. Қолданар алдында оларды файлмен салыстырыңыз.'),
     (N'import.inFile', N'ru', N'В файле'),
     (N'import.inFile', N'kz', N'Файлда'),
-    (N'err.ECR-CELL-0422.importPrecision', N'ru', N'В числе больше цифр, чем допускает колонка, даже после округления до её знаков после запятой.'),
+    (N'err.ECR-CELL-0422.importPrecision', N'ru', N'В числе больше цифр, чем допускает столбец, даже после округления до его знаков после запятой.'),
     (N'err.ECR-CELL-0422.importPrecision', N'kz', N'Бағанның үтірден кейінгі таңбаларына дейін дөңгелектегеннен кейін де санда баған рұқсат ететіннен көп цифр бар.')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
@@ -13263,12 +13519,12 @@ SELECT v.[Key], v.Lang, v.Val
     (N'registries.entryUsage.fieldShown', N'ru', N'Показано {shown} из {total}'),
     (N'registries.entryUsage.none', N'ru', N'Не найдено'),
     (N'registries.entryUsage.childrenTitle', N'ru', N'Дочерние записи'),
-    (N'registries.entryUsage.substancesTitle', N'ru', N'Методологии, объявившие её веществом'),
-    (N'registries.entryUsage.substanceLink', N'ru', N'Версии методологии'),
-    (N'registries.entryUsage.columnsTitle', N'ru', N'Колонки шаблонов, берущие значения из этого справочника'),
-    (N'registries.entryUsage.columnsHint', N'ru', N'Эти колонки могут содержать эту запись; какие документы её действительно содержат, для отдельной записи не перечисляется.'),
+    (N'registries.entryUsage.substancesTitle', N'ru', N'Методики, объявившие её веществом'),
+    (N'registries.entryUsage.substanceLink', N'ru', N'Версии методики'),
+    (N'registries.entryUsage.columnsTitle', N'ru', N'Столбцы шаблонов, берущие значения из этого справочника'),
+    (N'registries.entryUsage.columnsHint', N'ru', N'Эти столбцы могут содержать эту запись; какие документы её действительно содержат, для отдельной записи не перечисляется.'),
     (N'registries.entryUsage.truncated', N'ru', N'Список уровня справочника обрезан сервером: часть ссылающихся полей, колонок или веществ может здесь отсутствовать.'),
-    (N'registries.entryUsage.notListed', N'ru', N'Здесь для отдельной записи не перечисляются: ячейки и шапки документов, константы методологий и связи каскада. Удаление записи сообщает, сколько их, по видам.'),
+    (N'registries.entryUsage.notListed', N'ru', N'Здесь для отдельной записи не перечисляются: ячейки и шапки документов, константы методик и связи каскада. Удаление записи сообщает, сколько их, по видам.'),
     (N'registries.entryUsage.column', N'kz', N'Қолданылуы'),
     (N'registries.entryUsage.action', N'kz', N'Қайда қолданылады'),
     (N'registries.entryUsage.actionFor', N'kz', N'{code} жазбасы қайда қолданылады'),
@@ -13286,7 +13542,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'registries.entryUsage.columnsTitle', N'kz', N'Осы анықтамалықтан мән алатын үлгі бағандары'),
     (N'registries.entryUsage.columnsHint', N'kz', N'Бұл бағандарда осы жазба болуы мүмкін; оны нақты қай құжаттар қамтитыны жеке жазба үшін тізілмейді.'),
     (N'registries.entryUsage.truncated', N'kz', N'Анықтамалық деңгейіндегі тізімді сервер қысқартты: сілтеме жасайтын өрістердің, бағандардың немесе заттардың бір бөлігі мұнда болмауы мүмкін.'),
-    (N'registries.entryUsage.notListed', N'kz', N'Мұнда жеке жазба үшін тізілмейді: құжат ұяшықтары мен тақырыптары, әдістеме тұрақтылары және каскад байланыстары. Жазбаны жою олардың қанша екенін түрлері бойынша хабарлайды.')
+    (N'registries.entryUsage.notListed', N'kz', N'Мұнда жеке жазба үшін тізілмейді: құжат ұяшықтары мен тақырыптары, әдістеме константалары және каскад байланыстары. Жазбаны жою олардың қанша екенін түрлері бойынша хабарлайды.')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
@@ -13311,7 +13567,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'conditionalFormat.title', N'kz', N'Шартты пішімдеу'),
     (N'conditionalFormat.rule', N'ru', N'Правило {position}'),
     (N'conditionalFormat.rule', N'kz', N'{position}-ереже'),
-    (N'conditionalFormat.column', N'ru', N'Колонка'),
+    (N'conditionalFormat.column', N'ru', N'Столбец'),
     (N'conditionalFormat.column', N'kz', N'Баған'),
     (N'conditionalFormat.operator', N'ru', N'Условие'),
     (N'conditionalFormat.operator', N'kz', N'Шарт'),
@@ -13398,6 +13654,41 @@ OPTION (RECOMPILE);
 GO
 -- COLL:reqclose ── кінець секції ──
 
+-- COLL:reqclose3-mtest ── ru/kz; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-CALC-0422.testCaseJsonInvalid', N'ru', N'Тест «{testCode}»: поле {field} не является корректным JSON ожидаемой формы ({reason}).'),
+    (N'err.ECR-CALC-0422.testCaseJsonInvalid', N'kz', N'«{testCode}» тесі: {field} өрісі күтілетін пішімдегі дұрыс JSON емес ({reason}).')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:reqclose3-mtest ── кінець секції ──
+
+-- COLL:reqclose3-tmplkeys ── ru/kz; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-TMPL-4228.fixedTableWithoutRows', N'ru', N'Таблица {tableCode} фиксированная (строки определены в шаблоне), но в ней нет ни одной строки. В опубликованной форме это пустая таблица, в которую оператор не сможет ввести ни одного значения.'),
+    (N'err.ECR-TMPL-4228.fixedTableWithoutRows', N'kz', N'{tableCode} кестесі тұрақты (жолдар үлгіде анықталған), бірақ онда бірде-бір жол жоқ. Жарияланған пішінде бұл оператор ешқандай мән енгізе алмайтын бос кесте болады.'),
+    (N'err.ECR-TMPL-4226.calculatedWithoutSource', N'ru', N'Столбец {tableCode}.{columnCode} имеет тип {dataType}, то есть должен считаться формулой шаблона, но в этой версии формулы нет. В опубликованной форме это пустая ячейка, которую оператор не вправе заполнить.'),
+    (N'err.ECR-TMPL-4226.calculatedWithoutSource', N'kz', N'{tableCode}.{columnCode} бағанының түрі {dataType}, яғни ол үлгі формуласымен есептелуі тиіс, бірақ бұл нұсқада формула жоқ. Жарияланған пішінде бұл оператор толтыруға құқығы жоқ бос ұяша болады.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:reqclose3-tmplkeys ── кінець секції ──
+
+-- COLL:d230 ── ru/kz відмови схеми зв'язку Rollup/Check (D-230); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-TMPL-0422.relationSpecInvalid', N'ru', N'Связь «{relationCode}»: {detail}'),
+    (N'err.ECR-TMPL-0422.relationSpecInvalid', N'kz', N'«{relationCode}» байланысы: {detail}')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:d230 ── кінець секції ──
+
 -- COLL:sqlpolicy ── ru/kz політики адреси PiSqlClient; власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
@@ -13410,6 +13701,25 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:sqlpolicy ── кінець секції ──
+
+-- COLL:d234 ── ru/kz ширини колонки (D-234); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-TMPL-0422.widthOutOfRange', N'ru', N'Ширина столбца должна быть целым числом от 40 до 800 px, получено "{widthPx}".'),
+    (N'err.ECR-TMPL-0422.widthOutOfRange', N'kz', N'Баған ені 40-тан 800 px-ке дейінгі бүтін сан болуы керек, алынған мән "{widthPx}".'),
+    (N'columns.width', N'ru', N'Ширина по умолчанию, px'),
+    (N'columns.width', N'kz', N'Әдепкі ені, px'),
+    (N'columns.widthHint', N'ru', N'От 40 до 800; пусто — типовая ширина для типа данных. Ширина, заданная пользователем в таблице, перекрывает эту.'),
+    (N'columns.widthHint', N'kz', N'40-тан 800-ге дейін; бос — деректер түрінің әдепкі ені. Пайдаланушы кестеде орнатқан ені мұны басады.'),
+    (N'columns.errWidth', N'ru', N'Ширина должна быть целым числом от 40 до 800.'),
+    (N'columns.errWidth', N'kz', N'Ен 40-тан 800-ге дейінгі бүтін сан болуы керек.'),
+    (N'grid.columnWidths.reset', N'ru', N'Сбросить ширину столбцов'),
+    (N'grid.columnWidths.reset', N'kz', N'Баған енін қалпына келтіру')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:d234 ── кінець секції ──
 
 -- JOBL ── ru/kz назв видів задач (jobLabel.ts, KindKeys); власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)
@@ -13425,6 +13735,19 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- JOBL ── кінець секції ──
+
+-- COLL:rawhealth ── ru/kz розміру ext.RawDataPoint у картці `db`; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'health.collection.rawPointsApproaching', N'ru', N'В ext.RawDataPoint около {rows} строк: приближается порог пересмотра R2 ({threshold}).'),
+    (N'health.collection.rawPointsApproaching', N'kz', N'ext.RawDataPoint кестесінде шамамен {rows} жол бар: R2 қайта қарау шегіне ({threshold}) жақындап келеді.'),
+    (N'health.collection.rawPointsOverThreshold', N'ru', N'В ext.RawDataPoint около {rows} строк: порог пересмотра R2 ({threshold}) превышен. См. docs/build/perf/R2-rawdatapoint-plan.md.'),
+    (N'health.collection.rawPointsOverThreshold', N'kz', N'ext.RawDataPoint кестесінде шамамен {rows} жол бар: R2 қайта қарау шегі ({threshold}) асып кетті. docs/build/perf/R2-rawdatapoint-plan.md қараңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:rawhealth ── кінець секції ──
 
 -- COLL:covenv ── ru/kz подробиць журналу покриття конвертом (MaterializeCollectedDataJob, SourceEventSyncJob); власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)
@@ -13452,6 +13775,64 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:covenv ── кінець секції ──
+
+-- COLL:auditreason ── ru/kz причин зміни налаштувань збору (IntegrationConfigAudit.Reason); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'integrationAudit.scheduleCreated', N'ru', N'Расписание сбора {id} создано для сущности «{entity}».'),
+    (N'integrationAudit.scheduleCreated', N'kz', N'«{entity}» нысаны үшін {id} жинау кестесі құрылды.'),
+    (N'integrationAudit.scheduleChanged', N'ru', N'Расписание сбора {id} сущности «{entity}» изменено.'),
+    (N'integrationAudit.scheduleChanged', N'kz', N'«{entity}» нысанының {id} жинау кестесі өзгертілді.'),
+    (N'integrationAudit.scheduleDeleted', N'ru', N'Расписание сбора {id} сущности «{entity}» удалено.'),
+    (N'integrationAudit.scheduleDeleted', N'kz', N'«{entity}» нысанының {id} жинау кестесі жойылды.'),
+    (N'integrationAudit.fieldMapCreated', N'ru', N'Сопоставление поля «{field}» сущности {entity} создано.'),
+    (N'integrationAudit.fieldMapCreated', N'kz', N'{entity} нысанының «{field}» өрісін сәйкестендіру құрылды.'),
+    (N'integrationAudit.fieldMapPaused', N'ru', N'Сопоставление поля «{field}» приостановлено.'),
+    (N'integrationAudit.fieldMapPaused', N'kz', N'«{field}» өрісін сәйкестендіру тоқтатылды.'),
+    (N'integrationAudit.fieldMapResumed', N'ru', N'Сопоставление поля «{field}» возвращено в сбор.'),
+    (N'integrationAudit.fieldMapResumed', N'kz', N'«{field}» өрісін сәйкестендіру жинауға қайтарылды.'),
+    (N'integrationAudit.fieldMapUnitAccepted', N'ru', N'Сопоставление поля «{field}»: принята новая единица источника.'),
+    (N'integrationAudit.fieldMapUnitAccepted', N'kz', N'«{field}» өрісін сәйкестендіру: көздің жаңа өлшем бірлігі қабылданды.'),
+    (N'integrationAudit.fieldMapDeleted', N'ru', N'Сопоставление поля «{field}» сущности {entity} удалено.'),
+    (N'integrationAudit.fieldMapDeleted', N'kz', N'{entity} нысанының «{field}» өрісін сәйкестендіру жойылды.'),
+    (N'integrationAudit.rowWindowCreated', N'ru', N'Привязка окна строки к столбцу «{column}» создана.'),
+    (N'integrationAudit.rowWindowCreated', N'kz', N'Жол терезесін «{column}» бағанына байлау құрылды.'),
+    (N'integrationAudit.rowWindowChanged', N'ru', N'Привязка окна строки {id} изменена.'),
+    (N'integrationAudit.rowWindowChanged', N'kz', N'{id} жол терезесін байлау өзгертілді.'),
+    (N'integrationAudit.rowWindowDeleted', N'ru', N'Привязка окна строки {id} удалена.'),
+    (N'integrationAudit.rowWindowDeleted', N'kz', N'{id} жол терезесін байлау жойылды.'),
+    (N'integrationAudit.sourceEntityCreated', N'ru', N'Сущность сбора «{entity}» добавлена в подключение «{connection}».'),
+    (N'integrationAudit.sourceEntityCreated', N'kz', N'«{entity}» жинау нысаны «{connection}» қосылымына қосылды.'),
+    (N'integrationAudit.sourceEntityBound', N'ru', N'Сущность сбора «{entity}» привязана к справочнику {registry}.'),
+    (N'integrationAudit.sourceEntityBound', N'kz', N'«{entity}» жинау нысаны {registry} анықтамалығына байланыстырылды.'),
+    (N'integrationAudit.sourceEntityUnbound', N'ru', N'Сущность сбора «{entity}» отвязана от справочника.'),
+    (N'integrationAudit.sourceEntityUnbound', N'kz', N'«{entity}» жинау нысаны анықтамалықтан ажыратылды.'),
+    (N'integrationAudit.eventMapCreated', N'ru', N'Сопоставление событий сущности {entity} с документом {document} создано.'),
+    (N'integrationAudit.eventMapCreated', N'kz', N'{entity} нысанының оқиғаларын {document} құжатымен сәйкестендіру құрылды.'),
+    (N'integrationAudit.eventMapChanged', N'ru', N'Сопоставление событий {id} сущности {entity} изменено.'),
+    (N'integrationAudit.eventMapChanged', N'kz', N'{entity} нысанының {id} оқиғаларды сәйкестендіруі өзгертілді.'),
+    (N'integrationAudit.eventMapDeleted', N'ru', N'Сопоставление событий {id} сущности {entity} удалено.'),
+    (N'integrationAudit.eventMapDeleted', N'kz', N'{entity} нысанының {id} оқиғаларды сәйкестендіруі жойылды.'),
+    (N'integrationAudit.registryPolicyChanged', N'ru', N'Политика синхронизации справочника {registry} из сущности «{entity}» изменена.'),
+    (N'integrationAudit.registryPolicyChanged', N'kz', N'«{entity}» нысанынан {registry} анықтамалығын синхрондау саясаты өзгертілді.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:auditreason ── кінець секції ──
+
+-- COLL:ent4 ── ru/kz причин змін з'єднання з джерелом (D8); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'integrationAudit.dataSourceCreated', N'ru', N'Соединение «{connection}» создано.'),
+    (N'integrationAudit.dataSourceCreated', N'kz', N'«{connection}» қосылымы құрылды.'),
+    (N'integrationAudit.dataSourceChanged', N'ru', N'Соединение «{connection}» изменено.'),
+    (N'integrationAudit.dataSourceChanged', N'kz', N'«{connection}» қосылымы өзгертілді.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:ent4 ── кінець секції ──
 
 -- REGCTOR812 ── ru/kz табличного редактора даних довідника (ФВ-8.12); власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)
@@ -13804,7 +14185,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'tablePreview.hint', N'kz', N'Кесте құжатта қалай көрінеді: бағандар мен жолдардың ағымдағы реті, деректер түрлері, өлшем бірліктері және шартты пішімдеу ережелері. Мұнда ештеңе сақталмайды.'),
     (N'tablePreview.sample', N'ru', N'Пример значения'),
     (N'tablePreview.sample', N'kz', N'Мән үлгісі'),
-    (N'tablePreview.sampleHint', N'ru', N'Каждая ячейка показывает это значение и оформляется первым сработавшим правилом своей колонки.'),
+    (N'tablePreview.sampleHint', N'ru', N'Каждая ячейка показывает это значение и оформляется первым сработавшим правилом своего столбца.'),
     (N'tablePreview.sampleHint', N'kz', N'Әр ұяшық осы мәнді көрсетеді және өз бағанының алғашқы сәйкес келген ережесімен пішімделеді.'),
     (N'tablePreview.tableLabel', N'ru', N'Предпросмотр таблицы'),
     (N'tablePreview.tableLabel', N'kz', N'Кестені алдын ала қарау'),
@@ -13822,13 +14203,13 @@ SELECT v.[Key], v.Lang, v.Val
     (N'tablePreview.noColumns', N'kz', N'Кестеде әзірге көрінетін бағандар жоқ.'),
     (N'tablePreview.noRows', N'ru', N'В таблице нет заданных строк: строки добавляются в документе.'),
     (N'tablePreview.noRows', N'kz', N'Кестеде алдын ала берілген жолдар жоқ: жолдар құжатта қосылады.'),
-    (N'tablePreview.hiddenColumns', N'ru', N'Скрытые колонки не показаны: {count}'),
+    (N'tablePreview.hiddenColumns', N'ru', N'Скрытые столбцы не показаны: {count}'),
     (N'tablePreview.hiddenColumns', N'kz', N'Жасырын бағандар көрсетілмеген: {count}'),
     (N'tablePreview.truncated', N'ru', N'Показаны только первые {shown} строк; ещё {more} не показаны.'),
     (N'tablePreview.truncated', N'kz', N'Тек алғашқы {shown} жол көрсетілген; тағы {more} жол көрсетілмеген.'),
-    (N'tablePreview.ignoredRules', N'ru', N'Правила этой таблицы, которые не показаны (скрытая колонка, неизвестный оператор или неполное правило): {count}'),
+    (N'tablePreview.ignoredRules', N'ru', N'Правила этой таблицы, которые не показаны (скрытый столбец, неизвестный оператор или неполное правило): {count}'),
     (N'tablePreview.ignoredRules', N'kz', N'Осы кестенің көрсетілмеген ережелері (жасырын баған, белгісіз оператор немесе толық емес ереже): {count}'),
-    (N'tablePreview.monthsInColumns', N'ru', N'В документе эти колонки повторяются для каждого месяца периода.'),
+    (N'tablePreview.monthsInColumns', N'ru', N'В документе эти столбцы повторяются для каждого месяца периода.'),
     (N'tablePreview.monthsInColumns', N'kz', N'Құжатта бұл бағандар кезеңнің әр айы үшін қайталанады.'),
     (N'tablePreview.monthsInRows', N'ru', N'В документе эти строки повторяются для каждого месяца периода.'),
     (N'tablePreview.monthsInRows', N'kz', N'Құжатта бұл жолдар кезеңнің әр айы үшін қайталанады.')
@@ -13917,7 +14298,7 @@ GO
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
   FROM (VALUES
-    (N'err.ECR-AUTH-0403.columnUsedInHiddenProjects', N'ru', N'Колонку используют проекты, к которым у вас нет доступа уровня Manage.'),
+    (N'err.ECR-AUTH-0403.columnUsedInHiddenProjects', N'ru', N'Столбец используют проекты, к которым у вас нет доступа уровня Manage.'),
     (N'err.ECR-AUTH-0403.columnUsedInHiddenProjects', N'kz', N'Бағанды сізде Manage деңгейіндегі қолжетімділік жоқ жобалар пайдаланады.')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
@@ -13928,20 +14309,75 @@ GO
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
   FROM (VALUES
-    (N'reportDefs.addBlocked', N'ru', N'Сначала заполните код, название, версию и код каждой колонки.'),
+    (N'reportDefs.addBlocked', N'ru', N'Сначала заполните код, название, версию и код каждого столбца.'),
     (N'reportDefs.addBlocked', N'kz', N'Алдымен кодты, атауды, нұсқаны және әр бағанның кодын толтырыңыз.'),
-    (N'reportDefs.removeColumnBlocked', N'ru', N'В отчёте должна быть хотя бы одна колонка.'),
+    (N'reportDefs.removeColumnBlocked', N'ru', N'В отчёте должен остаться хотя бы один столбец.'),
     (N'reportDefs.removeColumnBlocked', N'kz', N'Есепте кемінде бір баған болуы керек.'),
     (N'registries.rc816.selectionLocked', N'ru', N'Сначала сохраните или отмените изменения на нижних уровнях.'),
     (N'registries.rc816.selectionLocked', N'kz', N'Алдымен төменгі деңгейлердегі өзгерістерді сақтаңыз немесе болдырмаңыз.'),
     (N'methodologies.importApplyBlocked', N'ru', N'Сначала проверьте пакет: импорт доступен после проверки, которая создала бы методику.'),
     (N'methodologies.importApplyBlocked', N'kz', N'Алдымен пакетті тексеріңіз: импорт әдістемені құратын тексеруден кейін қолжетімді болады.'),
     (N'registries.noFields', N'ru', N'У этого справочника пока нет полей'),
-    (N'registries.noFields', N'kz', N'Бұл анықтамалықта әзірге өрістер жоқ')
+    (N'registries.noFields', N'kz', N'Бұл анықтамалықта әзірге өрістер жоқ'),
+    (N'reportDefs.newVersionBlocked', N'ru', N'Сначала введите номер новой версии.'),
+    (N'reportDefs.newVersionBlocked', N'kz', N'Алдымен жаңа нұсқаның нөмірін енгізіңіз.')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
 -- UI:dead-buttons ── кінець секції ──
+
+-- IMPORT:hints ── ru/kz підказок імпорту Excel (P3); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-CELL-4221.importCalculatedStale', N'ru', N'Система пересчитала эту ячейку после выгрузки книги, поэтому книга устарела. Выгрузите документ заново и повторите изменения в новой книге.'),
+    (N'err.ECR-CELL-4221.importCalculatedStale', N'kz', N'Жүйе бұл ұяшықты кітап экспортталғаннан кейін қайта есептеді, сондықтан кітап ескірген. Құжатты қайта экспорттап, өзгерістерді жаңа кітапта қайталаңыз.'),
+    (N'import.excelCell', N'ru', N'Ячейка в файле'),
+    (N'import.excelCell', N'kz', N'Файлдағы ұяшық'),
+    (N'import.recalculateTitle', N'ru', N'Результаты расчёта устарели'),
+    (N'import.recalculateTitle', N'kz', N'Есептеу нәтижелері ескірген'),
+    (N'import.recalculateHint', N'ru', N'Импорт изменил входные данные методики. Нажмите «{action}», чтобы обновить результаты расчёта.'),
+    (N'import.recalculateHint', N'kz', N'Импорт әдістеменің кіріс деректерін өзгертті. Есептеу нәтижелерін жаңарту үшін «{action}» түймесін басыңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- IMPORT:hints ── кінець секції ──
+
+-- API:negative-path ── ru/kz відмов замість 500 на некоректних полях запиту; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-CALC-0422.versionNumber', N'ru', N'Номер версии методики должен содержать от 1 до {maxLength} символов.'),
+    (N'err.ECR-CALC-0422.versionNumber', N'kz', N'Әдістеме нұсқасының нөмірі 1-ден {maxLength} таңбаға дейін болуы тиіс.'),
+    (N'err.ECR-CALC-0422.formulaTooLong', N'ru', N'Выражение формулы «{code}» длиннее {maxLength} символов.'),
+    (N'err.ECR-CALC-0422.formulaTooLong', N'kz', N'«{code}» формуласының өрнегі {maxLength} таңбадан ұзын.'),
+    (N'err.ECR-CALC-0422.testToleranceNegative', N'ru', N'Допуск теста «{code}» не может быть отрицательным: такой тест не пройдёт никогда.'),
+    (N'err.ECR-CALC-0422.testToleranceNegative', N'kz', N'«{code}» тестінің рұқсат шегі теріс бола алмайды: мұндай тест ешқашан өтпейді.'),
+    (N'err.ECR-PRD-4225.offsetOutOfRange', N'ru', N'Смещение {field} ({value} дн.) должно быть от -{max} до {max} дн.'),
+    (N'err.ECR-PRD-4225.offsetOutOfRange', N'kz', N'{field} ығысуы ({value} күн) -{max} мен {max} күн аралығында болуы тиіс.'),
+    (N'err.ECR-PRD-0422.pinReasonTooLong', N'ru', N'Причина закрепления текущего периода длиннее {max} символов.'),
+    (N'err.ECR-PRD-0422.pinReasonTooLong', N'kz', N'Ағымдағы кезеңді тіркеп қою себебі {max} таңбадан ұзын.'),
+    (N'err.ECR-PWD-0422.tooLong', N'ru', N'Пароль длиннее {maxLength} символов.'),
+    (N'err.ECR-PWD-0422.tooLong', N'kz', N'Құпиясөз {maxLength} таңбадан ұзын.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- API:negative-path ── кінець секції ──
+
+-- I18N:keys-audit 2026-10-01 ── форми множини ru (few/many) для formatCount; власна порція ──
+-- kz за `Intl.PluralRules` має лише one/other — рядки kz тут лише для повноти
+-- каталогу (текст = other). ⚠ kz — нейтральний переклад, потребує перевірки носієм.
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'sources.testEntities.few', N'ru', N'В каталоге источника {count} сущности.'),
+    (N'sources.testEntities.few', N'kz', N'Көз каталогында {count} нысан бар.'),
+    (N'sources.testEntities.many', N'ru', N'В каталоге источника {count} сущностей.'),
+    (N'sources.testEntities.many', N'kz', N'Көз каталогында {count} нысан бар.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- I18N:keys-audit ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

@@ -154,7 +154,8 @@ public sealed class GetTemplateStructureHandler(
             column.DisplayFormat,
             column.UnitId is { } unitId && symbols.TryGetValue(unitId, out var symbol) ? symbol : null,
             formula?.Expression,
-            formula?.Dialect);
+            formula?.Dialect,
+            column.WidthPx);
     }
 
     private static TemplateRowDto Row(

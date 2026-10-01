@@ -16,17 +16,20 @@ const int HasBlockers = 2;
 
 Console.OutputEncoding = new UTF8Encoding(false);
 
-if (args.Length < 2 || args[0] is not ("analyze" or "export"))
+if (args.Length < 2 || args[0] is not ("analyze" or "export" or "unresolved"))
 {
     Console.Error.WriteLine("""
         Використання:
           Ecr.MethodologyImport analyze <AF.xml> [--json] [--top N] [--library Common] [--out report.json]
           Ecr.MethodologyImport export  <AF.xml> --out package.json [--library Common] [--allow-blockers]
+          Ecr.MethodologyImport unresolved <AF.xml> [--out unresolved.md] [--library Common]
 
         analyze — сухий прогін: розбір AF XML (потоково), Trim, резолвінг !Формула і CST.Константа
         (власна версія → бібліотека), цикли. Код виходу 2, якщо є блокери. Запису в БД немає.
         export  — пакет ecr-methodology-package v1 (JSON) без запису в БД. За наявності блокерів пакет НЕ
         пишеться (код 2); --allow-blockers пише його разом зі списком блокерів (імпортер має відмовити).
+        unresolved — нерезолвні посилання з категорією й рекомендацією по кожному (Markdown для методолога).
+        Код виходу 2, якщо є блокери. Запису в БД немає.
         """);
     return UsageOrInputError;
 }
@@ -35,6 +38,7 @@ var command = args[0];
 var path = args[1];
 var json = false;
 var allowBlockers = false;
+var normalize = true;
 var top = 20;
 var library = MethodologyAnalyzer.DefaultLibrary;
 string? outFile = null;
@@ -45,6 +49,9 @@ for (var i = 2; i < args.Length; i++)
     {
         case "--json":
             json = true;
+            break;
+        case "--no-normalize":
+            normalize = false;
             break;
         case "--allow-blockers":
             allowBlockers = true;
@@ -85,7 +92,7 @@ try
 {
     using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 20, FileOptions.SequentialScan);
     size = stream.Length;
-    (model, report) = AnalyzeCommand.Run(stream, library);
+    (model, report) = AnalyzeCommand.Run(stream, library, normalize);
 }
 catch (XmlException ex)
 {
@@ -118,6 +125,18 @@ if (command == "export")
     Console.Out.WriteLine(string.Create(
         CultureInfo.InvariantCulture,
         $"Пакет {MethodologyPackage.FormatName} v{MethodologyPackage.CurrentVersion} записано: методологій {package.Methodologies.Count}, формул {report.Formulas}, констант {report.Constants}, блокерів {package.Blockers.Count}."));
+    return report.HasBlockers ? HasBlockers : Ok;
+}
+
+if (command == "unresolved")
+{
+    var markdown = UnresolvedReferenceReport.ToMarkdown(UnresolvedReferenceReport.Recommend(model, report));
+    if (outFile is not null)
+    {
+        File.WriteAllText(outFile, markdown, new UTF8Encoding(false));
+    }
+
+    Console.Out.Write(markdown);
     return report.HasBlockers ? HasBlockers : Ok;
 }
 

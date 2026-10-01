@@ -24,15 +24,25 @@ public sealed class JobWorkerStartupTests
     [Fact]
     public async Task RCSI_вимкнено_Critical_один_раз_і_наступний_claim_не_раніше_паузи()
     {
+        var firstClaim = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var queue = Substitute.For<IJobQueue>();
         queue.ClaimAsync(default!, default!, default, default)
-            .ReturnsForAnyArgs(Task.FromException<ClaimedJob?>(new InvalidOperationException(
-                "Черга задач не захоплює задачі: у базі «x» вимкнено READ_COMMITTED_SNAPSHOT (RCSI).")));
+            .ReturnsForAnyArgs(_ =>
+            {
+                firstClaim.TrySetResult();
+                return Task.FromException<ClaimedJob?>(new InvalidOperationException(
+                    "Черга задач не захоплює задачі: у базі «x» вимкнено READ_COMMITTED_SNAPSHOT (RCSI)."));
+            });
 
         var logger = new RecordingLogger<JobWorker>();
         var worker = Worker(queue, logger, JobProgressStore.CurrentRole, TimeSpan.FromMilliseconds(400));
 
         await worker.StartAsync(CancellationToken.None);
+
+        // ⚠ Вікно міряємо від ПЕРШОГО claim, а не від StartAsync: у .NET 10
+        // ExecuteAsync іде через пул потоків, і на навантаженому CI (Evidence,
+        // run 36851912117) за 1 с від старту не траплявся жоден claim — «Actual: 0».
+        await firstClaim.Task.WaitAsync(TimeSpan.FromSeconds(60));
         await Task.Delay(1_000);
         await worker.StopAsync(CancellationToken.None);
 

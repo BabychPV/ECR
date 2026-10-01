@@ -180,6 +180,8 @@ public sealed class SaveTableRelationHandler(
         EnsureBelongs(tableCodes, request.SourceTableDefId, templateVersionId, "джерела");
         EnsureBelongs(tableCodes, request.TargetTableDefId, templateVersionId, "приймача");
 
+        await EnsureSpecAsync(templateVersionId, code, request, ct).ConfigureAwait(false);
+
         var existing = await store
             .FindTableRelationAsync(templateVersionId, code, ct)
             .ConfigureAwait(false);
@@ -249,6 +251,46 @@ public sealed class SaveTableRelationHandler(
         // ⚠ `existing` завжди присвоєно всередині щойно завершеного замикання
         // — той самий довід, що в `SaveColumnDefHandler`.
         return TableRelationMapper.Map(existing!, tableCodes);
+    }
+
+    /// <summary>
+    /// D-230: схеми <c>MatchJson</c>/<c>MapJson</c> видів Rollup і Check проти колонок таблиць версії.
+    /// Інші види не перевіряються і структуру версії не читають.
+    /// </summary>
+    private async Task EnsureSpecAsync(
+        int templateVersionId, string code, SaveTableRelationCommand request, CancellationToken ct)
+    {
+        if (request.RelationKind is not (TableRelationKind.Rollup or TableRelationKind.Check))
+        {
+            return;
+        }
+
+        var structure = await store.GetWithStructureAsync(templateVersionId, ct).ConfigureAwait(false);
+        var tables = structure.Sheets.SelectMany(s => s.Tables).ToList();
+
+        static IReadOnlyDictionary<string, CellDataType> Columns(TableDef? table)
+            => table is null
+                ? new Dictionary<string, CellDataType>()
+                : table.Columns.Where(c => !c.IsDeleted).ToDictionary(c => c.Code, c => c.DataType, StringComparer.Ordinal);
+
+        var failure = RelationSpecValidator.Validate(
+            request.RelationKind, request.MatchJson, request.MapJson,
+            Columns(tables.FirstOrDefault(t => t.Id == request.SourceTableDefId)),
+            Columns(tables.FirstOrDefault(t => t.Id == request.TargetTableDefId)));
+
+        if (failure is not null)
+        {
+            throw new BusinessRuleException(
+                ErrorCodes.TemplateInvalid,
+                $"Relation {code} ({request.RelationKind}): {failure.Detail}",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-TMPL-0422.relationSpecInvalid",
+                    ["relationCode"] = code,
+                    ["detail"] = failure.Detail,
+                    ["reason"] = failure.Reason,
+                });
+        }
     }
 
     /// <summary>Перевіряє, що таблиця належить саме цій версії.</summary>

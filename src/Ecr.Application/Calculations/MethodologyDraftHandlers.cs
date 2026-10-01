@@ -8,6 +8,7 @@ using Ecr.Application.Security;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Calculations;
 using Ecr.Domain.Enums;
+using Ecr.Domain.Errors;
 using Ecr.Domain.ValueObjects;
 
 namespace Ecr.Application.Calculations;
@@ -106,6 +107,9 @@ public sealed class CreateMethodologyVersionHandler(
     /// </remarks>
     public const string Permission = "Calculation.EditFormula";
 
+    /// <summary>Межа колонки <c>Version</c> у <c>MethodologyVersionConfiguration</c>.</summary>
+    public const int MaxVersionLength = 20;
+
     /// <summary>Створює чернетку.</summary>
     /// <param name="methodologyId">Методологія-контейнер.</param>
     /// <param name="versionNumber">Номер нової версії; унікальний у межах методології.</param>
@@ -124,9 +128,21 @@ public sealed class CreateMethodologyVersionHandler(
         CalculationLevel level,
         CancellationToken ct)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(versionNumber);
-
         await PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
+
+        // ⛔ Номер приходить із тіла запиту: порожній давав `ArgumentException`, задовгий —
+        // обрізання рядка в `calc.MethodologyVersion.Version`, і обидва ставали 500.
+        if (string.IsNullOrWhiteSpace(versionNumber) || versionNumber.Length > MaxVersionLength)
+        {
+            throw new BusinessRuleException(
+                ErrorCodes.MethodologyInvalid,
+                $"Номер версії методології — від 1 до {MaxVersionLength} символів.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0422.versionNumber",
+                    ["maxLength"] = MaxVersionLength.ToString(CultureInfo.InvariantCulture),
+                });
+        }
 
         var userId = currentUser.UserId
             ?? throw new AccessDeniedException(

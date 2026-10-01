@@ -101,7 +101,7 @@ function stub(): string[] {
   return urls;
 }
 
-async function show(allowed: boolean): Promise<void> {
+async function show(allowed: boolean, entity: SourceEntityStatus = Entity): Promise<void> {
   await loadCatalog('en', 'public');
   await loadCatalog('en', 'private');
 
@@ -109,7 +109,7 @@ async function show(allowed: boolean): Promise<void> {
     <MantineProvider theme={withTestDefaults(theme)}>
       <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
         <MemoryRouter>
-          <EntityPipeline entity={Entity} allowed={allowed} sourcesHref="/admin/sources" />
+          <EntityPipeline entity={entity} allowed={allowed} sourcesHref="/admin/sources" />
         </MemoryRouter>
       </QueryClientProvider>
     </MantineProvider>,
@@ -164,6 +164,23 @@ describe('EntityPipeline', () => {
 
       expect(await within(step('schedule')).findByText('No schedule')).toBeTruthy();
       await waitFor(() => expect(within(step('map')).getByRole('button', { name: 'Add mapping' })).toBeTruthy());
+    },
+    Slow,
+  );
+
+  it(
+    'неактивна сутність: перегляд не запитується (сервер дав би 404), кроки 3–5 idle',
+    async () => {
+      const urls = stub();
+      await show(true, { ...Entity, isActive: false });
+
+      await waitFor(() => expect(document.querySelector('[data-step="emit"]')).not.toBeNull());
+
+      for (const key of ['collect', 'map', 'emit']) {
+        expect(step(key).querySelector('[data-step-state]')?.getAttribute('data-step-state')).toBe('idle');
+      }
+      expect(step('source').querySelector('[data-step-state]')?.getAttribute('data-step-state')).toBe('off');
+      expect(urls.some((url) => url.includes('/mapping/preview'))).toBe(false);
     },
     Slow,
   );

@@ -138,7 +138,7 @@ public sealed class SetSourceEntityRegistryPolicyHandler(
                     Operation: AuditOperation,
                     OldJson: before,
                     NewJson: after,
-                    ChangeReason: $"Політика синку довідника {registryDefId} із сутності «{entity.Code}» змінена.",
+                    ChangeReason: IntegrationConfigAudit.Reason("integrationAudit.registryPolicyChanged", ("registry", registryDefId), ("entity", entity.Code)),
                     ChangedByUserId: userId,
                     CorrelationId: currentUser.CorrelationId),
                 innerCt).ConfigureAwait(false);

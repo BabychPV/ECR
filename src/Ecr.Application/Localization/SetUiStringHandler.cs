@@ -29,6 +29,9 @@ public sealed class SetUiStringHandler(
     /// </summary>
     private const int MaxValueLength = 1000;
 
+    /// <summary>Стеля довжини ключа (<c>sys_ecr.UiString.[Key] nvarchar(200)</c>).</summary>
+    private const int MaxKeyLength = 200;
+
     /// <summary>Записує рядок і повертає нову версію каталогу.</summary>
     /// <param name="key">Ключ.</param>
     /// <param name="languageCode">Мова.</param>
@@ -92,6 +95,21 @@ public sealed class SetUiStringHandler(
                     ["messageKey"] = "err.ECR-REQ-0422.uiStringTooLong",
                     ["key"] = key,
                     ["maxLength"] = MaxValueLength.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
+        }
+
+        // ⛔ Ключ довший за `sys_ecr.UiString.[Key] nvarchar(200)` не може існувати в каталозі —
+        // та сама відмова, що й CSV-імпорт дає на невідомий ключ. Без неї адреса
+        // `PUT /ui-strings/{lang}/{key}` із задовгим ключем доходила до бази й падала 500.
+        if (key.Length > MaxKeyLength)
+        {
+            throw new BusinessRuleException(
+                ErrorCodes.RequestInvalid,
+                $"Ключ довший за {MaxKeyLength} символів: такого ключа в каталозі немає.",
+                new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["messageKey"] = "err.ECR-REQ-0422.uiStringUnknownKey",
+                    ["maxLength"] = MaxKeyLength.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 });
         }
 

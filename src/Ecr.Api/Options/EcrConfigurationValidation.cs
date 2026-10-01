@@ -37,6 +37,8 @@ namespace Ecr.Api.Options;
 /// </remarks>
 public static partial class EcrConfigurationValidation
 {
+    private const string RawDataPointHealthKey = Ecr.Api.Health.RawDataPointHealth.ThresholdConfigKey;
+
     /// <summary>Цілі ключі та найменше допустиме значення.</summary>
     public static readonly IReadOnlyList<(string Key, int Min)> Integers =
     [
@@ -69,6 +71,9 @@ public static partial class EcrConfigurationValidation
 
         // ПРД-13: поріг сигналу «перерахунок довший за бюджет»; нуль зробив би сигналом кожну задачу.
         (Ecr.Infrastructure.Jobs.RecalculationBudgetOptions.WarnSecondsKey, 1),
+
+        // R2: поріг рядків ext.RawDataPoint у картці db; 0 вимикає перевірку, від'ємне — помилка.
+        (RawDataPointHealthKey, 0),
 
         // U17: частіше за 5 с експорт лише навантажує сервер і колектор.
         (Ecr.Api.Observability.TelemetrySetup.ExportIntervalKey, Ecr.Api.Observability.TelemetrySetup.MinExportIntervalSeconds),

@@ -3,6 +3,7 @@ using System.Runtime.CompilerServices;
 using System.Text.Json;
 using Ecr.Application.Common;
 using Ecr.Application.Errors;
+using Ecr.Application.Integration;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
 using Ecr.Application.Templates;
@@ -25,7 +26,8 @@ public sealed class ExportStructureChangesHandler(
     IAuditWriter writer,
     IAccessDecisionService access,
     ICurrentUser currentUser,
-    IClock clock)
+    IClock clock,
+    IUiStringCatalog catalog)
 {
     /// <summary>Стеля рядків, коли конфіг не задає іншої.</summary>
     public const int DefaultMaxRows = 100_000;
@@ -128,7 +130,15 @@ public sealed class ExportStructureChangesHandler(
         var emitted = 0;
         while (true)
         {
-            foreach (var row in page.Items)
+            // ⛔ ent4 P3-2: причина змін налаштувань збору — конверт {"k":…,"p":{…}}
+            // (IntegrationConfigAudit.Reason). Екран розгортає його в клієнті, а CSV віддавав
+            // сирий JSON. Розгортаємо мовою того, хто вивантажує, тим самим резолвером, що й
+            // повідомлення задач; рядок, що не є конвертом, і збій каталогу — без змін.
+            var reasons = await JobProgressMessageResolver
+                .ResolveManyAsync(catalog, currentUser.Language, [.. page.Items.Select(r => r.ChangeReason)], ct)
+                .ConfigureAwait(false);
+
+            for (var i = 0; i < page.Items.Count; i++)
             {
                 // Рядки, дописані після підрахунку, не прорвуть стелю.
                 if (emitted++ >= maxRows)
@@ -136,7 +146,7 @@ public sealed class ExportStructureChangesHandler(
                     yield break;
                 }
 
-                yield return row;
+                yield return page.Items[i] with { ChangeReason = reasons[i] };
             }
 
             if (page.NextCursor is null)

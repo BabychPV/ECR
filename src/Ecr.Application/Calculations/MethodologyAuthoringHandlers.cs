@@ -779,6 +779,11 @@ public sealed class SaveMethodologyTestCaseHandler(
 
         var testCode = EcrCode.Create(code);
 
+        // P2 (walk-reg): без цього некоректний JSON зберігався з 200, а публікація/симуляція
+        // падали 500. Той самий розбір, що в MethodologyStore.GetTestCasesAsync, плюс форма входу.
+        TestCaseJson.RequireInput(testCode.Value, inputJson);
+        TestCaseJson.Require<Dictionary<string, decimal>>(testCode.Value, "expectedJson", expectedJson);
+
         var version = await drafts.FindVersionAsync(methodologyVersionId, ct).ConfigureAwait(false)
             ?? throw new NotFoundException(
                 "ECR-CALC-0404",
@@ -1544,3 +1549,127 @@ public sealed record SaveMethodologyConstant(
     string? Category,
     long? SubstanceEntryId,
     string? Source);
+
+/// <summary>Перевірка JSON тесту золотого набору при записі (P2, walk-reg 2026-10-01).</summary>
+/// <remarks>
+/// ⛔ Розбору не досить (аудит ent3, P2): <c>"{}"</c> для позиційного record розбирається в не-null
+/// об'єкт з <c>Arguments = null</c>, і симуляція падала 500 на <c>input.Arguments.ToDictionary</c>.
+/// Тому вхід перевіряється ще й за формою. Період тут не вимагається: шаблон нового тесту в
+/// клієнті має <c>periodKey = 0</c>, а період перевіряє публікація (<c>ФВ-9.12</c>).
+/// <para>
+/// ⚠ Причина відмови — лише шлях і позиція в JSON (<c>$.arguments[0].argumentCode</c>), без тексту
+/// винятку System.Text.Json: той називає повні імена типів .NET (аудит ent3, P3).
+/// </para>
+/// </remarks>
+internal static class TestCaseJson
+{
+    private static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web);
+
+    /// <summary>Відхиляє вхід тесту, який не розбереться або не має форми для прогону.</summary>
+    /// <param name="testCode">Код тесту.</param>
+    /// <param name="json">Текст JSON поля <c>inputJson</c>.</param>
+    /// <exception cref="BusinessRuleException"><c>ECR-CALC-0422</c>.</exception>
+    public static void RequireInput(string testCode, string json)
+    {
+        const string field = "inputJson";
+
+        var input = Parse<CalculationInput>(testCode, field, json);
+        var broken = BrokenPath(input);
+
+        if (broken is not null)
+        {
+            throw Refusal(testCode, field, broken);
+        }
+    }
+
+    /// <summary>Відхиляє JSON, який не розбереться як <typeparamref name="T"/>.</summary>
+    /// <typeparam name="T">Очікувана форма.</typeparam>
+    /// <param name="testCode">Код тесту.</param>
+    /// <param name="field">Ім'я поля запиту.</param>
+    /// <param name="json">Текст JSON.</param>
+    /// <exception cref="BusinessRuleException"><c>ECR-CALC-0422</c>.</exception>
+    public static void Require<T>(string testCode, string field, string json)
+        where T : class
+    {
+        _ = Parse<T>(testCode, field, json);
+    }
+
+    private static T Parse<T>(string testCode, string field, string json)
+        where T : class
+    {
+        string path;
+
+        try
+        {
+            if (JsonSerializer.Deserialize<T>(json, Options) is { } value)
+            {
+                return value;
+            }
+
+            path = "$";
+        }
+        catch (JsonException error)
+        {
+            path = Position(error);
+        }
+        catch (NotSupportedException)
+        {
+            path = "$";
+        }
+
+        throw Refusal(testCode, field, path);
+    }
+
+    /// <summary>Шлях і позиція без тексту винятку: лише те, що людина знайде у своєму JSON.</summary>
+    private static string Position(JsonException error)
+    {
+        var path = string.IsNullOrEmpty(error.Path) ? "$" : error.Path;
+
+        return error.LineNumber is { } line && error.BytePositionInLine is { } position
+            ? string.Create(CultureInfo.InvariantCulture, $"{path} @ {line + 1}:{position + 1}")
+            : path;
+    }
+
+    /// <summary>Перший шлях, без якого прогін тесту впаде; <c>null</c> — форма придатна.</summary>
+    private static string? BrokenPath(CalculationInput input)
+    {
+        if (input.Arguments is null)
+        {
+            return "$.arguments";
+        }
+
+        var codes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        for (var i = 0; i < input.Arguments.Count; i++)
+        {
+            var at = i.ToString(CultureInfo.InvariantCulture);
+            var argument = input.Arguments[i];
+
+            if (argument is null)
+            {
+                return $"$.arguments[{at}]";
+            }
+
+            // Прогін складає аргументи в словник за кодом без урахування регістру: порожній чи
+            // повторений код там — виняток, тобто 500 на симуляції замість відмови тут.
+            if (string.IsNullOrWhiteSpace(argument.ArgumentCode) || !codes.Add(argument.ArgumentCode))
+            {
+                return $"$.arguments[{at}].argumentCode";
+            }
+        }
+
+        return null;
+    }
+
+    private static BusinessRuleException Refusal(string testCode, string field, string reason)
+        => new(
+            "ECR-CALC-0422",
+            $"Тест «{testCode}»: поле {field} не є коректним JSON потрібної форми ({reason}).",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-CALC-0422.testCaseJsonInvalid",
+                ["testCode"] = testCode,
+                ["field"] = field,
+                ["reason"] = reason,
+            });
+}

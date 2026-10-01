@@ -139,7 +139,7 @@ public sealed class RegistryEntryWriterSyncTests
 
         Assert.False(result.Applied);
         Assert.Equal("err.ECR-REG-0409.entryCodeTaken", RegistryEntryWriter.EntryCodeTakenKey);
-        Assert.Equal([new RegistryEntryImportError(1, "taken", null, RegistryEntryWriter.EntryCodeTakenKey)], result.Errors);
+        Assert.Equal([new RegistryEntryImportError(1, "taken", null, RegistryEntryWriter.EntryCodeTakenKey, new Dictionary<string, string> {["code"] = "taken", ["id"] = "501"})], result.Errors);
         _registries.DidNotReceive().AddValue(Arg.Is<RegistryValue>(v => v.RegistryEntryId == 501L));
         Assert.Equal("TAKEN", existing.DisplayL10n.Values["en"]);
         await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
@@ -224,7 +224,7 @@ public sealed class RegistryEntryWriterSyncTests
             CancellationToken.None);
 
         Assert.False(result.Applied);
-        Assert.Equal([new RegistryEntryImportError(1, "501", null, "err.ECR-REG-0404.registryEntry")], result.Errors);
+        Assert.Equal([new RegistryEntryImportError(1, "501", null, "err.ECR-REG-0404.registryEntry", new Dictionary<string, string> {["entryId"] = "501"})], result.Errors);
         Assert.False(entry.IsActive);
     }
 
@@ -290,7 +290,7 @@ public sealed class RegistryEntryWriterSyncTests
 
         Assert.False(result.Applied);
         Assert.Equal(
-            [new RegistryEntryImportError(1, "E1", RegistryEntryWriter.ValidityFieldCode, "err.validityWindowEmpty")],
+            [new RegistryEntryImportError(1, "E1", RegistryEntryWriter.ValidityFieldCode, "err.validityWindowEmpty", new Dictionary<string, string> {["from"] = "2025-01-01", ["to"] = "2025-01-01"})],
             result.Errors);
         Assert.Equal(ValidityWindow.Always, entry.Window);
         await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());

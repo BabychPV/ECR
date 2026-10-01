@@ -905,6 +905,9 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                     b.Property<int?>("UnitId")
                         .HasColumnType("int");
 
+                    b.Property<int?>("WidthPx")
+                        .HasColumnType("int");
+
                     b.HasKey("Id");
 
                     b.HasAlternateKey("TableDefId", "Id")
@@ -927,6 +930,8 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                             t.HasCheckConstraint("CK_ColumnDef_Lookup", "DataType <> 5 OR LookupRegistryDefId IS NOT NULL");
 
                             t.HasCheckConstraint("CK_ColumnDef_Month", "IsMonthColumn = 0 OR MonthNumber BETWEEN 1 AND 12");
+
+                            t.HasCheckConstraint("CK_ColumnDef_WidthPx", "WidthPx IS NULL OR WidthPx BETWEEN 40 AND 800");
                         });
 
                     b.HasAnnotation("SqlServer:UseSqlOutputClause", false);

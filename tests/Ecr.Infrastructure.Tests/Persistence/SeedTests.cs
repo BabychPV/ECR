@@ -497,8 +497,9 @@ public sealed class SeedTests(SqlServerFixture sql)
     {
         // Складаються ПОСИЛАННЯМИ, а не розбором рядка «g_per_s» (ФВ-16.2):
         // розбір коду означав би, що перейменування одиниці ламає конверсію.
-        // 14 (ФВ-16.2 і HSE301:F1) + mg_per_Sm3 і Sm3_per_day (UNITS:ecr-derived).
-        Assert.Equal(16, await ScalarAsync(
+        // 14 (ФВ-16.2 і HSE301:F1) + mg_per_Sm3 і Sm3_per_day (UNITS:ecr-derived)
+        // + Nm3_per_s/_h/_day і mg_per_Nm3 (HSE301:NM3).
+        Assert.Equal(20, await ScalarAsync(
             "SELECT COUNT(*) FROM uom.Unit WHERE NumeratorUnitId IS NOT NULL AND DenominatorUnitId IS NOT NULL"));
 
         // UNITS:ecr-derived: чисельник і знаменник — саме ті, що в коді, а не

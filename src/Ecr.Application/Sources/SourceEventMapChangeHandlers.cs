@@ -49,6 +49,9 @@ public sealed class UpdateSourceEventMapHandler(
             SourceEventMapSupport.RequireProjectManage(profile, document.ProjectId);
         }
 
+        SourceEventMapSupport.RequireShape(
+            command.VolumeMode, command.FilterAttribute, command.FilterScope, command.FilterValue, command.Fields);
+
         var old = IntegrationConfigAudit.Snapshot(SourceEventMapSupport.ToDto(map));
         var built = await SourceEventMapSupport.BuildSpecsAsync(store, sources, command.Fields, ct).ConfigureAwait(false);
 
@@ -78,7 +81,7 @@ public sealed class UpdateSourceEventMapHandler(
             await IntegrationConfigAudit.WriteAsync(
                 audit, clock, currentUser, IntegrationConfigAudit.EventMapType, map.Id, AuditOperation,
                 old, IntegrationConfigAudit.Snapshot(SourceEventMapSupport.ToDto(map)),
-                $"Мапінг подій {map.Id} сутності {map.SourceEntityId} змінено.", innerCt).ConfigureAwait(false);
+                IntegrationConfigAudit.Reason("integrationAudit.eventMapChanged", ("id", map.Id), ("entity", map.SourceEntityId)), innerCt).ConfigureAwait(false);
         }, ct).ConfigureAwait(false);
 
         return SourceEventMapSupport.ToDto(map);
@@ -142,7 +145,7 @@ public sealed class DeleteSourceEventMapHandler(
 
             await IntegrationConfigAudit.WriteAsync(
                 audit, clock, currentUser, IntegrationConfigAudit.EventMapType, id, AuditOperation,
-                removed, newJson: null, $"Мапінг подій {id} сутності {entityId} видалено.", innerCt)
+                removed, newJson: null, IntegrationConfigAudit.Reason("integrationAudit.eventMapDeleted", ("id", id), ("entity", entityId)), innerCt)
                 .ConfigureAwait(false);
         }, ct).ConfigureAwait(false);
     }

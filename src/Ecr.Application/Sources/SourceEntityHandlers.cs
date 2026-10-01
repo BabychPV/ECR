@@ -113,7 +113,7 @@ public sealed class CreateSourceEntityHandler(
             await IntegrationConfigAudit.WriteAsync(
                 audit, clock, currentUser, IntegrationConfigAudit.SourceEntityType, created.Id, AuditOperation,
                 oldJson: null, newJson: IntegrationConfigAudit.Snapshot(created),
-                reason: $"Сутність збору «{created.Code}» заведено в з'єднанні «{dataSource.Code}».", innerCt)
+                reason: IntegrationConfigAudit.Reason("integrationAudit.sourceEntityCreated", ("entity", created.Code), ("connection", dataSource.Code)), innerCt)
                 .ConfigureAwait(false);
         }, ct).ConfigureAwait(false);
 
@@ -223,8 +223,8 @@ public sealed class BindSourceEntityRegistryHandler(
                 audit, clock, currentUser, IntegrationConfigAudit.SourceEntityType, entity.Id, AuditOperation,
                 before, after,
                 reason: registryDefId is null
-                    ? $"Сутність збору «{entity.Code}» відв'язано від довідника."
-                    : $"Сутність збору «{entity.Code}» прив'язано до довідника {registryDefId}.",
+                    ? IntegrationConfigAudit.Reason("integrationAudit.sourceEntityUnbound", ("entity", entity.Code))
+                    : IntegrationConfigAudit.Reason("integrationAudit.sourceEntityBound", ("entity", entity.Code), ("registry", registryDefId)),
                 innerCt).ConfigureAwait(false);
         }, ct).ConfigureAwait(false);
 

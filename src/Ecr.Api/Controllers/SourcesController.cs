@@ -111,7 +111,7 @@ public sealed class SourcesController(
     }
 
     /// <summary>
-    /// Перелік сутностей збору. Право <c>Integration.Manage</c>.
+    /// Перелік сутностей збору. Право <c>Integration.View</c> або <c>Integration.Manage</c> (D9).
     /// </summary>
     /// <remarks>
     /// ⚠ Разом із кожною сутністю віддається найстаріша непокрита прогалина.

@@ -32,7 +32,11 @@ public sealed class RecalculationService(
     // (`SubmitRecalculationRaceTests`) — той самий механізм, що в
     // `PatchCellsHandler`. Без нього перерахунок, що перетинався з поданням,
     // переписував обчислені числа вже поданого аркуша повз зріз подання.
-    ISheetEditGate sheetGate) : ISubmitRecalculation
+    ISheetEditGate sheetGate,
+
+    // D-230: хук зв'язків Rollup. Необов'язковий: прямі `new RecalculationService(...)` у тестах його не
+    // передають, DI підставляє `RelationRecalculator`.
+    Calculations.IRelationRecalculator? relationRecalculator = null) : ISubmitRecalculation
 {
     /// <summary>Автор обчислених значень: їх ставить система, а не людина.</summary>
     /// <remarks>
@@ -390,7 +394,11 @@ public sealed class RecalculationService(
             targets = [.. affected, .. rollups];
         }
 
-        if (targets.Count == 0)
+        // D-230: версія з активним Rollup/Check не виходить тут, навіть коли формул немає: джерело Rollup
+        // могло змінитися без жодної залежної формули. Прапор — з наявного знімка (0 нових запитів).
+        var relationsActive = relationRecalculator is not null && snapshot.HasActiveRollupOrCheck;
+
+        if (targets.Count == 0 && !relationsActive)
         {
             return 0;
         }
@@ -548,6 +556,40 @@ public sealed class RecalculationService(
             Evaluate(
                 owner.Table, owner.Formula, expression, rows, rowFilter,
                 periodKey, context, values, stored, sink);
+        }
+
+        // D-230: Rollup — ПІСЛЯ формул документа (значення джерела вже перераховані) і тим самим шляхом
+        // запису: записи йдуть у `byInstance`, далі той самий `WriteBatchAsync`/аудит/гейти аркушів.
+        // Уся логіка — в `IRelationRecalculator`; без активного Rollup/Check тут нічого не читається.
+        if (relationsActive)
+        {
+            var pending = byInstance.Values
+                .SelectMany(cells => cells.Values)
+                .ToDictionary(record => record.Address);
+
+            var relationWrites = await relationRecalculator!
+                .ComputeForDocumentAsync(
+                    new Calculations.RelationRunInput(
+                        snapshot, instance.TemplateVersionId, periodKey, instances, rowIdsBatch, pending),
+                    ct)
+                .ConfigureAwait(false);
+
+            foreach (var relationWrite in relationWrites)
+            {
+                if (!byInstance.TryGetValue(relationWrite.TargetInstanceId, out var relationSink))
+                {
+                    byInstance[relationWrite.TargetInstanceId] = relationSink = [];
+                }
+
+                if (relationWrite.Unchanged)
+                {
+                    relationSink.Remove(relationWrite.Record.Address);
+                }
+                else
+                {
+                    relationSink[relationWrite.Record.Address] = relationWrite.Record;
+                }
+            }
         }
 
         var written = byInstance.Values.Sum(cells => cells.Count);

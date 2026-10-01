@@ -255,6 +255,13 @@ export function DocumentsPage(): JSX.Element {
           порожній результат — ховав би кнопку, якою фільтр і знімають. */}
       <DocumentListSummaryStrip periodKey={periodKey} filters={filters} />
 
+      {/* ⛔ `ФВ-14.22`: відмова календаря не показувалась ніде — автовибір
+          періоду мовчки не ставався, і колонка «State» лишалась «—» без
+          жодної причини на екрані. */}
+      {calendar.error !== null && (
+        <ErrorAlert error={calendar.error} onRetry={() => void calendar.refetch()} />
+      )}
+
       {/*
        * ⛔ Три порожні стани не виглядають однаково (L10): «фільтр нічого не
        * знайшов» — власний заголовок і кнопка скидання; «документів немає» —

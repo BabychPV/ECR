@@ -43,7 +43,7 @@ public sealed class CollectFromSourceHandlerTests
     {
         var entity = new SourceEntity(dataSourceId: 3, code: "ENT-77", RegistrySourceKind.External);
         _sources.FindSourceEntityAsync(SourceEntityId, Arg.Any<CancellationToken>()).Returns(entity);
-        _jobs.EnqueueAsync<ICollectionJob>(Arg.Any<object?>(), Arg.Any<CancellationToken>())
+        _jobs.EnqueueAsync<ICollectionJob>(Arg.Any<object?>(), Arg.Any<CancellationToken>(), Arg.Any<int?>())
             .Returns("job-123");
 
         var from = new DateTime(2026, 9, 1, 0, 0, 0, DateTimeKind.Utc);
@@ -60,7 +60,9 @@ public sealed class CollectFromSourceHandlerTests
                 && ((CollectionTask)p!).SourceEntityId == SourceEntityId
                 && ((CollectionTask)p!).FromUtc == from
                 && ((CollectionTask)p!).ToUtc == to),
-            Arg.Any<CancellationToken>());
+            Arg.Any<CancellationToken>(),
+            // D6: ручний запуск несе автора (інакше «Queued by System», «Started by: schedule»).
+            Actor);
     }
 
     [Fact]
@@ -83,7 +85,7 @@ public sealed class CollectFromSourceHandlerTests
         // неіснуючу сутність провалилась би у фоні через хвилину, і причину
         // шукали б не там (коментар в IntegrationHandlers.cs).
         await _jobs.DidNotReceive().EnqueueAsync<ICollectionJob>(
-            Arg.Any<object?>(), Arg.Any<CancellationToken>());
+            Arg.Any<object?>(), Arg.Any<CancellationToken>(), Arg.Any<int?>());
     }
 
     private CollectFromSourceHandler Handler() => new(_sources, _jobs, _access, _user);

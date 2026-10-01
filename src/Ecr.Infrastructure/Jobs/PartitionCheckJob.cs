@@ -61,6 +61,24 @@ public sealed class PartitionCheckJob(
     /// <param name="ct">Токен скасування.</param>
     private async Task RunAsync(MaintenanceRun run, IJobProgress progress, CancellationToken ct)
     {
+        // Аудит: межі pf_AuditByMonth продовжуються на AuditMonthsAhead місяців
+        // уперед процедурою (EXECUTE AS OWNER, тож DDL-прав застосунку не треба —
+        // D-66). Ідемпотентно: додає лише відсутні межі; SPLIT порожньої крайньої
+        // партиції — операція метаданих. Збій (напр. таймаут блокування) падає
+        // прогоном Failed (Q-240) і повторюється наступної ночі.
+        var auditAdded = await ExtendAuditBoundariesAsync(ct).ConfigureAwait(false);
+
+        // D-247: архівація старих партицій аудиту (SWITCH у arc.Audit*) тією ж нічною
+        // задачею; процедура ідемпотентна й сама пише слід у itg.MaintenanceRun.
+        // Збій архівації НЕ має ховати перевірку запасу партицій нижче: він іде в
+        // подробиці прогону й опускає статус до Degraded (сам рядок Failed процедура
+        // вже записала).
+        var (archivedPartitions, archivedRows, archiveError) =
+            await ArchiveAuditAsync(ct).ConfigureAwait(false);
+        var archiveJson = string.Create(
+            CultureInfo.InvariantCulture,
+            $",\"auditArchivedPartitions\":{archivedPartitions},\"auditArchivedRows\":{archivedRows}{(archiveError is null ? string.Empty : ",\"auditArchiveFailed\":true")}");
+
         // ⛔ Функції партиціонування може не бути — тоді запасу не існує як
         // поняття, і мовчати про це не можна: «перевірка пройшла» на базі без
         // партицій означала б, що вичерпання диска не помітить ніхто.
@@ -75,7 +93,7 @@ public sealed class PartitionCheckJob(
                 "Degraded",
                 string.Create(
                     CultureInfo.InvariantCulture,
-                    $"{{\"reason\":\"pf_ByPeriodKey не існує\",\"edition\":\"{capabilities.EditionName}\"}}"),
+                    $"{{\"reason\":\"pf_ByPeriodKey не існує\",\"edition\":\"{capabilities.EditionName}\",\"auditBoundariesAdded\":{auditAdded}{archiveJson}}}"),
                 clock.UtcNow);
 
             await db.SaveChangesAsync(ct).ConfigureAwait(false);
@@ -92,10 +110,10 @@ public sealed class PartitionCheckJob(
         // щоночі, привчає його не читати — і справжнє попередження губиться
         // серед звичних.
         run.Complete(
-            enough ? "Succeeded" : "Degraded",
+            enough && archiveError is null ? "Succeeded" : "Degraded",
             string.Create(
                 CultureInfo.InvariantCulture,
-                $"{{\"boundariesAhead\":{ahead},\"minimum\":{MinimumBoundariesAhead}}}"),
+                $"{{\"boundariesAhead\":{ahead},\"minimum\":{MinimumBoundariesAhead},\"auditBoundariesAdded\":{auditAdded}{archiveJson}}}"),
             clock.UtcNow);
 
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
@@ -125,6 +143,62 @@ public sealed class PartitionCheckJob(
     /// партицій колись зациклилося, і читати їх усі немає сенсу.
     /// </remarks>
     private const int MaxBoundaries = 1_000;
+
+    /// <summary>Запас меж <c>pf_AuditByMonth</c> уперед, місяців.</summary>
+    public const int AuditMonthsAhead = 12;
+
+    /// <summary>Скільки місяців аудит лишається «гарячим» в <c>aud.*</c> (D-247; припущення).</summary>
+    public const int AuditArchiveOlderThanMonths = 24;
+
+    /// <summary>
+    /// Архівує старі партиції аудиту процедурою <c>arc.usp_ArchiveAudit</c> (EXEC, без DDL у C#).
+    /// </summary>
+    private async Task<(int Partitions, long Rows, string? Error)> ArchiveAuditAsync(CancellationToken ct)
+    {
+        var partitions = new Microsoft.Data.SqlClient.SqlParameter("@PartitionsSwitched", System.Data.SqlDbType.Int)
+        {
+            Direction = System.Data.ParameterDirection.Output,
+        };
+        var rows = new Microsoft.Data.SqlClient.SqlParameter("@RowsSwitched", System.Data.SqlDbType.BigInt)
+        {
+            Direction = System.Data.ParameterDirection.Output,
+        };
+
+        try
+        {
+            await db.Database
+                .ExecuteSqlRawAsync(
+                    "EXEC arc.usp_ArchiveAudit @OlderThanMonths = {0}, @Today = {1}, @PartitionsSwitched = @PartitionsSwitched OUTPUT, @RowsSwitched = @RowsSwitched OUTPUT;",
+                    new object[] { AuditArchiveOlderThanMonths, clock.UtcNow.Date, partitions, rows },
+                    ct)
+                .ConfigureAwait(false);
+        }
+        catch (Microsoft.Data.SqlClient.SqlException ex)
+        {
+            return (0, 0, ex.Message);
+        }
+
+        return (partitions.Value is int p ? p : 0, rows.Value is long r ? r : 0, null);
+    }
+
+    /// <summary>Продовжує межі аудиту; повертає, скільки меж додано.</summary>
+    private async Task<int> ExtendAuditBoundariesAsync(CancellationToken ct)
+    {
+        var added = new Microsoft.Data.SqlClient.SqlParameter("@Added", System.Data.SqlDbType.Int)
+        {
+            Direction = System.Data.ParameterDirection.Output,
+        };
+
+        var today = clock.UtcNow.Date;
+        await db.Database
+            .ExecuteSqlRawAsync(
+                "EXEC arc.usp_EnsureAuditPartitions @MonthsAhead = {0}, @Today = {1}, @Added = @Added OUTPUT;",
+                new object[] { AuditMonthsAhead, today, added },
+                ct)
+            .ConfigureAwait(false);
+
+        return added.Value is int n ? n : 0;
+    }
 
     /// <summary>Чи існує функція партиціонування за періодом.</summary>
     private async Task<bool> PartitionFunctionExistsAsync(CancellationToken ct)

@@ -90,3 +90,30 @@ export function humanizeJobId(jobId: string): string {
 
   return key === undefined ? jobId : `${t(key)}${rest}`;
 }
+
+/**
+ * Зворотне до {@link humanizeJobId}: рядок, вставлений у «Job id» на
+ * `/admin/jobs`, → справжній `jobId` для `GET /api/v1/jobs/{id}`.
+ *
+ * ⛔ Тост «Recalculation queued as job {job}.» показує `humanizeJobId`, а
+ * сервер знає лише сирий `IRecalculationJob-…`: сценарій Н-К1 («номер з
+ * тосту → Job id → Watch») давав 404. Впізнається лише точний підпис
+ * відомого типу перед тим самим хвостом (`-GUID32` або `~ціль~GUID32`);
+ * решта повертається без змін — сирий `jobId` теж працює.
+ */
+export function rawJobId(input: string): string {
+  const value = input.trim();
+  for (const typeName of Object.keys(KindKeys)) {
+    // ⚠ Через jobKindLabel, а не прямий виклик перекладу з ключем-змінною:
+    // сторож EndpointCoverageTests.DynamicKeySites рахує такі місця (їх 3).
+    const label = jobKindLabel(typeName);
+    if (!value.startsWith(label)) continue;
+
+    const rest = value.slice(label.length);
+    if (/^-[0-9a-fA-F]{32}$/.test(rest) || /^~[^~]*~[0-9a-fA-F]{32}$/.test(rest)) {
+      return `${typeName}${rest}`;
+    }
+  }
+
+  return value;
+}

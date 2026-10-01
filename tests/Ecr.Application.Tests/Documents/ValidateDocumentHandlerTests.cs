@@ -127,7 +127,7 @@ public sealed class ValidateDocumentHandlerTests
 
     private ValidateDocumentHandler Handler() => new(
         _cells, _rows, _metadata, _results, new ValidationEngine(Substitute.For<IFormulaEngine>()),
-        _headers, _clock, _uow, _access, _user, Substitute.For<IRegistryStore>());
+        _headers, _clock, _uow, _access, _user, Substitute.For<IRegistryStore>(), Substitute.For<ITemplateVersionStore>());
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
@@ -148,6 +148,60 @@ public sealed class ValidateDocumentHandlerTests
         await _cells.DidNotReceive().ReadSliceAsync(Arg.Any<long>(), Arg.Any<CancellationToken>());
         await _rows.DidNotReceive().GetRowIdsAsync(
             Arg.Any<long>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>());
+    }
+
+    /// <summary>
+    /// D-230: знахідка зв'язку Check потрапляє в панель валідації і в збережений підсумок як Error.
+    /// Мутація: прибрати <c>RelationCheckRunner.RunAsync</c> з <c>ValidateDocumentHandler</c> — тест червоніє.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    public async Task Знахідка_зв_язку_Check_Block_потрапляє_в_панель_і_в_підсумок_як_Error()
+    {
+        var snapshot = await _metadata.GetAsync(TemplateVersionId, CancellationToken.None);
+        var columns = snapshot.Sheets.SelectMany(s => s.Tables).SelectMany(t => t.Columns).ToDictionary(c => c.Id);
+        _metadata.GetAsync(TemplateVersionId, Arg.Any<CancellationToken>()).Returns(
+            new TemplateVersionSnapshot(TemplateVersionId, 0, snapshot.Sheets, columns, new Dictionary<(int, string), RowDef>()));
+
+        var relation = new TableRelationDef(EcrCode.Create("REL1"), 3, 4, TableRelationKind.Check, "{}");
+        relation.Update(3, 4, TableRelationKind.Check, "{}",
+            """{"left":"Volume","right":"Volume","tolerance":"0","severity":"Block"}""", 0, true);
+        var store = Substitute.For<ITemplateVersionStore>();
+        store.ListTableRelationsAsync(TemplateVersionId, Arg.Any<CancellationToken>())
+            .Returns(new List<TableRelationDef> { relation });
+
+        _rows.GetRowIdsBatchAsync(Arg.Any<IReadOnlyList<long>>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<long, IReadOnlyDictionary<string, long>>
+            {
+                [Instance1] = new Dictionary<string, long> { ["R1"] = 1 },
+                [Instance2] = new Dictionary<string, long> { ["R1"] = 2 },
+            });
+        _cells.ReadSlicesAsync(Arg.Any<IReadOnlyList<long>>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<long, IReadOnlyList<CellRecord>>
+            {
+                [Instance1] = [new CellRecord(new CellAddress(new PeriodKey(Period), 1, 40), 3, new CellValueData { ValueNumeric = 10m })],
+                [Instance2] = [new CellRecord(new CellAddress(new PeriodKey(Period), 2, 41), 4, new CellValueData { ValueNumeric = 12m })],
+            });
+        var handler = new ValidateDocumentHandler(
+            _cells, _rows, _metadata, _results, new ValidationEngine(new RealFormulaEngine()),
+            _headers, _clock, _uow, _access, _user, Substitute.For<IRegistryStore>(), store);
+
+        ValidationSummary? saved = null;
+        await _results.SaveAsync(Arg.Do<ValidationSummary>(s => saved = s), Arg.Any<CancellationToken>());
+
+        try
+        {
+            await handler.HandleAsync(DocumentId, new PeriodKey(Period), CancellationToken.None);
+        }
+        catch (NullReferenceException)
+        {
+            // ReadScopeAsync не налаштовано в цьому файлі (повертає null): фільтр видимості після
+            // збереження підсумку нас тут не цікавить — предмет тесту сам підсумок.
+        }
+
+        Assert.NotNull(saved);
+        Assert.Equal(1, saved!.ErrorCount);
+        Assert.Contains("REL-REL1", saved.MessagesJson);
     }
 
     [Fact]

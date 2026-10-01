@@ -111,6 +111,11 @@ public sealed class ImportDiffBuilder
 
                 var cell = worksheet.Cell(row.Number, column.Number);
 
+                // ⚠ P3: адреса комірки книги — у КОЖНІЙ відмові, не лише поза
+                // рядками (`V-10`). Ключ рядка `R17` людина в Excel не знайде,
+                // адресу `F23` — одним переходом.
+                var excelCell = cell.Address.ToString();
+
                 // ⛔ S6 (ФВ-6.6): колонка, якої користувач не бачить, — ПЕРШОЮ і
                 // без жодного погляду на її поточне значення. Далі йде
                 // порівняння з ним (`Same`), і «незмінена — пропуск, змінена —
@@ -125,7 +130,7 @@ public sealed class ImportDiffBuilder
                         rejected.Add(new ImportRejection(
                             row.RowKey, column.Code, "ECR-ACCS-0403",
                             $"Editing the cell is not allowed: {EditDenyReason.NoGrant}.",
-                            table.Code, table.NameL10n, ImportMessageKeys.Denied(EditDenyReason.NoGrant)));
+                            table.Code, table.NameL10n, ImportMessageKeys.Denied(EditDenyReason.NoGrant), excelCell));
                     }
 
                     continue;
@@ -156,6 +161,19 @@ public sealed class ImportDiffBuilder
                     continue;
                 }
 
+                // ⚠ P1: значення оверлея — decimal до 16 знаків, а Excel зберігає
+                // double (~15 значущих цифр): незмінена книга дала б «зміну» на
+                // останніх розрядах. Для обчислюваної колонки рівність — з
+                // відносним допуском 1e-12; справжня правка (навіть 1 одиниця
+                // останнього видимого розряду) значно більша.
+                if (IsCalculated(definition)
+                    && incoming is decimal inNumber
+                    && Current(existing, definition) is decimal calcNumber
+                    && Math.Abs(inNumber - calcNumber) <= 1e-12m * Math.Max(1m, Math.Abs(calcNumber)))
+                {
+                    continue;
+                }
+
                 // ⛔ Обчислена комірка відхиляється ЗАВЖДИ і першою — навіть
                 // якщо права дозволяють. Записане поверх формули значення
                 // зникне при найближчому перерахунку, і користувач вирішить,
@@ -166,12 +184,23 @@ public sealed class ImportDiffBuilder
                 // імпортом адмін міг перепублікувати шаблон і зробити раніше
                 // редаговану колонку обчислюваною — і прев'ю показувало б зміну
                 // як застосовну, а `ApplyAsync` падав би пізніше.
+                //
+                // ✎ P3: причин розбіжності дві, і людині вони кажуть протилежне.
+                // Комірка книги збігається з відбитком експорту — її не чіпали,
+                // число змінила система (перерахунок після вивантаження): книга
+                // застаріла, правити в ній нічого. Інакше — правку вніс користувач.
                 if (IsCalculated(definition))
                 {
+                    var stale = CalculatedCellFingerprint.Unchanged(row, block.Columns, column, cell);
+
                     rejected.Add(new ImportRejection(
                         row.RowKey, column.Code, "ECR-CELL-4221",
-                        "The cell is calculated by the system: the value from the file is not applied.",
-                        table.Code, table.NameL10n, ImportMessageKeys.Calculated));
+                        stale
+                            ? "The cell is calculated by the system and was recalculated after export: the workbook is out of date."
+                            : "The cell is calculated by the system: the value from the file is not applied.",
+                        table.Code, table.NameL10n,
+                        stale ? ImportMessageKeys.CalculatedStale : ImportMessageKeys.Calculated,
+                        excelCell));
 
                     continue;
                 }
@@ -204,7 +233,7 @@ public sealed class ImportDiffBuilder
                     rejected.Add(new ImportRejection(
                         row.RowKey, column.Code, "ECR-ROW-0404",
                         "The document has no row with this key: import does not create rows.",
-                        table.Code, table.NameL10n, ImportMessageKeys.NoRow));
+                        table.Code, table.NameL10n, ImportMessageKeys.NoRow, excelCell));
 
                     continue;
                 }
@@ -225,7 +254,7 @@ public sealed class ImportDiffBuilder
                     rejected.Add(new ImportRejection(
                         row.RowKey, column.Code, "ECR-ACCS-0403",
                         $"Editing the cell is not allowed: {decision.Reason}.",
-                        table.Code, table.NameL10n, ImportMessageKeys.Denied(decision.Reason)));
+                        table.Code, table.NameL10n, ImportMessageKeys.Denied(decision.Reason), excelCell));
 
                     continue;
                 }
@@ -242,7 +271,7 @@ public sealed class ImportDiffBuilder
                     rejected.Add(new ImportRejection(
                         row.RowKey, column.Code, CellValueReader.TypeMismatch,
                         $"The number has more than {CellValueReader.StorageIntegerDigits} digits before the decimal point: storage cannot hold it.",
-                        table.Code, table.NameL10n, ImportMessageKeys.IntegerDigits));
+                        table.Code, table.NameL10n, ImportMessageKeys.IntegerDigits, excelCell));
 
                     continue;
                 }
@@ -259,7 +288,7 @@ public sealed class ImportDiffBuilder
                     rejected.Add(new ImportRejection(
                         row.RowKey, column.Code, CellValueReader.TypeMismatch,
                         $"The number does not fit the column precision ({definition.Precision}, scale {definition.Scale}) after rounding to the column scale.",
-                        table.Code, table.NameL10n, ImportMessageKeys.Precision));
+                        table.Code, table.NameL10n, ImportMessageKeys.Precision, excelCell));
 
                     continue;
                 }
@@ -285,7 +314,7 @@ public sealed class ImportDiffBuilder
                         ambiguous
                             ? "The value does not match the column type (err.ECR-CELL-0422.expectsNumber): ambiguous separator, the comma may be thousands or decimal."
                             : "The value does not match the column type (err.ECR-CELL-0422.expectsNumber).",
-                        table.Code, table.NameL10n, ImportMessageKeys.ExpectsNumber));
+                        table.Code, table.NameL10n, ImportMessageKeys.ExpectsNumber, excelCell));
 
                     continue;
                 }
@@ -294,7 +323,7 @@ public sealed class ImportDiffBuilder
                 {
                     rejected.Add(new ImportRejection(
                         row.RowKey, column.Code, CellValueReader.TypeMismatch, mismatch.Message,
-                        table.Code, table.NameL10n, mismatch.MessageKey));
+                        table.Code, table.NameL10n, mismatch.MessageKey, excelCell));
 
                     continue;
                 }
@@ -538,6 +567,20 @@ public sealed class ImportDiffBuilder
     private static bool IsCalculated(ColumnDef column)
         => column.DataType is CellDataType.Formula or CellDataType.Calculated || column.IsReadOnly;
 
+    /// <summary>Округлення до 15 значущих цифр — точності double Excel.</summary>
+    internal static decimal RoundSignificant(decimal value)
+    {
+        if (value == 0m)
+        {
+            return 0m;
+        }
+
+        var magnitude = (int)Math.Floor(Math.Log10((double)Math.Abs(value))) + 1;
+        var scale = Math.Clamp(15 - magnitude, 0, 28);
+
+        return decimal.Round(value, scale, MidpointRounding.AwayFromZero);
+    }
+
     /// <summary>Чи збігається значення з файлу з тим, що вже записано.</summary>
     /// <remarks>
     /// ⛔ `V-10`. Порівнюється з <see cref="Current"/> — тим самим значенням, яке
@@ -563,9 +606,17 @@ public sealed class ImportDiffBuilder
 
         return definition.DataType switch
         {
-            CellDataType.Int or CellDataType.Decimal or CellDataType.Formula or CellDataType.Calculated =>
+            // ⚠ Int — точно. Decimal/Formula/Calculated — рівність також за 15
+            // значущими цифрами: Excel тримає double, тож 16-значний хвіст БД
+            // (`8.1234567890123440`) у книзі стає `8.12345678901234` (P2).
+            // Правка в 15-й значущій цифрі й вище лишається зміною.
+            CellDataType.Int =>
+                current is decimal intNumber
+                && (incoming is decimal di ? intNumber == di : incoming is int ii && intNumber == ii),
+            CellDataType.Decimal or CellDataType.Formula or CellDataType.Calculated =>
                 current is decimal number
-                && (incoming is decimal d ? number == d : incoming is int i && number == i),
+                && (incoming is decimal d ? number == d || RoundSignificant(number) == RoundSignificant(d)
+                    : incoming is int i && number == i),
             CellDataType.Bool => incoming is bool b && current is bool flag && flag == b,
             CellDataType.Date => incoming is DateTime t && current is DateTime date && date == t,
             CellDataType.Lookup => incoming is long id && current is long entry && entry == id,
@@ -640,6 +691,12 @@ public static class ImportMessageKeys
 {
     /// <summary>Комірку рахує система, і користувач змінив її значення.</summary>
     public const string Calculated = "err.ECR-CELL-4221.importCalculated";
+
+    /// <summary>
+    /// Комірку рахує система, книгу не змінювали, але систему перерахували після
+    /// експорту — книга застаріла (P3).
+    /// </summary>
+    public const string CalculatedStale = "err.ECR-CELL-4221.importCalculatedStale";
 
     /// <summary>Рядка з ключем із файлу в документі немає.</summary>
     public const string NoRow = "err.ECR-ROW-0404.importNoRow";

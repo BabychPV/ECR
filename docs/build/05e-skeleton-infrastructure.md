@@ -532,7 +532,7 @@ public sealed class PasswordHasher : IPasswordHasher
 {
     private const int SaltSize = 16;
     private const int KeySize = 64;
-    private const int Iterations = 210_000;
+    private const int Iterations = 200_000;
 
     /// <inheritdoc />
     public string Hash(string password)

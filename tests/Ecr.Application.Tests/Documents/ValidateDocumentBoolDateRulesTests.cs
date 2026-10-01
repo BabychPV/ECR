@@ -291,7 +291,7 @@ public sealed class ValidateDocumentBoolDateRulesTests
     // правило бачить у комірці, а заглушка не обчислює виразу взагалі.
     private ValidateDocumentHandler Handler() => new(
         _cells, _rows, _metadata, _results, new ValidationEngine(new RealFormulaEngine()),
-        _headers, _clock, _uow, _access, _user, _registries);
+        _headers, _clock, _uow, _access, _user, _registries, Substitute.For<ITemplateVersionStore>());
 
     /// <summary>Довідник для <c>REGFIELD</c> (D16-04); у Bool/Date-тестах порожній.</summary>
     private readonly IRegistryStore _registries = Substitute.For<IRegistryStore>();

@@ -106,7 +106,7 @@ public sealed class RegistryEntryWriterModeTests
 
         Assert.False(result.Applied);
         Assert.Equal(
-            [new RegistryEntryImportError(2, "999", null, "err.ECR-REG-0404.registryEntry")],
+            [new RegistryEntryImportError(2, "999", null, "err.ECR-REG-0404.registryEntry", new Dictionary<string, string> {["entryId"] = "999"})],
             result.Errors);
         Assert.Empty(_addedEntries);
         await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
@@ -133,8 +133,8 @@ public sealed class RegistryEntryWriterModeTests
         Assert.False(result.Applied);
         Assert.Equal(
             [
-                new RegistryEntryImportError(1, "601", null, "err.ECR-REG-0404.registryEntry"),
-                new RegistryEntryImportError(2, "602", null, "err.ECR-REG-0404.registryEntry"),
+                new RegistryEntryImportError(1, "601", null, "err.ECR-REG-0404.registryEntry", new Dictionary<string, string> {["entryId"] = "601"}),
+                new RegistryEntryImportError(2, "602", null, "err.ECR-REG-0404.registryEntry", new Dictionary<string, string> {["entryId"] = "602"}),
             ],
             result.Errors);
         _registries.DidNotReceive().AddValue(Arg.Any<RegistryValue>());
@@ -150,7 +150,7 @@ public sealed class RegistryEntryWriterModeTests
             CancellationToken.None);
 
         Assert.False(result.Applied);
-        Assert.Equal([new RegistryEntryImportError(1, "NEW1", null, "err.ECR-REG-0404.registryEntry")], result.Errors);
+        Assert.Equal([new RegistryEntryImportError(1, "NEW1", null, "err.ECR-REG-0404.registryEntry", new Dictionary<string, string> {["entryId"] = "NEW1"})], result.Errors);
         Assert.Empty(_addedEntries);
         await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
     }

@@ -108,6 +108,9 @@ export interface ColumnDraft {
    */
   readonly lookupFilter: string | null;
   readonly unitId: number | null;
+
+  /** Типова ширина, px (D-234); `null` — типова за типом даних. */
+  readonly widthPx: number | null;
   readonly isNew: boolean;
 
   /**
@@ -145,6 +148,7 @@ export function emptyColumnDraft(nextOrdinal: number): ColumnDraft {
     lookupRegistryDefId: null,
     lookupFilter: null,
     unitId: null,
+    widthPx: null,
     styleId: null,
     style: null,
     isNew: true,
@@ -173,6 +177,7 @@ export function columnDraftOf(full: ColumnDefDto): ColumnDraft {
     lookupRegistryDefId: full.lookupRegistryDefId,
     lookupFilter: full.lookupFilter,
     unitId: full.unitId,
+    widthPx: full.widthPx ?? null,
     styleId: full.styleId,
     style: null,
     isNew: false,
@@ -205,6 +210,7 @@ export type ColumnBlocker =
   | 'CodeInvalid'
   | 'Header'
   | 'Scale'
+  | 'Width'
   | 'StyleCode'
   | 'StyleFontSize';
 
@@ -218,6 +224,11 @@ export function whyCannotSaveColumn(draft: ColumnDraft): ColumnBlocker | null {
   // ⚠ Дзеркалить `ColumnDef.SetNumericFormat`: сервер відхилив би те саме,
   // форма лише не везе в мережу те, що напевно повернеться відмовою.
   if (draft.precision !== null && draft.scale !== null && draft.scale > draft.precision) return 'Scale';
+
+  // ⚠ Дзеркалить `ColumnDef.SetWidth`: ціле 40..800 px (D-234).
+  if (draft.widthPx !== null && (!Number.isInteger(draft.widthPx) || draft.widthPx < 40 || draft.widthPx > 800)) {
+    return 'Width';
+  }
 
   // ⛔ Директива registry-lookup / cell-style, PR B1: перемикач «власний
   // стиль» увімкнено (`draft.style !== null`), і код стилю ще недійсний —
@@ -275,5 +286,6 @@ export function columnBody(draft: ColumnDraft): SaveColumnDefRequest {
     lookupRegistryDefId: draft.lookupRegistryDefId,
     lookupFilter: draft.lookupFilter,
     unitId: columnTakesUnit(draft.dataType) ? draft.unitId : null,
+    widthPx: draft.widthPx,
   };
 }

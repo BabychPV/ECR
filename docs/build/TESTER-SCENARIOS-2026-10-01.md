@@ -67,7 +67,7 @@ Decimal.
 
 ### Н-А1. Вкладка «Events from PI»: видимість і шаблон подій — ✅
 
-- **Права:** `Integration.View` (бачить сторінку), `Integration.Manage` (бачить вкладку).
+- **Права:** `Integration.Manage` (повна сторінка й вкладка). ✎ 2026-10-01, живий прохід: користувач лише з `Integration.View` у UI бачить **червоний 403** на `/admin/sources` (запити потребують Manage), а не «сторінку без вкладок» — уточнення/фікс у роботі (TESTER-GUIDE п. 4.4); п. 1 нижче перевіряйте з цим застереженням.
 - **Кроки:**
   1. Увійти користувачем лише з `Integration.View`; `/admin/sources` → клік по рядку з'єднання.
   2. Те саме користувачем з `Integration.Manage`.
@@ -84,7 +84,7 @@ Decimal.
 
 - **Передумова:** ключі `PiSqlClient:EventQuery` / `EventTemplateQuery` не задані.
 - **Права:** `Integration.Manage`.
-- **Кроки:** відкрити «Events from PI», вибрати шаблон; натиснути «Test» у розділі проби.
+- **Кроки:** відкрити «Events from PI», вибрати шаблон; **«Create mapping»** (проба живе лише у формі мапінгу, ✎ 2026-10-01, звірка Н-А…Н-Е: у самій вкладці її немає) → натиснути «Test» у розділі проби.
 - **Очікується:** інформаційний банер **«Event reading is not configured»** (текст із відповіді сервера); таблиця подій лишається видимою; проба відмовляє з тим самим поясненням, нічого не пише.
 - **Помилки:** `422 ECR-INT-0422 eventQueryNotConfigured` / `queryKindNotConfigured` / `queryKindNotSupported`.
 - **Вимоги:** HSE301 A6.
@@ -94,7 +94,7 @@ Decimal.
 - **Права:** `Integration.Manage` (проба — лише з ним: `POST /api/v1/data-sources/{id}/probe-events`).
 - **Дані:** у PI є події вибраного шаблону за останні 30 днів.
 - **Кроки:**
-  1. Розділ «Test on recent events»: «Days back» = 30, «At most events» = 20 → **«Test»**.
+  1. «Create mapping» (або «Edit» наявного) — розділ «Test on recent events» є **лише у формі мапінгу**, не у вкладці (✎ 2026-10-01, звірка Н-А…Н-Е: `SourceEventMapModal`); «Days back» = 30, «At most events» = 20 → **«Test»**.
   2. «At most events» = 1 при кількох подіях у вікні.
   3. «Days back» = 93 (або «At most events» = 0 / 101).
   4. Вікно без подій (напр. 1 день у тихий період).
@@ -114,26 +114,26 @@ Decimal.
 - **Кроки:**
   1. Панель «Event mappings» → **«Create mapping»** → «Document», «Dynamic table»; у сітці «Column ↔ attribute» уже є рядки `$start`, `$end` — зіставити їх із колонками-датами; «Map a column» → додати Decimal-колонку ← атрибут, «Units» (джерела/колонки); для Lookup-колонки «How» = «By registry code».
   2. Зберегти.
-  3. Спробувати: прибрати `$start`; зіставити `$end` з не-датою; вибрати не динамічну таблицю; дві колонки на один атрибут; «Only events where» без значення.
+  3. Спробувати: прибрати `$start`; зіставити `$end` з не-датою; вибрати не динамічну таблицю; **одну колонку двічі** (✎ 2026-10-01, звірка Н-А…Н-Е: один атрибут на дві колонки дозволено, це не помилка); «Only events where» без значення.
   4. Створити другий мапінг на ту саму пару документ + таблиця.
   5. «Edit» мапінгу — поля Document і Dynamic table вимкнені; змінити «Volume»; зберегти.
   6. «Pause», потім «Resume».
   7. «Delete» мапінгу, за яким ще **нічого не синхронізовано**; потім — за яким уже є події.
 - **Очікується:**
   - п. 1–2: «Event mapping created.»; рядок у панелі з бейджем «Active»; поки є проблеми — список під «Saving is not possible yet:», «Save» вимкнена;
-  - п. 3: відповідна проблема у формі (клієнт) або 422 від сервера;
+  - п. 3: відповідна проблема у формі (клієнт; для колонки двічі — «A column is mapped more than once.») або 422 від сервера;
   - п. 4: 409;
   - п. 5: «Event mapping saved.»; документ/таблицю змінити неможливо (PUT — повна заміна решти полів);
   - п. 6: «Event mapping paused: synchronization no longer writes through it.» / «Event mapping resumed.»;
-  - п. 7: перше — «Event mapping deleted.»; друге — відмова з підказкою поставити на паузу (діалог: «Only a mapping with no synchronized events can be deleted; otherwise pause it.»);
+  - п. 7: перед **кожним** видаленням — діалог-попередження «Only a mapping with no synchronized events can be deleted; otherwise pause it.»; перше — «Event mapping deleted.»; друге — помилка над панеллю «{links} source events have already been synchronized through this event mapping. Deleting it would leave their rows without an explanation. Pause the mapping instead.» (`409 eventMapHasLinks`);
   - кожна зміна — у журналі `aud.StructureChange` (ФВ-12.10).
-- **Помилки:** `409 ECR-INT-0409 eventMapExists` / `eventMapHasLinks` / `eventMapColumnTaken` / `eventMapSourceValueTaken`; `422 ECR-INT-0422 eventMapStartEndRequired` / `eventMapStartEndNotDate` / `eventMapTargetNotDynamic` / `eventMapColumnNotInTable` / `eventMapReservedAttributeInvalid` / `eventMapValueKindMismatch` / `eventMapFilterIncomplete` / `eventMapValueMapNotAllowed` / `eventMapTableNotInDocument`; `404 ECR-INT-0404 eventMap`; `403 ECR-AUTH-0403 noProjectManageGrant`.
+- **Помилки:** `409 ECR-INT-0409 eventMapExists` / `eventMapHasLinks` / `eventMapColumnTaken` / `eventMapSourceValueTaken`; `422 ECR-INT-0422 eventMapStartEndRequired` / `eventMapStartEndNotDate` / `eventMapTargetNotDynamic` / `eventMapColumnNotInTable` / `eventMapReservedAttributeInvalid` / `eventMapValueKindMismatch` / `eventMapFilterIncomplete` / `eventMapValueMapNotAllowed` / `eventMapTableNotInDocument`; `404 ECR-INT-0404 eventMap`; `403 ECR-AUTH-0403 noProjectManageGrant`; `422 ECR-REQ-0422 malformedRequest` — форма запиту поза доменом (порожній чи задовгий атрибут, невідоме число в `volumeMode`/`attributeScope`/`valueKind`/`filterScope`, задовге значення звуження чи відповідності; ✎ 2026-10-01, до виправлення — 500; тест `SourceEventsApiTests.Форма_мапінгу_подій_поза_доменом_дає_422_а_не_500_і_нічого_не_пише`).
 - **Примітка:** `POST /api/v1/source-event-maps` повертає **200**, не 201 — не дефект.
 - **Вимоги:** HSE301 A6, ФВ-12.10, D-174, D-185…D-189.
 
 ### Н-А5. Синхронізація подій і таблиця «Events from PI» — 🟨
 
-- **Права:** `Integration.Manage` для «Get from PI now»; перелік подій бачить користувач, що може читати документ мапінгу.
+- **Права:** `Integration.Manage` для «Get from PI now». Перелік подій через API (`GET /api/v1/source-events`) віддається будь-кому, хто може читати документ мапінгу, але **в UI** вкладка «Events from PI» є лише з `Integration.Manage` (✎ 2026-10-01, звірка Н-А…Н-Е: `DataSourceDrawer`; свідомо — `GET /api/v1/sources` вимагає Manage).
 - **Дані:** активний мапінг (Н-А4); у PI — закриті події, одна відкрита (без кінця), одна в періоді, що вже `Closed`.
 - **Кроки:**
   1. Без жодного мапінгу натиснути **«Get from PI now»**.
@@ -141,7 +141,7 @@ Decimal.
   3. Таблиця подій: фільтри «Mapping», «States», «Period», «From (UTC)»/«To (UTC)»; «Show more».
   4. Відкрити документ за посиланням у колонці «Document / period».
   5. Вручну змінити в документі значення з події; повторити п. 2.
-  6. Запустити збір кнопкою «Collect» на `/admin/sources` для сутності-шаблону подій без мапінгів точок.
+  6. Запустити збір кнопкою «Collect» на `/admin/sources` для сутності-шаблону подій без мапінгів точок. (✎ 2026-10-01: «Collect» — ручний збір на панелі сутностей; у журналі запусків результат пишеться як «Queued by System»/«Started by: schedule», 🟨 виправляється, lane `srcfix`; без PI сутність не створити — TESTER-GUIDE п. 4.4, ⛔ без PI.)
 - **Очікується:**
   - п. 1: помилка з підказкою «Create an event mapping first: it tells where the events go.» і кнопкою «Create mapping»;
   - п. 2: «Event synchronization queued: {job}.»; задача «Source event sync», прогрес «Created {created}, updated {updated}, kept manual…»;
@@ -169,7 +169,7 @@ Decimal.
 
 Розділ **«PI row-window bindings»** у тій самій вкладці.
 
-- **Права:** перегляд — `Integration.View` або `Manage`; зміни — `Integration.Manage` **і** грант `Manage` на **кожен** проєкт, що використовує колонку-ціль.
+- **Права:** перегляд — `Integration.View` або `Manage` (через API; в UI розділ — у вкладці «Events from PI», а вона є лише з `Integration.Manage`, див. Н-А1); зміни — `Integration.Manage` **і** грант `Manage` на **кожен** проєкт, що використовує колонку-ціль.
 - **Дані:** динамічна таблиця з колонками: ціль (Decimal), початок і кінець вікна (Date), за потреби колонка-селектор.
 - **Кроки:**
   1. **«Create binding»** → «Document» (лише для читання колонок таблиці), «Dynamic table», «Target column (Decimal)», «Window start column (Date)», «Window end column (Date)», «Summary» = «Total over time», «Unit of the target column»; у блоці «Sources» → «Add source»: «Source entity», «Attribute path» (вільний текст), «Source unit». Зберегти.
@@ -178,7 +178,7 @@ Decimal.
   4. «Edit» — у формі поле Document порожнє; змінити «Days to refetch…»; зберегти (Н-А7а).
   5. «Pause» / «Resume».
   6. «Delete» прив'язки без підтягнутих значень; потім — з підтягнутими.
-- **Очікується:** п. 1 — «Binding created.», рядок у переліку з колонками Target column / Window / Selector column («one attribute for all rows», якщо без селектора) / Summary / Sources / State; п. 2 — 409; п. 3 — проблеми під «Cannot save yet:» або 422; п. 5 — «Binding paused.» / «Binding resumed.»; п. 6 — перше «Binding deleted.», друге відмова з порадою поставити на паузу. Типові значення: покриття 95 %, повтор 7 днів, поріг розриву порожній.
+- **Очікується:** п. 1 — «Binding created.», рядок у переліку з колонками Target column / Window (start to end) / Selector column («one attribute for all rows», якщо без селектора) / Summary / Sources / State; п. 2 — 409; п. 3 — проблеми під «Cannot save yet:» або 422; п. 5 — «Binding paused.» / «Binding resumed.»; п. 6 — перше «Binding deleted.», друге відмова з порадою поставити на паузу. Типові значення: покриття 95 %, повтор 7 днів, поріг розриву порожній.
 - **Помилки:** `409 ECR-INT-0409 rowWindowTargetTaken` / `rowWindowMapHasValues` / `rowWindowConcurrency` (чужа `rowVersion`) / `rowWindowSelectorTaken`; `422 ECR-INT-0422 rowWindowTargetNotInTable` / `windowColumnsNotDate` / `targetNotDecimal` / `windowColumnNotInTable` / `selectorNotInTable` / `windowColumnsSame` / `rowWindowPolicyOutOfRange` / `rowWindowSelectorWithoutColumn`; `422 ECR-REQ-0422 rowWindowSummaryUnknown` (лише для **числового** `summary` поза переліком, напр. `99`; невідомий рядок `"Foo"` відсікає ще біндер моделі — `422 ECR-REQ-0422 malformedRequest`) / `rowWindowSourceInvalid`; `404 ECR-INT-0404 rowWindowMap`.
 - **Обмеження (Н-А7а):** при редагуванні треба знову вибрати документ («Choose a document to read the table columns.»), інакше «Save» вимкнена — пауза кнопкою в рядку цього не потребує. Прив'язка без джерел або з джерелом іншої сутності **не з'явиться** в розділі цієї сутності. Документи для вибору — перші 500.
 - **Вимоги:** HSE301 A1, ФВ-12.10.
@@ -195,8 +195,8 @@ Decimal.
   5. Імпортувати книгу Excel у документ, де є колонки вікна.
   6. Документ у періоді `Closed` — змінити вікно.
   7. Дочекатися хвилини :05 наступної години (щогодинний повтор).
-- **Очікується:** п. 1 — ставиться задача «PI row-window fetch»; ціль отримує значення (стан Fetched або Partial, якщо покриття < порогу); потім перерахунок; п. 2 — задача **не** ставиться; п. 3 — InvalidWindow, до PI запит не йде, комірка не змінюється; п. 4 — ручне значення лишається (KeptManual); п. 5 — одна задача на таблицю; п. 6 — «Nothing to fetch…»; п. 7 — повторне підтягування для NoData / Partial / SourceError, якщо кінець вікна не старший за «Days to refetch», і для вікон, що ще тривали. Прогрес задачі: «Fetched {fetched}, partial…, invalid window…, no source…». Не більше 500 рядків за прогін — решта продовженням.
-- **Обмеження:** кнопки «Підтягнути з PI» в документі, `POST /documents/{id}/row-windows/fetch` і `probe-window` з FEATURE §4.4/§10.6 **у коді немає**; вікно на переході годинника вважається InvalidWindow. Живим PI не перевірено.
+- **Очікується:** п. 1 — ставиться задача «PI row-window fetch»; ціль отримує значення (стан Fetched або Partial, якщо покриття < порогу); потім перерахунок; п. 2 — задача **не** ставиться; п. 3 — InvalidWindow, до PI запит не йде, комірка не змінюється; п. 4 — ручне значення лишається (KeptManual); п. 5 — одна задача на таблицю; п. 6 — сам запис комірки відхилено (період закрито, `PeriodClosed`, навіть з `Manage`), задача **не** ставиться (✎ 2026-10-01, звірка Н-А…Н-Е: «Nothing to fetch: the table instance, the open period or an active binding is missing» буває лише, коли період закрили між постановкою й виконанням задачі); п. 7 — повторне підтягування для NoData / Partial / SourceError, якщо кінець вікна не старший за «Days to refetch», і для вікон, що ще тривали. Прогрес задачі: «Fetched {fetched}, partial…, invalid window…, no source…». Не більше 500 рядків за прогін — решта продовженням.
+- **Обмеження:** кнопки «Підтягнути з PI» в документі, `POST /documents/{id}/row-windows/fetch` і `probe-window` з FEATURE §4.4/§10.6 **у коді немає**; InvalidWindow — лише час, якого немає в поясі проєкту (пропущена година весняного переходу); неоднозначний осінній час приймається. Живим PI не перевірено.
 - **Вимоги:** HSE301 A1.
 
 ---
@@ -217,8 +217,8 @@ join / filter / group / compute / script у бекенді **немає**, і в
   1. Меню **«Data pipeline»** → `/admin/pipeline` на стенді без джерел.
   2. На стенді з джерелами — не вибирати сутність.
   3. «Source entity» → вибрати сутність; оновити сторінку.
-- **Очікується:** п. 1 — «No collection sources configured» / «Without sources the system works fine: data is entered by hand.»; п. 2 — «Pick a source entity above to see its pipeline…»; п. 3 — вступ «The steps the system runs for this source entity, with real collected rows of the last {days} days after each step…» (`{days}` = 7), п'ять карток «1. Source», «2. Collection schedule», «3. Collection», «4. Mapping», «5. Write to documents»; вибір тримається в URL (`?entity=<id>`).
-- **Помилки:** `403 ECR-AUTH-0403` без права; `404 ECR-INT-0404 sourceEntity`.
+- **Очікується:** п. 1 — «No collection sources configured» / «Without sources the system works fine: data is entered by hand.» (під ними ще й підказка «Pick a source entity above…» — не дефект); п. 2 — «Pick a source entity above to see its pipeline…»; п. 3 — вступ «The steps the system runs for this source entity, with real collected rows of the last {days} days after each step…» (`{days}` = 7), п'ять карток «1. Source», «2. Collection schedule», «3. Collection», «4. Mapping», «5. Write to documents»; вибір тримається в URL (`?entity=<id>`).
+- **Помилки:** `403 ECR-AUTH-0403` без права; `404 ECR-INT-0404 sourceEntity` — лише прямим `GET …/mapping/preview` для неіснуючої або неактивної сутності; невідомий `?entity=<id>` в URL екран мовчки показує як «сутність не вибрано».
 - **Вимоги:** ФВ-14.3 (область 9), D-235.
 
 ### Н-Б2. Стани кроків і «звуження до нуля» — ✅
@@ -229,8 +229,8 @@ join / filter / group / compute / script у бекенді **немає**, і в
   - «Passes data» — дані проходять;
   - «Narrows to zero» — **лише перший** крок, де лічильник став 0; картка з червоною рамкою й alert «The data narrows to zero at this step» з підказкою для кроку; наступні кроки — «No data reaches it»;
   - «Check»: Source — останній прогін Degraded; Schedule — розкладу немає; Write — 0 записано, але є «stays raw»;
-  - «Off»: сутність неактивна / розклад вимкнено; «Failed»: останній прогін Failed / розклад з помилкою;
-  - лічильники: Collection = точки, що прийшли; Mapping = сума по **активних** мапінгах; Write = активні мапінги з результатом «lands in a cell»;
+  - «Off»: сутність неактивна (крок 1; кроки 3–5 тоді «No data reaches it» без лічильників — ✎ 2026-10-01 виправлено: раніше замість них була картка 404) / розклад вимкнено; «Failed»: останній прогін Failed / розклад з помилкою;
+  - лічильники: Collection = точки, що прийшли; Mapping = сума точок по **активних** мапінгах; Write = сума точок активних мапінгів з результатом «lands in a cell» (рахуються точки, не мапінги);
   - дані — уже зібрані (`ext.RawDataPoint`) за 7 днів, не живе читання; вікно на екрані не змінюється.
 - **Обмеження:** користувач з `Integration.Manage`, але без `Integration.EditSchedule`, бачить помилку всередині кроку 2, а бейдж кроку лишається «Passes data» (так задумано: нечитаний розклад не вважається дефектом кроку).
 - **Вимоги:** ФВ-14.3, D-235.
@@ -239,13 +239,13 @@ join / filter / group / compute / script у бекенді **немає**, і в
 
 - **Права:** `Integration.Manage` + `Integration.EditSchedule`.
 - **Кроки:**
-  1. Крок 2: «Create schedule» (cron, «Collection window (days)», «Enabled») → «Save»; змінити; «Remove» (підтвердження «Remove this schedule? Collection will no longer run automatically.»).
+  1. Крок 2: форма розкладу видна одразу (cron, «Collection window (days)», «Enabled»); кнопка — **«Create schedule»**, поки розкладу немає, і «Save» — для наявного; змінити; «Remove» (підтвердження «Remove this schedule? Collection will no longer run automatically.»).
   2. «Collection window (days)» поза межами.
   3. Змінити розклад у двох вкладках, зберегти в обох.
   4. Крок 1: «Open connections».
   5. Крок 4: «Add mapping» → «Add a source field mapping» → «Save mapping»; «Pause»/«Resume»; «Remove mapping» мапінгу без зібраних даних і з даними.
   6. Змінити одиницю джерела (банер «Source unit changed») → «Yes, accept {actualUnitCode}» / «No, this is a source error».
-- **Очікується:** п. 1 — «Schedule saved.» / «Schedule removed.»; п. 2 — «Enter a whole number of days from {min} to {max}.»; п. 3 — друга вкладка: 409 і кнопка «Reload the current version»; п. 4 — перехід на `/admin/sources`; п. 5 — «The mapping has been created.», «Mapping paused.»/«Mapping resumed.»; мапінг із даними не видаляється — порада поставити на паузу; крок 5 показує «Gaps» («Mappings that will put nothing in the document», «Source fields that land nowhere», «Columns with nothing behind them») або «No gaps…»; п. 6 — прийняття пишеться в `aud.StructureChange`.
+- **Очікується:** п. 1 — «Schedule saved.» / «Schedule removed.»; п. 2 — «Enter a whole number of days from {min} to {max}.» (1…366), кнопка вимкнена — `422 …Lookback` з екрана не побачити, лише прямим запитом; п. 3 — друга вкладка: 409 і кнопка «Reload the current version»; п. 4 — перехід на `/admin/sources`; п. 5 — «The mapping has been created.», «Mapping paused.»/«Mapping resumed.»; мапінг із даними не видаляється — порада поставити на паузу; крок 5 показує «Gaps» («Mappings that will put nothing in the document», «Source fields that land nowhere», «Columns with nothing behind them») або «No gaps…»; п. 6 — прийняття пишеться в `aud.StructureChange`.
 - **Помилки:** `422 ECR-REQ-0422 collectionScheduleCron` / `…CronLength` / `…Lookback` / `…IfMatch` / `…NotApplied`; `409 ECR-JOB-0409 collectionScheduleExists` / `collectionScheduleChanged`; `409 ECR-INT-0409 mappingHasCollectedData` / `mappingUnitChangeNotPending`; `422 ECR-INT-0422 pendingUnitNotInCatalog`; `404 ECR-UOM-0404 unitId`.
 - **Вимоги:** ФВ-14.3, ФВ-12.10, D-235.
 
@@ -258,11 +258,11 @@ Date, Bool, Lookup, Unit), бажано один темпоральний і о�
 
 ### Н-В1. Табличний редактор записів — ✅
 
-- **Права:** перегляд — `Registry.View` (або грант Read); редагування — `Registry.EditData` (або грант Write).
+- **Права:** перегляд — `Registry.View`; редагування — `Registry.EditData`. ⚠ ✎ 2026-10-01, звірка Н-А…Н-Е: гранти Read / Write на довідник сервер приймає, але **екран їх не враховує**: користувач лише з грантом Write бачить «Read only: editing needs the Registry.EditData permission.», лише з грантом Read — сторінку не відкриє. Гранти — тільки через API; це названий дефект клієнта, не новий.
 - **Кроки:**
   1. `/admin/registries` → вибрати довідник → **«Open data»** (`/admin/registries/:code/entries`).
-  2. «New entry» (або Ctrl+Enter); ввести значення; у Decimal — `1,5`; у Date — `31.12.2026`; порожнє обов'язкове поле.
-  3. Ввести код, що вже є в іншому рядку.
+  2. «New entry» (або Ctrl+Enter); ввести значення; у Decimal — `1,5`; у Date — **вставити** (Ctrl+V) текст `31.12.2026` (набраний руками в календарі він просто скасовується без підказки); порожнє обов'язкове поле.
+  3. У полі **унікального ключа** довідника ввести значення, що вже є в іншому рядку; окремо — код запису, що вже є в збереженому записі.
   4. Виправити; **«Save {count} changes»** (або Ctrl+S).
   5. Вставити з Excel блок комірок, де Lookup — коди/назви, частина — невідома.
   6. Позначити рядок на видалення (Ctrl+Shift+Delete) → «Keep row» → знову «Delete row» → зберегти.
@@ -270,7 +270,7 @@ Date, Bool, Lookup, Unit), бажано один темпоральний і о�
   8. Темпоральний довідник: змінити «As of».
   9. Користувачем без `Registry.EditData`; потім на External-довіднику.
   10. Змінити значення й піти зі сторінки.
-- **Очікується:** п. 2 — підказки «Use a dot, not a comma, as the decimal separator.», «Enter a date as YYYY-MM-DD.», «A value is required.»; код нового рядка «Assigned on save» (режим Auto); за 600 мс після правки жива перевірка («Check passed» або «{errors} errors, {warnings} warnings»); п. 3 — «Same key {key} as row {row}.», збереження заблоковано; п. 4 — один пакет «усе або нічого», «Saved {time}»; п. 5 — незіставлені комірки не змінені, банер «{count} pasted cells could not be matched and were left unchanged.»; п. 7 — у другій вкладці помилка рядка; п. 8 — дані на дату, `?asOf=` в URL; п. 9 — банер «Read only: editing needs the Registry.EditData permission.» / «Read only: this registry is mastered by an external source.»; п. 10 — перехоплення незбережених змін.
+- **Очікується:** п. 2 — підказки «Use a dot, not a comma, as the decimal separator.», «Enter a date as YYYY-MM-DD.», «A value is required.»; код нового рядка «Assigned on save» (режим Auto); за 600 мс після правки жива перевірка («Check passed» або «{errors} errors, {warnings} warnings»); п. 3 — для поля ключа «Same key {key} as row {row}.», збереження заблоковано; для коду запису жива перевірка мовчить — після збереження помилка рядка «An entry with code "{code}" already exists in this registry (Id {id}).» (`ECR-REG-0409 entryCodeTaken`), а два **нові** рядки з однаковим кодом — відмова всього пакета `422 batchItemInvalid` тостом; п. 4 — один пакет «усе або нічого», «Saved {time}»; п. 5 — незіставлені комірки не змінені, банер «{count} pasted cells could not be matched and were left unchanged.»; п. 7 — у другій вкладці помилка рядка; п. 8 — дані на дату, `?asOf=` в URL; п. 9 — банер «Read only: editing needs the Registry.EditData permission.» / «Read only: this registry is mastered by an external source.»; п. 10 — перехоплення незбережених змін.
 - **Клавіатура:** стрілки, Home/End, Ctrl+Home/End, PgUp/PgDn (10 рядків), Enter/F2/Alt+↓ — редагувати, Esc — скасувати, Delete — очистити, Ctrl+. — шторка запису.
 - **Помилки** (✎ 2026-10-01: `entryChanged`, `keyTaken`, `keyWindowOverlap` — це **помилки рядка** у звіті пакета, відповідь пакета лишається `200`; HTTP-статусом вони не приходять): `ECR-REG-4093 entryChanged` («Entry {entryCode} was changed after you opened it.»); `ECR-REG-4092 keyTaken` / `keyWindowOverlap`; `ECR-REQ-0422 batchItemInvalid` / `batchItemNewOnly` / `batchTooLarge` (> 2000 рядків); `ECR-REG-4221 ruleViolated`; `422 ECR-REQ-0422 asOfRequired` (темпоральний без дати, API).
 - **Вимоги:** ФВ-8.12.
@@ -287,7 +287,7 @@ Date, Bool, Lookup, Unit), бажано один темпоральний і о�
 - **Права:** `Registry.EditDefinition` (без нього колонки «Usage» немає).
 - **Дані:** запис A довідника X, на який посилаються: поле Lookup іншого довідника, дочірні записи, колонка шаблону з Lookup на X; методологія, де A — речовина.
 - **Кроки:** `/admin/registries` → X → колонка **«Usage»** → **«Where used»** у рядку A.
-- **Очікується:** діалог «Where entry "{code}" is used» з розділами: «Registry entries that refer to it» (записи, чинні **сьогодні**; до 20 на поле, «Shown {shown} of {total}»), «Child entries», «Methodologies that declare it as a substance», «Template columns that take values from this registry»; унизу — «Not listed here per entry: document cells and headers, methodology constants and cascade links…»; посилання на записи ведуть на `/admin/registries?code=X&q=CODE`. Відмова читання одного поля (напр. через обмеження S18) — помилка лише цієї групи.
+- **Очікується:** діалог «Where entry "{code}" is used» з рядком «Entries are read as of {date}: valid, active and not deleted on that day.» і розділами: «Registry entries that refer to it» (записи, чинні **сьогодні**; до 20 на поле, «Shown {shown} of {total}»), «Child entries» (дочірні за ієрархією `parentEntryId`, не частини композиції), «Methodologies that declare it as a substance», «Template columns that take values from this registry»; унизу — «Not listed here per entry: document cells and headers, methodology constants and cascade links…»; посилання на записи ведуть на `/admin/registries?code=X&q=CODE`. Відмова читання одного поля (напр. через обмеження S18) — помилка лише цієї групи.
 - **Обмеження:** комірки документів, константи методологій і каскадні зв'язки поіменно **не** перелічуються — діалог про це каже.
 - **Вимоги:** ФВ-8.14.
 
@@ -300,14 +300,14 @@ Date, Bool, Lookup, Unit), бажано один темпоральний і о�
   2. Друге поле-композиція в C.
   3. Композиція на сам C; C темпоральний; цикл P → C → P.
   4. Для наявного поля змінити зв'язок на композицію.
-  5. Додати в C запис, потім спробувати додати нове обов'язкове поле.
+  5. Додати в C запис, потім спробувати додати ще одне поле «Part of parent» (воно завжди обов'язкове; звичайне нове поле конструктор обов'язковим зробити не дає — лише через API).
 - **Очікується:** п. 1 — поле стає обов'язковим; п. 2–3 — попередження клієнта («A registry can be part of only one parent…», «A registry cannot be part of itself…», «A part cannot have its own validity window…») або відмова сервера; п. 4 — для наявних полів прапорця немає; через API — відмова; п. 5 — відмова.
 - **Помилки:** `422 ECR-REG-0422 compositionNotLookup` / `compositionMoreThanOne` / `compositionTargetSelf` / `compositionNotRequired` / `compositionChildTemporal` / `compositionCycle` / `relationKindImmutable` / `newFieldRequired`.
 - **Вимоги:** ФВ-8.16.
 
 ### Н-В5. Редактор master-detail і індикатор Σ — ✅
 
-- **Права:** перегляд — `Registry.View`; правка — `Registry.EditData`.
+- **Права:** перегляд — `Registry.View`; правка — `Registry.EditData` (грант Write екран не враховує — див. Н-В1).
 - **Дані:** композиція з Н-В4; на P — правило `childSum` з допуском (рівень Error або Warning).
 - **Кроки:**
   1. У конструкторі P → **«Edit with parts (master-detail)»** (`/admin/registries/P/composition`).
@@ -352,8 +352,8 @@ Date, Bool, Lookup, Unit), бажано один темпоральний і о�
   4. `format=pdf`.
   5. Довідник, де записів більше за `Registries:ExportMaxRows` (типово 50000; на стенді можна знизити).
   6. Користувачем без права читання.
-- **Кроки (UI):** `/admin/registries` (довідник вибрано) або `/entries` → **«Export»** → «CSV (can be imported back)» / «Excel workbook (XLSX)».
-- **Очікується:** п. 1 — файл `registry-{CODE}-{yyyyMMdd}.csv|xlsx`; ті самі записи, що в сітці на `asOf` (типово сьогодні, UTC); Lookup — кодом цілі, Unit — кодом одиниці; CSV — UTF-8 з BOM, колонки `code` + коди полів; XLSX — додатково `@name`, `@validFrom`, `@validTo`, аркуш = код довідника; п. 2 — у CSV значення з префіксом `'` (зокрема від'ємні числа), у XLSX — текст, не формула; п. 3 — імпорт проходить, апостроф знято; п. 5 — відмова, **обрізаного файлу немає**; у журналі безпеки подія `RegistryExported` (код, формат, дата, кількість рядків). В UI для темпорального — «Entries effective on {date}.»; помилки під заголовком «Export failed» (403 — реченням про право читання; 422 стелі — текст сервера й підказка про `Registries:ExportMaxRows`, файл не завантажується); прапорець «With child parts (composition)» **активний** (`598fdf2f`, Н-Г3).
+- **Кроки (UI):** `/admin/registries` (довідник вибрано) або `/admin/registries/:code/entries` → **«Export»** → «CSV (can be imported back)» / «Excel workbook (XLSX)».
+- **Очікується:** п. 1 — файл `registry-{CODE}-{yyyyMMdd}.csv|xlsx`; ті самі записи, що в сітці на `asOf` (типово сьогодні, UTC); Lookup — кодом цілі, Unit — кодом одиниці; CSV — UTF-8 з BOM, колонки `code` + коди полів; XLSX — додатково `@name`, `@validFrom`, `@validTo`, аркуш = код довідника; п. 2 — у CSV значення з префіксом `'` (зокрема від'ємні числа), у XLSX — текст, не формула; п. 3 — імпорт проходить, апостроф знято; п. 5 — відмова, **обрізаного файлу немає**; у журналі безпеки подія `RegistryExported` (код, формат, дата, кількість рядків). В UI для темпорального — «Entries effective on {date}.» (на `/entries` дата — з `?asOf` сторінки, без нього сьогодні); помилки під заголовком «Export failed» (403 — реченням про право читання; 422 стелі — текст сервера й підказка про `Registries:ExportMaxRows`, файл не завантажується); прапорець «With child parts (composition)» **активний** (`598fdf2f`, Н-Г3).
 - **Помилки:** `422 ECR-REQ-0422 registryExportFormatUnknown` («…use csv or xlsx»); `422 ECR-REQ-0422 registryExportTooLarge`; `403`; `404 ECR-REG-0404`; при CSV-імпорті невідомої одиниці — помилка **рядка** `ECR-REG-0422 unitCodeUnknown` у звіті імпорту (відповідь `200`, не 422).
 - **Конфігурація:** `Registries:ExportMaxRows` < 1 — служба не стартує (перевірка конфігурації).
 - **Вимоги:** RT-16, ФВ-8.12.
@@ -384,7 +384,7 @@ Date, Bool, Lookup, Unit), бажано один темпоральний і о�
 - **Дані:** методологія, що читає довідник X; документи з поточними результатами у відкритих (`Open`/`Grace`) періодах і один — у закритому.
 - **Кроки:** `/admin/registries` → X → **«Affected documents»** (`/admin/registries/X/impact`).
 - **Очікується:** заголовок «Registry impact» + код; колонки «Document | Period | State | Methodologies»; «Shown {shown} of {total}»; документа закритого періоду **немає**; якщо список обрізано (стеля 1000 / віддається до 500) — «The list reached the server limit…»; порожньо — «No affected documents».
-- **Після перерахунку:** зачепленим вважається документ, чий актуальний прогін почався **до** `DataChangedAt` довідника (те саме правило, що й банер свіжості); після завершення задачі перерахунку (з дочірніми) сторінка перечитує перелік і панель результатів — перераховані документи зникають; довідник без правок не зачепив нічого. Перевірка: Н-Д2 п. 3 → дочекатися «Done» → перелік порожній («No affected documents»). Статус задачі на сторінці — за ефективним станом («Fanned out…» → «Done»/«Done with errors», Н-К1).
+- **Після перерахунку:** зачепленим вважається документ, чий актуальний прогін почався **до** `DataChangedAt` довідника (те саме правило, що й банер свіжості); після завершення задачі перерахунку (з дочірніми) сторінка перечитує перелік і панель результатів — перераховані документи зникають; довідник без правок не зачепив нічого. Перевірка: Н-Д2 п. 3 → дочекатися «Succeeded» → перелік порожній («No affected documents»). Статус задачі на сторінці — за ефективним станом: «Calculating documents», поки дочірні рахуються, → «Succeeded» / «Done with errors»; під ним рядок «Fanned out {total}, done {done} of {total}, errors {failed}.» (Н-К1).
 - **Вимоги:** RT-25, ФВ-9.19.
 
 ### Н-Д2. «Recalculate affected» — ✅
@@ -405,7 +405,7 @@ Date, Bool, Lookup, Unit), бажано один темпоральний і о�
 
 - **Права:** `Calculation.View` (панель «Calculation results» документа).
 - **Кроки:** 1) перерахувати документ; 2) змінити запис довідника X, який читає методологія; 3) відкрити документ; 4) перерахувати (Н-Д2 або кнопкою в документі); 5) знову відкрити.
-- **Очікується:** п. 3 — жовтий alert «These results are out of date» + «Registry "{name}" was changed after the calculation»; **подання не блокується**, автоматичного перерахунку немає; п. 5 — банер зник.
+- **Очікується:** п. 3 — alert-попередження «These results are out of date» з текстом «The inputs changed after the last recalculation, so these numbers no longer match the data. Recalculate the sheet before submitting it.» і рядком «Registry "{name}" was changed after the calculation» (текст лише радить); **подання не блокується**, автоматичного перерахунку немає; п. 5 — банер зник. ⚠ P2 (живий прохід `d793f199`; 🟨 виправляється, lane `stalefix`): після «Recalculate» банер і тост лишаються до перезавантаження сторінки.
 - **Назва в банері:** назва довідника мовою користувача з каталогу (`85300af4`); **код** — запасний варіант, якщо каталог ще вантажиться, у користувача немає `Registry.View` або довідника в каталозі нема. Результат методології теж застаріває після правки довідника (`40b23079`).
 - **Вимоги:** ФВ-9.19, RT-25.
 
@@ -425,7 +425,7 @@ Date, Bool, Lookup, Unit), бажано один темпоральний і о�
   3. Лише клавіатурою: Tab до кнопки ↓ → Enter.
   4. Оновити сторінку; відкрити документ проєкту на цій версії.
   5. Спробувати переставити **рядки**.
-- **Очікується:** п. 1–3 — тост «{name} is now in position {position} of {count}.»; ↑ на першій і ↓ на останній позиції вимкнені; п. 4 — порядок збережено; п. 5 — кнопки й ручка рядків вимкнені, підпис «Rows cannot be reordered here yet… Use the Order field in the row form.»
+- **Очікується:** п. 1–3 — тост «{name} is now in position {position} of {count}.»; ↑ на першій і ↓ на останній позиції вимкнені; п. 4 — порядок збережено; п. 5 (лише в **чернетці** з `Template.Edit`; в опублікованій версії колонки порядку рядків і підпису немає зовсім) — кнопки й ручка рядків вимкнені, підпис «Rows cannot be reordered here yet… Use the Order field in the row form.»
 - **Помилки (API `PATCH /api/v1/template-versions/{id}/presentation`):** `422 ECR-TMPL-0422 emptyPatch` / `ordinalInvalid` (не ціле 0…1000000).
 - **Обмеження:** перестановка рядків — лише полем «Order» у формі рядка (D-234).
 - **Вимоги:** ФВ-2.6, ФВ-2.7, D-234.
@@ -443,15 +443,15 @@ Date, Bool, Lookup, Unit), бажано один темпоральний і о�
   1. У рядку дій таблиці **«Conditional formatting»**.
   2. «Add rule» → «Column», «Condition» = «Between», «Value»/«Up to» (верхня < нижньої), без кольору й жирності.
   3. «Check on a value» → «Sample value».
-- **Очікується (UI):** підказки «The upper bound must not be less than the lower one.», «Choose a fill color, text color or bold, otherwise the rule changes nothing.»; перевірка на значенні показує «Rule {n} applies.» або «No rule applies to this value.»; «Save rules» неактивна, поки правила неповні («Complete or remove the rules marked above before saving.»); збереження — Н-Е3.
+- **Очікується (UI):** підказки по одній, за чергою: спершу «The upper bound must not be less than the lower one.» під «Up to»; лише після виправлення меж — «Choose a fill color, text color or bold, otherwise the rule changes nothing.»; перевірка на значенні показує «Rule {n} applies.» або «No rule applies to this value.»; «Save rules» неактивна, поки правила неповні («Complete or remove the rules marked above before saving.»); збереження — Н-Е3.
 - **Кроки (API):**
   4. `GET`, узяти `ETag`; `PUT /api/v1/template-versions/{id}/conditional-formats` із заголовком `If-Match: <ETag>` (без нього — `422 ECR-REQ-0422 condFormatIfMatch`, застарілий — `409 ECR-TMPL-0409 condFormatChanged`) і тілом `{rules:[{columnCode, operator:"gt", value:"100", backgroundHex:"#ffcccc", isBold:true}]}` на чернетці; `GET` того самого шляху.
   5. Помилкові правила: невідомий оператор; `value:"abc"`; колір `red`; неіснуюча колонка; > 500 правил.
   6. PUT на опублікованій версії (з чинним `If-Match`, інакше раніше спрацює `condFormatIfMatch`).
   7. Опублікувати версію, в документі ввести значення 150 і 50; `GET /documents/{id}/tables/{tableInstanceId}`; Excel-експорт документа.
-- **Очікується (API):** п. 4 — правило повернуто; п. 5 — 422; п. 6 — 409; п. 7 — у зрізі `cellFormats["{rowKey}:{columnCode}"]` лише для 150; у Excel — заливка й жирний у тій комірці. `between` включає межі (порядок меж не важливий), кома = крапка, перше правило за порядком виграє.
+- **Очікується (API):** п. 4 — правило повернуто; п. 5 — 422; `{index}` у тексті всіх чотирьох ключів правила — номер правила **серед правил тієї ж колонки** (✎ 2026-10-01 вирівняно: раніше `condFormatColumn` давав позицію в запиті); п. 6 — 409; п. 7 — у зрізі `cellFormats["{rowKey}:{columnCode}"]` лише для 150; у Excel — заливка й жирний у тій комірці. `between` включає межі (порядок меж не важливий), кома = крапка, перше правило за порядком виграє.
 - **Помилки:** `422 ECR-CFG-0422 condFormatOperator` / `condFormatOperand` / `condFormatColor` / `condFormatColumn` / `condFormatLimit`; `409 ECR-TMPL-0409` (заморожена версія); `404 ECR-TMPL-0404 templateVersion`.
-- **Обмеження:** ✎ 2026-10-01 розбіжність `eq`/`ne` усунуто (`lane/cloud/fix-condfmt-ne-parity`): усі оператори з операндом — числові і в панелі, і на сервері; текст, дата, булеве, елемент довідника й одиниця їх не задовольняють (`ne 100` на «abc» не фарбує ніде); спільна фікстура `conditional-format-parity.json`. Приклад у панелі не знає типу колонки: текст «5» він бачить числом (сітка й Excel беруть результат лише з сервера); зріз таблиці віддає правила в `ColumnDto.conditionalFormats` і `TableSliceDto.cellFormats` (`56a20640`), тож оператору не потрібне право `Template.View`. Ширин колонок нема.
+- **Обмеження:** ✎ 2026-10-01 розбіжність `eq`/`ne` усунуто (`a54fb19`): усі оператори з операндом — числові і в панелі, і на сервері; текст, дата, булеве, елемент довідника й одиниця їх не задовольняють (`ne 100` на «abc» не фарбує ніде); спільна фікстура `conditional-format-parity.json`. Приклад у панелі не знає типу колонки: текст «5» він бачить числом (сітка й Excel беруть результат лише з сервера); зріз таблиці віддає вже обчислений результат лише в `TableSliceDto.cellFormats` (самих правил у зрізі немає, `ColumnDto` має лише `style`), тож оператору не потрібне право `Template.View`. Ширин колонок нема.
 - **Вимоги:** ФВ-2.6, ФВ-2.7, D-234.
 
 ### Н-Е3. Збереження правил з UI і підсвітка в сітці — ✅ (за тестами; вручну не пройдено)
@@ -467,7 +467,7 @@ Date, Bool, Lookup, Unit), бажано один темпоральний і о�
   2. Відкрити панель у двох вкладках; зберегти в першій, потім у другій.
   3. PUT через API без заголовка `If-Match`.
   4. Опублікувати, відкрити документ, ввести значення, що підпадає під правило, зберегти й перечитати.
-- **Очікується:** п. 1 — «This table has no rules yet.», потім «Conditional formatting rules saved.»; неповні правила — «Complete or remove the rules marked above before saving.»; п. 2 — alert «Someone else changed the rules…», кнопки «Save» (замінює чужі) і «Discard my changes»; п. 3 — 422; п. 4 — комірка пофарбована за сервером (`data-conditional-format="true"`); незбережена правка перефарбовується лише після перечитування зрізу.
+- **Очікується:** п. 1 — «This table has no rules yet.», потім «Conditional formatting rules saved.»; неповні правила — «Complete or remove the rules marked above before saving.»; п. 2 — друга вкладка отримує 409; якщо перечитані правила відрізняються від її чернетки — alert «Someone else changed the rules» («…Save replaces their rules with yours, Discard shows theirs.»), кнопки «Save rules» (замінює чужі) і «Discard my changes» (вона видна й поза конфліктом, щойно чернетка змінена); якщо чернетки однакові — лише повідомлення про помилку, без alert; п. 3 — 422; п. 4 — комірка пофарбована за сервером (`data-conditional-format="true"`); незбережена правка перефарбовується лише після перечитування зрізу.
 - **Помилки:** `422 ECR-REQ-0422 condFormatIfMatch`; `409 ECR-TMPL-0409 condFormatChanged` (саме **409**, не 412).
 - **Вимоги:** ФВ-2.7.
 
@@ -475,9 +475,9 @@ Date, Bool, Lookup, Unit), бажано один темпоральний і о�
 
 - **Права:** `Template.View` (кнопка доступна й без `Template.Edit`).
 - **Дані:** версія шаблону з таблицею: вкладені рядки (`parentRowKey`), приховані колонки, колонки з обов'язковістю/лише читанням, правила умовного форматування; окрема таблиця з > 200 рядків; таблиця з `MonthsInColumns`/`MonthsInRows`.
-- **Кроки:** `/admin/templates/:id/versions/:versionId` → кнопка **«Попередній перегляд»** (англ. каталог — `tablePreview.*`, назву уточніть на екрані) біля таблиці.
+- **Кроки:** `/admin/templates/:id/versions/:versionId` → кнопка **«Preview»** (`tablePreview.open`; ru «Предпросмотр») біля таблиці; діалог «Table preview: {name}».
 - **Очікується** (за повідомленням `0a1c1257`): діалог лише для читання — колонки й рядки в поточному порядку (`ordinal`), тип і одиниця колонки, обов'язковість/«лише читання», вкладеність рядків; правила умовного форматування в шапці колонки й значення-приклад, яке колонка фарбує першим своїм правилом (та сама політика контрасту, що в сітці); приховані колонки не показуються, а лише рахуються; понад 200 рядків — межа з лічильником; `MonthsInColumns`/`MonthsInRows` — попередження, що перегляд показує структуру один раз.
-- **Обмеження:** перегляд читає правила власним `GET …/conditional-formats` без `ETag`; після `1f54b156` використовує спільні `ruleFromWire`/`getConditionalFormats`. Точні підписи — не звірено з екраном.
+- **Обмеження:** перегляд читає правила тим самим запитом і кешем, що й панель (`getConditionalFormats`), `ETag` лише ігнорує. Межа 200 рядків — `tablePreviewModel.ts`.
 - **Вимоги:** ФВ-2.6, D-234.
 
 ---
@@ -494,7 +494,7 @@ Date, Bool, Lookup, Unit), бажано один темпоральний і о�
   3. Для зауваження без колонки; на всю таблицю; на рядок поза зрізом.
   4. Двічі поспіль по тому самому зауваженню; клік і одразу вихід зі сторінки.
   5. Увімкнути в ОС «зменшити рух».
-- **Очікується:** п. 1 — «Validation found {count} error(s).»; п. 2 — перемикання на аркуш, монтування таблиці (навіть непрогорнутої), прокрутка, фокус на комірці, рамка кольору primary пульсує двічі протягом 4 с; п. 3 — перша колонка даних / лише прокрутка до таблиці / таблиця без фокуса; п. 4 — повторний клік працює; після виходу стрибок не виконується; п. 5 — рамка статична. Чистий результат — «Validation passed with no errors.»
+- **Очікується:** п. 1 — «Validation found {count} error(s).»; п. 2 — перемикання на аркуш, монтування таблиці (навіть непрогорнутої), прокрутка, фокус на комірці, рамка кольору primary двічі пульсує (~1,6 с) і тримається до 4 с; п. 3 — перша колонка даних / лише прокрутка до таблиці / таблиця без фокуса; п. 4 — повторний клік працює; після виходу стрибок не виконується; п. 5 — рамка статична. Чистий результат — «Validation passed with no errors.»
 - **Вимоги:** ФВ-5.6 (TESTER-GUIDE Г-5).
 
 ### Н-Ж2. Значок «правка поза вікном» — ✅ (за тестами; вручну не пройдено)
@@ -570,6 +570,7 @@ Date, Bool, Lookup, Unit), бажано один темпоральний і о�
 ### Н-З4. Імпорт пакета методологій у систему — ✅
 
 - **Права:** `Calculation.EditFormula` **і** `Calculation.EditConstant` (без обох кнопки немає; API — 403); сторінка — `Calculation.View`.
+- **Фікстура-пастка (✎ 2026-10-01):** golden-тест методології вимагає `inputJson` `{"documentId":1,"tableInstanceId":<id>,"periodKey":{"value":202609},"sourceRowKey":"a","arguments":[{"argumentCode":"C2","value":2,"valueString":null,"unitId":null}]}`; без `arguments` publish дає 500 (P3). Автор версії не може опублікувати її сам (`ECR-CALC-0409`) — потрібен другий користувач (чотири очі).
 - **Кроки:**
   1. `/admin/methodologies` → **«Import package»** → файл не-JSON.
   2. Пакет з блокерами → **«Check»**.
@@ -599,7 +600,7 @@ Date, Bool, Lookup, Unit), бажано один темпоральний і о�
   6. Переглянути себе й іншого користувача, що має роль лише через групу AD.
 - **Очікується:** п. 2 — кнопка вимкнена до id ≥ 1, запит не надсилається; п. 3 — «Resulting level: {level}», таблиця «Given by | Role | Assigned | Level | Scope | Counted»; зараховуються лише «Everywhere» і «Project is in scope»; «Narrowed to sheets or periods…» і «Assignment not in effect» — «No»; п. 4 — alert «Explicitly denied: a deny wins over any grant and over any global right…»; глобальне `Registry.EditData` / `Registry.View` піднімає рівень, якщо немає заборони; п. 5 — 404; п. 6 — для себе групові ролі видно, для іншого — «The groups in this person's sign-in ticket are not known here…». Розріз **нічого не змінює**.
 - **Помилки:** `422 ECR-REQ-0422 effectiveAccessResource`; `404 ECR-SEC-0404 userNotFound`; `404 ECR-PRJ-0404 project`; `404 ECR-REG-0404 registryId`; `403 ECR-AUTH-0403`.
-- **Обмеження:** лише проєкти й довідники (для `Sheet`/`Table`/`Column` — `422`; ФВ-6.16 через це 🟨); рівень показано сирим значенням без перекладу. TESTER-GUIDE п. 7.12 ще пише «розрізу нема» — застаріло.
+- **Обмеження:** лише проєкти й довідники (для `Sheet`/`Table`/`Column` — `422`; ФВ-6.16 через це 🟨); рівень показано сирим значенням без перекладу.
 - **Вимоги:** ФВ-6.16, D-220.
 
 ---
@@ -611,23 +612,23 @@ Date, Bool, Lookup, Unit), бажано один темпоральний і о�
 ✎ 2026-10-01 (`d63ad313`): `/admin/periods` і `/admin/jobs` показують **ефективний** стан
 (`FannedOut` → «running», `SucceededWithErrors` → «partial»); тост «завершено» лише коли M = N і K = 0.
 
-- **Права:** запуск — `Calculation.Recalculate` (сторінка `/admin/periods` — `Period.Configure`); стеження за чужими задачами — `System.ViewHealth` (свою автор бачить без нього).
+- **Права:** запуск — `Calculation.Recalculate` (сторінка `/admin/periods` — `Period.Configure`); сторінка `/admin/jobs` — `System.ViewHealth` (без нього — 403, і автор стежить за своєю задачею на `/admin/periods` чи в «My tasks»); API статусу задачі власну задачу віддає автору і без цього права.
 - **Дані:** активний проєкт з кількома документами; воркер у режимі черги в БД (`Database`/`Worker`) — інакше блоку розкладу немає; один документ, що свідомо падає при розрахунку.
 - **Кроки:**
   1. `/admin/periods` → проєкт → **«Recalculate»** → підтвердити «Recalculate the whole project {code}?».
-  2. Взяти номер задачі з тосту «Recalculation queued as job {job}.» → `/admin/jobs` → «Job id» → **«Watch»**.
+  2. Взяти номер задачі з тосту «Recalculation queued as job {job}.» → `/admin/jobs` → «Job id» → **«Watch»** (✎ 2026-10-01: поле приймає і підпис із тоста `Recalculation-<guid>`, і сирий `IRecalculationJob-<guid>`; раніше підпис із тоста давав 404).
   3. Дочекатися завершення всіх дочірніх задач.
   4. Повторити з документом, що падає.
-- **Очікується:** п. 2 — батьківська задача «Succeeded» з повідомленням «Queued document recalculation tasks: {count}; not calculated yet.»; блок «Fanned out, not calculated yet» і рядок «Fanned out {total}, done {done} of {total}, errors {failed}.»; оновлення кожні 1,5 с; п. 3 — «Done»; п. 4 — «Done with errors ({failed})» (скасовані дочірні теж рахуються помилками).
-- **На `/admin/periods`:** опитування триває до кінця дочірніх задач, видно рядок «розкладено N, виконано M з N, помилок K» (`jobs.fanOutProgress`); тост «завершено» — лише при повному `Succeeded`; з помилками — попередження (`workflow.recalcDoneWithErrors`). Бейдж у `/admin/jobs` і на сторінці впливу довідника — «Calculating documents» (info, стан `FannedOut`) / «Done with errors» (warning, стан `SucceededWithErrors`) замість «Succeeded» (ключі `status.job.*`, `09-seed.sql`).
-- **Помилки:** `422 ECR-CALC-4221 approvalNotUsable` (закритий період без погодження); `404 ECR-PRD-0404 periodForProject`; `403 ECR-AUTH-0403 jobNotYours` — **чужа** задача без `System.ViewHealth` (власну задачу автор бачить і без цього права); 404 — невідомий номер задачі.
+- **Очікується:** п. 2 — API віддає батьківську задачу зі `state=Succeeded` і повідомленням «Queued document recalculation tasks: {count}; not calculated yet.», а бейдж картки — «Calculating documents», доки дочірні задачі не завершаться; блок «Fanned out, not calculated yet» і рядок «Fanned out {total}, done {done} of {total}, errors {failed}.»; оновлення кожні 1,5 с; п. 3 — «Done»; п. 4 — «Done with errors ({failed})» (скасовані дочірні теж рахуються помилками).
+- **На `/admin/periods`:** опитування триває до кінця дочірніх задач, видно рядок «розкладено N, виконано M з N, помилок K» (`jobs.fanOutProgress`); тост «завершено» — лише при повному `Succeeded`; з помилками — попередження (`workflow.recalcDoneWithErrors`). Бейдж **картки задачі, за якою стежать** (`/admin/jobs` → «Watch») і на сторінці впливу довідника — «Calculating documents» (info, стан `FannedOut`) / «Done with errors» (warning, стан `SucceededWithErrors`) замість «Succeeded» (ключі `status.job.*`, `09-seed.sql`). 🟨 **Обмеження:** у **переліку** останніх задач на `/admin/jobs` і в «My tasks» батьківська задача перерахунку показується «Succeeded», поки документи ще рахуються (перелік не рахує розклад) — це відоме обмеження, не новий дефект.
+- **Помилки:** `422 ECR-CALC-4221 periodClosed` (закритий період без погодження) / `sheetsSubmitted` (подані аркуші); `approvalNotUsable` — лише через API з `approvalId`, який не можна використати (`/admin/periods` `approvalId` не передає); `404 ECR-PRD-0404 periodForProject`; `403 ECR-AUTH-0403 jobNotYours` — **чужа** задача без `System.ViewHealth` (власну задачу автор бачить і без цього права); 404 — невідомий номер задачі.
 - **Вимоги:** ФВ-9.8 (P4).
 
 ---
 
 ## Н-Л. Адреса джерела PI Web API: політика SSRF
 
-✎ 2026-10-01: `14ade54d`, `c11285b0`, `d013ba3e`, `9023678e` (злито). Раніше сценарій М-8
+✎ 2026-10-01: `14ade54d`, `c11285b0`, `d013ba3e`, `9023678e` (злито; це хеші lane-гілок — у `dev/integration` код зведено іншими комітами, шукайте за `DataSourceEndpointPolicy`, `EndpointNetwork`, `SourcesHealthCheck`). Раніше сценарій М-8
 (TESTER-GUIDE) описував це як «очікується».
 
 ### Н-Л1. Блок-лист і allowlist при збереженні — ✅ (за тестами; вручну не пройдено)
@@ -641,7 +642,7 @@ Date, Bool, Lookup, Unit), бажано один темпоральний і о�
   4. Хост поза `AllowedHosts` (за наявності списку); хост із allowlist.
   5. Ім'я, що розв'язується на заборонену адресу.
 - **Очікується:** `422 ECR-REQ-0422`: п. 1 — `dataSourceEndpointScheme` або `dataSourceEndpointMalformed`; п. 2 — `dataSourceEndpointHostForbidden`; п. 3 — `dataSourceEndpointHostForbidden` (приватні IP — лише для Negotiate; для інших автентифікацій не блокуються); п. 4 — `dataSourceEndpointHostNotAllowed` / успіх; п. 5 — відмова (перевіряється кожна A/AAAA). Порожній `AllowedHosts` — діє лише блок-лист.
-- **Додатково:** IP перевіряється ще в момент підключення (DNS-rebinding, `c11285b0`); відповідь PI понад 50 МБ — адаптер не повторює запит (див. Н-Л4 про повтори задачі), `ECR-INT-0503 piWebApiResponseTooLarge`.
+- **Додатково:** IP перевіряється ще в момент підключення (DNS-rebinding, `c11285b0`); відповідь PI понад 50 МБ — ні адаптер, ні задача збору не повторюють запит (Н-Л4), `ECR-INT-0503 piWebApiResponseTooLarge`.
 - **Обмеження:** на живому PI/DNS не перевірено. Окремий крок: `http://localhost`, `http://x.localhost` — теж `HostForbidden`; DNS-ім'я корпоративного хоста (напр. `pi.corp.example`) дозволене, навіть якщо розв'язується на приватну адресу (для Negotiate саме ім'я потрібне для Kerberos SPN).
 - **Вимоги:** ФВ-13.11, ФВ-6.9.
 
@@ -653,27 +654,28 @@ Date, Bool, Lookup, Unit), бажано один темпоральний і о�
 ### Н-Л2. Negotiate без allowlist — ✅ (за тестами; вручну не пройдено)
 
 - **Кроки:** активне джерело PiWebApi із Negotiate (або порожньою автентифікацією) без `PiWebApi:AllowedHosts` → зберегти; відкрити `/health/ready` (картка `sources`).
-- **Очікується:** `Warning` у журналі при збереженні; картка `sources` — `Degraded` з повідомленням `health.sources.negotiateNoAllowlist` («Sources with Windows authentication and no allowed-hosts list (PiWebApi:AllowedHosts): {count}.»; рахуються лише джерела з активними сутностями збору, і повідомлення видно, коли немає інших причин Degraded); після задання `AllowedHosts` (потрібен перезапуск служби — не перевірено) — без попередження.
+- **Очікується:** `Warning` у журналі при збереженні; картка `sources` — `Degraded` з повідомленням `health.sources.negotiateNoAllowlist` («Sources with Windows authentication and no allowed-hosts list (PiWebApi:AllowedHosts): {count}.»; рахуються лише джерела з активними сутностями збору; коли є падіння (Unhealthy) чи прогалини покриття (Degraded), цей текст додається до їхнього повідомлення, окремим повідомленням — коли інших причин немає); після задання `AllowedHosts` (потрібен перезапуск служби — не перевірено) — без попередження.
 - **Уточнення (звірено з кодом `SourcesHealthCheck`/`EndpointNetwork`):** `AllowedHosts` читається з конфігурації `PiWebApi:AllowedHosts`; задається в `appsettings.Production.json` або `ECR_PiWebApi__AllowedHosts__0=…` у `Environment` служби `EcrApi`; потім `Restart-Service EcrApi` → `/health/ready`, картка `sources` — Healthy (за відсутності інших причин: запуск, покриття, падіння). Інсталятор і `deploy-ecr.ps1` ключ не пишуть. Що перезапуск обов'язковий, живою перевіркою не підтверджено.
 - **Вимоги:** ФВ-13.11.
+- ✎ 2026-10-01, живий прохід: `negotiateNoAllowlist` виводиться в одному рядку з «Sources with a coverage gap: N», а лічильник coverage gap **завищений** (сутності рахуються двічі) — 🟨 виправляється (lane `srcfix`).
 
 ### Н-Л3. Підтвердження зміни адреси Negotiate-джерела — ✅ (тести серверні 2 + клієнтські 2; вручну не пройдено)
 
 - **Права:** `Integration.Manage`. **Дані:** джерело PiWebApi без секрету (або секрет «Negotiate»).
 - **Кроки:** 1) у формі редагування змінити «Endpoint» на інший дозволений хост, чекбокс «I confirm that the service account may connect to the new address» не ставити → зберегти. 2) Поставити чекбокс → зберегти. 3) (API) `PUT /data-sources/{id}` зі зміненою адресою без `confirmEndpointChange` і з `confirmEndpointChange: true`. 4) Зміна без зміни адреси (лише ім'я/активність).
-- **Очікується:** п. 1, 3 (без прапора) — `422 ECR-REQ-0422`, `messageKey` `err.ECR-REQ-0422.dataSourceEndpointChangeUnconfirmed`, поле `confirmEndpointChange`, БД не змінюється; форма сама показує чекбокс при зміні адреси без `hasSecret` або після такої відмови сервера; п. 2 — проходить; п. 4 — підтвердження не потрібне. Джерело із секретом-заголовком: замість прапора — повторне введення секрету (S3).
+- **Очікується:** п. 1 — для джерела без секрету кнопка «Save» неактивна, доки чекбокс не поставлено (запит не надсилається); для джерела із секретом «Negotiate» форма чекбокса спершу не показує, сервер відповідає 422 (як у п. 3), після чого чекбокс з'являється; п. 3 (без прапора) — `422 ECR-REQ-0422`, `messageKey` `err.ECR-REQ-0422.dataSourceEndpointChangeUnconfirmed`, поле `confirmEndpointChange`, БД не змінюється; п. 2 — проходить; п. 4 — підтвердження не потрібне. Джерело із секретом-заголовком: замість прапора — повторне введення секрету (S3).
 - **Вимоги:** ФВ-13.11, ФВ-6.9. Коміт `80abcd19`.
 
-### Н-Л4. Відповідь PI Web API понад 50 МБ — 🟨 (за тестами; на живому PI не перевірено)
+### Н-Л4. Відповідь PI Web API понад 50 МБ — ✅ (за тестами; на живому PI не перевірено)
 
 - **Кроки:** збір із запитом, що повертає тіло > 50 МБ (або заглушка PI з `Content-Length` понад ліміт); також відповідь без `Content-Length`, що росте понад ліміт.
-- **Очікується:** адаптер не повторює HTTP-запит; ⚠ **дефект (✎ 2026-10-01, суха прогонка):** відмова — `BusinessRuleException`, а `JobRetryPolicy.IsWorthRetrying` вважає її транзієнтною, тож задача збору повторюється ще 3 рази (30 + 60 + 120 с) і користувач ~3.5 хв бачить «виконується». Очікувано за задумом коду (коментар `ReadBoundedAsync`) — відмова без повторів: `ECR-INT-0503`, `messageKey` `err.ECR-INT-0503.piWebApiResponseTooLarge` ({path}, {limitBytes}); процес не вичерпує пам'ять; надто широкий запит (багато тегів × довге вікно) слід ділити. Ліміт у конфігурації не виставляється (D-242, чекає підтвердження).
-- **Вимоги:** НФ, S-аудит. Коміт `d013ba3e`.
+- **Очікується:** адаптер не повторює HTTP-запит, задача збору падає **одразу, без повторів** (✎ 2026-10-01, `13f53b13`: `SourceResponseTooLargeException` у `JobRetryPolicy` не ретраїться; раніше задача повторювалась ще 3 рази, ~3.5 хв «виконується»): `ECR-INT-0503`, `messageKey` `err.ECR-INT-0503.piWebApiResponseTooLarge` ({path}, {limitBytes}); процес не вичерпує пам'ять; надто широкий запит (багато тегів × довге вікно) слід ділити. Ліміт у конфігурації не виставляється (D-242, чекає підтвердження). Тести: `PiWebApiResponseLimitTests`, `QuartzJobAdapterRetryTests`, `JobRetryPolicyTests`.
+- **Вимоги:** НФ, S-аудит. Коміти `d013ba3e`, `13f53b13`.
 
 ### Н-Л5. `Telemetry:Enabled=false` за замовчуванням — ✅ (свідомий дефолт)
 
 - **Кроки:** свіжа інсталяція без `Telemetry:*`; перевірити, що застосунок стартує, експорту OTLP немає. Для Worker — див. Н-М1.
-- **Очікується:** метрики не експортуються; навантаження нуль; це не дефект. Увімкнення Api: `Telemetry:Enabled=true` + `Telemetry:OtlpEndpoint` (без адреси служба не стартує). Метрики Worker потребують `Telemetry:*` у `worker.settings.json` або `ECR_Telemetry__*` у `Environment` служби `EcrWorker`; розгортання їх не пише.
+- **Очікується:** метрики не експортуються; навантаження нуль; це не дефект. Увімкнення Api: `Telemetry:Enabled=true` + `Telemetry:OtlpEndpoint` (без адреси служба не стартує). Метрики Worker потребують `Telemetry:*` у `worker.settings.json` або `ECR_Telemetry__*` у `Environment` служби `EcrWorker`; розгортання їх пише лише з `deploy-ecr.ps1 -TelemetryOtlpEndpoint` (Н-М1), без параметра — ні.
 
 ### Н-Л6. Оновлення з міграцією `PerfFixJobsStaleHealth` — 🟨 (вікно обслуговування)
 
@@ -689,7 +691,7 @@ Date, Bool, Lookup, Unit), бажано один темпоральний і о�
 - **Передумова:** режим `Worker` (служба `EcrWorker`), доступний OTLP-колектор.
 - **Кроки:** у `worker.settings.json` поруч з `Ecr.Worker.exe` (або `ECR_Telemetry__*` служби `EcrWorker`) увімкнути `Telemetry` (`Enabled=true`, `OtlpEndpoint`); перезапустити службу; завдати задачі перерахунку, що падає; у колекторі знайти `ecr.job.failed`.
 - **Очікується:** `ecr.job.failed{job=…}` з `service.name=ecr-worker`; також `ecr.job.start_latency`, `ecr.cache.hit/miss`, `ecr.access.profile.build`. `appsettings.json` Api дочірній процес не читає.
-- **Обмеження:** процес, убитий Job Object за ліміт пам'яті, втрачає останній буфер (до 15 с); недійсна адреса експорту дочірнього тихо вимикає експорт, не зупиняючи задачу; **у розгортанні `worker.settings.json` не має секції `Telemetry` → типово вимкнено**; `deploy-ecr.ps1 -TelemetryOtlpEndpoint http://collector:4317` виставляє `ECR_Telemetry__*` службам `EcrApi`/`EcrWorker` (`2e695683`); на живому колекторі не перевірено.
+- **Обмеження:** процес, убитий Job Object за ліміт пам'яті, втрачає останній буфер (до 15 с); недійсна адреса експорту дочірнього тихо вимикає експорт, не зупиняючи задачу; **у розгортанні `worker.settings.json` не має секції `Telemetry` → типово вимкнено**; `deploy-ecr.ps1 -TelemetryOtlpEndpoint http://collector:4317` виставляє `ECR_Telemetry__*` службі `EcrApi` і, за ввімкненого Worker, `EcrWorker` (`6af50984`); на живому колекторі не перевірено.
 - **Вимоги:** ФВ-12.7, ФВ-12.2, НФ-8.6.2.
 
 ### Н-М2. Скрипти розгортання без керуючих байтів — ✅ (сторож у CI)
@@ -707,9 +709,9 @@ Date, Bool, Lookup, Unit), бажано один темпоральний і о�
 ## Н-Н. Доступність нових екранів
 
 - **Статус:** 🟨 — перевірено автоматично (axe-тести), вручну з екранним читачем не проходилось.
-- **Що зроблено** (`855d79f1`, `0318e57c`): повернення фокуса після діалогів і форм (події PI, умовне форматування, поля/правила довідника), фокус за переставленою колонкою, кожен крок конвеєра — іменована область, обов'язкове поле — `required`, рядок до видалення без низького контрасту; axe-тести конструктора шаблону й конструктора довідника в обох темах; діалоги підтвердження й панель зауважень документа підключаються через `import()`.
+- **Що зроблено** (`855d79f1`, `0318e57c` — хеші lane-гілок): повернення фокуса після діалогів і форм (події PI, умовне форматування, поля/правила довідника), фокус за переставленою колонкою, кожен крок конвеєра — іменована область, обов'язкове поле — `required`, рядок до видалення без низького контрасту; axe-тести конструктора шаблону й конструктора довідника в обох темах; діалоги підтвердження й панель зауважень документа підключаються через `import()`.
 - **Кроки:** пройти клавіатурою (Tab/Enter/Esc) екрани `/admin/sources` (вкладка «Events from PI»), `/admin/pipeline`, конструктор шаблону (колонки, умовне форматування), конструктор довідника, `/admin/registries/:code/entries`, сторінку впливу довідника.
-- **Очікується:** видимий фокус, після закриття діалогу фокус повертається на ініціатор, кнопки в рядках мають імена з контексту (напр. «Remove {field}»), контраст ≥ AA в обох темах.
+- **Очікується:** видимий фокус, після закриття діалогу фокус повертається на ініціатор, кнопки в рядках мають імена з контексту (напр. «Remove: {code}»), контраст ≥ AA в обох темах.
 - **Вимоги:** ФВ-14.9, ФВ-14.14…14.24.
 
 ---
@@ -724,5 +726,4 @@ Date, Bool, Lookup, Unit), бажано один темпоральний і о�
 | `FEATURE-HSE301-VIEW.md` §4.7.4, §11.2 | A6, `source-event-maps`, «Get from PI now» немає; A1, A6 не виконані | є (Н-А) |
 | `FEATURE-HSE301-VIEW.md` §10.6 | вкладка в редакторі таблиці шаблону; проба за 7 днів; атрибут вікна з каталогу; кнопка ▶ | шухляда з'єднання; 30 днів; вільний текст; кнопки немає |
 | `FEATURE-HSE301-VIEW.md` §11.6 | ендпоінта імпорту методологій немає | `POST /api/v1/methodologies/import` (Н-З4) |
-| `TESTER-GUIDE.md` Г-6 | правка поза вікном «без позначки» | значок `◷` зберігається між перезавантаженнями (Н-Ж2); розділи 7.7, 7.12 уже виправлено ✎ 2026-10-01, Г-6 — не перевірялось |
 | `FEATURE-REGISTRY-TABLES.md` :761, :767 | історія без видів name/active; «422 закритий період» | види є; `impactDocumentNotAffected` |

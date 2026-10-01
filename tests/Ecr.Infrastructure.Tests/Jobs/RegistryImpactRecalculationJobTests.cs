@@ -8,6 +8,7 @@ using Ecr.Infrastructure.Jobs;
 using Ecr.Infrastructure.Persistence;
 using Ecr.TestKit;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using NSubstitute;
 using Xunit;
 
@@ -19,7 +20,11 @@ namespace Ecr.Infrastructure.Tests.Jobs;
 /// </summary>
 /// <remarks>
 /// Мутаційні докази: прибрати <c>wanted.Contains</c> → <see cref="Тригер_лише_для_названих_документів"/> червоний;
-/// набір з payload без звірки зі сховищем → <see cref="Закритий_період_не_ставиться_навіть_з_payload"/> червоний.
+/// набір з payload без звірки зі сховищем → <see cref="Закритий_період_не_ставиться_навіть_з_payload"/> червоний;
+/// прибрати try/catch навколо <c>RequestAsync</c> → <see cref="Збій_одного_документа_не_перериває_решту_і_видно_у_завершенні"/>
+/// червоний (другий документ не ставиться); прибрати <c>LogRequestFailed</c> або <c>InnerException</c> →
+/// <see cref="Збій_постановки_журналюється_з_причиною_і_рахується_окремо_від_пропущених"/> червоний;
+/// повернути <c>skipped = targets − queued</c> → він же червоний (провалений рахується «пропущеним»).
 /// </remarks>
 [Collection("SqlServer")]
 public sealed class RegistryImpactRecalculationJobTests(SqlServerFixture sql)
@@ -58,6 +63,62 @@ public sealed class RegistryImpactRecalculationJobTests(SqlServerFixture sql)
         await trigger.DidNotReceiveWithAnyArgs().RequestAsync(default, default, default);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Збій_одного_документа_не_перериває_решту_і_видно_у_завершенні()
+    {
+        var registryId = await NewRegistryAsync();
+        var first = await ArrangeDocumentAsync(registryId, PeriodState.Open);
+        var second = await ArrangeDocumentAsync(registryId, PeriodState.Open);
+        var trigger = Trigger();
+        trigger.RequestAsync(first.DocumentId, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+            .Returns<Task<string?>>(_ => throw new InvalidOperationException("boom"));
+
+        var act = () => RunAsync(trigger, registryId, first.DocumentId, second.DocumentId);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(act);
+        await trigger.Received(1).RequestAsync(second.DocumentId, second.PeriodKey, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Збій_постановки_журналюється_з_причиною_і_рахується_окремо_від_пропущених()
+    {
+        var registryId = await NewRegistryAsync();
+        var first = await ArrangeDocumentAsync(registryId, PeriodState.Open);
+        var second = await ArrangeDocumentAsync(registryId, PeriodState.Open);
+        var trigger = Trigger();
+        var boom = new InvalidOperationException("boom");
+        trigger.RequestAsync(first.DocumentId, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+            .Returns<Task<string?>>(_ => throw boom);
+        var logger = new ListLogger();
+        var progress = Substitute.For<IJobProgress>();
+        string? done = null;
+        progress.ReportAsync(100, Arg.Do<string?>(m => done = m), Arg.Any<CancellationToken>())
+            .Returns(Task.CompletedTask);
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => RunAsync(trigger, registryId, logger, progress, first.DocumentId, second.DocumentId));
+
+        // Причина збою — у журналі з номером документа, а не лише номер у тексті задачі.
+        var entry = Assert.Single(logger.Entries);
+        Assert.Equal(LogLevel.Error, entry.Level);
+        Assert.Same(boom, entry.Exception);
+        Assert.Contains(first.DocumentId.ToString(System.Globalization.CultureInfo.InvariantCulture), entry.Message, StringComparison.Ordinal);
+
+        // …і в ланцюжку винятку задачі.
+        var inner = Assert.IsType<AggregateException>(error.InnerException);
+        Assert.Same(boom, Assert.Single(inner.InnerExceptions));
+
+        // Підсумок: один поставлено, один провалено, «пропущених» (закритий період, поданий аркуш) немає.
+        Assert.NotNull(done);
+        Assert.Contains("\"queued\":\"1\"", done, StringComparison.Ordinal);
+        Assert.Contains("\"failed\":\"1\"", done, StringComparison.Ordinal);
+        Assert.Contains("\"skipped\":\"0\"", done, StringComparison.Ordinal);
+    }
+
     private static ICalculationTrigger Trigger()
     {
         var trigger = Substitute.For<ICalculationTrigger>();
@@ -66,14 +127,22 @@ public sealed class RegistryImpactRecalculationJobTests(SqlServerFixture sql)
         return trigger;
     }
 
-    private async Task RunAsync(ICalculationTrigger trigger, int registryId, params long[] documentIds)
+    private Task RunAsync(ICalculationTrigger trigger, int registryId, params long[] documentIds)
+        => RunAsync(trigger, registryId, logger: null, Substitute.For<IJobProgress>(), documentIds);
+
+    private async Task RunAsync(
+        ICalculationTrigger trigger,
+        int registryId,
+        ILogger<RegistryImpactRecalculationJob>? logger,
+        IJobProgress progress,
+        params long[] documentIds)
     {
         await using var db = Context();
-        var job = new RegistryImpactRecalculationJob(new RegistryImpactStore(db), trigger);
+        var job = new RegistryImpactRecalculationJob(new RegistryImpactStore(db), trigger, logger);
 
         await job.ExecuteAsync(
             new RegistryImpactRecalculationRequest(registryId, documentIds, "test"),
-            Substitute.For<IJobProgress>(),
+            progress,
             CancellationToken.None);
     }
 
@@ -142,4 +211,26 @@ public sealed class RegistryImpactRecalculationJobTests(SqlServerFixture sql)
 
     private EcrDbContext Context()
         => new(new DbContextOptionsBuilder<EcrDbContext>().UseSqlServer(sql.ConnectionString).Options);
+
+    /// <summary>Журнал, що зберігає записи для перевірки.</summary>
+    private sealed class ListLogger : ILogger<RegistryImpactRecalculationJob>
+    {
+        public List<(LogLevel Level, string Message, Exception? Exception)> Entries { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            ArgumentNullException.ThrowIfNull(formatter);
+            lock (Entries)
+            {
+                Entries.Add((logLevel, formatter(state, exception), exception));
+            }
+        }
+    }
 }

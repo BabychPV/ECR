@@ -367,11 +367,9 @@ public sealed partial class ExceptionHandlingMiddleware(
                 return message;
             }
 
-            var parameters = details
-                .Where(pair => pair.Key != MessageKeyDetailName && pair.Value is string)
-                .ToDictionary(pair => pair.Key, pair => (string)pair.Value!, StringComparer.Ordinal);
-
-            return UiStringResolver.Format(template, parameters);
+            // ⛔ Не лише `string`: число в подробицях (`["maxLength"] = 64`) інакше лишало
+            // користувачу `{maxLength}` фігурними дужками (клас `D1`).
+            return UiStringResolver.Format(template, UiStringResolver.Parameters(details));
         }
 #pragma warning disable CA1031 // Причина — та сама, що й у LocalizedTitleAsync: обробник помилок не падає вдруге.
         catch (Exception)

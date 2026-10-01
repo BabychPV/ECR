@@ -210,6 +210,62 @@ public sealed class XlsxZipBombTests
         Assert.Equal(XlsxVerdict.Corrupt, XlsxSafetyGate.Inspect(text));
     }
 
+    /// <summary>
+    /// Файл, коротший за кінцевий запис zip-каталогу, у потоці, що на від'ємну
+    /// позицію кидає <see cref="ArgumentOutOfRangeException"/> (так робить потік
+    /// завантаження ASP.NET), — <see cref="XlsxVerdict.Corrupt"/>, а не виняток.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ До фіксу <c>POST /documents/{id}/import/preview</c> із порожнім, текстовим
+    /// чи обрізаним до кількох байтів файлом давав 500 (прохід по відмовах API):
+    /// <c>MemoryStream</c> у сусідньому тесті кидає <c>IOException</c>, яку
+    /// <c>ZipArchive</c> сам перетворює на <c>InvalidDataException</c>, тож там
+    /// дефект не видно.
+    /// </remarks>
+    [Theory]
+    [InlineData(0)]
+    [InlineData(7)]
+    [InlineData(13)]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "negative-path-sweep")]
+    public void Файл_коротший_за_кінець_каталогу_дає_вердикт_Corrupt(int length)
+    {
+        var bytes = new byte[length];
+        Encoding.ASCII.GetBytes("PK\u0003\u0004hello garbage").AsSpan(0, Math.Min(length, 17)).CopyTo(bytes);
+
+        using var file = new StrictPositionStream(bytes);
+
+        Assert.Equal(XlsxVerdict.Corrupt, XlsxSafetyGate.Inspect(file));
+        Assert.Equal(0, file.Position);
+    }
+
+    /// <summary>Потік, що, як потік завантаження ASP.NET, не терпить позиції поза межами.</summary>
+    private sealed class StrictPositionStream(byte[] bytes) : MemoryStream(bytes, writable: false)
+    {
+        public override long Position
+        {
+            get => base.Position;
+            set
+            {
+                ArgumentOutOfRangeException.ThrowIfNegative(value);
+                ArgumentOutOfRangeException.ThrowIfGreaterThan(value, Length);
+                base.Position = value;
+            }
+        }
+
+        public override long Seek(long offset, SeekOrigin loc)
+        {
+            Position = loc switch
+            {
+                SeekOrigin.Begin => offset,
+                SeekOrigin.Current => Position + offset,
+                _ => Length + offset,
+            };
+
+            return Position;
+        }
+    }
+
     /// <summary>Звичайна книга системи — <see cref="XlsxVerdict.Safe"/>.</summary>
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]

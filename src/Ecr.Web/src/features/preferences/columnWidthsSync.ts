@@ -161,6 +161,13 @@ export class ColumnWidthsWriter {
     }, this.delayMs);
   }
 
+  /** Відкидає ще не відправлені зміни (скидання ширин: інакше вони воскресли б). */
+  discard(): void {
+    if (this.timer !== undefined) clearTimeout(this.timer);
+    this.timer = undefined;
+    this.changes = {};
+  }
+
   /** Відправляє накопичене негайно (розмонтування, зміна таблиці). */
   flush(): void {
     if (this.timer !== undefined) clearTimeout(this.timer);
@@ -199,6 +206,8 @@ interface ColumnWidths {
   readonly widths: ColumnWidthMap;
   /** Зміна ширин (результат `widthsFromEvent`). */
   readonly onResize: (changed: ColumnWidthMap) => void;
+  /** «Скинути ширину» (D-234): прибирає ширини користувача — лишаються шаблонні/типові. */
+  readonly reset: () => void;
 }
 
 interface LocalState {
@@ -309,5 +318,23 @@ export function useColumnWidths(
     [widths, defaultWidth, tableDefId],
   );
 
-  return { widths, onResize };
+  const reset = useCallback(() => {
+    const key = columnWidthsKey(tableDefId);
+    writer.current?.discard();
+    writeCachedWidths(tableDefId, {});
+    setState({ tableDefId, widths: {}, touched: true });
+
+    // Ключа на сервері вже немає — нічого видаляти (і кеш не вигадуємо).
+    const data = queryClient.getQueryData<UserPreference[]>(PreferencesQueryKey);
+    if (data !== undefined && serverColumnWidths(data, tableDefId) === undefined) return;
+
+    queryClient.setQueryData<UserPreference[] | undefined>(PreferencesQueryKey, (old) =>
+      upsertPreference(old, key, undefined),
+    );
+    void deletePreference(key).catch((error: unknown) => {
+      reportFailure(key, error);
+    });
+  }, [tableDefId, queryClient]);
+
+  return { widths, onResize, reset };
 }

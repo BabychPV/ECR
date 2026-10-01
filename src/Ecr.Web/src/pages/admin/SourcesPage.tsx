@@ -1,8 +1,10 @@
 import type { JSX } from 'react';
-import { Badge, Button, Group, Stack, Text, Title } from '@mantine/core';
+import { Anchor, Badge, Button, Group, Stack, Text, Title } from '@mantine/core';
+import { notifications } from '@mantine/notifications';
+import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { apiEnqueue, apiFetch } from '@/api/client';
-import { showApiError, showDone } from '@/shared/ui/notify';
+import { notificationCloseButtonProps, showApiError, showDone } from '@/shared/ui/notify';
 import { CollectionRunsPanel } from '@/features/integration/CollectionRunsPanel';
 import { CoverageEventsPanel } from '@/features/integration/CoverageEventsPanel';
 import { DataSourcesTable } from '@/features/integration/DataSourcesTable';
@@ -30,6 +32,7 @@ import { t } from '@/shared/i18n';
  */
 export function SourcesPage(): JSX.Element {
   const session = useSession();
+  const navigate = useNavigate();
 
   /*
    * ⚠ З'єднання (`UI-09`) — СЕКЦІЄЮ під сутностями, а не вкладкою `?tab=`:
@@ -94,7 +97,37 @@ export function SourcesPage(): JSX.Element {
       // ⚠ 202 з jobId: збір ходить по мережі до чужої системи, і його
       // тривалість визначає не наш код.
       // ⛔ Аудит-пас 8, lane6, п.8: людський вигляд у тості, сам `jobId` — не.
-      showDone(t('sources.queued', { job: humanizeJobId(job.jobId) }));
+      const message = t('sources.queued', { job: humanizeJobId(job.jobId) });
+
+      // P3 живого проходу: тост без шляху до задачі — людина не бачила, чим збір скінчився.
+      // ⚠ Тости живуть ПОЗА `RouterProvider` (`App.tsx`), тож `Link` там без контексту —
+      // перехід через `navigate` цієї сторінки. Без `System.ViewHealth` посилання — шлях у 403.
+      if (!can(session.data, 'System.ViewHealth')) {
+        showDone(message);
+        return;
+      }
+
+      const to = `/admin/jobs?id=${encodeURIComponent(job.jobId)}`;
+      const id = notifications.show({
+        color: 'statusSuccess',
+        closeButtonProps: notificationCloseButtonProps,
+        message: (
+          <Stack gap="xs">
+            <Text size="sm">{message}</Text>
+            <Anchor
+              href={to}
+              size="sm"
+              onClick={(event) => {
+                event.preventDefault();
+                notifications.hide(id);
+                navigate(to);
+              }}
+            >
+              {t('registries.impact.openJob')}
+            </Anchor>
+          </Stack>
+        ),
+      });
     },
     // ⛔ `X-08`: тут стояв `error.message` — сирий `detail` сервера
     // (українською без `messageKey`). Той самий розбір, що й скрізь.
@@ -172,7 +205,7 @@ export function SourcesPage(): JSX.Element {
                 source.oldestGap === null ? (
                   <Text c="dimmed">—</Text>
                 ) : (
-                  <Badge color="statusError" variant="light" miw="fit-content">
+                  <Badge color="statusError" variant="light" miw="fit-content" tt="none">
                     {/* ⚠ Година ПОТРІБНА, тобто не `dateOnly`. Клітинка
                         відповідає на «з якого моменту даних немає», а
                         відповідь на неї — дія в сусідній клітинці: збір за

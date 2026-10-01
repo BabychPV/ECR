@@ -6,12 +6,13 @@ import { EcrApiError } from '@/api/client';
 import { formatNumber } from '@/shared/format';
 import { t } from '@/shared/i18n';
 import { ConfirmModal } from '@/shared/ui/ConfirmModal';
-import { DetailDrawer } from '@/shared/ui/DetailDrawer';
+import { DetailDrawer, useDetailPanel } from '@/shared/ui/DetailDrawer';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { localized } from '@/shared/i18n/localized';
 import { KeyValue, type KeyValueItem } from '@/shared/ui/KeyValue';
 import { DataSourceFormModal, DataSourceScheduleTab, SourceEntitiesTab, SourceEventsTab } from './lazyDataSourceForm';
 import { TestDataSourceModal } from './TestDataSourceModal';
+import { hasDialogAbovePanel } from './nestedDialog';
 import { deleteDataSource, type DataSource } from './dataSourceApi';
 import { DataSourcesQueryKey } from './dataSourcesKey';
 
@@ -96,6 +97,7 @@ export function DataSourceDrawer({
   const [testing, setTesting] = useState(false);
   const [editing, setEditing] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const [, setPanel] = useDetailPanel();
 
   /*
    * ⚠ Заздалегідь, за лічильниками рядка: та сама умова, що й на сервері
@@ -151,6 +153,10 @@ export function DataSourceDrawer({
           )
         }
         closeLabel={t('sources.closeDetails')}
+        // Esc верхнього діалогу закриває лише його — шторка лишається (див. `hasDialogAbovePanel`).
+        onClose={() => {
+          if (hasDialogAbovePanel(source.code)) setPanel(source.code);
+        }}
         footer={
           canManage ? (
             <Group gap="xs" justify="space-between" w="100%">

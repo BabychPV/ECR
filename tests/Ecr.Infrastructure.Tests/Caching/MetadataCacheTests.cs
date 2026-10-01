@@ -464,6 +464,53 @@ public sealed class MetadataCacheTests(SqlServerFixture sql)
             .AddInterceptors(counter)
             .Options);
 
+    /// <summary>
+    /// D-230: прапор «є активний Rollup/Check» їде проєкцією в запиті аркушів — і тільки для Rollup/Check, що діють.
+    /// Кількість запитів побудови (вісім) контролює <see cref="Повторне_читання_не_звертається_до_БД"/>.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Прапор_активного_Rollup_або_Check_залежить_від_виду_й_активності()
+    {
+        var none = await ArrangeAsync();
+        var rollup = await ArrangeAsync();
+        var inactive = await ArrangeAsync();
+        var mirror = await ArrangeAsync();
+        var check = await ArrangeAsync();
+        var other = await ArrangeAsync();
+
+        await using (var db = CreateContext([]))
+        {
+            void Add(TestDocument source, Ecr.Domain.Enums.TableRelationKind kind, bool active)
+            {
+                var relation = new TableRelationDef(
+                    Ecr.Domain.ValueObjects.EcrCode.Create("REL" + source.TemplateVersionId), source.TableDefId, other.TableDefId,
+                    kind, """{"keys":[]}""");
+                relation.Update(source.TableDefId, other.TableDefId, kind, relation.MatchJson, null, 0, active);
+                db.TableRelations.Add(relation);
+            }
+
+            Add(rollup, Ecr.Domain.Enums.TableRelationKind.Rollup, true);
+            Add(inactive, Ecr.Domain.Enums.TableRelationKind.Rollup, false);
+            Add(mirror, Ecr.Domain.Enums.TableRelationKind.Mirror, true);
+            Add(check, Ecr.Domain.Enums.TableRelationKind.Check, true);
+            await db.SaveChangesAsync();
+        }
+
+        async Task<bool> FlagAsync(TestDocument doc)
+        {
+            await using var db = CreateContext([]);
+            return (await new MetadataCache(new MemoryCache(new MemoryCacheOptions()), db)
+                .GetAsync(doc.TemplateVersionId, CancellationToken.None)).HasActiveRollupOrCheck;
+        }
+
+        Assert.False(await FlagAsync(none));
+        Assert.True(await FlagAsync(rollup));
+        Assert.False(await FlagAsync(inactive));
+        Assert.False(await FlagAsync(mirror));
+        Assert.True(await FlagAsync(check));
+    }
     private async Task BumpRevisionAsync(int versionId)
     {
         await using var db = CreateContext([]);
