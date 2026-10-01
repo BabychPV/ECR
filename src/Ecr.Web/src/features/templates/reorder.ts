@@ -9,11 +9,10 @@
  * який сервер застосовує в одній транзакції. Нового ендпоінта перестановка не
  * вимагає.
  *
- * ⛔ Рядки фіксованої таблиці так переставити НЕ МОЖНА: `RowDef.Ordinal` поза
- * білим списком презентаційного патча (`TemplateVersionStore.PresentationColumns`),
- * а `PUT …/rows/{code}` — заміна цілком, і структура версії несе підпис рядка
- * лише однією мовою (`row.ts`, `hasFullLabel`): перестановка стерла б
- * переклади. Тому для рядків кнопки показані вимкненими (див. звіт лінії).
+ * Рядки фіксованої таблиці переставляються так само (AN-15): `RowDef.Ordinal` у
+ * білому списку презентаційного патча (`TemplateVersionStore.PresentationColumns`,
+ * `("RowDef","Ordinal")`), патч не чіпає `LabelL10n`, тож переклади цілі. Різниця
+ * лише в `entityType` (`orderPatch`).
  */
 
 /** Одна зміна презентаційного шару, як її приймає `PATCH …/presentation`. */
@@ -72,14 +71,25 @@ export function ordinalChanges(
   return changes;
 }
 
-/** Пакет `PATCH …/presentation` для перестановки колонок. */
-export function columnOrderPatch(
+/** Сутності, порядок яких міняє `PATCH …/presentation`. */
+export type OrderedEntity = 'ColumnDef' | 'RowDef';
+
+/** Пакет `PATCH …/presentation` для перестановки колонок або рядків. */
+export function orderPatch(
+  entityType: OrderedEntity,
   changes: readonly { readonly id: number; readonly ordinal: number }[],
 ): PresentationChange[] {
   return changes.map((change) => ({
-    entityType: 'ColumnDef',
+    entityType,
     entityId: change.id,
     field: 'Ordinal',
     value: String(change.ordinal),
   }));
+}
+
+/** Пакет `PATCH …/presentation` для перестановки колонок. */
+export function columnOrderPatch(
+  changes: readonly { readonly id: number; readonly ordinal: number }[],
+): PresentationChange[] {
+  return orderPatch('ColumnDef', changes);
 }

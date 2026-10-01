@@ -51,7 +51,7 @@ import { deleteColumn, saveColumn } from '@/features/templates/columnApi';
 import { emptyColumnDraft, type ColumnDraft } from '@/features/templates/column';
 import { ExistingColumn } from '@/features/templates/ExistingColumn';
 import { ReorderCell, ReorderableRows } from '@/features/templates/ReorderControls';
-import { reorderColumns } from '@/features/templates/reorderApi';
+import { reorderColumns, reorderRows } from '@/features/templates/reorderApi';
 import { dataTypeLabel, rowKindLabel, rowModeLabel } from '@/features/templates/enumLabels';
 import { getHeaderFields, saveHeaderField } from '@/features/templates/headerFieldApi';
 import {
@@ -546,6 +546,28 @@ export function TemplateVersionPage(): JSX.Element {
           name: moved === undefined ? '' : localized(moved.headerL10n) || moved.code,
           position: to + 1,
           count: columns.length,
+        }),
+      );
+    },
+    onError: showApiError,
+  });
+
+  /** Перестановка рядків фіксованої таблиці (AN-15): `RowDef.Ordinal` тим самим `PATCH …/presentation`. */
+  const reorderRowsMutation = useMutation({
+    mutationFn: (args: {
+      rows: TemplateStructureDto['sheets'][number]['tables'][number]['rows'];
+      from: number;
+      to: number;
+    }) => reorderRows(id, args.rows, args.from, args.to),
+    onSuccess: async (revision, { rows, from, to }) => {
+      if (revision === null) return;
+      await queryClient.invalidateQueries({ queryKey: queryKeys.templates.version(id) });
+      const moved = rows[from];
+      showDone(
+        t('reorder.moved', {
+          name: moved === undefined ? '' : (moved.label ?? moved.rowKey),
+          position: to + 1,
+          count: rows.length,
         }),
       );
     },
@@ -1336,16 +1358,6 @@ export function TemplateVersionPage(): JSX.Element {
                                   </Text>
                                 ) : (
                                   <Table striped withTableBorder mt="xs">
-                                    {canEditSheets && (
-                                      <caption
-                                        id={`rows-reorder-hint-${String(table.id)}`}
-                                        style={{ captionSide: 'bottom', textAlign: 'start' }}
-                                      >
-                                        <Text span size="xs" c="dimmed">
-                                          {t('reorder.rowsUnavailable')}
-                                        </Text>
-                                      </caption>
-                                    )}
                                     <Table.Thead>
                                       <Table.Tr>
                                         {canEditSheets && <Table.Th>{t('reorder.column')}</Table.Th>}
@@ -1355,24 +1367,28 @@ export function TemplateVersionPage(): JSX.Element {
                                       </Table.Tr>
                                     </Table.Thead>
                                     <Table.Tbody>
-                                      {/* ⛔ Кнопки порядку рядків ВИМКНЕНІ, і це не
-                                          заготовка: безпечного запису лише порядку
-                                          рядка сервер не має (`reorder.ts`, звіт
-                                          лінії). Порядок міняється полем «Порядок»
-                                          у формі рядка. */}
-                                      <ReorderableRows items={table.rows} enabled={false} onMove={() => undefined}>
+                                      {/* AN-15: порядок рядків — `RowDef.Ordinal` через
+                                          `PATCH …/presentation` (`reorder.ts`). */}
+                                      <ReorderableRows
+                                        items={table.rows}
+                                        enabled={canEditSheets && !reorderRowsMutation.isPending}
+                                        onMove={(from, to) =>
+                                          reorderRowsMutation.mutate({ rows: table.rows, from, to })
+                                        }
+                                      >
                                       {(row, index, drag) => (
-                                        <Table.Tr key={row.rowKey}>
+                                        <Table.Tr key={row.rowKey} {...drag.targetProps(index)}>
                                           {canEditSheets && (
                                             <Table.Td>
                                               <ReorderCell
                                                 index={index}
                                                 count={table.rows.length}
                                                 name={row.label ?? row.rowKey}
-                                                disabled
-                                                onMove={() => undefined}
+                                                disabled={reorderRowsMutation.isPending}
+                                                onMove={(from, to) =>
+                                                  reorderRowsMutation.mutate({ rows: table.rows, from, to })
+                                                }
                                                 drag={drag}
-                                                describedBy={`rows-reorder-hint-${String(table.id)}`}
                                               />
                                             </Table.Td>
                                           )}
