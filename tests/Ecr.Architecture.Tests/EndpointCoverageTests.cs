@@ -484,6 +484,9 @@ public sealed partial class EndpointCoverageTests
                 "err.ECR-REQ-0422.dataSourceEndpointCarriesSecret", "err.ECR-REQ-0422.dataSourceCodeTaken",
                 "err.ECR-REQ-0422.dataSourceSecretReentryRequired",
                 "err.ECR-REQ-0422.dataSourceEndpointChangeUnconfirmed",
+                "err.ECR-REQ-0422.dataSourceEndpointScheme", "err.ECR-REQ-0422.dataSourceEndpointHostForbidden",
+                "err.ECR-REQ-0422.dataSourceEndpointMalformed", "err.ECR-REQ-0422.dataSourceEndpointHostNotAllowed",
+                "err.ECR-REQ-0422.dataSourceEndpointSqlScheme", "err.ECR-REQ-0422.dataSourceEndpointSqlLinkLocal",
             ],
             "messageKey сервера, але лише з FieldOfKey — інші сюди не доходять."),
 
