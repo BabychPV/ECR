@@ -71,6 +71,27 @@ public sealed class PasswordHasherTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    public void D218_новий_хеш_має_200000_ітерацій_а_хеш_із_210000_перевіряється_за_збереженими_параметрами()
+    {
+        var fresh = _hasher.Hash(Password);
+        Assert.Equal("200000", fresh.Split('.')[1]);
+
+        // Формат {версія}.{ітерації}.{сіль}.{хеш}, зібраний вручну з 210 000.
+        var salt = System.Security.Cryptography.RandomNumberGenerator.GetBytes(16);
+        var key = System.Security.Cryptography.Rfc2898DeriveBytes.Pbkdf2(
+            Password, salt, 210_000, System.Security.Cryptography.HashAlgorithmName.SHA512, 64);
+        var old = $"1.210000.{Convert.ToBase64String(salt)}.{Convert.ToBase64String(key)}";
+
+        Assert.True(_hasher.Verify(Password, old));
+        Assert.False(_hasher.Verify(Password + "x", old));
+        // Більше збережених ітерацій — не привід перехешовувати.
+        Assert.False(_hasher.NeedsRehash(old));
+
+        var weaker = $"1.100000.{Convert.ToBase64String(salt)}.{Convert.ToBase64String(key)}";
+        Assert.True(_hasher.NeedsRehash(weaker));
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait("Requirement", "ФВ-6.11")]
     public void Пароль_не_потрапляє_в_текст_винятку()
     {

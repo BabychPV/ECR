@@ -15,7 +15,9 @@ public sealed class PasswordHasher : IPasswordHasher
 {
     private const int SaltSize = 16;
     private const int KeySize = 64;
-    private const int Iterations = 210_000;
+    // D-218 (рішення людини 2026-10-01): 200 000. Старі хеші (210 000 та інші) лишаються
+    // чинними: Verify читає ітерації зі збереженого рядка.
+    private const int Iterations = 200_000;
 
     /// <summary>Версія формату; змінюється разом з алгоритмом, не з параметрами.</summary>
     private const int Version = 1;
@@ -24,7 +26,7 @@ public sealed class PasswordHasher : IPasswordHasher
     /// Межа довжини пароля.
     /// </summary>
     /// <remarks>
-    /// ⚠ Не косметичне обмеження: PBKDF2 читає пароль на кожній із 210 000
+    /// ⚠ Не косметичне обмеження: PBKDF2 читає пароль на кожній із 200 000
     /// ітерацій, тому рядок на кілька мегабайт перетворює одну спробу входу на
     /// відмову в обслуговуванні. Межа стоїть тут, а не лише в політиці, бо
     /// політику можна не застосувати, а цей метод обійти не можна.
@@ -79,7 +81,7 @@ public sealed class PasswordHasher : IPasswordHasher
     /// <inheritdoc />
     public bool NeedsRehash(string hash)
         => !TryParse(hash, out var iterations, out var salt, out var key)
-           || iterations != Iterations
+           || iterations < Iterations // лише «менше»: більше збережених ітерацій не привід перехешовувати (D-218)
            || salt.Length != SaltSize
            || key.Length != KeySize;
 
