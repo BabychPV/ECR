@@ -171,9 +171,9 @@ $bp = Read-Host -AsSecureString -Prompt 'Пароль bootstrap-адмініст
 4. Що це означає для Data Protection: код захищає ключі кільця **лише сертифікатом за
    відбитком** (`AuthenticationSetup.cs`, `ProtectKeysWithCertificate`); у Production без нього
    служба не стартує. Заміна (продовження) сертифіката змінює і HTTPS, і захист нових ключів.
-   `UnprotectKeysWithAnyCertificate` у коді **не налаштовано**, тому **старий сертифікат
-   не видаляти зі сховища**, доки в `sec.DataProtectionKey` є ключі, захищені ним;
-   поведінку при заміні на живому стенді **не перевірено** (`docs/build/OPEN-ITEMS.md` §7). `-ConnectionString` обов'язковий по суті (без нього служба падає на
+   `UnprotectKeysWithAnyCertificate` налаштовано (D-267, коміт `ed0b2393`): при заміні задай
+   `-PreviousDataProtectionCertificateThumbprints <старий відбиток>` (ключ `Auth:DataProtection:PreviousCertificateThumbprints`)
+   і не видаляй старий сертифікат зі сховища; пропущений відбиток дає Degraded у `/health/db`. Ризик D-267 закрито кодом. `-ConnectionString` обов'язковий по суті (без нього служба падає на
 старті). Сім кроків скрипта: (1) передумови й редакція SQL; (2) схема (SQL-скрипти
 + `migration.sql`; сід `09-seed.sql` виконує сам застосунок при першому старті);
 (3) MSI; (4) секрети служби в реєстрі й `bootstrap.secret`; (5) несекретна

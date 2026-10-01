@@ -323,12 +323,13 @@ curl.exe -sI "https://$name/" | Select-String 'Strict-Transport-Security'
 
 1. Новий сертифікат — у `LocalMachine\My` **на кожному вузлі**, право на ключ.
 2. `deploy-ecr.ps1 … -DataProtectionThumbprint '<новий>'` (той самий виклик, що й оновлення).
-3. ⛔ **Старий сертифікат не видаляти** і не забирати в служби право на його ключ. Нові
+3. ⛔ **Старий сертифікат не видаляти зі сховища, доки його відбиток не внесено в `Auth:DataProtection:PreviousCertificateThumbprints` (`-PreviousDataProtectionCertificateThumbprints`; D-267, коміт `ed0b2393`)** — і не забирати в служби право на його ключ. Нові
    ключі кільця шифруються новим сертифікатом, а вже записані в `sec.DataProtectionKey`
    розшифровуються старим: ASP.NET Core Data Protection шукає сертифікат за відбитком у
    сховищах `My` (поведінка бібліотеки, перевірено 2026-10-01, розділ 10.1); старі ключі
    лишаються під старим сертифікатом до спливу строку (90 днів) — тримайте його стільки. Секрети
    каналів сповіщень, збережені під старим ключем, без нього не розшифруються ніколи.
+   Якщо старий відбиток пропущено, `/health/db` стане Degraded з його відбитком (кільце містить ключі, які служба не прочитає).
 4. Прибрати старий сертифікат можна лише разом із ротацією ключів: видалити старі ключі
    (за зразком `operations-runbook.md` §6.4) і **перевести секрети каналів сповіщень**
    (`/admin/notifications`), бо вони захищені старими ключами.
@@ -373,9 +374,12 @@ curl.exe -sI "https://$name/" | Select-String 'Strict-Transport-Security'
    строку (90 днів) або до ручної ротації. Отже, **A потрібен у сховищі щонайменше 90 днів
    після заміни** (а для секретів каналів — доки їх не введуть наново), а не «до першого
    перезапуску».
-3. `UnprotectKeysWithAnyCertificate` усуває залежність від сховища, але в `Ecr.Api` його
-   немає — це зміна коду (відкрите питання, розділ 12, п. 11). Код **не змінювався** у
-   цьому коміті.
+3. `UnprotectKeysWithAnyCertificate` усуває залежність від сховища. **Реалізовано, коміт `ed0b2393`:**
+   `Auth:DataProtection:PreviousCertificateThumbprints` (масив або список через `;`),
+   `deploy-ecr.ps1 -PreviousDataProtectionCertificateThumbprints`; перевірено тестами на бібліотеці
+   (A -> B + Previous=[A] читає, без Previous — `CryptographicException`). Сертифікат із Previous усе одно має бути
+   в `LocalMachine\My` (код шукає лише там; ненайдений — Warning у журналі). `/health/db` (перевірка `db`) став
+   Degraded, коли в кільці є ключі, зашифровані сертифікатом, якого служба не може використати, — у тексті названо відбитки.
 4. Не перевірено: поведінка самої `Ecr.Api` (EF-сховище, `ValidateOnStart`, Windows-служба,
    `LocalMachine`) — лише бібліотека Data Protection.
 
@@ -457,7 +461,7 @@ $cert.Thumbprint -AppPort 443 -HttpRedirectPort 80`) і 8. Що зафіксув
 10. **`/health/ready` у режимі проксі не знає про проксі** — `transport` зелений за
     `RequireHttps = true`, навіть якщо проксі немає (задокументовано в
     `TransportHealthCheck.cs`, тут — для повноти).
-11. **`UnprotectKeysWithAnyCertificate` не налаштовано**, і при заміні сертифіката видалення
+11. **Виправлено кодом, коміт `ed0b2393` (D-267).** Було: `UnprotectKeysWithAnyCertificate` не налаштовано, і при заміні сертифіката видалення
     старого тихо робить кільце нечитабельним (розділ 10.1). Рішення (зміна коду, питання
     власнику зони безпеки): список «старих» відбитків у конфігурації
     (`Auth:DataProtection:PreviousCertificateThumbprints`) + `UnprotectKeysWithAnyCertificate`.

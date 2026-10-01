@@ -1162,9 +1162,10 @@ TLS завершує **застосунок (Kestrel)** за замовчува�
 
 ⚠ **Data Protection і сертифікат — що відомо з коду (`AuthenticationSetup.cs`):** ключі кільця в
 `sec.DataProtectionKey` захищаються лише `ProtectKeysWithCertificate` за відбитком; у Production без відбитка
-служба не стартує. `UnprotectKeysWithAnyCertificate` **не налаштовано**: при заміні сертифіката старий
-залишати в `LocalMachine\My`, доки є ключі, захищені ним (ротація старих ключів — п. 6.4). Поведінку при
-заміні спільного сертифіката на живому стенді **не перевірено** — ризик у `docs/build/OPEN-ITEMS.md` §7.
+служба не стартує. `UnprotectKeysWithAnyCertificate` налаштовано з D-267 (коміт `ed0b2393`): відбитки попередніх сертифікатів —
+`Auth:DataProtection:PreviousCertificateThumbprints` (`deploy-ecr.ps1 -PreviousDataProtectionCertificateThumbprints`; MSI-оновлення стирає
+змінну — передавати знову); при заміні сертифіката старий залишати в `LocalMachine\My`, доки є ключі, захищені ним (ротація старих ключів — п. 6.4). Поведінку при
+заміні перевірено на бібліотеці (`https-certificate.md` §10.1), ризик закрито кодом; `/health/db` попереджає (Degraded), якщо відбиток пропущено.
 Продовження строку одного сертифіката зачіпає одночасно HTTPS і Data Protection — виконувати як одну
 операцію (перегляд п. 6.2 і цього пункту).
 

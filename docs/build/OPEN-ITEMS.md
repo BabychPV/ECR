@@ -269,7 +269,7 @@ Get-ChildItem docs/build/questions -Filter 'Q-*.md' |
 | `D-258` | `Date_Issue` у форматі `MM/dd/yyyy` | не зроблено: розбір лише ISO 8601, інше — `DateInvalidKey` | Аналіз |
 | `D-259` | `EventFrame`: ID не стабільні; синхронізація = повна звірка за період (видалити відсутні, додати, перерахувати); без закриття заднім числом | не зроблено: `SourceEventSyncPlanner` не видаляє події, відсутні в джерелі | Аналіз/HSE301 |
 | `D-265` | «Обліковий запис застосунку має в БД роль „бачить усе"» | формулювання неточне: яка SQL-роль/обсяг (напр. читання всіх схем) — уточнити в людини; дію в `deploy-ecr.ps1` не вигадувати | питання (координатор) |
-| `D-267` | Один сертифікат із SAN для HTTPS і Data Protection | DP прив'язано лише до відбитка (`AuthenticationSetup.cs`: `ProtectKeysWithCertificate`); `UnprotectKeysWithAnyCertificate` не налаштовано; поведінка при заміні сертифіката [не перевірено на стенді]; хто завершує TLS — не названо | питання (замовник) + перевірка (Аудит) |
+| `D-267` | Один сертифікат із SAN для HTTPS і Data Protection | DP прив'язано лише до відбитка (`AuthenticationSetup.cs`: `ProtectKeysWithCertificate`); **закрито кодом, коміт `ed0b2393`**: `Auth:DataProtection:PreviousCertificateThumbprints` + `UnprotectKeysWithAnyCertificate` + Degraded у `/health/db`; хто завершує TLS — не названо | питання (замовник): лише TLS |
 
 ---
 
