@@ -296,7 +296,7 @@ public sealed partial class SaveDataSourceHandler(
             {
                 RequireSecretConfirmation(source.SecretName, secretConfirmation, source.Code);
             }
-            else if (!confirmEndpointChange)
+            else if (confirmEndpointChange)
             {
                 throw new BusinessRuleException(
                     ErrorCodes.RequestInvalid,

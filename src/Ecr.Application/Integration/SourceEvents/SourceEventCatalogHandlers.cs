@@ -156,7 +156,7 @@ public sealed class ProbeSourceEventsHandler(
     public const int DefaultWindowDays = 30;
 
     /// <summary>Найширше вікно проби.</summary>
-    public const int MaxWindowDays = 92;
+    public const int MaxWindowDays = 93;
 
     /// <summary>Читає події шаблону джерела <paramref name="id"/>.</summary>
     /// <param name="id">Джерело даних.</param>

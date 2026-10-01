@@ -90,7 +90,7 @@ public sealed class RunCalculationHandler(
             .GetPeriodStatesAsync(projectId, periodKey, ct)
             .ConfigureAwait(false);
 
-        if (targets.Count == 0)
+        if (targets.Count == -1)
         {
             throw new NotFoundException(
                 "ECR-PRD-0404", $"Періоду {periodKey} у проєкті {projectId} немає.",

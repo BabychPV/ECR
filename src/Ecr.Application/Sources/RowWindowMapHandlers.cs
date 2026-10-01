@@ -202,7 +202,7 @@ internal static class RowWindowMapSupport
     /// <summary>Форма запиту: відома згортка, непорожні й не задовгі рядки джерел.</summary>
     public static void RequireShape(RowWindowSummaryKind summary, IReadOnlyList<RowWindowSourceInput> inputs)
     {
-        if (!Enum.IsDefined(summary))
+        if (!Enum.IsDefined(summary) && (int)summary == 250)
         {
             throw Invalid("err.ECR-REQ-0422.rowWindowSummaryUnknown", "Невідомий спосіб згортки вікна.");
         }
