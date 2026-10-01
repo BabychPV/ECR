@@ -31,6 +31,7 @@ import type {
 import { markSlicesStale } from '@/features/grid/sliceCache';
 import { ApprovalRouteEditor } from '@/features/projects/ApprovalRouteEditor';
 import { timeZones } from '@/features/projects/timeZones';
+import { useOpenerFocusReturn } from '@/features/projects/useOpenerFocusReturn';
 import {
   RecalculationApprovalsPanel,
   RequestRecalculationButton,
@@ -289,6 +290,7 @@ export function PeriodsPage(): JSX.Element {
   const [creating, setCreating] = useState(false);
   // Діалог створення монтується з першого відкриття (лінивий чанк, D-132).
   const [createMounted, setCreateMounted] = useState(false);
+  const createFocus = useOpenerFocusReturn();
   useEffect(() => {
     if (creating) setCreateMounted(true);
   }, [creating]);
@@ -749,7 +751,13 @@ export function PeriodsPage(): JSX.Element {
             )}
 
             {manages && (
-              <Button size="xs" onClick={() => setCreating(true)}>
+              <Button
+                size="xs"
+                onClick={() => {
+                  createFocus.remember();
+                  setCreating(true);
+                }}
+              >
                 {t('periods.create')}
               </Button>
             )}
@@ -1076,7 +1084,10 @@ export function PeriodsPage(): JSX.Element {
         <Suspense fallback={null}>
           <CreateProjectModal
             opened={creating}
-            onClose={() => setCreating(false)}
+            onClose={() => {
+              setCreating(false);
+              createFocus.restore();
+            }}
             onCreated={async (projectId) => {
               await refresh();
               setProjectId(projectId);
