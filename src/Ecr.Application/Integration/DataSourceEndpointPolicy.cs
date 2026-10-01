@@ -1,4 +1,4 @@
-﻿using System.Data.Common;
+using System.Data.Common;
 using System.Net;
 using System.Net.Sockets;
 
@@ -154,7 +154,8 @@ public static class DataSourceEndpointPolicy
     {
         ArgumentNullException.ThrowIfNull(address);
 
-        var s = address.Trim().Trim('{', '}').Trim();
+        // Лапки ODBC не знімає, але клієнт може; хост у лапках перевіряємо як без них.
+        var s = address.Trim().Trim('{', '}', '"', '\'').Trim();
 
         // `tcp:169.254.169.254,80`: без цього хостом ставав `tcp` (одна `:` = host:port).
         foreach (var prefix in ProtocolPrefixes)
