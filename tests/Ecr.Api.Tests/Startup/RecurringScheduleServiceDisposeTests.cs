@@ -34,15 +34,22 @@ public sealed class RecurringScheduleServiceDisposeTests
             new ConfigurationBuilder().Build());
     }
 
+    private static readonly TimeSpan Limit = TimeSpan.FromSeconds(10);
+
     [Fact]
-    public async Task StopAsync_двічі_підряд_не_кидає()
+    public async Task StopAsync_двічі_підряд_не_кидає_і_наступний_Dispose_теж()
     {
-        using var service = Create(out var started);
+        var service = Create(out var started);
         using var _ = started;
         await service.StartAsync(CancellationToken.None);
 
-        await service.StopAsync(CancellationToken.None);
-        await service.StopAsync(CancellationToken.None);
+        var first = await Record.ExceptionAsync(() => service.StopAsync(CancellationToken.None).WaitAsync(Limit));
+        var second = await Record.ExceptionAsync(() => service.StopAsync(CancellationToken.None).WaitAsync(Limit));
+        var dispose = Record.Exception(() => { service.Dispose(); service.Dispose(); });
+
+        Assert.Null(first);
+        Assert.Null(second);
+        Assert.Null(dispose);
     }
 
     [Fact]
@@ -52,28 +59,35 @@ public sealed class RecurringScheduleServiceDisposeTests
         using var _ = started;
         await service.StartAsync(CancellationToken.None);
 
-        service.Dispose();
-        service.Dispose();
+        var dispose = Record.Exception(() => { service.Dispose(); service.Dispose(); });
+        var stop = await Record.ExceptionAsync(() => service.StopAsync(CancellationToken.None).WaitAsync(Limit));
 
-        await service.StopAsync(CancellationToken.None);
+        Assert.Null(dispose);
+        Assert.Null(stop);
+        Assert.IsNotType<ObjectDisposedException>(stop);
     }
 
     [Fact]
-    public async Task ApplicationStarted_після_Dispose_не_кидає()
+    public async Task ApplicationStarted_після_Dispose_не_кидає_і_цикл_не_запускається()
     {
         var service = Create(out var started);
         using var _ = started;
         await service.StartAsync(CancellationToken.None);
 
         service.Dispose();
-        await started.CancelAsync();
+        var cancel = await Record.ExceptionAsync(() => started.CancelAsync());
+        var stop = await Record.ExceptionAsync(() => service.StopAsync(CancellationToken.None).WaitAsync(Limit));
 
-        await service.StopAsync(CancellationToken.None);
+        Assert.Null(cancel);
+        Assert.Null(stop);
     }
 
     [Fact]
-    public async Task Паралельні_StopAsync_і_Dispose_не_кидають()
+    public async Task Паралельні_StopAsync_і_Dispose_не_кидають_і_завершуються()
     {
+        var exceptions = new System.Collections.Concurrent.ConcurrentBag<Exception>();
+        var timeouts = 0;
+
         for (var i = 0; i < 200; i++)
         {
             var service = Create(out var started);
@@ -90,14 +104,26 @@ public sealed class RecurringScheduleServiceDisposeTests
 
             try
             {
-                await Task.WhenAll(tasks).WaitAsync(TimeSpan.FromSeconds(10));
+                await Task.WhenAll(tasks).WaitAsync(Limit);
             }
             catch (TimeoutException)
             {
-                throw new Xunit.Sdk.XunitException(
-                    "iter " + i + ": " + string.Join(",", tasks.Select(t => t.Status.ToString())));
+                timeouts++;
             }
+            catch (Exception ex)
+            {
+                exceptions.Add(ex);
+            }
+
+            foreach (var task in tasks.Where(t => t.IsFaulted))
+            {
+                exceptions.Add(task.Exception!);
+            }
+
             started.Dispose();
         }
+
+        Assert.Empty(exceptions);
+        Assert.Equal(0, timeouts);
     }
 }
