@@ -5872,6 +5872,10 @@ USING (VALUES
     (N'health.collection.rawPointsOverThreshold', N'en', N'ext.RawDataPoint holds about {rows} rows: the R2 review threshold of {threshold} is exceeded. See docs/build/perf/R2-rawdatapoint-plan.md.', 1),
     -- ru/kz — окремою порцією COLL:rawhealth у блоці I18N нижче.
     -- COLL:rawhealth ── кінець секції ──
+    -- COLL:d230 ── Види зв'язків таблиць Rollup/Check (D-230, ФВ-2.12): відмова PUT …/relations/{code} за схемою MatchJson/MapJson (ПРИПУЩЕННЯ, `RelationSpecParser`) ──
+    (N'err.ECR-TMPL-0422.relationSpecInvalid', N'en', N'Relation "{relationCode}": {detail}', 1),
+    -- ru/kz — окремою порцією $Section у блоці I18N нижче.
+    -- COLL:d230 ── кінець секції ──
     -- JOBL ── людські назви видів фонових задач, яких бракувало в jobLabel.ts (KindKeys) ──
     (N'jobs.kind.sourceEventSync',  N'en', N'Source event sync', 1),
     (N'jobs.kind.consistencyCheck', N'en', N'Consistency check', 1),
@@ -13579,6 +13583,17 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:reqclose3-tmplkeys ── кінець секції ──
+
+-- COLL:d230 ── ru/kz відмови схеми зв'язку Rollup/Check (D-230); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-TMPL-0422.relationSpecInvalid', N'ru', N'Связь «{relationCode}»: {detail}'),
+    (N'err.ECR-TMPL-0422.relationSpecInvalid', N'kz', N'«{relationCode}» байланысы: {detail}')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:d230 ── кінець секції ──
 
 -- COLL:sqlpolicy ── ru/kz політики адреси PiSqlClient; власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)

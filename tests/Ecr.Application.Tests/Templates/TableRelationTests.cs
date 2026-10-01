@@ -108,7 +108,7 @@ public sealed class TableRelationTests(SqlServerFixture sql)
                 version.VersionId, version.RelationCode,
                 new SaveTableRelationCommand(
                     version.SourceTableDefId, version.TargetTableDefId,
-                    TableRelationKind.Rollup, NewMatch, null, 1, true),
+                    TableRelationKind.Mirror, NewMatch, null, 1, true),
                 CancellationToken.None);
 
             // ⚠ Ця перевірка сама по собі НЕ доводить збереження: відповідь
@@ -126,6 +126,38 @@ public sealed class TableRelationTests(SqlServerFixture sql)
 
         Assert.Equal(NewMatch, stored.MatchJson);
         Assert.Equal((byte)1, stored.OnSourceChange);
+    }
+
+    /// <summary>
+    /// D-230: Rollup/Check перевіряються проти колонок таблиць версії. Мутація: прибрати виклик
+    /// <c>EnsureSpecAsync</c> у <c>SaveTableRelationHandler</c> — тест червоніє (зв'язок збережеться).
+    /// </summary>
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-2.12")]
+    [InlineData(TableRelationKind.Rollup, null)]
+    [InlineData(TableRelationKind.Rollup, """{"sourceColumn":"Fact","targetColumn":"Total","aggregate":"sum"}""")]
+    [InlineData(TableRelationKind.Check, """{"left":"A","right":"B","severity":"Fatal"}""")]
+    public async Task Rollup_і_Check_з_хибною_схемою_відхиляються_з_ECR_TMPL_0422_і_нічого_не_лишають(
+        TableRelationKind kind, string? mapJson)
+    {
+        var version = await DraftAsync();
+
+        await using (var db = Context())
+        {
+            var ex = await Assert.ThrowsAsync<BusinessRuleException>(() => Save(db).HandleAsync(
+                version.VersionId, version.RelationCode,
+                new SaveTableRelationCommand(version.SourceTableDefId, version.TargetTableDefId, kind, Match, mapJson, 0, true),
+                CancellationToken.None));
+
+            Assert.Equal("ECR-TMPL-0422", ex.ErrorCode);
+            Assert.Equal("err.ECR-TMPL-0422.relationSpecInvalid", ex.Details!["messageKey"]);
+        }
+
+        await using var fresh = Context();
+        Assert.False(await fresh.TableRelations.AsNoTracking()
+            .AnyAsync(r => r.SourceTableDefId == version.SourceTableDefId));
     }
 
     [Fact]
@@ -155,7 +187,7 @@ public sealed class TableRelationTests(SqlServerFixture sql)
 
         Assert.Equal(version.RelationCode, stored.Code);
         Assert.Equal(version.TargetTableDefId, stored.TargetTableDefId);
-        Assert.Equal(TableRelationKind.Rollup, stored.RelationKind);
+        Assert.Equal(TableRelationKind.Mirror, stored.RelationKind);
 
         // ⚠ Аудит — не косметика: структурна зміна версії має слід, інакше
         // питання «хто прибрав цей rollup» не має відповіді. Читається він із
@@ -269,7 +301,7 @@ public sealed class TableRelationTests(SqlServerFixture sql)
                 mine.RelationCode,
                 new SaveTableRelationCommand(
                     mine.SourceTableDefId, alien.TargetTableDefId,
-                    TableRelationKind.Rollup, Match, null, 0, true),
+                    TableRelationKind.Mirror, Match, null, 0, true),
                 CancellationToken.None));
 
         Assert.Equal("ECR-TMPL-0422", error.ErrorCode);
@@ -399,7 +431,7 @@ public sealed class TableRelationTests(SqlServerFixture sql)
     // ─────────────────────────────────────────────────────────────────────────
 
     private static SaveTableRelationCommand Command(DraftVersion version)
-        => new(version.SourceTableDefId, version.TargetTableDefId, TableRelationKind.Rollup, Match, null, 0, true);
+        => new(version.SourceTableDefId, version.TargetTableDefId, TableRelationKind.Mirror, Match, null, 0, true);
 
     private SaveTableRelationHandler Save(EcrDbContext db, string permission = "Template.Edit")
     {
