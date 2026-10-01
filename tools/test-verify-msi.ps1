@@ -1,6 +1,6 @@
 ﻿<#
 .SYNOPSIS
-    Тест перевірки цілісності MSI (CL-3, D-259): tools/verify-msi.ps1
+    Тест перевірки цілісності MSI (CL-3, MSI-SIGNING-OPTIONS (A+B)): tools/verify-msi.ps1
     -IntegrityOnly і tools/sign-msi.ps1 -Thumbprint на справжньому Ecr.msi.
 .DESCRIPTION
     Доводить не «зелений шлях», а відмови:

@@ -3,7 +3,7 @@
     Підписує зібраний MSI. Окремий крок — навмисно не входить у
     build-msi.ps1, бо збірка має проходити на машині без сертифіката.
 .DESCRIPTION
-    Два шляхи (D-259, QUESTIONS-BUSINESS §3.3):
+    Два шляхи (MSI-SIGNING-OPTIONS (A+B), QUESTIONS-BUSINESS §3.3):
       -Thumbprint   — варіант A: власний (самопідписаний) code-signing
                       сертифікат зі сховища Cert:\CurrentUser\My або
                       Cert:\LocalMachine\My; Set-AuthenticodeSignature, без signtool.
