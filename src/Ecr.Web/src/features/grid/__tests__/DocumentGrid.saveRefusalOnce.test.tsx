@@ -97,7 +97,7 @@ function mockRejectingServer(): void {
             correlationId: 'c1',
             columnCode: 'C1',
             // Сервер локалізує цю відмову (`CellValueReader`, `U-02`).
-            messageKey: 'err.ECR-CELL-0422.expectedNumber',
+            messageKey: 'err.ECR-CELL-0422.expectsNumber',
           }),
           { status: 422, headers: { 'Content-Type': 'application/problem+json' } },
         );

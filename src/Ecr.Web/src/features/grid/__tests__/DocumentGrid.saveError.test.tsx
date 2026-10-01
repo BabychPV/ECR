@@ -96,7 +96,7 @@ function mockServer(): void {
             correlationId: 'c1',
             columnCode: 'C1',
             // Сервер локалізує цю відмову (`CellValueReader`, `U-02`).
-            messageKey: 'err.ECR-CELL-0422.expectedNumber',
+            messageKey: 'err.ECR-CELL-0422.expectsNumber',
             expected: 'число',
             actualKind: 'String',
           }),

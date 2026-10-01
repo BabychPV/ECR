@@ -56,7 +56,7 @@ describe('cellsOfSaveError', () => {
           columnCode: 'C1',
           expected: 'число',
           actualKind: 'String',
-          messageKey: 'err.ECR-CELL-0422.expectedNumber',
+          messageKey: 'err.ECR-CELL-0422.expectsNumber',
         },
       }),
     );

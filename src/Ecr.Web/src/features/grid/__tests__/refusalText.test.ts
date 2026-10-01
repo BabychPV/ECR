@@ -7,7 +7,7 @@ function problem(overrides: Partial<EcrProblem> = {}): EcrProblem {
     title: 'Unit is in use',
     status: 409,
     detail: 'Одиниця використовується в 3 колонках.',
-    errorCode: 'ECR-UNIT-0409',
+    errorCode: 'ECR-REG-0409',
     correlationId: 'c1',
     ...overrides,
   };
@@ -16,7 +16,7 @@ function problem(overrides: Partial<EcrProblem> = {}): EcrProblem {
 describe('refusalText (ФВ-14.9a)', () => {
   it('подробиця з messageKey — локалізована сервером, показується', () => {
     const error = new EcrApiError(
-      problem({ detail: 'Unit is used by 3 columns.', extensions2: { messageKey: 'err.ECR-UNIT-0409.used' } }),
+      problem({ detail: 'Unit is used by 3 columns.', extensions2: { messageKey: 'err.ECR-REG-0409.entryReferenced' } }),
     );
 
     expect(refusalText(error)).toBe('Unit is used by 3 columns.');
