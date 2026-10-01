@@ -295,6 +295,23 @@ public sealed class SeedTests(SqlServerFixture sql)
     }
 
     [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Seed_заводить_три_описи_форм_230_з_опублікованою_версією_з_восьми_колонок()
+    {
+        // AN-14: ECR230_A1/B1/B4 — окрема секція `COLL:an14-ecr230`; кількість описів у сіді 1 → 4 (IEC + три).
+        Assert.Equal(3, await ScalarAsync(
+            "SELECT COUNT(*) FROM rpt.ReportDef WHERE Code IN (N'ECR230_A1', N'ECR230_B1', N'ECR230_B4') AND IsActive = 1 AND IsRegulatory = 1"));
+        Assert.Equal(3, await ScalarAsync("""
+            SELECT COUNT(*)
+            FROM rpt.ReportVersion AS v
+            JOIN rpt.ReportDef     AS d ON d.Id = v.ReportDefId
+            WHERE d.Code IN (N'ECR230_A1', N'ECR230_B1', N'ECR230_B4') AND v.Status = 1
+              AND (SELECT COUNT(*) FROM OPENJSON(v.ColumnsJson)) = 8
+            """));
+    }
+
+    [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "ФВ-6.12")]
