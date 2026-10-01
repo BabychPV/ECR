@@ -95,12 +95,18 @@ public sealed class HeaderScenarios(SqlServerFixture sql)
             new Uri($"/api/v1/documents/{doc.DocumentId}/recalculate", UriKind.Relative),
             new { periodKey = doc.PeriodKey, sheetDefId = (int?)null });
         Assert.True(recalc.StatusCode == HttpStatusCode.Accepted, $"{recalc.StatusCode}: {app.ErrorsText}");
+        var jobId = (await recalc.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("jobId").GetString()!;
+
+        // ⚠ Діагностика флейку (гіпотеза «втрачена перепостановка»): чекаємо ЗАВЕРШЕННЯ
+        // задачі з відповіді 202, а не побічного ефекту, — і при провалі друкуємо її стан.
+        var job = await ScenarioHelpers.AwaitJobAsync(admin.Client, jobId, TimeSpan.FromSeconds(60));
+        var jobText = job.ValueKind == JsonValueKind.Undefined ? "стан не прочитався" : job.GetRawText();
 
         // 5. ГОЛОВНЕ ТВЕРДЖЕННЯ: клітинка HdrEcho першого рядка стає РІВНО
         //    "Kashagan" — те саме значення, що щойно записане в шапку, а не
         //    null/порожньо (заглушка) і не будь-який інший текст.
         var value = await AwaitTextCellAsync(
-            app, admin.Client, doc.DocumentId, tableInstanceId, doc.RowKeys[0], "HdrEcho", "Kashagan");
+            app, admin.Client, doc.DocumentId, tableInstanceId, doc.RowKeys[0], "HdrEcho", "Kashagan", jobId, jobText);
         Assert.Equal("Kashagan", value);
 
         // 6. Симетрія з (2): GET .../header тепер віддає те саме значення, що
@@ -189,10 +195,11 @@ public sealed class HeaderScenarios(SqlServerFixture sql)
     /// <summary>Опитує зріз, поки текстова клітинка не стане очікуваним значенням.</summary>
     private static async Task<string?> AwaitTextCellAsync(
         EcrApiFactory app, HttpClient client, long documentId, long tableInstanceId,
-        string rowKey, string columnCode, string expected)
+        string rowKey, string columnCode, string expected, string jobId, string jobText)
     {
         var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(30);
         string? last = null;
+        var lastSlice = string.Empty;
 
         while (DateTime.UtcNow < deadline)
         {
@@ -201,6 +208,7 @@ public sealed class HeaderScenarios(SqlServerFixture sql)
             Assert.Equal(HttpStatusCode.OK, slice.StatusCode);
 
             var body = await slice.Content.ReadFromJsonAsync<JsonElement>();
+            lastSlice = body.GetRawText();
             var row = body.GetProperty("rows").EnumerateArray()
                 .FirstOrDefault(r => r.GetProperty("rowKey").GetString() == rowKey);
 
@@ -220,7 +228,8 @@ public sealed class HeaderScenarios(SqlServerFixture sql)
 
         Assert.Fail(
             $"клітинка {columnCode} рядка {rowKey} за 30 с не стала \"{expected}\" (останнє: "
-            + $"{last ?? "порожньо"}); {app.ErrorsText}");
+            + $"{last ?? "порожньо"}); задача {jobId}: {jobText}; GET tables: {lastSlice}; "
+            + $"хвіст ServerLog: {string.Join(" | ", app.ServerLog.TakeLast(40))}; {app.ErrorsText}");
 
         return last;
     }
