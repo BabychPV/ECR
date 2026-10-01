@@ -5975,6 +5975,17 @@ USING (VALUES
     (N'jobs.kind.consistencyCheck', N'en', N'Consistency check', 1),
     (N'jobs.kind.orphanScan',       N'en', N'Orphaned data scan', 1),
     -- JOBL ── кінець секції ──
+    -- COLL:smtp ── Категорії відмови проби SMTP (`SmtpFailureClassifier`) і подія «період відкрито» (`PeriodStateJob`, `NotificationEventKind.PeriodOpened`) ──
+    (N'notifications.test.smtp.dns',     N'en', N'SMTP test failed: the server name could not be resolved (DNS). Check Smtp:Host.', 1),
+    (N'notifications.test.smtp.connect', N'en', N'SMTP test failed: could not connect to the server. Check the host, the port (Smtp:Port) and the firewall.', 1),
+    (N'notifications.test.smtp.tls',     N'en', N'SMTP test failed: TLS/STARTTLS error. Check the server certificate and Smtp:UseStartTls.', 1),
+    (N'notifications.test.smtp.auth',    N'en', N'SMTP test failed: the server rejected the login. Check Smtp:User and the secret named in Smtp:SecretName.', 1),
+    (N'notifications.test.smtp.relay',   N'en', N'SMTP test failed: the server refused to relay for the sender or a recipient. Check Smtp:From and the recipient addresses.', 1),
+    (N'notifications.test.smtp.timeout', N'en', N'SMTP test failed: the server did not respond in time.', 1),
+    (N'notifications.event.PeriodOpened', N'en', N'Reporting period opened', 1),
+    (N'notifications.periodOpened.subject', N'en', N'ECR: period {period} opened, project {project}', 1),
+    (N'notifications.periodOpened.body', N'en', N'A new reporting period {period} has opened for project {project}. Please fill in your document for this period.', 1),
+    -- COLL:smtp ── кінець секції ──
     -- SEC:effective-access ── Розріз «ресурс → рівень → грант якої ролі» (ФВ-6.16, D-220, `EffectiveAccessPanel`, GET /security/users/{id}/effective-access) ──
     (N'err.ECR-REQ-0422.effectiveAccessResource', N'en', N'The resource must be given as a type and a positive number, for example Registry:5 or Project:3.', 1),
     (N'effectiveAccess.show',            N'en', N'Show effective access', 1),
@@ -13735,6 +13746,33 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- JOBL ── кінець секції ──
+
+-- COLL:smtp ── ru/kz категорій відмови проби SMTP і події «період відкрито»; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'notifications.test.smtp.dns', N'ru', N'Проверка SMTP не удалась: имя сервера не разрешилось (DNS). Проверьте Smtp:Host.'),
+    (N'notifications.test.smtp.dns', N'kz', N'SMTP тексеруі сәтсіз: сервер атауы анықталмады (DNS). Smtp:Host мәнін тексеріңіз.'),
+    (N'notifications.test.smtp.connect', N'ru', N'Проверка SMTP не удалась: не удалось подключиться к серверу. Проверьте хост, порт (Smtp:Port) и межсетевой экран.'),
+    (N'notifications.test.smtp.connect', N'kz', N'SMTP тексеруі сәтсіз: серверге қосылу мүмкін болмады. Хостты, портты (Smtp:Port) және брандмауэрді тексеріңіз.'),
+    (N'notifications.test.smtp.tls', N'ru', N'Проверка SMTP не удалась: ошибка TLS/STARTTLS. Проверьте сертификат сервера и Smtp:UseStartTls.'),
+    (N'notifications.test.smtp.tls', N'kz', N'SMTP тексеруі сәтсіз: TLS/STARTTLS қатесі. Сервер сертификатын және Smtp:UseStartTls мәнін тексеріңіз.'),
+    (N'notifications.test.smtp.auth', N'ru', N'Проверка SMTP не удалась: сервер отклонил логин. Проверьте Smtp:User и секрет, названный в Smtp:SecretName.'),
+    (N'notifications.test.smtp.auth', N'kz', N'SMTP тексеруі сәтсіз: сервер логинді қабылдамады. Smtp:User мәнін және Smtp:SecretName ішінде аталған құпияны тексеріңіз.'),
+    (N'notifications.test.smtp.relay', N'ru', N'Проверка SMTP не удалась: сервер отказался пересылать почту для отправителя или получателя. Проверьте Smtp:From и адреса получателей.'),
+    (N'notifications.test.smtp.relay', N'kz', N'SMTP тексеруі сәтсіз: сервер жіберушіге немесе алушыға пошта жіберуден бас тартты. Smtp:From мәнін және алушылар мекенжайларын тексеріңіз.'),
+    (N'notifications.test.smtp.timeout', N'ru', N'Проверка SMTP не удалась: сервер не ответил вовремя.'),
+    (N'notifications.test.smtp.timeout', N'kz', N'SMTP тексеруі сәтсіз: сервер уақытында жауап бермеді.'),
+    (N'notifications.event.PeriodOpened', N'ru', N'Открыт отчётный период'),
+    (N'notifications.event.PeriodOpened', N'kz', N'Есепті кезең ашылды'),
+    (N'notifications.periodOpened.subject', N'ru', N'ECR: открыт период {period}, проект {project}'),
+    (N'notifications.periodOpened.subject', N'kz', N'ECR: {period} кезеңі ашылды, {project} жобасы'),
+    (N'notifications.periodOpened.body', N'ru', N'Для проекта {project} открыт новый отчётный период {period}. Заполните документ за этот период.'),
+    (N'notifications.periodOpened.body', N'kz', N'{project} жобасы үшін жаңа есепті кезең {period} ашылды. Осы кезеңге арналған құжатты толтырыңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:smtp ── кінець секції ──
 
 -- COLL:rawhealth ── ru/kz розміру ext.RawDataPoint у картці `db`; власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)

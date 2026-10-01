@@ -372,7 +372,8 @@ public sealed class TestNotificationChannelHandler(
                 ? new NotificationTestResult(
                     false, "The SMTP transport is not configured.", "notifications.test.smtpNotConfigured")
                 : await TryAsync(
-                    () => sender.SendAsync(
+                    classify: true,
+                    send: () => sender.SendAsync(
                         ListNotificationChannelsHandler.ToView(channel, sender.IsConfigured).Settings.Recipients ?? [],
                         Subject, BodyFor(channel), ct))
                     .ConfigureAwait(false);
@@ -391,7 +392,8 @@ public sealed class TestNotificationChannelHandler(
         }
 
         return await TryAsync(
-            () => transport.SendAsync(channel, new NotificationMessage(Subject, BodyFor(channel)), ct))
+            classify: false,
+            send: () => transport.SendAsync(channel, new NotificationMessage(Subject, BodyFor(channel)), ct))
             .ConfigureAwait(false);
     }
 
@@ -401,7 +403,11 @@ public sealed class TestNotificationChannelHandler(
         => $"Test message for channel \"{channel.Name}\".";
 
     /// <summary>Виконує відправку; відмова транспорту стає відповіддю, не винятком.</summary>
-    private static async Task<NotificationTestResult> TryAsync(Func<Task> send)
+    /// <remarks>
+    /// ⚠ <paramref name="classify"/> — лише для пошти: розпізнану категорію (DNS, TLS, автентифікація,
+    /// relay…) віддаємо ключем каталогу, нерозпізнану — текстом як є (<see cref="SmtpFailureClassifier"/>).
+    /// </remarks>
+    private static async Task<NotificationTestResult> TryAsync(Func<Task> send, bool classify)
     {
         try
         {
@@ -413,7 +419,10 @@ public sealed class TestNotificationChannelHandler(
         catch (Exception e) when (e is not OperationCanceledException)
 #pragma warning restore CA1031
         {
-            return new NotificationTestResult(false, e.Message);
+            var key = classify ? SmtpFailureClassifier.MessageKeyOf(e) : null;
+
+            return new NotificationTestResult(
+                false, e.Message, key == SmtpFailureClassifier.Unknown ? null : key);
         }
     }
 }

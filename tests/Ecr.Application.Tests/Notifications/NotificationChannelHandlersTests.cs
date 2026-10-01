@@ -394,6 +394,38 @@ public sealed class NotificationChannelHandlersTests
 
     private ListNotificationChannelsHandler List() => new(_store, _sender, _access, _user);
 
+    /// <summary>
+    /// Проба пошти називає категорію відмови ключем каталогу (адміністратор бачить, ЩО лагодити),
+    /// а нерозпізнану — повертає текстом, не вигадуючи причини.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "ФВ-12.4a")]
+    public async Task Проба_SMTP_віддає_категорію_відмови_ключем_а_невідому_причину_текстом()
+    {
+        _sender.IsConfigured.Returns(true);
+        var channel = await Save().CreateAsync(NotificationChannelKind.Smtp, "Mail", Smtp, CancellationToken.None);
+
+        _sender
+            .SendAsync(Arg.Any<IReadOnlyList<string>>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .ThrowsAsync(new System.Net.Mail.SmtpException(System.Net.Mail.SmtpStatusCode.ClientNotPermitted, "535 5.7.8 rejected"));
+
+        var auth = await Test().HandleAsync(channel.Id, CancellationToken.None);
+
+        Assert.False(auth.Ok);
+        Assert.Equal(SmtpFailureClassifier.Auth, auth.MessageKey);
+
+        _sender
+            .SendAsync(Arg.Any<IReadOnlyList<string>>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .ThrowsAsync(new InvalidOperationException("something odd"));
+
+        var unknown = await Test().HandleAsync(channel.Id, CancellationToken.None);
+
+        Assert.False(unknown.Ok);
+        Assert.Null(unknown.MessageKey);
+        Assert.Equal("something odd", unknown.Error);
+    }
+
     private SaveNotificationChannelHandler Save() => new(_store, _sender, _access, _uow, _audit, _user, _clock);
 
     private DeleteNotificationChannelHandler Delete() => new(_store, _access, _uow, _audit, _user, _clock);
