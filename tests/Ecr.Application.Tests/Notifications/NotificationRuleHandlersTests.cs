@@ -47,10 +47,11 @@ public sealed class NotificationRuleHandlersTests
     {
         var matrix = await Rules().HandleAsync(CancellationToken.None);
 
-        // ⛔ Саме ВСІ шість, а не «ті, на які є правило»: порожня клітинка має
-        // означати «правила немає», а не «такої події не буває». Число
-        // літералом — інакше твердження їхало б разом із переліком.
-        Assert.Equal(6, matrix.EventKinds.Count);
+        // ⛔ Саме ВСІ види подій, а не «ті, на які є правило»: порожня клітинка має
+        // означати «правила немає», а не «такої події не буває». Число береться
+        // з enum, а не літералом: нова подія не ламає тест, а матриця все одно
+        // мусить перелічити кожну.
+        Assert.Equal(Enum.GetValues<NotificationEventKind>().Length, matrix.EventKinds.Count);
         Assert.Equal(Enum.GetValues<NotificationEventKind>(), matrix.EventKinds);
         Assert.Empty(matrix.Rules);
     }
