@@ -779,6 +779,11 @@ public sealed class SaveMethodologyTestCaseHandler(
 
         var testCode = EcrCode.Create(code);
 
+        // P2 (walk-reg): без цього некоректний JSON зберігався з 200, а публікація/симуляція
+        // падали 500. Той самий розбір, що в MethodologyStore.GetTestCasesAsync.
+        TestCaseJson.Require<CalculationInput>(testCode.Value, "inputJson", inputJson);
+        TestCaseJson.Require<Dictionary<string, decimal>>(testCode.Value, "expectedJson", expectedJson);
+
         var version = await drafts.FindVersionAsync(methodologyVersionId, ct).ConfigureAwait(false)
             ?? throw new NotFoundException(
                 "ECR-CALC-0404",
@@ -1544,3 +1549,52 @@ public sealed record SaveMethodologyConstant(
     string? Category,
     long? SubstanceEntryId,
     string? Source);
+
+/// <summary>Перевірка JSON тесту золотого набору при записі (P2, walk-reg 2026-10-01).</summary>
+internal static class TestCaseJson
+{
+    private static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web);
+
+    /// <summary>Відхиляє JSON, який не розбереться як <typeparamref name="T"/>.</summary>
+    /// <typeparam name="T">Очікувана форма.</typeparam>
+    /// <param name="testCode">Код тесту.</param>
+    /// <param name="field">Ім'я поля запиту.</param>
+    /// <param name="json">Текст JSON.</param>
+    /// <exception cref="BusinessRuleException"><c>ECR-CALC-0422</c>.</exception>
+    public static void Require<T>(string testCode, string field, string json)
+    {
+        string? reason = null;
+
+        try
+        {
+            if (JsonSerializer.Deserialize<T>(json, Options) is null)
+            {
+                reason = "null";
+            }
+        }
+        catch (JsonException error)
+        {
+            reason = error.Message;
+        }
+        catch (NotSupportedException error)
+        {
+            reason = error.Message;
+        }
+
+        if (reason is null)
+        {
+            return;
+        }
+
+        throw new BusinessRuleException(
+            "ECR-CALC-0422",
+            $"Тест «{testCode}»: поле {field} не є коректним JSON потрібної форми ({reason}).",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-CALC-0422.testCaseJsonInvalid",
+                ["testCode"] = testCode,
+                ["field"] = field,
+                ["reason"] = reason,
+            });
+    }
+}

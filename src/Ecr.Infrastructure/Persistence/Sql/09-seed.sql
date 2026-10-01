@@ -5731,6 +5731,10 @@ USING (VALUES
     (N'err.ECR-REQ-0422.dataSourceEndpointSqlLinkLocal', N'en', N'This server address is not allowed: link-local and cloud metadata addresses (169.254.0.0/16, fe80::/10) are refused.', 1),
     -- ru/kz — окремою порцією `COLL:sqlpolicy` у блоці I18N нижче.
     -- COLL:sqlpolicy ── кінець секції ──
+    -- COLL:reqclose3-mtest ── див. ключі нижче ──
+    (N'err.ECR-CALC-0422.testCaseJsonInvalid', N'en', N'Test "{testCode}": field {field} is not valid JSON of the expected shape ({reason}).', 1),
+    -- ru/kz — окремою порцією $Section у блоці I18N нижче.
+    -- COLL:reqclose3-mtest ── кінець секції ──
     -- JOBL ── людські назви видів фонових задач, яких бракувало в jobLabel.ts (KindKeys) ──
     (N'jobs.kind.sourceEventSync',  N'en', N'Source event sync', 1),
     (N'jobs.kind.consistencyCheck', N'en', N'Consistency check', 1),
@@ -13397,6 +13401,17 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:reqclose ── кінець секції ──
+
+-- COLL:reqclose3-mtest ── ru/kz; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-CALC-0422.testCaseJsonInvalid', N'ru', N'Тест «{testCode}»: поле {field} не является корректным JSON ожидаемой формы ({reason}).'),
+    (N'err.ECR-CALC-0422.testCaseJsonInvalid', N'kz', N'«{testCode}» тесі: {field} өрісі күтілетін пішімдегі дұрыс JSON емес ({reason}).')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:reqclose3-mtest ── кінець секції ──
 
 -- COLL:sqlpolicy ── ru/kz політики адреси PiSqlClient; власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)
