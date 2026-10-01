@@ -65,13 +65,29 @@ public sealed class SourcesHealthCheck(
         // мовчить, і мовчання приймають за спокій.
         var neverRan = active.Count(e => e.LastRun is null);
 
+        // Negotiate-джерело без PiWebApi:AllowedHosts: службові облікові дані
+        // підуть на будь-який хост, не заборонений блок-листом (SSRF).
+        // ⚠ Рахується ДО гілок збою/прогалин: інакше свіже Negotiate-джерело
+        // (ще не запускалося = «прогалина») ховало б цю причину за coverage gap.
+        var openNegotiate = await CountNegotiateWithoutAllowlistAsync(active, cancellationToken).ConfigureAwait(false);
+        var negotiateSuffix = string.Empty;
+
+        if (openNegotiate > 0)
+        {
+            negotiateSuffix = " " + await Text(
+                "health.sources.negotiateNoAllowlist",
+                "Sources with Windows authentication and no allowed-hosts list (PiWebApi:AllowedHosts): {count}.",
+                Param("count", openNegotiate.ToString(CultureInfo.InvariantCulture)), cancellationToken)
+                .ConfigureAwait(false);
+        }
+
         if (failed > 0)
         {
             var failedText = await Text(
                 "health.sources.failedCount", "Sources with a failed last run: {count}.",
                 Param("count", failed.ToString(CultureInfo.InvariantCulture)), cancellationToken)
                 .ConfigureAwait(false);
-            return HealthCheckResult.Unhealthy(failedText, data: Data(active.Count, failed, withGaps + neverRan));
+            return HealthCheckResult.Unhealthy(failedText + negotiateSuffix, data: Data(active.Count, failed, withGaps + neverRan));
         }
 
         if (withGaps + neverRan > 0)
@@ -80,21 +96,12 @@ public sealed class SourcesHealthCheck(
                 "health.sources.gapsCount", "Sources with a coverage gap: {count}.",
                 Param("count", (withGaps + neverRan).ToString(CultureInfo.InvariantCulture)), cancellationToken)
                 .ConfigureAwait(false);
-            return HealthCheckResult.Degraded(gapsText, data: Data(active.Count, 0, withGaps + neverRan));
+            return HealthCheckResult.Degraded(gapsText + negotiateSuffix, data: Data(active.Count, 0, withGaps + neverRan));
         }
-
-        // Negotiate-джерело без PiWebApi:AllowedHosts: службові облікові дані
-        // підуть на будь-який хост, не заборонений блок-листом (SSRF).
-        var openNegotiate = await CountNegotiateWithoutAllowlistAsync(active, cancellationToken).ConfigureAwait(false);
 
         if (openNegotiate > 0)
         {
-            var negotiateText = await Text(
-                "health.sources.negotiateNoAllowlist",
-                "Sources with Windows authentication and no allowed-hosts list (PiWebApi:AllowedHosts): {count}.",
-                Param("count", openNegotiate.ToString(CultureInfo.InvariantCulture)), cancellationToken)
-                .ConfigureAwait(false);
-            return HealthCheckResult.Degraded(negotiateText, data: Data(active.Count, 0, 0));
+            return HealthCheckResult.Degraded(negotiateSuffix.TrimStart(), data: Data(active.Count, 0, 0));
         }
 
         var allCollected = await Text(
