@@ -26,6 +26,14 @@ public sealed class ConditionalFormatEvaluatorTests
     [InlineData("eq", "5", "6", false)]
     [InlineData("ne", "5", "6", true)]
     [InlineData("ne", "5", "5", false)]
+    // Значення ПО ІНШИЙ бік межі: без них `gt`/`lt` → `!=` і `ge`/`le` → `true`
+    // проходили б увесь набір (мутаційна перевірка 2026-10-01).
+    [InlineData("gt", "5", "4", false)]
+    [InlineData("ge", "5", "4", false)]
+    [InlineData("ge", "5", "6", true)]
+    [InlineData("lt", "5", "6", false)]
+    [InlineData("le", "5", "6", false)]
+    [InlineData("le", "5", "4", true)]
     public void Comparison_operators_are_numeric(string op, string operand, string value, bool expected)
     {
         var number = decimal.Parse(value, System.Globalization.CultureInfo.InvariantCulture);
@@ -95,5 +103,58 @@ public sealed class ConditionalFormatEvaluatorTests
         Assert.Null(Eval(Rule("ne", "100"), 7L));
         Assert.Null(Eval(Rule("eq", "2"), 2));
         Assert.NotNull(Eval(Rule("notEmpty"), 7L));
+    }
+
+    [Fact]
+    public void Between_without_numeric_upper_bound_never_matches()
+    {
+        // Без перевірки `ValueTo` верхня межа мовчки ставала б 0, і «між 5 і (нічим)»
+        // фарбувало б 3.
+        Assert.Null(Eval(Rule("between", "5", null), 3m));
+        Assert.Null(Eval(Rule("between", "5", "abc"), 3m));
+        Assert.Null(Eval(Rule("between", "5", "  "), 0m));
+    }
+
+    [Fact]
+    public void Missing_or_non_numeric_operand_never_matches()
+    {
+        foreach (var op in new[] { "gt", "ge", "lt", "le", "eq", "ne" })
+        {
+            Assert.Null(Eval(Rule(op, null), 5m));
+            Assert.Null(Eval(Rule(op, "abc"), 5m));
+        }
+    }
+
+    [Fact]
+    public void Unknown_operator_never_matches()
+    {
+        Assert.Null(Eval(Rule("contains", "5"), 5m));
+        Assert.Null(Eval(Rule("contains", "5"), null));
+    }
+
+    [Fact]
+    public void Double_outside_decimal_range_is_not_a_number()
+    {
+        // `Convert.ToDecimal` кидає `OverflowException`: значення не число для правила,
+        // а не «0» і не падіння сітки.
+        Assert.Null(Eval(Rule("ne", "0"), double.MaxValue));
+        Assert.Null(Eval(Rule("ne", "0"), double.NaN));
+        Assert.Null(Eval(Rule("ne", "0"), double.PositiveInfinity));
+        Assert.Null(Eval(Rule("eq", "0"), double.MaxValue));
+    }
+
+    [Fact]
+    public void Float_is_a_number()
+    {
+        Assert.NotNull(Eval(Rule("eq", "2.5"), 2.5f));
+        Assert.Null(Eval(Rule("gt", "2.5"), 2.5f));
+    }
+
+    [Fact]
+    public void NotEmpty_is_false_for_blank_text()
+    {
+        Assert.Null(Eval(Rule("notEmpty"), "   "));
+        Assert.NotNull(Eval(Rule("empty"), string.Empty));
+        Assert.NotNull(Eval(Rule("notEmpty"), "x"));
     }
 }

@@ -103,4 +103,48 @@ public sealed class PeriodPolicyTests
         Assert.Equal(60, policy.HardCloseOffsetDays);
         Assert.Equal(90, policy.YearGraceOffsetDays);
     }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    public void Нульовий_річний_грейс_приймається()
+    {
+        // Межа включна: «рік закривається одразу» — законно; `< 0` → `<= 0` тут червоніє.
+        var policy = new PeriodPolicy(EcrCode.Create("ZERO"), 0, 15, 45, yearGraceOffsetDays: 0);
+
+        Assert.Equal(0, policy.YearGraceOffsetDays);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    public void Зсуви_на_межі_MaxOffsetDays_приймаються()
+    {
+        PeriodPolicy.EnsureOffsetsInRange(
+            PeriodPolicy.MaxOffsetDays, -PeriodPolicy.MaxOffsetDays, PeriodPolicy.MaxOffsetDays, 0);
+        PeriodPolicy.EnsureOffsetsInRange(
+            -PeriodPolicy.MaxOffsetDays, PeriodPolicy.MaxOffsetDays, -PeriodPolicy.MaxOffsetDays,
+            PeriodPolicy.MaxOffsetDays);
+    }
+
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [InlineData(0, "openOffsetDays", 3661)]
+    [InlineData(1, "graceOffsetDays", -3661)]
+    [InlineData(2, "hardCloseOffsetDays", 3661)]
+    [InlineData(3, "yearGraceOffsetDays", -3661)]
+    public void Зсув_за_межею_відхиляється_для_кожного_поля(int index, string field, int days)
+    {
+        // Кожне поле окремо: пропущений виклик `RequireInRange` для одного з чотирьох
+        // інакше пройшов би непоміченим.
+        var offsets = new int[4];
+        offsets[index] = days;
+
+        var error = Assert.Throws<DomainException>(
+            () => PeriodPolicy.EnsureOffsetsInRange(offsets[0], offsets[1], offsets[2], offsets[3]));
+
+        Assert.Equal("ECR-PRD-4225", error.ErrorCode);
+        Assert.Equal("err.ECR-PRD-4225.offsetOutOfRange", error.Details!["messageKey"]);
+        Assert.Equal(field, error.Details["field"]);
+        Assert.Equal(days.ToString(System.Globalization.CultureInfo.InvariantCulture), error.Details["value"]);
+        Assert.Equal("3660", error.Details["max"]);
+    }
 }
