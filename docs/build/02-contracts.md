@@ -2665,7 +2665,7 @@ public interface INotificationStore
     public Task<bool> IsChannelNameTakenAsync(string name, int? exceptChannelId, CancellationToken ct);
     public void AddChannel(NotificationChannel channel);
     public Task<int> RemoveChannelWithRulesAsync(NotificationChannel channel, CancellationToken ct);
-    // D-256: ролі-адресати каналу (sys_ecr.NotificationChannelRole)
+    // D-263: ролі-адресати каналу (sys_ecr.NotificationChannelRole)
     public Task<IReadOnlyDictionary<int, IReadOnlyList<int>>> ListChannelRolesAsync(CancellationToken ct);
     public Task<IReadOnlyList<int>> ChannelRoleIdsAsync(int channelId, CancellationToken ct);
     public Task<int> CountExistingRolesAsync(IReadOnlyCollection<int> roleIds, CancellationToken ct);
@@ -2675,7 +2675,7 @@ public interface INotificationStore
 
 #### `ISmtpSettingsStore`
 
-Налаштування SMTP, задані адміністратором (`sys_ecr.SmtpSettings`, єдиний рядок, `D-256`). У тому ж файлі — `ISmtpPasswordProtector` (шифрує пароль перед записом; розшифровує лише транспорт, API пароль не віддає) і `ISmtpSettingsCache` (скидання кешу ефективних налаштувань транспорту після PUT; без скидання — не пізніше ніж за 30 с).
+Налаштування SMTP, задані адміністратором (`sys_ecr.SmtpSettings`, єдиний рядок, `D-263`). У тому ж файлі — `ISmtpPasswordProtector` (шифрує пароль перед записом; розшифровує лише транспорт, API пароль не віддає) і `ISmtpSettingsCache` (скидання кешу ефективних налаштувань транспорту після PUT; без скидання — не пізніше ніж за 30 с).
 
 ```csharp
 public interface ISmtpSettingsStore
