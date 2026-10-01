@@ -16,6 +16,7 @@ public sealed class ChangeClassifier
         nameof(Entities.Configuration.ColumnDef.DisplayFormat),
         nameof(Entities.Configuration.ColumnDef.IsHidden),
         nameof(Entities.Configuration.ColumnDef.StyleId),
+        nameof(Entities.Configuration.ColumnDef.WidthPx),
         nameof(Entities.Configuration.RowDef.LabelL10n),
         nameof(Entities.Configuration.SheetDef.NameL10n),
         nameof(Entities.Configuration.SheetDef.IsVisible),

@@ -28,6 +28,20 @@ public sealed class ColumnDef : Entity<int>
     public bool IsReadOnly { get; private set; }
     public bool IsRequired { get; private set; }
     public bool IsHidden { get; private set; }
+
+    /// <summary>Допустимі межі ширини колонки, px (D-234).</summary>
+    public const int MinWidthPx = 40;
+
+    /// <inheritdoc cref="MinWidthPx"/>
+    public const int MaxWidthPx = 800;
+
+    /// <summary>
+    /// Типова ширина колонки, px, яку задає автор шаблону (D-234, ФВ-2.7);
+    /// <c>null</c> — типова за типом даних. Презентаційне поле: правиться й
+    /// в опублікованій версії (<c>PatchPresentationHandler</c>). Ширина
+    /// користувача (D-201) перекриває цю.
+    /// </summary>
+    public int? WidthPx { get; private set; }
     public bool IsMonthColumn { get; private set; }
     public byte? MonthNumber { get; private set; }
     public string? DefaultValue { get; private set; }
@@ -185,6 +199,26 @@ public sealed class ColumnDef : Entity<int>
     /// у <c>W5.0</c>.
     /// </remarks>
     public void SetHidden(bool hidden) => IsHidden = hidden;
+
+    /// <summary>Типова ширина колонки, px; <c>null</c> — скинути до типової за типом.</summary>
+    /// <exception cref="DomainException">Поза межами 40..800 — <c>ECR-TMPL-0422</c>.</exception>
+    public void SetWidth(int? widthPx)
+    {
+        if (widthPx is { } w && (w < MinWidthPx || w > MaxWidthPx))
+        {
+            throw new DomainException(
+                "ECR-TMPL-0422",
+                $"Ширина колонки {Code} має бути від {MinWidthPx} до {MaxWidthPx} px: {w}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-TMPL-0422.widthOutOfRange",
+                    ["columnCode"] = Code,
+                    ["widthPx"] = w.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
+        }
+
+        WidthPx = widthPx;
+    }
 
     /// <summary>
     /// Логічне видалення: фізично запис лишається, бо на нього посилаються
