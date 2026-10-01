@@ -390,7 +390,7 @@ public sealed class NotificationChannelHandlersTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
-    [Trait("Requirement", "D-256")]
+    [Trait("Requirement", "D-263")]
     public async Task Канал_може_мати_адресатів_лише_за_ролями_невідома_роль_і_Teams_із_ролями_дають_422_а_PUT_без_ролей_їх_знімає()
     {
         // Лише ролі, без явних адрес — це вже адресат.

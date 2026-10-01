@@ -6,7 +6,7 @@ using Microsoft.AspNetCore.Mvc;
 namespace Ecr.Api.Controllers;
 
 /// <summary>
-/// Налаштування SMTP, задані адміністратором (<c>D-256</c>). Право <c>System.ManageNotifications</c>.
+/// Налаштування SMTP, задані адміністратором (<c>D-263</c>). Право <c>System.ManageNotifications</c>.
 /// ⛔ Пароль write-only: приймається в PUT, у жодній відповіді його немає — лише <c>hasPassword</c>.
 /// </summary>
 [ApiController]

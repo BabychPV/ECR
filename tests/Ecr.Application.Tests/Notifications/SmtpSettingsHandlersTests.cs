@@ -14,7 +14,7 @@ using Xunit;
 
 namespace Ecr.Application.Tests.Notifications;
 
-/// <summary>Адмін-налаштування SMTP (<c>D-256</c>): пароль write-only, валідація, журнал без пароля, кеш.</summary>
+/// <summary>Адмін-налаштування SMTP (<c>D-263</c>): пароль write-only, валідація, журнал без пароля, кеш.</summary>
 public sealed class SmtpSettingsHandlersTests
 {
     private const int Actor = 7;
@@ -46,7 +46,7 @@ public sealed class SmtpSettingsHandlersTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
-    [Trait("Requirement", "D-256")]
+    [Trait("Requirement", "D-263")]
     public async Task Пароль_зберігається_захищеним_і_не_потрапляє_ні_у_відповідь_ні_в_журнал_ні_в_GET()
     {
         Arrange();
@@ -74,7 +74,7 @@ public sealed class SmtpSettingsHandlersTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
-    [Trait("Requirement", "D-256")]
+    [Trait("Requirement", "D-263")]
     public async Task Порожній_пароль_не_змінює_збережений_а_ClearPassword_і_режим_None_прибирають()
     {
         Arrange();
@@ -98,7 +98,7 @@ public sealed class SmtpSettingsHandlersTests
 
     [Theory]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
-    [Trait("Requirement", "D-256")]
+    [Trait("Requirement", "D-263")]
     [InlineData("", 587, "ecr@corp.example", "host")]                          // порожній хост на ввімкнених
     [InlineData("smtp://evil", 587, "ecr@corp.example", "host")]                // схема
     [InlineData("smtp.corp.example/path", 587, "ecr@corp.example", "host")]     // шлях
@@ -124,7 +124,7 @@ public sealed class SmtpSettingsHandlersTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
-    [Trait("Requirement", "D-256")]
+    [Trait("Requirement", "D-263")]
     public async Task Приватні_й_loopback_хости_дозволені_а_пароль_без_логіна_і_без_пароля_ні()
     {
         Arrange();
@@ -147,7 +147,7 @@ public sealed class SmtpSettingsHandlersTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
-    [Trait("Requirement", "D-256")]
+    [Trait("Requirement", "D-263")]
     public async Task Збереження_скидає_кеш_транспорту_а_джерело_у_відповіді_каже_БД_конфігурація_або_нічого()
     {
         Arrange();
@@ -170,7 +170,7 @@ public sealed class SmtpSettingsHandlersTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
-    [Trait("Requirement", "D-256")]
+    [Trait("Requirement", "D-263")]
     public async Task Проба_шле_лист_лише_поточному_користувачу_а_не_адресату_із_запиту()
     {
         Arrange();
@@ -191,7 +191,7 @@ public sealed class SmtpSettingsHandlersTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
-    [Trait("Requirement", "D-256")]
+    [Trait("Requirement", "D-263")]
     public async Task Проба_віддає_лише_ключ_категорії_без_тексту_відмови_і_пише_журнал_без_тексту_транспорту()
     {
         Arrange();
@@ -223,7 +223,7 @@ public sealed class SmtpSettingsHandlersTests
 
     [Theory]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
-    [Trait("Requirement", "D-256")]
+    [Trait("Requirement", "D-263")]
     [InlineData(null)]
     [InlineData("nope")]
     public async Task Проба_без_валідної_пошти_у_користувача_дає_422_і_нічого_не_шле(string? email)
@@ -241,7 +241,7 @@ public sealed class SmtpSettingsHandlersTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
-    [Trait("Requirement", "D-256")]
+    [Trait("Requirement", "D-263")]
     public async Task Без_System_ManageNotifications_усі_три_обробники_дають_403_з_назвою_права()
     {
         _access.BuildProfileAsync(Actor, Arg.Any<CancellationToken>())

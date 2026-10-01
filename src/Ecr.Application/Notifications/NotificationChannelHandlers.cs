@@ -46,7 +46,7 @@ public sealed record NotificationChannelSettings(
 /// <param name="Port">⛔ Не приймається: порт — із налаштувань застосунку.</param>
 /// <param name="UseTls">⛔ Не приймається: TLS — із налаштувань застосунку.</param>
 /// <param name="From">⛔ Не приймається: відправник — із налаштувань застосунку.</param>
-/// <param name="RecipientRoleIds">SMTP: ролі-адресати (<c>D-256</c>) — лист іде активним користувачам цих ролей.</param>
+/// <param name="RecipientRoleIds">SMTP: ролі-адресати (<c>D-263</c>) — лист іде активним користувачам цих ролей.</param>
 public sealed record NotificationChannelSettingsInput(
     IReadOnlyList<string>? Recipients = null, string? Title = null,
     string? Host = null, int? Port = null, bool? UseTls = null, string? From = null,

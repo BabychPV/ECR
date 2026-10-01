@@ -3,7 +3,7 @@ using Ecr.Domain.Entities.Notifications;
 
 namespace Ecr.Application.Ports;
 
-/// <summary>Сховище налаштувань SMTP, заданих адміністратором (<c>D-256</c>).</summary>
+/// <summary>Сховище налаштувань SMTP, заданих адміністратором (<c>D-263</c>).</summary>
 public interface ISmtpSettingsStore
 {
     /// <summary>Єдиний рядок налаштувань (відстежуваний) або <c>null</c>, якщо його ще не заводили.</summary>

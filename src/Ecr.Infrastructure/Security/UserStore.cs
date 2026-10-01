@@ -528,7 +528,7 @@ public sealed class UserStore(EcrDbContext db) : IUserStore
 
         db.RolePermissions.RemoveRange(permissions);
 
-        // D-256: роль як адресат каналу сповіщень — зв'язок зникає разом із роллю.
+        // D-263: роль як адресат каналу сповіщень — зв'язок зникає разом із роллю.
         db.NotificationChannelRoles.RemoveRange(
             await db.NotificationChannelRoles.Where(r => r.RoleId == roleId).ToListAsync(ct).ConfigureAwait(false));
         db.Roles.Remove(await db.Roles.FirstAsync(r => r.Id == roleId, ct).ConfigureAwait(false));

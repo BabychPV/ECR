@@ -140,7 +140,7 @@ export function listNotificationDeliveries(
 }
 
 /**
- * Налаштування SMTP, задані адміністратором (`D-256`). ⛔ Пароля тут немає й не буде — лише `hasPassword`.
+ * Налаштування SMTP, задані адміністратором (`D-263`). ⛔ Пароля тут немає й не буде — лише `hasPassword`.
  * `source` каже, звідки транспорт береться зараз: `database`, `configuration` (процес, `Smtp:*`) або `none`.
  */
 export type SmtpSettings = components['schemas']['SmtpSettingsView'];

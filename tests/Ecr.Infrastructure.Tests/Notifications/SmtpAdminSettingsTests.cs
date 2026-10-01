@@ -21,7 +21,7 @@ using Xunit;
 namespace Ecr.Infrastructure.Tests.Notifications;
 
 /// <summary>
-/// Адмін-налаштування SMTP (<c>D-256</c>) на справжній базі: ефективні налаштування БД &gt; конфігурація,
+/// Адмін-налаштування SMTP (<c>D-263</c>) на справжній базі: ефективні налаштування БД &gt; конфігурація,
 /// кеш і його скидання, пароль зашифрованим блобом, адресати за ролями (активні, з поштою, своєю мовою).
 /// </summary>
 /// <remarks>
@@ -89,7 +89,7 @@ public sealed class SmtpAdminSettingsTests(SqlServerFixture sql) : IAsyncLifetim
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
-    [Trait("Requirement", "D-256")]
+    [Trait("Requirement", "D-263")]
     public async Task Лист_іде_на_сервер_з_налаштувань_БД_а_не_з_конфігурації_і_кеш_скидається_після_збереження()
     {
         await using var server = new FakeSmtpServer();
@@ -129,7 +129,7 @@ public sealed class SmtpAdminSettingsTests(SqlServerFixture sql) : IAsyncLifetim
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
-    [Trait("Requirement", "D-256")]
+    [Trait("Requirement", "D-263")]
     public async Task Вимкнені_або_неповні_налаштування_БД_не_діють_і_транспорт_береться_з_конфігурації()
     {
         var time = new ManualTime();
@@ -157,7 +157,7 @@ public sealed class SmtpAdminSettingsTests(SqlServerFixture sql) : IAsyncLifetim
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
-    [Trait("Requirement", "D-256")]
+    [Trait("Requirement", "D-263")]
     public async Task Пароль_лежить_у_базі_зашифрованим_блобом_а_не_відкритим_текстом()
     {
         await SaveRowAsync("db.example", 25, enabled: true, password: Password);
@@ -177,7 +177,7 @@ public sealed class SmtpAdminSettingsTests(SqlServerFixture sql) : IAsyncLifetim
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
-    [Trait("Requirement", "D-256")]
+    [Trait("Requirement", "D-263")]
     public async Task Адресати_за_ролями_активні_з_поштою_кожен_своєю_мовою_без_дублів_з_явними_адресами()
     {
         var tag = Guid.NewGuid().ToString("N")[..8];
@@ -245,7 +245,7 @@ public sealed class SmtpAdminSettingsTests(SqlServerFixture sql) : IAsyncLifetim
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
-    [Trait("Requirement", "D-256")]
+    [Trait("Requirement", "D-263")]
     public async Task Роль_без_жодного_активного_адресата_і_без_явних_адрес_дає_названу_відмову_а_не_тишу()
     {
         var tag = Guid.NewGuid().ToString("N")[..8];

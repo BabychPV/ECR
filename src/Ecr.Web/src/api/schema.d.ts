@@ -20788,7 +20788,7 @@ export interface components {
              * @description ⛔ Не приймається: порт — із налаштувань застосунку.
              */
             port?: null | number;
-            /** @description SMTP: ролі-адресати (`D-256`) — лист іде активним користувачам цих ролей. */
+            /** @description SMTP: ролі-адресати (`D-263`) — лист іде активним користувачам цих ролей. */
             recipientRoleIds?: null | number[];
             /** @description SMTP: адресати. */
             recipients?: null | string[];

@@ -613,7 +613,7 @@ UPDATE t
   FROM sys_ecr.UiString AS t
   JOIN (VALUES
     (N'common.loading',                  N'en', N'Loading…', N'Loading...'),
-    -- D-256: SMTP задається в адмін-налаштуваннях, канал додає адресатів-ролі.
+    -- D-263: SMTP задається в адмін-налаштуваннях, канал додає адресатів-ролі.
     (N'notifications.smtpTransportHint', N'en', N'The server, sender address and password come from the application configuration; the channel only adds recipients.', N'The server, sender and login come from the SMTP settings above (or from the process configuration while they are not set); the channel adds recipients: addresses and roles.'),
     (N'notifications.smtpTransportHint', N'ru', N'Сервер, адрес отправителя и пароль берутся из конфигурации приложения; канал лишь добавляет получателей.', N'Сервер, отправитель и логин берутся из настроек SMTP выше (пока они не заданы — из конфигурации процесса); канал добавляет получателей: адреса и роли.'),
     (N'notifications.smtpTransportHint', N'kz', N'Сервер, жіберуші мекенжайы және құпиясөз қолданба конфигурациясынан алынады; арна тек алушыларды қосады.', N'Сервер, жіберуші және логин жоғарыдағы SMTP баптауларынан алынады (олар берілмегенше — процесс конфигурациясынан); арна алушыларды қосады: мекенжайлар мен рөлдер.'),
@@ -6015,7 +6015,7 @@ USING (VALUES
     (N'notifications.periodOpened.subject', N'en', N'ECR: period {period} opened, project {project}', 1),
     (N'notifications.periodOpened.body', N'en', N'A new reporting period {period} has opened for project {project}. Please fill in your document for this period.', 1),
     -- COLL:smtp ── кінець секції ──
-    -- COLL:smtp-admin ── Адмін-налаштування SMTP і ролі-адресати каналу (D-256, SmtpSettingsPanel, GET/PUT /notifications/smtp) ──
+    -- COLL:smtp-admin ── Адмін-налаштування SMTP і ролі-адресати каналу (D-263, SmtpSettingsPanel, GET/PUT /notifications/smtp) ──
     (N'err.ECR-REQ-0422.smtpSettingsInvalid', N'en', N'The SMTP settings are not valid: check the field "{name}".', 1),
     (N'err.ECR-REQ-0422.smtpTestRecipientInvalid', N'en', N'The test recipient is not an email address.', 1),
     (N'err.ECR-REQ-0422.notificationChannelRoleInvalid', N'en', N'Recipient roles can be set only on an email channel, and every role must exist.', 1),

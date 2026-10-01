@@ -56,7 +56,7 @@ public sealed class NotificationChannelsControllerTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
-    [Trait("Requirement", "D-256")]
+    [Trait("Requirement", "D-263")]
     public async Task Без_права_ManageNotifications_налаштування_SMTP_дають_403_з_назвою_права()
     {
         using var app = new EcrApiFactory(sql);

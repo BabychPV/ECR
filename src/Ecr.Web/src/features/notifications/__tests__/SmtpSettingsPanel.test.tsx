@@ -6,7 +6,7 @@ import { SmtpSettingsPanel } from '@/features/notifications/SmtpSettingsPanel';
 import { testTheme } from '@/test/render';
 
 /**
- * Налаштування SMTP (`D-256`).
+ * Налаштування SMTP (`D-263`).
  *
  * ⛔ Заради чого файл: (1) пароль НІКОЛИ не повертається з сервера й не з'являється у формі — поле
  * порожнє, а порожнє = «не змінювати»; (2) відмова `GET` не виглядає порожньою формою; (3) проба

@@ -26,7 +26,7 @@ public enum SmtpAuthMode : byte
 }
 
 /// <summary>
-/// Налаштування SMTP, задані адміністратором у системі (<c>sys_ecr.SmtpSettings</c>, <c>D-256</c>).
+/// Налаштування SMTP, задані адміністратором у системі (<c>sys_ecr.SmtpSettings</c>, <c>D-263</c>).
 /// Єдиний рядок (<see cref="SingletonId"/>).
 /// </summary>
 /// <remarks>

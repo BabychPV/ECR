@@ -2,7 +2,7 @@
 namespace Ecr.Domain.Entities.Notifications;
 
 /// <summary>
-/// Роль як адресат каналу сповіщень (<c>sys_ecr.NotificationChannelRole</c>, <c>D-256</c>): лист іде
+/// Роль як адресат каналу сповіщень (<c>sys_ecr.NotificationChannelRole</c>, <c>D-263</c>): лист іде
 /// активним користувачам цієї ролі, що мають адресу пошти, — не іменним особам.
 /// </summary>
 public sealed class NotificationChannelRole

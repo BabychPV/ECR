@@ -13,7 +13,7 @@ using Microsoft.Extensions.DependencyInjection;
 namespace Ecr.Infrastructure.Integration;
 
 /// <summary>
-/// Доставка сповіщень поштою (<c>D-124</c>, <c>D-256</c>).
+/// Доставка сповіщень поштою (<c>D-124</c>, <c>D-263</c>).
 /// </summary>
 /// <remarks>
 /// ⛔ Пароль із конфігурації процесу береться **лише за іменем секрету** через

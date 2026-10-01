@@ -14,7 +14,7 @@ namespace Ecr.Application.Ports;
 /// <param name="Body">Текст — без стеків і без секретів (ФВ-6.11).</param>
 /// <param name="Text">
 /// Той самий текст як ключі каталогу з підстановками — щоб лист кожному адресату-за-роллю пішов ЙОГО
-/// мовою (<c>D-256</c>). <c>null</c> — подія має лише готовий текст, і всі отримують його.
+/// мовою (<c>D-263</c>). <c>null</c> — подія має лише готовий текст, і всі отримують його.
 /// </param>
 public sealed record NotificationEvent(
     NotificationEventKind Kind, NotificationSeverity Severity, string EventKey, string Subject, string Body,
