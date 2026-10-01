@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Пакет для тестувальників (TESTER-GUIDE)
+    url: https://github.com/BabychPV/ECR/blob/dev/integration/docs/build/TESTER-GUIDE.md
+    about: Відомі обмеження (розділ 7) — це не дефекти. Перевірте перед заявкою.
