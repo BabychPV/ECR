@@ -67,7 +67,7 @@ Decimal.
 
 ### Н-А1. Вкладка «Events from PI»: видимість і шаблон подій — ✅
 
-- **Права:** `Integration.View` (бачить сторінку), `Integration.Manage` (бачить вкладку).
+- **Права:** `Integration.Manage` (повна сторінка й вкладка). ✎ 2026-10-01, живий прохід: користувач лише з `Integration.View` у UI бачить **червоний 403** на `/admin/sources` (запити потребують Manage), а не «сторінку без вкладок» — уточнення/фікс у роботі (TESTER-GUIDE п. 4.4); п. 1 нижче перевіряйте з цим застереженням.
 - **Кроки:**
   1. Увійти користувачем лише з `Integration.View`; `/admin/sources` → клік по рядку з'єднання.
   2. Те саме користувачем з `Integration.Manage`.
@@ -141,7 +141,7 @@ Decimal.
   3. Таблиця подій: фільтри «Mapping», «States», «Period», «From (UTC)»/«To (UTC)»; «Show more».
   4. Відкрити документ за посиланням у колонці «Document / period».
   5. Вручну змінити в документі значення з події; повторити п. 2.
-  6. Запустити збір кнопкою «Collect» на `/admin/sources` для сутності-шаблону подій без мапінгів точок.
+  6. Запустити збір кнопкою «Collect» на `/admin/sources` для сутності-шаблону подій без мапінгів точок. (✎ 2026-10-01: «Collect» — ручний збір на панелі сутностей; у журналі запусків результат пишеться як «Queued by System»/«Started by: schedule», 🟨 виправляється, lane `srcfix`; без PI сутність не створити — TESTER-GUIDE п. 4.4, ⛔ без PI.)
 - **Очікується:**
   - п. 1: помилка з підказкою «Create an event mapping first: it tells where the events go.» і кнопкою «Create mapping»;
   - п. 2: «Event synchronization queued: {job}.»; задача «Source event sync», прогрес «Created {created}, updated {updated}, kept manual…»;
@@ -405,7 +405,7 @@ Date, Bool, Lookup, Unit), бажано один темпоральний і о�
 
 - **Права:** `Calculation.View` (панель «Calculation results» документа).
 - **Кроки:** 1) перерахувати документ; 2) змінити запис довідника X, який читає методологія; 3) відкрити документ; 4) перерахувати (Н-Д2 або кнопкою в документі); 5) знову відкрити.
-- **Очікується:** п. 3 — alert-попередження «These results are out of date» з текстом «The inputs changed after the last recalculation, so these numbers no longer match the data. Recalculate the sheet before submitting it.» і рядком «Registry "{name}" was changed after the calculation» (текст лише радить); **подання не блокується**, автоматичного перерахунку немає; п. 5 — банер зник.
+- **Очікується:** п. 3 — alert-попередження «These results are out of date» з текстом «The inputs changed after the last recalculation, so these numbers no longer match the data. Recalculate the sheet before submitting it.» і рядком «Registry "{name}" was changed after the calculation» (текст лише радить); **подання не блокується**, автоматичного перерахунку немає; п. 5 — банер зник. ⚠ P2 (живий прохід `d793f199`; 🟨 виправляється, lane `stalefix`): після «Recalculate» банер і тост лишаються до перезавантаження сторінки.
 - **Назва в банері:** назва довідника мовою користувача з каталогу (`85300af4`); **код** — запасний варіант, якщо каталог ще вантажиться, у користувача немає `Registry.View` або довідника в каталозі нема. Результат методології теж застаріває після правки довідника (`40b23079`).
 - **Вимоги:** ФВ-9.19, RT-25.
 
@@ -570,6 +570,7 @@ Date, Bool, Lookup, Unit), бажано один темпоральний і о�
 ### Н-З4. Імпорт пакета методологій у систему — ✅
 
 - **Права:** `Calculation.EditFormula` **і** `Calculation.EditConstant` (без обох кнопки немає; API — 403); сторінка — `Calculation.View`.
+- **Фікстура-пастка (✎ 2026-10-01):** golden-тест методології вимагає `inputJson` `{"documentId":1,"tableInstanceId":<id>,"periodKey":{"value":202609},"sourceRowKey":"a","arguments":[{"argumentCode":"C2","value":2,"valueString":null,"unitId":null}]}`; без `arguments` publish дає 500 (P3). Автор версії не може опублікувати її сам (`ECR-CALC-0409`) — потрібен другий користувач (чотири очі).
 - **Кроки:**
   1. `/admin/methodologies` → **«Import package»** → файл не-JSON.
   2. Пакет з блокерами → **«Check»**.
@@ -656,6 +657,7 @@ Date, Bool, Lookup, Unit), бажано один темпоральний і о�
 - **Очікується:** `Warning` у журналі при збереженні; картка `sources` — `Degraded` з повідомленням `health.sources.negotiateNoAllowlist` («Sources with Windows authentication and no allowed-hosts list (PiWebApi:AllowedHosts): {count}.»; рахуються лише джерела з активними сутностями збору; коли є падіння (Unhealthy) чи прогалини покриття (Degraded), цей текст додається до їхнього повідомлення, окремим повідомленням — коли інших причин немає); після задання `AllowedHosts` (потрібен перезапуск служби — не перевірено) — без попередження.
 - **Уточнення (звірено з кодом `SourcesHealthCheck`/`EndpointNetwork`):** `AllowedHosts` читається з конфігурації `PiWebApi:AllowedHosts`; задається в `appsettings.Production.json` або `ECR_PiWebApi__AllowedHosts__0=…` у `Environment` служби `EcrApi`; потім `Restart-Service EcrApi` → `/health/ready`, картка `sources` — Healthy (за відсутності інших причин: запуск, покриття, падіння). Інсталятор і `deploy-ecr.ps1` ключ не пишуть. Що перезапуск обов'язковий, живою перевіркою не підтверджено.
 - **Вимоги:** ФВ-13.11.
+- ✎ 2026-10-01, живий прохід: `negotiateNoAllowlist` виводиться в одному рядку з «Sources with a coverage gap: N», а лічильник coverage gap **завищений** (сутності рахуються двічі) — 🟨 виправляється (lane `srcfix`).
 
 ### Н-Л3. Підтвердження зміни адреси Negotiate-джерела — ✅ (тести серверні 2 + клієнтські 2; вручну не пройдено)
 
