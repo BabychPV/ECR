@@ -4,6 +4,7 @@ using Ecr.Application.Ports;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Entities.Dictionaries;
 using Ecr.Domain.Enums;
+using Ecr.Domain.ValueObjects;
 using Microsoft.EntityFrameworkCore;
 
 namespace Ecr.Infrastructure.Persistence;
@@ -373,7 +374,7 @@ public sealed class RegistryStore(EcrDbContext db) : IRegistryStore
 
             var page = await source.Take(take - items.Count).ToListAsync(ct).ConfigureAwait(false);
             items.AddRange(page.Select(h => new UsageItemDto(
-                kind, h.Id.ToString(CultureInfo.InvariantCulture), h.Label, h.Route)));
+                kind, h.Id.ToString(CultureInfo.InvariantCulture), h.Label, h.Route, h.DisplayName())));
         }
 
         await AddAsync(
@@ -388,7 +389,9 @@ public sealed class RegistryStore(EcrDbContext db) : IRegistryStore
             select new UsageHit(
                 column.Id,
                 table.Code + "." + column.Code,
-                "/admin/templates/" + version.TemplateId + "/versions/" + version.Id))
+                "/admin/templates/" + version.TemplateId + "/versions/" + version.Id,
+                column.HeaderL10n,
+                null))
             .ConfigureAwait(false);
 
         // ⚠ Поле ВЛАСНОГО довідника, що вказує на нього ж (ієрархія), теж
@@ -403,7 +406,9 @@ public sealed class RegistryStore(EcrDbContext db) : IRegistryStore
             select new UsageHit(
                 field.Id,
                 owner.Code + "." + field.Code,
-                "/admin/registries/" + owner.Code + "/definition"))
+                "/admin/registries/" + owner.Code + "/definition",
+                field.NameL10n,
+                null))
             .ConfigureAwait(false);
 
         // Методологія посилається не на довідник, а на його ЗАПИС
@@ -417,11 +422,15 @@ public sealed class RegistryStore(EcrDbContext db) : IRegistryStore
             where entry.RegistryDefId == registryDefId
             join version in db.MethodologyVersions.AsNoTracking()
                 on substance.MethodologyVersionId equals version.Id
+            join methodology in db.Methodologies.AsNoTracking()
+                on version.MethodologyId equals methodology.Id
             orderby substance.Id
             select new UsageHit(
                 substance.Id,
                 entry.Code,
-                "/admin/methodologies/" + version.MethodologyId + "/versions"))
+                "/admin/methodologies/" + version.MethodologyId + "/versions",
+                methodology.NameL10n,
+                null))
             .ConfigureAwait(false);
 
         await AddAsync(
@@ -430,7 +439,8 @@ public sealed class RegistryStore(EcrDbContext db) : IRegistryStore
                 .AsNoTracking()
                 .Where(entity => entity.RegistryDefId == registryDefId)
                 .OrderBy(entity => entity.Id)
-                .Select(entity => new UsageHit(entity.Id, entity.Code, "/admin/sources")))
+                .Select(entity => new UsageHit(
+                    entity.Id, entity.Code, "/admin/sources", null, entity.DisplayName)))
             .ConfigureAwait(false);
 
         // Дані: один рядок на таблицю, без підрахунку (див. порт).
@@ -632,7 +642,17 @@ public sealed class RegistryStore(EcrDbContext db) : IRegistryStore
     }
 
     /// <summary>Проміжний рядок пошуку посилань на визначення довідника.</summary>
-    private sealed record UsageHit(int Id, string Label, string? Route);
+    /// <summary>Проєкція одного посилання; <c>Title</c>/<c>Plain</c> — джерела читабельної назви (ФВ-8.14).</summary>
+    private sealed record UsageHit(
+        int Id, string Label, string? Route, LocalizedText? Title, string? Plain)
+    {
+        /// <summary>Назва для людини; <c>null</c> — назви немає (клієнт показує код).</summary>
+        public string? DisplayName()
+        {
+            var name = Plain ?? Title?.Get("uk");
+            return string.IsNullOrWhiteSpace(name) ? null : name;
+        }
+    }
 }
 
 
