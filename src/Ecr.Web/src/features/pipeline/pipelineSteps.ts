@@ -118,6 +118,18 @@ export function pipelineSteps({ entity, schedule, preview }: PipelineInput): Pip
     { key: 'schedule', state: scheduleState(schedule), points: null },
   ];
 
+  // ⚠ Неактивну сутність сервер не переглядає (перегляд мапінгу бере лише
+  // активні, інакше 404): даних до кроків 3–5 не доходить — причина вже
+  // названа на кроці 1 («Off»), тож решта — `idle`, а не помилка.
+  if (!entity.isActive) {
+    return [
+      ...steps,
+      { key: 'collect', state: 'idle', points: null },
+      { key: 'map', state: 'idle', points: null },
+      { key: 'emit', state: 'idle', points: null },
+    ];
+  }
+
   if (preview === undefined) {
     return [
       ...steps,

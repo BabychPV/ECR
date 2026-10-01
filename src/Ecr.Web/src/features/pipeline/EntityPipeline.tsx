@@ -55,6 +55,9 @@ export function EntityPipeline({
   const preview = useQuery({
     queryKey: ['mapping-preview', entity.id, window.fromUtc],
     queryFn: () => fetchMappingPreview(entity.id, window),
+    // Неактивну сутність сервер не переглядає (404 `sourceEntity`): кроки 3–5
+    // тоді `idle` без запиту, а не картка помилки.
+    enabled: entity.isActive,
   });
 
   const head = pipelineSteps({
@@ -81,63 +84,67 @@ export function EntityPipeline({
           <CollectionScheduleTab sourceEntityId={entity.id} dataSource={entity.dataSourceCode} />
         </PipelineStepCard>
 
-        <AsyncBoundary<MappingPreview>
-          isPending={preview.isPending}
-          error={preview.error}
-          data={preview.data}
-          skeleton="table"
-          onRetry={() => void preview.refetch()}
-        >
-          {(data) => {
-            const [, , collect, map, emit] = pipelineSteps({ entity, schedule: undefined, preview: data });
+        {!entity.isActive && <IdleSteps head={head} />}
 
-            return (
-              <>
-                <PipelineStepCard
-                  step={collect as PipelineStep}
-                  index={3}
-                  title={t('pipeline.step.collect')}
-                  hint={t('pipeline.stepHint.collect')}
-                  zeroHint={t('pipeline.zero.collect')}
-                >
-                  {/* ⛔ Урізана серія дає правдоподібне число — мовчати не можна. */}
-                  {data.isTruncated && (
-                    <Alert color="statusWarning" title={t('mapping.truncated')}>
-                      {t('mapping.truncatedHint')}
-                    </Alert>
-                  )}
-                </PipelineStepCard>
+        {entity.isActive && (
+          <AsyncBoundary<MappingPreview>
+            isPending={preview.isPending}
+            error={preview.error}
+            data={preview.data}
+            skeleton="table"
+            onRetry={() => void preview.refetch()}
+          >
+            {(data) => {
+              const [, , collect, map, emit] = pipelineSteps({ entity, schedule: undefined, preview: data });
 
-                <PipelineStepCard
-                  step={map as PipelineStep}
-                  index={4}
-                  title={t('pipeline.step.map')}
-                  hint={t('pipeline.stepHint.map')}
-                  zeroHint={t('pipeline.zero.map')}
-                >
-                  {allowed && (
-                    <Group>
-                      <Button size="xs" variant="default" onClick={() => setCreateOpened(true)}>
-                        {t('mapping.create')}
-                      </Button>
-                    </Group>
-                  )}
-                  <MappingRows preview={data} allowed={allowed} />
-                </PipelineStepCard>
+              return (
+                <>
+                  <PipelineStepCard
+                    step={collect as PipelineStep}
+                    index={3}
+                    title={t('pipeline.step.collect')}
+                    hint={t('pipeline.stepHint.collect')}
+                    zeroHint={t('pipeline.zero.collect')}
+                  >
+                    {/* ⛔ Урізана серія дає правдоподібне число — мовчати не можна. */}
+                    {data.isTruncated && (
+                      <Alert color="statusWarning" title={t('mapping.truncated')}>
+                        {t('mapping.truncatedHint')}
+                      </Alert>
+                    )}
+                  </PipelineStepCard>
 
-                <PipelineStepCard
-                  step={emit as PipelineStep}
-                  index={5}
-                  title={t('pipeline.step.emit')}
-                  hint={t('pipeline.stepHint.emit')}
-                  zeroHint={t('pipeline.zero.emit')}
-                >
-                  <MappingGaps preview={data} />
-                </PipelineStepCard>
-              </>
-            );
-          }}
-        </AsyncBoundary>
+                  <PipelineStepCard
+                    step={map as PipelineStep}
+                    index={4}
+                    title={t('pipeline.step.map')}
+                    hint={t('pipeline.stepHint.map')}
+                    zeroHint={t('pipeline.zero.map')}
+                  >
+                    {allowed && (
+                      <Group>
+                        <Button size="xs" variant="default" onClick={() => setCreateOpened(true)}>
+                          {t('mapping.create')}
+                        </Button>
+                      </Group>
+                    )}
+                    <MappingRows preview={data} allowed={allowed} />
+                  </PipelineStepCard>
+
+                  <PipelineStepCard
+                    step={emit as PipelineStep}
+                    index={5}
+                    title={t('pipeline.step.emit')}
+                    hint={t('pipeline.stepHint.emit')}
+                    zeroHint={t('pipeline.zero.emit')}
+                  >
+                    <MappingGaps preview={data} />
+                  </PipelineStepCard>
+                </>
+              );
+            }}
+          </AsyncBoundary>
+        )}
       </Stack>
 
       <CreateMappingModal
@@ -148,6 +155,32 @@ export function EntityPipeline({
         onCreated={() => void queryClient.invalidateQueries({ queryKey: ['mapping-preview', entity.id] })}
       />
     </Stack>
+  );
+}
+
+/** Кроки 3–5 неактивної сутності: даних до них не доходить, причина — на кроці 1. */
+function IdleSteps({ head }: { readonly head: readonly PipelineStep[] }): JSX.Element {
+  return (
+    <>
+      <PipelineStepCard
+        step={head[2] as PipelineStep}
+        index={3}
+        title={t('pipeline.step.collect')}
+        hint={t('pipeline.stepHint.collect')}
+      />
+      <PipelineStepCard
+        step={head[3] as PipelineStep}
+        index={4}
+        title={t('pipeline.step.map')}
+        hint={t('pipeline.stepHint.map')}
+      />
+      <PipelineStepCard
+        step={head[4] as PipelineStep}
+        index={5}
+        title={t('pipeline.step.emit')}
+        hint={t('pipeline.stepHint.emit')}
+      />
+    </>
   );
 }
 

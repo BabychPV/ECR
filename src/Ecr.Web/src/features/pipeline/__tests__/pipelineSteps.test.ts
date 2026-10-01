@@ -165,6 +165,18 @@ describe('pipelineSteps', () => {
       .toMatchObject({ schedule: 'ok' });
   });
 
+  it('неактивна сутність: крок 1 «Off», кроки 3–5 idle без точок — навіть якщо перегляд є', () => {
+    const steps = pipelineSteps({
+      entity: entity({ isActive: false }),
+      schedule: schedule(),
+      preview: preview(0, []),
+    });
+
+    expect(states(steps)).toMatchObject({ source: 'off', collect: 'idle', map: 'idle', emit: 'idle' });
+    expect(steps.slice(2).map((step) => step.points)).toEqual([null, null, null]);
+    expect(narrowingStep(steps)).toBeNull();
+  });
+
   it('без перегляду кроки з точками не рахують нічого й нічого не підсвічують', () => {
     const steps = pipelineSteps({ entity: entity(), schedule: schedule(), preview: undefined });
 
