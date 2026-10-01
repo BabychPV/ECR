@@ -81,7 +81,7 @@ public sealed class RouteOwnershipNotFoundTests(SqlServerFixture sql)
             "PUT output", app);
         await AssertNotFoundAsync(client.PutAsJsonAsync(
             new Uri($"{foreign}/tests/case2", UriKind.Relative),
-            new { inputJson = "{}", expectedJson = """{"tons":1}""", tolerance = 0m }),
+            new { inputJson = """{"periodKey":{"value":0},"arguments":[]}""", expectedJson = """{"tons":1}""", tolerance = 0m }),
             "PUT test", app);
         await AssertNotFoundAsync(client.PutAsJsonAsync(
             new Uri($"{foreign}/modes", UriKind.Relative),

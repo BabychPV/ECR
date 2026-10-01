@@ -159,7 +159,7 @@ public sealed class NegativePathSweepTests(SqlServerFixture sql)
         {
             using var response = await client.PutAsJsonAsync(
                 new Uri($"/api/v1/methodologies/{stand.MethodologyId}/versions/{stand.DraftId}/tests/{code}", UriKind.Relative),
-                new { inputJson = "{}", expectedJson = """{"tons":1}""", tolerance = -0.5m }).ConfigureAwait(true);
+                new { inputJson = """{"periodKey":{"value":0},"arguments":[]}""", expectedJson = """{"tons":1}""", tolerance = -0.5m }).ConfigureAwait(true);
 
             var problem = await AssertRefusalAsync(
                 app, response, HttpStatusCode.UnprocessableEntity, "ECR-CALC-0422", "err.ECR-CALC-0422.testToleranceNegative").ConfigureAwait(true);
