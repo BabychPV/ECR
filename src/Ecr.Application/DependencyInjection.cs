@@ -138,6 +138,7 @@ public static class DependencyInjection
 
         // Вирази, валідація і перерахунок (модулі 2.6–2.8)
         services.AddScoped<Validation.ValidationEngine>();
+        services.AddScoped<Calculations.IRelationRecalculator, Calculations.RelationRecalculator>(); // D-230
         services.AddScoped<Recalculation.RecalculationService>();
 
         // ⚠ Той самий екземпляр у межах скоупу: подання мусить рахувати ТИМ
