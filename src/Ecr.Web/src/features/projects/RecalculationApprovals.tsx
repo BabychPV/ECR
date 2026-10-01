@@ -119,7 +119,9 @@ export function RecalculationApprovalsPanel({ projectId }: { projectId: number }
       <AsyncBoundary<Approval[]>
         isPending={approvals.isPending}
         error={approvals.error}
-        data={approvals.data}
+        // ⚠ Відповідь іншої форми (не масив) — як і раніше, «порожньо», а не
+        // падіння рендеру: тип обіцяє компілятор, а не мережа.
+        data={approvals.data === undefined ? undefined : Array.isArray(approvals.data) ? approvals.data : []}
         isEmpty={(rows) => rows.length === 0}
         emptyTitle={t('recalcApprovals.empty')}
         onRetry={() => void approvals.refetch()}
