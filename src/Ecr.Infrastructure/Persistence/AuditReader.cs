@@ -233,6 +233,57 @@ public sealed class AuditReader(EcrDbContext db) : IAuditReader
     }
 
     /// <inheritdoc />
+    public async Task<IReadOnlyList<StructureChangeView>> ReadRegistrySetSwitchesAsync(
+        string registryCode, int limit, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(registryCode);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(limit);
+
+        await using var connection = new SqlConnection(db.Database.GetConnectionString());
+        await connection.OpenAsync(ct).ConfigureAwait(false);
+
+        await using var command = connection.CreateCommand();
+
+        // ⚠ `ISJSON` — у CASE, а не окремою умовою WHERE: порядок умов SQL Server не гарантує,
+        // і `OPENJSON` над записом старішого формату впав би на всьому читанні.
+        command.CommandText = """
+            SELECT TOP (@take)
+                   s.ChangedAt, s.EntityType, s.EntityId, s.Operation,
+                   s.OldJson, s.NewJson, s.ChangeReason, s.ChangedByUserId, u.DisplayName
+              FROM aud.StructureChange AS s
+              LEFT JOIN sec.[User] AS u ON u.Id = s.ChangedByUserId
+             WHERE s.EntityType = N'cfg.RegistryDef'
+                   AND s.EntityId = 0
+                   AND EXISTS (
+                       SELECT 1
+                         FROM OPENJSON(CASE WHEN ISJSON(s.NewJson) = 1 THEN s.NewJson END, '$.registryCodes') AS j
+                        WHERE j.type = 1 AND j.value = @code)
+             ORDER BY s.ChangedAt DESC, s.Id DESC;
+            """;
+
+        command.Parameters.AddWithValue("@take", limit);
+        command.Parameters.Add("@code", SqlDbType.NVarChar, 4000).Value = registryCode;
+
+        var rows = new List<StructureChangeView>();
+        await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            rows.Add(new StructureChangeView(
+                DateTime.SpecifyKind(reader.GetDateTime(0), DateTimeKind.Utc),
+                reader.GetString(1),
+                reader.GetInt32(2),
+                reader.GetString(3),
+                reader.IsDBNull(4) ? null : reader.GetString(4),
+                reader.IsDBNull(5) ? null : reader.GetString(5),
+                reader.IsDBNull(6) ? null : reader.GetString(6),
+                reader.GetInt32(7),
+                StringOrNull(reader, 8)));
+        }
+
+        return rows;
+    }
+
+    /// <inheritdoc />
     public async Task<PagedResult<StructureChangeView>> ReadStructureJournalAsync(
         StructureChangeFilter filter, CursorRequest page, CancellationToken ct)
     {

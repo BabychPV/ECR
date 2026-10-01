@@ -419,9 +419,7 @@ public sealed class RegistryDefinitionTests
                     Now, "cfg.RegistryDef", PermitsId, "SaveDefinition", "{}", "{}", "правка", 9),
             ]);
 
-        _auditReader.ReadStructureChangesAsync(
-                Arg.Is<IReadOnlyList<string>>(t => t.Count == 1), Arg.Is(0),
-                Arg.Any<int>(), Arg.Any<CancellationToken>())
+        _auditReader.ReadRegistrySetSwitchesAsync("PERMIT", Arg.Any<int>(), Arg.Any<CancellationToken>())
             .Returns<IReadOnlyList<StructureChangeView>>(
             [
                 new StructureChangeView(
@@ -443,6 +441,42 @@ public sealed class RegistryDefinitionTests
         Assert.Equal("SaveDefinition", history[0].Operation);
         Assert.Equal("SwitchSourceSet", history[1].Operation);
         Assert.DoesNotContain(history, h => h.ChangeReason == "чуже");
+    }
+
+    /// <summary>
+    /// S18: запис перемикання набору називає й сусідів; довідник під забороною для викликача з нього
+    /// прибирається — і з <c>registryCodes</c>, і з <c>registries</c>.
+    /// </summary>
+    /// <remarks>
+    /// Мутаційний доказ: повернути <c>c.NewJson</c> без <c>Redact</c> → тест червоний; не прибирати
+    /// об'єкти з <c>code</c> (лише рядки) → тест червоний на <c>OldJson</c>.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    public async Task Історія_не_називає_сусіда_по_набору_під_забороною()
+    {
+        _access.BuildProfileAsync(9, Arg.Any<CancellationToken>()).Returns(
+            new AccessBuilder { UserId = 9 }
+                .Permission("Registry.View")
+                .Deny(ResourceKind.Registry, SubstancesId)
+                .Build());
+        _auditReader.ReadRegistrySetSwitchesAsync("PERMIT", Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns<IReadOnlyList<StructureChangeView>>(
+            [
+                new StructureChangeView(
+                    Now, "cfg.RegistryDef", 0, "SwitchSourceSet",
+                    """{"registries":[{"code":"PERMIT","from":"Local"},{"code":"SUBSTANCE","from":"Local"}]}""",
+                    """{"sourceKind":"External","registryCodes":["PERMIT","SUBSTANCE"]}""",
+                    "перехід", 9),
+            ]);
+
+        var history = await History().HandleAsync("PERMIT", default);
+
+        var entry = Assert.Single(history);
+        Assert.DoesNotContain("SUBSTANCE", entry.NewJson, StringComparison.Ordinal);
+        Assert.DoesNotContain("SUBSTANCE", entry.OldJson, StringComparison.Ordinal);
+        Assert.Contains("\"PERMIT\"", entry.NewJson, StringComparison.Ordinal);
+        Assert.Contains("\"PERMIT\"", entry.OldJson, StringComparison.Ordinal);
     }
 
     [Fact]

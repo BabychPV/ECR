@@ -1,6 +1,7 @@
 // src/Ecr.Application/Registries/RegistryDefinitionHandlers.cs
 using System.Globalization;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Ecr.Application.Common;
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
@@ -202,7 +203,7 @@ public sealed class GetRegistryHistoryHandler(
         // ⛔ S18: заборона на довідник перекриває глобальне Registry.View — 404, як неіснуючий.
         RegistryAccess.EnsureNotDenied(profile, definition.Id, code);
 
-        var own =await audit
+        var own = await audit
             .ReadStructureChangesAsync(Types, definition.Id, Limit, ct)
             .ConfigureAwait(false);
 
@@ -210,21 +211,86 @@ public sealed class GetRegistryHistoryHandler(
         // `EntityId = 0` (`ФВ-13.10`): сутності «група довідників» немає, і
         // зв'язок між перемкнутими разом довідниками живе саме в цьому записі.
         // Тому історія одного довідника без нього неповна — а показати
-        // ЧУЖИЙ набір було б гірше за пропуск. Фільтр іде по РОЗІБРАНОМУ
-        // JSON, а не по підрядку: код `WATER` міститься в `WATER_BODY`, і
-        // пошук підрядком приписав би довіднику чуже перемикання.
+        // ЧУЖИЙ набір було б гірше за пропуск. Фільтр за кодом — у запиті, до
+        // стелі (S18): «останні 100 перемикань, потім фільтр» губило свої, щойно
+        // за ними набиралось сто чужих. Збіг — елемент масиву, а не підрядок:
+        // код `WATER` міститься в `WATER_BODY`.
         var sets = await audit
-            .ReadStructureChangesAsync(["cfg.RegistryDef"], 0, Limit, ct)
+            .ReadRegistrySetSwitchesAsync(definition.Code, Limit, ct)
             .ConfigureAwait(false);
+
+        // ⛔ S18: запис набору називає й СУСІДІВ по набору; довідник під забороною для
+        // викликача — невидимий, тож його код із запису прибирається.
+        var hidden = await HiddenCodesAsync(profile, ct).ConfigureAwait(false);
 
         return own
             .Concat(sets.Where(s => Mentions(s.NewJson, definition.Code)))
             .OrderByDescending(c => c.ChangedAt)
             .Take(Limit)
             .Select(c => new RegistryHistoryEntryDto(
-                c.ChangedAt, c.EntityType, c.Operation, c.OldJson, c.NewJson,
+                c.ChangedAt, c.EntityType, c.Operation,
+                c.EntityId == 0 ? Redact(c.OldJson, "registries", hidden) : c.OldJson,
+                c.EntityId == 0 ? Redact(c.NewJson, "registryCodes", hidden) : c.NewJson,
                 c.ChangeReason, c.ChangedByUserId))
             .ToList();
+    }
+
+    /// <summary>Коди довідників, схованих від викликача забороною.</summary>
+    /// <param name="profile">Профіль доступу.</param>
+    /// <param name="ct">Токен скасування.</param>
+    private async Task<HashSet<string>> HiddenCodesAsync(Security.AccessProfile profile, CancellationToken ct)
+    {
+        var denied = RegistryAccess.DeniedIds(profile);
+        if (denied.Count == 0)
+        {
+            return [];
+        }
+
+        var all = await registries.ListDefinitionsAsync(ct).ConfigureAwait(false);
+        return all
+            .Where(d => denied.Contains(d.Id))
+            .Select(d => d.Code)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Прибирає зі списку <paramref name="property"/> запису набору довідники з <paramref name="hidden"/>:
+    /// у <c>registryCodes</c> — рядки, у <c>registries</c> — об'єкти з полем <c>code</c>.
+    /// </summary>
+    /// <param name="json">Тіло запису аудиту.</param>
+    /// <param name="property">Масив, у якому названо довідники.</param>
+    /// <param name="hidden">Сховані коди.</param>
+    private static string? Redact(string? json, string property, HashSet<string> hidden)
+    {
+        if (hidden.Count == 0 || string.IsNullOrWhiteSpace(json))
+        {
+            return json;
+        }
+
+        try
+        {
+            if (JsonNode.Parse(json) is not JsonObject root || root[property] is not JsonArray items)
+            {
+                return json;
+            }
+
+            foreach (var item in items.ToList())
+            {
+                var code = item is JsonObject named ? named["code"] : item;
+                if (code is JsonValue value && value.TryGetValue<string>(out var text) && hidden.Contains(text))
+                {
+                    items.Remove(item);
+                }
+            }
+
+            return root.ToJsonString();
+        }
+        catch (JsonException)
+        {
+            // ⚠ Нерозбірливий запис старішого формату: без певності, що в ньому немає схованого
+            // коду, тіло не віддається.
+            return null;
+        }
     }
 
     /// <summary>Чи називає запис аудиту саме цей довідник у наборі.</summary>

@@ -210,6 +210,20 @@ public interface IAuditReader
         IReadOnlyList<string> entityTypes, int entityId, int limit, CancellationToken ct);
 
     /// <summary>
+    /// Перемикання джерела наборів (<c>SwitchSourceSet</c>, <c>ФВ-13.10</c>), що називають довідник.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ S18: фільтр за кодом — у ЗАПИТІ, до <paramref name="limit"/>. Перемикання пишеться одним
+    /// записом на весь набір із <c>EntityId = 0</c>, і «останні N, потім фільтр» губило перемикання
+    /// довідника, щойно за ним набиралось N чужих.
+    /// </remarks>
+    /// <param name="registryCode">Код довідника в <c>NewJson.registryCodes</c> (точний збіг елемента, не підрядок).</param>
+    /// <param name="limit">Скільки останніх записів віддати.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<IReadOnlyList<StructureChangeView>> ReadRegistrySetSwitchesAsync(
+        string registryCode, int limit, CancellationToken ct);
+
+    /// <summary>
     /// Загальний журнал структурних змін у вікні часу (<c>BE-16</c>).
     /// </summary>
     /// <remarks>

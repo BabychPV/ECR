@@ -377,6 +377,7 @@ public sealed class RegistryDenyOverridesGlobalRightTests
 
         Assert.Equal("ECR-REG-0404", denied.ErrorCode);
         await audit.DidNotReceiveWithAnyArgs().ReadStructureChangesAsync(default!, default, default, default);
+        await audit.DidNotReceiveWithAnyArgs().ReadRegistrySetSwitchesAsync(default!, default, default);
     }
 
     [Fact]
