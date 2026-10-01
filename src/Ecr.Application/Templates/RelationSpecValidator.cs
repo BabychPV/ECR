@@ -58,8 +58,20 @@ public static class RelationSpecValidator
             }
 
             var r = spec.Value!;
-            return Column("sourceColumn", r.SourceColumn, sourceColumns, "source", requireNumeric: r.Aggregate != RollupAggregate.Count)
+            var failure = Column("sourceColumn", r.SourceColumn, sourceColumns, "source", requireNumeric: r.Aggregate != RollupAggregate.Count)
                 ?? Column("targetColumn", r.TargetColumn, targetColumns, "target", requireNumeric: true);
+            if (failure is not null)
+            {
+                return failure;
+            }
+
+            // D-230: приймач Rollup пише система, тож це колонка Formula — її руками не правлять
+            // (PATCH відмовляє ECR-CELL-4221). Інакше значення Rollup і ручне введення перекривали б одне одного.
+            return targetColumns[r.TargetColumn] == CellDataType.Formula
+                ? null
+                : new RelationSpecFailure(
+                    "targetNotFormula",
+                    $"Column \"{r.TargetColumn}\" (targetColumn) has type {targetColumns[r.TargetColumn]}; the Rollup target must be a Formula column (calculated by the system, not edited by hand).");
         }
 
         var check = RelationSpecParser.ParseCheck(mapJson);

@@ -1,4 +1,4 @@
-using Ecr.Application.Templates;
+﻿using Ecr.Application.Templates;
 using Ecr.Domain.Enums;
 using Xunit;
 
@@ -14,7 +14,7 @@ public sealed class RelationSpecTests
 
     private static readonly IReadOnlyDictionary<string, CellDataType> Target = new Dictionary<string, CellDataType>
     {
-        ["Unit"] = CellDataType.String, ["Total"] = CellDataType.Decimal, ["Name"] = CellDataType.String,
+        ["Unit"] = CellDataType.String, ["Total"] = CellDataType.Formula, ["Manual"] = CellDataType.Decimal, ["Name"] = CellDataType.String,
     };
 
     private const string Match = """{"keys":[{"source":"Unit","target":"Unit"}]}""";
@@ -134,6 +134,25 @@ public sealed class RelationSpecTests
     public void Rollup_відхиляє_неіснуючі_і_нечислові_колонки(string match, string map)
         => Assert.NotNull(RelationSpecValidator.Validate(TableRelationKind.Rollup, match, map, Source, Target));
 
+    /// <summary>
+    /// D-230: приймач Rollup — колонка Formula (її не правлять руками). Мутація: прибрати перевірку типу в
+    /// <c>RelationSpecValidator</c> — тест червоніє.
+    /// </summary>
+    [Theory]
+    [InlineData("Manual")]
+    [InlineData("Name")]
+    public void Приймач_Rollup_не_Formula_відхиляється(string targetColumn)
+    {
+        var map = $$"""{"sourceColumn":"Fact","targetColumn":"{{targetColumn}}","aggregate":"sum"}""";
+        var failure = RelationSpecValidator.Validate(TableRelationKind.Rollup, Match, map, Source, Target);
+        Assert.NotNull(failure);
+        Assert.Contains("Formula", failure!.Detail, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Приймач_Rollup_Decimal_відхиляється_з_причиною_targetNotFormula()
+        => Assert.Equal("targetNotFormula", RelationSpecValidator.Validate(
+            TableRelationKind.Rollup, Match, """{"sourceColumn":"Fact","targetColumn":"Manual","aggregate":"sum"}""", Source, Target)!.Reason);
     [Fact]
     public void Колонки_джерела_і_приймача_не_плутаються_місцями()
     {
