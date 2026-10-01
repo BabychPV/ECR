@@ -7187,7 +7187,8 @@
           "PartitionsRunningOut",
           "CollectionFailed",
           "ExportFailed",
-          "PeriodOpened"
+          "PeriodOpened",
+          "PeriodGraceStarted"
         ]
       },
       "NotificationRuleMatrix": {

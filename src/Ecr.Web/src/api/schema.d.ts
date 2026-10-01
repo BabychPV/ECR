@@ -20868,7 +20868,7 @@ export interface components {
          * @description Подія, про яку сповіщають. Числа зберігаються в базі — не перенумеровувати.
          * @enum {unknown}
          */
-        NotificationEventKind: "JobFailed" | "ConsistencyIssuesFound" | "PartitionsRunningOut" | "CollectionFailed" | "ExportFailed" | "PeriodOpened";
+        NotificationEventKind: "JobFailed" | "ConsistencyIssuesFound" | "PartitionsRunningOut" | "CollectionFailed" | "ExportFailed" | "PeriodOpened" | "PeriodGraceStarted";
         /** @description Матриця правил цілком. */
         NotificationRuleMatrix: {
             /** @description УСІ види подій, а не лише ті, на які правило вже є: інакше клієнт не мав би
