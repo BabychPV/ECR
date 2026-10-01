@@ -213,7 +213,7 @@ export function RegistryImpactPage(): JSX.Element {
     <>
       <PageHeader
         title={t('registries.impact.title')}
-        meta={<Text size="sm" c="dimmed">{code}</Text>}
+        meta={code}
         actions={
           canRecalculate && (
             <Button

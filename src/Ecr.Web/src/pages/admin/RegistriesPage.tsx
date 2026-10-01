@@ -261,7 +261,9 @@ export function RegistriesPage(): JSX.Element {
          `Format: date` (`RegistryEntryDto`) — це КАЛЕНДАРНІ межі вікна
          чинності, які звіряються з днем документа, а не з годинником.
          «12:00 AM» приписало б їм точність, якої в даних немає. */
-      render: (entry) => (
+      render: (entry) =>
+        // D7: нетемпоральний довідник вікна не має — «… — …» читалося б як «діє безстроково».
+        selected?.isTemporal !== true && entry.validFrom == null && entry.validTo == null ? null : (
         <>
           <Timestamp value={entry.validFrom} dateOnly fallback={Unbounded} />
           {' — '}
@@ -481,7 +483,8 @@ export function RegistriesPage(): JSX.Element {
           {selected.isTemporal && <Badge variant="light">{t('registries.temporal')}</Badge>}
           {selected.isHierarchical && <Badge variant="light">{t('registries.hierarchical')}</Badge>}
           <Text size="xs" c="dimmed">
-            {t('registries.fields', { count: selected.fields.length })}
+            {/* D7: текст каталогу — лише «Fields» без {count}; число дописуємо самі. */}
+            {`${t('registries.fields', { count: selected.fields.length })}: ${String(selected.fields.length)}`}
           </Text>
         </Group>
       )}

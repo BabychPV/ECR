@@ -95,7 +95,7 @@ const Unbounded = {
   validTo: null,
 };
 
-function mockFetch(entries: readonly unknown[]): void {
+function mockFetch(entries: readonly unknown[], registryDef: unknown = registry): void {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL) => {
@@ -112,7 +112,7 @@ function mockFetch(entries: readonly unknown[]): void {
       }
       if (url.includes('/api/v1/me')) return json(me);
       if (url.includes('/entries')) return json(entries);
-      if (url.includes('/api/v1/registries')) return json([registry]);
+      if (url.includes('/api/v1/registries')) return json([registryDef]);
 
       return json(null);
     }),
@@ -229,6 +229,22 @@ describe('RegistriesPage: вікно чинності запису довідн�
       // Порожня межа — не `<time>`: моменту немає, і машинозчитуваного
       // значення теж немає чому взятися.
       expect(document.querySelector('time')).toBeNull();
+    },
+    SlowEnvTimeout,
+  );
+
+  it(
+    'D7: нетемпоральний довідник — без «… — …» у колонці, підпис «Fields» з кількістю',
+    async () => {
+      // ⛔ Мутація: прибрати гілку `isTemporal !== true` у render колонки — з'являється «… — …».
+      mockFetch([Unbounded], { ...registry, isTemporal: false, fields: [{}, {}, {}] });
+      show();
+
+      await screen.findByText('Tonne', {}, { timeout: SlowEnvTimeout });
+
+      expect(document.querySelector('[data-timestamp="none"]')).toBeNull();
+      expect(document.body.textContent).not.toContain('… — …');
+      expect(screen.getByText(/: 3$/)).toBeTruthy();
     },
     SlowEnvTimeout,
   );
