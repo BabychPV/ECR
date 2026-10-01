@@ -752,7 +752,7 @@ UPDATE t
     (N'import.roundedHint', N'ru', N'В этих числах из файла больше знаков после запятой, чем допускает колонка. Они округлены (половина — от нуля), и сохранено будет именно округлённое значение. Сверьте их с файлом перед применением.',
                                                 N'В этих числах из файла больше знаков после запятой, чем допускает столбец. Они округлены (половина — от нуля), и сохранено будет именно округлённое значение. Сверьте их с файлом перед применением.'),
     (N'err.ECR-CELL-0422.importPrecision', N'ru', N'В числе больше цифр, чем допускает колонка, даже после округления до её знаков после запятой.',
-                                                N'В числе больше цифр, чем допускает столбец, даже после округления до её знаков после запятой.'),
+                                                N'В числе больше цифр, чем допускает столбец, даже после округления до его знаков после запятой.'),
     (N'registries.entryUsage.columnsTitle', N'ru', N'Колонки шаблонов, берущие значения из этого справочника',
                                                 N'Столбцы шаблонов, берущие значения из этого справочника'),
     (N'registries.entryUsage.columnsHint', N'ru', N'Эти колонки могут содержать эту запись; какие документы её действительно содержат, для отдельной записи не перечисляется.',
@@ -777,7 +777,22 @@ UPDATE t
                                                 N'В отчёте должен остаться хотя бы один столбец.'),
     -- COLL:ru-fix — ланцюг A → B → C: B уже могло дійти до баз попереднім рядком.
     (N'reportDefs.removeColumnBlocked', N'ru', N'В отчёте должна быть хотя бы один столбец.',
-                                                N'В отчёте должен остаться хотя бы один столбец.')
+                                                N'В отчёте должен остаться хотя бы один столбец.'),
+    -- I18N:keys-audit 2026-10-01: узгодження роду після «колонка» → «столбец»
+    -- (removeColumnBlocked уже оновлено вище в COLL:ru-fix) і єдині терміни
+    -- глосарію (ru «методика», «столбец»; kz «константа») — docs/i18n/glossary-ru-kz.md.
+    (N'err.ECR-CELL-0422.importPrecision', N'ru', N'В числе больше цифр, чем допускает столбец, даже после округления до её знаков после запятой.',
+                                                N'В числе больше цифр, чем допускает столбец, даже после округления до его знаков после запятой.'),
+    (N'integrationAudit.rowWindowCreated', N'ru', N'Привязка окна строки к колонке «{column}» создана.',
+                                                N'Привязка окна строки к столбцу «{column}» создана.'),
+    (N'registries.entryUsage.substancesTitle', N'ru', N'Методологии, объявившие её веществом',
+                                                N'Методики, объявившие её веществом'),
+    (N'registries.entryUsage.substanceLink', N'ru', N'Версии методологии',
+                                                N'Версии методики'),
+    (N'registries.entryUsage.notListed', N'ru', N'Здесь для отдельной записи не перечисляются: ячейки и шапки документов, константы методологий и связи каскада. Удаление записи сообщает, сколько их, по видам.',
+                                                N'Здесь для отдельной записи не перечисляются: ячейки и шапки документов, константы методик и связи каскада. Удаление записи сообщает, сколько их, по видам.'),
+    (N'registries.entryUsage.notListed', N'kz', N'Мұнда жеке жазба үшін тізілмейді: құжат ұяшықтары мен тақырыптары, әдістеме тұрақтылары және каскад байланыстары. Жазбаны жою олардың қанша екенін түрлері бойынша хабарлайды.',
+                                                N'Мұнда жеке жазба үшін тізілмейді: құжат ұяшықтары мен тақырыптары, әдістеме константалары және каскад байланыстары. Жазбаны жою олардың қанша екенін түрлері бойынша хабарлайды.')
   ) AS s ([Key], Lang, OldVal, NewVal)
     ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
  WHERE t.Value = s.OldVal COLLATE Latin1_General_BIN2;
@@ -2745,6 +2760,12 @@ USING (VALUES
     -- тест «технічні ключі на екрані» в `npm run test:a11y`.
     (N'sources.testEntities.one',        N'en', N'The source catalog lists {count} entity.', 1),
     (N'sources.testEntities.other',      N'en', N'The source catalog lists {count} entities.', 1),
+    -- ⛔ `few`/`many` англійська не вибирає ніколи, але російська — на 0, 2–4, 5–20,
+    -- 22… (`plural.ts`): без цих рядків російський інтерфейс показував позначку
+    -- `⟦sources.testEntities.few⟧`. Рядок en — лише носій ключа й області для
+    -- перекладів (порції перекладів беруть `Scope` з en); текст = `other`.
+    (N'sources.testEntities.few',        N'en', N'The source catalog lists {count} entities.', 1),
+    (N'sources.testEntities.many',       N'en', N'The source catalog lists {count} entities.', 1),
     -- Створення, правка й видалення з'єднань (UI-09 крок 2). ⚠ `created` і
     -- `saved` ідуть через `t(умова ? … : …)` — сторож `EndpointCoverageTests`
     -- їх не бачить, тож єдина гарантія — цей рядок.
@@ -13292,7 +13313,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'import.roundedHint', N'kz', N'Файлдағы бұл сандарда баған рұқсат ететіннен көп үтірден кейінгі таңба бар. Олар дөңгелектелді (жартысы — нөлден алысқа), және дәл дөңгелектелген мән сақталады. Қолданар алдында оларды файлмен салыстырыңыз.'),
     (N'import.inFile', N'ru', N'В файле'),
     (N'import.inFile', N'kz', N'Файлда'),
-    (N'err.ECR-CELL-0422.importPrecision', N'ru', N'В числе больше цифр, чем допускает столбец, даже после округления до её знаков после запятой.'),
+    (N'err.ECR-CELL-0422.importPrecision', N'ru', N'В числе больше цифр, чем допускает столбец, даже после округления до его знаков после запятой.'),
     (N'err.ECR-CELL-0422.importPrecision', N'kz', N'Бағанның үтірден кейінгі таңбаларына дейін дөңгелектегеннен кейін де санда баған рұқсат ететіннен көп цифр бар.')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
@@ -13425,12 +13446,12 @@ SELECT v.[Key], v.Lang, v.Val
     (N'registries.entryUsage.fieldShown', N'ru', N'Показано {shown} из {total}'),
     (N'registries.entryUsage.none', N'ru', N'Не найдено'),
     (N'registries.entryUsage.childrenTitle', N'ru', N'Дочерние записи'),
-    (N'registries.entryUsage.substancesTitle', N'ru', N'Методологии, объявившие её веществом'),
-    (N'registries.entryUsage.substanceLink', N'ru', N'Версии методологии'),
+    (N'registries.entryUsage.substancesTitle', N'ru', N'Методики, объявившие её веществом'),
+    (N'registries.entryUsage.substanceLink', N'ru', N'Версии методики'),
     (N'registries.entryUsage.columnsTitle', N'ru', N'Столбцы шаблонов, берущие значения из этого справочника'),
     (N'registries.entryUsage.columnsHint', N'ru', N'Эти столбцы могут содержать эту запись; какие документы её действительно содержат, для отдельной записи не перечисляется.'),
     (N'registries.entryUsage.truncated', N'ru', N'Список уровня справочника обрезан сервером: часть ссылающихся полей, колонок или веществ может здесь отсутствовать.'),
-    (N'registries.entryUsage.notListed', N'ru', N'Здесь для отдельной записи не перечисляются: ячейки и шапки документов, константы методологий и связи каскада. Удаление записи сообщает, сколько их, по видам.'),
+    (N'registries.entryUsage.notListed', N'ru', N'Здесь для отдельной записи не перечисляются: ячейки и шапки документов, константы методик и связи каскада. Удаление записи сообщает, сколько их, по видам.'),
     (N'registries.entryUsage.column', N'kz', N'Қолданылуы'),
     (N'registries.entryUsage.action', N'kz', N'Қайда қолданылады'),
     (N'registries.entryUsage.actionFor', N'kz', N'{code} жазбасы қайда қолданылады'),
@@ -13448,7 +13469,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'registries.entryUsage.columnsTitle', N'kz', N'Осы анықтамалықтан мән алатын үлгі бағандары'),
     (N'registries.entryUsage.columnsHint', N'kz', N'Бұл бағандарда осы жазба болуы мүмкін; оны нақты қай құжаттар қамтитыны жеке жазба үшін тізілмейді.'),
     (N'registries.entryUsage.truncated', N'kz', N'Анықтамалық деңгейіндегі тізімді сервер қысқартты: сілтеме жасайтын өрістердің, бағандардың немесе заттардың бір бөлігі мұнда болмауы мүмкін.'),
-    (N'registries.entryUsage.notListed', N'kz', N'Мұнда жеке жазба үшін тізілмейді: құжат ұяшықтары мен тақырыптары, әдістеме тұрақтылары және каскад байланыстары. Жазбаны жою олардың қанша екенін түрлері бойынша хабарлайды.')
+    (N'registries.entryUsage.notListed', N'kz', N'Мұнда жеке жазба үшін тізілмейді: құжат ұяшықтары мен тақырыптары, әдістеме константалары және каскад байланыстары. Жазбаны жою олардың қанша екенін түрлері бойынша хабарлайды.')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
@@ -13683,7 +13704,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'integrationAudit.fieldMapUnitAccepted', N'kz', N'«{field}» өрісін сәйкестендіру: көздің жаңа өлшем бірлігі қабылданды.'),
     (N'integrationAudit.fieldMapDeleted', N'ru', N'Сопоставление поля «{field}» сущности {entity} удалено.'),
     (N'integrationAudit.fieldMapDeleted', N'kz', N'{entity} нысанының «{field}» өрісін сәйкестендіру жойылды.'),
-    (N'integrationAudit.rowWindowCreated', N'ru', N'Привязка окна строки к колонке «{column}» создана.'),
+    (N'integrationAudit.rowWindowCreated', N'ru', N'Привязка окна строки к столбцу «{column}» создана.'),
     (N'integrationAudit.rowWindowCreated', N'kz', N'Жол терезесін «{column}» бағанына байлау құрылды.'),
     (N'integrationAudit.rowWindowChanged', N'ru', N'Привязка окна строки {id} изменена.'),
     (N'integrationAudit.rowWindowChanged', N'kz', N'{id} жол терезесін байлау өзгертілді.'),
@@ -14237,6 +14258,21 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- API:negative-path ── кінець секції ──
+
+-- I18N:keys-audit 2026-10-01 ── форми множини ru (few/many) для formatCount; власна порція ──
+-- kz за `Intl.PluralRules` має лише one/other — рядки kz тут лише для повноти
+-- каталогу (текст = other). ⚠ kz — нейтральний переклад, потребує перевірки носієм.
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'sources.testEntities.few', N'ru', N'В каталоге источника {count} сущности.'),
+    (N'sources.testEntities.few', N'kz', N'Көз каталогында {count} нысан бар.'),
+    (N'sources.testEntities.many', N'ru', N'В каталоге источника {count} сущностей.'),
+    (N'sources.testEntities.many', N'kz', N'Көз каталогында {count} нысан бар.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- I18N:keys-audit ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t
