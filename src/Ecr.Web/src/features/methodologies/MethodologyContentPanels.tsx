@@ -51,6 +51,7 @@ import {
 } from './api';
 import { ColumnDefPicker } from './ColumnDefPicker';
 import { MethodologyConstantUsage } from './ConstantUsage';
+import { usePendingLoading } from '@/features/common/usePendingLoading';
 
 /**
  * Вибір із допоміжного довідника, який МОЖЕ не приїхати (директива №15, §0,
@@ -236,6 +237,9 @@ export function MethodologyConstantsPanel({
     },
     onError: showApiError,
   });
+
+  // ⚠ `ФВ-14.26`: спінер на кнопці — лише після 100 мс дії, не з першого кадру.
+  const saveLoading = usePendingLoading(save.isPending);
 
   return (
     <>
@@ -457,8 +461,11 @@ export function MethodologyConstantsPanel({
                 // доти порожнє поле мовчки їхало нулем.
                 (editing.kind === 'Numeric' && normalizeDecimal(editing.value) === null)
               }
-              loading={save.isPending}
-              onClick={() => save.mutate(editing)}
+              loading={saveLoading}
+              onClick={() => {
+                if (save.isPending) return;
+                save.mutate(editing);
+              }}
             >
               {t('methodologies.save')}
             </Button>
@@ -541,6 +548,9 @@ export function MethodologyRulesPanel({
     },
     onError: showApiError,
   });
+
+  // ⚠ `ФВ-14.26`: спінер на кнопці — лише після 100 мс дії, не з першого кадру.
+  const saveLoading = usePendingLoading(save.isPending);
 
   return (
     <>
@@ -738,8 +748,11 @@ export function MethodologyRulesPanel({
                 editing.code.trim().length === 0 ||
                 editing.matchJson.trim().length === 0
               }
-              loading={save.isPending}
-              onClick={() => save.mutate(editing)}
+              loading={saveLoading}
+              onClick={() => {
+                if (save.isPending) return;
+                save.mutate(editing);
+              }}
             >
               {t('methodologies.save')}
             </Button>
@@ -798,6 +811,9 @@ export function MethodologyRequiredInputsPanel({
     },
     onError: showApiError,
   });
+
+  // ⚠ `ФВ-14.26`: спінер на кнопці — лише після 100 мс дії, не з першого кадру.
+  const saveLoading = usePendingLoading(save.isPending);
 
   return (
     <>
@@ -946,8 +962,11 @@ export function MethodologyRequiredInputsPanel({
 
             <Button
               disabled={editing.columnDefId <= 0}
-              loading={save.isPending}
-              onClick={() => save.mutate(editing)}
+              loading={saveLoading}
+              onClick={() => {
+                if (save.isPending) return;
+                save.mutate(editing);
+              }}
             >
               {t('methodologies.save')}
             </Button>
@@ -1004,6 +1023,9 @@ export function MethodologyOutputsPanel({
     },
     onError: showApiError,
   });
+
+  // ⚠ `ФВ-14.26`: спінер на кнопці — лише після 100 мс дії, не з першого кадру.
+  const saveLoading = usePendingLoading(save.isPending);
 
   return (
     <>
@@ -1134,8 +1156,11 @@ export function MethodologyOutputsPanel({
 
             <Button
               disabled={editing.code.trim().length === 0 || editing.unitId === null}
-              loading={save.isPending}
-              onClick={() => save.mutate(editing)}
+              loading={saveLoading}
+              onClick={() => {
+                if (save.isPending) return;
+                save.mutate(editing);
+              }}
             >
               {t('methodologies.save')}
             </Button>
@@ -1191,6 +1216,9 @@ export function MethodologyTestsPanel({
     },
     onError: showApiError,
   });
+
+  // ⚠ `ФВ-14.26`: спінер на кнопці — лише після 100 мс дії, не з першого кадру.
+  const saveLoading = usePendingLoading(save.isPending);
 
   return (
     <>
@@ -1322,8 +1350,11 @@ export function MethodologyTestsPanel({
               disabled={
                 editing.code.trim().length === 0 || normalizeDecimal(editing.tolerance) === null
               }
-              loading={save.isPending}
-              onClick={() => save.mutate(editing)}
+              loading={saveLoading}
+              onClick={() => {
+                if (save.isPending) return;
+                save.mutate(editing);
+              }}
             >
               {t('methodologies.save')}
             </Button>
@@ -1382,6 +1413,9 @@ export function MethodologyBindingsPanel({
     },
     onError: showApiError,
   });
+
+  // ⚠ `ФВ-14.26`: спінер на кнопці — лише після 100 мс дії, не з першого кадру.
+  const saveLoading = usePendingLoading(save.isPending);
 
   return (
     <>
@@ -1516,8 +1550,11 @@ export function MethodologyBindingsPanel({
 
             <Button
               disabled={editing.outputCode.trim().length === 0 || editing.columnDefId <= 0}
-              loading={save.isPending}
-              onClick={() => save.mutate(editing)}
+              loading={saveLoading}
+              onClick={() => {
+                if (save.isPending) return;
+                save.mutate(editing);
+              }}
             >
               {t('methodologies.save')}
             </Button>
@@ -1595,6 +1632,9 @@ export function MethodologyModesForm({
     onError: showApiError,
   });
 
+  // ⚠ `ФВ-14.26`: спінер на кнопці — лише після 100 мс дії, не з першого кадру.
+  const saveLoading = usePendingLoading(save.isPending);
+
   return (
     <Stack gap="sm">
       <Text fw={600}>{t('methodologies.modes')}</Text>
@@ -1646,7 +1686,14 @@ export function MethodologyModesForm({
         />
 
         {editable && (
-          <Button variant="default" loading={save.isPending} onClick={() => save.mutate()}>
+          <Button
+            variant="default"
+            loading={saveLoading}
+            onClick={() => {
+              if (save.isPending) return;
+              save.mutate();
+            }}
+          >
             {t('methodologies.saveModes')}
           </Button>
         )}

@@ -37,6 +37,7 @@ import { t } from '@/shared/i18n';
 import { generatePath } from 'react-router-dom';
 import { routes } from '@/app/routes';
 import { badgeStateOf } from '@/features/workflow/jobFollow';
+import { usePendingLoading } from '@/features/common/usePendingLoading';
 
 /** Адреса документа задачі — з реєстру маршрутів (`JobFacts` про маршрути не знає). */
 function documentHrefOf(id: number): string {
@@ -139,6 +140,9 @@ export function JobsPage(): JSX.Element {
     onSuccess: () => void job.refetch(),
     onError: showApiError,
   });
+
+  // ⚠ `ФВ-14.26`: спінер на кнопці — лише після 100 мс дії, не з першого кадру.
+  const restartLoading = usePendingLoading(restart.isPending);
 
   return (
     <>
@@ -262,8 +266,11 @@ export function JobsPage(): JSX.Element {
                 <Button
                   size="xs"
                   variant="default"
-                  loading={restart.isPending}
-                  onClick={() => restart.mutate()}
+                  loading={restartLoading}
+                  onClick={() => {
+                    if (restart.isPending) return;
+                    restart.mutate();
+                  }}
                 >
                   {restart.isPending ? t('jobs.restarting') : t('jobs.restart')}
                 </Button>
@@ -320,6 +327,9 @@ function RecentJobs({ onPick }: { onPick: (jobId: string) => void }): JSX.Elemen
     }
   });
 
+  // ⚠ `ФВ-14.26`: спінер на кнопці — лише після 100 мс дії, не з першого кадру.
+  const cancelLoading = usePendingLoading(cancel.isPending);
+
   return (
     <>
       <Modal
@@ -343,7 +353,7 @@ function RecentJobs({ onPick }: { onPick: (jobId: string) => void }): JSX.Elemen
           </Button>
           <Button
             color="statusError"
-            loading={cancel.isPending}
+            loading={cancelLoading}
             onClick={() => {
               if (confirming !== null) cancel.mutate(confirming.jobId);
             }}

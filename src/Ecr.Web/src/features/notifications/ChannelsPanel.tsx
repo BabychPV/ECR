@@ -33,6 +33,7 @@ import {
   type NotificationChannelSettings,
 } from './api';
 import { TransportSource } from './TransportSource';
+import { usePendingLoading } from '@/features/common/usePendingLoading';
 
 /**
  * Канали сповіщень (`BE-33`, екран `/admin/notifications`).
@@ -92,6 +93,9 @@ export function ChannelsPanel(): JSX.Element {
     onError: showApiError,
   });
 
+  // ⚠ `ФВ-14.26`: спінер на кнопці — лише після 100 мс дії, не з першого кадру.
+  const saveLoading = usePendingLoading(save.isPending);
+
   const remove = useMutation({
     mutationFn: (id: number) => deleteNotificationChannel(id),
     onSuccess: async () => {
@@ -101,6 +105,8 @@ export function ChannelsPanel(): JSX.Element {
     },
     onError: showApiError,
   });
+
+  const removeLoading = usePendingLoading(remove.isPending);
 
   const saveSecret = useMutation({
     mutationFn: (value: { id: number; secret: string | null }) =>
@@ -113,6 +119,8 @@ export function ChannelsPanel(): JSX.Element {
     },
     onError: showApiError,
   });
+
+  const saveSecretLoading = usePendingLoading(saveSecret.isPending);
 
   const test = useMutation({
     mutationFn: (id: number) => testNotificationChannel(id),
@@ -135,6 +143,8 @@ export function ChannelsPanel(): JSX.Element {
     },
     onError: showApiError,
   });
+
+  const testLoading = usePendingLoading(test.isPending);
 
   return (
     <Stack gap="sm">
@@ -260,8 +270,11 @@ export function ChannelsPanel(): JSX.Element {
                       <Button
                         size="compact-xs"
                         variant="subtle"
-                        loading={test.isPending && test.variables === channel.id}
-                        onClick={() => test.mutate(channel.id)}
+                        loading={testLoading && test.variables === channel.id}
+                        onClick={() => {
+                          if (test.isPending) return;
+                          test.mutate(channel.id);
+                        }}
                       >
                         {t('notifications.testChannel')}
                       </Button>
@@ -269,7 +282,7 @@ export function ChannelsPanel(): JSX.Element {
                         size="compact-xs"
                         variant="subtle"
                         color="statusError"
-                        loading={remove.isPending && remove.variables === channel.id}
+                        loading={removeLoading && remove.variables === channel.id}
                         onClick={() => setRemoving(channel)}
                       >
                         {t('common.delete')}
@@ -385,9 +398,12 @@ export function ChannelsPanel(): JSX.Element {
                 {t('common.cancel')}
               </Button>
               <Button
-                loading={save.isPending}
+                loading={saveLoading}
                 disabled={draft.name.trim().length === 0}
-                onClick={() => save.mutate(draft)}
+                onClick={() => {
+                  if (save.isPending) return;
+                  save.mutate(draft);
+                }}
               >
                 {t('common.save')}
               </Button>
@@ -426,16 +442,22 @@ export function ChannelsPanel(): JSX.Element {
               <Button
                 variant="default"
                 color="statusError"
-                loading={saveSecret.isPending}
+                loading={saveSecretLoading}
                 disabled={!secretFor.hasSecret}
-                onClick={() => saveSecret.mutate({ id: secretFor.id, secret: null })}
+                onClick={() => {
+                  if (saveSecret.isPending) return;
+                  saveSecret.mutate({ id: secretFor.id, secret: null });
+                }}
               >
                 {t('notifications.clearWebhook')}
               </Button>
               <Button
-                loading={saveSecret.isPending}
+                loading={saveSecretLoading}
                 disabled={secret.trim().length === 0}
-                onClick={() => saveSecret.mutate({ id: secretFor.id, secret })}
+                onClick={() => {
+                  if (saveSecret.isPending) return;
+                  saveSecret.mutate({ id: secretFor.id, secret });
+                }}
               >
                 {t('common.save')}
               </Button>

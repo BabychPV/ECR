@@ -19,6 +19,7 @@ import { LocalizedInput, hasAnyText, type LocalizedValue } from '@/shared/ui/Loc
 import { showApiError, showDone } from '@/shared/ui/notify';
 import { t } from '@/shared/i18n';
 import { RegistryExternalKeysPanel } from './RegistryExternalKeysPanel';
+import { usePendingLoading } from '@/features/common/usePendingLoading';
 
 type RegistryEntryDetailDto = components['schemas']['RegistryEntryDetailDto'];
 
@@ -223,6 +224,9 @@ function EntryForm({
     onError: showApiError,
   });
 
+  // ⚠ `ФВ-14.26`: спінер на кнопці — лише після 100 мс дії, не з першого кадру.
+  const upsertLoading = usePendingLoading(upsert.isPending);
+
   return (
     <>
       {readOnly && (
@@ -284,8 +288,11 @@ function EntryForm({
         </Button>
         <Button
           disabled={readOnly || code.trim().length === 0 || !hasAnyText(display)}
-          loading={upsert.isPending}
-          onClick={() => upsert.mutate()}
+          loading={upsertLoading}
+          onClick={() => {
+            if (upsert.isPending) return;
+            upsert.mutate();
+          }}
         >
           {t('common.save')}
         </Button>
@@ -348,6 +355,9 @@ export function ValidityEditor({
     onError: showApiError,
   });
 
+  // ⚠ `ФВ-14.26`: спінер на кнопці — лише після 100 мс дії, не з першого кадру.
+  const saveLoading = usePendingLoading(save.isPending);
+
   return (
     <Modal opened={entry !== null} onClose={onClose} title={t('registries.validity')}>
       <TextInput
@@ -373,7 +383,13 @@ export function ValidityEditor({
         <Button variant="default" onClick={onClose}>
           {t('common.cancel')}
         </Button>
-        <Button loading={save.isPending} onClick={() => save.mutate()}>
+        <Button
+          loading={saveLoading}
+          onClick={() => {
+            if (save.isPending) return;
+            save.mutate();
+          }}
+        >
           {t('common.save')}
         </Button>
       </Group>

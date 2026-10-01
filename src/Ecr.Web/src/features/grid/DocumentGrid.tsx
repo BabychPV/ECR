@@ -98,6 +98,7 @@ import { t } from '@/shared/i18n';
 // тут, а не у вхідному чанку, — бюджет маршруту (`D-132`).
 import '@/shared/theme/cell-states.css';
 import './cellEditors.css';
+import { usePendingLoading } from '@/features/common/usePendingLoading';
 
 /**
  * Остання календарна дата періоду (`periodKey` — `YYYYMM`, той самий формат,
@@ -1809,6 +1810,10 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     return () => clearTimeout(timer);
   }, [navigated]);
 
+  // ⚠ `ФВ-14.26`: спінер на кнопці — лише після 100 мс дії, не з першого кадру.
+  const saveLoading = usePendingLoading(isPending);
+  const addRowLoading = usePendingLoading(addRow.isPending);
+
   return (
     /*
      * ⛔ Чотири стани і тут (`ФВ-14.21`). Раніше зріз мав два: «вантажиться» і
@@ -1881,8 +1886,11 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         {(saveStatus === 'error' || rejections.size > 0) && pending.size > 0 && (
           <Button
             size="xs"
-            loading={isPending}
-            onClick={() => void save([...pending.values()])}
+            loading={saveLoading}
+            onClick={() => {
+              if (isPending) return;
+              void save([...pending.values()]);
+            }}
             data-testid="grid-retry-save"
           >
             {t('grid.retrySave', { count: pending.size })}
@@ -1969,9 +1977,12 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
           <Button
             size="xs"
             variant="default"
-            loading={addRow.isPending}
+            loading={addRowLoading}
             disabled={maxDynamicRows !== null && (data?.rows.length ?? 0) >= maxDynamicRows}
-            onClick={() => addRow.mutate()}
+            onClick={() => {
+              if (addRow.isPending) return;
+              addRow.mutate();
+            }}
           >
             {t('grid.addRow')}
           </Button>

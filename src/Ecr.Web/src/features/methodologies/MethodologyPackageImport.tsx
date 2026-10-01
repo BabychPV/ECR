@@ -7,6 +7,7 @@ import { t } from '@/shared/i18n';
 import { showApiError, showDone } from '@/shared/ui/notify';
 import { DisabledReason } from '@/features/common/DisabledReason';
 import { importMethodologyPackage, type MethodologyImportReportDto } from './api';
+import { usePendingLoading } from '@/features/common/usePendingLoading';
 
 type Issue = MethodologyImportReportDto['blockers'][number];
 
@@ -91,6 +92,9 @@ export function MethodologyPackageImport(): JSX.Element {
     onError: showApiError,
   });
 
+  // ⚠ `ФВ-14.26`: спінер на кнопці — лише після 100 мс дії, не з першого кадру.
+  const checkLoading = usePendingLoading(check.isPending);
+
   const apply = useMutation({
     mutationFn: (value: unknown) => importMethodologyPackage(value, false),
     onSuccess: async (done) => {
@@ -108,6 +112,8 @@ export function MethodologyPackageImport(): JSX.Element {
       showApiError(error);
     },
   });
+
+  const applyLoading = usePendingLoading(apply.isPending);
 
   // ⛔ «Перевірити» й «Імпортувати» на час запиту `loading` (= `disabled`) і втрачають фокус. Прийшов звіт —
   // фокус на нього: читач озвучує підсумок, а `Tab` веде до блокерів і конфліктів, а не з початку діалогу.
@@ -156,8 +162,11 @@ export function MethodologyPackageImport(): JSX.Element {
             <Button
               variant="default"
               disabled={pkg === null}
-              loading={check.isPending}
-              onClick={() => check.mutate(pkg)}
+              loading={checkLoading}
+              onClick={() => {
+                if (check.isPending) return;
+                check.mutate(pkg);
+              }}
             >
               {t('methodologies.importCheck')}
             </Button>
@@ -170,7 +179,13 @@ export function MethodologyPackageImport(): JSX.Element {
                   : null
               }
             >
-              <Button loading={apply.isPending} onClick={() => apply.mutate(pkg)}>
+              <Button
+                loading={applyLoading}
+                onClick={() => {
+                  if (apply.isPending) return;
+                  apply.mutate(pkg);
+                }}
+              >
                 {t('methodologies.importApply')}
               </Button>
             </DisabledReason>

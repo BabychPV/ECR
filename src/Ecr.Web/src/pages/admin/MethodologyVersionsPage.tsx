@@ -52,6 +52,7 @@ import { PageHeader } from '@/shared/ui/PageHeader';
 import { StatusBadge, statusKey } from '@/shared/ui/StatusBadge';
 import { Timestamp } from '@/shared/ui/Timestamp';
 import { showApiError, showDone } from '@/shared/ui/notify';
+import { usePendingLoading } from '@/features/common/usePendingLoading';
 
 /*
  * ⛔ Сім панелей змісту версії — за `import()`, і це вимога бюджету (`D-132`),
@@ -259,6 +260,9 @@ export function MethodologyVersionsPage(): JSX.Element {
     onError: showApiError,
   });
 
+  // ⚠ `ФВ-14.26`: спінер на кнопці — лише після 100 мс дії, не з першого кадру.
+  const createLoading = usePendingLoading(create.isPending);
+
   const save = useMutation({
     mutationFn: (draft: FormulaDraft) => saveMethodologyFormula(methodologyId, draft),
     onSuccess: async () => {
@@ -270,6 +274,8 @@ export function MethodologyVersionsPage(): JSX.Element {
     onError: showApiError,
   });
 
+  const saveLoading = usePendingLoading(save.isPending);
+
   const remove = useMutation({
     mutationFn: (target: { versionId: number; code: string }) =>
       deleteMethodologyFormula(methodologyId, target.versionId, target.code),
@@ -280,6 +286,8 @@ export function MethodologyVersionsPage(): JSX.Element {
     },
     onError: showApiError,
   });
+
+  const removeLoading = usePendingLoading(remove.isPending);
 
   /**
    * Публікація версії, відкритої на цьому екрані. Право `Calculation.Publish`.
@@ -315,6 +323,8 @@ export function MethodologyVersionsPage(): JSX.Element {
     // ⚠ F-15/B-12: під назвою — перелік проблем із поля `problems`.
     onError: showPublishError,
   });
+
+  const publishLoading = usePendingLoading(publish.isPending);
 
   const placement = useMemo<ExpressionPlacement>(
     () => ({ methodologyVersionId: editing?.versionId }),
@@ -744,8 +754,11 @@ export function MethodologyVersionsPage(): JSX.Element {
 
           <Button
             disabled={newVersion.trim().length === 0}
-            loading={create.isPending}
-            onClick={() => create.mutate()}
+            loading={createLoading}
+            onClick={() => {
+              if (create.isPending) return;
+              create.mutate();
+            }}
           >
             {t('methodologies.createVersion')}
           </Button>
@@ -882,8 +895,11 @@ export function MethodologyVersionsPage(): JSX.Element {
                 editing.expression.trim().length === 0 ||
                 (expressionErrors?.diagnostics.length ?? 0) > 0
               }
-              loading={save.isPending}
-              onClick={() => save.mutate(editing)}
+              loading={saveLoading}
+              onClick={() => {
+                if (save.isPending) return;
+                save.mutate(editing);
+              }}
             >
               {t('methodologies.saveFormula')}
             </Button>
@@ -914,9 +930,9 @@ export function MethodologyVersionsPage(): JSX.Element {
           </Button>
           <Button
             color="statusError"
-            loading={remove.isPending}
+            loading={removeLoading}
             onClick={() => {
-              if (deleteTarget !== null) remove.mutate(deleteTarget);
+              if (deleteTarget !== null && !remove.isPending) remove.mutate(deleteTarget);
             }}
           >
             {t('methodologies.deleteFormulaConfirmTitle')}
@@ -958,8 +974,11 @@ export function MethodologyVersionsPage(): JSX.Element {
 
           <Button
             disabled={publishReason.trim().length === 0 || publishEffectiveFrom.length === 0}
-            loading={publish.isPending}
-            onClick={() => publish.mutate()}
+            loading={publishLoading}
+            onClick={() => {
+              if (publish.isPending) return;
+              publish.mutate();
+            }}
           >
             {t('methodologies.publish')}
           </Button>

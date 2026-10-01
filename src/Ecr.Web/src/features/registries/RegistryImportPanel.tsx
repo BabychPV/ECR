@@ -6,6 +6,7 @@ import type { RegistryEntryImportReport } from '@/api/types';
 import { importRegistryEntries } from '@/features/registries/api';
 import { showApiError, showDone } from '@/shared/ui/notify';
 import { t } from '@/shared/i18n';
+import { usePendingLoading } from '@/features/common/usePendingLoading';
 
 /** Куди імпортувати. */
 export interface RegistryImportPanelProps {
@@ -48,6 +49,9 @@ export function RegistryImportPanel({ registryCode, disabled = false }: Registry
     onError: showApiError,
   });
 
+  // ⚠ `ФВ-14.26`: спінер на кнопці — лише після 100 мс дії, не з першого кадру.
+  const previewLoading = usePendingLoading(preview.isPending);
+
   const apply = useMutation({
     mutationFn: () => {
       if (file === null) {
@@ -82,6 +86,8 @@ export function RegistryImportPanel({ registryCode, disabled = false }: Registry
     },
     onError: showApiError,
   });
+
+  const applyLoading = usePendingLoading(apply.isPending);
 
   // ⛔ Головна умова блокування: хоч одна помилка рядка в перегляді — сервер
   // не запише нічого, навіть якщо натиснути «Застосувати». Кнопка нижче має
@@ -119,7 +125,7 @@ export function RegistryImportPanel({ registryCode, disabled = false }: Registry
         size="xs"
         variant="default"
         disabled={disabled}
-        loading={preview.isPending}
+        loading={previewLoading}
         onClick={() => picker.current?.click()}
       >
         {t('registry.import.pick')}
@@ -185,7 +191,14 @@ export function RegistryImportPanel({ registryCode, disabled = false }: Registry
               <Button variant="default" onClick={close}>
                 {t('common.cancel')}
               </Button>
-              <Button disabled={blocked} loading={apply.isPending} onClick={() => apply.mutate()}>
+              <Button
+                disabled={blocked}
+                loading={applyLoading}
+                onClick={() => {
+                  if (apply.isPending) return;
+                  apply.mutate();
+                }}
+              >
                 {t('registry.import.apply')}
               </Button>
             </Group>
