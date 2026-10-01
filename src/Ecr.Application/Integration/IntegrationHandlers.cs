@@ -106,9 +106,14 @@ public sealed class CollectFromSourceHandler(
 public sealed record CollectionTask(int SourceEntityId, DateTime? FromUtc, DateTime? ToUtc);
 
 /// <summary>
-/// Перелік сутностей збору. Право <c>Integration.Manage</c>.
+/// Перелік сутностей збору. Право <c>Integration.View</c> або <c>Integration.Manage</c>.
 /// </summary>
 /// <remarks>
+/// D9: лише читання, без секретів (код, шлях, стан останнього прогону) — як і перелік
+/// джерел <see cref="ListDataSourcesHandler"/>, журнал прогонів і мапінги. Раніше
+/// користувач лише з View бачив червоний 403 на <c>/admin/sources</c>, хоча сторінка
+/// для нього «лише перегляд».
+///
 /// ⚠ Ендпоінт додано після аудиту (`A7-03`): екран конфігуратора викликав
 /// <c>GET /api/v1/sources</c>, якого не існувало, і завжди показував помилку.
 /// Таблиця ендпоінтів контракту оголошувала лише запуск збору — але вимога
@@ -123,12 +128,15 @@ public sealed class ListSourceEntitiesHandler(
     /// <summary>Право на керування інтеграцією (`02-contracts.md` §9).</summary>
     public const string Permission = "Integration.Manage";
 
+    /// <summary>Право на перегляд конфігурації інтеграції (D9).</summary>
+    public const string ViewPermission = "Integration.View";
+
     /// <summary>Віддає сутності разом зі станом останнього прогону і прогалиною.</summary>
     /// <param name="ct">Скасування.</param>
     public async Task<IReadOnlyList<SourceEntityStatus>> HandleAsync(CancellationToken ct)
     {
-        await ListTemplatesHandler
-            .RequireAsync(access, currentUser, Permission, ct)
+        await PermissionCheck
+            .RequireAnyAsync(access, currentUser, [Permission, ViewPermission], ct)
             .ConfigureAwait(false);
 
         return await sources.ListSourceEntitiesAsync(ct).ConfigureAwait(false);
