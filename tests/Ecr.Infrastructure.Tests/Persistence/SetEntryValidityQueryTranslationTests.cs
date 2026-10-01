@@ -106,7 +106,7 @@ public sealed class SetEntryValidityQueryTranslationTests(SqlServerFixture sql)
         // finding 4 — 01.03.2026..01.06.2026): до фіксу тут летів
         // `InvalidOperationException` замість збереженого вікна.
         var affected = await handler.HandleAsync(
-            entry.Id, new DateOnly(2026, 3, 1), new DateOnly(2026, 6, 1), CancellationToken.None);
+            def.Code, entry.Id, new DateOnly(2026, 3, 1), new DateOnly(2026, 6, 1), CancellationToken.None);
 
         // Запис НЕ чинний у січні (період документа) — рядок з посиланням на
         // нього стає осиротілим: перерахунок справді відбувся, а не просто

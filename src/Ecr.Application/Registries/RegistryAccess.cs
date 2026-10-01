@@ -100,6 +100,23 @@ public static class RegistryAccess
             });
 
     /// <summary>
+    /// <c>404 err.ECR-REG-0404.registryEntry</c> — відповідь і на запис, якого немає, і на запис
+    /// іншого довідника, ніж у маршруті (S18): обидва для того, хто питає, у ЦЬОМУ довіднику відсутні.
+    /// </summary>
+    /// <param name="entryId">Запис з запиту.</param>
+    /// <param name="registryCode">Код довідника з маршруту.</param>
+    internal static NotFoundException EntryNotFound(long entryId, string registryCode)
+        => new(
+            "ECR-REG-0404",
+            $"Запису {entryId.ToString(CultureInfo.InvariantCulture)} у довіднику «{registryCode}» не існує.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-REG-0404.registryEntry",
+                ["entryId"] = entryId.ToString(CultureInfo.InvariantCulture),
+                ["registryCode"] = registryCode,
+            });
+
+    /// <summary>
     /// Для обробників, що вимагають ГЛОБАЛЬНЕ право (опис, історія, чернетка): довідник,
     /// на який є заборона, — <c>404</c>, як неіснуючий.
     /// </summary>

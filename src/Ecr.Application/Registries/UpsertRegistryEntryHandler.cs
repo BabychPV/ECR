@@ -63,20 +63,25 @@ public sealed class UpsertRegistryEntryHandler(
     /// <exception cref="NotFoundException">Довідника або запису немає.</exception>
     /// <exception cref="BusinessRuleException">Код зайнятий або невалідний.</exception>
     public async Task<long> HandleAsync(RegistryEntryUpsertDto dto, CancellationToken ct)
-        => (await HandleWithWarningsAsync(dto, ct).ConfigureAwait(false)).Id;
+        => (await HandleWithWarningsAsync(dto, registryCode: null, ct).ConfigureAwait(false)).Id;
 
     /// <summary>
     /// Створює або оновлює запис і повертає його ідентифікатор разом із порушеннями правил, що
     /// запису не зупинили (RT-17a, <c>warnings[]</c> відповіді, §7.1).
     /// </summary>
     /// <param name="dto">Опис запису.</param>
+    /// <param name="registryCode">
+    /// Код довідника з маршруту; <c>null</c> — без звірки (виклик не з HTTP). Не той довідник, що
+    /// <c>dto.RegistryDefId</c>, — <c>404</c>, як неіснуючий (S18).
+    /// </param>
     /// <param name="ct">Токен скасування.</param>
     /// <exception cref="NotFoundException">Довідника або запису немає.</exception>
     /// <exception cref="BusinessRuleException">
     /// Код зайнятий або невалідний; <c>422 ECR-REG-4221</c> — порушено правило рівня <c>Error</c>
     /// (власне правило запису або правило батька композиції), запис відкочено.
     /// </exception>
-    public async Task<RegistryEntryUpsertResult> HandleWithWarningsAsync(RegistryEntryUpsertDto dto, CancellationToken ct)
+    public async Task<RegistryEntryUpsertResult> HandleWithWarningsAsync(
+        RegistryEntryUpsertDto dto, string? registryCode, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(dto);
 
@@ -103,6 +108,14 @@ public sealed class UpsertRegistryEntryHandler(
                     ["registryDefId"] = dto.RegistryDefId.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 });
 
+        // ⛔ S18: код у маршруті — не декорація. Доти він ігнорувався, і запис будь-якого довідника,
+        // до якого є право, змінювався через адресу іншого.
+        if (registryCode is not null
+            && !string.Equals(definition.Code, registryCode, StringComparison.OrdinalIgnoreCase))
+        {
+            throw RegistryAccess.NotFound(registryCode);
+        }
+
         // ⛔ D-211: записи External-довідника — лише синком з AF. Гард → запис → правила.
         ExternalRegistryGuard.EnsureManualEditAllowed(definition);
 
@@ -124,7 +137,7 @@ public sealed class UpsertRegistryEntryHandler(
         EcrCode? code = auto ? null : EcrCode.Create(dto.Code);
 
         var entry = dto.Id is { } id
-            ? await LoadAsync(id, definition.Id, ct).ConfigureAwait(false)
+            ? await LoadAsync(id, definition, ct).ConfigureAwait(false)
             : await CreateAsync(
                 definition.Id,
                 code ?? await AutoCodeAsync(definition, dto.Code, ct).ConfigureAwait(false),
@@ -220,33 +233,20 @@ public sealed class UpsertRegistryEntryHandler(
         return (await writer.ReserveAutoCodesAsync(definition, 1, ct).ConfigureAwait(false)).Dequeue();
     }
 
-    private async Task<RegistryEntry> LoadAsync(long id, int registryDefId, CancellationToken ct)
+    private async Task<RegistryEntry> LoadAsync(long id, RegistryDef definition, CancellationToken ct)
     {
-        var entry = await registries.FindEntryAsync(id, ct).ConfigureAwait(false)
-            ?? throw new NotFoundException(
-                "ECR-REG-0404",
-                $"Запису довідника {id} не існує.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-REG-0404.registryEntry",
-                    ["entryId"] = id.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                });
+        var entry = await registries.FindEntryAsync(id, ct).ConfigureAwait(false);
 
         // Переносити запис між довідниками не можна: у комірках лежить його Id,
         // а колонка оголошує LookupRegistryDefId — після переносу значення
         // лишилося б валідним числом і невалідним посиланням.
-        if (entry.RegistryDefId != registryDefId)
+        //
+        // ⛔ S18: запис іншого довідника — та сама `404 registryEntry`, що й неіснуючий. Доти тут
+        // була `422 entryWrongRegistry` з `ownerRegistryDefId`: перебором Id вона розкривала, які
+        // записи є і в якому довіднику — зокрема в схованому забороною.
+        if (entry is null || entry.RegistryDefId != definition.Id)
         {
-            throw new BusinessRuleException(
-                "ECR-REG-0422",
-                $"Запис {id} належить довіднику {entry.RegistryDefId}, а не {registryDefId}.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-REG-0422.entryWrongRegistry",
-                    ["entryId"] = id.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                    ["ownerRegistryDefId"] = entry.RegistryDefId.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                    ["registryDefId"] = registryDefId.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                });
+            throw RegistryAccess.EntryNotFound(id, definition.Code);
         }
 
         return entry;

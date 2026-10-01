@@ -250,7 +250,7 @@ public sealed class RegistriesController(
         ArgumentNullException.ThrowIfNull(dto);
 
         var isNew = dto.Id is null;
-        var result = await upsert.HandleWithWarningsAsync(dto, ct).ConfigureAwait(false);
+        var result = await upsert.HandleWithWarningsAsync(dto, code, ct).ConfigureAwait(false);
         var id = result.Id;
         var body = new RegistryEntryIdResponse(id) { Warnings = result.Warnings };
 
@@ -341,7 +341,7 @@ public sealed class RegistriesController(
         ArgumentNullException.ThrowIfNull(request);
 
         var affected = await setValidity
-            .HandleAsync(id, request.From, request.To, ct)
+            .HandleAsync(code, id, request.From, request.To, ct)
             .ConfigureAwait(false);
 
         // Повертається кількість зачеплених рядків: той, хто звузив вікно, має

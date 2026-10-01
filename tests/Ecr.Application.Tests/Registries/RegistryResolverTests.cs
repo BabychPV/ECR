@@ -167,12 +167,11 @@ public sealed class RegistryResolverTests
             .Returns(RegistryEntryReferences.None with { Cells = 17 });
 
         /*
-         * ⚠ Довідник тепер читається ДО видалення: обробник звіряє код зі
-         * шляху з кодом довідника, якому запис належить (`BE-01`). Без цієї
-         * заглушки тест падав би на 404 — тобто на чужій причині, і твердження
-         * про 409 лишалося б неперевіреним.
+         * ⚠ Довідник тепер читається ДО запису — за кодом зі шляху (`BE-01`, S18), і запис
+         * має йому належати. Без цієї заглушки тест падав би на 404 — тобто на чужій причині,
+         * і твердження про 409 лишалося б неперевіреним.
          */
-        _registries.FindDefinitionByIdAsync(Permits, Arg.Any<CancellationToken>()).Returns(Definition());
+        _registries.FindDefinitionAsync("PERMITS", Arg.Any<CancellationToken>()).Returns(Definition());
 
         var handler = new DeleteRegistryEntryHandler(_registries, _uow, _audit, _access, _user, _clock);
 

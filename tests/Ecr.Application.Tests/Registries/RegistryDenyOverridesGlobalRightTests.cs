@@ -274,7 +274,7 @@ public sealed class RegistryDenyOverridesGlobalRightTests
 
         var denied = await Assert.ThrowsAsync<NotFoundException>(() => new SetEntryValidityHandler(
                 _registries, Substitute.For<IOrphanScanner>(), _uow, _audit, _access, _user, _clock)
-            .HandleAsync(DeniedEntryId, new DateOnly(2026, 1, 1), null, default));
+            .HandleAsync(DeniedCode, DeniedEntryId, new DateOnly(2026, 1, 1), null, default));
 
         Assert.Equal("ECR-REG-0404", denied.ErrorCode);
         Assert.Null(entry.ValidFrom);
