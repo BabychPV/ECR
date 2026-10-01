@@ -372,7 +372,7 @@ public sealed class ResultAuditTransactionTests(SqlServerFixture sql)
 
         return new ExportStructureChangesHandler(
             new GetStructureChangesHandler(reader, access, _user), reader, new AuditWriter(db),
-            access, _user, new TestClock(Now));
+            access, _user, new TestClock(Now), Substitute.For<IUiStringCatalog>());
     }
 
     private PublishTemplateVersionHandler Publisher(EcrDbContext db, MemoryCache memory, IUnitOfWork uow)
