@@ -15,6 +15,7 @@ import {
   Title,
 } from '@mantine/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { usePendingLoading } from '@/features/common/usePendingLoading';
 import { t } from '@/shared/i18n';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { showApiError, showDone } from '@/shared/ui/notify';
@@ -69,6 +70,9 @@ export function SmtpSettingsPanel(): JSX.Element {
     },
     onError: showApiError,
   });
+
+  const saveLoading = usePendingLoading(save.isPending);
+  const testLoading = usePendingLoading(test.isPending);
 
   const title = (
     <Title order={2} size="h5">
@@ -195,7 +199,7 @@ export function SmtpSettingsPanel(): JSX.Element {
       />
 
       <Group justify="flex-end">
-        <Button loading={save.isPending} disabled={draft === null} onClick={() => save.mutate(form)}>
+        <Button loading={saveLoading} disabled={draft === null} onClick={() => save.mutate(form)}>
           {t('smtp.save')}
         </Button>
       </Group>
@@ -209,7 +213,7 @@ export function SmtpSettingsPanel(): JSX.Element {
         />
         <Button
           variant="default"
-          loading={test.isPending}
+          loading={testLoading}
           disabled={testTo.trim().length === 0 || draft !== null}
           onClick={() => test.mutate(testTo.trim())}
         >
