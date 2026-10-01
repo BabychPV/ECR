@@ -35,7 +35,7 @@ public sealed class GetRegistryUsageHandler(
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(code);
 
-        await Security.PermissionCheck
+        var profile = await Security.PermissionCheck
             .RequireAsync(access, currentUser, Permission, ct)
             .ConfigureAwait(false);
 
@@ -51,6 +51,9 @@ public sealed class GetRegistryUsageHandler(
                     ["messageKey"] = "err.ECR-REG-0404.registry",
                     ["registryCode"] = code,
                 });
+
+        // ⛔ S18: заборона на довідник виграє і над правом на опис — 404, як неіснуючий.
+        RegistryAccess.EnsureNotDenied(profile, definition.Id, code);
 
         return await registries
             .FindDefinitionUsageAsync(definition.Id, UsageResponse.PageSize, ct)

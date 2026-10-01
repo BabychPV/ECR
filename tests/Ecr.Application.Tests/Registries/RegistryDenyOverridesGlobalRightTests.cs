@@ -394,6 +394,60 @@ public sealed class RegistryDenyOverridesGlobalRightTests
         await drafts.DidNotReceiveWithAnyArgs().FindAsync(default, default);
     }
 
+    // ---- S18, другий прогін: шляхи ЗМІНИ опису і «де використовується» теж поважають заборону ----
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait("Finding", "S18")]
+    public async Task Використання_довідника__EditDefinition_і_заборона__404_і_посилання_не_рахувались()
+    {
+        Profile(b => b.Permission("Registry.EditDefinition").Deny(ResourceKind.Registry, DeniedId));
+
+        var denied = await Assert.ThrowsAsync<NotFoundException>(
+            () => new GetRegistryUsageHandler(_registries, _access, _user).HandleAsync(DeniedCode, default));
+
+        Assert.Equal("err.ECR-REG-0404.registry", denied.Details!["messageKey"]);
+        await _registries.DidNotReceiveWithAnyArgs().FindDefinitionUsageAsync(default, default, default);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait("Finding", "S18")]
+    public async Task Зміна_опису_чернетка_публікація__EditDefinition_і_заборона__404_і_нічого_не_змінено()
+    {
+        Profile(b => b
+            .Permission("Registry.EditDefinition")
+            .Permission("Registry.Publish")
+            .Deny(ResourceKind.Registry, DeniedId));
+        var drafts = Substitute.For<IRegistryDraftStore>();
+        var keys = Substitute.For<IRegistryKeyStore>();
+        var units = Substitute.For<IUnitCatalog>();
+        var save = new SaveRegistryDefinitionHandler(
+            _registries, _uow, _audit, _access, _user, _clock, units, keys,
+            new Ecr.Application.Registries.Keys.RegistryKeyService(keys, _uow));
+
+        var direct = await Assert.ThrowsAsync<NotFoundException>(() => save.HandleAsync(
+            DeniedCode, new Ecr.Application.Registries.Dto.SaveRegistryDefinitionDto([], [], "r"), default));
+        var saveDraft = await Assert.ThrowsAsync<NotFoundException>(() => new SaveRegistryDefinitionDraftHandler(
+                _registries, drafts, _uow, _audit, _access, _user, _clock)
+            .HandleAsync(DeniedCode, new Ecr.Application.Registries.Dto.SaveRegistryDefinitionDraftRequest([], [], "r", null), default));
+        var discard = await Assert.ThrowsAsync<NotFoundException>(() => new DiscardRegistryDefinitionDraftHandler(
+                _registries, drafts, _uow, _audit, _access, _user, _clock)
+            .HandleAsync(DeniedCode, null, default));
+        var publish = await Assert.ThrowsAsync<NotFoundException>(() => new PublishRegistryDefinitionHandler(
+                _registries, drafts, save, _access, _user)
+            .HandleAsync(DeniedCode, new Ecr.Application.Registries.Dto.PublishRegistryDefinitionRequest("AA=="), default));
+
+        foreach (var ex in new[] { direct, saveDraft, discard, publish })
+        {
+            Assert.Equal("err.ECR-REG-0404.registry", ex.Details!["messageKey"]);
+        }
+
+        await drafts.DidNotReceiveWithAnyArgs().FindAsync(default, default);
+        await _uow.DidNotReceiveWithAnyArgs().ExecuteInTransactionAsync(default!, default);
+        await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage4)]
     public async Task Перелік_довідників__заборонений_не_повертається__решта_так()

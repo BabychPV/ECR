@@ -303,7 +303,7 @@ public sealed class SaveRegistryDefinitionHandler(
     {
         ArgumentNullException.ThrowIfNull(dto);
 
-        await Security.PermissionCheck
+        var profile = await Security.PermissionCheck
             .RequireAsync(access, currentUser, Permission, ct)
             .ConfigureAwait(false);
 
@@ -319,6 +319,9 @@ public sealed class SaveRegistryDefinitionHandler(
 
         var definition = await registries.FindDefinitionAsync(code, ct).ConfigureAwait(false)
             ?? throw RegistryNotFound(code);
+
+        // ⛔ S18: заборона на довідник виграє і над правом на опис — 404, як неіснуючий.
+        RegistryAccess.EnsureNotDenied(profile, definition.Id, code);
 
         return await ApplyAsync(definition, dto, "SaveDefinition", userId, ct).ConfigureAwait(false);
     }
