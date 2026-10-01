@@ -139,7 +139,7 @@ public sealed class ListSourceEventsHandler(
         {
             if (integrationReader)
             {
-                throw NotFound("err.ECR-INT-0404.sourceEntity", $"Сутності джерела {filter.SourceEntityId} немає або вона вимкнена.");
+                throw NotFound("err.ECR-INT-0404.sourceEntity", $"Сутності джерела {filter.SourceEntityId} немає або вона вимкнена.", "id", filter.SourceEntityId);
             }
 
             return Empty();
@@ -169,7 +169,7 @@ public sealed class ListSourceEventsHandler(
         // Прямий запит за мапінгом, якого немає чи якого не видно, — 404 (однаково в обох випадках).
         if (filter.MapId is not null && visible.Count == 0)
         {
-            throw NotFound("err.ECR-INT-0404.eventMap", $"Мапінгу подій {filter.MapId} немає.");
+            throw NotFound("err.ECR-INT-0404.eventMap", $"Мапінгу подій {filter.MapId} немає.", "eventMapId", filter.MapId.Value);
         }
 
         if (visible.Count == 0)
@@ -197,11 +197,16 @@ public sealed class ListSourceEventsHandler(
         static PagedResult<SourceEventRowDto> Empty() => new([], null, 0);
     }
 
-    private static NotFoundException NotFound(string messageKey, string message)
+    // `param` — плейсхолдер шаблону ключа ({id}, {eventMapId}): без нього клієнт показав би фігурні дужки.
+    private static NotFoundException NotFound(string messageKey, string message, string param, int id)
         => new(
             ErrorCodes.SourceEntityNotFound,
             message,
-            new Dictionary<string, object?> { ["messageKey"] = messageKey });
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = messageKey,
+                [param] = id.ToString(CultureInfo.InvariantCulture),
+            });
 
     private static SourceEventRowDto ToDto(SourceEventLinkRow row)
     {
