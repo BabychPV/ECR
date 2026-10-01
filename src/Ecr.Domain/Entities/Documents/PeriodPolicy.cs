@@ -67,6 +67,11 @@ public sealed class PeriodPolicy : Entity<int>
     private void ApplyOffsets(
         int openOffsetDays, int graceOffsetDays, int hardCloseOffsetDays, int yearGraceOffsetDays)
     {
+        RequireInRange(nameof(openOffsetDays), openOffsetDays);
+        RequireInRange(nameof(graceOffsetDays), graceOffsetDays);
+        RequireInRange(nameof(hardCloseOffsetDays), hardCloseOffsetDays);
+        RequireInRange(nameof(yearGraceOffsetDays), yearGraceOffsetDays);
+
         if (graceOffsetDays > hardCloseOffsetDays)
         {
             throw new DomainException(
@@ -98,5 +103,32 @@ public sealed class PeriodPolicy : Entity<int>
         GraceOffsetDays = graceOffsetDays;
         HardCloseOffsetDays = hardCloseOffsetDays;
         YearGraceOffsetDays = yearGraceOffsetDays;
+    }
+
+    /// <summary>Межа зсуву в днях в обидва боки: десять років.</summary>
+    /// <remarks>
+    /// ⛔ Без межі <c>int.MaxValue</c> днів доходив до <c>DateTime.AddDays</c> у перерахунку меж
+    /// наявних періодів (<c>Period.RecomputeBoundaries</c>) і падав
+    /// <c>ArgumentOutOfRangeException</c> — 500 на <c>PUT /projects/period-policies/{id}</c>.
+    /// Десять років — свідомо із запасом: реальні строки — дні й тижні (ФВ-1.6, ФВ-1.8), а межа
+    /// лише відсікає числа, з якими календар не може порахувати дату.
+    /// </remarks>
+    public const int MaxOffsetDays = 3660;
+
+    private static void RequireInRange(string field, int days)
+    {
+        if (days is < -MaxOffsetDays or > MaxOffsetDays)
+        {
+            throw new DomainException(
+                ErrorCodes.PeriodPolicyOrderInvalid,
+                $"Зсув {field} ({days} дн.) поза межами ±{MaxOffsetDays} дн.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-PRD-4225.offsetOutOfRange",
+                    ["field"] = field,
+                    ["value"] = days.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["max"] = MaxOffsetDays.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
+        }
     }
 }

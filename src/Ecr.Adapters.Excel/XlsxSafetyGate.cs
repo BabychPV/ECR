@@ -148,6 +148,14 @@ public static class XlsxSafetyGate
             // Немає центрального каталогу, зіпсований заголовок, не zip узагалі.
             return XlsxVerdict.Corrupt;
         }
+        catch (ArgumentOutOfRangeException)
+        {
+            // ⛔ Файл, коротший за кінцевий запис каталогу (22 байти): `ZipArchive`
+            // шукає його зсувом від кінця, і потік завантаження ASP.NET
+            // (`IFormFile.OpenReadStream`) на від'ємну позицію кидає ЦЕ, а не
+            // `IOException`, як `MemoryStream`. Порожній чи текстовий файл давав 500.
+            return XlsxVerdict.Corrupt;
+        }
         finally
         {
             file.Position = start;

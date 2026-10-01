@@ -199,6 +199,18 @@ internal static class RowWindowMapSupport
         return found;
     }
 
+    /// <summary>
+    /// Колонки запиту для <see cref="RequireColumnsAsync"/>: обов'язкові — завжди, селектор — коли заданий.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Відкидати нуль можна лише в необов'язкового селектора. Раніше `!= 0` стояло на всіх
+    /// чотирьох, тож тіло без колонок (`{}`) проходило перевірку існування, і наступне
+    /// `columns[command.TargetColumnDefId]` падало `KeyNotFoundException` — тобто 500 замість
+    /// тієї самої відмови «колонки немає», що й на неіснуючий номер.
+    /// </remarks>
+    public static IEnumerable<int> RequestedColumnIds(int target, int start, int end, int? selector)
+        => selector is { } id ? [target, start, end, id] : [target, start, end];
+
     /// <summary>Форма запиту: відома згортка, непорожні й не задовгі рядки джерел.</summary>
     public static void RequireShape(RowWindowSummaryKind summary, IReadOnlyList<RowWindowSourceInput> inputs)
     {
@@ -358,8 +370,8 @@ public sealed class CreateRowWindowMapHandler(
         var columns = await RowWindowMapSupport
             .RequireColumnsAsync(
                 store,
-                new[] { command.TargetColumnDefId, command.StartColumnDefId, command.EndColumnDefId, command.SelectorColumnDefId ?? 0 }
-                    .Where(id => id != 0),
+                RowWindowMapSupport.RequestedColumnIds(
+                    command.TargetColumnDefId, command.StartColumnDefId, command.EndColumnDefId, command.SelectorColumnDefId),
                 ct)
             .ConfigureAwait(false);
 
@@ -477,8 +489,8 @@ public sealed class UpdateRowWindowMapHandler(
         var columns = await RowWindowMapSupport
             .RequireColumnsAsync(
                 store,
-                new[] { map.TargetColumnDefId, command.StartColumnDefId, command.EndColumnDefId, command.SelectorColumnDefId ?? 0 }
-                    .Where(columnId => columnId != 0),
+                RowWindowMapSupport.RequestedColumnIds(
+                    map.TargetColumnDefId, command.StartColumnDefId, command.EndColumnDefId, command.SelectorColumnDefId),
                 ct)
             .ConfigureAwait(false);
         await RowWindowMapSupport.RequireReferencesAsync(sources, command.TargetUnitId, inputs, ct).ConfigureAwait(false);

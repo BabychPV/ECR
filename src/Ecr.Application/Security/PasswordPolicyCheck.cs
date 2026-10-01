@@ -33,6 +33,11 @@ public static class PasswordPolicyCheck
     public const int MinUserNameLengthToMatch = 3;
 
     /// <summary>
+    /// Найдовший пароль, який приймає хешер (<c>PasswordHasher.MaxPasswordLength</c>, Infrastructure).
+    /// </summary>
+    public const int MaxLength = 256;
+
+    /// <summary>
     /// Часто вживані паролі — невеликий вбудований блок-лист (S15).
     /// </summary>
     /// <remarks>
@@ -95,6 +100,21 @@ public static class PasswordPolicyCheck
                 {
                     ["messageKey"] = "err.ECR-PWD-0422.tooShort",
                     ["minLength"] = minLength,
+                });
+        }
+
+        // ⛔ Стеля хешера (`PasswordHasher`, захист PBKDF2 від багатомегабайтного «пароля»):
+        // без цієї перевірки задовгий пароль доходив до `Hash` і падав `ArgumentException` —
+        // 500 на створенні користувача, скиданні й зміні пароля.
+        if (password.Length > MaxLength)
+        {
+            throw new BusinessRuleException(
+                "ECR-PWD-0422",
+                $"{subject} довший за {MaxLength} символів.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-PWD-0422.tooLong",
+                    ["maxLength"] = MaxLength.ToString(CultureInfo.InvariantCulture),
                 });
         }
 

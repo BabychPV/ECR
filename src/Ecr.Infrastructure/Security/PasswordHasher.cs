@@ -29,7 +29,7 @@ public sealed class PasswordHasher : IPasswordHasher
     /// відмову в обслуговуванні. Межа стоїть тут, а не лише в політиці, бо
     /// політику можна не застосувати, а цей метод обійти не можна.
     /// </remarks>
-    private const int MaxPasswordLength = 256;
+    private const int MaxPasswordLength = Ecr.Application.Security.PasswordPolicyCheck.MaxLength;
 
     private static readonly HashAlgorithmName Algorithm = HashAlgorithmName.SHA512;
 

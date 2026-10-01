@@ -672,9 +672,11 @@ public sealed class ExcelImporter(
     /// </remarks>
     private async Task<ImportPlan> LoadPlanAsync(string previewToken, long? documentId, CancellationToken ct)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(previewToken);
-
-        var stored = await previews.FindAsync(previewToken, ct).ConfigureAwait(false)
+        // ⛔ Порожній токен — той самий «перегляду немає», а не `ArgumentException`:
+        // він приходить із тіла запиту (`{"previewToken": ""}`) і давав 500.
+        var stored = (string.IsNullOrWhiteSpace(previewToken)
+                         ? null
+                         : await previews.FindAsync(previewToken, ct).ConfigureAwait(false))
                      ?? throw new BusinessRuleException(
                          "ECR-IMP-0422",
                          "Перегляд імпорту не знайдено або його строк вийшов: побудуйте його заново.",
