@@ -49,6 +49,9 @@ public sealed class UpdateSourceEventMapHandler(
             SourceEventMapSupport.RequireProjectManage(profile, document.ProjectId);
         }
 
+        SourceEventMapSupport.RequireShape(
+            command.VolumeMode, command.FilterAttribute, command.FilterScope, command.FilterValue, command.Fields);
+
         var old = IntegrationConfigAudit.Snapshot(SourceEventMapSupport.ToDto(map));
         var built = await SourceEventMapSupport.BuildSpecsAsync(store, sources, command.Fields, ct).ConfigureAwait(false);
 

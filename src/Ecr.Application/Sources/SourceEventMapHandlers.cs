@@ -198,6 +198,46 @@ internal static class SourceEventMapSupport
     }
 
     /// <summary>
+    /// Форма запиту до домену: відомі значення переліків, непорожні й не задовгі рядки. Порушення — <c>422
+    /// ECR-REQ-0422 .malformedRequest</c>, нічого не прочитано й не записано.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Домен (<see cref="SourceEventMap.AddField"/>, <see cref="SourceEventMap.SetFilter"/>,
+    /// <see cref="SourceEventFieldMap.AddValue"/>) відкидає те саме через <see cref="ArgumentException"/> — це захист
+    /// інваріанта, а не відповідь людині: без цієї перевірки порожній атрибут, <c>volumeMode = 99</c> чи задовге
+    /// значення звуження давали <c>500 ECR-SYS-0500</c> (TESTER-SCENARIOS Н-А4, прямий виклик API).
+    /// </remarks>
+    public static void RequireShape(
+        SourceEventVolumeMode volumeMode,
+        string? filterAttribute,
+        SourceEventAttributeScope? filterScope,
+        string? filterValue,
+        IReadOnlyList<SourceEventFieldInput>? fields)
+    {
+        var valid = Enum.IsDefined(volumeMode)
+                    && (filterScope is null || Enum.IsDefined(filterScope.Value))
+                    && (filterAttribute?.Trim().Length ?? 0) <= SourceEventMap.MaxAttributeLength
+                    && (filterValue?.Trim().Length ?? 0) <= SourceEventMap.MaxValueLength
+                    && fields is not null
+                    && fields.All(f => f is not null
+                                       && !string.IsNullOrWhiteSpace(f.SourceAttribute)
+                                       && f.SourceAttribute.Trim().Length <= SourceEventMap.MaxAttributeLength
+                                       && Enum.IsDefined(f.AttributeScope)
+                                       && Enum.IsDefined(f.ValueKind)
+                                       && (f.Values ?? []).All(v => v is not null
+                                                                    && !string.IsNullOrWhiteSpace(v.SourceValue)
+                                                                    && v.SourceValue.Trim().Length <= SourceEventMap.MaxValueLength));
+        if (!valid)
+        {
+            throw new BusinessRuleException(
+                ErrorCodes.RequestInvalid,
+                $"Мапінг подій: відомі режим об'єму й області атрибутів, атрибути 1–{SourceEventMap.MaxAttributeLength} "
+                + $"символів, значення звуження й відповідностей 1–{SourceEventMap.MaxValueLength} символів.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-REQ-0422.malformedRequest" });
+        }
+    }
+
+    /// <summary>
     /// Перевіряє поля й будує їхній домен: колонки існують, одиниці є в довіднику, а записи відповідностей
     /// належать довіднику своєї Lookup-колонки.
     /// </summary>
@@ -375,6 +415,9 @@ public sealed class CreateSourceEventMapHandler(
         var profile = await PermissionCheck
             .RequireAsync(access, currentUser, SaveDataSourceHandler.Permission, ct)
             .ConfigureAwait(false);
+
+        SourceEventMapSupport.RequireShape(
+            command.VolumeMode, command.FilterAttribute, command.FilterScope, command.FilterValue, command.Fields);
 
         _ = await sources.FindSourceEntityAsync(command.SourceEntityId, ct).ConfigureAwait(false)
             ?? throw new NotFoundException(
