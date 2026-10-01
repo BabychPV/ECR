@@ -32,6 +32,7 @@ import {
   type NotificationChannel,
   type NotificationChannelSettings,
 } from './api';
+import { ChannelRolesField } from './ChannelRolesField';
 import { TransportSource } from './TransportSource';
 import { usePendingLoading } from '@/features/common/usePendingLoading';
 
@@ -371,6 +372,11 @@ export function ChannelsPanel(): JSX.Element {
                   value={draft.recipients}
                   onChange={(event) => setDraft({ ...draft, recipients: event.currentTarget.value })}
                 />
+
+                <ChannelRolesField
+                  value={draft.recipientRoleIds}
+                  onChange={(ids) => setDraft({ ...draft, recipientRoleIds: ids })}
+                />
               </>
             )}
 
@@ -497,6 +503,7 @@ interface ChannelDraft {
   readonly kind: 'Smtp' | 'TeamsWebhook';
   readonly isEnabled: boolean;
   readonly recipients: string;
+  readonly recipientRoleIds: readonly number[];
   readonly title: string;
   readonly transportFromConfiguration: boolean | null;
   readonly transportConfigured: boolean | null;
@@ -509,6 +516,7 @@ function emptyDraft(): ChannelDraft {
     kind: 'Smtp',
     isEnabled: true,
     recipients: '',
+    recipientRoleIds: [],
     title: '',
     transportFromConfiguration: null,
     transportConfigured: null,
@@ -522,6 +530,7 @@ function draftOf(channel: NotificationChannel): ChannelDraft {
     kind: channel.kind,
     isEnabled: channel.isEnabled,
     recipients: (channel.settings.recipients ?? []).join(', '),
+    recipientRoleIds: channel.settings.recipientRoleIds ?? [],
     title: channel.settings.title ?? '',
     transportFromConfiguration: channel.transportFromConfiguration,
     transportConfigured: channel.transportConfigured,
@@ -545,6 +554,8 @@ function settingsOf(draft: ChannelDraft): NotificationChannelSettings {
         .split(',')
         .map((one) => one.trim())
         .filter((one) => one.length > 0),
+      // ⚠ Ролі їдуть ЗАВЖДИ: PUT замінює їх цілком, тож без цього поля кожне збереження каналу стирало б їх.
+      recipientRoleIds: [...draft.recipientRoleIds],
       title: blankToNull(draft.title),
     };
   }

@@ -138,3 +138,27 @@ export function listNotificationDeliveries(
       (filter.status === undefined ? '' : `&status=${encodeURIComponent(filter.status)}`),
   );
 }
+
+/**
+ * Налаштування SMTP, задані адміністратором (`D-256`). ⛔ Пароля тут немає й не буде — лише `hasPassword`.
+ * `source` каже, звідки транспорт береться зараз: `database`, `configuration` (процес, `Smtp:*`) або `none`.
+ */
+export type SmtpSettings = components['schemas']['SmtpSettingsView'];
+/** Те, що приймає `PUT`. Порожній `password` — не змінювати збережений. */
+export type SmtpSettingsInput = components['schemas']['SmtpSettingsInput'];
+
+/** Ключ кешу React Query для налаштувань SMTP. */
+export const SmtpSettingsKey = ['notifications', 'smtp'] as const;
+
+export function getSmtpSettings(): Promise<SmtpSettings> {
+  return apiFetch<SmtpSettings>('/api/v1/notifications/smtp');
+}
+
+export function saveSmtpSettings(body: SmtpSettingsInput): Promise<SmtpSettings> {
+  return apiFetch<SmtpSettings>('/api/v1/notifications/smtp', { method: 'PUT', ...json(body) });
+}
+
+/** Пробний лист на `to` через ефективні налаштування; `ok: false` — відповідь, а не помилка запиту. */
+export function testSmtpSettings(to: string): Promise<NotificationTestResult> {
+  return apiFetch<NotificationTestResult>('/api/v1/notifications/smtp/test', { method: 'POST', ...json({ to }) });
+}

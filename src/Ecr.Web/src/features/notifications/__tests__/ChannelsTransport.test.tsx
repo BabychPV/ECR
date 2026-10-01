@@ -218,7 +218,8 @@ describe('ChannelsPanel: транспорт пошти — з налаштува
 
     // ⛔ Точний перелік ключів, а не «немає host»: будь-яке з чотирьох полів
     // транспорту дає `422 …notificationChannelTransportFromConfiguration`.
-    expect(Object.keys(body.settings ?? {}).sort()).toEqual(['recipients', 'title']);
-    expect(body.settings).toEqual({ recipients: ['ops@example.org'], title: 'ECR' });
+    expect(Object.keys(body.settings ?? {}).sort()).toEqual(['recipientRoleIds', 'recipients', 'title']);
+    // ⚠ Ролі-адресати (D-256) їдуть завжди: PUT замінює їх цілком, і без поля правка стирала б їх.
+    expect(body.settings).toEqual({ recipients: ['ops@example.org'], recipientRoleIds: [], title: 'ECR' });
   }, 30_000);
 });
