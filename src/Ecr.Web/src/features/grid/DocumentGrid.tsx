@@ -90,6 +90,7 @@ import {
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { showApiError } from '@/shared/ui/notify';
+import { refusalText } from './saveErrors';
 import { useRowHeight } from '@/shared/theme/preferences';
 import { t } from '@/shared/i18n';
 // ⚠ Порядок стилів збережений: `cell-states.css` (раніше — у `App.tsx`) іде
@@ -560,15 +561,18 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
           // (`requiredInputBlocked`) — другий банер із тим самим по суті
           // повідомленням розсіював би увагу, а не додавав інформацію.
           setSaveError(null);
-        } else if (error instanceof EcrApiError) {
+        } else {
           // ⛔ Q-30x (High): ось сам фікс — реальний, локалізований текст
           // сервера («Колонка «C1» очікує число.» і подібні) показується як
           // є, а не губиться в необробленому знеструмленні проміса. Саме
           // цей рядок і мала на увазі заглушка «NOT SAVED — SEE THE ERROR
           // ABOVE», яка досі не мала на що вказувати.
-          setSaveError(error.message);
-        } else {
-          setSaveError(String(error));
+          //
+          // ✎ `ФВ-14.9a`: `refusalText`, а не `error.message` — подробиця без
+          // `messageKey` написана українською, якої в продукті немає; замість
+          // неї — назва проблеми з каталогу. Те саме для не нашої відмови
+          // (мережа, `TypeError`): доти тут стояв `String(error)`.
+          setSaveError(refusalText(error));
         }
 
         // ⚠ Рестрибок НЕ повторюється: жоден викликач (`onPaste`, кнопка

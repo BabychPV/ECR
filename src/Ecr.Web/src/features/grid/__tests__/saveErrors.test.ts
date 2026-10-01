@@ -52,7 +52,12 @@ describe('cellsOfSaveError', () => {
     const error = new EcrApiError(
       problem({
         detail: 'Колонка «C1» очікує число.',
-        extensions2: { columnCode: 'C1', expected: 'число', actualKind: 'String' },
+        extensions2: {
+          columnCode: 'C1',
+          expected: 'число',
+          actualKind: 'String',
+          messageKey: 'err.ECR-CELL-0422.expectedNumber',
+        },
       }),
     );
 
@@ -64,6 +69,16 @@ describe('cellsOfSaveError', () => {
     expect(cellsOfSaveError(error, attempted)).toEqual([
       { rowKey: 'R1', columnCode: 'C1', ruleCode: 'ECR-CELL-0422', message: 'Колонка «C1» очікує число.' },
     ]);
+  });
+
+  it('ФВ-14.9a: подробиця БЕЗ messageKey на комірку не йде — замість неї назва відмови', () => {
+    // ⛔ Мутація «повернути `message: error.message`» дає тут сире українське
+    // речення розробника — мову, якої в продукті немає (`D-95`).
+    const error = new EcrApiError(
+      problem({ title: 'Validation failed', detail: 'Колонка «C1» очікує число.', extensions2: { columnCode: 'C1' } }),
+    );
+
+    expect(cellsOfSaveError(error, [edit('R1', 'C1')]).map((c) => c.message)).toEqual(['Validation failed']);
   });
 
   it('форма 2 з кількома рядками тієї самої колонки в одному патчі — позначаються всі', () => {

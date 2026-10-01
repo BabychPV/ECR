@@ -13,6 +13,7 @@ import { DataTable, type DataTableColumn } from '@/shared/ui/DataTable';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { showApiError, showDone } from '@/shared/ui/notify';
 import { t } from '@/shared/i18n';
+import { problemText } from '@/shared/ui/problemText';
 
 /**
  * Довідник одиниць і конвертор (`ФВ-16.1`, `ФВ-16.2`, `ФВ-16.5`).
@@ -396,7 +397,7 @@ export function UnitsPage(): JSX.Element {
         <Stack gap="sm">
           {usage.error !== null && remove.error === null && (
             <Text size="sm" c="statusError">
-              {usage.error.message}
+              {problemText(usage.error).detail ?? problemText(usage.error).title}
             </Text>
           )}
 
@@ -427,10 +428,11 @@ export function UnitsPage(): JSX.Element {
               </>
             ))}
 
-          {/* Відмова іншого роду (403, 404, мережа) — текстом сервера. */}
+          {/* Відмова іншого роду (403, 404, мережа) — текстом сервера, якщо він
+              локалізований, інакше назвою з каталогу (`ФВ-14.9a`). */}
           {remove.error !== null && unitReferences(remove.error) === null && (
             <Text size="sm" c="statusError">
-              {remove.error.message}
+              {problemText(remove.error).detail ?? problemText(remove.error).title}
             </Text>
           )}
         </Stack>

@@ -1,5 +1,20 @@
 import { EcrApiError, type RequiredInputCell } from '@/api/client';
 import type { PendingEdit } from './useCellPatch';
+import { problemText } from '@/shared/ui/problemText';
+
+/**
+ * Що з відмови збереження можна показати людині (`ФВ-14.9a`).
+ *
+ * ⛔ Не `error.message`: це `detail ?? title` БЕЗ розбору мови, тобто для
+ * відмови без `messageKey` — речення розробника українською, якої в продукті
+ * немає (`D-95`). Подробиця береться лише локалізована сервером, інакше —
+ * назва проблеми з каталогу (`problemText`).
+ */
+export function refusalText(error: unknown): string {
+  const shown = problemText(error);
+
+  return shown.detail ?? shown.title;
+}
 
 /**
  * Комірки, яких стосується конкретна відмова збереження (Q-30x, High).
@@ -9,7 +24,7 @@ import type { PendingEdit } from './useCellPatch';
  * не показувалась: тулбар малював лише заглушку «NOT SAVED — SEE THE ERROR
  * ABOVE», а сам текст губився в необробленому знеструмленні проміса
  * (`Uncaught (in promise)`), яке бачить лише консоль розробника, а не
- * оператор. `DocumentGrid.save` показує `error.message` в `Alert` — ця
+ * оператор. `DocumentGrid.save` показує `refusalText(error)` в `Alert` — ця
  * функція вирішує ДРУГУ частину: яку саме комірку підсвітити маркером,
  * аналогічним `.ecr-cell-required-input-blocked` (Q-306).
  *
@@ -51,7 +66,7 @@ export function cellsOfSaveError(
       rowKey: edit.rowKey,
       columnCode,
       ruleCode: error.problem.errorCode,
-      message: error.message,
+      message: refusalText(error),
     }));
 }
 
@@ -99,7 +114,7 @@ export function rejectionMarksOf(
 
     return (hit.length > 0 ? hit : attempted).map((edit) => ({
       edit,
-      message: error.message,
+      message: refusalText(error),
       scope: 'cell' as const,
     }));
   }
@@ -110,7 +125,7 @@ export function rejectionMarksOf(
 
     return (inRows.length > 0 ? inRows : attempted).map((edit) => ({
       edit,
-      message: error.message,
+      message: refusalText(error),
       scope: 'row' as const,
     }));
   }
@@ -122,7 +137,7 @@ export function rejectionMarksOf(
 
   return (hit.length > 0 ? hit : attempted).map((edit) => ({
     edit,
-    message: named.get(`${edit.rowKey}:${edit.columnCode}`) ?? error.message,
+    message: named.get(`${edit.rowKey}:${edit.columnCode}`) ?? refusalText(error),
     scope: 'cell' as const,
   }));
 }
