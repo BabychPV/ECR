@@ -5832,8 +5832,12 @@ USING (VALUES
     (N'err.ECR-REQ-0422.impactReasonRequired', N'en', N'Recalculating affected documents requires a reason.', 1),
     (N'err.ECR-REQ-0422.impactReasonTooLong', N'en', N'The reason is longer than {max} characters.', 1),
     (N'err.ECR-REG-0422.impactDocumentNotAffected', N'en', N'Document {documentId} is not among the open-period documents affected by this registry.', 1),
-    (N'err.ECR-REG-0422.impactNothingToRecalculate', N'en', N'There are no affected open-period documents that can be recalculated.', 1)
+    (N'err.ECR-REG-0422.impactNothingToRecalculate', N'en', N'There are no affected open-period documents that can be recalculated.', 1),
     -- COLL:rt25 ── кінець секції ──
+    -- SEC:p2-oracle ── відмова без номера невидимого проєкту (S18, `ColumnProjectGrants`) ──
+    (N'err.ECR-AUTH-0403.columnUsedInHiddenProjects', N'en', N'The column is used by projects you have no Manage grant on.', 1)
+    -- ru/kz — окремою порцією `I18N` (SEC:p2-oracle).
+    -- SEC:p2-oracle ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -13813,6 +13817,16 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- RECALC:periods-status ── кінець секції ──
+-- SEC:p2-oracle ── ru/kz відмови без номера невидимого проєкту (S18); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-AUTH-0403.columnUsedInHiddenProjects', N'ru', N'Колонку используют проекты, к которым у вас нет доступа уровня Manage.'),
+    (N'err.ECR-AUTH-0403.columnUsedInHiddenProjects', N'kz', N'Бағанды сізде Manage деңгейіндегі қолжетімділік жоқ жобалар пайдаланады.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- SEC:p2-oracle ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

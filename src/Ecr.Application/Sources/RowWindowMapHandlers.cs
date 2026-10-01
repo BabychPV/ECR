@@ -177,31 +177,6 @@ internal static class RowWindowMapSupport
                    ["rowWindowMapId"] = id.ToString(CultureInfo.InvariantCulture),
                });
 
-    /// <summary>
-    /// Прив'язка пише в колонку документів КОЖНОГО проєкту, що її використовує: на кожен потрібен грант
-    /// <c>Manage</c> (S3) — так само, як для мапінгу поля на колонку.
-    /// </summary>
-    public static async Task RequireProjectGrantsAsync(
-        ICollectionStore sources, AccessProfile profile, int targetColumnDefId, CancellationToken ct)
-    {
-        var projects = await sources.FindProjectIdsUsingColumnAsync(targetColumnDefId, ct).ConfigureAwait(false);
-
-        foreach (var projectId in projects.Order())
-        {
-            if (profile.LevelFor(ResourceKind.Project, projectId) < GrantLevel.Manage)
-            {
-                throw new AccessDeniedException(
-                    "ECR-AUTH-0403",
-                    $"Немає гранта Manage на проєкт {projectId}, у який писала б прив'язка.",
-                    new Dictionary<string, object?>
-                    {
-                        ["messageKey"] = "err.ECR-AUTH-0403.noProjectManageGrant",
-                        ["projectId"] = projectId.ToString(CultureInfo.InvariantCulture),
-                    });
-            }
-        }
-    }
-
     /// <summary>Колонки за ідентифікаторами; відсутня чи видалена — 404 <c>ECR-INT-0405</c>.</summary>
     public static async Task<IReadOnlyDictionary<int, ColumnDef>> RequireColumnsAsync(
         IRowWindowMapStore store, IEnumerable<int> ids, CancellationToken ct)
@@ -402,7 +377,7 @@ public sealed class CreateRowWindowMapHandler(
                 });
         }
 
-        await RowWindowMapSupport.RequireProjectGrantsAsync(sources, profile, target.Id, ct).ConfigureAwait(false);
+        await ColumnProjectGrants.RequireManageAsync(sources, profile, target.Id, ct).ConfigureAwait(false);
         await RowWindowMapSupport.RequireReferencesAsync(sources, command.TargetUnitId, inputs, ct).ConfigureAwait(false);
 
         if (await store.TargetTakenAsync(target.TableDefId, target.Id, ct).ConfigureAwait(false))
@@ -481,7 +456,7 @@ public sealed class UpdateRowWindowMapHandler(
             .ConfigureAwait(false);
 
         var map = await RowWindowMapSupport.RequireMapAsync(store, id, ct).ConfigureAwait(false);
-        await RowWindowMapSupport.RequireProjectGrantsAsync(sources, profile, map.TargetColumnDefId, ct).ConfigureAwait(false);
+        await ColumnProjectGrants.RequireManageAsync(sources, profile, map.TargetColumnDefId, ct).ConfigureAwait(false);
 
         if (command.RowVersion is { } expected
             && !string.Equals(expected, Convert.ToHexString(map.RowVersion), StringComparison.OrdinalIgnoreCase))
@@ -575,7 +550,7 @@ public sealed class DeleteRowWindowMapHandler(
             .ConfigureAwait(false);
 
         var map = await RowWindowMapSupport.RequireMapAsync(store, id, ct).ConfigureAwait(false);
-        await RowWindowMapSupport.RequireProjectGrantsAsync(sources, profile, map.TargetColumnDefId, ct).ConfigureAwait(false);
+        await ColumnProjectGrants.RequireManageAsync(sources, profile, map.TargetColumnDefId, ct).ConfigureAwait(false);
 
         var values = await store.CountValuesAsync(id, ct).ConfigureAwait(false);
         if (values > 0)

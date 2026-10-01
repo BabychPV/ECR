@@ -151,7 +151,7 @@ public sealed class CreateEntityFieldMapHandler(
                         });
                 }
 
-                await RequireProjectGrantsAsync(profile, columnDefId, ct).ConfigureAwait(false);
+                await ColumnProjectGrants.RequireManageAsync(sources, profile, columnDefId, ct).ConfigureAwait(false);
 
                 return EntityFieldMap.ToColumn(sourceEntityId, command.SourceField, columnDefId);
 
@@ -231,44 +231,6 @@ public sealed class CreateEntityFieldMapHandler(
                         ["messageKey"] = "err.ECR-REQ-0422.entityFieldMapTargetKindUnknown",
                         ["targetKind"] = command.TargetKind.ToString(),
                     });
-        }
-    }
-
-    /// <summary>
-    /// Мапінг на колонку — це запис у документи КОЖНОГО проєкту, що
-    /// використовує колонку: на кожен потрібен грант <c>Manage</c> (S3).
-    /// </summary>
-    /// <remarks>
-    /// ⛔ Збір пише від імені integration writer, який має <c>Write</c> усюди,
-    /// де немає явного <c>IsDeny</c>. Без цієї перевірки <c>Integration.Manage</c>
-    /// означало «пиши довільні значення у відкриті періоди будь-якого проєкту»:
-    /// підмінене джерело плюс мапінг. Грант — на конкретний проєкт, як в
-    /// активації проєкту (Q-179): глобальне право каже «керує інтеграцією»,
-    /// грант — «саме цими проєктами».
-    ///
-    /// ⚠ Рішення: колонку, якої не використовує жоден проєкт, мапити МОЖНА —
-    /// мапінг нікого не зачіпає. Вимога глобального права тут закрила б
-    /// налаштування нової версії шаблону до появи першого проєкту.
-    ///
-    /// ⚠ Відмова називає ПЕРШИЙ проєкт без гранта (найменший id), а не
-    /// перелік: перелік чужих проєктів розкривав би, де ще живе шаблон.
-    /// </remarks>
-    private async Task RequireProjectGrantsAsync(AccessProfile profile, int columnDefId, CancellationToken ct)
-    {
-        var projects = await sources.FindProjectIdsUsingColumnAsync(columnDefId, ct).ConfigureAwait(false);
-
-        foreach (var projectId in projects.Order())
-        {
-            if (profile.LevelFor(Domain.Enums.ResourceKind.Project, projectId) < Domain.Enums.GrantLevel.Manage)
-            {
-                throw new AccessDeniedException(
-                    "ECR-AUTH-0403", $"Немає гранта Manage на проєкт {projectId}, у який писав би мапінг.",
-                    new Dictionary<string, object?>
-                    {
-                        ["messageKey"] = "err.ECR-AUTH-0403.noProjectManageGrant",
-                        ["projectId"] = projectId.ToString(CultureInfo.InvariantCulture),
-                    });
-            }
         }
     }
 
