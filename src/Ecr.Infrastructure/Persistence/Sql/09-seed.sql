@@ -5995,6 +5995,10 @@ USING (VALUES
     (N'err.ECR-CALC-0422.strictBackdated',         N'en', N'Strict mode is switched on only by an explicit decision from a new effective date, never retroactively: {effectiveFrom} is not later than today ({today}). Choose a future date.', 1),
     -- ru/kz — окремою порцією `COLL:an13-strict` у блоці I18N нижче.
     -- COLL:an13-strict ── кінець секції ──
+    -- COLL:nosource-hints ── порожній стан списку з'єднань: що робити й де в документації (UI, DataSourcesTable) ──
+    (N'sources.notConfiguredHint', N'en', N'To connect PI, an administrator adds a connection here: the PI Web API address, the secret and the authentication. Until then data is entered by hand. See docs/admin/admin-guide.md, section 5, and docs/admin/operations-runbook.md, section 15.', 1),
+    -- ru/kz — окремою порцією `I18N` (COLL:nosource-hints).
+    -- COLL:nosource-hints ── кінець секції ──
     -- JOBL ── людські назви видів фонових задач, яких бракувало в jobLabel.ts (KindKeys) ──
     (N'jobs.kind.sourceEventSync',  N'en', N'Source event sync', 1),
     (N'jobs.kind.consistencyCheck', N'en', N'Consistency check', 1),
@@ -6197,11 +6201,7 @@ USING (VALUES
     (N'err.ECR-CALC-0422.testToleranceNegative', N'en', N'The tolerance of test "{code}" cannot be negative: such a test would never pass.', 1),
     (N'err.ECR-PRD-4225.offsetOutOfRange', N'en', N'Offset {field} ({value} days) must be between -{max} and {max} days.', 1),
     (N'err.ECR-PRD-0422.pinReasonTooLong', N'en', N'The reason for pinning the current period is longer than {max} characters.', 1),
-    (N'err.ECR-PWD-0422.tooLong', N'en', N'The password is longer than {maxLength} characters.', 1),
-    -- COLL:nosource-hints ── порожній стан списку з'єднань: що робити й де в документації (UI, DataSourcesTable) ──
-    (N'sources.notConfiguredHint', N'en', N'To connect PI, an administrator adds a connection here: the PI Web API address, the secret and the authentication. Until then data is entered by hand. See docs/admin/admin-guide.md, section 5.', 1)
-    -- ru/kz — окремою порцією `I18N` (COLL:nosource-hints).
-    -- COLL:nosource-hints ── кінець секції ──
+    (N'err.ECR-PWD-0422.tooLong', N'en', N'The password is longer than {maxLength} characters.', 1)
     -- ru/kz — окремою порцією `API:negative-path` у блоці I18N нижче.
     -- API:negative-path ── кінець секції ──
     -- D16: кінець секції
@@ -13833,6 +13833,18 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:an13-strict ── кінець секції ──
+
+-- COLL:nosource-hints ── ru/kz підказки порожнього списку з'єднань; власна порція ──
+-- ⚠ kz — найкращий переклад без термінології замовника: потрібна вичитка носієм.
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'sources.notConfiguredHint', N'ru', N'Чтобы подключить PI, администратор добавляет здесь подключение: адрес PI Web API, секрет и способ аутентификации. До этого данные вводятся вручную. См. docs/admin/admin-guide.md, раздел 5, и docs/admin/operations-runbook.md, раздел 15.'),
+    (N'sources.notConfiguredHint', N'kz', N'PI-ды қосу үшін әкімші осы жерде қосылым қосады: PI Web API мекенжайы, құпия және аутентификация тәсілі. Ол уақытқа дейін деректер қолмен енгізіледі. docs/admin/admin-guide.md құжатының 5-бөлімін және docs/admin/operations-runbook.md құжатының 15-бөлімін қараңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:nosource-hints ── кінець секції ──
 
 -- JOBL ── ru/kz назв видів задач (jobLabel.ts, KindKeys); власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)
