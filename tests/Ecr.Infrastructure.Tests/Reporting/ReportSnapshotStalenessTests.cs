@@ -1,4 +1,6 @@
 // tests/Ecr.Infrastructure.Tests/Reporting/ReportSnapshotStalenessTests.cs
+using System.Globalization;
+using Microsoft.Data.SqlClient;
 using Ecr.Application.Calculations;
 using Ecr.Application.Common;
 using Ecr.Application.Ports;
@@ -143,6 +145,68 @@ public sealed class ReportSnapshotStalenessTests(SqlServerFixture sql)
 
         Assert.Empty(journal);
         Assert.False((await ListAsync(arrange))[snapshot].IsStale);
+    }
+
+    /// <summary>
+    /// Вимір 2026-10-01 (docs/build/perf/jobs-stale-health-2026-10-01.md): перевірка заст. зрізів
+    /// при завершенні прогону не читає ЧУЖІ (давні) прогони проєкту — без
+    /// <c>IX_CalculationRun_Project_FinishedAt</c> EXISTS скановував усі прогони проєкту.
+    /// Мутація: прибрати індекс з CalculationsConfiguration + міграції — тест червоніє.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Перевірка_зрізів_не_читає_давніх_прогонів_проєкту()
+    {
+        var arrange = await ArrangeAsync();
+        await SnapshotAsync(arrange, arrange.Period, Now.AddHours(-2));
+        var run = await RunAsync(arrange, arrange.Period, arrange.DocumentId);
+        await CompleteAsync(arrange, run, Now);
+
+        async Task<long> ReadsAsync()
+        {
+            await using var connection = new SqlConnection(sql.ConnectionString);
+            await connection.OpenAsync();
+
+            async Task<long> SessionReadsAsync()
+            {
+                await using var q = connection.CreateCommand();
+                q.CommandText = "SELECT logical_reads FROM sys.dm_exec_sessions WHERE session_id = @@SPID";
+                return Convert.ToInt64(await q.ExecuteScalarAsync(), CultureInfo.InvariantCulture);
+            }
+
+            await using var db = new EcrDbContext(new DbContextOptionsBuilder<EcrDbContext>().UseSqlServer(connection).Options);
+            var before = await SessionReadsAsync();
+            var invalidated = await new CalculationResultStore(db, new TestClock(Now))
+                .InvalidateReportSnapshotsAsync(run, CancellationToken.None);
+            Assert.NotNull(invalidated);
+            return await SessionReadsAsync() - before;
+        }
+
+        var readsBefore = await ReadsAsync();
+
+        await using (var connection = new SqlConnection(sql.ConnectionString))
+        {
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandTimeout = 120;
+            command.CommandText = """
+                INSERT calc.CalculationRun (ProjectId, PeriodKey, Status, StartedAt, FinishedAt, ErrorMessage, DocumentId)
+                SELECT TOP (@n) @p, @k, N'Superseded', '2020-01-01', '2020-01-02', NULL, NULL
+                FROM sys.all_objects AS a CROSS JOIN sys.all_objects AS b
+                """;
+            command.Parameters.AddWithValue("@n", 40_000);
+            command.Parameters.AddWithValue("@p", arrange.ProjectId);
+            command.Parameters.AddWithValue("@k", arrange.Period);
+            await command.ExecuteNonQueryAsync();
+        }
+
+        await ReadsAsync(); // розігрів: оновлення статистики після масової вставки
+        var readsAfter = await ReadsAsync();
+
+        Assert.True(
+            readsAfter <= readsBefore + 8,
+            $"Читань при перевірці зрізів {readsBefore} -> {readsAfter} після 40000 давніх прогонів проєкту.");
     }
 
     private sealed record Arrange(
