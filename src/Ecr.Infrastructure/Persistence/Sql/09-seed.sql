@@ -678,7 +678,14 @@ UPDATE t
     (N'health.sources.failedCount',      N'kz', N'Соңғы іске қосуы сәтсіз деректер көздері: {count}.', N'Соңғы іске қосуы сәтсіз жинау нысандары: {count}.'),
     (N'health.sources.gapsCount',        N'en', N'Sources with a coverage gap: {count}.', N'Collection entities with a coverage gap: {count}.'),
     (N'health.sources.gapsCount',        N'ru', N'Источники с пробелом в покрытии: {count}.', N'Сущности сбора с пробелом в покрытии: {count}.'),
-    (N'health.sources.gapsCount',        N'kz', N'Қамтуында олқылығы бар деректер көздері: {count}.', N'Қамтуында олқылығы бар жинау нысандары: {count}.')
+    (N'health.sources.gapsCount',        N'kz', N'Қамтуында олқылығы бар деректер көздері: {count}.', N'Қамтуында олқылығы бар жинау нысандары: {count}.'),
+    -- COLL:srcfix D2: пояснено, що джерело без секрету = Windows (Negotiate); D4: що робити з порожнім allowlist.
+    (N'err.ECR-REQ-0422.dataSourceEndpointHostForbidden', N'en', N'This host is not allowed for a data source: loopback, link-local, metadata, unspecified and (for Windows authentication) private IP addresses are refused.', N'This host is not allowed for a data source: loopback, link-local, metadata and unspecified addresses are always refused. A source without a secret authenticates with Windows (Negotiate), and in that mode private IP-address literals are refused too: use the host name.'),
+    (N'err.ECR-REQ-0422.dataSourceEndpointHostForbidden', N'ru', N'Этот хост не допускается для источника данных: loopback, link-local, metadata, неопределённые и (для Windows-аутентификации) частные IP-адреса отклоняются.', N'Этот хост не допускается для источника данных: loopback, link-local, metadata и неопределённые адреса отклоняются всегда. Источник без секрета подключается по Windows-аутентификации (Negotiate), и в этом режиме литералы частных IP-адресов тоже запрещены: используйте имя хоста.'),
+    (N'err.ECR-REQ-0422.dataSourceEndpointHostForbidden', N'kz', N'Бұл хост деректер көзі үшін рұқсат етілмейді: loopback, link-local, metadata, анықталмаған және (Windows аутентификациясы үшін) жеке IP-мекенжайлар қабылданбайды.', N'Бұл хост деректер көзі үшін рұқсат етілмейді: loopback, link-local, metadata және анықталмаған мекенжайлар әрдайым қабылданбайды. Құпиясы жоқ көз Windows аутентификациясымен (Negotiate) қосылады, және бұл режимде жеке IP-мекенжай литералдары да тыйым салынған: хост атын пайдаланыңыз.'),
+    (N'health.sources.negotiateNoAllowlist', N'en', N'Sources with Windows authentication and no allowed-hosts list (PiWebApi:AllowedHosts): {count}.', N'Sources with Windows authentication and no allowed-hosts list: {count}. Set PiWebApi:AllowedHosts in the EcrApi configuration and restart EcrApi.'),
+    (N'health.sources.negotiateNoAllowlist', N'ru', N'Источники с Windows-аутентификацией без списка разрешённых хостов (PiWebApi:AllowedHosts): {count}.', N'Источники с Windows-аутентификацией без списка разрешённых хостов: {count}. Задайте PiWebApi:AllowedHosts в конфигурации EcrApi и перезапустите EcrApi.'),
+    (N'health.sources.negotiateNoAllowlist', N'kz', N'Windows аутентификациясы бар, рұқсат етілген хосттар тізімі жоқ көздер (PiWebApi:AllowedHosts): {count}.', N'Windows аутентификациясы бар, рұқсат етілген хосттар тізімі жоқ көздер: {count}. EcrApi конфигурациясында PiWebApi:AllowedHosts орнатып, EcrApi қайта іске қосыңыз.')
   ) AS s ([Key], Lang, OldVal, NewVal)
     ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
  WHERE t.Value = s.OldVal COLLATE Latin1_General_BIN2;
@@ -4711,11 +4718,11 @@ USING (VALUES
     -- COLL:rowwindow-crud ── кінець секції ──
     -- COLL:ssrf ── Політика адреси джерела PI Web API: схема, заборонений хост, allowlist (`DataSourceEndpointPolicy`) ──
     (N'err.ECR-REQ-0422.dataSourceEndpointScheme',       N'en', N'The data source address must use http or https.', 1),
-    (N'err.ECR-REQ-0422.dataSourceEndpointHostForbidden', N'en', N'This host is not allowed for a data source: loopback, link-local, metadata, unspecified and (for Windows authentication) private IP addresses are refused.', 1),
+    (N'err.ECR-REQ-0422.dataSourceEndpointHostForbidden', N'en', N'This host is not allowed for a data source: loopback, link-local, metadata and unspecified addresses are always refused. A source without a secret authenticates with Windows (Negotiate), and in that mode private IP-address literals are refused too: use the host name.', 1),
     (N'err.ECR-REQ-0422.dataSourceEndpointHostNotAllowed', N'en', N'This host is not in the list of allowed data source hosts (PiWebApi:AllowedHosts).', 1),
     (N'err.ECR-REQ-0422.dataSourceEndpointMalformed',    N'en', N'The data source address is empty or malformed: use a full http(s) address without a user name.', 1),
     (N'err.ECR-INT-0503.piWebApiResponseTooLarge',       N'en', N'PI Web API returned a response for {path} larger than {limitBytes} bytes: collection rejected.', 1),
-    (N'health.sources.negotiateNoAllowlist',             N'en', N'Sources with Windows authentication and no allowed-hosts list (PiWebApi:AllowedHosts): {count}.', 1),
+    (N'health.sources.negotiateNoAllowlist',             N'en', N'Sources with Windows authentication and no allowed-hosts list: {count}. Set PiWebApi:AllowedHosts in the EcrApi configuration and restart EcrApi.', 1),
     (N'err.ECR-REQ-0422.dataSourceEndpointChangeUnconfirmed', N'en', N'The address of data source "{code}" uses Windows authentication (the service account): confirm the address change explicitly.', 1),
     (N'sources.confirmEndpointChange',                   N'en', N'I confirm that the service account may connect to the new address', 1),
     -- ru/kz — окремою порцією `COLL:ssrf` у блоці I18N нижче.
@@ -12515,20 +12522,20 @@ SELECT v.[Key], v.Lang, v.Val
   FROM (VALUES
     (N'err.ECR-REQ-0422.dataSourceEndpointScheme', N'ru', N'Адрес источника данных должен использовать http или https.'),
     (N'err.ECR-REQ-0422.dataSourceEndpointScheme', N'kz', N'Деректер көзінің мекенжайы http немесе https пайдалануы тиіс.'),
-    (N'err.ECR-REQ-0422.dataSourceEndpointHostForbidden', N'ru', N'Этот хост не допускается для источника данных: loopback, link-local, metadata, неопределённые и (для Windows-аутентификации) частные IP-адреса отклоняются.'),
-    (N'err.ECR-REQ-0422.dataSourceEndpointHostForbidden', N'kz', N'Бұл хост деректер көзі үшін рұқсат етілмейді: loopback, link-local, metadata, анықталмаған және (Windows аутентификациясы үшін) жеке IP-мекенжайлар қабылданбайды.'),
+    (N'err.ECR-REQ-0422.dataSourceEndpointHostForbidden', N'ru', N'Этот хост не допускается для источника данных: loopback, link-local, metadata и неопределённые адреса отклоняются всегда. Источник без секрета подключается по Windows-аутентификации (Negotiate), и в этом режиме литералы частных IP-адресов тоже запрещены: используйте имя хоста.'),
+    (N'err.ECR-REQ-0422.dataSourceEndpointHostForbidden', N'kz', N'Бұл хост деректер көзі үшін рұқсат етілмейді: loopback, link-local, metadata және анықталмаған мекенжайлар әрдайым қабылданбайды. Құпиясы жоқ көз Windows аутентификациясымен (Negotiate) қосылады, және бұл режимде жеке IP-мекенжай литералдары да тыйым салынған: хост атын пайдаланыңыз.'),
     (N'err.ECR-REQ-0422.dataSourceEndpointHostNotAllowed', N'ru', N'Этого хоста нет в списке разрешённых хостов источников данных (PiWebApi:AllowedHosts).'),
     (N'err.ECR-REQ-0422.dataSourceEndpointHostNotAllowed', N'kz', N'Бұл хост деректер көздерінің рұқсат етілген хосттар тізімінде жоқ (PiWebApi:AllowedHosts).'),
     (N'err.ECR-REQ-0422.dataSourceEndpointMalformed', N'ru', N'Адрес источника данных пуст или некорректен: укажите полный адрес http(s) без имени пользователя.'),
     (N'err.ECR-REQ-0422.dataSourceEndpointMalformed', N'kz', N'Деректер көзінің мекенжайы бос немесе қате: пайдаланушы атынсыз толық http(s) мекенжайын көрсетіңіз.'),
     (N'err.ECR-INT-0503.piWebApiResponseTooLarge', N'ru', N'PI Web API вернул ответ на {path} размером больше {limitBytes} байт: сбор отклонён.'),
     (N'err.ECR-INT-0503.piWebApiResponseTooLarge', N'kz', N'PI Web API {path} үшін {limitBytes} байттан асатын жауап қайтарды: жинау қабылданбады.'),
-    (N'health.sources.negotiateNoAllowlist', N'ru', N'Источники с Windows-аутентификацией без списка разрешённых хостов (PiWebApi:AllowedHosts): {count}.'),
+    (N'health.sources.negotiateNoAllowlist', N'ru', N'Источники с Windows-аутентификацией без списка разрешённых хостов: {count}. Задайте PiWebApi:AllowedHosts в конфигурации EcrApi и перезапустите EcrApi.'),
     (N'err.ECR-REQ-0422.dataSourceEndpointChangeUnconfirmed', N'ru', N'Источник данных «{code}» использует Windows-аутентификацию (служебную учётную запись): подтвердите смену адреса явно.'),
     (N'err.ECR-REQ-0422.dataSourceEndpointChangeUnconfirmed', N'kz', N'«{code}» деректер көзі Windows аутентификациясын (қызметтік тіркелгіні) пайдаланады: мекенжай ауысуын анық растаңыз.'),
     (N'sources.confirmEndpointChange', N'ru', N'Подтверждаю: служебная учётная запись может подключаться к новому адресу'),
     (N'sources.confirmEndpointChange', N'kz', N'Растаймын: қызметтік тіркелгі жаңа мекенжайға қосыла алады'),
-    (N'health.sources.negotiateNoAllowlist', N'kz',N'Windows аутентификациясы бар, рұқсат етілген хосттар тізімі жоқ көздер (PiWebApi:AllowedHosts): {count}.')
+    (N'health.sources.negotiateNoAllowlist', N'kz',N'Windows аутентификациясы бар, рұқсат етілген хосттар тізімі жоқ көздер: {count}. EcrApi конфигурациясында PiWebApi:AllowedHosts орнатып, EcrApi қайта іске қосыңыз.')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO

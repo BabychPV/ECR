@@ -77,7 +77,7 @@ public sealed class SourcesHealthCheck(
         {
             negotiateSuffix = " " + await Text(
                 "health.sources.negotiateNoAllowlist",
-                "Sources with Windows authentication and no allowed-hosts list (PiWebApi:AllowedHosts): {count}.",
+                "Sources with Windows authentication and no allowed-hosts list: {count}. Set PiWebApi:AllowedHosts in the EcrApi configuration and restart EcrApi.",
                 Param("count", openNegotiate.ToString(CultureInfo.InvariantCulture)), cancellationToken)
                 .ConfigureAwait(false);
         }
