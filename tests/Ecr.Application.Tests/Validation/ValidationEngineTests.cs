@@ -57,6 +57,7 @@ public sealed class ValidationEngineTests
     [Trait("Requirement", "ФВ-5.1")]
     [Trait("Requirement", "ФВ-5.3")]
     [Trait("Requirement", "ФВ-5.18")]
+    [Trait("Requirement", "ФВ-5.19")]
     public void Error_рівня_документа_блокує_Submit_але_не_запис()
     {
         var messages = Engine().ValidateScope(
