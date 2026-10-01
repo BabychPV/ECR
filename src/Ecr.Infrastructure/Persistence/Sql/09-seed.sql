@@ -5917,6 +5917,7 @@ USING (VALUES
     (N'registries.rc816.selectionLocked', N'en', N'Save or discard the changes in the levels below first.', 1),
     (N'methodologies.importApplyBlocked', N'en', N'Check the package first: importing becomes available after a check that would create the methodology.', 1),
     (N'registries.noFields', N'en', N'This registry has no fields yet', 1),
+    (N'reportDefs.newVersionBlocked', N'en', N'Enter the number of the new version first.', 1),
     -- ru/kz — окремою порцією `UI:dead-buttons` у блоці I18N нижче.
     -- UI:dead-buttons ── кінець секції ──
     -- IMPORT:hints ── підказки імпорту Excel (P3): застаріла книга, адреса комірки, перерахунок ──
@@ -14066,7 +14067,9 @@ SELECT v.[Key], v.Lang, v.Val
     (N'methodologies.importApplyBlocked', N'ru', N'Сначала проверьте пакет: импорт доступен после проверки, которая создала бы методику.'),
     (N'methodologies.importApplyBlocked', N'kz', N'Алдымен пакетті тексеріңіз: импорт әдістемені құратын тексеруден кейін қолжетімді болады.'),
     (N'registries.noFields', N'ru', N'У этого справочника пока нет полей'),
-    (N'registries.noFields', N'kz', N'Бұл анықтамалықта әзірге өрістер жоқ')
+    (N'registries.noFields', N'kz', N'Бұл анықтамалықта әзірге өрістер жоқ'),
+    (N'reportDefs.newVersionBlocked', N'ru', N'Сначала введите номер новой версии.'),
+    (N'reportDefs.newVersionBlocked', N'kz', N'Алдымен жаңа нұсқаның нөмірін енгізіңіз.')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO

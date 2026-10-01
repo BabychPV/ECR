@@ -96,3 +96,27 @@ describe('ReportDefinitionsModal: причина недоступної дії',
     SlowEnvTimeout,
   );
 });
+
+/**
+ * reports-walk: «New version» теж пояснює недоступність.
+ *
+ * Мутаційний доказ: повернути голий `disabled` замість `DisabledReason` —
+ * тест червоний (немає `aria-describedby` з причиною).
+ */
+describe('ReportDefinitionsModal: причина недоступної нової версії', () => {
+  it(
+    'звіт не обрано: «New version» у фокусі, описана «pick a report», клік не шле запиту',
+    async () => {
+      renderModal();
+
+      const buttons = await screen.findAllByRole('button', { name: '⟦reportDefs.newVersion⟧' }, { timeout: SlowEnvTimeout });
+      const next = buttons[buttons.length - 1];
+      expect(next?.getAttribute('aria-disabled')).toBe('true');
+      expect(description(next)).toBe('⟦snapshots.pickReport⟧');
+
+      if (next !== undefined) fireEvent.click(next);
+      expect(postCalls()).toHaveLength(0);
+    },
+    SlowEnvTimeout,
+  );
+});

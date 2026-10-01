@@ -285,14 +285,25 @@ export function ReportDefinitionsModal({
         />
 
         <Group justify="flex-end">
-          <Button
-            variant="default"
-            disabled={versionOf === null || nextVersion.trim().length === 0}
-            loading={addVersion.isPending}
-            onClick={() => addVersion.mutate()}
+          {/* ⚠ Причина вголос, як у «Add» вище: голий `disabled` не давав ні
+              фокуса, ні підказки, котре з двох полів заважає. */}
+          <DisabledReason
+            reason={
+              versionOf === null
+                ? t('snapshots.pickReport')
+                : nextVersion.trim().length === 0
+                  ? t('reportDefs.newVersionBlocked')
+                  : null
+            }
           >
-            {t('reportDefs.newVersion')}
-          </Button>
+            <Button
+              variant="default"
+              loading={addVersion.isPending}
+              onClick={() => addVersion.mutate()}
+            >
+              {t('reportDefs.newVersion')}
+            </Button>
+          </DisabledReason>
         </Group>
 
         <ReasonModal
