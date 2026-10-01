@@ -172,6 +172,33 @@ public sealed partial class ReportViewGeneratorTests(SqlServerFixture sql)
     }
 
     /// <summary>
+    /// Межа ширини вʼюхи: 250 колонок — Created, 251 — <c>50422</c> з кількістю в повідомленні, вʼюхи нема
+    /// (TESTER-GUIDE §7.6: «тесту на 250+ колонок нема» — тепер є).
+    /// Мутація: у <c>05-rpt-views.sql</c> замінити <c>@n &gt; 250</c> на <c>@n &gt; 251</c> — 251 стане Created.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-10.4")]
+    public async Task Таблиця_понад_250_колонок_вʼюхи_не_отримує_а_250_отримує()
+    {
+        var edge = await new TestDocumentBuilder(sql.ConnectionString).BuildAsync(columnCount: 250, rowCount: 1);
+        await PublishAsync(edge.TemplateVersionId);
+        var edgeView = await ViewNameAsync(edge);
+        Assert.Equal([$"{edgeView}:Created"], await ExecAsync(edge.TemplateVersionId));
+
+        var wide = await new TestDocumentBuilder(sql.ConnectionString).BuildAsync(columnCount: 251, rowCount: 1);
+        await PublishAsync(wide.TemplateVersionId);
+        var wideView = await ViewNameAsync(wide);
+
+        var error = await Assert.ThrowsAsync<SqlException>(() => ExecAsync(wide.TemplateVersionId));
+
+        Assert.Equal(50422, error.Number);
+        Assert.Contains("251", error.Message, StringComparison.Ordinal);
+        Assert.Empty(await ColumnsAsync(wideView));
+    }
+
+    /// <summary>
     /// Документ на опублікованій версії: рядок 1 — текст <c>a</c> і число 1.5,
     /// рядок 2 — лише число 2; аркуш поданий.
     /// </summary>
