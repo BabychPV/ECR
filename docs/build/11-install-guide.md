@@ -17,6 +17,7 @@
 
 - [0. Що потрібно заздалегідь](#0-передумови)
 - [1. Збірка інсталятора (на машині розробки)](#1-збірка)
+  - [1.1 Підпис і перевірка `Ecr.msi` перед установкою](#1-1-перевірка-msi)
 - [2. Перше встановлення на чистому сервері](#2-перше-встановлення)
   - [2.1 Рекомендований шлях — самодостатній `Ecr-Setup-<версія>.exe`](#2-1-майстер)
   - [2.2 Альтернатива — `deploy-ecr.ps1` напряму (автоматизація/CI)](#2-2-скрипт)
@@ -155,6 +156,83 @@ setup\`) + `Ecr.msi` (з `artifacts\msi\en-US\`) — усі три в ОДНУ �
 Прапорці `-SkipPublish`/`-SkipWeb`, якщо потрібні лише частково —
 дивись `build-msi.ps1`/`rebuild-and-package-msi.ps1` напряму;
 `build-installer.ps1` пакує "усе в одному" й таких прапорців не приймає.
+
+### 1.1 Підпис і перевірка `Ecr.msi` перед установкою {#1-1-перевірка-msi}
+
+Рішення D-259 (QUESTIONS-BUSINESS §3.3): поки власного сертифіката для
+підпису коду немає, діють **разом** варіант A (самопідписаний code-signing
+сертифікат) і B (SHA-256 у release notes). Сертифікат HTTPS із SAN для підпису
+коду не годиться — в ньому немає призначення «Code Signing». Перехід на
+сертифікат корпоративного ЦС (варіант C) змінює лише крок підпису.
+
+**Видавець (машина збірки).** `build-msi.ps1` кладе поруч із пакетом
+`Ecr.msi.sha256` (формат `sha256sum`). Підпис — окремим кроком, після нього
+скрипт переписує `.sha256`, бо підпис змінює файл:
+
+```powershell
+# одноразово: сертифікат варіанта A (закритий ключ лишається у видавця)
+$c = New-SelfSignedCertificate -Type CodeSigningCert -Subject 'CN=ECR Release Signing' `
+       -CertStoreLocation Cert:\CurrentUser\My -KeyAlgorithm RSA -KeyLength 3072 `
+       -HashAlgorithm SHA256 -NotAfter (Get-Date).AddYears(3)
+Export-Certificate -Cert $c -FilePath .\ecr-release-signing.cer   # лише відкрита частина — на сервери
+
+.\tools\sign-msi.ps1 -MsiPath artifacts\msi\en-US\Ecr.msi -Thumbprint $c.Thumbprint
+# варіант C: .\tools\sign-msi.ps1 -MsiPath … -SubjectName '<підписант ЦС>'
+```
+
+У release notes ідуть **SHA-256 підписаного файла** (рядок із `.sha256`) і
+відбиток сертифіката. Їх передають **окремим каналом** від самого пакета
+(лист, тікет): хеш, що їде в тій самій теці, від підміни не захищає.
+
+**Адміністратор (сервер), один раз:** поставити `ecr-release-signing.cer`
+у довірені — тоді Windows покаже видавця замість «невідомий видавець»:
+
+```powershell
+Import-Certificate -FilePath .\ecr-release-signing.cer -CertStoreLocation Cert:\LocalMachine\Root
+Import-Certificate -FilePath .\ecr-release-signing.cer -CertStoreLocation Cert:\LocalMachine\TrustedPublisher
+```
+
+(або GPO для всіх серверів; `certutil -addstore Root/TrustedPublisher` — те саме).
+
+**Адміністратор, перед КОЖНОЮ установкою чи оновленням:**
+
+```powershell
+.\verify-msi.ps1 -MsiPath .\Ecr.msi -IntegrityOnly `
+    -ExpectedSha256 <хеш із release notes> -TrustedThumbprint <відбиток із release notes>
+```
+
+Скрипт (`tools/verify-msi.ps1`, нічого не встановлює) друкує два рядки і
+повертає ненульовий код, якщо хоч один `FAIL`:
+
+| Рядок | `PASS` | `FAIL` |
+|---|---|---|
+| `[I1]` SHA-256 | хеш файла = еталон | хеш інший; еталону немає (без `-ExpectedSha256`/`-Sha256File` і без `Ecr.msi.sha256` поруч) |
+| `[I2]` підпис | підпис дійсний, сертифікат довірений, відбиток збігається | вміст змінено після підпису (`HashMismatch`); підпис іншим сертифікатом; з `-TrustedThumbprint`/`-RequireSignature` — непідписаний або недовірений (`.cer` не встановлено) |
+
+Без `-TrustedThumbprint`/`-RequireSignature` непідписаний або недовірений
+пакет дає `[I2] WARN` (код 0) — це режим «лише хеш» (варіант B), поки підпису
+немає. `HashMismatch` — `FAIL` завжди. Без скрипта те саме вручну:
+`(Get-FileHash .\Ecr.msi -Algorithm SHA256).Hash` і
+`Get-AuthenticodeSignature .\Ecr.msi | Format-List Status, SignerCertificate`
+(очікуємо `Valid` і той самий відбиток).
+
+**Якщо `FAIL`:** ⛔ не встановлювати і не «пробувати ще раз» з цим файлом.
+
+1. `[I1] FAIL`, `[I2] FAIL` (`HashMismatch`) — файл пошкоджено або підмінено.
+   Завантажити пакет заново з джерела видачі, перевірити знову. Повторюється —
+   повідомити видавця й службу ІБ, файл зберегти для розбору.
+2. `[I1] FAIL`, а підпис `PASS` — звірити, що хеш узято з release notes
+   **саме цієї** версії; підписаний файл переписує `.sha256`, тож хеш до
+   підпису не збігатиметься. Неясно — до видавця.
+3. `[I2] FAIL` «не довірений» — на сервері немає `.cer` (кроки вище) або
+   сертифікат прострочено (без позначки часу підпис стає недійсним разом із
+   ним). «Підписант не той» — пакет підписано не нашим сертифікатом:
+   як у п. 1.
+
+Автоматична перевірка: джоба CI `msi (windows)` після збірки проганяє
+`tools/test-verify-msi.ps1` на справжньому `Ecr.msi` — непідписаний,
+підписаний тимчасовим сертифікатом, пошкоджений (падають і хеш, і підпис),
+підмінений із переписаним хешем (ловить підпис).
 
 ---
 

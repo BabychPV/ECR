@@ -284,6 +284,9 @@ if ($actualVersion -ne $expected) {
 if (-not $upgradeCode) { throw "UpgradeCode відсутній: оновлення не працюватиме" }
 
 $hash = (Get-FileHash $msi.FullName -Algorithm SHA256).Hash.ToLower()
+# Еталон для verify-msi.ps1 (I1, CL-3) у форматі sha256sum. sign-msi.ps1
+# переписує його після підпису — підпис змінює файл.
+Set-Content -LiteralPath "$($msi.FullName).sha256" -Value "$hash  $($msi.Name)" -Encoding ascii
 
 Write-Host ""
 Write-Host "MSI:      $($msi.FullName)" -ForegroundColor Green
