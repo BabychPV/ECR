@@ -13,6 +13,7 @@ using Ecr.Application.Common;
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
+using Ecr.Application.Sources;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.External;
 using Ecr.Domain.Enums;
@@ -246,7 +247,18 @@ public sealed partial class SaveDataSourceHandler(
         source.Configure(parsed.SecondaryEndpoint, Trim(catalog), parsed.MaxParallel);
 
         store.Add(source);
-        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+
+        // D8: створення з'єднання (адреса — SSRF-чутлива) лишає слід у журналі структурних
+        // змін В ТІЙ САМІЙ транзакції, що й збереження.
+        await uow.ExecuteInTransactionAsync(async innerCt =>
+        {
+            await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+
+            await IntegrationConfigAudit.WriteAsync(
+                audit, clock, currentUser, IntegrationConfigAudit.DataSourceType, source.Id, "Create",
+                oldJson: null, newJson: IntegrationConfigAudit.Snapshot(source),
+                reason: $"З'єднання «{source.Code}» заведено.", innerCt).ConfigureAwait(false);
+        }, ct).ConfigureAwait(false);
 
         await AuditAsync(profile.UserId, new { id = source.Id, code = source.Code, created = true }, ct)
             .ConfigureAwait(false);
@@ -321,10 +333,28 @@ public sealed partial class SaveDataSourceHandler(
         var oldEndpoint = source.Endpoint;
         var oldSecondary = source.SecondaryEndpoint;
 
+        var before = IntegrationConfigAudit.Snapshot(source);
+
         source.Update(parsed.Name, transport, parsed.Endpoint, isActive);
         source.Configure(parsed.SecondaryEndpoint, Trim(catalog), parsed.MaxParallel);
 
-        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+        // D8: стан ДО і ПІСЛЯ — у журнал структурних змін, в одній транзакції зі збереженням.
+        // Лише справжня зміна налаштувань з'єднання (ім'я/каталог без зміни знімка шуму не дають).
+        await uow.ExecuteInTransactionAsync(async innerCt =>
+        {
+            await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+
+            var after = IntegrationConfigAudit.Snapshot(source);
+            if (string.Equals(before, after, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            await IntegrationConfigAudit.WriteAsync(
+                audit, clock, currentUser, IntegrationConfigAudit.DataSourceType, source.Id, "Update",
+                before, after,
+                reason: $"З'єднання «{source.Code}» змінено.", innerCt).ConfigureAwait(false);
+        }, ct).ConfigureAwait(false);
 
         // ⛔ Стара й нова адреса — у журнал (S3/S20): без них журнал не
         // відповідав на питання «куди джерело дивилося вчора». Адреса не несе

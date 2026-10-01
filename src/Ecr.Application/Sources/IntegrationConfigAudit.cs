@@ -45,6 +45,25 @@ internal static class IntegrationConfigAudit
         Converters = { new JsonStringEnumConverter() },
     };
 
+    /// <summary>Тип сутності: з'єднання з джерелом (адреса, транспорт) — SSRF-чутлива конфігурація.</summary>
+    public const string DataSourceType = "ext.DataSource";
+
+    /// <summary>
+    /// Знімок з'єднання для журналу: код, транспорт, адреси, стеля паралелізму, активність.
+    /// ⛔ Секретів немає за побудовою: ні значення, ні навіть ім'я секрету (<c>SecretName</c>).
+    /// </summary>
+    public static string Snapshot(DataSource source) => JsonSerializer.Serialize(
+        new
+        {
+            source.Code,
+            transport = source.Transport,
+            endpoint = source.Endpoint,
+            secondaryEndpoint = source.SecondaryEndpoint,
+            maxParallel = source.MaxParallel,
+            isActive = source.IsActive,
+        },
+        Options);
+
     /// <summary>Знімок мапінгу для журналу (той самий вигляд, що й у відповіді API).</summary>
     public static string Snapshot(EntityFieldMap map) => JsonSerializer.Serialize(EntityFieldMapLifecycle.Map(map), Options);
 
