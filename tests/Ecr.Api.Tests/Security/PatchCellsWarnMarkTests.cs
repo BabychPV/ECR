@@ -93,6 +93,42 @@ public sealed class PatchCellsWarnMarkTests(SqlServerFixture sql)
         Assert.Equal(new[] { $"{s.RowKey}:{s.MonthColumnCode}" }, OutOfWindowCells(after));
     }
 
+    /// <summary>
+    /// Рядок Г-6 TESTER-GUIDE: у періоді <c>Grace</c> правило <c>Warn</c> теж
+    /// позначає правку (<c>IsOutOfWindow</c>), а <c>IsLateEdit</c> ставиться окремо.
+    /// Мутація: у <c>AccessDecisionService.Decide</c> не обчислювати правила періоду в
+    /// <c>Grace</c> - тест червоніє.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-2.16")]
+    public async Task Warn_у_періоді_Grace_позначає_правку_так_само()
+    {
+        var s = await ArrangeAsync(PeriodState.Grace).ConfigureAwait(true);
+        await using (var check = new TestDocumentBuilder(sql.ConnectionString).CreateContext())
+        {
+            Assert.Equal(PeriodState.Grace, await check.Periods.AsNoTracking()
+                .Where(p => p.ProjectId == s.Document.ProjectId && p.PeriodKeyValue == PeriodKeyValue)
+                .Select(p => p.State).SingleAsync().ConfigureAwait(true));
+        }
+
+        using var app = new EcrApiFactory(sql);
+        var client = await SignInAsync(app, s.UserName).ConfigureAwait(true);
+        var version = RowVersion(await SliceAsync(client, s).ConfigureAwait(true), s.RowKey);
+
+        var response = await PatchAsync(client, s, version, confirmed: null,
+            (s.MonthColumnCode, 11m)).ConfigureAwait(true);
+        var body = await response.Content.ReadAsStringAsync().ConfigureAwait(true);
+
+        Assert.True(response.StatusCode == HttpStatusCode.OK, $"{response.StatusCode}: {body}\n{app.ErrorsText}");
+        using var json = JsonDocument.Parse(body);
+        var marked = json.RootElement.GetProperty("outOfWindow").EnumerateArray().Select(e => e.GetString()).ToArray();
+        Assert.Equal(new[] { $"{s.RowKey}:{s.MonthColumnCode}" }, marked);
+        var monthMarks = await MarksAsync(s, s.MonthColumnId).ConfigureAwait(true);
+        Assert.True(monthMarks.SequenceEqual(new[] { true }), string.Join(',', monthMarks));
+    }
+
     private static string?[] OutOfWindowCells(JsonElement slice)
         => [.. slice.GetProperty("outOfWindowCells").EnumerateArray().Select(e => e.GetString())];
 
@@ -183,7 +219,7 @@ public sealed class PatchCellsWarnMarkTests(SqlServerFixture sql)
     /// неї діє правило вікна дозволу з <c>Warn</c>: дозвіл
     /// першого рядка закінчився 31 серпня.
     /// </summary>
-    private async Task<Scenario> ArrangeAsync()
+    private async Task<Scenario> ArrangeAsync(PeriodState state = PeriodState.Open)
     {
         var builder = new TestDocumentBuilder(sql.ConnectionString);
         var doc = await builder.BuildAsync(PeriodKeyValue, columnCount: 3, rowCount: 2).ConfigureAwait(false);
@@ -194,6 +230,10 @@ public sealed class PatchCellsWarnMarkTests(SqlServerFixture sql)
             .FirstAsync(p => p.ProjectId == doc.ProjectId && p.PeriodKeyValue == PeriodKeyValue)
             .ConfigureAwait(false);
         period.AdvanceTo(PeriodState.Open, DateTime.UtcNow);
+        if (state == PeriodState.Grace)
+        {
+            period.AdvanceTo(PeriodState.Grace, DateTime.UtcNow);
+        }
 
         var userName = $"pcw_{Guid.NewGuid():N}"[..20];
         var user = new User(userName, userName, AuthProvider.Local);
