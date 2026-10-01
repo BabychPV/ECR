@@ -22,7 +22,8 @@ public sealed class DatabaseHealthCheck(
     IUiStringCatalog catalog,
     ICurrentUser currentUser,
     DataProtectionKeyProtection keyProtection,
-    IHostEnvironment? environment = null) : IHealthCheck
+    IHostEnvironment? environment = null,
+    Microsoft.Extensions.Configuration.IConfiguration? configuration = null) : IHealthCheck
 {
     /// <summary>Скільки вільних партицій попереду вважається достатнім.</summary>
     /// <remarks>
@@ -126,6 +127,43 @@ public sealed class DatabaseHealthCheck(
                     cancellationToken)
                     .ConfigureAwait(false);
                 return HealthCheckResult.Degraded(message, data: data);
+            }
+
+            // R2-rescope: розмір ext.RawDataPoint проти порога перегляду (sys.partitions, кеш 10 хв).
+            // Збій самої оцінки не робить БД Unhealthy — це довідковий показник.
+            var threshold = configuration?.GetValue<long?>(RawDataPointHealth.ThresholdConfigKey)
+                ?? RawDataPointHealth.DefaultThreshold;
+            long? rawRows = null;
+            try
+            {
+                rawRows = await RawDataPointHealth.ApproximateRowsAsync(db, clock.UtcNow, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+#pragma warning disable CA1031 // довідковий показник: збій не псує перевірку БД
+            catch (Exception ex) when (ex is not OperationCanceledException)
+#pragma warning restore CA1031
+            {
+                data["rawDataPointRowsError"] = ex.GetType().Name;
+            }
+
+            if (rawRows is { } rows)
+            {
+                data["rawDataPointRows"] = rows;
+                data["rawDataPointWarnRows"] = threshold;
+                var (rawStatus, rawKey) = RawDataPointHealth.Evaluate(rows, threshold);
+                if (rawKey is not null)
+                {
+                    var message = await Text(
+                        rawKey,
+                        rawKey == RawDataPointHealth.OverThresholdKey
+                            ? "ext.RawDataPoint holds about {rows} rows: the R2 review threshold of {threshold} is exceeded."
+                            : "ext.RawDataPoint holds about {rows} rows and is approaching the R2 review threshold of {threshold}.",
+                        RawDataPointHealth.Parameters(rows, threshold), cancellationToken)
+                        .ConfigureAwait(false);
+                    return rawStatus == HealthStatus.Degraded
+                        ? HealthCheckResult.Degraded(message, data: data)
+                        : HealthCheckResult.Healthy(message, data);
+                }
             }
 
             var available = await Text("health.db.available", "Database is available.", null, cancellationToken)

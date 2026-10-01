@@ -5864,6 +5864,11 @@ USING (VALUES
     (N'err.ECR-TMPL-4226.calculatedWithoutSource', N'en', N'Column {tableCode}.{columnCode} has type {dataType}, so it must be computed by a template formula, but this version has none. In the published form it would be an empty cell the operator may not fill in.', 1),
     -- ru/kz — окремою порцією $Section у блоці I18N нижче.
     -- COLL:reqclose3-tmplkeys ── кінець секції ──
+    -- COLL:rawhealth ── Розмір ext.RawDataPoint у картці `db` (R2-rescope, `RawDataPointHealth`, поріг Health:RawDataPointWarnRows) ──
+    (N'health.collection.rawPointsApproaching', N'en', N'ext.RawDataPoint holds about {rows} rows and is approaching the R2 review threshold of {threshold}.', 1),
+    (N'health.collection.rawPointsOverThreshold', N'en', N'ext.RawDataPoint holds about {rows} rows: the R2 review threshold of {threshold} is exceeded. See docs/build/perf/R2-rawdatapoint-plan.md.', 1),
+    -- ru/kz — окремою порцією COLL:rawhealth у блоці I18N нижче.
+    -- COLL:rawhealth ── кінець секції ──
     -- JOBL ── людські назви видів фонових задач, яких бракувало в jobLabel.ts (KindKeys) ──
     (N'jobs.kind.sourceEventSync',  N'en', N'Source event sync', 1),
     (N'jobs.kind.consistencyCheck', N'en', N'Consistency check', 1),
@@ -13599,6 +13604,19 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- JOBL ── кінець секції ──
+
+-- COLL:rawhealth ── ru/kz розміру ext.RawDataPoint у картці `db`; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'health.collection.rawPointsApproaching', N'ru', N'В ext.RawDataPoint около {rows} строк: приближается порог пересмотра R2 ({threshold}).'),
+    (N'health.collection.rawPointsApproaching', N'kz', N'ext.RawDataPoint кестесінде шамамен {rows} жол бар: R2 қайта қарау шегіне ({threshold}) жақындап келеді.'),
+    (N'health.collection.rawPointsOverThreshold', N'ru', N'В ext.RawDataPoint около {rows} строк: порог пересмотра R2 ({threshold}) превышен. См. docs/build/perf/R2-rawdatapoint-plan.md.'),
+    (N'health.collection.rawPointsOverThreshold', N'kz', N'ext.RawDataPoint кестесінде шамамен {rows} жол бар: R2 қайта қарау шегі ({threshold}) асып кетті. docs/build/perf/R2-rawdatapoint-plan.md қараңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:rawhealth ── кінець секції ──
 
 -- COLL:covenv ── ru/kz подробиць журналу покриття конвертом (MaterializeCollectedDataJob, SourceEventSyncJob); власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)

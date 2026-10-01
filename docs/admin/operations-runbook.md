@@ -185,7 +185,7 @@ HTTP-код: `Healthy` і `Degraded` дають **200**, `Unhealthy` — **503**
 
 | Перевірка | Degraded | Unhealthy |
 |---|---|---|
-| `db` | попереду менше 2 партицій | RCSI вимкнено; немає файлової групи `DATA_HOT`, `DATA_ARCHIVE`, `AUDIT` або `INDEXES`; БД недоступна |
+| `db` | попереду менше 2 партицій; `ext.RawDataPoint` ≥ 80 % порога `Health:RawDataPointWarnRows` (типово 20 000 000 рядків, поріг перегляду R2; кількість з `sys.partitions`, кеш 10 хв; `health.collection.rawPointsApproaching`/`rawPointsOverThreshold`) | RCSI вимкнено; немає файлової групи `DATA_HOT`, `DATA_ARCHIVE`, `AUDIT` або `INDEXES`; БД недоступна |
 | `jobs` | у планувальника немає тригерів | планувальник не зареєстрований, зупинений або кидає помилку |
 | `sources` | джерело ще не запускалось, є прогалина покриття, або є активне джерело з Windows-автентифікацією (Negotiate) при порожньому `PiWebApi:AllowedHosts` (`health.sources.negotiateNoAllowlist`, п. 2.1) | останній запуск будь-якого активного джерела впав. Якщо активних джерел немає — Healthy |
 | `worker` | Api на `Executor=Worker`, а служби `EcrWorker` немає, вона `Disabled` або задачі чекають понад 5 хв без жодної виконуваної (п. 10) | — |
