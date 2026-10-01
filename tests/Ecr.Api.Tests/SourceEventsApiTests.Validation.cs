@@ -195,7 +195,7 @@ public sealed partial class SourceEventsApiTests
         using var app = new EcrApiFactory(sql);
         using var manager = await SignedInAsync(app, ["Integration.Manage"], stand.ProjectId, GrantLevel.Manage);
 
-        foreach (var limit in new[] { 0, 501 })
+        foreach (var limit in new[] { -1, 501 })
         {
             var response = await manager.GetAsync(new Uri($"/api/v1/sources/{stand.EntityId}/source-events?limit={limit}", UriKind.Relative));
             Assert.True(
