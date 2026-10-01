@@ -205,7 +205,7 @@ export function SourcesPage(): JSX.Element {
                 source.oldestGap === null ? (
                   <Text c="dimmed">—</Text>
                 ) : (
-                  <Badge color="statusError" variant="light" miw="fit-content">
+                  <Badge color="statusError" variant="light" miw="fit-content" tt="none">
                     {/* ⚠ Година ПОТРІБНА, тобто не `dateOnly`. Клітинка
                         відповідає на «з якого моменту даних немає», а
                         відповідь на неї — дія в сусідній клітинці: збір за
