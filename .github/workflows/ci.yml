@@ -383,6 +383,17 @@ jobs:
           pwsh -File tools/verify-msi.ps1 -MsiPath $msi.FullName -StaticOnly
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
 
+      # CL-3 (D-259): цілісність пакета — I1 SHA-256 і I2 підпис на справжньому
+      # Ecr.msi: непідписаний, підписаний тимчасовим самопідписаним
+      # сертифікатом, пошкоджений (мають впасти і хеш, і підпис), підмінений
+      # із переписаним хешем. Довіра до тимчасового сертифіката ставиться в
+      # LocalMachine і знімається — ранер ефемерний.
+      - name: Перевірка цілісності MSI (test-verify-msi.ps1)
+        run: |
+          $msi = Get-ChildItem artifacts/msi -Filter '*.msi' -Recurse | Sort-Object LastWriteTime | Select-Object -Last 1
+          pwsh -File tools/test-verify-msi.ps1 -MsiPath $msi.FullName
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+
       # ⚠ Єдине доповнення цієї джоби для `msi-install (windows)`: MSI
       # артефактом — для реальної установки в тому ж прогоні і як «попередня
       # MSI» для наступних (оновлення, W3/W3b). 30 днів — вистачає на тижневий
@@ -391,7 +402,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ecr-msi
-          path: artifacts/msi/**/*.msi
+          # .sha256 — еталон для I1 у verify-msi.ps1 (повний режим у msi-install).
+          path: |
+            artifacts/msi/**/*.msi
+            artifacts/msi/**/*.msi.sha256
           if-no-files-found: error
           retention-days: 30
 
