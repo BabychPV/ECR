@@ -303,6 +303,14 @@ public sealed partial class JobWorker(
         }
 
         var clock = provider.GetRequiredService<IClock>();
+
+        // ФВ-12.2: скільки задача чекала в черзі до початку виконання (від AvailableAt, годинник
+        // СУБД). Метрики в процесі може не бути (дочірній воркер) — тоді просто пропуск.
+        if (job.QueueWaitMs is { } waitedMs)
+        {
+            provider.GetService<IJobStartMetrics>()?.RecordStartLatency((double)waitedMs, job.JobCode, job.Lane);
+        }
+
         var lease = new LeaseWatch();
         using var jobCancel = CancellationTokenSource.CreateLinkedTokenSource(stopping);
         using var renewStop = new CancellationTokenSource();
@@ -325,6 +333,7 @@ public sealed partial class JobWorker(
         Exception? failure = null;
         JobDeferredException? deferred = null;
         var cancelled = false;
+        var runStarted = Stopwatch.GetTimestamp();
 
         try
         {
@@ -402,6 +411,11 @@ public sealed partial class JobWorker(
             return;
         }
 
+        // ФВ-12.7: тривалість спроби — лише для завершених (ok) і провалених (error); відступ,
+        // скасування й втрата оренди — не «робота», їх не міряємо.
+        Observability.InfrastructureMetrics.RecordJobRun(
+            job.JobCode, failure is null ? "ok" : "error", Stopwatch.GetElapsedTime(runStarted).TotalSeconds);
+
         if (failure is null)
         {
             await SettleAsync(claim.JobId, q => q.CompleteAsync(claim, CancellationToken.None)).ConfigureAwait(false);
@@ -423,6 +437,7 @@ public sealed partial class JobWorker(
         }
 
         LogJobFailed(logger, claim.JobId, job.JobCode, failure);
+        Observability.InfrastructureMetrics.RecordJobFailed(job.JobCode, "error");
         await SettleAsync(claim.JobId, q => q.FailAsync(
                 claim, JobRetryPolicy.FailureText(failure, correlationId), JobRetryPolicy.ErrorCodeOf(failure),
                 CancellationToken.None))
@@ -487,6 +502,7 @@ public sealed partial class JobWorker(
         var claim = job.Claim;
         var limit = options.MaxDuration!.Value.ToString("c", System.Globalization.CultureInfo.InvariantCulture);
         LogJobOvertime(logger, claim.JobId, job.JobCode, limit);
+        Observability.InfrastructureMetrics.RecordJobFailed(job.JobCode, "overtime");
 
         var envelope = JobProgressMessageCodec.Encode(new JobProgressMessageEnvelope(
             JobWorkerOptions.MaxDurationKey,
@@ -517,6 +533,7 @@ public sealed partial class JobWorker(
         var claim = job.Claim;
         var shown = JobDeferral.Format(waited);
         LogDeferralExhausted(logger, claim.JobId, job.JobCode, deferred.Resource ?? "—", shown);
+        Observability.InfrastructureMetrics.RecordJobFailed(job.JobCode, "deferral_exhausted");
 
         await WriteProgressAsync(claim.JobId, store => store.ReportAsync(
                 claim.JobId, 0, JobDeferral.Envelope(deferred.Resource, waited), clock.UtcNow, CancellationToken.None))

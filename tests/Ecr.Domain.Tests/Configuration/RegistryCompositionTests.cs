@@ -21,6 +21,7 @@ public sealed class RegistryCompositionTests
 
     [Fact]
     [Trait("Directive", "RT-03")]
+    [Trait("Requirement", "ФВ-8.3")]
     public void Нове_поле_посилання_а_не_композиція_з_забороною_видалення()
     {
         var field = Field(CellDataType.Lookup);
@@ -62,6 +63,7 @@ public sealed class RegistryCompositionTests
 
     [Fact]
     [Trait("Directive", "RT-03")]
+    [Trait("Requirement", "ФВ-8.2")]
     public void Новий_довідник_має_ручний_код_і_не_має_мітки_зміни()
     {
         var registry = Registry();

@@ -6,8 +6,28 @@
  */
 export const PollMs = 1500;
 
-/** Що показати оператору, коли стеження закінчилося. */
-export type JobOutcome = 'running' | 'succeeded' | 'failed' | 'unknown';
+/**
+ * Що показати оператору, коли стеження закінчилося.
+ *
+ * `partial` — задача-розклад (P4 ФВ-9.8): усі дочірні завершились, але частина з
+ * помилками (`effectiveState = SucceededWithErrors`). Це не «виконано».
+ */
+export type JobOutcome = 'running' | 'succeeded' | 'partial' | 'failed' | 'unknown';
+
+/** Підсумок задачі без розкладу: `partial` у ній не буває. */
+export type PlainJobOutcome = Exclude<JobOutcome, 'partial'>;
+
+/**
+ * Похідний стан батька-розкладу: дочірні ще рахуються (`FanOutStatus.StateFannedOut`).
+ *
+ * ⛔ Збережений стан такого батька — вже `Succeeded`: він лише РОЗКЛАВ документні
+ * задачі. Хто дивиться лише на `state`, пише «перерахунок завершено», коли не
+ * пораховано ще жодного документа.
+ */
+export const FannedOut = 'FannedOut';
+
+/** Похідний стан: усі дочірні завершились, частина з помилками. */
+export const SucceededWithErrors = 'SucceededWithErrors';
 
 /**
  * Чи опитувати задачу далі і як скоро.
@@ -22,10 +42,12 @@ export type JobOutcome = 'running' | 'succeeded' | 'failed' | 'unknown';
  * результату — це запит на секунду від кожної відкритої вкладки.
  *
  * @param state Стан задачі; `undefined` — відповіді ще немає.
+ * @param effectiveState Похідний стан розкладу (`JobStatus.effectiveState`): поки
+ *   `FannedOut`, опитування триває, хоча `state` уже `Succeeded`.
  * @returns Інтервал у мілісекундах або `false` — більше не питати.
  */
-export function pollInterval(state: string | undefined): number | false {
-  return state === 'Queued' || state === 'Running' ? PollMs : false;
+export function pollInterval(state: string | undefined, effectiveState?: string | null): number | false {
+  return state === 'Queued' || state === 'Running' || effectiveState === FannedOut ? PollMs : false;
 }
 
 /**
@@ -33,6 +55,8 @@ export function pollInterval(state: string | undefined): number | false {
  *
  * @param state Стан задачі; `undefined` — відповіді ще немає.
  * @param unreadable Стан прочитати не вдалося.
+ * @param effectiveState Похідний стан розкладу (`JobStatus.effectiveState`);
+ *   `null`/`undefined` — задача без дочірніх, вирішує `state`.
  *
  * @remarks
  * ⛔ «Стан прочитати не вдалося» — це НЕ «ще виконується».
@@ -40,7 +64,17 @@ export function pollInterval(state: string | undefined): number | false {
  * без нього кнопка крутилася б вічно: оператор бачив би «перераховується» на
  * задачі, стан якої йому просто не показують.
  */
-export function outcomeOf(state: string | undefined, unreadable: boolean): JobOutcome {
+export function outcomeOf(state: string | undefined, unreadable: boolean): PlainJobOutcome;
+export function outcomeOf(
+  state: string | undefined,
+  unreadable: boolean,
+  effectiveState: string | null | undefined,
+): JobOutcome;
+export function outcomeOf(
+  state: string | undefined,
+  unreadable: boolean,
+  effectiveState?: string | null,
+): JobOutcome {
   if (unreadable) {
     return 'unknown';
   }
@@ -49,5 +83,24 @@ export function outcomeOf(state: string | undefined, unreadable: boolean): JobOu
     return 'running';
   }
 
-  return state === 'Succeeded' ? 'succeeded' : 'failed';
+  if (state !== 'Succeeded') {
+    return 'failed';
+  }
+
+  // ⛔ «Завершено» — лише коли виконано M = N і помилок K = 0.
+  if (effectiveState === FannedOut) {
+    return 'running';
+  }
+
+  return effectiveState === SucceededWithErrors ? 'partial' : 'succeeded';
+}
+
+/**
+ * Стан для бейджа задачі: похідний стан розкладу, коли він є.
+ *
+ * ⛔ Батько-розклад (P4) зберігає `Succeeded` одразу після розкладу; бейдж за
+ * `state` писав би «успішно» над документами, яких ще не пораховано.
+ */
+export function badgeStateOf(status: { readonly state: string; readonly effectiveState?: string | null }): string {
+  return status.effectiveState ?? status.state;
 }

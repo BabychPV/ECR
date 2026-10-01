@@ -104,6 +104,7 @@ public sealed class ReportsController(
     /// </summary>
     /// <param name="id">Опис звіту.</param>
     /// <param name="vid">Версія.</param>
+    /// <param name="request">Причина публікації (ФВ-14.7) — обов'язкова.</param>
     /// <param name="ct">Токен скасування.</param>
     /// <remarks>
     /// ⛔ Побудова бере ЛИШЕ опубліковану версію — чернетка зрізу не дає
@@ -114,8 +115,10 @@ public sealed class ReportsController(
     [ProducesResponseType<Ecr.Application.Ports.ReportVersionDto>(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
-    public async Task<IActionResult> PublishVersion(int id, int vid, CancellationToken ct)
-        => Ok(await publishVersion.HandleAsync(id, vid, ct).ConfigureAwait(false));
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> PublishVersion(
+        int id, int vid, [FromBody] PublishReportVersionRequest request, CancellationToken ct)
+        => Ok(await publishVersion.HandleAsync(id, vid, request.Reason, ct).ConfigureAwait(false));
 
     /// <summary>Перелік побудованих зрізів. Право <c>Report.ViewRegulatory</c>.</summary>
     /// <remarks>
@@ -258,3 +261,10 @@ public sealed record CreateReportDefRequest(
 /// <param name="Rules">Правила відбору рядків; <c>null</c> — джерело за замовчуванням.</param>
 public sealed record CreateReportVersionRequest(
     string Version, IReadOnlyList<ReportColumnCommand> Columns, ReportRulesCommand? Rules);
+
+/// <summary>Запит на публікацію версії опису звіту (ФВ-14.7).</summary>
+/// <param name="Reason">
+/// Причина публікації; обов'язкова, порожня відхиляється (<c>ECR-REQ-0422</c>) і потрапляє в
+/// журнал структурних змін.
+/// </param>
+public sealed record PublishReportVersionRequest(string Reason);

@@ -11,7 +11,7 @@ namespace Ecr.Scenarios.Tests;
 public sealed class ProjectAndPeriodScenarios(SqlServerFixture sql)
 {
     /// <summary>
-    /// S-10. Проєкт із обов'язковим IANA-поясом (<c>Asia/Almaty</c>), активація, період.
+    /// S-10. Проєкт із обов'язковим IANA-поясом (<c>Asia/Atyrau</c>), активація, період.
     /// </summary>
     [Fact]
     [Trait("Category", "Integration")]
@@ -21,7 +21,7 @@ public sealed class ProjectAndPeriodScenarios(SqlServerFixture sql)
         using var app = new EcrApiFactory(sql);
         var admin = await Provisioning.AdministratorAsync(app, "S10", ["Project.Manage", "Document.View", "Template.Edit"]);
 
-        var projectId = await CreateProjectAsync(admin.Client, "S10", "Asia/Almaty");
+        var projectId = await CreateProjectAsync(admin.Client, "S10", "Asia/Atyrau");
         admin = await ActivateProjectAsync(admin, projectId);
 
         // Проєкт активний і має календар періодів. Грант Manage вже видано
@@ -59,7 +59,7 @@ public sealed class ProjectAndPeriodScenarios(SqlServerFixture sql)
         using var app = new EcrApiFactory(sql);
         var admin = await Provisioning.AdministratorAsync(app, "S11", ["Project.Manage", "Document.View", "Template.Edit"]);
 
-        var projectId = await CreateProjectAsync(admin.Client, "S11", "Asia/Almaty");
+        var projectId = await CreateProjectAsync(admin.Client, "S11", "Asia/Atyrau");
         admin = await ActivateProjectAsync(admin, projectId);
 
         // Грант Manage вже видано самим створенням проєкту.
@@ -104,7 +104,7 @@ public sealed class ProjectAndPeriodScenarios(SqlServerFixture sql)
     {
         using var app = new EcrApiFactory(sql);
         var owner = await Provisioning.AdministratorAsync(app, "S12Owner", ["Project.Manage", "Document.View", "Template.Edit"]);
-        var projectId = await CreateProjectAsync(owner.Client, "S12", "Asia/Almaty");
+        var projectId = await CreateProjectAsync(owner.Client, "S12", "Asia/Atyrau");
 
         var operatorAdmin = await Provisioning.AdministratorAsync(app, "S12Op", ["Document.View"]);
 
@@ -142,8 +142,8 @@ public sealed class ProjectAndPeriodScenarios(SqlServerFixture sql)
     {
         using var app = new EcrApiFactory(sql);
         var owner = await Provisioning.AdministratorAsync(app, "S12bOwner", ["Project.Manage", "Document.View", "Template.Edit"]);
-        _ = await CreateProjectAsync(owner.Client, "S12bA", "Asia/Almaty");
-        var granted = await CreateProjectAsync(owner.Client, "S12bB", "Asia/Almaty");
+        _ = await CreateProjectAsync(owner.Client, "S12bA", "Asia/Atyrau");
+        var granted = await CreateProjectAsync(owner.Client, "S12bB", "Asia/Atyrau");
 
         var operatorAdmin = await Provisioning.AdministratorAsync(app, "S12bOp", ["Document.View"]);
         await Provisioning.GrantAsync(app, operatorAdmin.RoleId, "Project", granted, "Read");
@@ -182,7 +182,7 @@ public sealed class ProjectAndPeriodScenarios(SqlServerFixture sql)
         using var app = new EcrApiFactory(sql);
         var owner = await Provisioning.AdministratorAsync(
             app, "Q246aOwner", ["Project.Manage", "Document.View", "Template.Edit"]);
-        var projectId = await CreateProjectAsync(owner.Client, "Q246a", "Asia/Almaty");
+        var projectId = await CreateProjectAsync(owner.Client, "Q246a", "Asia/Atyrau");
 
         var stranger = await Provisioning.AdministratorAsync(app, "Q246aStranger", ["Document.View"]);
 
@@ -224,7 +224,7 @@ public sealed class ProjectAndPeriodScenarios(SqlServerFixture sql)
         var owner = await Provisioning.AdministratorAsync(
             app, "Q246bOwner",
             ["Project.Manage", "Document.View", "Template.Edit", "Period.Configure"]);
-        var projectId = await CreateProjectAsync(owner.Client, "Q246b", "Asia/Almaty");
+        var projectId = await CreateProjectAsync(owner.Client, "Q246b", "Asia/Atyrau");
         owner = await ActivateProjectAsync(owner, projectId);
 
         var calendar = await owner.Client.GetAsync(
@@ -275,7 +275,7 @@ public sealed class ProjectAndPeriodScenarios(SqlServerFixture sql)
         using var app = new EcrApiFactory(sql);
         var admin = await Provisioning.AdministratorAsync(app, "S10own", ["Project.Manage", "Document.View", "Template.Edit"]);
 
-        var projectId = await CreateProjectAsync(admin.Client, "S10own", "Asia/Almaty");
+        var projectId = await CreateProjectAsync(admin.Client, "S10own", "Asia/Atyrau");
 
         // ⛔ ТІЄЮ САМОЮ сесією, без GrantAsync і без ReauthenticateAsync:
         // грант на власність видає сам CreateProjectHandler.
@@ -305,7 +305,7 @@ public sealed class ProjectAndPeriodScenarios(SqlServerFixture sql)
         var admin = await Provisioning.AdministratorAsync(app, "T636", ["Project.Manage", "Document.View", "Template.Edit"]);
 
         var projectId = await CreateProjectAsync(
-            admin.Client, "T636", "Asia/Almaty", periodKind: "Custom", customPeriodCount: 6);
+            admin.Client, "T636", "Asia/Atyrau", periodKind: "Custom", customPeriodCount: 6);
 
         var periods = await admin.Client.GetAsync(new Uri($"/api/v1/projects/{projectId}/periods", UriKind.Relative));
         Assert.Equal(HttpStatusCode.OK, periods.StatusCode);
@@ -346,7 +346,7 @@ public sealed class ProjectAndPeriodScenarios(SqlServerFixture sql)
             {
                 code = $"T636bad_{Guid.NewGuid():N}"[..20],
                 nameL10n = new Dictionary<string, string> { ["en"] = "T636bad project" },
-                timeZoneId = "Asia/Almaty",
+                timeZoneId = "Asia/Atyrau",
                 periodKind = "Custom",
                 year = DateTime.UtcNow.Year,
                 templateVersionId = versionId,
@@ -411,7 +411,7 @@ public sealed class ProjectAndPeriodScenarios(SqlServerFixture sql)
         using var app = new EcrApiFactory(sql);
         var admin = await Provisioning.AdministratorAsync(app, "T652", ["Project.Manage", "Document.View", "Template.Edit"]);
 
-        var projectId = await CreateProjectAsync(admin.Client, "T652", "Asia/Almaty");
+        var projectId = await CreateProjectAsync(admin.Client, "T652", "Asia/Atyrau");
 
         var changeInDraft = await admin.Client.PutAsJsonAsync(
             new Uri($"/api/v1/projects/{projectId}/timezone", UriKind.Relative),

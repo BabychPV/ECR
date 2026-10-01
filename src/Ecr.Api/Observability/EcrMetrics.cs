@@ -21,14 +21,18 @@ public sealed class EcrMetrics
     /// <summary>Перерахунок формул.</summary>
     public const string FormulaEvaluate = "ecr.formula.evaluate";
 
-    /// <summary>Побудова профілю доступу; має траплятися раз на сесію.</summary>
-    public const string AccessProfileBuild = "ecr.access.profile.build";
+    // ecr.access.profile.build емітує InfrastructureMetrics.RecordAccessProfileBuild (AccessProfileCache):
+    // другий інструмент з тим самим ім'ям у Meter "Ecr" дав би дубль гістограми.
 
     /// <summary>Тривалість фонової або довгої синхронної операції.</summary>
     public const string JobDuration = "ecr.job.duration";
 
-    /// <summary>Повний річний перерахунок; бюджет 600 с (ПРД-13).</summary>
-    public const string CalcFullYear = "ecr.calc.full_year";
+    /// <summary>
+    /// Повний річний перерахунок; бюджет 600 с (ПРД-13). Інструмент створює і наповнює
+    /// <c>RecalculationBudgetMonitor</c> (Ecr.Infrastructure): перерахунок виконує й Ecr.Worker,
+    /// який на Ecr.Api не посилається.
+    /// </summary>
+    public const string CalcFullYear = Ecr.Infrastructure.Jobs.RecalculationBudgetMonitor.InstrumentName;
 
     /// <summary>Конфлікти паралельного редагування.</summary>
     public const string ConflictCount = "ecr.conflict.count";
@@ -47,13 +51,17 @@ public sealed class EcrMetrics
     /// </remarks>
     public const string JobStartLatency = "ecr.job.start_latency";
 
+    /// <summary>
+    /// Порушення Content-Security-Policy, про які повідомили браузери (<c>S14</c>).
+    /// </summary>
+    public const string CspViolations = "ecr.csp.violations";
+
+    private readonly Counter<long> _cspViolations;
     private readonly Histogram<double> _jobStartLatency;
     private readonly Histogram<double> _cellsRead;
     private readonly Histogram<double> _cellsWrite;
     private readonly Histogram<double> _formulaEvaluate;
-    private readonly Histogram<double> _accessProfileBuild;
     private readonly Histogram<double> _jobDuration;
-    private readonly Histogram<double> _calcFullYear;
     private readonly Counter<long> _conflicts;
     private readonly Counter<long> _consistencyIssues;
 
@@ -64,14 +72,22 @@ public sealed class EcrMetrics
         _cellsRead = meter.CreateHistogram<double>(CellsRead, "ms", "Відкриття зрізу таблиці");
         _cellsWrite = meter.CreateHistogram<double>(CellsWrite, "ms", "Пакетний запис комірок");
         _formulaEvaluate = meter.CreateHistogram<double>(FormulaEvaluate, "ms", "Перерахунок формул таблиці");
-        _accessProfileBuild = meter.CreateHistogram<double>(AccessProfileBuild, "ms", "Побудова AccessProfile");
         _jobDuration = meter.CreateHistogram<double>(JobDuration, "s", "Тривалість фонової задачі");
-        _calcFullYear = meter.CreateHistogram<double>(CalcFullYear, "s", "Повний річний перерахунок");
         _conflicts = meter.CreateCounter<long>(ConflictCount, "1", "Конфлікти паралельного редагування");
         _consistencyIssues = meter.CreateCounter<long>(ConsistencyIssues, "1", "Знахідки ConsistencyCheckJob");
         _jobStartLatency = meter.CreateHistogram<double>(
             JobStartLatency, "ms", "Затримка від постановки задачі в чергу до її старту");
+        _cspViolations = meter.CreateCounter<long>(CspViolations, "1", "Порушення CSP за звітами браузерів");
     }
+
+    /// <summary>Фіксує одне порушення CSP (<c>S14</c>).</summary>
+    /// <param name="directive">
+    /// Ім'я директиви — ЛИШЕ зі закритого переліку (<c>CspReportParser.DirectiveName</c>):
+    /// тег приходить від анонімного джерела, а вільний рядок у тезі — це
+    /// необмежена кількість часових рядів.
+    /// </param>
+    public void RecordCspViolation(string directive)
+        => _cspViolations.Add(1, new KeyValuePair<string, object?>("directive", directive));
 
     /// <summary>
     /// Ключ у <c>HttpContext.Items</c>, яким дія повідомляє фільтру, скільки
@@ -135,13 +151,6 @@ public sealed class EcrMetrics
         _cellsWrite.Record(ms);
     }
 
-    /// <summary>
-    /// Фіксує повний річний перерахунок. **Бюджет — 600 с** (ПРД-13);
-    /// перевищення має бути видно на графіку одразу.
-    /// </summary>
-    public void RecordFullYearCalculation(double seconds, int documentCount)
-        => _calcFullYear.Record(seconds, new KeyValuePair<string, object?>("documents", documentCount));
-
     /// <summary>Фіксує конфлікт.</summary>
     public void RecordConflict() => _conflicts.Add(1);
 
@@ -161,18 +170,6 @@ public sealed class EcrMetrics
 
         _formulaEvaluate.Record(ms);
     }
-
-    /// <summary>
-    /// Фіксує побудову профілю доступу.
-    /// </summary>
-    /// <param name="ms">Тривалість.</param>
-    /// <remarks>
-    /// ⚠ Метрика існує не заради часу, а заради ЧАСТОТИ: профіль будується раз
-    /// на сесію (ФВ-6.10). Сплеск кількості означає, що кеш не працює, і
-    /// бюджет прав у 50 мс на запит уже не тримається.
-    /// </remarks>
-    public void RecordAccessProfileBuild(double ms)
-        => _accessProfileBuild.Record(ms);
 
     /// <summary>Фіксує тривалість довгої операції.</summary>
     /// <param name="operation">Назва операції — тег на гістограмі.</param>
@@ -199,6 +196,19 @@ public sealed class EcrMetrics
     /// комірки мусить починатися за секунди, а нічна архівація може чекати
     /// вікна обслуговування і бути при цьому цілком справною.
     /// </remarks>
-    public void RecordJobStartLatency(double milliseconds, string jobCode)
-        => _jobStartLatency.Record(milliseconds, new KeyValuePair<string, object?>("job", jobCode));
+    public void RecordJobStartLatency(double milliseconds, string jobCode, string? lane = null)
+    {
+        // ⚠ Тег lane лише коли він відомий (шлях черги в базі): задача Quartz лейна не має, і
+        // підставлений «default» приписав би їй чергу, якої вона не бачила.
+        if (lane is null)
+        {
+            _jobStartLatency.Record(milliseconds, new KeyValuePair<string, object?>("job", jobCode));
+            return;
+        }
+
+        _jobStartLatency.Record(
+            milliseconds,
+            new KeyValuePair<string, object?>("job", jobCode),
+            new KeyValuePair<string, object?>("lane", lane));
+    }
 }

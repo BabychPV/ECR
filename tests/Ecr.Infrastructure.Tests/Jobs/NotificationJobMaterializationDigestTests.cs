@@ -36,6 +36,7 @@ namespace Ecr.Infrastructure.Tests.Jobs;
 /// не гарантований, і пошук «останнього» ловив би чужий запис.
 /// </remarks>
 [Collection("SqlServer")]
+[Trait("Requirement", "ФВ-12.5")]
 public sealed class NotificationJobMaterializationDigestTests(SqlServerFixture sql)
 {
     private static readonly string MaterializeJobCode = typeof(IMaterializeCollectedDataJob).FullName!;

@@ -1,4 +1,4 @@
-﻿using Ecr.Api.Auth;
+using Ecr.Api.Auth;
 using Ecr.Api.Errors;
 using Ecr.Api.Middleware;
 using Ecr.Api.Observability;
@@ -45,6 +45,11 @@ builder.Configuration.AddProgramDataConfig(
 // Конфігурація: змінні оточення з префіксом ECR_ перекривають файли
 // (тому й секрети — лише сюди, ніколи в жоден із файлів вище, D-11).
 builder.Configuration.AddEnvironmentVariables(prefix: "ECR_");
+
+// ⛔ D14-08/R-01: сертифікат HTTPS за відбитком (Transport:Https:CertificateThumbprint,
+// пише deploy-ecr.ps1 -HttpsThumbprint). ПІСЛЯ змінних оточення — ключ приходить
+// звідти. Відбиток заданий, а сертифікат непридатний — відмова старту тут.
+builder.Services.AddSingleton(builder.ConfigureEcrHttps());
 
 // Файловий журнал (`D14-09`): під Windows-службою консолі немає, і без файлу
 // стек винятку з CorrelationId не зберігався ніде. Консоль і EventLog лишаються
@@ -198,12 +203,24 @@ builder.Services.Configure<GzipCompressionProviderOptions>(
 // композицією і конвеєром, розходиться першою ж правкою.
 builder.Services.AddEcrRateLimiting(builder.Configuration);
 
+// ФВ-5.24: відмови в доступі (403) → aud.SecurityEvent. Синглтон: обмежувач флуду
+// тримає стан між запитами. Запис — в окремому scope, поза транзакцією запиту.
+builder.Services.AddSingleton<Ecr.Api.Security.IAccessDenialAuditor, Ecr.Api.Security.AccessDenialAuditor>();
+
 builder.Services.AddScoped<Ecr.Api.Health.IRecalculationWorkerProbe, Ecr.Api.Health.RecalculationWorkerProbe>();
+// F-4: база часових поясів ОС — лише попередження (Degraded), старт не блокується.
+builder.Services.AddSingleton<Ecr.Api.Health.ITimeZoneOffsetProvider, Ecr.Api.Health.SystemTimeZoneOffsetProvider>();
+builder.Services.AddSingleton<Ecr.Api.Health.HealthResultCache>();
 builder.Services.AddHealthChecks()
     .AddCheck<Ecr.Api.Health.DatabaseHealthCheck>("db", tags: ["db", "ready"])
     .AddCheck<Ecr.Api.Health.JobsHealthCheck>("jobs", tags: ["ready"])
     .AddCheck<Ecr.Api.Health.SourcesHealthCheck>("sources", tags: ["ready"])
-    .AddCheck<Ecr.Api.Health.RecalculationWorkerHealthCheck>("worker", tags: ["ready"]);
+    .AddCheck<Ecr.Api.Health.RecalculationWorkerHealthCheck>("worker", tags: ["ready"])
+    // Вʼюхи rpt.v_* для SSRS: збій генерації (>250 колонок, зіткнення імен) — жовтий, публікацію не відкочує.
+    .AddCheck<Ecr.Api.Health.ReportViewsHealthCheck>("reportviews", tags: ["ready"])
+    .AddCheck<Ecr.Api.Health.TimeZoneDatabaseHealthCheck>("tzdata", tags: ["ready"])
+    // D14-08: Production по HTTP без Secure-cookie і строк сертифіката HTTPS — жовтим, не 503.
+    .AddCheck<Ecr.Api.Health.TransportHealthCheck>("transport", tags: ["ready"]);
 
 var app = builder.Build();
 
@@ -216,6 +233,12 @@ app.ReportFileLog();
 // лише тут видно всі джерела (зокрема ті, що додає хост тестів), і вже є логер,
 // тобто причина лягає в журнал подій і файл, а не лише у виняток процесу.
 app.ValidateEcrConfiguration();
+
+// F-4: попередження про застарілу базу часових поясів (лише лог, ніколи не кидає).
+app.ReportTimeZoneDatabase();
+
+// D14-08: транспорт у журнал старту — HTTP без Secure-cookie у Production і строк сертифіката.
+app.ReportTransport();
 
 // ⚠ ПОСЛІДОВНІСТЬ СТАРТУ (B01 §6.3) — порядок значущий:
 // 1) retry-очікування БД  2) звірка міграцій  3) Validate/Migrate
@@ -242,6 +265,10 @@ app.UseMiddleware<CorrelationIdMiddleware>();
 // «заголовки в кожній відповіді»: middleware ставить їх через `OnStarting`, який
 // виконується після `Response.Clear()` обробника помилок. Пояснення — у файлі.
 app.UseMiddleware<SecurityHeadersMiddleware>();
+
+// ⚠ Перенаправлення HTTP → HTTPS — лише коли задано Transport:Https:Port
+// (deploy-ecr.ps1 -HttpRedirectPort): без другого http-порту перенаправляти нікого.
+app.UseEcrHttpsRedirection();
 
 // ⚠ ПЕРЕД `UseStaticFiles`: інакше бандл і зріз їхали б нестисненими (`RD-01`).
 app.UseResponseCompression();

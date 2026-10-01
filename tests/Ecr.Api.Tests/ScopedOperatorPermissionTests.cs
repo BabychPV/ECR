@@ -200,7 +200,7 @@ public sealed class ScopedOperatorPermissionTests(SqlServerFixture sql)
         var projectA = new Project(
             EcrCode.Create($"PA{Guid.NewGuid():N}"[..12]), Name("FV-6.14 operator A"),
             new DateOnly(2026, 1, 1), new DateOnly(2026, 12, 31),
-            b.TemplateVersionId, PeriodKind.Monthly, policyId, "Asia/Almaty");
+            b.TemplateVersionId, PeriodKind.Monthly, policyId, "Asia/Atyrau");
         db.Projects.Add(projectA);
         db.DocumentSheets.Add(new DocumentSheet(b.DocumentId, b.SheetDefId));
 

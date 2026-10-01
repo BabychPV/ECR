@@ -291,9 +291,6 @@ export const surfaces = {
   },
 } as const;
 
-/** Назва поверхні макета. */
-export type SurfaceName = keyof typeof surfaces.light;
-
 /**
  * Поверхня й текст **сітки документа** — те, проти чого рахується контраст
  * комірки (`ФВ-14.17`).
@@ -316,9 +313,6 @@ export const themeSurface = {
   light: { body: '#ffffff', text: '#000000' },
   dark: { body: '#242424', text: '#c9c9c9' },
 } as const;
-
-/** Назва стану комірки. */
-export type CellStateName = keyof typeof cellState;
 
 /**
  * Тема — **єдине джерело** всіх візуальних значень (`ФВ-14.11`, `D-126`).
@@ -452,7 +446,8 @@ export const theme = createTheme({
     Button: { defaultProps: { size: 'sm' } },
     TextInput: { defaultProps: { size: 'sm' } },
     Select: { defaultProps: { size: 'sm' } },
-    NumberInput: { defaultProps: { size: 'sm' } },
+    // a11y: стрілки Mantine (data-direction, tabindex=-1) без імені; клавіатурні стрілки й ввід лишаються.
+    NumberInput: { defaultProps: { size: 'sm', hideControls: true } },
     Table: { defaultProps: { verticalSpacing: 'xs', horizontalSpacing: 'sm' } },
 
     // ⚠ Тривалість переходу задана ТУТ, а не в кожному діалозі: інакше перший

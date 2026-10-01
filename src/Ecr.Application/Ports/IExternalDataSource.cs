@@ -177,16 +177,6 @@ public interface IExternalDataSource
             });
 }
 
-/// <summary>Звідки атрибут події: з самої події чи з її первинного елемента.</summary>
-public enum SourceEventAttributeScope : byte
-{
-    /// <summary>Атрибут самої події.</summary>
-    Event = 0,
-
-    /// <summary>Атрибут первинного елемента події — значення на момент її початку.</summary>
-    PrimaryElement = 1,
-}
-
 /// <summary>Атрибут, який треба прочитати з події.</summary>
 /// <param name="Name">Ім'я атрибута з каталогу.</param>
 /// <param name="Scope">Звідки атрибут.</param>

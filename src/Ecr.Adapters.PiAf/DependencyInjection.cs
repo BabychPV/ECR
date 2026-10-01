@@ -36,7 +36,18 @@ public static class DependencyInjection
         // API в цьому репозиторії — 30 с узято як практичний поріг «досить
         // повільно, щоб не чекати», не з довідника постачальника.
         services.AddHttpClient<PiWebApiDataSource>()
-            .ConfigureHttpClient(c => c.Timeout = TimeSpan.FromSeconds(30));
+            .ConfigureHttpClient(c => c.Timeout = TimeSpan.FromSeconds(30))
+            .ConfigurePrimaryHttpMessageHandler(
+                () => PiWebApiAuthentication.CreatePrimaryHandler(PiWebApiAuthMode.Bearer));
+
+        // Режим Negotiate (секрет `Negotiate` або відсутній, D-34) — окремий
+        // клієнт: облікові дані процесу — властивість ОБРОБНИКА, а не запиту,
+        // тож заголовкові режими й Windows-автентифікація не можуть ділити
+        // один пул з'єднань. Таймаут той самий, що вище (Q-250).
+        services.AddHttpClient(PiWebApiAuthentication.NegotiateClientName)
+            .ConfigureHttpClient(c => c.Timeout = TimeSpan.FromSeconds(30))
+            .ConfigurePrimaryHttpMessageHandler(
+                () => PiWebApiAuthentication.CreatePrimaryHandler(PiWebApiAuthMode.Negotiate));
 
         // ⛔ Через ТИПІЗОВАНИЙ клієнт, а не `AddScoped<IExternalDataSource,
         // PiWebApiDataSource>()`. Різниця не стильова: друга форма будує

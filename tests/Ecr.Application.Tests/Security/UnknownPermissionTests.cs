@@ -57,7 +57,6 @@ public sealed class UnknownPermissionTests
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait("Finding", "H-21")]
-    [Trait("Requirement", "ФВ-6.3")]
     public async Task Невідомий_код_права_відхиляє_весь_набір()
     {
         var error = await Assert.ThrowsAsync<NotFoundException>(

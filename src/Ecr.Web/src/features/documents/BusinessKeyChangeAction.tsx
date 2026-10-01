@@ -104,7 +104,7 @@ function isRekeyStale(error: unknown): boolean {
   );
 }
 
-export interface BusinessKeyChangeActionArgs {
+interface BusinessKeyChangeActionArgs {
   readonly documentId: number;
 
   /** `undefined` — документ ще не приїхав: кнопки немає, немає й чинного ключа. */
@@ -114,7 +114,7 @@ export interface BusinessKeyChangeActionArgs {
   readonly periodKey: number;
 }
 
-export interface BusinessKeyChangeAction {
+interface BusinessKeyChangeAction {
   /**
    * Пункт меню «More» сторінки документа; `null`, якщо права немає.
    *

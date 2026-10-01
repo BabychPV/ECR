@@ -15,7 +15,7 @@ namespace Ecr.Application.Projects;
 /// <param name="Id">Ідентифікатор.</param>
 /// <param name="Code">Код.</param>
 /// <param name="Status">Стан проєкту.</param>
-/// <param name="TimeZoneId">Пояс майданчика — ідентифікатор IANA (`Asia/Aqtau`).</param>
+/// <param name="TimeZoneId">Пояс майданчика — ідентифікатор IANA (`Asia/Atyrau`).</param>
 /// <param name="PeriodKind">Періодичність.</param>
 /// <param name="CurrentPeriodId">Поточний період — підказка UI, не правило доступу (D-77).</param>
 /// <param name="PeriodCount">Скільки періодів у календарі.</param>
@@ -89,7 +89,7 @@ public sealed class ListProjectsHandler(
 
             // ⛔ ФВ-6.14: і право перегляду — в самому проєкті (оператор
             // з областю «A» бачить у переліку лише A).
-            .Where(id => profile.Has(Permission, id))
+            .Where(id => PermissionCheck.IsGrantedIn(profile, Permission, id))
             .ToList();
 
         return await projects.ListAsync(page, visibleIds, ct).ConfigureAwait(false);
@@ -289,7 +289,7 @@ public sealed class UpdatePeriodPolicyHandler(
             {
                 // Політика ні на що не діє — як і її створення, це дія поза
                 // будь-яким проєктом (`GlobalUseOfProjectCode`).
-                if (!profile.Has(Permission))
+                if (!PermissionCheck.IsGranted(profile, Permission))
                 {
                     throw new AccessDeniedException(
                         "ECR-AUTH-0403", $"Потрібне право {Permission}.",
@@ -303,7 +303,7 @@ public sealed class UpdatePeriodPolicyHandler(
             else
             {
                 var unmanaged = projectIds.Count(pid =>
-                    !profile.Has(Permission, pid)
+                    !PermissionCheck.IsGrantedIn(profile, Permission, pid)
                     || profile.LevelFor(ResourceKind.Project, pid) < GrantLevel.Manage);
 
                 if (unmanaged > 0)
@@ -324,6 +324,22 @@ public sealed class UpdatePeriodPolicyHandler(
             var before = PeriodPolicyMapping.ToDto(policy);
             policy.UpdateOffsets(openOffsetDays, graceOffsetDays, hardCloseOffsetDays, yearGraceOffsetDays);
             var after = PeriodPolicyMapping.ToDto(policy);
+
+            // ⛔ ФВ-1.6: збережені `Computed*At` наявних періодів перераховуються В ТІЙ САМІЙ
+            // транзакції — раніше вони мінялися лише при перебудові календаря, і новий зсув
+            // «діяв» лише на майбутні періоди. Закриті не чіпаємо (`PeriodBoundaryRefresh`).
+            foreach (var projectId in projectIds)
+            {
+                var project = await periods.FindProjectAsync(projectId, innerCt).ConfigureAwait(false);
+                if (project is null)
+                {
+                    continue;
+                }
+
+                Periods.PeriodBoundaryRefresh.Apply(
+                    project.Periods, policy,
+                    Domain.ValueObjects.SiteTimeZone.Create(project.TimeZoneId).ToTimeZoneInfo());
+            }
 
             // ⛔ Журнал — у тій самій транзакції, що й зміна: збій збереження не
             // лишає запису про зміну, якої не сталося, і навпаки.
@@ -388,7 +404,7 @@ public sealed class CreateProjectHandler(
     /// <summary>Створює проєкт на звітний рік.</summary>
     /// <param name="code">Код проєкту.</param>
     /// <param name="name">Назва мовами каталогу.</param>
-    /// <param name="timeZoneId">Пояс майданчика — ідентифікатор IANA (<c>Asia/Aqtau</c>).</param>
+    /// <param name="timeZoneId">Пояс майданчика — ідентифікатор IANA (<c>Asia/Atyrau</c>).</param>
     /// <param name="periodKind">Періодичність.</param>
     /// <param name="year">Звітний рік; <c>null</c> — поточний **у поясі майданчика**.</param>
     /// <param name="templateVersionId">Версія шаблону.</param>
@@ -435,8 +451,8 @@ public sealed class CreateProjectHandler(
         var zone = SiteTimeZone.Create(timeZoneId);
 
         // ⛔ Рік беремо в поясі МАЙДАНЧИКА, а не сервера. Тут стояло
-        // `clock.UtcNow.Year`, і для майданчика на `Asia/Almaty` (UTC+6)
-        // проєкт, створений 1 січня о 03:00 за місцем (це 31 грудня 21:00
+        // `clock.UtcNow.Year`, і для майданчика на `Asia/Atyrau` (UTC+5)
+        // проєкт, створений 1 січня о 02:00 за місцем (це 31 грудня 21:00
         // UTC), отримував МИНУЛИЙ рік: дванадцять періодів із ключами
         // `YYYY*100+N` не того року. `PeriodKey` — ключ партиціонування (R-A6),
         // тож дані поїхали б у чужі партиції й у чужий архів, а виглядало б це
@@ -967,6 +983,13 @@ public sealed class ChangeProjectTimeZoneHandler(
         // зміни після відкриття першого періоду обидва йдуть звідти
         // (`Project.ChangeTimeZone`), обробник нічого не дублює.
         project.ChangeTimeZone(timeZoneId);
+
+        // ⛔ ФВ-1.6: пояс змінюється лише поки всі періоди Scheduled, але їхні збережені
+        // `Computed*At` уже пораховані в СТАРОМУ поясі — перераховуємо в новому.
+        Periods.PeriodBoundaryRefresh.Apply(
+            project.Periods,
+            await periods.GetPolicyAsync(project.PeriodPolicyId, ct).ConfigureAwait(false),
+            Domain.ValueObjects.SiteTimeZone.Create(project.TimeZoneId).ToTimeZoneInfo());
 
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
     }

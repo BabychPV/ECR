@@ -69,8 +69,11 @@ public sealed class AccessProfileCache(IMemoryCache memory, CacheLifetimes? life
         var key = Key(userId, securityStamp, groupsFingerprint);
         if (memory.TryGetValue(key, out AccessProfile? cached) && cached is not null)
         {
+            Observability.InfrastructureMetrics.RecordCache(Observability.InfrastructureMetrics.AccessProfileCacheName, hit: true);
             return cached;
         }
+
+        Observability.InfrastructureMetrics.RecordCache(Observability.InfrastructureMetrics.AccessProfileCacheName, hit: false);
 
         // ⛔ Вхід у систему сотні людей о 9:00 — це сотня промахів на РІЗНИХ
         // ключах, але одна людина з десятком вкладок дає десяток промахів на
@@ -88,7 +91,10 @@ public sealed class AccessProfileCache(IMemoryCache memory, CacheLifetimes? life
             return ready;
         }
 
+        var started = System.Diagnostics.Stopwatch.GetTimestamp();
         var profile = await factory(ct).ConfigureAwait(false);
+        Observability.InfrastructureMetrics.RecordAccessProfileBuild(
+            System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalSeconds);
 
         // ⛔ Профіль симуляції в кеш не потрапляє НІКОЛИ (ФВ-6.16a п. 4).
         // Ключ складається з користувача і штампа — тобто профіль суб'єкта ліг

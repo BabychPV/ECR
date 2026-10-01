@@ -4,7 +4,7 @@ import { t } from '@/shared/i18n';
 import type { DocumentLock } from './documentLock';
 
 /** Властивості банера. */
-export interface DocumentLockBannerProps {
+interface DocumentLockBannerProps {
   readonly lock: DocumentLock | null;
   /** Період — у тексті, щоб банер казав, ЯКИЙ саме закрито. */
   readonly periodKey: number;

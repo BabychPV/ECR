@@ -49,7 +49,6 @@ public sealed class GoldenCalculationTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
-    [Trait("Requirement", "ФВ-9.16")]
     public async Task Тонни_для_ХСК_збігаються_з_очікуваним_значенням_фікстури()
     {
         var output = await RunAsync();

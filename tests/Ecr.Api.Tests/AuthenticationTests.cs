@@ -173,6 +173,7 @@ public sealed class AuthenticationTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-6.11")]
     public async Task Пароль_не_зустрічається_у_логах_трасуванні_і_відповідях()
     {
         var name = await ArrangeLocalUserAsync().ConfigureAwait(true);
@@ -214,7 +215,6 @@ public sealed class AuthenticationTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
-    [Trait("Requirement", "ФВ-6.11")]
     public async Task Анонімний_запит_до_захищеного_ендпоінта_дає_401_а_не_редирект()
     {
         using var app = new EcrApiFactory(sql);
@@ -232,7 +232,6 @@ public sealed class AuthenticationTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
-    [Trait("Requirement", "ФВ-6.2")]
     public async Task Після_зміни_пароля_сеанс_працює_попри_живий_кеш_штампа()
     {
         var name = await ArrangeLocalUserAsync().ConfigureAwait(true);

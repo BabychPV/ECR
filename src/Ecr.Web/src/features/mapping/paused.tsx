@@ -18,7 +18,7 @@ import { t } from '@/shared/i18n';
  */
 
 /** Діючі мапінги — лише вони кладуть значення в документ. */
-export function activeFields(fields: readonly MappedFieldPreview[]): MappedFieldPreview[] {
+function activeFields(fields: readonly MappedFieldPreview[]): MappedFieldPreview[] {
   return fields.filter((field) => field.isActive);
 }
 

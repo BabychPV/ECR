@@ -376,7 +376,8 @@ public sealed class SubmitRecalculationRaceTests(SqlServerFixture sql)
             BuildRecalculation(db, doc, beforeWrite: null),
             methodologies,
             new TemplateVersionStore(db),
-            new RegistryStore(db));
+            new RegistryStore(db),
+            new AuditWriter(db));
     }
 
     /// <summary>

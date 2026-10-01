@@ -54,10 +54,13 @@ public sealed class SearchStore(EcrDbContext db) : ISearchStore
         if (scope.Registries)
         {
             // Лише активні — як і перелік довідників (`RegistryStore.ListDefinitionsAsync`).
+            // S18: без довідників, на які користувачу дано явну заборону.
+            var deniedJson = JsonSerializer.Serialize(scope.DeniedRegistries ?? []);
             var registries = db.Database.SqlQuery<Row>($"""
                 SELECT CAST(r.Id AS bigint) AS Id, r.Code, r.NameL10n AS Name
                 FROM cfg.RegistryDef r
                 WHERE r.IsActive = 1
+                  AND r.Id NOT IN (SELECT CAST(j.value AS int) FROM OPENJSON({deniedJson}) j)
                   AND (r.Code LIKE {pattern} ESCAPE N'\'
                        OR EXISTS (SELECT 1 FROM OPENJSON(CASE WHEN ISJSON(r.NameL10n) = 1 THEN r.NameL10n END) n
                                   WHERE n.value COLLATE DATABASE_DEFAULT LIKE {pattern} ESCAPE N'\'))

@@ -32,7 +32,7 @@ import type { RouteHandle } from './routes';
  */
 
 /** Домени, які вміє резолвити ця версія breadcrumbs. */
-export type CrumbResolverId = NonNullable<RouteHandle['crumb']>['resolveWith'];
+type CrumbResolverId = NonNullable<RouteHandle['crumb']>['resolveWith'];
 
 /** Значення параметрів поточного матчу (`useParams()`), як рядки чи `undefined`. */
 export type CrumbParams = Readonly<Record<string, string | undefined>>;
@@ -106,7 +106,7 @@ const lookups: Record<NonNullable<CrumbResolverId>, (params: CrumbParams) => Res
 };
 
 /** Підсумок спроби резолву однієї динамічної крихти. */
-export type CrumbResolution =
+type CrumbResolution =
   | { status: 'resolved'; text: string }
   // ⚠ Запит на цей ключ ще виконується (`fetchStatus: 'fetching'`) — крихта
   // покаже вузький `Skeleton`, доки він не завершиться.

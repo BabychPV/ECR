@@ -15,6 +15,7 @@ import { SecurityPage } from '@/pages/admin/SecurityPage';
 import { PeriodsPage } from '@/pages/admin/PeriodsPage';
 import { SourcesPage } from '@/pages/admin/SourcesPage';
 import { MappingPreviewPage } from '@/pages/admin/MappingPreviewPage';
+import { PipelinePage } from '@/pages/admin/PipelinePage';
 import { JobsPage } from '@/pages/admin/JobsPage';
 import { SnapshotsPage } from '@/pages/admin/SnapshotsPage';
 import { NotificationsPage } from '@/pages/admin/NotificationsPage';
@@ -34,6 +35,9 @@ const Pages: [string, () => JSX.Element][] = [
   ['/admin/periods', PeriodsPage],
   ['/admin/sources', SourcesPage],
   ['/admin/mapping', MappingPreviewPage],
+
+  // ⚠ Редактор конвеєра (`ФВ-14.3`, область 9) — сюди ж: частина найлегша.
+  ['/admin/pipeline', PipelinePage],
   ['/admin/jobs', JobsPage],
   ['/admin/snapshots', SnapshotsPage],
 

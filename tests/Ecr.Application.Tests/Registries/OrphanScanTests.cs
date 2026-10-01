@@ -145,12 +145,12 @@ public sealed class OrphanScanTests
         // раніше за період документа.
         var permit = Entry(PermitEntry, from: new DateOnly(2025, 1, 1), to: new DateOnly(2026, 12, 31));
         _registries.FindEntryAsync(PermitEntry, Arg.Any<CancellationToken>()).Returns(permit);
-        _registries.FindDefinitionByIdAsync(Arg.Any<int>(), Arg.Any<CancellationToken>())
+        _registries.FindDefinitionAsync("PERMITS", Arg.Any<CancellationToken>())
                    .Returns(Definition());
         _scanner.RescanForEntryAsync(PermitEntry, Arg.Any<CancellationToken>()).Returns(3);
 
         var affected = await Handler().HandleAsync(
-            PermitEntry, new DateOnly(2025, 1, 1), new DateOnly(2026, 1, 31), CancellationToken.None);
+            "PERMITS", PermitEntry, new DateOnly(2025, 1, 1), new DateOnly(2026, 1, 31), CancellationToken.None);
 
         // Перерахунок відбувся В ТІЙ САМІЙ операції, що й зміна вікна: між
         // двома комітами існував би стан, у якому запис уже нечинний, а рядки
@@ -362,10 +362,16 @@ public sealed class OrphanScanTests
             NSubstitute.Substitute.For<Ecr.Application.Recalculation.ISubmitRecalculation>(),
             _methodologies,
             NSubstitute.Substitute.For<ITemplateVersionStore>(),
-            NSubstitute.Substitute.For<IRegistryStore>());
+            NSubstitute.Substitute.For<IRegistryStore>(),
+            NSubstitute.Substitute.For<IAuditWriter>());
 
+    /// <summary>Довідник записів <see cref="Entry"/> (<c>RegistryDefId = 4</c>).</summary>
     private static RegistryDef Definition()
-        => new(EcrCode.Create("PERMITS"), Text("Permits"), isTemporal: true);
+    {
+        var definition = new RegistryDef(EcrCode.Create("PERMITS"), Text("Permits"), isTemporal: true);
+        typeof(RegistryDef).BaseType!.GetProperty("Id")!.SetValue(definition, 4);
+        return definition;
+    }
 
     private static AccessProfile Profile() => new()
     {

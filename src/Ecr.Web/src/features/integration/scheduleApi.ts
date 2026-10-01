@@ -3,8 +3,8 @@ import type { components } from '@/api/schema';
 
 /** Розклад збору для сутності джерела (ФВ-14.3). */
 export type CollectionSchedule = components['schemas']['CollectionScheduleView'];
-export type CreateCollectionScheduleBody = components['schemas']['CreateCollectionScheduleRequest'];
-export type UpdateCollectionScheduleBody = components['schemas']['UpdateCollectionScheduleRequest'];
+type CreateCollectionScheduleBody = components['schemas']['CreateCollectionScheduleRequest'];
+type UpdateCollectionScheduleBody = components['schemas']['UpdateCollectionScheduleRequest'];
 
 /*
  * ⛔ Адреси записані повністю, а не збираються з помічника — той самий прийом,
@@ -36,7 +36,7 @@ function ifMatch(rowVersion: string): HeadersInit {
  * контекст react-query «не має спільних полів». Сторонні поля (той самий
  * контекст) ігноруються; `dataSource` береться лише рядком.
  */
-export interface ListCollectionSchedulesOptions {
+interface ListCollectionSchedulesOptions {
   /** Код з'єднання: лише розклади сутностей цього з'єднання (поле `dataSourceCode` рядка). */
   dataSource?: string;
   [ignored: string]: unknown;

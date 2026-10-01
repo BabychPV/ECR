@@ -114,7 +114,7 @@ public sealed class CurrentPeriodPinAuditTests
             EcrCode.Create("PIN_2026"),
             new LocalizedText(new Dictionary<string, string> { ["en"] = "Pin" }),
             new DateOnly(2026, 1, 1), new DateOnly(2026, 12, 31),
-            templateVersionId: 3, PeriodKind.Monthly, periodPolicyId: 1, "Asia/Almaty");
+            templateVersionId: 3, PeriodKind.Monthly, periodPolicyId: 1, "Asia/Atyrau");
         typeof(Entity<int>).GetProperty("Id")!.SetValue(project, ProjectId);
 
         var period = new Period(ProjectId, new PeriodKey(202602), 2,

@@ -106,11 +106,13 @@ public sealed class TestDocumentBuilder(string connectionString)
             EcrCode.Create($"PRJ{tag}"), Name($"Project {tag}"),
             new DateOnly(2026, 1, 1), new DateOnly(2026, 12, 31),
             // IANA, а не `Central Asia Standard Time`: Windows-ідентифікатор
-            // домен більше не приймає (директива ПК-1 №06 §3). Обраний саме
-            // `Asia/Almaty` — це те, у що сама платформа переводить колишнє
-            // значення (виміряно `TryConvertWindowsIdToIanaId`), тож жодна
-            // порахована в тестах межа не зсунулася ні на секунду.
-            version.Id, PeriodKind.Monthly, policyId, "Asia/Almaty");
+            // домен більше не приймає (директива ПК-1 №06 §3). Обраний
+            // `Asia/Atyrau` (майданчик NCOC, +05:00 з 2004 року без переходів):
+            // його зсув не залежить від редакції бази поясів машини. Раніше
+            // тут стояв `Asia/Almaty`, зсув якого змінився 2024-03-01 (+06:00
+            // → +05:00), тож межі в тестах залежали від того, чи оновлено
+            // tzdata/Windows (F-4).
+            version.Id, PeriodKind.Monthly, policyId, "Asia/Atyrau");
         db.Projects.Add(project);
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
 
@@ -129,7 +131,11 @@ public sealed class TestDocumentBuilder(string connectionString)
         // BulkCellLoader, тож фікстура повторює бойовий шлях.
         var loader = new BulkCellLoader(connectionString, 1000);
         var instanceId = await loader.ReserveIdsAsync("doc.TableInstanceSeq", 1, ct).ConfigureAwait(false);
-        var firstRowId = await loader.ReserveIdsAsync("doc.TableRowSeq", rowCount, ct).ConfigureAwait(false);
+        // ⚠ rowCount = 0 — динамічна таблиця без жодного рядка (HSE301 A5b): резервувати нічого,
+        // а `ReserveIdsAsync` нуль відхиляє.
+        var firstRowId = rowCount > 0
+            ? await loader.ReserveIdsAsync("doc.TableRowSeq", rowCount, ct).ConfigureAwait(false)
+            : 0;
 
         var instance = new TableInstance(key, instanceId, document.Id, table.Id, now);
         db.TableInstances.Add(instance);

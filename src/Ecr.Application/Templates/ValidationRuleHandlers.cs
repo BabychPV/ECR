@@ -52,6 +52,9 @@ public sealed class SaveValidationRuleHandler(
     /// <summary>Право на редагування структури версії (`02-contracts.md` §9).</summary>
     public const string Permission = "Template.Edit";
 
+    /// <summary>Найбільша допустима область: 3 Document (ФВ-5.3).</summary>
+    public const byte MaxScope = 3;
+
     /// <summary>Створює або змінює правило валідації.</summary>
     /// <param name="templateVersionId">Версія-чернетка.</param>
     /// <param name="tableDefId">Таблиця, якій належить правило.</param>
@@ -76,6 +79,21 @@ public sealed class SaveValidationRuleHandler(
                 ErrorCodes.Unauthorized,
                 "Сесія не містить користувача.",
                 new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.anonymousWrite" });
+
+        // ⛔ ФВ-5.3: область — рівно 0 Cell, 1 Row, 2 Table, 3 Document. Інше значення
+        // (`Scope=7`) зберігалося б і НІКОЛИ не виконувалось (`ValidationEngine` знає лише ці
+        // чотири) — тихо мертве правило. Відмова до читання структури.
+        if (command.Scope > MaxScope)
+        {
+            throw new BusinessRuleException(
+                ErrorCodes.RequestInvalid,
+                $"Область правила {command.Scope} недопустима: лише 0 (комірка), 1 (рядок), 2 (таблиця), 3 (документ).",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-REQ-0422.validationScope",
+                    ["scope"] = command.Scope.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
+        }
 
         var version = await store.GetWithStructureAsync(templateVersionId, ct).ConfigureAwait(false);
 
@@ -103,6 +121,10 @@ public sealed class SaveValidationRuleHandler(
         ExpressionRejection.RequireValid(
             formulaEngine, version, command.Expression, ExpressionDialect.Template,
             new ExpressionSite(table.Id, null, command.ColumnDefId));
+
+        // ⛔ ФВ-5.9: посилання на іншу таблицю/аркуш/період контекст правила читає
+        // не тим, чим воно є, — відмова на збереженні, а не тиха неправда в рантаймі.
+        RuleExpressionChecks.RequireSupportedReferences(formulaEngine, command.Expression);
 
         var ecrCode = EcrCode.Create(code);
         var message = new LocalizedText(new Dictionary<string, string>(command.MessageL10n, StringComparer.OrdinalIgnoreCase));

@@ -33,6 +33,7 @@ public sealed class CollectionStoreRawPointUpsertTests(SqlServerFixture sql)
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Finding", "B4")]
+    [Trait("Requirement", "ФВ-11.3")]
     public async Task Точка_записана_старим_шляхом_EF_на_межі_мілісекунди_не_дублюється_новим_MERGE(long fractionTicks)
     {
         // ⛔ Межа «обрізання проти округлення». До виправлення сирі точки писав
@@ -87,6 +88,7 @@ public sealed class CollectionStoreRawPointUpsertTests(SqlServerFixture sql)
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Finding", "B4")]
+    [Trait("Requirement", "ФВ-11.3")]
     public async Task Мітка_з_точністю_понад_мілісекунду_знаходить_збережену_точку_а_не_дублює_її()
     {
         // ⛔ Шлях (а) між батчами: у базі лежить `.123`, джерело повертає ту
@@ -164,6 +166,7 @@ public sealed class CollectionStoreRawPointUpsertTests(SqlServerFixture sql)
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Finding", "P6")]
+    [Trait("Requirement", "ФВ-11.3")]
     public async Task Понад_сто_тисяч_наявних_точок_у_діапазоні_батча_дублікати_розпізнаються_а_нові_пишуться()
     {
         // ⛔ P6: стеля читання наявних точок (`Take(100 000)` за `Id`) була

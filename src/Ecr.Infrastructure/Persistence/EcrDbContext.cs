@@ -35,6 +35,7 @@ public sealed class EcrDbContext(DbContextOptions<EcrDbContext> options)
     public DbSet<HeaderFieldDef> HeaderFieldDefs => Set<HeaderFieldDef>();
     public DbSet<RowDef> RowDefs => Set<RowDef>();
     public DbSet<StyleDef> StyleDefs => Set<StyleDef>();
+    public DbSet<ConditionalFormatRule> ConditionalFormatRules => Set<ConditionalFormatRule>();
     public DbSet<FormulaDef> FormulaDefs => Set<FormulaDef>();
     public DbSet<FormulaDependency> FormulaDependencies => Set<FormulaDependency>();
     public DbSet<ValidationRule> ValidationRules => Set<ValidationRule>();
@@ -149,6 +150,12 @@ public sealed class EcrDbContext(DbContextOptions<EcrDbContext> options)
     public DbSet<RowWindowMap> RowWindowMaps => Set<RowWindowMap>();
     public DbSet<RowWindowSource> RowWindowSources => Set<RowWindowSource>();
     public DbSet<RowWindowValue> RowWindowValues => Set<RowWindowValue>();
+
+    /// <summary>Мапінг подій джерела в динамічну таблицю і зв'язки «подія ↔ рядок» (HSE301 §4.7.3).</summary>
+    public DbSet<SourceEventMap> SourceEventMaps => Set<SourceEventMap>();
+    public DbSet<SourceEventFieldMap> SourceEventFieldMaps => Set<SourceEventFieldMap>();
+    public DbSet<SourceEventValueMap> SourceEventValueMaps => Set<SourceEventValueMap>();
+    public DbSet<SourceEventLink> SourceEventLinks => Set<SourceEventLink>();
 
     // itg
     public DbSet<CollectionRun> CollectionRuns => Set<CollectionRun>();

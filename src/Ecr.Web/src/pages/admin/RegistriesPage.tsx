@@ -17,6 +17,8 @@ import {
   isExternalRegistry,
 } from '@/features/registries/RegistryEntryEditor';
 import { RegistryImportPanel } from '@/features/registries/RegistryImportPanel';
+import { RegistryExportButton } from '@/features/registries/export/RegistryExportButton';
+import { EntryUsageButton } from '@/features/registries/rc814/EntryUsageButton';
 import { SourceKindSwitch } from '@/features/registries/SourceKindSwitch';
 import { localized } from '@/shared/i18n/localized';
 import { can, useSession } from '@/shared/session/useSession';
@@ -259,7 +261,9 @@ export function RegistriesPage(): JSX.Element {
          `Format: date` (`RegistryEntryDto`) — це КАЛЕНДАРНІ межі вікна
          чинності, які звіряються з днем документа, а не з годинником.
          «12:00 AM» приписало б їм точність, якої в даних немає. */
-      render: (entry) => (
+      render: (entry) =>
+        // D7: нетемпоральний довідник вікна не має — «… — …» читалося б як «діє безстроково».
+        selected?.isTemporal !== true && entry.validFrom == null && entry.validTo == null ? null : (
         <>
           <Timestamp value={entry.validFrom} dateOnly fallback={Unbounded} />
           {' — '}
@@ -324,6 +328,23 @@ export function RegistriesPage(): JSX.Element {
           } satisfies DataTableColumn<RegistryEntryDto>,
         ]
       : []),
+
+    /*
+     * ФВ-8.14: «Де використовується» запис — окрема колонка (`rc814`). Право — те саме, що в
+     * `GET /registries/{code}/usage` (`Registry.EditDefinition`); діалог — лінивий чанк.
+     */
+    ...(code !== null && can(session.data, 'Registry.EditDefinition')
+      ? [
+          {
+            key: 'usage',
+            label: t('registries.entryUsage.column'),
+            sortable: false,
+            render: (entry: RegistryEntryDto) => (
+              <EntryUsageButton registryCode={code} entry={entry} siblings={entries.data ?? []} />
+            ),
+          } satisfies DataTableColumn<RegistryEntryDto>,
+        ]
+      : []),
   ];
 
   return (
@@ -380,6 +401,21 @@ export function RegistriesPage(): JSX.Element {
               </Text>
             )}
 
+            {/* RT-16: експорт записів, чинних на ту саму дату, що й перелік (темпоральний — сьогодні). */}
+            {selected !== undefined && <RegistryExportButton registryCode={selected.code} asOf={asOf} />}
+
+            {/* ФВ-8.12: табличний редактор даних довідника (`rc812`). */}
+            {selected !== undefined && (
+              <Button
+                component={Link}
+                to={`/admin/registries/${encodeURIComponent(selected.code)}/entries`}
+                size="xs"
+                variant="default"
+              >
+                {t('registries.data.open')}
+              </Button>
+            )}
+
             {/* ⛔ Вхід у конструктор (`ФВ-8.12`). Опис довідника — поля,
                 зв'язки, правила, мапінг — не мав в інтерфейсі жодного
                 споживача: подивитися, за яким правилом довідник перевіряє
@@ -392,6 +428,18 @@ export function RegistriesPage(): JSX.Element {
                 variant="default"
               >
                 {t('registries.constructor')}
+              </Button>
+            )}
+
+            {/* RT-25: які документи відкритих періодів зачепить правка довідника, і їх перерахунок. */}
+            {selected !== undefined && (
+              <Button
+                component={Link}
+                to={`/admin/registries/${encodeURIComponent(selected.code)}/impact`}
+                size="xs"
+                variant="default"
+              >
+                {t('registries.impact.open')}
               </Button>
             )}
 
@@ -435,7 +483,8 @@ export function RegistriesPage(): JSX.Element {
           {selected.isTemporal && <Badge variant="light">{t('registries.temporal')}</Badge>}
           {selected.isHierarchical && <Badge variant="light">{t('registries.hierarchical')}</Badge>}
           <Text size="xs" c="dimmed">
-            {t('registries.fields', { count: selected.fields.length })}
+            {/* D7: текст каталогу — лише «Fields» без {count}; число дописуємо самі. */}
+            {`${t('registries.fields', { count: selected.fields.length })}: ${String(selected.fields.length)}`}
           </Text>
         </Group>
       )}

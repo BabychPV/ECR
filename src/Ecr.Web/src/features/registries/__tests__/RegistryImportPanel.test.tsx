@@ -44,6 +44,7 @@ const Strings: Record<string, string> = {
   'common.cancel': 'Cancel',
   'err.ECR-REG-0422.unknownColumn': 'This column is not a known field of the registry.',
   'err.ECR-REG-0422.duplicateCode': 'This code appears earlier in the same file.',
+  'err.ECR-REG-0422.valueNotNumber': 'The value "{value}" is not a number for a field of type {dataType}.',
 };
 
 interface ImportCall {
@@ -240,6 +241,35 @@ describe('RegistryImportPanel: імпорт записів довідника з
       fireEvent.click(apply);
       expect(imports).toHaveLength(1);
       expect(imports[0]?.url).toContain('dryRun=true');
+    },
+    SlowEnvTimeout,
+  );
+
+  it(
+    'D1: плейсхолдери причини підставляються з params рядка, а не лишаються шаблоном',
+    async () => {
+      // ⛔ Мутація: прибрати `{ ...error.params }` у RegistryImportPanel — на екрані
+      // лишається `{value}`/`{dataType}`, і тест червоніє.
+      report = reportOf({
+        added: 0,
+        errors: [
+          {
+            row: 2,
+            key: 'IMP003',
+            field: 'capacity',
+            messageKey: 'err.ECR-REG-0422.valueNotNumber',
+            params: { value: 'abc', dataType: 'Decimal' },
+          },
+        ],
+      });
+
+      await show();
+      fireEvent.click(await screen.findByRole('button', { name: 'Import from CSV' }));
+      pick('bad.csv');
+      await applyButton();
+
+      expect(screen.getByText('The value "abc" is not a number for a field of type Decimal.')).toBeTruthy();
+      expect(screen.queryByText(/\{value\}|\{dataType\}/)).toBeNull();
     },
     SlowEnvTimeout,
   );

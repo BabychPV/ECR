@@ -163,6 +163,7 @@ public sealed class GetTemplateStructureHandler(
         var formula = rowFormulas.GetValueOrDefault(row.Id);
 
         return new TemplateRowDto(
+            row.Id,
             row.RowKeyValue,
             row.Ordinal,
             row.RowKind.ToString(),

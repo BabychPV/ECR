@@ -1126,6 +1126,13 @@ public sealed class AccessDecisionService(
                 // закрив дві.
                 decision = EditDecision.AllowWithConfirmation(outcome.Detail);
             }
+            else if (outcome.Reason != EditDenyReason.None
+                     && outcome.Behavior == OutOfWindowBehavior.Warn)
+            {
+                // ФВ-2.16 / D-239: Warn — правка проходить, але журнал
+                // позначає її IsOutOfWindow. Підтвердження не потрібне.
+                decision = EditDecision.AllowMarked(outcome.Detail);
+            }
         }
 
         return decision;

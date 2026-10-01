@@ -4,6 +4,7 @@ import type { DocumentTableDto } from '@/api/types';
 import { localized } from '@/shared/i18n/localized';
 import { t } from '@/shared/i18n';
 import { DocumentGrid } from './DocumentGrid';
+import { completeCellNavigation, useCellNavigation } from './cellNavigation';
 
 /**
  * Усі таблиці активного аркуша — ОДНИМ лінивим елементом, сітки монтуються
@@ -226,11 +227,55 @@ export function SheetTables({
      */
   }, [tables, mounted]);
 
+  /**
+   * Перехід від зауваження до комірки (`ФВ-5.6`, `cellNavigation.ts`).
+   *
+   * ⚠ Ціль — ПЕРШИЙ екземпляр таблиці з потрібним `tableDefId` на активному
+   * аркуші: зауваження сервера адресоване описом таблиці, не екземпляром.
+   * Таблиці на аркуші немає — запит чекає: сторінка саме перемикає аркуш, і
+   * нові `tables` прийдуть наступним рендером.
+   */
+  const navigation = useCellNavigation();
+  const navigationTarget =
+    navigation === null
+      ? undefined
+      : tables.find((table) => table.tableDefId === navigation.tableDefId);
+
+  /** Запит, до слота якого вже прокрутили: прокрутка — одна на клік. */
+  const scrolledFor = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (navigation === null || navigationTarget === undefined) return;
+
+    const id = navigationTarget.tableInstanceId;
+
+    // ⛔ Сітка цільової таблиці може бути ще не змонтована (далеко внизу
+    // аркуша): спостерігач змонтує її лише після прокрутки, а плавна
+    // прокрутка сторінки проходить повз 90 заглушок не миттєво. Тому монтуємо
+    // явно, не чекаючи спостерігача.
+    if (!mounted.has(id)) {
+      setMounted((previous) => (previous.has(id) ? previous : new Set(previous).add(id)));
+    }
+
+    if (scrolledFor.current !== navigation.seq) {
+      scrolledFor.current = navigation.seq;
+      slots.current.get(id)?.scrollIntoView?.({ block: 'start', behavior: 'smooth' });
+    }
+
+    // Зауваження до таблиці цілком: слот у полі зору — перехід завершено.
+    // Решту завершить сітка, коли поставить фокус на комірку.
+    if (navigation.rowKey === null) completeCellNavigation(navigation.seq);
+  }, [navigation, navigationTarget, mounted]);
+
   return (
     <>
       {tables.map((table) => {
         const id = table.tableInstanceId;
         const isMounted = mounted.has(id);
+        const navigateTo =
+          navigation !== null && navigation.rowKey !== null && navigationTarget === table
+            ? navigation
+            : null;
 
         return (
           <Stack
@@ -258,6 +303,7 @@ export function SheetTables({
                 readOnly={readOnly}
                 allowsDynamicRows={table.allowsDynamicRows}
                 maxDynamicRows={table.maxDynamicRows}
+                navigateTo={navigateTo}
               />
             ) : (
               <LazyTablePlaceholder />

@@ -4,6 +4,7 @@ using Ecr.Application.Common;
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
+using Ecr.Application.Sources;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.External;
 using Ecr.Domain.Enums;
@@ -343,8 +344,12 @@ public sealed class SaveCollectionScheduleHandler(
     IAccessDecisionService access,
     IUnitOfWork uow,
     ICurrentUser currentUser,
-    IClock clock)
+    IClock clock,
+    IAuditWriter audit)
 {
+    /// <summary>Операція в журналі структурних змін (<c>ФВ-12.10</c>).</summary>
+    public const string AuditOperation = "SaveCollectionSchedule";
+
     /// <summary>Змінює cron і стан розкладу; повертає його новий вигляд.</summary>
     /// <param name="id">Розклад.</param>
     /// <param name="cron">Новий вираз cron (формат Quartz).</param>
@@ -380,6 +385,8 @@ public sealed class SaveCollectionScheduleHandler(
             ListCollectionSchedulesHandler.RequireCollectableSource(row.SourceKind, row.SourceEntityCode);
         }
 
+        var before = IntegrationConfigAudit.Snapshot(row.Schedule);
+
         row.Schedule.Reschedule(text);
 
         if (lookbackDays is { } days)
@@ -396,7 +403,16 @@ public sealed class SaveCollectionScheduleHandler(
             row.Schedule.Disable();
         }
 
-        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+        // ФВ-12.10: старий і новий розклад (cron, вмикання, вікно) — у журналі, в одній транзакції зі збереженням.
+        await uow.ExecuteInTransactionAsync(async innerCt =>
+        {
+            await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+            await IntegrationConfigAudit.WriteAsync(
+                audit, clock, currentUser, IntegrationConfigAudit.ScheduleType, row.Schedule.Id, AuditOperation,
+                before, IntegrationConfigAudit.Snapshot(row.Schedule),
+                $"Розклад збору {row.Schedule.Id} сутності «{row.SourceEntityCode}» змінено.", innerCt)
+                .ConfigureAwait(false);
+        }, ct).ConfigureAwait(false);
 
         // ⚠ Постановка ПІСЛЯ збереження (`CollectionScheduleApplier`): до неї
         // розклади читалися з бази рівно раз, на старті, і правка не доходила до
@@ -436,8 +452,12 @@ public sealed class CreateCollectionScheduleHandler(
     IAccessDecisionService access,
     IUnitOfWork uow,
     ICurrentUser currentUser,
-    IClock clock)
+    IClock clock,
+    IAuditWriter audit)
 {
+    /// <summary>Операція в журналі структурних змін (<c>ФВ-12.10</c>).</summary>
+    public const string AuditOperation = "CreateCollectionSchedule";
+
     /// <summary>Заводить розклад і ставить його в планувальник.</summary>
     /// <param name="sourceEntityId">Сутність джерела, яку збиратимуть.</param>
     /// <param name="cron">Вираз cron (формат Quartz).</param>
@@ -501,7 +521,17 @@ public sealed class CreateCollectionScheduleHandler(
         }
 
         store.Add(schedule);
-        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+
+        // ФВ-12.10: новий розклад — у журналі структурних змін, в одній транзакції зі збереженням.
+        await uow.ExecuteInTransactionAsync(async innerCt =>
+        {
+            await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+            await IntegrationConfigAudit.WriteAsync(
+                audit, clock, currentUser, IntegrationConfigAudit.ScheduleType, schedule.Id, AuditOperation,
+                oldJson: null, newJson: IntegrationConfigAudit.Snapshot(schedule),
+                reason: $"Розклад збору {schedule.Id} для сутності «{entity.Code}» створено.", innerCt)
+                .ConfigureAwait(false);
+        }, ct).ConfigureAwait(false);
 
         await ListCollectionSchedulesHandler
             .ApplyOrFailAsync(applier, uow, clock, schedule, ct).ConfigureAwait(false);
@@ -520,8 +550,13 @@ public sealed class DeleteCollectionScheduleHandler(
     IBackgroundJobScheduler scheduler,
     IAccessDecisionService access,
     IUnitOfWork uow,
-    ICurrentUser currentUser)
+    ICurrentUser currentUser,
+    IClock clock,
+    IAuditWriter audit)
 {
+    /// <summary>Операція в журналі структурних змін (<c>ФВ-12.10</c>).</summary>
+    public const string AuditOperation = "DeleteCollectionSchedule";
+
     /// <summary>Знімає розклад із планувальника і прибирає рядок.</summary>
     /// <param name="id">Розклад.</param>
     /// <param name="ifMatch">Заголовок <c>If-Match</c> зі значенням <c>rowVersion</c>.</param>
@@ -547,7 +582,18 @@ public sealed class DeleteCollectionScheduleHandler(
                 CollectionScheduleApplier.PayloadOf(row.Schedule.SourceEntityId), ct)
             .ConfigureAwait(false);
 
+        // ФВ-12.10: що саме було видалено (старий розклад) — у журналі, в одній транзакції з видаленням.
+        var removed = IntegrationConfigAudit.Snapshot(row.Schedule);
         store.Remove(row.Schedule);
-        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+
+        await uow.ExecuteInTransactionAsync(async innerCt =>
+        {
+            await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+            await IntegrationConfigAudit.WriteAsync(
+                audit, clock, currentUser, IntegrationConfigAudit.ScheduleType, id, AuditOperation,
+                removed, newJson: null,
+                $"Розклад збору {id} сутності «{row.SourceEntityCode}» видалено.", innerCt)
+                .ConfigureAwait(false);
+        }, ct).ConfigureAwait(false);
     }
 }

@@ -15,6 +15,7 @@ import type { CellChangePage } from '@/api/types';
 import { authorName, useAuthorOptions } from '@/features/audit/authorOptions';
 import { cellChangeOrigins, cellChangesQuery, isSingleCell, useCellChanges } from '@/features/audit/api';
 import { FilterHints, readerOnlyDescription } from '@/features/audit/FilterHints';
+import { SecurityEventsPanel } from '@/features/audit/SecurityEventsPanel';
 import { StructureChangesPanel } from '@/features/audit/StructureChangesPanel';
 import { StructureExportButton } from '@/features/audit/StructureExportButton';
 import { Timestamp } from '@/shared/ui/Timestamp';
@@ -128,7 +129,10 @@ export function AuditPage(): JSX.Element {
   // (`?view=structure`), бо саме адресу людина надсилає колезі. Журнал комірок
   // на ній НЕ запитується: зайвий запит по партиціях заради невидимої таблиці.
   const structure = view === 'structure';
-  const changes = useCellChanges(filter, !structure);
+  // ФВ-5.24: третя вкладка — журнал подій безпеки (`?view=security`), з тих самих міркувань.
+  const security = view === 'security';
+  const other = structure || security;
+  const changes = useCellChanges(filter, !other);
 
   // ⛔ `R-18`: попередня сторінка лишається на екрані, доки їде нова. Раніше кожен
   // застосований debounce фільтра клав скелет на місце таблиці й будував її
@@ -153,12 +157,14 @@ export function AuditPage(): JSX.Element {
         actions={
           <Group gap="xs" align="end">
             <SegmentedControl
+              aria-label={t('audit.title')}
               size="xs"
-              value={structure ? 'structure' : 'cells'}
-              onChange={(value) => setView(value === 'structure' ? 'structure' : null)}
+              value={structure ? 'structure' : security ? 'security' : 'cells'}
+              onChange={(value) => setView(value === 'structure' || value === 'security' ? value : null)}
               data={[
                 { value: 'cells', label: t('audit.viewCells') },
                 { value: 'structure', label: t('audit.viewStructure') },
+                { value: 'security', label: t('audit.viewSecurity') },
               ]}
             />
             <TextInput
@@ -192,7 +198,7 @@ export function AuditPage(): JSX.Element {
               miw={140}
               // ⚠ На вкладці структурних змін документа немає: мертвий фільтр
               // читався б як «за цим документом змін не було».
-              display={structure ? 'none' : undefined}
+              display={other ? 'none' : undefined}
               label={t('audit.document')}
               // ⚠ `U-21`: пояснення лишається для читалки, а видиме — під рядом
               // фільтрів (`FilterHints`); інакше воно зсуває ряд шапки.
@@ -212,10 +218,11 @@ export function AuditPage(): JSX.Element {
 
       {structure && <StructureExportButton from={fromDate} to={toDate} />}
       {structure && <StructureChangesPanel key={`${fromDate}:${toDate}`} from={fromDate} to={toDate} />}
+      {security && <SecurityEventsPanel key={`${fromDate}:${toDate}`} from={fromDate} to={toDate} />}
 
       {/* ⚠ Відступ усередині цієї обгортки НАВМИСНО не зсунуто: зсув — це
           форматування 160 рядків, а воно йде окремим PR (CLAUDE.md, правило 4). */}
-      {!structure && (
+      {!other && (
       <>
       {/* ⚠ Фільтри ОКРЕМИМ рядком, а не в шапці: їх шість, і в шапці вони
           витіснили б заголовок за край на ноутбучній ширині. */}
@@ -431,7 +438,7 @@ const CellChangesTable = memo(function CellChangesTable({
   readonly items: readonly CellChange[];
 }): JSX.Element {
   return (
-    <Table striped className="ecr-sticky-head">
+    <Table striped className="ecr-sticky-head" aria-label={t('audit.title')}>
       <Table.Thead>
         <Table.Tr>
           <Table.Th>{t('audit.when')}</Table.Th>
@@ -457,6 +464,12 @@ const CellChangesTable = memo(function CellChangesTable({
               {change.isLateEdit && (
                 <Badge ml="xs" size="xs" color="statusWarning" variant="light">
                   {t('audit.late')}
+                </Badge>
+              )}
+              {/* ФВ-2.16 / D-239: правка за політикою Warn поза вікном доступу. */}
+              {change.isOutOfWindow && (
+                <Badge ml="xs" size="xs" color="statusWarning" variant="outline">
+                  {t('audit.outOfWindow')}
                 </Badge>
               )}
             </Table.Td>

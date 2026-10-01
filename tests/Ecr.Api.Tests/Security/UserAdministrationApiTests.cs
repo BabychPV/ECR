@@ -65,6 +65,8 @@ public sealed class UserAdministrationApiTests(SqlServerFixture sql)
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "BE-12")]
+    [Trait("Requirement", "ФВ-6.4a")]
+    [Trait("Requirement", "ФВ-6.11")]
     public async Task Скидання_дає_разовий_пароль_обриває_сесію_і_не_віддає_пароля_ніде()
     {
         var ids = await ArrangeAsync().ConfigureAwait(true);

@@ -70,7 +70,7 @@ describe('Конфігуратор методологій', () => {
     expect(defaultVersion([], null)).toBeUndefined();
   });
 
-  it('ФВ-16.6: текстовий результат іде без одиниці', () => {
+  it('текстовий результат іде без одиниці', () => {
     const draft = {
       versionId: 5,
       code: 'verdict',

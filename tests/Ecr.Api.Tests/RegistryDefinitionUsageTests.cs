@@ -39,6 +39,7 @@ public sealed class RegistryDefinitionUsageTests(SqlServerFixture sql)
     [Trait(TestCategories.Stage, TestCategories.Stage4)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Directive", "BE-24")]
+    [Trait("Requirement", "ФВ-8.14")]
     public async Task Колонка_шаблону_і_поле_сусіднього_довідника_рахуються_обидві()
     {
         using var app = new EcrApiFactory(sql);

@@ -29,6 +29,14 @@ namespace Ecr.Application.Documents;
 /// конструюють обробник вручну: у контейнері розв'язується завжди, і без нього
 /// колонка <c>Calculated</c> була б порожньою — рівно дефект, який тут закрито.
 /// </param>
+/// <param name="conditionalFormats">
+/// Правила умовного форматування версії (ФВ-2.6/2.7); один запит на зріз.
+/// Необов'язковий лише заради тестів, що конструюють обробник вручну.
+/// </param>
+/// <param name="audit">
+/// Журнал змін — для значка «правка поза вікном» (<c>ФВ-2.16</c>); один запит
+/// на зріз. Необов'язковий лише заради тестів, що конструюють обробник вручну.
+/// </param>
 public sealed class GetTableSliceHandler(
     IRowStore rowStore,
     ICellStore cellStore,
@@ -39,7 +47,9 @@ public sealed class GetTableSliceHandler(
     IPeriodStore periods,
     IStyleCatalog styles,
     IMemoryCache? memory = null,
-    ICalculationResultStore? results = null)
+    ICalculationResultStore? results = null,
+    IConditionalFormatStore? conditionalFormats = null,
+    IAuditReader? audit = null)
 {
     private readonly MethodologyRequiredColumnsCache _required = new(memory);
 
@@ -324,8 +334,93 @@ public sealed class GetTableSliceHandler(
             }
         }
 
+        // ФВ-2.6/2.7: умовне форматування — ОДИН запит на версію й та сама
+        // чиста функція, що в Excel-експорті (`ConditionalFormatEvaluator`).
+        var formats = await ConditionalFormatsAsync(instance.TemplateVersionId, columns, rows, ct)
+            .ConfigureAwait(false);
+
+        var outOfWindow = await OutOfWindowCellsAsync(
+            documentId, instance.PeriodKey, keyById, columnCodeById, readable, ct).ConfigureAwait(false);
+
         return new TableSliceDto(
-            tableInstanceId, instance.PeriodKey, columns, rows, permissions, confirmations);
+            tableInstanceId, instance.PeriodKey, columns, rows, permissions, confirmations, formats, outOfWindow);
+    }
+
+    /// <summary>
+    /// Комірки зрізу, чия остання зміна — правка поза вікном доступу
+    /// (<c>ФВ-2.16</c>, <c>D-239</c>): ключі <c>"{rowKey}:{columnCode}"</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Доти значок ставився лише з відповіді <c>PATCH</c> і зникав після
+    /// перезавантаження, хоча позначка лежить у <c>aud.CellChange</c>.
+    ///
+    /// ⚠ Журнал знає документ, а не екземпляр таблиці — чужі таблиці того самого
+    /// документа відсікаються тут, за рядками зрізу (<paramref name="keyById"/>).
+    /// Заборонена колонка (S6) не віддається так само, як і її значення.
+    /// </remarks>
+    private async Task<IReadOnlyList<string>> OutOfWindowCellsAsync(
+        long documentId,
+        int periodKey,
+        Dictionary<long, string> keyById,
+        Dictionary<int, string> columnCodeById,
+        DocumentReadScope readable,
+        CancellationToken ct)
+    {
+        if (audit is null)
+        {
+            return [];
+        }
+
+        var cells = await audit.ReadOutOfWindowCellsAsync(documentId, periodKey, ct).ConfigureAwait(false);
+
+        return [.. cells
+            .Where(c => readable.CanReadColumn(c.ColumnDefId))
+            .Select(c => keyById.TryGetValue(c.TableRowId, out var rowKey)
+                         && columnCodeById.TryGetValue(c.ColumnDefId, out var code)
+                ? $"{rowKey}:{code}"
+                : null)
+            .OfType<string>()
+            .Order(StringComparer.Ordinal)];
+    }
+
+    /// <summary>
+    /// Результат правил умовного форматування по комірках зрізу: ключ
+    /// <c>"{rowKey}:{columnCode}"</c>. Комірки без спрацювання тут немає;
+    /// порожня комірка не матеріалізована, тож оцінюється як <c>null</c>
+    /// (правило <c>empty</c> спрацьовує й на ній).
+    /// </summary>
+    private async Task<IReadOnlyDictionary<string, Templates.CellFormatDto>> ConditionalFormatsAsync(
+        int templateVersionId, List<ColumnDto> columns, IReadOnlyList<RowDto> rows, CancellationToken ct)
+    {
+        var result = new Dictionary<string, Templates.CellFormatDto>(StringComparer.Ordinal);
+
+        if (conditionalFormats is null)
+        {
+            return result;
+        }
+
+        var all = await conditionalFormats.GetAsync(templateVersionId, ct).ConfigureAwait(false);
+        var byColumn = Templates.ConditionalFormatEvaluator.ByColumn(all);
+
+        foreach (var column in columns)
+        {
+            if (!byColumn.TryGetValue(column.Code, out var rules))
+            {
+                continue;
+            }
+
+            foreach (var row in rows)
+            {
+                row.Cells.TryGetValue(column.Code, out var value);
+
+                if (Templates.ConditionalFormatEvaluator.Evaluate(rules, value) is { } format)
+                {
+                    result[$"{row.RowKey}:{column.Code}"] = format;
+                }
+            }
+        }
+
+        return result;
     }
 
     /// <summary>

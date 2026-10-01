@@ -695,7 +695,12 @@ public sealed class CalculationScenarios(SqlServerFixture sql)
             $"перерахунок проєкту {stand.ProjectId} завершився станом "
             + $"{final.GetProperty("state").GetString()}: {final.GetRawText()}; {app.ErrorsText}");
 
-        var results1 = await ReadResultsAsync(app, stand.Admin.Client, stand.DocumentId, stand.PeriodKey);
+        // ⛔ Задача проєкту лише РОЗКЛАДАЄ роботу на документні задачі (P4 ФВ-9.8,
+        // 8e85c59d) і завершується `Succeeded` не чекаючи їх: числа документів
+        // з'являються пізніше. Читати їх одразу після стану батька — гонитва
+        // (FAIL 30.09 у CI, 5/5 локально на 81236cff), тому чекаємо на самі
+        // результати, а не на стан батька.
+        var results1 = await AwaitResultsAsync(app, stand.Admin.Client, stand.DocumentId, stand.PeriodKey);
         var emission1 = results1.EnumerateArray().FirstOrDefault(
             r => string.Equals(r.GetProperty("outputCode").GetString(), "EMISSION", StringComparison.Ordinal));
         Assert.True(
@@ -706,7 +711,7 @@ public sealed class CalculationScenarios(SqlServerFixture sql)
         // ⛔ ДРУГИЙ документ — те, чого до Q-151/Q-162 не могло статися:
         // фільтр `DocumentId == 0` не знаходив НІ ОДНОГО документа проєкту, і
         // `calc.CalculationResult` лишався порожнім для ОБОХ документів.
-        var results2 = await ReadResultsAsync(app, stand.Admin.Client, documentId2, stand.PeriodKey);
+        var results2 = await AwaitResultsAsync(app, stand.Admin.Client, documentId2, stand.PeriodKey);
         var emission2 = results2.EnumerateArray().FirstOrDefault(
             r => string.Equals(r.GetProperty("outputCode").GetString(), "EMISSION", StringComparison.Ordinal));
         Assert.True(
@@ -1312,7 +1317,7 @@ public sealed class CalculationScenarios(SqlServerFixture sql)
             {
                 code,
                 nameL10n = new Dictionary<string, string> { ["en"] = $"{prefix} project" },
-                timeZoneId = "Asia/Almaty",
+                timeZoneId = "Asia/Atyrau",
                 periodKind = "Monthly",
                 year = DateTime.UtcNow.Year,
                 templateVersionId,
@@ -1517,6 +1522,30 @@ public sealed class CalculationScenarios(SqlServerFixture sql)
         Assert.True(
             string.Equals(state, "Succeeded", StringComparison.Ordinal),
             $"перерахунок документа {documentId} завершився станом {state}: {final.GetRawText()}; {app.ErrorsText}");
+    }
+
+    /// <summary>
+    /// Чекає, поки в документа з'являться числа, і віддає останню відповідь.
+    /// </summary>
+    /// <remarks>
+    /// Для маршрутів, де стан задачі не означає готових чисел (перерахунок проєкту
+    /// розкладається на документні задачі й не чекає їх). Умова, а не пауза: вихід
+    /// одразу, як тільки перелік непорожній; по таймауту віддає порожній перелік —
+    /// асерт викликача покаже, чого саме немає.
+    /// </remarks>
+    private static async Task<JsonElement> AwaitResultsAsync(
+        EcrApiFactory app, HttpClient client, long documentId, int periodKey)
+    {
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(60);
+        var results = await ReadResultsAsync(app, client, documentId, periodKey);
+
+        while (results.GetArrayLength() == 0 && DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(TimeSpan.FromMilliseconds(200));
+            results = await ReadResultsAsync(app, client, documentId, periodKey);
+        }
+
+        return results;
     }
 
     /// <summary>Числа актуального прогону — те, що бачить користувач.</summary>

@@ -27,6 +27,7 @@ public sealed class DeployArgumentsTests
         {
             Mode = WizardMode.FirstDeployment,
             DataProtectionThumbprint = "AA11BB22CC33DD44EE55FF6600112233445566AA",
+            HttpsThumbprint = "0123456789ABCDEF0123456789ABCDEF01234567",
             MsiPath = @"C:\payload\Ecr.msi",
             BootstrapPassword = bootstrap,
             ServiceAccountMode = ServiceAccountMode.Gmsa,
@@ -38,7 +39,7 @@ public sealed class DeployArgumentsTests
 
         Assert.Equal(
             ["SqlInstance", "Database", "MsiPath", "AppPort", "ConnectionString", "CreateDatabaseIfMissing",
-             "DataProtectionThumbprint", "FirstDeployment", "BootstrapPassword", "ServiceAccount"],
+             "DataProtectionThumbprint", "HttpsThumbprint", "FirstDeployment", "BootstrapPassword", "ServiceAccount"],
             names);
         Assert.Null(arguments.Single(a => a.Key == "CreateDatabaseIfMissing").Value);
         Assert.Null(arguments.Single(a => a.Key == "FirstDeployment").Value);

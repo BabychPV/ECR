@@ -204,6 +204,7 @@ public sealed partial class QuartzJobAdapter(
             {
                 var waited = now - since!.Value;
                 LogDeferralExhausted(logger, jobId, typeName ?? "—", deferred.Resource ?? "—", JobDeferral.Format(waited));
+                Observability.InfrastructureMetrics.RecordJobFailed(typeName, "deferral_exhausted");
 
                 if (progress is not null)
                 {
@@ -282,6 +283,7 @@ public sealed partial class QuartzJobAdapter(
                 .ConfigureAwait(false);
 
             LogJobFailed(logger, jobId, typeName ?? "—", ex);
+            Observability.InfrastructureMetrics.RecordJobFailed(typeName, "error");
 
             // Тіло задачі злиття — для ручного перезапуску, але в межах (огляд O1, косметика).
             QuartzPayloadMerges.MarkFailed(jobId);
@@ -694,8 +696,11 @@ public sealed record JobHeartbeatSettings(TimeSpan Interval);
 /// клієнт, що опитує прогрес, потрапляє не обов'язково на той, який задачу
 /// виконує.
 /// </remarks>
-internal sealed class StoreJobProgress(IJobProgressStore? store, string jobId, IClock clock) : IJobProgress
+internal sealed class StoreJobProgress(IJobProgressStore? store, string jobId, IClock clock) : IJobProgress, IJobIdentity
 {
+    /// <inheritdoc />
+    public string JobId => jobId;
+
     /// <inheritdoc />
     public Task ReportAsync(int percent, string? message, CancellationToken ct)
         => store is null

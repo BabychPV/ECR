@@ -43,7 +43,7 @@ function isAbortError(error: unknown): boolean {
 }
 
 /** Властивості редактора. */
-export interface ExpressionEditorProps {
+interface ExpressionEditorProps {
   /** Текст виразу. */
   readonly value: string;
   /** Викликається на кожну зміну тексту. */

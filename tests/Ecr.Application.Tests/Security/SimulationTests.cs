@@ -67,7 +67,7 @@ public sealed class SimulationTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
-    [Trait("Requirement", "ФВ-6.16")]
+    [Trait("Requirement", "ФВ-6.16a")]
     public async Task Сеанс_потрапляє_в_аудит_до_видачі_профілю()
     {
         await Start().HandleAsync(Subject, "перевірка скарги", CancellationToken.None);

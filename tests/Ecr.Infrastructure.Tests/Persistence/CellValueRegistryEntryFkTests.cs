@@ -31,6 +31,7 @@ public sealed class CellValueRegistryEntryFkTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-8.7")]
     public async Task Комірка_з_неіснуючим_записом_довідника_відхиляється_на_рівні_БД()
     {
         var builder = new TestDocumentBuilder(sql.ConnectionString);

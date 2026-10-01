@@ -23,7 +23,7 @@ import { RegistryExternalKeysPanel } from './RegistryExternalKeysPanel';
 type RegistryEntryDetailDto = components['schemas']['RegistryEntryDetailDto'];
 
 /** Ключ `GET …/entries/{id}` — під префіксом `entries(code)`, тож інвалідується з переліком. */
-export function registryEntryKey(
+function registryEntryKey(
   code: string,
   entryId: number,
 ): readonly ['registries', 'entries', string, 'detail', number] {
@@ -31,7 +31,7 @@ export function registryEntryKey(
 }
 
 /** Стан форми запису. */
-export interface EntryFormState {
+interface EntryFormState {
   readonly code: string;
   readonly display: LocalizedValue;
   readonly values: Readonly<Record<string, string>>;
@@ -50,7 +50,7 @@ export function isExternalRegistry(registry: Pick<RegistryDefDto, 'sourceKind'> 
 }
 
 /** Стан форми з повного запису (X-03, R-04). */
-export function entryFormOf(detail: RegistryEntryDetailDto): EntryFormState {
+function entryFormOf(detail: RegistryEntryDetailDto): EntryFormState {
   const values: Record<string, string> = {};
 
   for (const [field, value] of Object.entries(detail.values)) {
@@ -254,7 +254,10 @@ function EntryForm({
             <TextInput
               key={field.id}
               // ⛔ X-16: підписом стояв код поля, описом — сирий тип (`Decimal`).
-              label={`${localized(field.nameL10n) || field.code}${field.isRequired ? ' *' : ''}`}
+              label={localized(field.nameL10n) || field.code}
+              // ⚠ `required`, а не « *» у тексті підпису: зірочку в підписі читач
+              // озвучує як «зірочка» і не знає, що поле обов'язкове.
+              required={field.isRequired}
               description={`${field.code} · ${dataTypeLabel(field.dataType)}`}
               value={values[field.code] ?? ''}
               disabled={readOnly}

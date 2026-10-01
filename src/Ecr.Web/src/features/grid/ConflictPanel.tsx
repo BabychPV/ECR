@@ -15,7 +15,7 @@ export interface OpenConflict {
 }
 
 /** Властивості панелі конфлікту. */
-export interface ConflictPanelProps {
+interface ConflictPanelProps {
   readonly conflict: OpenConflict;
 
   /** Підпис рядка, яким його бачить людина (`label`, інакше ключ). */

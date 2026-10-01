@@ -50,6 +50,8 @@ import {
 import { deleteColumn, saveColumn } from '@/features/templates/columnApi';
 import { emptyColumnDraft, type ColumnDraft } from '@/features/templates/column';
 import { ExistingColumn } from '@/features/templates/ExistingColumn';
+import { ReorderCell, ReorderableRows } from '@/features/templates/ReorderControls';
+import { reorderColumns } from '@/features/templates/reorderApi';
 import { dataTypeLabel, rowKindLabel, rowModeLabel } from '@/features/templates/enumLabels';
 import { getHeaderFields, saveHeaderField } from '@/features/templates/headerFieldApi';
 import {
@@ -156,8 +158,22 @@ const ValidationRuleList = lazy(async () => ({
   default: (await import('@/features/templates/ValidationRuleList')).ValidationRuleList,
 }));
 
+/**
+ * Умовне форматування (`ФВ-2.7`) — лінивий чанк, як і решта редакторів
+ * вище. Правила читаються й зберігаються на сервері (`If-Match`,
+ * `conditionalFormatApi.ts`).
+ */
+const ConditionalFormatPanel = lazy(async () => ({
+  default: (await import('@/features/templates/ConditionalFormatPanel')).ConditionalFormatPanel,
+}));
+
 const TemplateColumnUsage = lazy(async () => ({
   default: (await import('@/features/templates/ColumnUsage')).TemplateColumnUsage,
+}));
+
+/** Попередній перегляд таблиці (`ФВ-2.6`) — лінивий чанк, лише читання. */
+const TablePreview = lazy(async () => ({
+  default: (await import('@/features/templates/TablePreview')).TablePreview,
 }));
 
 /**
@@ -315,6 +331,12 @@ export function TemplateVersionPage(): JSX.Element {
   // разом із таблицею, для якої відкрили форму — той самий tableId їде і в
   // PUT, і в DELETE.
   const [validationRuleTable, setValidationRuleTable] = useState<number | null>(null);
+
+  // ФВ-2.7: таблиця, для якої відкрито умовне форматування.
+  const [conditionalFormatTable, setConditionalFormatTable] = useState<TemplateTable | null>(null);
+
+  // ФВ-2.6: таблиця, для якої відкрито попередній перегляд (доступний і без `Template.Edit`).
+  const [previewTable, setPreviewTable] = useState<TemplateTable | null>(null);
 
   // ⛔ Правила доступу до періоду (`ФВ-2.15`) не мають коду — форма
   // створення і форма правки наявного за `id` навмисно окремі, за тією самою
@@ -494,6 +516,32 @@ export function TemplateVersionPage(): JSX.Element {
       await queryClient.invalidateQueries({ queryKey: queryKeys.templates.version(id) });
       setColumnEdit(null);
       showDone(t('columns.saved'));
+    },
+    onError: showApiError,
+  });
+
+  /**
+   * Перестановка колонок (`ФВ-2.6`): перетягування або кнопки «вище/нижче».
+   * Порядок — презентаційне поле, тож запис законний і в опублікованій версії
+   * (`ФВ-7.2`) і йде тим самим `PATCH …/presentation`, що «Оформлення».
+   */
+  const reorderColumnsMutation = useMutation({
+    mutationFn: (args: {
+      columns: readonly TemplateColumnDto[];
+      from: number;
+      to: number;
+    }) => reorderColumns(id, args.columns, args.from, args.to),
+    onSuccess: async (revision, { columns, from, to }) => {
+      if (revision === null) return;
+      await queryClient.invalidateQueries({ queryKey: queryKeys.templates.version(id) });
+      const moved = columns[from];
+      showDone(
+        t('reorder.moved', {
+          name: moved === undefined ? '' : localized(moved.headerL10n) || moved.code,
+          position: to + 1,
+          count: columns.length,
+        }),
+      );
     },
     onError: showApiError,
   });
@@ -1035,9 +1083,14 @@ export function TemplateVersionPage(): JSX.Element {
                         return (
                           <>
                             <Group justify="space-between" mt="sm">
-                              <Text fw={600}>
-                                <TableTitle table={table} />
-                              </Text>
+                              <Group gap="xs">
+                                <Text fw={600}>
+                                  <TableTitle table={table} />
+                                </Text>
+                                <Button size="compact-xs" variant="subtle" onClick={() => setPreviewTable(table)}>
+                                  {t('tablePreview.open')}
+                                </Button>
+                              </Group>
                               {canEditSheets && (
                                 <Group gap="xs">
                                   <Button
@@ -1095,12 +1148,22 @@ export function TemplateVersionPage(): JSX.Element {
                                   >
                                     {t('validationRules.title')}
                                   </Button>
+                                  <Button
+                                    size="compact-xs"
+                                    variant="subtle"
+                                    onClick={() => setConditionalFormatTable(table)}
+                                  >
+                                    {t('conditionalFormat.title')}
+                                  </Button>
                                 </Group>
                               )}
                             </Group>
                             <Table striped withTableBorder mt="xs">
                               <Table.Thead>
                                 <Table.Tr>
+                                  {can(session.data, 'Template.Edit') && (
+                                    <Table.Th>{t('reorder.column')}</Table.Th>
+                                  )}
                                   <Table.Th>{t('version.column')}</Table.Th>
                                   <Table.Th>{t('version.type')}</Table.Th>
                                   <Table.Th>{t('version.unit')}</Table.Th>
@@ -1108,8 +1171,29 @@ export function TemplateVersionPage(): JSX.Element {
                                 </Table.Tr>
                               </Table.Thead>
                               <Table.Tbody>
-                                {table.columns.map((column) => (
-                                  <Table.Tr key={column.id}>
+                                <ReorderableRows
+                                  items={table.columns}
+                                  enabled={can(session.data, 'Template.Edit') && !reorderColumnsMutation.isPending}
+                                  onMove={(from, to) =>
+                                    reorderColumnsMutation.mutate({ columns: table.columns, from, to })
+                                  }
+                                >
+                                {(column, index, drag) => (
+                                  <Table.Tr key={column.id} {...drag.targetProps(index)}>
+                                    {can(session.data, 'Template.Edit') && (
+                                      <Table.Td>
+                                        <ReorderCell
+                                          index={index}
+                                          count={table.columns.length}
+                                          name={localized(column.headerL10n) || column.code}
+                                          disabled={reorderColumnsMutation.isPending}
+                                          onMove={(from, to) =>
+                                            reorderColumnsMutation.mutate({ columns: table.columns, from, to })
+                                          }
+                                          drag={drag}
+                                        />
+                                      </Table.Td>
+                                    )}
                                     <Table.Td>
                                       {localized(column.headerL10n) || column.code}{' '}
                                       <Text span c="dimmed">
@@ -1212,7 +1296,8 @@ export function TemplateVersionPage(): JSX.Element {
                                       </Group>
                                     </Table.Td>
                                   </Table.Tr>
-                                ))}
+                                )}
+                                </ReorderableRows>
                               </Table.Tbody>
                             </Table>
 
@@ -1245,16 +1330,46 @@ export function TemplateVersionPage(): JSX.Element {
                                   </Text>
                                 ) : (
                                   <Table striped withTableBorder mt="xs">
+                                    {canEditSheets && (
+                                      <caption
+                                        id={`rows-reorder-hint-${String(table.id)}`}
+                                        style={{ captionSide: 'bottom', textAlign: 'start' }}
+                                      >
+                                        <Text span size="xs" c="dimmed">
+                                          {t('reorder.rowsUnavailable')}
+                                        </Text>
+                                      </caption>
+                                    )}
                                     <Table.Thead>
                                       <Table.Tr>
+                                        {canEditSheets && <Table.Th>{t('reorder.column')}</Table.Th>}
                                         <Table.Th>{t('rows.label')}</Table.Th>
                                         <Table.Th>{t('rows.rowKind')}</Table.Th>
                                         <Table.Th />
                                       </Table.Tr>
                                     </Table.Thead>
                                     <Table.Tbody>
-                                      {table.rows.map((row) => (
+                                      {/* ⛔ Кнопки порядку рядків ВИМКНЕНІ, і це не
+                                          заготовка: безпечного запису лише порядку
+                                          рядка сервер не має (`reorder.ts`, звіт
+                                          лінії). Порядок міняється полем «Порядок»
+                                          у формі рядка. */}
+                                      <ReorderableRows items={table.rows} enabled={false} onMove={() => undefined}>
+                                      {(row, index, drag) => (
                                         <Table.Tr key={row.rowKey}>
+                                          {canEditSheets && (
+                                            <Table.Td>
+                                              <ReorderCell
+                                                index={index}
+                                                count={table.rows.length}
+                                                name={row.label ?? row.rowKey}
+                                                disabled
+                                                onMove={() => undefined}
+                                                drag={drag}
+                                                describedBy={`rows-reorder-hint-${String(table.id)}`}
+                                              />
+                                            </Table.Td>
+                                          )}
                                           <Table.Td>
                                             {row.label ?? row.rowKey}{' '}
                                             <Text span c="dimmed">
@@ -1322,7 +1437,8 @@ export function TemplateVersionPage(): JSX.Element {
                                             )}
                                           </Table.Td>
                                         </Table.Tr>
-                                      ))}
+                                      )}
+                                      </ReorderableRows>
                                     </Table.Tbody>
                                   </Table>
                                 )}
@@ -1565,6 +1681,23 @@ export function TemplateVersionPage(): JSX.Element {
         )}
       </Modal>
 
+      <Modal
+        opened={previewTable !== null}
+        onClose={() => setPreviewTable(null)}
+        title={
+          previewTable === null
+            ? ''
+            : t('tablePreview.title', { name: localized(previewTable.nameL10n) || previewTable.code })
+        }
+        size="100%"
+      >
+        {previewTable !== null && (
+          <Suspense fallback={null}>
+            <TablePreview templateVersionId={id} table={previewTable} />
+          </Suspense>
+        )}
+      </Modal>
+
       {/*
        * ⛔ Правило валідації (W5.4). Форма PUT-за-кодом стоїть поруч із
        * компактним видаленням за тим самим кодом: список наявних правил
@@ -1572,6 +1705,26 @@ export function TemplateVersionPage(): JSX.Element {
        * читає рушій валідації, а не GET-відповідь), тому редагування — це
        * ввести код і перезаписати, а не обрати рядок зі списку.
        */}
+      <Modal
+        opened={conditionalFormatTable !== null}
+        onClose={() => setConditionalFormatTable(null)}
+        title={t('conditionalFormat.title')}
+        size="xl"
+      >
+        {conditionalFormatTable !== null && (
+          <Suspense fallback={null}>
+            <ConditionalFormatPanel
+              templateVersionId={id}
+              canEdit={canEditSheets}
+              columns={conditionalFormatTable.columns.map((column) => ({
+                code: column.code,
+                label: localized(column.headerL10n) || column.code,
+              }))}
+            />
+          </Suspense>
+        )}
+      </Modal>
+
       <Modal
         opened={validationRuleTable !== null}
         onClose={() => setValidationRuleTable(null)}

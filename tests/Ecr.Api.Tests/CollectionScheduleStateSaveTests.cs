@@ -19,9 +19,28 @@ namespace Ecr.Api.Tests;
 /// цього запису старту не валить і не мовчить.
 /// </summary>
 [Collection("SqlServer")]
-public sealed class CollectionScheduleStateSaveTests(SqlServerFixture sql)
+public sealed class CollectionScheduleStateSaveTests(SqlServerFixture sql) : IAsyncLifetime
 {
     private static readonly DateTime Now = new(2026, 9, 20, 8, 0, 0, DateTimeKind.Utc);
+
+    private readonly List<int> created = [];
+
+    public Task InitializeAsync() => Task.CompletedTask;
+
+    // ⛔ База спільна на весь прогін Api: розклад із невалідним cron, що лишився в ній,
+    // на старті КОЖНОГО наступного хоста дає LogLevel.Error (ПРОПУЩЕНО — невалідний cron),
+    // а сторожі на кшталт ФВ_5_24_Збій_запису… вимагають порожні ServerErrors.
+    // Тому створене тут — прибирається тут (лише розклади: сутність і джерело неактивні).
+    public async Task DisposeAsync()
+    {
+        if (created.Count == 0)
+        {
+            return;
+        }
+
+        await using var db = Context();
+        await db.CollectionSchedules.Where(s => created.Contains(s.Id)).ExecuteDeleteAsync();
+    }
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
@@ -175,6 +194,7 @@ public sealed class CollectionScheduleStateSaveTests(SqlServerFixture sql)
         db.CollectionSchedules.Add(schedule);
         await db.SaveChangesAsync();
 
+        created.Add(schedule.Id);
         return schedule.Id;
     }
 

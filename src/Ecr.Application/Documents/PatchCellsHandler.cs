@@ -1,4 +1,4 @@
-﻿using Ecr.Application.Common;
+using Ecr.Application.Common;
 using Ecr.Application.Documents.Dto;
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
@@ -47,7 +47,11 @@ public sealed partial class PatchCellsHandler(
 
     // ⛔ B-02: довідник одиниць — щоб неіснуюча одиниця в комірці `Unit`
     // відхилялася ДО запису, а не сирим `FK_CellValue_Unit` (`500`).
-    IUnitCatalog units)
+    IUnitCatalog units,
+
+    // ⛔ HSE301 A1: хук підтягування вікон рядків з PI — ОДНА точка виклику нижче, після запису.
+    // Необов'язковий лише для прямого конструювання в тестах запису; контейнер його завжди передає.
+    IRowWindowTrigger? rowWindows = null)
 {
     /// <summary>Застосовує зміни.</summary>
     /// <exception cref="ConcurrencyConflictException">
@@ -138,7 +142,8 @@ public sealed partial class PatchCellsHandler(
         await EnsureUnitReferencesExistAsync(context, changes, ct).ConfigureAwait(false);
 
         var now = clock.UtcNow;
-        var isLateEdit = await DetermineIsLateEditAsync(context.Instance.DocumentId, request.PeriodKey, ct)
+        var isLateEdit = await DetermineIsLateEditAsync(
+                context.Instance.DocumentId, [context.Table.SheetDefId], request.PeriodKey, ct)
             .ConfigureAwait(false);
 
         // ⚠ `BE-05`: ідентифікатор поставленої задачі їде клієнтові у відповіді.
@@ -162,6 +167,21 @@ public sealed partial class PatchCellsHandler(
         if (!enlist)
         {
             await EnqueueAsync(changes, ct).ConfigureAwait(false);
+        }
+
+        // ⛔ HSE301 A1 (єдина точка): змінені колонки — порту; він сам відсіює все, що не Початок/Кінець/селектор
+        // вікна рядка, без звернень до бази. Після запису: відкат не ставить підтягування.
+        if (rowWindows is not null)
+        {
+            await rowWindows
+                .RowsChangedAsync(
+                    new RowWindowChange(
+                        context.Instance.TableInstanceId,
+                        context.Instance.PeriodKey,
+                        context.Instance.TableDefId,
+                        [.. changes.Upserts.Select(u => u.Address.ColumnDefId).Concat(changes.Deletes.Select(d => d.ColumnDefId)).Distinct()]),
+                    ct)
+                .ConfigureAwait(false);
         }
 
         return await BuildResponseAsync(request, context, changes, messages, recalculationJobId, ct)
@@ -214,7 +234,18 @@ public sealed partial class PatchCellsHandler(
         IReadOnlyDictionary<string, string> Versions,
         IReadOnlyDictionary<string, long> RowIds,
         List<PatchRow> Creations,
-        List<PatchRow> Updates);
+        List<PatchRow> Updates)
+    {
+        /// <summary>
+        /// Адреси комірок, правку яких дозволено політикою <c>Warn</c> поза вікном
+        /// доступу (<c>ФВ-2.16</c>, <c>D-239</c>): наповнює <c>CheckAccess</c>,
+        /// читає <c>BuildAuditRecords</c> (<c>IsOutOfWindow = 1</c>).
+        /// </summary>
+        /// <remarks>
+        /// ⚠ Лише оновлення наявних комірок: у нових рядків адреси ще немає.
+        /// </remarks>
+        public HashSet<CellAddress> OutOfWindow { get; } = [];
+    }
 
     /// <summary>Розподіл змін по upsert/delete разом із супутнім станом.</summary>
     /// <param name="Upserts">Комірки для запису або оновлення.</param>
@@ -369,11 +400,13 @@ public sealed partial class PatchCellsHandler(
         if (instance.PeriodKey != request.PeriodKey)
         {
             throw new BusinessRuleException(
-                ErrorCodes.RequestInvalid,
+                // ФВ-1.11: порушення меж періоду документа — `ECR-PRD-0422` на всіх
+                // шляхах (раніше тут був `ECR-REQ-0422`; D-223 переглянуто).
+                ErrorCodes.PeriodOutOfProject,
                 $"Період {request.PeriodKey} не збігається з періодом {instance.PeriodKey} екземпляра таблиці {request.TableInstanceId}.",
                 new Dictionary<string, object?>(StringComparer.Ordinal)
                 {
-                    ["messageKey"] = "err.ECR-REQ-0422.periodMismatch",
+                    ["messageKey"] = "err.ECR-PRD-0422.periodMismatch",
                     ["periodKey"] = request.PeriodKey.ToString(System.Globalization.CultureInfo.InvariantCulture),
                     ["expectedPeriodKey"] = instance.PeriodKey.ToString(System.Globalization.CultureInfo.InvariantCulture),
                     ["tableInstanceId"] = request.TableInstanceId.ToString(System.Globalization.CultureInfo.InvariantCulture),
@@ -930,6 +963,10 @@ public sealed partial class PatchCellsHandler(
                 else if (decision.RequiresConfirmation)
                 {
                     needsConfirmation++;
+                }
+                else if (decision.OutOfWindowMark)
+                {
+                    context.OutOfWindow.Add(address);
                 }
             }
         }
@@ -1975,15 +2012,26 @@ public sealed partial class PatchCellsHandler(
     /// колонки: він відповідає на питання, і відповідає неправдою.
     /// </summary>
     /// <remarks>
-    /// ⚠ <c>Reopen</c> теж сюди входить: він переводить період саме в
-    /// <c>Grace</c> (<c>Period.Reopen</c>), тому окремої умови не потрібно.
+    /// ⚠ <c>Reopen</c> ПЕРІОДУ входить сюди сам: він переводить період у
+    /// <c>Grace</c> (<c>Period.Reopen</c>). А <c>Reopen</c> АРКУША (ФВ-5.20a,
+    /// <c>D-70</c> б) період не чіпає — він лишається <c>Open</c>, тож окрема
+    /// умова: аркуш відкрито й відтоді не затверджено знову
+    /// (<see cref="IPeriodStore.HasReopenedSheetAsync"/>).
     /// </remarks>
-    private async Task<bool> DetermineIsLateEditAsync(long documentId, int periodKeyValue, CancellationToken ct)
+    private async Task<bool> DetermineIsLateEditAsync(
+        long documentId, IReadOnlyCollection<int> sheetDefIds, int periodKeyValue, CancellationToken ct)
     {
         var periodState = await periods
             .FindPeriodStateAsync(documentId, periodKeyValue, ct)
             .ConfigureAwait(false);
-        return periodState == PeriodState.Grace;
+        if (periodState == PeriodState.Grace)
+        {
+            return true;
+        }
+
+        return await periods
+            .HasReopenedSheetAsync(documentId, sheetDefIds, periodKeyValue, ct)
+            .ConfigureAwait(false);
     }
 
     /// <summary>
@@ -2354,7 +2402,7 @@ public sealed partial class PatchCellsHandler(
         await audit.WriteCellChangesAsync(
             BuildAuditRecords(
                 request, changes.Upserts, changes.Deletes, context.UserId, now, context.Instance.DocumentId,
-                changes.RowKeyById, previous, isLateEdit),
+                changes.RowKeyById, previous, isLateEdit, context.OutOfWindow),
             ct).ConfigureAwait(false);
     }
 
@@ -2449,7 +2497,7 @@ public sealed partial class PatchCellsHandler(
                           ?? await rowStore.GetRowVersionsAsync(request.TableInstanceId, context.PeriodKey, ct)
                               .ConfigureAwait(false);
 
-        return ToResponse(changes, messages, recalculationJobId, newVersions);
+        return ToResponse(changes, messages, recalculationJobId, newVersions, OutOfWindowKeys(context, changes));
     }
 
     /// <summary>
@@ -2480,7 +2528,8 @@ public sealed partial class PatchCellsHandler(
         CellChangeLists changes,
         List<Validation.ValidationMessage> messages,
         string? recalculationJobId,
-        IReadOnlyDictionary<string, string> newVersions)
+        IReadOnlyDictionary<string, string> newVersions,
+        IReadOnlyList<string>? outOfWindow = null)
     {
         return new PatchCellsResponse(
             AppliedCells: changes.Upserts.Count + changes.Deletes.Count,
@@ -2494,7 +2543,30 @@ public sealed partial class PatchCellsHandler(
 
             // ⚠ `BE-05`: передається ЯК Є, без перетворення порожнього рядка на
             // `null` і навпаки. Джерело значення одне — гілка постановки вище.
-            RecalculationJobId: recalculationJobId);
+            RecalculationJobId: recalculationJobId,
+            OutOfWindow: outOfWindow);
+    }
+
+    /// <summary>
+    /// <c>rowKey:columnCode</c> записаних комірок, позначених <c>Warn</c> поза
+    /// вікном (<c>ФВ-2.16</c>, <c>D-239</c>); порядок стабільний.
+    /// </summary>
+    private static List<string> OutOfWindowKeys(RequestContext context, CellChangeLists changes)
+    {
+        if (context.OutOfWindow.Count == 0)
+        {
+            return [];
+        }
+
+        var codeById = context.Columns.ToDictionary(c => c.Value, c => c.Key);
+        var written = changes.Upserts.Select(u => u.Address).Concat(changes.Deletes).ToHashSet();
+
+        return [.. context.OutOfWindow
+            .Where(a => written.Contains(a)
+                        && changes.RowKeyById.ContainsKey(a.TableRowId)
+                        && codeById.ContainsKey(a.ColumnDefId))
+            .Select(a => $"{changes.RowKeyById[a.TableRowId]}:{codeById[a.ColumnDefId]}")
+            .Order(StringComparer.Ordinal)];
     }
 
     /// <summary>Валідує змінені комірки і правила рівня рядка.</summary>
@@ -2684,7 +2756,8 @@ public sealed partial class PatchCellsHandler(
         List<CellAddress> deletes, int userId, DateTime now, long documentId,
         IReadOnlyDictionary<long, string> rowKeyById,
         IReadOnlyDictionary<CellAddress, CellValueData> previous,
-        bool isLateEdit)
+        bool isLateEdit,
+        HashSet<CellAddress>? outOfWindow = null)
     {
         var records = new List<CellChangeRecord>(upserts.Count + deletes.Count);
 
@@ -2718,7 +2791,8 @@ public sealed partial class PatchCellsHandler(
                 now, u.Address, DocumentId: documentId,
                 RowKey: rowKeyById.GetValueOrDefault(u.Address.TableRowId, string.Empty),
                 OldValue: Was(previous, u.Address), NewValue: Describe(u.Value),
-                userId, request.Origin, isLateEdit, CorrelationId: null));
+                userId, request.Origin, isLateEdit, CorrelationId: null,
+                IsOutOfWindow: outOfWindow?.Contains(u.Address) == true));
         }
 
         foreach (var d in deletes)
@@ -2727,7 +2801,8 @@ public sealed partial class PatchCellsHandler(
                 now, d, DocumentId: documentId,
                 RowKey: rowKeyById.GetValueOrDefault(d.TableRowId, string.Empty),
                 OldValue: Was(previous, d), NewValue: null,
-                userId, request.Origin, isLateEdit, CorrelationId: null));
+                userId, request.Origin, isLateEdit, CorrelationId: null,
+                IsOutOfWindow: outOfWindow?.Contains(d) == true));
         }
 
         return records;

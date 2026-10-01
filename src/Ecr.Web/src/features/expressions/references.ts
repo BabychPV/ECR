@@ -191,7 +191,7 @@ function segmentsBefore(text: string, open: number): string[] {
 }
 
 /** Що очікується в поточній ланці. */
-export type Slot =
+type Slot =
   | { readonly kind: 'first'; readonly table: TableSymbol | undefined }
   | { readonly kind: 'table'; readonly sheet: SheetSymbol }
   | { readonly kind: 'row'; readonly table: TableSymbol }

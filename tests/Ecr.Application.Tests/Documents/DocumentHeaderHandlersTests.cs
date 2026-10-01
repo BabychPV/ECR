@@ -148,7 +148,7 @@ public sealed class DocumentHeaderHandlersTests
         var project = new Project(
             EcrCode.Create("PRJ"), new LocalizedText(new Dictionary<string, string> { ["en"] = "Project" }),
             new DateOnly(2026, 1, 1), new DateOnly(2026, 12, 31),
-            TemplateVersionId, PeriodKind.Monthly, 1, "Asia/Almaty");
+            TemplateVersionId, PeriodKind.Monthly, 1, "Asia/Atyrau");
         typeof(Entity<int>).GetProperty("Id")!.SetValue(project, ProjectId);
         return project;
     }

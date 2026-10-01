@@ -249,6 +249,44 @@
 }
 
 /*
+ * ── правка поза вікном доступу (ФВ-2.16, D-239) ─────────────────────────
+ *
+ * ⚠ ДОДАТКОВИЙ маркер поверх будь-якого стану: сервер прийняв правку за
+ * політикою `Warn` після закриття вікна і позначив її в журналі змін
+ * (`PatchCellsResponse.outOfWindow`). Причина продубльована в `title`.
+ *
+ * ⚠ Носіїв два, бо всі чотири кути вже зайняті. Нижня внутрішня лінія є
+ * завжди і ні з чим не змагається (`box-shadow`, не `border`: ліву межу
+ * тримають стани). Знак `◷` посередині вгорі — лише коли `::before` комірки
+ * не зайнятий іншим маркером (помилка збереження, обов'язковий вхід, формула):
+ * інакше пізніше оголошене правило мовчки підмінило б їхній знак своїм.
+ */
+.ecr-cell-out-of-window {
+  box-shadow: inset 0 -2px 0 #8a6100;
+}
+
+.ecr-cell-out-of-window:not(.ecr-cell-save-error):not(.ecr-cell-required-input-blocked):not(
+    .ecr-cell-required-input-warning
+  ):not(.ecr-cell--calculated)::before {
+  content: '◷';
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 10px;
+  line-height: 1;
+  color: #8a6100;
+}
+
+:root[data-mantine-color-scheme='dark'] .ecr-cell-out-of-window {
+  box-shadow: inset 0 -2px 0 #ffd24d;
+}
+
+:root[data-mantine-color-scheme='dark'] .ecr-cell-out-of-window::before {
+  color: #ffd24d;
+}
+
+/*
  * ── RevoGrid: світлі значення пакета проти темної теми застосунку ─────────
  *
  * ⛔ Виміряно в браузері на живому документі, не припущено: у темній темі

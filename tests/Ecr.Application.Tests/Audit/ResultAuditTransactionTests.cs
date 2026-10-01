@@ -195,7 +195,6 @@ public sealed class ResultAuditTransactionTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
-    [Trait("Requirement", "ФВ-5.24")]
     public async Task Збій_запису_аудиту_одиниці_відкочує_саму_зміну()
     {
         // ⛔ Зворотний порядок: `UpdateUnitHandler` комітив зміну ДО аудиту. Збій
@@ -262,7 +261,6 @@ public sealed class ResultAuditTransactionTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
-    [Trait("Requirement", "ФВ-5.24")]
     public async Task Успішна_зміна_одиниці_лишає_рівно_одну_подію()
     {
         var unitId = await ArrangeUnitAsync();
@@ -285,7 +283,6 @@ public sealed class ResultAuditTransactionTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
-    [Trait("Requirement", "ФВ-5.24")]
     public async Task Подія_експорту_журналу_пишеться_рівно_одна()
     {
         // ⚠ Регресія: поза транзакцією подія-спроба пишеться, як і до C4.
@@ -298,7 +295,6 @@ public sealed class ResultAuditTransactionTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
-    [Trait("Requirement", "ФВ-5.24")]
     public async Task Подія_експорту_журналу_лишається_й_при_відкаті_транзакції_навколо()
     {
         // ⛔ Подія-СПРОБА: «дані пішли» — факт незалежно від того, чим скінчився
@@ -391,7 +387,8 @@ public sealed class ResultAuditTransactionTests(SqlServerFixture sql)
             _user,
             new AuditWriter(db),
             uow,
-            new TestClock(Now));
+            new TestClock(Now),
+            new Ecr.Infrastructure.Reporting.ReportViewGenerator(db));
 
     private IAccessDecisionService Allow(string permission)
     {

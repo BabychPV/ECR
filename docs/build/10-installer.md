@@ -300,8 +300,8 @@ Bundle» перетворює установку на переговори з а
 | Вимкнути | `WORKER_ENABLED=0` у msiexec або `deploy-ecr.ps1 -DisableWorker` (§10); `deploy-ecr.ps1` на SQL Server Express вимикає сам |
 | Обліковий запис | той самий `SERVICE_ACCOUNT`/`SERVICE_PASSWORD`, що в `EcrApi`; порожній → служба зареєстрована, але не стартує (§1.4) |
 | Старт, відновлення | `auto` + `DelayedAutoStart`, три спроби рестарту, як у `EcrApi` |
-| Секрети | рядок підключення — `HKLM\...\Services\EcrWorker\Environment` (`deploy-ecr.ps1`), не файл (D-11) |
-| Налаштування пулу | `worker.settings.json` поруч з exe — **типові значення збірки**, оновлення його перезаписує (як `appsettings.json`). Майданчик — `ECR_Jobs__Workers__Count`/`__MemoryLimitMb`/`__JobMemoryLimitMb`/`__MaxDuration` у тому ж `Environment`: перекривають файл і переживають оновлення |
+| Секрети | рядок підключення — `HKLM\...\Services\EcrWorker\Environment` (`deploy-ecr.ps1`), не файл (D-11). ⛔ **`Environment` служби НЕ переживає оновлення MSI** (перевірено джобом `msi-install`, див. нижче): після кожного оновлення — повторити `deploy-ecr.ps1` |
+| Налаштування пулу | `worker.settings.json` поруч з exe — **типові значення збірки**, оновлення його перезаписує (як `appsettings.json`). Майданчик — `ECR_Jobs__Workers__Count`/`__MemoryLimitMb`/`__JobMemoryLimitMb`/`__MaxDuration` у тому ж `Environment` служби `EcrWorker`: перекривають файл, але ✎ 2026-09-30 **разом з рештою `Environment` НЕ переживають оновлення MSI** (`MajorUpgrade` перевстановлює службу; `deploy-ecr.ps1` цих змінних не пише — після оновлення їх треба виставити знову вручну, `docs/admin/operations-runbook.md` §10.3). Стійке до оновлення місце для них — лише `worker.settings.json`, і то як типові значення збірки (оновлення його перезаписує), тож стійкого місця для налаштувань майданчика немає |
 
 **Рішення й чому так:**
 
@@ -562,6 +562,8 @@ msiexec /i Ecr.msi /qn /l*v install.log SERVICE_ACCOUNT=DOMAIN\ecr-svc$ APP_PORT
 ```bash
 # Оновлення — та сама команда, MajorUpgrade зробить решту
 msiexec /i Ecr-1.1.0.msi /qn /l*v upgrade.log
+# ⛔ Але НЕ змінні служби: Environment (рядок підключення, режим Api) оновлення
+#    стирає (перевірено джобом msi-install) — далі повторити tools\deploy-ecr.ps1 (§10)
 
 # Відновлення (файл пошкоджено, службу знесли руками)
 msiexec /f Ecr.msi /qn
@@ -607,13 +609,46 @@ msiexec /x {ProductCode} /qn
 | W0 | Установка без `WORKER_ENABLED` | `/i /qn SERVICE_ACCOUNT=...` | ✎ I2-2: `EcrWorker` **є** (типове `1`), `ImagePath` `…\Ecr.Worker.exe" --supervisor`, обліковий запис = `EcrApi`, `Running` |
 | W1 | Вимкнути воркер тим самим MSI | `/i /qn REINSTALL=ALL REINSTALLMODE=vomus WORKER_ENABLED=0 SERVICE_ACCOUNT=...` | `EcrWorker` знято; `EcrApi` на місці й працює |
 | W2 | Увімкнути назад тим самим MSI | те саме з `WORKER_ENABLED=1` | `EcrWorker` зареєстровано |
-| W3 | Оновлення БЕЗ `WORKER_ENABLED` | `/i` нового MSI (попередня версія — будь-яка, зокрема без воркера) | ✎ I2-2: `EcrWorker` **є** — до I2-2 тут його знімало; `Environment` служби `deploy-ecr.ps1` пише кроками 4–5 щоразу, як і для `EcrApi` — не покладатися на те, що він пережив `MajorUpgrade` |
+| W3 | Оновлення БЕЗ `WORKER_ENABLED` | `/i` нового MSI (попередня версія — будь-яка, зокрема без воркера) | ✎ I2-2: `EcrWorker` **є** — до I2-2 тут його знімало; ⛔ `Environment` служби **НЕ переживає** `MajorUpgrade` (✎ 2026-09-30, перевірено джобом `msi-install (windows)`, D3: тестовий маркер у `Environment` `EcrApi` зник, run 36676739674) — після оновлення **обов'язково** повторити `deploy-ecr.ps1` (він пише `Environment` кроками 4–5 щоразу): без цього Api лишається на типовому Quartz/`InProcess` без рядка підключення, а `EcrWorker` стоїть без роботи (безпечно, але режим D-216 не діє) |
 | W4 | Оновлення з `WORKER_ENABLED=0` | `/i` нового MSI | `EcrWorker` знято; `deploy-ecr.ps1 -DisableWorker` попереджає заздалегідь і перемикає Api на `InProcess` |
 
 `tools/verify-msi.ps1` автоматично проганяє сценарії 1 (разом із W0), W1,
-W2, 5, 9, 15 і статичні перевірки таблиць MSI S1–S5 (§6). Решта —
-вручну: вони потребують перезавантаження, відсутності прав адміністратора
-або двох версій MSI одночасно.
+W2, 5, 9, 15 і статичні перевірки таблиць MSI S1–S5 (§6); з
+`-PreviousMsiPath` — ще W3 і W3b (попередня з типовими властивостями →
+оновлення поточною: `EcrWorker` лишився, встановлена рівно одна версія), а
+також W5 (чиста установка з `WORKER_ENABLED=0` — служби й `Ecr.Worker.exe`
+немає). Решта — вручну: вони потребують перезавантаження або відсутності
+прав адміністратора.
+
+**CI: джоба `msi-install (windows)`** (`.github/workflows/ci.yml`, НЕ
+обов'язковий гейт; `needs: msi-windows` заради артефакту `ecr-msi`) ставить
+MSI по-справжньому на ефемерному `windows-latest` через
+`tools/ci-msi-install.ps1`:
+
+- `verify-msi.ps1` без `-StaticOnly`; попередня MSI — артефакт `ecr-msi`
+  останнього прогону `dev/integration` або `main` (`gh`), інакше — ранній
+  прогін тієї ж гілки (позначається в лозі); немає або не нижча версія — W3/W3b
+  пропускаються з поясненням;
+- `deploy-ecr.ps1 -WhatIf` типово і з `-DisableWorker`: план передає
+  `WORKER_ENABLED=1/0` і пише `Mode=Database`/`Executor=Worker` або
+  `Executor=InProcess` (SQL не потрібен — під `-WhatIf` `sqlcmd` не кличеться);
+- функції кроку 5 `deploy-ecr.ps1` (вирізані парсером, як у
+  `DeployWorkerModeTests`) проти **справжнього** реєстру встановленої служби:
+  `EcrWorker` є → `Environment` `EcrApi` має `Mode=Database`, `Executor=Worker`;
+  після `REINSTALL … WORKER_ENABLED=0` → `Executor=InProcess`, `Mode=Quartz`;
+- D3, довідково (сам крок не падає, лише повідомляє): чи пережив `Environment`
+  `EcrApi` оновлення MSI без повторного `deploy-ecr.ps1` (W3 у матриці вище).
+  ✎ 2026-09-30, **перевірено справжнім прогоном** (run 36676739674, лог кроку
+  D3): **не переживає** — `MajorUpgrade` перевстановлює службу, і тестовий
+  маркер зник. Отже після оновлення MSI `deploy-ecr.ps1` повторюють завжди
+  (§10). Для `EcrWorker` вимірювання окремо не робилося; той самий механізм
+  (`ServiceInstall` перевстановлюється), тож вважати його `Environment`
+  втраченим так само.
+
+⚠ Не перевіряє: старт служб і `/health` (SQL на ранері немає, `SERVICE_ACCOUNT`
+порожній → служби зареєстровані, але зупинені, §1.4), повний прогін
+`deploy-ecr.ps1` без `-WhatIf`, сценарії 3, 4 з реальним релізом, 6, 7, 8,
+10–14. Журнали `msiexec /l*v` — артефакт `msi-install-logs` при падінні.
 
 ---
 
@@ -664,15 +699,40 @@ W2, 5, 9, 15 і статичні перевірки таблиць MSI S1–S5 (
 ```powershell
 # Побачити повний план, нічого не роблячи в системі
 .\tools\deploy-ecr.ps1 -SqlInstance NCATUATV12 -Database ECR `
-    -ServiceAccount 'DOMAIN\ecr-svc$' -Version 1.0.0 -WhatIf
+    -ServiceAccount 'DOMAIN\ecr-svc$' -Version 1.0.0 `
+    -DataProtectionThumbprint '<відбиток>' -HttpsThumbprint '<відбиток HTTPS>' -AppPort 443 -WhatIf
 
 # Перше розгортання на чистому сервері (порожня база — потрібен bootstrap)
 $cs = Read-Host -AsSecureString -Prompt 'Рядок підключення'
 $bp = Read-Host -AsSecureString -Prompt 'Пароль bootstrap-адміністратора'
 .\tools\deploy-ecr.ps1 -SqlInstance NCATUATV12 -Database ECR `
     -ServiceAccount 'DOMAIN\ecr-svc$' -Version 1.0.0 -ConnectionString $cs `
+    -DataProtectionThumbprint '<відбиток>' -HttpsThumbprint '<відбиток HTTPS>' -AppPort 443 `
     -BootstrapPassword $bp -ConfigValues .\uat-config.json -FirstDeployment
 ```
+
+#### Транспорт (HTTPS) — рівно один із трьох параметрів (✎ 2026-09-30, `D14-08`, `R-01`)
+
+| Параметр | Що пише крок 4 у `Services\EcrApi\Environment` | Перевірка / застереження |
+|---|---|---|
+| `-HttpsThumbprint <відбиток>` | `ASPNETCORE_URLS=https://+:<AppPort>`, `ECR_Transport__Https__CertificateThumbprint`, `ECR_Auth__RequireHttps=true` | крок 1: сертифікат у `Cert:\LocalMachine\My`, є закритий ключ, чинний (спливає < 30 днів — попередження), відбиток 40 hex. Крок 7: TLS-зонд із пришпиленням — Kestrel віддає САМЕ цей сертифікат. Відбиток не друкується |
+| `-HttpRedirectPort <n>` (лише з попереднім) | додатково `;http://+:<n>` в URLS і `ECR_Transport__Https__Port=<AppPort>` | MSI відкриває в брандмауері лише `APP_PORT`; правило для `<n>` — вручну (скрипт попереджає) |
+| `-BehindHttpsProxy` | `ASPNETCORE_URLS=http://+:<AppPort>`, `ECR_Auth__RequireHttps=true`; прибирає `Transport__Https__*` | TLS завершує проксі; попередження: закрити порт Kestrel для всіх, крім проксі; `X-Forwarded-*` не читається (HSTS — на проксі) |
+| `-AllowHttp` | `ASPNETCORE_URLS=http://+:<AppPort>`, `ECR_Auth__RequireHttps=false`; прибирає `Transport__Https__*` | лише стенд; попередження в журналі розгортання, `transport` на `/health/ready` — Degraded |
+
+Жодного з трьох (або кілька разом) — зупинка на кроці 1 до будь-якої зміни системи. HTTPS слухає на
+`-AppPort` — тому самому порту, що `APP_PORT` у брандмауері MSI (звична адреса `https://сервер/` — `-AppPort 443`).
+`ECR_Auth__RequireHttps` пишеться завжди явно, тож `false` від колишнього `-AllowHttp` не переживе
+перерозгортання. Політика `Auth:RequireHttps` **не послаблюється** ніде, крім явного `-AllowHttp`.
+Параметр — на кожному оновленні (`Environment` стирає оновлення MSI). Реалізація: чисті функції
+`Resolve-TransportConfig`, `Get-HttpsCertificateProblem`, `Invoke-PinnedHttpsProbe`
+(`tests/Ecr.Architecture.Tests/DeployTransportTests.cs`, `DeployPinnedHttpsProbeTests.cs`), на боці Api —
+`HttpsTransport` і `TransportHealthCheck`. Майстер `Ecr-Setup` має крок «Transport (HTTPS)» із тим самим вибором.
+Про MSI: `Package.wxs`/`Service.wxs` цією зміною **не змінювались** — MSI не знає про HTTPS, транспорт лише в
+`Environment` служби (`docs/build/11-install-guide.md` §2.7).
+
+`.NET SDK` `deploy-ecr.ps1` вимагає лише коли кличе `dotnet`: `build-msi.ps1` (без `-MsiPath`) і `dotnet ef`
+(схема не з пакета й без `-SkipSchema`) — `Get-DotnetRequirement`. Пакований запуск із готовим MSI SDK не потребує.
 
 Пароль bootstrap-адміністратора «вводиться під час встановлення» саме тут
 — в ОДНОМУ вже наявному, перевіреному оркестраторі, а не через діалог
@@ -687,9 +747,9 @@ $bp = Read-Host -AsSecureString -Prompt 'Пароль bootstrap-адмініст
 
 ### Що робить (сім кроків)
 
-1. **Передумови** — `sqlcmd`/.NET на місці, цільова база вже існує (сама її
-   не створює — на відміну від `verify-sql-scripts.ps1`, який працює на
-   тимчасовій).
+1. **Передумови** — `sqlcmd` на місці (.NET SDK — лише коли кличеться `dotnet`, див. нижче), цільова база вже
+   існує (сама її не створює — на відміну від `verify-sql-scripts.ps1`, який працює на
+   тимчасовій); сертифікат Data Protection; ✎ 2026-09-30: обраний транспорт і сертифікат HTTPS (нижче).
 2. **Схема** — та сама послідовність, що `verify-sql-scripts.ps1`
    (`docs/build/09-commands.md` §3), **без** `09-seed.sql` (застосунок
    виконує його сам при першому старті) і без `14-agent-jobs.sql`, якщо не
@@ -719,7 +779,8 @@ $bp = Read-Host -AsSecureString -Prompt 'Пароль bootstrap-адмініст
    клав, а `Program.cs` жодного разу не додавав як джерело конфігурації.
 6. **Старт служби** — лише якщо `-ServiceAccount` задано і служба сама не
    піднялась.
-7. **Здоров'я** — `GET /health/live` з повторними спробами.
+7. **Здоров'я** — `GET /health/live` з повторними спробами; потім `/health/ready` (`Healthy`/`Degraded`).
+   У режимі HTTPS зонд іде по TLS із пришпиленням відбитка (✎ 2026-09-30).
 
 #### Редакція SQL Server і воркер (ФВ-9.8, `D-206`, P2)
 

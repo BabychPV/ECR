@@ -37,6 +37,11 @@ public sealed class EcrMigrationsSqlGenerator(
             operations = [new SqlOperation { Sql = D148ScalePrecheck.Sql }, .. operations];
         }
 
+        if (Q222UniquePrecheck.Applies(operations))
+        {
+            operations = [new SqlOperation { Sql = Q222UniquePrecheck.Sql }, .. operations];
+        }
+
         return base.Generate(operations, model, options);
     }
 }

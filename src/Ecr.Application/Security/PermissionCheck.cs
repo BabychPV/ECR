@@ -140,6 +140,35 @@ public static class PermissionCheck
         }
     }
 
+    /// <summary>Чи має профіль проєктне право в проєкті — для фільтра рядків переліку (ФВ-6.14).</summary>
+    /// <param name="profile">Профіль.</param>
+    /// <param name="permission">Код права.</param>
+    /// <param name="projectId">Проєкт ресурсу.</param>
+    /// <remarks>
+    /// ⚠ Не кидає: елемент без права просто не потрапляє в перелік. Рішення про ОДИН ресурс —
+    /// <see cref="RequireIn"/> (відмова має причину). Храповик ФВ-6.8: викликач не кличе
+    /// <c>profile.Has(</c> напряму.
+    /// </remarks>
+    public static bool IsGrantedIn(AccessProfile profile, string permission, int projectId)
+    {
+        ArgumentNullException.ThrowIfNull(profile);
+
+        return profile.Has(permission, projectId);
+    }
+    /// <summary>Чи має профіль глобальне (не проєктне) право — для гілок, що не кидають.</summary>
+    /// <remarks>
+    /// ⚠ Не кидає: викликач сам вирішує, що робити з відмовою (порожній перелік, 404, запасне
+    /// право). Рішення, що має кинути, — <see cref="RequireAsync"/>. Храповик ФВ-6.8: викликач
+    /// не кличе <c>profile.Has(</c> напряму.
+    /// </remarks>
+    /// <param name="profile">Профіль.</param>
+    /// <param name="permission">Код права.</param>
+    public static bool IsGranted(AccessProfile profile, string permission)
+    {
+        ArgumentNullException.ThrowIfNull(profile);
+
+        return profile.Has(permission);
+    }
     private static AccessDeniedException Denied(string permission)
         => new(
             "ECR-AUTH-0403",

@@ -69,7 +69,7 @@ public sealed class CellWriteRoundTripTests(SqlServerFixture sql)
     private const string ThirteenIntegerDigits = "1000800000000.1234567890123456";
 
     /// <summary>Пояс майданчика; той самий, який ставить <see cref="TestDocumentBuilder"/>.</summary>
-    private static readonly TimeZoneInfo SiteZone = SiteTimeZone.Create("Asia/Almaty").ToTimeZoneInfo();
+    private static readonly TimeZoneInfo SiteZone = SiteTimeZone.Create("Asia/Atyrau").ToTimeZoneInfo();
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]

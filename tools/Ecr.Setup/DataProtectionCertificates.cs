@@ -64,6 +64,31 @@ internal sealed class LocalMachineCertificateSource : ICertificateSource
 }
 
 /// <summary>
+/// Правила вибору сертифіката HTTPS у майстрі (D14-08): ті самі, що й для Data Protection
+/// (у сховищі, із закритим ключем, чинний за датами), лише текст порожнього вибору свій.
+/// </summary>
+internal static class HttpsCertificateRules
+{
+    /// <summary>Чи годиться вибраний відбиток HTTPS ЗАРАЗ (при виборі й перед стартом розгортання).</summary>
+    /// <param name="thumbprint">Відбиток зі стану майстра.</param>
+    /// <param name="source">Сховище сертифікатів.</param>
+    /// <param name="now">Поточний місцевий час.</param>
+    /// <param name="error">Зрозуміла причина відмови.</param>
+    public static bool TryValidate(string? thumbprint, ICertificateSource source, DateTime now, out string error)
+    {
+        if (DataProtectionCertificateRules.Normalize(thumbprint).Length == 0)
+        {
+            error = "Select the HTTPS certificate issued for the server name. Without it users cannot sign in from other "
+                + "computers: the session cookie is Secure and is not sent over HTTP. "
+                + "Or choose the reverse-proxy or the test-stand (HTTP) option.";
+            return false;
+        }
+
+        return DataProtectionCertificateRules.TryValidate(thumbprint, source, now, out error);
+    }
+}
+
+/// <summary>
 /// Правила вибору сертифіката Data Protection у майстрі (S11) — ті самі, що
 /// перевіряє <c>deploy-ecr.ps1</c> на кроці 1, плюс строк дії.
 /// </summary>

@@ -140,7 +140,7 @@ function formattableZone(timeZoneId: string): string {
  * Момент у поясі МАЙДАНЧИКА — для екрана (`X-34`/`F-20`).
  *
  * ⛔ Тут стояв `<Timestamp>`, тобто пояс БРАУЗЕРА. Межі періоду — моменти
- * майданчика (`D-68`): 202601 проєкту на `Asia/Aqtau` (+05:00) відкривається
+ * майданчика (`D-68`): 202601 проєкту на `Asia/Atyrau` (+05:00) відкривається
  * 1 січня 00:00 за Актау, тобто 31 грудня 19:00 UTC, — і адміністратор у UTC
  * бачив «Dec 31, 2025» як початок січня. «Grace until: Feb 14, 9:00 PM» при
  * справжньому 15.02 00:00 +05 — та сама розбіжність, на годину, що вирішує
@@ -161,7 +161,7 @@ export function siteMomentText(value: string, zone: string, dateOnly = false, in
    * 1 січня 00:00), і лише без зсуву в рядку — пояс проєкту через `Intl`.
    * Причина зміряна живцем: сервер рахує межі своєю базою поясів, браузер —
    * своєю, і вони розходяться (`Asia/Almaty` у свіжому ICU — уже +05:00, у
-   * базі Windows — ще +06:00). Через `Intl` межа 202501 показувалася б
+   * базі Windows-сервера без оновлення поясів 2024 року — ще +06:00). Через `Intl` межа 202501 показувалася б
    * «Dec 31, 2024». Зсув у відповіді — те, як межу порахував САМ сервер, і
    * саме за ним вона застосовується.
    */
@@ -237,8 +237,8 @@ export function periodCaption(year: number, sequence: number, kind: string): str
  *  - `date.toISOString()` дає ПІВНІЧ ПОЧАТКУ обраної доби, тобто вікно
  *    коротше на добу: «відкрити до 30 вересня» закрилося б 29-го ввечері;
  *  - північ у поясі ТОГО, ХТО ДИВИТЬСЯ, розходиться з поясом майданчика рівно
- *    на різницю зсувів — для проєкту на `Asia/Aqtau` (+05:00), відкритого з
- *    Астани (+06:00), це година рівно там, де вирішується «встиг чи не встиг»
+ *    на різницю зсувів — для проєкту на `Asia/Atyrau` (+05:00), відкритого з
+ *    Києва (+02:00/+03:00), це 2–3 години рівно там, де вирішується «встиг чи не встиг»
  *    (той самий дефект, про який попереджає підпис поясу над таблицею).
  *
  * ⚠ Два наближення, а не одне: зсув залежить від моменту, а момент — від
@@ -568,7 +568,9 @@ export function PeriodsPage(): JSX.Element {
     queryKey: ['job', recalcJobId],
     queryFn: () => apiFetch<JobStatus>(`/api/v1/jobs/${encodeURIComponent(recalcJobId ?? '')}`),
     enabled: recalcJobId !== null,
-    refetchInterval: (query) => pollInterval(query.state.data?.state),
+    // ⛔ P4 ФВ-9.8: батько-розклад уже `Succeeded`, коли документи ще рахуються
+    // (`effectiveState = FannedOut`) — опитування триває до кінця ДОЧІРНІХ.
+    refetchInterval: (query) => pollInterval(query.state.data?.state, query.state.data?.effectiveState),
 
     // ⚠ `GET /jobs/{id}` вимагає `System.ViewHealth` (Q-156) — без нього
     // оператор лишається з поставленою задачею, а не з червоним сповіщенням
@@ -578,9 +580,12 @@ export function PeriodsPage(): JSX.Element {
 
   const recalcOutcome = recalcJobId === null
     ? null
-    : outcomeOf(recalcJob.data?.state, recalcJob.isError);
+    : outcomeOf(recalcJob.data?.state, recalcJob.isError, recalcJob.data?.effectiveState);
 
   const recalcRunning = recalcOutcome === 'running';
+
+  // «Розкладено N, виконано M з N, помилок K» — правдивий стан проєктної задачі.
+  const recalcFan = recalcJobId === null ? null : (recalcJob.data?.fanOut ?? null);
 
   const recalcReported = useRef<string | null>(null);
 
@@ -591,8 +596,25 @@ export function PeriodsPage(): JSX.Element {
 
     recalcReported.current = recalcJobId;
 
-    if (recalcOutcome === 'succeeded') {
-      showDone(t('workflow.recalcDone'));
+    if (recalcOutcome === 'succeeded' || recalcOutcome === 'partial') {
+      // ⛔ «Завершено» — лише коли виконано M = N і помилок K = 0. Батько-розклад
+      // `Succeeded` одразу після розкладу; раніше тут і з'являвся тост
+      // «перерахунок завершено» над жодним ще не порахованим документом.
+      if (recalcOutcome === 'succeeded') {
+        showDone(t('workflow.recalcDone'));
+      } else {
+        const fan = recalcJob.data?.fanOut;
+
+        notifications.show({
+          color: 'statusWarning',
+          message: t('workflow.recalcDoneWithErrors', {
+            total: fan?.total ?? 0,
+            done: fan?.succeeded ?? 0,
+            failed: fan?.failed ?? 0,
+          }),
+          closeButtonProps: notificationCloseButtonProps,
+        });
+      }
 
       // ⚠ Кеш сіток скидається САМЕ тут, а не на постановці в чергу: раніше
       // означало б показати старі числа під написом «перераховано».
@@ -618,7 +640,7 @@ export function PeriodsPage(): JSX.Element {
       message: errorCodeText(recalcJob.data?.errorCode, t('workflow.recalcFailed')),
       closeButtonProps: notificationCloseButtonProps,
     });
-  }, [recalcJobId, recalcOutcome, recalcJob.data?.errorCode, queryClient]);
+  }, [recalcJobId, recalcOutcome, recalcJob.data?.errorCode, recalcJob.data?.fanOut, queryClient]);
 
   /*
    * ⚠ Пояс МАЙДАНЧИКА, а не той, у якому сидить адміністратор: строк
@@ -765,6 +787,16 @@ export function PeriodsPage(): JSX.Element {
               </Button>
             )}
 
+            {recalcFan !== null && (
+              <Text size="xs" c="dimmed" role="status" data-recalc-fanout={recalcJob.data?.effectiveState ?? ''}>
+                {t('jobs.fanOutProgress', {
+                  total: recalcFan.total,
+                  done: recalcFan.succeeded,
+                  failed: recalcFan.failed,
+                })}
+              </Text>
+            )}
+
             {/* ⚠ Архівація пропонується лише активному проєкту: чернетку
                 архівувати нема від чого, а вже заархівований — кінцевий стан. */}
             {/* ⛔ `X-29`: `variant="default"` разом із `color="statusError"` —
@@ -825,9 +857,9 @@ export function PeriodsPage(): JSX.Element {
         {/* ⛔ Пояс названо ПОРУЧ із межами, а не лише у формі створення
             (директива ПК-1 №06 §3). Колонки нижче показують моменти в поясі
             МАЙДАНЧИКА (`D-68`), і без підпису «01.02 00:00» читається як
-            місцевий час того, хто дивиться. Для проєкту на `Asia/Aqtau`
-            (+05:00), відкритого з Астани (+06:00), це різниця в годину рівно
-            там, де вирішується, встиг чи не встиг. */}
+            місцевий час того, хто дивиться. Для проєкту на `Asia/Atyrau`
+            (+05:00), відкритого з Києва (+02:00/+03:00), це різниця в 2–3
+            години рівно там, де вирішується, встиг чи не встиг. */}
         <Text size="xs" c="dimmed" mb="xs">
           {t('periods.timeZone')}: {calendar.timeZoneId}
         </Text>

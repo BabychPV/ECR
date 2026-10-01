@@ -19,7 +19,7 @@ function messageKeyOf(error: unknown, status: number): string | null {
 }
 
 /** `409 unitChanged` → чинна версія з тіла відмови; `null` — відмова інша. */
-export function freshUnitVersionOf(error: unknown): string | null {
+function freshUnitVersionOf(error: unknown): string | null {
   if (messageKeyOf(error, 409) !== UnitChanged || !(error instanceof EcrApiError)) return null;
   const rowVersion = error.problem.extensions2?.['rowVersion'];
   return typeof rowVersion === 'string' && rowVersion.length > 0 ? rowVersion : null;
@@ -30,7 +30,7 @@ export function freshUnitVersionOf(error: unknown): string | null {
  *
  * ⚠ `total` їде рядком (параметр каталогу повідомлень).
  */
-export function factorInUseOf(error: unknown): number | null {
+function factorInUseOf(error: unknown): number | null {
   if (messageKeyOf(error, 409) !== FactorInUse || !(error instanceof EcrApiError)) return null;
   const total = Number(error.problem.extensions2?.['total']);
   return Number.isFinite(total) ? total : 0;
@@ -61,7 +61,7 @@ function factorFailureOf(error: unknown): string | null {
  * людину у відому відмову сервера, а для сервера з дефектом — у тихо
  * перераховані збережені значення.
  */
-export function factorLockReason(
+function factorLockReason(
   unit: UnitDetail,
   usage: { readonly isPending: boolean; readonly isError: boolean; readonly data: UsageResponse | undefined },
   serverInUse: number | null,

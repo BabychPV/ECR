@@ -27,7 +27,14 @@ public sealed record RegistryRowsRequest(
     long? ParentEntryId,
     string? Search,
     IReadOnlyDictionary<string, string> FieldFilters,
-    CursorRequest Page);
+    CursorRequest Page)
+{
+    /// <summary>
+    /// Лише ці записи (<c>?id=</c>, ≤ <see cref="CursorRequest.MaxLimit"/>); порожньо — усі. Правило видимості
+    /// діє й тут: запис, невидимий на <c>asOf</c>, не повертається.
+    /// </summary>
+    public IReadOnlyCollection<long> EntryIds { get; init; } = [];
+}
 
 /// <summary>
 /// Рядки довідника зі значеннями полів — сторінками за курсором (RT-13, FEATURE-REGISTRY-TABLES §7.1).
@@ -38,8 +45,10 @@ public sealed record RegistryRowsRequest(
 /// видалений, а частина композиції — лише коли видно батька, рекурсивно. Інакше редактор показав би
 /// склад кейсу, якого пікер і формули вже не бачать.
 /// <para>
-/// ⚠ Відбір іде в пам'яті над усіма записами довідника (як у пікері — десятки тисяч), а значення
-/// читаються лише для сторінки. Курсор — за <c>Id</c>: вставка між сторінками не зсуває межі.
+/// ⚠ Плаский довідник (P1-4): видимість, порядок, курсор і кількість — у SQL, у пам'ять іде лише
+/// сторінка; пошук по назві — вузьке читання (Id, Code, назва) видимих записів. Довідник із композицією
+/// й експорт (<see cref="SelectAsync"/>) лишаються на відборі в пам'яті. Курсор — за <c>Id</c>: вставка
+/// між сторінками не зсуває межі.
 /// </para>
 /// </remarks>
 public sealed class GetRegistryRowsHandler(
@@ -63,9 +72,7 @@ public sealed class GetRegistryRowsHandler(
 
         await RegistryAccess
             .RequireAsync(
-                access, currentUser, Permission, GrantLevel.Read,
-                async token => (await registries.FindDefinitionAsync(request.RegistryCode, token).ConfigureAwait(false))?.Id,
-                ct)
+                access, currentUser, Permission, GrantLevel.Read, new RegistryLookup(registries, request.RegistryCode), ct)
             .ConfigureAwait(false);
 
         // ⚠ 422, а не 400: межа сторінки — правило (`ECR-REQ-0422`), як у решті курсорних переліків.
@@ -78,6 +85,46 @@ public sealed class GetRegistryRowsHandler(
                 new Dictionary<string, object?> { ["messageKey"] = "err.ECR-REQ-0422.pageSizeOutOfRange", ["max"] = max });
         }
 
+        var prepared = await PrepareAsync(request, ct).ConfigureAwait(false);
+        if (prepared.Chain.Count == 0)
+        {
+            return await FlatPageAsync(request, prepared, ct).ConfigureAwait(false);
+        }
+
+        var (definition, ordered) = await SelectFromAsync(request, prepared, ct).ConfigureAwait(false);
+
+        var after = DecodeCursor(request.Page.Cursor);
+        var page = ordered.Where(e => e.Id > after).Take(request.Page.Limit + 1).ToList();
+        var hasMore = page.Count > request.Page.Limit;
+        if (hasMore)
+        {
+            page.RemoveAt(page.Count - 1);
+        }
+
+        var items = await ProjectAsync(definition, page, request.AsOfUtc, ct).ConfigureAwait(false);
+
+        return new PagedResult<RegistryRowDto>(items, hasMore ? EncodeCursor(page[^1].Id) : null, ordered.Count);
+    }
+
+    /// <summary>
+    /// Опис довідника і ВСІ записи, що проходять запит (видимість, батько, <c>id</c>, пошук, фільтри), у
+    /// порядку <c>Id</c> — без права й без сторінки. Спільне з експортом (RT-16): одне правило відбору.
+    /// </summary>
+    /// <param name="request">Параметри; <see cref="RegistryRowsRequest.Page"/> не читається.</param>
+    /// <param name="ct">Токен скасування.</param>
+    internal async Task<(RegistryDef Definition, List<RegistryEntry> Ordered)> SelectAsync(
+        RegistryRowsRequest request, CancellationToken ct)
+        => await SelectFromAsync(request, await PrepareAsync(request, ct).ConfigureAwait(false), ct).ConfigureAwait(false);
+
+    /// <summary>Перевірки запиту, спільні для обох шляхів: опис, ланцюжок композиції, дата, id, фільтри.</summary>
+    private sealed record Prepared(
+        RegistryDef Definition,
+        List<CompositionLink> Chain,
+        List<(RegistryFieldDef Field, string Value)> Filters,
+        IReadOnlyList<long> EntryIds);
+
+    private async Task<Prepared> PrepareAsync(RegistryRowsRequest request, CancellationToken ct)
+    {
         var definition = await registries.FindDefinitionAsync(request.RegistryCode, ct).ConfigureAwait(false)
             ?? throw new NotFoundException(
                 ErrorCodes.RegistryEntryNotFound,
@@ -96,28 +143,156 @@ public sealed class GetRegistryRowsHandler(
                 new Dictionary<string, object?> { ["messageKey"] = "err.ECR-REQ-0422.asOfRequired", ["parameter"] = "asOf" });
         }
 
-        var filters = ParseFilters(definition, request.FieldFilters);
+        var entryIds = request.EntryIds ?? [];
+        if (entryIds.Count > CursorRequest.MaxLimit)
+        {
+            var max = CursorRequest.MaxLimit.ToString(CultureInfo.InvariantCulture);
+            throw new BusinessRuleException(
+                ErrorCodes.RequestInvalid,
+                $"Записів у фільтрі id {entryIds.Count}, а найбільше — {max}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-REQ-0422.registryRowsIdsTooMany",
+                    ["max"] = max,
+                    ["count"] = entryIds.Count.ToString(CultureInfo.InvariantCulture),
+                });
+        }
+
+        return new Prepared(definition, chain, ParseFilters(definition, request.FieldFilters), [.. entryIds]);
+    }
+
+    /// <summary>Шлях з композицією (і експорт): відбір над усіма записами в пам'яті, як і раніше.</summary>
+    private async Task<(RegistryDef Definition, List<RegistryEntry> Ordered)> SelectFromAsync(
+        RegistryRowsRequest request, Prepared prepared, CancellationToken ct)
+    {
+        var (definition, chain, filters, entryIds) = prepared;
         var entries = await rows.ListEntriesAsync(definition.Id, request.AsOfUtc, ct).ConfigureAwait(false);
         var visible = await VisibleAsync(definition, entries, chain, request, ct).ConfigureAwait(false);
+        if (entryIds.Count > 0)
+        {
+            var wanted = entryIds.ToHashSet();
+            visible = [.. visible.Where(e => wanted.Contains(e.Id))];
+        }
+
         visible = await MatchAsync(definition, visible, request.Search?.Trim(), filters, request.AsOfUtc, ct).ConfigureAwait(false);
 
         // ⛔ Порядок курсора — Id, а не порядок пікера (Ordinal, Code): «після Id N» має сенс лише в
         // порядку Id. Інакше новий запис із меншим кодом зсунув би межу, і сторінка повторила б рядки.
-        var ordered = visible.OrderBy(e => e.Id).ToList();
+        return (definition, visible.OrderBy(e => e.Id).ToList());
+    }
+
+    /// <summary>
+    /// Плаский довідник (P1-4): видимість, порядок за <c>Id</c>, курсор і кількість — у SQL; у пам'ять
+    /// йде лише сторінка. Пошук і фільтри: SQL дає надмножину збігів значень, а точну перевірку
+    /// (<c>OrdinalIgnoreCase</c>) робить цей клас — семантика відповіді та сама, що на шляху з композицією.
+    /// </summary>
+    private async Task<PagedResult<RegistryRowDto>> FlatPageAsync(
+        RegistryRowsRequest request, Prepared prepared, CancellationToken ct)
+    {
+        var definition = prepared.Definition;
+        long[] cascadeAllowed = [];
+        if (request.ParentEntryId is { } parent)
+        {
+            var links = await registries.ListInboundLinksAsync(definition.Id, ct).ConfigureAwait(false);
+            cascadeAllowed = [.. links.Where(l => l.LeftEntryId == parent).Select(l => l.RightEntryId)];
+        }
+
+        var filter = new VisibleEntriesFilter(
+            definition.Id,
+            request.AsOf,
+            request.AsOfUtc,
+            request.ParentEntryId,
+            cascadeAllowed,
+            prepared.EntryIds.Count > 0 ? prepared.EntryIds : null);
+
         var after = DecodeCursor(request.Page.Cursor);
-        var page = ordered.Where(e => e.Id > after).Take(request.Page.Limit + 1).ToList();
-        var hasMore = page.Count > request.Page.Limit;
+        var limit = request.Page.Limit;
+        var search = request.Search?.Trim();
+
+        List<RegistryEntry> page;
+        int total;
+        if (string.IsNullOrEmpty(search) && prepared.Filters.Count == 0)
+        {
+            var result = await rows.PageVisibleEntriesAsync(filter, after, limit + 1, ct).ConfigureAwait(false);
+            page = [.. result.Items];
+            total = result.Total;
+        }
+        else
+        {
+            var matched = await MatchedIdsAsync(definition, filter, search, prepared.Filters, request.AsOfUtc, ct)
+                .ConfigureAwait(false);
+            total = matched.Count;
+            var pageIds = matched.Where(id => id > after).Take(limit + 1).ToList();
+            page = pageIds.Count == 0
+                ? []
+                : [.. (await rows.PageVisibleEntriesAsync(filter with { EntryIds = pageIds }, 0, pageIds.Count, ct)
+                    .ConfigureAwait(false)).Items];
+        }
+
+        var hasMore = page.Count > limit;
         if (hasMore)
         {
             page.RemoveAt(page.Count - 1);
         }
 
-        var slice = await rows.ReadRowsAsync([.. page.Select(e => e.Id)], request.AsOfUtc, ct).ConfigureAwait(false);
+        var items = await ProjectAsync(definition, page, request.AsOfUtc, ct).ConfigureAwait(false);
+        return new PagedResult<RegistryRowDto>(items, hasMore ? EncodeCursor(page[^1].Id) : null, total);
+    }
+
+    /// <summary>Id видимих записів, що проходять пошук і фільтри, за зростанням.</summary>
+    private async Task<List<long>> MatchedIdsAsync(
+        RegistryDef definition,
+        VisibleEntriesFilter filter,
+        string? search,
+        List<(RegistryFieldDef Field, string Value)> filters,
+        DateTime? asOfUtc,
+        CancellationToken ct)
+    {
+        var slim = await rows.ListVisibleSlimAsync(filter, ct).ConfigureAwait(false);
+
+        HashSet<long>? textHits = null;
+        if (!string.IsNullOrEmpty(search))
+        {
+            var textFields = definition.Fields.Where(f => f.DataType == CellDataType.String).Select(f => f.Id).ToList();
+            textHits = (await rows.ListTextMatchesAsync(textFields, search, asOfUtc, ct).ConfigureAwait(false))
+                .Where(v => v.Text?.Contains(search, StringComparison.OrdinalIgnoreCase) == true)
+                .Select(v => v.RegistryEntryId)
+                .ToHashSet();
+        }
+
+        var filterHits = new List<HashSet<long>>();
+        foreach (var (field, value) in filters)
+        {
+            var comparison = field.DataType == CellDataType.String ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+            filterHits.Add((await rows.ListEqualMatchesAsync(field.Id, field.DataType, value, asOfUtc, ct).ConfigureAwait(false))
+                .Where(v => string.Equals(ValueText(field.DataType, v), value, comparison))
+                .Select(v => v.RegistryEntryId)
+                .ToHashSet());
+        }
+
+        return [.. slim
+            .Where(e => string.IsNullOrEmpty(search)
+                || e.Code.Contains(search, StringComparison.OrdinalIgnoreCase)
+                || (e.DisplayL10n.Get(currentUser.Language) ?? e.Code).Contains(search, StringComparison.OrdinalIgnoreCase)
+                || textHits!.Contains(e.Id))
+            .Where(e => filterHits.TrueForAll(hits => hits.Contains(e.Id)))
+            .Select(e => e.Id)];
+    }
+
+    /// <summary>Рядки зі значеннями для записів сторінки (≤ 500) — сталою кількістю запитів.</summary>
+    /// <param name="definition">Опис довідника.</param>
+    /// <param name="page">Записи сторінки.</param>
+    /// <param name="asOfUtc">Системний момент; <c>null</c> — поточні дані.</param>
+    /// <param name="ct">Токен скасування.</param>
+    internal async Task<List<RegistryRowDto>> ProjectAsync(
+        RegistryDef definition, IReadOnlyList<RegistryEntry> page, DateTime? asOfUtc, CancellationToken ct)
+    {
+        var slice = await rows.ReadRowsAsync([.. page.Select(e => e.Id)], asOfUtc, ct).ConfigureAwait(false);
         var fields = definition.Fields.ToDictionary(f => f.Id);
         var values = slice.Values.ToLookup(v => v.RegistryEntryId);
         var referenced = slice.Referenced.GroupBy(e => e.Id).ToDictionary(g => g.Key, g => g.First());
 
-        var items = page
+        return page
             .Select(e => new RegistryRowDto(
                 e.Id,
                 e.Code,
@@ -128,8 +303,6 @@ public sealed class GetRegistryRowsHandler(
                 RegistryRowVersion.Encode(slice.Versions.GetValueOrDefault(e.Id)),
                 Values(values[e.Id], fields, referenced)))
             .ToList();
-
-        return new PagedResult<RegistryRowDto>(items, hasMore ? EncodeCursor(page[^1].Id) : null, ordered.Count);
     }
 
     /// <summary>Записи, видимі правилом пікера, звужені батьком.</summary>
@@ -300,7 +473,7 @@ public sealed class GetRegistryRowsHandler(
     }
 
     /// <summary>Значення рядком за типом поля; немає значення — <c>null</c>.</summary>
-    private static string? ValueText(CellDataType type, RegistryRowValue value) => type switch
+    internal static string? ValueText(CellDataType type, RegistryRowValue value) => type switch
     {
         CellDataType.String => value.Text,
         CellDataType.Int or CellDataType.Decimal => value.Numeric is { } number ? Number(number) : null,
@@ -316,7 +489,7 @@ public sealed class GetRegistryRowsHandler(
     /// доходять до клієнта цілими. Хвостові нулі шкали прибрано — <c>49.9999977539011</c>, а не
     /// <c>49.9999977539011000</c>.
     /// </summary>
-    private static string Number(decimal value)
+    internal static string Number(decimal value)
     {
         var text = value.ToString(CultureInfo.InvariantCulture);
         return text.Contains('.', StringComparison.Ordinal) ? text.TrimEnd('0').TrimEnd('.') : text;

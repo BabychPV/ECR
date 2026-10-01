@@ -233,7 +233,7 @@ public sealed class MaterializeIntegrationActorTests(SqlServerFixture sql)
         var coverage = Assert.Single(await CoverageAsync(stand));
         Assert.Equal(CollectionCoverage.SkippedNeedsConfirmation, coverage.Status);
         Assert.Contains($"{stand.RowKey}:{stand.ColumnCodes[0]}", coverage.Details, StringComparison.Ordinal);
-        Assert.Contains("підтвердження", coverage.Details, StringComparison.Ordinal);
+        Assert.Contains(CoverageDetails.NeedsConfirmationKey, coverage.Details, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -344,7 +344,7 @@ public sealed class MaterializeIntegrationActorTests(SqlServerFixture sql)
         var coverage = Assert.Single(await CoverageAsync(stand));
         Assert.Equal(CollectionCoverage.ConflictKeptManual, coverage.Status);
         Assert.Contains($"{stand.RowKey}:{stand.ColumnCodes[0]}", coverage.Details, StringComparison.Ordinal);
-        Assert.Contains("правку людини", coverage.Details, StringComparison.Ordinal);
+        Assert.Contains(CoverageDetails.KeptManualKey, coverage.Details, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -390,7 +390,7 @@ public sealed class MaterializeIntegrationActorTests(SqlServerFixture sql)
         var coverage = Assert.Single(await CoverageAsync(stand));
         Assert.Equal(CollectionCoverage.SkippedWriteConflict, coverage.Status);
         Assert.Contains($"{stand.RowKey}:{stand.ColumnCodes[0]}", coverage.Details, StringComparison.Ordinal);
-        Assert.DoesNotContain("правку людини", coverage.Details, StringComparison.Ordinal);
+        Assert.DoesNotContain(CoverageDetails.KeptManualKey, coverage.Details, StringComparison.Ordinal);
     }
 
     [Fact]

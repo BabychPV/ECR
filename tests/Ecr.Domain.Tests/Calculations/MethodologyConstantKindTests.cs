@@ -129,7 +129,6 @@ public sealed class MethodologyConstantKindTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
-    [Trait("Requirement", "ФВ-16.6")]
     public void Текстова_формула_не_має_одиниці_результату()
     {
         // ⛔ Одиниця на текстовому результаті не має симптому: перевірка

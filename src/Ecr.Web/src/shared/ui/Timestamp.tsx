@@ -22,7 +22,7 @@ import { formatDate, formatDateTime } from '@/shared/format';
  * непослідовно, а `dateTime` — частина семантики елемента, і її видно в DOM
  * без наведення (тобто й у тесті, і при копіюванні розмітки).
  */
-export interface TimestampProps {
+interface TimestampProps {
   /** Момент, як його віддав сервер (ISO-рядок), або `null`. */
   readonly value: string | null | undefined;
 

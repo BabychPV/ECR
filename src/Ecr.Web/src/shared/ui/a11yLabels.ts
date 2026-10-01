@@ -28,7 +28,7 @@ export function undoLabel(): string {
 }
 
 /** Тумблер видимості пароля. */
-export function passwordToggleLabel(): string {
+function passwordToggleLabel(): string {
   return hasText('common.togglePasswordVisibility')
     ? t('common.togglePasswordVisibility')
     : 'Toggle password visibility';

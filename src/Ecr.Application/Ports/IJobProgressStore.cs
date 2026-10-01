@@ -100,6 +100,13 @@ public interface IJobProgressStore
     /// <summary>Стан задачі; <c>null</c> — такої немає.</summary>
     public Task<JobStatus?> FindAsync(string jobId, CancellationToken ct);
 
+    /// <summary>
+    /// Підсумок дочірніх задач, розкладених цим батьком; <c>null</c> — дочірніх немає.
+    /// </summary>
+    /// <param name="parentJobId">Ідентифікатор батьківської задачі.</param>
+    /// <param name="ct">Скасування.</param>
+    public Task<FanOutStatus?> GetFanOutAsync(string parentJobId, CancellationToken ct);
+
     /// <summary>Хто поставив задачу; <c>null</c> — системна, або такої немає (Q-156).</summary>
     public Task<int?> GetCreatedByUserIdAsync(string jobId, CancellationToken ct);
 
@@ -188,6 +195,15 @@ public interface IJobProgressStore
     /// <param name="sinceUtc">Нижня межа <c>UpdatedAt</c> (UTC).</param>
     /// <param name="ct">Скасування.</param>
     public Task<int> CountFailedWithMessageKeyAsync(string messageKey, DateTime sinceUtc, CancellationToken ct);
+
+    /// <summary>
+    /// Скільки задач закрито <c>Succeeded</c> з конвертом <paramref name="messageKey"/> від
+    /// <paramref name="sinceUtc"/> (ПРД-13: перерахунок вийшов за бюджет, але завершився).
+    /// </summary>
+    /// <param name="messageKey">Ключ каталогу в конверті <c>Message</c>.</param>
+    /// <param name="sinceUtc">Нижня межа <c>UpdatedAt</c> (UTC).</param>
+    /// <param name="ct">Скасування.</param>
+    public Task<int> CountSucceededWithMessageKeyAsync(string messageKey, DateTime sinceUtc, CancellationToken ct);
 
     /// <summary>
     /// Видаляє ЗАВЕРШЕНІ записи, старші за <paramref name="olderThan"/> (аудит P2).

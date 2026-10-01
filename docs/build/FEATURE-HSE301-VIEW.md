@@ -5,6 +5,17 @@
 > `D-171…D-184` (V-2…V-15); V-16…V-25 ухвалені за делегуванням людини того ж дня («все інше на
 > твій розсуд не обмежуй себе») і внесені як `D-185…D-194` — §13.2 · **Мова продукту:** en/ru/kk · **Мова документа:** українська.
 >
+> ✎ **2026-10-01, стан реалізації** (звірено з `git log origin/dev/integration` і кодом; текст
+> нижче — проєкт, де суперечить цьому абзацу, чинний абзац). Зроблено: **A1** — виконання
+> прив'язки вікна рядка (`b3f24d4c`: хук, задача підтягування, щогодинний повтор), CRUD
+> `/api/v1/row-window-maps` (`5a191109`, `a77afbff`, `ed152125` — знімок індексу скидається після
+> POST/PUT/DELETE; клієнт `7cd73f23`; тест на реальному HTTP і SQL `8a329bd4`; контракт
+> `27fa9237`), імпорт книги ставить підтягування вікон рядків (`bec56bb2`); **A6** — вкладка
+> «Події з PI» і `source-event-maps`; імпорт пакета методологій є; представлення `rpt-views` —
+> стан і публікація див. TESTER-GUIDE §7. Не перевірено в цьому проході: повний перелік
+> кроків B0…B8 і I1…I3 таблиці виконання (§ нижче) проти коду — рядки таблиці кроків
+> відображають стан на 2026-09-30.
+>
 > ✎ **2026-09-27, відповіді людини.** (1) «так погоджуюся на Подання» — V-1. (2) «так, вноси
 > D-149 в реєстр та Схвалено запропоновані рішення» — V-1…V-15. (3) Про теги, межі подій,
 > сезони Winter/Summer і категорії V6–V9: «це вже приходе з pi» — тому **подія (початок,
@@ -443,9 +454,21 @@ ext.RowWindowValue                     -- провенанс кожного пі
 - `MaterializeCollectedDataJob` після `Applied > 0`;
 - `RowWindowFetchJob` після зміни значення.
 
-Дедуплікація: у черзі чи в роботі вже є перерахунок того самого `(DocumentId, PeriodKey)`
-з міткою `auto` → нова задача не ставиться. Затримка 2 хв збирає пачку подій. Закритий
-період не чіпається (`MaterializeCollectedDataJob.cs:84-100`, `RecalculationWritePolicy`).
+~~Дедуплікація: у черзі чи в роботі вже є перерахунок того самого `(DocumentId, PeriodKey)`
+з міткою `auto` → нова задача не ставиться. Затримка 2 хв збирає пачку подій.~~
+✎ 2026-09-30 (A4, як реалізовано): дублі прибирає **черга**, а не тригер. Тригер ставить
+`IRecalculationJob` з тим самим маркером і ціллю `doc{id}-p{period}`
+(`RecalculateDocumentHandler.TargetOf`), що й кнопка «Перерахувати» та правка шапки, тож на
+пару «документ × період» лишається одна жива задача — і між авто- та ручним перерахунком теж.
+Постановка — `EnqueueCoalescedAsync` (без витіснення): виконуваний перерахунок не
+переривається, нова задача стає **позаду** нього (черга в базі) або зливається з наявною
+(Quartz); `EnqueueExclusiveAsync` тут заборонено — він переривав би «гарячий» документ на
+кожному записі. Лок документа `ecr:recalc:doc:{id}` бере сама задача, не тригер.
+Мітки `auto` й затримки 2 хв немає. Чому: власна дедуплікація поруч із чергою розійшлася б
+із її ключем (узгоджено з «Аналізом», власницею черги). Тригер кличуть **один раз на
+прогін** викликача, не в циклі.
+Закритий період, `Scheduled` і поданий аркуш — нуль задач (`RecalculationWritePolicy`;
+гілка стану в `MaterializeCollectedDataJob`).
 **Без прапорця:** без перерахунку нові дані однаково блокують подання
 (`SubmitSheetHandler.cs:187-217`), тобто прапорець лише відкладав би ту саму дію.
 Кнопка «Перерахувати» лишається для «застаріло» з інших причин (§8.8).
@@ -626,6 +649,59 @@ ext.SourceEventLink                   -- подія джерела ↔ рядо�
    `open`, `unmapped`, `closed`.
 
 Рядків **без** прив'язки (подія введена вручну) синхронізація не бачить і не чіпає ніколи.
+
+**Як реалізовано (A5b, рішення людини 2026-09-30):**
+
+- **Запуск.** `CollectionJob` для сутності з активним `SourceEventMap` і без мапінгів атрибутів точок збір точок
+  не запускає (точок немає, збирач шукав би за кодом-шаблоном сирий тег) — ставить `ISourceEventSyncJob`
+  (`EnqueueCoalescedAsync`, ціль `source-events-e{id}`), прогін розкладу фіксується без watermark; з мапінгами
+  точок — синк ставиться після збору. Читання одне на сутність (`Template` — код сутності), мапінги (документи
+  ділянок) ділять відповідь і її `Truncated`.
+- **Кореневі.** Беруться лише події без `ParentId` (дочірні EF не звітні); `ParentId` лишається сирим полем події.
+- **EFID — кеш.** Подія з новим ID, що збіглася з прив'язкою, якої джерело не повернуло, за природним ключем
+  лягає в її рядок: `SourceEventLink.RekeyTo`, `RowKey` лишається `EF-<перший ID>`. Лише пара «один до одного»;
+  дві однакові за ключем події не зіставляються з жодною. **Повний ключ (M6, `HSE301M6SourceEventKey`)** —
+  мапінг (= шаблон) + початок до мс + первинний елемент (`ext.SourceEventLink.PrimaryElement`, Trim + UPPER,
+  фільтрований `UX_SEL_NaturalKey`). Порядок: 1) повний ключ; 2) для решти — слабкий (початок + назва без
+  регістру) лише проти зв'язків БЕЗ елемента (записані до M6) чи для подій без елемента; зв'язок з ІНШИМ
+  елементом слабким ключем не зіставляється. Елемент заповнюється м'яко — першим `Synced`/спостереженням
+  (`SourceEventPlanItem.ElementToStore`), не міграцією; неоднозначний ключ (дві події одного прогону чи інший
+  зв'язок із тим самим «початок + елемент») не записується, щоб не порушити індекс.
+- **Період** — за межами періодів проєкту (`Period.UtcBounds`), не за UTC-датою: 19:00Z 31 січня в `Asia/Atyrau`
+  (+05:00) — лютий. `Scheduled` і відсутній екземпляр — `PeriodNotOpen`; `Closed` — `PeriodClosed` (нуль записів).
+- **Незакрита** — кінець `NULL` або ≥ `9999-01-01` (сторожова дата PI AF); з рядком (PI знову показує відкритою)
+  — прив'язка й рядок лишаються як є.
+- **Запис** — групами по екземпляру таблиці; пакет відхилено (`dynamicRowLimit`, валідація) — по одному рядку:
+  стеля → `RowLimit`, решта відмов — подія покриття `SkippedWriteConflict`, а не падіння прогону. Прив'язка
+  лягає лише для рядка, який існує після запису. `KeptManual` → `KeptManualJson`, `Rejected` патчера і значення
+  без відповідника → `UnmappedJson`. Спершу весь запис, потім усі зміни прив'язок одним збереженням.
+- **Автоперерахунок** — `ICalculationTrigger` один раз на зачеплений період за прогін мапінгу, лише за `Applied > 0`.
+- **Прогрес** — `jobs.sourceEventsDone` (`created`, `updated`, `keptManual`, `missing`, `open`, `unmapped`,
+  `closed`, `pending` = не записано й чекає: `PeriodNotOpen`, `PeriodChanged`, `RowLimit`, відмови).
+- **Каскадні Lookup** (`HmbCase` від `Stream`) шукаються серед усіх записів довідника колонки; двозначна назва —
+  незіставлена. Обмеження записами батька — окремий крок.
+
+**✎ 2026-09-30, звірка тексту кроків 1–7 з кодом** (`dev/integration`, після `4b609f1b`). Де текст вище
+розходиться з кодом, чинний код:
+
+- **Кнопки «Отримати з PI зараз» і `POST …/source-events/sync` немає.** Кроки A6 і B8 (§11.2) не
+  виконано: у `src/` немає маршрутів `source-event-maps`, `probe-events`, `event-templates`,
+  `source-events`. Ручний запуск — чинний `POST /api/v1/sources/{id}/collect` (`SourcesController.cs:135`):
+  `CollectionJob` ставить синк сам. Мапінг `ext.SourceEventMap` через API чи UI не заводиться — лише
+  прямим записом у БД; без мапінгу задача завершується з `jobs.sourceEventsNoMaps` і нічого не читає.
+- **Вікно:** `FromUtc` із завдання, інакше `ToUtc − LookbackDays` **увімкненого** розкладу сутності; розкладу
+  немає — 7 днів (`SourceEventSyncJob.DefaultLookbackDays`). `ToUtc` — із завдання, інакше «зараз».
+- **Крок 2 (ключ)** — як у тексті: `IntegrationRowUpsert.EventRowKey` (`ICellPatcher.cs:97-109`). Для
+  перествореної події з новим ID ключ рядка лишається ключем першого ID (EFID — кеш, див. вище).
+- **Крок 3 (відкрита подія)** — зв'язок зі статусом `Open` лягає, рядок — ні; так само `PeriodNotOpen`,
+  `PeriodClosed`, `RowLimit` — статуси зв'язку без рядка (`SourceEventSyncJob.Unwritten`).
+- **Крок 4 (період)** — межі періоду проєкту (`SourceEventPeriods`, `Period.UtcBounds`), а не «місяць за
+  TZ»: для місячної політики це те саме, для інших політик — межі самого періоду.
+- **Крок 7** — перерахунок один раз на зачеплений період **мапінгу** (мапінг = документ ділянки), лише за
+  `Applied > 0`; лічильник `pending` додано до переліку з тексту.
+- ⚠ **Не підтверджено кодом:** поведінка на живому RTQP (тексти `PiSqlClient:EventQuery`/`EventTemplateQuery`
+  типового значення не мають, живий PI не перевірявся) і реальна ієрархія Flare-EF — відкриті питання
+  PI-адміністратору (TESTER-GUIDE §7.3).
 
 #### 4.7.5 Об'єм: два режими, налаштовуються на мапінгу
 
@@ -1800,14 +1876,14 @@ RevoGrid 4.11 такий вигляд теж уміє: `ColumnGrouping` (`interf
 | F7 | **Міграція M4:** `cfg.ViewDef`, `cfg.ViewVersion` (~250 р.) | `src/Ecr.Domain/Entities/Configuration/ViewDef.cs` (новий), `src/Ecr.Infrastructure/Persistence/Configurations/ViewConfiguration.cs` (новий), `EcrDbContext.cs` (2 `DbSet`), міграція `…_HSE301M4ViewDef.cs`, `docs/build/02a-db-schema.md` (2 `CREATE TABLE`), `tests/Ecr.Domain.Tests/Configuration/ViewVersionTests.cs` | F6 | публікація лише з `Draft`; `UQ(TemplateId, Code)`. **Мутація:** дозволити `Publish` з `Published` → тест червоний | послідовно |
 | F8 | Коди `ECR-VIEW-*`, нові `messageKey` §9.3 (разом із ключами подій `.eventMap*`, `.sourceEventNotFound`; `.eventQueryNotConfigured` уже заводить F4e), арми middleware (~280 р.) | `src/Ecr.Domain/Errors/ErrorCodes.cs`, `docs/build/02-contracts.md` §7, `09-seed.sql` (секція `-- HSE301:F8`), `src/Ecr.Api/Errors/ExceptionHandlingMiddleware.cs`, `tests/Ecr.Api.Tests/Errors/ViewErrorStatusTests.cs` | F7 | `ContractIntegrityTests`, `ErrorTitleCatalogTests`, `SeedCatalogTextTests` зелені; `ECR-VIEW-0404` віддається як 404. **Мутація:** прибрати арм → статус 422, тест червоний | послідовно |
 | F9 | **Міграція M5:** `ext.SourceEventMap`, `SourceEventFieldMap`, `SourceEventValueMap`, `SourceEventLink` + домен + конфігурації (~350 р.) | `src/Ecr.Domain/Entities/External/SourceEventMap.cs`, `SourceEventLink.cs` (нові), `src/Ecr.Domain/Enums/Enums.cs` (у кінець: `SourceEventVolumeMode`, `SourceEventValueKind`, `SourceEventLinkStatus`), `src/Ecr.Infrastructure/Persistence/Configurations/SourceEventConfiguration.cs` (новий), `EcrDbContext.cs` (4 `DbSet`), міграція `…_HSE301M5SourceEvents.cs`, `docs/build/02a-db-schema.md` (4 `CREATE TABLE`), `tests/Ecr.Domain.Tests/External/SourceEventMapTests.cs` | F8 | мапінг без `$start`/`$end` → доменна відмова; ціль — лише динамічна таблиця; `UQ(SourceEventMapId, SourceEventId)`; переходи стану зв'язку (`Synced ↔ Missing`, `Open → Synced`). **Мутація:** дозволити мапінг без `$end` → тест червоний | послідовно |
-| A4 | `ICalculationTrigger` + виклик із матеріалізації, дедуплікація (~300 р.) | `src/Ecr.Application/Calculations/CalculationTrigger.cs` (новий), `src/Ecr.Application/Ports/ICalculationTrigger.cs` (новий), `src/Ecr.Infrastructure/Jobs/MaterializeCollectedDataJob.cs`, `src/Ecr.Infrastructure/DependencyInjection.cs` (секція `// HSE301:A4`), `tests/Ecr.Infrastructure.Tests/Jobs/AutoRecalcAfterMaterializeTests.cs` | F3 | `Applied > 0` → рівно одна задача на `(doc, period)` за будь-якої кількості викликів; закритий період — нуль. **Мутація:** прибрати дедуплікацію → тест «3 виклики = 1 задача» червоний | паралельно з A2, A3a |
+| A4 | `ICalculationTrigger` + виклик із матеріалізації, дедуплікація (~300 р.) — ✓ **виконано** в `179341ec` (код), `cf006e8b` (тести), `8155273b` (контракт портів). ✎ 2026-09-30: дедуплікацію робить черга, а не тригер (§4.5); тести — `tests/Ecr.Application.Tests/Calculations/CalculationTriggerTests.cs`, `tests/Ecr.Infrastructure.Tests/Jobs/AutoRecalcAfterMaterializeTests.cs`, `tests/Ecr.Infrastructure.Tests/Jobs/CalculationTriggerQueueTests.cs` | `src/Ecr.Application/Calculations/CalculationTrigger.cs` (новий), `src/Ecr.Application/Ports/ICalculationTrigger.cs` (новий), `src/Ecr.Infrastructure/Jobs/MaterializeCollectedDataJob.cs`, `src/Ecr.Infrastructure/DependencyInjection.cs` (секція `// HSE301:A4`), `tests/Ecr.Infrastructure.Tests/Jobs/AutoRecalcAfterMaterializeTests.cs` | F3 | `Applied > 0` → рівно одна задача на `(doc, period)` за будь-якої кількості викликів; закритий період — нуль. **Мутація:** прибрати дедуплікацію → тест «3 виклики = 1 задача» червоний | паралельно з A2, A3a |
 | A2 | API прив'язки PI за вікном рядка + `probe-window` + вкладка «Дані з PI» (ендпоінт + споживач, ~750 р., тести ≥ 40 %) | `src/Ecr.Application/Integration/RowWindowMapHandlers.cs`, `ProbeWindowHandler.cs` (нові), `src/Ecr.Api/Controllers/RowWindowMapsController.cs` (новий; `probe-window` — абсолютним маршрутом, `DataSourcesController.cs` не чіпається), `src/Ecr.Web/src/features/integration/rowWindow/**` (нові), `src/Ecr.Web/src/features/templates/TableEditor.tsx` (лише підключення вкладки), `09-seed.sql` (`-- HSE301:A2`, ключі `rowWindow.*`), тести `tests/Ecr.Api.Tests/RowWindowMapsTests.cs`, `src/Ecr.Web/src/features/integration/rowWindow/__tests__/**`, `contracts/openapi.snapshot.json` + `schema.d.ts` (останнім) | F5, F8 | `EndpointCoverageTests`, `OpenApiSnapshotTests` зелені; probe повертає `local` для фейкового джерела; L1/L9 тестами. **Мутація:** не перевіряти `Scale` цілі → тест `targetScaleTooSmall` червоний | паралельно з A4, A3a |
 | A3a | Рушій: `Scope`, `IsPerSubstance`, `IsVisible` → `Kind = Intermediate`; перевірка публікації; `rpt` бере лише `Output`; прив'язка колонки до видимої формули (~400 р.) | `src/Ecr.Calculations/GenericCalculationModule.cs`, `src/Ecr.Application/Ports/ICalculationModule.cs`, `src/Ecr.Infrastructure/Persistence/CalculationResultStore.cs` (`WriteResultsAsync`), `src/Ecr.Application/Calculations/PublishMethodologyHandler.cs`, `src/Ecr.Application/Calculations/MethodologyAuthoringHandlers.cs` (перевірка `OutputCode`), `src/Ecr.Infrastructure/Reporting/ReportSnapshotBuilder.cs` (фільтр `Kind`), тести `tests/Ecr.Calculations.Tests/RowScopeTests.cs`, `IntermediateResultsTests.cs`, `tests/Ecr.Infrastructure.Tests/Reporting/SnapshotIgnoresIntermediateTests.cs` | F6 | методологія з 11 речовинами пише `M_t` один раз; `ContentHash` зрізу не змінився від появи проміжних. **Мутація:** прибрати фільтр `Kind` у `ReportSnapshotBuilder` → хеш інший, тест червоний | паралельно з A4, A2 |
 | A1 | Виконання прив'язки: `RowWindowFetchJob`, щогодинний `RowWindowRefetchJob`, хук `IRowWindowTrigger` у `PatchCellsHandler`, TZ проєкту, `KeptManual`, виклик `ICalculationTrigger` (~450 р.; ⚠ `PatchCellsHandler.cs` — гарячий файл, лише одна точка виклику) | `src/Ecr.Application/Integration/RowWindowFetch.cs`, `src/Ecr.Application/Ports/IRowWindowTrigger.cs` (нові), `src/Ecr.Infrastructure/Jobs/RowWindowFetchJob.cs`, `RowWindowRefetchJob.cs` (нові), `src/Ecr.Application/Documents/PatchCellsHandler.cs` (1 виклик), `src/Ecr.Api/Startup/RecurringScheduleService.cs` (1 тригер), `DependencyInjection.cs` (`// HSE301:A1`), тести `tests/Ecr.Application.Tests/Integration/RowWindowFetchTests.cs`, `tests/Ecr.Infrastructure.Tests/Jobs/RowWindowFetchJobTests.cs` | A4, F4, F5 | 14:09:20–14:24:50 Asia/Atyrau → вікно UTC 09:09:20–09:24:50; ручна правка лишається, статус `KeptManual`; `End ≤ Start` → `InvalidWindow` без звернення до PI; після запису — задача перерахунку. **Мутація:** вікно в UTC без TZ → тест червоний | паралельно з A3b |
 | A3b | Трейс: `ReferenceCollector`, `TraceJson v1`, `CalculationStep.ResultId/DocumentId/RowKey`, запис `calc.CalculationInput` (~400 р.) | `src/Ecr.Calculations/ReferenceCollector.cs` (новий), `src/Ecr.Calculations/TraceRecorder.cs`, `GenericCalculationModule.cs` (після A3a), `src/Ecr.Infrastructure/Persistence/CalculationResultStore.cs` (`WriteTraceAsync`, `:119-157`), `src/Ecr.Calculations/CalculationOutputWriter.cs`, тести `tests/Ecr.Calculations.Tests/TraceJsonTests.cs`, `tests/Ecr.Infrastructure.Tests/Persistence/CalculationInputWrittenTests.cs` | A3a | для `M_t` прикладу A `TraceJson.inputs` = {`V_Sm3`, `Rho20`}, `ResultId` не null; на `TraceLevel.Off` — нічого. **Мутація:** `resultId: null` → тест «крок має результат» червоний | паралельно з A1 |
 | A6 | API й вкладка «Події з PI»: каталог шаблонів, `probe-events`, `source-event-maps` (CRUD, пауза), редактор відповідностей значень (ендпоінт + споживач, ~780 р., тести ≥ 40 %) | `src/Ecr.Application/Integration/SourceEventMapHandlers.cs`, `ProbeEventsHandler.cs` (нові), `src/Ecr.Api/Controllers/SourceEventMapsController.cs` (новий; `event-templates` і `probe-events` — абсолютними маршрутами, `DataSourcesController.cs` не чіпається), `src/Ecr.Web/src/features/integration/sourceEvents/**` (нові), `src/Ecr.Web/src/features/templates/TableEditor.tsx` (лише підключення вкладки, після A2), `09-seed.sql` (`-- HSE301:A6`, `sourceEvents.*`), DI (`// HSE301:A6`), тести `tests/Ecr.Api.Tests/SourceEventMapsTests.cs`, `src/Ecr.Web/src/features/integration/sourceEvents/__tests__/**`, контракт — останнім | F4e, F9, A2 | `EndpointCoverageTests`, `OpenApiSnapshotTests` зелені; `probe-events` на фейковому джерелі повертає розв'язані значення й незіставлені; стан «запит не налаштовано» — банер, а не порожній список; «Run now» — чинний `POST /sources/{id}/collect` (`SourcesController.cs:43`). **Мутація:** не перевіряти обов'язковість `$start`/`$end` → тест `eventMapStartEndRequired` червоний | паралельно з A1, A3b |
-| A5a | Запис рядків від інтеграції: `ICellPatcher.ApplyIntegrationRowsAsync` — типізовані значення (дата, Lookup, текст, число), `BaseVersion` чинного рядка для оновлення й `null` для нового, відсів комірок `UserEdit` → `KeptManual` (~300 р.) | `src/Ecr.Application/Ports/ICellPatcher.cs` (адитивний метод і запис `IntegrationRowUpsert`), `src/Ecr.Infrastructure/Integration/IntegrationCellPatcher.cs` (новий метод поруч із чинним), `tests/Ecr.Infrastructure.Tests/Integration/IntegrationRowUpsertTests.cs` (новий) | F9 | новий рядок створюється, наявний оновлюється без `ECR-ROW-0409 rowKeysExist`; комірка з останньою правкою людини не перезаписується й повертається в `KeptManual`; Lookup пишеться id запису; чинний `ApplyIntegrationAsync` поводиться як до кроку (його тести без правок). **Мутація:** надсилати `BaseVersion: null` і для наявного рядка → тест «оновлення наявного» червоний (`rowKeysExist`) | паралельно з A4, A2, A3a |
-| A5b | Синхронізація подій: `SourceEventSyncJob` (upsert за ID, ключ `EF-…`, TZ проєкту, `Missing` лише за повним прочитанням, закритий період, відкрита подія, `PeriodChanged`, `Unmapped`, фільтр мапінгу), постановка з `CollectionJob`, виклик `ICalculationTrigger` (~400 р.) | `src/Ecr.Application/Integration/SourceEventSync.cs`, `src/Ecr.Infrastructure/Jobs/SourceEventSyncJob.cs` (нові), `src/Ecr.Infrastructure/Jobs/CollectionJob.cs` (1 виклик після `SaveRunAsync`), DI (`// HSE301:A5b`), тести `tests/Ecr.Application.Tests/Integration/SourceEventSyncTests.cs`, `tests/Ecr.Infrastructure.Tests/Jobs/SourceEventSyncJobTests.cs` | F4e, A5a, A1, A4 | фейкова подія 09:09:20Z–09:24:50Z з `Category = V8`, `HMB = 370 Winter` → рядок `EF-…` зі `Start` 14:09:20 (Asia/Atyrau), `Category`, `HmbCase`; повтор — нуль змін; ручна правка категорії лишається (`KeptManual`); подія зникла → `Missing`, рядок той самий; той самий прогін з `Truncated` — жодного `Missing`; закритий період — нуль записів; подія без кінця — рядка немає; запис Start/End поставив `RowWindowFetchJob` (хук A1). **Мутація:** ставити `Missing` і при `Truncated` → тест червоний; брати місяць за UTC замість TZ проєкту → подія 31.01 22:00 (UTC+5 — вже 01.02) лягає не в той період, тест червоний | послідовно, після хвилі A2 |
+| A5a | Запис рядків від інтеграції: `ICellPatcher.ApplyIntegrationRowsAsync` — типізовані значення (дата, Lookup, текст, число), `BaseVersion` чинного рядка для оновлення й `null` для нового, відсів комірок `UserEdit` → `KeptManual` (~300 р.) — ✓ **виконано** в `c25065b7` (код), `20d17c31` (тести). ✎ 2026-09-30, понад план: значення, яких колонка не приймає, відсіюються до обробника в `IntegrationWriteResult.Rejected` (інакше одна зіпсована подія відхиляла б увесь пакет); гонка створення (`ECR-ROW-0409 rowKeyExists`) — обмежений повтор; ключ рядка — `IntegrationRowUpsert.EventRowKey` | `src/Ecr.Application/Ports/ICellPatcher.cs` (адитивний метод і запис `IntegrationRowUpsert`), `src/Ecr.Infrastructure/Integration/IntegrationCellPatcher.cs` (новий метод поруч із чинним), `tests/Ecr.Infrastructure.Tests/Integration/IntegrationRowUpsertTests.cs` (новий) | F9 | новий рядок створюється, наявний оновлюється без `ECR-ROW-0409 rowKeysExist`; комірка з останньою правкою людини не перезаписується й повертається в `KeptManual`; Lookup пишеться id запису; чинний `ApplyIntegrationAsync` поводиться як до кроку (його тести без правок). **Мутація:** надсилати `BaseVersion: null` і для наявного рядка → тест «оновлення наявного» червоний (`rowKeysExist`) | паралельно з A4, A2, A3a |
+| A5b | Синхронізація подій: `SourceEventSyncJob` (upsert за ID, ключ `EF-…`, TZ проєкту, `Missing` лише за повним прочитанням, закритий період, відкрита подія, `PeriodChanged`, `Unmapped`, фільтр мапінгу), постановка з `CollectionJob`, виклик `ICalculationTrigger` (~400 р.) — ✓ **виконано** в `c406d2ff` (планувальник), `e72afc56` (подія → комірки), `ad666f0b` (задача), `616004ae` (автоперерахунок), `14902df9` (SQL-тести), `4ee86b1c` (постановка з `CollectionJob`), `4b609f1b` (документація). ✎ 2026-09-30 — фактичні файли замість запланованих: `src/Ecr.Application/Integration/SourceEvents/SourceEventSyncPlanner.cs`, `SourceEventPeriods.cs`, `SourceEventRowBuilder.cs`, `src/Ecr.Application/Ports/ISourceEventSyncJob.cs`, `src/Ecr.Domain/Entities/External/SourceEventLink.cs` (`RekeyTo`), `src/Ecr.Infrastructure/Jobs/SourceEventSyncJob.cs`, `CollectionJob.cs`, `09-seed.sql` (секція `HSE301:a5b`, ключі `jobs.sourceEvents*`); тести `tests/Ecr.Application.Tests/Integration/SourceEventSyncPlannerTests.cs`, `SourceEventRowBuilderTests.cs`, `tests/Ecr.Domain.Tests/External/SourceEventLinkTests.cs`, `tests/Ecr.Infrastructure.Tests/Jobs/SourceEventSyncJobTests.cs`, `CollectionJobSourceEventsTests.cs`. Відхилення від плану — §4.7.4 «Як реалізовано» і «Звірка з кодом» | `src/Ecr.Application/Integration/SourceEventSync.cs`, `src/Ecr.Infrastructure/Jobs/SourceEventSyncJob.cs` (нові), `src/Ecr.Infrastructure/Jobs/CollectionJob.cs` (1 виклик після `SaveRunAsync`), DI (`// HSE301:A5b`), тести `tests/Ecr.Application.Tests/Integration/SourceEventSyncTests.cs`, `tests/Ecr.Infrastructure.Tests/Jobs/SourceEventSyncJobTests.cs` | F4e, A5a, A1, A4 | фейкова подія 09:09:20Z–09:24:50Z з `Category = V8`, `HMB = 370 Winter` → рядок `EF-…` зі `Start` 14:09:20 (Asia/Atyrau), `Category`, `HmbCase`; повтор — нуль змін; ручна правка категорії лишається (`KeptManual`); подія зникла → `Missing`, рядок той самий; той самий прогін з `Truncated` — жодного `Missing`; закритий період — нуль записів; подія без кінця — рядка немає; запис Start/End поставив `RowWindowFetchJob` (хук A1). **Мутація:** ставити `Missing` і при `Truncated` → тест червоний; брати місяць за UTC замість TZ проєкту → подія 31.01 22:00 (UTC+5 — вже 01.02) лягає не в той період, тест червоний | послідовно, після хвилі A2 |
 | B0a | **Рефакторинг:** `ReportExpressionChecker` приймає каталог колонок (`IReportColumnCatalog`), поведінка та сама (~200 р.) | `src/Ecr.Expressions/Binding/ReportExpressionChecker.cs`, `src/Ecr.Expressions/Binding/IReportColumnCatalog.cs` (новий), місця створення каталогу `ReportSourceColumns` | F8 | чинні тести діалекту Report зелені **без правок** | послідовно |
 | B0b | **Рефакторинг:** `AggregateFunctions` винесено з `ReportLayout` (~150 р.) | `src/Ecr.Application/Reporting/ReportLayout.cs`, `src/Ecr.Application/Reporting/AggregateFunctions.cs` (новий) | B0a | чинні тести `ReportLayout` зелені без правок | послідовно |
 | B2 | Рушій представлення: `ViewLayout` (схема, компіляція, перевірка), `ViewRecordReader` (рік, права, результати з речовиною), `RecordMatrixRenderer`; `GET …/views`, `GET …/views/{code}`, `GET …/freshness` (~500 р. бекенд + мінімальний споживач `viewApi.ts`; ≤ 800, тести ≥ 40 %) | `src/Ecr.Application/Views/**` (нові), `src/Ecr.Api/Controllers/DocumentViewsController.cs` (новий), `src/Ecr.Web/src/features/views/viewApi.ts` (новий), тести `tests/Ecr.Application.Tests/Views/**`, `tests/Ecr.Api.Tests/DocumentViewsTests.cs`, контракт — останнім | A3a, F7, B0a | фікстура SG_V8 січень: шапка `JAN` зі `span = 9` + `Total`, `Total` об'єму = 1 177.766; рядок без права — замок. **Мутація:** `hideEmpty` ігнорується → тест «FEB–JUL сховані» червоний | послідовно |
@@ -1898,6 +1974,43 @@ FEATURE-REGISTRY-TABLES (`IRegistrySnapshotLoader`, §5.7, `RT-22`), а не в�
 (FEATURE-REGISTRY-TABLES §7.1, `RT-26`: функція, довідник, ключ, результат) і момент знімка
 `calc.CalculationRun.RegistryAsOfUtc` (там §3.6, `RT-05`); (3) розіменування Lookup у `@Arg`
 (Д-6) — там (`R-12`, `RT-23a`), а тут його обходять формули `REGFIELD`.
+
+### 11.6 Крок V — імпорт методологій з AF: аналізатор (MVP, 2026-09-30)
+
+`tools/Ecr.MethodologyImport` (лише BCL, без запису в БД):
+`Ecr.MethodologyImport analyze <AF.xml> [--json] [--top N] [--library Common] [--out report.json]`.
+
+- **Що робить.** Потоково (`XmlReader`; справжній `ECR_01_Air.xml` 192 МБ — ~35 с, пік ~60 МБ) читає AF XML →
+  нейтральна модель (методологія → версія → формули/константи) → звіт: кількості; посилання з `FInfo_Arguments`
+  (`;`-список: `@параметр`, `!Формула`, `CST.Константа`); `Trim` імен, кодів, версій, текстів і токенів; резолвінг
+  «власна версія → бібліотека Common (усі версії)»; цикли (SCC); лічильник непізнаного.
+- **Блокери (код виходу 2):** нерезолвне `!`/`CST.` посилання (ціль не вгадується; підказка — лише текстом),
+  цикл між формулами, «не розпізнано жодної формули чи константи». 1 — помилка запуску/XML.
+  Токен у тексті формули без запису в аргументах лічиться окремо й не блокує (CLR такий токен не підставляє).
+- **Формат AF XML (звірено зі справжнім `ECR_01_Air.xml`, AF 3.1, `ExportMode="…Flat…"`).** Корінь `AF` →
+  `AFDatabase` → ПЛОСКИЙ перелік `AFElement`, де `Name` — повний шлях із `\`; `AFAttribute` (`Name`, `Value`
+  або `ConfigString` String Builder виду `"%..\..\Element%";`). Формула — версійний елемент
+  `Methodologies\<М…>\<ВерсіяМ>\Formulas\<Ф>\<ВерсіяФ>` (Formula_El_V, `FInfo_*`); елемент `…\Formulas\<Ф>`
+  (Formula_El) — лише контейнер. Константа — визначення `…\Constants\<К>` і значення
+  `…\Constants\<К>\<Категорія>\<Версія>` (`CInfo_Value`; Категорія = Location/набір). Методологія може бути
+  вкладеною (`Methodologies\EmissionCalculationWork\ECW_C05_…\ECW_C05_01`), тому ім'я/версія беруться з
+  `MInfo_*` (ConfigString `%..\..\..\..\Element%`), шлях — запасний варіант і перевірка. Обчислювані String
+  Builder (`'CInfo_Parameter';_;…`) не використовуються. Rules, Settings, корінь методології — пропущені.
+  Уся прив'язка до XML — `Reading/AfXmlReader.cs`, `Model/MethodologyModelBuilder.cs`.
+- **Прогін на справжньому файлі:** 48 методологій (по одній версії V1), 2009 формул (1801 контейнер), 1124 імені
+  констант / 6506 значень; `!`-посилань 3746 (265 через межу — збіг із 149+116 з `open-questions-pi-admin`),
+  `CST.` 7974 (у Common: Flert 821, HSE400 1269, Thermaloxidizer 1188; у файлі питань було 3276 — розбіжність 2 не
+  розібрана); нерезолвних 17 (6 різних токенів), циклів 0. Блокер лишається: імпорт по червоному не робити.
+- **`export <AF.xml> --out package.json [--allow-blockers]`** пише пакет `ecr-methodology-package` v1 (без запису в БД,
+  детермінований; на справжньому файлі 3.4 МБ). ⚠ Схему пакета ввів цей інструмент (раніше її ніде не було) —
+  її треба узгодити зі споживачем (крок V, `POST /methodologies/import?dryRun`): `{format, version: 1, library,
+  methodologies: [{name, versions: [{version, formulas: [{name, version, arguments, text, startDate, endDate,
+  isAvailable, report}], constants: [{name, parameter, unit, values: [{category, version, value, startDate,
+  endDate}]}]}]}], blockers: []}`. Дати — рядки AF як є (пояс і півінтервал `[from, to)` вирішує імпортер).
+  За наявності блокерів пакет не пишеться (код 2); `--allow-blockers` пише його з непорожнім `blockers`, і
+  імпортер зобов'язаний відмовити.
+- **Не зроблено:** запис у БД (`POST /methodologies/import?dryRun` у продукті ще немає), розбір дат, порядок
+  формул (B13 §7 крок 6), правила (`Rules`, 321 елемент), налаштування (`Settings`).
 
 ---
 

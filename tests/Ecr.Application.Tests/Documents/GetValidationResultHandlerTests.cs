@@ -79,6 +79,7 @@ public sealed class GetValidationResultHandlerTests
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     [Trait("Requirement", "B-11")]
+    [Trait("Requirement", "ФВ-5.6")]
     public async Task Підсумок_повертається_мовою_читача_а_не_автора_перевірки()
     {
         // Збережений текст — мовою АВТОРА запуску (ru), як його поклав
@@ -112,6 +113,7 @@ public sealed class GetValidationResultHandlerTests
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     [Trait("Requirement", "B-11")]
+    [Trait("Requirement", "ФВ-5.6")]
     public async Task Правило_видалене_з_часу_перевірки_лишає_збережений_текст()
     {
         // Код правила в збережених повідомленнях ("OLD") відсутній у

@@ -43,6 +43,7 @@ namespace Ecr.Infrastructure.Tests.Jobs;
 /// тесту за межі його власних даних.
 /// </remarks>
 [Collection("SqlServer")]
+[Trait("Requirement", "ФВ-12.5")]
 public sealed class MaintenanceRunFailureDigestTests(SqlServerFixture sql)
 {
     /// <summary>Межа прибирання: усе, що цей клас написав, лежить пізніше.</summary>

@@ -35,7 +35,7 @@ public sealed class ChangeClassifierTests
     [InlineData("UnitId")]
     [InlineData("LookupRegistryDefId")]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
-    [Trait("Requirement", "ФВ-7.5")]
+    [Trait("Requirement", "ФВ-7.3")]
     public void Зміна_типу_точності_або_одиниці_класифікується_як_Guarded(string field)
     {
         // Дані лишаються на місці, але їхнє ТЛУМАЧЕННЯ змінюється: ті самі

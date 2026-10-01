@@ -144,8 +144,8 @@ public sealed class CreateProjectTests
     [Trait("Requirement", "ФВ-1.1")]
     public async Task Звітний_рік_береться_в_поясі_майданчика_а_не_сервера()
     {
-        // ⛔ 31 грудня 21:00 UTC — це вже 1 січня 03:00 на `Asia/Almaty`
-        // (UTC+6). Тут стояло `clock.UtcNow.Year`, тобто проєкт, створений
+        // ⛔ 31 грудня 21:00 UTC — це вже 1 січня 02:00 на `Asia/Atyrau`
+        // (UTC+5). Тут стояло `clock.UtcNow.Year`, тобто проєкт, створений
         // на майданчику вночі проти Нового року, отримував МИНУЛИЙ рік:
         // дванадцять періодів із ключами `202512xx` замість `202601xx`.
         // `PeriodKey` — ключ партиціонування (R-A6), тож дані поїхали б у
@@ -156,7 +156,7 @@ public sealed class CreateProjectTests
             .HandleAsync(
                 "KASH_2026",
                 new Dictionary<string, string> { ["en"] = "Kashagan" },
-                "Asia/Almaty",
+                "Asia/Atyrau",
                 PeriodKind.Monthly,
                 year: null,
                 templateVersionId: 42,
@@ -177,14 +177,14 @@ public sealed class CreateProjectTests
     [Trait("Requirement", "ФВ-1.1a")]
     public async Task Заданий_пояс_зберігається_на_проєкті()
     {
-        await Create("Asia/Almaty");
+        await Create("Asia/Atyrau");
 
         var call = _periods.ReceivedCalls()
             .Single(c => c.GetMethodInfo().Name == nameof(IPeriodStore.AddProjectAsync));
 
         var project = (Project)call.GetArguments()[0]!;
 
-        Assert.Equal("Asia/Almaty", project.TimeZoneId);
+        Assert.Equal("Asia/Atyrau", project.TimeZoneId);
     }
 
     [Fact]
@@ -198,7 +198,7 @@ public sealed class CreateProjectTests
         _periods.GetPolicyAsync(PolicyId, Arg.Any<CancellationToken>())
             .Returns(new PeriodPolicy(EcrCode.Create("LONG"), 0, 15, 60, yearGraceOffsetDays: 90));
 
-        await Create("Asia/Almaty");
+        await Create("Asia/Atyrau");
 
         var call = _periods.ReceivedCalls()
             .Single(c => c.GetMethodInfo().Name == nameof(IPeriodStore.AddProjectAsync));
@@ -218,7 +218,7 @@ public sealed class CreateProjectTests
         var error = await Assert.ThrowsAsync<NotFoundException>(
             () => new CreateProjectHandler(_periods, _access, _users, _audit, _uow, _user, _clock)
                 .HandleAsync(
-                    "KASH_2026", new Dictionary<string, string> { ["en"] = "Kashagan" }, "Asia/Almaty",
+                    "KASH_2026", new Dictionary<string, string> { ["en"] = "Kashagan" }, "Asia/Atyrau",
                     PeriodKind.Monthly, year: 2026, templateVersionId: 42, periodPolicyId: 999,
                     CancellationToken.None));
 
@@ -233,7 +233,7 @@ public sealed class CreateProjectTests
         var error = await Assert.ThrowsAsync<BusinessRuleException>(
             () => new CreateProjectHandler(_periods, _access, _users, _audit, _uow, _user, _clock)
                 .HandleAsync(
-                    "KASH_2026", new Dictionary<string, string> { ["en"] = "Kashagan" }, "Asia/Almaty",
+                    "KASH_2026", new Dictionary<string, string> { ["en"] = "Kashagan" }, "Asia/Atyrau",
                     PeriodKind.Monthly, year: 2026, templateVersionId: 0, periodPolicyId: PolicyId,
                     CancellationToken.None));
 
@@ -253,7 +253,7 @@ public sealed class CreateProjectTests
         var error = await Assert.ThrowsAsync<BusinessRuleException>(
             () => new CreateProjectHandler(_periods, _access, _users, _audit, _uow, _user, _clock)
                 .HandleAsync(
-                    "KASH_2026", new Dictionary<string, string> { ["en"] = "Kashagan" }, "Asia/Almaty",
+                    "KASH_2026", new Dictionary<string, string> { ["en"] = "Kashagan" }, "Asia/Atyrau",
                     PeriodKind.Monthly, year: 2026, templateVersionId: 42, periodPolicyId: 0,
                     CancellationToken.None));
 
@@ -276,7 +276,7 @@ public sealed class CreateProjectTests
         var error = await Assert.ThrowsAsync<DomainException>(
             () => new CreateProjectHandler(_periods, _access, _users, _audit, _uow, _user, _clock)
                 .HandleAsync(
-                    "KASH_2026", new Dictionary<string, string> { ["en"] = "Kashagan" }, "Asia/Almaty",
+                    "KASH_2026", new Dictionary<string, string> { ["en"] = "Kashagan" }, "Asia/Atyrau",
                     PeriodKind.Custom, year: 2026, templateVersionId: 42, periodPolicyId: PolicyId,
                     CancellationToken.None, customPeriodCount: customCount));
 
@@ -290,7 +290,7 @@ public sealed class CreateProjectTests
     {
         await new CreateProjectHandler(_periods, _access, _users, _audit, _uow, _user, _clock)
             .HandleAsync(
-                "KASH_2026", new Dictionary<string, string> { ["en"] = "Kashagan" }, "Asia/Almaty",
+                "KASH_2026", new Dictionary<string, string> { ["en"] = "Kashagan" }, "Asia/Atyrau",
                 PeriodKind.Custom, year: 2026, templateVersionId: 42, periodPolicyId: PolicyId,
                 CancellationToken.None, customPeriodCount: 6);
 
@@ -309,7 +309,7 @@ public sealed class CreateProjectTests
         // означає нічого і не має зберігатися як властивість проєкту.
         await new CreateProjectHandler(_periods, _access, _users, _audit, _uow, _user, _clock)
             .HandleAsync(
-                "KASH_2026", new Dictionary<string, string> { ["en"] = "Kashagan" }, "Asia/Almaty",
+                "KASH_2026", new Dictionary<string, string> { ["en"] = "Kashagan" }, "Asia/Atyrau",
                 PeriodKind.Monthly, year: 2026, templateVersionId: 42, periodPolicyId: PolicyId,
                 CancellationToken.None, customPeriodCount: 5);
 
@@ -349,7 +349,7 @@ public sealed class CreateProjectTests
         // після Q-179 — а створення проєкту не видавало жодного гранта
         // нікому. Творець власного щойно створеного проєкту не міг би
         // активувати ЙОГО Ж, доки хтось не видасть грант окремим кроком.
-        var projectId = await Create("Asia/Almaty");
+        var projectId = await Create("Asia/Atyrau");
 
         await _users.Received(1).ReplaceGrantsAsync(
             ManagerRoleId,
@@ -384,7 +384,7 @@ public sealed class CreateProjectTests
                 new(ResourceKind.Project, 999, GrantLevel.Write, IsDeny: false),
             });
 
-        var projectId = await Create("Asia/Almaty");
+        var projectId = await Create("Asia/Atyrau");
 
         await _users.Received(1).ReplaceGrantsAsync(
             ManagerRoleId,

@@ -100,6 +100,28 @@ public sealed class RecalculationJobFanOutTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Дочірні_задачі_несуть_ідентифікатор_батька_для_похідного_стану()
+    {
+        var (builder, document) = await ArrangeAsync(extraDocuments: 1);
+        var scheduler = new RecordingScheduler();
+
+        await using (var db = builder.CreateContext())
+        {
+            await Job(db, new WritingRunner(builder, _methodologyVersionId, _unitId, Nightly), scheduler.Substitute)
+                .ExecuteAsync(
+                    new RecalculationRequest(document.ProjectId, 0, null, null),
+                    new IdentifiedProgress("IRecalculationJob-parent1"),
+                    CancellationToken.None);
+        }
+
+        // ⛔ Без цього поля статус батька не знайде дітей і покаже «виконано» на розкладі.
+        Assert.Equal(2, scheduler.Calls.Count);
+        Assert.All(scheduler.Calls, c => Assert.Equal("IRecalculationJob-parent1", c.Request.FanOutParentJobId));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "ФВ-9.7")]
     public async Task Перерахунок_закритого_періоду_переносить_погодження_в_КОЖНУ_документну_задачу()
     {
@@ -567,6 +589,13 @@ public sealed class RecalculationJobFanOutTests(SqlServerFixture sql)
 
             return new ModuleProfile();
         }
+    }
+
+    private sealed class IdentifiedProgress(string jobId) : IJobProgress, IJobIdentity
+    {
+        public string JobId => jobId;
+
+        public Task ReportAsync(int percent, string? message, CancellationToken ct) => Task.CompletedTask;
     }
 
     private sealed class RecordingProgress : IJobProgress

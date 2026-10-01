@@ -44,7 +44,7 @@ export interface KeyValueItem {
   readonly hint?: string | undefined;
 }
 
-export interface KeyValueProps {
+interface KeyValueProps {
   readonly items: readonly KeyValueItem[];
 
   /** Підпис і значення в один рядок — для вузьких шторок із короткими значеннями. */

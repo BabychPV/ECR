@@ -92,7 +92,9 @@ public sealed class ColumnDef : Entity<int>
     /// <remarks>
     /// Масштаб не є форматуванням: значення з більшою кількістю знаків
     /// <b>відхиляється</b>, а не округлюється, — інакше втрачений знак тихо
-    /// змінив би число у звіті.
+    /// змінив би число у звіті. Це про ручне введення й <c>PATCH</c>; імпорт
+    /// <c>.xlsx</c> і вставка з Excel округлюють до <c>Scale</c> самі, ДО запису
+    /// (ФВ-9.16b), тож сюди доходить уже кругле число.
     /// </remarks>
     public void SetNumericFormat(byte? precision, byte? scale)
     {
@@ -307,18 +309,27 @@ public sealed class ColumnDef : Entity<int>
                 return "ECR-CELL-0422";
             }
 
-            if (Precision is { } precision)
+            if (!FitsPrecision(dec))
             {
-                var digits = CountSignificantDigits(dec);
-                if (digits > precision)
-                {
-                    return "ECR-CELL-0422";
-                }
+                return "ECR-CELL-0422";
             }
         }
 
         return null;
     }
+
+    /// <summary>
+    /// Чи вміщується число в <see cref="Precision"/> колонки — те саме правило,
+    /// що п. 7 <see cref="ValidateValue"/>; без <see cref="Precision"/> — так.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Публічне для імпорту <c>.xlsx</c> (ФВ-9.16b): той округлює до
+    /// <see cref="Scale"/> і перевіряє точність УЖЕ округленого числа
+    /// (<c>99.999</c> → <c>100.00</c> при <c>(4,2)</c> переповнює), тож відмова
+    /// приходить у перегляді, а не 422 на застосування всієї книги.
+    /// </remarks>
+    public bool FitsPrecision(decimal value)
+        => Precision is not { } precision || CountSignificantDigits(value) <= precision;
 
     /// <summary>
     /// Кількість значущих цифр у <see cref="decimal"/> — те, що SQL Server

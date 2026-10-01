@@ -5,6 +5,7 @@
   RegistryRuleSaveDto,
   SaveRegistryDefinitionDto,
 } from '@/api/types';
+import { compositionSave, type CompositionDraft } from './rc816/composition';
 
 /**
  * Типи поля, які людина обирає у формі «додати поле» — за зразком
@@ -54,13 +55,10 @@ export const NumericFieldTypes: readonly FieldDataType[] = ['Int', 'Decimal'];
 export const RuleKinds = ['RequiredWhen', 'UniqueWithin', 'Expression', 'CrossRegistry'] as const;
 
 /** Вид правила довідника. */
-export type RuleKind = (typeof RuleKinds)[number];
+type RuleKind = (typeof RuleKinds)[number];
 
 /** Рівні порушення правила. */
 export const Severities = ['Info', 'Warning', 'Error'] as const;
-
-/** Рівень порушення. */
-export type Severity = (typeof Severities)[number];
 
 /**
  * Правило в стані редагування.
@@ -174,6 +172,8 @@ export function buildSaveRequest(
     isKey: draft.isKey,
     lookupRegistryDefId: draft.dataType === 'Lookup' ? draft.lookupRegistryDefId : null,
     unitId: NumericFieldTypes.includes(draft.dataType) ? draft.unitId : null,
+    // ФВ-8.16: композиція (`relationKind`, `onParentDelete`; поле композиції обов'язкове).
+    ...compositionSave(draft),
   }));
 
   const saved: RegistryRuleSaveDto[] = rules.map((rule) => ({
@@ -226,7 +226,7 @@ export function emptyRule(ruleKind: RuleKind): RuleDraft {
  * тут поле додається в рядку таблиці, і мову решти назв так само вводили б
  * послідовно, одну по одній, а не всі одразу.
  */
-export interface FieldDraft {
+export interface FieldDraft extends CompositionDraft {
   readonly code: string;
   readonly name: string;
   readonly dataType: FieldDataType;

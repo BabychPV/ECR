@@ -406,11 +406,12 @@ public sealed partial class EndpointCoverageTests
             ],
             "Підказка сірої комірки за причиною заборони."),
 
-        new("features/workflow/jobLabel.ts", "key", 2, "features/workflow/jobLabel.ts",
+        new("features/workflow/jobLabel.ts", "key", 3, "features/workflow/jobLabel.ts",
             [
                 "jobs.kind.recalculation", "jobs.kind.formulaRecalculation", "jobs.kind.excelExport",
                 "jobs.kind.excelImport", "jobs.kind.materializeCollectedData", "jobs.kind.reportSnapshot",
-                "jobs.kind.collection",
+                "jobs.kind.collection", "jobs.kind.sourceEventSync", "jobs.kind.rowWindowFetch",
+                "jobs.kind.consistencyCheck", "jobs.kind.orphanScan", "jobs.kind.registryImpactRecalculation",
             ],
             "Назва типу фонової задачі (KindKeys)."),
 
@@ -424,9 +425,9 @@ public sealed partial class EndpointCoverageTests
             "Підпис поля /health/db (FieldLabelKeys)."),
 
         // ⚠ Запасний варіант — сам ідентифікатор (`hasText(key) ? t(key) : name`),
-        // тож перевірка без рядка в сіді не дає `⟦…⟧`; але чотири відомі — названі тут.
+        // тож перевірка без рядка в сіді не дає `⟦…⟧`; але п'ять відомих — названі тут.
         new("pages/admin/HealthPage.tsx", "key", 1, "pages/admin/HealthPage.tsx",
-            ["health.check.db", "health.check.jobs", "health.check.sources", "health.check.worker"],
+            ["health.check.db", "health.check.jobs", "health.check.sources", "health.check.worker", "health.check.tzdata", "health.check.transport", "health.check.reportviews"],
             "Назва картки перевірки стану (checkLabel, U-14): ім'я з AddCheck<…> у Program.cs."),
 
         // ⚠ Ключі — увесь каталог sec.Permission із 09-seed.sql станом на 2026-09-23.
@@ -482,6 +483,7 @@ public sealed partial class EndpointCoverageTests
             [
                 "err.ECR-REQ-0422.dataSourceEndpointCarriesSecret", "err.ECR-REQ-0422.dataSourceCodeTaken",
                 "err.ECR-REQ-0422.dataSourceSecretReentryRequired",
+                "err.ECR-REQ-0422.dataSourceEndpointChangeUnconfirmed",
             ],
             "messageKey сервера, але лише з FieldOfKey — інші сюди не доходять."),
 
@@ -529,6 +531,9 @@ public sealed partial class EndpointCoverageTests
 
         // Ключі із сервера.
         new("features/expressions/markers.ts", "diagnostic.messageKey", 1, null, [], "messageKey діагностики виразу."),
+        new("features/registries/rc812/RegistryDataGrid.tsx", "problem.messageKey", 1, null, [],
+            "messageKey рядка звіту пакета записів довідника (ФВ-8.12, RegistryBatchRowError) — "
+            + "ключі валідації RegistryBatchHandler/UpsertRegistryEntryHandler, клієнт їх не перелічує."),
         new("shared/ui/problemText.ts", "problem.title", 1, null, [], "title problem+json, коли він — ключ каталогу."),
         new("features/notifications/ChannelsPanel.tsx", "key", 1, null, [], "messageKey проби каналу."),
         new("features/integration/TestDataSourceModal.tsx", "key", 1, null, [], "messageKey проби джерела."),
@@ -538,6 +543,9 @@ public sealed partial class EndpointCoverageTests
         new("features/registries/RegistryImportPanel.tsx", "error.messageKey", 1, null, [],
             "messageKey рядка звіту імпорту записів довідника (BE-24, RegistryEntryImportError) — "
             + "реюзить відкритий набір ключів валідації UpsertRegistryEntryHandler, клієнт його не перелічує."),
+        new("features/registries/rc816/serverMessage.ts", "messageKey", 1, null, [],
+            "ФВ-8.16: messageKey помилки рядка пакета записів довідника (RegistryBatchRowError) і порушення "
+            + "правила довідника (RegistryRuleViolationDto) у редакторі master-detail — відкритий набір сервера."),
 
         // F-15/B-12 (четвертий раунд UX): перелік проблем публікації методології —
         // закритий набір, що його породжує сервер (MethodologyPublishChecks).
@@ -560,9 +568,10 @@ public sealed partial class EndpointCoverageTests
     [
         "nav.documents", "password.title", "nav.templates", "version.title", "tables.relationsTitle",
         "nav.registries", "registries.constructor", "nav.methodologies", "methodologies.versionsTitle",
-        "nav.expressions", "nav.units", "nav.security", "nav.periods", "nav.sources", "nav.mapping",
+        "nav.expressions", "nav.units", "nav.security", "nav.periods", "nav.sources", "nav.mapping", "nav.pipeline",
         "nav.jobs", "nav.snapshots", "nav.campaign", "nav.audit", "nav.consistency", "nav.uiStrings",
         "nav.notifications", "nav.health", "nav.myGroups", "documents.title",
+        "registries.data.title",
     ];
 
     /// <summary>Назви прав <c>permission.&lt;Code&gt;</c> — 42 права каталогу <c>sec.Permission</c>.</summary>
@@ -1172,6 +1181,11 @@ public sealed partial class EndpointCoverageTests
     {
         // Викликається клієнтом опосередковано, всередині форми входу.
         "POST /api/v1/login/windows",
+
+        // S14: споживач — сам БРАУЗЕР. Адресу він бере із заголовка
+        // `Content-Security-Policy-Report-Only` (`report-uri`/`report-to`) і шле
+        // звіт про порушення без жодної участі клієнта застосунку.
+        "POST /api/v1/csp-report",
 
         // ⚠ Тут стояла ще й `POST /api/v1/units/convert` з поясненням
         // «числа конвертуються там, де їх вводять». Пояснення було

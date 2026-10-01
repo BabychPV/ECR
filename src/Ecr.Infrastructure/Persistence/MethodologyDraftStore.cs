@@ -220,6 +220,21 @@ public sealed class MethodologyDraftStore(EcrDbContext db) : IMethodologyDraftSt
     public void Remove(MethodologyFormula formula) => db.MethodologyFormulas.Remove(formula);
 
     /// <inheritdoc />
+    public void Add(MethodologyImport import) => db.MethodologyImports.Add(import);
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<string>> GetImportedMethodologyCodesAsync(
+        int methodologyVersionId, CancellationToken ct)
+        => await db.MethodologyImports
+            .AsNoTracking()
+            .Where(i => i.MethodologyVersionId == methodologyVersionId)
+            .Join(db.Methodologies, i => i.ImportedMethodologyId, m => m.Id, (i, m) => m.Code)
+            .OrderBy(code => code)
+            .Take(MaxChildren)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+    /// <inheritdoc />
     /// <remarks>
     /// ⚠ Два <c>SaveChanges</c>, а не один, і це не недогляд: дочірні записи
     /// посилаються на версію числом, тож їхній зовнішній ключ можна проставити

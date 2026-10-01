@@ -145,13 +145,13 @@ export const MappingHasCollectedDataKey = 'err.ECR-INT-0409.mappingHasCollectedD
  * ⛔ Той самий код `ECR-INT-0409`, що й «за мапінгом уже зібрано дані» —
  * розрізняється лише `messageKey`, тому саме він перевіряється, а не сам код.
  */
-export const MappingUnitChangeNotPendingKey = 'err.ECR-INT-0409.mappingUnitChangeNotPending';
+const MappingUnitChangeNotPendingKey = 'err.ECR-INT-0409.mappingUnitChangeNotPending';
 
 /** Код відмови «одиниці, яку побачив збір, немає в довіднику» (`ФВ-16.9`). */
-export const PendingUnitNotInCatalogCode = 'ECR-INT-0422';
+const PendingUnitNotInCatalogCode = 'ECR-INT-0422';
 
 /** Ключ каталогу для тієї самої відмови. */
-export const PendingUnitNotInCatalogKey = 'err.ECR-INT-0422.pendingUnitNotInCatalog';
+const PendingUnitNotInCatalogKey = 'err.ECR-INT-0422.pendingUnitNotInCatalog';
 
 /**
  * Чи це відмова «позначки зміни одиниці вже немає» — хтось інший вирішив

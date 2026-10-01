@@ -56,7 +56,6 @@ public sealed class PatchPresentationTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
-    [Trait("Requirement", "ФВ-2.7")]
     public async Task Зміна_підпису_справді_міняє_поле_а_не_лише_піднімає_ревізію()
     {
         // ⛔ Найдорожчий різновид зеленого тесту — той, що перевіряє все
@@ -371,6 +370,87 @@ public sealed class PatchPresentationTests(SqlServerFixture sql)
             version.VersionId, HeaderPatch(version.ColumnDefId), userId: 9, CancellationToken.None);
 
         await _cache.Received(1).InvalidateAsync(version.VersionId, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-2.6")]
+    public async Task Порядок_рядка_записується_в_базу_і_не_чіпає_решти_рядка()
+    {
+        var version = await BareVersionAsync();
+        var rowId = await AddRowAsync(version.TableDefId, "R1", 1);
+
+        var patch = $$"""[{"entityType":"RowDef","entityId":{{rowId}},"field":"Ordinal","value":"7"}]""";
+
+        await using var db = Context();
+        var revision = await Handler(db).PatchAsync(version.VersionId, patch, userId: 9, CancellationToken.None);
+        Assert.Equal(1, revision);
+
+        await using var fresh = Context();
+        var row = await fresh.RowDefs.AsNoTracking().SingleAsync(r => r.Id == rowId);
+        Assert.Equal(7, row.Ordinal);
+        Assert.Equal("R1", row.RowKeyValue);
+        Assert.Equal("R1", row.LabelL10n.Get("en"));
+    }
+
+    [Theory]
+    [InlineData("abc")]
+    [InlineData("-1")]
+    [InlineData("1.5")]
+    [InlineData("")]
+    [InlineData("1000001")]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-2.6")]
+    public async Task Невалідний_порядок_відхиляється_422_і_нічого_не_міняє(string value)
+    {
+        var version = await BareVersionAsync();
+        var rowId = await AddRowAsync(version.TableDefId, "R1", 1);
+
+        var patch = $$"""[{"entityType":"RowDef","entityId":{{rowId}},"field":"Ordinal","value":"{{value}}"}]""";
+
+        await using var db = Context();
+        var ex = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Handler(db).PatchAsync(version.VersionId, patch, userId: 9, CancellationToken.None));
+
+        Assert.Equal("ECR-TMPL-0422", ex.ErrorCode);
+        Assert.Equal("err.ECR-TMPL-0422.ordinalInvalid", ex.Details?["messageKey"]);
+
+        await using var fresh = Context();
+        Assert.Equal(1, (await fresh.RowDefs.AsNoTracking().SingleAsync(r => r.Id == rowId)).Ordinal);
+        Assert.Equal(0, (await fresh.TemplateVersions.AsNoTracking()
+            .SingleAsync(v => v.Id == version.VersionId)).PresentationRevision);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-2.6")]
+    public async Task Рядок_чужої_версії_порядок_не_міняє()
+    {
+        var mine = await BareVersionAsync();
+        var alien = await BareVersionAsync();
+        var alienRow = await AddRowAsync(alien.TableDefId, "R1", 1);
+
+        var patch = $$"""[{"entityType":"RowDef","entityId":{{alienRow}},"field":"Ordinal","value":"5"}]""";
+
+        await using var db = Context();
+        var error = await Assert.ThrowsAsync<NotFoundException>(
+            () => Handler(db).PatchAsync(mine.VersionId, patch, userId: 9, CancellationToken.None));
+        Assert.Equal("ECR-TMPL-0404", error.ErrorCode);
+
+        await using var fresh = Context();
+        Assert.Equal(1, (await fresh.RowDefs.AsNoTracking().SingleAsync(r => r.Id == alienRow)).Ordinal);
+    }
+
+    private async Task<int> AddRowAsync(int tableDefId, string key, int ordinal)
+    {
+        await using var db = Context();
+        var row = new RowDef(tableDefId, RowKey.Create(key), ordinal, Name(key), RowKind.Item);
+        db.RowDefs.Add(row);
+        await db.SaveChangesAsync();
+        return row.Id;
     }
 
     // ─────────────────────────────────────────────────────────────────────────

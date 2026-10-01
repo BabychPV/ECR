@@ -147,7 +147,7 @@ export function compareCellText(value: string | null): string {
  * тримає `compareCellText` без `Intl`). Ця функція лише КЛАСИФІКУЄ значення;
  * саме форматування — на виклику, в екрані.
  */
-export type CompareCellDisplay =
+type CompareCellDisplay =
   | { readonly kind: 'text'; readonly text: string }
   | { readonly kind: 'date'; readonly raw: string }
   | { readonly kind: 'bool'; readonly value: boolean };

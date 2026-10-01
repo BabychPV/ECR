@@ -1,4 +1,4 @@
-﻿import type { components } from './schema';
+import type { components } from './schema';
 
 /**
  * DTO клієнта — **псевдоніми згенерованих типів**, а не їхня копія.
@@ -57,9 +57,6 @@ export type TableSliceDto = Schemas['TableSliceDto'];
  */
 export type PatchCell = Schemas['PatchCell'];
 
-/** Рядок у пакетній зміні. `baseVersion: null` означає СТВОРЕННЯ рядка (R-B2). */
-export type PatchRow = Schemas['PatchRow'];
-
 /**
  * Пакетна зміна комірок.
  *
@@ -67,9 +64,6 @@ export type PatchRow = Schemas['PatchRow'];
  * **весь** батч (B04 §2.3).
  */
 export type PatchCellsRequest = Schemas['PatchCellsRequest'];
-
-/** Повідомлення валідації (рівні, що НЕ блокують запис — `PatchCellsResponse.validation`). */
-export type ValidationMessageDto = Schemas['ValidationMessageDto'];
 
 /** Одне зауваження перевірки (`POST/GET …/validate…`) — несе `blocksSave`. */
 export type ValidationFindingDto = Schemas['ValidationFindingDto'];
@@ -148,9 +142,6 @@ export type TemplateVersionsForTemplate = Schemas['TemplateVersionsForTemplate']
  */
 export type TemplateCard = Schemas['TemplateCard'];
 
-/** Скільки всього посилається на шаблон — ціна архівування. */
-export type TemplateDependents = Schemas['TemplateDependents'];
-
 /** Запит на зміну назви шаблону; коду в ньому немає — він незмінний. */
 export type RenameTemplateRequest = Schemas['RenameTemplateRequest'];
 
@@ -164,7 +155,6 @@ export type ApprovalRouteDto = Schemas['ApprovalRouteDto'];
 export type AffectedRolesResponse = Schemas['AffectedRolesResponse'];
 export type AffectedStepsResponse = Schemas['AffectedStepsResponse'];
 export type AccessMatrixDto = Schemas['AccessMatrixDto'];
-export type AccessMatrixSheetDto = Schemas['AccessMatrixSheetDto'];
 export type AccessMatrixCellDto = Schemas['AccessMatrixCellDto'];
 
 /** Зв'язок між таблицями версії (`ФВ-2.12`). */
@@ -234,9 +224,6 @@ export type RegistryEntryDto = Schemas['RegistryEntryDto'];
  */
 export type RegistryEntryImportReport = Schemas['RegistryEntryImportReport'];
 
-/** Один відхилений рядок звіту імпорту — див. {@link RegistryEntryImportReport}. */
-export type RegistryEntryImportError = Schemas['RegistryEntryImportError'];
-
 /**
  * Повний опис довідника для конструктора (`ФВ-8.12`).
  *
@@ -248,17 +235,8 @@ export type RegistryEntryImportError = Schemas['RegistryEntryImportError'];
  */
 export type RegistryDefinitionDto = Schemas['RegistryDefinitionDto'];
 
-/** Поле довідника в конструкторі. */
-export type RegistryFieldDto = Schemas['RegistryFieldDto'];
-
-/** Зв'язок довідника: посилання поля або вид M:N. */
-export type RegistryRelationDto = Schemas['RegistryRelationDto'];
-
 /** Правило цілісності довідника — один із чотирьох видів (`H-10`). */
 export type RegistryRuleDto = Schemas['RegistryRuleDto'];
-
-/** Мапінг зовнішнього поля на поле довідника. */
-export type RegistryMappingDto = Schemas['RegistryMappingDto'];
 
 /** Запис історії опису довідника. */
 export type RegistryHistoryEntryDto = Schemas['RegistryHistoryEntryDto'];
@@ -272,17 +250,11 @@ export type RegistryRuleSaveDto = Schemas['RegistryRuleSaveDto'];
 /** Запит на збереження опису довідника. */
 export type SaveRegistryDefinitionDto = Schemas['SaveRegistryDefinitionDto'];
 
-/** Нова версія опису після збереження. */
-export type RegistryDefinitionVersionResponse = Schemas['RegistryDefinitionVersionResponse'];
-
 /** Заведення довідника з нуля: код, назва, темпоральність — без жодного поля. */
 export type CreateRegistryDto = Schemas['CreateRegistryDto'];
 
 /** Методологія з версіями. */
 export type MethodologyDto = Schemas['MethodologyDto'];
-
-/** Версія методології. */
-export type MethodologyVersionDto = Schemas['MethodologyVersionDto'];
 
 /**
  * Версія методології в конфігураторі — **включно з чернетками**.
@@ -323,9 +295,6 @@ export type MethodologyConstantDto = Schemas['MethodologyConstantDto'];
 
 /** Запис константи версії-чернетки. */
 export type SaveMethodologyConstantRequest = Schemas['SaveMethodologyConstantRequest'];
-
-/** Природа значення константи: число, текст або мітка категорії. */
-export type ConstantKind = Schemas['ConstantKind'];
 
 /** Правило відбору рядків документа (`ФВ-13.3`). */
 export type MethodologyRuleDto = Schemas['MethodologyRuleDto'];
@@ -369,15 +338,6 @@ export type CalculationResultDto = Schemas['CalculationResultDto'];
 /** Diff публікації методології: що саме зміниться в числах (`ФВ-9.6`). */
 export type MethodologyPublicationDiff = Schemas['MethodologyPublicationDiff'];
 
-/** Арифметичний режим версії: `Legacy` відтворює числа чинної системи. */
-export type NumericMode = Schemas['NumericMode'];
-
-/** Джерело тривалості періоду (`ФВ-16.11`). */
-export type CalendarMode = Schemas['CalendarMode'];
-
-/** Обсяг журналу обчислення (`ФВ-9.13`). */
-export type TraceLevel = Schemas['TraceLevel'];
-
 /** Рівень драбини виразності версії (`ФВ-9.2`). */
 export type CalculationLevel = Schemas['CalculationLevel'];
 
@@ -405,17 +365,8 @@ export type UserPage = Schemas['PagedResultOfUserView'];
  */
 export type AccessDiagnosticsView = Schemas['AccessDiagnosticsView'];
 
-/** SID групи з квитка і те, що він дав. */
-export type GroupSidView = Schemas['GroupSidView'];
-
-/** Групове призначення, яке існує в системі. */
-export type GroupAssignmentView = Schemas['GroupAssignmentView'];
-
 /** Календар періодів проєкту. */
 export type PeriodCalendarDto = Schemas['PeriodCalendarDto'];
-
-/** Період проєкту. */
-export type PeriodDto = Schemas['PeriodDto'];
 
 /** Сутність збору зі станом останнього прогону і прогалиною. */
 export type SourceEntityStatus = Schemas['SourceEntityStatus'];
@@ -433,9 +384,6 @@ export type ReportSnapshotSummary = Schemas['ReportSnapshotSummary'];
  */
 export type ReportDefinition = Schemas['ReportDefinitionDto'];
 
-/** Версія опису звіту; зріз будується лише за `Published`. */
-export type ReportVersionDto = Schemas['ReportVersionDto'];
-
 /** Колонка зрізу в описі версії: код і тип значення. */
 export type ReportColumnCommand = Schemas['ReportColumnCommand'];
 
@@ -444,6 +392,9 @@ export type CreateReportDefRequest = Schemas['CreateReportDefRequest'];
 
 /** Запит на створення версії-чернетки опису звіту. */
 export type CreateReportVersionRequest = Schemas['CreateReportVersionRequest'];
+
+/** Запит на публікацію версії опису звіту: причина обов'язкова (ФВ-14.7). */
+export type PublishReportVersionRequest = Schemas['PublishReportVersionRequest'];
 
 /** Стан фонової задачі. */
 export type JobStatus = Schemas['JobStatus'];
@@ -462,9 +413,6 @@ export type JobSummary = Schemas['JobSummary'];
 
 /** Сторінка проєктів. */
 export type PagedProjects = Schemas['PagedResultOfProjectSummary'];
-
-/** Проєкт у переліку. */
-export type ProjectSummary = Schemas['ProjectSummary'];
 
 /** Результат перевірки документа. */
 export type ValidationResultResponse = Schemas['ValidationResultResponse'];
@@ -487,9 +435,6 @@ export type UiStringCatalog = Schemas['UiStringCatalog'];
  * тут — помилка компіляції.
  */
 export type HealthReport = Schemas['HealthReportDto'];
-
-/** Одна перевірка у звіті здоров'я. */
-export type HealthCheck = Schemas['HealthCheckDto'];
 
 /** Локальний вхід. */
 export type LocalLoginRequest = Schemas['LocalLoginRequest'];
@@ -526,9 +471,6 @@ export type PublishMethodologyRequest = Schemas['PublishMethodologyRequest'];
 
 /** Перерахунок усього проєкту (Q-151): null-період — повний рік. */
 export type ProjectRecalculationRequest = Schemas['ProjectRecalculationRequest'];
-
-/** Прийнятий у чергу перерахунок проєкту. */
-export type ProjectRecalculationAcceptedResponse = Schemas['ProjectRecalculationAcceptedResponse'];
 
 /** Запуск збору з джерела. */
 export type CollectRequest = Schemas['CollectRequest'];
@@ -599,9 +541,6 @@ export type SimulationResultDto = Schemas['SimulationResultDto'];
 /** Зміна рядка інтерфейсу (`ФВ-14.9`). */
 export type SetUiStringRequest = Schemas['SetUiStringRequest'];
 
-/** Область видимості рядка каталогу: публічна чи приватна (`D-114`). */
-export type UiStringScope = Schemas['UiStringScope'];
-
 /** Нова ревізія каталогу після зміни рядка. */
 export type UiStringRevisionResponse = Schemas['UiStringRevisionResponse'];
 
@@ -625,9 +564,6 @@ export type CreateUnitRequest = Schemas['CreateUnitRequest'];
 
 /** Результат конверсії. */
 export type ConvertUnitResponse = Schemas['ConvertUnitResponse'];
-
-/** Зміна комірки в журналі аудиту. */
-export type CellChangeView = Schemas['CellChangeView'];
 
 /** Сторінка журналу змін. */
 export type CellChangePage = Schemas['PagedResultOfCellChangeView'];
@@ -727,9 +663,6 @@ export type RoleIdResponse = Schemas['RoleIdResponse'];
 /** Створений користувач; ані пароля, ані хеша тут немає (`ФВ-6.11`). */
 export type UserIdResponse = Schemas['UserIdResponse'];
 
-/** Створений рядок динамічної таблиці. */
-export type RowKeyResponse = Schemas['RowKeyResponse'];
-
 /** Розпочатий сеанс симуляції разом із суб'єктом і прапорцем «лише читання». */
 export type SimulationSessionResponse = Schemas['SimulationSessionResponse'];
 
@@ -763,10 +696,6 @@ export type ValidateExpressionBody = Schemas['ValidateExpressionBody'];
  */
 export type ExpressionDialect = Schemas['ExpressionDialect'];
 
-
-/** Вердикт одного тесту золотого набору (`ФВ-13.7`). */
-export type TestCaseVerdict = Schemas['TestCaseVerdict'];
-
 /**
  * Перегляд мапінгу на реальних рядках джерела (`ФВ-13.14`).
  *
@@ -775,17 +704,8 @@ export type TestCaseVerdict = Schemas['TestCaseVerdict'];
  */
 export type MappingPreview = Schemas['MappingPreview'];
 
-/** Реальний рядок джерела разом з адресою, куди він лягає. */
-export type MappingPreviewRow = Schemas['MappingPreviewRow'];
-
 /** Підсумок одного мапінгу: що саме він поклав би в комірку. */
 export type MappedFieldPreview = Schemas['MappedFieldPreview'];
-
-/** Поле джерела, яке не лягає нікуди. */
-export type UnmappedSourceField = Schemas['UnmappedSourceField'];
-
-/** Колонка документа, за якою не стоїть нічого. */
-export type UncoveredColumn = Schemas['UncoveredColumn'];
 
 /**
  * Заведення мапінгу поля джерела (Прогалина 1 директиви паритету зі старою
@@ -818,3 +738,9 @@ export type GrantableSheet = Schemas['GrantableSheet'];
 
 /** Особисте призначення ролі користувачу з межами й областю (`GET /users/{id}/role-assignments`). */
 export type UserRoleAssignmentView = Schemas['UserRoleAssignmentView'];
+
+/** Розріз «ресурс → рівень → грант ролі» (ФВ-6.16, `GET /security/users/{id}/effective-access`). */
+export type EffectiveAccessView = Schemas['EffectiveAccessView'];
+
+/** Один внесок у підсумковий рівень доступу: роль, призначення, область, заборона. */
+export type EffectiveAccessContribution = Schemas['EffectiveAccessContribution'];

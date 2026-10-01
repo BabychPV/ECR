@@ -107,6 +107,23 @@ public interface IPeriodStore
     /// </remarks>
     public Task<Ecr.Domain.Enums.PeriodState?> FindPeriodStateAsync(
         long documentId, int periodKey, CancellationToken ct);
+
+    /// <summary>
+    /// Чи є серед аркушів такий, що після <c>Reopen</c> ще не затверджений
+    /// знову (ФВ-5.20a, <c>D-70</c> б): <c>ReopenedAt</c> заповнено й немає
+    /// <c>Approved</c> пізнішого за нього.
+    /// </summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="sheetDefIds">Аркуші, у які пишуться комірки.</param>
+    /// <param name="periodKey">Період.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⚠ Окремо від <see cref="FindPeriodStateAsync"/>: <c>Reopen</c> АРКУША не
+    /// змінює стану ПЕРІОДУ (період лишається <c>Open</c>), тож правка після
+    /// нього не відрізнялася від правки в строк.
+    /// </remarks>
+    public Task<bool> HasReopenedSheetAsync(
+        long documentId, IReadOnlyCollection<int> sheetDefIds, int periodKey, CancellationToken ct);
 }
 
 /// <summary>Стан одного періоду.</summary>

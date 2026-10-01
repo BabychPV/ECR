@@ -34,7 +34,7 @@ import { useCallback, useState } from 'react';
  * (патерн «adjusting state when a prop changes» з документації React), тож
  * поле не малює кадр зі старим значенням.
  */
-export interface FieldDraft<T> {
+interface FieldDraft<T> {
   /** Що показує поле. */
   readonly value: T;
 

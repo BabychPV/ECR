@@ -219,6 +219,24 @@ public sealed class NotificationJob(
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
+        // ⛔ ФВ-12.4/12.5 (Q-149, REQ-CLOSURE №36): провал перерахунку, імпорту, експорту й
+        // знімка звіту — так само лише в `itg.JobProgress` зі станом `Failed` (після вичерпання
+        // ретраїв). Клієнт уже отримав `202`/`200`, а без цього запиту збій бачив би лише той,
+        // хто відкрив `/admin/jobs`: дані не перераховано, файл не вивантажено — і тиша.
+        // ⚠ Кількість спроб («3 ретраї = 4 спроби») цей запит не змінює — лише повідомляє про
+        // кінцевий `Failed`; проміжні спроби (`Requeue`) станом `Failed` не позначаються.
+        var alertedCodes = AlertedJobKinds.Keys.ToArray();
+        var jobFailures = (await db.JobProgresses
+                .AsNoTracking()
+                .Where(p => p.UpdatedAt >= since && p.State == "Failed" && alertedCodes.Contains(p.JobCode))
+                .OrderByDescending(p => p.UpdatedAt)
+                .Take(MaxDigestItems)
+                .Select(p => new { p.JobId, p.JobCode, p.State, p.Error, p.UpdatedAt })
+                .ToListAsync(ct)
+                .ConfigureAwait(false))
+            .Select(p => new DigestItem(AlertedJobKinds[p.JobCode], p.JobId, p.State, p.Error, p.UpdatedAt))
+            .ToList();
+
         var coverageItems = coverage
             .Select(c => new DigestItem(
                 CoverageKind,
@@ -234,6 +252,7 @@ public sealed class NotificationJob(
         var items = collection
             .Concat(maintenance)
             .Concat(materialization)
+            .Concat(jobFailures)
             .Concat(coverageItems)
             .Take(MaxDigestItems)
             .ToList();
@@ -293,7 +312,7 @@ public sealed class NotificationJob(
         // вимикають разом із корисним. Груп рівно стільки, скільки різних подій
         // матриці правил, бо адміністратор має змогу надіслати «збій збору» в
         // один канал, а «збій задачі» — в інший.
-        foreach (var group in failures.GroupBy(f => EventKindOf(f.Kind)))
+        foreach (var group in failures.GroupBy(f => EventKindOf(f.Kind, f.Subject, f.Status)))
         {
             var lines = group
                 .Select(f => $"[{f.Kind}] {f.Subject}: {f.Status}. {f.Details}")
@@ -372,6 +391,26 @@ public sealed class NotificationJob(
         typeof(IMaterializeCollectedDataJob).FullName!;
 
     /// <summary>
+    /// Задачі, чий кінцевий <c>Failed</c> потрапляє в зведення (<c>ФВ-12.4/12.5</c>): код у
+    /// <c>itg.JobProgress</c> (повне ім'я маркера) → вид рядка зведення.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Перелік явний, а не «усі Failed»: збір і матеріалізація мають власні види, а
+    /// службові задачі (узгодженість, пошук осиротілих) — власні шляхи. Вид рядка не збігається
+    /// з <see cref="CollectionKind"/>, тож <see cref="EventKindOf(string)"/> відносить їх до
+    /// <see cref="NotificationEventKind.JobFailed"/> — «збій задачі», а не «збій збору».
+    /// </remarks>
+    public static IReadOnlyDictionary<string, string> AlertedJobKinds { get; } =
+        new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            [typeof(IRecalculationJob).FullName!] = "recalculation",
+            [typeof(IFormulaRecalculationJob).FullName!] = "formula-recalculation",
+            [typeof(IExcelImportJob).FullName!] = "excel-import",
+            [typeof(IExcelExportJob).FullName!] = "excel-export",
+            [typeof(IReportSnapshotJob).FullName!] = "report-snapshot",
+        };
+
+    /// <summary>
     /// Вид рядка зведення за текстом відмови прогону.
     /// </summary>
     /// <param name="errorMessage">Текст із <c>itg.CollectionRun.ErrorMessage</c>.</param>
@@ -404,6 +443,39 @@ public sealed class NotificationJob(
         => digestKind is CollectionKind or AuthenticationKind or CoverageKind
             ? NotificationEventKind.CollectionFailed
             : NotificationEventKind.JobFailed;
+
+    /// <summary>
+    /// Подія матриці за видом, темою і статусом рядка: уточнює <see cref="EventKindOf(string)"/>
+    /// для подій, що мають власну клітинку матриці (ФВ-12.5, REQ-CLOSURE №36).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Без цього правило «ExportFailed / PartitionsRunningOut / ConsistencyIssuesFound → канал»
+    /// можна було налаштувати, але воно ніколи не спрацьовувало: усі три йшли як
+    /// <see cref="NotificationEventKind.JobFailed"/>. ⚠ Лише <c>Degraded</c> (знахідки, мала
+    /// запас партицій) — власна подія; падіння самої перевірки (<c>Failed</c>) — збій задачі.
+    /// </remarks>
+    public static NotificationEventKind EventKindOf(string digestKind, string subject, string status)
+    {
+        if (digestKind == "excel-export")
+        {
+            return NotificationEventKind.ExportFailed;
+        }
+
+        if (digestKind == "maintenance" && status == "Degraded")
+        {
+            if (subject == PartitionCheckJob.Code)
+            {
+                return NotificationEventKind.PartitionsRunningOut;
+            }
+
+            if (subject == ConsistencyCheckJob.Code)
+            {
+                return NotificationEventKind.ConsistencyIssuesFound;
+            }
+        }
+
+        return EventKindOf(digestKind);
+    }
 
     /// <summary>
     /// Вид рядка зведення для події журналу покриття (<c>ІНТ-3.3</c>, <c>D-118</c>).

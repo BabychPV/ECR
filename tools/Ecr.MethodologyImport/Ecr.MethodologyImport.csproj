@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Консольний інструмент імпорту методологій з AF XML (крок D / V, HSE301).
+    Жодних пакетів і посилань на src/: лише BCL (XmlReader, System.Text.Json).
+    Шар читання AF XML (Reading/) відокремлений від моделі й аналізу, щоб правки
+    під справжній ECR_01_Air.xml лишались локальними.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Ecr.MethodologyImport</RootNamespace>
+    <AssemblyName>Ecr.MethodologyImport</AssemblyName>
+  </PropertyGroup>
+
+</Project>

@@ -25,7 +25,7 @@
  */
 
 /** Тип оголошеного параметра. Той самий словник, що приймає сервер. */
-export type ReportParameterType = 'Number' | 'Text' | 'Boolean' | 'Date';
+type ReportParameterType = 'Number' | 'Text' | 'Boolean' | 'Date';
 
 /** Оголошення параметра у версії опису звіту (`ReportParameterCommand`). */
 export interface ReportParameterDeclaration {
@@ -56,12 +56,12 @@ export type ParameterValue = string | boolean | Date | null;
 export type ParameterDraft = Readonly<Record<string, ParameterValue>>;
 
 /** Результат розбору оголошень — рівно три стани, див. заголовок файлу. */
-export type ParameterDeclarations =
+type ParameterDeclarations =
   | { readonly kind: 'declared'; readonly items: readonly ReportParameterDeclaration[] }
   | { readonly kind: 'unreadable' };
 
 /** Оголошення прочитати не вдалося. */
-export const UnreadableParameters: ParameterDeclarations = { kind: 'unreadable' };
+const UnreadableParameters: ParameterDeclarations = { kind: 'unreadable' };
 
 /** Параметрів немає — і це ЗНАННЯ, а не брак знання. */
 export const NoParameters: ParameterDeclarations = { kind: 'declared', items: [] };
@@ -193,7 +193,7 @@ function initialValue(declaration: ReportParameterDeclaration): ParameterValue {
 }
 
 /** Чи значення в чернетці заповнене для цього оголошення. */
-export function isFilled(declaration: ReportParameterDeclaration, value: ParameterValue): boolean {
+function isFilled(declaration: ReportParameterDeclaration, value: ParameterValue): boolean {
   switch (declaration.type) {
     case 'Boolean':
       return typeof value === 'boolean';

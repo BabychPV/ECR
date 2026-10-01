@@ -51,4 +51,49 @@ public sealed class JobRetryPolicyTests
         Assert.Equal("ECR-INT-0503", JobRetryPolicy.ErrorCodeOf(new BusinessRuleException("ECR-INT-0503", "x")));
         Assert.Equal(ErrorCodes.Internal, JobRetryPolicy.ErrorCodeOf(new TimeoutException()));
     }
+
+    /// <summary>
+    /// Н-Л4: <see cref="BusinessRuleException"/> ретраїться лише з кодом «недоступно»;
+    /// завелика відповідь джерела — ні, хоч код у неї той самий.
+    /// </summary>
+    /// <remarks>
+    /// Мутації: прибрати арм <see cref="SourceResponseTooLargeException"/> — червоний
+    /// перший рядок; <c>BusinessRuleException =&gt; true</c> — червоні рядки 0422.
+    /// </remarks>
+    [Fact]
+    public void Прикладна_відмова_ретраїться_лише_з_кодом_недоступності()
+    {
+        Assert.False(JobRetryPolicy.IsWorthRetrying(
+            new SourceResponseTooLargeException(ErrorCodes.SourceUnavailable, "понад 50 МБ")));
+        Assert.False(JobRetryPolicy.IsWorthRetrying(new BusinessRuleException("ECR-INT-0422", "запит не налаштовано")));
+        Assert.False(JobRetryPolicy.IsWorthRetrying(new BusinessRuleException("ECR-UOM-0422", "одиниця не переводиться")));
+
+        Assert.True(JobRetryPolicy.IsWorthRetrying(new BusinessRuleException(ErrorCodes.SourceUnavailable, "джерело лежить")));
+        Assert.True(JobRetryPolicy.IsWorthRetrying(new BusinessRuleException(ErrorCodes.Archiving, "архівування")));
+    }
+
+    /// <summary>
+    /// Сторож: кожен код каталогу зі статусом <c>503</c> («спробуйте пізніше») —
+    /// у переліку транзієнтних, і в переліку немає нічого іншого.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Новий код <c>…-0503</c>, не внесений у <see cref="JobRetryPolicy.TransientRuleCodes"/>,
+    /// мовчки перестав би ретраїтись; код іншого статусу в переліку — повертав би
+    /// три марні ретраї вердиктам. Обидва напрямки червоні тут, а не в проді.
+    /// Мутація: прибрати <c>Archiving</c> з переліку — тест червоний.
+    /// </remarks>
+    [Fact]
+    public void Сторож_перелік_транзієнтних_кодів_дорівнює_кодам_зі_статусом_503()
+    {
+        var unavailable = typeof(ErrorCodes)
+            .GetFields(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)
+            .Where(f => f is { IsLiteral: true } && f.FieldType == typeof(string))
+            .Select(f => (string)f.GetRawConstantValue()!)
+            .Where(code => code.EndsWith("-0503", StringComparison.Ordinal))
+            .ToHashSet(StringComparer.Ordinal);
+
+        Assert.Equal(
+            unavailable.Order(StringComparer.Ordinal),
+            JobRetryPolicy.TransientRuleCodes.Order(StringComparer.Ordinal));
+    }
 }

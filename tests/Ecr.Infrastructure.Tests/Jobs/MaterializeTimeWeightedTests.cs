@@ -47,7 +47,7 @@ public sealed class MaterializeTimeWeightedTests(SqlServerFixture sql)
     {
         // Постійні 3.6 Sm3/h; точки лише ПОЗА січнем і одна всередині — значення
         // на межах періоду інтерполюються з них (§4.1). Січень у поясі проєкту
-        // (Asia/Almaty, без переходу на літній час) — 744 год: 3.6 × 744 = 2 678.4 Sm3.
+        // (Asia/Atyrau, без переходу на літній час) — 744 год: 3.6 × 744 = 2 678.4 Sm3.
         var stand = await ArrangeAsync(
             new Field("INT", AggregationKind.TimeIntegral, "Sm3_per_h", "Sm3",
             [
@@ -96,7 +96,6 @@ public sealed class MaterializeTimeWeightedTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
-    [Trait("Requirement", "ФВ-16.12")]
     public async Task Avg_старого_мапінгу_побітно_той_самий()
     {
         // Точка ДО періоду є, але згортка точок її не бачить — як і до F3.

@@ -39,7 +39,7 @@ export function hasContent(value: ReactNode): boolean {
   return true;
 }
 
-export interface TwoLineProps {
+interface TwoLineProps {
   /** Верхній рядок — людський підпис. */
   readonly primary?: ReactNode;
 

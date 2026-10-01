@@ -107,7 +107,6 @@ public sealed class HealthRedStateTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
-    [Trait("Requirement", "ФВ-11.9")]
     public async Task Джерела_червоніють_коли_сховища_немає_в_контейнері()
     {
         var result = await Sources(sources: null)
@@ -118,7 +117,6 @@ public sealed class HealthRedStateTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
-    [Trait("Requirement", "ФВ-11.9")]
     public async Task Джерела_червоніють_коли_останній_збір_упав()
     {
         var store = StoreWith(Source("pi-water", active: true, lastRunStatus: "Failed", gap: null));
@@ -132,7 +130,6 @@ public sealed class HealthRedStateTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
-    [Trait("Requirement", "ФВ-11.9")]
     public async Task Джерела_жовтіють_коли_в_покритті_є_прогалина()
     {
         var store = StoreWith(
@@ -146,7 +143,6 @@ public sealed class HealthRedStateTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
-    [Trait("Requirement", "ФВ-11.9")]
     public async Task Джерело_яке_ніколи_не_запускалося_рахується_прогалиною()
     {
         // ⛔ Забуте налаштування мовчить, і мовчання приймають за спокій.
@@ -160,7 +156,6 @@ public sealed class HealthRedStateTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
-    [Trait("Requirement", "ФВ-11.9")]
     public async Task Відсутність_активних_джерел_це_зелений_стан()
     {
         // ⚠ Система без інтеграції працездатна: дані вводять руками. Жовтий
@@ -256,7 +251,11 @@ public sealed class HealthRedStateTests
                 : new CollectionRunStatus(DateTime.UtcNow, lastRunStatus, 10),
             OldestGap: gap,
             DataSourceId: 1,
-            DataSourceCode: "PI");
+            DataSourceCode: "PI",
+            OnMissingInSource: Ecr.Domain.Enums.RegistryMissingPolicy.MarkOrphaned,
+            ValidFromAttribute: null,
+            ValidToAttribute: null,
+            ValidToInclusive: false);
 
     private static ICollectionStore StoreWith(params SourceEntityStatus[] sources)
     {

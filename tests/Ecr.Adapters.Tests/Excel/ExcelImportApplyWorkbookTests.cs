@@ -43,8 +43,12 @@ public sealed class ExcelImportApplyWorkbookTests(SqlServerFixture sql) : IDispo
     /// <summary>
     /// Звернень SqlClient на застосування книги з одного аркуша — однаково на 3
     /// і на 12 таблиць. До P8 (цикл поштучних PATCH) було 57 на 3 і 219 на 12.
+    /// 20 — ФВ-5.20a (5b88652a): один індексований пошук Reopen-стану аркуша
+    /// для <c>IsLateEdit</c> на спільному книжковому шляху запису (те саме +1,
+    /// що в <c>PatchCellsWorkbookTests</c>: 26 → 27); від кількості таблиць не
+    /// залежить — рівність 3 = 12 перевіряється окремо вище.
     /// </summary>
-    private const long ApplyExecutions = 19;
+    private const long ApplyExecutions = 20;
 
     private static readonly DateTime Now = new(2026, 10, 15, 10, 0, 0, DateTimeKind.Utc);
 

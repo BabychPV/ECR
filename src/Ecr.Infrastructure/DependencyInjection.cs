@@ -92,6 +92,7 @@ public static class DependencyInjection
             ReadInt(configuration, "Database:SheetLockTimeoutSeconds", SheetEditGatePolicy.DefaultLockTimeoutSeconds),
             1, 300))));
         services.AddScoped<IDocumentVersionStore, DocumentVersionStore>();
+        services.AddScoped<IDocumentVersionMigrationStore, DocumentVersionMigrationStore>();
         services.AddScoped<IPeriodStore, PeriodStore>();
         services.AddScoped<IAuditReader, AuditReader>();
         services.AddScoped<IConsistencyIssueReader, ConsistencyIssueReader>();
@@ -103,6 +104,8 @@ public static class DependencyInjection
         services.AddScoped<IValidationResultStore, ValidationResultStore>();
         services.AddScoped<IProjectStore, ProjectStore>();
         services.AddScoped<IRegistryStore, RegistryStore>();
+        services.AddScoped<IRegistryUseStore, RegistryUseStore>(); // RT-23b
+        services.AddScoped<IRegistryImpactStore, RegistryImpactStore>(); // RT-25
         services.AddScoped<IRegistryDraftStore, RegistryDraftStore>();
         services.AddScoped<IRegistryExternalKeyStore, RegistryExternalKeyStore>(); // FEATURE-REGISTRY-SYNC S2
         services.AddScoped<IUnitCatalog, UnitCatalog>();
@@ -207,6 +210,7 @@ public static class DependencyInjection
         services.AddSingleton<Application.Security.IPasswordHasher, PasswordHasher>();
         services.AddScoped<SecurityStampValidator>();
         services.AddScoped<IUserStore, UserStore>();
+        services.AddScoped<Application.Ports.IEffectiveAccessStore, EffectiveAccessStore>();
         services.AddSingleton<Application.Ports.IPrincipalNameResolver, WindowsPrincipalNameResolver>();
         services.AddScoped<Application.Ports.IResourceNameResolver, ResourceNameResolver>();
         services.AddScoped<ISimulationService>(sp => new SimulationService(
@@ -219,6 +223,12 @@ public static class DependencyInjection
         services.AddScoped<Application.Ports.ICellPatcher, Integration.IntegrationCellPatcher>();
         services.AddScoped<Application.Ports.ICoverageJournal, Integration.CoverageJournal>();
         services.AddScoped<Application.Ports.IMaterializeCollectedDataJob, Jobs.MaterializeCollectedDataJob>();
+
+        // HSE301:A4 — автоперерахунок після запису без людини (V-5 → D-174).
+        // Без цього рядка `MaterializeCollectedDataJob` отримав би `null` у
+        // необов'язковому параметрі й мовчки не ставив би перерахунку.
+        services.AddScoped<Application.Ports.ICalculationTrigger, Application.Calculations.CalculationTrigger>();
+        // HSE301:A4 — кінець
 
         // ⛔ P0: технічний автор задач інтеграції (`svc-integration`). Сам
         // `JobActorScope` реєструє `Program.cs` разом з обгорткою
@@ -288,6 +298,9 @@ public static class DependencyInjection
         // ⚠ Задача реєструється як МАРКЕР IRecalculationJob, бо саме ним її
         // називає use-case. Без цього рядка `EnqueueAsync<IRecalculationJob>`
         // приймав би завдання, і не виконувалося б нічого.
+        // ПРД-13: вимір бюджету перерахунку — і в Api, і в Ecr.Worker (обидва беруть це складання).
+        services.AddSingleton(Jobs.RecalculationBudgetOptions.Read(configuration));
+        services.AddSingleton<Jobs.RecalculationBudgetMonitor>();
         services.AddScoped<IRecalculationJob, Jobs.RecalculationJob>();
         services.AddScoped<IFormulaRecalculationJob, Jobs.FormulaRecalculationJob>();
 
@@ -368,6 +381,21 @@ public static class DependencyInjection
         services.AddScoped<IReportSnapshotJob, Jobs.ReportSnapshotJob>();
         services.AddScoped<ICollectionJob, Jobs.CollectionJob>();
 
+        // HSE301 A5b: синк подій джерела в рядки таблиць. Ставить його `CollectionJob` (сутність із
+        // активним `SourceEventMap`) — за маркером, як решту задач у черзі.
+        services.AddScoped<ISourceEventSyncJob, Jobs.SourceEventSyncJob>();
+        services.AddScoped<IRegistryImpactRecalculationJob, Jobs.RegistryImpactRecalculationJob>(); // RT-25: батьківська задача перерахунку зачеплених
+
+        // HSE301:A1 — підтягування значень PI за вікном рядка (§4.4). Задачу ставить хук запису комірок
+        // (`IRowWindowTrigger` у `PatchCellsHandler`) і щогодинний `RowWindowRefetchJob` (конкретний клас — як
+        // `PeriodStateJob`, ставиться розкладом у `RecurringScheduleService`). Знімок колонок вікна — одиночка:
+        // хук питає його на кожен запис комірок.
+        services.AddScoped<IRowWindowFetchJob, Jobs.RowWindowFetchJob>();
+        services.AddScoped<Jobs.RowWindowRefetchJob>();
+        services.AddSingleton<Application.Ports.IRowWindowColumnIndex, Jobs.RowWindowColumnIndex>();
+        services.AddScoped<Application.Ports.IRowWindowTrigger, Application.Integration.RowWindowTrigger>();
+        // HSE301:A1 — кінець
+
         // ⚠ Та сама задача, що вже зареєстрована по типу вище: нічний розклад
         // ставить її конкретним класом, а `POST /consistency/run` — маркером
         // (`BE-30`). Без цього рядка ручний прогін приймався б у чергу й не
@@ -380,14 +408,20 @@ public static class DependencyInjection
         // Сховища Етапу 5.
         services.AddScoped<IJobProgressStore, JobProgressStore>();
         services.AddScoped<ICollectionStore, CollectionStore>();
+        services.AddScoped<ISourceEventMapStore, SourceEventMapStore>();
+        services.AddScoped<IRowWindowMapStore, RowWindowMapStore>(); // HSE301 A1
         services.AddScoped<ICollectionScheduleStore, CollectionScheduleStore>();
         services.AddScoped<IDataSourceStore, DataSourceStore>();
         services.AddScoped<ICollectionRunReader, CollectionRunReader>();
         services.AddScoped<Ecr.Application.Sources.IMappingPreviewStore, MappingPreviewStore>();
         services.AddScoped<IStyleCatalog, StyleCatalog>();
+        services.AddScoped<IConditionalFormatStore, ConditionalFormatStore>();
         services.AddScoped<IReportDefinitionStore, ReportDefinitionStore>();
         services.AddScoped<IReportSnapshotBuilder, Reporting.ReportSnapshotBuilder>();
+        services.AddSingleton<IReportViewStatus, Reporting.ReportViewStatus>();
+        services.AddScoped<IReportViewGenerator, Reporting.ReportViewGenerator>();
         services.AddSingleton<ISecretProvider, ConfigurationSecretProvider>();
+        services.AddSingleton<Ecr.Application.Ports.IEndpointNetwork, Integration.EndpointNetwork>();
 
         // ⚠ Diff імпорту живе в РОЗПОДІЛЕНОМУ кеші: перегляд і застосування —
         // два запити, і другий може потрапити на інший інстанс.

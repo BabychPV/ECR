@@ -172,6 +172,10 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .HasDatabaseName("UX_CalculationRun_Current")
                         .HasFilter("[Status] = 'Current'");
 
+                    b.HasIndex(new[] { "ProjectId", "FinishedAt" }, "IX_CalculationRun_Project_FinishedAt");
+
+                    SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex(new[] { "ProjectId", "FinishedAt" }, "IX_CalculationRun_Project_FinishedAt"), new[] { "PeriodKey", "Status", "ErrorMessage" });
+
                     b.ToTable("CalculationRun", "calc");
                 });
 
@@ -923,6 +927,69 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                             t.HasCheckConstraint("CK_ColumnDef_Lookup", "DataType <> 5 OR LookupRegistryDefId IS NOT NULL");
 
                             t.HasCheckConstraint("CK_ColumnDef_Month", "IsMonthColumn = 0 OR MonthNumber BETWEEN 1 AND 12");
+                        });
+
+                    b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
+                });
+
+            modelBuilder.Entity("Ecr.Domain.Entities.Configuration.ConditionalFormatRule", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("BackgroundHex")
+                        .HasMaxLength(7)
+                        .IsUnicode(false)
+                        .HasColumnType("varchar(7)");
+
+                    b.Property<string>("ColumnCode")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("ForegroundHex")
+                        .HasMaxLength(7)
+                        .IsUnicode(false)
+                        .HasColumnType("varchar(7)");
+
+                    b.Property<bool>("IsBold")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false, "DF_CondFmt_Bold");
+
+                    b.Property<string>("Operator")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("nvarchar(16)");
+
+                    b.Property<int>("Ordinal")
+                        .HasColumnType("int");
+
+                    b.Property<int>("TemplateVersionId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Value")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("ValueTo")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TemplateVersionId", "ColumnCode", "Ordinal")
+                        .IsUnique()
+                        .HasDatabaseName("UQ_CondFmt_Order");
+
+                    b.ToTable("ConditionalFormatRule", "cfg", t =>
+                        {
+                            t.HasTrigger("TR_ConditionalFormatRule_Immutable");
+
+                            t.HasCheckConstraint("CK_CondFmt_Operator", "Operator IN (N'gt', N'ge', N'lt', N'le', N'eq', N'ne', N'between', N'empty', N'notEmpty')");
                         });
 
                     b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
@@ -3499,6 +3566,225 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("Ecr.Domain.Entities.External.SourceEventFieldMap", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<byte>("AttributeScope")
+                        .HasColumnType("tinyint");
+
+                    b.Property<string>("SourceAttribute")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<int>("SourceEventMapId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("SourceUnitId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("TargetColumnDefId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("TargetUnitId")
+                        .HasColumnType("int");
+
+                    b.Property<byte>("ValueKind")
+                        .HasColumnType("tinyint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SourceEventMapId", "TargetColumnDefId")
+                        .IsUnique()
+                        .HasDatabaseName("UQ_SEFM_Target");
+
+                    b.ToTable("SourceEventFieldMap", "ext", t =>
+                        {
+                            t.HasCheckConstraint("CK_SEFM_Kinds", "AttributeScope BETWEEN 0 AND 1 AND ValueKind BETWEEN 0 AND 3");
+                        });
+                });
+
+            modelBuilder.Entity("Ecr.Domain.Entities.External.SourceEventLink", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<DateTime?>("EndUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<string>("EventName")
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)");
+
+                    b.Property<DateTime>("FirstSeenAt")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<string>("KeptManualJson")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime>("LastSeenAt")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<DateTime>("LastSyncAt")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<int?>("PeriodKey")
+                        .HasColumnType("int");
+
+                    b.Property<string>("PrimaryElement")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("RowKey")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<string>("SourceEventId")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<int>("SourceEventMapId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("SourceModifiedUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<DateTime>("StartUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
+                    b.Property<long?>("TableInstanceId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("UnmappedJson")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SourceEventMapId", "SourceEventId")
+                        .IsUnique()
+                        .HasDatabaseName("UQ_SEL_Event");
+
+                    b.HasIndex("TableInstanceId", "RowKey")
+                        .HasDatabaseName("IX_SEL_Row");
+
+                    b.HasIndex("SourceEventMapId", "StartUtc", "PrimaryElement")
+                        .IsUnique()
+                        .HasDatabaseName("UX_SEL_NaturalKey")
+                        .HasFilter("[PrimaryElement] IS NOT NULL");
+
+                    b.ToTable("SourceEventLink", "ext", t =>
+                        {
+                            t.HasCheckConstraint("CK_SEL_Row", "(PeriodKey IS NULL AND TableInstanceId IS NULL AND RowKey IS NULL) OR (PeriodKey IS NOT NULL AND TableInstanceId IS NOT NULL AND RowKey IS NOT NULL)");
+
+                            t.HasCheckConstraint("CK_SEL_Status", "Status IN (N'Synced', N'Open', N'Missing', N'PeriodClosed', N'PeriodChanged', N'PeriodNotOpen', N'Unmapped', N'RowLimit')");
+
+                            t.HasCheckConstraint("CK_SEL_StatusRow", "(Status NOT IN (N'Synced', N'Unmapped', N'Missing', N'PeriodChanged') OR TableInstanceId IS NOT NULL) AND (Status NOT IN (N'Open', N'PeriodNotOpen', N'RowLimit') OR TableInstanceId IS NULL)");
+                        });
+                });
+
+            modelBuilder.Entity("Ecr.Domain.Entities.External.SourceEventMap", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<long>("DocumentId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("FilterAttribute")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<byte?>("FilterScope")
+                        .HasColumnType("tinyint");
+
+                    b.Property<string>("FilterValue")
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true, "DF_SEM_Act");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<int>("SourceEntityId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("TableDefId")
+                        .HasColumnType("int");
+
+                    b.Property<byte>("VolumeMode")
+                        .HasColumnType("tinyint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SourceEntityId", "DocumentId", "TableDefId")
+                        .IsUnique()
+                        .HasDatabaseName("UQ_SourceEventMap");
+
+                    b.ToTable("SourceEventMap", "ext", t =>
+                        {
+                            t.HasCheckConstraint("CK_SEM_Filter", "(FilterAttribute IS NULL AND FilterScope IS NULL AND FilterValue IS NULL) OR (FilterAttribute IS NOT NULL AND FilterScope BETWEEN 0 AND 1 AND FilterValue IS NOT NULL)");
+
+                            t.HasCheckConstraint("CK_SEM_VolumeMode", "VolumeMode BETWEEN 0 AND 2");
+                        });
+                });
+
+            modelBuilder.Entity("Ecr.Domain.Entities.External.SourceEventValueMap", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("RegistryEntryId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("SourceEventFieldMapId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("SourceValue")
+                        .IsRequired()
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SourceEventFieldMapId", "SourceValue")
+                        .IsUnique()
+                        .HasDatabaseName("UQ_SEVM_Value");
+
+                    b.ToTable("SourceEventValueMap", "ext");
+                });
+
             modelBuilder.Entity("Ecr.Domain.Entities.Integration.ArchiveRun", b =>
                 {
                     b.Property<long>("Id")
@@ -3699,6 +3985,12 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .IsUnicode(false)
                         .HasColumnType("varchar(32)");
 
+                    b.Property<string>("FanOutParentJobId")
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasComputedColumnSql("CASE WHEN ISJSON([Payload]) = 1 THEN CAST(JSON_VALUE([Payload], N'$.fanOutParentJobId') AS nvarchar(100)) END", true);
+
                     b.Property<DateTime?>("HeartbeatAt")
                         .HasColumnType("datetime2(3)");
 
@@ -3764,6 +4056,14 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .IsDescending(false, true);
 
                     SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex(new[] { "CreatedByUserId", "UpdatedAt" }, "IX_JobProgress_CreatedBy_UpdatedAt"), new[] { "State", "JobCode" });
+
+                    b.HasIndex(new[] { "FanOutParentJobId" }, "IX_JobProgress_FanOutParent");
+
+                    SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex(new[] { "FanOutParentJobId" }, "IX_JobProgress_FanOutParent"), new[] { "State" });
+
+                    b.HasIndex(new[] { "State", "UpdatedAt" }, "IX_JobProgress_State_UpdatedAt");
+
+                    SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex(new[] { "State", "UpdatedAt" }, "IX_JobProgress_State_UpdatedAt"), new[] { "Message" });
 
                     b.HasIndex(new[] { "TargetKey" }, "UX_JobProgress_Target_Queued")
                         .IsUnique()
@@ -5297,6 +5597,16 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .HasConstraintName("FK_ColumnDef_Unit");
                 });
 
+            modelBuilder.Entity("Ecr.Domain.Entities.Configuration.ConditionalFormatRule", b =>
+                {
+                    b.HasOne("Ecr.Domain.Entities.Configuration.TemplateVersion", null)
+                        .WithMany()
+                        .HasForeignKey("TemplateVersionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_CondFmt_TV");
+                });
+
             modelBuilder.Entity("Ecr.Domain.Entities.Configuration.FormulaDef", b =>
                 {
                     b.HasOne("Ecr.Domain.Entities.Configuration.TableDef", null)
@@ -6022,6 +6332,86 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .HasConstraintName("FK_SE_Registry");
                 });
 
+            modelBuilder.Entity("Ecr.Domain.Entities.External.SourceEventFieldMap", b =>
+                {
+                    b.HasOne("Ecr.Domain.Entities.External.SourceEventMap", null)
+                        .WithMany("Fields")
+                        .HasForeignKey("SourceEventMapId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_SEFM_Map");
+
+                    b.HasOne("Ecr.Domain.Entities.Units.Unit", null)
+                        .WithMany()
+                        .HasForeignKey("SourceUnitId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_SEFM_SourceUnit");
+
+                    b.HasOne("Ecr.Domain.Entities.Configuration.ColumnDef", null)
+                        .WithMany()
+                        .HasForeignKey("TargetColumnDefId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_SEFM_Column");
+
+                    b.HasOne("Ecr.Domain.Entities.Units.Unit", null)
+                        .WithMany()
+                        .HasForeignKey("TargetUnitId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_SEFM_TargetUnit");
+                });
+
+            modelBuilder.Entity("Ecr.Domain.Entities.External.SourceEventLink", b =>
+                {
+                    b.HasOne("Ecr.Domain.Entities.External.SourceEventMap", null)
+                        .WithMany()
+                        .HasForeignKey("SourceEventMapId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_SEL_Map");
+                });
+
+            modelBuilder.Entity("Ecr.Domain.Entities.External.SourceEventMap", b =>
+                {
+                    b.HasOne("Ecr.Domain.Entities.Documents.Document", null)
+                        .WithMany()
+                        .HasForeignKey("DocumentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_SEM_Document");
+
+                    b.HasOne("Ecr.Domain.Entities.External.SourceEntity", null)
+                        .WithMany()
+                        .HasForeignKey("SourceEntityId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_SEM_Entity");
+
+                    b.HasOne("Ecr.Domain.Entities.Configuration.TableDef", null)
+                        .WithMany()
+                        .HasForeignKey("TableDefId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_SEM_Table");
+                });
+
+            modelBuilder.Entity("Ecr.Domain.Entities.External.SourceEventValueMap", b =>
+                {
+                    b.HasOne("Ecr.Domain.Entities.Dictionaries.RegistryEntry", null)
+                        .WithMany()
+                        .HasForeignKey("RegistryEntryId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_SEVM_Entry");
+
+                    b.HasOne("Ecr.Domain.Entities.External.SourceEventFieldMap", null)
+                        .WithMany("Values")
+                        .HasForeignKey("SourceEventFieldMapId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_SEVM_Field");
+                });
+
             modelBuilder.Entity("Ecr.Domain.Entities.Integration.ArchiveRun", b =>
                 {
                     b.HasOne("Ecr.Domain.Entities.Documents.Project", null)
@@ -6358,6 +6748,16 @@ namespace Ecr.Infrastructure.Persistence.Migrations
             modelBuilder.Entity("Ecr.Domain.Entities.External.RowWindowMap", b =>
                 {
                     b.Navigation("Sources");
+                });
+
+            modelBuilder.Entity("Ecr.Domain.Entities.External.SourceEventFieldMap", b =>
+                {
+                    b.Navigation("Values");
+                });
+
+            modelBuilder.Entity("Ecr.Domain.Entities.External.SourceEventMap", b =>
+                {
+                    b.Navigation("Fields");
                 });
 
             modelBuilder.Entity("Ecr.Domain.Entities.Workflow.ApprovalRoute", b =>

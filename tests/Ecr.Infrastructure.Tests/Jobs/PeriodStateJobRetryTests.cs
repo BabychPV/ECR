@@ -41,7 +41,7 @@ public sealed class PeriodStateJobRetryTests(SqlServerFixture sql)
 {
     private const int November = 202611;
 
-    private static readonly TimeZoneInfo Site = SiteTimeZone.Create("Asia/Almaty").ToTimeZoneInfo();
+    private static readonly TimeZoneInfo Site = SiteTimeZone.Create("Asia/Atyrau").ToTimeZoneInfo();
 
     private static readonly YearGraceWindow Window = YearGraceWindow.For(new DateOnly(2026, 12, 31), 45, Site);
 

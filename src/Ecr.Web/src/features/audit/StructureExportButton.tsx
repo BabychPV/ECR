@@ -7,7 +7,7 @@ import { can, useSession } from '@/shared/session/useSession';
 import { t } from '@/shared/i18n';
 
 /** Ім'я файлу, коли сервер не надіслав `Content-Disposition`. */
-export const FallbackExportFileName = 'audit-structure.csv';
+const FallbackExportFileName = 'audit-structure.csv';
 
 /**
  * Вікно придатне для запиту: обидві дати задані й початок не пізніше кінця.
@@ -15,7 +15,7 @@ export const FallbackExportFileName = 'audit-structure.csv';
  * ⚠ Ширину вікна (92 дні) клієнт свідомо НЕ перевіряє: межу знає сервер, і
  * його відмова `auditWindowTooWide` показується банером з його ж текстом.
  */
-export function isExportWindowValid(from: string, to: string): boolean {
+function isExportWindowValid(from: string, to: string): boolean {
   return from.length > 0 && to.length > 0 && from <= to;
 }
 

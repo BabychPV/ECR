@@ -18,6 +18,7 @@ import {
   HealthPage,
   JobsPage,
   MappingPreviewPage,
+  PipelinePage,
   MethodologiesPage,
   MethodologyVersionsPage,
   MyGroupsPage,
@@ -58,6 +59,14 @@ import { childPath, relativePath, routes, type RouteHandle } from './routes';
 const LoginPage = lazy(async () => ({ default: (await import('@/pages/LoginPage')).LoginPage }));
 
 /**
+ * Дані довідника (`ФВ-8.12`) — лінивий чанк; заходять із переліку довідників, тому, як і картка
+ * шаблону нижче, поза реєстром прогріву навбару.
+ */
+const RegistryDataPage = lazy(async () => ({
+  default: (await import('@/features/registries/rc812/RegistryDataPage')).RegistryDataPage,
+}));
+
+/**
  * Картка шаблону (`UI-09`) — лінива, як і решта сторінок.
  *
  * ⚠ Оголошена ТУТ, а не в `routePrefetch.ts`, свідомо: той реєстр існує для
@@ -68,6 +77,21 @@ const LoginPage = lazy(async () => ({ default: (await import('@/pages/LoginPage'
  */
 const TemplateCardPage = lazy(async () => ({
   default: (await import('@/pages/admin/TemplateCardPage')).TemplateCardPage,
+}));
+
+/**
+ * Редактор master-detail довідника (`ФВ-8.16`) — лінивий чанк, як і картка шаблону вище: сюди
+ * заходять із конструктора довідника, а не з навбару, тож реєстру прогріву він не потрібен.
+ */
+const CompositionEditorPage = lazy(async () => ({
+  default: (await import('@/features/registries/rc816/CompositionEditorPage')).CompositionEditorPage,
+}));
+
+/**
+ * Вплив правки довідника (RT-25) — лінивий чанк; заходять із переліку довідників, не з навбару.
+ */
+const RegistryImpactPage = lazy(async () => ({
+  default: (await import('@/features/registries/impact/RegistryImpactPage')).RegistryImpactPage,
 }));
 
 /**
@@ -286,9 +310,24 @@ export const router = createBrowserRouter([
             handle: routes.adminRegistries.handle,
           },
           {
+            path: relativePath(routes.adminRegistryData, 'admin'),
+            element: guarded(routes.adminRegistryData.handle, <RegistryDataPage />),
+            handle: routes.adminRegistryData.handle,
+          },
+          {
             path: relativePath(routes.adminRegistryDefinition, 'admin'),
             element: guarded(routes.adminRegistryDefinition.handle, <RegistryConstructorPage />),
             handle: routes.adminRegistryDefinition.handle,
+          },
+          {
+            path: relativePath(routes.adminRegistryComposition, 'admin'),
+            element: guarded(routes.adminRegistryComposition.handle, <CompositionEditorPage />),
+            handle: routes.adminRegistryComposition.handle,
+          },
+          {
+            path: relativePath(routes.adminRegistryImpact, 'admin'),
+            element: guarded(routes.adminRegistryImpact.handle, <RegistryImpactPage />),
+            handle: routes.adminRegistryImpact.handle,
           },
           {
             path: relativePath(routes.adminMethodologies, 'admin'),
@@ -324,6 +363,11 @@ export const router = createBrowserRouter([
             path: relativePath(routes.adminMapping, 'admin'),
             element: guarded(routes.adminMapping.handle, <MappingPreviewPage />),
             handle: routes.adminMapping.handle,
+          },
+          {
+            path: relativePath(routes.adminPipeline, 'admin'),
+            element: guarded(routes.adminPipeline.handle, <PipelinePage />),
+            handle: routes.adminPipeline.handle,
           },
           {
             path: relativePath(routes.adminJobs, 'admin'),

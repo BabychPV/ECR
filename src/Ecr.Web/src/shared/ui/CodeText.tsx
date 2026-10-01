@@ -27,7 +27,7 @@ import { showApiError, showDone } from './notify';
 const DefaultCopyLabel = 'Copy';
 const DefaultCopiedMessage = 'Copied';
 
-export interface CodeTextProps {
+interface CodeTextProps {
   /** Сам код. */
   readonly children: string;
 

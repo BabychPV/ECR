@@ -72,7 +72,7 @@ public static class DocumentVisibility
 
         await RequireVisibleAsync(access, profile, documentId, ct).ConfigureAwait(false);
 
-        if (profile.Has(permission))
+        if (PermissionCheck.IsGranted(profile, permission))
         {
             return;
         }

@@ -8,6 +8,7 @@ using Ecr.Application.Ports;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Entities.Integration;
+using Ecr.Domain.Enums;
 using Ecr.Domain.Errors;
 using Ecr.Domain.ValueObjects;
 using Ecr.Infrastructure.Persistence;
@@ -76,6 +77,88 @@ public sealed class IntegrationCellPatcher(
             return new IntegrationWriteResult(0, []);
         }
 
+        return await WriteAsync(
+                tableInstanceId,
+                periodKey,
+                [.. cells.Select(c => new PlannedCell(c.RowKey, c.ColumnDefId, c.Value))],
+                rowsOf: null,
+                ct)
+            .ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⛔ Той самий шлях, що й <see cref="ApplyIntegrationAsync"/> (HR-15): той
+    /// самий план, той самий відсів правок людини (<see cref="KeepManual"/>),
+    /// той самий обробник і повтор. Відмінностей дві, і обидві — від того, що
+    /// батч тут несе РІЗНІ події, а обробник відхиляє батч цілком:
+    /// <list type="bullet">
+    /// <item>значення, якого колонка не прийме (вид, тип, запис не з довідника
+    /// колонки), відсіюється ДО обробника в <see cref="IntegrationWriteResult.Rejected"/>
+    /// (<see cref="RejectedValuesAsync"/>) — інакше одна зіпсована подія
+    /// зупиняла б запис усіх;</item>
+    /// <item>рядок, який створили між читанням обробника і вставкою
+    /// (<c>UQ_TableRow_Key</c> → <c>ECR-ROW-0409</c> <c>rowKeyExists</c>), — теж
+    /// гонка, яку знімає перечитування (<see cref="IsCreatedMeanwhile"/>).</item>
+    /// </list>
+    /// </remarks>
+    /// <exception cref="ArgumentException">Ключ рядка не проходить <see cref="RowKey.Pattern"/>.</exception>
+    public async Task<IntegrationWriteResult> ApplyIntegrationRowsAsync(
+        long documentId,
+        long tableInstanceId,
+        PeriodKey periodKey,
+        IReadOnlyList<IntegrationRowUpsert> rows,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(rows);
+
+        // ⚠ Невалідний ключ — помилка викликача (`IntegrationRowUpsert.EventRowKey`
+        // такого не дає), а не дані: обробник упав би на ньому лише під час
+        // вставки, і разом із ним — увесь батч.
+        var invalid = rows.Where(r => !RowKey.TryCreate(r.RowKey, out _)).Select(r => r.RowKey).ToList();
+        if (invalid.Count > 0)
+        {
+            throw new ArgumentException($"Недопустимі ключі рядків: {string.Join(", ", invalid)}.", nameof(rows));
+        }
+
+        var cells = rows
+            .SelectMany(r => r.Cells.Select(c => new PlannedCell(r.RowKey, c.ColumnDefId, c.Value.Raw, c.Value.Kind)))
+            .ToList();
+
+        if (cells.Count == 0)
+        {
+            return new IntegrationWriteResult(0, []);
+        }
+
+        return await WriteAsync(tableInstanceId, periodKey, cells, new RowsOf(documentId), ct).ConfigureAwait(false);
+    }
+
+    /// <summary>Одне значення для запису — спільна форма обох методів порту.</summary>
+    /// <param name="RowKey">Рядок-адресат.</param>
+    /// <param name="ColumnDefId">Колонка-адресат.</param>
+    /// <param name="Value">Значення так, як його прийме <see cref="CellValueReader.Read"/>.</param>
+    /// <param name="Kind">Вид значення — лише для рядків (<see cref="ApplyIntegrationRowsAsync"/>).</param>
+    private sealed record PlannedCell(string RowKey, int ColumnDefId, object Value, IntegrationValueKind? Kind = null);
+
+    /// <summary>Запис рядків документа (<see cref="ApplyIntegrationRowsAsync"/>), а не комірок збору.</summary>
+    /// <param name="DocumentId">Документ — для меж періоду в перевірці чинності запису довідника.</param>
+    private sealed record RowsOf(long DocumentId);
+
+    /// <summary>
+    /// Спільне ядро запису: план за поточним станом, обробник, обмежений повтор.
+    /// </summary>
+    /// <param name="tableInstanceId">Екземпляр таблиці.</param>
+    /// <param name="periodKey">Період.</param>
+    /// <param name="cells">Заплановані значення.</param>
+    /// <param name="rowsOf">Рядки документа (<see cref="ApplyIntegrationRowsAsync"/>); <c>null</c> — комірки збору.</param>
+    /// <param name="ct">Токен скасування.</param>
+    private async Task<IntegrationWriteResult> WriteAsync(
+        long tableInstanceId,
+        PeriodKey periodKey,
+        IReadOnlyList<PlannedCell> cells,
+        RowsOf? rowsOf,
+        CancellationToken ct)
+    {
         // ⚠ Коди колонок беруться з опису таблиці, а не з мапінгу: мапінг
         // зберігає `ColumnDefId`, а шлях запису адресує КОДОМ. Переклад робимо
         // тут і в межах ЦІЄЇ таблиці — саме звуження до таблиці й було
@@ -99,11 +182,12 @@ public sealed class IntegrationCellPatcher(
 
         for (var attempt = 1; ; attempt++)
         {
-            var plan = await PlanAsync(tableInstanceId, periodKey, cells, columnById, ct).ConfigureAwait(false);
+            var plan = await PlanAsync(tableInstanceId, periodKey, cells, columnById, rowsOf, ct).ConfigureAwait(false);
+            var rejected = plan.Rejected.Count == 0 ? null : plan.Rejected;
 
             if (plan.Rows.Count == 0)
             {
-                return new IntegrationWriteResult(0, plan.Kept, plan.AwaitingConfirmation);
+                return new IntegrationWriteResult(0, plan.Kept, plan.AwaitingConfirmation, Rejected: rejected);
             }
 
             try
@@ -114,9 +198,9 @@ public sealed class IntegrationCellPatcher(
                         ct)
                     .ConfigureAwait(false);
 
-                return new IntegrationWriteResult(plan.Applied, plan.Kept, plan.AwaitingConfirmation);
+                return new IntegrationWriteResult(plan.Applied, plan.Kept, plan.AwaitingConfirmation, Rejected: rejected);
             }
-            catch (EcrException ex) when (IsRowRace(ex))
+            catch (EcrException ex) when (IsRowRace(ex) || (rowsOf is not null && IsCreatedMeanwhile(ex)))
             {
                 // ⚠ Відкинутий батч міг лишити в трекері контексту зміни, яких
                 // у базі вже немає (транзакцію запису відкочено), — наступна
@@ -129,14 +213,29 @@ public sealed class IntegrationCellPatcher(
                         0,
                         plan.Kept,
                         plan.AwaitingConfirmation,
-                        [.. plan.Rows.SelectMany(r => r.Cells.Select(c => $"{r.RowKey}:{c.ColumnCode}"))]);
+                        [.. plan.Rows.SelectMany(r => r.Cells.Select(c => $"{r.RowKey}:{c.ColumnCode}"))],
+                        rejected);
                 }
             }
         }
     }
 
     /// <summary>Те, що піде в обробник за одну спробу, і те, що лишено.</summary>
-    private sealed record WritePlan(List<PatchRow> Rows, List<string> Kept, int Applied, List<string> AwaitingConfirmation);
+    private sealed record WritePlan(
+        List<PatchRow> Rows, List<string> Kept, int Applied, List<string> AwaitingConfirmation, List<string> Rejected);
+
+    /// <summary>
+    /// Рядок, якого не було, створили між читанням обробника і вставкою:
+    /// <c>UQ_TableRow_Key</c> не пускає дубль, і <c>RowStore</c> дає
+    /// <c>ECR-ROW-0409</c> <c>rowKeyExists</c> (однина — один новий рядок у батчі).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Лише для рядків: для комірок збору повтор на цю відмову не вмикався
+    /// ніколи, і метод комірок поводиться як до A5a.
+    /// </remarks>
+    private static bool IsCreatedMeanwhile(EcrException ex)
+        => string.Equals(ex.ErrorCode, ErrorCodes.RowDuplicate, StringComparison.Ordinal)
+           && ex.Details?.GetValueOrDefault("messageKey") is "err.ECR-ROW-0409.rowKeyExists";
 
     /// <summary>
     /// Чи це гонка за рядок, яку знімає перечитування: версію змінили
@@ -160,42 +259,18 @@ public sealed class IntegrationCellPatcher(
     private async Task<WritePlan> PlanAsync(
         long tableInstanceId,
         PeriodKey periodKey,
-        IReadOnlyList<IntegrationCellValue> cells,
+        IReadOnlyList<PlannedCell> cells,
         Dictionary<int, ColumnDef> columnById,
+        RowsOf? rowsOf,
         CancellationToken ct)
     {
         var existing = (await rowStore.GetRowsAsync(tableInstanceId, periodKey, ct).ConfigureAwait(false))
             .ToDictionary(r => r.RowKey, StringComparer.Ordinal);
 
-        // ⛔ Комірки, що їх правила людина, не чіпаємо (`D-118`). Ознака —
-        // походження останньої зміни в журналі комірок: `UserEdit` означає
-        // свідоме рішення, і інтеграція не має права його стерти.
         var manual = await ManualCellsAsync(tableInstanceId, periodKey, ct).ConfigureAwait(false);
 
-        var candidates = new List<(IntegrationCellValue Cell, ColumnDef Column)>();
         var kept = new List<string>();
-
-        foreach (var cell in cells)
-        {
-            if (!columnById.TryGetValue(cell.ColumnDefId, out var column))
-            {
-                // Колонки немає серед живих колонок цієї таблиці. Мапінги
-                // чужих таблиць сюди вже не доходять (задача звужує їх до
-                // таблиці екземпляра, суміжне D16-03), тож лишається
-                // видалена колонка — помилка конфігурації, і мовчати про
-                // неї не можна, але й падати посеред перенесення теж.
-                kept.Add($"{cell.RowKey}:columnDef={cell.ColumnDefId}");
-                continue;
-            }
-
-            if (manual.Contains($"{cell.RowKey}:{column.Code}"))
-            {
-                kept.Add($"{cell.RowKey}:{column.Code}");
-                continue;
-            }
-
-            candidates.Add((cell, column));
-        }
+        var candidates = KeepManual(cells, columnById, manual, kept);
 
         var current = await CurrentValuesAsync(periodKey, candidates, existing, ct).ConfigureAwait(false);
 
@@ -203,6 +278,15 @@ public sealed class IntegrationCellPatcher(
             .Where(c => !existing.TryGetValue(c.Cell.RowKey, out var row)
                         || !Unchanged(c.Cell, c.Column, row.Id, periodKey, current))
             .ToList();
+
+        var rejected = rowsOf is null
+            ? new HashSet<string>(StringComparer.Ordinal)
+            : await RejectedValuesAsync(rowsOf.DocumentId, periodKey, changed, ct).ConfigureAwait(false);
+
+        if (rejected.Count > 0)
+        {
+            changed = [.. changed.Where(c => !rejected.Contains($"{c.Cell.RowKey}:{c.Column.Code}"))];
+        }
 
         var awaiting = await AwaitingConfirmationAsync(tableInstanceId, periodKey, changed, existing, ct)
             .ConfigureAwait(false);
@@ -231,7 +315,151 @@ public sealed class IntegrationCellPatcher(
             applied += patchCells.Count;
         }
 
-        return new WritePlan(rows, kept, applied, [.. awaiting.Order(StringComparer.Ordinal)]);
+        return new WritePlan(
+            rows,
+            kept,
+            applied,
+            [.. awaiting.Order(StringComparer.Ordinal)],
+            [.. rejected.Order(StringComparer.Ordinal)]);
+    }
+
+    /// <summary>
+    /// Змінені значення рядків, яких колонка не прийме: <c>rowKey:columnCode</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Запис довідника має належати довіднику КОЛОНКИ і бути в обігу — ті
+    /// самі умови, якими обробник відхиляє батч (<c>C7</c>, <c>ECR-CELL-4223</c>:
+    /// чужий, відсутній, видалений, вимкнений, нечинний на останній день
+    /// періоду), і та сама проєкція (<see cref="RegistryStore.FindEntryStandingsAsync"/>).
+    /// Правила не підміняються: обробник перевірить ще раз; тут відсіюється
+    /// лише те, на чому він відхилив би ВЕСЬ батч подій через одну.
+    ///
+    /// ⚠ Лише змінені значення: те саме, що вже стоїть у комірці, обробник
+    /// пропускає без перевірки (<c>C7</c>), а до нього воно й не доходить.
+    ///
+    /// ⚠ Вид значення й тип колонки: <see cref="IntegrationValueKind.Lookup"/> —
+    /// лише в колонку <c>Lookup</c> і навпаки (Id запису й число однаково цілі,
+    /// і в числовій колонці Id записався б мовчки); решту розбирає
+    /// <see cref="CellValueReader.Read"/> — той самий розбір, що в обробнику.
+    /// </remarks>
+    private async Task<HashSet<string>> RejectedValuesAsync(
+        long documentId,
+        PeriodKey periodKey,
+        List<(PlannedCell Cell, ColumnDef Column)> changed,
+        CancellationToken ct)
+    {
+        var rejected = new HashSet<string>(StringComparer.Ordinal);
+        var lookups = new List<(string Address, long EntryId, int? RegistryDefId)>();
+
+        foreach (var (cell, column) in changed)
+        {
+            var address = $"{cell.RowKey}:{column.Code}";
+
+            var isLookup = cell.Kind == IntegrationValueKind.Lookup;
+
+            if (isLookup != (column.DataType == CellDataType.Lookup) || !Readable(cell, column))
+            {
+                rejected.Add(address);
+                continue;
+            }
+
+            if (isLookup)
+            {
+                lookups.Add((address, (long)cell.Value, column.LookupRegistryDefId));
+            }
+        }
+
+        if (lookups.Count == 0)
+        {
+            return rejected;
+        }
+
+        var standings = (await new RegistryStore(db)
+                .FindEntryStandingsAsync([.. lookups.Select(l => l.EntryId).Distinct()], ct)
+                .ConfigureAwait(false))
+            .ToDictionary(s => s.Id);
+
+        // Дата чинності — останній день періоду: D-158, як в обробнику, пікері й OrphanScanner.
+        var bounds = await new PeriodStore(db)
+            .FindPeriodBoundsAsync(documentId, periodKey.Value, ct)
+            .ConfigureAwait(false);
+
+        foreach (var (address, entryId, registryDefId) in lookups)
+        {
+            if (!standings.TryGetValue(entryId, out var standing)
+                || standing.RegistryDefId != registryDefId
+                || standing.IsDeleted
+                || !standing.IsActive
+                || (bounds is { } period && !standing.IsValidOn(period.PeriodEnd)))
+            {
+                rejected.Add(address);
+            }
+        }
+
+        return rejected;
+    }
+
+    /// <summary>Чи розбере колонка значення (<see cref="CellValueReader.Read"/>).</summary>
+    private static bool Readable(PlannedCell cell, ColumnDef column)
+    {
+        try
+        {
+            _ = CellValueReader.Read(cell.Value, column);
+            return true;
+        }
+        catch (EcrException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Відсів того, що лишається за людиною (<c>D-118</c>): повертає кандидатів
+    /// на запис, а лишене дописує в <paramref name="kept"/> (<c>rowKey:columnCode</c>).
+    /// </summary>
+    /// <param name="cells">Значення для запису.</param>
+    /// <param name="columnById">Живі колонки таблиці.</param>
+    /// <param name="manual">Комірки з останньою правкою людини (<see cref="ManualCellsAsync"/>).</param>
+    /// <param name="kept">Лишене за людиною.</param>
+    /// <remarks>
+    /// ⛔ Один помічник на обидва методи порту — і комірки збору, і рядки
+    /// подій. Два відсіви одного правила розійшлися б так само, як розійшлася
+    /// адресація двох шляхів запису (<c>A7-27</c>).
+    /// </remarks>
+    private static List<(PlannedCell Cell, ColumnDef Column)> KeepManual(
+        IReadOnlyList<PlannedCell> cells,
+        Dictionary<int, ColumnDef> columnById,
+        HashSet<string> manual,
+        List<string> kept)
+    {
+        var candidates = new List<(PlannedCell Cell, ColumnDef Column)>();
+
+        foreach (var cell in cells)
+        {
+            if (!columnById.TryGetValue(cell.ColumnDefId, out var column))
+            {
+                // Колонки немає серед живих колонок цієї таблиці. Мапінги
+                // чужих таблиць сюди вже не доходять (задача звужує їх до
+                // таблиці екземпляра, суміжне D16-03), тож лишається
+                // видалена колонка — помилка конфігурації, і мовчати про
+                // неї не можна, але й падати посеред перенесення теж.
+                kept.Add($"{cell.RowKey}:columnDef={cell.ColumnDefId}");
+                continue;
+            }
+
+            // ⛔ Комірки, що їх правила людина, не чіпаємо (`D-118`). Ознака —
+            // походження останньої зміни в журналі комірок: `UserEdit` означає
+            // свідоме рішення, і інтеграція не має права його стерти.
+            if (manual.Contains($"{cell.RowKey}:{column.Code}"))
+            {
+                kept.Add($"{cell.RowKey}:{column.Code}");
+                continue;
+            }
+
+            candidates.Add((cell, column));
+        }
+
+        return candidates;
     }
 
     /// <summary>
@@ -257,7 +485,7 @@ public sealed class IntegrationCellPatcher(
     private async Task<HashSet<string>> AwaitingConfirmationAsync(
         long tableInstanceId,
         PeriodKey periodKey,
-        List<(IntegrationCellValue Cell, ColumnDef Column)> changed,
+        List<(PlannedCell Cell, ColumnDef Column)> changed,
         Dictionary<string, RowState> existing,
         CancellationToken ct)
     {
@@ -320,7 +548,7 @@ public sealed class IntegrationCellPatcher(
     /// <summary>Чинні значення комірок-кандидатів у наявних рядках.</summary>
     private async Task<IReadOnlyDictionary<CellAddress, CellValueData>> CurrentValuesAsync(
         PeriodKey periodKey,
-        List<(IntegrationCellValue Cell, ColumnDef Column)> candidates,
+        List<(PlannedCell Cell, ColumnDef Column)> candidates,
         Dictionary<string, RowState> existing,
         CancellationToken ct)
     {
@@ -345,7 +573,7 @@ public sealed class IntegrationCellPatcher(
     /// мовчазний пропуск тут.
     /// </remarks>
     private static bool Unchanged(
-        IntegrationCellValue cell,
+        PlannedCell cell,
         ColumnDef column,
         long rowId,
         PeriodKey periodKey,

@@ -27,7 +27,7 @@ public static class ProjectBuilder
     /// <summary>Проєкт на повний 2026 рік.</summary>
     public static Project Project(
         PeriodKind kind = PeriodKind.Monthly,
-        string timeZoneId = "Asia/Almaty",
+        string timeZoneId = "Asia/Atyrau",
         int id = 10)
     {
         var project = new Project(

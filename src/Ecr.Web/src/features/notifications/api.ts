@@ -21,10 +21,10 @@ export type NotificationChannelSettings = components['schemas']['NotificationCha
  * (`notificationChannelTransportFromConfiguration`). Не надсилати.
  */
 export type NotificationChannelSettingsInput = components['schemas']['NotificationChannelSettingsInput'];
-export type CreateNotificationChannelBody = components['schemas']['CreateNotificationChannelRequest'];
-export type UpdateNotificationChannelBody = components['schemas']['UpdateNotificationChannelRequest'];
+type CreateNotificationChannelBody = components['schemas']['CreateNotificationChannelRequest'];
+type UpdateNotificationChannelBody = components['schemas']['UpdateNotificationChannelRequest'];
 /** `ok: false` — відповідь каналу, а не помилка запиту; `messageKey` — ключ каталогу, якщо причина відома. */
-export type NotificationTestResult = components['schemas']['NotificationTestResult'];
+type NotificationTestResult = components['schemas']['NotificationTestResult'];
 
 /*
  * ⛔ Адреси записані повністю, а не збираються з помічника — той самий прийом,
@@ -113,10 +113,10 @@ export function replaceNotificationRules(rules: NotificationRule[]): Promise<Not
 }
 
 /** Підсумок спроби доставки — рівно значення переліку сервера. */
-export type NotificationDeliveryStatus = NonNullable<NotificationDelivery['status']>;
+type NotificationDeliveryStatus = NonNullable<NotificationDelivery['status']>;
 
 /** Необов'язкове звуження журналу; поле без значення — «будь-яке». */
-export interface NotificationDeliveryFilter {
+interface NotificationDeliveryFilter {
   channelId?: number;
   status?: NotificationDeliveryStatus;
 }

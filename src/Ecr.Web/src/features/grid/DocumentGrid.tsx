@@ -17,6 +17,7 @@ import type {
 } from '@/api/types';
 import { useColumnWidths } from '@/features/preferences/columnWidthsSync';
 import { cellAppearanceClassOf, cellAppearanceOf } from './cellAppearance';
+import { cellFormatOf, withCellFormat } from './conditionalAppearance';
 import { cellDisplay, cellText, editorValueOf, isNumericColumn, sameCellValue } from './cellValue';
 import { parseClipboard, planPaste, toClipboard, type PasteRejection } from './clipboard';
 import { captureEdit, coerce, revertsToSaved, valueOf, withKnownVersions } from './edits';
@@ -70,7 +71,15 @@ import {
   type GridSelection,
 } from './selection';
 import { publishFocus } from './focusStore';
+import {
+  NavigationHighlightMs,
+  cellCoordinateOf,
+  completeCellNavigation,
+  revealGridCell,
+  type CellNavigationRequest,
+} from './cellNavigation';
 import { GridFormulaBar } from './GridFormulaBar';
+import { useOutOfWindowMarks } from './outOfWindowMarks';
 import {
   columnTotals,
   isTotalsRow,
@@ -118,7 +127,7 @@ function periodEndDateIso(periodKey: number): string | null {
 }
 
 /** Властивості grid. */
-export interface DocumentGridProps {
+interface DocumentGridProps {
   /** Документ. */
   documentId: number;
   /** Екземпляр таблиці. */
@@ -142,6 +151,14 @@ export interface DocumentGridProps {
 
   /** Стеля кількості рядків; `null` — без стелі. */
   maxDynamicRows: number | null;
+
+  /**
+   * Запит переходу до комірки цієї таблиці (`ФВ-5.6`); `null` — немає.
+   *
+   * ⚠ Приходить від `SheetTables` лише ЦІЛЬОВІЙ сітці: решта сіток аркуша не
+   * перемальовуються від кліку по зауваженню чужої таблиці.
+   */
+  navigateTo?: CellNavigationRequest | null;
 }
 
 /** Рядок у моделі grid: значення за кодами колонок плюс службовий ключ. */
@@ -284,6 +301,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     readOnly,
     allowsDynamicRows,
     maxDynamicRows,
+    navigateTo = null,
   } = props;
 
   const slice = useQuery({
@@ -670,6 +688,15 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
   // або виправлено.
   const rejections = usePendingRejections(tableInstanceId, periodKey);
 
+  // ⚠ `ФВ-2.16`: комірки, які сервер записав за `Warn` поза вікном доступу
+  // (`PatchCellsResponse.outOfWindow`, `outOfWindowMarks.ts`), і ті, що сервер
+  // пам'ятає з журналу (`TableSliceDto.outOfWindowCells`) — після F5 теж.
+  const outOfWindow = useOutOfWindowMarks(
+    tableInstanceId,
+    periodKey,
+    slice.data?.outOfWindowCells,
+  );
+
   // ⚠ Лічильник змін історії. Стек живе в `ref` — інакше кожна правка
   // перестворювала б його і губила глибину; але тоді React не знає, що
   // «можна скасувати» змінилося, і кнопки лишалися б назавжди сірими.
@@ -730,6 +757,16 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
   );
 
   const data = slice.data;
+
+  /**
+   * Підсвічена ціль переходу від зауваження (`ФВ-5.6`).
+   *
+   * ⚠ Разом із номером запиту: повторний перехід до ТІЄЇ САМОЇ комірки має
+   * наново запустити і підсвітку, і її таймер — інакше другий клік гасив би
+   * підсвітку за залишком першого.
+   */
+  const [navigated, setNavigated] = useState<{ key: string; seq: number } | null>(null);
+  const navigatedCell = navigated?.key ?? null;
 
   // ⚠ Позначки клієнта — окремо від зрізу: сервер не знає ні про незбережені
   // правки, ні про те, що значення округлилося при вставці саме тут.
@@ -975,6 +1012,8 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
             totals,
             lookupPending,
             units.data ?? null,
+            navigatedCell,
+            outOfWindow,
           ),
     [
       data,
@@ -987,6 +1026,8 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
       totals,
       lookupPending,
       units.data,
+      navigatedCell,
+      outOfWindow,
     ],
   );
 
@@ -1693,10 +1734,12 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
   const rowSize = useRowHeight();
 
   const gridListenersCleanup = useRef<(() => void)[]>([]);
+  const gridContainer = useRef<HTMLDivElement | null>(null);
   const gridContainerRef = useCallback(
     (node: HTMLDivElement | null) => {
       for (const cleanup of gridListenersCleanup.current) cleanup();
       gridListenersCleanup.current = [];
+      gridContainer.current = node;
 
       if (node === null) return;
 
@@ -1717,6 +1760,49 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     },
     [tableInstanceId, periodKey],
   );
+
+  /*
+   * ⛔ `ФВ-5.6`: перехід від зауваження перевірки до комірки. Чекає ЗРІЗУ, а не
+   * лише монтування: до його приходу немає ні рядків, щоб знайти `rowKey`, ні
+   * самої `revo-grid` (вона рендериться всередині `AsyncBoundary`).
+   *
+   * ⚠ Рядка в зрізі немає (видалений динамічний рядок, зауваження старішої
+   * перевірки) — перехід завершується тим, що вже зроблено: `SheetTables`
+   * прокрутив до таблиці. Вигадувати «найближчий» рядок — гірше, ніж чесно
+   * лишитися на таблиці.
+   */
+  useEffect(() => {
+    if (navigateTo === null || navigateTo.rowKey === null || data === undefined) return;
+
+    const node = gridContainer.current;
+    if (node === null) return;
+
+    const request = navigateTo;
+    const labeled = hasRowLabels(data);
+    const coordinate = cellCoordinateOf(data, labeled, navigateTo.rowKey, navigateTo.columnCode);
+
+    if (coordinate === null) {
+      completeCellNavigation(request.seq);
+      return;
+    }
+
+    const column = data.columns[dataColumnIndexOf(coordinate.x, data)];
+    if (column !== undefined) {
+      setNavigated({ key: cellKey(navigateTo.rowKey, column.code), seq: request.seq });
+    }
+
+    void revealGridCell(node, coordinate).finally(() => completeCellNavigation(request.seq));
+  }, [navigateTo, data]);
+
+  // ⚠ Таймер окремо від переходу: запит завершується одразу після фокуса, і
+  // прибирання ефекту переходу гасило б підсвітку ще до того, як її побачать.
+  useEffect(() => {
+    if (navigated === null) return;
+
+    const timer = setTimeout(() => setNavigated(null), NavigationHighlightMs);
+
+    return () => clearTimeout(timer);
+  }, [navigated]);
 
   return (
     /*
@@ -2107,6 +2193,13 @@ export function gridColumns(
 
   // ⛔ `R-01`: перелік одиниць для колонок `Unit`; `null` — ще не приїхав.
   units: readonly UnitRef[] | null = null,
+
+  // ⛔ `ФВ-5.6`: комірка, до якої щойно перейшли від зауваження перевірки
+  // (`cellNavigation.ts`); `null` — підсвічувати нічого.
+  navigatedCell: string | null = null,
+
+  // ⛔ `ФВ-2.16`, `D-239`: комірки, записані за `Warn` поза вікном доступу.
+  outOfWindow: ReadonlySet<string> = new Set(),
 ): ColumnRegular[] {
   // ⚠ Тип оголошений ЯВНО, а не виведений із `map`. Без нього лямбди
   // всередині (`readonly`, `cellProperties`, `cellTemplate`) втрачають
@@ -2317,16 +2410,33 @@ export function gridColumns(
         const saveErrorMessage = saveErrorByCell.get(key) ?? null;
         const saveErrorClass = saveErrorMessage === null ? null : 'ecr-cell-save-error';
 
+        // ⛔ `ФВ-5.6`: підсвітка цілі переходу — ще один маркер ПОВЕРХ стану,
+        // не заміна: комірка з помилкою збереження лишається такою і після
+        // переходу до неї.
+        const navigationClass = navigatedCell === key ? 'ecr-cell-nav-target' : null;
+
+        // ⛔ `ФВ-2.16`: значок «правка поза вікном» — теж маркер ПОВЕРХ стану.
+        // Причина продубльована текстом у `title`, не лише знаком.
+        const isOutOfWindow = outOfWindow.has(key);
+        const outOfWindowClass = isOutOfWindow ? 'ecr-cell-out-of-window' : null;
+        const outOfWindowHint = isOutOfWindow ? t('grid.outOfWindowHint') : null;
+
         // ⛔ Директива registry-lookup / cell-style, PR B2: оформлення
         // автора шаблону — ШАР ПІД будь-яким станом (`cellStateOf` вище),
         // не заміна: рахується ЗАВЖДИ, незалежно від того, чи спрацював
         // хоч один з інших маркерів, — інакше жирна колонка без стилю
         // фарбувалась би, лише щойно комірку зроблено `dirty`.
-        const appearance = cellAppearanceOf(column.style);
+        //
+        // ⛔ `ФВ-2.7`: результат правил умовного форматування (рахує сервер,
+        // `slice.cellFormats`) — шар ПОВЕРХ стилю автора, тим самим шляхом
+        // (`conditionalAppearance.ts`).
+        const conditional = cellFormatOf(slice, key);
+        const style = conditional === null ? column.style : withCellFormat(column.style, conditional);
+        const appearance = cellAppearanceOf(style);
 
         // ⛔ `X-10`: колір і заливка автора — змінними й класами, які читає
         // `cellEditors.css`, а не inline-кольором (коментар `cellAppearanceOf`).
-        const appearanceClass = cellAppearanceClassOf(column.style);
+        const appearanceClass = cellAppearanceClassOf(style);
 
         /*
          * ⛔ `U-05`: повне значення має бути ДОСТУПНЕ, навіть коли воно
@@ -2347,7 +2457,14 @@ export function gridColumns(
         const fullValueHint =
           numericClass === null ? null : cellDisplay((model as GridRow)[column.code], column);
 
-        if (state === null && requiredInputClass === null && saveErrorClass === null && appearance === undefined) {
+        if (
+          state === null &&
+          requiredInputClass === null &&
+          saveErrorClass === null &&
+          navigationClass === null &&
+          outOfWindowClass === null &&
+          appearance === undefined
+        ) {
           return numericClass === null
             ? {}
             : {
@@ -2370,7 +2487,13 @@ export function gridColumns(
 
         // Стан доступний і ТЕКСТОМ, не лише кольором/формою: причина заборони
         // чи незаповненого входу вже є на сервері — читалка має її почути.
-        const hint = [decision.hint, submittedHint, requiredInputMessage, saveErrorMessage]
+        const hint = [
+          decision.hint,
+          submittedHint,
+          requiredInputMessage,
+          saveErrorMessage,
+          outOfWindowHint,
+        ]
           .filter((part) => !!part)
           .join(' ');
 
@@ -2382,6 +2505,8 @@ export function gridColumns(
             state === null ? 'ecr-cell' : cellStateClass(state),
             requiredInputClass,
             saveErrorClass,
+            navigationClass,
+            outOfWindowClass,
             numericClass,
             appearanceClass,
           ]
@@ -2391,6 +2516,11 @@ export function gridColumns(
           // ⚠ Атрибут окремо від класу: тест читає саме його і тому доводить
           // розрізнення станів, не залежачи від жодного кольору (`ФВ-14.18`).
           ...(state === null ? {} : { 'data-cell-state': state }),
+          ...(isOutOfWindow ? { 'data-out-of-window': 'true' } : {}),
+
+          // ⚠ Що комірку пофарбувало правило — атрибутом, не лише кольором: тест
+          // і людина з інструментами розробника бачать причину підсвітки.
+          ...(conditional === null ? {} : { 'data-conditional-format': 'true' }),
 
           // ⚠ Підказка СТАНУ має першість над підказкою ЗНАЧЕННЯ, і це
           // вибір, а не випадок: `title` на елементі один, а «сервер

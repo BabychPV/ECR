@@ -180,16 +180,61 @@
     одноразових стендів цей скрипт не ставить ніколи (сторож в
     Ecr.Architecture.Tests).
 
+.PARAMETER HttpsThumbprint
+    ⛔ D14-08/R-01: ТРАНСПОРТ — рівно один із трьох параметрів (`-HttpsThumbprint`,
+    `-BehindHttpsProxy`, `-AllowHttp`); жодного з них — зупинка з поясненням, а не мовчазний HTTP.
+    Відбиток сертифіката HTTPS у `Cert:\LocalMachine\My` (його видає PKI замовника, скрипт його не
+    генерує). Перевіряється на кроці 1 — ДО встановлення: сертифікат є, має закритий ключ (`HasPrivateKey`),
+    чинний за датами (спливає менш ніж за 30 днів — попередження). Пишеться в Environment служби EcrApi:
+    `ASPNETCORE_URLS=https://+:<AppPort>` і `ECR_Transport__Https__CertificateThumbprint` — застосунок сам
+    завантажує сертифікат зі сховища за відбитком (`HttpsTransport`, Program.cs) і віддає його Kestrel;
+    `ECR_Auth__RequireHttps=true` (cookie сеансу Secure). HTTPS слухає на `-AppPort` — цей самий порт MSI
+    відкриває в брандмауері (APP_PORT); для звичного 443 задай `-AppPort 443`. Обліковому запису служби
+    (`-ServiceAccount`) потрібне право читання закритого ключа (certlm.msc → Усі завдання → Керування закритими
+    ключами) — скрипт його не надає. Відбиток у журнал не друкується (лише суб'єкт і строк дії). Крок 7
+    перевіряє, що Kestrel віддає САМЕ цей сертифікат. Параметр потрібен на КОЖНОМУ оновленні, як і решта
+    параметрів Environment.
+
+.PARAMETER HttpRedirectPort
+    Лише з `-HttpsThumbprint`. Додатковий http-порт, що перенаправляє (308) на HTTPS-порт `-AppPort`:
+    `ASPNETCORE_URLS=https://+:<AppPort>;http://+:<HttpRedirectPort>` і `ECR_Transport__Https__Port=<AppPort>`.
+    ⚠ MSI відкриває в брандмауері лише APP_PORT — правило для цього порту адміністратор додає сам
+    (`New-NetFirewallRule`, install-guide §HTTPS); скрипт про це попереджає. Без параметра — лише HTTPS-порт.
+
+.PARAMETER BehindHttpsProxy
+    TLS завершується ПЕРЕД застосунком (зворотний проксі / IIS ARR / балансувальник): Kestrel слухає http на
+    `-AppPort`, `ECR_Auth__RequireHttps=true` лишається (cookie Secure — браузер говорить із проксі по HTTPS,
+    тож вхід працює). ⚠ Застосунок не довіряє `X-Forwarded-*` (UseForwardedHeaders не вмикається): HSTS і
+    перенаправлення http→https — на проксі; Windows-автентифікація (Negotiate) за проксі зазвичай не працює. Порт
+    Kestrel варто закрити брандмауером для всіх, крім проксі.
+
+.PARAMETER AllowHttp
+    Лише для СТЕНДА: HTTP без HTTPS. `ECR_Auth__RequireHttps=false` — cookie сеансу НЕ Secure, пароль і сеанс
+    ідуть відкритим текстом. Скрипт пише попередження в журнал розгортання, застосунок — попередження на
+    старті й жовтий `transport` на `/health/ready` та `/admin/health`. На майданчику замовника не
+    використовувати.
+
 .PARAMETER AppPort
-    Порт Kestrel і правило брандмауера. За замовчуванням 5000.
+    Порт Kestrel і правило брандмауера (HTTPS-порт із `-HttpsThumbprint`, http-порт в інших режимах).
+    За замовчуванням 5000.
 
 .PARAMETER ConfigValues
     Шлях до JSON-файлу з НЕсекретними значеннями appsettings.Production.json
     цього майданчика (наприклад, Logging:File:Directory; ⚠ не
-    Telemetry:OtlpEndpoint — експорту OTLP у цій версії немає) — НІКОЛИ рядок
+    Telemetry:OtlpEndpoint — для телеметрії є -TelemetryOtlpEndpoint) — НІКОЛИ рядок
     підключення чи інший секрет, для нього -ConnectionString (D-11).
     Записується ЛИШЕ якщо цільовий файл ще заповнювач (порожній об'єкт) —
     інакше крок 5 попереджає і нічого не чіпає.
+
+.PARAMETER TelemetryOtlpEndpoint
+    Адреса OTLP-колектора метрик (http:// або https://). Скрипт пише
+    ECR_Telemetry__Enabled=true і ECR_Telemetry__OtlpEndpoint у Environment
+    служб EcrApi і (якщо є) EcrWorker: без цього воркер перерахунку не
+    експортує метрик (worker.settings.json у розгортанні без секції Telemetry).
+    Не задано — телеметрію не чіпаємо.
+
+.PARAMETER TelemetryOtlpProtocol
+    Grpc (типово в застосунку) або HttpProtobuf; лише разом із -TelemetryOtlpEndpoint.
 
 .PARAMETER MsiPath
     Готовий Ecr.msi. Якщо не задано — скрипт сам викликає
@@ -250,7 +295,8 @@
     # Побачити повний план, нічого не роблячи в системі
     .\tools\deploy-ecr.ps1 -SqlInstance NCATUATV12 -Database ECR `
         -ServiceAccount 'DOMAIN\ecr-svc$' -Version 1.0.0 `
-        -DataProtectionThumbprint '<відбиток з Cert:\LocalMachine\My>' -WhatIf
+        -DataProtectionThumbprint '<відбиток з Cert:\LocalMachine\My>' `
+        -HttpsThumbprint '<відбиток сертифіката HTTPS>' -AppPort 443 -WhatIf
 
 .EXAMPLE
     # Перше розгортання на чистому сервері (порожня база — потрібен bootstrap)
@@ -259,7 +305,13 @@
     .\tools\deploy-ecr.ps1 -SqlInstance NCATUATV12 -Database ECR `
         -ServiceAccount 'DOMAIN\ecr-svc$' -Version 1.0.0 -ConnectionString $cs `
         -DataProtectionThumbprint '<відбиток з Cert:\LocalMachine\My>' `
+        -HttpsThumbprint '<відбиток сертифіката HTTPS>' -AppPort 443 `
         -BootstrapPassword $bp -ConfigValues .\uat-config.json -FirstDeployment
+
+.EXAMPLE
+    # Стенд без сертифіката (явно і з попередженням): HTTP, cookie не Secure
+    .\tools\deploy-ecr.ps1 -SqlInstance localhost -Database ECR -MsiPath .\Ecr.msi `
+        -DataProtectionThumbprint '<відбиток>' -AllowHttp -AllowExpress
 
 .NOTES
     Не переписує tools/build-msi.ps1, tools/sign-msi.ps1,
@@ -286,6 +338,10 @@ param(
     [System.Security.SecureString] $ConnectionString,
     [System.Security.SecureString] $BootstrapPassword,
     [string] $DataProtectionThumbprint,
+    [string] $HttpsThumbprint,
+    [ValidateRange(0, 65535)] [int] $HttpRedirectPort = 0,
+    [switch] $BehindHttpsProxy,
+    [switch] $AllowHttp,
     [int] $AppPort = 5000,
     [string] $ConfigValues,
     [string] $MsiPath,
@@ -296,6 +352,8 @@ param(
     [ValidateRange(10, 3600)] [int] $ReadyTimeoutSeconds = 180,
     [switch] $EnableWorker,
     [switch] $DisableWorker,
+    [string] $TelemetryOtlpEndpoint,
+    [ValidateSet('Grpc', 'HttpProtobuf')] [string] $TelemetryOtlpProtocol,
     [ValidateSet('Auto', 'Standard', 'Enterprise')] [string] $EditionMode,
     [switch] $AllowExpress
 )
@@ -668,6 +726,32 @@ function Resolve-WorkerDeployment {
     return [pscustomobject]@{ Enabled = $true; Reason = 'типово (I2-2)' }
 }
 
+# ФВ-12.7 / НФ-8.6.2 (чиста функція): змінні середовища телеметрії для служб.
+# Без -TelemetryOtlpEndpoint — порожній набір (нічого не чіпаємо). Адреса — лише
+# абсолютна http(s): застосунок відхиляє іншу на старті (EcrConfigurationValidation),
+# а тут краще зупинитись до запису в реєстр, ніж покласти службу.
+function Resolve-TelemetryEnvironment {
+    param(
+        [string] $OtlpEndpoint,
+        [string] $OtlpProtocol
+    )
+
+    $set = [ordered]@{}
+    if ([string]::IsNullOrWhiteSpace($OtlpEndpoint)) {
+        if ($OtlpProtocol) { throw '-TelemetryOtlpProtocol без -TelemetryOtlpEndpoint не має сенсу.' }
+        return [pscustomobject]@{ Set = $set }
+    }
+
+    $uri = $null
+    if (-not [Uri]::TryCreate($OtlpEndpoint.Trim(), [UriKind]::Absolute, [ref] $uri) -or $uri.Scheme -notin 'http', 'https') {
+        throw "-TelemetryOtlpEndpoint має бути абсолютною адресою http(s)://..., отримано '$OtlpEndpoint'."
+    }
+    $set['ECR_Telemetry__Enabled'] = 'true'
+    $set['ECR_Telemetry__OtlpEndpoint'] = $uri.AbsoluteUri
+    if ($OtlpProtocol) { $set['ECR_Telemetry__OtlpProtocol'] = $OtlpProtocol }
+    return [pscustomobject]@{ Set = $set }
+}
+
 # ⛔ I2-2 (чиста функція): режим перерахунку Api визначається ФАКТОМ виконавця,
 # а не лише конфігом. Api з Executor = Worker лейн перерахунку НЕ бере
 # (JobLaneMap.ApiLanes), тож Worker без служби = перерахунок без виконавця.
@@ -714,6 +798,26 @@ function Resolve-JobExecutionConfig {
     return [pscustomobject]@{ Set = $set; Remove = [string[]] $remove; Warnings = [string[]] $warnings }
 }
 
+# ⛔ Чиста функція: чи потрібен .NET SDK цьому запуску. Його кличуть у двох місцях —
+# `build-msi.ps1` (коли -MsiPath не задано) і `dotnet ef migrations script` (крок 2,
+# коли схема не з пакета й немає -SkipSchema). Більше ніде: пакований запуск із
+# готовим MSI обходиться без SDK (install-guide §2.1).
+function Get-DotnetRequirement {
+    param(
+        [Parameter(Mandatory)] [bool] $HasMsiPath,
+        [Parameter(Mandatory)] [bool] $SkipSchema,
+        [Parameter(Mandatory)] [bool] $IsPackagedSchema
+    )
+
+    $reasons = @()
+    if (-not $HasMsiPath) { $reasons += 'build-msi.ps1 (-MsiPath не задано)' }
+    if (-not $SkipSchema -and -not $IsPackagedSchema) {
+        $reasons += 'dotnet ef migrations script (схема не з пакета, без -SkipSchema)'
+    }
+
+    return [pscustomobject]@{ Required = ($reasons.Count -gt 0); Reasons = [string[]] $reasons }
+}
+
 # ⛔ S11: відбиток у тому вигляді, в якому його шукає застосунок
 # (`AuthenticationSetup.FindCertificate`): без пробілів і нерозривних пробілів —
 # з вікна сертифіката Windows його копіюють групами по два символи.
@@ -749,6 +853,200 @@ function Get-DataProtectionCertificateProblem {
     return $null
 }
 
+# ⛔ D14-08/R-01 (чиста функція): сертифікат HTTPS за відбитком. Провайдер
+# ін'єктується (на живому скрипті — Cert:\LocalMachine\My, у тесті — фікстури),
+# тож рішення перевіряється без сховища Windows. Вхід — нормалізований відбиток
+# (ConvertTo-NormalizedThumbprint), провайдер `{ param($thumbprint) … }` (порожньо —
+# не знайдено) і поточний час. Вихід — Code ('Ok' або код відмови), Problem (текст
+# відмови або $null), Warning (текст або $null), Certificate. Відбиток у тексти НЕ
+# потрапляє: журнал розгортання його зайвий раз не друкує.
+function Get-HttpsCertificateProblem {
+    param(
+        [string] $Thumbprint,
+        [Parameter(Mandatory)] [scriptblock] $Provider,
+        [Parameter(Mandatory)] [datetime] $Now
+    )
+
+    function New-CertificateVerdict([string] $Code, $Problem, $Warning, $Certificate) {
+        return [pscustomobject]@{ Code = $Code; Problem = $Problem; Warning = $Warning; Certificate = $Certificate }
+    }
+
+    if ($Thumbprint -notmatch '^[0-9A-Fa-f]{40}$') {
+        return New-CertificateVerdict 'BadFormat' ("-HttpsThumbprint: очікується відбиток із 40 шістнадцяткових символів " +
+            "(SHA-1, як у вікні сертифіката Windows або Get-ChildItem Cert:\LocalMachine\My).") $null $null
+    }
+
+    $certificate = & $Provider $Thumbprint
+    if (-not $certificate) {
+        return New-CertificateVerdict 'NotFound' ("Сертифіката HTTPS із заданим відбитком немає в Cert:\LocalMachine\My. " +
+            "Імпортуй PFX (із закритим ключем) у сховище МАШИНИ (не поточного користувача).") $null $null
+    }
+    if (-not $certificate.HasPrivateKey) {
+        return New-CertificateVerdict 'NoPrivateKey' ("Сертифікат HTTPS у Cert:\LocalMachine\My без закритого ключа (HasPrivateKey = False): " +
+            "TLS ним не підняти. Імпортуй PFX із закритим ключем.") $null $null
+    }
+    if ($certificate.NotAfter -lt $Now) {
+        return New-CertificateVerdict 'Expired' ("Сертифікат HTTPS прострочений (діяв до $($certificate.NotAfter.ToString('yyyy-MM-dd'))): " +
+            "браузери відмовляться відкривати застосунок. Постав чинний сертифікат.") $null $null
+    }
+    if ($certificate.NotBefore -gt $Now) {
+        return New-CertificateVerdict 'NotYetValid' ("Сертифікат HTTPS ще не чинний (діє з $($certificate.NotBefore.ToString('yyyy-MM-dd'))). " +
+            "Перевір годинник сервера або постав чинний сертифікат.") $null $null
+    }
+
+    $warning = $null
+    if (($certificate.NotAfter - $Now).TotalDays -lt 30) {
+        $warning = "Сертифікат HTTPS спливає менш ніж за 30 днів ($($certificate.NotAfter.ToString('yyyy-MM-dd'))): заздалегідь плануй заміну й повтор deploy-ecr.ps1 з новим -HttpsThumbprint."
+    }
+    return New-CertificateVerdict 'Ok' $null $warning $certificate
+}
+
+# ⛔ D14-08/R-01 (чиста функція): що писати в Environment служби EcrApi для обраного
+# транспорту. Обрано має бути РІВНО ОДИН режим — жодного HTTP «за замовчуванням»:
+#   Https — `-HttpsThumbprint`: https://+:AppPort (+ http-порт перенаправлення), RequireHttps=true;
+#   Proxy — `-BehindHttpsProxy`: http, RequireHttps=true (TLS завершує проксі, cookie Secure);
+#   Http  — `-AllowHttp`: http, RequireHttps=false + попередження (лише стенд).
+# Вхід — нормалізований відбиток ($null/'' — не задано). Вихід — Mode, Set (ім'я → значення),
+# Remove (імена, що мають зникнути з Environment — лишки попереднього режиму), Warnings,
+# ProbeScheme, Code/Problem (відмова: режиму не обрано, обрано кілька, некоректні порти).
+# `ECR_Auth__RequireHttps` пишеться ЗАВЖДИ явно: стан командного рядка = бажаний стан, тож
+# `false` від попереднього -AllowHttp не переживе перерозгортання з HTTPS.
+function Resolve-TransportConfig {
+    param(
+        [string] $HttpsThumbprint,
+        [switch] $BehindHttpsProxy,
+        [switch] $AllowHttp,
+        [Parameter(Mandatory)] [int] $AppPort,
+        [int] $HttpRedirectPort = 0
+    )
+
+    function New-TransportVerdict([string] $Mode, $Set, [string[]] $Remove, [string[]] $Warnings, [string] $Scheme, [string] $Code, $Problem) {
+        return [pscustomobject]@{ Mode = $Mode; Set = $Set; Remove = [string[]] $Remove; Warnings = [string[]] $Warnings
+            ProbeScheme = $Scheme; Code = $Code; Problem = $Problem }
+    }
+
+    $chosen = 0
+    if ($HttpsThumbprint) { $chosen++ }
+    if ($BehindHttpsProxy) { $chosen++ }
+    if ($AllowHttp) { $chosen++ }
+
+    if ($chosen -eq 0) {
+        return New-TransportVerdict '' ([ordered]@{}) @() @() '' 'NoTransport' ("Транспорт не обрано. Задай РІВНО ОДИН: " +
+            "-HttpsThumbprint <відбиток сертифіката в Cert:\LocalMachine\My> (HTTPS, рекомендовано), " +
+            "-BehindHttpsProxy (TLS завершується на проксі перед застосунком) або -AllowHttp (лише стенд: cookie сеансу " +
+            "не Secure). Без цього вхід з інших машин не працюватиме: cookie Secure по HTTP не відсилається. " +
+            "Параметр потрібен і на кожному оновленні. Деталі — docs/build/11-install-guide.md, розділ «HTTPS».")
+    }
+    if ($chosen -gt 1) {
+        return New-TransportVerdict '' ([ordered]@{}) @() @() '' 'Ambiguous' ("-HttpsThumbprint, -BehindHttpsProxy і -AllowHttp взаємовиключні — обери одне.")
+    }
+    if ($AppPort -lt 1 -or $AppPort -gt 65535) {
+        return New-TransportVerdict '' ([ordered]@{}) @() @() '' 'BadPort' "-AppPort $AppPort поза 1..65535."
+    }
+    if ($HttpRedirectPort -gt 0 -and -not $HttpsThumbprint) {
+        return New-TransportVerdict '' ([ordered]@{}) @() @() '' 'RedirectWithoutHttps' "-HttpRedirectPort має сенс лише з -HttpsThumbprint: без HTTPS перенаправляти нікуди."
+    }
+    if ($HttpRedirectPort -gt 0 -and $HttpRedirectPort -eq $AppPort) {
+        return New-TransportVerdict '' ([ordered]@{}) @() @() '' 'RedirectPortEqualsAppPort' "-HttpRedirectPort збігається з -AppPort ($AppPort): два протоколи на одному порту неможливі."
+    }
+
+    $urlsName = 'ASPNETCORE_URLS'
+    $thumbName = 'ECR_Transport__Https__CertificateThumbprint'
+    $portName = 'ECR_Transport__Https__Port'
+    $requireName = 'ECR_Auth__RequireHttps'
+    $set = [ordered]@{}
+    $warnings = @()
+
+    if ($HttpsThumbprint) {
+        $urls = "https://+:$AppPort"
+        if ($HttpRedirectPort -gt 0) {
+            $urls += ";http://+:$HttpRedirectPort"
+            $set[$portName] = [string] $AppPort
+            $warnings += ("MSI відкриває в брандмауері лише порт ${AppPort}: для http-порту перенаправлення $HttpRedirectPort правило " +
+                "додай сам (New-NetFirewallRule -DisplayName 'ECR redirect' -Direction Inbound -Protocol TCP -LocalPort $HttpRedirectPort -Action Allow).")
+        }
+        $set[$urlsName] = $urls
+        $set[$thumbName] = $HttpsThumbprint
+        $set[$requireName] = 'true'
+        # ⚠ Не `$remove = if … { @() }`: порожній масив із if розгортається в $null.
+        $remove = @()
+        if ($HttpRedirectPort -le 0) { $remove = @($portName) }
+        return New-TransportVerdict 'Https' $set $remove $warnings 'https' 'Ok' $null
+    }
+
+    $set[$urlsName] = "http://+:$AppPort"
+    $remove = @($thumbName, $portName)
+
+    if ($BehindHttpsProxy) {
+        $set[$requireName] = 'true'
+        $warnings += ("-BehindHttpsProxy: TLS має завершуватись на проксі; Kestrel слухає http на всіх інтерфейсах порту $AppPort — " +
+            "закрий його брандмауером для всіх, крім проксі. Застосунок не довіряє X-Forwarded-*: HSTS і перенаправлення http→https — " +
+            "на проксі. Без проксі вхід не працюватиме (cookie Secure).")
+        return New-TransportVerdict 'Proxy' $set $remove $warnings 'http' 'Ok' $null
+    }
+
+    $set[$requireName] = 'false'
+    $warnings += ("-AllowHttp: служба працює по HTTP, cookie сеансу НЕ Secure (Auth:RequireHttps = false) — пароль і сеанс ідуть " +
+        "відкритим текстом. Це режим СТЕНДА; на майданчику замовника постав сертифікат і використай -HttpsThumbprint. " +
+        "Застосунок про це скаже на старті й жовтою перевіркою transport на /health/ready.")
+    return New-TransportVerdict 'Http' $set $remove $warnings 'http' 'Ok' $null
+}
+
+# ⛔ D14-08/R-01: мережева половина кроку 7 для режиму Https. Invoke-WebRequest тут не годиться:
+# сертифікат виписано на ім'я сервера, а зонд іде на localhost, — PowerShell 5.1 не вміє «пропустити
+# перевірку» без глобального ServicePointManager (чіпати його в процесі майстра не можна), а
+# scriptblock-колбек HttpClient виконується на потоці без runspace. Тому — SslStream зі
+# синхронним колбеком і ПРИШПИЛЕННЯМ: приймається лише сертифікат із заданим відбитком, тобто зонд
+# заодно доводить, що Kestrel віддає саме той сертифікат, який задав адміністратор. HTTP/1.0 — щоб
+# відповідь не була chunked (тіло — усе після порожнього рядка). Повертає ту саму форму, що
+# Invoke-ReadyProbe, плюс CertificateMatches ($null — рукостискання не відбулося).
+function Invoke-PinnedHttpsProbe {
+    param(
+        [Parameter(Mandatory)] [int] $Port,
+        [Parameter(Mandatory)] [string] $Path,
+        [Parameter(Mandatory)] [string] $Thumbprint,
+        [int] $TimeoutSeconds = 10
+    )
+
+    $result = [pscustomobject]@{ StatusCode = 0; Body = $null; CertificateMatches = $null }
+    $tcp = New-Object System.Net.Sockets.TcpClient
+    $ssl = $null
+    try {
+        $tcp.ReceiveTimeout = $TimeoutSeconds * 1000
+        $tcp.SendTimeout = $TimeoutSeconds * 1000
+        $tcp.Connect('127.0.0.1', $Port)
+
+        $accept = [System.Net.Security.RemoteCertificateValidationCallback] { param($sender, $certificate, $chain, $errors) $true }
+        $ssl = New-Object System.Net.Security.SslStream($tcp.GetStream(), $false, $accept)
+        $ssl.AuthenticateAsClient('localhost', (New-Object System.Security.Cryptography.X509Certificates.X509CertificateCollection),
+            [System.Security.Authentication.SslProtocols]::Tls12, $false)
+
+        $served = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2($ssl.RemoteCertificate)
+        $result.CertificateMatches = ($served.Thumbprint -eq $Thumbprint.ToUpperInvariant())
+        if (-not $result.CertificateMatches) { return $result }
+
+        $request = [System.Text.Encoding]::ASCII.GetBytes("GET $Path HTTP/1.0`r`nHost: localhost`r`nConnection: close`r`n`r`n")
+        $ssl.Write($request, 0, $request.Length)
+        $ssl.Flush()
+
+        $buffer = New-Object System.IO.MemoryStream
+        $ssl.CopyTo($buffer)
+        $text = [System.Text.Encoding]::UTF8.GetString($buffer.ToArray())
+        $headerEnd = $text.IndexOf("`r`n`r`n")
+        $lineEnd = $text.IndexOf("`r`n")
+        if ($headerEnd -ge 0 -and $lineEnd -ge 0) {
+            $result.StatusCode = [int] (($text.Substring(0, $lineEnd) -split ' ')[1])
+            $result.Body = $text.Substring($headerEnd + 4)
+        }
+    }
+    catch { $result.StatusCode = 0 }
+    finally {
+        if ($ssl) { $ssl.Dispose() }
+        $tcp.Dispose()
+    }
+    return $result
+}
+
 # ⚠ ПЕРЕДУМОВИ — до будь-якої зміни системи (дешевша відмова тут, ніж на
 # кроці 3 з наполовину встановленою службою).
 Write-Step "Крок 1/7: передумови"
@@ -756,8 +1054,15 @@ Write-Step "Крок 1/7: передумови"
 if (-not (Get-Command sqlcmd -ErrorAction SilentlyContinue)) {
     throw "sqlcmd не знайдено. Ним DBA виконує розгортання — без нього продовжувати нема сенсу."
 }
-if (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) {
-    throw ".NET SDK не знайдено."
+# ⛔ .NET SDK потрібен лише там, де його реально кличуть (Get-DotnetRequirement):
+# на чистому сервері з пакованою схемою і готовим MSI його немає й бути не мусить
+# (install-guide §2.1, Q-219) — безумовна вимога тут зупиняла б саме цей сценарій.
+$dotnetNeed = Get-DotnetRequirement -HasMsiPath ([bool] $MsiPath) -SkipSchema ([bool] $SkipSchema) `
+    -IsPackagedSchema ([bool] $isPackagedSchema)
+if ($dotnetNeed.Required -and -not (Get-Command dotnet -ErrorAction SilentlyContinue)) {
+    throw (".NET SDK не знайдено, а він потрібен для: $($dotnetNeed.Reasons -join '; '). " +
+        "На чистому сервері передай готовий -MsiPath і запускай із пакета майстра (sql\ і migration.sql поруч зі скриптом) " +
+        "або -SkipSchema, якщо схему вже накотив DBA.")
 }
 if (-not $MsiPath -and -not $Version) {
     throw "Треба або -MsiPath (готовий Ecr.msi), або -Version (сам зберу через build-msi.ps1)."
@@ -777,6 +1082,8 @@ if ($ServicePassword) {
 if ($ConfigValues -and -not (Test-Path $ConfigValues)) {
     throw "ConfigValues вказує на неіснуючий файл: $ConfigValues"
 }
+# ФВ-12.7: недійсну адресу телеметрії відхиляємо ДО msiexec, а не посеред розгортання.
+$telemetryDecision = Resolve-TelemetryEnvironment -OtlpEndpoint $TelemetryOtlpEndpoint -OtlpProtocol $TelemetryOtlpProtocol
 if ($EnableWorker -and $DisableWorker) {
     throw '-EnableWorker і -DisableWorker разом — оберіть одне.'
 }
@@ -800,6 +1107,30 @@ $certificateProblem = Get-DataProtectionCertificateProblem -Thumbprint $DataProt
 if ($certificateProblem) { throw $certificateProblem }
 Write-Host ("Сертифікат Data Protection: $DataProtectionThumbprint ($($dataProtectionCertificate.Subject)), " +
     "закритий ключ є. Обліковому запису служби потрібне право читання закритого ключа.") -ForegroundColor Green
+
+# ⛔ D14-08/R-01: транспорт — ТАКОЖ до схеми й MSI. Без вибору (HTTPS, проксі чи явний
+# -AllowHttp) зупинка: мовчки поставлений HTTP дав би службу, у яку не можна увійти з
+# жодної іншої машини (cookie Secure по HTTP не відсилається). Сертифікат HTTPS —
+# наявність, закритий ключ, строк; лише читання сховища, тому й під -WhatIf.
+$HttpsThumbprint = ConvertTo-NormalizedThumbprint $HttpsThumbprint
+$transport = Resolve-TransportConfig -HttpsThumbprint $HttpsThumbprint -BehindHttpsProxy:$BehindHttpsProxy `
+    -AllowHttp:$AllowHttp -AppPort $AppPort -HttpRedirectPort $HttpRedirectPort
+if ($transport.Problem) { throw $transport.Problem }
+
+if ($transport.Mode -eq 'Https') {
+    $httpsCheck = Get-HttpsCertificateProblem -Thumbprint $HttpsThumbprint -Now (Get-Date) -Provider {
+        param($thumbprint)
+        $path = "Cert:\LocalMachine\My\$thumbprint"
+        if (Test-Path $path) { Get-Item $path }
+    }
+    if ($httpsCheck.Problem) { throw $httpsCheck.Problem }
+    if ($httpsCheck.Warning) { Write-Warning $httpsCheck.Warning }
+    Write-Host ("Сертифікат HTTPS: $($httpsCheck.Certificate.Subject), діє до " +
+        "$($httpsCheck.Certificate.NotAfter.ToString('yyyy-MM-dd')), закритий ключ є. " +
+        "Обліковому запису служби потрібне право читання закритого ключа.") -ForegroundColor Green
+}
+Write-Host "Транспорт: $($transport.Mode) (ASPNETCORE_URLS = $($transport.Set['ASPNETCORE_URLS']))."
+foreach ($warning in $transport.Warnings) { Write-Warning $warning }
 
 $sqlAuth = if ($SqlLogin) { @('-U', $SqlLogin) } else { @('-E') }
 
@@ -1140,12 +1471,22 @@ else {
 # самий канал, що ECR_ConnectionStrings__Ecr (реєстр служби), і той самий
 # принцип: ASPNETCORE_URLS — не секрет, ASP.NET Core читає його як
 # стандартну змінну оточення без жодного коду в Program.cs.
-if ($PSCmdlet.ShouldProcess('HKLM:\SYSTEM\CurrentControlSet\Services\EcrApi\Environment',
-        'записати ASPNETCORE_URLS')) {
-    Set-ServiceEnvironmentVariable -ServiceName 'EcrApi' -Name 'ASPNETCORE_URLS' `
-        -Value "http://+:$AppPort"
-    Write-Host "ASPNETCORE_URLS записано (http://+:$AppPort) — служба слухає всі інтерфейси, не лише localhost." -ForegroundColor Green
+#
+# ⛔ D14-08/R-01: адреси, режим HTTPS і Auth:RequireHttps пише Resolve-TransportConfig
+# (рішення прийнято на кроці 1). Відбиток сертифіката HTTPS — не секрет, але й не
+# друкується: лише імена змінних.
+foreach ($name in $transport.Set.Keys) {
+    if ($PSCmdlet.ShouldProcess('HKLM:\SYSTEM\CurrentControlSet\Services\EcrApi\Environment', "записати $name")) {
+        Set-ServiceEnvironmentVariable -ServiceName 'EcrApi' -Name $name -Value $transport.Set[$name]
+    }
 }
+foreach ($name in $transport.Remove) {
+    if ($PSCmdlet.ShouldProcess('HKLM:\SYSTEM\CurrentControlSet\Services\EcrApi\Environment', "прибрати $name")) {
+        Remove-ServiceEnvironmentVariable -ServiceName 'EcrApi' -Name $name
+    }
+}
+Write-Host ("Транспорт записано ($($transport.Mode)): ASPNETCORE_URLS = $($transport.Set['ASPNETCORE_URLS']), " +
+    "ECR_Auth__RequireHttps = $($transport.Set['ECR_Auth__RequireHttps']) — служба слухає всі інтерфейси, не лише localhost.") -ForegroundColor Green
 
 # ⛔ S11: відбиток сертифіката Data Protection — тим самим каналом (реєстр
 # служби), що й ASPNETCORE_URLS. Не секрет (відбиток — це хеш публічного
@@ -1237,6 +1578,15 @@ foreach ($name in $jobDecision.Remove) {
         Remove-ServiceEnvironmentVariable -ServiceName 'EcrApi' -Name $name
     }
 }
+foreach ($name in $telemetryDecision.Set.Keys) {
+    $telemetryServices = @('EcrApi') + $(if ($workerEnabled) { @('EcrWorker') } else { @() })
+    foreach ($serviceName in $telemetryServices) {
+        if ($PSCmdlet.ShouldProcess("HKLM:\SYSTEM\CurrentControlSet\Services\$serviceName\Environment",
+                "записати $name=$($telemetryDecision.Set[$name])")) {
+            Set-ServiceEnvironmentVariable -ServiceName $serviceName -Name $name -Value $telemetryDecision.Set[$name]
+        }
+    }
+}
 Write-Host ("Перерахунок: " + $(if ($workerEnabled) { 'служба EcrWorker (Jobs:Queue:Mode = Database, Executor = Worker).' }
         else { 'у процесі EcrApi (Executor = InProcess).' })) -ForegroundColor Green
 
@@ -1286,15 +1636,33 @@ else {
 # ---------------------------------------------------------------------
 Write-Step "Крок 7/7: перевірка здоров'я"
 
-$healthUrl = "http://localhost:$AppPort/health/live"
+# ⛔ D14-08/R-01: у режимі Https зонд іде по TLS із пришпиленням сертифіката
+# (Invoke-PinnedHttpsProbe): відповідь доводить і що служба жива, і що Kestrel віддає
+# САМЕ сертифікат, заданий -HttpsThumbprint.
+$probeHttps = ($transport.Mode -eq 'Https')
+$healthUrl = "$($transport.ProbeScheme)://localhost:$AppPort/health/live"
 if ($PSCmdlet.ShouldProcess($healthUrl, 'GET /health/live')) {
     $ok = $false
     for ($i = 0; $i -lt 20 -and -not $ok; $i++) {
         try {
-            $resp = Invoke-WebRequest -Uri $healthUrl -UseBasicParsing -TimeoutSec 3
-            $ok = $resp.StatusCode -eq 200
+            if ($probeHttps) {
+                $probe = Invoke-PinnedHttpsProbe -Port $AppPort -Path '/health/live' -Thumbprint $HttpsThumbprint -TimeoutSeconds 3
+                if ($probe.CertificateMatches -eq $false) {
+                    throw ("Kestrel віддає ІНШИЙ сертифікат, ніж заданий -HttpsThumbprint: служба працює, але не з тим сертифікатом. " +
+                        "Перевір ECR_Transport__Https__CertificateThumbprint в Environment служби EcrApi і журнал старту.")
+                }
+                $ok = $probe.StatusCode -eq 200
+                if (-not $ok) { Start-Sleep -Seconds 3 }
+            }
+            else {
+                $resp = Invoke-WebRequest -Uri $healthUrl -UseBasicParsing -TimeoutSec 3
+                $ok = $resp.StatusCode -eq 200
+            }
         }
-        catch { Start-Sleep -Seconds 3 }
+        catch {
+            if ($_.Exception.Message -like 'Kestrel віддає ІНШИЙ*') { throw }
+            Start-Sleep -Seconds 3
+        }
     }
     if (-not $ok) { throw "Служба не відповіла на $healthUrl за відведений час. Перевір Event Log (джерело ECR) і %ProgramData%\ECR\logs." }
     Write-Host "Служба відповідає на $healthUrl." -ForegroundColor Green
@@ -1303,11 +1671,14 @@ if ($PSCmdlet.ShouldProcess($healthUrl, 'GET /health/live')) {
 # ⛔ U21: `live` доводить лише, що процес відповідає. Стенд без RCSI, без
 # файлових груп чи з мертвим планувальником проходив би далі як «Готово» —
 # саме тому після `live` чекаємо `ready` і друкуємо перевірки, що не Healthy.
-$readyUrl = "http://localhost:$AppPort/health/ready"
+$readyUrl = "$($transport.ProbeScheme)://localhost:$AppPort/health/ready"
 if ($PSCmdlet.ShouldProcess($readyUrl, 'GET /health/ready')) {
     $deadline = (Get-Date).AddSeconds($ReadyTimeoutSeconds)
     do {
-        $response = Invoke-ReadyProbe -Url $readyUrl
+        $response = if ($probeHttps) {
+            Invoke-PinnedHttpsProbe -Port $AppPort -Path '/health/ready' -Thumbprint $HttpsThumbprint
+        }
+        else { Invoke-ReadyProbe -Url $readyUrl }
         $verdict  = Get-ReadinessVerdict -StatusCode $response.StatusCode -Body $response.Body
         if ($verdict.Outcome -ne 'Wait') { break }
         Start-Sleep -Seconds 3

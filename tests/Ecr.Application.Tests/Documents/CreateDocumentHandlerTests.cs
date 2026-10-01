@@ -83,6 +83,7 @@ public sealed class CreateDocumentHandlerTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "ФВ-3.1")]
     public async Task Задане_імя_записується_в_NameL10n()
     {
         await Create(new Dictionary<string, string> { ["en"] = "Water intake report" });

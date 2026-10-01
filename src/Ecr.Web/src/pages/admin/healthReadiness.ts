@@ -7,7 +7,7 @@ import type { HealthReport } from '@/api/types';
  * `ready: false` — сервер відповів `503`, але з повноцінним звітом перевірок:
  * це стан системи, який треба ПОКАЗАТИ, а не відмова запиту.
  */
-export interface Readiness {
+interface Readiness {
   report: HealthReport;
   ready: boolean;
 }

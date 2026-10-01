@@ -44,9 +44,23 @@ const Connection = {
   transport: 'PiSqlClient',
 };
 
-/** Рядок переліку `GET /api/v1/sources` — БЕЗ полів політики, як віддає сервер. */
-function row(id: number, code: string, registryDefId: number | null): Record<string, unknown> {
+/** Типова політика, з якою сервер заводить сутність. */
+const Typical = {
+  onMissingInSource: 'MarkOrphaned',
+  validFromAttribute: null,
+  validToAttribute: null,
+  validToInclusive: false,
+};
+
+/** Рядок переліку `GET /api/v1/sources` — з чинною політикою, як віддає сервер. */
+function row(
+  id: number,
+  code: string,
+  registryDefId: number | null,
+  policy: Record<string, unknown> = Typical,
+): Record<string, unknown> {
   return {
+    ...policy,
     code,
     dataSourceCode: 'PI-MAIN',
     dataSourceId: 7,
@@ -88,16 +102,25 @@ const Stored = {
   validToInclusive: true,
 };
 
+/** Політика, що лежить «у базі» для STACK-1: її й віддає перелік, її міняє `PUT`. */
+let current: Record<string, unknown> = Typical;
+
 function respond({
   permissions = ['Integration.View', 'Integration.Manage', 'Registry.EditData'],
   grants = {},
-  policy = (body: unknown) => json(dto(42, 70, body as Record<string, unknown>)),
+  stored = Typical,
+  policy = (body: unknown) => {
+    current = body as Record<string, unknown>;
+    return json(dto(42, 70, current));
+  },
 }: {
   permissions?: string[];
   grants?: Record<string, string>;
+  stored?: Record<string, unknown>;
   policy?: (body: unknown) => Response;
 } = {}): void {
   sent = [];
+  current = stored;
 
   vi.stubGlobal(
     'fetch',
@@ -125,7 +148,7 @@ function respond({
 
       if (path === '/api/v1/data-sources') return json([Connection]);
       if (path === '/api/v1/registries') return json(Registries);
-      if (path === '/api/v1/sources') return json([row(42, 'STACK-1', 70), row(44, 'LOOSE-1', null)]);
+      if (path === '/api/v1/sources') return json([row(42, 'STACK-1', 70, current), row(44, 'LOOSE-1', null)]);
       if (path === '/api/v1/sources/42/registry/policy') return policy(body);
       if (path === '/api/v1/sources/42/registry') {
         return json(dto(42, (body as { registryDefId: number }).registryDefId, Stored));
@@ -218,14 +241,14 @@ describe('D-212: політика синку довідника з AF', () => {
     expect(policyButton(drawer, 'STACK-1')).toBeNull();
   });
 
-  it('чинна політика невідома — типова з попередженням; збереження шле PUT з обраним тілом', async () => {
+  it('типова політика з рядка переліку; збереження шле PUT з обраним тілом', async () => {
     respond();
     show();
 
     const form = await openPolicy(await openEntitiesTab());
 
-    expect(form.querySelector('[data-sync-policy-unknown]')).not.toBeNull();
     expect(input(form, 'input[value="MarkOrphaned"]').checked).toBe(true);
+    expect(input(form, 'input[data-sync-policy-valid-from]').value).toBe('');
 
     fireEvent.click(input(form, 'input[value="Ignore"]'));
     fireEvent.change(input(form, 'input[data-sync-policy-valid-from]'), { target: { value: '  Start ' } });
@@ -242,22 +265,13 @@ describe('D-212: політика синку довідника з AF', () => {
     await waitFor(() => expect(screen.queryByRole('dialog', { name: /sources\.syncPolicyTitle/ })).toBeNull());
   });
 
-  it('форма показує політику з SourceEntityDto (відповідь прив\'язки); порожній атрибут — null, «включно» без кінця — false', async () => {
-    respond();
+  it('після перезавантаження форма показує ЧИННУ політику з рядка переліку; порожній атрибут — null, «включно» без кінця — false', async () => {
+    // ⛔ Жодної відповіді прив'язки в сеансі: політику знає лише `GET /api/v1/sources`.
+    respond({ stored: Stored });
     show();
 
-    const drawer = await openEntitiesTab();
-    // Перший рядок — STACK-1 (порядок переліку).
-    const [select] = (await within(drawer).findAllByRole('textbox', { name: /sources\.registry/ })) as HTMLInputElement[];
-    if (select === undefined) throw new Error('немає вибору довідника');
-    await waitFor(() => expect(select.disabled).toBe(false));
-    fireEvent.click(select);
-    fireEvent.click(await screen.findByRole('option', { name: 'Stacks' }));
-    await waitFor(() => expect(sent).toHaveLength(1));
+    const form = await openPolicy(await openEntitiesTab());
 
-    const form = await openPolicy(drawer);
-
-    expect(form.querySelector('[data-sync-policy-unknown]')).toBeNull();
     expect(input(form, 'input[value="Deactivate"]').checked).toBe(true);
     expect(input(form, 'input[data-sync-policy-valid-from]').value).toBe('StartDate');
     expect(input(form, 'input[data-sync-policy-valid-to]').value).toBe('EndDate');
@@ -267,13 +281,29 @@ describe('D-212: політика синку довідника з AF', () => {
     fireEvent.change(input(form, 'input[data-sync-policy-valid-to]'), { target: { value: '' } });
     fireEvent.click(within(form).getByRole('button', { name: /common\.save/ }));
 
-    await waitFor(() => expect(sent).toHaveLength(2));
-    expect(sent[1]?.body).toEqual({
+    await waitFor(() => expect(sent).toHaveLength(1));
+    expect(sent[0]?.body).toEqual({
       onMissingInSource: 'Deactivate',
       validFromAttribute: null,
       validToAttribute: null,
       validToInclusive: false,
     });
+  });
+
+  it('після збереження повторне відкриття показує збережене — перелік перечитано', async () => {
+    respond();
+    show();
+
+    const drawer = await openEntitiesTab();
+    let form = await openPolicy(drawer);
+    fireEvent.click(input(form, 'input[value="Ignore"]'));
+    fireEvent.change(input(form, 'input[data-sync-policy-valid-to]'), { target: { value: 'Until' } });
+    fireEvent.click(within(form).getByRole('button', { name: /common\.save/ }));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: /sources\.syncPolicyTitle/ })).toBeNull());
+
+    form = await openPolicy(drawer);
+    await waitFor(() => expect(input(form, 'input[value="Ignore"]').checked).toBe(true));
+    expect(input(form, 'input[data-sync-policy-valid-to]').value).toBe('Until');
   });
 
   it.each([
@@ -292,7 +322,6 @@ describe('D-212: політика синку довідника з AF', () => {
     const form = await openPolicy(await openEntitiesTab());
     fireEvent.click(within(form).getByRole('button', { name: /common\.save/ }));
 
-    // ⚠ Попередження «чинна політика невідома» — теж `alert`; шукаємо саме відмову.
     await waitFor(() =>
       expect(within(form).getAllByRole('alert').some((alert) => alert.textContent?.includes(text))).toBe(true),
     );

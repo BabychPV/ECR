@@ -66,7 +66,7 @@ public sealed class ListDocumentsHandler(
         // проєкту — це вже відомості про те, які об'єкти звітують і як часто, і
         // помилка в побудові фільтра запиту не має цього відкривати.
         var visible = all.Items
-            .Where(d => profile.SeesDocumentsOf(d.ProjectId) && profile.Has(Permission, d.ProjectId))
+            .Where(d => profile.SeesDocumentsOf(d.ProjectId) && PermissionCheck.IsGrantedIn(profile, Permission, d.ProjectId))
             .ToList();
 
         // ⛔ `all.TotalCount` НЕ проводиться далі як є — саме це й було дірою:
@@ -161,9 +161,21 @@ public sealed class ListDocumentsHandler(
     /// </remarks>
     internal static HashSet<int> ReadableProjects(AccessProfile profile, string permission)
     {
+        var ids = VisibleProjects(profile);
+        ids.RemoveWhere(id => !PermissionCheck.IsGrantedIn(profile, permission, id));
+        return ids;
+    }
+
+    /// <summary>
+    /// Проєкти, документи яких профіль БАЧИТЬ (<see cref="AccessProfile.SeesDocumentsOf"/>), без
+    /// жодного проєктного права — для шляхів, де видимий документ без права дає <c>403</c> із причиною,
+    /// а невидимий відсутній (B-08).
+    /// </summary>
+    /// <param name="profile">Профіль.</param>
+    internal static HashSet<int> VisibleProjects(AccessProfile profile)
+    {
         var ids = ReadableProjects(profile);
         ids.UnionWith(profile.Scoped.Keys.Where(profile.SeesDocumentsOf));
-        ids.RemoveWhere(id => !profile.Has(permission, id));
         return ids;
     }
 
@@ -206,7 +218,7 @@ public sealed class GetDocumentHandler(
         // ⛔ ФВ-6.14: без права перегляду В ЦЬОМУ проєкті — так само невидимий.
         return document is null
                || !profile.SeesDocumentsOf(document.ProjectId)
-               || !profile.Has(ListDocumentsHandler.Permission, document.ProjectId)
+               || !PermissionCheck.IsGrantedIn(profile, ListDocumentsHandler.Permission, document.ProjectId)
             ? null
             : document;
     }

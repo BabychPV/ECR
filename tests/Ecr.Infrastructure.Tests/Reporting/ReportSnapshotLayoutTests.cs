@@ -329,6 +329,7 @@ public sealed class ReportSnapshotLayoutTests(SqlServerFixture sql)
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "ФВ-9.17")]
+    [Trait("Requirement", "ФВ-10.3")]
     public async Task Макет_не_чіпає_рядків_зрізу_і_суми_а_змінює_лише_видачу()
     {
         // ⛔ R8 цілиться рівно в це: макет — спосіб ПОКАЗУ. Якби він доїжджав
@@ -375,6 +376,7 @@ public sealed class ReportSnapshotLayoutTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-10.3")]
     public async Task Сторінка_зрізу_з_макетом_іде_за_групою_а_підсумок_не_залежить_від_сторінки()
     {
         var chain = new TestDocumentBuilder(sql.ConnectionString);

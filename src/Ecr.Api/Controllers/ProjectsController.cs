@@ -173,7 +173,7 @@ public sealed class ProjectsController(
     /// першого періоду (<c>ECR-PRD-0409</c>): межі періодів рахуються в поясі
     /// майданчика, і зміна поясу заднім числом зсунула б уже подану звітність.
     ///
-    /// ⛔ Тільки ідентифікатор IANA (<c>Asia/Aqtau</c>). Windows-ідентифікатор
+    /// ⛔ Тільки ідентифікатор IANA (<c>Asia/Atyrau</c>). Windows-ідентифікатор
     /// (<c>Central Asia Standard Time</c>) і зсув (<c>+05:00</c>) — це
     /// <c>ECR-CFG-4221</c>: зсув міняється переходом на літній час, а
     /// Windows-ідентифікатор на зворотному шляху втрачає державу
@@ -358,7 +358,7 @@ public sealed class ProjectsController(
 /// <param name="Code">Код проєкту.</param>
 /// <param name="NameL10n">Назва мовами каталогу.</param>
 /// <param name="TimeZoneId">
-/// Пояс майданчика — ідентифікатор IANA (`Asia/Aqtau`). Обов'язковий; після
+/// Пояс майданчика — ідентифікатор IANA (`Asia/Atyrau`). Обов'язковий; після
 /// відкриття періоду не змінюється. Windows-ідентифікатор або зсув —
 /// `ECR-CFG-4221`.
 /// </param>
@@ -438,5 +438,5 @@ public sealed record UpdatePeriodPolicyRequest(
     int YearGraceOffsetDays);
 
 /// <summary>Запит на зміну поясу майданчика проєкту (T6/#52).</summary>
-/// <param name="TimeZoneId">Новий пояс — ідентифікатор IANA (<c>Asia/Aqtau</c>).</param>
+/// <param name="TimeZoneId">Новий пояс — ідентифікатор IANA (<c>Asia/Atyrau</c>).</param>
 public sealed record ChangeProjectTimeZoneRequest(string TimeZoneId);

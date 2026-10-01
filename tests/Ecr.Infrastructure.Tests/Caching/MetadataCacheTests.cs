@@ -1,5 +1,6 @@
 ﻿using Ecr.Domain.Entities.Configuration;
 using Ecr.Infrastructure.Caching;
+using Ecr.Infrastructure.Observability;
 using Ecr.Infrastructure.Persistence;
 using Ecr.TestKit;
 using Microsoft.EntityFrameworkCore;
@@ -85,6 +86,33 @@ public sealed class MetadataCacheTests(SqlServerFixture sql)
         // ⚠ Мутація: у `CacheLifetimes` поставити `DefaultRevision` нулем
         // (мемоїзація вимкнена) — число стає 1, як було.
         Assert.Empty(second);
+    }
+
+    /// <summary>ФВ-12.7: перше читання — промах, повторне — влучання (<c>ecr.cache.*</c>, cache=metadata).</summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Кеш_метаданих_пише_промах_а_потім_влучання()
+    {
+        var doc = await ArrangeAsync();
+        var memory = new MemoryCache(new MemoryCacheOptions());
+        using var capture = new InfrastructureMetricsCapture();
+
+        await using (var db = CreateContext([]))
+        {
+            await new MetadataCache(memory, db).GetAsync(doc.TemplateVersionId, CancellationToken.None);
+        }
+
+        Assert.Equal("metadata", Assert.Single(capture.Of(InfrastructureMetrics.CacheMiss))["cache"]);
+        Assert.Empty(capture.Of(InfrastructureMetrics.CacheHit));
+
+        await using (var db = CreateContext([]))
+        {
+            await new MetadataCache(memory, db).GetAsync(doc.TemplateVersionId, CancellationToken.None);
+        }
+
+        Assert.Single(capture.Of(InfrastructureMetrics.CacheMiss));
+        Assert.Equal("metadata", Assert.Single(capture.Of(InfrastructureMetrics.CacheHit))["cache"]);
     }
 
     /// <summary>
@@ -348,7 +376,6 @@ public sealed class MetadataCacheTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
-    [Trait("Requirement", "ФВ-2.6")]
     public async Task Знімок_містить_індекси_колонок_і_рядків_для_швидкого_доступу()
     {
         var doc = await ArrangeAsync();

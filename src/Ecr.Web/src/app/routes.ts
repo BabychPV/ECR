@@ -263,12 +263,58 @@ export const routes = {
     handle: { labelKey: 'nav.registries', permission: 'Registry.View', icon: 'registries' },
     showInNav: true,
   },
+  // ФВ-8.12: дані довідника — табличний редактор (`features/registries/rc812`).
+  adminRegistryData: {
+    id: 'admin-registry-data',
+    path: '/admin/registries/:code/entries',
+    handle: {
+      labelKey: 'registries.data.title',
+      // Читання рядків — `Registry.View`; правка — `Registry.EditData` усередині сторінки.
+      permission: 'Registry.View',
+      crumb: {
+        ancestorIds: ['admin-registries'],
+        resolveParam: 'code',
+        resolveWith: 'registryName',
+      },
+    },
+  },
   adminRegistryDefinition: {
     id: 'admin-registry-definition',
     path: '/admin/registries/:code/definition',
     handle: {
       labelKey: 'registries.constructor',
       // Читання визначення — `Registry.View` (`RegistryDefinitionHandlers`).
+      permission: 'Registry.View',
+      crumb: {
+        ancestorIds: ['admin-registries'],
+        resolveParam: 'code',
+        resolveWith: 'registryName',
+      },
+    },
+  },
+  adminRegistryComposition: {
+    id: 'admin-registry-composition',
+    path: '/admin/registries/:code/composition',
+    handle: {
+      labelKey: 'registries.rc816.title',
+      // Читання — `Registry.View` (`GET …/rows`); правка вимагає `Registry.EditData`, і без нього
+      // сторінка лише показує (ФВ-8.16).
+      permission: 'Registry.View',
+      crumb: {
+        ancestorIds: ['admin-registries'],
+        resolveParam: 'code',
+        resolveWith: 'registryName',
+      },
+    },
+  },
+  // RT-25: вплив правки довідника — документи відкритих періодів і перерахунок зачеплених.
+  adminRegistryImpact: {
+    id: 'admin-registry-impact',
+    path: '/admin/registries/:code/impact',
+    handle: {
+      labelKey: 'registries.impact.title',
+      // Перелік — `Registry.View` + `Calculation.View` у проєкті документа (`GetRegistryImpactHandler`);
+      // перерахунок — `Calculation.Recalculate` усередині сторінки.
       permission: 'Registry.View',
       crumb: {
         ancestorIds: ['admin-registries'],
@@ -343,6 +389,17 @@ export const routes = {
     id: 'admin-mapping',
     path: '/admin/mapping',
     handle: { labelKey: 'nav.mapping', permission: 'Integration.Manage', icon: 'mapping' },
+    showInNav: true,
+  },
+  /**
+   * Редактор конвеєра даних (`ФВ-14.3`, область 9; `B21` §7). Право — те саме,
+   * що й у перегляду мапінгу: конвеєр читає `/api/v1/sources` і перегляд
+   * мапінгу, а обидва сервер віддає лише з `Integration.Manage`.
+   */
+  adminPipeline: {
+    id: 'admin-pipeline',
+    path: '/admin/pipeline',
+    handle: { labelKey: 'nav.pipeline', permission: 'Integration.Manage', icon: 'pipeline' },
     showInNav: true,
   },
   adminJobs: {

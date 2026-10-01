@@ -12,7 +12,7 @@ import { activeJobCount } from './myTasks';
  */
 
 /** Опитування, доки серед ВЛАСНИХ задач є `Queued`/`Running`. */
-export const MyTasksActivePollMs = 3_000;
+const MyTasksActivePollMs = 3_000;
 
 /**
  * Опитування, коли активних задач немає.
@@ -30,7 +30,7 @@ export const MyTasksActivePollMs = 3_000;
  * частіше, ніж будь-який інший запит застосунку вже вважає своє значення
  * застарілим.
  */
-export const MyTasksIdlePollMs = 30_000;
+const MyTasksIdlePollMs = 30_000;
 
 /**
  * Власні фонові задачі для шухляди «My tasks» у шапці (`UI-07`, `BE-08`).

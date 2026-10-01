@@ -9,6 +9,11 @@
     <ProjectReference Include="..\..\src\Ecr.Domain\Ecr.Domain.csproj" />
     <ProjectReference Include="..\..\src\Ecr.Application\Ecr.Application.csproj" />
     <ProjectReference Include="..\..\src\Ecr.Infrastructure\Ecr.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\Ecr.Adapters.Excel\Ecr.Adapters.Excel.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Ecr.Bootstrap.Tests" />
   </ItemGroup>
 
   <ItemGroup>

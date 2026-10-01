@@ -22,9 +22,8 @@ namespace Ecr.Infrastructure.Tests.Jobs;
 /// <c>ext.RawDataPoint</c>, і перевірити її в пам'яті означало б перевірити
 /// копію запиту, а не сам запит.
 ///
-/// ⚠ Пояс проєкту будівника — <c>Asia/Almaty</c> (UTC+5 або +6 залежно від
-/// редакції бази поясів), тож межі періоду 202601 в UTC — вечір 31 грудня і
-/// вечір 31 січня. Саме тому точки поруч із межами поставлено за UTC-моментами
+/// ⚠ Пояс проєкту будівника — <c>Asia/Atyrau</c> (UTC+5 без переходів), тож
+/// межі періоду 202601 в UTC — вечір 31 грудня і вечір 31 січня. Саме тому точки поруч із межами поставлено за UTC-моментами
 /// місцевої опівночі, а не за опівніччю UTC:
 /// тест, що ставив би точки на опівніч UTC, не розрізнив би пояс проєкту й UTC.
 ///
@@ -38,11 +37,13 @@ public sealed class MaterializePeriodBoundsTests(SqlServerFixture sql)
 
     /// <summary>Опівніч 1 січня 2026 в поясі проєкту будівника, у UTC.</summary>
     /// <remarks>
-    /// ⚠ Рахується з бази поясів платформи, а не константою: Казахстан перейшов
-    /// з UTC+6 на UTC+5 у 2024-му, і база поясів на різних машинах (Windows ICU,
-    /// Linux tzdata) може мати будь-яку з двох редакцій. Константа 19:00 UTC
-    /// виявилась хибною вже на першій машині (там +6). Незалежність від
-    /// <c>Period.UtcBounds</c> збережено: тут пряме <c>ConvertTimeToUtc</c>.
+    /// ⚠ Рахується з бази поясів платформи, а не константою: незалежність від
+    /// <c>Period.UtcBounds</c> збережено — тут пряме <c>ConvertTimeToUtc</c>.
+    /// Раніше пояс був <c>Asia/Almaty</c>, який Казахстан перевів з UTC+6 на
+    /// UTC+5 у 2024-му, і база поясів на різних машинах (Windows, Linux tzdata)
+    /// мала будь-яку з двох редакцій — константа 19:00 UTC виявилась хибною вже
+    /// на першій машині (там +6). Тепер <c>Asia/Atyrau</c> (+5 без переходів),
+    /// але обчислення лишається з бази: воно і є еталоном (F-4).
     /// </remarks>
     private static readonly DateTime JanStartUtc = LocalMidnightUtc(new DateTime(2026, 1, 1));
 
@@ -52,7 +53,7 @@ public sealed class MaterializePeriodBoundsTests(SqlServerFixture sql)
     private static DateTime LocalMidnightUtc(DateTime local)
         => TimeZoneInfo.ConvertTimeToUtc(
             DateTime.SpecifyKind(local, DateTimeKind.Unspecified),
-            TimeZoneInfo.FindSystemTimeZoneById("Asia/Almaty"));
+            TimeZoneInfo.FindSystemTimeZoneById("Asia/Atyrau"));
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]

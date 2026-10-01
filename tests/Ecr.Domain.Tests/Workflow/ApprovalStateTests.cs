@@ -27,7 +27,6 @@ public sealed class ApprovalStateTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
-    [Trait("Requirement", "ФВ-5.13")]
     public void Reopen_без_причини_відхиляється()
     {
         var state = Submitted();
@@ -41,7 +40,6 @@ public sealed class ApprovalStateTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
-    [Trait("Requirement", "ФВ-5.12")]
     public void Перехід_Approved_у_Draft_можливий_лише_через_Reopen()
     {
         var state = Submitted();

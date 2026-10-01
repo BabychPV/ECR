@@ -33,7 +33,11 @@ public sealed class ListRegistriesHandler(
 
         var definitions = await registries.ListDefinitionsAsync(ct).ConfigureAwait(false);
 
+        // ⛔ S18: довідник із явною забороною в переліку немає — глобальне право його не повертає.
+        var profile = await access.BuildProfileAsync(currentUser.UserId!.Value, ct).ConfigureAwait(false);
+
         return definitions
+            .Where(d => !RegistryAccess.IsDenied(profile, d.Id))
             .Select(d => new RegistryDefDto(
                 d.Id,
                 d.Code,
@@ -342,47 +346,23 @@ public sealed class DeleteRegistryEntryHandler(
                 "Анонімний запит не змінює довідники.",
                 new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.anonymousWrite" });
 
-        // ⚠ Запис читається ДО перевірки права: грант (A7-58) видається на
-        // RegistryDefId, а його знає лише запис (той самий порядок, що
-        // SetEntryValidityHandler і DeleteDocumentHandler).
-        var entry = await registries.FindEntryAsync(registryEntryId, ct).ConfigureAwait(false)
-            ?? throw new NotFoundException(
-                "ECR-REG-0404",
-                $"Запису довідника {registryEntryId} не існує.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-REG-0404.registryEntry",
-                    ["entryId"] = registryEntryId.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                });
-
-        // Глобальне право АБО ресурсний грант рівня Write на довідник запису.
+        // ⛔ S18: спершу довідник ЗА КОДОМ з маршруту і право на нього, лише потім запис. Доти запис
+        // читався першим і право питалось на довідник ЗАПИСУ: запис схованого забороною довідника
+        // відповідав `404 registryId` з його `registryDefId`, без гранта — `403`, а неіснуючий —
+        // `404 registryEntry`. Три різні відповіді розкривали, що запис є і де він живе.
+        var lookup = new RegistryLookup(registries, registryCode);
         await RegistryAccess
-            .RequireAsync(access, currentUser, Permission, GrantLevel.Write, entry.RegistryDefId, ct)
+            .RequireAsync(access, currentUser, Permission, GrantLevel.Write, lookup, ct)
             .ConfigureAwait(false);
 
-        // ⚠ Опис читається ДО перевірки посилань і до видалення — він потрібен
-        // двічі: спершу щоб звірити належність довіднику, потім щоб підняти
-        // ревізію даних. Другого читання нижче немає навмисно.
-        var definition = await registries.FindDefinitionByIdAsync(entry.RegistryDefId, ct).ConfigureAwait(false);
-        if (definition is null
-            || !string.Equals(definition.Code, registryCode, StringComparison.OrdinalIgnoreCase))
-        {
-            throw new NotFoundException(
-                "ECR-REG-0404",
-                $"Запису {registryEntryId} у довіднику «{registryCode}» не існує.",
+        var definition = await lookup.RequireAsync(ct).ConfigureAwait(false);
+        var entry = await registries.FindEntryAsync(registryEntryId, ct).ConfigureAwait(false);
 
-                // ⚠ Ключ той самий, що й у решти «запису не існує»: для того,
-                // хто питає, факт один — записа з таким Id тут немає. Заводити
-                // окремий рядок каталогу заради того, що довідник у шляху
-                // чужий, означало б розповісти про внутрішній устрій замість
-                // відповіді (`ФВ-14.9a`).
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-REG-0404.registryEntry",
-                    ["entryId"] = registryEntryId.ToString(
-                        System.Globalization.CultureInfo.InvariantCulture),
-                    ["registryCode"] = registryCode,
-                });
+        // ⚠ Ідентифікатор запису наскрізний по всіх довідниках: запис ЧУЖОГО довідника — та сама
+        // `404`, що й неіснуючий, а не видалення «бо id збігся».
+        if (entry is null || entry.RegistryDefId != definition.Id)
+        {
+            throw RegistryAccess.EntryNotFound(registryEntryId, registryCode);
         }
 
         // ⛔ D-211: запис External-довідника вручну не видаляється — master AF.

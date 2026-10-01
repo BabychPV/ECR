@@ -32,11 +32,6 @@ export interface PendingEdit {
   baseVersion: string | null;
 }
 
-/** Ключ комірки в накопичувачі. */
-function keyOf(edit: Pick<PendingEdit, 'rowKey' | 'columnCode'>): string {
-  return `${edit.rowKey}:${edit.columnCode}`;
-}
-
 /**
  * Збирає накопичені зміни в один запит.
  *
@@ -161,6 +156,15 @@ export function applyPatchLocally(
     queryKey: queryKeys.slices.one(request.tableInstanceId, request.periodKey),
     refetchType: 'none',
   });
+
+  // ⛔ `ФВ-2.16`: значок «поза вікном» — за `import()`, не статично (`D-132`,
+  // коментар `outOfWindowMarks.ts`); порожня відповідь модуля не тягне.
+  const outOfWindow = response.outOfWindow ?? [];
+  if (outOfWindow.length > 0) {
+    void import('./outOfWindowMarks').then((marks) =>
+      marks.recordOutOfWindow(request.tableInstanceId, request.periodKey, outOfWindow),
+    );
+  }
 }
 
 /**
@@ -332,7 +336,7 @@ export function moreConflictsOf(error: EcrApiError): number {
 export const RecalculationPollMs = 2000;
 
 /** Видимий підсумок перерахунку для статус-рядка сітки. */
-export interface RecalculationStatus {
+interface RecalculationStatus {
   /** Стан задачі; `undefined` — відповіді ще немає. */
   state: string | undefined;
 
@@ -518,6 +522,3 @@ export function sendPatchBeacon(documentId: number, request: PatchCellsRequest):
     swallow();
   }
 }
-
-/** Ключ комірки — експортується, щоб накопичувач і grid не розходилися. */
-export { keyOf as cellEditKey };

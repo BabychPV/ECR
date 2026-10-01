@@ -1,6 +1,7 @@
 using Ecr.Application.Ports;
 using Ecr.Application.Errors;
 using Ecr.Domain.Abstractions;
+using Microsoft.Extensions.Logging;
 
 namespace Ecr.Application.Templates;
 
@@ -13,7 +14,7 @@ namespace Ecr.Application.Templates;
 /// Публікація або проходить цілком, або відхиляється з переліком проблем.
 /// Часткова публікація неможлива за побудовою.
 /// </remarks>
-public sealed class PublishTemplateVersionHandler(
+public sealed partial class PublishTemplateVersionHandler(
     IRepository<Domain.Entities.Configuration.TemplateVersion, int> versions,
     ITemplateVersionStore versionStore,
     IFormulaEngine formulaEngine,
@@ -24,7 +25,10 @@ public sealed class PublishTemplateVersionHandler(
     Common.ICurrentUser currentUser,
     IAuditWriter audit,
     IUnitOfWork uow,
-    IClock clock)
+    IClock clock,
+    IReportViewGenerator reportViews,
+    ILogger<PublishTemplateVersionHandler>? logger = null,
+    IReportViewStatus? viewStatus = null)
 {
     /// <summary>Право на публікацію версії шаблону (`02-contracts.md` §9).</summary>
     public const string Permission = "Template.Publish";
@@ -78,6 +82,9 @@ public sealed class PublishTemplateVersionHandler(
             ct).ConfigureAwait(false);
 
         await metadataCache.InvalidateAsync(templateVersionId, ct).ConfigureAwait(false);
+
+        // ⛔ ПІСЛЯ коміту й поза транзакцією: збій вʼюх публікацію не відкочує.
+        await GenerateViewsBestEffortAsync(templateVersionId, ct).ConfigureAwait(false);
     }
 
     /// <summary>Публікація під блоком рядка версії, усередині транзакції.</summary>
@@ -200,7 +207,44 @@ public sealed class PublishTemplateVersionHandler(
             ct).ConfigureAwait(false);
 
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+
     }
+
+    /// <summary>
+    /// Вʼюхи сирих даних для SSRS (ФВ-10.2, ФВ-10.4) — ПІСЛЯ коміту публікації,
+    /// «найкращим зусиллям».
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Рішення координатора 2026-09-30: SSRS-шар другорядний, публікація — ядро.
+    /// Раніше виклик ішов у тій самій транзакції, і таблиця &gt; 250 колонок
+    /// (50422) чи зіткнення імен (50409) відкочували публікацію. Тепер збій —
+    /// Warning із причиною (вона несе шаблон, версію, аркуш і таблицю) і картка
+    /// <c>reportviews</c> на <c>/health/ready</c> (Degraded); повтор — на старті й
+    /// <c>EXEC rpt.usp_GenerateTemplateViews</c> (runbook). DDL робить процедура (D-66).
+    /// </remarks>
+    private async Task GenerateViewsBestEffortAsync(int templateVersionId, CancellationToken ct)
+    {
+        try
+        {
+            await reportViews.GenerateAsync(templateVersionId, ct).ConfigureAwait(false);
+        }
+#pragma warning disable CA1031 // Найкраще зусилля: будь-який збій вʼюх не має ламати вже закомічену публікацію.
+        catch (Exception ex) when (ex is not OperationCanceledException)
+#pragma warning restore CA1031
+        {
+            var code = viewStatus?.Snapshot().FirstOrDefault(f => f.TemplateVersionId == templateVersionId)?.Code;
+            if (logger is not null)
+            {
+                LogViewsFailed(logger, templateVersionId, code, ex.Message);
+            }
+        }
+    }
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "Публікація версії {TemplateVersionId} збережена, але вʼюхи rpt.v_* не створено (код {Code}): {Reason}. "
+            + "SSRS не бачить цієї версії, доки причину не усунуто; повтор — старт застосунку чи EXEC rpt.usp_GenerateTemplateViews.")]
+    private static partial void LogViewsFailed(ILogger logger, int templateVersionId, int? code, string reason);
 
     /// <summary>
     /// Виводить версію з обігу — відкат без видалення (<c>ФВ-7.8</c>).

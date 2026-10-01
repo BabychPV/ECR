@@ -52,7 +52,7 @@ public sealed class ProjectDuplicateCodeTests(SqlServerFixture sql)
         var first = new Project(
             EcrCode.Create(code), Text("First"),
             new DateOnly(2026, 1, 1), new DateOnly(2026, 12, 31),
-            version.Id, PeriodKind.Monthly, periodPolicyId: 1, "Asia/Almaty");
+            version.Id, PeriodKind.Monthly, periodPolicyId: 1, "Asia/Atyrau");
         db.Projects.Add(first);
         await new UnitOfWork(db).SaveChangesAsync(CancellationToken.None);
 
@@ -63,7 +63,7 @@ public sealed class ProjectDuplicateCodeTests(SqlServerFixture sql)
         var duplicate = new Project(
             EcrCode.Create(code), Text("Second"),
             new DateOnly(2026, 1, 1), new DateOnly(2026, 12, 31),
-            version.Id, PeriodKind.Monthly, periodPolicyId: 1, "Asia/Almaty");
+            version.Id, PeriodKind.Monthly, periodPolicyId: 1, "Asia/Atyrau");
         db2.Projects.Add(duplicate);
 
         var thrown = await Assert.ThrowsAsync<BusinessRuleException>(

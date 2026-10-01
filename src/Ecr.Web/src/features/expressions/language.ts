@@ -25,7 +25,7 @@ const Keywords = ['AND', 'OR', 'NOT', 'WHERE'] as const;
 const Literals = ['TRUE', 'FALSE', 'NULL'] as const;
 
 /** Параметри побудови мови. */
-export interface LanguageOptions {
+interface LanguageOptions {
   /** Діалект — визначає розбір `!` (`D-113`). */
   readonly dialect: ExpressionDialect;
 
@@ -279,7 +279,7 @@ export type TokenRule = readonly [RegExp, TokenAction];
  * опиниться цей файл. Структура віддається як дані і приводиться до
  * `monaco.languages.IMonarchLanguage` у місці реєстрації.
  */
-export interface MonarchLanguage {
+interface MonarchLanguage {
   readonly ignoreCase: boolean;
   readonly keywords: readonly string[];
   readonly literals: readonly string[];
@@ -289,7 +289,7 @@ export interface MonarchLanguage {
 }
 
 /** Форма налаштувань мови, якою користується цей модуль. */
-export interface LanguageConfiguration {
+interface LanguageConfiguration {
   readonly brackets: readonly (readonly [string, string])[];
   readonly autoClosingPairs: readonly {
     readonly open: string;

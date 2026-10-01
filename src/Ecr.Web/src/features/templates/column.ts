@@ -75,7 +75,7 @@ export const EditableColumnDataTypes: readonly CellDataType[] = [
 export type ColumnDefDto = Schemas['ColumnDefDto'];
 
 /** Тіло запиту `PUT …/tables/{tableId}/columns/{code}`. */
-export type SaveColumnDefRequest = Schemas['SaveColumnDefRequest'];
+type SaveColumnDefRequest = Schemas['SaveColumnDefRequest'];
 
 /**
  * Чернетка колонки в редакторі.

@@ -339,11 +339,18 @@ public sealed record ColumnResultBinding(
 /// <summary>Свіжість результатів методологій документа за період (F-05).</summary>
 /// <param name="CalculatedAt">Коли завершився прогін, що дав актуальні числа.</param>
 /// <param name="InputsChangedAt">
-/// Остання зміна ВХОДІВ (ручний запис, імпорт) після початку цього прогону;
-/// <c>null</c> — числа відповідають даним.
+/// Остання зміна ВХОДІВ (ручний запис, імпорт) або довідника, який читають методології цього
+/// документа, після початку цього прогону (RT-25); <c>null</c> — числа відповідають даним.
 /// </param>
-public sealed record CalculationFreshness(DateTime? CalculatedAt, DateTime? InputsChangedAt)
+/// <param name="ChangedRegistries">
+/// Коди довідників, змінених після прогону (RT-25, ФВ-9.19); порожньо — правка довідників не причина.
+/// </param>
+public sealed record CalculationFreshness(
+    DateTime? CalculatedAt, DateTime? InputsChangedAt, IReadOnlyList<string>? ChangedRegistries = null)
 {
+    /// <summary>Довідники, змінені після прогону; ніколи не <c>null</c>.</summary>
+    public IReadOnlyList<string> ChangedRegistryCodes => ChangedRegistries ?? [];
+
     /// <summary>Чи змінилися входи після розрахунку — числа застарілі.</summary>
     public bool IsStale => InputsChangedAt is not null;
 }

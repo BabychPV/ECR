@@ -304,6 +304,14 @@ public interface IJobProgress
 /// Id автора; <c>null</c> — системна задача. Заповнює <c>GetJobStatusHandler</c>:
 /// тіло бачить лише автор або власник <c>System.ViewHealth</c>.
 /// </param>
+/// <param name="FanOut">
+/// Підсумок дочірніх задач, розкладених цією (P4); <c>null</c> — дочірніх немає.
+/// Заповнює <c>GetJobStatusHandler</c>.
+/// </param>
+/// <param name="EffectiveState">
+/// Похідний стан для оператора: <c>FannedOut</c> / <c>Succeeded</c> /
+/// <c>SucceededWithErrors</c>; <c>null</c> — як <see cref="State"/>.
+/// </param>
 public sealed record JobStatus(
     string JobId,
     string State,
@@ -317,7 +325,59 @@ public sealed record JobStatus(
     string? ErrorCode = null,
     long? DocumentId = null,
     string? ResultUrl = null,
-    int? CreatedByUserId = null);
+    int? CreatedByUserId = null,
+    FanOutStatus? FanOut = null,
+    string? EffectiveState = null);
+
+/// <summary>Ідентифікатор поточної задачі; його несе канал прогресу воркера.</summary>
+/// <remarks>Потрібен задачі, що розкладає роботу на дочірні, щоб позначити їх своїм <c>JobId</c>.</remarks>
+public interface IJobIdentity
+{
+    /// <summary>Ідентифікатор задачі, що виконується.</summary>
+    public string JobId { get; }
+}
+
+/// <summary>
+/// Підсумок дочірніх задач розкладу (P4 ФВ-9.8): скільки розкладено і що з ними зараз.
+/// </summary>
+/// <param name="Total">Скільки дочірніх задач позначено цим батьком.</param>
+/// <param name="Queued">У черзі.</param>
+/// <param name="Running">Виконуються.</param>
+/// <param name="Succeeded">Виконано.</param>
+/// <param name="Failed">Провалено або скасовано.</param>
+/// <remarks>
+/// ⛔ Батьківська задача завершується, коли лише РОЗКЛАДЕНО дочірні, — це не
+/// «пораховано». Похідний стан рахується при читанні (схеми немає): батьківський
+/// збережений стан лишається <c>Succeeded</c> і не займає слот пулу.
+/// </remarks>
+public sealed record FanOutStatus(int Total, int Queued, int Running, int Succeeded, int Failed)
+{
+    /// <summary>Розкладено, дочірні ще не завершились.</summary>
+    public const string StateFannedOut = "FannedOut";
+
+    /// <summary>Усі дочірні виконано.</summary>
+    public const string StateSucceeded = "Succeeded";
+
+    /// <summary>Усі дочірні завершились, але частина з помилками.</summary>
+    public const string StateSucceededWithErrors = "SucceededWithErrors";
+
+    /// <summary>Похідний стан батька за його збереженим станом.</summary>
+    /// <param name="parentState">Збережений стан батька.</param>
+    public string EffectiveStateOf(string parentState)
+    {
+        if (!string.Equals(parentState, "Succeeded", StringComparison.Ordinal))
+        {
+            return parentState;
+        }
+
+        if (Queued + Running > 0 || Succeeded + Failed < Total)
+        {
+            return StateFannedOut;
+        }
+
+        return Failed > 0 ? StateSucceededWithErrors : StateSucceeded;
+    }
+}
 
 /// <summary>
 /// Маркер задачі перерахунку.

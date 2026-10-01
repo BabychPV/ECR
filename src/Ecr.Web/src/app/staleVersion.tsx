@@ -58,7 +58,7 @@ let stale = false;
  * - `failed` — щось лишилось (відмова або таймаут): перезавантаження його
  *   викине, і банер каже це прямо.
  */
-export type StaleSaveState = 'none' | 'saving' | 'saved' | 'failed';
+type StaleSaveState = 'none' | 'saving' | 'saved' | 'failed';
 
 let saveState: StaleSaveState = 'none';
 
@@ -74,7 +74,7 @@ export function isStaleVersion(): boolean {
 }
 
 /** Підписка на зміну стану; повертає відписку. */
-export function subscribeStaleVersion(listener: () => void): () => void {
+function subscribeStaleVersion(listener: () => void): () => void {
   listeners.add(listener);
   return () => {
     listeners.delete(listener);
@@ -95,7 +95,7 @@ function markStaleVersion(): void {
 }
 
 /** Знімок стану збереження для `useSyncExternalStore`. */
-export function staleSaveState(): StaleSaveState {
+function staleSaveState(): StaleSaveState {
   return saveState;
 }
 
@@ -131,7 +131,7 @@ export function resetStaleVersion(): void {
  * @param settleTimeoutMs Скільки чекати на результат збереження — див.
  *   `UnsavedSettleMs`; проп існує заради тестів.
  */
-export function watchPreloadErrors(settleTimeoutMs: number = UnsavedSettleMs): () => void {
+function watchPreloadErrors(settleTimeoutMs: number = UnsavedSettleMs): () => void {
   const onPreloadError = (): void => {
     if (stale) return;
 

@@ -33,6 +33,7 @@ public sealed class SecurityController(
     Ecr.Application.Security.ReplaceUserRolesHandler replaceRoles,
     Ecr.Application.Security.SetUserEmailHandler setEmail,
     Ecr.Application.Security.GetAccessDiagnosticsHandler accessDiagnostics,
+    Ecr.Application.Security.GetEffectiveAccessHandler effectiveAccess,
     Ecr.Application.Security.ResetUserPasswordHandler resetPassword,
     Ecr.Application.Security.SetUserLockHandler setLock,
     Ecr.Domain.Abstractions.IClock clock,
@@ -80,6 +81,26 @@ public sealed class SecurityController(
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> UserGroups(int id, CancellationToken ct)
         => Ok(await accessDiagnostics.HandleAsync(id, ct).ConfigureAwait(false));
+
+    /// <summary>
+    /// Розріз «ресурс → підсумковий рівень → який грант якої ролі його дав» (ФВ-6.16, D-220).
+    /// Право <c>Security.ManageUsers</c>.
+    /// </summary>
+    /// <param name="id">Обліковий запис, доступ якого пояснюємо.</param>
+    /// <param name="resource">Ресурс: <c>Registry:{id}</c> або <c>Project:{id}</c>.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⚠ Нічого не вирішує: підсумковий рівень дає той самий профіль доступу, що й усі рішення,
+    /// а внески (роль, призначення, область, заборона) лише пояснюють його.
+    /// </remarks>
+    [HttpGet("security/users/{id:int}/effective-access")]
+    [ProducesResponseType<Ecr.Application.Security.EffectiveAccessView>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> UserEffectiveAccess(
+        int id, [FromQuery] string? resource, CancellationToken ct)
+        => Ok(await effectiveAccess.HandleAsync(id, resource, ct).ConfigureAwait(false));
 
     /// <summary>Перелік ролей. Право <c>Security.ManageRoles</c>.</summary>
     [HttpGet("roles")]

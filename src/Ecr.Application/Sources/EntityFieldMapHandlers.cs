@@ -4,6 +4,7 @@ using Ecr.Application.Common;
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
+using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.External;
 using Ecr.Domain.Errors;
 
@@ -30,10 +31,16 @@ namespace Ecr.Application.Sources;
 public sealed class CreateEntityFieldMapHandler(
     ICollectionStore sources,
     IAccessDecisionService access,
-    ICurrentUser currentUser)
+    ICurrentUser currentUser,
+    IUnitOfWork uow,
+    IAuditWriter audit,
+    IClock clock)
 {
     /// <summary>Право на керування інтеграцією (`02-contracts.md` §9).</summary>
     public const string Permission = "Integration.Manage";
+
+    /// <summary>Операція в журналі структурних змін (<c>ФВ-12.10</c>).</summary>
+    public const string AuditOperation = "CreateEntityFieldMap";
 
     /// <summary>Заводить мапінг.</summary>
     /// <param name="sourceEntityId">Сутність джерела.</param>
@@ -88,9 +95,20 @@ public sealed class CreateEntityFieldMapHandler(
             map.SetMaterialization(command.TargetRowKey, command.Aggregation);
         }
 
-        var created = await sources.AddFieldMapAsync(map, ct).ConfigureAwait(false);
+        // ФВ-12.10: створення мапінгу лишає слід у журналі структурних змін в одній транзакції із записом.
+        EntityFieldMap? created = null;
+        await uow.ExecuteInTransactionAsync(async innerCt =>
+        {
+            created = await sources.AddFieldMapAsync(map, innerCt).ConfigureAwait(false);
 
-        return Map(created);
+            await IntegrationConfigAudit.WriteAsync(
+                audit, clock, currentUser, IntegrationConfigAudit.FieldMapType, created.Id, AuditOperation,
+                oldJson: null, newJson: IntegrationConfigAudit.Snapshot(created),
+                reason: $"Мапінг поля «{created.SourceField}» сутності {sourceEntityId} створено.", innerCt)
+                .ConfigureAwait(false);
+        }, ct).ConfigureAwait(false);
+
+        return Map(created!);
     }
 
     /// <summary>Будує мапінг на потрібний вид цілі, перевіривши, що вона існує.</summary>
@@ -133,7 +151,7 @@ public sealed class CreateEntityFieldMapHandler(
                         });
                 }
 
-                await RequireProjectGrantsAsync(profile, columnDefId, ct).ConfigureAwait(false);
+                await ColumnProjectGrants.RequireManageAsync(sources, profile, columnDefId, ct).ConfigureAwait(false);
 
                 return EntityFieldMap.ToColumn(sourceEntityId, command.SourceField, columnDefId);
 
@@ -213,44 +231,6 @@ public sealed class CreateEntityFieldMapHandler(
                         ["messageKey"] = "err.ECR-REQ-0422.entityFieldMapTargetKindUnknown",
                         ["targetKind"] = command.TargetKind.ToString(),
                     });
-        }
-    }
-
-    /// <summary>
-    /// Мапінг на колонку — це запис у документи КОЖНОГО проєкту, що
-    /// використовує колонку: на кожен потрібен грант <c>Manage</c> (S3).
-    /// </summary>
-    /// <remarks>
-    /// ⛔ Збір пише від імені integration writer, який має <c>Write</c> усюди,
-    /// де немає явного <c>IsDeny</c>. Без цієї перевірки <c>Integration.Manage</c>
-    /// означало «пиши довільні значення у відкриті періоди будь-якого проєкту»:
-    /// підмінене джерело плюс мапінг. Грант — на конкретний проєкт, як в
-    /// активації проєкту (Q-179): глобальне право каже «керує інтеграцією»,
-    /// грант — «саме цими проєктами».
-    ///
-    /// ⚠ Рішення: колонку, якої не використовує жоден проєкт, мапити МОЖНА —
-    /// мапінг нікого не зачіпає. Вимога глобального права тут закрила б
-    /// налаштування нової версії шаблону до появи першого проєкту.
-    ///
-    /// ⚠ Відмова називає ПЕРШИЙ проєкт без гранта (найменший id), а не
-    /// перелік: перелік чужих проєктів розкривав би, де ще живе шаблон.
-    /// </remarks>
-    private async Task RequireProjectGrantsAsync(AccessProfile profile, int columnDefId, CancellationToken ct)
-    {
-        var projects = await sources.FindProjectIdsUsingColumnAsync(columnDefId, ct).ConfigureAwait(false);
-
-        foreach (var projectId in projects.Order())
-        {
-            if (profile.LevelFor(Domain.Enums.ResourceKind.Project, projectId) < Domain.Enums.GrantLevel.Manage)
-            {
-                throw new AccessDeniedException(
-                    "ECR-AUTH-0403", $"Немає гранта Manage на проєкт {projectId}, у який писав би мапінг.",
-                    new Dictionary<string, object?>
-                    {
-                        ["messageKey"] = "err.ECR-AUTH-0403.noProjectManageGrant",
-                        ["projectId"] = projectId.ToString(CultureInfo.InvariantCulture),
-                    });
-            }
         }
     }
 

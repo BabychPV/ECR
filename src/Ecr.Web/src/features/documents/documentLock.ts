@@ -20,7 +20,7 @@ type ProjectStatus = components['schemas']['ProjectStatus'];
 export type DocumentLock = 'projectArchived' | 'periodClosed' | 'periodNotOpen' | 'sheetSubmitted' | 'sheetApproved';
 
 /** Що відомо про документ для рішення. `undefined` — ще не прочитано. */
-export interface DocumentLockFacts {
+interface DocumentLockFacts {
   readonly projectStatus: ProjectStatus | undefined;
   readonly periodState: PeriodState | undefined;
   readonly sheetState: string;

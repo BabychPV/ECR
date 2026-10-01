@@ -48,6 +48,7 @@ public sealed class RegFieldValidationRuleTests
     [InlineData(5)]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
     [Trait("Requirement", "ФВ-5.8")]
+    [Trait("Requirement", "ФВ-5.9")]
     [Trait("Finding", "D16-04")]
     public async Task Коміркове_правило_з_REGFIELD_рахує_поле_довідника(int limit)
     {
@@ -91,6 +92,7 @@ public sealed class RegFieldValidationRuleTests
     [InlineData(5)]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
     [Trait("Requirement", "ФВ-5.1")]
+    [Trait("Requirement", "ФВ-5.9")]
     [Trait("Finding", "D16-04")]
     public async Task Правило_рядка_з_REGFIELD_над_long_Lookup(int limit)
     {

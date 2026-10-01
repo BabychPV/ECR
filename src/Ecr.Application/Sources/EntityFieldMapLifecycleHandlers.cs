@@ -76,6 +76,8 @@ public sealed class SetEntityFieldMapPausedHandler(
 
         // ⛔ Перехід ухвалює ДОМЕН: повторна пауза — `ECR-INT-0409`, і саме
         // суфікс `-0409` робить із нього 409, а не 422.
+        var before = IntegrationConfigAudit.Snapshot(map);
+
         if (paused)
         {
             map.Pause();
@@ -85,7 +87,19 @@ public sealed class SetEntityFieldMapPausedHandler(
             map.Resume();
         }
 
-        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+        // ФВ-12.10: старий і новий стан мапінгу — у журналі структурних змін, в одній транзакції зі зміною.
+        await uow.ExecuteInTransactionAsync(async innerCt =>
+        {
+            await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+            await IntegrationConfigAudit.WriteAsync(
+                audit, clock, currentUser, IntegrationConfigAudit.FieldMapType, map.Id,
+                paused ? PausedEventType : ResumedEventType,
+                before, IntegrationConfigAudit.Snapshot(map),
+                paused
+                    ? $"Мапінг поля «{map.SourceField}» призупинено."
+                    : $"Мапінг поля «{map.SourceField}» повернено у збір.",
+                innerCt).ConfigureAwait(false);
+        }, ct).ConfigureAwait(false);
 
         // ⛔ Журнал — ПІСЛЯ збереження: `IAuditWriter` комітить власним
         // підключенням одразу, тож запис перед збереженням лишив би доказ
@@ -201,10 +215,20 @@ public sealed class AcceptSourceUnitChangeHandler(
                 });
         }
 
+        var before = IntegrationConfigAudit.Snapshot(map);
         var previousUnitId = map.AcceptSourceUnitChange(requestedSourceUnitId);
         var newSourceUnitId = map.SourceUnitId!.Value;
 
-        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+        // ФВ-12.10: старий і новий стан мапінгу — у журналі структурних змін, в одній транзакції зі зміною.
+        await uow.ExecuteInTransactionAsync(async innerCt =>
+        {
+            await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+            await IntegrationConfigAudit.WriteAsync(
+                audit, clock, currentUser, IntegrationConfigAudit.FieldMapType, map.Id, AcceptedEventType,
+                before, IntegrationConfigAudit.Snapshot(map),
+                $"Мапінг поля «{map.SourceField}»: прийнято нову одиницю джерела.",
+                innerCt).ConfigureAwait(false);
+        }, ct).ConfigureAwait(false);
 
         // Коди читаються ПІСЛЯ збереження й обидва: журнал має відповісти на
         // «з якої на яку» без другого запиту в довідник, якого на той момент
@@ -258,6 +282,7 @@ public sealed class AcceptSourceUnitChangeHandler(
 public sealed class DeleteEntityFieldMapHandler(
     ICollectionStore sources,
     IAccessDecisionService access,
+    IUnitOfWork uow,
     IAuditWriter audit,
     ICurrentUser currentUser,
     IClock clock)
@@ -310,7 +335,16 @@ public sealed class DeleteEntityFieldMapHandler(
         var sourceEntityId = map.SourceEntityId;
         var sourceField = map.SourceField;
 
-        await sources.RemoveFieldMapAsync(map, ct).ConfigureAwait(false);
+        // ФВ-12.10: що саме зникло (старий стан) — у журналі структурних змін, в одній транзакції з видаленням.
+        var removed = IntegrationConfigAudit.Snapshot(map);
+        await uow.ExecuteInTransactionAsync(async innerCt =>
+        {
+            await sources.RemoveFieldMapAsync(map, innerCt).ConfigureAwait(false);
+            await IntegrationConfigAudit.WriteAsync(
+                audit, clock, currentUser, IntegrationConfigAudit.FieldMapType, fieldMapId, DeletedEventType,
+                removed, newJson: null, $"Мапінг поля «{sourceField}» сутності {sourceEntityId} видалено.", innerCt)
+                .ConfigureAwait(false);
+        }, ct).ConfigureAwait(false);
 
         await audit.WriteSecurityEventAsync(
             new SecurityEventRecord(

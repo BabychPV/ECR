@@ -63,12 +63,18 @@ public sealed class BudgetMetricsFilterTests
     public async Task Лічильник_комірок_бере_РЕАЛЬНЕ_число_а_не_нуль()
     {
         // ⛔ Друга половина §9: до фіксу тут стояв літеральний `cellCount: 0`.
+        // Ізоляція: Meter "Ecr" є і в інших тестах процесу (WebApplicationFactory, паралельні
+        // класи) — слухаємо ЛИШЕ Meter власної фабрики, а не все з ім'ям "Ecr".
+        using var meterFactory = new TestMeterFactory();
+        var metrics = new EcrMetrics(meterFactory);
+        var filter = new BudgetMetricsFilter(metrics);
+
         using var listener = new MeterListener();
         var recorded = new List<(string Metric, int? Cells)>();
 
         listener.InstrumentPublished = (instrument, l) =>
         {
-            if (instrument.Meter.Name == EcrMetrics.MeterName)
+            if (meterFactory.Owns(instrument.Meter))
             {
                 l.EnableMeasurementEvents(instrument);
             }
@@ -89,10 +95,6 @@ public sealed class BudgetMetricsFilterTests
         });
 
         listener.Start();
-
-        using var meterFactory = new TestMeterFactory();
-        var metrics = new EcrMetrics(meterFactory);
-        var filter = new BudgetMetricsFilter(metrics);
 
         var http = new DefaultHttpContext();
 
@@ -127,6 +129,8 @@ public sealed class BudgetMetricsFilterTests
     private sealed class TestMeterFactory : IMeterFactory
     {
         private readonly List<Meter> _meters = [];
+
+        public bool Owns(Meter meter) => _meters.Any(m => ReferenceEquals(m, meter));
 
         public Meter Create(MeterOptions options)
         {

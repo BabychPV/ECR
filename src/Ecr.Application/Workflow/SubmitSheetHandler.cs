@@ -68,19 +68,43 @@ public sealed class SubmitSheetHandler(
 
     // ⛔ D16-04: знімок полів довідника для `REGFIELD` у правилах — той самий,
     // що будує «Перевірити» (`TableValidation.RunAsync`).
-    IRegistryStore registries)
+    IRegistryStore registries,
+
+    // ФВ-5.19: факт підтвердження попереджень — результатна подія аудиту в тій
+    // самій транзакції, що й зріз (`IAuditWriter`, C4).
+    IAuditWriter audit)
 {
-    /// <summary>Подає аркуш на погодження.</summary>
+    /// <summary>Тип події аудиту: подавач підтвердив попередження валідації (ФВ-5.19).</summary>
+    public const string WarningsAcknowledgedEventType = "SheetSubmitWarningsAcknowledged";
+
+    /// <summary>Ключ каталогу відмови «попередження потребують підтвердження» (ФВ-5.19).</summary>
+    public const string WarningsNeedConfirmationMessageKey = "err.ECR-SUB-4221.warningsNeedConfirmation";
+
+    /// <summary>Подає аркуш на погодження без підтвердження попереджень.</summary>
     /// <param name="documentId">Документ.</param>
     /// <param name="sheetDefId">Аркуш.</param>
     /// <param name="periodKey">Період.</param>
     /// <param name="ct">Токен скасування.</param>
+    public Task HandleAsync(long documentId, int sheetDefId, int periodKey, CancellationToken ct)
+        => HandleAsync(documentId, sheetDefId, periodKey, acknowledgeWarnings: false, ct);
+
+    /// <summary>Подає аркуш на погодження.</summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="sheetDefId">Аркуш.</param>
+    /// <param name="periodKey">Період.</param>
+    /// <param name="acknowledgeWarnings">
+    /// Подавач підтвердив попередження (<c>Warning</c>) валідації (ФВ-5.19): без
+    /// підтвердження їхня наявність відхиляє подання з переліком.
+    /// </param>
+    /// <param name="ct">Токен скасування.</param>
     /// <exception cref="NotFoundException">Аркуша немає в складі документа.</exception>
     /// <exception cref="AccessDeniedException">Немає рівня <c>Submit</c>.</exception>
     /// <exception cref="BusinessRuleException">
-    /// Валідація, осиротілі рядки або застарілі результати методологій.
+    /// Валідація, осиротілі рядки, застарілі результати методологій або
+    /// непідтверджені попередження.
     /// </exception>
-    public async Task HandleAsync(long documentId, int sheetDefId, int periodKey, CancellationToken ct)
+    public async Task HandleAsync(
+        long documentId, int sheetDefId, int periodKey, bool acknowledgeWarnings, CancellationToken ct)
     {
         var userId = currentUser.UserId
                      ?? throw new AccessDeniedException(
@@ -137,7 +161,8 @@ public sealed class SubmitSheetHandler(
             async innerCt =>
             {
                 await sheetGate.EnterSubmitAsync(documentId, sheetDefId, key, innerCt).ConfigureAwait(false);
-                await SubmitUnderLockAsync(documentId, sheetDefId, periodKey, key, userId, profile, innerCt)
+                await SubmitUnderLockAsync(
+                        documentId, sheetDefId, periodKey, key, userId, profile, acknowledgeWarnings, innerCt)
                     .ConfigureAwait(false);
             },
             ct).ConfigureAwait(false);
@@ -145,11 +170,11 @@ public sealed class SubmitSheetHandler(
 
     /// <summary>
     /// Права, осиротілі рядки, валідація і зріз — під блокуванням, яке взяв
-    /// <see cref="HandleAsync"/>.
+    /// <see cref="HandleAsync(long, int, int, bool, CancellationToken)"/>.
     /// </summary>
     private async Task SubmitUnderLockAsync(
         long documentId, int sheetDefId, int periodKey, PeriodKey key, int userId, AccessProfile profile,
-        CancellationToken ct)
+        bool acknowledgeWarnings, CancellationToken ct)
     {
         var decision = await access.CanSubmitAsync(profile, documentId, sheetDefId, key, ct)
                                    .ConfigureAwait(false);
@@ -368,6 +393,9 @@ public sealed class SubmitSheetHandler(
 
         var blocking = new List<Validation.ValidationMessage>();
 
+        // ФВ-5.19: `Warning` не блокує, але потребує підтвердження подавача.
+        var warnings = new List<Validation.ValidationMessage>();
+
         // ⛔ Обов'язкова колонка (`ColumnDef.IsRequired`), якої НІКОЛИ не
         // торкались редагуванням, не лишає запису в `doc.CellValue`
         // (ФВ-3.8) — і тому не проходить через жодну перевірку на шляху
@@ -431,6 +459,7 @@ public sealed class SubmitSheetHandler(
                     .RunAsync(validation, registries, snapshot, table, cells, rowIds, headerValues, currentUser.Language, ct)
                     .ConfigureAwait(false);
                 blocking.AddRange(tableMessages.Where(m => m.Severity == ValidationSeverity.Error));
+                warnings.AddRange(tableMessages.Where(m => m.Severity == ValidationSeverity.Warning));
             }
 
             blocking.AddRange(MissingRequiredColumnMessages(table, requiredColumns, cells, rowIds));
@@ -463,18 +492,7 @@ public sealed class SubmitSheetHandler(
                 ["messageKey"] = onlyHidden
                     ? Validation.HiddenValidationIssues.MessageKey
                     : "err.ECR-SUB-4221.validationBlocked",
-                ["messages"] = shown
-                    .Select(m => new
-                    {
-                        m.RuleCode,
-                        m.Message,
-                        m.RowKey,
-                        m.ColumnCode,
-                        MessageKey = Validation.HiddenValidationIssues.IsPlaceholder(m)
-                            ? Validation.HiddenValidationIssues.MessageKey
-                            : null,
-                    })
-                    .ToList(),
+                ["messages"] = MessageDetails(shown),
             };
             if (!onlyHidden)
             {
@@ -487,6 +505,38 @@ public sealed class SubmitSheetHandler(
                     ? "Подання неможливе: є зауваження поза вашою видимістю."
                     : $"Подання неможливе: блокувальних помилок валідації — {shown.Count}.",
                 details);
+        }
+
+        // ⛔ ФВ-5.19: «Warning — з підтвердженням». Блокувальних помилок немає, але
+        // є попередження, яких подавач ще не підтвердив, — відмова з їхнім
+        // переліком (той самий код і форма тіла, що й `validationBlocked`;
+        // клієнт розрізняє за `messageKey` і показує діалог підтвердження).
+        //
+        // ⚠ Лише ВИДИМІ подавачеві: приховане попередження (таблиця/колонка під
+        // забороною читання) підтверджувати нема чого — він його не бачить, а
+        // нічого не блокуючи, воно не має й тримати подання (`HiddenValidationIssues`).
+        var shownWarnings = new List<Validation.ValidationMessage>();
+        if (warnings.Count > 0)
+        {
+            var warnScope = await access.ReadScopeAsync(profile, documentId, ct).ConfigureAwait(false);
+            DocumentReadScope? warnReadable = null;
+            shownWarnings = OrderAsOnScreen(
+                Validation.HiddenValidationIssues.ForViewer(
+                    warnings, m => (warnReadable ??= warnScope.InPeriod(key)).CanReadAt(m.TableDefId, m.ColumnCode)),
+                tables, rowIdsByTable);
+        }
+
+        if (shownWarnings.Count > 0 && !acknowledgeWarnings)
+        {
+            throw new BusinessRuleException(
+                ErrorCodes.SubmitBlocked,
+                $"Подання потребує підтвердження: попереджень валідації — {shownWarnings.Count}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = WarningsNeedConfirmationMessageKey,
+                    ["messages"] = MessageDetails(shownWarnings),
+                    ["messageCount"] = shownWarnings.Count.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
         }
 
         // ⛔ `DAT-06`. Зріз, стан аркуша й проведення в звітність — ОДНИМ
@@ -504,9 +554,23 @@ public sealed class SubmitSheetHandler(
         // (`UnitOfWork.cs:174-178`), тож це обгортка, а не переробка.
         await uow.ExecuteInTransactionAsync(
             innerCt => SubmitCoreAsync(
-                documentId, sheetDefId, periodKey, key, userId, templateVersionId, instances, headerFieldCodes, innerCt),
+                documentId, sheetDefId, periodKey, key, userId, templateVersionId, instances, headerFieldCodes,
+                shownWarnings, innerCt),
             ct).ConfigureAwait(false);
     }
+
+    /// <summary>Перелік повідомлень для тіла відмови.</summary>
+    private static List<object> MessageDetails(IEnumerable<Validation.ValidationMessage> messages)
+        => [.. messages.Select(m => (object)new
+        {
+            m.RuleCode,
+            m.Message,
+            m.RowKey,
+            m.ColumnCode,
+            MessageKey = Validation.HiddenValidationIssues.IsPlaceholder(m)
+                ? Validation.HiddenValidationIssues.MessageKey
+                : null,
+        })];
 
     /// <summary>Осиротілі рядки, які подавач має право бачити (S6).</summary>
     /// <remarks>
@@ -541,6 +605,7 @@ public sealed class SubmitSheetHandler(
         int templateVersionId,
         IReadOnlyList<TableInstanceRef> instances,
         IReadOnlyDictionary<int, string> headerFieldCodes,
+        List<Validation.ValidationMessage> acknowledgedWarnings,
         CancellationToken ct)
     {
         var state = await workflow.GetOrCreateAsync(documentId, sheetDefId, key, ct).ConfigureAwait(false);
@@ -612,6 +677,32 @@ public sealed class SubmitSheetHandler(
         await reports
             .MarkSubmittedAsync(documentId, key, userId, ct)
             .ConfigureAwait(false);
+
+        // ФВ-5.19: подавач підтвердив попередження — слід у журналі, тією самою
+        // транзакцією, що й зріз (результатна подія, C4): відкат подання не
+        // лишає підтвердження, якого не було.
+        if (acknowledgedWarnings.Count > 0)
+        {
+            await audit.WriteSecurityEventAsync(
+                new SecurityEventRecord(
+                    now,
+                    WarningsAcknowledgedEventType,
+                    TargetUserId: null,
+                    TargetRoleId: null,
+                    System.Text.Json.JsonSerializer.Serialize(new
+                    {
+                        documentId,
+                        sheetDefId,
+                        periodKey,
+                        warningCount = acknowledgedWarnings.Count,
+                        warnings = acknowledgedWarnings
+                            .Select(m => new { m.RuleCode, m.RowKey, m.ColumnCode })
+                            .ToList(),
+                    }),
+                    userId,
+                    currentUser.CorrelationId),
+                ct).ConfigureAwait(false);
+        }
 
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
     }

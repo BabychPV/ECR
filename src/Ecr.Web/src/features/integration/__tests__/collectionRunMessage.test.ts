@@ -64,6 +64,23 @@ describe('collectionRunErrorText', () => {
     );
   });
 
+  it.each([
+    ['coverageEvents.periodClosed', { state: 'Closed' }, 'state=Closed'],
+    ['coverageEvents.periodMissing', undefined, ''],
+    ['coverageEvents.pointCeiling', { field: 'F1', limit: '5000' }, 'field=F1, limit=5000'],
+    ['coverageEvents.keptManual', { cell: 'r1:c2' }, 'cell=r1:c2'],
+    ['coverageEvents.writeConflict', { cell: 'r1:c2' }, 'cell=r1:c2'],
+    ['coverageEvents.needsConfirmation', { cell: 'r1:c2' }, 'cell=r1:c2'],
+    ['coverageEvents.eventWriteFailed', { eventId: '7', reason: 'нема доступу' }, 'eventId=7, reason=нема доступу'],
+    ['coverageEvents.eventWritePartial', { eventId: '7', rowKey: 'R1' }, 'eventId=7, rowKey=R1'],
+    ['coverageEvents.eventRowNotCreated', { eventId: '7', rowKey: 'R1' }, 'eventId=7, rowKey=R1'],
+  ])('подія покриття від задачі `%s` резолвиться через каталог, а не лишається JSON', (k, p, shown) => {
+    // Без гілки в `render` ключ дав би `null` і в таблиці лишився б сирий JSON.
+    const raw = JSON.stringify(p === undefined ? { k } : { k, p });
+
+    expect(collectionRunErrorText(raw)).toBe(`⟦${k} (${shown})⟧`);
+  });
+
   it('старий рядок (сирий текст до U12) — як є', () => {
     expect(collectionRunErrorText('ECR-INT-0503: джерело недоступне')).toBe(
       'ECR-INT-0503: джерело недоступне',

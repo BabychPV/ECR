@@ -34,7 +34,7 @@ export function isRangeEdit(detail: unknown): detail is RangeEditDetail {
 }
 
 /** Результат розбору діапазону: що зберегти і що повернулось до збереженого. */
-export interface CapturedRange {
+interface CapturedRange {
   captured: CapturedEdit[];
   /** Комірки, чиє нове значення дорівнює збереженому (`V-01`, скасування правки). */
   reverted: EditSignal[];

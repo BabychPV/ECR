@@ -53,6 +53,7 @@ public sealed partial class ReportDefinitionTests
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Architecture)]
     [Trait("Requirement", "ФВ-10.4")]
+    [Trait("Requirement", "ФВ-5.12")]
     public void Фільтр_за_статусом_стоїть_у_вьюсі_а_не_в_RDL()
     {
         // ⛔ `ФВ-10.11`: звіти для регулятора читають лише `Approved` і
@@ -62,7 +63,25 @@ public sealed partial class ReportDefinitionTests
         var views = File.ReadAllText(Path.Combine(
             SolutionRoot(), "src", "Ecr.Infrastructure", "Persistence", "Sql", "05-rpt-views.sql"));
 
-        foreach (Match view in ViewRegex.Matches(views))
+        // ⚠ Правило — про вʼюхи ЗРІЗІВ (`rpt.ReportSnapshot`). Шар сирих даних
+        // документів (`rpt.v_DocumentCells`, рішення людини 2026-09-30: «для
+        // SSRS ми маємо просто підготувати сирі дані») віддає статус аркуша
+        // КОЛОНКОЮ: сирі дані — усі, а звіт регулятору обирає статус сам.
+        var snapshotViews = ViewRegex.Matches(views)
+            .Where(v => !IsRawDocumentView(v.Groups["body"].Value))
+            .ToList();
+
+        // ⛔ Виняток — ЛИШЕ вʼюха, що читає сирі комірки `doc.CellValue`. Раніше
+        // сторож перевіряв тільки вʼюхи з `rpt.ReportSnapshot`, тож нова вʼюха
+        // над `rpt.ReportRow` (без зрізу) чи над чимось іншим оминала б
+        // фільтр мовчки. Тепер без фільтра статусу проходить лише шар сирих
+        // документів; усе інше в файлі — під правилом.
+        foreach (var raw in ViewRegex.Matches(views).Where(v => IsRawDocumentView(v.Groups["body"].Value)))
+        {
+            Assert.DoesNotContain("rpt.Report", raw.Groups["body"].Value, StringComparison.Ordinal);
+        }
+
+        foreach (var view in snapshotViews)
         {
             var body = view.Groups["body"].Value;
 
@@ -79,8 +98,11 @@ public sealed partial class ReportDefinitionTests
 
         // Порожній файл теж пройшов би цикл — а він означав би, що регулятор
         // не бачить нічого.
-        Assert.NotEmpty(ViewRegex.Matches(views));
+        Assert.NotEmpty(snapshotViews);
     }
+
+    private static bool IsRawDocumentView(string body) =>
+        body.Contains("doc.CellValue", StringComparison.Ordinal);
 
     private static string SolutionRoot()
     {

@@ -26,6 +26,7 @@ import type {
   SimulationResultDto,
 } from '@/api/types';
 import { createMethodology } from '@/features/methodologies/api';
+import { MethodologyPackageImport } from '@/features/methodologies/MethodologyPackageImport';
 import { showPublishError } from '@/features/methodologies/publishError';
 import { localized } from '@/shared/i18n/localized';
 import { can, useSession } from '@/shared/session/useSession';
@@ -162,11 +163,17 @@ export function MethodologiesPage(): JSX.Element {
       <PageHeader
         title={t('methodologies.title')}
         actions={
-          can(session.data, 'Calculation.EditFormula') && (
-            <Button variant="default" onClick={() => setCreating(true)}>
-              {t('methodologies.newMethodology')}
-            </Button>
-          )
+          <Group gap="xs">
+            {/* Імпорт пакета з AF заводить і формули, і константи — тому обидва права. */}
+            {can(session.data, 'Calculation.EditFormula') && can(session.data, 'Calculation.EditConstant') && (
+              <MethodologyPackageImport />
+            )}
+            {can(session.data, 'Calculation.EditFormula') && (
+              <Button variant="default" onClick={() => setCreating(true)}>
+                {t('methodologies.newMethodology')}
+              </Button>
+            )}
+          </Group>
         }
       />
       <AsyncBoundary<MethodologyDto[]>

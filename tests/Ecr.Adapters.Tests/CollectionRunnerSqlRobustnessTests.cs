@@ -181,6 +181,7 @@ public sealed class CollectionRunnerSqlRobustnessTests(SqlServerFixture sql)
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Finding", "B4")]
+    [Trait("Requirement", "ФВ-11.3")]
     public async Task Два_паралельні_збори_однієї_сутності_завершуються_обидва_без_дублікатів()
     {
         // ⛔ Шлях (в): ручний «зібрати зараз» поруч із плановим. Обидва джерела

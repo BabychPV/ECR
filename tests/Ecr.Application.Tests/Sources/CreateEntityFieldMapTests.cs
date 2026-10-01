@@ -43,10 +43,17 @@ public sealed class CreateEntityFieldMapTests
     private readonly ICollectionStore _sources = Substitute.For<ICollectionStore>();
     private readonly IAccessDecisionService _access = Substitute.For<IAccessDecisionService>();
     private readonly ICurrentUser _user = Substitute.For<ICurrentUser>();
+    private readonly IUnitOfWork _uow = Substitute.For<IUnitOfWork>();
+    private readonly IAuditWriter _audit = Substitute.For<IAuditWriter>();
+    private readonly IClock _clock = Substitute.For<IClock>();
 
     public CreateEntityFieldMapTests()
     {
         _user.UserId.Returns(9);
+
+        // Підробка UoW виконує замикання транзакції, інакше запис і журнал (ФВ-12.10) не запустилися б.
+        _uow.ExecuteInTransactionAsync(Arg.Any<Func<CancellationToken, Task>>(), Arg.Any<CancellationToken>())
+            .Returns(call => call.Arg<Func<CancellationToken, Task>>()(call.Arg<CancellationToken>()));
         _access.BuildProfileAsync(9, Arg.Any<CancellationToken>())
             .Returns(new AccessBuilder { UserId = 9 }.Permission("Integration.Manage").Build());
 
@@ -69,7 +76,28 @@ public sealed class CreateEntityFieldMapTests
             .Returns(call => call.Arg<EntityFieldMap>());
     }
 
-    private CreateEntityFieldMapHandler Handler() => new(_sources, _access, _user);
+    private CreateEntityFieldMapHandler Handler() => new(_sources, _access, _user, _uow, _audit, _clock);
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-12.10")]
+    public async Task ФВ_12_10_створення_мапінгу_пише_запис_журналу_з_новим_станом_а_відмова_ні()
+    {
+        await Handler().HandleAsync(SourceEntityId, ColumnCommand(), CancellationToken.None);
+
+        await _audit.Received(1).WriteStructureChangeAsync(
+            Arg.Is<StructureChangeRecord>(r =>
+                r.EntityType == "ext.EntityFieldMap" && r.Operation == CreateEntityFieldMapHandler.AuditOperation
+                && r.OldJson == null && r.NewJson!.Contains("Flare_01_CO", StringComparison.Ordinal)
+                && r.NewJson.Contains("\"targetKind\":\"Column\"", StringComparison.Ordinal)
+                && r.ChangedByUserId == 9),
+            Arg.Any<CancellationToken>());
+
+        _audit.ClearReceivedCalls();
+        await Assert.ThrowsAsync<NotFoundException>(
+            () => Handler().HandleAsync(999, ColumnCommand(), CancellationToken.None));
+        await _audit.DidNotReceiveWithAnyArgs().WriteStructureChangeAsync(default!, default);
+    }
 
     /// <summary>Сутність джерела, прив'язана до <paramref name="registryDefId"/>.</summary>
     private void EntityBoundTo(int? registryDefId)

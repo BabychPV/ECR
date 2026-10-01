@@ -1296,7 +1296,7 @@ CREATE TABLE doc.Project
     PeriodPolicyId      int           NOT NULL,
     YearGraceOffsetDays int           NOT NULL CONSTRAINT DF_Project_YearGrace DEFAULT(45),
     -- Пояс майданчика: у ньому рахуються межі періодів, offsets і IsLateEdit (D-68).
-    -- Значення — ІДЕНТИФІКАТОР IANA (N'Asia/Aqtau'), не Windows-ідентифікатор і не
+    -- Значення — ІДЕНТИФІКАТОР IANA (N'Asia/Atyrau'), не Windows-ідентифікатор і не
     -- зсув: зсув міняється переходом на літній час, а збережене число — ні (H-13).
     -- ⛔ DEFAULT прибраний (D2-74). Він підставляв N'Central Asia Standard Time' —
     -- Windows-ідентифікатор, і робив це мовчки для будь-якої вставки, яка колонку
@@ -2189,6 +2189,123 @@ GO
 CREATE UNIQUE INDEX UX_RowWindowValue_Current
     ON ext.RowWindowValue (PeriodKey, TableInstanceId, RowKey, ColumnDefId)
     WHERE IsCurrent = 1 ON ps_ByPeriodKey(PeriodKey);
+GO
+
+-- HSE301 M5 (FEATURE-HSE301-VIEW §4.7.3, D-186): мапінг «шаблон подій джерела →
+-- динамічна таблиця документа». Подія сама стає рядком — тому НЕ режим
+-- ext.EntityFieldMap (фіксований адресат рядка). Ціль — лише таблиця з
+-- RowMode = Dynamic, $start/$end обов'язкові: тримає домен (SourceEventMap).
+CREATE TABLE ext.SourceEventMap
+(
+    Id              int           IDENTITY(1,1) NOT NULL,
+    SourceEntityId  int           NOT NULL,   -- сутність = шаблон подій (Code — з каталогу)
+    DocumentId      bigint        NOT NULL,   -- документ ділянки, куди лягають події
+    TableDefId      int           NOT NULL,   -- лише динамічна таблиця
+    FilterAttribute nvarchar(200) NULL,       -- звуження: події лише цієї ділянки чи факела
+    FilterScope     tinyint       NULL,       -- 0 Event | 1 PrimaryElement
+    FilterValue     nvarchar(400) NULL,
+    VolumeMode      tinyint       NOT NULL,   -- 0 None | 1 EventAttribute | 2 RowWindow (§4.7.5)
+    IsActive        bit           NOT NULL CONSTRAINT DF_SEM_Act DEFAULT(1),
+    RowVersion      rowversion    NOT NULL,
+    CONSTRAINT PK_SourceEventMap PRIMARY KEY (Id),
+    -- Два мапінги того самого шаблону в ту саму таблицю писали б кожну подію двічі.
+    CONSTRAINT UQ_SourceEventMap UNIQUE (SourceEntityId, DocumentId, TableDefId),
+    CONSTRAINT FK_SEM_Entity   FOREIGN KEY (SourceEntityId) REFERENCES ext.SourceEntity (Id),
+    CONSTRAINT FK_SEM_Document FOREIGN KEY (DocumentId)     REFERENCES doc.Document (Id),
+    CONSTRAINT FK_SEM_Table    FOREIGN KEY (TableDefId)     REFERENCES cfg.TableDef (Id),
+    CONSTRAINT CK_SEM_VolumeMode CHECK (VolumeMode BETWEEN 0 AND 2),
+    -- Звуження — три значення разом або жодного.
+    CONSTRAINT CK_SEM_Filter CHECK ((FilterAttribute IS NULL AND FilterScope IS NULL AND FilterValue IS NULL)
+                                 OR (FilterAttribute IS NOT NULL AND FilterScope BETWEEN 0 AND 1 AND FilterValue IS NOT NULL))
+);
+GO
+
+-- «Атрибут → колонка». Зарезервовані атрибути: $start, $end, $name.
+CREATE TABLE ext.SourceEventFieldMap
+(
+    Id                int           IDENTITY(1,1) NOT NULL,
+    SourceEventMapId  int           NOT NULL,
+    TargetColumnDefId int           NOT NULL,
+    SourceAttribute   nvarchar(200) NOT NULL,   -- ім'я з каталогу шаблону
+    AttributeScope    tinyint       NOT NULL,   -- 0 Event | 1 PrimaryElement
+    ValueKind         tinyint       NOT NULL,   -- 0 Direct | 1 LookupByCode | 2 LookupByName | 3 ValueMap
+    SourceUnitId      int           NULL,
+    TargetUnitId      int           NULL,
+    CONSTRAINT PK_SourceEventFieldMap PRIMARY KEY (Id),
+    -- Одне поле на колонку: два атрибути в ту саму комірку — значення залежить від порядку обходу.
+    CONSTRAINT UQ_SEFM_Target UNIQUE (SourceEventMapId, TargetColumnDefId),
+    CONSTRAINT FK_SEFM_Map        FOREIGN KEY (SourceEventMapId)  REFERENCES ext.SourceEventMap (Id),
+    CONSTRAINT FK_SEFM_Column     FOREIGN KEY (TargetColumnDefId) REFERENCES cfg.ColumnDef (Id),
+    CONSTRAINT FK_SEFM_SourceUnit FOREIGN KEY (SourceUnitId)      REFERENCES uom.Unit (Id),
+    CONSTRAINT FK_SEFM_TargetUnit FOREIGN KEY (TargetUnitId)      REFERENCES uom.Unit (Id),
+    CONSTRAINT CK_SEFM_Kinds CHECK (AttributeScope BETWEEN 0 AND 1 AND ValueKind BETWEEN 0 AND 3)
+);
+GO
+
+-- Явна відповідність «значення джерела → запис довідника» (ValueKind = 3, §4.7.6).
+-- ⚠ RegistryEntryId — int, як dic.RegistryEntry.Id (у домені long, у базі int через
+-- HasConversion<int>, див. RegistryEntryConfiguration).
+CREATE TABLE ext.SourceEventValueMap
+(
+    Id                    int           IDENTITY(1,1) NOT NULL,
+    SourceEventFieldMapId int           NOT NULL,
+    SourceValue           nvarchar(400) NOT NULL,
+    RegistryEntryId       int           NOT NULL,
+    CONSTRAINT PK_SourceEventValueMap PRIMARY KEY (Id),
+    -- Зіставлення бази _CI_: «зима» і «ЗИМА» — одне значення.
+    CONSTRAINT UQ_SEVM_Value UNIQUE (SourceEventFieldMapId, SourceValue),
+    CONSTRAINT FK_SEVM_Field FOREIGN KEY (SourceEventFieldMapId) REFERENCES ext.SourceEventFieldMap (Id),
+    CONSTRAINT FK_SEVM_Entry FOREIGN KEY (RegistryEntryId)       REFERENCES dic.RegistryEntry (Id)
+);
+GO
+
+-- Подія джерела ↔ рядок: провенанс і стан синхронізації (§4.7.4).
+-- ⛔ FK на doc.TableInstance НЕМАЄ — та сама причина, що в ext.RowWindowValue
+-- (arc.usp_ArchiveYear звільняє doc.* через TRUNCATE … WITH (PARTITIONS)).
+CREATE TABLE ext.SourceEventLink
+(
+    Id                bigint        IDENTITY(1,1) NOT NULL,
+    SourceEventMapId  int           NOT NULL,
+    SourceEventId     nvarchar(200) NOT NULL,   -- ID події в джерелі — ключ синхронізації
+    PeriodKey         int           NULL,
+    TableInstanceId   bigint        NULL,
+    RowKey            nvarchar(100) NULL,       -- EF-<ID> або EF-<32 hex SHA-256>
+    EventName         nvarchar(400) NULL,
+    StartUtc          datetime2(3)  NOT NULL,
+    EndUtc            datetime2(3)  NULL,       -- NULL — подія ще триває
+    SourceModifiedUtc datetime2(3)  NULL,
+    PrimaryElement    nvarchar(200) NULL,       -- M6: первинний елемент (Location/Equipment), Trim + UPPER; NULL — старий зв'язок, заповнює синк
+    Status            nvarchar(32)  NOT NULL,
+    KeptManualJson    nvarchar(max) NULL,       -- коди колонок, лишених за людиною (D-118)
+    UnmappedJson      nvarchar(max) NULL,       -- [{column, value}] без відповідника
+    FirstSeenAt       datetime2(3)  NOT NULL,
+    LastSeenAt        datetime2(3)  NOT NULL,
+    LastSyncAt        datetime2(3)  NOT NULL,
+    RowVersion        rowversion    NOT NULL,
+    CONSTRAINT PK_SourceEventLink PRIMARY KEY (Id),
+    -- Повтор синхронізації не дублює ні зв'язку, ні рядка.
+    CONSTRAINT UQ_SEL_Event UNIQUE (SourceEventMapId, SourceEventId),
+    CONSTRAINT FK_SEL_Map FOREIGN KEY (SourceEventMapId) REFERENCES ext.SourceEventMap (Id),
+    CONSTRAINT CK_SEL_Status CHECK (Status IN (N'Synced', N'Open', N'Missing', N'PeriodClosed', N'PeriodChanged',
+                                               N'PeriodNotOpen', N'Unmapped', N'RowLimit')),
+    -- Рядок — три значення разом або жодного.
+    CONSTRAINT CK_SEL_Row CHECK ((PeriodKey IS NULL AND TableInstanceId IS NULL AND RowKey IS NULL)
+                              OR (PeriodKey IS NOT NULL AND TableInstanceId IS NOT NULL AND RowKey IS NOT NULL)),
+    -- Те саме правило, що SourceEventLink.IsTransitionAllowed: стани «рядок є»
+    -- без рядка і стани «рядка ще немає» з рядком не бувають.
+    CONSTRAINT CK_SEL_StatusRow CHECK ((Status NOT IN (N'Synced', N'Unmapped', N'Missing', N'PeriodChanged') OR TableInstanceId IS NOT NULL)
+                                   AND (Status NOT IN (N'Open', N'PeriodNotOpen', N'RowLimit') OR TableInstanceId IS NULL))
+);
+GO
+
+-- Реєстр подій (§10.4): «з якої події цей рядок».
+CREATE INDEX IX_SEL_Row ON ext.SourceEventLink (TableInstanceId, RowKey);
+GO
+
+-- M6 (міграція HSE301M6SourceEventKey): повний природний ключ події — мапінг (= шаблон) + початок + первинний
+-- елемент. Фільтрований: старі зв'язки (PrimaryElement NULL) не входять і не переписуються.
+CREATE UNIQUE INDEX UX_SEL_NaturalKey ON ext.SourceEventLink (SourceEventMapId, StartUtc, PrimaryElement)
+    WHERE PrimaryElement IS NOT NULL;
 GO
 
 CREATE TABLE ext.ConsistencyRule
@@ -3115,6 +3232,17 @@ GO
 > `.ToTable(t => t.HasTrigger("..."))` у конфігурації EF — інакше `SaveChanges`
 > падає в рантаймі (ТЗ §13.5 п.1).
 
+> ✎ **2026-09-30, D5.** Текст нижче — початковий контракт (лише `Status = 1` і
+> лише `UPDATE`). **Чинний текст — `Sql/10-triggers.sql`**: заморожена версія —
+> `Status IN (1, 2)` (Published і Deprecated); тригери `TR_ColumnDef_Immutable`,
+> `TR_RowDef_Immutable`, `TR_FormulaDef_Immutable` стоять на
+> `INSERT, UPDATE, DELETE`; версія перевіряється за СТАРОЮ і НОВОЮ таблицею
+> (перенесення `TableDefId`). Номери `THROW`: `50001` колонка (UPDATE), `50002`
+> рядок (UPDATE), `50003` формула (UPDATE/DELETE), `50004` INSERT у заморожену
+> версію, `50005` DELETE колонки/рядка; текст несе ключ
+> `[ECR-TMPL-0409 structurallyFrozen]`. Дозволено: усе в Draft; презентаційні
+> поля колонки/рядка в будь-якому стані. Тести — `FrozenVersionTriggerTests`.
+
 ```sql
 CREATE OR ALTER TRIGGER cfg.TR_ColumnDef_Immutable
 ON cfg.ColumnDef
@@ -3200,6 +3328,19 @@ GO
 ---
 
 <a id="archive-proc"></a>
+> ✎ **2026-09-30, ФВ-5.21.** Журнали аудиту незмінні на рівні БД:
+> `aud.TR_{CellChange,StructureChange,SecurityEvent,PublicationEvent}_Immutable`
+> (AFTER UPDATE, DELETE → `THROW 50060`) і `aud.TR_SimulationSession_Immutable`
+> (дозволено лише закриття EndedAt з NULL; DELETE заборонено) — в кінці
+> `Sql/11-audit-tables.sql` (аудит-таблиці створюються після `10-triggers.sql`).
+> `aud.ConsistencyIssue` не входить (має `ResolvedAt`). Це тригери, а не
+> `DENY`: обліковий запис служби створює DBA, у репозиторії немає `CREATE
+> USER`/`GRANT`. DBA **може додатково** накласти
+> `DENY UPDATE, DELETE ON SCHEMA::aud TO [<служба>]` (тоді `aud.SimulationSession`
+> треба виключити: `GRANT UPDATE ON aud.SimulationSession (EndedAt)`) — тригери
+> працюють і без цього, навіть для db_owner. `TRUNCATE`/SWITCH партицій —
+> DDL DBA, тригерами не блокується.
+
 ## 16. Процедура архівації
 
 ```sql

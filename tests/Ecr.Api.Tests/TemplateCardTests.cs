@@ -303,7 +303,7 @@ public sealed class TemplateCardTests(SqlServerFixture sql)
                 EcrCode.Create($"P{tag}{i.ToString(CultureInfo.InvariantCulture)}"), Name("Template card"),
                 new DateOnly(2026, 1, 1), new DateOnly(2026, 12, 31),
                 templateVersionId: versionIds[i % versionIds.Count], PeriodKind.Monthly,
-                periodPolicyId: 1, "Asia/Almaty");
+                periodPolicyId: 1, "Asia/Atyrau");
 
             db.Projects.Add(project);
             await db.SaveChangesAsync().ConfigureAwait(false);

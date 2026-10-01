@@ -159,6 +159,29 @@ PRINT N'Перенесено індексів: ' + CAST(@moved AS nvarchar(10))
     + N'; усього на схемах партиціонування: ' + CAST(@skipped AS nvarchar(10)) + N'.';
 GO
 
+-- ── Індекс під вимір впливу довідника (GET /api/v1/registries/{code}/impact) ──
+--
+-- `RegistryImpactStore` іде від версій методологій, що читають довідник
+-- (`cfg.RegistryUse`, SourceKind = 1), до `calc.CalculationResult` за
+-- `MethodologyVersionId` БЕЗ фільтра по періоду. Єдиний індекс таблиці
+-- `IX_CalculationResult_Lookup` починається з `PeriodKey`, тож без цього
+-- індексу запит сканується по всіх партиціях: читання ростуть лінійно з
+-- обсягом таблиці (замір — docs/build/perf/impact-query-2026-10-01.md).
+--
+-- ⚠ Індекс створюється ТУТ, а не міграцією EF: він мусить лежати на схемі
+-- `ps_ByPeriodKey` (інакше 50031 нижче), а EF цього не вміє. Виконується на
+-- кожному проході (ідемпотентно); на заповненій базі — офлайн-побудова
+-- (Standard-редакція не має ONLINE), тому в `-Upgrade` це вікно обслуговування.
+IF OBJECT_ID(N'calc.CalculationResult', N'U') IS NOT NULL
+   AND NOT EXISTS (SELECT 1 FROM sys.indexes
+                   WHERE object_id = OBJECT_ID(N'calc.CalculationResult')
+                     AND name = N'IX_CalculationResult_Version')
+    CREATE NONCLUSTERED INDEX IX_CalculationResult_Version
+        ON calc.CalculationResult (MethodologyVersionId, PeriodKey)
+        INCLUDE (CalculationRunId, DocumentId)
+        ON ps_ByPeriodKey (PeriodKey);
+GO
+
 -- ── Повернення довіри зовнішнім ключам ───────────────────────────────────
 --
 -- ⛔ Перебудова кластерного індексу через `DROP_EXISTING` знімає з зовнішніх

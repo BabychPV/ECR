@@ -31,6 +31,7 @@ public sealed class WhereUsedTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-8.14")]
     public async Task Константу_показують_лише_формули_що_посилаються_саме_на_неї()
     {
         var stand = await ConstantStandAsync().ConfigureAwait(true);
@@ -74,6 +75,7 @@ public sealed class WhereUsedTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-8.14")]
     public async Task Колонку_показують_формула_привязка_вимога_мапінг_і_правило()
     {
         var stand = await ColumnStandAsync().ConfigureAwait(true);

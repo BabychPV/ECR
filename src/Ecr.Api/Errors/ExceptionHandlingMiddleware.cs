@@ -72,7 +72,13 @@ public sealed partial class ExceptionHandlingMiddleware(
 
         var (status, code, message, details) = Map(exception);
 
-        if (status >= StatusCodes.Status500InternalServerError)
+        // ФВ-12.7: ecr.conflict.count — один раз на запит (сюди доходить вже фінальний виняток).
+        if (exception is ConcurrencyConflictException)
+        {
+            context.RequestServices.GetService<Observability.EcrMetrics>()?.RecordConflict();
+        }
+
+        if (status >=StatusCodes.Status500InternalServerError)
         {
             // Стек іде В ЛОГ, і тільки туди. Клієнт отримує CorrelationId —
             // цього досить, щоб знайти цей самий запис.
@@ -81,6 +87,13 @@ public sealed partial class ExceptionHandlingMiddleware(
         else
         {
             LogRejected(code, status, correlationId);
+        }
+
+        // ФВ-5.24: відмова в доступі лишає слід у журналі безпеки. ⛔ Після відповіді
+        // нічого не залежить від запису: збій журналу — це лог, а не інший статус.
+        if (status == StatusCodes.Status403Forbidden && exception is AccessDeniedException denied)
+        {
+            await RecordDenialAsync(context, denied, correlationId).ConfigureAwait(false);
         }
 
         if (context.Response.HasStarted)
@@ -153,6 +166,37 @@ public sealed partial class ExceptionHandlingMiddleware(
             SerializerOptions,
             context.RequestAborted).ConfigureAwait(false);
     }
+
+    /// <summary>Передає відмову журналу безпеки; нічого не кидає (ФВ-5.24).</summary>
+    /// <remarks>
+    /// ⚠ Службу беремо з <c>RequestServices</c>, а не з конструктора: тести
+    /// створюють цей middleware напряму з двома аргументами, а без реєстрації
+    /// (<c>GetService</c> → <c>null</c>) відмова просто не журналюється.
+    /// Сама служба теж не кидає — другий <c>catch</c> лише страхує від підміненої.
+    /// </remarks>
+    private async Task RecordDenialAsync(HttpContext context, AccessDeniedException denied, string correlationId)
+    {
+        try
+        {
+            var auditor = context.RequestServices?.GetService<Ecr.Api.Security.IAccessDenialAuditor>();
+            if (auditor is not null)
+            {
+                // `None`, а не `RequestAborted`: клієнт, що пішов, не скасовує факту відмови.
+                // Час запису обмежує сама служба.
+                await auditor.RecordAsync(context, denied, CancellationToken.None).ConfigureAwait(false);
+            }
+        }
+#pragma warning disable CA1031 // Причина — у <remarks>: журнал відмов не змінює відповідь.
+        catch (Exception ex)
+#pragma warning restore CA1031
+        {
+            LogDenialAuditFailed(ex, correlationId);
+        }
+    }
+
+    [LoggerMessage(Level = LogLevel.Warning,
+        Message = "Журнал відмов у доступі кинув виняток; відповідь не змінено. CorrelationId={CorrelationId}")]
+    private partial void LogDenialAuditFailed(Exception exception, string correlationId);
 
     /// <summary>
     /// Заголовок відповіді: текст із каталогу за ключем <c>err.&lt;код&gt;</c>,

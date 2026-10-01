@@ -10,7 +10,7 @@ import { DetailDrawer } from '@/shared/ui/DetailDrawer';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { localized } from '@/shared/i18n/localized';
 import { KeyValue, type KeyValueItem } from '@/shared/ui/KeyValue';
-import { DataSourceFormModal, DataSourceScheduleTab, SourceEntitiesTab } from './lazyDataSourceForm';
+import { DataSourceFormModal, DataSourceScheduleTab, SourceEntitiesTab, SourceEventsTab } from './lazyDataSourceForm';
 import { TestDataSourceModal } from './TestDataSourceModal';
 import { deleteDataSource, type DataSource } from './dataSourceApi';
 import { DataSourcesQueryKey } from './dataSourcesKey';
@@ -54,7 +54,7 @@ export function freshVersionOf(error: unknown): string | null {
  * ⚠ `null` у `secondaryEndpoint`/`catalog` рядка не дає: `KeyValue` сам не
  * малює пару без значення.
  */
-export function connectionItems(source: DataSource): KeyValueItem[] {
+function connectionItems(source: DataSource): KeyValueItem[] {
   return [
     { label: t('sources.transport'), value: source.transport },
     { label: t('sources.endpoint'), value: source.endpoint, mono: true },
@@ -202,6 +202,9 @@ export function DataSourceDrawer({
             {/* ⛔ Без `Integration.Manage` вкладки НЕМАЄ: і перелік, і заведення,
                 і прив'язка вимагають саме цього права. */}
             {canManage && <Tabs.Tab value="entities">{t('sources.tabEntities')}</Tabs.Tab>}
+            {/* ⚠ «Події з PI» — теж лише з `Integration.Manage`: сутність-шаблон обирається з переліку
+                сутностей (`GET /api/v1/sources`), а той вимагає саме цього права. */}
+            {canManage && <Tabs.Tab value="events">{t('sourceEvents.tab')}</Tabs.Tab>}
           </Tabs.List>
 
           <Tabs.Panel value="connection" pt="sm">
@@ -220,6 +223,14 @@ export function DataSourceDrawer({
             <Tabs.Panel value="entities" pt="sm">
               <Suspense fallback={<Loader size="sm" />}>
                 <SourceEntitiesTab source={source} />
+              </Suspense>
+            </Tabs.Panel>
+          )}
+
+          {canManage && (
+            <Tabs.Panel value="events" pt="sm">
+              <Suspense fallback={<Loader size="sm" />}>
+                <SourceEventsTab source={source} canManage={canManage} />
               </Suspense>
             </Tabs.Panel>
           )}

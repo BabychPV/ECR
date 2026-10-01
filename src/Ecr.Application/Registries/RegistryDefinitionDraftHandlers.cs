@@ -79,10 +79,13 @@ public sealed class GetRegistryDefinitionDraftHandler(
     /// <summary>Читає чернетку; <c>Draft = null</c> — чернетки немає.</summary>
     public async Task<RegistryDefinitionDraftStateResponse> HandleAsync(string code, CancellationToken ct)
     {
-        await Security.PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
+        var profile = await Security.PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
 
         var definition = await registries.FindDefinitionAsync(code, ct).ConfigureAwait(false)
             ?? throw SaveRegistryDefinitionHandler.RegistryNotFound(code);
+
+        // ⛔ S18: заборона на довідник перекриває глобальне Registry.View — 404, як неіснуючий.
+        RegistryAccess.EnsureNotDenied(profile, definition.Id, code);
 
         var draft = await drafts.FindAsync(definition.Id, ct).ConfigureAwait(false);
 
@@ -114,13 +117,16 @@ public sealed class SaveRegistryDefinitionDraftHandler(
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        await Security.PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
+        var profile = await Security.PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
 
         var userId = SaveRegistryDefinitionHandler.RequireUser(currentUser);
         SaveRegistryDefinitionHandler.RequireReason(request.Reason);
 
         var definition = await registries.FindDefinitionAsync(code, ct).ConfigureAwait(false)
             ?? throw SaveRegistryDefinitionHandler.RegistryNotFound(code);
+
+        // ⛔ S18: заборона на довідник виграє і над правом на опис — 404, як неіснуючий.
+        RegistryAccess.EnsureNotDenied(profile, definition.Id, code);
 
         var draft = await drafts.FindAsync(definition.Id, ct).ConfigureAwait(false);
         RegistryDraft.RequireVersion(draft, request.RowVersion, definition.Code);
@@ -188,12 +194,15 @@ public sealed class DiscardRegistryDefinitionDraftHandler(
     /// <exception cref="ConcurrencyConflictException">Версія чернетки чужа — <c>409 ECR-REG-0409</c>.</exception>
     public async Task HandleAsync(string code, string? rowVersion, CancellationToken ct)
     {
-        await Security.PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
+        var profile = await Security.PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
 
         var userId = SaveRegistryDefinitionHandler.RequireUser(currentUser);
 
         var definition = await registries.FindDefinitionAsync(code, ct).ConfigureAwait(false)
             ?? throw SaveRegistryDefinitionHandler.RegistryNotFound(code);
+
+        // ⛔ S18: заборона на довідник виграє і над правом на опис — 404, як неіснуючий.
+        RegistryAccess.EnsureNotDenied(profile, definition.Id, code);
 
         var draft = await drafts.FindAsync(definition.Id, ct).ConfigureAwait(false)
             ?? throw RegistryDraft.NotFound(definition.Code);
@@ -249,12 +258,15 @@ public sealed class PublishRegistryDefinitionHandler(
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        await Security.PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
+        var profile = await Security.PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
 
         var userId = SaveRegistryDefinitionHandler.RequireUser(currentUser);
 
         var definition = await registries.FindDefinitionAsync(code, ct).ConfigureAwait(false)
             ?? throw SaveRegistryDefinitionHandler.RegistryNotFound(code);
+
+        // ⛔ S18: заборона на довідник виграє і над правом на опис — 404, як неіснуючий.
+        RegistryAccess.EnsureNotDenied(profile, definition.Id, code);
 
         var draft = await drafts.FindAsync(definition.Id, ct).ConfigureAwait(false)
             ?? throw RegistryDraft.NotFound(definition.Code);

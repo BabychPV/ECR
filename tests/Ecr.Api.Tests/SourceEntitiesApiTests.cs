@@ -174,6 +174,76 @@ public sealed class SourceEntitiesApiTests(SqlServerFixture sql)
         }
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-12.10")]
+    public async Task ФВ_12_10_заведення_сутності_прив_язка_і_мапінг_лишають_журнал_зі_старим_і_новим_станом()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, Manage, "Registry.EditData").ConfigureAwait(true);
+        var dataSourceId = await DataSourceAsync().ConfigureAwait(true);
+        var stand = await StandAsync(dataSourceId).ConfigureAwait(true);
+        var code = $"Aud{Guid.NewGuid():N}"[..14];
+
+        try
+        {
+            var created = await client.PostAsJsonAsync(Sources, new { dataSourceId, code, displayName = "Audit" });
+            Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+            var entityId = (await JsonAsync(created).ConfigureAwait(true)).GetProperty("id").GetInt32();
+
+            var entityJournal = await StructureChangeProbe.ReadAsync(sql.ConnectionString, "ext.SourceEntity", entityId)
+                .ConfigureAwait(true);
+            var createRow = Assert.Single(entityJournal);
+            Assert.Equal("CreateSourceEntity", createRow.Operation);
+            Assert.Null(createRow.OldJson);
+            Assert.Contains(code, createRow.NewJson, StringComparison.Ordinal);
+
+            // Прив'язка: у старому стані довідника немає, у новому — є.
+            var bind = await client.PutAsJsonAsync(
+                new Uri($"/api/v1/sources/{entityId}/registry", UriKind.Relative), new { registryDefId = stand.RegistryId });
+            Assert.Equal(HttpStatusCode.OK, bind.StatusCode);
+
+            var afterBind = await StructureChangeProbe.ReadAsync(sql.ConnectionString, "ext.SourceEntity", entityId)
+                .ConfigureAwait(true);
+            var bindRow = Assert.Single(afterBind, r => r.Operation == "BindSourceEntityRegistry");
+            Assert.Contains("\"registryDefId\":null", bindRow.OldJson, StringComparison.Ordinal);
+            Assert.Contains($"\"registryDefId\":{stand.RegistryId}", bindRow.NewJson, StringComparison.Ordinal);
+
+            // Повторна прив'язка до того самого довідника не змінює нічого — і не шумить у журналі.
+            var again = await client.PutAsJsonAsync(
+                new Uri($"/api/v1/sources/{entityId}/registry", UriKind.Relative), new { registryDefId = stand.RegistryId });
+            Assert.Equal(HttpStatusCode.OK, again.StatusCode);
+            Assert.Single(
+                await StructureChangeProbe.ReadAsync(sql.ConnectionString, "ext.SourceEntity", entityId).ConfigureAwait(true),
+                r => r.Operation == "BindSourceEntityRegistry");
+
+            // Мапінг: створення пише новий стан (поле й ціль).
+            var mapped = await client.PostAsJsonAsync(
+                new Uri("/api/v1/entity-field-maps", UriKind.Relative),
+                new
+                {
+                    sourceEntityId = entityId,
+                    sourceField = "AuditField",
+                    targetKind = "RegistryField",
+                    targetRegistryFieldDefId = stand.OwnFieldId,
+                });
+            Assert.True(mapped.StatusCode == HttpStatusCode.OK, await mapped.Content.ReadAsStringAsync().ConfigureAwait(true));
+            var mapId = (await JsonAsync(mapped).ConfigureAwait(true)).GetProperty("id").GetInt32();
+
+            var mapRow = Assert.Single(
+                await StructureChangeProbe.ReadAsync(sql.ConnectionString, "ext.EntityFieldMap", mapId).ConfigureAwait(true));
+            Assert.Equal("CreateEntityFieldMap", mapRow.Operation);
+            Assert.Null(mapRow.OldJson);
+            Assert.Contains("AuditField", mapRow.NewJson, StringComparison.Ordinal);
+            Assert.Contains($"\"targetRegistryFieldDefId\":{stand.OwnFieldId}", mapRow.NewJson, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await DeactivateAsync(dataSourceId).ConfigureAwait(true);
+        }
+    }
+
     /// <summary>Сутність і два довідники по одному полю.</summary>
     private sealed record Stand(int EntityId, int RegistryId, int OwnFieldId, int ForeignFieldId);
 

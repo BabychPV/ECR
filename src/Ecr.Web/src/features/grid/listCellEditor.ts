@@ -38,7 +38,7 @@ export interface ListOption {
 }
 
 /** Звідки редактор бере варіанти в мить відкриття. */
-export interface ListSource {
+interface ListSource {
   /** Варіанти; `null` — ще завантажуються. */
   readonly options: readonly ListOption[] | null;
 }
@@ -50,7 +50,7 @@ export const MaxShownOptions = 50;
 const ListMinSpacePx = 220;
 
 /** Що знає смонтований редактор. */
-export interface MountListEditorProps {
+interface MountListEditorProps {
   readonly options: readonly ListOption[] | null;
   /** Поточне значення комірки (рядком) — з нього починається виділення. */
   readonly selected: string | null;
@@ -63,7 +63,7 @@ export interface MountListEditorProps {
 }
 
 /** Смонтований редактор: лише прибрати за собою. */
-export interface MountedListEditor {
+interface MountedListEditor {
   readonly input: HTMLInputElement;
   /** Перелік варіантів — у `document.body`, не всередині `host`. */
   readonly list: HTMLUListElement;

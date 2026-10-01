@@ -14,7 +14,7 @@ import { ErrorAlert } from '@/shared/ui/ErrorAlert';
  * вкладка — єдиний споживач. Форма та сама, що в фабриці (`['registries', …]`),
  * тож `queryKeys.registries.all()` інвалідовує й цей запис.
  */
-export function registryUsageKey(code: string): readonly ['registries', 'usage', string] {
+function registryUsageKey(code: string): readonly ['registries', 'usage', string] {
   return ['registries', 'usage', code] as const;
 }
 

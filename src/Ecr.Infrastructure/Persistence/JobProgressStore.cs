@@ -279,6 +279,53 @@ public sealed class JobProgressStore(EcrDbContext db) : IJobProgressStore
         return true;
     }
 
+    /// <summary>Рядок групування дочірніх задач за станом.</summary>
+    private sealed class FanOutRow
+    {
+        public string State { get; set; } = string.Empty;
+
+        public int Cnt { get; set; }
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⚠ Схеми не змінено: дочірня задача несе <c>fanOutParentJobId</c> у Payload
+    /// (<c>RecalculationRequest.FanOutParentJobId</c>), звужується префіксом цілі
+    /// (<c>IRecalculationJob~doc…</c>) і лише рядками черги. Читання разове — за
+    /// опитуванням однієї задачі, не за переліком.
+    /// </remarks>
+    public async Task<FanOutStatus?> GetFanOutAsync(string parentJobId, CancellationToken ct)
+    {
+        // ⚠ За стовпцем `FanOutParentJobId` (persisted, JSON_VALUE з Payload) і його індексом
+        // `IX_JobProgress_FanOutParent`: раніше JSON_VALUE у предикаті скановував усю
+        // історію (вимір 2026-10-01, 500 тис. рядків: 47 116 читань / 2,5 с → 4 читання / 14 мс).
+        // Індекс навмисно НЕ фільтрований: параметризований запит фільтрований індекс не бачить.
+        var rows = await db.Database
+            .SqlQuery<FanOutRow>(
+                $"""
+                 SELECT State, COUNT(*) AS Cnt
+                   FROM itg.JobProgress
+                  WHERE FanOutParentJobId = {parentJobId}
+                    AND Lane IS NOT NULL
+                    AND TargetKey LIKE N'IRecalculationJob~doc%'
+                  GROUP BY State
+                 """)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var total = rows.Sum(r => r.Cnt);
+
+        if (total == 0)
+        {
+            return null;
+        }
+
+        int Of(string state) => rows.Where(r => r.State == state).Sum(r => r.Cnt);
+
+        return new FanOutStatus(
+            total, Of("Queued"), Of("Running"), Of("Succeeded"), Of("Failed") + Of("Cancelled"));
+    }
+
     /// <inheritdoc />
     public async Task<JobStatus?> FindAsync(string jobId, CancellationToken ct)
         => await db.JobProgresses
@@ -436,6 +483,18 @@ public sealed class JobProgressStore(EcrDbContext db) : IJobProgressStore
     /// небагато рядків, шукаються за префіксом <c>IX_JobProgress_Stale</c> (State).
     /// </remarks>
     public Task<int> CountFailedWithMessageKeyAsync(string messageKey, DateTime sinceUtc, CancellationToken ct)
+        => CountWithMessageKeyAsync("Failed", messageKey, sinceUtc, ct);
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⚠ `Message` успішної задачі переживає `Finish` (той пише лише `Error`), і `CompleteAsync`
+    /// черги в базі теж його не чіпає — тому конверт, записаний задачею наприкінці, лишається
+    /// в рядку до прибирання (30 діб).
+    /// </remarks>
+    public Task<int> CountSucceededWithMessageKeyAsync(string messageKey, DateTime sinceUtc, CancellationToken ct)
+        => CountWithMessageKeyAsync("Succeeded", messageKey, sinceUtc, ct);
+
+    private Task<int> CountWithMessageKeyAsync(string state, string messageKey, DateTime sinceUtc, CancellationToken ct)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(messageKey);
         var quoted = "\"" + messageKey + "\"";
@@ -443,7 +502,7 @@ public sealed class JobProgressStore(EcrDbContext db) : IJobProgressStore
         return db.JobProgresses
             .AsNoTracking()
             .CountAsync(
-                p => p.State == "Failed" && p.UpdatedAt >= sinceUtc && p.Message != null && p.Message.Contains(quoted),
+                p => p.State == state && p.UpdatedAt >= sinceUtc && p.Message != null && p.Message.Contains(quoted),
                 ct);
     }
 

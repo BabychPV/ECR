@@ -1,11 +1,11 @@
 import type { JSX } from 'react';
-import { Alert, Badge, Group, Stack, Table, Text } from '@mantine/core';
+import { Alert, Anchor, Badge, Group, Stack, Table, Text } from '@mantine/core';
 import type { ValidationFindingDto } from '@/api/types';
 import { t } from '@/shared/i18n';
 import { StatusBadge } from '@/shared/ui/StatusBadge';
 
 /** Що показувати в панелі зауважень. */
-export interface ValidationPanelProps {
+interface ValidationPanelProps {
   /**
    * Повідомлення останньої перевірки; `null` — перевірку ще не запускали.
    *
@@ -15,6 +15,12 @@ export interface ValidationPanelProps {
    * й порожній дашборд замість збою (`A7-04`).
    */
   messages: readonly ValidationFindingDto[] | null;
+
+  /**
+   * Перехід до адреси зауваження в сітці (`ФВ-5.6`); без нього текст
+   * зауваження — звичайний текст.
+   */
+  onSelect?: (message: ValidationFindingDto) => void;
 }
 
 /**
@@ -35,11 +41,14 @@ export interface ValidationPanelProps {
  *
  * ⚠ Повна адреса починається з `tableDefId` (`BE-04`): аркуш містить кілька
  * таблиць, і `rowKey` унікальний лише всередині своєї. Поле вже приходить із
- * сервера і входить у ключ рядка, але «клац → стрибок до комірки» тут ще
- * НЕМАЄ — це окрема задача інтерфейсу. Названо прямо, щоб наявність поля не
- * читалася як наявність переходу.
+ * сервера і входить у ключ рядка.
+ *
+ * ✎ `ФВ-5.6`: текст зауваження — кнопка переходу до його адреси: аркуш,
+ * таблиця, рядок, колонка (`onSelect`, `features/grid/cellNavigation.ts`).
+ * Кнопка, а не клік по рядку таблиці: рядок `<tr>` не отримує фокуса з
+ * клавіатури, і перехід лишився б лише для миші.
  */
-export function ValidationPanel({ messages }: ValidationPanelProps): JSX.Element | null {
+export function ValidationPanel({ messages, onSelect }: ValidationPanelProps): JSX.Element | null {
   if (messages === null) {
     return null;
   }
@@ -106,7 +115,22 @@ export function ValidationPanel({ messages }: ValidationPanelProps): JSX.Element
                 <Table.Td>{message.rowKey ?? '—'}</Table.Td>
                 <Table.Td>{message.columnCode ?? '—'}</Table.Td>
                 <Table.Td>{message.ruleCode}</Table.Td>
-                <Table.Td>{message.message}</Table.Td>
+                <Table.Td>
+                  {onSelect === undefined ? (
+                    message.message
+                  ) : (
+                    <Anchor
+                      component="button"
+                      type="button"
+                      size="sm"
+                      ta="start"
+                      title={t('document.validationGoTo')}
+                      onClick={() => onSelect(message)}
+                    >
+                      {message.message}
+                    </Anchor>
+                  )}
+                </Table.Td>
               </Table.Tr>
             ))}
           </Table.Tbody>

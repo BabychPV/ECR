@@ -2,7 +2,7 @@
 import { Button, Divider } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { apiEnqueue, apiFetch } from '@/api/client';
+import { apiEnqueue, apiFetch, EcrApiError } from '@/api/client';
 import type {
   ApproveSheetRequest,
   DocumentSummary,
@@ -15,9 +15,8 @@ import { locksDataActions, type DocumentLock } from '@/features/documents/docume
 import { invalidateSlices } from '@/features/grid/sliceCache';
 import { JobFailure } from '@/features/jobs/JobFacts';
 import { can, useSession, type MeDto } from '@/shared/session/useSession';
-import { ConfirmModal } from '@/shared/ui/ConfirmModal';
+import { LazyConfirmModal, LazyReasonModal } from './lazyDialogs';
 import { Hint } from '@/shared/ui/Hint';
-import { ReasonModal } from '@/shared/ui/ReasonModal';
 import { showApiError, showDone } from '@/shared/ui/notify';
 import { useRecallAvailability, type RecallSheetRequest } from './api';
 import { outcomeOf, pollInterval } from './jobFollow';
@@ -26,7 +25,7 @@ import { isAllowed, type WorkflowAction } from './transitions';
 import { t } from '@/shared/i18n';
 
 /** Аркуш, над яким виконуються дії робочого процесу. */
-export interface SheetActionsProps {
+interface SheetActionsProps {
   /** Документ. */
   documentId: number;
   /** Аркуш; гранулярність робочого процесу — `аркуш × період` (D-38). */
@@ -195,20 +194,37 @@ export function SheetActions({
     await queryClient.invalidateQueries({ queryKey: ['document', documentId, periodKey] });
   };
 
+  // ФВ-5.19: попередження, які сервер попросив підтвердити; `null` — діалог закритий.
+  const [warnings, setWarnings] = useState<string[] | null>(null);
+
   const submit = useMutation({
-    mutationFn: () =>
+    mutationFn: (acknowledgeWarnings: boolean) =>
       apiFetch(`/api/v1/documents/${documentId}/submit`, {
         method: 'POST',
-        body: JSON.stringify({ sheetDefId, periodKey } satisfies SheetWorkflowRequest),
+        body: JSON.stringify({
+          sheetDefId,
+          periodKey,
+          acknowledgeWarnings,
+        } satisfies SheetWorkflowRequest),
       }),
     onSuccess: async () => {
+      setWarnings(null);
       await refresh();
       showDone(t('document.submitted'));
     },
     // ⚠ Причина показується як є: Submit при осиротілих рядках
     // (`ECR-SUB-4221`) — це не «помилка сервера», а перелік того, що треба
-    // виправити.
-    onError: showApiError,
+    // виправити. Виняток — «попередження без підтвердження» (ФВ-5.19): це
+    // питання, а не відмова, тож замість тосту — діалог із переліком.
+    onError: (error) => {
+      const pending = warningsToConfirm(error);
+      if (pending === null) {
+        setWarnings(null);
+        showApiError(error);
+        return;
+      }
+      setWarnings(pending);
+    },
   });
 
   const decide = useMutation({
@@ -364,7 +380,7 @@ export function SheetActions({
 
     // ⚠ Правило опитування — у чистому модулі `jobFollow.ts`: саме його не
     // було, і саме його треба перевіряти окремо від компонента.
-    refetchInterval: (query) => pollInterval(query.state.data?.state),
+    refetchInterval: (query) => pollInterval(query.state.data?.state, query.state.data?.effectiveState),
 
     // ⚠ `retry: false` і мовчазна зупинка на відмові: `GET /jobs/{id}` вимагає
     // окремого права (`System.ViewHealth`, `Q-156`), і оператор без нього має
@@ -382,7 +398,7 @@ export function SheetActions({
    */
   const outcome = recalcJobId === null
     ? null
-    : outcomeOf(recalcJob.data?.state, recalcJob.isError);
+    : outcomeOf(recalcJob.data?.state, recalcJob.isError, recalcJob.data?.effectiveState);
 
   // ⛔ §10.6: «виконується» — про ЦЕЙ екран, а не про будь-яку задачу в
   // пам'яті компонента. Кнопка на іншому аркуші/періоді мусить бути звичайною
@@ -594,7 +610,7 @@ export function SheetActions({
       )}
 
       {canSubmit && (
-        <Button size="xs" loading={submit.isPending} onClick={() => submit.mutate()}>
+        <Button size="xs" loading={submit.isPending} onClick={() => submit.mutate(false)}>
           {t('document.submit')}
         </Button>
       )}
@@ -667,7 +683,19 @@ export function SheetActions({
         </Button>
       )}
 
-      <ConfirmModal
+      <LazyConfirmModal
+        opened={warnings !== null}
+        title={t('workflow.submitWarningsTitle')}
+        text={t('workflow.submitWarningsHint')}
+        consequences={warnings ?? []}
+        verb={t('workflow.submitAnyway')}
+        danger={false}
+        isPending={submit.isPending}
+        onConfirm={() => submit.mutate(true)}
+        onClose={() => setWarnings(null)}
+      />
+
+      <LazyConfirmModal
         opened={asking === 'approve'}
         title={t('workflow.approveTitle')}
         text={t('workflow.approveHint')}
@@ -678,7 +706,7 @@ export function SheetActions({
         onClose={() => setAsking(null)}
       />
 
-      <ReasonModal
+      <LazyReasonModal
         opened={asking === 'recall'}
         title={t('workflow.recallTitle')}
         label={t('workflow.reason')}
@@ -689,7 +717,7 @@ export function SheetActions({
         onClose={() => setAsking(null)}
       />
 
-      <ReasonModal
+      <LazyReasonModal
         opened={asking === 'reject'}
         title={t('workflow.rejectTitle')}
         label={t('workflow.reason')}
@@ -700,7 +728,7 @@ export function SheetActions({
         onClose={() => setAsking(null)}
       />
 
-      <ReasonModal
+      <LazyReasonModal
         opened={asking === 'reopen'}
         title={t('workflow.reopenTitle')}
         label={t('workflow.reason')}
@@ -712,6 +740,23 @@ export function SheetActions({
       />
     </>
   );
+}
+
+/**
+ * Тексти попереджень із відмови «потрібне підтвердження» (ФВ-5.19):
+ * `422 ECR-SUB-4221`, `messageKey = err.ECR-SUB-4221.warningsNeedConfirmation`,
+ * перелік у `messages[].message` (локалізований сервером). `null` — це інша відмова.
+ */
+export function warningsToConfirm(error: unknown): string[] | null {
+  if (!(error instanceof EcrApiError) || error.problem.errorCode !== 'ECR-SUB-4221') return null;
+
+  const extensions = error.problem.extensions2;
+  if (extensions?.['messageKey'] !== 'err.ECR-SUB-4221.warningsNeedConfirmation') return null;
+
+  const messages = extensions['messages'];
+  if (!Array.isArray(messages)) return [];
+
+  return messages.map((m: { message?: unknown }) => String(m.message ?? ''));
 }
 
 /** Чи має аркуш у цьому стані бути доступним для правки. */

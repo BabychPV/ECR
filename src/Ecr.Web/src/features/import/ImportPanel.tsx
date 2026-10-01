@@ -109,6 +109,7 @@ export function ImportPanel({ documentId, periodKey }: ImportPanelProps): JSX.El
   const applyPhase = useDurationIndicator(apply.isPending);
 
   const blocked = (preview?.conflicts.length ?? 0) > 0 || (preview?.rejected.length ?? 0) > 0;
+  const rounded = preview?.changes.filter(isRounded) ?? [];
 
   return (
     <>
@@ -167,6 +168,11 @@ export function ImportPanel({ documentId, periodKey }: ImportPanelProps): JSX.El
                   {t('import.rejected', { count: preview.rejected.length })}
                 </Badge>
               )}
+              {rounded.length > 0 && (
+                <Badge color="statusWarning" variant="light">
+                  {t('import.rounded', { count: rounded.length })}
+                </Badge>
+              )}
             </Group>
 
             {blocked && (
@@ -182,6 +188,40 @@ export function ImportPanel({ documentId, periodKey }: ImportPanelProps): JSX.El
               <Text size="sm">{t('import.noChanges')}</Text>
             )}
 
+            {rounded.length > 0 && (
+              // ⚠ ФВ-9.16b: імпорт округлює число до `Scale` колонки (від нуля) —
+              // записано буде не те, що стоїть у книзі. Людина бачить це ДО
+              // застосування, окремим переліком: серед тисяч змін позначка в
+              // рядку легко губиться, а саме ці комірки варто звірити з файлом.
+              <Alert color="statusWarning" title={t('import.roundedTitle')}>
+                <Stack gap="xs">
+                  <Text size="sm">{t('import.roundedHint')}</Text>
+                  <Table withTableBorder aria-label={t('import.roundedTitle')}>
+                    <Table.Thead>
+                      <Table.Tr>
+                        <Table.Th>{t('import.table')}</Table.Th>
+                        <Table.Th>{t('import.row')}</Table.Th>
+                        <Table.Th>{t('import.column')}</Table.Th>
+                        <Table.Th>{t('import.inFile')}</Table.Th>
+                        <Table.Th>{t('import.becomes')}</Table.Th>
+                      </Table.Tr>
+                    </Table.Thead>
+                    <Table.Tbody>
+                      {rounded.map((change) => (
+                        <Table.Tr key={keyOf(change)}>
+                          <Table.Td>{tableOf(change)}</Table.Td>
+                          <Table.Td>{change.rowKey}</Table.Td>
+                          <Table.Td>{change.columnCode}</Table.Td>
+                          <Table.Td>{show(change.roundedFrom)}</Table.Td>
+                          <Table.Td>{show(change.newValue)}</Table.Td>
+                        </Table.Tr>
+                      ))}
+                    </Table.Tbody>
+                  </Table>
+                </Stack>
+              </Alert>
+            )}
+
             {preview.changes.length > 0 && (
               <Table striped withTableBorder className="ecr-sticky-head">
                 <Table.Thead>
@@ -195,12 +235,22 @@ export function ImportPanel({ documentId, periodKey }: ImportPanelProps): JSX.El
                 </Table.Thead>
                 <Table.Tbody>
                   {preview.changes.map((change) => (
-                    <Table.Tr key={`${change.tableCode ?? ''}:${change.rowKey}:${change.columnCode}`}>
+                    <Table.Tr key={keyOf(change)}>
                       <Table.Td>{tableOf(change)}</Table.Td>
                       <Table.Td>{change.rowKey}</Table.Td>
                       <Table.Td>{change.columnCode}</Table.Td>
                       <Table.Td>{show(change.oldValue)}</Table.Td>
-                      <Table.Td>{show(change.newValue)}</Table.Td>
+                      <Table.Td>
+                        {show(change.newValue)}
+                        {isRounded(change) && (
+                          // ⚠ Позначка несе число з файлу текстом, а не лише
+                          // підказкою: підказку не прочитає ні читалка, ні
+                          // людина, що дивиться знімок екрана.
+                          <Badge ml="xs" size="xs" color="statusWarning" variant="outline">
+                            {t('import.roundedMark', { value: show(change.roundedFrom) })}
+                          </Badge>
+                        )}
+                      </Table.Td>
                     </Table.Tr>
                   ))}
                 </Table.Tbody>
@@ -258,6 +308,21 @@ export function ImportPanel({ documentId, periodKey }: ImportPanelProps): JSX.El
   );
 }
 
+/** Ключ рядка зміни: таблиця + рядок + колонка (`R1`/`C1` однакові в різних таблицях). */
+function keyOf(change: ImportChange): string {
+  return `${change.tableCode ?? ''}:${change.rowKey}:${change.columnCode}`;
+}
+
+/**
+ * Чи імпорт округлив число з книги до `Scale` колонки (ФВ-9.16b).
+ *
+ * ⚠ `null`/відсутнє поле — не округлено: так приходить і план, збережений до
+ * появи поля.
+ */
+function isRounded(change: ImportChange): boolean {
+  return change.roundedFrom !== null && change.roundedFrom !== undefined;
+}
+
 /** Чи відповідь застосування — «поставлено в чергу», а не готовий результат. */
 function isQueued(result: PatchCellsResponse | JobAcceptedResponse): result is JobAcceptedResponse {
   return 'jobId' in result && typeof result.jobId === 'string' && result.jobId !== '';
@@ -313,6 +378,9 @@ function rejectionText(rejection: ImportRejection): string {
       return t('err.ECR-ROW-0404.importOutsideRows');
     case 'err.ECR-CELL-0422.importIntegerDigits':
       return t('err.ECR-CELL-0422.importIntegerDigits');
+    // ⛔ ФВ-9.16b: після округлення до `Scale` число не вміщується в `Precision`.
+    case 'err.ECR-CELL-0422.importPrecision':
+      return t('err.ECR-CELL-0422.importPrecision');
     case 'err.ECR-IMP-0422.importInstanceMissing':
       return t('err.ECR-IMP-0422.importInstanceMissing');
     case 'err.ECR-IMP-0422.importTableMissing':

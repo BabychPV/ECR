@@ -157,7 +157,6 @@ public sealed partial class PrincipleTests
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
     [Trait(TestCategories.Category, TestCategories.Architecture)]
     [Trait("Requirement", "ФВ-14.10")]
-    [Trait("Requirement", "ФВ-10.3")]
     public void Клієнт_не_містить_бізнес_правил_яких_немає_на_сервері()
     {
         // ⛔ Клієнтська валідація дублює серверну заради швидкості відгуку;

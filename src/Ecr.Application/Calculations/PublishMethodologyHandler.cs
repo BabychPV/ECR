@@ -23,11 +23,15 @@ public sealed class PublishMethodologyHandler(
     IMethodologyStore methodologies,
     IFormulaEngine formulaEngine,
     ICalculationBindingStore bindings,
+    IUnitCatalog units,
     IUnitOfWork uow,
     IAuditWriter audit,
     Security.IAccessDecisionService access,
     ICurrentUser currentUser,
-    IClock clock)
+    IClock clock,
+    IRegistryStore? registryStore = null,
+    IRegistryKeyStore? registryKeys = null,
+    IRegistryUseStore? registryUses = null)
 {
     /// <summary>Право на публікацію методології (`02-contracts.md` §9).</summary>
     /// <remarks>
@@ -47,7 +51,8 @@ public sealed class PublishMethodologyHandler(
     /// <exception cref="NotFoundException">Версії немає.</exception>
     /// <exception cref="BusinessRuleException">
     /// <c>ECR-CALC-0409</c> — публікує автор або дата зайнята;
-    /// <c>ECR-CALC-0422</c> — немає причини, дати, зеленого тесту або є цикл.
+    /// <c>ECR-CALC-0422</c> — немає причини, дати, зеленого тесту або є цикл;
+    /// <c>ECR-TMPL-4223</c> — несумісні одиниці без явного <c>CONVERT</c> (ФВ-16.7).
     /// </exception>
     public async Task<MethodologyPublicationDiff> HandleAsync(
         int methodologyVersionId, string changeReason, DateOnly? effectiveFrom, CancellationToken ct)
@@ -210,6 +215,7 @@ public sealed class PublishMethodologyHandler(
             // на кого, а ті, що лишилися від попередньої редакції, тягли б
             // методологію в чергу перерахунку без жодної причини.
             await methodologies.ReplaceDependenciesAsync(methodology.Id, [], ct).ConfigureAwait(false);
+            await ReplaceRegistryUsesAsync(methodologyVersionId, [], null, ct).ConfigureAwait(false);
             return [];
         }
 
@@ -305,6 +311,25 @@ public sealed class PublishMethodologyHandler(
 
         Reject(problems);
 
+        // ⛔ RT-23b (FEATURE-REGISTRY-TABLES §5.5, перевірки 15–19): описка в довіднику, полі
+        // чи ключі — відмова 422 з позицією, а не `#REF` на кожному рядку нічного прогону.
+        // Після `RejectExtensionFunctions`: у `Legacy` функції довідників відхилено раніше
+        // (`ECR-CALC-0433`, перевірка 21) — судити їхні поля там нема сенсу.
+        var registryShapes = await RegistryShapesAsync(parsed, ct).ConfigureAwait(false);
+        var formulaRegistries = registryShapes is null ? null : MethodologyRegistryChecks.FormulaRegistries(parsed);
+        if (registryShapes is not null)
+        {
+            MethodologyRegistryChecks.RequireValidReferences(parsed, registryShapes, warnings);
+        }
+
+        // ⛔ ФВ-16.6/16.7: т + кг без CONVERT — відмова `ECR-TMPL-4223` до
+        // продуктиву. Після перевірки типів: одиниця текстової константи —
+        // питання, яке не має сенсу ставити, доки вона стоїть в арифметиці.
+        // ⚠ З формами довідників — одиниці полів беруть участь у перевірках (перевірка 20).
+        var catalogue = await units.GetAsync(ct).ConfigureAwait(false);
+        MethodologyUnitChecks.RequireCompatibleUnits(
+            parsed, new MethodologyUnitContext(constants, formulas, catalogue, registryShapes, formulaRegistries));
+
         var ordering = formulaEngine.BuildEvaluationOrder(nodes);
         if (!ordering.IsSuccess)
         {
@@ -344,7 +369,62 @@ public sealed class PublishMethodologyHandler(
             .ReplaceDependenciesAsync(methodology.Id, dependencies, ct)
             .ConfigureAwait(false);
 
+        await ReplaceRegistryUsesAsync(methodologyVersionId, parsed, registryShapes, ct).ConfigureAwait(false);
+
         return warnings;
+    }
+
+    /// <summary>
+    /// Форми довідників для перевірок 15–20; <c>null</c> — версія довідників не читає або
+    /// сховищ довідників у цьому складанні немає.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Версія без функцій довідників не робить жодного звернення до сховищ довідників:
+    /// так публікація поводилась до кроку RT-23b.
+    /// </remarks>
+    private async Task<RegistryShapeCatalog?> RegistryShapesAsync(
+        IReadOnlyList<ParsedFormula> parsed, CancellationToken ct)
+    {
+        if (registryStore is null || registryKeys is null || !MethodologyRegistryChecks.UsesRegistries(parsed))
+        {
+            return null;
+        }
+
+        return await MethodologyRegistryChecks
+            .LoadShapesAsync(parsed, registryStore, registryKeys, ct)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Переписує ребра <c>cfg.RegistryUse</c> версії (RT-23b, §5.8): що читає кожна формула.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Ребра пишуться й тоді, коли їх нуль: версія, яка перестала читати довідник, не має
+    /// лишати ребра попередньої редакції (RT-19 «Де використано», RT-25 свіжість).
+    /// ⚠ Версія читає довідники, а форм немає (сховищ довідників у складанні немає) —
+    /// ребра не чіпаються: переписати їх порожньою множиною означало б стерти правду.
+    /// </remarks>
+    private async Task ReplaceRegistryUsesAsync(
+        int methodologyVersionId,
+        IReadOnlyList<ParsedFormula> parsed,
+        RegistryShapeCatalog? shapes,
+        CancellationToken ct)
+    {
+        if (registryUses is null)
+        {
+            return;
+        }
+
+        if (shapes is null && MethodologyRegistryChecks.UsesRegistries(parsed))
+        {
+            return;
+        }
+
+        var uses = shapes is null
+            ? []
+            : MethodologyRegistryChecks.BuildUses(methodologyVersionId, parsed, shapes);
+
+        await registryUses.ReplaceMethodologyUsesAsync(methodologyVersionId, uses, ct).ConfigureAwait(false);
     }
 
     /// <summary>

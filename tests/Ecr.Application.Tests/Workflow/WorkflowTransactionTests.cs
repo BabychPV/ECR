@@ -250,7 +250,8 @@ public sealed partial class WorkflowTransactionTests(SqlServerFixture sql)
             NSubstitute.Substitute.For<Ecr.Application.Recalculation.ISubmitRecalculation>(),
             methodologies,
             NSubstitute.Substitute.For<ITemplateVersionStore>(),
-            NSubstitute.Substitute.For<IRegistryStore>());
+            NSubstitute.Substitute.For<IRegistryStore>(),
+            new AuditWriter(db));
     }
 
     private ApproveSheetHandler Approve(World world, EcrDbContext db, IReportSnapshotBuilder snapshots)
@@ -384,7 +385,7 @@ public sealed partial class WorkflowTransactionTests(SqlServerFixture sql)
             EcrCode.Create($"P{tag}"),
             new LocalizedText(new Dictionary<string, string> { ["en"] = "Workflow tx" }),
             new DateOnly(2026, 1, 1), new DateOnly(2026, 12, 31),
-            templateVersionId: version.Id, PeriodKind.Monthly, periodPolicyId: 1, "Asia/Almaty");
+            templateVersionId: version.Id, PeriodKind.Monthly, periodPolicyId: 1, "Asia/Atyrau");
         db.Projects.Add(project);
         await db.SaveChangesAsync().ConfigureAwait(false);
 

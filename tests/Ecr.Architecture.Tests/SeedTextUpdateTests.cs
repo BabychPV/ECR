@@ -132,6 +132,21 @@ public sealed partial class SeedTextUpdateTests
             rows[(Unquote(m.Groups[1].Value), m.Groups[2].Value)] = Unquote(m.Groups[3].Value);
         }
 
+        // ru/kz живуть окремими порціями `INSERT INTO #I18N … OPTION (RECOMPILE)`
+        // (рядки без прапорця Scope): «нове» в секції має дорівнювати й їм.
+        var pos = 0;
+        while ((pos = text.IndexOf("INSERT INTO #I18N", pos, StringComparison.Ordinal)) >= 0)
+        {
+            var stop = text.IndexOf("OPTION (RECOMPILE)", pos, StringComparison.Ordinal);
+            Assert.True(stop > pos, $"Порція #I18N у {SeedFile} не закінчується OPTION (RECOMPILE).");
+            foreach (Match m in RemovedRow().Matches(text[pos..stop]))
+            {
+                rows[(Unquote(m.Groups[1].Value), m.Groups[2].Value)] = Unquote(m.Groups[3].Value);
+            }
+
+            pos = stop;
+        }
+
         return rows;
     }
 

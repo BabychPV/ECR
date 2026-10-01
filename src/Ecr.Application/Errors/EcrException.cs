@@ -19,8 +19,32 @@ public class EcrException : Exception
 }
 
 /// <summary>Порушення бізнес-правила. HTTP 422.</summary>
-public sealed class BusinessRuleException(string errorCode, string message, IReadOnlyDictionary<string, object?>? details = null)
+/// <remarks>
+/// ⚠ Не <c>sealed</c> заради одного підтипу —
+/// <see cref="SourceResponseTooLargeException"/>: він мусить лишатися
+/// <see cref="BusinessRuleException"/> для кожного наявного <c>catch</c> і арма
+/// статусу, але відрізнятися ТИПОМ для політики ретраїв фонових задач.
+/// </remarks>
+public class BusinessRuleException(string errorCode, string message, IReadOnlyDictionary<string, object?>? details = null)
     : EcrException(errorCode, message, details);
+
+/// <summary>
+/// Зовнішнє джерело віддало відповідь, більшу за межу збирача
+/// (<c>err.ECR-INT-0503.piWebApiResponseTooLarge</c>).
+/// </summary>
+/// <remarks>
+/// ⛔ Окремий тип, а не <see cref="BusinessRuleException"/> з кодом
+/// <c>ECR-INT-0503</c>: той самий код означає «джерело недоступне», і саме його
+/// фонові задачі повторюють (30 + 60 + 120 с). Завелика відповідь від повтору
+/// не меншає — той самий запит дасть той самий обсяг, тож три ретраї лише
+/// ~3.5 хв показували б «виконується» замість причини (Н-Л4).
+/// <para>
+/// ⚠ Код лишається <c>ECR-INT-0503</c>, ключ — той самий: контракт, сід і
+/// клієнт (<c>collectionRunMessage.ts</c>) не змінюються.
+/// </para>
+/// </remarks>
+public sealed class SourceResponseTooLargeException(string errorCode, string message, IReadOnlyDictionary<string, object?>? details = null)
+    : BusinessRuleException(errorCode, message, details);
 
 /// <summary>Відмова в доступі з причиною. HTTP 403.</summary>
 public sealed class AccessDeniedException(string errorCode, string message, IReadOnlyDictionary<string, object?>? details = null)

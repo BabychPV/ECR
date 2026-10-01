@@ -59,7 +59,7 @@ describe('приладдя a11y і застосунок підіймають о�
     expect(css).toContain('--ecr-text');
   });
 
-  it('у документі є ОБИДВА значення --ecr-surface, а не одне на дві схеми', () => {
+  it('ФВ-14.15: у документі є ОБИДВА значення --ecr-surface, а не одне на дві схеми', () => {
     render(
       <Shell colorScheme="dark">
         <p>зонд</p>

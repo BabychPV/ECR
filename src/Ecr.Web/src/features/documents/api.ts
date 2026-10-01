@@ -20,7 +20,7 @@ export type TableStatus = components['schemas']['TableStatusDto'];
  * коді клієнта саме літерали `/api/v1/…` разом із функцією поруч; винесений у
  * помічник префікс зробив би дію «недосяжною з інтерфейсу» для сторожа.
  */
-export function tableStatus(documentId: number, periodKey: number): Promise<TableStatus[]> {
+function tableStatus(documentId: number, periodKey: number): Promise<TableStatus[]> {
   return apiFetch<TableStatus[]>(
     `/api/v1/documents/${String(documentId)}/tables/status?periodKey=${String(periodKey)}`,
   );
@@ -45,7 +45,7 @@ export function useTableStatus(
 }
 
 /** Скільки таблиць заповнено повністю і скільки їх усього. */
-export interface FillSummary {
+interface FillSummary {
   /** Таблиці, у яких заповнені всі комірки, що їх має заповнити людина. */
   filled: number;
 
@@ -105,7 +105,7 @@ export type DocumentListPage = components['schemas']['PagedResultOfDocumentSumma
 export type DocumentStateFilter = 'Draft' | 'Submitted' | 'Approved' | 'Rejected';
 
 /** Параметри переліку документів (`BE-09b`). */
-export interface DocumentListParams {
+interface DocumentListParams {
   periodKey: number | null;
   cursor?: string | null;
   /** ⚠ Лише разом із `periodKey`: без періоду стан не визначений (`D-93`), сервер відповість `422`. */
@@ -140,10 +140,10 @@ export function listDocuments(params: DocumentListParams): Promise<DocumentListP
 }
 
 /** Лічильники над переліком документів (`BE-09`); тип — зі згенерованої схеми. */
-export type DocumentListSummary = components['schemas']['DocumentListSummaryResponse'];
+type DocumentListSummary = components['schemas']['DocumentListSummaryResponse'];
 
 /** Зведення переліку за період. Адреса — повним літералом: її шукає сторож споживачів. */
-export function documentListSummary(periodKey: number): Promise<DocumentListSummary> {
+function documentListSummary(periodKey: number): Promise<DocumentListSummary> {
   return apiFetch<DocumentListSummary>(`/api/v1/documents/summary?periodKey=${String(periodKey)}`);
 }
 
@@ -176,7 +176,7 @@ export const ChangeDocumentKeyPermission = 'Document.ChangeKey';
 export const BusinessKeyMaxLength = 200;
 
 /** Параметри зміни бізнес-ключа документа. */
-export interface ChangeDocumentKeyParams {
+interface ChangeDocumentKeyParams {
   readonly documentId: number;
   /** Новий ключ. */
   readonly businessKey: string;

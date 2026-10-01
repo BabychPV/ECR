@@ -106,11 +106,12 @@ public sealed class AuditReader(EcrDbContext db) : IAuditReader
         command.CommandText = $"""
             SELECT a.Id, a.ChangedAt, a.PeriodKey, a.DocumentId, a.RowKey, a.ColumnDefId,
                    a.OldValue, a.NewValue, a.ChangedByUserId, a.Origin, a.IsLateEdit,
-                   u.DisplayName, d.BusinessKey, d.NameL10n, c.Code, c.HeaderL10n, c.DataType
+                   u.DisplayName, d.BusinessKey, d.NameL10n, c.Code, c.HeaderL10n, c.DataType,
+                   a.IsOutOfWindow
               FROM (
                     SELECT TOP (@take)
                            Id, ChangedAt, PeriodKey, DocumentId, RowKey, ColumnDefId,
-                           OldValue, NewValue, ChangedByUserId, Origin, IsLateEdit
+                           OldValue, NewValue, ChangedByUserId, Origin, IsLateEdit, IsOutOfWindow
                       FROM aud.CellChange
                      WHERE {where}
                      ORDER BY Id
@@ -154,7 +155,8 @@ public sealed class AuditReader(EcrDbContext db) : IAuditReader
                         LocalizedOrNull(reader, 15),
                         reader.IsDBNull(16)
                             ? null
-                            : ((Ecr.Domain.Enums.CellDataType)reader.GetByte(16)).ToString())));
+                            : ((Ecr.Domain.Enums.CellDataType)reader.GetByte(16)).ToString(),
+                        reader.GetBoolean(17))));
             }
         }
 
@@ -210,6 +212,57 @@ public sealed class AuditReader(EcrDbContext db) : IAuditReader
 
         command.Parameters.AddWithValue("@take", limit);
         command.Parameters.AddWithValue("@entityId", entityId);
+
+        var rows = new List<StructureChangeView>();
+        await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            rows.Add(new StructureChangeView(
+                DateTime.SpecifyKind(reader.GetDateTime(0), DateTimeKind.Utc),
+                reader.GetString(1),
+                reader.GetInt32(2),
+                reader.GetString(3),
+                reader.IsDBNull(4) ? null : reader.GetString(4),
+                reader.IsDBNull(5) ? null : reader.GetString(5),
+                reader.IsDBNull(6) ? null : reader.GetString(6),
+                reader.GetInt32(7),
+                StringOrNull(reader, 8)));
+        }
+
+        return rows;
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<StructureChangeView>> ReadRegistrySetSwitchesAsync(
+        string registryCode, int limit, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(registryCode);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(limit);
+
+        await using var connection = new SqlConnection(db.Database.GetConnectionString());
+        await connection.OpenAsync(ct).ConfigureAwait(false);
+
+        await using var command = connection.CreateCommand();
+
+        // ⚠ `ISJSON` — у CASE, а не окремою умовою WHERE: порядок умов SQL Server не гарантує,
+        // і `OPENJSON` над записом старішого формату впав би на всьому читанні.
+        command.CommandText = """
+            SELECT TOP (@take)
+                   s.ChangedAt, s.EntityType, s.EntityId, s.Operation,
+                   s.OldJson, s.NewJson, s.ChangeReason, s.ChangedByUserId, u.DisplayName
+              FROM aud.StructureChange AS s
+              LEFT JOIN sec.[User] AS u ON u.Id = s.ChangedByUserId
+             WHERE s.EntityType = N'cfg.RegistryDef'
+                   AND s.EntityId = 0
+                   AND EXISTS (
+                       SELECT 1
+                         FROM OPENJSON(CASE WHEN ISJSON(s.NewJson) = 1 THEN s.NewJson END, '$.registryCodes') AS j
+                        WHERE j.type = 1 AND j.value = @code)
+             ORDER BY s.ChangedAt DESC, s.Id DESC;
+            """;
+
+        command.Parameters.AddWithValue("@take", limit);
+        command.Parameters.Add("@code", SqlDbType.NVarChar, 4000).Value = registryCode;
 
         var rows = new List<StructureChangeView>();
         await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
@@ -342,6 +395,88 @@ public sealed class AuditReader(EcrDbContext db) : IAuditReader
     }
 
     /// <inheritdoc />
+    public async Task<PagedResult<SecurityEventView>> ReadSecurityEventsAsync(
+        SecurityEventFilter filter, CursorRequest page, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(filter);
+        ArgumentNullException.ThrowIfNull(page);
+
+        await using var connection = new SqlConnection(db.Database.GetConnectionString());
+        await connection.OpenAsync(ct).ConfigureAwait(false);
+
+        await using var command = connection.CreateCommand();
+
+        // ⚠ Вікно ПЕРШИМ (відсікає партиції), звуження — лише за наявності значення
+        // й іменованим типізованим параметром; ім'я автора — у зовнішньому запиті
+        // після вибору сторінки (R-18), як у `ReadStructureJournalAsync`.
+        var where = new StringBuilder("ChangedAt >= @from AND ChangedAt < @to");
+
+        if (filter.EventType is { } eventType)
+        {
+            where.Append("\n                   AND EventType = @eventType");
+            command.Parameters.Add("@eventType", SqlDbType.NVarChar, EntityTypeSize).Value = eventType;
+        }
+
+        if (filter.ChangedByUserId is { } changedBy)
+        {
+            where.Append("\n                   AND ChangedByUserId = @changedBy");
+            command.Parameters.Add("@changedBy", SqlDbType.Int).Value = changedBy;
+        }
+
+        foreach (var (name, value) in new[] { ("@from", filter.From), ("@to", filter.To) })
+        {
+            var moment = command.Parameters.Add(name, SqlDbType.DateTime2);
+            moment.Scale = 3;
+            moment.Value = value;
+        }
+
+        command.CommandText = $"""
+            SELECT s.Id, s.ChangedAt, s.EventType, s.TargetUserId, s.TargetRoleId,
+                   s.DetailsJson, s.ChangedByUserId, s.CorrelationId, u.DisplayName
+              FROM (
+                    SELECT TOP (@take)
+                           Id, ChangedAt, EventType, TargetUserId, TargetRoleId,
+                           DetailsJson, ChangedByUserId, CorrelationId
+                      FROM aud.SecurityEvent
+                     WHERE {where}
+                       AND Id > @after
+                     ORDER BY Id
+                   ) AS s
+              LEFT JOIN sec.[User] AS u ON u.Id = s.ChangedByUserId
+             ORDER BY s.Id;
+            """;
+
+        command.Parameters.Add("@take", SqlDbType.Int).Value = page.Limit + 1;
+        command.Parameters.Add("@after", SqlDbType.BigInt).Value = Cursor.Decode(page.Cursor);
+
+        var rows = new List<(long Id, SecurityEventView View)>();
+        await using (var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false))
+        {
+            while (await reader.ReadAsync(ct).ConfigureAwait(false))
+            {
+                rows.Add((
+                    reader.GetInt64(0),
+                    new SecurityEventView(
+                        DateTime.SpecifyKind(reader.GetDateTime(1), DateTimeKind.Utc),
+                        reader.GetString(2),
+                        reader.IsDBNull(3) ? null : reader.GetInt32(3),
+                        reader.IsDBNull(4) ? null : reader.GetInt32(4),
+                        reader.IsDBNull(5) ? null : reader.GetString(5),
+                        reader.GetInt32(6),
+                        StringOrNull(reader, 8),
+                        reader.IsDBNull(7) ? null : reader.GetString(7))));
+            }
+        }
+
+        var hasMore = rows.Count > page.Limit;
+
+        return new PagedResult<SecurityEventView>(
+            rows.Take(page.Limit).Select(r => r.View).ToList(),
+            hasMore ? Cursor.Encode(rows[page.Limit - 1].Id) : null,
+            TotalCount: null);
+    }
+
+    /// <inheritdoc />
     public async Task<IReadOnlyDictionary<(long TableRowId, int ColumnDefId), LastCellChange>> ReadLastChangesAsync(
         long documentId,
         IReadOnlyCollection<(long TableRowId, int ColumnDefId)> cells,
@@ -459,6 +594,60 @@ public sealed class AuditReader(EcrDbContext db) : IAuditReader
               LEFT JOIN sec.[User] AS u ON u.Id = l.ChangedByUserId;
             """;
     }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyCollection<(long TableRowId, int ColumnDefId)>> ReadOutOfWindowCellsAsync(
+        long documentId, int periodKey, CancellationToken ct)
+    {
+        await using var connection = new SqlConnection(db.Database.GetConnectionString());
+        await connection.OpenAsync(ct).ConfigureAwait(false);
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = OutOfWindowCellsSql;
+        command.Parameters.Add("@documentId", SqlDbType.BigInt).Value = documentId;
+        command.Parameters.Add("@periodKey", SqlDbType.Int).Value = periodKey;
+
+        var result = new List<(long TableRowId, int ColumnDefId)>();
+        await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            result.Add((reader.GetInt64(0), reader.GetInt32(1)));
+        }
+
+        return result;
+    }
+
+    /// <summary>Текст запиту <see cref="ReadOutOfWindowCellsAsync"/>.</summary>
+    /// <remarks>
+    /// ⚠ Кандидати — лише рядки з <c>IsOutOfWindow = 1</c>: їх несе
+    /// фільтрований індекс <c>IX_CellChange_OutOfWindow</c> (ключ
+    /// <c>DocumentId, PeriodKey, TableRowId, ColumnDefId</c>, а <c>ChangedAt</c>
+    /// і <c>Id</c> додає сам кластерний ключ), тож звичайні правки документа,
+    /// яких тисячі, зовнішня частина не читає зовсім. Предикат — літерал
+    /// <c>1</c>, а не параметр: інакше оптимізатор не має права взяти
+    /// фільтрований індекс.
+    ///
+    /// ⚠ <c>NOT EXISTS</c> — «пізнішої зміни тієї самої комірки немає»; засічка
+    /// по <c>IX_CellChange_Cell (DocumentId, TableRowId, ColumnDefId,
+    /// ChangedAt DESC)</c>. Однакові <c>ChangedAt</c> (datetime2(3), пакет)
+    /// розводить <c>Id</c>, тож на кожну комірку лишається рівно один рядок —
+    /// без <c>DISTINCT</c>.
+    /// </remarks>
+    public const string OutOfWindowCellsSql = """
+        SELECT o.TableRowId, o.ColumnDefId
+          FROM aud.CellChange AS o
+         WHERE o.DocumentId = @documentId
+           AND o.PeriodKey = @periodKey
+           AND o.IsOutOfWindow = 1
+           AND NOT EXISTS (
+                 SELECT 1
+                   FROM aud.CellChange AS later
+                  WHERE later.DocumentId = o.DocumentId
+                    AND later.TableRowId = o.TableRowId
+                    AND later.ColumnDefId = o.ColumnDefId
+                    AND (later.ChangedAt > o.ChangedAt
+                         OR (later.ChangedAt = o.ChangedAt AND later.Id > o.Id)));
+        """;
 
     private static string? StringOrNull(SqlDataReader reader, int ordinal)
         => reader.IsDBNull(ordinal) ? null : reader.GetString(ordinal);

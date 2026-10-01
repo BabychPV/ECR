@@ -61,6 +61,25 @@ public sealed class PatchPresentationHandler(
                 new Dictionary<string, object?> { ["messageKey"] = "err.ECR-TMPL-0422.emptyPatch" });
         }
 
+        // ФВ-2.6: порядок — ціле від 0. Без перевірки «abc» доїхало б до
+        // `CONVERT(int, @value)` у сховищі і вийшло б 500 замість 422.
+        foreach (var change in changes.Where(c => c.Field == "Ordinal"))
+        {
+            if (!int.TryParse(change.Value, System.Globalization.NumberStyles.None,
+                    System.Globalization.CultureInfo.InvariantCulture, out var ordinal)
+                || ordinal > MaxOrdinal)
+            {
+                throw new BusinessRuleException(
+                    "ECR-TMPL-0422",
+                    $"Порядок має бути цілим числом від 0 до {MaxOrdinal}: '{change.Value}'.",
+                    new Dictionary<string, object?>
+                    {
+                        ["messageKey"] = "err.ECR-TMPL-0422.ordinalInvalid",
+                        ["value"] = change.Value ?? string.Empty,
+                    });
+            }
+        }
+
         var hasDocuments = await store.HasDocumentsAsync(templateVersionId, ct).ConfigureAwait(false);
 
         // ⚠ Спершу класифікуємо ВСІ зміни і лише потім вирішуємо. Часткове
@@ -206,6 +225,8 @@ public sealed class PatchPresentationHandler(
 
         return newRevision;
     }
+
+    private const int MaxOrdinal = 1_000_000;
 
     private static readonly JsonSerializerOptions PatchJsonOptions = new() { PropertyNameCaseInsensitive = true };
 

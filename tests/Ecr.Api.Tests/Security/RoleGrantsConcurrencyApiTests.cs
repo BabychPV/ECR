@@ -147,7 +147,7 @@ public sealed class RoleGrantsConcurrencyApiTests(SqlServerFixture sql)
             {
                 code = $"GCP{_tag}",
                 nameL10n = new Dictionary<string, string> { ["en"] = "Grant race" },
-                timeZoneId = "Asia/Almaty",
+                timeZoneId = "Asia/Atyrau",
                 periodKind = "Monthly",
                 year = 2026,
                 templateVersionId,

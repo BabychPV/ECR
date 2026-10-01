@@ -3,7 +3,7 @@ import { Group, Loader, Text } from '@mantine/core';
 import type { DurationPhase } from './useDurationIndicator';
 
 /** Властивості показу прогресу. */
-export interface DurationProgressProps {
+interface DurationProgressProps {
   /** Фаза з `useDurationIndicator`. */
   phase: DurationPhase;
   /** Що саме триває — уже перекладений текст (`t('…')`). */

@@ -1,4 +1,4 @@
-﻿import { lazy, Suspense, useEffect, useMemo, useState, type JSX } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useState, type JSX } from 'react';
 import { Badge, Button, Skeleton, Stack, Tabs, Text } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery } from '@tanstack/react-query';
@@ -21,10 +21,10 @@ import {
   useDeleteDocumentAction,
 } from '@/features/documents/DeleteDocumentAction';
 import { ActionGroup, DocumentToolbar } from '@/features/documents/DocumentToolbar';
+import { useVersionMigrationAction } from '@/features/documents/VersionMigrationAction';
 import { DocumentLockBanner } from '@/features/documents/DocumentLockBanner';
 import { documentLockOf, locksDataActions } from '@/features/documents/documentLock';
 import { SheetFillSummary } from '@/features/documents/SheetFillSummary';
-import { ValidationPanel } from '@/features/documents/ValidationPanel';
 import { useDocumentPending } from '@/features/grid/autosave';
 import { RestoreEditsBanner } from '@/features/grid/RestoreEditsBanner';
 import { ExportButton } from '@/features/export/ExportButton';
@@ -94,6 +94,17 @@ const DocumentHeaderPanel = lazy(async () => ({
 }));
 
 /**
+ * Перелік зауважень перевірки — шоста лінива панель (`D-132`).
+ *
+ * ⚠ Без результату перевірки (`messages === null`) панель не малює нічого, тож
+ * до першого «Перевірити» її код (і `Table` з ним) сторінці не потрібен.
+ */
+const loadValidationPanel = () => import('@/features/documents/ValidationPanel');
+const ValidationPanel = lazy(async () => ({
+  default: (await loadValidationPanel()).ValidationPanel,
+}));
+
+/**
  * Сітка вантажиться окремим чанком.
  *
  * ⛔ Не оптимізація «про запас», а ліки, прописані самим гейтом бюджету:
@@ -123,6 +134,13 @@ type SheetTablesComponent = typeof import('@/features/grid/SheetTables')['SheetT
 interface GridModuleState {
   readonly component: SheetTablesComponent | null;
   readonly error: unknown;
+}
+
+// Невиконаний запит переходу до комірки не переживає сторінку (ФВ-5.6).
+function useClearCellNavigationOnUnmount(): void {
+  useEffect(() => () => {
+    void import('@/features/grid/cellNavigation').then((module) => { module.clearCellNavigation(); });
+  }, []);
 }
 
 function useSheetTablesModule(): GridModuleState & { readonly reload: () => void } {
@@ -385,6 +403,7 @@ export function DocumentPage(): JSX.Element {
   // ⚠ Викликається БЕЗУМОВНО і до будь-якого розгалуження показу: правило
   // хуків не знає про `AsyncBoundary` нижче.
   const gridModule = useSheetTablesModule();
+  useClearCellNavigationOnUnmount();
 
   /*
    * ⛔ Незбережені правки належать ДОКУМЕНТУ, а не сітці (`D14-12`). Хук
@@ -415,6 +434,10 @@ export function DocumentPage(): JSX.Element {
     document: summary.data,
     periodKey,
   });
+
+  // Перенос на нову версію шаблону (ФВ-7.5): пункт — у меню «More», звіт сухого
+  // прогону й відмови — у самому діалозі.
+  const versionMigration = useVersionMigrationAction({ documentId, document: summary.data });
 
   return (
     /*
@@ -472,7 +495,7 @@ export function DocumentPage(): JSX.Element {
           небезпечні (зміна ключа, видалення) — у меню «More» праворуч.
           Діалоги обох — поза меню: меню розмонтовує вміст, щойно
           закривається, тобто саме тоді, коли діалог мав би відкритися. */}
-      <DocumentToolbar more={[businessKeyChange.menuItem, deletion.menuItem]}>
+      <DocumentToolbar more={[businessKeyChange.menuItem, versionMigration.menuItem, deletion.menuItem]}>
         <ActionGroup name="check">
           <Button
             size="xs"
@@ -523,6 +546,8 @@ export function DocumentPage(): JSX.Element {
       <DocumentLockBanner lock={lock} periodKey={periodKey} />
 
       {businessKeyChange.dialog}
+
+      {versionMigration.dialog}
 
       {deletion.dialog}
 
@@ -590,7 +615,27 @@ export function DocumentPage(): JSX.Element {
           питає. Тобто невідомість кнопки не ВІДКРИВАЄ — вона лише лишала
           оператора без єдиного попередження перед натисканням; банер вище це
           й закриває. Гейт подання за помилками — на сервері (`ECR-SUB-*`). */}
-      <ValidationPanel messages={shownValidation?.messages ?? null} />
+      {shownValidation?.messages != null && (
+        <Suspense fallback={null}>
+          <ValidationPanel
+            messages={shownValidation.messages}
+            onSelect={(finding) => {
+              // ⛔ `ФВ-5.6`: спершу аркуш зауваження, потім запит переходу. Модуль
+              // переходу — за `import()`: він живе в чанку сітки, не сторінки
+              // (`D-132`), і сітки однаково без нього не з'являться.
+              const target = tables.data?.find((table) => table.tableDefId === finding.tableDefId);
+              if (target === undefined) return;
+
+              // ⚠ Лише коли аркуш інший: зміна адреси — це навігація, і на
+              // активному аркуші вона нічого не дає, крім зайвого рендеру сторінки.
+              if (target.sheetCode !== active?.code) setSheet(target.sheetCode);
+              void import('@/features/grid/cellNavigation').then((module) =>
+                module.requestCellNavigation(finding),
+              );
+            }}
+          />
+        </Suspense>
+      )}
 
       {/* `BE-11b`. Над вкладками з тієї ж причини, що й панель вище: журнал —
           про всі аркуші документа за період. Згорнутий, і до розгортання

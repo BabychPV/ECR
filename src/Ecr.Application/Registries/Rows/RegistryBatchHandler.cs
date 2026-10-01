@@ -73,10 +73,7 @@ public sealed partial class RegistryBatchHandler(
         var items = request.Items ?? [];
 
         await RegistryAccess
-            .RequireAsync(
-                access, currentUser, Permission, GrantLevel.Write,
-                async token => (await registries.FindDefinitionAsync(registryCode, token).ConfigureAwait(false))?.Id,
-                ct)
+            .RequireAsync(access, currentUser, Permission, GrantLevel.Write, new RegistryLookup(registries, registryCode), ct)
             .ConfigureAwait(false);
 
         Validate(items);
@@ -177,6 +174,20 @@ public sealed partial class RegistryBatchHandler(
                     {
                         ["messageKey"] = "err.ECR-REQ-0422.batchItemInvalid",
                         ["clientRowId"] = item?.ClientRowId,
+                    });
+            }
+
+            // Назва й вікно — лише для НОВОГО запису (див. RegistryBatchItemDto.Name): у наявного їх
+            // змінюють форма запису й POST …/validity, що перераховує посилання документів.
+            if (item!.Id is not null && (item.Name is not null || item.ValidFrom is not null || item.ValidTo is not null))
+            {
+                throw new BusinessRuleException(
+                    ErrorCodes.RequestInvalid,
+                    $"Рядок пакета «{item.ClientRowId}»: назву й вікно чинності задають лише новому запису.",
+                    new Dictionary<string, object?>
+                    {
+                        ["messageKey"] = "err.ECR-REQ-0422.batchItemNewOnly",
+                        ["clientRowId"] = item.ClientRowId,
                     });
             }
         }
@@ -340,7 +351,7 @@ public sealed partial class RegistryBatchHandler(
 
             foreach (var (state, hash) in hashed.Where(h => h.State.Errors.Count == 0))
             {
-                var window = state.Entry?.Window ?? new ValidityWindow(null, null);
+                var window = state.Entry?.Window ?? WindowOf(state.Item) ?? new ValidityWindow(null, null);
                 var conflict = holders[Convert.ToHexString(hash!)]
                     .Where(h => !inBatch.Contains(h.EntryId))
                     .FirstOrDefault(h => !definition.IsTemporal || RegistryKeyService.Overlaps(h.Window, window));
@@ -368,7 +379,11 @@ public sealed partial class RegistryBatchHandler(
 
         var batch = new RegistryEntryWriteBatch(
             definition.Id,
-            [.. upserts.Select(s => new RegistryEntryWrite(s.Code, s.Values))])
+            [.. upserts.Select(s => new RegistryEntryWrite(s.Code, s.Values)
+            {
+                DisplayName = s.Entry is null ? s.Item.Name : null,
+                Validity = s.Entry is null ? WindowOf(s.Item) : null,
+            })])
         {
             PlaceholderAutoCodes = dryRun,
         };
@@ -450,6 +465,10 @@ public sealed partial class RegistryBatchHandler(
     }
 
     private static string Invariant(long value) => value.ToString(CultureInfo.InvariantCulture);
+
+    /// <summary>Вікно нового запису з рядка пакета; жодної межі — <c>null</c> (не задавати).</summary>
+    private static ValidityWindow? WindowOf(RegistryBatchItemDto item)
+        => item.ValidFrom is null && item.ValidTo is null ? null : new ValidityWindow(item.ValidFrom, item.ValidTo);
 
     [GeneratedRegex(@"^err\.(ECR-[A-Z]{3,4}-\d{4})\.")]
     private static partial Regex CodeInKey();

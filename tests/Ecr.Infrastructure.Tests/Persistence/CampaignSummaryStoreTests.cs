@@ -234,7 +234,7 @@ public sealed class CampaignSummaryStoreTests(SqlServerFixture sql)
     }
 
     /// <summary>Пояс проєктів у тестах класифікації (той самий, що дає будівник ланцюга).</summary>
-    private static readonly TimeZoneInfo Zone = TimeZoneInfo.FindSystemTimeZoneById("Asia/Almaty");
+    private static readonly TimeZoneInfo Zone = TimeZoneInfo.FindSystemTimeZoneById("Asia/Atyrau");
 
     private static DateTime LocalToUtc(DateOnly day, int hour, int minute)
         => TimeZoneInfo.ConvertTimeToUtc(day.ToDateTime(new TimeOnly(hour, minute)), Zone);
@@ -294,7 +294,7 @@ public sealed class CampaignSummaryStoreTests(SqlServerFixture sql)
             .Select(i => new Project(
                 EcrCode.Create($"{prefix}{i:D3}_{tag}"), name,
                 new DateOnly(2026, 1, 1), new DateOnly(2026, 12, 31),
-                chain.TemplateVersionId, PeriodKind.Monthly, policyId, "Asia/Almaty"))
+                chain.TemplateVersionId, PeriodKind.Monthly, policyId, "Asia/Atyrau"))
             .ToList();
 
         db.Projects.AddRange(projects);
@@ -346,7 +346,7 @@ public sealed class CampaignSummaryStoreTests(SqlServerFixture sql)
             EcrCode.Create($"{code}_{tag}"),
             new LocalizedText(new Dictionary<string, string> { ["en"] = "Empty campaign" }),
             new DateOnly(2026, 1, 1), new DateOnly(2026, 12, 31),
-            chain.TemplateVersionId, PeriodKind.Monthly, policyId, "Asia/Almaty");
+            chain.TemplateVersionId, PeriodKind.Monthly, policyId, "Asia/Atyrau");
 
         db.Projects.Add(project);
         await db.SaveChangesAsync(CancellationToken.None);

@@ -11,6 +11,7 @@ import {
   Text,
   TextInput,
   Title,
+  VisuallyHidden,
 } from '@mantine/core';
 import type {
   RegistryDefinitionDto,
@@ -30,6 +31,8 @@ import {
 import { localized } from '@/shared/i18n/localized';
 import { Timestamp } from '@/shared/ui/Timestamp';
 import { t } from '@/shared/i18n';
+import { useListFocus } from '@/shared/a11y/focus';
+import { CompositionFieldOptions } from './rc816/CompositionFieldOptions';
 
 /**
  * Поля довідника (`ФВ-8.3`, `ФВ-8.12`).
@@ -74,8 +77,10 @@ export function RegistryFields({
   readonly onChangeField: (index: number, field: FieldDraft) => void;
   readonly onRemoveField: (index: number) => void;
 }): JSX.Element {
+  const focus = useListFocus(newFields.length);
+
   return (
-    <Stack gap="xs">
+    <Stack gap="xs" ref={focus.container}>
       <Group justify="space-between" align="center">
         <Title order={2} size="h5">
           {t('registries.tabFields')}
@@ -86,7 +91,15 @@ export function RegistryFields({
             вкладки `RegistryRules`, у якої «Додати правило» працює навіть
             при нулі правил. */}
         {canEdit && (
-          <Button size="xs" variant="default" onClick={onAddField}>
+          <Button
+            ref={focus.addButton}
+            size="xs"
+            variant="default"
+            onClick={() => {
+              focus.added();
+              onAddField();
+            }}
+          >
             {t('registries.addField')}
           </Button>
         )}
@@ -102,10 +115,26 @@ export function RegistryFields({
             <Table.Th>{t('registries.keyField')}</Table.Th>
             <Table.Th>{t('registries.lookup')}</Table.Th>
             <Table.Th>{t('registries.unit')}</Table.Th>
-            {newFields.length > 0 && <Table.Th />}
+            {newFields.length > 0 && (
+              <Table.Th>
+                <VisuallyHidden>{t('common.actions')}</VisuallyHidden>
+              </Table.Th>
+            )}
           </Table.Tr>
         </Table.Thead>
         <Table.Tbody>
+          {/* ⚠ Без цього рядка довідник без полів — це голі заголовки таблиці,
+              що читаються як «ще вантажиться». Колонок сім: кнопки «Прибрати»
+              немає, бо немає й нових полів. */}
+          {definition.fields.length === 0 && newFields.length === 0 && (
+            <Table.Tr data-registry-fields-empty="">
+              <Table.Td colSpan={7}>
+                <Text size="sm" c="dimmed">
+                  {t('registries.noFields')}
+                </Text>
+              </Table.Td>
+            </Table.Tr>
+          )}
           {definition.fields.map((field) => (
             <Table.Tr key={field.id}>
               <Table.Td>{field.code}</Table.Td>
@@ -126,7 +155,7 @@ export function RegistryFields({
             const isNumeric = NumericFieldTypes.includes(draft.dataType);
 
             return (
-              <Table.Tr key={`new-${index}`}>
+              <Table.Tr key={`new-${index}`} data-focus-row="">
                 <Table.Td>
                   <TextInput
                     size="xs"
@@ -186,6 +215,7 @@ export function RegistryFields({
 
                 <Table.Td>
                   {isLookup ? (
+                    <>
                     <NativeSelect
                       size="xs"
                       label={t('registries.lookup')}
@@ -200,6 +230,14 @@ export function RegistryFields({
                         })
                       }
                     />
+                    <CompositionFieldOptions
+                      definition={definition}
+                      draft={draft}
+                      otherNew={newFields}
+                      canEdit={canEdit}
+                      onChange={(next) => onChangeField(index, next)}
+                    />
+                    </>
                   ) : (
                     '—'
                   )}
@@ -227,7 +265,13 @@ export function RegistryFields({
                     variant="subtle"
                     color="statusError"
                     disabled={!canEdit}
-                    onClick={() => onRemoveField(index)}
+                    // ⚠ Кнопки «Прибрати» однакові в кожному рядку — ім'я несе
+                    // код поля, інакше читач чує п'ять однакових кнопок.
+                    aria-label={`${t('registries.removeField')}: ${draft.code || String(index + 1)}`}
+                    onClick={() => {
+                      focus.removed();
+                      onRemoveField(index);
+                    }}
                   >
                     {t('registries.removeField')}
                   </Button>
@@ -329,14 +373,24 @@ export function RegistryRules({
   readonly onChange: (index: number, rule: RuleDraft) => void;
   readonly onAdd: () => void;
 }): JSX.Element {
+  const focus = useListFocus(rules.length);
+
   return (
-    <Stack gap="xs">
+    <Stack gap="xs" ref={focus.container}>
       <Group justify="space-between" align="center">
         <Title order={2} size="h5">
           {t('registries.tabRules')}
         </Title>
         {canEdit && (
-          <Button size="xs" variant="default" onClick={onAdd}>
+          <Button
+            ref={focus.addButton}
+            size="xs"
+            variant="default"
+            onClick={() => {
+              focus.added();
+              onAdd();
+            }}
+          >
             {t('registries.addRule')}
           </Button>
         )}
@@ -351,7 +405,7 @@ export function RegistryRules({
       {rules.length === 0 && <Text c="dimmed">{t('registries.noRules')}</Text>}
 
       {rules.map((rule, index) => (
-        <Group key={rule.id ?? `new-${index}`} gap="xs" align="end" wrap="nowrap">
+        <Group key={rule.id ?? `new-${index}`} gap="xs" align="end" wrap="nowrap" data-focus-row="">
           <TextInput
             size="xs"
             miw={160}

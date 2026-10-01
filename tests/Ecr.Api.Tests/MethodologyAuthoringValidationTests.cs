@@ -112,6 +112,7 @@ public sealed class MethodologyAuthoringValidationTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage4)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-13.5")]
     public async Task Симуляція_з_місяцем_проходить()
     {
         using var app = new EcrApiFactory(sql);
@@ -295,6 +296,32 @@ public sealed class MethodologyAuthoringValidationTests(SqlServerFixture sql)
         Assert.Contains("(2 formula(s))", detail, StringComparison.Ordinal);
     }
 
+    /// <remarks>
+    /// ФВ-16.6/16.7: код <c>ECR-TMPL-4223</c> не має власного арма в
+    /// <c>ExceptionHandlingMiddleware</c> — 422 йому дає загальне правило
+    /// <c>BusinessRuleException</c>. Тест фіксує саме HTTP-відповідь, щоб цей
+    /// зв'язок не зник непомітно. Мутація: замінити <c>RequireCompatibleUnits</c>
+    /// на порожній виклик у <c>PublishMethodologyHandler</c> — публікація
+    /// т + кг проходить, а не дає 422.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Публікація_т_плюс_кг_без_CONVERT_дає_422_з_кодом_ECR_TMPL_4223()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app).ConfigureAwait(true);
+        var stand = await StandAsync(formulas: [("F_MIX", "CST.EF_T + CST.EF_KG")]).ConfigureAwait(true);
+
+        await AddConstantsInUnitsAsync(stand.VersionId, ("EF_T", "t"), ("EF_KG", "kg")).ConfigureAwait(true);
+
+        var problem = await PublishExpecting422Async(client, stand).ConfigureAwait(true);
+
+        Assert.Equal("ECR-TMPL-4223", problem.GetProperty("errorCode").GetString());
+        Assert.Equal("expr.unit.addNeedsConvert", problem.GetProperty("messageKey").GetString());
+        Assert.Equal("F_MIX", problem.GetProperty("formula").GetString());
+    }
+
     // ── Опора ─────────────────────────────────────────────────────────────
 
     private static string VersionUrl(Stand stand)
@@ -327,6 +354,23 @@ public sealed class MethodologyAuthoringValidationTests(SqlServerFixture sql)
         Assert.True(response.StatusCode == expected, $"{response.StatusCode}: {body}");
 
         return JsonDocument.Parse(body).RootElement.Clone();
+    }
+
+    /// <summary>Числові константи версії в одиницях довідника (за кодом одиниці).</summary>
+    private async Task AddConstantsInUnitsAsync(int versionId, params (string Constant, string UnitCode)[] constants)
+    {
+        await using var db = new EcrDbContext(Options());
+
+        var unitIds = await db.Units.ToDictionaryAsync(u => u.Code, u => u.Id).ConfigureAwait(false);
+        var version = await db.MethodologyVersions.SingleAsync(v => v.Id == versionId).ConfigureAwait(false);
+
+        foreach (var (constant, unitCode) in constants)
+        {
+            db.MethodologyConstants.Add(
+                version.AddNumericConstant(EcrCode.Create(constant), 1m, unitIds[unitCode]));
+        }
+
+        await db.SaveChangesAsync().ConfigureAwait(false);
     }
 
     private async Task<int> RuleCountAsync(int versionId)

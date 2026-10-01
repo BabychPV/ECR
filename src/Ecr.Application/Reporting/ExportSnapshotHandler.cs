@@ -71,7 +71,7 @@ public sealed class ExportSnapshotHandler(
         // ФВ-6.14: без права в проєкті зрізу — так само.
         if (projectId is not { } project
             || profile.LevelFor(ResourceKind.Project, project) < GrantLevel.Read
-            || !profile.Has(Permission, project))
+            || !PermissionCheck.IsGrantedIn(profile, Permission, project))
         {
             throw NotFound(snapshotId);
         }

@@ -309,7 +309,7 @@ public sealed class ReopenPeriodTransactionTests(SqlServerFixture sql)
             EcrCode.Create($"P{tag}"),
             new LocalizedText(new Dictionary<string, string> { ["en"] = "Reopen period" }),
             new DateOnly(2026, 1, 1), new DateOnly(2026, 12, 31),
-            templateVersionId: version.Id, PeriodKind.Monthly, periodPolicyId: 1, "Asia/Almaty");
+            templateVersionId: version.Id, PeriodKind.Monthly, periodPolicyId: 1, "Asia/Atyrau");
         db.Projects.Add(project);
         await db.SaveChangesAsync().ConfigureAwait(false);
 
@@ -379,6 +379,10 @@ public sealed class ReopenPeriodTransactionTests(SqlServerFixture sql)
 
         public Task<PeriodState?> FindPeriodStateAsync(long documentId, int periodKey, CancellationToken ct)
             => inner.FindPeriodStateAsync(documentId, periodKey, ct);
+
+        public Task<bool> HasReopenedSheetAsync(
+            long documentId, IReadOnlyCollection<int> sheetDefIds, int periodKey, CancellationToken ct)
+            => inner.HasReopenedSheetAsync(documentId, sheetDefIds, periodKey, ct);
     }
 
     /// <summary>

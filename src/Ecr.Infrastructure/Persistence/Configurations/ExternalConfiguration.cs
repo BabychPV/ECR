@@ -463,6 +463,21 @@ public sealed class JobProgressConfiguration : IEntityTypeConfiguration<JobProgr
                .IsDescending(false, true)
                .IncludeProperties(x => new { x.State, x.JobCode });
 
+        // Вимір 2026-10-01 (docs/build/perf/jobs-stale-health-2026-10-01.md, 500 тис. рядків):
+        // `/health/ready` (анонімний) рахує `Message LIKE '%"key"%'` за State + UpdatedAt. Без
+        // індексу — скан таблиці (47 тис. читань); з ним — діапазон (254 читання). Message у
+        // INCLUDE, щоб LIKE йшов по індексу без key lookup.
+        builder.HasIndex(x => new { x.State, x.UpdatedAt }, "IX_JobProgress_State_UpdatedAt")
+               .IncludeProperties(x => x.Message);
+
+        // Дочірні задачі розкладу (P4): `GetFanOutAsync` шукає їх за батьком. Стовпець —
+        // persisted-проєкція Payload, щоб його можна було індексувати.
+        builder.Property(x => x.FanOutParentJobId)
+               .HasMaxLength(100)
+               .HasComputedColumnSql("CASE WHEN ISJSON([Payload]) = 1 THEN CAST(JSON_VALUE([Payload], N'$.fanOutParentJobId') AS nvarchar(100)) END", stored: true);
+        builder.HasIndex(x => x.FanOutParentJobId, "IX_JobProgress_FanOutParent")
+               .IncludeProperties(x => x.State);
+
         ConfigureQueue(builder);
     }
 

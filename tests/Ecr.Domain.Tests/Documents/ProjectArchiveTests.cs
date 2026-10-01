@@ -92,7 +92,7 @@ public sealed class ProjectArchiveTests
             EcrCode.Create("PLANT_A"),
             new LocalizedText(new Dictionary<string, string> { ["en"] = "Plant A" }),
             new DateOnly(2026, 1, 1), new DateOnly(2026, 12, 31),
-            templateVersionId: 2, PeriodKind.Monthly, periodPolicyId: 1, "Asia/Almaty");
+            templateVersionId: 2, PeriodKind.Monthly, periodPolicyId: 1, "Asia/Atyrau");
 
         period = new Period(project.Id, new PeriodKey(202601), 1,
                             new DateOnly(2026, 1, 1), new DateOnly(2026, 1, 31));

@@ -65,14 +65,12 @@ public sealed class SourceUnitConverterTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
-    [Trait("Requirement", "ФВ-16.12")]
     [Trait("Requirement", "ФВ-16.10")]
     public void Збіг_оголошеної_і_фактичної_одиниці_збір_не_зупиняє()
         => SourceUnitConverter.EnsureDeclaredUnit(KilogramId, "KG", Catalog(), "tag");
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
-    [Trait("Requirement", "ФВ-16.12")]
     public void Джерело_без_UOM_збір_не_зупиняє()
     {
         // Порівнювати нема з чим: джерело одиниці не повідомило. Це не
@@ -94,7 +92,6 @@ public sealed class SourceUnitConverterTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
-    [Trait("Requirement", "ФВ-16.12")]
     public void Конверсія_на_межі_іде_через_доменний_конвертер()
     {
         var result = Converter().Convert(2.5m, TonneId, "t", KilogramId, Catalog());

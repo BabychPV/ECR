@@ -153,4 +153,22 @@ public sealed class PeriodStore(EcrDbContext db) : IPeriodStore
 
         return await query.FirstOrDefaultAsync(ct).ConfigureAwait(false);
     }
+
+    /// <inheritdoc />
+    public async Task<bool> HasReopenedSheetAsync(
+        long documentId, IReadOnlyCollection<int> sheetDefIds, int periodKey, CancellationToken ct)
+    {
+        // ⚠ `Reject` теж ставить ApprovedAt, але статус тоді Rejected: доопрацювання
+        // відхиленого після Reopen лишається пізньою правкою. Знімає позначку
+        // лише Approved, датований не раніше за Reopen.
+        return await db.ApprovalStates.AsNoTracking()
+            .AnyAsync(
+                a => a.DocumentId == documentId
+                     && a.PeriodKey == periodKey
+                     && sheetDefIds.Contains(a.SheetDefId)
+                     && a.ReopenedAt != null
+                     && !(a.Status == Ecr.Domain.Enums.DocumentStatus.Approved && a.ApprovedAt >= a.ReopenedAt),
+                ct)
+            .ConfigureAwait(false);
+    }
 }

@@ -245,6 +245,71 @@ public sealed class CollectionSchedulesControllerTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-12.10")]
+    public async Task ФВ_12_10_створення_зміна_і_видалення_розкладу_лишають_журнал_зі_старим_і_новим_станом()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, "Integration.EditSchedule").ConfigureAwait(true);
+        var (entityId, _) = await AddSourceEntityAsync().ConfigureAwait(true);
+
+        var created = await PostAsync(client, entityId, FarFuture).ConfigureAwait(true);
+        Assert.True(created.StatusCode == HttpStatusCode.Created, $"{created.StatusCode}: {app.ErrorsText}");
+        var createdBody = await BodyAsync(created).ConfigureAwait(true);
+        var id = createdBody.GetProperty("id").GetInt32();
+        var version = createdBody.GetProperty("rowVersion").GetString();
+
+        var saved = await PutAsync(client, id, FarFutureLater, isEnabled: false, version).ConfigureAwait(true);
+        Assert.True(saved.StatusCode == HttpStatusCode.OK, $"{saved.StatusCode}: {app.ErrorsText}");
+        var newVersion = (await BodyAsync(saved).ConfigureAwait(true)).GetProperty("rowVersion").GetString();
+
+        var removed = await SendAsync(client, HttpMethod.Delete, At(id), newVersion, body: null).ConfigureAwait(true);
+        Assert.True(removed.StatusCode == HttpStatusCode.NoContent, $"{removed.StatusCode}: {app.ErrorsText}");
+
+        var journal = await StructureChangeProbe.ReadAsync(sql.ConnectionString, "ext.CollectionSchedule", id)
+            .ConfigureAwait(true);
+
+        Assert.Equal(
+            ["CreateCollectionSchedule", "SaveCollectionSchedule", "DeleteCollectionSchedule"],
+            journal.Select(j => j.Operation).ToArray());
+
+        // Створення: старого немає, новий — те, що заведено.
+        Assert.Null(journal[0].OldJson);
+        Assert.Contains(FarFuture, journal[0].NewJson, StringComparison.Ordinal);
+
+        // Зміна: у старому — попередній cron і «увімкнено», у новому — новий cron і «вимкнено».
+        Assert.Contains(FarFuture, journal[1].OldJson, StringComparison.Ordinal);
+        Assert.Contains("\"isEnabled\":true", journal[1].OldJson, StringComparison.Ordinal);
+        Assert.Contains(FarFutureLater, journal[1].NewJson, StringComparison.Ordinal);
+        Assert.Contains("\"isEnabled\":false", journal[1].NewJson, StringComparison.Ordinal);
+
+        // Видалення: що зникло — у старому, нового немає.
+        Assert.Contains(FarFutureLater, journal[2].OldJson, StringComparison.Ordinal);
+        Assert.Null(journal[2].NewJson);
+
+        Assert.All(journal, j => Assert.True(j.ChangedByUserId > 0));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-12.10")]
+    public async Task ФВ_12_10_відмова_запиту_не_лишає_запису_журналу()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, "Integration.EditSchedule").ConfigureAwait(true);
+        var (id, _) = await AddScheduleAsync(FarFuture).ConfigureAwait(true);
+        var version = (await RowAsync(client, id).ConfigureAwait(true)).GetProperty("rowVersion").GetString();
+
+        var refused = await PutAsync(client, id, Unsupported, isEnabled: true, version).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, refused.StatusCode);
+
+        Assert.Empty(await StructureChangeProbe.ReadAsync(sql.ConnectionString, "ext.CollectionSchedule", id)
+            .ConfigureAwait(true));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "UI-09")]
     public async Task Фільтр_dataSource_віддає_розклади_лише_цього_зʼєднання_а_невідомий_код_порожній_перелік()
     {

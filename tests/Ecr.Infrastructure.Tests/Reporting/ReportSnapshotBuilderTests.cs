@@ -28,7 +28,6 @@ public sealed class ReportSnapshotBuilderTests(SqlServerFixture sql)
     private static readonly DateTime Now = new(2026, 4, 1, 10, 0, 0, DateTimeKind.Utc);
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage5)]
-    [Trait("Requirement", "ФВ-5.7")]
     [Trait("Requirement", "ФВ-10.10")]
     public void Статус_зрізу_успадковується_від_стану_даних()
     {
@@ -116,7 +115,7 @@ public sealed class ReportSnapshotBuilderTests(SqlServerFixture sql)
             EcrCode.Create($"P{tag}"),
             new LocalizedText(new Dictionary<string, string> { ["en"] = "Water report project" }),
             new DateOnly(2026, 1, 1), new DateOnly(2026, 12, 31),
-            templateVersionId: templateVersion.Id, PeriodKind.Monthly, periodPolicyId: 1, "Asia/Almaty");
+            templateVersionId: templateVersion.Id, PeriodKind.Monthly, periodPolicyId: 1, "Asia/Atyrau");
         db.Projects.Add(project);
         await db.SaveChangesAsync(CancellationToken.None);
 
@@ -210,8 +209,6 @@ public sealed class ReportSnapshotBuilderTests(SqlServerFixture sql)
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage5)]
-    [Trait("Requirement", "ФВ-10.5")]
-    [Trait("Requirement", "ФВ-5.14")]
     [Trait("Requirement", "ФВ-9.17")]
     public void Поданий_зріз_не_перебудовується_ніколи()
     {

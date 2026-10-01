@@ -15,7 +15,7 @@ import { RouteHeadingClass } from '@/shared/theme/routeHeading';
  * не значення, яким користувач має ділитися посиланням чи бачити в
  * адресному рядку як параметр, яким нібито можна керувати.
  */
-export interface ForbiddenLocationState {
+interface ForbiddenLocationState {
   /** Право, якого бракує (`RouteHandle.permission`). */
   permission?: string;
 }

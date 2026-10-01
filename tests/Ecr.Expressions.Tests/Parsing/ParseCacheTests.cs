@@ -32,6 +32,7 @@ public sealed class ParseCacheTests
 {
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "ФВ-9.8")]
     public void Той_самий_вираз_розбирається_один_раз()
     {
         var parser = new Parser();

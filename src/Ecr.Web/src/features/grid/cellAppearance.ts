@@ -90,7 +90,7 @@ export function cellAppearanceClassOf(style: CellStyleDto | null | undefined): s
  * без заливки. Значення — з теми (`themeSurface`), а не свої: у темній це
  * рівно `#242424`, виміряний на живій сітці (`X-10`).
  */
-export const LightSurface = themeSurface.light.body;
+const LightSurface = themeSurface.light.body;
 export const DarkSurface = themeSurface.dark.body;
 
 /** Колір, якщо він читається на `surface` (`AA.text`); інакше `null`. */

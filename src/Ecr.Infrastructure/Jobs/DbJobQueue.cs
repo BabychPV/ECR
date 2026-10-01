@@ -49,7 +49,8 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock) : IJobQueue
     private const string ClaimOutput = """
         OUTPUT inserted.JobId, inserted.JobCode, inserted.Lane, inserted.Payload, inserted.TargetKey,
                ISNULL(inserted.Attempt, 0), ISNULL(inserted.ReclaimCount, 0), inserted.LeaseUntil,
-               inserted.CreatedByUserId, inserted.CorrelationId, inserted.DocumentId
+               inserted.CreatedByUserId, inserted.CorrelationId, inserted.DocumentId,
+               DATEDIFF_BIG(millisecond, inserted.AvailableAt, SYSUTCDATETIME())
         """;
 
     /// <summary>Переклейм простроченої <c>Running</c>: Attempt не чіпає, ReclaimCount + 1 (правка Б).</summary>
@@ -303,7 +304,10 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock) : IJobQueue
                     r.IsDBNull(3) ? null : r.GetString(3), r.IsDBNull(4) ? null : r.GetString(4),
                     r.GetInt32(5), r.GetInt32(6), reclaimed, DateTime.SpecifyKind(r.GetDateTime(7), DateTimeKind.Utc),
                     r.IsDBNull(8) ? null : r.GetInt32(8), r.IsDBNull(9) ? null : r.GetString(9),
-                    r.IsDBNull(10) ? null : r.GetInt64(10))
+                    r.IsDBNull(10) ? null : r.GetInt64(10),
+                    // ФВ-12.2: затримка старту — лише для Queued; Math.Max — CAST у claim округлює
+                    // «зараз» угору до 0,5 мс, тож різниця може вийти на мілісекунду від'ємною.
+                    reclaimed || r.IsDBNull(11) ? null : Math.Max(0L, r.GetInt64(11)))
                 : null;
 
         try

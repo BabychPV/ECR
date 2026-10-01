@@ -49,7 +49,7 @@ public sealed class ChangeProjectTimeZoneTests
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     public async Task Draft_без_періодів_дозволяє_зміну()
     {
-        var project = ProjectBuilder.Project(timeZoneId: "Asia/Almaty");
+        var project = ProjectBuilder.Project(timeZoneId: "Asia/Atyrau");
         _periods.FindProjectAsync(project.Id, Arg.Any<CancellationToken>()).Returns(project);
 
         await Handler().HandleAsync(project.Id, "Asia/Aqtau", CancellationToken.None);
@@ -66,7 +66,7 @@ public sealed class ChangeProjectTimeZoneTests
         // хоч один період вийшов зі Scheduled. Ретроактивна зміна зсунула б
         // межі закритих періодів і переписала б `IsLateEdit` на поданих
         // формах.
-        var project = ProjectBuilder.Project(timeZoneId: "Asia/Almaty");
+        var project = ProjectBuilder.Project(timeZoneId: "Asia/Atyrau");
         var periods = Ecr.Domain.Services.PeriodCalendar.Build(
             project, ProjectBuilder.Policy(), ProjectBuilder.Zone(), existing: []);
         ProjectBuilder.Attach(project, periods);
@@ -78,7 +78,7 @@ public sealed class ChangeProjectTimeZoneTests
             () => Handler().HandleAsync(project.Id, "Asia/Aqtau", CancellationToken.None));
 
         Assert.Equal("ECR-PRD-0409", error.ErrorCode);
-        Assert.Equal("Asia/Almaty", project.TimeZoneId);
+        Assert.Equal("Asia/Atyrau", project.TimeZoneId);
         await _uow.DidNotReceiveWithAnyArgs().SaveChangesAsync(default);
     }
 
@@ -87,7 +87,7 @@ public sealed class ChangeProjectTimeZoneTests
     [Trait("Requirement", "ФВ-1.1b")]
     public async Task Невідомий_пояс_дає_ECR_CFG_4221()
     {
-        var project = ProjectBuilder.Project(timeZoneId: "Asia/Almaty");
+        var project = ProjectBuilder.Project(timeZoneId: "Asia/Atyrau");
         _periods.FindProjectAsync(project.Id, Arg.Any<CancellationToken>()).Returns(project);
 
         var error = await Assert.ThrowsAsync<DomainException>(
@@ -117,7 +117,7 @@ public sealed class ChangeProjectTimeZoneTests
     {
         // ⛔ Той самий патерн, що й Activate/Archive/Clone (Q-179): глобальне
         // `Project.Manage` без гранта на ЦЕЙ проєкт не має бути достатнім.
-        var project = ProjectBuilder.Project(timeZoneId: "Asia/Almaty");
+        var project = ProjectBuilder.Project(timeZoneId: "Asia/Atyrau");
         _periods.FindProjectAsync(project.Id, Arg.Any<CancellationToken>()).Returns(project);
         // ⚠ S17: грант Read — проєкт ВИДИМИЙ, бракує рівня Manage. Без жодного
         // гранта проєкт невидимий, і відповідь — 404, як на неіснуючий.
@@ -132,6 +132,6 @@ public sealed class ChangeProjectTimeZoneTests
 
         Assert.Equal("ECR-AUTH-0403", denied.ErrorCode);
         Assert.Equal("err.ECR-AUTH-0403.noProjectManageGrant", denied.Details!["messageKey"]);
-        Assert.Equal("Asia/Almaty", project.TimeZoneId);
+        Assert.Equal("Asia/Atyrau", project.TimeZoneId);
     }
 }

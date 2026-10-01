@@ -69,7 +69,7 @@ const listeners = new Set<() => void>();
  * ⚠ Тримається саме ЗНАЧЕННЯ, яке відхилили (`edit`), а не комірка взагалі:
  * якщо в комірці вже інше значення, відмова його не стосується (`sendableEdits`).
  */
-export interface PendingRejection {
+interface PendingRejection {
   /** Правка в тому вигляді, в якому її відхилили. */
   readonly edit: PendingEdit;
   /** Причина — текст сервера як є. */

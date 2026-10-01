@@ -112,7 +112,11 @@ public sealed class SchemaValidatorTests(SqlServerFixture sql)
         // виправити, означало б зробити його незапускним без DBA.
         await validator.ValidateAsync("Validate", CancellationToken.None);
 
-        Assert.Contains(validator.Warnings, w => w.Contains("RCSI", StringComparison.Ordinal));
+        // D-102: критична знахідка з посиланням на скрипт, а не рядовий warning.
+        var finding = Assert.Single(validator.Critical);
+        Assert.Contains("RCSI", finding, StringComparison.Ordinal);
+        Assert.Contains("06-rcsi.sql", finding, StringComparison.Ordinal);
+        Assert.DoesNotContain(validator.Warnings, w => w.Contains("RCSI", StringComparison.Ordinal));
     }
 
     [Fact]

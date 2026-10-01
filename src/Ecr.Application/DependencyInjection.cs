@@ -54,6 +54,7 @@ public static class DependencyInjection
         services.AddScoped<Security.ResetUserPasswordHandler>();
         services.AddScoped<Security.SetUserLockHandler>();
         services.AddScoped<Security.GetAccessDiagnosticsHandler>();
+        services.AddScoped<Security.GetEffectiveAccessHandler>();
         services.AddScoped<DiffTemplateVersionsHandler>();
         services.AddScoped<PatchPresentationHandler>();
 
@@ -90,6 +91,8 @@ public static class DependencyInjection
         // стилю — той самий патерн, що колонка/рядок вище.
         services.AddScoped<SaveStyleDefHandler>();
         services.AddScoped<ListStyleDefsHandler>();
+        services.AddScoped<SaveConditionalFormatsHandler>();
+        services.AddScoped<GetConditionalFormatsHandler>();
 
         // П'ятий зріз — формула колонки чи рядка (W5.3), за зразком вище.
         services.AddScoped<SaveFormulaDefHandler>();
@@ -179,6 +182,7 @@ public static class DependencyInjection
         services.AddScoped<Security.CreateUserHandler>();
         services.AddScoped<Audit.GetCellChangesHandler>();
         services.AddScoped<Audit.GetStructureChangesHandler>();
+        services.AddScoped<Audit.GetSecurityEventsHandler>();
         services.AddScoped<Audit.ExportStructureChangesHandler>();
         services.AddScoped<Consistency.GetConsistencyIssuesHandler>();
         services.AddScoped<Consistency.RunConsistencyCheckHandler>();
@@ -201,6 +205,7 @@ public static class DependencyInjection
         services.AddScoped<Workflow.ReopenDocumentHandler>();
         services.AddScoped<Documents.DeleteDocumentHandler>();
         services.AddScoped<Documents.ChangeDocumentKeyHandler>();
+        services.AddScoped<Documents.VersionMigration.MigrateDocumentVersionHandler>();
         services.AddScoped<Workflow.GetWorkflowHistoryHandler>();
         services.AddScoped<Documents.ListDocumentVersionsHandler>();
         services.AddScoped<Documents.CompareDocumentVersionsHandler>();
@@ -241,6 +246,8 @@ public static class DependencyInjection
         services.AddScoped<Registries.DiscardRegistryDefinitionDraftHandler>();
         services.AddScoped<Registries.GetRegistryHistoryHandler>();
         services.AddScoped<Registries.GetRegistryUsageHandler>();
+        services.AddScoped<Registries.Impact.GetRegistryImpactHandler>(); // RT-25
+        services.AddScoped<Registries.Impact.RecalculateImpactedHandler>(); // RT-25
         services.AddScoped<Registries.ImportRegistryEntriesHandler>();
         services.AddScoped<Registries.ListRegistryExternalKeysHandler>(); // FEATURE-REGISTRY-SYNC S2
         services.AddScoped<Registries.BindRegistryExternalKeyHandler>();
@@ -257,6 +264,8 @@ public static class DependencyInjection
         services.AddScoped<Registries.RegistryEntryWriter>(); // S6
         services.AddScoped<Registries.Rows.GetRegistryRowsHandler>(); // RT-13
         services.AddScoped<Registries.Rows.RegistryBatchHandler>(); // RT-14
+        services.AddScoped<Registries.Rows.GetRegistryEntryHistoryHandler>(); // RT-15
+        services.AddScoped<Registries.Export.ExportRegistryHandler>(); // RT-16
         services.AddScoped<Registries.Rules.RegistryRuleCompiler>(); // RT-17a
         services.AddScoped<Registries.Rules.IRegistryRuleEngine, Registries.Rules.RegistryRuleEngine>(); // RT-17a
 
@@ -283,6 +292,7 @@ public static class DependencyInjection
         // константи, правила відбору, виходи, золотий набір, режими і прив'язка
         // до колонки документа.
         services.AddScoped<Calculations.CreateMethodologyHandler>();
+        services.AddScoped<Calculations.ImportMethodologyPackageHandler>();
         services.AddScoped<Calculations.ListMethodologyConstantsHandler>();
         services.AddScoped<Calculations.SaveMethodologyConstantHandler>();
         services.AddScoped<Calculations.ListMethodologyRulesHandler>();
@@ -390,6 +400,22 @@ public static class DependencyInjection
         services.AddScoped<Sources.SetEntityFieldMapPausedHandler>();
         services.AddScoped<Sources.AcceptSourceUnitChangeHandler>();
         services.AddScoped<Sources.DeleteEntityFieldMapHandler>();
+
+        // HSE301 A6: API подій джерела — каталог шаблонів, проба, мапінг, таблиця подій, «Отримати з PI зараз».
+        services.AddScoped<Integration.SourceEvents.ListEventTemplatesHandler>();
+        services.AddScoped<Integration.SourceEvents.ProbeSourceEventsHandler>();
+        services.AddScoped<Integration.SourceEvents.ListSourceEventsHandler>();
+        services.AddScoped<Integration.SourceEvents.SyncSourceEventsHandler>();
+        services.AddScoped<Sources.ListSourceEventMapsHandler>();
+        services.AddScoped<Sources.CreateSourceEventMapHandler>();
+        services.AddScoped<Sources.UpdateSourceEventMapHandler>();
+        services.AddScoped<Sources.DeleteSourceEventMapHandler>();
+
+        // HSE301 A1: CRUD прив'язок вікна рядка (ext.RowWindowMap).
+        services.AddScoped<Sources.ListRowWindowMapsHandler>();
+        services.AddScoped<Sources.CreateRowWindowMapHandler>();
+        services.AddScoped<Sources.UpdateRowWindowMapHandler>();
+        services.AddScoped<Sources.DeleteRowWindowMapHandler>();
 
         // BE-07: публічні дані екрана входу. Єдиний обробник, який НЕ перевіряє
         // жодного права — бо викликається до автентифікації; склад полів і

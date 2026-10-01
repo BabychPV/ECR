@@ -5,7 +5,7 @@ import { useNavigate } from 'react-router-dom';
 import type { DocumentSummary } from '@/api/types';
 import { deleteDocument } from './api';
 import { localized } from '@/shared/i18n/localized';
-import { ConfirmModal } from '@/shared/ui/ConfirmModal';
+import { LazyConfirmModal } from '@/features/workflow/lazyDialogs';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { showDone } from '@/shared/ui/notify';
 import { t } from '@/shared/i18n';
@@ -37,7 +37,7 @@ export function isKnownDraft(
   );
 }
 
-export interface DeleteDocumentActionArgs {
+interface DeleteDocumentActionArgs {
   readonly documentId: number;
 
   /** `undefined` — документ ще не приїхав: кнопки немає, бо назви немає. */
@@ -50,7 +50,7 @@ export interface DeleteDocumentActionArgs {
   readonly allowed: boolean;
 }
 
-export interface DeleteDocumentAction {
+interface DeleteDocumentAction {
   /**
    * Пункт меню «More» на сторінці документа; `null`, якщо дії немає.
    *
@@ -151,7 +151,7 @@ export function useDeleteDocumentAction({
   ) : null;
 
   const dialog = shown ? (
-    <ConfirmModal
+    <LazyConfirmModal
       opened={opened}
       title={t('documents.deleteTitle', { name })}
       text={t('documents.deleteText')}

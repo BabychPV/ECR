@@ -16,14 +16,14 @@ namespace Ecr.Domain.Tests.Documents;
 /// де кінчається місяць. Еталон — <c>ComputedOpenAt</c> із відступом 0
 /// (опівніч <c>PeriodStart</c>) і <c>ComputedGraceAt</c> із відступом 1
 /// (опівніч <c>PeriodEnd + 1</c>), а не константи: зсув поясу (напр.
-/// <c>Asia/Almaty</c>) залежить від бази tz на машині.
+/// <c>Europe/Kyiv</c>) залежить від бази tz на машині.
 /// </remarks>
 public sealed class PeriodUtcBoundsTests
 {
     [Theory]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait("Finding", "D16-03")]
-    [InlineData("Asia/Almaty", 2026, 1)]
+    [InlineData("Asia/Atyrau", 2026, 1)]
     [InlineData("Europe/Kyiv", 2026, 3)]   // перехід на літній час усередині місяця
     [InlineData("Europe/Kyiv", 2026, 10)]  // і назад
     [InlineData("America/New_York", 2026, 11)]

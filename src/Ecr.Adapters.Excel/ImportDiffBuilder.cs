@@ -176,6 +176,29 @@ public sealed class ImportDiffBuilder
                     continue;
                 }
 
+                // ✎ ФВ-9.16b (D-109): імпорт `.xlsx` ОКРУГЛЯЄ до `ColumnDef.Scale`
+                // (`AwayFromZero`), а не відмовляє, як ручне введення й `PATCH`.
+                // Округлюється в ПРЕВ'Ю: застосування бере `NewValue` з плану, тож
+                // «показано» і «записано» — те саме число, і `PATCH` приймає його
+                // (`ColumnDef.ValidateValue`, п. 7, бачить уже кругле). Порівняння
+                // з наявним — двічі: до округлення (незмінена книга з історичним
+                // значенням понад Scale не стає «зміною») і після (`1.234` → `1.23`
+                // при наявному `1.23` — не зміна). Обчислювані відсіяні вище.
+                var fromFile = incoming;
+                incoming = RoundToColumnScale(incoming, definition);
+
+                // ✎ ФВ-9.16b: округлення видно в перегляді — людина має знати, що
+                // записано не те число, яке стоїть у її книзі. `1.230` → `1.23`
+                // числом не змінюється, тож позначки не дає.
+                var roundedFrom = fromFile is decimal before && incoming is decimal after && before != after
+                    ? fromFile
+                    : null;
+
+                if (Same(incoming, existing, definition))
+                {
+                    continue;
+                }
+
                 if (!rowIds.TryGetValue(row.RowKey, out var rowId))
                 {
                     rejected.Add(new ImportRejection(
@@ -224,6 +247,23 @@ public sealed class ImportDiffBuilder
                     continue;
                 }
 
+                // ⛔ ФВ-9.16b: точність — ПІСЛЯ округлення до `Scale`, тим самим
+                // правилом, що п. 7 `ColumnDef.ValidateValue` на застосуванні.
+                // Округлення може додати розряд (`99.999` → `100.00` при `(4,2)`),
+                // і таке число доходило б до `PATCH`, що відхиляв усю книгу вже
+                // після погодженого перегляду. Відмова — тут, однією коміркою.
+                if (incoming is decimal fitted
+                    && definition.DataType == CellDataType.Decimal
+                    && !definition.FitsPrecision(fitted))
+                {
+                    rejected.Add(new ImportRejection(
+                        row.RowKey, column.Code, CellValueReader.TypeMismatch,
+                        $"The number does not fit the column precision ({definition.Precision}, scale {definition.Scale}) after rounding to the column scale.",
+                        table.Code, table.NameL10n, ImportMessageKeys.Precision));
+
+                    continue;
+                }
+
                 // ⛔ F-06: тип перевіряє ТОЙ САМИЙ читач, що й запис
                 // (`CellValueReader.Read` у `PatchCellsHandler`). Доти `abc` у
                 // числовій колонці ставав звичайною зміною, Apply був активний, а
@@ -260,7 +300,8 @@ public sealed class ImportDiffBuilder
                 }
 
                 changes.Add(new ImportChange(
-                    row.RowKey, column.Code, Display(existing, definition), incoming, table.Code, table.NameL10n));
+                    row.RowKey, column.Code, Display(existing, definition), incoming, table.Code, table.NameL10n,
+                    roundedFrom));
             }
         }
 
@@ -340,10 +381,10 @@ public sealed class ImportDiffBuilder
                 // `0.30000000000000004` (17 знаків), а сховище тримає 16
                 // (`CellValueReader.StorageScale`). Сервер ручне введення з
                 // таким хвостом відхиляє, тож без цього кроку один такий
-                // осередок валив би застосування всієї книги. Округлюється
+                // осередок валив би застосування всієї книги. Тут округлюється
                 // лише до масштабу СХОВИЩА — тобто рівно те, що сховище однаково
-                // відкинуло б; оголошений масштаб колонки тут не застосовується
-                // (його порушення лишається відмовою). Округлене значення
+                // відкинуло б; до `ColumnDef.Scale` колонки округлює `Build`
+                // (`RoundToColumnScale`, ФВ-9.16b). Округлене значення
                 // видно в прев'ю як «нове», і воно ж — те, що буде записано й
                 // потрапить у журнал.
                 return ReadNumber(cell, text, culture) is { } number
@@ -466,6 +507,27 @@ public sealed class ImportDiffBuilder
     private static bool IsNumeric(ColumnDef definition)
         => definition.DataType is CellDataType.Decimal or CellDataType.Formula or CellDataType.Calculated;
 
+    /// <summary>
+    /// Округлює число з книги до <see cref="ColumnDef.Scale"/> колонки
+    /// (ФВ-9.16b); усе інше повертає як є.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Лише <see cref="CellDataType.Decimal"/> — так само, як п. 7
+    /// <c>ColumnDef.ValidateValue</c>, що відхиляє ручне введення. Правило
+    /// те саме (<c>AwayFromZero</c>), тож результат гарантовано проходить цю
+    /// перевірку. <c>Scale</c> ≥ масштабу сховища нічого не округляє (число вже
+    /// нормалізоване в <c>Read</c>) і не передається в <c>decimal.Round</c> —
+    /// той не приймає понад 28. Округлення від уже нормалізованого до 16 знаків
+    /// числа дає інше лише на хвості з 17+ знаків, якого в книзі не буває.
+    /// </remarks>
+    private static object? RoundToColumnScale(object? value, ColumnDef definition)
+        => value is decimal number
+           && definition.DataType == CellDataType.Decimal
+           && definition.Scale is { } scale
+           && scale < CellValueReader.StorageScale
+            ? decimal.Round(number, scale, MidpointRounding.AwayFromZero)
+            : value;
+
     /// <summary>Чи рахує комірки цієї колонки система — за ЖИВИМ визначенням.</summary>
     /// <remarks>
     /// ⚠ Те саме правило, що в <c>ExcelExporter.IsCalculated</c>, і навмисно те
@@ -587,6 +649,9 @@ public static class ImportMessageKeys
 
     /// <summary>Ціла частина числа не вміщується в сховище.</summary>
     public const string IntegerDigits = "err.ECR-CELL-0422.importIntegerDigits";
+
+    /// <summary>Число після округлення до <c>Scale</c> не вміщується в <c>Precision</c> колонки (ФВ-9.16b).</summary>
+    public const string Precision = "err.ECR-CELL-0422.importPrecision";
 
     /// <summary>Екземпляра таблиці з файлу немає в документі за цей період.</summary>
     public const string InstanceMissing = "err.ECR-IMP-0422.importInstanceMissing";

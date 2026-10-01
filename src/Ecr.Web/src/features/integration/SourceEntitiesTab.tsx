@@ -13,28 +13,22 @@ import type { RegistrySyncPolicy } from '@/features/sources/registrySyncPolicyAp
 import { canEditRegistrySyncPolicy, RegistrySyncPolicyModal } from '@/features/sources/RegistrySyncPolicyModal';
 import { AddSourceEntityModal } from './AddSourceEntityModal';
 import type { DataSource } from './dataSourceApi';
-import { bindSourceEntityRegistry, SourceEntitiesQueryKey, type SourceEntity } from './sourceEntityApi';
+import { bindSourceEntityRegistry, SourceEntitiesQueryKey } from './sourceEntityApi';
 
 /** Значення «не прив'язана» у виборі довідника: `Select` не приймає `null` як опцію. */
 const Unbound = '';
 
 /**
- * Чинна політика синку, наскільки її знає клієнт (`D-212`).
- *
- * ⚠ `GET /api/v1/sources` (`SourceEntityStatus`) політики не віддає; її несе
- * лише `SourceEntityDto` — відповідь на прив'язку й на збереження політики.
- * Тому: рядок переліку, якщо сервер колись додасть туди поля, інакше —
- * остання відповідь у цьому сеансі, інакше `null` («невідома»).
+ * Чинна політика синку сутності (`D-212`) — з рядка `GET /api/v1/sources`:
+ * `SourceEntityStatus` несе всі чотири поля обов'язковими, тож форма завжди
+ * стартує з того, що лежить у базі, а не з типової.
  */
-function policyOf(row: object, known: SourceEntity | undefined): RegistrySyncPolicy | null {
-  const source = 'onMissingInSource' in row ? (row as SourceEntity) : known;
-  if (source === undefined) return null;
-
+function policyOf(row: SourceEntityStatus): RegistrySyncPolicy {
   return {
-    onMissingInSource: source.onMissingInSource,
-    validFromAttribute: source.validFromAttribute,
-    validToAttribute: source.validToAttribute,
-    validToInclusive: source.validToInclusive,
+    onMissingInSource: row.onMissingInSource,
+    validFromAttribute: row.validFromAttribute,
+    validToAttribute: row.validToAttribute,
+    validToInclusive: row.validToInclusive,
   };
 }
 
@@ -54,9 +48,6 @@ export function SourceEntitiesTab({ source }: { readonly source: DataSource }): 
   const [adding, setAdding] = useState(false);
   const session = useSession();
   const [policyFor, setPolicyFor] = useState<number | null>(null);
-  const [known, setKnown] = useState<ReadonlyMap<number, SourceEntity>>(new Map());
-  const remember = (entity: SourceEntity): void =>
-    setKnown((prev) => new Map(prev).set(entity.id, entity));
 
   const entities = useQuery({
     queryKey: SourceEntitiesQueryKey,
@@ -72,7 +63,6 @@ export function SourceEntitiesTab({ source }: { readonly source: DataSource }): 
     mutationFn: ({ id, registryDefId }: { id: number; registryDefId: number | null }) =>
       bindSourceEntityRegistry(id, registryDefId),
     onSuccess: (entity) => {
-      remember(entity);
       void queryClient.invalidateQueries({ queryKey: SourceEntitiesQueryKey });
       notifications.show({
         message: entity.registryDefId === null ? t('sources.registryUnbound') : t('sources.registryBound'),
@@ -194,13 +184,10 @@ export function SourceEntitiesTab({ source }: { readonly source: DataSource }): 
           key={editing.id}
           entityId={editing.id}
           entityLabel={editing.displayName ?? editing.code}
-          current={policyOf(editing, known.get(editing.id))}
+          current={policyOf(editing)}
           opened
           onClose={() => setPolicyFor(null)}
-          onSaved={(entity) => {
-            remember(entity);
-            void queryClient.invalidateQueries({ queryKey: SourceEntitiesQueryKey });
-          }}
+          onSaved={() => void queryClient.invalidateQueries({ queryKey: SourceEntitiesQueryKey })}
         />
       )}
     </Stack>

@@ -50,7 +50,7 @@ function projectLabel(project: GrantableProject): string {
  * права на нього немає), лишається обраним під своїм номером: зникнути з поля
  * він не має права — збереження тоді мовчки звузило б область.
  */
-export function projectOptions(
+function projectOptions(
   projects: readonly GrantableProject[],
   selectedIds: readonly number[],
 ): { value: string; label: string }[] {
@@ -163,7 +163,7 @@ export function useProjectSheets(enabled: boolean): { readonly sheets: readonly 
  * проєктах — один варіант). Обраний код, якого в довіднику немає, лишається
  * під своїм кодом — з тієї ж причини, що й проєкт у `projectOptions`.
  */
-export function sheetOptions(
+function sheetOptions(
   sheets: readonly GrantableSheet[],
   projectIds: readonly number[],
   selected: readonly string[],

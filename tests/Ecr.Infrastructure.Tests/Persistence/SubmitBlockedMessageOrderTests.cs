@@ -251,7 +251,8 @@ public sealed class SubmitBlockedMessageOrderTests(SqlServerFixture sql)
             Recalculation(db, doc, metadata, clock),
             methodologies,
             new TemplateVersionStore(db),
-            new RegistryStore(db));
+            new RegistryStore(db),
+            new AuditWriter(db));
     }
 
     /// <summary>Перерахунок аркуша на реальних сховищах (формул у знімку немає).</summary>

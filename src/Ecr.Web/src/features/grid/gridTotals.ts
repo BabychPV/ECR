@@ -55,7 +55,7 @@ const TotalableColumnTypes: ReadonlySet<string> = new Set([
 ]);
 
 /** Чи підсумовується ця колонка. */
-export function isTotalableColumn(column: ColumnDto): boolean {
+function isTotalableColumn(column: ColumnDto): boolean {
   return TotalableColumnTypes.has(column.dataType);
 }
 
@@ -67,7 +67,7 @@ export interface TotalsEdit {
 }
 
 /** Джерела значень поверх зрізу — ті самі, що бачить `gridRows`. */
-export interface TotalsOverlay {
+interface TotalsOverlay {
   /** Незбережені правки цього зрізу (`pendingStore`), ключ — `rowKey:columnCode`. */
   readonly pending?: ReadonlyMap<string, TotalsEdit>;
   /** Значення, підтверджені оператором (`ФВ-2.16`), ключ — `rowKey:columnCode`. */

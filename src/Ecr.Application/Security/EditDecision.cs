@@ -18,8 +18,14 @@ namespace Ecr.Application.Security;
 /// <c>false</c> при відмові: підтверджувати нема чого, коли дія й так
 /// заборонена.
 /// </param>
+/// <param name="OutOfWindowMark">
+/// Дозволено поза вікном доступу за політикою <c>Warn</c> («дозволити з
+/// позначкою», <c>ФВ-2.16</c>, <c>D-239</c>): правка проходить без
+/// підтвердження, але в журналі стає <c>IsOutOfWindow = 1</c>.
+/// </param>
 public readonly record struct EditDecision(
-    bool IsAllowed, EditDenyReason Reason, string? Detail = null, bool RequiresConfirmation = false)
+    bool IsAllowed, EditDenyReason Reason, string? Detail = null, bool RequiresConfirmation = false,
+    bool OutOfWindowMark = false)
 {
     public static EditDecision Allow() => new(true, EditDenyReason.None);
     public static EditDecision Deny(EditDenyReason reason, string? detail = null) => new(false, reason, detail);
@@ -35,4 +41,8 @@ public readonly record struct EditDecision(
     /// </remarks>
     public static EditDecision AllowWithConfirmation(string? detail)
         => new(true, EditDenyReason.None, detail, RequiresConfirmation: true);
+
+    /// <summary>Дозволено з позначкою в журналі (<c>ФВ-2.16</c>, <c>Warn</c>, <c>D-239</c>).</summary>
+    public static EditDecision AllowMarked(string? detail)
+        => new(true, EditDenyReason.None, detail, OutOfWindowMark: true);
 }

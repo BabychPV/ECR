@@ -89,6 +89,11 @@ public sealed class ChildCompositionTests
         Assert.NotNull(sp.GetRequiredService<IJobProgressStore>());
         Assert.NotNull(sp.GetRequiredService<JobLeaseContext>());
 
+        // ПРД-13: дочірній процес теж міряє бюджет — саме воркер виконує перерахунок у режимі Worker;
+        // без цього реєстрація в Api була б єдиною, а вимір — порожнім у найважливішому режимі.
+        Assert.NotNull(sp.GetRequiredService<RecalculationBudgetMonitor>());
+        Assert.Equal("Database", sp.GetRequiredService<RecalculationBudgetOptions>().Mode);
+
         // Задача без автора — анонім, як у Api поза запитом: права відмовляють, а не пропускають.
         var user = sp.GetRequiredService<ICurrentUser>();
         Assert.IsType<JobAwareCurrentUser>(user);

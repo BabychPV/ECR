@@ -64,7 +64,7 @@ describe('Контраст токенів (ФВ-14.17)', () => {
     expect(contrast(token.dark.line, themeSurface.dark.body)).toBeGreaterThanOrEqual(AA.nonText);
   });
 
-  it('ФВ-14.15: кільце фокуса контрастне в обох темах', () => {
+  it('ФВ-14.17: кільце фокуса контрастне в обох темах', () => {
     // `brand[6]` у світлій, `brand[4]` у темній — так задано в `motion.css`
     // (`--mantine-color-brand-6` / `--mantine-color-brand-4`). Береться з
     // `theme.ts`, а не літералом: інакше заміна плейсхолдерної палітри на

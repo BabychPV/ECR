@@ -19,7 +19,11 @@ Invoke-WebRequest http://localhost:5000/health/live -UseBasicParsing   # 200 = �
 Invoke-WebRequest http://localhost:5000/health/ready -UseBasicParsing  # 200 = готовий; 503 = див. п. 3.1
 ```
 
-Порт задає `ASPNETCORE_URLS` у середовищі служби (дефолт `-AppPort 5000`).
+Порт і схему (`http`/`https`) задає `ASPNETCORE_URLS` у середовищі служби (дефолт
+`-AppPort 5000`). ✎ 2026-09-30: з HTTPS (`deploy-ecr.ps1 -HttpsThumbprint`) це
+`https://+:<AppPort>` — перевіряти `https://<ім'я з сертифіката>/health/live`; по
+`https://localhost` `Invoke-WebRequest` скаржиться на ім'я сертифіката (це не збій).
+Транспорт і сертифікат — п. 11.
 
 Послідовність старту (`StartupSequence.cs`):
 
@@ -85,7 +89,9 @@ Api й воркер на **одному** хості — різні ролі й 
 | `Cache:AccessProfileSlidingMinutes` | 60 | кеш профілю доступу, хв |
 | `Auth:CookieName` | `ecr.auth` | ім'я cookie сесії. Зміна розлогінює всіх відкритих користувачів |
 | `Auth:SlidingHours` | 8 | ковзний строк сесії, год |
-| `Auth:RequireHttps` | `true` | cookie лише через HTTPS |
+| `Auth:RequireHttps` | `true` | cookie лише через HTTPS (`Secure`). `false` пише лише `deploy-ecr.ps1 -AllowHttp` (стенд): у Production `transport` на `/health/ready` — Degraded (п. 11) |
+| `Transport:Https:CertificateThumbprint` | порожньо | відбиток сертифіката HTTPS у `LocalMachine\My`; Kestrel віддає його для кожної `https://`-адреси з `ASPNETCORE_URLS`. Пише `deploy-ecr.ps1 -HttpsThumbprint`. Заданий, а сертифіката немає чи він без закритого ключа — служба не стартує (п. 11) |
+| `Transport:Https:Port` | `0` | порт HTTPS для перенаправлення `http` → `https` (308); `0` — без перенаправлення. Пише `deploy-ecr.ps1 -HttpRedirectPort` |
 | `Auth:EnableNegotiate` | `true` | вхід Windows (Negotiate) |
 | `Auth:StampCacheSeconds` | 5 | як швидко блокування чи зміна ролей діє на відкриті сесії, с |
 | `Auth:DataProtection:CertificateThumbprint` | немає | відбиток сертифіката з `LocalMachine\My` для захисту ключів Data Protection (п. 6.2). ⛔ **З 2026-09-29 (S11) у Production обов'язковий**: без нього служба не стартує. Один і той самий сертифікат (із закритим ключем, з правом читання для облікового запису служби) — на всіх вузлах |
@@ -93,6 +99,10 @@ Api й воркер на **одному** хості — різні ролі й 
 | `Security:RateLimit:LoginPermitPerMinute` | 60 | спроб входу за хвилину |
 | `Security:RateLimit:TrustForwardedFor` | `false` | брати IP із `X-Forwarded-For`. Вмикати лише за довіреним проксі |
 | `Security:RateLimit:SearchPermit` / `SearchWindowSeconds` | 30 / 10 | обмеження пошуку |
+| `Security:RateLimit:CspReportPermitPerMinute` | 120 | звітів про порушення CSP за хвилину з однієї адреси (`POST /api/v1/csp-report`); понад межу — `429` без тіла |
+| `Security:Csp:ReportOnly` | `true` | віддавати сувору політику заголовком `Content-Security-Policy-Report-Only` (лише звіти, сторінки не блокуються). Порушення — рядки журналу `CSP violation: …` і лічильник `ecr.csp.violations` (тег `directive`) |
+| `Security:Csp:ReportUri` | `/api/v1/csp-report` | куди браузер шле звіти (`report-uri`, а на HTTPS ще й `report-to`). Порожньо — без звітування. Без `;`, пробілів і ком |
+| `Security:Csp:Enforce` | `false` | ⛔ лише задел: `true` робить повну політику примусовою (звітний заголовок зникає). Не вмикати, доки e2e-набір не пройшов під нею, а `ecr.csp.violations` не порожній |
 | `Jobs:NightlyRecalculation:Enabled` | `false` | нічний перерахунок о 03:30. Вмикається лише рядком `true` |
 | `Audit:ExportMaxRows` | 100000 | межа експорту аудиту CSV |
 | `Campaign:AtRiskDays` | 3 | за скільки днів до терміну проєкт вважається «під загрозою» |
@@ -105,6 +115,8 @@ Api й воркер на **одному** хості — різні ролі й 
 | `PiSqlClient:CatalogQuery` / `TemplateQuery` / `ValueQuery` | немає (вбудовані) | перевизначення запитів адаптера PI SQL Client. `InterpolatedQuery`, `SummaryQuery`, `CurrentValueQuery`, `ElementListQuery`, `EventQuery`, `EventTemplateQuery` — без вбудованого тексту |
 | `PiSqlClient:<код джерела>:<Query>` | немає | запит для ОДНОГО джерела (інша база AF на тому ж сервері), перекриває спільний `PiSqlClient:<Query>` — для будь-якого із запитів вище; напр. `PiSqlClient:AIR:ElementListQuery`. ⚠ Усі `PiSqlClient:*` адаптер читає через канал секретів, тобто фізично це `Secrets:PiSqlClient:…` — змінна `ECR_Secrets__PiSqlClient__AIR__ElementListQuery` |
 | `Sql:CatalogQuery` / `Sql:ValueQuery` | немає (вбудовані) | те саме для SQL-джерела |
+| `Integration:AfTimeZoneId` | (порожньо = UTC) | ✎ 2026-09-30, D-212 PR-7: пояс, у якому AF віддає дати дії записів довідника без поясу (Windows або IANA, напр. `Asia/Atyrau`). Діє лише для синку темпорального довідника з атрибутами дат у політиці. Невідомий пояс зупиняє старт з ім'ям ключа. ⚠ Пояс серверів AF замовника — відкрите питання PI-адміністратору |
+| `PiWebApi:AllowedHosts` | `[]` (порожньо) | ✎ 2026-10-01: перелік хостів PI Web API, до яких дозволено підключати джерела. Елемент — точне ім'я хоста або `*.domain` (лише піддомени; сам `domain` не збігається); без урахування регістра. **Порожньо = без обмеження, окрім блок-листа** (loopback, link-local і хмарний metadata 169.254.x, unspecified, multicast — діє завжди, для всіх режимів автентифікації; перевіряється по кожній розв'язаній A/AAAA-адресі, у момент підключення — отже DNS rebinding не обійде). Приватні IP-літерали (`10.x`, `172.16–31.x`, `192.168.x`, `fc00::/7`) заборонені лише для джерел з Negotiate (потрібне ім'я хоста для Kerberos SPN). Адресу Negotiate-джерела можна змінити лише з явним `confirmEndpointChange: true` у запиті (в інтерфейсі — діалог підтвердження). Відповідь PI понад 50 МБ відхиляється. Масив задається так: у `appsettings.Production.json` — `"PiWebApi": { "AllowedHosts": [ "<хост PI Web API>", "*.<домен замовника>" ] }`, або змінними служби `ECR_PiWebApi__AllowedHosts__0`, `ECR_PiWebApi__AllowedHosts__1`, … ⚠ Інсталятор і `deploy-ecr.ps1` цього ключа не пишуть — задає адміністратор замовника вручну; імена хостів PI — дані замовника, у продукті їх немає. ⚠ Negotiate-джерело без списку: Warning у журнал і картка `sources` Degraded (`health.sources.negotiateNoAllowlist`, п. 3.1) — заповніть список. Після зміни — перезапуск `EcrApi` |
 | `Bootstrap:Password` | немає | запасний пароль `bootstrap`. Основний шлях — файл `bootstrap.secret` |
 | `Telemetry:Enabled` | `false` | експорт метрик по OTLP (п. 3.4). Вимкнено — не реєструється нічого з OpenTelemetry, навантаження нуль. Вмикається лише рядком `true` |
 | `Telemetry:OtlpEndpoint` | порожньо | адреса OTLP-колектора, напр. `http://collector:4317` (gRPC) чи `http://collector:4318` (HTTP). **Обов'язкова**, коли `Telemetry:Enabled=true`: без неї або з недійсною адресою служба не стартує. Задана при вимкненому експорті — ігнорується, старт пише попередження |
@@ -165,7 +177,7 @@ ORDER BY [Ts];
 | Ендпоінт | Доступ | Що перевіряє |
 |---|---|---|
 | `/health/live` | анонімно | нічого: процес відповідає |
-| `/health/ready` | анонімно | `db`, `jobs`, `sources`. Подробиці `db` приховано |
+| `/health/ready` | анонімно | `db`, `jobs`, `sources`, `worker` (п. 10), `reportviews` (п. 12), `tzdata` (п. 13), `transport` (п. 11) — ✎ 2026-09-30, порядок як у `Program.cs`. Подробиці `db` приховано |
 | `/health/db` | після входу | редакція, RCSI, файлові групи, запас партицій |
 
 HTTP-код: `Healthy` і `Degraded` дають **200**, `Unhealthy` — **503**. Моніторинг
@@ -175,7 +187,11 @@ HTTP-код: `Healthy` і `Degraded` дають **200**, `Unhealthy` — **503**
 |---|---|---|
 | `db` | попереду менше 2 партицій | RCSI вимкнено; немає файлової групи `DATA_HOT`, `DATA_ARCHIVE`, `AUDIT` або `INDEXES`; БД недоступна |
 | `jobs` | у планувальника немає тригерів | планувальник не зареєстрований, зупинений або кидає помилку |
-| `sources` | джерело ще не запускалось або є прогалина покриття | останній запуск будь-якого активного джерела впав. Якщо активних джерел немає — Healthy |
+| `sources` | джерело ще не запускалось, є прогалина покриття, або є активне джерело з Windows-автентифікацією (Negotiate) при порожньому `PiWebApi:AllowedHosts` (`health.sources.negotiateNoAllowlist`, п. 2.1) | останній запуск будь-якого активного джерела впав. Якщо активних джерел немає — Healthy |
+| `worker` | Api на `Executor=Worker`, а служби `EcrWorker` немає, вона `Disabled` або задачі чекають понад 5 хв без жодної виконуваної (п. 10) | — |
+| `reportviews` | вʼюхи `rpt.v_*` не створено для якоїсь опублікованої версії шаблону (п. 12) | ніколи |
+| `tzdata` | база часових поясів ОС не знає, що Казахстан з 2024-03-01 на UTC+5, або перевірка сама не вдалась (п. 13) | ніколи |
+| `transport` | Production із `Auth:RequireHttps = false` (`-AllowHttp`); сертифікат HTTPS спливає менш ніж за 30 днів або прострочений | ніколи (перевірка не виводить Api з ротації) |
 
 ### 3.2. Логи
 
@@ -213,6 +229,7 @@ Select-String -Path "$env:ProgramData\ECR\logs\ecr-*.log" -Pattern '<correlation
 Служба пише власні метрики в лічильник `Meter "Ecr"` (`ecr.cells.read`,
 `ecr.cells.write`, `ecr.formula.evaluate`, `ecr.job.duration`,
 `ecr.job.start_latency`, `ecr.conflict.count`, `ecr.consistency.issues`,
+`ecr.csp.violations` (порушення CSP за звітами браузерів, тег `directive`),
 `ecr.budget.count` тощо — перелік у `EcrMetrics.cs`). Прочитати їх можна двома
 способами.
 
@@ -259,6 +276,22 @@ OpenTelemetry Collector). За замовчуванням **вимкнено**: 
 служба працює далі, експорт за цей інтервал може загубитися (на диск служба
 метрики не накопичує).
 
+**Дочірній воркер перерахунку** (`Ecr.Worker --child`, пул під наглядачем
+`EcrWorker`) виконує задачі перерахунку, тож `ecr.job.failed` цих задач,
+`ecr.job.start_latency` лейна `recalc`, `ecr.cache.hit/miss` і
+`ecr.access.profile.build` у цьому режимі емітяться **ним**, а не Api.
+Він експортує їх сам, тим самим Meter `Ecr` і з тими самими ключами `Telemetry:*`
+(`Enabled`, `OtlpEndpoint`, `OtlpProtocol`, `ExportIntervalSeconds`), але читає їх
+**не з `appsettings.json` Api**, а з `worker.settings.json` поруч з `Ecr.Worker.exe`
+або зі змінних оточення служби наглядача `ECR_Telemetry__*` (дочірній їх
+успадковує). Тож для режиму Worker експорт вмикають там теж; у колекторі ці метрики
+мають `service.name` = `ecr-worker`. `deploy-ecr.ps1 -TelemetryOtlpEndpoint http://collector:4317`
+(необов'язково `-TelemetryOtlpProtocol Grpc|HttpProtobuf`) пише ці змінні одразу в `Environment`
+`EcrApi` і `EcrWorker`; без параметра телеметрію не чіпає. Типовий інтервал дочірнього — 15 с, а перед
+завершенням процесу буфер скидається; процес, який убив Job Object за ліміт пам'яті,
+останній буфер втрачає. Недійсна адреса дочірній не зупиняє: експорт тоді тихо
+вимкнено (Api у такому разі не стартує).
+
 ## 4. Розклади
 
 Планувальник Quartz, розклади реєструє `RecurringScheduleService`. Час —
@@ -290,6 +323,10 @@ SQL Server Agent (`14-agent-jobs.sql`) ставиться лише з `deploy-ec
 | служба не стартує, у лозі незастосовані міграції | оновили код без схеми, а `StartupMode=Validate` | застосувати схему (п. 8) і запустити службу |
 | служба не стартує: «Production: ключі кільця DataProtection … не захищені» | не задано `Auth:DataProtection:CertificateThumbprint` (S11) | встановити сертифікат із закритим ключем у `LocalMachine\My` на кожному вузлі, дати права облікового запису служби, задати `ECR_Auth__DataProtection__CertificateThumbprint` (`deploy-ecr.ps1 -DataProtectionThumbprint`). Старі відкриті ключі в таблиці лишаються чинними до кінця строку — після ввімкнення захисту ротація, п. 6.4 |
 | служба не стартує після зміни відбитка | немає сертифіката `Auth:DataProtection:CertificateThumbprint` у `LocalMachine\My` | встановити сертифікат із закритим ключем і дати права облікового запису служби |
+| вхід «вдався», далі `401` на кожен запит; з сервера працює | HTTP при `Auth:RequireHttps = true`: `Secure`-cookie по HTTP не відсилається | п. 11: HTTPS (`deploy-ecr.ps1 -HttpsThumbprint`), проксі (`-BehindHttpsProxy`) або на стенді `-AllowHttp` |
+| служба не стартує: «Transport:Https:CertificateThumbprint: …» | сертифіката HTTPS немає в `LocalMachine\My`, він без закритого ключа або відбиток не 40 hex | п. 11: поставити сертифікат із закритим ключем, повторити `deploy-ecr.ps1` |
+| служба не стартує: «Certificate … cannot be used as an SSL server certificate» | у сертифіката HTTPS розширене використання ключа без Server Authentication | видати сертифікат із EKU Server Authentication |
+| `transport` Degraded | `-AllowHttp` у Production, або сертифікат HTTPS спливає / прострочений | п. 11 |
 | `db` Degraded: менше 2 партицій попереду | не працює Agent-задача (Express) | `EXEC arc.usp_EnsurePartitions @MonthsAhead = 6;` або скрипт `GET /api/v1/health/partitions/script` |
 | `db` Unhealthy: RCSI | базу відновили або створили без `06-rcsi.sql` | виконати `06-rcsi.sql`. Перезапуск не потрібен: перевірка читає RCSI щоразу, а не з проби старту |
 | служба не стартує: «Недійсна конфігурація — служба не стартує» | значення ключа не того типу чи поза межами (`"60s"` замість `60`, друкарська помилка в `Database:EditionMode`) | виправити названий ключ у `appsettings.Production.json` або в `ECR_…` змінній служби. Той самий текст — у журналі подій (джерело `ECR`) і в лозі |
@@ -506,6 +543,16 @@ BACKUP LOG      [Ecr] TO DISK = N'<шлях>\Ecr_log.trn'  WITH CHECKSUM, COMPRE
 
 `09-seed.sql` виконує застосунок на старті. Скрипти запускати не треба.
 
+✎ 2026-10-01: **вікно обслуговування для великих баз.** Міграція `PerfFixJobsStaleHealth`
+додає до `itg.JobProgress` збережену обчислювану колонку `FanOutParentJobId` (з `Payload`) і індекси
+`IX_JobProgress_FanOutParent`, `IX_JobProgress_State_UpdatedAt`, а також `IX_CalculationRun_Project_FinishedAt`
+(`calc.CalculationRun`). Додавання збереженої колонки переписує таблицю: на вимірюваному стенді
+≈ 20 с на 500 тис. рядків `itg.JobProgress`, на цей час таблиця заблокована. Якщо `itg.JobProgress` велика
+(`SELECT COUNT(*) FROM itg.JobProgress`), оновлюйте у вікно без активних задач (зупиніть `EcrWorker` і
+`EcrApi`) і заздалегідь перевірте місце під журнал транзакцій. Репетиція на копії бази:
+`powershell -File tools\setup-dev-db.ps1 -Server <сервер> -Database <копія> -Upgrade` (оновлює лише наявну
+базу, нову не створює; `-Upgrade` без `-RequireFreeGb` місце не перевіряє).
+
 ⛔ **Перед оновленням на цю версію (S11, 2026-09-29) — один раз.** Служба в
 Production більше не стартує, доки ключі кільця Data Protection не захищені
 сертифікатом (п. 2.1). До оновлення:
@@ -523,7 +570,10 @@ Production більше не стартує, доки ключі кільця Da
 схеми й MSI, тож працююча служба не зупиняється. Ризик лише в **ручному
 оновленні MSI** без `deploy-ecr.ps1` і без відбитка в реєстрі служби: нова
 версія встановиться, а служба не стартне (п. 5, «ключі кільця
-DataProtection … не захищені»). ⚠ Згоду
+DataProtection … не захищені»). ⛔ ✎ 2026-09-30: `Environment` служби
+(відбиток, рядок підключення, режим Api) оновлення MSI **стирає** — джоб
+`msi-install` це перевірив (п. 10.3), тож ручне оновлення без
+`deploy-ecr.ps1` лишає службу й без рядка підключення. ⚠ Згоду
 `Auth:DataProtection:AllowUnprotectedKeys` на майданчику **не вмикати**: ключі
 лишаються відкритими в базі й бекапах, старт пише `Critical`, `db` постійно
 `Degraded` — вона лише для одноразових стендів. Після першого старту з
@@ -549,6 +599,13 @@ DataProtection … не захищені»). ⚠ Згоду
    будь-яка інша `Unhealthy` після тайм-ауту — розгортання провалене, «Готово»
    не друкується.
 3. Перевірити `/health/db`.
+
+⛔ ✎ 2026-09-30: **`Environment` служб (`EcrApi`, `EcrWorker`) не переживає
+оновлення MSI** (`MajorUpgrade` перевстановлює службу; перевірено CI-джобом
+`msi-install (windows)`, D3). Тому оновлення — це **завжди** `deploy-ecr.ps1`
+(він пише `Environment` кроками 4–5 щоразу, разом із `-ConnectionString`),
+а не голий `msiexec`. Змінні, яких скрипт не пише (`ECR_Jobs__Workers__*`,
+п. 10, будь-які ваші), після оновлення виставте знову.
 
 Графічний майстер `tools/Ecr.Setup` запускає той самий `deploy-ecr.ps1`.
 
@@ -748,6 +805,84 @@ Msg 50301 … Передперевірка U1: оновлення зупинен
 Гілку індексу без `ONLINE` тест виконує наживо на Developer, підставляючи
 редакцію 4. Справжнього Standard чи Express у перевірці не було.
 
+### 8.3. Міграція Q222: помилка 50222 «Передперевірка Q222» (дублі під унікальні індекси)
+
+**Кого стосується.** Бази, розгорнуті до міграції
+`20260910231342_Q222MissingForeignKeysAndConstraints` (10.09.2026) і ще не
+оновлені. Нові бази й бази, де Q222 уже застосовано, цю перевірку не бачать.
+
+**Що робить міграція (щодо унікальності).** Три унікальні індекси на наявних
+таблицях:
+
+| Індекс | Таблиця | Ключ |
+|---|---|---|
+| `UQ_RoleAssignment_Sid` (фільтр `PrincipalSid IS NOT NULL`) | `sec.RoleAssignment` | `(PrincipalSid, RoleId)` |
+| `UQ_RoleAssignment_User` (фільтр `UserId IS NOT NULL`) | `sec.RoleAssignment` | `(UserId, RoleId)` |
+| `UQ_MethodologyConstant` | `calc.MethodologyConstant` | `(MethodologyVersionId, Code, ISNULL(Category, ''), ISNULL(ValidFrom, 1900-01-01))` |
+
+До Q222 база цих ключів не тримала. Дубль SQL Server відхилив би на
+`CREATE UNIQUE INDEX` помилкою `1505` без переліку. Перевірка йде **першою
+командою міграції, до зміни схеми**:
+
+```
+Msg 50222 … Передперевірка Q222: оновлення зупинено ДО зміни схеми. …
+Дублі (кількість груп; перші групи):
+  UQ_RoleAssignment_Sid (sec.RoleAssignment): 1 груп; (SID S-1-5-21-…, роль 3) x2
+  UQ_MethodologyConstant (calc.MethodologyConstant): 1 груп; (версія методології 7, код K1, категорія , діє з 1900-01-01) x2
+Схему й дані не змінено, автоматичного видалення немає. …
+```
+
+Показано до десяти груп на індекс. Після помилки `deploy-ecr.ps1` зупиняється на
+кроці 2/7. MSI не ставиться, стара версія лишається робочою.
+
+**Чому перевірка не видаляє дублі сама.** Яка з двох констант чи призначень
+правильна, залежить від змісту: у константах різні `Value`, `UnitId` й
+`TextValue` дають різні розрахунки. Тихе видалення змінило б результати без
+помилки.
+
+**Що робити.**
+
+1. `Stop-Service EcrApi`, повний бекап (п. 6.2).
+2. Повний перелік дублів (кожен запит має повернути порожньо, коли все чисто):
+
+   ```sql
+   -- призначення ролі групі AD
+   SELECT PrincipalSid, RoleId, COUNT(*) AS Cnt, MIN(Id) AS FirstId, MAX(Id) AS LastId
+   FROM sec.RoleAssignment WHERE PrincipalSid IS NOT NULL
+   GROUP BY PrincipalSid, RoleId HAVING COUNT(*) > 1;
+
+   -- призначення ролі особі
+   SELECT UserId, RoleId, COUNT(*) AS Cnt, MIN(Id) AS FirstId, MAX(Id) AS LastId
+   FROM sec.RoleAssignment WHERE UserId IS NOT NULL
+   GROUP BY UserId, RoleId HAVING COUNT(*) > 1;
+
+   -- константи методології (Category і ValidFrom необов'язкові: NULL = порожньо / 1900-01-01)
+   SELECT MethodologyVersionId, Code, ISNULL(Category, N'') AS Category,
+          ISNULL(ValidFrom, CONVERT(date, '19000101', 112)) AS ValidFrom, COUNT(*) AS Cnt
+   FROM calc.MethodologyConstant
+   GROUP BY MethodologyVersionId, Code, ISNULL(Category, N''), ISNULL(ValidFrom, CONVERT(date, '19000101', 112))
+   HAVING COUNT(*) > 1;
+   ```
+
+3. Для кожної групи подивіться всі її рядки (`SELECT * FROM … WHERE <ключ>`) і
+   лишіть один.
+   - `sec.RoleAssignment`: рядки з однаковою особою чи групою й роллю
+     рівнозначні, якщо збігаються `ScopeJson`, `ValidFrom` і `ValidTo`. Тоді видаліть
+     зайві: `DELETE FROM sec.RoleAssignment WHERE Id IN (…)`. Якщо ці стовпці
+     різні, це не дубль за змістом: обговоріть із власником ролі, перш ніж
+     видаляти.
+   - `calc.MethodologyConstant`: порівняйте `Value`, `TextValue`, `UnitId`, `ValidTo`.
+     Лишіть той, який застосовує розрахунок (`calc.CalculationInput`/`CalculationStep`
+     посилаються на константи за кодом); якщо значення різні, рішення за методологом.
+     Ідентичні рядки видаляйте.
+4. Повторіть запити з кроку 2: порожньо.
+5. Звичайне розгортання (п. 8, крок 2). `migration.sql` ідемпотентний.
+
+⛔ Не редагуйте міграцію й не знімайте індекс, щоб «пройти» перевірку.
+
+✎ 2026-09-30: передперевірку й обидва шляхи застосування (`MigrateAsync` і
+`migration.sql --idempotent`) тримає тест `Q222UniquePrecheckTests`.
+
 ## 9. Відкат
 
 Окремого механізму відкату в коді **немає**. Міграції EF назад не застосовуються,
@@ -756,10 +891,15 @@ Msg 50301 … Передперевірка U1: оновлення зупинен
 1. `Stop-Service EcrApi` (і `Stop-Service EcrWorker`, якщо воркер увімкнено, п. 10).
 2. Відновити базу з бекапу, зробленого перед оновленням (п. 6.3).
 3. Встановити попередній MSI (з `WORKER_ENABLED=1`, якщо воркер був і
-   попередня версія його має; до I2-2 типове там було `0`). Попередня
-   версія без воркера — прибрати з `Services\EcrApi\Environment`
-   `ECR_Jobs__Recalculation__Executor` (або поставити `InProcess`), інакше
-   перерахунок лишиться без виконавця (п. 10.1).
+   попередня версія його має; до I2-2 типове там було `0`).
+   ⛔ ✎ 2026-09-30: `Environment` служб (рядок підключення, режим Api) ні
+   оновлення, ні відкат MSI не зберігає, тож після встановлення попередньої
+   MSI **повторіть `deploy-ecr.ps1`** (`-SkipSchema`, з тим самим
+   `-ConnectionString` і `-DisableWorker`, якщо попередня версія без
+   воркера) — інакше Api стартує без рядка підключення. Якщо Environment
+   пишете вручну: попередня версія без воркера — `Executor=InProcess` (і
+   `Mode=Quartz`) у `Services\EcrApi\Environment`, інакше перерахунок
+   лишиться без виконавця (п. 10.1).
 4. `Start-Service EcrApi` і перевірити health.
 
 Дані, введені після оновлення, при такому відкаті втрачаються.
@@ -797,6 +937,9 @@ Get-CimInstance Win32_Process -Filter "Name='Ecr.Worker.exe'" | Select-Object Pr
 `worker.settings.json` поруч з exe, який оновлення перезаписує). Недійсне
 значення — служба не стартує (код виходу 3, перелік недійсних ключів — у
 stderr і журналі); після зміни — `Restart-Service EcrWorker`.
+⛔ ✎ 2026-09-30: ці змінні **не переживають оновлення MSI** — воно стирає
+`Environment` служби (п. 10.3), а `deploy-ecr.ps1` їх не пише. Після кожного
+оновлення виставте їх знову й зробіть `Restart-Service EcrWorker`.
 
 ### 10.1. Вимкнути воркер
 
@@ -875,4 +1018,124 @@ REINSTALLMODE=vomus` нічого не перемикає: це режим об�
 ставить службу воркера назад (типове — так), а `deploy-ecr.ps1` ще й
 перемикає Api на `Worker`. Вимкнений воркер — прапорець на кожному
 оновленні. Прямий `msiexec` без властивості службу поставить, але режим Api
-не змінить — Api лишиться на тому, що в його `Environment`.
+не виставить (це робить лише `deploy-ecr.ps1`).
+
+⛔ ✎ 2026-09-30: **`Environment` служби `EcrApi` не переживає оновлення MSI.**
+`MajorUpgrade` перевстановлює службу, і змінні оточення (режим Api
+`ECR_Jobs__Queue__Mode` / `ECR_Jobs__Recalculation__Executor`, рядок
+підключення `ECR_ConnectionStrings__Ecr`, `ECR_Database__EditionMode`,
+відбиток DataProtection, ваші власні) зникають. Перевірено джобом
+`msi-install (windows)` (крок D3, run 36676739674): тестовий маркер у
+`Environment` після оновлення відсутній. Для `EcrWorker` окремого виміру
+немає, але механізм той самий — вважайте `Environment` втраченим і там.
+Наслідок після голого `msiexec`: Api без рядка підключення й на типовому
+Quartz/`InProcess`, а служба `EcrWorker` (MSI її зберігає) стоїть без роботи —
+безпечно, але режим D-216 (Api на `Worker`) не діє. Тому **після кожного
+оновлення MSI повторюйте** `deploy-ecr.ps1` (10.2, той самий
+`-ConnectionString`, без `-DisableWorker`, якщо воркер потрібен):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools\deploy-ecr.ps1 `
+  -SqlInstance <сервер> -Database <база> -MsiPath <шлях до .msi> -SkipSchema `
+  -ConnectionString $cs -DataProtectionThumbprint <відбиток> -HttpsThumbprint <відбиток HTTPS>
+```
+
+(`-SkipSchema` — якщо схему вже застосовано; повний виклик — п. 8.) Те саме
+для відкату (п. 9, крок 3). Змінні, яких скрипт не пише
+(`ECR_Jobs__Workers__*`), виставте знову вручну. ✎ 2026-09-30: параметр транспорту
+(`-HttpsThumbprint`, або `-BehindHttpsProxy`, або на стенді `-AllowHttp`) обов'язковий і тут — без
+нього скрипт зупиняється (п. 11).
+
+## 11. HTTPS і сертифікат (✎ 2026-09-30, `D14-08`)
+
+Повний опис — `docs/build/11-install-guide.md` §2.7; тут — те, що потрібно в експлуатації.
+
+**Три транспорти, рівно один** (`deploy-ecr.ps1`; на кожному оновленні — бо `Environment` стирає
+оновлення MSI, п. 10.3): `-HttpsThumbprint '<відбиток>'` (HTTPS; порт `-AppPort`, для `https://сервер/`
+— 443; необов'язково `-HttpRedirectPort 80`), `-BehindHttpsProxy` (TLS на проксі перед застосунком;
+`Auth:RequireHttps` лишається `true`), `-AllowHttp` (лише стенд: `Auth:RequireHttps=false`).
+Жодного — скрипт зупиняється на кроці 1. Причина вибору: cookie сеансу `Secure`, а по HTTP його
+браузер не відсилає — вхід з інших машин не працює (симптом «вдався, далі 401»).
+
+**Змінні служби `EcrApi`** (пише `deploy-ecr.ps1`): `ASPNETCORE_URLS`,
+`ECR_Transport__Https__CertificateThumbprint`, `ECR_Transport__Https__Port` (лише з перенаправленням),
+`ECR_Auth__RequireHttps` (завжди явно).
+
+**Що бачить оператор:**
+
+- Старт пише в журнал подій (джерело `ECR`) і файловий журнал: Warning «HTTP без HTTPS — cookie сеансу НЕ Secure»
+  (Production з `RequireHttps=false`); Information «HTTPS, сертифікат завантажено, діє до …»; Warning
+  «сертифікат HTTPS спливає через N дн.»; Error «сертифікат HTTPS ПРОСТРОЧЕНИЙ». Відбиток у журнал не пишеться.
+- `/health/ready` і `/admin/health`, картка «Transport (HTTPS)» — `transport`: `Degraded` (не 503),
+  коли Production працює з `RequireHttps=false`, або сертифікат спливає менш ніж за 30 днів чи прострочений.
+  Дані: `requireHttps`, `httpsCertificate`, `certificateNotAfter`, `certificateDaysLeft`.
+- Заданий відбиток без сертифіката чи сертифікат без закритого ключа — **служба не стартує** (не відкат до
+  HTTP) із назвою ключа `Transport:Https:CertificateThumbprint` і причиною. Прострочений сертифікат старт
+  **не** зупиняє (служба, що не піднялась вночі через строк, гірша за сторінку з попередженням) — це
+  видно на `transport`.
+
+**Заміна сертифіката** (продовження строку): встановити новий у `LocalMachine\My`, дати обліковому запису служби
+право читання закритого ключа, повторити `deploy-ecr.ps1` з новим `-HttpsThumbprint` і решту параметрів як
+на оновленні — служба перезапуститься; крок 7 перевірить, що Kestrel віддає саме новий сертифікат. Швидка
+заміна лише відбитка без MSI (як у `docs/build/11-install-guide.md` §9): змінити
+`ECR_Transport__Https__CertificateThumbprint` у `Environment` служби й `Restart-Service EcrApi`.
+
+⚠ **HSTS:** запити по HTTPS отримують `Strict-Transport-Security: max-age=31536000`; після першого входу браузер
+не відкриє це ім'я по `http://` до кінця строку. За проксі застосунок HSTS не віддає (`X-Forwarded-*` не читає):
+ставити на проксі.
+
+⚠ **Невідомо про майданчик замовника** (у документах проєкту немає; потрібне рішення замовника): чи є
+зворотний проксі/балансувальник перед застосунком і хто завершує TLS; ім'я хоста, за яким відкриватимуть
+застосунок (SAN сертифіката), і який ЦС його видає; кількість вузлів. Відомо лише рішення людини 2026-09-29: «HTTPS
+— сертифікат замовника».
+
+## 12. Вʼюхи для SSRS не створено (картка `reportviews`, ✎ 2026-09-30)
+
+Публікація версії шаблону НЕ залежить від вʼюх `rpt.v_*`: якщо `rpt.usp_GenerateTemplateViews` відмовила
+(`50422` — таблиця має понад 250 колонок; `50409` — два шаблони/аркуші/таблиці дають одне ім'я вʼюхи), версія
+лишається опублікованою, у журналі — Warning із шаблоном, версією, аркушем, таблицею й кодом, а
+`/health/ready` показує картку `reportviews` жовтою (`Degraded`, не 503) з тією самою причиною.
+
+Виправлення: зменшити таблицю (нова версія шаблону) або змінити коди шаблону/аркуша/таблиці, щоб вони
+відрізнялися не лише розділовими знаками чи регістром. Повтор генерації — **перезапуск застосунку** (старт
+перегенеровує вʼюхи по всіх версіях) або вручну від імені DBA:
+
+```sql
+EXEC rpt.usp_GenerateTemplateViews;                        -- усі опубліковані версії
+EXEC rpt.usp_GenerateTemplateViews @TemplateVersionId = 7; -- одна
+```
+
+⚠ Картка живе в памʼяті процесу: ручний `EXEC` вʼюхи створює, але картку очистить лише перезапуск.
+
+## 13. База часових поясів ОС (картка `tzdata`, ✎ 2026-09-30, F-4, `D-217`)
+
+Межі періодів проєкту рахуються з бази часових поясів **операційної системи**
+(`TimeZoneInfo.FindSystemTimeZoneById` за ідентифікатором IANA проєкту; Windows — реєстр і
+накопичувальні оновлення, Linux — `tzdata`). Фіксованого зсуву в продукті немає. Майданчик —
+`Asia/Atyrau` (UTC+5, `D-217`). З 2024-03-01 увесь Казахстан на UTC+5; машина, що про це не знає,
+вважає `Asia/Almaty` `+06:00`, і періоди проєктів на такому поясі закриваються на годину пізніше.
+
+**Що перевіряється** (`KazakhstanTimeZoneReference`): зсув `Asia/Atyrau`, `Asia/Aqtau`, `Asia/Almaty` на
+2024-06-01 має бути `+05:00`; еталон — константа, а не та сама база. Реально виказує застарілу базу
+`Asia/Almaty` — для Атирау й Актау зсув не змінювався.
+
+**Що бачить оператор:**
+
+- Старт пише Warning «База часових поясів ОС застаріла: <пояси>…» (або «Не вдалося перевірити базу
+  часових поясів ОС») у журнал. **Старт не зупиняється.**
+- `/health/ready` і `/admin/health` — картка `tzdata`: `Healthy`, або `Degraded` (не 503) з полем
+  `staleZones` (напр. `Asia/Almaty=+06:00`; `?` — пояса в базі немає), `expectedOffset`, `checkedZones`.
+
+**Виправлення:** встановити накопичувальне оновлення Windows із часовими поясами (Linux — оновити пакет
+`tzdata`), перезапустити `EcrApi` (і `EcrWorker`, п. 10) і переконатися, що картка зелена. Збережені дані
+перевірка не змінює; ⚠ чи треба щось перераховувати для періодів, закритих на машині із застарілою
+базою, — кодом не визначено (перевірка лише попереджає).
+
+Швидка ручна перевірка на сервері:
+
+```powershell
+[System.TimeZoneInfo]::FindSystemTimeZoneById('Asia/Almaty').GetUtcOffset([datetime]'2024-06-01T00:00:00Z')   # очікується 05:00:00
+```
+
+⚠ Той самий пояс проєкту — IANA; у полі проєкту Windows-ідентифікатор (`West Asia Standard Time`)
+відхиляється `ECR-CFG-4221`. Windows-імена лишаються лише для `AT TIME ZONE` у запитах SQL-джерела (п. 2.2).

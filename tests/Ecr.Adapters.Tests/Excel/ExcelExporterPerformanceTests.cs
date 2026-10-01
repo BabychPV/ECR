@@ -87,6 +87,7 @@ public sealed class ExcelExporterPerformanceTests(ITestOutputHelper output)
     /// правки лише з відмови імпорту.
     /// </remarks>
     [Fact]
+    [Trait("Requirement", "ФВ-4.1")]
     public async Task Порожня_комірка_обчисленої_колонки_лишається_оформленою()
     {
         // filled: 2 — заповнені лише рядки R0 і R2, тобто рядки книги 3 і 5.

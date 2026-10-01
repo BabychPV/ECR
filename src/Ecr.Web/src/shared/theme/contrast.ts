@@ -8,7 +8,7 @@
  */
 
 /** Колір як чотири складові: `r`/`g`/`b` у 0…255, `a` у 0…1. */
-export interface Rgba {
+interface Rgba {
   readonly r: number;
   readonly g: number;
   readonly b: number;
@@ -95,7 +95,7 @@ function channels(value: string): [number, number, number] {
  * насиченого синього ту саму яскравість, що й для сірого 50 %, і всі
  * перевірки контрасту стали б вигадкою.
  */
-export function luminance(hex: string): number {
+function luminance(hex: string): number {
   const [r, g, b] = channels(hex).map((c) =>
     c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4,
   ) as [number, number, number];

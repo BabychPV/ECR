@@ -98,7 +98,7 @@ public sealed class PeriodPolicySharedUpdateApiTests(SqlServerFixture sql)
         Project NewProject(string suffix) => new(
             EcrCode.Create($"S19{suffix}{tag}"), Name($"S19 {suffix}"),
             new DateOnly(2026, 1, 1), new DateOnly(2026, 12, 31),
-            templateVersionId, PeriodKind.Monthly, policy.Id, "Asia/Almaty");
+            templateVersionId, PeriodKind.Monthly, policy.Id, "Asia/Atyrau");
 
         var a = NewProject("A");
         var b = NewProject("B");

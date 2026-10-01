@@ -30,7 +30,7 @@
  */
 
 /** Мінімальний перетин `KeyboardEvent`, потрібний для розпізнавання. */
-export interface EnterLikeKeyEvent {
+interface EnterLikeKeyEvent {
   readonly key: string;
   readonly keyCode?: number;
   readonly which?: number;

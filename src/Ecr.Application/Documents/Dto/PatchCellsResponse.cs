@@ -5,6 +5,11 @@ namespace Ecr.Application.Documents.Dto;
 /// <param name="AppliedCells">Скільки комірок записано.</param>
 /// <param name="RowVersions">Нові версії зачеплених рядків: <c>RowKey</c> → hex.</param>
 /// <param name="Validation">Результати валідації рівнів, які не блокують запис (R-B3).</param>
+/// <param name="OutOfWindow">
+/// Адреси <c>rowKey:columnCode</c> комірок, записаних за політикою <c>Warn</c>
+/// поза вікном доступу (<c>ФВ-2.16</c>, <c>D-239</c>): у журналі вони
+/// позначені <c>IsOutOfWindow</c>. Порожній — таких не було.
+/// </param>
 /// <param name="RecalculationJobId">
 /// Ідентифікатор поставленої задачі перерахунку формул; <c>null</c> —
 /// перерахунку НЕ поставлено (`BE-05`).
@@ -27,7 +32,8 @@ public sealed record PatchCellsResponse(
     int AppliedCells,
     IReadOnlyDictionary<string, string> RowVersions,
     IReadOnlyList<ValidationMessageDto> Validation,
-    string? RecalculationJobId = null);
+    string? RecalculationJobId = null,
+    IReadOnlyList<string>? OutOfWindow = null);
 
 /// <summary>Повідомлення валідації.</summary>
 /// <param name="Severity">Рівень: <c>Info</c>/<c>Warning</c>/<c>Error</c>.</param>

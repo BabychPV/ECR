@@ -115,7 +115,6 @@ public sealed class MethodologyKindSchemaTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
-    [Trait("Requirement", "ФВ-16.6")]
     public async Task Текстова_формула_з_одиницею_результату_відхиляється_базою()
     {
         var versionId = await SeedVersionAsync().ConfigureAwait(true);

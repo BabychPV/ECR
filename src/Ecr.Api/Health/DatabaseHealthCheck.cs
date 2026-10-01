@@ -36,6 +36,9 @@ public sealed class DatabaseHealthCheck(
         "Session keys are stored unencrypted in sec.DataProtectionKey: no certificate is configured "
         + "(Auth:DataProtection:CertificateThumbprint). Restrict the table to the service account with DENY for everyone else.";
 
+    /// <summary>Скрипт, що вмикає RCSI (розгортання виконує його ДО старту застосунку).</summary>
+    internal const string RcsiScript = "Sql/06-rcsi.sql";
+
     /// <summary>Файлові групи, без яких фізична модель не працює.</summary>
     private static readonly string[] RequiredFilegroups =
         ["DATA_HOT", "DATA_ARCHIVE", "AUDIT", "INDEXES"];
@@ -82,10 +85,12 @@ public sealed class DatabaseHealthCheck(
                 // Не Degraded, а Unhealthy: без RCSI пік останнього дня періоду
                 // впирається в блокування (D-29), і це не «трохи гірше», а
                 // непрацездатність у той єдиний день, коли система потрібна.
+                // D-102/ФВ-7.9: адміністратор має одразу бачити, ЩО виконати. Посилання
+                // на скрипт — не переклад, тому дописується в коді до тексту з каталогу.
                 var message = await Text(
                     "health.db.rcsiDisabled", "RCSI is disabled.", null, cancellationToken)
                     .ConfigureAwait(false);
-                return HealthCheckResult.Unhealthy(message, data: data);
+                return HealthCheckResult.Unhealthy($"{message} [{RcsiScript}]", data: data);
             }
 
             if (missing.Count > 0)

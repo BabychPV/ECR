@@ -20,10 +20,10 @@ type Schemas = components['schemas'];
  * цього зрізу, а сам тип уже існує в схемі (структуру версії з рядками
  * читає `GET …/structure` відтоді, як з'явився `GetTemplateStructureHandler`).
  */
-export type TemplateRowDto = TableDto['rows'][number];
+type TemplateRowDto = TableDto['rows'][number];
 
 /** Роль рядка — дзеркалить `Ecr.Domain.Enums.RowKind`. */
-export type RowKind = Schemas['RowKind'];
+type RowKind = Schemas['RowKind'];
 
 export const RowKindOptions: readonly RowKind[] = ['Group', 'Item', 'Balance', 'Note', 'Header'];
 
@@ -31,7 +31,7 @@ export const RowKindOptions: readonly RowKind[] = ['Group', 'Item', 'Balance', '
 export type RowDefDto = Schemas['RowDefDto'];
 
 /** Тіло запиту `PUT …/tables/{tableId}/rows/{code}`. */
-export type SaveRowDefRequest = Schemas['SaveRowDefRequest'];
+type SaveRowDefRequest = Schemas['SaveRowDefRequest'];
 
 /**
  * Чернетка рядка в редакторі.

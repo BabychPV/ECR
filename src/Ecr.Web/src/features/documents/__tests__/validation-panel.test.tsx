@@ -1,6 +1,6 @@
 ﻿import type { JSX } from 'react';
-import { describe, it, expect } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { describe, it, expect, vi } from 'vitest';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import type { ValidationFindingDto } from '@/api/types';
 import { ValidationPanel } from '@/features/documents/ValidationPanel';
@@ -29,10 +29,16 @@ const Message = (over: Partial<ValidationFindingDto> = {}): ValidationFindingDto
   ...over,
 });
 
-function Panel(props: { messages: readonly ValidationFindingDto[] | null }): JSX.Element {
+function Panel(props: {
+  messages: readonly ValidationFindingDto[] | null;
+  onSelect?: (message: ValidationFindingDto) => void;
+}): JSX.Element {
   return (
     <MantineProvider>
-      <ValidationPanel messages={props.messages} />
+      <ValidationPanel
+        messages={props.messages}
+        {...(props.onSelect === undefined ? {} : { onSelect: props.onSelect })}
+      />
     </MantineProvider>
   );
 }
@@ -80,5 +86,35 @@ describe('панель зауважень перевірки', () => {
 
     render(<Panel messages={[]} />);
     expect(screen.getByText('⟦document.validationCleanHint⟧')).toBeDefined();
+  });
+});
+
+describe('перехід від зауваження до комірки (ФВ-5.6)', () => {
+  it('клік по тексту зауваження передає його адресу', () => {
+    const onSelect = vi.fn();
+    const second = Message({ rowKey: 'R2', columnCode: 'C3', message: 'Balance does not add up' });
+    render(<Panel messages={[Message(), second]} onSelect={onSelect} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Balance does not add up' }));
+
+    // ⛔ Саме те зауваження, по якому клацнули, — з таблицею, рядком і колонкою.
+    expect(onSelect).toHaveBeenCalledTimes(1);
+    expect(onSelect).toHaveBeenCalledWith(second);
+  });
+
+  it('перехід — кнопка: доступний з клавіатури і має підказку', () => {
+    render(<Panel messages={[Message()]} onSelect={() => undefined} />);
+
+    const button = screen.getByRole('button', { name: 'Volume is over the cap' });
+    expect(button.tagName).toBe('BUTTON');
+    expect(button.getAttribute('type')).toBe('button');
+    expect(button.getAttribute('title')).toBe('⟦document.validationGoTo⟧');
+  });
+
+  it('без обробника текст лишається текстом, а не кнопкою в нікуди', () => {
+    render(<Panel messages={[Message()]} />);
+
+    expect(screen.queryByRole('button', { name: 'Volume is over the cap' })).toBeNull();
+    expect(screen.getByText('Volume is over the cap')).toBeDefined();
   });
 });

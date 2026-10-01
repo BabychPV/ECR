@@ -294,7 +294,7 @@ public sealed class NarrowedRoleScopeApiTests(SqlServerFixture sql)
         var project = new Project(
             EcrCode.Create($"PN{Guid.NewGuid():N}"[..12]), Name("D-214 other"),
             new DateOnly(2026, 1, 1), new DateOnly(2026, 12, 31),
-            b.TemplateVersionId, PeriodKind.Monthly, policyId, "Asia/Almaty");
+            b.TemplateVersionId, PeriodKind.Monthly, policyId, "Asia/Atyrau");
         db.Projects.Add(project);
         await db.SaveChangesAsync().ConfigureAwait(false);
 

@@ -89,6 +89,7 @@ public sealed class ValidationRuleTests
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
     [Trait("Requirement", "ФВ-2.1")]
+    [Trait("Requirement", "ФВ-5.2")]
     public async Task Нове_правило_зберігається_і_потрапляє_в_аудит_структурних_змін()
     {
         var saved = await Save().HandleAsync(1, _table.Id, "R1", Command(), CancellationToken.None);
@@ -110,6 +111,8 @@ public sealed class ValidationRuleTests
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
     [Trait("Requirement", "ФВ-2.1")]
+    [Trait("Requirement", "ФВ-5.2")]
+    [Trait("Requirement", "ФВ-5.3")]
     public async Task Повторний_запис_тим_самим_кодом_оновлює_а_не_дублює()
     {
         await Save().HandleAsync(1, _table.Id, "R1", Command(expression: "[Volume] >= 0"), CancellationToken.None);

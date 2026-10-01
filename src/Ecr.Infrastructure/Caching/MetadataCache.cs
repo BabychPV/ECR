@@ -75,8 +75,11 @@ public sealed class MetadataCache(
 
         if (memory.TryGetValue(key, out TemplateVersionSnapshot? cached) && cached is not null)
         {
+            Observability.InfrastructureMetrics.RecordCache(Observability.InfrastructureMetrics.MetadataCacheName, hit: true);
             return cached;
         }
+
+        Observability.InfrastructureMetrics.RecordCache(Observability.InfrastructureMetrics.MetadataCacheName, hit: false);
 
         // ⛔ Промах ключа — це НЕ «піти й побудувати». Між `TryGetValue` і
         // `Set` тут нічого не стояло, і на холодному ключі N одночасних

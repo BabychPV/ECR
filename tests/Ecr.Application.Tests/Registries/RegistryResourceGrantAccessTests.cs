@@ -23,7 +23,7 @@ namespace Ecr.Application.Tests.Registries;
 /// <remarks>
 /// ⛔ <b>Мутаційний доказ цього набору.</b> Прибрати
 /// <c>profile.LevelFor(ResourceKind.Registry, registryDefId) &gt;= minLevel</c>
-/// з <see cref="RegistryAccess.RequireAsync(IAccessDecisionService, ICurrentUser, string, GrantLevel, Func{CancellationToken, Task{int?}}, CancellationToken)"/>
+/// з <see cref="RegistryAccess.RequireAsync(IAccessDecisionService, ICurrentUser, string, GrantLevel, int, CancellationToken)"/>
 /// (лишити тільки <c>profile.Has(permission)</c>) — і
 /// <see cref="Грант_на_свій_довідник_дозволяє_редагувати_без_глобального_права"/>
 /// та <see cref="Грант_на_свій_довідник_дозволяє_читати_без_глобального_права"/>

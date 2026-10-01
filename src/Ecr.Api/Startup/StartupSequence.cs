@@ -58,13 +58,19 @@ public static partial class StartupSequence
         // 3) Сумісність середовища (ФВ-7.9) — ЄДИНЕ джерело цих перевірок,
         //    `SchemaValidator`. Зупиняє старт (`ECR-SYS-5031`): редакція/версія,
         //    незастосовані міграції в Validate, база новіша за збірку, файлові
-        //    групи, функції й схеми партиціонування. Лише попереджає: RCSI,
-        //    зіставлення, запас партицій. У проді застосунок DDL-прав не має
+        //    групи, функції й схеми партиціонування. Без зупинки: RCSI —
+        //    Critical у журналі (і Unhealthy на /health/ready, D-102);
+        //    зіставлення, запас партицій — попередження. У проді застосунок DDL-прав не має
         //    (D-66), тому Validate — це саме перевірка, а не тихе «домігруємо».
         var mode = app.Configuration["Schema:StartupMode"] ?? "Validate";
         var validator = new SchemaValidator(
             db, capabilities, scope.ServiceProvider.GetRequiredService<Domain.Abstractions.IClock>());
         await validator.ValidateAsync(mode, CancellationToken.None).ConfigureAwait(false);
+
+        foreach (var finding in validator.Critical)
+        {
+            LogSchemaCritical(logger, finding);
+        }
 
         foreach (var warning in validator.Warnings)
         {
@@ -77,6 +83,22 @@ public static partial class StartupSequence
         //    застосунок формально піднімається і не робить нічого.
         await new SeedRunner(db, logger).RunAsync(CancellationToken.None).ConfigureAwait(false);
         LogSeedDone(logger);
+
+        // 4b) Вʼюхи сирих даних rpt.v_* для SSRS (ФВ-10.2, ФВ-10.4) по
+        //     кожній таблиці опублікованих версій шаблонів. ⚠ ПІСЛЯ seed і на
+        //     кожному старті: так вʼюхи отримують і версії, опубліковані до
+        //     появи генератора, і база після оновлення. Процедура ідемпотентна —
+        //     незмінні вʼюхи не чіпає. ⚠ Відмова — попередження, а не зупинка
+        //     старту: вʼюхи потрібні SSRS, а не застосунку.
+        try
+        {
+            await scope.ServiceProvider.GetRequiredService<IReportViewGenerator>()
+                .GenerateAsync(templateVersionId: null, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (SqlException ex)
+        {
+            LogReportViewsFailed(logger, ex.Message);
+        }
 
         // 4a) Bootstrap-адміністратор. ⛔ Крок був ОГОЛОШЕНИЙ (обробник є,
         //     зареєстрований, покритий тестами) і НЕ ВИКЛИКАВСЯ (`A7-10`):
@@ -244,11 +266,19 @@ public static partial class StartupSequence
     [LoggerMessage(Level = LogLevel.Information, Message = "Старт: схема відповідає моделі.")]
     private static partial void LogSchemaValid(ILogger logger);
 
+    [LoggerMessage(Level = LogLevel.Critical, Message = "Старт (критично): {Finding}")]
+    private static partial void LogSchemaCritical(ILogger logger, string finding);
+
     [LoggerMessage(Level = LogLevel.Warning, Message = "Старт (попередження): {Warning}")]
     private static partial void LogSchemaWarning(ILogger logger, string warning);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Старт: seed виконано.")]
     private static partial void LogSeedDone(ILogger logger);
+
+    [LoggerMessage(Level = LogLevel.Warning,
+        Message = "Старт: вʼюхи rpt.v_* не згенеровано: {Error}. SSRS не бачить нових версій шаблонів, "
+            + "доки DBA не виконає EXEC rpt.usp_GenerateTemplateViews.")]
+    private static partial void LogReportViewsFailed(ILogger logger, string error);
 
     [LoggerMessage(
         Level = LogLevel.Warning,

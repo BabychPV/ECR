@@ -38,6 +38,7 @@ public sealed partial class AuditStructureJournalTests(SqlServerFixture sql)
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Directive", "BE-16")]
+    [Trait("Requirement", "ФВ-6.3")]
     public async Task Фільтри_типу_сутності_й_автора_звужують_видачу_кожен_окремо()
     {
         using var app = new EcrApiFactory(sql);

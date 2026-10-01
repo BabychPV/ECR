@@ -172,6 +172,27 @@ export function createMethodology(body: CreateMethodologyRequest): Promise<Metho
   });
 }
 
+/** Звіт імпорту пакета методологій — однаковий для перевірки й запису. */
+export type MethodologyImportReportDto = components['schemas']['MethodologyImportReportDto'];
+
+/**
+ * Імпорт пакета `ecr-methodology-package` v1 (крок V, FEATURE-HSE301-VIEW §11.6).
+ *
+ * ⚠ Пакет передається як є — розібраним JSON із файлу, без перетворень у клієнті:
+ * його схему тримає інструмент експорту, а перевіряє сервер. `dryRun = true`
+ * нічого не пише і повертає звіт навіть із блокерами; запис із блокерами — 422,
+ * із конфліктами — 409, обидва зі звітом у `report`.
+ */
+export function importMethodologyPackage(
+  pkg: unknown,
+  dryRun: boolean,
+): Promise<MethodologyImportReportDto> {
+  return apiFetch<MethodologyImportReportDto>(
+    `/api/v1/methodologies/import?dryRun=${dryRun ? 'true' : 'false'}`,
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(pkg) },
+  );
+}
+
 /** Константи версії — усі, включно з мітками категорій. */
 export function methodologyConstants(
   methodologyId: number,

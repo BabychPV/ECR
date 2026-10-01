@@ -61,6 +61,7 @@ internal sealed class MainForm : Form
             new ModeStep(),
             new AccountAndNetworkStep(),
             new DataProtectionStep(certificates, now),
+            new TransportStep(certificates, now),
             new DatabaseStep(_state),
             new CredentialsStep(),
             _reviewStep,

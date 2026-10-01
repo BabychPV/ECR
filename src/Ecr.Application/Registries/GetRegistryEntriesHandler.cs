@@ -37,9 +37,10 @@ public sealed class GetRegistryEntriesHandler(
         string registryCode, DateOnly asOf, long? parentEntryId, CancellationToken ct)
     {
         // ⚠ Глобальне право АБО ресурсний грант рівня Read на ЦЕЙ довідник
-        // (A7-58). Всередині `RegistryAccess.RequireAsync` резолвер довідника
-        // з коду (переданий лямбдою) викликається ЛИШЕ тоді, коли глобального
-        // Registry.View нема — власник глобального права не платить зайвим
+        // (A7-58). Всередині `RegistryAccess.RequireAsync` довідник з коду
+        // (`RegistryLookup`) резолвиться ЛИШЕ тоді, коли глобального
+        // Registry.View нема або в профілі є заборони на довідники (S18) —
+        // власник глобального права без заборон не платить зайвим
         // FindDefinitionAsync ТУТ.
         //
         // ⚠ Явний виклик нижче — ОКРЕМИЙ похід у базу, потрібен незалежно від
@@ -52,10 +53,7 @@ public sealed class GetRegistryEntriesHandler(
         // довідника не працював НІКОЛИ, бо перевірка asOf ішла раніше, ніж
         // хтось встигав дізнатися, що довідник нетемпоральний.
         await RegistryAccess
-            .RequireAsync(
-                access, currentUser, Permission, GrantLevel.Read,
-                async token => (await registries.FindDefinitionAsync(registryCode, token).ConfigureAwait(false))?.Id,
-                ct)
+            .RequireAsync(access, currentUser, Permission, GrantLevel.Read, new RegistryLookup(registries, registryCode), ct)
             .ConfigureAwait(false);
 
         var definition = await registries.FindDefinitionAsync(registryCode, ct).ConfigureAwait(false)

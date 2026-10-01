@@ -9,13 +9,13 @@ import { t } from '@/shared/i18n';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 
 /** Затримка між останнім натисканням і запитом пошуку. */
-export const ColumnSearchDebounceMs = 300;
+const ColumnSearchDebounceMs = 300;
 
 /** Скільки колонок просимо в сервера на один запит. */
 const ColumnSearchLimit = 50;
 
 /** Підпис колонки у виборі: «Назва (КОД) · АРКУШ/ТАБЛИЦЯ». */
-export function columnDefLabel(column: ColumnDefSearchResultDto): string {
+function columnDefLabel(column: ColumnDefSearchResultDto): string {
   return `${localized(column.headerL10n) || column.code} (${column.code}) · ${column.sheetCode}/${column.tableCode}`;
 }
 

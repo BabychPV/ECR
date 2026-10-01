@@ -10,7 +10,7 @@ import type { components } from '@/api/schema';
 export type SourceCatalogItem = components['schemas']['SourceCatalogItem'];
 
 /** Сторінка каталогу; `nextCursor === null` — сторінка остання. */
-export type SourceCatalogPage = components['schemas']['SourceCatalogPage'];
+type SourceCatalogPage = components['schemas']['SourceCatalogPage'];
 
 /**
  * Розмір сторінки, який просить клієнт.
@@ -19,7 +19,7 @@ export type SourceCatalogPage = components['schemas']['SourceCatalogPage'];
  * Сервер підставить своє, якщо межі немає, — але тоді зміна його дефолту
  * мовчки змінила б і крок кнопки «показати ще», тобто те, що бачить людина.
  */
-export const CatalogPageLimit = 50;
+const CatalogPageLimit = 50;
 
 /**
  * Один рівень каталогу.
@@ -30,7 +30,7 @@ export const CatalogPageLimit = 50;
  * без нього віддає КОРЕНІ, а не дочірні вузли, і помилка виглядала б як
  * «джерело не віддає дітей», а не як дефект клієнта.
  */
-export interface CatalogQuery {
+interface CatalogQuery {
   /** Шлях батьківського елемента; `null` — кореневий рівень. */
   readonly path: string | null;
 
@@ -67,10 +67,10 @@ export function fetchSourceCatalog(
 export const CatalogPermission = 'Integration.Manage';
 
 /** «Джерело недоступне або не відповіло вчасно» — той самий код, що в `ErrorCodes.cs`. */
-export const SourceUnavailableCode = 'ECR-INT-0503';
+const SourceUnavailableCode = 'ECR-INT-0503';
 
 /** «Джерело відмовило в автентифікації» — той самий код, що в `ErrorCodes.cs`. */
-export const SourceAuthRefusedCode = 'ECR-INT-0502';
+const SourceAuthRefusedCode = 'ECR-INT-0502';
 
 /**
  * Чи це відмова, за яку відповідає ДЖЕРЕЛО, а не форма.

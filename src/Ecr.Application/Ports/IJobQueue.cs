@@ -220,6 +220,11 @@ public sealed record JobClaimToken(string JobId, Guid Token);
 /// <param name="CreatedByUserId">Автор.</param>
 /// <param name="CorrelationId">Кореляція постановки.</param>
 /// <param name="DocumentId">Документ.</param>
+/// <param name="QueueWaitMs">
+/// Скільки мілісекунд задача була ГОТОВА (від <c>AvailableAt</c>) і чекала, поки її візьмуть, —
+/// за годинником СУБД (<c>ФВ-12.2</c>); <c>null</c> для переклейму простроченої <c>Running</c>
+/// (тоді «чекання» — це збій оренди, а не черга) і там, де черга значення не дає.
+/// </param>
 public sealed record ClaimedJob(
     JobClaimToken Claim,
     string JobCode,
@@ -232,7 +237,8 @@ public sealed record ClaimedJob(
     DateTime LeaseUntil,
     int? CreatedByUserId,
     string? CorrelationId,
-    long? DocumentId);
+    long? DocumentId,
+    long? QueueWaitMs = null);
 
 /// <summary>Стан оренди після <see cref="IJobQueue.RenewAsync"/>.</summary>
 public enum LeaseState

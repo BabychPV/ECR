@@ -56,6 +56,9 @@ public sealed class UnitChecker
             case SymbolReferenceNode { Kind: SymbolKind.Constant } constant:
                 return context.GetConstantUnit(constant.Name);
 
+            case SymbolReferenceNode { Kind: SymbolKind.Formula } formula:
+                return context.GetFormulaUnit(formula.Name);
+
             case SymbolReferenceNode:
                 return null;
 
@@ -487,6 +490,14 @@ public interface IUnitContext : IRegistryBindingContext
 
     /// <summary>Одиниця константи методології.</summary>
     public int? GetConstantUnit(string code);
+
+    /// <summary>Оголошена одиниця результату формули методології (<c>!Code</c>); <c>null</c> — безрозмірна або невідома.</summary>
+    /// <remarks>
+    /// ⚠ Типово <c>null</c>: у діалекті шаблону <c>!Code</c> немає, і його
+    /// джерела одиниць (<c>SnapshotUnitContext</c>) про формули методологій не
+    /// знають. Джерело методології (ФВ-16.6) бере одиницю з <c>OutputUnitId</c>.
+    /// </remarks>
+    public int? GetFormulaUnit(string code) => null;
 
     /// <summary>Розмірність одиниці.</summary>
     public byte GetDimension(int unitId);

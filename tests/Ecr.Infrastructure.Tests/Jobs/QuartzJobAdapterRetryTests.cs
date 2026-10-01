@@ -67,6 +67,24 @@ public sealed class QuartzJobAdapterRetryTests
                 Ecr.Domain.Errors.ErrorCodes.SourceUnavailable, "Джерело недоступне.");
     }
 
+    /// <summary>PI віддав відповідь понад межу збирача (Н-Л4): код той самий, що й «джерело лежить».</summary>
+    private sealed class TooLargeJob : IBackgroundJob
+    {
+        public Task ExecuteAsync(object? payload, IJobProgress progress, CancellationToken ct)
+            => throw new Ecr.Application.Errors.SourceResponseTooLargeException(
+                Ecr.Domain.Errors.ErrorCodes.SourceUnavailable,
+                "PI Web API віддав відповідь понад межу.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-INT-0503.piWebApiResponseTooLarge" });
+    }
+
+    /// <summary>Вердикт налаштування з кодом <c>ECR-INT-0422</c>: від повтору не зміниться.</summary>
+    private sealed class QueryNotConfiguredJob : IBackgroundJob
+    {
+        public Task ExecuteAsync(object? payload, IJobProgress progress, CancellationToken ct)
+            => throw new Ecr.Application.Errors.BusinessRuleException(
+                "ECR-INT-0422", "Запит типу ElementList для PI SQL Client не налаштовано.");
+    }
+
     private static (QuartzJobAdapter Adapter, IJobProgressStore Progress) Adapter()
         => Adapter<AlwaysFailingJob>();
 
@@ -311,6 +329,53 @@ public sealed class QuartzJobAdapterRetryTests
 
         await progress.Received(1).FinishAsync(
             JobId, "Failed", Arg.Any<string?>(), Arg.Any<DateTime>(), Arg.Any<CancellationToken>(), "ECR-INT-0503");
+    }
+
+    /// <summary>
+    /// ⛔ Н-Л4: завелика відповідь PI (код <c>ECR-INT-0503</c>, як у «джерело
+    /// лежить») і вердикт налаштування (<c>ECR-INT-0422</c>) провалюють задачу з
+    /// ПЕРШОЇ спроби. Раніше обидва ретраїлись тричі (30 + 60 + 120 с), і
+    /// користувач ~3.5 хв бачив «виконується» замість причини.
+    /// </summary>
+    /// <remarks>
+    /// Мутації: прибрати арм <c>SourceResponseTooLargeException</c> з
+    /// <c>JobRetryPolicy.IsWorthRetrying</c> — червоний випадок <c>TooLargeJob</c>;
+    /// повернути «будь-який <c>BusinessRuleException</c> ретраїться» — червоні обидва.
+    /// </remarks>
+    [Theory]
+    [InlineData(typeof(TooLargeJob), "ECR-INT-0503")]
+    [InlineData(typeof(QueryNotConfiguredJob), "ECR-INT-0422")]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "Н-Л4")]
+    public async Task Нетранзієнтна_прикладна_відмова_провалює_задачу_з_першої_спроби(Type jobType, string code)
+    {
+        var (adapter, progress) = jobType == typeof(TooLargeJob)
+            ? Adapter<TooLargeJob>()
+            : Adapter<QueryNotConfiguredJob>();
+        var (context, scheduler) = ContextAt(0, jobType);
+
+        await Assert.ThrowsAsync<JobExecutionException>(() => adapter.Execute(context));
+
+        await scheduler.DidNotReceive().ScheduleJob(Arg.Any<ITrigger>(), Arg.Any<CancellationToken>());
+        await progress.Received(1).FinishAsync(
+            JobId, "Failed", Arg.Any<string?>(), Arg.Any<DateTime>(), Arg.Any<CancellationToken>(), code);
+    }
+
+    /// <summary>«Джерело лежить» (<c>ECR-INT-0503</c>) на першій спробі — як і раніше, ретрай.</summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "Н-Л4")]
+    public async Task Недоступне_джерело_на_першій_спробі_ретраїться()
+    {
+        var (adapter, progress) = Adapter<SourceDownJob>();
+        var (context, scheduler) = ContextAt(0, typeof(SourceDownJob));
+
+        await adapter.Execute(context);
+
+        await scheduler.Received(1).ScheduleJob(Arg.Any<ITrigger>(), Arg.Any<CancellationToken>());
+        await progress.DidNotReceive().FinishAsync(
+            Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string?>(), Arg.Any<DateTime>(), Arg.Any<CancellationToken>(),
+            Arg.Any<string?>());
     }
 
     /// <summary>

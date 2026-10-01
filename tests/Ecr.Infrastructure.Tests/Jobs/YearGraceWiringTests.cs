@@ -66,7 +66,7 @@ public sealed class YearGraceWiringTests(SqlServerFixture sql) : IDisposable
 {
     private const int December = 202612;
 
-    private static readonly TimeZoneInfo Site = SiteTimeZone.Create("Asia/Almaty").ToTimeZoneInfo();
+    private static readonly TimeZoneInfo Site = SiteTimeZone.Create("Asia/Atyrau").ToTimeZoneInfo();
 
     /// <summary>У вікні: після власного закриття грудня (30.01), до кінця вікна (15.02).</summary>
     private static readonly DateTime InWindow = SiteTime(2027, 2, 1, 10);

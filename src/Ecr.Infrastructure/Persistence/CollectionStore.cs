@@ -603,6 +603,10 @@ public sealed class CollectionStore(EcrDbContext db, IClock clock) : ICollection
                 e.IsActive,
                 e.DataSourceId,
                 e.RegistryDefId,
+                e.OnMissingInSource,
+                e.ValidFromAttribute,
+                e.ValidToAttribute,
+                e.ValidToInclusive,
             })
             .ToListAsync(ct)
             .ConfigureAwait(false);
@@ -675,6 +679,10 @@ public sealed class CollectionStore(EcrDbContext db, IClock clock) : ICollection
                 gaps.Count == 0 ? null : gaps[0].From,
                 entity.DataSourceId,
                 codeById[entity.DataSourceId],
+                entity.OnMissingInSource,
+                entity.ValidFromAttribute,
+                entity.ValidToAttribute,
+                entity.ValidToInclusive,
                 entity.RegistryDefId);
         });
     }

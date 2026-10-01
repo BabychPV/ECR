@@ -35,7 +35,7 @@ import {
 /** Код ролі → область; немає запису чи порожні проєкти — усі проєкти. */
 export type ScopeDraft = Readonly<Record<string, ScopeEntry>>;
 
-export type ScopeState = 'pending' | 'ready' | 'unavailable' | 'unreadable';
+type ScopeState = 'pending' | 'ready' | 'unavailable' | 'unreadable';
 
 /** Збережені області БЕЗСТРОКОВИХ призначень — тих, якими керує форма. */
 export function useUserRoleScopes(userId: number | null): { baseline: ScopeDraft; state: ScopeState } {

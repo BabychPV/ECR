@@ -35,6 +35,7 @@ namespace Ecr.Infrastructure.Tests.Jobs;
 /// би вікно сусіднього тесту за межі його даних.
 /// </remarks>
 [Collection("SqlServer")]
+[Trait("Requirement", "ФВ-12.5")]
 public sealed class NotificationJobCoverageDigestTests(SqlServerFixture sql)
 {
     /// <summary>Межа прибирання: усе, що клас написав у журнал обслуговування, пізніше.</summary>

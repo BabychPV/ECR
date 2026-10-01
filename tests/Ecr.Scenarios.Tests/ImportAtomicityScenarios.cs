@@ -243,7 +243,7 @@ public sealed class ImportAtomicityScenarios(SqlServerFixture sql)
             {
                 code = $"{Prefix}_{Guid.NewGuid():N}"[..20],
                 nameL10n = new Dictionary<string, string> { ["en"] = "Import project" },
-                timeZoneId = "Asia/Almaty",
+                timeZoneId = "Asia/Atyrau",
                 periodKind = "Monthly",
                 year = DateTime.UtcNow.Year,
                 templateVersionId = versionId,

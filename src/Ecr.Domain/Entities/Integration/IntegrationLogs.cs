@@ -798,6 +798,12 @@ public sealed class JobProgress
     /// </summary>
     public string? TargetKey { get; private set; }
 
+    /// <summary>
+    /// Батько розкладу: persisted-проєкція <c>$.fanOutParentJobId</c> з <see cref="Payload"/>
+    /// (стовпець обчислює база, код його не пише) — лише щоб шукати дітей за індексом.
+    /// </summary>
+    public string? FanOutParentJobId { get; private set; }
+
     /// <summary>Коли попросили скасувати <c>Running</c>; <c>null</c> — не просили.</summary>
     public DateTime? CancelRequestedAt { get; private set; }
 

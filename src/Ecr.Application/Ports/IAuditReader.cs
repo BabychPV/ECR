@@ -13,6 +13,7 @@ namespace Ecr.Application.Ports;
 /// <param name="ChangedByUserId">Автор — <b>UserId</b>, не SID (R-A2, D-86).</param>
 /// <param name="Origin">Звідки зміна: правка, імпорт, перерахунок, міграція.</param>
 /// <param name="IsLateEdit">Зміна в <c>Grace</c> або після <c>Reopen</c> (D-70).</param>
+/// <param name="IsOutOfWindow">Правка за політикою <c>Warn</c> поза вікном доступу (<c>ФВ-2.16</c>, <c>D-239</c>).</param>
 /// <param name="ChangedByDisplayName">
 /// Ім'я автора (<c>sec.User.DisplayName</c>); <c>null</c> — запису користувача
 /// вже немає (`R-18`). ⛔ Не логін: логін і SID показувати людині заборонено
@@ -44,7 +45,8 @@ public sealed record CellChangeView(
     Ecr.Domain.ValueObjects.LocalizedText? DocumentNameL10n = null,
     string? ColumnCode = null,
     Ecr.Domain.ValueObjects.LocalizedText? ColumnHeaderL10n = null,
-    string? ColumnDataType = null);
+    string? ColumnDataType = null,
+    bool IsOutOfWindow = false);
 
 /// <summary>Структурна зміна в журналі, як її бачить читач.</summary>
 /// <param name="ChangedAt">Момент зміни в UTC.</param>
@@ -208,6 +210,20 @@ public interface IAuditReader
         IReadOnlyList<string> entityTypes, int entityId, int limit, CancellationToken ct);
 
     /// <summary>
+    /// Перемикання джерела наборів (<c>SwitchSourceSet</c>, <c>ФВ-13.10</c>), що називають довідник.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ S18: фільтр за кодом — у ЗАПИТІ, до <paramref name="limit"/>. Перемикання пишеться одним
+    /// записом на весь набір із <c>EntityId = 0</c>, і «останні N, потім фільтр» губило перемикання
+    /// довідника, щойно за ним набиралось N чужих.
+    /// </remarks>
+    /// <param name="registryCode">Код довідника в <c>NewJson.registryCodes</c> (точний збіг елемента, не підрядок).</param>
+    /// <param name="limit">Скільки останніх записів віддати.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<IReadOnlyList<StructureChangeView>> ReadRegistrySetSwitchesAsync(
+        string registryCode, int limit, CancellationToken ct);
+
+    /// <summary>
     /// Загальний журнал структурних змін у вікні часу (<c>BE-16</c>).
     /// </summary>
     /// <remarks>
@@ -226,6 +242,13 @@ public interface IAuditReader
     /// <param name="filter">Вікно й звуження журналу.</param>
     /// <param name="ct">Токен скасування.</param>
     public Task<int> CountStructureJournalAsync(StructureChangeFilter filter, CancellationToken ct);
+
+    /// <summary>Журнал подій безпеки (<c>aud.SecurityEvent</c>) у вікні часу, курсорна пагінація.</summary>
+    /// <param name="filter">Вікно й звуження журналу.</param>
+    /// <param name="page">Курсорна пагінація.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<PagedResult<SecurityEventView>> ReadSecurityEventsAsync(
+        SecurityEventFilter filter, CursorRequest page, CancellationToken ct);
 
     /// <summary>
     /// Остання зміна кожної названої комірки — ОДНИМ запитом на весь перелік
@@ -258,4 +281,32 @@ public interface IAuditReader
         IReadOnlyCollection<(long TableRowId, int ColumnDefId)> cells,
         DateTime since,
         CancellationToken ct);
+
+    /// <summary>
+    /// Комірки документа за період, чия ОСТАННЯ зміна в журналі — правка
+    /// поза вікном доступу (<c>ФВ-2.16</c>, <c>D-239</c>), ОДНИМ запитом.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Потрібне зрізу (<c>GetTableSliceHandler</c>): значок «поза вікном»
+    /// ставився лише з відповіді <c>PATCH</c> і зникав після перезавантаження
+    /// сторінки, хоча позначка давно лежить у <c>aud.CellChange.IsOutOfWindow</c>.
+    ///
+    /// ⚠ «Остання», а не «хоч раз»: пізніша звичайна зміна (імпорт, правка в
+    /// перевідкритому вікні) означає, що в комірці вже інше значення, і значок
+    /// про нього збрехав би.
+    ///
+    /// ⚠ Вікна часу тут немає, на відміну від <see cref="ReadLastChangesAsync"/>:
+    /// межа твердження — «остання зміна взагалі», і вікно її обрізало б. Ціну
+    /// тримає фільтрований індекс <c>IX_CellChange_OutOfWindow</c>
+    /// (<c>11-audit-tables.sql</c>): такі правки рідкісні, тож у кожній партиції
+    /// засічка по майже порожньому індексу.
+    ///
+    /// ⚠ Документ цілком, а не екземпляр таблиці: <c>aud.CellChange</c>
+    /// екземпляра не знає. Відсікає чужі таблиці викликач — за рядками зрізу.
+    /// </remarks>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="periodKey">Звітний період.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<IReadOnlyCollection<(long TableRowId, int ColumnDefId)>> ReadOutOfWindowCellsAsync(
+        long documentId, int periodKey, CancellationToken ct);
 }

@@ -1,13 +1,35 @@
 import type { JSX } from 'react';
 import { Alert, Code, Skeleton, Stack, Table, Text } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
-import type { CalculationResultDto, UnitRef } from '@/api/types';
+import type { CalculationResultDto, RegistryDefDto, UnitRef } from '@/api/types';
 import { apiFetch } from '@/api/client';
+import { queryKeys } from '@/api/queryKeys';
 import { formatDecimal } from '@/shared/format';
 import { t } from '@/shared/i18n';
+import { localized } from '@/shared/i18n/localized';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { calculationResults } from './api';
+import { calculationResultsKey } from './calculationResultsKey';
+
+/**
+ * Коди довідників, змінених після прогону (RT-25), без повторів і впорядковані.
+ *
+ * ⚠ Сервер кладе той самий перелік у кожен рядок (свіжість — на документ, не на число), тож
+ * без зведення банер повторив би кожен довідник стільки разів, скільки чисел у панелі.
+ */
+export function changedRegistriesOf(list: readonly CalculationResultDto[]): string[] {
+  return [...new Set(list.flatMap((result) => result.changedRegistries ?? []))].sort();
+}
+
+/**
+ * Назва довідника для банера застарілості: назва мовою користувача з каталогу довідників, а код —
+ * лише запасний варіант (каталог ще їде, недоступний без права або довідника там немає).
+ */
+export function registryDisplayName(code: string, registries: readonly RegistryDefDto[] | undefined): string {
+  const name = localized(registries?.find((registry) => registry.code === code)?.nameL10n);
+  return name === '' ? code : name;
+}
 
 /**
  * Числа, які дав розрахунок методологій на цьому документі за цей період.
@@ -38,8 +60,19 @@ export function CalculationResultsPanel({
   // кожна зміна робочого процесу; доти панель жила під окремим ключем, і після
   // перерахунку показувала старі числа до перезавантаження сторінки.
   const results = useQuery({
-    queryKey: ['document', documentId, periodKey, 'calculation-results'],
+    queryKey: calculationResultsKey(documentId, periodKey),
     queryFn: () => calculationResults(documentId, periodKey),
+  });
+
+  // ⚠ Каталог довідників — лише коли банеру є кого називати, і під спільним ключем переліку
+  // (його вже читають сітка й шапка документа), щоб не множити запитів. Відмова (немає
+  // `Registry.View`) — не помилка панелі: банер покаже код.
+  const changedCodes = changedRegistriesOf(results.data ?? []);
+  const registries = useQuery({
+    queryKey: queryKeys.registries.list(),
+    queryFn: () => apiFetch<RegistryDefDto[]>('/api/v1/registries'),
+    enabled: changedCodes.length > 0,
+    retry: false,
   });
 
   const units = useQuery({
@@ -79,9 +112,19 @@ export function CalculationResultsPanel({
               даним. Доти панель показувала їх як чинні, і документ подавали з
               результатами, що рахували інші входи.
             */}
-            {list.some((result) => result.isStale) && (
+            {/*
+              ⛔ RT-25: причиною застарілості буває не лише введення, а й правка довідника,
+              який читає методологія (`changedRegistries`). Без назви довідника людина шукала
+              б зміну в документі, якої там немає.
+            */}
+            {(list.some((result) => result.isStale) || changedRegistriesOf(list).length > 0) && (
               <Alert color="statusWarning" data-results-stale="" title={t('documents.calculationResultsStale')}>
                 {t('documents.calculationResultsStaleHint')}
+                {changedRegistriesOf(list).map((code) => (
+                  <Text key={code} size="sm" mt="xs" data-results-stale-registry={code}>
+                    {t('calculation.staleRegistry', { name: registryDisplayName(code, registries.data) })}
+                  </Text>
+                ))}
               </Alert>
             )}
 

@@ -47,6 +47,7 @@ internal sealed class ReviewStep(ICertificateSource certificates, Func<DateTime>
         AddRow("Service account", DescribeServiceAccount(state));
         AddRow("Port", state.Port.ToString(System.Globalization.CultureInfo.InvariantCulture));
         AddRow("Data Protection certificate", state.DataProtectionThumbprint ?? "not selected");
+        AddRow("Transport", DescribeTransport(state));
         AddRow("Ecr.msi file", state.MsiPath ?? "not specified");
         AddRow(
             "Database schema",
@@ -72,7 +73,19 @@ internal sealed class ReviewStep(ICertificateSource certificates, Func<DateTime>
             return false;
         }
 
-        return _state.TryValidateDataProtection(certificates, now(), out error);
+        // D14-08: те саме для сертифіката HTTPS (лише в режимі HTTPS).
+        return _state.TryValidateDataProtection(certificates, now(), out error)
+            && _state.TryValidateTransport(certificates, now(), out error);
+    }
+
+    private static string DescribeTransport(WizardState state)
+    {
+        return state.Transport switch
+        {
+            WizardTransport.Https => $"HTTPS, certificate {state.HttpsThumbprint ?? "not selected"}",
+            WizardTransport.Proxy => "HTTP behind an HTTPS reverse proxy",
+            _ => "HTTP only - TEST STAND (session cookie is NOT Secure)",
+        };
     }
 
     public void Apply(WizardState state)

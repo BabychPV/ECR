@@ -494,6 +494,12 @@ public sealed class CalculationRunConfiguration : IEntityTypeConfiguration<Calcu
                .HasFilter("[Status] = 'Current'")
                .HasDatabaseName("UX_CalculationRun_Current");
 
+        // Вимір 2026-10-01 (1,5 млн прогонів): `ReportSnapshotStaleness` робить EXISTS за
+        // `ProjectId` + `FinishedAt > BuiltAt`; FK_CR_Project індексу не мав — 21 тис. читань
+        // і 18 с на кожне завершення розрахунку, з індексом 120 читань / 5 мс.
+        builder.HasIndex(x => new { x.ProjectId, x.FinishedAt }, "IX_CalculationRun_Project_FinishedAt")
+               .IncludeProperties(x => new { x.PeriodKey, x.Status, x.ErrorMessage });
+
         builder.HasOne<Project>().WithMany().HasForeignKey(x => x.ProjectId)
                .HasConstraintName("FK_CR_Project");
     }

@@ -18,14 +18,11 @@ import { DefaultLanguage, t } from '@/shared/i18n';
 /** Звіт імпорту — форма **згенерована** зі знімка OpenAPI, не описана тут. */
 export type UiStringImportReport = components['schemas']['UiStringImportReport'];
 
-/** Одна відхилена стрічка файлу. */
-export type UiStringImportError = components['schemas']['UiStringImportError'];
-
 /** Ім'я файлу, коли сервер не надіслав `Content-Disposition`. */
 export const FallbackExportFileName = 'ui-strings.csv';
 
 /** Завантажений CSV: тіло й ім'я, яке запропонував сервер (або `null`). */
-export interface UiStringExportFile {
+interface UiStringExportFile {
   readonly blob: Blob;
   readonly fileName: string | null;
 }
@@ -54,7 +51,7 @@ export async function fetchUiStringExport(lang: string): Promise<UiStringExportF
 }
 
 /** Що саме надсилаємо на перевірку або на запис. */
-export interface UiStringImportInput {
+interface UiStringImportInput {
   /** Мова перекладу; мова за замовчуванням сервером не приймається. */
   readonly lang: string;
 

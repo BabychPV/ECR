@@ -23,7 +23,7 @@ export type PublicBootstrap = components['schemas']['PublicBootstrapResponse'];
  * ⚠ Версія порожня, і через це підвал із нею просто не малюється — вигадувати
  * «1.0.0» тут означало б показувати число, якого ніхто не питав.
  */
-export const SIGN_IN_FALLBACK: PublicBootstrap = {
+const SIGN_IN_FALLBACK: PublicBootstrap = {
   productVersion: '',
   languages: [],
   windowsSignInEnabled: true,
@@ -31,7 +31,7 @@ export const SIGN_IN_FALLBACK: PublicBootstrap = {
 };
 
 /** Один анонімний запит; викликається до будь-якої автентифікації. */
-export function fetchPublicBootstrap(): Promise<PublicBootstrap> {
+function fetchPublicBootstrap(): Promise<PublicBootstrap> {
   return apiFetch<PublicBootstrap>('/api/v1/public/bootstrap');
 }
 

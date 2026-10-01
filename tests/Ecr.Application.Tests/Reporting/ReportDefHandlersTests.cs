@@ -29,9 +29,17 @@ public sealed class ReportDefHandlersTests
     private readonly IClock _clock = Substitute.For<IClock>();
     private readonly IAccessDecisionService _access = Substitute.For<IAccessDecisionService>();
     private readonly ICurrentUser _user = Substitute.For<ICurrentUser>();
+    private readonly IAuditWriter _audit = Substitute.For<IAuditWriter>();
+
+    private PublishReportVersionHandler Publisher()
+        => new(_versions, _uow, _access, _user, _audit, _clock);
 
     public ReportDefHandlersTests()
     {
+        // ФВ-14.7: публікація йде в транзакції — без цього закриття не виконується.
+        _uow.ExecuteInTransactionAsync(Arg.Any<Func<CancellationToken, Task>>(), Arg.Any<CancellationToken>())
+            .Returns(call => call.ArgAt<Func<CancellationToken, Task>>(0)(call.ArgAt<CancellationToken>(1)));
+
         _clock.UtcNow.Returns(new DateTime(2026, 2, 1, 0, 0, 0, DateTimeKind.Utc));
         _user.UserId.Returns(9);
         _access.BuildProfileAsync(9, Arg.Any<CancellationToken>())
@@ -83,8 +91,8 @@ public sealed class ReportDefHandlersTests
         _versions.FindAsync(55, Arg.Any<CancellationToken>()).Returns((ReportVersion?)null);
 
         var error = await Assert.ThrowsAsync<NotFoundException>(
-            () => new PublishReportVersionHandler(_versions, _uow, _access, _user)
-                .HandleAsync(reportDefId: 1, reportVersionId: 55, CancellationToken.None));
+            () => Publisher()
+                .HandleAsync(reportDefId: 1, reportVersionId: 55, "Перша публікація", CancellationToken.None));
 
         Assert.Equal(ErrorCodes.ReportNotFound, error.ErrorCode);
         Assert.Equal("err.ECR-RPT-0404.version", error.Details!["messageKey"]);
@@ -99,12 +107,50 @@ public sealed class ReportDefHandlersTests
         _versions.FindAsync(55, Arg.Any<CancellationToken>()).Returns(version);
 
         var error = await Assert.ThrowsAsync<NotFoundException>(
-            () => new PublishReportVersionHandler(_versions, _uow, _access, _user)
-                .HandleAsync(reportDefId: 2, reportVersionId: 55, CancellationToken.None));
+            () => Publisher()
+                .HandleAsync(reportDefId: 2, reportVersionId: 55, "Перша публікація", CancellationToken.None));
 
         Assert.Equal(ErrorCodes.ReportNotFound, error.ErrorCode);
         Assert.Equal("err.ECR-RPT-0404.versionWrongDef", error.Details!["messageKey"]);
         Assert.Equal("1", error.Details["versionDefId"]);
         Assert.Equal("2", error.Details["reportDefId"]);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData(null)]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-14.7")]
+    public async Task Публікація_без_причини_відхиляється_і_версія_лишається_чернеткою(string? reason)
+    {
+        var version = new ReportVersion(1, "1", "[]", """{"rowSource":"CalculationResults"}""", _clock.UtcNow);
+        _versions.FindAsync(55, Arg.Any<CancellationToken>()).Returns(version);
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Publisher().HandleAsync(1, 55, reason!, CancellationToken.None));
+
+        Assert.Equal(ErrorCodes.RequestInvalid, error.ErrorCode);
+        Assert.Equal("err.ECR-REQ-0422.reportPublishReason", error.Details!["messageKey"]);
+        Assert.Equal(Ecr.Domain.Enums.TemplateVersionStatus.Draft, version.Status);
+        await _audit.DidNotReceiveWithAnyArgs().WriteStructureChangeAsync(default!, default);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-14.7")]
+    public async Task Публікація_з_причиною_зберігає_її_в_журналі_структурних_змін()
+    {
+        var version = new ReportVersion(1, "1", "[]", """{"rowSource":"CalculationResults"}""", _clock.UtcNow);
+        _versions.FindAsync(55, Arg.Any<CancellationToken>()).Returns(version);
+
+        var published = await Publisher().HandleAsync(1, 55, "  Затверджено комісією  ", CancellationToken.None);
+
+        Assert.Equal("Published", published.Status);
+        await _audit.Received(1).WriteStructureChangeAsync(
+            Arg.Is<StructureChangeRecord>(r =>
+                r.EntityType == "ReportVersion" && r.Operation == "Publish"
+                && r.ChangeReason == "Затверджено комісією" && r.ChangedByUserId == 9),
+            Arg.Any<CancellationToken>());
     }
 }

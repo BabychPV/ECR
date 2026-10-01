@@ -15,8 +15,17 @@ namespace Ecr.Adapters.PiAf;
 /// Використовується для того, чого не вміє RTQP. **Методів запису тут немає
 /// навмисно** (`D-44`): Web API їх підтримує, але система в AF не пише нічого.
 /// </remarks>
+/// <param name="http">Клієнт для режимів Basic/Bearer (заголовок із секрету).</param>
+/// <param name="store">Сховище збору.</param>
+/// <param name="secrets">Секрети джерел.</param>
+/// <param name="clients">
+/// Фабрика, з якої береться клієнт режиму <see cref="PiWebApiAuthMode.Negotiate"/>
+/// (<see cref="PiWebApiAuthentication.NegotiateClientName"/>). <c>null</c> — лише
+/// в тестах, що підміняють транспорт одним обробником: тоді Negotiate іде тим
+/// самим <paramref name="http"/>.
+/// </param>
 public sealed partial class PiWebApiDataSource(
-    HttpClient http, ICollectionStore store, ISecretProvider secrets)
+    HttpClient http, ICollectionStore store, ISecretProvider secrets, IHttpClientFactory? clients = null)
     : IExternalDataSource, IHierarchicalCatalogSource, IBatchCollectionSource
 {
     /// <summary>Скільки разів повторювати запит, який відмовив через 5xx або таймаут.</summary>
@@ -29,6 +38,12 @@ public sealed partial class PiWebApiDataSource(
 
     /// <summary>Базова затримка між спробами; далі подвоюється.</summary>
     public static TimeSpan RetryDelay => TimeSpan.FromSeconds(2);
+
+    /// <summary>Типова межа тіла відповіді PI Web API — 50 МБ.</summary>
+    public const long DefaultMaxResponseBytes = 50L * 1024 * 1024;
+
+    /// <summary>Межа тіла однієї відповіді, байт; більше — відмова збору без повторів.</summary>
+    public long MaxResponseBytes { get; init; } = DefaultMaxResponseBytes;
 
     private const string SourceUnavailable = "ECR-INT-0503";
 
@@ -427,9 +442,9 @@ public sealed partial class PiWebApiDataSource(
             try
             {
                 using var message = new HttpRequestMessage(HttpMethod.Get, uri);
-                Authorize(message, secretName);
+                var client = Authorize(message, secretName);
 
-                using var response = await http.SendAsync(message, ct).ConfigureAwait(false);
+                using var response = await client.SendAsync(message, ct).ConfigureAwait(false);
 
                 if (!response.IsSuccessStatusCode)
                 {
@@ -467,7 +482,7 @@ public sealed partial class PiWebApiDataSource(
                 }
                 else
                 {
-                    var body = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+                    using var body = await ReadBoundedAsync(response, path, ct).ConfigureAwait(false);
                     return await JsonDocument.ParseAsync(body, cancellationToken: ct).ConfigureAwait(false);
                 }
             }
@@ -518,10 +533,59 @@ public sealed partial class PiWebApiDataSource(
     }
 
     /// <summary>
-    /// Схема автентифікації, названа в секреті джерела.
+    /// Читає тіло відповіді не далі за <see cref="MaxResponseBytes"/>: джерело (у
+    /// тому числі підставлене адреса, SSRF) не може вичерпати пам'ять збирача
+    /// нескінченною відповіддю. Перевищення — відмова збору без повторів.
+    /// </summary>
+    private async Task<MemoryStream> ReadBoundedAsync(HttpResponseMessage response, string path, CancellationToken ct)
+    {
+        SourceResponseTooLargeException TooLarge() => new(
+            SourceUnavailable,
+            $"PI Web API на {path} віддав відповідь понад {MaxResponseBytes} байт: збір відхилено.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-INT-0503.piWebApiResponseTooLarge",
+                ["path"] = path,
+                ["limitBytes"] = MaxResponseBytes.ToString(CultureInfo.InvariantCulture),
+            });
+
+        if (response.Content.Headers.ContentLength is { } declared && declared > MaxResponseBytes)
+        {
+            throw TooLarge();
+        }
+
+        var result = new MemoryStream();
+        try
+        {
+            await using var source = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+            var buffer = new byte[81920];
+            int read;
+            while ((read = await source.ReadAsync(buffer, ct).ConfigureAwait(false)) > 0)
+            {
+                if (result.Length + read > MaxResponseBytes)
+                {
+                    throw TooLarge();
+                }
+
+                result.Write(buffer, 0, read);
+            }
+
+            result.Position = 0;
+            return result;
+        }
+        catch
+        {
+            await result.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Автентифікація запиту за режимом, названим у секреті джерела; повертає
+    /// клієнта, яким запит треба надіслати.
     /// </summary>
     /// <remarks>
-    /// ⚠ Схема — це **налаштування**, а не гілка коду (`P-12`). Як саме
+    /// ⚠ Схема — це **налаштування**, а не гілка коду (<c>P-12</c>). Як саме
     /// автентифікується PI Web API в конкретному контурі, з коду не видно:
     /// Kerberos, Basic і Bearer однаково правдоподібні. Помилка тут дає збору
     /// постійний <c>401</c>.
@@ -531,40 +595,37 @@ public sealed partial class PiWebApiDataSource(
     /// недоступного джерела. Це був наш дефект (<c>H-20</c>): помилка в
     /// налаштуванні не проявлялася як помилка. Тепер відмова в автентифікації
     /// кидає <see cref="SourceAuthenticationException"/>, прогін стає
-    /// <c>Failed</c>, а алерт іде негайно.
+    /// <c>Failed</c>, а алерт іде негайно — у кожному з трьох режимів.
     /// </para>
     /// <para>
-    /// Тому значення секрету читається як <c>"схема значення"</c>:
-    /// <c>Basic dXNlcjpwYXNz</c>, <c>Bearer eyJ…</c>. Секрет без пробілу —
-    /// <c>Bearer</c> за замовчуванням; порожній секрет означає інтегровану
-    /// автентифікацію службового облікового запису (D-34), яку виконує сам
-    /// <c>HttpClient</c>.
+    /// Режим за значенням секрету — <see cref="PiWebApiAuthentication.ModeOf"/>:
+    /// <c>Basic …</c>, <c>Bearer …</c> (або значення без пробілу) — заголовок;
+    /// <c>Negotiate</c> або відсутній секрет — Windows-автентифікація
+    /// службового облікового запису (D-34) окремим клієнтом, чий обробник
+    /// має <c>UseDefaultCredentials</c>.
     /// </para>
     /// <para>
     /// ⛔ Значення секрету не логується — ні саме, ні його довжина, ні факт
     /// збігу (ФВ-6.11).
     /// </para>
     /// </remarks>
-    private void Authorize(HttpRequestMessage message, string secretName)
+    private HttpClient Authorize(HttpRequestMessage message, string secretName)
     {
         message.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
 
         var secret = secrets.Find(secretName);
 
-        if (string.IsNullOrEmpty(secret))
+        if (PiWebApiAuthentication.ModeOf(secret) == PiWebApiAuthMode.Negotiate)
         {
-            // Порожній заголовок кращий за вигаданий: підставлений `Basic` із
-            // порожнім паролем отримав би 401 і виглядав би як недоступність
-            // джерела.
-            return;
+            // Заголовка немає: облікові дані дає ОС у відповідь на виклик 401.
+            return negotiateClient ??= clients?.CreateClient(PiWebApiAuthentication.NegotiateClientName) ?? http;
         }
 
-        var separator = secret.IndexOf(' ', StringComparison.Ordinal);
-
-        message.Headers.Authorization = separator > 0
-            ? new AuthenticationHeaderValue(secret[..separator], secret[(separator + 1)..])
-            : new AuthenticationHeaderValue("Bearer", secret);
+        message.Headers.Authorization = PiWebApiAuthentication.HeaderOf(secret);
+        return http;
     }
+
+    private HttpClient? negotiateClient;
 
     private static bool Retryable(HttpStatusCode status)
         => (int)status >= 500 || status == HttpStatusCode.RequestTimeout;

@@ -39,5 +39,9 @@ public interface IJobStartMetrics
     /// <summary>Фіксує затримку старту однієї задачі.</summary>
     /// <param name="milliseconds">Скільки минуло від постановки до першого рядка тіла.</param>
     /// <param name="jobCode">Код задачі — щоб відрізняти перерахунок від архівації.</param>
-    public void RecordStartLatency(double milliseconds, string jobCode);
+    /// <param name="lane">
+    /// Лейн черги в базі (<c>JobLanes</c>); <c>null</c> — задача Quartz без лейна: тег
+    /// <c>lane</c> тоді ОМИНАЄТЬСЯ, а не підставляється вигаданим значенням.
+    /// </param>
+    public void RecordStartLatency(double milliseconds, string jobCode, string? lane = null);
 }

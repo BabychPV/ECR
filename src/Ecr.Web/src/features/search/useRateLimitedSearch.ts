@@ -19,22 +19,22 @@ import { useDataSearch, type SearchHit } from './api';
  */
 
 /** Код відмови межі частоти — той самий, що `ErrorCodes.TooManyRequests` на сервері. */
-export const SearchRateLimitCode = 'ECR-REQ-0429';
+const SearchRateLimitCode = 'ECR-REQ-0429';
 
 /** Строк очікування, якщо сервер не надіслав (або надіслав нерозбірний) `Retry-After`. */
-export const SearchRetryDefaultSeconds = 2;
+const SearchRetryDefaultSeconds = 2;
 
 /** Скільки `429` поспіль у ланцюгу автоматичних повторів — і далі звичайна відмова. */
-export const SearchRateLimitMaxInARow = 3;
+const SearchRateLimitMaxInARow = 3;
 
 /** Строк очікування, якщо відмова — саме межа частоти пошуку; інакше `null`. */
-export function rateLimitWaitSeconds(error: unknown): number | null {
+function rateLimitWaitSeconds(error: unknown): number | null {
   if (!(error instanceof EcrApiError) || error.problem.errorCode !== SearchRateLimitCode) return null;
 
   return error.problem.retryAfterSeconds ?? SearchRetryDefaultSeconds;
 }
 
-export interface RateLimitedSearch {
+interface RateLimitedSearch {
   readonly search: UseQueryResult<SearchHit[]>;
   /** Секунди до повтору, поки триває очікування; інакше `null`. */
   readonly waitSeconds: number | null;

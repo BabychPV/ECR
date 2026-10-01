@@ -264,7 +264,8 @@ public sealed class SubmitHiddenDetailsTests(SqlServerFixture sql)
             Recalculation(db, doc, metadata, clock),
             methodologies,
             new TemplateVersionStore(db),
-            new RegistryStore(db));
+            new RegistryStore(db),
+            new AuditWriter(db));
     }
 
     private static RecalculationService Recalculation(EcrDbContext db, Scenario doc, IMetadataCache metadata, IClock clock)

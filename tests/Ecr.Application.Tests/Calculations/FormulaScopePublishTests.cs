@@ -201,8 +201,17 @@ public sealed class FormulaScopePublishTests
     // ─────────────────────────────────────────────────────────────────────────
 
     private Task<MethodologyPublicationDiff> Publish()
-        => new PublishMethodologyHandler(_module, _store, _formulas, _bindings, _uow, _audit, _access, _user, _clock)
+        => new PublishMethodologyHandler(
+            _module, _store, _formulas, _bindings, Units(), _uow, _audit, _access, _user, _clock)
             .HandleAsync(VersionId, "HSE301 A3a", From, CancellationToken.None);
+
+    /// <remarks>Одиниці тут не предмет: порожній довідник, перевірку одиниць веде <c>MethodologyUnitPublishTests</c>.</remarks>
+    private static IUnitCatalog Units()
+    {
+        var units = Substitute.For<IUnitCatalog>();
+        units.GetAsync(Arg.Any<CancellationToken>()).Returns(UnitCatalogSnapshot.Empty);
+        return units;
+    }
 
     private void Formulas(List<MethodologyFormula> formulas)
         => _store.GetFormulasAsync(VersionId, Arg.Any<CancellationToken>()).Returns(formulas);

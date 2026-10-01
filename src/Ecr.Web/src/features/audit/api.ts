@@ -64,7 +64,7 @@ function instant(value: string, plusDays: number): string {
 }
 
 /** Початок вікна: північ названої дати в поясі браузера. */
-export function windowStart(value: string): string {
+function windowStart(value: string): string {
   return instant(value, 0);
 }
 
@@ -77,12 +77,12 @@ export function windowStart(value: string): string {
  * дивляться журнал теж сьогодні («хто щойно це змінив») — і він відповідав
  * «змін не було», тобто неправдою.
  */
-export function windowEnd(value: string): string {
+function windowEnd(value: string): string {
   return instant(value, 1);
 }
 
 /** Фільтр журналу змін комірок. */
-export interface CellChangeFilter {
+interface CellChangeFilter {
   /** Початок вікна (`YYYY-MM-DD` або ISO); **обов'язковий**. Дата — ВКЛЮЧНО. */
   readonly from: string;
   /** Кінець вікна; **обов'язковий**. Дата — ВКЛЮЧНО: названий день у вікні (див. `windowEnd`). */
@@ -173,7 +173,7 @@ export function cellChangesQuery(filter: CellChangeFilter): string {
 export type StructureChangePage = components['schemas']['PagedResultOfStructureChangeView'];
 
 /** Фільтр журналу структурних змін; вікно **обов'язкове**, як у журналі комірок. */
-export interface StructureChangeFilter {
+interface StructureChangeFilter {
   /** Початок вікна; дата — ВКЛЮЧНО. */
   readonly from: string;
   /** Кінець вікна; дата — ВКЛЮЧНО, як у `CellChangeFilter`. */
@@ -215,7 +215,7 @@ export function structureChangesQuery(filter: StructureChangeFilter): string {
  * Рядок запиту CSV-експорту: ті самі фільтри, що в переліку, але БЕЗ `limit` і
  * `cursor` — експорт віддає всю видачу фільтра, а не сторінку.
  */
-export function structureExportQuery(filter: StructureChangeFilter): string {
+function structureExportQuery(filter: StructureChangeFilter): string {
   const params = new URLSearchParams(structureChangesQuery({ ...filter, cursor: null }));
   params.delete('limit');
 
@@ -223,7 +223,7 @@ export function structureExportQuery(filter: StructureChangeFilter): string {
 }
 
 /** Завантажений CSV: тіло й ім'я, яке запропонував сервер (або `null`). */
-export interface StructureExportFile {
+interface StructureExportFile {
   readonly blob: Blob;
   readonly fileName: string | null;
 }
@@ -280,6 +280,50 @@ export function fileNameOf(disposition: string | null): string | null {
   const safe = name.replace(/[\\/\p{Cc}]/gu, '_').trim();
 
   return safe.length > 0 ? safe : null;
+}
+
+/** Сторінка журналу подій безпеки (`aud.SecurityEvent`, ФВ-5.24). */
+export type SecurityEventPage = components['schemas']['PagedResultOfSecurityEventView'];
+
+/** Фільтр журналу подій безпеки; вікно **обов'язкове**, як у решти журналів. */
+interface SecurityEventFilter {
+  readonly from: string;
+  readonly to: string;
+  /** Тип події (`AccessDenied`, …). */
+  readonly eventType?: string | null;
+  /** Хто спричинив подію — `UserId`, не SID. */
+  readonly changedByUserId?: number | null;
+  readonly limit?: number;
+  readonly cursor?: string | null;
+}
+
+/** Рядок запиту журналу подій безпеки: вікно й курсор — як у журналі структури, тип події замість `entityType`. */
+export function securityEventsQuery(filter: SecurityEventFilter): string {
+  const params = new URLSearchParams(
+    structureChangesQuery({
+      from: filter.from,
+      to: filter.to,
+      changedByUserId: filter.changedByUserId ?? null,
+      limit: filter.limit ?? 100,
+      cursor: filter.cursor ?? null,
+    }),
+  );
+
+  if (filter.eventType !== null && filter.eventType !== undefined && filter.eventType.length > 0) {
+    params.set('eventType', filter.eventType);
+  }
+
+  return params.toString();
+}
+
+/** Сторінка журналу подій безпеки (ФВ-5.24: відмови в доступі, зміни прав). */
+export function useSecurityEvents(filter: SecurityEventFilter): UseQueryResult<SecurityEventPage> {
+  const query = securityEventsQuery(filter);
+
+  return useQuery({
+    queryKey: ['audit-security', query],
+    queryFn: () => apiFetch<SecurityEventPage>(`/api/v1/audit/security?${query}`),
+  });
 }
 
 /** Сторінка загального журналу структурних змін (`BE-16`). */

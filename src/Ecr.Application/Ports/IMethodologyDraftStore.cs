@@ -190,6 +190,17 @@ public interface IMethodologyDraftStore
     /// <param name="formula">Формула, дозволена <c>MethodologyVersion.RemoveFormula</c>.</param>
     public void Remove(MethodologyFormula formula);
 
+    /// <summary>Ставить у чергу оголошення імпорту; зберігає <c>IUnitOfWork</c>.</summary>
+    /// <param name="import">Імпорт версії-чернетки (імпорт пакета методологій).</param>
+    public void Add(MethodologyImport import);
+
+    /// <summary>Коди методологій, чиї формули видно версії через <c>!Name</c>.</summary>
+    /// <param name="methodologyVersionId">Версія.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Коди в порядку коду.</returns>
+    public Task<IReadOnlyList<string>> GetImportedMethodologyCodesAsync(
+        int methodologyVersionId, CancellationToken ct);
+
     /// <summary>
     /// Зберігає нову чернетку і переносить у неї **весь** вміст версії-джерела.
     /// </summary>

@@ -23,10 +23,12 @@ namespace Ecr.Worker.Child;
 /// <c>AddEcrCalculations</c>, <c>AddEcrApplication</c>, <c>AddEcrJobActor</c>.
 /// Веб-частина (автентифікація, Data Protection, HTTP-кореляція, метрики Api)
 /// сюди не йде: задачі перерахунку її не резолвлять — це доводить
-/// <c>ChildCompositionTests</c>. <c>ICorrelationIdAccessor</c> і
-/// <c>IJobStartMetrics</c> не реєструються навмисно: усі їхні споживачі беруть
-/// їх необов'язково (<c>GetService</c> / параметр <c>= null</c>), а кореляцію
-/// задачі воркер бере з рядка черги.
+/// <c>ChildCompositionTests</c>. <c>ICorrelationIdAccessor</c> не реєструється
+/// навмисно: його споживачі беруть його необов'язково, а кореляцію задачі воркер бере з
+/// рядка черги. ✎ 2026-10-01: <c>IJobStartMetrics</c> Api-адаптера (над <c>EcrMetrics</c>)
+/// тут і далі немає — веб-частина; натомість <see cref="ChildTelemetry"/> дає власний
+/// адаптер у тому ж Meter <c>Ecr</c> і OTLP-експорт метрик дочірнього (раніше вони
+/// емітились у нікуди).
 /// </remarks>
 internal static class ChildComposition
 {
@@ -84,6 +86,10 @@ internal static class ChildComposition
         // Задача перерахунку може поставити наступну — лише в чергу в базі:
         // Quartz у пам'яті цього процесу ніхто б не виконав.
         services.AddScoped<IBackgroundJobScheduler, DbBackgroundJobScheduler>();
+
+        // Метрики процесу задачі (ecr.job.failed, start_latency, кеші): без цього вони
+        // емітились у нікуди — див. ChildTelemetry.
+        services.AddChildTelemetry(configuration);
 
         services.AddSingleton(WorkerOptions(pool));
         services.AddHostedService<JobWorker>();

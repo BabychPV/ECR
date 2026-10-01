@@ -13,9 +13,9 @@ import { Alert, Button, Group } from '@mantine/core';
  * задана таблицею в одному місці (`ToneRole` нижче), а не розсипана по
  * викликах.
  */
-export type BannerTone = 'info' | 'warning' | 'danger' | 'success';
+type BannerTone = 'info' | 'warning' | 'danger' | 'success';
 
-export interface BannerAction {
+interface BannerAction {
   readonly label: string;
   readonly onClick: () => void;
 
@@ -27,7 +27,7 @@ export interface BannerAction {
   readonly variant?: 'default' | 'subtle' | 'filled' | undefined;
 }
 
-export interface BannerDismiss {
+interface BannerDismiss {
   /**
    * ⛔ Підпис ОБОВ'ЯЗКОВИЙ, і саме тому «закривання» — об'єкт, а не пара
    * незалежних пропсів. Mantine малює кнопку закриття самим значком; без
@@ -39,7 +39,7 @@ export interface BannerDismiss {
   readonly onDismiss: () => void;
 }
 
-export interface BannerProps {
+interface BannerProps {
   readonly tone?: BannerTone | undefined;
   readonly title?: string | undefined;
   readonly text?: ReactNode | undefined;

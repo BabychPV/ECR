@@ -244,6 +244,7 @@ describe("З'єднання: створення", () => {
       maxParallel: null,
       isActive: true,
       secretConfirmation: null,
+      confirmEndpointChange: false,
     });
 
     await waitFor(() => expect(listReads()).toBeGreaterThan(before));
@@ -378,6 +379,7 @@ describe("З'єднання: правка", () => {
       maxParallel: 4,
       isActive: false,
       secretConfirmation: null,
+      confirmEndpointChange: false,
     });
 
     // ⛔ `If-Match` — версія ПОКАЗАНОГО рядка: без неї сервер дає `422`, а
@@ -474,6 +476,87 @@ describe("З'єднання: правка", () => {
       endpoint: 'https://pi2.example.invalid/piwebapi',
       secretConfirmation: 'Bearer s3cr3t',
     });
+  });
+
+  it('SSRF: нова адреса з\'єднання без секрету (Windows-автентифікація) — потрібне явне підтвердження; PUT несе confirmEndpointChange', async () => {
+    respond();
+    show('/admin/sources?panel=PI-MAIN');
+
+    const scope = await openEdit();
+    const save = (): HTMLButtonElement =>
+      within(scope).getByRole('button', { name: /common\.save/ }) as HTMLButtonElement;
+
+    // Адреса та сама — підтвердження немає.
+    expect(within(scope).queryByLabelText(/sources\.confirmEndpointChange/)).toBeNull();
+
+    type(scope, /^.*sources\.endpoint/, 'https://pi2.example.invalid/piwebapi');
+
+    const confirm = field(scope, /sources\.confirmEndpointChange/);
+    expect(confirm.type).toBe('checkbox');
+    expect(confirm.checked).toBe(false);
+    expect(save().disabled).toBe(true);
+
+    // Адресу повернули — підтвердження зникло: нічого не змінюється.
+    type(scope, /^.*sources\.endpoint/, Connection.endpoint);
+    expect(within(scope).queryByLabelText(/sources\.confirmEndpointChange/)).toBeNull();
+    expect(save().disabled).toBe(false);
+
+    type(scope, /^.*sources\.endpoint/, 'https://pi2.example.invalid/piwebapi');
+    fireEvent.click(field(scope, /sources\.confirmEndpointChange/));
+    expect(save().disabled).toBe(false);
+
+    fireEvent.click(save());
+    await waitFor(() => expect(changes()).toHaveLength(1));
+
+    expect(changes()[0]?.body).toMatchObject({
+      endpoint: 'https://pi2.example.invalid/piwebapi',
+      confirmEndpointChange: true,
+    });
+  });
+
+  it('SSRF: 422 dataSourceEndpointChangeUnconfirmed — підтвердження відкриває відмова сервера, повтор несе confirmEndpointChange', async () => {
+    const puts: Call[] = [];
+
+    respond({
+      list: () => [{ ...Connection, hasSecret: true }],
+      change: (call) => {
+        puts.push(call);
+
+        return puts.length === 1
+          ? json(
+              {
+                title: 'Invalid request',
+                status: 422,
+                errorCode: 'ECR-REQ-0422',
+                correlationId: 'c-422',
+                messageKey: 'err.ECR-REQ-0422.dataSourceEndpointChangeUnconfirmed',
+                field: 'confirmEndpointChange',
+                code: 'PI-MAIN',
+              },
+              422,
+            )
+          : json(Connection);
+      },
+    });
+    show('/admin/sources?panel=PI-MAIN');
+
+    const scope = await openEdit();
+
+    // Клієнт бачить hasSecret і не знає, що секрет — «Negotiate»: поле відкриває сервер.
+    type(scope, /sources\.catalog/, 'OtherAF');
+    fireEvent.click(within(scope).getByRole('button', { name: /common\.save/ }));
+
+    const confirm = await waitFor(() => field(scope, /sources\.confirmEndpointChange/));
+    await waitFor(() =>
+      expect(scope.textContent).toContain('err.ECR-REQ-0422.dataSourceEndpointChangeUnconfirmed'),
+    );
+    expect(puts[0]?.body).toMatchObject({ confirmEndpointChange: false });
+
+    fireEvent.click(confirm);
+    fireEvent.click(within(scope).getByRole('button', { name: /common\.save/ }));
+
+    await waitFor(() => expect(puts).toHaveLength(2));
+    expect(puts[1]?.body).toMatchObject({ confirmEndpointChange: true });
   });
 
   it('S3: правка без зміни адреси з\'єднання із секретом — поля немає, секрет не шлеться', async () => {

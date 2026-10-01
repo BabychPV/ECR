@@ -143,7 +143,16 @@ internal static partial class WorkerProgram
         }
 
         using var host = builder.Build();
-        await host.RunAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await host.RunAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            // Дочірній короткоживучий: без скидання буфера метрики останньої задачі зникли б.
+            Child.ChildTelemetry.Flush(host.Services);
+        }
+
         return Environment.ExitCode;
     }
 

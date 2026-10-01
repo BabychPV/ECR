@@ -22,7 +22,7 @@ export interface CellEdit {
  * з'їдало б усю глибину історії, і Ctrl+Z відкочував би вставку по комірці —
  * тобто робив би саме те, чого користувач не просив.
  */
-export interface HistoryStep {
+interface HistoryStep {
   /** Що саме сталося; показується користувачеві. */
   label: string;
   edits: CellEdit[];

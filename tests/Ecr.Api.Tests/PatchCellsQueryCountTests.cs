@@ -69,8 +69,10 @@ public sealed class PatchCellsQueryCountTests(SqlServerFixture sql)
     /// контролер). 26 — п. 3 (стан рядків одним <c>GetRowsAsync</c>). 25 —
     /// п. 4 (нові версії з <c>OUTPUT inserted.RowVersion</c>, без читання після
     /// коміту). 22 — п. 5 (контекст доступу одним запитом замість чотирьох).
+    /// 23 — ФВ-5.20a: один індексований пошук Reopen-стану аркуша для
+    /// <c>IsLateEdit</c> (<c>D-70</c> б); свідомий +1, не дрейф.
     /// </remarks>
-    private const int MaxCommands = 22;
+    private const int MaxCommands = 23;
 
     private const string Password = "Api-Patch-Ratchet-2026!";
 
@@ -81,7 +83,7 @@ public sealed class PatchCellsQueryCountTests(SqlServerFixture sql)
     /// <summary>Скільки теплих записів міряється.</summary>
     private const int MeasuredRounds = 3;
 
-    private static readonly TimeZoneInfo SiteZone = SiteTimeZone.Create("Asia/Almaty").ToTimeZoneInfo();
+    private static readonly TimeZoneInfo SiteZone = SiteTimeZone.Create("Asia/Atyrau").ToTimeZoneInfo();
 
     private static readonly AsyncLocal<StrongBox<bool>?> Measuring = new();
 

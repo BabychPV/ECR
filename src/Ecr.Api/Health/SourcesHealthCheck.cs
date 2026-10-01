@@ -1,6 +1,7 @@
 using System.Globalization;
 using Ecr.Application.Common;
 using Ecr.Application.Ports;
+using Ecr.Domain.Enums;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 
 namespace Ecr.Api.Health;
@@ -21,7 +22,11 @@ namespace Ecr.Api.Health;
 /// ніколи не змінює відповіді, не перевіряє нічого.
 /// </remarks>
 public sealed class SourcesHealthCheck(
-    ICollectionStore? sources, IUiStringCatalog catalog, ICurrentUser currentUser) : IHealthCheck
+    ICollectionStore? sources,
+    IUiStringCatalog catalog,
+    ICurrentUser currentUser,
+    ISecretProvider? secrets = null,
+    IEndpointNetwork? network = null) : IHealthCheck
 {
     /// <inheritdoc />
     public async Task<HealthCheckResult> CheckHealthAsync(
@@ -60,13 +65,29 @@ public sealed class SourcesHealthCheck(
         // мовчить, і мовчання приймають за спокій.
         var neverRan = active.Count(e => e.LastRun is null);
 
+        // Negotiate-джерело без PiWebApi:AllowedHosts: службові облікові дані
+        // підуть на будь-який хост, не заборонений блок-листом (SSRF).
+        // ⚠ Рахується ДО гілок збою/прогалин: інакше свіже Negotiate-джерело
+        // (ще не запускалося = «прогалина») ховало б цю причину за coverage gap.
+        var openNegotiate = await CountNegotiateWithoutAllowlistAsync(active, cancellationToken).ConfigureAwait(false);
+        var negotiateSuffix = string.Empty;
+
+        if (openNegotiate > 0)
+        {
+            negotiateSuffix = " " + await Text(
+                "health.sources.negotiateNoAllowlist",
+                "Sources with Windows authentication and no allowed-hosts list (PiWebApi:AllowedHosts): {count}.",
+                Param("count", openNegotiate.ToString(CultureInfo.InvariantCulture)), cancellationToken)
+                .ConfigureAwait(false);
+        }
+
         if (failed > 0)
         {
             var failedText = await Text(
                 "health.sources.failedCount", "Sources with a failed last run: {count}.",
                 Param("count", failed.ToString(CultureInfo.InvariantCulture)), cancellationToken)
                 .ConfigureAwait(false);
-            return HealthCheckResult.Unhealthy(failedText, data: Data(active.Count, failed, withGaps + neverRan));
+            return HealthCheckResult.Unhealthy(failedText + negotiateSuffix, data: Data(active.Count, failed, withGaps + neverRan));
         }
 
         if (withGaps + neverRan > 0)
@@ -75,13 +96,52 @@ public sealed class SourcesHealthCheck(
                 "health.sources.gapsCount", "Sources with a coverage gap: {count}.",
                 Param("count", (withGaps + neverRan).ToString(CultureInfo.InvariantCulture)), cancellationToken)
                 .ConfigureAwait(false);
-            return HealthCheckResult.Degraded(gapsText, data: Data(active.Count, 0, withGaps + neverRan));
+            return HealthCheckResult.Degraded(gapsText + negotiateSuffix, data: Data(active.Count, 0, withGaps + neverRan));
+        }
+
+        if (openNegotiate > 0)
+        {
+            return HealthCheckResult.Degraded(negotiateSuffix.TrimStart(), data: Data(active.Count, 0, 0));
         }
 
         var allCollected = await Text(
             "health.sources.allCollectedNoGaps", "All active sources are collected with no gaps.",
             null, cancellationToken).ConfigureAwait(false);
         return HealthCheckResult.Healthy(allCollected, data: Data(active.Count, 0, 0));
+    }
+
+    private async Task<int> CountNegotiateWithoutAllowlistAsync(
+        IReadOnlyList<SourceEntityStatus> active, CancellationToken ct)
+    {
+        if (sources is null || secrets is null || network?.AllowedHosts is { Count: > 0 })
+        {
+            return 0;
+        }
+
+        var count = 0;
+
+        foreach (var id in active
+                     .Where(e => string.Equals(e.Transport, nameof(ExternalTransport.PiWebApi), StringComparison.OrdinalIgnoreCase))
+                     .Select(e => e.DataSourceId)
+                     .Distinct())
+        {
+            var source = await sources.FindDataSourceAsync(id, ct).ConfigureAwait(false);
+
+            if (source is null)
+            {
+                continue;
+            }
+
+            var bound = secrets.Find(source.SecretName);
+
+            if (string.IsNullOrWhiteSpace(bound)
+                || string.Equals(bound.Trim(), "Negotiate", StringComparison.OrdinalIgnoreCase))
+            {
+                count++;
+            }
+        }
+
+        return count;
     }
 
     private Task<string> Text(

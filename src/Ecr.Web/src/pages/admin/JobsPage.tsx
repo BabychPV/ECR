@@ -36,6 +36,7 @@ import { humanizeJobId, jobKindLabel } from '@/features/workflow/jobLabel';
 import { t } from '@/shared/i18n';
 import { generatePath } from 'react-router-dom';
 import { routes } from '@/app/routes';
+import { badgeStateOf } from '@/features/workflow/jobFollow';
 
 /** Адреса документа задачі — з реєстру маршрутів (`JobFacts` про маршрути не знає). */
 function documentHrefOf(id: number): string {
@@ -56,6 +57,40 @@ const CancellableStates: readonly string[] = ['Queued', 'Running'];
 /** Чи можна ще просити задачу зупинитися. */
 function isCancellable(state: string): boolean {
   return CancellableStates.includes(state);
+}
+
+/**
+ * Похідний стан батька-розкладу (P4): «розкладено N, виконано M з N, помилок K».
+ *
+ * ⛔ Збережений стан такого батька — `Succeeded`, хоча дочірні ще не пораховані;
+ * без цього рядка оператор читав би «виконано» замість «ще не пораховано».
+ */
+function FanOutSummary({ status }: { readonly status: JobStatus }): JSX.Element | null {
+  const fan = status.fanOut;
+
+  if (fan === null || fan === undefined) return null;
+
+  const label =
+    status.effectiveState === 'FannedOut'
+      ? t('jobs.fanOutPending')
+      : status.effectiveState === 'SucceededWithErrors'
+        ? t('jobs.fanOutDoneWithErrors', { failed: fan.failed })
+        : t('jobs.fanOutDone');
+
+  return (
+    <Stack gap="xs" data-job-fanout={status.effectiveState ?? ''}>
+      <Text size="sm" fw={600}>
+        {label}
+      </Text>
+      <Text size="xs" c="dimmed">
+        {t('jobs.fanOutProgress', {
+          total: fan.total,
+          done: fan.succeeded,
+          failed: fan.failed,
+        })}
+      </Text>
+    </Stack>
+  );
 }
 
 /** Як часто опитувати стан задачі, поки вона виконується. */
@@ -85,7 +120,10 @@ export function JobsPage(): JSX.Element {
     refetchInterval: (query) => {
       const state = query.state.data?.state;
 
-      return state === 'Queued' || state === 'Running' ? PollMs : false;
+      // ⚠ Батько-розклад (P4) уже `Succeeded`, але дочірні ще рахуються — опитування триває.
+      return state === 'Queued' || state === 'Running' || query.state.data?.effectiveState === 'FannedOut'
+        ? PollMs
+        : false;
     },
     retry: false,
   });
@@ -176,7 +214,8 @@ export function JobsPage(): JSX.Element {
                   ідентифікатора вже немає — `QuartzJobScheduler.cs`) малювалися
                   тим самим кольором, що й `Queued`: відмова відповісти про
                   задачу виглядала як задача в черзі. Набір дає їм `warning`. */}
-              <StatusBadge kind="job" state={status.state} />
+              {/* ⛔ Похідний стан розкладу: батько `Succeeded`, коли документи ще рахуються. */}
+              <StatusBadge kind="job" state={badgeStateOf(status)} />
             </Group>
 
             {/* ⚠ BE-08: спроба, момент постановки й документ задачі. Картка —
@@ -194,6 +233,8 @@ export function JobsPage(): JSX.Element {
             <Progress value={status.percent} animated={status.state === 'Running'} />
 
             {status.message !== null && <Text size="sm">{status.message}</Text>}
+
+            <FanOutSummary status={status} />
 
             <JobFailure
               state={status.state}

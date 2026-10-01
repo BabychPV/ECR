@@ -58,6 +58,7 @@ public sealed class JobWorkerTests(SqlServerFixture sql) : DbJobQueueTestsBase(s
     }
 
     [Fact]
+    [Trait("Requirement", "ФВ-12.4a")]
     public async Task Транзієнтний_провал_повертає_в_чергу_з_затримкою_і_після_чотирьох_спроб_Failed()
     {
         var probe = new WorkerProbe();
@@ -136,6 +137,7 @@ public sealed class JobWorkerTests(SqlServerFixture sql) : DbJobQueueTestsBase(s
     }
 
     [Fact]
+    [Trait("Requirement", "ФВ-12.3")]
     public async Task Два_хости_по_50_задач_кожна_виконана_рівно_раз_таблиця_свідок()
     {
         var table = $"dbo.JobWitness_{Guid.NewGuid():N}";

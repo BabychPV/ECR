@@ -2162,6 +2162,17 @@ public interface ICalculationRunner
 }
 ```
 
+#### `ICalculationTrigger`
+
+Автоперерахунок документа за період після запису без людини (HSE301 A4, V-5 → `D-174`). Ставить `IRecalculationJob` з ціллю `doc{id}-p{period}` через `EnqueueCoalescedAsync` (без витіснення); закритий період і поданий аркуш — нуль задач. Викликати один раз на прогін, не в циклі.
+
+```csharp
+public interface ICalculationTrigger
+{
+    public Task<string?> RequestAsync(long documentId, PeriodKey periodKey, CancellationToken ct);
+}
+```
+
 #### `ICellPatcher`
 
 Запис комірок від імені інтеграції (D-118).
@@ -2185,6 +2196,31 @@ public interface ICollectionRunner
 {
     public interface ICollectionRunner
     public Task RunAsync(
+}
+```
+
+#### `ISourceEventSyncJob`
+
+Маркер задачі синхронізації подій джерела (PI Event Frames) у рядки динамічних таблиць (HSE301 A5b, FEATURE-HSE301-VIEW §4.7.4). Ставить її `CollectionJob` для сутності-шаблону з активним `SourceEventMap` — `EnqueueCoalescedAsync` на ціль `SourceEventSyncTarget.Of(sourceEntityId)` (`source-events-e{id}`): сплеск постановок зливається, виконувана не переривається. Читає `ReadEventsAsync`, пише рядки `EF-…` через `ICellPatcher.ApplyIntegrationRowsAsync`, веде `ext.SourceEventLink`.
+
+```csharp
+public interface ISourceEventSyncJob : IBackgroundJob;
+
+public sealed record SourceEventSyncRequest(int SourceEntityId, DateTime? FromUtc = null, DateTime? ToUtc = null);
+```
+
+#### `IRowWindowFetchJob`, `IRowWindowTrigger`
+
+Підтягування значень PI за вікном рядка (HSE301 A1, FEATURE-HSE301-VIEW §4.4). Хук `IRowWindowTrigger` — одна точка виклику в `PatchCellsHandler` після запису: коли правка зачепила колонку Початку/Кінця/селектора активної прив'язки (`ext.RowWindowMap`), ставить `IRowWindowFetchJob` — `EnqueueCoalescedAsync` (не `EnqueueExclusiveAsync`) на ціль `RowWindowFetchTarget.Of(tableInstanceId)` (`row-windows-i{id}`). Задача працює на весь екземпляр таблиці й сама відбирає рядки, вікно яких змінилося чи ще не дочитане (тому payload не несе ключів рядків — злиття постановок нічого не губить). Вікно береться з комірок у часі проєкту й переводиться в UTC лише для запиту; запис — через `ICellPatcher.ApplyIntegrationAsync` (ручна правка → `KeptManual`); провенанс — `ext.RowWindowValue`; після запису — один `ICalculationTrigger`. Щогодинний `RowWindowRefetchJob` (конкретний клас, як `PeriodStateJob`) ставить ту саму задачу на екземпляри з неповними чи недочитаними значеннями. `IRowWindowColumnIndex` — знімок колонок вікна (TTL 60 с), щоб хук не додавав звернень до бази на кожен запис.
+
+```csharp
+public interface IRowWindowFetchJob : IBackgroundJob;
+
+public sealed record RowWindowFetchRequest(long TableInstanceId, int PeriodKey);
+
+public interface IRowWindowTrigger
+{
+    public Task RowsChangedAsync(RowWindowChange change, CancellationToken ct);
 }
 ```
 
@@ -2725,6 +2761,24 @@ public interface IRegistryRowsQuery
         IReadOnlyCollection<int> registryFieldDefIds, DateTime? asOfUtc, CancellationToken ct);
     public Task<RegistryRowsSlice> ReadRowsAsync(
         IReadOnlyCollection<long> registryEntryIds, DateTime? asOfUtc, CancellationToken ct);
+    public Task<RegistryEntryHistorySlice> ReadEntryHistoryAsync(long registryEntryId, CancellationToken ct);
+}
+```
+
+✎ 2026-09-30 (RT-15): `ReadEntryHistoryAsync` — усі системні версії запису та значень
+(`FOR SYSTEM_TIME ALL`) без версій нульової тривалості, імена авторів і поточні цілі `Lookup`;
+порівняння версій робить обробник.
+
+#### `IRegistryWorkbookWriter`
+
+Книга експорту довідника (RT-16): один плаский аркуш, заголовок — коди колонок. Число — числом лише
+тоді, коли `double` тримає його без втрат (D-30), інакше текстом; дата — датою `yyyy-mm-dd`. Потік —
+тимчасовий файл, закриває викликач.
+
+```csharp
+public interface IRegistryWorkbookWriter
+{
+    public Task<Stream> WriteAsync(RegistryWorkbook workbook, CancellationToken ct);
 }
 ```
 
@@ -2745,6 +2799,49 @@ public interface IRegistrySnapshotLoader
 }
 ```
 
+#### `IRegistryUseStore`
+
+Ребра `cfg.RegistryUse` формул версії методології (`SourceKind = 1`, RT-23b,
+FEATURE-REGISTRY-TABLES §5.8): публікація версії переписує їх цілком — прибирає всі ребра
+версії й ставить у чергу нові; зберігає `IUnitOfWork` публікації тим самим `SaveChanges`.
+Правила довідника (`SourceKind = 2`) — `IRegistryStore.ReplaceRuleUsesAsync`.
+
+```csharp
+public interface IRegistryUseStore
+{
+    public Task ReplaceMethodologyUsesAsync(
+        int methodologyVersionId, IReadOnlyCollection<RegistryUse> uses, CancellationToken ct);
+}
+```
+
+#### `IRegistryImpactStore`
+
+«Які документи зачепила правка довідника» (RT-25, FEATURE-REGISTRY-TABLES §5.10): документи
+ВІДКРИТИХ періодів (`Open`/`Grace`), чий актуальний прогін дав числа за версією методології, що
+читає довідник (`cfg.RegistryUse`, `SourceKind = 1`). Закриті періоди не повертаються (`D-39`).
+
+```csharp
+public interface IRegistryImpactStore
+{
+    public Task<IReadOnlyList<RegistryImpactRow>> ListImpactedAsync(
+        int registryDefId, int take, CancellationToken ct);
+}
+```
+
+#### `IRegistryImpactRecalculationJob`
+
+Маркер батьківської задачі «перерахувати документи, зачеплені правкою довідника» (RT-25, FEATURE-REGISTRY-TABLES §5.10).
+Ставить її `POST /registries/{code}/recalculate-impacted` — `EnqueueCoalescedAsync` на ціль
+`RegistryImpactRecalculationTarget.Of(registryDefId, documentIds)` (`registry-impact-r{id}-{відбиток набору}`):
+однакові набори зливаються, різні — ні. Задача звіряє набір з поточним `IRegistryImpactStore` (закритий період випадає) і
+ставить `ICalculationTrigger.RequestAsync` на кожен документ × період — тож «готово» означає «поставлено в чергу».
+`EnqueueExclusive` заборонено: воно витісняє виконуваний перерахунок гарячого документа.
+
+```csharp
+public interface IRegistryImpactRecalculationJob : IBackgroundJob;
+
+public sealed record RegistryImpactRecalculationRequest(int RegistryDefId, IReadOnlyList<long> DocumentIds, string Reason);
+```
 #### `IReportDefinitionStore`
 
 Описи звітів (rpt.ReportDef) та їхні версії.
@@ -2769,6 +2866,44 @@ public interface IReportSnapshotBuilder
     public Task MarkSubmittedAsync(long snapshotId, int userId, CancellationToken ct);
     public Task<SnapshotStatus> RefreshStatusAsync(long snapshotId, CancellationToken ct);
     public Task<IReadOnlyList<ReportSnapshotSummary>> ListAsync(
+}
+```
+
+#### `IReportViewGenerator`
+
+Шар сирих даних документів для SSRS (ФВ-10.2, ФВ-10.4; рішення людини
+2026-09-30: SSRS отримує сирі дані й будує звіти сам). Дві частини в
+`05-rpt-views.sql`: статична «довга» `rpt.v_DocumentCells` (комірка = рядок) і
+«широкі» `rpt.v_<Шаблон>_<Аркуш>_<Таблиця>_v<Версія>` — по одній на таблицю
+опублікованої версії шаблону, колонка = код колонки шаблону, службові
+колонки з `_`. Широкі створює процедура `rpt.usp_GenerateTemplateViews` від
+імені власника; застосунок її лише викликає (D-14, D-66) — при публікації
+версії шаблону (ПІСЛЯ коміту публікації, «найкращим зусиллям»: збій публікацію
+не відкочує, а лягає в журнал і в `IReportViewStatus`) і на старті після seed.
+Ідемпотентна: незмінну вʼюху не чіпає; нова версія = нові вʼюхи, старі
+лишаються (D-53). Читання — роль бази `rpt_reader` (SELECT на схему `rpt`).
+
+```csharp
+public interface IReportViewGenerator
+{
+    public Task GenerateAsync(int? templateVersionId, CancellationToken ct);
+}
+```
+
+#### `IReportViewStatus`
+
+Останній стан генерації вʼюх для `/health/ready` (картка `reportviews`,
+лише `Degraded`). У памʼяті (singleton): старт перегенеровує вʼюхи по всіх
+версіях, тож після рестарту стан відновлюється без таблиці й міграції.
+Збій: `50422` (таблиця > 250 колонок), `50409` (зіткнення імен вʼюх);
+повтор — старт застосунку або `EXEC rpt.usp_GenerateTemplateViews`.
+
+```csharp
+public interface IReportViewStatus
+{
+    public void Failed(ReportViewFailure failure);
+    public void Succeeded(int? templateVersionId);
+    public IReadOnlyList<ReportViewFailure> Snapshot();
 }
 ```
 
@@ -2816,6 +2951,21 @@ public interface ISecretProvider
 }
 ```
 
+#### `IEndpointNetwork`
+
+Мережеві відомості для політики адреси джерела PI Web API
+(`DataSourceEndpointPolicy`, захист від SSRF): allowlist хостів з
+`PiWebApi:AllowedHosts` (порожній — без обмеження, діє лише блок-лист
+loopback/link-local/metadata/unspecified) і розв'язання імені в A/AAAA.
+
+```csharp
+public interface IEndpointNetwork
+{
+    public IReadOnlyList<string> AllowedHosts { get; }
+    public Task<IReadOnlyList<IPAddress>> ResolveAsync(string host, CancellationToken ct);
+}
+```
+
 #### `ISnapshotWorkbookWriter`
 
 Складає книгу `.xlsx` зі зрізу звітності (`R7`, `D-52a`). Окремий порт, а не
@@ -2842,6 +2992,18 @@ public interface IStyleCatalog
 }
 ```
 
+#### `IConditionalFormatStore`
+
+Правила умовного форматування версії шаблону (cfg.ConditionalFormatRule, ФВ-2.6/2.7):
+читання набору й заміна набору цілком (коміт — спільним `IUnitOfWork`).
+
+```csharp
+public interface IConditionalFormatStore
+{
+    public Task<IReadOnlyList<ConditionalFormatRule>> GetAsync(int templateVersionId, CancellationToken ct);
+    public Task ReplaceAsync(int templateVersionId, IReadOnlyList<ConditionalFormatRule> rules, CancellationToken ct);
+}
+```
 #### `ITableFillStore`
 
 Заповненість таблиць документа за період (`BE-10`): скільки рядків
@@ -2973,6 +3135,66 @@ public interface ISourceCatalogReader
 > — та сама конвенція, що в каталозі: `503 ECR-INT-0503`
 > (`probeTimeout`/`probeUnavailable`), відмова автентифікації — `502 ECR-INT-0502`.
 
+#### `ISourceEventMapStore` — API подій джерела (HSE301 A6)
+
+Події джерела (PI Event Frames) → рядки динамічних таблиць
+(`FEATURE-HSE301-VIEW` §4.7). Порт обслуговує налаштування мапінгу подій
+(`ext.SourceEventMap`/`SourceEventFieldMap`/`SourceEventValueMap`) і читання
+таблиці подій (`ext.SourceEventLink`); саму синхронізацію робить
+`SourceEventSyncJob` напряму на `EcrDbContext`.
+
+| Маршрут | Право | Що робить |
+|---|---|---|
+| `GET /data-sources/{id}/event-templates` | `Integration.View`/`Manage` | каталог шаблонів подій і атрибутів (`DiscoverEventTemplatesAsync`); без запиту каталогу — `422 ECR-INT-0422` (`eventQueryNotConfigured`, `queryKindNotConfigured`, `queryKindNotSupported`); `503 ECR-INT-0503` (`catalogTimeout`/`catalogUnavailable`) |
+| `POST /data-sources/{id}/probe-events` | `Integration.Manage` | пробне читання подій шаблону, **нічого не пише**; тіло `{ template, fromUtc?, toUtc?, attributes?, maxEvents? }`, типово 30 днів і 20 подій, до 92 днів і 100; `422 err.ECR-REQ-0422.probeEventsInvalid`, `503 probeTimeout/probeUnavailable` |
+| `GET /sources/{id}/source-events` | `Read` на документ мапінгу | таблиця подій: стан `Synced`/`Open`/`Missing`/`PeriodClosed`/`PeriodChanged`/`PeriodNotOpen`/`Unmapped`/`RowLimit`, час у поясі проєкту й UTC, ключ рядка `EF-…`, документ і період, `keptManual`, `unmapped`; фільтри `mapId`, `documentId`, `status`(×N), `fromUtc`, `toUtc`, `periodKey`; курсор, `limit` 1–500. Документ, якого користувач не бачить, не існує: його події поза відповіддю й `totalCount`, `mapId` невидимого — `404` |
+| `POST /sources/{id}/source-events/sync` | `Integration.Manage` | «Отримати з PI зараз»: `EnqueueCoalescedAsync<ISourceEventSyncJob>`, ціль `source-events-e{id}`, `202 { jobId }`; без активного мапінгу — `422 err.ECR-INT-0422.eventSyncNoMap` |
+| `GET`/`POST source-event-maps`, `GET`/`PUT`/`DELETE source-event-maps/{id}` | `Integration.View`/`Manage` + грант `Manage` на проєкт документа | CRUD мапінгу; `PUT` — повна заміна (режим об'єму, звуження, поля з відповідностями значень, `isActive` — пауза); слід у `aud.StructureChange` (`ext.SourceEventMap`); `DELETE` зі зв'язками — `409 err.ECR-INT-0409.eventMapHasLinks` |
+
+```csharp
+public interface ISourceEventMapStore
+{
+    public Task<EventMapTableInfo?> FindTargetTableAsync(int tableDefId, CancellationToken ct);
+    public Task<EventMapDocumentInfo?> FindDocumentAsync(long documentId, CancellationToken ct);
+    public Task<SourceEventMap?> FindMapAsync(int id, CancellationToken ct);
+    public Task<IReadOnlyList<SourceEventMap>> ListMapsAsync(int? sourceEntityId, CancellationToken ct);
+    public void ReleaseFields(SourceEventMap map);            // до ReplaceFields: усі FK — Restrict
+    public Task<SourceEventLinkPage> ReadLinksAsync(SourceEventLinkFilter filter, string? cursor, int limit, CancellationToken ct);
+    // … Add/Save/Remove/HasActiveMap/CountLinks — див. src/Ecr.Application/Ports/ISourceEventMapStore.cs
+}
+```
+
+> ⛔ Усі зовнішні ключі моделі — `Restrict` (без каскаду в базі й у EF), тому заміна
+> полів мапінгу спершу позначає старі поля й відповідності до видалення
+> (`ReleaseFields`), а вже потім `SourceEventMap.ReplaceFields` очищає колекцію.
+
+#### `IRowWindowMapStore` — прив'язки вікна рядка (HSE301 A1)
+
+Налаштування «атрибут PI → колонка, вікно = рядок» (`FEATURE-HSE301-VIEW` §4.4):
+`ext.RowWindowMap` із джерелами `ext.RowWindowSource`. Підтягування значень робить
+`RowWindowFetchJob`; порт обслуговує лише CRUD.
+
+| Маршрут | Право | Що робить |
+|---|---|---|
+| `GET row-window-maps?tableDefId=&sourceEntityId=`, `GET row-window-maps/{id}` | `Integration.View`/`Manage` | перелік (обидва фільтри необов'язкові; `sourceEntityId` — прив'язки, що мають джерело на цій сутності) і одна прив'язка з кодами колонок, джерелами й `rowVersion` |
+| `POST row-window-maps` | `Integration.Manage` + грант `Manage` на кожен проєкт, що використовує колонку-ціль | `201`; `404 ECR-INT-0405` (колонки), `ECR-UOM-0404` (одиниці), `ECR-INT-0404` (сутності джерела); `422 ECR-INT-0422` (`windowColumnsNotDate`, `targetNotDecimal`, `selectorNotInTable`, `rowWindowTargetNotInTable`, `rowWindowPolicyOutOfRange`, `rowWindowSelectorWithoutColumn`), `ECR-REQ-0422` (`rowWindowSourceInvalid`, `rowWindowSummaryUnknown`); `409 ECR-INT-0409` (`rowWindowTargetTaken`, `rowWindowSelectorTaken`) |
+| `PUT row-window-maps/{id}` | те саме | повна заміна вікна, селектора, згортки, порогів, `isActive` (пауза) і джерел; таблиця й колонка-ціль — ключ і не змінюються; `rowVersion` не збігається — `409 err.ECR-INT-0409.rowWindowConcurrency` |
+| `DELETE row-window-maps/{id}` | те саме | `204`; із записами провенансу (`ext.RowWindowValue`) — `409 err.ECR-INT-0409.rowWindowMapHasValues`, вихід — пауза |
+
+Слід кожної зміни — у `aud.StructureChange` (`ext.RowWindowMap`, `ФВ-12.10`).
+
+```csharp
+public interface IRowWindowMapStore
+{
+    public Task<RowWindowMap?> FindMapAsync(int id, CancellationToken ct);
+    public Task<IReadOnlyList<RowWindowMap>> ListMapsAsync(int? tableDefId, int? sourceEntityId, CancellationToken ct);
+    public Task<bool> TargetTakenAsync(int tableDefId, int targetColumnDefId, CancellationToken ct);
+    public void ReleaseSources(RowWindowMap map);             // до ClearSources: FK_RWS_Map обов'язковий
+    public Task<int> CountValuesAsync(int mapId, CancellationToken ct);
+    // … FindColumns/Add/Save/Remove — див. src/Ecr.Application/Ports/IRowWindowMapStore.cs
+}
+```
+
 > ⛔ **Джерела даних — без сховища секретів** (`BE-21`, пряме рішення людини на
 > `Q15-06`): «Windows-автентифікація службового облікового запису; секретів у
 > застосунку немає». Тому в `SaveDataSourceRequest` поля секрету НЕМАЄ і
@@ -3099,6 +3321,12 @@ public interface IRecalculationApprovalStore
 }
 ```
 
+#### `IEffectiveAccessStore`
+
+Джерела доступу до ресурсу (довідник, проєкт) для розрізу «ресурс → рівень → грант ролі» (`ФВ-6.16`,
+`D-220`): `ResourceExistsAsync` і `ListSourcesAsync` (призначення людини плюс те, що їхні ролі кажуть
+про ресурс). Нічого не вирішує — рівень дає `AccessProfile`.
+
 #### `IUserStore`
 
 Доступ до облікових записів для use-cases безпеки.
@@ -3141,6 +3369,20 @@ public interface IValidationResultStore
 #### `IDocumentVersionStore`
 
 Версії документа для порівняння (ФВ-5.22): зрізи подання `calc.SubmissionSnapshot`, поточні комірки в тій самій формі, підписи рядків (зокрема видалених) і коди колонок. Сигнатури — у `src/Ecr.Application/Ports/IDocumentVersionStore.cs`.
+
+#### `IDocumentVersionMigrationStore`
+
+Перенос документів на нову версію шаблону (ФВ-7.5, `GET`/`POST /api/v1/documents/{id}/migrate-version`,
+право `Template.Edit`). Версія шаблону живе на проєкті, тому переносяться всі документи
+проєкту документа однією транзакцією: рядок проєкту під `UPDLOCK`, план перераховується
+під блоком (`VersionMigrationPlanner`, відповідність лише за кодами), далі один пакет SQL
+переносить комірки, рядки, екземпляри таблиць, шапку, індекс пошуку, склад аркушів і
+стани погодження й перемикає `Project.TemplateVersionId`. `dryRun = true` лише рахує звіт.
+Режим `Safe` відмовляє, якщо зникло б чи змінило тлумачення бодай одне введене значення,
+`Presentation` — на будь-яку структурну різницю: `422 ECR-SCHM-0422`. Подані чи
+затверджені аркуші або архівований проєкт — `409 ECR-DOC-0409`. Ціль не опублікована,
+з іншого шаблону чи та сама — `422 ECR-TMPL-0422`. Подія — `aud.SecurityEvent`
+(`DocumentVersionMigrated`). Сигнатури — у `src/Ecr.Application/Ports/IDocumentVersionMigrationStore.cs`.
 
 #### `IWorkflowStore`
 
@@ -3280,7 +3522,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `ECR-USR-0422` | 422 | дані облікового запису не проходять перевірку: алерти без пошти, доменний запис без SID, локальний без разового пароля |
 | `ECR-USR-0409` | 409 | обліковий запис із таким іменем уже існує |
 | `ECR-TMPL-0404` | 404 | шаблон або версія не знайдені |
-| `ECR-TMPL-0409` | 409 | спроба структурної зміни в опублікованій версії (ФВ-7.1) |
+| `ECR-TMPL-0409` | 409 | спроба структурної зміни в опублікованій версії (ФВ-7.1), **або** правила умовного форматування версії змінили між читанням і записом — `If-Match` не збігся з `ETag` набору (`condFormatChanged`, актуальна версія в `details.version`; `PUT …/conditional-formats`, ФВ-2.7) |
 | `ECR-TMPL-0422` | 422 | публікація не проходить валідацію цілісності |
 | `ECR-TMPL-4221` | 422 | цикл у графі формул |
 | `ECR-TMPL-4222` | 422 | посилання на неіснуючий аркуш/таблицю/колонку/рядок |
@@ -3295,7 +3537,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `ECR-REQ-0422` | 422 | параметр самого запиту поза межами: розмір сторінки, ширина або напрям вікна аудиту |
 | `ECR-REQ-0429` | 429 | КОРИСТУВАЧ вичерпав межу частоти запитів (пошук `GET /api/v1/search`, типово 30 за 10 с, `Security:RateLimit:SearchPermit`/`SearchWindowSeconds`); у відповіді `Retry-After` |
 | `ECR-SCHM-0409` | 409 | `Breaking`-зміна у версії з документами (ФВ-7.4) |
-| `ECR-SCHM-0422` | 422 | `Guarded`-зміна без стратегії міграції |
+| `ECR-SCHM-0422` | 422 | `Guarded`-зміна без стратегії міграції; режим переносу документа на нову версію (ФВ-7.5) не має стратегії для змін |
 | `ECR-DOC-0404` | 404 | документ не знайдено |
 | `ECR-DOC-0409` | 409 | документ подано; потрібен `Reopen` (D-67) |
 | `ECR-DOC-4091` | 409 | аркуш зайнятий поданням або правкою (блокування аркуша × періоду не взято вчасно); повторити запит за мить |
@@ -3311,12 +3553,12 @@ public sealed class NotFoundException(string errorCode, string message)
 | `ECR-HDR-0422` | 422 | значення поля шапки документа не відповідає типу чи обов'язковості |
 | `ECR-PRD-0409` | 409 | період закрито; **або** спроба змінити `TimeZoneId` після відкриття першого періоду (ФВ-1.1a) |
 | `ECR-PRD-0404` | 404 | періоду з таким ключем у проєкті немає |
-| `ECR-PRD-0422` | 422 | період поза межами проєкту (ФВ-1.11) |
+| `ECR-PRD-0422` | 422 | період поза межами проєкту (ФВ-1.11); також розбіжність періоду тіла запиту з періодом екземпляра таблиці на `PATCH …/cells` (`err.ECR-PRD-0422.periodMismatch`; раніше `ECR-REQ-0422`) |
 | `ECR-PRD-4223` | 422 | `Reopen` документа при закритому періоді |
 | `ECR-PRD-4224` | 422 | `Sequence` поза діапазоном `1…12` (ФВ-1.5a, D-108); **або** кількість періодів `Custom` не ділить рік нарівно |
 | `ECR-PRD-4225` | 422 | політика періодів: пільговий строк довший за жорстке закриття, або річний пільговий строк від'ємний (T6/#37) |
 | `ECR-PRD-4091` | 409 | політика періодів із таким кодом уже існує (`UQ_PeriodPolicy`, T6/#37) |
-| `ECR-SUB-4221` | 422 | `Submit` при наявності рядків `IsOrphaned` (ФВ-8.13) |
+| `ECR-SUB-4221` | 422 | `Submit` при наявності рядків `IsOrphaned` (ФВ-8.13); також блокувальні помилки валідації, застарілі результати методологій і — `messageKey = err.ECR-SUB-4221.warningsNeedConfirmation` — попередження (`Warning`) без `acknowledgeWarnings = true` у тілі `POST …/submit` (ФВ-5.19; підтвердження пишеться в `aud.SecurityEvent`, `SheetSubmitWarningsAcknowledged`) |
 | `ECR-SIM-0403` | 403 | спроба запису в сеансі симуляції (`SimulationReadOnly`, ФВ-6.16a) |
 | `ECR-SIM-0422` | 422 | симуляція самого себе або без причини |
 | `ECR-PWD-0428` | 428 | потрібна зміна пароля: доки `MustChangePassword`, доступні лише зміна пароля і вихід (ФВ-6.18) |
@@ -3365,6 +3607,72 @@ public sealed class NotFoundException(string errorCode, string message)
 | `ECR-CALC-4222` | 422 | прив'язка методології має більше комірок входу, ніж бюджет прогону `Calculations:MaxInputCellsPerBinding` (ФВ-9.8, `D-205`, `inputCellsOverBudget`); перевірка до виконання рядків — виходи не пишуться, фонова задача перерахунку стає `Failed` без ретраю |
 | `ECR-SIM-4031` | 403 | ціль «View as» (`Security.Simulate`) заборонена політикою (`D-210`): bootstrap-адміністратор (`bootstrapTarget`) або власник хоча б одного небезпечного права `sec.Permission.IsDangerous` з будь-якого чинного чи майбутнього особистого призначення, з областю чи без (`dangerousTarget`; групові призначення чужого запису невідомі — `P-02` — і в профіль сеансу не входять); сеанс не відкривається, спроба пишеться подією `SimulationDenied`. Константа каталогу — `ErrorCodes.SimulationTargetForbidden` |
 | `ECR-TMPL-4091` | 409 | відв'язка (`PUT …/bindings/…`, `isActive=false`) забрала б у колонки типу `Formula` опублікованої (`Published`/`Deprecated`) версії шаблону останнє джерело — ні формули шаблону, ні іншої активної прив'язки (HSE301 C5b, `D-215`, `lastSourceOfPublishedColumn`); джерела рахуються ПІСЛЯ зміни під блоком версії, тож заміна «прив'язати нове → відв'язати старе» проходить. Константа — `ErrorCodes.LastSourceOfPublishedColumn` |
+
+### 7.1 Суфікси `messageKey` (`err.<код>.<суфікс>`) нових випадків
+
+Код у таблиці вище лишається стабільним; випадок каже суфікс `messageKey`
+(ключ каталогу `err.<код>.<суфікс>` у `09-seed.sql`, en/ru/kz). Тут — суфікси,
+додані після `c6f6ff44` (enterprise-прохід №2, зауваження 7). Рядок — на суфікс;
+колонка першою не починається з `` `ECR-… ` ``, тому сторож §7 (код ↔ `src/`) їх не
+рахує як коди.
+
+| `messageKey` | HTTP | Коли |
+|---|---|---|
+| `err.ECR-CALC-0422.methodologyImportBlocked` | 422 | пакет методологій має блокери (нерезолвні посилання тощо) — запис не виконується (`POST /methodologies/import`) |
+| `err.ECR-CALC-0422.methodologyImportTimeZone` | 422 | пояс дат AF в імпорті пакета невідомий |
+| `err.ECR-CALC-0409.methodologyImportConflict` | 409 | пакет змінює вже наявну версію методології без нового номера версії |
+| `err.ECR-CELL-0422.importPrecision` | 422 | імпорт `.xlsx`: значення після округлення до `Scale` не вміщується в `Precision` колонки (ФВ-9.16b) |
+| `err.ECR-CFG-0422.condFormatColor` | 422 | правило умовного форматування: колір не у форматі `#rrggbb` |
+| `err.ECR-CFG-0422.condFormatColumn` | 422 | правило умовного форматування посилається на неіснуючу колонку таблиці |
+| `err.ECR-CFG-0422.condFormatLimit` | 422 | правил умовного форматування більше за ліміт (500) |
+| `err.ECR-CFG-0422.condFormatOperand` | 422 | операнд правила не відповідає оператору чи типу колонки (нечислове значення, верхня межа менша за нижню) |
+| `err.ECR-CFG-0422.condFormatOperator` | 422 | невідомий оператор умовного форматування |
+| `err.ECR-REQ-0422.condFormatIfMatch` | 422 | `PUT …/conditional-formats` без `If-Match` (зміну випадку «змінили між читанням і записом» дає `ECR-TMPL-0409 condFormatChanged`) |
+| `err.ECR-DOC-0409.migrateProjectArchived` | 409 | перенос документів на нову версію шаблону: проєкт в архіві (ФВ-7.5) |
+| `err.ECR-DOC-0409.migrateSheetsLocked` | 409 | перенос версії: у проєкті є подані/затверджені аркуші |
+| `err.ECR-SCHM-0422.migrateDataLoss` | 422 | перенос версії в режимі `Safe` втратив би дані |
+| `err.ECR-SCHM-0422.migrateStructural` | 422 | перенос версії в режимі `Presentation` відхилено через структурну зміну |
+| `err.ECR-TMPL-0422.migrateOtherTemplate` | 422 | цільова версія належить іншому шаблону |
+| `err.ECR-TMPL-0422.migrateSameVersion` | 422 | цільова версія збігається з поточною |
+| `err.ECR-TMPL-0422.migrateTargetNotPublished` | 422 | цільова версія не опублікована |
+| `err.ECR-TMPL-0422.ordinalInvalid` | 422 | порядковий номер колонки (перестановка в конструкторі) поза допустимим діапазоном |
+| `err.ECR-INT-0404.eventMap` | 404 | мапінг подій PI (`source-event-maps`) не знайдено |
+| `err.ECR-INT-0404.rowWindowMap` | 404 | прив'язку вікна рядка (`row-window-maps`) не знайдено |
+| `err.ECR-INT-0405.registryEntry` | 404 | запис довідника, на який вказує ціль мапінгу, не існує |
+| `err.ECR-INT-0409.eventMapColumnTaken` | 409 | колонка таблиці вже зайнята іншим мапінгом подій |
+| `err.ECR-INT-0409.eventMapExists` | 409 | мапінг подій для цієї пари документ–таблиця вже існує |
+| `err.ECR-INT-0409.eventMapHasLinks` | 409 | видалення мапінгу подій, за яким уже синхронізовано рядки (вихід — пауза `isActive=false`) |
+| `err.ECR-INT-0409.eventMapSourceValueTaken` | 409 | значення джерела в `ValueMap` повторюється |
+| `err.ECR-INT-0409.rowWindowConcurrency` | 409 | прив'язку вікна рядка змінено іншим після читання (`rowVersion`) |
+| `err.ECR-INT-0409.rowWindowMapHasValues` | 409 | видалення прив'язки вікна рядка, за якою вже накопичено значення (вихід — пауза) |
+| `err.ECR-INT-0409.rowWindowTargetTaken` | 409 | колонка-ціль уже має прив'язку вікна рядка |
+| `err.ECR-INT-0422.eventLinkTransitionInvalid` | 422 | недопустимий перехід стану зв'язку «подія ↔ рядок» |
+| `err.ECR-INT-0422.eventMapColumnNotInTable` | 422 | колонка мапінгу подій не належить таблиці |
+| `err.ECR-INT-0422.eventMapFilterIncomplete` | 422 | фільтр звуження мапінгу подій заповнено не повністю |
+| `err.ECR-INT-0422.eventMapReservedAttributeInvalid` | 422 | службовий атрибут мапінгу (`$start`/`$end` тощо) вказано неправильно |
+| `err.ECR-INT-0422.eventMapStartEndNotDate` | 422 | `$start`/`$end` прив'язані до колонок не типу Date |
+| `err.ECR-INT-0422.eventMapStartEndRequired` | 422 | мапінг подій без `$start` і `$end` |
+| `err.ECR-INT-0422.eventMapTableNotInDocument` | 422 | таблиця мапінгу подій не входить до документа |
+| `err.ECR-INT-0422.eventMapTargetNotDynamic` | 422 | ціль мапінгу подій — не динамічна таблиця |
+| `err.ECR-INT-0422.eventMapValueKindMismatch` | 422 | тип значення атрибута не відповідає типу колонки |
+| `err.ECR-INT-0422.eventMapValueMapNotAllowed` | 422 | `ValueMap` недопустимий для цього типу колонки |
+| `err.ECR-INT-0422.eventSyncNoMap` | 422 | «Отримати з PI зараз» без активного мапінгу подій |
+| `err.ECR-INT-0422.rowWindowTargetNotInTable` | 422 | колонка-ціль вікна рядка не належить таблиці |
+| `err.ECR-REQ-0422.probeEventsInvalid` | 422 | параметри проби подій (`probe-events`) поза межами |
+| `err.ECR-REQ-0422.rowWindowSourceInvalid` | 422 | джерело прив'язки вікна рядка задано невалідно |
+| `err.ECR-REQ-0422.rowWindowSummaryUnknown` | 422 | невідомий режим підсумовування прив'язки вікна рядка |
+| `err.ECR-REG-0422.impactDocumentNotAffected` | 422 | документ не входить до впливу правки довідника (також документ закритого періоду) |
+| `err.ECR-REG-0422.impactNothingToRecalculate` | 422 | перерахунок за впливом довідника: нічого перераховувати |
+| `err.ECR-REQ-0422.impactReasonRequired` | 422 | перерахунок за впливом довідника без причини |
+| `err.ECR-REQ-0422.impactReasonTooLong` | 422 | причина перерахунку довша за 400 символів |
+| `err.ECR-REG-0422.unitCodeUnknown` | 422 | CSV-імпорт записів довідника: невідомий код одиниці |
+| `err.ECR-REQ-0422.batchItemNewOnly` | 422 | елемент пакета `POST …/entries/batch` дозволяє лише створення |
+| `err.ECR-REQ-0422.registryExportFormatUnknown` | 422 | формат експорту довідника не `csv`/`xlsx` |
+| `err.ECR-REQ-0422.registryExportTooLarge` | 422 | експорт довідника більший за `Registries:ExportMaxRows` |
+| `err.ECR-REQ-0422.registryRowsIdsTooMany` | 422 | у запиті рядків довідника забагато ідентифікаторів |
+| `err.ECR-REQ-0422.effectiveAccessResource` | 422 | розріз ефективного доступу: невідомий тип ресурсу чи ідентифікатор без типу |
+| `err.ECR-REQ-0422.reportPublishReason` | 422 | публікація версії звіту без причини |
+| `err.ECR-REQ-0422.validationScope` | 422 | область виконання перевірок (validation) задано невалідно |
 
 ---
 
@@ -3455,6 +3763,8 @@ public sealed class NotFoundException(string errorCode, string message)
 | `PUT` | `/api/v1/template-versions/{id}/header-fields/{code}` | `Template.Edit` | 8 |
 | `GET` | `/api/v1/template-versions/{id}/styles` | `Template.View` | 8 |
 | `PUT` | `/api/v1/template-versions/{id}/styles/{code}` | `Template.Edit` | 8 |
+| `GET` | `/api/v1/template-versions/{id}/conditional-formats` | `Template.View` | 8 |
+| `PUT` | `/api/v1/template-versions/{id}/conditional-formats` | `Template.Edit` | 8 |
 | `PUT` | `/api/v1/template-versions/{id}/tables/{tableId}/rows/{code}` | `Template.Edit` | 7 |
 | `DELETE` | `/api/v1/template-versions/{id}/tables/{tableId}/rows/{code}` | `Template.Edit` | 7 |
 | `PUT` | `/api/v1/template-versions/{id}/tables/{tableDefId}/formulas/{scope}/{target}` | `Template.Edit` | 7 |
@@ -3490,6 +3800,8 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/documents/{id}` | `Document.View` | 1 |
 | `DELETE` | `/api/v1/documents/{id}` | `Document.Delete` | 6 |
 | `POST` | `/api/v1/documents/{id}/business-key` | `Document.ChangeKey` | 6 |
+| `GET` | `/api/v1/documents/{id}/migrate-version` | `Template.Edit` | 8 |
+| `POST` | `/api/v1/documents/{id}/migrate-version` | `Template.Edit` | 8 |
 | `GET` | `/api/v1/documents/{id}/header` | `Document.View` | 8 |
 | `PATCH` | `/api/v1/documents/{id}/header` | — (через грант Write на проєкт) | 8 |
 | `GET` | `/api/v1/documents/{id}/tables/{tableInstanceId}` | `Document.View` | 1 |
@@ -3532,6 +3844,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `PUT` | `/api/v1/units/{id}` | `Uom.EditCatalog` | 4 |
 | `GET` | `/api/v1/methodologies` | `Calculation.View` | 4 |
 | `POST` | `/api/v1/methodologies` | `Calculation.EditFormula` | 7 |
+| `POST` | `/api/v1/methodologies/import` | `Calculation.EditFormula` | 7 |
 | `GET` | `/api/v1/methodologies/{id}/versions` | `Calculation.View` | 7 |
 | `POST` | `/api/v1/methodologies/{id}/versions` | `Calculation.EditFormula` | 7 |
 | `GET` | `/api/v1/methodologies/{id}/versions/{vid}/formulas` | `Calculation.View` | 7 |
@@ -3577,6 +3890,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/audit/cells` | `Security.ViewAudit` | 3 |
 | `GET` | `/api/v1/audit/structure` | `Security.ViewAudit` | 7 |
 | `GET` | `/api/v1/audit/structure/export.csv` | `Security.ViewAudit` | 7 |
+| `GET` | `/api/v1/audit/security` | `Security.ViewAudit` | 7 |
 | `GET` | `/api/v1/consistency/issues` | `System.ViewHealth` | 5 |
 | `POST` | `/api/v1/consistency/run` | `System.RunJob` | 5 |
 | `GET` | `/api/v1/health/facts` | `System.ViewHealth` | 5 |
@@ -3611,6 +3925,20 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/entity-field-maps/{id}/resume` | `Integration.Manage` | 5 |
 | `POST` | `/api/v1/entity-field-maps/{id}/accept-unit-change` | `Integration.Manage` | 5 |
 | `DELETE` | `/api/v1/entity-field-maps/{id}` | `Integration.Manage` | 5 |
+| `GET` | `/api/v1/data-sources/{id}/event-templates` | `Integration.View` | 7 |
+| `POST` | `/api/v1/data-sources/{id}/probe-events` | `Integration.Manage` | 7 |
+| `GET` | `/api/v1/sources/{id}/source-events` | — (`Read` на документ мапінгу) | 7 |
+| `POST` | `/api/v1/sources/{id}/source-events/sync` | `Integration.Manage` | 7 |
+| `GET` | `/api/v1/source-event-maps` | `Integration.View` | 7 |
+| `GET` | `/api/v1/source-event-maps/{id}` | `Integration.View` | 7 |
+| `POST` | `/api/v1/source-event-maps` | `Integration.Manage` | 7 |
+| `PUT` | `/api/v1/source-event-maps/{id}` | `Integration.Manage` | 7 |
+| `DELETE` | `/api/v1/source-event-maps/{id}` | `Integration.Manage` | 7 |
+| `GET` | `/api/v1/row-window-maps` | `Integration.View` | 7 |
+| `GET` | `/api/v1/row-window-maps/{id}` | `Integration.View` | 7 |
+| `POST` | `/api/v1/row-window-maps` | `Integration.Manage` | 7 |
+| `PUT` | `/api/v1/row-window-maps/{id}` | `Integration.Manage` | 7 |
+| `DELETE` | `/api/v1/row-window-maps/{id}` | `Integration.Manage` | 7 |
 | `GET` | `/api/v1/campaign/summary` | `Report.ViewCampaign` | 5 |
 | `GET` | `/api/v1/reports/snapshots` | `Report.ViewRegulatory` | 5 |
 | `POST` | `/api/v1/reports/snapshots/{id}/verify` | `Report.ViewRegulatory` | 5 |
@@ -3619,6 +3947,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/reports/{code}/build` | `Report.BuildSnapshot` | 5 |
 | `GET` | `/api/v1/languages` | — (будь-який автентифікований) | 3 |
 | `GET` | `/api/v1/public/bootstrap` | — (анонімний) | 7 |
+| `POST` | `/api/v1/csp-report` | — (анонімний; приймач звітів CSP від браузера, S14) | 7 |
 | `GET` | `/api/v1/ui-strings/{lang}?scope=public` | — (анонімний) | 3 |
 | `GET` | `/api/v1/ui-strings/{lang}?scope=private` | — (будь-який автентифікований) | 3 |
 | `PUT` | `/api/v1/ui-strings/{lang}/{key}` | `System.ManageLocalization` | 3 |
@@ -3630,6 +3959,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `DELETE` | `/api/v1/security/simulation` | — (власний сеанс) | 3 |
 | `GET` | `/api/v1/security/my-groups` | — (власний сеанс) | 3 |
 | `GET` | `/api/v1/security/users/{id}/groups` | `Security.ManageUsers` | 3 |
+| `GET` | `/api/v1/security/users/{id}/effective-access` | `Security.ManageUsers` | 6 |
 | `GET` | `/api/v1/security/group-assignments` | `Security.ManageUsers` | 3 |
 | `POST` | `/api/v1/security/group-assignments` | `Security.ManageUsers` | 3 |
 | `DELETE` | `/api/v1/security/group-assignments/{id}` | `Security.ManageUsers` | 3 |
@@ -3654,11 +3984,15 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/registries/{code}/definition/publish` | `Registry.Publish` | 8 |
 | `GET` | `/api/v1/registries/{code}/history` | `Registry.View` | 8 |
 | `GET` | `/api/v1/registries/{code}/usage` | `Registry.EditDefinition` | 8 |
+| `GET` | `/api/v1/registries/{code}/impact` | `Registry.View` + `Calculation.View` | 8 |
+| `POST` | `/api/v1/registries/{code}/recalculate-impacted` | `Calculation.Recalculate` | 8 |
 | `POST` | `/api/v1/registries/{code}/entries/import?dryRun=` | `Registry.EditData` | 8 |
 | `POST` | `/api/v1/registries` | `Registry.EditDefinition` | 8 |
 | `POST` | `/api/v1/registries/{code}/keys/check` | `Registry.EditDefinition` | 8 |
-| `GET` | `/api/v1/registries/{code}/rows?asOf=&asOfUtc=&parentEntryId=&q=&cursor=&limit=` | `Registry.View` | 8 |
+| `GET` | `/api/v1/registries/{code}/rows?asOf=&asOfUtc=&parentEntryId=&id=&q=&cursor=&limit=` | `Registry.View` | 8 |
 | `POST` | `/api/v1/registries/{code}/entries/batch?dryRun=` | `Registry.EditData` | 8 |
+| `GET` | `/api/v1/registries/{code}/entries/{id}/history?cursor=&limit=` | `Registry.View` | 8 |
+| `GET` | `/api/v1/registries/{code}/export?format=&asOf=` | `Registry.View` | 8 |
 | `GET` | `/api/v1/reports` | `Report.ViewRegulatory` | 5 |
 | `POST` | `/api/v1/reports` | `Report.EditDefinition` | 5 |
 | `POST` | `/api/v1/reports/{id}/versions` | `Report.EditDefinition` | 5 |
@@ -3667,6 +4001,19 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/registries/{code}/external-keys?entryId=&dataSourceId=&cursor=&limit=` | `Registry.View` | 8 |
 | `POST` | `/api/v1/registries/{code}/external-keys` | `Registry.EditData` | 8 |
 | `DELETE` | `/api/v1/registries/{code}/external-keys/{id}` | `Registry.EditData` | 8 |
+
+> ✎ 2026-09-30 (ФВ-2.6/2.7): `GET /documents/{id}/tables/{tableInstanceId}` → `TableSliceDto.cellFormats`
+> (необов'язкове; `null`/відсутнє = правил немає) — `{ "{rowKey}:{columnCode}": { backgroundHex, foregroundHex, isBold } }`,
+> той самий ключ, що `cellPermissions`. Це ГОТОВИЙ результат правил версії шаблону
+> (`cfg.ConditionalFormatRule`): сервер рахує єдиною чистою функцією
+> `ConditionalFormatEvaluator.Evaluate` (Application), яку викликає й Excel-експорт, тож клієнт
+> правил НЕ обчислює — лише фарбує комірки з ключем. Колір `#rrggbb` або `null` (колір теми);
+> комірки без спрацювання в мапі немає. Операнди числові (кома = крапка), `between` включно й
+> без залежності від порядку меж; текст/дата/булеве числових операторів не задовольняють;
+> `empty`/`notEmpty` — `null` або пробіли; перше правило за `ordinal` виграє. Порожня
+> (нематеріалізована) комірка оцінюється як `null`. Значення беруться з ЗБЕРЕЖЕНОГО
+> стану: ще не збережена правка в мапі не відображена до повторного читання зрізу.
+> Excel-експорт (зі `IncludeStyles`) кладе заливку/колір шрифту/жирність тими ж правилами.
 
 > ✎ 2026-09-29 (RT-13): `GET /registries/{code}/rows` — `PagedResult<RegistryRowDto>`, курсор за
 > `Id`, `limit` 1…500 (інакше `422 pageSizeOutOfRange`). `asOf` — бізнес-дата чинності
@@ -3689,6 +4036,44 @@ public sealed class NotFoundException(string errorCode, string message)
 > обмін ключами між записами пакета законний. `409 ECR-REG-4092` — лише гонка під час застосування;
 > `422 ECR-REQ-0422 batchTooLarge` (> 2000) / `batchItemInvalid` (невідома дія, `delete` без `id`,
 > повтор `id`).
+
+> ✎ 2026-09-30 (RT-13/RT-14, доповнення): `GET …/rows` приймає `id` (повторюваний, ≤ 500 — інакше
+> `422 registryRowsIdsTooMany`): лише ці записи, правило видимості діє й тут. Рядок пакета
+> `POST …/entries/batch` для НОВОГО запису приймає `name` (назва мовою за замовчуванням; порожньо —
+> код), `validFrom`, `validTo` (порожнє вікно — помилка рядка в полі `@validity`); для наявного — `422
+> batchItemNewOnly` (назву й вікно наявного змінюють форма запису й `POST …/validity`).
+
+> ✎ 2026-09-30 (RT-15): `GET /registries/{code}/entries/{id}/history?cursor=&limit=` →
+> `PagedResult<RegistryEntryHistoryItemDto>` від найновішого: `{at, byUserId, byDisplayName, kind, field,
+> oldValue, newValue, oldDisplay, newDisplay}`, `kind` ∈ `created`, `value`, `name`, `validity`, `active`,
+> `deleted`. Джерело — системні версії `dic.RegistryEntry`/`dic.RegistryValue` (`FOR SYSTEM_TIME ALL`,
+> автор версії — `ChangedByUserId`, D-158), тож історію має кожен шлях запису. Значення, задані разом зі
+> створенням, окремих рядків не дають (їх підсумовує `created`); `value` зі `newValue = null` — значення
+> прибрано. Значення — у поданні `GET …/rows` (`Lookup` — Id, `oldDisplay`/`newDisplay` — назва цілі чи
+> код одиниці); `validity` — інтервал ISO 8601 `2026-01-01/..`. Видалений запис має історію; запис
+> іншого довідника — `404 REG-0404 registryEntry`. Курсор — ключ рядка (момент, вид, поле), не зсув.
+
+> ✎ 2026-09-30 (RT-16): `GET /registries/{code}/export?format=csv|xlsx&asOf=` — файл. Формат — `format`,
+> без нього — `Accept` (`text/csv` або тип книги Excel), інакше CSV; невідомий — `422
+> registryExportFormatUnknown`. Записи — ті, що бачить `GET …/rows` на `asOf` (без нього — сьогодні, UTC).
+> Посилання — кодами: `Lookup` — код запису-цілі, поле `Unit` — код одиниці. CSV (UTF-8 із BOM) —
+> `code` і коди полів, рівно те, що приймає `POST …/entries/import` (той тепер приймає код одиниці в полі
+> `Unit`, невідомий — помилка рядка `unitCodeUnknown`); XLSX додає `@name`, `@validFrom`, `@validTo`,
+> число лягає числом, лише коли `double` тримає його без втрат, інакше — текстом. Стеля
+> `Registries:ExportMaxRows` (50 000) — `422 registryExportTooLarge`. Кожен експорт — подія
+> `RegistryExported` у `aud.SecurityEvent` (незалежна від транзакції, C4).
+
+> ✎ 2026-09-30 (RT-16 `includeChildren`, ФВ-8.16): `GET /registries/{code}/export?includeChildren=true` —
+> разом із дочірніми довідниками композиції, рекурсивно (частина частини теж). Частини — ОКРЕМИМИ
+> таблицями, у порядку імпорту: батько, далі його частини за кодом, кожна одразу зі своїми. CSV —
+> архів `application/zip` (`registry-{code}-{yyyyMMdd}.zip`) із файлами `01-{КОД}.csv`, `02-{КОД}.csv`…;
+> кожен — рівно той CSV, що дав би експорт цього довідника окремо, тож імпорт файлів архіву за номерами
+> нічого не змінює (поле композиції несе КОД батька). XLSX — одна книга, аркуш на довідник (назва —
+> код; однакові в перших 31 символі — суфікс `~2`, `~3`…). Записи частин — ті, що бачить `GET …/rows`
+> частини на той самий `asOf` (частину видно рівно тоді, коли видно батька). Кожен дочірній вимагає
+> читання (`Registry.View` або грант `Read`): без нього — `403`, заборонений — `404`. Стеля
+> `Registries:ExportMaxRows` — на ВСІ довідники файлу разом. Подія `RegistryExported` додає
+> `includeChildren` і `registries` (код і кількість записів кожного).
 
 > ✎ 2026-09-29 (RT-17a, ФВ-8.18, FEATURE-REGISTRY-TABLES §6, §7.1): правила довідника виконуються
 > під час запису — `POST …/entries`, `POST …/entries/batch`, `POST …/entries/import` — на стані ПІСЛЯ

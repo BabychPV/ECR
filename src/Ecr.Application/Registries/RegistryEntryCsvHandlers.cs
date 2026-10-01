@@ -1,4 +1,5 @@
 // src/Ecr.Application/Registries/RegistryEntryCsvHandlers.cs
+using System.Globalization;
 using System.Text.Json;
 using Ecr.Application.Common;
 using Ecr.Application.Errors;
@@ -22,7 +23,25 @@ namespace Ecr.Application.Registries;
 /// дублікат), а не конкретного поля.
 /// </param>
 /// <param name="MessageKey">Ключ тексту відмови в каталозі.</param>
-public sealed record RegistryEntryImportError(int Row, string Key, string? Field, string MessageKey);
+/// <param name="Params">
+/// Значення для плейсхолдерів <c>{…}</c> тексту каталогу (D1): без них клієнт показує сирий шаблон.
+/// <c>null</c> — текст ключа плейсхолдерів не має.
+/// </param>
+/// <remarks>
+/// Рівність — за <c>Row/Key/Field/MessageKey</c>: <c>Params</c> лише підставляє значення в текст і
+/// ідентичності помилки не змінює (словник не має значеннєвої рівності).
+/// </remarks>
+public sealed record RegistryEntryImportError(
+    int Row, string Key, string? Field, string MessageKey, IReadOnlyDictionary<string, string>? Params = null)
+{
+    /// <inheritdoc />
+    public bool Equals(RegistryEntryImportError? other)
+        => other is not null && Row == other.Row && Key == other.Key && Field == other.Field
+           && MessageKey == other.MessageKey;
+
+    /// <inheritdoc />
+    public override int GetHashCode() => HashCode.Combine(Row, Key, Field, MessageKey);
+}
 
 /// <summary>Звіт імпорту записів довідника (`BE-24`, крок 3).</summary>
 /// <param name="Added">Нових записів.</param>
@@ -70,8 +89,18 @@ public sealed class ImportRegistryEntriesHandler(
     IClock clock,
     RegistryEntryWriter writer,
     IUnitOfWork? uow = null,
-    Rules.IRegistryRuleEngine? rules = null)
+    Rules.IRegistryRuleEngine? rules = null,
+    IUnitStore? units = null)
 {
+    // ⚠ `units` (RT-16) — код одиниці в полі типу Unit: так його пише експорт. Без порту (тести, що
+    // будують обробник руками) поле приймає лише Id, як і досі.
+
+    /// <summary>Ключ помилки рядка: одиниці з таким кодом немає.</summary>
+    public const string UnitCodeUnknownKey = "err.ECR-REG-0422.unitCodeUnknown";
+
+    /// <summary>Код одиниці → Id у межах одного файлу: кожен код читається один раз (B-10).</summary>
+    private readonly Dictionary<string, int?> _unitIds = new(StringComparer.OrdinalIgnoreCase);
+
     // ⚠ `uow` і `rules` (RT-17a) необов'язкові лише для тестів, що будують обробник руками: контейнер
     // підставляє обидва, і файл проходить ті самі правила, що й ручний upsert і пакет.
 
@@ -113,8 +142,7 @@ public sealed class ImportRegistryEntriesHandler(
         await RegistryAccess
             .RequireAsync(
                 access, currentUser, UpsertRegistryEntryHandler.Permission, GrantLevel.Write,
-                async token => (await registries.FindDefinitionAsync(registryCode, token).ConfigureAwait(false))?.Id,
-                ct)
+                new RegistryLookup(registries, registryCode), ct)
             .ConfigureAwait(false);
 
         var userId = currentUser.UserId
@@ -273,7 +301,7 @@ public sealed class ImportRegistryEntriesHandler(
             var ecrCode = default(EcrCode);
             if (code.Length > 0 && !EcrCode.TryCreate(code, out ecrCode))
             {
-                errors.Add(new RegistryEntryImportError(rowNumber, code, null, "err.ECR-CFG-0422.invalidCode"));
+                errors.Add(new RegistryEntryImportError(rowNumber, code, null, "err.ECR-CFG-0422.invalidCode", RegistryEntryWriter.Param("code", code)));
                 continue;
             }
 
@@ -322,12 +350,12 @@ public sealed class ImportRegistryEntriesHandler(
                 continue;
             }
 
-            var (values, refField, refErrorKey) = await ResolveRowAsync(record, columns, lookupCache, ct)
+            var (values, refField, refErrorKey, refParams) = await ResolveRowAsync(record, columns, lookupCache, ct)
                 .ConfigureAwait(false);
 
             if (refErrorKey is not null)
             {
-                errors.Add(new RegistryEntryImportError(rowNumber, code, refField, refErrorKey));
+                errors.Add(new RegistryEntryImportError(rowNumber, code, refField, refErrorKey, refParams));
                 continue;
             }
 
@@ -366,7 +394,8 @@ public sealed class ImportRegistryEntriesHandler(
             catch (Exception ex) when (ex is DomainException or BusinessRuleException)
             {
                 errors.Add(new RegistryEntryImportError(
-                    rowNumber, code, RegistryEntryWriter.FieldOf(ex), RegistryEntryWriter.MessageKeyOf(ex)));
+                    rowNumber, code, RegistryEntryWriter.FieldOf(ex), RegistryEntryWriter.MessageKeyOf(ex),
+                    RegistryEntryWriter.ParamsOf(ex)));
                 continue;
             }
 
@@ -605,7 +634,9 @@ public sealed class ImportRegistryEntriesHandler(
     /// <c>registryEntryId = 0</c>), тож жодного побічного ефекту не лишає;
     /// значення, що пройшло пробу, детерміновано пройде й реальний виклик.
     /// </remarks>
-    private async Task<(Dictionary<string, object?> Values, string? Field, string? ErrorKey)> ResolveRowAsync(
+    private async Task<(
+        Dictionary<string, object?> Values, string? Field, string? ErrorKey, IReadOnlyDictionary<string, string>? Params)>
+        ResolveRowAsync(
         IReadOnlyList<string> record,
         List<(int Index, RegistryFieldDef Field)> columns,
         Dictionary<(int RefRegistryDefId, string Code), long?> lookupCache,
@@ -630,12 +661,36 @@ public sealed class ImportRegistryEntriesHandler(
                 // і «12,5» мовчки ставало 125 (клас `C1`). Далі їде вже `decimal`
                 // — проба, ключі й запис бачать те саме число.
                 object parsed = raw;
+
+                // RT-16: експорт пише поле Unit КОДОМ одиниці; Id (число) приймається, як і раніше.
+                if (field.DataType == CellDataType.Unit && units is not null
+                    && !long.TryParse(raw.Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out _))
+                {
+                    var unitCode = raw.Trim();
+                    if (!_unitIds.TryGetValue(unitCode, out var unitId))
+                    {
+                        unitId = (await units.FindUnitByCodeAsync(unitCode, ct).ConfigureAwait(false))?.Id;
+                        _unitIds[unitCode] = unitId;
+                    }
+
+                    if (unitId is null)
+                    {
+                        return (values, field.Code, UnitCodeUnknownKey, null);
+                    }
+
+                    parsed = unitId.Value;
+                }
+
                 if (field.DataType is CellDataType.Int or CellDataType.Decimal)
                 {
                     var reading = CultureNumberReader.Read(raw, numberCulture);
                     if (reading.Kind != NumberTextKind.Number)
                     {
-                        return (values, field.Code, "err.ECR-REG-0422.valueNotNumber");
+                        return (values, field.Code, "err.ECR-REG-0422.valueNotNumber", new Dictionary<string, string>
+                        {
+                            ["value"] = raw,
+                            ["dataType"] = field.DataType.ToString(),
+                        });
                     }
 
                     parsed = reading.Value;
@@ -647,7 +702,7 @@ public sealed class ImportRegistryEntriesHandler(
                 }
                 catch (DomainException ex)
                 {
-                    return (values, field.Code, RegistryEntryWriter.MessageKeyOf(ex));
+                    return (values, field.Code, RegistryEntryWriter.MessageKeyOf(ex), RegistryEntryWriter.ParamsOf(ex));
                 }
 
                 values[field.Code] = parsed;
@@ -662,7 +717,7 @@ public sealed class ImportRegistryEntriesHandler(
 
             if (field.RefRegistryDefId is not { } refDefId)
             {
-                return (values, field.Code, "err.ECR-REG-0422.fieldTypeNotAllowed");
+                return (values, field.Code, "err.ECR-REG-0422.fieldTypeNotAllowed", RegistryEntryWriter.Param("dataType", field.DataType.ToString()));
             }
 
             var cacheKey = (refDefId, trimmed);
@@ -675,13 +730,13 @@ public sealed class ImportRegistryEntriesHandler(
 
             if (resolvedId is null)
             {
-                return (values, field.Code, "err.ECR-REG-0422.entryRefNotFound");
+                return (values, field.Code, "err.ECR-REG-0422.entryRefNotFound", null);
             }
 
             values[field.Code] = resolvedId.Value;
         }
 
-        return (values, null, null);
+        return (values, null, null, null);
     }
 
     /// <summary>
@@ -728,7 +783,7 @@ public sealed class ImportRegistryEntriesHandler(
             }
 
             // Рядок із помилкою значення тут пропускається: основний цикл і так його відхилить.
-            var (values, _, errorKey) = await ResolveRowAsync(record, columns, prefetched.LookupCache, ct)
+            var (values, _, errorKey, _) = await ResolveRowAsync(record, columns, prefetched.LookupCache, ct)
                 .ConfigureAwait(false);
             if (errorKey is not null)
             {

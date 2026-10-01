@@ -24,7 +24,7 @@ namespace Ecr.Api.Tests;
 /// (<see cref="EcrApiFactory.SourceCalls"/>).
 /// </remarks>
 [Collection("SqlServer")]
-public sealed class DataSourcesControllerTests(SqlServerFixture sql)
+public sealed partial class DataSourcesControllerTests(SqlServerFixture sql)
 {
     private const string Password = "Api-Source-Probe-2026!";
 

@@ -172,6 +172,14 @@ public sealed class EcrApiFactory(SqlServerFixture sql, int stampCacheSeconds = 
 
         builder.ConfigureTestServices(services =>
         {
+            // ⚠ F-4: стенд «знає» перехід Казахстану на UTC+5, а не питає базу поясів
+            // машини — інакше готовність (`tzdata`) жовтіла б на кожній машині зі
+            // старою базою й валила б усі перевірки «зелений». Справжню базу цієї
+            // машини перевіряє KazakhstanSiteZoneOffsetTests; поведінку картки на
+            // застарілій базі — TimeZoneDatabase*Tests (там провайдер підміняється).
+            services.AddSingleton<Ecr.Api.Health.ITimeZoneOffsetProvider>(
+                Ecr.Api.Tests.Health.FixedTimeZoneOffsetProvider.Current);
+
             services
                 .AddHttpClient(TeamsWebhookSender.HttpClientName)
                 .ConfigurePrimaryHttpMessageHandler(() => new OfflineWebhookHandler(WebhookCalls));
@@ -181,6 +189,13 @@ public sealed class EcrApiFactory(SqlServerFixture sql, int stampCacheSeconds = 
             // не заводить другий.
             services
                 .AddHttpClient<PiWebApiDataSource>()
+                .ConfigurePrimaryHttpMessageHandler(() => new OfflineSourceHandler(SourceCalls, SourceRequests));
+
+            // ⚠ Джерело без секрету (або з секретом `Negotiate`) ходить ОКРЕМИМ
+            // іменованим клієнтом Windows-автентифікації (PiWebApiAuthentication):
+            // без цієї підміни стенд пішов би в справжню мережу.
+            services
+                .AddHttpClient(PiWebApiAuthentication.NegotiateClientName)
                 .ConfigurePrimaryHttpMessageHandler(() => new OfflineSourceHandler(SourceCalls, SourceRequests));
 
             // ⚠ Решта строків — з конфігурації, як у проді; підмінюється лише

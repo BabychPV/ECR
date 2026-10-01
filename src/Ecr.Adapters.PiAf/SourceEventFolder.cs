@@ -1,5 +1,6 @@
 using System.Globalization;
 using Ecr.Application.Ports;
+using Ecr.Domain.Enums;
 
 namespace Ecr.Adapters.PiAf;
 

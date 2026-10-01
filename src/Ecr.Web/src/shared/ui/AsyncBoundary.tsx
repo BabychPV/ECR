@@ -16,7 +16,7 @@ import { t } from '@/shared/i18n';
 const CorrelationCopy = lazy(() => import('./CorrelationCopy'));
 
 /** Форма скелета: що саме зараз з'явиться. */
-export type SkeletonShape = 'table' | 'form' | 'none';
+type SkeletonShape = 'table' | 'form' | 'none';
 
 interface AsyncBoundaryProps<T> {
   /** Чи триває завантаження. */

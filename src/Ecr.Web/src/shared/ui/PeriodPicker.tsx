@@ -155,7 +155,7 @@ function periodCaption(value: number, kind?: string): string | undefined {
   return formatted.length > 0 ? formatted : undefined;
 }
 
-export interface PeriodPickerProps {
+interface PeriodPickerProps {
   /** `periodKey` (`YYYYMM`), як в адресі (`ФВ-14.29`); `null` — період не обрано. */
   readonly value: number | null;
   /**

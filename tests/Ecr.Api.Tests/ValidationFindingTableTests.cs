@@ -42,6 +42,7 @@ public sealed class ValidationFindingTableTests(SqlServerFixture sql)
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "ФВ-5.1")]
+    [Trait("Requirement", "ФВ-5.6")]
     public async Task Знахідка_у_другій_таблиці_аркуша_несе_її_TableDefId()
     {
         var scenario = await ArrangeAsync().ConfigureAwait(true);

@@ -30,7 +30,7 @@ export type HoverSymbol =
   | { readonly kind: 'sheet'; readonly sheet: SheetSymbol };
 
 /** Що показати і який фрагмент тексту підсвітити. */
-export interface HoverInfo {
+interface HoverInfo {
   readonly from: number;
   readonly to: number;
   readonly symbol: HoverSymbol;

@@ -132,7 +132,8 @@ public sealed class RegistryEntryWriterTests
 
         Assert.False(result.Applied);
         var error = Assert.Single(result.Errors);
-        Assert.Equal(new RegistryEntryImportError(2, "E2", "LIMIT", "err.ECR-REG-0422.valueNotNumber"), error);
+        Assert.Equal((2, "E2", "LIMIT", "err.ECR-REG-0422.valueNotNumber"), (error.Row, error.Key, error.Field, error.MessageKey));
+        Assert.Equal("not a number", error.Params!["value"]);
 
         await _uow.DidNotReceive().ExecuteInTransactionAsync(Arg.Any<Func<CancellationToken, Task>>(), Arg.Any<CancellationToken>());
         await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());

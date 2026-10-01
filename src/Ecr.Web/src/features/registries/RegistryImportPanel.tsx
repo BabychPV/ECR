@@ -174,7 +174,7 @@ export function RegistryImportPanel({ registryCode, disabled = false }: Registry
                           текст (аналогічно серверним кодам помилок): рендерити
                           лише через `t()`. Сирий ключ на екрані виглядав би як
                           `err.registryImport.duplicateCode` замість речення. */}
-                      <Table.Td>{t(error.messageKey)}</Table.Td>
+                      <Table.Td>{t(error.messageKey, { ...error.params })}</Table.Td>
                     </Table.Tr>
                   ))}
                 </Table.Tbody>

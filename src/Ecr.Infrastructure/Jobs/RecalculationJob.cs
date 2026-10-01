@@ -57,7 +57,8 @@ public sealed class RecalculationJob(
     RunCalculationHandler runs,
     RecalculationService formulas,
     Domain.Abstractions.IClock clock,
-    IBackgroundJobScheduler? jobs = null) : IRecalculationJob
+    IBackgroundJobScheduler? jobs = null,
+    RecalculationBudgetMonitor? budget = null) : IRecalculationJob
 {
     /// <summary>Стеля прив'язок на прогін: методологій у системі — десятки.</summary>
     private const int MaxBindings = 5_000;
@@ -436,6 +437,16 @@ public sealed class RecalculationJob(
 
             throw;
         }
+
+        // ПРД-13 (НФ-8.6.4): вимір ПІСЛЯ завершення — лише читає годинник, логіки перерахунку не торкається.
+        // Провалена задача сюди не доходить: тривалість до відмови не є тривалістю перерахунку.
+        if (budget is not null)
+        {
+            await budget
+                .ObserveAsync(
+                    projectId, request.DocumentId, fullYear: request.PeriodKey is null, clock.UtcNow - startedAt, progress, ct)
+                .ConfigureAwait(false);
+        }
     }
 
     /// <summary>
@@ -476,7 +487,12 @@ public sealed class RecalculationJob(
 
         foreach (var documentId in documentIds)
         {
-            var child = request with { DocumentId = documentId };
+            // Позначка батька — щоб статус показував «розкладено N, виконано M».
+            var child = request with
+            {
+                DocumentId = documentId,
+                FanOutParentJobId = (progress as IJobIdentity)?.JobId,
+            };
 
             var target = child.PeriodKey is { } period
                 ? Ecr.Application.Documents.RecalculateDocumentHandler.TargetOf(documentId, new PeriodKey(period))
@@ -992,6 +1008,10 @@ public sealed class RecalculationJob(
 /// губили його при розборі.
 /// </param>
 /// <param name="ApprovalReason">Причина погодження — той самий слід, що й <paramref name="ApprovalId"/>.</param>
+/// <param name="FanOutParentJobId">
+/// Батьківська задача-розклад (P4): кладе <c>FanOutAsync</c> у дочірні, щоб статус
+/// батька рахував їх (<c>IJobProgressStore.GetFanOutAsync</c>, JSON <c>fanOutParentJobId</c>).
+/// </param>
 public sealed record RecalculationRequest(
     int ProjectId,
     long DocumentId,
@@ -1000,4 +1020,5 @@ public sealed record RecalculationRequest(
     int? SheetDefId = null,
     int? ApprovedBy = null,
     long? ApprovalId = null,
-    string? ApprovalReason = null);
+    string? ApprovalReason = null,
+    string? FanOutParentJobId = null);

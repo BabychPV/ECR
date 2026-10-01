@@ -146,7 +146,8 @@ public sealed class GetJobStatusHandler(
     IBackgroundJobScheduler jobs,
     IAccessDecisionService access,
     ICurrentUser currentUser,
-    IUiStringCatalog catalog)
+    IUiStringCatalog catalog,
+    IJobProgressStore? progressStore = null)
 {
     /// <summary>Право на перегляд стану системи (`02-contracts.md` §9).</summary>
     public const string Permission = "System.ViewHealth";
@@ -201,7 +202,7 @@ public sealed class GetJobStatusHandler(
 
         var createdByUserId = await jobs.GetCreatedByUserIdAsync(jobId, ct).ConfigureAwait(false);
 
-        if (!profile.Has(Permission))
+        if (!PermissionCheck.IsGranted(profile, Permission))
         {
             if (createdByUserId != userId)
             {
@@ -219,12 +220,22 @@ public sealed class GetJobStatusHandler(
             .ResolveAsync(catalog, currentUser.Language, status.Message, ct)
             .ConfigureAwait(false);
 
+        // ⛔ Розклад на дочірні задачі (P4): батько `Succeeded` = «розкладено», не «пораховано».
+        // Похідний стан — при читанні, без схеми; для задачі без дочірніх не змінюється.
+        // Розкладає лише проєктна задача (без DocumentId): документна дітей не має, і без цієї відсічки
+        // кожне опитування її статусу скановувало б журнал (вимір 2026-10-01).
+        var fanOut = progressStore is null || status.State is not ("Succeeded" or "Running") || status.DocumentId is > 0
+            ? null
+            : await progressStore.GetFanOutAsync(jobId, ct).ConfigureAwait(false);
+
         return status with
         {
             Message = resolvedMessage,
             ResultUrl = JobResultUrl.For(
                 profile, jobId, null, status.State, status.Message, status.DocumentId),
             CreatedByUserId = createdByUserId,
+            FanOut = fanOut,
+            EffectiveState = fanOut?.EffectiveStateOf(status.State),
         };
     }
 }
@@ -482,7 +493,7 @@ public sealed class RestartJobHandler(
         // задачі»); чужу чи системну (автор `null`) — лише з правом.
         var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
 
-        if (!profile.Has(GetJobStatusHandler.Permission))
+        if (!PermissionCheck.IsGranted(profile, GetJobStatusHandler.Permission))
         {
             var ownerId = await jobs.GetCreatedByUserIdAsync(jobId, ct).ConfigureAwait(false);
 
@@ -624,7 +635,7 @@ public sealed class CancelJobHandler(
 
         var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
 
-        if (!profile.Has(GetJobStatusHandler.Permission))
+        if (!PermissionCheck.IsGranted(profile, GetJobStatusHandler.Permission))
         {
             // Автор скасовує СВОЮ задачу без `System.ViewHealth`; чужу — ні.
             // ⚠ `null` (системна задача за розкладом) автором не є нікому:

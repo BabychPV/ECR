@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using Ecr.Application.Documents.Dto;
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
@@ -147,9 +147,24 @@ public sealed partial class PatchCellsHandler
                 recalculationSeeds.Add(seed);
             }
 
+            // HSE301 A1: імпорт книги — та сама єдина точка, що й у HandleAsync; після запису, один виклик на таблицю.
+            if (rowWindows is not null)
+            {
+                var instance = item.Context.Instance;
+                await rowWindows
+                    .RowsChangedAsync(
+                        new RowWindowChange(
+                            instance.TableInstanceId,
+                            instance.PeriodKey,
+                            instance.TableDefId,
+                            [.. applied.Upserts.Select(u => u.Address.ColumnDefId).Concat(applied.Deletes.Select(d => d.ColumnDefId)).Distinct()]),
+                        ct)
+                    .ConfigureAwait(false);
+            }
             var versions = (IReadOnlyDictionary<string, string>?)MergedRowVersions(item.Context, applied)
                            ?? await rowStore.GetRowVersionsAsync(item.Id, period, ct).ConfigureAwait(false);
-            responses.Add(ToResponse(applied, item.Messages, recalculationJobId: null, versions));
+            responses.Add(ToResponse(
+                applied, item.Messages, recalculationJobId: null, versions, OutOfWindowKeys(item.Context, applied)));
         }
 
         return responses;
@@ -223,7 +238,9 @@ public sealed partial class PatchCellsHandler
         await EnsureWorkbookReferencesAsync(active, previous, Bounds, ct).ConfigureAwait(false);
 
         var now = clock.UtcNow;
-        var isLateEdit = await DetermineIsLateEditAsync(documentId, period.Value, ct).ConfigureAwait(false);
+        var isLateEdit = await DetermineIsLateEditAsync(
+                documentId, [.. active.Select(x => x.Context.Table.SheetDefId).Distinct()], period.Value, ct)
+            .ConfigureAwait(false);
 
         await uow.ExecuteInTransactionAsync(
             innerCt => PersistWorkbookAsync(
@@ -520,7 +537,7 @@ public sealed partial class PatchCellsHandler
         await audit.WriteCellChangesAsync(
             [.. active.SelectMany(x => BuildAuditRecords(
                 x.Request, x.Applied!.Upserts, x.Applied.Deletes, userId, now, documentId,
-                x.Applied.RowKeyById, previous, isLateEdit))],
+                x.Applied.RowKeyById, previous, isLateEdit, x.Context.OutOfWindow))],
             ct).ConfigureAwait(false);
 
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);

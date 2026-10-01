@@ -136,7 +136,7 @@ export function useCancelJob(
  * вигляд `IRecalculationJob#42`, і сирий `#` в URL обриває шлях на фрагменті
  * (саме на цьому впав крок 17 `smoke.ps1`).
  */
-export function restartJob(jobId: string): Promise<AcceptedJob> {
+function restartJob(jobId: string): Promise<AcceptedJob> {
   return apiEnqueue(`/api/v1/jobs/${encodeURIComponent(jobId)}/restart`);
 }
 
