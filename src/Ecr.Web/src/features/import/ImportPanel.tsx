@@ -1,6 +1,7 @@
 import { useRef, useState, type JSX } from 'react';
 import { Alert, Badge, Button, Group, Modal, Stack, Table, Text } from '@mantine/core';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { notifications } from '@mantine/notifications';
+import { useMutation, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import type {
   ImportApplyRequest,
@@ -12,7 +13,9 @@ import type {
 } from '@/api/types';
 import { denyText } from '@/features/grid/permissions';
 import { invalidateSlices } from '@/features/grid/sliceCache';
-import { showApiError, showDone } from '@/shared/ui/notify';
+import { calculationResults } from '@/features/methodologies/api';
+import { calculationResultsKey } from '@/features/methodologies/calculationResultsKey';
+import { notificationCloseButtonProps, showApiError, showDone } from '@/shared/ui/notify';
 import { useDurationIndicator } from '@/shared/ui/useDurationIndicator';
 import { DurationProgress } from '@/shared/ui/DurationProgress';
 import { t } from '@/shared/i18n';
@@ -91,6 +94,21 @@ export function ImportPanel({ documentId, periodKey }: ImportPanelProps): JSX.El
 
       setPreview(null);
       showDone(t('import.applied'));
+
+      // ⚠ P3: перерахунок після Apply — лише формул (`recalculationJobId`).
+      // Числа методологій сам імпорт не перераховує: змінений вхід лишає їх
+      // застарілими, і людина бачила «Imported» без жодного слова, що звіт
+      // ще рахує старі входи. Підказка — за правдою сервера (`isStale`), а не
+      // за здогадом клієнта про те, які колонки читає методологія.
+      if (await calculationResultsStale(queryClient, documentId, periodKey)) {
+        notifications.show({
+          color: 'statusWarning',
+          title: t('import.recalculateTitle'),
+          message: t('import.recalculateHint', { action: t('workflow.recalculate') }),
+          autoClose: false,
+          closeButtonProps: notificationCloseButtonProps,
+        });
+      }
     },
     // ⚠ Конфлікт версій рядків (`ECR-CELL-0409`) означає, що між переглядом і
     // застосуванням хтось змінив ті самі комірки. Батч відхиляється цілком —
@@ -264,6 +282,7 @@ export function ImportPanel({ documentId, periodKey }: ImportPanelProps): JSX.El
                     <Table.Th>{t('import.table')}</Table.Th>
                     <Table.Th>{t('import.row')}</Table.Th>
                     <Table.Th>{t('import.column')}</Table.Th>
+                    <Table.Th>{t('import.excelCell')}</Table.Th>
                     <Table.Th>{t('import.reason')}</Table.Th>
                   </Table.Tr>
                 </Table.Thead>
@@ -273,10 +292,13 @@ export function ImportPanel({ documentId, periodKey }: ImportPanelProps): JSX.El
                       key={`${rejection.tableCode ?? ''}:${rejection.excelCell ?? rejection.rowKey}:${rejection.columnCode}`}
                     >
                       <Table.Td>{tableOf(rejection)}</Table.Td>
-                      {/* ⚠ Значення поза рядками таблиці рядка системи не має —
-                          людині показується адреса комірки книги (`V-10`). */}
-                      <Table.Td>{rejection.excelCell ?? rejection.rowKey}</Table.Td>
+                      <Table.Td>{rejection.rowKey}</Table.Td>
                       <Table.Td>{rejection.columnCode}</Table.Td>
+                      {/* ⚠ P3: адреса комірки книги — окремою колонкою в кожній
+                          відмові: ключ рядка `R17` в Excel не знайти, `F23` — одним
+                          переходом. Поза рядками таблиці (`V-10`) вона єдиний
+                          орієнтир; прочерк — відмова цілої таблиці. */}
+                      <Table.Td>{show(rejection.excelCell)}</Table.Td>
                       <Table.Td>
                         {rejectionText(rejection)} ({rejection.reasonCode})
                       </Table.Td>
@@ -321,6 +343,30 @@ function keyOf(change: ImportChange): string {
  */
 function isRounded(change: ImportChange): boolean {
   return change.roundedFrom !== null && change.roundedFrom !== undefined;
+}
+
+/**
+ * Чи застаріли числа методологій документа після застосування (P3).
+ *
+ * ⚠ Відмова читання (немає права, мережа) — не застаріло: підказка тут
+ * необов'язкова, а помилка про неї після успішного імпорту читалася б як
+ * провал самого імпорту.
+ */
+async function calculationResultsStale(
+  queryClient: QueryClient,
+  documentId: number,
+  periodKey: number,
+): Promise<boolean> {
+  try {
+    const results = await queryClient.fetchQuery({
+      queryKey: calculationResultsKey(documentId, periodKey),
+      queryFn: () => calculationResults(documentId, periodKey),
+    });
+
+    return results.some((result) => result.isStale);
+  } catch {
+    return false;
+  }
 }
 
 /** Чи відповідь застосування — «поставлено в чергу», а не готовий результат. */
@@ -381,6 +427,9 @@ function rejectionText(rejection: ImportRejection): string {
   switch (key) {
     case 'err.ECR-CELL-4221.importCalculated':
       return t('err.ECR-CELL-4221.importCalculated');
+    // ⚠ P3: комірку не змінювали — її перерахувала система після експорту.
+    case 'err.ECR-CELL-4221.importCalculatedStale':
+      return t('err.ECR-CELL-4221.importCalculatedStale');
     case 'err.ECR-ROW-0404.importNoRow':
       return t('err.ECR-ROW-0404.importNoRow');
     case 'err.ECR-ROW-0404.importOutsideRows':
