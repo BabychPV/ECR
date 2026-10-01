@@ -59,7 +59,9 @@ public sealed class NotificationRulesControllerTests(SqlServerFixture sql)
 
         // ⛔ Вісь подій повна навіть тоді, коли правил немає: порожня клітинка
         // означає «правила немає», а не «події не буває».
-        Assert.Equal(6, matrix.GetProperty("eventKinds").GetArrayLength());
+        Assert.Equal(
+            Enum.GetValues<Ecr.Domain.Entities.Notifications.NotificationEventKind>().Length,
+            matrix.GetProperty("eventKinds").GetArrayLength());
 
         var body = new
         {
