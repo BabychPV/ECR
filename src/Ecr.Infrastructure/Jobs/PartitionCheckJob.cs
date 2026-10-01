@@ -61,6 +61,13 @@ public sealed class PartitionCheckJob(
     /// <param name="ct">Токен скасування.</param>
     private async Task RunAsync(MaintenanceRun run, IJobProgress progress, CancellationToken ct)
     {
+        // Аудит: межі pf_AuditByMonth продовжуються на AuditMonthsAhead місяців
+        // уперед процедурою (EXECUTE AS OWNER, тож DDL-прав застосунку не треба —
+        // D-66). Ідемпотентно: додає лише відсутні межі; SPLIT порожньої крайньої
+        // партиції — операція метаданих. Збій (напр. таймаут блокування) падає
+        // прогоном Failed (Q-240) і повторюється наступної ночі.
+        var auditAdded = await ExtendAuditBoundariesAsync(ct).ConfigureAwait(false);
+
         // ⛔ Функції партиціонування може не бути — тоді запасу не існує як
         // поняття, і мовчати про це не можна: «перевірка пройшла» на базі без
         // партицій означала б, що вичерпання диска не помітить ніхто.
@@ -75,7 +82,7 @@ public sealed class PartitionCheckJob(
                 "Degraded",
                 string.Create(
                     CultureInfo.InvariantCulture,
-                    $"{{\"reason\":\"pf_ByPeriodKey не існує\",\"edition\":\"{capabilities.EditionName}\"}}"),
+                    $"{{\"reason\":\"pf_ByPeriodKey не існує\",\"edition\":\"{capabilities.EditionName}\",\"auditBoundariesAdded\":{auditAdded}}}"),
                 clock.UtcNow);
 
             await db.SaveChangesAsync(ct).ConfigureAwait(false);
@@ -95,7 +102,7 @@ public sealed class PartitionCheckJob(
             enough ? "Succeeded" : "Degraded",
             string.Create(
                 CultureInfo.InvariantCulture,
-                $"{{\"boundariesAhead\":{ahead},\"minimum\":{MinimumBoundariesAhead}}}"),
+                $"{{\"boundariesAhead\":{ahead},\"minimum\":{MinimumBoundariesAhead},\"auditBoundariesAdded\":{auditAdded}}}"),
             clock.UtcNow);
 
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
@@ -125,6 +132,28 @@ public sealed class PartitionCheckJob(
     /// партицій колись зациклилося, і читати їх усі немає сенсу.
     /// </remarks>
     private const int MaxBoundaries = 1_000;
+
+    /// <summary>Запас меж <c>pf_AuditByMonth</c> уперед, місяців.</summary>
+    public const int AuditMonthsAhead = 12;
+
+    /// <summary>Продовжує межі аудиту; повертає, скільки меж додано.</summary>
+    private async Task<int> ExtendAuditBoundariesAsync(CancellationToken ct)
+    {
+        var added = new Microsoft.Data.SqlClient.SqlParameter("@Added", System.Data.SqlDbType.Int)
+        {
+            Direction = System.Data.ParameterDirection.Output,
+        };
+
+        var today = clock.UtcNow.Date;
+        await db.Database
+            .ExecuteSqlRawAsync(
+                "EXEC arc.usp_EnsureAuditPartitions @MonthsAhead = {0}, @Today = {1}, @Added = @Added OUTPUT;",
+                new object[] { AuditMonthsAhead, today, added },
+                ct)
+            .ConfigureAwait(false);
+
+        return added.Value is int n ? n : 0;
+    }
 
     /// <summary>Чи існує функція партиціонування за періодом.</summary>
     private async Task<bool> PartitionFunctionExistsAsync(CancellationToken ct)
