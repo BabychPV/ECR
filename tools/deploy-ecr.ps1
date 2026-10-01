@@ -367,7 +367,7 @@ param(
     [ValidateSet('Grpc', 'HttpProtobuf')] [string] $TelemetryOtlpProtocol,
     [ValidateSet('Auto', 'Standard', 'Enterprise')] [string] $EditionMode,
     [switch] $AllowExpress,
-    # AN-10 (D-258): довірений акаунт для ролі БД `ecr_viewer` («бачить усе»,
+    # AN-10 (D-265): довірений акаунт для ролі БД `ecr_viewer` («бачить усе»,
     # лише читання; роль створює 05-rpt-views.sql). Порожньо — роль порожня.
     # НЕ акаунт служби EcrApi/EcrWorker.
     [string] $ViewerAccount

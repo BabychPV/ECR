@@ -6,7 +6,7 @@ using Xunit;
 namespace Ecr.Infrastructure.Tests.Persistence;
 
 /// <summary>
-/// AN-10 (D-258): роль бази <c>ecr_viewer</c> («бачить усе», лише читання) з
+/// AN-10 (D-265): роль бази <c>ecr_viewer</c> («бачить усе», лише читання) з
 /// <c>05-rpt-views.sql</c>. Порожня за замовчуванням; член читає КОЖНУ схему
 /// додатку й не може ні змінювати схему, ні писати.
 /// Мутаційний доказ: прибрати з 05-rpt-views.sql <c>ALTER ROLE db_datareader ADD MEMBER

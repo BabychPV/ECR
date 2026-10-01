@@ -311,7 +311,7 @@ IF DATABASE_PRINCIPAL_ID(N'rpt_reader') IS NULL
 GRANT SELECT ON SCHEMA::rpt TO rpt_reader;
 GO
 
--- AN-10 (D-258, НФ-8.5): роль бази `ecr_viewer` — «бачить УСЕ» для довіреного
+-- AN-10 (D-265, НФ-8.5): роль бази `ecr_viewer` — «бачить УСЕ» для довіреного
 -- акаунта (DBA, діагностика). НЕ плутати з `rpt_reader` (SSRS, лише `rpt`).
 -- Права: членство у `db_datareader` (SELECT на ВСІ схеми бази, зокрема майбутні)
 -- + VIEW DEFINITION. Жодних ALTER/CREATE/INSERT/UPDATE/DELETE/EXECUTE.
