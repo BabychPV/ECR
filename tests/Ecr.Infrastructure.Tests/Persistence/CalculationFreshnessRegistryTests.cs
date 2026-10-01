@@ -26,6 +26,7 @@ public sealed class CalculationFreshnessRegistryTests(SqlServerFixture sql)
     private static readonly DateTime Now = new(2026, 5, 1, 8, 0, 0, DateTimeKind.Utc);
 
     [Fact]
+    [Trait("Requirement", "ФВ-9.19")]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     public async Task Правка_довідника_робить_результат_застарілим()
@@ -40,6 +41,7 @@ public sealed class CalculationFreshnessRegistryTests(SqlServerFixture sql)
     }
 
     [Fact]
+    [Trait("Requirement", "ФВ-9.19")]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     public async Task Правка_до_прогону_не_робить_застарілим()

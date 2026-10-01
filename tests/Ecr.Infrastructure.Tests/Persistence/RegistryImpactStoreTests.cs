@@ -58,6 +58,7 @@ public sealed class RegistryImpactStoreTests(SqlServerFixture sql)
     [Theory]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-9.19")]
     [InlineData(PeriodState.Closed)]
     [InlineData(PeriodState.Scheduled)]
     public async Task Impact_без_закритих_періодів(PeriodState state)
