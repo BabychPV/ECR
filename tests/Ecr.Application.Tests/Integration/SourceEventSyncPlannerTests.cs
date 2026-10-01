@@ -342,6 +342,29 @@ public sealed class SourceEventSyncPlannerTests
         Assert.Equal(["E2"], plan.Missing.Select(m => m.SourceEventId));
     }
 
+    /// <summary>D-259: подія, що перестала проходити звуження чи стала не кореневою, не «повертається» — вона в Gone.</summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Directive", "HSE301-EFSYNC")]
+    public void D259_Подія_що_перестала_проходити_звуження_або_стала_не_кореневою_потрапляє_в_Gone()
+    {
+        var stillMine = Linked("E1", "EF-E1");
+        var nowOtherFlare = Linked("E2", "EF-E2", start: Start.AddHours(1));
+        var nowChild = Linked("E3", "EF-E3", start: Start.AddHours(2));
+
+        var events = new[]
+        {
+            Ev("E1", Start, Start.AddMinutes(15), attrs: [Attribute("Flare", "HP")]),
+            Ev("E2", Start.AddHours(1), Start.AddHours(2), attrs: [Attribute("Flare", "LP")]),
+            Ev("E3", Start.AddHours(2), Start.AddHours(3), parent: "P1", attrs: [Attribute("Flare", "HP")]),
+        };
+
+        var plan = SourceEventSyncPlanner.Plan(Input(events, [stillMine, nowOtherFlare, nowChild], [January])
+            with { FilterAttribute = "Flare", FilterScope = SourceEventAttributeScope.Event, FilterValue = "HP" });
+
+        Assert.Equal(["E2", "E3"], plan.Gone!.Select(g => g.SourceEventId).Order(StringComparer.Ordinal));
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait("Directive", "HSE301-A5b")]
