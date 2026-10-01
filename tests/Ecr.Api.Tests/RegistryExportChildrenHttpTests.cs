@@ -154,6 +154,18 @@ public sealed class RegistryExportChildrenHttpTests(SqlServerFixture sql)
             $"/api/v1/registries/{f.Parent.Code}/export?asOf=2026-05-01&includeChildren=true", UriKind.Relative));
         Assert.Equal(HttpStatusCode.Forbidden, withParts.StatusCode);
 
+        // ⛔ S18: глобальне право із забороною на частину — та сама відмова, що й лише з грантом на батька:
+        // 403 permission без ідентифікатора частини. Доти — 404 registryId з registryDefId частини,
+        // про яку людина не питала й якої не бачить.
+        using var deniedChild = await SignedInDeniedAsync(app, [], [f.Child.Id], "Registry.View");
+        var hiddenPart = await deniedChild.GetAsync(new Uri(
+            $"/api/v1/registries/{f.Parent.Code}/export?asOf=2026-05-01&includeChildren=true", UriKind.Relative));
+        var hiddenText = await hiddenPart.Content.ReadAsStringAsync();
+        Assert.True(hiddenPart.StatusCode == HttpStatusCode.Forbidden, $"{hiddenPart.StatusCode}: {hiddenText}");
+        Assert.Contains("err.ECR-AUTH-0403.permission", hiddenText, StringComparison.Ordinal);
+        Assert.DoesNotContain("registryDefId", hiddenText, StringComparison.Ordinal);
+        Assert.Contains("err.ECR-AUTH-0403.permission", await withParts.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+
         using var all = await SignedInAsync(app, [f.Parent.Id, f.Child.Id, f.Grand.Id]);
         var granted = await all.GetAsync(new Uri(
             $"/api/v1/registries/{f.Parent.Code}/export?asOf=2026-05-01&includeChildren=true", UriKind.Relative));
@@ -331,8 +343,13 @@ public sealed class RegistryExportChildrenHttpTests(SqlServerFixture sql)
         => new DbContextOptionsBuilder<EcrDbContext>().UseSqlServer(sql.ConnectionString).Options;
 
     /// <summary>Користувач із глобальними правами й/або грантами <c>Read</c> на довідники.</summary>
-    private async Task<HttpClient> SignedInAsync(
+    private Task<HttpClient> SignedInAsync(
         Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactory<Program> app, int[] readGrants, params string[] permissions)
+        => SignedInDeniedAsync(app, readGrants, [], permissions);
+
+    /// <summary>Те саме, плюс явні заборони (<c>IsDeny</c>) на довідники.</summary>
+    private async Task<HttpClient> SignedInDeniedAsync(
+        Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactory<Program> app, int[] readGrants, int[] denies, params string[] permissions)
     {
         var name = $"rege_{Guid.NewGuid():N}"[..20];
 
@@ -343,7 +360,7 @@ public sealed class RegistryExportChildrenHttpTests(SqlServerFixture sql)
             db.Users.Add(user);
             await db.SaveChangesAsync();
 
-            if (permissions.Length > 0 || readGrants.Length > 0)
+            if (permissions.Length > 0 || readGrants.Length > 0 || denies.Length > 0)
             {
                 var role = new Role(
                     EcrCode.Create($"R{Guid.NewGuid():N}"[..12]),
@@ -359,6 +376,11 @@ public sealed class RegistryExportChildrenHttpTests(SqlServerFixture sql)
                 foreach (var registryId in readGrants)
                 {
                     db.ResourceGrants.Add(new ResourceGrant(role.Id, ResourceKind.Registry, registryId, GrantLevel.Read));
+                }
+
+                foreach (var registryId in denies)
+                {
+                    db.ResourceGrants.Add(new ResourceGrant(role.Id, ResourceKind.Registry, registryId, GrantLevel.Read, isDeny: true));
                 }
 
                 db.RoleAssignments.Add(new RoleAssignment(role.Id, user.Id, principalSid: null));

@@ -126,8 +126,8 @@ public sealed class ExportRegistryHandler(
     /// </param>
     /// <param name="maxRows">Стеля записів — на ВСІ довідники файлу разом.</param>
     /// <param name="ct">Токен скасування.</param>
-    /// <exception cref="NotFoundException"><c>ECR-REG-0404</c>: довідника немає або дочірній заборонено.</exception>
-    /// <exception cref="AccessDeniedException">Немає читання дочірнього довідника.</exception>
+    /// <exception cref="NotFoundException"><c>ECR-REG-0404</c>: довідника немає.</exception>
+    /// <exception cref="AccessDeniedException">Немає читання дочірнього довідника (грант чи заборона — однаково).</exception>
     /// <exception cref="BusinessRuleException">
     /// <c>ECR-REQ-0422</c>: невідомий формат (<c>registryExportFormatUnknown</c>) або записів понад
     /// стелю (<c>registryExportTooLarge</c>).
@@ -135,7 +135,7 @@ public sealed class ExportRegistryHandler(
     public async Task<RegistryExportFile> HandleAsync(
         string registryCode, string? format, DateOnly? asOf, bool includeChildren, int maxRows, CancellationToken ct)
     {
-        await RegistryAccess
+        var profile = await RegistryAccess
             .RequireAsync(access, currentUser, Permission, GrantLevel.Read, new RegistryLookup(registries, registryCode), ct)
             .ConfigureAwait(false);
 
@@ -160,11 +160,15 @@ public sealed class ExportRegistryHandler(
         {
             foreach (var child in await ChildrenAsync(root.Definition, ct).ConfigureAwait(false))
             {
-                // ⛔ Читання КОЖНОГО дочірнього — та сама перевірка, що й для батька: грант на батька
+                // ⛔ Читання КОЖНОГО дочірнього — те саме правило, що й для батька: грант на батька
                 // не відкриває його частин, а заборона на частину не обходиться експортом батька.
-                await RegistryAccess
-                    .RequireAsync(access, currentUser, Permission, GrantLevel.Read, child.Id, ct)
-                    .ConfigureAwait(false);
+                // ⛔ S18: відмова одна — `403 permission` без ідентифікатора частини — і для гранта, і для
+                // заборони. Доти заборонена частина давала `404 registryId` з її `registryDefId`:
+                // відповідь про довідник, якого людина не називала й не бачить.
+                if (!RegistryAccess.CanAccess(profile, Permission, GrantLevel.Read, child.Id))
+                {
+                    throw RegistryAccess.Denied(Permission);
+                }
 
                 // Частину видно рівно тоді, коли видно батька (D-155): усі видимі частини на asOf — це
                 // рівно частини записів батька, які вже лягли у файл.

@@ -244,7 +244,27 @@ public static class RegistryAccess
         // ресурсний грант користувачу знати не треба — повідомлення про
         // ГЛОБАЛЬНЕ право лишається зрозумілим і тоді, коли насправді
         // бракує саме гранта.
-        throw new AccessDeniedException(
+        throw Denied(permission);
+    }
+
+    /// <summary>
+    /// Чи відкриває профіль довідник, уже відомий викликачу, без винятку: глобальне право без
+    /// заборони або ресурсний грант рівня <paramref name="minLevel"/>+ (те саме правило, що й
+    /// <see cref="RequireAsync(IAccessDecisionService, ICurrentUser, string, GrantLevel, int, CancellationToken)"/>).
+    /// </summary>
+    /// <param name="profile">Профіль користувача.</param>
+    /// <param name="permission">Глобальне право.</param>
+    /// <param name="minLevel">Мінімальний рівень гранта.</param>
+    /// <param name="registryDefId">Довідник.</param>
+    internal static bool CanAccess(AccessProfile profile, string permission, GrantLevel minLevel, int registryDefId)
+        => PermissionCheck.IsGranted(profile, permission)
+            ? !IsDenied(profile, registryDefId)
+            : profile.LevelFor(ResourceKind.Registry, registryDefId) >= minLevel;
+
+    /// <summary><c>403 err.ECR-AUTH-0403.permission</c> — без жодного ідентифікатора довідника.</summary>
+    /// <param name="permission">Код права.</param>
+    internal static AccessDeniedException Denied(string permission)
+        => new(
             "ECR-AUTH-0403",
             $"Потрібне право {permission}.",
             new Dictionary<string, object?>
@@ -252,5 +272,4 @@ public static class RegistryAccess
                 ["messageKey"] = "err.ECR-AUTH-0403.permission",
                 ["permission"] = permission,
             });
-    }
 }
