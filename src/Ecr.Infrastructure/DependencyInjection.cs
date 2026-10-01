@@ -1,4 +1,4 @@
-using Ecr.Application.Ports;
+﻿using Ecr.Application.Ports;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Infrastructure.Caching;

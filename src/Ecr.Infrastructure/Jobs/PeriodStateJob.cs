@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Runtime.ExceptionServices;
 using System.Text.Encodings.Web;
 using System.Text.Json;

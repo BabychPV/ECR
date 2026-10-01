@@ -1,4 +1,4 @@
-// src/Ecr.Domain/Entities/Calculations/MethodologyFormula.cs
+﻿// src/Ecr.Domain/Entities/Calculations/MethodologyFormula.cs
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
@@ -182,7 +182,7 @@ public sealed class MethodologyFormula : Entity<int>
     }
 
     /// <summary>Межа виразу — довжина колонки <c>Expression</c> у <c>MethodologyFormulaConfiguration</c>.</summary>
-    public const int MaxExpressionLength = 2000;
+    public const int MaxExpressionLength = 4000;
 
     /// <summary>Знімає одиницю результату.</summary>
     /// <remarks>

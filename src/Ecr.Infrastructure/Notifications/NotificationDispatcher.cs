@@ -1,4 +1,4 @@
-// src/Ecr.Infrastructure/Notifications/NotificationDispatcher.cs
+﻿// src/Ecr.Infrastructure/Notifications/NotificationDispatcher.cs
 using System.Globalization;
 using Ecr.Application.Ports;
 using Ecr.Domain.Abstractions;

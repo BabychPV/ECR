@@ -1,4 +1,4 @@
-// src/Ecr.Infrastructure/Integration/SmtpNotificationSender.cs
+﻿// src/Ecr.Infrastructure/Integration/SmtpNotificationSender.cs
 using System.Globalization;
 using System.Net;
 using System.Net.Mail;

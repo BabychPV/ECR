@@ -1,4 +1,4 @@
-// src/Ecr.Application/Notifications/NotificationChannelHandlers.cs
+﻿// src/Ecr.Application/Notifications/NotificationChannelHandlers.cs
 using System.Globalization;
 using System.Net.Mail;
 using System.Text.Json;

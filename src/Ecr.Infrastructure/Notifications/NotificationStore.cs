@@ -1,4 +1,4 @@
-// src/Ecr.Infrastructure/Notifications/NotificationStore.cs
+﻿// src/Ecr.Infrastructure/Notifications/NotificationStore.cs
 using Ecr.Application.Common;
 using Ecr.Application.Notifications;
 using Ecr.Application.Ports;

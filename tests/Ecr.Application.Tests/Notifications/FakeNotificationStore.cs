@@ -1,4 +1,4 @@
-// tests/Ecr.Application.Tests/Notifications/FakeNotificationStore.cs
+﻿// tests/Ecr.Application.Tests/Notifications/FakeNotificationStore.cs
 using Ecr.Application.Common;
 using Ecr.Application.Notifications;
 using Ecr.Application.Ports;

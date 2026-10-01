@@ -1,4 +1,4 @@
-// src/Ecr.Application/Ports/INotificationDispatchStore.cs
+﻿// src/Ecr.Application/Ports/INotificationDispatchStore.cs
 using Ecr.Domain.Entities.Notifications;
 
 namespace Ecr.Application.Ports;

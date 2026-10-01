@@ -1,4 +1,4 @@
-// src/Ecr.Infrastructure/Notifications/SmtpChannelSender.cs
+﻿// src/Ecr.Infrastructure/Notifications/SmtpChannelSender.cs
 using System.Text.Json;
 using Ecr.Application.Notifications;
 using Ecr.Application.Ports;

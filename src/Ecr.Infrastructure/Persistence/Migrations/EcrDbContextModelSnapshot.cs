@@ -401,8 +401,8 @@ namespace Ecr.Infrastructure.Persistence.Migrations
 
                     b.Property<string>("Expression")
                         .IsRequired()
-                        .HasMaxLength(2000)
-                        .HasColumnType("nvarchar(2000)");
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
 
                     b.Property<bool>("IsVisible")
                         .HasColumnType("bit")

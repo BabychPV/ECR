@@ -1,4 +1,4 @@
-using Ecr.Domain.Entities.Notifications;
+﻿using Ecr.Domain.Entities.Notifications;
 using Ecr.Domain.Entities.Security;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;

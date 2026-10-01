@@ -1,4 +1,4 @@
-import { lazy, Suspense, type JSX } from 'react';
+﻿import { lazy, Suspense, type JSX } from 'react';
 import { Skeleton, Stack, Title } from '@mantine/core';
 import { ChannelsPanel } from '@/features/notifications/ChannelsPanel';
 import { DeliveriesPanel } from '@/features/notifications/DeliveriesPanel';

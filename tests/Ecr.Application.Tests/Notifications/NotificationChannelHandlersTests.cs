@@ -1,4 +1,4 @@
-// tests/Ecr.Application.Tests/Notifications/NotificationChannelHandlersTests.cs
+﻿// tests/Ecr.Application.Tests/Notifications/NotificationChannelHandlersTests.cs
 using System.Text;
 using Ecr.Application.Common;
 using Ecr.Application.Errors;

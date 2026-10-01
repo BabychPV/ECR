@@ -11,6 +11,19 @@ namespace Ecr.Infrastructure.Persistence.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
+            // AN-5: реальні формули Thermaloxidizer мають 2409 символів (> 2000). Розширення nvarchar до
+            // 4000 для неіндексованої колонки — лише метадані.
+            migrationBuilder.AlterColumn<string>(
+                name: "Expression",
+                schema: "calc",
+                table: "MethodologyFormula",
+                type: "nvarchar(4000)",
+                maxLength: 4000,
+                nullable: false,
+                oldClrType: typeof(string),
+                oldType: "nvarchar(2000)",
+                oldMaxLength: 2000);
+
             migrationBuilder.CreateTable(
                 name: "NotificationChannelRole",
                 schema: "sys_ecr",
@@ -76,6 +89,17 @@ namespace Ecr.Infrastructure.Persistence.Migrations
         /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
+            migrationBuilder.AlterColumn<string>(
+                name: "Expression",
+                schema: "calc",
+                table: "MethodologyFormula",
+                type: "nvarchar(2000)",
+                maxLength: 2000,
+                nullable: false,
+                oldClrType: typeof(string),
+                oldType: "nvarchar(4000)",
+                oldMaxLength: 4000);
+
             migrationBuilder.DropTable(
                 name: "NotificationChannelRole",
                 schema: "sys_ecr");

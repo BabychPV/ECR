@@ -129,17 +129,24 @@ public sealed class NegativePathSweepTests(SqlServerFixture sql)
 
         using var response = await client.PutAsJsonAsync(
             new Uri(url + "tons", UriKind.Relative),
-            new { expression = "1+" + new string('1', 1999), resultType = 0, outputUnitId = (int?)null, argumentsCsv = (string?)null })
+            new { expression = "1+" + new string('1', 3999), resultType = 0, outputUnitId = (int?)null, argumentsCsv = (string?)null })
             .ConfigureAwait(true);
 
         var problem = await AssertRefusalAsync(
             app, response, HttpStatusCode.UnprocessableEntity, "ECR-CALC-0422", "err.ECR-CALC-0422.formulaTooLong").ConfigureAwait(true);
         Assert.Equal("tons", problem.GetProperty("code").GetString());
 
-        // Рівно 2000 символів — межа колонки — зберігається.
+        // ✎ AN-5: формули Thermaloxidizer мають 2409 символів — раніше це було `formulaTooLong`.
+        using var thermal = await client.PutAsJsonAsync(
+            new Uri(url + "thermal", UriKind.Relative),
+            new { expression = "1+" + new string('1', 2407), resultType = 0, outputUnitId = (int?)null, argumentsCsv = (string?)null })
+            .ConfigureAwait(true);
+        Assert.True(thermal.IsSuccessStatusCode, $"{(int)thermal.StatusCode} {await thermal.Content.ReadAsStringAsync().ConfigureAwait(true)}");
+
+        // Рівно 4000 символів — межа колонки — зберігається.
         using var ok = await client.PutAsJsonAsync(
             new Uri(url + "edge", UriKind.Relative),
-            new { expression = "1+" + new string('1', 1998), resultType = 0, outputUnitId = (int?)null, argumentsCsv = (string?)null })
+            new { expression = "1+" + new string('1', 3998), resultType = 0, outputUnitId = (int?)null, argumentsCsv = (string?)null })
             .ConfigureAwait(true);
         Assert.True(ok.IsSuccessStatusCode, $"{(int)ok.StatusCode} {await ok.Content.ReadAsStringAsync().ConfigureAwait(true)}");
     }

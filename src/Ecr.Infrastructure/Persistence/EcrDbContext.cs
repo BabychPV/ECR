@@ -1,4 +1,4 @@
-using Ecr.Domain.Entities.Calculations;
+﻿using Ecr.Domain.Entities.Calculations;
 using Ecr.Domain.Entities.External;
 using Ecr.Domain.Entities.Integration;
 using Ecr.Domain.Entities.Notifications;
