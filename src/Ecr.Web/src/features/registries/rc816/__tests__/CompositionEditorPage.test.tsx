@@ -111,10 +111,17 @@ describe('CompositionEditorPage: master-detail без введення іден�
     show();
     const table = await openCase('E77');
 
-    expect((screen.getByRole('button', { name: 'E78' }) as HTMLButtonElement).disabled).toBe(false);
+    const other = (): HTMLElement => screen.getByRole('button', { name: 'E78' });
+    expect(other().getAttribute('aria-disabled')).toBeNull();
     fireEvent.change(within(table).getAllByRole('textbox', { name: 'MOL_PCT' })[0] as HTMLElement, { target: { value: '1' } });
 
-    await waitFor(() => expect((screen.getByRole('button', { name: 'E78' }) as HTMLButtonElement).disabled).toBe(true));
+    await waitFor(() => expect(other().getAttribute('aria-disabled')).toBe('true'));
+    // ⚠ Кнопка лишається у фокусі й пояснює, чому недоступна, — а клік нічого не перемикає.
+    const describedBy = other().getAttribute('aria-describedby') ?? '';
+    expect(document.getElementById(describedBy)?.textContent).toBe('⟦registries.rc816.selectionLocked⟧');
+    fireEvent.click(other());
+    expect(screen.getByRole('button', { name: 'E77' }).getAttribute('aria-pressed')).toBe('true');
+    expect(other().getAttribute('aria-pressed')).toBe('false');
   });
 
   it('без Registry.EditData — лише перегляд: ні додавання, ні збереження', async () => {

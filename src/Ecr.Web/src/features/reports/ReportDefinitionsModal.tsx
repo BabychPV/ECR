@@ -28,6 +28,7 @@ import { LocalizedInput, hasAnyText, type LocalizedValue } from '@/shared/ui/Loc
 import { ReasonModal } from '@/shared/ui/ReasonModal';
 import { StatusBadge } from '@/shared/ui/StatusBadge';
 import { showApiError, showDone } from '@/shared/ui/notify';
+import { DisabledReason } from '@/features/common/DisabledReason';
 
 /**
  * Описи звітів: перелік, заведення нового, нова версія, публікація
@@ -255,9 +256,13 @@ export function ReportDefinitionsModal({
         <ColumnsEditor columns={columns} onChange={setColumns} />
 
         <Group justify="flex-end">
-          <Button disabled={cannotCreate} loading={create.isPending} onClick={() => create.mutate()}>
-            {t('reportDefs.add')}
-          </Button>
+          {/* ⚠ Причина вголос: без неї кнопка просто «не натискається», а
+              котре з п'яти полів порожнє — вгадуй. */}
+          <DisabledReason reason={cannotCreate ? t('reportDefs.addBlocked') : null}>
+            <Button loading={create.isPending} onClick={() => create.mutate()} data-report-add="">
+              {t('reportDefs.add')}
+            </Button>
+          </DisabledReason>
         </Group>
 
         <Divider label={t('reportDefs.newVersion')} />
@@ -353,15 +358,16 @@ function ColumnsEditor({
               onChange(columns.map((c, i) => (i === index ? { ...c, kind: value ?? c.kind } : c)))
             }
           />
-          <ActionIcon
-            variant="subtle"
-            color="statusError"
-            aria-label={t('reportDefs.removeColumn')}
-            disabled={columns.length === 1}
-            onClick={() => onChange(columns.filter((_, i) => i !== index))}
-          >
-            ×
-          </ActionIcon>
+          <DisabledReason reason={columns.length === 1 ? t('reportDefs.removeColumnBlocked') : null}>
+            <ActionIcon
+              variant="subtle"
+              color="statusError"
+              aria-label={t('reportDefs.removeColumn')}
+              onClick={() => onChange(columns.filter((_, i) => i !== index))}
+            >
+              ×
+            </ActionIcon>
+          </DisabledReason>
         </Group>
       ))}
 

@@ -5,6 +5,7 @@ import { EcrApiError } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
 import { t } from '@/shared/i18n';
 import { showApiError, showDone } from '@/shared/ui/notify';
+import { DisabledReason } from '@/features/common/DisabledReason';
 import { importMethodologyPackage, type MethodologyImportReportDto } from './api';
 
 type Issue = MethodologyImportReportDto['blockers'][number];
@@ -160,13 +161,19 @@ export function MethodologyPackageImport(): JSX.Element {
             >
               {t('methodologies.importCheck')}
             </Button>
-            <Button
-              disabled={pkg === null || report?.dryRun !== true || report.outcome !== 'created'}
-              loading={apply.isPending}
-              onClick={() => apply.mutate(pkg)}
+            {/* ⚠ Причина вголос: «Застосувати» відкривається лише після перевірки,
+                що створила б методику, — і без пояснення це треба вгадати. */}
+            <DisabledReason
+              reason={
+                pkg === null || report?.dryRun !== true || report.outcome !== 'created'
+                  ? t('methodologies.importApplyBlocked')
+                  : null
+              }
             >
-              {t('methodologies.importApply')}
-            </Button>
+              <Button loading={apply.isPending} onClick={() => apply.mutate(pkg)}>
+                {t('methodologies.importApply')}
+              </Button>
+            </DisabledReason>
           </Group>
 
           {report !== null && (

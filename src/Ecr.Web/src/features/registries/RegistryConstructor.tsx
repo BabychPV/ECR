@@ -123,6 +123,18 @@ export function RegistryFields({
           </Table.Tr>
         </Table.Thead>
         <Table.Tbody>
+          {/* ⚠ Без цього рядка довідник без полів — це голі заголовки таблиці,
+              що читаються як «ще вантажиться». Колонок сім: кнопки «Прибрати»
+              немає, бо немає й нових полів. */}
+          {definition.fields.length === 0 && newFields.length === 0 && (
+            <Table.Tr data-registry-fields-empty="">
+              <Table.Td colSpan={7}>
+                <Text size="sm" c="dimmed">
+                  {t('registries.noFields')}
+                </Text>
+              </Table.Td>
+            </Table.Tr>
+          )}
           {definition.fields.map((field) => (
             <Table.Tr key={field.id}>
               <Table.Td>{field.code}</Table.Td>

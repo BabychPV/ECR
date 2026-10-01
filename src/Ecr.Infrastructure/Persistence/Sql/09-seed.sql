@@ -5864,9 +5864,17 @@ USING (VALUES
     (N'audit.eventType', N'en', N'Event type', 1),
     (N'audit.securityEmpty', N'en', N'No security events in this window.', 1),
     (N'audit.details', N'en', N'Details', 1),
-    (N'audit.correlation', N'en', N'Correlation ID', 1)
+    (N'audit.correlation', N'en', N'Correlation ID', 1),
     -- ru/kz — окремою порцією `COLL:reqclose` у блоці I18N нижче.
     -- COLL:reqclose ── кінець секції ──
+    -- UI:dead-buttons ── причини недоступних дій і порожній стан полів довідника (клієнт) ──
+    (N'reportDefs.addBlocked', N'en', N'Fill in the code, the name, the version and a code for every column first.', 1),
+    (N'reportDefs.removeColumnBlocked', N'en', N'A report needs at least one column.', 1),
+    (N'registries.rc816.selectionLocked', N'en', N'Save or discard the changes in the levels below first.', 1),
+    (N'methodologies.importApplyBlocked', N'en', N'Check the package first: importing becomes available after a check that would create the methodology.', 1),
+    (N'registries.noFields', N'en', N'This registry has no fields yet', 1)
+    -- ru/kz — окремою порцією `UI:dead-buttons` у блоці I18N нижче.
+    -- UI:dead-buttons ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -13915,6 +13923,25 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- SEC:p2-oracle ── кінець секції ──
+
+-- UI:dead-buttons ── ru/kz причин недоступних дій і порожнього стану полів довідника; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'reportDefs.addBlocked', N'ru', N'Сначала заполните код, название, версию и код каждой колонки.'),
+    (N'reportDefs.addBlocked', N'kz', N'Алдымен кодты, атауды, нұсқаны және әр бағанның кодын толтырыңыз.'),
+    (N'reportDefs.removeColumnBlocked', N'ru', N'В отчёте должна быть хотя бы одна колонка.'),
+    (N'reportDefs.removeColumnBlocked', N'kz', N'Есепте кемінде бір баған болуы керек.'),
+    (N'registries.rc816.selectionLocked', N'ru', N'Сначала сохраните или отмените изменения на нижних уровнях.'),
+    (N'registries.rc816.selectionLocked', N'kz', N'Алдымен төменгі деңгейлердегі өзгерістерді сақтаңыз немесе болдырмаңыз.'),
+    (N'methodologies.importApplyBlocked', N'ru', N'Сначала проверьте пакет: импорт доступен после проверки, которая создала бы методику.'),
+    (N'methodologies.importApplyBlocked', N'kz', N'Алдымен пакетті тексеріңіз: импорт әдістемені құратын тексеруден кейін қолжетімді болады.'),
+    (N'registries.noFields', N'ru', N'У этого справочника пока нет полей'),
+    (N'registries.noFields', N'kz', N'Бұл анықтамалықта әзірге өрістер жоқ')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- UI:dead-buttons ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

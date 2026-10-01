@@ -19,6 +19,7 @@ import { localized } from '@/shared/i18n/localized';
 import { Banner } from '@/shared/ui/Banner';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { showDone } from '@/shared/ui/notify';
+import { DisabledReason } from '@/features/common/DisabledReason';
 import { getRegistryRows, saveBatch, type RegistryBatchResult } from '../rows/api';
 import type { CompositionNode } from './compositionTree';
 import {
@@ -362,15 +363,20 @@ export function CompositionPanel({
                           onChange={(event) => edit((all) => setCode(all, row.key, event.currentTarget.value))}
                         />
                       ) : onSelect !== undefined && row.id !== null ? (
-                        <Button
-                          size="compact-xs"
-                          variant={selected ? 'light' : 'subtle'}
-                          aria-pressed={selected}
-                          disabled={selectionLocked === true && !selected}
-                          onClick={() => onSelect(row.id as number, row.display || row.code)}
+                        // ⚠ Причина вголос: поки нижчий рівень не збережено, інший
+                        // рядок не обрати, і без пояснення кнопка просто «мертва».
+                        <DisabledReason
+                          reason={selectionLocked === true && !selected ? t('registries.rc816.selectionLocked') : null}
                         >
-                          {row.code}
-                        </Button>
+                          <Button
+                            size="compact-xs"
+                            variant={selected ? 'light' : 'subtle'}
+                            aria-pressed={selected}
+                            onClick={() => onSelect(row.id as number, row.display || row.code)}
+                          >
+                            {row.code}
+                          </Button>
+                        </DisabledReason>
                       ) : (
                         <Text size="sm">{row.code || t('registries.rc816.autoCode')}</Text>
                       )}

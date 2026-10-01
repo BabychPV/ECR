@@ -82,13 +82,19 @@ describe('MethodologyPackageImport', () => {
     await choosePackage();
 
     const apply = screen.getByRole('button', { name: '⟦methodologies.importApply⟧' });
-    expect(apply.hasAttribute('disabled')).toBe(true);
+    expect(apply.getAttribute('aria-disabled')).toBe('true');
+    // ⚠ Недоступна, але пояснює чому, а клік до перевірки нічого не шле.
+    expect(document.getElementById(apply.getAttribute('aria-describedby') ?? '')?.textContent).toBe(
+      '⟦methodologies.importApplyBlocked⟧',
+    );
+    fireEvent.click(apply);
+    expect(sent).toEqual([]);
 
     fireEvent.click(screen.getByRole('button', { name: '⟦methodologies.importCheck⟧' }));
 
     await screen.findByText('⟦methodologies.importOutcomeCreated⟧');
     expect(sent).toEqual([{ url: '/api/v1/methodologies/import?dryRun=true', method: 'POST' }]);
-    expect(screen.getByRole('button', { name: '⟦methodologies.importApply⟧' }).hasAttribute('disabled')).toBe(false);
+    expect(screen.getByRole('button', { name: '⟦methodologies.importApply⟧' }).getAttribute('aria-disabled')).toBeNull();
   });
 
   it('блокери з відмови 422 видно в діалозі', async () => {
