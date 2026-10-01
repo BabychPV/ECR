@@ -120,6 +120,7 @@ public sealed class PublishMethodologyHandler(
         // Diff рахується ДО публікації: після неї попередня версія вже не та,
         // що була чинною, і порівнювати стало б нема з чим.
         var previous = methodology.VersionOn(from.AddDays(-1));
+        RejectBackdatedStrict(version, previous, from);
         var diff = await BuildDiffAsync(methodology, version, previous, testCases, ct).ConfigureAwait(false);
 
         // Зелений тест — не прапорець, а факт: усі випадки золотого набору
@@ -489,6 +490,42 @@ public sealed class PublishMethodologyHandler(
             {
                 ["messageKey"] = "err.ECR-CALC-0433.legacyExtensionFunction",
                 ["functionCount"] = found.Count.ToString(CultureInfo.InvariantCulture),
+            });
+    }
+
+    /// <summary>
+    /// ФВ-9.9: перехід у <c>Strict</c> — лише явним рішенням з нової дати дії,
+    /// ніколи заднім числом (<c>ECR-CALC-0422</c>, <c>strictBackdated</c>).
+    /// </summary>
+    /// <remarks>
+    /// Перша версія без попередньої не зачіпається: переходу немає. «Сьогодні» — за
+    /// <see cref="IClock"/>, не за системним годинником.
+    /// </remarks>
+    private void RejectBackdatedStrict(MethodologyVersion version, MethodologyVersion? previous, DateOnly from)
+    {
+        if (previous is null
+            || version.NumericMode != NumericMode.Strict
+            || previous.NumericMode == NumericMode.Strict)
+        {
+            return;
+        }
+
+        var today = DateOnly.FromDateTime(clock.UtcNow);
+        if (from > today)
+        {
+            return;
+        }
+
+        throw new BusinessRuleException(
+            "ECR-CALC-0422",
+            $"Версія {version.Version} переводить методологію з {previous.NumericMode} у {NumericMode.Strict} "
+            + $"з дати {from:yyyy-MM-dd}, яка не пізніша за сьогоднішню ({today:yyyy-MM-dd}): "
+            + "Strict вмикається лише з нової дати дії, не заднім числом.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-CALC-0422.strictBackdated",
+                ["effectiveFrom"] = from.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                ["today"] = today.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
             });
     }
 
