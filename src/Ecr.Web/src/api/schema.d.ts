@@ -19819,6 +19819,9 @@ export interface components {
              * @description Документ задачі; `null` — не документна (BE-08).
              */
             documentId?: null | number;
+            /** @description Похідний стан для оператора (`SucceededWithErrors` — дайджест сповіщень без
+             *     жодної відправки, `JobCompletionWarning`); `null` — як `State`. */
+            effectiveState?: null | string;
             /** @description Код каталогу помилок провалу (BE-08). */
             errorCode?: null | string;
             /** @description Код задачі (тип). */

@@ -5144,6 +5144,13 @@
               "integer"
             ]
           },
+          "effectiveState": {
+            "description": "Похідний стан для оператора (`SucceededWithErrors` — дайджест сповіщень без\nжодної відправки, `JobCompletionWarning`); `null` — як `State`.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
           "errorCode": {
             "description": "Код каталогу помилок провалу (BE-08).",
             "type": [

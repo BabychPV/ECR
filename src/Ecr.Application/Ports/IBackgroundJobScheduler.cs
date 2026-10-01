@@ -250,6 +250,10 @@ public sealed record JobListFilter(
 /// Id автора; <c>null</c> — системна задача. Видимість та сама, що й
 /// <paramref name="CreatedByDisplayName"/> — клієнт вирішує показ «Повторити».
 /// </param>
+/// <param name="EffectiveState">
+/// Похідний стан для оператора (<c>SucceededWithErrors</c> — дайджест сповіщень без
+/// жодної відправки, <c>JobCompletionWarning</c>); <c>null</c> — як <c>State</c>.
+/// </param>
 public sealed record JobSummary(
     string JobId,
     string JobCode,
@@ -266,7 +270,8 @@ public sealed record JobSummary(
     long? DocumentId = null,
     int? MaxAttempts = null,
     string? ResultUrl = null,
-    int? CreatedByUserId = null);
+    int? CreatedByUserId = null,
+    string? EffectiveState = null);
 
 /// <summary>Фонова задача.</summary>
 public interface IBackgroundJob

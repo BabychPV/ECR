@@ -235,7 +235,8 @@ public sealed class GetJobStatusHandler(
                 profile, jobId, null, status.State, status.Message, status.DocumentId),
             CreatedByUserId = createdByUserId,
             FanOut = fanOut,
-            EffectiveState = fanOut?.EffectiveStateOf(status.State),
+            EffectiveState = fanOut?.EffectiveStateOf(status.State)
+                             ?? JobCompletionWarning.EffectiveStateOf(status.State, status.Message),
         };
     }
 }
@@ -425,6 +426,7 @@ public sealed class ListJobsHandler(
             .. items.Select((item, i) => item with
             {
                 Message = messages[i],
+                EffectiveState = JobCompletionWarning.EffectiveStateOf(item.State, item.Message),
                 ResultUrl = JobResultUrl.For(
                     profile, item.JobId, item.JobCode, item.State, item.Message, item.DocumentId),
             }),
