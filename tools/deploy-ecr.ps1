@@ -180,6 +180,16 @@
     одноразових стендів цей скрипт не ставить ніколи (сторож в
     Ecr.Architecture.Tests).
 
+.PARAMETER PreviousDataProtectionCertificateThumbprints
+    D-267: відбитки ПОПЕРЕДНІХ сертифікатів Data Protection через `;` — при
+    заміні сертифіката. Пишеться змінною
+    `ECR_Auth__DataProtection__PreviousCertificateThumbprints`; застосунок
+    розшифровує ними старі ключі кільця (`UnprotectKeysWithAnyCertificate`).
+    Сертифікат має бути в `Cert:\LocalMachine\My`, інакше застосунок лише
+    пише Warning. Не задано — змінна не пишеться (поведінка без змін).
+    ⚠ MSI-оновлення стирає Environment служби: при кожному оновленні
+    передавай параметр знову, поки старі ключі ще в кільці.
+
 .PARAMETER HttpsThumbprint
     ⛔ D14-08/R-01: ТРАНСПОРТ — рівно один із трьох параметрів (`-HttpsThumbprint`,
     `-BehindHttpsProxy`, `-AllowHttp`); жодного з них — зупинка з поясненням, а не мовчазний HTTP.
@@ -338,6 +348,7 @@ param(
     [System.Security.SecureString] $ConnectionString,
     [System.Security.SecureString] $BootstrapPassword,
     [string] $DataProtectionThumbprint,
+    [string] $PreviousDataProtectionCertificateThumbprints,
     [string] $HttpsThumbprint,
     [ValidateRange(0, 65535)] [int] $HttpRedirectPort = 0,
     [switch] $BehindHttpsProxy,
@@ -1496,6 +1507,15 @@ if ($PSCmdlet.ShouldProcess('HKLM:\SYSTEM\CurrentControlSet\Services\EcrApi\Envi
     Set-ServiceEnvironmentVariable -ServiceName 'EcrApi' -Name 'ECR_Auth__DataProtection__CertificateThumbprint' `
         -Value $DataProtectionThumbprint
     Write-Host "ECR_Auth__DataProtection__CertificateThumbprint записано ($DataProtectionThumbprint)." -ForegroundColor Green
+}
+
+# D-267: попередні сертифікати DP (заміна сертифіката) — відбитки, не секрет.
+if ($PreviousDataProtectionCertificateThumbprints -and
+    $PSCmdlet.ShouldProcess('HKLM:\SYSTEM\CurrentControlSet\Services\EcrApi\Environment',
+        'записати ECR_Auth__DataProtection__PreviousCertificateThumbprints')) {
+    Set-ServiceEnvironmentVariable -ServiceName 'EcrApi' -Name 'ECR_Auth__DataProtection__PreviousCertificateThumbprints' `
+        -Value $PreviousDataProtectionCertificateThumbprints
+    Write-Host "ECR_Auth__DataProtection__PreviousCertificateThumbprints записано ($PreviousDataProtectionCertificateThumbprints)." -ForegroundColor Green
 }
 
 if ($BootstrapPassword) {
