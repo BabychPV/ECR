@@ -46,6 +46,8 @@ public sealed class DataSourceEndpointPolicyTests
     [InlineData("http://0.0.0.0/")]
     [InlineData("http://[::]/")]
     [InlineData("http://224.0.0.1/")]
+    [InlineData("http://metadata.google.internal/computeMetadata/v1/")]
+    [InlineData("http://metadata.google.internal./")]
     public void Блоклист_loopback_linklocal_metadata_unspecified_відхиляється_у_будь_якому_режимі(string address)
     {
         Assert.Equal(EndpointVerdict.HostForbidden, DataSourceEndpointPolicy.CheckAddress(address, false, null));

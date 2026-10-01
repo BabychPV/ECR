@@ -47,7 +47,7 @@ public static class DataSourceEndpointPolicy
 
         var host = HostOf(uri);
 
-        if (IsLocalName(host))
+        if (IsLocalName(host) || IsCloudMetadataName(host))
         {
             return EndpointVerdict.HostForbidden;
         }
@@ -82,9 +82,9 @@ public static class DataSourceEndpointPolicy
             return EndpointVerdict.Scheme;
         }
 
-        var host = SqlHostOf(address);
+        var host = SqlHostOf(address).TrimEnd('.');
 
-        return IPAddress.TryParse(host, out var ip) && IsLinkLocal(ip)
+        return IsCloudMetadataName(host) || (IPAddress.TryParse(host, out var ip) && IsLinkLocal(ip))
             ? EndpointVerdict.HostForbidden
             : EndpointVerdict.Allowed;
     }
@@ -263,6 +263,17 @@ public static class DataSourceEndpointPolicy
     }
 
     private static string HostOf(Uri uri) => uri.Host.Trim('[', ']').TrimEnd('.');
+
+    /// <summary>
+    /// Імена хмарних служб метаданих (GCP <c>metadata.google.internal</c>/<c>metadata.goog</c>,
+    /// Azure/OCI <c>metadata.azure.internal</c>). Розв'язуються в 169.254.169.254, але за іменем
+    /// перевірку IP-літерала оминають — тому відмова за самим іменем.
+    /// </summary>
+    public static bool IsCloudMetadataName(string host)
+        => CloudMetadataNames.Contains(host.Trim('[', ']').TrimEnd('.'), StringComparer.OrdinalIgnoreCase);
+
+    private static readonly string[] CloudMetadataNames =
+        ["metadata.google.internal", "metadata.goog", "metadata.azure.internal", "metadata"];
 
     private static bool IsLocalName(string host)
         => string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase)

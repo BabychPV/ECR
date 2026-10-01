@@ -30,6 +30,13 @@ public sealed class DataSourceSqlEndpointPolicyTests
     [InlineData("fe80::1")]
     [InlineData("[fe80::1]:5461")]
     [InlineData("::ffff:169.254.169.254")]
+    [InlineData("metadata.google.internal")]
+    [InlineData("METADATA.GOOGLE.INTERNAL.")]
+    [InlineData("metadata.google.internal,1433")]
+    [InlineData("metadata.google.internal:1433")]
+    [InlineData("metadata.google.internal\\PIAF")]
+    [InlineData("metadata.goog")]
+    [InlineData("metadata")]
     public void LinkLocal_літерал_відхиляється(string address)
         => Assert.Equal(EndpointVerdict.HostForbidden, DataSourceEndpointPolicy.CheckSqlServerAddress(address));
 
@@ -45,6 +52,8 @@ public sealed class DataSourceSqlEndpointPolicyTests
     [InlineData("localhost\\SQLEXPRESS")]
     [InlineData("[::1]:5461")]
     [InlineData("192.168.0.9:5461")]
+    [InlineData("metadata.corp.local")]
+    [InlineData("google.internal")]
     public void Допустимі_формати_сервера_проходять(string address)
         => Assert.Equal(EndpointVerdict.Allowed, DataSourceEndpointPolicy.CheckSqlServerAddress(address));
 
