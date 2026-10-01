@@ -338,9 +338,18 @@ function isQueued(result: PatchCellsResponse | JobAcceptedResponse): result is J
 function show(value: unknown): string {
   if (value === null || value === undefined || value === '') return '—';
 
-  return String(value);
+  return trimFractionZeros(String(value));
 }
 
+/**
+ * Прибирає хвостові нулі дробової частини: колонка decimal(25,16) віддає
+ * 1.5000000000000000, і в переліку імпорту це шістнадцять знаків шуму замість
+ * числа, яке людина звіряє з книгою (P3, walk3 2026-10-01). Лише відображення:
+ * значення в запиті не змінюється; ціле й нечислове лишається як є.
+ */
+export function trimFractionZeros(text: string): string {
+  return /^-?\d+\.\d+$/.test(text) ? text.replace(/\.?0+$/, '') : text;
+}
 /**
  * Таблиця рядка переліку — назвою мовою інтерфейсу, а коли назви немає, кодом.
  *
