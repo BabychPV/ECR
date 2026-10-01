@@ -550,7 +550,7 @@ public sealed class PeriodContext
     /// <summary>Днів у періоді згідно з <see cref="Mode"/>.</summary>
     public int Days => throw new NotImplementedException(
         "TODO: Actual → фактична кількість днів (End - Start + 1); " +
-        "Fixed365 → місяць як фактичний, але рік завжди 365; " +
+        "Fixed365 → ✎ 2026-10-01 як Actual: рік 366/365 за календарем; " +
         "Fixed360 → місяць 30, рік 360. Перевіряється тестом на обидва режими (02c §7).");
 
     /// <summary>Годин у періоді.</summary>

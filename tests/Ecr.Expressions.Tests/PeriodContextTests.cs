@@ -47,20 +47,45 @@ public sealed class PeriodContextTests
         Assert.Equal(360, Year(2028, CalendarMode.Fixed360).Days);
     }
 
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Theory]
+    [InlineData(2024, 366)]
+    [InlineData(2025, 365)]
+    [InlineData(2028, 366)]
+    [InlineData(2100, 365)] // століття не кратне 400 — не високосний
+    [InlineData(2000, 366)]
+    public void Рік_має_фактичну_кількість_днів_для_Actual_і_застарілого_Fixed365(int year, int days)
+    {
+        // Рішення людини 2026-10-01 (замінює D-213): Fixed365 = фактичний календар.
+        Assert.Equal(days, Year(year, CalendarMode.Actual).Days);
+        Assert.Equal(days, Year(year, CalendarMode.Fixed365).Days);
+        Assert.Equal(days * 86400L, Year(year, CalendarMode.Fixed365).Seconds);
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage4)]
-    public void Fixed365_дає_рік_у_365_днів_навіть_у_високосному()
+    public void Сума_місяців_дорівнює_року_і_лютий_фактичний()
     {
-        // 2028 — високосний: фактично 366 днів.
-        Assert.Equal(366, Year(2028, CalendarMode.Actual).Days);
-        Assert.Equal(365, Year(2028, CalendarMode.Fixed365).Days);
-        Assert.Equal(365, Year(2026, CalendarMode.Fixed365).Days);
-
-        // ⚠ Fixed365 фіксує лише РІК. Місяць у ньому лишається фактичним —
-        // інакше сума дванадцяти місяців не дорівнювала б року, і зведений
-        // звіт не сходився б із помісячними при жодному округленні.
         Assert.Equal(31, Month(2026, 1, CalendarMode.Fixed365).Days);
-        Assert.Equal(29, Month(2028, 2, CalendarMode.Fixed365).Days);
+        Assert.Equal(28, Month(2025, 2, CalendarMode.Fixed365).Days);
+        Assert.Equal(29, Month(2024, 2, CalendarMode.Fixed365).Days);
+        Assert.Equal(28, Month(2100, 2, CalendarMode.Fixed365).Days);
+        Assert.Equal(29, Month(2000, 2, CalendarMode.Fixed365).Days);
+        foreach (var y in new[] { 2024, 2025, 2100, 2000 })
+        {
+            var sum = Enumerable.Range(1, 12).Sum(m => Month(y, m, CalendarMode.Fixed365).Days);
+            Assert.Equal(Year(y, CalendarMode.Fixed365).Days, sum);
+        }
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    public void Частка_1_на_днів_року_у_високосному_році_це_1_на_366()
+    {
+        var leap = 1m / Year(2024, CalendarMode.Fixed365).Days;
+        var normal = 1m / Year(2025, CalendarMode.Fixed365).Days;
+        Assert.Equal(1m / 366m, leap);
+        Assert.Equal(1m / 365m, normal);
     }
 
     [Fact]
