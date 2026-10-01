@@ -42,7 +42,7 @@ namespace Ecr.Api.Tests;
 /// </list>
 /// </remarks>
 [Collection("SqlServer")]
-public sealed class RowWindowMapsApiTests(SqlServerFixture sql)
+public sealed partial class RowWindowMapsApiTests(SqlServerFixture sql)
 {
     private const string Password = "Row-Window-Api-2026!";
     private static readonly Uri Maps = new("/api/v1/row-window-maps", UriKind.Relative);

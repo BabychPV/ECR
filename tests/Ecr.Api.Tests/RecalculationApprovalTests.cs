@@ -24,7 +24,7 @@ namespace Ecr.Api.Tests;
 /// Тести йдуть реальним HTTP двома окремими сесіями — саме так, як експлойт.
 /// </remarks>
 [Collection("SqlServer")]
-public sealed class RecalculationApprovalTests(SqlServerFixture sql)
+public sealed partial class RecalculationApprovalTests(SqlServerFixture sql)
 {
     private const string Password = "Api-Recalc-Approval-2026!";
     private const int Closed = 202601;

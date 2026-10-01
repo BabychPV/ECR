@@ -101,10 +101,10 @@ Decimal.
 - **Очікується:**
   - п. 1: «Window {from} – {to} UTC: {count} events.»; таблиця «Start / end, UTC | Event | Attributes»; **нічого не записано** («Reads real events of the template from PI and writes nothing.»); атрибути — ті, що вже є в мапінгу (крім `$…`), якщо таких нема — усі;
   - п. 2: «There were more events than the limit: only the first ones are shown.»;
-  - п. 3: відмова перевірки, запит до PI не йде;
+  - п. 3: поля UI самі затискають значення в 1–92 / 1–100 (93 стане 92, 0 стане 1), тож відмову в UI **не побачити**; 422 `probeEventsInvalid` — лише прямим `POST …/probe-events` (✎ 2026-10-01, суха прогонка; тест `SourceEventsApiTests.Проба_поза_межами_вікна_й_ліміту_422_до_звернення_в_джерело`); запит до PI не йде;
   - п. 4: «No events of the template in this window.»;
   - якщо в мапінгу є поле з «Value map»: блок «Values of {attribute} without a pair:» з кнопками «+ {value}»; кнопка додає пару у форму мапінгу, запис довідника треба обрати вручну.
-- **Помилки:** `422 ECR-REQ-0422 probeEventsInvalid` (вікно > 92 днів, ліміт поза 1–100); `503 ECR-INT-0503 probeTimeout` / `probeUnavailable`; частково — «The source answered partially ({code})…».
+- **Помилки:** `422 ECR-REQ-0422 probeEventsInvalid` (вікно > 92 днів, початок не раніше кінця, ліміт поза 1–100, порожній шаблон чи атрибут; межі 92 і 100 включні); `503 ECR-INT-0503 probeTimeout` / `probeUnavailable`; частково — «The source answered partially ({code})…».
 - **Обмеження:** `FEATURE-HSE301-VIEW` §10.6 обіцяє 7 днів — у коді типово 30; окремої кнопки ▶ «Перевірити на прикладі» немає.
 - **Вимоги:** HSE301 A6-UI, §4.7.3.
 
@@ -161,7 +161,7 @@ Decimal.
   1. Синхронізувати подію; в PI перестворити її з **новим ID** (той самий початок і елемент); синхронізувати знову.
   2. Дві події з однаковим початком і назвою, але **різними елементами**.
   3. Дві події з однаковим початком **і** елементом.
-- **Очікується:** п. 1 — дубля немає, `RowKey` лишається `EF-<перший ID>`; п. 2 — два окремі рядки; п. 3 — неоднозначні, не зіставляються ні з чим (нового злиття нема). У БД `PrimaryElement` (Trim + UPPER), індекс `UX_SEL_NaturalKey (MapId, StartUtc, PrimaryElement)`; старі зв'язки без елемента отримують його під час синхронізації, якщо ключ однозначний.
+- **Очікується:** п. 1 — дубля немає, `RowKey` лишається `EF-<перший ID>`; п. 2 — два окремі рядки; п. 3 — неоднозначні, не зіставляються ні з чим (нового злиття нема). У БД `PrimaryElement` (Trim + UPPER), індекс `UX_SEL_NaturalKey (MapId, StartUtc, PrimaryElement)` — фільтрований `WHERE PrimaryElement IS NOT NULL`, тож старі зв'язки без елемента в ньому не беруть участі; старі зв'язки без елемента отримують його під час синхронізації, якщо ключ однозначний.
 - **Обмеження:** перестворення події з новим ID залежить від можливостей PI-стенда.
 - **Вимоги:** HSE301 M6.
 
@@ -179,7 +179,7 @@ Decimal.
   5. «Pause» / «Resume».
   6. «Delete» прив'язки без підтягнутих значень; потім — з підтягнутими.
 - **Очікується:** п. 1 — «Binding created.», рядок у переліку з колонками Target column / Window / Selector column («one attribute for all rows», якщо без селектора) / Summary / Sources / State; п. 2 — 409; п. 3 — проблеми під «Cannot save yet:» або 422; п. 5 — «Binding paused.» / «Binding resumed.»; п. 6 — перше «Binding deleted.», друге відмова з порадою поставити на паузу. Типові значення: покриття 95 %, повтор 7 днів, поріг розриву порожній.
-- **Помилки:** `409 ECR-INT-0409 rowWindowTargetTaken` / `rowWindowMapHasValues` / `rowWindowConcurrency` (чужа `rowVersion`) / `rowWindowSelectorTaken`; `422 ECR-INT-0422 rowWindowTargetNotInTable` / `windowColumnsNotDate` / `targetNotDecimal` / `windowColumnNotInTable` / `selectorNotInTable` / `windowColumnsSame` / `rowWindowPolicyOutOfRange` / `rowWindowSelectorWithoutColumn`; `422 ECR-REQ-0422 rowWindowSummaryUnknown` / `rowWindowSourceInvalid`; `404 rowWindowMap`.
+- **Помилки:** `409 ECR-INT-0409 rowWindowTargetTaken` / `rowWindowMapHasValues` / `rowWindowConcurrency` (чужа `rowVersion`) / `rowWindowSelectorTaken`; `422 ECR-INT-0422 rowWindowTargetNotInTable` / `windowColumnsNotDate` / `targetNotDecimal` / `windowColumnNotInTable` / `selectorNotInTable` / `windowColumnsSame` / `rowWindowPolicyOutOfRange` / `rowWindowSelectorWithoutColumn`; `422 ECR-REQ-0422 rowWindowSummaryUnknown` (лише для **числового** `summary` поза переліком, напр. `99`; невідомий рядок `"Foo"` відсікає ще біндер моделі — `422 ECR-REQ-0422 malformedRequest`) / `rowWindowSourceInvalid`; `404 ECR-INT-0404 rowWindowMap`.
 - **Обмеження (Н-А7а):** при редагуванні треба знову вибрати документ («Choose a document to read the table columns.»), інакше «Save» вимкнена — пауза кнопкою в рядку цього не потребує. Прив'язка без джерел або з джерелом іншої сутності **не з'явиться** в розділі цієї сутності. Документи для вибору — перші 500.
 - **Вимоги:** HSE301 A1, ФВ-12.10.
 
@@ -217,7 +217,7 @@ join / filter / group / compute / script у бекенді **немає**, і в
   1. Меню **«Data pipeline»** → `/admin/pipeline` на стенді без джерел.
   2. На стенді з джерелами — не вибирати сутність.
   3. «Source entity» → вибрати сутність; оновити сторінку.
-- **Очікується:** п. 1 — «No collection sources configured» / «Without sources the system works fine: data is entered by hand.»; п. 2 — «Pick a source entity above to see its pipeline…»; п. 3 — вступ «The steps the system runs for this source entity, with real collected rows of the last 7 days after each step…», п'ять карток «1. Source», «2. Collection schedule», «3. Collection», «4. Mapping», «5. Write to documents»; вибір тримається в URL (`?entity=<id>`).
+- **Очікується:** п. 1 — «No collection sources configured» / «Without sources the system works fine: data is entered by hand.»; п. 2 — «Pick a source entity above to see its pipeline…»; п. 3 — вступ «The steps the system runs for this source entity, with real collected rows of the last {days} days after each step…» (`{days}` = 7), п'ять карток «1. Source», «2. Collection schedule», «3. Collection», «4. Mapping», «5. Write to documents»; вибір тримається в URL (`?entity=<id>`).
 - **Помилки:** `403 ECR-AUTH-0403` без права; `404 ECR-INT-0404 sourceEntity`.
 - **Вимоги:** ФВ-14.3 (область 9), D-235.
 
@@ -244,7 +244,7 @@ join / filter / group / compute / script у бекенді **немає**, і в
   3. Змінити розклад у двох вкладках, зберегти в обох.
   4. Крок 1: «Open connections».
   5. Крок 4: «Add mapping» → «Add a source field mapping» → «Save mapping»; «Pause»/«Resume»; «Remove mapping» мапінгу без зібраних даних і з даними.
-  6. Змінити одиницю джерела (банер «Source unit changed») → «Yes, accept {unit}» / «No, this is a source error».
+  6. Змінити одиницю джерела (банер «Source unit changed») → «Yes, accept {actualUnitCode}» / «No, this is a source error».
 - **Очікується:** п. 1 — «Schedule saved.» / «Schedule removed.»; п. 2 — «Enter a whole number of days from {min} to {max}.»; п. 3 — друга вкладка: 409 і кнопка «Reload the current version»; п. 4 — перехід на `/admin/sources`; п. 5 — «The mapping has been created.», «Mapping paused.»/«Mapping resumed.»; мапінг із даними не видаляється — порада поставити на паузу; крок 5 показує «Gaps» («Mappings that will put nothing in the document», «Source fields that land nowhere», «Columns with nothing behind them») або «No gaps…»; п. 6 — прийняття пишеться в `aud.StructureChange`.
 - **Помилки:** `422 ECR-REQ-0422 collectionScheduleCron` / `…CronLength` / `…Lookback` / `…IfMatch` / `…NotApplied`; `409 ECR-JOB-0409 collectionScheduleExists` / `collectionScheduleChanged`; `409 ECR-INT-0409 mappingHasCollectedData` / `mappingUnitChangeNotPending`; `422 ECR-INT-0422 pendingUnitNotInCatalog`; `404 ECR-UOM-0404 unitId`.
 - **Вимоги:** ФВ-14.3, ФВ-12.10, D-235.
@@ -272,7 +272,7 @@ Date, Bool, Lookup, Unit), бажано один темпоральний і о�
   10. Змінити значення й піти зі сторінки.
 - **Очікується:** п. 2 — підказки «Use a dot, not a comma, as the decimal separator.», «Enter a date as YYYY-MM-DD.», «A value is required.»; код нового рядка «Assigned on save» (режим Auto); за 600 мс після правки жива перевірка («Check passed» або «{errors} errors, {warnings} warnings»); п. 3 — «Same key {key} as row {row}.», збереження заблоковано; п. 4 — один пакет «усе або нічого», «Saved {time}»; п. 5 — незіставлені комірки не змінені, банер «{count} pasted cells could not be matched and were left unchanged.»; п. 7 — у другій вкладці помилка рядка; п. 8 — дані на дату, `?asOf=` в URL; п. 9 — банер «Read only: editing needs the Registry.EditData permission.» / «Read only: this registry is mastered by an external source.»; п. 10 — перехоплення незбережених змін.
 - **Клавіатура:** стрілки, Home/End, Ctrl+Home/End, PgUp/PgDn (10 рядків), Enter/F2/Alt+↓ — редагувати, Esc — скасувати, Delete — очистити, Ctrl+. — шторка запису.
-- **Помилки:** `ECR-REG-4093 entryChanged` («Entry {entryCode} was changed after you opened it.»); `ECR-REG-4092 keyTaken` / `keyWindowOverlap`; `ECR-REQ-0422 batchItemInvalid` / `batchItemNewOnly` / `batchTooLarge` (> 2000 рядків); `ECR-REG-4221 ruleViolated`; `422 ECR-REQ-0422 asOfRequired` (темпоральний без дати, API).
+- **Помилки** (✎ 2026-10-01: `entryChanged`, `keyTaken`, `keyWindowOverlap` — це **помилки рядка** у звіті пакета, відповідь пакета лишається `200`; HTTP-статусом вони не приходять): `ECR-REG-4093 entryChanged` («Entry {entryCode} was changed after you opened it.»); `ECR-REG-4092 keyTaken` / `keyWindowOverlap`; `ECR-REQ-0422 batchItemInvalid` / `batchItemNewOnly` / `batchTooLarge` (> 2000 рядків); `ECR-REG-4221 ruleViolated`; `422 ECR-REQ-0422 asOfRequired` (темпоральний без дати, API).
 - **Вимоги:** ФВ-8.12.
 
 ### Н-В2. Шторка запису: «Values as of» — ✅
@@ -354,7 +354,7 @@ Date, Bool, Lookup, Unit), бажано один темпоральний і о�
   6. Користувачем без права читання.
 - **Кроки (UI):** `/admin/registries` (довідник вибрано) або `/entries` → **«Export»** → «CSV (can be imported back)» / «Excel workbook (XLSX)».
 - **Очікується:** п. 1 — файл `registry-{CODE}-{yyyyMMdd}.csv|xlsx`; ті самі записи, що в сітці на `asOf` (типово сьогодні, UTC); Lookup — кодом цілі, Unit — кодом одиниці; CSV — UTF-8 з BOM, колонки `code` + коди полів; XLSX — додатково `@name`, `@validFrom`, `@validTo`, аркуш = код довідника; п. 2 — у CSV значення з префіксом `'` (зокрема від'ємні числа), у XLSX — текст, не формула; п. 3 — імпорт проходить, апостроф знято; п. 5 — відмова, **обрізаного файлу немає**; у журналі безпеки подія `RegistryExported` (код, формат, дата, кількість рядків). В UI для темпорального — «Entries effective on {date}.»; помилки під заголовком «Export failed» (403 — реченням про право читання; 422 стелі — текст сервера й підказка про `Registries:ExportMaxRows`, файл не завантажується); прапорець «With child parts (composition)» **активний** (`598fdf2f`, Н-Г3).
-- **Помилки:** `422 ECR-REQ-0422 registryExportFormatUnknown` («…use csv or xlsx»); `422 ECR-REQ-0422 registryExportTooLarge`; `403`; `404 ECR-REG-0404`; при CSV-імпорті невідомої одиниці — `422 ECR-REG-0422 unitCodeUnknown`.
+- **Помилки:** `422 ECR-REQ-0422 registryExportFormatUnknown` («…use csv or xlsx»); `422 ECR-REQ-0422 registryExportTooLarge`; `403`; `404 ECR-REG-0404`; при CSV-імпорті невідомої одиниці — помилка **рядка** `ECR-REG-0422 unitCodeUnknown` у звіті імпорту (відповідь `200`, не 422).
 - **Конфігурація:** `Registries:ExportMaxRows` < 1 — служба не стартує (перевірка конфігурації).
 - **Вимоги:** RT-16, ФВ-8.12.
 
@@ -366,7 +366,7 @@ Date, Bool, Lookup, Unit), бажано один темпоральний і о�
 
 - **Права:** читання батька **і кожного** дочірнього довідника.
 - **Кроки:** `GET …/export?format=csv&includeChildren=true` для P з Н-В4; потім `format=xlsx`; потім користувачем без права на C. В UI: «Export» → позначити «With child parts (composition)» → CSV, потім XLSX.
-- **Очікується:** CSV → `application/zip` `registry-{CODE}-{yyyyMMdd}.zip` з файлами `01-P.csv`, `02-C.csv`… (номер — порядок імпорту, кожен імпортується окремо); XLSX — аркуш на кожен довідник, однакові назви з суфіксом `~2`; без права на частину — відмова **всього** експорту (403, а для прихованого — 404); стеля рядків рахується на суму; `RegistryExported` містить `includeChildren` і перелік довідників.
+- **Очікується:** CSV → `application/zip` `registry-{CODE}-{yyyyMMdd}.zip` з файлами `01-P.csv`, `02-C.csv`… (номер — порядок імпорту, кожен імпортується окремо); XLSX — аркуш на кожен довідник, однакові назви з суфіксом `~2`; без права на частину — відмова **всього** експорту (403 `err.ECR-AUTH-0403.permission` — і для прихованого довідника теж, без його id: виправлення S18); стеля рядків рахується на суму; `RegistryExported` містить `includeChildren` і перелік довідників.
 - **Вимоги:** RT-16, ФВ-8.16.
 
 ---
@@ -398,7 +398,7 @@ Date, Bool, Lookup, Unit), бажано один темпоральний і о�
   5. Через API передати `documentIds` з документом, якого немає у впливі.
   6. Користувачем без `Calculation.Recalculate`.
 - **Очікується:** п. 1–2 — відмова; п. 3 — 202, картка «Recalculation job {jobId}» з рядком «Fanned out {total}, done {done} of {total}, errors {failed}.»; задача «Recalculation of documents affected by a registry edit», статус «Queued for recalculation: {queued}; skipped: {skipped}; no longer affected: {gone}»; однакові набори документів зливаються в одну задачу; посилання «Open in the job queue» лише з `System.ViewHealth`, без нього — «The job state cannot be read with your rights.»; після постановки перелік і результати розрахунку перечитуються; п. 6 — чекбоксів і кнопки немає.
-- **Помилки:** `422 ECR-REQ-0422 impactReasonRequired` / `impactReasonTooLong`; `422 ECR-REG-0422 impactDocumentNotAffected` (також для документа закритого періоду — сервер навмисно не розрізняє) / `impactNothingToRecalculate`; `403` — документ чужого проєкту.
+- **Помилки:** `422 ECR-REQ-0422 impactReasonRequired` / `impactReasonTooLong`; `422 ECR-REG-0422 impactDocumentNotAffected` (також для документа закритого періоду — сервер навмисно не розрізняє) / `impactNothingToRecalculate`; `403` — документ чужого, але **видимого** користувачеві проєкту; документ невидимого проєкту дає `422 impactDocumentNotAffected` (навмисно: не розкриває існування).
 - **Вимоги:** RT-25.
 
 ### Н-Д3. Банер «довідник змінено після розрахунку» — ✅ (за тестами; вручну не пройдено)
@@ -445,13 +445,13 @@ Date, Bool, Lookup, Unit), бажано один темпоральний і о�
   3. «Check on a value» → «Sample value».
 - **Очікується (UI):** підказки «The upper bound must not be less than the lower one.», «Choose a fill color, text color or bold, otherwise the rule changes nothing.»; перевірка на значенні показує «Rule {n} applies.» або «No rule applies to this value.»; «Save rules» неактивна, поки правила неповні («Complete or remove the rules marked above before saving.»); збереження — Н-Е3.
 - **Кроки (API):**
-  4. `PUT /api/v1/template-versions/{id}/conditional-formats` з тілом `{rules:[{columnCode, operator:"gt", value:"100", backgroundHex:"#ffcccc", isBold:true}]}` на чернетці; `GET` того самого шляху.
+  4. `GET`, узяти `ETag`; `PUT /api/v1/template-versions/{id}/conditional-formats` із заголовком `If-Match: <ETag>` (без нього — `422 ECR-REQ-0422 condFormatIfMatch`, застарілий — `409 ECR-TMPL-0409 condFormatChanged`) і тілом `{rules:[{columnCode, operator:"gt", value:"100", backgroundHex:"#ffcccc", isBold:true}]}` на чернетці; `GET` того самого шляху.
   5. Помилкові правила: невідомий оператор; `value:"abc"`; колір `red`; неіснуюча колонка; > 500 правил.
-  6. PUT на опублікованій версії.
+  6. PUT на опублікованій версії (з чинним `If-Match`, інакше раніше спрацює `condFormatIfMatch`).
   7. Опублікувати версію, в документі ввести значення 150 і 50; `GET /documents/{id}/tables/{tableInstanceId}`; Excel-експорт документа.
 - **Очікується (API):** п. 4 — правило повернуто; п. 5 — 422; п. 6 — 409; п. 7 — у зрізі `cellFormats["{rowKey}:{columnCode}"]` лише для 150; у Excel — заливка й жирний у тій комірці. `between` включає межі (порядок меж не важливий), кома = крапка, перше правило за порядком виграє.
 - **Помилки:** `422 ECR-CFG-0422 condFormatOperator` / `condFormatOperand` / `condFormatColor` / `condFormatColumn` / `condFormatLimit`; `409 ECR-TMPL-0409` (заморожена версія); `404 ECR-TMPL-0404 templateVersion`.
-- **Обмеження:** у панелі перевірки `eq`/`ne` можуть порівнювати й текст, сервер — лише числа (не перевірено, чи розбіжність усунуто); зріз таблиці віддає правила в `ColumnDto.conditionalFormats` і `TableSliceDto.cellFormats` (`56a20640`), тож оператору не потрібне право `Template.View`. Ширин колонок нема.
+- **Обмеження:** у панелі перевірки `eq`/`ne` порівнюють і текст, сервер — лише числа: ⚠ розбіжність **не усунуто** (✎ 2026-10-01, суха прогонка: `conditionalFormat.ts` `ruleMatches` проти `ConditionalFormatEvaluator`) — правило `ne 100` на текстовій комірці «abc» панель і незбережена правка в сітці підсвічують, а зріз сервера й Excel — ні; це дефект, не очікувана поведінка; зріз таблиці віддає правила в `ColumnDto.conditionalFormats` і `TableSliceDto.cellFormats` (`56a20640`), тож оператору не потрібне право `Template.View`. Ширин колонок нема.
 - **Вимоги:** ФВ-2.6, ФВ-2.7, D-234.
 
 ### Н-Е3. Збереження правил з UI і підсвітка в сітці — ✅ (за тестами; вручну не пройдено)
@@ -541,7 +541,7 @@ Date, Bool, Lookup, Unit), бажано один темпоральний і о�
   1. `dotnet run --project tools/Ecr.Bootstrap.Excel -- --workbook книга.xlsx`
   2. Те саме з `--out-report звіт.md --out-plan план.json --layout MonthsInColumns`.
   3. Без `--workbook`; неіснуючий файл; `--help`; `--apply --dry-run`.
-- **Очікується:** п. 1 — код виходу **0** (або **1**, якщо у звіті є помилки); консоль: «{outcome}. Аркушів N, таблиць N, колонок N, рядків N; помилок N, ручних рішень N. Звіт: …»; звіт `книга.xlsx.import-report.md` пишеться завжди; розділи «Помилки…», «Потребує ручного рішення…», «Чек-лист звірки таблиць», «Імпортовано автоматично», «Довідка…»; прихований аркуш — Info; межі блоку — ручне рішення; 12 місяців → MonthsInColumns + ручне рішення; «Всього» → Balance; `mg/Nm3` → `mg_per_Sm3`, `нм3/сут` → `Sm3_per_day`, `т`/`tonne` → `t`; `МВт`, `%`, `год` — неоднозначні; `xyz` — ручне рішення «одиницю не розпізнано… колонку створено без одиниці»; формула на інший аркуш → колонка лише для читання + ручне рішення; Scale: `0.000` → 3, `#,##0` → 0; дані комірок **не** імпортуються; п. 3 — код **2**, повідомлення й usage у stderr.
+- **Очікується:** п. 1 — код виходу **0** (або **1**, якщо у звіті є помилки); консоль: «{outcome}. Аркушів N, таблиць N, колонок N, рядків N; помилок N, ручних рішень N. Звіт: …»; звіт `книга.import-report.md` (розширення книги замінюється) пишеться завжди; розділи «Помилки…», «Потребує ручного рішення…», «Чек-лист звірки таблиць», «Імпортовано автоматично», «Довідка…»; прихований аркуш — Info; межі блоку — ручне рішення; 12 місяців → MonthsInColumns + ручне рішення; «Всього» → Balance; `mg/Nm3` → `mg_per_Sm3`, `нм3/сут` → `Sm3_per_day`, `т`/`tonne` → `t`; `МВт`, `%`, `год` — неоднозначні; `xyz` — ручне рішення «одиницю не розпізнано… колонку створено без одиниці»; формула на інший аркуш → колонка лише для читання + ручне рішення; Scale: `0.000` → 3, `#,##0` → 0; дані комірок **не** імпортуються; п. 3 — код **2**, повідомлення й usage у stderr.
 - **Обмеження:** перевірено лише на синтетичних книгах (TESTER-GUIDE З-7); розбір атрибутів VBA не реалізовано.
 - **Вимоги:** ФВ-2.10, ФВ-2.11, ФВ-16.12.
 
@@ -611,7 +611,7 @@ Date, Bool, Lookup, Unit), бажано один темпоральний і о�
 ✎ 2026-10-01 (`d63ad313`): `/admin/periods` і `/admin/jobs` показують **ефективний** стан
 (`FannedOut` → «running», `SucceededWithErrors` → «partial»); тост «завершено» лише коли M = N і K = 0.
 
-- **Права:** запуск — `Calculation.Recalculate` (сторінка `/admin/periods` — `Period.Configure`); стеження — `System.ViewHealth`.
+- **Права:** запуск — `Calculation.Recalculate` (сторінка `/admin/periods` — `Period.Configure`); стеження за чужими задачами — `System.ViewHealth` (свою автор бачить без нього).
 - **Дані:** активний проєкт з кількома документами; воркер у режимі черги в БД (`Database`/`Worker`) — інакше блоку розкладу немає; один документ, що свідомо падає при розрахунку.
 - **Кроки:**
   1. `/admin/periods` → проєкт → **«Recalculate»** → підтвердити «Recalculate the whole project {code}?».
@@ -619,8 +619,8 @@ Date, Bool, Lookup, Unit), бажано один темпоральний і о�
   3. Дочекатися завершення всіх дочірніх задач.
   4. Повторити з документом, що падає.
 - **Очікується:** п. 2 — батьківська задача «Succeeded» з повідомленням «Queued document recalculation tasks: {count}; not calculated yet.»; блок «Fanned out, not calculated yet» і рядок «Fanned out {total}, done {done} of {total}, errors {failed}.»; оновлення кожні 1,5 с; п. 3 — «Done»; п. 4 — «Done with errors ({failed})» (скасовані дочірні теж рахуються помилками).
-- **На `/admin/periods`:** опитування триває до кінця дочірніх задач, видно рядок «розкладено N, виконано M з N, помилок K» (`jobs.fanOutProgress`); тост «завершено» — лише при повному `Succeeded`; з помилками — попередження (`workflow.recalcDoneWithErrors`). Бейдж у `/admin/jobs` і на сторінці впливу довідника — «FannedOut» (info) / «SucceededWithErrors» (warning) замість «Succeeded». Не перевірено: точні англійські підписи тосту й бейджів (за кодом: ключі секції `RECALC:periods-status`).
-- **Помилки:** `422 ECR-CALC-4221 approvalNotUsable` (закритий період без погодження); `404 ECR-PRD-0404 periodForProject`; `403 ECR-AUTH-0403` без `System.ViewHealth`; 404 — невідомий номер задачі.
+- **На `/admin/periods`:** опитування триває до кінця дочірніх задач, видно рядок «розкладено N, виконано M з N, помилок K» (`jobs.fanOutProgress`); тост «завершено» — лише при повному `Succeeded`; з помилками — попередження (`workflow.recalcDoneWithErrors`). Бейдж у `/admin/jobs` і на сторінці впливу довідника — «Calculating documents» (info, стан `FannedOut`) / «Done with errors» (warning, стан `SucceededWithErrors`) замість «Succeeded» (ключі `status.job.*`, `09-seed.sql`).
+- **Помилки:** `422 ECR-CALC-4221 approvalNotUsable` (закритий період без погодження); `404 ECR-PRD-0404 periodForProject`; `403 ECR-AUTH-0403 jobNotYours` — **чужа** задача без `System.ViewHealth` (власну задачу автор бачить і без цього права); 404 — невідомий номер задачі.
 - **Вимоги:** ФВ-9.8 (P4).
 
 ---
@@ -635,13 +635,13 @@ Date, Bool, Lookup, Unit), бажано один темпоральний і о�
 - **Права:** `Integration.Manage`.
 - **Дані:** з'єднання з транспортом PiWebApi; для кроків 4–5 у конфігурації `PiWebApi:AllowedHosts` (напр. `pi.example.local`, `*.corp.example`).
 - **Кроки:** `/admin/sources` → з'єднання → Connection → змінити «Endpoint» (і `SecondaryEndpoint`) і зберегти:
-  1. `ftp://pi.example.local`; `http://user:pass@host`; порожній/кривий рядок.
+  1. `ftp://pi.example.local`; `http://user@host`; порожній/кривий рядок. (✎ 2026-10-01: `http://user:pass@host` відсікається раніше політики — `422 dataSourceEndpointCarriesSecret`, див. TESTER-GUIDE S3.)
   2. `http://127.0.0.1`, `http://[::1]`, `http://169.254.169.254`, `http://0.0.0.0`, `http://2130706433`, `http://0x7f.1`.
   3. З'єднання з Windows-автентифікацією (Negotiate) і приватний IP-літерал (напр. `http://10.0.0.5`).
   4. Хост поза `AllowedHosts` (за наявності списку); хост із allowlist.
   5. Ім'я, що розв'язується на заборонену адресу.
 - **Очікується:** `422 ECR-REQ-0422`: п. 1 — `dataSourceEndpointScheme` або `dataSourceEndpointMalformed`; п. 2 — `dataSourceEndpointHostForbidden`; п. 3 — `dataSourceEndpointHostForbidden` (приватні IP — лише для Negotiate; для інших автентифікацій не блокуються); п. 4 — `dataSourceEndpointHostNotAllowed` / успіх; п. 5 — відмова (перевіряється кожна A/AAAA). Порожній `AllowedHosts` — діє лише блок-лист.
-- **Додатково:** IP перевіряється ще в момент підключення (DNS-rebinding, `c11285b0`); відповідь PI понад 50 МБ — збір відхиляється без повторів, `ECR-INT-0503 piWebApiResponseTooLarge`.
+- **Додатково:** IP перевіряється ще в момент підключення (DNS-rebinding, `c11285b0`); відповідь PI понад 50 МБ — адаптер не повторює запит (див. Н-Л4 про повтори задачі), `ECR-INT-0503 piWebApiResponseTooLarge`.
 - **Обмеження:** на живому PI/DNS не перевірено. Окремий крок: `http://localhost`, `http://x.localhost` — теж `HostForbidden`; DNS-ім'я корпоративного хоста (напр. `pi.corp.example`) дозволене, навіть якщо розв'язується на приватну адресу (для Negotiate саме ім'я потрібне для Kerberos SPN).
 - **Вимоги:** ФВ-13.11, ФВ-6.9.
 
@@ -653,7 +653,7 @@ Date, Bool, Lookup, Unit), бажано один темпоральний і о�
 ### Н-Л2. Negotiate без allowlist — ✅ (за тестами; вручну не пройдено)
 
 - **Кроки:** активне джерело PiWebApi із Negotiate (або порожньою автентифікацією) без `PiWebApi:AllowedHosts` → зберегти; відкрити `/health/ready` (картка `sources`).
-- **Очікується:** `Warning` у журналі при збереженні; картка `sources` — `Degraded` з повідомленням `health.sources.negotiateNoAllowlist` («Sources with Windows authentication and no allowed-hosts list: {count}.»); після задання `AllowedHosts` (потрібен перезапуск служби — не перевірено) — без попередження.
+- **Очікується:** `Warning` у журналі при збереженні; картка `sources` — `Degraded` з повідомленням `health.sources.negotiateNoAllowlist` («Sources with Windows authentication and no allowed-hosts list (PiWebApi:AllowedHosts): {count}.»; рахуються лише джерела з активними сутностями збору, і повідомлення видно, коли немає інших причин Degraded); після задання `AllowedHosts` (потрібен перезапуск служби — не перевірено) — без попередження.
 - **Уточнення (звірено з кодом `SourcesHealthCheck`/`EndpointNetwork`):** `AllowedHosts` читається з конфігурації `PiWebApi:AllowedHosts`; задається в `appsettings.Production.json` або `ECR_PiWebApi__AllowedHosts__0=…` у `Environment` служби `EcrApi`; потім `Restart-Service EcrApi` → `/health/ready`, картка `sources` — Healthy (за відсутності інших причин: запуск, покриття, падіння). Інсталятор і `deploy-ecr.ps1` ключ не пишуть. Що перезапуск обов'язковий, живою перевіркою не підтверджено.
 - **Вимоги:** ФВ-13.11.
 
@@ -667,7 +667,7 @@ Date, Bool, Lookup, Unit), бажано один темпоральний і о�
 ### Н-Л4. Відповідь PI Web API понад 50 МБ — 🟨 (за тестами; на живому PI не перевірено)
 
 - **Кроки:** збір із запитом, що повертає тіло > 50 МБ (або заглушка PI з `Content-Length` понад ліміт); також відповідь без `Content-Length`, що росте понад ліміт.
-- **Очікується:** збір відхиляється **без повторів**: `ECR-INT-0503`, `messageKey` `err.ECR-INT-0503.piWebApiResponseTooLarge` ({path}, {limitBytes}); процес не вичерпує пам'ять; надто широкий запит (багато тегів × довге вікно) слід ділити. Ліміт у конфігурації не виставляється (D-242, чекає підтвердження).
+- **Очікується:** адаптер не повторює HTTP-запит; ⚠ **дефект (✎ 2026-10-01, суха прогонка):** відмова — `BusinessRuleException`, а `JobRetryPolicy.IsWorthRetrying` вважає її транзієнтною, тож задача збору повторюється ще 3 рази (30 + 60 + 120 с) і користувач ~3.5 хв бачить «виконується». Очікувано за задумом коду (коментар `ReadBoundedAsync`) — відмова без повторів: `ECR-INT-0503`, `messageKey` `err.ECR-INT-0503.piWebApiResponseTooLarge` ({path}, {limitBytes}); процес не вичерпує пам'ять; надто широкий запит (багато тегів × довге вікно) слід ділити. Ліміт у конфігурації не виставляється (D-242, чекає підтвердження).
 - **Вимоги:** НФ, S-аудит. Коміт `d013ba3e`.
 
 ### Н-Л5. `Telemetry:Enabled=false` за замовчуванням — ✅ (свідомий дефолт)
@@ -725,6 +725,4 @@ Date, Bool, Lookup, Unit), бажано один темпоральний і о�
 | `FEATURE-HSE301-VIEW.md` §10.6 | вкладка в редакторі таблиці шаблону; проба за 7 днів; атрибут вікна з каталогу; кнопка ▶ | шухляда з'єднання; 30 днів; вільний текст; кнопки немає |
 | `FEATURE-HSE301-VIEW.md` §11.6 | ендпоінта імпорту методологій немає | `POST /api/v1/methodologies/import` (Н-З4) |
 | `TESTER-GUIDE.md` Г-6 | правка поза вікном «без позначки» | значок `◷` зберігається між перезавантаженнями (Н-Ж2); розділи 7.7, 7.12 уже виправлено ✎ 2026-10-01, Г-6 — не перевірялось |
-| `10-decisions.md` D-239 | persistence значка не зроблено | зроблено (`7e6c3266`) — запис у `10-decisions.md` не оновлено (зона CHECKSUMS, правити людині) |
-| `10-decisions.md` D-234 | застосування умовного форматування в сітці/Excel не перевірено | сітка й Excel застосовують (Н-Е2, Н-Е3); запис не оновлено |
 | `FEATURE-REGISTRY-TABLES.md` :761, :767 | історія без видів name/active; «422 закритий період» | види є; `impactDocumentNotAffected` |
