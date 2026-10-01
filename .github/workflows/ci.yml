@@ -482,3 +482,37 @@ jobs:
           echo "Сід перемішування: $SEED"
           echo "Відтворити локально: npx vitest run --sequence.shuffle --sequence.seed=$SEED"
           npx vitest run --sequence.shuffle --sequence.seed=$SEED
+
+  # ✎ 2026-10-01 (рішення людини): необов'язкова перевірка ФОРМИ lane-гілки.
+  # Лише попередження/notice, завжди зелена; жодних `needs:` ні від, ні на неї —
+  # сім гейтів не змінюються. paths-ignore не додано: Actions застосовує його до
+  # всіх гілок `push` (включно з main), ризик пропущених обов'язкових перевірок.
+  lane-shape:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/lane/')
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Форма lane-гілки (лише попередження)
+        run: |
+          git fetch origin dev/integration || true
+          BASE=origin/dev/integration
+          MERGES=$(git rev-list --merges "$BASE..HEAD" | wc -l)
+          if [ "$MERGES" -gt 0 ]; then
+            echo "::warning::lane містить merge-коміти ($MERGES); має бути лінійною"
+          fi
+          if git log -1 --format=%B | grep -qiE 'мутац|відкат|revert|mutation|доказ-мутац'; then
+            echo "::warning::кінчик lane схожий на мутаційний доказ/відкат; мутація лише в локальному worktree"
+          fi
+          BEHIND=$(git rev-list --count "HEAD..$BASE")
+          if [ "$BEHIND" -gt 50 ]; then
+            echo "::warning::база відстає від dev/integration на $BEHIND комітів (>50); створи lane від свіжого tip"
+          fi
+          HOT=$(git diff --name-only "$BASE...HEAD" | grep -E '(^|/)(Sql/|Migrations/|openapi\.snapshot\.json|schema\.d\.ts|shared/ui/|package(-lock)?\.json|Directory\.Packages\.props|CLAUDE\.md|\.github/)' || true)
+          if [ -n "$HOT" ]; then
+            echo "::notice::гарячі файли в діфі: $(echo "$HOT" | tr '\n' ' ')"
+          fi
+          exit 0
