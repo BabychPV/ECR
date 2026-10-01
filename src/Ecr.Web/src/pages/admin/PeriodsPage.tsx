@@ -30,8 +30,7 @@ import type {
 } from '@/api/types';
 import { markSlicesStale } from '@/features/grid/sliceCache';
 import { ApprovalRouteEditor } from '@/features/projects/ApprovalRouteEditor';
-import { CreateProjectModal, timeZones } from '@/features/projects/CreateProjectModal';
-import { PeriodPolicyManager } from '@/features/projects/PeriodPolicyManager';
+import { timeZones } from '@/features/projects/timeZones';
 import {
   RecalculationApprovalsPanel,
   RequestRecalculationButton,
@@ -53,6 +52,20 @@ import { errorCodeText } from '@/shared/ui/problemText';
 import { useUrlNumber } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
 import { fetchAllProjects } from '@/features/projects/allProjects';
+
+/**
+ * Діалог створення проєкту і менеджер політик — за `import()` (`D-132`).
+ *
+ * ⚠ Обидва тягнуть `NumberInput` (~8 КБ gzip), а маршрут стояв на 247 із 250.
+ * Діалог потрібен лише після «Створити», менеджер — лише адміністраторові
+ * (`manages`); переглядач календаря періодів не завантажує жодного.
+ */
+const CreateProjectModal = lazy(async () => ({
+  default: (await import('@/features/projects/CreateProjectModal')).CreateProjectModal,
+}));
+const PeriodPolicyManager = lazy(async () => ({
+  default: (await import('@/features/projects/PeriodPolicyManager')).PeriodPolicyManager,
+}));
 
 /**
  * Поле дати — за `import()`, і не заради стилю.
@@ -274,6 +287,11 @@ export function PeriodsPage(): JSX.Element {
   const session = useSession();
 
   const [creating, setCreating] = useState(false);
+  // Діалог створення монтується з першого відкриття (лінивий чанк, D-132).
+  const [createMounted, setCreateMounted] = useState(false);
+  useEffect(() => {
+    if (creating) setCreateMounted(true);
+  }, [creating]);
 
   const [cloning, setCloning] = useState(false);
   const [cloneCode, setCloneCode] = useState('');
@@ -738,7 +756,11 @@ export function PeriodsPage(): JSX.Element {
 
             {/* T6/#37: CRUD політик — без нього завести чи змінити політику
                 можна було лише сідингом або рукою DBA. */}
-            {manages && <PeriodPolicyManager />}
+            {manages && (
+              <Suspense fallback={null}>
+                <PeriodPolicyManager />
+              </Suspense>
+            )}
 
             {/* ⛔ Кнопка є лише для чернетки. Доки проєкт не активований,
                 задача станів до нього не доходить, періоди лишаються
@@ -1048,15 +1070,21 @@ export function PeriodsPage(): JSX.Element {
           відхиляє створення без них — тобто перший крок роботи із системою не
           працював жодного разу. Окремий компонент дає їй власний тест, який
           дивиться на тіло запиту, а не на те, що діалог відкрився. */}
-      <CreateProjectModal
-        opened={creating}
-        onClose={() => setCreating(false)}
-        onCreated={async (projectId) => {
-          await refresh();
-          setProjectId(projectId);
-          showDone(t('periods.created'));
-        }}
-      />
+      {/* ⚠ Монтується з першого «Створити» і лишається змонтованим — як і до
+          лінивого імпорту: анімація закриття й набране у формі не губляться. */}
+      {createMounted && (
+        <Suspense fallback={null}>
+          <CreateProjectModal
+            opened={creating}
+            onClose={() => setCreating(false)}
+            onCreated={async (projectId) => {
+              await refresh();
+              setProjectId(projectId);
+              showDone(t('periods.created'));
+            }}
+          />
+        </Suspense>
+      )}
 
       <Modal opened={cloning} onClose={() => setCloning(false)} title={t('periods.clone')}>
         <Text size="sm" mb="sm">

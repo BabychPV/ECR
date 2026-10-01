@@ -26,7 +26,6 @@ import { DocumentLockBanner } from '@/features/documents/DocumentLockBanner';
 import { documentLockOf, locksDataActions } from '@/features/documents/documentLock';
 import { SheetFillSummary } from '@/features/documents/SheetFillSummary';
 import { useDocumentPending } from '@/features/grid/autosave';
-import { RestoreEditsBanner } from '@/features/grid/RestoreEditsBanner';
 import { ExportButton } from '@/features/export/ExportButton';
 import { SheetActions, isEditable } from '@/features/workflow/SheetActions';
 import { can, useSession } from '@/shared/session/useSession';
@@ -35,7 +34,6 @@ import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { showApiError } from '@/shared/ui/notify';
 import { PageHeader } from '@/shared/ui/PageHeader';
-import { PeriodPicker } from '@/shared/ui/PeriodPicker';
 import { useUrlNumber, useUrlState } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
 
@@ -102,6 +100,30 @@ const DocumentHeaderPanel = lazy(async () => ({
 const loadValidationPanel = () => import('@/features/documents/ValidationPanel');
 const ValidationPanel = lazy(async () => ({
   default: (await loadValidationPanel()).ValidationPanel,
+}));
+
+/**
+ * Поле періоду в шапці — за `import()` (`D-132`): воно тягне `NumberInput`
+ * (~8 КБ gzip), а маршрут стояв на 246 із 250.
+ *
+ * ⚠ На відміну від панелей вище, поле видиме в першому ж кадрі ДОКУМЕНТА. Тому
+ * чанк починає вантажитись разом із модулем сторінки — паралельно із запитом
+ * документа, до відповіді якого шапки однаково немає (`AsyncBoundary`). Поки
+ * чанк не прийшов, місце тримає `Skeleton` того ж розміру — шапка не стрибає.
+ */
+const loadPeriodPicker = () => import('@/shared/ui/PeriodPicker');
+void loadPeriodPicker();
+const PeriodPicker = lazy(async () => ({ default: (await loadPeriodPicker()).PeriodPicker }));
+
+/**
+ * Пропозиція повернути загублені правки — сьома лінива панель (`D-132`).
+ *
+ * ⚠ Без загублених правок банер не малює нічого (`return null`), тобто майже
+ * завжди його код (разом із `restoreEdits`) сторінці не потрібен.
+ */
+const loadRestoreEditsBanner = () => import('@/features/grid/RestoreEditsBanner');
+const RestoreEditsBanner = lazy(async () => ({
+  default: (await loadRestoreEditsBanner()).RestoreEditsBanner,
 }));
 
 /**
@@ -482,12 +504,14 @@ export function DocumentPage(): JSX.Element {
               воно НЕ звужувало документ до «без періоду» (тут період
               обов'язковий — `urlPeriod ?? currentPeriodKey()` нижче), а
               просто лишало те, що вже було. */
-          <PeriodPicker
-            size="xs"
-            miw={110}
-            value={periodKey}
-            onChange={(value) => setPeriodKey(value ?? periodKey)}
-          />
+          <Suspense fallback={<Skeleton h={52} w={190} />}>
+            <PeriodPicker
+              size="xs"
+              miw={110}
+              value={periodKey}
+              onChange={(value) => setPeriodKey(value ?? periodKey)}
+            />
+          </Suspense>
         }
       />
 
@@ -563,7 +587,9 @@ export function DocumentPage(): JSX.Element {
 
           ⚠ Статичний імпорт бюджету чанка не чіпає (`D-132`): компонент
           працює зі сховищем правок і зрізом, ядра `RevoGrid` не торкаючись. */}
-      <RestoreEditsBanner documentId={documentId} userId={session.data?.userId} />
+      <Suspense fallback={null}>
+        <RestoreEditsBanner documentId={documentId} userId={session.data?.userId} />
+      </Suspense>
 
       {/* ⛔ Шапка документа: поля версії шаблону з поточними значеннями.
           Компонент сам вирішує, чи малюватися — порожній перелік полів
