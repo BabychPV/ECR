@@ -599,7 +599,7 @@ Date, Bool, Lookup, Unit), бажано один темпоральний і о�
   6. Переглянути себе й іншого користувача, що має роль лише через групу AD.
 - **Очікується:** п. 2 — кнопка вимкнена до id ≥ 1, запит не надсилається; п. 3 — «Resulting level: {level}», таблиця «Given by | Role | Assigned | Level | Scope | Counted»; зараховуються лише «Everywhere» і «Project is in scope»; «Narrowed to sheets or periods…» і «Assignment not in effect» — «No»; п. 4 — alert «Explicitly denied: a deny wins over any grant and over any global right…»; глобальне `Registry.EditData` / `Registry.View` піднімає рівень, якщо немає заборони; п. 5 — 404; п. 6 — для себе групові ролі видно, для іншого — «The groups in this person's sign-in ticket are not known here…». Розріз **нічого не змінює**.
 - **Помилки:** `422 ECR-REQ-0422 effectiveAccessResource`; `404 ECR-SEC-0404 userNotFound`; `404 ECR-PRJ-0404 project`; `404 ECR-REG-0404 registryId`; `403 ECR-AUTH-0403`.
-- **Обмеження:** лише проєкти й довідники (не аркуші й колонки); рівень показано сирим значенням без перекладу. TESTER-GUIDE п. 7.12 ще пише «розрізу нема» — застаріло.
+- **Обмеження:** лише проєкти й довідники (для `Sheet`/`Table`/`Column` — `422`; ФВ-6.16 через це 🟨); рівень показано сирим значенням без перекладу. TESTER-GUIDE п. 7.12 ще пише «розрізу нема» — застаріло.
 - **Вимоги:** ФВ-6.16, D-220.
 
 ---
@@ -689,7 +689,7 @@ Date, Bool, Lookup, Unit), бажано один темпоральний і о�
 - **Передумова:** режим `Worker` (служба `EcrWorker`), доступний OTLP-колектор.
 - **Кроки:** у `worker.settings.json` поруч з `Ecr.Worker.exe` (або `ECR_Telemetry__*` служби `EcrWorker`) увімкнути `Telemetry` (`Enabled=true`, `OtlpEndpoint`); перезапустити службу; завдати задачі перерахунку, що падає; у колекторі знайти `ecr.job.failed`.
 - **Очікується:** `ecr.job.failed{job=…}` з `service.name=ecr-worker`; також `ecr.job.start_latency`, `ecr.cache.hit/miss`, `ecr.access.profile.build`. `appsettings.json` Api дочірній процес не читає.
-- **Обмеження:** процес, убитий Job Object за ліміт пам'яті, втрачає останній буфер (до 15 с); недійсна адреса експорту дочірнього тихо вимикає експорт, не зупиняючи задачу; **у розгортанні `worker.settings.json` не має секції `Telemetry` → типово вимкнено** (deploy має виставляти `ECR_Telemetry__*`, відкрите).
+- **Обмеження:** процес, убитий Job Object за ліміт пам'яті, втрачає останній буфер (до 15 с); недійсна адреса експорту дочірнього тихо вимикає експорт, не зупиняючи задачу; **у розгортанні `worker.settings.json` не має секції `Telemetry` → типово вимкнено**; `deploy-ecr.ps1 -TelemetryOtlpEndpoint http://collector:4317` виставляє `ECR_Telemetry__*` службам `EcrApi`/`EcrWorker` (`2e695683`); на живому колекторі не перевірено.
 - **Вимоги:** ФВ-12.7, ФВ-12.2, НФ-8.6.2.
 
 ### Н-М2. Скрипти розгортання без керуючих байтів — ✅ (сторож у CI)
