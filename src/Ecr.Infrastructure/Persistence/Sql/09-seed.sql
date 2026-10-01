@@ -2762,7 +2762,7 @@ USING (VALUES
     -- ⛔ `few`/`many` англійська не вибирає ніколи, але російська — на 0, 2–4, 5–20,
     -- 22… (`plural.ts`): без цих рядків російський інтерфейс показував позначку
     -- `⟦sources.testEntities.few⟧`. Рядок en — лише носій ключа й області для
-    -- перекладів (`#I18N` бере `Scope` з en); текст = `other`.
+    -- перекладів (порції перекладів беруть `Scope` з en); текст = `other`.
     (N'sources.testEntities.few',        N'en', N'The source catalog lists {count} entities.', 1),
     (N'sources.testEntities.many',       N'en', N'The source catalog lists {count} entities.', 1),
     -- Створення, правка й видалення з'єднань (UI-09 крок 2). ⚠ `created` і
