@@ -34,7 +34,12 @@ public sealed class ExcelImporter(
 
     // ⛔ Спільні блокування аркушів книги беруться ЗАЗДАЛЕГІДЬ і в стабільному
     // порядку (`ExcelImportSheetLockOrderTests`) — див. `ApplyAsync`.
-    ISheetEditGate sheetGate) : IExcelImporter
+    ISheetEditGate sheetGate,
+
+    // Порти оверлею необов'язкові лише заради тестів, що конструюють імпортер
+    // вручну; у контейнері розв'язуються завжди.
+    IMethodologyStore? methodologies = null,
+    ICalculationResultStore? results = null) : IExcelImporter
 {
     /// <summary>Порожній зріз — таблиця без жодного рядка чи непорожньої комірки.</summary>
     private static readonly IReadOnlyDictionary<string, long> EmptyRowIds =
@@ -214,6 +219,27 @@ public sealed class ExcelImporter(
         var rowIdsBatch = await rowStore.GetRowIdsBatchAsync(tableInstanceIds, period, ct).ConfigureAwait(false);
         var versionsBatch = await rowStore.GetRowVersionsBatchAsync(tableInstanceIds, period, ct).ConfigureAwait(false);
         var slicesBatch = await cellStore.ReadSlicesAsync(tableInstanceIds, period, ct).ConfigureAwait(false);
+
+        // ⛔ P1 (живий прохід 2026-10-01): експорт пише в колонку `Calculated`
+        // ЧИСЛО методології (`CalculatedCellOverlay`, F-02), а не формулу, тож
+        // пропуск «обчислювана з формулою» не спрацьовує, а в `doc.CellValue`
+        // значення такої колонки немає — незмінена книга давала ECR-CELL-4221.
+        // Порівнюємо з тим самим оверлеєм, що пише експорт: рівне — мовчки
+        // пропуск, змінене — відхилення як і раніше.
+        if (methodologies is not null && results is not null)
+        {
+            var included = tableInstanceIds.ToHashSet();
+            slicesBatch = await new Ecr.Application.Calculations.CalculatedCellOverlay(methodologies, results)
+                .ApplyAsync(
+                    documentId,
+                    map.PeriodKey,
+                    snapshot,
+                    [.. instances.Where(i => included.Contains(i.TableInstanceId))],
+                    rowIdsBatch,
+                    slicesBatch,
+                    ct)
+                .ConfigureAwait(false);
+        }
 
         // ⚠ Рішення про доступ — ПАКЕТНО на зріз. Поштучна перевірка
         // тисяч комірок імпорту не вкладається в жоден бюджет і саме тому

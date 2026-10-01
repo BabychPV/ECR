@@ -156,6 +156,19 @@ public sealed class ImportDiffBuilder
                     continue;
                 }
 
+                // ⚠ P1: значення оверлея — decimal до 16 знаків, а Excel зберігає
+                // double (~15 значущих цифр): незмінена книга дала б «зміну» на
+                // останніх розрядах. Для обчислюваної колонки рівність — з
+                // відносним допуском 1e-12; справжня правка (навіть 1 одиниця
+                // останнього видимого розряду) значно більша.
+                if (IsCalculated(definition)
+                    && incoming is decimal inNumber
+                    && Current(existing, definition) is decimal calcNumber
+                    && Math.Abs(inNumber - calcNumber) <= 1e-12m * Math.Max(1m, Math.Abs(calcNumber)))
+                {
+                    continue;
+                }
+
                 // ⛔ Обчислена комірка відхиляється ЗАВЖДИ і першою — навіть
                 // якщо права дозволяють. Записане поверх формули значення
                 // зникне при найближчому перерахунку, і користувач вирішить,
