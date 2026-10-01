@@ -446,7 +446,8 @@ export const theme = createTheme({
     Button: { defaultProps: { size: 'sm' } },
     TextInput: { defaultProps: { size: 'sm' } },
     Select: { defaultProps: { size: 'sm' } },
-    NumberInput: { defaultProps: { size: 'sm' } },
+    // a11y: стрілки Mantine (data-direction, tabindex=-1) без імені; клавіатурні стрілки й ввід лишаються.
+    NumberInput: { defaultProps: { size: 'sm', hideControls: true } },
     Table: { defaultProps: { verticalSpacing: 'xs', horizontalSpacing: 'sm' } },
 
     // ⚠ Тривалість переходу задана ТУТ, а не в кожному діалозі: інакше перший
