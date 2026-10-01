@@ -18232,6 +18232,8 @@ export interface components {
             styleId: null | number;
             /** Format: int32 */
             unitId: null | number;
+            /** Format: int32 */
+            widthPx?: null | number;
         };
         /** @description Одна знахідка пошуку колонки, у формі відповіді API. */
         ColumnDefSearchResultDto: {
@@ -18289,6 +18291,8 @@ export interface components {
             /** Format: int32 */
             unitId: null | number;
             unitSymbol: null | string;
+            /** Format: int32 */
+            widthPx?: null | number;
         };
         /** @description Правило умовного форматування (дзеркало клієнтського `ConditionalRule`). */
         ConditionalFormatRuleDto: {
@@ -22984,6 +22988,11 @@ export interface components {
              * @description Одиниця значень колонки (ФВ-16.1); не для типу `Unit`.
              */
             unitId: null | number;
+            /**
+             * Format: int32
+             * @description Типова ширина, px, 40..800 (D-234); `null` — типова за типом.
+             */
+            widthPx?: null | number;
         };
         /** @description Тіло `PUT …/conditional-formats`. */
         SaveConditionalFormatsRequest: {
@@ -24494,6 +24503,11 @@ export interface components {
             ordinal: number;
             /** @description Позначення одиниці, якщо задана. */
             unitSymbol: null | string;
+            /**
+             * Format: int32
+             * @description Типова ширина колонки, px (D-234); `null` — типова за типом; презентаційне поле.
+             */
+            widthPx?: null | number;
         };
         /** @description Скільки всього посилається на шаблон — ціна архівування. */
         TemplateDependents: {

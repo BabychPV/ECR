@@ -30,6 +30,8 @@ export interface PreviewColumn {
   readonly unitSymbol: string | null;
   readonly isRequired: boolean;
   readonly isReadOnly: boolean;
+  /** Типова ширина колонки, px (D-234); `null` — типова за типом. */
+  readonly widthPx: number | null;
   /** Повні правила колонки в порядку пріоритету. */
   readonly rules: readonly ConditionalRule[];
 }
@@ -97,6 +99,7 @@ export function buildTablePreview(
     unitSymbol: column.unitSymbol,
     isRequired: column.isRequired,
     isReadOnly: column.isReadOnly,
+    widthPx: column.widthPx ?? null,
     rules: applied.filter((rule) => rule.columnCode === column.code),
   }));
 

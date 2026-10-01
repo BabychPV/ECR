@@ -47,6 +47,8 @@ export function PresentationEditor({
   const [format, setFormat] = useState('');
   const [ordinal, setOrdinal] = useState(0);
   const [hidden, setHidden] = useState(false);
+  // D-234: типова ширина, px; '' — типова за типом даних.
+  const [width, setWidth] = useState<number | ''>('');
   const [loadedFor, setLoadedFor] = useState<number | null>(null);
 
   // ⚠ Стан наповнюється при зміні колонки, а не в `useEffect`: ефект тут дав
@@ -57,6 +59,7 @@ export function PresentationEditor({
     setFormat(column.displayFormat ?? '');
     setOrdinal(column.ordinal);
     setHidden(column.isHidden);
+    setWidth(column.widthPx ?? '');
   }
 
   /**
@@ -115,6 +118,10 @@ export function PresentationEditor({
       result.push({ ...entity, field: 'IsHidden', value: hidden ? '1' : '0' });
     }
 
+    if (width !== (column.widthPx ?? '')) {
+      result.push({ ...entity, field: 'WidthPx', value: width === '' ? null : String(width) });
+    }
+
     return result;
   };
 
@@ -147,6 +154,18 @@ export function PresentationEditor({
         description={t('version.ordinalHint')}
         value={ordinal}
         onChange={(value) => setOrdinal(typeof value === 'number' ? value : ordinal)}
+      />
+
+      <NumberInput
+        mt="sm"
+        label={t('columns.width')}
+        description={t('columns.widthHint')}
+        min={40}
+        max={800}
+        allowDecimal={false}
+        allowNegative={false}
+        value={width}
+        onChange={(value) => setWidth(typeof value === 'number' ? value : '')}
       />
 
       <Switch

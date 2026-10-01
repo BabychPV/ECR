@@ -130,7 +130,11 @@ export function TablePreview({
               <Table.Tr>
                 <Table.Th rowSpan={3}>{t('tablePreview.row')}</Table.Th>
                 {model.columns.map((column) => (
-                  <Table.Th key={column.code} data-preview-column={column.code}>
+                  <Table.Th
+                    key={column.code}
+                    data-preview-column={column.code}
+                    style={column.widthPx === null ? undefined : { minWidth: column.widthPx }}
+                  >
                     {column.label}
                     {column.isRequired && (
                       <Text span c="statusError" aria-label={t('tablePreview.required')}>

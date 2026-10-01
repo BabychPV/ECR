@@ -230,6 +230,18 @@ export function ColumnEditor({
         onChange={(event) => onChange({ ...draft, displayFormat: event.currentTarget.value })}
       />
 
+      <NumberInput
+        label={t('columns.width')}
+        description={t('columns.widthHint')}
+        disabled={disabled}
+        min={40}
+        max={800}
+        allowDecimal={false}
+        allowNegative={false}
+        value={draft.widthPx ?? ''}
+        onChange={(value) => onChange({ ...draft, widthPx: typeof value === 'number' ? value : null })}
+      />
+
       <TextInput
         label={t('columns.defaultValue')}
         description={t('columns.defaultValueHint')}
@@ -392,6 +404,8 @@ function blockerLabel(blocker: ColumnBlocker): string {
       return t('columns.errHeader');
     case 'Scale':
       return t('columns.errScale');
+    case 'Width':
+      return t('columns.errWidth');
 
     /*
      * ⛔ Обидві причини стилю доти падали в `default` і показувалися ГОЛИМ

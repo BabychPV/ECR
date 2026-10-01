@@ -25,7 +25,7 @@ import { captureRange, isRangeEdit, type RangeEditDetail } from './rangeEdit';
 import { ConflictPanel, hasCurrentVersion, type OpenConflict } from './ConflictPanel';
 import { cellStateClass, cellStateOf, type LocalCellFlags } from './cellState';
 import { isMissingColumns, isSliceEmpty } from './emptiness';
-import { DefaultColumnWidth, widthsFromEvent } from './columnWidths';
+import { columnWidth, widthsFromEvent } from './columnWidths';
 import { createLookupCellEditor, lookupCellDisplay, lookupIdOfText } from './LookupCellEditor';
 import { boolCellDisplay, createBoolCellEditor } from './BoolCellEditor';
 import { createUnitCellEditor, unitCellDisplay, unitIdOfCode } from './UnitCellEditor';
@@ -703,7 +703,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
   // ⚠ Ширини — на користувача і ВИЗНАЧЕННЯ таблиці (`ФВ-14.29`, `D-201`):
   // ключ `tableDefId`, а не `tableInstanceId`, інакше ширини губилися б на
   // кожному новому періоді. Хук сам скидає стан при зміні таблиці.
-  const { widths, onResize: saveColumnWidths } = useColumnWidths(tableDefId);
+  const { widths, onResize: saveColumnWidths, reset: resetColumnWidths } = useColumnWidths(tableDefId);
 
   const [historyRevision, setHistoryRevision] = useState(0);
   const touchHistory = useCallback(() => setHistoryRevision((value) => value + 1), []);
@@ -1839,6 +1839,11 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         <Button size="xs" variant="default" disabled={!history.current.canRedo} onClick={() => applyHistory(history.current.redo())}>
           {t('grid.redo')}
         </Button>
+        {Object.keys(widths).length > 0 && (
+          <Button size="xs" variant="default" onClick={resetColumnWidths}>
+            {t('grid.columnWidths.reset')}
+          </Button>
+        )}
         {/*
          * ⛔ `U-16`. Тут стояла ГОЛОВНА кнопка панелі — «Save (N)», завжди
          * видима й майже завжди вимкнена, — і вона суперечила моделі
@@ -2278,7 +2283,7 @@ export function gridColumns(
         (isRequired ? ' *' : ''),
 
       // Збережена ширина цієї колонки для цього користувача (ФВ-14.29, D-201).
-      size: widths[column.code] ?? DefaultColumnWidth,
+      size: columnWidth(widths[column.code], column.widthPx),
 
       // ⚠ Зірочка в заголовку — це ЗНАК, а не пояснення: читалка екрана й
       // наведення миші мають почути/побачити ПОВНИЙ текст вимоги, а не лише
