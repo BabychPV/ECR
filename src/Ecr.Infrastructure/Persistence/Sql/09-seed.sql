@@ -6197,7 +6197,11 @@ USING (VALUES
     (N'err.ECR-CALC-0422.testToleranceNegative', N'en', N'The tolerance of test "{code}" cannot be negative: such a test would never pass.', 1),
     (N'err.ECR-PRD-4225.offsetOutOfRange', N'en', N'Offset {field} ({value} days) must be between -{max} and {max} days.', 1),
     (N'err.ECR-PRD-0422.pinReasonTooLong', N'en', N'The reason for pinning the current period is longer than {max} characters.', 1),
-    (N'err.ECR-PWD-0422.tooLong', N'en', N'The password is longer than {maxLength} characters.', 1)
+    (N'err.ECR-PWD-0422.tooLong', N'en', N'The password is longer than {maxLength} characters.', 1),
+    -- COLL:nosource-hints ── порожній стан списку з'єднань: що робити й де в документації (UI, DataSourcesTable) ──
+    (N'sources.notConfiguredHint', N'en', N'To connect PI, an administrator adds a connection here: the PI Web API address, the secret and the authentication. Until then data is entered by hand. See docs/admin/admin-guide.md, section 5.', 1)
+    -- ru/kz — окремою порцією `I18N` (COLL:nosource-hints).
+    -- COLL:nosource-hints ── кінець секції ──
     -- ru/kz — окремою порцією `API:negative-path` у блоці I18N нижче.
     -- API:negative-path ── кінець секції ──
     -- D16: кінець секції

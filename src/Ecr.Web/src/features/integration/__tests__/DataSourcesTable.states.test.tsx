@@ -94,7 +94,9 @@ describe('DataSourcesTable — стани', () => {
     show();
 
     expect(await screen.findByText('⟦sources.connectionsEmpty⟧')).toBeTruthy();
-    expect(screen.queryByText('⟦sources.connectionsEmptyHint⟧')).toBeTruthy();
+    expect(screen.queryByText(/⟦sources\.connectionsEmptyHint⟧/)).toBeTruthy();
+    // Що робити без налаштованого PI й де це описано — у тому ж стані.
+    expect(screen.queryByText(/⟦sources\.notConfiguredHint⟧/)).toBeTruthy();
     expect(screen.queryByRole('table')).toBeNull();
   });
 
