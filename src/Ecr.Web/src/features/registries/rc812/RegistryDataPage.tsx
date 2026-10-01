@@ -369,7 +369,8 @@ export function RegistryDataPage(): JSX.Element {
           ) : undefined
         }
         skeleton="table"
-        onRetry={() => void rows.refetch()}
+        // ⛔ Відмова опису: повторювати треба САМЕ опис — інакше «повторити» мертва.
+        onRetry={() => void (definition.error !== null ? definition.refetch() : rows.refetch())}
       >
         {() => (
           <>
