@@ -1,5 +1,5 @@
 import { Profiler, type JSX, type ReactNode } from 'react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, render } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -280,6 +280,27 @@ const bigSheet = Array.from({ length: TablesPerSheet }, (_, index) => ({
 
 registerGridLayout();
 
+/**
+ * Прогрів лінивих панелей `MethodologyVersionsPage` (той самий прийом, що в
+ * `DataSearchPalette.a11y.test.tsx`).
+ *
+ * ⚠ Під заглушкою мережі версія ОБИРАЄТЬСЯ, і всі дев'ять панелей монтуються
+ * (зміряно: дев'ять запитів змісту версії на ~0.5 с після монтування). Холодний
+ * `import()` — це трансформація модулів Vite у реальному часі: на
+ * повільному ранері він може доїхати вже після {@link settle}, і коміти
+ * маршруту впали б у вікно виміру події кешу. Прогрів прибирає з виміру час
+ * трансформації, а не роботу рендера: `React.lazy` однаково проходить свою
+ * межу `<Suspense>`, лише без очікування диска.
+ */
+beforeAll(async () => {
+  await Promise.all([
+    import('@/features/methodologies/MethodologyContentPanels'),
+    import('@/features/methodologies/MethodologyPublicationsPanel'),
+    import('@/features/methodologies/RuleCoveragePanel'),
+    import('@/features/methodologies/MethodologyCoveragePanel'),
+  ]);
+}, 60_000);
+
 beforeEach(() => {
   vi.stubGlobal(
     'fetch',
@@ -292,15 +313,44 @@ beforeEach(() => {
       // таблиці була б перевіркою іншого документа.
       const body = /\/documents\/[^/?]+\/tables\?/.test(url) ? bigSheet : emptyBodyFor(url);
 
-      return Promise.resolve(
-        new Response(JSON.stringify(body), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' },
-        }),
-      );
+      return Promise.resolve(sameRealmJson(body));
     }),
   );
 });
+
+/**
+ * Відповідь, чиє `json()` повертає об'єкти ЦЬОГО реалму.
+ *
+ * ⛔ 2026-10-01, причина плаваючого `{ tree: 2, route: 0 }` (найчастіше на
+ * `/admin/methodologies/:id/versions`, і на гілках, що не чіпали клієнта).
+ * `Response` у jsdom-оточенні — з Node (undici), і його `json()` будує
+ * об'єкти з `Object.prototype` ІНШОГО реалму. `replaceEqualDeep` TanStack
+ * Query вважає їх «не простими об'єктами» і структурного спільного
+ * використання не робить: КОЖНЕ повторне завантаження дає нове посилання
+ * навіть на ідентичний вміст. `/me` має `staleTime: 0` і перезапитується, щойно
+ * монтується наступний спостерігач (`RouteGuard`), тобто новий `me` →
+ * ефект `[me]` в `AppLayout` знову кличе `loadCatalog` → `bumpCatalog` →
+ * рівно ДВА коміти дерева поза маршрутом. Зміряно: ручний повторний запит
+ * `/me` з тим самим тілом коштував 4/2 коміти до правки і 0/0 після.
+ *
+ * Коли цей ланцюжок встигав до кінця {@link settle}, сторож був зелений; на
+ * повільному ранері він доїжджав у вікно {@link foreignCacheEvent} і
+ * зараховувався чужій події кешу. У браузері реалм один, і посилання
+ * зберігається — отже дефект був у заглушці мережі, а не в застосунку.
+ */
+function sameRealmJson(body: unknown): Response {
+  const text = JSON.stringify(body);
+  const response = new Response(text, {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  });
+
+  Object.defineProperty(response, 'json', {
+    value: () => Promise.resolve(JSON.parse(text) as unknown),
+  });
+
+  return response;
+}
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -540,10 +590,11 @@ describe("Зворотний зв'язок під час рендера — ст
    *   • і під запобіжник (б) — межа, що ввела нескінченний цикл, упаде з
    *     числом, а не повисне до таймауту.
    *
-   * ⚠ Що ПАНЕЛІ СПРАВДІ З'ЯВЛЯЮТЬСЯ, цей випадок НЕ доводить: під заглушкою
-   * мережі версія не обирається, тож до `selected !== undefined` справа не
-   * доходить. Це перевіряється прогоном стенда (`e2e-stand.ps1`) — і саме там
-   * свого часу спіймали #295, якого не побачив жоден із 1800 тестів.
+   * ⚠ Що ПАНЕЛІ СПРАВДІ З'ЯВЛЯЮТЬСЯ, цей випадок НЕ доводить: він не перевіряє
+   * їхнього вмісту. ✎ 2026-10-01: твердження, що під заглушкою версія не
+   * обирається, хибне — обирається, і панелі монтуються (див. прогрів у
+   * `beforeAll`). Вміст перевіряється прогоном стенда (`e2e-stand.ps1`) — і
+   * саме там свого часу спіймали #295, якого не побачив жоден із 1800 тестів.
    */
   it('/admin/methodologies/:id/versions — маршрут із новою межею <Suspense>', async () => {
     await guardRoute(
