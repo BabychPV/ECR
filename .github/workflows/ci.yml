@@ -94,6 +94,8 @@ jobs:
   server-part:
     name: server-part (${{ matrix.part }})
     runs-on: ubuntu-latest
+    # CI-concurrency 2026-10-01: PR dev/integration -> main не дублює push-прогін тієї ж вершини (ті самі імена контекстів, статуси за SHA).
+    if: ${{ !(github.event_name == 'pull_request' && github.head_ref == 'dev/integration' && github.event.pull_request.head.repo.full_name == github.repository) }}
     strategy:
       fail-fast: false
       matrix:
@@ -221,7 +223,7 @@ jobs:
   # зараховує як пройдену: червона частина дала б зелений `server`.
   server:
     needs: server-part
-    if: always()
+    if: ${{ always() && !(github.event_name == 'pull_request' && github.head_ref == 'dev/integration' && github.event.pull_request.head.repo.full_name == github.repository) }}
     runs-on: ubuntu-latest
     steps:
       - name: Усі частини server зелені
@@ -234,6 +236,7 @@ jobs:
 
   client:
     runs-on: ubuntu-latest
+    if: ${{ !(github.event_name == 'pull_request' && github.head_ref == 'dev/integration' && github.event.pull_request.head.repo.full_name == github.repository) }}
     steps:
       - uses: actions/checkout@v4
 
@@ -262,6 +265,7 @@ jobs:
   # `client` вона тримала б решту гейтів заручниками; поруч — не тримає нікого.
   a11y:
     runs-on: ubuntu-latest
+    if: ${{ !(github.event_name == 'pull_request' && github.head_ref == 'dev/integration' && github.event.pull_request.head.repo.full_name == github.repository) }}
     # ⚠ W4.3 (accessibility.a11y.test.tsx, коментар над ECR_A11Y_THEME) описував
     # матрицю light/dark як чинну — вона такою не була: ця джоба досі проганяла
     # ОБИДВІ теми ПОСЛІДОВНО в одному виклику Vitest (ECR_A11Y_THEME ніде не
@@ -317,6 +321,7 @@ jobs:
   worker-windows:
     name: worker (windows)
     runs-on: windows-latest
+    if: ${{ !(github.event_name == 'pull_request' && github.head_ref == 'dev/integration' && github.event.pull_request.head.repo.full_name == github.repository) }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
@@ -344,6 +349,7 @@ jobs:
   msi-windows:
     name: msi (windows)
     runs-on: windows-latest
+    if: ${{ !(github.event_name == 'pull_request' && github.head_ref == 'dev/integration' && github.event.pull_request.head.repo.full_name == github.repository) }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
