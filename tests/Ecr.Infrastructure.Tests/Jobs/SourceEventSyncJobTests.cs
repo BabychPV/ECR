@@ -12,6 +12,7 @@ using Ecr.Domain.Entities.Dictionaries;
 using Ecr.Domain.Entities.Documents;
 using Ecr.Domain.Entities.External;
 using Ecr.Domain.Entities.Security;
+using Ecr.Domain.Entities.Workflow;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
 using Ecr.Infrastructure.Jobs;
@@ -451,6 +452,579 @@ public sealed class SourceEventSyncJobTests(SqlServerFixture sql)
         Assert.Empty(logger.Entries);
     }
 
+    // ── «Повна звірка за період» (рішення людини 2026-10-01: ID EventFrame нестабільні) ──
+    //
+    // ⛔ МУТАЦІЙНІ ДОКАЗИ: прибрати RemoveGoneAsync (або DeleteRowAsync) — червоніють T1/T7/T8;
+    // прибрати гілку plan.SourceEmpty — червоніє T4; прибрати перевірку Open/Grace — червоніє T5;
+    // прибрати перевірку manual/KeptManualJson — червоніє T6; додавати період в appliedPeriods на кожну
+    // подію замість множини — червоніє T7 (рівно один виклик).
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "HSE301-EFSYNC")]
+    public async Task T1_Подія_зникла_з_джерела_рядок_і_зв_язок_видалені_перерахунок_поставлено_а_повтор_нічого_не_змінює()
+    {
+        await using var stand = await ArrangeAsync();
+        var trigger = Substitute.For<ICalculationTrigger>();
+        var source = new FakeEventSource(
+            Ev("E1", Start, End), Ev("E2", Start.AddHours(1), End.AddHours(1)));
+        await RunAsync(stand, source, trigger: trigger);
+        trigger.ClearReceivedCalls();
+
+        source.Result = new SourceEventResult([Ev("E2", Start.AddHours(1), End.AddHours(1))], false, null);
+        await RunAsync(stand, source, trigger: trigger);
+
+        Assert.Equal(["EF-E2"], (await RowsAsync(stand)).Select(r => r.RowKey));
+        Assert.Equal(["E2"], (await LinksAsync(stand)).Select(l => l.SourceEventId));
+        Assert.Empty(await CellsAsync(stand, "EF-E1"));
+        await trigger.Received(1).RequestAsync(stand.DocumentId, new PeriodKey(202601), Arg.Any<CancellationToken>());
+
+        // T3: повтор без змін — нуль змін і нуль перерахунків.
+        trigger.ClearReceivedCalls();
+        var version = await RowVersionAsync(stand, "EF-E2");
+        await RunAsync(stand, source, trigger: trigger);
+        Assert.Empty(trigger.ReceivedCalls());
+        Assert.Equal(version, await RowVersionAsync(stand, "EF-E2"));
+        Assert.Single(await LinksAsync(stand));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "HSE301-EFSYNC")]
+    public async Task T2_T8_Нова_подія_додається_а_повернена_після_видалення_ідентифікатор_лягає_знову_без_конфлікту_ключа()
+    {
+        await using var stand = await ArrangeAsync();
+        var e1 = Ev("E1", Start, End);
+        var e2 = Ev("E2", Start.AddHours(1), End.AddHours(1));
+        var source = new FakeEventSource(e2);
+        await RunAsync(stand, source);
+
+        source.Result = new SourceEventResult([e1, e2], false, null);
+        await RunAsync(stand, source);
+        Assert.Equal(["EF-E1", "EF-E2"], (await RowsAsync(stand)).Select(r => r.RowKey).Order(StringComparer.Ordinal));
+
+        source.Result = new SourceEventResult([e2], false, null);
+        await RunAsync(stand, source);
+        Assert.Equal(["EF-E2"], (await RowsAsync(stand)).Select(r => r.RowKey));
+
+        // Той самий ID повернувся: UQ_TableRow_Key не заважає, бо рядок видалено фізично.
+        source.Result = new SourceEventResult([e1, e2], false, null);
+        await RunAsync(stand, source);
+        Assert.Equal(["EF-E1", "EF-E2"], (await RowsAsync(stand)).Select(r => r.RowKey).Order(StringComparer.Ordinal));
+        Assert.Equal(2, (await LinksAsync(stand)).Count);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "HSE301-EFSYNC")]
+    public async Task T4_Джерело_віддало_нуль_подій_при_наявних_рядках_нічого_не_видаляється_і_пишеться_подія_покриття()
+    {
+        await using var stand = await ArrangeAsync();
+        var trigger = Substitute.For<ICalculationTrigger>();
+        var source = new FakeEventSource(Ev("E1", Start, End), Ev("E2", Start.AddHours(1), End.AddHours(1)));
+        await RunAsync(stand, source, trigger: trigger);
+        trigger.ClearReceivedCalls();
+
+        source.Result = new SourceEventResult([], false, null);
+        await RunAsync(stand, source, trigger: trigger);
+
+        Assert.Equal(2, (await RowsAsync(stand)).Count);
+        Assert.Equal(2, (await LinksAsync(stand)).Count);
+        Assert.Empty(trigger.ReceivedCalls());
+        Assert.Equal(
+            1,
+            Convert.ToInt32(
+                await ScalarAsync(
+                    $"SELECT COUNT(*) FROM itg.CollectionCoverage WHERE SourceEntityId = {stand.EntityId} AND Status = N'SourceDataRefused'"),
+                CultureInfo.InvariantCulture));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "HSE301-EFSYNC")]
+    public async Task T5_Закритий_період_подію_не_видаляє_рядок_лишається_і_пишеться_подія_покриття()
+    {
+        await using var stand = await ArrangeAsync();
+        var trigger = Substitute.For<ICalculationTrigger>();
+        var february = new DateTime(2026, 2, 2, 9, 0, 0, DateTimeKind.Utc);
+        var source = new FakeEventSource(Ev("E1", Start, End), Ev("F1", february, february.AddMinutes(5)));
+        await RunAsync(stand, source, trigger: trigger);
+
+        await using (var db = sql.CreateContext())
+        {
+            var period = await db.Periods.SingleAsync(p => p.ProjectId == stand.ProjectId && p.PeriodKeyValue == 202601);
+            period.AdvanceTo(PeriodState.Closed, Now);
+            await db.SaveChangesAsync();
+        }
+
+        trigger.ClearReceivedCalls();
+        source.Result = new SourceEventResult([Ev("F1", february, february.AddMinutes(5))], false, null);
+        await RunAsync(stand, source, trigger: trigger);
+
+        Assert.Equal(["EF-E1", "EF-F1"], (await RowsAsync(stand)).Select(r => r.RowKey).Order(StringComparer.Ordinal));
+        Assert.Equal(SourceEventLinkStatus.Missing, (await LinksAsync(stand)).Single(l => l.SourceEventId == "E1").Status);
+        Assert.Empty(trigger.ReceivedCalls());
+        Assert.Equal(
+            1,
+            Convert.ToInt32(
+                await ScalarAsync(
+                    $"SELECT COUNT(*) FROM itg.CollectionCoverage WHERE SourceEntityId = {stand.EntityId} AND Status = N'SkippedPeriodClosed'"),
+                CultureInfo.InvariantCulture));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "HSE301-EFSYNC")]
+    [Trait("Finding", "D-118")]
+    public async Task T6_Рядок_із_правкою_людини_не_видаляється_навіть_коли_події_немає_в_джерелі()
+    {
+        await using var stand = await ArrangeAsync();
+        var source = new FakeEventSource(Ev("E1", Start, End, volume: 10m), Ev("E2", Start.AddHours(1), End.AddHours(1)));
+        await RunAsync(stand, source);
+        await HumanWriteAsync(stand, "EF-E1", new PatchCell(stand.VolumeCode, 42m));
+
+        source.Result = new SourceEventResult([Ev("E2", Start.AddHours(1), End.AddHours(1))], false, null);
+        await RunAsync(stand, source);
+
+        Assert.Equal(["EF-E1", "EF-E2"], (await RowsAsync(stand)).Select(r => r.RowKey).Order(StringComparer.Ordinal));
+        Assert.Equal(42m, (await CellsAsync(stand, "EF-E1"))[stand.VolumeColumn].Numeric);
+        Assert.Equal(SourceEventLinkStatus.Missing, (await LinksAsync(stand)).Single(l => l.SourceEventId == "E1").Status);
+        Assert.Equal(
+            1,
+            Convert.ToInt32(
+                await ScalarAsync(
+                    $"SELECT COUNT(*) FROM itg.CollectionCoverage WHERE SourceEntityId = {stand.EntityId} AND Status = N'ConflictKeptManual'"),
+                CultureInfo.InvariantCulture));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "HSE301-EFSYNC")]
+    public async Task T7_Каскад_видалення_кількох_подій_одного_періоду_ставить_один_перерахунок()
+    {
+        await using var stand = await ArrangeAsync();
+        var trigger = Substitute.For<ICalculationTrigger>();
+        var source = new FakeEventSource(
+            Ev("E1", Start, End), Ev("E2", Start.AddHours(1), End.AddHours(1)), Ev("E3", Start.AddHours(2), End.AddHours(2)));
+        await RunAsync(stand, source, trigger: trigger);
+        trigger.ClearReceivedCalls();
+
+        source.Result = new SourceEventResult([Ev("E3", Start.AddHours(2), End.AddHours(2))], false, null);
+        await RunAsync(stand, source, trigger: trigger);
+
+        Assert.Equal(["EF-E3"], (await RowsAsync(stand)).Select(r => r.RowKey));
+        await trigger.Received(1).RequestAsync(stand.DocumentId, new PeriodKey(202601), Arg.Any<CancellationToken>());
+        Assert.Single(trigger.ReceivedCalls());
+    }
+
+    // ── Блокери рев'ю «Аудита» (Б1–Б4) і межі вікна ──
+    //
+    // ⛔ МУТАЦІЙНІ ДОКАЗИ: прибрати ADO-транзакцію в ApplyRemovalsAsync (autocommit) — червоніє Б2; прибрати запис
+    // INSERT INTO aud.StructureChange — червоніє Б1; прибрати перевірку `exceeds` — червоніє Б3; прибрати блок
+    // `sheetStatus` — червоніє Б4; прибрати `l.StartUtc >= from`/`< to` у планувальнику — червоніє Вікно.
+
+    private async Task<int> JournalCountAsync(Stand stand, string? eventId = null)
+        => Convert.ToInt32(
+            await ScalarAsync(
+                "SELECT COUNT(*) FROM aud.StructureChange WHERE Operation = N'SourceEventRowRemoved' "
+                + $"AND OldJson LIKE N'%\"mapId\":{stand.MapId},%'"
+                + (eventId is null ? string.Empty : $" AND OldJson LIKE N'%\"eventId\":\"{eventId}\"%'")),
+            CultureInfo.InvariantCulture);
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "HSE301-EFSYNC")]
+    [Trait("Finding", "audit-B1")]
+    public async Task B1_Видалення_пише_склад_видаленого_в_журнал_із_ключем_значеннями_і_прогоном()
+    {
+        await using var stand = await ArrangeAsync();
+        var source = new FakeEventSource(Ev("E1", Start, End, volume: 10m), Ev("E2", Start.AddHours(1), End.AddHours(1)));
+        await RunAsync(stand, source);
+
+        source.Result = new SourceEventResult([Ev("E2", Start.AddHours(1), End.AddHours(1))], false, null);
+        await RunAsync(stand, source);
+
+        Assert.Equal(1, await JournalCountAsync(stand, "E1"));
+        Assert.Equal(0, await JournalCountAsync(stand, "E2"));
+
+        var json = (string)(await ScalarAsync(
+            "SELECT TOP 1 OldJson FROM aud.StructureChange WHERE Operation = N'SourceEventRowRemoved' "
+            + $"AND OldJson LIKE N'%\"mapId\":{stand.MapId},%' AND OldJson LIKE N'%\"eventId\":\"E1\"%'"))!;
+        Assert.Contains("\"rowKey\":\"EF-E1\"", json, StringComparison.Ordinal);
+        Assert.Contains("\"periodKey\":202601", json, StringComparison.Ordinal);
+        Assert.Contains($"\"tableInstanceId\":{stand.JanuaryInstanceId}", json, StringComparison.Ordinal);
+        Assert.Contains("\"number\":10", json, StringComparison.Ordinal);
+        Assert.Matches("\"runId\":\"[0-9a-f]{32}\"", json);
+        Assert.Equal(
+            1,
+            Convert.ToInt32(
+                await ScalarAsync(
+                    "SELECT COUNT(*) FROM aud.StructureChange WHERE Operation = N'SourceEventRowRemoved' "
+                    + $"AND OldJson LIKE N'%\"mapId\":{stand.MapId},%' AND ChangedByUserId = "
+                    + "(SELECT Id FROM sec.[User] WHERE UserName = N'svc-integration') AND CorrelationId IS NOT NULL"),
+                CultureInfo.InvariantCulture));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "HSE301-EFSYNC")]
+    [Trait("Finding", "audit-B2")]
+    public async Task B2_Збій_на_видаленні_зв_язку_відкочує_комірки_рядок_і_запис_журналу_разом()
+    {
+        await using var stand = await ArrangeAsync();
+        var source = new FakeEventSource(Ev("E1", Start, End, volume: 10m), Ev("E2", Start.AddHours(1), End.AddHours(1)));
+        await RunAsync(stand, source);
+
+        var trigger = $"TR_EfsyncB2_{stand.MapId}";
+        await ExecuteAsync(
+            $"CREATE OR ALTER TRIGGER ext.{trigger} ON ext.SourceEventLink AFTER DELETE AS "
+            + $"BEGIN IF EXISTS (SELECT 1 FROM deleted WHERE SourceEventMapId = {stand.MapId}) "
+            + "THROW 50999, N'efsync B2: link delete refused', 1; END");
+        try
+        {
+            source.Result = new SourceEventResult([Ev("E2", Start.AddHours(1), End.AddHours(1))], false, null);
+            await Assert.ThrowsAnyAsync<Exception>(() => RunAsync(stand, source));
+
+            // Усе або нічого: рядок і комірки на місці, журнал порожній, зв'язок цілий.
+            Assert.Equal(["EF-E1", "EF-E2"], (await RowsAsync(stand)).Select(r => r.RowKey).Order(StringComparer.Ordinal));
+            Assert.Equal(10m, (await CellsAsync(stand, "EF-E1"))[stand.VolumeColumn].Numeric);
+            Assert.Equal(0, await JournalCountAsync(stand));
+            Assert.Equal(2, (await LinksAsync(stand)).Count);
+        }
+        finally
+        {
+            await ExecuteAsync($"DROP TRIGGER IF EXISTS ext.{trigger}");
+        }
+    }
+
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Directive", "HSE301-EFSYNC")]
+    [Trait("Finding", "audit-B3")]
+    [InlineData(3, 4, false)] // 75 %, але ≤ 10 — дозволено (мінімум)
+    [InlineData(10, 10, false)] // рівно мінімум
+    [InlineData(11, 11, true)] // 11 із 11 > max(10, 2.2)
+    [InlineData(11, 100, false)] // 11 % від 100 і > 10, але ≤ 20 % → дозволено
+    [InlineData(21, 100, true)] // 21 % > 20 %
+    [InlineData(20, 100, false)] // рівно 20 %
+    [InlineData(201, 1500, true)] // ≤ 20 % (13 %), але > 200 абсолютно
+    [InlineData(200, 1500, false)]
+    public void B3_Ліміт_масового_видалення_відсоток_мінімум_і_абсолютна_стеля(int candidates, int linked, bool exceeds)
+        => Assert.Equal(exceeds, SourceEventSyncJob.ExceedsRemovalLimit(candidates, linked, out _));
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "HSE301-EFSYNC")]
+    [Trait("Finding", "audit-B3")]
+    public async Task B3_Масове_зникнення_блокується_лімітом_а_після_ручного_підтвердження_видаляється()
+    {
+        await using var stand = await ArrangeAsync();
+        var trigger = Substitute.For<ICalculationTrigger>();
+        var logger = new CollectingLogger();
+
+        // Перший синк: зв'язків ще немає — ліміт його не зачіпає (16 подій записано).
+        var all = Enumerable.Range(1, 16)
+            .Select(i => Ev($"M{i:00}", Start.AddMinutes(i * 20), Start.AddMinutes((i * 20) + 10)))
+            .ToArray();
+        var source = new FakeEventSource(all);
+        await RunAsync(stand, source, trigger: trigger);
+        Assert.Equal(16, (await LinksAsync(stand)).Count);
+        Assert.Equal(16, (await RowsAsync(stand)).Count);
+
+        // Лишилось 2 із 16: 14 кандидатів > max(10, 3.2).
+        source.Result = new SourceEventResult([all[0], all[1]], false, null);
+        trigger.ClearReceivedCalls();
+        await RunAsync(stand, source, trigger: trigger, logger: logger);
+
+        Assert.Equal(16, (await RowsAsync(stand)).Count);
+        Assert.Equal(16, (await LinksAsync(stand)).Count);
+        Assert.Equal(0, await JournalCountAsync(stand));
+        Assert.Empty(trigger.ReceivedCalls());
+        Assert.Contains(logger.Entries, e => e.Level == LogLevel.Warning && e.Message.Contains("перевищує ліміт", StringComparison.Ordinal));
+        Assert.Equal(
+            1,
+            Convert.ToInt32(
+                await ScalarAsync(
+                    $"SELECT COUNT(*) FROM itg.CollectionCoverage WHERE SourceEntityId = {stand.EntityId} "
+                    + "AND Status = N'SourceDataRefused' AND Details LIKE N'%eventRemovalLimit%'"),
+                CultureInfo.InvariantCulture));
+
+        // Здоров'я джерел: блок видно як прогалину (Degraded у SourcesHealthCheck).
+        await using (var scope = stand.Provider.CreateAsyncScope())
+        {
+            var status = (await scope.ServiceProvider.GetRequiredService<ICollectionStore>()
+                .ListSourceEntitiesAsync(CancellationToken.None)).Single(e => e.Id == stand.EntityId);
+            Assert.NotNull(status.OldestGap);
+        }
+
+        // Підтвердження вручну (Integration.Manage ставить прапор у payload) — видалення виконується.
+        await RunAsync(stand, source, trigger: trigger, confirm: true);
+        Assert.Equal(["EF-M01", "EF-M02"], (await RowsAsync(stand)).Select(r => r.RowKey).Order(StringComparer.Ordinal));
+        Assert.Equal(14, await JournalCountAsync(stand));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "HSE301-EFSYNC")]
+    [Trait("Finding", "audit-B4")]
+    public async Task B4_Поданий_аркуш_рядок_не_видаляється_а_пишеться_подія_покриття_і_журнал_порожній()
+    {
+        await using var stand = await ArrangeAsync();
+        var trigger = Substitute.For<ICalculationTrigger>();
+        var source = new FakeEventSource(Ev("E1", Start, End), Ev("E2", Start.AddHours(1), End.AddHours(1)));
+        await RunAsync(stand, source, trigger: trigger);
+
+        var sheetDefId = Convert.ToInt32(
+            await ScalarAsync($"SELECT SheetDefId FROM cfg.TableDef WHERE Id = {stand.TableDefId}"), CultureInfo.InvariantCulture);
+        await using (var db = sql.CreateContext())
+        {
+            var state = new ApprovalState(stand.DocumentId, sheetDefId, 202601);
+            state.Submit(stand.HumanId, Now);
+            db.ApprovalStates.Add(state);
+            await db.SaveChangesAsync();
+        }
+
+        trigger.ClearReceivedCalls();
+        source.Result = new SourceEventResult([Ev("E2", Start.AddHours(1), End.AddHours(1))], false, null);
+        await RunAsync(stand, source, trigger: trigger);
+
+        Assert.Equal(["EF-E1", "EF-E2"], (await RowsAsync(stand)).Select(r => r.RowKey).Order(StringComparer.Ordinal));
+        Assert.Equal(0, await JournalCountAsync(stand));
+        Assert.Empty(trigger.ReceivedCalls());
+        Assert.Equal(
+            1,
+            Convert.ToInt32(
+                await ScalarAsync(
+                    $"SELECT COUNT(*) FROM itg.CollectionCoverage WHERE SourceEntityId = {stand.EntityId} "
+                    + "AND Status = N'SkippedPeriodClosed' AND Details LIKE N'%eventRemovalSheetSubmitted%'"),
+                CultureInfo.InvariantCulture));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "HSE301-EFSYNC")]
+    public async Task Часткова_відмова_джерела_ErrorCode_нічого_не_видаляє_і_не_ставить_Missing()
+    {
+        await using var stand = await ArrangeAsync();
+        var source = new FakeEventSource(Ev("E1", Start, End), Ev("E2", Start.AddHours(1), End.AddHours(1)));
+        await RunAsync(stand, source);
+
+        source.Result = new SourceEventResult([Ev("E2", Start.AddHours(1), End.AddHours(1))], false, "ECR-INT-0503");
+        await RunAsync(stand, source);
+
+        Assert.Equal(["EF-E1", "EF-E2"], (await RowsAsync(stand)).Select(r => r.RowKey).Order(StringComparer.Ordinal));
+        Assert.All(await LinksAsync(stand), l => Assert.NotEqual(SourceEventLinkStatus.Missing, l.Status));
+        Assert.Equal(0, await JournalCountAsync(stand));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "HSE301-EFSYNC")]
+    public async Task Вікно_звірки_подія_раніше_початку_і_з_початком_рівно_у_кінці_вікна_не_видаляються()
+    {
+        await using var stand = await ArrangeAsync();
+        var early = new DateTime(2026, 1, 10, 9, 0, 0, DateTimeKind.Utc);
+        var atEnd = Now; // кінець вікна виключно
+        var source = new FakeEventSource(
+            Ev("OLD", early, early.AddMinutes(5)), Ev("E1", Start, End), Ev("LATE", atEnd, atEnd.AddMinutes(5)));
+        await RunAsync(stand, source, from: new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc), to: Now.AddDays(1));
+        Assert.Equal(3, (await LinksAsync(stand)).Count);
+
+        // Вікно прогону [20.01; Now): OLD раніше початку, LATE починається рівно в кінці — обидві поза звіркою.
+        source.Result = new SourceEventResult([Ev("E1", Start, End)], false, null);
+        await RunAsync(stand, source);
+
+        Assert.Equal(["EF-E1", "EF-LATE", "EF-OLD"], (await RowsAsync(stand)).Select(r => r.RowKey).Order(StringComparer.Ordinal));
+        Assert.Equal(0, await JournalCountAsync(stand));
+    }
+
+    // ── Братні шаблони: Auto / Auto_Day / Manual / Manual_Day (рішення людини 2026-10-01) ──
+    //
+    // ⛔ МУТАЦІЙНІ ДОКАЗИ: прибрати фільтр Outranked в ExecuteAsync — червоніє S1; прибрати перевірку
+    // sibling.Overlaps — S2; прибрати `read.Truncated || sibling.Incomplete` — S3; прибрати
+    // `!other.Contains(...)` у gone планувальника — S4.
+
+    private const string LowerPriority = "_Zz";
+    private const string HigherPriority = "_Auto";
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "HSE301-EFSYNC")]
+    public async Task S1_Одна_подія_в_двох_шаблонах_дає_один_рядок_і_один_зв_язок_у_шаблоні_з_вищим_пріоритетом()
+    {
+        await using var stand = await ArrangeAsync();
+        var sibling = await AddSiblingAsync(stand, HigherPriority);
+        try
+        {
+            var source = new FakeEventSource();
+            source.ByTemplate[stand.EntityCode] = new SourceEventResult([Ev("E1", Start, End, volume: 10m)], false, null);
+            source.ByTemplate[sibling.Code] = new SourceEventResult([Ev("E1", Start, End, volume: 10m)], false, null);
+
+            await RunAsync(stand, source);
+            Assert.Empty(await RowsAsync(stand));
+            Assert.Empty(await LinksAsync(stand));
+
+            await RunAsync(stand, source, entityId: sibling.EntityId);
+            await RunAsync(stand, source);
+
+            Assert.Equal(["EF-E1"], (await RowsAsync(stand)).Select(r => r.RowKey));
+            Assert.Empty(await LinksAsync(stand));
+            Assert.Single(await LinksOfMapAsync(sibling.MapId));
+        }
+        finally
+        {
+            await DeactivateAsync(sibling.EntityId);
+        }
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "HSE301-EFSYNC")]
+    public async Task S2_Перекриття_з_різними_значеннями_дає_попередження_а_береться_перший_за_порядком_шаблонів()
+    {
+        await using var stand = await ArrangeAsync();
+        var sibling = await AddSiblingAsync(stand, LowerPriority);
+        try
+        {
+            var source = new FakeEventSource();
+            source.ByTemplate[stand.EntityCode] = new SourceEventResult([Ev("E1", Start, End, volume: 10m)], false, null);
+            source.ByTemplate[sibling.Code] = new SourceEventResult([Ev("E1", Start, End, volume: 20m)], false, null);
+
+            await RunAsync(stand, source);
+
+            Assert.Equal(10m, (await CellsAsync(stand, "EF-E1"))[stand.VolumeColumn].Numeric);
+            Assert.Equal(
+                1,
+                Convert.ToInt32(
+                    await ScalarAsync(
+                        $"SELECT COUNT(*) FROM itg.CollectionCoverage WHERE SourceEntityId = {stand.EntityId} AND Details LIKE N'%eventTemplateOverlap%'"),
+                    CultureInfo.InvariantCulture));
+        }
+        finally
+        {
+            await DeactivateAsync(sibling.EntityId);
+        }
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "HSE301-EFSYNC")]
+    public async Task S3_Недоступний_братній_шаблон_пропускає_видалення_для_всього_періоду()
+    {
+        await using var stand = await ArrangeAsync();
+        var sibling = await AddSiblingAsync(stand, LowerPriority);
+        try
+        {
+            var source = new FakeEventSource();
+            source.ByTemplate[stand.EntityCode] = new SourceEventResult(
+                [Ev("E1", Start, End), Ev("E2", Start.AddHours(1), End.AddHours(1))], false, null);
+            source.ByTemplate[sibling.Code] = new SourceEventResult([], false, null);
+            await RunAsync(stand, source);
+
+            source.ByTemplate[stand.EntityCode] = new SourceEventResult([Ev("E2", Start.AddHours(1), End.AddHours(1))], false, null);
+            source.FailTemplates.Add(sibling.Code);
+            await RunAsync(stand, source);
+
+            Assert.Equal(["EF-E1", "EF-E2"], (await RowsAsync(stand)).Select(r => r.RowKey).Order(StringComparer.Ordinal));
+            Assert.Equal(2, (await LinksAsync(stand)).Count);
+
+            // Шаблон знову доступний — тепер подія E1 справді зникла.
+            source.FailTemplates.Clear();
+            await RunAsync(stand, source);
+            Assert.Equal(["EF-E2"], (await RowsAsync(stand)).Select(r => r.RowKey));
+        }
+        finally
+        {
+            await DeactivateAsync(sibling.EntityId);
+        }
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "HSE301-EFSYNC")]
+    public async Task S4_Подія_переїхала_в_братній_шаблон_зв_язок_знімається_а_рядок_лишається()
+    {
+        await using var stand = await ArrangeAsync();
+        var sibling = await AddSiblingAsync(stand, LowerPriority);
+        try
+        {
+            var source = new FakeEventSource();
+            source.ByTemplate[stand.EntityCode] = new SourceEventResult([Ev("E1", Start, End), Ev("E2", Start.AddHours(1), End.AddHours(1))], false, null);
+            source.ByTemplate[sibling.Code] = new SourceEventResult([], false, null);
+            await RunAsync(stand, source);
+
+            source.ByTemplate[stand.EntityCode] = new SourceEventResult([Ev("E2", Start.AddHours(1), End.AddHours(1))], false, null);
+            source.ByTemplate[sibling.Code] = new SourceEventResult([Ev("E1", Start, End)], false, null);
+            await RunAsync(stand, source);
+
+            Assert.Equal(["EF-E1", "EF-E2"], (await RowsAsync(stand)).Select(r => r.RowKey).Order(StringComparer.Ordinal));
+            Assert.Equal(["E2"], (await LinksAsync(stand)).Select(l => l.SourceEventId));
+
+            await RunAsync(stand, source, entityId: sibling.EntityId);
+            Assert.Equal(["EF-E1", "EF-E2"], (await RowsAsync(stand)).Select(r => r.RowKey).Order(StringComparer.Ordinal));
+            Assert.Equal(["E1"], (await LinksOfMapAsync(sibling.MapId)).Select(l => l.SourceEventId));
+        }
+        finally
+        {
+            await DeactivateAsync(sibling.EntityId);
+        }
+    }
+
+    private sealed record Sibling(int EntityId, int MapId, string Code);
+
+    private async Task<Sibling> AddSiblingAsync(Stand stand, string suffix)
+    {
+        await using var db = sql.CreateContext();
+        var dataSourceId = await db.SourceEntities.AsNoTracking()
+            .Where(e => e.Id == stand.EntityId).Select(e => e.DataSourceId).SingleAsync();
+        var entity = new SourceEntity(dataSourceId, $"{stand.EntityCode}{suffix}", RegistrySourceKind.External);
+        db.SourceEntities.Add(entity);
+        await db.SaveChangesAsync();
+
+        var table = await db.TableDefs.AsNoTracking().SingleAsync(t => t.Id == stand.TableDefId);
+        var columns = await db.ColumnDefs.AsNoTracking().Where(c => c.TableDefId == stand.TableDefId).ToDictionaryAsync(c => c.Id);
+        var map = SourceEventMap.Create(
+            entity.Id,
+            stand.DocumentId,
+            table,
+            [
+                new(columns[stand.StartColumn], SourceEventMap.StartAttribute),
+                new(columns[stand.EndColumn], SourceEventMap.EndAttribute),
+                new(columns[stand.NameColumn], SourceEventMap.NameAttribute),
+                new(columns[stand.VolumeColumn], "Volume"),
+            ],
+            SourceEventVolumeMode.EventAttribute);
+        db.SourceEventMaps.Add(map);
+        await db.SaveChangesAsync();
+
+        return new Sibling(entity.Id, map.Id, entity.Code);
+    }
+
+    private Task DeactivateAsync(int entityId)
+        => ExecuteAsync($"UPDATE ext.SourceEntity SET IsActive = 0 WHERE Id = {entityId}");
+
+    private async Task<List<SourceEventLink>> LinksOfMapAsync(int mapId)
+    {
+        await using var db = sql.CreateContext();
+        return await db.SourceEventLinks.AsNoTracking().Where(l => l.SourceEventMapId == mapId).ToListAsync();
+    }
+
     private sealed class CollectingLogger : ILogger<SourceEventSyncJob>
     {
         public List<(LogLevel Level, string Message, Exception? Exception)> Entries { get; } = [];
@@ -467,7 +1041,8 @@ public sealed class SourceEventSyncJobTests(SqlServerFixture sql)
 
     private async Task RunAsync(
         Stand stand, FakeEventSource source, bool freshContainer = false, ICalculationTrigger? trigger = null,
-        ILogger<SourceEventSyncJob>? logger = null)
+        ILogger<SourceEventSyncJob>? logger = null, int? entityId = null,
+        DateTime? from = null, DateTime? to = null, bool confirm = false)
     {
         // ⚠ Метадані таблиці кешуються в контейнері: зміна стелі рядків у базі видна лише новому контейнеру.
         await using var fresh = freshContainer ? BuildProvider() : null;
@@ -488,7 +1063,9 @@ public sealed class SourceEventSyncJobTests(SqlServerFixture sql)
             logger);
 
         await job.ExecuteAsync(
-            new SourceEventSyncRequest(stand.EntityId, From, Now), Substitute.For<IJobProgress>(), CancellationToken.None);
+            new SourceEventSyncRequest(entityId ?? stand.EntityId, from ?? From, to ?? Now, confirm),
+            Substitute.For<IJobProgress>(),
+            CancellationToken.None);
     }
 
     private static SourceEvent Ev(
@@ -522,6 +1099,12 @@ public sealed class SourceEventSyncJobTests(SqlServerFixture sql)
 
         public SourceEventQuery? LastQuery { get; private set; }
 
+        /// <summary>Відповіді за шаблоном; шаблону немає в словнику — <see cref="Result"/>.</summary>
+        public Dictionary<string, SourceEventResult> ByTemplate { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>Шаблони, читання яких падає (недоступне джерело).</summary>
+        public HashSet<string> FailTemplates { get; } = new(StringComparer.OrdinalIgnoreCase);
+
         public Task<IReadOnlyList<SourceEntityDescriptor>> DiscoverAsync(int dataSourceId, CancellationToken ct)
             => throw new NotSupportedException();
 
@@ -531,7 +1114,12 @@ public sealed class SourceEventSyncJobTests(SqlServerFixture sql)
         public Task<SourceEventResult> ReadEventsAsync(SourceEventQuery query, CancellationToken ct)
         {
             LastQuery = query;
-            return Task.FromResult(Result);
+            if (FailTemplates.Contains(query.Template))
+            {
+                throw new InvalidOperationException($"template {query.Template} unavailable");
+            }
+
+            return Task.FromResult(ByTemplate.TryGetValue(query.Template, out var byTemplate) ? byTemplate : Result);
         }
     }
 

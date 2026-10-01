@@ -20,6 +20,12 @@ public enum NotificationEventKind : byte
 
     /// <summary>Вивантаження не вдалося.</summary>
     ExportFailed = 5,
+
+    /// <summary>
+    /// Відкрито новий звітний період проєкту (<c>Scheduled → Open</c>): привід нагадати, що
+    /// документ за період пора заповнювати. Інформаційна подія, не збій.
+    /// </summary>
+    PeriodOpened = 6,
 }
 
 /// <summary>Серйозність події; правило пропускає події не нижчі за свою межу.</summary>

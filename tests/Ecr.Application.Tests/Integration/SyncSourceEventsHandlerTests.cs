@@ -76,6 +76,33 @@ public sealed class SyncSourceEventsHandlerTests
         await _jobs.DidNotReceiveWithAnyArgs().EnqueueCoalescedAsync<ISourceEventSyncJob>(default!, default, default);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Directive", "HSE301-EFSYNC")]
+    public async Task Підтвердження_масового_видалення_ставить_прапор_у_payload_на_власну_ціль_і_лише_з_правом_Manage()
+    {
+        Allow("Integration.View");
+        await Assert.ThrowsAsync<AccessDeniedException>(() => Sync().HandleAsync(EntityId, default, confirmRemoval: true));
+        await _jobs.DidNotReceiveWithAnyArgs().EnqueueCoalescedAsync<ISourceEventSyncJob>(default!, default, default);
+
+        Allow("Integration.Manage");
+        await Sync().HandleAsync(EntityId, default, confirmRemoval: true);
+
+        await _jobs.Received(1).EnqueueCoalescedAsync<ISourceEventSyncJob>(
+            "source-events-e5-confirm",
+            Arg.Is<object?>(p => p is SourceEventSyncRequest && ((SourceEventSyncRequest)p).ConfirmRemoval),
+            Arg.Any<CancellationToken>(),
+            Actor);
+
+        // Звичайна постановка прапора не несе (розклад і збір його не ставлять).
+        await Sync().HandleAsync(EntityId, default);
+        await _jobs.Received(1).EnqueueCoalescedAsync<ISourceEventSyncJob>(
+            "source-events-e5",
+            Arg.Is<object?>(p => p is SourceEventSyncRequest && !((SourceEventSyncRequest)p).ConfirmRemoval),
+            Arg.Any<CancellationToken>(),
+            Actor);
+    }
+
     private SyncSourceEventsHandler Sync() => new(_sources, _maps, _jobs, _access, _user);
 
     private void Allow(string permission)

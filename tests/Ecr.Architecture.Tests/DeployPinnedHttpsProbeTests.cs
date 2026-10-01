@@ -38,7 +38,11 @@ public sealed class DeployPinnedHttpsProbeTests
         using var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();
         var port = ((IPEndPoint)listener.LocalEndpoint).Port;
-        var closedPort = FreePort();
+
+        // ⛔ Порт «нікого немає» ТРИМАЄТЬСЯ до кінця прогону: сокет прив'язаний, але не слухає, тож
+        // з'єднання на нього — гарантована відмова. Колись порт брався й одразу відпускався, і в
+        // паралельному прогоні його міг зайняти будь-який сусідній слухач.
+        using var closed = ReserveClosedPort(out var closedPort);
         var serving = Serve(listener, certificate, connections: 2);
 
         var body = $$"""
@@ -77,51 +81,66 @@ public sealed class DeployPinnedHttpsProbeTests
         Expect("p.none.matches", string.Empty);
     }
 
-    private static Task Serve(TcpListener listener, X509Certificate2 certificate, int connections) => Task.Run(async () =>
-    {
-        for (var i = 0; i < connections; i++)
+    /// <remarks>
+    /// ⛔ Корінь флейку CL-1: сервер жив у <c>Task.Run</c> з асинхронними викликами, тобто кожен його
+    /// крок (прийом, рукостискання, читання) чекав вільного потоку ПУЛУ процесу тестів. Сусідні
+    /// тести цієї збірки блокують потоки пулу синхронно (<see cref="DeployScriptHarness.Run"/> чекає
+    /// <c>pwsh</c> до 2 хв, той самий <c>Task.Run</c> тут), і під CPU ~100 % пул доростає повільно:
+    /// рукостискання не починалося за <c>-TimeoutSeconds</c> зонда, і він чесно рапортував
+    /// <c>StatusCode = 0</c> — збій тесту, а не скрипта. Тепер сервер — окремий потік
+    /// (<see cref="TaskCreationOptions.LongRunning"/>) із синхронним вводом-виводом: від пулу він не
+    /// залежить узагалі.
+    /// </remarks>
+    private static Task Serve(TcpListener listener, X509Certificate2 certificate, int connections) => Task.Factory.StartNew(
+        () =>
         {
-            using var client = await listener.AcceptTcpClientAsync();
-            try
+            for (var i = 0; i < connections; i++)
             {
-                using var ssl = new SslStream(client.GetStream());
-                await ssl.AuthenticateAsServerAsync(certificate, false, SslProtocols.Tls12 | SslProtocols.Tls13, false);
-
-                var seen = new StringBuilder();
-                var buffer = new byte[1024];
-                while (!seen.ToString().Contains("\r\n\r\n", StringComparison.Ordinal))
+                using var client = listener.AcceptTcpClient();
+                try
                 {
-                    var read = await ssl.ReadAsync(buffer);
-                    if (read == 0)
+                    using var ssl = new SslStream(client.GetStream());
+                    ssl.AuthenticateAsServer(certificate, false, SslProtocols.Tls12 | SslProtocols.Tls13, false);
+
+                    var seen = new StringBuilder();
+                    var buffer = new byte[1024];
+                    while (!seen.ToString().Contains("\r\n\r\n", StringComparison.Ordinal))
                     {
-                        break;
+                        var read = ssl.Read(buffer);
+                        if (read == 0)
+                        {
+                            break;
+                        }
+
+                        seen.Append(Encoding.ASCII.GetString(buffer, 0, read));
                     }
 
-                    seen.Append(Encoding.ASCII.GetString(buffer, 0, read));
+                    if (seen.Length > 0)
+                    {
+                        var payload = Encoding.UTF8.GetBytes(ResponseBody);
+                        var head = Encoding.ASCII.GetBytes(
+                            $"HTTP/1.1 503 Service Unavailable\r\nContent-Type: application/json; charset=utf-8\r\nContent-Length: {payload.Length}\r\nConnection: close\r\n\r\n");
+                        ssl.Write(head);
+                        ssl.Write(payload);
+                        ssl.Flush();
+                    }
                 }
-
-                if (seen.Length > 0)
+                catch (Exception ex) when (ex is IOException or AuthenticationException or SocketException or ObjectDisposedException)
                 {
-                    var payload = Encoding.UTF8.GetBytes(ResponseBody);
-                    var head = Encoding.ASCII.GetBytes(
-                        $"HTTP/1.1 503 Service Unavailable\r\nContent-Type: application/json; charset=utf-8\r\nContent-Length: {payload.Length}\r\nConnection: close\r\n\r\n");
-                    await ssl.WriteAsync(head);
-                    await ssl.WriteAsync(payload);
-                    await ssl.FlushAsync();
+                    // Клієнт, що відхилив чужий сертифікат, обриває з'єднання — це очікувано.
                 }
             }
-            catch (Exception ex) when (ex is IOException or AuthenticationException or SocketException or ObjectDisposedException)
-            {
-                // Клієнт, що відхилив чужий сертифікат, обриває з'єднання — це очікувано.
-            }
-        }
-    });
+        },
+        CancellationToken.None,
+        TaskCreationOptions.LongRunning,
+        TaskScheduler.Default);
 
-    private static int FreePort()
+    private static Socket ReserveClosedPort(out int port)
     {
-        using var probe = new TcpListener(IPAddress.Loopback, 0);
-        probe.Start();
-        return ((IPEndPoint)probe.LocalEndpoint).Port;
+        var socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+        socket.Bind(new IPEndPoint(IPAddress.Loopback, 0));
+        port = ((IPEndPoint)socket.LocalEndPoint!).Port;
+        return socket;
     }
 
     private static X509Certificate2 NewCertificate()

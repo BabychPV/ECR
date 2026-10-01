@@ -350,8 +350,8 @@ public sealed class SeedRunner(EcrDbContext db)
             "4) sec.PasswordPolicy; 5) uom.Dimension (11); 6) uom.Unit базові; 7) uom.Unit похідні;\n" +
             "8) оновити Dimension.BaseUnitId; 9) doc.PeriodPolicy 'ECR-Standard'.\n" +
             "⚠ Небезпечні права (Calculation.EditScript/Publish, Security.*, Integration.Manage, " +
-            "System.RunJob) у вбудовані ролі НЕ додавати: вони видаються іменованим особам " +
-            "окремо (ФВ-6.12). Порожні за ними ролі — це навмисно, а не пропуск.\n" +
+            "System.RunJob) у вбудовані ролі НЕ додавати: вони видаються ролям окремо; " +
+            "склад ролей визначає адміністратор замовника, іменних осіб немає (ФВ-6.12). Порожні за ними ролі — це навмисно, а не пропуск.\n" +
             "⚠ FactorToBase наявних одиниць змінювати заборонено: на них спираються фікстури.");
 }
 ```

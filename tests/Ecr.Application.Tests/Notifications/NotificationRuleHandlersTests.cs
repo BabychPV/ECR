@@ -47,10 +47,10 @@ public sealed class NotificationRuleHandlersTests
     {
         var matrix = await Rules().HandleAsync(CancellationToken.None);
 
-        // ⛔ Саме ВСІ п'ять, а не «ті, на які є правило»: порожня клітинка має
+        // ⛔ Саме ВСІ шість, а не «ті, на які є правило»: порожня клітинка має
         // означати «правила немає», а не «такої події не буває». Число
         // літералом — інакше твердження їхало б разом із переліком.
-        Assert.Equal(5, matrix.EventKinds.Count);
+        Assert.Equal(6, matrix.EventKinds.Count);
         Assert.Equal(Enum.GetValues<NotificationEventKind>(), matrix.EventKinds);
         Assert.Empty(matrix.Rules);
     }

@@ -601,6 +601,28 @@ public static class RegistrySyncPlanner
     {
         var probe = new RegistryValue(registryEntryId: 0, mapping.RegistryFieldDefId);
 
+        // Рядок для поля Date — лише явні формати (ISO, MM/dd/yyyy), без здогадів CellDateParser
+        // (той читає «29/04/2026» як dd/MM); DateTime з AF іде як є.
+        if (mapping.DataType == CellDataType.Date && raw is string dateText && !string.IsNullOrWhiteSpace(dateText))
+        {
+            if (!RegistrySyncValidity.TryParseFieldDate(dateText, out var date))
+            {
+                typed = null;
+                rejection = new DomainException(
+                    ValueRejectedCode,
+                    $"Значення «{dateText}» не в форматі {RegistrySyncValidity.FieldDateFormat}.",
+                    new Dictionary<string, object?>
+                    {
+                        ["messageKey"] = RegistrySyncValidity.DateFormatRefusedKey,
+                        ["value"] = dateText,
+                        ["expected"] = RegistrySyncValidity.FieldDateFormat,
+                    });
+                return false;
+            }
+
+            raw = date;
+        }
+
         try
         {
             probe.Set(mapping.DataType, CellValueReader.Normalize(raw), mapping.UnitId);

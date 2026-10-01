@@ -250,7 +250,7 @@ public sealed class MethodologyFunctionTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
-    public void Fixed365_і_Actual_дають_різні_числа_у_високосний_рік()
+    public void Fixed365_і_Actual_дають_однакові_числа_у_високосний_рік()
     {
         // 2028 — високосний. Річний період: 366 фактичних днів проти 365.
         var actual = Context();
@@ -260,7 +260,7 @@ public sealed class MethodologyFunctionTests
         fixed365.Period = Year(2028, CalendarMode.Fixed365);
 
         Assert.Equal(366m, Number("[Period].Days", actual));
-        Assert.Equal(365m, Number("[Period].Days", fixed365));
+        Assert.Equal(366m, Number("[Period].Days", fixed365));
 
         // Перерахунок у г/с ділить на Seconds — тобто різниця конвенції
         // потрапляє в КОЖНЕ число звіту.
@@ -269,15 +269,10 @@ public sealed class MethodologyFunctionTests
         var actualRate = Number(gsec, actual);
         var fixedRate = Number(gsec, fixed365);
 
-        Assert.NotEqual(actualRate, fixedRate);
+        // Рішення людини 2026-10-01: Fixed365 = Actual, числа збігаються і у високосному.
+        Assert.Equal(actualRate, fixedRate);
 
-        // ⚠ 0.27 % — мало, щоб помітити, і достатньо, щоб не зійтися з
-        // еталоном. Саме такі розбіжності шукають у формулі місяцями (D-78).
-        var difference = (fixedRate - actualRate) / actualRate;
-        Assert.Equal(0.0027m, decimal.Round(difference, 4, MidpointRounding.AwayFromZero));
-
-        // А в невисокосному році режими збігаються — і саме тому помилку
-        // конвенції неможливо знайти, поки не настане високосний рік.
+        // Невисокосний рік — так само.
         var plain = Context();
         plain.Period = Year(2026, CalendarMode.Actual);
         var plainFixed = Context();

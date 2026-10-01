@@ -116,7 +116,7 @@ Api й воркер на **одному** хості — різні ролі й 
 | `PiSqlClient:<код джерела>:<Query>` | немає | запит для ОДНОГО джерела (інша база AF на тому ж сервері), перекриває спільний `PiSqlClient:<Query>` — для будь-якого із запитів вище; напр. `PiSqlClient:AIR:ElementListQuery`. ⚠ Усі `PiSqlClient:*` адаптер читає через канал секретів, тобто фізично це `Secrets:PiSqlClient:…` — змінна `ECR_Secrets__PiSqlClient__AIR__ElementListQuery` |
 | `Sql:CatalogQuery` / `Sql:ValueQuery` | немає (вбудовані) | те саме для SQL-джерела |
 | `Integration:AfTimeZoneId` | (порожньо = UTC) | ✎ 2026-09-30, D-212 PR-7: пояс, у якому AF віддає дати дії записів довідника без поясу (Windows або IANA, напр. `Asia/Atyrau`). Діє лише для синку темпорального довідника з атрибутами дат у політиці. Невідомий пояс зупиняє старт з ім'ям ключа. ⚠ Пояс серверів AF замовника — відкрите питання PI-адміністратору |
-| `PiWebApi:AllowedHosts` | `[]` (порожньо) | ✎ 2026-10-01: перелік хостів PI Web API, до яких дозволено підключати джерела. Елемент — точне ім'я хоста або `*.domain` (лише піддомени; сам `domain` не збігається); без урахування регістра. **Порожньо = без обмеження, окрім блок-листа** (loopback, link-local і хмарний metadata 169.254.x, unspecified, multicast — діє завжди, для всіх режимів автентифікації; перевіряється по кожній розв'язаній A/AAAA-адресі, у момент підключення — отже DNS rebinding не обійде). Приватні IP-літерали (`10.x`, `172.16–31.x`, `192.168.x`, `fc00::/7`) заборонені лише для джерел з Negotiate (потрібне ім'я хоста для Kerberos SPN). Адресу Negotiate-джерела можна змінити лише з явним `confirmEndpointChange: true` у запиті (в інтерфейсі — діалог підтвердження). Відповідь PI понад 50 МБ відхиляється. Масив задається так: у `appsettings.Production.json` — `"PiWebApi": { "AllowedHosts": [ "<хост PI Web API>", "*.<домен замовника>" ] }`, або змінними служби `ECR_PiWebApi__AllowedHosts__0`, `ECR_PiWebApi__AllowedHosts__1`, … ⚠ Інсталятор і `deploy-ecr.ps1` цього ключа не пишуть — задає адміністратор замовника вручну; імена хостів PI — дані замовника, у продукті їх немає. ⚠ Negotiate-джерело без списку: Warning у журнал і картка `sources` Degraded (`health.sources.negotiateNoAllowlist`, п. 3.1) — заповніть список. Після зміни — перезапуск `EcrApi` |
+| `PiWebApi:AllowedHosts` | `[]` (порожньо) | ✎ 2026-10-01: перелік хостів PI Web API, до яких дозволено підключати джерела. Елемент — точне ім'я хоста або `*.domain` (лише піддомени; сам `domain` не збігається); без урахування регістра. **Порожньо = без обмеження, окрім блок-листа** (loopback, link-local і хмарний metadata 169.254.x, unspecified, multicast — діє завжди, для всіх режимів автентифікації; перевіряється по кожній розв'язаній A/AAAA-адресі, у момент підключення — отже DNS rebinding не обійде). Приватні IP-літерали (`10.x`, `172.16–31.x`, `192.168.x`, `fc00::/7`) заборонені лише для джерел з Negotiate (потрібне ім'я хоста для Kerberos SPN). Адресу Negotiate-джерела можна змінити лише з явним `confirmEndpointChange: true` у запиті (в інтерфейсі — діалог підтвердження). Відповідь PI понад 50 МБ відхиляється. Масив задається так: у `appsettings.Production.json` — `"PiWebApi": { "AllowedHosts": [ "<хост PI Web API>", "*.<домен замовника>" ] }`, або змінними служби `ECR_PiWebApi__AllowedHosts__0`, `ECR_PiWebApi__AllowedHosts__1`, … ⚠ Інсталятор і `deploy-ecr.ps1` цього ключа не пишуть — задає адміністратор замовника вручну; імена хостів PI — дані замовника, у продукті їх немає (дефолт порожній; сторож `PiWebApiAllowedHostsDefaultTests`). Для вашого середовища кандидати allowlist: `ncatdevv08`, `ncatuatv12`, `ncatappv0154`; задає адміністратор замовника через `appsettings.Production.json` / `ECR_PiWebApi__AllowedHosts__0`. ⚠ Negotiate-джерело без списку: Warning у журнал і картка `sources` Degraded (`health.sources.negotiateNoAllowlist`, п. 3.1) — заповніть список. Після зміни — перезапуск `EcrApi` |
 | `Bootstrap:Password` | немає | запасний пароль `bootstrap`. Основний шлях — файл `bootstrap.secret` |
 | `Telemetry:Enabled` | `false` | експорт метрик по OTLP (п. 3.4). Вимкнено — не реєструється нічого з OpenTelemetry, навантаження нуль. Вмикається лише рядком `true` |
 | `Telemetry:OtlpEndpoint` | порожньо | адреса OTLP-колектора, напр. `http://collector:4317` (gRPC) чи `http://collector:4318` (HTTP). **Обов'язкова**, коли `Telemetry:Enabled=true`: без неї або з недійсною адресою служба не стартує. Задана при вимкненому експорті — ігнорується, старт пише попередження |
@@ -135,8 +135,11 @@ Api й воркер на **одному** хості — різні ролі й 
 службу з назвою ключа (п. 5), а не мовчки замінюється дефолтом. Порожнє
 значення — «не задано», тобто дефолт.
 
-⚠ **потрібне рішення замовника:** SMTP, OTLP-колектор (і чи вмикати експорт метрик), сертифікат для Data
-Protection і HTTPS, адреси джерел PI. Дефолти коду — «вимкнено» або порожньо.
+⚠ **потрібне рішення замовника:** OTLP-колектор (і чи вмикати експорт метрик), адреси джерел PI. Дефолти
+коду — «вимкнено» або порожньо. ✎ 2026-10-01 (рішення людини): SMTP і правила сповіщень налаштовуються в
+самій системі (`D-263`); сертифікат — один із SAN для HTTPS і Data Protection (`D-267`, п. 11);
+`PiWebApi:AllowedHosts` за замовчуванням порожній, хости інтранету не вносяться (`D-260`); DBA, резервне
+копіювання й обслуговування БД — на замовнику (`D-264`).
 
 ### 2.2. SQL-джерело: місцевий час у колонці `Ts` без поясу
 
@@ -339,6 +342,8 @@ SQL Server Agent (`14-agent-jobs.sql`) ставиться лише з `deploy-ec
 | оновлення: `Msg 50301 … Передперевірка U1` на `migration.sql` | колонка шаблону чи поле довідника посилається на видалену одиницю | п. 8.2 |
 | `404` на `GET /api/v1/jobs/…` | `#` в ідентифікаторі не закодовано | кодувати `%23` |
 | пошта не йде | не задано `Smtp:Host`/`Smtp:From` | задати й перевірити `POST /api/v1/notifications/channels/{id}/test` |
+| проба пошти: «DNS» / «з'єднання» / «TLS» / «логін» / «relay» / «тайм-аут» | проба називає категорію відмови (`notifications.test.smtp.*`): ім'я сервера, порт/брандмауер, сертифікат чи `Smtp:UseStartTls`, `Smtp:User` + секрет `Smtp:SecretName`, `Smtp:From`/адресати | виправити названий параметр і повторити пробу |
+| не приходить нагадування «період відкрито» | правило події `PeriodOpened` не вимкнене за замовчуванням, а **відсутнє**: матриця `/admin/notifications` → подія «Відкрито звітний період» × канал, межа серйозності `Info`; нагадує лише про перехід `Scheduled → Open`, раз на період | увімкнути клітинку; текст листа — ключі `notifications.periodOpened.subject/body` (`/admin/ui-strings`) |
 
 ## 6. Резервне копіювання і відновлення
 
@@ -1111,6 +1116,8 @@ powershell -ExecutionPolicy Bypass -File tools\deploy-ecr.ps1 `
 ## 11. HTTPS і сертифікат (✎ 2026-09-30, `D14-08`)
 
 Повний опис — `docs/build/11-install-guide.md` §2.7; тут — те, що потрібно в експлуатації.
+Покроково для одного сертифіката замовника з SAN (право на ключ, перенаправлення порту, Data Protection,
+перевірка після встановлення, заміна, відомі розбіжності) — [`https-certificate.md`](https-certificate.md).
 
 **Три транспорти, рівно один** (`deploy-ecr.ps1`; на кожному оновленні — бо `Environment` стирає
 оновлення MSI, п. 10.3): `-HttpsThumbprint '<відбиток>'` (HTTPS; порт `-AppPort`, для `https://сервер/`
@@ -1146,10 +1153,26 @@ powershell -ExecutionPolicy Bypass -File tools\deploy-ecr.ps1 `
 не відкриє це ім'я по `http://` до кінця строку. За проксі застосунок HSTS не віддає (`X-Forwarded-*` не читає):
 ставити на проксі.
 
-⚠ **Невідомо про майданчик замовника** (у документах проєкту немає; потрібне рішення замовника): чи є
-зворотний проксі/балансувальник перед застосунком і хто завершує TLS; ім'я хоста, за яким відкриватимуть
-застосунок (SAN сертифіката), і який ЦС його видає; кількість вузлів. Відомо лише рішення людини 2026-09-29: «HTTPS
-— сертифікат замовника».
+**Один сертифікат для HTTPS і Data Protection** (рішення людини 2026-10-01, `D-267`): замовник видає
+один сертифікат із SAN. Практично — один відбиток у двох параметрах `deploy-ecr.ps1`
+(`-HttpsThumbprint` і `-DataProtectionThumbprint`), сертифікат із закритим ключем у `LocalMachine\My`,
+право читання ключа для облікового запису служби. Ім'я, за яким відкривають застосунок, має входити в SAN.
+TLS завершує **застосунок (Kestrel)** за замовчуванням; з `-BehindHttpsProxy` сертифікат HTTPS стоїть на
+проксі, а на вузлі застосунку той самий сертифікат усе одно потрібен для Data Protection.
+
+⚠ **Data Protection і сертифікат — що відомо з коду (`AuthenticationSetup.cs`):** ключі кільця в
+`sec.DataProtectionKey` захищаються лише `ProtectKeysWithCertificate` за відбитком; у Production без відбитка
+служба не стартує. `UnprotectKeysWithAnyCertificate` налаштовано з D-267 (коміт `ed0b2393`): відбитки попередніх сертифікатів —
+`Auth:DataProtection:PreviousCertificateThumbprints` (`deploy-ecr.ps1 -PreviousDataProtectionCertificateThumbprints`; MSI-оновлення стирає
+змінну — передавати знову); при заміні сертифіката старий залишати в `LocalMachine\My`, доки є ключі, захищені ним (ротація старих ключів — п. 6.4). Поведінку при
+заміні перевірено на бібліотеці (`https-certificate.md` §10.1), ризик закрито кодом; `/health/db` попереджає (Degraded), якщо відбиток пропущено.
+Продовження строку одного сертифіката зачіпає одночасно HTTPS і Data Protection — виконувати як одну
+операцію (перегляд п. 6.2 і цього пункту).
+
+⚠ **Невідомо про майданчик замовника** (потрібне уточнення): чи є зворотний проксі/балансувальник перед
+застосунком і хто завершує TLS (замовник не називав; діє Kestrel за замовчуванням); який ЦС видає сертифікат;
+кількість вузлів. Рішення людини 2026-09-29: «HTTPS — сертифікат замовника»; 2026-10-01 — один сертифікат
+із SAN (`D-267`).
 
 ## 12. Вʼюхи для SSRS не створено (картка `reportviews`, ✎ 2026-09-30)
 
@@ -1201,3 +1224,37 @@ EXEC rpt.usp_GenerateTemplateViews @TemplateVersionId = 7; -- одна
 
 ⚠ Той самий пояс проєкту — IANA; у полі проєкту Windows-ідентифікатор (`West Asia Standard Time`)
 відхиляється `ECR-CFG-4221`. Windows-імена лишаються лише для `AT TIME ZONE` у запитах SQL-джерела (п. 2.2).
+
+
+## 14. Роль бази «бачить усе» `ecr_viewer` (✎ 2026-10-01, AN-10, `D-258`, НФ-8.5)
+
+Роль `ecr_viewer` створює `Sql/05-rpt-views.sql` на КОЖНОМУ розгортанні й оновленні (ідемпотентно). Вона **порожня за замовчуванням**.
+
+| Роль | Для кого | Права |
+|---|---|---|
+| `rpt_reader` | обліковий запис SSRS | лише `SELECT` на схему `rpt` |
+| `ecr_viewer` | довірений DBA / діагностика | членство в `db_datareader` (`SELECT` на ВСІ схеми бази, зокрема майбутні) + `VIEW DEFINITION`; жодних `ALTER`/`CREATE`/`INSERT`/`UPDATE`/`DELETE`/`EXECUTE` |
+
+⛔ DENY на секрети: `ecr_viewer` НЕ читає `sec.DataProtectionKey` і стовпці `PasswordHash`, `SecurityStamp` у `sec.User` (DENY SELECT у `05-rpt-views.sql`; перекриває `db_datareader`). Скрипти відхиляють `-ViewerAccount` зі службовими іменами (EcrApi/EcrWorker/NT SERVICE\).
+
+⛔ Членом `ecr_viewer` НЕ робити обліковий запис служби EcrApi/EcrWorker: ця роль лише читає, а службі потрібні власні права запису. Роль бачить усе, зокрема `sys_ecr` і `aud` — членство лише довіреним особам.
+
+Видати членство при розгортанні (необовʼязковий параметр, без нього роль лишається порожньою):
+
+```powershell
+powershell -File tools\deploy-ecr.ps1 ... -ViewerAccount 'DOMAIN\dba-ecr'
+powershell -File tools\setup-dev-db.ps1 -Server localhost -Database EcrDev -ViewerAccount 'DOMAIN\dba-ecr'
+```
+
+Скрипт створює користувача бази `FOR LOGIN`, якщо логін на сервері є (інакше зупиняється з повідомленням), і додає його в роль лише якщо він ще не член; повторний запуск нічого не міняє. Паролів скрипт не друкує. Вручну: `ALTER ROLE ecr_viewer ADD MEMBER [DOMAIN\dba-ecr];`.
+
+Перевірка:
+
+```sql
+SELECT m.name FROM sys.database_role_members rm
+JOIN sys.database_principals r ON r.principal_id = rm.role_principal_id AND r.name = N'ecr_viewer'
+JOIN sys.database_principals m ON m.principal_id = rm.member_principal_id;
+-- від імені члена: SELECT HAS_PERMS_BY_NAME(DB_NAME(), 'DATABASE', 'ALTER');  -- очікується 0
+```
+
+Тести: `ViewerRoleTests` (читання кожної схеми, відмова на `CREATE TABLE`/`DELETE`), `DeployScriptsRerunTests` (ідемпотентність повторного прогону).

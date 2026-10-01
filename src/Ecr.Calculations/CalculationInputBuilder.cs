@@ -91,7 +91,9 @@ public sealed class CalculationInputBuilder(ICellStore cellStore, IMetadataCache
                 tableInstanceId,
                 periodKey,
                 rowKey,
-                arguments));
+                // AN-5: похідні аргументи події факела (Total/Duration/FlareUnitMode/…) — лише для рядка
+                // події й лише там, де колонки з тим самим кодом немає; нових запитів нема.
+                FlareEventArguments.Derive(arguments)));
         }
 
         return inputs;

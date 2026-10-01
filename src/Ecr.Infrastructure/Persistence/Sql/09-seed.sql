@@ -5970,11 +5970,35 @@ USING (VALUES
     (N'grid.columnWidths.reset',           N'en', N'Reset column widths', 1),
     -- ru/kz — окремою порцією `COLL:d234` у блоці I18N нижче.
     -- COLL:d234 ── кінець секції ──
+    -- COLL:dates ── Дата-рядок поля довідника з AF: лише MM/dd/yyyy чи ISO 8601 (`RegistrySyncValidity.TryParseFieldDate`, відповідь людини 2026-10-01) ──
+    (N'err.ECR-REG-0422.dateFormatRefused', N'en', N'The source value "{value}" is not a date in the expected format ({expected}) or ISO 8601: the field is left unchanged.', 1),
+    -- ru/kz — окремою порцією `COLL:dates` у блоці I18N нижче.
+    -- COLL:dates ── кінець секції ──
+    -- COLL:efrecon ── «Повна звірка за період» подій джерела: що видалено/пропущено (HSE301, `SourceEventSyncJob`, `CoverageDetails`) ──
+    (N'jobs.sourceEventsRemoved',                  N'en', N'Events missing from the source: removed {removed}, removal skipped {skipped}', 1),
+    (N'coverageEvents.eventRemovalSourceEmpty',    N'en', N'The source returned no events while {count} linked rows exist: removal skipped, the source looks unavailable.', 1),
+    (N'coverageEvents.eventRemovalKeptManual',     N'en', N'Event {eventId} is no longer in the source, but row {rowKey} has a manual edit: the row was not removed.', 1),
+    (N'coverageEvents.eventTemplateOverlap',       N'en', N'Event {eventId} exists in templates {template} and {other} with different attribute values; the first template in the order Auto, Auto_Day, Manual, Manual_Day is used.', 1),
+    (N'coverageEvents.eventRemovalLimit',          N'en', N'{count} events are missing from the source ({linked} linked rows in the window; limit {limit}): nothing was removed. Check the source and confirm the removal manually.', 1),
+    (N'coverageEvents.eventRemovalSheetSubmitted', N'en', N'Event {eventId} is no longer in the source, but the sheet of row {rowKey} is {status}: the row was not removed.', 1),
+    -- ru/kz — окремою порцією `COLL:efrecon` у блоці I18N нижче.
+    -- COLL:efrecon ── кінець секції ──
     -- JOBL ── людські назви видів фонових задач, яких бракувало в jobLabel.ts (KindKeys) ──
     (N'jobs.kind.sourceEventSync',  N'en', N'Source event sync', 1),
     (N'jobs.kind.consistencyCheck', N'en', N'Consistency check', 1),
     (N'jobs.kind.orphanScan',       N'en', N'Orphaned data scan', 1),
     -- JOBL ── кінець секції ──
+    -- COLL:smtp ── Категорії відмови проби SMTP (`SmtpFailureClassifier`) і подія «період відкрито» (`PeriodStateJob`, `NotificationEventKind.PeriodOpened`) ──
+    (N'notifications.test.smtp.dns',     N'en', N'SMTP test failed: the server name could not be resolved (DNS). Check Smtp:Host.', 1),
+    (N'notifications.test.smtp.connect', N'en', N'SMTP test failed: could not connect to the server. Check the host, the port (Smtp:Port) and the firewall.', 1),
+    (N'notifications.test.smtp.tls',     N'en', N'SMTP test failed: TLS/STARTTLS error. Check the server certificate and Smtp:UseStartTls.', 1),
+    (N'notifications.test.smtp.auth',    N'en', N'SMTP test failed: the server rejected the login. Check Smtp:User and the secret named in Smtp:SecretName.', 1),
+    (N'notifications.test.smtp.relay',   N'en', N'SMTP test failed: the server refused to relay for the sender or a recipient. Check Smtp:From and the recipient addresses.', 1),
+    (N'notifications.test.smtp.timeout', N'en', N'SMTP test failed: the server did not respond in time.', 1),
+    (N'notifications.event.PeriodOpened', N'en', N'Reporting period opened', 1),
+    (N'notifications.periodOpened.subject', N'en', N'ECR: period {period} opened, project {project}', 1),
+    (N'notifications.periodOpened.body', N'en', N'A new reporting period {period} has opened for project {project}. Please fill in your document for this period.', 1),
+    -- COLL:smtp ── кінець секції ──
     -- SEC:effective-access ── Розріз «ресурс → рівень → грант якої ролі» (ФВ-6.16, D-220, `EffectiveAccessPanel`, GET /security/users/{id}/effective-access) ──
     (N'err.ECR-REQ-0422.effectiveAccessResource', N'en', N'The resource must be given as a type and a positive number, for example Registry:5 or Project:3.', 1),
     (N'effectiveAccess.show',            N'en', N'Show effective access', 1),
@@ -13721,6 +13745,37 @@ OPTION (RECOMPILE);
 GO
 -- COLL:d234 ── кінець секції ──
 
+-- COLL:dates ── ru/kz відмови формату дати поля довідника з AF; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-REG-0422.dateFormatRefused', N'ru', N'Значение источника «{value}» — не дата в ожидаемом формате ({expected}) или ISO 8601: поле не изменено.'),
+    (N'err.ECR-REG-0422.dateFormatRefused', N'kz', N'Дереккөз мәні «{value}» — күтілетін форматтағы ({expected}) немесе ISO 8601 күні емес: өріс өзгертілмеді.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:dates ── кінець секції ──
+-- COLL:efrecon ── ru/kz «повної звірки за період» подій джерела; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'jobs.sourceEventsRemoved', N'ru', N'События, пропавшие из источника: удалено {removed}, удаление пропущено {skipped}'),
+    (N'jobs.sourceEventsRemoved', N'kz', N'Көзден жоғалған оқиғалар: жойылды {removed}, жою өткізілді {skipped}'),
+    (N'coverageEvents.eventRemovalSourceEmpty', N'ru', N'Источник не вернул ни одного события, хотя связанных строк: {count}. Удаление пропущено: источник похож на недоступный.'),
+    (N'coverageEvents.eventRemovalSourceEmpty', N'kz', N'Көз ешбір оқиға қайтармады, ал байланысты жолдар: {count}. Жою өткізілді: көз қолжетімсіз сияқты.'),
+    (N'coverageEvents.eventRemovalKeptManual', N'ru', N'События {eventId} больше нет в источнике, но в строке {rowKey} есть ручная правка: строка не удалена.'),
+    (N'coverageEvents.eventRemovalKeptManual', N'kz', N'{eventId} оқиғасы көзде жоқ, бірақ {rowKey} жолында қолмен түзету бар: жол жойылмады.'),
+    (N'coverageEvents.eventTemplateOverlap', N'ru', N'Событие {eventId} есть в шаблонах {template} и {other} с разными значениями атрибутов; берётся первый шаблон в порядке Auto, Auto_Day, Manual, Manual_Day.'),
+    (N'coverageEvents.eventTemplateOverlap', N'kz', N'{eventId} оқиғасы {template} және {other} үлгілерінде атрибут мәндері әртүрлі күйде бар; Auto, Auto_Day, Manual, Manual_Day реті бойынша бірінші үлгі алынады.'),
+    (N'coverageEvents.eventRemovalLimit', N'ru', N'В источнике пропало событий: {count} (связанных строк в окне: {linked}; лимит {limit}). Ничего не удалено. Проверьте источник и подтвердите удаление вручную.'),
+    (N'coverageEvents.eventRemovalLimit', N'kz', N'Көзде оқиғалар жоғалды: {count} (терезедегі байланысты жолдар: {linked}; шек {limit}). Ештеңе жойылмады. Көзді тексеріп, жоюды қолмен растаңыз.'),
+    (N'coverageEvents.eventRemovalSheetSubmitted', N'ru', N'События {eventId} больше нет в источнике, но лист строки {rowKey} в состоянии {status}: строка не удалена.'),
+    (N'coverageEvents.eventRemovalSheetSubmitted', N'kz', N'{eventId} оқиғасы көзде жоқ, бірақ {rowKey} жолының парағы {status} күйінде: жол жойылмады.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:efrecon ── кінець секції ──
+
 -- JOBL ── ru/kz назв видів задач (jobLabel.ts, KindKeys); власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
@@ -13735,6 +13790,33 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- JOBL ── кінець секції ──
+
+-- COLL:smtp ── ru/kz категорій відмови проби SMTP і події «період відкрито»; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'notifications.test.smtp.dns', N'ru', N'Проверка SMTP не удалась: имя сервера не разрешилось (DNS). Проверьте Smtp:Host.'),
+    (N'notifications.test.smtp.dns', N'kz', N'SMTP тексеруі сәтсіз: сервер атауы анықталмады (DNS). Smtp:Host мәнін тексеріңіз.'),
+    (N'notifications.test.smtp.connect', N'ru', N'Проверка SMTP не удалась: не удалось подключиться к серверу. Проверьте хост, порт (Smtp:Port) и межсетевой экран.'),
+    (N'notifications.test.smtp.connect', N'kz', N'SMTP тексеруі сәтсіз: серверге қосылу мүмкін болмады. Хостты, портты (Smtp:Port) және брандмауэрді тексеріңіз.'),
+    (N'notifications.test.smtp.tls', N'ru', N'Проверка SMTP не удалась: ошибка TLS/STARTTLS. Проверьте сертификат сервера и Smtp:UseStartTls.'),
+    (N'notifications.test.smtp.tls', N'kz', N'SMTP тексеруі сәтсіз: TLS/STARTTLS қатесі. Сервер сертификатын және Smtp:UseStartTls мәнін тексеріңіз.'),
+    (N'notifications.test.smtp.auth', N'ru', N'Проверка SMTP не удалась: сервер отклонил логин. Проверьте Smtp:User и секрет, названный в Smtp:SecretName.'),
+    (N'notifications.test.smtp.auth', N'kz', N'SMTP тексеруі сәтсіз: сервер логинді қабылдамады. Smtp:User мәнін және Smtp:SecretName ішінде аталған құпияны тексеріңіз.'),
+    (N'notifications.test.smtp.relay', N'ru', N'Проверка SMTP не удалась: сервер отказался пересылать почту для отправителя или получателя. Проверьте Smtp:From и адреса получателей.'),
+    (N'notifications.test.smtp.relay', N'kz', N'SMTP тексеруі сәтсіз: сервер жіберушіге немесе алушыға пошта жіберуден бас тартты. Smtp:From мәнін және алушылар мекенжайларын тексеріңіз.'),
+    (N'notifications.test.smtp.timeout', N'ru', N'Проверка SMTP не удалась: сервер не ответил вовремя.'),
+    (N'notifications.test.smtp.timeout', N'kz', N'SMTP тексеруі сәтсіз: сервер уақытында жауап бермеді.'),
+    (N'notifications.event.PeriodOpened', N'ru', N'Открыт отчётный период'),
+    (N'notifications.event.PeriodOpened', N'kz', N'Есепті кезең ашылды'),
+    (N'notifications.periodOpened.subject', N'ru', N'ECR: открыт период {period}, проект {project}'),
+    (N'notifications.periodOpened.subject', N'kz', N'ECR: {period} кезеңі ашылды, {project} жобасы'),
+    (N'notifications.periodOpened.body', N'ru', N'Для проекта {project} открыт новый отчётный период {period}. Заполните документ за этот период.'),
+    (N'notifications.periodOpened.body', N'kz', N'{project} жобасы үшін жаңа есепті кезең {period} ашылды. Осы кезеңге арналған құжатты толтырыңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:smtp ── кінець секції ──
 
 -- COLL:rawhealth ── ru/kz розміру ext.RawDataPoint у картці `db`; власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)

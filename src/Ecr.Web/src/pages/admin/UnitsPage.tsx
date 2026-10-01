@@ -13,6 +13,8 @@ import { DataTable, type DataTableColumn } from '@/shared/ui/DataTable';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { showApiError, showDone } from '@/shared/ui/notify';
 import { t } from '@/shared/i18n';
+import { problemText } from '@/shared/ui/problemText';
+import { usePendingLoading } from '@/features/common/usePendingLoading';
 
 /**
  * Довідник одиниць і конвертор (`ФВ-16.1`, `ФВ-16.2`, `ФВ-16.5`).
@@ -80,6 +82,9 @@ export function UnitsPage(): JSX.Element {
     onError: showApiError,
   });
 
+  // ⚠ `ФВ-14.26`: спінер на кнопці — лише після 100 мс дії, не з першого кадру.
+  const convertLoading = usePendingLoading(convert.isPending);
+
   // ⛔ UI-аудит, lane 4: жоден обліковий запис, включно з повноправним
   // адміністратором, не мав шляху додати одиницю виміру — той самий клас
   // дефекту, що вже виправлений для довідників (`Q-200`).
@@ -131,6 +136,8 @@ export function UnitsPage(): JSX.Element {
     },
     onError: showApiError,
   });
+
+  const createLoading = usePendingLoading(create.isPending);
 
   // Директива №15, BE-15: діалог видалення СПЕРШУ показує залежних, а на
   // відмову `ECR-UOM-0409` — перелік із самої відмови замість «повторити»:
@@ -305,8 +312,11 @@ export function UnitsPage(): JSX.Element {
               // ⚠ Поле тепер текстове, тож «не число» стало можливим станом:
               // кнопка, яка веде у відому відмову сервера, гірша за вимкнену.
               disabled={fromUnit === null || toUnit === null || normalizeDecimal(value) === null}
-              loading={convert.isPending}
-              onClick={() => convert.mutate()}
+              loading={convertLoading}
+              onClick={() => {
+                if (convert.isPending) return;
+                convert.mutate();
+              }}
             >
               {t('units.convert')}
             </Button>
@@ -396,7 +406,7 @@ export function UnitsPage(): JSX.Element {
         <Stack gap="sm">
           {usage.error !== null && remove.error === null && (
             <Text size="sm" c="statusError">
-              {usage.error.message}
+              {problemText(usage.error).detail ?? problemText(usage.error).title}
             </Text>
           )}
 
@@ -427,10 +437,11 @@ export function UnitsPage(): JSX.Element {
               </>
             ))}
 
-          {/* Відмова іншого роду (403, 404, мережа) — текстом сервера. */}
+          {/* Відмова іншого роду (403, 404, мережа) — текстом сервера, якщо він
+              локалізований, інакше назвою з каталогу (`ФВ-14.9a`). */}
           {remove.error !== null && unitReferences(remove.error) === null && (
             <Text size="sm" c="statusError">
-              {remove.error.message}
+              {problemText(remove.error).detail ?? problemText(remove.error).title}
             </Text>
           )}
         </Stack>
@@ -499,8 +510,11 @@ export function UnitsPage(): JSX.Element {
                 normalizeDecimal(newFactor) === null ||
                 normalizeDecimal(newOffset) === null
               }
-              loading={create.isPending}
-              onClick={() => create.mutate()}
+              loading={createLoading}
+              onClick={() => {
+                if (create.isPending) return;
+                create.mutate();
+              }}
             >
               {t('units.new')}
             </Button>

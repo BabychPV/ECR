@@ -15,6 +15,7 @@ import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { showApiError, showDone } from '@/shared/ui/notify';
 import { can, useSession } from '@/shared/session/useSession';
 import { t } from '@/shared/i18n';
+import { usePendingLoading } from '@/features/common/usePendingLoading';
 
 /**
  * Обмін перекладом інтерфейсу через CSV (`BE-13` ч.2).
@@ -92,6 +93,9 @@ export function UiStringsCsvPanel(): JSX.Element | null {
     onError: showApiError,
   });
 
+  // ⚠ `ФВ-14.26`: спінер на кнопці — лише після 100 мс дії, не з першого кадру.
+  const previewLoading = usePendingLoading(preview.isPending);
+
   const apply = useMutation({
     mutationFn: (input: { lang: string; file: File }) =>
       importUiStrings({ lang: input.lang, file: input.file, dryRun: false }),
@@ -106,6 +110,8 @@ export function UiStringsCsvPanel(): JSX.Element | null {
     },
     onError: showApiError,
   });
+
+  const applyLoading = usePendingLoading(apply.isPending);
 
   // ⛔ Після всіх хуків, а не перед ними: ранній вихід над `useState` міняв би
   // кількість хуків між рендерами, щойно відповідь `/me` доїде.
@@ -191,7 +197,7 @@ export function UiStringsCsvPanel(): JSX.Element | null {
           <Button
             size="xs"
             variant="default"
-            loading={preview.isPending}
+            loading={previewLoading}
             onClick={() => picker.current?.click()}
           >
             {t('uiStrings.importCsv')}
@@ -263,7 +269,7 @@ export function UiStringsCsvPanel(): JSX.Element | null {
               </Button>
               <Button
                 disabled={!isApplicable(report) || file === null}
-                loading={apply.isPending}
+                loading={applyLoading}
                 onClick={() => {
                   if (file !== null) apply.mutate({ lang, file });
                 }}

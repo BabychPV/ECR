@@ -30,6 +30,7 @@ import { PageHeader } from '@/shared/ui/PageHeader';
 import { Timestamp } from '@/shared/ui/Timestamp';
 import { useUrlState } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
+import { problemText } from '@/shared/ui/problemText';
 
 /**
  * Що стоїть у межі вікна чинності запису, коли межі НЕМАЄ.
@@ -597,12 +598,12 @@ export function RegistriesPage(): JSX.Element {
       >
         {blocked !== null && (
           <Stack gap="sm">
-            {/* ⚠ Текст відмови — СЕРВЕРНИЙ: він уже локалізований каталогом
-                і називає причину словами. Поруч — саме число посилань, бо
+            {/* ⚠ Текст відмови — СЕРВЕРНИЙ, якщо сервер його локалізував
+                (`messageKey`), інакше назва з каталогу (`ФВ-14.9a`). Поруч — саме число посилань, бо
                 воно і є мірою наслідку. */}
             <Group gap="xs">
               <Badge color="statusWarning">{blocked}</Badge>
-              <Text size="sm">{remove.error?.message}</Text>
+              <Text size="sm">{problemText(remove.error).detail ?? problemText(remove.error).title}</Text>
             </Group>
 
             {/* ⛔ V-08: розклад посилань за видами — куди йти виправляти. */}

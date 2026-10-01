@@ -81,6 +81,7 @@ import { PageHeader } from '@/shared/ui/PageHeader';
 import { ReasonModal } from '@/shared/ui/ReasonModal';
 import { showApiError, showDone } from '@/shared/ui/notify';
 import { t } from '@/shared/i18n';
+import { usePendingLoading } from '@/features/common/usePendingLoading';
 
 /**
  * Редактори, що відкриваються ЛИШЕ дією — за `import()`.
@@ -428,6 +429,9 @@ export function TemplateVersionPage(): JSX.Element {
     onError: showApiError,
   });
 
+  // ⚠ `ФВ-14.26`: спінер на кнопці — лише після 100 мс дії, не з першого кадру.
+  const cloneLoading = usePendingLoading(clone.isPending);
+
   /**
    * Виведення версії з обігу (`ФВ-7.8`).
    *
@@ -477,6 +481,8 @@ export function TemplateVersionPage(): JSX.Element {
     },
     onError: showApiError,
   });
+
+  const deleteSheetMutationLoading = usePendingLoading(deleteSheetMutation.isPending);
 
   /**
    * Запис таблиці (`W5.1`) — другий вертикальний зріз авторства структури
@@ -1031,7 +1037,7 @@ export function TemplateVersionPage(): JSX.Element {
                             color="statusError"
                             // ⛔ Лише натиснута кнопка: доти `loading` крутився
                             // на кнопках УСІХ аркушів одночасно.
-                            loading={deleteSheetMutation.isPending && deleteSheetMutation.variables === sheet.code}
+                            loading={deleteSheetMutationLoading && deleteSheetMutation.variables === sheet.code}
                             onClick={() =>
                               setPendingDelete({
                                 kind: 'sheet',
@@ -1506,8 +1512,11 @@ export function TemplateVersionPage(): JSX.Element {
                 </Button>
                 <Button
                   disabled={newVersion.trim().length === 0}
-                  loading={clone.isPending}
-                  onClick={() => clone.mutate(newVersion)}
+                  loading={cloneLoading}
+                  onClick={() => {
+                    if (clone.isPending) return;
+                    clone.mutate(newVersion);
+                  }}
                 >
                   {t('version.clone')}
                 </Button>

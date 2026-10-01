@@ -277,6 +277,42 @@ public sealed class ImportedFormulaReferencePublishTests
 
     // ─────────────────────────────────────────────────────────────────────────
 
+    /// <remarks>
+    /// F-1 (AN-5): <c>!X</c> через межу методології — формула бібліотеки, яка сама посилається на
+    /// іншу формулу тієї ж бібліотеки, публікується (замикання бере обидві, імен не втрачено).
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "ФВ-9.4")]
+    public async Task Формула_бібліотеки_що_посилається_на_іншу_формулу_бібліотеки_публікується()
+    {
+        Formulas([Formula(103, "Total", $"!{Shared} * 2")]);
+        Library(Formula(301, Shared, "!Base * 3", CommonVersionId), Formula(302, "Base", "5", CommonVersionId));
+
+        await Handler().HandleAsync(VersionId, "Уточнення", From, CancellationToken.None);
+
+        Assert.True(_version.IsPublished);
+        Assert.Equal([CommonId], Assert.Single(_edgeWrites));
+    }
+
+    /// <remarks>
+    /// F-2 за межею (AN-5): нерезолвне <c>!Ghost</c> у ФОРМУЛІ БІБЛІОТЕКИ — відмова публікації
+    /// <c>ECR-CALC-0422</c> з переліком, а не мовчання й <c>#REF</c> у кожному прогоні.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "ФВ-9.14")]
+    public async Task Нерезолвне_посилання_у_формулі_бібліотеки_відхиляє_публікацію_з_переліком()
+    {
+        Formulas([Formula(103, "Total", $"!{Shared} * 2")]);
+        Library(Formula(301, Shared, "!Base * 3 + !Ghost", CommonVersionId), Formula(302, "Base", "5", CommonVersionId));
+
+        var problem = Assert.Single(await ProblemsAsync());
+        Assert.Equal("publish.problem.formulaNotFound", problem.MessageKey);
+        Assert.Equal($"Common.{Shared}", problem.Args["formula"]);
+        Assert.Equal("Ghost", problem.Args["name"]);
+    }
+
     private async Task<List<PublishProblem>> ProblemsAsync()
     {
         var error = await Assert.ThrowsAsync<BusinessRuleException>(

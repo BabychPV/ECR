@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Security.Claims;
 using System.Security.Cryptography.X509Certificates;
 using Ecr.Api.Health;
+using Ecr.Api.Startup;
 using Ecr.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
@@ -88,12 +89,15 @@ public static partial class AuthenticationSetup
     public const string CertificateThumbprintKey = "Auth:DataProtection:CertificateThumbprint";
 
     /// <summary>Налаштовує схеми автентифікації.</summary>
-    public static IServiceCollection AddEcrAuthentication(this IServiceCollection services, IConfiguration configuration)
+    public static IServiceCollection AddEcrAuthentication(
+        this IServiceCollection services,
+        IConfiguration configuration,
+        Func<string, X509Certificate2?>? certificateLookup = null)
     {
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(configuration);
 
-        AddEcrDataProtection(services, configuration);
+        AddEcrDataProtection(services, configuration, certificateLookup ?? FindInLocalMachine);
 
         // Дефолт = значення з appsettings.json: у продукт завжди їхало `ecr.auth`,
         // зміна імені розлогінила б усіх при оновленні.
@@ -221,7 +225,8 @@ public static partial class AuthenticationSetup
     /// вважає себе захищеною, і адміністратор дізнався б про це не з health, а
     /// з аудиту.
     /// </remarks>
-    private static void AddEcrDataProtection(IServiceCollection services, IConfiguration configuration)
+    private static void AddEcrDataProtection(
+        IServiceCollection services, IConfiguration configuration, Func<string, X509Certificate2?> lookup)
     {
         var builder = services.AddDataProtection()
             .SetApplicationName("Ecr")
@@ -245,8 +250,85 @@ public static partial class AuthenticationSetup
             return;
         }
 
-        builder.ProtectKeysWithCertificate(FindCertificate(thumbprint));
-        services.AddSingleton(DataProtectionKeyProtection.ProtectedBy(thumbprint));
+        var current = FindCertificate(thumbprint, lookup);
+        builder.ProtectKeysWithCertificate(current);
+
+        // D-267: після заміни сертифіката старі ключі кільця лишаються зашифрованими
+        // СТАРИМ сертифікатом. Без `UnprotectKeysWithAnyCertificate` вони нечитабельні
+        // безповоротно (сеанси, секрети каналів), і відмова тиха. Ненайдений попередній
+        // відбиток — Warning, не відмова старту: поточний сертифікат уже обов'язковий.
+        var readable = new List<string> { HttpsTransport.Normalize(thumbprint) };
+        var missingPrevious = new List<string>();
+        var previousCertificates = new List<X509Certificate2>();
+        foreach (var previous in ParsePreviousThumbprints(configuration))
+        {
+            var certificate = lookup(previous);
+            if (certificate is null)
+            {
+                missingPrevious.Add(previous);
+                continue;
+            }
+
+            previousCertificates.Add(certificate);
+            readable.Add(previous);
+        }
+
+        if (previousCertificates.Count > 0)
+        {
+            builder.UnprotectKeysWithAnyCertificate([.. previousCertificates]);
+        }
+
+        if (missingPrevious.Count > 0)
+        {
+            services.AddOptions<KeyManagementOptions>()
+                .Validate<ILoggerFactory>(
+                    (_, loggers) =>
+                    {
+                        LogMissingPrevious(
+                            loggers.CreateLogger("Ecr.Startup"), PreviousCertificateThumbprintsKey,
+                            string.Join(", ", missingPrevious));
+                        return true;
+                    });
+        }
+
+        services.AddSingleton(DataProtectionKeyProtection.ProtectedBy(thumbprint, readable));
+    }
+
+    /// <summary>
+    /// Відбитки сертифікатів, якими раніше шифрувалось кільце ключів Data Protection
+    /// (масив або список через <c>;</c>/<c>,</c>). Порожньо — поведінка без змін (D-267).
+    /// </summary>
+    public const string PreviousCertificateThumbprintsKey = "Auth:DataProtection:PreviousCertificateThumbprints";
+
+    /// <summary>Нормалізовані відбитки попередніх сертифікатів із конфігурації.</summary>
+    public static IReadOnlyList<string> ParsePreviousThumbprints(IConfiguration configuration)
+    {
+        var section = configuration.GetSection(PreviousCertificateThumbprintsKey);
+        var raw = new List<string>();
+        if (!string.IsNullOrWhiteSpace(section.Value))
+        {
+            raw.AddRange(section.Value.Split(';', ','));
+        }
+
+        raw.AddRange(section.GetChildren().Select(c => c.Value ?? string.Empty));
+
+        return raw.Select(HttpsTransport.Normalize)
+            .Where(t => t.Length > 0)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+    }
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "{Key}: сертифіката(ів) {Thumbprints} немає у сховищі сертифікатів — ключі кільця, зашифровані ними, залишаться нечитабельними.")]
+    private static partial void LogMissingPrevious(ILogger logger, string key, string thumbprints);
+
+    /// <summary>Пошук сертифіката за відбитком у <c>LocalMachine\My</c>; <c>null</c> — немає.</summary>
+    internal static X509Certificate2? FindInLocalMachine(string thumbprint)
+    {
+        var normalized = new string(thumbprint.Where(char.IsLetterOrDigit).ToArray());
+        using var store = new X509Store(StoreName.My, StoreLocation.LocalMachine);
+        store.Open(OpenFlags.ReadOnly);
+        var found = store.Certificates.Find(X509FindType.FindByThumbprint, normalized, validOnly: false);
+        return found.Count == 0 ? null : found[0];
     }
 
     /// <summary>
@@ -308,13 +390,13 @@ public static partial class AuthenticationSetup
     private static partial void LogUnprotectedByConsent(ILogger logger, string message);
 
     /// <summary>Сертифікат за відбитком у <c>LocalMachine\My</c> (`D14-08`).</summary>
-    private static X509Certificate2 FindCertificate(string thumbprint)
+    private static X509Certificate2 FindCertificate(string thumbprint, Func<string, X509Certificate2?> lookup)
     {
         // Пробіли й нерозривні пробіли: відбиток зазвичай копіюють із вікна
         // сертифіката Windows, де він надрукований групами по два символи.
         var normalized = new string(thumbprint.Where(char.IsLetterOrDigit).ToArray());
 
-        X509Certificate2Collection found;
+        X509Certificate2? found;
 
         // ⛔ Недосяжне сховище — той самий наслідок, що й відсутній сертифікат:
         // налаштований захист застосувати НЕМОЖЛИВО. Тому й відмова та сама, а
@@ -327,11 +409,7 @@ public static partial class AuthenticationSetup
         // Windows цього не видно.
         try
         {
-            using var store = new X509Store(StoreName.My, StoreLocation.LocalMachine);
-            store.Open(OpenFlags.ReadOnly);
-
-            found = store.Certificates
-                .Find(X509FindType.FindByThumbprint, normalized, validOnly: false);
+            found = lookup(normalized);
         }
         catch (Exception unreachable) when (unreachable is System.Security.Cryptography.CryptographicException
                                                          or PlatformNotSupportedException
@@ -345,7 +423,7 @@ public static partial class AuthenticationSetup
                 unreachable);
         }
 
-        if (found.Count == 0)
+        if (found is null)
         {
             throw new InvalidOperationException(
                 $"{CertificateThumbprintKey} = '{thumbprint}': сертифіката з таким відбитком немає в "
@@ -353,6 +431,6 @@ public static partial class AuthenticationSetup
                 + "ключі кільця лежатимуть у sec.DataProtectionKey відкрито, і /health/db про це скаже.");
         }
 
-        return found[0];
+        return found;
     }
 }

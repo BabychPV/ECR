@@ -271,6 +271,7 @@ public sealed class PublishMethodologyHandler(
 
         problems.AddRange(await ImportCycleAsync(methodology, imports, effectiveFrom, ct).ConfigureAwait(false));
         problems.AddRange(LibraryProblems(version, formulas, [.. parsed.Select(p => p.Root)], byCode, libraries));
+        problems.AddRange(LibraryUnresolvedReferences(libraries));
 
         var constants = await methodologies
             .GetConstantsAsync(methodologyVersionId, ct).ConfigureAwait(false);
@@ -1106,6 +1107,46 @@ public sealed class PublishMethodologyHandler(
                     ("formula", formulas[i].Code),
                     ("name", name),
                     ("library", library.MethodologyCode));
+            }
+        }
+    }
+
+    /// <summary>
+    /// F-2 за межею версії: <c>!Name</c> у формулі бібліотеки із замикання не веде ні у формулу цієї
+    /// бібліотеки, ні в її власні імпорти (AN-5).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Замикання (<see cref="MethodologyLibraryClosure"/>) такі імена мовчки пропускає — воно
+    /// лише збирає, що рахувати. Без цієї перевірки версія з <c>!Common_X</c>, чия формула
+    /// посилається на неіснуюче <c>!Ghost</c>, публікувалася, а кожен прогін давав <c>#REF</c>.
+    /// ⚠ Той самий ключ <c>formulaNotFound</c>, що й для власних формул: клієнт перекладає один
+    /// пункт, а <c>formula</c> тут — «Бібліотека.Формула».
+    /// </remarks>
+    private IEnumerable<PublishProblem> LibraryUnresolvedReferences(CalculationLibraries? libraries)
+    {
+        if (libraries is null)
+        {
+            yield break;
+        }
+
+        foreach (var library in libraries.Versions)
+        {
+            var own = library.Formulas.Select(f => f.Code).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var formula in library.Formulas)
+            {
+                if (formulaEngine.Parse(formula.Expression, ExpressionDialect.Methodology).Expression?.Root is not { } root)
+                {
+                    continue;
+                }
+
+                foreach (var name in FormulaReferences(root)
+                             .Select(r => r.Name)
+                             .Distinct(StringComparer.OrdinalIgnoreCase)
+                             .Where(n => !own.Contains(n) && !library.Imports.ContainsKey(n)))
+                {
+                    yield return FormulaNotFound($"{library.MethodologyCode}.{formula.Code}", name, root);
+                }
             }
         }
     }

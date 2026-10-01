@@ -465,6 +465,19 @@ public sealed class SubmitSheetHandler(
             blocking.AddRange(MissingRequiredColumnMessages(table, requiredColumns, cells, rowIds));
         }
 
+        // ⛔ D-230: зв'язки Check аркуша. Block → Error блокує подання, Warn → Warning (з підтвердженням),
+        // Info не впливає. Без активних Rollup/Check (`HasActiveRollupOrCheck`, з кешу метаданих) —
+        // жодного додаткового запиту. Свіжі комірки: Rollup уже перераховано вище під тим самим блокуванням.
+        if (snapshot.HasActiveRollupOrCheck)
+        {
+            var sheetInstances = instances.Where(i => tables.ContainsKey(i.TableDefId)).ToList();
+            var relationMessages = await Validation.RelationCheckRunner
+                .RunAsync(versions, cellStore, rowStore, metadata, sheetInstances, key, currentUser.Language, ct)
+                .ConfigureAwait(false);
+            blocking.AddRange(relationMessages.Where(m => m.Severity == ValidationSeverity.Error));
+            warnings.AddRange(relationMessages.Where(m => m.Severity == ValidationSeverity.Warning));
+        }
+
         if (blocking.Count > 0)
         {
             // ⛔ Порядок у тілі 422 — ЯВНИЙ, як на екрані: таблиця аркуша →

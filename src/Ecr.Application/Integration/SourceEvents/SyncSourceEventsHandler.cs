@@ -28,7 +28,11 @@ public sealed class SyncSourceEventsHandler(
     /// <summary>Ставить синхронізацію; повертає ідентифікатор задачі (наявної чи нової).</summary>
     /// <param name="sourceEntityId">Сутність-шаблон подій.</param>
     /// <param name="ct">Скасування.</param>
-    public async Task<string> HandleAsync(int sourceEntityId, CancellationToken ct)
+    /// <param name="confirmRemoval">
+    /// Підтвердити масове видалення зниклих подій, заблоковане лімітом «повної звірки». Право те саме
+    /// (<c>Integration.Manage</c>); контролер цей прапор поки не віддає — контракт не змінено.
+    /// </param>
+    public async Task<string> HandleAsync(int sourceEntityId, CancellationToken ct, bool confirmRemoval = false)
     {
         await PermissionCheck
             .RequireAsync(access, currentUser, SaveDataSourceHandler.Permission, ct)
@@ -58,8 +62,8 @@ public sealed class SyncSourceEventsHandler(
 
         return await jobs
             .EnqueueCoalescedAsync<ISourceEventSyncJob>(
-                SourceEventSyncTarget.Of(sourceEntityId),
-                new SourceEventSyncRequest(sourceEntityId),
+                confirmRemoval ? SourceEventSyncTarget.OfConfirmed(sourceEntityId) : SourceEventSyncTarget.Of(sourceEntityId),
+                new SourceEventSyncRequest(sourceEntityId, ConfirmRemoval: confirmRemoval),
                 ct,
                 currentUser.UserId)
             .ConfigureAwait(false);

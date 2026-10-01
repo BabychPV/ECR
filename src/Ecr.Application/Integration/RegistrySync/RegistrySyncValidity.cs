@@ -81,6 +81,34 @@ public static class RegistrySyncValidity
         "yyyy-MM-dd",
     ];
 
+    /// <summary>Ключ відмови: рядок значення поля типу <c>Date</c> не в дозволеному форматі (<c>MM/dd/yyyy</c> чи ISO 8601).</summary>
+    public const string DateFormatRefusedKey = "err.ECR-REG-0422.dateFormatRefused";
+
+    /// <summary>Формат дати-рядка в AF замовника (<c>Date_Issue</c>: «04/29/2026»), відповідь людини 2026-10-01.</summary>
+    public const string FieldDateFormat = "MM/dd/yyyy";
+
+    private static readonly string[] FieldDateFormats = [.. Formats, FieldDateFormat];
+
+    /// <summary>
+    /// Рядок AF → значення поля довідника типу <c>Date</c> (UTC). Лише ЯВНІ формати: ISO 8601 і
+    /// <c>MM/dd/yyyy</c>, завжди <see cref="CultureInfo.InvariantCulture"/> (культура потоку
+    /// змінює роздільники: під ru-RU «04.29.2026» став би прийнятним — доведено мутацією).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Жодного <c>DateTime.Parse</c>/фолбеку: «29/04/2026» — відмова, а не 29 квітня; «01/04/2026»
+    /// — 4 січня (формат один, MM/dd — рішення людини, не здогад).
+    /// </remarks>
+    /// <param name="text">Непорожній рядок.</param>
+    /// <param name="value">Дата в UTC.</param>
+    /// <returns><c>false</c> — формат не дозволено.</returns>
+    public static bool TryParseFieldDate(string text, out DateTime value)
+        => DateTime.TryParseExact(
+            text.Trim(),
+            FieldDateFormats,
+            CultureInfo.InvariantCulture,
+            DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal,
+            out value);
+
     /// <summary>Пояс AF за ідентифікатором конфігурації.</summary>
     /// <param name="id">Ідентифікатор Windows чи IANA; порожній — UTC.</param>
     /// <exception cref="InvalidOperationException">Пояс невідомий — з ім'ям ключа.</exception>

@@ -29,6 +29,7 @@ import { ReasonModal } from '@/shared/ui/ReasonModal';
 import { StatusBadge } from '@/shared/ui/StatusBadge';
 import { showApiError, showDone } from '@/shared/ui/notify';
 import { DisabledReason } from '@/features/common/DisabledReason';
+import { usePendingLoading } from '@/features/common/usePendingLoading';
 
 /**
  * Описи звітів: перелік, заведення нового, нова версія, публікація
@@ -107,6 +108,9 @@ export function ReportDefinitionsModal({
     onError: showApiError,
   });
 
+  // ⚠ `ФВ-14.26`: спінер на кнопці — лише після 100 мс дії, не з першого кадру.
+  const createLoading = usePendingLoading(create.isPending);
+
   const addVersion = useMutation({
     mutationFn: () => {
       const parent = definitions.find((d) => String(d.id) === versionOf);
@@ -131,6 +135,8 @@ export function ReportDefinitionsModal({
     },
     onError: showApiError,
   });
+
+  const addVersionLoading = usePendingLoading(addVersion.isPending);
 
   const publish = useMutation({
     mutationFn: (target: { definitionId: number; versionId: number; reason: string }) =>
@@ -259,7 +265,14 @@ export function ReportDefinitionsModal({
           {/* ⚠ Причина вголос: без неї кнопка просто «не натискається», а
               котре з п'яти полів порожнє — вгадуй. */}
           <DisabledReason reason={cannotCreate ? t('reportDefs.addBlocked') : null}>
-            <Button loading={create.isPending} onClick={() => create.mutate()} data-report-add="">
+            <Button
+              loading={createLoading}
+              onClick={() => {
+                if (create.isPending) return;
+                create.mutate();
+              }}
+              data-report-add=""
+            >
               {t('reportDefs.add')}
             </Button>
           </DisabledReason>
@@ -298,8 +311,11 @@ export function ReportDefinitionsModal({
           >
             <Button
               variant="default"
-              loading={addVersion.isPending}
-              onClick={() => addVersion.mutate()}
+              loading={addVersionLoading}
+              onClick={() => {
+                if (addVersion.isPending) return;
+                addVersion.mutate();
+              }}
             >
               {t('reportDefs.newVersion')}
             </Button>

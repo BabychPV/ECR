@@ -90,6 +90,7 @@ import {
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { showApiError } from '@/shared/ui/notify';
+import { refusalText } from './saveErrors';
 import { useRowHeight } from '@/shared/theme/preferences';
 import { t } from '@/shared/i18n';
 // ⚠ Порядок стилів збережений: `cell-states.css` (раніше — у `App.tsx`) іде
@@ -97,6 +98,7 @@ import { t } from '@/shared/i18n';
 // тут, а не у вхідному чанку, — бюджет маршруту (`D-132`).
 import '@/shared/theme/cell-states.css';
 import './cellEditors.css';
+import { usePendingLoading } from '@/features/common/usePendingLoading';
 
 /**
  * Остання календарна дата періоду (`periodKey` — `YYYYMM`, той самий формат,
@@ -560,15 +562,18 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
           // (`requiredInputBlocked`) — другий банер із тим самим по суті
           // повідомленням розсіював би увагу, а не додавав інформацію.
           setSaveError(null);
-        } else if (error instanceof EcrApiError) {
+        } else {
           // ⛔ Q-30x (High): ось сам фікс — реальний, локалізований текст
           // сервера («Колонка «C1» очікує число.» і подібні) показується як
           // є, а не губиться в необробленому знеструмленні проміса. Саме
           // цей рядок і мала на увазі заглушка «NOT SAVED — SEE THE ERROR
           // ABOVE», яка досі не мала на що вказувати.
-          setSaveError(error.message);
-        } else {
-          setSaveError(String(error));
+          //
+          // ✎ `ФВ-14.9a`: `refusalText`, а не `error.message` — подробиця без
+          // `messageKey` написана українською, якої в продукті немає; замість
+          // неї — назва проблеми з каталогу. Те саме для не нашої відмови
+          // (мережа, `TypeError`): доти тут стояв `String(error)`.
+          setSaveError(refusalText(error));
         }
 
         // ⚠ Рестрибок НЕ повторюється: жоден викликач (`onPaste`, кнопка
@@ -1805,6 +1810,10 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     return () => clearTimeout(timer);
   }, [navigated]);
 
+  // ⚠ `ФВ-14.26`: спінер на кнопці — лише після 100 мс дії, не з першого кадру.
+  const saveLoading = usePendingLoading(isPending);
+  const addRowLoading = usePendingLoading(addRow.isPending);
+
   return (
     /*
      * ⛔ Чотири стани і тут (`ФВ-14.21`). Раніше зріз мав два: «вантажиться» і
@@ -1877,8 +1886,11 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         {(saveStatus === 'error' || rejections.size > 0) && pending.size > 0 && (
           <Button
             size="xs"
-            loading={isPending}
-            onClick={() => void save([...pending.values()])}
+            loading={saveLoading}
+            onClick={() => {
+              if (isPending) return;
+              void save([...pending.values()]);
+            }}
             data-testid="grid-retry-save"
           >
             {t('grid.retrySave', { count: pending.size })}
@@ -1965,9 +1977,12 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
           <Button
             size="xs"
             variant="default"
-            loading={addRow.isPending}
+            loading={addRowLoading}
             disabled={maxDynamicRows !== null && (data?.rows.length ?? 0) >= maxDynamicRows}
-            onClick={() => addRow.mutate()}
+            onClick={() => {
+              if (addRow.isPending) return;
+              addRow.mutate();
+            }}
           >
             {t('grid.addRow')}
           </Button>

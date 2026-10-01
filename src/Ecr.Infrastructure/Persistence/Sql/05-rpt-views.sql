@@ -310,3 +310,25 @@ IF DATABASE_PRINCIPAL_ID(N'rpt_reader') IS NULL
     CREATE ROLE rpt_reader;
 GRANT SELECT ON SCHEMA::rpt TO rpt_reader;
 GO
+
+-- AN-10 (D-258, НФ-8.5): роль бази `ecr_viewer` — «бачить УСЕ» для довіреного
+-- акаунта (DBA, діагностика). НЕ плутати з `rpt_reader` (SSRS, лише `rpt`).
+-- Права: членство у `db_datareader` (SELECT на ВСІ схеми бази, зокрема майбутні)
+-- + VIEW DEFINITION. Жодних ALTER/CREATE/INSERT/UPDATE/DELETE/EXECUTE.
+-- Роль створюється ПОРОЖНЬОЮ; членство видає deploy-ecr.ps1 / setup-dev-db.ps1
+-- параметром -ViewerAccount (або DBA вручну: ALTER ROLE ecr_viewer ADD MEMBER ...).
+-- ⛔ Акаунт служби EcrApi/EcrWorker членом НЕ робити: це довірений ЧИТАЧ, а не
+-- виконавець; службі потрібні власні права запису.
+IF DATABASE_PRINCIPAL_ID(N'ecr_viewer') IS NULL
+    CREATE ROLE ecr_viewer;
+IF IS_ROLEMEMBER(N'db_datareader', N'ecr_viewer') = 0
+    ALTER ROLE db_datareader ADD MEMBER ecr_viewer;
+GRANT VIEW DEFINITION TO ecr_viewer;
+GO
+-- ⛔ Секрети — НЕ «дані звітності»: DENY має пріоритет над db_datareader.
+-- Хеші паролів і штамп сесії користувачів, ключі кільця Data Protection (XML).
+IF OBJECT_ID(N'sec.DataProtectionKey', N'U') IS NOT NULL
+    DENY SELECT ON OBJECT::sec.DataProtectionKey TO ecr_viewer;
+IF OBJECT_ID(N'sec.[User]', N'U') IS NOT NULL
+    DENY SELECT ON OBJECT::sec.[User] (PasswordHash, SecurityStamp) TO ecr_viewer;
+GO

@@ -68,6 +68,11 @@ public sealed record SourceEventLinkState(
 /// <param name="FilterAttribute">Звуження мапінгу: атрибут; <c>null</c> — без звуження.</param>
 /// <param name="FilterScope">Звуження мапінгу: де лежить атрибут.</param>
 /// <param name="FilterValue">Звуження мапінгу: значення.</param>
+/// <param name="OtherTemplateIds">
+/// ID подій, які в ЦЬОМУ прогоні прочитано з братніх шаблонів (Auto/Auto_Day/Manual/Manual_Day) тієї самої таблиці:
+/// подія могла лише переїхати в інший шаблон, тож зв'язок із таким ID не «зниклий» (не <c>Missing</c>, не <c>Gone</c>),
+/// а переданий (<c>HandedOff</c>).
+/// </param>
 public sealed record SourceEventSyncInput(
     DateTime FromUtc,
     DateTime ToUtc,
@@ -78,7 +83,8 @@ public sealed record SourceEventSyncInput(
     Func<DateTime, SourceEventPeriodTarget?> PeriodOf,
     string? FilterAttribute = null,
     SourceEventAttributeScope? FilterScope = null,
-    string? FilterValue = null);
+    string? FilterValue = null,
+    IReadOnlySet<string>? OtherTemplateIds = null);
 
 /// <summary>Одна подія плану.</summary>
 /// <param name="Event">Подія, як її дало джерело; кінець уже нормалізовано (незакрита — <c>null</c>).</param>
@@ -115,12 +121,27 @@ public sealed record SourceEventPlanItem(
 /// <param name="SkippedNonRoot">Скільки подій відкинуто як не кореневі.</param>
 /// <param name="Filtered">Скільки подій відкинуто звуженням мапінгу.</param>
 /// <param name="MissingSuppressed">Позначку «зникла» не ставили, бо читання обрізане чи з відмовою.</param>
+/// <param name="Gone">
+/// «Повна звірка за період»: зв'язки вікна, чиєї події в ПОВНІЙ відповіді немає (і чий ID не переклали на
+/// новий за природним ключем) — кандидати на видалення разом із рядком. Порожньо при обрізаному чи відмовному
+/// читанні. Включає й уже позначені <c>Missing</c>.
+/// </param>
+/// <param name="HandedOff">
+/// Зв'язки, чия подія прочитана з братнього шаблону (подія переїхала чи дублюється): зв'язок знімається, рядок
+/// ЛИШАЄТЬСЯ (його веде зв'язок братнього шаблону).
+/// </param>
+/// <param name="SourceEmpty">
+/// Джерело при повному читанні повернуло НУЛЬ подій: підозріло (збій, а не «усе видалено») — видаляти не можна.
+/// </param>
 public sealed record SourceEventSyncPlan(
     IReadOnlyList<SourceEventPlanItem> Items,
     IReadOnlyList<SourceEventLinkState> Missing,
     int SkippedNonRoot,
     int Filtered,
-    bool MissingSuppressed);
+    bool MissingSuppressed,
+    IReadOnlyList<SourceEventLinkState>? Gone = null,
+    bool SourceEmpty = false,
+    IReadOnlyList<SourceEventLinkState>? HandedOff = null);
 
 /// <summary>
 /// Планує синхронізацію подій за одним мапінгом (FEATURE-HSE301-VIEW §4.7.4): що створити,
@@ -181,6 +202,16 @@ public static class SourceEventSyncPlanner
 
         var claimed = rekeyed.Values.Select(l => l.SourceEventId).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var suppressed = input.Truncated || input.ErrorCode is not null;
+        var other = input.OtherTemplateIds ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        // Подія, прочитана з братнього шаблону: не зникла, а переїхала/дублюється — зв'язок передається.
+        var handedOff = suppressed
+            ? []
+            : input.Links
+                .Where(l => other.Contains(l.SourceEventId)
+                            && !returned.Contains(l.SourceEventId)
+                            && !claimed.Contains(l.SourceEventId))
+                .ToList();
         var missing = suppressed
             ? []
             : input.Links
@@ -188,11 +219,28 @@ public static class SourceEventSyncPlanner
                             && l.Status != SourceEventLinkStatus.Missing
                             && !returned.Contains(l.SourceEventId)
                             && !claimed.Contains(l.SourceEventId)
+                            && !other.Contains(l.SourceEventId)
                             && l.StartUtc >= input.FromUtc
                             && l.StartUtc < input.ToUtc)
                 .ToList();
 
-        return new SourceEventSyncPlan(items, missing, nonRoot, filtered, suppressed);
+        // Повна звірка: усі зв'язки вікна без події у відповіді. Зв'язок без рядка в закритому періоді
+        // (PeriodClosed) — історія, а не кандидат.
+        var gone = suppressed
+            ? []
+            : input.Links
+                .Where(l => !returned.Contains(l.SourceEventId)
+                            && !claimed.Contains(l.SourceEventId)
+                            && !other.Contains(l.SourceEventId)
+                            && l.StartUtc >= input.FromUtc
+                            && l.StartUtc < input.ToUtc
+                            && (l.HasRow
+                                || l.Status is SourceEventLinkStatus.Open or SourceEventLinkStatus.PeriodNotOpen
+                                    or SourceEventLinkStatus.RowLimit))
+                .ToList();
+
+        return new SourceEventSyncPlan(
+            items, missing, nonRoot, filtered, suppressed, gone, !suppressed && input.Events.Count == 0 && other.Count == 0, handedOff);
     }
 
     /// <summary>Кінець події: <c>NULL</c> чи сторожова дата — подія ще триває.</summary>

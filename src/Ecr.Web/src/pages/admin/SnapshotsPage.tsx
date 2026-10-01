@@ -55,6 +55,7 @@ import { t } from '@/shared/i18n';
 import { localized } from '@/shared/i18n/localized';
 import { fetchAllProjects } from '@/features/projects/allProjects';
 import { DisabledReason } from '@/features/common/DisabledReason';
+import { usePendingLoading } from '@/features/common/usePendingLoading';
 
 // ⚠ За `import()`: бюджет маршруту тісний, а рядки зрізу відкривають рідко.
 const SnapshotRowsModal = lazy(() => import('@/features/reports/SnapshotRowsModal'));
@@ -239,6 +240,9 @@ export function SnapshotsPage(): JSX.Element {
     onError: showApiError,
   });
 
+  // ⚠ `ФВ-14.26`: спінер на кнопці — лише після 100 мс дії, не з першого кадру.
+  const buildLoading = usePendingLoading(build.isPending);
+
   const job = useQuery({
     queryKey: ['job', jobId],
     queryFn: () => apiFetch<JobStatus>(`/api/v1/jobs/${encodeURIComponent(jobId ?? '')}`),
@@ -268,6 +272,8 @@ export function SnapshotsPage(): JSX.Element {
       setVerified((previous) => ({ ...previous, [snapshotId]: result })),
     onError: showApiError,
   });
+
+  const verifyLoading = usePendingLoading(verify.isPending);
 
   const outcome = jobId === null ? null : outcomeOf(job.data?.state, job.isError);
 
@@ -490,7 +496,7 @@ export function SnapshotsPage(): JSX.Element {
                   <Table.Td>
                     <VerifyCell
                       result={verified[snapshot.id]}
-                      loading={verify.isPending && verify.variables === snapshot.id}
+                      loading={verifyLoading && verify.variables === snapshot.id}
                       onVerify={() => verify.mutate(snapshot.id)}
                     />
                   </Table.Td>
@@ -591,7 +597,13 @@ export function SnapshotsPage(): JSX.Element {
                     : null
             }
           >
-            <Button loading={build.isPending} onClick={() => build.mutate()}>
+            <Button
+              loading={buildLoading}
+              onClick={() => {
+                if (build.isPending) return;
+                build.mutate();
+              }}
+            >
               {t('snapshots.build')}
             </Button>
           </DisabledReason>

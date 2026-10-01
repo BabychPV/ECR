@@ -44,7 +44,7 @@ public sealed class PeriodContext
     public int Days => Mode switch
     {
         CalendarMode.Fixed360 => Months * 30,
-        CalendarMode.Fixed365 when Months == 12 => 365,
+        // Fixed365 (застарілий): з 2026-10-01 — фактичний календар (рік 366/365), рішення людини.
         _ => End.DayNumber - Start.DayNumber + 1,
     };
 

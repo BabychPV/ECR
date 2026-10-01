@@ -117,6 +117,34 @@ public sealed class DatabaseHealthCheck(
                 return HealthCheckResult.Degraded(message, data: data);
             }
 
+            // D-267: ключі кільця, зашифровані сертифікатом, якого служба не може
+            // використати (не поточний і не з PreviousCertificateThumbprints), —
+            // нечитабельні безповоротно, а відмова тиха. Лише відбитки, без секретів.
+            if (keyProtection.IsProtected)
+            {
+                var xml = await db.DataProtectionKeys.AsNoTracking()
+                    .Select(k => k.Xml).ToListAsync(cancellationToken).ConfigureAwait(false);
+                var readable = new HashSet<string>(
+                    keyProtection.ReadableThumbprints ?? [], StringComparer.OrdinalIgnoreCase);
+                if (keyProtection.CertificateThumbprint is { } own)
+                {
+                    readable.Add(own);
+                }
+
+                var unreadable = DataProtectionKeyProtection.ThumbprintsInKeyRing(xml.OfType<string>())
+                    .Where(t => !readable.Contains(t)).Order(StringComparer.Ordinal).ToList();
+                data["unreadableKeyCertificates"] = unreadable;
+                if (unreadable.Count > 0)
+                {
+                    return HealthCheckResult.Degraded(
+                        "Data Protection key ring holds keys encrypted with certificate(s) that are not available to the service: "
+                        + string.Join(", ", unreadable)
+                        + ". Install them in LocalMachine\\My and list the thumbprints in "
+                        + "Auth:DataProtection:PreviousCertificateThumbprints, otherwise sessions and channel secrets protected by them cannot be read.",
+                        data: data);
+                }
+            }
+
             if (partitionsAhead < MinimumPartitionsAhead)
             {
                 var message = await Text(

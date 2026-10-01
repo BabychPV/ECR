@@ -87,6 +87,9 @@ const inUse = {
   // рівно так, як їх пише `ExceptionHandlingMiddleware`.
   registryEntryId: 42,
   references: 7,
+  // Сервер локалізує цю відмову (`RegistryAdminHandlers`): лише тоді
+  // `detail` можна показати (`ФВ-14.9a`).
+  messageKey: 'err.ECR-REG-0409.entryReferenced',
 
   // ⛔ V-08: розклад за видами — сервер віддає лише ненульові.
   referenceKinds: { cells: 5, methodologyConstants: 2 },

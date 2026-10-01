@@ -36,6 +36,7 @@ import { PeriodPicker } from '@/shared/ui/PeriodPicker';
 import { Timestamp } from '@/shared/ui/Timestamp';
 import { showApiError, showDone } from '@/shared/ui/notify';
 import { t } from '@/shared/i18n';
+import { usePendingLoading } from '@/features/common/usePendingLoading';
 
 /**
  * Конфігуратор методологій: версії, публікація, симуляція.
@@ -106,6 +107,9 @@ export function MethodologiesPage(): JSX.Element {
     onError: showApiError,
   });
 
+  // ⚠ `ФВ-14.26`: спінер на кнопці — лише після 100 мс дії, не з першого кадру.
+  const createLoading = usePendingLoading(create.isPending);
+
   const publish = useMutation({
     mutationFn: (target: { id: number; versionId: number; reason: string; from: string }) =>
       apiFetch<MethodologyPublicationDiff>(`/api/v1/methodologies/${target.id}/versions/${target.versionId}/publish`, {
@@ -133,6 +137,8 @@ export function MethodologiesPage(): JSX.Element {
     onError: showPublishError,
   });
 
+  const publishLoading = usePendingLoading(publish.isPending);
+
   /**
    * Прогін методології без запису (`ФВ-13.5`).
    *
@@ -157,6 +163,8 @@ export function MethodologiesPage(): JSX.Element {
     onSuccess: setSimulationResult,
     onError: showApiError,
   });
+
+  const simulateLoading = usePendingLoading(simulate.isPending);
 
   return (
     <>
@@ -340,8 +348,11 @@ export function MethodologiesPage(): JSX.Element {
 
           <Button
             disabled={code.trim().length === 0 || name.trim().length === 0}
-            loading={create.isPending}
-            onClick={() => create.mutate()}
+            loading={createLoading}
+            onClick={() => {
+              if (create.isPending) return;
+              create.mutate();
+            }}
           >
             {t('methodologies.create')}
           </Button>
@@ -434,7 +445,7 @@ export function MethodologiesPage(): JSX.Element {
         <Button
           mt="md"
           disabled={reason.trim().length === 0 || effectiveFrom.length === 0}
-          loading={publish.isPending}
+          loading={publishLoading}
           onClick={() => {
             if (publishing !== null) {
               publish.mutate({ ...publishing, reason, from: effectiveFrom });
@@ -480,7 +491,7 @@ export function MethodologiesPage(): JSX.Element {
 
         <Button
           mt="md"
-          loading={simulate.isPending}
+          loading={simulateLoading}
           onClick={() => {
             if (simulating !== null) simulate.mutate(simulating);
           }}

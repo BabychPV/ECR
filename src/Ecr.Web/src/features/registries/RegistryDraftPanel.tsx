@@ -20,6 +20,7 @@ import {
   saveRegistryDraft,
   type DraftConflict,
 } from './registryDraft';
+import { usePendingLoading } from '@/features/common/usePendingLoading';
 
 /**
  * Чернетка опису довідника і публікація (`BE-24` крок 2).
@@ -93,6 +94,9 @@ export function RegistryDraftPanel({
     },
   });
 
+  // ⚠ `ФВ-14.26`: спінер на кнопці — лише після 100 мс дії, не з першого кадру.
+  const saveLoading = usePendingLoading(save.isPending);
+
   const publish = useMutation({
     meta: { handled: true },
     mutationFn: () => publishRegistryDefinition(code, rowVersion ?? ''),
@@ -107,6 +111,8 @@ export function RegistryDraftPanel({
       showDone(t('registries.definitionPublished', { version: result.definitionVersion }));
     },
   });
+
+  const publishLoading = usePendingLoading(publish.isPending);
 
   /**
    * Прямий `PUT …/definition` — «зберегти й одразу опублікувати».
@@ -133,6 +139,8 @@ export function RegistryDraftPanel({
     },
   });
 
+  const saveAndPublishLoading = usePendingLoading(saveAndPublish.isPending);
+
   const discard = useMutation({
     meta: { handled: true },
     mutationFn: () => discardRegistryDraft(code, rowVersion ?? ''),
@@ -142,6 +150,8 @@ export function RegistryDraftPanel({
       showDone(t('registries.draftDiscarded'));
     },
   });
+
+  const discardLoading = usePendingLoading(discard.isPending);
 
   const failures = [save.error, publish.error, discard.error, saveAndPublish.error];
   const conflict = failures.map(draftConflictOf).find((item) => item !== null) ?? null;
@@ -202,8 +212,11 @@ export function RegistryDraftPanel({
           <Button
             size="xs"
             disabled={request === null || blocked}
-            loading={save.isPending}
-            onClick={() => save.mutate()}
+            loading={saveLoading}
+            onClick={() => {
+              if (save.isPending) return;
+              save.mutate();
+            }}
             data-save-draft=""
           >
             {t('registries.saveDraft')}
@@ -216,7 +229,7 @@ export function RegistryDraftPanel({
               size="xs"
               variant="default"
               disabled={request === null || blocked}
-              loading={saveAndPublish.isPending}
+              loading={saveAndPublishLoading}
               onClick={() => setConfirm('saveAndPublish')}
               data-save-and-publish=""
             >
@@ -233,7 +246,7 @@ export function RegistryDraftPanel({
               size="xs"
               variant="default"
               disabled={blocked}
-              loading={discard.isPending}
+              loading={discardLoading}
               onClick={() => setConfirm('discard')}
               data-discard-draft=""
             >
@@ -246,7 +259,7 @@ export function RegistryDraftPanel({
               size="xs"
               variant="default"
               disabled={blocked}
-              loading={publish.isPending}
+              loading={publishLoading}
               onClick={() => setConfirm('publish')}
               data-publish-definition=""
             >

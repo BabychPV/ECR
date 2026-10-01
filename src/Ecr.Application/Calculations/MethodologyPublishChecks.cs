@@ -328,6 +328,7 @@ public static class MethodologyPublishChecks
 
         var contextualKeys = new HashSet<string>(
             (contextualArguments ?? DefaultContextualArguments)
+                .Concat(DerivedArgumentNames.All) // AN-5: похідні аргументи колонки не вимагають
                 .Select(ArgumentDeclarationChecker.NormalizeName),
             StringComparer.OrdinalIgnoreCase);
 

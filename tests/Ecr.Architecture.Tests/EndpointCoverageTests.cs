@@ -631,7 +631,7 @@ public sealed partial class EndpointCoverageTests
     [
         "notifications.event.JobFailed", "notifications.event.ConsistencyIssuesFound",
         "notifications.event.PartitionsRunningOut", "notifications.event.CollectionFailed",
-        "notifications.event.ExportFailed",
+        "notifications.event.ExportFailed", "notifications.event.PeriodOpened",
     ];
 
     /// <summary>Стани <c>statusTable</c> у <c>StatusBadge.tsx</c> станом на 2026-09-21.</summary>

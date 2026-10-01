@@ -4,9 +4,29 @@
     9, 15 автоматично (Q-222: коментар раніше називав 4 і 6, яких тут
     ніколи не було), плюс сценарії воркера W1/W2 (ФВ-9.8, D-206). Решта —
     вручну: вони потребують перезавантаження або відсутності прав.
+    Першими в будь-якому режимі — I1 (SHA-256 проти еталона) і I2 (підпис
+    Authenticode): CL-3, MSI-SIGNING-OPTIONS (A+B). -IntegrityOnly — лише вони.
 .PARAMETER StaticOnly
     Лише статичні перевірки таблиць MSI: нічого не встановлює, безпечно на
     будь-якій машині (зокрема на машині збірки).
+.PARAMETER ExpectedSha256
+    Еталонний SHA-256 пакета (64 hex), отриманий ОКРЕМИМ каналом (release
+    notes, лист видавця). Без нього — -Sha256File, далі файл-супутник
+    `<MsiPath>.sha256` (його пише build-msi.ps1 і переписує sign-msi.ps1).
+    Еталона немає ніде — I1 падає: хеш перевіряється завжди (CL-3, MSI-SIGNING-OPTIONS (A+B)).
+.PARAMETER Sha256File
+    Файл з еталонним хешем: перше слово першого непорожнього рядка (формат
+    `sha256sum`: `<hex>  Ecr.msi`).
+.PARAMETER RequireSignature
+    Підпис Authenticode обов'язковий: непідписаний або недовірений пакет — FAIL.
+    Без ключа такий пакет — WARN (поки сертифіката немає, варіант B), але
+    пошкоджений підпис (HashMismatch) — FAIL завжди.
+.PARAMETER TrustedThumbprint
+    Очікуваний відбиток сертифіката підписанта (варіант A — наш
+    самопідписаний, C — корпоративний ЦС). Мається на увазі -RequireSignature.
+.PARAMETER IntegrityOnly
+    Лише I1 (SHA-256) і I2 (підпис), без таблиць MSI і без установки: перевірка
+    адміністратора перед установкою (docs/admin/admin-guide.md §12).
 .PARAMETER LogDir
     Куди класти журнали msiexec (/l*v). Типово — поточна тека (як і раніше).
     CI (джоба `msi-install (windows)`, tools/ci-msi-install.ps1) вивантажує
@@ -24,7 +44,12 @@ param(
     [string] $PreviousMsiPath,
     [string] $ServiceAccount,
     [string] $LogDir,
-    [switch] $StaticOnly
+    [switch] $StaticOnly,
+    [string] $ExpectedSha256,
+    [string] $Sha256File,
+    [switch] $RequireSignature,
+    [string] $TrustedThumbprint,
+    [switch] $IntegrityOnly
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -45,6 +70,90 @@ function Invoke-Msi([string] $arguments) {
         throw "msiexec $arguments → $($p.ExitCode)$log"
     }
     $p.ExitCode
+}
+
+# ── Цілісність пакета (CL-3, MSI-SIGNING-OPTIONS (A+B), НФ-8.7): I1 — SHA-256, I2 — підпис ─────
+# Йде ПЕРШОЮ: таблиці MSI пошкодженого пакета нема сенсу читати, а
+# адміністратор на сервері (-IntegrityOnly) бачить лише ці два рядки.
+# Рядок `[I1] FAIL: …` — стабільний формат, його читає tools/test-verify-msi.ps1.
+function Write-Integrity([string] $case, [string] $verdict, [string] $message) {
+    $line = "[$case] ${verdict}: $message"
+    $color = @{ PASS = 'Green'; WARN = 'Yellow'; FAIL = 'Red' }[$verdict]
+    Write-Host $line -ForegroundColor $color
+    $results.Add([pscustomobject]@{ Case = "$case. $(@{ I1 = 'SHA-256'; I2 = 'Підпис Authenticode' }[$case])"; Result = "${verdict}: $message" })
+}
+
+function Get-ExpectedSha256 {
+    if ($ExpectedSha256) { return @{ Hash = $ExpectedSha256.Trim(); Source = '-ExpectedSha256' } }
+    $file = if ($Sha256File) { $Sha256File } elseif (Test-Path -LiteralPath "$MsiPath.sha256") { "$MsiPath.sha256" } else { $null }
+    if (-not $file) { return $null }
+    if (-not (Test-Path -LiteralPath $file)) { throw "файлу еталонного хешу немає: $file" }
+    $first = Get-Content -LiteralPath $file | Where-Object { $_.Trim() } | Select-Object -First 1
+    if (-not $first) { throw "файл еталонного хешу порожній: $file" }
+    return @{ Hash = ($first.Trim() -split '\s+')[0].TrimStart('*'); Source = $file }
+}
+
+try {
+    $reference = Get-ExpectedSha256
+    if (-not $reference) {
+        Write-Integrity I1 FAIL "еталонного хешу немає: передайте -ExpectedSha256 (з release notes) або -Sha256File; файла $MsiPath.sha256 поруч теж немає"
+    }
+    elseif ($reference.Hash -notmatch '^[0-9a-fA-F]{64}$') {
+        Write-Integrity I1 FAIL "еталон '$($reference.Hash)' ($($reference.Source)) — не SHA-256 (очікували 64 hex-символи)"
+    }
+    else {
+        $actual = (Get-FileHash -LiteralPath $MsiPath -Algorithm SHA256).Hash
+        # -ne для рядків у PowerShell нечутливе до регістру — hex у будь-якому регістрі.
+        if ($actual -ne $reference.Hash) {
+            Write-Integrity I1 FAIL "SHA-256 пакета $($actual.ToLower()) ≠ еталон $($reference.Hash.ToLower()) ($($reference.Source)) — файл пошкоджено або підмінено, НЕ встановлювати"
+        }
+        else {
+            Write-Integrity I1 PASS "SHA-256 $($actual.ToLower()) збігається з еталоном ($($reference.Source))"
+        }
+    }
+}
+catch { Write-Integrity I1 FAIL "$_" }
+
+$signatureRequired = $RequireSignature -or [bool] $TrustedThumbprint
+$notOk = if ($signatureRequired) { 'FAIL' } else { 'WARN' }
+try {
+    if (-not (Get-Command Get-AuthenticodeSignature -ErrorAction SilentlyContinue)) {
+        # Не Windows (pwsh на Linux): перевірити підпис нічим.
+        Write-Integrity I2 $notOk 'Get-AuthenticodeSignature недоступний на цій ОС — підпис не перевірено (перевіряйте на Windows)'
+    }
+    else {
+        $sig = Get-AuthenticodeSignature -LiteralPath $MsiPath
+        $signer = $sig.SignerCertificate
+        $who = if ($signer) { "$($signer.Subject), відбиток $($signer.Thumbprint)" } else { '' }
+        switch ([string] $sig.Status) {
+            'Valid' {
+                if ($TrustedThumbprint -and $signer.Thumbprint -ne ($TrustedThumbprint -replace '\s', '')) {
+                    Write-Integrity I2 FAIL "підпис дійсний, але підписант не той: $who; очікували відбиток $TrustedThumbprint"
+                }
+                else { Write-Integrity I2 PASS "підпис дійсний і довірений: $who" }
+            }
+            'HashMismatch' {
+                # Підпис є, а вміст після підпису змінено — це підміна або
+                # пошкодження, хоч би що казав хеш (його могли переписати разом).
+                Write-Integrity I2 FAIL "HashMismatch — вміст змінено після підпису ($who), НЕ встановлювати"
+            }
+            'NotSigned' {
+                Write-Integrity I2 $notOk 'пакет не підписано: Windows покаже «невідомий видавець»; цілісність тримає лише I1'
+            }
+            default {
+                # NotTrusted / UnknownError (недовірений корінь самопідписаного
+                # сертифіката — .cer не встановлено на цьому сервері) / Incompatible.
+                Write-Integrity I2 $notOk "підпис не довірений на цій машині ($($sig.Status): $($sig.StatusMessage)) $who"
+            }
+        }
+    }
+}
+catch { Write-Integrity I2 FAIL "$_" }
+
+if ($IntegrityOnly) {
+    $results | Format-Table -AutoSize -Wrap
+    if ($results.Result -match '^FAIL') { exit 1 }
+    return
 }
 # SERVICE_ACCOUNT= з порожнім значенням не передаємо взагалі: порожня
 # властивість у командному рядку msiexec — зайвий ризик 1639, а сенс той самий.

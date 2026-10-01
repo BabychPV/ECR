@@ -71,7 +71,12 @@ param(
 
     # ⚠ Оновлення наявної бази (див. `.PARAMETER Upgrade`). Без перемикача
     # поведінка рівно та сама, що й до його появи.
-    [switch] $Upgrade
+    [switch] $Upgrade,
+
+    # AN-10 (D-258): довірений акаунт, якому видається роль `ecr_viewer`
+    # («бачить усе», лише читання). Порожньо — роль лишається порожньою.
+    # Це НЕ акаунт служби застосунку (див. 05-rpt-views.sql).
+    [string] $ViewerAccount
 )
 
 $ErrorActionPreference = 'Stop'
@@ -371,6 +376,31 @@ foreach ($name in $scripts) {
     else {
         Invoke-Script $name
     }
+}
+
+# AN-10: членство в `ecr_viewer` (роль створює 05-rpt-views.sql). Ідемпотентно.
+if ($ViewerAccount) {
+    if ($ViewerAccount -match '(?i)EcrApi|EcrWorker|^NT SERVICE\\') { throw "ViewerAccount '$ViewerAccount' - службовий акаунт (EcrApi/EcrWorker/NT SERVICE): ecr_viewer лише для довірених читачів." }
+    $acct = $ViewerAccount.Replace("'", "''")
+    $viewerSql = @"
+SET NOCOUNT ON;
+DECLARE @a sysname = N'$acct';
+DECLARE @s nvarchar(max);
+IF DATABASE_PRINCIPAL_ID(N'ecr_viewer') IS NULL THROW 50000, N'Role ecr_viewer is missing: 05-rpt-views.sql was not applied.', 1;
+IF DATABASE_PRINCIPAL_ID(@a) IS NULL
+BEGIN
+    IF SUSER_ID(@a) IS NULL THROW 50000, N'ViewerAccount has no server login; create the login first.', 1;
+    SET @s = N'CREATE USER ' + QUOTENAME(@a) + N' FOR LOGIN ' + QUOTENAME(@a);
+    EXEC(@s);
+END;
+IF IS_ROLEMEMBER(N'ecr_viewer', @a) = 0
+BEGIN
+    SET @s = N'ALTER ROLE ecr_viewer ADD MEMBER ' + QUOTENAME(@a);
+    EXEC(@s);
+END;
+"@
+    Invoke-Sql -Db $Database -Query $viewerSql
+    Write-Host "  ecr_viewer: акаунт $ViewerAccount — член ролі"
 }
 
 # ⚠ Seed виконує САМ застосунок при старті (`02-contracts.md` §14: seed — це

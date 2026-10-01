@@ -180,6 +180,16 @@
     одноразових стендів цей скрипт не ставить ніколи (сторож в
     Ecr.Architecture.Tests).
 
+.PARAMETER PreviousDataProtectionCertificateThumbprints
+    D-267: відбитки ПОПЕРЕДНІХ сертифікатів Data Protection через `;` — при
+    заміні сертифіката. Пишеться змінною
+    `ECR_Auth__DataProtection__PreviousCertificateThumbprints`; застосунок
+    розшифровує ними старі ключі кільця (`UnprotectKeysWithAnyCertificate`).
+    Сертифікат має бути в `Cert:\LocalMachine\My`, інакше застосунок лише
+    пише Warning. Не задано — змінна не пишеться (поведінка без змін).
+    ⚠ MSI-оновлення стирає Environment служби: при кожному оновленні
+    передавай параметр знову, поки старі ключі ще в кільці.
+
 .PARAMETER HttpsThumbprint
     ⛔ D14-08/R-01: ТРАНСПОРТ — рівно один із трьох параметрів (`-HttpsThumbprint`,
     `-BehindHttpsProxy`, `-AllowHttp`); жодного з них — зупинка з поясненням, а не мовчазний HTTP.
@@ -338,6 +348,7 @@ param(
     [System.Security.SecureString] $ConnectionString,
     [System.Security.SecureString] $BootstrapPassword,
     [string] $DataProtectionThumbprint,
+    [string] $PreviousDataProtectionCertificateThumbprints,
     [string] $HttpsThumbprint,
     [ValidateRange(0, 65535)] [int] $HttpRedirectPort = 0,
     [switch] $BehindHttpsProxy,
@@ -355,7 +366,11 @@ param(
     [string] $TelemetryOtlpEndpoint,
     [ValidateSet('Grpc', 'HttpProtobuf')] [string] $TelemetryOtlpProtocol,
     [ValidateSet('Auto', 'Standard', 'Enterprise')] [string] $EditionMode,
-    [switch] $AllowExpress
+    [switch] $AllowExpress,
+    # AN-10 (D-258): довірений акаунт для ролі БД `ecr_viewer` («бачить усе»,
+    # лише читання; роль створює 05-rpt-views.sql). Порожньо — роль порожня.
+    # НЕ акаунт служби EcrApi/EcrWorker.
+    [string] $ViewerAccount
 )
 
 $ErrorActionPreference = 'Stop'
@@ -1374,6 +1389,30 @@ END
             }
         }
     }
+
+    # AN-10: членство в `ecr_viewer` — і з -SkipSchema (роль уже накотив DBA).
+    if ($ViewerAccount) {
+        if ($ViewerAccount -match '(?i)EcrApi|EcrWorker|^NT SERVICE\\') { throw "ViewerAccount '$ViewerAccount' - службовий акаунт (EcrApi/EcrWorker/NT SERVICE): ecr_viewer лише для довірених читачів." }
+        $acct = $ViewerAccount.Replace("'", "''")
+        Invoke-DeploySql -TargetDb $Database -Query @"
+SET NOCOUNT ON;
+DECLARE @a sysname = N'$acct';
+DECLARE @s nvarchar(max);
+IF DATABASE_PRINCIPAL_ID(N'ecr_viewer') IS NULL THROW 50000, N'Role ecr_viewer is missing: 05-rpt-views.sql was not applied.', 1;
+IF DATABASE_PRINCIPAL_ID(@a) IS NULL
+BEGIN
+    IF SUSER_ID(@a) IS NULL THROW 50000, N'ViewerAccount has no server login; create the login first.', 1;
+    SET @s = N'CREATE USER ' + QUOTENAME(@a) + N' FOR LOGIN ' + QUOTENAME(@a);
+    EXEC(@s);
+END;
+IF IS_ROLEMEMBER(N'ecr_viewer', @a) = 0
+BEGIN
+    SET @s = N'ALTER ROLE ecr_viewer ADD MEMBER ' + QUOTENAME(@a);
+    EXEC(@s);
+END;
+"@
+        Write-Host "  ecr_viewer: акаунт $ViewerAccount — член ролі"
+    }
 }
 finally {
     if ($env:SQLCMDPASSWORD) { Remove-Item Env:\SQLCMDPASSWORD -ErrorAction SilentlyContinue }
@@ -1496,6 +1535,15 @@ if ($PSCmdlet.ShouldProcess('HKLM:\SYSTEM\CurrentControlSet\Services\EcrApi\Envi
     Set-ServiceEnvironmentVariable -ServiceName 'EcrApi' -Name 'ECR_Auth__DataProtection__CertificateThumbprint' `
         -Value $DataProtectionThumbprint
     Write-Host "ECR_Auth__DataProtection__CertificateThumbprint записано ($DataProtectionThumbprint)." -ForegroundColor Green
+}
+
+# D-267: попередні сертифікати DP (заміна сертифіката) — відбитки, не секрет.
+if ($PreviousDataProtectionCertificateThumbprints -and
+    $PSCmdlet.ShouldProcess('HKLM:\SYSTEM\CurrentControlSet\Services\EcrApi\Environment',
+        'записати ECR_Auth__DataProtection__PreviousCertificateThumbprints')) {
+    Set-ServiceEnvironmentVariable -ServiceName 'EcrApi' -Name 'ECR_Auth__DataProtection__PreviousCertificateThumbprints' `
+        -Value $PreviousDataProtectionCertificateThumbprints
+    Write-Host "ECR_Auth__DataProtection__PreviousCertificateThumbprints записано ($PreviousDataProtectionCertificateThumbprints)." -ForegroundColor Green
 }
 
 if ($BootstrapPassword) {

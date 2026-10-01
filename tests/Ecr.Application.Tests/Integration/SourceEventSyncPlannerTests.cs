@@ -189,6 +189,97 @@ public sealed class SourceEventSyncPlannerTests
         Assert.Empty(plan.Missing);
     }
 
+    /// <remarks>
+    /// ⛔ МУТАЦІЙНИЙ ДОКАЗ (повна звірка): прибрати <c>suppressed</c> з умови <c>gone</c> — червоніє
+    /// кейс «обрізане/з відмовою»; прибрати <c>l.StartUtc &gt;= input.FromUtc</c> — червоніє «поза вікном»;
+    /// <c>!suppressed &amp;&amp;</c> із <c>SourceEmpty</c> — червоніє кейс порожньої відповіді.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Directive", "HSE301-EFSYNC")]
+    public void Повна_звірка_Gone_містить_зниклі_включно_з_уже_Missing_і_без_рядка_але_не_повернені_й_не_поза_вікном()
+    {
+        var gone = Linked("GONE", "EF-GONE");
+        var already = Linked("MISSED", "EF-MISSED", status: SourceEventLinkStatus.Missing);
+        var noRow = new SourceEventLinkState("OPEN", "Flaring", Start, SourceEventLinkStatus.Open, null, null, null);
+        var closedHistory = new SourceEventLinkState("CL", "Flaring", Start, SourceEventLinkStatus.PeriodClosed, null, null, null);
+        var outside = Linked("OLD", "EF-OLD", start: new DateTime(2026, 1, 10, 0, 0, 0, DateTimeKind.Utc));
+        var seen = Linked("SEEN", "EF-SEEN");
+
+        var plan = Plan([Ev("SEEN", Start, Start.AddMinutes(15))], [gone, already, noRow, closedHistory, outside, seen]);
+
+        Assert.Equal(["GONE", "MISSED", "OPEN"], plan.Gone!.Select(g => g.SourceEventId).Order(StringComparer.Ordinal));
+        Assert.False(plan.SourceEmpty);
+    }
+
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Directive", "HSE301-EFSYNC")]
+    [InlineData(true, null)]
+    [InlineData(false, "ECR-INT-0503")]
+    public void Повна_звірка_обрізане_чи_відмовне_читання_нічого_не_видаляє(bool truncated, string? errorCode)
+    {
+        var plan = SourceEventSyncPlanner.Plan(Input([], [Linked("GONE", "EF-GONE")], [January], truncated, errorCode));
+
+        Assert.Empty(plan.Gone!);
+        Assert.False(plan.SourceEmpty);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Directive", "HSE301-EFSYNC")]
+    public void Повна_звірка_порожня_відповідь_ставить_SourceEmpty_а_непорожня_ні()
+    {
+        var lost = Linked("GONE", "EF-GONE");
+
+        Assert.True(Plan([], [lost]).SourceEmpty);
+        Assert.False(Plan([Ev("OTHER", Start.AddHours(1), Start.AddHours(2), name: "Other")], [lost]).SourceEmpty);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Directive", "HSE301-EFSYNC")]
+    public void Повна_звірка_перестворена_подія_не_потрапляє_в_Gone()
+    {
+        var old = Linked("OLD-ID", "EF-OLD-ID", name: "Flaring HP");
+
+        var plan = Plan([Ev("NEW-ID", Start, Start.AddMinutes(15), name: "flaring hp")], [old]);
+
+        Assert.Empty(plan.Gone!);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Directive", "HSE301-EFSYNC")]
+    public void Братній_шаблон_подія_переїхала_Handoff_а_не_Gone_і_не_Missing_а_порожність_рахується_по_об_єднанню()
+    {
+        var moved = Linked("MOVED", "EF-MOVED");
+        var gone = Linked("GONE", "EF-GONE");
+        var baseInput = Input([Ev("KEEP", Start.AddHours(1), Start.AddHours(2), name: "Keep")], [moved, gone], [January]);
+
+        var plan = SourceEventSyncPlanner.Plan(baseInput with { OtherTemplateIds = new HashSet<string> { "MOVED" } });
+
+        Assert.Equal(["MOVED"], plan.HandedOff!.Select(h => h.SourceEventId));
+        Assert.Equal(["GONE"], plan.Gone!.Select(g => g.SourceEventId));
+        Assert.Equal(["GONE"], plan.Missing.Select(m => m.SourceEventId));
+
+        // Власних подій нуль, але братній шаблон щось віддав — це не «джерело порожнє».
+        var emptyOwn = SourceEventSyncPlanner.Plan(
+            Input([], [moved], [January]) with { OtherTemplateIds = new HashSet<string> { "X" } });
+        Assert.False(emptyOwn.SourceEmpty);
+    }
+
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Directive", "HSE301-EFSYNC")]
+    [InlineData("P_Auto", "P_Auto_Day", true)]
+    [InlineData("P_Auto_Day", "P_Manual", true)]
+    [InlineData("P_Manual", "P_Manual_Day", true)]
+    [InlineData("P_Manual_Day", "P_Auto", false)]
+    [InlineData("P_Manual", "P_Auto", false)]
+    public void Порядок_шаблонів_Auto_AutoDay_Manual_ManualDay(string winner, string other, bool outranks)
+        => Assert.Equal(outranks, SourceEventTemplateOrder.Outranks(winner, other));
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait("Directive", "HSE301-A5b")]
@@ -249,6 +340,29 @@ public sealed class SourceEventSyncPlannerTests
         Assert.Equal(["E1"], plan.Items.Select(i => i.Event.EventId));
         Assert.Equal(2, plan.Filtered);
         Assert.Equal(["E2"], plan.Missing.Select(m => m.SourceEventId));
+    }
+
+    /// <summary>D-259: подія, що перестала проходити звуження чи стала не кореневою, не «повертається» — вона в Gone.</summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Directive", "HSE301-EFSYNC")]
+    public void D259_Подія_що_перестала_проходити_звуження_або_стала_не_кореневою_потрапляє_в_Gone()
+    {
+        var stillMine = Linked("E1", "EF-E1");
+        var nowOtherFlare = Linked("E2", "EF-E2", start: Start.AddHours(1));
+        var nowChild = Linked("E3", "EF-E3", start: Start.AddHours(2));
+
+        var events = new[]
+        {
+            Ev("E1", Start, Start.AddMinutes(15), attrs: [Attribute("Flare", "HP")]),
+            Ev("E2", Start.AddHours(1), Start.AddHours(2), attrs: [Attribute("Flare", "LP")]),
+            Ev("E3", Start.AddHours(2), Start.AddHours(3), parent: "P1", attrs: [Attribute("Flare", "HP")]),
+        };
+
+        var plan = SourceEventSyncPlanner.Plan(Input(events, [stillMine, nowOtherFlare, nowChild], [January])
+            with { FilterAttribute = "Flare", FilterScope = SourceEventAttributeScope.Event, FilterValue = "HP" });
+
+        Assert.Equal(["E2", "E3"], plan.Gone!.Select(g => g.SourceEventId).Order(StringComparer.Ordinal));
     }
 
     [Fact]

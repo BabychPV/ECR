@@ -532,6 +532,13 @@ EcrWorker` з `--supervisor`, `[SERVICE_ACCOUNT]`, у компоненті з у
 підписанта — параметр, не вписане значення: конкретний сертифікат і
 організація для підпису — факт розгортання, а не рішення скрипта.
 
+✎ 2026-10-01 (CL-3, MSI-SIGNING-OPTIONS (A+B)): `-Thumbprint` — варіант A (самопідписаний
+сертифікат, `Set-AuthenticodeSignature`), `-SubjectName` — варіант C
+(signtool). Після підпису переписує `Ecr.msi.sha256`. Перевірка пакета —
+`verify-msi.ps1 -IntegrityOnly` (I1 SHA-256, I2 підпис; у будь-якому режимі
+йдуть першими), тест — `tools/test-verify-msi.ps1` у джобі `msi (windows)`.
+Порядок для видавця й адміністратора — `11-install-guide.md` §1.1.
+
 ---
 
 <a id="properties"></a>

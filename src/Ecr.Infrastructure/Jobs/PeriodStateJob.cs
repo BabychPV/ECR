@@ -6,6 +6,7 @@ using Ecr.Application.Ports;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Documents;
 using Ecr.Domain.Entities.Integration;
+using Ecr.Domain.Entities.Notifications;
 using Ecr.Domain.Enums;
 using Ecr.Domain.Services;
 using Ecr.Domain.ValueObjects;
@@ -37,7 +38,9 @@ public sealed partial class PeriodStateJob(
     IMaterializationScheduler materialization,
     ILogger<PeriodStateJob>? logger = null,
     IAuditWriter? audit = null,
-    IBackgroundJobScheduler? jobs = null) : IBackgroundJob
+    IBackgroundJobScheduler? jobs = null,
+    Notifications.NotificationDispatcher? notifications = null,
+    IUiStringCatalog? catalog = null) : IBackgroundJob
 {
     /// <summary>Ціль витісняючої постановки пошуку осиротілих після системного Reopen.</summary>
     /// <remarks>
@@ -286,6 +289,7 @@ public sealed partial class PeriodStateJob(
         // транзакції заборонені» (D-29), а блокування, взяте на першому
         // проєкті, трималося б до кінця прогону по всіх.
         var toMaterialize = new List<int>();
+        var opened = new List<Period>();
         var skipped = new List<SkippedPeriodTransition>();
         var reopened = 0;
         var attempt = 0;
@@ -295,6 +299,7 @@ public sealed partial class PeriodStateJob(
             // ⚠ Стратегія повторів може виконати замикання вдруге — переліки
             // збираються заново, а не дописуються.
             toMaterialize.Clear();
+            opened.Clear();
             skipped.Clear();
             reopened = 0;
 
@@ -342,6 +347,13 @@ public sealed partial class PeriodStateJob(
             {
                 var before = period.State;
                 period.AdvanceTo(target, utcNow);
+
+                // ⚠ Лише «щойно відкрито» (`Scheduled → Open`): прогін, що застав період
+                // уже в `Grace`/`Closed` (простій задачі), нагадувати «заповніть» не має.
+                if (before == PeriodState.Scheduled && period.State == PeriodState.Open)
+                {
+                    opened.Add(period);
+                }
 
                 // ⚠ Зокрема `Scheduled → … → Closed` за один прогін (задача
                 // простояла весь Open+Grace): задача нічого не запише, але
@@ -417,7 +429,64 @@ public sealed partial class PeriodStateJob(
             .EnqueueAfterTransitionAsync(project.Id, toMaterialize, ct)
             .ConfigureAwait(false);
 
+        await NotifyOpenedAsync(project, opened, ct).ConfigureAwait(false);
+
         return skipped;
+    }
+
+    /// <summary>Подія <see cref="NotificationEventKind.PeriodOpened"/> на кожен щойно відкритий період.</summary>
+    /// <param name="project">Проєкт.</param>
+    /// <param name="opened">Періоди, що перейшли <c>Scheduled → Open</c> у закоміченій транзакції.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ ПІСЛЯ коміту і без права валити прогін: сповіщення не транзакційні, а недоступна пошта
+    /// не мусить повертати періоди проєкту в `Scheduled` чи ламати решту проєктів. Збій — у журнал.
+    /// <para>
+    /// ⚠ Текст — мовою каталогу за замовчуванням (як зведення збоїв): адресати каналу — явний
+    /// перелік (J-4), мови одержувача система не знає. Підстановки <c>{project}</c>/<c>{period}</c>;
+    /// ключ дедуплікації — проєкт+період, тож повторний прогін не дублює лист.
+    /// </para>
+    /// </remarks>
+    private async Task NotifyOpenedAsync(Project project, List<Period> opened, CancellationToken ct)
+    {
+        if (opened.Count == 0 || notifications is null || catalog is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var strings = (await catalog
+                .GetAsync(Application.Localization.UiStringResolver.DefaultLanguage, ct)
+                .ConfigureAwait(false)).Strings;
+
+            foreach (var period in opened)
+            {
+                var label = string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"{period.PeriodKeyValue} ({period.PeriodStart:yyyy-MM-dd} – {period.PeriodEnd:yyyy-MM-dd})");
+
+                string Fill(string key)
+                    => strings.GetValueOrDefault(key, key)
+                        .Replace("{project}", project.Code, StringComparison.Ordinal)
+                        .Replace("{period}", label, StringComparison.Ordinal);
+
+                await notifications
+                    .DispatchAsync(
+                        new NotificationEvent(
+                            NotificationEventKind.PeriodOpened,
+                            NotificationSeverity.Info,
+                            string.Create(CultureInfo.InvariantCulture, $"period-opened:{project.Code}:{period.PeriodKeyValue}"),
+                            Fill("notifications.periodOpened.subject"),
+                            Fill("notifications.periodOpened.body")),
+                        ct)
+                    .ConfigureAwait(false);
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            LogOpenedNotificationFailed(_logger, project.Code, project.Id, ex);
+        }
     }
 
     /// <summary>
@@ -585,6 +654,11 @@ public sealed partial class PeriodStateJob(
         Level = LogLevel.Information,
         Message = "PeriodStateJob: системно відкрито періодів — {Count}; поставлено разовий пошук осиротілих рядків.")]
     private static partial void LogOrphanScanEnqueued(ILogger logger, int count);
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "PeriodStateJob: проєкт {ProjectCode} ({ProjectId}) — сповіщення «період відкрито» не розіслано; стани періодів уже збережено.")]
+    private static partial void LogOpenedNotificationFailed(ILogger logger, string projectCode, int projectId, Exception exception);
 
     [LoggerMessage(
         Level = LogLevel.Warning,
