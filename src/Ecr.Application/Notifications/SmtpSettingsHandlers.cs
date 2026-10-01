@@ -202,15 +202,18 @@ public sealed class SaveSmtpSettingsHandler(
 
 /// <summary>Результат проби SMTP.</summary>
 /// <param name="To">Адреса, на яку слати пробний лист.</param>
+// ⛔ D-256 (рев'ю): <c>To</c> СЕРВЕРОМ ІГНОРУЄТЬСЯ — лист іде лише на адресу поточного користувача (інакше проба —
+// відкритий релей від імені організації). Поле лишено в контракті, щоб не міняти openapi/schema.d.ts; XML-опис
+// навмисно не чіпаємо з тієї ж причини (він потрапляє в знімок).
 public sealed record SmtpTestRequest(string? To);
 
 /// <summary>Пробний лист через ефективні налаштування (БД, інакше конфігурація). Право <c>System.ManageNotifications</c>.</summary>
 public sealed class TestSmtpSettingsHandler(
     INotificationSender sender, IAccessDecisionService access, IAuditWriter audit, ICurrentUser currentUser,
-    IClock clock)
+    IClock clock, IUserStore users)
 {
-    /// <summary>Шле пробний лист; відмова транспорту — це відповідь із категорією, а не помилка запиту.</summary>
-    /// <param name="request">Адресат.</param>
+    /// <summary>Шле пробний лист на адресу поточного користувача; відмова транспорту — відповідь із категорією.</summary>
+    /// <param name="request">Запит; <c>To</c> ігнорується.</param>
     /// <param name="ct">Токен скасування.</param>
     public async Task<NotificationTestResult> HandleAsync(SmtpTestRequest request, CancellationToken ct)
     {
@@ -219,7 +222,8 @@ public sealed class TestSmtpSettingsHandler(
         var profile = await PermissionCheck
             .RequireAsync(access, currentUser, ListNotificationChannelsHandler.Permission, ct).ConfigureAwait(false);
 
-        var to = (request.To ?? string.Empty).Trim();
+        var me = await users.FindByIdAsync(profile.UserId, ct).ConfigureAwait(false);
+        var to = (me?.Email ?? string.Empty).Trim();
 
         if (!SmtpSettings.IsValidAddress(to))
         {
@@ -233,6 +237,12 @@ public sealed class TestSmtpSettingsHandler(
             : await TestNotificationChannelHandler.TryAsync(
                 () => sender.SendAsync([to], "ECR test notification", "SMTP settings test message.", ct),
                 classify: true).ConfigureAwait(false);
+
+        // ⛔ Текст відмови транспорту (e.Message) назовні не віддаємо: лише ключ категорії; невідома — загальний ключ клієнта.
+        if (!result.Ok)
+        {
+            result = result with { Error = null };
+        }
 
         await ListNotificationChannelsHandler.AuditAsync(
             audit, clock, currentUser, profile.UserId, "SmtpSettingsTested", new { ok = result.Ok }, ct)

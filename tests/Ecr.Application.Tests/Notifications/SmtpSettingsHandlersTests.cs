@@ -171,34 +171,114 @@ public sealed class SmtpSettingsHandlersTests
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
     [Trait("Requirement", "D-256")]
-    public async Task Проба_шле_лист_адресату_віддає_категорію_відмови_і_пише_журнал_без_тексту_транспорту()
+    public async Task Проба_шле_лист_лише_поточному_користувачу_а_не_адресату_із_запиту()
     {
         Arrange();
         _sender.IsConfigured.Returns(true);
-        var handler = new TestSmtpSettingsHandler(_sender, _access, _audit, _user, _clock);
+        var handler = TestHandler(" me@corp.example ");
 
-        var ok = await handler.HandleAsync(new SmtpTestRequest(" me@corp.example "), CancellationToken.None);
+        var ok = await handler.HandleAsync(new SmtpTestRequest("victim@evil.example"), CancellationToken.None);
         Assert.True(ok.Ok);
+
+        // ⛔ Мутація: взяти адресу із request.To замість користувача → цей рядок стане червоним.
         await _sender.Received(1).SendAsync(
             Arg.Is<IReadOnlyList<string>>(r => r.Single() == "me@corp.example"), Arg.Any<string>(), Arg.Any<string>(),
             Arg.Any<CancellationToken>());
+        await _sender.DidNotReceive().SendAsync(
+            Arg.Is<IReadOnlyList<string>>(r => r.Contains("victim@evil.example")), Arg.Any<string>(),
+            Arg.Any<string>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "D-256")]
+    public async Task Проба_віддає_лише_ключ_категорії_без_тексту_відмови_і_пише_журнал_без_тексту_транспорту()
+    {
+        Arrange();
+        _sender.IsConfigured.Returns(true);
+        var handler = TestHandler("me@corp.example");
 
         _sender.SendAsync(default!, default!, default!, default)
             .ReturnsForAnyArgs(Task.FromException(new System.Net.Mail.SmtpException(
                 System.Net.Mail.SmtpStatusCode.MustIssueStartTlsFirst, "5.7.0 Must issue a STARTTLS command first")));
-        var failed = await handler.HandleAsync(new SmtpTestRequest("me@corp.example"), CancellationToken.None);
+        var failed = await handler.HandleAsync(new SmtpTestRequest(null), CancellationToken.None);
         Assert.False(failed.Ok);
         Assert.NotNull(failed.MessageKey);
         Assert.StartsWith("notifications.test.smtp.", failed.MessageKey, StringComparison.Ordinal);
+        Assert.Null(failed.Error);
 
-        var bad = await Assert.ThrowsAsync<BusinessRuleException>(
-            () => handler.HandleAsync(new SmtpTestRequest("nope"), CancellationToken.None));
-        Assert.Equal("err.ECR-REQ-0422.smtpTestRecipientInvalid", bad.Details!["messageKey"]);
+        // Невідома категорія: теж без сирого тексту (клієнт покаже загальне «проба не вдалась»).
+        _sender.SendAsync(default!, default!, default!, default)
+            .ReturnsForAnyArgs(Task.FromException(new InvalidOperationException("secret-internal-host.corp:25 refused")));
+        var unknown = await handler.HandleAsync(new SmtpTestRequest(null), CancellationToken.None);
+        Assert.False(unknown.Ok);
+        Assert.Null(unknown.Error);
+        Assert.DoesNotContain("secret-internal-host", JsonSerializer.Serialize(unknown), StringComparison.Ordinal);
 
         _sender.IsConfigured.Returns(false);
-        var none = await handler.HandleAsync(new SmtpTestRequest("me@corp.example"), CancellationToken.None);
+        var none = await handler.HandleAsync(new SmtpTestRequest(null), CancellationToken.None);
         Assert.Equal("notifications.test.smtpNotConfigured", none.MessageKey);
         Assert.All(_events.Where(e => e.EventType == "SmtpSettingsTested"), e => Assert.DoesNotContain("STARTTLS", e.DetailsJson, StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "D-256")]
+    [InlineData(null)]
+    [InlineData("nope")]
+    public async Task Проба_без_валідної_пошти_у_користувача_дає_422_і_нічого_не_шле(string? email)
+    {
+        Arrange();
+        _sender.IsConfigured.Returns(true);
+        var handler = TestHandler(email);
+
+        var bad = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => handler.HandleAsync(new SmtpTestRequest("victim@evil.example"), CancellationToken.None));
+
+        Assert.Equal("err.ECR-REQ-0422.smtpTestRecipientInvalid", bad.Details!["messageKey"]);
+        await _sender.DidNotReceiveWithAnyArgs().SendAsync(default!, default!, default!, default);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "D-256")]
+    public async Task Без_System_ManageNotifications_усі_три_обробники_дають_403_з_назвою_права()
+    {
+        _access.BuildProfileAsync(Actor, Arg.Any<CancellationToken>())
+            .Returns(new AccessBuilder { UserId = Actor }.Permission("System.ViewHealth").Build());
+
+        // ⛔ Мутація: прибрати PermissionCheck.RequireAsync з SaveSmtpSettingsHandler → відповідний рядок стане червоним.
+        Func<Task>[] calls =
+        [
+            () => Get().HandleAsync(CancellationToken.None),
+            () => Save().HandleAsync(Input(), CancellationToken.None),
+            () => TestHandler("me@corp.example").HandleAsync(new SmtpTestRequest(null), CancellationToken.None),
+        ];
+
+        foreach (var call in calls)
+        {
+            var denied = await Assert.ThrowsAsync<AccessDeniedException>(call);
+            Assert.Equal("System.ManageNotifications", denied.Details!["permission"]);
+            Assert.Contains("System.ManageNotifications", denied.Message, StringComparison.Ordinal);
+        }
+
+        Assert.Null(_store.Row);
+        await _sender.DidNotReceiveWithAnyArgs().SendAsync(default!, default!, default!, default);
+    }
+
+    private TestSmtpSettingsHandler TestHandler(string? email)
+    {
+        var users = Substitute.For<IUserStore>();
+        var me = new Ecr.Domain.Entities.Security.User("me", "Me", Ecr.Domain.Enums.AuthProvider.Local);
+
+        if (email is not null)
+        {
+            me.SetEmail(email);
+        }
+
+        users.FindByIdAsync(Actor, Arg.Any<CancellationToken>()).Returns(me);
+
+        return new TestSmtpSettingsHandler(_sender, _access, _audit, _user, _clock, users);
     }
 
     private void Arrange()
