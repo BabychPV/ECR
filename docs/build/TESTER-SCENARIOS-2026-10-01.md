@@ -78,6 +78,7 @@ Decimal.
   - п. 2: обидві вкладки є;
   - п. 3: у списку — **усі** сутності з'єднання (не лише шаблони подій), підказка «A source entity of this connection whose code is the name of a PI event template.»;
   - п. 4: «This connection has no source entities yet. Add the event template on the Entities tab first.»
+- **Без PI (стенд без PI, рішення людини 01.10):** тестується п. 1, 2 (вкладки за правами) і п. 4 (з'єднання без сутностей — підказка «This connection has no source entities yet…»). П. 3 (вибір шаблону зі списку сутностей) — **не тестується на стенді без PI**: сутність без каталогу в UI не створити (TESTER-GUIDE п. 4.4, п. 3).
 - **Вимоги:** HSE301 A6-UI, D-171/D-172.
 
 ### Н-А2. Читання подій не налаштоване — ✅
@@ -87,6 +88,7 @@ Decimal.
 - **Кроки:** відкрити «Events from PI», вибрати шаблон; **«Create mapping»** (проба живе лише у формі мапінгу, ✎ 2026-10-01, звірка Н-А…Н-Е: у самій вкладці її немає) → натиснути «Test» у розділі проби.
 - **Очікується:** інформаційний банер **«Event reading is not configured»** (текст із відповіді сервера); таблиця подій лишається видимою; проба відмовляє з тим самим поясненням, нічого не пише.
 - **Помилки:** `422 ECR-INT-0422 eventQueryNotConfigured` / `queryKindNotConfigured` / `queryKindNotSupported`.
+- **Без PI:** **не тестується на стенді без PI** — для вибору шаблону й форми мапінгу потрібна сутність-джерело, якої без PI не створити (TESTER-GUIDE п. 4.4, п. 3).
 - **Вимоги:** HSE301 A6.
 
 ### Н-А3. Проба «Test on recent events» — 🟨
@@ -106,6 +108,7 @@ Decimal.
   - якщо в мапінгу є поле з «Value map»: блок «Values of {attribute} without a pair:» з кнопками «+ {value}»; кнопка додає пару у форму мапінгу, запис довідника треба обрати вручну.
 - **Помилки:** `422 ECR-REQ-0422 probeEventsInvalid` (вікно > 92 днів, початок не раніше кінця, ліміт поза 1–100, порожній шаблон чи атрибут; межі 92 і 100 включні); `503 ECR-INT-0503 probeTimeout` / `probeUnavailable`; частково — «The source answered partially ({code})…».
 - **Обмеження:** `FEATURE-HSE301-VIEW` §10.6 обіцяє 7 днів — у коді типово 30; окремої кнопки ▶ «Перевірити на прикладі» немає.
+- **Без PI:** п. 1, 2, 4 (реальні події шаблону) — **не тестуються на стенді без PI**. Через UI п. 3 теж недосяжний (потрібна форма мапінгу з сутністю). Можна лише прямим `POST …/probe-events` перевірити відмову поза межами (п. 3: `422 probeEventsInvalid`, запит до PI не йде); недосяжне джерело дає `503 ECR-INT-0503` (`probeUnavailable`/`probeTimeout`) — це очікувано без PI, не дефект.
 - **Вимоги:** HSE301 A6-UI, §4.7.3.
 
 ### Н-А4. Мапінг подій: створення, валідація, пауза, видалення — ✅
@@ -129,6 +132,7 @@ Decimal.
   - кожна зміна — у журналі `aud.StructureChange` (ФВ-12.10).
 - **Помилки:** `409 ECR-INT-0409 eventMapExists` / `eventMapHasLinks` / `eventMapColumnTaken` / `eventMapSourceValueTaken`; `422 ECR-INT-0422 eventMapStartEndRequired` / `eventMapStartEndNotDate` / `eventMapTargetNotDynamic` / `eventMapColumnNotInTable` / `eventMapReservedAttributeInvalid` / `eventMapValueKindMismatch` / `eventMapFilterIncomplete` / `eventMapValueMapNotAllowed` / `eventMapTableNotInDocument`; `404 ECR-INT-0404 eventMap`; `403 ECR-AUTH-0403 noProjectManageGrant`; `422 ECR-REQ-0422 malformedRequest` — форма запиту поза доменом (порожній чи задовгий атрибут, невідоме число в `volumeMode`/`attributeScope`/`valueKind`/`filterScope`, задовге значення звуження чи відповідності; ✎ 2026-10-01, до виправлення — 500; тест `SourceEventsApiTests.Форма_мапінгу_подій_поза_доменом_дає_422_а_не_500_і_нічого_не_пише`).
 - **Примітка:** `POST /api/v1/source-event-maps` повертає **200**, не 201 — не дефект.
+- **Без PI:** **не тестується на стенді без PI** — форма мапінгу вимагає сутність-шаблон подій, а її без PI не створити (TESTER-GUIDE п. 4.4, п. 3).
 - **Вимоги:** HSE301 A6, ФВ-12.10, D-174, D-185…D-189.
 
 ### Н-А5. Синхронізація подій і таблиця «Events from PI» — 🟨
@@ -152,6 +156,7 @@ Decimal.
   - подія належить періоду свого **початку** в поясі проєкту (D-179); беруться лише кореневі події (без батька); «Missing in PI» — лише при повному читанні.
 - **Помилки:** `422 ECR-INT-0422 eventSyncNoMap`; `422 ECR-REQ-0422 pageSizeOutOfRange` (limit < 0 або > 500; `limit=0` — не відмова, а типові 50).
 - **Обмеження:** на живому PI (RTQP) не перевірялося (TESTER-GUIDE И-9/И-10, п. 7.11).
+- **Без PI:** **не тестується на стенді без PI** (потрібні мапінг, сутність і події в PI).
 - **Вимоги:** HSE301 A5b, A6, D-179, ФВ-11.1.
 
 ### Н-А6. Повний природний ключ події (M6) — 🟨
@@ -163,6 +168,7 @@ Decimal.
   3. Дві події з однаковим початком **і** елементом.
 - **Очікується:** п. 1 — дубля немає, `RowKey` лишається `EF-<перший ID>`; п. 2 — два окремі рядки; п. 3 — неоднозначні, не зіставляються ні з чим (нового злиття нема). У БД `PrimaryElement` (Trim + UPPER), індекс `UX_SEL_NaturalKey (MapId, StartUtc, PrimaryElement)` — фільтрований `WHERE PrimaryElement IS NOT NULL`, тож старі зв'язки без елемента в ньому не беруть участі; старі зв'язки без елемента отримують його під час синхронізації, якщо ключ однозначний.
 - **Обмеження:** перестворення події з новим ID залежить від можливостей PI-стенда.
+- **Без PI:** **не тестується на стенді без PI** (потрібні події в PI).
 - **Вимоги:** HSE301 M6.
 
 ### Н-А7. Прив'язки PI за вікном рядка: CRUD — ✅
@@ -181,6 +187,7 @@ Decimal.
 - **Очікується:** п. 1 — «Binding created.», рядок у переліку з колонками Target column / Window (start to end) / Selector column («one attribute for all rows», якщо без селектора) / Summary / Sources / State; п. 2 — 409; п. 3 — проблеми під «Cannot save yet:» або 422; п. 5 — «Binding paused.» / «Binding resumed.»; п. 6 — перше «Binding deleted.», друге відмова з порадою поставити на паузу. Типові значення: покриття 95 %, повтор 7 днів, поріг розриву порожній.
 - **Помилки:** `409 ECR-INT-0409 rowWindowTargetTaken` / `rowWindowMapHasValues` / `rowWindowConcurrency` (чужа `rowVersion`) / `rowWindowSelectorTaken`; `422 ECR-INT-0422 rowWindowTargetNotInTable` / `windowColumnsNotDate` / `targetNotDecimal` / `windowColumnNotInTable` / `selectorNotInTable` / `windowColumnsSame` / `rowWindowPolicyOutOfRange` / `rowWindowSelectorWithoutColumn`; `422 ECR-REQ-0422 rowWindowSummaryUnknown` (лише для **числового** `summary` поза переліком, напр. `99`; невідомий рядок `"Foo"` відсікає ще біндер моделі — `422 ECR-REQ-0422 malformedRequest`) / `rowWindowSourceInvalid`; `404 ECR-INT-0404 rowWindowMap`.
 - **Обмеження (Н-А7а):** при редагуванні треба знову вибрати документ («Choose a document to read the table columns.»), інакше «Save» вимкнена — пауза кнопкою в рядку цього не потребує. Прив'язка без джерел або з джерелом іншої сутності **не з'явиться** в розділі цієї сутності. Документи для вибору — перші 500.
+- **Без PI:** розділ «PI row-window bindings» є у вкладці з'єднання й без PI. Перевіряється те, що не потребує живого джерела: поведінка форми й відмови валідації колонок (п. 3), пауза/відновлення/видалення (п. 5–6), якщо прив'язку вдалося створити. Крок «Add source» вимагає сутність-джерело, яку без PI не створити (TESTER-GUIDE п. 4.4, п. 3): що від неї залежить — **не тестується на стенді без PI**. Зафіксуйте в заявці, до якого кроку дійшли.
 - **Вимоги:** HSE301 A1, ФВ-12.10.
 
 ### Н-А8. Прив'язка вікна рядка під час роботи — 🟨
@@ -197,6 +204,7 @@ Decimal.
   7. Дочекатися хвилини :05 наступної години (щогодинний повтор).
 - **Очікується:** п. 1 — ставиться задача «PI row-window fetch»; ціль отримує значення (стан Fetched або Partial, якщо покриття < порогу); потім перерахунок; п. 2 — задача **не** ставиться; п. 3 — InvalidWindow, до PI запит не йде, комірка не змінюється; п. 4 — ручне значення лишається (KeptManual); п. 5 — одна задача на таблицю; п. 6 — сам запис комірки відхилено (період закрито, `PeriodClosed`, навіть з `Manage`), задача **не** ставиться (✎ 2026-10-01, звірка Н-А…Н-Е: «Nothing to fetch: the table instance, the open period or an active binding is missing» буває лише, коли період закрили між постановкою й виконанням задачі); п. 7 — повторне підтягування для NoData / Partial / SourceError, якщо кінець вікна не старший за «Days to refetch», і для вікон, що ще тривали. Прогрес задачі: «Fetched {fetched}, partial…, invalid window…, no source…». Не більше 500 рядків за прогін — решта продовженням.
 - **Обмеження:** кнопки «Підтягнути з PI» в документі, `POST /documents/{id}/row-windows/fetch` і `probe-window` з FEATURE §4.4/§10.6 **у коді немає**; InvalidWindow — лише час, якого немає в поясі проєкту (пропущена година весняного переходу); неоднозначний осінній час приймається. Живим PI не перевірено.
+- **Без PI:** **не тестується на стенді без PI** — задача «PI row-window fetch» потребує джерела PI. Частина без PI (п. 6, відмова запису комірки закритого періоду `PeriodClosed`) від PI не залежить, але вимагає активної прив'язки, а та — сутності-джерела; тож практично теж недосяжна.
 - **Вимоги:** HSE301 A1.
 
 ---
@@ -219,6 +227,7 @@ join / filter / group / compute / script у бекенді **немає**, і в
   3. «Source entity» → вибрати сутність; оновити сторінку.
 - **Очікується:** п. 1 — «No collection sources configured» / «Without sources the system works fine: data is entered by hand.» (під ними ще й підказка «Pick a source entity above…» — не дефект); п. 2 — «Pick a source entity above to see its pipeline…»; п. 3 — вступ «The steps the system runs for this source entity, with real collected rows of the last {days} days after each step…» (`{days}` = 7), п'ять карток «1. Source», «2. Collection schedule», «3. Collection», «4. Mapping», «5. Write to documents»; вибір тримається в URL (`?entity=<id>`).
 - **Помилки:** `403 ECR-AUTH-0403` без права; `404 ECR-INT-0404 sourceEntity` — лише прямим `GET …/mapping/preview` для неіснуючої або неактивної сутності; невідомий `?entity=<id>` в URL екран мовчки показує як «сутність не вибрано».
+- **Без PI:** тестується **п. 1** (стенд без джерел: «No collection sources configured» і «Without sources the system works fine: data is entered by hand.»). П. 2–3 (вибір сутності, п'ять карток) — **не тестуються на стенді без PI**: сутності немає.
 - **Вимоги:** ФВ-14.3 (область 9), D-235.
 
 ### Н-Б2. Стани кроків і «звуження до нуля» — ✅
@@ -233,6 +242,7 @@ join / filter / group / compute / script у бекенді **немає**, і в
   - лічильники: Collection = точки, що прийшли; Mapping = сума точок по **активних** мапінгах; Write = сума точок активних мапінгів з результатом «lands in a cell» (рахуються точки, не мапінги);
   - дані — уже зібрані (`ext.RawDataPoint`) за 7 днів, не живе читання; вікно на екрані не змінюється.
 - **Обмеження:** користувач з `Integration.Manage`, але без `Integration.EditSchedule`, бачить помилку всередині кроку 2, а бейдж кроку лишається «Passes data» (так задумано: нечитаний розклад не вважається дефектом кроку).
+- **Без PI:** **не тестується на стенді без PI** — потрібні сутність зі збором, розкладом, мапінгами й зібрані точки (`ext.RawDataPoint`).
 - **Вимоги:** ФВ-14.3, D-235.
 
 ### Н-Б3. Редагування розкладу і мапінгів з екрана конвеєра — ✅
@@ -247,6 +257,7 @@ join / filter / group / compute / script у бекенді **немає**, і в
   6. Змінити одиницю джерела (банер «Source unit changed») → «Yes, accept {actualUnitCode}» / «No, this is a source error».
 - **Очікується:** п. 1 — «Schedule saved.» / «Schedule removed.»; п. 2 — «Enter a whole number of days from {min} to {max}.» (1…366), кнопка вимкнена — `422 …Lookback` з екрана не побачити, лише прямим запитом; п. 3 — друга вкладка: 409 і кнопка «Reload the current version»; п. 4 — перехід на `/admin/sources`; п. 5 — «The mapping has been created.», «Mapping paused.»/«Mapping resumed.»; мапінг із даними не видаляється — порада поставити на паузу; крок 5 показує «Gaps» («Mappings that will put nothing in the document», «Source fields that land nowhere», «Columns with nothing behind them») або «No gaps…»; п. 6 — прийняття пишеться в `aud.StructureChange`.
 - **Помилки:** `422 ECR-REQ-0422 collectionScheduleCron` / `…CronLength` / `…Lookback` / `…IfMatch` / `…NotApplied`; `409 ECR-JOB-0409 collectionScheduleExists` / `collectionScheduleChanged`; `409 ECR-INT-0409 mappingHasCollectedData` / `mappingUnitChangeNotPending`; `422 ECR-INT-0422 pendingUnitNotInCatalog`; `404 ECR-UOM-0404 unitId`.
+- **Без PI:** **не тестується на стенді без PI** — розклад і мапінги прив'язані до сутності-джерела.
 - **Вимоги:** ФВ-14.3, ФВ-12.10, D-235.
 
 ---
@@ -644,6 +655,7 @@ Date, Bool, Lookup, Unit), бажано один темпоральний і о�
 - **Очікується:** `422 ECR-REQ-0422`: п. 1 — `dataSourceEndpointScheme` або `dataSourceEndpointMalformed`; п. 2 — `dataSourceEndpointHostForbidden`; п. 3 — `dataSourceEndpointHostForbidden` (приватні IP — лише для Negotiate; для інших автентифікацій не блокуються); п. 4 — `dataSourceEndpointHostNotAllowed` / успіх; п. 5 — відмова (перевіряється кожна A/AAAA). Порожній `AllowedHosts` — діє лише блок-лист.
 - **Додатково:** IP перевіряється ще в момент підключення (DNS-rebinding, `c11285b0`); відповідь PI понад 50 МБ — ні адаптер, ні задача збору не повторюють запит (Н-Л4), `ECR-INT-0503 piWebApiResponseTooLarge`.
 - **Обмеження:** на живому PI/DNS не перевірено. Окремий крок: `http://localhost`, `http://x.localhost` — теж `HostForbidden`; DNS-ім'я корпоративного хоста (напр. `pi.corp.example`) дозволене, навіть якщо розв'язується на приватну адресу (для Negotiate саме ім'я потрібне для Kerberos SPN).
+- **Без PI:** тестується повністю в частині, що не потребує живого PI: форма з'єднання, збереження й відмови політики адреси (п. 1–4; перевірка адрес-літералів не звертається до PI). П. 5 (розв'язання імені) залежить від DNS стенда, а не від PI. «Підключення до PI» як таке (досяжність, відповіді) — **не тестується на стенді без PI**.
 - **Вимоги:** ФВ-13.11, ФВ-6.9.
 
 ### Н-Л1а. Приватний IP-літерал і ім'я для Negotiate — ✅ (за тестами)
@@ -656,6 +668,7 @@ Date, Bool, Lookup, Unit), бажано один темпоральний і о�
 - **Кроки:** активне джерело PiWebApi із Negotiate (або порожньою автентифікацією) без `PiWebApi:AllowedHosts` → зберегти; відкрити `/health/ready` (картка `sources`).
 - **Очікується:** `Warning` у журналі при збереженні; картка `sources` — `Degraded` з повідомленням `health.sources.negotiateNoAllowlist` («Sources with Windows authentication and no allowed-hosts list (PiWebApi:AllowedHosts): {count}.»; рахуються лише джерела з активними сутностями збору; коли є падіння (Unhealthy) чи прогалини покриття (Degraded), цей текст додається до їхнього повідомлення, окремим повідомленням — коли інших причин немає); після задання `AllowedHosts` (потрібен перезапуск служби — не перевірено) — без попередження.
 - **Уточнення (звірено з кодом `SourcesHealthCheck`/`EndpointNetwork`):** `AllowedHosts` читається з конфігурації `PiWebApi:AllowedHosts`; задається в `appsettings.Production.json` або `ECR_PiWebApi__AllowedHosts__0=…` у `Environment` служби `EcrApi`; потім `Restart-Service EcrApi` → `/health/ready`, картка `sources` — Healthy (за відсутності інших причин: запуск, покриття, падіння). Інсталятор і `deploy-ecr.ps1` ключ не пишуть. Що перезапуск обов'язковий, живою перевіркою не підтверджено.
+- **Без PI:** повідомлення `negotiateNoAllowlist` рахує лише джерела з **активними сутностями збору**, а сутність без PI не створити (TESTER-GUIDE п. 4.4, п. 3) — тож `Degraded` цієї причини **не тестується на стенді без PI**. Без активних джерел картка `sources` — `Healthy` (TESTER-GUIDE п. 5.2); джерело, що не запускалось, дає `Degraded`, а активне джерело з невдалим останнім запуском — `Unhealthy` (503), тому на стенді без PI тримайте джерела неактивними або не створюйте їх.
 - **Вимоги:** ФВ-13.11.
 - ✎ 2026-10-01, живий прохід: `negotiateNoAllowlist` виводиться в одному рядку з «Sources with a coverage gap: N», а лічильник coverage gap **завищений** (сутності рахуються двічі) — 🟨 виправляється (lane `srcfix`).
 
@@ -664,12 +677,14 @@ Date, Bool, Lookup, Unit), бажано один темпоральний і о�
 - **Права:** `Integration.Manage`. **Дані:** джерело PiWebApi без секрету (або секрет «Negotiate»).
 - **Кроки:** 1) у формі редагування змінити «Endpoint» на інший дозволений хост, чекбокс «I confirm that the service account may connect to the new address» не ставити → зберегти. 2) Поставити чекбокс → зберегти. 3) (API) `PUT /data-sources/{id}` зі зміненою адресою без `confirmEndpointChange` і з `confirmEndpointChange: true`. 4) Зміна без зміни адреси (лише ім'я/активність).
 - **Очікується:** п. 1 — для джерела без секрету кнопка «Save» неактивна, доки чекбокс не поставлено (запит не надсилається); для джерела із секретом «Negotiate» форма чекбокса спершу не показує, сервер відповідає 422 (як у п. 3), після чого чекбокс з'являється; п. 3 (без прапора) — `422 ECR-REQ-0422`, `messageKey` `err.ECR-REQ-0422.dataSourceEndpointChangeUnconfirmed`, поле `confirmEndpointChange`, БД не змінюється; п. 2 — проходить; п. 4 — підтвердження не потрібне. Джерело із секретом-заголовком: замість прапора — повторне введення секрету (S3).
+- **Без PI:** тестується: це перевірка форми й відповіді сервера при збереженні з'єднання, живий PI не потрібен.
 - **Вимоги:** ФВ-13.11, ФВ-6.9. Коміт `80abcd19`.
 
 ### Н-Л4. Відповідь PI Web API понад 50 МБ — ✅ (за тестами; на живому PI не перевірено)
 
 - **Кроки:** збір із запитом, що повертає тіло > 50 МБ (або заглушка PI з `Content-Length` понад ліміт); також відповідь без `Content-Length`, що росте понад ліміт.
 - **Очікується:** адаптер не повторює HTTP-запит, задача збору падає **одразу, без повторів** (✎ 2026-10-01, `13f53b13`: `SourceResponseTooLargeException` у `JobRetryPolicy` не ретраїться; раніше задача повторювалась ще 3 рази, ~3.5 хв «виконується»): `ECR-INT-0503`, `messageKey` `err.ECR-INT-0503.piWebApiResponseTooLarge` ({path}, {limitBytes}); процес не вичерпує пам'ять; надто широкий запит (багато тегів × довге вікно) слід ділити. Ліміт у конфігурації не виставляється (D-242, чекає підтвердження). Тести: `PiWebApiResponseLimitTests`, `QuartzJobAdapterRetryTests`, `JobRetryPolicyTests`.
+- **Без PI:** **не тестується на стенді без PI** (потрібен збір з живого PI або його заглушка).
 - **Вимоги:** НФ, S-аудит. Коміти `d013ba3e`, `13f53b13`.
 
 ### Н-Л5. `Telemetry:Enabled=false` за замовчуванням — ✅ (свідомий дефолт)
