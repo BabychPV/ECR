@@ -69,24 +69,53 @@ public static class JobRetryPolicy
     /// перестане працювати від першої ж правки формулювання.
     /// </para>
     /// <para>
-    /// ⚠ Двох типів тут НЕМАЄ навмисно. <see cref="BusinessRuleException"/> —
-    /// ним із адаптерів збору приїжджає <c>ECR-INT-0503</c> («джерело
-    /// недоступне»), тобто рівно та транзієнтна відмова, заради якої ретрай і
-    /// будували. <see cref="ConcurrencyConflictException"/> — конфлікт версій
-    /// минає сам, щойно повтор перечитає свіжий стан.
+    /// ⚠ <see cref="BusinessRuleException"/> повторюється ЛИШЕ з кодом
+    /// «недоступно, спробуйте пізніше» (<see cref="TransientRuleCodes"/>): ним
+    /// із адаптерів збору приїжджає <c>ECR-INT-0503</c> («джерело недоступне»),
+    /// тобто рівно та транзієнтна відмова, заради якої ретрай і будували. Решта
+    /// кодів — вердикт про дані чи налаштування (<c>ECR-INT-0422</c> «запит не
+    /// налаштовано», «одиниця змінилась», <c>ECR-UOM-0422</c>, <c>ECR-IMP-0422</c>):
+    /// раніше вони теж ретраїлись тричі. Код — константа каталогу, не текст
+    /// повідомлення, тож заборона нижче не порушується.
+    /// </para>
+    /// <para>
+    /// ⛔ <see cref="SourceResponseTooLargeException"/> — виняток із цього
+    /// правила: код у нього <c>ECR-INT-0503</c> (контракт), але завелика
+    /// відповідь від повтору не меншає (Н-Л4).
+    /// </para>
+    /// <para>
+    /// ⚠ <see cref="ConcurrencyConflictException"/> тут НЕМАЄ навмисно —
+    /// конфлікт версій минає сам, щойно повтор перечитає свіжий стан.
     /// </para>
     /// <para>
     /// ⚠ <see cref="JobLeaseLostException"/> — теж ні: оренду вже тримає інший
     /// виконавець, і повтор тут означав би другу копію тієї самої роботи.
     /// </para>
     /// </remarks>
-    public static bool IsWorthRetrying(Exception ex)
-        => ex is not (DomainException
+    public static bool IsWorthRetrying(Exception ex) => ex switch
+    {
+        SourceResponseTooLargeException => false,
+        BusinessRuleException rule => TransientRuleCodes.Contains(rule.ErrorCode),
+        DomainException
             or NotFoundException
             or AccessDeniedException
             or SourceAuthenticationException
-            or JobLeaseLostException)
-           && !JobFailureText.IsConstraintViolation(ex);
+            or JobLeaseLostException => false,
+        _ => !JobFailureText.IsConstraintViolation(ex),
+    };
+
+    /// <summary>
+    /// Коди <see cref="BusinessRuleException"/>, що означають «зараз недоступно»
+    /// і минають самі: джерело лежить (<c>ECR-INT-0503</c>), система архівує або
+    /// планувальник ще не піднявся (<c>ECR-SYS-0503</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Явним переліком, а не розбором цифр <c>0503</c>: та сама причина, що й
+    /// у <c>ExceptionHandlingMiddleware</c> — одна помилка в правилі розбору
+    /// тихо переназначила б поведінку всьому каталогу.
+    /// </remarks>
+    public static readonly IReadOnlySet<string> TransientRuleCodes =
+        new HashSet<string>(StringComparer.Ordinal) { ErrorCodes.SourceUnavailable, ErrorCodes.Archiving };
 
     /// <summary>
     /// Код каталогу для провалу (BE-08): власний код доменної чи прикладної

@@ -539,7 +539,7 @@ public sealed partial class PiWebApiDataSource(
     /// </summary>
     private async Task<MemoryStream> ReadBoundedAsync(HttpResponseMessage response, string path, CancellationToken ct)
     {
-        BusinessRuleException TooLarge() => new(
+        SourceResponseTooLargeException TooLarge() => new(
             SourceUnavailable,
             $"PI Web API на {path} віддав відповідь понад {MaxResponseBytes} байт: збір відхилено.",
             new Dictionary<string, object?>

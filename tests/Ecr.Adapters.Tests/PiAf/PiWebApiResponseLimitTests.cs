@@ -22,7 +22,7 @@ public sealed class PiWebApiResponseLimitTests
         var handler = new CountingHandler(() => new StreamContent(new MemoryStream(Encoding.UTF8.GetBytes(Padded(200)))));
         var sut = Create(handler, limit: 100);
 
-        var ex = await Assert.ThrowsAsync<BusinessRuleException>(() => sut.ReadAsync(Request(), CancellationToken.None));
+        var ex = await Assert.ThrowsAsync<SourceResponseTooLargeException>(() => sut.ReadAsync(Request(), CancellationToken.None));
 
         Assert.Equal("ECR-INT-0503", ex.ErrorCode);
         Assert.Equal("err.ECR-INT-0503.piWebApiResponseTooLarge", ex.Details!["messageKey"]);
@@ -39,7 +39,7 @@ public sealed class PiWebApiResponseLimitTests
         });
         var sut = Create(handler, limit: 100);
 
-        var ex = await Assert.ThrowsAsync<BusinessRuleException>(() => sut.ReadAsync(Request(), CancellationToken.None));
+        var ex = await Assert.ThrowsAsync<SourceResponseTooLargeException>(() => sut.ReadAsync(Request(), CancellationToken.None));
 
         Assert.Equal("err.ECR-INT-0503.piWebApiResponseTooLarge", ex.Details!["messageKey"]);
         Assert.Equal(1, handler.Calls);
