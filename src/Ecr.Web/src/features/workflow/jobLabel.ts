@@ -103,8 +103,10 @@ export function humanizeJobId(jobId: string): string {
  */
 export function rawJobId(input: string): string {
   const value = input.trim();
-  for (const [typeName, key] of Object.entries(KindKeys)) {
-    const label = t(key);
+  for (const typeName of Object.keys(KindKeys)) {
+    // ⚠ Через jobKindLabel, а не прямий виклик перекладу з ключем-змінною:
+    // сторож EndpointCoverageTests.DynamicKeySites рахує такі місця (їх 3).
+    const label = jobKindLabel(typeName);
     if (!value.startsWith(label)) continue;
 
     const rest = value.slice(label.length);
