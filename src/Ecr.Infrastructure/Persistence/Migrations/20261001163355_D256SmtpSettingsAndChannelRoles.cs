@@ -87,6 +87,7 @@ namespace Ecr.Infrastructure.Persistence.Migrations
         }
 
         /// <inheritdoc />
+        /// <remarks>Down впаде при формулі &gt; 2000 символів (звуження nvarchar(4000) до nvarchar(2000)).</remarks>
         protected override void Down(MigrationBuilder migrationBuilder)
         {
             migrationBuilder.AlterColumn<string>(
