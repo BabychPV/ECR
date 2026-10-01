@@ -1,4 +1,4 @@
-# 02 — Контракти. Єдине джерело правди
+﻿# 02 — Контракти. Єдине джерело правди
 
 > **Це найважливіший файл пакета.** Усе, що тут написано, реалізується
 > **дослівно**. Змінювати контракт заборонено (`08-workflow.md` §5): потрібна
@@ -2665,6 +2665,23 @@ public interface INotificationStore
     public Task<bool> IsChannelNameTakenAsync(string name, int? exceptChannelId, CancellationToken ct);
     public void AddChannel(NotificationChannel channel);
     public Task<int> RemoveChannelWithRulesAsync(NotificationChannel channel, CancellationToken ct);
+    // D-256: ролі-адресати каналу (sys_ecr.NotificationChannelRole)
+    public Task<IReadOnlyDictionary<int, IReadOnlyList<int>>> ListChannelRolesAsync(CancellationToken ct);
+    public Task<IReadOnlyList<int>> ChannelRoleIdsAsync(int channelId, CancellationToken ct);
+    public Task<int> CountExistingRolesAsync(IReadOnlyCollection<int> roleIds, CancellationToken ct);
+    public Task ReplaceChannelRolesAsync(int channelId, IReadOnlyCollection<int> roleIds, CancellationToken ct);
+}
+```
+
+#### `ISmtpSettingsStore`
+
+Налаштування SMTP, задані адміністратором (`sys_ecr.SmtpSettings`, єдиний рядок, `D-256`). У тому ж файлі — `ISmtpPasswordProtector` (шифрує пароль перед записом; розшифровує лише транспорт, API пароль не віддає) і `ISmtpSettingsCache` (скидання кешу ефективних налаштувань транспорту після PUT; без скидання — не пізніше ніж за 30 с).
+
+```csharp
+public interface ISmtpSettingsStore
+{
+    public Task<SmtpSettings?> FindAsync(CancellationToken ct);
+    public void Add(SmtpSettings settings);
 }
 ```
 
@@ -3969,6 +3986,9 @@ public sealed class NotFoundException(string errorCode, string message)
 | `DELETE` | `/api/v1/notifications/channels/{id}` | `System.ManageNotifications` | 7 |
 | `PUT` | `/api/v1/notifications/channels/{id}/secret` | `System.ManageNotifications` | 7 |
 | `POST` | `/api/v1/notifications/channels/{id}/test` | `System.ManageNotifications` | 7 |
+| `GET` | `/api/v1/notifications/smtp` | `System.ManageNotifications` | 7 |
+| `PUT` | `/api/v1/notifications/smtp` | `System.ManageNotifications` | 7 |
+| `POST` | `/api/v1/notifications/smtp/test` | `System.ManageNotifications` | 7 |
 | `GET` | `/api/v1/notifications/rules` | `System.ManageNotifications` | 7 |
 | `PUT` | `/api/v1/notifications/rules` | `System.ManageNotifications` | 7 |
 | `GET` | `/api/v1/notifications/deliveries` | `System.ManageNotifications` | 7 |

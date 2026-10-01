@@ -33,7 +33,7 @@ public sealed class NotificationStore(EcrDbContext db) : INotificationStore
 
     public async Task<IReadOnlyDictionary<int, IReadOnlyList<int>>> ListChannelRolesAsync(CancellationToken ct)
         => (await db.NotificationChannelRoles.AsNoTracking()
-                .OrderBy(r => r.ChannelId).ThenBy(r => r.RoleId).ToListAsync(ct).ConfigureAwait(false))
+                .OrderBy(r => r.ChannelId).ThenBy(r => r.RoleId).Take(MaxChannelRoles).ToListAsync(ct).ConfigureAwait(false))
             .GroupBy(r => r.ChannelId)
             .ToDictionary(g => g.Key, g => (IReadOnlyList<int>)[.. g.Select(r => r.RoleId)]);
 
@@ -74,6 +74,9 @@ public sealed class NotificationStore(EcrDbContext db) : INotificationStore
 
     /// <summary>Стеля матриці: види подій × <see cref="MaxChannels"/> каналів.</summary>
     public const int MaxRules = 1000;
+
+    /// <summary>Стеля зв'язків «канал — роль»: 50 ролей на кожен із <see cref="MaxChannels"/> каналів.</summary>
+    public const int MaxChannelRoles = MaxChannels * 50;
 
     /// <inheritdoc />
     public async Task<IReadOnlyList<NotificationRule>> ListRulesAsync(CancellationToken ct)

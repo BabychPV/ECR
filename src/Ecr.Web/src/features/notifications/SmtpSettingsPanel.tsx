@@ -1,4 +1,4 @@
-import { useState, type JSX } from "react";
+﻿import { useState, type JSX } from "react";
 import {
   Badge,
   Button,
@@ -119,7 +119,7 @@ export function SmtpSettingsPanel(): JSX.Element {
           variant="light"
           data-smtp-source={settings.data.source}
         >
-          {t(`smtp.source.${settings.data.source}`)}
+          {sourceLabel(settings.data.source)}
         </Badge>
       </Group>
 
@@ -243,6 +243,14 @@ export function SmtpSettingsPanel(): JSX.Element {
       </Group>
     </Stack>
   );
+}
+
+/** Підпис джерела транспорту; літерали, а не шаблонний ключ — сторож ключів бачить кожен рядок. */
+function sourceLabel(source: string): string {
+  if (source === 'database') return t('smtp.source.database');
+  if (source === 'configuration') return t('smtp.source.configuration');
+
+  return t('smtp.source.none');
 }
 
 /** Чернетка форми: рядки й булеві; `password` — лише те, що введено ЦЬОГО разу. */
