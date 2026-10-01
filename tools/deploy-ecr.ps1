@@ -221,10 +221,20 @@
 .PARAMETER ConfigValues
     Шлях до JSON-файлу з НЕсекретними значеннями appsettings.Production.json
     цього майданчика (наприклад, Logging:File:Directory; ⚠ не
-    Telemetry:OtlpEndpoint — експорту OTLP у цій версії немає) — НІКОЛИ рядок
+    Telemetry:OtlpEndpoint — для телеметрії є -TelemetryOtlpEndpoint) — НІКОЛИ рядок
     підключення чи інший секрет, для нього -ConnectionString (D-11).
     Записується ЛИШЕ якщо цільовий файл ще заповнювач (порожній об'єкт) —
     інакше крок 5 попереджає і нічого не чіпає.
+
+.PARAMETER TelemetryOtlpEndpoint
+    Адреса OTLP-колектора метрик (http:// або https://). Скрипт пише
+    ECR_Telemetry__Enabled=true і ECR_Telemetry__OtlpEndpoint у Environment
+    служб EcrApi і (якщо є) EcrWorker: без цього воркер перерахунку не
+    експортує метрик (worker.settings.json у розгортанні без секції Telemetry).
+    Не задано — телеметрію не чіпаємо.
+
+.PARAMETER TelemetryOtlpProtocol
+    Grpc (типово в застосунку) або HttpProtobuf; лише разом із -TelemetryOtlpEndpoint.
 
 .PARAMETER MsiPath
     Готовий Ecr.msi. Якщо не задано — скрипт сам викликає
@@ -342,6 +352,8 @@ param(
     [ValidateRange(10, 3600)] [int] $ReadyTimeoutSeconds = 180,
     [switch] $EnableWorker,
     [switch] $DisableWorker,
+    [string] $TelemetryOtlpEndpoint,
+    [ValidateSet('Grpc', 'HttpProtobuf')] [string] $TelemetryOtlpProtocol,
     [ValidateSet('Auto', 'Standard', 'Enterprise')] [string] $EditionMode,
     [switch] $AllowExpress
 )
@@ -714,6 +726,32 @@ function Resolve-WorkerDeployment {
     return [pscustomobject]@{ Enabled = $true; Reason = 'типово (I2-2)' }
 }
 
+# ФВ-12.7 / НФ-8.6.2 (чиста функція): змінні середовища телеметрії для служб.
+# Без -TelemetryOtlpEndpoint — порожній набір (нічого не чіпаємо). Адреса — лише
+# абсолютна http(s): застосунок відхиляє іншу на старті (EcrConfigurationValidation),
+# а тут краще зупинитись до запису в реєстр, ніж покласти службу.
+function Resolve-TelemetryEnvironment {
+    param(
+        [string] $OtlpEndpoint,
+        [string] $OtlpProtocol
+    )
+
+    $set = [ordered]@{}
+    if ([string]::IsNullOrWhiteSpace($OtlpEndpoint)) {
+        if ($OtlpProtocol) { throw '-TelemetryOtlpProtocol без -TelemetryOtlpEndpoint не має сенсу.' }
+        return [pscustomobject]@{ Set = $set }
+    }
+
+    $uri = $null
+    if (-not [Uri]::TryCreate($OtlpEndpoint.Trim(), [UriKind]::Absolute, [ref] $uri) -or $uri.Scheme -notin 'http', 'https') {
+        throw "-TelemetryOtlpEndpoint має бути абсолютною адресою http(s)://..., отримано '$OtlpEndpoint'."
+    }
+    $set['ECR_Telemetry__Enabled'] = 'true'
+    $set['ECR_Telemetry__OtlpEndpoint'] = $uri.AbsoluteUri
+    if ($OtlpProtocol) { $set['ECR_Telemetry__OtlpProtocol'] = $OtlpProtocol }
+    return [pscustomobject]@{ Set = $set }
+}
+
 # ⛔ I2-2 (чиста функція): режим перерахунку Api визначається ФАКТОМ виконавця,
 # а не лише конфігом. Api з Executor = Worker лейн перерахунку НЕ бере
 # (JobLaneMap.ApiLanes), тож Worker без служби = перерахунок без виконавця.
@@ -1044,6 +1082,8 @@ if ($ServicePassword) {
 if ($ConfigValues -and -not (Test-Path $ConfigValues)) {
     throw "ConfigValues вказує на неіснуючий файл: $ConfigValues"
 }
+# ФВ-12.7: недійсну адресу телеметрії відхиляємо ДО msiexec, а не посеред розгортання.
+$telemetryDecision = Resolve-TelemetryEnvironment -OtlpEndpoint $TelemetryOtlpEndpoint -OtlpProtocol $TelemetryOtlpProtocol
 if ($EnableWorker -and $DisableWorker) {
     throw '-EnableWorker і -DisableWorker разом — оберіть одне.'
 }
@@ -1536,6 +1576,15 @@ foreach ($name in $jobDecision.Set.Keys) {
 foreach ($name in $jobDecision.Remove) {
     if ($PSCmdlet.ShouldProcess('HKLM:\SYSTEM\CurrentControlSet\Services\EcrApi\Environment', "прибрати $name")) {
         Remove-ServiceEnvironmentVariable -ServiceName 'EcrApi' -Name $name
+    }
+}
+foreach ($name in $telemetryDecision.Set.Keys) {
+    $telemetryServices = @('EcrApi') + $(if ($workerEnabled) { @('EcrWorker') } else { @() })
+    foreach ($serviceName in $telemetryServices) {
+        if ($PSCmdlet.ShouldProcess("HKLM:\SYSTEM\CurrentControlSet\Services\$serviceName\Environment",
+                "записати $name=$($telemetryDecision.Set[$name])")) {
+            Set-ServiceEnvironmentVariable -ServiceName $serviceName -Name $name -Value $telemetryDecision.Set[$name]
+        }
     }
 }
 Write-Host ("Перерахунок: " + $(if ($workerEnabled) { 'служба EcrWorker (Jobs:Queue:Mode = Database, Executor = Worker).' }

@@ -285,7 +285,9 @@ OpenTelemetry Collector). За замовчуванням **вимкнено**: 
 **не з `appsettings.json` Api**, а з `worker.settings.json` поруч з `Ecr.Worker.exe`
 або зі змінних оточення служби наглядача `ECR_Telemetry__*` (дочірній їх
 успадковує). Тож для режиму Worker експорт вмикають там теж; у колекторі ці метрики
-мають `service.name` = `ecr-worker`. Типовий інтервал дочірнього — 15 с, а перед
+мають `service.name` = `ecr-worker`. `deploy-ecr.ps1 -TelemetryOtlpEndpoint http://collector:4317`
+(необов'язково `-TelemetryOtlpProtocol Grpc|HttpProtobuf`) пише ці змінні одразу в `Environment`
+`EcrApi` і `EcrWorker`; без параметра телеметрію не чіпає. Типовий інтервал дочірнього — 15 с, а перед
 завершенням процесу буфер скидається; процес, який убив Job Object за ліміт пам'яті,
 останній буфер втрачає. Недійсна адреса дочірній не зупиняє: експорт тоді тихо
 вимкнено (Api у такому разі не стартує).
