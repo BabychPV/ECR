@@ -45,7 +45,7 @@ public sealed class PeriodOpenedNotificationTests(SqlServerFixture sql)
         await using var scope = db;
 
         var sender = new RecordingSender();
-        var job = Job(db, Dispatcher(new PlanStore(), sender), StateRun);
+        var job = Job(db, Dispatcher(new PlanStore(NotificationEventKind.PeriodOpened), sender), StateRun);
 
         await job.ExecuteAsync(null, Substitute.For<IJobProgress>(), CancellationToken.None);
 
@@ -58,7 +58,7 @@ public sealed class PeriodOpenedNotificationTests(SqlServerFixture sql)
 
         // Період уже Open: наступний прогін нічого не відкриває — і не нагадує вдруге.
         db.ChangeTracker.Clear();
-        await Job(db, Dispatcher(new PlanStore(), sender), StateRun.AddHours(1))
+        await Job(db, Dispatcher(new PlanStore(NotificationEventKind.PeriodOpened), sender), StateRun.AddHours(1))
             .ExecuteAsync(null, Substitute.For<IJobProgress>(), CancellationToken.None);
 
         Assert.Single(sender.Messages, m => m.Subject.Contains(code, StringComparison.Ordinal));
@@ -84,6 +84,70 @@ public sealed class PeriodOpenedNotificationTests(SqlServerFixture sql)
             .Select(p => p.State)
             .SingleAsync();
         Assert.Equal(PeriodState.Open, state);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Без_правила_нічого_не_шлеться_ні_про_відкриття_ні_про_пільговий_строк()
+    {
+        var (db, chain, code) = await ArrangeAsync();
+        await using var scope = db;
+
+        var sender = new RecordingSender();
+        await Job(db, Dispatcher(new PlanStore(), sender), StateRun)
+            .ExecuteAsync(null, Substitute.For<IJobProgress>(), CancellationToken.None);
+        var graceAt = await GraceAtAsync(db, chain);
+        await Job(db, Dispatcher(new PlanStore(), sender), graceAt.AddHours(1))
+            .ExecuteAsync(null, Substitute.For<IJobProgress>(), CancellationToken.None);
+
+        Assert.DoesNotContain(sender.Messages, m => m.Subject.Contains(code, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Пільговий_строк_періоду_розсилає_PeriodGraceStarted_раз_за_фіксованим_годинником()
+    {
+        var (db, chain, code) = await ArrangeAsync();
+        await using var scope = db;
+
+        var sender = new RecordingSender();
+        var plan = new PlanStore(NotificationEventKind.PeriodGraceStarted);
+
+        // Відкриття: правила на PeriodOpened немає — тиша.
+        await Job(db, Dispatcher(plan, sender), StateRun)
+            .ExecuteAsync(null, Substitute.For<IJobProgress>(), CancellationToken.None);
+        Assert.DoesNotContain(sender.Messages, m => m.Subject.Contains(code, StringComparison.Ordinal));
+
+        var graceAt = await GraceAtAsync(db, chain);
+
+        // Раніше за межу пільгового строку — досі тиша.
+        db.ChangeTracker.Clear();
+        await Job(db, Dispatcher(plan, sender), graceAt.AddHours(-1))
+            .ExecuteAsync(null, Substitute.For<IJobProgress>(), CancellationToken.None);
+        Assert.DoesNotContain(sender.Messages, m => m.Subject.Contains(code, StringComparison.Ordinal));
+
+        // Після межі: один лист; повторний прогін не дублює.
+        db.ChangeTracker.Clear();
+        await Job(db, Dispatcher(plan, sender), graceAt.AddHours(1))
+            .ExecuteAsync(null, Substitute.For<IJobProgress>(), CancellationToken.None);
+        db.ChangeTracker.Clear();
+        await Job(db, Dispatcher(plan, sender), graceAt.AddHours(2))
+            .ExecuteAsync(null, Substitute.For<IJobProgress>(), CancellationToken.None);
+
+        var message = Assert.Single(sender.Messages, m => m.Subject.Contains(code, StringComparison.Ordinal));
+        Assert.StartsWith("Past deadline", message.Subject, StringComparison.Ordinal);
+        Assert.Contains(code, message.Body, StringComparison.Ordinal);
+    }
+
+    private static async Task<DateTime> GraceAtAsync(EcrDbContext db, TestDocument chain)
+    {
+        db.ChangeTracker.Clear();
+        return await db.Periods
+            .Where(p => p.ProjectId == chain.ProjectId && p.PeriodKeyValue == chain.PeriodKey.Value)
+            .Select(p => p.ComputedGraceAt)
+            .SingleAsync();
     }
 
     private async Task<(EcrDbContext Db, TestDocument Chain, string Code)> ArrangeAsync()
@@ -113,6 +177,8 @@ public sealed class PeriodOpenedNotificationTests(SqlServerFixture sql)
             {
                 ["notifications.periodOpened.subject"] = "Period {period} opened: {project}",
                 ["notifications.periodOpened.body"] = "Fill in {project} for {period}.",
+                ["notifications.periodGraceStarted.subject"] = "Past deadline {period}: {project}",
+                ["notifications.periodGraceStarted.body"] = "Grace window for {project}, {period}.",
             }));
 
         return new PeriodStateJob(
@@ -125,13 +191,13 @@ public sealed class PeriodOpenedNotificationTests(SqlServerFixture sql)
         => new(store, [sender], new TestClock(StateRun));
 
     /// <summary>Правило «PeriodOpened → канал» для одного пошти-каналу в пам'яті (Id = 0 в обох).</summary>
-    private sealed class PlanStore : INotificationDispatchStore
+    private sealed class PlanStore(params NotificationEventKind[] kinds) : INotificationDispatchStore
     {
         public Task<NotificationDispatchPlan> GetPlanAsync(CancellationToken ct)
             => Task.FromResult(new NotificationDispatchPlan(
                 "r1",
                 [new NotificationChannel(NotificationChannelKind.Smtp, "Mail", "{}", StateRun, null)],
-                [new NotificationRule(NotificationEventKind.PeriodOpened, 0, NotificationSeverity.Info)]));
+                [.. kinds.Select(k => new NotificationRule(k, 0, NotificationSeverity.Info))]));
 
         public Task<bool> WasSentSinceAsync(int channelId, string eventKey, DateTime since, CancellationToken ct)
             => Task.FromResult(false);

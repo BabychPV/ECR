@@ -6048,6 +6048,11 @@ USING (VALUES
     (N'notifications.channelRolesHint', N'en', N'Active users of these roles who have an email address get the message in their own language.', 1),
     (N'notifications.channelRolesUnavailable', N'en', N'The role list needs the right to manage roles; roles already set on the channel are kept.', 1),
     -- COLL:smtp-admin ── кінець секції ──
+    -- COLL:an9-rules ── Подія «період перейшов у пільговий строк» (`PeriodStateJob`, `NotificationEventKind.PeriodGraceStarted`, AN-9) ──
+    (N'notifications.event.PeriodGraceStarted', N'en', N'Reporting period entered its grace window', 1),
+    (N'notifications.periodGraceStarted.subject', N'en', N'ECR: period {period} is past its deadline, project {project}', 1),
+    (N'notifications.periodGraceStarted.body', N'en', N'The submission deadline of period {period} for project {project} has passed; only the grace window is left. Please finish and submit your document for this period.', 1),
+    -- COLL:an9-rules ── кінець секції ──
     -- SEC:effective-access ── Розріз «ресурс → рівень → грант якої ролі» (ФВ-6.16, D-220, `EffectiveAccessPanel`, GET /security/users/{id}/effective-access) ──
     (N'err.ECR-REQ-0422.effectiveAccessResource', N'en', N'The resource must be given as a type and a positive number, for example Registry:5 or Project:3.', 1),
     (N'effectiveAccess.show',            N'en', N'Show effective access', 1),
@@ -13957,6 +13962,21 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:smtp-admin ── кінець секції ──
+
+-- COLL:an9-rules ── ru/kz події «пільговий строк періоду»; власна порція #I18N ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'notifications.event.PeriodGraceStarted', N'ru', N'Отчётный период перешёл в льготный срок'),
+    (N'notifications.event.PeriodGraceStarted', N'kz', N'Есепті кезең жеңілдік мерзіміне өтті'),
+    (N'notifications.periodGraceStarted.subject', N'ru', N'ECR: срок периода {period} истёк, проект {project}'),
+    (N'notifications.periodGraceStarted.subject', N'kz', N'ECR: {period} кезеңінің мерзімі өтті, {project} жобасы'),
+    (N'notifications.periodGraceStarted.body', N'ru', N'Срок подачи за период {period} по проекту {project} истёк, остался только льготный срок. Завершите и отправьте документ за этот период.'),
+    (N'notifications.periodGraceStarted.body', N'kz', N'{project} жобасы бойынша {period} кезеңіне тапсыру мерзімі өтті, тек жеңілдік мерзімі қалды. Осы кезеңге арналған құжатты аяқтап жіберіңіз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:an9-rules ── кінець секції ──
 
 -- COLL:rawhealth ── ru/kz розміру ext.RawDataPoint у картці `db`; власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)

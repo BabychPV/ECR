@@ -73,7 +73,8 @@ public sealed class NotificationStore(EcrDbContext db) : INotificationStore
     }
 
     /// <summary>Стеля матриці: види подій × <see cref="MaxChannels"/> каналів.</summary>
-    public const int MaxRules = 1000;
+    public static readonly int MaxRules =
+        MaxChannels * Enum.GetValues<Ecr.Domain.Entities.Notifications.NotificationEventKind>().Length;
 
     /// <summary>Стеля зв'язків «канал — роль»: 50 ролей на кожен із <see cref="MaxChannels"/> каналів.</summary>
     public const int MaxChannelRoles = MaxChannels * 50;
