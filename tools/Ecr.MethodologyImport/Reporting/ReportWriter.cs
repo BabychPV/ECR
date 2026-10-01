@@ -44,6 +44,11 @@ public static class ReportWriter
         sb.AppendLine(ci, $"Аргументи-параметри (@…): {r.ParameterArguments}; інші аргументи: {r.OtherArguments}");
         sb.AppendLine(ci, $"Trim: полів обрізано {r.TrimmedFields}, токенів аргументів з пробілами {r.TrimmedArgumentTokens}");
         sb.AppendLine(ci, $"Дублікати ключа формули: {r.DuplicateFormulaKeys}");
+        foreach (var n in r.Normalizations ?? [])
+        {
+            sb.AppendLine(ci, $"Нормалізація {n.Id}: {n.From} -> {n.To} (аргументів {n.InArguments}, текстів {n.InTexts})");
+        }
+
         sb.AppendLine(ci, $"Токени в тексті формули, яких немає в списку аргументів: {r.UndeclaredInTextTotal} (не блокер; CLR такі токени не підставляє)");
         sb.AppendLine();
 

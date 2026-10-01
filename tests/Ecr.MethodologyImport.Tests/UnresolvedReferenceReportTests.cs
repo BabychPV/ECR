@@ -39,12 +39,12 @@ public sealed class UnresolvedReferenceReportTests
     [Fact]
     public void Описка_в_одну_літеру_дає_кандидата_але_рішення_за_методологом()
     {
-        // «Dimethil» замість «Dimethyl» — саме такий вигляд мають описки в аргументах AF.
-        var items = Recommend(Library().Formula("Flert", "V1", "F", "!Common_WtCi_DimethilSulfide", "1"));
+        // «Benzine» замість «Benzene» — саме такий вигляд мають описки в аргументах AF.
+        var items = Recommend(Library().Formula("Flert", "V1", "F", "!Common_WtCi_Benzine", "1"));
 
-        var r = Single(items, "Common_WtCi_DimethilSulfide");
+        var r = Single(items, "Common_WtCi_Benzine");
         Assert.Equal(UnresolvedCategory.LikelyTypo, r.Category);
-        Assert.Equal("Common_WtCi_DimethylSulfide", r.Candidate);
+        Assert.Equal("Common_WtCi_Benzene", r.Candidate);
         Assert.True(r.NeedsMethodologist);
     }
 
@@ -119,7 +119,7 @@ public sealed class UnresolvedReferenceReportTests
     public void Markdown_має_рядок_на_кожне_посилання_підсумок_і_детермінований()
     {
         var builder = Library()
-            .Formula("Flert", "V1", "F", "!common_wtci_benzene;!Common_WtCi_DimethilSulfide;CST.k_None", "1");
+            .Formula("Flert", "V1", "F", "!common_wtci_benzene;!Common_WtCi_NoSuchFormula;CST.k_None", "1");
 
         var first = UnresolvedReferenceReport.ToMarkdown(Recommend(builder));
         var second = UnresolvedReferenceReport.ToMarkdown(Recommend(builder));

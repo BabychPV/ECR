@@ -8,11 +8,17 @@ namespace Ecr.MethodologyImport;
 public static class AnalyzeCommand
 {
     public static (MethodologyModel Model, AnalysisReport Report) Run(
-        Stream input, string library = MethodologyAnalyzer.DefaultLibrary)
+        Stream input, string library = MethodologyAnalyzer.DefaultLibrary, bool normalize = true)
     {
         var builder = new MethodologyModelBuilder();
         var readStats = AfXmlReader.Read(input, builder.Add);
         var model = builder.Build();
-        return (model, MethodologyAnalyzer.Analyze(model, readStats, library));
+        var applied = (IReadOnlyList<NormalizationApplied>)[];
+        if (normalize)
+        {
+            (model, applied) = ReferenceNormalizer.Normalize(model);
+        }
+
+        return (model, MethodologyAnalyzer.Analyze(model, readStats, library) with { Normalizations = applied });
     }
 }

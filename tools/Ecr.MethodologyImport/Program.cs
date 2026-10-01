@@ -38,6 +38,7 @@ var command = args[0];
 var path = args[1];
 var json = false;
 var allowBlockers = false;
+var normalize = true;
 var top = 20;
 var library = MethodologyAnalyzer.DefaultLibrary;
 string? outFile = null;
@@ -48,6 +49,9 @@ for (var i = 2; i < args.Length; i++)
     {
         case "--json":
             json = true;
+            break;
+        case "--no-normalize":
+            normalize = false;
             break;
         case "--allow-blockers":
             allowBlockers = true;
@@ -88,7 +92,7 @@ try
 {
     using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 20, FileOptions.SequentialScan);
     size = stream.Length;
-    (model, report) = AnalyzeCommand.Run(stream, library);
+    (model, report) = AnalyzeCommand.Run(stream, library, normalize);
 }
 catch (XmlException ex)
 {

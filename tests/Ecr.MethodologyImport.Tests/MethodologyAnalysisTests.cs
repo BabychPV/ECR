@@ -68,7 +68,7 @@ public sealed class MethodologyAnalysisTests
     public void Нерезолвна_формула_і_константа_є_блокером_із_місцем_і_токеном()
     {
         var xml = Baseline()
-            .Formula("Flert", "V1", "Broken", "!Common_WtCi_DimethilSulfide;CST.k_Missing", "1")
+            .Formula("Flert", "V1", "Broken", "!Common_WtCi_NoSuchFormula;CST.k_Missing", "1")
             .Build();
 
         var report = Analyze(xml);
@@ -76,7 +76,7 @@ public sealed class MethodologyAnalysisTests
         Assert.True(report.HasBlockers);
         Assert.Contains(report.Blockers, b => b.StartsWith("UNRESOLVED_REFERENCES: 2", StringComparison.Ordinal));
         var formulaRef = Assert.Single(report.Unresolved, u => u.Kind == ReferenceKind.Formula);
-        Assert.Equal("Common_WtCi_DimethilSulfide", formulaRef.Token);
+        Assert.Equal("Common_WtCi_NoSuchFormula", formulaRef.Token);
         Assert.Equal("Flert", formulaRef.Methodology);
         Assert.Equal("Broken", formulaRef.Formula);
         var constantRef = Assert.Single(report.Unresolved, u => u.Kind == ReferenceKind.Constant);
