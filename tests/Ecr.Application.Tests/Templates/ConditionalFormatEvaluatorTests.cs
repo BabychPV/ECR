@@ -12,6 +12,22 @@ public sealed class ConditionalFormatEvaluatorTests
         string? bg = "#ff0000", string? fg = null, bool bold = false, string column = "A")
         => new(1, column, ordinal, op, value, to, bg, fg, bold);
 
+    // Конструктор правила валідує оператор і операнди (ECR-CFG-0422), тож «зіпсоване»
+    // правило (старі дані, обхід валідації) збирається в обхід нього: оцінювач
+    // мусить відмовляти сам, а не покладатися на валідатор.
+    private static ConditionalFormatRule RawRule(string op, string? value = null, string? to = null)
+    {
+        var rule = (ConditionalFormatRule)Activator.CreateInstance(typeof(ConditionalFormatRule), nonPublic: true)!;
+        void Set(string name, object? v) =>
+            typeof(ConditionalFormatRule).GetProperty(name)!.SetValue(rule, v);
+        Set(nameof(ConditionalFormatRule.ColumnCode), "A");
+        Set(nameof(ConditionalFormatRule.Ordinal), 1);
+        Set(nameof(ConditionalFormatRule.Operator), op);
+        Set(nameof(ConditionalFormatRule.Value), value);
+        Set(nameof(ConditionalFormatRule.ValueTo), to);
+        Set(nameof(ConditionalFormatRule.BackgroundHex), "#ff0000");
+        return rule;
+    }
     private static CellFormatDto? Eval(ConditionalFormatRule rule, object? value)
         => ConditionalFormatEvaluator.Evaluate([rule], value);
 
@@ -110,9 +126,9 @@ public sealed class ConditionalFormatEvaluatorTests
     {
         // Без перевірки `ValueTo` верхня межа мовчки ставала б 0, і «між 5 і (нічим)»
         // фарбувало б 3.
-        Assert.Null(Eval(Rule("between", "5", null), 3m));
-        Assert.Null(Eval(Rule("between", "5", "abc"), 3m));
-        Assert.Null(Eval(Rule("between", "5", "  "), 0m));
+        Assert.Null(Eval(RawRule("between", "5", null), 3m));
+        Assert.Null(Eval(RawRule("between", "5", "abc"), 3m));
+        Assert.Null(Eval(RawRule("between", "5", "  "), 0m));
     }
 
     [Fact]
@@ -120,16 +136,16 @@ public sealed class ConditionalFormatEvaluatorTests
     {
         foreach (var op in new[] { "gt", "ge", "lt", "le", "eq", "ne" })
         {
-            Assert.Null(Eval(Rule(op, null), 5m));
-            Assert.Null(Eval(Rule(op, "abc"), 5m));
+            Assert.Null(Eval(RawRule(op, null), 5m));
+            Assert.Null(Eval(RawRule(op, "abc"), 5m));
         }
     }
 
     [Fact]
     public void Unknown_operator_never_matches()
     {
-        Assert.Null(Eval(Rule("contains", "5"), 5m));
-        Assert.Null(Eval(Rule("contains", "5"), null));
+        Assert.Null(Eval(RawRule("contains", "5"), 5m));
+        Assert.Null(Eval(RawRule("contains", "5"), null));
     }
 
     [Fact]
