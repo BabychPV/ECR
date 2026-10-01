@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { columnOrderPatch, moveItem, ordinalChanges } from '../reorder';
+import { columnOrderPatch, moveItem, ordinalChanges, orderPatch } from '../reorder';
 import { reorderColumns } from '../reorderApi';
 
 /**
@@ -76,6 +76,14 @@ describe('columnOrderPatch', () => {
   it('поле Ordinal колонки, значення рядком — як приймає сервер', () => {
     expect(columnOrderPatch([{ id: 7, ordinal: 3 }])).toEqual([
       { entityType: 'ColumnDef', entityId: 7, field: 'Ordinal', value: '3' },
+    ]);
+  });
+});
+
+describe('orderPatch', () => {
+  it('RowDef: той самий пакет, інший entityType', () => {
+    expect(orderPatch('RowDef', [{ id: 9, ordinal: 0 }])).toEqual([
+      { entityType: 'RowDef', entityId: 9, field: 'Ordinal', value: '0' },
     ]);
   });
 });
