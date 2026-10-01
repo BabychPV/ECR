@@ -34319,7 +34319,7 @@
             "description": "OK"
           }
         },
-        "summary": "Перелік сутностей збору. Право `Integration.Manage`.",
+        "summary": "Перелік сутностей збору. Право `Integration.View` або `Integration.Manage` (D9).",
         "tags": [
           "Sources"
         ]
