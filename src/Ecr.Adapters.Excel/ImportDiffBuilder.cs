@@ -567,6 +567,20 @@ public sealed class ImportDiffBuilder
     private static bool IsCalculated(ColumnDef column)
         => column.DataType is CellDataType.Formula or CellDataType.Calculated || column.IsReadOnly;
 
+    /// <summary>Округлення до 15 значущих цифр — точності double Excel.</summary>
+    internal static decimal RoundSignificant(decimal value)
+    {
+        if (value == 0m)
+        {
+            return 0m;
+        }
+
+        var magnitude = (int)Math.Floor(Math.Log10((double)Math.Abs(value))) + 1;
+        var scale = Math.Clamp(15 - magnitude, 0, 28);
+
+        return decimal.Round(value, scale, MidpointRounding.AwayFromZero);
+    }
+
     /// <summary>Чи збігається значення з файлу з тим, що вже записано.</summary>
     /// <remarks>
     /// ⛔ `V-10`. Порівнюється з <see cref="Current"/> — тим самим значенням, яке
@@ -592,9 +606,17 @@ public sealed class ImportDiffBuilder
 
         return definition.DataType switch
         {
-            CellDataType.Int or CellDataType.Decimal or CellDataType.Formula or CellDataType.Calculated =>
+            // ⚠ Int — точно. Decimal/Formula/Calculated — рівність також за 15
+            // значущими цифрами: Excel тримає double, тож 16-значний хвіст БД
+            // (`8.1234567890123440`) у книзі стає `8.12345678901234` (P2).
+            // Правка в 15-й значущій цифрі й вище лишається зміною.
+            CellDataType.Int =>
+                current is decimal intNumber
+                && (incoming is decimal di ? intNumber == di : incoming is int ii && intNumber == ii),
+            CellDataType.Decimal or CellDataType.Formula or CellDataType.Calculated =>
                 current is decimal number
-                && (incoming is decimal d ? number == d : incoming is int i && number == i),
+                && (incoming is decimal d ? number == d || RoundSignificant(number) == RoundSignificant(d)
+                    : incoming is int i && number == i),
             CellDataType.Bool => incoming is bool b && current is bool flag && flag == b,
             CellDataType.Date => incoming is DateTime t && current is DateTime date && date == t,
             CellDataType.Lookup => incoming is long id && current is long entry && entry == id,

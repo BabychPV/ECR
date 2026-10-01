@@ -68,7 +68,7 @@ public sealed class ExcelImportCalculatedColumnRoundTripTests
             {
                 [InstanceId] =
                 [
-                    new CellRecord(new CellAddress(Period, 1001, InputColumnId), TableId, new CellValueData { ValueNumeric = 8m }),
+                    new CellRecord(new CellAddress(Period, 1001, InputColumnId), TableId, new CellValueData { ValueNumeric = _inputR1 }),
                     new CellRecord(new CellAddress(Period, 1002, InputColumnId), TableId, new CellValueData { ValueNumeric = 5m }),
                 ],
             });
@@ -143,6 +143,46 @@ public sealed class ExcelImportCalculatedColumnRoundTripTests
         Assert.Empty(preview.Changes);
         Assert.Empty(preview.Rejected);
     }
+
+    // P2: вхідна Decimal з 16 знаками дробу; Excel тримає double (15 значущих цифр).
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [InlineData("8.1234567890123440", "8.12345678901234", false)] // хвіст 16-го знака — не зміна
+    [InlineData("8.1234567890123440", "8.12345678901235", true)] // правка 15-ї цифри — зміна
+    [InlineData("0.0000001", "0.0000002", true)] // мале абсолютне значення — зміна
+    [InlineData("0.0000001", "0.0000001", false)]
+    [InlineData("123456789012345.6", "123456789012346", false)] // різниця лише в 16-й цифрі double — вище точності Excel
+    [InlineData("123456789012345.6", "123456789012347", true)]
+    public async Task Вхідне_число_з_16_знаками_порівнюється_з_точністю_double_Excel(
+        string stored, string edited, bool expectChange)
+    {
+        _inputR1 = decimal.Parse(stored, System.Globalization.CultureInfo.InvariantCulture);
+        Arrange(withResults: true);
+        using var workbook = await ExportAsync();
+        workbook.Worksheet("Sheet").Cell(3, 1).Value = double.Parse(edited, System.Globalization.CultureInfo.InvariantCulture);
+
+        var preview = await ImportAsync(workbook);
+
+        Assert.Equal(expectChange ? 1 : 0, preview.Changes.Count);
+        Assert.Empty(preview.Rejected);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public async Task Незмінена_книга_з_16_знаками_у_вхідній_колонці_не_дає_змін()
+    {
+        // Справжній експорт (double) → імпорт. Мутація: строге `number == d` у Same → червоний.
+        _inputR1 = 8.1234567890123440m;
+        Arrange(withResults: true);
+        using var workbook = await ExportAsync();
+
+        var preview = await ImportAsync(workbook);
+
+        Assert.Empty(preview.Changes);
+        Assert.Empty(preview.Rejected);
+    }
+
+    private decimal _inputR1 = 8m;
 
     private async Task<XLWorkbook> ExportAsync()
     {
