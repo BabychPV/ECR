@@ -117,6 +117,95 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/audit/security": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Журнал подій безпеки (`aud.SecurityEvent`): зміни прав і ролей, відмови в доступі
+         *     (`AccessDenied`, ФВ-5.24). Право `Security.ViewAudit`.
+         * @description Вікно часу **обов'язкове** й обмежене згори, як у `cells` і `structure`:
+         *     таблиця лежить на тій самій схемі партицій. Автор — `UserId`, не SID.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Початок вікна в UTC, включно. */
+                    from?: string;
+                    /** @description Кінець вікна в UTC, виключно. */
+                    to?: string;
+                    /** @description Тип події, напр. `AccessDenied`. */
+                    eventType?: string;
+                    /** @description Хто спричинив подію — `UserId`. */
+                    changedByUserId?: number;
+                    /** @description Розмір сторінки; `0` — 50. */
+                    limit?: number;
+                    /** @description Курсор наступної сторінки. */
+                    cursor?: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PagedResultOfSecurityEventView"];
+                        "text/json": components["schemas"]["PagedResultOfSecurityEventView"];
+                        "text/plain": components["schemas"]["PagedResultOfSecurityEventView"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/audit/structure": {
         parameters: {
             query?: never;
@@ -20821,6 +20910,19 @@ export interface components {
         };
         /** @description Сторінка результатів. Ендпоінтів, що повертають «усе», не існує —
          *     перевіряється архітектурним тестом. */
+        PagedResultOfSecurityEventView: {
+            /** @description Елементи сторінки. */
+            items: components["schemas"]["SecurityEventView"][];
+            /** @description Курсор наступної сторінки; `null` — кінець. */
+            nextCursor: null | string;
+            /**
+             * Format: int32
+             * @description Загальна кількість; `null`, якщо підрахунок дорогий.
+             */
+            totalCount: null | number;
+        };
+        /** @description Сторінка результатів. Ендпоінтів, що повертають «усе», не існує —
+         *     перевіряється архітектурним тестом. */
         PagedResultOfSourceEventRowDto: {
             /** @description Елементи сторінки. */
             items: components["schemas"]["SourceEventRowDto"][];
@@ -23293,6 +23395,37 @@ export interface components {
             kind: string;
             /** @description Назва мовою запиту; немає назви — код. */
             title: string;
+        };
+        /** @description Подія безпеки в журналі, як її бачить читач аудиту (ФВ-5.24, ФВ-6.11). */
+        SecurityEventView: {
+            /**
+             * Format: date-time
+             * @description Момент події в UTC.
+             */
+            changedAt: string;
+            /** @description Ім'я (`R-18`); `null` — запису користувача вже немає. */
+            changedByDisplayName?: null | string;
+            /**
+             * Format: int32
+             * @description Хто спричинив подію — <b>UserId</b>, не SID (R-A2, D-86).
+             */
+            changedByUserId: number;
+            /** @description Ідентифікатор кореляції запиту — той самий, що в тілі відмови. */
+            correlationId?: null | string;
+            /** @description Деталі події (без PII; для `AccessDenied` — метод, шаблон маршруту, право/причина). */
+            detailsJson: null | string;
+            /** @description Тип: `AccessDenied`, `RoleAssigned`, `SheetSubmitWarningsAcknowledged` тощо. */
+            eventType: string;
+            /**
+             * Format: int32
+             * @description Роль, якої стосується подія; `null` — не стосується.
+             */
+            targetRoleId: null | number;
+            /**
+             * Format: int32
+             * @description Користувач, якого стосується подія; `null` — не стосується.
+             */
+            targetUserId: null | number;
         };
         /** @description Запит на зміну отримання алертів. */
         SetAlertsRequest: {

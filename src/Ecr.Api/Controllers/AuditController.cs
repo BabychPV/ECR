@@ -16,6 +16,7 @@ namespace Ecr.Api.Controllers;
 public sealed class AuditController(
     GetCellChangesHandler cellChanges,
     GetStructureChangesHandler structureChanges,
+    GetSecurityEventsHandler securityEvents,
     ExportStructureChangesHandler exportStructure,
     IConfiguration configuration) : ControllerBase
 {
@@ -125,6 +126,43 @@ public sealed class AuditController(
             changedByUserId);
 
         return Ok(await structureChanges
+            .HandleAsync(filter, new CursorRequest(limit == 0 ? 50 : limit, cursor), ct)
+            .ConfigureAwait(false));
+    }
+
+    /// <summary>
+    /// Журнал подій безпеки (<c>aud.SecurityEvent</c>): зміни прав і ролей, відмови в доступі
+    /// (<c>AccessDenied</c>, ФВ-5.24). Право <c>Security.ViewAudit</c>.
+    /// </summary>
+    /// <remarks>
+    /// Вікно часу **обов'язкове** й обмежене згори, як у <c>cells</c> і <c>structure</c>:
+    /// таблиця лежить на тій самій схемі партицій. Автор — <c>UserId</c>, не SID.
+    /// </remarks>
+    /// <param name="from">Початок вікна в UTC, включно.</param>
+    /// <param name="to">Кінець вікна в UTC, виключно.</param>
+    /// <param name="eventType">Тип події, напр. <c>AccessDenied</c>.</param>
+    /// <param name="changedByUserId">Хто спричинив подію — <c>UserId</c>.</param>
+    /// <param name="limit">Розмір сторінки; <c>0</c> — 50.</param>
+    /// <param name="cursor">Курсор наступної сторінки.</param>
+    /// <param name="ct">Токен скасування.</param>
+    [HttpGet("security")]
+    [ProducesResponseType<Ecr.Application.Common.PagedResult<Ecr.Application.Ports.SecurityEventView>>(
+        StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> Security(
+        [FromQuery] DateTime from, [FromQuery] DateTime to,
+        [FromQuery] string? eventType, [FromQuery] int? changedByUserId,
+        [FromQuery] int limit, [FromQuery] string? cursor,
+        CancellationToken ct)
+    {
+        var filter = new Ecr.Application.Ports.SecurityEventFilter(
+            from, to,
+            string.IsNullOrWhiteSpace(eventType) ? null : eventType,
+            changedByUserId);
+
+        return Ok(await securityEvents
             .HandleAsync(filter, new CursorRequest(limit == 0 ? 50 : limit, cursor), ct)
             .ConfigureAwait(false));
     }

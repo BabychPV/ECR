@@ -243,6 +243,13 @@ public interface IAuditReader
     /// <param name="ct">Токен скасування.</param>
     public Task<int> CountStructureJournalAsync(StructureChangeFilter filter, CancellationToken ct);
 
+    /// <summary>Журнал подій безпеки (<c>aud.SecurityEvent</c>) у вікні часу, курсорна пагінація.</summary>
+    /// <param name="filter">Вікно й звуження журналу.</param>
+    /// <param name="page">Курсорна пагінація.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<PagedResult<SecurityEventView>> ReadSecurityEventsAsync(
+        SecurityEventFilter filter, CursorRequest page, CancellationToken ct);
+
     /// <summary>
     /// Остання зміна кожної названої комірки — ОДНИМ запитом на весь перелік
     /// (<c>BE-06</c>).

@@ -5847,9 +5847,17 @@ USING (VALUES
     (N'err.ECR-REG-0422.impactNothingToRecalculate', N'en', N'There are no affected open-period documents that can be recalculated.', 1),
     -- COLL:rt25 ── кінець секції ──
     -- SEC:p2-oracle ── відмова без номера невидимого проєкту (S18, `ColumnProjectGrants`) ──
-    (N'err.ECR-AUTH-0403.columnUsedInHiddenProjects', N'en', N'The column is used by projects you have no Manage grant on.', 1)
+    (N'err.ECR-AUTH-0403.columnUsedInHiddenProjects', N'en', N'The column is used by projects you have no Manage grant on.', 1),
     -- ru/kz — окремою порцією `I18N` (SEC:p2-oracle).
     -- SEC:p2-oracle ── кінець секції ──
+    -- COLL:reqclose ── вкладка «Security events» екрана аудиту (ФВ-5.24: читач журналу відмов у доступі) ──
+    (N'audit.viewSecurity', N'en', N'Security events', 1),
+    (N'audit.eventType', N'en', N'Event type', 1),
+    (N'audit.securityEmpty', N'en', N'No security events in this window.', 1),
+    (N'audit.details', N'en', N'Details', 1),
+    (N'audit.correlation', N'en', N'Correlation ID', 1)
+    -- ru/kz — окремою порцією `COLL:reqclose` у блоці I18N нижче.
+    -- COLL:reqclose ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -13353,6 +13361,25 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:health-dpkeys ── кінець секції ──
+
+-- COLL:reqclose ── ru/kz вкладки «Security events» екрана аудиту (ФВ-5.24); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'audit.viewSecurity', N'ru', N'События безопасности'),
+    (N'audit.viewSecurity', N'kz', N'Қауіпсіздік оқиғалары'),
+    (N'audit.eventType', N'ru', N'Тип события'),
+    (N'audit.eventType', N'kz', N'Оқиға түрі'),
+    (N'audit.securityEmpty', N'ru', N'В этом окне нет событий безопасности.'),
+    (N'audit.securityEmpty', N'kz', N'Бұл терезеде қауіпсіздік оқиғалары жоқ.'),
+    (N'audit.details', N'ru', N'Детали'),
+    (N'audit.details', N'kz', N'Мәліметтер'),
+    (N'audit.correlation', N'ru', N'Идентификатор корреляции'),
+    (N'audit.correlation', N'kz', N'Корреляция идентификаторы')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:reqclose ── кінець секції ──
 
 -- JOBL ── ru/kz назв видів задач (jobLabel.ts, KindKeys); власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)

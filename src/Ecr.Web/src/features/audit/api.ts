@@ -282,6 +282,50 @@ export function fileNameOf(disposition: string | null): string | null {
   return safe.length > 0 ? safe : null;
 }
 
+/** Сторінка журналу подій безпеки (`aud.SecurityEvent`, ФВ-5.24). */
+export type SecurityEventPage = components['schemas']['PagedResultOfSecurityEventView'];
+
+/** Фільтр журналу подій безпеки; вікно **обов'язкове**, як у решти журналів. */
+interface SecurityEventFilter {
+  readonly from: string;
+  readonly to: string;
+  /** Тип події (`AccessDenied`, …). */
+  readonly eventType?: string | null;
+  /** Хто спричинив подію — `UserId`, не SID. */
+  readonly changedByUserId?: number | null;
+  readonly limit?: number;
+  readonly cursor?: string | null;
+}
+
+/** Рядок запиту журналу подій безпеки: вікно й курсор — як у журналі структури, тип події замість `entityType`. */
+export function securityEventsQuery(filter: SecurityEventFilter): string {
+  const params = new URLSearchParams(
+    structureChangesQuery({
+      from: filter.from,
+      to: filter.to,
+      changedByUserId: filter.changedByUserId ?? null,
+      limit: filter.limit ?? 100,
+      cursor: filter.cursor ?? null,
+    }),
+  );
+
+  if (filter.eventType !== null && filter.eventType !== undefined && filter.eventType.length > 0) {
+    params.set('eventType', filter.eventType);
+  }
+
+  return params.toString();
+}
+
+/** Сторінка журналу подій безпеки (ФВ-5.24: відмови в доступі, зміни прав). */
+export function useSecurityEvents(filter: SecurityEventFilter): UseQueryResult<SecurityEventPage> {
+  const query = securityEventsQuery(filter);
+
+  return useQuery({
+    queryKey: ['audit-security', query],
+    queryFn: () => apiFetch<SecurityEventPage>(`/api/v1/audit/security?${query}`),
+  });
+}
+
 /** Сторінка загального журналу структурних змін (`BE-16`). */
 export function useStructureChanges(
   filter: StructureChangeFilter,

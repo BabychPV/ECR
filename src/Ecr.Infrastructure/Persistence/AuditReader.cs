@@ -395,6 +395,88 @@ public sealed class AuditReader(EcrDbContext db) : IAuditReader
     }
 
     /// <inheritdoc />
+    public async Task<PagedResult<SecurityEventView>> ReadSecurityEventsAsync(
+        SecurityEventFilter filter, CursorRequest page, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(filter);
+        ArgumentNullException.ThrowIfNull(page);
+
+        await using var connection = new SqlConnection(db.Database.GetConnectionString());
+        await connection.OpenAsync(ct).ConfigureAwait(false);
+
+        await using var command = connection.CreateCommand();
+
+        // ⚠ Вікно ПЕРШИМ (відсікає партиції), звуження — лише за наявності значення
+        // й іменованим типізованим параметром; ім'я автора — у зовнішньому запиті
+        // після вибору сторінки (R-18), як у `ReadStructureJournalAsync`.
+        var where = new StringBuilder("ChangedAt >= @from AND ChangedAt < @to");
+
+        if (filter.EventType is { } eventType)
+        {
+            where.Append("\n                   AND EventType = @eventType");
+            command.Parameters.Add("@eventType", SqlDbType.NVarChar, EntityTypeSize).Value = eventType;
+        }
+
+        if (filter.ChangedByUserId is { } changedBy)
+        {
+            where.Append("\n                   AND ChangedByUserId = @changedBy");
+            command.Parameters.Add("@changedBy", SqlDbType.Int).Value = changedBy;
+        }
+
+        foreach (var (name, value) in new[] { ("@from", filter.From), ("@to", filter.To) })
+        {
+            var moment = command.Parameters.Add(name, SqlDbType.DateTime2);
+            moment.Scale = 3;
+            moment.Value = value;
+        }
+
+        command.CommandText = $"""
+            SELECT s.Id, s.ChangedAt, s.EventType, s.TargetUserId, s.TargetRoleId,
+                   s.DetailsJson, s.ChangedByUserId, s.CorrelationId, u.DisplayName
+              FROM (
+                    SELECT TOP (@take)
+                           Id, ChangedAt, EventType, TargetUserId, TargetRoleId,
+                           DetailsJson, ChangedByUserId, CorrelationId
+                      FROM aud.SecurityEvent
+                     WHERE {where}
+                       AND Id > @after
+                     ORDER BY Id
+                   ) AS s
+              LEFT JOIN sec.[User] AS u ON u.Id = s.ChangedByUserId
+             ORDER BY s.Id;
+            """;
+
+        command.Parameters.Add("@take", SqlDbType.Int).Value = page.Limit + 1;
+        command.Parameters.Add("@after", SqlDbType.BigInt).Value = Cursor.Decode(page.Cursor);
+
+        var rows = new List<(long Id, SecurityEventView View)>();
+        await using (var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false))
+        {
+            while (await reader.ReadAsync(ct).ConfigureAwait(false))
+            {
+                rows.Add((
+                    reader.GetInt64(0),
+                    new SecurityEventView(
+                        DateTime.SpecifyKind(reader.GetDateTime(1), DateTimeKind.Utc),
+                        reader.GetString(2),
+                        reader.IsDBNull(3) ? null : reader.GetInt32(3),
+                        reader.IsDBNull(4) ? null : reader.GetInt32(4),
+                        reader.IsDBNull(5) ? null : reader.GetString(5),
+                        reader.GetInt32(6),
+                        StringOrNull(reader, 8),
+                        reader.IsDBNull(7) ? null : reader.GetString(7))));
+            }
+        }
+
+        var hasMore = rows.Count > page.Limit;
+
+        return new PagedResult<SecurityEventView>(
+            rows.Take(page.Limit).Select(r => r.View).ToList(),
+            hasMore ? Cursor.Encode(rows[page.Limit - 1].Id) : null,
+            TotalCount: null);
+    }
+
+    /// <inheritdoc />
     public async Task<IReadOnlyDictionary<(long TableRowId, int ColumnDefId), LastCellChange>> ReadLastChangesAsync(
         long documentId,
         IReadOnlyCollection<(long TableRowId, int ColumnDefId)> cells,

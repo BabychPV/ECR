@@ -7602,6 +7602,39 @@
         ],
         "type": "object"
       },
+      "PagedResultOfSecurityEventView": {
+        "description": "Сторінка результатів. Ендпоінтів, що повертають «усе», не існує —\nперевіряється архітектурним тестом.",
+        "properties": {
+          "items": {
+            "description": "Елементи сторінки.",
+            "items": {
+              "$ref": "#/components/schemas/SecurityEventView"
+            },
+            "type": "array"
+          },
+          "nextCursor": {
+            "description": "Курсор наступної сторінки; `null` — кінець.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "totalCount": {
+            "description": "Загальна кількість; `null`, якщо підрахунок дорогий.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor",
+          "totalCount"
+        ],
+        "type": "object"
+      },
       "PagedResultOfSourceEventRowDto": {
         "description": "Сторінка результатів. Ендпоінтів, що повертають «усе», не існує —\nперевіряється архітектурним тестом.",
         "properties": {
@@ -12906,6 +12939,71 @@
         ],
         "type": "object"
       },
+      "SecurityEventView": {
+        "description": "Подія безпеки в журналі, як її бачить читач аудиту (ФВ-5.24, ФВ-6.11).",
+        "properties": {
+          "changedAt": {
+            "description": "Момент події в UTC.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "changedByDisplayName": {
+            "description": "Ім'я (`R-18`); `null` — запису користувача вже немає.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "changedByUserId": {
+            "description": "Хто спричинив подію — <b>UserId</b>, не SID (R-A2, D-86).",
+            "format": "int32",
+            "type": "integer"
+          },
+          "correlationId": {
+            "description": "Ідентифікатор кореляції запиту — той самий, що в тілі відмови.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "detailsJson": {
+            "description": "Деталі події (без PII; для `AccessDenied` — метод, шаблон маршруту, право/причина).",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "eventType": {
+            "description": "Тип: `AccessDenied`, `RoleAssigned`, `SheetSubmitWarningsAcknowledged` тощо.",
+            "type": "string"
+          },
+          "targetRoleId": {
+            "description": "Роль, якої стосується подія; `null` — не стосується.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "targetUserId": {
+            "description": "Користувач, якого стосується подія; `null` — не стосується.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          }
+        },
+        "required": [
+          "changedAt",
+          "eventType",
+          "targetUserId",
+          "targetRoleId",
+          "detailsJson",
+          "changedByUserId"
+        ],
+        "type": "object"
+      },
       "SetAlertsRequest": {
         "description": "Запит на зміну отримання алертів.",
         "properties": {
@@ -17127,6 +17225,151 @@
           }
         },
         "summary": "Історія змін комірок. Право `Security.ViewAudit` — або\n`Document.View`, коли задано повну адресу однієї комірки.",
+        "tags": [
+          "Audit"
+        ]
+      }
+    },
+    "/api/v1/audit/security": {
+      "get": {
+        "description": "Вікно часу **обов'язкове** й обмежене згори, як у `cells` і `structure`:\nтаблиця лежить на тій самій схемі партицій. Автор — `UserId`, не SID.",
+        "parameters": [
+          {
+            "description": "Початок вікна в UTC, включно.",
+            "in": "query",
+            "name": "from",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Кінець вікна в UTC, виключно.",
+            "in": "query",
+            "name": "to",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Тип події, напр. `AccessDenied`.",
+            "in": "query",
+            "name": "eventType",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Хто спричинив подію — `UserId`.",
+            "in": "query",
+            "name": "changedByUserId",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Розмір сторінки; `0` — 50.",
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Курсор наступної сторінки.",
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagedResultOfSecurityEventView"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagedResultOfSecurityEventView"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagedResultOfSecurityEventView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Журнал подій безпеки (`aud.SecurityEvent`): зміни прав і ролей, відмови в доступі\n(`AccessDenied`, ФВ-5.24). Право `Security.ViewAudit`.",
         "tags": [
           "Audit"
         ]
