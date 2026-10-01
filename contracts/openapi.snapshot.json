@@ -7164,7 +7164,8 @@
           "ConsistencyIssuesFound",
           "PartitionsRunningOut",
           "CollectionFailed",
-          "ExportFailed"
+          "ExportFailed",
+          "PeriodOpened"
         ]
       },
       "NotificationRuleMatrix": {
