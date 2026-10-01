@@ -2,6 +2,7 @@
 using System.Collections.Concurrent;
 using System.Data.Common;
 using System.Globalization;
+using System.Net;
 using System.Net.Http;
 using System.Net.Sockets;
 using System.Security.Authentication;
@@ -180,6 +181,11 @@ public sealed partial class SaveDataSourceHandler(
         Level = LogLevel.Warning,
         Message = "Джерело {DataSource} з Windows-автентифікацією збережено без PiWebApi:AllowedHosts: адреса обмежена лише блок-листом.")]
     private static partial void LogNegotiateWithoutAllowlist(ILogger logger, string dataSource);
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "Джерело {DataSource} (PiSqlClient): адреса сервера поза PiWebApi:AllowedHosts; збережено, бо для SQL-транспорту це лише попередження.")]
+    private static partial void LogSqlHostOutsideAllowlist(ILogger logger, string dataSource);
 
     /// <summary>Право на керування інтеграцією (`02-contracts.md` §9).</summary>
     public const string Permission = "Integration.Manage";
@@ -403,6 +409,16 @@ public sealed partial class SaveDataSourceHandler(
             }
         }
 
+        if (transport == ExternalTransport.PiSqlClient)
+        {
+            await RequireSqlServerAddressAsync(address, "endpoint", code, ct).ConfigureAwait(false);
+
+            if (spare is { Length: > 0 })
+            {
+                await RequireSqlServerAddressAsync(spare, "secondaryEndpoint", code, ct).ConfigureAwait(false);
+            }
+        }
+
         if (await store.IsCodeTakenAsync(code, exceptId, ct).ConfigureAwait(false))
         {
             throw ListDataSourcesHandler.Invalid(
@@ -410,6 +426,49 @@ public sealed partial class SaveDataSourceHandler(
         }
 
         return new Parsed(new LocalizedText(named), address, spare, parallel);
+    }
+
+    /// <summary>
+    /// Адреса PiSqlClient — ім'я сервера, не URL; link-local/metadata (літерал чи розв'язаний) відхиляється.
+    /// Збій розв'язання не блокує (внутрішні імена). Хост поза <c>PiWebApi:AllowedHosts</c> — лише Warning.
+    /// </summary>
+    private async Task RequireSqlServerAddressAsync(string address, string field, string code, CancellationToken ct)
+    {
+        var verdict = DataSourceEndpointPolicy.CheckSqlServerAddress(address);
+        var host = verdict == EndpointVerdict.Allowed ? DataSourceEndpointPolicy.SqlHostOf(address) : null;
+
+        if (host is not null && network is not null && !IPAddress.TryParse(host, out _))
+        {
+            var resolved = await network.ResolveAsync(host, ct).ConfigureAwait(false);
+
+            if (resolved.Any(DataSourceEndpointPolicy.IsLinkLocal))
+            {
+                verdict = EndpointVerdict.HostForbidden;
+            }
+        }
+
+        if (verdict == EndpointVerdict.Allowed)
+        {
+            if (host is not null && logger is not null && network?.AllowedHosts is { Count: > 0 } allowed
+                && !DataSourceEndpointPolicy.IsHostAllowed(host, allowed))
+            {
+                LogSqlHostOutsideAllowlist(logger, code);
+            }
+
+            return;
+        }
+
+        var key = verdict switch
+        {
+            EndpointVerdict.Scheme => "err.ECR-REQ-0422.dataSourceEndpointSqlScheme",
+            EndpointVerdict.HostForbidden => "err.ECR-REQ-0422.dataSourceEndpointSqlLinkLocal",
+            _ => "err.ECR-REQ-0422.dataSourceEndpointMalformed",
+        };
+
+        throw new BusinessRuleException(
+            ErrorCodes.RequestInvalid,
+            $"Адресу джерела відхилено політикою ({verdict}).",
+            new Dictionary<string, object?> { ["messageKey"] = key, ["field"] = field });
     }
 
     /// <summary>Адреса PI Web API проходить політику SSRF (<see cref="DataSourceEndpointPolicy"/>).</summary>

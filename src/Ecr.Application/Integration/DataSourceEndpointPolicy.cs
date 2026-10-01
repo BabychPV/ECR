@@ -65,6 +65,75 @@ public static class DataSourceEndpointPolicy
         return IsHostAllowed(host, allowedHosts) ? EndpointVerdict.Allowed : EndpointVerdict.HostNotAllowed;
     }
 
+    /// <summary>
+    /// Вердикт для PiSqlClient: адреса — ІМ'Я/адреса сервера (<c>server</c>, <c>server\instance</c>,
+    /// <c>server,port</c>, <c>host:port</c>), а не URL. Відмова лише за схему (<c>xxx://</c>)
+    /// і link-local/metadata IP-літерал; loopback і приватні — легітимні.
+    /// </summary>
+    public static EndpointVerdict CheckSqlServerAddress(string? address)
+    {
+        if (string.IsNullOrWhiteSpace(address))
+        {
+            return EndpointVerdict.Malformed;
+        }
+
+        if (address.Contains("://", StringComparison.Ordinal))
+        {
+            return EndpointVerdict.Scheme;
+        }
+
+        var host = SqlHostOf(address);
+
+        return IPAddress.TryParse(host, out var ip) && IsLinkLocal(ip)
+            ? EndpointVerdict.HostForbidden
+            : EndpointVerdict.Allowed;
+    }
+
+    /// <summary>Хост сервера з <c>server\instance</c>/<c>server,port</c>/<c>host:port</c>/<c>[v6]:port</c>.</summary>
+    public static string SqlHostOf(string address)
+    {
+        var s = address.Trim();
+        var cut = s.IndexOfAny(['\\', ',']);
+
+        if (cut >= 0)
+        {
+            s = s[..cut];
+        }
+
+        if (s.StartsWith('[') && s.IndexOf(']') is var close and > 0)
+        {
+            return s[1..close];
+        }
+
+        // Один `:` — host:port; кілька — голий IPv6.
+        if (s.IndexOf(':') is var colon and > 0 && s.IndexOf(':', colon + 1) < 0)
+        {
+            s = s[..colon];
+        }
+
+        return s.TrimEnd('.');
+    }
+
+    /// <summary>Link-local/metadata: 169.254.0.0/16, fe80::/10.</summary>
+    public static bool IsLinkLocal(IPAddress ip)
+    {
+        ArgumentNullException.ThrowIfNull(ip);
+
+        if (ip.IsIPv4MappedToIPv6)
+        {
+            ip = ip.MapToIPv4();
+        }
+
+        if (ip.AddressFamily == AddressFamily.InterNetworkV6)
+        {
+            return ip.IsIPv6LinkLocal;
+        }
+
+        var b = ip.GetAddressBytes();
+
+        return b[0] == 169 && b[1] == 254;
+    }
+
     /// <summary>Хост адреси, якщо це ім'я (не IP-літерал) — його треба розв'язати; інакше <c>null</c>.</summary>
     public static string? HostNeedingResolution(string? address)
     {
