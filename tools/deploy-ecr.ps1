@@ -366,7 +366,11 @@ param(
     [string] $TelemetryOtlpEndpoint,
     [ValidateSet('Grpc', 'HttpProtobuf')] [string] $TelemetryOtlpProtocol,
     [ValidateSet('Auto', 'Standard', 'Enterprise')] [string] $EditionMode,
-    [switch] $AllowExpress
+    [switch] $AllowExpress,
+    # AN-10 (D-258): довірений акаунт для ролі БД `ecr_viewer` («бачить усе»,
+    # лише читання; роль створює 05-rpt-views.sql). Порожньо — роль порожня.
+    # НЕ акаунт служби EcrApi/EcrWorker.
+    [string] $ViewerAccount
 )
 
 $ErrorActionPreference = 'Stop'
@@ -1384,6 +1388,29 @@ END
                 Invoke-DeploySql -TargetDb $Database -File $path
             }
         }
+    }
+
+    # AN-10: членство в `ecr_viewer` — і з -SkipSchema (роль уже накотив DBA).
+    if ($ViewerAccount) {
+        $acct = $ViewerAccount.Replace("'", "''")
+        Invoke-DeploySql -TargetDb $Database -Query @"
+SET NOCOUNT ON;
+DECLARE @a sysname = N'$acct';
+DECLARE @s nvarchar(max);
+IF DATABASE_PRINCIPAL_ID(N'ecr_viewer') IS NULL THROW 50000, N'Role ecr_viewer is missing: 05-rpt-views.sql was not applied.', 1;
+IF DATABASE_PRINCIPAL_ID(@a) IS NULL
+BEGIN
+    IF SUSER_ID(@a) IS NULL THROW 50000, N'ViewerAccount has no server login; create the login first.', 1;
+    SET @s = N'CREATE USER ' + QUOTENAME(@a) + N' FOR LOGIN ' + QUOTENAME(@a);
+    EXEC(@s);
+END;
+IF IS_ROLEMEMBER(N'ecr_viewer', @a) = 0
+BEGIN
+    SET @s = N'ALTER ROLE ecr_viewer ADD MEMBER ' + QUOTENAME(@a);
+    EXEC(@s);
+END;
+"@
+        Write-Host "  ecr_viewer: акаунт $ViewerAccount — член ролі"
     }
 }
 finally {
