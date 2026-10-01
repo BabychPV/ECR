@@ -1,4 +1,4 @@
-﻿import { useState, type JSX } from "react";
+import { useState, type JSX } from 'react';
 import {
   Badge,
   Button,
@@ -13,11 +13,11 @@ import {
   Text,
   TextInput,
   Title,
-} from "@mantine/core";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { t } from "@/shared/i18n";
-import { ErrorAlert } from "@/shared/ui/ErrorAlert";
-import { showApiError, showDone } from "@/shared/ui/notify";
+} from '@mantine/core';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { t } from '@/shared/i18n';
+import { ErrorAlert } from '@/shared/ui/ErrorAlert';
+import { showApiError, showDone } from '@/shared/ui/notify';
 import {
   getSmtpSettings,
   saveSmtpSettings,
@@ -25,7 +25,7 @@ import {
   testSmtpSettings,
   type SmtpSettings,
   type SmtpSettingsInput,
-} from "./api";
+} from './api';
 
 /**
  * Налаштування SMTP, які адміністратор задає в системі (`D-256`, `GET/PUT /notifications/smtp`).
@@ -44,14 +44,14 @@ export function SmtpSettingsPanel(): JSX.Element {
     queryFn: getSmtpSettings,
   });
   const [draft, setDraft] = useState<SmtpDraft | null>(null);
-  const [testTo, setTestTo] = useState("");
+  const [testTo, setTestTo] = useState('');
 
   const save = useMutation({
     mutationFn: (value: SmtpDraft) => saveSmtpSettings(inputOf(value)),
     onSuccess: async (saved) => {
       queryClient.setQueryData(SmtpSettingsKey, saved);
       setDraft(null);
-      showDone(t("smtp.saved"));
+      showDone(t('smtp.saved'));
     },
     onError: showApiError,
   });
@@ -60,25 +60,19 @@ export function SmtpSettingsPanel(): JSX.Element {
     mutationFn: (to: string) => testSmtpSettings(to),
     onSuccess: (result) => {
       if (result.ok) {
-        showDone(t("notifications.testOk"));
+        showDone(t('notifications.testOk'));
         return;
       }
 
       const key = result.messageKey ?? null;
-      showApiError(
-        new Error(
-          key === null
-            ? (result.error ?? t("notifications.testFailed"))
-            : t(key),
-        ),
-      );
+      showApiError(new Error(key === null ? (result.error ?? t('notifications.testFailed')) : t(key)));
     },
     onError: showApiError,
   });
 
   const title = (
     <Title order={2} size="h5">
-      {t("smtp.title")}
+      {t('smtp.title')}
     </Title>
   );
 
@@ -86,10 +80,7 @@ export function SmtpSettingsPanel(): JSX.Element {
     return (
       <Stack gap="sm">
         {title}
-        <ErrorAlert
-          error={settings.error}
-          onRetry={() => void settings.refetch()}
-        />
+        <ErrorAlert error={settings.error} onRetry={() => void settings.refetch()} />
       </Stack>
     );
   }
@@ -104,18 +95,17 @@ export function SmtpSettingsPanel(): JSX.Element {
   }
 
   const form = draft ?? draftOf(settings.data);
-  const set = (patch: Partial<SmtpDraft>): void =>
-    setDraft({ ...form, ...patch });
+  const set = (patch: Partial<SmtpDraft>): void => setDraft({ ...form, ...patch });
 
   return (
     <Stack gap="sm">
       {title}
       <Text size="sm" c="dimmed">
-        {t("smtp.hint")}
+        {t('smtp.hint')}
       </Text>
       <Group gap="xs">
         <Badge
-          color={settings.data.configured ? "statusSuccess" : "statusWarning"}
+          color={settings.data.configured ? 'statusSuccess' : 'statusWarning'}
           variant="light"
           data-smtp-source={settings.data.source}
         >
@@ -124,76 +114,65 @@ export function SmtpSettingsPanel(): JSX.Element {
       </Group>
 
       <Group grow align="flex-start">
-        <TextInput
-          label={t("smtp.host")}
-          value={form.host}
-          onChange={(e) => set({ host: e.currentTarget.value })}
-        />
+        <TextInput label={t('smtp.host')} value={form.host} onChange={(e) => set({ host: e.currentTarget.value })} />
         <NumberInput
-          label={t("smtp.port")}
+          label={t('smtp.port')}
           value={form.port}
           min={1}
           max={65535}
           allowDecimal={false}
-          onChange={(value) =>
-            set({ port: typeof value === "number" ? value : 587 })
-          }
+          onChange={(value) => set({ port: typeof value === 'number' ? value : 587 })}
         />
         <Select
-          label={t("smtp.encryption")}
+          label={t('smtp.encryption')}
           allowDeselect={false}
           data={[
-            { value: "StartTls", label: t("smtp.encryption.StartTls") },
-            { value: "None", label: t("smtp.encryption.None") },
+            { value: 'StartTls', label: t('smtp.encryption.StartTls') },
+            { value: 'None', label: t('smtp.encryption.None') },
           ]}
           value={form.encryptionMode}
           onChange={(value) => {
-            if (value !== null)
-              set({ encryptionMode: value as SmtpDraft["encryptionMode"] });
+            if (value !== null) set({ encryptionMode: value as SmtpDraft['encryptionMode'] });
           }}
         />
       </Group>
 
       <Group grow align="flex-start">
         <TextInput
-          label={t("smtp.from")}
+          label={t('smtp.from')}
           value={form.fromAddress}
           onChange={(e) => set({ fromAddress: e.currentTarget.value })}
         />
         <TextInput
-          label={t("smtp.fromName")}
+          label={t('smtp.fromName')}
           value={form.fromName}
           onChange={(e) => set({ fromName: e.currentTarget.value })}
         />
       </Group>
 
       <Select
-        label={t("smtp.auth")}
+        label={t('smtp.auth')}
         allowDeselect={false}
         data={[
-          { value: "None", label: t("smtp.auth.None") },
-          { value: "Password", label: t("smtp.auth.Password") },
+          { value: 'None', label: t('smtp.auth.None') },
+          { value: 'Password', label: t('smtp.auth.Password') },
         ]}
         value={form.authMode}
         onChange={(value) => {
-          if (value !== null) set({ authMode: value as SmtpDraft["authMode"] });
+          if (value !== null) set({ authMode: value as SmtpDraft['authMode'] });
         }}
       />
 
-      {form.authMode === "Password" && (
+      {form.authMode === 'Password' && (
         <Group grow align="flex-start">
           <TextInput
-            label={t("smtp.user")}
+            label={t('smtp.user')}
             value={form.userName}
             onChange={(e) => set({ userName: e.currentTarget.value })}
           />
           <PasswordInput
-            label={t("smtp.password")}
-            description={
-              settings.data.hasPassword
-                ? t("smtp.passwordStored")
-                : t("smtp.passwordNone")
-            }
+            label={t('smtp.password')}
+            description={settings.data.hasPassword ? t('smtp.passwordStored') : t('smtp.passwordNone')}
             autoComplete="new-password"
             value={form.password}
             onChange={(e) => set({ password: e.currentTarget.value })}
@@ -201,33 +180,29 @@ export function SmtpSettingsPanel(): JSX.Element {
         </Group>
       )}
 
-      {form.authMode === "Password" && settings.data.hasPassword && (
+      {form.authMode === 'Password' && settings.data.hasPassword && (
         <Checkbox
-          label={t("smtp.clearPassword")}
+          label={t('smtp.clearPassword')}
           checked={form.clearPassword}
           onChange={(e) => set({ clearPassword: e.currentTarget.checked })}
         />
       )}
 
       <Switch
-        label={t("smtp.enabled")}
+        label={t('smtp.enabled')}
         checked={form.isEnabled}
         onChange={(e) => set({ isEnabled: e.currentTarget.checked })}
       />
 
       <Group justify="flex-end">
-        <Button
-          loading={save.isPending}
-          disabled={draft === null}
-          onClick={() => save.mutate(form)}
-        >
-          {t("smtp.save")}
+        <Button loading={save.isPending} disabled={draft === null} onClick={() => save.mutate(form)}>
+          {t('smtp.save')}
         </Button>
       </Group>
 
       <Group align="flex-end">
         <TextInput
-          label={t("smtp.testTo")}
+          label={t('smtp.testTo')}
           value={testTo}
           onChange={(e) => setTestTo(e.currentTarget.value)}
           style={{ flex: 1 }}
@@ -238,7 +213,7 @@ export function SmtpSettingsPanel(): JSX.Element {
           disabled={testTo.trim().length === 0 || draft !== null}
           onClick={() => test.mutate(testTo.trim())}
         >
-          {t("smtp.testSend")}
+          {t('smtp.testSend')}
         </Button>
       </Group>
     </Stack>
@@ -257,10 +232,10 @@ function sourceLabel(source: string): string {
 interface SmtpDraft {
   readonly host: string;
   readonly port: number;
-  readonly encryptionMode: "None" | "StartTls";
+  readonly encryptionMode: 'None' | 'StartTls';
   readonly fromAddress: string;
   readonly fromName: string;
-  readonly authMode: "None" | "Password";
+  readonly authMode: 'None' | 'Password';
   readonly userName: string;
   readonly password: string;
   readonly clearPassword: boolean;
@@ -273,10 +248,10 @@ function draftOf(value: SmtpSettings): SmtpDraft {
     port: value.port,
     encryptionMode: value.encryptionMode,
     fromAddress: value.fromAddress,
-    fromName: value.fromName ?? "",
+    fromName: value.fromName ?? '',
     authMode: value.authMode,
-    userName: value.userName ?? "",
-    password: "",
+    userName: value.userName ?? '',
+    password: '',
     clearPassword: false,
     isEnabled: value.isEnabled,
   };
@@ -284,8 +259,7 @@ function draftOf(value: SmtpSettings): SmtpDraft {
 
 /** Порожні рядки їдуть як `null`; порожній пароль — «не змінювати». */
 function inputOf(draft: SmtpDraft): SmtpSettingsInput {
-  const blank = (v: string): string | null =>
-    v.trim().length === 0 ? null : v.trim();
+  const blank = (v: string): string | null => (v.trim().length === 0 ? null : v.trim());
 
   return {
     host: blank(draft.host),
