@@ -14348,6 +14348,17 @@ OPTION (RECOMPILE);
 GO
 -- COLL:warn-grid ── кінець секції ──
 
+-- COLL:smtp-probe ── ru/kz проби SMTP-каналу без адресатів (D-256); власна порція; kz — потрібна вичитка носієм ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'notifications.test.smtpNoRecipients', N'ru', N'Нет адресатов: в канале нет явных адресов, а его роли не раскрываются ни в одного активного пользователя с адресом электронной почты.'),
+    (N'notifications.test.smtpNoRecipients', N'kz', N'Алушылар жоқ: арнада нақты мекенжайлар жоқ, ал оның рөлдері электрондық пошта мекенжайы бар бірде-бір белсенді пайдаланушыға айқындалмайды.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:smtp-probe ── кінець секції ──
+
 -- REG:rt25-client ── ru/kz сторінки впливу довідника і банера застарілості (RT-25, клієнт); власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
