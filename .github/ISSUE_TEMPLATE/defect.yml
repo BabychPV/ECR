@@ -1,0 +1,88 @@
+name: Дефект (тестування ECR)
+description: Один дефект, знайдений під час тестування збірки ECR Web (TESTER-GUIDE §8).
+title: "[Група-ID сценарію або розділ] коротко, що не так"
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Одна заявка — один дефект. Перед створенням перевірте розділ 7 `docs/build/TESTER-GUIDE.md` (відомі обмеження) і пошук по Issues.
+        **Не вкладайте** рядки підключення, паролі, PFX, вміст `Environment` служби, дані замовника.
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Серйозність (TESTER-GUIDE §8.1)
+      options:
+        - P0 — блокер (установка/старт/вхід неможливі, втрата даних, вихід за межі прав, секрет у журналі)
+        - P1 — критичний (основний потік не виконується, обходу нема)
+        - P2 — значний (неправильно, але є обхід або не основний потік)
+        - P3 — дрібний (косметика, тексти, локалізація, неточність документації)
+    validations:
+      required: true
+  - type: input
+    id: build
+    attributes:
+      label: Хеш коміту / номер Version збірки
+      description: З артефакта, який вам видали (ім'я Ecr-Setup-<версія>.exe, властивості Ecr.msi).
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: Спосіб установки
+      options:
+        - майстер Ecr-Setup
+        - deploy-ecr.ps1
+        - голий msiexec
+        - не стосується
+    validations:
+      required: true
+  - type: textarea
+    id: env
+    attributes:
+      label: Середовище
+      description: ОС сервера, редакція й версія SQL Server, обліковий запис служби, режим перерахунку (/health/ready → worker → queueMode, executor), браузер і версія.
+    validations:
+      required: true
+  - type: input
+    id: scenario
+    attributes:
+      label: Сценарій
+      description: ID сценарію з TESTER-GUIDE §6 або TESTER-SCENARIOS (наприклад, Н-Ж3), або розділ документа.
+  - type: textarea
+    id: steps
+    attributes:
+      label: Кроки відтворення
+      value: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Очікуваний результат (з розділу 6 / документа)
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Фактичний результат
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Докази
+      description: X-Correlation-Id відповіді з помилкою; фрагмент %ProgramData%\ECR\logs\ecr-*.log (без паролів); запис журналу подій Windows (джерело ECR), якщо збій старту; JSON /health/ready, якщо стосується стану служб; скріншот.
+      render: text
+  - type: dropdown
+    id: known
+    attributes:
+      label: Це відоме обмеження з розділу 7?
+      options:
+        - ні
+        - так, але поведінка відрізняється від опису
+        - не впевнений
+    validations:
+      required: true
