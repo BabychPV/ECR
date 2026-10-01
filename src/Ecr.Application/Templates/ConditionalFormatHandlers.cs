@@ -91,21 +91,27 @@ public sealed class SaveConditionalFormatsHandler(
         for (var i = 0; i < requested.Count; i++)
         {
             var r = requested[i];
-            if (!columns.Contains(r.ColumnCode ?? string.Empty))
+
+            // ⚠ {index} в усіх ключах condFormat* — номер правила серед правил ТІЄЇ Ж
+            // колонки (як Ordinal і як у ConditionalFormatRule.Validate), а не позиція
+            // в запиті: інакше «правило 3» з одного ключа й «правило 1» з другого
+            // вказували б на різні речі (суха прогонка Н-Е2, 01.10).
+            var code = r.ColumnCode ?? string.Empty;
+            var ordinal = ordinals.GetValueOrDefault(code) + 1;
+            ordinals[code] = ordinal;
+
+            if (!columns.Contains(code))
             {
                 throw new DomainException(
                     "ECR-CFG-0422",
-                    $"Правило {i + 1}: колонки {r.ColumnCode} у версії немає.",
+                    $"Правило {ordinal} колонки {r.ColumnCode}: колонки у версії немає.",
                     new Dictionary<string, object?>
                     {
                         ["messageKey"] = "err.ECR-CFG-0422.condFormatColumn",
-                        ["index"] = i + 1,
+                        ["index"] = ordinal,
                         ["columnCode"] = r.ColumnCode,
                     });
             }
-
-            var ordinal = ordinals.GetValueOrDefault(r.ColumnCode!) + 1;
-            ordinals[r.ColumnCode!] = ordinal;
             built.Add(new ConditionalFormatRule(
                 templateVersionId, r.ColumnCode!, ordinal, r.Operator, Blank(r.Value), Blank(r.ValueTo),
                 Blank(r.BackgroundHex), Blank(r.ForegroundHex), r.IsBold));
