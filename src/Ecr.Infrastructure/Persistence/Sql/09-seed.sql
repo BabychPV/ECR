@@ -5978,6 +5978,7 @@ USING (VALUES
     (N'jobs.sourceEventsRemoved',                  N'en', N'Events missing from the source: removed {removed}, removal skipped {skipped}', 1),
     (N'coverageEvents.eventRemovalSourceEmpty',    N'en', N'The source returned no events while {count} linked rows exist: removal skipped, the source looks unavailable.', 1),
     (N'coverageEvents.eventRemovalKeptManual',     N'en', N'Event {eventId} is no longer in the source, but row {rowKey} has a manual edit: the row was not removed.', 1),
+    (N'coverageEvents.eventTemplateOverlap',       N'en', N'Event {eventId} exists in templates {template} and {other} with different attribute values; the first template in the order Auto, Auto_Day, Manual, Manual_Day is used.', 1),
     -- ru/kz — окремою порцією `COLL:efrecon` у блоці I18N нижче.
     -- COLL:efrecon ── кінець секції ──
     -- JOBL ── людські назви видів фонових задач, яких бракувало в jobLabel.ts (KindKeys) ──
@@ -13761,7 +13762,9 @@ SELECT v.[Key], v.Lang, v.Val
     (N'coverageEvents.eventRemovalSourceEmpty', N'ru', N'Источник не вернул ни одного события, хотя связанных строк: {count}. Удаление пропущено: источник похож на недоступный.'),
     (N'coverageEvents.eventRemovalSourceEmpty', N'kz', N'Көз ешбір оқиға қайтармады, ал байланысты жолдар: {count}. Жою өткізілді: көз қолжетімсіз сияқты.'),
     (N'coverageEvents.eventRemovalKeptManual', N'ru', N'События {eventId} больше нет в источнике, но в строке {rowKey} есть ручная правка: строка не удалена.'),
-    (N'coverageEvents.eventRemovalKeptManual', N'kz', N'{eventId} оқиғасы көзде жоқ, бірақ {rowKey} жолында қолмен түзету бар: жол жойылмады.')
+    (N'coverageEvents.eventRemovalKeptManual', N'kz', N'{eventId} оқиғасы көзде жоқ, бірақ {rowKey} жолында қолмен түзету бар: жол жойылмады.'),
+    (N'coverageEvents.eventTemplateOverlap', N'ru', N'Событие {eventId} есть в шаблонах {template} и {other} с разными значениями атрибутов; берётся первый шаблон в порядке Auto, Auto_Day, Manual, Manual_Day.'),
+    (N'coverageEvents.eventTemplateOverlap', N'kz', N'{eventId} оқиғасы {template} және {other} үлгілерінде атрибут мәндері әртүрлі күйде бар; Auto, Auto_Day, Manual, Manual_Day реті бойынша бірінші үлгі алынады.')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO

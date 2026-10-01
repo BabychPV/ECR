@@ -622,6 +622,181 @@ public sealed class SourceEventSyncJobTests(SqlServerFixture sql)
         Assert.Single(trigger.ReceivedCalls());
     }
 
+    // ── Братні шаблони: Auto / Auto_Day / Manual / Manual_Day (рішення людини 2026-10-01) ──
+    //
+    // ⛔ МУТАЦІЙНІ ДОКАЗИ: прибрати фільтр Outranked в ExecuteAsync — червоніє S1; прибрати перевірку
+    // sibling.Overlaps — S2; прибрати `read.Truncated || sibling.Incomplete` — S3; прибрати
+    // `!other.Contains(...)` у gone планувальника — S4.
+
+    private const string LowerPriority = "_Zz";
+    private const string HigherPriority = "_Auto";
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "HSE301-EFSYNC")]
+    public async Task S1_Одна_подія_в_двох_шаблонах_дає_один_рядок_і_один_зв_язок_у_шаблоні_з_вищим_пріоритетом()
+    {
+        await using var stand = await ArrangeAsync();
+        var sibling = await AddSiblingAsync(stand, HigherPriority);
+        try
+        {
+            var source = new FakeEventSource();
+            source.ByTemplate[stand.EntityCode] = new SourceEventResult([Ev("E1", Start, End, volume: 10m)], false, null);
+            source.ByTemplate[sibling.Code] = new SourceEventResult([Ev("E1", Start, End, volume: 10m)], false, null);
+
+            await RunAsync(stand, source);
+            Assert.Empty(await RowsAsync(stand));
+            Assert.Empty(await LinksAsync(stand));
+
+            await RunAsync(stand, source, entityId: sibling.EntityId);
+            await RunAsync(stand, source);
+
+            Assert.Equal(["EF-E1"], (await RowsAsync(stand)).Select(r => r.RowKey));
+            Assert.Empty(await LinksAsync(stand));
+            Assert.Single(await LinksOfMapAsync(sibling.MapId));
+        }
+        finally
+        {
+            await DeactivateAsync(sibling.EntityId);
+        }
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "HSE301-EFSYNC")]
+    public async Task S2_Перекриття_з_різними_значеннями_дає_попередження_а_береться_перший_за_порядком_шаблонів()
+    {
+        await using var stand = await ArrangeAsync();
+        var sibling = await AddSiblingAsync(stand, LowerPriority);
+        try
+        {
+            var source = new FakeEventSource();
+            source.ByTemplate[stand.EntityCode] = new SourceEventResult([Ev("E1", Start, End, volume: 10m)], false, null);
+            source.ByTemplate[sibling.Code] = new SourceEventResult([Ev("E1", Start, End, volume: 20m)], false, null);
+
+            await RunAsync(stand, source);
+
+            Assert.Equal(10m, (await CellsAsync(stand, "EF-E1"))[stand.VolumeColumn].Numeric);
+            Assert.Equal(
+                1,
+                Convert.ToInt32(
+                    await ScalarAsync(
+                        $"SELECT COUNT(*) FROM itg.CollectionCoverage WHERE SourceEntityId = {stand.EntityId} AND Details LIKE N'%eventTemplateOverlap%'"),
+                    CultureInfo.InvariantCulture));
+        }
+        finally
+        {
+            await DeactivateAsync(sibling.EntityId);
+        }
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "HSE301-EFSYNC")]
+    public async Task S3_Недоступний_братній_шаблон_пропускає_видалення_для_всього_періоду()
+    {
+        await using var stand = await ArrangeAsync();
+        var sibling = await AddSiblingAsync(stand, LowerPriority);
+        try
+        {
+            var source = new FakeEventSource();
+            source.ByTemplate[stand.EntityCode] = new SourceEventResult(
+                [Ev("E1", Start, End), Ev("E2", Start.AddHours(1), End.AddHours(1))], false, null);
+            source.ByTemplate[sibling.Code] = new SourceEventResult([], false, null);
+            await RunAsync(stand, source);
+
+            source.ByTemplate[stand.EntityCode] = new SourceEventResult([Ev("E2", Start.AddHours(1), End.AddHours(1))], false, null);
+            source.FailTemplates.Add(sibling.Code);
+            await RunAsync(stand, source);
+
+            Assert.Equal(["EF-E1", "EF-E2"], (await RowsAsync(stand)).Select(r => r.RowKey).Order(StringComparer.Ordinal));
+            Assert.Equal(2, (await LinksAsync(stand)).Count);
+
+            // Шаблон знову доступний — тепер подія E1 справді зникла.
+            source.FailTemplates.Clear();
+            await RunAsync(stand, source);
+            Assert.Equal(["EF-E2"], (await RowsAsync(stand)).Select(r => r.RowKey));
+        }
+        finally
+        {
+            await DeactivateAsync(sibling.EntityId);
+        }
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "HSE301-EFSYNC")]
+    public async Task S4_Подія_переїхала_в_братній_шаблон_зв_язок_знімається_а_рядок_лишається()
+    {
+        await using var stand = await ArrangeAsync();
+        var sibling = await AddSiblingAsync(stand, LowerPriority);
+        try
+        {
+            var source = new FakeEventSource();
+            source.ByTemplate[stand.EntityCode] = new SourceEventResult([Ev("E1", Start, End), Ev("E2", Start.AddHours(1), End.AddHours(1))], false, null);
+            source.ByTemplate[sibling.Code] = new SourceEventResult([], false, null);
+            await RunAsync(stand, source);
+
+            source.ByTemplate[stand.EntityCode] = new SourceEventResult([Ev("E2", Start.AddHours(1), End.AddHours(1))], false, null);
+            source.ByTemplate[sibling.Code] = new SourceEventResult([Ev("E1", Start, End)], false, null);
+            await RunAsync(stand, source);
+
+            Assert.Equal(["EF-E1", "EF-E2"], (await RowsAsync(stand)).Select(r => r.RowKey).Order(StringComparer.Ordinal));
+            Assert.Equal(["E2"], (await LinksAsync(stand)).Select(l => l.SourceEventId));
+
+            await RunAsync(stand, source, entityId: sibling.EntityId);
+            Assert.Equal(["EF-E1", "EF-E2"], (await RowsAsync(stand)).Select(r => r.RowKey).Order(StringComparer.Ordinal));
+            Assert.Equal(["E1"], (await LinksOfMapAsync(sibling.MapId)).Select(l => l.SourceEventId));
+        }
+        finally
+        {
+            await DeactivateAsync(sibling.EntityId);
+        }
+    }
+
+    private sealed record Sibling(int EntityId, int MapId, string Code);
+
+    private async Task<Sibling> AddSiblingAsync(Stand stand, string suffix)
+    {
+        await using var db = sql.CreateContext();
+        var dataSourceId = await db.SourceEntities.AsNoTracking()
+            .Where(e => e.Id == stand.EntityId).Select(e => e.DataSourceId).SingleAsync();
+        var entity = new SourceEntity(dataSourceId, $"{stand.EntityCode}{suffix}", RegistrySourceKind.External);
+        db.SourceEntities.Add(entity);
+        await db.SaveChangesAsync();
+
+        var table = await db.TableDefs.AsNoTracking().SingleAsync(t => t.Id == stand.TableDefId);
+        var columns = await db.ColumnDefs.AsNoTracking().Where(c => c.TableDefId == stand.TableDefId).ToDictionaryAsync(c => c.Id);
+        var map = SourceEventMap.Create(
+            entity.Id,
+            stand.DocumentId,
+            table,
+            [
+                new(columns[stand.StartColumn], SourceEventMap.StartAttribute),
+                new(columns[stand.EndColumn], SourceEventMap.EndAttribute),
+                new(columns[stand.NameColumn], SourceEventMap.NameAttribute),
+                new(columns[stand.VolumeColumn], "Volume"),
+            ],
+            SourceEventVolumeMode.EventAttribute);
+        db.SourceEventMaps.Add(map);
+        await db.SaveChangesAsync();
+
+        return new Sibling(entity.Id, map.Id, entity.Code);
+    }
+
+    private Task DeactivateAsync(int entityId)
+        => ExecuteAsync($"UPDATE ext.SourceEntity SET IsActive = 0 WHERE Id = {entityId}");
+
+    private async Task<List<SourceEventLink>> LinksOfMapAsync(int mapId)
+    {
+        await using var db = sql.CreateContext();
+        return await db.SourceEventLinks.AsNoTracking().Where(l => l.SourceEventMapId == mapId).ToListAsync();
+    }
+
     private sealed class CollectingLogger : ILogger<SourceEventSyncJob>
     {
         public List<(LogLevel Level, string Message, Exception? Exception)> Entries { get; } = [];
@@ -638,7 +813,7 @@ public sealed class SourceEventSyncJobTests(SqlServerFixture sql)
 
     private async Task RunAsync(
         Stand stand, FakeEventSource source, bool freshContainer = false, ICalculationTrigger? trigger = null,
-        ILogger<SourceEventSyncJob>? logger = null)
+        ILogger<SourceEventSyncJob>? logger = null, int? entityId = null)
     {
         // ⚠ Метадані таблиці кешуються в контейнері: зміна стелі рядків у базі видна лише новому контейнеру.
         await using var fresh = freshContainer ? BuildProvider() : null;
@@ -659,7 +834,7 @@ public sealed class SourceEventSyncJobTests(SqlServerFixture sql)
             logger);
 
         await job.ExecuteAsync(
-            new SourceEventSyncRequest(stand.EntityId, From, Now), Substitute.For<IJobProgress>(), CancellationToken.None);
+            new SourceEventSyncRequest(entityId ?? stand.EntityId, From, Now), Substitute.For<IJobProgress>(), CancellationToken.None);
     }
 
     private static SourceEvent Ev(
@@ -693,6 +868,12 @@ public sealed class SourceEventSyncJobTests(SqlServerFixture sql)
 
         public SourceEventQuery? LastQuery { get; private set; }
 
+        /// <summary>Відповіді за шаблоном; шаблону немає в словнику — <see cref="Result"/>.</summary>
+        public Dictionary<string, SourceEventResult> ByTemplate { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>Шаблони, читання яких падає (недоступне джерело).</summary>
+        public HashSet<string> FailTemplates { get; } = new(StringComparer.OrdinalIgnoreCase);
+
         public Task<IReadOnlyList<SourceEntityDescriptor>> DiscoverAsync(int dataSourceId, CancellationToken ct)
             => throw new NotSupportedException();
 
@@ -702,7 +883,12 @@ public sealed class SourceEventSyncJobTests(SqlServerFixture sql)
         public Task<SourceEventResult> ReadEventsAsync(SourceEventQuery query, CancellationToken ct)
         {
             LastQuery = query;
-            return Task.FromResult(Result);
+            if (FailTemplates.Contains(query.Template))
+            {
+                throw new InvalidOperationException($"template {query.Template} unavailable");
+            }
+
+            return Task.FromResult(ByTemplate.TryGetValue(query.Template, out var byTemplate) ? byTemplate : Result);
         }
     }
 

@@ -75,6 +75,7 @@ describe('collectionRunErrorText', () => {
     ['coverageEvents.eventWritePartial', { eventId: '7', rowKey: 'R1' }, 'eventId=7, rowKey=R1'],
     ['coverageEvents.eventRowNotCreated', { eventId: '7', rowKey: 'R1' }, 'eventId=7, rowKey=R1'],
     ['coverageEvents.eventRemovalSourceEmpty', { count: '3' }, 'count=3'],
+    ['coverageEvents.eventTemplateOverlap', { eventId: '7', template: 'A', other: 'B' }, 'eventId=7, template=A, other=B'],
     ['coverageEvents.eventRemovalKeptManual', { eventId: '7', rowKey: 'R1' }, 'eventId=7, rowKey=R1'],
   ])('подія покриття від задачі `%s` резолвиться через каталог, а не лишається JSON', (k, p, shown) => {
     // Без гілки в `render` ключ дав би `null` і в таблиці лишився б сирий JSON.

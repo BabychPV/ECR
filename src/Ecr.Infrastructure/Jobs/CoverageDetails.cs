@@ -37,6 +37,16 @@ public static class CoverageDetails
     public const string EventRemovalSourceEmptyKey = "coverageEvents.eventRemovalSourceEmpty";
     public const string EventRemovalKeptManualKey = "coverageEvents.eventRemovalKeptManual";
 
+    public const string EventTemplateOverlapKey = "coverageEvents.eventTemplateOverlap";
+
+    /// <summary>Одна подія в двох братніх шаблонах з різними значеннями атрибутів; береться перший за порядком.</summary>
+    public static string EventTemplateOverlap(object eventId, object template, object otherTemplate)
+        => Encode(
+            EventTemplateOverlapKey,
+            ("eventId", Text(eventId)),
+            ("template", Text(template)),
+            ("other", Text(otherTemplate)));
+
     /// <summary>Джерело віддало нуль подій при N прив'язаних у БД: видалення пропущено (гард «повної звірки»).</summary>
     public static string EventRemovalSourceEmpty(int linked)
         => Encode(EventRemovalSourceEmptyKey, ("count", Text(linked)));

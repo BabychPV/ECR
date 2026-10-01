@@ -120,6 +120,8 @@ function render(key: string, params: Record<string, string>): string | null {
       return t('coverageEvents.eventRowNotCreated', params);
     case 'coverageEvents.eventRemovalSourceEmpty':
       return t('coverageEvents.eventRemovalSourceEmpty', params);
+    case 'coverageEvents.eventTemplateOverlap':
+      return t('coverageEvents.eventTemplateOverlap', params);
     case 'coverageEvents.eventRemovalKeptManual':
       return t('coverageEvents.eventRemovalKeptManual', params);
     default:

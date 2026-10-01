@@ -146,10 +146,18 @@ public sealed partial class SourceEventSyncJob(
 
         await progress.ReportKeyAsync(40, "jobs.sourceEventsWriting", ct).ConfigureAwait(false);
 
+        // ⛔ Братні шаблони (Auto/Auto_Day/Manual/Manual_Day) тієї самої таблиці — одна множина подій: дедуплікація
+        // за ID, перекриття з різними значеннями — попередження, збій читання будь-якого — пропуск видалення.
+        var sibling = await ReadSiblingsAsync(adapter, dataSource.Id, entity, maps, from, to, read, ct).ConfigureAwait(false);
+        var own = new SourceEventResult(
+            [.. read.Events.Where(e => !sibling.Outranked.Contains(e.EventId))],
+            read.Truncated || sibling.Incomplete,
+            read.ErrorCode);
+
         var totals = new Totals();
         foreach (var map in maps)
         {
-            await SyncMapAsync(map, read, from, to, now, totals, ct).ConfigureAwait(false);
+            await SyncMapAsync(map, own, sibling, from, to, now, totals, ct).ConfigureAwait(false);
         }
 
         if (totals.Removed > 0 || totals.RemovalSkipped > 0)
@@ -241,9 +249,129 @@ public sealed partial class SourceEventSyncJob(
                     : []))
             .DistinctBy(a => (a.Name.ToUpperInvariant(), a.Scope))];
 
+    /// <summary>Що відомо про братні шаблони цього прогону.</summary>
+    /// <param name="OtherIds">Усі ID подій, прочитані з братніх шаблонів.</param>
+    /// <param name="Outranked">ID власних подій, які веде братній шаблон з вищим пріоритетом (дедуплікація).</param>
+    /// <param name="Overlaps">Власні події, чий ID є в братньому шаблоні з іншими значеннями атрибутів.</param>
+    /// <param name="Incomplete">Братній шаблон не прочитано повністю (збій, відмова, стеля): видалення пропускається.</param>
+    private sealed record SiblingContext(
+        HashSet<string> OtherIds,
+        HashSet<string> Outranked,
+        List<(SourceEvent Event, string Template)> Overlaps,
+        bool Incomplete)
+    {
+        public static SiblingContext Empty { get; } = new(
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+            [],
+            false);
+    }
+
+    private async Task<SiblingContext> ReadSiblingsAsync(
+        IExternalDataSource adapter,
+        int dataSourceId,
+        SourceEntity entity,
+        IReadOnlyList<SourceEventMap> maps,
+        DateTime from,
+        DateTime to,
+        SourceEventResult read,
+        CancellationToken ct)
+    {
+        var pairs = maps.Select(m => (m.DocumentId, m.TableDefId)).ToHashSet();
+        var documentIds = pairs.Select(p => p.DocumentId).Distinct().ToList();
+
+        var candidates = (await db.SourceEventMaps
+                .AsNoTracking()
+                .Include(m => m.Fields)
+                .Where(m => m.IsActive && m.SourceEntityId != entity.Id && documentIds.Contains(m.DocumentId))
+                .ToListAsync(ct)
+                .ConfigureAwait(false))
+            .Where(m => pairs.Contains((m.DocumentId, m.TableDefId)))
+            .GroupBy(m => m.SourceEntityId)
+            .ToList();
+        if (candidates.Count == 0)
+        {
+            return SiblingContext.Empty;
+        }
+
+        var ids = candidates.Select(g => g.Key).ToList();
+        var entities = await db.SourceEntities
+            .AsNoTracking()
+            .Where(e => ids.Contains(e.Id) && e.IsActive && e.DataSourceId == entity.DataSourceId)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var ownById = read.Events
+            .Where(e => string.IsNullOrWhiteSpace(e.ParentId))
+            .GroupBy(e => e.EventId, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+
+        var context = SiblingContext.Empty with
+        {
+            OtherIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+            Outranked = new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+            Overlaps = [],
+        };
+        var incomplete = false;
+
+        foreach (var sibling in entities.OrderBy(e => SourceEventTemplateOrder.Rank(e.Code)).ThenBy(e => e.Code, StringComparer.OrdinalIgnoreCase))
+        {
+            SourceEventResult result;
+            try
+            {
+                result = await adapter
+                    .ReadEventsAsync(
+                        new SourceEventQuery(
+                            dataSourceId, sibling.Id, sibling.Code, from, to,
+                            AttributesOf([.. candidates.First(g => g.Key == sibling.Id)])),
+                        ct)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                LogSiblingReadFailed(_logger, sibling.Code, entity.Code, ex);
+                incomplete = true;
+                continue;
+            }
+
+            incomplete |= result.Truncated || result.ErrorCode is not null;
+
+            foreach (var ev in result.Events.Where(e => string.IsNullOrWhiteSpace(e.ParentId)))
+            {
+                context.OtherIds.Add(ev.EventId);
+                if (!ownById.TryGetValue(ev.EventId, out var mine))
+                {
+                    continue;
+                }
+
+                if (SourceEventTemplateOrder.Outranks(sibling.Code, entity.Code))
+                {
+                    context.Outranked.Add(ev.EventId);
+                }
+                else if (SourceEventTemplateOrder.AttributesDiffer(mine, ev))
+                {
+                    context.Overlaps.Add((mine, sibling.Code));
+                }
+            }
+        }
+
+        return context with { Incomplete = incomplete };
+    }
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "SourceEventSyncJob: братній шаблон {Sibling} (сутність {Entity}) не прочитано — видалення подій цього прогону пропущено.")]
+    private static partial void LogSiblingReadFailed(ILogger logger, string sibling, string entity, Exception exception);
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "SourceEventSyncJob: подія {EventId} є в шаблонах {Template} і {Other} з різними значеннями атрибутів; береться перший за порядком шаблонів.")]
+    private static partial void LogTemplateOverlap(ILogger logger, string eventId, string template, string other);
+
     private async Task SyncMapAsync(
         SourceEventMap map,
         SourceEventResult read,
+        SiblingContext sibling,
         DateTime from,
         DateTime to,
         DateTime now,
@@ -311,7 +439,8 @@ public sealed partial class SourceEventSyncJob(
             },
             map.FilterAttribute,
             map.FilterScope,
-            map.FilterValue));
+            map.FilterValue,
+            sibling.OtherIds));
 
         var fields = await FieldPlansAsync(map, ct).ConfigureAwait(false);
         UnitCatalogSnapshot? units = fields.Any(f => f.SourceUnitId is not null && f.TargetUnitId is not null)
@@ -333,6 +462,29 @@ public sealed partial class SourceEventSyncJob(
         // ── Повна звірка: подія зникла з джерела — видаляємо рядок і зв'язок (з гардами).
         var removed = await RemoveGoneAsync(map, plan, periods, appliedPeriods, links, linkByEventId, totals, events, ct)
             .ConfigureAwait(false);
+
+        // Подія переїхала в братній шаблон (чи дублюється в ньому): зв'язок знімаємо, РЯДОК лишається —
+        // його веде братній мапінг.
+        foreach (var handed in plan.HandedOff ?? [])
+        {
+            Drop(linkByEventId[handed.SourceEventId], links, linkByEventId, removed);
+            totals.HandedOff++;
+        }
+
+        // Одна подія в кількох шаблонах з різними значеннями: беремо перший за порядком, а розбіжність — у журнал.
+        foreach (var (overlapEvent, otherTemplate) in sibling.Overlaps)
+        {
+            if (SourceEventPeriods.Locate(overlapEvent.StartUtc, periods) is { } overlapPeriod)
+            {
+                events.Add(new CoverageEvent(
+                    map.SourceEntityId,
+                    new PeriodKey(overlapPeriod.PeriodKey),
+                    CollectionCoverage.SourceDataRefused,
+                    CoverageDetails.EventTemplateOverlap(overlapEvent.EventId, overlapEvent.TemplateName, otherTemplate)));
+            }
+
+            LogTemplateOverlap(_logger, overlapEvent.EventId, overlapEvent.TemplateName, otherTemplate);
+        }
 
         foreach (var lost in plan.Missing)
         {
@@ -461,7 +613,19 @@ public sealed partial class SourceEventSyncJob(
                 continue;
             }
 
-            await DeleteRowAsync(instance, periodKey, state.RowKey!, ct).ConfigureAwait(false);
+            // Рядок веде й зв'язок братнього мапінгу: знімаємо лише свій зв'язок, рядок видалить останній.
+            var sharedRow = await db.SourceEventLinks
+                .AsNoTracking()
+                .AnyAsync(
+                    l => l.SourceEventMapId != map.Id && l.TableInstanceId == instance && l.PeriodKey == periodKey
+                         && l.RowKey == state.RowKey,
+                    ct)
+                .ConfigureAwait(false);
+            if (!sharedRow)
+            {
+                await DeleteRowAsync(instance, periodKey, state.RowKey!, ct).ConfigureAwait(false);
+            }
+
             Drop(link, links, linkByEventId, removed);
             appliedPeriods.Add(periodKey);
             totals.Removed++;
@@ -1014,6 +1178,8 @@ public sealed partial class SourceEventSyncJob(
         public int Pending { get; set; }
 
         public int Removed { get; set; }
+
+        public int HandedOff { get; set; }
 
         public int RemovalSkipped { get; set; }
     }

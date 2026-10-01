@@ -250,6 +250,38 @@ public sealed class SourceEventSyncPlannerTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Directive", "HSE301-EFSYNC")]
+    public void Братній_шаблон_подія_переїхала_Handoff_а_не_Gone_і_не_Missing_а_порожність_рахується_по_об_єднанню()
+    {
+        var moved = Linked("MOVED", "EF-MOVED");
+        var gone = Linked("GONE", "EF-GONE");
+        var baseInput = Input([Ev("KEEP", Start.AddHours(1), Start.AddHours(2), name: "Keep")], [moved, gone], [January]);
+
+        var plan = SourceEventSyncPlanner.Plan(baseInput with { OtherTemplateIds = new HashSet<string> { "MOVED" } });
+
+        Assert.Equal(["MOVED"], plan.HandedOff!.Select(h => h.SourceEventId));
+        Assert.Equal(["GONE"], plan.Gone!.Select(g => g.SourceEventId));
+        Assert.Equal(["GONE"], plan.Missing.Select(m => m.SourceEventId));
+
+        // Власних подій нуль, але братній шаблон щось віддав — це не «джерело порожнє».
+        var emptyOwn = SourceEventSyncPlanner.Plan(
+            Input([], [moved], [January]) with { OtherTemplateIds = new HashSet<string> { "X" } });
+        Assert.False(emptyOwn.SourceEmpty);
+    }
+
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Directive", "HSE301-EFSYNC")]
+    [InlineData("P_Auto", "P_Auto_Day", true)]
+    [InlineData("P_Auto_Day", "P_Manual", true)]
+    [InlineData("P_Manual", "P_Manual_Day", true)]
+    [InlineData("P_Manual_Day", "P_Auto", false)]
+    [InlineData("P_Manual", "P_Auto", false)]
+    public void Порядок_шаблонів_Auto_AutoDay_Manual_ManualDay(string winner, string other, bool outranks)
+        => Assert.Equal(outranks, SourceEventTemplateOrder.Outranks(winner, other));
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait("Directive", "HSE301-A5b")]
     public void Перестворена_подія_лягає_у_рядок_попередньої()
     {
