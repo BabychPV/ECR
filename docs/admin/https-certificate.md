@@ -40,7 +40,7 @@
 | Параметр `deploy-ecr.ps1` | Змінна служби `EcrApi` | Для чого | Без нього |
 |---|---|---|---|
 | `-HttpsThumbprint` | `ECR_Transport__Https__CertificateThumbprint` | TLS: Kestrel віддає цей сертифікат браузеру | треба `-BehindHttpsProxy` або `-AllowHttp` (стенд), інакше скрипт зупиняється на кроці 1 |
-| `-DataProtectionThumbprint` | `ECR_Auth__DataProtection__CertificateThumbprint` | шифрує ключі кільця Data Protection у `sec.DataProtectionKey` (cookie сеансу, секрети каналів сповіщень) | обов'язковий (S11): служба в Production не стартує |
+| `-DataProtectionThumbprint` | `ECR_Auth__DataProtection__CertificateThumbprint` | шифрує ключі кільця Data Protection у `sec.DataProtectionKey` (cookie сеансу, секрети каналів сповіщень, пароль SMTP — purpose `Ecr.Smtp.Password.v1`) | обов'язковий (S11): служба в Production не стартує |
 
 - Сертифікат шукається **за відбитком** (не за `Subject`) — так однозначно, коли в сховищі
   лежать старий і новий сертифікати одного імені (`HttpsTransport.cs`, коментар до класу).
