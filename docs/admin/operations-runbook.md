@@ -1116,6 +1116,8 @@ powershell -ExecutionPolicy Bypass -File tools\deploy-ecr.ps1 `
 ## 11. HTTPS і сертифікат (✎ 2026-09-30, `D14-08`)
 
 Повний опис — `docs/build/11-install-guide.md` §2.7; тут — те, що потрібно в експлуатації.
+Покроково для одного сертифіката замовника з SAN (право на ключ, перенаправлення порту, Data Protection,
+перевірка після встановлення, заміна, відомі розбіжності) — [`https-certificate.md`](https-certificate.md).
 
 **Три транспорти, рівно один** (`deploy-ecr.ps1`; на кожному оновленні — бо `Environment` стирає
 оновлення MSI, п. 10.3): `-HttpsThumbprint '<відбиток>'` (HTTPS; порт `-AppPort`, для `https://сервер/`
