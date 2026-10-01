@@ -774,7 +774,10 @@ UPDATE t
     (N'reportDefs.addBlocked', N'ru', N'Сначала заполните код, название, версию и код каждой колонки.',
                                                 N'Сначала заполните код, название, версию и код каждого столбца.'),
     (N'reportDefs.removeColumnBlocked', N'ru', N'В отчёте должна быть хотя бы одна колонка.',
-                                                N'В отчёте должна быть хотя бы один столбец.')
+                                                N'В отчёте должен остаться хотя бы один столбец.'),
+    -- COLL:ru-fix — ланцюг A → B → C: B уже могло дійти до баз попереднім рядком.
+    (N'reportDefs.removeColumnBlocked', N'ru', N'В отчёте должна быть хотя бы один столбец.',
+                                                N'В отчёте должен остаться хотя бы один столбец.')
   ) AS s ([Key], Lang, OldVal, NewVal)
     ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
  WHERE t.Value = s.OldVal COLLATE Latin1_General_BIN2;
@@ -14167,7 +14170,7 @@ SELECT v.[Key], v.Lang, v.Val
   FROM (VALUES
     (N'reportDefs.addBlocked', N'ru', N'Сначала заполните код, название, версию и код каждого столбца.'),
     (N'reportDefs.addBlocked', N'kz', N'Алдымен кодты, атауды, нұсқаны және әр бағанның кодын толтырыңыз.'),
-    (N'reportDefs.removeColumnBlocked', N'ru', N'В отчёте должна быть хотя бы один столбец.'),
+    (N'reportDefs.removeColumnBlocked', N'ru', N'В отчёте должен остаться хотя бы один столбец.'),
     (N'reportDefs.removeColumnBlocked', N'kz', N'Есепте кемінде бір баған болуы керек.'),
     (N'registries.rc816.selectionLocked', N'ru', N'Сначала сохраните или отмените изменения на нижних уровнях.'),
     (N'registries.rc816.selectionLocked', N'kz', N'Алдымен төменгі деңгейлердегі өзгерістерді сақтаңыз немесе болдырмаңыз.'),
