@@ -1224,3 +1224,35 @@ EXEC rpt.usp_GenerateTemplateViews @TemplateVersionId = 7; -- одна
 
 ⚠ Той самий пояс проєкту — IANA; у полі проєкту Windows-ідентифікатор (`West Asia Standard Time`)
 відхиляється `ECR-CFG-4221`. Windows-імена лишаються лише для `AT TIME ZONE` у запитах SQL-джерела (п. 2.2).
+
+
+## 14. Роль бази «бачить усе» `ecr_viewer` (✎ 2026-10-01, AN-10, `D-258`, НФ-8.5)
+
+Роль `ecr_viewer` створює `Sql/05-rpt-views.sql` на КОЖНОМУ розгортанні й оновленні (ідемпотентно). Вона **порожня за замовчуванням**.
+
+| Роль | Для кого | Права |
+|---|---|---|
+| `rpt_reader` | обліковий запис SSRS | лише `SELECT` на схему `rpt` |
+| `ecr_viewer` | довірений DBA / діагностика | членство в `db_datareader` (`SELECT` на ВСІ схеми бази, зокрема майбутні) + `VIEW DEFINITION`; жодних `ALTER`/`CREATE`/`INSERT`/`UPDATE`/`DELETE`/`EXECUTE` |
+
+⛔ Членом `ecr_viewer` НЕ робити обліковий запис служби EcrApi/EcrWorker: ця роль лише читає, а службі потрібні власні права запису. Роль бачить усе, зокрема `sys_ecr` і `aud` — членство лише довіреним особам.
+
+Видати членство при розгортанні (необовʼязковий параметр, без нього роль лишається порожньою):
+
+```powershell
+powershell -File tools\deploy-ecr.ps1 ... -ViewerAccount 'DOMAIN\dba-ecr'
+powershell -File tools\setup-dev-db.ps1 -Server localhost -Database EcrDev -ViewerAccount 'DOMAIN\dba-ecr'
+```
+
+Скрипт створює користувача бази `FOR LOGIN`, якщо логін на сервері є (інакше зупиняється з повідомленням), і додає його в роль лише якщо він ще не член; повторний запуск нічого не міняє. Паролів скрипт не друкує. Вручну: `ALTER ROLE ecr_viewer ADD MEMBER [DOMAIN\dba-ecr];`.
+
+Перевірка:
+
+```sql
+SELECT m.name FROM sys.database_role_members rm
+JOIN sys.database_principals r ON r.principal_id = rm.role_principal_id AND r.name = N'ecr_viewer'
+JOIN sys.database_principals m ON m.principal_id = rm.member_principal_id;
+-- від імені члена: SELECT HAS_PERMS_BY_NAME(DB_NAME(), 'DATABASE', 'ALTER');  -- очікується 0
+```
+
+Тести: `ViewerRoleTests` (читання кожної схеми, відмова на `CREATE TABLE`/`DELETE`), `DeployScriptsRerunTests` (ідемпотентність повторного прогону).
