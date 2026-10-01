@@ -42,10 +42,12 @@ describe('ruleMatches', () => {
     expect(ruleMatches(between, '0.99')).toBe(false);
   });
 
-  it('дорівнює: числа як числа, текст як текст', () => {
+  it('дорівнює / не дорівнює: лише числа, як на сервері', () => {
     expect(ruleMatches(rule({ operator: 'eq', value: '1' }), '1.0')).toBe(true);
-    expect(ruleMatches(rule({ operator: 'eq', value: 'Так' }), 'Так')).toBe(true);
-    expect(ruleMatches(rule({ operator: 'ne', value: 'Так' }), 'Ні')).toBe(true);
+    // ⛔ Текст не число — ні `eq`, ні `ne` (2026-10-01: `ne 100` фарбував «abc»).
+    expect(ruleMatches(rule({ operator: 'ne', value: '100' }), 'abc')).toBe(false);
+    expect(ruleMatches(rule({ operator: 'eq', value: 'Так' }), 'Так')).toBe(false);
+    expect(ruleMatches(rule({ operator: 'ne', value: 'Так' }), 'Ні')).toBe(false);
   });
 
   it('порожня комірка: лише «порожньо» спрацьовує', () => {
@@ -75,7 +77,11 @@ describe('whyRuleIncomplete', () => {
     expect(whyRuleIncomplete(rule({ operator: 'eq', value: 'Так' }))).toBe('Value');
     expect(whyRuleIncomplete(rule({ operator: 'ne', value: 'Так' }))).toBe('Value');
     expect(whyRuleIncomplete(rule({ operator: 'gt', value: '1'.repeat(65) }))).toBe('Value');
-    expect(whyRuleIncomplete(rule({ operator: 'gt', value: '1'.repeat(64) }))).toBeNull();
+    expect(whyRuleIncomplete(rule({ operator: 'gt', value: `0.${'1'.repeat(62)}` }))).toBeNull();
+    // ⛔ 64 знаки, але поза `decimal` — сервер не розбере (`decimal.TryParse`).
+    expect(whyRuleIncomplete(rule({ operator: 'gt', value: '1'.repeat(64) }))).toBe('Value');
+    // Кома — як крапка, як на сервері.
+    expect(whyRuleIncomplete(rule({ operator: 'gt', value: '5,5' }))).toBeNull();
     expect(whyRuleIncomplete(rule({ operator: 'gt', value: '1', backgroundHex: '#fff' }))).toBe('Color');
     expect(whyRuleIncomplete(rule({ operator: 'gt', value: '1', foregroundHex: 'red' }))).toBe('Color');
     expect(whyRuleIncomplete(rule({ operator: 'gt', value: '1', foregroundHex: '#00AAff' }))).toBeNull();

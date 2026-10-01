@@ -11,9 +11,18 @@ import { normalizeDecimal } from '@/shared/format';
  * значенні-прикладі, узгоджені з серверною: ті самі оператори, межі включно,
  * перше спрацьоване правило виграє.
  *
- * ⚠ Порівняння — через `Number` після `normalizeDecimal`: для вибору кольору
- * межа точності `double` не має значення, а для збереження значень ця
- * функція не використовується ніде.
+ * ⛔ Семантика ОДНА з сервером, і перевіряє її спільна фікстура
+ * `tests/Ecr.TestKit/Fixtures/conditional-format-parity.json` (читають і
+ * `conditionalFormatParity.test.ts`, і `ConditionalFormatParityTests.cs`):
+ * усі оператори з операндом — числові, включно з `eq`/`ne`; значення, що не
+ * є числом (текст — навіть «5», дата, булеве), жодного з них не задовольняє.
+ * «Не дорівнює 100» для тексту «abc» — не привід фарбувати: правило про
+ * число, а числа в комірці немає. До 2026-10-01 тут `eq`/`ne` порівнювали
+ * ще й текст, і панель фарбувала те, чого не фарбували сітка й Excel.
+ *
+ * ⚠ Порівняння — точне, на канонічних десяткових рядках (`normalizeDecimal`),
+ * без `Number`: сервер рахує в `decimal`, і `double` розійшовся б із ним на
+ * 16-му знаку.
  */
 
 export type ConditionOperator =
@@ -77,8 +86,50 @@ export const MaxOperandLength = 64;
 
 const HexColor = /^#[0-9a-fA-F]{6}$/;
 
+/** Найбільше `decimal` .NET (`decimal.MaxValue`) — ціла частина. */
+const DecimalMaxInteger = '79228162514264337593543950335';
+
+/**
+ * Канонічне десяткове число, як його розбирає сервер (`decimal.TryParse` після
+ * заміни коми крапкою); `null` — не число або не вміщається в `decimal`.
+ */
+function decimalOf(text: string): string | null {
+  const normalized = normalizeDecimal(text.replace(/,/g, '.'));
+  if (normalized === null) return null;
+
+  const integer = normalized.replace(/^-/, '').split('.')[0] ?? '';
+  const fits =
+    integer.length < DecimalMaxInteger.length ||
+    (integer.length === DecimalMaxInteger.length && integer <= DecimalMaxInteger);
+
+  return fits ? normalized : null;
+}
+
 function isOperandNumber(text: string): boolean {
-  return text.trim().length <= MaxOperandLength && normalizeDecimal(text) !== null;
+  return text.trim().length <= MaxOperandLength && decimalOf(text) !== null;
+}
+
+/** Точне порівняння двох канонічних десяткових рядків: від'ємне, 0 або додатне. */
+function compareDecimal(left: string, right: string): number {
+  const negativeLeft = left.startsWith('-');
+  const negativeRight = right.startsWith('-');
+  if (negativeLeft !== negativeRight) return negativeLeft ? -1 : 1;
+
+  const magnitude = compareMagnitude(left.replace(/^-/, ''), right.replace(/^-/, ''));
+  return negativeLeft ? -magnitude : magnitude;
+}
+
+function compareMagnitude(left: string, right: string): number {
+  const [leftInteger = '', leftFraction = ''] = left.split('.');
+  const [rightInteger = '', rightFraction = ''] = right.split('.');
+
+  if (leftInteger.length !== rightInteger.length) return leftInteger.length - rightInteger.length;
+  if (leftInteger !== rightInteger) return leftInteger < rightInteger ? -1 : 1;
+
+  const width = Math.max(leftFraction.length, rightFraction.length);
+  const a = leftFraction.padEnd(width, '0');
+  const b = rightFraction.padEnd(width, '0');
+  return a === b ? 0 : a < b ? -1 : 1;
 }
 
 /**
@@ -99,7 +150,7 @@ export function whyRuleIncomplete(rule: ConditionalRule): RuleBlocker | null {
 
   if (count === 2) {
     if (!isOperandNumber(rule.valueTo)) return 'ValueTo';
-    if (Number(normalizeDecimal(rule.valueTo)) < Number(normalizeDecimal(rule.value))) return 'Range';
+    if (compareDecimal(decimalOf(rule.valueTo) ?? '0', decimalOf(rule.value) ?? '0') < 0) return 'Range';
   }
 
   for (const hex of [rule.backgroundHex, rule.foregroundHex]) {
@@ -111,44 +162,82 @@ export function whyRuleIncomplete(rule: ConditionalRule): RuleBlocker | null {
   return null;
 }
 
-function numberOf(text: string): number | null {
-  const normalized = normalizeDecimal(text);
-  return normalized === null ? null : Number(normalized);
+/**
+ * Значення комірки для правила — те саме розгортання, що на сервері
+ * (`CellValueMapping.ToRuleValue`): число — десятковим рядком (як його шле
+ * API), усе інше (текст, дата, булеве, елемент довідника) — `other` зі своїм
+ * текстом; `null` — комірка порожня.
+ */
+export type RuleCellValue =
+  | { readonly kind: 'number'; readonly value: string }
+  | { readonly kind: 'other'; readonly value: string }
+  | null;
+
+/**
+ * Порожньо — `null` або текст із самих пробілів, як `string.IsNullOrWhiteSpace`.
+ * ⚠ `trim()` у JS знімає ще й U+FEFF, якого .NET пробілом не вважає.
+ */
+function isBlank(value: RuleCellValue): boolean {
+  if (value === null) return true;
+  return value.kind === 'other' && value.value.trim().length === 0 && !value.value.includes('\uFEFF');
 }
 
-/** Чи спрацьовує правило на значенні комірки (`null` — порожня комірка). */
-export function ruleMatches(rule: ConditionalRule, cell: string | null): boolean {
-  const text = cell?.trim() ?? '';
+/** Чи спрацьовує правило на значенні комірки — дзеркало `ConditionalFormatEvaluator.Matches`. */
+export function ruleMatchesValue(rule: ConditionalRule, cell: RuleCellValue): boolean {
+  const empty = isBlank(cell);
 
-  if (rule.operator === 'empty') return text.length === 0;
-  if (rule.operator === 'notEmpty') return text.length > 0;
-  if (text.length === 0) return false;
+  if (rule.operator === 'empty') return empty;
+  if (rule.operator === 'notEmpty') return !empty;
 
-  const value = numberOf(text);
-  const operand = numberOf(rule.value);
-
-  if (rule.operator === 'eq' || rule.operator === 'ne') {
-    // Обидва числа — порівнюємо як числа (`1.0` = `1`), інакше як текст.
-    const equal = value !== null && operand !== null ? value === operand : text === rule.value.trim();
-    return rule.operator === 'eq' ? equal : !equal;
-  }
-
+  // ⛔ Нечислове значення не задовольняє ЖОДНОГО оператора з операндом — і `ne` теж.
+  const value = cell?.kind === 'number' ? normalizeDecimal(cell.value) : null;
+  const operand = decimalOf(rule.value);
   if (value === null || operand === null) return false;
+
+  const order = compareDecimal(value, operand);
 
   switch (rule.operator) {
     case 'gt':
-      return value > operand;
+      return order > 0;
     case 'ge':
-      return value >= operand;
+      return order >= 0;
     case 'lt':
-      return value < operand;
+      return order < 0;
     case 'le':
-      return value <= operand;
+      return order <= 0;
+    case 'eq':
+      return order === 0;
+    case 'ne':
+      return order !== 0;
     case 'between': {
-      const upper = numberOf(rule.valueTo);
-      return upper !== null && value >= operand && value <= upper;
+      // Межі — включно, і порядок операндів не важливий, як на сервері.
+      const upper = decimalOf(rule.valueTo);
+      if (upper === null) return false;
+      const [low, high] = compareDecimal(operand, upper) <= 0 ? [operand, upper] : [upper, operand];
+      return compareDecimal(value, low) >= 0 && compareDecimal(value, high) <= 0;
     }
   }
+}
+
+/**
+ * Значення-приклад, яке людина ввела в панелі: число — числом (кома
+ * дозволена, як в операнді), решта — текстом; `null` — порожньо.
+ *
+ * ⚠ Тип колонки приклад не несе, тож текст «5» у текстовій колонці тут
+ * виглядає числом; сервер його числом не вважає. Сітка й Excel беруть
+ * результат лише з сервера (`TableSliceDto.cellFormats`), тому розбіжність
+ * обмежена прикладом у конструкторі.
+ */
+export function sampleValue(sample: string | null): RuleCellValue {
+  if (sample === null) return null;
+
+  const number = decimalOf(sample);
+  return number === null ? { kind: 'other', value: sample } : { kind: 'number', value: number };
+}
+
+/** Чи спрацьовує правило на значенні-прикладі (`null` — порожня комірка). */
+export function ruleMatches(rule: ConditionalRule, cell: string | null): boolean {
+  return ruleMatchesValue(rule, sampleValue(cell));
 }
 
 /**

@@ -1,0 +1,799 @@
+{
+  "$comment": [
+    "Спільні вектори умовного форматування (ФВ-2.7): чи спрацьовує правило на значенні комірки.",
+    "Їх читають ОБИДВІ реалізації: ConditionalFormatParityTests.cs (сервер: зріз сітки й Excel, через CellValueMapping.ToRuleValue) і conditionalFormatParity.test.ts (клієнт: ruleMatchesValue і приклад у панелі).",
+    "cell — [поле CellValueData, значення рядком]: Numeric (decimal), String, Bool, Date (ISO, інваріантно), RegistryEntry (long), Unit (int), Empty (IsEmpty = true); null — рядка немає.",
+    "Семантика: усі оператори з операндом — числові, включно з eq/ne; значення, що не є числом (текст — навіть «5», дата, булеве, довідник, одиниця), жодного з них не задовольняє. empty — null, IsEmpty або текст із самих пробілів (string.IsNullOrWhiteSpace).",
+    "Очікування написано вручну за цією семантикою, а не згенеровано реалізацією."
+  ],
+  "cases": [
+    {
+      "id": "ne: текст abc — не число, не фарбує",
+      "operator": "ne",
+      "value": "100",
+      "valueTo": null,
+      "cell": [
+        "String",
+        "abc"
+      ],
+      "matches": false
+    },
+    {
+      "id": "ne: текст 100 — теж не число",
+      "operator": "ne",
+      "value": "100",
+      "valueTo": null,
+      "cell": [
+        "String",
+        "100"
+      ],
+      "matches": false
+    },
+    {
+      "id": "ne: текст 5 — теж не число",
+      "operator": "ne",
+      "value": "100",
+      "valueTo": null,
+      "cell": [
+        "String",
+        "5"
+      ],
+      "matches": false
+    },
+    {
+      "id": "ne: число 99.99",
+      "operator": "ne",
+      "value": "100",
+      "valueTo": null,
+      "cell": [
+        "Numeric",
+        "99.99"
+      ],
+      "matches": true
+    },
+    {
+      "id": "ne: число 100.0000 = 100",
+      "operator": "ne",
+      "value": "100",
+      "valueTo": null,
+      "cell": [
+        "Numeric",
+        "100.0000"
+      ],
+      "matches": false
+    },
+    {
+      "id": "ne: від'ємне",
+      "operator": "ne",
+      "value": "100",
+      "valueTo": null,
+      "cell": [
+        "Numeric",
+        "-100"
+      ],
+      "matches": true
+    },
+    {
+      "id": "ne: булеве",
+      "operator": "ne",
+      "value": "100",
+      "valueTo": null,
+      "cell": [
+        "Bool",
+        "true"
+      ],
+      "matches": false
+    },
+    {
+      "id": "ne: дата",
+      "operator": "ne",
+      "value": "100",
+      "valueTo": null,
+      "cell": [
+        "Date",
+        "2026-01-31T00:00:00"
+      ],
+      "matches": false
+    },
+    {
+      "id": "ne: елемент довідника",
+      "operator": "ne",
+      "value": "100",
+      "valueTo": null,
+      "cell": [
+        "RegistryEntry",
+        "42"
+      ],
+      "matches": false
+    },
+    {
+      "id": "ne: одиниця",
+      "operator": "ne",
+      "value": "100",
+      "valueTo": null,
+      "cell": [
+        "Unit",
+        "3"
+      ],
+      "matches": false
+    },
+    {
+      "id": "ne: явна порожнеча",
+      "operator": "ne",
+      "value": "100",
+      "valueTo": null,
+      "cell": [
+        "Empty",
+        null
+      ],
+      "matches": false
+    },
+    {
+      "id": "ne: рядка немає",
+      "operator": "ne",
+      "value": "100",
+      "valueTo": null,
+      "cell": null,
+      "matches": false
+    },
+    {
+      "id": "ne: пробіли",
+      "operator": "ne",
+      "value": "100",
+      "valueTo": null,
+      "cell": [
+        "String",
+        "   "
+      ],
+      "matches": false
+    },
+    {
+      "id": "ne: точність decimal, а не double",
+      "operator": "ne",
+      "value": "0.1",
+      "valueTo": null,
+      "cell": [
+        "Numeric",
+        "0.1000000000000000000001"
+      ],
+      "matches": true
+    },
+    {
+      "id": "eq: 100.0 = 100",
+      "operator": "eq",
+      "value": "100",
+      "valueTo": null,
+      "cell": [
+        "Numeric",
+        "100.0"
+      ],
+      "matches": true
+    },
+    {
+      "id": "eq: кома в операнді",
+      "operator": "eq",
+      "value": "5,5",
+      "valueTo": null,
+      "cell": [
+        "Numeric",
+        "5.5"
+      ],
+      "matches": true
+    },
+    {
+      "id": "eq: точність decimal, а не double",
+      "operator": "eq",
+      "value": "0.1",
+      "valueTo": null,
+      "cell": [
+        "Numeric",
+        "0.1000000000000000000001"
+      ],
+      "matches": false
+    },
+    {
+      "id": "eq: текст 100 — не число",
+      "operator": "eq",
+      "value": "100",
+      "valueTo": null,
+      "cell": [
+        "String",
+        "100"
+      ],
+      "matches": false
+    },
+    {
+      "id": "eq: текст abc",
+      "operator": "eq",
+      "value": "100",
+      "valueTo": null,
+      "cell": [
+        "String",
+        "abc"
+      ],
+      "matches": false
+    },
+    {
+      "id": "eq: нуль і мінус нуль",
+      "operator": "eq",
+      "value": "-0",
+      "valueTo": null,
+      "cell": [
+        "Numeric",
+        "0"
+      ],
+      "matches": true
+    },
+    {
+      "id": "eq: булеве 1",
+      "operator": "eq",
+      "value": "1",
+      "valueTo": null,
+      "cell": [
+        "Bool",
+        "true"
+      ],
+      "matches": false
+    },
+    {
+      "id": "eq: рядка немає",
+      "operator": "eq",
+      "value": "0",
+      "valueTo": null,
+      "cell": null,
+      "matches": false
+    },
+    {
+      "id": "gt: межа не включно",
+      "operator": "gt",
+      "value": "10",
+      "valueTo": null,
+      "cell": [
+        "Numeric",
+        "10"
+      ],
+      "matches": false
+    },
+    {
+      "id": "gt: трохи вище",
+      "operator": "gt",
+      "value": "10",
+      "valueTo": null,
+      "cell": [
+        "Numeric",
+        "10.0001"
+      ],
+      "matches": true
+    },
+    {
+      "id": "gt: від'ємне",
+      "operator": "gt",
+      "value": "10",
+      "valueTo": null,
+      "cell": [
+        "Numeric",
+        "-11"
+      ],
+      "matches": false
+    },
+    {
+      "id": "gt: текст 11 — не число",
+      "operator": "gt",
+      "value": "10",
+      "valueTo": null,
+      "cell": [
+        "String",
+        "11"
+      ],
+      "matches": false
+    },
+    {
+      "id": "gt: текст abc",
+      "operator": "gt",
+      "value": "10",
+      "valueTo": null,
+      "cell": [
+        "String",
+        "abc"
+      ],
+      "matches": false
+    },
+    {
+      "id": "gt: дата",
+      "operator": "gt",
+      "value": "0",
+      "valueTo": null,
+      "cell": [
+        "Date",
+        "2026-01-31T00:00:00"
+      ],
+      "matches": false
+    },
+    {
+      "id": "gt: межа decimal.MaxValue",
+      "operator": "gt",
+      "value": "79228162514264337593543950334",
+      "valueTo": null,
+      "cell": [
+        "Numeric",
+        "79228162514264337593543950335"
+      ],
+      "matches": true
+    },
+    {
+      "id": "gt: довга ціла частина довша",
+      "operator": "gt",
+      "value": "9",
+      "valueTo": null,
+      "cell": [
+        "Numeric",
+        "10"
+      ],
+      "matches": true
+    },
+    {
+      "id": "gt: порожньо",
+      "operator": "gt",
+      "value": "-1",
+      "valueTo": null,
+      "cell": [
+        "Empty",
+        null
+      ],
+      "matches": false
+    },
+    {
+      "id": "ge: межа включно",
+      "operator": "ge",
+      "value": "10",
+      "valueTo": null,
+      "cell": [
+        "Numeric",
+        "10"
+      ],
+      "matches": true
+    },
+    {
+      "id": "ge: нижче",
+      "operator": "ge",
+      "value": "10",
+      "valueTo": null,
+      "cell": [
+        "Numeric",
+        "9.9999"
+      ],
+      "matches": false
+    },
+    {
+      "id": "ge: булеве false",
+      "operator": "ge",
+      "value": "0",
+      "valueTo": null,
+      "cell": [
+        "Bool",
+        "false"
+      ],
+      "matches": false
+    },
+    {
+      "id": "ge: одиниця",
+      "operator": "ge",
+      "value": "0",
+      "valueTo": null,
+      "cell": [
+        "Unit",
+        "3"
+      ],
+      "matches": false
+    },
+    {
+      "id": "lt: від'ємне дробове",
+      "operator": "lt",
+      "value": "0",
+      "valueTo": null,
+      "cell": [
+        "Numeric",
+        "-0.5"
+      ],
+      "matches": true
+    },
+    {
+      "id": "lt: межа не включно",
+      "operator": "lt",
+      "value": "0",
+      "valueTo": null,
+      "cell": [
+        "Numeric",
+        "0"
+      ],
+      "matches": false
+    },
+    {
+      "id": "lt: рядка немає",
+      "operator": "lt",
+      "value": "1",
+      "valueTo": null,
+      "cell": null,
+      "matches": false
+    },
+    {
+      "id": "lt: текст -1 — не число",
+      "operator": "lt",
+      "value": "0",
+      "valueTo": null,
+      "cell": [
+        "String",
+        "-1"
+      ],
+      "matches": false
+    },
+    {
+      "id": "lt: два від'ємні",
+      "operator": "lt",
+      "value": "-2",
+      "valueTo": null,
+      "cell": [
+        "Numeric",
+        "-3"
+      ],
+      "matches": true
+    },
+    {
+      "id": "le: межа включно",
+      "operator": "le",
+      "value": "0",
+      "valueTo": null,
+      "cell": [
+        "Numeric",
+        "0"
+      ],
+      "matches": true
+    },
+    {
+      "id": "le: вище",
+      "operator": "le",
+      "value": "0",
+      "valueTo": null,
+      "cell": [
+        "Numeric",
+        "0.1"
+      ],
+      "matches": false
+    },
+    {
+      "id": "le: дата",
+      "operator": "le",
+      "value": "0",
+      "valueTo": null,
+      "cell": [
+        "Date",
+        "2026-01-31T00:00:00"
+      ],
+      "matches": false
+    },
+    {
+      "id": "le: елемент довідника",
+      "operator": "le",
+      "value": "100",
+      "valueTo": null,
+      "cell": [
+        "RegistryEntry",
+        "42"
+      ],
+      "matches": false
+    },
+    {
+      "id": "between: нижня межа",
+      "operator": "between",
+      "value": "1",
+      "valueTo": "5",
+      "cell": [
+        "Numeric",
+        "1"
+      ],
+      "matches": true
+    },
+    {
+      "id": "between: верхня межа",
+      "operator": "between",
+      "value": "1",
+      "valueTo": "5",
+      "cell": [
+        "Numeric",
+        "5"
+      ],
+      "matches": true
+    },
+    {
+      "id": "between: вище",
+      "operator": "between",
+      "value": "1",
+      "valueTo": "5",
+      "cell": [
+        "Numeric",
+        "5.01"
+      ],
+      "matches": false
+    },
+    {
+      "id": "between: нижче",
+      "operator": "between",
+      "value": "1",
+      "valueTo": "5",
+      "cell": [
+        "Numeric",
+        "0.99"
+      ],
+      "matches": false
+    },
+    {
+      "id": "between: межі навпаки",
+      "operator": "between",
+      "value": "5",
+      "valueTo": "1",
+      "cell": [
+        "Numeric",
+        "3"
+      ],
+      "matches": true
+    },
+    {
+      "id": "between: межі навпаки, поза",
+      "operator": "between",
+      "value": "5",
+      "valueTo": "1",
+      "cell": [
+        "Numeric",
+        "6"
+      ],
+      "matches": false
+    },
+    {
+      "id": "between: від'ємні межі",
+      "operator": "between",
+      "value": "-10",
+      "valueTo": "-1",
+      "cell": [
+        "Numeric",
+        "-5"
+      ],
+      "matches": true
+    },
+    {
+      "id": "between: текст 3 — не число",
+      "operator": "between",
+      "value": "1",
+      "valueTo": "5",
+      "cell": [
+        "String",
+        "3"
+      ],
+      "matches": false
+    },
+    {
+      "id": "between: текст abc",
+      "operator": "between",
+      "value": "1",
+      "valueTo": "5",
+      "cell": [
+        "String",
+        "abc"
+      ],
+      "matches": false
+    },
+    {
+      "id": "between: порожньо",
+      "operator": "between",
+      "value": "1",
+      "valueTo": "5",
+      "cell": [
+        "Empty",
+        null
+      ],
+      "matches": false
+    },
+    {
+      "id": "empty: рядка немає",
+      "operator": "empty",
+      "value": null,
+      "valueTo": null,
+      "cell": null,
+      "matches": true
+    },
+    {
+      "id": "empty: явна порожнеча",
+      "operator": "empty",
+      "value": null,
+      "valueTo": null,
+      "cell": [
+        "Empty",
+        null
+      ],
+      "matches": true
+    },
+    {
+      "id": "empty: порожній текст",
+      "operator": "empty",
+      "value": null,
+      "valueTo": null,
+      "cell": [
+        "String",
+        ""
+      ],
+      "matches": true
+    },
+    {
+      "id": "empty: пробіли й табуляція",
+      "operator": "empty",
+      "value": null,
+      "valueTo": null,
+      "cell": [
+        "String",
+        " \t "
+      ],
+      "matches": true
+    },
+    {
+      "id": "empty: нерозривний пробіл",
+      "operator": "empty",
+      "value": null,
+      "valueTo": null,
+      "cell": [
+        "String",
+        " "
+      ],
+      "matches": true
+    },
+    {
+      "id": "empty: BOM — не пробіл у .NET",
+      "operator": "empty",
+      "value": null,
+      "valueTo": null,
+      "cell": [
+        "String",
+        "﻿"
+      ],
+      "matches": false
+    },
+    {
+      "id": "empty: нуль",
+      "operator": "empty",
+      "value": null,
+      "valueTo": null,
+      "cell": [
+        "Numeric",
+        "0"
+      ],
+      "matches": false
+    },
+    {
+      "id": "empty: false",
+      "operator": "empty",
+      "value": null,
+      "valueTo": null,
+      "cell": [
+        "Bool",
+        "false"
+      ],
+      "matches": false
+    },
+    {
+      "id": "empty: текст",
+      "operator": "empty",
+      "value": null,
+      "valueTo": null,
+      "cell": [
+        "String",
+        "abc"
+      ],
+      "matches": false
+    },
+    {
+      "id": "notEmpty: рядка немає",
+      "operator": "notEmpty",
+      "value": null,
+      "valueTo": null,
+      "cell": null,
+      "matches": false
+    },
+    {
+      "id": "notEmpty: явна порожнеча",
+      "operator": "notEmpty",
+      "value": null,
+      "valueTo": null,
+      "cell": [
+        "Empty",
+        null
+      ],
+      "matches": false
+    },
+    {
+      "id": "notEmpty: пробіли",
+      "operator": "notEmpty",
+      "value": null,
+      "valueTo": null,
+      "cell": [
+        "String",
+        "  "
+      ],
+      "matches": false
+    },
+    {
+      "id": "notEmpty: нуль",
+      "operator": "notEmpty",
+      "value": null,
+      "valueTo": null,
+      "cell": [
+        "Numeric",
+        "0"
+      ],
+      "matches": true
+    },
+    {
+      "id": "notEmpty: текст",
+      "operator": "notEmpty",
+      "value": null,
+      "valueTo": null,
+      "cell": [
+        "String",
+        "abc"
+      ],
+      "matches": true
+    },
+    {
+      "id": "notEmpty: BOM",
+      "operator": "notEmpty",
+      "value": null,
+      "valueTo": null,
+      "cell": [
+        "String",
+        "﻿"
+      ],
+      "matches": true
+    },
+    {
+      "id": "notEmpty: дата",
+      "operator": "notEmpty",
+      "value": null,
+      "valueTo": null,
+      "cell": [
+        "Date",
+        "2026-01-31T00:00:00"
+      ],
+      "matches": true
+    },
+    {
+      "id": "notEmpty: булеве false",
+      "operator": "notEmpty",
+      "value": null,
+      "valueTo": null,
+      "cell": [
+        "Bool",
+        "false"
+      ],
+      "matches": true
+    },
+    {
+      "id": "notEmpty: елемент довідника",
+      "operator": "notEmpty",
+      "value": null,
+      "valueTo": null,
+      "cell": [
+        "RegistryEntry",
+        "42"
+      ],
+      "matches": true
+    },
+    {
+      "id": "notEmpty: одиниця",
+      "operator": "notEmpty",
+      "value": null,
+      "valueTo": null,
+      "cell": [
+        "Unit",
+        "3"
+      ],
+      "matches": true
+    }
+  ]
+}

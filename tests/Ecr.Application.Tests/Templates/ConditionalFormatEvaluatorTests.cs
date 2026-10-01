@@ -85,10 +85,15 @@ public sealed class ConditionalFormatEvaluatorTests
     }
 
     [Fact]
-    public void Double_and_int_values_are_numbers()
+    public void Double_is_a_number_but_registry_and_unit_ids_are_not()
     {
-        Assert.NotNull(Eval(Rule("eq", "2"), 2));
         Assert.NotNull(Eval(Rule("eq", "2.5"), 2.5d));
-        Assert.NotNull(Eval(Rule("eq", "7"), 7L));
+
+        // `long` — елемент довідника, `int` — одиниця (`CellValueMapping.ToRuleValue`):
+        // ідентифікатор, а не число в комірці.
+        Assert.Null(Eval(Rule("eq", "7"), 7L));
+        Assert.Null(Eval(Rule("ne", "100"), 7L));
+        Assert.Null(Eval(Rule("eq", "2"), 2));
+        Assert.NotNull(Eval(Rule("notEmpty"), 7L));
     }
 }

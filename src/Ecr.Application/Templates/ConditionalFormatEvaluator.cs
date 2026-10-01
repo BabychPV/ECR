@@ -97,9 +97,10 @@ public static class ConditionalFormatEvaluator
             case decimal d:
                 number = d;
                 return true;
-            case int or long or short or byte:
-                number = Convert.ToDecimal(value, CultureInfo.InvariantCulture);
-                return true;
+            // ⛔ Цілих `ToRuleValue` числом не віддає: `long` — елемент довідника,
+            // `int` — одиниця виміру. Це ідентифікатори, а людина в комірці бачить
+            // назву, тож «не дорівнює 100» для них — не про число (паритет із
+            // клієнтом, `conditional-format-parity.json`).
             case double or float:
                 try
                 {
