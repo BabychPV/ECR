@@ -89,6 +89,56 @@ public sealed class PresentationRowOrderApiTests(SqlServerFixture sql)
         Assert.Equal(1, (await db.RowDefs.AsNoTracking().SingleAsync(r => r.Id == draft.Row1)).Ordinal);
     }
 
+    /// <remarks>
+    /// Порядок рядків — презентація, а не структура: у ОПУБЛІКОВАНІЙ версії без
+    /// документів патч теж проходить (<c>200</c>) і міняє послідовність. Мутація:
+    /// класифікувати <c>RowDef.Ordinal</c> як структурну зміну в
+    /// <c>ChangeClassifier</c> — тест червоніє (<c>409</c>).
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-2.6")]
+    public async Task У_опублікованій_версії_патч_порядку_рядків_дає_200_і_міняє_порядок()
+    {
+        var draft = await ArrangeAsync(publish: true);
+        using var app = new EcrApiFactory(sql);
+        using var client = await SystemHealthControllerTests.SignedInAsync(
+            sql, app, "Template.View", "Template.Edit");
+
+        var patch = await PatchAsync(client, draft.VersionId, new object[]
+        {
+            new { entityType = "RowDef", entityId = draft.Row1, field = "Ordinal", value = "2" },
+            new { entityType = "RowDef", entityId = draft.Row2, field = "Ordinal", value = "1" },
+        });
+        Assert.True(patch.StatusCode == HttpStatusCode.OK, await patch.Content.ReadAsStringAsync());
+
+        var after = await RowsAsync(client, draft.VersionId);
+        Assert.Equal("R2,R1", string.Join(",", after.Select(r => r.Key)));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-2.6")]
+    public async Task Неіснуюча_версія_дає_404_на_патч_порядку_рядка()
+    {
+        var draft = await ArrangeAsync();
+        using var app = new EcrApiFactory(sql);
+        using var client = await SystemHealthControllerTests.SignedInAsync(
+            sql, app, "Template.View", "Template.Edit");
+
+        var response = await PatchAsync(client, 2_000_000_000, new object[]
+        {
+            new { entityType = "RowDef", entityId = draft.Row1, field = "Ordinal", value = "2" },
+        });
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+
+        await using var db = Context();
+        Assert.Equal(1, (await db.RowDefs.AsNoTracking().SingleAsync(r => r.Id == draft.Row1)).Ordinal);
+    }
+
     private static Task<HttpResponseMessage> PatchAsync(HttpClient client, int versionId, object[] body)
     {
         var request = new HttpRequestMessage(
@@ -109,7 +159,7 @@ public sealed class PresentationRowOrderApiTests(SqlServerFixture sql)
             .ToList();
     }
 
-    private async Task<Draft> ArrangeAsync()
+    private async Task<Draft> ArrangeAsync(bool publish = false)
     {
         var tag = Guid.NewGuid().ToString("N")[..8].ToUpperInvariant();
         await using var db = Context();
@@ -137,6 +187,12 @@ public sealed class PresentationRowOrderApiTests(SqlServerFixture sql)
         var row2 = new RowDef(table.Id, RowKey.Create("R2"), 2, Name("R2"), RowKind.Item);
         db.RowDefs.AddRange(row1, row2);
         await db.SaveChangesAsync();
+
+        if (publish)
+        {
+            version.Publish(1, Now);
+            await db.SaveChangesAsync();
+        }
 
         return new Draft(version.Id, row1.Id, row2.Id);
     }
