@@ -187,3 +187,150 @@ IF COL_LENGTH(N'arc.TableRow', N'IsOrphaned') IS NULL
     ALTER TABLE arc.TableRow
         ADD IsOrphaned bit NOT NULL CONSTRAINT DF_arc_TableRow_Orph DEFAULT (0);
 GO
+
+-- D-247 / НФ-8.4b: архів аудиту — SWITCH партицій aud.* у дзеркала arc.Audit*.
+--
+-- ⛔ Чому НЕ існуючий arc.CellChange: він clustered columnstore на [DATA_ARCHIVE],
+-- а SWITCH вимагає ідентичної структури (rowstore PK, ті самі індекси, та сама
+-- схема партиціонування й файлові групи). Тому цілі SWITCH — окремі таблиці
+-- `arc.Audit*`: колонка в колонку, індекс в індекс, на ТІЙ САМІЙ ps_AuditByMonth(ChangedAt).
+-- Партиція n джерела перемикається в партицію n цілі (метаданкова операція,
+-- без копіювання рядків). Переміщення на дешевший диск — справа DBA (файлова група
+-- [AUDIT] партицій, що старіють, див. docs/build/audit-archive-runbook.md).
+--
+-- ⚠ Колонки й індекси мають ЗБІГАТИСЯ з `11-audit-tables.sql`: SWITCH падає на
+-- будь-якій розбіжності (Msg 4943/4904/4912/4913). Додаєш колонку чи індекс до
+-- `aud.*` — додай сюди (сторож AuditArchiveSwitchTests).
+IF OBJECT_ID(N'arc.AuditCellChange', N'U') IS NULL
+BEGIN
+    CREATE TABLE arc.AuditCellChange
+    (
+        Id              bigint         IDENTITY(1,1) NOT NULL,
+        ChangedAt       datetime2(3)   NOT NULL,
+        PeriodKey       int            NOT NULL,
+        DocumentId      bigint         NOT NULL,
+        TableRowId      bigint         NOT NULL,
+        RowKey          nvarchar(100)  NOT NULL,
+        ColumnDefId     int            NOT NULL,
+        OldValue        nvarchar(1000) NULL,
+        NewValue        nvarchar(1000) NULL,
+        ChangedByUserId int            NOT NULL,
+        Origin          nvarchar(32)   NOT NULL,
+        IsLateEdit      bit            NOT NULL CONSTRAINT DF_arcAudCellChange_Late DEFAULT(0),
+        CorrelationId   nvarchar(64)   NULL,
+        IsOutOfWindow   bit            NOT NULL CONSTRAINT DF_arcAudCellChange_OutOfWindow DEFAULT(0),
+        CONSTRAINT PK_arcAuditCellChange PRIMARY KEY CLUSTERED (ChangedAt, Id) ON ps_AuditByMonth(ChangedAt)
+    ) ON ps_AuditByMonth(ChangedAt);
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_CellChange_Cell'
+               AND object_id = OBJECT_ID(N'arc.AuditCellChange'))
+    CREATE INDEX IX_CellChange_Cell
+        ON arc.AuditCellChange (DocumentId, TableRowId, ColumnDefId, ChangedAt DESC)
+        ON ps_AuditByMonth(ChangedAt);
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_CellChange_OutOfWindow'
+               AND object_id = OBJECT_ID(N'arc.AuditCellChange'))
+    CREATE INDEX IX_CellChange_OutOfWindow
+        ON arc.AuditCellChange (DocumentId, PeriodKey, TableRowId, ColumnDefId)
+        WHERE IsOutOfWindow = 1
+        ON ps_AuditByMonth(ChangedAt);
+GO
+
+IF OBJECT_ID(N'arc.AuditStructureChange', N'U') IS NULL
+BEGIN
+    CREATE TABLE arc.AuditStructureChange
+    (
+        Id                bigint         IDENTITY(1,1) NOT NULL,
+        ChangedAt         datetime2(3)   NOT NULL,
+        TemplateVersionId int            NOT NULL,
+        EntityType        nvarchar(64)   NOT NULL,
+        EntityId          int            NOT NULL,
+        ChangeClass       tinyint        NOT NULL,
+        Operation         nvarchar(32)   NOT NULL,
+        OldJson           nvarchar(max)  NULL,
+        NewJson           nvarchar(max)  NULL,
+        ChangeReason      nvarchar(1000) NULL,
+        ChangedByUserId   int            NOT NULL,
+        CorrelationId     nvarchar(64)   NULL,
+        CONSTRAINT PK_arcAuditStructureChange PRIMARY KEY CLUSTERED (ChangedAt, Id) ON ps_AuditByMonth(ChangedAt)
+    ) ON ps_AuditByMonth(ChangedAt);
+END
+GO
+
+IF OBJECT_ID(N'arc.AuditSecurityEvent', N'U') IS NULL
+BEGIN
+    CREATE TABLE arc.AuditSecurityEvent
+    (
+        Id              bigint        IDENTITY(1,1) NOT NULL,
+        ChangedAt       datetime2(3)  NOT NULL,
+        EventType       nvarchar(64)  NOT NULL,
+        TargetUserId    int           NULL,
+        TargetRoleId    int           NULL,
+        DetailsJson     nvarchar(max) NULL,
+        ChangedByUserId int           NOT NULL,
+        CorrelationId   nvarchar(64)  NULL,
+        CONSTRAINT PK_arcAuditSecurityEvent PRIMARY KEY CLUSTERED (ChangedAt, Id) ON ps_AuditByMonth(ChangedAt)
+    ) ON ps_AuditByMonth(ChangedAt);
+END
+GO
+
+IF OBJECT_ID(N'arc.AuditPublicationEvent', N'U') IS NULL
+BEGIN
+    CREATE TABLE arc.AuditPublicationEvent
+    (
+        Id              bigint         IDENTITY(1,1) NOT NULL,
+        ChangedAt       datetime2(3)   NOT NULL,
+        EntityType      nvarchar(64)   NOT NULL,
+        EntityId        int            NOT NULL,
+        ResultDiffJson  nvarchar(max)  NULL,
+        ChangeReason    nvarchar(1000) NOT NULL,
+        ChangedByUserId int            NOT NULL,
+        CONSTRAINT PK_arcAuditPublicationEvent PRIMARY KEY CLUSTERED (ChangedAt, Id) ON ps_AuditByMonth(ChangedAt)
+    ) ON ps_AuditByMonth(ChangedAt);
+END
+GO
+
+-- Архівований аудит так само незмінний: UPDATE/DELETE відхиляються (THROW 50060,
+-- як у aud.*). SWITCH (туди й назад) — DDL, тригерів не запускає.
+CREATE OR ALTER TRIGGER arc.TR_AuditCellChange_Immutable
+ON arc.AuditCellChange
+AFTER UPDATE, DELETE
+AS
+BEGIN
+    SET NOCOUNT ON;
+    THROW 50060, N'Архів arc.AuditCellChange незмінний: UPDATE і DELETE заборонені (ФВ-5.21).', 1;
+END;
+GO
+
+CREATE OR ALTER TRIGGER arc.TR_AuditStructureChange_Immutable
+ON arc.AuditStructureChange
+AFTER UPDATE, DELETE
+AS
+BEGIN
+    SET NOCOUNT ON;
+    THROW 50060, N'Архів arc.AuditStructureChange незмінний: UPDATE і DELETE заборонені (ФВ-5.21).', 1;
+END;
+GO
+
+CREATE OR ALTER TRIGGER arc.TR_AuditSecurityEvent_Immutable
+ON arc.AuditSecurityEvent
+AFTER UPDATE, DELETE
+AS
+BEGIN
+    SET NOCOUNT ON;
+    THROW 50060, N'Архів arc.AuditSecurityEvent незмінний: UPDATE і DELETE заборонені (ФВ-5.21).', 1;
+END;
+GO
+
+CREATE OR ALTER TRIGGER arc.TR_AuditPublicationEvent_Immutable
+ON arc.AuditPublicationEvent
+AFTER UPDATE, DELETE
+AS
+BEGIN
+    SET NOCOUNT ON;
+    THROW 50060, N'Архів arc.AuditPublicationEvent незмінний: UPDATE і DELETE заборонені (ФВ-5.21).', 1;
+END;
+GO
