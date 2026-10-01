@@ -183,6 +183,19 @@ const devRoutes = import.meta.env.DEV
           </Chunk>
         ),
       },
+      {
+        // ⚠ Стенд віртуалізації 500×60 (`ФВ-14.29`), міряє `e2e/virtualGrid.spec.ts`.
+        path: '/_virtual-grid',
+        element: (
+          <Chunk>
+            {createElement(
+              lazy(async () => ({
+                default: (await import('@/pages/VirtualGridStandPage')).VirtualGridStandPage,
+              })),
+            )}
+          </Chunk>
+        ),
+      },
     ]
   : [];
 
