@@ -473,7 +473,7 @@ export function SourceEventsTable({
 
       {rows.length > 0 && (
         <Table.ScrollContainer minWidth={900}>
-          <Table data-source-events-table="">
+          <Table data-source-events-table="" aria-label={t('sourceEvents.title')}>
             <Table.Thead>
               <Table.Tr>
                 <Table.Th>{t("sourceEvents.colTime")}</Table.Th>

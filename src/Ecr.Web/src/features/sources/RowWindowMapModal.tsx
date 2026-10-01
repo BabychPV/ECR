@@ -1,4 +1,5 @@
 import { useState, type JSX } from 'react';
+import { useReturnFocusOnUnmount } from '@/shared/a11y/focus';
 import { Button, Divider, Group, List, Loader, Modal, Select, Stack, Switch, Table, Text, TextInput, Title } from '@mantine/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { DocumentSummary, SourceEntityStatus } from '@/api/types';
@@ -98,6 +99,7 @@ export function RowWindowMapModal({
   readonly documents: readonly DocumentSummary[];
   readonly onClose: () => void;
 }): JSX.Element {
+  useReturnFocusOnUnmount();
   const queryClient = useQueryClient();
   const [state, setState] = useState<RowWindowFormState>(() => (map === null ? emptyForm() : formFromMap(map)));
   const patch = (next: Partial<RowWindowFormState>): void => setState((current) => ({ ...current, ...next }));

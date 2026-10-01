@@ -1,4 +1,5 @@
 import { useEffect, useState, type JSX } from 'react';
+import { useReturnFocusOnUnmount } from '@/shared/a11y/focus';
 import { Alert, Button, Group, Modal, SegmentedControl, Select, Stack, Table, Text } from '@mantine/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
@@ -77,6 +78,7 @@ export interface VersionMigrationDialogProps {
  * тож вибір і звіт щоразу починаються з нуля без окремого скидання.
  */
 export function VersionMigrationDialog({ documentId, onClose }: VersionMigrationDialogProps): JSX.Element {
+  useReturnFocusOnUnmount();
   const queryClient = useQueryClient();
 
   const [targetId, setTargetId] = useState<string | null>(null);
@@ -144,6 +146,7 @@ export function VersionMigrationDialog({ documentId, onClose }: VersionMigration
         />
 
         <SegmentedControl
+          aria-label={t('documents.migrateVersionTitle')}
           value={mode}
           onChange={(value) => setMode(value as VersionMigrationMode)}
           data={[
@@ -224,7 +227,7 @@ function MigrationReport({ report }: { readonly report: VersionMigrationReport }
       )}
 
       {shown.length > 0 && (
-        <Table withTableBorder striped>
+        <Table withTableBorder striped aria-label={t('documents.migrateVersionTitle')}>
           <Table.Thead>
             <Table.Tr>
               <Table.Th>{t('documents.migrateItemPath')}</Table.Th>

@@ -202,7 +202,7 @@ export function SourceEventProbePanel({
               role="region"
               aria-label={t('sourceEvents.probeTitle')}
             >
-              <Table data-source-event-probe-table="">
+              <Table data-source-event-probe-table="" aria-label={t('sourceEvents.probeTitle')}>
                 <Table.Thead>
                   <Table.Tr>
                     <Table.Th>{t('sourceEvents.colTimeUtc')}</Table.Th>

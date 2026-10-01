@@ -92,7 +92,7 @@ export function StructureChangesPanel({ from, to }: { from: string; to: string }
       >
         {(page) => (
           <>
-            <Table striped className="ecr-sticky-head">
+            <Table striped className="ecr-sticky-head" aria-label={t('audit.viewStructure')}>
               <Table.Thead>
                 <Table.Tr>
                   <Table.Th>{t('audit.when')}</Table.Th>

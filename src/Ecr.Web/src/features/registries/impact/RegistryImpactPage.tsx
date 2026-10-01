@@ -267,7 +267,7 @@ export function RegistryImpactPage(): JSX.Element {
                 </Alert>
               )}
 
-              <Table striped withTableBorder>
+              <Table striped withTableBorder aria-label={t('registries.impact.title')}>
                 <Table.Thead>
                   <Table.Tr>
                     {canRecalculate && <Table.Th aria-label={t('registries.impact.select')} />}

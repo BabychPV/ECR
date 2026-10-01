@@ -177,6 +177,10 @@ describe('useVersionMigrationAction', () => {
 
     fireEvent.click(screen.getByTestId('migrate-dry-run'));
     await screen.findByText('⟦documents.migrateCanApply⟧');
+
+    // Перемикач режиму і таблиця змін мають доступні назви (WCAG 1.3.1 / 4.1.2).
+    expect(screen.getByRole('radiogroup', { name: '⟦documents.migrateVersionTitle⟧' })).toBeDefined();
+    expect(screen.getByRole('table', { name: '⟦documents.migrateVersionTitle⟧' })).toBeDefined();
     expect(sent).toEqual([{ method: 'POST', body: { targetVersionId: 2, mode: 'Safe', dryRun: true } }]);
 
     await waitFor(() => expect((apply as HTMLButtonElement).disabled).toBe(false));

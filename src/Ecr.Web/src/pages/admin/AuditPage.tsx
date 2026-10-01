@@ -153,6 +153,7 @@ export function AuditPage(): JSX.Element {
         actions={
           <Group gap="xs" align="end">
             <SegmentedControl
+              aria-label={t('audit.title')}
               size="xs"
               value={structure ? 'structure' : 'cells'}
               onChange={(value) => setView(value === 'structure' ? 'structure' : null)}
@@ -431,7 +432,7 @@ const CellChangesTable = memo(function CellChangesTable({
   readonly items: readonly CellChange[];
 }): JSX.Element {
   return (
-    <Table striped className="ecr-sticky-head">
+    <Table striped className="ecr-sticky-head" aria-label={t('audit.title')}>
       <Table.Thead>
         <Table.Tr>
           <Table.Th>{t('audit.when')}</Table.Th>

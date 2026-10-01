@@ -97,7 +97,7 @@ export function RowWindowMapsPanel({
 
       {maps.isSuccess && maps.data.length > 0 && (
         <Table.ScrollContainer minWidth={720}>
-          <Table data-row-window-list="">
+          <Table data-row-window-list="" aria-label={t('rowWindow.title')}>
             <Table.Thead>
               <Table.Tr>
                 <Table.Th>{t('rowWindow.colTarget')}</Table.Th>

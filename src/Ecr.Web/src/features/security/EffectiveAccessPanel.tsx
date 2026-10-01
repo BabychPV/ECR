@@ -130,7 +130,7 @@ function EffectiveAccessResult({ view }: { view: EffectiveAccessView }): JSX.Ele
         <Text size="sm">{t('effectiveAccess.noContributions')}</Text>
       ) : (
         <Table.ScrollContainer minWidth={560}>
-          <Table striped>
+          <Table striped aria-label={t('effectiveAccess.title')}>
             <Table.Thead>
               <Table.Tr>
                 <Table.Th>{t('effectiveAccess.colSource')}</Table.Th>

@@ -84,7 +84,7 @@ export function RegistryExternalKeysPanel({
       ) : items.length === 0 ? (
         <Text size="sm">{t('registries.externalKeysEmpty')}</Text>
       ) : (
-        <Table>
+        <Table aria-label={t('registries.externalKeys')}>
           <Table.Thead>
             <Table.Tr>
               <Table.Th>{t('registries.externalKeySource')}</Table.Th>

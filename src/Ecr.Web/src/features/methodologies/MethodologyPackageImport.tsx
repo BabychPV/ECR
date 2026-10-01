@@ -53,7 +53,7 @@ function IssueTable({ title, issues }: { title: string; issues: Issue[] }): JSX.
       <Text fw={600}>
         {title} ({issues.length})
       </Text>
-      <Table striped withTableBorder>
+      <Table striped withTableBorder aria-label={t('methodologies.importTitle')}>
         <Table.Tbody>
           {issues.slice(0, 200).map((issue, index) => (
             <Table.Tr key={`${issue.kind}:${String(index)}`}>

@@ -104,7 +104,7 @@ export function SourceEventMapsPanel({
       )}
 
       {maps.isSuccess && maps.data.length > 0 && (
-        <Table data-source-event-map-list="">
+        <Table data-source-event-map-list="" aria-label={t('sourceEvents.mapsTitle')}>
           <Table.Thead>
             <Table.Tr>
               <Table.Th>{t('sourceEvents.document')}</Table.Th>

@@ -1,4 +1,5 @@
 import { useState, type JSX } from 'react';
+import { useReturnFocusOnUnmount } from '@/shared/a11y/focus';
 import { Button, Checkbox, Group, Modal, NumberInput, Select, Stack, Switch, TextInput } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
@@ -191,6 +192,7 @@ export function DataSourceFormModal({
   readonly source: DataSource | null;
   readonly onClose: () => void;
 }): JSX.Element {
+  useReturnFocusOnUnmount();
   return (
     <Modal
       opened={opened}
