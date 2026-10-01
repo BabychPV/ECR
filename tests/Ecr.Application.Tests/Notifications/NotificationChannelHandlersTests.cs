@@ -1,4 +1,4 @@
-﻿// tests/Ecr.Application.Tests/Notifications/NotificationChannelHandlersTests.cs
+// tests/Ecr.Application.Tests/Notifications/NotificationChannelHandlersTests.cs
 using System.Text;
 using Ecr.Application.Common;
 using Ecr.Application.Errors;
@@ -303,6 +303,29 @@ public sealed class NotificationChannelHandlersTests
         _sender.SendAsync(default!, default!, default!, default).ThrowsAsyncForAnyArgs(new InvalidOperationException("relay refused"));
         var refused = await Test().HandleAsync(mail.Id, CancellationToken.None);
         Assert.Equal((false, "relay refused"), (refused.Ok, refused.Error));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "D-263")]
+    public async Task Проба_SMTP_іде_відправником_каналу_що_розгортає_ролі_з_межею_а_порожній_розклад_має_ключ()
+    {
+        var mail = await Save().CreateAsync(NotificationChannelKind.Smtp, "Mail", Smtp, CancellationToken.None);
+        _sender.IsConfigured.Returns(true);
+
+        var smtp = new SpyChannelSender(NotificationChannelKind.Smtp);
+        Assert.True((await Test(smtp).HandleAsync(mail.Id, CancellationToken.None)).Ok);
+
+        // ⛔ Мутація: повернути шлях лише з явними адресами (`sender.SendAsync`) → Calls порожній, рядок червоний.
+        var call = Assert.Single(smtp.Calls);
+        Assert.Equal(mail.Id, call.Channel.Id);
+        Assert.Equal(TestNotificationChannelHandler.ProbeRecipientLimit, call.Message.RecipientLimit);
+        await _sender.DidNotReceiveWithAnyArgs().SendAsync(default!, default!, default!, default);
+
+        // Ролі не розкрилися → названий ключ, а не загальна відмова.
+        smtp.Fails = new NotificationNoRecipientsException("no active role users");
+        var none = await Test(smtp).HandleAsync(mail.Id, CancellationToken.None);
+        Assert.Equal((false, "notifications.test.smtpNoRecipients"), (none.Ok, none.MessageKey));
     }
 
     [Fact]

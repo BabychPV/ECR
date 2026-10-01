@@ -171,22 +171,56 @@ public sealed class SmtpSettingsHandlersTests
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
     [Trait("Requirement", "D-263")]
-    public async Task Проба_шле_лист_лише_поточному_користувачу_а_не_адресату_із_запиту()
+    public async Task Проба_шле_лист_на_введену_адресу_рівно_одну_а_порожня_адреса_веде_до_пошти_користувача()
     {
         Arrange();
         _sender.IsConfigured.Returns(true);
         var handler = TestHandler(" me@corp.example ");
 
-        var ok = await handler.HandleAsync(new SmtpTestRequest("victim@evil.example"), CancellationToken.None);
+        var ok = await handler.HandleAsync(new SmtpTestRequest(" ops@corp.example "), CancellationToken.None);
         Assert.True(ok.Ok);
 
-        // ⛔ Мутація: взяти адресу із request.To замість користувача → цей рядок стане червоним.
+        // ⛔ Мутація: ігнорувати request.To (брати пошту користувача) → цей рядок стане червоним.
+        await _sender.Received(1).SendAsync(
+            Arg.Is<IReadOnlyList<string>>(r => r.Single() == "ops@corp.example"), "ECR test notification",
+            "SMTP settings test message.", Arg.Any<CancellationToken>());
+
+        _sender.ClearReceivedCalls();
+        await handler.HandleAsync(new SmtpTestRequest("  "), CancellationToken.None);
         await _sender.Received(1).SendAsync(
             Arg.Is<IReadOnlyList<string>>(r => r.Single() == "me@corp.example"), Arg.Any<string>(), Arg.Any<string>(),
             Arg.Any<CancellationToken>());
-        await _sender.DidNotReceive().SendAsync(
-            Arg.Is<IReadOnlyList<string>>(r => r.Contains("victim@evil.example")), Arg.Any<string>(),
-            Arg.Any<string>(), Arg.Any<CancellationToken>());
+
+        // Журнал: лише домен і ознака «введена», без повної адреси.
+        var audited = _events.Last(e => e.EventType == "SmtpSettingsTested").DetailsJson;
+        Assert.Contains("\"domain\":\"corp.example\"", audited, StringComparison.Ordinal);
+        Assert.DoesNotContain("ops@", audited, StringComparison.Ordinal);
+        Assert.DoesNotContain("me@", audited, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "D-263")]
+    [InlineData("a@corp.example, b@evil.example")]
+    [InlineData("a@corp.example,b@evil.example")]
+    [InlineData("a@corp.example;b@evil.example")]
+    [InlineData("a@corp.example b@evil.example")]
+    [InlineData("Ops <a@corp.example>")]
+    [InlineData("a@corp.example\r\nBcc: b@evil.example")]
+    [InlineData("a@corp.example\nb@evil.example")]
+    [InlineData("not-an-address")]
+    public async Task Проба_відхиляє_списки_роздільники_імена_відображення_і_CRLF_422_і_нічого_не_шле(string to)
+    {
+        Arrange();
+        _sender.IsConfigured.Returns(true);
+        var handler = TestHandler("me@corp.example");
+
+        // ⛔ Мутація: прибрати IsSingleAddress (брати request.To як є) → рядки червоніють (відкритий релей).
+        var bad = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => handler.HandleAsync(new SmtpTestRequest(to), CancellationToken.None));
+
+        Assert.Equal("err.ECR-REQ-0422.smtpTestRecipientInvalid", bad.Details!["messageKey"]);
+        await _sender.DidNotReceiveWithAnyArgs().SendAsync(default!, default!, default!, default);
     }
 
     [Fact]
@@ -233,7 +267,7 @@ public sealed class SmtpSettingsHandlersTests
         var handler = TestHandler(email);
 
         var bad = await Assert.ThrowsAsync<BusinessRuleException>(
-            () => handler.HandleAsync(new SmtpTestRequest("victim@evil.example"), CancellationToken.None));
+            () => handler.HandleAsync(new SmtpTestRequest(null), CancellationToken.None));
 
         Assert.Equal("err.ECR-REQ-0422.smtpTestRecipientInvalid", bad.Details!["messageKey"]);
         await _sender.DidNotReceiveWithAnyArgs().SendAsync(default!, default!, default!, default);

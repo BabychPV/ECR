@@ -1,4 +1,4 @@
-﻿// src/Ecr.Infrastructure/Notifications/SmtpChannelSender.cs
+// src/Ecr.Infrastructure/Notifications/SmtpChannelSender.cs
 using System.Text.Json;
 using Ecr.Application.Notifications;
 using Ecr.Application.Ports;
@@ -68,12 +68,13 @@ public sealed class SmtpChannelSender(
         var explicitSet = recipients.ToHashSet(StringComparer.OrdinalIgnoreCase);
         var groups = byRole
             .Where(r => explicitSet.Add(r.Email))
+            .Take(message.RecipientLimit ?? int.MaxValue)
             .GroupBy(r => r.Language, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
         if (explicitSet.Count == 0)
         {
-            throw new InvalidOperationException(
+            throw new NotificationNoRecipientsException(
                 $"Канал «{channel.Name}»: адресатів не задано (PUT …/channels/{{id}}) або в ролях-адресатах немає активних користувачів із поштою.");
         }
 

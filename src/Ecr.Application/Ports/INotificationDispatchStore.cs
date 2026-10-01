@@ -30,7 +30,9 @@ public sealed record NotificationText(string SubjectKey, string BodyKey, IReadOn
 /// <param name="Subject">Тема.</param>
 /// <param name="Body">Текст.</param>
 /// <param name="Text">Локалізовуваний варіант того самого тексту; див. <see cref="NotificationEvent"/>.</param>
-public sealed record NotificationMessage(string Subject, string Body, NotificationText? Text = null);
+/// <param name="RecipientLimit">Лише проба: найбільше адрес, розкритих із ролей (бойова розсилка — <c>null</c>, без межі).</param>
+public sealed record NotificationMessage(
+    string Subject, string Body, NotificationText? Text = null, int? RecipientLimit = null);
 
 /// <summary>Підсумок розсилки однієї події.</summary>
 /// <param name="Sent">Скільки каналів прийняли.</param>

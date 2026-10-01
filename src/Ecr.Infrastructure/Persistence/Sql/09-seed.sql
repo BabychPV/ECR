@@ -1,4 +1,4 @@
-﻿-- ⚠ SET-опції задаються ЯВНО і першими.
+-- ⚠ SET-опції задаються ЯВНО і першими.
 -- `sqlcmd` за замовчуванням має `QUOTED_IDENTIFIER OFF`, а `SqlClient` — `ON`.
 -- Через це скрипт, який проходить у тестах (їх виконує SqlClient), падає в
 -- розгортанні (його виконує DBA через sqlcmd, `09-commands.md` §3) на будь-якій
@@ -6053,6 +6053,9 @@ USING (VALUES
     (N'notifications.periodGraceStarted.subject', N'en', N'ECR: period {period} is past its deadline, project {project}', 1),
     (N'notifications.periodGraceStarted.body', N'en', N'The submission deadline of period {period} for project {project} has passed; only the grace window is left. Please finish and submit your document for this period.', 1),
     -- COLL:an9-rules ── кінець секції ──
+    -- COLL:smtp-probe ── Проба SMTP: адресат і канал за ролями (D-263) ──
+    (N'notifications.test.smtpNoRecipients', N'en', N'No recipients: the channel has no explicit addresses, and its roles resolve to no active user with an email address.', 1),
+    -- COLL:smtp-probe ── кінець секції ──
     -- SEC:effective-access ── Розріз «ресурс → рівень → грант якої ролі» (ФВ-6.16, D-220, `EffectiveAccessPanel`, GET /security/users/{id}/effective-access) ──
     (N'err.ECR-REQ-0422.effectiveAccessResource', N'en', N'The resource must be given as a type and a positive number, for example Registry:5 or Project:3.', 1),
     (N'effectiveAccess.show',            N'en', N'Show effective access', 1),

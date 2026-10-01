@@ -1,4 +1,4 @@
-﻿// src/Ecr.Application/Notifications/NotificationChannelHandlers.cs
+// src/Ecr.Application/Notifications/NotificationChannelHandlers.cs
 using System.Globalization;
 using System.Net.Mail;
 using System.Text.Json;
@@ -348,6 +348,11 @@ public sealed class ReplaceNotificationChannelSecretHandler(
     }
 }
 
+/// <summary>Поштовому каналу нікому слати: явних адрес немає, а ролі не розкрилися в жодну адресу.</summary>
+public sealed class NotificationNoRecipientsException(string message) : InvalidOperationException(message)
+{
+}
+
 /// <summary>Пробне повідомлення в канал. Право <c>System.ManageNotifications</c>.</summary>
 /// <remarks>
 /// ⚠ Два шляхи, і вони РІЗНІ навмисно. SMTP іде через
@@ -400,10 +405,24 @@ public sealed class TestNotificationChannelHandler(
     {
         if (channel.Kind == NotificationChannelKind.Smtp)
         {
-            return !sender.IsConfigured
-                ? new NotificationTestResult(
-                    false, "The SMTP transport is not configured.", "notifications.test.smtpNotConfigured")
-                : await TryAsync(
+            if (!sender.IsConfigured)
+            {
+                return new NotificationTestResult(
+                    false, "The SMTP transport is not configured.", "notifications.test.smtpNotConfigured");
+            }
+
+            // ⚠ Проба йде ТИМ САМИМ відправником каналу, що й розсилка: він розгортає ролі в адреси (активні
+            // користувачі з поштою, мова за вподобанням, дедуп). Без нього — лише явні адреси (старий шлях).
+            if (channelSenders.FirstOrDefault(s => s.Kind == NotificationChannelKind.Smtp) is { } smtp)
+            {
+                return await TryAsync(
+                    classify: true,
+                    send: () => smtp.SendAsync(
+                        channel, new NotificationMessage(Subject, BodyFor(channel), RecipientLimit: ProbeRecipientLimit), ct))
+                    .ConfigureAwait(false);
+            }
+
+            return await TryAsync(
                     classify: true,
                     send: () => sender.SendAsync(
                         ListNotificationChannelsHandler.ToView(channel, sender.IsConfigured).Settings.Recipients ?? [],
@@ -431,6 +450,9 @@ public sealed class TestNotificationChannelHandler(
 
     private const string Subject = "ECR test notification";
 
+    /// <summary>Найбільше адрес, розкритих із ролей у пробі: проба — не розсилка.</summary>
+    public const int ProbeRecipientLimit = 20;
+
     private static string BodyFor(NotificationChannel channel)
         => $"Test message for channel \"{channel.Name}\".";
 
@@ -451,7 +473,8 @@ public sealed class TestNotificationChannelHandler(
         catch (Exception e) when (e is not OperationCanceledException)
 #pragma warning restore CA1031
         {
-            var key = classify ? SmtpFailureClassifier.MessageKeyOf(e) : null;
+            var key = e is NotificationNoRecipientsException ? "notifications.test.smtpNoRecipients"
+                : classify ? SmtpFailureClassifier.MessageKeyOf(e) : null;
 
             return new NotificationTestResult(
                 false, e.Message, key == SmtpFailureClassifier.Unknown ? null : key);

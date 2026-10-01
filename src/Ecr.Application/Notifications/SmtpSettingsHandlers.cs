@@ -202,9 +202,9 @@ public sealed class SaveSmtpSettingsHandler(
 
 /// <summary>Результат проби SMTP.</summary>
 /// <param name="To">Адреса, на яку слати пробний лист.</param>
-// ⛔ D-263 (рев'ю): <c>To</c> СЕРВЕРОМ ІГНОРУЄТЬСЯ — лист іде лише на адресу поточного користувача (інакше проба —
-// відкритий релей від імені організації). Поле лишено в контракті, щоб не міняти openapi/schema.d.ts; XML-опис
-// навмисно не чіпаємо з тієї ж причини (він потрапляє в знімок).
+// ✎ D-263: <c>To</c> — РІВНО одна адреса (список, роздільники, ім'я-відображення, CRLF → 422). Порожня — пошта
+// поточного користувача. Лист фіксованого тексту, лише адмін із правом; журнал — лише домен. XML-опис не чіпаємо
+// (він потрапляє в знімок контракту).
 public sealed record SmtpTestRequest(string? To);
 
 /// <summary>Пробний лист через ефективні налаштування (БД, інакше конфігурація). Право <c>System.ManageNotifications</c>.</summary>
@@ -212,8 +212,8 @@ public sealed class TestSmtpSettingsHandler(
     INotificationSender sender, IAccessDecisionService access, IAuditWriter audit, ICurrentUser currentUser,
     IClock clock, IUserStore users)
 {
-    /// <summary>Шле пробний лист на адресу поточного користувача; відмова транспорту — відповідь із категорією.</summary>
-    /// <param name="request">Запит; <c>To</c> ігнорується.</param>
+    /// <summary>Шле пробний лист на одну введену адресу (інакше — поточному користувачу); відмова транспорту — відповідь із категорією.</summary>
+    /// <param name="request">Запит; <c>To</c> — одна адреса або порожньо.</param>
     /// <param name="ct">Токен скасування.</param>
     public async Task<NotificationTestResult> HandleAsync(SmtpTestRequest request, CancellationToken ct)
     {
@@ -222,10 +222,19 @@ public sealed class TestSmtpSettingsHandler(
         var profile = await PermissionCheck
             .RequireAsync(access, currentUser, ListNotificationChannelsHandler.Permission, ct).ConfigureAwait(false);
 
-        var me = await users.FindByIdAsync(profile.UserId, ct).ConfigureAwait(false);
-        var to = (me?.Email ?? string.Empty).Trim();
+        // ✎ Зміна рішення D-263: введена адреса ВИКОРИСТОВУЄТЬСЯ, але рівно ОДНА (без відкритого релея);
+        // порожня — як і раніше, пошта поточного користувача.
+        var entered = (request.To ?? string.Empty).Trim();
+        var useEntered = entered.Length > 0;
+        var to = entered;
 
-        if (!SmtpSettings.IsValidAddress(to))
+        if (!useEntered)
+        {
+            var me = await users.FindByIdAsync(profile.UserId, ct).ConfigureAwait(false);
+            to = (me?.Email ?? string.Empty).Trim();
+        }
+
+        if (!IsSingleAddress(to))
         {
             throw ListNotificationChannelsHandler.Invalid(
                 "err.ECR-REQ-0422.smtpTestRecipientInvalid", "Адресат проби не є поштовою адресою.", "to");
@@ -245,9 +254,15 @@ public sealed class TestSmtpSettingsHandler(
         }
 
         await ListNotificationChannelsHandler.AuditAsync(
-            audit, clock, currentUser, profile.UserId, "SmtpSettingsTested", new { ok = result.Ok }, ct)
+            audit, clock, currentUser, profile.UserId, "SmtpSettingsTested",
+            new { ok = result.Ok, recipient = useEntered ? "entered" : "own", domain = to[(to.LastIndexOf('@') + 1)..] }, ct)
             .ConfigureAwait(false);
 
         return result;
     }
+
+    /// <summary>Рівно одна «чиста» адреса: без списків, роздільників, імен-відображення, пробілів і керівних символів.</summary>
+    internal static bool IsSingleAddress(string address)
+        => address.All(c => !char.IsWhiteSpace(c) && !char.IsControl(c) && c is not (',' or ';' or '<' or '>' or '"' or '(' or ')'))
+           && SmtpSettings.IsValidAddress(address);
 }

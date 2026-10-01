@@ -2,6 +2,7 @@
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
+using Ecr.Application.Notifications;
 using Ecr.Application.Ports;
 using Ecr.Domain.Entities.Notifications;
 using Ecr.Domain.Entities.Security;
@@ -265,9 +266,48 @@ public sealed class SmtpAdminSettingsTests(SqlServerFixture sql) : IAsyncLifetim
         transport.IsConfigured.Returns(true);
         var sender = new SmtpChannelSender(transport, db);
 
-        await Assert.ThrowsAsync<InvalidOperationException>(
+        await Assert.ThrowsAsync<NotificationNoRecipientsException>(
             () => sender.SendAsync(channel, new NotificationMessage("S", "B"), CancellationToken.None));
         await transport.DidNotReceiveWithAnyArgs().SendAsync(default!, default!, default!, default);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "D-263")]
+    public async Task Проба_розгортає_ролі_каналу_в_адреси_але_не_більше_межі_а_розсилка_без_межі()
+    {
+        var tag = Guid.NewGuid().ToString("N")[..8];
+        await using var db = Db();
+        var role = new Role(EcrCode.Create($"SP{tag}"), new LocalizedText(new Dictionary<string, string> { ["en"] = "probe role" }));
+        db.Roles.Add(role);
+        await db.SaveChangesAsync();
+
+        for (var i = 0; i < 3; i++)
+        {
+            await AddUserAsync(db, role.Id, $"p{i}_{tag}@corp.example", "en");
+        }
+
+        var channel = new NotificationChannel(NotificationChannelKind.Smtp, $"probe-{tag}", "{}", DateTime.UtcNow, null);
+        db.NotificationChannels.Add(channel);
+        await db.SaveChangesAsync();
+        db.NotificationChannelRoles.Add(new NotificationChannelRole(channel.Id, role.Id));
+        await db.SaveChangesAsync();
+
+        var sent = new List<string>();
+        var transport = Substitute.For<INotificationSender>();
+        transport.IsConfigured.Returns(true);
+        transport.SendAsync(Arg.Do<IReadOnlyList<string>>(sent.AddRange), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(Task.CompletedTask);
+        var sender = new SmtpChannelSender(transport, db);
+
+        // ⛔ Мутація: прибрати Take(RecipientLimit) → лишиться 3, рядок стане червоним.
+        await sender.SendAsync(channel, new NotificationMessage("S", "B", RecipientLimit: 2), CancellationToken.None);
+        Assert.Equal(2, sent.Count);
+
+        sent.Clear();
+        await sender.SendAsync(channel, new NotificationMessage("S", "B"), CancellationToken.None);
+        Assert.Equal(3, sent.Count);
     }
 
     private static async Task<int> AddUserAsync(EcrDbContext db, int roleId, string? email, string? language)
