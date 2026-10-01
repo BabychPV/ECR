@@ -42,7 +42,7 @@ public sealed class CollectFromSourceHandler(
     {
         // ⚠ Права — ПЕРШИМИ: відмова за змістом запиту (422) не має
         // випереджати відмову за правом (403) тому, хто збирати не може.
-        await ListTemplatesHandler
+        var profile = await PermissionCheck
             .RequireAsync(access, currentUser, Permission, ct)
             .ConfigureAwait(false);
 
@@ -86,7 +86,7 @@ public sealed class CollectFromSourceHandler(
                 });
 
         return await jobs
-            .EnqueueAsync<ICollectionJob>(new CollectionTask(sourceEntityId, from, to), ct)
+            .EnqueueAsync<ICollectionJob>(new CollectionTask(sourceEntityId, from, to), ct, profile.UserId)
             .ConfigureAwait(false);
     }
 
