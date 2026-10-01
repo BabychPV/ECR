@@ -1,9 +1,9 @@
-// src/Ecr.Domain/Services/LegacyValidityImport.cs
+// src/Ecr.Domain/Services/External/LegacyValidityImport.cs
 
 using System.Globalization;
 using Ecr.Domain.ValueObjects;
 
-namespace Ecr.Domain.Services;
+namespace Ecr.Domain.Services.External;
 
 /// <summary>Що саме джерело написало на межі чинності.</summary>
 /// <remarks>

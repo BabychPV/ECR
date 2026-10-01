@@ -63,6 +63,32 @@ public sealed class LayerRulesTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "ФВ-11.9")]
+    public void Правило_3а_типи_Af_і_Legacy_лише_в_просторі_External()
+    {
+        // ФВ-11.9 дослівно: «типи Af* / Legacy* допустимі лише в ext». Правило 3
+        // стереже лише посилання на збірки — тип LegacyXxx, оголошений будь-де
+        // в ядрі, воно пропускає. `ext` у коді — простір імен із сегментом
+        // `External` (`Entities.External`, `Services.External`).
+        var offenders = new[] { Domain, Application }
+            .SelectMany(a => a.GetTypes())
+            .Where(t => IsExternalOnlyName(t.Name))
+            .Where(t => !(t.Namespace ?? "").Split('.').Contains("External"))
+            .Select(t => t.FullName)
+            .ToList();
+
+        Assert.Empty(offenders);
+    }
+
+    private static bool IsExternalOnlyName(string name)
+    {
+        var bare = name.Length > 1 && name[0] == 'I' && char.IsUpper(name[1]) ? name[1..] : name;
+        return bare.StartsWith("Legacy", StringComparison.Ordinal)
+               || (bare.Length > 2 && bare.StartsWith("Af", StringComparison.Ordinal) && char.IsUpper(bare[2]));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
     public void Правило_4_DbContext_не_зустрічається_у_контролерах()
     {
         // Контролер із DbContext — це другий прикладний шар, у якому те саме

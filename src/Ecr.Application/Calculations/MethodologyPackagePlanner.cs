@@ -4,7 +4,7 @@ using Ecr.Application.Calculations.Dto;
 using Ecr.Application.Ports;
 using Ecr.Domain.Entities.Calculations;
 using Ecr.Domain.Enums;
-using Ecr.Domain.Services;
+using Ecr.Domain.Services.External;
 using Ecr.Domain.ValueObjects;
 
 namespace Ecr.Application.Calculations;
