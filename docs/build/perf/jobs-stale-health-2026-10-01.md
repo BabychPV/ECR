@@ -36,7 +36,14 @@ Enterprise-прохід №2 (`3-performance.md`, P1 №1–3) був СТАТИ
 - Міграція `PerfFixJobsStaleHealth` додає persisted-стовпець: на оновленні — перерахунок по всіх рядках
   журналу (на 500 тис. рядків стенда ~20 с).
 
-## Пастка: JSON_VALUE у persisted-стовпці`nПерша версія стовпця (`CAST(JSON_VALUE(Payload...))` без захисту) зламала CI: `JSON_VALUE` на не-JSON тексті кидає\nпомилку 13609 навіть у lax-режимі, тож будь-який INSERT із нерозібраним Payload падав\n(`DbJobQueueTests.Невідомий_лейн_і_завеликий_payload...`), а ALTER на живій базі впав би на першому ж такому рядку.\nТепер `CASE WHEN ISJSON([Payload]) = 1 THEN ... END`.`n`n## Сторожі
+## Пастка: JSON_VALUE у persisted-стовпці
+
+Перша версія стовпця (`CAST(JSON_VALUE(Payload...))` без захисту) зламала CI: `JSON_VALUE` на не-JSON тексті кидає
+помилку 13609 навіть у lax-режимі, тож будь-який INSERT із нерозібраним Payload падав
+(`DbJobQueueTests.Невідомий_лейн_і_завеликий_payload...`), а ALTER на живій базі впав би на першому ж такому рядку.
+Тепер `CASE WHEN ISJSON([Payload]) = 1 THEN ... END`.
+
+## Сторожі
 
 `JobProgressHotQueriesScanTests` (Infrastructure, 2 тести) і
 `ReportSnapshotStalenessTests.Перевірка_зрізів_не_читає_давніх_прогонів_проєкту`: читання
