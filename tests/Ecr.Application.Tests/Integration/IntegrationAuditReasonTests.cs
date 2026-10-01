@@ -13,7 +13,7 @@ public sealed class IntegrationAuditReasonTests
     [Fact]
     public void Причина_кодується_конвертом_з_ключем_і_параметрами_інваріантною_культурою()
     {
-        var raw = IntegrationConfigAudit.Reason(
+        var raw = IntegrationAuditReason.Encode(
             "integrationAudit.sourceEntityBound", ("entity", "FLD-1"), ("registry", (int?)12345));
 
         Assert.True(JobProgressMessageCodec.TryDecode(raw, out var envelope));
@@ -26,7 +26,7 @@ public sealed class IntegrationAuditReasonTests
     [Fact]
     public void Причина_без_параметрів_не_несе_порожнього_p()
     {
-        var raw = IntegrationConfigAudit.Reason("integrationAudit.sourceEntityUnbound");
+        var raw = IntegrationAuditReason.Encode("integrationAudit.sourceEntityUnbound");
 
         Assert.Equal("{\"k\":\"integrationAudit.sourceEntityUnbound\"}", raw);
     }

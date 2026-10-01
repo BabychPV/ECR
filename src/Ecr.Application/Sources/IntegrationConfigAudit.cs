@@ -1,5 +1,4 @@
 // src/Ecr.Application/Sources/IntegrationConfigAudit.cs
-using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Ecr.Application.Common;
@@ -95,14 +94,7 @@ internal static class IntegrationConfigAudit
     /// розгортає ключ <c>integrationAudit.*</c> мовою інтерфейсу (<c>structureChangeReason.ts</c>).
     /// </summary>
     public static string Reason(string key, params (string Name, object? Value)[] parameters)
-        => JobProgressMessageCodec.Encode(new JobProgressMessageEnvelope(
-            key,
-            parameters.Length == 0
-                ? null
-                : parameters.ToDictionary(
-                    p => p.Name,
-                    p => Convert.ToString(p.Value, CultureInfo.InvariantCulture) ?? string.Empty,
-                    StringComparer.Ordinal)));
+        => IntegrationAuditReason.Encode(key, parameters);
 
     /// <summary>Пише запис журналу; <paramref name="oldJson"/> = <c>null</c> — створення, <paramref name="newJson"/> = <c>null</c> — видалення.</summary>
     public static Task WriteAsync(
