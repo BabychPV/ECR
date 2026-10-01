@@ -922,7 +922,12 @@ DELETE t
     (N'conditionalFormat.unavailable',             N'kz', N'Сервер әзірге шартты пішімдеу ережелерін сақтамайды. Мұнда ережелер құрып, оларды мән үлгісінде тексеруге болады, бірақ терезе жабылғанда олар жоғалады.'),
     (N'conditionalFormat.saveUnavailable',         N'en', N'Saving is unavailable until the server stores conditional formatting rules.'),
     (N'conditionalFormat.saveUnavailable',         N'ru', N'Сохранение недоступно, пока сервер не хранит правила условного форматирования.'),
-    (N'conditionalFormat.saveUnavailable',         N'kz', N'Сервер шартты пішімдеу ережелерін сақтамайынша, сақтау қолжетімсіз.')
+    (N'conditionalFormat.saveUnavailable',         N'kz', N'Сервер шартты пішімдеу ережелерін сақтамайынша, сақтау қолжетімсіз.'),
+    -- AN-15: рядки фіксованої таблиці переставляються (`RowDef.Ordinal` через
+    -- `PATCH …/presentation`) — підпис «поки не можна» втратив місце на екрані.
+    (N'reorder.rowsUnavailable',                   N'en', N'Rows cannot be reordered here yet: the server cannot change only a row''s order without resetting its translations. Use the Order field in the row form.'),
+    (N'reorder.rowsUnavailable',                   N'ru', N'Строки здесь пока нельзя переставлять: сервер не умеет менять только порядок строки, не сбрасывая её переводы. Используйте поле «Порядок» в форме строки.'),
+    (N'reorder.rowsUnavailable',                   N'kz', N'Мұнда жолдардың ретін әзірге өзгерту мүмкін емес: сервер жолдың аудармаларын өшірмей, тек ретін өзгерте алмайды. Жол пішініндегі «Реті» өрісін пайдаланыңыз.')
   ) AS s ([Key], Lang, OldVal)
     ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
  WHERE t.Value = s.OldVal COLLATE Latin1_General_BIN2;
@@ -5817,7 +5822,6 @@ USING (VALUES
     (N'reorder.moveUp', N'en', N'Move {name} up', 1),
     (N'reorder.moveDown', N'en', N'Move {name} down', 1),
     (N'reorder.moved', N'en', N'{name} is now in position {position} of {count}.', 1),
-    (N'reorder.rowsUnavailable', N'en', N'Rows cannot be reordered here yet: the server cannot change only a row''s order without resetting its translations. Use the Order field in the row form.', 1),
     (N'conditionalFormat.title', N'en', N'Conditional formatting', 1),
     (N'conditionalFormat.rule', N'en', N'Rule {position}', 1),
     (N'conditionalFormat.column', N'en', N'Column', 1),
@@ -13626,8 +13630,6 @@ SELECT v.[Key], v.Lang, v.Val
     (N'reorder.moveDown', N'kz', N'{name} төмен жылжыту'),
     (N'reorder.moved', N'ru', N'{name}: теперь позиция {position} из {count}.'),
     (N'reorder.moved', N'kz', N'{name}: енді {count} ішінен {position}-орында.'),
-    (N'reorder.rowsUnavailable', N'ru', N'Строки здесь пока нельзя переставлять: сервер не умеет менять только порядок строки, не сбрасывая её переводы. Используйте поле «Порядок» в форме строки.'),
-    (N'reorder.rowsUnavailable', N'kz', N'Мұнда жолдардың ретін әзірге өзгерту мүмкін емес: сервер жолдың аудармаларын өшірмей, тек ретін өзгерте алмайды. Жол пішініндегі «Реті» өрісін пайдаланыңыз.'),
     (N'conditionalFormat.title', N'ru', N'Условное форматирование'),
     (N'conditionalFormat.title', N'kz', N'Шартты пішімдеу'),
     (N'conditionalFormat.rule', N'ru', N'Правило {position}'),
