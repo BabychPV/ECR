@@ -120,7 +120,7 @@ public sealed class SaveConditionalFormatsHandler(
             var actual = ConditionalFormatsVersion.Of(
                 (await rules.GetAsync(templateVersionId, innerCt).ConfigureAwait(false))
                 .Select(ConditionalFormatMapper.Map));
-            if (string.Equals(actual, expected, StringComparison.OrdinalIgnoreCase))
+            if (!string.Equals(actual, expected, StringComparison.OrdinalIgnoreCase))
             {
                 throw new ConcurrencyConflictException(
                     ErrorCodes.TemplateFrozen,

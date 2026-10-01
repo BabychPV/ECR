@@ -219,7 +219,7 @@ public sealed class SourceEventMap : Entity<int>
         // синхронізація не пише взагалі: її значення дає формула.
         var lookupKind = spec.ValueKind != SourceEventValueKind.Direct;
         var lookupColumn = target.DataType == CellDataType.Lookup;
-        if (target.IsComputed)
+        if (lookupKind != lookupColumn || target.IsComputed)
         {
             throw new DomainException(
                 "ECR-INT-0422",
