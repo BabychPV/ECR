@@ -38,6 +38,8 @@ describe('structureChangeReasonText', () => {
     'integrationAudit.eventMapChanged',
     'integrationAudit.eventMapDeleted',
     'integrationAudit.registryPolicyChanged',
+    'integrationAudit.dataSourceCreated',
+    'integrationAudit.dataSourceChanged',
   ])('%s — відомий ключ розгортається', (key) => {
     const raw = JSON.stringify({ k: key, p: { id: '1' } });
 

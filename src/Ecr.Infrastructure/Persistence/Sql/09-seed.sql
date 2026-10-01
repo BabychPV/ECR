@@ -5874,6 +5874,11 @@ USING (VALUES
     (N'integrationAudit.registryPolicyChanged', N'en', N'Sync policy of registry {registry} from entity "{entity}" changed.', 1),
     -- ru/kz — окремою порцією `COLL:auditreason` у блоці I18N нижче.
     -- COLL:auditreason ── кінець секції ──
+    -- COLL:ent4 ── Причини змін з'єднання з джерелом (D8) конвертом, а не українською фразою (`SaveDataSourceHandler`, `structureChangeReason.ts`) ──
+    (N'integrationAudit.dataSourceCreated', N'en', N'Connection "{connection}" created.', 1),
+    (N'integrationAudit.dataSourceChanged', N'en', N'Connection "{connection}" changed.', 1),
+    -- ru/kz — окремою порцією `COLL:ent4` у блоці I18N нижче.
+    -- COLL:ent4 ── кінець секції ──
     -- COLL:sqlpolicy ── Політика адреси джерела PiSqlClient: ім'я сервера, а не URL; link-local заборонено ──
     (N'err.ECR-REQ-0422.dataSourceEndpointSqlScheme',    N'en', N'A PiSqlClient source address must be a server name (server, server\instance, server,port or host:port), not a URL with a scheme.', 1),
     (N'err.ECR-REQ-0422.dataSourceEndpointSqlLinkLocal', N'en', N'This server address is not allowed: link-local and cloud metadata addresses (169.254.0.0/16, fe80::/10) are refused.', 1),
@@ -13755,6 +13760,19 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:auditreason ── кінець секції ──
+
+-- COLL:ent4 ── ru/kz причин змін з'єднання з джерелом (D8); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'integrationAudit.dataSourceCreated', N'ru', N'Соединение «{connection}» создано.'),
+    (N'integrationAudit.dataSourceCreated', N'kz', N'«{connection}» қосылымы құрылды.'),
+    (N'integrationAudit.dataSourceChanged', N'ru', N'Соединение «{connection}» изменено.'),
+    (N'integrationAudit.dataSourceChanged', N'kz', N'«{connection}» қосылымы өзгертілді.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:ent4 ── кінець секції ──
 
 -- REGCTOR812 ── ru/kz табличного редактора даних довідника (ФВ-8.12); власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)
