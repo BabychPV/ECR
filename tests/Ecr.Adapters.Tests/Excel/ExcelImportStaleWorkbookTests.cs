@@ -182,6 +182,63 @@ public sealed class ExcelImportStaleWorkbookTests
         Assert.Equal("A4", rejection.ExcelCell);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public async Task Книга_без_відбитка_у_карті_імпортується_а_4221_дає_колишній_текст()
+    {
+        // ⚠ Сумісність: книги, вивантажені ДО відбитка, не мають `calc` у картах
+        // рядків. Імпорт має працювати, а причина лишатися колишньою («змінили»),
+        // навіть коли комірку насправді перерахувала система.
+        using var workbook = await ExportAsync();
+        StripFingerprints(workbook);
+        Recalculated(r1: 25m, r2: 12.5m);
+
+        var preview = await ImportAsync(workbook);
+
+        var rejection = Assert.Single(preview.Rejected);
+        Assert.Equal("ECR-CELL-4221", rejection.ReasonCode);
+        Assert.Equal(ImportMessageKeys.Calculated, rejection.MessageKey);
+        Assert.Equal("The cell is calculated by the system: the value from the file is not applied.", rejection.Message);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public async Task Підроблений_відбиток_не_обходить_відмову_обчислюваної_комірки()
+    {
+        // ⚠ Безпека: відбиток лише обирає формулювання причини. Підроблена карта
+        // дає «застаріла книга», але комірка все одно відхилена, значення не застосоване.
+        using var workbook = await ExportAsync();
+        var sheet = workbook.Worksheet("Sheet");
+        sheet.Cell(3, 2).Value = 21;
+        var map = workbook.Worksheet(ExcelWorkbookMap.SheetName);
+        var json = string.Concat(map.CellsUsed().OrderBy(c => c.Address.RowNumber).Select(c => c.GetString()));
+        var forged = System.Text.RegularExpressions.Regex.Replace(
+            json, "\"calc\":\"[0-9a-f]{4}\"", $"\"calc\":\"{CalculatedCellFingerprint.Of(sheet.Cell(3, 2))}\"");
+        Assert.NotEqual(json, forged);
+        map.Clear();
+        map.Cell(1, 1).Value = forged;
+
+        var preview = await ImportAsync(workbook);
+
+        Assert.Empty(preview.Changes);
+        var rejection = Assert.Single(preview.Rejected);
+        Assert.Equal("ECR-CELL-4221", rejection.ReasonCode);
+    }
+
+    private static void StripFingerprints(XLWorkbook workbook)
+    {
+        var map = workbook.Worksheet(ExcelWorkbookMap.SheetName);
+        var json = string.Concat(map.CellsUsed().OrderBy(c => c.Address.RowNumber).Select(c => c.GetString()));
+        var stripped = System.Text.RegularExpressions.Regex.Replace(json, ",\"calc\":\"[0-9a-f]*\"", string.Empty);
+        Assert.NotEqual(json, stripped);
+        map.Clear();
+        for (var offset = 0; offset < stripped.Length; offset += ExcelWorkbookMap.ChunkSize)
+        {
+            map.Cell((offset / ExcelWorkbookMap.ChunkSize) + 1, 1).Value =
+                stripped.Substring(offset, Math.Min(ExcelWorkbookMap.ChunkSize, stripped.Length - offset));
+        }
+    }
+
     private void Recalculated(decimal r1, decimal r2)
         => _results.ReadCurrentAsync(DocumentId, PeriodKeyValue, Arg.Any<CancellationToken>())
             .Returns(
