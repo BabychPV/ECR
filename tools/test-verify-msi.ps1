@@ -82,15 +82,23 @@ function Write-Corruption([string] $msi) {
 }
 # Підміна вмісту через Windows Installer API: новий рядок у Property.
 function Write-Tamper([string] $msi) {
+    # ⚠ Дескриптор бази тримає файл, доки COM-об'єкти не звільнено явно:
+    # `$db = $null` не досить — наступний Get-FileHash падав «file is being
+    # used by another process» (перший прогін CI).
     $installer = New-Object -ComObject WindowsInstaller.Installer
+    $db = $null; $view = $null
     try {
         $db = $installer.OpenDatabase($msi, 1)   # 1 = msiOpenDatabaseModeTransact
         $view = $db.OpenView("INSERT INTO ``Property`` (``Property``, ``Value``) VALUES ('EcrTamperProbe', '1')")
         [void] $view.Execute(); [void] $view.Close()
         [void] $db.Commit()
-        $db = $null
     }
-    finally { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($installer) | Out-Null }
+    finally {
+        foreach ($o in $view, $db, $installer) {
+            if ($o) { [void] [System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($o) }
+        }
+        [GC]::Collect(); [GC]::WaitForPendingFinalizers()
+    }
 }
 function Set-MachineTrust([System.Security.Cryptography.X509Certificates.X509Certificate2] $cert, [bool] $add) {
     foreach ($storeName in 'Root', 'TrustedPublisher') {
