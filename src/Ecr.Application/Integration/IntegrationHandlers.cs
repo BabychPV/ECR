@@ -136,7 +136,7 @@ public sealed class ListSourceEntitiesHandler(
     public async Task<IReadOnlyList<SourceEntityStatus>> HandleAsync(CancellationToken ct)
     {
         await PermissionCheck
-            .RequireAnyAsync(access, currentUser, [Permission, ViewPermission], ct)
+            .RequireAnyAsync(access, currentUser, [ViewPermission, Permission], ct)
             .ConfigureAwait(false);
 
         return await sources.ListSourceEntitiesAsync(ct).ConfigureAwait(false);
