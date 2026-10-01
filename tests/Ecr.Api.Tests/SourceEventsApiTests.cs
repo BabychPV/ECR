@@ -47,7 +47,7 @@ namespace Ecr.Api.Tests;
 /// </list>
 /// </remarks>
 [Collection("SqlServer")]
-public sealed class SourceEventsApiTests(SqlServerFixture sql)
+public sealed partial class SourceEventsApiTests(SqlServerFixture sql)
 {
     private const string Password = "Src-Events-Api-2026!";
 

@@ -28,7 +28,7 @@ namespace Ecr.Api.Tests;
 /// крім того, що змінює сценарій.
 /// </remarks>
 [Collection("SqlServer")]
-public sealed class DocumentVersionMigrationTests(SqlServerFixture sql)
+public sealed partial class DocumentVersionMigrationTests(SqlServerFixture sql)
 {
     private const string Password = "Api-Doc-Migrate-2026!";
 
