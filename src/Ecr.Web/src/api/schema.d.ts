@@ -25304,6 +25304,10 @@ export interface components {
             kind: string;
             /** @description Те, чим об'єкт упізнає людина: код. */
             label: string;
+            /** @description Читабельна назва об'єкта (ФВ-8.14, B5.4); `null` — назви немає (клієнт
+             *                 показує Label). Нове поле, а не зміна Label:
+             *                 підпис-код лишається для споживачів, що його читають. */
+            name?: null | string;
             /** @description Маршрут клієнта до об'єкта; `null` — окремого екрана немає. */
             route: null | string;
         };
