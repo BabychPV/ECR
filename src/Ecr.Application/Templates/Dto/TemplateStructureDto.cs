@@ -112,6 +112,7 @@ public sealed record TableDto(
 /// <param name="IsRequired">Колонка обов'язкова.</param>
 /// <param name="IsHidden">Колонка прихована; презентаційне поле.</param>
 /// <param name="DisplayFormat">Формат показу; презентаційне поле.</param>
+/// <param name="WidthPx">Типова ширина колонки, px (D-234); <c>null</c> — типова за типом; презентаційне поле.</param>
 /// <param name="UnitSymbol">Позначення одиниці, якщо задана.</param>
 /// <param name="FormulaExpression">
 /// Текст наявної формули колонки, якщо вона є; <c>null</c> — формули ще
@@ -138,7 +139,8 @@ public sealed record TemplateColumnDto(
     string? DisplayFormat,
     string? UnitSymbol,
     string? FormulaExpression,
-    ExpressionDialect? FormulaDialect);
+    ExpressionDialect? FormulaDialect,
+    int? WidthPx = null);
 
 /// <summary>
 /// Рядок у СТРУКТУРІ шаблону — опис, а не дані.

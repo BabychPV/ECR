@@ -497,7 +497,7 @@ public sealed class TemplateVersionsController(
                     request.IsRequired, request.IsReadOnly, request.IsHidden,
                     request.Precision, request.Scale,
                     request.DefaultValue, request.DisplayFormat, request.StyleId,
-                    request.LookupRegistryDefId, request.LookupFilter, request.UnitId),
+                    request.LookupRegistryDefId, request.LookupFilter, request.UnitId, request.WidthPx),
                 ct)
             .ConfigureAwait(false));
     }
@@ -975,6 +975,7 @@ public sealed record SaveTableDefRequest(
 /// <param name="LookupRegistryDefId">Довідник; лише для колонки типу <c>Lookup</c>.</param>
 /// <param name="LookupFilter">Звуження списку довідника.</param>
 /// <param name="UnitId">Одиниця значень колонки (ФВ-16.1); не для типу <c>Unit</c>.</param>
+/// <param name="WidthPx">Типова ширина, px, 40..800 (D-234); <c>null</c> — типова за типом.</param>
 public sealed record SaveColumnDefRequest(
     IReadOnlyDictionary<string, string> HeaderL10n,
     int? Ordinal,
@@ -989,7 +990,8 @@ public sealed record SaveColumnDefRequest(
     int? StyleId,
     int? LookupRegistryDefId,
     string? LookupFilter,
-    int? UnitId);
+    int? UnitId,
+    int? WidthPx = null);
 
 /// <summary>Налаштування поля шапки документа версії-чернетки.</summary>
 /// <param name="LabelL10n">Підпис поля мовами каталогу.</param>

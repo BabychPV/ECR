@@ -80,6 +80,27 @@ public sealed class PatchPresentationHandler(
             }
         }
 
+        // D-234: ширина колонки — ціле 40..800 px; `null` скидає до типової за
+        // типом. Той самий ключ, що й у `ColumnDef.SetWidth`.
+        foreach (var change in changes.Where(c => c.Field == "WidthPx" && c.Value is not null))
+        {
+            if (!int.TryParse(change.Value, System.Globalization.NumberStyles.None,
+                    System.Globalization.CultureInfo.InvariantCulture, out var width)
+                || width < Domain.Entities.Configuration.ColumnDef.MinWidthPx
+                || width > Domain.Entities.Configuration.ColumnDef.MaxWidthPx)
+            {
+                throw new BusinessRuleException(
+                    "ECR-TMPL-0422",
+                    $"Ширина колонки має бути цілим від {Domain.Entities.Configuration.ColumnDef.MinWidthPx} "
+                    + $"до {Domain.Entities.Configuration.ColumnDef.MaxWidthPx} px: '{change.Value}'.",
+                    new Dictionary<string, object?>
+                    {
+                        ["messageKey"] = "err.ECR-TMPL-0422.widthOutOfRange",
+                        ["widthPx"] = change.Value ?? string.Empty,
+                    });
+            }
+        }
+
         var hasDocuments = await store.HasDocumentsAsync(templateVersionId, ct).ConfigureAwait(false);
 
         // ⚠ Спершу класифікуємо ВСІ зміни і лише потім вирішуємо. Часткове

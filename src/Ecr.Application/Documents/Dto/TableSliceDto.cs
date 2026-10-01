@@ -93,7 +93,8 @@ public sealed record ColumnDto(
     byte? Precision = null,
     byte? Scale = null,
     bool IsRequiredByMethodology = false,
-    CellStyleDto? Style = null);
+    CellStyleDto? Style = null,
+    int? WidthPx = null);
 
 /// <summary>
 /// Підмножина <c>StyleDef</c>, потрібна ЖИВІЙ сітці (директива registry-

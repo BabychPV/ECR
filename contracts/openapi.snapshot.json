@@ -1659,6 +1659,13 @@
               "null",
               "integer"
             ]
+          },
+          "widthPx": {
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
           }
         },
         "required": [
@@ -1817,6 +1824,13 @@
             "type": [
               "null",
               "string"
+            ]
+          },
+          "widthPx": {
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
             ]
           }
         },
@@ -12015,6 +12029,14 @@
               "null",
               "integer"
             ]
+          },
+          "widthPx": {
+            "description": "Типова ширина, px, 40..800 (D-234); `null` — типова за типом.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
           }
         },
         "required": [
@@ -15350,6 +15372,14 @@
             "type": [
               "null",
               "string"
+            ]
+          },
+          "widthPx": {
+            "description": "Типова ширина колонки, px (D-234); `null` — типова за типом; презентаційне поле.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
             ]
           }
         },
