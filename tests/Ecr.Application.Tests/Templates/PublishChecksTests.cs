@@ -176,6 +176,8 @@ public sealed class PublishChecksTests
         var diagnostic = Assert.Single(PublishChecks.CheckStructure(version));
         Assert.Equal("ECR-TMPL-4226", diagnostic.Code);
         Assert.Contains("Total", diagnostic.Message, StringComparison.Ordinal);
+        Assert.Equal("err.ECR-TMPL-4226.calculatedWithoutSource", diagnostic.MessageKey);
+        Assert.Equal("Total", diagnostic.MessageParams!["columnCode"]);
 
         // Формула на цю ж колонку знімає зауваження — і це доводить, що
         // перевірка дивиться саме на джерело, а не на тип колонки.
@@ -206,6 +208,9 @@ public sealed class PublishChecksTests
         var diagnostic = Assert.Single(PublishChecks.CheckStructure(version));
         Assert.Equal("ECR-TMPL-4228", diagnostic.Code);
         Assert.Contains("Main", diagnostic.Message, StringComparison.Ordinal);
+        // P3 (walk-reg): діагностика несе ключ каталогу й підстановку, а не лише українське речення.
+        Assert.Equal("err.ECR-TMPL-4228.fixedTableWithoutRows", diagnostic.MessageKey);
+        Assert.Equal("Main", diagnostic.MessageParams!["tableCode"]);
     }
 
     [Fact]

@@ -5735,6 +5735,11 @@ USING (VALUES
     (N'err.ECR-CALC-0422.testCaseJsonInvalid', N'en', N'Test "{testCode}": field {field} is not valid JSON of the expected shape ({reason}).', 1),
     -- ru/kz — окремою порцією $Section у блоці I18N нижче.
     -- COLL:reqclose3-mtest ── кінець секції ──
+    -- COLL:reqclose3-tmplkeys ── див. ключі нижче ──
+    (N'err.ECR-TMPL-4228.fixedTableWithoutRows', N'en', N'Table {tableCode} is fixed (its rows are defined in the template) but has no rows. In the published form it would be an empty table the operator cannot enter anything into.', 1),
+    (N'err.ECR-TMPL-4226.calculatedWithoutSource', N'en', N'Column {tableCode}.{columnCode} has type {dataType}, so it must be computed by a template formula, but this version has none. In the published form it would be an empty cell the operator may not fill in.', 1),
+    -- ru/kz — окремою порцією $Section у блоці I18N нижче.
+    -- COLL:reqclose3-tmplkeys ── кінець секції ──
     -- JOBL ── людські назви видів фонових задач, яких бракувало в jobLabel.ts (KindKeys) ──
     (N'jobs.kind.sourceEventSync',  N'en', N'Source event sync', 1),
     (N'jobs.kind.consistencyCheck', N'en', N'Consistency check', 1),
@@ -13412,6 +13417,19 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:reqclose3-mtest ── кінець секції ──
+
+-- COLL:reqclose3-tmplkeys ── ru/kz; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-TMPL-4228.fixedTableWithoutRows', N'ru', N'Таблица {tableCode} фиксированная (строки определены в шаблоне), но в ней нет ни одной строки. В опубликованной форме это пустая таблица, в которую оператор не сможет ввести ни одного значения.'),
+    (N'err.ECR-TMPL-4228.fixedTableWithoutRows', N'kz', N'{tableCode} кестесі тұрақты (жолдар үлгіде анықталған), бірақ онда бірде-бір жол жоқ. Жарияланған пішінде бұл оператор ешқандай мән енгізе алмайтын бос кесте болады.'),
+    (N'err.ECR-TMPL-4226.calculatedWithoutSource', N'ru', N'Колонка {tableCode}.{columnCode} имеет тип {dataType}, то есть должна считаться формулой шаблона, но в этой версии формулы нет. В опубликованной форме это пустая ячейка, которую оператор не вправе заполнить.'),
+    (N'err.ECR-TMPL-4226.calculatedWithoutSource', N'kz', N'{tableCode}.{columnCode} бағанының түрі {dataType}, яғни ол үлгі формуласымен есептелуі тиіс, бірақ бұл нұсқада формула жоқ. Жарияланған пішінде бұл оператор толтыруға құқығы жоқ бос ұяша болады.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:reqclose3-tmplkeys ── кінець секції ──
 
 -- COLL:sqlpolicy ── ru/kz політики адреси PiSqlClient; власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)
