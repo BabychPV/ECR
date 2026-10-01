@@ -281,10 +281,9 @@ GO
 --                 decimal(38,18), 1/86400 = 0.0000115740740740740740…).
 -- Конверсії в/з працюючий м3 (mg_per_m3, m3_per_day) НЕМАЄ навмисно: розмірності
 -- 16 і 11 різні (V-12), і CONVERT дає #UNIT, а не правдоподібне число.
--- ⚠ Sm3 у каталозі — єдиний «стандартний» кубометр; книги замовника пишуть
--- і «Nm3» (0 °C), і «Sm3» (15/20 °C), а множника між ними каталог не має.
--- Бачить це `UnitRecognizer` (tools/Ecr.Bootstrap.Excel): «nm3» → Sm3.
--- Факт замовника: чи тотожні для його методологій Nm3 і Sm3 (див. звіт).
+-- ⚠ Sm3 тут — стандартний кубометр (20 °C, 1 атм). Нормальний Nm3 (0 °C,
+-- 1 атм) з множником до Sm3 — окрема секція `-- HSE301:NM3` нижче;
+-- `UnitRecognizer` (tools/Ecr.Bootstrap.Excel) мапить «nm3» → Nm3, не Sm3.
 -- Дзеркало в пам'яті воркера — `UnitTable.Seed` (Ecr.Calculations); його
 -- звіряє `Hse301UnitsTests`.
 MERGE uom.Unit AS t
@@ -302,6 +301,67 @@ WHEN NOT MATCHED THEN INSERT
              (SELECT Id FROM uom.Unit WHERE Code = s.DenCode));
 GO
 -- UNITS:ecr-derived ── кінець секції ───────────────────────────────────────
+
+-- HSE301:NM3 ── нормальний кубометр Nm3 (0 °C, 1 атм) окремо від Sm3 (20 °C, 1 атм) ──
+-- Nm3 — ТА САМА розмірність StdVolume (12), що й Sm3 (база, множник 1): обидва
+-- стандартні, тиск 1 атм однаковий, різниця лише в температурі, тож V-12 не
+-- порушено, а нової розмірності й міграції схеми немає. CONVERT(x,'Nm3','Sm3')
+-- іде через базу; Nm3 і Sm3 без явного CONVERT не змішуються (D-74).
+-- ПРИПУЩЕННЯ — замінити фактом замовника: 1 Nm3 = 293.15 / 273.15 Sm3
+-- = 1.073219842577338459 (ідеальний газ, однаковий тиск, Z не враховано).
+-- Факту (власної таблиці чи ГОСТ 22667-82) у замовника немає. Заміна — правка
+-- ДВОХ літералів: `FactorToBase` Nm3 нижче й дзеркала `UnitTable.Seed`
+-- (Ecr.Calculations); похідні нижче — зі степеня того самого фактора:
+--   Nm3_per_s = F;  Nm3_per_h = F / 3600;  Nm3_per_day = F / 86400;
+--   mg_per_Nm3 = 1e-6 / F  (до kg_per_Sm3, база MassPerStdVolume).
+-- ⚠ Нове число для БАЗ, що вже розгорнуті, потребує рядка UPDATE: MERGE
+-- нижче лише вставляє відсутні одиниці й наявного фактора не змінює.
+MERGE uom.Unit AS t
+USING (VALUES
+  (N'Nm3', 12, 0, 1.073219842577338459, 0.0)
+) AS s (Code, DimensionId, IsBase, Factor, [Offset])
+ON t.Code = s.Code
+WHEN NOT MATCHED THEN INSERT (Code, SymbolL10n, NameL10n, DimensionId, IsBase, FactorToBase, OffsetToBase)
+     VALUES (s.Code, N'{"en":"' + s.Code + N'"}', N'{"en":"' + s.Code + N'"}',
+             s.DimensionId, s.IsBase, s.Factor, s.[Offset]);
+GO
+
+MERGE uom.Unit AS t
+USING (VALUES
+  (N'Nm3_per_s',   13, N'Nm3', N's',   1.073219842577338459),
+  (N'Nm3_per_h',   13, N'Nm3', N'h',   0.000298116622938150),   -- F / 3600
+  (N'Nm3_per_day', 13, N'Nm3', N'day', 0.000012421525955756),   -- F / 86400
+  (N'mg_per_Nm3',  16, N'mg',  N'Nm3', 0.000000931775541532)    -- 1e-6 / F
+) AS s (Code, DimensionId, NumCode, DenCode, Factor)
+ON t.Code = s.Code
+WHEN NOT MATCHED THEN INSERT
+     (Code, SymbolL10n, NameL10n, DimensionId, IsBase, FactorToBase, OffsetToBase,
+      NumeratorUnitId, DenominatorUnitId)
+     VALUES (s.Code, N'{"en":"' + s.Code + N'"}', N'{"en":"' + s.Code + N'"}',
+             s.DimensionId, 0, s.Factor, 0,
+             (SELECT Id FROM uom.Unit WHERE Code = s.NumCode),
+             (SELECT Id FROM uom.Unit WHERE Code = s.DenCode));
+GO
+
+-- ru/kz символи й назви: лише поки в базі стоїть вставлений en-запис
+-- (правку адміністратора з /admin/units не затирає).
+UPDATE u SET SymbolL10n = s.Symbol, NameL10n = s.Name
+FROM uom.Unit u
+JOIN (VALUES
+  (N'Nm3',         N'{"en":"Nm3","ru":"Нм3","kz":"Нм3"}',
+                   N'{"en":"Normal cubic metre (0 °C, 1 atm)","ru":"Нормальный кубометр (0 °C, 1 атм)","kz":"Қалыпты текше метр (0 °C, 1 атм)"}'),
+  (N'Nm3_per_s',   N'{"en":"Nm3/s","ru":"Нм3/с","kz":"Нм3/с"}',
+                   N'{"en":"Normal cubic metre per second","ru":"Нормальный кубометр в секунду","kz":"Секундына қалыпты текше метр"}'),
+  (N'Nm3_per_h',   N'{"en":"Nm3/h","ru":"Нм3/ч","kz":"Нм3/сағ"}',
+                   N'{"en":"Normal cubic metre per hour","ru":"Нормальный кубометр в час","kz":"Сағатына қалыпты текше метр"}'),
+  (N'Nm3_per_day', N'{"en":"Nm3/day","ru":"Нм3/сут","kz":"Нм3/тәулік"}',
+                   N'{"en":"Normal cubic metre per day","ru":"Нормальный кубометр в сутки","kz":"Тәулігіне қалыпты текше метр"}'),
+  (N'mg_per_Nm3',  N'{"en":"mg/Nm3","ru":"мг/Нм3","kz":"мг/Нм3"}',
+                   N'{"en":"Milligram per normal cubic metre","ru":"Миллиграмм на нормальный кубометр","kz":"Қалыпты текше метрге миллиграмм"}')
+) AS s (Code, Symbol, Name) ON s.Code = u.Code
+WHERE u.SymbolL10n = N'{"en":"' + u.Code + N'"}' AND u.NameL10n = N'{"en":"' + u.Code + N'"}';
+GO
+-- HSE301:NM3 ── кінець секції ───────────────────────────────────────────────
 
 -- Політика паролів і вбудовані ролі
 MERGE sec.PasswordPolicy AS t USING (VALUES (N'Default')) AS s (Code) ON t.Code = s.Code

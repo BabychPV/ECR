@@ -35,6 +35,7 @@ public static partial class UnitRecognizer
         "g_per_s", "t_per_year", "kg_per_t", "g_per_GJ", "mg_per_m3", "kg_per_m3",
         "Sm3_per_s", "Sm3_per_h", "kg_per_Sm3", "MJ_per_Sm3", "MJ_per_kg", "t_per_t", "kg_per_TJ", "g_per_mol",
         "mg_per_Sm3", "Sm3_per_day",
+        "Nm3_per_s", "Nm3_per_h", "Nm3_per_day", "mg_per_Nm3",
     };
 
     /// <summary>Позначення простих одиниць (нормалізовані: нижній регістр, без пробілів і крапок).</summary>
@@ -47,7 +48,8 @@ public static partial class UnitRecognizer
         ["мг"] = "mg", ["mg"] = "mg",
         ["тист"] = "kt", ["тыст"] = "kt", ["kt"] = "kt",
         ["м3"] = "m3", ["m3"] = "m3",
-        ["нм3"] = "Sm3", ["стм3"] = "Sm3", ["sm3"] = "Sm3", ["nm3"] = "Sm3",
+        // Nm3 (0 °C, 1 атм) і Sm3 (20 °C, 1 атм) — різні одиниці (HSE301:NM3); «нм3» — нормальний.
+        ["нм3"] = "Nm3", ["nm3"] = "Nm3", ["стм3"] = "Sm3", ["sm3"] = "Sm3",
         ["л"] = "l", ["l"] = "l",
         ["гдж"] = "GJ", ["gj"] = "GJ",
         ["мдж"] = "MJ", ["mj"] = "MJ",

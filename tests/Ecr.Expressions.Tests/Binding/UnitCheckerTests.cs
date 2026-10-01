@@ -183,6 +183,38 @@ public sealed class UnitCheckerTests
             d => d.Code == "ECR-TMPL-4223");
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait("Requirement", "ФВ-16.4")]
+    public void Nm3_і_Sm3_без_явного_CONVERT_не_змішуються()
+    {
+        // HSE301:NM3: одна розмірність StdVolume (12), різні одиниці (0 °C і 20 °C).
+        const byte StdVolume = 12;
+        const int Sm3 = 101;
+        const int Nm3 = 102;
+
+        var context = Context();
+        context.Dimensions[Sm3] = StdVolume;
+        context.Dimensions[Nm3] = StdVolume;
+        context.UnitsByCode["Sm3"] = Sm3;
+        context.UnitsByCode["Nm3"] = Nm3;
+        context.ColumnUnits["Std"] = Sm3;
+        context.ColumnUnits["Normal"] = Nm3;
+
+        // ⛔ D-74: різні одиниці однієї розмірності не додаються мовчки (різниця 7,3 %).
+        Assert.Contains(Check("[Std] + [Normal]", context).Diagnostics, d => d.Code == "ECR-TMPL-4223");
+
+        // Явний CONVERT — єдиний шлях; результат у Sm3.
+        var (unit, diagnostics) = Check("CONVERT([Normal], 'Nm3', 'Sm3') + [Std]", context);
+        Assert.Empty(diagnostics);
+        Assert.Equal(Sm3, unit);
+
+        // Nm3 з робочим м3 (розмірність 2) CONVERT не поєднує.
+        Assert.Contains(
+            Check("CONVERT([Normal], 'Nm3', 'm3')", context).Diagnostics,
+            d => d.Code == "ECR-TMPL-4223");
+    }
+
     private static (int? Unit, List<ExpressionDiagnostic> Diagnostics) Check(
         string expression, TestBindingContext context)
     {
