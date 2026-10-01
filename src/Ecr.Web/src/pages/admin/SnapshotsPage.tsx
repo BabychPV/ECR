@@ -584,9 +584,11 @@ export function SnapshotsPage(): JSX.Element {
             reason={
               code === null
                 ? t('snapshots.pickReport')
-                : blockedReason !== null
-                  ? t(blockedReason)
-                  : null
+                : blockedReason === 'snapshots.parametersUnknown'
+                  ? t('snapshots.parametersUnknown')
+                  : blockedReason === 'snapshots.parametersBlocked'
+                    ? t('snapshots.parametersBlocked')
+                    : null
             }
           >
             <Button loading={build.isPending} onClick={() => build.mutate()}>
