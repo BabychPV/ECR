@@ -5974,6 +5974,12 @@ USING (VALUES
     (N'err.ECR-REG-0422.dateFormatRefused', N'en', N'The source value "{value}" is not a date in the expected format ({expected}) or ISO 8601: the field is left unchanged.', 1),
     -- ru/kz — окремою порцією `COLL:dates` у блоці I18N нижче.
     -- COLL:dates ── кінець секції ──
+    -- COLL:efrecon ── «Повна звірка за період» подій джерела: що видалено/пропущено (HSE301, `SourceEventSyncJob`, `CoverageDetails`) ──
+    (N'jobs.sourceEventsRemoved',                  N'en', N'Events missing from the source: removed {removed}, removal skipped {skipped}', 1),
+    (N'coverageEvents.eventRemovalSourceEmpty',    N'en', N'The source returned no events while {count} linked rows exist: removal skipped, the source looks unavailable.', 1),
+    (N'coverageEvents.eventRemovalKeptManual',     N'en', N'Event {eventId} is no longer in the source, but row {rowKey} has a manual edit: the row was not removed.', 1),
+    -- ru/kz — окремою порцією `COLL:efrecon` у блоці I18N нижче.
+    -- COLL:efrecon ── кінець секції ──
     -- JOBL ── людські назви видів фонових задач, яких бракувало в jobLabel.ts (KindKeys) ──
     (N'jobs.kind.sourceEventSync',  N'en', N'Source event sync', 1),
     (N'jobs.kind.consistencyCheck', N'en', N'Consistency check', 1),
@@ -13746,6 +13752,20 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:dates ── кінець секції ──
+-- COLL:efrecon ── ru/kz «повної звірки за період» подій джерела; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'jobs.sourceEventsRemoved', N'ru', N'События, пропавшие из источника: удалено {removed}, удаление пропущено {skipped}'),
+    (N'jobs.sourceEventsRemoved', N'kz', N'Көзден жоғалған оқиғалар: жойылды {removed}, жою өткізілді {skipped}'),
+    (N'coverageEvents.eventRemovalSourceEmpty', N'ru', N'Источник не вернул ни одного события, хотя связанных строк: {count}. Удаление пропущено: источник похож на недоступный.'),
+    (N'coverageEvents.eventRemovalSourceEmpty', N'kz', N'Көз ешбір оқиға қайтармады, ал байланысты жолдар: {count}. Жою өткізілді: көз қолжетімсіз сияқты.'),
+    (N'coverageEvents.eventRemovalKeptManual', N'ru', N'События {eventId} больше нет в источнике, но в строке {rowKey} есть ручная правка: строка не удалена.'),
+    (N'coverageEvents.eventRemovalKeptManual', N'kz', N'{eventId} оқиғасы көзде жоқ, бірақ {rowKey} жолында қолмен түзету бар: жол жойылмады.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:efrecon ── кінець секції ──
 
 -- JOBL ── ru/kz назв видів задач (jobLabel.ts, KindKeys); власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)
