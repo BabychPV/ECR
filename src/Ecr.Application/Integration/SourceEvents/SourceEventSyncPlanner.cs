@@ -115,12 +115,22 @@ public sealed record SourceEventPlanItem(
 /// <param name="SkippedNonRoot">Скільки подій відкинуто як не кореневі.</param>
 /// <param name="Filtered">Скільки подій відкинуто звуженням мапінгу.</param>
 /// <param name="MissingSuppressed">Позначку «зникла» не ставили, бо читання обрізане чи з відмовою.</param>
+/// <param name="Gone">
+/// «Повна звірка за період»: зв'язки вікна, чиєї події в ПОВНІЙ відповіді немає (і чий ID не переклали на
+/// новий за природним ключем) — кандидати на видалення разом із рядком. Порожньо при обрізаному чи відмовному
+/// читанні. Включає й уже позначені <c>Missing</c>.
+/// </param>
+/// <param name="SourceEmpty">
+/// Джерело при повному читанні повернуло НУЛЬ подій: підозріло (збій, а не «усе видалено») — видаляти не можна.
+/// </param>
 public sealed record SourceEventSyncPlan(
     IReadOnlyList<SourceEventPlanItem> Items,
     IReadOnlyList<SourceEventLinkState> Missing,
     int SkippedNonRoot,
     int Filtered,
-    bool MissingSuppressed);
+    bool MissingSuppressed,
+    IReadOnlyList<SourceEventLinkState>? Gone = null,
+    bool SourceEmpty = false);
 
 /// <summary>
 /// Планує синхронізацію подій за одним мапінгом (FEATURE-HSE301-VIEW §4.7.4): що створити,
@@ -192,7 +202,22 @@ public static class SourceEventSyncPlanner
                             && l.StartUtc < input.ToUtc)
                 .ToList();
 
-        return new SourceEventSyncPlan(items, missing, nonRoot, filtered, suppressed);
+        // Повна звірка: усі зв'язки вікна без події у відповіді. Зв'язок без рядка в закритому періоді
+        // (PeriodClosed) — історія, а не кандидат.
+        var gone = suppressed
+            ? []
+            : input.Links
+                .Where(l => !returned.Contains(l.SourceEventId)
+                            && !claimed.Contains(l.SourceEventId)
+                            && l.StartUtc >= input.FromUtc
+                            && l.StartUtc < input.ToUtc
+                            && (l.HasRow
+                                || l.Status is SourceEventLinkStatus.Open or SourceEventLinkStatus.PeriodNotOpen
+                                    or SourceEventLinkStatus.RowLimit))
+                .ToList();
+
+        return new SourceEventSyncPlan(
+            items, missing, nonRoot, filtered, suppressed, gone, !suppressed && input.Events.Count == 0);
     }
 
     /// <summary>Кінець події: <c>NULL</c> чи сторожова дата — подія ще триває.</summary>
