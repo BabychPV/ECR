@@ -296,14 +296,18 @@ public sealed class JobProgressStore(EcrDbContext db) : IJobProgressStore
     /// </remarks>
     public async Task<FanOutStatus?> GetFanOutAsync(string parentJobId, CancellationToken ct)
     {
+        // ⚠ За стовпцем `FanOutParentJobId` (persisted, JSON_VALUE з Payload) і його індексом
+        // `IX_JobProgress_FanOutParent`: раніше JSON_VALUE у предикаті скановував усю
+        // історію (вимір 2026-10-01, 500 тис. рядків: 47 116 читань / 2,5 с → 4 читання / 14 мс).
+        // Індекс навмисно НЕ фільтрований: параметризований запит фільтрований індекс не бачить.
         var rows = await db.Database
             .SqlQuery<FanOutRow>(
                 $"""
                  SELECT State, COUNT(*) AS Cnt
                    FROM itg.JobProgress
-                  WHERE Lane IS NOT NULL
+                  WHERE FanOutParentJobId = {parentJobId}
+                    AND Lane IS NOT NULL
                     AND TargetKey LIKE N'IRecalculationJob~doc%'
-                    AND JSON_VALUE(Payload, '$.fanOutParentJobId') = {parentJobId}
                   GROUP BY State
                  """)
             .ToListAsync(ct)

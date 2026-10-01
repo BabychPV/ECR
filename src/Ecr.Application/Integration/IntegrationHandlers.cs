@@ -222,7 +222,9 @@ public sealed class GetJobStatusHandler(
 
         // ⛔ Розклад на дочірні задачі (P4): батько `Succeeded` = «розкладено», не «пораховано».
         // Похідний стан — при читанні, без схеми; для задачі без дочірніх не змінюється.
-        var fanOut = progressStore is null || status.State is not ("Succeeded" or "Running")
+        // Розкладає лише проєктна задача (без DocumentId): документна дітей не має, і без цієї відсічки
+        // кожне опитування її статусу скановувало б журнал (вимір 2026-10-01).
+        var fanOut = progressStore is null || status.State is not ("Succeeded" or "Running") || status.DocumentId is > 0
             ? null
             : await progressStore.GetFanOutAsync(jobId, ct).ConfigureAwait(false);
 
