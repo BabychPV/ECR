@@ -465,10 +465,19 @@ public sealed partial class SaveDataSourceHandler(
     private async Task RequireSqlServerAddressAsync(string address, string field, string code, CancellationToken ct)
     {
         var verdict = DataSourceEndpointPolicy.CheckSqlServerAddress(address);
-        var host = verdict == EndpointVerdict.Allowed ? DataSourceEndpointPolicy.SqlHostOf(address) : null;
 
-        if (host is not null && network is not null && !IPAddress.TryParse(host, out _))
+        // ⛔ ent4 P2-1: кожен сервер рядка з'єднання ODBC, а не весь рядок як «ім'я».
+        var hosts = verdict == EndpointVerdict.Allowed
+            ? DataSourceEndpointPolicy.SqlHostsOf(address) ?? []
+            : [];
+
+        foreach (var host in hosts)
         {
+            if (verdict != EndpointVerdict.Allowed || network is null || IPAddress.TryParse(host, out _))
+            {
+                continue;
+            }
+
             var resolved = await network.ResolveAsync(host, ct).ConfigureAwait(false);
 
             if (resolved.Any(DataSourceEndpointPolicy.IsLinkLocal))
@@ -479,8 +488,8 @@ public sealed partial class SaveDataSourceHandler(
 
         if (verdict == EndpointVerdict.Allowed)
         {
-            if (host is not null && logger is not null && network?.AllowedHosts is { Count: > 0 } allowed
-                && !DataSourceEndpointPolicy.IsHostAllowed(host, allowed))
+            if (logger is not null && network?.AllowedHosts is { Count: > 0 } allowed
+                && hosts.Any(host => !DataSourceEndpointPolicy.IsHostAllowed(host, allowed)))
             {
                 LogSqlHostOutsideAllowlist(logger, code);
             }

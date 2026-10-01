@@ -1,4 +1,5 @@
-﻿using System.Net;
+﻿using System.Data.Common;
+using System.Net;
 using System.Net.Sockets;
 
 namespace Ecr.Application.Integration;
@@ -66,10 +67,18 @@ public static class DataSourceEndpointPolicy
     }
 
     /// <summary>
-    /// Вердикт для PiSqlClient: адреса — ІМ'Я/адреса сервера (<c>server</c>, <c>server\instance</c>,
-    /// <c>server,port</c>, <c>host:port</c>), а не URL. Відмова лише за схему (<c>xxx://</c>)
-    /// і link-local/metadata IP-літерал; loopback і приватні — легітимні.
+    /// Вердикт для PiSqlClient. Адреса — або рядок з'єднання ODBC
+    /// (<c>Driver={PI SQL Client};Server=…</c> — саме його читає адаптер), або ім'я/адреса сервера
+    /// (<c>server</c>, <c>server\instance</c>, <c>server,port</c>, <c>host:port</c>, <c>tcp:host,port</c>).
+    /// Відмова за схему (<c>xxx://</c>), за рядок, що не розбирається, і за link-local/metadata
+    /// у БУДЬ-ЯКОМУ ключі сервера рядка; loopback і приватні — легітимні.
     /// </summary>
+    /// <remarks>
+    /// ⛔ ent4 P2-1: раніше політика брала весь рядок з'єднання за «ім'я сервера», тож
+    /// <c>Driver=…;Server=169.254.169.254</c> і <c>tcp:169.254.169.254,80</c> проходили.
+    /// Тепер рядок розбирається тими самими правилами ODBC, що й в адаптері
+    /// (<c>OdbcConnectionStringBuilder</c>), і перевіряється кожен ключ, що називає сервер.
+    /// </remarks>
     public static EndpointVerdict CheckSqlServerAddress(string? address)
     {
         if (string.IsNullOrWhiteSpace(address))
@@ -82,17 +91,87 @@ public static class DataSourceEndpointPolicy
             return EndpointVerdict.Scheme;
         }
 
-        var host = SqlHostOf(address).TrimEnd('.');
+        if (SqlHostsOf(address) is not { } hosts)
+        {
+            return EndpointVerdict.Malformed;
+        }
 
-        return IsCloudMetadataName(host) || (IPAddress.TryParse(host, out var ip) && IsLinkLocal(ip))
-            ? EndpointVerdict.HostForbidden
-            : EndpointVerdict.Allowed;
+        foreach (var host in hosts)
+        {
+            if (IsCloudMetadataName(host) || (IPAddress.TryParse(host, out var ip) && IsLinkLocal(ip)))
+            {
+                return EndpointVerdict.HostForbidden;
+            }
+        }
+
+        return EndpointVerdict.Allowed;
     }
 
-    /// <summary>Хост сервера з <c>server\instance</c>/<c>server,port</c>/<c>host:port</c>/<c>[v6]:port</c>.</summary>
+    /// <summary>
+    /// Хости, на які піде з'єднання PiSqlClient: з кожного ключа сервера рядка ODBC або з голого
+    /// імені сервера. <c>null</c> — рядок з'єднання не розбирається. Рядок без ключа сервера
+    /// (лише <c>DSN=…</c>) дає порожній перелік: сервер тоді задає адміністратор машини в DSN.
+    /// </summary>
+    public static IReadOnlyList<string>? SqlHostsOf(string address)
+    {
+        ArgumentNullException.ThrowIfNull(address);
+
+        if (!address.Contains('=', StringComparison.Ordinal))
+        {
+            return [SqlHostOf(address)];
+        }
+
+        var builder = new DbConnectionStringBuilder(useOdbcRules: true);
+
+        try
+        {
+            builder.ConnectionString = address;
+        }
+        catch (ArgumentException)
+        {
+            return null;
+        }
+
+        var hosts = new List<string>();
+
+        foreach (string key in builder.Keys)
+        {
+            if (IsServerKey(key) && builder[key]?.ToString() is { Length: > 0 } value)
+            {
+                hosts.Add(SqlHostOf(value));
+            }
+        }
+
+        return hosts;
+    }
+
+    /// <summary>
+    /// Хост сервера з <c>server\instance</c>/<c>server,port</c>/<c>host:port</c>/<c>[v6]:port</c>,
+    /// з префіксом протоколу (<c>tcp:</c>, <c>np:</c>, <c>lpc:</c>, <c>admin:</c>) чи без,
+    /// і з іменованого каналу <c>\\host\pipe\…</c>.
+    /// </summary>
     public static string SqlHostOf(string address)
     {
-        var s = address.Trim();
+        ArgumentNullException.ThrowIfNull(address);
+
+        var s = address.Trim().Trim('{', '}').Trim();
+
+        // `tcp:169.254.169.254,80`: без цього хостом ставав `tcp` (одна `:` = host:port).
+        foreach (var prefix in ProtocolPrefixes)
+        {
+            if (s.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                s = s[prefix.Length..].TrimStart();
+                break;
+            }
+        }
+
+        // Іменований канал: `\\host\pipe\sql\query`.
+        if (s.StartsWith(@"\\", StringComparison.Ordinal))
+        {
+            s = s[2..];
+        }
+
         var cut = s.IndexOfAny(['\\', ',']);
 
         if (cut >= 0)
@@ -100,18 +179,38 @@ public static class DataSourceEndpointPolicy
             s = s[..cut];
         }
 
-        if (s.StartsWith('[') && s.IndexOf(']') is var close and > 0)
+        if (s.StartsWith('[') && s.IndexOf(']', StringComparison.Ordinal) is var close and > 0)
         {
             return s[1..close];
         }
 
         // Один `:` — host:port; кілька — голий IPv6.
-        if (s.IndexOf(':') is var colon and > 0 && s.IndexOf(':', colon + 1) < 0)
+        if (s.IndexOf(':', StringComparison.Ordinal) is var colon and > 0
+            && s.IndexOf(':', colon + 1) < 0)
         {
             s = s[..colon];
         }
 
-        return s.TrimEnd('.');
+        return s.Trim().TrimEnd('.');
+    }
+
+    private static readonly string[] ProtocolPrefixes = ["tcp:", "np:", "lpc:", "admin:"];
+
+    /// <summary>
+    /// Чи називає ключ рядка з'єднання сервер: <c>Server</c>, <c>Data Source</c>, <c>Address</c>,
+    /// <c>Addr</c>, <c>Network Address</c>, <c>Host</c>, <c>AF Server</c>, <c>Failover Partner</c> тощо.
+    /// ⚠ Навмисно широко (за частиною імені): невідомий драйверу ключ він проігнорує, а пропущений
+    /// політикою ключ сервера — це обхід.
+    /// </summary>
+    private static bool IsServerKey(string key)
+    {
+        var k = key.Replace(" ", string.Empty, StringComparison.Ordinal).ToUpperInvariant();
+
+        return k.Contains("SERVER", StringComparison.Ordinal)
+               || k.Contains("HOST", StringComparison.Ordinal)
+               || k.Contains("ADDR", StringComparison.Ordinal)
+               || k.Contains("PARTNER", StringComparison.Ordinal)
+               || k is "DATASOURCE" or "SOURCE";
     }
 
     /// <summary>Link-local/metadata: 169.254.0.0/16, fe80::/10.</summary>
@@ -268,12 +367,17 @@ public static class DataSourceEndpointPolicy
     /// Імена хмарних служб метаданих (GCP <c>metadata.google.internal</c>/<c>metadata.goog</c>,
     /// Azure/OCI <c>metadata.azure.internal</c>). Розв'язуються в 169.254.169.254, але за іменем
     /// перевірку IP-літерала оминають — тому відмова за самим іменем.
+    /// <para>
+    /// ⚠ Голого <c>metadata</c> тут немає навмисно (ent4 P3-4): у корпоративній мережі це цілком
+    /// легітимне коротке ім'я хоста. На GCP воно розв'язується в 169.254.169.254, і його ловить
+    /// перевірка КОЖНОЇ розв'язаної адреси в обробнику збереження.
+    /// </para>
     /// </summary>
     public static bool IsCloudMetadataName(string host)
         => CloudMetadataNames.Contains(host.Trim('[', ']').TrimEnd('.'), StringComparer.OrdinalIgnoreCase);
 
     private static readonly string[] CloudMetadataNames =
-        ["metadata.google.internal", "metadata.goog", "metadata.azure.internal", "metadata"];
+        ["metadata.google.internal", "metadata.goog", "metadata.azure.internal"];
 
     private static bool IsLocalName(string host)
         => string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase)
