@@ -243,8 +243,6 @@ public sealed class MetadataCache(
         // (одна колонка на рядок), а не окремим зверненням: кількість запитів побудови кешу не росте.
         var sheetRows = await db.SheetDefs
             .AsNoTracking()
-            .Where(s => s.TemplateVersionId == templateVersionId && !s.IsDeleted)
-            .OrderBy(s => s.Ordinal)
             .Select(s => new
             {
                 Sheet = s,
@@ -255,6 +253,8 @@ public sealed class MetadataCache(
                     && db.TableDefs.Any(t => t.Id == r.SourceTableDefId
                         && db.SheetDefs.Any(s2 => s2.Id == t.SheetDefId && s2.TemplateVersionId == templateVersionId))),
             })
+            .Where(x => x.Sheet.TemplateVersionId == templateVersionId && !x.Sheet.IsDeleted)
+            .OrderBy(x => x.Sheet.Ordinal)
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
