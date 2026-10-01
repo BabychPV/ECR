@@ -138,7 +138,7 @@ public sealed class NotificationDispatcher(
         try
         {
             await sender
-                .SendAsync(channel, new NotificationMessage(notification.Subject, notification.Body), ct)
+                .SendAsync(channel, new NotificationMessage(notification.Subject, notification.Body, notification.Text), ct)
                 .ConfigureAwait(false);
 
             return null;

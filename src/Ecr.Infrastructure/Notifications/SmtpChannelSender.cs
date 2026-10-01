@@ -3,6 +3,8 @@ using System.Text.Json;
 using Ecr.Application.Notifications;
 using Ecr.Application.Ports;
 using Ecr.Domain.Entities.Notifications;
+using Ecr.Infrastructure.Persistence;
+using Microsoft.EntityFrameworkCore;
 
 namespace Ecr.Infrastructure.Notifications;
 
@@ -31,7 +33,9 @@ namespace Ecr.Infrastructure.Notifications;
 /// рядок <c>Failed</c> із цим текстом, і в журналі доставок буде видно, ЩО саме
 /// налаштовано не до кінця.
 /// </remarks>
-public sealed class SmtpChannelSender(INotificationSender transport) : INotificationChannelSender
+public sealed class SmtpChannelSender(
+    INotificationSender transport, EcrDbContext? db = null, IUiStringCatalog? catalog = null)
+    : INotificationChannelSender
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
@@ -58,15 +62,99 @@ public sealed class SmtpChannelSender(INotificationSender transport) : INotifica
             .Select(r => r.Trim())
             .ToList();
 
-        if (recipients.Count == 0)
+        var byRole = await RoleRecipientsAsync(channel.Id, ct).ConfigureAwait(false);
+
+        // ⚠ Адреса, що вже є в явному переліку, у групу мови не потрапляє вдруге: людина отримує один лист.
+        var explicitSet = recipients.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var groups = byRole
+            .Where(r => explicitSet.Add(r.Email))
+            .GroupBy(r => r.Language, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (explicitSet.Count == 0)
         {
             throw new InvalidOperationException(
-                $"Канал «{channel.Name}»: адресатів не задано (PUT …/channels/{{id}}).");
+                $"Канал «{channel.Name}»: адресатів не задано (PUT …/channels/{{id}}) або в ролях-адресатах немає активних користувачів із поштою.");
         }
 
-        await transport
-            .SendAsync(recipients, SubjectOf(settings, message), message.Body, ct)
-            .ConfigureAwait(false);
+        // Явні адреси — мовою каталогу за замовчуванням (мови одержувача система не знає).
+        if (recipients.Count > 0)
+        {
+            await transport
+                .SendAsync(recipients, SubjectOf(settings, message), message.Body, ct)
+                .ConfigureAwait(false);
+        }
+
+        foreach (var group in groups)
+        {
+            var (subject, body) = await RenderAsync(message, group.Key, ct).ConfigureAwait(false);
+
+            await transport
+                .SendAsync([.. group.Select(r => r.Email)], SubjectOf(settings, message with { Subject = subject }), body, ct)
+                .ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>Тема й тіло мовою одержувача; без локалізованого тексту чи каталогу — як є.</summary>
+    private async Task<(string Subject, string Body)> RenderAsync(
+        NotificationMessage message, string language, CancellationToken ct)
+    {
+        if (message.Text is not { } text || catalog is null
+            || string.Equals(language, Ecr.Application.Localization.UiStringResolver.DefaultLanguage, StringComparison.OrdinalIgnoreCase))
+        {
+            return (message.Subject, message.Body);
+        }
+
+        var strings = (await catalog.GetAsync(language, ct).ConfigureAwait(false)).Strings;
+
+        string Fill(string key)
+            => text.Args.Aggregate(
+                strings.GetValueOrDefault(key, key),
+                (acc, arg) => acc.Replace("{" + arg.Key + "}", arg.Value, StringComparison.Ordinal));
+
+        return (Fill(text.SubjectKey), Fill(text.BodyKey));
+    }
+
+    /// <summary>
+    /// Адресати за ролями каналу: активні користувачі з поштою, мова — з налаштування <c>language</c>
+    /// (інакше — каталог за замовчуванням). ⚠ <c>User.ReceivesAlerts</c> НЕ вимагається: роль обрав
+    /// адміністратор у каналі, прапорець — це вибір для старої черги <c>NotificationOutbox</c>.
+    /// </summary>
+    private async Task<List<(string Email, string Language)>> RoleRecipientsAsync(int channelId, CancellationToken ct)
+    {
+        if (db is null)
+        {
+            return [];
+        }
+
+        var users = await (
+                from link in db.NotificationChannelRoles
+                join a in db.RoleAssignments on link.RoleId equals a.RoleId
+                join u in db.Users on a.UserId equals u.Id
+                where link.ChannelId == channelId && u.IsActive && u.Email != null
+                select new { u.Id, Email = u.Email! })
+            .Distinct().OrderBy(u => u.Id).ToListAsync(ct).ConfigureAwait(false);
+
+        var ids = users.Select(u => u.Id).ToList();
+        var prefs = await db.UserPreferences.AsNoTracking()
+            .Where(p => p.Key == "language" && ids.Contains(p.UserId))
+            .ToDictionaryAsync(p => p.UserId, p => p.ValueJson, ct).ConfigureAwait(false);
+
+        return [.. users.Select(u => (u.Email.Trim(), LanguageOf(prefs.GetValueOrDefault(u.Id))))];
+    }
+
+    private static string LanguageOf(string? valueJson)
+    {
+        try
+        {
+            return valueJson is null ? Ecr.Application.Localization.UiStringResolver.DefaultLanguage
+                : JsonSerializer.Deserialize<string>(valueJson) is { Length: > 0 } l ? l
+                : Ecr.Application.Localization.UiStringResolver.DefaultLanguage;
+        }
+        catch (JsonException)
+        {
+            return Ecr.Application.Localization.UiStringResolver.DefaultLanguage;
+        }
     }
 
     /// <summary>Несекретні параметри каналу; зіпсований JSON — порожні.</summary>

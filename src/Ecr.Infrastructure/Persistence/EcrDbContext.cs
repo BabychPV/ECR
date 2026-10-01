@@ -173,6 +173,8 @@ public sealed class EcrDbContext(DbContextOptions<EcrDbContext> options)
     // Сповіщення, налаштовані в застосунку (BE-32): канали й правила — sys_ecr, журнал доставок — itg.
     public DbSet<NotificationChannel> NotificationChannels => Set<NotificationChannel>();
     public DbSet<NotificationRule> NotificationRules => Set<NotificationRule>();
+    public DbSet<NotificationChannelRole> NotificationChannelRoles => Set<NotificationChannelRole>();
+    public DbSet<SmtpSettings> SmtpSettings => Set<SmtpSettings>();
     public DbSet<NotificationDelivery> NotificationDeliveries => Set<NotificationDelivery>();
 
     // doc — індекс фільтрів

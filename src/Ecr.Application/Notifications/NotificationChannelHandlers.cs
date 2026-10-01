@@ -29,8 +29,9 @@ namespace Ecr.Application.Notifications;
 /// </remarks>
 /// <param name="Recipients">SMTP: адресати.</param>
 /// <param name="Title">SMTP: префікс теми; Teams: заголовок картки.</param>
+/// <param name="RecipientRoleIds">Ролі-адресати; живуть у <c>sys_ecr.NotificationChannelRole</c>, НЕ в <c>SettingsJson</c>.</param>
 public sealed record NotificationChannelSettings(
-    IReadOnlyList<string>? Recipients = null, string? Title = null);
+    IReadOnlyList<string>? Recipients = null, string? Title = null, IReadOnlyList<int>? RecipientRoleIds = null);
 
 /// <summary>Несекретні параметри каналу так, як їх надсилає клієнт.</summary>
 /// <remarks>
@@ -45,9 +46,11 @@ public sealed record NotificationChannelSettings(
 /// <param name="Port">⛔ Не приймається: порт — із налаштувань застосунку.</param>
 /// <param name="UseTls">⛔ Не приймається: TLS — із налаштувань застосунку.</param>
 /// <param name="From">⛔ Не приймається: відправник — із налаштувань застосунку.</param>
+/// <param name="RecipientRoleIds">SMTP: ролі-адресати (<c>D-256</c>) — лист іде активним користувачам цих ролей.</param>
 public sealed record NotificationChannelSettingsInput(
     IReadOnlyList<string>? Recipients = null, string? Title = null,
-    string? Host = null, int? Port = null, bool? UseTls = null, string? From = null)
+    string? Host = null, int? Port = null, bool? UseTls = null, string? From = null,
+    IReadOnlyList<int>? RecipientRoleIds = null)
 {
     /// <summary>Чи названо бодай одне поле транспорту.</summary>
     /// <remarks>
@@ -111,16 +114,21 @@ public sealed class ListNotificationChannelsHandler(
 
         var channels = await store.ListChannelsAsync(ct).ConfigureAwait(false);
 
-        return [.. channels.Select(c => ToView(c, sender.IsConfigured))];
+        var roles = await store.ListChannelRolesAsync(ct).ConfigureAwait(false);
+
+        return [.. channels.Select(c => ToView(c, sender.IsConfigured, roles.GetValueOrDefault(c.Id)))];
     }
 
     /// <summary>Рядок екрана з сутності.</summary>
     /// <param name="channel">Канал.</param>
     /// <param name="smtpConfigured"><see cref="INotificationSender.IsConfigured"/> процесу.</param>
-    internal static NotificationChannelView ToView(NotificationChannel channel, bool smtpConfigured)
+    /// <param name="roleIds">Ролі-адресати каналу.</param>
+    internal static NotificationChannelView ToView(
+        NotificationChannel channel, bool smtpConfigured, IReadOnlyList<int>? roleIds = null)
         => new(
             channel.Id, channel.Kind, channel.Name, channel.IsEnabled,
-            JsonSerializer.Deserialize<NotificationChannelSettings>(channel.SettingsJson, Json) ?? new(),
+            (JsonSerializer.Deserialize<NotificationChannelSettings>(channel.SettingsJson, Json) ?? new())
+                with { RecipientRoleIds = roleIds ?? [] },
             channel.HasSecret, channel.ModifiedAt,
             channel.Kind == NotificationChannelKind.Smtp,
             channel.Kind == NotificationChannelKind.Smtp ? smtpConfigured : channel.HasSecret);
@@ -169,6 +177,7 @@ public sealed class SaveNotificationChannelHandler(
         }
 
         var json = await ValidateAsync(kind, name, settings, exceptId: null, ct).ConfigureAwait(false);
+        var roleIds = RoleIdsOf(settings);
         var channel = new NotificationChannel(kind, name.Trim(), json, clock.UtcNow, profile.UserId);
         store.AddChannel(channel);
 
@@ -177,7 +186,12 @@ public sealed class SaveNotificationChannelHandler(
             new { name = channel.Name, kind = kind.ToString(), settings }, ct).ConfigureAwait(false);
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
 
-        return ListNotificationChannelsHandler.ToView(channel, sender.IsConfigured);
+        // ⚠ Ролі — другим збереженням: ключа каналу до першого немає. Збій тут лишає канал без ролей,
+        // а не ролі без каналу (FK), і наступний PUT їх проставить.
+        await store.ReplaceChannelRolesAsync(channel.Id, roleIds, ct).ConfigureAwait(false);
+        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+
+        return ListNotificationChannelsHandler.ToView(channel, sender.IsConfigured, roleIds);
     }
 
     /// <summary>Змінює назву, стан і несекретні параметри; транспорт і секрет не чіпає.</summary>
@@ -189,15 +203,20 @@ public sealed class SaveNotificationChannelHandler(
 
         var channel = await ListNotificationChannelsHandler.FindAsync(store, id, ct).ConfigureAwait(false);
         var json = await ValidateAsync(channel.Kind, name, settings, id, ct).ConfigureAwait(false);
+        var roleIds = RoleIdsOf(settings);
         channel.Update(name.Trim(), json, isEnabled, clock.UtcNow, profile.UserId);
+        await store.ReplaceChannelRolesAsync(id, roleIds, ct).ConfigureAwait(false);
 
         await ListNotificationChannelsHandler.AuditAsync(
             audit, clock, currentUser, profile.UserId, "NotificationChannelUpdated",
             new { id, name = channel.Name, isEnabled, settings }, ct).ConfigureAwait(false);
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
 
-        return ListNotificationChannelsHandler.ToView(channel, sender.IsConfigured);
+        return ListNotificationChannelsHandler.ToView(channel, sender.IsConfigured, roleIds);
     }
+
+    private static List<int> RoleIdsOf(NotificationChannelSettingsInput? settings)
+        => [.. (settings?.RecipientRoleIds ?? []).Distinct()];
 
     private async Task<string> ValidateAsync(
         NotificationChannelKind kind, string name, NotificationChannelSettingsInput? settings, int? exceptId,
@@ -222,7 +241,19 @@ public sealed class SaveNotificationChannelHandler(
         }
 
         var recipients = (settings.Recipients ?? []).Select(r => (r ?? string.Empty).Trim()).ToList();
-        var smtpWithoutRecipients = kind == NotificationChannelKind.Smtp && recipients.Count == 0;
+        var roleIds = RoleIdsOf(settings);
+
+        // ⚠ Ролі-адресати — лише для пошти, і лише існуючі: невідомий RoleId інакше впав би на FK
+        // 500-кою, а не 422.
+        if ((kind != NotificationChannelKind.Smtp && roleIds.Count > 0)
+            || (roleIds.Count > 0 && await store.CountExistingRolesAsync(roleIds, ct).ConfigureAwait(false) != roleIds.Count))
+        {
+            throw ListNotificationChannelsHandler.Invalid(
+                "err.ECR-REQ-0422.notificationChannelRoleInvalid",
+                "Ролі-адресати задаються лише поштовому каналу, і кожна має існувати.", trimmed);
+        }
+
+        var smtpWithoutRecipients = kind == NotificationChannelKind.Smtp && recipients.Count == 0 && roleIds.Count == 0;
 
         if (trimmed.Length is 0 or > NotificationChannel.NameMaxLength || smtpWithoutRecipients)
         {
@@ -312,7 +343,8 @@ public sealed class ReplaceNotificationChannelSecretHandler(
             new { id, name = channel.Name, hasSecret = channel.HasSecret }, ct).ConfigureAwait(false);
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
 
-        return ListNotificationChannelsHandler.ToView(channel, sender.IsConfigured);
+        return ListNotificationChannelsHandler.ToView(
+            channel, sender.IsConfigured, await store.ChannelRoleIdsAsync(id, ct).ConfigureAwait(false));
     }
 }
 
@@ -407,7 +439,7 @@ public sealed class TestNotificationChannelHandler(
     /// ⚠ <paramref name="classify"/> — лише для пошти: розпізнану категорію (DNS, TLS, автентифікація,
     /// relay…) віддаємо ключем каталогу, нерозпізнану — текстом як є (<see cref="SmtpFailureClassifier"/>).
     /// </remarks>
-    private static async Task<NotificationTestResult> TryAsync(Func<Task> send, bool classify)
+    internal static async Task<NotificationTestResult> TryAsync(Func<Task> send, bool classify)
     {
         try
         {

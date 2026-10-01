@@ -31,6 +31,31 @@ public sealed class NotificationStore(EcrDbContext db) : INotificationStore
     /// <inheritdoc />
     public void AddChannel(NotificationChannel channel) => db.NotificationChannels.Add(channel);
 
+    public async Task<IReadOnlyDictionary<int, IReadOnlyList<int>>> ListChannelRolesAsync(CancellationToken ct)
+        => (await db.NotificationChannelRoles.AsNoTracking()
+                .OrderBy(r => r.ChannelId).ThenBy(r => r.RoleId).ToListAsync(ct).ConfigureAwait(false))
+            .GroupBy(r => r.ChannelId)
+            .ToDictionary(g => g.Key, g => (IReadOnlyList<int>)[.. g.Select(r => r.RoleId)]);
+
+    public async Task<IReadOnlyList<int>> ChannelRoleIdsAsync(int channelId, CancellationToken ct)
+        => await db.NotificationChannelRoles.AsNoTracking().Where(r => r.ChannelId == channelId)
+            .OrderBy(r => r.RoleId).Select(r => r.RoleId).ToListAsync(ct).ConfigureAwait(false);
+
+    public Task<int> CountExistingRolesAsync(IReadOnlyCollection<int> roleIds, CancellationToken ct)
+        => db.Roles.CountAsync(r => roleIds.Contains(r.Id), ct);
+
+    public async Task ReplaceChannelRolesAsync(int channelId, IReadOnlyCollection<int> roleIds, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(roleIds);
+
+        var existing = await db.NotificationChannelRoles.Where(r => r.ChannelId == channelId)
+            .ToListAsync(ct).ConfigureAwait(false);
+
+        db.NotificationChannelRoles.RemoveRange(existing.Where(r => !roleIds.Contains(r.RoleId)));
+        db.NotificationChannelRoles.AddRange(
+            roleIds.Except(existing.Select(r => r.RoleId)).Select(id => new NotificationChannelRole(channelId, id)));
+    }
+
     /// <inheritdoc />
     public async Task<int> RemoveChannelWithRulesAsync(NotificationChannel channel, CancellationToken ct)
     {
@@ -38,6 +63,10 @@ public sealed class NotificationStore(EcrDbContext db) : INotificationStore
 
         var rules = await db.NotificationRules.Where(r => r.ChannelId == channel.Id).ToListAsync(ct).ConfigureAwait(false);
         db.NotificationRules.RemoveRange(rules);
+
+        // ⚠ Явно, не каскадом: у моделі каскадів немає (Restrict скрізь).
+        db.NotificationChannelRoles.RemoveRange(
+            await db.NotificationChannelRoles.Where(r => r.ChannelId == channel.Id).ToListAsync(ct).ConfigureAwait(false));
         db.NotificationChannels.Remove(channel);
 
         return rules.Count;
@@ -129,4 +158,26 @@ public sealed class DataProtectionNotificationSecretProtector(IDataProtectionPro
 
     /// <inheritdoc />
     public byte[] Protect(string secret) => _protector.Protect(System.Text.Encoding.UTF8.GetBytes(secret));
+}
+
+/// <summary>Пароль SMTP: окреме призначення DataProtection, не те, що в секретів каналів.</summary>
+public sealed class SmtpPasswordProtector(IDataProtectionProvider provider) : ISmtpPasswordProtector
+{
+    public const string Purpose = "Ecr.Smtp.Password.v1";
+
+    private readonly IDataProtector _protector = provider.CreateProtector(Purpose);
+
+    public byte[] Protect(string password) => _protector.Protect(System.Text.Encoding.UTF8.GetBytes(password));
+
+    /// <summary>Розшифровує пароль; лише транспорт, ніколи API.</summary>
+    /// <param name="blob">Зашифрований блоб із <c>sys_ecr.SmtpSettings</c>.</param>
+    public string Unprotect(byte[] blob) => System.Text.Encoding.UTF8.GetString(_protector.Unprotect(blob));
+}
+
+public sealed class SmtpSettingsStore(EcrDbContext db) : ISmtpSettingsStore
+{
+    public Task<SmtpSettings?> FindAsync(CancellationToken ct)
+        => db.SmtpSettings.FirstOrDefaultAsync(s => s.Id == SmtpSettings.SingletonId, ct);
+
+    public void Add(SmtpSettings settings) => db.SmtpSettings.Add(settings);
 }

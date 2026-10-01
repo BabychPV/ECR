@@ -478,7 +478,11 @@ public sealed partial class PeriodStateJob(
                             NotificationSeverity.Info,
                             string.Create(CultureInfo.InvariantCulture, $"period-opened:{project.Code}:{period.PeriodKeyValue}"),
                             Fill("notifications.periodOpened.subject"),
-                            Fill("notifications.periodOpened.body")),
+                            Fill("notifications.periodOpened.body"),
+                            new NotificationText(
+                                "notifications.periodOpened.subject",
+                                "notifications.periodOpened.body",
+                                new Dictionary<string, string> { ["project"] = project.Code, ["period"] = label })),
                         ct)
                     .ConfigureAwait(false);
             }

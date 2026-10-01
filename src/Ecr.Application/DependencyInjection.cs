@@ -1,4 +1,4 @@
-﻿using Ecr.Application.Documents;
+using Ecr.Application.Documents;
 using Ecr.Application.Templates;
 using Ecr.Domain.Services;
 using Microsoft.Extensions.DependencyInjection;
@@ -175,6 +175,9 @@ public static class DependencyInjection
         services.AddScoped<Notifications.DeleteNotificationChannelHandler>();
         services.AddScoped<Notifications.ReplaceNotificationChannelSecretHandler>();
         services.AddScoped<Notifications.TestNotificationChannelHandler>();
+        services.AddScoped<Notifications.GetSmtpSettingsHandler>();
+        services.AddScoped<Notifications.SaveSmtpSettingsHandler>();
+        services.AddScoped<Notifications.TestSmtpSettingsHandler>();
         services.AddScoped<Notifications.GetNotificationRulesHandler>();
         services.AddScoped<Notifications.ReplaceNotificationRulesHandler>();
         services.AddScoped<Notifications.ListNotificationDeliveriesHandler>();
