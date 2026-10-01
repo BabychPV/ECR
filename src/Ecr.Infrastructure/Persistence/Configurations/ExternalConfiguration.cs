@@ -474,7 +474,7 @@ public sealed class JobProgressConfiguration : IEntityTypeConfiguration<JobProgr
         // persisted-проєкція Payload, щоб його можна було індексувати.
         builder.Property(x => x.FanOutParentJobId)
                .HasMaxLength(100)
-               .HasComputedColumnSql("CAST(JSON_VALUE([Payload], N'$.fanOutParentJobId') AS nvarchar(100))", stored: true);
+               .HasComputedColumnSql("CASE WHEN ISJSON([Payload]) = 1 THEN CAST(JSON_VALUE([Payload], N'$.fanOutParentJobId') AS nvarchar(100)) END", stored: true);
         builder.HasIndex(x => x.FanOutParentJobId, "IX_JobProgress_FanOutParent")
                .IncludeProperties(x => x.State);
 

@@ -22,7 +22,7 @@ namespace Ecr.Infrastructure.Tests.Persistence;
 [Collection("SqlServer")]
 public sealed class JobProgressHotQueriesScanTests(SqlServerFixture sql)
 {
-    private const int ForeignRows = 40_000;
+    private const int ForeignRows = 8_000;
     private const int Slack = 8;
 
     private readonly string _tag = Guid.NewGuid().ToString("N")[..8];

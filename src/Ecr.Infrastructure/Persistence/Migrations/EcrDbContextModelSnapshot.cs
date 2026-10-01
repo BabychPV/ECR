@@ -3989,7 +3989,7 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .ValueGeneratedOnAddOrUpdate()
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)")
-                        .HasComputedColumnSql("CAST(JSON_VALUE([Payload], N'$.fanOutParentJobId') AS nvarchar(100))", true);
+                        .HasComputedColumnSql("CASE WHEN ISJSON([Payload]) = 1 THEN CAST(JSON_VALUE([Payload], N'$.fanOutParentJobId') AS nvarchar(100)) END", true);
 
                     b.Property<DateTime?>("HeartbeatAt")
                         .HasColumnType("datetime2(3)");

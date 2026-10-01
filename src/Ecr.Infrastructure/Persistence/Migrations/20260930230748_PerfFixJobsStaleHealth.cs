@@ -17,7 +17,7 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                 type: "nvarchar(100)",
                 maxLength: 100,
                 nullable: true,
-                computedColumnSql: "CAST(JSON_VALUE([Payload], N'$.fanOutParentJobId') AS nvarchar(100))",
+                computedColumnSql: "CASE WHEN ISJSON([Payload]) = 1 THEN CAST(JSON_VALUE([Payload], N'$.fanOutParentJobId') AS nvarchar(100)) END",
                 stored: true);
 
             migrationBuilder.CreateIndex(

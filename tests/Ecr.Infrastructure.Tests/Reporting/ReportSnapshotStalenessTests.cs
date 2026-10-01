@@ -1,4 +1,4 @@
-// tests/Ecr.Infrastructure.Tests/Reporting/ReportSnapshotStalenessTests.cs
+﻿// tests/Ecr.Infrastructure.Tests/Reporting/ReportSnapshotStalenessTests.cs
 using System.Globalization;
 using Microsoft.Data.SqlClient;
 using Ecr.Application.Calculations;
@@ -195,7 +195,7 @@ public sealed class ReportSnapshotStalenessTests(SqlServerFixture sql)
                 SELECT TOP (@n) @p, @k, N'Superseded', '2020-01-01', '2020-01-02', NULL, NULL
                 FROM sys.all_objects AS a CROSS JOIN sys.all_objects AS b
                 """;
-            command.Parameters.AddWithValue("@n", 40_000);
+            command.Parameters.AddWithValue("@n", 8_000);
             command.Parameters.AddWithValue("@p", arrange.ProjectId);
             command.Parameters.AddWithValue("@k", arrange.Period);
             await command.ExecuteNonQueryAsync();
@@ -206,7 +206,7 @@ public sealed class ReportSnapshotStalenessTests(SqlServerFixture sql)
 
         Assert.True(
             readsAfter <= readsBefore + 8,
-            $"Читань при перевірці зрізів {readsBefore} -> {readsAfter} після 40000 давніх прогонів проєкту.");
+            $"Читань при перевірці зрізів {readsBefore} -> {readsAfter} після 8000 давніх прогонів проєкту.");
     }
 
     private sealed record Arrange(

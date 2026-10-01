@@ -16,7 +16,7 @@ Enterprise-прохід №2 (`3-performance.md`, P1 №1–3) був СТАТИ
 
 | # | Запит | До (читань / час) | Після | Виправлення |
 |---|---|---|---|---|
-| P1-1 | `GetFanOutAsync` (статус проєктної задачі `Running`/`Succeeded`) | 47 116 / 2,5 с (CPU 3,8 с) | 4 / 14 мс | persisted-стовпець `FanOutParentJobId` + індекс `IX_JobProgress_FanOutParent (FanOutParentJobId) INCLUDE (State)`; запит за стовпцем; документна задача (DocumentId > 0) дітей не має — виклик пропущено |
+| P1-1 | `GetFanOutAsync` (статус проєктної задачі `Running`/`Succeeded`) | 47 116 / 2,5 с (CPU 3,8 с) | 4 / 14 мс | persisted-стовпець `FanOutParentJobId` (з `ISJSON`-захистом) + індекс `IX_JobProgress_FanOutParent (FanOutParentJobId) INCLUDE (State)`; запит за стовпцем; документна задача (DocumentId > 0) дітей не має — виклик пропущено |
 | P1-2 | перевірка заст. зрізів при завершенні прогону (`ReportSnapshotStaleness`) | 21 231 / 18,4 с | 120 / 5 мс | `IX_CalculationRun_Project_FinishedAt (ProjectId, FinishedAt) INCLUDE (PeriodKey, Status, ErrorMessage)`; `FK_CR_Project` індексу не мав |
 | P1-3 | `CountSucceededWithMessageKeyAsync` (`/health/ready`, анонімний) | 47 236 / 1,6 с | 254 / 0,19 с | `IX_JobProgress_State_UpdatedAt (State, UpdatedAt) INCLUDE (Message)` |
 
@@ -36,10 +36,10 @@ Enterprise-прохід №2 (`3-performance.md`, P1 №1–3) був СТАТИ
 - Міграція `PerfFixJobsStaleHealth` додає persisted-стовпець: на оновленні — перерахунок по всіх рядках
   журналу (на 500 тис. рядків стенда ~20 с).
 
-## Сторожі
+## Пастка: JSON_VALUE у persisted-стовпці`nПерша версія стовпця (`CAST(JSON_VALUE(Payload...))` без захисту) зламала CI: `JSON_VALUE` на не-JSON тексті кидає\nпомилку 13609 навіть у lax-режимі, тож будь-який INSERT із нерозібраним Payload падав\n(`DbJobQueueTests.Невідомий_лейн_і_завеликий_payload...`), а ALTER на живій базі впав би на першому ж такому рядку.\nТепер `CASE WHEN ISJSON([Payload]) = 1 THEN ... END`.`n`n## Сторожі
 
 `JobProgressHotQueriesScanTests` (Infrastructure, 2 тести) і
 `ReportSnapshotStalenessTests.Перевірка_зрізів_не_читає_давніх_прогонів_проєкту`: читання
-`sys.dm_exec_sessions.logical_reads` не ростуть після 40 000 чужих рядків. Мутація: прибрати
+`sys.dm_exec_sessions.logical_reads` не ростуть після 8 000 чужих рядків (40 000 роздувало тестову базу понад ліміт `TestDatabaseSizeTests`). Мутація (виміряна на 40 000): прибрати
 `CreateIndex` із міграції — статус розкладу 258 → 1 936, зрізи 33 → 499, лічильник готовності
 199 → 545 читань, тести червоні.
