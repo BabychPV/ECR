@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { humanizeJobId, jobKindLabel } from '../jobLabel';
+import { humanizeJobId, jobKindLabel, rawJobId } from '../jobLabel';
 
 /**
  * Аудит-пас 8, lane6, п.8: тости й перелік `/admin/jobs` показували сирі
@@ -80,5 +80,29 @@ describe('humanizeJobId', () => {
   it('постановка з ціллю невідомого типу — без змін', () => {
     const id = 'ISomeNewJob~t1~a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4';
     expect(humanizeJobId(id)).toBe(id);
+  });
+});
+
+describe('rawJobId', () => {
+  const guid = 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4';
+
+  it(
+    // ⛔ Мутаційний доказ: JobsPage без rawJobId шле підпис із тоста як є —
+    // сервер не знає `Recalculation-…` і дає 404 (сценарій Н-К1, крок 2).
+    'номер задачі з тоста повертається до сирого jobId',
+    () => {
+      expect(rawJobId(humanizeJobId(`IRecalculationJob-${guid}`))).toBe(`IRecalculationJob-${guid}`);
+    },
+  );
+
+  it('злита задача з ціллю — так само, ціль лишається дослівно', () => {
+    const raw = `ISourceEventSyncJob~SRC-1~${guid}`;
+    expect(rawJobId(`  ${humanizeJobId(raw)} `)).toBe(raw);
+  });
+
+  it('сирий jobId і невідомий вигляд — без змін (лише обрізано пробіли)', () => {
+    expect(rawJobId(` IRecalculationJob-${guid} `)).toBe(`IRecalculationJob-${guid}`);
+    expect(rawJobId('IFormulaRecalculationJob:9f8e7d')).toBe('IFormulaRecalculationJob:9f8e7d');
+    expect(rawJobId(`⟦jobs.kind.recalculation⟧-short`)).toBe(`⟦jobs.kind.recalculation⟧-short`);
   });
 });

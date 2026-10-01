@@ -32,7 +32,7 @@ import {
   JobRetry,
   jobAuthor,
 } from '@/features/jobs/JobFacts';
-import { humanizeJobId, jobKindLabel } from '@/features/workflow/jobLabel';
+import { humanizeJobId, jobKindLabel, rawJobId } from '@/features/workflow/jobLabel';
 import { t } from '@/shared/i18n';
 import { generatePath } from 'react-router-dom';
 import { routes } from '@/app/routes';
@@ -167,12 +167,12 @@ export function JobsPage(): JSX.Element {
           // потяг миші до кнопки. Той самий обробник, що й клік «Дивитись»:
           // одна дія, два способи її викликати, не дві копії логіки.
           onKeyDown={(event) => {
-            if (event.key === 'Enter') setJobId(input.trim().length === 0 ? null : input.trim());
+            if (event.key === 'Enter') setJobId(input.trim().length === 0 ? null : rawJobId(input));
           }}
           miw={280}
           flex="1"
         />
-        <Button onClick={() => setJobId(input.trim().length === 0 ? null : input.trim())}>
+        <Button onClick={() => setJobId(input.trim().length === 0 ? null : rawJobId(input))}>
           {t('jobs.watch')}
         </Button>
       </Group>
