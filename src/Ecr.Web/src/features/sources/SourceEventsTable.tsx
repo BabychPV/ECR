@@ -4,6 +4,7 @@ import {
   Badge,
   Button,
   Group,
+  Loader,
   Select,
   Stack,
   Table,
@@ -457,6 +458,9 @@ export function SourceEventsTable({
           onRetry={() => void events.refetch()}
         />
       )}
+
+      {/* ⛔ ФВ-14.25: перша сторінка в дорозі — завантаження, а не порожнє місце під фільтрами («подій немає»). */}
+      {events.isPending && <Loader size="sm" />}
 
       {total !== null && (
         // ⚠ `role="status"`: після зміни фільтра читач чує нову кількість, а не мовчання.
