@@ -151,6 +151,9 @@ function CatalogLevel({
     queries: cursors.map((cursor) => ({
       queryKey: ['piaf-catalog', dataSourceId, path ?? '', '', cursor] as const,
       queryFn: () => fetchSourceCatalog(dataSourceId, { path, search: '', cursor }),
+      // D11: каталог — інтерактивний вибір, не тло. Глобальне правило повторює 5xx двічі з
+      // паузою (503 джерела → причина лише через ~20 с); тут людина сама натисне «повторити».
+      retry: false,
     })),
   });
 

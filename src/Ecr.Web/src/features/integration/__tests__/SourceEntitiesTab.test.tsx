@@ -3,6 +3,7 @@ import { render, screen, fireEvent, waitFor, within } from '@testing-library/rea
 import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
+import { createQueryClient } from '@/app/queryClient';
 import { SourcesPage } from '@/pages/admin/SourcesPage';
 
 /**
@@ -67,6 +68,7 @@ interface Sent {
 }
 
 let sent: Sent[] = [];
+let catalogCalls = 0;
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -78,11 +80,14 @@ function json(body: unknown, status = 200): Response {
 function respond({
   permissions = ['Integration.View', 'Integration.Manage'],
   create = () => json({ id: 50 }, 201),
+  catalogOutage = false,
 }: {
   permissions?: string[];
   create?: () => Response;
+  catalogOutage?: boolean;
 } = {}): void {
   sent = [];
+  catalogCalls = 0;
 
   vi.stubGlobal(
     'fetch',
@@ -111,6 +116,13 @@ function respond({
 
       if (path === '/api/v1/data-sources') return json([connection()]);
       if (path === '/api/v1/data-sources/7/catalog') {
+        catalogCalls += 1;
+        if (catalogOutage) {
+          return json(
+            { title: 'Source unavailable', status: 503, errorCode: 'ECR-INT-0503', correlationId: 'c-503' },
+            503,
+          );
+        }
         return json({ items: Catalog[url.searchParams.get('path') ?? ''] ?? [], nextCursor: null });
       }
       if (path === '/api/v1/registries') return json(Registries);
@@ -126,9 +138,7 @@ function respond({
   );
 }
 
-function show(): void {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-
+function show(client: QueryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })): void {
   render(
     <MantineProvider>
       <QueryClientProvider client={client}>
@@ -176,6 +186,21 @@ describe("Шухляда з'єднання: вкладка Entities", () => {
 
     await waitFor(() => expect(drawer.querySelector('[data-entity-row="STACK-1"]')).not.toBeNull());
     expect(drawer.querySelector('[data-entity-row="LAB-1"]')).toBeNull();
+  });
+
+  it('D11: недоступний каталог (503) не повторюється — причина видна з першої відповіді, а не через ~3 спроби', async () => {
+    respond({ catalogOutage: true });
+    // Реальні типові опції застосунку: глобальне правило повторює 5xx двічі з паузою.
+    show(createQueryClient());
+
+    const drawer = await openEntitiesTab();
+    fireEvent.click(await within(drawer).findByRole('button', { name: /sources\.addEntity/ }));
+
+    const form = await screen.findByRole('dialog', { name: /sources\.addEntityTitle/ });
+
+    // findByRole чекає ~1 с; із повторами (паузи 1 с + 2 с) причина з'явилась би щонайменше за 3 с.
+    await within(form).findByRole('alert');
+    expect(catalogCalls).toBe(1);
   });
 
   it('ФВ-13.11: сутність обирається з каталогу і заводиться POST /api/v1/sources з кодом і шляхом позиції', async () => {
