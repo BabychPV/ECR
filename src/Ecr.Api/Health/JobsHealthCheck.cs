@@ -1,4 +1,4 @@
-﻿using Ecr.Application.Common;
+using Ecr.Application.Common;
 using Ecr.Application.Ports;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Quartz;
@@ -25,7 +25,8 @@ public sealed class JobsHealthCheck(
     IUiStringCatalog catalog,
     ICurrentUser currentUser,
     IJobProgressStore? progress = null,
-    Domain.Abstractions.IClock? clock = null) : IHealthCheck
+    Domain.Abstractions.IClock? clock = null,
+    HealthResultCache? cache = null) : IHealthCheck
 {
     /// <summary>
     /// Скільки задача може висіти без биття, поки прибирання мало б її закрити,
@@ -52,9 +53,19 @@ public sealed class JobsHealthCheck(
     public static readonly TimeSpan RecalcOverBudgetWindow = TimeSpan.FromDays(1);
 
     /// <inheritdoc />
-    public async Task<HealthCheckResult> CheckHealthAsync(
+    public Task<HealthCheckResult> CheckHealthAsync(
         HealthCheckContext context,
         CancellationToken cancellationToken)
+    {
+        // ⛔ `/health/ready` анонімний, а перевірка робить ~254 логічних читання на пробу
+        // (JobProgressStore.Count*). Результат живе недовго (HealthResultCache.Ttl), тож
+        // шквал проб не б'є по базі; зміна стану не ховається довше за TTL.
+        return cache is null
+            ? ComputeAsync(cancellationToken)
+            : cache.GetOrAddAsync($"ready:{currentUser.Language}", ComputeAsync, cancellationToken);
+    }
+
+    private async Task<HealthCheckResult> ComputeAsync(CancellationToken cancellationToken)
     {
         // ⚠ Фабрика лишається необов'язковою: у складаннях без Quartz
         // (наприклад, у тестах контейнера) перевірка має повідомити про це, а

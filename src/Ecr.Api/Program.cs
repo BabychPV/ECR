@@ -1,4 +1,4 @@
-﻿using Ecr.Api.Auth;
+using Ecr.Api.Auth;
 using Ecr.Api.Errors;
 using Ecr.Api.Middleware;
 using Ecr.Api.Observability;
@@ -210,6 +210,7 @@ builder.Services.AddSingleton<Ecr.Api.Security.IAccessDenialAuditor, Ecr.Api.Sec
 builder.Services.AddScoped<Ecr.Api.Health.IRecalculationWorkerProbe, Ecr.Api.Health.RecalculationWorkerProbe>();
 // F-4: база часових поясів ОС — лише попередження (Degraded), старт не блокується.
 builder.Services.AddSingleton<Ecr.Api.Health.ITimeZoneOffsetProvider, Ecr.Api.Health.SystemTimeZoneOffsetProvider>();
+builder.Services.AddSingleton<Ecr.Api.Health.HealthResultCache>();
 builder.Services.AddHealthChecks()
     .AddCheck<Ecr.Api.Health.DatabaseHealthCheck>("db", tags: ["db", "ready"])
     .AddCheck<Ecr.Api.Health.JobsHealthCheck>("jobs", tags: ["ready"])
