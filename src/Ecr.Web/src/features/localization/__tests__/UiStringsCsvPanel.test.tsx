@@ -62,7 +62,7 @@ const Strings: Record<string, string> = {
   'err.ECR-REQ-0422.uiStringTooLong': 'The translation is longer than 1000 characters.',
   'err.ECR-REQ-0422.uiStringDuplicateKey': 'This key already appears earlier in the file.',
   'err.ECR-REQ-0422.placeholderMismatch':
-    'The placeholders of "{key}" differ from the default language.',
+    'The placeholders of "{key}" differ from the default language: expected [{expected}], got [{actual}].',
 };
 
 /** Мови реєстру: еталон і дві мови перекладу — як у сіді. */
@@ -269,6 +269,12 @@ describe('UiStringsCsvPanel: обмін перекладом через CSV', ()
         errors: [
           { row: 2, key: 'no.such.key', messageKey: 'err.ECR-REQ-0422.uiStringUnknownKey' },
           { row: 5, key: 'a.key', messageKey: 'err.ECR-REQ-0422.uiStringDuplicateKey' },
+          {
+            row: 7,
+            key: 'a.window',
+            messageKey: 'err.ECR-REQ-0422.placeholderMismatch',
+            params: { key: 'a.window', expected: 'from, to', actual: 'from' },
+          },
         ],
       });
 
@@ -291,6 +297,14 @@ describe('UiStringsCsvPanel: обмін перекладом через CSV', ()
       expect(screen.getByText('This key already appears earlier in the file.')).toBeTruthy();
       expect(screen.queryByText('err.ECR-REQ-0422.uiStringUnknownKey')).toBeNull();
       expect(screen.queryByText('err.ECR-REQ-0422.uiStringDuplicateKey')).toBeNull();
+
+      // ⛔ Клас D1, мутаційний доказ: не передай `failure.params` у `rowErrorText` — лишаться
+      // «[{expected}]» і «[{actual}]» фігурними дужками.
+      expect(
+        screen.getByText(
+          'The placeholders of "a.window" differ from the default language: expected [from, to], got [from].',
+        ),
+      ).toBeTruthy();
 
       // Причина «нічого не записано» названа, і номери стрічок на місці.
       expect(screen.getByText('This file cannot be applied as it is')).toBeTruthy();

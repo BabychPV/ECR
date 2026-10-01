@@ -247,7 +247,7 @@ export function UiStringsCsvPanel(): JSX.Element | null {
                         <Table.Td data-allow-dotted>
                           <Text size="xs">{failure.key}</Text>
                         </Table.Td>
-                        <Table.Td>{rowErrorText(failure.messageKey, failure.key)}</Table.Td>
+                        <Table.Td>{rowErrorText(failure.messageKey, failure.key, failure.params)}</Table.Td>
                       </Table.Tr>
                     ))}
                   </Table.Tbody>

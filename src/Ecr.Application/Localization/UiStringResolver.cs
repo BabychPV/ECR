@@ -108,6 +108,68 @@ public static partial class UiStringResolver
     }
 
     /// <summary>
+    /// Підстановки для шаблону <c>messageKey</c> із подробиць відмови: усе, крім самого
+    /// <c>messageKey</c>, текстом за інваріантною культурою.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Клас дефекту <c>D1</c>: брати лише <c>string</c> означало мовчки губити числа —
+    /// <c>["maxLength"] = 64</c> лишав користувачу <c>{maxLength}</c> фігурними дужками, хоча
+    /// поле в подробицях було. Числа, дати й перелічення — <see cref="IFormattable"/>
+    /// (інваріантно: культура запиту тут не вирішує, текст однаковий у звіті й у журналі),
+    /// <c>bool</c> — <c>true</c>/<c>false</c>. Решта (колекції, вкладені об'єкти) у речення не
+    /// підставляється: їхній <c>ToString()</c> — назва типу, гірша за дужки.
+    /// </remarks>
+    /// <param name="details">Подробиці винятку; <c>null</c> — порожньо.</param>
+    public static IReadOnlyDictionary<string, string> Parameters(IReadOnlyDictionary<string, object?>? details)
+    {
+        var result = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (details is null)
+        {
+            return result;
+        }
+
+        foreach (var (key, value) in details)
+        {
+            if (string.Equals(key, MessageKeyDetail, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var text = value switch
+            {
+                string s => s,
+                bool b => b ? "true" : "false",
+                IFormattable f => f.ToString(null, System.Globalization.CultureInfo.InvariantCulture),
+                _ => null,
+            };
+
+            if (text is not null)
+            {
+                result[key] = text;
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Чи однакові два набори підстановок за вмістом; <c>null</c> і порожній — однакові.
+    /// </summary>
+    public static bool SameParameters(
+        IReadOnlyDictionary<string, string>? left, IReadOnlyDictionary<string, string>? right)
+    {
+        var a = left ?? EmptyParameters;
+        var b = right ?? EmptyParameters;
+        return a.Count == b.Count
+               && a.All(pair => b.TryGetValue(pair.Key, out var value) && string.Equals(value, pair.Value, StringComparison.Ordinal));
+    }
+
+    private static readonly IReadOnlyDictionary<string, string> EmptyParameters = new Dictionary<string, string>();
+
+    /// <summary>Ім'я подробиці з ключем каталогу тексту відмови.</summary>
+    public const string MessageKeyDetail = "messageKey";
+
+    /// <summary>
     /// Підставляє <c>{name}</c> у шаблон значеннями з <paramref name="parameters"/>
     /// (`Q-304`).
     /// </summary>

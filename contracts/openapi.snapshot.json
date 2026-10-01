@@ -15831,6 +15831,16 @@
             "description": "Ключ тексту відмови в каталозі.",
             "type": "string"
           },
+          "params": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Підстановки для MessageKey; `null` — шаблон без плейсхолдерів.",
+            "type": [
+              "null",
+              "object"
+            ]
+          },
           "row": {
             "description": "Номер запису у файлі; заголовок — 1.",
             "format": "int32",

@@ -14,7 +14,22 @@ namespace Ecr.Application.Localization;
 /// <param name="Row">Номер запису у файлі; заголовок — 1.</param>
 /// <param name="Key">Ключ, як його записано у файлі.</param>
 /// <param name="MessageKey">Ключ тексту відмови в каталозі.</param>
-public sealed record UiStringImportError(int Row, string Key, string MessageKey);
+/// <param name="Params">Підстановки для <paramref name="MessageKey"/>; <c>null</c> — шаблон без плейсхолдерів.</param>
+// ⛔ Клас дефекту D1: placeholderMismatch без Params показував «[{expected}]… [{actual}]» дужками.
+public sealed record UiStringImportError(
+    int Row, string Key, string MessageKey, IReadOnlyDictionary<string, string>? Params = null)
+{
+    /// <summary>Рівність за вмістом підстановок, а не за посиланням на словник.</summary>
+    public bool Equals(UiStringImportError? other)
+        => other is not null
+           && Row == other.Row
+           && string.Equals(Key, other.Key, StringComparison.Ordinal)
+           && string.Equals(MessageKey, other.MessageKey, StringComparison.Ordinal)
+           && UiStringResolver.SameParameters(Params, other.Params);
+
+    /// <inheritdoc />
+    public override int GetHashCode() => HashCode.Combine(Row, Key, MessageKey);
+}
 
 /// <summary>Звіт імпорту перекладу.</summary>
 /// <param name="Added">Нових перекладів.</param>
@@ -143,7 +158,15 @@ public sealed class UiStringImportHandler(
 
             if (messageKey is not null || current is null)
             {
-                errors.Add(new UiStringImportError(i + 1, key, messageKey ?? "err.ECR-REQ-0422.uiStringUnknownKey"));
+                var parameters = current is not null && messageKey == "err.ECR-REQ-0422.placeholderMismatch"
+                    ? new Dictionary<string, string>(StringComparer.Ordinal)
+                    {
+                        ["key"] = key,
+                        ["expected"] = string.Join(", ", UiStringResolver.Placeholders(current.Reference)),
+                        ["actual"] = string.Join(", ", UiStringResolver.Placeholders(value)),
+                    }
+                    : null;
+                errors.Add(new UiStringImportError(i + 1, key, messageKey ?? "err.ECR-REQ-0422.uiStringUnknownKey", parameters));
                 continue;
             }
 

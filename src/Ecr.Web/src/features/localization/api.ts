@@ -120,16 +120,18 @@ export function translationLanguages(languages: readonly LanguageDto[] | undefin
  * ⚠ Чотири власні рядки `BE-13` ч.2 підстановок не мають навмисно («відмови
  * рядків приходять у звіті без підстановок», коментар у сіді). П'ятий,
  * `placeholderMismatch`, узятий із редактора рядків і чекає на `{key}`,
- * `{expected}`, `{actual}`; у звіті є лише `key`, і він підставляється. Двох
- * інших сервер у `UiStringImportError` не надсилає взагалі — вони лишаються в
- * тексті як є, і це видима прогалина СЕРВЕРА, а не місце, де можна вигадати
- * значення: неправдиві «очікувалось [a], отримано [b]» коштували б дорожче за
- * порожні дужки.
+ * `{expected}`, `{actual}` — їх сервер надсилає в `params` помилки (клас `D1`:
+ * доти `{expected}` і `{actual}` лишалися на екрані фігурними дужками).
  *
  * @param messageKey Ключ відмови, як його назвав сервер.
  * @param key Ключ каталогу з цієї стрічки файлу.
+ * @param params Підстановки сервера для `messageKey`; `key` стрічки — запасний.
  */
-export function rowErrorText(messageKey: string, key: string): string {
+export function rowErrorText(
+  messageKey: string,
+  key: string,
+  params?: Readonly<Record<string, string>> | null,
+): string {
   switch (messageKey) {
     case 'err.ECR-REQ-0422.uiStringUnknownKey':
       return t('err.ECR-REQ-0422.uiStringUnknownKey', { key });
@@ -140,7 +142,7 @@ export function rowErrorText(messageKey: string, key: string): string {
     case 'err.ECR-REQ-0422.uiStringDuplicateKey':
       return t('err.ECR-REQ-0422.uiStringDuplicateKey', { key });
     case 'err.ECR-REQ-0422.placeholderMismatch':
-      return t('err.ECR-REQ-0422.placeholderMismatch', { key });
+      return t('err.ECR-REQ-0422.placeholderMismatch', { key, ...params });
     default:
       return t('err.ECR-REQ-0422', { key });
   }

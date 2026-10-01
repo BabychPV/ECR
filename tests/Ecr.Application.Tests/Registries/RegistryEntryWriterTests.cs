@@ -157,8 +157,8 @@ public sealed class RegistryEntryWriterTests
         Assert.Equal(
             new[]
             {
-                new RegistryEntryImportError(1, "E1", "CASE_NAME", "err.ECR-REG-0422.requiredFieldsMissing"),
-                new RegistryEntryImportError(3, "E3", "NOPE", "err.ECR-REG-0422.unknownFields"),
+                new RegistryEntryImportError(1, "E1", "CASE_NAME", "err.ECR-REG-0422.requiredFieldsMissing", new Dictionary<string, string> {["registryCode"] = "STREAM_CASE", ["fields"] = "CASE_NAME"}),
+                new RegistryEntryImportError(3, "E3", "NOPE", "err.ECR-REG-0422.unknownFields", new Dictionary<string, string> {["registryCode"] = "STREAM_CASE", ["fields"] = "NOPE"}),
             },
             result.Errors);
         await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());

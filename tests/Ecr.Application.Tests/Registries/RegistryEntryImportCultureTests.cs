@@ -87,6 +87,23 @@ public sealed class RegistryEntryImportCultureTests
         Assert.Equal(1m, value.ValueNumeric);
     }
 
+    /// <summary>
+    /// ⛔ Клас дефекту <c>D1</c>: <c>valueNotNumber</c> («The value "{value}" is not a number for a
+    /// field of type {dataType}») їхав у звіті без підстановок, і людина бачила фігурні дужки.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    public async Task Відмова_числа_несе_підстановки_шаблону()
+    {
+        var (report, _) = await ImportAsync("en", "abc");
+
+        var error = Assert.Single(report.Errors);
+        Assert.Equal("err.ECR-REG-0422.valueNotNumber", error.MessageKey);
+        Assert.NotNull(error.Params);
+        Assert.Equal("abc", error.Params["value"]);
+        Assert.Equal("Decimal", error.Params["dataType"]);
+    }
+
     private async Task<(RegistryEntryImportReport Report, RegistryValue Value)> ImportAsync(string language, string cell)
     {
         _user.Language.Returns(language);

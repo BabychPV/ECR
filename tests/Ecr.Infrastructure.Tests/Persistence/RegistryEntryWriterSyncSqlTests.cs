@@ -70,7 +70,13 @@ public sealed class RegistryEntryWriterSyncSqlTests(SqlServerFixture sql)
             CancellationToken.None);
 
         Assert.False(result.Applied);
-        Assert.Equal([new RegistryEntryImportError(1, "E1", null, RegistryEntryWriter.EntryCodeTakenKey)], result.Errors);
+        Assert.Equal(
+            [new RegistryEntryImportError(1, "E1", null, RegistryEntryWriter.EntryCodeTakenKey, new Dictionary<string, string>
+            {
+                ["code"] = "E1",
+                ["id"] = entryId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            })],
+            result.Errors);
     }
 
     [Fact]

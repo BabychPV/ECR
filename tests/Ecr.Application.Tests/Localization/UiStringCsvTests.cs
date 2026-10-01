@@ -73,6 +73,15 @@ public sealed class UiStringCsvTests
                 (6, "a.quote", "err.ECR-REQ-0422.uiStringDuplicateKey"),
             ],
             report.Errors.Select(e => (e.Row, e.Key, e.MessageKey)));
+
+        // ⛔ Клас D1: шаблон placeholderMismatch чекає {key}, {expected}, {actual} — без
+        // підстановок клієнтський t() показав би їх фігурними дужками.
+        var mismatch = report.Errors[0].Params;
+        Assert.NotNull(mismatch);
+        Assert.Equal("a.window", mismatch["key"]);
+        Assert.Equal("from, to", mismatch["expected"]);
+        Assert.Equal("from", mismatch["actual"]);
+        Assert.Null(report.Errors[1].Params);
         Assert.False(report.Applied);
         Assert.Equal(before, _catalog.Revision);
     }

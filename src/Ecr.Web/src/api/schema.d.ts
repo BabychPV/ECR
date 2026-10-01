@@ -24747,6 +24747,10 @@ export interface components {
             key: string;
             /** @description Ключ тексту відмови в каталозі. */
             messageKey: string;
+            /** @description Підстановки для MessageKey; `null` — шаблон без плейсхолдерів. */
+            params?: null | {
+                [key: string]: string;
+            };
             /**
              * Format: int32
              * @description Номер запису у файлі; заголовок — 1.
