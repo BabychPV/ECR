@@ -1745,6 +1745,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
 
       gridListenersCleanup.current = [
         installEnterKeyCompat(node),
+        blockNativePaste(node),
         trackSelection(node, (next) => {
           selection.current = next;
         }),
@@ -2658,3 +2659,26 @@ function rowKeyOf(model: unknown): string {
 
 /** Колонки для решти екранів; експортується заради повторного використання. */
 export type { ColumnDto };
+
+
+/**
+ * Гасить НАТИВНУ вставку RevoGrid (`beforepasteapply` скасовується).
+ *
+ * ⛔ Вставка йшла двома шляхами одразу: наш `onPaste` (відхиляє батч цілком,
+ * якщо є read-only комірки) і нативна вставка бібліотеки — слухач `paste` на
+ * `document`, `defaultPrevented` він не перевіряє, — яка через `afteredit` →
+ * `applyRangeEdit` зберігала записувані комірки. Оператор бачив «Nothing from
+ * this paste was saved», а сусідню комірку було збережено (P2, 2026-10-01).
+ * `onPaste` — єдиний шлях вставки.
+ *
+ * ⚠ Слухач на контейнері, а не проп `onBeforepaste*`: обгортка react-datagrid
+ * не підписується на подію, чия назва збігається з DOM-подією (`onbeforepaste`,
+ * `isCoveredByReact`), а `onBeforepasteapply` у типах `<RevoGrid>` немає.
+ * Подія `bubbles` + `composed`, тож контейнер її бачить.
+ */
+function blockNativePaste(node: HTMLElement): () => void {
+  const block = (event: Event): void => event.preventDefault();
+  node.addEventListener('beforepasteapply', block);
+
+  return () => node.removeEventListener('beforepasteapply', block);
+}
