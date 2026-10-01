@@ -189,13 +189,14 @@ public sealed partial class SourceEventsApiTests
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Directive", "HSE301-A6")]
     [Trait("Scenario", "Н-А5")]
-    public async Task Розмір_сторінки_таблиці_подій_поза_1_500_дає_422_з_ключем()
+    public async Task Розмір_сторінки_таблиці_подій_поза_межами_дає_422_з_ключем_а_нуль_типовий()
     {
         await using var stand = await ArrangeAsync();
         using var app = new EcrApiFactory(sql);
         using var manager = await SignedInAsync(app, ["Integration.Manage"], stand.ProjectId, GrantLevel.Manage);
 
-        foreach (var limit in new[] { 0, 501 })
+        // 0 — не відмова, а типові 50 (контролер: limit == 0 ? 50 : limit).
+        foreach (var limit in new[] { -1, 501 })
         {
             var response = await manager.GetAsync(new Uri($"/api/v1/sources/{stand.EntityId}/source-events?limit={limit}", UriKind.Relative));
             Assert.True(
@@ -204,9 +205,12 @@ public sealed partial class SourceEventsApiTests
             Assert.Equal("err.ECR-REQ-0422.pageSizeOutOfRange", (await JsonAsync(response)).GetProperty("messageKey").GetString());
         }
 
-        Assert.Equal(
-            HttpStatusCode.OK,
-            (await manager.GetAsync(new Uri($"/api/v1/sources/{stand.EntityId}/source-events?limit=500", UriKind.Relative))).StatusCode);
+        foreach (var limit in new[] { 0, 500 })
+        {
+            Assert.Equal(
+                HttpStatusCode.OK,
+                (await manager.GetAsync(new Uri($"/api/v1/sources/{stand.EntityId}/source-events?limit={limit}", UriKind.Relative))).StatusCode);
+        }
     }
 
     private static async Task ExpectMapAsync(HttpClient client, object body, int status, string messageKey)
