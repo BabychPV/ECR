@@ -39,6 +39,33 @@ public sealed class SourceEventMapChangeHandlersTests : SourceEventMapTestBase
         await Store.DidNotReceiveWithAnyArgs().RemoveMapAsync(default!, default);
     }
 
+    /// <summary>
+    /// S18: мапінг документа невидимого проєкту — та сама 404, що й неіснуючий мапінг, а не 403 з
+    /// <c>projectId</c>. Видимий проєкт без <c>Manage</c> лишається 403 (попередній тест).
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Directive", "S18")]
+    public async Task Мапінг_документа_невидимого_проєкту_на_зміні_й_видаленні_це_404_як_неіснуючий()
+    {
+        Store.FindMapAsync(77, Arg.Any<CancellationToken>()).Returns(NewMap());
+        var missing = await Assert.ThrowsAsync<NotFoundException>(() => Delete().HandleAsync(78, default));
+
+        Profile(GrantLevel.None);
+        var onUpdate = await Assert.ThrowsAsync<NotFoundException>(() => Update().HandleAsync(77, UpdateCommand(), default));
+        var onDelete = await Assert.ThrowsAsync<NotFoundException>(() => Delete().HandleAsync(77, default));
+
+        foreach (var ex in new[] { onUpdate, onDelete })
+        {
+            Assert.Equal(missing.ErrorCode, ex.ErrorCode);
+            Assert.Equal(missing.Details!["messageKey"], ex.Details!["messageKey"]);
+            Assert.False(ex.Details.ContainsKey("projectId"));
+        }
+
+        await Store.DidNotReceiveWithAnyArgs().SaveAsync(default);
+        await Store.DidNotReceiveWithAnyArgs().RemoveMapAsync(default!, default);
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
     [Trait("Directive", "HSE301-A6")]

@@ -42,7 +42,7 @@ public sealed class UpdateSourceEventMapHandler(
             .RequireAsync(access, currentUser, SaveDataSourceHandler.Permission, ct)
             .ConfigureAwait(false);
 
-        var map = await SourceEventMapSupport.RequireMapAsync(store, id, ct).ConfigureAwait(false);
+        var map = await SourceEventMapSupport.RequireVisibleMapAsync(store, access, profile, id, ct).ConfigureAwait(false);
         var document = await store.FindDocumentAsync(map.DocumentId, ct).ConfigureAwait(false);
         if (document is not null)
         {
@@ -113,7 +113,7 @@ public sealed class DeleteSourceEventMapHandler(
             .RequireAsync(access, currentUser, SaveDataSourceHandler.Permission, ct)
             .ConfigureAwait(false);
 
-        var map = await SourceEventMapSupport.RequireMapAsync(store, id, ct).ConfigureAwait(false);
+        var map = await SourceEventMapSupport.RequireVisibleMapAsync(store, access, profile, id, ct).ConfigureAwait(false);
         var document = await store.FindDocumentAsync(map.DocumentId, ct).ConfigureAwait(false);
         if (document is not null)
         {

@@ -145,15 +145,38 @@ internal static class SourceEventMapSupport
 
     /// <summary>Мапінг або 404.</summary>
     public static async Task<SourceEventMap> RequireMapAsync(ISourceEventMapStore store, int id, CancellationToken ct)
-        => await store.FindMapAsync(id, ct).ConfigureAwait(false)
-           ?? throw new NotFoundException(
-               ErrorCodes.SourceEntityNotFound,
-               $"Мапінгу подій {id} немає.",
-               new Dictionary<string, object?>
-               {
-                   ["messageKey"] = "err.ECR-INT-0404.eventMap",
-                   ["eventMapId"] = id.ToString(CultureInfo.InvariantCulture),
-               });
+        => await store.FindMapAsync(id, ct).ConfigureAwait(false) ?? throw MapNotFound(id);
+
+    /// <summary>
+    /// Мапінг, документ якого користувач бачить, або та сама 404, що й на неіснуючий (S18, B-08).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ До S18 перелік і картка віддавали мапінги документів невидимих проєктів, а зміна й видалення на
+    /// них відмовляли <c>403 noProjectManageGrant</c> з <c>projectId</c> — підтвердження, що мапінг є, і
+    /// номер чужого проєкту. Таблиця подій (<c>ListSourceEventsHandler</c>) такі мапінги вже ховала.
+    /// </remarks>
+    public static async Task<SourceEventMap> RequireVisibleMapAsync(
+        ISourceEventMapStore store, IAccessDecisionService access, AccessProfile profile, int id, CancellationToken ct)
+    {
+        var map = await RequireMapAsync(store, id, ct).ConfigureAwait(false);
+
+        return await IsVisibleAsync(access, profile, map, ct).ConfigureAwait(false) ? map : throw MapNotFound(id);
+    }
+
+    /// <summary>Чи бачить користувач документ, у який пише мапінг.</summary>
+    public static async Task<bool> IsVisibleAsync(
+        IAccessDecisionService access, AccessProfile profile, SourceEventMap map, CancellationToken ct)
+        => (await access.CanReadDocumentAsync(profile, map.DocumentId, ct).ConfigureAwait(false)).IsAllowed;
+
+    private static NotFoundException MapNotFound(int id)
+        => new(
+            ErrorCodes.SourceEntityNotFound,
+            $"Мапінгу подій {id} немає.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-INT-0404.eventMap",
+                ["eventMapId"] = id.ToString(CultureInfo.InvariantCulture),
+            });
 
     /// <summary>
     /// Мапінг пише в документ проєкту: на проєкт потрібен грант <c>Manage</c> — так само, як для
@@ -289,13 +312,23 @@ public sealed class ListSourceEventMapsHandler(
     /// <param name="ct">Скасування.</param>
     public async Task<IReadOnlyList<SourceEventMapDto>> ListAsync(int? sourceEntityId, CancellationToken ct)
     {
-        await PermissionCheck
+        var profile = await PermissionCheck
             .RequireAnyAsync(access, currentUser, [ListDataSourcesHandler.Permission, SaveDataSourceHandler.Permission], ct)
             .ConfigureAwait(false);
 
         var maps = await store.ListMapsAsync(sourceEntityId, ct).ConfigureAwait(false);
 
-        return [.. maps.OrderBy(m => m.Id).Select(SourceEventMapSupport.ToDto)];
+        // ⛔ S18: мапінг документа, якого користувач не бачить, для нього відсутній.
+        var visible = new List<SourceEventMap>(maps.Count);
+        foreach (var map in maps)
+        {
+            if (await SourceEventMapSupport.IsVisibleAsync(access, profile, map, ct).ConfigureAwait(false))
+            {
+                visible.Add(map);
+            }
+        }
+
+        return [.. visible.OrderBy(m => m.Id).Select(SourceEventMapSupport.ToDto)];
     }
 
     /// <summary>Один мапінг; немає — 404.</summary>
@@ -303,11 +336,12 @@ public sealed class ListSourceEventMapsHandler(
     /// <param name="ct">Скасування.</param>
     public async Task<SourceEventMapDto> GetAsync(int id, CancellationToken ct)
     {
-        await PermissionCheck
+        var profile = await PermissionCheck
             .RequireAnyAsync(access, currentUser, [ListDataSourcesHandler.Permission, SaveDataSourceHandler.Permission], ct)
             .ConfigureAwait(false);
 
-        return SourceEventMapSupport.ToDto(await SourceEventMapSupport.RequireMapAsync(store, id, ct).ConfigureAwait(false));
+        return SourceEventMapSupport.ToDto(
+            await SourceEventMapSupport.RequireVisibleMapAsync(store, access, profile, id, ct).ConfigureAwait(false));
     }
 }
 
@@ -352,15 +386,12 @@ public sealed class CreateSourceEventMapHandler(
                     ["id"] = command.SourceEntityId.ToString(CultureInfo.InvariantCulture),
                 });
 
-        var document = await store.FindDocumentAsync(command.DocumentId, ct).ConfigureAwait(false)
-            ?? throw new NotFoundException(
-                "ECR-DOC-0404",
-                $"Документ {command.DocumentId} не знайдено.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-DOC-0404.document",
-                    ["documentId"] = command.DocumentId.ToString(CultureInfo.InvariantCulture),
-                });
+        // ⛔ S18: документ невидимого проєкту — та сама 404, що й неіснуючий (B-08), а не 403 з його projectId.
+        var document = await store.FindDocumentAsync(command.DocumentId, ct).ConfigureAwait(false);
+        if (document is null || !profile.SeesDocumentsOf(document.ProjectId))
+        {
+            throw Documents.DocumentVisibility.NotFound(command.DocumentId);
+        }
 
         SourceEventMapSupport.RequireProjectManage(profile, document.ProjectId);
 

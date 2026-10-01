@@ -34,6 +34,12 @@ public abstract class SourceEventMapTestBase
             .Returns(call => call.Arg<Func<CancellationToken, Task>>()(call.Arg<CancellationToken>()));
         Profile(GrantLevel.Manage);
 
+        // Видимість документа — те саме правило, що й у службі доступу (SeesDocumentsOf).
+        Access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), DocumentId, Arg.Any<CancellationToken>())
+            .Returns(call => call.Arg<AccessProfile>().SeesDocumentsOf(ProjectId)
+                ? EditDecision.Allow()
+                : EditDecision.Deny(EditDenyReason.NoGrant));
+
         Sources.FindSourceEntityAsync(EntityId, Arg.Any<CancellationToken>())
             .Returns(new SourceEntity(1, "FlareEvent", RegistrySourceKind.External));
         Sources.UnitExistsAsync(Arg.Any<int>(), Arg.Any<CancellationToken>()).Returns(true);

@@ -76,13 +76,62 @@ public sealed class SourceEventMapHandlersTests : SourceEventMapTestBase
         await Audit.DidNotReceiveWithAnyArgs().WriteStructureChangeAsync(default!, default);
     }
 
+    /// <summary>
+    /// S18: документ проєкту, якого користувач не бачить (без гранта чи із забороною), — та сама 404
+    /// <c>ECR-DOC-0404</c>, що й неіснуючий, а не 403 з номером чужого проєкту.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Directive", "S18")]
+    public async Task Документ_невидимого_проєкту_це_та_сама_404_що_й_неіснуючий()
+    {
+        Store.FindDocumentAsync(DocumentId + 1, Arg.Any<CancellationToken>()).Returns((EventMapDocumentInfo?)null);
+        var missing = await Assert.ThrowsAsync<NotFoundException>(
+            () => Create().HandleAsync(Command() with { DocumentId = DocumentId + 1 }, default));
+
+        Profile(GrantLevel.None);
+        var hidden = await Assert.ThrowsAsync<NotFoundException>(() => Create().HandleAsync(Command(), default));
+
+        Access.BuildProfileAsync(Actor, Arg.Any<CancellationToken>()).Returns(
+            new AccessBuilder { UserId = Actor }.Permission("Integration.Manage")
+                .Grant(ResourceKind.Project, ProjectId, GrantLevel.Manage).Deny(ResourceKind.Project, ProjectId).Build());
+        var denied = await Assert.ThrowsAsync<NotFoundException>(() => Create().HandleAsync(Command(), default));
+
+        foreach (var ex in new[] { hidden, denied })
+        {
+            Assert.Equal(missing.ErrorCode, ex.ErrorCode);
+            Assert.Equal(missing.Details!["messageKey"], ex.Details!["messageKey"]);
+            Assert.False(ex.Details.ContainsKey("projectId"));
+        }
+
+        await Store.DidNotReceiveWithAnyArgs().AddMapAsync(default!, default);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Directive", "S18")]
+    public async Task Мапінг_документа_невидимого_проєкту_не_читається_ні_переліком_ні_карткою()
+    {
+        Access.BuildProfileAsync(Actor, Arg.Any<CancellationToken>())
+            .Returns(new AccessBuilder { UserId = Actor }.Permission("Integration.View").Build());
+        Store.FindMapAsync(77, Arg.Any<CancellationToken>()).Returns(NewMap());
+        Store.ListMapsAsync(Arg.Any<int?>(), Arg.Any<CancellationToken>()).Returns([NewMap()]);
+
+        var reader = new ListSourceEventMapsHandler(Store, Access, User);
+        Assert.Empty(await reader.ListAsync(null, default));
+        var hidden = await Assert.ThrowsAsync<NotFoundException>(() => reader.GetAsync(77, default));
+        var missing = await Assert.ThrowsAsync<NotFoundException>(() => reader.GetAsync(404, default));
+
+        Assert.Equal(missing.Details!["messageKey"], hidden.Details!["messageKey"]);
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
     [Trait("Directive", "HSE301-A6")]
     public async Task Читання_мапінгів_доступне_View_а_без_права_403()
     {
         Access.BuildProfileAsync(Actor, Arg.Any<CancellationToken>())
-            .Returns(new AccessBuilder { UserId = Actor }.Permission("Integration.View").Build());
+            .Returns(new AccessBuilder { UserId = Actor }.Permission("Integration.View").Grant(ResourceKind.Project, ProjectId, GrantLevel.Read).Build());
         Store.FindMapAsync(77, Arg.Any<CancellationToken>()).Returns(NewMap());
         Store.ListMapsAsync(Arg.Any<int?>(), Arg.Any<CancellationToken>()).Returns([NewMap()]);
 
