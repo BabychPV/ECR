@@ -19,7 +19,9 @@ namespace Ecr.Infrastructure.Tests.Jobs;
 /// </summary>
 /// <remarks>
 /// Мутаційні докази: прибрати <c>wanted.Contains</c> → <see cref="Тригер_лише_для_названих_документів"/> червоний;
-/// набір з payload без звірки зі сховищем → <see cref="Закритий_період_не_ставиться_навіть_з_payload"/> червоний.
+/// набір з payload без звірки зі сховищем → <see cref="Закритий_період_не_ставиться_навіть_з_payload"/> червоний;
+/// прибрати try/catch навколо <c>RequestAsync</c> → <see cref="Збій_одного_документа_не_перериває_решту_і_видно_у_завершенні"/>
+/// червоний (другий документ не ставиться).
 /// </remarks>
 [Collection("SqlServer")]
 public sealed class RegistryImpactRecalculationJobTests(SqlServerFixture sql)
@@ -56,6 +58,24 @@ public sealed class RegistryImpactRecalculationJobTests(SqlServerFixture sql)
         await RunAsync(trigger, registryId, closed.DocumentId);
 
         await trigger.DidNotReceiveWithAnyArgs().RequestAsync(default, default, default);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Збій_одного_документа_не_перериває_решту_і_видно_у_завершенні()
+    {
+        var registryId = await NewRegistryAsync();
+        var first = await ArrangeDocumentAsync(registryId, PeriodState.Open);
+        var second = await ArrangeDocumentAsync(registryId, PeriodState.Open);
+        var trigger = Trigger();
+        trigger.RequestAsync(first.DocumentId, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+            .Returns<Task<string?>>(_ => throw new InvalidOperationException("boom"));
+
+        var act = () => RunAsync(trigger, registryId, first.DocumentId, second.DocumentId);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(act);
+        await trigger.Received(1).RequestAsync(second.DocumentId, second.PeriodKey, Arg.Any<CancellationToken>());
     }
 
     private static ICalculationTrigger Trigger()

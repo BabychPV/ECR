@@ -49,12 +49,22 @@ public sealed class RegistryImpactRecalculationJob(
             .ToList();
 
         var queued = 0;
+        var failed = new List<long>();
         foreach (var (documentId, periodKey) in targets)
         {
-            var jobId = await trigger.RequestAsync(documentId, new PeriodKey(periodKey), ct).ConfigureAwait(false);
-            if (jobId is not null)
+            // ⛔ Збій одного документа (гонитва, тимчасова помилка БД) не перериває решту набору:
+            // решту все одно ставимо, а про збої — гучно в кінці. Скасування не ковтаємо.
+            try
             {
-                queued++;
+                var jobId = await trigger.RequestAsync(documentId, new PeriodKey(periodKey), ct).ConfigureAwait(false);
+                if (jobId is not null)
+                {
+                    queued++;
+                }
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                failed.Add(documentId);
             }
         }
 
@@ -71,5 +81,12 @@ public sealed class RegistryImpactRecalculationJob(
                 },
                 ct)
             .ConfigureAwait(false);
+
+        // Задача не вдає успіх, коли частину документів не поставлено: людина бачить збій, а решта вже в черзі.
+        if (failed.Count > 0)
+        {
+            throw new InvalidOperationException(
+                $"Не вдалось поставити перерахунок для документів: {string.Join(", ", failed)}; решту поставлено ({queued}).");
+        }
     }
 }
