@@ -490,7 +490,7 @@ public sealed class CreateSourceEventMapHandler(
             await IntegrationConfigAudit.WriteAsync(
                 audit, clock, currentUser, IntegrationConfigAudit.EventMapType, created.Id, AuditOperation,
                 oldJson: null, newJson: IntegrationConfigAudit.Snapshot(SourceEventMapSupport.ToDto(created)),
-                reason: $"Мапінг подій сутності {command.SourceEntityId} у документ {command.DocumentId} створено.",
+                reason: IntegrationConfigAudit.Reason("integrationAudit.eventMapCreated", ("entity", command.SourceEntityId), ("document", command.DocumentId)),
                 innerCt).ConfigureAwait(false);
         }, ct).ConfigureAwait(false);
 

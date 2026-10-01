@@ -1,4 +1,5 @@
 // src/Ecr.Application/Sources/IntegrationConfigAudit.cs
+using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Ecr.Application.Common;
@@ -86,6 +87,22 @@ internal static class IntegrationConfigAudit
             schedule.LookbackDays,
         },
         Options);
+
+    /// <summary>
+    /// Причина запису КОНВЕРТОМ <c>{"k":…,"p":{…}}</c> (той самий кодек, що <c>JobProgressMessageCodec</c>),
+    /// а не готовою українською фразою: мова читача журналу в момент запису невідома, і
+    /// англійський інтерфейс бачив українську (P3 живого проходу екрана джерел). Клієнт
+    /// розгортає ключ <c>integrationAudit.*</c> мовою інтерфейсу (<c>structureChangeReason.ts</c>).
+    /// </summary>
+    public static string Reason(string key, params (string Name, object? Value)[] parameters)
+        => JobProgressMessageCodec.Encode(new JobProgressMessageEnvelope(
+            key,
+            parameters.Length == 0
+                ? null
+                : parameters.ToDictionary(
+                    p => p.Name,
+                    p => Convert.ToString(p.Value, CultureInfo.InvariantCulture) ?? string.Empty,
+                    StringComparer.Ordinal)));
 
     /// <summary>Пише запис журналу; <paramref name="oldJson"/> = <c>null</c> — створення, <paramref name="newJson"/> = <c>null</c> — видалення.</summary>
     public static Task WriteAsync(

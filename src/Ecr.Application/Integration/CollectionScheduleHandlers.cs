@@ -410,7 +410,7 @@ public sealed class SaveCollectionScheduleHandler(
             await IntegrationConfigAudit.WriteAsync(
                 audit, clock, currentUser, IntegrationConfigAudit.ScheduleType, row.Schedule.Id, AuditOperation,
                 before, IntegrationConfigAudit.Snapshot(row.Schedule),
-                $"Розклад збору {row.Schedule.Id} сутності «{row.SourceEntityCode}» змінено.", innerCt)
+                IntegrationConfigAudit.Reason("integrationAudit.scheduleChanged", ("id", row.Schedule.Id), ("entity", row.SourceEntityCode)), innerCt)
                 .ConfigureAwait(false);
         }, ct).ConfigureAwait(false);
 
@@ -529,7 +529,7 @@ public sealed class CreateCollectionScheduleHandler(
             await IntegrationConfigAudit.WriteAsync(
                 audit, clock, currentUser, IntegrationConfigAudit.ScheduleType, schedule.Id, AuditOperation,
                 oldJson: null, newJson: IntegrationConfigAudit.Snapshot(schedule),
-                reason: $"Розклад збору {schedule.Id} для сутності «{entity.Code}» створено.", innerCt)
+                reason: IntegrationConfigAudit.Reason("integrationAudit.scheduleCreated", ("id", schedule.Id), ("entity", entity.Code)), innerCt)
                 .ConfigureAwait(false);
         }, ct).ConfigureAwait(false);
 
@@ -592,7 +592,7 @@ public sealed class DeleteCollectionScheduleHandler(
             await IntegrationConfigAudit.WriteAsync(
                 audit, clock, currentUser, IntegrationConfigAudit.ScheduleType, id, AuditOperation,
                 removed, newJson: null,
-                $"Розклад збору {id} сутності «{row.SourceEntityCode}» видалено.", innerCt)
+                IntegrationConfigAudit.Reason("integrationAudit.scheduleDeleted", ("id", id), ("entity", row.SourceEntityCode)), innerCt)
                 .ConfigureAwait(false);
         }, ct).ConfigureAwait(false);
     }

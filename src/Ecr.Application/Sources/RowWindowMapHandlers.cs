@@ -422,7 +422,7 @@ public sealed class CreateRowWindowMapHandler(
             await IntegrationConfigAudit.WriteAsync(
                 audit, clock, currentUser, IntegrationConfigAudit.RowWindowMapType, created.Id, AuditOperation,
                 oldJson: null, newJson: IntegrationConfigAudit.Snapshot(RowWindowMapSupport.ToDto(created, columns)),
-                reason: $"Прив'язку вікна рядка на колонку «{target.Code}» створено.",
+                reason: IntegrationConfigAudit.Reason("integrationAudit.rowWindowCreated", ("column", target.Code)),
                 innerCt).ConfigureAwait(false);
         }, ct).ConfigureAwait(false);
 
@@ -519,7 +519,7 @@ public sealed class UpdateRowWindowMapHandler(
             await IntegrationConfigAudit.WriteAsync(
                 audit, clock, currentUser, IntegrationConfigAudit.RowWindowMapType, map.Id, AuditOperation,
                 old, IntegrationConfigAudit.Snapshot(RowWindowMapSupport.ToDto(map, columns)),
-                $"Прив'язку вікна рядка {map.Id} змінено.", innerCt).ConfigureAwait(false);
+                IntegrationConfigAudit.Reason("integrationAudit.rowWindowChanged", ("id", map.Id)), innerCt).ConfigureAwait(false);
         }, ct).ConfigureAwait(false);
 
         // Колонки Початку/Кінця/селектора могли змінитися, а активність — вимкнутися: скидаємо знімок індексу.
@@ -585,7 +585,7 @@ public sealed class DeleteRowWindowMapHandler(
 
             await IntegrationConfigAudit.WriteAsync(
                 audit, clock, currentUser, IntegrationConfigAudit.RowWindowMapType, id, AuditOperation,
-                removed, newJson: null, $"Прив'язку вікна рядка {id} видалено.", innerCt)
+                removed, newJson: null, IntegrationConfigAudit.Reason("integrationAudit.rowWindowDeleted", ("id", id)), innerCt)
                 .ConfigureAwait(false);
         }, ct).ConfigureAwait(false);
 

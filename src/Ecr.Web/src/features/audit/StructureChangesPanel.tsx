@@ -9,6 +9,7 @@ import { useDebouncedFilter, useFilterCursor } from '@/shared/ui/useDebouncedFil
 import { useFieldDraft } from '@/shared/ui/useFieldDraft';
 import { useUrlNumber, useUrlState } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
+import { structureChangeReasonText } from './structureChangeReason';
 
 /**
  * Журнал структурних змін (`BE-16`) — друга вкладка екрана аудиту.
@@ -124,7 +125,9 @@ export function StructureChangesPanel({ from, to }: { from: string; to: string }
                       </Text>
                     </Table.Td>
                     <Table.Td>{change.operation}</Table.Td>
-                    <Table.Td>{change.changeReason ?? '—'}</Table.Td>
+                    <Table.Td>
+                      {change.changeReason === null ? '—' : structureChangeReasonText(change.changeReason)}
+                    </Table.Td>
                   </Table.Tr>
                 ))}
               </Table.Tbody>

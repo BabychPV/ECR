@@ -112,7 +112,7 @@ export function SourcesPage(): JSX.Element {
         color: 'statusSuccess',
         closeButtonProps: notificationCloseButtonProps,
         message: (
-          <Stack gap={4}>
+          <Stack gap="xs">
             <Text size="sm">{message}</Text>
             <Anchor
               href={to}

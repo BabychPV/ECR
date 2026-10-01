@@ -96,8 +96,8 @@ public sealed class SetEntityFieldMapPausedHandler(
                 paused ? PausedEventType : ResumedEventType,
                 before, IntegrationConfigAudit.Snapshot(map),
                 paused
-                    ? $"Мапінг поля «{map.SourceField}» призупинено."
-                    : $"Мапінг поля «{map.SourceField}» повернено у збір.",
+                    ? IntegrationConfigAudit.Reason("integrationAudit.fieldMapPaused", ("field", map.SourceField))
+                    : IntegrationConfigAudit.Reason("integrationAudit.fieldMapResumed", ("field", map.SourceField)),
                 innerCt).ConfigureAwait(false);
         }, ct).ConfigureAwait(false);
 
@@ -226,7 +226,7 @@ public sealed class AcceptSourceUnitChangeHandler(
             await IntegrationConfigAudit.WriteAsync(
                 audit, clock, currentUser, IntegrationConfigAudit.FieldMapType, map.Id, AcceptedEventType,
                 before, IntegrationConfigAudit.Snapshot(map),
-                $"Мапінг поля «{map.SourceField}»: прийнято нову одиницю джерела.",
+                IntegrationConfigAudit.Reason("integrationAudit.fieldMapUnitAccepted", ("field", map.SourceField)),
                 innerCt).ConfigureAwait(false);
         }, ct).ConfigureAwait(false);
 
@@ -342,7 +342,7 @@ public sealed class DeleteEntityFieldMapHandler(
             await sources.RemoveFieldMapAsync(map, innerCt).ConfigureAwait(false);
             await IntegrationConfigAudit.WriteAsync(
                 audit, clock, currentUser, IntegrationConfigAudit.FieldMapType, fieldMapId, DeletedEventType,
-                removed, newJson: null, $"Мапінг поля «{sourceField}» сутності {sourceEntityId} видалено.", innerCt)
+                removed, newJson: null, IntegrationConfigAudit.Reason("integrationAudit.fieldMapDeleted", ("field", sourceField), ("entity", sourceEntityId)), innerCt)
                 .ConfigureAwait(false);
         }, ct).ConfigureAwait(false);
 
