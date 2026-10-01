@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+﻿import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { NotificationsPage } from '@/pages/admin/NotificationsPage';
 import type { NotificationChannel, NotificationRuleMatrix } from '@/features/notifications/api';
@@ -41,6 +41,22 @@ const Matrix: NotificationRuleMatrix = {
   rules: [],
 };
 
+/** Налаштування SMTP (D-256): ліниво завантажена панель над каналами; без відповіді вона малює alert. */
+const Smtp = {
+  host: '',
+  port: 587,
+  encryptionMode: 'StartTls',
+  fromAddress: '',
+  fromName: null,
+  authMode: 'None',
+  userName: null,
+  hasPassword: false,
+  isEnabled: false,
+  source: 'none',
+  configured: false,
+  updatedAt: null,
+};
+
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -56,6 +72,7 @@ function mockEmptyStand(): void {
       const path = String(input).split('?')[0] ?? '';
 
       if (path === '/api/v1/notifications/channels') return json([]);
+      if (path === '/api/v1/notifications/smtp') return json(Smtp);
       if (path === '/api/v1/notifications/rules') return json(Matrix);
       if (path === '/api/v1/notifications/deliveries') {
         return json({ items: [], nextCursor: null, totalCount: 0 });
@@ -105,10 +122,13 @@ describe('NotificationsPage: заголовок розділяє тексти Ch
     ).toBeTruthy();
   });
 
-  it('порядок заголовків сторінки: h3 «Notifications» → h2 «Channels» → h2 «Rules»', async () => {
+  it('порядок заголовків сторінки: h3 «Notifications» → h2 «SMTP» → h2 «Channels» → h2 «Rules»', async () => {
     mockEmptyStand();
     show();
 
+    // ⚠ SMTP-панель — лінивий чанк (D-256): без очікування її заголовка перелік залежав би від того,
+    // чи встиг чанк завантажитись, — тобто був би плаваючим.
+    await screen.findByRole('heading', { name: '⟦smtp.title⟧' }, { timeout: 10_000 });
     await waitFor(() => {
       expect(screen.getByText('⟦notifications.noChannels⟧')).toBeDefined();
       expect(screen.getByText('⟦notifications.rulesNoChannels⟧')).toBeDefined();
@@ -118,6 +138,7 @@ describe('NotificationsPage: заголовок розділяє тексти Ch
 
     expect(headings.map((node) => [node.tagName, node.textContent])).toEqual([
       ['H3', '⟦notifications.title⟧'],
+      ['H2', '⟦smtp.title⟧'],
       ['H2', '⟦notifications.channels⟧'],
       ['H2', '⟦notifications.rules⟧'],
     ]);
@@ -177,6 +198,7 @@ describe('NotificationsPage: ChannelsPanel і RulesMatrixPanel діляться 
           return json(created, 201);
         }
 
+        if (path === '/api/v1/notifications/smtp') return json(Smtp);
         if (path === '/api/v1/notifications/rules') return json(Matrix);
 
         if (path === '/api/v1/notifications/deliveries') {

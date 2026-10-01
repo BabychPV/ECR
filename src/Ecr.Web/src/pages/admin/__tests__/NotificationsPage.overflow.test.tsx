@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+﻿import { afterEach, describe, expect, it, vi } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
 import { NotificationsPage } from '@/pages/admin/NotificationsPage';
 import type {
@@ -75,6 +75,22 @@ function mockNonEmptyStand(): void {
       const path = String(input).split('?')[0] ?? '';
 
       if (path === '/api/v1/notifications/channels') return json([channel]);
+        if (path === '/api/v1/notifications/smtp') {
+          return json({
+            host: 'smtp.corp.example',
+            port: 587,
+            encryptionMode: 'StartTls',
+            fromAddress: 'ecr@corp.example',
+            fromName: null,
+            authMode: 'None',
+            userName: null,
+            hasPassword: false,
+            isEnabled: true,
+            source: 'database',
+            configured: true,
+            updatedAt: null,
+          });
+        }
       if (path === '/api/v1/notifications/rules') return json(matrix);
       if (path === '/api/v1/notifications/deliveries') return json(deliveries);
 
