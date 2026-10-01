@@ -7482,6 +7482,140 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/notifications/smtp": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Поточні налаштування (без пароля). */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SmtpSettingsView"];
+                        "text/json": components["schemas"]["SmtpSettingsView"];
+                        "text/plain": components["schemas"]["SmtpSettingsView"];
+                    };
+                };
+            };
+        };
+        /** Замінює налаштування; порожній пароль — не змінювати. */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["SmtpSettingsInput"];
+                    "application/json": components["schemas"]["SmtpSettingsInput"];
+                    "text/json": components["schemas"]["SmtpSettingsInput"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SmtpSettingsView"];
+                        "text/json": components["schemas"]["SmtpSettingsView"];
+                        "text/plain": components["schemas"]["SmtpSettingsView"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/notifications/smtp/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Пробний лист на вказану адресу через ефективні налаштування. */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["SmtpTestRequest"];
+                    "application/json": components["schemas"]["SmtpTestRequest"];
+                    "text/json": components["schemas"]["SmtpTestRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["NotificationTestResult"];
+                        "text/json": components["schemas"]["NotificationTestResult"];
+                        "text/plain": components["schemas"]["NotificationTestResult"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/periods/{id}/reopen": {
         parameters: {
             query?: never;
@@ -20636,6 +20770,8 @@ export interface components {
         NotificationChannelKind: "Smtp" | "TeamsWebhook";
         /** @description Несекретні параметри каналу — рівно те, що лягає в `SettingsJson`. */
         NotificationChannelSettings: {
+            /** @description Ролі-адресати; живуть у `sys_ecr.NotificationChannelRole`, НЕ в `SettingsJson`. */
+            recipientRoleIds?: null | number[];
             /** @description SMTP: адресати. */
             recipients?: null | string[];
             /** @description SMTP: префікс теми; Teams: заголовок картки. */
@@ -20652,6 +20788,8 @@ export interface components {
              * @description ⛔ Не приймається: порт — із налаштувань застосунку.
              */
             port?: null | number;
+            /** @description SMTP: ролі-адресати (`D-256`) — лист іде активним користувачам цих ролей. */
+            recipientRoleIds?: null | number[];
             /** @description SMTP: адресати. */
             recipients?: null | string[];
             /** @description SMTP: префікс теми; Teams: заголовок картки. */
@@ -23610,6 +23748,80 @@ export interface components {
              * @description Чиїми правами дивимося.
              */
             simulatedForUserId: number;
+        };
+        /**
+         * @description Автентифікація на поштовому сервері.
+         * @enum {unknown}
+         */
+        SmtpAuthMode: "None" | "Password";
+        /**
+         * @description Шифрування з'єднання з поштовим сервером. Числа лежать у базі — не перенумеровувати.
+         * @enum {unknown}
+         */
+        SmtpEncryptionMode: "None" | "StartTls";
+        /** @description Запит на зміну налаштувань SMTP. */
+        SmtpSettingsInput: {
+            /** @description Автентифікація. */
+            authMode: components["schemas"]["SmtpAuthMode"];
+            /** @description Прибрати збережений пароль. */
+            clearPassword: boolean;
+            /** @description Шифрування. */
+            encryptionMode: components["schemas"]["SmtpEncryptionMode"];
+            /** @description Адреса відправника. */
+            fromAddress: null | string;
+            /** @description Ім'я відправника. */
+            fromName: null | string;
+            /** @description Сервер. */
+            host: null | string;
+            /** @description Чи діють налаштування. */
+            isEnabled: boolean;
+            /** @description Новий пароль; `null` або порожньо — не змінювати. */
+            password: null | string;
+            /**
+             * Format: int32
+             * @description Порт 1–65535.
+             */
+            port: number;
+            /** @description Логін (для автентифікації за паролем). */
+            userName: null | string;
+        };
+        /** @description Налаштування SMTP для екрана. ⛔ Пароля тут немає й бути не може — лише bool SmtpSettingsView.HasPassword. */
+        SmtpSettingsView: {
+            /** @description Автентифікація. */
+            authMode: components["schemas"]["SmtpAuthMode"];
+            /** @description Чи є чим слати пошту. */
+            configured: boolean;
+            /** @description Шифрування. */
+            encryptionMode: components["schemas"]["SmtpEncryptionMode"];
+            /** @description Адреса відправника. */
+            fromAddress: string;
+            /** @description Ім'я відправника. */
+            fromName: null | string;
+            /** @description Чи заданий пароль. */
+            hasPassword: boolean;
+            /** @description Сервер. */
+            host: string;
+            /** @description Чи діють ці налаштування. */
+            isEnabled: boolean;
+            /**
+             * Format: int32
+             * @description Порт.
+             */
+            port: number;
+            /** @description Звідки береться транспорт зараз: `database`, `configuration` або `none`. */
+            source: string;
+            /**
+             * Format: date-time
+             * @description Коли змінено (UTC); `null` — рядка ще немає.
+             */
+            updatedAt: null | string;
+            /** @description Логін. */
+            userName: null | string;
+        };
+        /** @description Результат проби SMTP. */
+        SmtpTestRequest: {
+            /** @description Адреса, на яку слати пробний лист. */
+            to: null | string;
         };
         /** @description Колонка зрізу. */
         SnapshotColumn: {

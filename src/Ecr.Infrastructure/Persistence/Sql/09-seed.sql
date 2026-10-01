@@ -613,6 +613,10 @@ UPDATE t
   FROM sys_ecr.UiString AS t
   JOIN (VALUES
     (N'common.loading',                  N'en', N'Loading…', N'Loading...'),
+    -- D-256: SMTP задається в адмін-налаштуваннях, канал додає адресатів-ролі.
+    (N'notifications.smtpTransportHint', N'en', N'The server, sender address and password come from the application configuration; the channel only adds recipients.', N'The server, sender and login come from the SMTP settings above (or from the process configuration while they are not set); the channel adds recipients: addresses and roles.'),
+    (N'notifications.smtpTransportHint', N'ru', N'Сервер, адрес отправителя и пароль берутся из конфигурации приложения; канал лишь добавляет получателей.', N'Сервер, отправитель и логин берутся из настроек SMTP выше (пока они не заданы — из конфигурации процесса); канал добавляет получателей: адреса и роли.'),
+    (N'notifications.smtpTransportHint', N'kz', N'Сервер, жіберуші мекенжайы және құпиясөз қолданба конфигурациясынан алынады; арна тек алушыларды қосады.', N'Сервер, жіберуші және логин жоғарыдағы SMTP баптауларынан алынады (олар берілмегенше — процесс конфигурациясынан); арна алушыларды қосады: мекенжайлар мен рөлдер.'),
     -- P4 ФВ-9.8: батько лише РОЗКЛАДАЄ документні задачі — «ще не пораховано».
     (N'jobs.recalcFannedOut',            N'en', N'Queued document recalculation tasks: {count}.', N'Queued document recalculation tasks: {count}; not calculated yet.'),
     (N'jobs.recalcFannedOut',            N'ru', N'Поставлено в очередь задач пересчёта документов: {count}.', N'Поставлено в очередь задач пересчёта документов: {count}; ещё не пересчитано.'),
@@ -5096,7 +5100,7 @@ USING (VALUES
 
     -- ⚠ Полів `host`/`port`/`from`/`useTls` на екрані немає: контракт їх
     -- носить, але не читає жоден відправник (перевірено в `SmtpChannelSender`).
-    (N'notifications.smtpTransportHint',   N'en', N'The server, sender address and password come from the application configuration; the channel only adds recipients.', 1),
+    (N'notifications.smtpTransportHint',   N'en', N'The server, sender and login come from the SMTP settings above (or from the process configuration while they are not set); the channel adds recipients: addresses and roles.', 1),
     (N'notifications.smtpRecipients',      N'en', N'Recipients', 1),
     (N'notifications.smtpRecipientsHint',  N'en', N'Comma-separated addresses.', 1),
     (N'notifications.subjectPrefix',       N'en', N'Subject prefix', 1),
@@ -6003,6 +6007,39 @@ USING (VALUES
     (N'notifications.periodOpened.subject', N'en', N'ECR: period {period} opened, project {project}', 1),
     (N'notifications.periodOpened.body', N'en', N'A new reporting period {period} has opened for project {project}. Please fill in your document for this period.', 1),
     -- COLL:smtp ── кінець секції ──
+    -- COLL:smtp-admin ── Адмін-налаштування SMTP і ролі-адресати каналу (D-256, SmtpSettingsPanel, GET/PUT /notifications/smtp) ──
+    (N'err.ECR-REQ-0422.smtpSettingsInvalid', N'en', N'The SMTP settings are not valid: check the field "{name}".', 1),
+    (N'err.ECR-REQ-0422.smtpTestRecipientInvalid', N'en', N'The test recipient is not an email address.', 1),
+    (N'err.ECR-REQ-0422.notificationChannelRoleInvalid', N'en', N'Recipient roles can be set only on an email channel, and every role must exist.', 1),
+    (N'smtp.title', N'en', N'SMTP (outgoing mail)', 1),
+    (N'smtp.hint', N'en', N'Server, sender and login of the mail that sends notifications. While the settings are disabled, the process configuration (Smtp:*) is used. The password is write-only: it is never shown again.', 1),
+    (N'smtp.source.database', N'en', N'In use: the settings below.', 1),
+    (N'smtp.source.configuration', N'en', N'In use: the process configuration (Smtp:*).', 1),
+    (N'smtp.source.none', N'en', N'Mail is not configured: events stay queued.', 1),
+    (N'smtp.host', N'en', N'Server', 1),
+    (N'smtp.port', N'en', N'Port', 1),
+    (N'smtp.encryption', N'en', N'Encryption', 1),
+    (N'smtp.encryption.None', N'en', N'None', 1),
+    (N'smtp.encryption.StartTls', N'en', N'STARTTLS', 1),
+    (N'smtp.from', N'en', N'Sender address', 1),
+    (N'smtp.fromName', N'en', N'Sender name', 1),
+    (N'smtp.auth', N'en', N'Authentication', 1),
+    (N'smtp.auth.None', N'en', N'None', 1),
+    (N'smtp.auth.Password', N'en', N'Login and password', 1),
+    (N'smtp.user', N'en', N'Login', 1),
+    (N'smtp.password', N'en', N'Password', 1),
+    (N'smtp.passwordStored', N'en', N'A password is stored. Leave empty to keep it.', 1),
+    (N'smtp.passwordNone', N'en', N'No password stored yet.', 1),
+    (N'smtp.clearPassword', N'en', N'Remove the stored password', 1),
+    (N'smtp.enabled', N'en', N'Use these settings', 1),
+    (N'smtp.save', N'en', N'Save SMTP settings', 1),
+    (N'smtp.saved', N'en', N'SMTP settings saved.', 1),
+    (N'smtp.testTo', N'en', N'Send a test message to', 1),
+    (N'smtp.testSend', N'en', N'Send test message', 1),
+    (N'notifications.channelRoles', N'en', N'Recipient roles', 1),
+    (N'notifications.channelRolesHint', N'en', N'Active users of these roles who have an email address get the message in their own language.', 1),
+    (N'notifications.channelRolesUnavailable', N'en', N'The role list needs the right to manage roles; roles already set on the channel are kept.', 1),
+    -- COLL:smtp-admin ── кінець секції ──
     -- SEC:effective-access ── Розріз «ресурс → рівень → грант якої ролі» (ФВ-6.16, D-220, `EffectiveAccessPanel`, GET /security/users/{id}/effective-access) ──
     (N'err.ECR-REQ-0422.effectiveAccessResource', N'en', N'The resource must be given as a type and a positive number, for example Registry:5 or Project:3.', 1),
     (N'effectiveAccess.show',            N'en', N'Show effective access', 1),
@@ -8940,7 +8977,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'notifications.testChannel', N'ru', N'Отправить тест'),
     (N'notifications.testOk', N'ru', N'Канал принял тестовое сообщение.'),
     (N'notifications.testFailed', N'ru', N'Канал отклонил тестовое сообщение.'),
-    (N'notifications.smtpTransportHint', N'ru', N'Сервер, адрес отправителя и пароль берутся из конфигурации приложения; канал лишь добавляет получателей.'),
+    (N'notifications.smtpTransportHint', N'ru', N'Сервер, отправитель и логин берутся из настроек SMTP выше (пока они не заданы — из конфигурации процесса); канал добавляет получателей: адреса и роли.'),
     (N'notifications.smtpRecipients', N'ru', N'Получатели'),
     (N'notifications.smtpRecipientsHint', N'ru', N'Адреса через запятую.'),
     (N'notifications.subjectPrefix', N'ru', N'Префикс темы'),
@@ -11968,7 +12005,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'notifications.testChannel', N'kz', N'Сынақ жіберу'),
     (N'notifications.testOk', N'kz', N'Арна сынақ хабарын қабылдады.'),
     (N'notifications.testFailed', N'kz', N'Арна сынақ хабарын қабылдамады.'),
-    (N'notifications.smtpTransportHint', N'kz', N'Сервер, жіберуші мекенжайы және құпиясөз қолданба конфигурациясынан алынады; арна тек алушыларды қосады.'),
+    (N'notifications.smtpTransportHint', N'kz', N'Сервер, жіберуші және логин жоғарыдағы SMTP баптауларынан алынады (олар берілмегенше — процесс конфигурациясынан); арна алушыларды қосады: мекенжайлар мен рөлдер.'),
     (N'notifications.smtpRecipients', N'kz', N'Алушылар'),
     (N'notifications.smtpRecipientsHint', N'kz', N'Үтірмен бөлінген мекенжайлар.'),
     (N'notifications.subjectPrefix', N'kz', N'Тақырып префиксі'),
@@ -13832,6 +13869,76 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:smtp ── кінець секції ──
+-- COLL:smtp-admin ── ru/kz адмін-налаштувань SMTP і ролей-адресатів; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-REQ-0422.smtpSettingsInvalid', N'ru', N'Настройки SMTP недопустимы: проверьте поле «{name}».'),
+    (N'err.ECR-REQ-0422.smtpSettingsInvalid', N'kz', N'SMTP баптаулары жарамсыз: «{name}» өрісін тексеріңіз.'),
+    (N'err.ECR-REQ-0422.smtpTestRecipientInvalid', N'ru', N'Адресат проверки не является адресом электронной почты.'),
+    (N'err.ECR-REQ-0422.smtpTestRecipientInvalid', N'kz', N'Тексеру алушысы электрондық пошта мекенжайы емес.'),
+    (N'err.ECR-REQ-0422.notificationChannelRoleInvalid', N'ru', N'Роли-получатели задаются только почтовому каналу, и каждая роль должна существовать.'),
+    (N'err.ECR-REQ-0422.notificationChannelRoleInvalid', N'kz', N'Алушы рөлдері тек пошта арнасына беріледі, әрбір рөл болуы тиіс.'),
+    (N'smtp.title', N'ru', N'SMTP (исходящая почта)'),
+    (N'smtp.title', N'kz', N'SMTP (шығыс пошта)'),
+    (N'smtp.hint', N'ru', N'Сервер, отправитель и логин почты, которой отправляются уведомления. Пока настройки выключены, используется конфигурация процесса (Smtp:*). Пароль только для записи: повторно он не показывается.'),
+    (N'smtp.hint', N'kz', N'Хабарламаларды жіберетін поштаның сервері, жіберушісі және логині. Баптаулар өшірулі болса, процесс конфигурациясы (Smtp:*) қолданылады. Құпиясөз тек жазуға арналған: ол қайта көрсетілмейді.'),
+    (N'smtp.source.database', N'ru', N'Используются: настройки ниже.'),
+    (N'smtp.source.database', N'kz', N'Қолданылуда: төмендегі баптаулар.'),
+    (N'smtp.source.configuration', N'ru', N'Используется: конфигурация процесса (Smtp:*).'),
+    (N'smtp.source.configuration', N'kz', N'Қолданылуда: процесс конфигурациясы (Smtp:*).'),
+    (N'smtp.source.none', N'ru', N'Почта не настроена: события остаются в очереди.'),
+    (N'smtp.source.none', N'kz', N'Пошта бапталмаған: оқиғалар кезекте қалады.'),
+    (N'smtp.host', N'ru', N'Сервер'),
+    (N'smtp.host', N'kz', N'Сервер'),
+    (N'smtp.port', N'ru', N'Порт'),
+    (N'smtp.port', N'kz', N'Порт'),
+    (N'smtp.encryption', N'ru', N'Шифрование'),
+    (N'smtp.encryption', N'kz', N'Шифрлау'),
+    (N'smtp.encryption.None', N'ru', N'Нет'),
+    (N'smtp.encryption.None', N'kz', N'Жоқ'),
+    (N'smtp.encryption.StartTls', N'ru', N'STARTTLS'),
+    (N'smtp.encryption.StartTls', N'kz', N'STARTTLS'),
+    (N'smtp.from', N'ru', N'Адрес отправителя'),
+    (N'smtp.from', N'kz', N'Жіберуші мекенжайы'),
+    (N'smtp.fromName', N'ru', N'Имя отправителя'),
+    (N'smtp.fromName', N'kz', N'Жіберуші аты'),
+    (N'smtp.auth', N'ru', N'Аутентификация'),
+    (N'smtp.auth', N'kz', N'Аутентификация'),
+    (N'smtp.auth.None', N'ru', N'Нет'),
+    (N'smtp.auth.None', N'kz', N'Жоқ'),
+    (N'smtp.auth.Password', N'ru', N'Логин и пароль'),
+    (N'smtp.auth.Password', N'kz', N'Логин және құпиясөз'),
+    (N'smtp.user', N'ru', N'Логин'),
+    (N'smtp.user', N'kz', N'Логин'),
+    (N'smtp.password', N'ru', N'Пароль'),
+    (N'smtp.password', N'kz', N'Құпиясөз'),
+    (N'smtp.passwordStored', N'ru', N'Пароль сохранён. Оставьте пустым, чтобы не менять.'),
+    (N'smtp.passwordStored', N'kz', N'Құпиясөз сақталған. Өзгертпеу үшін бос қалдырыңыз.'),
+    (N'smtp.passwordNone', N'ru', N'Пароль ещё не задан.'),
+    (N'smtp.passwordNone', N'kz', N'Құпиясөз әлі берілмеген.'),
+    (N'smtp.clearPassword', N'ru', N'Удалить сохранённый пароль'),
+    (N'smtp.clearPassword', N'kz', N'Сақталған құпиясөзді жою'),
+    (N'smtp.enabled', N'ru', N'Использовать эти настройки'),
+    (N'smtp.enabled', N'kz', N'Осы баптауларды қолдану'),
+    (N'smtp.save', N'ru', N'Сохранить настройки SMTP'),
+    (N'smtp.save', N'kz', N'SMTP баптауларын сақтау'),
+    (N'smtp.saved', N'ru', N'Настройки SMTP сохранены.'),
+    (N'smtp.saved', N'kz', N'SMTP баптаулары сақталды.'),
+    (N'smtp.testTo', N'ru', N'Отправить проверочное письмо на'),
+    (N'smtp.testTo', N'kz', N'Тексеру хатын жіберу мекенжайы'),
+    (N'smtp.testSend', N'ru', N'Отправить проверку'),
+    (N'smtp.testSend', N'kz', N'Тексеру хатын жіберу'),
+    (N'notifications.channelRoles', N'ru', N'Роли-получатели'),
+    (N'notifications.channelRoles', N'kz', N'Алушы рөлдері'),
+    (N'notifications.channelRolesHint', N'ru', N'Активные пользователи этих ролей с адресом почты получают письмо на своём языке.'),
+    (N'notifications.channelRolesHint', N'kz', N'Осы рөлдердің поштасы бар белсенді пайдаланушылары хатты өз тілінде алады.'),
+    (N'notifications.channelRolesUnavailable', N'ru', N'Для списка ролей нужно право управления ролями; уже заданные роли канала сохраняются.'),
+    (N'notifications.channelRolesUnavailable', N'kz', N'Рөлдер тізімі үшін рөлдерді басқару құқығы қажет; арнада бұрын берілген рөлдер сақталады.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:smtp-admin ── кінець секції ──
 
 -- COLL:rawhealth ── ru/kz розміру ext.RawDataPoint у картці `db`; власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)

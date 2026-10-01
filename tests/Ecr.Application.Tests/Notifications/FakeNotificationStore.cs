@@ -40,6 +40,29 @@ internal sealed class FakeNotificationStore : INotificationStore
         Channels.Add(channel);
     }
 
+    /// <summary>Ролі-адресати каналів у пам'яті.</summary>
+    public Dictionary<int, List<int>> ChannelRoles { get; } = [];
+
+    /// <summary>Які ролі «існують» для перевірки в обробнику.</summary>
+    public HashSet<int> ExistingRoles { get; } = [1, 2, 3];
+
+    public Task<IReadOnlyDictionary<int, IReadOnlyList<int>>> ListChannelRolesAsync(CancellationToken ct)
+        => Task.FromResult<IReadOnlyDictionary<int, IReadOnlyList<int>>>(
+            ChannelRoles.ToDictionary(p => p.Key, p => (IReadOnlyList<int>)[.. p.Value]));
+
+    public Task<IReadOnlyList<int>> ChannelRoleIdsAsync(int channelId, CancellationToken ct)
+        => Task.FromResult<IReadOnlyList<int>>(ChannelRoles.TryGetValue(channelId, out var ids) ? [.. ids] : []);
+
+    public Task<int> CountExistingRolesAsync(IReadOnlyCollection<int> roleIds, CancellationToken ct)
+        => Task.FromResult(roleIds.Count(ExistingRoles.Contains));
+
+    public Task ReplaceChannelRolesAsync(int channelId, IReadOnlyCollection<int> roleIds, CancellationToken ct)
+    {
+        ChannelRoles[channelId] = [.. roleIds];
+
+        return Task.CompletedTask;
+    }
+
     public Task<int> RemoveChannelWithRulesAsync(NotificationChannel channel, CancellationToken ct)
     {
         Channels.Remove(channel);
