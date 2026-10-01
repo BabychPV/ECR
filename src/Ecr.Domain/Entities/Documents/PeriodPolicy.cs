@@ -67,11 +67,6 @@ public sealed class PeriodPolicy : Entity<int>
     private void ApplyOffsets(
         int openOffsetDays, int graceOffsetDays, int hardCloseOffsetDays, int yearGraceOffsetDays)
     {
-        RequireInRange(nameof(openOffsetDays), openOffsetDays);
-        RequireInRange(nameof(graceOffsetDays), graceOffsetDays);
-        RequireInRange(nameof(hardCloseOffsetDays), hardCloseOffsetDays);
-        RequireInRange(nameof(yearGraceOffsetDays), yearGraceOffsetDays);
-
         if (graceOffsetDays > hardCloseOffsetDays)
         {
             throw new DomainException(
@@ -114,6 +109,22 @@ public sealed class PeriodPolicy : Entity<int>
     /// лише відсікає числа, з якими календар не може порахувати дату.
     /// </remarks>
     public const int MaxOffsetDays = 3660;
+
+    /// <summary>Перевіряє, що зсуви запиту в межах <see cref="MaxOffsetDays"/>.</summary>
+    /// <exception cref="DomainException"><c>ECR-PRD-4225</c> з ключем <c>offsetOutOfRange</c>.</exception>
+    /// <remarks>
+    /// ⚠ Межа запиту (кличуть обробники створення й зміни політики), а не інваріант сутності:
+    /// тести календаря свідомо будують політику з величезним зсувом, щоб поставити строк
+    /// періоду далекого року, і для самої сутності таке значення не помилка.
+    /// </remarks>
+    public static void EnsureOffsetsInRange(
+        int openOffsetDays, int graceOffsetDays, int hardCloseOffsetDays, int yearGraceOffsetDays)
+    {
+        RequireInRange(nameof(openOffsetDays), openOffsetDays);
+        RequireInRange(nameof(graceOffsetDays), graceOffsetDays);
+        RequireInRange(nameof(hardCloseOffsetDays), hardCloseOffsetDays);
+        RequireInRange(nameof(yearGraceOffsetDays), yearGraceOffsetDays);
+    }
 
     private static void RequireInRange(string field, int days)
     {

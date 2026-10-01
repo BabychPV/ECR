@@ -204,6 +204,8 @@ public sealed class CreatePeriodPolicyHandler(
                 });
         }
 
+        PeriodPolicy.EnsureOffsetsInRange(openOffsetDays, graceOffsetDays, hardCloseOffsetDays, yearGraceOffsetDays);
+
         var policy = new PeriodPolicy(
             ecrCode, openOffsetDays, graceOffsetDays, hardCloseOffsetDays, yearGraceOffsetDays);
 
@@ -322,6 +324,7 @@ public sealed class UpdatePeriodPolicyHandler(
             }
 
             var before = PeriodPolicyMapping.ToDto(policy);
+            PeriodPolicy.EnsureOffsetsInRange(openOffsetDays, graceOffsetDays, hardCloseOffsetDays, yearGraceOffsetDays);
             policy.UpdateOffsets(openOffsetDays, graceOffsetDays, hardCloseOffsetDays, yearGraceOffsetDays);
             var after = PeriodPolicyMapping.ToDto(policy);
 
