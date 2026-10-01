@@ -43,7 +43,7 @@ public sealed class ProblemReservedMembersTests
                 ["detail"] = "Рішення про доступ на комірку рядка 1001 не отримано.",
                 ["title"] = "підмінений заголовок",
                 ["status"] = 200,
-                ["errorCode"] = "ECR-FAKE-0000",
+                ["errorCode"] = "ECR-SYS-0500",
                 ["Detail"] = "ще один",
             }));
 

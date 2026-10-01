@@ -37,7 +37,7 @@ public sealed class JobRestartOwnerTests
     public JobRestartOwnerTests()
     {
         _jobs.GetStatusAsync(JobId, Arg.Any<CancellationToken>())
-            .Returns(new JobStatus(JobId, "Failed", 30, null, "boom", ErrorCode: "ECR-JOB-0500"));
+            .Returns(new JobStatus(JobId, "Failed", 30, null, "boom", ErrorCode: "ECR-SYS-0500"));
         _jobs.RestartAsync(JobId, Arg.Any<CancellationToken>()).Returns(true);
         _jobs.GetCreatedByUserIdAsync(JobId, Arg.Any<CancellationToken>()).Returns(Author);
     }

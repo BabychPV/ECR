@@ -50,7 +50,7 @@ describe('rejectionMarksOf — які відмови тримають правк
   });
 
   it('422 без названої комірки тримає ВЕСЬ пакет — інакше він упав би знову цілим', () => {
-    expect(rejectionMarksOf(problem(422, 'ECR-X-0422'), [bad, good])).toHaveLength(2);
+    expect(rejectionMarksOf(problem(422, 'ECR-CELL-0422'), [bad, good])).toHaveLength(2);
   });
 
   it('5xx і мережа НЕ тримають: повтор має везти ті самі правки', () => {

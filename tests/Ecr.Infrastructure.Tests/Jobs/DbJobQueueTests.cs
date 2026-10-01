@@ -276,8 +276,8 @@ public sealed class DbJobQueueTests(SqlServerFixture sql) : DbJobQueueTestsBase(
         await using var host = NewHost();
         var claim = (await host.ClaimAsync())!.Claim;
         await ExecAsync("UPDATE itg.JobProgress SET ReclaimCount = 2 WHERE JobId = @id;", jobId);
-        Assert.True(await host.Queue.FailAsync(claim, "причина", "ECR-TEST-0001", CancellationToken.None));
-        Assert.Equal(("Failed", "причина", "ECR-TEST-0001"), ((await RowAsync(jobId))!.State, (await RowAsync(jobId))!.Error, (await RowAsync(jobId))!.ErrorCode));
+        Assert.True(await host.Queue.FailAsync(claim, "причина", "ECR-SYS-0500", CancellationToken.None));
+        Assert.Equal(("Failed", "причина", "ECR-SYS-0500"), ((await RowAsync(jobId))!.State, (await RowAsync(jobId))!.Error, (await RowAsync(jobId))!.ErrorCode));
 
         Assert.True(await host.Queue.RestartAsync(jobId, CancellationToken.None));
         Assert.False(await host.Queue.RestartAsync(jobId, CancellationToken.None));
