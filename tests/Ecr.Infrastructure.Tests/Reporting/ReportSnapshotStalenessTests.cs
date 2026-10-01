@@ -148,6 +148,31 @@ public sealed class ReportSnapshotStalenessTests(SqlServerFixture sql)
     }
 
     /// <summary>
+    /// Прогін ІНШОГО проєкту зрізу не старить. Мутаційний доказ (2026-10-01): прибрати
+    /// <c>r.ProjectId == s.ProjectId</c> у <c>StaleSnapshotIds</c> — тест червоніє, інші тести
+    /// класу лишаються зеленими (у них один проєкт).
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Прогін_іншого_проєкту_зрізу_не_старить()
+    {
+        var mine = await ArrangeAsync();
+        var foreign = await ArrangeAsync();
+        Assert.NotEqual(mine.ProjectId, foreign.ProjectId);
+
+        var snapshot = await SnapshotAsync(mine, mine.Period, Now.AddHours(-2));
+        var yearSnapshot = await SnapshotAsync(mine, periodKey: null, Now.AddHours(-2));
+
+        var journal = await CompleteAsync(foreign, await RunAsync(foreign, foreign.Period), Now);
+
+        Assert.DoesNotContain(journal, r => (long)r.EntityId == snapshot || (long)r.EntityId == yearSnapshot);
+        var list = await ListAsync(mine);
+        Assert.False(list[snapshot].IsStale, "Прогін чужого проєкту не старить зріз періоду.");
+        Assert.False(list[yearSnapshot].IsStale, "Прогін чужого проєкту не старить зріз усього року.");
+    }
+
+    /// <summary>
     /// Вимір 2026-10-01 (docs/build/perf/jobs-stale-health-2026-10-01.md): перевірка заст. зрізів
     /// при завершенні прогону не читає ЧУЖІ (давні) прогони проєкту — без
     /// <c>IX_CalculationRun_Project_FinishedAt</c> EXISTS скановував усі прогони проєкту.
