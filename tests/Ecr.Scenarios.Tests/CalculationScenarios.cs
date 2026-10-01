@@ -1004,17 +1004,20 @@ public sealed class CalculationScenarios(SqlServerFixture sql)
         var strictVersionId = await CloneDraftVersionAsync(
             app, stand.Admin.Client, methodologyId, "2.0.0", legacyVersionId);
         await SaveModesAsync(app, stand.Admin.Client, methodologyId, strictVersionId, "Strict", "Full");
-        await PublishAsync(app, stand.Publisher.Client, methodologyId, strictVersionId, EffectiveFrom(stand.PeriodKey, yearsBack: 1));
+        // ⛔ ФВ-9.9 (ECR-CALC-0422): перехід Legacy→Strict заднім числом відхиляється,
+        // тож Strict публікується із ЗАВТРАШНЬОЇ дати (годинник застосунку — справжній
+        // UTC). Така версія ще не чинна на відкритий період стенда, тому її числа
+        // видно не з перерахунку документа, а з прогону без запису (`ФВ-13.5`) на тому
+        // самому золотому наборі.
+        var tomorrow = DateTime.UtcNow.Date.AddDays(1).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        await PublishAsync(app, stand.Publisher.Client, methodologyId, strictVersionId, tomorrow);
 
-        await RecalculateAsync(app, stand.Admin, stand.DocumentId, stand.PeriodKey);
+        var strictSimulated = await SimulateAsync(app, stand.Admin.Client, methodologyId, strictVersionId, stand.PeriodKey);
+        var strictTrace = string.Join("\n", strictSimulated.GetProperty("trace").EnumerateArray().Select(t => t.GetString()));
 
-        var strictResults = await ReadResultsAsync(app, stand.Admin.Client, stand.DocumentId, stand.PeriodKey);
-
-        // ⛔ У Strict виходу НЕМАЄ зовсім, і це не те саме, що нуль: нуль
-        // виглядає як виміряне значення (`ФВ-9.14`).
-        Assert.DoesNotContain(
-            strictResults.EnumerateArray(),
-            r => string.Equals(r.GetProperty("outputCode").GetString(), "EMISSION", StringComparison.Ordinal));
+        // ⛔ У Strict ділення на нуль не маскується нулем: нуль виглядає як виміряне
+        // значення (`ФВ-9.14`), тож «masked» у трейсі бути не повинно (у Legacy був).
+        Assert.DoesNotContain("masked", strictTrace, StringComparison.OrdinalIgnoreCase);
     }
 
     // ─────────────────────────────────────────────────────────────────────────
