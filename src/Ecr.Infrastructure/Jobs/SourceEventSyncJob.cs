@@ -129,7 +129,11 @@ public sealed partial class SourceEventSyncJob(
             .Select(s => (int?)s.LookbackDays)
             .FirstOrDefaultAsync(ct)
             .ConfigureAwait(false);
-        var from = request.FromUtc ?? to.AddDays(-(lookback ?? DefaultLookbackDays));
+        // ⛔ «Повна звірка за період»: без явного вікна читаємо від початку найранішого НЕ закритого періоду
+        // (Open/Grace) мапінгів — ID подій у PI нестабільні, тож відсутність події ловиться лише повним
+        // прочитанням періоду, а не «останніх N днів».
+        var from = request.FromUtc
+                   ?? await ReconcileFromAsync(maps, to.AddDays(-(lookback ?? DefaultLookbackDays)), ct).ConfigureAwait(false);
 
         await progress.ReportKeyAsync(10, "jobs.sourceEventsReading", ct).ConfigureAwait(false);
 
@@ -146,6 +150,21 @@ public sealed partial class SourceEventSyncJob(
         foreach (var map in maps)
         {
             await SyncMapAsync(map, read, from, to, now, totals, ct).ConfigureAwait(false);
+        }
+
+        if (totals.Removed > 0 || totals.RemovalSkipped > 0)
+        {
+            await progress
+                .ReportKeyAsync(
+                    90,
+                    "jobs.sourceEventsRemoved",
+                    new Dictionary<string, string>(StringComparer.Ordinal)
+                    {
+                        ["removed"] = Text(totals.Removed),
+                        ["skipped"] = Text(totals.RemovalSkipped),
+                    },
+                    ct)
+                .ConfigureAwait(false);
         }
 
         await progress
@@ -165,6 +184,50 @@ public sealed partial class SourceEventSyncJob(
                 },
                 ct)
             .ConfigureAwait(false);
+    }
+
+    /// <summary>Початок вікна повної звірки: найраніший початок Open/Grace-періоду проєктів мапінгів, не пізніше lookback.</summary>
+    private async Task<DateTime> ReconcileFromAsync(
+        IReadOnlyList<SourceEventMap> maps, DateTime lookbackFrom, CancellationToken ct)
+    {
+        var from = lookbackFrom;
+        var documentIds = maps.Select(m => m.DocumentId).Distinct().ToList();
+        var projects = await db.Documents
+            .AsNoTracking()
+            .Where(d => documentIds.Contains(d.Id))
+            .Select(d => d.ProjectId)
+            .Distinct()
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        foreach (var projectId in projects)
+        {
+            var timeZoneId = await db.Projects
+                .AsNoTracking()
+                .Where(p => p.Id == projectId)
+                .Select(p => p.TimeZoneId)
+                .FirstAsync(ct)
+                .ConfigureAwait(false);
+            var tz = SiteTimeZone.Create(timeZoneId).ToTimeZoneInfo();
+
+            var live = (await db.Periods
+                    .AsNoTracking()
+                    .Where(p => p.ProjectId == projectId)
+                    .ToListAsync(ct)
+                    .ConfigureAwait(false))
+                .Where(p => p.State is PeriodState.Open or PeriodState.Grace)
+                .Select(p => Domain.Entities.Documents.Period.UtcBounds(p.PeriodStart, p.PeriodEnd, tz).StartUtc);
+
+            foreach (var start in live)
+            {
+                if (start < from)
+                {
+                    from = start;
+                }
+            }
+        }
+
+        return DateTime.SpecifyKind(from, DateTimeKind.Utc);
     }
 
     /// <summary>Атрибути для запиту: усі поля мапінгів і атрибути звуження, без зарезервованих.</summary>
@@ -267,8 +330,17 @@ public sealed partial class SourceEventSyncJob(
             ApplyItem(map, item, link, writes.GetValueOrDefault(item.RowKey), now, totals, events, links, linkByEventId);
         }
 
+        // ── Повна звірка: подія зникла з джерела — видаляємо рядок і зв'язок (з гардами).
+        var removed = await RemoveGoneAsync(map, plan, periods, appliedPeriods, links, linkByEventId, totals, events, ct)
+            .ConfigureAwait(false);
+
         foreach (var lost in plan.Missing)
         {
+            if (removed.Contains(lost.SourceEventId))
+            {
+                continue;
+            }
+
             linkByEventId[lost.SourceEventId].MarkMissing(now);
             totals.Missing++;
         }
@@ -305,6 +377,158 @@ public sealed partial class SourceEventSyncJob(
             }
         }
     }
+
+    /// <summary>
+    /// ⛔ «Повна звірка за період» (рішення людини 2026-10-01: ID EventFrame нестабільні, подію можуть видалити чи
+    /// перестворити): подія вікна, якої немає в ПОВНІЙ відповіді, видаляється разом із рядком і зв'язком, а період
+    /// ставиться на перерахунок. Гарди — видалення не відбувається, коли: читання обрізане/з відмовою (план дає
+    /// порожній <c>Gone</c>); джерело віддало нуль подій; період рядка не Open/Grace (закритий, Scheduled);
+    /// рядок має правку людини (D-118) — тоді зв'язок лишається позначкою Missing і пишеться подія покриття.
+    /// </summary>
+    private async Task<HashSet<string>> RemoveGoneAsync(
+        SourceEventMap map,
+        SourceEventSyncPlan plan,
+        IReadOnlyList<SourceEventPeriod> periods,
+        HashSet<int> appliedPeriods,
+        List<SourceEventLink> links,
+        Dictionary<string, SourceEventLink> linkByEventId,
+        Totals totals,
+        List<CoverageEvent> events,
+        CancellationToken ct)
+    {
+        var removed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (plan.Gone is not { Count: > 0 } gone)
+        {
+            return removed;
+        }
+
+        if (plan.SourceEmpty)
+        {
+            // Нуль подій при N > 0 прив'язаних — ознака збою читання, а не «усе видалили».
+            var withRows = gone.Where(g => g.HasRow).ToList();
+            if (withRows.Count > 0)
+            {
+                events.Add(new CoverageEvent(
+                    map.SourceEntityId,
+                    new PeriodKey(withRows[0].PeriodKey!.Value),
+                    CollectionCoverage.SourceDataRefused,
+                    CoverageDetails.EventRemovalSourceEmpty(withRows.Count)));
+                totals.RemovalSkipped += withRows.Count;
+            }
+
+            return removed;
+        }
+
+        var manualByGroup = new Dictionary<(long Instance, int Period), HashSet<string>>();
+        foreach (var state in gone)
+        {
+            var link = linkByEventId[state.SourceEventId];
+            if (!state.HasRow)
+            {
+                Drop(link, links, linkByEventId, removed);
+                totals.Removed++;
+                continue;
+            }
+
+            var periodKey = state.PeriodKey!.Value;
+            var instance = state.TableInstanceId!.Value;
+            var period = periods.FirstOrDefault(p => p.PeriodKey == periodKey);
+            if (period is null || period.State is not (PeriodState.Open or PeriodState.Grace))
+            {
+                events.Add(new CoverageEvent(
+                    map.SourceEntityId,
+                    new PeriodKey(periodKey),
+                    CollectionCoverage.SkippedPeriodClosed,
+                    CoverageDetails.PeriodNotOpen(period?.State)));
+                totals.RemovalSkipped++;
+                continue;
+            }
+
+            if (!manualByGroup.TryGetValue((instance, periodKey), out var manual))
+            {
+                manual = await ManualRowKeysAsync(instance, periodKey, ct).ConfigureAwait(false);
+                manualByGroup[(instance, periodKey)] = manual;
+            }
+
+            if (manual.Contains(state.RowKey!) || link.KeptManualJson is not null)
+            {
+                events.Add(new CoverageEvent(
+                    map.SourceEntityId,
+                    new PeriodKey(periodKey),
+                    CollectionCoverage.ConflictKeptManual,
+                    CoverageDetails.EventRemovalKeptManual(state.SourceEventId, state.RowKey!)));
+                totals.RemovalSkipped++;
+                continue;
+            }
+
+            await DeleteRowAsync(instance, periodKey, state.RowKey!, ct).ConfigureAwait(false);
+            Drop(link, links, linkByEventId, removed);
+            appliedPeriods.Add(periodKey);
+            totals.Removed++;
+            LogEventRemoved(_logger, state.SourceEventId, map.Id, state.RowKey!, periodKey);
+        }
+
+        return removed;
+    }
+
+    private void Drop(
+        SourceEventLink link,
+        List<SourceEventLink> links,
+        Dictionary<string, SourceEventLink> linkByEventId,
+        HashSet<string> removed)
+    {
+        db.SourceEventLinks.Remove(link);
+        links.Remove(link);
+        linkByEventId.Remove(link.SourceEventId);
+        removed.Add(link.SourceEventId);
+    }
+
+    /// <summary>Жорстке видалення рядка й комірок (ключ <c>UQ_TableRow_Key</c> не знає IsDeleted: м'яке видалення блокувало б повернення події).</summary>
+    private async Task DeleteRowAsync(long tableInstanceId, int periodKey, string rowKey, CancellationToken ct)
+    {
+        var rows = db.TableRows.Where(r => r.PeriodKeyValue == periodKey && r.TableInstanceId == tableInstanceId && r.RowKeyValue == rowKey);
+        await db.CellValues
+            .Where(c => c.PeriodKeyValue == periodKey && rows.Any(r => r.Id == c.TableRowId))
+            .ExecuteDeleteAsync(ct)
+            .ConfigureAwait(false);
+        await rows.ExecuteDeleteAsync(ct).ConfigureAwait(false);
+    }
+
+    /// <summary>Ключі рядків екземпляра, у яких остання зміна хоч однієї комірки — правка людини (як <c>ManualCellsAsync</c> патчера).</summary>
+    private async Task<HashSet<string>> ManualRowKeysAsync(long tableInstanceId, int periodKey, CancellationToken ct)
+    {
+        var manual = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        await using var connection = new Microsoft.Data.SqlClient.SqlConnection(db.Database.GetConnectionString());
+        await connection.OpenAsync(ct).ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            WITH last_change AS (
+                SELECT c.RowKey, c.Origin,
+                       ROW_NUMBER() OVER (PARTITION BY c.RowKey, c.ColumnDefId
+                                              ORDER BY c.ChangedAt DESC, c.Id DESC) AS rn
+                  FROM aud.CellChange AS c
+                  JOIN doc.TableRow  AS r ON r.PeriodKey = c.PeriodKey AND r.Id = c.TableRowId
+                 WHERE c.PeriodKey = @period AND r.TableInstanceId = @instance
+            )
+            SELECT DISTINCT RowKey FROM last_change WHERE rn = 1 AND Origin = N'UserEdit';
+            """;
+        command.Parameters.AddWithValue("@period", periodKey);
+        command.Parameters.AddWithValue("@instance", tableInstanceId);
+
+        await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            manual.Add(reader.GetString(0));
+        }
+
+        return manual;
+    }
+
+    [LoggerMessage(
+        Level = LogLevel.Information,
+        Message = "SourceEventSyncJob: подію {EventId} (мапінг {MapId}) немає в джерелі — рядок {RowKey} періоду {PeriodKey} і зв'язок видалено.")]
+    private static partial void LogEventRemoved(ILogger logger, string eventId, int mapId, string rowKey, int periodKey);
 
     [LoggerMessage(
         Level = LogLevel.Error,
@@ -788,5 +1012,9 @@ public sealed partial class SourceEventSyncJob(
         public int Closed { get; set; }
 
         public int Pending { get; set; }
+
+        public int Removed { get; set; }
+
+        public int RemovalSkipped { get; set; }
     }
 }

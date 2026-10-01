@@ -451,6 +451,177 @@ public sealed class SourceEventSyncJobTests(SqlServerFixture sql)
         Assert.Empty(logger.Entries);
     }
 
+    // ── «Повна звірка за період» (рішення людини 2026-10-01: ID EventFrame нестабільні) ──
+    //
+    // ⛔ МУТАЦІЙНІ ДОКАЗИ: прибрати RemoveGoneAsync (або DeleteRowAsync) — червоніють T1/T7/T8;
+    // прибрати гілку plan.SourceEmpty — червоніє T4; прибрати перевірку Open/Grace — червоніє T5;
+    // прибрати перевірку manual/KeptManualJson — червоніє T6; додавати період в appliedPeriods на кожну
+    // подію замість множини — червоніє T7 (рівно один виклик).
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "HSE301-EFSYNC")]
+    public async Task T1_Подія_зникла_з_джерела_рядок_і_зв_язок_видалені_перерахунок_поставлено_а_повтор_нічого_не_змінює()
+    {
+        await using var stand = await ArrangeAsync();
+        var trigger = Substitute.For<ICalculationTrigger>();
+        var source = new FakeEventSource(
+            Ev("E1", Start, End), Ev("E2", Start.AddHours(1), End.AddHours(1)));
+        await RunAsync(stand, source, trigger: trigger);
+        trigger.ClearReceivedCalls();
+
+        source.Result = new SourceEventResult([Ev("E2", Start.AddHours(1), End.AddHours(1))], false, null);
+        await RunAsync(stand, source, trigger: trigger);
+
+        Assert.Equal(["EF-E2"], (await RowsAsync(stand)).Select(r => r.RowKey));
+        Assert.Equal(["E2"], (await LinksAsync(stand)).Select(l => l.SourceEventId));
+        Assert.Empty(await CellsAsync(stand, "EF-E1"));
+        await trigger.Received(1).RequestAsync(stand.DocumentId, new PeriodKey(202601), Arg.Any<CancellationToken>());
+
+        // T3: повтор без змін — нуль змін і нуль перерахунків.
+        trigger.ClearReceivedCalls();
+        var version = await RowVersionAsync(stand, "EF-E2");
+        await RunAsync(stand, source, trigger: trigger);
+        Assert.Empty(trigger.ReceivedCalls());
+        Assert.Equal(version, await RowVersionAsync(stand, "EF-E2"));
+        Assert.Single(await LinksAsync(stand));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "HSE301-EFSYNC")]
+    public async Task T2_T8_Нова_подія_додається_а_повернена_після_видалення_ідентифікатор_лягає_знову_без_конфлікту_ключа()
+    {
+        await using var stand = await ArrangeAsync();
+        var e1 = Ev("E1", Start, End);
+        var e2 = Ev("E2", Start.AddHours(1), End.AddHours(1));
+        var source = new FakeEventSource(e2);
+        await RunAsync(stand, source);
+
+        source.Result = new SourceEventResult([e1, e2], false, null);
+        await RunAsync(stand, source);
+        Assert.Equal(["EF-E1", "EF-E2"], (await RowsAsync(stand)).Select(r => r.RowKey).Order(StringComparer.Ordinal));
+
+        source.Result = new SourceEventResult([e2], false, null);
+        await RunAsync(stand, source);
+        Assert.Equal(["EF-E2"], (await RowsAsync(stand)).Select(r => r.RowKey));
+
+        // Той самий ID повернувся: UQ_TableRow_Key не заважає, бо рядок видалено фізично.
+        source.Result = new SourceEventResult([e1, e2], false, null);
+        await RunAsync(stand, source);
+        Assert.Equal(["EF-E1", "EF-E2"], (await RowsAsync(stand)).Select(r => r.RowKey).Order(StringComparer.Ordinal));
+        Assert.Equal(2, (await LinksAsync(stand)).Count);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "HSE301-EFSYNC")]
+    public async Task T4_Джерело_віддало_нуль_подій_при_наявних_рядках_нічого_не_видаляється_і_пишеться_подія_покриття()
+    {
+        await using var stand = await ArrangeAsync();
+        var trigger = Substitute.For<ICalculationTrigger>();
+        var source = new FakeEventSource(Ev("E1", Start, End), Ev("E2", Start.AddHours(1), End.AddHours(1)));
+        await RunAsync(stand, source, trigger: trigger);
+        trigger.ClearReceivedCalls();
+
+        source.Result = new SourceEventResult([], false, null);
+        await RunAsync(stand, source, trigger: trigger);
+
+        Assert.Equal(2, (await RowsAsync(stand)).Count);
+        Assert.Equal(2, (await LinksAsync(stand)).Count);
+        Assert.Empty(trigger.ReceivedCalls());
+        Assert.Equal(
+            1,
+            Convert.ToInt32(
+                await ScalarAsync(
+                    $"SELECT COUNT(*) FROM itg.CollectionCoverage WHERE SourceEntityId = {stand.EntityId} AND Status = N'SourceDataRefused'"),
+                CultureInfo.InvariantCulture));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "HSE301-EFSYNC")]
+    public async Task T5_Закритий_період_подію_не_видаляє_рядок_лишається_і_пишеться_подія_покриття()
+    {
+        await using var stand = await ArrangeAsync();
+        var trigger = Substitute.For<ICalculationTrigger>();
+        var february = new DateTime(2026, 2, 2, 9, 0, 0, DateTimeKind.Utc);
+        var source = new FakeEventSource(Ev("E1", Start, End), Ev("F1", february, february.AddMinutes(5)));
+        await RunAsync(stand, source, trigger: trigger);
+
+        await using (var db = sql.CreateContext())
+        {
+            var period = await db.Periods.SingleAsync(p => p.ProjectId == stand.ProjectId && p.PeriodKeyValue == 202601);
+            period.AdvanceTo(PeriodState.Closed, Now);
+            await db.SaveChangesAsync();
+        }
+
+        trigger.ClearReceivedCalls();
+        source.Result = new SourceEventResult([Ev("F1", february, february.AddMinutes(5))], false, null);
+        await RunAsync(stand, source, trigger: trigger);
+
+        Assert.Equal(["EF-E1", "EF-F1"], (await RowsAsync(stand)).Select(r => r.RowKey).Order(StringComparer.Ordinal));
+        Assert.Equal(SourceEventLinkStatus.Missing, (await LinksAsync(stand)).Single(l => l.SourceEventId == "E1").Status);
+        Assert.Empty(trigger.ReceivedCalls());
+        Assert.Equal(
+            1,
+            Convert.ToInt32(
+                await ScalarAsync(
+                    $"SELECT COUNT(*) FROM itg.CollectionCoverage WHERE SourceEntityId = {stand.EntityId} AND Status = N'SkippedPeriodClosed'"),
+                CultureInfo.InvariantCulture));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "HSE301-EFSYNC")]
+    [Trait("Finding", "D-118")]
+    public async Task T6_Рядок_із_правкою_людини_не_видаляється_навіть_коли_події_немає_в_джерелі()
+    {
+        await using var stand = await ArrangeAsync();
+        var source = new FakeEventSource(Ev("E1", Start, End, volume: 10m), Ev("E2", Start.AddHours(1), End.AddHours(1)));
+        await RunAsync(stand, source);
+        await HumanWriteAsync(stand, "EF-E1", new PatchCell(stand.VolumeCode, 42m));
+
+        source.Result = new SourceEventResult([Ev("E2", Start.AddHours(1), End.AddHours(1))], false, null);
+        await RunAsync(stand, source);
+
+        Assert.Equal(["EF-E1", "EF-E2"], (await RowsAsync(stand)).Select(r => r.RowKey).Order(StringComparer.Ordinal));
+        Assert.Equal(42m, (await CellsAsync(stand, "EF-E1"))[stand.VolumeColumn].Numeric);
+        Assert.Equal(SourceEventLinkStatus.Missing, (await LinksAsync(stand)).Single(l => l.SourceEventId == "E1").Status);
+        Assert.Equal(
+            1,
+            Convert.ToInt32(
+                await ScalarAsync(
+                    $"SELECT COUNT(*) FROM itg.CollectionCoverage WHERE SourceEntityId = {stand.EntityId} AND Status = N'ConflictKeptManual'"),
+                CultureInfo.InvariantCulture));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "HSE301-EFSYNC")]
+    public async Task T7_Каскад_видалення_кількох_подій_одного_періоду_ставить_один_перерахунок()
+    {
+        await using var stand = await ArrangeAsync();
+        var trigger = Substitute.For<ICalculationTrigger>();
+        var source = new FakeEventSource(
+            Ev("E1", Start, End), Ev("E2", Start.AddHours(1), End.AddHours(1)), Ev("E3", Start.AddHours(2), End.AddHours(2)));
+        await RunAsync(stand, source, trigger: trigger);
+        trigger.ClearReceivedCalls();
+
+        source.Result = new SourceEventResult([Ev("E3", Start.AddHours(2), End.AddHours(2))], false, null);
+        await RunAsync(stand, source, trigger: trigger);
+
+        Assert.Equal(["EF-E3"], (await RowsAsync(stand)).Select(r => r.RowKey));
+        await trigger.Received(1).RequestAsync(stand.DocumentId, new PeriodKey(202601), Arg.Any<CancellationToken>());
+        Assert.Single(trigger.ReceivedCalls());
+    }
+
     private sealed class CollectingLogger : ILogger<SourceEventSyncJob>
     {
         public List<(LogLevel Level, string Message, Exception? Exception)> Entries { get; } = [];
