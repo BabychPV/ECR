@@ -642,14 +642,43 @@ Date, Bool, Lookup, Unit), бажано один темпоральний і о�
   5. Ім'я, що розв'язується на заборонену адресу.
 - **Очікується:** `422 ECR-REQ-0422`: п. 1 — `dataSourceEndpointScheme` або `dataSourceEndpointMalformed`; п. 2 — `dataSourceEndpointHostForbidden`; п. 3 — `dataSourceEndpointHostForbidden` (приватні IP — лише для Negotiate; для інших автентифікацій не блокуються); п. 4 — `dataSourceEndpointHostNotAllowed` / успіх; п. 5 — відмова (перевіряється кожна A/AAAA). Порожній `AllowedHosts` — діє лише блок-лист.
 - **Додатково:** IP перевіряється ще в момент підключення (DNS-rebinding, `c11285b0`); відповідь PI понад 50 МБ — збір відхиляється без повторів, `ECR-INT-0503 piWebApiResponseTooLarge`.
-- **Обмеження:** **немає** інтерактивного «підтвердження зміни адреси» для Negotiate — його замінює allowlist; на живому PI/DNS не перевірено.
+- **Обмеження:** на живому PI/DNS не перевірено. Окремий крок: `http://localhost`, `http://x.localhost` — теж `HostForbidden`; DNS-ім'я корпоративного хоста (напр. `pi.corp.example`) дозволене, навіть якщо розв'язується на приватну адресу (для Negotiate саме ім'я потрібне для Kerberos SPN).
 - **Вимоги:** ФВ-13.11, ФВ-6.9.
+
+### Н-Л1а. Приватний IP-літерал і ім'я для Negotiate — ✅ (за тестами)
+
+- **Кроки:** джерело з Negotiate: `http://10.0.0.5`, `http://192.168.1.10`, `http://[fd00::1]` → зберегти; потім `http://pi.corp.example` (DNS-ім'я).
+- **Очікується:** літерали — `422 ECR-REQ-0422 dataSourceEndpointHostForbidden`; ім'я — проходить (за відсутності `AllowedHosts` або наявності хоста в ньому). Для Basic/Bearer ті самі приватні літерали блок-лист не забороняє.
 
 ### Н-Л2. Negotiate без allowlist — ✅ (за тестами; вручну не пройдено)
 
 - **Кроки:** активне джерело PiWebApi із Negotiate (або порожньою автентифікацією) без `PiWebApi:AllowedHosts` → зберегти; відкрити `/health/ready` (картка `sources`).
 - **Очікується:** `Warning` у журналі при збереженні; картка `sources` — `Degraded` з повідомленням `health.sources.negotiateNoAllowlist` («Sources with Windows authentication and no allowed-hosts list: {count}.»); після задання `AllowedHosts` (потрібен перезапуск служби — не перевірено) — без попередження.
+- **Уточнення (звірено з кодом `SourcesHealthCheck`/`EndpointNetwork`):** `AllowedHosts` читається з конфігурації `PiWebApi:AllowedHosts`; задається в `appsettings.Production.json` або `ECR_PiWebApi__AllowedHosts__0=…` у `Environment` служби `EcrApi`; потім `Restart-Service EcrApi` → `/health/ready`, картка `sources` — Healthy (за відсутності інших причин: запуск, покриття, падіння). Інсталятор і `deploy-ecr.ps1` ключ не пишуть. Що перезапуск обов'язковий, живою перевіркою не підтверджено.
 - **Вимоги:** ФВ-13.11.
+
+### Н-Л3. Підтвердження зміни адреси Negotiate-джерела — ✅ (тести серверні 2 + клієнтські 2; вручну не пройдено)
+
+- **Права:** `Integration.Manage`. **Дані:** джерело PiWebApi без секрету (або секрет «Negotiate»).
+- **Кроки:** 1) у формі редагування змінити «Endpoint» на інший дозволений хост, чекбокс «I confirm that the service account may connect to the new address» не ставити → зберегти. 2) Поставити чекбокс → зберегти. 3) (API) `PUT /data-sources/{id}` зі зміненою адресою без `confirmEndpointChange` і з `confirmEndpointChange: true`. 4) Зміна без зміни адреси (лише ім'я/активність).
+- **Очікується:** п. 1, 3 (без прапора) — `422 ECR-REQ-0422`, `messageKey` `err.ECR-REQ-0422.dataSourceEndpointChangeUnconfirmed`, поле `confirmEndpointChange`, БД не змінюється; форма сама показує чекбокс при зміні адреси без `hasSecret` або після такої відмови сервера; п. 2 — проходить; п. 4 — підтвердження не потрібне. Джерело із секретом-заголовком: замість прапора — повторне введення секрету (S3).
+- **Вимоги:** ФВ-13.11, ФВ-6.9. Коміт `80abcd19`.
+
+### Н-Л4. Відповідь PI Web API понад 50 МБ — 🟨 (за тестами; на живому PI не перевірено)
+
+- **Кроки:** збір із запитом, що повертає тіло > 50 МБ (або заглушка PI з `Content-Length` понад ліміт); також відповідь без `Content-Length`, що росте понад ліміт.
+- **Очікується:** збір відхиляється **без повторів**: `ECR-INT-0503`, `messageKey` `err.ECR-INT-0503.piWebApiResponseTooLarge` ({path}, {limitBytes}); процес не вичерпує пам'ять; надто широкий запит (багато тегів × довге вікно) слід ділити. Ліміт у конфігурації не виставляється (D-242, чекає підтвердження).
+- **Вимоги:** НФ, S-аудит. Коміт `d013ba3e`.
+
+### Н-Л5. `Telemetry:Enabled=false` за замовчуванням — ✅ (свідомий дефолт)
+
+- **Кроки:** свіжа інсталяція без `Telemetry:*`; перевірити, що застосунок стартує, експорту OTLP немає. Для Worker — див. Н-М1.
+- **Очікується:** метрики не експортуються; навантаження нуль; це не дефект. Увімкнення Api: `Telemetry:Enabled=true` + `Telemetry:OtlpEndpoint` (без адреси служба не стартує). Метрики Worker потребують `Telemetry:*` у `worker.settings.json` або `ECR_Telemetry__*` у `Environment` служби `EcrWorker`; розгортання їх не пише.
+
+### Н-Л6. Оновлення з міграцією `PerfFixJobsStaleHealth` — 🟨 (вікно обслуговування)
+
+- **Кроки:** база з великим `itg.JobProgress` (від ~500 тис. рядків) → оновлення **при зупиненому** `EcrApi`/`EcrWorker`.
+- **Очікується:** міграція ≈ 20 с на 500 тис. рядків, таблиця заблокована на цей час; активні задачі в цей час вплинуть; після оновлення кількість міграцій зросла (п. 3.c гайда). Не оновлювати під навантаженням.
 
 ---
 
