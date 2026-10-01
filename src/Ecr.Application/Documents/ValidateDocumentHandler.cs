@@ -21,7 +21,10 @@ public sealed class ValidateDocumentHandler(
     Common.ICurrentUser currentUser,
 
     // ⛔ D16-04: знімок полів довідника для `REGFIELD` у правилах.
-    IRegistryStore registries)
+    IRegistryStore registries,
+
+    // D-230: знахідки зв'язків виду Check (`RelationCheckRunner`).
+    ITemplateVersionStore templateVersions)
 {
     /// <summary>Виконує валідацію всіх аркушів документа за період.</summary>
     /// <param name="documentId">Документ.</param>
@@ -114,6 +117,12 @@ public sealed class ValidateDocumentHandler(
                 .RunAsync(engine, registries, snapshot, table, cells, rowIds, headerValues, currentUser.Language, ct)
                 .ConfigureAwait(false));
         }
+
+        // D-230: зв'язки Check (ПРИПУЩЕННЯ схеми, `RelationSpec.cs`). Читаються після таблиць із
+        // правилами, бо мають власну вибірку таблиць (джерело й приймач зв'язку).
+        messages.AddRange(await RelationCheckRunner
+            .RunAsync(templateVersions, cellStore, rowStore, metadata, instances, periodKey, currentUser.Language, ct)
+            .ConfigureAwait(false));
 
         var summary = new ValidationSummary(
             documentId,
