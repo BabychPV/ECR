@@ -29,7 +29,7 @@ internal sealed class InfrastructureMetricsCapture : IDisposable
             if (instrument.Meter.Name == InfrastructureMetrics.MeterName
                 && instrument.Name is InfrastructureMetrics.JobFailed
                     or InfrastructureMetrics.CacheHit or InfrastructureMetrics.CacheMiss
-                    or InfrastructureMetrics.AccessProfileBuild)
+                    or InfrastructureMetrics.AccessProfileBuild or InfrastructureMetrics.JobRunDuration)
             {
                 l.EnableMeasurementEvents(instrument);
             }
@@ -55,9 +55,17 @@ internal sealed class InfrastructureMetricsCapture : IDisposable
         });
         listener.SetMeasurementEventCallback<double>((instrument, value, tags, _) =>
         {
-            if (jobCode is null && ReferenceEquals(Flow.Value, flowMark))
+            var map = new Dictionary<string, object?> { ["value"] = value };
+            foreach (var tag in tags)
             {
-                var map = new Dictionary<string, object?> { ["value"] = value };
+                map[tag.Key] = tag.Value;
+            }
+
+            var mine = jobCode is null
+                ? ReferenceEquals(Flow.Value, flowMark)
+                : Equals(map.GetValueOrDefault("job"), jobCode);
+            if (mine)
+            {
                 lock (gate)
                 {
                     seen.Add((instrument.Name, map));

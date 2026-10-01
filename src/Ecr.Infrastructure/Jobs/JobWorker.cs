@@ -333,6 +333,7 @@ public sealed partial class JobWorker(
         Exception? failure = null;
         JobDeferredException? deferred = null;
         var cancelled = false;
+        var runStarted = Stopwatch.GetTimestamp();
 
         try
         {
@@ -409,6 +410,11 @@ public sealed partial class JobWorker(
                 .ConfigureAwait(false);
             return;
         }
+
+        // ФВ-12.7: тривалість спроби — лише для завершених (ok) і провалених (error); відступ,
+        // скасування й втрата оренди — не «робота», їх не міряємо.
+        Observability.InfrastructureMetrics.RecordJobRun(
+            job.JobCode, failure is null ? "ok" : "error", Stopwatch.GetElapsedTime(runStarted).TotalSeconds);
 
         if (failure is null)
         {

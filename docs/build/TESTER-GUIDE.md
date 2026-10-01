@@ -846,7 +846,10 @@ Get-CimInstance Win32_Service -Filter "Name='EcrWorker'" | Select-Object State, 
   задача, `JobWorker` і Quartz), `ecr.cache.hit` / `ecr.cache.miss` (кеш метаданих
   і кеш профілю доступу), `ecr.job.start_latency` (затримка старту задачі — тепер
   і на шляху `Database`/`Worker`), `ecr.csp.violations`, `ecr.conflict.count`
-  (`a2440449`), `ecr.access.profile.build` (`d4c5198e`); глибини черги нема.
+  (`a2440449`), `ecr.access.profile.build` (`d4c5198e`), `ecr.job.run.duration`
+  (тривалість спроби задачі воркером, теги `job` і `outcome` = `ok`/`error`);
+  глибини черги нема. Змінні `ECR_Telemetry__*` обох служб пише
+  `deploy-ecr.ps1 -TelemetryOtlpEndpoint <url>` (без параметра — не чіпає).
   Метрики перерахунку в режимі `Worker` експортує **дочірній процес**
   `Ecr.Worker --child` (`899d19e0`), а не Api — див. Л-9 і п. 7.1. Емісію
   доведено тестами з `MeterListener` (для дочірнього — і локальним OTLP-колектором

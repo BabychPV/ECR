@@ -35,7 +35,15 @@ public static class InfrastructureMetrics
     /// <summary>Тривалість реальної побудови профілю доступу (не з кешу), секунди.</summary>
     public const string AccessProfileBuild = "ecr.access.profile.build";
 
+    /// <summary>
+    /// Тривалість одного виконання фонової задачі воркером, секунди (теги <c>job</c>, <c>outcome</c> = <c>ok</c>/<c>error</c>).
+    /// ⚠ Не <c>ecr.job.duration</c> (той — лише чотири HTTP-дії в Api): тут кожна спроба задачі з черги.
+    /// </summary>
+    public const string JobRunDuration = "ecr.job.run.duration";
+
     private static readonly Meter Meter = new(MeterName);
+    private static readonly Histogram<double> RunDuration =
+        Meter.CreateHistogram<double>(JobRunDuration, "s", "Тривалість виконання задачі з черги");
     private static readonly Histogram<double> ProfileBuild =
         Meter.CreateHistogram<double>(AccessProfileBuild, "s", "Побудова AccessProfile");
     private static readonly Counter<long> Failed =
@@ -51,6 +59,13 @@ public static class InfrastructureMetrics
             1,
             new KeyValuePair<string, object?>("job", jobCode ?? "—"),
             new KeyValuePair<string, object?>("reason", reason));
+
+    /// <summary>Фіксує тривалість спроби задачі; <paramref name="outcome"/> — <c>ok</c> або <c>error</c>.</summary>
+    public static void RecordJobRun(string? jobCode, string outcome, double seconds)
+        => RunDuration.Record(
+            seconds,
+            new KeyValuePair<string, object?>("job", jobCode ?? "—"),
+            new KeyValuePair<string, object?>("outcome", outcome));
 
     /// <summary>Фіксує тривалість побудови профілю доступу.</summary>
     public static void RecordAccessProfileBuild(double seconds) => ProfileBuild.Record(seconds);

@@ -77,6 +77,35 @@ public sealed class JobFailedMetricTests
         Assert.Empty(capture.Of(InfrastructureMetrics.JobFailed));
     }
 
+    /// <remarks>
+    /// <c>ecr.job.run.duration</c> (ФВ-12.7): одна спроба задачі з черги — один запис з тегами
+    /// <c>job</c> і <c>outcome</c>. Мутації: прибрати <c>RecordJobRun</c> у <c>JobWorker</c> —
+    /// обидва червоні; завжди писати <c>ok</c> — другий червоний.
+    /// </remarks>
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [InlineData(false, "ok")]
+    [InlineData(true, "error")]
+    public async Task JobWorker_кожна_спроба_дає_один_запис_тривалості_з_наслідком(bool fails, string outcome)
+    {
+        var code = fails ? typeof(WorkerFailingJob).FullName! : typeof(WorkerOkJob).FullName!;
+        using var capture = new InfrastructureMetricsCapture(code);
+
+        if (fails)
+        {
+            await RunWorkerOnceAsync<WorkerFailingJob>(code, failed: true);
+        }
+        else
+        {
+            await RunWorkerOnceAsync<WorkerOkJob>(code, failed: false);
+        }
+
+        var run = Assert.Single(capture.Of(InfrastructureMetrics.JobRunDuration));
+        Assert.Equal(code, run["job"]);
+        Assert.Equal(outcome, run["outcome"]);
+        Assert.True((double)run["value"]! >= 0d);
+    }
+
     private static async Task RunQuartzAsync<TJob>(string code)
         where TJob : class, IBackgroundJob
     {
