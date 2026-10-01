@@ -344,6 +344,38 @@ public sealed class SourceEventSyncJobTests(SqlServerFixture sql)
         Assert.Empty(trigger.ReceivedCalls());
     }
 
+    /// <remarks>
+    /// ⛔ МУТАЦІЙНИЙ ДОКАЗ (борг перерахунку): повернути виклик перерахунку ПІСЛЯ <c>SaveChangesAsync</c> без
+    /// <c>finally</c> — червоніє: рядок уже записано, зв'язки впали, а перерахунок не поставлено.
+    /// Збій зв'язків імітує тригер БД на <c>ext.SourceEventLink</c>.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "enterprise-2-P2-recalc-debt")]
+    public async Task Збій_збереження_зв_язків_після_запису_рядків_усе_одно_ставить_перерахунок()
+    {
+        await using var stand = await ArrangeAsync();
+        var trigger = Substitute.For<ICalculationTrigger>();
+        var source = new FakeEventSource(Ev("E1", Start, End));
+
+        await ExecuteAsync(
+            "CREATE OR ALTER TRIGGER ext.TR_rc4_SourceEventLink_fail ON ext.SourceEventLink AFTER INSERT AS THROW 51000, 'rc4 link save failure', 1;");
+        try
+        {
+            await Assert.ThrowsAnyAsync<Exception>(() => RunAsync(stand, source, trigger: trigger));
+        }
+        finally
+        {
+            await ExecuteAsync("DROP TRIGGER IF EXISTS ext.TR_rc4_SourceEventLink_fail;");
+        }
+
+        // Рядок уже в базі (закомічено патчером), зв'язку немає — і перерахунок усе одно поставлено.
+        Assert.Single(await RowsAsync(stand));
+        Assert.Empty(await LinksAsync(stand));
+        await trigger.Received(1).RequestAsync(stand.DocumentId, new PeriodKey(202601), Arg.Any<CancellationToken>());
+    }
+
     // ── Стенд ────────────────────────────────────────────────────────────────
 
     private async Task RunAsync(

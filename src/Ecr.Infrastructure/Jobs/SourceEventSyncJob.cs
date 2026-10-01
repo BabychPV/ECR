@@ -268,22 +268,39 @@ public sealed class SourceEventSyncJob(
             totals.Missing++;
         }
 
-        await db.SaveChangesAsync(ct).ConfigureAwait(false);
-
-        if (events.Count > 0)
+        // ⛔ Борг перерахунку (enterprise-2 P2): рядки вже ЗАКОМІЧЕНО патчером у етапі 1, тож збій
+        // збереження зв'язків чи журналу покриття не повинен лишити документ без перерахунку — наступний
+        // прогін бачить рядок без змін і нічого не запише, тобто перерахунок уже ніхто б не поставив.
+        try
         {
-            await coverage.RecordManyAsync(events, ct).ConfigureAwait(false);
+            await db.SaveChangesAsync(ct).ConfigureAwait(false);
+
+            if (events.Count > 0)
+            {
+                await coverage.RecordManyAsync(events, ct).ConfigureAwait(false);
+            }
+        }
+        finally
+        {
+            await RequestRecalculationAsync(map.DocumentId, appliedPeriods, ct).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// ⛔ Автоперерахунок (§4.7.4 крок 7, A4): ОДИН виклик на зачеплений період за прогін мапінгу,
+    /// не на подію й не на групу; нуль записаного — нуль викликів. Черга зливає дублікати без
+    /// витіснення, тригер сам не ставить для закритого, Scheduled чи поданого періоду.
+    /// </summary>
+    private async Task RequestRecalculationAsync(long documentId, HashSet<int> appliedPeriods, CancellationToken ct)
+    {
+        if (recalculation is null)
+        {
+            return;
         }
 
-        // ⛔ Автоперерахунок (§4.7.4 крок 7, A4): ОДИН виклик на зачеплений період за прогін мапінгу,
-        // не на подію й не на групу; нуль записаного — нуль викликів. Черга зливає дублікати без
-        // витіснення, тригер сам не ставить для закритого, Scheduled чи поданого періоду.
-        if (recalculation is not null)
+        foreach (var periodKey in appliedPeriods.Order())
         {
-            foreach (var periodKey in appliedPeriods.Order())
-            {
-                await recalculation.RequestAsync(map.DocumentId, new PeriodKey(periodKey), ct).ConfigureAwait(false);
-            }
+            await recalculation.RequestAsync(documentId, new PeriodKey(periodKey), ct).ConfigureAwait(false);
         }
     }
 
