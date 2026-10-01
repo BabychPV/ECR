@@ -14670,6 +14670,39 @@ WHEN NOT MATCHED THEN INSERT (ReportDefId, [Version], Status, ColumnsJson, Rules
      VALUES (s.ReportDefId, s.[Version], 1, s.ColumnsJson, s.RulesJson, SYSUTCDATETIME());
 GO
 
+-- COLL:an14-ecr230 ── опис форм 230 A1/B1/B4 (ФВ-10.7, AN-14); власна секція ──
+-- ⚠ Колонки — лише коди джерела CalculationResults (ReportSourceColumns): RDL-«колонки»
+-- (SUM_HP_Purge_Value, FG_Makat_*) — це значення OutputCode у довгому форматі, а не колонки опису.
+-- ⚠ Коди ECR230_A1/B1/B4 і підписи en/ru — дефолт із заголовків RDL; KZ у RDL немає, не вигадано
+-- (назва колонки без kz падає на en, ReportColumnNames.Of). Критерій звірки ФВ-10.9, зміст OutputCode,
+-- мапінг періоду «квартал» ↔ PeriodKey і подієві рамки (дати епізодів) — прогалини замовника/коду.
+MERGE rpt.ReportDef AS t
+USING (VALUES
+  (N'ECR230_A1', N'{"en":"Unit A1-230 Flares (quarterly)","ru":"Установка 230 A1 – Факельная система (квартал)"}', 1),
+  (N'ECR230_B1', N'{"en":"Unit B1-230 Flares (quarterly)","ru":"Установка 230 B1 – Факельная система (квартал)"}', 1),
+  (N'ECR230_B4', N'{"en":"Unit B4-230 Flares (quarterly)","ru":"Установка B4-230 – Факельная система (квартал)"}', 1)
+) AS s (Code, NameL10n, IsRegulatory)
+ON t.Code = s.Code
+WHEN NOT MATCHED THEN INSERT (Code, NameL10n, IsRegulatory, IsActive)
+     VALUES (s.Code, s.NameL10n, s.IsRegulatory, 1);
+GO
+
+MERGE rpt.ReportVersion AS t
+USING (
+    SELECT d.Id AS ReportDefId, v.[Version], v.ColumnsJson, v.RulesJson
+    FROM (VALUES
+        (N'ECR230_A1', N'1.0', N'[{"code":"ProjectCode","kind":"text","nameL10n":{"en":"Unit / project","ru":"Установка"}},{"code":"PeriodKey","kind":"number","nameL10n":{"en":"Period","ru":"Период"}},{"code":"RowKey","kind":"text","nameL10n":{"en":"Stream / event row","ru":"Поток / событие"}},{"code":"OutputCode","kind":"text","nameL10n":{"en":"Indicator","ru":"Показатель"}},{"code":"Value","kind":"number","nameL10n":{"en":"Value","ru":"Значение"}},{"code":"UnitCode","kind":"text","nameL10n":{"en":"Unit of measure","ru":"Единица измерения"}},{"code":"DocumentId","kind":"number"},{"code":"SubstanceEntryId","kind":"number"}]', N'{"rowSource":"CalculationResults"}'),
+        (N'ECR230_B1', N'1.0', N'[{"code":"ProjectCode","kind":"text","nameL10n":{"en":"Unit / project","ru":"Установка"}},{"code":"PeriodKey","kind":"number","nameL10n":{"en":"Period","ru":"Период"}},{"code":"RowKey","kind":"text","nameL10n":{"en":"Stream / event row","ru":"Поток / событие"}},{"code":"OutputCode","kind":"text","nameL10n":{"en":"Indicator","ru":"Показатель"}},{"code":"Value","kind":"number","nameL10n":{"en":"Value","ru":"Значение"}},{"code":"UnitCode","kind":"text","nameL10n":{"en":"Unit of measure","ru":"Единица измерения"}},{"code":"DocumentId","kind":"number"},{"code":"SubstanceEntryId","kind":"number"}]', N'{"rowSource":"CalculationResults"}'),
+        (N'ECR230_B4', N'1.0', N'[{"code":"ProjectCode","kind":"text","nameL10n":{"en":"Unit / project","ru":"Установка"}},{"code":"PeriodKey","kind":"number","nameL10n":{"en":"Period","ru":"Период"}},{"code":"RowKey","kind":"text","nameL10n":{"en":"Stream / event row","ru":"Поток / событие"}},{"code":"OutputCode","kind":"text","nameL10n":{"en":"Indicator","ru":"Показатель"}},{"code":"Value","kind":"number","nameL10n":{"en":"Value","ru":"Значение"}},{"code":"UnitCode","kind":"text","nameL10n":{"en":"Unit of measure","ru":"Единица измерения"}},{"code":"DocumentId","kind":"number"},{"code":"SubstanceEntryId","kind":"number"}]', N'{"rowSource":"CalculationResults"}')
+    ) AS v (Code, [Version], ColumnsJson, RulesJson)
+    JOIN rpt.ReportDef AS d ON d.Code = v.Code
+) AS s
+ON t.ReportDefId = s.ReportDefId AND t.[Version] = s.[Version]
+WHEN NOT MATCHED THEN INSERT (ReportDefId, [Version], Status, ColumnsJson, RulesJson, CreatedAt)
+     VALUES (s.ReportDefId, s.[Version], 1, s.ColumnsJson, s.RulesJson, SYSUTCDATETIME());
+GO
+-- COLL:an14-ecr230 ── кінець секції ──
+
 -- COLL:period0-supersede ── Старі річні прогони нічного перерахунку (період 0) ──
 -- ⛔ Одноразове виправлення ДАНИХ, ідемпотентне. До фіксу 44c952c1 прогін «на
 -- весь рік» (`PeriodKey = NULL`, нічний розклад) писав результати методологій у
