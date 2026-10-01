@@ -99,13 +99,11 @@ public sealed class SingleFlightTests
     /// швидкість планувальника CI, а не поведінку коду.
     /// </para>
     /// <para>
-    /// ⚠ Тепер звільнення чекає, доки всі 50 ВВІЙДУТЬ у <c>RunAsync</c>
-    /// (<c>entered</c>), і доки запис справді один (<c>Pending == 1</c>).
-    /// Залишкове вікно назване, а не заметене: потік, витіснений між
-    /// <c>Interlocked.Increment</c> і <c>GetOrAdd</c> довше, ніж триває цикл
-    /// опитування (≥ 10 мс), збудує вдруге. Це кілька сусідніх інструкцій
-    /// проти десятків мілісекунд — на порядки вужче за попереднє «майже
-    /// гарантовано впаде під навантаженням».
+    /// ⚠ Звільнення чекає, доки всі 50 ПОВЕРНУЛИСЯ з <c>RunAsync</c>
+    /// (лічильник <c>entered</c> росте після виклику, а не до нього), тож
+    /// вікна «інкремент є, <c>GetOrAdd</c> ще ні» немає взагалі: без опитування
+    /// й без <c>Task.Delay</c> у тіні тесту. Попередня редакція лишала таке
+    /// вікно й іноді давала дві побудови на CI.
     /// </para>
     /// </remarks>
     [Fact]
@@ -118,6 +116,7 @@ public sealed class SingleFlightTests
         var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var builds = 0;
         var entered = 0;
+        var allEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
         async Task<int> Build(CancellationToken _)
         {
@@ -144,12 +143,21 @@ public sealed class SingleFlightTests
              */
             await Task.Delay(index * 2).ConfigureAwait(false);
 
-            // ⚠ Лічильник ПЕРЕД викликом, а не всередині `Build`: усередину
-            // заходить лише переможець гонки, а міряти треба саме тих, хто
-            // прийшов і мав злитися з ним.
-            Interlocked.Increment(ref entered);
+            // ⛔ Лічильник ПІСЛЯ повернення з `RunAsync`, а не до виклику:
+            // `RunAsync` — не async-метод, `GetOrAdd` у ньому завершується до
+            // повернення Task. Тож `entered == 50` означає, що кожен із 50 уже
+            // знайшов запис (або створив його), а не «збирається». Раніше
+            // лічильник стояв ПЕРЕД викликом, і потік, витіснений між
+            // інкрементом і `GetOrAdd`, будував удруге, коли перша побудова
+            // встигала завершитися.
+            var pending = flight.RunAsync("k", Build, CancellationToken.None);
 
-            return await flight.RunAsync("k", Build, CancellationToken.None).ConfigureAwait(false);
+            if (Interlocked.Increment(ref entered) == Parallel)
+            {
+                allEntered.TrySetResult();
+            }
+
+            return await pending.ConfigureAwait(false);
         })).ToArray();
 
         Assert.True(atGate.Wait(TimeSpan.FromSeconds(30)), "не всі потоки дійшли до бар'єра");
@@ -162,17 +170,9 @@ public sealed class SingleFlightTests
          * перша побудова завершувалася, `finally` прибирав запис, і кожен, хто
          * прийшов потім, будував своє — 50 побудов замість однієї.
          */
-        for (var waited = 0; Volatile.Read(ref entered) < Parallel; waited++)
-        {
-            Assert.True(waited < 3_000, "не всі викликачі дійшли до RunAsync — міряти нічого");
-            await Task.Delay(10);
-        }
-
-        for (var waited = 0; Volatile.Read(ref builds) == 0 || flight.Pending != 1; waited++)
-        {
-            Assert.True(waited < 3_000, "побудова так і не почалася — міряти нічого");
-            await Task.Delay(10);
-        }
+        // Без опитування: подія, а не Task.Delay. Усі 50 уже повернулися з
+        // `RunAsync` (див. вище), тож побудова точно одна й запис один.
+        await allEntered.Task.WaitAsync(TimeSpan.FromSeconds(60));
 
         // Санітарна перевірка ДО звільнення: 50 викликачів, запис один.
         Assert.Equal(1, Volatile.Read(ref builds));
