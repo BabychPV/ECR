@@ -617,7 +617,6 @@ UPDATE t
     (N'err.ECR-SCHM-0422.migrateGrantsNotMapped', N'en', N'The target version has no sheet, table or column with the code of a resource that has a deny grant, so the deny cannot be carried over. Remove or re-create that deny deliberately before moving the project.', N'The target version has no sheet, table or column with the code of a resource that has an access grant (deny or a restricting Read), so the grant cannot be carried over and access could widen. Remove or re-create that grant deliberately before moving the project.'),
     (N'err.ECR-SCHM-0422.migrateGrantsNotMapped', N'ru', N'В целевой версии нет листа, таблицы или столбца с кодом ресурса, на котором стоит запрет, поэтому запрет не перенести. Снимите или пересоздайте этот запрет осознанно до переноса проекта.', N'В целевой версии нет листа, таблицы или столбца с кодом ресурса, на котором стоит право доступа (запрет или ограничивающее чтение), поэтому право не перенести, а доступ мог бы расшириться. Снимите или пересоздайте это право осознанно до переноса проекта.'),
     (N'err.ECR-SCHM-0422.migrateGrantsNotMapped', N'kz', N'Мақсатты нұсқада тыйым қойылған ресурстың кодымен парақ, кесте немесе баған жоқ, сондықтан тыйымды көшіру мүмкін емес. Жобаны көшірместен бұрын бұл тыйымды саналы түрде алып тастаңыз немесе қайта жасаңыз.', N'Мақсатты нұсқада қол жеткізу құқығы (тыйым немесе шектейтін оқу) қойылған ресурстың кодымен парақ, кесте немесе баған жоқ, сондықтан құқықты көшіру мүмкін емес, ал қолжетімділік кеңеюі мүмкін. Жобаны көшірместен бұрын бұл құқықты саналы түрде алып тастаңыз немесе қайта жасаңыз.'),
-    -- ⚠ kz вище — потрібна вичитка носієм.
     -- D-263: SMTP задається в адмін-налаштуваннях, канал додає адресатів-ролі.
     (N'notifications.smtpTransportHint', N'en', N'The server, sender address and password come from the application configuration; the channel only adds recipients.', N'The server, sender and login come from the SMTP settings above (or from the process configuration while they are not set); the channel adds recipients: addresses and roles.'),
     (N'notifications.smtpTransportHint', N'ru', N'Сервер, адрес отправителя и пароль берутся из конфигурации приложения; канал лишь добавляет получателей.', N'Сервер, отправитель и логин берутся из настроек SMTP выше (пока они не заданы — из конфигурации процесса); канал добавляет получателей: адреса и роли.'),
@@ -661,7 +660,7 @@ UPDATE t
     (N'tables.readOnlyHint',             N'en', N'A relation decides where a table takes its numbers from, so changing it would silently change forms already submitted. Clone the version to change it (ФВ-7.1).',
                                                 N'A relation decides where a table takes its numbers from, so changing it would silently change forms already submitted. Clone the version to change it.'),
     (N'security.roleCodeHint',           N'en', N'Used in grants and audit; it cannot be changed later.', N'Used in grants and audit. Built-in role codes cannot be changed.'),
-    -- SEC:ФВ-6.16 ent5 P2-2: звужене призначення враховується на аркушах області; kz — на вичитку носієм мови.
+    -- SEC:ФВ-6.16 ent5 P2-2: звужене призначення враховується на аркушах області.
     (N'effectiveAccess.scopeNarrowed',   N'en', N'Narrowed to sheets or periods: opens documents but does not raise the project level', N'Narrowed to sheets or periods: counted on the sheets of its scope (not counted when narrowed by periods); the level may be higher than the actual one'),
     (N'effectiveAccess.scopeNarrowed',   N'ru', N'Сужено листами или периодами: открывает документы, но не повышает уровень проекта', N'Сужено листами или периодами: учитывается на листах своей области (при сужении по периодам не учитывается); уровень может быть выше фактического'),
     (N'effectiveAccess.scopeNarrowed',   N'kz', N'Парақтармен немесе кезеңдермен тарылтылған: құжаттарды ашады, бірақ жоба деңгейін көтермейді', N'Парақтармен немесе кезеңдермен тарылтылған: өз аумағындағы парақтарда ескеріледі (кезеңдер бойынша тарылтылса — ескерілмейді); деңгей нақтыдан жоғары болуы мүмкін'),
@@ -14089,7 +14088,6 @@ GO
 -- COLL:sec-a1 ── кінець секції ──
 
 -- COLL:nosource-hints ── ru/kz підказки порожнього списку з'єднань; власна порція ──
--- ⚠ kz — найкращий переклад без термінології замовника: потрібна вичитка носієм.
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
   FROM (VALUES
@@ -14228,7 +14226,6 @@ GO
 -- COLL:an9-rules ── кінець секції ──
 
 -- COLL:fv616 ── ru/kz розрізу доступу на аркуші, таблиці й колонці; власна порція #I18N ──
--- kz — найкращий переклад, потрібна вичитка носієм.
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
   FROM (VALUES
@@ -14628,7 +14625,7 @@ OPTION (RECOMPILE);
 GO
 -- COLL:warn-grid ── кінець секції ──
 
--- COLL:smtp-probe ── ru/kz проби SMTP-каналу без адресатів (D-256); власна порція; kz — потрібна вичитка носієм ──
+-- COLL:smtp-probe ── ru/kz проби SMTP-каналу без адресатів (D-256); власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
   FROM (VALUES
@@ -14656,7 +14653,7 @@ OPTION (RECOMPILE);
 GO
 -- COLL:fv1315 ── кінець секції ──
 
--- COLL:fv1315-ui ── ru/kz залежності розкладу збору: select і подія пропуску (ФВ-13.15, клієнт); власна порція; kz — потрібна вичитка носієм ──
+-- COLL:fv1315-ui ── ru/kz залежності розкладу збору: select і подія пропуску (ФВ-13.15, клієнт); власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
   FROM (VALUES
@@ -14675,7 +14672,7 @@ OPTION (RECOMPILE);
 GO
 -- COLL:fv1315-ui ── кінець секції ──
 
--- COLL:smtp-hardening ── ru/kz межі частоти проб транспорту; власна порція; kz — потрібна вичитка носієм ──
+-- COLL:smtp-hardening ── ru/kz межі частоти проб транспорту; власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
   FROM (VALUES
@@ -14686,7 +14683,7 @@ OPTION (RECOMPILE);
 GO
 -- COLL:smtp-hardening ── кінець секції ──
 
--- COLL:sec-smtp-s1s2 ── ru/kz відмов S1 налаштувань SMTP; власна порція; kz — потрібна вичитка носієм ──
+-- COLL:sec-smtp-s1s2 ── ru/kz відмов S1 налаштувань SMTP; власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
   FROM (VALUES
@@ -14752,7 +14749,7 @@ OPTION (RECOMPILE);
 GO
 -- REG:rt25-client ── кінець секції ──
 
--- I18N:backfill-2 2026-09-30 ── ru/kz для ключів, що мали лише en (правило перевірки, причина публікації звіту); переклади машинні, потребують вичитки носієм; власна порція ──
+-- I18N:backfill-2 2026-09-30 ── ru/kz для ключів, що мали лише en (правило перевірки, причина публікації звіту); переклади машинні; власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
   FROM (VALUES
@@ -15070,7 +15067,7 @@ OPTION (RECOMPILE);
 GO
 -- COLL:fv812-relations ── кінець секції ──
 
--- COLL:recalc-rl ── ru/kz межі частоти перерахунку документа; власна порція; kz — потрібна вичитка носієм ──
+-- COLL:recalc-rl ── ru/kz межі частоти перерахунку документа; власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
   FROM (VALUES
@@ -15092,7 +15089,7 @@ OPTION (RECOMPILE);
 GO
 -- COLL:sec-s3s6 ── кінець секції ──
 
--- COLL:fv812-ifmatch ── ru/kz обов'язкового If-Match на PUT опису довідника; власна порція; kz — потрібна вичитка носієм ──
+-- COLL:fv812-ifmatch ── ru/kz обов'язкового If-Match на PUT опису довідника; власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
   FROM (VALUES
