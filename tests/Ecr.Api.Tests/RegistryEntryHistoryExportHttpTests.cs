@@ -398,7 +398,7 @@ public sealed class RegistryEntryHistoryExportHttpTests(SqlServerFixture sql)
 
     private static async Task SaveFieldsAsync(HttpClient client, Registry registry, object[] fields)
     {
-        var saved = await client.PutAsJsonAsync(
+        var saved = await client.PutDefinitionAsync(
             new Uri($"/api/v1/registries/{registry.Code}/definition", UriKind.Relative),
             new { fields, rules = Array.Empty<object>(), reason = "RT-15/16" });
         Assert.True(saved.IsSuccessStatusCode, $"{saved.StatusCode}: {await saved.Content.ReadAsStringAsync()}");

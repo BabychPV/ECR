@@ -87,18 +87,18 @@ export function saveRegistryDraft(
  * @param code Код довідника.
  * @param body Повний стан форми разом із причиною.
  * @param definitionVersion Версія опису, яку показали людині: іде в `If-Match`; інша на сервері —
- *   `409 definitionChanged` (опис змінили після читання). `null` — версії не знаємо, заголовка немає.
+ *   `409 definitionChanged` (опис змінили після читання). Без заголовка сервер відмовляє `422`.
  */
 export function saveAndPublishRegistryDefinition(
   code: string,
   body: SaveRegistryDefinition,
-  definitionVersion: number | null = null,
+  definitionVersion: number,
 ): Promise<RegistryDefinitionVersion> {
   return apiFetch<RegistryDefinitionVersion>(
     `/api/v1/registries/${encodeURIComponent(code)}/definition`,
     {
       method: 'PUT',
-      ...(definitionVersion === null ? {} : { headers: { 'If-Match': `"${definitionVersion}"` } }),
+      headers: { 'If-Match': `"${definitionVersion}"` },
       body: JSON.stringify(body),
     },
   );

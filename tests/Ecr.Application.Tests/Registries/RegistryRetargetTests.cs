@@ -367,16 +367,33 @@ public sealed class RegistryRetargetTests
     [Theory]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait("Requirement", "ФВ-8.12")]
-    [InlineData(null)]
-    [InlineData("")]
     [InlineData("\"1\"")]
     [InlineData("1")]
-    public async Task Поточна_версія_в_If_Match_або_її_відсутність_пропускає_збереження(string? ifMatch)
+    [InlineData("W/\"1\"")]
+    public async Task Поточна_версія_в_If_Match_пропускає_збереження(string ifMatch)
     {
         var version = await Save(NewTargetId, ifMatch: ifMatch);
 
         Assert.Equal(2, version);
         Assert.Equal(NewTargetId, _link.RefRegistryDefId);
+    }
+
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Requirement", "ФВ-8.12")]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task Без_If_Match_збереження_відмовляє_422_і_нічого_не_пише(string? ifMatch)
+    {
+        // ⛔ Мутація: повернути `return` для `expected is null` у `RequireCurrentVersion` — тест червоніє
+        // (без заголовка версію не звіряють, і гонку двох PUT не відловити).
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(() => Save(NewTargetId, ifMatch: ifMatch, ifMatchExplicit: true));
+
+        Assert.Equal("ECR-REQ-0422", error.ErrorCode);
+        Assert.Equal("err.ECR-REQ-0422.definitionVersionRequired", error.Details!["messageKey"]);
+        Assert.Equal(OldTargetId, _link.RefRegistryDefId);
+        await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -411,8 +428,10 @@ public sealed class RegistryRetargetTests
 
     private Task<int> Save(
         int? target, RegistryFieldSaveDto? extra = null, int linkFieldId = LinkFieldId,
-        string? ifMatch = null, IAuditWriter? audit = null)
+        string? ifMatch = null, IAuditWriter? audit = null, bool ifMatchExplicit = false)
     {
+        // Версія опису в тесті — 1 (конструктор `RegistryDef`); тести, яким версія не предмет, шлють актуальну.
+        ifMatch = ifMatchExplicit ? ifMatch : ifMatch ?? "\"1\"";
         var fields = _owner.Fields.OrderBy(f => f.Ordinal).Select(f => new RegistryFieldSaveDto(
             f.Id, f.Code, f.NameL10n, f.DataType.ToString(), f.Ordinal, f.IsRequired, f.IsKey,
             f.Id == linkFieldId ? target : f.RefRegistryDefId, f.UnitId)).ToList();

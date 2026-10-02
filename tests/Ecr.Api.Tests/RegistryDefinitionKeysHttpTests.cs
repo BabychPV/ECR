@@ -210,11 +210,53 @@ public sealed partial class RegistryDefinitionKeysHttpTests(SqlServerFixture sql
             isActive = true,
         };
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-8.12")]
+    public async Task Опис_без_If_Match_422_зі_старою_версією_409_з_актуальною_200()
+    {
+        // ⛔ Мутація: `RequireCurrentVersion` не вимагає заголовка (`return` при `expected is null`)
+        // або ігнорує його — перший або другий assert червоніє.
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app);
+        var registry = await GroupedRegistryAsync(client);
+        var url = new Uri($"/api/v1/registries/{registry.Code}/definition", UriKind.Relative);
+        var body = new
+        {
+            fields = new object[]
+            {
+                Field(registry.FieldIds["NAME"], "NAME", "String", 1, isKey: true),
+                Field(registry.FieldIds["GROUP"], "GROUP", "String", 2),
+            },
+            rules = Array.Empty<object>(),
+            reason = "ФВ-8.12 If-Match",
+        };
+        var current = await RegistryDefinitionHttpExtensions.ReadVersionAsync(client, url);
+
+        var missing = await client.PutDefinitionAsync(url, body, ifMatch: null);
+        var missingBody = await missing.Content.ReadAsStringAsync();
+        Assert.True(missing.StatusCode == HttpStatusCode.UnprocessableEntity, $"{missing.StatusCode}: {missingBody}\n{app.ErrorsText}");
+        Assert.Equal("err.ECR-REQ-0422.definitionVersionRequired", JsonDocument.Parse(missingBody).RootElement.GetProperty("messageKey").GetString());
+
+        var stale = await client.PutDefinitionAsync(url, body, ifMatch: "\"999\"");
+        var staleBody = await stale.Content.ReadAsStringAsync();
+        Assert.True(stale.StatusCode == HttpStatusCode.Conflict, $"{stale.StatusCode}: {staleBody}\n{app.ErrorsText}");
+        Assert.Equal("err.ECR-REG-0409.definitionChanged", JsonDocument.Parse(staleBody).RootElement.GetProperty("messageKey").GetString());
+
+        // Відмови нічого не записали: версія та сама.
+        Assert.Equal(current, await RegistryDefinitionHttpExtensions.ReadVersionAsync(client, url));
+
+        var ok = await client.PutDefinitionAsync(url, body, ifMatch: current);
+        Assert.True(ok.StatusCode == HttpStatusCode.OK, $"{ok.StatusCode}: {await ok.Content.ReadAsStringAsync()}\n{app.ErrorsText}");
+        Assert.NotEqual(current, await RegistryDefinitionHttpExtensions.ReadVersionAsync(client, url));
+    }
+
     /// <summary>Довідник із ключовим полем NAME і необов'язковим GROUP — через POST і PUT опису.</summary>
     private static async Task<Registry> GroupedRegistryAsync(HttpClient client)
     {
         var registry = await CreateRegistryAsync(client, "KG", isTemporal: false);
-        var saved = await client.PutAsJsonAsync(
+        var saved = await client.PutDefinitionAsync(
             new Uri($"/api/v1/registries/{registry.Code}/definition", UriKind.Relative),
             new
             {
@@ -227,7 +269,7 @@ public sealed partial class RegistryDefinitionKeysHttpTests(SqlServerFixture sql
     }
 
     private static async Task<HttpResponseMessage> SaveDefinitionAsync(HttpClient client, Registry registry, object[] keys)
-        => await client.PutAsJsonAsync(
+        => await client.PutDefinitionAsync(
             new Uri($"/api/v1/registries/{registry.Code}/definition", UriKind.Relative),
             new
             {
@@ -248,13 +290,13 @@ public sealed partial class RegistryDefinitionKeysHttpTests(SqlServerFixture sql
     private static async Task<(Registry Parent, Registry Child)> CompositionAsync(HttpClient client, bool parentTemporal)
     {
         var parent = await CreateRegistryAsync(client, "CP", parentTemporal);
-        var parentSaved = await client.PutAsJsonAsync(
+        var parentSaved = await client.PutDefinitionAsync(
             new Uri($"/api/v1/registries/{parent.Code}/definition", UriKind.Relative),
             new { fields = new object[] { Field(null, "NAME", "String", 1, isKey: true) }, rules = Array.Empty<object>(), reason = "RT-11" });
         Assert.True(parentSaved.IsSuccessStatusCode, $"{parentSaved.StatusCode}: {await parentSaved.Content.ReadAsStringAsync()}");
 
         var child = await CreateRegistryAsync(client, "CC", isTemporal: false);
-        var childSaved = await client.PutAsJsonAsync(
+        var childSaved = await client.PutDefinitionAsync(
             new Uri($"/api/v1/registries/{child.Code}/definition", UriKind.Relative),
             new
             {

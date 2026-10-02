@@ -117,7 +117,7 @@ public sealed class RegistryRowsSqlParityTests(SqlServerFixture sql)
             new { code = $"PA{tag}", nameL10n = new Dictionary<string, string> { ["en"] = $"PA {tag}" }, isTemporal = temporal });
         var created = JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement;
         var code = created.GetProperty("code").GetString()!;
-        var saved = await client.PutAsJsonAsync(
+        var saved = await client.PutDefinitionAsync(
             new Uri($"/api/v1/registries/{code}/definition", UriKind.Relative),
             new
             {

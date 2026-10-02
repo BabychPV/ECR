@@ -266,7 +266,7 @@ public sealed class RegistryRulesHttpTests(SqlServerFixture sql)
     /// <summary>Опис кейсу як є (поля, SUM_100) плюс одне нове правило.</summary>
     private static async Task<(HttpStatusCode Status, JsonElement Body)> SaveDefinitionAsync(HttpClient client, Fixture f, object extraRule)
     {
-        var response = await client.PutAsJsonAsync(
+        var response = await client.PutDefinitionAsync(
             new Uri($"/api/v1/registries/{f.Case.Code}/definition", UriKind.Relative),
             new
             {

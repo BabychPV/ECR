@@ -149,7 +149,7 @@ public sealed class RegistryDefinitionConcurrencyTests(SqlServerFixture sql)
             // `LINK` має значення (навіть у видаленого запису це було б так само): ціль не міняється.
             var error = await Assert.ThrowsAsync<BusinessRuleException>(
                 async () => await Handler(db).HandleAsync(
-                    seed.OwnerCode, await DtoAsync(db, seed, newTarget: seed.OtherTargetId), default));
+                    seed.OwnerCode, await DtoAsync(db, seed, newTarget: seed.OtherTargetId), default, "\"1\""));
             Assert.Equal("err.ECR-REG-0422.lookupRetargetInUse", error.Details!["messageKey"]);
         }
 

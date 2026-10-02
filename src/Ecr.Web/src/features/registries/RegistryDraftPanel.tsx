@@ -124,12 +124,18 @@ export function RegistryDraftPanel({
    */
   const saveAndPublish = useMutation({
     meta: { handled: true },
-    mutationFn: () =>
-      saveAndPublishRegistryDefinition(code, {
+    mutationFn: () => {
+      // ⛔ `If-Match` обов'язковий: версії опису не знаємо — не шлемо запит наосліп.
+      const version = state.data?.definitionVersion;
+      if (version === undefined) {
+        return Promise.reject(new Error('definitionVersion is unknown'));
+      }
+      return saveAndPublishRegistryDefinition(code, {
         fields: request?.fields ?? [],
         rules: request?.rules ?? [],
         reason: request?.reason ?? '',
-      }, state.data?.definitionVersion ?? null),
+      }, version);
+    },
     onSettled: () => setConfirm(null),
     onSuccess: async (result) => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.registries.definition(code) });

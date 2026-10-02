@@ -362,8 +362,8 @@ public sealed class SaveRegistryDefinitionHandler(
     /// <param name="dto">Повний стан опису після правки.</param>
     /// <param name="ct">Токен скасування.</param>
     /// <param name="ifMatch">
-    /// Заголовок <c>If-Match</c> із <c>definitionVersion</c>, яку показали людині; <c>null</c> —
-    /// заголовка немає, версію не звіряємо (старі споживачі). Чужа версія — <c>409 ECR-REG-0409</c>.
+    /// Заголовок <c>If-Match</c> із <c>definitionVersion</c>, яку показали людині. Обов'язковий:
+    /// немає — <c>422 ECR-REQ-0422</c>; чужа версія — <c>409 ECR-REG-0409</c>.
     /// </param>
     /// <returns>Нова версія опису.</returns>
     /// <exception cref="NotFoundException">Довідника немає — <c>ECR-REG-0404</c>.</exception>
@@ -409,9 +409,17 @@ public sealed class SaveRegistryDefinitionHandler(
     internal static void RequireCurrentVersion(RegistryDef definition, string? ifMatch)
     {
         var expected = Integration.ListCollectionSchedulesHandler.NormalizeETag(ifMatch);
+        // ⛔ Версія ОБОВ'ЯЗКОВА (як для одиниць, джерел, грантів ролі): без заголовка гонку двох
+        // PUT не відловити — запит того, хто опису не читав, мовчки затер би чужу правку.
         if (expected is null)
         {
-            return;
+            throw new BusinessRuleException(
+                Ecr.Domain.Errors.ErrorCodes.RequestInvalid,
+                "Збереження опису довідника має нести заголовок If-Match з definitionVersion прочитаного опису.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-REQ-0422.definitionVersionRequired",
+                });
         }
 
         if (!string.Equals(
