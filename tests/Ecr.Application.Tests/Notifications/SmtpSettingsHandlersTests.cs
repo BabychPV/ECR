@@ -767,6 +767,18 @@ public sealed class SmtpSettingsHandlersTests
     [InlineData("localhost", null)]
     [InlineData("127.0.0.1", null)]
     [InlineData("[::1]", null)]
+    [InlineData("::1", null)]
+    [InlineData("[::1]:25", null)]                // P1: дужки з «портом» - SmtpClient розбирає як ::1
+    [InlineData("[::ffff:127.0.0.1]:25", null)]
+    [InlineData("[0:0:0:0:0:0:0:1]:1", null)]
+    [InlineData("::ffff:7f00:1", null)]           // hex-форма mapped
+    [InlineData("127.1", null)]
+    [InlineData("0x7f.1", null)]
+    [InlineData("2130706433", null)]
+    [InlineData("::1%1", null)]
+    [InlineData("::127.0.0.1", null)]
+    [InlineData("[10.0.0.5]", null)]
+    [InlineData("relay.corp.example:25", null)]   // порт у полі Server
     [InlineData("169.254.169.254", null)]
     [InlineData("metadata.google.internal", null)]
     [InlineData("rebind.example", "127.0.0.1")]          // DNS-rebinding на loopback

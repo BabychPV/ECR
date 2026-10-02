@@ -1,4 +1,4 @@
-﻿// tests/Ecr.Infrastructure.Tests/Notifications/SmtpEndpointPolicySendTests.cs
+// tests/Ecr.Infrastructure.Tests/Notifications/SmtpEndpointPolicySendTests.cs
 using Ecr.Application.Notifications;
 using Ecr.Application.Ports;
 using Ecr.Infrastructure.Integration;
@@ -30,6 +30,8 @@ public sealed class SmtpEndpointPolicySendTests
     [InlineData("10.0.0.5", "3306")]
     [InlineData("127.0.0.1", "587")]        // стандартний порт, але loopback
     [InlineData("localhost", "25")]
+    [InlineData("[::1]:25", "587")]                // P1: справжній EndpointNetwork і справжній SocketException
+    [InlineData("[::ffff:127.0.0.1]:25", "587")]
     [InlineData("169.254.169.254", "587")]  // metadata
     public async Task Відправлення_відхиляє_нестандартний_порт_і_loopback_link_local_до_будь_якого_з_єднання(string host, string port)
     {

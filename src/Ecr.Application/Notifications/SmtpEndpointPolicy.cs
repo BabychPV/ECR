@@ -44,18 +44,31 @@ public sealed class SmtpEndpointPolicy(IEndpointNetwork network) : ISmtpEndpoint
     {
         ArgumentNullException.ThrowIfNull(host);
 
-        var name = host.Trim().Trim('[', ']').TrimEnd('.');
+        var raw = host.Trim();
+
+        // ⛔ P1 (рев'ю sec-s4-2): літерал розбирається з СИРОГО рядка тими самими правилами, що в Dns/SmtpClient
+        // (`[::1]:25`, `[::ffff:127.0.0.1]`, `127.1`, `0x7f.1`, `2130706433`), ДО зняття дужок. Інакше `::1]:25`
+        // не розбиралось, DNS падав у «дозволено», а SmtpClient з'єднувався з loopback.
+        if (IPAddress.TryParse(raw, out var literal))
+        {
+            // Дужки лише навколо цілого [v6]: [v6]:25 (порт у полі Server) відхиляється, порт — окреме поле.
+            return !(raw.Contains(']', StringComparison.Ordinal) && !raw.EndsWith(']'))
+                   && !IsBlockedAddress(literal);
+        }
+
+        // Усе, що не IP-літерал, — звичайне DNS-ім'я: без дужок, портів, схем і шляхів (порт — окреме поле).
+        if (!IsPlainName(raw))
+        {
+            return false;
+        }
+
+        var name = raw.TrimEnd('.');
 
         if (name.Length == 0 || DataSourceEndpointPolicy.IsCloudMetadataName(name)
             || string.Equals(name, "localhost", StringComparison.OrdinalIgnoreCase)
             || name.EndsWith(".localhost", StringComparison.OrdinalIgnoreCase))
         {
             return false;
-        }
-
-        if (IPAddress.TryParse(name, out var literal))
-        {
-            return !DataSourceEndpointPolicy.IsBlocked(literal);
         }
 
         IReadOnlyList<IPAddress> resolved;
@@ -69,6 +82,34 @@ public sealed class SmtpEndpointPolicy(IEndpointNetwork network) : ISmtpEndpoint
             return true;
         }
 
-        return !resolved.Any(DataSourceEndpointPolicy.IsBlocked);
+        return !resolved.Any(IsBlockedAddress);
+    }
+
+    /// <summary>Ім'я з літер, цифр, <c>. - _</c> і нічого іншого (дужки, двокрапка, косі, пробіли — ні).</summary>
+    internal static bool IsPlainName(string name)
+        => name.Length > 0 && name.All(c => char.IsAsciiLetterOrDigit(c) || c is '.' or '-' or '_');
+
+    /// <summary>
+    /// Блок-лист для однієї адреси: спільний <see cref="DataSourceEndpointPolicy.IsBlocked"/> плюс гігієна IPv6
+    /// (P3-1): зона <c>%scope</c> знімається (інакше <c>::1%1</c> не loopback), а IPv4-сумісний <c>::/96</c> закритий цілком.
+    /// </summary>
+    internal static bool IsBlockedAddress(IPAddress ip)
+    {
+        if (ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6)
+        {
+            var bytes = ip.GetAddressBytes();
+
+            if (bytes.Take(12).All(b => b == 0))
+            {
+                return true;
+            }
+
+            if (ip.ScopeId != 0)
+            {
+                ip = new IPAddress(bytes);
+            }
+        }
+
+        return DataSourceEndpointPolicy.IsBlocked(ip);
     }
 }
