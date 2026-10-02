@@ -121,6 +121,28 @@ public sealed class SubmitRelationCheckTests(SqlServerFixture sql)
         Assert.DoesNotContain("REL-CHK1", body, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// T1-01: приховане ПОПЕРЕДЖЕННЯ (Check Warn із забороненим джерелом) відкидається фільтром —
+    /// подання без підтвердження проходить, значень у відмові немає; видиме (без заборони) — просить підтвердження.
+    /// </summary>
+    /// <remarks>Мутація: у <c>SubmitSheetHandler</c> замість <c>ForViewer(warnings, …)</c> віддати <c>warnings</c> — тест червоніє.</remarks>
+    [Theory]
+    [InlineData(ResourceKind.Column)]
+    [InlineData(ResourceKind.Table)]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Check_Warn_із_забороненим_джерелом_відкидається_а_видиме_лишається(ResourceKind deny)
+    {
+        var hidden = await RunAsync("Warn", left: 777.5m, right: 55m, deny: deny);
+        Assert.Null(hidden.Error);
+        Assert.True(hidden.Submitted, "Приховане попередження тримало подання.");
+
+        var visible = await RunAsync("Warn", left: 777.5m, right: 55m);
+        var error = Assert.IsType<BusinessRuleException>(visible.Error);
+        Assert.Equal("err.ECR-SUB-4221.warningsNeedConfirmation", error.Details?["messageKey"]);
+        Assert.Contains("777.5", JsonSerializer.Serialize(error.Details), StringComparison.Ordinal);
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage4)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
