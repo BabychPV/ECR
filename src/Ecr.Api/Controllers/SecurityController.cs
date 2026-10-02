@@ -87,11 +87,15 @@ public sealed class SecurityController(
     /// Право <c>Security.ManageUsers</c>.
     /// </summary>
     /// <param name="id">Обліковий запис, доступ якого пояснюємо.</param>
-    /// <param name="resource">Ресурс: <c>Registry:{id}</c> або <c>Project:{id}</c>.</param>
+    /// <param name="resource">
+    /// Ресурс: <c>Registry:{id}</c>, <c>Project:{id}</c>, <c>Sheet:{id}</c>, <c>Table:{id}</c> або <c>Column:{id}</c>.
+    /// </param>
+    /// <param name="projectId">Проєкт, у шаблоні якого розглядається аркуш, таблиця чи колонка (обов'язковий для них).</param>
     /// <param name="ct">Токен скасування.</param>
     /// <remarks>
     /// ⚠ Нічого не вирішує: підсумковий рівень дає той самий профіль доступу, що й усі рішення,
-    /// а внески (роль, призначення, область, заборона) лише пояснюють його.
+    /// а внески (роль, призначення, область, заборона) лише пояснюють його. Для аркуша, таблиці й колонки
+    /// відповідь несе <c>caveat</c>: стан документа й звуження періодами не враховано.
     /// </remarks>
     [HttpGet("security/users/{id:int}/effective-access")]
     [ProducesResponseType<Ecr.Application.Security.EffectiveAccessView>(StatusCodes.Status200OK)]
@@ -99,8 +103,8 @@ public sealed class SecurityController(
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     public async Task<IActionResult> UserEffectiveAccess(
-        int id, [FromQuery] string? resource, CancellationToken ct)
-        => Ok(await effectiveAccess.HandleAsync(id, resource, ct).ConfigureAwait(false));
+        int id, [FromQuery] string? resource, [FromQuery] int? projectId, CancellationToken ct)
+        => Ok(await effectiveAccess.HandleAsync(id, resource, projectId, ct).ConfigureAwait(false));
 
     /// <summary>Перелік ролей. Право <c>Security.ManageRoles</c>.</summary>
     [HttpGet("roles")]

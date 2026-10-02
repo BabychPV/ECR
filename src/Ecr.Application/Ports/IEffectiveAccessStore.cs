@@ -29,9 +29,27 @@ public sealed record AccessSourceRow(
     GrantLevel? Level,
     bool IsDeny);
 
+/// <summary>Ланцюжок предків аркуша, таблиці чи колонки в шаблоні проєкту (ФВ-6.16).</summary>
+/// <param name="SheetDefId">Аркуш (для самого аркуша — він сам).</param>
+/// <param name="SheetCode">Код аркуша: від нього залежить, чи діє шар ролі, звуженої аркушами.</param>
+/// <param name="TableDefId">Таблиця; <c>null</c> для аркуша.</param>
+/// <param name="ColumnDefId">Колонка; <c>null</c> для аркуша й таблиці.</param>
+public sealed record ResourceChain(int SheetDefId, string SheetCode, int? TableDefId, int? ColumnDefId);
+
 /// <summary>Читання джерел доступу для розрізу «ресурс → рівень → грант ролі».</summary>
 public interface IEffectiveAccessStore
 {
+    /// <summary>
+    /// Ланцюжок предків ресурсу в шаблоні проєкту; <c>null</c> — проєкту немає або ресурс не з його
+    /// версії шаблону. Ідентифікатори аркуша, таблиці й колонки — версії шаблону, спільної для проєктів,
+    /// тому без проєкту предків (а отже й рівня) не визначити.
+    /// </summary>
+    /// <param name="kind">Аркуш, таблиця чи колонка.</param>
+    /// <param name="resourceId">Ідентифікатор.</param>
+    /// <param name="projectId">Проєкт, у якому питають.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<ResourceChain?> ResolveChainAsync(ResourceKind kind, int resourceId, int projectId, CancellationToken ct);
+
     /// <summary>Чи існує ресурс.</summary>
     /// <param name="kind">Вид ресурсу.</param>
     /// <param name="resourceId">Ідентифікатор.</param>
