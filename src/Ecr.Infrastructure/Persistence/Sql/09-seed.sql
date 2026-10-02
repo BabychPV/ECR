@@ -15129,7 +15129,7 @@ OPTION (RECOMPILE);
 GO
 -- COLL:check-relation ── кінець секції ──
 
--- COLL:p3-ent7 ── ru/kz: усі споживачі зв'язку приховані від автора (ФВ-8.12, ent7 P3-7); власна порція; kz — потрібна вичитка носієм ──
+-- COLL:p3-ent7 ── ru/kz: усі споживачі зв'язку приховані від автора (ФВ-8.12, ent7 P3-7); власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
   FROM (VALUES
