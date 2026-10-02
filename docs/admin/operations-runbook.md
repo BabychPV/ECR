@@ -27,13 +27,19 @@ Invoke-WebRequest http://localhost:5000/health/ready -UseBasicParsing  # 200 = �
 
 Послідовність старту (`StartupSequence.cs`):
 
-1. Перевірка схеми (`Schema:StartupMode`).
-2. Сід `09-seed.sql`. Його виконує **сам застосунок**, а не скрипти розгортання.
-3. Створення запису `bootstrap`.
-4. Реєстрація розкладів.
+1. Очікування БД (до 10 спроб по 3 с).
+2. Проба редакції SQL Server (`Database:EditionMode`).
+3. Перевірка схеми (`Schema:StartupMode`, `SchemaValidator`).
+4. Сід `09-seed.sql`. Його виконує **сам застосунок** на кожному старті, а не скрипти
+   розгортання.
+5. Генерація вʼюх `rpt.v_*` (збій — лише Warning і картка `reportviews`, п. 12).
+6. Запис `bootstrap` (`admin-guide.md` §2.2).
+7. Закриття покинутих фонових задач цієї машини й ролі (п. 1.1).
+8. Прогрів кешу метаданих.
 
-Якщо з цих кроків падає будь-який, служба не стартує. Причину шукайте в лозі
-(п. 3.2) і в журналі подій Windows.
+Розклади реєструє окрема фонова служба вже після старту (`RecurringScheduleService`, п. 4).
+Службу зупиняють збої кроків 1–4 і 6; збої кроків 5 і 8 старт не зупиняють. Причину шукайте
+в лозі (п. 3.2) і в журналі подій Windows.
 
 ### 1.1. Одна служба кожної ролі на базу на одному хості
 
@@ -82,7 +88,7 @@ Api й воркер на **одному** хості — різні ролі й 
 | Ключ | Дефолт | Значення |
 |---|---|---|
 | `ConnectionStrings:Ecr` | порожньо | рядок підключення до SQL Server. **Секрет**: `ECR_ConnectionStrings__Ecr` |
-| `Schema:StartupMode` | `Validate` | `Validate` — не стартувати, якщо є незастосовані міграції EF. `Migrate` — застосувати їх на старті |
+| `Schema:StartupMode` | `Validate` | `Validate` — не стартувати, якщо є незастосовані міграції EF. `Migrate` — застосувати незастосовані міграції EF на старті (лише dev/test: у проді обліковий запис служби не має DDL-прав, `D-66`; скрипти `Sql/*.sql` цей режим не виконує) |
 | `Database:EditionMode` | `Auto` | режим редакції SQL Server (`Standard` / `Enterprise`). `Auto` — визначити самостійно на старті. `deploy-ecr.ps1` записує визначене при установці значення в `ECR_Database__EditionMode`, якщо його не задано явно (`docs/build/11-install-guide.md` §2.5) |
 | `Database:CommandTimeoutSeconds` | 60 | таймаут команди SQL, с |
 | `Database:BulkBatchSize` | 50000 | розмір пачки масового запису |
@@ -97,16 +103,25 @@ Api й воркер на **одному** хості — різні ролі й 
 | `Auth:EnableNegotiate` | `true` | вхід Windows (Negotiate) |
 | `Auth:StampCacheSeconds` | 5 | як швидко блокування чи зміна ролей діє на відкриті сесії, с |
 | `Auth:DataProtection:CertificateThumbprint` | немає | відбиток сертифіката з `LocalMachine\My` для захисту ключів Data Protection (п. 6.2). ⛔ **З 2026-09-29 (S11) у Production обов'язковий**: без нього служба не стартує. Один і той самий сертифікат (із закритим ключем, з правом читання для облікового запису служби) — на всіх вузлах |
+| `Auth:DataProtection:PreviousCertificateThumbprints` | немає | відбитки попередніх сертифікатів Data Protection (масив або список через `;`/`,`), сертифікати мають лишатися в `LocalMachine\My`. Пише `deploy-ecr.ps1 -PreviousDataProtectionCertificateThumbprints`; ненайдений — Warning у журналі. Заміна сертифіката — `https-certificate.md` §9.2–9.3 |
 | `Auth:DataProtection:AllowUnprotectedKeys` | `false` | лише для одноразових стендів (`smoke.ps1`, `e2e-stand.ps1`, `setup-dev-db.ps1`): дозволяє старт у Production без сертифіката. На майданчику не вмикати: старт пише Critical у журнал подій (джерело `ECR`), `db` — Degraded з причиною. `deploy-ecr.ps1` його не ставить ніколи |
-| `Security:RateLimit:LoginPermitPerMinute` | 60 | спроб входу за хвилину |
+| `Security:RateLimit:LoginPermitPerMinute` | 60 | спроб входу за хвилину з однієї IP-адреси (`/api/v1/login/*`) |
+| `Security:RateLimit:ChangePasswordPermitPerMinute` | 10 | змін пароля за хвилину на користувача |
 | `Security:RateLimit:TrustForwardedFor` | `false` | брати IP із `X-Forwarded-For`. Вмикати лише за довіреним проксі |
 | `Security:RateLimit:SearchPermit` / `SearchWindowSeconds` | 30 / 10 | обмеження пошуку |
 | `Security:RateLimit:CspReportPermitPerMinute` | 120 | звітів про порушення CSP за хвилину з однієї адреси (`POST /api/v1/csp-report`); понад межу — `429` без тіла |
-| `Security:RateLimit:SmtpTestPermitPerMinute` / `SmtpTestSystemPermitPerHour` | 5 / 30 | проб поштового транспорту (`POST /api/v1/notifications/smtp/test` і `POST /api/v1/notifications/channels/{id}/test`): на користувача за хвилину і на всю систему за годину; понад межу — `429` (`ECR-REQ-0429`, `Retry-After`). Системна межа списується за проби, ПРИЙНЯТІ межею користувача й перевіркою права `System.ManageNotifications`; запити, відхилені цими двома перевірками, її не витрачають, а запити, відхилені пізніше валідацією чи пошуком каналу (`422`, `404`), — витрачають (списання до моделі й обробника). Рахуються проби, а не листи: проба каналу з ролями шле до 20 адресатів, тож стеля — 30 × 20 = 600 листів на годину з адреси системи (D-263). Квота живе в пам'яті процесу — перезапуск її скидає. Мінімум для обох — 1 |
+| `Security:RateLimit:SmtpTestPermitPerMinute` / `SmtpTestSystemPermitPerHour` | 5 / 30 | проб поштового транспорту (`POST /api/v1/notifications/smtp/test` і `POST /api/v1/notifications/channels/{id}/test`): на користувача за хвилину і на всю систему за годину; понад межу — `429` (`ECR-REQ-0429`, `Retry-After`). Системна межа списується за проби, ПРИЙНЯТІ межею користувача й перевіркою права `System.ManageNotifications`; запити, відхилені цими двома перевірками (`429`, `403`), її не витрачають, а запити, відхилені пізніше валідацією чи пошуком каналу (`422`, `404`), — витрачають (списання до моделі й обробника). Межа діє і для проби каналу Teams. Рахуються проби, а не листи: проба каналу шле до 20 адресатів із ролей (D-263) плюс усі явні адреси каналу (без межі). Квоти живуть у пам'яті кожного процесу: перезапуск скидає, а на кількох вузлах межа діє на кожному окремо. Мінімум для обох — 1 (`notifications-runbook.md` п. 2.5) |
 | `Security:Csp:ReportOnly` | `true` | віддавати сувору політику заголовком `Content-Security-Policy-Report-Only` (лише звіти, сторінки не блокуються). Порушення — рядки журналу `CSP violation: …` і лічильник `ecr.csp.violations` (тег `directive`) |
 | `Security:Csp:ReportUri` | `/api/v1/csp-report` | куди браузер шле звіти (`report-uri`, а на HTTPS ще й `report-to`). Порожньо — без звітування. Без `;`, пробілів і ком |
 | `Security:Csp:Enforce` | `false` | ⛔ лише задел: `true` робить повну політику примусовою (звітний заголовок зникає). Не вмикати, доки e2e-набір не пройшов під нею, а `ecr.csp.violations` не порожній |
 | `Jobs:NightlyRecalculation:Enabled` | `false` | нічний перерахунок о 03:30. Вмикається лише рядком `true` |
+| `Jobs:ShutdownTimeoutSeconds` | 120 | скільки чекати завершення фонових задач при зупинці служби, с |
+| `Jobs:Queue:Mode` | `Quartz` | `Database` — черга задач у БД (пише `deploy-ecr.ps1` разом з `EcrWorker`, п. 10). ⚠ Недійсне значення мовчки = `Quartz` |
+| `Jobs:Recalculation:Executor` | `InProcess` | `Worker` — перерахунок у службі `EcrWorker` (лише з `Queue:Mode=Database`). ⚠ Недійсне значення мовчки = `InProcess` |
+| `Database:SheetLockTimeoutSeconds` | 30 | очікування блокування аркуша, с |
+| `Health:RawDataPointWarnRows` | 20000000 | поріг перегляду R2 для картки `db` (п. 3.1); `0` — вимкнено. ⚠ Нечислове значення робить `db` Unhealthy «Database is unavailable» (перевірки на старті немає) |
+| `Calculations:FullYearWarnSeconds` | 600 | бюджет річного перерахунку (ПРД-13); перевищення — `recalcOverBudget` у картці `jobs` |
+| `Calculations:MaxParallelism` | 4 | паралелізм розрахунку |
 | `Audit:ExportMaxRows` | 100000 | межа експорту аудиту CSV |
 | `Campaign:AtRiskDays` | 3 | за скільки днів до терміну проєкт вважається «під загрозою» |
 | `Notifications:WebhookAllowedHostSuffixes` | `.webhook.office.com;.logic.azure.com;.powerplatform.com` | дозволені хости вебхуків (`;` або `,`) |
@@ -126,17 +141,20 @@ Api й воркер на **одному** хості — різні ролі й 
 | `Telemetry:OtlpProtocol` | `Grpc` | `Grpc` (порт колектора 4317) або `HttpProtobuf` (4318). Інше значення зупиняє старт |
 | `Telemetry:ExportIntervalSeconds` | 60 | як часто відсилати метрики, с. Не менше 5 |
 | `Telemetry:ServiceName` | `ecr-api` | `service.name` у ресурсі OTLP — під цим іменем служба видна в колекторі |
-| `Logging:LogLevel:*` | `Information`, `Microsoft.AspNetCore` = `Warning` | рівні логування |
+| `Logging:LogLevel:*` | `Information`, `Microsoft.AspNetCore` = `Warning`, `Microsoft.EntityFrameworkCore.Database.Command` = `Warning` | рівні логування |
 | `Logging:File:Directory` | `%ProgramData%\ECR\logs` | тека логів. Порожньо — без файлового логу |
 | `Logging:File:RetainedFiles` | 30 | скільки файлів зберігати |
 | `Logging:File:FileSizeLimitMb` | 100 | розмір файлу, після якого починається новий |
 | `Logging:File:Json` | `true` | поруч писати `ecr-yyyyMMdd.json` — рядок JSON на запис (п. 3.2) |
 | `AllowedHosts` | `*` | |
 
-Числові, булеві ключі й ключі з переліком значень (`Schema:StartupMode`,
-`Database:EditionMode`) перевіряються на старті: недійсне значення зупиняє
-службу з назвою ключа (п. 5), а не мовчки замінюється дефолтом. Порожнє
-значення — «не задано», тобто дефолт.
+Ключі з переліку `EcrConfigurationValidation.cs` (зокрема `Schema:StartupMode`,
+`Database:*`, `Auth:SlidingHours`, `Security:*`, `Logging:File:*`,
+`Calculations:MaxParallelism`) і `Telemetry:*` перевіряються на старті: недійсне значення
+зупиняє службу з назвою ключа (п. 5). ⚠ **Не** перевіряються й мовчки замінюються дефолтом:
+`Jobs:Queue:Mode`, `Jobs:Recalculation:Executor`, `Smtp:Port`, `Smtp:UseStartTls`,
+`Calculations:FullYearWarnSeconds`; про `Health:RawDataPointWarnRows` — рядок таблиці вище.
+Порожнє значення — «не задано», тобто дефолт.
 
 ⚠ **потрібне рішення замовника:** OTLP-колектор (і чи вмикати експорт метрик), адреси джерел PI. Дефолти
 коду — «вимкнено» або порожньо. ✎ 2026-10-01 (рішення людини): SMTP і правила сповіщень налаштовуються в
@@ -184,17 +202,17 @@ ORDER BY [Ts];
 |---|---|---|
 | `/health/live` | анонімно | нічого: процес відповідає |
 | `/health/ready` | анонімно | `db`, `jobs`, `sources`, `worker` (п. 10), `reportviews` (п. 12), `tzdata` (п. 13), `transport` (п. 11) — ✎ 2026-09-30, порядок як у `Program.cs`. Подробиці `db` приховано |
-| `/health/db` | після входу | редакція, RCSI, файлові групи, запас партицій |
+| `/health/db` | будь-який користувач після входу (право `System.ViewHealth` **не** потрібне) | редакція, RCSI, файлові групи, запас партицій `pf_ByPeriodKey`, обмеження режиму, кільце ключів Data Protection |
 
 HTTP-код: `Healthy` і `Degraded` дають **200**, `Unhealthy` — **503**. Моніторинг
 має читати поле `status` у JSON, а не лише код відповіді.
 
 | Перевірка | Degraded | Unhealthy |
 |---|---|---|
-| `db` | попереду менше 2 партицій; `ext.RawDataPoint` ≥ 80 % порога `Health:RawDataPointWarnRows` (типово 20 000 000 рядків, поріг перегляду R2; кількість з `sys.partitions`, кеш 10 хв; `health.collection.rawPointsApproaching`/`rawPointsOverThreshold`) | RCSI вимкнено; немає файлової групи `DATA_HOT`, `DATA_ARCHIVE`, `AUDIT` або `INDEXES`; БД недоступна |
-| `jobs` | у планувальника немає тригерів | планувальник не зареєстрований, зупинений або кидає помилку |
-| `sources` | джерело ще не запускалось, є прогалина покриття, або є активне джерело з Windows-автентифікацією (Negotiate) при порожньому `PiWebApi:AllowedHosts` (`health.sources.negotiateNoAllowlist`, п. 2.1) | останній запуск будь-якого активного джерела впав. Якщо активних джерел немає — Healthy |
-| `worker` | Api на `Executor=Worker`, а служби `EcrWorker` немає, вона `Disabled` або задачі чекають понад 5 хв без жодної виконуваної (п. 10) | — |
+| `db` | попереду менше 2 меж `pf_ByPeriodKey` (`health.db.partitionsLow`; межі аудиту `pf_AuditByMonth` не перевіряються — п. 7.4); `ext.RawDataPoint` ≥ 80 % порога `Health:RawDataPointWarnRows` (типово 20 000 000 рядків, поріг перегляду R2; кількість з `sys.partitions`, кеш 10 хв; `health.collection.rawPointsApproaching`/`rawPointsOverThreshold`) ; у Production ключі Data Protection не захищені сертифікатом (`Auth:DataProtection:AllowUnprotectedKeys`); у кільці є ключі, зашифровані сертифікатом, якого служба не має (`unreadableKeyCertificates` — `https-certificate.md` §9.2) | RCSI вимкнено; немає файлової групи `DATA_HOT`, `DATA_ARCHIVE`, `AUDIT` або `INDEXES`; БД недоступна |
+| `jobs` | планувальник зупинений (`schedulerStopped: true`); немає жодного тригера; є задачі без биття серця (`staleJobs`; `cleanupStalled: true` — прибирання їх не закриває); за 24 год є задачі, що вичерпали стелю відкладень (`deferralExhausted`), або перерахунки понад бюджет `Calculations:FullYearWarnSeconds` (`recalcOverBudget`) | планувальник не зареєстрований або перевірка кинула помилку |
+| `sources` | джерело ще не запускалось, є прогалина покриття, або є активне джерело з Windows-автентифікацією (Negotiate) при порожньому `PiWebApi:AllowedHosts` (`health.sources.negotiateNoAllowlist`, п. 2.1) | останній прогін будь-якої активної **сутності** збору — `Failed` (сутність, що ще не бігала, — прогалина, Degraded). Якщо активних сутностей немає — Healthy |
+| `worker` | лише коли Api на `Jobs:Queue:Mode=Database` і `Jobs:Recalculation:Executor=Worker`: служби `EcrWorker` немає, вона `Disabled`, задачі перерахунку чекають понад 5 хв без жодної живої оренди, або чергу не вдалося прочитати (п. 10) | — |
 | `reportviews` | вʼюхи `rpt.v_*` не створено для якоїсь опублікованої версії шаблону (п. 12) | ніколи |
 | `tzdata` | база часових поясів ОС не знає, що Казахстан з 2024-03-01 на UTC+5, або перевірка сама не вдалась (п. 13) | ніколи |
 | `transport` | Production із `Auth:RequireHttps = false` (`-AllowHttp`); сертифікат HTTPS спливає менш ніж за 30 днів або прострочений | ніколи (перевірка не виводить Api з ротації) |
@@ -227,7 +245,7 @@ Select-String -Path "$env:ProgramData\ECR\logs\ecr-*.log" -Pattern '<correlation
 ```
 
 Фонова задача: стан і помилку можна отримати через `GET /api/v1/jobs/{jobId}`
-(`#` кодується як `%23`) або з таблиці `itg.JobProgress`. Далі шукайте
+або з таблиці `itg.JobProgress`. Далі шукайте
 `jobId` у лозі.
 
 ### 3.4. Метрики
@@ -300,22 +318,42 @@ OpenTelemetry Collector). За замовчуванням **вимкнено**: 
 
 ## 4. Розклади
 
-Планувальник Quartz, розклади реєструє `RecurringScheduleService`. Час —
-локальний час сервера.
+Планувальник Quartz, розклади реєструє `RecurringScheduleService`. Hangfire у продукті
+немає.
+
+Час — локальний час ОС сервера застосунку (`EcrApi`), **не** пояс проєкту (`Asia/Atyrau`,
+UTC+5) і не UTC (тригери Quartz без `InTimeZone`). Якщо на сервері виставлено UTC, «02:15»
+настає о 07:15 за Атирау. Це стосується і вбудованих задач, і cron розкладів збору. Задачі SQL
+Server Agent ідуть за локальним часом сервера SQL. Тики, що припали на час, коли служба
+стояла, після старту не наздоганяються (сховище Quartz у пам'яті); виняток — `PeriodStateJob`,
+він виконується один раз на старті.
 
 | Коли | Задачі |
 |---|---|
 | щоночі 02:15 | `PartitionCheckJob`, `ConsistencyCheckJob`, `OrphanScanJob`, `ReportRetentionJob`, `ReportSnapshotFormatJob` |
-| щогодини, хх:05 | `PeriodStateJob` (також один раз на старті), `NotificationJob` |
+| щогодини, хх:05 | `PeriodStateJob` (також один раз на старті), `NotificationJob`, `RowWindowRefetchJob` (повторне підтягування вікон рядків за пізніми даними PI) |
 | щоночі 03:30 | нічний перерахунок, лише якщо `Jobs:NightlyRecalculation:Enabled=true` |
-| за cron джерела | збір даних (`ext.CollectionSchedule`) |
+| за cron розкладу сутності | збір даних (`ext.CollectionSchedule`, по одному розкладу на сутність джерела; формат і залежності — `admin-guide.md` §5.1–5.2) |
+| щохвилини / щогодини | прибирання покинутих задач і прогонів збору (`AbandonedWorkSweeper`) / видалення завершених записів `itg.JobProgress` (ретенція) — цикл `RecurringScheduleService`, не Quartz |
+
+Нічний перерахунок ставиться окремо на кожен проєкт, **активний на момент старту** (усі
+документи, увесь рік). Проєкт, активований пізніше, потрапить у нічний перерахунок лише після
+перезапуску `EcrApi`.
+
+`PartitionCheckJob` (`partition-check`) щоночі: 1) `arc.usp_EnsureAuditPartitions
+@MonthsAhead = 12` — межі аудиту `pf_AuditByMonth` на 12 місяців уперед (`D-246`, п. 7.4);
+2) `arc.usp_ArchiveAudit @OlderThanMonths = 24` (п. 7.3); 3) перевіряє запас `pf_ByPeriodKey`
+(≥ 2 межі попереду). Межі `pf_ByPeriodKey` задача **не** додає — це робить Agent-задача
+нижче або DBA. Числа 12 і 24 — константи в коді, ключа конфігурації немає.
 
 SQL Server Agent (`14-agent-jobs.sql`) ставиться лише з `deploy-ecr.ps1
--FirstDeployment` і не працює на Express (THROW 50040):
+-FirstDeployment`. На Express скрипт задач не створює (друкує «SQL Server Express: SQL
+Server Agent немає — завдання обслуговування НЕ створено», розгортання не падає) —
+обслуговування тоді виконують вручну (п. 5, п. 7.4):
 
 | Задача Agent | Коли | Що робить |
 |---|---|---|
-| `ECR: Partitions ahead` | 1-го числа, 02:40 | `arc.usp_EnsurePartitions @MonthsAhead = 6` |
+| `ECR: Partitions ahead` | 1-го числа, 02:40 | `arc.usp_EnsurePartitions @MonthsAhead = 6`: межі `pf_ByPeriodKey` на 6 міс. уперед; усередині — `arc.usp_EnsureAuditPartitions @MonthsAhead = 12` |
 | `ECR: Physical checks` | щодня 03:10 | недовірені/вимкнені FK (50041), невирівняні індекси (50042) |
 
 ⚠ **потрібне рішення замовника:** вікна обслуговування. Код їх не знає. Розклади
@@ -333,7 +371,8 @@ SQL Server Agent (`14-agent-jobs.sql`) ставиться лише з `deploy-ec
 | служба не стартує: «Transport:Https:CertificateThumbprint: …» | сертифіката HTTPS немає в `LocalMachine\My`, він без закритого ключа або відбиток не 40 hex | п. 11: поставити сертифікат із закритим ключем, повторити `deploy-ecr.ps1` |
 | служба не стартує: «Certificate … cannot be used as an SSL server certificate» | у сертифіката HTTPS розширене використання ключа без Server Authentication | видати сертифікат із EKU Server Authentication |
 | `transport` Degraded | `-AllowHttp` у Production, або сертифікат HTTPS спливає / прострочений | п. 11 |
-| `db` Degraded: менше 2 партицій попереду | не працює Agent-задача (Express) | `EXEC arc.usp_EnsurePartitions @MonthsAhead = 6;` або скрипт `GET /api/v1/health/partitions/script` |
+| `db` Degraded: менше 2 партицій попереду | не працює Agent-задача (Express) | `EXEC arc.usp_EnsurePartitions @MonthsAhead = 6;` або скрипт `GET /api/v1/health/partitions/script` (заодно продовжує межі аудиту на 12 міс.). Виконує DBA: процедура без `EXECUTE AS`, потрібні права `ALTER` на функцію й схему партиціонування |
+| `partition-check` `Failed` щоночі, у помилці — відмова в `EXECUTE` на `usp_EnsureAuditPartitions` | службовому акаунту не видано `EXECUTE` (`deploy-ecr.ps1` `GRANT` не робить) | DBA: `GRANT EXECUTE` (п. 7.4). Поки не видано, не виконуються ні архівація аудиту, ні перевірка запасу партицій |
 | `db` Unhealthy: RCSI | базу відновили або створили без `06-rcsi.sql` | виконати `06-rcsi.sql`. Перезапуск не потрібен: перевірка читає RCSI щоразу, а не з проби старту |
 | служба не стартує: «Недійсна конфігурація — служба не стартує» | значення ключа не того типу чи поза межами (`"60s"` замість `60`, друкарська помилка в `Database:EditionMode`) | виправити названий ключ у `appsettings.Production.json` або в `ECR_…` змінній служби. Той самий текст — у журналі подій (джерело `ECR`) і в лозі |
 | `sources` Unhealthy | PI/SQL-джерело недоступне або змінився секрет | стан на `/admin/sources`, помилка в `GET /api/v1/jobs/{id}`, секрет `ECR_Secrets__<ім'я>` |
@@ -343,13 +382,15 @@ SQL Server Agent (`14-agent-jobs.sql`) ставиться лише з `deploy-ec
 | збірка чи оновлення: `The file is locked by: "Ecr.Api (<pid>)"` | DLL тримає запущена служба | `Stop-Service EcrApi`, потім оновлення |
 | оновлення: `Msg 50148 … Передперевірка D148` на `migration.sql` | у базі до 2026-09-20 є значення з модулем ≥ 1e12 | п. 8.1 |
 | оновлення: `Msg 50301 … Передперевірка U1` на `migration.sql` | колонка шаблону чи поле довідника посилається на видалену одиницю | п. 8.2 |
-| `404` на `GET /api/v1/jobs/…` | `#` в ідентифікаторі не закодовано | кодувати `%23` |
+| `404` на `GET /api/v1/jobs/…` | задачі немає (видалена ретенцією) або ідентифікатор старого формату з `#` | нові ідентифікатори (`Тип-guid`, `Тип~ціль~guid`, `Тип:відбиток`) кодування не потребують; старий `#` кодувати `%23` |
+| розклад збору є, але збір за ним не йде, у журналі покриття «Очікує залежності» (`SkippedDependency`) | розклад-залежність не відпрацював успішно після останнього прогону цього розкладу | `/admin/sources` → журнал прогонів залежності: якщо `Failed` — усунути причину (часто `401/403`) або зняти залежність. Після 48 год без успіху залежності збір піде сам (`admin-guide.md` §5.2) |
+| вкладка «Розклад»: «не поставлено» (`LastError`) | на старті cron виявився недійсним (рядок записано в обхід API), сутність — власна форма ECR, або планувальник відмовив | виправити cron чи вимкнути розклад; текст причини — у вкладці й у лозі (`RecurringScheduleService`) |
 | пошта не йде | не налаштовано SMTP у застосунку (і немає запасних `Smtp:Host`/`Smtp:From`) | `/admin/notifications` → «SMTP (outgoing mail)», проба «Send test message» (`notifications-runbook.md` п. 2) |
 | проба пошти: «DNS» / «з'єднання» / «TLS» / «логін» / «relay» / «тайм-аут» | проба називає категорію відмови (`notifications.test.smtp.*`): ім'я сервера, порт/брандмауер, сертифікат чи режим STARTTLS, логін і пароль, адреса відправника/адресати — у формі SMTP або, на запасному шляху, `Smtp:*` | виправити названий параметр і повторити пробу (`notifications-runbook.md` п. 2.4) |
-| проба пошти: `429` | перевищено межу проб: 5 за хвилину на користувача, 30 за годину на всю систему (відомий вектор: адміністратор із правом може вичерпати системну квоту для всіх — до 30 проб, зокрема відхилених валідацією, за ~6 хв; до 600 листів на годину; відновлюється протягом години) (`Security:RateLimit:SmtpTestPermitPerMinute`, `SmtpTestSystemPermitPerHour`) | почекати `Retry-After` і повторити; межу не знімати |
+| проба пошти: `429` | перевищено межу проб: 5 за хвилину на користувача, 30 за годину на всю систему (відомий вектор: адміністратор із правом може вичерпати системну квоту для всіх — до 30 проб, зокрема відхилених валідацією, за ~6 хв; до 600 листів адресатам із ролей на годину плюс усі явні адреси каналів; відновлюється протягом години) (`Security:RateLimit:SmtpTestPermitPerMinute`, `SmtpTestSystemPermitPerHour`) | почекати `Retry-After` і повторити; межу не знімати |
 | проба каналу шле багато листів | явні адреси каналу **не обмежені** `RecipientLimit`: проба шле на ВСІ явні адреси каналу; адреси, розкриті з ролей, — не більше 20 (`ProbeRecipientLimit`) | тримати перелік явних адрес каналу коротким; проба — не розсилка, її частоту обмежує межа вище |
 | проба пошти: відмова без категорії | нерозпізнану відмову транспорту проба називає загальним `notifications.testFailed`, тексту сервера немає | текст відмови клієнту не віддається (безпека); причину шукати в журналі поштового сервера |
-| не приходить нагадування «період відкрито» | правило події `PeriodOpened` не вимкнене за замовчуванням, а **відсутнє**: матриця `/admin/notifications` → подія «Відкрито звітний період» × канал, межа серйозності `Info`; нагадує лише про перехід `Scheduled → Open`, раз на період | увімкнути клітинку; текст листа — ключі `notifications.periodOpened.subject/body` (`/admin/ui-strings`) |
+| не приходить нагадування «період відкрито» | правило події `PeriodOpened` не вимкнене за замовчуванням, а **відсутнє**: матриця `/admin/notifications` → подія «Reporting period opened» (ru «Открыт отчётный период») × канал, межа серйозності `Info`; нагадує лише про перехід `Scheduled → Open`, раз на період | увімкнути клітинку; текст листа — ключі `notifications.periodOpened.subject/body` (`/admin/ui-strings` або панель «Message templates»); для «термін минув» — подія «Reporting period entered its grace window», ключі `notifications.periodGraceStarted.*` |
 
 ## 6. Резервне копіювання і відновлення
 
@@ -358,8 +399,10 @@ SQL Server Agent (`14-agent-jobs.sql`) ставиться лише з `deploy-ec
 | Що | Де | Чому |
 |---|---|---|
 | **база ECR** (усі файлові групи: `PRIMARY`, `DATA_HOT`, `DATA_ARCHIVE`, `AUDIT`, `INDEXES` і журнал) | SQL Server | усі дані, аудит, архів. Бекапити **повною базою**. Часткове відновлення файлових груп не перевірялось |
-| **ключі Data Protection** | таблиця `sec.DataProtectionKey` **в тій самій БД** | потрапляють у бекап бази. Без них недійсні всі сесії й **не розшифровуються секрети каналів сповіщень** |
-| **сертифікат** `Auth:DataProtection:CertificateThumbprint` (з закритим ключем) | `LocalMachine\My` | якщо ключі захищені сертифікатом, без нього бекап бази не відкриє їх. Експортуйте PFX окремо |
+| **ключі Data Protection** | таблиця `sec.DataProtectionKey` **в тій самій БД** | потрапляють у бекап бази. Без них недійсні всі сесії й **не розшифровуються секрети каналів сповіщень і пароль SMTP**, заданий у `/admin/notifications` (`D-263`) |
+| **сертифікат** `Auth:DataProtection:CertificateThumbprint` (з закритим ключем) | `LocalMachine\My` | якщо ключі захищені сертифікатом, без нього бекап бази не відкриє їх. Експортуйте PFX окремо, одразу після імпорту (`https-certificate.md` §7) |
+| **попередні** сертифікати Data Protection (`Auth:DataProtection:PreviousCertificateThumbprints`) | `LocalMachine\My` | ключі кільця, зашифровані ними, без них не читаються (`db` Degraded, `unreadableKeyCertificates`). PFX кожного зберігати, доки його ключі в кільці **або** в будь-якому бекапі бази |
+| задачі SQL Agent (`ECR: Partitions ahead`, `ECR: Physical checks`) | `msdb`, **не** в базі ECR | при відновленні на інший інстанс повторити `14-agent-jobs.sql` (або `deploy-ecr.ps1 -FirstDeployment`) |
 | конфіг майданчика | `%ProgramData%\ECR\config\appsettings.Production.json` | налаштування майданчика |
 | змінні оточення служби | `HKLM:\SYSTEM\CurrentControlSet\Services\EcrApi\Environment` | рядок підключення, секрети. Зберігайте в сховищі секретів, не поруч із бекапом |
 
@@ -376,7 +419,8 @@ SQL Server Agent (`14-agent-jobs.sql`) ставиться лише з `deploy-ec
 | `Ecr_audit` | `AUDIT` | 4096 / 2048 МБ |
 | `Ecr_idx` | `INDEXES` | 2048 / 1024 МБ |
 
-На Express усі розміри — 64 МБ.
+На Express (і з розширеною властивістю `Ecr_SmallFiles`) усі розміри — 64 МБ. Окремої
+архівної бази немає: архів — файлова група `DATA_ARCHIVE` тієї самої бази.
 
 ### 6.2. Політика
 
@@ -407,8 +451,27 @@ BACKUP LOG      [Ecr] TO DISK = N'<шлях>\Ecr_log.trn'  WITH CHECKSUM, COMPRE
 1. `Stop-Service EcrApi`.
 2. Відновити повну копію й журнали: `RESTORE … WITH NORECOVERY`, останній —
    `WITH RECOVERY`.
-3. Перевірити RCSI (`06-rcsi.sql`) і наявність сертифіката Data Protection.
-4. `Start-Service EcrApi`, потім `/health/ready` і `/health/db`.
+3. Перевірити RCSI (`06-rcsi.sql`). Сертифікати Data Protection: у `LocalMachine\My` кожного
+   вузла мають бути **поточний і всі, якими зашифровані ключі у відновленій базі** (бекап міг
+   бути зроблений до заміни сертифіката). Після старту — `/health/db`: якщо
+   `unreadableKeyCertificates` не порожній — поставити ці PFX і передати їхні відбитки в
+   `-PreviousDataProtectionCertificateThumbprints`; PFX немає — секрети каналів і пароль SMTP
+   ввести наново (`https-certificate.md` §9).
+4. Після відновлення **на інший сервер**: обліковий запис служби мусить мати логін на
+   інстансі й користувача в базі (користувачі бази відновлюються, логіни — ні); членство
+   `ecr_viewer` — `deploy-ecr.ps1 -ViewerAccount` (п. 14); задачі Agent — `14-agent-jobs.sql`;
+   `Environment` служб — повтор `deploy-ecr.ps1 -SkipSchema` з тими самими параметрами.
+5. `Start-Service EcrApi` (і `EcrWorker`), потім `/health/ready` і `/health/db`.
+
+⚠ Відновлена база стартує лише з тією версією застосунку, чиї міграції їй відповідають:
+незастосовані міграції в режимі `Validate` чи база, новіша за збірку, зупиняють старт
+(`ECR-SYS-5031`).
+
+**Доступ `bootstrap` втрачено.** Запис `bootstrap` створюється лише раз і ніколи не
+видаляється, тож на наявній базі новий `-BootstrapPassword` ігнорується. Новий запис
+`bootstrap` дає лише розгортання в **нову порожню базу** (`-FirstDeployment
+-BootstrapPassword`); на наявній базі вхід відновлює інший адміністратор із
+`Security.ManageUsers` (скидання пароля, `admin-guide.md` §2.2–2.3).
 
 ⚠ Процедура відновлення **на стенді не перевірялась**. Перевірте її до
 приймання.
@@ -420,19 +483,25 @@ BACKUP LOG      [Ecr] TO DISK = N'<шлях>\Ecr_log.trn'  WITH CHECKSUM, COMPRE
 раніше працювала без нього.
 
 **Чому:** з сертифікатом **нові** ключі кільця пишуться в
-`sec.DataProtectionKey` зашифрованими, але **старі**, записані відкрито,
-застосунок і далі читає й приймає до кінця їхнього строку (типово 90 днів).
-Доки старий ключ у таблиці — будь-хто з доступом на читання до бази або до
-будь-якого бекапу, зробленого раніше, може підробити cookie сеансу будь-якого
-користувача.
+`sec.DataProtectionKey` зашифрованими, але **старий** відкритий ключ лишається
+ключем за замовчуванням до свого спливу (типово 90 днів), а потім не зникає з
+таблиці й **безстроково** приймається для розшифрування. Доки він у таблиці (і
+в будь-якому бекапі) — будь-хто з доступом на читання може підробити cookie
+сеансу будь-якого користувача. Чекати спливу строку марно: потрібне видалення
+(кроки нижче).
+
+⚠ Цей запит знаходить лише **відкриті** ключі. Ключі, зашифровані старим
+сертифікатом (після заміни сертифіката), прибирають інакше —
+`https-certificate.md` §9.3.
 
 ⛔ **Попередження — наслідки для користувачів:**
 
 - **усі користувачі вийдуть із системи**: сеанси, підписані старими ключами,
   стануть недійсними;
-- **секрети каналів сповіщень доведеться ввести наново**: вони зашифровані
-  тими самими ключами і після ротації не розшифровуються. Перелік каналів —
-  `/admin/notifications`; перед ротацією підготуйте їхні секрети.
+- **секрети каналів сповіщень і пароль SMTP доведеться ввести наново**: вони
+  зашифровані тими самими ключами і після ротації не розшифровуються. Перелік —
+  `/admin/notifications` (панель «SMTP (outgoing mail)» і канали); перед ротацією
+  підготуйте їх.
 
 Узгодьте вікно з користувачами.
 
@@ -459,8 +528,9 @@ BACKUP LOG      [Ecr] TO DISK = N'<шлях>\Ecr_log.trn'  WITH CHECKSUM, COMPRE
    Якщо після цього в таблиці не лишилося жодного ключа — це нормально:
    застосунок створить новий, уже зашифрований, під час першого старту.
 6. `Start-Service EcrApi` на всіх вузлах, потім `/health/ready` і `/health/db`.
-7. Увійти в систему й ввести наново секрети каналів сповіщень
-   (`/admin/notifications`, перевірка — `POST /api/v1/notifications/channels/{id}/test`).
+7. Увійти в систему, ввести наново пароль SMTP (панель «SMTP (outgoing mail)»,
+   проба «Send test message») і секрети каналів (`/admin/notifications`, перевірка —
+   `POST /api/v1/notifications/channels/{id}/test`).
 8. **Бекапи, зроблені до кроку 5, містять відкриті ключі.** Обмежте доступ до
    них або знищіть їх відповідно до політики зберігання: для них ротація
    нічого не змінює.
@@ -542,23 +612,41 @@ BACKUP LOG      [Ecr] TO DISK = N'<шлях>\Ecr_log.trn'  WITH CHECKSUM, COMPRE
 ### 7.3. Архівація аудиту `arc.usp_ArchiveAudit` (✎ 2026-10-01, `D-247`, `D-236`, `НФ-8.4b`)
 
 **Що робить.** Партиції `aud.CellChange`, `aud.StructureChange`, `aud.SecurityEvent`,
-`aud.PublicationEvent`, **повністю** старші за `@OlderThanMonths` (дефолт **24**, мінімум 1:
-поточний місяць не архівується ніколи), перемикає (`ALTER TABLE … SWITCH PARTITION`) у
+`aud.PublicationEvent`, **повністю** старші за `@OlderThanMonths` (дефолт **24**; NULL або < 1 мовчки стає 1),
+перемикає (`ALTER TABLE … SWITCH PARTITION`) у
 дзеркала `arc.AuditCellChange`, `arc.AuditStructureChange`, `arc.AuditSecurityEvent`,
 `arc.AuditPublicationEvent` (`12-archive-tables.sql`; та сама `ps_AuditByMonth`, ті самі
 індекси). Рядки не копіюються і не видаляються — це метаданкова операція; `Id` зберігаються.
 Це **не** `arc.CellChange` (columnstore на `DATA_ARCHIVE`): SWITCH у нього неможливий.
 
+Межа відсічення — «перше число поточного місяця (UTC) мінус `@OlderThanMonths` місяців»;
+переносяться партиції, що **цілком** лежать раніше за неї (`04-partition-maintenance.sql`,
+`arc.usp_ArchiveAudit`). Поточний місяць не переноситься ніколи. Перша партиція (усе до
+2026-01-01) теж підпадає, у журналі для неї `periodStart = null`. Параметр `@Today` (дата
+«сьогодні», за замовчуванням поточна UTC) — лише для тестів.
+
 **Незмінність.** Тригери `aud.TR_*_Immutable` (`THROW 50060` на `UPDATE`/`DELETE`) **не
 вимикаються**: `SWITCH` — DDL, DML-тригери не запускає. Архівні дзеркала мають такі самі
 тригери (`arc.TR_Audit*_Immutable`).
 
-**Хто й коли запускає.** Нічна задача `partition-check` (`PartitionCheckJob`) після
-продовження меж викликає `EXEC arc.usp_ArchiveAudit` (поріг 24 міс.); ідемпотентно, у C#
-DDL немає. Збій архівації не ховає перевірку запасу партицій: прогін `partition-check` стає
-`Degraded` з `auditArchiveFailed` у `DetailsJson`.
+**Хто й коли запускає.** Нічна задача `partition-check` (`PartitionCheckJob`, щоночі 02:15
+за часом сервера) спершу продовжує межі аудиту (`arc.usp_EnsureAuditPartitions
+@MonthsAhead = 12`, п. 7.4), потім викликає `arc.usp_ArchiveAudit @OlderThanMonths = 24`.
+Поріг — константа `PartitionCheckJob.AuditArchiveOlderThanMonths`, **ключа конфігурації
+немає**; місяць рахується за UTC. Ідемпотентно, у C# DDL немає.
 
-**Вручну** (потрібне лише `EXECUTE` на процедуру; `WITH EXECUTE AS OWNER`):
+- Збій **архівації** (помилка SQL) не ховає перевірку запасу партицій: прогін
+  `partition-check` стає `Degraded` з `"auditArchiveFailed":true` у `DetailsJson`, подробиці —
+  у рядку `audit-archive`/`Failed`.
+- Збій **продовження меж** (немає права `EXECUTE`, таймаут блокування) робить увесь прогін
+  `Failed`: тієї ночі не виконуються ні архівація, ні перевірка запасу
+  (`PartitionCheckJob.cs`, виклик без перехоплення). Повтор — наступної ночі.
+
+**Права.** Обидві процедури `WITH EXECUTE AS OWNER`, тож викликачу потрібне лише `EXECUTE`.
+Службовому акаунту застосунку його видає **DBA** (`D-246`, `D-247`, `D-264`;
+`deploy-ecr.ps1` `GRANT` не робить) — команди в п. 7.4.
+
+**Вручну:**
 
 ```sql
 DECLARE @p int, @r bigint;
@@ -572,9 +660,20 @@ SELECT @p AS Partitions, @r AS [Rows];
 Перенос і запис — одна транзакція. `Failed` — відкат + текст помилки (процедура кидає її
 далі). `Degraded` — у цілі вже є рядки цієї партиції (пізній запис у вже заархівований
 місяць): партицію **не перенесено**, потрібна ручна розв'язка. Порожні/вже перенесені
-партиції — без запису.
+партиції — без запису. Процедура зупиняється на першому `Failed`: решта партицій чекає
+наступного прогону. `Degraded` пишеться **щоночі заново**, доки конфлікт не розв'язано, і
+щоночі потрапляє у зведення збоїв сповіщень (`NotificationJob` вважає збоєм кожен рядок
+`itg.MaintenanceRun` зі `Status <> 'Succeeded'`).
 
-**Відновити** (SWITCH назад; ціль `aud.*` у тій партиції має бути порожньою):
+**Розв'язати `Degraded`.** Поки ціль `arc.Audit*` у цій партиції непорожня, `SWITCH`
+неможливий, а тригери незмінності забороняють `DELETE`/`UPDATE` в обох таблицях. Готового
+рецепта злиття в коді немає — це рішення DBA: або лишити як є (рядки пізнього запису лишаються
+в `aud.*`, `Degraded` повторюється щоночі), або повернути архівну партицію в `aud.*`
+(«Відновити» нижче) — чи вміщує тоді партиція `aud.*` обидві частини, **не перевірено**.
+
+**Відновити** (SWITCH назад; ціль `aud.*` у тій партиції має бути порожньою). Виконує DBA:
+ручний `ALTER TABLE … SWITCH` іде без `EXECUTE AS OWNER` і потребує прав `ALTER` на обидві
+таблиці.
 
 ```sql
 DECLARE @p int = $PARTITION.pf_AuditByMonth('2026-03-01');
@@ -583,8 +682,13 @@ DECLARE @sql nvarchar(400) = N'ALTER TABLE arc.AuditSecurityEvent SWITCH PARTITI
 EXEC sp_executesql @sql;
 ```
 
-Після відновлення нічна задача знову заархівує партицію, якщо вона старша за поріг, — для
-утримання зніміть її з порогу (параметр) або відновлюйте лише на час аналізу.
+⚠ Нічна задача завжди викликає процедуру з порогом 24 (константа в коді). Тому відновлена
+партиція, старша за 24 місяці, буде знову заархівована найближчої ночі о 02:15. Для аналізу
+краще не відновлювати, а читати архів прямо (UI і експорт CSV архіву не бачать):
+
+```sql
+SELECT * FROM arc.AuditSecurityEvent WHERE ChangedAt >= '2024-03-01' AND ChangedAt < '2024-04-01';
+```
 
 **Ризики.**
 - Читачі (`AuditReader`, історія комірки) дивляться лише в `aud.*`: заархівований період
@@ -595,11 +699,78 @@ EXEC sp_executesql @sql;
 - SWITCH бере `SCH-M` на мить; `LOCK_TIMEOUT` 30 с — за довгою транзакцією прогін падає
   (`Failed`), повторить наступна ніч.
 - Додаєш колонку чи індекс до `aud.*` — додай і до `arc.Audit*`: інакше SWITCH падає
-  (Msg 4943/4904…); сторож — `AuditArchiveSwitchTests`.
+  (Msg 4943/4904/4912/4913 — за коментарем у `12-archive-tables.sql`, на сервері не
+  відтворено). Інтеграційний тест `AuditArchiveSwitchTests` проганяє SWITCH, окремої звірки
+  колонок у ньому немає.
 - Бекап до архівації обов'язковий (див. вище).
 
 **Моніторинг:** `SELECT * FROM itg.MaintenanceRun WHERE JobCode = 'audit-archive' AND Status <> 'Succeeded' ORDER BY Id DESC;`
-і `partition-check` зі статусом `Degraded`.
+і нічний прогін:
+
+```sql
+SELECT TOP (10) Id, Status, FinishedAt, DetailsJson
+FROM itg.MaintenanceRun WHERE JobCode = 'partition-check' ORDER BY Id DESC;
+```
+
+Поля `DetailsJson`: `boundariesAhead`, `minimum` (запас `pf_ByPeriodKey`), `auditBoundariesAdded`
+(скільки меж аудиту додано тієї ночі), `auditArchivedPartitions`, `auditArchivedRows`,
+`auditArchiveFailed`. `Status = 'Failed'` означає, що й межі аудиту не продовжено.
+
+### 7.4. Межі партицій аудиту `pf_AuditByMonth` (`D-246`)
+
+Таблиці `aud.CellChange`, `aud.StructureChange`, `aud.SecurityEvent`, `aud.PublicationEvent`
+(і архівні `arc.Audit*`) партиціоновано помісячно за `ChangedAt` (`pf_AuditByMonth`,
+`RANGE RIGHT`, усі партиції — файлова група `AUDIT`). Початкові межі — 2026-01-01…2027-06-01
+(`02-partitions.sql`).
+
+**Хто продовжує.** `arc.usp_EnsureAuditPartitions @MonthsAhead = 12, @Today = NULL, @Added OUTPUT`
+(`04-partition-maintenance.sql`, `WITH EXECUTE AS OWNER`, `LOCK_TIMEOUT` 30 с) додає відсутні
+межі — перші числа місяців від **наступного** до +12 від поточного (UTC). Ідемпотентна;
+`SPLIT` порожньої крайньої партиції даних не переміщує. Якщо функції `pf_AuditByMonth` немає —
+нічого не робить (`@Added = 0`). Викликають:
+
+- нічна задача `partition-check` (щоночі 02:15, п. 4);
+- Agent-задача `ECR: Partitions ahead` через `arc.usp_EnsurePartitions` (1-го числа, 02:40;
+  на Express Agent немає).
+
+Розгортання (`deploy-ecr.ps1`) процедури лише створює, не викликає.
+
+**Права.** Службовому акаунту застосунку потрібне `EXECUTE` (видає DBA, `D-264`):
+
+```sql
+GRANT EXECUTE ON OBJECT::arc.usp_EnsureAuditPartitions TO [<користувач БД служби>];
+GRANT EXECUTE ON OBJECT::arc.usp_ArchiveAudit         TO [<користувач БД служби>];
+```
+
+Без першого права прогін `partition-check` щоночі `Failed` (сповіщення «Background job
+failed»), і не виконуються ні архівація аудиту, ні перевірка запасу партицій.
+
+**Перевірити горизонт вручну** (⚠ `/health/db` і картка стану горизонт аудиту **не**
+показують — лише `pf_ByPeriodKey`):
+
+```sql
+SELECT MAX(CAST(rv.value AS datetime2(3))) AS LastBoundary,
+       DATEDIFF(MONTH, DATEFROMPARTS(YEAR(GETUTCDATE()), MONTH(GETUTCDATE()), 1),
+                MAX(CAST(rv.value AS datetime2(3)))) AS MonthsAhead
+FROM sys.partition_range_values rv
+JOIN sys.partition_functions pf ON pf.function_id = rv.function_id
+WHERE pf.name = N'pf_AuditByMonth';
+```
+
+Норма — `MonthsAhead` = 12 (щонайменше 11 перед нічним прогоном).
+
+**Продовжити вручну** (DBA або акаунт із `EXECUTE`):
+
+```sql
+DECLARE @a int; EXEC arc.usp_EnsureAuditPartitions @MonthsAhead = 12, @Added = @a OUTPUT; SELECT @a AS Added;
+```
+
+**Якщо межі закінчились.** Записи аудиту не губляться: усе після останньої межі лягає в
+крайню праву партицію, і вона росте (висновок із `RANGE RIGHT`, на стенді не відтворено).
+Наслідки: архівація переносить цю партицію лише цілком і лише коли вона вся старша за поріг;
+процедура додає межі від наступного місяця, тож поточний і пропущені місяці лишаються в одній
+партиції; `SPLIT` непорожньої партиції переміщує дані з блокуванням. Що робити: продовжити
+межі якнайшвидше, у вікно обслуговування, з бекапом.
 
 ## 8. Оновлення версії
 
@@ -654,24 +825,44 @@ DataProtection … не захищені»). ⛔ ✎ 2026-09-30: `Environment` �
 
 Процедура:
 
-1. Повний бекап (п. 6.2).
-2. Розгортання:
+1. Повний бекап (п. 6.2) і PFX сертифіката(ів) Data Protection (п. 6.1).
+2. **Зупинити застосунок:** `Stop-Service EcrWorker` (якщо є), потім `Stop-Service EcrApi`.
+   ⚠ `deploy-ecr.ps1` служб перед схемою **не зупиняє**: без цього кроку схема
+   застосовується, поки стара версія працює, `06-rcsi.sql` (на базі без RCSI) обриває
+   сеанси (`ROLLBACK IMMEDIATE`), міграції можуть блокувати таблиці, а між кроками 2 і 6
+   скрипта стара версія працює на новій схемі без нового сіду.
+3. Розгортання:
 
    ```powershell
    powershell -ExecutionPolicy Bypass -File tools\deploy-ecr.ps1 `
      -SqlInstance <сервер> -Database <база> -MsiPath <шлях до .msi> `
-     -DataProtectionThumbprint <відбиток> -WhatIf
+     -ServiceAccount '<DOMAIN\ecr-svc$>' -ConnectionString $cs `
+     -DataProtectionThumbprint <відбиток> `
+     -HttpsThumbprint <відбиток HTTPS> -AppPort 443 -WhatIf
    ```
+
+   Без `-BootstrapPassword` і без `-FirstDeployment`. На **кожному** оновленні (MSI
+   стирає `Environment` служб): транспорт — рівно один із `-HttpsThumbprint` /
+   `-BehindHttpsProxy` / `-AllowHttp` (інакше зупинка на кроці 1 «Транспорт не обрано»),
+   `-ConnectionString`, `-ServiceAccount`, `-PreviousDataProtectionCertificateThumbprints`
+   (якщо був) і `-DisableWorker` (якщо воркера не має бути).
 
    Спершу запустіть із `-WhatIf`, потім без нього. Кроки скрипта: передумови,
    схема, MSI (`msiexec /qn`), змінні служби, конфіг (лише якщо ще заглушка),
-   перезапуск служби, перевірка `GET /health/live`, потім очікування
+   запуск служб (лише з `-ServiceAccount`; без нього служба не стартує, і крок 7 не
+   дочекається `/health/live`), перевірка `GET /health/live`, потім очікування
    `GET /health/ready` до `Healthy`/`Degraded` (не довше `-ReadyTimeoutSeconds`,
    дефолт 180 с). Перевірки, що не `Healthy`, скрипт друкує. `Unhealthy` лише
    через `sources` — попередження (зовнішнє джерело, ручне введення працює);
    будь-яка інша `Unhealthy` після тайм-ауту — розгортання провалене, «Готово»
    не друкується.
-3. Перевірити `/health/db`.
+4. Перевірити `/health/ready` і `/health/db`; виставити вручну змінні, яких скрипт не пише
+   (`ECR_Jobs__Workers__*`, `ECR_Secrets__*`, `ECR_PiWebApi__AllowedHosts__*`), і
+   перезапустити служби, якщо щось змінили.
+
+⛔ **Будь-який `msiexec` поза скриптом** (ремонт, ручне оновлення, перевстановлення) стирає
+`Environment` служб — після нього **знову виконайте `deploy-ecr.ps1`** з тими самими
+параметрами, при зупиненому застосунку (кроки 2–4 вище).
 
 ⛔ ✎ 2026-09-30: **`Environment` служб (`EcrApi`, `EcrWorker`) не переживає
 оновлення MSI** (`MajorUpgrade` перевстановлює службу; перевірено CI-джобом
@@ -1009,7 +1200,16 @@ Get-CimInstance Win32_Process -Filter "Name='Ecr.Worker.exe'" | Select-Object Pr
 `__JobMemoryLimitMb`, `__MaxDuration` у `Environment` служби (перекривають
 `worker.settings.json` поруч з exe, який оновлення перезаписує). Недійсне
 значення — служба не стартує (код виходу 3, перелік недійсних ключів — у
-stderr і журналі); після зміни — `Restart-Service EcrWorker`.
+stderr і журналі); після зміни — `Restart-Service EcrWorker`. Типові значення
+(`worker.settings.json`): `Count` 10, `MemoryLimitMb` 2048, `JobMemoryLimitMb` 22528,
+`MaxDuration` 00:30:00.
+
+⚠ Задачі **за розкладом** (усі з п. 4, зокрема нічний перерахунок і збір) виконує Quartz
+усередині `EcrApi` навіть у режимі `Queue:Mode=Database` + `Executor=Worker`: воркер бере з
+черги лише разово поставлені задачі лейна перерахунку. Тому зупинений воркер не зупиняє
+розклади, а нічний перерахунок навантажує процес Api і межі Job Object на нього не діють
+(висновок із коду, вимірів немає). Тик розкладу бере міжінстансний SQL-лок
+`Ecr.Job.<ідентифікатор>`: якщо той самий тик уже виконує інший вузол, цей його пропускає.
 ⛔ ✎ 2026-09-30: ці змінні **не переживають оновлення MSI** — воно стирає
 `Environment` служби (п. 10.3), а `deploy-ecr.ps1` їх не пише. Після кожного
 оновлення виставте їх знову й зробіть `Restart-Service EcrWorker`.
@@ -1134,7 +1334,8 @@ powershell -ExecutionPolicy Bypass -File tools\deploy-ecr.ps1 `
 
 **Змінні служби `EcrApi`** (пише `deploy-ecr.ps1`): `ASPNETCORE_URLS`,
 `ECR_Transport__Https__CertificateThumbprint`, `ECR_Transport__Https__Port` (лише з перенаправленням),
-`ECR_Auth__RequireHttps` (завжди явно).
+`ECR_Auth__RequireHttps` (завжди явно), `ECR_Auth__DataProtection__CertificateThumbprint` і, при заміні
+сертифіката DP, `ECR_Auth__DataProtection__PreviousCertificateThumbprints`.
 
 **Що бачить оператор:**
 
@@ -1154,6 +1355,8 @@ powershell -ExecutionPolicy Bypass -File tools\deploy-ecr.ps1 `
 на оновленні — служба перезапуститься; крок 7 перевірить, що Kestrel віддає саме новий сертифікат. Швидка
 заміна лише відбитка без MSI (як у `docs/build/11-install-guide.md` §9): змінити
 `ECR_Transport__Https__CertificateThumbprint` у `Environment` служби й `Restart-Service EcrApi`.
+⚠ Якщо цей сертифікат — і сертифікат Data Protection, швидкий шлях змінює **три** змінні
+(`https-certificate.md` §9.1), а старий сертифікат лишається в сховищі.
 
 ⚠ **HSTS:** запити по HTTPS отримують `Strict-Transport-Security: max-age=31536000`; після першого входу браузер
 не відкриє це ім'я по `http://` до кінця строку. За проксі застосунок HSTS не віддає (`X-Forwarded-*` не читає):
@@ -1170,10 +1373,10 @@ TLS завершує **застосунок (Kestrel)** за замовчува�
 `sec.DataProtectionKey` захищаються лише `ProtectKeysWithCertificate` за відбитком; у Production без відбитка
 служба не стартує. `UnprotectKeysWithAnyCertificate` налаштовано з D-267 (коміт `ed0b2393`): відбитки попередніх сертифікатів —
 `Auth:DataProtection:PreviousCertificateThumbprints` (`deploy-ecr.ps1 -PreviousDataProtectionCertificateThumbprints`; MSI-оновлення стирає
-змінну — передавати знову); при заміні сертифіката старий залишати в `LocalMachine\My`, доки є ключі, захищені ним (ротація старих ключів — п. 6.4). Поведінку при
+змінну — передавати параметр на кожному розгортанні, доки старі ключі в таблиці; прибирається Previous тим, що його перестають передавати); при заміні сертифіката старий залишати в `LocalMachine\My`, доки з кільця не видалено ключі, захищені ним (`https-certificate.md` §9.3; запит п. 6.4 для цього не годиться — він знаходить лише відкриті ключі). Поведінку при
 заміні перевірено на бібліотеці (`https-certificate.md` §10.1), ризик закрито кодом; `/health/db` попереджає (Degraded), якщо відбиток пропущено.
 Продовження строку одного сертифіката зачіпає одночасно HTTPS і Data Protection — виконувати як одну
-операцію (перегляд п. 6.2 і цього пункту).
+операцію (`https-certificate.md` §9.2–9.3, бекап PFX — п. 6.1).
 
 ⚠ **Невідомо про майданчик замовника** (потрібне уточнення): чи є зворотний проксі/балансувальник перед
 застосунком і хто завершує TLS (замовник не називав; діє Kestrel за замовчуванням); який ЦС видає сертифікат;
@@ -1214,8 +1417,9 @@ EXEC rpt.usp_GenerateTemplateViews @TemplateVersionId = 7; -- одна
 
 - Старт пише Warning «База часових поясів ОС застаріла: <пояси>…» (або «Не вдалося перевірити базу
   часових поясів ОС») у журнал. **Старт не зупиняється.**
-- `/health/ready` і `/admin/health` — картка `tzdata`: `Healthy`, або `Degraded` (не 503) з полем
-  `staleZones` (напр. `Asia/Almaty=+06:00`; `?` — пояса в базі немає), `expectedOffset`, `checkedZones`.
+- `/admin/health` — картка `tzdata` (`Healthy` / `Degraded`, не 503, з переліком поясів у тексті);
+  у JSON `/health/ready` — поля `staleZones` (напр. `Asia/Almaty=+06:00`; `?` — пояса в базі немає),
+  `expectedOffset`, `checkedZones`.
 
 **Виправлення:** встановити накопичувальне оновлення Windows із часовими поясами (Linux — оновити пакет
 `tzdata`), перезапустити `EcrApi` (і `EcrWorker`, п. 10) і переконатися, що картка зелена. Збережені дані
@@ -1241,7 +1445,7 @@ EXEC rpt.usp_GenerateTemplateViews @TemplateVersionId = 7; -- одна
 | `rpt_reader` | обліковий запис SSRS | лише `SELECT` на схему `rpt` |
 | `ecr_viewer` | довірений DBA / діагностика | членство в `db_datareader` (`SELECT` на ВСІ схеми бази, зокрема майбутні) + `VIEW DEFINITION`; жодних `ALTER`/`CREATE`/`INSERT`/`UPDATE`/`DELETE`/`EXECUTE` |
 
-⛔ DENY на секрети: `ecr_viewer` НЕ читає `sec.DataProtectionKey` і стовпці `PasswordHash`, `SecurityStamp` у `sec.User` (DENY SELECT у `05-rpt-views.sql`; перекриває `db_datareader`). Скрипти відхиляють `-ViewerAccount` зі службовими іменами (EcrApi/EcrWorker/NT SERVICE\).
+⛔ DENY на секрети: `ecr_viewer` НЕ читає `sec.DataProtectionKey` і стовпці `PasswordHash`, `SecurityStamp` у `sec.User` (DENY SELECT у `05-rpt-views.sql`; перекриває `db_datareader`). Скрипти відхиляють лише імена, що містять `EcrApi`/`EcrWorker` або починаються з `NT SERVICE\`. ⚠ Обліковий запис служби на кшталт `DOMAIN\ecr-svc$` ця перевірка **не** розпізнає — не передавайте його в `-ViewerAccount`.
 
 ⛔ Членом `ecr_viewer` НЕ робити обліковий запис служби EcrApi/EcrWorker: ця роль лише читає, а службі потрібні власні права запису. Роль бачить усе, зокрема `sys_ecr` і `aud` — членство лише довіреним особам.
 
@@ -1252,7 +1456,15 @@ powershell -File tools\deploy-ecr.ps1 ... -ViewerAccount 'DOMAIN\dba-ecr'
 powershell -File tools\setup-dev-db.ps1 -Server localhost -Database EcrDev -ViewerAccount 'DOMAIN\dba-ecr'
 ```
 
-Скрипт створює користувача бази `FOR LOGIN`, якщо логін на сервері є (інакше зупиняється з повідомленням), і додає його в роль лише якщо він ще не член; повторний запуск нічого не міняє. Паролів скрипт не друкує. Вручну: `ALTER ROLE ecr_viewer ADD MEMBER [DOMAIN\dba-ecr];`.
+Скрипт створює користувача бази `FOR LOGIN`, якщо логін на сервері є (інакше зупиняється з повідомленням), і додає його в роль лише якщо він ще не член; повторний запуск нічого не міняє. Паролів скрипт не друкує. `-ViewerAccount` приймає будь-який логін сервера (Windows або SQL), але логін має існувати до запуску (`CREATE LOGIN` — справа DBA). Вручну: `ALTER ROLE ecr_viewer ADD MEMBER [DOMAIN\dba-ecr];`; зняти членство — `ALTER ROLE ecr_viewer DROP MEMBER [DOMAIN\dba-ecr];`.
+
+З `-SkipSchema` скрипт `05-rpt-views.sql` не виконується: роль має вже існувати (її накотив DBA), інакше скрипт зупиниться з `Role ecr_viewer is missing`.
+
+`rpt_reader` параметром не наповнюється — лише вручну: `ALTER ROLE rpt_reader ADD MEMBER [DOMAIN\svc-ssrs];`.
+
+⚠ Через DENY на стовпці члени `ecr_viewer` отримають відмову на `SELECT * FROM sec.[User]` — перелічуйте стовпці явно (без `PasswordHash`, `SecurityStamp`; висновок із семантики column-DENY SQL Server, тестом не перевірено). Зашифровані секрети каналів сповіщень і пароль SMTP роль читає лише як шифротекст: ключі Data Protection їй закриті.
+
+**Права облікового запису служби** в базі скрипти **не** видають — це робить DBA (`deploy-ecr.ps1` виконує DDL під обліковим записом DBA, не під `-ServiceAccount`; у службі DDL немає, `D-66`). За кодом потрібні: `SELECT/INSERT/UPDATE/DELETE` на таблицях (сід виконується на кожному старті), `UPDATE` на послідовностях, `EXECUTE` на TVP-типах `doc.CellValueTvp`, `aud.CellChangeTvp` і на `arc.usp_ArchiveYear`, `arc.usp_EnsureAuditPartitions`, `arc.usp_ArchiveAudit` (п. 7.3–7.4). Чи досить `db_datareader` + `db_datawriter` + `EXECUTE`, не перевірено (відкрите питання DBA, `DB-1`).
 
 Перевірка:
 
