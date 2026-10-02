@@ -67,6 +67,11 @@ public sealed class UserStore(EcrDbContext db) : IUserStore
                 where user.IsActive
                       && role.IsActive
                       && permission.PermissionCode == permissionCode
+
+                      // ⛔ Лише призначення БЕЗ області: функціональне право ролі з областю діє
+                      // лише в її проєктах, а `Security.*` — глобальне (AccessDecisionService),
+                      // тож такий носій адміністратором не є: інакше єдиного глобального можна зняти.
+                      && assignment.ScopeJson == null
                       && (exceptUserId == null || user.Id != exceptUserId)
                       && (user.LockedUntil == null || user.LockedUntil <= utcNow)
                 select new { user.Id, Assignment = assignment })

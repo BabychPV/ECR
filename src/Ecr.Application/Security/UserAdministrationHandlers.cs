@@ -76,17 +76,32 @@ internal static class UserAdministration
         int userId,
         IReadOnlyList<string> roleCodes,
         IReadOnlyDictionary<string, RoleValidityWindow>? validity,
+        IReadOnlyDictionary<string, RoleAssignmentScope>? scopes,
         DateTime now,
         CancellationToken ct)
     {
         var roles = await users.ListRolesAsync(ct).ConfigureAwait(false);
         var today = DateOnly.FromDateTime(now);
 
+        // ⛔ Роль з областю права адміністратора не дає (воно глобальне). `scopes` передано —
+        // область мають лише коди з нього; не передано — зберігаються області наявних призначень.
+        var existing = scopes is null
+            ? await users.ListUserRoleAssignmentsAsync(userId, ct).ConfigureAwait(false)
+            : [];
+
         var keeps = roleCodes.Any(code =>
         {
             var role = roles.FirstOrDefault(r => string.Equals(r.Code, code, StringComparison.Ordinal));
             if (role is not { IsActive: true }
                 || !role.Permissions.Contains(BootstrapAdmin.AdminPermission, StringComparer.Ordinal))
+            {
+                return false;
+            }
+
+            var scoped = scopes is not null
+                ? scopes.ContainsKey(code)
+                : existing.Any(a => string.Equals(a.RoleCode, code, StringComparison.Ordinal) && a.Scope is not null);
+            if (scoped)
             {
                 return false;
             }

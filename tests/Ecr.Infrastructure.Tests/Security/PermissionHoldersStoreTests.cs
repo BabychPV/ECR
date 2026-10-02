@@ -69,6 +69,41 @@ public sealed class PermissionHoldersStoreTests(SqlServerFixture sql)
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "BE-12")]
+    public async Task Призначення_з_областю_дії_не_робить_носієм_а_глобальне_рахується()
+    {
+        await using var db = Context();
+
+        var role = new Role(EcrCode.Create($"PS_{_tag}"), new LocalizedText(new Dictionary<string, string> { ["en"] = "Role" }));
+        db.Roles.Add(role);
+        await db.SaveChangesAsync();
+        db.RolePermissions.Add(new RolePermission(role.Id, Permission));
+
+        var global = Add(db, "glb");
+        var scoped = Add(db, "scp");
+        await db.SaveChangesAsync();
+
+        db.RoleAssignments.Add(new RoleAssignment(role.Id, global.Id, principalSid: null));
+        var narrowed = new RoleAssignment(role.Id, scoped.Id, principalSid: null);
+        narrowed.SetScope(RoleAssignmentScope.Create([1]));
+        db.RoleAssignments.Add(narrowed);
+        await db.SaveChangesAsync();
+
+        var store = new UserStore(db);
+        var all = await store.CountActivePermissionHoldersAsync(Permission, null, Now, CancellationToken.None);
+
+        async Task<int> Contribution(User user)
+            => all - await store.CountActivePermissionHoldersAsync(Permission, user.Id, Now, CancellationToken.None);
+
+        Assert.Equal(1, await Contribution(global));
+
+        // ⛔ Область дії — не адміністратор: `Security.*` діє лише глобально.
+        Assert.Equal(0, await Contribution(scoped));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "BE-12")]
     public async Task Замок_адміністратора_тримається_до_коміту_і_не_пускає_другу_транзакцію()
     {
         await using var first = Context();

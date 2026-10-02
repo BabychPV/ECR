@@ -52,6 +52,12 @@ public sealed class FakeUserStore : IUserStore
     public List<(string UserName, string RoleCode, DateOnly? ValidFrom, DateOnly? ValidTo)> DatedGrants { get; } = [];
 
     /// <summary>
+    /// Безстрокові призначення З ОБЛАСТЮ дії (проєкти 1): носій права адміністратора не є,
+    /// бо `Security.*` — глобальне (як `sec.RoleAssignment.ScopeJson IS NOT NULL` у справжньому сховищі).
+    /// </summary>
+    public List<(string UserName, string RoleCode)> ScopedGrants { get; } = [];
+
+    /// <summary>
     /// Ролі, призначені НА ГРУПУ — основний спосіб для доменних користувачів
     /// (<c>ФВ-6.15</c>).
     /// </summary>
@@ -133,6 +139,7 @@ public sealed class FakeUserStore : IUserStore
             .Select(r => r.Code)
             .ToHashSet(StringComparer.Ordinal);
 
+        // Призначення з областю (`ScopedGrants`) не рахуються — як `ScopeJson IS NULL` у справжньому сховищі.
         var holders = Grants
             .Where(g => rolesWithPermission.Contains(g.RoleCode))
             .Select(g => g.UserName)
@@ -201,6 +208,8 @@ public sealed class FakeUserStore : IUserStore
             ? []
             : [.. Grants.Where(g => g.UserName == user.UserName)
                    .Select(g => new UserRoleAssignmentView(g.RoleCode, null, null, null)),
+               .. ScopedGrants.Where(g => g.UserName == user.UserName)
+                   .Select(g => new UserRoleAssignmentView(g.RoleCode, null, null, new RoleScopeDto([1]))),
                .. DatedGrants.Where(g => g.UserName == user.UserName)
                    .Select(g => new UserRoleAssignmentView(g.RoleCode, g.ValidFrom, g.ValidTo, null))]);
     }

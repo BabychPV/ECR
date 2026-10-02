@@ -341,7 +341,7 @@ public sealed class ReplaceUserRolesHandler(
                 // Захист останнього адміністратора — в тій самій транзакції під замком.
                 await users.AcquireAdministratorGuardAsync(token).ConfigureAwait(false);
                 await UserAdministration
-                    .EnsureRoleSetKeepsAdministratorAsync(users, userId, roleCodes, validity, clock.UtcNow, token)
+                    .EnsureRoleSetKeepsAdministratorAsync(users, userId, roleCodes, validity, domainScopes, clock.UtcNow, token)
                     .ConfigureAwait(false);
 
                 count = await users.ReplaceRolesAsync(userId, roleCodes, validity, domainScopes, token).ConfigureAwait(false);
