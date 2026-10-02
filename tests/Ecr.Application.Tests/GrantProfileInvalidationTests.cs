@@ -60,5 +60,18 @@ public sealed class GrantProfileInvalidationTests
             GrantProfileInvalidation.Run(cache, Substitute.For<ILogger>(), new GrantedUsers([1], Overflow: false)));
 
         Assert.Null(ex);
+        // Мутація: прибрати MarkInvalidationFailed у ClearAll — червоне.
+        cache.Received(1).MarkInvalidationFailed();
+    }
+
+    [Fact]
+    public void Успішне_повне_скидання_не_вмикає_fail_closed()
+    {
+        var cache = Substitute.For<IAccessProfileInvalidator>();
+        cache.When(c => c.InvalidateUser(Arg.Any<int>())).Throw(new InvalidOperationException("boom"));
+
+        GrantProfileInvalidation.Run(cache, Substitute.For<ILogger>(), new GrantedUsers([1], Overflow: false));
+
+        cache.DidNotReceive().MarkInvalidationFailed();
     }
 }

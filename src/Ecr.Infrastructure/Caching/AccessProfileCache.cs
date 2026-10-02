@@ -48,7 +48,7 @@ public sealed class AccessProfileCache(IMemoryCache memory, CacheLifetimes? life
     /// узагалі: <c>SimulationService</c> будує його поза кешем і з іншим
     /// <c>CacheKey</c>; перевірка нижче лишається другим рубежем.
     /// </remarks>
-    private readonly SingleFlight<AccessProfile> _flight = new();
+    private readonly SingleFlight<Built> _flight = new();
 
     /// <summary>
     /// Стеля життя запису.
@@ -89,6 +89,15 @@ public sealed class AccessProfileCache(IMemoryCache memory, CacheLifetimes? life
         // Зміна ролей або пароля змінює SecurityStamp, тому старий запис просто
         // перестає використовуватися — явна інвалідація не потрібна.
         var key = Key(userId, securityStamp, groupsFingerprint);
+
+        // ⛔ fail-closed: скидання не вдалося — кеш міг лишити застарілі профілі, тож
+        // їх не читаємо й нових не кладемо, поки InvalidateAll не пройде успішно.
+        if (Volatile.Read(ref _dirty) != 0)
+        {
+            Observability.InfrastructureMetrics.RecordCache(Observability.InfrastructureMetrics.AccessProfileCacheName, hit: false);
+            return await factory(ct).ConfigureAwait(false);
+        }
+
         if (memory.TryGetValue(key, out AccessProfile? cached) && cached is not null)
         {
             Observability.InfrastructureMetrics.RecordCache(Observability.InfrastructureMetrics.AccessProfileCacheName, hit: true);
@@ -100,17 +109,34 @@ public sealed class AccessProfileCache(IMemoryCache memory, CacheLifetimes? life
         // ⛔ Вхід у систему сотні людей о 9:00 — це сотня промахів на РІЗНИХ
         // ключах, але одна людина з десятком вкладок дає десяток промахів на
         // ОДНОМУ, і кожен будував профіль окремо (`RD-05`).
-        return await _flight.RunAsync(key, token => BuildAsync(userId, key, factory, token), ct)
-            .ConfigureAwait(false);
+        //
+        // ⚠ Той, хто приєднався до вже запущеного польоту, міг би отримати профіль,
+        // побудований ДО скидання (до коміту гранта). Тому профіль несе епоху, під
+        // якою будувався; якщо скидання сталося — одна перебудова (друга спроба — остання).
+        Built built = default;
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            built = await _flight.RunAsync(key, token => BuildAsync(userId, key, factory, token), ct)
+                .ConfigureAwait(false);
+            if (built.Epoch == Interlocked.Read(ref _epoch))
+            {
+                break;
+            }
+        }
+
+        return built.Profile;
     }
 
+    /// <summary>Профіль разом з епохою скидань, під якою його побудовано.</summary>
+    private readonly record struct Built(AccessProfile Profile, long Epoch);
+
     /// <summary>Будує профіль і кладе його в кеш — усередині одного польоту.</summary>
-    private async Task<AccessProfile> BuildAsync(
+    private async Task<Built> BuildAsync(
         int userId, string key, Func<CancellationToken, Task<AccessProfile>> factory, CancellationToken ct)
     {
         if (memory.TryGetValue(key, out AccessProfile? ready) && ready is not null)
         {
-            return ready;
+            return new Built(ready, Interlocked.Read(ref _epoch));
         }
 
         var epoch = Interlocked.Read(ref _epoch);
@@ -126,7 +152,7 @@ public sealed class AccessProfileCache(IMemoryCache memory, CacheLifetimes? life
         // би під ключ, за яким справжній користувач дістав би чужі права разом
         // із прапорцем IsSimulation. Симуляція рідкісна, перебудова дешева.
         // Скидання, що сталося, поки профіль будувався, робить його можливо застарілим: віддаємо, але не кешуємо.
-        if (!profile.IsSimulation && Interlocked.Read(ref _epoch) == epoch)
+        if (!profile.IsSimulation && Interlocked.Read(ref _epoch) == epoch && Volatile.Read(ref _dirty) == 0)
         {
             var options = new MemoryCacheEntryOptions { AbsoluteExpirationRelativeToNow = Lifetime };
             options.AddExpirationToken(new CancellationChangeToken(all.Token));
@@ -134,8 +160,18 @@ public sealed class AccessProfileCache(IMemoryCache memory, CacheLifetimes? life
             memory.Set(key, profile, options);
         }
 
-        return profile;
+        return new Built(profile, epoch);
     }
+
+    /// <inheritdoc />
+    public void MarkInvalidationFailed()
+    {
+        Volatile.Write(ref _dirty, 1);
+        Observability.InfrastructureMetrics.RecordAccessProfileInvalidationFailure();
+    }
+
+    /// <summary>Скидання не вдалося: кеш не читається й не наповнюється до успішного <see cref="InvalidateAll"/>.</summary>
+    private int _dirty;
 
     /// <inheritdoc />
     public void InvalidateUser(int userId)
@@ -153,6 +189,7 @@ public sealed class AccessProfileCache(IMemoryCache memory, CacheLifetimes? life
         Interlocked.Increment(ref _epoch);
         var old = Interlocked.Exchange(ref _all, new CancellationTokenSource());
         old.Cancel();
+        Volatile.Write(ref _dirty, 0); // лише повне скидання знімає прапорець
     }
 
     /// <summary>

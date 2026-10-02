@@ -38,6 +38,64 @@ public sealed class AccessProfileCacheTests : IDisposable
         Assert.Same(first, second);
     }
 
+    /// <remarks>
+    /// Мутація: прибрати перевірку <c>_dirty</c> у <c>GetOrCreateAsync</c> (читання) або в <c>BuildAsync</c>
+    /// (запис) — червоне; прибрати скидання прапорця в <c>InvalidateAll</c> — червоне.
+    /// </remarks>
+    [Fact]
+    public async Task Збій_скидання_вмикає_fail_closed_і_профілі_не_кешуються_до_успішного_InvalidateAll()
+    {
+        var cache = new AccessProfileCache(_memory);
+        var builds = 0;
+        await cache.GetOrCreateAsync(UserId, "s1", "", _ => Build(ref builds, "s1"), CancellationToken.None);
+
+        cache.MarkInvalidationFailed();
+
+        // застарілий запис не читається, нові не кешуються: сховище опитується щоразу
+        await cache.GetOrCreateAsync(UserId, "s1", "", _ => Build(ref builds, "s1"), CancellationToken.None);
+        await cache.GetOrCreateAsync(UserId, "s1", "", _ => Build(ref builds, "s1"), CancellationToken.None);
+        Assert.Equal(3, builds);
+
+        cache.InvalidateAll(); // успішне повне скидання знімає прапорець
+
+        await cache.GetOrCreateAsync(UserId, "s1", "", _ => Build(ref builds, "s1"), CancellationToken.None);
+        await cache.GetOrCreateAsync(UserId, "s1", "", _ => Build(ref builds, "s1"), CancellationToken.None);
+        Assert.Equal(4, builds);
+    }
+
+    /// <remarks>Мутація: прибрати повторну спробу за зміною епохи в <c>GetOrCreateAsync</c> — приєднаний отримує профіль до скидання, червоне.</remarks>
+    [Fact]
+    public async Task Скидання_під_час_польоту_не_віддає_профіль_побудований_до_нього_жодному_з_учасників()
+    {
+        var cache = new AccessProfileCache(_memory);
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var builds = 0;
+        AccessProfile? stale = null;
+
+        var initiator = cache.GetOrCreateAsync(UserId, "s1", "", async _ =>
+        {
+            var p = await Build(ref builds, "s1");
+            if (stale is null)
+            {
+                stale = p; // лише перша (до скидання) побудова; повторна — свіжа
+                started.TrySetResult();
+            }
+
+            await release.Task;
+            return p;
+        }, CancellationToken.None);
+        await started.Task;
+        var joiner = cache.GetOrCreateAsync(UserId, "s1", "", _ => Build(ref builds, "s1"), CancellationToken.None);
+
+        cache.InvalidateAll(); // «коміт» гранта між початком польоту та відповіддю
+        release.SetResult();
+
+        var results = await Task.WhenAll(initiator, joiner);
+
+        Assert.All(results, r => Assert.NotSame(stale, r));
+    }
+
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
     public async Task Зміна_SecurityStamp_дає_інший_ключ_кешу()
     {

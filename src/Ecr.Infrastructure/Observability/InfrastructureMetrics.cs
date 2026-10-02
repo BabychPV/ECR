@@ -32,6 +32,9 @@ public static class InfrastructureMetrics
     /// <summary>Кеш профілю доступу — значення тегу <c>cache</c>.</summary>
     public const string AccessProfileCacheName = "access_profile";
 
+    /// <summary>Збої скидання кешу профілів (fail-closed режим увімкнено).</summary>
+    public const string AccessProfileInvalidationFailures = "ecr.access_profile.invalidation_failures";
+
     /// <summary>Тривалість реальної побудови профілю доступу (не з кешу), секунди.</summary>
     public const string AccessProfileBuild = "ecr.access.profile.build";
 
@@ -56,6 +59,8 @@ public static class InfrastructureMetrics
         Meter.CreateHistogram<double>(JobRunDuration, "s", "Тривалість виконання задачі з черги");
     private static readonly Histogram<double> ProfileBuild =
         Meter.CreateHistogram<double>(AccessProfileBuild, "s", "Побудова AccessProfile");
+    private static readonly Counter<long> InvalidationFailures =
+        Meter.CreateCounter<long>(AccessProfileInvalidationFailures, "{failure}", "Збої скидання кешу профілів доступу");
     private static readonly Counter<long> Failed =
         Meter.CreateCounter<long>(JobFailed, "{job}", "Остаточно провалені фонові задачі");
     private static readonly Counter<long> Hits =
@@ -93,6 +98,9 @@ public static class InfrastructureMetrics
 
     /// <summary>Фіксує тривалість побудови профілю доступу.</summary>
     public static void RecordAccessProfileBuild(double seconds) => ProfileBuild.Record(seconds);
+
+    /// <summary>Фіксує збій скидання кешу профілів.</summary>
+    public static void RecordAccessProfileInvalidationFailure() => InvalidationFailures.Add(1);
 
     /// <summary>Фіксує влучання (<paramref name="hit"/>) чи промах кешу <paramref name="cache"/>.</summary>
     public static void RecordCache(string cache, bool hit)

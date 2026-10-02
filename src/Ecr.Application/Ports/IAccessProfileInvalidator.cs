@@ -16,4 +16,10 @@ public interface IAccessProfileInvalidator
 
     /// <summary>Скидає весь кеш профілів (fail-closed).</summary>
     public void InvalidateAll();
+
+    /// <summary>
+    /// Скидання не вдалося навіть повне: кеш переходить у fail-closed (профілі не читаються й
+    /// не кешуються), доки не пройде успішний <see cref="InvalidateAll"/>; метрика збою росте.
+    /// </summary>
+    public void MarkInvalidationFailed();
 }

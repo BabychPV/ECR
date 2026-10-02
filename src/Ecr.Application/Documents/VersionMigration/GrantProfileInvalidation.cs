@@ -51,6 +51,15 @@ public static partial class GrantProfileInvalidation
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             LogClearFailed(log, ex);
+            // fail-closed: кеш більше не віддає й не зберігає профілі до успішного повного скидання
+            try
+            {
+                invalidator.MarkInvalidationFailed();
+            }
+            catch (Exception markEx) when (markEx is not OutOfMemoryException)
+            {
+                LogClearFailed(log, markEx);
+            }
         }
     }
 
@@ -60,6 +69,6 @@ public static partial class GrantProfileInvalidation
     [LoggerMessage(Level = LogLevel.Warning, Message = "Скидання кешу профілів після переносу версії не вдалося: скидаю весь кеш профілів.")]
     private static partial void LogUserFailed(ILogger log, Exception ex);
 
-    [LoggerMessage(Level = LogLevel.Error, Message = "Не вдалося скинути весь кеш профілів після переносу версії: профілі живуть до TTL.")]
+    [LoggerMessage(Level = LogLevel.Error, Message = "Не вдалося скинути весь кеш профілів після переносу версії: кеш переведено в fail-closed (профілі не кешуються).")]
     private static partial void LogClearFailed(ILogger log, Exception ex);
 }
