@@ -6421,8 +6421,11 @@ USING (VALUES
     (N'notificationTemplates.recipientsRoleCount', N'en', N'recipient roles: {count}', 1),
     (N'notificationTemplates.recipientsNoRoles', N'en', N'no recipient roles', 1),
     (N'notificationTemplates.recipientsFiltered', N'en', N'the severity threshold is above Info, so this event does not pass', 1),
-    (N'notificationTemplates.recipientsNoTransport', N'en', N'the channel has no delivery transport configured', 1)
+    (N'notificationTemplates.recipientsNoTransport', N'en', N'the channel has no delivery transport configured', 1),
     -- CL6:notification-templates ── кінець секції ──
+    -- COLL:recalc-rl ── Межа частоти перерахунку документа (рекомендація безпекового рев'ю «Аудит») ──
+    (N'err.ECR-REQ-0429.tooManyRecalculations', N'en', N'Too many recalculation requests in a short time. Wait a moment and try again; the Retry-After header says how long.', 1)
+    -- COLL:recalc-rl ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -15043,6 +15046,17 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:fv812-relations ── кінець секції ──
+
+-- COLL:recalc-rl ── ru/kz межі частоти перерахунку документа; власна порція; kz — потрібна вичитка носієм ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-REQ-0429.tooManyRecalculations', N'ru', N'Слишком много запросов на пересчёт за короткое время. Подождите немного и повторите попытку; заголовок Retry-After указывает, через сколько.'),
+    (N'err.ECR-REQ-0429.tooManyRecalculations', N'kz', N'Қысқа уақыт ішінде қайта есептеуге сұраныстар тым көп. Біраз күтіп, қайталап көріңіз; қанша уақыттан кейін екенін Retry-After тақырыбы көрсетеді.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:recalc-rl ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

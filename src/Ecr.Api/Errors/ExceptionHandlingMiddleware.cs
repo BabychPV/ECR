@@ -386,7 +386,7 @@ public sealed partial class ExceptionHandlingMiddleware(
     /// найгіршому разі — значення параметрів. Це поверхня для розвідки, і
     /// клієнту вона не потрібна (ФВ-6.11).
     /// </remarks>
-    private static (int Status, string Code, string Message, IReadOnlyDictionary<string, object?>? Details) Map(
+    internal static (int Status, string Code, string Message, IReadOnlyDictionary<string, object?>? Details) Map(
         Exception exception) => exception switch
     {
         // ⛔ `e.Details`, а не `null`. Раніше тут стояла жорстка `null` — і

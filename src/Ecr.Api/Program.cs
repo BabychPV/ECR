@@ -327,6 +327,7 @@ app.UseAuthorization();
 // дорожчає: без cookie автентифікація — перевірки в пам'яті, PBKDF2 не почато.
 app.UseRateLimiter();
 app.UseMiddleware<SmtpTestQuotaMiddleware>(); // системна квота проб SMTP: лише прийняті політикою користувача
+app.UseMiddleware<DocumentRecalculateQuotaMiddleware>(); // межа перерахунку документа: користувач+документ, відмови не списують
 
 app.MapControllers();
 

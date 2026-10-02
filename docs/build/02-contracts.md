@@ -3566,7 +3566,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `ECR-CFG-0422` | 422 | код або `RowKey` не відповідає шаблону — помилка введення, не збій |
 | `ECR-CFG-4221` | 422 | `Project.TimeZoneId` не є відомим ідентифікатором IANA: порожньо, невідомий пояс, Windows-ідентифікатор (`Central Asia Standard Time`) або зсув (`+05:00`) |
 | `ECR-REQ-0422` | 422 | параметр самого запиту поза межами: розмір сторінки, ширина або напрям вікна аудиту |
-| `ECR-REQ-0429` | 429 | КОРИСТУВАЧ вичерпав межу частоти запитів (пошук `GET /api/v1/search`, типово 30 за 10 с, `Security:RateLimit:SearchPermit`/`SearchWindowSeconds`; проби SMTP `POST /notifications/smtp/test` і `/notifications/channels/{id}/test`, політика `smtp-test`: 5/хв на користувача і 30/год на систему, `Security:RateLimit:SmtpTestPermitPerMinute`/`SmtpTestSystemPermitPerHour`); у відповіді `Retry-After` |
+| `ECR-REQ-0429` | 429 | КОРИСТУВАЧ вичерпав межу частоти запитів (пошук `GET /api/v1/search`, типово 30 за 10 с, `Security:RateLimit:SearchPermit`/`SearchWindowSeconds`; перерахунок документа `POST /documents/{id}/recalculate`, межа на користувача й документ: 6/хв, `Security:RateLimit:RecalculatePermitPerMinute`; проби SMTP `POST /notifications/smtp/test` і `/notifications/channels/{id}/test`, політика `smtp-test`: 5/хв на користувача і 30/год на систему, `Security:RateLimit:SmtpTestPermitPerMinute`/`SmtpTestSystemPermitPerHour`); у відповіді `Retry-After` |
 | `ECR-SCHM-0409` | 409 | `Breaking`-зміна у версії з документами (ФВ-7.4) |
 | `ECR-SCHM-0422` | 422 | `Guarded`-зміна без стратегії міграції; режим переносу документа на нову версію (ФВ-7.5) не має стратегії для змін |
 | `ECR-DOC-0404` | 404 | документ не знайдено |

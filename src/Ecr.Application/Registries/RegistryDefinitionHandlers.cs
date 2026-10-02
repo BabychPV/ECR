@@ -1033,8 +1033,8 @@ public sealed class SaveRegistryDefinitionHandler(
                 UsageKinds.RegistryField => idByCode is not null
                     && idByCode.TryGetValue(item.Label.Split('.')[0], out var ownerId)
                     && !RegistryAccess.IsDenied(profile, ownerId),
-                UsageKinds.TemplateFormula => profile.Has("Template.View"),
-                UsageKinds.MethodologyFormula => profile.Has("Calculation.View"),
+                UsageKinds.TemplateFormula => Security.PermissionCheck.IsGranted(profile, "Template.View"),
+                UsageKinds.MethodologyFormula => Security.PermissionCheck.IsGranted(profile, "Calculation.View"),
                 _ => false,
             };
             if (seen)
