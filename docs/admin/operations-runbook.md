@@ -109,7 +109,7 @@ Api й воркер на **одному** хості — різні ролі й 
 | `Audit:ExportMaxRows` | 100000 | межа експорту аудиту CSV |
 | `Campaign:AtRiskDays` | 3 | за скільки днів до терміну проєкт вважається «під загрозою» |
 | `Notifications:WebhookAllowedHostSuffixes` | `.webhook.office.com;.logic.azure.com;.powerplatform.com` | дозволені хости вебхуків (`;` або `,`) |
-| `Smtp:Host`, `Smtp:From` | немає | транспорт пошти. Без них пошта не йде |
+| `Smtp:Host`, `Smtp:From` | немає | **запасний** транспорт пошти: діє, лише поки налаштування SMTP у застосунку (`/admin/notifications`, `D-263`) вимкнені чи неповні. Без обох пошта не йде (`notifications-runbook.md`) |
 | `Smtp:Port` | (587) | |
 | `Smtp:UseStartTls` | (`true`) | |
 | `Smtp:User`, `Smtp:SecretName` | немає | автентифікація. Пароль — секрет `Secrets:<SecretName>` |
@@ -343,8 +343,8 @@ SQL Server Agent (`14-agent-jobs.sql`) ставиться лише з `deploy-ec
 | оновлення: `Msg 50148 … Передперевірка D148` на `migration.sql` | у базі до 2026-09-20 є значення з модулем ≥ 1e12 | п. 8.1 |
 | оновлення: `Msg 50301 … Передперевірка U1` на `migration.sql` | колонка шаблону чи поле довідника посилається на видалену одиницю | п. 8.2 |
 | `404` на `GET /api/v1/jobs/…` | `#` в ідентифікаторі не закодовано | кодувати `%23` |
-| пошта не йде | не задано `Smtp:Host`/`Smtp:From` | задати й перевірити `POST /api/v1/notifications/channels/{id}/test` |
-| проба пошти: «DNS» / «з'єднання» / «TLS» / «логін» / «relay» / «тайм-аут» | проба називає категорію відмови (`notifications.test.smtp.*`): ім'я сервера, порт/брандмауер, сертифікат чи `Smtp:UseStartTls`, `Smtp:User` + секрет `Smtp:SecretName`, `Smtp:From`/адресати | виправити названий параметр і повторити пробу |
+| пошта не йде | не налаштовано SMTP у застосунку (і немає запасних `Smtp:Host`/`Smtp:From`) | `/admin/notifications` → «SMTP (outgoing mail)», проба «Send test message» (`notifications-runbook.md` п. 2) |
+| проба пошти: «DNS» / «з'єднання» / «TLS» / «логін» / «relay» / «тайм-аут» | проба називає категорію відмови (`notifications.test.smtp.*`): ім'я сервера, порт/брандмауер, сертифікат чи режим STARTTLS, логін і пароль, адреса відправника/адресати — у формі SMTP або, на запасному шляху, `Smtp:*` | виправити названий параметр і повторити пробу (`notifications-runbook.md` п. 2.4) |
 | не приходить нагадування «період відкрито» | правило події `PeriodOpened` не вимкнене за замовчуванням, а **відсутнє**: матриця `/admin/notifications` → подія «Відкрито звітний період» × канал, межа серйозності `Info`; нагадує лише про перехід `Scheduled → Open`, раз на період | увімкнути клітинку; текст листа — ключі `notifications.periodOpened.subject/body` (`/admin/ui-strings`) |
 
 ## 6. Резервне копіювання і відновлення
