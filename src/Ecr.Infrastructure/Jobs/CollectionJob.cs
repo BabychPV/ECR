@@ -45,6 +45,37 @@ public sealed class CollectionJob(
 
         var now = clock.UtcNow;
 
+        // ФВ-13.15: розклад із залежністю чекає успішного прогону залежного розкладу того ж
+        // з'єднання. ⚠ Лише плановий запуск (без вікна й не з кнопки «Зібрати»): ручний і
+        // наздоганяння не блокуються. Пропуск — затримка, не втрата: наступний запуск за cron
+        // перевірить знову, а прогалину закриє наздоганяння; вічно залежність не блокує
+        // (`CollectionSchedule.IsDependencyMet`).
+        if (schedule?.DependsOnScheduleId is { } dependsOnId
+            && request is { Manual: not true, FromUtc: null, ToUtc: null })
+        {
+            var dependency = await db.CollectionSchedules
+                .AsNoTracking()
+                .FirstOrDefaultAsync(s => s.Id == dependsOnId, ct)
+                .ConfigureAwait(false);
+
+            if (!schedule.IsDependencyMet(dependency, now))
+            {
+                await progress
+                    .ReportKeyAsync(
+                        100,
+                        "jobs.collectionDependencyWaiting",
+                        new Dictionary<string, string>(StringComparer.Ordinal)
+                        {
+                            ["sourceEntityId"] = request.SourceEntityId.ToString(CultureInfo.InvariantCulture),
+                            ["dependsOn"] = dependsOnId.ToString(CultureInfo.InvariantCulture),
+                        },
+                        ct)
+                    .ConfigureAwait(false);
+
+                return;
+            }
+        }
+
         // ⛔ Сутність, прив'язана до довідника, — не часовий ряд (ФВ-8.11, S5):
         // її атрибути — поточні значення полів записів, і збирати їх у
         // ext.RawDataPoint з матеріалізацією в комірки означало б записати
@@ -331,7 +362,8 @@ public sealed class CollectionJob(
 /// <param name="SourceEntityId">Сутність джерела.</param>
 /// <param name="FromUtc">Початок; <c>null</c> — за <c>LookbackDays</c> розкладу.</param>
 /// <param name="ToUtc">Кінець; <c>null</c> — «зараз».</param>
-public sealed record CollectionJobRequest(int SourceEntityId, DateTime? FromUtc, DateTime? ToUtc)
+/// <param name="Manual"><c>true</c> — запуск людиною (кнопка «Зібрати»): залежність розкладу не перевіряється (ФВ-13.15).</param>
+public sealed record CollectionJobRequest(int SourceEntityId, DateTime? FromUtc, DateTime? ToUtc, bool? Manual = null)
 {
     /// <summary>Налаштування розбору; спільні на всі виклики.</summary>
     private static readonly System.Text.Json.JsonSerializerOptions Options =
