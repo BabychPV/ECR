@@ -12,6 +12,11 @@ namespace Ecr.Application.Validation;
 /// <param name="BlocksSave">
 /// Чи блокує збереження. <c>true</c> **лише** для коміркового <c>Error</c> (R-B3).
 /// </param>
+/// <param name="SourceTableDefId">
+/// Таблиця ДРУГОЇ сторони зв'язку Check (джерело); текст містить її значення, тож читач без права на неї
+/// не бачить повідомлення (T1-01). <c>null</c> — повідомлення однобічне.
+/// </param>
+/// <param name="SourceColumnCode">Колонка джерела зв'язку Check; <c>null</c> — лише рівень таблиці.</param>
 public sealed record ValidationMessage(
     ValidationSeverity Severity,
     string RuleCode,
@@ -19,4 +24,6 @@ public sealed record ValidationMessage(
     int TableDefId,
     string? RowKey,
     string? ColumnCode,
-    bool BlocksSave);
+    bool BlocksSave,
+    int? SourceTableDefId = null,
+    string? SourceColumnCode = null);

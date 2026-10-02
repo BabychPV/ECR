@@ -146,6 +146,51 @@ public sealed class HiddenValidationIssuesTests
         Assert.Empty(result!);
     }
 
+    // T1-01: Check видимого приймача з прихованим ДЖЕРЕЛОМ несе значення джерела в тексті.
+    private const string LeakedText = "Check: QTY = 777.5 does not match QTY = 55: deviation 722.5";
+
+    private static ValidationMessage CheckOnVisibleTarget()
+        => new(ValidationSeverity.Error, "REL-CHK1", LeakedText, VisibleTable, "R1", "COLVIS", BlocksSave: false,
+            SourceTableDefId: HiddenTable, SourceColumnCode: HiddenColumn);
+
+    [Theory]
+    [InlineData(ResourceKind.Column, 52)]
+    [InlineData(ResourceKind.Table, HiddenTable)]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-6.6")]
+    public async Task Check_з_прихованим_джерелом_віддається_знеособленим_без_значень(ResourceKind kind, int id)
+    {
+        Stored(CheckOnVisibleTarget());
+        _access.ReadScopeAsync(Arg.Any<AccessProfile>(), DocumentId, Arg.Any<CancellationToken>())
+            .Returns(DocumentReadScope.For(
+                new AccessBuilder().Grant(ResourceKind.Project, AccessBuilder.ProjectId, GrantLevel.Read).Deny(kind, id).Build(),
+                AccessBuilder.ProjectId, _snapshot));
+
+        var result = await Handler().HandleAsync(DocumentId, new PeriodKey(Period), CancellationToken.None);
+
+        var only = Assert.Single(result!);
+        Assert.True(HiddenValidationIssues.IsPlaceholder(only));
+        var json = JsonSerializer.Serialize(result);
+        foreach (var leak in new[] { "777.5", "55", "722.5", "REL-CHK1", "COLVIS" })
+        {
+            Assert.DoesNotContain(leak, json, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-6.6")]
+    public async Task Check_з_видимим_джерелом_віддається_зі_значеннями_регресія()
+    {
+        Stored(CheckOnVisibleTarget());
+        Reader(denyHiddenTable: false);
+
+        var result = await Handler().HandleAsync(DocumentId, new PeriodKey(Period), CancellationToken.None);
+
+        var only = Assert.Single(result!);
+        Assert.Equal(LeakedText, only.Message);
+    }
+
     private GetValidationResultHandler Handler() => new(_results, _documents, _metadata, _access, _user);
 
     private static ValidationMessage HiddenError()

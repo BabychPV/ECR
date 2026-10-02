@@ -92,7 +92,7 @@ public sealed class GetValidationResultHandler(
         // Таблиці 0 у знімку немає, тож перерезолв нижче його текст не чіпає.
         var messages = readable is null
             ? stored
-            : HiddenValidationIssues.ForViewer(stored, m => readable.CanReadAt(m.TableDefId, m.ColumnCode));
+            : HiddenValidationIssues.ForViewer(stored, m => HiddenValidationIssues.CanSee(readable, m));
 
         if (messages.Count == 0)
         {

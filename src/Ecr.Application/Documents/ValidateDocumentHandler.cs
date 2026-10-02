@@ -150,7 +150,7 @@ public sealed class ValidateDocumentHandler(
         // ⛔ Приховані помилки не зникають мовчки (`HiddenValidationIssues`):
         // інакше запускач, чиї зауваження всі під забороною, бачить «зауважень
         // немає», а «Подати» відмовляє.
-        return HiddenValidationIssues.ForViewer(messages, m => (readable ??= scope.InPeriod(periodKey)).CanReadAt(m.TableDefId, m.ColumnCode));
+        return HiddenValidationIssues.ForViewer(messages, m => HiddenValidationIssues.CanSee(readable ??= scope.InPeriod(periodKey), m));
     }
 
 }

@@ -100,7 +100,40 @@ public sealed class SubmitRelationCheckTests(SqlServerFixture sql)
         await run.Versions.DidNotReceive().ListTableRelationsAsync(Arg.Any<int>(), Arg.Any<CancellationToken>());
     }
 
-    private async Task<Outcome> RunAsync(string severity, decimal left, decimal right, bool acknowledge = false, bool flag = true)
+    /// <summary>
+    /// T1-01: Check видимого приймача, джерело якого під забороною (колонка чи таблиця), не віддає значень
+    /// джерела в тілі 422 — лише знеособлене зауваження; без заборони значення на місці.
+    /// </summary>
+    /// <remarks>Мутація: у <c>HiddenValidationIssues.CanSee</c> прибрати перевірку джерела — тест червоніє.</remarks>
+    [Theory]
+    [InlineData(ResourceKind.Column)]
+    [InlineData(ResourceKind.Table)]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Check_Block_із_забороненим_джерелом_не_розкриває_значень_у_422(ResourceKind deny)
+    {
+        var run = await RunAsync("Block", left: 777.5m, right: 55m, deny: deny);
+
+        var error = Assert.IsType<BusinessRuleException>(run.Error);
+        Assert.Equal("err.ECR-SUB-4221.hiddenIssues", error.Details?["messageKey"]);
+        var body = JsonSerializer.Serialize(error.Details) + error.Message;
+        Assert.DoesNotContain("777.5", body, StringComparison.Ordinal);
+        Assert.DoesNotContain("REL-CHK1", body, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Check_Block_без_заборони_422_містить_значення_регресія()
+    {
+        var run = await RunAsync("Block", left: 777.5m, right: 55m);
+
+        var error = Assert.IsType<BusinessRuleException>(run.Error);
+        Assert.Contains("777.5", JsonSerializer.Serialize(error.Details), StringComparison.Ordinal);
+    }
+
+    private async Task<Outcome> RunAsync(
+        string severity, decimal left, decimal right, bool acknowledge = false, bool flag = true, ResourceKind? deny = null)
     {
         var builder = new TestDocumentBuilder(sql.ConnectionString);
         var doc = await builder.BuildAsync(columnCount: 3, rowCount: 1);
@@ -153,7 +186,7 @@ public sealed class SubmitRelationCheckTests(SqlServerFixture sql)
              .Returns(slices);
 
         var metadata = Metadata(doc, flag, tableB.Id, columnB.Id);
-        var handler = BuildSubmit(db, doc, metadata, versions, cells);
+        var handler = BuildSubmit(db, doc, metadata, versions, cells, deny);
 
         Exception? error = null;
         try
@@ -170,7 +203,8 @@ public sealed class SubmitRelationCheckTests(SqlServerFixture sql)
     }
 
     private static SubmitSheetHandler BuildSubmit(
-        EcrDbContext db, TestDocument doc, IMetadataCache metadata, ITemplateVersionStore versions, ICellStore cells)
+        EcrDbContext db, TestDocument doc, IMetadataCache metadata, ITemplateVersionStore versions, ICellStore cells,
+        ResourceKind? deny = null)
     {
         var bulk = new BulkCellLoader(db.Database.GetConnectionString()!, 1000);
         var clock = new FixedClock(new DateTime(2026, 2, 1, 9, 0, 0, DateTimeKind.Utc));
@@ -190,7 +224,13 @@ public sealed class SubmitRelationCheckTests(SqlServerFixture sql)
         access.CurrentApprovalStepAsync(doc.DocumentId, doc.SheetDefId, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
               .Returns((ApprovalStepView?)null);
 
-        var reader = new AccessBuilder().Grant(ResourceKind.Project, AccessBuilder.ProjectId, GrantLevel.Read).Build();
+        var readerBuilder = new AccessBuilder().Grant(ResourceKind.Project, AccessBuilder.ProjectId, GrantLevel.Read);
+        if (deny is { } kind)
+        {
+            readerBuilder = readerBuilder.Deny(kind, kind == ResourceKind.Column ? doc.ColumnDefIds[1] : doc.TableDefId);
+        }
+
+        var reader = readerBuilder.Build();
         access.ReadScopeAsync(Arg.Any<AccessProfile>(), doc.DocumentId, Arg.Any<CancellationToken>())
               .Returns(async _ => DocumentReadScope.For(
                   reader, AccessBuilder.ProjectId, await metadata.GetAsync(doc.TemplateVersionId, CancellationToken.None)));
