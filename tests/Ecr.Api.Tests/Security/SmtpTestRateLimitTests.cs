@@ -164,6 +164,30 @@ public sealed class SmtpTestRateLimitTests(SqlServerFixture sql)
         }
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Завершальна_коса_риска_не_обходить_ні_межу_користувача_ні_системну_квоту()
+    {
+        using var baseApp = new EcrApiFactory(sql);
+        using var app = baseApp.WithWebHostBuilder(
+            b => b.UseSetting("Security:RateLimit:SmtpTestSystemPermitPerHour", "2"));
+        using var a = await SystemHealthControllerTests.SignedInAsync(sql, app, Permission).ConfigureAwait(true);
+        using var b = await SystemHealthControllerTests.SignedInAsync(sql, app, Permission).ConfigureAwait(true);
+
+        using var one = await a.PostAsJsonAsync(new Uri("/api/v1/notifications/smtp/test/", UriKind.Relative), new { to = "probe@example.com" })
+            .ConfigureAwait(true);
+        using var two = await b.PostAsync(new Uri("/api/v1/notifications/channels/999999/test/", UriKind.Relative), null)
+            .ConfigureAwait(true);
+        Assert.NotEqual(HttpStatusCode.TooManyRequests, one.StatusCode);
+        Assert.NotEqual(HttpStatusCode.TooManyRequests, two.StatusCode);
+
+        // Мутація: прибрати атрибути з ендпоінтів → квота не зачеплена, третя проба не дає 429 — падає тут.
+        using var three = await a.PostAsJsonAsync(new Uri("/api/v1/notifications/smtp/test/", UriKind.Relative), new { to = "probe@example.com" })
+            .ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.TooManyRequests, three.StatusCode);
+    }
+
     private static Task<HttpResponseMessage> ProbeAsync(HttpClient client)
         => client.PostAsJsonAsync(
             new Uri("/api/v1/notifications/smtp/test", UriKind.Relative), new { to = "probe@example.com" });
