@@ -202,6 +202,14 @@ export function LoginPage(): JSX.Element {
     }
   }
 
+  // T1-15 (г): вкладка сторінки входу називається системою, а не лишається «ECR Web».
+  // Лише коли каталог розв'язано успішно — інакше в заголовок потрапив би `⟦login.title⟧`.
+  const titleReady = isCatalogResolved(preferredLanguage(), 'public')
+    && !isCatalogFailed(preferredLanguage(), 'public');
+  useEffect(() => {
+    if (titleReady) document.title = `${t('login.title')} · ECR`;
+  });
+
   // ⛔ Доки каталог не розв'язано, тексту НЕМАЄ. Перший кадр із позначеними
   // ключами (`⟦login.title⟧`) бачив би кожен користувач при кожному відкритті
   // сторінки — а це рівно те, чим була `A7-33`, тільки коротше (`D-138`).
@@ -303,9 +311,8 @@ export function LoginPage(): JSX.Element {
             </Text>
           </Group>
 
-          {/* ⚠ Заголовок лишається `h3` — e2e й перевірки доступності шукають
-              саме роль, а не розмір. Змінюється вага й вирівнювання, не роль. */}
-          <Title order={3} fz="sm" fw={500} ta="center">
+          {/* T1-15 (г): сторінка входу не мала h1/h2 — заголовок тепер `h1` (розмір той самий). */}
+          <Title order={1} fz="sm" fw={500} ta="center">
             {t('login.title')}
           </Title>
         </Stack>

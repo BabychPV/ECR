@@ -53,7 +53,9 @@ const AppTitleSuffix = 'ECR';
 export function formatDocumentTitle(chain: readonly Pick<CrumbEntry, 'text'>[]): string {
   const parts = chain
     .map((entry) => entry.text)
-    .filter((text): text is string => text !== null && text.length > 0)
+    // T1-15 (в): позначений ключ `⟦nav.security⟧` (каталог ще не доїхав) у заголовок вкладки
+    // не йде — така частина пропускається, як і та, що ще резолвиться.
+    .filter((text): text is string => text !== null && text.length > 0 && !text.includes('⟦'))
     .reverse();
 
   return parts.length > 0 ? `${parts.join(TitleSeparator)}${TitleSeparator}${AppTitleSuffix}` : AppTitleSuffix;

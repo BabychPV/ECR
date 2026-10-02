@@ -120,4 +120,43 @@ describe('LoginPage: каталог перекладів не завантажи
     expect(screen.queryByRole('alert')).toBeNull();
     expect(document.body.textContent).not.toMatch(/⟦[^⟧]*⟧/);
   });
+
+  it('T1-15 (г): заголовок сторінки входу — h1, а вкладка названа системою', async () => {
+    localStorage.setItem('uiLanguage', 'title-lang');
+    document.title = 'ECR Web';
+    workingCatalog({
+      'login.title': 'Environmental Compliance Reporting',
+      'login.windows': 'Sign in with Windows',
+      'login.or': 'or',
+      'login.user': 'User name',
+      'login.password': 'Password',
+      'login.submit': 'Sign in',
+      'login.hint': 'Use your Windows account or a local one',
+    });
+
+    render(
+      <Shell>
+        <LoginPage />
+      </Shell>,
+    );
+
+    const heading = await screen.findByRole('heading', { level: 1 });
+    expect(heading.textContent).toBe('Environmental Compliance Reporting');
+    expect(document.title).toBe('Environmental Compliance Reporting · ECR');
+  });
+
+  it('T1-15 (г): при збої каталогу заголовок вкладки не отримує позначеного ключа', async () => {
+    localStorage.setItem('uiLanguage', 'title-fail-lang');
+    document.title = 'ECR Web';
+    failingCatalog();
+
+    render(
+      <Shell>
+        <LoginPage />
+      </Shell>,
+    );
+
+    await screen.findByRole('alert');
+    expect(document.title).not.toContain('⟦');
+  });
 });

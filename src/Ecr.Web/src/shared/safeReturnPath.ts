@@ -13,5 +13,10 @@ export function safeReturnPath(from: string | null): string {
   if (from.length > 1 && (from[1] === '/' || from[1] === '\\')) return '/';
   // Коди, а не регулярний вираз: керівні символи в джерелі легко загубити.
   if ([...from].some((ch) => ch.charCodeAt(0) < 0x20 || ch.charCodeAt(0) === 0x7f)) return '/';
+  // T1-15 (а): `/change-password` — «звідки» примусової зміни пароля. Після зміни сесія
+  // скинута, і повернення на цю сторінку замість головної було б хибним.
+  if (from === '/change-password' || from.startsWith('/change-password?') || from.startsWith('/change-password#')) {
+    return '/';
+  }
   return from;
 }

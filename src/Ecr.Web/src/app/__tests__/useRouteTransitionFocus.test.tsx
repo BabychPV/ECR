@@ -45,14 +45,14 @@ function jsonResponse(body: unknown): Response {
   });
 }
 
-function stubFetch(): void {
+function stubFetch(strings: Record<string, string> = {}): void {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.includes('/api/v1/me')) return jsonResponse(MeResponse);
       if (url.includes('/ui-strings/')) {
-        return jsonResponse({ languageCode: 'en', revision: 1, strings: {} });
+        return jsonResponse({ languageCode: 'en', revision: 1, strings });
       }
       return jsonResponse(null);
     }),
@@ -151,6 +151,11 @@ describe('formatDocumentTitle — та сама крихта, що й <Breadcrum
     const chain = [{ text: 'Шаблони' }, { text: null }];
     expect(formatDocumentTitle(chain)).toBe('Шаблони · ECR');
   });
+
+  it('T1-15: позначений ключ каталогу ⟦…⟧ у заголовок вкладки не потрапляє', () => {
+    expect(formatDocumentTitle([{ text: '⟦nav.security⟧' }])).toBe('ECR');
+    expect(formatDocumentTitle([{ text: 'Шаблони' }, { text: '⟦nav.security⟧' }])).toBe('Шаблони · ECR');
+  });
 });
 
 describe('useRouteTransitionFocus: document.title (PR nav-arch #7)', () => {
@@ -159,17 +164,25 @@ describe('useRouteTransitionFocus: document.title (PR nav-arch #7)', () => {
   });
 
   it('оновлюється при вході на маршрут і знову — при переході на інший', async () => {
-    stubFetch();
+    stubFetch({ 'home.label': 'Home', 'a.label': 'Page A' });
     const { router } = renderApp();
 
     await screen.findByTestId('home-page');
-    expect(document.title).toBe('⟦home.label⟧ · ECR');
+    expect(document.title).toBe('Home · ECR');
 
     await act(async () => {
       await router.navigate('/a');
     });
 
-    expect(document.title).toBe('⟦a.label⟧ · ECR');
+    expect(document.title).toBe('Page A · ECR');
+  });
+
+  it('T1-15 (в): без рядків каталогу заголовок вкладки не містить ⟦ключа⟧', async () => {
+    stubFetch();
+    renderApp();
+
+    await screen.findByTestId('home-page');
+    expect(document.title).toBe('ECR');
   });
 });
 
