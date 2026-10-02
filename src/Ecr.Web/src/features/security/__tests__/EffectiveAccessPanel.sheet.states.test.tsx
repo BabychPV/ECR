@@ -74,7 +74,7 @@ describe('EffectiveAccessPanel: аркуш — стани', () => {
     serve(async () =>
       Promise.resolve(
         new Response(
-          JSON.stringify({ title: 'Not Found', status: 404, errorCode: 'ECR-REQ-0404', correlationId: 'c-sheet', detail: null }),
+          JSON.stringify({ title: 'Not Found', status: 404, errorCode: 'ECR-TMPL-0404', correlationId: 'c-sheet', detail: null }),
           { status: 404, headers: { 'Content-Type': 'application/problem+json' } },
         ),
       ),
@@ -84,7 +84,7 @@ describe('EffectiveAccessPanel: аркуш — стани', () => {
     ask('Sheet', '4', '3');
     fireEvent.click(explain());
 
-    expect(await screen.findByText('ECR-REQ-0404', { exact: false })).toBeDefined();
+    expect(await screen.findByText('ECR-TMPL-0404', { exact: false })).toBeDefined();
     expect(screen.queryByText(/effectiveAccess\.noContributions/)).toBeNull();
     expect(screen.queryByTestId('effective-access-caveat')).toBeNull();
   });

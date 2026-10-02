@@ -541,8 +541,8 @@ public sealed partial class EndpointCoverageTests
             "messageKey рядка звіту пакета записів довідника (ФВ-8.12, RegistryBatchRowError) — "
             + "ключі валідації RegistryBatchHandler/UpsertRegistryEntryHandler, клієнт їх не перелічує."),
         new("shared/ui/problemText.ts", "problem.title", 1, null, [], "title problem+json, коли він — ключ каталогу."),
-        new("features/notifications/ChannelsPanel.tsx", "key", 1, null, [], "messageKey проби каналу."),
-        new("features/notifications/SmtpSettingsPanel.tsx", "key", 1, null, [], "messageKey проби SMTP (категорія відмови транспорту)."),
+        new("features/notifications/probeResult.ts", "key", 1, null, [],
+            "messageKey проби каналу й SMTP (категорія відмови транспорту) — спільний showProbeResult."),
         new("features/integration/TestDataSourceModal.tsx", "key", 1, null, [], "messageKey проби джерела."),
         new("features/jobs/JobFacts.tsx", "errorKey(errorCode)", 1, null, [], "errorCode провалу фонової задачі — код каталогу помилок сервера."),
         new("shared/ui/problemText.ts", "key", 1, null, [],
