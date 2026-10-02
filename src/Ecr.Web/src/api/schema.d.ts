@@ -12397,13 +12397,16 @@ export interface paths {
          * Розріз «ресурс → підсумковий рівень → який грант якої ролі його дав» (ФВ-6.16, D-220).
          *     Право `Security.ManageUsers`.
          * @description ⚠ Нічого не вирішує: підсумковий рівень дає той самий профіль доступу, що й усі рішення,
-         *     а внески (роль, призначення, область, заборона) лише пояснюють його.
+         *     а внески (роль, призначення, область, заборона) лише пояснюють його. Для аркуша, таблиці й колонки
+         *     відповідь несе `caveat`: стан документа й звуження періодами не враховано.
          */
         get: {
             parameters: {
                 query?: {
-                    /** @description Ресурс: `Registry:{id}` або `Project:{id}`. */
+                    /** @description Ресурс: `Registry:{id}`, `Project:{id}`, `Sheet:{id}`, `Table:{id}` або `Column:{id}`. */
                     resource?: string;
+                    /** @description Проєкт, у шаблоні якого розглядається аркуш, таблиця чи колонка (обов'язковий для них). */
+                    projectId?: number;
                 };
                 header?: never;
                 path: {
@@ -19427,6 +19430,9 @@ export interface components {
         EffectiveAccessContribution: {
             /** @description Чи бере участь внесок у підсумковий рівень профілю. */
             counted: boolean;
+            /** @description Для аркуша, таблиці й колонки — предок, на якому стоїть грант (`Project:3`, `Sheet:7`), якщо це
+             *     не сам запитаний ресурс; інакше `null`. */
+            inheritedFrom?: null | string;
             /** @description Явна заборона. */
             isDeny: boolean;
             /** @description Рівень: у гранта — його рівень, у права — той, який воно відкриває для довідника. */
@@ -19446,6 +19452,9 @@ export interface components {
         };
         /** @description Розріз «ресурс → підсумковий рівень → який грант якої ролі його дав» (ФВ-6.16, D-220). */
         EffectiveAccessView: {
+            /** @description string EffectiveAccessView.DocumentStateNotConsidered для аркуша, таблиці й колонки: розріз не знає стану документа
+             *             й звужень області періодами; для довідника й проєкту — `null`. */
+            caveat?: null | string;
             /** @description Усі внески, включно з тими, що не порахувалися. */
             contributions: components["schemas"]["EffectiveAccessContribution"][];
             /** @description `ExplicitDeny` або `NoGrant`; `null` — рівень є. */
@@ -19456,6 +19465,11 @@ export interface components {
             isDenied: boolean;
             /** @description Підсумковий рівень — той, що дає профіль доступу (`AccessProfile`). */
             level: components["schemas"]["GrantLevel"];
+            /**
+             * Format: int32
+             * @description Проєкт, у шаблоні якого розглянуто аркуш, таблицю чи колонку; інакше `null`.
+             */
+            projectId?: null | number;
             /** @description Ресурс у формі запиту: `Registry:5`. */
             resource: string;
             /**

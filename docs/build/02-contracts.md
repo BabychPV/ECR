@@ -3340,9 +3340,15 @@ public interface IRecalculationApprovalStore
 
 #### `IEffectiveAccessStore`
 
-Джерела доступу до ресурсу (довідник, проєкт) для розрізу «ресурс → рівень → грант ролі» (`ФВ-6.16`,
-`D-220`): `ResourceExistsAsync` і `ListSourcesAsync` (призначення людини плюс те, що їхні ролі кажуть
-про ресурс). Нічого не вирішує — рівень дає `AccessProfile`.
+Джерела доступу до ресурсу (довідник, проєкт, аркуш, таблиця, колонка) для розрізу «ресурс → рівень →
+грант ролі» (`ФВ-6.16`, `D-220`): `ResourceExistsAsync`, `ResolveChainAsync` (предки аркуша, таблиці й
+колонки в шаблоні проєкту) і `ListSourcesAsync` (призначення людини плюс те, що їхні ролі кажуть про
+ресурс). Нічого не вирішує — рівень дає `AccessProfile` (для аркуша/таблиці/колонки — `EditRules.Effective`).
+
+`GET …/effective-access?resource=Sheet:{id}|Table:{id}|Column:{id}&projectId={id}`: `projectId` обов'язковий
+(id аркуша, таблиці й колонки — версії шаблону, спільної для проєктів). Відповідь несе `caveat`
+(`DocumentStateNotConsidered`) і `projectId`, а внески — `inheritedFrom` (`Project:3`, `Sheet:7`): розріз
+не знає стану документа й звужень області періодами.
 
 #### `IUserStore`
 
@@ -3688,6 +3694,9 @@ public sealed class NotFoundException(string errorCode, string message)
 | `err.ECR-REQ-0422.registryExportTooLarge` | 422 | експорт довідника більший за `Registries:ExportMaxRows` |
 | `err.ECR-REQ-0422.registryRowsIdsTooMany` | 422 | у запиті рядків довідника забагато ідентифікаторів |
 | `err.ECR-REQ-0422.effectiveAccessResource` | 422 | розріз ефективного доступу: невідомий тип ресурсу чи ідентифікатор без типу |
+| `err.ECR-REQ-0422.effectiveAccessProject` | 422 | розріз для аркуша, таблиці чи колонки без `projectId` |
+| `err.ECR-TMPL-0404.effectiveAccessResource` | 404 | розріз: аркуша, таблиці чи колонки немає |
+| `err.ECR-TMPL-0404.effectiveAccessNotInProject` | 404 | розріз: ресурс не з версії шаблону проєкту |
 | `err.ECR-REQ-0422.reportPublishReason` | 422 | публікація версії звіту без причини |
 | `err.ECR-REQ-0422.validationScope` | 422 | область виконання перевірок (validation) задано невалідно |
 
