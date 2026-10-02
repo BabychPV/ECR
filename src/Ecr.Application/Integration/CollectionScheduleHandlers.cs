@@ -448,15 +448,24 @@ public sealed class SaveCollectionScheduleHandler(
         }
 
         // ФВ-12.10: старий і новий розклад (cron, вмикання, вікно) — у журналі, в одній транзакції зі збереженням.
-        await uow.ExecuteInTransactionAsync(async innerCt =>
+        await CollectionScheduleDependencyRules.RunMappingConflictAsync(store, row.Schedule.Id, () => uow.ExecuteInTransactionAsync(async innerCt =>
         {
+            // ⛔ S-D1: перевірка циклу ПОВТОРНО й під замком джерела: ранню перевірку вище два паралельні
+            // `PUT A→B` і `PUT B→A` обидва проходили, і виходив цикл.
+            if (!dependency.Clear && dependency.DependsOnScheduleId is { } locked)
+            {
+                await store.LockDependenciesAsync(row.DataSourceId, innerCt).ConfigureAwait(false);
+                await CollectionScheduleDependencyRules
+                    .RequireValidAsync(store, id, row.DataSourceId, locked, innerCt).ConfigureAwait(false);
+            }
+
             await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
             await IntegrationConfigAudit.WriteAsync(
                 audit, clock, currentUser, IntegrationConfigAudit.ScheduleType, row.Schedule.Id, AuditOperation,
                 before, IntegrationConfigAudit.Snapshot(row.Schedule),
                 IntegrationConfigAudit.Reason("integrationAudit.scheduleChanged", ("id", row.Schedule.Id), ("entity", row.SourceEntityCode)), innerCt)
                 .ConfigureAwait(false);
-        }, ct).ConfigureAwait(false);
+        }, ct)).ConfigureAwait(false);
 
         // ⚠ Постановка ПІСЛЯ збереження (`CollectionScheduleApplier`): до неї
         // розклади читалися з бази рівно раз, на старті, і правка не доходила до
@@ -591,15 +600,23 @@ public sealed class CreateCollectionScheduleHandler(
         store.Add(schedule);
 
         // ФВ-12.10: новий розклад — у журналі структурних змін, в одній транзакції зі збереженням.
-        await uow.ExecuteInTransactionAsync(async innerCt =>
+        await CollectionScheduleDependencyRules.RunMappingConflictAsync(store, 0, () => uow.ExecuteInTransactionAsync(async innerCt =>
         {
+            if (dependsOnScheduleId is { } locked)
+            {
+                // S-D1: залежність могли видалити чи переключити між ранньою перевіркою і збереженням.
+                await store.LockDependenciesAsync(entity.DataSourceId, innerCt).ConfigureAwait(false);
+                await CollectionScheduleDependencyRules
+                    .RequireValidAsync(store, selfId: null, entity.DataSourceId, locked, innerCt).ConfigureAwait(false);
+            }
+
             await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
             await IntegrationConfigAudit.WriteAsync(
                 audit, clock, currentUser, IntegrationConfigAudit.ScheduleType, schedule.Id, AuditOperation,
                 oldJson: null, newJson: IntegrationConfigAudit.Snapshot(schedule),
                 reason: IntegrationConfigAudit.Reason("integrationAudit.scheduleCreated", ("id", schedule.Id), ("entity", entity.Code)), innerCt)
                 .ConfigureAwait(false);
-        }, ct).ConfigureAwait(false);
+        }, ct)).ConfigureAwait(false);
 
         await ListCollectionSchedulesHandler
             .ApplyOrFailAsync(applier, uow, clock, schedule, ct).ConfigureAwait(false);
@@ -653,22 +670,41 @@ public sealed class DeleteCollectionScheduleHandler(
         // ФВ-12.10: що саме було видалено (старий розклад) — у журналі, в одній транзакції з видаленням.
         var removed = IntegrationConfigAudit.Snapshot(row.Schedule);
 
-        // ФВ-13.15: ключ-самопосилання без каскаду — хто залежав від цього розкладу, перестає залежати.
-        foreach (var dependent in await store.FindDependentsAsync(id, ct).ConfigureAwait(false))
+        // ⛔ S-D2: усе в одній транзакції під замком залежностей джерела: залежних беремо ПІСЛЯ замка, тож
+        // паралельний `PUT X→цей` або чекає видалення (і дістає «розкладу немає»), або вже закомічений і
+        // видимий тут. Раніше недогляд давав порушення FK (547) → 500.
+        await CollectionScheduleDependencyRules.RunMappingConflictAsync(store, id, () => uow.ExecuteInTransactionAsync(async innerCt =>
         {
-            dependent.SetDependency(null);
-        }
+            await store.LockDependenciesAsync(row.DataSourceId, innerCt).ConfigureAwait(false);
 
-        store.Remove(row.Schedule);
+            // ФВ-13.15: ключ-самопосилання без каскаду — хто залежав від цього розкладу, перестає залежати.
+            var changed = new List<(CollectionSchedule Schedule, string Before)>();
 
-        await uow.ExecuteInTransactionAsync(async innerCt =>
-        {
+            foreach (var dependent in await store.FindDependentsAsync(id, innerCt).ConfigureAwait(false))
+            {
+                changed.Add((dependent, IntegrationConfigAudit.Snapshot(dependent)));
+                dependent.SetDependency(null);
+            }
+
+            store.Remove(row.Schedule);
+
             await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
             await IntegrationConfigAudit.WriteAsync(
                 audit, clock, currentUser, IntegrationConfigAudit.ScheduleType, id, AuditOperation,
                 removed, newJson: null,
                 IntegrationConfigAudit.Reason("integrationAudit.scheduleDeleted", ("id", id), ("entity", row.SourceEntityCode)), innerCt)
                 .ConfigureAwait(false);
-        }, ct).ConfigureAwait(false);
+
+            // Залежним знято залежність — це зміна їхньої конфігурації, і вона має бути в журналі (раніше мовчки).
+            foreach (var (dependent, snapshot) in changed)
+            {
+                await IntegrationConfigAudit.WriteAsync(
+                    audit, clock, currentUser, IntegrationConfigAudit.ScheduleType, dependent.Id,
+                    SaveCollectionScheduleHandler.AuditOperation, snapshot, IntegrationConfigAudit.Snapshot(dependent),
+                    IntegrationConfigAudit.Reason(
+                        "integrationAudit.scheduleChanged", ("id", dependent.Id), ("entity", dependent.SourceEntityId)),
+                    innerCt).ConfigureAwait(false);
+            }
+        }, ct)).ConfigureAwait(false);
     }
 }

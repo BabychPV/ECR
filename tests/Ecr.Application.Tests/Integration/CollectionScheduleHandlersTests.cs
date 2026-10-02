@@ -44,8 +44,110 @@ public sealed class CollectionScheduleHandlersTests
         Allow("Integration.EditSchedule");
 
         // Підробка UoW виконує замикання транзакції, інакше зміна й журнал (ФВ-12.10) не запустилися б узагалі.
+        _store.InTransaction = () => _inTransaction;
         _uow.ExecuteInTransactionAsync(Arg.Any<Func<CancellationToken, Task>>(), Arg.Any<CancellationToken>())
-            .Returns(call => call.Arg<Func<CancellationToken, Task>>()(call.Arg<CancellationToken>()));
+            .Returns(call => RunInTransactionAsync(call.Arg<Func<CancellationToken, Task>>(), call.Arg<CancellationToken>()));
+    }
+
+    private bool _inTransaction;
+
+    private async Task RunInTransactionAsync(Func<CancellationToken, Task> operation, CancellationToken ct)
+    {
+        _inTransaction = true;
+
+        try
+        {
+            await operation(ct);
+        }
+        finally
+        {
+            _inTransaction = false;
+        }
+    }
+
+    /// <summary>Підміна відмови зовнішнього ключа (SQL 547), яку фейк-сховище розпізнає.</summary>
+    private sealed class ForeignKeyFailure() : Exception("FK_CS_DependsOn");
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "S-D1")]
+    public async Task Паралельні_A_B_і_B_A_цикл_ловиться_повторною_перевіркою_під_замком_джерела()
+    {
+        var a = Add(Hourly);
+        var b = Add(Hourly);
+
+        // Рання перевірка `PUT B→A` проходить (A ще нічого не залежить). Поки B чекає замок, паралельний
+        // запит комітить `A→B`: повтор під замком мусить побачити цикл.
+        // ⚠ МУТАЦІЇ: прибрати `LockDependenciesAsync` → Locks порожній; прибрати повторний `RequireValidAsync`
+        // у SaveCollectionScheduleHandler → виняток зникає, і ліворуч лишається цикл A→B→A.
+        _store.OnLock = () => a.SetDependency(b.Id);
+
+        var refused = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Save().HandleAsync(
+                b.Id, Hourly, isEnabled: true, lookbackDays: null, new ScheduleDependencyChange(a.Id), Version(b),
+                CancellationToken.None));
+
+        Assert.Equal("err.ECR-REQ-0422.collectionScheduleDependencyCycle", refused.Details!["messageKey"]);
+        Assert.Equal([(3, true)], _store.Locks);
+        await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "S-D2")]
+    public async Task Порушення_FK_при_видаленні_чи_правці_залежності_це_409_а_не_500()
+    {
+        // ⚠ МУТАЦІЯ: прибрати `RunMappingConflictAsync` у Delete/Save/Create → голий виняток (500) замість 409.
+        var a = Add(Hourly);
+        var b = Add(Hourly);
+        _uow.SaveChangesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromException<int>(new ForeignKeyFailure()));
+
+        var onUpdate = await Assert.ThrowsAsync<ConcurrencyConflictException>(
+            () => Save().HandleAsync(
+                b.Id, Hourly, isEnabled: true, lookbackDays: null, new ScheduleDependencyChange(a.Id), Version(b),
+                CancellationToken.None));
+        var onDelete = await Assert.ThrowsAsync<ConcurrencyConflictException>(
+            () => Delete().HandleAsync(a.Id, Version(a), CancellationToken.None));
+
+        Assert.Equal("err.ECR-JOB-0409.collectionScheduleChanged", onDelete.Details!["messageKey"]);
+        Assert.Equal("err.ECR-JOB-0409.collectionScheduleChanged", onUpdate.Details!["messageKey"]);
+
+        // Сторонній виняток не маскується під конфлікт.
+        _uow.SaveChangesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromException<int>(new InvalidOperationException("db")));
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => Delete().HandleAsync(b.Id, Version(b), CancellationToken.None));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "S-D2")]
+    public async Task Видалення_розкладу_бере_замок_у_транзакції_і_пише_аудит_кожному_залежному_якому_знято_залежність()
+    {
+        // ⚠ МУТАЦІЯ: прибрати цикл запису аудиту залежних → Received(3) стає Received(1).
+        var a = Add(Hourly);
+        var b = Add(Hourly);
+        var c = Add(Hourly);
+        b.SetDependency(a.Id);
+        c.SetDependency(a.Id);
+
+        await Delete().HandleAsync(a.Id, Version(a), CancellationToken.None);
+
+        Assert.Equal([(3, true)], _store.Locks);
+        await _audit.Received(1).WriteStructureChangeAsync(
+            Arg.Is<StructureChangeRecord>(r => r.EntityId == a.Id && r.Operation == DeleteCollectionScheduleHandler.AuditOperation),
+            Arg.Any<CancellationToken>());
+
+        foreach (var dependent in new[] { b, c })
+        {
+            await _audit.Received(1).WriteStructureChangeAsync(
+                Arg.Is<StructureChangeRecord>(r =>
+                    r.EntityId == dependent.Id && r.Operation == SaveCollectionScheduleHandler.AuditOperation
+                    && r.OldJson!.Contains($"\"dependsOnScheduleId\":{a.Id}", StringComparison.Ordinal)
+                    && r.NewJson!.Contains("\"dependsOnScheduleId\":null", StringComparison.Ordinal)),
+                Arg.Any<CancellationToken>());
+        }
+
+        Assert.Null(b.DependsOnScheduleId);
     }
 
     [Fact]
@@ -656,6 +758,28 @@ public sealed class CollectionScheduleHandlersTests
                         "SRC-3",
                         KindOf(sourceEntityId))
                     : null);
+
+        /// <summary>Узяті замки залежностей: з'єднання і чи було це всередині транзакції.</summary>
+        public List<(int DataSourceId, bool InTransaction)> Locks { get; } = [];
+
+        /// <summary>Чи виконується зараз замикання транзакції (виставляє тест).</summary>
+        public Func<bool> InTransaction { get; set; } = () => false;
+
+        /// <summary>Дія в момент взяття замка — «паралельний запит коміттить свою зміну».</summary>
+        public Action? OnLock { get; set; }
+
+        public Task LockDependenciesAsync(int dataSourceId, CancellationToken ct)
+        {
+            Locks.Add((dataSourceId, InTransaction()));
+            OnLock?.Invoke();
+
+            return Task.CompletedTask;
+        }
+
+        public Task<int?> ReadDependsOnAsync(int collectionScheduleId, CancellationToken ct)
+            => Task.FromResult(Rows.Find(r => r.Schedule.Id == collectionScheduleId)?.Schedule.DependsOnScheduleId);
+
+        public bool IsForeignKeyViolation(Exception failure) => failure is ForeignKeyFailure;
 
         public Task<IReadOnlyList<CollectionSchedule>> FindDependentsAsync(int collectionScheduleId, CancellationToken ct)
             => Task.FromResult<IReadOnlyList<CollectionSchedule>>(

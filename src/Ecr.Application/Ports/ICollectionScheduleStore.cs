@@ -59,6 +59,24 @@ public interface ICollectionScheduleStore
     /// <param name="ct">Скасування.</param>
     public Task<IReadOnlyList<CollectionSchedule>> FindDependentsAsync(int collectionScheduleId, CancellationToken ct);
 
+    /// <summary>
+    /// Беремо транзакційний замок залежностей джерела (<c>sp_getapplock</c>, власник — транзакція): правки
+    /// залежностей одного з'єднання йдуть по черзі, і перевірка циклу бачить закомічене попередніми.
+    /// </summary>
+    /// <param name="dataSourceId">З'єднання (залежності можливі лише в його межах).</param>
+    /// <param name="ct">Скасування.</param>
+    /// <remarks>⚠ Лише всередині <see cref="IUnitOfWork.ExecuteInTransactionAsync"/>. Таймаут — 409, не 500.</remarks>
+    public Task LockDependenciesAsync(int dataSourceId, CancellationToken ct);
+
+    /// <summary>
+    /// Свіже значення <c>DependsOnScheduleId</c> розкладу — запитом без відстеження; <c>null</c> — немає
+    /// залежності або розкладу.
+    /// </summary>
+    public Task<int?> ReadDependsOnAsync(int collectionScheduleId, CancellationToken ct);
+
+    /// <summary>Чи виняток — порушення зовнішнього ключа (SQL 547), напр. залежність щойно видалили.</summary>
+    public bool IsForeignKeyViolation(Exception failure);
+
     /// <summary>Додає розклад; зберігає <see cref="IUnitOfWork"/>.</summary>
     public void Add(CollectionSchedule schedule);
 
