@@ -203,6 +203,77 @@ public sealed class NotificationRuleHandlersTests
         Assert.Single(all.Items);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "BE-33")]
+    public async Task Журнал_заміни_рахує_додані_оновлені_й_прибрані_а_матриця_повертається_впорядкованою()
+    {
+        var mail = await NewChannelAsync();
+        var second = (await new SaveNotificationChannelHandler(
+                _store, Substitute.For<INotificationSender>(), _access, _uow, _audit, _user, _clock)
+            .CreateAsync(NotificationChannelKind.Smtp, "Mail 2", Smtp, CancellationToken.None)).Id;
+
+        await Replace().HandleAsync(
+            [new(NotificationEventKind.JobFailed, mail, NotificationSeverity.Warning, IsEnabled: true)],
+            CancellationToken.None);
+
+        // Подано «не по порядку»: подія 5 перед 1, канал second перед mail.
+        // ⚠ МУТАЦІЙНИЙ ДОКАЗ: `added++` → `added--` або прибрати його, `ThenBy` → `ThenByDescending`,
+        // `OrderBy` → `OrderByDescending` у ReplaceNotificationRulesHandler — червоніє цей тест.
+        var matrix = await Replace().HandleAsync(
+            [
+                new(NotificationEventKind.ExportFailed, mail, NotificationSeverity.Error, IsEnabled: true),
+                new(NotificationEventKind.JobFailed, second, NotificationSeverity.Info, IsEnabled: true),
+                new(NotificationEventKind.JobFailed, mail, NotificationSeverity.Error, IsEnabled: true),
+            ],
+            CancellationToken.None);
+
+        Assert.Equal(
+            [(NotificationEventKind.JobFailed, mail), (NotificationEventKind.JobFailed, second), (NotificationEventKind.ExportFailed, mail)],
+            matrix.Rules.Select(r => (r.EventKind, r.ChannelId)));
+
+        var audited = _events.FindAll(e => e.EventType == "NotificationRulesReplaced")[^1].DetailsJson;
+        Assert.Contains("\"total\":3", audited, StringComparison.Ordinal);
+        Assert.Contains("\"added\":2", audited, StringComparison.Ordinal);
+        Assert.Contains("\"updated\":1", audited, StringComparison.Ordinal);
+        Assert.Contains("\"removed\":0", audited, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "BE-33")]
+    public async Task Сторінка_журналу_з_одного_рядка_законна()
+    {
+        _store.Deliveries.Add(new NotificationDeliveryView(
+            1, _clock.UtcNow, 1, "Mail", NotificationEventKind.JobFailed, "job:7",
+            NotificationDeliveryStatus.Failed, "relay refused"));
+
+        // ⚠ МУТАЦІЙНИЙ ДОКАЗ: `page.Limit is < 1` → `<= 1` — сторінка з одного рядка стала б 422.
+        var page = await Deliveries().HandleAsync(new CursorRequest(1), null, null, CancellationToken.None);
+
+        Assert.Equal("job:7", Assert.Single(page.Items).EventKey);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "BE-33")]
+    public async Task Заміна_матриці_зберігається_а_null_замість_переліку_це_порожня_матриця()
+    {
+        // ⚠ МУТАЦІЙНИЙ ДОКАЗ: прибрати `uow.SaveChangesAsync` у ReplaceNotificationRulesHandler; `rules ?? []` → `rules`
+        // (тіло без масиву впало б NullReferenceException → 500).
+        var channel = await NewChannelAsync();
+        _uow.ClearReceivedCalls();
+        await Replace().HandleAsync(
+            [new(NotificationEventKind.JobFailed, channel, NotificationSeverity.Warning, IsEnabled: true)], CancellationToken.None);
+        await _uow.Received(1).SaveChangesAsync(Arg.Any<CancellationToken>());
+
+        var cleared = await Replace().HandleAsync(null, CancellationToken.None);
+
+        Assert.Empty(cleared.Rules);
+        Assert.Empty(_store.Rules);
+        await _uow.Received(2).SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
+
     private void Allow(string permission)
         => _access.BuildProfileAsync(Actor, Arg.Any<CancellationToken>())
             .Returns(new AccessBuilder { UserId = Actor }.Permission(permission).Build());

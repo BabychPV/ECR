@@ -483,6 +483,122 @@ public sealed class NotificationChannelHandlersTests
         Assert.Null(auth.Error);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "D-263")]
+    public async Task Проба_через_відправника_каналу_класифікує_відмову_SMTP_а_Teams_дає_загальний_ключ_без_поштової_категорії()
+    {
+        var mail = await Save().CreateAsync(NotificationChannelKind.Smtp, "Mail", Smtp, CancellationToken.None);
+        var teams = await Save().CreateAsync(NotificationChannelKind.TeamsWebhook, "Teams", null, CancellationToken.None);
+        _sender.IsConfigured.Returns(true);
+
+        // ⚠ МУТАЦІЙНИЙ ДОКАЗ: `classify: true` → `false` у гілці відправника каналу (ProbeAsync) — назовні
+        // пішов би банер поштового сервера, а ключа категорії не було б.
+        var smtp = new SpyChannelSender(NotificationChannelKind.Smtp)
+        {
+            Fails = new System.Net.Mail.SmtpException(
+                System.Net.Mail.SmtpStatusCode.ClientNotPermitted, "535 5.7.8 relay.corp.internal rejected"),
+        };
+        var refused = await Test(smtp).HandleAsync(mail.Id, CancellationToken.None);
+        Assert.Equal((false, null, SmtpFailureClassifier.Auth), (refused.Ok, refused.Error, refused.MessageKey));
+
+        // ⚠ МУТАЦІЙНИЙ ДОКАЗ: `classify ? MessageKeyOf(e) : null` → завжди MessageKeyOf — Teams отримав би
+        // поштовий ключ «notifications.test.smtp.unknown» замість загального (тексту немає — ent5 P3-3).
+        var webhook = new SpyChannelSender(NotificationChannelKind.TeamsWebhook)
+        {
+            Fails = new InvalidOperationException("Канал «Teams»: вебхук відповів 500."),
+        };
+        var failed = await Test(webhook).HandleAsync(teams.Id, CancellationToken.None);
+        Assert.Equal((false, (string?)null, "notifications.testFailed"), (failed.Ok, failed.Error, failed.MessageKey));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "BE-33")]
+    public async Task Назва_рівно_100_символів_приймається_заголовок_обрізається_а_канал_лише_з_ролями_не_пише_порожнього_списку_адрес()
+    {
+        // ⚠ МУТАЦІЙНИЙ ДОКАЗ (SaveNotificationChannelHandler): стеля назви `>` → `>=` відхилила б рівно 100;
+        // `Title` → завжди null загубив би заголовок; `recipients.Count == 0 ? null : recipients` → завжди
+        // `recipients` записав би «recipients: []» каналу, що адресує лише ролями.
+        var name = new string('N', 100);
+        var created = await Save().CreateAsync(
+            NotificationChannelKind.Smtp, name,
+            new NotificationChannelSettingsInput(Title: "  Ops alerts  ", RecipientRoleIds: [1]), CancellationToken.None);
+
+        Assert.Equal(name, created.Name);
+        Assert.Equal("Ops alerts", created.Settings.Title);
+        Assert.DoesNotContain("[]", _store.Channels.Single().SettingsJson, StringComparison.Ordinal);
+
+        var blank = await Save().UpdateAsync(
+            created.Id, name, true, new NotificationChannelSettingsInput(Recipients: ["a@b.example"], Title: "   "), CancellationToken.None);
+        Assert.Null(blank.Settings.Title);
+        Assert.Equal(["a@b.example"], blank.Settings.Recipients!);
+
+        var tooLong = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Save().CreateAsync(NotificationChannelKind.Smtp, name + "N", Smtp, CancellationToken.None));
+        Assert.Equal("err.ECR-REQ-0422.notificationChannelInvalid", tooLong.Details!["messageKey"]);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "D-263")]
+    public async Task Кожна_зміна_каналу_зберігається_а_ролі_правки_доходять_до_сховища()
+    {
+        // ⚠ МУТАЦІЙНИЙ ДОКАЗ: прибрати будь-який `uow.SaveChangesAsync` у створенні (два: канал і ролі),
+        // правці, секреті чи видаленні, або `store.ReplaceChannelRolesAsync` у правці — відповідь лишалася б
+        // правильною, а база ні.
+        var mail = await Save().CreateAsync(NotificationChannelKind.Smtp, "Mail", Smtp, CancellationToken.None);
+        Assert.Equal(2, Saves());
+
+        await Save().UpdateAsync(
+            mail.Id, "Mail", true, new NotificationChannelSettingsInput(RecipientRoleIds: [3]), CancellationToken.None);
+        Assert.Equal(3, Saves());
+        Assert.Equal([3], _store.ChannelRoles[mail.Id]);
+        Assert.Equal([3], (await List().HandleAsync(CancellationToken.None)).Single().Settings.RecipientRoleIds);
+
+        var teams = await Save().CreateAsync(NotificationChannelKind.TeamsWebhook, "Teams", null, CancellationToken.None);
+        Assert.Equal(5, Saves());
+        await Secret().HandleAsync(teams.Id, Webhook, CancellationToken.None);
+        Assert.Equal(6, Saves());
+
+        // Канал без ролей: у списку — порожній перелік, а не null (`roleIds ?? []`).
+        Assert.Empty((await List().HandleAsync(CancellationToken.None)).Single(c => c.Id == teams.Id).Settings.RecipientRoleIds!);
+
+        await Delete().HandleAsync(teams.Id, CancellationToken.None);
+        Assert.Equal(7, Saves());
+    }
+
+    private int Saves() => _uow.ReceivedCalls().Count(c => c.GetMethodInfo().Name == nameof(IUnitOfWork.SaveChangesAsync));
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "D-263")]
+    public async Task Проба_Teams_з_DNS_відмовою_не_отримує_поштової_категорії_а_старий_шлях_пошти_шле_порожній_перелік_а_не_null()
+    {
+        var teams = await Save().CreateAsync(NotificationChannelKind.TeamsWebhook, "Teams", null, CancellationToken.None);
+
+        // ⚠ МУТАЦІЙНИЙ ДОКАЗ: `classify: false` → `true` для не-пошти — Teams отримав би
+        // «notifications.test.smtp.dns», хоча пошти тут немає.
+        var webhook = new SpyChannelSender(NotificationChannelKind.TeamsWebhook)
+        {
+            Fails = new HttpRequestException(
+                "No such host is known. (hooks.corp.example:443)",
+                new System.Net.Sockets.SocketException((int)System.Net.Sockets.SocketError.HostNotFound)),
+        };
+        var dns = await Test(webhook).HandleAsync(teams.Id, CancellationToken.None);
+        Assert.Equal((false, (string?)null, "notifications.testFailed"), (dns.Ok, dns.Error, dns.MessageKey));
+
+        // ⚠ МУТАЦІЙНИЙ ДОКАЗ: `Settings.Recipients ?? []` у старому шляху пошти (без відправника каналу) —
+        // канал лише з ролями передав би транспорту null замість порожнього переліку.
+        var byRole = await Save().CreateAsync(
+            NotificationChannelKind.Smtp, "By role", new NotificationChannelSettingsInput(RecipientRoleIds: [1]), CancellationToken.None);
+        _sender.IsConfigured.Returns(true);
+        await Test().HandleAsync(byRole.Id, CancellationToken.None);
+        await _sender.Received(1).SendAsync(
+            Arg.Is<IReadOnlyList<string>>(r => r != null && r.Count == 0),
+            Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+    }
+
     private SaveNotificationChannelHandler Save() => new(_store, _sender, _access, _uow, _audit, _user, _clock);
 
     private DeleteNotificationChannelHandler Delete() => new(_store, _access, _uow, _audit, _user, _clock);
