@@ -104,6 +104,12 @@ public sealed class RoleLifecycleStoreTests(SqlServerFixture sql)
             Assert.NotNull(found);
             Assert.Equal($"ZZZ{_tag}".ToUpperInvariant(), found.Code.ToUpperInvariant());
             Assert.Null(await store.FindRoleAsync(int.MaxValue, CancellationToken.None));
+
+            // Код ролі №601 за межею Take(500): дубль знаходиться прямим запитом.
+            Assert.True(await store.RoleCodeExistsAsync($"ZZZ{_tag}", 0, CancellationToken.None));
+            Assert.True(await store.RoleCodeExistsAsync($"zzz{_tag}", 0, CancellationToken.None));
+            Assert.False(await store.RoleCodeExistsAsync($"ZZZ{_tag}", lateId, CancellationToken.None));
+            Assert.False(await store.RoleCodeExistsAsync($"NOPE{_tag}", 0, CancellationToken.None));
         }
         finally
         {

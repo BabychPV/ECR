@@ -79,13 +79,18 @@ internal static class ProjectOwnershipGrant
     {
         ArgumentNullException.ThrowIfNull(createProject);
 
-        var allRoles = await users.ListRolesAsync(ct).ConfigureAwait(false);
-
-        // ⚠ Порядок за Id — частина протоколу блокувань (див. нижче).
-        var qualifyingRoles = allRoles
-            .Where(r => profile.RoleIds.Contains(r.Id) && r.Permissions.Contains(permission))
-            .OrderBy(r => r.Id)
-            .ToList();
+        // ⛔ Ролі творця — прямими запитами за Id: ListRolesAsync обрізає Take(500),
+        // і роль за межею мовчки не отримувала гранта власності.
+        var qualifyingRoles = new List<RoleView>();
+        foreach (var roleId in profile.RoleIds.Order())
+        {
+            var role = await users.FindRoleAsync(roleId, ct).ConfigureAwait(false);
+            if (role is not null && role.Permissions.Contains(permission))
+            {
+                qualifyingRoles.Add(role);
+            }
+        }
+        // ⚠ Порядок за Id (Order вище) — частина протоколу блокувань (див. нижче).
 
         var grantedAny = false;
         var projectId = 0;

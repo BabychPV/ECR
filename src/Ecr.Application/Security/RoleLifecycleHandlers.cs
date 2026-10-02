@@ -71,9 +71,8 @@ internal static class RoleLifecycle
     /// </remarks>
     public static async Task EnsureCodeFreeAsync(IUserStore users, string code, int exceptRoleId, CancellationToken ct)
     {
-        var roles = await users.ListRolesAsync(ct).ConfigureAwait(false);
-
-        if (roles.Any(r => r.Id != exceptRoleId && string.Equals(r.Code, code, StringComparison.OrdinalIgnoreCase)))
+        // ⛔ Прямий запит: ListRolesAsync обрізає Take(500), дубль за межею давав 500 від UQ.
+        if (await users.RoleCodeExistsAsync(code, exceptRoleId, ct).ConfigureAwait(false))
         {
             throw new BusinessRuleException(
                 ErrorCodes.SecurityConflict, $"Роль із кодом «{code}» уже існує.",

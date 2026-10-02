@@ -64,9 +64,9 @@ public sealed class CreateProjectTests
         // творцю грант Manage на щойно створений проєкт — через КОЖНУ роль
         // творця, яка сама несе Project.Manage. Фікстура задає рівно одну
         // таку роль.
-        _users.ListRolesAsync(Arg.Any<CancellationToken>()).Returns(
-            [new RoleView(ManagerRoleId, "Manager", IsBuiltIn: false, IsActive: true,
-                Permissions: ["Project.Manage"], DangerousPermissions: [])]);
+        _users.FindRoleAsync(ManagerRoleId, Arg.Any<CancellationToken>()).Returns(
+            new RoleView(ManagerRoleId, "Manager", IsBuiltIn: false, IsActive: true,
+                Permissions: ["Project.Manage"], DangerousPermissions: []));
         _users.ListGrantsAsync(ManagerRoleId, Arg.Any<CancellationToken>())
             .Returns(new List<ResourceGrantDto>());
 

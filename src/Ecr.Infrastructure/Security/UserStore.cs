@@ -1,4 +1,4 @@
-﻿using Ecr.Application.Common;
+using Ecr.Application.Common;
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
@@ -369,6 +369,10 @@ public sealed class UserStore(EcrDbContext db) : IUserStore
             [.. mine.Where(p => p.IsDangerous).Select(p => p.Code).Order(StringComparer.Ordinal)],
             r.NameL10n);
     }
+
+    /// <inheritdoc />
+    public Task<bool> RoleCodeExistsAsync(string code, int exceptRoleId, CancellationToken ct)
+        => db.Roles.AsNoTracking().AnyAsync(r => r.Code == code && r.Id != exceptRoleId, ct);
 
     /// <inheritdoc />
     public async Task<IReadOnlyList<RoleView>> ListRolesAsync(CancellationToken ct)
