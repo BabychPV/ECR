@@ -262,8 +262,9 @@ Keep your values to overwrite theirs, or discard yours to see theirs.» — з
 
 Після збереження значення, від якого залежать обчислені комірки, сітка
 показує «Recalculating...», а після завершення — «Recalculated {time}».
-Ручний перерахунок — право `Calculation.Recalculate` (адміністративне,
-кнопка «Recalculate»).
+Ручний перерахунок свого документа (кнопка «Recalculate») доступний кожному, хто
+бачить документ (читання, `Document.View`); проєктний і масовий перерахунок —
+право `Calculation.Recalculate` (адміністративне).
 
 ### 5.3. Аркуш, закритий для редагування
 

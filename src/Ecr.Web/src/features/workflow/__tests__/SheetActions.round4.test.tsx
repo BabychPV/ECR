@@ -49,7 +49,7 @@ function mockFetch(options: { grants: Record<string, string>; jobState?: string 
           isSimulation: false,
           language: 'en',
           mustChangePassword: false,
-          permissions: ['Calculation.Recalculate'],
+          permissions: ['Document.View'],
           simulatedForUserId: null,
           userId: 9,
           userName: 'tester',

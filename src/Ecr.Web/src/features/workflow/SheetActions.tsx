@@ -554,7 +554,9 @@ export function SheetActions({
   // (Recalculate/Submit/Approve/Reject/Reopen, останні три вже кольорові:
   // green/statusError) — те саме розділення класів ризику, що директива вже
   // застосувала для лан 1-7.
-  const canRecalculate = !dataLocked && can(me, 'Calculation.Recalculate');
+  // ✎ 2026-10-02: перерахунок СВОГО документа — за читанням (сервер: `RecalculateDocumentHandler`),
+  // а не за `Calculation.Recalculate` (те — проєктний/масовий перерахунок).
+  const canRecalculate = !dataLocked && can(me, 'Document.View');
 
   const hasAnyAction =
     canRecalculate ||

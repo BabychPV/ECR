@@ -61,7 +61,7 @@
 | `Calculation.View` | | методики, вирази, одиниці (`/admin/methodologies`, `/admin/expressions`, `/admin/units`) | TemplateAdm, DataEntry, Approver, Viewer, Auditor, SysAdm |
 | `Calculation.EditFormula` / `EditConstant` / `EditRule` | | формули, константи, правила | SysAdm |
 | `Calculation.ManageRequiredInputs` | | обов'язкові входи | SysAdm |
-| `Calculation.Recalculate` | | перерахунок | SysAdm |
+| `Calculation.Recalculate` | | проєктний/масовий перерахунок (перерахунок СВОГО документа кнопкою «Recalculate» — за читанням, `Document.View` + видимість документа) | SysAdm |
 | `Calculation.Publish` | так | публікація версії методики | — |
 | `Report.ViewRegulatory` | | регуляторні зрізи, `/admin/snapshots` | Approver, Viewer, ReportViewer, Auditor, SysAdm |
 | `Report.ViewSnapshot` | | вміст зрізу: «View rows», книга `.xlsx` (разом із `Report.Export`); потрібен ще грант Read на проєкт | Approver, ReportViewer, Auditor, SysAdm |

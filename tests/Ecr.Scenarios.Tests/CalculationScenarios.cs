@@ -828,7 +828,7 @@ public sealed class CalculationScenarios(SqlServerFixture sql)
             app, "S25bOwner",
             ["Project.Manage", "Document.View", "Document.Create", "Template.Edit", "Calculation.Recalculate"]);
         var stranger = await Provisioning.AdministratorAsync(
-            app, "S25bStranger", ["Calculation.Recalculate"]);
+            app, "S25bStranger", ["Calculation.Recalculate", "Document.View"]);
 
         (owner, _, var documentId, var periodKey) = await DataEntryScenarios.ArrangeDocumentAsync(app, owner, "S25bOwner");
 

@@ -23,8 +23,15 @@ public sealed class RecalculateDocumentHandler(
     IPeriodStore periods,
     IWorkflowStore workflow)
 {
-    /// <summary>Право на запуск перерахунку (`02-contracts.md` §9).</summary>
-    public const string Permission = "Calculation.Recalculate";
+    /// <summary>Право на перерахунок СВОГО документа: лише читання (`02-contracts.md` §9).</summary>
+    /// <remarks>
+    /// ✎ 2026-10-02: функціональне <c>Document.View</c> у проєкті документа плюс видимість
+    /// документа (грант не нижче <c>Read</c>), як <c>GetTableSliceHandler</c>. Інакше виконавець
+    /// (<c>DataEntry</c>) застрягав на «methodology results are stale». <c>Calculation.Recalculate</c>
+    /// лишається для проєктного/масового перерахунку (<c>RunCalculationHandler</c>,
+    /// <c>RecalculateImpactedHandler</c>).
+    /// </remarks>
+    public const string Permission = "Document.View";
 
     /// <summary>Ставить задачу в чергу і повертає її ідентифікатор.</summary>
     /// <param name="documentId">Документ.</param>
@@ -80,6 +87,21 @@ public sealed class RecalculateDocumentHandler(
         // «NoGrant»: різниця відповідей сама розкривала б, що документ існує.
         // ФВ-6.14: і право — у проєкті документа.
         await DocumentVisibility.RequireVisibleAsync(access, profile, documentId, Permission, ct).ConfigureAwait(false);
+
+        // ⛔ D-214: роль, ЗВУЖЕНА аркушами/періодами, перераховувати документ не може — перерахунок
+        // пише в усі аркуші й періоди, тож обійшов би звуження (раніше це давало невхід
+        // `Calculation.Recalculate`, який не звужується). Потрібне читання БЕЗ звуження:
+        // з ролі без області або з області проєкту, але не лише з шару звуження.
+        if (!HasUnnarrowedRead(profile, await access.DocumentProjectIdAsync(documentId, ct).ConfigureAwait(false)))
+        {
+            throw new Errors.AccessDeniedException(
+                "ECR-AUTH-0403", $"Потрібне право {Permission} без звуження.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-AUTH-0403.permission",
+                    ["permission"] = Permission,
+                });
+        }
 
         // ⛔ Q-331: аркуш мусить входити в СКЛАД документа — той самий гейт,
         // що вже стоїть перед `SubmitSheetHandler` (`ФВ-3.2`). Без нього
@@ -168,6 +190,12 @@ public sealed class RecalculateDocumentHandler(
                 currentUser.UserId)
             .ConfigureAwait(false);
     }
+
+    private static bool HasUnnarrowedRead(Security.AccessProfile profile, int? projectId)
+        => profile.Permissions.Contains(Permission)
+           || (projectId is { } id
+               && profile.Scoped.TryGetValue(id, out var scoped)
+               && scoped.Permissions.Contains(Permission));
 
     /// <summary>Ціль перерахунку: документ і період.</summary>
     /// <param name="documentId">Документ.</param>

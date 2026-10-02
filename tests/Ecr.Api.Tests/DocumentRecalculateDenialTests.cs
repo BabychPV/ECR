@@ -110,7 +110,7 @@ public sealed class DocumentRecalculateDenialTests(SqlServerFixture sql)
         db.Roles.Add(role);
         await db.SaveChangesAsync().ConfigureAwait(false);
 
-        db.RolePermissions.Add(new RolePermission(role.Id, "Calculation.Recalculate"));
+        db.RolePermissions.Add(new RolePermission(role.Id, "Document.View"));
         db.RoleAssignments.Add(new RoleAssignment(role.Id, user.Id, null));
         db.ResourceGrants.Add(new ResourceGrant(role.Id, ResourceKind.Project, document.ProjectId, GrantLevel.Write));
         await db.SaveChangesAsync().ConfigureAwait(false);

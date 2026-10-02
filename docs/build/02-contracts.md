@@ -3835,7 +3835,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/documents/{id}/rows` | — | 1 |
 | `POST` | `/api/v1/documents/{id}/validate` | `Document.View` | 2 |
 | `GET` | `/api/v1/documents/{id}/validation` | `Document.View` | 2 |
-| `POST` | `/api/v1/documents/{id}/recalculate` | `Calculation.Recalculate` | 2 |
+| `POST` | `/api/v1/documents/{id}/recalculate` | `Document.View` | 2 |
 | `POST` | `/api/v1/documents/{id}/submit` | — | 3 |
 | `POST` | `/api/v1/documents/{id}/approve` | — | 3 |
 | `POST` | `/api/v1/documents/{id}/reopen` | `Document.Reopen` | 3 |

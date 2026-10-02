@@ -57,7 +57,7 @@ function currentUser(options: {
     // поки вона на екрані, компонент точно відрендерився і профіль доїхав,
     // тож відсутність «Submit» означає саме рішення про грант, а не те, що
     // тест зазирнув до першого рендеру.
-    permissions: ['Calculation.Recalculate', 'Document.Reopen'],
+    permissions: ['Document.View', 'Document.Reopen'],
     simulatedForUserId: null,
     userId: 9,
     userName: 'tester',
