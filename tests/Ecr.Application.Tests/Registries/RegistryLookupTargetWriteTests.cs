@@ -106,10 +106,28 @@ public sealed class RegistryLookupTargetWriteTests
         Assert.Equal("TARGET", error.Params["expectedRegistry"]);
     }
 
-    private Task<RegistryEntryWriteResult> Write()
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Requirement", "ФВ-8.11")]
+    public async Task Поле_Lookup_із_ціллю_відхиляє_неіснуючий_id_запису_як_lookupEntryNotFound()
+    {
+        // Збережена перевірка зі сценарію RegistrySyncApplyTests: раніше її давав стенд із Lookup без
+        // цілі, тепер ту ціль вимагає writer, а неіснуючий id перевіряється саме на полі З ціллю.
+        _link.PointTo(TargetId);
+        _registries.FindEntryAsync(777L, Arg.Any<CancellationToken>()).Returns((RegistryEntry?)null);
+
+        var result = await Write(777L);
+
+        Assert.False(result.Applied);
+        var error = Assert.Single(result.Errors);
+        Assert.Equal("err.ECR-REG-0422.lookupEntryNotFound", error.MessageKey);
+        Assert.Equal("777", error.Params!["value"]);
+    }
+
+    private Task<RegistryEntryWriteResult> Write(long linkValue = ForeignEntryId)
         => new RegistryEntryWriter(_registries, _uow, _audit, _user, _clock).WriteAsync(
             new RegistryEntryWriteBatch(
-                OwnerId, [new RegistryEntryWrite("NEW1", new Dictionary<string, object?> { ["LINK"] = ForeignEntryId })])
+                OwnerId, [new RegistryEntryWrite("NEW1", new Dictionary<string, object?> { ["LINK"] = linkValue })])
             { CreateOnly = true },
             CancellationToken.None);
 
