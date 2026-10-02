@@ -78,6 +78,7 @@ public static class RegistryFieldSnapshotLoader
 
         var valuesByEntry = await ListValuesAsync(registries, [.. neededFieldsByEntry.Keys], ct).ConfigureAwait(false);
         var snapshot = new Dictionary<long, IReadOnlyDictionary<string, ExpressionValue>>();
+        Dictionary<long, List<string>>? unproven = null;
 
         foreach (var (entryId, fieldCodes) in neededFieldsByEntry)
         {
@@ -92,14 +93,20 @@ public static class RegistryFieldSnapshotLoader
 
             var perEntry = new Dictionary<string, ExpressionValue>(StringComparer.OrdinalIgnoreCase);
 
+            List<string>? emptyFields = null;
+
             foreach (var fieldCode in fieldCodes)
             {
-                if (!fieldDefs.TryGetValue(fieldCode, out var fieldDef)
-                    || !byFieldDefId.TryGetValue(fieldDef.Id, out var registryValue))
+                if (!fieldDefs.TryGetValue(fieldCode, out var fieldDef))
                 {
-                    // Немає такого поля або запис ще не заповнив його —
-                    // `GetRegistryField` віддасть #REF на відсутній ключ; тут
-                    // просто нема що покласти в знімок.
+                    // Немає такого поля — `GetRegistryField` віддасть #REF на
+                    // відсутній ключ; у знімок класти нема що.
+                    continue;
+                }
+
+                if (!byFieldDefId.TryGetValue(fieldDef.Id, out var registryValue))
+                {
+                    (emptyFields ??= []).Add(fieldCode);
                     continue;
                 }
 
@@ -107,11 +114,51 @@ public static class RegistryFieldSnapshotLoader
                 {
                     perEntry[fieldCode] = mapped;
                 }
+                else if (IsEmpty(registryValue, fieldDef.DataType))
+                {
+                    (emptyFields ??= []).Add(fieldCode);
+                }
+            }
+
+            if (emptyFields is not null)
+            {
+                // RT-24 (Д-2, R-11): ПОРОЖНЄ поле існуючого запису — `null`, а не #REF.
+                // Запис, який має хоч одне значення, існує напевно; решту (жодного
+                // значення) перевіряє ОДИН пакетний запит — лише коли є що перевіряти,
+                // тож повністю заповнені довідники нових звернень не отримують.
+                if (byFieldDefId.Count > 0)
+                {
+                    foreach (var code in emptyFields)
+                    {
+                        perEntry[code] = ExpressionValue.Null;
+                    }
+                }
+                else
+                {
+                    (unproven ??= []).Add(entryId, emptyFields);
+                }
             }
 
             if (perEntry.Count > 0)
             {
                 snapshot[entryId] = perEntry;
+            }
+        }
+
+        if (unproven is not null)
+        {
+            var existing = await registries.FindExistingEntryIdsAsync([.. unproven.Keys], ct).ConfigureAwait(false);
+
+            foreach (var (entryId, emptyFields) in unproven)
+            {
+                // Запису немає (чи сховище не знає його) — #REF, як і раніше.
+                if (existing is null || !existing.Contains(entryId))
+                {
+                    continue;
+                }
+
+                snapshot[entryId] = emptyFields.ToDictionary(
+                    code => code, _ => ExpressionValue.Null, StringComparer.OrdinalIgnoreCase);
             }
         }
 
@@ -141,6 +188,19 @@ public static class RegistryFieldSnapshotLoader
             .GroupBy(v => v.RegistryEntryId)
             .ToDictionary(g => g.Key, g => g.ToList());
     }
+
+    /// <summary>Чи поле порожнє: значення ВІДСУТНЄ в колонці свого типу (одиниця без знімка — не порожнє).</summary>
+    private static bool IsEmpty(RegistryValue value, CellDataType dataType)
+        => dataType switch
+        {
+            CellDataType.Decimal or CellDataType.Int => value.ValueNumeric is null,
+            CellDataType.String => value.ValueString is null,
+            CellDataType.Bool => value.ValueBool is null,
+            CellDataType.Date => value.ValueDate is null,
+            CellDataType.Lookup => value.ValueRefEntryId is null,
+            CellDataType.Unit => value.ValueUnitId is null,
+            _ => false,
+        };
 
     /// <summary>Значення поля довідника як значення виразу; типізовано за <c>RegistryFieldDef.DataType</c>.</summary>
     /// <remarks>

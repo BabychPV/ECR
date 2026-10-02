@@ -224,6 +224,47 @@ public sealed class RegistryFieldRecalculationTests
         Assert.Equal(99m, Assert.Single(Applied()).Value.ValueNumeric);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "ФВ-8.1")]
+    public async Task Порожнє_поле_довідника_null()
+    {
+        // RT-24 (Д-2, R-11): запис існує, поле "Limit" не заповнене — REGFIELD дає
+        // null, а не #REF. Видно через IFERROR: #REF він ловив би і писав -1 (стара
+        // поведінка), null проходить крізь нього, і нічого не пишеться.
+        Arrange(fieldValue: 1m, withRegistryDependency: true, formulaText: "IFERROR(REGFIELD([Permit], 'Limit'), -1)");
+        var empty = new RegistryValue(EntryId, _fieldDefId);
+        empty.Set(CellDataType.Decimal, null, unitId: null);
+        _registry.ListValuesAsync(EntryId, Arg.Any<CancellationToken>())
+            .Returns((IReadOnlyList<RegistryValue>)[empty]);
+
+        var written = await Service().RecalculateAllAsync(DocumentId, Period, CancellationToken.None);
+
+        Assert.Equal(0, written);
+        Assert.DoesNotContain(
+            _cells.ReceivedCalls(), c => c.GetMethodInfo().Name
+                is nameof(ICellStore.ApplyAsync) or nameof(ICellStore.ApplyBatchAsync));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "ФВ-8.1")]
+    public async Task Відсутній_запис_довідника_лишається_REF_і_IFERROR_його_ловить()
+    {
+        // Запису немає зовсім (жодного значення, FindExistingEntryIds його не знає) —
+        // #REF, як і раніше: IFERROR підставляє -1.
+        Arrange(fieldValue: 1m, withRegistryDependency: true, formulaText: "IFERROR(REGFIELD([Permit], 'Limit'), -1)");
+        _registry.ListValuesAsync(EntryId, Arg.Any<CancellationToken>())
+            .Returns((IReadOnlyList<RegistryValue>)[]);
+        _registry.FindExistingEntryIdsAsync(Arg.Any<IReadOnlyCollection<long>>(), Arg.Any<CancellationToken>())
+            .Returns((IReadOnlySet<long>)new HashSet<long>());
+
+        var written = await Service().RecalculateAllAsync(DocumentId, Period, CancellationToken.None);
+
+        Assert.Equal(1, written);
+        Assert.Equal(-1m, Assert.Single(Applied()).Value.ValueNumeric);
+    }
+
     private void SetRegistryValue(decimal amount)
     {
         var value = new RegistryValue(EntryId, _fieldDefId);
@@ -243,7 +284,9 @@ public sealed class RegistryFieldRecalculationTests
     /// <c>DependencyExtractor.AddRegistryDependency</c> — той метод не
     /// публічний, тому мутація тут відтворена станом графа, а не викликом.
     /// </param>
-    private void Arrange(decimal fieldValue, bool withRegistryDependency)
+    /// <param name="formulaText">Текст формули колонки <c>Result</c>.</param>
+    private void Arrange(
+        decimal fieldValue, bool withRegistryDependency, string formulaText = "REGFIELD([Permit], 'Limit')")
     {
         var builder = new TemplateBuilder { TemplateVersionId = Version };
         var sheet = builder.Sheet("Water");
@@ -258,7 +301,7 @@ public sealed class RegistryFieldRecalculationTests
         _permitId = permitColumn.Id;
         _resultId = resultColumn.Id;
 
-        var formula = new FormulaDef(_table.Id, FormulaScope.Column, "REGFIELD([Permit], 'Limit')", ExpressionDialect.Template);
+        var formula = new FormulaDef(_table.Id, FormulaScope.Column, formulaText, ExpressionDialect.Template);
         typeof(Ecr.Domain.Abstractions.Entity<int>).GetProperty("Id")!.SetValue(formula, 100);
         typeof(FormulaDef).GetProperty(nameof(FormulaDef.ColumnDefId))!.SetValue(formula, _resultId);
         _table.AddFormula(formula);
