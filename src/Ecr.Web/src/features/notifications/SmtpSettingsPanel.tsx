@@ -27,6 +27,7 @@ import {
   type SmtpSettings,
   type SmtpSettingsInput,
 } from './api';
+import { showProbeResult } from './probeResult';
 
 /**
  * Налаштування SMTP, які адміністратор задає в системі (`D-263`, `GET/PUT /notifications/smtp`).
@@ -59,15 +60,7 @@ export function SmtpSettingsPanel(): JSX.Element {
 
   const test = useMutation({
     mutationFn: (to: string) => testSmtpSettings(to),
-    onSuccess: (result) => {
-      if (result.ok) {
-        showDone(t('notifications.testOk'));
-        return;
-      }
-
-      const key = result.messageKey ?? null;
-      showApiError(new Error(key === null ? (result.error ?? t('notifications.testFailed')) : t(key)));
-    },
+    onSuccess: showProbeResult,
     onError: showApiError,
   });
 
@@ -199,7 +192,15 @@ export function SmtpSettingsPanel(): JSX.Element {
       />
 
       <Group justify="flex-end">
-        <Button loading={saveLoading} disabled={draft === null} onClick={() => save.mutate(form)}>
+        <Button
+          loading={saveLoading}
+          disabled={draft === null}
+          onClick={() => {
+            // ⚠ До порогу `usePendingLoading` кнопка ще активна: другий клік не шле другий PUT.
+            if (save.isPending) return;
+            save.mutate(form);
+          }}
+        >
           {t('smtp.save')}
         </Button>
       </Group>
@@ -215,7 +216,11 @@ export function SmtpSettingsPanel(): JSX.Element {
           variant="default"
           loading={testLoading}
           disabled={testTo.trim().length === 0 || draft !== null}
-          onClick={() => test.mutate(testTo.trim())}
+          onClick={() => {
+            // ⚠ Друга проба поверх першої — другий лист і зайвий крок квоти проб (`D-263`).
+            if (test.isPending) return;
+            test.mutate(testTo.trim());
+          }}
         >
           {t('smtp.testSend')}
         </Button>

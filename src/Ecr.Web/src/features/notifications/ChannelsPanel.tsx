@@ -33,6 +33,7 @@ import {
   type NotificationChannelSettings,
 } from './api';
 import { ChannelRolesField } from './ChannelRolesField';
+import { showProbeResult } from './probeResult';
 import { TransportSource } from './TransportSource';
 import { usePendingLoading } from '@/features/common/usePendingLoading';
 
@@ -133,15 +134,7 @@ export function ChannelsPanel(): JSX.Element {
      * текстом сервера — коли ні: власного «не вдалося» тут бути не може
      * (`ФВ-14.24`).
      */
-    onSuccess: (result) => {
-      if (result.ok) {
-        showDone(t('notifications.testOk'));
-        return;
-      }
-
-      const key = result.messageKey ?? null;
-      showApiError(new Error(key === null ? (result.error ?? t('notifications.testFailed')) : t(key)));
-    },
+    onSuccess: showProbeResult,
     onError: showApiError,
   });
 
