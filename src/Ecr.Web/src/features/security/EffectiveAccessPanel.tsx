@@ -6,7 +6,17 @@ import type { EffectiveAccessContribution, EffectiveAccessView } from '@/api/typ
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { t } from '@/shared/i18n';
 
-type Kind = 'Registry' | 'Project';
+type Kind = 'Registry' | 'Project' | 'Sheet' | 'Table' | 'Column';
+
+/** Аркуш, таблиця й колонка — id версії шаблону, спільної для проєктів: без проєкту рівень невизначений. */
+function needsProject(kind: Kind): boolean {
+  return kind === 'Sheet' || kind === 'Table' || kind === 'Column';
+}
+
+interface Asked {
+  resource: string;
+  projectId: number | null;
+}
 
 /** Підпис області внеску (`EffectiveAccessContribution.scope`); ключі — літерали, щоб їх бачив сторож каталогу. */
 function scopeLabel(scope: string): string {
@@ -33,26 +43,32 @@ function scopeLabel(scope: string): string {
  * немає доступу», коли роль начебто є.
  *
  * ⚠ Запит іде лише після «Пояснити»: порожня форма нічого не питає в сервера.
+ *
+ * ⚠ Аркуш, таблиця, колонка (`ФВ-6.16`): потрібен проєкт, відповідь несе застереження про стан документа,
+ * а внески — «успадковано від …» (`inheritedFrom`).
  */
 export function EffectiveAccessPanel({ userId }: { userId: number }): JSX.Element {
   const [kind, setKind] = useState<Kind>('Registry');
   const [id, setId] = useState<number | ''>('');
-  const [asked, setAsked] = useState<string | null>(null);
+  const [projectId, setProjectId] = useState<number | ''>('');
+  const [asked, setAsked] = useState<Asked | null>(null);
 
   const view = useQuery({
-    queryKey: ['effective-access', userId, asked],
+    queryKey: ['effective-access', userId, asked?.resource ?? null, asked?.projectId ?? null],
     queryFn: () =>
       apiFetch<EffectiveAccessView>(
-        `/api/v1/security/users/${userId}/effective-access?resource=${encodeURIComponent(asked ?? '')}`,
+        `/api/v1/security/users/${userId}/effective-access?resource=${encodeURIComponent(asked?.resource ?? '')}` +
+          (asked?.projectId == null ? '' : `&projectId=${String(asked.projectId)}`),
       ),
     enabled: asked !== null,
   });
+  const projectMissing = needsProject(kind) && (projectId === '' || projectId < 1);
 
   return (
     <Stack gap="sm" mt="md" data-testid="effective-access-panel">
       <Title order={5}>{t('effectiveAccess.title')}</Title>
       <Text size="sm" c="dimmed">
-        {t('effectiveAccess.hint')}
+        {t('effectiveAccess.hintAll')}
       </Text>
 
       <Group align="flex-end" gap="sm" wrap="wrap">
@@ -63,6 +79,9 @@ export function EffectiveAccessPanel({ userId }: { userId: number }): JSX.Elemen
           data={[
             { value: 'Registry', label: t('effectiveAccess.kindRegistry') },
             { value: 'Project', label: t('effectiveAccess.kindProject') },
+            { value: 'Sheet', label: t('effectiveAccess.kindSheet') },
+            { value: 'Table', label: t('effectiveAccess.kindTable') },
+            { value: 'Column', label: t('effectiveAccess.kindColumn') },
           ]}
         />
         <NumberInput
@@ -74,9 +93,25 @@ export function EffectiveAccessPanel({ userId }: { userId: number }): JSX.Elemen
           allowNegative={false}
           hideControls
         />
+        {needsProject(kind) && (
+          <NumberInput
+            label={t('effectiveAccess.projectId')}
+            value={projectId}
+            onChange={(value) => setProjectId(typeof value === 'number' ? value : '')}
+            min={1}
+            allowDecimal={false}
+            allowNegative={false}
+            hideControls
+          />
+        )}
         <Button
-          disabled={id === '' || id < 1}
-          onClick={() => setAsked(`${kind}:${String(id)}`)}
+          disabled={id === '' || id < 1 || projectMissing}
+          onClick={() =>
+            setAsked({
+              resource: `${kind}:${String(id)}`,
+              projectId: needsProject(kind) && projectId !== '' ? projectId : null,
+            })
+          }
         >
           {t('effectiveAccess.explain')}
         </Button>
@@ -106,6 +141,14 @@ function EffectiveAccessResult({ view }: { view: EffectiveAccessView }): JSX.Ele
           {view.resource}
         </Badge>
       </Group>
+
+      {/* ⛔ Для аркуша, таблиці й колонки сервер не знає стану документа й звужень за періодом: без цього
+          застереження поруч із рівнем розріз брехав би про те, що людина зможе зробити з коміркою зараз. */}
+      {view.caveat != null && (
+        <Alert color="statusWarning" data-testid="effective-access-caveat">
+          {t('effectiveAccess.caveat')}
+        </Alert>
+      )}
 
       {/* ⛔ Слово, а не лише колір: заборона виграє над усім, і це читається тими, хто не бачить кольору. */}
       {view.isDenied && (
@@ -161,7 +204,14 @@ function ContributionRow({ c }: { c: EffectiveAccessContribution }): JSX.Element
           ? t('effectiveAccess.sourcePermission', { permission: c.permissionCode ?? '' })
           : t('effectiveAccess.sourceGrant')}
       </Table.Td>
-      <Table.Td>{c.roleCode}</Table.Td>
+      <Table.Td>
+        {c.roleCode}
+        {c.inheritedFrom != null && (
+          <Text size="xs" c="dimmed">
+            {t('effectiveAccess.inheritedFrom', { resource: c.inheritedFrom })}
+          </Text>
+        )}
+      </Table.Td>
       <Table.Td>
         {c.principalSid === null
           ? t('effectiveAccess.viaPersonal')
