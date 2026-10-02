@@ -284,7 +284,7 @@ Get-ChildItem docs/build/questions -Filter 'Q-*.md' |
 | Перерахунок | свій документ — за `Document.View` + видимість (Coalesced для не-власників `Calculation.Recalculate`); ⚠ ліміт частоти перерахунку — у наступному RC |
 | Ролі | перелік ролей обрізається `Take(500)` |
 | ent5/ent6 | P3: `Deny` vs `ProjectNotVisible`, `efsync` (TOCTOU/1205/Degraded-проксі), сирі JSON-колонки, `If-Match` на `PUT` опису довідника |
-| Не в RC | A1 deny при міграції версії шаблону (fail-open кеш профілю виправлено в lane, рев'ю триває); у чергах `sec-s3s6`, `last-admin`, ліміт частоти перерахунку |
+| Не в RC | A1 deny при міграції версії шаблону (fail-open кеш профілю виправлено, влито e9f04bce); у чергах `sec-s3s6`, `last-admin`, ліміт частоти перерахунку |
 
 ---
 
