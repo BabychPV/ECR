@@ -6430,6 +6430,10 @@ USING (VALUES
     -- COLL:recalc-rl ── Межа частоти перерахунку документа (рекомендація безпекового рев'ю «Аудит») ──
     (N'err.ECR-REQ-0429.tooManyRecalculations', N'en', N'Too many recalculation requests in a short time. Wait a moment and try again; the Retry-After header says how long.', 1)
     -- COLL:recalc-rl ── кінець секції ──
+    -- CL:states-a11y-2 ── поле Lookup без цілі у вкладці «Зв'язки» (стани нових панелей 2) ──
+    (N'registries.relationTargetMissing', N'en', N'Target not set: choose a registry', 1),
+    -- ru/kz — окремою порцією CL:states-a11y-2 у блоці I18N нижче.
+    -- CL:states-a11y-2 ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -15072,6 +15076,17 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:sec-s3s6 ── кінець секції ──
+
+-- CL:states-a11y-2 ── ru/kz поля Lookup без цілі (стани нових панелей 2); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'registries.relationTargetMissing', N'ru', N'Цель не задана: выберите справочник'),
+    (N'registries.relationTargetMissing', N'kz', N'Мақсат берілмеген: анықтамалықты таңдаңыз')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- CL:states-a11y-2 ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

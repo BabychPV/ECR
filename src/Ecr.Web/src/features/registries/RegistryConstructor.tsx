@@ -382,15 +382,23 @@ export function RegistryRelations({
                             : `#${String(current)}`,
                         },
                       ];
+                  // ⚠ Поле Lookup без цілі (давні дані до ent6 R1): без підпису вибір лишався
+                  // порожнім і без пояснення. Підпис — вимкнена опція, обрати її знову не можна.
+                  const missing = current === null || current === undefined;
                   return (
                     <NativeSelect
                       size="xs"
                       aria-label={t('registries.relationTargetFor', { field: field.code })}
-                      value={current === null || current === undefined ? '' : String(current)}
+                      error={missing}
+                      value={missing ? '' : String(current)}
                       // ⛔ ent6 R1: «—» (зняти ціль) тут немає: поле Lookup без цілі приймало запис
                       // БУДЬ-ЯКОГО довідника, і сервер такий стан не приймає (`lookupTargetUnknown`).
                       // `options` = перелік + поточна ціль, якщо перелік її ще не містить.
-                      data={options}
+                      data={
+                        missing
+                          ? [{ value: '', label: t('registries.relationTargetMissing'), disabled: true }, ...options]
+                          : options
+                      }
                       onChange={(event) => {
                         if (event.currentTarget.value !== '') {
                           onChangeLink(field.id, Number(event.currentTarget.value));

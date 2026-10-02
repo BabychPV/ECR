@@ -10,7 +10,8 @@ import { RegistryRelations } from '@/features/registries/RegistryConstructor';
  *
  * Мутаційні докази (лише локально): без опції поточної цілі в `RegistryRelations` — поки перелік
  * довідників не прочитався, вибір показує «—» («зв'язку немає»); без перевірки `Composition` —
- * незмінний зв'язок отримує вибір.
+ * незмінний зв'язок отримує вибір; без опції-підпису `relationTargetMissing` поле Lookup без цілі
+ * показує порожній вибір без пояснення і без `aria-invalid`.
  */
 const Definition: RegistryDefinitionDto = {
   id: 4,
@@ -89,5 +90,36 @@ describe('Зв\'язки: стани', () => {
     expect(selects[0]?.getAttribute('aria-label')).toContain('Substance');
     expect(screen.getByText('PERMIT_LINE')).toBeDefined();
     expect(screen.getByText('12')).toBeDefined();
+  });
+
+  it('поле Lookup без цілі (давні дані) — підпис «ціль не задано», aria-invalid, обрати підпис не можна', () => {
+    const onChangeLink = vi.fn();
+    const legacy: RegistryDefinitionDto = {
+      ...Definition,
+      relations: [{ ...Definition.relations[0]!, targetRegistryDefId: null, targetRegistryCode: null }],
+    };
+    show(
+      <RegistryRelations
+        definition={legacy}
+        canEdit
+        registryOptions={[{ value: '5', label: 'Substances (SUBSTANCE)' }]}
+        onChangeLink={onChangeLink}
+      />,
+    );
+
+    const select = screen.getByRole('combobox', { name: /registries\.relationTargetFor/ }) as HTMLSelectElement;
+    expect(select.value).toBe('');
+    expect(select.selectedOptions[0]?.textContent).toMatch(/registries\.relationTargetMissing/);
+    expect((select.selectedOptions[0] as HTMLOptionElement).disabled).toBe(true);
+    expect(select.getAttribute('aria-invalid')).toBe('true');
+    expect(onChangeLink).not.toHaveBeenCalled();
+  });
+
+  it('поле з ціллю не позначене як помилкове і підпису «ціль не задано» не має', () => {
+    show(<RegistryRelations definition={Definition} canEdit registryOptions={[]} onChangeLink={vi.fn()} />);
+
+    const select = screen.getByRole('combobox', { name: /registries\.relationTargetFor/ }) as HTMLSelectElement;
+    expect(select.getAttribute('aria-invalid')).not.toBe('true');
+    expect(screen.queryByText(/registries\.relationTargetMissing/)).toBeNull();
   });
 });
