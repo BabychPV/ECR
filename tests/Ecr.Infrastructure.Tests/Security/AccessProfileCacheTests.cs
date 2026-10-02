@@ -93,6 +93,55 @@ public sealed class AccessProfileCacheTests : IDisposable
         Assert.False(_memory.TryGetValue(AccessProfileCache.Key(UserId, "s1", ""), out _));
     }
 
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    public async Task InvalidateUser_видаляє_всі_записи_користувача_за_будь_якого_відбитку_груп_і_не_чіпає_інших()
+    {
+        var cache = new AccessProfileCache(_memory);
+        var builds = 0;
+        await cache.GetOrCreateAsync(UserId, "s1", "", _ => Build(ref builds, "s1"), CancellationToken.None);
+        await cache.GetOrCreateAsync(UserId, "s1", "fp-groups", _ => Build(ref builds, "s1"), CancellationToken.None);
+        await cache.GetOrCreateAsync(UserId + 1, "s9", "", _ => Build(ref builds, "s9"), CancellationToken.None);
+
+        cache.InvalidateUser(UserId);
+
+        // ⛔ Мутація: eviction лише за ключем із порожнім відбитком лишає запис із групами (fail-open).
+        Assert.False(_memory.TryGetValue(AccessProfileCache.Key(UserId, "s1", ""), out _));
+        Assert.False(_memory.TryGetValue(AccessProfileCache.Key(UserId, "s1", "fp-groups"), out _));
+        Assert.True(_memory.TryGetValue(AccessProfileCache.Key(UserId + 1, "s9", ""), out _));
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    public async Task InvalidateAll_скидає_весь_кеш_і_нові_записи_кешуються_знову()
+    {
+        var cache = new AccessProfileCache(_memory);
+        var builds = 0;
+        await cache.GetOrCreateAsync(UserId, "s1", "a", _ => Build(ref builds, "s1"), CancellationToken.None);
+        await cache.GetOrCreateAsync(UserId + 1, "s9", "b", _ => Build(ref builds, "s9"), CancellationToken.None);
+
+        cache.InvalidateAll();
+
+        Assert.False(_memory.TryGetValue(AccessProfileCache.Key(UserId, "s1", "a"), out _));
+        Assert.False(_memory.TryGetValue(AccessProfileCache.Key(UserId + 1, "s9", "b"), out _));
+
+        await cache.GetOrCreateAsync(UserId, "s1", "a", _ => Build(ref builds, "s1"), CancellationToken.None);
+        Assert.True(_memory.TryGetValue(AccessProfileCache.Key(UserId, "s1", "a"), out _));
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    public async Task Профіль_побудований_під_час_скидання_не_кешується_застарілим()
+    {
+        var cache = new AccessProfileCache(_memory);
+        var builds = 0;
+
+        await cache.GetOrCreateAsync(UserId, "s1", "", _ =>
+        {
+            cache.InvalidateUser(UserId); // скидання посеред побудови
+            return Build(ref builds, "s1");
+        }, CancellationToken.None);
+
+        Assert.False(_memory.TryGetValue(AccessProfileCache.Key(UserId, "s1", ""), out _));
+    }
+
     /// <inheritdoc />
     public void Dispose() => _memory.Dispose();
 

@@ -146,13 +146,11 @@ public sealed class DocumentVersionMigrationStore(EcrDbContext db) : IDocumentVe
             .ConfigureAwait(false);
     }
 
-    /// <summary>Стеля переліку користувачів для скидання кешу профілів.</summary>
-    private const int MaxGrantedUsers = 100_000;
-
     /// <inheritdoc />
-    public async Task<IReadOnlyList<int>> ListUsersWithGrantsAsync(VersionMigrationPlan plan, CancellationToken ct)
+    public async Task<GrantedUsers> ListUsersWithGrantsAsync(VersionMigrationPlan plan, int limit, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(plan);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(limit);
 
         var keys = plan.Sheets.Keys.Select(i => new { k = (byte)ResourceKind.Sheet, i })
             .Concat(plan.Tables.Keys.Select(i => new { k = (byte)ResourceKind.Table, i }))
@@ -160,11 +158,11 @@ public sealed class DocumentVersionMigrationStore(EcrDbContext db) : IDocumentVe
             .ToList();
         if (keys.Count == 0)
         {
-            return [];
+            return new GrantedUsers([], Overflow: false);
         }
 
         var json = JsonSerializer.Serialize(keys);
-        return await db.Database
+        var ids = await db.Database
             .SqlQuery<int>($"""
                 SELECT DISTINCT a.UserId AS Value
                 FROM   sec.RoleAssignment a
@@ -173,9 +171,14 @@ public sealed class DocumentVersionMigrationStore(EcrDbContext db) : IDocumentVe
                 WHERE  a.UserId IS NOT NULL
                 """)
             .OrderBy(id => id)
-            .Take(MaxGrantedUsers)
+            .Take(limit + 1)
             .ToListAsync(ct)
             .ConfigureAwait(false);
+
+        // Зайвий (limit+1-й) рядок — ознака переповнення: решту не видно, тож скидається весь кеш.
+        return ids.Count > limit
+            ? new GrantedUsers([.. ids.Take(limit)], Overflow: true)
+            : new GrantedUsers(ids, Overflow: false);
     }
 
     private static SqlParameter Json(string name, IEnumerable<object> rows)

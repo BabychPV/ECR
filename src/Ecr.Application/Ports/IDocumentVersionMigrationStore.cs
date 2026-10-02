@@ -13,6 +13,11 @@ public sealed record VersionMigrationScope(
     IReadOnlyDictionary<int, long> HeaderValues,
     int LockedSheets);
 
+/// <summary>Користувачі, чиї профілі в кеші треба скинути після переносу.</summary>
+/// <param name="Ids">Користувачі (не більше стелі).</param>
+/// <param name="Overflow">Користувачів більше за стелю: перелік неповний, скидати треба ВЕСЬ кеш.</param>
+public sealed record GrantedUsers(IReadOnlyList<int> Ids, bool Overflow);
+
 /// <summary>Сховище переносу документів проєкту на нову версію шаблону (ФВ-7.5).</summary>
 public interface IDocumentVersionMigrationStore
 {
@@ -41,7 +46,10 @@ public interface IDocumentVersionMigrationStore
     /// Користувачі з ПРЯМИМ призначенням ролі, яка має гранти на аркуші/таблиці/колонки
     /// вихідної версії, що переносяться: їхні профілі в кеші треба скинути після коміту.
     /// </summary>
-    public Task<IReadOnlyList<int>> ListUsersWithGrantsAsync(VersionMigrationPlan plan, CancellationToken ct);
+    /// <param name="plan">План переносу.</param>
+    /// <param name="limit">Стеля переліку; перевищення — <see cref="GrantedUsers.Overflow"/>.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<GrantedUsers> ListUsersWithGrantsAsync(VersionMigrationPlan plan, int limit, CancellationToken ct);
 
     /// <summary>
     /// Переносить дані всіх документів проєкту за планом і перемикає версію

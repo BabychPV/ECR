@@ -198,6 +198,7 @@ public static class DependencyInjection
         services.AddSingleton(sp => new Caching.AccessProfileCache(
             sp.GetRequiredService<Microsoft.Extensions.Caching.Memory.IMemoryCache>(),
             sp.GetRequiredService<CacheLifetimes>()));
+        services.AddSingleton<IAccessProfileInvalidator>(sp => sp.GetRequiredService<Caching.AccessProfileCache>());
         services.AddSingleton<IRegistryEntryCache, Caching.RegistryEntryCache>();
         // ⛔ V-06: назовні — обгортка, що підставляє профіль суб'єкта під час
         // симуляції. `SimulationService` отримує САМУ службу: обгортці він

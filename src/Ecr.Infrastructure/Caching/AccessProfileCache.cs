@@ -1,5 +1,8 @@
+using System.Collections.Concurrent;
+using Ecr.Application.Ports;
 using Ecr.Application.Security;
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Primitives;
 
 namespace Ecr.Infrastructure.Caching;
 
@@ -8,8 +11,27 @@ namespace Ecr.Infrastructure.Caching;
 /// на кожну комірку — гарантована смерть продуктивності, бо бюджет відкриття
 /// таблиці дає на права 50 мс на весь запит (ФВ-6.10).
 /// </summary>
-public sealed class AccessProfileCache(IMemoryCache memory, CacheLifetimes? lifetimes = null)
+public sealed class AccessProfileCache(IMemoryCache memory, CacheLifetimes? lifetimes = null) : IAccessProfileInvalidator, IDisposable
 {
+    /// <inheritdoc />
+    public void Dispose()
+    {
+        _all.Dispose();
+        foreach (var source in _userTokens.Values)
+        {
+            source.Dispose();
+        }
+    }
+
+    /// <summary>Токени записів по користувачу: скасування прибирає ВСІ його записи за будь-якого відбитку груп.</summary>
+    private readonly ConcurrentDictionary<int, CancellationTokenSource> _userTokens = new();
+
+    /// <summary>Токен «усе»: скасування скидає весь кеш профілів.</summary>
+    private CancellationTokenSource _all = new();
+
+    /// <summary>Лічильник скидань: профіль, побудований ПІД ЧАС скидання, не кладеться в кеш застарілим.</summary>
+    private long _epoch;
+
     /// <summary>
     /// Один політ на ключ (`RD-05`).
     /// </summary>
@@ -36,9 +58,9 @@ public sealed class AccessProfileCache(IMemoryCache memory, CacheLifetimes? life
     /// але без стелі запис вимкненого користувача жив би в пам'яті до
     /// перезапуску процесу. Це не про доступ (штамп змінюється), а про пам'ять.
     ///
-    /// ⚠ 30 хв — це ДЕФОЛТ, а не константа: значення береться з
-    /// <c>Cache:AccessProfileSlidingMinutes</c> (`S-13`). Ключ був у
-    /// <c>appsettings.json</c> без читача, тобто виставлені там 60 хв не діяли.
+    /// ⚠ 60 хв — це ДЕФОЛТ (<see cref="CacheLifetimes.DefaultAccessProfileMinutes"/>),
+    /// а не константа: значення береться з <c>Cache:AccessProfileSlidingMinutes</c>
+    /// (`S-13`; <c>appsettings.json</c> теж 60). Колишні «30 хв» у коментарях застаріли.
     /// </remarks>
     private TimeSpan Lifetime => (lifetimes ?? CacheLifetimes.Default).AccessProfile;
 
@@ -78,19 +100,22 @@ public sealed class AccessProfileCache(IMemoryCache memory, CacheLifetimes? life
         // ⛔ Вхід у систему сотні людей о 9:00 — це сотня промахів на РІЗНИХ
         // ключах, але одна людина з десятком вкладок дає десяток промахів на
         // ОДНОМУ, і кожен будував профіль окремо (`RD-05`).
-        return await _flight.RunAsync(key, token => BuildAsync(key, factory, token), ct)
+        return await _flight.RunAsync(key, token => BuildAsync(userId, key, factory, token), ct)
             .ConfigureAwait(false);
     }
 
     /// <summary>Будує профіль і кладе його в кеш — усередині одного польоту.</summary>
     private async Task<AccessProfile> BuildAsync(
-        string key, Func<CancellationToken, Task<AccessProfile>> factory, CancellationToken ct)
+        int userId, string key, Func<CancellationToken, Task<AccessProfile>> factory, CancellationToken ct)
     {
         if (memory.TryGetValue(key, out AccessProfile? ready) && ready is not null)
         {
             return ready;
         }
 
+        var epoch = Interlocked.Read(ref _epoch);
+        var all = _all;
+        var userToken = _userTokens.GetOrAdd(userId, _ => new CancellationTokenSource());
         var started = System.Diagnostics.Stopwatch.GetTimestamp();
         var profile = await factory(ct).ConfigureAwait(false);
         Observability.InfrastructureMetrics.RecordAccessProfileBuild(
@@ -100,12 +125,34 @@ public sealed class AccessProfileCache(IMemoryCache memory, CacheLifetimes? life
         // Ключ складається з користувача і штампа — тобто профіль суб'єкта ліг
         // би під ключ, за яким справжній користувач дістав би чужі права разом
         // із прапорцем IsSimulation. Симуляція рідкісна, перебудова дешева.
-        if (!profile.IsSimulation)
+        // Скидання, що сталося, поки профіль будувався, робить його можливо застарілим: віддаємо, але не кешуємо.
+        if (!profile.IsSimulation && Interlocked.Read(ref _epoch) == epoch)
         {
-            memory.Set(key, profile, Lifetime);
+            var options = new MemoryCacheEntryOptions { AbsoluteExpirationRelativeToNow = Lifetime };
+            options.AddExpirationToken(new CancellationChangeToken(all.Token));
+            options.AddExpirationToken(new CancellationChangeToken(userToken.Token));
+            memory.Set(key, profile, options);
         }
 
         return profile;
+    }
+
+    /// <inheritdoc />
+    public void InvalidateUser(int userId)
+    {
+        Interlocked.Increment(ref _epoch);
+        if (_userTokens.TryRemove(userId, out var source))
+        {
+            source.Cancel(); // не Dispose: паралельна побудова ще може взяти source.Token
+        }
+    }
+
+    /// <inheritdoc />
+    public void InvalidateAll()
+    {
+        Interlocked.Increment(ref _epoch);
+        var old = Interlocked.Exchange(ref _all, new CancellationTokenSource());
+        old.Cancel();
     }
 
     /// <summary>

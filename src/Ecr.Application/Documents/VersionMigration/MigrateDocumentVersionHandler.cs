@@ -89,8 +89,13 @@ public sealed class MigrateDocumentVersionHandler(
     IAuditWriter audit,
     IClock clock,
     IAccessDecisionService access,
-    ICurrentUser currentUser)
+    ICurrentUser currentUser,
+    IAccessProfileInvalidator profileCache,
+    Microsoft.Extensions.Logging.ILogger<MigrateDocumentVersionHandler> log)
 {
+    /// <summary>Стеля переліку користувачів для скидання кешу профілів; більше — скидається весь кеш.</summary>
+    public const int MaxInvalidatedUsers = 100_000;
+
     /// <summary>Право операції.</summary>
     public const string Permission = "Template.Edit";
 
@@ -140,7 +145,7 @@ public sealed class MigrateDocumentVersionHandler(
         }
 
         DocumentVersionMigrationDto? result = null;
-        IReadOnlyList<int> grantedUsers = [];
+        var grantedUsers = new GrantedUsers([], Overflow: false);
         await uow.ExecuteInTransactionAsync(async innerCt =>
         {
             // ⛔ План перераховується ПІД блоком рядка проєкту: між сухим
@@ -158,18 +163,16 @@ public sealed class MigrateDocumentVersionHandler(
                 documentId, projectId, current, target, mode, archived, dryRun: false, innerCt).ConfigureAwait(false);
             ThrowIfRefused(dto);
 
-            grantedUsers = await store.ListUsersWithGrantsAsync(plan, innerCt).ConfigureAwait(false);
+            grantedUsers = await store.ListUsersWithGrantsAsync(plan, MaxInvalidatedUsers, innerCt).ConfigureAwait(false);
             await store.ApplyAsync(projectId, target.Id, plan, innerCt).ConfigureAwait(false);
             result = dto with { Applied = true };
         }, ct).ConfigureAwait(false);
 
         // ⛔ Профіль у кеші не бачить зміни грантів, яка не рухає відбиток груп
-        // (користувачі з прямим призначенням ролі мають порожній відбиток): без
-        // явного скидання закрита колонка лишалася б доступною до 60 хв.
-        foreach (var userId in grantedUsers)
-        {
-            await access.InvalidateProfileAsync(userId, ct).ConfigureAwait(false);
-        }
+        // (прямі ролі): без явного скидання закрита колонка лишалася б доступною
+        // до TTL (60 хв). Скидаються ВСІ записи користувача (будь-який відбиток
+        // груп); збій або переповнення переліку — скидання всього кешу, не 500.
+        GrantProfileInvalidation.Run(profileCache, log, grantedUsers);
 
         var applied = result!;
 

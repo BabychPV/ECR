@@ -3407,6 +3407,14 @@ public interface IValidationResultStore
 з іншого шаблону чи та сама — `422 ECR-TMPL-0422`. Подія — `aud.SecurityEvent`
 (`DocumentVersionMigrated`). Сигнатури — у `src/Ecr.Application/Ports/IDocumentVersionMigrationStore.cs`.
 
+#### `IAccessProfileInvalidator`
+
+Скидання кешу профілів доступу ПРОЦЕСУ без зміни `SecurityStamp`: `InvalidateUser` видаляє
+ВСІ записи користувача (за будь-якого відбитку груп), `InvalidateAll` — весь кеш (fail-closed
+при переповненні переліку чи збої; перенос версії шаблону, ent6 A1). Кеш процесний: інші
+інстанси скидаються лише за TTL `Cache:AccessProfileSlidingMinutes` (60 хв). Сигнатури — у
+`src/Ecr.Application/Ports/IAccessProfileInvalidator.cs`.
+
 #### `IWorkflowStore`
 
 Доступ до стану робочого процесу і періоду для операцій подання, затвердження і повернення в роботу.

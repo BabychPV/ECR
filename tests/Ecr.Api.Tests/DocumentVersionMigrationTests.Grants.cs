@@ -2,6 +2,7 @@
 using System.Net;
 using System.Text.Json;
 using Ecr.Application.Common;
+using Ecr.Application.Documents.VersionMigration;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
 using Ecr.Infrastructure.Caching;
@@ -206,6 +207,78 @@ public sealed partial class DocumentVersionMigrationTests
 
         // Той самий кеш: відбиток груп мусить змінитися, і deny діє одразу.
         Assert.Equal(GrantLevel.None, await LevelAsync(s.TargetSheetDefId, s.TargetTableDefId, s.TargetColumns["C2"]).ConfigureAwait(true));
+    }
+
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-6.7")]
+    public async Task Пряма_роль_плюс_групи_профіль_у_кеші_застосунку_бачить_заборону_одразу_після_переносу()
+    {
+        const string groupSid = "S-1-5-21-000111-222333-9888";
+        var s = await ArrangeAsync(Target.DropsC3AddsC4AndRow).ConfigureAwait(true);
+        var c2Old = s.Doc.ColumnDefIds[1];
+        var (userId, roleId) = await AddRestrictedUserAsync(s, (ResourceKind.Column, c2Old, true)).ConfigureAwait(true);
+        await using (var seed = new TestDocumentBuilder(sql.ConnectionString).CreateContext())
+        {
+            seed.ResourceGrants.Add(new ResourceGrant(roleId, ResourceKind.Column, s.TargetColumns["C2"], GrantLevel.Write));
+            await seed.SaveChangesAsync().ConfigureAwait(true);
+        }
+
+        var session = Substitute.For<ICurrentUser>();
+        session.UserId.Returns(userId);
+        session.GroupSids.Returns([groupSid]); // відбиток груп непорожній, а ключ запису його містить
+
+        using var app = new EcrApiFactory(sql);
+        var cache = app.Services.GetRequiredService<AccessProfileCache>();
+
+        async Task<GrantLevel> LevelAsync(int sheet, int table, int column)
+        {
+            await using var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext();
+            var access = new AccessDecisionService(
+                db, Substitute.For<IMetadataCache>(), cache, new TestClock(DateTime.UtcNow), session, Substitute.For<IWorkflowStore>());
+            var profile = await access.BuildProfileAsync(userId, CancellationToken.None).ConfigureAwait(false);
+            return EditRules.Effective(profile, default(CellAccessContext) with
+            {
+                ProjectId = s.Doc.ProjectId, SheetDefId = sheet, TableDefId = table, ColumnDefId = column, SheetCode = s.Doc.SheetCode,
+            });
+        }
+
+        Assert.True(await LevelAsync(s.TargetSheetDefId, s.TargetTableDefId, s.TargetColumns["C2"]).ConfigureAwait(true) > GrantLevel.None);
+
+        using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
+        var response = await PostAsync(client, s, "Safe", dryRun: false).ConfigureAwait(true);
+        Assert.True(response.StatusCode == HttpStatusCode.OK, await response.Content.ReadAsStringAsync().ConfigureAwait(true));
+
+        // Профіль із групами прогріто ДО переносу: скидання за ключем із порожнім відбитком його не зачепило б.
+        Assert.Equal(GrantLevel.None, await LevelAsync(s.TargetSheetDefId, s.TargetTableDefId, s.TargetColumns["C2"]).ConfigureAwait(true));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-6.7")]
+    public async Task Перелік_користувачів_для_скидання_кешу_сигналізує_переповнення_стелі()
+    {
+        var s = await ArrangeAsync(Target.OnlyLabels).ConfigureAwait(true);
+        await AddRestrictedUserAsync(s, (ResourceKind.Sheet, s.Doc.SheetDefId, true)).ConfigureAwait(true);
+        await AddRestrictedUserAsync(s, (ResourceKind.Sheet, s.Doc.SheetDefId, true)).ConfigureAwait(true);
+
+        var plan = new VersionMigrationPlan(
+            new Dictionary<int, int> { [s.Doc.SheetDefId] = s.TargetSheetDefId },
+            new Dictionary<int, int>(), [], new Dictionary<int, int>(), new Dictionary<int, int>(), [], [], 0, 0, 0);
+
+        await using var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext();
+        var store = new Ecr.Infrastructure.Persistence.DocumentVersionMigrationStore(db);
+
+        var capped = await store.ListUsersWithGrantsAsync(plan, 1, CancellationToken.None).ConfigureAwait(true);
+        Assert.True(capped.Overflow);
+        Assert.Single(capped.Ids);
+
+        var enough = await store.ListUsersWithGrantsAsync(plan, 10, CancellationToken.None).ConfigureAwait(true);
+        Assert.False(enough.Overflow);
+        Assert.Equal(2, enough.Ids.Count);
     }
 
     private async Task<(int UserId, int RoleId)> AddRestrictedUserAsync(
