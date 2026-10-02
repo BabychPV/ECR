@@ -146,6 +146,38 @@ public sealed class DocumentVersionMigrationStore(EcrDbContext db) : IDocumentVe
             .ConfigureAwait(false);
     }
 
+    /// <summary>Стеля переліку користувачів для скидання кешу профілів.</summary>
+    private const int MaxGrantedUsers = 100_000;
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<int>> ListUsersWithGrantsAsync(VersionMigrationPlan plan, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+
+        var keys = plan.Sheets.Keys.Select(i => new { k = (byte)ResourceKind.Sheet, i })
+            .Concat(plan.Tables.Keys.Select(i => new { k = (byte)ResourceKind.Table, i }))
+            .Concat(plan.Columns.Select(c => new { k = (byte)ResourceKind.Column, i = c.SourceColumnDefId }))
+            .ToList();
+        if (keys.Count == 0)
+        {
+            return [];
+        }
+
+        var json = JsonSerializer.Serialize(keys);
+        return await db.Database
+            .SqlQuery<int>($"""
+                SELECT DISTINCT a.UserId AS Value
+                FROM   sec.RoleAssignment a
+                JOIN   sec.ResourceGrant g ON g.RoleId = a.RoleId
+                JOIN   OPENJSON({json}) WITH (k tinyint, i int) x ON x.k = g.ResourceKind AND x.i = g.ResourceId
+                WHERE  a.UserId IS NOT NULL
+                """)
+            .OrderBy(id => id)
+            .Take(MaxGrantedUsers)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+    }
+
     private static SqlParameter Json(string name, IEnumerable<object> rows)
         => new(name, System.Data.SqlDbType.NVarChar, -1) { Value = JsonSerializer.Serialize(rows) };
 
@@ -343,8 +375,10 @@ public sealed class DocumentVersionMigrationStore(EcrDbContext db) : IDocumentVe
         SELECT 2, o, n FROM @tableMap UNION ALL
         SELECT 3, o, n FROM @columnMap;
 
-        UPDATE t
-        SET    t.IsDeny = 1
+        -- ⚠ DELETE + INSERT, а не UPDATE IsDeny: відбиток груп у ключі кешу профілю
+        -- (count і max(Id) грантів ролі) від UPDATE не міняється, і профіль без
+        -- заборони жив би до 60 хв. Новий рядок дає новий max(Id) → профіль перебудується.
+        DELETE t
         FROM   sec.ResourceGrant t
         JOIN   @grantMap m ON m.k = t.ResourceKind AND m.n = t.ResourceId
         JOIN   sec.ResourceGrant g ON g.RoleId = t.RoleId AND g.ResourceKind = m.k AND g.ResourceId = m.o

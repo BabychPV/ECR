@@ -38,6 +38,12 @@ public interface IDocumentVersionMigrationStore
         CancellationToken ct);
 
     /// <summary>
+    /// Користувачі з ПРЯМИМ призначенням ролі, яка має гранти на аркуші/таблиці/колонки
+    /// вихідної версії, що переносяться: їхні профілі в кеші треба скинути після коміту.
+    /// </summary>
+    public Task<IReadOnlyList<int>> ListUsersWithGrantsAsync(VersionMigrationPlan plan, CancellationToken ct);
+
+    /// <summary>
     /// Переносить дані всіх документів проєкту за планом і перемикає версію
     /// проєкту. Викликається лише в транзакції, після
     /// <see cref="LockProjectVersionAsync"/>.

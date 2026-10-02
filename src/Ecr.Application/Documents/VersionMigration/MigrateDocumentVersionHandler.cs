@@ -23,7 +23,7 @@ namespace Ecr.Application.Documents.VersionMigration;
 /// <param name="DryRun">Сухий прогін: нічого не змінено.</param>
 /// <param name="Applied">Перенос виконано.</param>
 /// <param name="CanApply">Режим дозволяє перенос.</param>
-/// <param name="Refusals">Причини відмови: <c>structural</c>, <c>dataLoss</c>, <c>guardedWithData</c>, <c>sheetsLocked</c>, <c>projectArchived</c>, <c>grantsNotMapped</c> (є заборона на аркуші/таблиці/колонці, якої в новій версії за кодом нема).</param>
+/// <param name="Refusals">Причини відмови: <c>structural</c>, <c>dataLoss</c>, <c>guardedWithData</c>, <c>sheetsLocked</c>, <c>projectArchived</c>.</param>
 /// <param name="TransferredValues">Скільки введених значень переїде.</param>
 /// <param name="LostValues">Скільки введених значень зникло б.</param>
 /// <param name="GuardedValues">Скільки введених значень змінили б тлумачення.</param>
@@ -140,6 +140,7 @@ public sealed class MigrateDocumentVersionHandler(
         }
 
         DocumentVersionMigrationDto? result = null;
+        IReadOnlyList<int> grantedUsers = [];
         await uow.ExecuteInTransactionAsync(async innerCt =>
         {
             // ⛔ План перераховується ПІД блоком рядка проєкту: між сухим
@@ -157,9 +158,18 @@ public sealed class MigrateDocumentVersionHandler(
                 documentId, projectId, current, target, mode, archived, dryRun: false, innerCt).ConfigureAwait(false);
             ThrowIfRefused(dto);
 
+            grantedUsers = await store.ListUsersWithGrantsAsync(plan, innerCt).ConfigureAwait(false);
             await store.ApplyAsync(projectId, target.Id, plan, innerCt).ConfigureAwait(false);
             result = dto with { Applied = true };
         }, ct).ConfigureAwait(false);
+
+        // ⛔ Профіль у кеші не бачить зміни грантів, яка не рухає відбиток груп
+        // (користувачі з прямим призначенням ролі мають порожній відбиток): без
+        // явного скидання закрита колонка лишалася б доступною до 60 хв.
+        foreach (var userId in grantedUsers)
+        {
+            await access.InvalidateProfileAsync(userId, ct).ConfigureAwait(false);
+        }
 
         var applied = result!;
 
