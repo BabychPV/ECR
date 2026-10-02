@@ -209,6 +209,17 @@ public sealed class SmtpSettingsHandlersTests
     [InlineData("a@corp.example\r\nBcc: b@evil.example")]
     [InlineData("a@corp.example\nb@evil.example")]
     [InlineData("not-an-address")]
+    [InlineData("a@corp.example\0evil")]
+    [InlineData("a@corp.example\x2028Zb@evil.example")]
+    [InlineData("a@corp.example\x0085Zb@evil.example")]
+    [InlineData("\"a b\"@corp.example")]
+    [InlineData("\"a\"@corp.example")]
+    [InlineData("a@[IPv6:::1]")]
+    [InlineData("a@[127.0.0.1]")]
+    [InlineData("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa@corp.example")]
+    [InlineData("a@xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.example")]
+    [InlineData("a@corp.example.")]
+    [InlineData("a@-corp.example")]
     public async Task Проба_відхиляє_списки_роздільники_імена_відображення_і_CRLF_422_і_нічого_не_шле(string to)
     {
         Arrange();
@@ -221,6 +232,31 @@ public sealed class SmtpSettingsHandlersTests
 
         Assert.Equal("err.ECR-REQ-0422.smtpTestRecipientInvalid", bad.Details!["messageKey"]);
         await _sender.DidNotReceiveWithAnyArgs().SendAsync(default!, default!, default!, default);
+    }
+
+    /// <summary>Сама адреса (і «Від кого» в налаштуваннях) — ті самі вектори: захист не лише в пробі.</summary>
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "D-256")]
+    [InlineData("a@corp.example\0evil", false)]
+    [InlineData("a@corp.example\x2028", false)]
+    [InlineData("a@corp.example\x85", false)]
+    [InlineData("\"a b\"@corp.example", false)]
+    [InlineData("\"a\"@corp.example", false)]
+    [InlineData("a@[IPv6:::1]", false)]
+    [InlineData("a@[127.0.0.1]", false)]
+    [InlineData("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa@corp.example", false)]
+    [InlineData("a@xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.example", false)]
+    [InlineData("a@corp.example.", false)]
+    [InlineData("a@-corp.example", false)]
+    [InlineData("a@corp-.example", false)]
+    [InlineData("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa@xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.example", true)]
+    [InlineData("ops.team+probe@corp-mail.example", true)]
+    public void Адреса_відхиляє_літерали_квотування_довгі_частини_крапку_й_дефіс_і_приймає_звичайні(
+        string address, bool expected)
+    {
+        // ⛔ Мутація: прибрати нові перевірки в SmtpSettings.IsValidAddress → відхилювані рядки червоніють.
+        Assert.Equal(expected, SmtpSettings.IsValidAddress(address));
     }
 
     [Fact]
