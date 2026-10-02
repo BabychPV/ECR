@@ -41,7 +41,7 @@ public sealed class SmtpEndpointPolicyTests
     public async Task Loopback_у_будь_якому_записі_і_хибна_форма_хоста_відхиляються_на_сирому_рядку(string host)
     {
         // ⛔ Мутація: повернути `host.Trim().Trim('[', ']')` до розбору літерала → `[::1]:25` знову проходить.
-        Assert.False(await Policy().IsHostAllowedAsync(host, CancellationToken.None));
+        Assert.False(await Policy().IsHostAllowedAsync(host, failClosed: false, CancellationToken.None));
     }
 
     [Theory]
@@ -53,7 +53,7 @@ public sealed class SmtpEndpointPolicyTests
     [InlineData("relay.corp.example")]
     [InlineData("mail_relay-1.corp.example.")]
     public async Task Приватні_й_звичайні_адреси_та_імена_проходять(string host)
-        => Assert.True(await Policy().IsHostAllowedAsync(host, CancellationToken.None));
+        => Assert.True(await Policy().IsHostAllowedAsync(host, failClosed: false, CancellationToken.None));
 
     [Theory]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
@@ -71,14 +71,81 @@ public sealed class SmtpEndpointPolicyTests
     {
         // ⛔ Мутації (кожна окремо): прибрати IsCloudMetadataName; прибрати IsBlocked/IsBlockedAddress для літералів;
         // прибрати перевірку localhost. Викликаємо політику НАПРЯМУ — Validate цих випадків тут не відсікає.
-        Assert.False(await Policy().IsHostAllowedAsync(host, CancellationToken.None));
+        Assert.False(await Policy().IsHostAllowedAsync(host, failClosed: false, CancellationToken.None));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "ent6-S4")]
+    public async Task Збій_тайм_аут_і_порожня_відповідь_DNS_закривають_пробу_і_не_ламають_чергу()
+    {
+        // ⛔ Мутація: `Unresolved` → завжди true (fail-open скрізь) або завжди false (fail-closed скрізь).
+        var cases = new (string Name, Func<Task<IReadOnlyList<IPAddress>>> Resolve)[]
+        {
+            ("never", () => new TaskCompletionSource<IReadOnlyList<IPAddress>>().Task),
+            ("socket", () => Task.FromException<IReadOnlyList<IPAddress>>(new System.Net.Sockets.SocketException(11001))),
+            ("empty", () => Task.FromResult<IReadOnlyList<IPAddress>>([])),
+        };
+
+        foreach (var (name, resolve) in cases)
+        {
+            _net.Resolve = resolve;
+            var policy = new SmtpEndpointPolicy(_net) { ResolveTimeout = TimeSpan.FromMilliseconds(50) };
+
+            Assert.False(await policy.IsHostAllowedAsync("relay.corp.example", failClosed: true, CancellationToken.None), name);
+            Assert.True(await policy.IsHostAllowedAsync("relay.corp.example", failClosed: false, CancellationToken.None), name);
+        }
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "ent6-S4")]
+    public async Task Скасування_пробрасується_а_не_читається_як_тайм_аут()
+    {
+        _net.Resolve = () => new TaskCompletionSource<IReadOnlyList<IPAddress>>().Task;
+        using var cts = new CancellationTokenSource();
+        var policy = new SmtpEndpointPolicy(_net) { ResolveTimeout = TimeSpan.FromMinutes(5) };
+
+        var pending = policy.IsHostAllowedAsync("relay.corp.example", failClosed: false, cts.Token);
+        await cts.CancelAsync();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => pending);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "ent6-S4")]
+    public async Task Розв_язаний_у_loopback_відхиляється_і_в_режимі_черги()
+    {
+        _net.Resolve = () => Task.FromResult<IReadOnlyList<IPAddress>>([IPAddress.Parse("127.0.0.1")]);
+
+        Assert.False(await Policy().IsHostAllowedAsync("rebind.example", failClosed: false, CancellationToken.None));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "ent6-S4")]
+    public async Task Суворий_режим_діє_лише_всередині_Begin_і_знімається_після()
+    {
+        Assert.False(SmtpEndpointStrictness.IsStrict);
+
+        using (SmtpEndpointStrictness.Begin())
+        {
+            Assert.True(SmtpEndpointStrictness.IsStrict);
+            await Task.Yield();
+            Assert.True(SmtpEndpointStrictness.IsStrict);
+        }
+
+        Assert.False(SmtpEndpointStrictness.IsStrict);
     }
 
     private sealed class StubNetwork : IEndpointNetwork
     {
+        public Func<Task<IReadOnlyList<IPAddress>>> Resolve { get; set; } =
+            () => Task.FromResult<IReadOnlyList<IPAddress>>([IPAddress.Parse("10.0.0.5")]);
+
         public IReadOnlyList<string> AllowedHosts => [];
 
-        public Task<IReadOnlyList<IPAddress>> ResolveAsync(string host, CancellationToken ct)
-            => Task.FromResult<IReadOnlyList<IPAddress>>([IPAddress.Parse("10.0.0.5")]);
+        public Task<IReadOnlyList<IPAddress>> ResolveAsync(string host, CancellationToken ct) => Resolve();
     }
 }

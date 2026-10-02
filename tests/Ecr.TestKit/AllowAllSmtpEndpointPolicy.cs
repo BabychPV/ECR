@@ -1,4 +1,4 @@
-﻿// tests/Ecr.TestKit/AllowAllSmtpEndpointPolicy.cs
+// tests/Ecr.TestKit/AllowAllSmtpEndpointPolicy.cs
 using Ecr.Application.Ports;
 
 namespace Ecr.TestKit;
@@ -11,5 +11,5 @@ public sealed class AllowAllSmtpEndpointPolicy : ISmtpEndpointPolicy
 {
     public bool IsPortAllowed(int port) => true;
 
-    public Task<bool> IsHostAllowedAsync(string host, CancellationToken ct) => Task.FromResult(true);
+    public Task<bool> IsHostAllowedAsync(string host, bool failClosed, CancellationToken ct) => Task.FromResult(true);
 }

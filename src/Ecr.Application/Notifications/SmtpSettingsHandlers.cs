@@ -1,4 +1,4 @@
-﻿// src/Ecr.Application/Notifications/SmtpSettingsHandlers.cs
+// src/Ecr.Application/Notifications/SmtpSettingsHandlers.cs
 using Ecr.Application.Common;
 using Ecr.Application.Errors;
 using Ecr.Application.Integration;
@@ -120,7 +120,7 @@ public sealed class SaveSmtpSettingsHandler(
                 "Порт не дозволено: лише 25, 465, 587, 2525 або порти з конфігурації Smtp:AllowedPorts.", "port");
         }
 
-        if (host.Length > 0 && !await endpointPolicy.IsHostAllowedAsync(host, ct).ConfigureAwait(false))
+        if (host.Length > 0 && !await endpointPolicy.IsHostAllowedAsync(host, failClosed: true, ct).ConfigureAwait(false))
         {
             throw Invalid(
                 HostForbiddenKey,

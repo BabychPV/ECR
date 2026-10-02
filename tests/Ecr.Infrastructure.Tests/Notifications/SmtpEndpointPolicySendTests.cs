@@ -45,6 +45,30 @@ public sealed class SmtpEndpointPolicySendTests
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
     [Trait("Requirement", "ent6-S4")]
+    public async Task Нерозв_язане_ім_я_відправлення_в_черзі_йде_далі_а_в_пробі_закрите()
+    {
+        var net = Substitute.For<IEndpointNetwork>();
+        net.ResolveAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<System.Net.IPAddress>>([]));
+        var sender = new SmtpNotificationSender(
+            Config(("Smtp:Host", "no-such-relay.invalid"), ("Smtp:Port", "587"), ("Smtp:From", "ecr@corp.example")),
+            Substitute.For<ISecretProvider>(), endpointPolicy: new SmtpEndpointPolicy(net));
+
+        // Черга: політика пропускає (fail-open), далі — справжня мережева відмова DNS, а НЕ відмова політики.
+        var queued = await Assert.ThrowsAnyAsync<Exception>(
+            () => sender.SendAsync(["a@corp.example"], "s", "b", CancellationToken.None));
+        Assert.IsNotType<SmtpEndpointForbiddenException>(queued);
+
+        // Проба: fail-closed ДО мережі.
+        using (SmtpEndpointStrictness.Begin())
+        {
+            await Assert.ThrowsAsync<SmtpEndpointForbiddenException>(
+                () => sender.SendAsync(["a@corp.example"], "s", "b", CancellationToken.None));
+        }
+    }
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "ent6-S4")]
     public async Task Smtp_AllowedPorts_відкриває_порт_але_не_loopback()
     {
         var config = Config(("Smtp:AllowedPorts:0", "8025"), ("Smtp:AllowedPorts:1", "not-a-port"), ("Smtp:AllowedPorts:2", "70000"));
@@ -55,7 +79,7 @@ public sealed class SmtpEndpointPolicySendTests
         Assert.True(policy.IsPortAllowed(587));
         Assert.False(policy.IsPortAllowed(22));
         Assert.False(policy.IsPortAllowed(70000));
-        Assert.False(await policy.IsHostAllowedAsync("127.0.0.1", CancellationToken.None));
-        Assert.True(await policy.IsHostAllowedAsync("10.1.2.3", CancellationToken.None));
+        Assert.False(await policy.IsHostAllowedAsync("127.0.0.1", failClosed: false, CancellationToken.None));
+        Assert.True(await policy.IsHostAllowedAsync("10.1.2.3", failClosed: false, CancellationToken.None));
     }
 }

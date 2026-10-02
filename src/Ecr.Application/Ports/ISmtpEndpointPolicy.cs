@@ -16,6 +16,10 @@ public interface ISmtpEndpointPolicy
     /// розв'язаній адресі) заборонені завжди; приватні діапазони дозволені (типовий корпоративний relay).
     /// </summary>
     /// <param name="host">Ім'я чи IP-літерал.</param>
+    /// <param name="failClosed">
+    /// Помилка, тайм-аут чи порожня відповідь DNS: <c>true</c> — відмова (проба, збереження), <c>false</c> — дозволено
+    /// (черга сповіщень: розрив DNS не мусить ламати доставку; з'єднання без розв'язаного імені й так не вийде).
+    /// </param>
     /// <param name="ct">Токен скасування.</param>
-    public Task<bool> IsHostAllowedAsync(string host, CancellationToken ct);
+    public Task<bool> IsHostAllowedAsync(string host, bool failClosed, CancellationToken ct);
 }

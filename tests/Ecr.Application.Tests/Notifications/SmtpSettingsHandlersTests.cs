@@ -813,7 +813,6 @@ public sealed class SmtpSettingsHandlersTests
     [InlineData("192.168.0.10", null)]
     [InlineData("relay.corp.example", "10.20.30.40")]
     [InlineData("relay.corp.example", "172.16.0.9,192.168.1.1")]
-    [InlineData("relay.corp.example", "")]            // не розв'язалось зараз — не підстава відмовляти
     public async Task Приватні_адреси_корпоративного_relay_дозволені_і_за_літералом_і_за_DNS(string host, string? resolves)
     {
         Arrange();
@@ -826,6 +825,43 @@ public sealed class SmtpSettingsHandlersTests
         Assert.Equal(host, (await Save().HandleAsync(Input(host: host), CancellationToken.None)).Host);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "ent6-S4")]
+    public async Task Збереження_закрите_при_нерозв_язаному_імені_fail_closed_P2_1()
+    {
+        Arrange();
+        _net.Names["relay.corp.example"] = [];
+
+        // ⛔ Мутація: `failClosed: true` → `false` у SaveSmtpSettingsHandler → нерозв'язане ім'я проходить.
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Save().HandleAsync(Input(host: "relay.corp.example"), CancellationToken.None));
+
+        Assert.Equal("err.ECR-REQ-0422.smtpHostForbidden", error.Details!["messageKey"]);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "ent6-S4")]
+    public async Task Проба_виконується_в_суворому_режимі_політики()
+    {
+        Arrange();
+        _sender.IsConfigured.Returns(true);
+        var seen = new List<bool>();
+        _sender.SendAsync(Arg.Any<IReadOnlyList<string>>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(_ =>
+            {
+                seen.Add(SmtpEndpointStrictness.IsStrict);
+
+                return Task.CompletedTask;
+            });
+
+        // ⛔ Мутація: прибрати `SmtpEndpointStrictness.Begin()` у TryAsync → проба йде fail-open.
+        await TestHandler("me@corp.example").HandleAsync(new SmtpTestRequest(null), CancellationToken.None);
+
+        Assert.Equal([true], seen);
+        Assert.False(SmtpEndpointStrictness.IsStrict);
+    }
     private sealed class FakeNetwork : IEndpointNetwork
     {
         public Dictionary<string, IReadOnlyList<System.Net.IPAddress>> Names { get; } = new(StringComparer.OrdinalIgnoreCase);

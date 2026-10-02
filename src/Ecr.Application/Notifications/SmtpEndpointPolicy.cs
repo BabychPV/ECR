@@ -27,20 +27,26 @@ public sealed class SmtpEndpointForbiddenException : InvalidOperationException
 /// кожної розв'язаної адреси. ⚠ Залишок: між цією перевіркою й власним розв'язанням <c>SmtpClient</c> є
 /// вікно; пінити IP не можна (ламає перевірку імені сертифіката при STARTTLS).
 /// </remarks>
-public sealed class SmtpEndpointPolicy(IEndpointNetwork network) : ISmtpEndpointPolicy
+public sealed class SmtpEndpointPolicy(
+    IEndpointNetwork network, Microsoft.Extensions.Logging.ILogger<SmtpEndpointPolicy>? logger = null) : ISmtpEndpointPolicy
 {
+    private static readonly Action<Microsoft.Extensions.Logging.ILogger, Exception?> FailOpenLog =
+        Microsoft.Extensions.Logging.LoggerMessage.Define(
+            Microsoft.Extensions.Logging.LogLevel.Warning, new Microsoft.Extensions.Logging.EventId(1, nameof(FailOpenLog)),
+            "SMTP: DNS-перевірка хоста не дала відповіді вчасно чи пуста; відправлення дозволено (fail-open), з'єднання все одно потребує розв'язання імені.");
+
     /// <summary>Стандартні поштові порти: SMTP, SMTPS, submission, альтернативний submission.</summary>
     public static readonly IReadOnlyList<int> StandardPorts = [25, 465, 587, 2525];
 
-    /// <summary>Скільки чекати на DNS; не розв'язалося вчасно — не підстава відмовляти (з'єднання теж не вийде).</summary>
-    public static readonly TimeSpan ResolveTimeout = TimeSpan.FromSeconds(3);
+    /// <summary>Скільки чекати на DNS (для тесту задається ініціалізатором).</summary>
+    public TimeSpan ResolveTimeout { get; init; } = TimeSpan.FromSeconds(3);
 
     /// <inheritdoc />
     public bool IsPortAllowed(int port)
         => StandardPorts.Contains(port) || network.SmtpAllowedPorts.Contains(port);
 
     /// <inheritdoc />
-    public async Task<bool> IsHostAllowedAsync(string host, CancellationToken ct)
+    public async Task<bool> IsHostAllowedAsync(string host, bool failClosed, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(host);
 
@@ -77,12 +83,25 @@ public sealed class SmtpEndpointPolicy(IEndpointNetwork network) : ISmtpEndpoint
         {
             resolved = await network.ResolveAsync(name, ct).WaitAsync(ResolveTimeout, ct).ConfigureAwait(false);
         }
-        catch (TimeoutException)
+        catch (Exception e) when (e is TimeoutException or System.Net.Sockets.SocketException)
         {
-            return true;
+            return Unresolved(failClosed);
         }
 
-        return !resolved.Any(IsBlockedAddress);
+        // ⛔ P2-1: помилка/тайм-аут/порожня відповідь DNS — відмова для проби й збереження (failClosed), дозвіл із
+        // Warning-логом для черги. Вікно DNS-rebinding між цією перевіркою і розв'язанням SmtpClient лишається
+        // (IP пінити не можна: STARTTLS перевіряє ім'я сертифіката).
+        return resolved.Count == 0 ? Unresolved(failClosed) : !resolved.Any(IsBlockedAddress);
+    }
+
+    private bool Unresolved(bool failClosed)
+    {
+        if (!failClosed && logger is not null)
+        {
+            FailOpenLog(logger, null);
+        }
+
+        return !failClosed;
     }
 
     /// <summary>Ім'я з літер, цифр, <c>. - _</c> і нічого іншого (дужки, двокрапка, косі, пробіли — ні).</summary>

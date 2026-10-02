@@ -1,4 +1,4 @@
-﻿// src/Ecr.Infrastructure/Integration/SmtpNotificationSender.cs
+// src/Ecr.Infrastructure/Integration/SmtpNotificationSender.cs
 using System.Globalization;
 using System.Net;
 using System.Net.Mail;
@@ -99,7 +99,7 @@ public sealed class SmtpNotificationSender(
         // ⛔ S4 (ент6): політика напрямку діє на КОЖНЕ відправлення (і пробу, і чергу; БД і запасний Smtp:*):
         // старі збережені значення з нестандартним портом чи loopback-хостом тут не проходять.
         if (!_endpointPolicy.IsPortAllowed(settings.Port)
-            || !await _endpointPolicy.IsHostAllowedAsync(settings.Host!, ct).ConfigureAwait(false))
+            || !await _endpointPolicy.IsHostAllowedAsync(settings.Host!, SmtpEndpointStrictness.IsStrict, ct).ConfigureAwait(false))
         {
             throw new SmtpEndpointForbiddenException();
         }

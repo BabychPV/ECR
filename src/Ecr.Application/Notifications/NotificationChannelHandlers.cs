@@ -502,6 +502,9 @@ public sealed class TestNotificationChannelHandler(
     internal static async Task<NotificationTestResult> TryAsync(
         Func<Task> send, bool classify, ILogger? log = null)
     {
+        // ⛔ S4 P2-1: проба — суворий режим політики напрямку (збій DNS = відмова); черга працює без нього.
+        using var strict = SmtpEndpointStrictness.Begin();
+
         try
         {
             await send().ConfigureAwait(false);
