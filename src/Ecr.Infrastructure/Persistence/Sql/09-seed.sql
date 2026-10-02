@@ -927,7 +927,11 @@ DELETE t
     -- `PATCH …/presentation`) — підпис «поки не можна» втратив місце на екрані.
     (N'reorder.rowsUnavailable',                   N'en', N'Rows cannot be reordered here yet: the server cannot change only a row''s order without resetting its translations. Use the Order field in the row form.'),
     (N'reorder.rowsUnavailable',                   N'ru', N'Строки здесь пока нельзя переставлять: сервер не умеет менять только порядок строки, не сбрасывая её переводы. Используйте поле «Порядок» в форме строки.'),
-    (N'reorder.rowsUnavailable',                   N'kz', N'Мұнда жолдардың ретін әзірге өзгерту мүмкін емес: сервер жолдың аудармаларын өшірмей, тек ретін өзгерте алмайды. Жол пішініндегі «Реті» өрісін пайдаланыңыз.')
+    (N'reorder.rowsUnavailable',                   N'kz', N'Мұнда жолдардың ретін әзірге өзгерту мүмкін емес: сервер жолдың аудармаларын өшірмей, тек ретін өзгерте алмайды. Жол пішініндегі «Реті» өрісін пайдаланыңыз.'),
+    -- ФВ-6.16: розріз доступу має єдиний підпис `effectiveAccess.hintAll` (довідник, проєкт, аркуш, таблиця, колонка).
+    (N'effectiveAccess.hint',                      N'en', N'Pick a registry or a project to see the resulting level and which grant of which role gives it. This only explains the decision; it changes nothing.'),
+    (N'effectiveAccess.hint',                      N'ru', N'Выберите справочник или проект, чтобы увидеть итоговый уровень и какой грант какой роли его даёт. Это лишь объяснение решения, ничего не меняется.'),
+    (N'effectiveAccess.hint',                      N'kz', N'Түпкілікті деңгейді және оны қай рөлдің қай гранты беретінін көру үшін анықтамалықты немесе жобаны таңдаңыз. Бұл тек шешімнің түсіндірмесі, ештеңе өзгермейді.')
   ) AS s ([Key], Lang, OldVal)
     ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
  WHERE t.Value = s.OldVal COLLATE Latin1_General_BIN2;
@@ -6073,7 +6077,6 @@ USING (VALUES
     (N'effectiveAccess.show',            N'en', N'Show effective access', 1),
     (N'effectiveAccess.hide',            N'en', N'Hide effective access', 1),
     (N'effectiveAccess.title',           N'en', N'Effective access to a resource', 1),
-    (N'effectiveAccess.hint',            N'en', N'Pick a registry or a project to see the resulting level and which grant of which role gives it. This only explains the decision; it changes nothing.', 1),
     (N'effectiveAccess.kind',            N'en', N'Resource type', 1),
     (N'effectiveAccess.kindRegistry',    N'en', N'Registry', 1),
     (N'effectiveAccess.kindProject',     N'en', N'Project', 1),
@@ -14026,6 +14029,36 @@ OPTION (RECOMPILE);
 GO
 -- COLL:an9-rules ── кінець секції ──
 
+-- COLL:fv616 ── ru/kz розрізу доступу на аркуші, таблиці й колонці; власна порція #I18N ──
+-- kz — найкращий переклад, потрібна вичитка носієм.
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-REQ-0422.effectiveAccessProject', N'ru', N'Лист, таблица или колонка рассматриваются внутри одного проекта: передайте projectId.'),
+    (N'err.ECR-REQ-0422.effectiveAccessProject', N'kz', N'Парақ, кесте немесе баған бір жоба шеңберінде қаралады: projectId беріңіз.'),
+    (N'err.ECR-TMPL-0404.effectiveAccessResource', N'ru', N'{resource} не найден.'),
+    (N'err.ECR-TMPL-0404.effectiveAccessResource', N'kz', N'{resource} табылмады.'),
+    (N'err.ECR-TMPL-0404.effectiveAccessNotInProject', N'ru', N'{resource} не входит в шаблон проекта {projectId}.'),
+    (N'err.ECR-TMPL-0404.effectiveAccessNotInProject', N'kz', N'{resource} {projectId} жобасының үлгісіне кірмейді.'),
+    (N'effectiveAccess.hintAll', N'ru', N'Выберите справочник, проект либо лист, таблицу или колонку внутри проекта, чтобы увидеть итоговый уровень и какой грант какой роли его даёт. Это лишь объяснение решения, ничего не меняется.'),
+    (N'effectiveAccess.hintAll', N'kz', N'Түпкілікті деңгейді және оны қай рөлдің қай гранты беретінін көру үшін анықтамалықты, жобаны немесе жоба ішіндегі парақты, кестені не бағанды таңдаңыз. Бұл тек шешімнің түсіндірмесі, ештеңе өзгермейді.'),
+    (N'effectiveAccess.kindSheet', N'ru', N'Лист'),
+    (N'effectiveAccess.kindSheet', N'kz', N'Парақ'),
+    (N'effectiveAccess.kindTable', N'ru', N'Таблица'),
+    (N'effectiveAccess.kindTable', N'kz', N'Кесте'),
+    (N'effectiveAccess.kindColumn', N'ru', N'Колонка'),
+    (N'effectiveAccess.kindColumn', N'kz', N'Баған'),
+    (N'effectiveAccess.projectId', N'ru', N'ID проекта'),
+    (N'effectiveAccess.projectId', N'kz', N'Жоба ID'),
+    (N'effectiveAccess.caveat', N'ru', N'Состояние документа (подан, утверждён, закрытый период) и сужение назначения по периодам здесь не учитываются. Показано, что дают гранты по цепочке проект, лист, таблица, колонка, а не можно ли редактировать ячейку сейчас.'),
+    (N'effectiveAccess.caveat', N'kz', N'Құжат күйі (тапсырылған, бекітілген, жабық кезең) және тағайындаудың кезеңдер бойынша тарылуы мұнда ескерілмейді. Жоба, парақ, кесте, баған тізбегі бойынша гранттар не беретіні көрсетілген, ұяшықты қазір өңдеуге болатыны емес.'),
+    (N'effectiveAccess.inheritedFrom', N'ru', N'Унаследовано от {resource}'),
+    (N'effectiveAccess.inheritedFrom', N'kz', N'{resource} ресурсынан мұраланған')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:fv616 ── кінець секції ──
+
 -- COLL:rawhealth ── ru/kz розміру ext.RawDataPoint у картці `db`; власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
@@ -14304,7 +14337,6 @@ SELECT v.[Key], v.Lang, v.Val
     (N'effectiveAccess.show', N'ru', N'Показать эффективный доступ'),
     (N'effectiveAccess.hide', N'ru', N'Скрыть эффективный доступ'),
     (N'effectiveAccess.title', N'ru', N'Эффективный доступ к ресурсу'),
-    (N'effectiveAccess.hint', N'ru', N'Выберите справочник или проект, чтобы увидеть итоговый уровень и какой грант какой роли его даёт. Это лишь объяснение решения, ничего не меняется.'),
     (N'effectiveAccess.kind', N'ru', N'Тип ресурса'),
     (N'effectiveAccess.kindRegistry', N'ru', N'Справочник'),
     (N'effectiveAccess.kindProject', N'ru', N'Проект'),
@@ -14337,7 +14369,6 @@ SELECT v.[Key], v.Lang, v.Val
     (N'effectiveAccess.show', N'kz', N'Тиімді қолжетімділікті көрсету'),
     (N'effectiveAccess.hide', N'kz', N'Тиімді қолжетімділікті жасыру'),
     (N'effectiveAccess.title', N'kz', N'Ресурсқа тиімді қолжетімділік'),
-    (N'effectiveAccess.hint', N'kz', N'Түпкілікті деңгейді және оны қай рөлдің қай гранты беретінін көру үшін анықтамалықты немесе жобаны таңдаңыз. Бұл тек шешімнің түсіндірмесі, ештеңе өзгермейді.'),
     (N'effectiveAccess.kind', N'kz', N'Ресурс түрі'),
     (N'effectiveAccess.kindRegistry', N'kz', N'Анықтамалық'),
     (N'effectiveAccess.kindProject', N'kz', N'Жоба'),
