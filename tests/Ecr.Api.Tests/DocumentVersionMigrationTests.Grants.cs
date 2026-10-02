@@ -143,6 +143,58 @@ public sealed partial class DocumentVersionMigrationTests
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "ФВ-6.7")]
+    public async Task Властивість_моделі_копія_дозволу_колонки_розширює_доступ_в_іншому_проєкті_цільової_версії()
+    {
+        // ⚠ ФІКСУЄ ПОТОЧНУ ПОВЕДІНКУ (ent7 P2-2), не бажану: гранти Sheet/Table/Column не мають
+        // ProjectId (EditRules.Effective, S2), тож копія allow-гранту на нові Id діє в УСІХ проєктах
+        // цільової версії, які користувач бачить. Рішення «копіювати лише Deny» не прийнято —
+        // потрібне рішення «Аудиту»; змінюєш поведінку — міняй і п.7.7 TESTER-GUIDE.
+        var s = await ArrangeAsync(Target.DropsC3AddsC4AndRow).ConfigureAwait(true);
+        var c2Old = s.Doc.ColumnDefIds[1];
+        var (userId, roleId) = await AddRestrictedUserAsync(s, (ResourceKind.Column, c2Old, false)).ConfigureAwait(true);
+
+        // Проєкт B (будь-який інший id: гранти без FK на проєкт) — користувач лише читає його.
+        var projectB = s.Doc.ProjectId + 100_000;
+        await using (var seed = new TestDocumentBuilder(sql.ConnectionString).CreateContext())
+        {
+            seed.ResourceGrants.Add(new ResourceGrant(roleId, ResourceKind.Project, projectB, GrantLevel.Read));
+            var write = await seed.ResourceGrants.SingleAsync(g => g.RoleId == roleId && g.ResourceKind == ResourceKind.Column && g.ResourceId == c2Old).ConfigureAwait(true);
+            seed.ResourceGrants.Remove(write);
+            await seed.SaveChangesAsync().ConfigureAwait(true);
+            seed.ResourceGrants.Add(new ResourceGrant(roleId, ResourceKind.Column, c2Old, GrantLevel.Write));
+            await seed.SaveChangesAsync().ConfigureAwait(true);
+        }
+
+        async Task<GrantLevel> InProjectBAsync(EcrApiFactory app)
+        {
+            using var scope = app.Services.CreateScope();
+            var access = scope.ServiceProvider.GetRequiredService<IAccessDecisionService>();
+            var profile = await access.BuildProfileAsync(userId, CancellationToken.None).ConfigureAwait(false);
+            return EditRules.Effective(profile, default(CellAccessContext) with
+            {
+                ProjectId = projectB,
+                SheetDefId = s.TargetSheetDefId,
+                TableDefId = s.TargetTableDefId,
+                ColumnDefId = s.TargetColumns["C2"],
+                SheetCode = s.Doc.SheetCode,
+            });
+        }
+
+        using var before = new EcrApiFactory(sql);
+        Assert.Equal(GrantLevel.Read, await InProjectBAsync(before).ConfigureAwait(true));
+
+        using var client = await SignedInAsync(before, s.UserName).ConfigureAwait(true);
+        var response = await PostAsync(client, s, "Safe", dryRun: false).ConfigureAwait(true);
+        Assert.True(response.StatusCode == HttpStatusCode.OK, await response.Content.ReadAsStringAsync().ConfigureAwait(true));
+
+        using var after = new EcrApiFactory(sql);
+        Assert.Equal(GrantLevel.Write, await InProjectBAsync(after).ConfigureAwait(true));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-6.7")]
     public async Task Профіль_у_кеші_того_самого_застосунку_бачить_заборону_на_новому_id_одразу_після_переносу()
     {
         var s = await ArrangeAsync(Target.DropsC3AddsC4AndRow).ConfigureAwait(true);
