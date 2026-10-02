@@ -542,7 +542,7 @@ public sealed class CollectionSchedulesControllerTests(SqlServerFixture sql)
         using var client = await SignedInAsync(app, "Integration.EditSchedule").ConfigureAwait(true);
 
         var (sourceId, _) = await AddDataSourceAsync().ConfigureAwait(true);
-        var (upstream, _) = await AddScheduleAsync(FarFuture, sourceId).ConfigureAwait(true);
+        var (upstream, upstreamCode) = await AddScheduleAsync(FarFuture, sourceId).ConfigureAwait(true);
         var (entityId, _) = await AddSourceEntityAsync(sourceId).ConfigureAwait(true);
 
         var created = await client.PostAsJsonAsync(
@@ -578,6 +578,8 @@ public sealed class CollectionSchedulesControllerTests(SqlServerFixture sql)
         Assert.Equal(
             upstream.ToString(System.Globalization.CultureInfo.InvariantCulture),
             reasonJson.RootElement.GetProperty("p").GetProperty("deleted").ToString());
+        Assert.Equal(
+            upstreamCode, reasonJson.RootElement.GetProperty("p").GetProperty("entity").GetString());
     }
 
     private static async Task AssertDependencyRefusalAsync(HttpResponseMessage response, string key, int dependsOn)
