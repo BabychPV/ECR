@@ -613,6 +613,11 @@ UPDATE t
   FROM sys_ecr.UiString AS t
   JOIN (VALUES
     (N'common.loading',                  N'en', N'Loading…', N'Loading...'),
+    -- ent7 P2-1: відмова й для звужувального дозволу (Read під Write проєкту), не лише заборони.
+    (N'err.ECR-SCHM-0422.migrateGrantsNotMapped', N'en', N'The target version has no sheet, table or column with the code of a resource that has a deny grant, so the deny cannot be carried over. Remove or re-create that deny deliberately before moving the project.', N'The target version has no sheet, table or column with the code of a resource that has an access grant (deny or a restricting Read), so the grant cannot be carried over and access could widen. Remove or re-create that grant deliberately before moving the project.'),
+    (N'err.ECR-SCHM-0422.migrateGrantsNotMapped', N'ru', N'В целевой версии нет листа, таблицы или столбца с кодом ресурса, на котором стоит запрет, поэтому запрет не перенести. Снимите или пересоздайте этот запрет осознанно до переноса проекта.', N'В целевой версии нет листа, таблицы или столбца с кодом ресурса, на котором стоит право доступа (запрет или ограничивающее чтение), поэтому право не перенести, а доступ мог бы расшириться. Снимите или пересоздайте это право осознанно до переноса проекта.'),
+    (N'err.ECR-SCHM-0422.migrateGrantsNotMapped', N'kz', N'Мақсатты нұсқада тыйым қойылған ресурстың кодымен парақ, кесте немесе баған жоқ, сондықтан тыйымды көшіру мүмкін емес. Жобаны көшірместен бұрын бұл тыйымды саналы түрде алып тастаңыз немесе қайта жасаңыз.', N'Мақсатты нұсқада қол жеткізу құқығы (тыйым немесе шектейтін оқу) қойылған ресурстың кодымен парақ, кесте немесе баған жоқ, сондықтан құқықты көшіру мүмкін емес, ал қолжетімділік кеңеюі мүмкін. Жобаны көшірместен бұрын бұл құқықты саналы түрде алып тастаңыз немесе қайта жасаңыз.'),
+    -- ⚠ kz вище — потрібна вичитка носієм.
     -- D-263: SMTP задається в адмін-налаштуваннях, канал додає адресатів-ролі.
     (N'notifications.smtpTransportHint', N'en', N'The server, sender address and password come from the application configuration; the channel only adds recipients.', N'The server, sender and login come from the SMTP settings above (or from the process configuration while they are not set); the channel adds recipients: addresses and roles.'),
     (N'notifications.smtpTransportHint', N'ru', N'Сервер, адрес отправителя и пароль берутся из конфигурации приложения; канал лишь добавляет получателей.', N'Сервер, отправитель и логин берутся из настроек SMTP выше (пока они не заданы — из конфигурации процесса); канал добавляет получателей: адреса и роли.'),
@@ -6126,7 +6131,7 @@ USING (VALUES
     -- ru/kz — окремою порцією `COLL:an13-strict` у блоці I18N нижче.
     -- COLL:an13-strict ── кінець секції ──
     -- COLL:sec-a1 ── Перенос версії: заборона на аркуші/таблиці/колонці, якої нема в новій версії (`MigrateDocumentVersionHandler`) ──
-    (N'err.ECR-SCHM-0422.migrateGrantsNotMapped', N'en', N'The target version has no sheet, table or column with the code of a resource that has a deny grant, so the deny cannot be carried over. Remove or re-create that deny deliberately before moving the project.', 1),
+    (N'err.ECR-SCHM-0422.migrateGrantsNotMapped', N'en', N'The target version has no sheet, table or column with the code of a resource that has an access grant (deny or a restricting Read), so the grant cannot be carried over and access could widen. Remove or re-create that grant deliberately before moving the project.', 1),
     -- ru/kz — окремою порцією `COLL:sec-a1` у блоці I18N нижче.
     -- COLL:sec-a1 ── кінець секції ──
     -- COLL:nosource-hints ── порожній стан списку з'єднань: що робити й де в документації (UI, DataSourcesTable) ──
@@ -14064,8 +14069,8 @@ GO
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
   FROM (VALUES
-    (N'err.ECR-SCHM-0422.migrateGrantsNotMapped', N'ru', N'В целевой версии нет листа, таблицы или столбца с кодом ресурса, на котором стоит запрет, поэтому запрет не перенести. Снимите или пересоздайте этот запрет осознанно до переноса проекта.'),
-    (N'err.ECR-SCHM-0422.migrateGrantsNotMapped', N'kz', N'Мақсатты нұсқада тыйым қойылған ресурстың кодымен парақ, кесте немесе баған жоқ, сондықтан тыйымды көшіру мүмкін емес. Жобаны көшірместен бұрын бұл тыйымды саналы түрде алып тастаңыз немесе қайта жасаңыз.')
+    (N'err.ECR-SCHM-0422.migrateGrantsNotMapped', N'ru', N'В целевой версии нет листа, таблицы или столбца с кодом ресурса, на котором стоит право доступа (запрет или ограничивающее чтение), поэтому право не перенести, а доступ мог бы расшириться. Снимите или пересоздайте это право осознанно до переноса проекта.'),
+    (N'err.ECR-SCHM-0422.migrateGrantsNotMapped', N'kz', N'Мақсатты нұсқада қол жеткізу құқығы (тыйым немесе шектейтін оқу) қойылған ресурстың кодымен парақ, кесте немесе баған жоқ, сондықтан құқықты көшіру мүмкін емес, ал қолжетімділік кеңеюі мүмкін. Жобаны көшірместен бұрын бұл құқықты саналы түрде алып тастаңыз немесе қайта жасаңыз.')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
