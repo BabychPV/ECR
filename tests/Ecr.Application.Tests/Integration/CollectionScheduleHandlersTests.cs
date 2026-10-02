@@ -420,6 +420,139 @@ public sealed class CollectionScheduleHandlersTests
         Assert.Equal(CollectionScheduleApplier.PayloadOf(schedule.SourceEntityId), _scheduler.Unscheduled.Single());
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "ФВ-13.15")]
+    public async Task ФВ_13_15_залежність_ставиться_створенням_і_правкою_знімається_ClearDependency_а_без_поля_лишається()
+    {
+        var first = Add(Hourly);
+        var second = Add(Nightly);
+
+        var saved = await Save().HandleAsync(
+            second.Id, Nightly, isEnabled: true, lookbackDays: null,
+            new ScheduleDependencyChange(first.Id), Version(second), CancellationToken.None);
+
+        Assert.Equal(first.Id, saved.DependsOnScheduleId);
+        Assert.Equal(first.Id, second.DependsOnScheduleId);
+
+        // Запит без поля (старий клієнт, старий підпис) залежності не скидає.
+        await Save().HandleAsync(second.Id, Hourly, isEnabled: true, lookbackDays: null, Version(second), CancellationToken.None);
+        Assert.Equal(first.Id, second.DependsOnScheduleId);
+
+        var cleared = await Save().HandleAsync(
+            second.Id, Hourly, isEnabled: true, lookbackDays: null,
+            new ScheduleDependencyChange(null, Clear: true), Version(second), CancellationToken.None);
+
+        Assert.Null(cleared.DependsOnScheduleId);
+        Assert.Null(second.DependsOnScheduleId);
+
+        _store.Entities[77] = ("ENT-77", null);
+        var created = await Create().HandleAsync(77, Nightly, isEnabled: true, lookbackDays: null, first.Id, CancellationToken.None);
+
+        Assert.Equal(first.Id, created.DependsOnScheduleId);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "ФВ-13.15")]
+    public async Task ФВ_13_15_залежність_від_неіснуючого_розкладу_чи_іншого_з_єднання_відхиляється_422_ДО_бази()
+    {
+        var own = Add(Hourly);
+        var foreign = Add(Nightly, dataSourceId: 4);
+
+        var missing = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Save().HandleAsync(
+                own.Id, Hourly, isEnabled: true, lookbackDays: null,
+                new ScheduleDependencyChange(999), Version(own), CancellationToken.None));
+        var otherSource = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Save().HandleAsync(
+                own.Id, Hourly, isEnabled: true, lookbackDays: null,
+                new ScheduleDependencyChange(foreign.Id), Version(own), CancellationToken.None));
+
+        Assert.Equal("ECR-REQ-0422", missing.ErrorCode);
+        Assert.Equal("err.ECR-REQ-0422.collectionScheduleDependencyNotFound", missing.Details!["messageKey"]);
+        Assert.Equal("err.ECR-REQ-0422.collectionScheduleDependencyOtherSource", otherSource.Details!["messageKey"]);
+
+        // Нове створення з чужого з'єднання — теж відмова; нічого не збережено.
+        _store.Entities[77] = ("ENT-77", null);
+        var createRefused = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Create().HandleAsync(77, Nightly, isEnabled: true, lookbackDays: null, foreign.Id, CancellationToken.None));
+
+        Assert.Equal("err.ECR-REQ-0422.collectionScheduleDependencyOtherSource", createRefused.Details!["messageKey"]);
+        Assert.Null(own.DependsOnScheduleId);
+        Assert.Equal(2, _store.Rows.Count);
+        await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "ФВ-13.15")]
+    public async Task ФВ_13_15_цикл_залежностей_на_себе_прямий_і_через_ланцюг_відхиляється_422_ДО_бази()
+    {
+        var a = Add(Hourly);
+        var b = Add(Hourly);
+        var c = Add(Hourly);
+
+        // Ланцюг a → b → c (a залежить від b, b від c).
+        a.SetDependency(b.Id);
+        b.SetDependency(c.Id);
+
+        // ⚠ МУТАЦІЙНИЙ ДОКАЗ: прибрати обхід ланцюга в `CollectionScheduleDependencyRules`
+        // (лишити лише `selfId == dependsOnId`) — червоніє «c → a», хоча сама пряма й проста
+        // «a → b → a» проходять.
+        foreach (var (self, target) in new[] { (c, a), (b, a), (a, a), (c, b) })
+        {
+            var refused = await Assert.ThrowsAsync<BusinessRuleException>(
+                () => Save().HandleAsync(
+                    self.Id, Hourly, isEnabled: true, lookbackDays: null,
+                    new ScheduleDependencyChange(target.Id), Version(self), CancellationToken.None));
+
+            Assert.Equal("ECR-REQ-0422", refused.ErrorCode);
+            Assert.Equal("err.ECR-REQ-0422.collectionScheduleDependencyCycle", refused.Details!["messageKey"]);
+        }
+
+        Assert.Null(c.DependsOnScheduleId);
+        await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
+
+        // Не цикл: c → d (поза ланцюгом) проходить.
+        var d = Add(Hourly);
+        var ok = await Save().HandleAsync(
+            c.Id, Hourly, isEnabled: true, lookbackDays: null,
+            new ScheduleDependencyChange(d.Id), Version(c), CancellationToken.None);
+
+        Assert.Equal(d.Id, ok.DependsOnScheduleId);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "ФВ-13.15")]
+    public async Task ФВ_13_15_видалення_розкладу_знімає_залежність_у_залежних()
+    {
+        var first = Add(Hourly);
+        var second = Add(Nightly);
+        second.SetDependency(first.Id);
+
+        await Delete().HandleAsync(first.Id, Version(first), CancellationToken.None);
+
+        // ⛔ FK без каскаду: без зняття видалення впало б на ключі в базі.
+        Assert.Null(second.DependsOnScheduleId);
+        Assert.Same(first, _store.Removed.Single());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "ФВ-13.15")]
+    public void ФВ_13_15_payload_планового_збору_не_містить_ознаки_ручного_а_ручний_містить()
+    {
+        // ⛔ Payload планового збору — ключ тригера Quartz: зайве поле розійшлося б зі збереженими
+        // тригерами, і після оновлення розклад ставився б удруге.
+        var scheduled = System.Text.Json.JsonSerializer.Serialize(CollectionScheduleApplier.PayloadOf(77));
+        var manual = System.Text.Json.JsonSerializer.Serialize(new CollectionTask(77, null, null, Manual: true));
+
+        Assert.DoesNotContain("anual", scheduled, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("\"Manual\":true", manual, StringComparison.Ordinal);
+    }
+
     private void Allow(string permission)
         => _access.BuildProfileAsync(Actor, Arg.Any<CancellationToken>())
             .Returns(new AccessBuilder { UserId = Actor }.Permission(permission).Build());
@@ -435,7 +568,7 @@ public sealed class CollectionScheduleHandlersTests
     private static string Version(CollectionSchedule schedule) => Convert.ToBase64String(schedule.RowVersion);
 
     /// <summary>Розклад із присвоєним ключем і версією рядка, як його віддала б база.</summary>
-    private CollectionSchedule Add(string cron, RegistrySourceKind kind = RegistrySourceKind.External)
+    private CollectionSchedule Add(string cron, RegistrySourceKind kind = RegistrySourceKind.External, int dataSourceId = 3)
     {
         var id = _store.Rows.Count + 1;
         var schedule = new CollectionSchedule(sourceEntityId: 40 + id, cron);
@@ -444,7 +577,7 @@ public sealed class CollectionScheduleHandlersTests
         typeof(CollectionSchedule).GetProperty(nameof(CollectionSchedule.RowVersion))!
             .SetValue(schedule, new byte[] { 0, 0, 0, 0, 0, 0, 7, (byte)id });
 
-        _store.Rows.Add(new ScheduledSourceEntity(schedule, $"ENT-{id}", $"Entity {id}", 3, "SRC-3", kind));
+        _store.Rows.Add(new ScheduledSourceEntity(schedule, $"ENT-{id}", $"Entity {id}", dataSourceId, $"SRC-{dataSourceId}", kind));
 
         return schedule;
     }
@@ -481,6 +614,10 @@ public sealed class CollectionScheduleHandlersTests
                         "SRC-3",
                         KindOf(sourceEntityId))
                     : null);
+
+        public Task<IReadOnlyList<CollectionSchedule>> FindDependentsAsync(int collectionScheduleId, CancellationToken ct)
+            => Task.FromResult<IReadOnlyList<CollectionSchedule>>(
+                [.. Rows.Where(r => r.Schedule.DependsOnScheduleId == collectionScheduleId).Select(r => r.Schedule)]);
 
         /// <summary>Ключ присвоюється одразу — базу тут заміняє цей список.</summary>
         public void Add(CollectionSchedule schedule)
