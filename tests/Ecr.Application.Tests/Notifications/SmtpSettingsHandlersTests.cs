@@ -129,7 +129,7 @@ public sealed class SmtpSettingsHandlersTests
     {
         Arrange();
         await Save().HandleAsync(Input(host: "10.1.2.3"), CancellationToken.None);
-        await Save().HandleAsync(Input(host: "localhost", password: null), CancellationToken.None);
+        await Save().HandleAsync(Input(host: "localhost"), CancellationToken.None);
 
         var noUser = await Assert.ThrowsAsync<BusinessRuleException>(
             () => Save().HandleAsync(Input(user: null), CancellationToken.None));
@@ -143,6 +143,105 @@ public sealed class SmtpSettingsHandlersTests
         // Вимкнену чернетку можна зберегти неповною — вона не діє.
         var draft = await Save().HandleAsync(Input(host: "", from: "", password: null, enabled: false), CancellationToken.None);
         Assert.False(draft.Configured && draft.Source == "database");
+    }
+
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "D-263")]
+    [InlineData("host")]
+    [InlineData("port")]
+    [InlineData("user")]
+    public async Task S1_зміна_адреси_порту_шифрування_чи_логіна_без_нового_пароля_дає_422_і_лишає_збережене(string changed)
+    {
+        Arrange();
+        await Save().HandleAsync(Input(), CancellationToken.None);
+        var before = _store.Row!.PasswordProtected;
+        var invalidations = _cache.Invalidations;
+
+        var input = changed switch
+        {
+            "host" => Input(host: "evil.example", password: null),
+            "port" => Input(port: 2525, password: null),
+            _ => Input(user: "other", password: null),
+        };
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Save().HandleAsync(input, CancellationToken.None));
+
+        Assert.Equal("ECR-REQ-0422", error.ErrorCode);
+        Assert.Equal(SaveSmtpSettingsHandler.PasswordReentryRequiredKey, error.Details!["messageKey"]);
+        Assert.Equal("err.ECR-REQ-0422.smtpPasswordReentryRequired", error.Details["messageKey"]);
+        Assert.Equal("smtp.corp.example", _store.Row.Host);
+        Assert.Equal(before, _store.Row.PasswordProtected);
+        Assert.Equal(invalidations, _cache.Invalidations);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "D-263")]
+    public async Task S1_зміна_хоста_з_новим_паролем_проходить_а_без_зміни_адреси_порожній_пароль_лишає_старий()
+    {
+        Arrange();
+        await Save().HandleAsync(Input(), CancellationToken.None);
+
+        await Save().HandleAsync(Input(host: "SMTP.corp.example", password: null), CancellationToken.None);
+        Assert.Equal(FakeProtector.Mark + Password, Encoding.UTF8.GetString(_store.Row!.PasswordProtected!));
+
+        await Save().HandleAsync(Input(host: "relay.corp.example", password: "New-Pw-1"), CancellationToken.None);
+        Assert.Equal("relay.corp.example", _store.Row!.Host);
+        Assert.Equal(FakeProtector.Mark + "New-Pw-1", Encoding.UTF8.GetString(_store.Row.PasswordProtected!));
+
+        // Явне очищення й перехід на None змінюють адресу без пароля — це не витік, а скидання секрету.
+        await Save().HandleAsync(Input(host: "other.corp.example", password: null, clear: true, enabled: false), CancellationToken.None);
+        Assert.False(_store.Row!.HasPassword);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "D-263")]
+    public async Task Журнал_passwordChanged_true_при_новому_і_при_стиранні_пароля_false_при_незмінному_і_без_самого_пароля()
+    {
+        Arrange();
+        await Save().HandleAsync(Input(), CancellationToken.None);
+        Assert.Contains("\"passwordChanged\":true", _events.Last().DetailsJson, StringComparison.Ordinal);
+
+        await Save().HandleAsync(Input(password: null, from: "ecr2@corp.example"), CancellationToken.None);
+        Assert.Contains("\"passwordChanged\":false", _events.Last().DetailsJson, StringComparison.Ordinal);
+
+        // ⛔ Мутація: повернути `clears && input.ClearPassword` → перехід на None без прапора дасть false.
+        await Save().HandleAsync(Input(auth: SmtpAuthMode.None, user: null, password: null), CancellationToken.None);
+        Assert.False(_store.Row!.HasPassword);
+        Assert.Contains("\"passwordChanged\":true", _events.Last().DetailsJson, StringComparison.Ordinal);
+
+        // Пароля вже немає — повторне збереження без автентифікації секрету не змінює.
+        await Save().HandleAsync(Input(auth: SmtpAuthMode.None, user: null, password: null), CancellationToken.None);
+        Assert.Contains("\"passwordChanged\":false", _events.Last().DetailsJson, StringComparison.Ordinal);
+
+        await Save().HandleAsync(Input(), CancellationToken.None);
+        await Save().HandleAsync(Input(password: null, clear: true, enabled: false), CancellationToken.None);
+        Assert.Contains("\"passwordChanged\":true", _events.Last().DetailsJson, StringComparison.Ordinal);
+
+        Assert.All(_events, e => Assert.DoesNotContain(Password, e.DetailsJson, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "D-263")]
+    public async Task S1_пароль_без_шифрування_дає_422_а_режим_без_автентифікації_без_шифрування_дозволений()
+    {
+        Arrange();
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Save().HandleAsync(Input() with { EncryptionMode = SmtpEncryptionMode.None }, CancellationToken.None));
+        Assert.Equal(SaveSmtpSettingsHandler.PasswordNeedsTlsKey, error.Details!["messageKey"]);
+        Assert.Equal("encryption", error.Details["name"]);
+        Assert.False(_store.Row?.HasPassword ?? false);
+        Assert.Equal(0, _cache.Invalidations);
+
+        var relay = await Save().HandleAsync(
+            Input(auth: SmtpAuthMode.None, user: null, password: null) with { EncryptionMode = SmtpEncryptionMode.None },
+            CancellationToken.None);
+        Assert.Equal(SmtpEncryptionMode.None, relay.EncryptionMode);
     }
 
     [Fact]
@@ -209,6 +308,17 @@ public sealed class SmtpSettingsHandlersTests
     [InlineData("a@corp.example\r\nBcc: b@evil.example")]
     [InlineData("a@corp.example\nb@evil.example")]
     [InlineData("not-an-address")]
+    [InlineData("a@corp.example\0evil")]
+    [InlineData("a@corp.example\x2028Zb@evil.example")]
+    [InlineData("a@corp.example\x0085Zb@evil.example")]
+    [InlineData("\"a b\"@corp.example")]
+    [InlineData("\"a\"@corp.example")]
+    [InlineData("a@[IPv6:::1]")]
+    [InlineData("a@[127.0.0.1]")]
+    [InlineData("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa@corp.example")]
+    [InlineData("a@xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.example")]
+    [InlineData("a@corp.example.")]
+    [InlineData("a@-corp.example")]
     public async Task Проба_відхиляє_списки_роздільники_імена_відображення_і_CRLF_422_і_нічого_не_шле(string to)
     {
         Arrange();
@@ -221,6 +331,31 @@ public sealed class SmtpSettingsHandlersTests
 
         Assert.Equal("err.ECR-REQ-0422.smtpTestRecipientInvalid", bad.Details!["messageKey"]);
         await _sender.DidNotReceiveWithAnyArgs().SendAsync(default!, default!, default!, default);
+    }
+
+    /// <summary>Сама адреса (і «Від кого» в налаштуваннях) — ті самі вектори: захист не лише в пробі.</summary>
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "D-256")]
+    [InlineData("a@corp.example\0evil", false)]
+    [InlineData("a@corp.example\x2028", false)]
+    [InlineData("a@corp.example\x85", false)]
+    [InlineData("\"a b\"@corp.example", false)]
+    [InlineData("\"a\"@corp.example", false)]
+    [InlineData("a@[IPv6:::1]", false)]
+    [InlineData("a@[127.0.0.1]", false)]
+    [InlineData("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa@corp.example", false)]
+    [InlineData("a@xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.example", false)]
+    [InlineData("a@corp.example.", false)]
+    [InlineData("a@-corp.example", false)]
+    [InlineData("a@corp-.example", false)]
+    [InlineData("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa@xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.example", true)]
+    [InlineData("ops.team+probe@corp-mail.example", true)]
+    public void Адреса_відхиляє_літерали_квотування_довгі_частини_крапку_й_дефіс_і_приймає_звичайні(
+        string address, bool expected)
+    {
+        // ⛔ Мутація: прибрати нові перевірки в SmtpSettings.IsValidAddress → відхилювані рядки червоніють.
+        Assert.Equal(expected, SmtpSettings.IsValidAddress(address));
     }
 
     [Fact]
@@ -313,6 +448,32 @@ public sealed class SmtpSettingsHandlersTests
         users.FindByIdAsync(Actor, Arg.Any<CancellationToken>()).Returns(me);
 
         return new TestSmtpSettingsHandler(_sender, _access, _audit, _user, _clock, users);
+    }
+
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "D-263")]
+    [InlineData("ecr@[127.0.0.1]")]
+    [InlineData("ops team@corp.example")]
+    public async Task Раніше_збережений_From_що_не_проходить_суворішу_перевірку_читається_без_помилки_а_PUT_його_відхиляє(
+        string legacyFrom)
+    {
+        Arrange();
+        var row = new SmtpSettings(_clock.UtcNow, Actor);
+        row.Update(
+            "smtp.corp.example", 587, SmtpEncryptionMode.StartTls, legacyFrom, null, SmtpAuthMode.None, null, true,
+            _clock.UtcNow, Actor);
+        _store.Row = row;
+
+        // Читання (і, отже, ефективні налаштування відправника) валідації адреси не виконує.
+        // ⛔ Мутація: викликати IsValidAddress у GetSmtpSettingsHandler / IsComplete → кидає або конфігурація «не повна».
+        var read = await Get().HandleAsync(CancellationToken.None);
+        Assert.Equal(legacyFrom, read.FromAddress);
+        Assert.True(row.IsComplete);
+
+        // Нове значення при збереженні — перевіряється.
+        await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Save().HandleAsync(Input(from: legacyFrom), CancellationToken.None));
     }
 
     private void Arrange()

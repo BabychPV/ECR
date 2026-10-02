@@ -3907,6 +3907,13 @@
             "description": "Чи бере участь внесок у підсумковий рівень профілю.",
             "type": "boolean"
           },
+          "inheritedFrom": {
+            "description": "Для аркуша, таблиці й колонки — предок, на якому стоїть грант (`Project:3`, `Sheet:7`), якщо це\nне сам запитаний ресурс; інакше `null`.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
           "isDeny": {
             "description": "Явна заборона.",
             "type": "boolean"
@@ -3914,6 +3921,20 @@
           "level": {
             "$ref": "#/components/schemas/GrantLevel",
             "description": "Рівень: у гранта — його рівень, у права — той, який воно відкриває для довідника."
+          },
+          "narrowedBy": {
+            "description": "Для `Narrowed`: чим звужено — `Sheets:F1,F2`, `Periods:from..to`; інакше `null`.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "notCountedReason": {
+            "description": "`ProjectNotVisible` — грант нижче проєкту без видимого проєкту (S2); інакше `null`.",
+            "type": [
+              "null",
+              "string"
+            ]
           },
           "permissionCode": {
             "description": "Код права для `Permission`; для `Grant` — `null`.",
@@ -3957,6 +3978,13 @@
       "EffectiveAccessView": {
         "description": "Розріз «ресурс → підсумковий рівень → який грант якої ролі його дав» (ФВ-6.16, D-220).",
         "properties": {
+          "caveat": {
+            "description": "string EffectiveAccessView.DocumentStateNotConsidered для аркуша, таблиці й колонки: розріз не знає стану документа\n        й звужень області періодами; для довідника й проєкту — `null`.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
           "contributions": {
             "description": "Усі внески, включно з тими, що не порахувалися.",
             "items": {
@@ -3982,6 +4010,19 @@
           "level": {
             "$ref": "#/components/schemas/GrantLevel",
             "description": "Підсумковий рівень — той, що дає профіль доступу (`AccessProfile`)."
+          },
+          "levelMayExceedActual": {
+            "default": false,
+            "description": "Є призначення, звужене аркушами чи періодами (`Narrowed`): розріз бачить лише аркушні звуження,\nтож заборона такого призначення в періоді не знижує показаний рівень — фактичний може бути НИЖЧИМ за показаний\n(грант за періодом, навпаки, у розріз не потрапляє).",
+            "type": "boolean"
+          },
+          "projectId": {
+            "description": "Проєкт, у шаблоні якого розглянуто аркуш, таблицю чи колонку; інакше `null`.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
           },
           "resource": {
             "description": "Ресурс у формі запиту: `Registry:5`.",
@@ -9872,7 +9913,7 @@
             "type": "boolean"
           },
           "lookupRegistryDefId": {
-            "description": "Довідник-джерело; у наявного не змінюється.",
+            "description": "Довідник-джерело; у наявного змінюється чи знімається (`null`), лише поки жодне значення поля не вказує на запис (ФВ-8.12).",
             "format": "int32",
             "type": [
               "null",
@@ -21794,7 +21835,7 @@
             "description": "Not Found"
           }
         },
-        "summary": "Перерахунок документа, або лише одного його аркуша. Право `Calculation.Recalculate`.",
+        "summary": "Перерахунок документа, або лише одного його аркуша. Право `Document.View` у проєкті документа + видимість (Read); проєктний перерахунок — `Calculation.Recalculate`.",
         "tags": [
           "Documents"
         ]
@@ -34046,7 +34087,7 @@
     },
     "/api/v1/security/users/{id}/effective-access": {
       "get": {
-        "description": "⚠ Нічого не вирішує: підсумковий рівень дає той самий профіль доступу, що й усі рішення,\nа внески (роль, призначення, область, заборона) лише пояснюють його.",
+        "description": "⚠ Нічого не вирішує: підсумковий рівень дає той самий профіль доступу, що й усі рішення,\nа внески (роль, призначення, область, заборона) лише пояснюють його. Для аркуша, таблиці й колонки\nвідповідь несе `caveat`: стан документа й звуження періодами не враховано.",
         "parameters": [
           {
             "description": "Обліковий запис, доступ якого пояснюємо.",
@@ -34060,11 +34101,20 @@
             }
           },
           {
-            "description": "Ресурс: `Registry:{id}` або `Project:{id}`.",
+            "description": "Ресурс: `Registry:{id}`, `Project:{id}`, `Sheet:{id}`, `Table:{id}` або `Column:{id}`.",
             "in": "query",
             "name": "resource",
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "description": "Проєкт, у шаблоні якого розглядається аркуш, таблиця чи колонка (обов'язковий для них).",
+            "in": "query",
+            "name": "projectId",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
             }
           }
         ],

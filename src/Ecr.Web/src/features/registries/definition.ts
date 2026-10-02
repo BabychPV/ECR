@@ -1,4 +1,4 @@
-﻿import type {
+import type {
   RegistryDefinitionDto,
   RegistryFieldSaveDto,
   RegistryRuleDto,
@@ -114,6 +114,28 @@ export function isComplete(draft: RuleDraft): boolean {
   );
 }
 
+export type LinkEdits = Readonly<Record<number, number | null>>;
+
+/**
+ * Правки зв'язків наявних полів, які відрізняються від опублікованого опису (відновлення з чернетки).
+ *
+ * @param fields Поля чернетки.
+ * @param definition Опублікований опис.
+ */
+export function draftLinkEdits(
+  fields: readonly { readonly id: number | null; readonly lookupRegistryDefId: number | null }[],
+  definition: RegistryDefinitionDto,
+): LinkEdits {
+  const edits: Record<number, number | null> = {};
+  for (const field of fields) {
+    const current = definition.fields.find((f) => f.id === field.id);
+    if (field.id !== null && current?.dataType === 'Lookup' && current.lookupRegistryDefId !== field.lookupRegistryDefId) {
+      edits[field.id] = field.lookupRegistryDefId;
+    }
+  }
+  return edits;
+}
+
 /**
  * Складає запит на збереження опису.
  *
@@ -140,6 +162,7 @@ export function buildSaveRequest(
   newFields: readonly FieldDraft[],
   reason: string,
   language: string,
+  linkEdits: LinkEdits = {},
 ): SaveRegistryDefinitionDto {
   const existingFields: RegistryFieldSaveDto[] = definition.fields.map((field, index) => ({
     id: field.id,
@@ -153,7 +176,8 @@ export function buildSaveRequest(
     // саме ключові поля бере `RoleAssignment.ScopeJson`. Надіслати сюди
     // `false` означало б попросити прибрати бізнес-ключ довідника.
     isKey: field.isScopeField,
-    lookupRegistryDefId: field.lookupRegistryDefId,
+    // ФВ-8.12: ціль посилання наявного поля — зі списку правок вкладки «Зв'язки» (`null` — зняти).
+    lookupRegistryDefId: field.id in linkEdits ? (linkEdits[field.id] ?? null) : field.lookupRegistryDefId,
     unitId: field.unitId,
   }));
 

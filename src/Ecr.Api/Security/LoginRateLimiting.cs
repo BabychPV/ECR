@@ -242,6 +242,10 @@ public static class LoginRateLimiting
             CspReportPermitKey, DefaultCspReportPermitPerMinute);
         var trustForwardedFor = configuration.GetValue(TrustForwardedForKey, defaultValue: false);
 
+        // Системна межа проб транспорту — не в глобальному обмежувачі: той рахує і ВІДХИЛЕНІ запити, а квота
+        // мусить витрачатися лише прийнятими політикою користувача (див. SmtpTestQuotaMiddleware).
+        services.AddSingleton<SmtpTestSystemQuota>();
+
         services.AddRateLimiter(options =>
         {
             options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
@@ -291,6 +295,7 @@ public static class LoginRateLimiting
             // Межа пошуку (BE-19) — іменована політика: їй потрібен користувач,
             // тобто вона діє лише після автентифікації (див. `Program.cs`).
             options.AddPolicy<string, SearchRateLimitPolicy>(SearchRateLimitPolicy.PolicyName);
+            options.AddPolicy<string, SmtpTestRateLimitPolicy>(SmtpTestRateLimitPolicy.PolicyName);
         });
 
         return services;

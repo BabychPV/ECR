@@ -453,6 +453,127 @@ public sealed class CollectionSchedulesControllerTests(SqlServerFixture sql)
         Assert.False(await db.CollectionSchedules.AnyAsync(s => s.SourceEntityId == entityId).ConfigureAwait(true));
     }
 
+    /// <remarks>
+    /// Сценарій Н-П1 (<c>docs/build/TESTER-SCENARIOS-2026-10-01.md</c>): залежність
+    /// ставиться при створенні, їде в переліку, знімається <c>clearDependency</c>;
+    /// три відмови — <c>422</c> з <c>messageKey</c> і <c>dependsOn</c>, база не змінюється.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-13.15")]
+    public async Task ФВ_13_15_залежність_розкладу_крізь_HTTP_ставиться_знімається_а_цикл_чуже_зʼєднання_і_неіснуючий_дають_422()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, "Integration.EditSchedule").ConfigureAwait(true);
+
+        var (sourceId, _) = await AddDataSourceAsync().ConfigureAwait(true);
+        var (upstream, _) = await AddScheduleAsync(FarFuture, sourceId).ConfigureAwait(true);
+        var (entityId, _) = await AddSourceEntityAsync(sourceId).ConfigureAwait(true);
+        var (foreign, _) = await AddScheduleAsync(FarFuture).ConfigureAwait(true);
+
+        var created = await client.PostAsJsonAsync(
+            Schedules,
+            new { sourceEntityId = entityId, cron = FarFuture, isEnabled = true, dependsOnScheduleId = upstream })
+            .ConfigureAwait(true);
+        Assert.True(created.StatusCode == HttpStatusCode.Created, $"{created.StatusCode}: {app.ErrorsText}");
+        var id = (await BodyAsync(created).ConfigureAwait(true)).GetProperty("id").GetInt32();
+        Assert.Equal(upstream, (await RowAsync(client, id).ConfigureAwait(true)).GetProperty("dependsOnScheduleId").GetInt32());
+
+        // Цикл: верхній розклад не може залежати від того, що вже залежить від нього.
+        var upRow = await RowAsync(client, upstream).ConfigureAwait(true);
+        var cycle = await SendAsync(
+            client, HttpMethod.Put, At(upstream), upRow.GetProperty("rowVersion").GetString(),
+            new { cron = FarFuture, isEnabled = true, dependsOnScheduleId = id }).ConfigureAwait(true);
+        await AssertDependencyRefusalAsync(cycle, "collectionScheduleDependencyCycle", id).ConfigureAwait(true);
+
+        // Самозалежність — той самий ключ циклу.
+        var row = await RowAsync(client, id).ConfigureAwait(true);
+        var self = await SendAsync(
+            client, HttpMethod.Put, At(id), row.GetProperty("rowVersion").GetString(),
+            new { cron = FarFuture, isEnabled = true, dependsOnScheduleId = id }).ConfigureAwait(true);
+        await AssertDependencyRefusalAsync(self, "collectionScheduleDependencyCycle", id).ConfigureAwait(true);
+
+        var other = await SendAsync(
+            client, HttpMethod.Put, At(id), row.GetProperty("rowVersion").GetString(),
+            new { cron = FarFuture, isEnabled = true, dependsOnScheduleId = foreign }).ConfigureAwait(true);
+        await AssertDependencyRefusalAsync(other, "collectionScheduleDependencyOtherSource", foreign).ConfigureAwait(true);
+
+        var missing = await SendAsync(
+            client, HttpMethod.Put, At(id), row.GetProperty("rowVersion").GetString(),
+            new { cron = FarFuture, isEnabled = true, dependsOnScheduleId = 2_000_000_000 }).ConfigureAwait(true);
+        await AssertDependencyRefusalAsync(missing, "collectionScheduleDependencyNotFound", 2_000_000_000).ConfigureAwait(true);
+
+        await using (var db = NewDb())
+        {
+            Assert.Equal(
+                upstream,
+                (await db.CollectionSchedules.AsNoTracking().SingleAsync(s => s.Id == id).ConfigureAwait(true)).DependsOnScheduleId);
+            Assert.Null(
+                (await db.CollectionSchedules.AsNoTracking().SingleAsync(s => s.Id == upstream).ConfigureAwait(true)).DependsOnScheduleId);
+        }
+
+        // Правка без полів залежності її не чіпає; clearDependency знімає.
+        var kept = await SendAsync(
+            client, HttpMethod.Put, At(id), row.GetProperty("rowVersion").GetString(),
+            new { cron = FarFutureLater, isEnabled = true }).ConfigureAwait(true);
+        Assert.True(kept.StatusCode == HttpStatusCode.OK, $"{kept.StatusCode}: {app.ErrorsText}");
+        Assert.Equal(upstream, (await BodyAsync(kept).ConfigureAwait(true)).GetProperty("dependsOnScheduleId").GetInt32());
+
+        var cleared = await SendAsync(
+            client, HttpMethod.Put, At(id), (await RowAsync(client, id).ConfigureAwait(true)).GetProperty("rowVersion").GetString(),
+            new { cron = FarFutureLater, isEnabled = true, dependsOnScheduleId = upstream, clearDependency = true })
+            .ConfigureAwait(true);
+        Assert.True(cleared.StatusCode == HttpStatusCode.OK, $"{cleared.StatusCode}: {app.ErrorsText}");
+        Assert.Equal(JsonValueKind.Null, (await BodyAsync(cleared).ConfigureAwait(true)).GetProperty("dependsOnScheduleId").ValueKind);
+    }
+
+    /// <remarks>
+    /// Сценарій Н-П2: видалення розкладу, від якого залежать інші, — <c>204</c>, а не
+    /// відмова зовнішнього ключа; у залежного залежність обнуляється.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-13.15")]
+    public async Task ФВ_13_15_видалення_розкладу_від_якого_залежать_204_і_залежність_у_залежного_обнуляється()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, "Integration.EditSchedule").ConfigureAwait(true);
+
+        var (sourceId, _) = await AddDataSourceAsync().ConfigureAwait(true);
+        var (upstream, _) = await AddScheduleAsync(FarFuture, sourceId).ConfigureAwait(true);
+        var (entityId, _) = await AddSourceEntityAsync(sourceId).ConfigureAwait(true);
+
+        var created = await client.PostAsJsonAsync(
+            Schedules,
+            new { sourceEntityId = entityId, cron = FarFuture, isEnabled = true, dependsOnScheduleId = upstream })
+            .ConfigureAwait(true);
+        Assert.True(created.StatusCode == HttpStatusCode.Created, $"{created.StatusCode}: {app.ErrorsText}");
+        var id = (await BodyAsync(created).ConfigureAwait(true)).GetProperty("id").GetInt32();
+
+        var deleted = await SendAsync(
+            client, HttpMethod.Delete, At(upstream),
+            (await RowAsync(client, upstream).ConfigureAwait(true)).GetProperty("rowVersion").GetString(), body: null)
+            .ConfigureAwait(true);
+        Assert.True(deleted.StatusCode == HttpStatusCode.NoContent, $"{deleted.StatusCode}: {app.ErrorsText}");
+
+        await using var db = NewDb();
+        Assert.False(await db.CollectionSchedules.AnyAsync(s => s.Id == upstream).ConfigureAwait(true));
+        Assert.Null(
+            (await db.CollectionSchedules.AsNoTracking().SingleAsync(s => s.Id == id).ConfigureAwait(true)).DependsOnScheduleId);
+    }
+
+    private static async Task AssertDependencyRefusalAsync(HttpResponseMessage response, string key, int dependsOn)
+    {
+        var text = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+        Assert.True(response.StatusCode == HttpStatusCode.UnprocessableEntity, $"{response.StatusCode}: {text}");
+        var problem = JsonDocument.Parse(text).RootElement;
+        Assert.Equal("ECR-REQ-0422", problem.GetProperty("errorCode").GetString());
+        Assert.Equal($"err.ECR-REQ-0422.{key}", problem.GetProperty("messageKey").GetString());
+        Assert.Equal(dependsOn.ToString(System.Globalization.CultureInfo.InvariantCulture), problem.GetProperty("dependsOn").ToString());
+    }
+
     private static Uri Filtered(string dataSource)
         => new($"{Schedules}?dataSource={Uri.EscapeDataString(dataSource)}", UriKind.Relative);
 

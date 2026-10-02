@@ -3174,7 +3174,7 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Перерахунок документа, або лише одного його аркуша. Право `Calculation.Recalculate`.
+         * Перерахунок документа, або лише одного його аркуша. Право `Document.View` у проєкті документа + видимість (Read); проєктний перерахунок — `Calculation.Recalculate`.
          * @description Довга операція — у фон із прогресом; повертає `jobId`, а не результат.
          *     `SheetDefId` звужує перерахунок до одного аркуша (Q-331); без нього —
          *     увесь документ, як і раніше.
@@ -12397,13 +12397,16 @@ export interface paths {
          * Розріз «ресурс → підсумковий рівень → який грант якої ролі його дав» (ФВ-6.16, D-220).
          *     Право `Security.ManageUsers`.
          * @description ⚠ Нічого не вирішує: підсумковий рівень дає той самий профіль доступу, що й усі рішення,
-         *     а внески (роль, призначення, область, заборона) лише пояснюють його.
+         *     а внески (роль, призначення, область, заборона) лише пояснюють його. Для аркуша, таблиці й колонки
+         *     відповідь несе `caveat`: стан документа й звуження періодами не враховано.
          */
         get: {
             parameters: {
                 query?: {
-                    /** @description Ресурс: `Registry:{id}` або `Project:{id}`. */
+                    /** @description Ресурс: `Registry:{id}`, `Project:{id}`, `Sheet:{id}`, `Table:{id}` або `Column:{id}`. */
                     resource?: string;
+                    /** @description Проєкт, у шаблоні якого розглядається аркуш, таблиця чи колонка (обов'язковий для них). */
+                    projectId?: number;
                 };
                 header?: never;
                 path: {
@@ -19427,10 +19430,17 @@ export interface components {
         EffectiveAccessContribution: {
             /** @description Чи бере участь внесок у підсумковий рівень профілю. */
             counted: boolean;
+            /** @description Для аркуша, таблиці й колонки — предок, на якому стоїть грант (`Project:3`, `Sheet:7`), якщо це
+             *     не сам запитаний ресурс; інакше `null`. */
+            inheritedFrom?: null | string;
             /** @description Явна заборона. */
             isDeny: boolean;
             /** @description Рівень: у гранта — його рівень, у права — той, який воно відкриває для довідника. */
             level: components["schemas"]["GrantLevel"];
+            /** @description Для `Narrowed`: чим звужено — `Sheets:F1,F2`, `Periods:from..to`; інакше `null`. */
+            narrowedBy?: null | string;
+            /** @description `ProjectNotVisible` — грант нижче проєкту без видимого проєкту (S2); інакше `null`. */
+            notCountedReason?: null | string;
             /** @description Код права для `Permission`; для `Grant` — `null`. */
             permissionCode: null | string;
             /** @description SID групи, через яку прийшла роль; `null` — призначена особисто. */
@@ -19446,6 +19456,9 @@ export interface components {
         };
         /** @description Розріз «ресурс → підсумковий рівень → який грант якої ролі його дав» (ФВ-6.16, D-220). */
         EffectiveAccessView: {
+            /** @description string EffectiveAccessView.DocumentStateNotConsidered для аркуша, таблиці й колонки: розріз не знає стану документа
+             *             й звужень області періодами; для довідника й проєкту — `null`. */
+            caveat?: null | string;
             /** @description Усі внески, включно з тими, що не порахувалися. */
             contributions: components["schemas"]["EffectiveAccessContribution"][];
             /** @description `ExplicitDeny` або `NoGrant`; `null` — рівень є. */
@@ -19456,6 +19469,18 @@ export interface components {
             isDenied: boolean;
             /** @description Підсумковий рівень — той, що дає профіль доступу (`AccessProfile`). */
             level: components["schemas"]["GrantLevel"];
+            /**
+             * @description Є призначення, звужене аркушами чи періодами (`Narrowed`): розріз бачить лише аркушні звуження,
+             *     тож заборона такого призначення в періоді не знижує показаний рівень — фактичний може бути НИЖЧИМ за показаний
+             *     (грант за періодом, навпаки, у розріз не потрапляє).
+             * @default false
+             */
+            levelMayExceedActual: boolean;
+            /**
+             * Format: int32
+             * @description Проєкт, у шаблоні якого розглянуто аркуш, таблицю чи колонку; інакше `null`.
+             */
+            projectId?: null | number;
             /** @description Ресурс у формі запиту: `Registry:5`. */
             resource: string;
             /**
@@ -22143,7 +22168,7 @@ export interface components {
             isRequired: boolean;
             /**
              * Format: int32
-             * @description Довідник-джерело; у наявного не змінюється.
+             * @description Довідник-джерело; у наявного змінюється чи знімається (`null`), лише поки жодне значення поля не вказує на запис (ФВ-8.12).
              */
             lookupRegistryDefId: null | number;
             /** @description Підпис мовами каталогу. */

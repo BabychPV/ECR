@@ -382,6 +382,7 @@ public sealed class SaveRegistryDefinitionHandler(
 
         var userId = RequireUser(currentUser);
         RequireReason(dto.Reason);
+        RequireNoEmptyItems(dto.Fields, dto.Rules, dto.Keys);
 
         var definition = await registries.FindDefinitionAsync(code, ct).ConfigureAwait(false)
             ?? throw RegistryNotFound(code);
@@ -389,7 +390,7 @@ public sealed class SaveRegistryDefinitionHandler(
         // ⛔ S18: заборона на довідник виграє і над правом на опис — 404, як неіснуючий.
         RegistryAccess.EnsureNotDenied(profile, definition.Id, code);
 
-        return await ApplyAsync(definition, dto, "SaveDefinition", userId, ct).ConfigureAwait(false);
+        return await ApplyAsync(definition, dto, "SaveDefinition", userId, profile, ct).ConfigureAwait(false);
     }
 
     internal static int RequireUser(ICurrentUser user)
@@ -410,6 +411,24 @@ public sealed class SaveRegistryDefinitionHandler(
         }
     }
 
+    /// <summary>
+    /// Порожній елемент (<c>null</c>) у полях, правилах чи ключах — відмова, а не
+    /// <c>NullReferenceException</c> посеред застосування опису (прохід по відмовах 2).
+    /// </summary>
+    internal static void RequireNoEmptyItems<TField, TRule, TKey>(
+        IReadOnlyList<TField>? fields, IReadOnlyList<TRule>? rules, IReadOnlyList<TKey>? keys)
+    {
+        if ((fields?.Any(f => f is null) ?? false)
+            || (rules?.Any(r => r is null) ?? false)
+            || (keys?.Any(k => k is null) ?? false))
+        {
+            throw new BusinessRuleException(
+                "ECR-REG-0422",
+                "Опис містить порожній елемент серед полів, правил чи ключів.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-REG-0422.definitionItemMissing" });
+        }
+    }
+
     internal static NotFoundException RegistryNotFound(string code)
         => new(
             "ECR-REG-0404",
@@ -424,9 +443,11 @@ public sealed class SaveRegistryDefinitionHandler(
     /// <param name="dto">Поля, правила, причина.</param>
     /// <param name="operation">Дія в журналі: <c>SaveDefinition</c> або <c>PublishDefinition</c>.</param>
     /// <param name="userId">Автор.</param>
+    /// <param name="profile">Профіль автора: цілі посилань, на які в нього є заборона, — <c>404</c>.</param>
     /// <param name="ct">Токен скасування.</param>
     internal async Task<int> ApplyAsync(
-        RegistryDef definition, SaveRegistryDefinitionDto dto, string operation, int userId, CancellationToken ct)
+        RegistryDef definition, SaveRegistryDefinitionDto dto, string operation, int userId,
+        Security.AccessProfile profile, CancellationToken ct)
     {
         var rules = await registries.ListRulesAsync(definition.Id, ct).ConfigureAwait(false);
         var existingKeys = await keys.ListKeysForUpdateAsync(definition.Id, ct).ConfigureAwait(false);
@@ -448,6 +469,9 @@ public sealed class SaveRegistryDefinitionHandler(
         // D-153) не можна було б завести через HTTP узагалі.
         var newFieldsMayBeRequired = !dto.Fields.Any(f => f.Id is null && f.IsRequired)
             || !(await EntriesAsync().ConfigureAwait(false)).Any(e => !e.IsDeleted);
+
+        // ⛔ ФВ-8.12 (порція 1): ціль посилання наявного поля змінюється лише поки на нього не посилається жодне значення.
+        await GuardLookupRetargetAsync(definition, dto.Fields, profile, EntriesAsync, ct).ConfigureAwait(false);
 
         ApplyFields(definition, dto.Fields, newFieldsMayBeRequired);
 
@@ -888,6 +912,135 @@ public sealed class SaveRegistryDefinitionHandler(
             });
     }
 
+    /// <summary>
+    /// Змінює або знімає ціль посилання НАЯВНОГО поля (<c>ФВ-8.12</c>): тільки коли жодне
+    /// збережене значення цього поля не вказує на запис (<c>ValueRefEntryId</c>) — інакше комірки
+    /// стали б посиланнями в чужий довідник.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Композиція і ключове поле не перенацілюються (відношення й бізнес-ключ незмінні).
+    /// Усі відмови — <c>ECR-REG-0422</c> з ключем; нового коду немає. Аудит пише
+    /// <c>ApplyAsync</c>: знімок опису містить <c>RefRegistryDefId</c> до і після.
+    /// </remarks>
+    private async Task GuardLookupRetargetAsync(
+        RegistryDef definition,
+        IReadOnlyList<RegistryFieldSaveDto> wanted,
+        Security.AccessProfile profile,
+        Func<Task<IReadOnlyList<Domain.Entities.Dictionaries.RegistryEntry>>> entriesAsync,
+        CancellationToken ct)
+    {
+        var changed = new List<(RegistryFieldDef Field, int? Target)>();
+        foreach (var w in wanted)
+        {
+            // ⛔ Нове поле Lookup: та сама вимога до цілі, що й при перенаціленні (ent6 R1).
+            if (w.Id is null)
+            {
+                if (string.Equals(w.DataType, nameof(CellDataType.Lookup), StringComparison.Ordinal))
+                {
+                    await RequireUsableTargetAsync(w.LookupRegistryDefId, w.Code, profile, ct).ConfigureAwait(false);
+                }
+
+                continue;
+            }
+
+            if (w.Id is not { } id
+                || definition.Fields.FirstOrDefault(f => f.Id == id) is not { DataType: CellDataType.Lookup } field
+                || field.RefRegistryDefId == w.LookupRegistryDefId)
+            {
+                continue;
+            }
+
+            if (field.RelationKind == RegistryRelationKind.Composition || field.IsKey)
+            {
+                throw Retarget("err.ECR-REG-0422.relationKindImmutable", field.Code);
+            }
+
+            await RequireUsableTargetAsync(w.LookupRegistryDefId, field.Code, profile, ct).ConfigureAwait(false);
+
+            changed.Add((field, w.LookupRegistryDefId));
+        }
+
+        if (changed.Count == 0)
+        {
+            return;
+        }
+
+        // ⛔ Правила, формули й методології, що йдуть через поле (`FIELD.attr`): тип шляху
+        // виводиться з цілі посилання, тож після перенацілення вони тихо посилалися б на атрибут,
+        // якого в новій цілі немає (про це дізнались би лише під час виконання). Відмова з переліком.
+        var consumers = await registries
+            .FindFieldChainConsumersAsync(
+                definition.Id, changed.Select(c => (string)c.Field.Code).ToList(), UsageResponse.PageSize, ct)
+            .ConfigureAwait(false);
+        if (consumers.Total > 0)
+        {
+            throw new BusinessRuleException(
+                "ECR-REG-0422",
+                $"Зв'язок поля «{changed[0].Field.Code}» не можна змінити: через нього читають атрибути правил, формул чи методологій — {consumers.Total.ToString(CultureInfo.InvariantCulture)}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-REG-0422.lookupRetargetUsedByRules",
+                    ["fieldCode"] = (string)changed[0].Field.Code,
+                    ["total"] = consumers.Total.ToString(CultureInfo.InvariantCulture),
+                    ["usedBy"] = string.Join(", ", consumers.Items.Select(i => i.Label)),
+                    ["references"] = consumers.Items,
+                });
+        }
+
+        var entries = await entriesAsync().ConfigureAwait(false);
+        var fieldIds = changed.Select(c => c.Field.Id).ToHashSet();
+        var values = entries.Count == 0
+            ? []
+            : await registries.ListValuesForEntriesAsync(entries.Select(e => e.Id).ToList(), ct).ConfigureAwait(false);
+        if (values.FirstOrDefault(v => v.ValueRefEntryId is not null && fieldIds.Contains(v.RegistryFieldDefId)) is { } used)
+        {
+            throw Retarget("err.ECR-REG-0422.lookupRetargetInUse", changed.First(c => c.Field.Id == used.RegistryFieldDefId).Field.Code);
+        }
+
+        foreach (var (field, target) in changed)
+        {
+            field.PointTo(target);
+        }
+    }
+
+    /// <summary>
+    /// Ціль посилання поля <c>Lookup</c>: обов'язкова, існує, і на неї немає заборони автора.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ ent6 R1. Заборонений довідник — <c>404</c> (як неіснуючий, <c>RegistryAccess.NotFound</c>): інакше
+    /// користувач із забороною на X перенацілив би своє поле на X і читав коди й назви записів X
+    /// через рядки довідника-власника. Порожня ціль теж не береться: поле <c>Lookup</c> без цілі
+    /// приймало запис БУДЬ-ЯКОГО довідника (перевірка в <c>RegistryEntryWriter</c> мовчала).
+    /// </remarks>
+    private async Task RequireUsableTargetAsync(
+        int? target, string fieldCode, Security.AccessProfile profile, CancellationToken ct)
+    {
+        if (target is not { } id)
+        {
+            throw Retarget("err.ECR-REG-0422.lookupTargetUnknown", fieldCode);
+        }
+
+        // Заборона перевіряється ДО існування: однакова відповідь на «є, але заборонено» і «немає».
+        if (RegistryAccess.IsDenied(profile, id))
+        {
+            throw RegistryAccess.NotFound(id);
+        }
+
+        if (await registries.FindDefinitionByIdAsync(id, ct).ConfigureAwait(false) is null)
+        {
+            throw Retarget("err.ECR-REG-0422.lookupTargetUnknown", fieldCode);
+        }
+    }
+
+    private static BusinessRuleException Retarget(string messageKey, string fieldCode)
+        => new(
+            "ECR-REG-0422",
+            $"Зв'язок поля «{fieldCode}» не можна змінити.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = messageKey,
+                ["fieldCode"] = fieldCode,
+            });
     /// <summary>Застосовує перелік полів до опису.</summary>
     /// <param name="definition">Довідник.</param>
     /// <param name="wanted">Поля після правки.</param>

@@ -130,6 +130,8 @@ export const CoverageEventStatuses = [
   'RegistryReactivated',
   'RegistryRuleViolation',
   'RegistryExternalKeyRelinked',
+  // Збір: плановий запуск пропущено за залежністю розкладу (ФВ-13.15) — затримка, не втрата.
+  'SkippedDependency',
 ] as const;
 export type CoverageEventStatus = (typeof CoverageEventStatuses)[number];
 

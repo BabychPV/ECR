@@ -1,6 +1,7 @@
 // tests/Ecr.Infrastructure.Tests/Jobs/CollectionScheduleDependencyGateTests.cs
 using Ecr.Application.Ports;
 using Ecr.Domain.Entities.External;
+using Ecr.Domain.Entities.Integration;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
 using Ecr.Infrastructure.Integration;
@@ -45,6 +46,14 @@ public sealed class CollectionScheduleDependencyGateTests(SqlServerFixture sql)
         await progress.Received().ReportAsync(
             100, Arg.Is<string?>(m => m!.Contains("jobs.collectionDependencyWaiting", StringComparison.Ordinal)), Arg.Any<CancellationToken>());
 
+        // Пропуск видно в журналі покриття: подія SkippedDependency із конвертом; повторний
+        // пропуск тієї ж години не дублює її. ⛔ МУТАЦІЯ: прибрати RecordCoverageEventAsync — червоніє.
+        await Job(db, runner).ExecuteAsync(new CollectionJobRequest(waiting, null, null), progress, CancellationToken.None);
+        var events = await db.CollectionCoverages.AsNoTracking()
+            .Where(c => c.SourceEntityId == waiting && c.Status == CollectionCoverage.SkippedDependency).ToListAsync();
+        var skipped = Assert.Single(events);
+        Assert.Contains("coverageEvents.skippedDependency", skipped.Details, StringComparison.Ordinal);
+
         // Той, від кого залежимо, збирається без обмежень.
         await Job(db, runner).ExecuteAsync(new CollectionJobRequest(dependent, null, null), progress, CancellationToken.None);
         await runner.Received(1).RunAsync(dependent, Arg.Any<DateTime>(), Arg.Any<DateTime>(), Arg.Any<IJobProgress>(), Arg.Any<CancellationToken>());
@@ -66,6 +75,8 @@ public sealed class CollectionScheduleDependencyGateTests(SqlServerFixture sql)
             new CollectionJobRequest(waiting, Now.AddDays(-2), Now.AddDays(-1)), Substitute.For<IJobProgress>(), CancellationToken.None);
 
         await runner.Received(2).RunAsync(waiting, Arg.Any<DateTime>(), Arg.Any<DateTime>(), Arg.Any<IJobProgress>(), Arg.Any<CancellationToken>());
+        Assert.False(await db.CollectionCoverages.AnyAsync(
+            c => c.SourceEntityId == waiting && c.Status == CollectionCoverage.SkippedDependency));
     }
 
     [Fact]

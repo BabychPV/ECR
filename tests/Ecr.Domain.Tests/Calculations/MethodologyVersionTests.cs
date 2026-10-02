@@ -46,6 +46,7 @@ public sealed class MethodologyVersionTests
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
     [Trait("Requirement", "ФВ-13.2")]
+    [Trait("Requirement", "ФВ-14.7")]
     public void Публікація_без_ChangeReason_неможлива()
     {
         var version = Version();

@@ -16,6 +16,7 @@ import {
 } from '@mantine/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { usePendingLoading } from '@/features/common/usePendingLoading';
+import { EcrApiError } from '@/api/client';
 import { t } from '@/shared/i18n';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { showApiError, showDone } from '@/shared/ui/notify';
@@ -27,6 +28,10 @@ import {
   type SmtpSettings,
   type SmtpSettingsInput,
 } from './api';
+import { showProbeResult } from './probeResult';
+
+/** Ключ відмови `422`: адресу змінено, а збережений пароль не підтверджено (`SaveSmtpSettingsHandler`). */
+const SmtpPasswordReentryRequiredKey = 'err.ECR-REQ-0422.smtpPasswordReentryRequired';
 
 /**
  * Налаштування SMTP, які адміністратор задає в системі (`D-263`, `GET/PUT /notifications/smtp`).
@@ -46,28 +51,32 @@ export function SmtpSettingsPanel(): JSX.Element {
   });
   const [draft, setDraft] = useState<SmtpDraft | null>(null);
   const [testTo, setTestTo] = useState('');
+  const [passwordHint, setPasswordHint] = useState<string | null>(null);
 
   const save = useMutation({
     mutationFn: (value: SmtpDraft) => saveSmtpSettings(inputOf(value)),
+    onMutate: () => setPasswordHint(null),
     onSuccess: async (saved) => {
       queryClient.setQueryData(SmtpSettingsKey, saved);
       setDraft(null);
       showDone(t('smtp.saved'));
     },
-    onError: showApiError,
+    onError: (error) => {
+      // ⛔ S1 (ent6): адресу змінено, а збережений пароль не переноситься — підсвічуємо поле пароля.
+      if (
+        error instanceof EcrApiError &&
+        error.problem.status === 422 &&
+        error.problem.extensions2?.['messageKey'] === SmtpPasswordReentryRequiredKey
+      ) {
+        setPasswordHint(t('err.ECR-REQ-0422.smtpPasswordReentryRequired'));
+      }
+      showApiError(error);
+    },
   });
 
   const test = useMutation({
     mutationFn: (to: string) => testSmtpSettings(to),
-    onSuccess: (result) => {
-      if (result.ok) {
-        showDone(t('notifications.testOk'));
-        return;
-      }
-
-      const key = result.messageKey ?? null;
-      showApiError(new Error(key === null ? (result.error ?? t('notifications.testFailed')) : t(key)));
-    },
+    onSuccess: showProbeResult,
     onError: showApiError,
   });
 
@@ -178,8 +187,12 @@ export function SmtpSettingsPanel(): JSX.Element {
             label={t('smtp.password')}
             description={settings.data.hasPassword ? t('smtp.passwordStored') : t('smtp.passwordNone')}
             autoComplete="new-password"
+            error={passwordHint}
             value={form.password}
-            onChange={(e) => set({ password: e.currentTarget.value })}
+            onChange={(e) => {
+              setPasswordHint(null);
+              set({ password: e.currentTarget.value });
+            }}
           />
         </Group>
       )}
@@ -199,7 +212,15 @@ export function SmtpSettingsPanel(): JSX.Element {
       />
 
       <Group justify="flex-end">
-        <Button loading={saveLoading} disabled={draft === null} onClick={() => save.mutate(form)}>
+        <Button
+          loading={saveLoading}
+          disabled={draft === null}
+          onClick={() => {
+            // ⚠ До порогу `usePendingLoading` кнопка ще активна: другий клік не шле другий PUT.
+            if (save.isPending) return;
+            save.mutate(form);
+          }}
+        >
           {t('smtp.save')}
         </Button>
       </Group>
@@ -215,7 +236,11 @@ export function SmtpSettingsPanel(): JSX.Element {
           variant="default"
           loading={testLoading}
           disabled={testTo.trim().length === 0 || draft !== null}
-          onClick={() => test.mutate(testTo.trim())}
+          onClick={() => {
+            // ⚠ Друга проба поверх першої — другий лист і зайвий крок квоти проб (`D-263`).
+            if (test.isPending) return;
+            test.mutate(testTo.trim());
+          }}
         >
           {t('smtp.testSend')}
         </Button>

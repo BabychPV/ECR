@@ -42,7 +42,7 @@ export function DataSourceScheduleTab({ source }: { readonly source: DataSource 
     return <ErrorAlert error={entities.error} onRetry={() => void entities.refetch()} />;
   }
 
-  if (schedules.isPending || entities.isPending) return <Loader size="sm" />;
+  if (schedules.isPending || entities.isPending) return <Loader size="sm" role="status" aria-label={t('common.loading')} />;
 
   const own = entities.data.filter((entity) => entity.dataSourceCode === source.code);
   const label = (entity: SourceEntityStatus): string => entity.displayName ?? entity.code;
@@ -59,6 +59,7 @@ export function DataSourceScheduleTab({ source }: { readonly source: DataSource 
             <Table.Tr>
               <Table.Th>{t('sources.entity')}</Table.Th>
               <Table.Th>{t('schedule.cron')}</Table.Th>
+              <Table.Th>{t('schedule.dependsOn')}</Table.Th>
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
@@ -86,6 +87,18 @@ export function DataSourceScheduleTab({ source }: { readonly source: DataSource 
                       </Badge>
                     )}
                   </Group>
+                </Table.Td>
+                <Table.Td data-schedule-depends-on={schedule.dependsOnScheduleId ?? ''}>
+                  {(() => {
+                    const target = schedules.data.find((row) => row.id === schedule.dependsOnScheduleId);
+
+                    // ⚠ Залежність є, а цілі в переліку немає (прибрана в сусідній вкладці): «—»
+                    // збрехало б «без залежності», тож видно хоча б номер розкладу.
+                    if (schedule.dependsOnScheduleId == null) return '—';
+                    if (target === undefined) return `#${String(schedule.dependsOnScheduleId)}`;
+
+                    return target.sourceEntityName ?? target.sourceEntityCode;
+                  })()}
                 </Table.Td>
               </Table.Tr>
             ))}

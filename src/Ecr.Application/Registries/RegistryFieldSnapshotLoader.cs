@@ -36,9 +36,11 @@ public static class RegistryFieldSnapshotLoader
     /// <param name="registries">Сховище довідників.</param>
     /// <param name="requests">Що прочитати; повтори допустимі.</param>
     /// <param name="ct">Токен скасування.</param>
+    /// <param name="units">Знімок одиниць для полів типу <c>Unit</c>; <c>null</c> — такі поля не читаються.</param>
     /// <returns><c>null</c> — просити нічого, звернень до сховища не було.</returns>
     public static async Task<IReadOnlyDictionary<long, IReadOnlyDictionary<string, ExpressionValue>>?> LoadAsync(
-        IRegistryStore registries, IEnumerable<RegistryFieldRequest> requests, CancellationToken ct)
+        IRegistryStore registries, IEnumerable<RegistryFieldRequest> requests, CancellationToken ct,
+        Ports.UnitCatalogSnapshot? units = null)
     {
         ArgumentNullException.ThrowIfNull(registries);
         ArgumentNullException.ThrowIfNull(requests);
@@ -76,6 +78,7 @@ public static class RegistryFieldSnapshotLoader
 
         var valuesByEntry = await ListValuesAsync(registries, [.. neededFieldsByEntry.Keys], ct).ConfigureAwait(false);
         var snapshot = new Dictionary<long, IReadOnlyDictionary<string, ExpressionValue>>();
+        Dictionary<long, List<string>>? unproven = null;
 
         foreach (var (entryId, fieldCodes) in neededFieldsByEntry)
         {
@@ -90,26 +93,72 @@ public static class RegistryFieldSnapshotLoader
 
             var perEntry = new Dictionary<string, ExpressionValue>(StringComparer.OrdinalIgnoreCase);
 
+            List<string>? emptyFields = null;
+
             foreach (var fieldCode in fieldCodes)
             {
-                if (!fieldDefs.TryGetValue(fieldCode, out var fieldDef)
-                    || !byFieldDefId.TryGetValue(fieldDef.Id, out var registryValue))
+                if (!fieldDefs.TryGetValue(fieldCode, out var fieldDef))
                 {
-                    // Немає такого поля або запис ще не заповнив його —
-                    // `GetRegistryField` віддасть #REF на відсутній ключ; тут
-                    // просто нема що покласти в знімок.
+                    // Немає такого поля — `GetRegistryField` віддасть #REF на
+                    // відсутній ключ; у знімок класти нема що.
                     continue;
                 }
 
-                if (ToExpressionValue(registryValue, fieldDef.DataType) is { } mapped)
+                if (!byFieldDefId.TryGetValue(fieldDef.Id, out var registryValue))
+                {
+                    (emptyFields ??= []).Add(fieldCode);
+                    continue;
+                }
+
+                if (ToExpressionValue(registryValue, fieldDef.DataType, units) is { } mapped)
                 {
                     perEntry[fieldCode] = mapped;
+                }
+                else if (IsEmpty(registryValue, fieldDef.DataType))
+                {
+                    (emptyFields ??= []).Add(fieldCode);
+                }
+            }
+
+            if (emptyFields is not null)
+            {
+                // RT-24 (Д-2, R-11): ПОРОЖНЄ поле існуючого запису — `null`, а не #REF.
+                // Запис, який має хоч одне значення, існує напевно; решту (жодного
+                // значення) перевіряє ОДИН пакетний запит — лише коли є що перевіряти,
+                // тож повністю заповнені довідники нових звернень не отримують.
+                if (byFieldDefId.Count > 0)
+                {
+                    foreach (var code in emptyFields)
+                    {
+                        perEntry[code] = ExpressionValue.Null;
+                    }
+                }
+                else
+                {
+                    (unproven ??= []).Add(entryId, emptyFields);
                 }
             }
 
             if (perEntry.Count > 0)
             {
                 snapshot[entryId] = perEntry;
+            }
+        }
+
+        if (unproven is not null)
+        {
+            var existing = await registries.FindExistingEntryIdsAsync([.. unproven.Keys], ct).ConfigureAwait(false);
+
+            foreach (var (entryId, emptyFields) in unproven)
+            {
+                // Запису немає (чи сховище не знає його) — #REF, як і раніше.
+                if (existing is null || !existing.Contains(entryId))
+                {
+                    continue;
+                }
+
+                snapshot[entryId] = emptyFields.ToDictionary(
+                    code => code, _ => ExpressionValue.Null, StringComparer.OrdinalIgnoreCase);
             }
         }
 
@@ -140,16 +189,38 @@ public static class RegistryFieldSnapshotLoader
             .ToDictionary(g => g.Key, g => g.ToList());
     }
 
-    /// <summary>Значення поля довідника як значення виразу; типізовано за <c>RegistryFieldDef.DataType</c>.</summary>
-    /// <remarks>
-    /// ⚠ <c>Lookup</c>/<c>Unit</c>/<c>Formula</c>/<c>Calculated</c> тут
-    /// НЕМАЄ: перші два REGFIELD сьогодні не читає (задача — decimal/text/
-    /// bool/date), а останні два в довіднику взагалі не існують
-    /// (<c>RegistryValue.Set</c> їх забороняє при записі).
-    /// </remarks>
-    private static ExpressionValue? ToExpressionValue(RegistryValue value, CellDataType dataType)
+    /// <summary>Чи поле порожнє: значення ВІДСУТНЄ в колонці свого типу (одиниця без знімка — не порожнє).</summary>
+    private static bool IsEmpty(RegistryValue value, CellDataType dataType)
         => dataType switch
         {
+            CellDataType.Decimal or CellDataType.Int => value.ValueNumeric is null,
+            CellDataType.String => value.ValueString is null,
+            CellDataType.Bool => value.ValueBool is null,
+            CellDataType.Date => value.ValueDate is null,
+            CellDataType.Lookup => value.ValueRefEntryId is null,
+            CellDataType.Unit => value.ValueUnitId is null,
+            _ => false,
+        };
+
+    /// <summary>Значення поля довідника як значення виразу; типізовано за <c>RegistryFieldDef.DataType</c>.</summary>
+    /// <remarks>
+    /// RT-24: <c>Lookup</c> → число (id цільового запису, той самий вибір, що для
+    /// <c>Lookup</c>-комірок), <c>Unit</c> → текст (код одиниці; лише коли викликач
+    /// передав знімок одиниць — без нього поле лишається поза знімком, як і було).
+    /// <c>Formula</c>/<c>Calculated</c> у довіднику не існують
+    /// (<c>RegistryValue.Set</c> їх забороняє при записі).
+    /// </remarks>
+    private static ExpressionValue? ToExpressionValue(
+        RegistryValue value, CellDataType dataType, Ports.UnitCatalogSnapshot? units)
+        => dataType switch
+        {
+            CellDataType.Lookup => value.ValueRefEntryId is { } target
+                ? ExpressionValue.Number(target)
+                : null,
+            CellDataType.Unit => value.ValueUnitId is { } unitId
+                && units?.Units.Values.FirstOrDefault(u => u.Id == unitId) is { } unit
+                ? ExpressionValue.Text(unit.Code)
+                : null,
             CellDataType.Decimal or CellDataType.Int => value.ValueNumeric is { } n
                 ? ExpressionValue.Number(n)
                 : null,

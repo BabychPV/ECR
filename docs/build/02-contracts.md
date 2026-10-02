@@ -3340,9 +3340,15 @@ public interface IRecalculationApprovalStore
 
 #### `IEffectiveAccessStore`
 
-Джерела доступу до ресурсу (довідник, проєкт) для розрізу «ресурс → рівень → грант ролі» (`ФВ-6.16`,
-`D-220`): `ResourceExistsAsync` і `ListSourcesAsync` (призначення людини плюс те, що їхні ролі кажуть
-про ресурс). Нічого не вирішує — рівень дає `AccessProfile`.
+Джерела доступу до ресурсу (довідник, проєкт, аркуш, таблиця, колонка) для розрізу «ресурс → рівень →
+грант ролі» (`ФВ-6.16`, `D-220`): `ResourceExistsAsync`, `ResolveChainAsync` (предки аркуша, таблиці й
+колонки в шаблоні проєкту) і `ListSourcesAsync` (призначення людини плюс те, що їхні ролі кажуть про
+ресурс). Нічого не вирішує — рівень дає `AccessProfile` (для аркуша/таблиці/колонки — `EditRules.Effective`).
+
+`GET …/effective-access?resource=Sheet:{id}|Table:{id}|Column:{id}&projectId={id}`: `projectId` обов'язковий
+(id аркуша, таблиці й колонки — версії шаблону, спільної для проєктів). Відповідь несе `caveat`
+(`DocumentStateNotConsidered`) і `projectId`, а внески — `inheritedFrom` (`Project:3`, `Sheet:7`): розріз
+не знає стану документа й звужень області періодами.
 
 #### `IUserStore`
 
@@ -3552,7 +3558,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `ECR-CFG-0422` | 422 | код або `RowKey` не відповідає шаблону — помилка введення, не збій |
 | `ECR-CFG-4221` | 422 | `Project.TimeZoneId` не є відомим ідентифікатором IANA: порожньо, невідомий пояс, Windows-ідентифікатор (`Central Asia Standard Time`) або зсув (`+05:00`) |
 | `ECR-REQ-0422` | 422 | параметр самого запиту поза межами: розмір сторінки, ширина або напрям вікна аудиту |
-| `ECR-REQ-0429` | 429 | КОРИСТУВАЧ вичерпав межу частоти запитів (пошук `GET /api/v1/search`, типово 30 за 10 с, `Security:RateLimit:SearchPermit`/`SearchWindowSeconds`); у відповіді `Retry-After` |
+| `ECR-REQ-0429` | 429 | КОРИСТУВАЧ вичерпав межу частоти запитів (пошук `GET /api/v1/search`, типово 30 за 10 с, `Security:RateLimit:SearchPermit`/`SearchWindowSeconds`; проби SMTP `POST /notifications/smtp/test` і `/notifications/channels/{id}/test`, політика `smtp-test`: 5/хв на користувача і 30/год на систему, `Security:RateLimit:SmtpTestPermitPerMinute`/`SmtpTestSystemPermitPerHour`); у відповіді `Retry-After` |
 | `ECR-SCHM-0409` | 409 | `Breaking`-зміна у версії з документами (ФВ-7.4) |
 | `ECR-SCHM-0422` | 422 | `Guarded`-зміна без стратегії міграції; режим переносу документа на нову версію (ФВ-7.5) не має стратегії для змін |
 | `ECR-DOC-0404` | 404 | документ не знайдено |
@@ -3688,6 +3694,9 @@ public sealed class NotFoundException(string errorCode, string message)
 | `err.ECR-REQ-0422.registryExportTooLarge` | 422 | експорт довідника більший за `Registries:ExportMaxRows` |
 | `err.ECR-REQ-0422.registryRowsIdsTooMany` | 422 | у запиті рядків довідника забагато ідентифікаторів |
 | `err.ECR-REQ-0422.effectiveAccessResource` | 422 | розріз ефективного доступу: невідомий тип ресурсу чи ідентифікатор без типу |
+| `err.ECR-REQ-0422.effectiveAccessProject` | 422 | розріз для аркуша, таблиці чи колонки без `projectId` |
+| `err.ECR-TMPL-0404.effectiveAccessResource` | 404 | розріз: аркуша, таблиці чи колонки немає |
+| `err.ECR-TMPL-0404.effectiveAccessNotInProject` | 404 | розріз: ресурс не з версії шаблону проєкту |
 | `err.ECR-REQ-0422.reportPublishReason` | 422 | публікація версії звіту без причини |
 | `err.ECR-REQ-0422.validationScope` | 422 | область виконання перевірок (validation) задано невалідно |
 
@@ -3826,7 +3835,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/documents/{id}/rows` | — | 1 |
 | `POST` | `/api/v1/documents/{id}/validate` | `Document.View` | 2 |
 | `GET` | `/api/v1/documents/{id}/validation` | `Document.View` | 2 |
-| `POST` | `/api/v1/documents/{id}/recalculate` | `Calculation.Recalculate` | 2 |
+| `POST` | `/api/v1/documents/{id}/recalculate` | `Document.View` | 2 |
 | `POST` | `/api/v1/documents/{id}/submit` | — | 3 |
 | `POST` | `/api/v1/documents/{id}/approve` | — | 3 |
 | `POST` | `/api/v1/documents/{id}/reopen` | `Document.Reopen` | 3 |
@@ -4136,6 +4145,10 @@ public sealed class NotFoundException(string errorCode, string message)
 > (`codeModeImmutable`). Публікація ключа на даних із дублікатами —
 > `409 ECR-REG-4092 existingDuplicates`; без дублікатів рядки
 > `dic.RegistryEntryKey` заповнюються в тій самій транзакції.
+> Ціль посилання наявного поля (`lookupRegistryDefId`) змінюється чи знімається (`null`)
+> лише поки жодне значення поля не вказує на запис; інакше `422 ECR-REG-0422`
+> `lookupRetargetInUse`; неіснуючий довідник — `lookupTargetUnknown`; композиція й
+> ключове поле — `relationKindImmutable` (`ФВ-8.12`).
 > `POST …/keys/check` `{fieldCodes[], ignoreCase}` →
 > `{checked, groups, sample[≤20]:{keyText, entries:[{id, code}]}}` — той самий
 > алгоритм до збереження. `GET …/entries` не пропонує частин композиції,

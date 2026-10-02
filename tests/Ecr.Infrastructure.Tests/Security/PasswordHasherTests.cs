@@ -71,6 +71,7 @@ public sealed class PasswordHasherTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "ФВ-6.5")]
     public void D218_новий_хеш_має_200000_ітерацій_а_хеш_із_210000_перевіряється_за_збереженими_параметрами()
     {
         var fresh = _hasher.Hash(Password);

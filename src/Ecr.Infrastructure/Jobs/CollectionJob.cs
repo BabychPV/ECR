@@ -3,6 +3,7 @@ using Ecr.Application.Errors;
 using Ecr.Application.Integration;
 using Ecr.Application.Ports;
 using Ecr.Domain.Abstractions;
+using Ecr.Domain.Entities.Integration;
 using Ecr.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 
@@ -69,6 +70,28 @@ public sealed class CollectionJob(
                             ["sourceEntityId"] = request.SourceEntityId.ToString(CultureInfo.InvariantCulture),
                             ["dependsOn"] = dependsOnId.ToString(CultureInfo.InvariantCulture),
                         },
+                        ct)
+                    .ConfigureAwait(false);
+
+                // Пропуск видно в журналі покриття (не лише в прогресі задачі). Подія — не покриття:
+                // інтервал лишається прогалиною. Мітка — початок години: пропуски одного розкладу
+                // в межах години дедуплікуються (`RecordCoverageEventAsync`), журнал не засипається.
+                var slot = new DateTime(now.Year, now.Month, now.Day, now.Hour, 0, 0, DateTimeKind.Utc);
+                await new Persistence.CollectionStore(db, clock)
+                    .RecordCoverageEventAsync(
+                        request.SourceEntityId,
+                        sourcePath: null,
+                        slot,
+                        slot,
+                        CollectionCoverage.SkippedDependency,
+                        "dependencyWaiting",
+                        new JobProgressMessageEnvelope(
+                            "coverageEvents.skippedDependency",
+                            new Dictionary<string, string>(StringComparer.Ordinal)
+                            {
+                                ["sourceEntityId"] = request.SourceEntityId.ToString(CultureInfo.InvariantCulture),
+                                ["dependsOn"] = dependsOnId.ToString(CultureInfo.InvariantCulture),
+                            }),
                         ct)
                     .ConfigureAwait(false);
 

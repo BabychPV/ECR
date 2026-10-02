@@ -1,5 +1,17 @@
-import { useState, type JSX } from 'react';
-import { Alert, Button, Code, Group, Loader, NumberInput, Stack, Switch, Text, TextInput } from '@mantine/core';
+import { useEffect, useId, useRef, useState, type JSX } from 'react';
+import {
+  Alert,
+  Button,
+  Code,
+  Group,
+  Loader,
+  NumberInput,
+  Select,
+  Stack,
+  Switch,
+  Text,
+  TextInput,
+} from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { EcrApiError } from '@/api/client';
@@ -108,7 +120,8 @@ export function CollectionScheduleTab({
     onError: onFailure,
   });
 
-  if (schedules.isPending) return <Loader size="sm" />;
+  // Ім'я для читалки: голий `Loader` оголошується ніяк, і очікування не відрізнити від порожнечі.
+  if (schedules.isPending) return <Loader size="sm" role="status" aria-label={t('common.loading')} />;
 
   if (schedules.isError) {
     return <ErrorAlert error={schedules.error} onRetry={() => void schedules.refetch()} />;
@@ -141,6 +154,9 @@ export function CollectionScheduleTab({
         // рядку, чию версію вона пошле в `If-Match`.
         key={schedule === null ? 'new' : `${schedule.id}:${schedule.rowVersion}`}
         base={schedule}
+        // Залежність можлива лише від розкладу того ж з'єднання (перелік уже відфільтровано
+        // за ним) і не від самого себе; решту (цикли) відхиляє сервер.
+        candidates={schedules.data.filter((row) => row.id !== schedule?.id)}
         busy={save.isPending || remove.isPending}
         blocked={conflict}
         onSave={(draft) => save.mutate({ base: schedule, draft })}
@@ -152,11 +168,16 @@ export function CollectionScheduleTab({
   );
 }
 
-/** Те, що форма посилає: cron, стан і вікно збору (ФВ-13.15). */
+/**
+ * Те, що форма посилає: cron, стан і вікно збору та залежність (ФВ-13.15):
+ * `dependsOnScheduleId` — нова, `clearDependency` — зняти наявну; обидва відсутні — без змін.
+ */
 interface ScheduleDraft {
   cron: string;
   isEnabled: boolean;
   lookbackDays: number;
+  dependsOnScheduleId?: number;
+  clearDependency?: boolean;
 }
 
 /*
@@ -172,12 +193,15 @@ const LOOKBACK_DEFAULT = 7;
 
 function ScheduleForm({
   base,
+  candidates,
   busy,
   blocked,
   onSave,
   onRemove,
 }: {
   base: CollectionSchedule | null;
+  /** Розклади, від яких можна залежати. */
+  candidates: readonly CollectionSchedule[];
   busy: boolean;
   /** Конфлікт версій не розв'язаний — зберігати поверх нього не можна. */
   blocked: boolean;
@@ -189,6 +213,27 @@ function ScheduleForm({
   // ⚠ `NumberInput` віддає '' на порожньому полі — це не нуль, а «не введено».
   const [lookback, setLookback] = useState<number | string>(base?.lookbackDays ?? LOOKBACK_DEFAULT);
   const [confirming, setConfirming] = useState(false);
+  // ⛔ WCAG 2.4.3: «Видалити» зникає з дерева в мить кліку — без переносу фокус падав на `body`, і
+  // клавіатурний користувач опинявся на початку сторінки. Підтвердження бере фокус на «Скасувати»
+  // (безпечна дія), а скасування повертає його на «Видалити».
+  const removeRef = useRef<HTMLButtonElement>(null);
+  const cancelRef = useRef<HTMLButtonElement>(null);
+  const confirmShown = useRef(false);
+  const confirmTextId = useId();
+  useEffect(() => {
+    if (confirming) {
+      confirmShown.current = true;
+      cancelRef.current?.focus();
+    } else if (confirmShown.current) {
+      confirmShown.current = false;
+      removeRef.current?.focus();
+    }
+  }, [confirming]);
+  const initialDependency = base?.dependsOnScheduleId ?? null;
+  const [dependsOn, setDependsOn] = useState<string | null>(
+    initialDependency === null ? null : String(initialDependency),
+  );
+  const dependsOnId = dependsOn === null ? null : Number(dependsOn);
 
   const problem = checkCron(cron);
   const lookbackDays = typeof lookback === 'number' ? lookback : Number.NaN;
@@ -198,7 +243,8 @@ function ScheduleForm({
     base === null ||
     cron !== base.cron ||
     isEnabled !== base.isEnabled ||
-    lookbackDays !== base.lookbackDays;
+    lookbackDays !== base.lookbackDays ||
+    dependsOnId !== initialDependency;
 
   return (
     <Stack gap="sm">
@@ -238,6 +284,26 @@ function ScheduleForm({
         error={lookbackValid ? undefined : t('schedule.lookbackRange', { min: LOOKBACK_MIN, max: LOOKBACK_MAX })}
       />
 
+      <Select
+        label={t('schedule.dependsOn')}
+        description={t('schedule.dependsOnHint')}
+        placeholder={t('schedule.dependsOnNone')}
+        // ⚠ «Без залежності» — ще й опція переліку: хрестик Mantine має `aria-hidden` і `tabIndex=-1`,
+        // тож із клавіатури чи читалкою зняти залежність інакше нема чим.
+        data={[
+          { value: '', label: t('schedule.dependsOnNone') },
+          ...candidates.map((row) => ({
+            value: String(row.id),
+            label: row.sourceEntityName ?? row.sourceEntityCode,
+          })),
+        ]}
+        value={dependsOn}
+        onChange={(value) => setDependsOn(value === '' ? null : value)}
+        // «—»: порожній вибір знімає залежність (`clearDependency`).
+        clearable
+        data-schedule-depends-on=""
+      />
+
       <Switch
         label={t('schedule.enabled')}
         checked={isEnabled}
@@ -246,14 +312,22 @@ function ScheduleForm({
 
       <Group justify="space-between" gap="xs">
         {base !== null && !confirming && (
-          <Button variant="subtle" color="statusError" onClick={() => setConfirming(true)} disabled={busy}>
+          <Button
+            ref={removeRef}
+            variant="subtle"
+            color="statusError"
+            onClick={() => setConfirming(true)}
+            disabled={busy}
+          >
             {t('common.delete')}
           </Button>
         )}
 
         {base !== null && confirming && (
-          <Group gap="xs">
-            <Text size="sm">{t('schedule.removeConfirm')}</Text>
+          <Group gap="xs" role="group" aria-labelledby={confirmTextId}>
+            <Text size="sm" id={confirmTextId}>
+              {t('schedule.removeConfirm')}
+            </Text>
             <Button
               size="xs"
               color="statusError"
@@ -264,7 +338,7 @@ function ScheduleForm({
             >
               {t('common.delete')}
             </Button>
-            <Button size="xs" variant="default" onClick={() => setConfirming(false)}>
+            <Button ref={cancelRef} size="xs" variant="default" onClick={() => setConfirming(false)}>
               {t('common.cancel')}
             </Button>
           </Group>
@@ -276,7 +350,18 @@ function ScheduleForm({
           disabled={problem !== null || !lookbackValid || !dirty || blocked}
           // ⛔ Шле рівно те, що в полі: обрізання — справа сервера, і тоді
           // збережене значення збігається з тим, що людина бачила.
-          onClick={() => onSave({ cron, isEnabled, lookbackDays })}
+          onClick={() =>
+            onSave({
+              cron,
+              isEnabled,
+              lookbackDays,
+              // Лише змінене: без змін залежність на сервері лишається як є.
+              ...(dependsOnId !== null && dependsOnId !== initialDependency
+                ? { dependsOnScheduleId: dependsOnId }
+                : {}),
+              ...(dependsOnId === null && initialDependency !== null ? { clearDependency: true } : {}),
+            })
+          }
         >
           {base === null ? t('schedule.create') : t('common.save')}
         </Button>

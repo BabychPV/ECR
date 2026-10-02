@@ -86,6 +86,7 @@ public sealed class NotificationChannelsController(
 
     /// <summary>Шле пробне повідомлення; відмова каналу — <c>ok: false</c>, а не помилка запиту.</summary>
     [HttpPost("{id:int}/test")]
+    [Microsoft.AspNetCore.RateLimiting.EnableRateLimiting(Ecr.Api.Security.SmtpTestRateLimitPolicy.PolicyName)]
     [ProducesResponseType<NotificationTestResult>(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> Test(int id, CancellationToken ct)

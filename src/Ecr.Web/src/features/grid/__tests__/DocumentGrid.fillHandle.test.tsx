@@ -190,7 +190,7 @@ afterEach(() => {
 });
 
 describe('протягування маркером заповнення', () => {
-  it('діапазонна форма afteredit доходить до сховища правок і до PATCH', async () => {
+  it('ФВ-3.3: діапазонна форма afteredit доходить до сховища правок і до PATCH', async () => {
     mockServer();
     await show();
 
@@ -241,7 +241,7 @@ describe('протягування маркером заповнення', () =>
     await wait(300);
   });
 
-  it('Ctrl+Z відкочує протягування одним кроком', async () => {
+  it('ФВ-14.4: Ctrl+Z відкочує протягування одним кроком', async () => {
     mockServer();
     const grid = await show();
 

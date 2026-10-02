@@ -483,7 +483,7 @@ public sealed class RecalculationService(
         // навіть коли Lookup-комірка заповнена, — це і є той міст, який
         // з'єднує `DependencyExtractor` з фактичним перерахунком.
         var registryFields = await LoadRegistryFieldsAsync(
-            dependencies, targets, tables, rowIdsByTable, values, ct).ConfigureAwait(false);
+            dependencies, targets, tables, rowIdsByTable, values, catalogue, ct).ConfigureAwait(false);
 
         // ⛔ Шапка документа читається РЕАЛЬНО (раніше — EmptyHeaders,
         // статичний порожній словник, і HDR.X завжди давав Null незалежно
@@ -1273,6 +1273,7 @@ public sealed class RecalculationService(
             Dictionary<int, Domain.Entities.Configuration.TableDef> tables,
             Dictionary<int, IReadOnlyDictionary<string, long>> rowIdsByTable,
             Dictionary<CellKey, Ecr.Expressions.Evaluation.ExpressionValue> values,
+            UnitCatalogSnapshot units,
             CancellationToken ct)
     {
         var targetIds = new HashSet<int>(targets);
@@ -1339,7 +1340,7 @@ public sealed class RecalculationService(
         // 3–4. Визначення полів і значення — СПІЛЬНИЙ завантажувач (D16-04):
         //      той самий, яким знімок будують правила валідації.
         return await Registries.RegistryFieldSnapshotLoader
-            .LoadAsync(registryStore, requests, ct).ConfigureAwait(false);
+            .LoadAsync(registryStore, requests, ct, units).ConfigureAwait(false);
     }
 
     /// <summary>Значення виразу як значення комірки; <c>null</c> — записувати нічого.</summary>

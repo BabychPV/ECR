@@ -656,6 +656,10 @@ UPDATE t
     (N'tables.readOnlyHint',             N'en', N'A relation decides where a table takes its numbers from, so changing it would silently change forms already submitted. Clone the version to change it (ФВ-7.1).',
                                                 N'A relation decides where a table takes its numbers from, so changing it would silently change forms already submitted. Clone the version to change it.'),
     (N'security.roleCodeHint',           N'en', N'Used in grants and audit; it cannot be changed later.', N'Used in grants and audit. Built-in role codes cannot be changed.'),
+    -- SEC:ФВ-6.16 ent5 P2-2: звужене призначення враховується на аркушах області; kz — на вичитку носієм мови.
+    (N'effectiveAccess.scopeNarrowed',   N'en', N'Narrowed to sheets or periods: opens documents but does not raise the project level', N'Narrowed to sheets or periods: counted on the sheets of its scope (not counted when narrowed by periods); the level may be higher than the actual one'),
+    (N'effectiveAccess.scopeNarrowed',   N'ru', N'Сужено листами или периодами: открывает документы, но не повышает уровень проекта', N'Сужено листами или периодами: учитывается на листах своей области (при сужении по периодам не учитывается); уровень может быть выше фактического'),
+    (N'effectiveAccess.scopeNarrowed',   N'kz', N'Парақтармен немесе кезеңдермен тарылтылған: құжаттарды ашады, бірақ жоба деңгейін көтермейді', N'Парақтармен немесе кезеңдермен тарылтылған: өз аумағындағы парақтарда ескеріледі (кезеңдер бойынша тарылтылса — ескерілмейді); деңгей нақтыдан жоғары болуы мүмкін'),
     (N'err.ECR-INT-0404',                N'en', N'Source entity not found', N'Source entity or field mapping not found'),
     -- COLL:regfix D2: заголовок коду 0422 був про одиницю виміру, хоча код обслуговує всі відмови джерела.
     (N'err.ECR-INT-0422',                N'en', N'The source unit of measure changed', N'The data source request cannot be processed'),
@@ -856,7 +860,129 @@ UPDATE t
     (N'registries.entryUsage.notListed', N'ru', N'Здесь для отдельной записи не перечисляются: ячейки и шапки документов, константы методологий и связи каскада. Удаление записи сообщает, сколько их, по видам.',
                                                 N'Здесь для отдельной записи не перечисляются: ячейки и шапки документов, константы методик и связи каскада. Удаление записи сообщает, сколько их, по видам.'),
     (N'registries.entryUsage.notListed', N'kz', N'Мұнда жеке жазба үшін тізілмейді: құжат ұяшықтары мен тақырыптары, әдістеме тұрақтылары және каскад байланыстары. Жазбаны жою олардың қанша екенін түрлері бойынша хабарлайды.',
-                                                N'Мұнда жеке жазба үшін тізілмейді: құжат ұяшықтары мен тақырыптары, әдістеме константалары және каскад байланыстары. Жазбаны жою олардың қанша екенін түрлері бойынша хабарлайды.')
+                                                N'Мұнда жеке жазба үшін тізілмейді: құжат ұяшықтары мен тақырыптары, әдістеме константалары және каскад байланыстары. Жазбаны жою олардың қанша екенін түрлері бойынша хабарлайды.'),
+    -- I18N:keys-audit-2 2026-10-02: нові ключі SMTP, сповіщень, залежностей розкладів, effective-access.
+    -- ru «столбец» і «подключение», kz «жоспар» (schedule; «кесте» = table) і «жоспарлаушы» —
+    -- docs/i18n/glossary-ru-kz.md і більшість каталогу; SMTP-тексти — після D-263 (налаштування в системі,
+    -- Smtp:* — запасний шлях). Звіт: /mnt/project-files/audit/i18n-keys-audit-2-2026-10-02.md.
+    (N'effectiveAccess.kindColumn', N'ru', N'Колонка',
+                                                N'Столбец'),
+    (N'err.ECR-REQ-0422.effectiveAccessProject', N'ru', N'Лист, таблица или колонка рассматриваются внутри одного проекта: передайте projectId.',
+                                                N'Лист, таблица или столбец рассматриваются внутри одного проекта: передайте projectId.'),
+    (N'effectiveAccess.hintAll', N'ru', N'Выберите справочник, проект либо лист, таблицу или колонку внутри проекта, чтобы увидеть итоговый уровень и какой грант какой роли его даёт. Это лишь объяснение решения, ничего не меняется.',
+                                                N'Выберите справочник, проект либо лист, таблицу или столбец внутри проекта, чтобы увидеть итоговый уровень и какой грант какой роли его даёт. Это лишь объяснение решения, ничего не меняется.'),
+    (N'effectiveAccess.caveat', N'ru', N'Состояние документа (подан, утверждён, закрытый период) и сужение назначения по периодам здесь не учитываются. Показано, что дают гранты по цепочке проект, лист, таблица, колонка, а не можно ли редактировать ячейку сейчас.',
+                                                N'Состояние документа (подан, утверждён, закрытый период) и сужение назначения по периодам здесь не учитываются. Показано, что дают гранты по цепочке проект, лист, таблица, столбец, а не можно ли редактировать ячейку сейчас.'),
+    (N'sourceEvents.entityHint', N'ru', N'Сущность источника этого соединения; её код — имя шаблона событий PI.',
+                                                N'Сущность источника этого подключения; её код — имя шаблона событий PI.'),
+    (N'sourceEvents.noEntities', N'ru', N'У этого соединения ещё нет сущностей. Сначала добавьте шаблон событий на вкладке «Сущности».',
+                                                N'У этого подключения ещё нет сущностей. Сначала добавьте шаблон событий на вкладке «Сущности».'),
+    (N'integrationAudit.dataSourceCreated', N'ru', N'Соединение «{connection}» создано.',
+                                                N'Подключение «{connection}» создано.'),
+    (N'integrationAudit.dataSourceChanged', N'ru', N'Соединение «{connection}» изменено.',
+                                                N'Подключение «{connection}» изменено.'),
+    (N'err.ECR-REQ-0422.collectionScheduleDependencyOtherSource', N'ru', N'Расписание может зависеть только от расписания того же соединения.',
+                                                N'Расписание может зависеть только от расписания того же подключения.'),
+    (N'schedule.dependsOnHint', N'ru', N'Плановые запуски ждут успешного прогона выбранного расписания того же соединения. Ручной сбор и добор не блокируются.',
+                                                N'Плановые запуски ждут успешного прогона выбранного расписания того же подключения. Ручной сбор и добор не блокируются.'),
+    (N'err.ECR-REQ-0422.collectionScheduleDependencyNotFound', N'ru', N'Расписание, от которого должно зависеть это, не существует.',
+                                                N'Расписания, от которого должно зависеть это расписание, не существует.'),
+    (N'err.ECR-REQ-0422.notificationChannelRoleInvalid', N'ru', N'Роли-получатели задаются только почтовому каналу, и каждая роль должна существовать.',
+                                                N'Роли-получатели можно задать только для почтового канала, и каждая роль должна существовать.'),
+    (N'notifications.test.smtpNoRecipients', N'ru', N'Нет адресатов: в канале нет явных адресов, а его роли не раскрываются ни в одного активного пользователя с адресом электронной почты.',
+                                                N'Нет адресатов: в канале нет явных адресов, а среди пользователей его ролей нет ни одного активного с адресом электронной почты.'),
+    (N'notifications.test.smtpNoRecipients', N'kz', N'Алушылар жоқ: арнада нақты мекенжайлар жоқ, ал оның рөлдері электрондық пошта мекенжайы бар бірде-бір белсенді пайдаланушыға айқындалмайды.',
+                                                N'Алушылар жоқ: арнада нақты мекенжайлар жоқ, ал оның рөлдерінде электрондық пошта мекенжайы бар бірде-бір белсенді пайдаланушы жоқ.'),
+    (N'err.ECR-REQ-0429.tooManySmtpTests', N'ru', N'Слишком много пробных сообщений за короткое время. Подождите немного и повторите попытку; заголовок Retry-After указывает, через сколько.',
+                                                N'Слишком много проверочных сообщений за короткое время. Подождите немного и повторите попытку; заголовок Retry-After указывает, через сколько.'),
+    (N'err.ECR-REQ-0429.tooManySmtpTests', N'kz', N'Қысқа уақыт ішінде сынақ хабарламалары тым көп. Біраз күтіп, қайталап көріңіз; қанша уақыттан кейін екенін Retry-After тақырыбы көрсетеді.',
+                                                N'Қысқа уақыт ішінде тексеру хабарламалары тым көп. Біраз күтіп, қайталап көріңіз; қанша уақыттан кейін екенін Retry-After тақырыбы көрсетеді.'),
+    (N'schedule.dependsOn', N'kz', N'Тәуелді кесте',
+                                                N'Қай жоспарға тәуелді'),
+    (N'schedule.dependsOnHint', N'kz', N'Жоспарлы іске қосулар сол қосылымның таңдалған кестесінің сәтті орындалуын күтеді. Қолмен жинау мен толықтыру бұғатталмайды.',
+                                                N'Жоспарлы іске қосулар сол қосылымның таңдалған жоспарының сәтті орындалуын күтеді. Қолмен жинау мен толықтыру бұғатталмайды.'),
+    (N'err.ECR-REQ-0422.collectionScheduleDependencyNotFound', N'kz', N'Осы кесте тәуелді болуы тиіс кесте жоқ.',
+                                                N'Бұл жоспар тәуелді болуы тиіс жоспар жоқ.'),
+    (N'err.ECR-REQ-0422.collectionScheduleDependencyOtherSource', N'kz', N'Кесте тек сол қосылымның кестесіне тәуелді бола алады.',
+                                                N'Жоспар тек сол қосылымның жоспарына тәуелді бола алады.'),
+    (N'err.ECR-REQ-0422.collectionScheduleDependencyCycle', N'kz', N'Бұл тәуелділік циклді тұйықтайды: екінші кесте бұған әлдеқашан тәуелді.',
+                                                N'Бұл тәуелділік циклді тұйықтайды: екінші жоспар бұған әлдеқашан тәуелді.'),
+    (N'jobs.collectionDependencyWaiting', N'kz', N'{sourceEntityId} нысаны: өткізілді, {dependsOn} кестесінің сәтті іске қосылуы күтілуде',
+                                                N'{sourceEntityId} нысаны: өткізілді, {dependsOn} жоспарының сәтті іске қосылуы күтілуде'),
+    (N'coverageEvents.skippedDependency', N'kz', N'{sourceEntityId} нысаны: жоспарлы іске қосу өткізілді, {dependsOn} кестесінің сәтті орындалуы күтілуде. Деректер кешіктірілді, жоғалған жоқ: оларды келесі іске қосу немесе толықтыру жинайды.',
+                                                N'{sourceEntityId} нысаны: жоспарлы іске қосу өткізілді, {dependsOn} жоспарының сәтті орындалуы күтілуде. Деректер кешіктірілді, жоғалған жоқ: оларды келесі іске қосу немесе толықтыру жинайды.'),
+    (N'integrationAudit.scheduleCreated', N'kz', N'«{entity}» нысаны үшін {id} жинау кестесі құрылды.',
+                                                N'«{entity}» нысаны үшін {id} жинау жоспары құрылды.'),
+    (N'integrationAudit.scheduleChanged', N'kz', N'«{entity}» нысанының {id} жинау кестесі өзгертілді.',
+                                                N'«{entity}» нысанының {id} жинау жоспары өзгертілді.'),
+    (N'integrationAudit.scheduleDeleted', N'kz', N'«{entity}» нысанының {id} жинау кестесі жойылды.',
+                                                N'«{entity}» нысанының {id} жинау жоспары жойылды.'),
+    (N'pipeline.step.schedule', N'kz', N'Жинау кестесі',
+                                                N'Жинау жоспары'),
+    (N'pipeline.zero.collect', N'kz', N'Терезеде ештеңе жиналмады. Осы нысанның қосылымын, кестесін және соңғы іске қосылуын тексеріңіз.',
+                                                N'Терезеде ештеңе жиналмады. Осы нысанның қосылымын, жоспарын және соңғы іске қосылуын тексеріңіз.'),
+    (N'err.ECR-REQ-0422.collectionScheduleCron', N'kz', N'Жоспарлағыш «{cron}» cron өрнегін қабылдамады: {reason}',
+                                                N'Жоспарлаушы «{cron}» cron өрнегін қабылдамады: {reason}'),
+    (N'err.ECR-REQ-0422.collectionScheduleNotApplied', N'kz', N'Жоспар сақталды, бірақ жоспарлағыш оны қабылдамады: {reason}',
+                                                N'Жоспар сақталды, бірақ жоспарлаушы оны қабылдамады: {reason}'),
+    (N'err.ECR-SYS-0503.schedulerNotConfigured', N'kz', N'Фондық тапсырмалар әлі бапталмаған: жоспарлағыш іске қосылмаған. Бұл операцияға кезек қажет, сондықтан ол қолжетімсіз.',
+                                                N'Фондық тапсырмалар әлі бапталмаған: жоспарлаушы іске қосылмаған. Бұл операцияға кезек қажет, сондықтан ол қолжетімсіз.'),
+    (N'err.ECR-REQ-0422.notificationChannelTransportFromConfiguration', N'en', N'The SMTP server, port, TLS and sender address come from the application settings; a channel cannot set them.',
+                                                N'The SMTP server, port, TLS and sender address come from the SMTP settings (or from the process configuration while they are not used); a channel cannot set them.'),
+    (N'err.ECR-REQ-0422.notificationChannelTransportFromConfiguration', N'ru', N'SMTP-сервер, порт, TLS и адрес отправителя берутся из настроек приложения; канал не может их задавать.',
+                                                N'SMTP-сервер, порт, TLS и адрес отправителя берутся из настроек SMTP (пока они не используются — из конфигурации процесса); канал не может их задавать.'),
+    (N'err.ECR-REQ-0422.notificationChannelTransportFromConfiguration', N'kz', N'SMTP сервері, порт, TLS және жіберуші мекенжайы қолданба баптауларынан алынады; арна оларды орната алмайды.',
+                                                N'SMTP сервері, порт, TLS және жіберуші мекенжайы SMTP баптауларынан алынады (олар қолданылмаса — процесс конфигурациясынан); арна оларды орната алмайды.'),
+    (N'notifications.test.smtpNotConfigured', N'en', N'The SMTP transport is not configured on the server.',
+                                                N'SMTP is not configured: fill in and enable the SMTP settings, or set Smtp:* in the process configuration.'),
+    (N'notifications.test.smtpNotConfigured', N'ru', N'Транспорт SMTP не настроен на сервере.',
+                                                N'SMTP не настроен: заполните и включите настройки SMTP или задайте Smtp:* в конфигурации процесса.'),
+    (N'notifications.test.smtpNotConfigured', N'kz', N'Серверде SMTP транспорты бапталмаған.',
+                                                N'SMTP бапталмаған: SMTP баптауларын толтырып, қосыңыз немесе процесс конфигурациясында Smtp:* мәндерін орнатыңыз.'),
+    (N'notifications.test.smtp.dns', N'en', N'SMTP test failed: the server name could not be resolved (DNS). Check Smtp:Host.',
+                                                N'SMTP test failed: the server name could not be resolved (DNS). Check the server (Smtp:Host when the process configuration is in use).'),
+    (N'notifications.test.smtp.dns', N'ru', N'Проверка SMTP не удалась: имя сервера не разрешилось (DNS). Проверьте Smtp:Host.',
+                                                N'Проверка SMTP не удалась: имя сервера не разрешилось (DNS). Проверьте сервер (Smtp:Host, если используется конфигурация процесса).'),
+    (N'notifications.test.smtp.dns', N'kz', N'SMTP тексеруі сәтсіз: сервер атауы анықталмады (DNS). Smtp:Host мәнін тексеріңіз.',
+                                                N'SMTP тексеруі сәтсіз: сервер атауы анықталмады (DNS). Серверді тексеріңіз (процесс конфигурациясы қолданылса — Smtp:Host).'),
+    (N'notifications.test.smtp.connect', N'en', N'SMTP test failed: could not connect to the server. Check the host, the port (Smtp:Port) and the firewall.',
+                                                N'SMTP test failed: could not connect to the server. Check the server, the port (Smtp:Host and Smtp:Port when the process configuration is in use) and the firewall.'),
+    (N'notifications.test.smtp.connect', N'ru', N'Проверка SMTP не удалась: не удалось подключиться к серверу. Проверьте хост, порт (Smtp:Port) и межсетевой экран.',
+                                                N'Проверка SMTP не удалась: не удалось подключиться к серверу. Проверьте сервер, порт (Smtp:Host и Smtp:Port, если используется конфигурация процесса) и межсетевой экран.'),
+    (N'notifications.test.smtp.connect', N'kz', N'SMTP тексеруі сәтсіз: серверге қосылу мүмкін болмады. Хостты, портты (Smtp:Port) және брандмауэрді тексеріңіз.',
+                                                N'SMTP тексеруі сәтсіз: серверге қосылу мүмкін болмады. Серверді, портты (процесс конфигурациясы қолданылса — Smtp:Host және Smtp:Port) және брандмауэрді тексеріңіз.'),
+    (N'notifications.test.smtp.tls', N'en', N'SMTP test failed: TLS/STARTTLS error. Check the server certificate and Smtp:UseStartTls.',
+                                                N'SMTP test failed: TLS/STARTTLS error. Check the server certificate and the encryption (Smtp:UseStartTls when the process configuration is in use).'),
+    (N'notifications.test.smtp.tls', N'ru', N'Проверка SMTP не удалась: ошибка TLS/STARTTLS. Проверьте сертификат сервера и Smtp:UseStartTls.',
+                                                N'Проверка SMTP не удалась: ошибка TLS/STARTTLS. Проверьте сертификат сервера и шифрование (Smtp:UseStartTls, если используется конфигурация процесса).'),
+    (N'notifications.test.smtp.tls', N'kz', N'SMTP тексеруі сәтсіз: TLS/STARTTLS қатесі. Сервер сертификатын және Smtp:UseStartTls мәнін тексеріңіз.',
+                                                N'SMTP тексеруі сәтсіз: TLS/STARTTLS қатесі. Сервер сертификатын және шифрлауды тексеріңіз (процесс конфигурациясы қолданылса — Smtp:UseStartTls).'),
+    (N'notifications.test.smtp.auth', N'en', N'SMTP test failed: the server rejected the login. Check Smtp:User and the secret named in Smtp:SecretName.',
+                                                N'SMTP test failed: the server rejected the login. Check the login and the password (Smtp:User and the secret named in Smtp:SecretName when the process configuration is in use).'),
+    (N'notifications.test.smtp.auth', N'ru', N'Проверка SMTP не удалась: сервер отклонил логин. Проверьте Smtp:User и секрет, названный в Smtp:SecretName.',
+                                                N'Проверка SMTP не удалась: сервер отклонил логин. Проверьте логин и пароль (Smtp:User и секрет, названный в Smtp:SecretName, если используется конфигурация процесса).'),
+    (N'notifications.test.smtp.auth', N'kz', N'SMTP тексеруі сәтсіз: сервер логинді қабылдамады. Smtp:User мәнін және Smtp:SecretName ішінде аталған құпияны тексеріңіз.',
+                                                N'SMTP тексеруі сәтсіз: сервер логинді қабылдамады. Логин мен құпиясөзді тексеріңіз (процесс конфигурациясы қолданылса — Smtp:User және Smtp:SecretName ішінде аталған құпия).'),
+    (N'notifications.test.smtp.relay', N'en', N'SMTP test failed: the server refused to relay for the sender or a recipient. Check Smtp:From and the recipient addresses.',
+                                                N'SMTP test failed: the server refused to relay for the sender or a recipient. Check the sender address (Smtp:From when the process configuration is in use) and the recipient addresses.'),
+    (N'notifications.test.smtp.relay', N'ru', N'Проверка SMTP не удалась: сервер отказался пересылать почту для отправителя или получателя. Проверьте Smtp:From и адреса получателей.',
+                                                N'Проверка SMTP не удалась: сервер отказался пересылать почту для отправителя или получателя. Проверьте адрес отправителя (Smtp:From, если используется конфигурация процесса) и адреса получателей.'),
+    (N'notifications.test.smtp.relay', N'kz', N'SMTP тексеруі сәтсіз: сервер жіберушіге немесе алушыға пошта жіберуден бас тартты. Smtp:From мәнін және алушылар мекенжайларын тексеріңіз.',
+                                                N'SMTP тексеруі сәтсіз: сервер жіберушіге немесе алушыға пошта жіберуден бас тартты. Жіберуші мекенжайын (процесс конфигурациясы қолданылса — Smtp:From) және алушылар мекенжайларын тексеріңіз.'),
+    -- ФВ-8.12 / ent6 R1: ціль посилання не знімається (поле Lookup без цілі приймало запис будь-якого довідника).
+    (N'registries.relationsEditHint', N'en', N'The target of a link can be changed or removed while no record holds a value in that field; otherwise the server refuses it.',
+                                                N'The target of a link can be changed to another registry while no record holds a value in that field; otherwise the server refuses it.'),
+    (N'registries.relationsEditHint', N'ru', N'Цель связи можно изменить или снять, пока ни в одной записи нет значения этого поля; иначе сервер откажет.',
+                                                N'Цель связи можно заменить другим справочником, пока ни в одной записи нет значения этого поля; иначе сервер откажет.'),
+    (N'registries.relationsEditHint', N'kz', N'Байланыс мақсатын осы өрістің мәні бірде-бір жазбада болмаған кезде өзгертуге немесе алуға болады; әйтпесе сервер бас тартады.',
+                                                N'Байланыс мақсатын осы өрістің мәні бірде-бір жазбада болмаған кезде басқа анықтамалыққа ауыстыруға болады; әйтпесе сервер бас тартады.'),
+    -- ent6 R2: код чужого запису (міг бути із забороненого довідника) у відмові не показується.
+    (N'err.ECR-REG-0422.lookupWrongRegistry', N'en', N'Field "{field}" looks up registry "{expectedRegistry}", but entry {value} ("{entryCode}") belongs to another registry.',
+                                                N'Field "{field}" looks up registry "{expectedRegistry}", but entry {value} belongs to another registry.'),
+    (N'err.ECR-REG-0422.lookupWrongRegistry', N'ru', N'Поле «{field}» выбирает из справочника «{expectedRegistry}», но запись {value} («{entryCode}») принадлежит другому справочнику.',
+                                                N'Поле «{field}» выбирает из справочника «{expectedRegistry}», но запись {value} принадлежит другому справочнику.'),
+    (N'err.ECR-REG-0422.lookupWrongRegistry', N'kz', N'«{field}» өрісі «{expectedRegistry}» анықтамалығынан таңдайды, бірақ {value} («{entryCode}») жазбасы басқа анықтамалыққа тиесілі.',
+                                                N'«{field}» өрісі «{expectedRegistry}» анықтамалығынан таңдайды, бірақ {value} жазбасы басқа анықтамалыққа тиесілі.')
   ) AS s ([Key], Lang, OldVal, NewVal)
     ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
  WHERE t.Value = s.OldVal COLLATE Latin1_General_BIN2;
@@ -927,7 +1053,11 @@ DELETE t
     -- `PATCH …/presentation`) — підпис «поки не можна» втратив місце на екрані.
     (N'reorder.rowsUnavailable',                   N'en', N'Rows cannot be reordered here yet: the server cannot change only a row''s order without resetting its translations. Use the Order field in the row form.'),
     (N'reorder.rowsUnavailable',                   N'ru', N'Строки здесь пока нельзя переставлять: сервер не умеет менять только порядок строки, не сбрасывая её переводы. Используйте поле «Порядок» в форме строки.'),
-    (N'reorder.rowsUnavailable',                   N'kz', N'Мұнда жолдардың ретін әзірге өзгерту мүмкін емес: сервер жолдың аудармаларын өшірмей, тек ретін өзгерте алмайды. Жол пішініндегі «Реті» өрісін пайдаланыңыз.')
+    (N'reorder.rowsUnavailable',                   N'kz', N'Мұнда жолдардың ретін әзірге өзгерту мүмкін емес: сервер жолдың аудармаларын өшірмей, тек ретін өзгерте алмайды. Жол пішініндегі «Реті» өрісін пайдаланыңыз.'),
+    -- ФВ-6.16: розріз доступу має єдиний підпис `effectiveAccess.hintAll` (довідник, проєкт, аркуш, таблиця, колонка).
+    (N'effectiveAccess.hint',                      N'en', N'Pick a registry or a project to see the resulting level and which grant of which role gives it. This only explains the decision; it changes nothing.'),
+    (N'effectiveAccess.hint',                      N'ru', N'Выберите справочник или проект, чтобы увидеть итоговый уровень и какой грант какой роли его даёт. Это лишь объяснение решения, ничего не меняется.'),
+    (N'effectiveAccess.hint',                      N'kz', N'Түпкілікті деңгейді және оны қай рөлдің қай гранты беретінін көру үшін анықтамалықты немесе жобаны таңдаңыз. Бұл тек шешімнің түсіндірмесі, ештеңе өзгермейді.')
   ) AS s ([Key], Lang, OldVal)
     ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
  WHERE t.Value = s.OldVal COLLATE Latin1_General_BIN2;
@@ -1332,7 +1462,7 @@ USING (VALUES
     -- ⛔ 2026-09-20: транспорт SMTP задає застосунок, не канал. Речення має
     -- сказати це прямо: користувач, який щойно ввів адресу сервера, інакше
     -- шукатиме друкарську помилку там, де її немає.
-    (N'err.ECR-REQ-0422.notificationChannelTransportFromConfiguration', N'en', N'The SMTP server, port, TLS and sender address come from the application settings; a channel cannot set them.', 1),
+    (N'err.ECR-REQ-0422.notificationChannelTransportFromConfiguration', N'en', N'The SMTP server, port, TLS and sender address come from the SMTP settings (or from the process configuration while they are not used); a channel cannot set them.', 1),
     (N'err.ECR-REQ-0422.notificationChannelRecipientInvalid',           N'en', N'One of the recipients is not an email address.', 1),
     (N'err.ECR-INT-0404.notificationChannel',          N'en', N'Notification channel {id} does not exist.', 1),
     (N'err.ECR-REQ-0422.notificationRuleInvalid',      N'en', N'A rule matrix accepts a known event and severity, and at most one rule per event and channel.', 1),
@@ -1600,7 +1730,7 @@ USING (VALUES
     (N'err.ECR-REG-0422.valueNotEntryId',    N'en', N'The value "{value}" is not a registry entry identifier.', 1),
     -- V-08(b), V-17(a): значення поля Lookup — живий запис оголошеного довідника.
     (N'err.ECR-REG-0422.lookupEntryNotFound', N'en', N'Field "{field}": registry entry {value} does not exist.', 1),
-    (N'err.ECR-REG-0422.lookupWrongRegistry', N'en', N'Field "{field}" looks up registry "{expectedRegistry}", but entry {value} ("{entryCode}") belongs to another registry.', 1),
+    (N'err.ECR-REG-0422.lookupWrongRegistry', N'en', N'Field "{field}" looks up registry "{expectedRegistry}", but entry {value} belongs to another registry.', 1),
     (N'err.ECR-REG-0422.selfLink',           N'en', N'Entry {entryId} cannot be linked to itself.', 1),
     (N'err.ECR-REG-0422.linkPayloadNotObject', N'en', N'Link attributes must be a JSON object.', 1),
     (N'err.ECR-REG-0422.linkPayloadInvalidJson', N'en', N'Link attributes are not valid JSON: {reason}', 1),
@@ -2951,7 +3081,7 @@ USING (VALUES
     -- ним самим. Лишився стан, у якому транспорт каналу не має відправника
     -- взагалі: те саме, що рядок `Failed` у журналі доставок.
     (N'notifications.test.senderNotRegistered', N'en', N'No sender is registered for this channel transport: messages to it never arrive.', 1),
-    (N'notifications.test.smtpNotConfigured',   N'en', N'The SMTP transport is not configured on the server.', 1),
+    (N'notifications.test.smtpNotConfigured',   N'en', N'SMTP is not configured: fill in and enable the SMTP settings, or set Smtp:* in the process configuration.', 1),
     -- BE-21: те саме для джерел даних — транспорт джерела не має адаптера.
     -- Проба віддає `ok: false` із цим ключем, а не 500: конфігурація, у якій
     -- обрано транспорт без адаптера, — стан системи, а не аварія запиту.
@@ -6005,11 +6135,11 @@ USING (VALUES
     (N'jobs.kind.orphanScan',       N'en', N'Orphaned data scan', 1),
     -- JOBL ── кінець секції ──
     -- COLL:smtp ── Категорії відмови проби SMTP (`SmtpFailureClassifier`) і подія «період відкрито» (`PeriodStateJob`, `NotificationEventKind.PeriodOpened`) ──
-    (N'notifications.test.smtp.dns',     N'en', N'SMTP test failed: the server name could not be resolved (DNS). Check Smtp:Host.', 1),
-    (N'notifications.test.smtp.connect', N'en', N'SMTP test failed: could not connect to the server. Check the host, the port (Smtp:Port) and the firewall.', 1),
-    (N'notifications.test.smtp.tls',     N'en', N'SMTP test failed: TLS/STARTTLS error. Check the server certificate and Smtp:UseStartTls.', 1),
-    (N'notifications.test.smtp.auth',    N'en', N'SMTP test failed: the server rejected the login. Check Smtp:User and the secret named in Smtp:SecretName.', 1),
-    (N'notifications.test.smtp.relay',   N'en', N'SMTP test failed: the server refused to relay for the sender or a recipient. Check Smtp:From and the recipient addresses.', 1),
+    (N'notifications.test.smtp.dns',     N'en', N'SMTP test failed: the server name could not be resolved (DNS). Check the server (Smtp:Host when the process configuration is in use).', 1),
+    (N'notifications.test.smtp.connect', N'en', N'SMTP test failed: could not connect to the server. Check the server, the port (Smtp:Host and Smtp:Port when the process configuration is in use) and the firewall.', 1),
+    (N'notifications.test.smtp.tls',     N'en', N'SMTP test failed: TLS/STARTTLS error. Check the server certificate and the encryption (Smtp:UseStartTls when the process configuration is in use).', 1),
+    (N'notifications.test.smtp.auth',    N'en', N'SMTP test failed: the server rejected the login. Check the login and the password (Smtp:User and the secret named in Smtp:SecretName when the process configuration is in use).', 1),
+    (N'notifications.test.smtp.relay',   N'en', N'SMTP test failed: the server refused to relay for the sender or a recipient. Check the sender address (Smtp:From when the process configuration is in use) and the recipient addresses.', 1),
     (N'notifications.test.smtp.timeout', N'en', N'SMTP test failed: the server did not respond in time.', 1),
     (N'notifications.event.PeriodOpened', N'en', N'Reporting period opened', 1),
     (N'notifications.periodOpened.subject', N'en', N'ECR: period {period} opened, project {project}', 1),
@@ -6056,12 +6186,30 @@ USING (VALUES
     -- COLL:smtp-probe ── Проба SMTP: адресат і канал за ролями (D-263) ──
     (N'notifications.test.smtpNoRecipients', N'en', N'No recipients: the channel has no explicit addresses, and its roles resolve to no active user with an email address.', 1),
     -- COLL:smtp-probe ── кінець секції ──
+    -- COLL:fv616 ── Розріз ефективного доступу на аркуші, таблиці й колонці (ФВ-6.16, `EffectiveAccessPanel`) ──
+    (N'err.ECR-REQ-0422.effectiveAccessProject', N'en', N'A sheet, table or column is looked at inside one project: pass projectId.', 1),
+    (N'err.ECR-TMPL-0404.effectiveAccessResource', N'en', N'{resource} was not found.', 1),
+    (N'err.ECR-TMPL-0404.effectiveAccessNotInProject', N'en', N'{resource} is not part of the template of project {projectId}.', 1),
+    (N'effectiveAccess.hintAll', N'en', N'Pick a registry, a project, or a sheet, table or column inside a project, to see the resulting level and which grant of which role gives it. This only explains the decision; it changes nothing.', 1),
+    (N'effectiveAccess.kindSheet', N'en', N'Sheet', 1),
+    (N'effectiveAccess.kindTable', N'en', N'Table', 1),
+    (N'effectiveAccess.kindColumn', N'en', N'Column', 1),
+    (N'effectiveAccess.projectId', N'en', N'Project ID', 1),
+    (N'effectiveAccess.caveat', N'en', N'Document state (submitted, approved, closed period) and assignment narrowing by periods are not taken into account here. This shows what the grants give along the chain project, sheet, table, column, not whether a cell can be edited right now.', 1),
+    (N'effectiveAccess.inheritedFrom', N'en', N'Inherited from {resource}', 1),
+    -- COLL:fv616 ── кінець секції ──
+    -- COLL:smtp-hardening ── Межа частоти проб транспорту (рекомендація безпекового рев'ю D-263) ──
+    (N'err.ECR-REQ-0429.tooManySmtpTests', N'en', N'Too many test messages in a short time. Wait a moment and try again; the Retry-After header says how long.', 1),
+    -- COLL:smtp-hardening ── кінець секції ──
+    -- COLL:sec-smtp-s1s2 ── Збережений пароль SMTP не переноситься на іншу адресу; пароль без шифрування заборонено (ent6 S1, `SaveSmtpSettingsHandler`) ──
+    (N'err.ECR-REQ-0422.smtpPasswordReentryRequired', N'en', N'The server, port, encryption or login was changed, so the saved password is not carried over: enter the password again.', 1),
+    (N'err.ECR-REQ-0422.smtpPasswordNeedsTls', N'en', N'Password authentication needs encryption: choose STARTTLS, or switch authentication off for an internal relay.', 1),
+    -- COLL:sec-smtp-s1s2 ── кінець секції ──
     -- SEC:effective-access ── Розріз «ресурс → рівень → грант якої ролі» (ФВ-6.16, D-220, `EffectiveAccessPanel`, GET /security/users/{id}/effective-access) ──
     (N'err.ECR-REQ-0422.effectiveAccessResource', N'en', N'The resource must be given as a type and a positive number, for example Registry:5 or Project:3.', 1),
     (N'effectiveAccess.show',            N'en', N'Show effective access', 1),
     (N'effectiveAccess.hide',            N'en', N'Hide effective access', 1),
     (N'effectiveAccess.title',           N'en', N'Effective access to a resource', 1),
-    (N'effectiveAccess.hint',            N'en', N'Pick a registry or a project to see the resulting level and which grant of which role gives it. This only explains the decision; it changes nothing.', 1),
     (N'effectiveAccess.kind',            N'en', N'Resource type', 1),
     (N'effectiveAccess.kindRegistry',    N'en', N'Registry', 1),
     (N'effectiveAccess.kindProject',     N'en', N'Project', 1),
@@ -6085,11 +6233,14 @@ USING (VALUES
     (N'effectiveAccess.deny',            N'en', N'Deny', 1),
     (N'effectiveAccess.scopeUnscoped',   N'en', N'Everywhere', 1),
     (N'effectiveAccess.scopeInScope',    N'en', N'Project is in scope', 1),
-    (N'effectiveAccess.scopeNarrowed',   N'en', N'Narrowed to sheets or periods: opens documents but does not raise the project level', 1),
+    (N'effectiveAccess.scopeNarrowed',   N'en', N'Narrowed to sheets or periods: counted on the sheets of its scope (not counted when narrowed by periods); the level may be higher than the actual one', 1),
     (N'effectiveAccess.scopeOutOfScope', N'en', N'Outside the assignment scope', 1),
     (N'effectiveAccess.scopeExpired',    N'en', N'Assignment not in effect', 1),
     (N'effectiveAccess.counted',         N'en', N'Yes', 1),
     (N'effectiveAccess.notCounted',      N'en', N'No', 1),
+    (N'effectiveAccess.narrowedBy',      N'en', N'Narrowed by {by}', 1),
+    (N'effectiveAccess.projectNotVisible', N'en', N'No: the project is not visible, so grants below it do not apply', 1),
+    (N'effectiveAccess.mayExceed',       N'en', N'The role is narrowed by sheets or periods: the shown level may be HIGHER than the actual one for a given period. Check the narrowing in the contributions.', 1),
     -- ru/kz — окремою порцією `I18N` (SEC:effective-access).
     -- SEC:effective-access ── кінець секції ──
     -- REG:rt25-client ── сторінка впливу довідника і банер застарілості (RT-25, клієнт) ──
@@ -6194,6 +6345,14 @@ USING (VALUES
     (N'jobs.collectionDependencyWaiting', N'en', N'Entity {sourceEntityId}: skipped, waiting for a successful run of schedule {dependsOn}', 1),
     -- ru/kz — окремою порцією `I18N` (COLL:fv1315).
     -- COLL:fv1315 ── кінець секції ──
+    -- COLL:fv1315-ui ── Залежність розкладу збору: select у формі, подія покриття пропуску (ФВ-13.15, клієнт) ──
+    (N'schedule.dependsOn', N'en', N'Depends on schedule', 1),
+    (N'schedule.dependsOnHint', N'en', N'Scheduled runs wait for a successful run of the chosen schedule of the same connection. Manual and catch-up runs are not blocked.', 1),
+    (N'schedule.dependsOnNone', N'en', N'No dependency', 1),
+    (N'status.coverage.SkippedDependency', N'en', N'Waiting for dependency', 1),
+    (N'coverageEvents.skippedDependency', N'en', N'Entity {sourceEntityId}: the scheduled run was skipped, waiting for a successful run of schedule {dependsOn}. The data is delayed, not lost: the next run or the catch-up collects it.', 1),
+    -- ru/kz — окремою порцією `I18N` (COLL:fv1315-ui).
+    -- COLL:fv1315-ui ── кінець секції ──
     -- UI:dead-buttons ── причини недоступних дій і порожній стан полів довідника (клієнт) ──
     (N'reportDefs.addBlocked', N'en', N'Fill in the code, the name, the version and a code for every column first.', 1),
     (N'reportDefs.removeColumnBlocked', N'en', N'A report needs at least one column.', 1),
@@ -6217,8 +6376,23 @@ USING (VALUES
     (N'err.ECR-PRD-4225.offsetOutOfRange', N'en', N'Offset {field} ({value} days) must be between -{max} and {max} days.', 1),
     (N'err.ECR-PRD-0422.pinReasonTooLong', N'en', N'The reason for pinning the current period is longer than {max} characters.', 1),
     (N'err.ECR-PWD-0422.tooLong', N'en', N'The password is longer than {maxLength} characters.', 1),
+    -- COLL:fv812-relations ── редагування зв'язків полів у конструкторі довідників (ФВ-8.12, порція 1) ──
+    (N'err.ECR-REG-0422.lookupRetargetInUse', N'en', N'The link of field "{fieldCode}" cannot be changed: records already hold values pointing to the current target.', 1),
+    (N'err.ECR-REG-0422.lookupTargetUnknown', N'en', N'The target registry of field "{fieldCode}" does not exist.', 1),
+    (N'registries.relationTargetFor', N'en', N'Link target of field {field}', 1),
+    (N'registries.relationsEditHint', N'en', N'The target of a link can be changed to another registry while no record holds a value in that field; otherwise the server refuses it.', 1),
+    (N'err.ECR-REG-0422.lookupRetargetUsedByRules', N'en', N'The link of field "{fieldCode}" cannot be changed: {total} rule(s), formula(s) or methodology version(s) read attributes through it: {usedBy}. Change or disable them first.', 1),
+    -- ru/kz — окремою порцією COLL:fv812-relations у блоці I18N нижче.
+    -- COLL:fv812-relations ── кінець секції ──
     -- ru/kz — окремою порцією `API:negative-path` у блоці I18N нижче.
     -- API:negative-path ── кінець секції ──
+    -- API:negative-path-2 ── відмови замість 500 у нових ендпоінтах (прохід по відмовах 2) ──
+    (N'err.ECR-TMPL-0422.patchChangeInvalid', N'en', N'Every patch change needs entityType, entityId and field.', 1),
+    (N'err.ECR-TMPL-0422.presentationValueInvalid', N'en', N'The value of {entityType}.{field} has a form this field does not accept.', 1),
+    (N'err.ECR-REG-0422.definitionItemMissing', N'en', N'The definition contains an empty item among its fields, rules or keys.', 1),
+    (N'err.ECR-REG-0422.switchCodeEmpty', N'en', N'The set of registries contains an empty code.', 1),
+    -- ru/kz — окремою порцією `API:negative-path-2` у блоці I18N нижче.
+    -- API:negative-path-2 ── кінець секції ──
     -- CL6:notification-templates ── Шаблони повідомлень і адресати події (CL-6, NotificationTemplatesPanel, /admin/notifications) ──
     (N'notificationTemplates.title', N'en', N'Message templates', 1),
     (N'notificationTemplates.hint', N'en', N'What is sent for each event and to whom. Each recipient gets the message in their own language; an empty translation falls back to the default language.', 1),
@@ -6513,7 +6687,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-REQ-0422.notificationChannelInvalid', N'ru', N'Каналу нужно название длиной до 100 символов; каналу SMTP также нужен хотя бы один получатель.'),
     (N'err.ECR-REQ-0422.notificationChannelNameTaken', N'ru', N'Канал с названием «{name}» уже существует.'),
     (N'err.ECR-REQ-0422.webhookUrlNotAllowed', N'ru', N'Адрес веб-хука должен использовать https и указывать на разрешённый хост.'),
-    (N'err.ECR-REQ-0422.notificationChannelTransportFromConfiguration', N'ru', N'SMTP-сервер, порт, TLS и адрес отправителя берутся из настроек приложения; канал не может их задавать.'),
+    (N'err.ECR-REQ-0422.notificationChannelTransportFromConfiguration', N'ru', N'SMTP-сервер, порт, TLS и адрес отправителя берутся из настроек SMTP (пока они не используются — из конфигурации процесса); канал не может их задавать.'),
     (N'err.ECR-REQ-0422.notificationChannelRecipientInvalid', N'ru', N'Один из получателей не является адресом электронной почты.'),
     (N'err.ECR-INT-0404.notificationChannel', N'ru', N'Канал уведомлений {id} не существует.'),
     (N'err.ECR-REQ-0422.notificationRuleInvalid', N'ru', N'Матрица правил принимает известное событие и уровень важности и не более одного правила на событие и канал.'),
@@ -6686,7 +6860,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-REG-0422.valueNotDate', N'ru', N'Значение «{value}» не является датой.'),
     (N'err.ECR-REG-0422.valueNotEntryId', N'ru', N'Значение «{value}» не является идентификатором записи справочника.'),
     (N'err.ECR-REG-0422.lookupEntryNotFound', N'ru', N'Поле «{field}»: запись справочника {value} не существует.'),
-    (N'err.ECR-REG-0422.lookupWrongRegistry', N'ru', N'Поле «{field}» выбирает из справочника «{expectedRegistry}», но запись {value} («{entryCode}») принадлежит другому справочнику.'),
+    (N'err.ECR-REG-0422.lookupWrongRegistry', N'ru', N'Поле «{field}» выбирает из справочника «{expectedRegistry}», но запись {value} принадлежит другому справочнику.'),
     (N'err.ECR-REG-0422.selfLink', N'ru', N'Запись {entryId} нельзя связать с самой собой.'),
     (N'err.ECR-REG-0422.linkPayloadNotObject', N'ru', N'Атрибуты связи должны быть объектом JSON.'),
     (N'err.ECR-REG-0422.linkPayloadInvalidJson', N'ru', N'Атрибуты связи не являются допустимым JSON: {reason}'),
@@ -7721,7 +7895,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'health.facts.transportNotConfigured', N'ru', N'Не настроен: уведомления остаются в очереди'),
     (N'health.facts.logDirectory', N'ru', N'Каталог журналов'),
     (N'notifications.test.senderNotRegistered', N'ru', N'Для транспорта этого канала не зарегистрирован отправитель: сообщения по нему никогда не будут доставлены.'),
-    (N'notifications.test.smtpNotConfigured', N'ru', N'Транспорт SMTP не настроен на сервере.'),
+    (N'notifications.test.smtpNotConfigured', N'ru', N'SMTP не настроен: заполните и включите настройки SMTP или задайте Smtp:* в конфигурации процесса.'),
     (N'integration.test.adapterNotRegistered', N'ru', N'Для транспорта этого источника не зарегистрирован адаптер: сбор из него никогда не выполняется.'),
     (N'integration.test.failed.auth', N'ru', N'Источник отклонил учётные данные служебной учётной записи.'),
     (N'integration.test.failed.unreachable', N'ru', N'Источник недоступен или ответил ошибкой.'),
@@ -9541,16 +9715,16 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-REQ-0422.notificationChannelInvalid', N'kz', N'Арнаға 100 таңбаға дейінгі атау қажет; SMTP арнасына сонымен қатар кемінде бір алушы қажет.'),
     (N'err.ECR-REQ-0422.notificationChannelNameTaken', N'kz', N'«{name}» атты арна бұрыннан бар.'),
     (N'err.ECR-REQ-0422.webhookUrlNotAllowed', N'kz', N'Вебхук мекенжайы https пайдалануы және рұқсат етілген хостқа бағытталуы тиіс.'),
-    (N'err.ECR-REQ-0422.notificationChannelTransportFromConfiguration', N'kz', N'SMTP сервері, порт, TLS және жіберуші мекенжайы қолданба баптауларынан алынады; арна оларды орната алмайды.'),
+    (N'err.ECR-REQ-0422.notificationChannelTransportFromConfiguration', N'kz', N'SMTP сервері, порт, TLS және жіберуші мекенжайы SMTP баптауларынан алынады (олар қолданылмаса — процесс конфигурациясынан); арна оларды орната алмайды.'),
     (N'err.ECR-REQ-0422.notificationChannelRecipientInvalid', N'kz', N'Алушылардың бірі электрондық пошта мекенжайы емес.'),
     (N'err.ECR-INT-0404.notificationChannel', N'kz', N'{id} хабарландыру арнасы жоқ.'),
     (N'err.ECR-REQ-0422.notificationRuleInvalid', N'kz', N'Ережелер матрицасы белгілі оқиға мен маңыздылық деңгейін қабылдайды, әр оқиға мен арнаға ең көбі бір ереже.'),
     (N'err.ECR-REQ-0422.notificationDeliveryStatus', N'kz', N'«{status}» жеткізу нәтижесі жоқ.'),
     (N'err.ECR-INT-0404.collectionSchedule', N'kz', N'{id} деректерді жинау жоспары жоқ.'),
-    (N'err.ECR-REQ-0422.collectionScheduleCron', N'kz', N'Жоспарлағыш «{cron}» cron өрнегін қабылдамады: {reason}'),
+    (N'err.ECR-REQ-0422.collectionScheduleCron', N'kz', N'Жоспарлаушы «{cron}» cron өрнегін қабылдамады: {reason}'),
     (N'err.ECR-REQ-0422.collectionScheduleCronLength', N'kz', N'Cron өрнегінің ұзындығы 1-ден {max} таңбаға дейін болуы тиіс.'),
     (N'err.ECR-REQ-0422.collectionScheduleIfMatch', N'kz', N'Бұл сұрауға Сіз оқыған жоспардың rowVersion мәні бар If-Match тақырыбы қажет.'),
-    (N'err.ECR-REQ-0422.collectionScheduleNotApplied', N'kz', N'Жоспар сақталды, бірақ жоспарлағыш оны қабылдамады: {reason}'),
+    (N'err.ECR-REQ-0422.collectionScheduleNotApplied', N'kz', N'Жоспар сақталды, бірақ жоспарлаушы оны қабылдамады: {reason}'),
     (N'err.ECR-JOB-0409.collectionScheduleChanged', N'kz', N'Бұл жоспарды Сіз оқығаннан кейін оны басқа біреу өзгертті: тізімді қайта жүктеп, өзгерісті қайталаңыз.'),
     (N'err.ECR-INT-0404.sourceEntity', N'kz', N'{id} бастапқы нысаны жоқ.'),
     (N'err.ECR-JOB-0409.collectionScheduleExists', N'kz', N'Бұл бастапқы нысанның {scheduleId} жоспары бұрыннан бар: екіншісін қоспай, соны өңдеңіз.'),
@@ -9714,7 +9888,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-REG-0422.valueNotDate', N'kz', N'«{value}» мәні күн емес.'),
     (N'err.ECR-REG-0422.valueNotEntryId', N'kz', N'«{value}» мәні анықтамалық жазбасының идентификаторы емес.'),
     (N'err.ECR-REG-0422.lookupEntryNotFound', N'kz', N'«{field}» өрісі: {value} анықтамалық жазбасы жоқ.'),
-    (N'err.ECR-REG-0422.lookupWrongRegistry', N'kz', N'«{field}» өрісі «{expectedRegistry}» анықтамалығынан таңдайды, бірақ {value} («{entryCode}») жазбасы басқа анықтамалыққа тиесілі.'),
+    (N'err.ECR-REG-0422.lookupWrongRegistry', N'kz', N'«{field}» өрісі «{expectedRegistry}» анықтамалығынан таңдайды, бірақ {value} жазбасы басқа анықтамалыққа тиесілі.'),
     (N'err.ECR-REG-0422.selfLink', N'kz', N'{entryId} жазбасын өзімен байланыстыруға болмайды.'),
     (N'err.ECR-REG-0422.linkPayloadNotObject', N'kz', N'Байланыс атрибуттары JSON нысаны болуы керек.'),
     (N'err.ECR-REG-0422.linkPayloadInvalidJson', N'kz', N'Байланыс атрибуттары жарамды JSON емес: {reason}'),
@@ -9890,7 +10064,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-PRD-0422.periodNotInProjectOfDocument', N'kz', N'{periodKey} кезеңі {documentId} құжатының жобасына тиесілі емес.'),
     (N'err.ECR-CFG-0422.rowKeyInvalid', N'kz', N'«{value}» жол кілтіне рұқсат жоқ: ол формулаларға экрандаусыз түседі, сондықтан тек әріптер, цифрлар, нүкте, астын сызу белгісі және дефис қабылданады.'),
     (N'err.ECR-CFG-4221.notIana', N'kz', N'Алаңның «{value}» уақыт белдеуі белгілі IANA идентификаторы емес (мысалы, «Asia/Atyrau»). «Central Asia Standard Time» сияқты Windows идентификаторлары және «+05:00» сияқты ығысулар қабылданбайды.'),
-    (N'err.ECR-SYS-0503.schedulerNotConfigured', N'kz', N'Фондық тапсырмалар әлі бапталмаған: жоспарлағыш іске қосылмаған. Бұл операцияға кезек қажет, сондықтан ол қолжетімсіз.'),
+    (N'err.ECR-SYS-0503.schedulerNotConfigured', N'kz', N'Фондық тапсырмалар әлі бапталмаған: жоспарлаушы іске қосылмаған. Бұл операцияға кезек қажет, сондықтан ол қолжетімсіз.'),
     (N'err.ECR-DOC-0409.businessKeyExhausted', N'kz', N'Құжат үшін бос бизнес-кілт табылмады.'),
     (N'err.ECR-DOC-0409.businessKeyDuplicate', N'kz', N'Бұл жобада «{businessKey}» кілті бар құжат бұрыннан бар.'),
     (N'err.ECR-CELL-0409.concurrentChange', N'kz', N'Деректер Сіз оларды оқығаннан кейін өзгерді.'),
@@ -10749,7 +10923,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'health.facts.transportNotConfigured', N'kz', N'Бапталмаған: хабарландырулар кезекте қалады'),
     (N'health.facts.logDirectory', N'kz', N'Журналдар каталогы'),
     (N'notifications.test.senderNotRegistered', N'kz', N'Осы арна транспорты үшін жіберуші тіркелмеген: ол арқылы хабарлар ешқашан жеткізілмейді.'),
-    (N'notifications.test.smtpNotConfigured', N'kz', N'Серверде SMTP транспорты бапталмаған.'),
+    (N'notifications.test.smtpNotConfigured', N'kz', N'SMTP бапталмаған: SMTP баптауларын толтырып, қосыңыз немесе процесс конфигурациясында Smtp:* мәндерін орнатыңыз.'),
     (N'integration.test.adapterNotRegistered', N'kz', N'Осы көз транспорты үшін адаптер тіркелмеген: одан деректер жинау ешқашан орындалмайды.'),
     (N'integration.test.failed.auth', N'kz', N'Көз қызметтік тіркелгінің тіркелгі деректерін қабылдамады.'),
     (N'integration.test.failed.unreachable', N'kz', N'Көз қолжетімсіз немесе қатемен жауап берді.'),
@@ -12429,7 +12603,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'sourceEvents.empty', N'ru', N'Нет событий под фильтры.'),
     (N'sourceEvents.emptyValue', N'ru', N'(пусто)'),
     (N'sourceEvents.entity', N'ru', N'Шаблон событий'),
-    (N'sourceEvents.entityHint', N'ru', N'Сущность источника этого соединения; её код — имя шаблона событий PI.'),
+    (N'sourceEvents.entityHint', N'ru', N'Сущность источника этого подключения; её код — имя шаблона событий PI.'),
     (N'sourceEvents.fieldAdd', N'ru', N'Сопоставить столбец'),
     (N'sourceEvents.fieldAttribute', N'ru', N'Атрибут PI'),
     (N'sourceEvents.fieldColumn', N'ru', N'Столбец'),
@@ -12471,7 +12645,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'sourceEvents.mapsEmpty', N'ru', N'Сопоставлений событий пока нет: события не записываются ни в один документ.'),
     (N'sourceEvents.mapsTitle', N'ru', N'Сопоставления событий'),
     (N'sourceEvents.noDynamicTables', N'ru', N'В документе нет таблиц с динамическими строками.'),
-    (N'sourceEvents.noEntities', N'ru', N'У этого соединения ещё нет сущностей. Сначала добавьте шаблон событий на вкладке «Сущности».'),
+    (N'sourceEvents.noEntities', N'ru', N'У этого подключения ещё нет сущностей. Сначала добавьте шаблон событий на вкладке «Сущности».'),
     (N'sourceEvents.notConfiguredText', N'ru', N'Для этого источника в окружении нет запроса событий. Уже синхронизированные события остаются видны ниже.'),
     (N'sourceEvents.notConfiguredTitle', N'ru', N'Чтение событий не настроено'),
     (N'sourceEvents.probeAddValue', N'ru', N'+ {value}'),
@@ -13906,16 +14080,16 @@ GO
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
   FROM (VALUES
-    (N'notifications.test.smtp.dns', N'ru', N'Проверка SMTP не удалась: имя сервера не разрешилось (DNS). Проверьте Smtp:Host.'),
-    (N'notifications.test.smtp.dns', N'kz', N'SMTP тексеруі сәтсіз: сервер атауы анықталмады (DNS). Smtp:Host мәнін тексеріңіз.'),
-    (N'notifications.test.smtp.connect', N'ru', N'Проверка SMTP не удалась: не удалось подключиться к серверу. Проверьте хост, порт (Smtp:Port) и межсетевой экран.'),
-    (N'notifications.test.smtp.connect', N'kz', N'SMTP тексеруі сәтсіз: серверге қосылу мүмкін болмады. Хостты, портты (Smtp:Port) және брандмауэрді тексеріңіз.'),
-    (N'notifications.test.smtp.tls', N'ru', N'Проверка SMTP не удалась: ошибка TLS/STARTTLS. Проверьте сертификат сервера и Smtp:UseStartTls.'),
-    (N'notifications.test.smtp.tls', N'kz', N'SMTP тексеруі сәтсіз: TLS/STARTTLS қатесі. Сервер сертификатын және Smtp:UseStartTls мәнін тексеріңіз.'),
-    (N'notifications.test.smtp.auth', N'ru', N'Проверка SMTP не удалась: сервер отклонил логин. Проверьте Smtp:User и секрет, названный в Smtp:SecretName.'),
-    (N'notifications.test.smtp.auth', N'kz', N'SMTP тексеруі сәтсіз: сервер логинді қабылдамады. Smtp:User мәнін және Smtp:SecretName ішінде аталған құпияны тексеріңіз.'),
-    (N'notifications.test.smtp.relay', N'ru', N'Проверка SMTP не удалась: сервер отказался пересылать почту для отправителя или получателя. Проверьте Smtp:From и адреса получателей.'),
-    (N'notifications.test.smtp.relay', N'kz', N'SMTP тексеруі сәтсіз: сервер жіберушіге немесе алушыға пошта жіберуден бас тартты. Smtp:From мәнін және алушылар мекенжайларын тексеріңіз.'),
+    (N'notifications.test.smtp.dns', N'ru', N'Проверка SMTP не удалась: имя сервера не разрешилось (DNS). Проверьте сервер (Smtp:Host, если используется конфигурация процесса).'),
+    (N'notifications.test.smtp.dns', N'kz', N'SMTP тексеруі сәтсіз: сервер атауы анықталмады (DNS). Серверді тексеріңіз (процесс конфигурациясы қолданылса — Smtp:Host).'),
+    (N'notifications.test.smtp.connect', N'ru', N'Проверка SMTP не удалась: не удалось подключиться к серверу. Проверьте сервер, порт (Smtp:Host и Smtp:Port, если используется конфигурация процесса) и межсетевой экран.'),
+    (N'notifications.test.smtp.connect', N'kz', N'SMTP тексеруі сәтсіз: серверге қосылу мүмкін болмады. Серверді, портты (процесс конфигурациясы қолданылса — Smtp:Host және Smtp:Port) және брандмауэрді тексеріңіз.'),
+    (N'notifications.test.smtp.tls', N'ru', N'Проверка SMTP не удалась: ошибка TLS/STARTTLS. Проверьте сертификат сервера и шифрование (Smtp:UseStartTls, если используется конфигурация процесса).'),
+    (N'notifications.test.smtp.tls', N'kz', N'SMTP тексеруі сәтсіз: TLS/STARTTLS қатесі. Сервер сертификатын және шифрлауды тексеріңіз (процесс конфигурациясы қолданылса — Smtp:UseStartTls).'),
+    (N'notifications.test.smtp.auth', N'ru', N'Проверка SMTP не удалась: сервер отклонил логин. Проверьте логин и пароль (Smtp:User и секрет, названный в Smtp:SecretName, если используется конфигурация процесса).'),
+    (N'notifications.test.smtp.auth', N'kz', N'SMTP тексеруі сәтсіз: сервер логинді қабылдамады. Логин мен құпиясөзді тексеріңіз (процесс конфигурациясы қолданылса — Smtp:User және Smtp:SecretName ішінде аталған құпия).'),
+    (N'notifications.test.smtp.relay', N'ru', N'Проверка SMTP не удалась: сервер отказался пересылать почту для отправителя или получателя. Проверьте адрес отправителя (Smtp:From, если используется конфигурация процесса) и адреса получателей.'),
+    (N'notifications.test.smtp.relay', N'kz', N'SMTP тексеруі сәтсіз: сервер жіберушіге немесе алушыға пошта жіберуден бас тартты. Жіберуші мекенжайын (процесс конфигурациясы қолданылса — Smtp:From) және алушылар мекенжайларын тексеріңіз.'),
     (N'notifications.test.smtp.timeout', N'ru', N'Проверка SMTP не удалась: сервер не ответил вовремя.'),
     (N'notifications.test.smtp.timeout', N'kz', N'SMTP тексеруі сәтсіз: сервер уақытында жауап бермеді.'),
     (N'notifications.event.PeriodOpened', N'ru', N'Открыт отчётный период'),
@@ -13936,7 +14110,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-REQ-0422.smtpSettingsInvalid', N'kz', N'SMTP баптаулары жарамсыз: «{name}» өрісін тексеріңіз.'),
     (N'err.ECR-REQ-0422.smtpTestRecipientInvalid', N'ru', N'Адресат проверки не является адресом электронной почты.'),
     (N'err.ECR-REQ-0422.smtpTestRecipientInvalid', N'kz', N'Тексеру алушысы электрондық пошта мекенжайы емес.'),
-    (N'err.ECR-REQ-0422.notificationChannelRoleInvalid', N'ru', N'Роли-получатели задаются только почтовому каналу, и каждая роль должна существовать.'),
+    (N'err.ECR-REQ-0422.notificationChannelRoleInvalid', N'ru', N'Роли-получатели можно задать только для почтового канала, и каждая роль должна существовать.'),
     (N'err.ECR-REQ-0422.notificationChannelRoleInvalid', N'kz', N'Алушы рөлдері тек пошта арнасына беріледі, әрбір рөл болуы тиіс.'),
     (N'smtp.title', N'ru', N'SMTP (исходящая почта)'),
     (N'smtp.title', N'kz', N'SMTP (шығыс пошта)'),
@@ -14014,6 +14188,36 @@ OPTION (RECOMPILE);
 GO
 -- COLL:an9-rules ── кінець секції ──
 
+-- COLL:fv616 ── ru/kz розрізу доступу на аркуші, таблиці й колонці; власна порція #I18N ──
+-- kz — найкращий переклад, потрібна вичитка носієм.
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-REQ-0422.effectiveAccessProject', N'ru', N'Лист, таблица или столбец рассматриваются внутри одного проекта: передайте projectId.'),
+    (N'err.ECR-REQ-0422.effectiveAccessProject', N'kz', N'Парақ, кесте немесе баған бір жоба шеңберінде қаралады: projectId беріңіз.'),
+    (N'err.ECR-TMPL-0404.effectiveAccessResource', N'ru', N'{resource} не найден.'),
+    (N'err.ECR-TMPL-0404.effectiveAccessResource', N'kz', N'{resource} табылмады.'),
+    (N'err.ECR-TMPL-0404.effectiveAccessNotInProject', N'ru', N'{resource} не входит в шаблон проекта {projectId}.'),
+    (N'err.ECR-TMPL-0404.effectiveAccessNotInProject', N'kz', N'{resource} {projectId} жобасының үлгісіне кірмейді.'),
+    (N'effectiveAccess.hintAll', N'ru', N'Выберите справочник, проект либо лист, таблицу или столбец внутри проекта, чтобы увидеть итоговый уровень и какой грант какой роли его даёт. Это лишь объяснение решения, ничего не меняется.'),
+    (N'effectiveAccess.hintAll', N'kz', N'Түпкілікті деңгейді және оны қай рөлдің қай гранты беретінін көру үшін анықтамалықты, жобаны немесе жоба ішіндегі парақты, кестені не бағанды таңдаңыз. Бұл тек шешімнің түсіндірмесі, ештеңе өзгермейді.'),
+    (N'effectiveAccess.kindSheet', N'ru', N'Лист'),
+    (N'effectiveAccess.kindSheet', N'kz', N'Парақ'),
+    (N'effectiveAccess.kindTable', N'ru', N'Таблица'),
+    (N'effectiveAccess.kindTable', N'kz', N'Кесте'),
+    (N'effectiveAccess.kindColumn', N'ru', N'Столбец'),
+    (N'effectiveAccess.kindColumn', N'kz', N'Баған'),
+    (N'effectiveAccess.projectId', N'ru', N'ID проекта'),
+    (N'effectiveAccess.projectId', N'kz', N'Жоба ID'),
+    (N'effectiveAccess.caveat', N'ru', N'Состояние документа (подан, утверждён, закрытый период) и сужение назначения по периодам здесь не учитываются. Показано, что дают гранты по цепочке проект, лист, таблица, столбец, а не можно ли редактировать ячейку сейчас.'),
+    (N'effectiveAccess.caveat', N'kz', N'Құжат күйі (тапсырылған, бекітілген, жабық кезең) және тағайындаудың кезеңдер бойынша тарылуы мұнда ескерілмейді. Жоба, парақ, кесте, баған тізбегі бойынша гранттар не беретіні көрсетілген, ұяшықты қазір өңдеуге болатыны емес.'),
+    (N'effectiveAccess.inheritedFrom', N'ru', N'Унаследовано от {resource}'),
+    (N'effectiveAccess.inheritedFrom', N'kz', N'{resource} ресурсынан мұраланған')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:fv616 ── кінець секції ──
+
 -- COLL:rawhealth ── ru/kz розміру ext.RawDataPoint у картці `db`; власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
@@ -14059,11 +14263,11 @@ INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
   FROM (VALUES
     (N'integrationAudit.scheduleCreated', N'ru', N'Расписание сбора {id} создано для сущности «{entity}».'),
-    (N'integrationAudit.scheduleCreated', N'kz', N'«{entity}» нысаны үшін {id} жинау кестесі құрылды.'),
+    (N'integrationAudit.scheduleCreated', N'kz', N'«{entity}» нысаны үшін {id} жинау жоспары құрылды.'),
     (N'integrationAudit.scheduleChanged', N'ru', N'Расписание сбора {id} сущности «{entity}» изменено.'),
-    (N'integrationAudit.scheduleChanged', N'kz', N'«{entity}» нысанының {id} жинау кестесі өзгертілді.'),
+    (N'integrationAudit.scheduleChanged', N'kz', N'«{entity}» нысанының {id} жинау жоспары өзгертілді.'),
     (N'integrationAudit.scheduleDeleted', N'ru', N'Расписание сбора {id} сущности «{entity}» удалено.'),
-    (N'integrationAudit.scheduleDeleted', N'kz', N'«{entity}» нысанының {id} жинау кестесі жойылды.'),
+    (N'integrationAudit.scheduleDeleted', N'kz', N'«{entity}» нысанының {id} жинау жоспары жойылды.'),
     (N'integrationAudit.fieldMapCreated', N'ru', N'Сопоставление поля «{field}» сущности {entity} создано.'),
     (N'integrationAudit.fieldMapCreated', N'kz', N'{entity} нысанының «{field}» өрісін сәйкестендіру құрылды.'),
     (N'integrationAudit.fieldMapPaused', N'ru', N'Сопоставление поля «{field}» приостановлено.'),
@@ -14103,9 +14307,9 @@ GO
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
   FROM (VALUES
-    (N'integrationAudit.dataSourceCreated', N'ru', N'Соединение «{connection}» создано.'),
+    (N'integrationAudit.dataSourceCreated', N'ru', N'Подключение «{connection}» создано.'),
     (N'integrationAudit.dataSourceCreated', N'kz', N'«{connection}» қосылымы құрылды.'),
-    (N'integrationAudit.dataSourceChanged', N'ru', N'Соединение «{connection}» изменено.'),
+    (N'integrationAudit.dataSourceChanged', N'ru', N'Подключение «{connection}» изменено.'),
     (N'integrationAudit.dataSourceChanged', N'kz', N'«{connection}» қосылымы өзгертілді.')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
@@ -14253,7 +14457,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'pipeline.points', N'kz', N'Шығыстағы жолдар: {points}'),
     (N'pipeline.narrowedTitle', N'kz', N'Осы қадамда деректер нөлге дейін тарылады'),
     (N'pipeline.step.source', N'kz', N'Көз'),
-    (N'pipeline.step.schedule', N'kz', N'Жинау кестесі'),
+    (N'pipeline.step.schedule', N'kz', N'Жинау жоспары'),
     (N'pipeline.step.collect', N'kz', N'Жинау'),
     (N'pipeline.step.map', N'kz', N'Сәйкестендіру'),
     (N'pipeline.step.emit', N'kz', N'Құжаттарға жазу'),
@@ -14262,7 +14466,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'pipeline.stepHint.collect', N'kz', N'Қарау терезесінде көзден бұрыннан жиналған жолдар.'),
     (N'pipeline.stepHint.map', N'kz', N'Құжат ұяшығымен әрекеттегі сәйкестендіруге түсетін жиналған жолдар.'),
     (N'pipeline.stepHint.emit', N'kz', N'Құжат ұяшығына түсетін жолдар.'),
-    (N'pipeline.zero.collect', N'kz', N'Терезеде ештеңе жиналмады. Осы нысанның қосылымын, кестесін және соңғы іске қосылуын тексеріңіз.'),
+    (N'pipeline.zero.collect', N'kz', N'Терезеде ештеңе жиналмады. Осы нысанның қосылымын, жоспарын және соңғы іске қосылуын тексеріңіз.'),
     (N'pipeline.zero.map', N'kz', N'Жиналған жолдар ешбір әрекеттегі сәйкестендіруге түспейді. Сәйкестендіру қосыңыз немесе тоқтатылғанын жалғастырыңыз.'),
     (N'pipeline.zero.emit', N'kz', N'Сәйкестендірілген бірде-бір жол құжат ұяшығына түспейді. Төменде жетіспейтін жолдар мен бағандар аталған.'),
     (N'pipeline.state.ok', N'kz', N'Деректерді өткізеді'),
@@ -14292,7 +14496,6 @@ SELECT v.[Key], v.Lang, v.Val
     (N'effectiveAccess.show', N'ru', N'Показать эффективный доступ'),
     (N'effectiveAccess.hide', N'ru', N'Скрыть эффективный доступ'),
     (N'effectiveAccess.title', N'ru', N'Эффективный доступ к ресурсу'),
-    (N'effectiveAccess.hint', N'ru', N'Выберите справочник или проект, чтобы увидеть итоговый уровень и какой грант какой роли его даёт. Это лишь объяснение решения, ничего не меняется.'),
     (N'effectiveAccess.kind', N'ru', N'Тип ресурса'),
     (N'effectiveAccess.kindRegistry', N'ru', N'Справочник'),
     (N'effectiveAccess.kindProject', N'ru', N'Проект'),
@@ -14316,16 +14519,18 @@ SELECT v.[Key], v.Lang, v.Val
     (N'effectiveAccess.deny', N'ru', N'Запрет'),
     (N'effectiveAccess.scopeUnscoped', N'ru', N'Везде'),
     (N'effectiveAccess.scopeInScope', N'ru', N'Проект входит в область'),
-    (N'effectiveAccess.scopeNarrowed', N'ru', N'Сужено листами или периодами: открывает документы, но не повышает уровень проекта'),
+    (N'effectiveAccess.scopeNarrowed', N'ru', N'Сужено листами или периодами: учитывается на листах своей области (при сужении по периодам не учитывается); уровень может быть выше фактического'),
     (N'effectiveAccess.scopeOutOfScope', N'ru', N'Вне области назначения'),
     (N'effectiveAccess.scopeExpired', N'ru', N'Назначение не действует'),
     (N'effectiveAccess.counted', N'ru', N'Да'),
     (N'effectiveAccess.notCounted', N'ru', N'Нет'),
+    (N'effectiveAccess.narrowedBy', N'ru', N'Сужено: {by}'),
+    (N'effectiveAccess.projectNotVisible', N'ru', N'Нет: проект не виден, поэтому гранты ниже него не действуют'),
+    (N'effectiveAccess.mayExceed', N'ru', N'Роль сужена листами или периодами: показанный уровень может быть ВЫШЕ фактического для конкретного периода. Проверьте сужение во вкладах.'),
     (N'err.ECR-REQ-0422.effectiveAccessResource', N'kz', N'Ресурсты түрі мен оң санымен көрсету керек, мысалы Registry:5 немесе Project:3.'),
     (N'effectiveAccess.show', N'kz', N'Тиімді қолжетімділікті көрсету'),
     (N'effectiveAccess.hide', N'kz', N'Тиімді қолжетімділікті жасыру'),
     (N'effectiveAccess.title', N'kz', N'Ресурсқа тиімді қолжетімділік'),
-    (N'effectiveAccess.hint', N'kz', N'Түпкілікті деңгейді және оны қай рөлдің қай гранты беретінін көру үшін анықтамалықты немесе жобаны таңдаңыз. Бұл тек шешімнің түсіндірмесі, ештеңе өзгермейді.'),
     (N'effectiveAccess.kind', N'kz', N'Ресурс түрі'),
     (N'effectiveAccess.kindRegistry', N'kz', N'Анықтамалық'),
     (N'effectiveAccess.kindProject', N'kz', N'Жоба'),
@@ -14349,11 +14554,14 @@ SELECT v.[Key], v.Lang, v.Val
     (N'effectiveAccess.deny', N'kz', N'Тыйым'),
     (N'effectiveAccess.scopeUnscoped', N'kz', N'Барлық жерде'),
     (N'effectiveAccess.scopeInScope', N'kz', N'Жоба аумаққа кіреді'),
-    (N'effectiveAccess.scopeNarrowed', N'kz', N'Парақтармен немесе кезеңдермен тарылтылған: құжаттарды ашады, бірақ жоба деңгейін көтермейді'),
+    (N'effectiveAccess.scopeNarrowed', N'kz', N'Парақтармен немесе кезеңдермен тарылтылған: өз аумағындағы парақтарда ескеріледі (кезеңдер бойынша тарылтылса — ескерілмейді); деңгей нақтыдан жоғары болуы мүмкін'),
     (N'effectiveAccess.scopeOutOfScope', N'kz', N'Тағайындау аумағынан тыс'),
     (N'effectiveAccess.scopeExpired', N'kz', N'Тағайындау қолданыста емес'),
     (N'effectiveAccess.counted', N'kz', N'Иә'),
-    (N'effectiveAccess.notCounted', N'kz', N'Жоқ')
+    (N'effectiveAccess.notCounted', N'kz', N'Жоқ'),
+    (N'effectiveAccess.narrowedBy', N'kz', N'Тарылтылған: {by}'),
+    (N'effectiveAccess.projectNotVisible', N'kz', N'Жоқ: жоба көрінбейді, сондықтан одан төмен гранттар әрекет етпейді'),
+    (N'effectiveAccess.mayExceed', N'kz', N'Рөл парақтармен немесе кезеңдермен тарылтылған: көрсетілген деңгей нақты кезең үшін фактіліктен ЖОҒАРЫ болуы мүмкін. Үлестердегі тарылтуды тексеріңіз.')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
@@ -14385,8 +14593,8 @@ GO
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
   FROM (VALUES
-    (N'notifications.test.smtpNoRecipients', N'ru', N'Нет адресатов: в канале нет явных адресов, а его роли не раскрываются ни в одного активного пользователя с адресом электронной почты.'),
-    (N'notifications.test.smtpNoRecipients', N'kz', N'Алушылар жоқ: арнада нақты мекенжайлар жоқ, ал оның рөлдері электрондық пошта мекенжайы бар бірде-бір белсенді пайдаланушыға айқындалмайды.')
+    (N'notifications.test.smtpNoRecipients', N'ru', N'Нет адресатов: в канале нет явных адресов, а среди пользователей его ролей нет ни одного активного с адресом электронной почты.'),
+    (N'notifications.test.smtpNoRecipients', N'kz', N'Алушылар жоқ: арнада нақты мекенжайлар жоқ, ал оның рөлдерінде электрондық пошта мекенжайы бар бірде-бір белсенді пайдаланушы жоқ.')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
@@ -14396,18 +14604,61 @@ GO
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
   FROM (VALUES
-    (N'err.ECR-REQ-0422.collectionScheduleDependencyNotFound', N'ru', N'Расписание, от которого должно зависеть это, не существует.'),
-    (N'err.ECR-REQ-0422.collectionScheduleDependencyNotFound', N'kz', N'Осы кесте тәуелді болуы тиіс кесте жоқ.'),
-    (N'err.ECR-REQ-0422.collectionScheduleDependencyOtherSource', N'ru', N'Расписание может зависеть только от расписания того же соединения.'),
-    (N'err.ECR-REQ-0422.collectionScheduleDependencyOtherSource', N'kz', N'Кесте тек сол қосылымның кестесіне тәуелді бола алады.'),
+    (N'err.ECR-REQ-0422.collectionScheduleDependencyNotFound', N'ru', N'Расписания, от которого должно зависеть это расписание, не существует.'),
+    (N'err.ECR-REQ-0422.collectionScheduleDependencyNotFound', N'kz', N'Бұл жоспар тәуелді болуы тиіс жоспар жоқ.'),
+    (N'err.ECR-REQ-0422.collectionScheduleDependencyOtherSource', N'ru', N'Расписание может зависеть только от расписания того же подключения.'),
+    (N'err.ECR-REQ-0422.collectionScheduleDependencyOtherSource', N'kz', N'Жоспар тек сол қосылымның жоспарына тәуелді бола алады.'),
     (N'err.ECR-REQ-0422.collectionScheduleDependencyCycle', N'ru', N'Эта зависимость замкнула бы цикл: другое расписание уже зависит от этого.'),
-    (N'err.ECR-REQ-0422.collectionScheduleDependencyCycle', N'kz', N'Бұл тәуелділік циклді тұйықтайды: екінші кесте бұған әлдеқашан тәуелді.'),
+    (N'err.ECR-REQ-0422.collectionScheduleDependencyCycle', N'kz', N'Бұл тәуелділік циклді тұйықтайды: екінші жоспар бұған әлдеқашан тәуелді.'),
     (N'jobs.collectionDependencyWaiting', N'ru', N'Сущность {sourceEntityId}: пропуск, ожидается успешный прогон расписания {dependsOn}'),
-    (N'jobs.collectionDependencyWaiting', N'kz', N'{sourceEntityId} нысаны: өткізілді, {dependsOn} кестесінің сәтті іске қосылуы күтілуде')
+    (N'jobs.collectionDependencyWaiting', N'kz', N'{sourceEntityId} нысаны: өткізілді, {dependsOn} жоспарының сәтті іске қосылуы күтілуде')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
 -- COLL:fv1315 ── кінець секції ──
+
+-- COLL:fv1315-ui ── ru/kz залежності розкладу збору: select і подія пропуску (ФВ-13.15, клієнт); власна порція; kz — потрібна вичитка носієм ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'schedule.dependsOn', N'ru', N'Зависит от расписания'),
+    (N'schedule.dependsOn', N'kz', N'Қай жоспарға тәуелді'),
+    (N'schedule.dependsOnHint', N'ru', N'Плановые запуски ждут успешного прогона выбранного расписания того же подключения. Ручной сбор и добор не блокируются.'),
+    (N'schedule.dependsOnHint', N'kz', N'Жоспарлы іске қосулар сол қосылымның таңдалған жоспарының сәтті орындалуын күтеді. Қолмен жинау мен толықтыру бұғатталмайды.'),
+    (N'schedule.dependsOnNone', N'ru', N'Без зависимости'),
+    (N'schedule.dependsOnNone', N'kz', N'Тәуелділіксіз'),
+    (N'status.coverage.SkippedDependency', N'ru', N'Ожидание зависимости'),
+    (N'status.coverage.SkippedDependency', N'kz', N'Тәуелділік күтілуде'),
+    (N'coverageEvents.skippedDependency', N'ru', N'Сущность {sourceEntityId}: плановый запуск пропущен, ожидается успешный прогон расписания {dependsOn}. Данные задержаны, не потеряны: их соберёт следующий запуск или добор.'),
+    (N'coverageEvents.skippedDependency', N'kz', N'{sourceEntityId} нысаны: жоспарлы іске қосу өткізілді, {dependsOn} жоспарының сәтті орындалуы күтілуде. Деректер кешіктірілді, жоғалған жоқ: оларды келесі іске қосу немесе толықтыру жинайды.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:fv1315-ui ── кінець секції ──
+
+-- COLL:smtp-hardening ── ru/kz межі частоти проб транспорту; власна порція; kz — потрібна вичитка носієм ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-REQ-0429.tooManySmtpTests', N'ru', N'Слишком много проверочных сообщений за короткое время. Подождите немного и повторите попытку; заголовок Retry-After указывает, через сколько.'),
+    (N'err.ECR-REQ-0429.tooManySmtpTests', N'kz', N'Қысқа уақыт ішінде тексеру хабарламалары тым көп. Біраз күтіп, қайталап көріңіз; қанша уақыттан кейін екенін Retry-After тақырыбы көрсетеді.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:smtp-hardening ── кінець секції ──
+
+-- COLL:sec-smtp-s1s2 ── ru/kz відмов S1 налаштувань SMTP; власна порція; kz — потрібна вичитка носієм ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-REQ-0422.smtpPasswordReentryRequired', N'ru', N'Сервер, порт, шифрование или логин изменены, поэтому сохранённый пароль не переносится: введите пароль заново.'),
+    (N'err.ECR-REQ-0422.smtpPasswordReentryRequired', N'kz', N'Сервер, порт, шифрлау немесе логин өзгертілді, сондықтан сақталған пароль көшірілмейді: парольді қайта енгізіңіз.'),
+    (N'err.ECR-REQ-0422.smtpPasswordNeedsTls', N'ru', N'Аутентификация по паролю требует шифрования: выберите STARTTLS или отключите аутентификацию для внутреннего релея.'),
+    (N'err.ECR-REQ-0422.smtpPasswordNeedsTls', N'kz', N'Пароль арқылы аутентификация шифрлауды қажет етеді: STARTTLS таңдаңыз немесе ішкі релей үшін аутентификацияны өшіріңіз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:sec-smtp-s1s2 ── кінець секції ──
 
 -- REG:rt25-client ── ru/kz сторінки впливу довідника і банера застарілості (RT-25, клієнт); власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)
@@ -14670,6 +14921,23 @@ OPTION (RECOMPILE);
 GO
 -- API:negative-path ── кінець секції ──
 
+-- API:negative-path-2 ── ru/kz відмов замість 500 у нових ендпоінтах; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-TMPL-0422.patchChangeInvalid', N'ru', N'Каждое изменение патча должно содержать entityType, entityId и field.'),
+    (N'err.ECR-TMPL-0422.patchChangeInvalid', N'kz', N'Патчтың әр өзгерісінде entityType, entityId және field болуы керек.'),
+    (N'err.ECR-TMPL-0422.presentationValueInvalid', N'ru', N'Значение {entityType}.{field} имеет недопустимую для этого поля форму.'),
+    (N'err.ECR-TMPL-0422.presentationValueInvalid', N'kz', N'{entityType}.{field} мәнінің пішіні бұл өріске жарамайды.'),
+    (N'err.ECR-REG-0422.definitionItemMissing', N'ru', N'Описание содержит пустой элемент среди полей, правил или ключей.'),
+    (N'err.ECR-REG-0422.definitionItemMissing', N'kz', N'Сипаттаманың өрістері, ережелері немесе кілттері арасында бос элемент бар.'),
+    (N'err.ECR-REG-0422.switchCodeEmpty', N'ru', N'Набор справочников содержит пустой код.'),
+    (N'err.ECR-REG-0422.switchCodeEmpty', N'kz', N'Анықтамалықтар жиынында бос код бар.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- API:negative-path-2 ── кінець секції ──
+
 -- I18N:keys-audit 2026-10-01 ── форми множини ru (few/many) для formatCount; власна порція ──
 -- kz за `Intl.PluralRules` має лише one/other — рядки kz тут лише для повноти
 -- каталогу (текст = other). ⚠ kz — нейтральний переклад, потребує перевірки носієм.
@@ -14741,6 +15009,25 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- CL6:notification-templates ── кінець секції ──
+
+-- COLL:fv812-relations ── ru/kz редагування зв'язків полів у конструкторі довідників (ФВ-8.12, порція 1); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-REG-0422.lookupRetargetInUse', N'ru', N'Связь поля «{fieldCode}» нельзя изменить: в записях уже есть значения, указывающие на текущий справочник.'),
+    (N'err.ECR-REG-0422.lookupRetargetInUse', N'kz', N'«{fieldCode}» өрісінің байланысын өзгерту мүмкін емес: жазбаларда ағымдағы анықтамалыққа сілтейтін мәндер бар.'),
+    (N'err.ECR-REG-0422.lookupTargetUnknown', N'ru', N'Справочника, на который указывает поле «{fieldCode}», не существует.'),
+    (N'err.ECR-REG-0422.lookupTargetUnknown', N'kz', N'«{fieldCode}» өрісі сілтейтін анықтамалық жоқ.'),
+    (N'registries.relationTargetFor', N'ru', N'Цель связи поля {field}'),
+    (N'registries.relationTargetFor', N'kz', N'{field} өрісінің байланыс мақсаты'),
+    (N'registries.relationsEditHint', N'ru', N'Цель связи можно заменить другим справочником, пока ни в одной записи нет значения этого поля; иначе сервер откажет.'),
+    (N'registries.relationsEditHint', N'kz', N'Байланыс мақсатын осы өрістің мәні бірде-бір жазбада болмаған кезде басқа анықтамалыққа ауыстыруға болады; әйтпесе сервер бас тартады.'),
+    (N'err.ECR-REG-0422.lookupRetargetUsedByRules', N'ru', N'Связь поля «{fieldCode}» нельзя изменить: через неё читают атрибуты правил, формул или версий методологий — {total}: {usedBy}. Сначала измените или отключите их.'),
+    (N'err.ECR-REG-0422.lookupRetargetUsedByRules', N'kz', N'«{fieldCode}» өрісінің байланысын өзгерту мүмкін емес: ол арқылы атрибуттарды оқитын ережелер, формулалар немесе әдістеме нұсқалары бар — {total}: {usedBy}. Алдымен оларды өзгертіңіз немесе өшіріңіз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:fv812-relations ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

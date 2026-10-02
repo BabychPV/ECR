@@ -215,6 +215,23 @@ public interface IRegistryStore
     /// <summary>Значення полів запису.</summary>
     public Task<IReadOnlyList<RegistryValue>> ListValuesAsync(long registryEntryId, CancellationToken ct);
 
+    /// <summary>
+    /// Правила довідників, формули шаблонів і версії методологій, що читають АТРИБУТИ цілі через
+    /// поля-посилання довідника (<c>FIELD.attr</c> у <c>cfg.RegistryUse.FieldPath</c>) — ФВ-8.12.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Тип шляху <c>поле.атрибут</c> виводиться з цілі посилання, тож перенацілення поля тихо
+    /// ламає кожного, хто йде через нього. Ребра <c>cfg.RegistryUse</c> пишуть збереження правил
+    /// (<c>SourceKind = 2</c>), публікація методологій (<c>1</c>) і шаблонів (<c>0</c>). Шлях,
+    /// що дорівнює самому полю (читання значення без переходу), сюди не входить.
+    /// </remarks>
+    /// <param name="registryDefId">Довідник-власник полів.</param>
+    /// <param name="fieldCodes">Коди полів, чия ціль змінюється.</param>
+    /// <param name="take">Скільки назв повернути в переліку; повна кількість — у <c>Total</c>.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<Common.UsageResponse> FindFieldChainConsumersAsync(
+        int registryDefId, IReadOnlyCollection<string> fieldCodes, int take, CancellationToken ct);
+
     /// <summary>Додає запис; ідентифікатор з'являється після збереження.</summary>
     public void Add(RegistryEntry entry);
 

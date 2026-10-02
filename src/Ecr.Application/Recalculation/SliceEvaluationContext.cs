@@ -262,7 +262,8 @@ public sealed class SliceEvaluationContext : IBudgetedEvaluationContext
     /// ⚠ Відсутній запис ЧИ відсутнє поле — одна й та сама відповідь, <c>#REF</c>
     /// (02b §6.4): автору формули байдуже, яка з двох причин, — обидві
     /// означають «звідси значення взяти нема звідки», і дія одна — полагодити
-    /// довідник або посилання.
+    /// довідник або посилання. ПОРОЖНЄ поле існуючого запису (RT-24, R-11) —
+    /// <c>null</c>: завантажувач кладе в знімок <c>ExpressionValue.Null</c>.
     /// </remarks>
     public ExpressionValue GetRegistryField(long registryEntryId, string fieldCode)
         => _registryFields.TryGetValue(registryEntryId, out var byField)

@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useState, type JSX } from 'react';
+import { useEffect, useMemo, useState, type JSX } from 'react';
 import { Badge, Group, Skeleton, Tabs, Text } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
 import { useParams } from 'react-router-dom';
@@ -23,6 +23,8 @@ import { CompositionEditorLink } from '@/features/registries/rc816/CompositionEd
 import { RegistryUsagePanel } from '@/features/registries/RegistryUsage';
 import {
   buildSaveRequest,
+  draftLinkEdits,
+  type LinkEdits,
   emptyField,
   emptyRule,
   isComplete,
@@ -68,6 +70,7 @@ export function RegistryConstructorPage(): JSX.Element {
   const [rules, setRules] = useState<RuleDraft[]>([]);
   const [newFields, setNewFields] = useState<FieldDraft[]>([]);
   const [reason, setReason] = useState('');
+  const [linkEdits, setLinkEdits] = useState<LinkEdits>({});
 
   const definition = useQuery({
     queryKey: queryKeys.registries.definition(code),
@@ -187,12 +190,14 @@ export function RegistryConstructorPage(): JSX.Element {
       // означало б надіслати їх іще раз під `id === null`, тобто як дублікат.
       setRules(definition.data.rules.map((rule) => toDraft(rule, language())));
       setNewFields([]);
+      setLinkEdits({});
       setReason('');
       return;
     }
 
     setRules(draftRules(saved, language()));
     setNewFields(draftNewFields(saved, language()));
+    setLinkEdits(draftLinkEdits(saved.fields, definition.data));
     setReason(saved.reason);
   }, [definition.data, draft.data, draft.isPending]);
 
@@ -210,9 +215,9 @@ export function RegistryConstructorPage(): JSX.Element {
   const request = useMemo<SaveRegistryDefinitionDto | null>(
     () =>
       ready && definition.data !== undefined
-        ? buildSaveRequest(definition.data, rules, newFields, reason, language())
+        ? buildSaveRequest(definition.data, rules, newFields, reason, language(), linkEdits)
         : null,
-    [ready, definition.data, rules, newFields, reason],
+    [ready, definition.data, rules, newFields, reason, linkEdits],
   );
 
   return (
@@ -303,7 +308,15 @@ export function RegistryConstructorPage(): JSX.Element {
               </Tabs.Panel>
 
               <Tabs.Panel value="relations" pt="sm">
-                <RegistryRelations definition={loaded} />
+                <RegistryRelations
+                  definition={loaded}
+                  canEdit={mayEdit}
+                  registryOptions={registryOptions}
+                  linkEdits={linkEdits}
+                  onChangeLink={(fieldId, target) =>
+                    setLinkEdits((all) => ({ ...all, [fieldId]: target }))
+                  }
+                />
               </Tabs.Panel>
 
               <Tabs.Panel value="rules" pt="sm">

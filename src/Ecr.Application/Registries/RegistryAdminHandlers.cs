@@ -141,6 +141,15 @@ public sealed class SwitchRegistrySourceHandler(
                 new Dictionary<string, object?> { ["messageKey"] = "err.ECR-REG-0422.emptySwitchSet" });
         }
 
+        // Прохід по відмовах 2: `[null]` чи порожній код падав 500 на ключі словника нижче.
+        if (registryCodes.Any(string.IsNullOrWhiteSpace))
+        {
+            throw new BusinessRuleException(
+                "ECR-REG-0422",
+                "Набір довідників містить порожній код.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-REG-0422.switchCodeEmpty" });
+        }
+
         // ⚠ Дубль у наборі — не дрібниця. Він означає, що набір складали не
         // руками, а зліпили з двох переліків, і другий міг містити зайве.
         var duplicates = registryCodes

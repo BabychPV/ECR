@@ -181,6 +181,55 @@ public sealed class DocumentDataExportTests
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait("Requirement", "ФВ-4.2")]
+    public async Task Csv_і_Json_includeFormulas_true_віддають_сирий_вираз_без_трансляції_й_знешкоджують_injection()
+    {
+        // Три формульні колонки, вирази яких починаються з = + - (CSV-injection).
+        var sheet = new SheetDef(2, EcrCode.Create("Water"), Text("Water"), 1);
+        var table = new TableDef(1, EcrCode.Create("Main"), Text("Main"), 1,
+                                 TableLayoutKind.MonthsInColumns, TableRowMode.Fixed);
+        SetId(table, 3);
+        var byColumn = new Dictionary<int, ColumnDef>();
+        var expressions = new[] { "=[Volume]*2", "+[Volume]", "-[Volume]" };
+        for (var i = 0; i < expressions.Length; i++)
+        {
+            var column = Column(21 + i, "Fx" + "abc"[i], i + 1, CellDataType.String);
+            table.AddColumn(column);
+            byColumn[column.Id] = column;
+            var formula = new FormulaDef(3, FormulaScope.Column, expressions[i], ExpressionDialect.Template);
+            formula.AssignColumn(column.Id);
+            table.AddFormula(formula);
+        }
+
+        sheet.AddTable(table);
+        _metadata.GetAsync(2, Arg.Any<CancellationToken>()).Returns(
+            new TemplateVersionSnapshot(2, 0, [sheet], byColumn, new Dictionary<(int, string), RowDef>()));
+
+        var zip = await Exporter().ExportAsync(
+            DocumentId, Period, DocumentExportFormat.Csv, includeFormulas: true, CancellationToken.None);
+        using var archive = new ZipArchive(new MemoryStream(zip));
+        using var reader = new StreamReader(Assert.Single(archive.Entries).Open(), Encoding.UTF8);
+        var text = await reader.ReadToEndAsync();
+
+        // Сирий вираз з апострофом-захистом; жодної трансляції в A1 (Excel).
+        Assert.EndsWith(
+            "formulas\r\ncolumn,expression\r\n"
+            + "Fxa,'=[Volume]*2\r\nFxb,'+[Volume]\r\nFxc,'-[Volume]\r\n",
+            text, StringComparison.Ordinal);
+        Assert.DoesNotMatch(@"\b[A-Z]{1,3}[0-9]+\b", text[text.IndexOf("formulas", StringComparison.Ordinal)..]
+            .Replace("F0", "", StringComparison.Ordinal).Replace("F1", "", StringComparison.Ordinal)
+            .Replace("F2", "", StringComparison.Ordinal));
+
+        var json = await Exporter().ExportAsync(
+            DocumentId, Period, DocumentExportFormat.Json, includeFormulas: true, CancellationToken.None);
+        using var doc = JsonDocument.Parse(json);
+        var columns = doc.RootElement.GetProperty("tables")[0].GetProperty("columns");
+        // JSON не знешкоджується (не CSV): вираз рівно як у FormulaDef.
+        Assert.Equal(expressions, columns.EnumerateArray().Select(c => c.GetProperty("expression").GetString()).ToArray());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "ФВ-4.2")]
     public async Task Json_includeFormulas_true_додає_поле_expression_в_опис_колонки()
     {
         var json = await Exporter().ExportAsync(

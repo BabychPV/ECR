@@ -82,9 +82,29 @@ public sealed class SmtpSettings : Entity<int>
 
     /// <summary>Чи є адреса коректною поштовою адресою.</summary>
     /// <param name="address">Адреса.</param>
+    /// <remarks>
+    /// ⛔ Суворіше за <see cref="MailAddress"/>: без доменних літералів (<c>a@[127.0.0.1]</c>), квотованого
+    /// локального імені, пробілів і керівних символів (NUL, U+2028, U+0085), локальної частини понад 64,
+    /// мітки домену понад 63, кінцевої крапки й дефіса на краю мітки (RFC 5321) — рекомендація рев'ю D-263.
+    /// </remarks>
     public static bool IsValidAddress(string? address)
-        => !string.IsNullOrWhiteSpace(address) && address.Length <= AddressMaxLength
-           && MailAddress.TryCreate(address, out var parsed) && parsed.Address == address.Trim();
+    {
+        if (string.IsNullOrWhiteSpace(address) || address.Length > AddressMaxLength
+            || address.Any(c => char.IsWhiteSpace(c) || char.IsControl(c) || c is '[' or ']' or '"')
+            || !MailAddress.TryCreate(address, out var parsed) || parsed.Address != address.Trim())
+        {
+            return false;
+        }
+
+        var at = address.LastIndexOf('@');
+        if (at < 1 || at > 64 || address.IndexOf('@', StringComparison.Ordinal) != at)
+        {
+            return false;
+        }
+
+        return address[(at + 1)..].Split('.').All(
+            label => label.Length is >= 1 and <= 63 && label[0] != '-' && label[^1] != '-');
+    }
 
     /// <summary>Замінює все, крім пароля.</summary>
     public void Update(

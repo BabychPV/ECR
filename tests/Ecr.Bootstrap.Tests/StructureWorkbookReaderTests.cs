@@ -166,6 +166,7 @@ public sealed class StructureWorkbookReaderTests
     }
 
     [Fact]
+    [Trait("Requirement", "ФВ-16.12")]
     public void Нерозпізнана_одиниця_йде_у_звіт_а_колонка_без_одиниці()
     {
         using var wb = EmissionsWorkbook();

@@ -40,6 +40,7 @@ public sealed class BackgroundImportScenarios(SqlServerFixture sql)
     [Fact]
     [Trait("Category", "Integration")]
     [Trait("Finding", "F-01")]
+    [Trait("Requirement", "ФВ-4.5")]
     public async Task Імпорт_понад_поріг_іде_у_фон_і_пише_від_імені_автора()
     {
         using var app = new EcrApiFactory(sql);

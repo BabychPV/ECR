@@ -40,6 +40,7 @@ public sealed class FormulaRecalculationCoalesceTests(SqlServerFixture sql) : Db
 
     /// <summary>Обов'язковий тест координатора: дві правки підряд — одна задача, формули від другої.</summary>
     [Fact]
+    [Trait("Requirement", "ФВ-3.5")]
     public async Task Дві_правки_підряд_одна_задача_і_формули_від_другої_правки()
     {
         var doc = await ArrangeAsync(rows: 2);
@@ -60,6 +61,7 @@ public sealed class FormulaRecalculationCoalesceTests(SqlServerFixture sql) : Db
     }
 
     [Fact]
+    [Trait("Requirement", "ФВ-3.5")]
     public async Task П_ятдесят_правок_одного_документо_періоду_одна_задача_результат_від_останнього_входу()
     {
         var doc = await ArrangeAsync(rows: 2);

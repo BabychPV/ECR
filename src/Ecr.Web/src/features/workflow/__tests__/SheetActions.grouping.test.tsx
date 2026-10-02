@@ -98,7 +98,7 @@ afterEach(() => {
 
 describe('SheetActions: кнопки — прямі елементи батьківського Group, не вкладений контейнер', () => {
   it('є бодай одна дія робочого процесу (Draft → Submit) — рівно ОДИН Group на всю панель', async () => {
-    show(['Calculation.Recalculate'], 'Draft');
+    show(['Document.View'], 'Draft');
 
     await screen.findByRole('button', { name: /submit/i });
 
@@ -111,7 +111,7 @@ describe('SheetActions: кнопки — прямі елементи батьк�
   });
 
   it('є бодай одна дія робочого процесу — Divider стоїть ПОРУЧ із кнопками в тому самому Group', async () => {
-    show(['Calculation.Recalculate'], 'Draft');
+    show(['Document.View'], 'Draft');
 
     const submitButton = await screen.findByRole('button', { name: /submit/i });
     const bar = screen.getByTestId('actions-bar');

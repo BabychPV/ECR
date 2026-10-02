@@ -65,7 +65,8 @@ public sealed class RecalculationServiceTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)]
-    [Trait("Requirement", "ФВ-3.5")]
+    // ⚠ Трейт ФВ-3.5 знято: `IsCrossSheet` у проді ніхто не виставляє (`D-227`), тож ця гілка
+    // мертва. Відкладення доводять `FormulaRecalculationCoalesceTests` (черга зі злиттям).
     public void Крос_аркушний_rollup_відкладається_а_не_рахується_синхронно()
     {
         var plan = new RecalculationPlan();

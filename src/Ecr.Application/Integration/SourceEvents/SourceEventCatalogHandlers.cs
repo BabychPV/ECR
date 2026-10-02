@@ -181,7 +181,7 @@ public sealed class ProbeSourceEventsHandler(
             || from >= to
             || to - from > TimeSpan.FromDays(MaxWindowDays)
             || max is < 1 or > MaxProbeEvents
-            || attributes.Any(a => string.IsNullOrWhiteSpace(a.Name) || a.Name.Length > MaxNameLength || !Enum.IsDefined(a.Scope)))
+            || attributes.Any(a => a is null || string.IsNullOrWhiteSpace(a.Name) || a.Name.Length > MaxNameLength || !Enum.IsDefined(a.Scope)))
         {
             throw ListDataSourcesHandler.Invalid(
                 "err.ECR-REQ-0422.probeEventsInvalid",

@@ -248,6 +248,29 @@ describe('CoverageEventsPanel', () => {
     expect(within(row).queryByText(details)).toBeNull();
   });
 
+  it('пропуск за залежністю розкладу (ФВ-13.15) — бейдж `info`, причина конвертом через каталог, є у фільтрі', async () => {
+    const details = JSON.stringify({
+      k: 'coverageEvents.skippedDependency',
+      p: { sourceEntityId: '42', dependsOn: '7', key: 'ABCDEF0123456789' },
+    });
+    const Waiting = { ...Ceiling, id: 9301, sourceEntityCode: 'STACK-1', sourceEntityName: null, periodKey: null, status: 'SkippedDependency', details };
+    respond(() => ({ items: [Waiting], nextCursor: null, totalCount: null }));
+    show();
+
+    await screen.findByText('STACK-1');
+
+    const row = document.querySelector<HTMLElement>('tr[data-row-key="9301"]') as HTMLElement;
+    const badge = row.querySelector<HTMLElement>('[data-status-kind="coverage"]');
+    expect(badge?.dataset.statusState).toBe('SkippedDependency');
+    expect(badge?.dataset.statusTone).toBe('info');
+    expect(
+      within(row).getByText('⟦coverageEvents.skippedDependency (sourceEntityId=42, dependsOn=7, key=ABCDEF0123456789)⟧'),
+    ).toBeTruthy();
+
+    fireEvent.click(await screen.findByRole('textbox', { name: '⟦coverageEvents.filterStatus⟧' }));
+    expect(await screen.findByRole('option', { name: '⟦status.coverage.SkippedDependency⟧' })).toBeTruthy();
+  });
+
   it('фільтр статусу пропонує відмову джерела з підписом каталогу', async () => {
     respond(() => ({ items: [], nextCursor: null, totalCount: null }));
     show();

@@ -21,8 +21,58 @@ public sealed class EffectiveAccessStore(EcrDbContext db) : IEffectiveAccessStor
         {
             ResourceKind.Registry => db.RegistryDefs.AsNoTracking().AnyAsync(r => r.Id == resourceId, ct),
             ResourceKind.Project => db.Projects.AsNoTracking().AnyAsync(p => p.Id == resourceId, ct),
+            ResourceKind.Sheet => db.SheetDefs.AsNoTracking().AnyAsync(s => s.Id == resourceId, ct),
+            ResourceKind.Table => db.TableDefs.AsNoTracking().AnyAsync(t => t.Id == resourceId, ct),
+            ResourceKind.Column => db.ColumnDefs.AsNoTracking().AnyAsync(c => c.Id == resourceId, ct),
             _ => Task.FromResult(false),
         };
+
+    /// <inheritdoc />
+    public async Task<ResourceChain?> ResolveChainAsync(ResourceKind kind, int resourceId, int projectId, CancellationToken ct)
+    {
+        var version = await db.Projects.AsNoTracking()
+            .Where(p => p.Id == projectId)
+            .Select(p => (int?)p.TemplateVersionId)
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+        if (version is not { } versionId)
+        {
+            return null;
+        }
+
+        switch (kind)
+        {
+            case ResourceKind.Sheet:
+                var sheet = await db.SheetDefs.AsNoTracking()
+                    .Where(s => s.Id == resourceId && s.TemplateVersionId == versionId)
+                    .Select(s => new { s.Id, s.Code })
+                    .FirstOrDefaultAsync(ct)
+                    .ConfigureAwait(false);
+                return sheet is null ? null : new ResourceChain(sheet.Id, sheet.Code, null, null);
+
+            case ResourceKind.Table:
+                var table = await (from t in db.TableDefs.AsNoTracking()
+                                   join s in db.SheetDefs.AsNoTracking() on t.SheetDefId equals s.Id
+                                   where t.Id == resourceId && s.TemplateVersionId == versionId
+                                   select new { SheetId = s.Id, s.Code, TableId = t.Id })
+                    .FirstOrDefaultAsync(ct)
+                    .ConfigureAwait(false);
+                return table is null ? null : new ResourceChain(table.SheetId, table.Code, table.TableId, null);
+
+            case ResourceKind.Column:
+                var column = await (from c in db.ColumnDefs.AsNoTracking()
+                                    join t in db.TableDefs.AsNoTracking() on c.TableDefId equals t.Id
+                                    join s in db.SheetDefs.AsNoTracking() on t.SheetDefId equals s.Id
+                                    where c.Id == resourceId && s.TemplateVersionId == versionId
+                                    select new { SheetId = s.Id, s.Code, TableId = t.Id, ColumnId = c.Id })
+                    .FirstOrDefaultAsync(ct)
+                    .ConfigureAwait(false);
+                return column is null ? null : new ResourceChain(column.SheetId, column.Code, column.TableId, column.ColumnId);
+
+            default:
+                return null;
+        }
+    }
 
     /// <inheritdoc />
     public async Task<IReadOnlyList<AccessSourceRow>> ListSourcesAsync(

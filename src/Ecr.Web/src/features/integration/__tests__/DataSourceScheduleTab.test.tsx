@@ -193,6 +193,25 @@ describe("Шухляда з'єднання: вкладка Schedule", () => {
     expect(new Set(scheduleUrls)).toEqual(new Set(['/api/v1/collection-schedules?dataSource=PI-MAIN']));
   });
 
+  it('ФВ-13.15: у переліку видно, від якого розкладу залежить рядок, а без залежності — «—»', async () => {
+    respond(() =>
+      json([
+        scheduleOf(1, 42, 'STACK-1', 'PI-MAIN'),
+        { ...scheduleOf(3, 44, 'STACK-2', 'PI-MAIN'), dependsOnScheduleId: 1 },
+      ]),
+    );
+    show();
+
+    const drawer = await openScheduleTab();
+
+    await waitFor(() => expect(drawer.querySelector('[data-schedule-row="STACK-2"]')).not.toBeNull());
+    const cell = (code: string): string | undefined =>
+      drawer.querySelector(`[data-schedule-row="${code}"] [data-schedule-depends-on]`)?.textContent ?? undefined;
+
+    expect(cell('STACK-2')).toBe('STACK-1 entity');
+    expect(cell('STACK-1')).toBe('—');
+  });
+
   it('L10: відмова читання — ErrorAlert, а не «розкладів немає»', async () => {
     respond(() => json({ title: 'Server error', status: 500, correlationId: 'c-500' }, 500));
     show();

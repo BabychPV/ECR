@@ -358,6 +358,7 @@ public sealed class RegistryDefinitionTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "ФВ-14.7")]
     public async Task Причина_зміни_обовʼязкова()
     {
         var error = await Assert.ThrowsAsync<BusinessRuleException>(

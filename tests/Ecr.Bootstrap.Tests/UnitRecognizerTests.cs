@@ -50,6 +50,7 @@ public sealed class UnitRecognizerTests
     [Theory]
     [InlineData("Викид (т/год)")]
     [InlineData("Витрата, т/год")]
+    [Trait("Requirement", "ФВ-16.12")]
     public void Год_неоднозначна_і_не_розпізнається(string raw)
     {
         var result = UnitRecognizer.Parse(raw);
@@ -71,6 +72,7 @@ public sealed class UnitRecognizerTests
     }
 
     [Fact]
+    [Trait("Requirement", "ФВ-16.12")]
     public void Похідна_одиниця_поза_каталогом_не_вигадується()
     {
         var result = UnitRecognizer.Parse("Викид (г/хв)");
@@ -112,6 +114,7 @@ public sealed class UnitRecognizerTests
     }
 
     [Fact]
+    [Trait("Requirement", "ФВ-16.12")]
     public void Коротке_невідоме_позначення_в_дужках_іде_у_звіт()
     {
         var result = UnitRecognizer.Parse("Об'єм (бар)");

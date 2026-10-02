@@ -54,6 +54,8 @@ public static partial class EcrConfigurationValidation
         ("Security:RateLimit:SearchPermit", 1),
         ("Security:RateLimit:SearchWindowSeconds", 1),
         ("Security:RateLimit:CspReportPermitPerMinute", 1),
+        ("Security:RateLimit:SmtpTestPermitPerMinute", 1),
+        ("Security:RateLimit:SmtpTestSystemPermitPerHour", 1),
         ("Jobs:ShutdownTimeoutSeconds", 1),
         ("Audit:ExportMaxRows", 1),
         ("Localization:ImportMaxBytes", 1),

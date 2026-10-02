@@ -524,7 +524,7 @@ public sealed class NotificationJob(
             ? NotificationSeverity.Error
             : status switch
             {
-                CollectionCoverage.RegistryAutoCreated => NotificationSeverity.Info,
+                CollectionCoverage.RegistryAutoCreated or CollectionCoverage.SkippedDependency => NotificationSeverity.Info,
                 CollectionCoverage.SkippedPeriodClosed
                     or CollectionCoverage.SkippedWriteConflict
                     or CollectionCoverage.SkippedNeedsConfirmation

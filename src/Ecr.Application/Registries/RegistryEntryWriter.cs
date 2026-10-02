@@ -991,6 +991,22 @@ public sealed class RegistryEntryWriter(
         CancellationToken ct)
     {
         var invariant = System.Globalization.CultureInfo.InvariantCulture;
+
+        // ⛔ ent6 R1: поле Lookup без цілі приймало запис БУДЬ-ЯКОГО довідника (і з заборонених).
+        // Перевіряється ПЕРШИМ — до читання запису, щоб відмова не була оракулом існування id.
+        if (field.RefRegistryDefId is null)
+        {
+            throw new BusinessRuleException(
+                "ECR-REG-0422",
+                $"Поле «{field.Code}» типу Lookup не має цілі посилання: значення не приймається.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-REG-0422.lookupTargetUnknown",
+                    ["field"] = field.Code,
+                    ["fieldCode"] = field.Code,
+                });
+        }
+
         var entry = knownTargets is not null && knownTargets.TryGetValue(target, out var known)
             ? known
             : await registries.FindEntryAsync(target, ct).ConfigureAwait(false);
@@ -1010,6 +1026,8 @@ public sealed class RegistryEntryWriter(
 
         if (field.RefRegistryDefId is { } expected && entry.RegistryDefId != expected)
         {
+            // ⛔ ent6 R2: код ЧУЖОГО запису не віддається (він міг бути із забороненого довідника) —
+            // лише його номер, який людина й так ввела.
             var expectedDefinition = await registries
                 .FindDefinitionByIdAsync(expected, ct).ConfigureAwait(false);
             var expectedCode = expectedDefinition?.Code ?? expected.ToString(invariant);
@@ -1017,13 +1035,12 @@ public sealed class RegistryEntryWriter(
             throw new BusinessRuleException(
                 "ECR-REG-0422",
                 $"Поле «{field.Code}» посилається на довідник «{expectedCode}», а запис {target} "
-                + $"(«{entry.Code}») належить іншому довіднику.",
+                + "належить іншому довіднику.",
                 new Dictionary<string, object?>
                 {
                     ["messageKey"] = "err.ECR-REG-0422.lookupWrongRegistry",
                     ["field"] = field.Code,
                     ["value"] = target.ToString(invariant),
-                    ["entryCode"] = entry.Code,
                     ["expectedRegistry"] = expectedCode,
                 });
         }

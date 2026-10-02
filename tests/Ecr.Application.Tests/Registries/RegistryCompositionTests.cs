@@ -294,6 +294,9 @@ public sealed class RegistryCompositionTests
         foreach (var registry in registries)
         {
             _registries.FindDefinitionAsync(registry.Code, Arg.Any<CancellationToken>()).Returns(registry);
+
+            // ФВ-8.12 / ent6 R1: ціль нового поля Lookup тепер перевіряється на існування.
+            _registries.FindDefinitionByIdAsync(registry.Id, Arg.Any<CancellationToken>()).Returns(registry);
         }
 
         _registries.ListDefinitionsAsync(Arg.Any<CancellationToken>()).Returns(registries);

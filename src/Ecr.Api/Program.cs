@@ -326,6 +326,7 @@ app.UseAuthorization();
 // запит до пошуку отримує 401 і межі не витрачає. Вхід (`S-10`) від цього не
 // дорожчає: без cookie автентифікація — перевірки в пам'яті, PBKDF2 не почато.
 app.UseRateLimiter();
+app.UseMiddleware<SmtpTestQuotaMiddleware>(); // системна квота проб SMTP: лише прийняті політикою користувача
 
 app.MapControllers();
 

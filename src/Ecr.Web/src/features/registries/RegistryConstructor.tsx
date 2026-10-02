@@ -1,4 +1,4 @@
-﻿import type { JSX } from 'react';
+import type { JSX } from 'react';
 import {
   Badge,
   Button,
@@ -24,6 +24,7 @@ import {
   Severities,
   isComplete,
   isFieldComplete,
+  type LinkEdits,
   type FieldDataType,
   type FieldDraft,
   type RuleDraft,
@@ -301,10 +302,19 @@ export function RegistryFields({
  */
 export function RegistryRelations({
   definition,
+  canEdit = false,
+  registryOptions = [],
+  linkEdits = {},
+  onChangeLink,
 }: {
   readonly definition: RegistryDefinitionDto;
+  /** ФВ-8.12: чи можна міняти ціль посилання (`Registry.EditDefinition`). */
+  readonly canEdit?: boolean;
+  readonly registryOptions?: readonly { readonly value: string; readonly label: string }[];
+  readonly linkEdits?: LinkEdits;
+  readonly onChangeLink?: (fieldId: number, target: number | null) => void;
 }): JSX.Element {
-  if (definition.relations.length === 0) {
+  if (definition.relations.length === 0 && Object.keys(linkEdits).length === 0) {
     return (
       <Stack gap="xs">
         <Title order={2} size="h5">
@@ -323,6 +333,11 @@ export function RegistryRelations({
       <Text size="xs" c="dimmed">
         {t('registries.relationsHint')}
       </Text>
+      {canEdit && (
+        <Text size="xs" c="dimmed">
+          {t('registries.relationsEditHint')}
+        </Text>
+      )}
 
       <Table striped highlightOnHover>
         <Table.Thead>
@@ -340,7 +355,51 @@ export function RegistryRelations({
                 <Badge variant="light">{relation.kind}</Badge>
               </Table.Td>
               <Table.Td>{relation.fieldCode ?? '—'}</Table.Td>
-              <Table.Td>{relation.targetRegistryCode ?? relation.linkKind ?? '—'}</Table.Td>
+              <Table.Td>
+                {(() => {
+                  // ⚠ Правиться лише посилання/ієрархія наявного НЕключового поля: композиція й
+                  // асоціація незмінні, ключ — частина бізнес-ключа. Сервер відмовить і інакше.
+                  const field = definition.fields.find((f) => f.code === relation.fieldCode);
+                  if (
+                    !canEdit || onChangeLink === undefined || field === undefined
+                    || relation.kind === 'Composition' || relation.kind === 'Association'
+                    || field.isScopeField
+                  ) {
+                    return relation.targetRegistryCode ?? relation.linkKind ?? '—';
+                  }
+                  const current = field.id in linkEdits ? linkEdits[field.id] : relation.targetRegistryDefId;
+                  // ⚠ Перелік довідників ще їде або не прочитався: без опції поточної цілі `NativeSelect`
+                  // показав би «—», тобто «зв'язку немає», хоча він є.
+                  const known = current == null || registryOptions.some((o) => o.value === String(current));
+                  const options = known
+                    ? registryOptions
+                    : [
+                        ...registryOptions,
+                        {
+                          value: String(current),
+                          label: current === relation.targetRegistryDefId && relation.targetRegistryCode != null
+                            ? relation.targetRegistryCode
+                            : `#${String(current)}`,
+                        },
+                      ];
+                  return (
+                    <NativeSelect
+                      size="xs"
+                      aria-label={t('registries.relationTargetFor', { field: field.code })}
+                      value={current === null || current === undefined ? '' : String(current)}
+                      // ⛔ ent6 R1: «—» (зняти ціль) тут немає: поле Lookup без цілі приймало запис
+                      // БУДЬ-ЯКОГО довідника, і сервер такий стан не приймає (`lookupTargetUnknown`).
+                      // `options` = перелік + поточна ціль, якщо перелік її ще не містить.
+                      data={options}
+                      onChange={(event) => {
+                        if (event.currentTarget.value !== '') {
+                          onChangeLink(field.id, Number(event.currentTarget.value));
+                        }
+                      }}
+                    />
+                  );
+                })()}
+              </Table.Td>
               <Table.Td>{relation.linkCount ?? '—'}</Table.Td>
             </Table.Tr>
           ))}
