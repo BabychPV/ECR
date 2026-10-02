@@ -273,6 +273,9 @@ export const statusTable: Readonly<Record<StatusKind, Readonly<Record<string, St
     RegistryReactivated: 'warning',
     RegistryRuleViolation: 'warning',
     RegistryExternalKeyRelinked: 'warning',
+    // ФВ-13.15: плановий збір пропущено, бо розклад-залежність ще не відбіг. `info` (той самий
+    // тон і токени, що `ConflictKeptManual`): це затримка за правилом, а не збій.
+    SkippedDependency: 'info',
   },
 
   /**
