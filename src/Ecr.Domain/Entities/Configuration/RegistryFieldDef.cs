@@ -1,4 +1,4 @@
-﻿using Ecr.Domain.Abstractions;
+using Ecr.Domain.Abstractions;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
 
@@ -83,7 +83,8 @@ public sealed class RegistryFieldDef : Entity<int>
     /// <summary>Вказує довідник-джерело для поля-посилання.</summary>
     /// <param name="refRegistryDefId">Довідник; <c>null</c> — поле не є посиланням.</param>
     /// <remarks>
-    /// ⚠ Так само лише під час створення: комірки <c>dic.RegistryValue</c>
+    /// ⚠ Змінюється після створення лише якщо жодне значення не вказує на запис (ФВ-8.12;
+    /// перевіряє <c>SaveRegistryDefinitionHandler</c>): комірки <c>dic.RegistryValue</c>
     /// зберігають <c>ValueRefEntryId</c>, і зміна цілі перетворила б їх на
     /// посилання в чужий довідник.
     /// </remarks>

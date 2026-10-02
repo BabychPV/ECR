@@ -210,7 +210,7 @@ public sealed record RegistryHistoryEntryDto(
 /// <param name="Ordinal">Порядок у переліку.</param>
 /// <param name="IsRequired">Обов'язковість.</param>
 /// <param name="IsKey">Чи входить у бізнес-ключ; у наявного не змінюється.</param>
-/// <param name="LookupRegistryDefId">Довідник-джерело; у наявного не змінюється.</param>
+/// <param name="LookupRegistryDefId">Довідник-джерело; у наявного змінюється чи знімається (<c>null</c>), лише поки жодне значення поля не вказує на запис (ФВ-8.12).</param>
 /// <param name="UnitId">Одиниця значення.</param>
 /// <param name="RelationKind">
 /// Посилання чи композиція (<c>D-155</c>) — лише для нового поля <c>Lookup</c>; <c>null</c> —

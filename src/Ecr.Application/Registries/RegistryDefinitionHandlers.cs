@@ -449,6 +449,9 @@ public sealed class SaveRegistryDefinitionHandler(
         var newFieldsMayBeRequired = !dto.Fields.Any(f => f.Id is null && f.IsRequired)
             || !(await EntriesAsync().ConfigureAwait(false)).Any(e => !e.IsDeleted);
 
+        // ⛔ ФВ-8.12 (порція 1): ціль посилання наявного поля змінюється лише поки на нього не посилається жодне значення.
+        await GuardLookupRetargetAsync(definition, dto.Fields, EntriesAsync, ct).ConfigureAwait(false);
+
         ApplyFields(definition, dto.Fields, newFieldsMayBeRequired);
 
         IReadOnlyList<RegistryDef>? graph = null;
@@ -888,6 +891,76 @@ public sealed class SaveRegistryDefinitionHandler(
             });
     }
 
+    /// <summary>
+    /// Змінює або знімає ціль посилання НАЯВНОГО поля (<c>ФВ-8.12</c>): тільки коли жодне
+    /// збережене значення цього поля не вказує на запис (<c>ValueRefEntryId</c>) — інакше комірки
+    /// стали б посиланнями в чужий довідник.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Композиція і ключове поле не перенацілюються (відношення й бізнес-ключ незмінні).
+    /// Усі відмови — <c>ECR-REG-0422</c> з ключем; нового коду немає. Аудит пише
+    /// <c>ApplyAsync</c>: знімок опису містить <c>RefRegistryDefId</c> до і після.
+    /// </remarks>
+    private async Task GuardLookupRetargetAsync(
+        RegistryDef definition,
+        IReadOnlyList<RegistryFieldSaveDto> wanted,
+        Func<Task<IReadOnlyList<Domain.Entities.Dictionaries.RegistryEntry>>> entriesAsync,
+        CancellationToken ct)
+    {
+        var changed = new List<(RegistryFieldDef Field, int? Target)>();
+        foreach (var w in wanted)
+        {
+            if (w.Id is not { } id
+                || definition.Fields.FirstOrDefault(f => f.Id == id) is not { DataType: CellDataType.Lookup } field
+                || field.RefRegistryDefId == w.LookupRegistryDefId)
+            {
+                continue;
+            }
+
+            if (field.RelationKind == RegistryRelationKind.Composition || field.IsKey)
+            {
+                throw Retarget("err.ECR-REG-0422.relationKindImmutable", field.Code);
+            }
+
+            if (w.LookupRegistryDefId is { } target
+                && await registries.FindDefinitionByIdAsync(target, ct).ConfigureAwait(false) is null)
+            {
+                throw Retarget("err.ECR-REG-0422.lookupTargetUnknown", field.Code);
+            }
+
+            changed.Add((field, w.LookupRegistryDefId));
+        }
+
+        if (changed.Count == 0)
+        {
+            return;
+        }
+
+        var entries = await entriesAsync().ConfigureAwait(false);
+        var fieldIds = changed.Select(c => c.Field.Id).ToHashSet();
+        var values = entries.Count == 0
+            ? []
+            : await registries.ListValuesForEntriesAsync(entries.Select(e => e.Id).ToList(), ct).ConfigureAwait(false);
+        if (values.FirstOrDefault(v => v.ValueRefEntryId is not null && fieldIds.Contains(v.RegistryFieldDefId)) is { } used)
+        {
+            throw Retarget("err.ECR-REG-0422.lookupRetargetInUse", changed.First(c => c.Field.Id == used.RegistryFieldDefId).Field.Code);
+        }
+
+        foreach (var (field, target) in changed)
+        {
+            field.PointTo(target);
+        }
+    }
+
+    private static BusinessRuleException Retarget(string messageKey, string fieldCode)
+        => new(
+            "ECR-REG-0422",
+            $"Зв'язок поля «{fieldCode}» не можна змінити.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = messageKey,
+                ["fieldCode"] = fieldCode,
+            });
     /// <summary>Застосовує перелік полів до опису.</summary>
     /// <param name="definition">Довідник.</param>
     /// <param name="wanted">Поля після правки.</param>
