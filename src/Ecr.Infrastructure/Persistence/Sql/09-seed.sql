@@ -1006,7 +1006,11 @@ UPDATE t
     (N'err.ECR-REQ-0429.tooManySmtpTests', N'en', N'Too many test messages in a short time. Wait a moment and try again; the Retry-After header says how long.', N'Too many test messages in a short time. Wait a moment and try again.'),
     (N'err.ECR-REQ-0429.tooManyRecalculations', N'en', N'Too many recalculation requests in a short time. Wait a moment and try again; the Retry-After header says how long.', N'Too many recalculation requests in a short time. Wait a moment and try again.'),
     (N'err.ECR-REQ-0429.tooManyRecalculations', N'ru', N'Слишком много запросов на пересчёт за короткое время. Подождите немного и повторите попытку; заголовок Retry-After указывает, через сколько.', N'Слишком много запросов на пересчёт за короткое время. Подождите немного и повторите попытку.'),
-    (N'err.ECR-REQ-0429.tooManyRecalculations', N'kz', N'Қысқа уақыт ішінде қайта есептеуге сұраныстар тым көп. Біраз күтіп, қайталап көріңіз; қанша уақыттан кейін екенін Retry-After тақырыбы көрсетеді.', N'Қысқа уақыт ішінде қайта есептеуге сұраныстар тым көп. Біраз күтіп, қайталап көріңіз.')
+    (N'err.ECR-REQ-0429.tooManyRecalculations', N'kz', N'Қысқа уақыт ішінде қайта есептеуге сұраныстар тым көп. Біраз күтіп, қайталап көріңіз; қанша уақыттан кейін екенін Retry-After тақырыбы көрсетеді.', N'Қысқа уақыт ішінде қайта есептеуге сұраныстар тым көп. Біраз күтіп, қайталап көріңіз.'),
+    -- p3-t1 T1-09: у тексті самозв'язку немає імені обмеження БД.
+    (N'err.ECR-TMPL-0422.relationSelfLink', N'en', N'Relation "{relationCode}" links table {tableDefId} to itself: this is not allowed (CK_Rel_NotSelf).', N'Relation "{relationCode}" links table {tableDefId} to itself: this is not allowed.'),
+    (N'err.ECR-TMPL-0422.relationSelfLink', N'ru', N'Связь «{relationCode}» связывает таблицу {tableDefId} саму с собой: это не допускается (CK_Rel_NotSelf).', N'Связь «{relationCode}» связывает таблицу {tableDefId} саму с собой: это не допускается.'),
+    (N'err.ECR-TMPL-0422.relationSelfLink', N'kz', N'«{relationCode}» байланысы {tableDefId} кестесін өзімен байланыстырады: бұған жол берілмейді (CK_Rel_NotSelf).', N'«{relationCode}» байланысы {tableDefId} кестесін өзімен байланыстырады: бұған жол берілмейді.')
   ) AS s ([Key], Lang, OldVal, NewVal)
     ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
  WHERE t.Value = s.OldVal COLLATE Latin1_General_BIN2;
@@ -1627,7 +1631,7 @@ USING (VALUES
     (N'err.ECR-TMPL-0404.periodAccessRule',          N'en', N'Rule {ruleId} was not found in template version {versionId}.', 1),
     (N'err.ECR-TMPL-0404.tableRelation',             N'en', N'Relation "{relationCode}" was not found in template version {versionId}.', 1),
     (N'err.ECR-SCHM-0409.templateRelationBreaking',  N'en', N'This change to relation "{relationCode}" is breaking: documents are already attached to this template version. Values in them were computed using the relation, and removing or changing it now would silently alter what was already submitted.', 1),
-    (N'err.ECR-TMPL-0422.relationSelfLink',          N'en', N'Relation "{relationCode}" links table {tableDefId} to itself: this is not allowed (CK_Rel_NotSelf).', 1),
+    (N'err.ECR-TMPL-0422.relationSelfLink',          N'en', N'Relation "{relationCode}" links table {tableDefId} to itself: this is not allowed.', 1),
     (N'err.ECR-TMPL-0422.relationMatchRequired',     N'en', N'Relation "{relationCode}" has no row match (MatchJson): without it, it connects no rows while looking configured.', 1),
     (N'err.ECR-TMPL-0422.relationMatchNotObject',    N'en', N'The row match (MatchJson) of relation "{relationCode}" must be a JSON object.', 1),
     (N'err.ECR-TMPL-0422.relationMatchInvalidJson',  N'en', N'The row match (MatchJson) of relation "{relationCode}" is not valid JSON.', 1),
@@ -6839,7 +6843,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-TMPL-0404.periodAccessRule', N'ru', N'Правило {ruleId} не найдено в версии шаблона {versionId}.'),
     (N'err.ECR-TMPL-0404.tableRelation', N'ru', N'Связь «{relationCode}» не найдена в версии шаблона {versionId}.'),
     (N'err.ECR-SCHM-0409.templateRelationBreaking', N'ru', N'Это изменение связи «{relationCode}» является критическим: к этой версии шаблона уже привязаны документы. Значения в них рассчитаны с использованием связи, и её удаление или изменение сейчас молча изменило бы то, что уже подано.'),
-    (N'err.ECR-TMPL-0422.relationSelfLink', N'ru', N'Связь «{relationCode}» связывает таблицу {tableDefId} саму с собой: это не допускается (CK_Rel_NotSelf).'),
+    (N'err.ECR-TMPL-0422.relationSelfLink', N'ru', N'Связь «{relationCode}» связывает таблицу {tableDefId} саму с собой: это не допускается.'),
     (N'err.ECR-TMPL-0422.relationMatchRequired', N'ru', N'У связи «{relationCode}» нет сопоставления строк (MatchJson): без него она выглядит настроенной, но не связывает ни одной строки.'),
     (N'err.ECR-TMPL-0422.relationMatchNotObject', N'ru', N'Сопоставление строк (MatchJson) связи «{relationCode}» должно быть объектом JSON.'),
     (N'err.ECR-TMPL-0422.relationMatchInvalidJson', N'ru', N'Сопоставление строк (MatchJson) связи «{relationCode}» не является допустимым JSON.'),
@@ -9867,7 +9871,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-TMPL-0404.periodAccessRule', N'kz', N'{ruleId} ережесі {versionId} үлгі нұсқасында табылмады.'),
     (N'err.ECR-TMPL-0404.tableRelation', N'kz', N'«{relationCode}» байланысы {versionId} үлгі нұсқасында табылмады.'),
     (N'err.ECR-SCHM-0409.templateRelationBreaking', N'kz', N'«{relationCode}» байланысының бұл өзгерісі бұзушы болып табылады: бұл үлгі нұсқасына құжаттар бұрыннан тіркелген. Олардағы мәндер осы байланыс арқылы есептелген, және оны қазір жою немесе өзгерту бұрыннан тапсырылған нәрсені үнсіз өзгертер еді.'),
-    (N'err.ECR-TMPL-0422.relationSelfLink', N'kz', N'«{relationCode}» байланысы {tableDefId} кестесін өзімен байланыстырады: бұған жол берілмейді (CK_Rel_NotSelf).'),
+    (N'err.ECR-TMPL-0422.relationSelfLink', N'kz', N'«{relationCode}» байланысы {tableDefId} кестесін өзімен байланыстырады: бұған жол берілмейді.'),
     (N'err.ECR-TMPL-0422.relationMatchRequired', N'kz', N'«{relationCode}» байланысында жолдарды сәйкестендіру (MatchJson) жоқ: онсыз ол бапталған сияқты көрінеді, бірақ ешбір жолды байланыстырмайды.'),
     (N'err.ECR-TMPL-0422.relationMatchNotObject', N'kz', N'«{relationCode}» байланысының жолдарды сәйкестендіруі (MatchJson) JSON нысаны болуы тиіс.'),
     (N'err.ECR-TMPL-0422.relationMatchInvalidJson', N'kz', N'«{relationCode}» байланысының жолдарды сәйкестендіруі (MatchJson) жарамды JSON емес.'),

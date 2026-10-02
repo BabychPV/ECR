@@ -25,6 +25,22 @@ public sealed partial class SeedTextUpdateTests
             .Select(row => $"{row.Key.Item1} [{row.Key.Item2}]"));
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void T1_09_Текст_самозвязку_не_називає_обмеження_бази()
+    {
+        var catalog = Catalog();
+
+        foreach (var lang in new[] { "en", "ru", "kz" })
+        {
+            Assert.True(
+                catalog.TryGetValue(("err.ECR-TMPL-0422.relationSelfLink", lang), out var value),
+                $"relationSelfLink [{lang}] немає в каталозі.");
+            Assert.DoesNotContain("CK_", value, StringComparison.Ordinal);
+        }
+    }
+
     [Theory]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     [Trait(TestCategories.Category, TestCategories.Architecture)]
