@@ -280,6 +280,10 @@ public sealed class FakeUserStore : IUserStore
         => Task.FromResult<IReadOnlyList<RoleView>>(Roles);
 
     /// <inheritdoc />
+    public Task<RoleView?> FindRoleAsync(int roleId, CancellationToken ct)
+        => Task.FromResult(Roles.FirstOrDefault(r => r.Id == roleId));
+
+    /// <inheritdoc />
     public Task<int> AddRoleAsync(Role role, IReadOnlyList<string> permissionCodes, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(role);

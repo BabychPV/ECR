@@ -342,6 +342,35 @@ public sealed class UserStore(EcrDbContext db) : IUserStore
     }
 
     /// <inheritdoc />
+    public async Task<RoleView?> FindRoleAsync(int roleId, CancellationToken ct)
+    {
+        // ⛔ Прямий запит за Id, а не пошук у ListRolesAsync: той обрізаний
+        // Take(MaxRoles) за кодом, і роль за межею 500 «не існувала».
+        var r = await db.Roles.AsNoTracking()
+            .FirstOrDefaultAsync(x => x.Id == roleId, ct)
+            .ConfigureAwait(false);
+        if (r is null)
+        {
+            return null;
+        }
+
+        var mine = await db.RolePermissions.AsNoTracking()
+            .Where(rp => rp.RoleId == roleId)
+            .Join(db.Permissions, rp => rp.PermissionCode, p => p.Id,
+                  (rp, p) => new { Code = p.Id, p.IsDangerous })
+            .OrderBy(x => x.Code)
+            .Take(MaxPermissions)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        return new RoleView(
+            r.Id, r.Code, r.IsBuiltIn, r.IsActive,
+            [.. mine.Select(p => p.Code).Order(StringComparer.Ordinal)],
+            [.. mine.Where(p => p.IsDangerous).Select(p => p.Code).Order(StringComparer.Ordinal)],
+            r.NameL10n);
+    }
+
+    /// <inheritdoc />
     public async Task<IReadOnlyList<RoleView>> ListRolesAsync(CancellationToken ct)
     {
         // ⚠ Take стоїть навіть тут, де набір свідомо малий: ролей десятки,

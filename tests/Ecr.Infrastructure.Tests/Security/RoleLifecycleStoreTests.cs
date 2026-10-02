@@ -73,6 +73,46 @@ public sealed class RoleLifecycleStoreTests(SqlServerFixture sql)
         Assert.False(await check.RolePermissions.AnyAsync(p => p.RoleId == roleId));
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Роль_за_межею_500_за_кодом_знаходиться_за_Id()
+    {
+        // ⛔ Створення ролей не має ліміту, а ListRolesAsync обрізає Take(500) за
+        // кодом: роль із пізнім кодом «не існувала» (404) для видалення й гранту.
+        var early = Enumerable.Range(0, 600)
+            .Select(i => new Role(EcrCode.Create($"AAA{_tag}_{i:D3}"), Text("bulk")))
+            .ToList();
+        int lateId;
+
+        await using (var db = Context())
+        {
+            db.Roles.AddRange(early);
+            await db.SaveChangesAsync();
+            lateId = await new UserStore(db).AddRoleAsync(
+                new Role(EcrCode.Create($"ZZZ{_tag}"), Text("late")), [], CancellationToken.None);
+        }
+
+        try
+        {
+            await using var db = Context();
+            var store = new UserStore(db);
+
+            Assert.DoesNotContain(await store.ListRolesAsync(CancellationToken.None), r => r.Id == lateId);
+
+            var found = await store.FindRoleAsync(lateId, CancellationToken.None);
+            Assert.NotNull(found);
+            Assert.Equal($"ZZZ{_tag}".ToUpperInvariant(), found.Code.ToUpperInvariant());
+            Assert.Null(await store.FindRoleAsync(int.MaxValue, CancellationToken.None));
+        }
+        finally
+        {
+            await using var db = Context();
+            db.Roles.RemoveRange(db.Roles.Where(r => r.Code.StartsWith("AAA" + _tag) || r.Id == lateId));
+            await db.SaveChangesAsync();
+        }
+    }
+
     private static LocalizedText Text(string value)
         => new(new Dictionary<string, string> { ["en"] = value });
 

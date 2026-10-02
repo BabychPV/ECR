@@ -121,7 +121,7 @@ public sealed class ListResourceGrantsHandler(
             // ⛔ B-07: неіснуюча роль давала `200 []` — «грантів немає» на
             // адресі, якої не існує. Роль із грантами існує за побудовою, тож
             // питаємо лише тут.
-            if ((await users.ListRolesAsync(ct).ConfigureAwait(false)).All(r => r.Id != roleId))
+            if (await users.FindRoleAsync(roleId, ct).ConfigureAwait(false) is null)
             {
                 throw new NotFoundException(
                     ErrorCodes.SecurityPrincipalNotFound,
@@ -318,8 +318,7 @@ public sealed class ReplaceResourceGrantsHandler(
             .RequireAsync(access, currentUser, ct)
             .ConfigureAwait(false);
 
-        var role = (await users.ListRolesAsync(ct).ConfigureAwait(false))
-            .FirstOrDefault(r => r.Id == roleId)
+        var role = await users.FindRoleAsync(roleId, ct).ConfigureAwait(false)
             // ⛔ Родина SEC, а не ROW (`P-25`, рядок 2): суб'єкт відмови —
             // запис каталогу безпеки, а `ROW` маршрутизує на клієнті в
             // обробник помилок рядка таблиці документа.

@@ -121,6 +121,12 @@ public interface IUserStore
     /// <summary>Ролі з їхніми правами.</summary>
     public Task<IReadOnlyList<Security.RoleView>> ListRolesAsync(CancellationToken ct);
 
+    /// <summary>Роль за ідентифікатором прямим запитом (не крізь обрізаний список); <c>null</c> — немає.</summary>
+    /// <param name="roleId">Ідентифікатор.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Роль або <c>null</c>.</returns>
+    public Task<Security.RoleView?> FindRoleAsync(int roleId, CancellationToken ct);
+
     /// <summary>Створює роль із набором прав; повертає її ідентифікатор.</summary>
     public Task<int> AddRoleAsync(Role role, IReadOnlyList<string> permissionCodes, CancellationToken ct);
 

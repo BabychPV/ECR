@@ -33,9 +33,7 @@ internal static class RoleLifecycle
     /// <summary>Знаходить роль або відповідає <c>ECR-SEC-0404</c>.</summary>
     public static async Task<RoleView> FindAsync(IUserStore users, int roleId, CancellationToken ct)
     {
-        var roles = await users.ListRolesAsync(ct).ConfigureAwait(false);
-
-        return roles.FirstOrDefault(r => r.Id == roleId)
+        return await users.FindRoleAsync(roleId, ct).ConfigureAwait(false)
                ?? throw new NotFoundException(
                    ErrorCodes.SecurityPrincipalNotFound, $"Ролі {roleId} не існує.",
                    new Dictionary<string, object?>
