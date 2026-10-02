@@ -139,6 +139,88 @@ public sealed class PresentationRowOrderApiTests(SqlServerFixture sql)
         Assert.Equal(1, (await db.RowDefs.AsNoTracking().SingleAsync(r => r.Id == draft.Row1)).Ordinal);
     }
 
+    /// <remarks>
+    /// Сценарій Н-Р1 (TESTER-SCENARIOS): межі порядку — 0…1 000 000; «-1» і
+    /// «1000001» відмовляються тим самим ключем, що й «abc», порядок не змінюється.
+    /// </remarks>
+    [Theory]
+    [InlineData("-1")]
+    [InlineData("1000001")]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-2.6")]
+    public async Task Порядок_рядка_поза_межами_0_1000000_дає_422_ordinalInvalid(string value)
+    {
+        var draft = await ArrangeAsync();
+        using var app = new EcrApiFactory(sql);
+        using var client = await SystemHealthControllerTests.SignedInAsync(
+            sql, app, "Template.View", "Template.Edit");
+
+        var response = await PatchAsync(client, draft.VersionId, new object[]
+        {
+            new { entityType = "RowDef", entityId = draft.Row1, field = "Ordinal", value },
+        });
+
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, response.StatusCode);
+        using var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal("err.ECR-TMPL-0422.ordinalInvalid", problem.RootElement.GetProperty("messageKey").GetString());
+
+        await using var db = Context();
+        Assert.Equal(1, (await db.RowDefs.AsNoTracking().SingleAsync(r => r.Id == draft.Row1)).Ordinal);
+    }
+
+    /// <remarks>
+    /// Сценарій Н-Р1: порожній масив — <c>422 emptyPatch</c>, а не тихий 200.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-2.6")]
+    public async Task Порожній_патч_порядку_дає_422_emptyPatch()
+    {
+        var draft = await ArrangeAsync();
+        using var app = new EcrApiFactory(sql);
+        using var client = await SystemHealthControllerTests.SignedInAsync(
+            sql, app, "Template.View", "Template.Edit");
+
+        var response = await PatchAsync(client, draft.VersionId, []);
+
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, response.StatusCode);
+        using var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal("err.ECR-TMPL-0422.emptyPatch", problem.RootElement.GetProperty("messageKey").GetString());
+    }
+
+    /// <remarks>
+    /// Сценарій Н-Р1: рядок ІНШОЇ версії в патчі цієї — <c>404 presentationTarget</c>;
+    /// жоден із двох рядків не зрушив (патч атомарний).
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-2.6")]
+    public async Task Рядок_чужої_версії_дає_404_presentationTarget_і_нічого_не_міняє()
+    {
+        var mine = await ArrangeAsync();
+        var foreign = await ArrangeAsync();
+        using var app = new EcrApiFactory(sql);
+        using var client = await SystemHealthControllerTests.SignedInAsync(
+            sql, app, "Template.View", "Template.Edit");
+
+        var response = await PatchAsync(client, mine.VersionId, new object[]
+        {
+            new { entityType = "RowDef", entityId = mine.Row1, field = "Ordinal", value = "2" },
+            new { entityType = "RowDef", entityId = foreign.Row2, field = "Ordinal", value = "1" },
+        });
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        using var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal("err.ECR-TMPL-0404.presentationTarget", problem.RootElement.GetProperty("messageKey").GetString());
+
+        await using var db = Context();
+        Assert.Equal(1, (await db.RowDefs.AsNoTracking().SingleAsync(r => r.Id == mine.Row1)).Ordinal);
+        Assert.Equal(2, (await db.RowDefs.AsNoTracking().SingleAsync(r => r.Id == foreign.Row2)).Ordinal);
+    }
+
     private static Task<HttpResponseMessage> PatchAsync(HttpClient client, int versionId, object[] body)
     {
         var request = new HttpRequestMessage(
