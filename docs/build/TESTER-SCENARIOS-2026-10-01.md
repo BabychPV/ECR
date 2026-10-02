@@ -609,9 +609,11 @@ Date, Bool, Lookup, Unit), бажано один темпоральний і о�
   4. Registry + id R → «Explain».
   5. Неіснуючий id; неіснуючий користувач (API).
   6. Переглянути себе й іншого користувача, що має роль лише через групу AD.
+  7. ✎ 2026-10-02: «Resource type» = Sheet / Table / Column, «Resource ID» і **«Project ID»** (поле з'являється; без нього «Explain» вимкнена) → «Explain»; грант на проєкт, на аркуш і на колонку в одного користувача.
+- **Очікується (п. 7):** рівень береться з найдрібнішого оголошеного гранта в ланцюжку Проєкт→Аркуш→Таблиця→Колонка (грант на колонку перекриває аркуш); внески від предків підписано «Inherited from Project:N» / «Sheet:N»; без гранта на проєкт грант на аркуш нічого не дає; deny на проєкті — «Explicitly denied»; **застереження** «Document state … and assignment narrowing by periods are not taken into account…» стоїть над результатом. API без `projectId` — `422 effectiveAccessProject`; чужий для шаблону проєкту аркуш — `404 effectiveAccessNotInProject`.
 - **Очікується:** п. 2 — кнопка вимкнена до id ≥ 1, запит не надсилається; п. 3 — «Resulting level: {level}», таблиця «Given by | Role | Assigned | Level | Scope | Counted»; зараховуються лише «Everywhere» і «Project is in scope»; «Narrowed to sheets or periods…» і «Assignment not in effect» — «No»; п. 4 — alert «Explicitly denied: a deny wins over any grant and over any global right…»; глобальне `Registry.EditData` / `Registry.View` піднімає рівень, якщо немає заборони; п. 5 — 404; п. 6 — для себе групові ролі видно, для іншого — «The groups in this person's sign-in ticket are not known here…». Розріз **нічого не змінює**.
 - **Помилки:** `422 ECR-REQ-0422 effectiveAccessResource`; `404 ECR-SEC-0404 userNotFound`; `404 ECR-PRJ-0404 project`; `404 ECR-REG-0404 registryId`; `403 ECR-AUTH-0403`.
-- **Обмеження:** лише проєкти й довідники (для `Sheet`/`Table`/`Column` — `422`; ФВ-6.16 через це 🟨); рівень показано сирим значенням без перекладу.
+- **Обмеження:** ✎ 2026-10-02: для `Sheet`/`Table`/`Column` розріз не знає стану документа (подання, затвердження, закритий період) і звужень області періодами — це написано в самому застереженні; ФВ-6.16 лишається 🟨 до підтвердження людиною; рівень показано сирим значенням без перекладу.
 - **Вимоги:** ФВ-6.16, D-220.
 
 ---
