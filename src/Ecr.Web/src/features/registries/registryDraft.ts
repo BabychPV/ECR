@@ -1,4 +1,4 @@
-﻿import { apiFetch, EcrApiError } from '@/api/client';
+import { apiFetch, EcrApiError } from '@/api/client';
 import type { components } from '@/api/schema';
 import {
   EditableFieldDataTypes,
@@ -86,14 +86,21 @@ export function saveRegistryDraft(
  *
  * @param code Код довідника.
  * @param body Повний стан форми разом із причиною.
+ * @param definitionVersion Версія опису, яку показали людині: іде в `If-Match`; інша на сервері —
+ *   `409 definitionChanged` (опис змінили після читання). `null` — версії не знаємо, заголовка немає.
  */
 export function saveAndPublishRegistryDefinition(
   code: string,
   body: SaveRegistryDefinition,
+  definitionVersion: number | null = null,
 ): Promise<RegistryDefinitionVersion> {
   return apiFetch<RegistryDefinitionVersion>(
     `/api/v1/registries/${encodeURIComponent(code)}/definition`,
-    { method: 'PUT', body: JSON.stringify(body) },
+    {
+      method: 'PUT',
+      headers: definitionVersion === null ? undefined : { 'If-Match': `"${definitionVersion}"` },
+      body: JSON.stringify(body),
+    },
   );
 }
 
@@ -134,11 +141,15 @@ export function discardRegistryDraft(code: string, rowVersion: string): Promise<
 
 const DraftChangedKey = 'err.ECR-REG-0409.definitionDraftChanged';
 const DraftStaleKey = 'err.ECR-REG-0409.definitionDraftStale';
+const DefinitionChangedKey = 'err.ECR-REG-0409.definitionChanged';
 const DraftMissingKey = 'err.ECR-REG-0404.definitionDraft';
 
 /** Відмова, яку цей екран пояснює сам, а не віддає в загальну плашку. */
 export type DraftConflict =
   | { readonly kind: 'changed' }
+
+  /** Прямий `PUT …/definition`: опис змінили після того, як його відкрили (`If-Match`). */
+  | { readonly kind: 'definitionChanged' }
 
   /** Опис змінили ПОВЗ чернетку: чернетка лишається на екрані. */
   | { readonly kind: 'stale'; readonly baseVersion: string; readonly currentVersion: string }
@@ -173,6 +184,7 @@ export function draftConflictOf(error: unknown): DraftConflict | null {
   if (key === null || !(error instanceof EcrApiError)) return null;
 
   if (key === DraftChangedKey) return { kind: 'changed' };
+  if (key === DefinitionChangedKey) return { kind: 'definitionChanged' };
   if (key === DraftMissingKey) return { kind: 'missing' };
 
   if (key === DraftStaleKey) {
