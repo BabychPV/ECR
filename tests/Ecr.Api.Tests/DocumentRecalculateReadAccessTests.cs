@@ -1,6 +1,10 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Ecr.Application.Ports;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.DependencyInjection;
+using NSubstitute;
 using Ecr.Domain.Entities.Security;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
@@ -82,13 +86,51 @@ public sealed class DocumentRecalculateReadAccessTests(SqlServerFixture sql)
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Виконавець_без_Calculation_Recalculate_ставить_без_витіснення()
+    {
+        var jobs = Substitute.For<IBackgroundJobScheduler>();
+        var (client, doc, app) = await SignInAsync(["Document.View"], GrantLevel.Read, grantOnProject: true, jobs).ConfigureAwait(true);
+        using var _ = app;
+
+        var response = await PostDocumentRecalcAsync(client, doc).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
+        var second = await PostDocumentRecalcAsync(client, doc).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.Accepted, second.StatusCode);
+
+        await jobs.Received(2).EnqueueCoalescedAsync<IRecalculationJob>(
+            Arg.Any<string>(), Arg.Any<object?>(), Arg.Any<CancellationToken>(), Arg.Any<int?>()).ConfigureAwait(true);
+        await jobs.DidNotReceiveWithAnyArgs().EnqueueExclusiveAsync<IRecalculationJob>(
+            default!, default, default, default).ConfigureAwait(true);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Власник_Calculation_Recalculate_витісняє_як_раніше()
+    {
+        var jobs = Substitute.For<IBackgroundJobScheduler>();
+        var (client, doc, app) = await SignInAsync(["Document.View", "Calculation.Recalculate"], GrantLevel.Read, grantOnProject: true, jobs).ConfigureAwait(true);
+        using var _ = app;
+
+        var response = await PostDocumentRecalcAsync(client, doc).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
+
+        await jobs.Received(1).EnqueueExclusiveAsync<IRecalculationJob>(
+            Arg.Any<string>(), Arg.Any<object?>(), Arg.Any<CancellationToken>(), Arg.Any<int?>()).ConfigureAwait(true);
+        await jobs.DidNotReceiveWithAnyArgs().EnqueueCoalescedAsync<IRecalculationJob>(
+            default!, default, default, default).ConfigureAwait(true);
+    }
+
     private static Task<HttpResponseMessage> PostDocumentRecalcAsync(HttpClient client, TestDocument doc)
         => client.PostAsJsonAsync(
             new Uri($"/api/v1/documents/{doc.DocumentId}/recalculate", UriKind.Relative),
             new { periodKey = doc.PeriodKey.Value.ToString(System.Globalization.CultureInfo.InvariantCulture) });
 
-    private async Task<(HttpClient Client, TestDocument Doc, EcrApiFactory App)> SignInAsync(
-        string[] permissions, GrantLevel level, bool grantOnProject)
+    private async Task<(HttpClient Client, TestDocument Doc, IDisposable App)> SignInAsync(
+        string[] permissions, GrantLevel level, bool grantOnProject, IBackgroundJobScheduler? scheduler = null)
     {
         var builder = new TestDocumentBuilder(sql.ConnectionString);
         var doc = await builder.BuildAsync().ConfigureAwait(false);
@@ -122,12 +164,25 @@ public sealed class DocumentRecalculateReadAccessTests(SqlServerFixture sql)
         }
 
         var app = new EcrApiFactory(sql);
-        var client = app.CreateClient();
+        IDisposable owner = app;
+        HttpClient client;
+        if (scheduler is null)
+        {
+            client = app.CreateClient();
+        }
+        else
+        {
+            var derived = app.WithWebHostBuilder(b => b.ConfigureTestServices(
+                services => services.AddSingleton(scheduler)));
+            owner = derived;
+            client = derived.CreateClient();
+        }
+
         var login = await client.PostAsJsonAsync(
             new Uri("/api/v1/login/local", UriKind.Relative),
             new { userName = _userName, password = Password }).ConfigureAwait(false);
         Assert.True(login.IsSuccessStatusCode, $"Вхід: {login.StatusCode}: {app.ErrorsText}");
-        return (client, doc, app);
+        return (client, doc, owner);
     }
 
     private string _userName = string.Empty;

@@ -176,20 +176,34 @@ public sealed class RecalculateDocumentHandler(
         // System.ViewHealth (Q-156). Окремо від `TriggeredByUserId` у payload
         // вище: те поле бачить сама задача перерахунку, це — лише журнал
         // прогресу для перевірки прав при опитуванні.
-        return await jobs
-            .EnqueueExclusiveAsync<IRecalculationJob>(
-                TargetOf(documentId, periodKey),
-                new
-                {
-                    DocumentId = documentId,
-                    PeriodKey = periodKey.Value,
-                    TriggeredByUserId = currentUser.UserId,
-                    SheetDefId = sheetDefId,
-                },
-                ct,
-                currentUser.UserId)
-            .ConfigureAwait(false);
+        // ⛔ Витіснення (Exclusive скасовує ВИКОНУВАНУ задачу) — лише власникам
+        // `Calculation.Recalculate`. Виконавець із самим `Document.View` ставить без витіснення
+        // (Coalesced): інакше будь-хто з читанням у циклі POST обривав би чужий довгий
+        // перерахунок (DoS). Його перерахунок усе одно відбудеться після наявного.
+        var payload = new
+        {
+            DocumentId = documentId,
+            PeriodKey = periodKey.Value,
+            TriggeredByUserId = currentUser.UserId,
+            SheetDefId = sheetDefId,
+        };
+        var target = TargetOf(documentId, periodKey);
+        var projectId = await access.DocumentProjectIdAsync(documentId, ct).ConfigureAwait(false);
+        var mayPreempt = projectId is { } pid
+            ? Security.PermissionCheck.IsGrantedIn(profile, PreemptPermission, pid)
+            : Security.PermissionCheck.IsGranted(profile, PreemptPermission);
+
+        return mayPreempt
+            ? await jobs
+                .EnqueueExclusiveAsync<IRecalculationJob>(target, payload, ct, currentUser.UserId)
+                .ConfigureAwait(false)
+            : await jobs
+                .EnqueueCoalescedAsync<IRecalculationJob>(target, payload, ct, currentUser.UserId)
+                .ConfigureAwait(false);
     }
+
+    /// <summary>Право, що дає витіснення виконуваного перерахунку того самого документа.</summary>
+    private const string PreemptPermission = "Calculation.Recalculate";
 
     private static bool HasUnnarrowedRead(Security.AccessProfile profile, int? projectId)
         => profile.Permissions.Contains(Permission)
