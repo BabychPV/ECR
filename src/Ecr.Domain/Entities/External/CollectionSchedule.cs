@@ -51,6 +51,64 @@ public sealed class CollectionSchedule : Entity<int>
     /// <summary>Скільки днів перекривати назад — саме це закриває пропущені вікна.</summary>
     public int LookbackDays { get; private set; }
 
+    /// <summary>
+    /// Розклад, після успішного прогону якого цей запускається (ФВ-13.15 «залежності»);
+    /// <c>null</c> — залежності немає.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Лише розклад ТОГО Ж з'єднання, без циклів — це перевіряє прикладний шар ДО
+    /// бази. Зовнішній ключ без каскаду (самопосилання): прибираючи розклад,
+    /// <c>DeleteCollectionScheduleHandler</c> спершу знімає залежність у тих, хто на
+    /// нього посилався.
+    /// </remarks>
+    public int? DependsOnScheduleId { get; private set; }
+
+    /// <summary>Скільки діб залежний розклад вважається живим: старший прогін не блокує.</summary>
+    /// <remarks>
+    /// ⚠ Судження, не факт із ТЗ. Залежність, що давно не бігала (вимкнена, зламана,
+    /// тижнева), не має зупиняти збір назавжди: наздоганяння закриє затримку, а вічна
+    /// відмова з'їла б дані мовчки.
+    /// </remarks>
+    public static readonly TimeSpan MaxDependencyStaleness = TimeSpan.FromHours(48);
+
+    /// <summary>Ставить або знімає залежність.</summary>
+    /// <param name="dependsOnScheduleId">Розклад-залежність; <c>null</c> — зняти.</param>
+    /// <exception cref="ArgumentException">Розклад залежить сам від себе.</exception>
+    public void SetDependency(int? dependsOnScheduleId)
+    {
+        if (dependsOnScheduleId is { } dep && Id != 0 && dep == Id)
+        {
+            throw new ArgumentException("Розклад не може залежати сам від себе.", nameof(dependsOnScheduleId));
+        }
+
+        DependsOnScheduleId = dependsOnScheduleId;
+    }
+
+    /// <summary>Чи можна запускати збір зараз з огляду на залежність (ФВ-13.15).</summary>
+    /// <param name="dependency">Розклад-залежність; <c>null</c> — немає або вже видалений.</param>
+    /// <param name="utcNow">Поточний момент.</param>
+    /// <returns><c>true</c> — запускати; <c>false</c> — пропустити цей запуск (наступний за cron перевірить знову).</returns>
+    /// <remarks>
+    /// Не блокує вічно: запускається завжди, якщо залежності немає, вона вимкнена, ще не
+    /// бігала, не бігала понад <see cref="MaxDependencyStaleness"/>, або цей розклад
+    /// ще жодного разу не бігав. Інакше потрібен прогін залежності НЕ раніший за наш
+    /// останній — «спершу залежний, потім цей».
+    /// </remarks>
+    public bool IsDependencyMet(CollectionSchedule? dependency, DateTime utcNow)
+    {
+        if (DependsOnScheduleId is null || dependency is null || !dependency.IsEnabled)
+        {
+            return true;
+        }
+
+        if (LastRunAt is not { } own || dependency.LastRunAt is not { } theirs)
+        {
+            return true;
+        }
+
+        return theirs >= own || utcNow - theirs > MaxDependencyStaleness;
+    }
+
     public bool IsEnabled { get; private set; }
     public DateTime? LastRunAt { get; private set; }
 
