@@ -103,6 +103,29 @@ public sealed class AccessProfileCacheTests : IDisposable
         Assert.Equal(4, builds);
     }
 
+    /// <remarks>
+    /// Поточна семантика: <c>InvalidateAll</c> НЕ ковтає виняток скасування токена «усе» (колбек кидає →
+    /// <see cref="AggregateException"/> виходить назовні, бо <c>CancellationTokenSource.Cancel</c> збирає винятки колбеків),
+    /// а прапорець dirty знімається лише ПІСЛЯ успішного скасування. Мутація: піднімати <c>_cleanGen</c> до
+    /// <c>old.Cancel()</c> або у <c>finally</c> — червоне (профіль закешувався б попри збій скидання).
+    /// </remarks>
+    [Fact]
+    public async Task InvalidateAll_що_завершився_винятком_не_знімає_dirty()
+    {
+        var spy = new SpyMemory(_memory);
+        var cache = new AccessProfileCache(spy);
+        var builds = 0;
+        await cache.GetOrCreateAsync(UserId, "s1", "", _ => Build(ref builds, "s1"), CancellationToken.None);
+        spy.Entry!.ExpirationTokens[0].RegisterChangeCallback(_ => throw new InvalidOperationException("збій скидання"), null);
+        cache.MarkInvalidationFailed();
+
+        var thrown = Assert.Throws<AggregateException>(() => cache.InvalidateAll());
+        Assert.IsType<InvalidOperationException>(Assert.Single(thrown.InnerExceptions));
+
+        await cache.GetOrCreateAsync(UserId, "s1", "", _ => Build(ref builds, "s1"), CancellationToken.None);
+        await cache.GetOrCreateAsync(UserId, "s1", "", _ => Build(ref builds, "s1"), CancellationToken.None);
+        Assert.Equal(3, builds); // dirty лишився: профіль будується щоразу
+    }
     private sealed class SpyMemory(IMemoryCache inner) : IMemoryCache
     {
         public ICacheEntry? Entry { get; private set; }
