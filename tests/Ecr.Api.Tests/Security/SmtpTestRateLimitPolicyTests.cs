@@ -149,7 +149,9 @@ public sealed class SmtpTestRateLimitPolicyTests
         var replenishing = Assert.IsAssignableFrom<ReplenishingRateLimiter>(limiter);
         Assert.Equal(TimeSpan.FromMinutes(1), replenishing.ReplenishmentPeriod);
 
-        using var quota = new SmtpTestSystemQuota(two);
+        // Системна квота: власний лічильник із годинним вікном (S6), час — підміняний.
+        var clock = new ManualClock();
+        using var quota = new SmtpTestSystemQuota(two, clock);
         for (var i = 0; i < 3; i++)
         {
             using var lease = quota.TryAcquire();
@@ -161,13 +163,30 @@ public sealed class SmtpTestRateLimitPolicyTests
             Assert.False(over.IsAcquired);
         }
 
-        var system = (ReplenishingRateLimiter)typeof(SmtpTestSystemQuota)
-            .GetField("_limiter", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
-            .GetValue(quota)!;
-        Assert.Equal(TimeSpan.FromHours(1), system.ReplenishmentPeriod);
-        Assert.True(system.IsAutoReplenishing);
+        // Вікно — година: через 59 хв ще відмова, через 61 — нове вікно.
+        clock.Advance(TimeSpan.FromMinutes(59));
+        using (var still = quota.TryAcquire())
+        {
+            Assert.False(still.IsAcquired);
+        }
+
+        clock.Advance(TimeSpan.FromMinutes(2));
+        using (var fresh = quota.TryAcquire())
+        {
+            Assert.True(fresh.IsAcquired);
+        }
     }
 
+    private sealed class ManualClock : TimeProvider
+    {
+        private long _ticks;
+
+        public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+
+        public override long GetTimestamp() => _ticks;
+
+        public void Advance(TimeSpan by) => _ticks += by.Ticks;
+    }
     private static DefaultHttpContext ContextOf(string? userId, string? ip = null)
     {
         var context = new DefaultHttpContext();
