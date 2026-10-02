@@ -30,6 +30,11 @@ namespace Ecr.Application.Documents.VersionMigration;
 /// <param name="LockedSheets">Скільки пар «аркуш × період» подано або затверджено.</param>
 /// <param name="Items">Відмінності версій, спершу ті, що зачіпають дані.</param>
 /// <param name="ItemsTruncated">Перелік обрізано стелею <see cref="MigrateDocumentVersionHandler.MaxItems"/>.</param>
+/// <param name="BlockedGrantCount">
+/// Скільки грантів на ресурсах (аркуш/таблиця/колонка) вихідної версії не мають відповідника за кодом у новій і
+/// через це блокують перенос; <c>null</c>, коли таких немає. ⛔ Лише кількість — які саме ресурси й ролі, не
+/// розкривається, доки перелік не фільтрується через AccessProfile.
+/// </param>
 public sealed record DocumentVersionMigrationDto(
     long DocumentId,
     int ProjectId,
@@ -48,7 +53,8 @@ public sealed record DocumentVersionMigrationDto(
     long GuardedValues,
     int LockedSheets,
     IReadOnlyList<VersionMigrationItem> Items,
-    bool ItemsTruncated);
+    bool ItemsTruncated,
+    int? BlockedGrantCount = null);
 
 /// <summary>Куди можна перенести документ: поточна версія й опубліковані версії того самого шаблону.</summary>
 /// <param name="ProjectId">Проєкт документа — переноситься весь.</param>
@@ -273,7 +279,8 @@ public sealed class MigrateDocumentVersionHandler(
             source.Id, source.Version, target.Id, target.Version,
             mode, dryRun, Applied: false, CanApply: refusals.Count == 0, refusals,
             plan.TransferredValues, plan.LostValues, plan.GuardedValues, scope.LockedSheets,
-            [.. ordered.Take(MaxItems)], ordered.Count > MaxItems);
+            [.. ordered.Take(MaxItems)], ordered.Count > MaxItems,
+            denied > 0 ? denied : null);
 
         return (dto, plan);
     }
@@ -381,6 +388,7 @@ public sealed class MigrateDocumentVersionHandler(
                 ["guardedValues"] = dto.GuardedValues.ToString(CultureInfo.InvariantCulture),
                 ["mode"] = dto.Mode.ToString(),
                 ["refusals"] = dto.Refusals,
+                ["blockedGrantCount"] = dto.BlockedGrantCount?.ToString(CultureInfo.InvariantCulture),
             });
     }
 }

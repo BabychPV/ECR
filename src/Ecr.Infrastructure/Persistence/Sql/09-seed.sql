@@ -6452,7 +6452,10 @@ USING (VALUES
     -- ru/kz — окремою порцією COLL:p3-ent7 у блоці I18N нижче.
     -- COLL:p3-ent7 ── кінець секції ──
     -- COLL:p3-audit-key ── Залежність розкладу знято видаленням розкладу-джерела (`CollectionScheduleHandlers`, `structureChangeReason.ts`) ──
-    (N'integrationAudit.scheduleDependencyCleared', N'en', N'Dependency of collection schedule {id} cleared: schedule {deleted} of entity "{entity}" was deleted.', 1)
+    (N'integrationAudit.scheduleDependencyCleared', N'en', N'Dependency of collection schedule {id} cleared: schedule {deleted} of entity "{entity}" was deleted.', 1),
+    -- COLL:p3-ent7c ── число грантів, що блокують перенос версії (ent7 P3-4); лише кількість, без переліку ──
+    (N'documents.migrateGrantsNotMappedCount', N'en', N'Blocked: {count} permission(s) on sheets, tables or columns have no counterpart in the new version. Remove them or recreate them afterwards.', 1)
+    -- COLL:p3-ent7c ── кінець секції ──
     -- COLL:p3-audit-key ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
@@ -15151,6 +15154,16 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:p3-audit-key ── кінець секції ──
+-- COLL:p3-ent7c ── ru/kz: число грантів, що блокують перенос версії; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'documents.migrateGrantsNotMappedCount', N'ru', N'Заблокировано: прав на листы, таблицы или колонки без соответствия в новой версии — {count}. Снимите их или создайте заново.'),
+    (N'documents.migrateGrantsNotMappedCount', N'kz', N'Бұғатталған: жаңа нұсқада баламасы жоқ парақтарға, кестелерге немесе бағандарға құқықтар саны — {count}. Оларды алып тастаңыз немесе қайта жасаңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:p3-ent7c ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t
