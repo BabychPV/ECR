@@ -702,7 +702,8 @@ public sealed class DeleteCollectionScheduleHandler(
                     audit, clock, currentUser, IntegrationConfigAudit.ScheduleType, dependent.Id,
                     SaveCollectionScheduleHandler.AuditOperation, snapshot, IntegrationConfigAudit.Snapshot(dependent),
                     IntegrationConfigAudit.Reason(
-                        "integrationAudit.scheduleChanged", ("id", dependent.Id), ("entity", dependent.SourceEntityId)),
+                        "integrationAudit.scheduleDependencyCleared",
+                        ("id", dependent.Id), ("deleted", id), ("entity", row.SourceEntityCode)),
                     innerCt).ConfigureAwait(false);
             }
         }, ct)).ConfigureAwait(false);

@@ -562,6 +562,22 @@ public sealed class CollectionSchedulesControllerTests(SqlServerFixture sql)
         Assert.False(await db.CollectionSchedules.AnyAsync(s => s.Id == upstream).ConfigureAwait(true));
         Assert.Null(
             (await db.CollectionSchedules.AsNoTracking().SingleAsync(s => s.Id == id).ConfigureAwait(true)).DependsOnScheduleId);
+
+        // Журнал залежного: окремий ключ причини з id видаленого розкладу (не «scheduleChanged» з числом замість коду).
+        await using var conn = new Microsoft.Data.SqlClient.SqlConnection(sql.ConnectionString);
+        await conn.OpenAsync().ConfigureAwait(true);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText =
+            "SELECT TOP 1 ChangeReason FROM aud.StructureChange "
+            + "WHERE EntityType = 'ext.CollectionSchedule' AND EntityId = @id ORDER BY Id DESC;";
+        cmd.Parameters.AddWithValue("@id", id);
+        var reason = (string?)await cmd.ExecuteScalarAsync().ConfigureAwait(true);
+        Assert.NotNull(reason);
+        using var reasonJson = JsonDocument.Parse(reason);
+        Assert.Equal("integrationAudit.scheduleDependencyCleared", reasonJson.RootElement.GetProperty("k").GetString());
+        Assert.Equal(
+            upstream.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            reasonJson.RootElement.GetProperty("p").GetProperty("deleted").ToString());
     }
 
     private static async Task AssertDependencyRefusalAsync(HttpResponseMessage response, string key, int dependsOn)

@@ -6448,9 +6448,12 @@ USING (VALUES
     -- COLL:check-relation ── кінець секції ──
     -- COLL:p3-ent7 ── усі споживачі зв'язку приховані від автора (ФВ-8.12, ent7 P3-7); підпис відмови grantsNotMapped у діалозі переносу (ent7 P3-4) ──
     (N'documents.migrateRefusalGrantsNotMapped', N'en', N'Roles have permissions on sheets, tables or columns that have no counterpart in the target version; they would be lost.', 1),
-    (N'err.ECR-REG-0422.lookupRetargetUsedByHidden', N'en', N'The link of field "{fieldCode}" cannot be changed: {total} rule(s), formula(s) or methodology version(s) read attributes through it, and all {hiddenCount} shown in this response are hidden from you. Ask someone with access to change or disable them first.', 1)
+    (N'err.ECR-REG-0422.lookupRetargetUsedByHidden', N'en', N'The link of field "{fieldCode}" cannot be changed: {total} rule(s), formula(s) or methodology version(s) read attributes through it, and all {hiddenCount} shown in this response are hidden from you. Ask someone with access to change or disable them first.', 1),
     -- ru/kz — окремою порцією COLL:p3-ent7 у блоці I18N нижче.
     -- COLL:p3-ent7 ── кінець секції ──
+    -- COLL:p3-audit-key ── Залежність розкладу знято видаленням розкладу-джерела (`CollectionScheduleHandlers`, `structureChangeReason.ts`) ──
+    (N'integrationAudit.scheduleDependencyCleared', N'en', N'Dependency of collection schedule {id} cleared: schedule {deleted} of entity "{entity}" was deleted.', 1)
+    -- COLL:p3-audit-key ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -15138,6 +15141,16 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:p3-ent7 ── кінець секції ──
+-- COLL:p3-audit-key ── ru/kz зняття залежності розкладу; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'integrationAudit.scheduleDependencyCleared', N'ru', N'Зависимость расписания сбора {id} снята: расписание {deleted} сущности «{entity}» удалено.'),
+    (N'integrationAudit.scheduleDependencyCleared', N'kz', N'{id} жинау жоспарының тәуелділігі алынды: «{entity}» нысанының {deleted} жоспары жойылды.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:p3-audit-key ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

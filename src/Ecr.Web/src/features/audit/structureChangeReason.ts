@@ -36,6 +36,8 @@ function render(key: string, params: Record<string, string>): string | null {
       return t('integrationAudit.scheduleCreated', params);
     case 'integrationAudit.scheduleChanged':
       return t('integrationAudit.scheduleChanged', params);
+    case 'integrationAudit.scheduleDependencyCleared':
+      return t('integrationAudit.scheduleDependencyCleared', params);
     case 'integrationAudit.scheduleDeleted':
       return t('integrationAudit.scheduleDeleted', params);
     case 'integrationAudit.fieldMapCreated':
