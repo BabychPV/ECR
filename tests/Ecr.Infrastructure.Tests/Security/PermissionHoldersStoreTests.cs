@@ -65,6 +65,35 @@ public sealed class PermissionHoldersStoreTests(SqlServerFixture sql)
         Assert.Equal(0, await Contribution(none));
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "BE-12")]
+    public async Task Замок_адміністратора_тримається_до_коміту_і_не_пускає_другу_транзакцію()
+    {
+        await using var first = Context();
+        await using var tx = await first.Database.BeginTransactionAsync();
+        await new UserStore(first).AcquireAdministratorGuardAsync(CancellationToken.None);
+
+        // Друга з'єднана транзакція без очікування не бере замок (-1), доки перша не завершена.
+        await using var second = Context();
+        await using var tx2 = await second.Database.BeginTransactionAsync();
+        var rc = await second.Database
+            .SqlQueryRaw<int>(
+                "DECLARE @r int; EXEC @r = sp_getapplock @Resource = N'ecr.last-administrator', "
+                + "@LockMode = N'Exclusive', @LockOwner = N'Transaction', @LockTimeout = 0; SELECT @r AS [Value];")
+            .ToListAsync();
+        Assert.True(rc[0] < 0);
+
+        await tx.CommitAsync();
+        var after = await second.Database
+            .SqlQueryRaw<int>(
+                "DECLARE @r int; EXEC @r = sp_getapplock @Resource = N'ecr.last-administrator', "
+                + "@LockMode = N'Exclusive', @LockOwner = N'Transaction', @LockTimeout = 0; SELECT @r AS [Value];")
+            .ToListAsync();
+        Assert.True(after[0] >= 0);
+    }
+
     private User Add(EcrDbContext db, string prefix)
     {
         var user = new User($"{prefix}_{_tag}", prefix, AuthProvider.Local);

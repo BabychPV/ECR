@@ -67,6 +67,53 @@ internal static class UserAdministration
         }
     }
 
+    /// <summary>
+    /// Заміна набору ролей не лишає систему без носія <see cref="BootstrapAdmin.AdminPermission"/>:
+    /// якщо ціль — останній носій, а новий набір права не дає (або роль вимкнена/ще не чинна), — 409.
+    /// </summary>
+    public static async Task EnsureRoleSetKeepsAdministratorAsync(
+        IUserStore users,
+        int userId,
+        IReadOnlyList<string> roleCodes,
+        IReadOnlyDictionary<string, RoleValidityWindow>? validity,
+        DateTime now,
+        CancellationToken ct)
+    {
+        var roles = await users.ListRolesAsync(ct).ConfigureAwait(false);
+        var today = DateOnly.FromDateTime(now);
+
+        var keeps = roleCodes.Any(code =>
+        {
+            var role = roles.FirstOrDefault(r => string.Equals(r.Code, code, StringComparison.Ordinal));
+            if (role is not { IsActive: true }
+                || !role.Permissions.Contains(BootstrapAdmin.AdminPermission, StringComparer.Ordinal))
+            {
+                return false;
+            }
+
+            if (validity is null || !validity.TryGetValue(code, out var window))
+            {
+                return true;
+            }
+
+            // Чинність рахує домен (`IsEffectiveOn`), а не друга копія умови (`H-23a`).
+            var probe = new RoleAssignment(role.Id, userId, principalSid: null);
+            probe.SetValidity(window.ValidFrom, window.ValidTo);
+            return probe.IsEffectiveOn(today);
+        });
+
+        if (keeps)
+        {
+            return;
+        }
+
+        var target = await users.FindByIdAsync(userId, ct).ConfigureAwait(false);
+        if (target is not null)
+        {
+            await EnsureNotLastAdministratorAsync(users, target, now, ct).ConfigureAwait(false);
+        }
+    }
+
     /// <summary>Причина обов'язкова: вона — єдина відповідь журналу на «чому».</summary>
     public static string RequireReason(string? reason)
     {
@@ -173,24 +220,31 @@ public sealed class SetUserLockHandler(
         var trimmed = UserAdministration.RequireReason(reason);
         var now = clock.UtcNow;
 
-        if (locked)
-        {
-            UserAdministration.EnsureNotSelf(actorId, target);
-            await UserAdministration.EnsureNotLastAdministratorAsync(users, target, now, ct).ConfigureAwait(false);
-            target.LockByAdministrator();
-        }
-        else
-        {
-            target.Unlock();
-        }
+        // Перевірка «останнього адміністратора» і блокування — одна транзакція під замком.
+        await uow.ExecuteInTransactionAsync(
+            async token =>
+            {
+                if (locked)
+                {
+                    UserAdministration.EnsureNotSelf(actorId, target);
+                    await users.AcquireAdministratorGuardAsync(token).ConfigureAwait(false);
+                    await UserAdministration.EnsureNotLastAdministratorAsync(users, target, now, token).ConfigureAwait(false);
+                    target.LockByAdministrator();
+                }
+                else
+                {
+                    target.Unlock();
+                }
 
-        await audit.WriteSecurityEventAsync(
-            new SecurityEventRecord(
-                now, locked ? "UserLocked" : "UserUnlocked", TargetUserId: target.Id, TargetRoleId: null,
-                DetailsJson: JsonSerializer.Serialize(new { reason = trimmed }),
-                ChangedByUserId: actorId, CorrelationId: currentUser.CorrelationId),
+                await audit.WriteSecurityEventAsync(
+                    new SecurityEventRecord(
+                        now, locked ? "UserLocked" : "UserUnlocked", TargetUserId: target.Id, TargetRoleId: null,
+                        DetailsJson: JsonSerializer.Serialize(new { reason = trimmed }),
+                        ChangedByUserId: actorId, CorrelationId: currentUser.CorrelationId),
+                    token).ConfigureAwait(false);
+
+                await uow.SaveChangesAsync(token).ConfigureAwait(false);
+            },
             ct).ConfigureAwait(false);
-
-        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
     }
 }

@@ -143,6 +143,9 @@ public sealed class FakeUserStore : IUserStore
     }
 
     /// <inheritdoc />
+    public Task AcquireAdministratorGuardAsync(CancellationToken ct) => Task.CompletedTask;
+
+    /// <inheritdoc />
     public Task<User?> FindByWindowsSidAsync(string sid, CancellationToken ct)
         => Task.FromResult(_users.Find(u => string.Equals(u.WindowsSid, sid, StringComparison.Ordinal)));
 

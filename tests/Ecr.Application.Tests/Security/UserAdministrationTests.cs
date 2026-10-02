@@ -41,10 +41,62 @@ public sealed class UserAdministrationTests
         _domain = _users.Seed(FakeUserStore.DomainUser("ivanov", "S-1-5-21-77"));
         _users.Roles.Add(new RoleView(1, "Admins", IsBuiltIn: false, IsActive: true, ["Security.ManageUsers"], []));
 
+        _users.Roles.Add(new RoleView(2, "Viewers", IsBuiltIn: false, IsActive: true, ["Document.View"], []));
+
+        // Транзакція виконує операцію, як справжня: захист адміністратора живе всередині неї.
+        _uow.ExecuteInTransactionAsync(Arg.Any<Func<CancellationToken, Task>>(), Arg.Any<CancellationToken>())
+            .Returns(call => call.Arg<Func<CancellationToken, Task>>()(CancellationToken.None));
+
         _current.UserId.Returns(_actor.Id);
         _current.CorrelationId.Returns("test");
         Allow("Security.ManageUsers");
     }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "BE-12")]
+    public async Task Зняття_ролі_в_останнього_адміністратора_відхиляється_і_нічого_не_змінює()
+    {
+        await _users.GrantRoleAsync(_local, "Admins", CancellationToken.None);
+
+        var cleared = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => ReplaceRoles().HandleAsync(_local.Id, [], null, null, CancellationToken.None));
+        var swapped = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => ReplaceRoles().HandleAsync(_local.Id, ["Viewers"], null, null, CancellationToken.None));
+
+        Assert.Equal("ECR-SEC-0409", cleared.ErrorCode);
+        Assert.Equal("err.ECR-SEC-0409.lastAdministrator", cleared.Details!["messageKey"]);
+        Assert.Equal("err.ECR-SEC-0409.lastAdministrator", swapped.Details!["messageKey"]);
+        Assert.Equal(["Admins"], await _users.ListUserRolesAsync(_local.Id, CancellationToken.None));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "BE-12")]
+    public async Task Зняття_ролі_дозволене_якщо_є_інший_активний_носій_або_набір_її_зберігає()
+    {
+        await _users.GrantRoleAsync(_local, "Admins", CancellationToken.None);
+        var second = _users.Seed(new User("sidorenko", "Сидоренко", AuthProvider.Local));
+        await _users.GrantRoleAsync(second, "Admins", CancellationToken.None);
+
+        // Заблокований носій не рахується — ціль усе ще остання активна.
+        second.LockByAdministrator();
+        await Assert.ThrowsAsync<BusinessRuleException>(
+            () => ReplaceRoles().HandleAsync(_local.Id, [], null, null, CancellationToken.None));
+
+        // Набір, що зберігає право, не чіпається навіть в останнього.
+        await ReplaceRoles().HandleAsync(_local.Id, ["Admins", "Viewers"], null, null, CancellationToken.None);
+
+        second.Unlock();
+        await ReplaceRoles().HandleAsync(_local.Id, [], null, null, CancellationToken.None);
+        Assert.Empty(await _users.ListUserRolesAsync(_local.Id, CancellationToken.None));
+    }
+
+    private ReplaceUserRolesHandler ReplaceRoles() => new(
+        _users, _access, _uow, _current, _audit, _clock,
+        new DisableBootstrapAdminHandler(_users, _uow, _audit, _current, _clock),
+        Substitute.For<IDocumentStore>(),
+        Substitute.For<IResourceNameResolver>());
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]

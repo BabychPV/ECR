@@ -79,6 +79,27 @@ public sealed class UserStore(EcrDbContext db) : IUserStore
     }
 
     /// <inheritdoc />
+    public async Task AcquireAdministratorGuardAsync(CancellationToken ct)
+    {
+        // Транзакційний application-lock: два одночасні зняття ролі в «двох останніх»
+        // не бачать один одного під RCSI, тож без замка обидва пройшли б перевірку.
+        var result = new Microsoft.Data.SqlClient.SqlParameter("@rc", System.Data.SqlDbType.Int)
+        {
+            Direction = System.Data.ParameterDirection.Output,
+        };
+        await db.Database.ExecuteSqlRawAsync(
+            "EXEC @rc = sp_getapplock @Resource = N'ecr.last-administrator', @LockMode = N'Exclusive', "
+            + "@LockOwner = N'Transaction', @LockTimeout = 15000;",
+            [result],
+            ct).ConfigureAwait(false);
+
+        if (result.Value is int code && code < 0)
+        {
+            throw new InvalidOperationException("Не вдалося взяти замок «останній адміністратор» (sp_getapplock " + code + ").");
+        }
+    }
+
+    /// <inheritdoc />
     public Task<User?> FindByWindowsSidAsync(string sid, CancellationToken ct)
         => db.Users.FirstOrDefaultAsync(u => u.WindowsSid == sid, ct);
 
