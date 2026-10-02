@@ -94,6 +94,13 @@ public sealed class CollectionScheduleDependencyLockTests(SqlServerFixture sql)
         Assert.True(store.IsForeignKeyViolation(failure));
         Assert.False(store.IsForeignKeyViolation(new InvalidOperationException("x")));
         Assert.False(store.IsForeignKeyViolation(new DbUpdateException("x")));
+
+        // Інший зовнішній ключ (розклад на неіснуючу сутність) — теж 547, але не гонка залежностей.
+        // ⛔ МУТАЦІЯ: прибрати перевірку імені FK_CS_DependsOn → цей рядок червоніє.
+        await using var other = Context();
+        other.CollectionSchedules.Add(new CollectionSchedule(2_000_000_000, "0 5 * * * ?"));
+        var unrelated = await Assert.ThrowsAsync<DbUpdateException>(() => other.SaveChangesAsync(CancellationToken.None));
+        Assert.False(new CollectionScheduleStore(other).IsForeignKeyViolation(unrelated));
     }
 
     /// <summary>Два незалежні розклади одного з'єднання.</summary>

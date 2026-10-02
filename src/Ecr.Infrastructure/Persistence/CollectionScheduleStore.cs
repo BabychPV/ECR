@@ -111,7 +111,9 @@ public sealed class CollectionScheduleStore(EcrDbContext db) : ICollectionSchedu
 
     /// <inheritdoc />
     public bool IsForeignKeyViolation(Exception failure)
-        => failure is DbUpdateException { InnerException: Microsoft.Data.SqlClient.SqlException { Number: 547 } };
+        // ⚠ Лише ключ залежності: інший 547 (напр. сутність джерела) — це не гонка залежностей, а справжня помилка.
+        => failure is DbUpdateException { InnerException: Microsoft.Data.SqlClient.SqlException { Number: 547 } sql }
+           && sql.Message.Contains("FK_CS_DependsOn", StringComparison.Ordinal);
 
     /// <inheritdoc />
     public void Add(CollectionSchedule schedule) => db.CollectionSchedules.Add(schedule);
