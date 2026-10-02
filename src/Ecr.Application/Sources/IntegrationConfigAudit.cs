@@ -84,6 +84,7 @@ internal static class IntegrationConfigAudit
             cron = schedule.CronExpression,
             schedule.IsEnabled,
             schedule.LookbackDays,
+            schedule.DependsOnScheduleId,
         },
         Options);
 

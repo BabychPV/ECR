@@ -52,7 +52,9 @@ public sealed class CollectionSchedulesController(
         ArgumentNullException.ThrowIfNull(request);
 
         var created = await create
-            .HandleAsync(request.SourceEntityId, request.Cron, request.IsEnabled, request.LookbackDays, ct)
+            .HandleAsync(
+                request.SourceEntityId, request.Cron, request.IsEnabled, request.LookbackDays,
+                request.DependsOnScheduleId, ct)
             .ConfigureAwait(false);
 
         return Created(new Uri("/api/v1/collection-schedules", UriKind.Relative), created);
@@ -79,7 +81,9 @@ public sealed class CollectionSchedulesController(
         var ifMatch = Request.Headers[HeaderNames.IfMatch].ToString();
 
         return Ok(await save
-            .HandleAsync(id, request.Cron, request.IsEnabled, request.LookbackDays, ifMatch, ct)
+            .HandleAsync(
+                id, request.Cron, request.IsEnabled, request.LookbackDays,
+                new ScheduleDependencyChange(request.DependsOnScheduleId, request.ClearDependency), ifMatch, ct)
             .ConfigureAwait(false));
     }
 
@@ -107,8 +111,12 @@ public sealed class CollectionSchedulesController(
 /// <param name="LookbackDays">
 /// Вікно збору назад, днів (ФВ-13.15), 1–366; <c>null</c> — типове (7).
 /// </param>
+/// <param name="DependsOnScheduleId">
+/// Розклад того ж з'єднання, після успішного прогону якого цей запускається (ФВ-13.15);
+/// <c>null</c> — без залежності.
+/// </param>
 public sealed record CreateCollectionScheduleRequest(
-    int SourceEntityId, string Cron, bool IsEnabled, int? LookbackDays = null);
+    int SourceEntityId, string Cron, bool IsEnabled, int? LookbackDays = null, int? DependsOnScheduleId = null);
 
 /// <summary>Тіло зміни розкладу.</summary>
 /// <param name="Cron">Вираз cron у форматі Quartz: 6–7 полів, одне з полів дня — <c>?</c>.</param>
@@ -116,4 +124,9 @@ public sealed record CreateCollectionScheduleRequest(
 /// <param name="LookbackDays">
 /// Вікно збору назад, днів (ФВ-13.15), 1–366; <c>null</c> — лишити наявне.
 /// </param>
-public sealed record UpdateCollectionScheduleRequest(string Cron, bool IsEnabled, int? LookbackDays = null);
+/// <param name="DependsOnScheduleId">
+/// Нова залежність від розкладу того ж з'єднання (ФВ-13.15); <c>null</c> — лишити наявну.
+/// </param>
+/// <param name="ClearDependency"><c>true</c> — зняти залежність (перемагає <paramref name="DependsOnScheduleId"/>).</param>
+public sealed record UpdateCollectionScheduleRequest(
+    string Cron, bool IsEnabled, int? LookbackDays = null, int? DependsOnScheduleId = null, bool ClearDependency = false);

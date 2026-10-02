@@ -34,6 +34,10 @@ namespace Ecr.Application.Integration;
 /// Вікно збору назад від моменту запуску, днів (ФВ-13.15): кожен прогін перечитує
 /// саме стільки, і пропущені вікна закриваються повтором, а не станом.
 /// </param>
+/// <param name="DependsOnScheduleId">
+/// Розклад того ж з'єднання, після успішного прогону якого цей запускається
+/// (ФВ-13.15 «залежності»); <c>null</c> — залежності немає.
+/// </param>
 public sealed record CollectionScheduleView(
     int Id,
     int SourceEntityId,
@@ -47,7 +51,8 @@ public sealed record CollectionScheduleView(
     string RowVersion,
     int DataSourceId,
     string DataSourceCode,
-    int LookbackDays);
+    int LookbackDays,
+    int? DependsOnScheduleId = null);
 
 /// <summary>
 /// Перелік розкладів збору. Право <c>Integration.EditSchedule</c>.
@@ -98,7 +103,8 @@ public sealed class ListCollectionSchedulesHandler(
             VersionOf(row.Schedule),
             row.DataSourceId,
             row.DataSourceCode,
-            row.Schedule.LookbackDays);
+            row.Schedule.LookbackDays,
+            row.Schedule.DependsOnScheduleId);
 
     internal static async Task<ScheduledSourceEntity> FindAsync(
         ICollectionScheduleStore store, int id, CancellationToken ct)
@@ -367,9 +373,32 @@ public sealed class SaveCollectionScheduleHandler(
     /// ⚠ Для власної форми відмовляє лише УВІМКНЕННЯ: розклад, заведений до
     /// правила, має лишатися можливим вимкнути й прибрати.
     /// </remarks>
-    public async Task<CollectionScheduleView> HandleAsync(
+    public Task<CollectionScheduleView> HandleAsync(
         int id, string cron, bool isEnabled, int? lookbackDays, string? ifMatch, CancellationToken ct)
+        => HandleAsync(id, cron, isEnabled, lookbackDays, ScheduleDependencyChange.Unchanged, ifMatch, ct);
+
+    /// <summary>Те саме, із зміною залежності від іншого розкладу (ФВ-13.15).</summary>
+    /// <param name="id">Розклад.</param>
+    /// <param name="cron">Новий вираз cron (формат Quartz).</param>
+    /// <param name="isEnabled">Чи має розклад стояти в планувальнику.</param>
+    /// <param name="lookbackDays">Вікно збору назад, днів; <c>null</c> — лишити наявне.</param>
+    /// <param name="dependency">Зміна залежності: нова, зняти або лишити.</param>
+    /// <param name="ifMatch">Заголовок <c>If-Match</c> зі значенням <c>rowVersion</c>.</param>
+    /// <param name="ct">Скасування.</param>
+    /// <exception cref="BusinessRuleException">
+    /// Залежність не існує, з іншого з'єднання або замикає цикл — 422.
+    /// </exception>
+    public async Task<CollectionScheduleView> HandleAsync(
+        int id,
+        string cron,
+        bool isEnabled,
+        int? lookbackDays,
+        ScheduleDependencyChange dependency,
+        string? ifMatch,
+        CancellationToken ct)
     {
+        ArgumentNullException.ThrowIfNull(dependency);
+
         await PermissionCheck
             .RequireAsync(access, currentUser, ListCollectionSchedulesHandler.Permission, ct)
             .ConfigureAwait(false);
@@ -379,6 +408,12 @@ public sealed class SaveCollectionScheduleHandler(
 
         var row = await ListCollectionSchedulesHandler.FindAsync(store, id, ct).ConfigureAwait(false);
         ListCollectionSchedulesHandler.RequireCurrentVersion(row.Schedule, ifMatch);
+
+        if (!dependency.Clear && dependency.DependsOnScheduleId is { } dependsOn)
+        {
+            await CollectionScheduleDependencyRules
+                .RequireValidAsync(store, id, row.DataSourceId, dependsOn, ct).ConfigureAwait(false);
+        }
 
         if (isEnabled)
         {
@@ -392,6 +427,15 @@ public sealed class SaveCollectionScheduleHandler(
         if (lookbackDays is { } days)
         {
             row.Schedule.SetLookback(days);
+        }
+
+        if (dependency.Clear)
+        {
+            row.Schedule.SetDependency(null);
+        }
+        else if (dependency.DependsOnScheduleId is { } newDependency)
+        {
+            row.Schedule.SetDependency(newDependency);
         }
 
         if (isEnabled)
@@ -474,8 +518,25 @@ public sealed class CreateCollectionScheduleHandler(
     /// ⛔ Власній формі відмовляє і ВИМКНЕНЕ створення: ФВ-12.8 забороняє
     /// заводити розклад, а не лише запускати його.
     /// </remarks>
-    public async Task<CollectionScheduleView> HandleAsync(
+    public Task<CollectionScheduleView> HandleAsync(
         int sourceEntityId, string cron, bool isEnabled, int? lookbackDays, CancellationToken ct)
+        => HandleAsync(sourceEntityId, cron, isEnabled, lookbackDays, dependsOnScheduleId: null, ct);
+
+    /// <summary>Те саме, із залежністю від іншого розкладу того ж з'єднання (ФВ-13.15).</summary>
+    /// <param name="sourceEntityId">Сутність джерела, яку збиратимуть.</param>
+    /// <param name="cron">Вираз cron (формат Quartz).</param>
+    /// <param name="isEnabled">Чи має розклад одразу стояти в планувальнику.</param>
+    /// <param name="lookbackDays">Вікно збору назад, днів; <c>null</c> — типове.</param>
+    /// <param name="dependsOnScheduleId">Розклад-залежність; <c>null</c> — без залежності.</param>
+    /// <param name="ct">Скасування.</param>
+    /// <exception cref="BusinessRuleException">Залежність не існує або з іншого з'єднання — 422.</exception>
+    public async Task<CollectionScheduleView> HandleAsync(
+        int sourceEntityId,
+        string cron,
+        bool isEnabled,
+        int? lookbackDays,
+        int? dependsOnScheduleId,
+        CancellationToken ct)
     {
         await PermissionCheck
             .RequireAsync(access, currentUser, ListCollectionSchedulesHandler.Permission, ct)
@@ -508,7 +569,14 @@ public sealed class CreateCollectionScheduleHandler(
 
         ListCollectionSchedulesHandler.RequireCollectableSource(entity.SourceKind, entity.Code);
 
+        if (dependsOnScheduleId is { } dependsOn)
+        {
+            await CollectionScheduleDependencyRules
+                .RequireValidAsync(store, selfId: null, entity.DataSourceId, dependsOn, ct).ConfigureAwait(false);
+        }
+
         var schedule = new CollectionSchedule(sourceEntityId, text);
+        schedule.SetDependency(dependsOnScheduleId);
 
         if (lookbackDays is { } days)
         {
@@ -584,6 +652,13 @@ public sealed class DeleteCollectionScheduleHandler(
 
         // ФВ-12.10: що саме було видалено (старий розклад) — у журналі, в одній транзакції з видаленням.
         var removed = IntegrationConfigAudit.Snapshot(row.Schedule);
+
+        // ФВ-13.15: ключ-самопосилання без каскаду — хто залежав від цього розкладу, перестає залежати.
+        foreach (var dependent in await store.FindDependentsAsync(id, ct).ConfigureAwait(false))
+        {
+            dependent.SetDependency(null);
+        }
+
         store.Remove(row.Schedule);
 
         await uow.ExecuteInTransactionAsync(async innerCt =>

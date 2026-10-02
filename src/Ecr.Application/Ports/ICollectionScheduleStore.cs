@@ -51,6 +51,14 @@ public interface ICollectionScheduleStore
     /// </remarks>
     public Task<SourceEntityScheduling?> FindSourceEntityAsync(int sourceEntityId, CancellationToken ct);
 
+    /// <summary>
+    /// Розклади, що залежать від цього (<c>DependsOnScheduleId</c>) — <b>відстежувані</b>:
+    /// перед видаленням залежність знімається (ФВ-13.15).
+    /// </summary>
+    /// <param name="collectionScheduleId">Розклад-залежність.</param>
+    /// <param name="ct">Скасування.</param>
+    public Task<IReadOnlyList<CollectionSchedule>> FindDependentsAsync(int collectionScheduleId, CancellationToken ct);
+
     /// <summary>Додає розклад; зберігає <see cref="IUnitOfWork"/>.</summary>
     public void Add(CollectionSchedule schedule);
 
