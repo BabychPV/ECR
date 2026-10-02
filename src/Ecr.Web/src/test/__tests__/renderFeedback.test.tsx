@@ -464,7 +464,7 @@ interface Mounted {
  * (воно зупинялося РАНІШЕ за фіксований бюджет і тим замаскувало #295), —
  * тут немає жодної евристики тиші, лише два фіксовані числа.
  */
-async function settle(scheduledAt: number): Promise<void> {
+async function settle(scheduledAt: number, queryClient: QueryClient): Promise<void> {
   await turns(EventLoopTurns);
 
   // ⚠ Одна пауза, а не {@link SettleMs} тактів по одному: такт для найважчого
@@ -479,6 +479,19 @@ async function settle(scheduledAt: number): Promise<void> {
   }
 
   await turns(EventLoopTurns);
+
+  // ⛔ 2026-10-02, третє джерело плаваючого `{ tree: 1, route: 0 }` (CI на
+  // 435340b3, перший тест файлу — `/admin/units`, холодний воркер). Зміряно
+  // трасою комітів: після монтування вони йдуть ланцюжком відповідей мережі
+  // (`/me` → каталог → запити сторінки) на +300, +385, +510 мс — тобто ПІСЛЯ
+  // {@link SettleMs}. Холодний повільний ранер подовжує ланцюжок, і його
+  // останній коміт падав у вікно {@link foreignCacheEvent}. Тому доосідання
+  // тримається умови, а не часу: поки є запит у польоті, чекаємо ще бюджет
+  // тактів. Це лише ДОДАЄ очікування (як і {@link SettleMs}) і не є евристикою
+  // тиші: умова — відсутність незавершених запитів, межа ітерацій фіксована.
+  for (let round = 0; round < 100 && queryClient.isFetching() > 0; round += 1) {
+    await turns(EventLoopTurns);
+  }
 }
 
 async function mountRoute(entry: RouteEntry, page: JSX.Element, url: string): Promise<Mounted> {
@@ -506,7 +519,7 @@ async function mountRoute(entry: RouteEntry, page: JSX.Element, url: string): Pr
   // таймер `AppShell` заводиться в layout-ефекті, тобто всередині виклику
   // вище, і для `/documents/1` сам цей виклик коштує 200-300 мс. Відлік від
   // початку монтування з'їв би весь запас на найважчому маршруті вибірки.
-  await settle(Date.now());
+  await settle(Date.now(), queryClient);
 
   return { ledger, queryClient };
 }
