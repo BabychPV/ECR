@@ -2,6 +2,7 @@
 using Ecr.Application.Templates;
 using Ecr.Domain.Services;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace Ecr.Application;
 
@@ -178,6 +179,7 @@ public static class DependencyInjection
         services.AddScoped<Notifications.GetSmtpSettingsHandler>();
         services.AddScoped<Notifications.SaveSmtpSettingsHandler>();
         services.AddScoped<Notifications.TestSmtpSettingsHandler>();
+        services.TryAddSingleton<Ports.ISmtpEndpointPolicy, Notifications.SmtpEndpointPolicy>();
         services.AddScoped<Notifications.GetNotificationRulesHandler>();
         services.AddScoped<Notifications.ReplaceNotificationRulesHandler>();
         services.AddScoped<Notifications.ListNotificationDeliveriesHandler>();

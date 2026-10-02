@@ -19,10 +19,11 @@ public sealed class SmtpFailureClassifierTests
     [Trait("Requirement", "ФВ-12.4a")]
     [InlineData(SocketError.HostNotFound, SmtpFailureClassifier.Dns)]
     [InlineData(SocketError.TryAgain, SmtpFailureClassifier.Dns)]
-    [InlineData(SocketError.ConnectionRefused, SmtpFailureClassifier.Connect)]
-    [InlineData(SocketError.NetworkUnreachable, SmtpFailureClassifier.Connect)]
-    [InlineData(SocketError.TimedOut, SmtpFailureClassifier.Timeout)]
-    public void Помилка_сокета_під_обгорткою_SmtpException_дає_dns_connect_або_timeout(SocketError code, string expected)
+    [InlineData(SocketError.ConnectionRefused, SmtpFailureClassifier.ProbeFailed)]
+    [InlineData(SocketError.NetworkUnreachable, SmtpFailureClassifier.ProbeFailed)]
+    [InlineData(SocketError.HostUnreachable, SmtpFailureClassifier.ProbeFailed)]
+    [InlineData(SocketError.TimedOut, SmtpFailureClassifier.ProbeFailed)]
+    public void Помилка_сокета_під_обгорткою_SmtpException_дає_dns_або_єдину_категорію_недосяжності(SocketError code, string expected)
         => Assert.Equal(expected, SmtpFailureClassifier.MessageKeyOf(Wrapped(new SocketException((int)code))));
 
     [Fact]
@@ -57,10 +58,21 @@ public sealed class SmtpFailureClassifierTests
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
     [Trait("Requirement", "ФВ-12.4a")]
-    public void Тайм_аут_і_скасування_дають_timeout_а_нерозпізнане_unknown()
+    public void Тайм_аут_скасування_і_нерозпізнане_зливаються_з_відмовою_з_єднання_в_одну_категорію()
     {
-        Assert.Equal(SmtpFailureClassifier.Timeout, SmtpFailureClassifier.MessageKeyOf(Wrapped(new TimeoutException())));
-        Assert.Equal(SmtpFailureClassifier.Unknown, SmtpFailureClassifier.MessageKeyOf(new InvalidOperationException("x")));
-        Assert.Equal(SmtpFailureClassifier.Unknown, SmtpFailureClassifier.MessageKeyOf(new SmtpException("mystery")));
+        // ⛔ S4 (ent6): connect/timeout/unknown — оракул сканування портів; усі троє мусять бути однаковими.
+        // Мутація: повернути `Timeout`/`Connect`/`Unknown` в будь-якій гілці → відповідний рядок червоніє.
+        Assert.Equal(SmtpFailureClassifier.ProbeFailed, SmtpFailureClassifier.MessageKeyOf(Wrapped(new TimeoutException())));
+        Assert.Equal(SmtpFailureClassifier.ProbeFailed, SmtpFailureClassifier.MessageKeyOf(new OperationCanceledException()));
+        Assert.Equal(SmtpFailureClassifier.ProbeFailed, SmtpFailureClassifier.MessageKeyOf(new InvalidOperationException("x")));
+        Assert.Equal(SmtpFailureClassifier.ProbeFailed, SmtpFailureClassifier.MessageKeyOf(new SmtpException("mystery")));
     }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "ent6-S4")]
+    public void Відмова_політики_напрямку_має_власну_категорію_що_не_залежить_від_мережі()
+        => Assert.Equal(
+            SmtpFailureClassifier.EndpointForbidden,
+            SmtpFailureClassifier.MessageKeyOf(Wrapped(new SmtpEndpointForbiddenException())));
 }

@@ -85,7 +85,8 @@ public sealed class SmtpAdminSettingsTests(SqlServerFixture sql) : IAsyncLifetim
 
     private static SmtpNotificationSender Sender(
         IServiceScopeFactory scopes, TimeProvider time, params (string, string)[] config)
-        => new(Config(config), Substitute.For<ISecretProvider>(), scopes, new SmtpPasswordProtector(new EphemeralDataProtectionProvider()), time);
+        => new(Config(config), Substitute.For<ISecretProvider>(), scopes, new SmtpPasswordProtector(new EphemeralDataProtectionProvider()), time,
+            new Ecr.TestKit.AllowAllSmtpEndpointPolicy());
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]

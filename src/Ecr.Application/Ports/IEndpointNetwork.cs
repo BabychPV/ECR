@@ -19,6 +19,12 @@ public interface IEndpointNetwork
     /// </summary>
     public IReadOnlyList<string> AllowedHosts { get; }
 
+    /// <summary>
+    /// <c>Smtp:AllowedPorts</c>: порти SMTP, ДОДАТКОВІ до стандартних 25/465/587/2525 (ent6 S4);
+    /// порожньо за замовчуванням.
+    /// </summary>
+    public IReadOnlyList<int> SmtpAllowedPorts => [];
+
     /// <summary>Усі A/AAAA-адреси імені; порожній список — не розв'язалось.</summary>
     public Task<IReadOnlyList<IPAddress>> ResolveAsync(string host, CancellationToken ct);
 }

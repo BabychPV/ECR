@@ -2,6 +2,7 @@
 using System.Globalization;
 using System.Net;
 using System.Net.Mail;
+using Ecr.Application.Notifications;
 using Ecr.Application.Ports;
 using Ecr.Domain.Entities.Notifications;
 using Ecr.Infrastructure.Notifications;
@@ -40,7 +41,8 @@ public sealed class SmtpNotificationSender(
     ISecretProvider secrets,
     IServiceScopeFactory? scopes = null,
     SmtpPasswordProtector? protector = null,
-    TimeProvider? time = null) : INotificationSender, ISmtpSettingsCache
+    TimeProvider? time = null,
+    ISmtpEndpointPolicy? endpointPolicy = null) : INotificationSender, ISmtpSettingsCache
 {
     /// <summary>Скільки діє знімок ефективних налаштувань.</summary>
     public static readonly TimeSpan CacheTtl = TimeSpan.FromSeconds(30);
@@ -54,6 +56,8 @@ public sealed class SmtpNotificationSender(
     private readonly ISecretProvider _secrets = secrets;
     private readonly SmtpPasswordProtector? _protector = protector;
     private readonly TimeProvider _time = time ?? TimeProvider.System;
+    private readonly ISmtpEndpointPolicy _endpointPolicy =
+        endpointPolicy ?? new SmtpEndpointPolicy(new EndpointNetwork(configuration));
     private readonly object _gate = new();
     private Effective? _cached;
     private DateTimeOffset _expires;
@@ -90,6 +94,14 @@ public sealed class SmtpNotificationSender(
         if (recipients.Count == 0)
         {
             throw new InvalidOperationException("Адресатів не визначено.");
+        }
+
+        // ⛔ S4 (ент6): політика напрямку діє на КОЖНЕ відправлення (і пробу, і чергу; БД і запасний Smtp:*):
+        // старі збережені значення з нестандартним портом чи loopback-хостом тут не проходять.
+        if (!_endpointPolicy.IsPortAllowed(settings.Port)
+            || !await _endpointPolicy.IsHostAllowedAsync(settings.Host!, ct).ConfigureAwait(false))
+        {
+            throw new SmtpEndpointForbiddenException();
         }
 
         using var message = new MailMessage

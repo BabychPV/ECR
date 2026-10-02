@@ -43,6 +43,15 @@ public static class SmtpFailureClassifier
     /// <summary>Причину не розпізнано.</summary>
     public const string Unknown = "notifications.test.smtp.unknown";
 
+    /// <summary>
+    /// ⛔ ent6 S4: ЄДИНА відповідь на недосяжність (відмова з'єднання, тайм-аут, немає маршруту, невідома причина):
+    /// інакше <c>connect</c>/<c>timeout</c>/<c>unknown</c> — оракул «порт відкритий/закритий/фільтрується».
+    /// </summary>
+    public const string ProbeFailed = "notifications.test.smtp.probeFailed";
+
+    /// <summary>Порт чи хост заборонені політикою напрямку (залежить лише від конфігурації, не від мережі).</summary>
+    public const string EndpointForbidden = "notifications.test.smtp.endpointForbidden";
+
     /// <summary>Ключ категорії відмови.</summary>
     /// <param name="error">Виняток відправки.</param>
     public static string MessageKeyOf(Exception error)
@@ -60,12 +69,14 @@ public static class SmtpFailureClassifier
                     return socket.SocketErrorCode switch
                     {
                         SocketError.HostNotFound or SocketError.TryAgain or SocketError.NoData => Dns,
-                        SocketError.TimedOut => Timeout,
-                        _ => Connect,
+                        _ => ProbeFailed,
                     };
 
+                case SmtpEndpointForbiddenException:
+                    return EndpointForbidden;
+
                 case TimeoutException or OperationCanceledException:
-                    return Timeout;
+                    return ProbeFailed;
             }
         }
 
@@ -77,7 +88,7 @@ public static class SmtpFailureClassifier
             SmtpException { StatusCode: SmtpStatusCode.MailboxUnavailable
                 or SmtpStatusCode.MailboxNameNotAllowed } => Relay,
             SmtpException ex when ex.Message.Contains("authenticat", StringComparison.OrdinalIgnoreCase) => Auth,
-            _ => Unknown,
+            _ => ProbeFailed,
         };
     }
 }

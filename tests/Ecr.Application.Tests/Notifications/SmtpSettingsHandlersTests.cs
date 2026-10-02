@@ -30,6 +30,7 @@ public sealed class SmtpSettingsHandlersTests
     private readonly IClock _clock = Substitute.For<IClock>();
     private readonly TransactionProbe _tx;
     private readonly INotificationSender _sender = Substitute.For<INotificationSender>();
+    private readonly FakeNetwork _net = new();
 
     public SmtpSettingsHandlersTests()
     {
@@ -127,11 +128,11 @@ public sealed class SmtpSettingsHandlersTests
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
     [Trait("Requirement", "D-263")]
-    public async Task Приватні_й_loopback_хости_дозволені_а_пароль_без_логіна_і_без_пароля_ні()
+    public async Task Приватний_хост_дозволений_а_пароль_без_логіна_і_без_пароля_ні()
     {
         Arrange();
         await Save().HandleAsync(Input(host: "10.1.2.3"), CancellationToken.None);
-        await Save().HandleAsync(Input(host: "localhost"), CancellationToken.None);
+        // ⛔ S4: loopback більше НЕ дозволений (див. тести напряму пошти нижче); приватні — так.
 
         var noUser = await Assert.ThrowsAsync<BusinessRuleException>(
             () => Save().HandleAsync(Input(user: null), CancellationToken.None));
@@ -476,7 +477,8 @@ public sealed class SmtpSettingsHandlersTests
         Arrange();
 
         // ⚠ МУТАЦІЙНИЙ ДОКАЗ: `Port is < 1 or > 65535` → `<= 1` чи `>= 65535`, стелі FromName/логіна `>` → `>=`
-        // відхилили б рівно ці межові значення.
+        // відхилили б рівно ці межові значення. (Порти 1 і 65535 — через Smtp:AllowedPorts.)
+        _net.ExtraPorts = [1, 65535];
         foreach (var port in new[] { 1, 65535 })
         {
             var saved = await Save().HandleAsync(Input(port: port), CancellationToken.None);
@@ -626,6 +628,37 @@ public sealed class SmtpSettingsHandlersTests
         Assert.Equal([true, true], _tx.AuditInside);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "ent6-S4")]
+    public async Task Проба_не_розрізняє_відмову_з_єднання_тайм_аут_і_невідоме_а_політику_напрямку_називає_окремо()
+    {
+        Arrange();
+        _sender.IsConfigured.Returns(true);
+        var handler = TestHandler("me@corp.example");
+
+        async Task<string?> KeyOf(Exception failure)
+        {
+            _sender.SendAsync(Arg.Any<IReadOnlyList<string>>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
+                .Returns(Task.FromException(failure));
+            var result = await handler.HandleAsync(new SmtpTestRequest(null), CancellationToken.None);
+            Assert.False(result.Ok);
+            Assert.Null(result.Error);
+
+            return result.MessageKey;
+        }
+
+        // ⛔ Мутація: повернути окремі ключі connect/timeout/unknown у SmtpFailureClassifier → оракул сканера портів.
+        var refused = await KeyOf(new System.Net.Mail.SmtpException("Failure sending mail.", new System.Net.Sockets.SocketException(10061)));
+        var timeout = await KeyOf(new TimeoutException());
+        var mystery = await KeyOf(new InvalidOperationException("x"));
+
+        Assert.Equal(SmtpFailureClassifier.ProbeFailed, refused);
+        Assert.Equal(refused, timeout);
+        Assert.Equal(refused, mystery);
+        Assert.Equal(SmtpFailureClassifier.EndpointForbidden, await KeyOf(new SmtpEndpointForbiddenException()));
+    }
+
     private TestSmtpSettingsHandler TestHandler(string? email)
     {
         var users = Substitute.For<IUserStore>();
@@ -674,7 +707,126 @@ public sealed class SmtpSettingsHandlersTests
     private GetSmtpSettingsHandler Get() => new(_store, _sender, _access, _user);
 
     private SaveSmtpSettingsHandler Save()
-        => new(_store, new FakeProtector(), _cache, _sender, _access, _uow, _audit, _user, _clock);
+        => new(_store, new FakeProtector(), _cache, _sender, _access, _uow, _audit, _user, _clock, new SmtpEndpointPolicy(_net));
+
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "ent6-S4")]
+    [InlineData(22)]
+    [InlineData(3306)]
+    [InlineData(8080)]
+    [InlineData(1433)]
+    public async Task Порт_поза_стандартними_поштовими_дає_422_smtpPortNotAllowed_і_нічого_не_пише(int port)
+    {
+        Arrange();
+
+        // ⛔ Мутація: прибрати IsPortAllowed у SaveSmtpSettingsHandler → сканер портів повертається.
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Save().HandleAsync(Input(port: port), CancellationToken.None));
+
+        Assert.Equal("ECR-REQ-0422", error.ErrorCode);
+        Assert.Equal("err.ECR-REQ-0422.smtpPortNotAllowed", error.Details!["messageKey"]);
+        Assert.Equal("port", error.Details["name"]);
+        await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
+
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "ent6-S4")]
+    [InlineData(25)]
+    [InlineData(465)]
+    [InlineData(587)]
+    [InlineData(2525)]
+    public async Task Стандартні_поштові_порти_приймаються(int port)
+    {
+        Arrange();
+
+        var saved = await Save().HandleAsync(Input(port: port), CancellationToken.None);
+
+        Assert.Equal(port, saved.Port);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "ent6-S4")]
+    public async Task Smtp_AllowedPorts_додає_порти_до_стандартних_а_не_замінює_їх()
+    {
+        Arrange();
+        _net.ExtraPorts = [8025];
+
+        // ⛔ Мутація: || → && або прибрати StandardPorts.Contains у SmtpEndpointPolicy.IsPortAllowed.
+        Assert.Equal(8025, (await Save().HandleAsync(Input(port: 8025), CancellationToken.None)).Port);
+        Assert.Equal(587, (await Save().HandleAsync(Input(port: 587), CancellationToken.None)).Port);
+        await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Save().HandleAsync(Input(port: 22), CancellationToken.None));
+    }
+
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "ent6-S4")]
+    [InlineData("localhost", null)]
+    [InlineData("127.0.0.1", null)]
+    [InlineData("[::1]", null)]
+    [InlineData("169.254.169.254", null)]
+    [InlineData("metadata.google.internal", null)]
+    [InlineData("rebind.example", "127.0.0.1")]          // DNS-rebinding на loopback
+    [InlineData("rebind.example", "169.254.169.254")]    // ім'я → metadata
+    [InlineData("rebind.example", "::1")]
+    [InlineData("rebind.example", "10.0.0.5,127.0.0.1")] // хоч одна розв'язана адреса заборонена
+    public async Task Loopback_link_local_і_імена_що_в_них_розв_язуються_дають_422_smtpHostForbidden(string host, string? resolves)
+    {
+        Arrange();
+        if (resolves is not null)
+        {
+            _net.Names[host] = [.. resolves.Split(',').Select(System.Net.IPAddress.Parse)];
+        }
+
+        // ⛔ Мутація: прибрати перевірку розв'язаних адрес у SmtpEndpointPolicy.IsHostAllowedAsync → rebinding проходить;
+        // прибрати IsBlocked для літералів → loopback проходить.
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Save().HandleAsync(Input(host: host), CancellationToken.None));
+
+        Assert.True(
+            Equals("err.ECR-REQ-0422.smtpHostForbidden", error.Details!["messageKey"])
+            || Equals("err.ECR-REQ-0422.smtpSettingsInvalid", error.Details["messageKey"]),
+            $"Хост {host}: {error.Details["messageKey"]}");
+        Assert.Equal("host", error.Details["name"]);
+        await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
+
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "ent6-S4")]
+    [InlineData("10.1.2.3", null)]
+    [InlineData("192.168.0.10", null)]
+    [InlineData("relay.corp.example", "10.20.30.40")]
+    [InlineData("relay.corp.example", "172.16.0.9,192.168.1.1")]
+    [InlineData("relay.corp.example", "")]            // не розв'язалось зараз — не підстава відмовляти
+    public async Task Приватні_адреси_корпоративного_relay_дозволені_і_за_літералом_і_за_DNS(string host, string? resolves)
+    {
+        Arrange();
+        if (resolves is not null)
+        {
+            _net.Names[host] = [.. resolves.Split(',', StringSplitOptions.RemoveEmptyEntries).Select(System.Net.IPAddress.Parse)];
+        }
+
+        // ⛔ Мутація: IsBlocked → IsBlocked || IsPrivate зламав би основний сценарій (relay у приватній мережі).
+        Assert.Equal(host, (await Save().HandleAsync(Input(host: host), CancellationToken.None)).Host);
+    }
+
+    private sealed class FakeNetwork : IEndpointNetwork
+    {
+        public Dictionary<string, IReadOnlyList<System.Net.IPAddress>> Names { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+        public IReadOnlyList<int> ExtraPorts { get; set; } = [];
+
+        public IReadOnlyList<string> AllowedHosts => [];
+
+        public IReadOnlyList<int> SmtpAllowedPorts => ExtraPorts;
+
+        public Task<IReadOnlyList<System.Net.IPAddress>> ResolveAsync(string host, CancellationToken ct)
+            => Task.FromResult(Names.TryGetValue(host, out var ips) ? ips : [System.Net.IPAddress.Parse("10.0.0.5")]);
+    }
 
     private sealed class FakeStore : ISmtpSettingsStore
     {

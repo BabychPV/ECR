@@ -2979,7 +2979,23 @@ loopback/link-local/metadata/unspecified) і розв'язання імені в
 public interface IEndpointNetwork
 {
     public IReadOnlyList<string> AllowedHosts { get; }
+    public IReadOnlyList<int> SmtpAllowedPorts => [];   // Smtp:AllowedPorts
     public Task<IReadOnlyList<IPAddress>> ResolveAsync(string host, CancellationToken ct);
+}
+```
+
+#### `ISmtpEndpointPolicy`
+
+Напрям пошти (ent6 S4): куди SMTP-транспорт має право з'єднуватися — і на пробі, і на
+відправленні, і при збереженні налаштувань. Порти: 25/465/587/2525 і додаткові з
+`Smtp:AllowedPorts`. Хост: loopback, link-local і хмарний metadata заборонені завжди (за літералом,
+за іменем і по кожній розв'язаній адресі); приватні діапазони дозволені (корпоративний relay).
+
+```csharp
+public interface ISmtpEndpointPolicy
+{
+    public bool IsPortAllowed(int port);
+    public Task<bool> IsHostAllowedAsync(string host, CancellationToken ct);
 }
 ```
 
