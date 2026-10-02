@@ -316,6 +316,11 @@ OpenTelemetry Collector). За замовчуванням **вимкнено**: 
 останній буфер втрачає. Недійсна адреса дочірній не зупиняє: експорт тоді тихо
 вимкнено (Api у такому разі не стартує).
 
+**Глибина черги задач:** `ecr.jobs.queue_depth` (gauge, теги `lane` = `default`/`recalc`, `state` =
+`Queued`/`Running`) — кількість задач черги в базі (режим `Jobs:Queue:Mode = Database`). Значення —
+кеш, який Api оновлює раз на `Jobs:QueueDepth:RefreshSeconds` (типово 15, не менше 5) одним агрегатом;
+експортує лише Api (`service.name` = `ecr-api`) — дочірній воркер його не рахує (число глобальне).
+
 ## 4. Розклади
 
 Планувальник Quartz, розклади реєструє `RecurringScheduleService`. Hangfire у продукті
