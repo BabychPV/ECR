@@ -225,6 +225,30 @@ public sealed class SmtpTestRateLimitTests(SqlServerFixture sql)
         Assert.Equal(HttpStatusCode.TooManyRequests, over.StatusCode);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Відповідь_4xx_без_винятку_415_теж_повертає_токен()
+    {
+        using var baseApp = new EcrApiFactory(sql);
+        using var app = baseApp.WithWebHostBuilder(
+            b => b.UseSetting("Security:RateLimit:SmtpTestSystemPermitPerHour", "1"));
+        using var a = await SystemHealthControllerTests.SignedInAsync(sql, app, Permission).ConfigureAwait(true);
+
+        // Мутація: замінити умову `StatusCode is >= 400 and < 500` у SmtpTestQuotaMiddleware на хибну — другий цикл дає 429.
+        for (var i = 0; i < 3; i++)
+        {
+            using var content = new StringContent("не json", System.Text.Encoding.UTF8, "text/plain");
+            using var broken = await a.PostAsync(new Uri("/api/v1/notifications/smtp/test", UriKind.Relative), content)
+                .ConfigureAwait(true);
+            Assert.NotEqual(HttpStatusCode.TooManyRequests, broken.StatusCode);
+            Assert.True((int)broken.StatusCode is >= 400 and < 500, $"очікувано 4xx, є {broken.StatusCode}");
+        }
+
+        using var ok = await ProbeAsync(a).ConfigureAwait(true);
+        Assert.True((int)ok.StatusCode < 400, $"{ok.StatusCode}");
+    }
+
     private static Task<HttpResponseMessage> ProbeAsync(HttpClient client)
         => client.PostAsJsonAsync(
             new Uri("/api/v1/notifications/smtp/test", UriKind.Relative), new { to = "probe@example.com" });
