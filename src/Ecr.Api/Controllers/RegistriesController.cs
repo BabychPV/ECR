@@ -116,13 +116,18 @@ public sealed class RegistriesController(
     [HttpPut("{code}/definition")]
     [ProducesResponseType<RegistryDefinitionVersionResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     public async Task<IActionResult> SaveDefinition(
         string code, [FromBody] SaveRegistryDefinitionDto dto, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(dto);
 
-        var version = await saveDefinition.HandleAsync(code, dto, ct).ConfigureAwait(false);
+        // ⛔ ФВ-8.12 (борг): `If-Match` = `definitionVersion`, яку бачила людина, ОБОВ'ЯЗКОВИЙ:
+        // немає — `422 ECR-REQ-0422` (`definitionVersionRequired`), чужа версія — `409 ECR-REG-0409`
+        // (`definitionChanged`). Заголовок читається вручну, як у інших ендпоінтів.
+        var ifMatch = Request.Headers[Microsoft.Net.Http.Headers.HeaderNames.IfMatch].ToString();
+        var version = await saveDefinition.HandleAsync(code, dto, ct, ifMatch).ConfigureAwait(false);
 
         // Повертається нова версія опису: саме вона відрізняє «збережено» від
         // «збережено і нічого не змінилося» для того, хто відкрив екран удруге.

@@ -189,7 +189,8 @@ public sealed class RegistryDefinitionKeysTests
                     "RT-11",
                     keys,
                     codeMode),
-                default);
+                default,
+                "\"1\"");
 
     private static RegistryKeySaveDto Key(string code, string[] fields, bool isPrimary, int? id = null)
         => new(id, code, Text(code), fields, isPrimary, IgnoreCase: true, IsActive: true);

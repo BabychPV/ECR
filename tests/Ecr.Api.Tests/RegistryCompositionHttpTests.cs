@@ -225,7 +225,7 @@ public sealed partial class RegistryCompositionHttpTests(SqlServerFixture sql)
             loopFieldId = loop.Id;
         }
 
-        var response = await client.PutAsJsonAsync(
+        var response = await client.PutDefinitionAsync(
             new Uri($"/api/v1/registries/{f.Stream.Code}/definition", UriKind.Relative),
             new
             {

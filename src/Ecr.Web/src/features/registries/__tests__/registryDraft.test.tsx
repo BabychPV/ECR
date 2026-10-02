@@ -78,6 +78,12 @@ interface Stub {
   readonly draftBodies: string[];
   saveConflict: 'none' | 'changed' | 'stale';
   hasDraft: boolean;
+
+  /** `If-Match` останнього прямого `PUT …/definition`; `undefined` — запиту ще не було. */
+  directIfMatch?: string | null;
+
+  /** Прямий `PUT …/definition` відповідає `409 definitionChanged`. */
+  directConflict?: boolean;
 }
 
 function json(body: unknown, status = 200): Response {
@@ -214,7 +220,19 @@ function respond(options?: Partial<Pick<Stub, 'saveConflict' | 'hasDraft'>>, per
 
       if (url.includes('/definition')) {
         // Прямий `PUT …/definition` — «зберегти й одразу опублікувати».
-        if (method === 'PUT') return json({ definitionVersion: 4 });
+        if (method === 'PUT') {
+          state.directIfMatch = new Headers(init?.headers).get('If-Match');
+
+          if (state.directConflict === true) {
+            return problem(409, 'ECR-REG-0409', {
+              messageKey: 'err.ECR-REG-0409.definitionChanged',
+              registryCode: Code,
+              definitionVersion: '4',
+            });
+          }
+
+          return json({ definitionVersion: 4 });
+        }
 
         return json({
           id: 4,
@@ -615,6 +633,68 @@ describe('BE-24 крок 2: чернетка опису довідника в к
       // ⛔ Саме `…/definition`, а НЕ `…/definition/draft`: це інша дія і інші
       // права (сервер вимагає обох). Підрядковий збіг сховав би підміну.
       expect(call).toBe(`PUT /api/v1/registries/${Code}/definition`);
+
+      // ⛔ ФВ-8.12 (борг): `If-Match` несе `definitionVersion`, яку показав сервер (3 у стабі), —
+      // без нього дві вкладки з однаковим повним станом затирали б одна одну.
+      expect(state.directIfMatch).toBe('"3"');
+    },
+    SlowEnvTimeout,
+  );
+
+  it(
+    '409 definitionChanged на прямому PUT названий причиною і дає перечитати опис',
+    async () => {
+      const state = respond({ hasDraft: false });
+      state.directConflict = true;
+      showPanel();
+      await ready();
+
+      const direct = await waitFor(
+        () => {
+          const node = document.querySelector('[data-save-and-publish]');
+          expect(node).not.toBeNull();
+          return node as HTMLElement;
+        },
+        { timeout: SlowEnvTimeout },
+      );
+
+      await userEvent.click(direct);
+      await userEvent.click(await screen.findByTestId('confirm-verb', {}, { timeout: PromptTimeout }));
+
+      const note = await waitFor(
+        () => {
+          const node = document.querySelector('[data-registry-draft-conflict="definitionChanged"]');
+          expect(node).not.toBeNull();
+          return node as HTMLElement;
+        },
+        { timeout: PromptTimeout },
+      );
+
+      // ⛔ Власний ключ (не `definitionDraftChanged`: чернетки тут немає) і кнопка перечитування.
+      expect(note.textContent).toContain('err.ECR-REG-0409.definitionChanged');
+      expect(note.textContent).not.toContain('definitionDraftChanged');
+      expect(note.textContent).toContain(Code);
+      expect(document.querySelector('[data-take-current-draft]')).not.toBeNull();
+
+      const before = state.calls.filter((c) => c.startsWith('GET ') && c.includes('/definition/draft')).length;
+      state.directConflict = false;
+      await userEvent.click(document.querySelector('[data-take-current-draft]') as HTMLElement);
+
+      // Перечитується стан чернетки з ПОТОЧНОЮ `definitionVersion` для наступного `If-Match`.
+      await waitFor(
+        () => {
+          const after = state.calls.filter((c) => c.startsWith('GET ') && c.includes('/definition/draft')).length;
+          expect(after).toBeGreaterThan(before);
+        },
+        { timeout: PromptTimeout },
+      );
+
+      await waitFor(
+        () => {
+          expect(document.querySelector('[data-registry-draft-conflict]')).toBeNull();
+        },
+        { timeout: PromptTimeout },
+      );
     },
     SlowEnvTimeout,
   );

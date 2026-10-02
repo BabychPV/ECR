@@ -79,7 +79,7 @@ public sealed class RegistryCompositionTests
         Known(stream, @case);
 
         var error = await Assert.ThrowsAsync<BusinessRuleException>(
-            () => Saves().HandleAsync("STREAM", Request(stream), default));
+            () => Saves().HandleAsync("STREAM", Request(stream), default, "\"1\""));
 
         Assert.Equal("ECR-REG-0422", error.ErrorCode);
         Assert.Equal("err.ECR-REG-0422.compositionCycle", error.Details!["messageKey"]);
@@ -102,7 +102,7 @@ public sealed class RegistryCompositionTests
         Known(stream, @case, composition);
 
         var error = await Assert.ThrowsAsync<BusinessRuleException>(
-            () => Saves().HandleAsync("STREAM", Request(stream), default));
+            () => Saves().HandleAsync("STREAM", Request(stream), default, "\"1\""));
 
         Assert.Equal("err.ECR-REG-0422.compositionCycle", error.Details!["messageKey"]);
         Assert.Equal("STREAM → GAS_COMPOSITION → STREAM_CASE → STREAM", error.Details["chain"]);
@@ -121,7 +121,7 @@ public sealed class RegistryCompositionTests
         Compose(composition, 331, "CASE", CaseId);
         Known(stream, @case, composition);
 
-        var version = await Saves().HandleAsync("GAS_COMPOSITION", Request(composition), default);
+        var version = await Saves().HandleAsync("GAS_COMPOSITION", Request(composition), default, "\"1\"");
 
         Assert.Equal(2, version);
         await _uow.Received(1).SaveChangesAsync(Arg.Any<CancellationToken>());
@@ -164,7 +164,7 @@ public sealed class RegistryCompositionTests
         Known(stream, @case);
 
         var error = await Assert.ThrowsAsync<BusinessRuleException>(
-            () => Saves().HandleAsync("STREAM_CASE", Request(@case), default));
+            () => Saves().HandleAsync("STREAM_CASE", Request(@case), default, "\"1\""));
 
         Assert.Equal("ECR-REG-0422", error.ErrorCode);
         Assert.Equal(messageKey, error.Details!["messageKey"]);
@@ -220,7 +220,7 @@ public sealed class RegistryCompositionTests
         };
 
         var error = await Assert.ThrowsAsync<BusinessRuleException>(
-            () => Saves().HandleAsync("STREAM_CASE", request, default));
+            () => Saves().HandleAsync("STREAM_CASE", request, default, "\"1\""));
 
         Assert.Equal("ECR-REG-0422", error.ErrorCode);
         Assert.Equal("err.ECR-REG-0422.compositionNotLookup", error.Details!["messageKey"]);
@@ -250,7 +250,7 @@ public sealed class RegistryCompositionTests
             CodeMode = RegistryCodeMode.Auto,
         };
 
-        await Saves().HandleAsync("STREAM_CASE", request, default);
+        await Saves().HandleAsync("STREAM_CASE", request, default, "\"1\"");
 
         var field = Assert.Single(@case.Fields, f => f.Code == "STREAM");
         Assert.Equal(RegistryRelationKind.Composition, field.RelationKind);
@@ -279,7 +279,7 @@ public sealed class RegistryCompositionTests
         };
 
         var error = await Assert.ThrowsAsync<BusinessRuleException>(
-            () => Saves().HandleAsync("STREAM_CASE", request, default));
+            () => Saves().HandleAsync("STREAM_CASE", request, default, "\"1\""));
 
         Assert.Equal("err.ECR-REG-0422.relationKindImmutable", error.Details!["messageKey"]);
         Assert.Equal(RegistryRelationKind.Reference, link.RelationKind);

@@ -124,12 +124,18 @@ export function RegistryDraftPanel({
    */
   const saveAndPublish = useMutation({
     meta: { handled: true },
-    mutationFn: () =>
-      saveAndPublishRegistryDefinition(code, {
+    mutationFn: () => {
+      // ⛔ `If-Match` обов'язковий: версії опису не знаємо — не шлемо запит наосліп.
+      const version = state.data?.definitionVersion;
+      if (version === undefined) {
+        return Promise.reject(new Error('definitionVersion is unknown'));
+      }
+      return saveAndPublishRegistryDefinition(code, {
         fields: request?.fields ?? [],
         rules: request?.rules ?? [],
         reason: request?.reason ?? '',
-      }),
+      }, version);
+    },
     onSettled: () => setConfirm(null),
     onSuccess: async (result) => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.registries.definition(code) });
@@ -171,6 +177,11 @@ export function RegistryDraftPanel({
     discard.reset();
     saveAndPublish.reset();
     void reload();
+
+    // Опис змінили в іншій вкладці: свіжа версія потрібна і формі, і наступному `If-Match`.
+    if (conflict?.kind === 'definitionChanged') {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.registries.definition(code) });
+    }
   };
 
   return (
@@ -329,6 +340,10 @@ function conflictText(code: string, conflict: DraftConflict): string {
 
   if (conflict.kind === 'missing') {
     return t('err.ECR-REG-0404.definitionDraft', { registryCode: code });
+  }
+
+  if (conflict.kind === 'definitionChanged') {
+    return t('err.ECR-REG-0409.definitionChanged', { registryCode: code });
   }
 
   return t('err.ECR-REG-0409.definitionDraftChanged', { registryCode: code });

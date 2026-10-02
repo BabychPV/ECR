@@ -23,6 +23,7 @@ describe('structureChangeReasonText', () => {
     'integrationAudit.scheduleCreated',
     'integrationAudit.scheduleChanged',
     'integrationAudit.scheduleDeleted',
+    'integrationAudit.scheduleDependencyCleared',
     'integrationAudit.fieldMapCreated',
     'integrationAudit.fieldMapPaused',
     'integrationAudit.fieldMapResumed',

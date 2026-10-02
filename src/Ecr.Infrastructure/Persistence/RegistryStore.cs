@@ -51,6 +51,59 @@ public sealed class RegistryStore(EcrDbContext db) : IRegistryStore
              .FirstOrDefaultAsync(d => d.Id == registryDefId, ct);
 
     /// <inheritdoc />
+    public async Task<bool> LockDefinitionIsStaleAsync(int registryDefId, int loadedVersion, CancellationToken ct)
+    {
+        if (db.Database.CurrentTransaction is null)
+        {
+            throw new InvalidOperationException(
+                "Блокування опису довідника береться лише всередині транзакції: поза нею воно звільнилося б одразу.");
+        }
+
+        var current = await db.Database
+            .SqlQuery<int>($"SELECT DefinitionVersion AS Value FROM cfg.RegistryDef WITH (UPDLOCK, HOLDLOCK) WHERE Id = {registryDefId}")
+            .OrderBy(v => v)
+            .Take(1)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        return current.Count == 0 || current[0] != loadedVersion;
+    }
+
+    /// <inheritdoc />
+    public async Task<int?> FindFieldHoldingReferenceAsync(IReadOnlyCollection<int> registryFieldDefIds, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(registryFieldDefIds);
+
+        if (registryFieldDefIds.Count == 0)
+        {
+            return null;
+        }
+
+        var fieldIds = registryFieldDefIds.ToList();
+        var inTransaction = db.Database.CurrentTransaction is not null;
+        if (inTransaction)
+        {
+            await db.Database.ExecuteSqlRawAsync("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE;", ct).ConfigureAwait(false);
+        }
+
+        // `FirstOrDefault` по проєкції без `Take`-стелі: SQL Server зупиняється на першому рядку
+        // (`TOP 1`), тобто це і є EXISTS; значення видалених записів теж враховуються.
+        var holder = await db.RegistryValues
+            .AsNoTracking()
+            .Where(v => v.ValueRefEntryId != null && fieldIds.Contains(v.RegistryFieldDefId))
+            .Select(v => (int?)v.RegistryFieldDefId)
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+
+        if (inTransaction)
+        {
+            await db.Database.ExecuteSqlRawAsync("SET TRANSACTION ISOLATION LEVEL READ COMMITTED;", ct).ConfigureAwait(false);
+        }
+
+        return holder;
+    }
+
+    /// <inheritdoc />
     /// <remarks>
     /// ⚠ БЕЗ <c>AsNoTracking</c> навмисно — дзеркально до
     /// <see cref="FindDefinitionAsync"/>, який цей метод і замінює в циклі.

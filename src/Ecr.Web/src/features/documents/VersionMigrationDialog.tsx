@@ -31,6 +31,8 @@ export function refusalText(reason: string): string {
       return t('documents.migrateRefusalSheetsLocked');
     case 'projectArchived':
       return t('documents.migrateRefusalArchived');
+    case 'grantsNotMapped':
+      return t('documents.migrateRefusalGrantsNotMapped');
     default:
       return reason;
   }

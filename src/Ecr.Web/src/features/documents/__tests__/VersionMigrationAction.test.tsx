@@ -201,6 +201,16 @@ describe('useVersionMigrationAction', () => {
     expect((screen.getByTestId('migrate-apply') as HTMLButtonElement).disabled).toBe(true);
   });
 
+  it('причина grantsNotMapped показується підписом каталогу, а не сирим кодом (ent7 P3-4)', async () => {
+    show(['Template.Edit'], report({ canApply: false, refusals: ['grantsNotMapped'] }));
+    await openAndPickTarget();
+
+    fireEvent.click(screen.getByTestId('migrate-dry-run'));
+
+    await screen.findByText('⟦documents.migrateRefusalGrantsNotMapped⟧');
+    expect(screen.queryByText('grantsNotMapped')).toBeNull();
+  });
+
   it('зміна режиму після звіту знецінює звіт — перенос знову вимкнено', async () => {
     show(['Template.Edit'], report({}));
     await openAndPickTarget();

@@ -314,7 +314,14 @@ export function RegistryRelations({
   readonly linkEdits?: LinkEdits;
   readonly onChangeLink?: (fieldId: number, target: number | null) => void;
 }): JSX.Element {
-  if (definition.relations.length === 0 && Object.keys(linkEdits).length === 0) {
+  // ФВ-8.12 (ent5 P3-6): не-ключові поля `Lookup` БЕЗ цілі зв'язку не мають — їх немає в
+  // `relations`, а значить, після «зняти зв'язок» і збереження повернути ціль було б ніде.
+  const unlinked = definition.fields.filter(
+    (f) => f.dataType === 'Lookup' && f.lookupRegistryDefId === null && !f.isScopeField
+      && !definition.relations.some((r) => r.fieldCode === f.code),
+  );
+
+  if (definition.relations.length === 0 && unlinked.length === 0 && Object.keys(linkEdits).length === 0) {
     return (
       <Stack gap="xs">
         <Title order={2} size="h5">
@@ -411,6 +418,33 @@ export function RegistryRelations({
               <Table.Td>{relation.linkCount ?? '—'}</Table.Td>
             </Table.Tr>
           ))}
+          {unlinked.map((field) => {
+            const current = field.id in linkEdits ? linkEdits[field.id] : null;
+            return (
+              <Table.Tr key={`unlinked:${field.code}`} data-unlinked-lookup={field.code}>
+                <Table.Td>
+                  <Badge variant="light" color="gray">Lookup</Badge>
+                </Table.Td>
+                <Table.Td>{field.code}</Table.Td>
+                <Table.Td>
+                  {!canEdit || onChangeLink === undefined ? (
+                    '—'
+                  ) : (
+                    <NativeSelect
+                      size="xs"
+                      aria-label={t('registries.relationTargetFor', { field: field.code })}
+                      value={current === null || current === undefined ? '' : String(current)}
+                      data={[{ value: '', label: '—' }, ...registryOptions]}
+                      onChange={(event) =>
+                        onChangeLink(field.id, event.currentTarget.value === '' ? null : Number(event.currentTarget.value))
+                      }
+                    />
+                  )}
+                </Table.Td>
+                <Table.Td>—</Table.Td>
+              </Table.Tr>
+            );
+          })}
         </Table.Tbody>
       </Table>
     </Stack>

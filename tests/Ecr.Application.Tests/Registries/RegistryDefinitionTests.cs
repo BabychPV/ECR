@@ -185,7 +185,7 @@ public sealed class RegistryDefinitionTests
         Allow("Registry.EditData", "Registry.View");
 
         var denied = await Assert.ThrowsAsync<AccessDeniedException>(
-            () => Saves().HandleAsync("PERMIT", Request(), default));
+            () => Saves().HandleAsync("PERMIT", Request(), default, "\"1\""));
 
         Assert.Equal("ECR-AUTH-0403", denied.ErrorCode);
         await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
@@ -206,7 +206,7 @@ public sealed class RegistryDefinitionTests
         ]);
 
         var error = await Assert.ThrowsAsync<BusinessRuleException>(
-            () => Saves().HandleAsync("PERMIT", request, default));
+            () => Saves().HandleAsync("PERMIT", request, default, "\"1\""));
 
         Assert.Equal("ECR-REG-0422", error.ErrorCode);
         Assert.Contains("чотири", error.Message, StringComparison.Ordinal);
@@ -230,7 +230,7 @@ public sealed class RegistryDefinitionTests
         ]);
 
         var error = await Assert.ThrowsAsync<BusinessRuleException>(
-            () => Saves().HandleAsync("PERMIT", request, default));
+            () => Saves().HandleAsync("PERMIT", request, default, "\"1\""));
 
         Assert.Equal("ECR-REG-0422", error.ErrorCode);
     }
@@ -250,7 +250,7 @@ public sealed class RegistryDefinitionTests
                 kept.Severity.ToString(), kept.MessageL10n, null, true),
         ]);
 
-        await Saves().HandleAsync("PERMIT", request, default);
+        await Saves().HandleAsync("PERMIT", request, default, "\"1\"");
 
         Assert.True(_rules[0].IsActive);
         Assert.All(_rules.Skip(1), r => Assert.False(r.IsActive));
@@ -267,7 +267,7 @@ public sealed class RegistryDefinitionTests
         var request = Request(fields: Fields().Take(3).ToList());
 
         var error = await Assert.ThrowsAsync<BusinessRuleException>(
-            () => Saves().HandleAsync("PERMIT", request, default));
+            () => Saves().HandleAsync("PERMIT", request, default, "\"1\""));
 
         Assert.Equal("ECR-REG-0422", error.ErrorCode);
         Assert.Equal("err.ECR-REG-0422.fieldRemoved", error.Details?["messageKey"]);
@@ -286,7 +286,7 @@ public sealed class RegistryDefinitionTests
         renamed[0] = renamed[0] with { Code = "PermitNumber" };
 
         var code = await Assert.ThrowsAsync<BusinessRuleException>(
-            () => Saves().HandleAsync("PERMIT", Request(fields: renamed), default));
+            () => Saves().HandleAsync("PERMIT", Request(fields: renamed), default, "\"1\""));
         Assert.Equal("ECR-REG-0422", code.ErrorCode);
         Assert.Equal("err.ECR-REG-0422.fieldCodeImmutable", code.Details?["messageKey"]);
 
@@ -294,7 +294,7 @@ public sealed class RegistryDefinitionTests
         retyped[3] = retyped[3] with { DataType = "String" };
 
         var type = await Assert.ThrowsAsync<BusinessRuleException>(
-            () => Saves().HandleAsync("PERMIT", Request(fields: retyped), default));
+            () => Saves().HandleAsync("PERMIT", Request(fields: retyped), default, "\"1\""));
         Assert.Equal("ECR-REG-0422", type.ErrorCode);
         Assert.Equal("err.ECR-REG-0422.fieldTypeImmutable", type.Details?["messageKey"]);
     }
@@ -316,7 +316,7 @@ public sealed class RegistryDefinitionTests
             IsRequired: true, IsKey: false, LookupRegistryDefId: null, UnitId: null));
 
         var error = await Assert.ThrowsAsync<BusinessRuleException>(
-            () => Saves().HandleAsync("PERMIT", Request(fields: fields), default));
+            () => Saves().HandleAsync("PERMIT", Request(fields: fields), default, "\"1\""));
 
         Assert.Equal("ECR-REG-0422", error.ErrorCode);
         Assert.Equal("err.ECR-REG-0422.newFieldRequired", error.Details?["messageKey"]);
@@ -349,7 +349,7 @@ public sealed class RegistryDefinitionTests
             "перевірка ключа");
 
         var error = await Assert.ThrowsAsync<BusinessRuleException>(
-            () => Saves().HandleAsync("BARE", request, default));
+            () => Saves().HandleAsync("BARE", request, default, "\"1\""));
 
         Assert.Equal("ECR-REG-0422", error.ErrorCode);
         Assert.Equal("err.ECR-REG-0422.noKeyField", error.Details?["messageKey"]);
@@ -362,7 +362,7 @@ public sealed class RegistryDefinitionTests
     public async Task Причина_зміни_обовʼязкова()
     {
         var error = await Assert.ThrowsAsync<BusinessRuleException>(
-            () => Saves().HandleAsync("PERMIT", Request(reason: "   "), default));
+            () => Saves().HandleAsync("PERMIT", Request(reason: "   "), default, "\"1\""));
 
         Assert.Equal("ECR-REG-0422", error.ErrorCode);
         Assert.Equal("err.ECR-REG-0422.definitionReasonRequired", error.Details?["messageKey"]);
@@ -388,7 +388,7 @@ public sealed class RegistryDefinitionTests
             Text("ліміт завеликий"), null, true));
 
         var version = await Saves().HandleAsync(
-            "PERMIT", Request(rules: rules, reason: "додано стелю ліміту"), default);
+            "PERMIT", Request(rules: rules, reason: "додано стелю ліміту"), default, "\"1\"");
 
         Assert.Equal(2, version);
         Assert.Equal(2, _permits.DefinitionVersion);
@@ -507,7 +507,7 @@ public sealed class RegistryDefinitionTests
         var index = fields.FindIndex(f => f.Code == "Limit");
         fields[index] = fields[index] with { UnitId = Tonne };
 
-        await Saves().HandleAsync("PERMIT", Request(fields: fields), default);
+        await Saves().HandleAsync("PERMIT", Request(fields: fields), default, "\"1\"");
 
         Assert.Equal(Tonne, _permits.Fields.Single(f => f.Code == "Limit").UnitId);
     }
@@ -541,7 +541,7 @@ public sealed class RegistryDefinitionTests
         }
 
         var error = await Assert.ThrowsAsync<BusinessRuleException>(
-            () => Saves().HandleAsync("PERMIT", Request(fields: fields), default));
+            () => Saves().HandleAsync("PERMIT", Request(fields: fields), default, "\"1\""));
 
         Assert.Equal("ECR-REG-0422", error.ErrorCode);
         Assert.Equal("err.ECR-REG-0422.unknownUnit", error.Details!["messageKey"]);

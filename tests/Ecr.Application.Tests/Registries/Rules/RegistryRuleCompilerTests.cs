@@ -89,7 +89,7 @@ public sealed class RegistryRuleCompilerTests
     public async Task Неправильний_вираз_правила_відхиляється_з_діагностикою(string expression, string diagnosticKey)
     {
         var error = await Assert.ThrowsAsync<BusinessRuleException>(
-            () => Saves().HandleAsync("STREAM_CASE", Request(NewRule("BAD", "Expression", expression)), default));
+            () => Saves().HandleAsync("STREAM_CASE", Request(NewRule("BAD", "Expression", expression)), default, "\"1\""));
 
         Assert.Equal("ECR-REG-0422", error.ErrorCode);
         Assert.Equal(RegistryRuleCompiler.ExpressionInvalidKey, error.Details!["messageKey"]);
@@ -109,7 +109,8 @@ public sealed class RegistryRuleCompilerTests
             () => Saves().HandleAsync(
                 "STREAM_CASE",
                 Request(NewRule("NEED", "RequiredWhen", "TRUE", """{"field":"NOPE"}""")),
-                default));
+                default,
+                "\"1\""));
 
         var diagnostic = Assert.Single((IReadOnlyList<RegistryRuleDiagnosticDto>)error.Details!["diagnostics"]!);
         Assert.Equal(RegistryRuleCompiler.ParameterInvalidKey, diagnostic.MessageKey);
@@ -123,7 +124,7 @@ public sealed class RegistryRuleCompilerTests
     public async Task Нове_UniqueWithin_відхиляється()
     {
         var error = await Assert.ThrowsAsync<BusinessRuleException>(
-            () => Saves().HandleAsync("STREAM_CASE", Request(NewRule("UNIQUE", "UniqueWithin", "ROW.T_C")), default));
+            () => Saves().HandleAsync("STREAM_CASE", Request(NewRule("UNIQUE", "UniqueWithin", "ROW.T_C")), default, "\"1\""));
 
         Assert.Equal("ECR-REG-0422", error.ErrorCode);
         Assert.Equal(RegistryRuleCompiler.UniqueWithinReplacedKey, error.Details!["messageKey"]);
@@ -142,7 +143,8 @@ public sealed class RegistryRuleCompilerTests
             Request(NewRule(
                 "SUM_100", "Expression", "TRUE",
                 """{"template":"childSum","child":"GAS_COMPOSITION","field":"MOL_PCT","target":100,"tolerance":0.5}""")),
-            default);
+            default,
+            "\"1\"");
 
         var rule = Assert.Single(_added);
         Assert.Equal(
@@ -162,7 +164,8 @@ public sealed class RegistryRuleCompilerTests
                 Request(NewRule(
                     "SUM_100", "Expression", "TRUE",
                     """{"template":"childSum","child":"STREAM_CASE","field":"T_C","target":100}""")),
-                default));
+                default,
+                "\"1\""));
 
         var diagnostic = Assert.Single((IReadOnlyList<RegistryRuleDiagnosticDto>)error.Details!["diagnostics"]!);
         Assert.Equal("child", diagnostic.Params!["parameter"]);
@@ -185,7 +188,7 @@ public sealed class RegistryRuleCompilerTests
             new RegistryRuleSaveDto(501, "LEGACY", "Expression", "[Limit] > 0", "Warning", Text("legacy"), null, true),
             NewRule("T_POSITIVE", "Expression", "ROW.T_C > 0"));
 
-        await Saves().HandleAsync("STREAM_CASE", request, default);
+        await Saves().HandleAsync("STREAM_CASE", request, default, "\"1\"");
 
         Assert.Equal("ROW.T_C > 0", Assert.Single(_added).Expression);
     }

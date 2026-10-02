@@ -175,7 +175,8 @@ public sealed class RegistryConstructorChainTests(SqlServerFixture sql)
                     .ToList(),
                 rules,
                 $"стеля ліміту {_tag}"),
-            CancellationToken.None);
+            CancellationToken.None,
+            $"\"{existing.DefinitionVersion}\"");
 
         Assert.Equal(2, version);
 

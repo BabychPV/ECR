@@ -81,7 +81,7 @@ public sealed class UnitReferenceHandlerTests(SqlServerFixture sql)
             sql, app, "Registry.View", "Registry.EditDefinition", "Registry.Publish");
         var (code, registryId, fieldId) = await SeedRegistryAsync();
 
-        var response = await client.PutAsJsonAsync(
+        var response = await client.PutDefinitionAsync(
             new Uri($"/api/v1/registries/{code}/definition", UriKind.Relative),
             new
             {

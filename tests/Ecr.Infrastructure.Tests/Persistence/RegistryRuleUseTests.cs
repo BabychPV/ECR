@@ -82,6 +82,10 @@ public sealed class RegistryRuleUseTests(SqlServerFixture sql)
             store, uow, new AuditWriter(db), Editor(), User(), Clock(), new UnitCatalog(db),
             keys, new RegistryKeyService(keys, uow), new RegistryRuleCompiler(new Parser()));
 
+        // `If-Match` обов'язковий: версія, яку «бачила б людина» прямо перед збереженням.
+        var version = await db.RegistryDefs.AsNoTracking()
+            .Where(d => d.Id == f.CaseId).Select(d => d.DefinitionVersion).SingleAsync();
+
         await handler.HandleAsync(
             f.CaseCode,
             new SaveRegistryDefinitionDto(
@@ -92,7 +96,8 @@ public sealed class RegistryRuleUseTests(SqlServerFixture sql)
                 ],
                 rules,
                 "RT-17a"),
-            CancellationToken.None);
+            CancellationToken.None,
+            $"\"{version}\"");
     }
 
     private async Task<int> RuleIdAsync(Fixture f, string code)

@@ -617,7 +617,6 @@ UPDATE t
     (N'err.ECR-SCHM-0422.migrateGrantsNotMapped', N'en', N'The target version has no sheet, table or column with the code of a resource that has a deny grant, so the deny cannot be carried over. Remove or re-create that deny deliberately before moving the project.', N'The target version has no sheet, table or column with the code of a resource that has an access grant (deny or a restricting Read), so the grant cannot be carried over and access could widen. Remove or re-create that grant deliberately before moving the project.'),
     (N'err.ECR-SCHM-0422.migrateGrantsNotMapped', N'ru', N'В целевой версии нет листа, таблицы или столбца с кодом ресурса, на котором стоит запрет, поэтому запрет не перенести. Снимите или пересоздайте этот запрет осознанно до переноса проекта.', N'В целевой версии нет листа, таблицы или столбца с кодом ресурса, на котором стоит право доступа (запрет или ограничивающее чтение), поэтому право не перенести, а доступ мог бы расшириться. Снимите или пересоздайте это право осознанно до переноса проекта.'),
     (N'err.ECR-SCHM-0422.migrateGrantsNotMapped', N'kz', N'Мақсатты нұсқада тыйым қойылған ресурстың кодымен парақ, кесте немесе баған жоқ, сондықтан тыйымды көшіру мүмкін емес. Жобаны көшірместен бұрын бұл тыйымды саналы түрде алып тастаңыз немесе қайта жасаңыз.', N'Мақсатты нұсқада қол жеткізу құқығы (тыйым немесе шектейтін оқу) қойылған ресурстың кодымен парақ, кесте немесе баған жоқ, сондықтан құқықты көшіру мүмкін емес, ал қолжетімділік кеңеюі мүмкін. Жобаны көшірместен бұрын бұл құқықты саналы түрде алып тастаңыз немесе қайта жасаңыз.'),
-    -- ⚠ kz вище — потрібна вичитка носієм.
     -- D-263: SMTP задається в адмін-налаштуваннях, канал додає адресатів-ролі.
     (N'notifications.smtpTransportHint', N'en', N'The server, sender address and password come from the application configuration; the channel only adds recipients.', N'The server, sender and login come from the SMTP settings above (or from the process configuration while they are not set); the channel adds recipients: addresses and roles.'),
     (N'notifications.smtpTransportHint', N'ru', N'Сервер, адрес отправителя и пароль берутся из конфигурации приложения; канал лишь добавляет получателей.', N'Сервер, отправитель и логин берутся из настроек SMTP выше (пока они не заданы — из конфигурации процесса); канал добавляет получателей: адреса и роли.'),
@@ -661,7 +660,7 @@ UPDATE t
     (N'tables.readOnlyHint',             N'en', N'A relation decides where a table takes its numbers from, so changing it would silently change forms already submitted. Clone the version to change it (ФВ-7.1).',
                                                 N'A relation decides where a table takes its numbers from, so changing it would silently change forms already submitted. Clone the version to change it.'),
     (N'security.roleCodeHint',           N'en', N'Used in grants and audit; it cannot be changed later.', N'Used in grants and audit. Built-in role codes cannot be changed.'),
-    -- SEC:ФВ-6.16 ent5 P2-2: звужене призначення враховується на аркушах області; kz — на вичитку носієм мови.
+    -- SEC:ФВ-6.16 ent5 P2-2: звужене призначення враховується на аркушах області.
     (N'effectiveAccess.scopeNarrowed',   N'en', N'Narrowed to sheets or periods: opens documents but does not raise the project level', N'Narrowed to sheets or periods: counted on the sheets of its scope (not counted when narrowed by periods); the level may be higher than the actual one'),
     (N'effectiveAccess.scopeNarrowed',   N'ru', N'Сужено листами или периодами: открывает документы, но не повышает уровень проекта', N'Сужено листами или периодами: учитывается на листах своей области (при сужении по периодам не учитывается); уровень может быть выше фактического'),
     (N'effectiveAccess.scopeNarrowed',   N'kz', N'Парақтармен немесе кезеңдермен тарылтылған: құжаттарды ашады, бірақ жоба деңгейін көтермейді', N'Парақтармен немесе кезеңдермен тарылтылған: өз аумағындағы парақтарда ескеріледі (кезеңдер бойынша тарылтылса — ескерілмейді); деңгей нақтыдан жоғары болуы мүмкін'),
@@ -6391,6 +6390,7 @@ USING (VALUES
     (N'registries.relationTargetFor', N'en', N'Link target of field {field}', 1),
     (N'registries.relationsEditHint', N'en', N'The target of a link can be changed to another registry while no record holds a value in that field; otherwise the server refuses it.', 1),
     (N'err.ECR-REG-0422.lookupRetargetUsedByRules', N'en', N'The link of field "{fieldCode}" cannot be changed: {total} rule(s), formula(s) or methodology version(s) read attributes through it: {usedBy}. Change or disable them first.', 1),
+    (N'err.ECR-REG-0409.definitionChanged', N'en', N'The definition of registry "{registryCode}" was changed after you opened it. Reload it and repeat your changes.', 1),
     -- ru/kz — окремою порцією COLL:fv812-relations у блоці I18N нижче.
     -- COLL:fv812-relations ── кінець секції ──
     -- COLL:sec-s3s6 ── межа явних адрес каналу сповіщень (рев'ю ent6 S3) ──
@@ -6435,10 +6435,25 @@ USING (VALUES
     -- COLL:recalc-rl ── Межа частоти перерахунку документа (рекомендація безпекового рев'ю «Аудит») ──
     (N'err.ECR-REQ-0429.tooManyRecalculations', N'en', N'Too many recalculation requests in a short time. Wait a moment and try again; the Retry-After header says how long.', 1),
     -- COLL:recalc-rl ── кінець секції ──
+    -- COLL:fv812-ifmatch ── обов'язковий If-Match на PUT опису довідника ──
+    (N'err.ECR-REQ-0422.definitionVersionRequired', N'en', N'Saving a registry definition needs an If-Match header carrying the definition version you read. Reload the definition and save again.', 1),
+    -- ru/kz — окремою порцією COLL:fv812-ifmatch у блоці I18N нижче.
+    -- COLL:fv812-ifmatch ── кінець секції ──
     -- CL:states-a11y-2 ── поле Lookup без цілі у вкладці «Зв'язки» (стани нових панелей 2) ──
-    (N'registries.relationTargetMissing', N'en', N'Target not set: choose a registry', 1)
+    (N'registries.relationTargetMissing', N'en', N'Target not set: choose a registry', 1),
     -- ru/kz — окремою порцією CL:states-a11y-2 у блоці I18N нижче.
     -- CL:states-a11y-2 ── кінець секції ──
+    -- COLL:check-relation ── Підказка MapJson для виду зв'язку Check: поле обов'язкове (RelationSpecParser.ParseCheck) ──
+    (N'tables.mapJsonCheckHint', N'en', N'Required for Check: a JSON object with "left" (source column) and "right" (target column); optional "tolerance", "toleranceKind" (abs or rel) and "severity" (Warn, Block or Info).', 1),
+    -- COLL:check-relation ── кінець секції ──
+    -- COLL:p3-ent7 ── усі споживачі зв'язку приховані від автора (ФВ-8.12, ent7 P3-7); підпис відмови grantsNotMapped у діалозі переносу (ent7 P3-4) ──
+    (N'documents.migrateRefusalGrantsNotMapped', N'en', N'Roles have permissions on sheets, tables or columns that have no counterpart in the target version; they would be lost.', 1),
+    (N'err.ECR-REG-0422.lookupRetargetUsedByHidden', N'en', N'The link of field "{fieldCode}" cannot be changed: {total} rule(s), formula(s) or methodology version(s) read attributes through it, and all {hiddenCount} shown in this response are hidden from you. Ask someone with access to change or disable them first.', 1),
+    -- ru/kz — окремою порцією COLL:p3-ent7 у блоці I18N нижче.
+    -- COLL:p3-ent7 ── кінець секції ──
+    -- COLL:p3-audit-key ── Залежність розкладу знято видаленням розкладу-джерела (`CollectionScheduleHandlers`, `structureChangeReason.ts`) ──
+    (N'integrationAudit.scheduleDependencyCleared', N'en', N'Dependency of collection schedule {id} cleared: schedule {deleted} of entity "{entity}" was deleted.', 1)
+    -- COLL:p3-audit-key ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -14081,7 +14096,6 @@ GO
 -- COLL:sec-a1 ── кінець секції ──
 
 -- COLL:nosource-hints ── ru/kz підказки порожнього списку з'єднань; власна порція ──
--- ⚠ kz — найкращий переклад без термінології замовника: потрібна вичитка носієм.
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
   FROM (VALUES
@@ -14220,7 +14234,6 @@ GO
 -- COLL:an9-rules ── кінець секції ──
 
 -- COLL:fv616 ── ru/kz розрізу доступу на аркуші, таблиці й колонці; власна порція #I18N ──
--- kz — найкращий переклад, потрібна вичитка носієм.
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
   FROM (VALUES
@@ -14620,7 +14633,7 @@ OPTION (RECOMPILE);
 GO
 -- COLL:warn-grid ── кінець секції ──
 
--- COLL:smtp-probe ── ru/kz проби SMTP-каналу без адресатів (D-256); власна порція; kz — потрібна вичитка носієм ──
+-- COLL:smtp-probe ── ru/kz проби SMTP-каналу без адресатів (D-256); власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
   FROM (VALUES
@@ -14648,7 +14661,7 @@ OPTION (RECOMPILE);
 GO
 -- COLL:fv1315 ── кінець секції ──
 
--- COLL:fv1315-ui ── ru/kz залежності розкладу збору: select і подія пропуску (ФВ-13.15, клієнт); власна порція; kz — потрібна вичитка носієм ──
+-- COLL:fv1315-ui ── ru/kz залежності розкладу збору: select і подія пропуску (ФВ-13.15, клієнт); власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
   FROM (VALUES
@@ -14667,7 +14680,7 @@ OPTION (RECOMPILE);
 GO
 -- COLL:fv1315-ui ── кінець секції ──
 
--- COLL:smtp-hardening ── ru/kz межі частоти проб транспорту; власна порція; kz — потрібна вичитка носієм ──
+-- COLL:smtp-hardening ── ru/kz межі частоти проб транспорту; власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
   FROM (VALUES
@@ -14678,7 +14691,7 @@ OPTION (RECOMPILE);
 GO
 -- COLL:smtp-hardening ── кінець секції ──
 
--- COLL:sec-smtp-s1s2 ── ru/kz відмов S1 налаштувань SMTP; власна порція; kz — потрібна вичитка носієм ──
+-- COLL:sec-smtp-s1s2 ── ru/kz відмов S1 налаштувань SMTP; власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
   FROM (VALUES
@@ -14744,7 +14757,7 @@ OPTION (RECOMPILE);
 GO
 -- REG:rt25-client ── кінець секції ──
 
--- I18N:backfill-2 2026-09-30 ── ru/kz для ключів, що мали лише en (правило перевірки, причина публікації звіту); переклади машинні, потребують вичитки носієм; власна порція ──
+-- I18N:backfill-2 2026-09-30 ── ru/kz для ключів, що мали лише en (правило перевірки, причина публікації звіту); переклади машинні; власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
   FROM (VALUES
@@ -15054,13 +15067,15 @@ SELECT v.[Key], v.Lang, v.Val
     (N'registries.relationsEditHint', N'ru', N'Цель связи можно заменить другим справочником, пока ни в одной записи нет значения этого поля; иначе сервер откажет.'),
     (N'registries.relationsEditHint', N'kz', N'Байланыс мақсатын осы өрістің мәні бірде-бір жазбада болмаған кезде басқа анықтамалыққа ауыстыруға болады; әйтпесе сервер бас тартады.'),
     (N'err.ECR-REG-0422.lookupRetargetUsedByRules', N'ru', N'Связь поля «{fieldCode}» нельзя изменить: через неё читают атрибуты правил, формул или версий методологий — {total}: {usedBy}. Сначала измените или отключите их.'),
-    (N'err.ECR-REG-0422.lookupRetargetUsedByRules', N'kz', N'«{fieldCode}» өрісінің байланысын өзгерту мүмкін емес: ол арқылы атрибуттарды оқитын ережелер, формулалар немесе әдістеме нұсқалары бар — {total}: {usedBy}. Алдымен оларды өзгертіңіз немесе өшіріңіз.')
+    (N'err.ECR-REG-0422.lookupRetargetUsedByRules', N'kz', N'«{fieldCode}» өрісінің байланысын өзгерту мүмкін емес: ол арқылы атрибуттарды оқитын ережелер, формулалар немесе әдістеме нұсқалары бар — {total}: {usedBy}. Алдымен оларды өзгертіңіз немесе өшіріңіз.'),
+    (N'err.ECR-REG-0409.definitionChanged', N'ru', N'Определение справочника «{registryCode}» было изменено после того, как вы его открыли. Перезагрузите его и повторите свои изменения.'),
+    (N'err.ECR-REG-0409.definitionChanged', N'kz', N'«{registryCode}» анықтамалығының анықтамасы Сіз оны ашқаннан кейін өзгертілген. Оны қайта жүктеп, өзгерістеріңізді қайталаңыз.')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
 -- COLL:fv812-relations ── кінець секції ──
 
--- COLL:recalc-rl ── ru/kz межі частоти перерахунку документа; власна порція; kz — потрібна вичитка носієм ──
+-- COLL:recalc-rl ── ru/kz межі частоти перерахунку документа; власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
   FROM (VALUES
@@ -15082,6 +15097,17 @@ OPTION (RECOMPILE);
 GO
 -- COLL:sec-s3s6 ── кінець секції ──
 
+-- COLL:fv812-ifmatch ── ru/kz обов'язкового If-Match на PUT опису довідника; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-REQ-0422.definitionVersionRequired', N'ru', N'Для сохранения определения справочника нужен заголовок If-Match с версией определения, которую вы читали. Перезагрузите определение и сохраните снова.'),
+    (N'err.ECR-REQ-0422.definitionVersionRequired', N'kz', N'Анықтамалық анықтамасын сақтау үшін Сіз оқыған анықтама нұсқасы бар If-Match тақырыбы қажет. Анықтаманы қайта жүктеп, қайта сақтаңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:fv812-ifmatch ── кінець секції ──
+
 -- CL:states-a11y-2 ── ru/kz поля Lookup без цілі (стани нових панелей 2); власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
@@ -15092,6 +15118,39 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- CL:states-a11y-2 ── кінець секції ──
+-- COLL:check-relation ── ru/kz підказка MapJson для виду Check; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'tables.mapJsonCheckHint', N'ru', N'Обязательно для «Проверки»: JSON-объект с полями "left" (столбец источника) и "right" (столбец приёмника); необязательны "tolerance", "toleranceKind" (abs или rel) и "severity" (Warn, Block или Info).'),
+    (N'tables.mapJsonCheckHint', N'kz', N'«Тексеру» үшін міндетті: "left" (көз бағаны) және "right" (қабылдағыш бағаны) өрістері бар JSON-нысан; "tolerance", "toleranceKind" (abs немесе rel) және "severity" (Warn, Block немесе Info) міндетті емес.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:check-relation ── кінець секції ──
+
+-- COLL:p3-ent7 ── ru/kz: усі споживачі зв'язку приховані від автора (ФВ-8.12, ent7 P3-7); власна порція; kz — потрібна вичитка носієм ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'documents.migrateRefusalGrantsNotMapped', N'ru', N'У ролей есть права на листы, таблицы или колонки, которых нет в целевой версии; они были бы потеряны.'),
+    (N'documents.migrateRefusalGrantsNotMapped', N'kz', N'Рөлдерде мақсатты нұсқада баламасы жоқ парақтарға, кестелерге немесе бағандарға құқықтар бар; олар жоғалар еді.'),
+    (N'err.ECR-REG-0422.lookupRetargetUsedByHidden', N'ru', N'Связь поля «{fieldCode}» нельзя изменить: через неё читают атрибуты правил, формул или версий методологий — {total}, и все {hiddenCount} из показанных в ответе скрыты от вас. Попросите того, у кого есть доступ, изменить или отключить их.'),
+    (N'err.ECR-REG-0422.lookupRetargetUsedByHidden', N'kz', N'«{fieldCode}» өрісінің байланысын өзгерту мүмкін емес: ол арқылы атрибуттарды оқитын ережелер, формулалар немесе әдістеме нұсқалары бар — {total}, ал жауапта көрсетілгеннің барлығы ({hiddenCount}) сізден жасырылған. Қолжетімділігі бар адамнан оларды өзгертуді немесе өшіруді сұраңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:p3-ent7 ── кінець секції ──
+-- COLL:p3-audit-key ── ru/kz зняття залежності розкладу; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'integrationAudit.scheduleDependencyCleared', N'ru', N'Зависимость расписания сбора {id} снята: расписание {deleted} сущности «{entity}» удалено.'),
+    (N'integrationAudit.scheduleDependencyCleared', N'kz', N'{id} жинау жоспарының тәуелділігі алынды: «{entity}» нысанының {deleted} жоспары жойылды.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:p3-audit-key ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t
