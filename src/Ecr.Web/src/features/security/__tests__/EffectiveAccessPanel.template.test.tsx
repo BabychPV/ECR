@@ -20,6 +20,7 @@ const Column: EffectiveAccessView = {
   isDenied: false,
   denyReason: null,
   groupsFromTicket: false,
+  levelMayExceedActual: false,
   caveat: 'DocumentStateNotConsidered',
   projectId: 3,
   contributions: [
@@ -79,6 +80,26 @@ describe('EffectiveAccessPanel: аркуш, таблиця, колонка', () 
     expect(screen.getAllByText(/effectiveAccess\.inheritedFrom/)).toHaveLength(1);
   });
 
+  it('звужена роль: показує чим звужено, причину «проєкт невидимий» і застереження про завищення', async () => {
+    stub({
+      ...Column,
+      levelMayExceedActual: true,
+      contributions: [
+        { source: 'Grant', roleCode: 'N1', principalSid: null, permissionCode: null, level: 'Manage', isDeny: false, scope: 'Narrowed', counted: true, inheritedFrom: 'Project:3', narrowedBy: 'Sheets:F1', notCountedReason: null },
+        { source: 'Grant', roleCode: 'N2', principalSid: null, permissionCode: null, level: 'Approve', isDeny: false, scope: 'Unscoped', counted: false, inheritedFrom: 'Sheet:7', narrowedBy: null, notCountedReason: 'ProjectNotVisible' },
+      ],
+    });
+    show();
+
+    fireEvent.change(screen.getByLabelText(/effectiveAccess\.kind⟧/), { target: { value: 'Column' } });
+    fireEvent.change(screen.getByLabelText(/effectiveAccess\.resourceId/), { target: { value: '9' } });
+    fireEvent.change(screen.getByLabelText(/effectiveAccess\.projectId/), { target: { value: '3' } });
+    fireEvent.click(screen.getByRole('button', { name: /effectiveAccess\.explain/ }));
+
+    expect(await screen.findByTestId('effective-access-may-exceed')).toBeDefined();
+    expect(screen.getByText(/effectiveAccess\.narrowedBy/)).toBeDefined();
+    expect(screen.getByText(/effectiveAccess\.projectNotVisible/)).toBeDefined();
+  });
   it('ФВ-6.16: для довідника проєкт не питає, застереження немає', async () => {
     stub({ ...Column, resource: 'Registry:5', caveat: null, projectId: null, contributions: [] });
     show();

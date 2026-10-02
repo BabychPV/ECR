@@ -21,6 +21,7 @@ const Denied: EffectiveAccessView = {
   isDenied: true,
   denyReason: 'ExplicitDeny',
   groupsFromTicket: false,
+  levelMayExceedActual: false,
   contributions: [
     { source: 'Permission', roleCode: 'Glb', principalSid: null, permissionCode: 'Registry.View', level: 'Read', isDeny: false, scope: 'Unscoped', counted: true },
     { source: 'Grant', roleCode: 'Dny', principalSid: null, permissionCode: null, level: 'Read', isDeny: true, scope: 'Unscoped', counted: true },

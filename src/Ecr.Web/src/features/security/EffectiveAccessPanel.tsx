@@ -150,6 +150,12 @@ function EffectiveAccessResult({ view }: { view: EffectiveAccessView }): JSX.Ele
         </Alert>
       )}
 
+      {view.levelMayExceedActual && (
+        <Alert color="statusWarning" data-testid="effective-access-may-exceed">
+          {t('effectiveAccess.mayExceed')}
+        </Alert>
+      )}
+
       {/* ⛔ Слово, а не лише колір: заборона виграє над усім, і це читається тими, хто не бачить кольору. */}
       {view.isDenied && (
         <Alert color="statusError" title={t('effectiveAccess.deny')}>
@@ -219,7 +225,18 @@ function ContributionRow({ c }: { c: EffectiveAccessContribution }): JSX.Element
       </Table.Td>
       <Table.Td>{c.isDeny ? t('effectiveAccess.deny') : c.level}</Table.Td>
       <Table.Td>{scopeLabel(c.scope)}</Table.Td>
-      <Table.Td>{c.counted ? t('effectiveAccess.counted') : t('effectiveAccess.notCounted')}</Table.Td>
+      <Table.Td>
+        {c.counted
+          ? t('effectiveAccess.counted')
+          : c.notCountedReason === 'ProjectNotVisible'
+            ? t('effectiveAccess.projectNotVisible')
+            : t('effectiveAccess.notCounted')}
+        {c.narrowedBy != null && (
+          <Text size="xs" c="dimmed">
+            {t('effectiveAccess.narrowedBy', { by: c.narrowedBy })}
+          </Text>
+        )}
+      </Table.Td>
     </Table.Tr>
   );
 }

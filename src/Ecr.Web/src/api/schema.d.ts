@@ -19437,6 +19437,10 @@ export interface components {
             isDeny: boolean;
             /** @description Рівень: у гранта — його рівень, у права — той, який воно відкриває для довідника. */
             level: components["schemas"]["GrantLevel"];
+            /** @description Для `Narrowed`: чим звужено — `Sheets:F1,F2`, `Periods:from..to`; інакше `null`. */
+            narrowedBy?: null | string;
+            /** @description `ProjectNotVisible` — грант нижче проєкту без видимого проєкту (S2); інакше `null`. */
+            notCountedReason?: null | string;
             /** @description Код права для `Permission`; для `Grant` — `null`. */
             permissionCode: null | string;
             /** @description SID групи, через яку прийшла роль; `null` — призначена особисто. */
@@ -19465,6 +19469,13 @@ export interface components {
             isDenied: boolean;
             /** @description Підсумковий рівень — той, що дає профіль доступу (`AccessProfile`). */
             level: components["schemas"]["GrantLevel"];
+            /**
+             * @description Є призначення, звужене аркушами чи періодами (`Narrowed`): розріз бачить лише аркушні звуження,
+             *     тож заборона такого призначення в періоді не знижує показаний рівень — фактичний може бути НИЖЧИМ за показаний
+             *     (грант за періодом, навпаки, у розріз не потрапляє).
+             * @default false
+             */
+            levelMayExceedActual: boolean;
             /**
              * Format: int32
              * @description Проєкт, у шаблоні якого розглянуто аркуш, таблицю чи колонку; інакше `null`.

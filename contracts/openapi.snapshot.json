@@ -3922,6 +3922,20 @@
             "$ref": "#/components/schemas/GrantLevel",
             "description": "Рівень: у гранта — його рівень, у права — той, який воно відкриває для довідника."
           },
+          "narrowedBy": {
+            "description": "Для `Narrowed`: чим звужено — `Sheets:F1,F2`, `Periods:from..to`; інакше `null`.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "notCountedReason": {
+            "description": "`ProjectNotVisible` — грант нижче проєкту без видимого проєкту (S2); інакше `null`.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
           "permissionCode": {
             "description": "Код права для `Permission`; для `Grant` — `null`.",
             "type": [
@@ -3996,6 +4010,11 @@
           "level": {
             "$ref": "#/components/schemas/GrantLevel",
             "description": "Підсумковий рівень — той, що дає профіль доступу (`AccessProfile`)."
+          },
+          "levelMayExceedActual": {
+            "default": false,
+            "description": "Є призначення, звужене аркушами чи періодами (`Narrowed`): розріз бачить лише аркушні звуження,\nтож заборона такого призначення в періоді не знижує показаний рівень — фактичний може бути НИЖЧИМ за показаний\n(грант за періодом, навпаки, у розріз не потрапляє).",
+            "type": "boolean"
           },
           "projectId": {
             "description": "Проєкт, у шаблоні якого розглянуто аркуш, таблицю чи колонку; інакше `null`.",
