@@ -6187,6 +6187,10 @@ USING (VALUES
     -- COLL:smtp-hardening ── Межа частоти проб транспорту (рекомендація безпекового рев'ю D-263) ──
     (N'err.ECR-REQ-0429.tooManySmtpTests', N'en', N'Too many test messages in a short time. Wait a moment and try again; the Retry-After header says how long.', 1),
     -- COLL:smtp-hardening ── кінець секції ──
+    -- COLL:sec-smtp-s1s2 ── Збережений пароль SMTP не переноситься на іншу адресу; пароль без шифрування заборонено (ent6 S1, `SaveSmtpSettingsHandler`) ──
+    (N'err.ECR-REQ-0422.smtpPasswordReentryRequired', N'en', N'The server, port, encryption or login was changed, so the saved password is not carried over: enter the password again.', 1),
+    (N'err.ECR-REQ-0422.smtpPasswordNeedsTls', N'en', N'Password authentication needs encryption: choose STARTTLS, or switch authentication off for an internal relay.', 1),
+    -- COLL:sec-smtp-s1s2 ── кінець секції ──
     -- SEC:effective-access ── Розріз «ресурс → рівень → грант якої ролі» (ФВ-6.16, D-220, `EffectiveAccessPanel`, GET /security/users/{id}/effective-access) ──
     (N'err.ECR-REQ-0422.effectiveAccessResource', N'en', N'The resource must be given as a type and a positive number, for example Registry:5 or Project:3.', 1),
     (N'effectiveAccess.show',            N'en', N'Show effective access', 1),
@@ -14627,6 +14631,19 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:smtp-hardening ── кінець секції ──
+
+-- COLL:sec-smtp-s1s2 ── ru/kz відмов S1 налаштувань SMTP; власна порція; kz — потрібна вичитка носієм ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-REQ-0422.smtpPasswordReentryRequired', N'ru', N'Сервер, порт, шифрование или логин изменены, поэтому сохранённый пароль не переносится: введите пароль заново.'),
+    (N'err.ECR-REQ-0422.smtpPasswordReentryRequired', N'kz', N'Сервер, порт, шифрлау немесе логин өзгертілді, сондықтан сақталған пароль көшірілмейді: парольді қайта енгізіңіз.'),
+    (N'err.ECR-REQ-0422.smtpPasswordNeedsTls', N'ru', N'Аутентификация по паролю требует шифрования: выберите STARTTLS или отключите аутентификацию для внутреннего релея.'),
+    (N'err.ECR-REQ-0422.smtpPasswordNeedsTls', N'kz', N'Пароль арқылы аутентификация шифрлауды қажет етеді: STARTTLS таңдаңыз немесе ішкі релей үшін аутентификацияны өшіріңіз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:sec-smtp-s1s2 ── кінець секції ──
 
 -- REG:rt25-client ── ru/kz сторінки впливу довідника і банера застарілості (RT-25, клієнт); власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)

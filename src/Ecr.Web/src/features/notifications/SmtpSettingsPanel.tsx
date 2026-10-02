@@ -16,6 +16,7 @@ import {
 } from '@mantine/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { usePendingLoading } from '@/features/common/usePendingLoading';
+import { EcrApiError } from '@/api/client';
 import { t } from '@/shared/i18n';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { showApiError, showDone } from '@/shared/ui/notify';
@@ -28,6 +29,9 @@ import {
   type SmtpSettingsInput,
 } from './api';
 import { showProbeResult } from './probeResult';
+
+/** Ключ відмови `422`: адресу змінено, а збережений пароль не підтверджено (`SaveSmtpSettingsHandler`). */
+const SmtpPasswordReentryRequiredKey = 'err.ECR-REQ-0422.smtpPasswordReentryRequired';
 
 /**
  * Налаштування SMTP, які адміністратор задає в системі (`D-263`, `GET/PUT /notifications/smtp`).
@@ -47,15 +51,27 @@ export function SmtpSettingsPanel(): JSX.Element {
   });
   const [draft, setDraft] = useState<SmtpDraft | null>(null);
   const [testTo, setTestTo] = useState('');
+  const [passwordHint, setPasswordHint] = useState<string | null>(null);
 
   const save = useMutation({
     mutationFn: (value: SmtpDraft) => saveSmtpSettings(inputOf(value)),
+    onMutate: () => setPasswordHint(null),
     onSuccess: async (saved) => {
       queryClient.setQueryData(SmtpSettingsKey, saved);
       setDraft(null);
       showDone(t('smtp.saved'));
     },
-    onError: showApiError,
+    onError: (error) => {
+      // ⛔ S1 (ent6): адресу змінено, а збережений пароль не переноситься — підсвічуємо поле пароля.
+      if (
+        error instanceof EcrApiError &&
+        error.problem.status === 422 &&
+        error.problem.extensions2?.['messageKey'] === SmtpPasswordReentryRequiredKey
+      ) {
+        setPasswordHint(t('err.ECR-REQ-0422.smtpPasswordReentryRequired'));
+      }
+      showApiError(error);
+    },
   });
 
   const test = useMutation({
@@ -171,8 +187,12 @@ export function SmtpSettingsPanel(): JSX.Element {
             label={t('smtp.password')}
             description={settings.data.hasPassword ? t('smtp.passwordStored') : t('smtp.passwordNone')}
             autoComplete="new-password"
+            error={passwordHint}
             value={form.password}
-            onChange={(e) => set({ password: e.currentTarget.value })}
+            onChange={(e) => {
+              setPasswordHint(null);
+              set({ password: e.currentTarget.value });
+            }}
           />
         </Group>
       )}

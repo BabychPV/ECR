@@ -1,4 +1,4 @@
-// src/Ecr.Application/Notifications/SmtpSettingsHandlers.cs
+﻿// src/Ecr.Application/Notifications/SmtpSettingsHandlers.cs
 using Ecr.Application.Common;
 using Ecr.Application.Errors;
 using Ecr.Application.Integration;
@@ -106,9 +106,21 @@ public sealed class SaveSmtpSettingsHandler(
         var user = string.IsNullOrWhiteSpace(input.UserName) ? null : input.UserName.Trim();
         var newPassword = string.IsNullOrEmpty(input.Password) ? null : input.Password;
         var clears = input.ClearPassword || input.AuthMode == SmtpAuthMode.None;
-        var willHavePassword = !clears && (newPassword is not null || row.HasPassword);
+        var hadPassword = row.HasPassword;
+        var willHavePassword = !clears && (newPassword is not null || hadPassword);
 
         Validate(input, host, from, user, willHavePassword);
+
+        // ⛔ S1 (ent6): збережений пароль іде лише туди, куди його ввели. Змінився хост, порт, шифрування чи
+        // логін, а пароль не введено заново, — відмова: інакше адміністратор із правом на налаштування
+        // перенаправив би збережений секрет на чужий хост (порожній Password = «лишити» цього не бачить).
+        if (!clears && newPassword is null && hadPassword && EndpointChanged(row, host, input, user))
+        {
+            throw Invalid(
+                PasswordReentryRequiredKey,
+                "Адресу, порт, шифрування чи логін змінено: збережений пароль не переноситься — введіть пароль заново.",
+                "password");
+        }
 
         row.Update(
             host, input.Port, input.EncryptionMode, from, input.FromName, input.AuthMode, user, input.IsEnabled,
@@ -136,7 +148,8 @@ public sealed class SaveSmtpSettingsHandler(
                 auth = input.AuthMode.ToString(),
                 userName = row.UserName,
                 isEnabled = input.IsEnabled,
-                passwordChanged = newPassword is not null || (clears && input.ClearPassword),
+                // Стирання збереженого секрету (явне чи перехід на режим без автентифікації) — теж зміна секрету.
+                passwordChanged = newPassword is not null || (clears && hadPassword),
             },
             ct).ConfigureAwait(false);
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
@@ -145,6 +158,18 @@ public sealed class SaveSmtpSettingsHandler(
 
         return GetSmtpSettingsHandler.ToView(row, sender.IsConfigured);
     }
+
+    /// <summary>Ключ відмови: адресу змінено, а збережений пароль не підтверджено введенням.</summary>
+    public const string PasswordReentryRequiredKey = "err.ECR-REQ-0422.smtpPasswordReentryRequired";
+
+    /// <summary>Ключ відмови: пароль не можна слати без шифрування (AUTH LOGIN відкритим текстом).</summary>
+    public const string PasswordNeedsTlsKey = "err.ECR-REQ-0422.smtpPasswordNeedsTls";
+
+    private static bool EndpointChanged(SmtpSettings row, string host, SmtpSettingsInput input, string? user)
+        => !string.Equals(row.Host, host, StringComparison.OrdinalIgnoreCase)
+           || row.Port != input.Port
+           || row.EncryptionMode != input.EncryptionMode
+           || !string.Equals(row.UserName ?? string.Empty, user ?? string.Empty, StringComparison.Ordinal);
 
     private static void Validate(SmtpSettingsInput input, string host, string from, string? user, bool willHavePassword)
     {
@@ -177,6 +202,13 @@ public sealed class SaveSmtpSettingsHandler(
         if (input.FromName is { Length: > SmtpSettings.NameMaxLength })
         {
             throw Invalid("err.ECR-REQ-0422.smtpSettingsInvalid", "Ім'я відправника задовге.", "fromName");
+        }
+
+        // ⛔ S1: автентифікація за паролем без шифрування віддала б пароль відкритим текстом (AUTH LOGIN).
+        // Без винятків і прапорів: внутрішній relay без TLS — AuthMode.None.
+        if (input.AuthMode == SmtpAuthMode.Password && input.EncryptionMode == SmtpEncryptionMode.None)
+        {
+            throw Invalid(PasswordNeedsTlsKey, "Автентифікація за паролем вимагає шифрування (STARTTLS).", "encryption");
         }
 
         if (input.AuthMode == SmtpAuthMode.Password
