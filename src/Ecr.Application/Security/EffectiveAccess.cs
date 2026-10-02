@@ -28,6 +28,8 @@ namespace Ecr.Application.Security;
 /// Для аркуша, таблиці й колонки — предок, на якому стоїть грант (<c>Project:3</c>, <c>Sheet:7</c>), якщо це
 /// не сам запитаний ресурс; інакше <c>null</c>.
 /// </param>
+/// <param name="NarrowedBy">Для <c>Narrowed</c>: чим звужено — <c>Sheets:F1,F2</c>, <c>Periods:from..to</c>; інакше <c>null</c>.</param>
+/// <param name="NotCountedReason"><c>ProjectNotVisible</c> — грант нижче проєкту без видимого проєкту (S2); інакше <c>null</c>.</param>
 public sealed record EffectiveAccessContribution(
     string Source,
     string RoleCode,
@@ -37,7 +39,9 @@ public sealed record EffectiveAccessContribution(
     bool IsDeny,
     string Scope,
     bool Counted,
-    string? InheritedFrom = null);
+    string? InheritedFrom = null,
+    string? NarrowedBy = null,
+    string? NotCountedReason = null);
 
 /// <summary>Розріз «ресурс → підсумковий рівень → який грант якої ролі його дав» (ФВ-6.16, D-220).</summary>
 /// <param name="UserId">Людина.</param>
@@ -53,6 +57,10 @@ public sealed record EffectiveAccessContribution(
 /// й звужень області періодами; для довідника й проєкту — <c>null</c>.
 /// </param>
 /// <param name="ProjectId">Проєкт, у шаблоні якого розглянуто аркуш, таблицю чи колонку; інакше <c>null</c>.</param>
+/// <param name="LevelMayExceedActual">
+/// Є призначення, звужене аркушами чи періодами (<c>Narrowed</c>): розріз бачить лише аркушні звуження,
+/// тож фактичний рівень у конкретному періоді може бути НИЖЧИМ за показаний.
+/// </param>
 public sealed record EffectiveAccessView(
     int UserId,
     string UserName,
@@ -63,7 +71,8 @@ public sealed record EffectiveAccessView(
     bool GroupsFromTicket,
     IReadOnlyList<EffectiveAccessContribution> Contributions,
     string? Caveat = null,
-    int? ProjectId = null)
+    int? ProjectId = null,
+    bool LevelMayExceedActual = false)
 {
     /// <summary>Значення <see cref="Caveat"/>: рівень без стану документа й без звужень за періодом.</summary>
     public const string DocumentStateNotConsidered = "DocumentStateNotConsidered";
@@ -274,10 +283,29 @@ public sealed class GetEffectiveAccessHandler(
             {
                 // Грант на предка — грант; область призначення дивиться на ПРОЄКТ, у якому питають.
                 var scope = ClassifyScope(row, ResourceKind.Project, project, isGrant: true);
+                string? narrowedBy = null;
+                var counted = scope is "Unscoped" or "InScope";
+                if (scope == "Narrowed" && RoleAssignmentScope.TryParse(row.ScopeJson!) is { } narrowedScope)
+                {
+                    narrowedBy = DescribeNarrowing(narrowedScope);
+                    // EditRules.Effective питає шари з period = null: шар із періодами не діє, лише аркушний.
+                    counted = !narrowedScope.HasPeriods && narrowedScope.IncludesSheet(chain.SheetCode);
+                }
+
                 contributions.Add((depth, new EffectiveAccessContribution(
                     "Grant", row.RoleCode, row.PrincipalSid, null, row.Level ?? GrantLevel.None, row.IsDeny,
-                    scope, scope is "Unscoped" or "InScope", from == requested ? null : from)));
+                    scope, counted, from == requested ? null : from, narrowedBy)));
             }
+        }
+
+        // S2: грант нижче проєкту діє лише у видимому проєкті (грант ≥ Read, що сам враховано).
+        var projectVisible = contributions.Any(c => c.Depth == 0 && c.Row.Counted && !c.Row.IsDeny
+                                                    && c.Row.Level >= GrantLevel.Read);
+        if (!projectVisible)
+        {
+            contributions = [.. contributions.Select(c => c.Depth > 0 && c.Row.Counted
+                ? (c.Depth, c.Row with { Counted = false, NotCountedReason = "ProjectNotVisible" })
+                : c)];
         }
 
         var context = default(CellAccessContext) with
@@ -306,7 +334,8 @@ public sealed class GetEffectiveAccessHandler(
                 .ThenBy(c => c.Row.PrincipalSid, StringComparer.Ordinal)
                 .Select(c => c.Row)],
             EffectiveAccessView.DocumentStateNotConsidered,
-            project);
+            project,
+            contributions.Any(c => c.Row.Scope == "Narrowed"));
     }
 
     /// <summary>Заборона на ключ: ролі без області, ролі з областю проєкту, звужені шари, що діють на аркуш.</summary>
@@ -366,6 +395,23 @@ public sealed class GetEffectiveAccessHandler(
             row.IsDeny,
             scope,
             scope is "Unscoped" or "InScope");
+    }
+
+    /// <summary>Чим звужено призначення: <c>Sheets:F1,F2</c>, <c>Periods:202401..202412</c>, обидва через <c>;</c>.</summary>
+    private static string DescribeNarrowing(RoleAssignmentScope scope)
+    {
+        var parts = new List<string>();
+        if (scope.SheetCodes.Count > 0)
+        {
+            parts.Add("Sheets:" + string.Join(',', scope.SheetCodes));
+        }
+
+        if (scope.HasPeriods)
+        {
+            parts.Add($"Periods:{scope.PeriodFrom?.Value.ToString(CultureInfo.InvariantCulture)}..{scope.PeriodTo?.Value.ToString(CultureInfo.InvariantCulture)}");
+        }
+
+        return string.Join(';', parts);
     }
 
     private static string ClassifyScope(AccessSourceRow row, ResourceKind kind, int resourceId, bool isGrant)

@@ -94,7 +94,9 @@ public sealed class EffectiveAccessInheritanceHttpTests(SqlServerFixture sql)
         var hidden = await GetAsync(admin, sheetOnly.Id, $"Sheet:{s.SheetId}", s.ProjectA);
         Assert.Equal("None", hidden.GetProperty("level").GetString());
         Assert.Equal("NoGrant", hidden.GetProperty("denyReason").GetString());
-        Assert.Single(Contributions(hidden));
+        var hiddenRow = Assert.Single(Contributions(hidden));
+        Assert.False(hiddenRow.Counted);
+        Assert.Equal("ProjectNotVisible", hidden.GetProperty("contributions")[0].GetProperty("notCountedReason").GetString());
 
         var view = await GetAsync(admin, denied.Id, $"Table:{s.TableId}", s.ProjectA);
         Assert.Equal("None", view.GetProperty("level").GetString());
@@ -139,6 +141,53 @@ public sealed class EffectiveAccessInheritanceHttpTests(SqlServerFixture sql)
         var inB = await GetAsync(admin, scoped.Id, $"Sheet:{s.SheetId}", s.ProjectB);
         Assert.Equal("None", inB.GetProperty("level").GetString());
         Assert.False(Assert.Single(Contributions(inB)).Counted);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-6.16")]
+    public async Task Звужена_аркушем_роль_дає_рівень__внесок_враховано_з_narrowedBy__на_іншому_аркуші_і_з_періодом_не_враховано()
+    {
+        using var app = new EcrApiFactory(sql);
+        var s = await SeedAsync();
+
+        var role = await AddRoleAsync(s.Tag, "Nsh", [(ResourceKind.Project, s.ProjectA, GrantLevel.Manage, false)]);
+        var onSheet = await AddUserAsync([role], scopeProjects: [s.ProjectA], sheetCodes: [s.SheetCode]);
+        var onOther = await AddUserAsync([role], scopeProjects: [s.ProjectA], sheetCodes: ["OTHER"]);
+        var withPeriod = await AddUserWithPeriodAsync(role, s.ProjectA, s.SheetCode);
+        using var admin = await SignedInAdminAsync(app);
+
+        var hit = await GetAsync(admin, onSheet.Id, $"Sheet:{s.SheetId}", s.ProjectA);
+        Assert.Equal("Manage", hit.GetProperty("level").GetString());
+        Assert.Equal(GrantLevel.Manage, await OracleAsync(app, onSheet.Id, s, 0, 0, s.SheetId));
+        var hitRow = hit.GetProperty("contributions")[0];
+        Assert.True(hitRow.GetProperty("counted").GetBoolean());
+        Assert.Equal($"Sheets:{s.SheetCode}", hitRow.GetProperty("narrowedBy").GetString());
+        Assert.True(hit.GetProperty("levelMayExceedActual").GetBoolean());
+
+        var miss = await GetAsync(admin, onOther.Id, $"Sheet:{s.SheetId}", s.ProjectA);
+        Assert.Equal("None", miss.GetProperty("level").GetString());
+        Assert.False(miss.GetProperty("contributions")[0].GetProperty("counted").GetBoolean());
+        Assert.Equal("Sheets:OTHER", miss.GetProperty("contributions")[0].GetProperty("narrowedBy").GetString());
+
+        // Період: розріз його не знає, EditRules.Effective (period = null) шар не бере — рівень None, внесок не враховано.
+        var period = await GetAsync(admin, withPeriod.Id, $"Sheet:{s.SheetId}", s.ProjectA);
+        Assert.Equal("None", period.GetProperty("level").GetString());
+        Assert.False(period.GetProperty("contributions")[0].GetProperty("counted").GetBoolean());
+        Assert.Contains("Periods:", period.GetProperty("contributions")[0].GetProperty("narrowedBy").GetString());
+        Assert.Equal(GrantLevel.None, await OracleAsync(app, withPeriod.Id, s, 0, 0, s.SheetId));
+    }
+
+    private async Task<Account> AddUserWithPeriodAsync(int roleId, int projectId, string sheetCode)
+    {
+        var account = await AddUserAsync([]);
+        await using var db = new EcrDbContext(Options());
+        var assignment = new RoleAssignment(roleId, account.Id, principalSid: null);
+        assignment.SetScope(RoleAssignmentScope.Create([projectId], [sheetCode], new PeriodKey(202601), new PeriodKey(202603)));
+        db.RoleAssignments.Add(assignment);
+        await db.SaveChangesAsync();
+        return account;
     }
 
     [Fact]
