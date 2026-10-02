@@ -28,10 +28,12 @@ public sealed class SmtpSettingsHandlersTests
     private readonly IUnitOfWork _uow = Substitute.For<IUnitOfWork>();
     private readonly ICurrentUser _user = Substitute.For<ICurrentUser>();
     private readonly IClock _clock = Substitute.For<IClock>();
+    private readonly TransactionProbe _tx;
     private readonly INotificationSender _sender = Substitute.For<INotificationSender>();
 
     public SmtpSettingsHandlersTests()
     {
+        _tx = TransactionProbe.Attach(_uow, _audit);
         _clock.UtcNow.Returns(new DateTime(2026, 10, 1, 8, 0, 0, DateTimeKind.Utc));
         _user.UserId.Returns(Actor);
         _audit.WriteSecurityEventAsync(Arg.Do<SecurityEventRecord>(_events.Add), Arg.Any<CancellationToken>())
@@ -603,6 +605,25 @@ public sealed class SmtpSettingsHandlersTests
         Assert.Equal(before, _store.Row!.PasswordProtected);
         Assert.Contains("\"passwordChanged\":false", _events.Last().DetailsJson, StringComparison.Ordinal);
         await _uow.Received(2).SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "S8")]
+    public async Task Збереження_налаштувань_SMTP_пише_аудит_у_транзакції_збереження_і_збій_її_відкочує()
+    {
+        // ⚠ МУТАЦІЙНИЙ ДОКАЗ: у AuditAndSaveAsync викликати Audit/Save поза ExecuteInTransactionAsync.
+        Arrange();
+        await Save().HandleAsync(Input(), CancellationToken.None);
+
+        Assert.Equal([true], _tx.AuditInside);
+        Assert.Equal([true], _tx.SaveInside);
+
+        _uow.SaveChangesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromException<int>(new InvalidOperationException("db down")));
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => Save().HandleAsync(Input(host: "smtp2.corp.example"), CancellationToken.None));
+
+        Assert.Equal([true, true], _tx.AuditInside);
     }
 
     private TestSmtpSettingsHandler TestHandler(string? email)

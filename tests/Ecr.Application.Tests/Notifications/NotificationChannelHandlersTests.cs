@@ -30,10 +30,12 @@ public sealed class NotificationChannelHandlersTests
     private readonly IUnitOfWork _uow = Substitute.For<IUnitOfWork>();
     private readonly ICurrentUser _user = Substitute.For<ICurrentUser>();
     private readonly IClock _clock = Substitute.For<IClock>();
+    private readonly TransactionProbe _tx;
     private readonly INotificationSender _sender = Substitute.For<INotificationSender>();
 
     public NotificationChannelHandlersTests()
     {
+        _tx = TransactionProbe.Attach(_uow, _audit);
         _clock.UtcNow.Returns(new DateTime(2026, 9, 20, 8, 0, 0, DateTimeKind.Utc));
         _user.UserId.Returns(Actor);
         _audit.WriteSecurityEventAsync(Arg.Do<SecurityEventRecord>(_events.Add), Arg.Any<CancellationToken>())
@@ -652,6 +654,38 @@ public sealed class NotificationChannelHandlersTests
         await _sender.Received(1).SendAsync(
             Arg.Is<IReadOnlyList<string>>(r => r != null && r.Count == 0),
             Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "S8")]
+    public async Task Створення_зміна_секрет_і_видалення_каналу_пишуть_аудит_у_транзакції_збереження()
+    {
+        // ⚠ МУТАЦІЙНИЙ ДОКАЗ: у AuditAndSaveAsync викликати Audit/Save поза ExecuteInTransactionAsync.
+        var teams = await Save().CreateAsync(NotificationChannelKind.TeamsWebhook, "Teams", null, CancellationToken.None);
+        await Save().UpdateAsync(teams.Id, "Teams 2", true, null, CancellationToken.None);
+        await Secret().HandleAsync(teams.Id, "https://prod-17.westeurope.logic.azure.com/workflows/x", CancellationToken.None);
+        await Delete().HandleAsync(teams.Id, CancellationToken.None);
+
+        Assert.Equal(4, _tx.AuditInside.Count);
+        Assert.All(_tx.AuditInside, inside => Assert.True(inside));
+        Assert.All(_tx.SaveInside.Take(1), inside => Assert.True(inside));
+        Assert.True(_tx.SaveInside.Count >= 4);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "S8")]
+    public async Task Збій_збереження_зміни_каналу_не_лишає_події_поза_транзакцією()
+    {
+        var teams = await Save().CreateAsync(NotificationChannelKind.TeamsWebhook, "Teams", null, CancellationToken.None);
+        _tx.AuditInside.Clear();
+        _uow.SaveChangesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromException<int>(new InvalidOperationException("db down")));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => Save().UpdateAsync(teams.Id, "Teams 2", true, null, CancellationToken.None));
+
+        Assert.Equal([true], _tx.AuditInside);
     }
 
     private SaveNotificationChannelHandler Save() => new(_store, _sender, _access, _uow, _audit, _user, _clock);

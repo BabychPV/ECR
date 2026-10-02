@@ -100,6 +100,10 @@ public sealed class ReplaceNotificationRulesHandler(
         var cells = existing.ToDictionary(r => (r.EventKind, r.ChannelId));
         var added = 0;
 
+        // ⚠ Знімок ДО змін: клітинки міняються на місці (`rule.Update`), після циклу «до» вже не відновити.
+        var before = existing.Select(GetNotificationRulesHandler.ToView)
+            .OrderBy(r => r.EventKind).ThenBy(r => r.ChannelId).ToList();
+
         foreach (var cell in wanted)
         {
             // ⛔ Саме тут і живе ідемпотентність PUT: наявну клітинку міняємо,
@@ -119,11 +123,10 @@ public sealed class ReplaceNotificationRulesHandler(
         var removed = existing.Where(r => !keep.Contains((r.EventKind, r.ChannelId))).ToList();
         store.RemoveRules(removed);
 
-        await ListNotificationChannelsHandler.AuditAsync(
-            audit, clock, currentUser, profile.UserId, "NotificationRulesReplaced",
-            new { total = wanted.Count, added, updated = wanted.Count - added, removed = removed.Count }, ct)
+        await ListNotificationChannelsHandler.AuditAndSaveAsync(
+            uow, audit, clock, currentUser, profile.UserId, "NotificationRulesReplaced",
+            new { total = wanted.Count, added, updated = wanted.Count - added, removed = removed.Count, before, after = wanted }, ct)
             .ConfigureAwait(false);
-        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
 
         return new NotificationRuleMatrix(GetNotificationRulesHandler.AllEventKinds, wanted);
     }

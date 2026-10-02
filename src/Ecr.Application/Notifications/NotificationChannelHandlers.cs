@@ -157,6 +157,24 @@ public sealed class ListNotificationChannelsHandler(
                 clock.UtcNow, eventType, TargetUserId: null, TargetRoleId: null,
                 JsonSerializer.Serialize(details, Json), byUserId, currentUser.CorrelationId),
             ct);
+
+    /// <summary>
+    /// Подія аудиту і збереження зміни — ОДНІЄЮ транзакцією (S8 ent6).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Раніше подія автокомітилась ДО <c>SaveChangesAsync</c>: збій збереження лишав у журналі «Updated»
+    /// без зміни. Тепер збій відкочує і подію.
+    /// </remarks>
+    internal static Task AuditAndSaveAsync(
+        IUnitOfWork uow, IAuditWriter audit, IClock clock, ICurrentUser currentUser, int byUserId, string eventType,
+        object details, CancellationToken ct)
+        => uow.ExecuteInTransactionAsync(
+            async token =>
+            {
+                await AuditAsync(audit, clock, currentUser, byUserId, eventType, details, token).ConfigureAwait(false);
+                await uow.SaveChangesAsync(token).ConfigureAwait(false);
+            },
+            ct);
 }
 
 /// <summary>Створення і зміна каналу. Право <c>System.ManageNotifications</c>.</summary>
@@ -182,10 +200,9 @@ public sealed class SaveNotificationChannelHandler(
         var channel = new NotificationChannel(kind, name.Trim(), json, clock.UtcNow, profile.UserId);
         store.AddChannel(channel);
 
-        await ListNotificationChannelsHandler.AuditAsync(
-            audit, clock, currentUser, profile.UserId, "NotificationChannelCreated",
+        await ListNotificationChannelsHandler.AuditAndSaveAsync(
+            uow, audit, clock, currentUser, profile.UserId, "NotificationChannelCreated",
             new { name = channel.Name, kind = kind.ToString(), settings }, ct).ConfigureAwait(false);
-        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
 
         // ⚠ Ролі — другим збереженням: ключа каналу до першого немає. Збій тут лишає канал без ролей,
         // а не ролі без каналу (FK), і наступний PUT їх проставить.
@@ -208,10 +225,9 @@ public sealed class SaveNotificationChannelHandler(
         channel.Update(name.Trim(), json, isEnabled, clock.UtcNow, profile.UserId);
         await store.ReplaceChannelRolesAsync(id, roleIds, ct).ConfigureAwait(false);
 
-        await ListNotificationChannelsHandler.AuditAsync(
-            audit, clock, currentUser, profile.UserId, "NotificationChannelUpdated",
+        await ListNotificationChannelsHandler.AuditAndSaveAsync(
+            uow, audit, clock, currentUser, profile.UserId, "NotificationChannelUpdated",
             new { id, name = channel.Name, isEnabled, settings }, ct).ConfigureAwait(false);
-        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
 
         return ListNotificationChannelsHandler.ToView(channel, sender.IsConfigured, roleIds);
     }
@@ -320,10 +336,9 @@ public sealed class DeleteNotificationChannelHandler(
         var channel = await ListNotificationChannelsHandler.FindAsync(store, id, ct).ConfigureAwait(false);
         var rules = await store.RemoveChannelWithRulesAsync(channel, ct).ConfigureAwait(false);
 
-        await ListNotificationChannelsHandler.AuditAsync(
-            audit, clock, currentUser, profile.UserId, "NotificationChannelDeleted",
+        await ListNotificationChannelsHandler.AuditAndSaveAsync(
+            uow, audit, clock, currentUser, profile.UserId, "NotificationChannelDeleted",
             new { id, name = channel.Name, removedRules = rules }, ct).ConfigureAwait(false);
-        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
     }
 }
 
@@ -356,10 +371,9 @@ public sealed class ReplaceNotificationChannelSecretHandler(
 
         channel.ReplaceSecret(cleared ? null : protector.Protect(secret!.Trim()), clock.UtcNow, profile.UserId);
 
-        await ListNotificationChannelsHandler.AuditAsync(
-            audit, clock, currentUser, profile.UserId, "NotificationChannelSecretReplaced",
+        await ListNotificationChannelsHandler.AuditAndSaveAsync(
+            uow, audit, clock, currentUser, profile.UserId, "NotificationChannelSecretReplaced",
             new { id, name = channel.Name, hasSecret = channel.HasSecret }, ct).ConfigureAwait(false);
-        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
 
         return ListNotificationChannelsHandler.ToView(
             channel, sender.IsConfigured, await store.ChannelRoleIdsAsync(id, ct).ConfigureAwait(false));

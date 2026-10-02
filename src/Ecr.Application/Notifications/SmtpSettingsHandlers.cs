@@ -136,8 +136,8 @@ public sealed class SaveSmtpSettingsHandler(
         }
 
         // ⛔ У журнал — лише факт зміни пароля, не він сам і не його довжина.
-        await ListNotificationChannelsHandler.AuditAsync(
-            audit, clock, currentUser, profile.UserId, created ? "SmtpSettingsCreated" : "SmtpSettingsUpdated",
+        await ListNotificationChannelsHandler.AuditAndSaveAsync(
+            uow, audit, clock, currentUser, profile.UserId, created ? "SmtpSettingsCreated" : "SmtpSettingsUpdated",
             new
             {
                 host,
@@ -152,7 +152,6 @@ public sealed class SaveSmtpSettingsHandler(
                 passwordChanged = newPassword is not null || (clears && hadPassword),
             },
             ct).ConfigureAwait(false);
-        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
 
         cache.Invalidate();
 

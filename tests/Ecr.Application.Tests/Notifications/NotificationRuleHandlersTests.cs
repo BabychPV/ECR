@@ -30,9 +30,11 @@ public sealed class NotificationRuleHandlersTests
     private readonly IUnitOfWork _uow = Substitute.For<IUnitOfWork>();
     private readonly ICurrentUser _user = Substitute.For<ICurrentUser>();
     private readonly IClock _clock = Substitute.For<IClock>();
+    private readonly TransactionProbe _tx;
 
     public NotificationRuleHandlersTests()
     {
+        _tx = TransactionProbe.Attach(_uow, _audit);
         _clock.UtcNow.Returns(new DateTime(2026, 9, 20, 8, 0, 0, DateTimeKind.Utc));
         _user.UserId.Returns(Actor);
         _audit.WriteSecurityEventAsync(Arg.Do<SecurityEventRecord>(_events.Add), Arg.Any<CancellationToken>())
@@ -284,6 +286,48 @@ public sealed class NotificationRuleHandlersTests
             .CreateAsync(NotificationChannelKind.Smtp, "Mail", Smtp, CancellationToken.None)).Id;
 
     private GetNotificationRulesHandler Rules() => new(_store, _access, _user);
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "S8")]
+    public async Task Заміна_правил_пише_аудит_із_матрицею_до_і_після_в_одній_транзакції_із_збереженням()
+    {
+        // ⚠ МУТАЦІЙНИЙ ДОКАЗ: у AuditAndSaveAsync прибрати ExecuteInTransactionAsync (викликати Audit і Save напряму)
+        // → AuditInside/SaveInside порожні/false; прибрати `before` → перевірка нижче червоніє.
+        var channel = await NewChannelAsync();
+        var first = new NotificationRuleView(NotificationEventKind.JobFailed, channel, NotificationSeverity.Warning, true);
+        await Replace().HandleAsync([first], CancellationToken.None);
+        await Replace().HandleAsync([first with { MinSeverity = NotificationSeverity.Error }], CancellationToken.None);
+
+        Assert.All(_tx.AuditInside, inside => Assert.True(inside));
+        // Створення каналу (допоміжне) + дві заміни: по одному збереженню в транзакції; друге збереження ролей створення — поза нею.
+        Assert.Equal(3, _tx.AuditInside.Count);
+        Assert.Equal(3, _tx.SaveInside.Count(inside => inside));
+
+        using var doc = System.Text.Json.JsonDocument.Parse(
+            _events.Last(e => e.EventType == "NotificationRulesReplaced").DetailsJson!);
+        var before = doc.RootElement.GetProperty("before");
+        var after = doc.RootElement.GetProperty("after");
+        Assert.Equal(1, before.GetArrayLength());
+        Assert.Equal(1, after.GetArrayLength());
+        Assert.NotEqual(before[0].ToString(), after[0].ToString());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "S8")]
+    public async Task Збій_збереження_правил_кидає_виняток_а_подія_лишається_всередині_транзакції_що_відкотиться()
+    {
+        var channel = await NewChannelAsync();
+        _uow.SaveChangesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromException<int>(new InvalidOperationException("db down")));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => Replace().HandleAsync(
+            [new(NotificationEventKind.JobFailed, channel, NotificationSeverity.Info, true)], CancellationToken.None));
+
+        // Подія записана ЛИШЕ всередині транзакції: її відкат забирає подію разом зі зміною.
+        Assert.NotEmpty(_tx.AuditInside);
+        Assert.All(_tx.AuditInside, inside => Assert.True(inside));
+    }
 
     private ReplaceNotificationRulesHandler Replace() => new(_store, _access, _uow, _audit, _user, _clock);
 
