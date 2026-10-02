@@ -56,9 +56,14 @@ public sealed class SmtpTestRateLimitPolicy(IConfiguration configuration) : IRat
     {
         ArgumentNullException.ThrowIfNull(httpContext);
 
-        var userId = httpContext.User.FindFirstValue(AuthenticationSetup.UserIdClaim) ?? AnonymousPartition;
+        // ⚠ Розділ за користувачем — лише для автентифікованих. Анонім (запит без сеансу) не ділить розділ
+        // ні з чиїмось userId, ні з іншими анонімами іншої адреси: свій вузький розділ за адресою.
+        var userId = httpContext.User.FindFirstValue(AuthenticationSetup.UserIdClaim);
+        var key = string.IsNullOrEmpty(userId)
+            ? AnonymousPartition + ":" + (httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown")
+            : "user:" + userId;
 
-        return RateLimitPartition.GetFixedWindowLimiter(userId, _ => new FixedWindowRateLimiterOptions
+        return RateLimitPartition.GetFixedWindowLimiter(key, _ => new FixedWindowRateLimiterOptions
         {
             PermitLimit = _permit,
             Window = TimeSpan.FromMinutes(1),

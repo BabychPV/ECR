@@ -83,12 +83,85 @@ public sealed class SmtpTestRateLimitTests(SqlServerFixture sql)
         Assert.NotEqual(HttpStatusCode.TooManyRequests, one.StatusCode);
         Assert.NotEqual(HttpStatusCode.TooManyRequests, two.StatusCode);
 
-        // Мутація: прибрати гілку `IsSmtpTest` із глобального обмежувача — падає тут.
+        // Мутація: прибрати `[ServiceFilter(SmtpTestQuotaFilter)]` з `smtp/test` — падає тут.
         using var three = await ProbeAsync(first).ConfigureAwait(true);
         Assert.Equal(HttpStatusCode.TooManyRequests, three.StatusCode);
 
         var json = JsonDocument.Parse(await three.Content.ReadAsStringAsync().ConfigureAwait(true)).RootElement;
         Assert.Equal("ECR-REQ-0429", json.GetProperty("errorCode").GetString());
+        Assert.NotNull(three.Headers.RetryAfter);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Відхилені_політикою_користувача_і_неправомочні_запити_не_витрачають_системну_квоту()
+    {
+        using var baseApp = new EcrApiFactory(sql);
+        using var app = baseApp.WithWebHostBuilder(
+            b => b.UseSetting("Security:RateLimit:SmtpTestSystemPermitPerHour", "7"));
+        using var a = await SystemHealthControllerTests.SignedInAsync(sql, app, Permission).ConfigureAwait(true);
+        using var b = await SystemHealthControllerTests.SignedInAsync(sql, app, Permission).ConfigureAwait(true);
+        using var noRight = await SystemHealthControllerTests.SignedInAsync(sql, app).ConfigureAwait(true);
+
+        // Без права: 403, квота не зачеплена (і не 429 системи).
+        for (var i = 0; i < 3; i++)
+        {
+            using var denied = await ProbeAsync(noRight).ConfigureAwait(true);
+            Assert.True(denied.StatusCode != HttpStatusCode.OK, "без права проба пройшла");
+        }
+
+        // A: 5 прийнятих (квота 5 із 7) + 3 відхилені політикою користувача.
+        for (var i = 0; i < PermitPerMinute; i++)
+        {
+            using var _ = await ProbeAsync(a).ConfigureAwait(true);
+        }
+
+        for (var i = 0; i < 3; i++)
+        {
+            using var limited = await ProbeAsync(a).ConfigureAwait(true);
+            Assert.Equal(HttpStatusCode.TooManyRequests, limited.StatusCode);
+        }
+
+        // B: лишилось рівно 2 — якби відхилені A чи неправомочні з'їли квоту, другий би впав.
+        // Мутація: перенести системну квоту в глобальний обмежувач (рахує відхилені) — падає тут.
+        for (var i = 1; i <= 2; i++)
+        {
+            using var allowed = await ProbeAsync(b).ConfigureAwait(true);
+            Assert.True(allowed.StatusCode != HttpStatusCode.TooManyRequests, $"проба B №{i}: {allowed.StatusCode}");
+        }
+
+        using var exhausted = await ProbeAsync(b).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.TooManyRequests, exhausted.StatusCode);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Анонім_має_власний_розділ_і_не_їсть_квоти_адмінів_а_інші_маршрути_без_межі()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var admin = await SystemHealthControllerTests.SignedInAsync(sql, app, Permission).ConfigureAwait(true);
+        using var anonymous = app.CreateClient();
+
+        for (var i = 0; i < PermitPerMinute + 3; i++)
+        {
+            using var _ = await ProbeAsync(anonymous).ConfigureAwait(true);
+        }
+
+        // Мутація: розділ анонімів = розділ користувача (спільний ключ) — адмін тут не пройшов би.
+        using var allowed = await ProbeAsync(admin).ConfigureAwait(true);
+        Assert.NotEqual(HttpStatusCode.TooManyRequests, allowed.StatusCode);
+
+        // Гілка діє за метаданими ендпоінта, а не за підрядком: сусідні маршрути з «smtp»/«test» без межі.
+        for (var i = 0; i < PermitPerMinute + 5; i++)
+        {
+            using var unknown = await admin.PostAsync(
+                new Uri("/api/v1/notifications/smtp/test-extra", UriKind.Relative), null).ConfigureAwait(true);
+            using var get = await admin.GetAsync(new Uri("/api/v1/notifications/smtp", UriKind.Relative)).ConfigureAwait(true);
+            Assert.NotEqual(HttpStatusCode.TooManyRequests, unknown.StatusCode);
+            Assert.NotEqual(HttpStatusCode.TooManyRequests, get.StatusCode);
+        }
     }
 
     private static Task<HttpResponseMessage> ProbeAsync(HttpClient client)

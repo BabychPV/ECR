@@ -241,8 +241,11 @@ public static class LoginRateLimiting
         var cspReportPermit = configuration.GetValue(
             CspReportPermitKey, DefaultCspReportPermitPerMinute);
         var trustForwardedFor = configuration.GetValue(TrustForwardedForKey, defaultValue: false);
-        var smtpTestSystemPermit = configuration.GetValue(
-            SmtpTestRateLimitPolicy.SystemPermitKey, SmtpTestRateLimitPolicy.DefaultSystemPermitPerHour);
+
+        // Системна межа проб транспорту — не в глобальному обмежувачі: той рахує і ВІДХИЛЕНІ запити, а квота
+        // мусить витрачатися лише прийнятими політикою користувача (див. SmtpTestQuotaFilter).
+        services.AddSingleton<SmtpTestSystemQuota>();
+        services.AddScoped<SmtpTestQuotaFilter>();
 
         services.AddRateLimiter(options =>
         {
@@ -266,20 +269,6 @@ public static class LoginRateLimiting
                     return PerMinute(ChangePasswordKey(context, trustForwardedFor), changePasswordPermit);
                 }
 
-                // Системна межа проб транспорту: одна на всіх (розділ-константа).
-                if (IsSmtpTest(context))
-                {
-                    return RateLimitPartition.GetFixedWindowLimiter(
-                        SmtpTestSystemPartition,
-                        _ => new FixedWindowRateLimiterOptions
-                        {
-                            PermitLimit = smtpTestSystemPermit,
-                            Window = TimeSpan.FromHours(1),
-                            QueueLimit = 0,
-                            AutoReplenishment = true,
-                        });
-                }
-
                 return RateLimitPartition.GetNoLimiter(UnlimitedPartition);
             });
 
@@ -295,13 +284,6 @@ public static class LoginRateLimiting
                 if (IsCspReport(rejection.HttpContext))
                 {
                     return RejectBare(rejection);
-                }
-
-                if (IsSmtpTest(rejection.HttpContext))
-                {
-                    return new ValueTask(RejectAsync(
-                        rejection, ErrorCodes.TooManyRequests,
-                        SmtpTestRateLimitPolicy.DetailKey, SmtpTestRateLimitPolicy.DetailFallback, ct));
                 }
 
                 return IsChangePassword(rejection.HttpContext)
@@ -331,24 +313,6 @@ public static class LoginRateLimiting
                 QueueLimit = 0,
                 AutoReplenishment = true,
             });
-
-    /// <summary>Розділ системної межі проб транспорту.</summary>
-    private const string SmtpTestSystemPartition = "smtp-test:system";
-
-    /// <summary>Чи запит — проба транспорту (<c>smtp/test</c> або <c>channels/{id}/test</c>).</summary>
-    private static bool IsSmtpTest(HttpContext context)
-    {
-        if (!HttpMethods.IsPost(context.Request.Method))
-        {
-            return false;
-        }
-
-        var path = context.Request.Path;
-
-        return path.Equals("/api/v1/notifications/smtp/test", StringComparison.OrdinalIgnoreCase)
-            || (path.StartsWithSegments("/api/v1/notifications/channels", StringComparison.OrdinalIgnoreCase)
-                && path.Value!.EndsWith("/test", StringComparison.OrdinalIgnoreCase));
-    }
 
     /// <summary>Чи запит — зміна власного пароля.</summary>
     private static bool IsChangePassword(HttpContext context)
