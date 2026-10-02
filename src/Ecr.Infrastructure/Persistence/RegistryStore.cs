@@ -61,6 +61,7 @@ public sealed class RegistryStore(EcrDbContext db) : IRegistryStore
 
         var current = await db.Database
             .SqlQuery<int>($"SELECT DefinitionVersion AS Value FROM cfg.RegistryDef WITH (UPDLOCK, HOLDLOCK) WHERE Id = {registryDefId}")
+            .OrderBy(v => v)
             .Take(1)
             .ToListAsync(ct)
             .ConfigureAwait(false);

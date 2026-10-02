@@ -98,7 +98,7 @@ export function saveAndPublishRegistryDefinition(
     `/api/v1/registries/${encodeURIComponent(code)}/definition`,
     {
       method: 'PUT',
-      headers: definitionVersion === null ? undefined : { 'If-Match': `"${definitionVersion}"` },
+      ...(definitionVersion === null ? {} : { headers: { 'If-Match': `"${definitionVersion}"` } }),
       body: JSON.stringify(body),
     },
   );
