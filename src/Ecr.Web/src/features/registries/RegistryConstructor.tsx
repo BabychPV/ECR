@@ -368,12 +368,26 @@ export function RegistryRelations({
                     return relation.targetRegistryCode ?? relation.linkKind ?? '—';
                   }
                   const current = field.id in linkEdits ? linkEdits[field.id] : relation.targetRegistryDefId;
+                  // ⚠ Перелік довідників ще їде або не прочитався: без опції поточної цілі `NativeSelect`
+                  // показав би «—», тобто «зв'язку немає», хоча він є.
+                  const known = current == null || registryOptions.some((o) => o.value === String(current));
+                  const options = known
+                    ? registryOptions
+                    : [
+                        ...registryOptions,
+                        {
+                          value: String(current),
+                          label: current === relation.targetRegistryDefId && relation.targetRegistryCode != null
+                            ? relation.targetRegistryCode
+                            : `#${String(current)}`,
+                        },
+                      ];
                   return (
                     <NativeSelect
                       size="xs"
                       aria-label={t('registries.relationTargetFor', { field: field.code })}
                       value={current === null || current === undefined ? '' : String(current)}
-                      data={[{ value: '', label: '—' }, ...registryOptions]}
+                      data={[{ value: '', label: '—' }, ...options]}
                       onChange={(event) =>
                         onChangeLink(field.id, event.currentTarget.value === '' ? null : Number(event.currentTarget.value))
                       }
