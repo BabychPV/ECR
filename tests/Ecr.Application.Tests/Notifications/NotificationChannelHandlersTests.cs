@@ -284,6 +284,61 @@ public sealed class NotificationChannelHandlersTests
         Assert.Equal(["Ops <ops@corp.example>"], ok.Settings.Recipients);
     }
 
+    /// <summary>Рев'ю ent6 S3: межа явних адрес, суворіша перевірка адреси, довжина заголовка — лише на збереженні.</summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "ent6-S3")]
+    public async Task Збереження_каналу_обмежує_кількість_явних_адрес_відкидає_доменні_літерали_і_довгий_заголовок()
+    {
+        string[] Many(int n) => [.. Enumerable.Range(0, n).Select(i => $"u{i}@corp.example")];
+
+        // Мутація: прибрати перевірку `MaxExplicitRecipients` → 51 адреса проходить, рядок червоніє.
+        var tooMany = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Save().CreateAsync(
+                NotificationChannelKind.Smtp, "Mail", Smtp with { Recipients = Many(NotificationChannel.MaxExplicitRecipients + 1) },
+                CancellationToken.None));
+        Assert.Equal("ECR-REQ-0422", tooMany.ErrorCode);
+        Assert.Equal("err.ECR-REQ-0422.channelTooManyRecipients", tooMany.Details!["messageKey"]);
+
+        // Мутація: повернути `MailAddress.TryCreate` замість `SmtpSettings.IsValidAddress` → літерал проходить.
+        var literal = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Save().CreateAsync(
+                NotificationChannelKind.Smtp, "Mail", Smtp with { Recipients = ["a@[10.0.0.1]"] }, CancellationToken.None));
+        Assert.Equal("err.ECR-REQ-0422.notificationChannelRecipientInvalid", literal.Details!["messageKey"]);
+
+        var longTitle = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Save().CreateAsync(
+                NotificationChannelKind.Smtp, "Mail",
+                Smtp with { Title = new string('x', NotificationChannel.TitleMaxLength + 1) }, CancellationToken.None));
+        Assert.Equal("err.ECR-REQ-0422.notificationChannelInvalid", longTitle.Details!["messageKey"]);
+        Assert.Empty(_store.Channels);
+
+        // Рівно межа — приймається.
+        var ok = await Save().CreateAsync(
+            NotificationChannelKind.Smtp, "Mail", Smtp with { Recipients = Many(NotificationChannel.MaxExplicitRecipients) },
+            CancellationToken.None);
+        Assert.Equal(NotificationChannel.MaxExplicitRecipients, ok.Settings.Recipients!.Count);
+    }
+
+    /// <summary>Рев'ю ent6 S3: legacy-канал із понад межею адрес читається, а проба шле не більше ліміту проби.</summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "ent6-S3")]
+    public async Task Проба_legacy_каналу_з_понад_межею_адрес_обрізає_їх_до_ліміту_проби()
+    {
+        var mail = await Save().CreateAsync(NotificationChannelKind.Smtp, "Mail", Smtp, CancellationToken.None);
+        var legacy = Enumerable.Range(0, 80).Select(i => $"\"u{i}@corp.example\"");
+        _store.Channels.Single().Update(
+            "Mail", $"{{\"recipients\":[{string.Join(',', legacy)}]}}", true, DateTime.UtcNow, null);
+        _sender.IsConfigured.Returns(true);
+
+        // Мутація: прибрати `.Take(ProbeRecipientLimit)` у `ProbeAsync` → піде 80 адрес.
+        Assert.True((await Test().HandleAsync(mail.Id, CancellationToken.None)).Ok);
+        await _sender.Received(1).SendAsync(
+            Arg.Is<IReadOnlyList<string>>(r => r.Count == TestNotificationChannelHandler.ProbeRecipientLimit),
+            Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
     [Trait("Requirement", "BE-33")]

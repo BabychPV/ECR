@@ -266,7 +266,24 @@ public sealed class SaveNotificationChannelHandler(
         // ⚠ Адресат перевіряється ЯК АДРЕСА, а не «непорожній рядок»: друкарська
         // помилка інакше лягала б у базу й спливала аж у журналі доставок
         // рядком `Failed` від поштового сервера.
-        if (recipients.FirstOrDefault(r => !MailAddress.TryCreate(r, out _)) is { } broken)
+        // ⛔ Межа явних адрес і довжини заголовка — на збереженні (рев'ю ent6 S3); legacy-значення в базі це не зачіпає.
+        if (recipients.Count > NotificationChannel.MaxExplicitRecipients)
+        {
+            throw ListNotificationChannelsHandler.Invalid(
+                "err.ECR-REQ-0422.channelTooManyRecipients",
+                $"Канал приймає не більше {NotificationChannel.MaxExplicitRecipients} явних адрес.", trimmed);
+        }
+
+        if ((settings.Title?.Trim().Length ?? 0) > NotificationChannel.TitleMaxLength)
+        {
+            throw ListNotificationChannelsHandler.Invalid(
+                "err.ECR-REQ-0422.notificationChannelInvalid",
+                $"Заголовок каналу — до {NotificationChannel.TitleMaxLength} символів.", trimmed);
+        }
+
+        // ⛔ Суворіше за MailAddress: без доменних літералів (a@[10.0.0.1]) — як адреса відправника.
+        // Адреса з підписом («Ops <ops@corp.example>») лишається чинною: суворо перевіряється сама адреса.
+        if (recipients.FirstOrDefault(r => !(MailAddress.TryCreate(r, out var parsed) && SmtpSettings.IsValidAddress(parsed.Address))) is { } broken)
         {
             throw ListNotificationChannelsHandler.Invalid(
                 "err.ECR-REQ-0422.notificationChannelRecipientInvalid",
@@ -427,7 +444,8 @@ public sealed class TestNotificationChannelHandler(
             return await TryAsync(
                     classify: true,
                     send: () => sender.SendAsync(
-                        ListNotificationChannelsHandler.ToView(channel, sender.IsConfigured).Settings.Recipients ?? [],
+                        [.. (ListNotificationChannelsHandler.ToView(channel, sender.IsConfigured).Settings.Recipients ?? [])
+                            .Take(ProbeRecipientLimit)],
                         Subject, BodyFor(channel), ct))
                     .ConfigureAwait(false);
         }
@@ -456,7 +474,7 @@ public sealed class TestNotificationChannelHandler(
     private static readonly Action<ILogger, string, Exception?> ProbeFailed = LoggerMessage.Define<string>(
         LogLevel.Warning, new EventId(6301, "NotificationProbeFailed"), "Notification probe failed: {ExceptionType}.");
 
-    /// <summary>Найбільше адрес, розкритих із ролей у пробі: проба — не розсилка.</summary>
+    /// <summary>Найбільше адресатів проби РАЗОМ (явні адреси, потім ролі): проба — не розсилка.</summary>
     public const int ProbeRecipientLimit = 20;
 
     private static string BodyFor(NotificationChannel channel)

@@ -28,6 +28,16 @@ public sealed class NotificationChannel : Entity<int>
     /// <summary>Найбільша довжина назви; та сама, що в стовпці.</summary>
     public const int NameMaxLength = 100;
 
+    /// <summary>
+    /// Найбільше ЯВНИХ адрес на канал при збереженні (рев'ю ent6 S3): <c>SettingsJson</c> — <c>nvarchar(max)</c>, тож без межі
+    /// одна проба шле скільки завгодно листів. Константа, не ключ конфігурації: це захист, а не налаштування. Уже збережені
+    /// канали з більшою кількістю читаються як є; проба обрізає їх до ліміту проби.
+    /// </summary>
+    public const int MaxExplicitRecipients = 50;
+
+    /// <summary>Найбільша довжина заголовка (теми) листа каналу.</summary>
+    public const int TitleMaxLength = 200;
+
     private NotificationChannel() { }
 
     /// <summary>Створює ввімкнений канал без секрету.</summary>
