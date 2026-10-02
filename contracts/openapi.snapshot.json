@@ -21835,7 +21835,7 @@
             "description": "Not Found"
           }
         },
-        "summary": "Перерахунок документа, або лише одного його аркуша. Право `Calculation.Recalculate`.",
+        "summary": "Перерахунок документа, або лише одного його аркуша. Право `Document.View` у проєкті документа + видимість (Read); проєктний перерахунок — `Calculation.Recalculate`.",
         "tags": [
           "Documents"
         ]

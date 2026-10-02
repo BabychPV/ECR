@@ -306,7 +306,7 @@ public sealed class DocumentsController(
                 Validated: true));
     }
 
-    /// <summary>Перерахунок документа, або лише одного його аркуша. Право <c>Calculation.Recalculate</c>.</summary>
+    /// <summary>Перерахунок документа, або лише одного його аркуша. Право <c>Document.View</c> у проєкті документа + видимість (Read); проєктний перерахунок — <c>Calculation.Recalculate</c>.</summary>
     /// <remarks>
     /// Довга операція — у фон із прогресом; повертає <c>jobId</c>, а не результат.
     /// <c>SheetDefId</c> звужує перерахунок до одного аркуша (Q-331); без нього —
