@@ -36,9 +36,11 @@ public static class RegistryFieldSnapshotLoader
     /// <param name="registries">Сховище довідників.</param>
     /// <param name="requests">Що прочитати; повтори допустимі.</param>
     /// <param name="ct">Токен скасування.</param>
+    /// <param name="units">Знімок одиниць для полів типу <c>Unit</c>; <c>null</c> — такі поля не читаються.</param>
     /// <returns><c>null</c> — просити нічого, звернень до сховища не було.</returns>
     public static async Task<IReadOnlyDictionary<long, IReadOnlyDictionary<string, ExpressionValue>>?> LoadAsync(
-        IRegistryStore registries, IEnumerable<RegistryFieldRequest> requests, CancellationToken ct)
+        IRegistryStore registries, IEnumerable<RegistryFieldRequest> requests, CancellationToken ct,
+        Ports.UnitCatalogSnapshot? units = null)
     {
         ArgumentNullException.ThrowIfNull(registries);
         ArgumentNullException.ThrowIfNull(requests);
@@ -101,7 +103,7 @@ public static class RegistryFieldSnapshotLoader
                     continue;
                 }
 
-                if (ToExpressionValue(registryValue, fieldDef.DataType) is { } mapped)
+                if (ToExpressionValue(registryValue, fieldDef.DataType, units) is { } mapped)
                 {
                     perEntry[fieldCode] = mapped;
                 }
@@ -142,14 +144,23 @@ public static class RegistryFieldSnapshotLoader
 
     /// <summary>Значення поля довідника як значення виразу; типізовано за <c>RegistryFieldDef.DataType</c>.</summary>
     /// <remarks>
-    /// ⚠ <c>Lookup</c>/<c>Unit</c>/<c>Formula</c>/<c>Calculated</c> тут
-    /// НЕМАЄ: перші два REGFIELD сьогодні не читає (задача — decimal/text/
-    /// bool/date), а останні два в довіднику взагалі не існують
+    /// RT-24: <c>Lookup</c> → число (id цільового запису, той самий вибір, що для
+    /// <c>Lookup</c>-комірок), <c>Unit</c> → текст (код одиниці; лише коли викликач
+    /// передав знімок одиниць — без нього поле лишається поза знімком, як і було).
+    /// <c>Formula</c>/<c>Calculated</c> у довіднику не існують
     /// (<c>RegistryValue.Set</c> їх забороняє при записі).
     /// </remarks>
-    private static ExpressionValue? ToExpressionValue(RegistryValue value, CellDataType dataType)
+    private static ExpressionValue? ToExpressionValue(
+        RegistryValue value, CellDataType dataType, Ports.UnitCatalogSnapshot? units)
         => dataType switch
         {
+            CellDataType.Lookup => value.ValueRefEntryId is { } target
+                ? ExpressionValue.Number(target)
+                : null,
+            CellDataType.Unit => value.ValueUnitId is { } unitId
+                && units?.Units.Values.FirstOrDefault(u => u.Id == unitId) is { } unit
+                ? ExpressionValue.Text(unit.Code)
+                : null,
             CellDataType.Decimal or CellDataType.Int => value.ValueNumeric is { } n
                 ? ExpressionValue.Number(n)
                 : null,
