@@ -106,25 +106,45 @@ public sealed class SmtpNotificationSender(
             message.To.Add(recipient);
         }
 
-        using var client = new SmtpClient(settings.Host, settings.Port)
-        {
-            EnableSsl = settings.StartTls,
-            Timeout = (int)Timeout.TotalMilliseconds,
-        };
-
-        if (!string.IsNullOrWhiteSpace(settings.User))
-        {
-            client.Credentials = new NetworkCredential(settings.User, settings.PasswordOf(this));
-        }
-        else
-        {
-            // Інтегрована або анонімна відправка — рішення контуру, не наше.
-            client.UseDefaultCredentials = true;
-        }
+        using var client = CreateClient(settings);
 
         // ⚠ `SendMailAsync` із токеном: без нього зупинка застосунку чекала б
         // на таймаут SMTP.
         await client.SendMailAsync(message, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Клієнт під ефективні налаштування. ⛔ S2 (ent6): без логіна — лише анонімна відправка. Інтегрована
+    /// автентифікація (<c>UseDefaultCredentials</c>, NTLM-дані облікового запису служби) НЕ підтримується:
+    /// з адмін-налаштувань вона відправила б дані служби на довільний хост. Те саме для запасного <c>Smtp:*</c>.
+    /// </summary>
+    private SmtpClient CreateClient(Effective settings)
+        => BuildClient(
+            settings.Host, settings.Port, settings.StartTls, settings.User, () => settings.PasswordOf(this));
+
+    /// <summary>Збирає клієнта; відкрито для тесту стану облікових даних (без мережі).</summary>
+    /// <param name="host">Хост.</param>
+    /// <param name="port">Порт.</param>
+    /// <param name="startTls">Чи вмикати STARTTLS.</param>
+    /// <param name="user">Логін; порожній — анонімно.</param>
+    /// <param name="password">Пароль (читається лише за наявності логіна).</param>
+    public static SmtpClient BuildClient(string? host, int port, bool startTls, string? user, Func<string> password)
+    {
+        ArgumentNullException.ThrowIfNull(password);
+
+        var client = new SmtpClient(host, port)
+        {
+            EnableSsl = startTls,
+            Timeout = (int)Timeout.TotalMilliseconds,
+            UseDefaultCredentials = false,
+        };
+
+        if (!string.IsNullOrWhiteSpace(user))
+        {
+            client.Credentials = new NetworkCredential(user, password());
+        }
+
+        return client;
     }
 
     private Effective Current()
