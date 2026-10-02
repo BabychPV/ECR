@@ -22157,7 +22157,7 @@ export interface components {
             isRequired: boolean;
             /**
              * Format: int32
-             * @description Довідник-джерело; у наявного не змінюється.
+             * @description Довідник-джерело; у наявного змінюється чи знімається (`null`), лише поки жодне значення поля не вказує на запис (ФВ-8.12).
              */
             lookupRegistryDefId: null | number;
             /** @description Підпис мовами каталогу. */

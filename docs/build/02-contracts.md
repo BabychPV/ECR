@@ -4145,6 +4145,10 @@ public sealed class NotFoundException(string errorCode, string message)
 > (`codeModeImmutable`). Публікація ключа на даних із дублікатами —
 > `409 ECR-REG-4092 existingDuplicates`; без дублікатів рядки
 > `dic.RegistryEntryKey` заповнюються в тій самій транзакції.
+> Ціль посилання наявного поля (`lookupRegistryDefId`) змінюється чи знімається (`null`)
+> лише поки жодне значення поля не вказує на запис; інакше `422 ECR-REG-0422`
+> `lookupRetargetInUse`; неіснуючий довідник — `lookupTargetUnknown`; композиція й
+> ключове поле — `relationKindImmutable` (`ФВ-8.12`).
 > `POST …/keys/check` `{fieldCodes[], ignoreCase}` →
 > `{checked, groups, sample[≤20]:{keyText, entries:[{id, code}]}}` — той самий
 > алгоритм до збереження. `GET …/entries` не пропонує частин композиції,
