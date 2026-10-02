@@ -19353,6 +19353,13 @@ export interface components {
         DocumentVersionMigrationDto: {
             /** @description Перенос виконано. */
             applied: boolean;
+            /**
+             * Format: int32
+             * @description Скільки грантів на ресурсах (аркуш/таблиця/колонка) вихідної версії не мають відповідника за кодом у новій і
+             *     через це блокують перенос; `null`, коли таких немає. ⛔ Лише кількість — які саме ресурси й ролі, не
+             *     розкривається, доки перелік не фільтрується через AccessProfile.
+             */
+            blockedGrantCount?: null | number;
             /** @description Режим дозволяє перенос. */
             canApply: boolean;
             /**
