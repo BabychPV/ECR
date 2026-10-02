@@ -6187,6 +6187,13 @@ USING (VALUES
     (N'audit.correlation', N'en', N'Correlation ID', 1),
     -- ru/kz — окремою порцією `COLL:reqclose` у блоці I18N нижче.
     -- COLL:reqclose ── кінець секції ──
+    -- COLL:fv1315 ── Залежність розкладу збору від іншого розкладу того ж з'єднання (ФВ-13.15, `CollectionScheduleDependencyRules`, `CollectionJob`) ──
+    (N'err.ECR-REQ-0422.collectionScheduleDependencyNotFound', N'en', N'The schedule this one should depend on does not exist.', 1),
+    (N'err.ECR-REQ-0422.collectionScheduleDependencyOtherSource', N'en', N'A schedule can depend only on a schedule of the same connection.', 1),
+    (N'err.ECR-REQ-0422.collectionScheduleDependencyCycle', N'en', N'This dependency would close a cycle: the other schedule already depends on this one.', 1),
+    (N'jobs.collectionDependencyWaiting', N'en', N'Entity {sourceEntityId}: skipped, waiting for a successful run of schedule {dependsOn}', 1),
+    -- ru/kz — окремою порцією `I18N` (COLL:fv1315).
+    -- COLL:fv1315 ── кінець секції ──
     -- UI:dead-buttons ── причини недоступних дій і порожній стан полів довідника (клієнт) ──
     (N'reportDefs.addBlocked', N'en', N'Fill in the code, the name, the version and a code for every column first.', 1),
     (N'reportDefs.removeColumnBlocked', N'en', N'A report needs at least one column.', 1),
@@ -14384,6 +14391,23 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:smtp-probe ── кінець секції ──
+
+-- COLL:fv1315 ── ru/kz залежності розкладу збору від іншого розкладу (ФВ-13.15); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-REQ-0422.collectionScheduleDependencyNotFound', N'ru', N'Расписание, от которого должно зависеть это, не существует.'),
+    (N'err.ECR-REQ-0422.collectionScheduleDependencyNotFound', N'kz', N'Осы кесте тәуелді болуы тиіс кесте жоқ.'),
+    (N'err.ECR-REQ-0422.collectionScheduleDependencyOtherSource', N'ru', N'Расписание может зависеть только от расписания того же соединения.'),
+    (N'err.ECR-REQ-0422.collectionScheduleDependencyOtherSource', N'kz', N'Кесте тек сол қосылымның кестесіне тәуелді бола алады.'),
+    (N'err.ECR-REQ-0422.collectionScheduleDependencyCycle', N'ru', N'Эта зависимость замкнула бы цикл: другое расписание уже зависит от этого.'),
+    (N'err.ECR-REQ-0422.collectionScheduleDependencyCycle', N'kz', N'Бұл тәуелділік циклді тұйықтайды: екінші кесте бұған әлдеқашан тәуелді.'),
+    (N'jobs.collectionDependencyWaiting', N'ru', N'Сущность {sourceEntityId}: пропуск, ожидается успешный прогон расписания {dependsOn}'),
+    (N'jobs.collectionDependencyWaiting', N'kz', N'{sourceEntityId} нысаны: өткізілді, {dependsOn} кестесінің сәтті іске қосылуы күтілуде')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:fv1315 ── кінець секції ──
 
 -- REG:rt25-client ── ru/kz сторінки впливу довідника і банера застарілості (RT-25, клієнт); власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)
