@@ -573,6 +573,8 @@ public sealed class SetUserEmailHandler(
                 });
         }
 
+        UserEmailPolicy.EnsureValid(email);
+
         var user = await users.FindByIdAsync(userId, ct).ConfigureAwait(false)
                    ?? throw new NotFoundException(
                        "ECR-SEC-0404", $"Користувача {userId} не знайдено.",
@@ -754,6 +756,8 @@ public sealed class CreateUserHandler(
         // T1-02/T1-03: ім'я входу — без крайніх пробілів, непорожнє, не довше
         // межі й лише з дозволених символів (`DOMAIN\user`, `user@domain` — теж).
         userName = NormalizeUserName(userName);
+
+        UserEmailPolicy.EnsureValid(email);
 
         if (await users.FindByUserNameAsync(userName, ct).ConfigureAwait(false) is not null)
         {

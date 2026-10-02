@@ -6469,9 +6469,12 @@ USING (VALUES
     (N'err.ECR-REQ-0422.smtpPortNotAllowed', N'en', N'This SMTP port is not allowed. Use 25, 465, 587 or 2525, or ask the administrator to list the port in the Smtp:AllowedPorts configuration key.', 1),
     (N'err.ECR-REQ-0422.smtpHostForbidden', N'en', N'This SMTP server is not allowed: loopback, link-local and cloud metadata addresses (including names that resolve to them) are forbidden.', 1),
     (N'notifications.test.smtp.probeFailed', N'en', N'SMTP test failed: the server is not reachable or did not answer. Check the server name, the port and the firewall.', 1),
-    (N'notifications.test.smtp.endpointForbidden', N'en', N'SMTP test refused: the port or the server is not allowed. Allowed ports are 25, 465, 587, 2525 and those in Smtp:AllowedPorts; loopback, link-local and cloud metadata servers are forbidden.', 1)
+    (N'notifications.test.smtp.endpointForbidden', N'en', N'SMTP test refused: the port or the server is not allowed. Allowed ports are 25, 465, 587, 2525 and those in Smtp:AllowedPorts; loopback, link-local and cloud metadata servers are forbidden.', 1),
     -- ru/kz — окремою порцією COLL:sec-s4 у блоці I18N нижче.
     -- COLL:sec-s4 ── кінець секції ──
+    -- COLL:p3-t1 ── тестувальний прохід №1, пакет P3 (T1-04…); ru/kz — порцією COLL:p3-t1 у блоці I18N нижче ──
+    (N'err.ECR-USR-0422.emailInvalid', N'en', N'"{email}" is not a valid email address. Use the form name@example.com.', 1)
+    -- COLL:p3-t1 ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -15207,6 +15210,16 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:sec-s4 ── кінець секції ──
+-- COLL:p3-t1 ── ru/kz пакета P3 тестувального проходу №1; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-USR-0422.emailInvalid', N'ru', N'«{email}» не является корректным адресом электронной почты. Используйте вид name@example.com.'),
+    (N'err.ECR-USR-0422.emailInvalid', N'kz', N'«{email}» жарамды электрондық пошта мекенжайы емес. name@example.com түрін пайдаланыңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:p3-t1 ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t
