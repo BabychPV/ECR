@@ -417,6 +417,36 @@ public sealed class RegistryRetargetTests
             .Single(f => f.GetProperty("Code").GetString() == "LINK").GetProperty("RefRegistryDefId") is
             { ValueKind: System.Text.Json.JsonValueKind.Number } n ? n.GetInt32() : null;
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Requirement", "ФВ-8.12")]
+    public async Task Коли_усі_споживачі_приховані_ключ_окремий_а_перелік_порожній()
+    {
+        // ⛔ ent7 P3-7. Мутація: повернути завжди lookupRetargetUsedByRules - тест червоніє.
+        const int secretId = 77;
+        var secret = new RegistryDef(EcrCode.Create("SECRET"), Text("SECRET"), false);
+        SetId(secret, secretId);
+        _registries.ListDefinitionsAsync(Arg.Any<CancellationToken>()).Returns([_owner, secret]);
+        UsageItemDto[] consumers =
+        [
+            new(UsageKinds.RegistryField, "6", "SECRET.HIDDEN_RULE", "/admin/registries/SECRET/definition"),
+            new(UsageKinds.TemplateFormula, "8", "HIDDEN_TABLE#8", null),
+        ];
+        _registries.FindFieldChainConsumersAsync(
+                OwnerId, Arg.Is<IReadOnlyCollection<string>>(codes => codes.Contains("LINK")), Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(new UsageResponse(2, consumers));
+        _access.BuildProfileAsync(9, Arg.Any<CancellationToken>()).Returns(new AccessBuilder { UserId = 9 }
+            .Permission("Registry.View").Permission("Registry.EditDefinition").Permission("Registry.Publish")
+            .Deny(ResourceKind.Registry, secretId).Build());
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(() => Save(NewTargetId));
+
+        Assert.Equal("err.ECR-REG-0422.lookupRetargetUsedByHidden", error.Details!["messageKey"]);
+        Assert.Equal("2", error.Details["total"]);
+        Assert.Equal("2", error.Details["hiddenCount"]);
+        Assert.Equal(string.Empty, error.Details["usedBy"]);
+    }
+
     private void DenyRegistry(int registryDefId)
 
         => _access.BuildProfileAsync(9, Arg.Any<CancellationToken>()).Returns(new AccessBuilder { UserId = 9 }

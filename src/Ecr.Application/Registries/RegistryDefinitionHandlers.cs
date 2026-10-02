@@ -1051,7 +1051,10 @@ public sealed class SaveRegistryDefinitionHandler(
                 $"Зв'язок поля «{changed[0].Field.Code}» не можна змінити: через нього читають атрибути правил, формул чи методологій — {consumers.Total.ToString(CultureInfo.InvariantCulture)}.",
                 new Dictionary<string, object?>
                 {
-                    ["messageKey"] = "err.ECR-REG-0422.lookupRetargetUsedByRules",
+                    // ent7 P3-7: усі споживачі приховані від автора - окремий текст, без порожнього «…через неї: .».
+                    ["messageKey"] = visible.Count == 0
+                        ? "err.ECR-REG-0422.lookupRetargetUsedByHidden"
+                        : "err.ECR-REG-0422.lookupRetargetUsedByRules",
                     ["fieldCode"] = (string)changed[0].Field.Code,
                     ["total"] = consumers.Total.ToString(CultureInfo.InvariantCulture),
                     ["usedBy"] = string.Join(", ", visible.Select(i => i.Label)),

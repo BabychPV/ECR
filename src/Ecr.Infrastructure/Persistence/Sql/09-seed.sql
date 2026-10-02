@@ -6444,8 +6444,12 @@ USING (VALUES
     -- ru/kz — окремою порцією CL:states-a11y-2 у блоці I18N нижче.
     -- CL:states-a11y-2 ── кінець секції ──
     -- COLL:check-relation ── Підказка MapJson для виду зв'язку Check: поле обов'язкове (RelationSpecParser.ParseCheck) ──
-    (N'tables.mapJsonCheckHint', N'en', N'Required for Check: a JSON object with "left" (source column) and "right" (target column); optional "tolerance", "toleranceKind" (abs or rel) and "severity" (Warn, Block or Info).', 1)
+    (N'tables.mapJsonCheckHint', N'en', N'Required for Check: a JSON object with "left" (source column) and "right" (target column); optional "tolerance", "toleranceKind" (abs or rel) and "severity" (Warn, Block or Info).', 1),
     -- COLL:check-relation ── кінець секції ──
+    -- COLL:p3-ent7 ── усі споживачі зв'язку приховані від автора (ФВ-8.12, ent7 P3-7) ──
+    (N'err.ECR-REG-0422.lookupRetargetUsedByHidden', N'en', N'The link of field "{fieldCode}" cannot be changed: {total} rule(s), formula(s) or methodology version(s) read attributes through it, and all {hiddenCount} shown in this response are hidden from you. Ask someone with access to change or disable them first.', 1)
+    -- ru/kz — окремою порцією COLL:p3-ent7 у блоці I18N нижче.
+    -- COLL:p3-ent7 ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -15120,6 +15124,17 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:check-relation ── кінець секції ──
+
+-- COLL:p3-ent7 ── ru/kz: усі споживачі зв'язку приховані від автора (ФВ-8.12, ent7 P3-7); власна порція; kz — потрібна вичитка носієм ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-REG-0422.lookupRetargetUsedByHidden', N'ru', N'Связь поля «{fieldCode}» нельзя изменить: через неё читают атрибуты правил, формул или версий методологий — {total}, и все {hiddenCount} из показанных в ответе скрыты от вас. Попросите того, у кого есть доступ, изменить или отключить их.'),
+    (N'err.ECR-REG-0422.lookupRetargetUsedByHidden', N'kz', N'«{fieldCode}» өрісінің байланысын өзгерту мүмкін емес: ол арқылы атрибуттарды оқитын ережелер, формулалар немесе әдістеме нұсқалары бар — {total}, ал жауапта көрсетілгеннің барлығы ({hiddenCount}) сізден жасырылған. Қолжетімділігі бар адамнан оларды өзгертуді немесе өшіруді сұраңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:p3-ent7 ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t
