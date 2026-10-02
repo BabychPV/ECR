@@ -301,9 +301,16 @@ public sealed class SaveNotificationChannelHandler(
         // Адреса з підписом («Ops <ops@corp.example>») лишається чинною: суворо перевіряється сама адреса.
         if (recipients.FirstOrDefault(r => !(MailAddress.TryCreate(r, out var parsed) && SmtpSettings.IsValidAddress(parsed.Address))) is { } broken)
         {
-            throw ListNotificationChannelsHandler.Invalid(
-                "err.ECR-REQ-0422.notificationChannelRecipientInvalid",
-                $"«{broken}» не є поштовою адресою.", trimmed);
+            // T1-11: у відповіді названо саму хибну адресу ({address}) — зі списку з 50 її інакше не знайти.
+            throw new BusinessRuleException(
+                ErrorCodes.RequestInvalid,
+                $"«{broken}» не є поштовою адресою.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-REQ-0422.notificationChannelRecipientInvalid",
+                    ["name"] = trimmed,
+                    ["address"] = broken,
+                });
         }
 
         if (await store.IsChannelNameTakenAsync(trimmed, exceptId, ct).ConfigureAwait(false))

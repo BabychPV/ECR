@@ -986,7 +986,11 @@ UPDATE t
     (N'err.ECR-REG-0422.lookupWrongRegistry', N'ru', N'Поле «{field}» выбирает из справочника «{expectedRegistry}», но запись {value} («{entryCode}») принадлежит другому справочнику.',
                                                 N'Поле «{field}» выбирает из справочника «{expectedRegistry}», но запись {value} принадлежит другому справочнику.'),
     (N'err.ECR-REG-0422.lookupWrongRegistry', N'kz', N'«{field}» өрісі «{expectedRegistry}» анықтамалығынан таңдайды, бірақ {value} («{entryCode}») жазбасы басқа анықтамалыққа тиесілі.',
-                                                N'«{field}» өрісі «{expectedRegistry}» анықтамалығынан таңдайды, бірақ {value} жазбасы басқа анықтамалыққа тиесілі.')
+                                                N'«{field}» өрісі «{expectedRegistry}» анықтамалығынан таңдайды, бірақ {value} жазбасы басқа анықтамалыққа тиесілі.'),
+    -- p3-t1 T1-11: відмова називає саме ту адресу, яка хибна ({address}).
+    (N'err.ECR-REQ-0422.notificationChannelRecipientInvalid', N'en', N'One of the recipients is not an email address.', N'The recipient "{address}" is not an email address.'),
+    (N'err.ECR-REQ-0422.notificationChannelRecipientInvalid', N'ru', N'Один из получателей не является адресом электронной почты.', N'Получатель «{address}» не является адресом электронной почты.'),
+    (N'err.ECR-REQ-0422.notificationChannelRecipientInvalid', N'kz', N'Алушылардың бірі электрондық пошта мекенжайы емес.', N'«{address}» алушысы электрондық пошта мекенжайы емес.')
   ) AS s ([Key], Lang, OldVal, NewVal)
     ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
  WHERE t.Value = s.OldVal COLLATE Latin1_General_BIN2;
@@ -1467,7 +1471,7 @@ USING (VALUES
     -- сказати це прямо: користувач, який щойно ввів адресу сервера, інакше
     -- шукатиме друкарську помилку там, де її немає.
     (N'err.ECR-REQ-0422.notificationChannelTransportFromConfiguration', N'en', N'The SMTP server, port, TLS and sender address come from the SMTP settings (or from the process configuration while they are not used); a channel cannot set them.', 1),
-    (N'err.ECR-REQ-0422.notificationChannelRecipientInvalid',           N'en', N'One of the recipients is not an email address.', 1),
+    (N'err.ECR-REQ-0422.notificationChannelRecipientInvalid',           N'en', N'The recipient "{address}" is not an email address.', 1),
     (N'err.ECR-INT-0404.notificationChannel',          N'en', N'Notification channel {id} does not exist.', 1),
     (N'err.ECR-REQ-0422.notificationRuleInvalid',      N'en', N'A rule matrix accepts a known event and severity, and at most one rule per event and channel.', 1),
     -- ⚠ Той самий вибір, що в `jobState`: невідомий фільтр — відмова, а не
@@ -6737,7 +6741,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-REQ-0422.notificationChannelNameTaken', N'ru', N'Канал с названием «{name}» уже существует.'),
     (N'err.ECR-REQ-0422.webhookUrlNotAllowed', N'ru', N'Адрес веб-хука должен использовать https и указывать на разрешённый хост.'),
     (N'err.ECR-REQ-0422.notificationChannelTransportFromConfiguration', N'ru', N'SMTP-сервер, порт, TLS и адрес отправителя берутся из настроек SMTP (пока они не используются — из конфигурации процесса); канал не может их задавать.'),
-    (N'err.ECR-REQ-0422.notificationChannelRecipientInvalid', N'ru', N'Один из получателей не является адресом электронной почты.'),
+    (N'err.ECR-REQ-0422.notificationChannelRecipientInvalid', N'ru', N'Получатель «{address}» не является адресом электронной почты.'),
     (N'err.ECR-INT-0404.notificationChannel', N'ru', N'Канал уведомлений {id} не существует.'),
     (N'err.ECR-REQ-0422.notificationRuleInvalid', N'ru', N'Матрица правил принимает известное событие и уровень важности и не более одного правила на событие и канал.'),
     (N'err.ECR-REQ-0422.notificationDeliveryStatus', N'ru', N'Результата доставки «{status}» не существует.'),
@@ -9765,7 +9769,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-REQ-0422.notificationChannelNameTaken', N'kz', N'«{name}» атты арна бұрыннан бар.'),
     (N'err.ECR-REQ-0422.webhookUrlNotAllowed', N'kz', N'Вебхук мекенжайы https пайдалануы және рұқсат етілген хостқа бағытталуы тиіс.'),
     (N'err.ECR-REQ-0422.notificationChannelTransportFromConfiguration', N'kz', N'SMTP сервері, порт, TLS және жіберуші мекенжайы SMTP баптауларынан алынады (олар қолданылмаса — процесс конфигурациясынан); арна оларды орната алмайды.'),
-    (N'err.ECR-REQ-0422.notificationChannelRecipientInvalid', N'kz', N'Алушылардың бірі электрондық пошта мекенжайы емес.'),
+    (N'err.ECR-REQ-0422.notificationChannelRecipientInvalid', N'kz', N'«{address}» алушысы электрондық пошта мекенжайы емес.'),
     (N'err.ECR-INT-0404.notificationChannel', N'kz', N'{id} хабарландыру арнасы жоқ.'),
     (N'err.ECR-REQ-0422.notificationRuleInvalid', N'kz', N'Ережелер матрицасы белгілі оқиға мен маңыздылық деңгейін қабылдайды, әр оқиға мен арнаға ең көбі бір ереже.'),
     (N'err.ECR-REQ-0422.notificationDeliveryStatus', N'kz', N'«{status}» жеткізу нәтижесі жоқ.'),
