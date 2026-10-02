@@ -129,14 +129,21 @@ are read-only.»
 ### 1.4. Перерахувати результати методик
 
 Формули шаблону перераховуються самі (розділ 1.2). Результати **методик**
-(розрахунки викидів, прив'язані до таблиць) — окремою дією
-**«Recalculate»**, яка вимагає права `Calculation.Recalculate`; у ролі
-`DataEntry` за замовчуванням його немає. Якщо після правок вхідних даних
-подання відмовляє з «methodology results are stale», а кнопки
-**«Recalculate»** у вас немає — зверніться до того, кому видано це право
-(⚠ залежить від налаштувань). Хід перерахунку: «Recalculating…» →
-«Recalculation finished: the figures are up to date.» або «Recalculation
-failed. Open Jobs to see why.»
+(розрахунки викидів, прив'язані до таблиць) оновлюються окремою дією
+**«Recalculate»** на сторінці документа. Якщо після правок вхідних даних
+подання відмовляє з «methodology results are stale», натисніть
+**«Recalculate»**, дочекайтеся «Recalculation finished: the figures are up to
+date.» і подайте знову. Збій — «Recalculation failed. Open Jobs to see why.»
+
+За рішенням замовника (28–29.09) для запуску перерахунку досить права
+читання документа, тож виконавець перераховує сам.
+
+⚠ **Розбіжність коду з рішенням, передано на виправлення.** Зараз кнопка й
+сервер вимагають права `Calculation.Recalculate`, якого роль `DataEntry` за
+замовчуванням не має. Доки код не виправлено, кнопку бачить лише власник
+цього права. Місця перевірки: `src/Ecr.Web/src/features/workflow/SheetActions.tsx:557`
+(показ кнопки), `src/Ecr.Application/Documents/RecalculateDocumentHandler.cs:27`,
+`:71`, `:82` (сервер, `POST /api/v1/documents/{id}/recalculate`).
 
 ### 1.5. Подати [Е-1, Е-2, Е-6]
 
@@ -360,7 +367,7 @@ sheet: there is nothing to apply.»
 |---|---|---|
 | «The sheet cannot be submitted: {messageCount} blocking validation error(s).» | є помилки рівня Error | **«Validate»** → **«Show in the table»** → виправте |
 | «Submit with warnings?» | є попередження | перегляньте й **«Submit anyway»** або виправте |
-| «… methodology results are stale … Recalculate before submitting.» | вхідні дані змінено після розрахунку методики | **«Recalculate»** (розділ 1.4), потім **«Submit»** |
+| «… methodology results are stale … Recalculate before submitting.» | вхідні дані змінено після розрахунку методики | **«Recalculate»** (розділ 1.4, див. ⚠ про право), потім **«Submit»** |
 | «… {rowCount} row(s) lost their registry entry.» | рядок посилається на нечинний запис довідника | розділ 3 |
 | «There are issues outside your visibility — submission is blocked. Contact the project owner.» | помилки в таблицях, яких ви не бачите | зверніться до власника проєкту |
 | «Only a draft or rejected sheet can be submitted; the sheet is {status}.» | аркуш уже подано або затверджено | оновіть сторінку; для правок потрібне повернення (розділ 2.5) |
@@ -428,9 +435,8 @@ texts»**, тоді у вашій системі написи можуть ві�
 
 ## Додаток Б. Відкриті питання
 
-- **Перерахунок методик виконавцем.** Подання блокується застарілими
-  результатами методик, а кнопка **«Recalculate»** вимагає
-  `Calculation.Recalculate`, якого в `DataEntry` за замовчуванням немає.
-  Дефолт до відповіді: виконавця перераховує власник права (розділ 1.4).
+- **Перерахунок методик виконавцем.** Рішення замовника: досить права
+  читання. Код поки вимагає `Calculation.Recalculate` (розділ 1.4);
+  посібник описує цільову поведінку.
 - **Знімки екранів.** Посібник текстовий; знімків реальних екранів у
   репозиторії для нього немає.
