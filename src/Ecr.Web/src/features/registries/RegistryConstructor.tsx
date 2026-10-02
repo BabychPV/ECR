@@ -387,10 +387,15 @@ export function RegistryRelations({
                       size="xs"
                       aria-label={t('registries.relationTargetFor', { field: field.code })}
                       value={current === null || current === undefined ? '' : String(current)}
-                      data={[{ value: '', label: '—' }, ...options]}
-                      onChange={(event) =>
-                        onChangeLink(field.id, event.currentTarget.value === '' ? null : Number(event.currentTarget.value))
-                      }
+                      // ⛔ ent6 R1: «—» (зняти ціль) тут немає: поле Lookup без цілі приймало запис
+                      // БУДЬ-ЯКОГО довідника, і сервер такий стан не приймає (`lookupTargetUnknown`).
+                      // `options` = перелік + поточна ціль, якщо перелік її ще не містить.
+                      data={options}
+                      onChange={(event) => {
+                        if (event.currentTarget.value !== '') {
+                          onChangeLink(field.id, Number(event.currentTarget.value));
+                        }
+                      }}
                     />
                   );
                 })()}

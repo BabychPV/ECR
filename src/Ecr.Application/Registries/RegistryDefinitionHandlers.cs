@@ -390,7 +390,7 @@ public sealed class SaveRegistryDefinitionHandler(
         // ⛔ S18: заборона на довідник виграє і над правом на опис — 404, як неіснуючий.
         RegistryAccess.EnsureNotDenied(profile, definition.Id, code);
 
-        return await ApplyAsync(definition, dto, "SaveDefinition", userId, ct).ConfigureAwait(false);
+        return await ApplyAsync(definition, dto, "SaveDefinition", userId, profile, ct).ConfigureAwait(false);
     }
 
     internal static int RequireUser(ICurrentUser user)
@@ -443,9 +443,11 @@ public sealed class SaveRegistryDefinitionHandler(
     /// <param name="dto">Поля, правила, причина.</param>
     /// <param name="operation">Дія в журналі: <c>SaveDefinition</c> або <c>PublishDefinition</c>.</param>
     /// <param name="userId">Автор.</param>
+    /// <param name="profile">Профіль автора: цілі посилань, на які в нього є заборона, — <c>404</c>.</param>
     /// <param name="ct">Токен скасування.</param>
     internal async Task<int> ApplyAsync(
-        RegistryDef definition, SaveRegistryDefinitionDto dto, string operation, int userId, CancellationToken ct)
+        RegistryDef definition, SaveRegistryDefinitionDto dto, string operation, int userId,
+        Security.AccessProfile profile, CancellationToken ct)
     {
         var rules = await registries.ListRulesAsync(definition.Id, ct).ConfigureAwait(false);
         var existingKeys = await keys.ListKeysForUpdateAsync(definition.Id, ct).ConfigureAwait(false);
@@ -469,7 +471,7 @@ public sealed class SaveRegistryDefinitionHandler(
             || !(await EntriesAsync().ConfigureAwait(false)).Any(e => !e.IsDeleted);
 
         // ⛔ ФВ-8.12 (порція 1): ціль посилання наявного поля змінюється лише поки на нього не посилається жодне значення.
-        await GuardLookupRetargetAsync(definition, dto.Fields, EntriesAsync, ct).ConfigureAwait(false);
+        await GuardLookupRetargetAsync(definition, dto.Fields, profile, EntriesAsync, ct).ConfigureAwait(false);
 
         ApplyFields(definition, dto.Fields, newFieldsMayBeRequired);
 
@@ -923,12 +925,24 @@ public sealed class SaveRegistryDefinitionHandler(
     private async Task GuardLookupRetargetAsync(
         RegistryDef definition,
         IReadOnlyList<RegistryFieldSaveDto> wanted,
+        Security.AccessProfile profile,
         Func<Task<IReadOnlyList<Domain.Entities.Dictionaries.RegistryEntry>>> entriesAsync,
         CancellationToken ct)
     {
         var changed = new List<(RegistryFieldDef Field, int? Target)>();
         foreach (var w in wanted)
         {
+            // ⛔ Нове поле Lookup: та сама вимога до цілі, що й при перенаціленні (ent6 R1).
+            if (w.Id is null)
+            {
+                if (string.Equals(w.DataType, nameof(CellDataType.Lookup), StringComparison.Ordinal))
+                {
+                    await RequireUsableTargetAsync(w.LookupRegistryDefId, w.Code, profile, ct).ConfigureAwait(false);
+                }
+
+                continue;
+            }
+
             if (w.Id is not { } id
                 || definition.Fields.FirstOrDefault(f => f.Id == id) is not { DataType: CellDataType.Lookup } field
                 || field.RefRegistryDefId == w.LookupRegistryDefId)
@@ -941,11 +955,7 @@ public sealed class SaveRegistryDefinitionHandler(
                 throw Retarget("err.ECR-REG-0422.relationKindImmutable", field.Code);
             }
 
-            if (w.LookupRegistryDefId is { } target
-                && await registries.FindDefinitionByIdAsync(target, ct).ConfigureAwait(false) is null)
-            {
-                throw Retarget("err.ECR-REG-0422.lookupTargetUnknown", field.Code);
-            }
+            await RequireUsableTargetAsync(w.LookupRegistryDefId, field.Code, profile, ct).ConfigureAwait(false);
 
             changed.Add((field, w.LookupRegistryDefId));
         }
@@ -990,6 +1000,35 @@ public sealed class SaveRegistryDefinitionHandler(
         foreach (var (field, target) in changed)
         {
             field.PointTo(target);
+        }
+    }
+
+    /// <summary>
+    /// Ціль посилання поля <c>Lookup</c>: обов'язкова, існує, і на неї немає заборони автора.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ ent6 R1. Заборонений довідник — <c>404</c> (як неіснуючий, <c>RegistryAccess.NotFound</c>): інакше
+    /// користувач із забороною на X перенацілив би своє поле на X і читав коди й назви записів X
+    /// через рядки довідника-власника. Порожня ціль теж не береться: поле <c>Lookup</c> без цілі
+    /// приймало запис БУДЬ-ЯКОГО довідника (перевірка в <c>RegistryEntryWriter</c> мовчала).
+    /// </remarks>
+    private async Task RequireUsableTargetAsync(
+        int? target, string fieldCode, Security.AccessProfile profile, CancellationToken ct)
+    {
+        if (target is not { } id)
+        {
+            throw Retarget("err.ECR-REG-0422.lookupTargetUnknown", fieldCode);
+        }
+
+        // Заборона перевіряється ДО існування: однакова відповідь на «є, але заборонено» і «немає».
+        if (RegistryAccess.IsDenied(profile, id))
+        {
+            throw RegistryAccess.NotFound(id);
+        }
+
+        if (await registries.FindDefinitionByIdAsync(id, ct).ConfigureAwait(false) is null)
+        {
+            throw Retarget("err.ECR-REG-0422.lookupTargetUnknown", fieldCode);
         }
     }
 

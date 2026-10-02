@@ -303,6 +303,7 @@ public sealed class PublishRegistryDefinitionHandler(
                     content.Fields, content.Rules, draft.Reason, content.Keys, content.CodeMode),
                 "PublishDefinition",
                 userId,
+                profile,
                 ct)
             .ConfigureAwait(false);
     }

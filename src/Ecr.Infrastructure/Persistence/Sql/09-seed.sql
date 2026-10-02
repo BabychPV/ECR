@@ -968,7 +968,21 @@ UPDATE t
     (N'notifications.test.smtp.relay', N'ru', N'Проверка SMTP не удалась: сервер отказался пересылать почту для отправителя или получателя. Проверьте Smtp:From и адреса получателей.',
                                                 N'Проверка SMTP не удалась: сервер отказался пересылать почту для отправителя или получателя. Проверьте адрес отправителя (Smtp:From, если используется конфигурация процесса) и адреса получателей.'),
     (N'notifications.test.smtp.relay', N'kz', N'SMTP тексеруі сәтсіз: сервер жіберушіге немесе алушыға пошта жіберуден бас тартты. Smtp:From мәнін және алушылар мекенжайларын тексеріңіз.',
-                                                N'SMTP тексеруі сәтсіз: сервер жіберушіге немесе алушыға пошта жіберуден бас тартты. Жіберуші мекенжайын (процесс конфигурациясы қолданылса — Smtp:From) және алушылар мекенжайларын тексеріңіз.')
+                                                N'SMTP тексеруі сәтсіз: сервер жіберушіге немесе алушыға пошта жіберуден бас тартты. Жіберуші мекенжайын (процесс конфигурациясы қолданылса — Smtp:From) және алушылар мекенжайларын тексеріңіз.'),
+    -- ФВ-8.12 / ent6 R1: ціль посилання не знімається (поле Lookup без цілі приймало запис будь-якого довідника).
+    (N'registries.relationsEditHint', N'en', N'The target of a link can be changed or removed while no record holds a value in that field; otherwise the server refuses it.',
+                                                N'The target of a link can be changed to another registry while no record holds a value in that field; otherwise the server refuses it.'),
+    (N'registries.relationsEditHint', N'ru', N'Цель связи можно изменить или снять, пока ни в одной записи нет значения этого поля; иначе сервер откажет.',
+                                                N'Цель связи можно заменить другим справочником, пока ни в одной записи нет значения этого поля; иначе сервер откажет.'),
+    (N'registries.relationsEditHint', N'kz', N'Байланыс мақсатын осы өрістің мәні бірде-бір жазбада болмаған кезде өзгертуге немесе алуға болады; әйтпесе сервер бас тартады.',
+                                                N'Байланыс мақсатын осы өрістің мәні бірде-бір жазбада болмаған кезде басқа анықтамалыққа ауыстыруға болады; әйтпесе сервер бас тартады.'),
+    -- ent6 R2: код чужого запису (міг бути із забороненого довідника) у відмові не показується.
+    (N'err.ECR-REG-0422.lookupWrongRegistry', N'en', N'Field "{field}" looks up registry "{expectedRegistry}", but entry {value} ("{entryCode}") belongs to another registry.',
+                                                N'Field "{field}" looks up registry "{expectedRegistry}", but entry {value} belongs to another registry.'),
+    (N'err.ECR-REG-0422.lookupWrongRegistry', N'ru', N'Поле «{field}» выбирает из справочника «{expectedRegistry}», но запись {value} («{entryCode}») принадлежит другому справочнику.',
+                                                N'Поле «{field}» выбирает из справочника «{expectedRegistry}», но запись {value} принадлежит другому справочнику.'),
+    (N'err.ECR-REG-0422.lookupWrongRegistry', N'kz', N'«{field}» өрісі «{expectedRegistry}» анықтамалығынан таңдайды, бірақ {value} («{entryCode}») жазбасы басқа анықтамалыққа тиесілі.',
+                                                N'«{field}» өрісі «{expectedRegistry}» анықтамалығынан таңдайды, бірақ {value} жазбасы басқа анықтамалыққа тиесілі.')
   ) AS s ([Key], Lang, OldVal, NewVal)
     ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
  WHERE t.Value = s.OldVal COLLATE Latin1_General_BIN2;
@@ -1716,7 +1730,7 @@ USING (VALUES
     (N'err.ECR-REG-0422.valueNotEntryId',    N'en', N'The value "{value}" is not a registry entry identifier.', 1),
     -- V-08(b), V-17(a): значення поля Lookup — живий запис оголошеного довідника.
     (N'err.ECR-REG-0422.lookupEntryNotFound', N'en', N'Field "{field}": registry entry {value} does not exist.', 1),
-    (N'err.ECR-REG-0422.lookupWrongRegistry', N'en', N'Field "{field}" looks up registry "{expectedRegistry}", but entry {value} ("{entryCode}") belongs to another registry.', 1),
+    (N'err.ECR-REG-0422.lookupWrongRegistry', N'en', N'Field "{field}" looks up registry "{expectedRegistry}", but entry {value} belongs to another registry.', 1),
     (N'err.ECR-REG-0422.selfLink',           N'en', N'Entry {entryId} cannot be linked to itself.', 1),
     (N'err.ECR-REG-0422.linkPayloadNotObject', N'en', N'Link attributes must be a JSON object.', 1),
     (N'err.ECR-REG-0422.linkPayloadInvalidJson', N'en', N'Link attributes are not valid JSON: {reason}', 1),
@@ -6366,7 +6380,7 @@ USING (VALUES
     (N'err.ECR-REG-0422.lookupRetargetInUse', N'en', N'The link of field "{fieldCode}" cannot be changed: records already hold values pointing to the current target.', 1),
     (N'err.ECR-REG-0422.lookupTargetUnknown', N'en', N'The target registry of field "{fieldCode}" does not exist.', 1),
     (N'registries.relationTargetFor', N'en', N'Link target of field {field}', 1),
-    (N'registries.relationsEditHint', N'en', N'The target of a link can be changed or removed while no record holds a value in that field; otherwise the server refuses it.', 1),
+    (N'registries.relationsEditHint', N'en', N'The target of a link can be changed to another registry while no record holds a value in that field; otherwise the server refuses it.', 1),
     (N'err.ECR-REG-0422.lookupRetargetUsedByRules', N'en', N'The link of field "{fieldCode}" cannot be changed: {total} rule(s), formula(s) or methodology version(s) read attributes through it: {usedBy}. Change or disable them first.', 1),
     -- ru/kz — окремою порцією COLL:fv812-relations у блоці I18N нижче.
     -- COLL:fv812-relations ── кінець секції ──
@@ -6846,7 +6860,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-REG-0422.valueNotDate', N'ru', N'Значение «{value}» не является датой.'),
     (N'err.ECR-REG-0422.valueNotEntryId', N'ru', N'Значение «{value}» не является идентификатором записи справочника.'),
     (N'err.ECR-REG-0422.lookupEntryNotFound', N'ru', N'Поле «{field}»: запись справочника {value} не существует.'),
-    (N'err.ECR-REG-0422.lookupWrongRegistry', N'ru', N'Поле «{field}» выбирает из справочника «{expectedRegistry}», но запись {value} («{entryCode}») принадлежит другому справочнику.'),
+    (N'err.ECR-REG-0422.lookupWrongRegistry', N'ru', N'Поле «{field}» выбирает из справочника «{expectedRegistry}», но запись {value} принадлежит другому справочнику.'),
     (N'err.ECR-REG-0422.selfLink', N'ru', N'Запись {entryId} нельзя связать с самой собой.'),
     (N'err.ECR-REG-0422.linkPayloadNotObject', N'ru', N'Атрибуты связи должны быть объектом JSON.'),
     (N'err.ECR-REG-0422.linkPayloadInvalidJson', N'ru', N'Атрибуты связи не являются допустимым JSON: {reason}'),
@@ -9874,7 +9888,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-REG-0422.valueNotDate', N'kz', N'«{value}» мәні күн емес.'),
     (N'err.ECR-REG-0422.valueNotEntryId', N'kz', N'«{value}» мәні анықтамалық жазбасының идентификаторы емес.'),
     (N'err.ECR-REG-0422.lookupEntryNotFound', N'kz', N'«{field}» өрісі: {value} анықтамалық жазбасы жоқ.'),
-    (N'err.ECR-REG-0422.lookupWrongRegistry', N'kz', N'«{field}» өрісі «{expectedRegistry}» анықтамалығынан таңдайды, бірақ {value} («{entryCode}») жазбасы басқа анықтамалыққа тиесілі.'),
+    (N'err.ECR-REG-0422.lookupWrongRegistry', N'kz', N'«{field}» өрісі «{expectedRegistry}» анықтамалығынан таңдайды, бірақ {value} жазбасы басқа анықтамалыққа тиесілі.'),
     (N'err.ECR-REG-0422.selfLink', N'kz', N'{entryId} жазбасын өзімен байланыстыруға болмайды.'),
     (N'err.ECR-REG-0422.linkPayloadNotObject', N'kz', N'Байланыс атрибуттары JSON нысаны болуы керек.'),
     (N'err.ECR-REG-0422.linkPayloadInvalidJson', N'kz', N'Байланыс атрибуттары жарамды JSON емес: {reason}'),
@@ -15006,8 +15020,8 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-REG-0422.lookupTargetUnknown', N'kz', N'«{fieldCode}» өрісі сілтейтін анықтамалық жоқ.'),
     (N'registries.relationTargetFor', N'ru', N'Цель связи поля {field}'),
     (N'registries.relationTargetFor', N'kz', N'{field} өрісінің байланыс мақсаты'),
-    (N'registries.relationsEditHint', N'ru', N'Цель связи можно изменить или снять, пока ни в одной записи нет значения этого поля; иначе сервер откажет.'),
-    (N'registries.relationsEditHint', N'kz', N'Байланыс мақсатын осы өрістің мәні бірде-бір жазбада болмаған кезде өзгертуге немесе алуға болады; әйтпесе сервер бас тартады.'),
+    (N'registries.relationsEditHint', N'ru', N'Цель связи можно заменить другим справочником, пока ни в одной записи нет значения этого поля; иначе сервер откажет.'),
+    (N'registries.relationsEditHint', N'kz', N'Байланыс мақсатын осы өрістің мәні бірде-бір жазбада болмаған кезде басқа анықтамалыққа ауыстыруға болады; әйтпесе сервер бас тартады.'),
     (N'err.ECR-REG-0422.lookupRetargetUsedByRules', N'ru', N'Связь поля «{fieldCode}» нельзя изменить: через неё читают атрибуты правил, формул или версий методологий — {total}: {usedBy}. Сначала измените или отключите их.'),
     (N'err.ECR-REG-0422.lookupRetargetUsedByRules', N'kz', N'«{fieldCode}» өрісінің байланысын өзгерту мүмкін емес: ол арқылы атрибуттарды оқитын ережелер, формулалар немесе әдістеме нұсқалары бар — {total}: {usedBy}. Алдымен оларды өзгертіңіз немесе өшіріңіз.')
        ) AS v ([Key], Lang, Val)

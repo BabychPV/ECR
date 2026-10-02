@@ -50,18 +50,22 @@ function show(node: JSX.Element): void {
 }
 
 describe('Зв\'язки полів: редагування', () => {
-  it('зміна цілі й зняття зв\'язку повідомляють поле і нову ціль', () => {
+  it('зміна цілі повідомляє поле і нову ціль; зняти ціль («—») не можна', () => {
     const onChange = vi.fn();
     show(
       <RegistryRelations definition={Definition} canEdit registryOptions={Options} onChangeLink={onChange} />,
     );
 
     const select = screen.getByRole('combobox');
+
+    // ⛔ ent6 R1: порожнього варіанта немає — поле Lookup без цілі сервер не приймає.
+    expect(Array.from(select.querySelectorAll('option')).map((o) => o.getAttribute('value'))).toEqual(['5', '6']);
+
     fireEvent.change(select, { target: { value: '6' } });
     fireEvent.change(select, { target: { value: '' } });
 
-    expect(onChange).toHaveBeenNthCalledWith(1, 42, 6);
-    expect(onChange).toHaveBeenNthCalledWith(2, 42, null);
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenCalledWith(42, 6);
   });
 
   it('без права на опис — лише читання', () => {

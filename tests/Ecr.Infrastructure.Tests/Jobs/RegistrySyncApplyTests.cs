@@ -203,25 +203,30 @@ public sealed class RegistrySyncApplyTests(SqlServerFixture sql)
         {
             await RunAsync(provider, stand);
 
-            // E1: Lookup на неіснуючий запис — тип планувальник пропустив (це число), а writer
-            // відхилив ціль. E1 не записано зовсім (все або нічого на запис), E2 — записано.
+            // ent6 R1: REF — Lookup БЕЗ цілі, а такий writer значень не приймає (lookupTargetUnknown).
+            // Тому відхилено ОБИДВА записи пакета (кожен окремо, все або нічого на запис): жоден не
+            // записано, і відмова одного не блокує перевірку іншого (дві окремі події).
             var values = await CapValuesAsync(stand);
             Assert.Equal(V(10m, stand.SvcId), values[stand.E1]);
-            Assert.Equal(V(30m, stand.SvcId), values[stand.E2]);
+            Assert.Equal(V(20m, stand.SvcId), values[stand.E2]);
 
             var rejected = (await EventsAsync(stand.EntityId))
                 .Where(e => e.Status == CollectionCoverage.RegistryValueRejected)
                 .ToList();
-            var single = Assert.Single(rejected);
-            Assert.Contains($"entry={stand.E1}", single.Details, StringComparison.Ordinal);
-            Assert.Contains("messageKey=err.ECR-REG-0422.lookupEntryNotFound", single.Details, StringComparison.Ordinal);
-            Assert.Contains("error=ECR-REG-0422", single.Details, StringComparison.Ordinal);
+            Assert.Equal(2, rejected.Count);
+            Assert.Contains(rejected, e => e.Details!.Contains($"entry={stand.E1}", StringComparison.Ordinal));
+            Assert.Contains(rejected, e => e.Details!.Contains($"entry={stand.E2}", StringComparison.Ordinal));
+            Assert.All(rejected, e =>
+            {
+                Assert.Contains("messageKey=err.ECR-REG-0422.lookupTargetUnknown", e.Details, StringComparison.Ordinal);
+                Assert.Contains("error=ECR-REG-0422", e.Details, StringComparison.Ordinal);
+            });
 
-            // Повтор: відмова не дублюється (дедуп), E2 уже не змінюється.
+            // Повтор: відмова не дублюється (дедуп).
             await RunAsync(provider, stand);
-            Assert.Single(
-                await EventsAsync(stand.EntityId),
-                e => e.Status == CollectionCoverage.RegistryValueRejected);
+            Assert.Equal(
+                2,
+                (await EventsAsync(stand.EntityId)).Count(e => e.Status == CollectionCoverage.RegistryValueRejected));
         }
         finally
         {
@@ -551,8 +556,7 @@ public sealed class RegistrySyncApplyTests(SqlServerFixture sql)
         // ⚠ REF без довідника-цілі (RefRegistryDefId = null): джерело дає Id, і відмову дає САМ
         // writer (lookupEntryNotFound). З ціллю атрибут ніс би КОД (D-212 (5)), і відмова була б
         // планувальника — це RegistrySyncExecuteTests.
-        var reference = new RegistryFieldDef(registry.Id, EcrCode.Create("REF"), Text("Ref"), CellDataType.Lookup, 2);
-        if (keyed is not null)
+        var reference = new RegistryFieldDef(registry.Id, EcrCode.Create("REF"), Text("Ref"), CellDataType.Lookup, 2);        if (keyed is not null)
         {
             // Поле первинного ключа обов'язкове (D-153).
             cap.Update(Text("Capacity"), 1, isRequired: true);

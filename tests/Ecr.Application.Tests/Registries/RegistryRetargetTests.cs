@@ -22,8 +22,11 @@ namespace Ecr.Application.Tests.Registries;
 /// <remarks>
 /// Мутаційні докази: без перевірки значень у <c>GuardLookupRetargetAsync</c> червоний
 /// <see cref="Ціль_не_змінюється_поки_на_неї_посилаються_значення"/>; без <c>PointTo</c> —
-/// <see cref="Ціль_змінюється_коли_значень_немає"/> і <see cref="Зв_язок_знімається_коли_значень_немає"/>;
-/// без перевірки існування цілі — <see cref="Невідома_ціль_відхиляється"/>.
+/// <see cref="Ціль_змінюється_коли_значень_немає"/>; без перевірки існування цілі —
+/// <see cref="Невідома_ціль_відхиляється"/>; без <c>IsDenied</c> у <c>RequireUsableTargetAsync</c> —
+/// <see cref="Ретаргет_на_заборонений_довідник_дає_404_як_на_неіснуючий"/> і
+/// <see cref="Нове_поле_Lookup_із_забороненою_ціллю_дає_404"/>; без вимоги цілі —
+/// <see cref="Ціль_не_знімається_навіть_коли_значень_немає"/>.
 /// </remarks>
 public sealed class RegistryRetargetTests
 {
@@ -73,7 +76,6 @@ public sealed class RegistryRetargetTests
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait("Requirement", "ФВ-8.12")]
     [InlineData(NewTargetId)]
-    [InlineData(null)]
     public async Task Ціль_не_змінюється_поки_через_поле_читають_атрибути_правила_чи_методології(int? target)
     {
         // ⛔ Правило `LINK.Capacity > 0`, формула методології — через ребра cfg.RegistryUse. Значень
@@ -124,18 +126,76 @@ public sealed class RegistryRetargetTests
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait("Requirement", "ФВ-8.12")]
-    public async Task Зв_язок_знімається_коли_значень_немає()
+    public async Task Ціль_не_знімається_навіть_коли_значень_немає()
     {
-        await Save(null);
+        // ⛔ ent6 R1: поле Lookup без цілі приймало запис БУДЬ-ЯКОГО довідника (і забороненого).
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(() => Save(null));
 
-        Assert.Null(_link.RefRegistryDefId);
+        Assert.Equal("err.ECR-REG-0422.lookupTargetUnknown", error.Details!["messageKey"]);
+        Assert.Equal(OldTargetId, _link.RefRegistryDefId);
+        await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Requirement", "ФВ-8.12")]
+    public async Task Ретаргет_на_заборонений_довідник_дає_404_як_на_неіснуючий()
+    {
+        DenyRegistry(NewTargetId);
+
+        var error = await Assert.ThrowsAsync<NotFoundException>(() => Save(NewTargetId));
+
+        // Та сама відповідь, що й на неіснуючий довідник: заборона не розкриває його існування.
+        Assert.Equal("ECR-REG-0404", error.ErrorCode);
+        Assert.Equal("err.ECR-REG-0404.registryId", error.Details!["messageKey"]);
+        Assert.Equal(OldTargetId, _link.RefRegistryDefId);
+        await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Requirement", "ФВ-8.12")]
+    public async Task Нове_поле_Lookup_із_забороненою_ціллю_дає_404()
+    {
+        DenyRegistry(NewTargetId);
+
+        var error = await Assert.ThrowsAsync<NotFoundException>(
+            () => Save(OldTargetId, extra: NewLookup(NewTargetId)));
+
+        Assert.Equal("err.ECR-REG-0404.registryId", error.Details!["messageKey"]);
+        Assert.DoesNotContain(_owner.Fields, f => f.Code == "EXTRA");
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Requirement", "ФВ-8.12")]
+    public async Task Нове_поле_Lookup_без_цілі_або_з_невідомою_ціллю_відхиляється()
+    {
+        foreach (var target in new int?[] { null, 999 })
+        {
+            var error = await Assert.ThrowsAsync<BusinessRuleException>(
+                () => Save(OldTargetId, extra: NewLookup(target)));
+
+            Assert.Equal("err.ECR-REG-0422.lookupTargetUnknown", error.Details!["messageKey"]);
+        }
+
+        Assert.DoesNotContain(_owner.Fields, f => f.Code == "EXTRA");
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Requirement", "ФВ-8.12")]
+    public async Task Нове_поле_Lookup_із_дозволеною_ціллю_додається()
+    {
+        await Save(OldTargetId, extra: NewLookup(NewTargetId));
+
+        Assert.Contains(_owner.Fields, f => f.Code == "EXTRA" && f.RefRegistryDefId == NewTargetId);
     }
 
     [Theory]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait("Requirement", "ФВ-8.12")]
     [InlineData(NewTargetId)]
-    [InlineData(null)]
     public async Task Ціль_не_змінюється_поки_на_неї_посилаються_значення(int? target)
     {
         var entry = new RegistryEntry(OwnerId, EcrCode.Create("E1"), Text("E1"));
@@ -177,11 +237,24 @@ public sealed class RegistryRetargetTests
         Assert.Equal(OldTargetId, _link.RefRegistryDefId);
     }
 
-    private Task<int> Save(int? target)
+    private void DenyRegistry(int registryDefId)
+        => _access.BuildProfileAsync(9, Arg.Any<CancellationToken>()).Returns(new AccessBuilder { UserId = 9 }
+            .Permission("Registry.View").Permission("Registry.EditDefinition").Permission("Registry.Publish")
+            .Deny(ResourceKind.Registry, registryDefId).Build());
+
+    private static RegistryFieldSaveDto NewLookup(int? target)
+        => new(null, "EXTRA", Text("EXTRA"), "Lookup", 9, false, false, target, null);
+
+    private Task<int> Save(int? target, RegistryFieldSaveDto? extra = null)
     {
         var fields = _owner.Fields.OrderBy(f => f.Ordinal).Select(f => new RegistryFieldSaveDto(
             f.Id, f.Code, f.NameL10n, f.DataType.ToString(), f.Ordinal, f.IsRequired, f.IsKey,
             f.Id == LinkFieldId ? target : f.RefRegistryDefId, f.UnitId)).ToList();
+        if (extra is not null)
+        {
+            fields.Add(extra);
+        }
+
         var handler = new SaveRegistryDefinitionHandler(
             _registries, _uow, Substitute.For<IAuditWriter>(), _access, _user, Substitute.For<IClock>(),
             Substitute.For<IUnitCatalog>(), _keys,
