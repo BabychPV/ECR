@@ -35,6 +35,7 @@ public sealed class SmtpSettingsController(
     /// <param name="request">Адресат.</param>
     /// <param name="ct">Токен скасування.</param>
     [HttpPost("test")]
+    [Microsoft.AspNetCore.RateLimiting.EnableRateLimiting(Ecr.Api.Security.SmtpTestRateLimitPolicy.PolicyName)]
     [ProducesResponseType<NotificationTestResult>(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     public async Task<IActionResult> Test([FromBody] SmtpTestRequest request, CancellationToken ct)

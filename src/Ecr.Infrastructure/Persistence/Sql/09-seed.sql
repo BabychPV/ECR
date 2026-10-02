@@ -6072,6 +6072,9 @@ USING (VALUES
     (N'effectiveAccess.caveat', N'en', N'Document state (submitted, approved, closed period) and assignment narrowing by periods are not taken into account here. This shows what the grants give along the chain project, sheet, table, column, not whether a cell can be edited right now.', 1),
     (N'effectiveAccess.inheritedFrom', N'en', N'Inherited from {resource}', 1),
     -- COLL:fv616 ── кінець секції ──
+    -- COLL:smtp-hardening ── Межа частоти проб транспорту (рекомендація безпекового рев'ю D-263) ──
+    (N'err.ECR-REQ-0429.tooManySmtpTests', N'en', N'Too many test messages in a short time. Wait a moment and try again; the Retry-After header says how long.', 1),
+    -- COLL:smtp-hardening ── кінець секції ──
     -- SEC:effective-access ── Розріз «ресурс → рівень → грант якої ролі» (ФВ-6.16, D-220, `EffectiveAccessPanel`, GET /security/users/{id}/effective-access) ──
     (N'err.ECR-REQ-0422.effectiveAccessResource', N'en', N'The resource must be given as a type and a positive number, for example Registry:5 or Project:3.', 1),
     (N'effectiveAccess.show',            N'en', N'Show effective access', 1),
@@ -14478,6 +14481,17 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:fv1315-ui ── кінець секції ──
+
+-- COLL:smtp-hardening ── ru/kz межі частоти проб транспорту; власна порція; kz — потрібна вичитка носієм ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-REQ-0429.tooManySmtpTests', N'ru', N'Слишком много пробных сообщений за короткое время. Подождите немного и повторите попытку; заголовок Retry-After указывает, через сколько.'),
+    (N'err.ECR-REQ-0429.tooManySmtpTests', N'kz', N'Қысқа уақыт ішінде сынақ хабарламалары тым көп. Біраз күтіп, қайталап көріңіз; қанша уақыттан кейін екенін Retry-After тақырыбы көрсетеді.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:smtp-hardening ── кінець секції ──
 
 -- REG:rt25-client ── ru/kz сторінки впливу довідника і банера застарілості (RT-25, клієнт); власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)
