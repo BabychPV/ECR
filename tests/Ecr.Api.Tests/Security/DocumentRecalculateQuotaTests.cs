@@ -13,6 +13,7 @@ using Ecr.Domain.ValueObjects;
 using Ecr.Infrastructure.Security;
 using Ecr.TestKit;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Configuration;
@@ -172,6 +173,46 @@ public sealed class DocumentRecalculateQuotaTests(SqlServerFixture sql)
         quota.Refund("a", w1); // повернення з минулого вікна нічого не дає
         Assert.True(quota.TryAcquire("a", out _, out _));
         Assert.False(quota.TryAcquire("a", out _, out _));
+    }
+
+    /// <remarks>Мутація: прибрати <c>quota.Refund</c> після <c>next</c> для статусу ≥ 400 без винятку — червоне.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    public async Task Відповідь_зі_статусом_400_плюс_без_винятку_повертає_дозвіл()
+    {
+        var quota = new DocumentRecalculateQuota(
+            new ConfigurationBuilder().AddInMemoryCollection([new(DocumentRecalculateQuota.PermitKey, "2")]).Build(), new ManualClock());
+        var status = StatusCodes.Status404NotFound;
+        var middleware = new DocumentRecalculateQuotaMiddleware(ctx =>
+        {
+            ctx.Response.StatusCode = status; // як Results.StatusCode(404) від контролера: без винятку
+            return Task.CompletedTask;
+        }, quota);
+
+        for (var i = 0; i < Permit * 3; i++)
+        {
+            var ctx = MarkedContext();
+            await middleware.InvokeAsync(ctx).ConfigureAwait(true);
+            Assert.Equal(StatusCodes.Status404NotFound, ctx.Response.StatusCode); // не 429
+        }
+
+        status = StatusCodes.Status202Accepted;
+        for (var i = 0; i < Permit; i++)
+        {
+            var ctx = MarkedContext();
+            await middleware.InvokeAsync(ctx).ConfigureAwait(true);
+            Assert.Equal(StatusCodes.Status202Accepted, ctx.Response.StatusCode); // межа ціла
+        }
+    }
+
+    private static DefaultHttpContext MarkedContext()
+    {
+        var ctx = new DefaultHttpContext();
+        ctx.User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(
+            [new System.Security.Claims.Claim(Ecr.Api.Auth.AuthenticationSetup.UserIdClaim, "42")], "test"));
+        ctx.SetEndpoint(new Endpoint(null, new EndpointMetadataCollection(new DocumentRecalculateQuotaAttribute()), "recalc"));
+
+        return ctx;
     }
 
     [Fact]
