@@ -84,6 +84,9 @@ interface Stub {
 
   /** Прямий `PUT …/definition` відповідає `409 definitionChanged`. */
   directConflict?: boolean;
+
+  /** `GET …/definition/draft` відповідає 500: версії опису клієнт не знає. */
+  draftStateFails?: boolean;
 }
 
 function json(body: unknown, status = 200): Response {
@@ -207,6 +210,10 @@ function respond(options?: Partial<Pick<Stub, 'saveConflict' | 'hasDraft'>>, per
           state.hasDraft = false;
 
           return new Response(null, { status: 204 });
+        }
+
+        if (state.draftStateFails === true) {
+          return problem(500, 'ECR-SYS-0500', { messageKey: 'err.ECR-SYS-0500' });
         }
 
         return json({ definitionVersion: 3, draft: state.hasDraft ? draftBody() : null });
@@ -637,6 +644,40 @@ describe('BE-24 крок 2: чернетка опису довідника в к
       // ⛔ ФВ-8.12 (борг): `If-Match` несе `definitionVersion`, яку показав сервер (3 у стабі), —
       // без нього дві вкладки з однаковим повним станом затирали б одна одну.
       expect(state.directIfMatch).toBe('"3"');
+    },
+    SlowEnvTimeout,
+  );
+
+  it(
+    'версія опису невідома (стан чернетки не прочитався) — прямий PUT не йде зовсім',
+    async () => {
+      // ⛔ Мутація: прибрати перевірку `version === undefined` у `saveAndPublish.mutationFn` —
+      // PUT піде без `If-Match` (сервер відмовить 422), тест червоніє.
+      const state = respond({ hasDraft: false });
+      state.draftStateFails = true;
+      showPanel();
+      await ready();
+
+      const direct = await waitFor(
+        () => {
+          const node = document.querySelector('[data-save-and-publish]');
+          expect(node).not.toBeNull();
+          return node as HTMLElement;
+        },
+        { timeout: SlowEnvTimeout },
+      );
+
+      await userEvent.click(direct);
+      await userEvent.click(await screen.findByTestId('confirm-verb', {}, { timeout: PromptTimeout }));
+
+      // Дія завершилась (діалог закрито `onSettled`) — і жодного PUT не було.
+      await waitFor(
+        () => {
+          expect(screen.queryByTestId('confirm-verb')).toBeNull();
+        },
+        { timeout: PromptTimeout },
+      );
+      expect(state.calls.some((call) => call.startsWith('PUT '))).toBe(false);
     },
     SlowEnvTimeout,
   );
