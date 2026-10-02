@@ -1,5 +1,9 @@
 // tests/Ecr.Infrastructure.Tests/Security/AccessProfileCacheTests.cs
+using Ecr.Application.Documents.VersionMigration;
+using Ecr.Application.Ports;
 using Ecr.Application.Security;
+using Microsoft.Extensions.Logging;
+using NSubstitute;
 using Ecr.Domain.Enums;
 using Ecr.Infrastructure.Caching;
 using Ecr.TestKit;
@@ -125,6 +129,24 @@ public sealed class AccessProfileCacheTests : IDisposable
 
         await cache.GetOrCreateAsync(UserId, "s1", "a", _ => Build(ref builds, "s1"), CancellationToken.None);
         Assert.True(_memory.TryGetValue(AccessProfileCache.Key(UserId, "s1", "a"), out _));
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    public async Task Переповнення_переліку_скидає_реально_закешовані_профілі_усіх_користувачів()
+    {
+        var cache = new AccessProfileCache(_memory);
+        var builds = 0;
+        await cache.GetOrCreateAsync(UserId, "s1", "g", _ => Build(ref builds, "s1"), CancellationToken.None);
+        await cache.GetOrCreateAsync(UserId + 1, "s9", "", _ => Build(ref builds, "s9"), CancellationToken.None);
+        Assert.True(_memory.TryGetValue(AccessProfileCache.Key(UserId, "s1", "g"), out _));
+
+        // Перелік користувачів неповний (Overflow) — Ids не називає нікого, скидатись мусить усе.
+        GrantProfileInvalidation.Run(
+            cache, Substitute.For<ILogger>(), new GrantedUsers([], Overflow: true));
+
+        // ⛔ Мутація: InvalidateAll → no-op лишає ці записи (fail-open).
+        Assert.False(_memory.TryGetValue(AccessProfileCache.Key(UserId, "s1", "g"), out _));
+        Assert.False(_memory.TryGetValue(AccessProfileCache.Key(UserId + 1, "s9", ""), out _));
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
