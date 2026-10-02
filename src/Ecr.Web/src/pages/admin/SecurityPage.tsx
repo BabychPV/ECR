@@ -22,6 +22,7 @@ import { CreateUserModal } from '@/features/security/CreateUserModal';
 import { RoleMatrix } from '@/features/security/RoleMatrix';
 import { StartSimulationButton } from '@/features/security/SimulationPanel';
 import { UserAdminActions } from '@/features/security/UserAdminActions';
+import { useOpenerFocusReturn } from '@/features/projects/useOpenerFocusReturn';
 import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
@@ -114,6 +115,10 @@ export function SecurityPage(): JSX.Element {
   // ⚠ «Діалог доступу вже відкривали». Назад у `false` не вертається навмисно —
   // див. коментар біля `UserAccessEditor` вище.
   const [accessUsed, setAccessUsed] = useState(false);
+
+  // ⛔ WCAG 2.4.3: діалог лінивий і при першому відкритті монтується вже відкритим — Mantine тоді не
+  // знає відкривача, і Escape лишав фокус на `body` (`SecurityPage.accessFocusReturn.test.tsx`).
+  const accessFocus = useOpenerFocusReturn();
 
   // ⛔ Аудит U6: вкладка «Гранти», раз відкрита, лишається змонтованою (лише
   // ховається). Вкладка живе в адресі (`?tab=`), а `UnsavedGuard` блокує лише
@@ -347,6 +352,7 @@ export function SecurityPage(): JSX.Element {
                       size="compact-xs"
                       variant="subtle"
                       onClick={() => {
+                        accessFocus.remember();
                         setAccessUsed(true);
                         setEditingAccess(user);
                       }}
@@ -476,7 +482,10 @@ export function SecurityPage(): JSX.Element {
           <UserAccessEditor
             user={editingAccess}
             roles={roles.data ?? []}
-            onClose={() => setEditingAccess(null)}
+            onClose={() => {
+              setEditingAccess(null);
+              accessFocus.restore();
+            }}
           />
         </Suspense>
       )}

@@ -1,4 +1,4 @@
-import { useState, type JSX } from 'react';
+import { useEffect, useId, useRef, useState, type JSX } from 'react';
 import {
   Alert,
   Button,
@@ -213,6 +213,22 @@ function ScheduleForm({
   // ⚠ `NumberInput` віддає '' на порожньому полі — це не нуль, а «не введено».
   const [lookback, setLookback] = useState<number | string>(base?.lookbackDays ?? LOOKBACK_DEFAULT);
   const [confirming, setConfirming] = useState(false);
+  // ⛔ WCAG 2.4.3: «Видалити» зникає з дерева в мить кліку — без переносу фокус падав на `body`, і
+  // клавіатурний користувач опинявся на початку сторінки. Підтвердження бере фокус на «Скасувати»
+  // (безпечна дія), а скасування повертає його на «Видалити».
+  const removeRef = useRef<HTMLButtonElement>(null);
+  const cancelRef = useRef<HTMLButtonElement>(null);
+  const confirmShown = useRef(false);
+  const confirmTextId = useId();
+  useEffect(() => {
+    if (confirming) {
+      confirmShown.current = true;
+      cancelRef.current?.focus();
+    } else if (confirmShown.current) {
+      confirmShown.current = false;
+      removeRef.current?.focus();
+    }
+  }, [confirming]);
   const initialDependency = base?.dependsOnScheduleId ?? null;
   const [dependsOn, setDependsOn] = useState<string | null>(
     initialDependency === null ? null : String(initialDependency),
@@ -296,14 +312,22 @@ function ScheduleForm({
 
       <Group justify="space-between" gap="xs">
         {base !== null && !confirming && (
-          <Button variant="subtle" color="statusError" onClick={() => setConfirming(true)} disabled={busy}>
+          <Button
+            ref={removeRef}
+            variant="subtle"
+            color="statusError"
+            onClick={() => setConfirming(true)}
+            disabled={busy}
+          >
             {t('common.delete')}
           </Button>
         )}
 
         {base !== null && confirming && (
-          <Group gap="xs">
-            <Text size="sm">{t('schedule.removeConfirm')}</Text>
+          <Group gap="xs" role="group" aria-labelledby={confirmTextId}>
+            <Text size="sm" id={confirmTextId}>
+              {t('schedule.removeConfirm')}
+            </Text>
             <Button
               size="xs"
               color="statusError"
@@ -314,7 +338,7 @@ function ScheduleForm({
             >
               {t('common.delete')}
             </Button>
-            <Button size="xs" variant="default" onClick={() => setConfirming(false)}>
+            <Button ref={cancelRef} size="xs" variant="default" onClick={() => setConfirming(false)}>
               {t('common.cancel')}
             </Button>
           </Group>
