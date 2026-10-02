@@ -140,7 +140,6 @@ public sealed class DocumentVersionMigrationStore(EcrDbContext db) : IDocumentVe
                 SELECT COUNT(*) AS Value
                 FROM   sec.ResourceGrant g
                 JOIN   OPENJSON({json}) WITH (k tinyint, i int) x ON x.k = g.ResourceKind AND x.i = g.ResourceId
-                WHERE  g.IsDeny = 1
                 """)
             .SingleAsync(ct)
             .ConfigureAwait(false);

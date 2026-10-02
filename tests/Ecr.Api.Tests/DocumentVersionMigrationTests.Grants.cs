@@ -119,6 +119,30 @@ public sealed partial class DocumentVersionMigrationTests
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "ФВ-6.7")]
+    public async Task Звужувальний_дозвіл_Read_під_Write_проєкту_на_колонку_якої_нема_в_новій_версії_блокує_перенос()
+    {
+        // Allow Column=Read під Project=Write теж ЗВУЖУЄ доступ (береться найдрібніший рівень).
+        var s = await ArrangeAsync(Target.DropsC3AddsC4AndRow).ConfigureAwait(true);
+        await AddRestrictedUserAsync(s, (ResourceKind.Column, s.Doc.ColumnDefIds[2], false)).ConfigureAwait(true);
+        var before = await SnapshotAsync(s).ConfigureAwait(true);
+
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
+
+        var dry = JsonDocument.Parse(await (await PostAsync(client, s, "Safe", dryRun: true).ConfigureAwait(true))
+            .Content.ReadAsStringAsync().ConfigureAwait(true)).RootElement;
+        Assert.False(dry.GetProperty("canApply").GetBoolean());
+        Assert.Contains("grantsNotMapped", dry.GetProperty("refusals").EnumerateArray().Select(r => r.GetString()));
+
+        var response = await PostAsync(client, s, "Safe", dryRun: false).ConfigureAwait(true);
+        await AssertProblemAsync(response, HttpStatusCode.UnprocessableEntity, "ECR-SCHM-0422", "err.ECR-SCHM-0422.migrateGrantsNotMapped").ConfigureAwait(true);
+        Assert.Equal(before, await SnapshotAsync(s).ConfigureAwait(true));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-6.7")]
     public async Task Профіль_у_кеші_того_самого_застосунку_бачить_заборону_на_новому_id_одразу_після_переносу()
     {
         var s = await ArrangeAsync(Target.DropsC3AddsC4AndRow).ConfigureAwait(true);

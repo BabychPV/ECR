@@ -35,9 +35,13 @@ public interface IDocumentVersionMigrationStore
     public Task<VersionMigrationScope> ReadScopeAsync(int projectId, CancellationToken ct);
 
     /// <summary>
-    /// Скільки заборон (<c>IsDeny</c>) стоїть на перелічених аркушах, таблицях і
-    /// колонках вихідної версії — тих, що новій версії нема куди скопіювати.
+    /// Скільки грантів (будь-яких: заборона й дозвіл) стоїть на перелічених аркушах,
+    /// таблицях і колонках вихідної версії — тих, що новій версії нема куди скопіювати.
     /// </summary>
+    /// <remarks>
+    /// ⚠ Не лише <c>IsDeny</c>: дозвіл нижчого рівня на ресурсі (Read під Write проєкту)
+    /// теж звужує доступ — береться найдрібніший рівень, — тож його втрата розширює доступ.
+    /// </remarks>
     public Task<int> CountDenyGrantsAsync(
         IReadOnlyCollection<int> sheetIds, IReadOnlyCollection<int> tableIds, IReadOnlyCollection<int> columnIds,
         CancellationToken ct);
