@@ -23,6 +23,7 @@ const EmptySheet: EffectiveAccessView = {
   isDenied: false,
   denyReason: 'NoGrant',
   groupsFromTicket: true,
+  levelMayExceedActual: false,
   caveat: 'DocumentStateNotConsidered',
   projectId: 3,
   contributions: [],
