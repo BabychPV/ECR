@@ -302,7 +302,7 @@ public sealed class NotificationChannelHandlersTests
 
         _sender.SendAsync(default!, default!, default!, default).ThrowsAsyncForAnyArgs(new InvalidOperationException("relay refused"));
         var refused = await Test().HandleAsync(mail.Id, CancellationToken.None);
-        Assert.Equal((false, "relay refused"), (refused.Ok, refused.Error));
+        Assert.Equal((false, null, "notifications.testFailed"), (refused.Ok, refused.Error, refused.MessageKey));
     }
 
     [Fact]
@@ -449,12 +449,12 @@ public sealed class NotificationChannelHandlersTests
 
     /// <summary>
     /// Проба пошти називає категорію відмови ключем каталогу (адміністратор бачить, ЩО лагодити),
-    /// а нерозпізнану — повертає текстом, не вигадуючи причини.
+    /// а нерозпізнану — загальним ключем <c>notifications.testFailed</c>; текст транспорту назовні не йде.
     /// </summary>
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
     [Trait("Requirement", "ФВ-12.4a")]
-    public async Task Проба_SMTP_віддає_категорію_відмови_ключем_а_невідому_причину_текстом()
+    public async Task Проба_SMTP_віддає_категорію_відмови_ключем_а_невідому_загальним_ключем_без_тексту()
     {
         _sender.IsConfigured.Returns(true);
         var channel = await Save().CreateAsync(NotificationChannelKind.Smtp, "Mail", Smtp, CancellationToken.None);
@@ -475,8 +475,10 @@ public sealed class NotificationChannelHandlersTests
         var unknown = await Test().HandleAsync(channel.Id, CancellationToken.None);
 
         Assert.False(unknown.Ok);
-        Assert.Null(unknown.MessageKey);
-        Assert.Equal("something odd", unknown.Error);
+        // ⛔ Мутація: повернути `e.Message` у `TryAsync` для пошти → тут і у відповіді про `auth` червоніє (текст транспорту — назовні).
+        Assert.Equal("notifications.testFailed", unknown.MessageKey);
+        Assert.Null(unknown.Error);
+        Assert.Null(auth.Error);
     }
 
     private SaveNotificationChannelHandler Save() => new(_store, _sender, _access, _uow, _audit, _user, _clock);

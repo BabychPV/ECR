@@ -458,8 +458,8 @@ public sealed class TestNotificationChannelHandler(
 
     /// <summary>Виконує відправку; відмова транспорту стає відповіддю, не винятком.</summary>
     /// <remarks>
-    /// ⚠ <paramref name="classify"/> — лише для пошти: розпізнану категорію (DNS, TLS, автентифікація,
-    /// relay…) віддаємо ключем каталогу, нерозпізнану — текстом як є (<see cref="SmtpFailureClassifier"/>).
+    /// ⚠ <paramref name="classify"/> — лише для пошти: категорію (DNS, TLS, автентифікація, relay…) віддаємо
+    /// ключем каталогу, нерозпізнану — <c>notifications.testFailed</c>; тексту відмови немає (<see cref="SmtpFailureClassifier"/>).
     /// </remarks>
     internal static async Task<NotificationTestResult> TryAsync(Func<Task> send, bool classify)
     {
@@ -476,8 +476,12 @@ public sealed class TestNotificationChannelHandler(
             var key = e is NotificationNoRecipientsException ? "notifications.test.smtpNoRecipients"
                 : classify ? SmtpFailureClassifier.MessageKeyOf(e) : null;
 
-            return new NotificationTestResult(
-                false, e.Message, key == SmtpFailureClassifier.Unknown ? null : key);
+            // ⛔ Пошта: текст відмови транспорту (хост, банер сервера) назовні не йде — лише ключ; нерозпізнана —
+            // загальний ключ клієнта. Інші транспорти складають текст самі (без чужого банера) — лишається.
+            return classify
+                ? new NotificationTestResult(
+                    false, null, key is null || key == SmtpFailureClassifier.Unknown ? "notifications.testFailed" : key)
+                : new NotificationTestResult(false, e.Message, key);
         }
     }
 }
