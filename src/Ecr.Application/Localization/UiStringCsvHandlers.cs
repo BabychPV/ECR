@@ -106,8 +106,9 @@ public sealed class UiStringImportHandler(
     {
         ArgumentNullException.ThrowIfNull(content);
 
-        await ListTemplatesHandler
+        var profile = await PermissionCheck
             .RequireAsync(access, currentUser, SetUiStringHandler.Permission, ct).ConfigureAwait(false);
+        var mayEditMail = PermissionCheck.IsGranted(profile, UiStringMailKeys.Permission);
         await RequireTranslationLanguageAsync(catalog, languageCode, ct).ConfigureAwait(false);
         RequireSize(sizeBytes, maxBytes);
 
@@ -151,6 +152,7 @@ public sealed class UiStringImportHandler(
             var messageKey =
                 !seen.Add(key) ? "err.ECR-REQ-0422.uiStringDuplicateKey"
                 : !known || current is null ? "err.ECR-REQ-0422.uiStringUnknownKey"
+                : !mayEditMail && UiStringMailKeys.IsMailTemplate(key) ? "err.ECR-AUTH-0403.permission" // S7: текст листа
                 : string.IsNullOrWhiteSpace(value) ? "err.ECR-REQ-0422.uiStringEmptyValue"
                 : value.Length > MaxValueLength ? "err.ECR-REQ-0422.uiStringTooLong"
                 : !UiStringResolver.SamePlaceholders(current.Reference, value) ? "err.ECR-REQ-0422.placeholderMismatch"
@@ -165,7 +167,9 @@ public sealed class UiStringImportHandler(
                         ["expected"] = string.Join(", ", UiStringResolver.Placeholders(current.Reference)),
                         ["actual"] = string.Join(", ", UiStringResolver.Placeholders(value)),
                     }
-                    : null;
+                    : messageKey == "err.ECR-AUTH-0403.permission"
+                        ? new Dictionary<string, string>(StringComparer.Ordinal) { ["permission"] = UiStringMailKeys.Permission }
+                        : null;
                 errors.Add(new UiStringImportError(i + 1, key, messageKey ?? "err.ECR-REQ-0422.uiStringUnknownKey", parameters));
                 continue;
             }
