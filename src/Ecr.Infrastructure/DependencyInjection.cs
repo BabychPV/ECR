@@ -289,6 +289,12 @@ public static class DependencyInjection
                 Lanes = Jobs.JobLaneMap.ApiLanes(Jobs.JobLaneMap.ReadExecutor(configuration)),
             });
             services.AddHostedService<Jobs.JobWorker>();
+
+            // B5.10: gauge ecr.jobs.queue_depth; кеш раз на N секунд, лише в Api
+            // (ChildComposition прибирає цю службу з воркера пулу).
+            services.AddSingleton(Jobs.JobQueueDepthOptions.Read(configuration));
+            services.AddSingleton<Jobs.IJobQueueDepthSource, Jobs.DbJobQueueDepthSource>();
+            services.AddHostedService<Jobs.JobQueueDepthSampler>();
         }
         else
         {
