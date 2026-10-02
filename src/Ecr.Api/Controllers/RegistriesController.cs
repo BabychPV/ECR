@@ -122,7 +122,11 @@ public sealed class RegistriesController(
     {
         ArgumentNullException.ThrowIfNull(dto);
 
-        var version = await saveDefinition.HandleAsync(code, dto, ct).ConfigureAwait(false);
+        // ⛔ ФВ-8.12 (борг): `If-Match` = `definitionVersion`, яку бачила людина; чужа версія —
+        // `409 ECR-REG-0409` (`definitionChanged`). Заголовок читається вручну, як у інших
+        // ендпоінтів: схему контракту він не змінює. Немає заголовка — версію не звіряємо.
+        var ifMatch = Request.Headers[Microsoft.Net.Http.Headers.HeaderNames.IfMatch].ToString();
+        var version = await saveDefinition.HandleAsync(code, dto, ct, ifMatch).ConfigureAwait(false);
 
         // Повертається нова версія опису: саме вона відрізняє «збережено» від
         // «збережено і нічого не змінилося» для того, хто відкрив екран удруге.

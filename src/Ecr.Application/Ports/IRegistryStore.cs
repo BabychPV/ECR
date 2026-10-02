@@ -30,6 +30,35 @@ public interface IRegistryStore
     public Task<RegistryDef?> FindDefinitionByIdAsync(int registryDefId, CancellationToken ct);
 
     /// <summary>
+    /// Бере блокування на рядок опису довідника до кінця транзакції й каже, чи опис уже пішов
+    /// далі за <paramref name="loadedVersion"/> — версію, яку обробник прочитав раніше.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Лише всередині транзакції (<c>UPDLOCK, HOLDLOCK</c>): паралельне збереження опису чекає
+    /// коміту, а після нього бачить нову версію й відмовляється (<c>409</c>), замість мовчки
+    /// затерти чужу правку. Читання опису до цього — під RCSI, тож саме цей запит і є рішенням.
+    /// </remarks>
+    /// <param name="registryDefId">Довідник.</param>
+    /// <param name="loadedVersion">Версія опису, з якої обробник почав.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns><c>true</c> — версія в базі інша (опис змінили після читання).</returns>
+    public Task<bool> LockDefinitionIsStaleAsync(int registryDefId, int loadedVersion, CancellationToken ct);
+
+    /// <summary>
+    /// Перше з полів набору, у якого є хоч одне збережене значення-посилання на запис довідника
+    /// (<c>ValueRefEntryId</c> не порожній); <c>null</c> — жодного. Одним <c>EXISTS</c>-запитом
+    /// по <c>dic.RegistryValue</c>: рахуються значення ВСІХ записів, включно з видаленими, і
+    /// стелі вибірки немає.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Усередині транзакції читає під <c>SERIALIZABLE</c> (нове значення-посилання чекає
+    /// коміту), поза нею — звичайне читання.
+    /// </remarks>
+    /// <param name="registryFieldDefIds">Поля, чия ціль змінюється.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<int?> FindFieldHoldingReferenceAsync(IReadOnlyCollection<int> registryFieldDefIds, CancellationToken ct);
+
+    /// <summary>
     /// Визначення довідників за набором кодів — <b>одним запитом</b>.
     /// </summary>
     /// <param name="codes">Коди; порожній набір — порожній результат.</param>

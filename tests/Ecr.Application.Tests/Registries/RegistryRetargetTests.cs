@@ -199,13 +199,10 @@ public sealed class RegistryRetargetTests
     [InlineData(NewTargetId)]
     public async Task Ціль_не_змінюється_поки_на_неї_посилаються_значення(int? target)
     {
-        var entry = new RegistryEntry(OwnerId, EcrCode.Create("E1"), Text("E1"));
-        typeof(Entity<long>).GetProperty(nameof(Entity<long>.Id))!.SetValue(entry, 7L);
-        _registries.ListEntriesAsync(OwnerId, Arg.Any<CancellationToken>()).Returns([entry]);
-        var value = new RegistryValue(7L, LinkFieldId);
-        value.Set(CellDataType.Lookup, 5L, null);
-        _registries.ListValuesForEntriesAsync(Arg.Any<IReadOnlyCollection<long>>(), Arg.Any<CancellationToken>())
-            .Returns([value]);
+        // ⛔ Гейт — прямий EXISTS (`FindFieldHoldingReferenceAsync`), а не вибірка записів зі стелею.
+        _registries.FindFieldHoldingReferenceAsync(
+                Arg.Is<IReadOnlyCollection<int>>(ids => ids.Contains(LinkFieldId)), Arg.Any<CancellationToken>())
+            .Returns(LinkFieldId);
 
         var error = await Assert.ThrowsAsync<BusinessRuleException>(() => Save(target));
 
@@ -273,6 +270,136 @@ public sealed class RegistryRetargetTests
         Assert.DoesNotContain("HIDDEN", error.Message);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Requirement", "ФВ-8.12")]
+    public async Task Ключове_поле_не_перенацілюється()
+    {
+        // ⛔ Бізнес-ключ незмінний: поле-ключ із посиланням перенацілити не можна навіть без значень.
+        var keyLink = new RegistryFieldDef(OwnerId, EcrCode.Create("KEYLINK"), Text("KEYLINK"), CellDataType.Lookup, 3);
+        SetId(keyLink, 412);
+        keyLink.PointTo(OldTargetId);
+        keyLink.MarkKey(true);
+        _owner.AddField(keyLink);
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(() => Save(NewTargetId, linkFieldId: keyLink.Id));
+
+        Assert.Equal("err.ECR-REG-0422.relationKindImmutable", error.Details!["messageKey"]);
+        Assert.Equal(OldTargetId, keyLink.RefRegistryDefId);
+        await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Requirement", "ФВ-8.12")]
+    public async Task Гейт_ретаргета_читає_значення_всередині_транзакції_і_не_читає_записи()
+    {
+        // ⛔ Гейт до транзакції пропускав паралельний запис зі старою ціллю; а вибірка записів
+        // (`ListEntriesAsync`, стеля 50 000) губила хвіст великого довідника.
+        var inTransaction = false;
+        var seenInsideTransaction = false;
+        _uow.ExecuteInTransactionAsync(Arg.Any<Func<CancellationToken, Task>>(), Arg.Any<CancellationToken>())
+            .Returns(async call =>
+            {
+                inTransaction = true;
+                try
+                {
+                    await call.ArgAt<Func<CancellationToken, Task>>(0)(call.ArgAt<CancellationToken>(1));
+                }
+                finally
+                {
+                    inTransaction = false;
+                }
+            });
+        _registries.FindFieldHoldingReferenceAsync(Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<CancellationToken>())
+            .Returns(_ =>
+            {
+                seenInsideTransaction = inTransaction;
+                return Task.FromResult<int?>(null);
+            });
+
+        await Save(NewTargetId);
+
+        Assert.True(seenInsideTransaction);
+        await _registries.DidNotReceive().ListEntriesAsync(Arg.Any<int>(), Arg.Any<CancellationToken>());
+        await _registries.DidNotReceive()
+            .ListValuesForEntriesAsync(Arg.Any<IReadOnlyCollection<long>>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Requirement", "ФВ-8.12")]
+    public async Task Ретаргет_пишеться_в_журнал_структурних_змін_зі_знімком_до_і_після()
+    {
+        var audit = Substitute.For<IAuditWriter>();
+        StructureChangeRecord? written = null;
+        await audit.WriteStructureChangeAsync(
+            Arg.Do<StructureChangeRecord>(r => written = r), Arg.Any<CancellationToken>());
+
+        await Save(NewTargetId, audit: audit);
+
+        Assert.NotNull(written);
+        Assert.Equal("cfg.RegistryDef", written!.EntityType);
+        Assert.Equal(OwnerId, written.EntityId);
+        Assert.Equal("SaveDefinition", written.Operation);
+        Assert.Equal("ФВ-8.12", written.ChangeReason);
+        Assert.Equal(OldTargetId, LinkTargetIn(written.OldJson));
+        Assert.Equal(NewTargetId, LinkTargetIn(written.NewJson));
+    }
+
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Requirement", "ФВ-8.12")]
+    [InlineData("\"7\"")]
+    [InlineData("W/\"7\"")]
+    [InlineData("abc")]
+    public async Task Чужа_версія_в_If_Match_дає_409_і_нічого_не_пише(string ifMatch)
+    {
+        // Опис довідника — версія 1 (див. конструктор `RegistryDef`).
+        var error = await Assert.ThrowsAsync<ConcurrencyConflictException>(() => Save(NewTargetId, ifMatch: ifMatch));
+
+        Assert.Equal("ECR-REG-0409", error.ErrorCode);
+        Assert.Equal("err.ECR-REG-0409.definitionChanged", error.Details!["messageKey"]);
+        Assert.Equal(OldTargetId, _link.RefRegistryDefId);
+        await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
+
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Requirement", "ФВ-8.12")]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("\"1\"")]
+    [InlineData("1")]
+    public async Task Поточна_версія_в_If_Match_або_її_відсутність_пропускає_збереження(string? ifMatch)
+    {
+        var version = await Save(NewTargetId, ifMatch: ifMatch);
+
+        Assert.Equal(2, version);
+        Assert.Equal(NewTargetId, _link.RefRegistryDefId);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Requirement", "ФВ-8.12")]
+    public async Task Версія_що_змінилась_між_читанням_і_блокуванням_рядка_дає_409()
+    {
+        // ⛔ Справжня гонка: `If-Match` збігся з прочитаним, але до блокування рядка опис
+        // встиг закомітити інший запит.
+        _registries.LockDefinitionIsStaleAsync(OwnerId, 1, Arg.Any<CancellationToken>()).Returns(true);
+
+        var error = await Assert.ThrowsAsync<ConcurrencyConflictException>(() => Save(NewTargetId, ifMatch: "\"1\""));
+
+        Assert.Equal("err.ECR-REG-0409.definitionChanged", error.Details!["messageKey"]);
+        Assert.Equal(OldTargetId, _link.RefRegistryDefId);
+        await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
+
+    private static int? LinkTargetIn(string? json)
+        => System.Text.Json.JsonDocument.Parse(json!).RootElement.GetProperty("fields").EnumerateArray()
+            .Single(f => f.GetProperty("Code").GetString() == "LINK").GetProperty("RefRegistryDefId") is
+            { ValueKind: System.Text.Json.JsonValueKind.Number } n ? n.GetInt32() : null;
+
     private void DenyRegistry(int registryDefId)
 
         => _access.BuildProfileAsync(9, Arg.Any<CancellationToken>()).Returns(new AccessBuilder { UserId = 9 }
@@ -282,21 +409,23 @@ public sealed class RegistryRetargetTests
     private static RegistryFieldSaveDto NewLookup(int? target)
         => new(null, "EXTRA", Text("EXTRA"), "Lookup", 9, false, false, target, null);
 
-    private Task<int> Save(int? target, RegistryFieldSaveDto? extra = null)
+    private Task<int> Save(
+        int? target, RegistryFieldSaveDto? extra = null, int linkFieldId = LinkFieldId,
+        string? ifMatch = null, IAuditWriter? audit = null)
     {
         var fields = _owner.Fields.OrderBy(f => f.Ordinal).Select(f => new RegistryFieldSaveDto(
             f.Id, f.Code, f.NameL10n, f.DataType.ToString(), f.Ordinal, f.IsRequired, f.IsKey,
-            f.Id == LinkFieldId ? target : f.RefRegistryDefId, f.UnitId)).ToList();
+            f.Id == linkFieldId ? target : f.RefRegistryDefId, f.UnitId)).ToList();
         if (extra is not null)
         {
             fields.Add(extra);
         }
 
         var handler = new SaveRegistryDefinitionHandler(
-            _registries, _uow, Substitute.For<IAuditWriter>(), _access, _user, Substitute.For<IClock>(),
+            _registries, _uow, audit ?? Substitute.For<IAuditWriter>(), _access, _user, Substitute.For<IClock>(),
             Substitute.For<IUnitCatalog>(), _keys,
             new Ecr.Application.Registries.Keys.RegistryKeyService(_keys, _uow));
-        return handler.HandleAsync("OWNER", new SaveRegistryDefinitionDto(fields, [], "ФВ-8.12"), default);
+        return handler.HandleAsync("OWNER", new SaveRegistryDefinitionDto(fields, [], "ФВ-8.12"), default, ifMatch);
     }
 
     private static LocalizedText Text(string value)

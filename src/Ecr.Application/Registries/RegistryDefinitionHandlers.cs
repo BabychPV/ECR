@@ -361,11 +361,16 @@ public sealed class SaveRegistryDefinitionHandler(
     /// <param name="code">Код довідника.</param>
     /// <param name="dto">Повний стан опису після правки.</param>
     /// <param name="ct">Токен скасування.</param>
+    /// <param name="ifMatch">
+    /// Заголовок <c>If-Match</c> із <c>definitionVersion</c>, яку показали людині; <c>null</c> —
+    /// заголовка немає, версію не звіряємо (старі споживачі). Чужа версія — <c>409 ECR-REG-0409</c>.
+    /// </param>
     /// <returns>Нова версія опису.</returns>
     /// <exception cref="NotFoundException">Довідника немає — <c>ECR-REG-0404</c>.</exception>
     /// <exception cref="BusinessRuleException">Опис суперечливий — <c>ECR-REG-0422</c>.</exception>
+    /// <exception cref="ConcurrencyConflictException">Опис змінили після читання — <c>ECR-REG-0409</c>.</exception>
     public async Task<int> HandleAsync(
-        string code, SaveRegistryDefinitionDto dto, CancellationToken ct)
+        string code, SaveRegistryDefinitionDto dto, CancellationToken ct, string? ifMatch = null)
     {
         ArgumentNullException.ThrowIfNull(dto);
 
@@ -390,8 +395,42 @@ public sealed class SaveRegistryDefinitionHandler(
         // ⛔ S18: заборона на довідник виграє і над правом на опис — 404, як неіснуючий.
         RegistryAccess.EnsureNotDenied(profile, definition.Id, code);
 
+        RequireCurrentVersion(definition, ifMatch);
+
         return await ApplyAsync(definition, dto, "SaveDefinition", userId, profile, ct).ConfigureAwait(false);
     }
+
+    /// <summary>
+    /// ⛔ <c>If-Match</c> = <c>definitionVersion</c>, яку бачила людина: інша версія означає, що
+    /// опис змінили між її читанням і цим збереженням — повний стан затер би чужу правку.
+    /// Запобіжник від справжньої гонки (дві правки з однаковим <c>If-Match</c>) — блокування рядка
+    /// в <see cref="ApplyAsync"/>.
+    /// </summary>
+    internal static void RequireCurrentVersion(RegistryDef definition, string? ifMatch)
+    {
+        var expected = Integration.ListCollectionSchedulesHandler.NormalizeETag(ifMatch);
+        if (expected is null)
+        {
+            return;
+        }
+
+        if (!string.Equals(
+                expected, definition.DefinitionVersion.ToString(CultureInfo.InvariantCulture), StringComparison.Ordinal))
+        {
+            throw DefinitionChanged(definition);
+        }
+    }
+
+    private static ConcurrencyConflictException DefinitionChanged(RegistryDef definition)
+        => new(
+            "ECR-REG-0409",
+            $"Опис довідника «{definition.Code}» змінили після того, як його прочитали.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-REG-0409.definitionChanged",
+                ["registryCode"] = definition.Code,
+                ["definitionVersion"] = definition.DefinitionVersion.ToString(CultureInfo.InvariantCulture),
+            });
 
     internal static int RequireUser(ICurrentUser user)
         => user.UserId
@@ -449,7 +488,29 @@ public sealed class SaveRegistryDefinitionHandler(
         RegistryDef definition, SaveRegistryDefinitionDto dto, string operation, int userId,
         Security.AccessProfile profile, CancellationToken ct)
     {
-        var rules = await registries.ListRulesAsync(definition.Id, ct).ConfigureAwait(false);
+        // ⛔ ФВ-8.12 (борг): ВЕСЬ розбір — в одній транзакції, під блокуванням рядка опису. Раніше
+        // версія опису й гейт ретаргета читалися ДО транзакції: паралельне збереження чи запис
+        // значення між читанням і комітом проскакували повз перевірки.
+        var version = 0;
+        await uow.ExecuteInTransactionAsync(async innerCt =>
+        {
+            if (await registries.LockDefinitionIsStaleAsync(definition.Id, definition.DefinitionVersion, innerCt)
+                    .ConfigureAwait(false))
+            {
+                throw DefinitionChanged(definition);
+            }
+
+            version = await ApplyInTransactionAsync(definition, dto, operation, userId, profile, innerCt).ConfigureAwait(false);
+        }, ct).ConfigureAwait(false);
+
+        return version;
+    }
+
+    private async Task<int> ApplyInTransactionAsync(
+        RegistryDef definition, SaveRegistryDefinitionDto dto, string operation, int userId,
+        Security.AccessProfile profile, CancellationToken ct)
+    {
+        var rules =await registries.ListRulesAsync(definition.Id, ct).ConfigureAwait(false);
         var existingKeys = await keys.ListKeysForUpdateAsync(definition.Id, ct).ConfigureAwait(false);
 
         var before = Snapshot(definition, rules, KeySnapshots(definition, existingKeys, []));
@@ -471,7 +532,7 @@ public sealed class SaveRegistryDefinitionHandler(
             || !(await EntriesAsync().ConfigureAwait(false)).Any(e => !e.IsDeleted);
 
         // ⛔ ФВ-8.12 (порція 1): ціль посилання наявного поля змінюється лише поки на нього не посилається жодне значення.
-        await GuardLookupRetargetAsync(definition, dto.Fields, profile, EntriesAsync, ct).ConfigureAwait(false);
+        await GuardLookupRetargetAsync(definition, dto.Fields, profile, ct).ConfigureAwait(false);
 
         ApplyFields(definition, dto.Fields, newFieldsMayBeRequired);
 
@@ -926,10 +987,9 @@ public sealed class SaveRegistryDefinitionHandler(
         RegistryDef definition,
         IReadOnlyList<RegistryFieldSaveDto> wanted,
         Security.AccessProfile profile,
-        Func<Task<IReadOnlyList<Domain.Entities.Dictionaries.RegistryEntry>>> entriesAsync,
         CancellationToken ct)
     {
-        var changed = new List<(RegistryFieldDef Field, int? Target)>();
+        var changed =new List<(RegistryFieldDef Field, int? Target)>();
         foreach (var w in wanted)
         {
             // ⛔ Нове поле Lookup: та сама вимога до цілі, що й при перенаціленні (ent6 R1).
@@ -992,14 +1052,11 @@ public sealed class SaveRegistryDefinitionHandler(
                 });
         }
 
-        var entries = await entriesAsync().ConfigureAwait(false);
-        var fieldIds = changed.Select(c => c.Field.Id).ToHashSet();
-        var values = entries.Count == 0
-            ? []
-            : await registries.ListValuesForEntriesAsync(entries.Select(e => e.Id).ToList(), ct).ConfigureAwait(false);
-        if (values.FirstOrDefault(v => v.ValueRefEntryId is not null && fieldIds.Contains(v.RegistryFieldDefId)) is { } used)
+        // ⛔ Прямий EXISTS по значеннях (без вибірки записів зі стелею 50 000 — хвіст великого
+        // довідника не пропускався б). Іде всередині транзакції `ApplyAsync`, під SERIALIZABLE.
+        if (await registries.FindFieldHoldingReferenceAsync(changed.Select(c => c.Field.Id).ToList(), ct).ConfigureAwait(false) is { } usedFieldId)
         {
-            throw Retarget("err.ECR-REG-0422.lookupRetargetInUse", changed.First(c => c.Field.Id == used.RegistryFieldDefId).Field.Code);
+            throw Retarget("err.ECR-REG-0422.lookupRetargetInUse", changed.First(c => c.Field.Id == usedFieldId).Field.Code);
         }
 
         foreach (var (field, target) in changed)
