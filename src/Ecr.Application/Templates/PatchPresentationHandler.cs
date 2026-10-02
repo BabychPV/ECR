@@ -61,6 +61,11 @@ public sealed class PatchPresentationHandler(
                 new Dictionary<string, object?> { ["messageKey"] = "err.ECR-TMPL-0422.emptyPatch" });
         }
 
+        // Прохід по відмовах 2: форма кожної зміни і значення за типом поля — ДО бази. Без цього
+        // `[null]` давав NullReferenceException, `IsHidden: "abc"` — помилку CONVERT, а підпис
+        // `"abc"` ЗБЕРІГАВСЯ (200) і далі кожне читання структури версії падало на розборі JSON.
+        RequireWellFormed(changes);
+
         // ФВ-2.6: порядок — ціле від 0. Без перевірки «abc» доїхало б до
         // `CONVERT(int, @value)` у сховищі і вийшло б 500 замість 422.
         foreach (var change in changes.Where(c => c.Field == "Ordinal"))
@@ -245,6 +250,91 @@ public sealed class PatchPresentationHandler(
         await metadataCache.InvalidateAsync(templateVersionId, ct).ConfigureAwait(false);
 
         return newRevision;
+    }
+
+    /// <summary>Поля-підписи: JSON-об'єкт «мова → текст», колонка NOT NULL.</summary>
+    private static readonly HashSet<string> LocalizedFields = new(StringComparer.Ordinal) { "HeaderL10n", "LabelL10n", "NameL10n" };
+
+    /// <summary>Поля-прапорці: <c>CONVERT(bit, …)</c> у сховищі, колонка NOT NULL.</summary>
+    private static readonly HashSet<string> FlagFields = new(StringComparer.Ordinal) { "IsHidden", "IsVisible" };
+
+    /// <summary>Межа <c>cfg.ColumnDef.DisplayFormat</c> (<c>nvarchar(50)</c>).</summary>
+    private const int MaxDisplayFormatLength = 50;
+
+    /// <summary>
+    /// Кожна зміна має тип сутності й поле, а значення — форму, яку прийме колонка: інакше
+    /// відмова приходила 500-кою з бази або (для підписів) не приходила зовсім.
+    /// </summary>
+    private static void RequireWellFormed(List<PresentationChange> changes)
+    {
+        foreach (var change in changes)
+        {
+            if (change is null || string.IsNullOrWhiteSpace(change.EntityType) || string.IsNullOrWhiteSpace(change.Field))
+            {
+                throw new BusinessRuleException(
+                    "ECR-TMPL-0422",
+                    "Кожна зміна патча має містити entityType, entityId і field.",
+                    new Dictionary<string, object?> { ["messageKey"] = "err.ECR-TMPL-0422.patchChangeInvalid" });
+            }
+
+            if (!ValueFits(change.Field, change.Value))
+            {
+                throw new BusinessRuleException(
+                    "ECR-TMPL-0422",
+                    $"Значення {change.EntityType}.{change.Field} має неприйнятну форму для цього поля.",
+                    new Dictionary<string, object?>
+                    {
+                        ["messageKey"] = "err.ECR-TMPL-0422.presentationValueInvalid",
+                        ["entityType"] = change.EntityType,
+                        ["field"] = change.Field,
+                    });
+            }
+        }
+    }
+
+    private static bool ValueFits(string field, string? value)
+    {
+        if (LocalizedFields.Contains(field))
+        {
+            return IsLocalizedText(value);
+        }
+
+        if (FlagFields.Contains(field))
+        {
+            return value is "0" or "1" || bool.TryParse(value, out _);
+        }
+
+        return field switch
+        {
+            "StyleId" => value is null || int.TryParse(
+                value, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out _),
+            "DisplayFormat" => value is null || value.Length <= MaxDisplayFormatLength,
+            _ => true,
+        };
+    }
+
+    /// <summary>
+    /// Підпис читається <c>LocalizedText.FromJson</c>: об'єкт рядків без повтору мови з точністю
+    /// до регістру. <c>"abc"</c>, число чи масив там кидають — і кидали б на КОЖНОМУ читанні версії.
+    /// </summary>
+    private static bool IsLocalizedText(string? value)
+    {
+        if (value is null)
+        {
+            return false;
+        }
+
+        try
+        {
+            var values = JsonSerializer.Deserialize<Dictionary<string, string>>(value);
+            return values is not null
+                && values.Values.All(v => v is not null)
+                && values.Keys.Distinct(StringComparer.OrdinalIgnoreCase).Count() == values.Count;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
     }
 
     private const int MaxOrdinal = 1_000_000;
