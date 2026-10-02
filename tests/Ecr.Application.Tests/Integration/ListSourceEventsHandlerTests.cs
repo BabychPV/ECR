@@ -84,6 +84,10 @@ public sealed class ListSourceEventsHandlerTests
         Assert.Equal(hidden.Details!["messageKey"], missing.Details!["messageKey"]);
         Assert.Equal(hidden.ErrorCode, missing.ErrorCode);
 
+        // Шаблон «Event mapping {eventMapId} does not exist.» — без підстановки клієнт показав би дужки (D1).
+        Assert.Equal("11", hidden.Details!["eventMapId"]);
+        Assert.Equal("999", missing.Details!["eventMapId"]);
+
         _access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), VisibleDocument, Arg.Any<CancellationToken>())
             .Returns(EditDecision.Deny(EditDenyReason.NoGrant));
         var page = await Handler().HandleAsync(new SourceEventsFilter(EntityId, null, null, null, null, null, null), new CursorRequest(), default);
@@ -104,7 +108,11 @@ public sealed class ListSourceEventsHandlerTests
         Assert.Empty(plain.Items);
 
         Profile("Integration.View");
-        await Assert.ThrowsAsync<NotFoundException>(() => Handler().HandleAsync(unknown, new CursorRequest(), default));
+        var refused = await Assert.ThrowsAsync<NotFoundException>(() => Handler().HandleAsync(unknown, new CursorRequest(), default));
+
+        // Шаблон «Source entity {id} does not exist.» — без підстановки клієнт показав би дужки (D1).
+        Assert.Equal("err.ECR-INT-0404.sourceEntity", refused.Details!["messageKey"]);
+        Assert.Equal("404", refused.Details!["id"]);
     }
 
     [Fact]

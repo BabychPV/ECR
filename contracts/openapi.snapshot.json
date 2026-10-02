@@ -1503,6 +1503,14 @@
             "format": "int32",
             "type": "integer"
           },
+          "dependsOnScheduleId": {
+            "description": "Розклад того ж з'єднання, після успішного прогону якого цей запускається\n(ФВ-13.15 «залежності»); `null` — залежності немає.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
           "id": {
             "description": "Ідентифікатор розкладу.",
             "format": "int32",
@@ -2099,6 +2107,14 @@
           "cron": {
             "description": "Вираз cron у форматі Quartz: 6–7 полів, одне з полів дня — `?`.",
             "type": "string"
+          },
+          "dependsOnScheduleId": {
+            "description": "Розклад того ж з'єднання, після успішного прогону якого цей запускається (ФВ-13.15);\n`null` — без залежності.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
           },
           "isEnabled": {
             "description": "Чи має розклад одразу стояти в планувальнику.",
@@ -6965,6 +6981,17 @@
       "NotificationChannelSettings": {
         "description": "Несекретні параметри каналу — рівно те, що лягає в `SettingsJson`.",
         "properties": {
+          "recipientRoleIds": {
+            "description": "Ролі-адресати; живуть у `sys_ecr.NotificationChannelRole`, НЕ в `SettingsJson`.",
+            "items": {
+              "format": "int32",
+              "type": "integer"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
           "recipients": {
             "description": "SMTP: адресати.",
             "items": {
@@ -7008,6 +7035,17 @@
             "type": [
               "null",
               "integer"
+            ]
+          },
+          "recipientRoleIds": {
+            "description": "SMTP: ролі-адресати (`D-263`) — лист іде активним користувачам цих ролей.",
+            "items": {
+              "format": "int32",
+              "type": "integer"
+            },
+            "type": [
+              "null",
+              "array"
             ]
           },
           "recipients": {
@@ -7165,7 +7203,8 @@
           "PartitionsRunningOut",
           "CollectionFailed",
           "ExportFailed",
-          "PeriodOpened"
+          "PeriodOpened",
+          "PeriodGraceStarted"
         ]
       },
       "NotificationRuleMatrix": {
@@ -13398,6 +13437,189 @@
         ],
         "type": "object"
       },
+      "SmtpAuthMode": {
+        "description": "Автентифікація на поштовому сервері.",
+        "enum": [
+          "None",
+          "Password"
+        ]
+      },
+      "SmtpEncryptionMode": {
+        "description": "Шифрування з'єднання з поштовим сервером. Числа лежать у базі — не перенумеровувати.",
+        "enum": [
+          "None",
+          "StartTls"
+        ]
+      },
+      "SmtpSettingsInput": {
+        "description": "Запит на зміну налаштувань SMTP.",
+        "properties": {
+          "authMode": {
+            "$ref": "#/components/schemas/SmtpAuthMode",
+            "description": "Автентифікація."
+          },
+          "clearPassword": {
+            "description": "Прибрати збережений пароль.",
+            "type": "boolean"
+          },
+          "encryptionMode": {
+            "$ref": "#/components/schemas/SmtpEncryptionMode",
+            "description": "Шифрування."
+          },
+          "fromAddress": {
+            "description": "Адреса відправника.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "fromName": {
+            "description": "Ім'я відправника.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "host": {
+            "description": "Сервер.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "isEnabled": {
+            "description": "Чи діють налаштування.",
+            "type": "boolean"
+          },
+          "password": {
+            "description": "Новий пароль; `null` або порожньо — не змінювати.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "port": {
+            "description": "Порт 1–65535.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "userName": {
+            "description": "Логін (для автентифікації за паролем).",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "host",
+          "port",
+          "encryptionMode",
+          "fromAddress",
+          "fromName",
+          "authMode",
+          "userName",
+          "password",
+          "clearPassword",
+          "isEnabled"
+        ],
+        "type": "object"
+      },
+      "SmtpSettingsView": {
+        "description": "Налаштування SMTP для екрана. ⛔ Пароля тут немає й бути не може — лише bool SmtpSettingsView.HasPassword.",
+        "properties": {
+          "authMode": {
+            "$ref": "#/components/schemas/SmtpAuthMode",
+            "description": "Автентифікація."
+          },
+          "configured": {
+            "description": "Чи є чим слати пошту.",
+            "type": "boolean"
+          },
+          "encryptionMode": {
+            "$ref": "#/components/schemas/SmtpEncryptionMode",
+            "description": "Шифрування."
+          },
+          "fromAddress": {
+            "description": "Адреса відправника.",
+            "type": "string"
+          },
+          "fromName": {
+            "description": "Ім'я відправника.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "hasPassword": {
+            "description": "Чи заданий пароль.",
+            "type": "boolean"
+          },
+          "host": {
+            "description": "Сервер.",
+            "type": "string"
+          },
+          "isEnabled": {
+            "description": "Чи діють ці налаштування.",
+            "type": "boolean"
+          },
+          "port": {
+            "description": "Порт.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "source": {
+            "description": "Звідки береться транспорт зараз: `database`, `configuration` або `none`.",
+            "type": "string"
+          },
+          "updatedAt": {
+            "description": "Коли змінено (UTC); `null` — рядка ще немає.",
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "userName": {
+            "description": "Логін.",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "host",
+          "port",
+          "encryptionMode",
+          "fromAddress",
+          "fromName",
+          "authMode",
+          "userName",
+          "hasPassword",
+          "isEnabled",
+          "source",
+          "configured",
+          "updatedAt"
+        ],
+        "type": "object"
+      },
+      "SmtpTestRequest": {
+        "description": "Результат проби SMTP.",
+        "properties": {
+          "to": {
+            "description": "Адреса, на яку слати пробний лист.",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "to"
+        ],
+        "type": "object"
+      },
       "SnapshotColumn": {
         "description": "Колонка зрізу.",
         "properties": {
@@ -16181,9 +16403,24 @@
       "UpdateCollectionScheduleRequest": {
         "description": "Тіло зміни розкладу.",
         "properties": {
+          "clearDependency": {
+            "description": "`true` — зняти залежність (перемагає DependsOnScheduleId).",
+            "type": [
+              "null",
+              "boolean"
+            ]
+          },
           "cron": {
             "description": "Вираз cron у форматі Quartz: 6–7 полів, одне з полів дня — `?`.",
             "type": "string"
+          },
+          "dependsOnScheduleId": {
+            "description": "Нова залежність від розкладу того ж з'єднання (ФВ-13.15); `null` — лишити наявну.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
           },
           "isEnabled": {
             "description": "Чи має розклад стояти в планувальнику.",
@@ -16517,6 +16754,13 @@
           "label": {
             "description": "Те, чим об'єкт упізнає людина: код.",
             "type": "string"
+          },
+          "name": {
+            "description": "Читабельна назва об'єкта (ФВ-8.14, B5.4); `null` — назви немає (клієнт\n            показує Label). Нове поле, а не зміна Label:\n            підпис-код лишається для споживачів, що його читають.",
+            "type": [
+              "null",
+              "string"
+            ]
           },
           "route": {
             "description": "Маршрут клієнта до об'єкта; `null` — окремого екрана немає.",
@@ -27255,6 +27499,176 @@
         "summary": "Замінює матрицю цілком; клітинка, якої немає в тілі, зникає.",
         "tags": [
           "NotificationRules"
+        ]
+      }
+    },
+    "/api/v1/notifications/smtp": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SmtpSettingsView"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SmtpSettingsView"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/SmtpSettingsView"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "Поточні налаштування (без пароля).",
+        "tags": [
+          "SmtpSettings"
+        ]
+      },
+      "put": {
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/SmtpSettingsInput"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SmtpSettingsInput"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SmtpSettingsInput"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SmtpSettingsView"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SmtpSettingsView"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/SmtpSettingsView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Замінює налаштування; порожній пароль — не змінювати.",
+        "tags": [
+          "SmtpSettings"
+        ]
+      }
+    },
+    "/api/v1/notifications/smtp/test": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/SmtpTestRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SmtpTestRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SmtpTestRequest"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationTestResult"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationTestResult"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationTestResult"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Пробний лист на вказану адресу через ефективні налаштування.",
+        "tags": [
+          "SmtpSettings"
         ]
       }
     },
@@ -40829,6 +41243,9 @@
     },
     {
       "name": "Security"
+    },
+    {
+      "name": "SmtpSettings"
     },
     {
       "name": "SourceEvents"

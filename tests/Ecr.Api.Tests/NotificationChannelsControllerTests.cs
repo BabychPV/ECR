@@ -56,6 +56,32 @@ public sealed class NotificationChannelsControllerTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "D-263")]
+    public async Task Без_права_ManageNotifications_налаштування_SMTP_дають_403_з_назвою_права()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, "System.ViewHealth").ConfigureAwait(true);
+        var smtp = new Uri("/api/v1/notifications/smtp", UriKind.Relative);
+
+        HttpResponseMessage[] responses =
+        [
+            await client.GetAsync(smtp).ConfigureAwait(true),
+            await client.PutAsJsonAsync(smtp, new { host = "smtp.corp.example", port = 587, fromAddress = "a@b.example" })
+                .ConfigureAwait(true),
+            await client.PostAsJsonAsync(new Uri("/api/v1/notifications/smtp/test", UriKind.Relative), new { to = "a@b.example" })
+                .ConfigureAwait(true),
+        ];
+
+        foreach (var r in responses)
+        {
+            Assert.Equal(HttpStatusCode.Forbidden, r.StatusCode);
+            Assert.Contains("System.ManageNotifications", await r.Content.ReadAsStringAsync().ConfigureAwait(true), StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "BE-33")]
     public async Task Секрет_не_повертається_жодною_відповіддю_не_лежить_у_базі_відкрито_і_не_йде_в_журнали()
     {

@@ -1,4 +1,4 @@
--- ⚠ SET-опції задаються ЯВНО і першими.
+﻿-- ⚠ SET-опції задаються ЯВНО і першими.
 -- `sqlcmd` за замовчуванням має `QUOTED_IDENTIFIER OFF`, а `SqlClient` — `ON`.
 -- Через це скрипт, який проходить у тестах (їх виконує SqlClient), падає в
 -- розгортанні (його виконує DBA через sqlcmd, `09-commands.md` §3) на будь-якій
@@ -613,6 +613,10 @@ UPDATE t
   FROM sys_ecr.UiString AS t
   JOIN (VALUES
     (N'common.loading',                  N'en', N'Loading…', N'Loading...'),
+    -- D-263: SMTP задається в адмін-налаштуваннях, канал додає адресатів-ролі.
+    (N'notifications.smtpTransportHint', N'en', N'The server, sender address and password come from the application configuration; the channel only adds recipients.', N'The server, sender and login come from the SMTP settings above (or from the process configuration while they are not set); the channel adds recipients: addresses and roles.'),
+    (N'notifications.smtpTransportHint', N'ru', N'Сервер, адрес отправителя и пароль берутся из конфигурации приложения; канал лишь добавляет получателей.', N'Сервер, отправитель и логин берутся из настроек SMTP выше (пока они не заданы — из конфигурации процесса); канал добавляет получателей: адреса и роли.'),
+    (N'notifications.smtpTransportHint', N'kz', N'Сервер, жіберуші мекенжайы және құпиясөз қолданба конфигурациясынан алынады; арна тек алушыларды қосады.', N'Сервер, жіберуші және логин жоғарыдағы SMTP баптауларынан алынады (олар берілмегенше — процесс конфигурациясынан); арна алушыларды қосады: мекенжайлар мен рөлдер.'),
     -- P4 ФВ-9.8: батько лише РОЗКЛАДАЄ документні задачі — «ще не пораховано».
     (N'jobs.recalcFannedOut',            N'en', N'Queued document recalculation tasks: {count}.', N'Queued document recalculation tasks: {count}; not calculated yet.'),
     (N'jobs.recalcFannedOut',            N'ru', N'Поставлено в очередь задач пересчёта документов: {count}.', N'Поставлено в очередь задач пересчёта документов: {count}; ещё не пересчитано.'),
@@ -918,7 +922,12 @@ DELETE t
     (N'conditionalFormat.unavailable',             N'kz', N'Сервер әзірге шартты пішімдеу ережелерін сақтамайды. Мұнда ережелер құрып, оларды мән үлгісінде тексеруге болады, бірақ терезе жабылғанда олар жоғалады.'),
     (N'conditionalFormat.saveUnavailable',         N'en', N'Saving is unavailable until the server stores conditional formatting rules.'),
     (N'conditionalFormat.saveUnavailable',         N'ru', N'Сохранение недоступно, пока сервер не хранит правила условного форматирования.'),
-    (N'conditionalFormat.saveUnavailable',         N'kz', N'Сервер шартты пішімдеу ережелерін сақтамайынша, сақтау қолжетімсіз.')
+    (N'conditionalFormat.saveUnavailable',         N'kz', N'Сервер шартты пішімдеу ережелерін сақтамайынша, сақтау қолжетімсіз.'),
+    -- AN-15: рядки фіксованої таблиці переставляються (`RowDef.Ordinal` через
+    -- `PATCH …/presentation`) — підпис «поки не можна» втратив місце на екрані.
+    (N'reorder.rowsUnavailable',                   N'en', N'Rows cannot be reordered here yet: the server cannot change only a row''s order without resetting its translations. Use the Order field in the row form.'),
+    (N'reorder.rowsUnavailable',                   N'ru', N'Строки здесь пока нельзя переставлять: сервер не умеет менять только порядок строки, не сбрасывая её переводы. Используйте поле «Порядок» в форме строки.'),
+    (N'reorder.rowsUnavailable',                   N'kz', N'Мұнда жолдардың ретін әзірге өзгерту мүмкін емес: сервер жолдың аудармаларын өшірмей, тек ретін өзгерте алмайды. Жол пішініндегі «Реті» өрісін пайдаланыңыз.')
   ) AS s ([Key], Lang, OldVal)
     ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
  WHERE t.Value = s.OldVal COLLATE Latin1_General_BIN2;
@@ -5096,7 +5105,7 @@ USING (VALUES
 
     -- ⚠ Полів `host`/`port`/`from`/`useTls` на екрані немає: контракт їх
     -- носить, але не читає жоден відправник (перевірено в `SmtpChannelSender`).
-    (N'notifications.smtpTransportHint',   N'en', N'The server, sender address and password come from the application configuration; the channel only adds recipients.', 1),
+    (N'notifications.smtpTransportHint',   N'en', N'The server, sender and login come from the SMTP settings above (or from the process configuration while they are not set); the channel adds recipients: addresses and roles.', 1),
     (N'notifications.smtpRecipients',      N'en', N'Recipients', 1),
     (N'notifications.smtpRecipientsHint',  N'en', N'Comma-separated addresses.', 1),
     (N'notifications.subjectPrefix',       N'en', N'Subject prefix', 1),
@@ -5813,7 +5822,6 @@ USING (VALUES
     (N'reorder.moveUp', N'en', N'Move {name} up', 1),
     (N'reorder.moveDown', N'en', N'Move {name} down', 1),
     (N'reorder.moved', N'en', N'{name} is now in position {position} of {count}.', 1),
-    (N'reorder.rowsUnavailable', N'en', N'Rows cannot be reordered here yet: the server cannot change only a row''s order without resetting its translations. Use the Order field in the row form.', 1),
     (N'conditionalFormat.title', N'en', N'Conditional formatting', 1),
     (N'conditionalFormat.rule', N'en', N'Rule {position}', 1),
     (N'conditionalFormat.column', N'en', N'Column', 1),
@@ -5983,6 +5991,14 @@ USING (VALUES
     (N'coverageEvents.eventRemovalSheetSubmitted', N'en', N'Event {eventId} is no longer in the source, but the sheet of row {rowKey} is {status}: the row was not removed.', 1),
     -- ru/kz — окремою порцією `COLL:efrecon` у блоці I18N нижче.
     -- COLL:efrecon ── кінець секції ──
+    -- COLL:an13-strict ── Відмова публікації методології: Strict заднім числом (ФВ-9.9, `PublishMethodologyHandler`) ──
+    (N'err.ECR-CALC-0422.strictBackdated',         N'en', N'Strict mode is switched on only by an explicit decision from a new effective date, never retroactively: {effectiveFrom} is not later than today ({today}). Choose a future date.', 1),
+    -- ru/kz — окремою порцією `COLL:an13-strict` у блоці I18N нижче.
+    -- COLL:an13-strict ── кінець секції ──
+    -- COLL:nosource-hints ── порожній стан списку з'єднань: що робити й де в документації (UI, DataSourcesTable) ──
+    (N'sources.notConfiguredHint', N'en', N'To connect PI, an administrator adds a connection here: the PI Web API address, the secret and the authentication. Until then data is entered by hand. See docs/admin/admin-guide.md, section 5, and docs/admin/operations-runbook.md, section 15.', 1),
+    -- ru/kz — окремою порцією `I18N` (COLL:nosource-hints).
+    -- COLL:nosource-hints ── кінець секції ──
     -- JOBL ── людські назви видів фонових задач, яких бракувало в jobLabel.ts (KindKeys) ──
     (N'jobs.kind.sourceEventSync',  N'en', N'Source event sync', 1),
     (N'jobs.kind.consistencyCheck', N'en', N'Consistency check', 1),
@@ -5999,6 +6015,47 @@ USING (VALUES
     (N'notifications.periodOpened.subject', N'en', N'ECR: period {period} opened, project {project}', 1),
     (N'notifications.periodOpened.body', N'en', N'A new reporting period {period} has opened for project {project}. Please fill in your document for this period.', 1),
     -- COLL:smtp ── кінець секції ──
+    -- COLL:smtp-admin ── Адмін-налаштування SMTP і ролі-адресати каналу (D-263, SmtpSettingsPanel, GET/PUT /notifications/smtp) ──
+    (N'err.ECR-REQ-0422.smtpSettingsInvalid', N'en', N'The SMTP settings are not valid: check the field "{name}".', 1),
+    (N'err.ECR-REQ-0422.smtpTestRecipientInvalid', N'en', N'The test recipient is not an email address.', 1),
+    (N'err.ECR-REQ-0422.notificationChannelRoleInvalid', N'en', N'Recipient roles can be set only on an email channel, and every role must exist.', 1),
+    (N'smtp.title', N'en', N'SMTP (outgoing mail)', 1),
+    (N'smtp.hint', N'en', N'Server, sender and login of the mail that sends notifications. While the settings are disabled, the process configuration (Smtp:*) is used. The password is write-only: it is never shown again.', 1),
+    (N'smtp.source.database', N'en', N'In use: the settings below.', 1),
+    (N'smtp.source.configuration', N'en', N'In use: the process configuration (Smtp:*).', 1),
+    (N'smtp.source.none', N'en', N'Mail is not configured: events stay queued.', 1),
+    (N'smtp.host', N'en', N'Server', 1),
+    (N'smtp.port', N'en', N'Port', 1),
+    (N'smtp.encryption', N'en', N'Encryption', 1),
+    (N'smtp.encryption.None', N'en', N'None', 1),
+    (N'smtp.encryption.StartTls', N'en', N'STARTTLS', 1),
+    (N'smtp.from', N'en', N'Sender address', 1),
+    (N'smtp.fromName', N'en', N'Sender name', 1),
+    (N'smtp.auth', N'en', N'Authentication', 1),
+    (N'smtp.auth.None', N'en', N'None', 1),
+    (N'smtp.auth.Password', N'en', N'Login and password', 1),
+    (N'smtp.user', N'en', N'Login', 1),
+    (N'smtp.password', N'en', N'Password', 1),
+    (N'smtp.passwordStored', N'en', N'A password is stored. Leave empty to keep it.', 1),
+    (N'smtp.passwordNone', N'en', N'No password stored yet.', 1),
+    (N'smtp.clearPassword', N'en', N'Remove the stored password', 1),
+    (N'smtp.enabled', N'en', N'Use these settings', 1),
+    (N'smtp.save', N'en', N'Save SMTP settings', 1),
+    (N'smtp.saved', N'en', N'SMTP settings saved.', 1),
+    (N'smtp.testTo', N'en', N'Send a test message to', 1),
+    (N'smtp.testSend', N'en', N'Send test message', 1),
+    (N'notifications.channelRoles', N'en', N'Recipient roles', 1),
+    (N'notifications.channelRolesHint', N'en', N'Active users of these roles who have an email address get the message in their own language.', 1),
+    (N'notifications.channelRolesUnavailable', N'en', N'The role list needs the right to manage roles; roles already set on the channel are kept.', 1),
+    -- COLL:smtp-admin ── кінець секції ──
+    -- COLL:an9-rules ── Подія «період перейшов у пільговий строк» (`PeriodStateJob`, `NotificationEventKind.PeriodGraceStarted`, AN-9) ──
+    (N'notifications.event.PeriodGraceStarted', N'en', N'Reporting period entered its grace window', 1),
+    (N'notifications.periodGraceStarted.subject', N'en', N'ECR: period {period} is past its deadline, project {project}', 1),
+    (N'notifications.periodGraceStarted.body', N'en', N'The submission deadline of period {period} for project {project} has passed; only the grace window is left. Please finish and submit your document for this period.', 1),
+    -- COLL:an9-rules ── кінець секції ──
+    -- COLL:smtp-probe ── Проба SMTP: адресат і канал за ролями (D-263) ──
+    (N'notifications.test.smtpNoRecipients', N'en', N'No recipients: the channel has no explicit addresses, and its roles resolve to no active user with an email address.', 1),
+    -- COLL:smtp-probe ── кінець секції ──
     -- SEC:effective-access ── Розріз «ресурс → рівень → грант якої ролі» (ФВ-6.16, D-220, `EffectiveAccessPanel`, GET /security/users/{id}/effective-access) ──
     (N'err.ECR-REQ-0422.effectiveAccessResource', N'en', N'The resource must be given as a type and a positive number, for example Registry:5 or Project:3.', 1),
     (N'effectiveAccess.show',            N'en', N'Show effective access', 1),
@@ -6130,6 +6187,13 @@ USING (VALUES
     (N'audit.correlation', N'en', N'Correlation ID', 1),
     -- ru/kz — окремою порцією `COLL:reqclose` у блоці I18N нижче.
     -- COLL:reqclose ── кінець секції ──
+    -- COLL:fv1315 ── Залежність розкладу збору від іншого розкладу того ж з'єднання (ФВ-13.15, `CollectionScheduleDependencyRules`, `CollectionJob`) ──
+    (N'err.ECR-REQ-0422.collectionScheduleDependencyNotFound', N'en', N'The schedule this one should depend on does not exist.', 1),
+    (N'err.ECR-REQ-0422.collectionScheduleDependencyOtherSource', N'en', N'A schedule can depend only on a schedule of the same connection.', 1),
+    (N'err.ECR-REQ-0422.collectionScheduleDependencyCycle', N'en', N'This dependency would close a cycle: the other schedule already depends on this one.', 1),
+    (N'jobs.collectionDependencyWaiting', N'en', N'Entity {sourceEntityId}: skipped, waiting for a successful run of schedule {dependsOn}', 1),
+    -- ru/kz — окремою порцією `I18N` (COLL:fv1315).
+    -- COLL:fv1315 ── кінець секції ──
     -- UI:dead-buttons ── причини недоступних дій і порожній стан полів довідника (клієнт) ──
     (N'reportDefs.addBlocked', N'en', N'Fill in the code, the name, the version and a code for every column first.', 1),
     (N'reportDefs.removeColumnBlocked', N'en', N'A report needs at least one column.', 1),
@@ -6152,9 +6216,35 @@ USING (VALUES
     (N'err.ECR-CALC-0422.testToleranceNegative', N'en', N'The tolerance of test "{code}" cannot be negative: such a test would never pass.', 1),
     (N'err.ECR-PRD-4225.offsetOutOfRange', N'en', N'Offset {field} ({value} days) must be between -{max} and {max} days.', 1),
     (N'err.ECR-PRD-0422.pinReasonTooLong', N'en', N'The reason for pinning the current period is longer than {max} characters.', 1),
-    (N'err.ECR-PWD-0422.tooLong', N'en', N'The password is longer than {maxLength} characters.', 1)
+    (N'err.ECR-PWD-0422.tooLong', N'en', N'The password is longer than {maxLength} characters.', 1),
     -- ru/kz — окремою порцією `API:negative-path` у блоці I18N нижче.
     -- API:negative-path ── кінець секції ──
+    -- CL6:notification-templates ── Шаблони повідомлень і адресати події (CL-6, NotificationTemplatesPanel, /admin/notifications) ──
+    (N'notificationTemplates.title', N'en', N'Message templates', 1),
+    (N'notificationTemplates.hint', N'en', N'What is sent for each event and to whom. Each recipient gets the message in their own language; an empty translation falls back to the default language.', 1),
+    (N'notificationTemplates.noPermission', N'en', N'Editing message templates requires the right to manage interface strings.', 1),
+    (N'notificationTemplates.noLanguages', N'en', N'No interface languages are registered.', 1),
+    (N'notificationTemplates.notInCatalog', N'en', N'The template of this event is not in the string catalog. Re-run the database deployment so that the seed adds it.', 1),
+    (N'notificationTemplates.event', N'en', N'Event', 1),
+    (N'notificationTemplates.language', N'en', N'Language', 1),
+    (N'notificationTemplates.subject', N'en', N'Subject', 1),
+    (N'notificationTemplates.body', N'en', N'Message text', 1),
+    (N'notificationTemplates.reference', N'en', N'Default language: {text}', 1),
+    (N'notificationTemplates.untranslated', N'en', N'There is no translation in this language yet: recipients get the default-language text.', 1),
+    (N'notificationTemplates.placeholders', N'en', N'Placeholders filled in by the system: {names}.', 1),
+    (N'notificationTemplates.problemEmpty', N'en', N'The default-language text cannot be empty.', 1),
+    (N'notificationTemplates.problemUnknownPlaceholder', N'en', N'Unknown placeholders: {names}. The system fills in only {allowed}.', 1),
+    (N'notificationTemplates.save', N'en', N'Save template', 1),
+    (N'notificationTemplates.saved', N'en', N'Message template saved', 1),
+    (N'notificationTemplates.unsaved', N'en', N'Template changes are not saved', 1),
+    (N'notificationTemplates.recipients', N'en', N'Who gets it', 1),
+    (N'notificationTemplates.recipientsNone', N'en', N'No rule is enabled for this event: nobody gets the message. Enable it in the rules matrix above.', 1),
+    (N'notificationTemplates.recipientsRoles', N'en', N'roles: {roles}', 1),
+    (N'notificationTemplates.recipientsRoleCount', N'en', N'recipient roles: {count}', 1),
+    (N'notificationTemplates.recipientsNoRoles', N'en', N'no recipient roles', 1),
+    (N'notificationTemplates.recipientsFiltered', N'en', N'the severity threshold is above Info, so this event does not pass', 1),
+    (N'notificationTemplates.recipientsNoTransport', N'en', N'the channel has no delivery transport configured', 1)
+    -- CL6:notification-templates ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -8936,7 +9026,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'notifications.testChannel', N'ru', N'Отправить тест'),
     (N'notifications.testOk', N'ru', N'Канал принял тестовое сообщение.'),
     (N'notifications.testFailed', N'ru', N'Канал отклонил тестовое сообщение.'),
-    (N'notifications.smtpTransportHint', N'ru', N'Сервер, адрес отправителя и пароль берутся из конфигурации приложения; канал лишь добавляет получателей.'),
+    (N'notifications.smtpTransportHint', N'ru', N'Сервер, отправитель и логин берутся из настроек SMTP выше (пока они не заданы — из конфигурации процесса); канал добавляет получателей: адреса и роли.'),
     (N'notifications.smtpRecipients', N'ru', N'Получатели'),
     (N'notifications.smtpRecipientsHint', N'ru', N'Адреса через запятую.'),
     (N'notifications.subjectPrefix', N'ru', N'Префикс темы'),
@@ -11964,7 +12054,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'notifications.testChannel', N'kz', N'Сынақ жіберу'),
     (N'notifications.testOk', N'kz', N'Арна сынақ хабарын қабылдады.'),
     (N'notifications.testFailed', N'kz', N'Арна сынақ хабарын қабылдамады.'),
-    (N'notifications.smtpTransportHint', N'kz', N'Сервер, жіберуші мекенжайы және құпиясөз қолданба конфигурациясынан алынады; арна тек алушыларды қосады.'),
+    (N'notifications.smtpTransportHint', N'kz', N'Сервер, жіберуші және логин жоғарыдағы SMTP баптауларынан алынады (олар берілмегенше — процесс конфигурациясынан); арна алушыларды қосады: мекенжайлар мен рөлдер.'),
     (N'notifications.smtpRecipients', N'kz', N'Алушылар'),
     (N'notifications.smtpRecipientsHint', N'kz', N'Үтірмен бөлінген мекенжайлар.'),
     (N'notifications.subjectPrefix', N'kz', N'Тақырып префиксі'),
@@ -13585,8 +13675,6 @@ SELECT v.[Key], v.Lang, v.Val
     (N'reorder.moveDown', N'kz', N'{name} төмен жылжыту'),
     (N'reorder.moved', N'ru', N'{name}: теперь позиция {position} из {count}.'),
     (N'reorder.moved', N'kz', N'{name}: енді {count} ішінен {position}-орында.'),
-    (N'reorder.rowsUnavailable', N'ru', N'Строки здесь пока нельзя переставлять: сервер не умеет менять только порядок строки, не сбрасывая её переводы. Используйте поле «Порядок» в форме строки.'),
-    (N'reorder.rowsUnavailable', N'kz', N'Мұнда жолдардың ретін әзірге өзгерту мүмкін емес: сервер жолдың аудармаларын өшірмей, тек ретін өзгерте алмайды. Жол пішініндегі «Реті» өрісін пайдаланыңыз.'),
     (N'conditionalFormat.title', N'ru', N'Условное форматирование'),
     (N'conditionalFormat.title', N'kz', N'Шартты пішімдеу'),
     (N'conditionalFormat.rule', N'ru', N'Правило {position}'),
@@ -13776,6 +13864,29 @@ OPTION (RECOMPILE);
 GO
 -- COLL:efrecon ── кінець секції ──
 
+-- COLL:an13-strict ── ru/kz відмови публікації Strict заднім числом (ФВ-9.9, `PublishMethodologyHandler`); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-CALC-0422.strictBackdated', N'ru', N'Режим Strict включается только явным решением с новой даты вступления в силу, не задним числом: дата {effectiveFrom} не позже сегодняшней ({today}). Укажите будущую дату.'),
+    (N'err.ECR-CALC-0422.strictBackdated', N'kz', N'Strict режимі тек айқын шешіммен, күшіне енудің жаңа күнінен бастап қосылады, бұрынғы күнмен емес: {effectiveFrom} күні бүгінгіден ({today}) кеш емес. Болашақ күнді көрсетіңіз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:an13-strict ── кінець секції ──
+
+-- COLL:nosource-hints ── ru/kz підказки порожнього списку з'єднань; власна порція ──
+-- ⚠ kz — найкращий переклад без термінології замовника: потрібна вичитка носієм.
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'sources.notConfiguredHint', N'ru', N'Чтобы подключить PI, администратор добавляет здесь подключение: адрес PI Web API, секрет и способ аутентификации. До этого данные вводятся вручную. См. docs/admin/admin-guide.md, раздел 5, и docs/admin/operations-runbook.md, раздел 15.'),
+    (N'sources.notConfiguredHint', N'kz', N'PI-ды қосу үшін әкімші осы жерде қосылым қосады: PI Web API мекенжайы, құпия және аутентификация тәсілі. Ол уақытқа дейін деректер қолмен енгізіледі. docs/admin/admin-guide.md құжатының 5-бөлімін және docs/admin/operations-runbook.md құжатының 15-бөлімін қараңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:nosource-hints ── кінець секції ──
+
 -- JOBL ── ru/kz назв видів задач (jobLabel.ts, KindKeys); власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
@@ -13817,6 +13928,91 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:smtp ── кінець секції ──
+-- COLL:smtp-admin ── ru/kz адмін-налаштувань SMTP і ролей-адресатів; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-REQ-0422.smtpSettingsInvalid', N'ru', N'Настройки SMTP недопустимы: проверьте поле «{name}».'),
+    (N'err.ECR-REQ-0422.smtpSettingsInvalid', N'kz', N'SMTP баптаулары жарамсыз: «{name}» өрісін тексеріңіз.'),
+    (N'err.ECR-REQ-0422.smtpTestRecipientInvalid', N'ru', N'Адресат проверки не является адресом электронной почты.'),
+    (N'err.ECR-REQ-0422.smtpTestRecipientInvalid', N'kz', N'Тексеру алушысы электрондық пошта мекенжайы емес.'),
+    (N'err.ECR-REQ-0422.notificationChannelRoleInvalid', N'ru', N'Роли-получатели задаются только почтовому каналу, и каждая роль должна существовать.'),
+    (N'err.ECR-REQ-0422.notificationChannelRoleInvalid', N'kz', N'Алушы рөлдері тек пошта арнасына беріледі, әрбір рөл болуы тиіс.'),
+    (N'smtp.title', N'ru', N'SMTP (исходящая почта)'),
+    (N'smtp.title', N'kz', N'SMTP (шығыс пошта)'),
+    (N'smtp.hint', N'ru', N'Сервер, отправитель и логин почты, которой отправляются уведомления. Пока настройки выключены, используется конфигурация процесса (Smtp:*). Пароль только для записи: повторно он не показывается.'),
+    (N'smtp.hint', N'kz', N'Хабарламаларды жіберетін поштаның сервері, жіберушісі және логині. Баптаулар өшірулі болса, процесс конфигурациясы (Smtp:*) қолданылады. Құпиясөз тек жазуға арналған: ол қайта көрсетілмейді.'),
+    (N'smtp.source.database', N'ru', N'Используются: настройки ниже.'),
+    (N'smtp.source.database', N'kz', N'Қолданылуда: төмендегі баптаулар.'),
+    (N'smtp.source.configuration', N'ru', N'Используется: конфигурация процесса (Smtp:*).'),
+    (N'smtp.source.configuration', N'kz', N'Қолданылуда: процесс конфигурациясы (Smtp:*).'),
+    (N'smtp.source.none', N'ru', N'Почта не настроена: события остаются в очереди.'),
+    (N'smtp.source.none', N'kz', N'Пошта бапталмаған: оқиғалар кезекте қалады.'),
+    (N'smtp.host', N'ru', N'Сервер'),
+    (N'smtp.host', N'kz', N'Сервер'),
+    (N'smtp.port', N'ru', N'Порт'),
+    (N'smtp.port', N'kz', N'Порт'),
+    (N'smtp.encryption', N'ru', N'Шифрование'),
+    (N'smtp.encryption', N'kz', N'Шифрлау'),
+    (N'smtp.encryption.None', N'ru', N'Нет'),
+    (N'smtp.encryption.None', N'kz', N'Жоқ'),
+    (N'smtp.encryption.StartTls', N'ru', N'STARTTLS'),
+    (N'smtp.encryption.StartTls', N'kz', N'STARTTLS'),
+    (N'smtp.from', N'ru', N'Адрес отправителя'),
+    (N'smtp.from', N'kz', N'Жіберуші мекенжайы'),
+    (N'smtp.fromName', N'ru', N'Имя отправителя'),
+    (N'smtp.fromName', N'kz', N'Жіберуші аты'),
+    (N'smtp.auth', N'ru', N'Аутентификация'),
+    (N'smtp.auth', N'kz', N'Аутентификация'),
+    (N'smtp.auth.None', N'ru', N'Нет'),
+    (N'smtp.auth.None', N'kz', N'Жоқ'),
+    (N'smtp.auth.Password', N'ru', N'Логин и пароль'),
+    (N'smtp.auth.Password', N'kz', N'Логин және құпиясөз'),
+    (N'smtp.user', N'ru', N'Логин'),
+    (N'smtp.user', N'kz', N'Логин'),
+    (N'smtp.password', N'ru', N'Пароль'),
+    (N'smtp.password', N'kz', N'Құпиясөз'),
+    (N'smtp.passwordStored', N'ru', N'Пароль сохранён. Оставьте пустым, чтобы не менять.'),
+    (N'smtp.passwordStored', N'kz', N'Құпиясөз сақталған. Өзгертпеу үшін бос қалдырыңыз.'),
+    (N'smtp.passwordNone', N'ru', N'Пароль ещё не задан.'),
+    (N'smtp.passwordNone', N'kz', N'Құпиясөз әлі берілмеген.'),
+    (N'smtp.clearPassword', N'ru', N'Удалить сохранённый пароль'),
+    (N'smtp.clearPassword', N'kz', N'Сақталған құпиясөзді жою'),
+    (N'smtp.enabled', N'ru', N'Использовать эти настройки'),
+    (N'smtp.enabled', N'kz', N'Осы баптауларды қолдану'),
+    (N'smtp.save', N'ru', N'Сохранить настройки SMTP'),
+    (N'smtp.save', N'kz', N'SMTP баптауларын сақтау'),
+    (N'smtp.saved', N'ru', N'Настройки SMTP сохранены.'),
+    (N'smtp.saved', N'kz', N'SMTP баптаулары сақталды.'),
+    (N'smtp.testTo', N'ru', N'Отправить проверочное письмо на'),
+    (N'smtp.testTo', N'kz', N'Тексеру хатын жіберу мекенжайы'),
+    (N'smtp.testSend', N'ru', N'Отправить проверку'),
+    (N'smtp.testSend', N'kz', N'Тексеру хатын жіберу'),
+    (N'notifications.channelRoles', N'ru', N'Роли-получатели'),
+    (N'notifications.channelRoles', N'kz', N'Алушы рөлдері'),
+    (N'notifications.channelRolesHint', N'ru', N'Активные пользователи этих ролей с адресом почты получают письмо на своём языке.'),
+    (N'notifications.channelRolesHint', N'kz', N'Осы рөлдердің поштасы бар белсенді пайдаланушылары хатты өз тілінде алады.'),
+    (N'notifications.channelRolesUnavailable', N'ru', N'Для списка ролей нужно право управления ролями; уже заданные роли канала сохраняются.'),
+    (N'notifications.channelRolesUnavailable', N'kz', N'Рөлдер тізімі үшін рөлдерді басқару құқығы қажет; арнада бұрын берілген рөлдер сақталады.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:smtp-admin ── кінець секції ──
+
+-- COLL:an9-rules ── ru/kz події «пільговий строк періоду»; власна порція #I18N ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'notifications.event.PeriodGraceStarted', N'ru', N'Отчётный период перешёл в льготный срок'),
+    (N'notifications.event.PeriodGraceStarted', N'kz', N'Есепті кезең жеңілдік мерзіміне өтті'),
+    (N'notifications.periodGraceStarted.subject', N'ru', N'ECR: срок периода {period} истёк, проект {project}'),
+    (N'notifications.periodGraceStarted.subject', N'kz', N'ECR: {period} кезеңінің мерзімі өтті, {project} жобасы'),
+    (N'notifications.periodGraceStarted.body', N'ru', N'Срок подачи за период {period} по проекту {project} истёк, остался только льготный срок. Завершите и отправьте документ за этот период.'),
+    (N'notifications.periodGraceStarted.body', N'kz', N'{project} жобасы бойынша {period} кезеңіне тапсыру мерзімі өтті, тек жеңілдік мерзімі қалды. Осы кезеңге арналған құжатты аяқтап жіберіңіз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:an9-rules ── кінець секції ──
 
 -- COLL:rawhealth ── ru/kz розміру ext.RawDataPoint у картці `db`; власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)
@@ -14185,6 +14381,34 @@ OPTION (RECOMPILE);
 GO
 -- COLL:warn-grid ── кінець секції ──
 
+-- COLL:smtp-probe ── ru/kz проби SMTP-каналу без адресатів (D-256); власна порція; kz — потрібна вичитка носієм ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'notifications.test.smtpNoRecipients', N'ru', N'Нет адресатов: в канале нет явных адресов, а его роли не раскрываются ни в одного активного пользователя с адресом электронной почты.'),
+    (N'notifications.test.smtpNoRecipients', N'kz', N'Алушылар жоқ: арнада нақты мекенжайлар жоқ, ал оның рөлдері электрондық пошта мекенжайы бар бірде-бір белсенді пайдаланушыға айқындалмайды.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:smtp-probe ── кінець секції ──
+
+-- COLL:fv1315 ── ru/kz залежності розкладу збору від іншого розкладу (ФВ-13.15); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-REQ-0422.collectionScheduleDependencyNotFound', N'ru', N'Расписание, от которого должно зависеть это, не существует.'),
+    (N'err.ECR-REQ-0422.collectionScheduleDependencyNotFound', N'kz', N'Осы кесте тәуелді болуы тиіс кесте жоқ.'),
+    (N'err.ECR-REQ-0422.collectionScheduleDependencyOtherSource', N'ru', N'Расписание может зависеть только от расписания того же соединения.'),
+    (N'err.ECR-REQ-0422.collectionScheduleDependencyOtherSource', N'kz', N'Кесте тек сол қосылымның кестесіне тәуелді бола алады.'),
+    (N'err.ECR-REQ-0422.collectionScheduleDependencyCycle', N'ru', N'Эта зависимость замкнула бы цикл: другое расписание уже зависит от этого.'),
+    (N'err.ECR-REQ-0422.collectionScheduleDependencyCycle', N'kz', N'Бұл тәуелділік циклді тұйықтайды: екінші кесте бұған әлдеқашан тәуелді.'),
+    (N'jobs.collectionDependencyWaiting', N'ru', N'Сущность {sourceEntityId}: пропуск, ожидается успешный прогон расписания {dependsOn}'),
+    (N'jobs.collectionDependencyWaiting', N'kz', N'{sourceEntityId} нысаны: өткізілді, {dependsOn} кестесінің сәтті іске қосылуы күтілуде')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:fv1315 ── кінець секції ──
+
 -- REG:rt25-client ── ru/kz сторінки впливу довідника і банера застарілості (RT-25, клієнт); власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
@@ -14461,6 +14685,63 @@ OPTION (RECOMPILE);
 GO
 -- I18N:keys-audit ── кінець секції ──
 
+-- CL6:notification-templates ── ru/kz шаблонів повідомлень (CL-6); власна порція #I18N ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'notificationTemplates.title', N'ru', N'Шаблоны сообщений'),
+    (N'notificationTemplates.title', N'kz', N'Хабарлама үлгілері'),
+    (N'notificationTemplates.hint', N'ru', N'Что отправляется по каждому событию и кому. Каждый получатель получает сообщение на своём языке; пустой перевод заменяется языком по умолчанию.'),
+    (N'notificationTemplates.hint', N'kz', N'Әр оқиға бойынша не және кімге жіберіледі. Әр алушы хабарламаны өз тілінде алады; бос аударманың орнына әдепкі тіл қолданылады.'),
+    (N'notificationTemplates.noPermission', N'ru', N'Для изменения шаблонов сообщений нужно право управления строками интерфейса.'),
+    (N'notificationTemplates.noPermission', N'kz', N'Хабарлама үлгілерін өзгерту үшін интерфейс жолдарын басқару құқығы қажет.'),
+    (N'notificationTemplates.noLanguages', N'ru', N'Не зарегистрировано ни одного языка интерфейса.'),
+    (N'notificationTemplates.noLanguages', N'kz', N'Интерфейстің бірде-бір тілі тіркелмеген.'),
+    (N'notificationTemplates.notInCatalog', N'ru', N'Шаблона этого события нет в каталоге строк. Повторите развёртывание базы данных, чтобы его добавил сид.'),
+    (N'notificationTemplates.notInCatalog', N'kz', N'Бұл оқиғаның үлгісі жолдар каталогында жоқ. Сид оны қосуы үшін дерекқорды қайта орналастырыңыз.'),
+    (N'notificationTemplates.event', N'ru', N'Событие'),
+    (N'notificationTemplates.event', N'kz', N'Оқиға'),
+    (N'notificationTemplates.language', N'ru', N'Язык'),
+    (N'notificationTemplates.language', N'kz', N'Тіл'),
+    (N'notificationTemplates.subject', N'ru', N'Тема'),
+    (N'notificationTemplates.subject', N'kz', N'Тақырып'),
+    (N'notificationTemplates.body', N'ru', N'Текст сообщения'),
+    (N'notificationTemplates.body', N'kz', N'Хабарлама мәтіні'),
+    (N'notificationTemplates.reference', N'ru', N'Язык по умолчанию: {text}'),
+    (N'notificationTemplates.reference', N'kz', N'Әдепкі тіл: {text}'),
+    (N'notificationTemplates.untranslated', N'ru', N'Перевода на этот язык пока нет: получатели получают текст на языке по умолчанию.'),
+    (N'notificationTemplates.untranslated', N'kz', N'Бұл тілге аударма әлі жоқ: алушылар әдепкі тілдегі мәтінді алады.'),
+    (N'notificationTemplates.placeholders', N'ru', N'Подстановки, которые заполняет система: {names}.'),
+    (N'notificationTemplates.placeholders', N'kz', N'Жүйе толтыратын толтырғыштар: {names}.'),
+    (N'notificationTemplates.problemEmpty', N'ru', N'Текст на языке по умолчанию не может быть пустым.'),
+    (N'notificationTemplates.problemEmpty', N'kz', N'Әдепкі тілдегі мәтін бос болмауы керек.'),
+    (N'notificationTemplates.problemUnknownPlaceholder', N'ru', N'Неизвестные подстановки: {names}. Система заполняет только {allowed}.'),
+    (N'notificationTemplates.problemUnknownPlaceholder', N'kz', N'Белгісіз толтырғыштар: {names}. Жүйе тек {allowed} толтырады.'),
+    (N'notificationTemplates.save', N'ru', N'Сохранить шаблон'),
+    (N'notificationTemplates.save', N'kz', N'Үлгіні сақтау'),
+    (N'notificationTemplates.saved', N'ru', N'Шаблон сообщения сохранён'),
+    (N'notificationTemplates.saved', N'kz', N'Хабарлама үлгісі сақталды'),
+    (N'notificationTemplates.unsaved', N'ru', N'Изменения шаблона не сохранены'),
+    (N'notificationTemplates.unsaved', N'kz', N'Үлгідегі өзгерістер сақталмаған'),
+    (N'notificationTemplates.recipients', N'ru', N'Кто получит'),
+    (N'notificationTemplates.recipients', N'kz', N'Кім алады'),
+    (N'notificationTemplates.recipientsNone', N'ru', N'Для этого события не включено ни одно правило: сообщение никто не получит. Включите его в матрице правил выше.'),
+    (N'notificationTemplates.recipientsNone', N'kz', N'Бұл оқиға үшін бірде-бір ереже қосылмаған: хабарламаны ешкім алмайды. Оны жоғарыдағы ережелер матрицасында қосыңыз.'),
+    (N'notificationTemplates.recipientsRoles', N'ru', N'роли: {roles}'),
+    (N'notificationTemplates.recipientsRoles', N'kz', N'рөлдер: {roles}'),
+    (N'notificationTemplates.recipientsRoleCount', N'ru', N'ролей-получателей: {count}'),
+    (N'notificationTemplates.recipientsRoleCount', N'kz', N'алушы рөлдер: {count}'),
+    (N'notificationTemplates.recipientsNoRoles', N'ru', N'нет ролей-получателей'),
+    (N'notificationTemplates.recipientsNoRoles', N'kz', N'алушы рөлдер жоқ'),
+    (N'notificationTemplates.recipientsFiltered', N'ru', N'порог серьёзности выше Info, это событие не проходит'),
+    (N'notificationTemplates.recipientsFiltered', N'kz', N'маңыздылық шегі Info-дан жоғары, бұл оқиға өтпейді'),
+    (N'notificationTemplates.recipientsNoTransport', N'ru', N'у канала не настроена доставка'),
+    (N'notificationTemplates.recipientsNoTransport', N'kz', N'арнада жеткізу бапталмаған')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- CL6:notification-templates ── кінець секції ──
+
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t
 USING (
@@ -14484,7 +14765,7 @@ DROP TABLE #I18N;
 GO
 
 -- ── Опис звіту: одна державна форма з каталогу ФВ-10.7 ───────────────────
--- ⛔ Рівно ОДИН опис, і це не заготовка «на потім». `rpt.ReportDef` і
+-- ⛔ Тут `IEC`; ще три (ECR230_A1/B1/B4) — у секції COLL:an14-ecr230. `rpt.ReportDef` і
 -- `rpt.ReportVersion` не створювало НІЩО — ні код, ні seed, ні тести, — тому
 -- `POST /reports/{code}/build` відмовляв `ECR-RPT-0404` на будь-який код:
 -- звітність існувала і не могла спрацювати жодного разу. Одна реальна форма
@@ -14492,7 +14773,8 @@ GO
 -- як хтось здогадається завести опис руками (директива №09, W7).
 --
 -- ⚠ `IEC` — з каталогу державних форм ТЗ (`ФВ-10.7`): Industrial
--- Environmental Control, квартальна. Решта шести (230 A1/B1/B4, PermitInfo,
+-- Environmental Control, квартальна. Форми 230 A1/B1/B4 заведено в секції
+-- COLL:an14-ecr230; решта (PermitInfo,
 -- 20986 Primary Water Use, 2-ТП водгосп, IEC Water, 2-ТП відходи) сюди НЕ
 -- йдуть: seed, що заводить сім форм, кожна з яких описана тими самими
 -- п'ятьма колонками, виглядав би готовим каталогом і не був би ним —
@@ -14529,6 +14811,39 @@ ON t.ReportDefId = s.ReportDefId AND t.[Version] = s.[Version]
 WHEN NOT MATCHED THEN INSERT (ReportDefId, [Version], Status, ColumnsJson, RulesJson, CreatedAt)
      VALUES (s.ReportDefId, s.[Version], 1, s.ColumnsJson, s.RulesJson, SYSUTCDATETIME());
 GO
+
+-- COLL:an14-ecr230 ── опис форм 230 A1/B1/B4 (ФВ-10.7, AN-14); власна секція ──
+-- ⚠ Колонки — лише коди джерела CalculationResults (ReportSourceColumns): RDL-«колонки»
+-- (SUM_HP_Purge_Value, FG_Makat_*) — це значення OutputCode у довгому форматі, а не колонки опису.
+-- ⚠ Коди ECR230_A1/B1/B4 і підписи en/ru — дефолт із заголовків RDL; KZ у RDL немає, не вигадано
+-- (назва колонки без kz падає на en, ReportColumnNames.Of). Критерій звірки ФВ-10.9, зміст OutputCode,
+-- мапінг періоду «квартал» ↔ PeriodKey і подієві рамки (дати епізодів) — прогалини замовника/коду.
+MERGE rpt.ReportDef AS t
+USING (VALUES
+  (N'ECR230_A1', N'{"en":"Unit A1-230 Flares (quarterly)","ru":"Установка 230 A1 – Факельная система (квартал)"}', 1),
+  (N'ECR230_B1', N'{"en":"Unit B1-230 Flares (quarterly)","ru":"Установка 230 B1 – Факельная система (квартал)"}', 1),
+  (N'ECR230_B4', N'{"en":"Unit B4-230 Flares (quarterly)","ru":"Установка B4-230 – Факельная система (квартал)"}', 1)
+) AS s (Code, NameL10n, IsRegulatory)
+ON t.Code = s.Code
+WHEN NOT MATCHED THEN INSERT (Code, NameL10n, IsRegulatory, IsActive)
+     VALUES (s.Code, s.NameL10n, s.IsRegulatory, 1);
+GO
+
+MERGE rpt.ReportVersion AS t
+USING (
+    SELECT d.Id AS ReportDefId, v.[Version], v.ColumnsJson, v.RulesJson
+    FROM (VALUES
+        (N'ECR230_A1', N'1.0', N'[{"code":"ProjectCode","kind":"text","nameL10n":{"en":"Unit / project","ru":"Установка"}},{"code":"PeriodKey","kind":"number","nameL10n":{"en":"Period","ru":"Период"}},{"code":"RowKey","kind":"text","nameL10n":{"en":"Stream / event row","ru":"Поток / событие"}},{"code":"OutputCode","kind":"text","nameL10n":{"en":"Indicator","ru":"Показатель"}},{"code":"Value","kind":"number","nameL10n":{"en":"Value","ru":"Значение"}},{"code":"UnitCode","kind":"text","nameL10n":{"en":"Unit of measure","ru":"Единица измерения"}},{"code":"DocumentId","kind":"number"},{"code":"SubstanceEntryId","kind":"number"}]', N'{"rowSource":"CalculationResults"}'),
+        (N'ECR230_B1', N'1.0', N'[{"code":"ProjectCode","kind":"text","nameL10n":{"en":"Unit / project","ru":"Установка"}},{"code":"PeriodKey","kind":"number","nameL10n":{"en":"Period","ru":"Период"}},{"code":"RowKey","kind":"text","nameL10n":{"en":"Stream / event row","ru":"Поток / событие"}},{"code":"OutputCode","kind":"text","nameL10n":{"en":"Indicator","ru":"Показатель"}},{"code":"Value","kind":"number","nameL10n":{"en":"Value","ru":"Значение"}},{"code":"UnitCode","kind":"text","nameL10n":{"en":"Unit of measure","ru":"Единица измерения"}},{"code":"DocumentId","kind":"number"},{"code":"SubstanceEntryId","kind":"number"}]', N'{"rowSource":"CalculationResults"}'),
+        (N'ECR230_B4', N'1.0', N'[{"code":"ProjectCode","kind":"text","nameL10n":{"en":"Unit / project","ru":"Установка"}},{"code":"PeriodKey","kind":"number","nameL10n":{"en":"Period","ru":"Период"}},{"code":"RowKey","kind":"text","nameL10n":{"en":"Stream / event row","ru":"Поток / событие"}},{"code":"OutputCode","kind":"text","nameL10n":{"en":"Indicator","ru":"Показатель"}},{"code":"Value","kind":"number","nameL10n":{"en":"Value","ru":"Значение"}},{"code":"UnitCode","kind":"text","nameL10n":{"en":"Unit of measure","ru":"Единица измерения"}},{"code":"DocumentId","kind":"number"},{"code":"SubstanceEntryId","kind":"number"}]', N'{"rowSource":"CalculationResults"}')
+    ) AS v (Code, [Version], ColumnsJson, RulesJson)
+    JOIN rpt.ReportDef AS d ON d.Code = v.Code
+) AS s
+ON t.ReportDefId = s.ReportDefId AND t.[Version] = s.[Version]
+WHEN NOT MATCHED THEN INSERT (ReportDefId, [Version], Status, ColumnsJson, RulesJson, CreatedAt)
+     VALUES (s.ReportDefId, s.[Version], 1, s.ColumnsJson, s.RulesJson, SYSUTCDATETIME());
+GO
+-- COLL:an14-ecr230 ── кінець секції ──
 
 -- COLL:period0-supersede ── Старі річні прогони нічного перерахунку (період 0) ──
 -- ⛔ Одноразове виправлення ДАНИХ, ідемпотентне. До фіксу 44c952c1 прогін «на

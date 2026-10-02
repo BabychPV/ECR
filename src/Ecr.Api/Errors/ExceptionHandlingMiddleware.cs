@@ -405,6 +405,14 @@ public sealed partial class ExceptionHandlingMiddleware(
         AccessDeniedException e =>
             (StatusCodes.Status403Forbidden, e.ErrorCode, e.Message, e.Details),
 
+        // ⛔ ФВ-16.5: конверсія між різними розмірностями (контекстний коефіцієнт на кшталт
+        // щільності) відхиляється CHECK `CK_Conv_SameDimension`, і без цього арма
+        // `DbUpdateException` ішов у fallback голим 500. Дані суперечать правилу — 422.
+        Microsoft.EntityFrameworkCore.DbUpdateException e
+            when e.GetBaseException().Message.Contains("CK_Conv_SameDimension", StringComparison.Ordinal) =>
+            (StatusCodes.Status422UnprocessableEntity, ErrorCodes.UnitContextualCoefficient,
+             "Контекстний коефіцієнт не може бути конверсією між різними розмірностями.", null),
+
         ConcurrencyConflictException e =>
             (StatusCodes.Status409Conflict, e.ErrorCode, e.Message, e.Details),
 

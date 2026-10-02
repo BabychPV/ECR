@@ -23,4 +23,7 @@ public sealed record UsageResponse(int Total, IReadOnlyList<UsageItemDto> Items)
 /// <param name="Id">Ідентифікатор залежного об'єкта — рядком, бо ключі різних таблиць різного типу.</param>
 /// <param name="Label">Те, чим об'єкт упізнає людина: код.</param>
 /// <param name="Route">Маршрут клієнта до об'єкта; <c>null</c> — окремого екрана немає.</param>
-public sealed record UsageItemDto(string Kind, string Id, string Label, string? Route);
+/// <param name="Name">Читабельна назва об'єкта (ФВ-8.14, B5.4); <c>null</c> — назви немає (клієнт
+/// показує <paramref name="Label"/>). Нове поле, а не зміна <paramref name="Label"/>:
+/// підпис-код лишається для споживачів, що його читають.</param>
+public sealed record UsageItemDto(string Kind, string Id, string Label, string? Route, string? Name = null);

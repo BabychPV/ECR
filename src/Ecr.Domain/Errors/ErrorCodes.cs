@@ -437,8 +437,8 @@ public static class ErrorCodes
     /// Контекстний коефіцієнт у <c>uom.Conversion</c> (ФВ-16.5).
     /// </summary>
     /// <remarks>
-    /// ⚠ Заброньований: заборона тримається побудовою таблиці конверсій, а не
-    /// перевіркою в коді, тому жоден шлях C# цього коду не кидає.
+    /// Заборону тримає CHECK <c>CK_Conv_SameDimension</c>; відмову БД у 422 з цим
+    /// кодом перетворює <c>ExceptionHandlingMiddleware</c> (AN-13).
     /// </remarks>
     public const string UnitContextualCoefficient = "ECR-UOM-4221";
 

@@ -542,6 +542,7 @@ public sealed partial class EndpointCoverageTests
             + "ключі валідації RegistryBatchHandler/UpsertRegistryEntryHandler, клієнт їх не перелічує."),
         new("shared/ui/problemText.ts", "problem.title", 1, null, [], "title problem+json, коли він — ключ каталогу."),
         new("features/notifications/ChannelsPanel.tsx", "key", 1, null, [], "messageKey проби каналу."),
+        new("features/notifications/SmtpSettingsPanel.tsx", "key", 1, null, [], "messageKey проби SMTP (категорія відмови транспорту)."),
         new("features/integration/TestDataSourceModal.tsx", "key", 1, null, [], "messageKey проби джерела."),
         new("features/jobs/JobFacts.tsx", "errorKey(errorCode)", 1, null, [], "errorCode провалу фонової задачі — код каталогу помилок сервера."),
         new("shared/ui/problemText.ts", "key", 1, null, [],
@@ -632,6 +633,7 @@ public sealed partial class EndpointCoverageTests
         "notifications.event.JobFailed", "notifications.event.ConsistencyIssuesFound",
         "notifications.event.PartitionsRunningOut", "notifications.event.CollectionFailed",
         "notifications.event.ExportFailed", "notifications.event.PeriodOpened",
+        "notifications.event.PeriodGraceStarted",
     ];
 
     /// <summary>Стани <c>statusTable</c> у <c>StatusBadge.tsx</c> станом на 2026-09-21.</summary>

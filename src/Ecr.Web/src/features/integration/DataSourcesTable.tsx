@@ -121,7 +121,9 @@ export function DataSourcesTable(): JSX.Element {
         error={sources.error}
         onRetry={() => void sources.refetch()}
         emptyTitle={t('sources.connectionsEmpty')}
-        emptyHint={t('sources.connectionsEmptyHint')}
+        // ⚠ Що робити й де прочитати (`docs/admin/admin-guide.md`, п. 5) — одним
+        // рядком із поясненням: тестувальник без PI бачить причину, а не порожнечу.
+        emptyHint={`${t('sources.connectionsEmptyHint')} ${t('sources.notConfiguredHint')}`}
         onRowClick={open}
         selectedKey={panel ?? undefined}
         rowLabel={(source) =>

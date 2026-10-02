@@ -50,7 +50,7 @@ public sealed class StartSimulationHandler(
                               new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.anonymousWrite" });
 
         var actorProfile = await access.BuildProfileAsync(actorUserId, ct).ConfigureAwait(false);
-        if (!actorProfile.Has(Permission))
+        if (!PermissionCheck.IsGranted(actorProfile, Permission))
         {
             throw new AccessDeniedException(
                 "ECR-AUTH-0403", $"Потрібне право {Permission}.",

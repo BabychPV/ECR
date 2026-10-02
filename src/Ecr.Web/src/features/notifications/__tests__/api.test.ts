@@ -7,11 +7,14 @@ import {
   createNotificationChannel,
   deleteNotificationChannel,
   getNotificationRules,
+  getSmtpSettings,
   listNotificationChannels,
   listNotificationDeliveries,
   replaceNotificationChannelSecret,
   replaceNotificationRules,
+  saveSmtpSettings,
   testNotificationChannel,
+  testSmtpSettings,
   updateNotificationChannel,
 } from '../api';
 
@@ -36,6 +39,30 @@ describe('features/notifications/api', () => {
       'POST /api/v1/notifications/channels/7/test',
     ]);
     expect(JSON.parse(String(apiFetch.mock.calls[2]?.[1]?.body))).toEqual({ name: 'Teams', isEnabled: false });
+  });
+
+  it('SMTP: GET/PUT на одну адресу, проба — POST …/smtp/test з адресою в тілі', async () => {
+    await getSmtpSettings();
+    await saveSmtpSettings({
+      host: 'h',
+      port: 25,
+      encryptionMode: 'None',
+      fromAddress: 'a@b.c',
+      fromName: null,
+      authMode: 'None',
+      userName: null,
+      password: null,
+      clearPassword: false,
+      isEnabled: true,
+    });
+    await testSmtpSettings('me@b.c');
+
+    expect(apiFetch.mock.calls.map(([path, init]) => `${init?.method ?? 'GET'} ${path}`)).toEqual([
+      'GET /api/v1/notifications/smtp',
+      'PUT /api/v1/notifications/smtp',
+      'POST /api/v1/notifications/smtp/test',
+    ]);
+    expect(JSON.parse(String(apiFetch.mock.calls[2]?.[1]?.body))).toEqual({ to: 'me@b.c' });
   });
 
   it('секрет їде тілом PUT …/secret, а не адресою', async () => {

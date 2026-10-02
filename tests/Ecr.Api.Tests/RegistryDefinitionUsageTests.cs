@@ -72,6 +72,11 @@ public sealed class RegistryDefinitionUsageTests(SqlServerFixture sql)
 
         var field = items.Single(i => i.GetProperty("kind").GetString() == "registryField");
         Assert.Equal($"{fixture.OtherCode}.{fixture.FieldCode}", field.GetProperty("label").GetString());
+
+        // ФВ-8.14 (B5.4): `label` лишається кодом, а читабельна назва йде окремим полем
+        // `name` (назва заголовка колонки / назва поля зі сіду фікстури).
+        Assert.Equal("Column", column.GetProperty("name").GetString());
+        Assert.Equal("Ref field", field.GetProperty("name").GetString());
     }
 
     [Fact]

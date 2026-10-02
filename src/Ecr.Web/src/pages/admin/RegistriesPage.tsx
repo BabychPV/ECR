@@ -1,4 +1,4 @@
-﻿import { useMemo, useState, type JSX } from 'react';
+import { useMemo, useState, type JSX } from 'react';
 import { Badge, Button, Group, List, Select, Stack, Text } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
@@ -243,7 +243,8 @@ export function RegistriesPage(): JSX.Element {
       // заглушки: `null` набір лишає порожньою клітинкою сам. Прочерк —
       // твердження «батька немає», яке не відрізнити від «поле не приїхало».
     },
-    {
+    // D-212: нетемпоральний довідник не має колонки чинності.
+    ...(selected?.isTemporal === true ? [{
       key: 'validity',
       label: t('registries.validity'),
 
@@ -263,15 +264,14 @@ export function RegistriesPage(): JSX.Element {
          чинності, які звіряються з днем документа, а не з годинником.
          «12:00 AM» приписало б їм точність, якої в даних немає. */
       render: (entry) =>
-        // D7: нетемпоральний довідник вікна не має — «… — …» читалося б як «діє безстроково».
-        selected?.isTemporal !== true && entry.validFrom == null && entry.validTo == null ? null : (
+        (
         <>
           <Timestamp value={entry.validFrom} dateOnly fallback={Unbounded} />
           {' — '}
           <Timestamp value={entry.validTo} dateOnly fallback={Unbounded} />
         </>
       ),
-    },
+    } as DataTableColumn<RegistryEntryDto>] : []),
 
     /*
      * ⚠ Колонка дій з'являється лише з правом — рівно як і до переїзду
@@ -295,14 +295,16 @@ export function RegistriesPage(): JSX.Element {
                 {/* ⚠ Вікно чинності — окрема дія, і саме воно замінює
                     видалення: запис, на який посилаються комірки, закривають
                     датою (`ФВ-8.5`). */}
-                <Button
-                  size="compact-xs"
-                  variant="subtle"
-                  disabled={externalReadOnly}
-                  onClick={() => setValidity(entry)}
-                >
-                  {t('registries.validity')}
-                </Button>
+                {selected?.isTemporal === true && (
+                  <Button
+                    size="compact-xs"
+                    variant="subtle"
+                    disabled={externalReadOnly}
+                    onClick={() => setValidity(entry)}
+                  >
+                    {t('registries.validity')}
+                  </Button>
+                )}
 
                 {/* ⛔ Видалення не мало в інтерфейсі жодної кнопки: обробник
                     на сервері існував, перевіряв право й рахував посилання —
@@ -620,17 +622,19 @@ export function RegistriesPage(): JSX.Element {
             {/* ⛔ Замість «повторити». Повтор дасть ту саму відмову: змінити
                 треба не запит, а намір — запис виводять з обігу датою
                 (`ФВ-8.5`), і тоді історичні документи лишаються читабельними. */}
-            <Group justify="flex-start">
-              <Button
-                variant="light"
-                onClick={() => {
-                  setValidity(deleting);
-                  setDeleting(null);
-                }}
-              >
-                {t('registries.validity')}
-              </Button>
-            </Group>
+            {selected?.isTemporal === true && (
+              <Group justify="flex-start">
+                <Button
+                  variant="light"
+                  onClick={() => {
+                    setValidity(deleting);
+                    setDeleting(null);
+                  }}
+                >
+                  {t('registries.validity')}
+                </Button>
+              </Group>
+            )}
           </Stack>
         )}
       </ConfirmModal>

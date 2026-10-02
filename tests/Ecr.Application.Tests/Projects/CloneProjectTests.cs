@@ -70,9 +70,9 @@ public sealed class CloneProjectTests
         // на щойно СТВОРЕНИЙ КЛОН — той самий механізм, що CreateProjectHandler
         // (Q-179), через ProjectOwnershipGrant. Фікстура задає рівно одну
         // роль творця, що несе Project.Manage.
-        _users.ListRolesAsync(Arg.Any<CancellationToken>()).Returns(
-            [new RoleView(ManagerRoleId, "Manager", IsBuiltIn: false, IsActive: true,
-                Permissions: ["Project.Manage"], DangerousPermissions: [])]);
+        _users.FindRoleAsync(ManagerRoleId, Arg.Any<CancellationToken>()).Returns(
+            new RoleView(ManagerRoleId, "Manager", IsBuiltIn: false, IsActive: true,
+                Permissions: ["Project.Manage"], DangerousPermissions: []));
         _users.ListGrantsAsync(ManagerRoleId, Arg.Any<CancellationToken>())
             .Returns(new List<ResourceGrantDto>());
 

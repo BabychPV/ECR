@@ -83,9 +83,11 @@ public sealed class ContractIntegrityTests
     /// <item><c>ECR-CELL-4222</c> — сценарій живий, але доїжджає іншим кодом:
     /// межі довідника перевіряє <c>ColumnDef.ValidateValue</c>
     /// (<c>ECR-CELL-0422</c>). Кандидат на вилучення з контракту.</item>
-    /// <item><c>ECR-UOM-4221</c> — заборона тримається побудовою таблиці
-    /// конверсій, а не перевіркою в C#.</item>
     /// </list>
+    ///
+    /// ⚠ <c>ECR-UOM-4221</c> зі списку ПІШОВ (AN-13, ФВ-16.5): порушення
+    /// <c>CK_Conv_SameDimension</c> тепер віддається як 422 з цим кодом
+    /// (арм <c>DbUpdateException</c> у <c>ExceptionHandlingMiddleware</c>).
     ///
     /// ⚠ <c>ECR-SIM-0403</c> зі списку ПІШОВ (V-06): запис під симуляцією тепер
     /// відхиляє <c>SimulationReadOnlyMiddleware</c> саме цим кодом, до обробника.
@@ -99,7 +101,7 @@ public sealed class ContractIntegrityTests
     /// коротшати — не правкою «щоб зелене», а виконаною вимогою.
     /// </remarks>
     private static readonly string[] ReservedCodes =
-        ["ECR-CELL-4222", "ECR-UOM-4221"];
+        ["ECR-CELL-4222"];
 
     /// <summary>Шлях каталогу констант відносно кореня репозиторію.</summary>
     private const string CatalogFile = "src/Ecr.Domain/Errors/ErrorCodes.cs";

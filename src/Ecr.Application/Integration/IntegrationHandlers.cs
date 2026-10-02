@@ -86,7 +86,7 @@ public sealed class CollectFromSourceHandler(
                 });
 
         return await jobs
-            .EnqueueAsync<ICollectionJob>(new CollectionTask(sourceEntityId, from, to), ct, profile.UserId)
+            .EnqueueAsync<ICollectionJob>(new CollectionTask(sourceEntityId, from, to, Manual: true), ct, profile.UserId)
             .ConfigureAwait(false);
     }
 
@@ -103,7 +103,17 @@ public sealed class CollectFromSourceHandler(
 /// <param name="SourceEntityId">Сутність джерела.</param>
 /// <param name="FromUtc">Початок; <c>null</c> — за <c>LookbackDays</c> розкладу.</param>
 /// <param name="ToUtc">Кінець; <c>null</c> — «зараз».</param>
-public sealed record CollectionTask(int SourceEntityId, DateTime? FromUtc, DateTime? ToUtc);
+/// <param name="Manual">
+/// <c>true</c> — поставила людина (кнопка «Зібрати»); <c>null</c> — за розкладом. ⚠ <c>null</c> НЕ
+/// серіалізується: payload планового збору — ключ періодичної задачі, і зайве поле
+/// розійшлося б зі збереженими тригерами (дубль розкладу після оновлення).
+/// </param>
+public sealed record CollectionTask(
+    int SourceEntityId,
+    DateTime? FromUtc,
+    DateTime? ToUtc,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    bool? Manual = null);
 
 /// <summary>
 /// Перелік сутностей збору. Право <c>Integration.View</c> або <c>Integration.Manage</c>.

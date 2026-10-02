@@ -63,6 +63,13 @@ public sealed class CollectionScheduleStore(EcrDbContext db) : ICollectionSchedu
             .ConfigureAwait(false);
 
     /// <inheritdoc />
+    public async Task<IReadOnlyList<CollectionSchedule>> FindDependentsAsync(int collectionScheduleId, CancellationToken ct)
+        => await db.CollectionSchedules
+            .Where(s => s.DependsOnScheduleId == collectionScheduleId)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+    /// <inheritdoc />
     public void Add(CollectionSchedule schedule) => db.CollectionSchedules.Add(schedule);
 
     /// <inheritdoc />

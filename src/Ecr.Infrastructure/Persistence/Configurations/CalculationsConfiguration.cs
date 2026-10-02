@@ -164,7 +164,9 @@ public sealed class MethodologyFormulaConfiguration : IEntityTypeConfiguration<M
 
         builder.HasKey(x => x.Id);
         builder.Property(x => x.Code).HasMaxLength(64).IsRequired();
-        builder.Property(x => x.Expression).HasMaxLength(2000).IsRequired();
+        // ✎ AN-5: 2000 → 4000. Реальні формули Thermaloxidizer (`HSE_TO_AGR_*_MolecularWeight`) мають
+        // 2409 символів, і імпорт методологій впирався в `formulaTooLong`.
+        builder.Property(x => x.Expression).HasMaxLength(MethodologyFormula.MaxExpressionLength).IsRequired();
 
         // ⚠ Без межі довжини і без `IsRequired`: це `FInfo_Arguments` чинної
         // системи як є, а там трапляються списки на десятки імен (38 токенів

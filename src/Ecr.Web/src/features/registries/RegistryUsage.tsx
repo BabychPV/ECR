@@ -97,11 +97,19 @@ export function RegistryUsageList({ usage }: { usage: UsageResponse }): JSX.Elem
                   {t('registries.usageDataInDocuments')}
                 </Text>
               ) : item.route === null ? (
-                <Text size="sm">{item.label}</Text>
+                <Text size="sm">{item.name ?? item.label}</Text>
               ) : (
                 <Anchor component={Link} to={item.route} size="sm">
-                  {item.label}
+                  {item.name ?? item.label}
                 </Anchor>
+              )}
+
+              {/* ФВ-8.14: назва — основний підпис, код — другорядний, щоб об'єкт
+                  лишався впізнаваним за кодом (його називають у формулах і мапінгу). */}
+              {item.kind !== 'data' && item.name != null && item.name !== item.label && (
+                <Text size="xs" c="dimmed" data-registry-usage="code">
+                  {item.label}
+                </Text>
               )}
 
               {/* ⚠ Ідентифікатор — рядок сервера як є: без роздільників розрядів. */}

@@ -1,4 +1,4 @@
-// src/Ecr.Application/Ports/INotificationDispatchStore.cs
+﻿// src/Ecr.Application/Ports/INotificationDispatchStore.cs
 using Ecr.Domain.Entities.Notifications;
 
 namespace Ecr.Application.Ports;
@@ -12,13 +12,27 @@ namespace Ecr.Application.Ports;
 /// </param>
 /// <param name="Subject">Тема.</param>
 /// <param name="Body">Текст — без стеків і без секретів (ФВ-6.11).</param>
+/// <param name="Text">
+/// Той самий текст як ключі каталогу з підстановками — щоб лист кожному адресату-за-роллю пішов ЙОГО
+/// мовою (<c>D-263</c>). <c>null</c> — подія має лише готовий текст, і всі отримують його.
+/// </param>
 public sealed record NotificationEvent(
-    NotificationEventKind Kind, NotificationSeverity Severity, string EventKey, string Subject, string Body);
+    NotificationEventKind Kind, NotificationSeverity Severity, string EventKey, string Subject, string Body,
+    NotificationText? Text = null);
+
+/// <summary>Текст сповіщення як ключі каталогу рядків інтерфейсу з підстановками <c>{name}</c>.</summary>
+/// <param name="SubjectKey">Ключ теми.</param>
+/// <param name="BodyKey">Ключ тіла.</param>
+/// <param name="Args">Підстановки: ім'я без фігурних дужок → значення.</param>
+public sealed record NotificationText(string SubjectKey, string BodyKey, IReadOnlyDictionary<string, string> Args);
 
 /// <summary>Те, що доставляють у канал.</summary>
 /// <param name="Subject">Тема.</param>
 /// <param name="Body">Текст.</param>
-public sealed record NotificationMessage(string Subject, string Body);
+/// <param name="Text">Локалізовуваний варіант того самого тексту; див. <see cref="NotificationEvent"/>.</param>
+/// <param name="RecipientLimit">Лише проба: найбільше адрес, розкритих із ролей (бойова розсилка — <c>null</c>, без межі).</param>
+public sealed record NotificationMessage(
+    string Subject, string Body, NotificationText? Text = null, int? RecipientLimit = null);
 
 /// <summary>Підсумок розсилки однієї події.</summary>
 /// <param name="Sent">Скільки каналів прийняли.</param>

@@ -1,4 +1,4 @@
-// src/Ecr.Application/Ports/INotificationStore.cs
+﻿// src/Ecr.Application/Ports/INotificationStore.cs
 using Ecr.Domain.Entities.Notifications;
 
 namespace Ecr.Application.Ports;
@@ -17,6 +17,26 @@ public interface INotificationStore
 
     /// <summary>Додає канал; зберігає <c>IUnitOfWork</c>.</summary>
     public void AddChannel(NotificationChannel channel);
+
+    /// <summary>Ролі-адресати всіх каналів: канал → ідентифікатори ролей.</summary>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<IReadOnlyDictionary<int, IReadOnlyList<int>>> ListChannelRolesAsync(CancellationToken ct);
+
+    /// <summary>Ролі-адресати одного каналу.</summary>
+    /// <param name="channelId">Канал.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<IReadOnlyList<int>> ChannelRoleIdsAsync(int channelId, CancellationToken ct);
+
+    /// <summary>Скільки з цих ролей існує.</summary>
+    /// <param name="roleIds">Ролі.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<int> CountExistingRolesAsync(IReadOnlyCollection<int> roleIds, CancellationToken ct);
+
+    /// <summary>Замінює ролі-адресати каналу (без збереження).</summary>
+    /// <param name="channelId">Канал.</param>
+    /// <param name="roleIds">Нові ролі.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task ReplaceChannelRolesAsync(int channelId, IReadOnlyCollection<int> roleIds, CancellationToken ct);
 
     /// <summary>
     /// Прибирає канал РАЗОМ із його правилами (зовнішній ключ — <c>Restrict</c>);

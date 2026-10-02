@@ -307,6 +307,29 @@ public sealed class NotificationChannelHandlersTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "D-263")]
+    public async Task Проба_SMTP_іде_відправником_каналу_що_розгортає_ролі_з_межею_а_порожній_розклад_має_ключ()
+    {
+        var mail = await Save().CreateAsync(NotificationChannelKind.Smtp, "Mail", Smtp, CancellationToken.None);
+        _sender.IsConfigured.Returns(true);
+
+        var smtp = new SpyChannelSender(NotificationChannelKind.Smtp);
+        Assert.True((await Test(smtp).HandleAsync(mail.Id, CancellationToken.None)).Ok);
+
+        // ⛔ Мутація: повернути шлях лише з явними адресами (`sender.SendAsync`) → Calls порожній, рядок червоний.
+        var call = Assert.Single(smtp.Calls);
+        Assert.Equal(mail.Id, call.Channel.Id);
+        Assert.Equal(TestNotificationChannelHandler.ProbeRecipientLimit, call.Message.RecipientLimit);
+        await _sender.DidNotReceiveWithAnyArgs().SendAsync(default!, default!, default!, default);
+
+        // Ролі не розкрилися → названий ключ, а не загальна відмова.
+        smtp.Fails = new NotificationNoRecipientsException("no active role users");
+        var none = await Test(smtp).HandleAsync(mail.Id, CancellationToken.None);
+        Assert.Equal((false, "notifications.test.smtpNoRecipients"), (none.Ok, none.MessageKey));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
     [Trait("Requirement", "BE-34")]
     public async Task Проба_Teams_іде_відправником_каналу_а_без_відправника_каже_це_ключем()
     {
@@ -386,6 +409,36 @@ public sealed class NotificationChannelHandlersTests
 
         Assert.Equal("Mail", _store.Channels.Single().Name);
         Assert.False(_store.Channels.Single().HasSecret);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "D-263")]
+    public async Task Канал_може_мати_адресатів_лише_за_ролями_невідома_роль_і_Teams_із_ролями_дають_422_а_PUT_без_ролей_їх_знімає()
+    {
+        // Лише ролі, без явних адрес — це вже адресат.
+        var created = await Save().CreateAsync(
+            NotificationChannelKind.Smtp, "By role", new NotificationChannelSettingsInput(RecipientRoleIds: [1, 2, 2]), CancellationToken.None);
+        Assert.Equal([1, 2], created.Settings.RecipientRoleIds);
+        Assert.Equal([1, 2], (await List().HandleAsync(CancellationToken.None)).Single().Settings.RecipientRoleIds);
+
+        // ⛔ Ролі не потрапляють у SettingsJson: вони живуть у sys_ecr.NotificationChannelRole.
+        Assert.DoesNotContain("recipientRoleIds", _store.Channels.Single().SettingsJson, StringComparison.OrdinalIgnoreCase);
+
+        var unknown = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Save().CreateAsync(NotificationChannelKind.Smtp, "Bad", new NotificationChannelSettingsInput(RecipientRoleIds: [99]), CancellationToken.None));
+        var teams = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Save().CreateAsync(NotificationChannelKind.TeamsWebhook, "T", new NotificationChannelSettingsInput(RecipientRoleIds: [1]), CancellationToken.None));
+        Assert.Equal("err.ECR-REQ-0422.notificationChannelRoleInvalid", unknown.Details!["messageKey"]);
+        Assert.Equal("err.ECR-REQ-0422.notificationChannelRoleInvalid", teams.Details!["messageKey"]);
+
+        // Без ролей і без адрес — як і раніше 422.
+        await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Save().UpdateAsync(created.Id, "By role", true, new NotificationChannelSettingsInput(Recipients: []), CancellationToken.None));
+
+        var updated = await Save().UpdateAsync(
+            created.Id, "By role", true, new NotificationChannelSettingsInput(Recipients: ["a@b.example"]), CancellationToken.None);
+        Assert.Empty(updated.Settings.RecipientRoleIds!);
     }
 
     private void Allow(string permission)

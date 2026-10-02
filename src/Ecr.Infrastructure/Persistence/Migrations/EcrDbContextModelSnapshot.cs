@@ -401,8 +401,8 @@ namespace Ecr.Infrastructure.Persistence.Migrations
 
                     b.Property<string>("Expression")
                         .IsRequired()
-                        .HasMaxLength(2000)
-                        .HasColumnType("nvarchar(2000)");
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
 
                     b.Property<bool>("IsVisible")
                         .HasColumnType("bit")
@@ -2907,6 +2907,9 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
 
+                    b.Property<int?>("DependsOnScheduleId")
+                        .HasColumnType("int");
+
                     b.Property<bool>("IsEnabled")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("bit")
@@ -4259,6 +4262,23 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("Ecr.Domain.Entities.Notifications.NotificationChannelRole", b =>
+                {
+                    b.Property<int>("ChannelId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("RoleId")
+                        .HasColumnType("int");
+
+                    b.HasKey("ChannelId", "RoleId")
+                        .HasName("PK_NotificationChannelRole");
+
+                    b.HasIndex("RoleId")
+                        .HasDatabaseName("IX_NotificationChannelRole_Role");
+
+                    b.ToTable("NotificationChannelRole", "sys_ecr");
+                });
+
             modelBuilder.Entity("Ecr.Domain.Entities.Notifications.NotificationDelivery", b =>
                 {
                     b.Property<long>("Id")
@@ -4332,6 +4352,70 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .HasDatabaseName("UQ_NotificationRule_EventChannel");
 
                     b.ToTable("NotificationRule", "sys_ecr");
+                });
+
+            modelBuilder.Entity("Ecr.Domain.Entities.Notifications.SmtpSettings", b =>
+                {
+                    b.Property<int>("Id")
+                        .HasColumnType("int");
+
+                    b.Property<byte>("AuthMode")
+                        .HasColumnType("tinyint");
+
+                    b.Property<byte>("EncryptionMode")
+                        .HasColumnType("tinyint");
+
+                    b.Property<string>("FromAddress")
+                        .IsRequired()
+                        .HasMaxLength(254)
+                        .HasColumnType("nvarchar(254)");
+
+                    b.Property<string>("FromName")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("Host")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<bool>("IsEnabled")
+                        .HasColumnType("bit");
+
+                    b.Property<byte[]>("PasswordProtected")
+                        .HasColumnType("varbinary(max)");
+
+                    b.Property<int>("Port")
+                        .HasColumnType("int");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<int?>("UpdatedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("UserName")
+                        .HasMaxLength(254)
+                        .HasColumnType("nvarchar(254)");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("SmtpSettings", "sys_ecr", t =>
+                        {
+                            t.HasCheckConstraint("CK_SmtpSettings_Auth", "AuthMode IN (0, 1)");
+
+                            t.HasCheckConstraint("CK_SmtpSettings_Encryption", "EncryptionMode IN (0, 1)");
+
+                            t.HasCheckConstraint("CK_SmtpSettings_Port", "Port BETWEEN 1 AND 65535");
+
+                            t.HasCheckConstraint("CK_SmtpSettings_Singleton", "Id = 1");
+                        });
                 });
 
             modelBuilder.Entity("Ecr.Domain.Entities.Reporting.ReportDef", b =>
@@ -6120,6 +6204,12 @@ namespace Ecr.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("Ecr.Domain.Entities.External.CollectionSchedule", b =>
                 {
+                    b.HasOne("Ecr.Domain.Entities.External.CollectionSchedule", null)
+                        .WithMany()
+                        .HasForeignKey("DependsOnScheduleId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_CS_DependsOn");
+
                     b.HasOne("Ecr.Domain.Entities.External.SourceEntity", null)
                         .WithMany()
                         .HasForeignKey("SourceEntityId")
@@ -6451,6 +6541,23 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("FK_CRun_Entity");
+                });
+
+            modelBuilder.Entity("Ecr.Domain.Entities.Notifications.NotificationChannelRole", b =>
+                {
+                    b.HasOne("Ecr.Domain.Entities.Notifications.NotificationChannel", null)
+                        .WithMany()
+                        .HasForeignKey("ChannelId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_NotificationChannelRole_Channel");
+
+                    b.HasOne("Ecr.Domain.Entities.Security.Role", null)
+                        .WithMany()
+                        .HasForeignKey("RoleId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_NotificationChannelRole_Role");
                 });
 
             modelBuilder.Entity("Ecr.Domain.Entities.Notifications.NotificationRule", b =>

@@ -12,8 +12,8 @@ import { TemplateVersionPage } from '@/pages/admin/TemplateVersionPage';
  *
  * ⛔ Мутаційний доказ (перевірено руками 2026-09-30): у сторінці передати
  * `reorderColumnsMutation.mutate` позиції навпаки (`to, from`) — червоніє
- * тіло патча; прибрати `disabled` з `ReorderCell` рядків — червоніє «рядки
- * вимкнені»; прибрати гейт `can(…, 'Template.Edit')` з колонки порядку —
+ * тіло патча; AN-15: у `reorderRows` поставити `ColumnDef` замість `RowDef` —
+ * червоніє тест рядків; прибрати гейт `can(…, 'Template.Edit')` з колонки порядку —
  * червоніє «без права».
  */
 
@@ -33,6 +33,7 @@ const column = (id: number, code: string, ordinal: number): unknown => ({
 });
 
 const row = (rowKey: string, ordinal: number): unknown => ({
+  id: 200 + ordinal,
   rowKey,
   label: rowKey,
   ordinal,
@@ -186,13 +187,20 @@ describe('TemplateVersionPage — перестановка колонок (ФВ-
     ]);
   });
 
-  it('рядки: кнопки порядку вимкнені й пояснені', async () => {
+  it('рядки: кнопки порядку активні, «нижче» шле PATCH з RowDef', async () => {
     await renderPage(['Template.View', 'Template.Edit']);
 
     const down = screen.getByRole('button', { name: /reorder\.moveDown.*R1/ }) as HTMLButtonElement;
-    expect(down.disabled).toBe(true);
-    const hint = document.getElementById(down.getAttribute('aria-describedby') ?? '');
-    expect(hint?.textContent).toMatch(/reorder\.rowsUnavailable/);
+    expect(down.disabled).toBe(false);
+    expect(screen.queryByText(/reorder\.rowsUnavailable/)).toBeNull();
+
+    fireEvent.click(down);
+
+    await waitFor(() => expect(patches).toHaveLength(1));
+    expect(patches[0]).toEqual([
+      { entityType: 'RowDef', entityId: 201, field: 'Ordinal', value: '0' },
+      { entityType: 'RowDef', entityId: 200, field: 'Ordinal', value: '1' },
+    ]);
   });
 
   it('без права Template.Edit — жодних кнопок порядку', async () => {

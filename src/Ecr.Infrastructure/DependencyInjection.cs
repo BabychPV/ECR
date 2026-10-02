@@ -336,16 +336,15 @@ public static class DependencyInjection
         // контур без пошти і контур із поштою — це те саме розгортання з
         // різними змінними (`D-124`). Без `ECR_Smtp__Host` лишається
         // «не налаштовано», і черга накопичує, замість тихо губити події.
-        var smtpHost = configuration["Smtp:Host"];
-
-        if (string.IsNullOrWhiteSpace(smtpHost))
-        {
-            services.AddSingleton<INotificationSender, Jobs.UnconfiguredNotificationSender>();
-        }
-        else
-        {
-            services.AddSingleton<INotificationSender, Integration.SmtpNotificationSender>();
-        }
+        // ✎ D-263: відправник реєструється ЗАВЖДИ — налаштування SMTP тепер можуть прийти з БД
+        // (адмін-налаштування), а не лише з `Smtp:*`. «Не налаштовано» він повідомляє сам
+        // (`IsConfigured`), і події лишаються в черзі.
+        services.AddSingleton<Integration.SmtpNotificationSender>();
+        services.AddSingleton<INotificationSender>(sp => sp.GetRequiredService<Integration.SmtpNotificationSender>());
+        services.AddSingleton<ISmtpSettingsCache>(sp => sp.GetRequiredService<Integration.SmtpNotificationSender>());
+        services.AddSingleton<Notifications.SmtpPasswordProtector>();
+        services.AddSingleton<ISmtpPasswordProtector>(sp => sp.GetRequiredService<Notifications.SmtpPasswordProtector>());
+        services.AddScoped<ISmtpSettingsStore, Notifications.SmtpSettingsStore>();
 
         // BE-33. ⛔ Перелік хостів вебхука — лише з конфігурації процесу:
         // порожній перелік означає «жоден вебхук не приймається».

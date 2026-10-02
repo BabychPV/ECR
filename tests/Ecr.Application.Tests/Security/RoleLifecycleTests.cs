@@ -147,6 +147,25 @@ public sealed class RoleLifecycleTests
         Assert.Equal("Reviewers", _users.Roles.Single(r => r.Id == 2).Code);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    public async Task Дубль_коду_за_межею_обрізаного_списку_ролей_дає_409_а_не_500()
+    {
+        // ⛔ ListRolesAsync обрізає Take(500): тут він порожній, а код зайнятий.
+        var store = Substitute.For<IUserStore>();
+        store.ListRolesAsync(Arg.Any<CancellationToken>()).Returns(new List<RoleView>());
+        store.FindRoleAsync(2, Arg.Any<CancellationToken>())
+            .Returns(new RoleView(2, "Reviewers", IsBuiltIn: false, IsActive: true, [], []));
+        store.RoleCodeExistsAsync("ZZZLATE", 2, Arg.Any<CancellationToken>()).Returns(true);
+
+        var handler = new RenameRoleHandler(store, _access, _uow, _audit, _user, _clock);
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => handler.HandleAsync(2, "ZZZLATE", null, CancellationToken.None));
+
+        Assert.Equal("ECR-SEC-0409", error.ErrorCode);
+        Assert.Equal("err.ECR-SEC-0409.roleCodeTaken", error.Details!["messageKey"]);
+    }
+
     private void Allow(string permission)
         => _access.BuildProfileAsync(Actor, Arg.Any<CancellationToken>())
             .Returns(new AccessBuilder { UserId = Actor }.Permission(permission).Build());

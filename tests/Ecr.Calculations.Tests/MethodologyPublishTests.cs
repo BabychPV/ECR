@@ -233,6 +233,68 @@ public sealed class MethodologyPublishTests
         Assert.True(_version.IsPublished);
     }
 
+    private void PublishPreviousLegacy()
+    {
+        var previous = AddVersion(PreviousVersionId, "1.0.0.0");
+        previous.SetModes(NumericMode.Legacy, CalendarMode.Actual, TraceLevel.ErrorsOnly);
+        _methodology.PublishVersion(
+            previous, Reviewer, "Базова", new DateOnly(2026, 1, 1), testsPassed: true, Now);
+    }
+
+    [Theory] [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait("Requirement", "ФВ-9.9")]
+    [InlineData(2026, 2, 10)]
+    [InlineData(2026, 2, 1)]
+    public async Task Перехід_у_Strict_заднім_числом_відхиляється_ECR_CALC_0422(int y, int m, int d)
+    {
+        // ⛔ Strict змінює числа, що вже подані: вмикається лише з нової дати, а
+        // «сьогодні» (включно) і минуле — це заднє число. Мутація: прибрати
+        // `RejectBackdatedStrict` — публікація проходить, тест червоний.
+        PublishPreviousLegacy();
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Handler().HandleAsync(VersionId, "Перехід", new DateOnly(y, m, d), CancellationToken.None));
+
+        Assert.Equal("ECR-CALC-0422", error.ErrorCode);
+        Assert.Equal("err.ECR-CALC-0422.strictBackdated", error.Details!["messageKey"]);
+        Assert.False(_version.IsPublished);
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait("Requirement", "ФВ-9.9")]
+    public async Task Перехід_у_Strict_з_майбутньої_дати_проходить()
+    {
+        PublishPreviousLegacy();
+
+        await Handler().HandleAsync(VersionId, "Перехід", new DateOnly(2026, 2, 11), CancellationToken.None);
+
+        Assert.True(_version.IsPublished);
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait("Requirement", "ФВ-9.9")]
+    public async Task Strict_після_Strict_заднім_числом_проходить()
+    {
+        // Переходу немає, отже й заборонити нічого: правило про ПЕРЕХІД у Strict.
+        var previous = AddVersion(PreviousVersionId, "1.0.0.0");
+        previous.SetModes(NumericMode.Strict, CalendarMode.Actual, TraceLevel.ErrorsOnly);
+        _methodology.PublishVersion(
+            previous, Reviewer, "Базова", new DateOnly(2026, 1, 1), testsPassed: true, Now);
+
+        await Handler().HandleAsync(VersionId, "Уточнення", new DateOnly(2026, 2, 1), CancellationToken.None);
+
+        Assert.True(_version.IsPublished);
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait("Requirement", "ФВ-9.9")]
+    public async Task Перша_версія_Strict_заднім_числом_не_зачіпається()
+    {
+        await Handler().HandleAsync(VersionId, "Перша", new DateOnly(2026, 2, 1), CancellationToken.None);
+
+        Assert.True(_version.IsPublished);
+    }
+
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
     [Trait("Requirement", "ФВ-9.6")]
     public async Task Публікація_формує_diff_РЕЗУЛЬТАТІВ_а_не_diff_коду()

@@ -96,6 +96,15 @@ public sealed class WhereUsedTests(SqlServerFixture sql)
         Assert.Equal(stand.FormulaLabel, byKind["templateFormula"]);
         Assert.Equal("tag_hit", byKind["fieldMap"]);
 
+        // ФВ-8.14 (B5.4): читабельна назва — окреме поле `name` (назва методики зі сіду
+        // стенда), `label` лишається кодом; без назви (мапінг) поле порожнє.
+        var names = usage.GetProperty("items").EnumerateArray().ToDictionary(
+            i => i.GetProperty("kind").GetString()!,
+            i => i.TryGetProperty("name", out var n) && n.ValueKind == JsonValueKind.String ? n.GetString() : null);
+        Assert.Equal("FV-8.14", names["calculationBinding"]);
+        Assert.Equal("FV-8.14", names["methodologyRequiredInput"]);
+        Assert.Null(names["fieldMap"]);
+
         // Сусідня колонка: на неї посилається лише пастка-правило — ключем.
         var neighbour = await GetOkAsync(client, app, $"/api/v1/column-defs/{stand.Neighbour}/usage").ConfigureAwait(true);
         var only = Assert.Single(neighbour.GetProperty("items").EnumerateArray());

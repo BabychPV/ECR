@@ -749,11 +749,16 @@ public sealed class CreateUserHandler(
         // роль із помилкою лишила б користувача створеним із першою.
         if (roleCodes.Count > 0)
         {
-            var known = (await users.ListRolesAsync(ct).ConfigureAwait(false))
-                .Select(r => r.Code)
-                .ToHashSet(StringComparer.Ordinal);
+            // ⛔ Прямі запити за кодом: ListRolesAsync обрізає Take(500).
+            var unknown = new List<string>();
+            foreach (var code in roleCodes)
+            {
+                if (!await users.RoleCodeExistsAsync(code, 0, ct).ConfigureAwait(false))
+                {
+                    unknown.Add(code);
+                }
+            }
 
-            var unknown = roleCodes.Where(code => !known.Contains(code)).ToList();
             if (unknown.Count > 0)
             {
                 // ⚠ Саме `NotFoundException`: статус відповіді береться з ТИПУ

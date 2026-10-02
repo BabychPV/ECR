@@ -1,6 +1,6 @@
 # HTTPS під один сертифікат із SAN
 
-✎ 2026-10-01 (`D-259`, `D14-08`, `R-01`, черга `CL-2`). Відповідь людини (3.5.3,
+✎ 2026-10-01 (`D-267`, `D14-08`, `R-01`, черга `CL-2`). Відповідь людини (3.5.3,
 `QUESTIONS-BUSINESS-2026-10-01`): «замовник надасть один сертифікат в якому буде SAN».
 Хто завершує TLS (`Q-5`) не підтверджено; дефолт — **сам застосунок** (Kestrel із цим
 сертифікатом, `deploy-ecr.ps1 -HttpsThumbprint`). Режим проксі — розділ 6.
@@ -40,7 +40,7 @@
 | Параметр `deploy-ecr.ps1` | Змінна служби `EcrApi` | Для чого | Без нього |
 |---|---|---|---|
 | `-HttpsThumbprint` | `ECR_Transport__Https__CertificateThumbprint` | TLS: Kestrel віддає цей сертифікат браузеру | треба `-BehindHttpsProxy` або `-AllowHttp` (стенд), інакше скрипт зупиняється на кроці 1 |
-| `-DataProtectionThumbprint` | `ECR_Auth__DataProtection__CertificateThumbprint` | шифрує ключі кільця Data Protection у `sec.DataProtectionKey` (cookie сеансу, секрети каналів сповіщень) | обов'язковий (S11): служба в Production не стартує |
+| `-DataProtectionThumbprint` | `ECR_Auth__DataProtection__CertificateThumbprint` | шифрує ключі кільця Data Protection у `sec.DataProtectionKey` (cookie сеансу, секрети каналів сповіщень, пароль SMTP — purpose `Ecr.Smtp.Password.v1`) | обов'язковий (S11): служба в Production не стартує |
 
 - Сертифікат шукається **за відбитком** (не за `Subject`) — так однозначно, коли в сховищі
   лежать старий і новий сертифікати одного імені (`HttpsTransport.cs`, коментар до класу).

@@ -1,19 +1,30 @@
-// src/Ecr.Infrastructure/Integration/SmtpNotificationSender.cs
+﻿// src/Ecr.Infrastructure/Integration/SmtpNotificationSender.cs
 using System.Globalization;
 using System.Net;
 using System.Net.Mail;
 using Ecr.Application.Ports;
+using Ecr.Domain.Entities.Notifications;
+using Ecr.Infrastructure.Notifications;
+using Ecr.Infrastructure.Persistence;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Ecr.Infrastructure.Integration;
 
 /// <summary>
-/// Доставка сповіщень поштою (<c>D-124</c>).
+/// Доставка сповіщень поштою (<c>D-124</c>, <c>D-263</c>).
 /// </summary>
 /// <remarks>
-/// ⛔ Пароль береться **лише за іменем секрету** через <see cref="ISecretProvider"/>
-/// (`ФВ-6.11`): у конфігурації лежить `ECR_Smtp__SecretName`, а не значення.
-/// Пароль у `appsettings.json` — це пароль у системі контролю версій.
+/// ⛔ Пароль із конфігурації процесу береться **лише за іменем секрету** через
+/// <see cref="ISecretProvider"/> (`ФВ-6.11`); пароль з адмін-налаштувань лежить у базі ЗАШИФРОВАНИМ
+/// (DataProtection) і розшифровується тут, у момент відправки, ніколи не повертаючись в API.
+///
+/// ⚠ Ефективні налаштування: УВІМКНЕНІ й повні налаштування з БД (<c>sys_ecr.SmtpSettings</c>)
+/// мають пріоритет над конфігурацією процесу (<c>Smtp:*</c>, залишається запасним шляхом).
+/// Результат кешується на <see cref="CacheTtl"/>; <see cref="Invalidate"/> (після PUT) скидає кеш.
+/// Недоступна БД — не привід мовчки слати «з нічого»: падаємо на конфігурацію, а кеш на цей збій
+/// не ставимо.
 ///
 /// ⚠ Без заданих `Host` і `From` відправник **не вважається налаштованим** і черга
 /// накопичує далі. Це не помилка конфігурації, а нормальний стан контуру, де
@@ -24,32 +35,43 @@ namespace Ecr.Infrastructure.Integration;
 /// рахує спробу і лишає запис у черзі (`ФВ-12.4a` — три спроби, далі `Failed`).
 /// Проковтнути його тут означало б «надіслано» для листа, якого немає.
 /// </remarks>
-public sealed class SmtpNotificationSender(IConfiguration configuration, ISecretProvider secrets)
-    : INotificationSender
+public sealed class SmtpNotificationSender(
+    IConfiguration configuration,
+    ISecretProvider secrets,
+    IServiceScopeFactory? scopes = null,
+    SmtpPasswordProtector? protector = null,
+    TimeProvider? time = null) : INotificationSender, ISmtpSettingsCache
 {
+    /// <summary>Скільки діє знімок ефективних налаштувань.</summary>
+    public static readonly TimeSpan CacheTtl = TimeSpan.FromSeconds(30);
+
     /// <summary>Порт за замовчуванням: submission із STARTTLS.</summary>
     private const int DefaultPort = 587;
 
     /// <summary>Скільки чекати на сервер, перш ніж вважати спробу невдалою.</summary>
-    /// <remarks>
-    /// Тридцять секунд — межа, за якою затримка перестає бути «повільно» і
-    /// стає «недоступно». Задача погодинна; чекати довше немає сенсу, а
-    /// коротше — ловити хибні збої на завантаженому сервері.
-    /// </remarks>
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(30);
 
-    private string? Host => Value("Host");
-
-    private string? From => Value("From");
+    private readonly ISecretProvider _secrets = secrets;
+    private readonly SmtpPasswordProtector? _protector = protector;
+    private readonly TimeProvider _time = time ?? TimeProvider.System;
+    private readonly object _gate = new();
+    private Effective? _cached;
+    private DateTimeOffset _expires;
 
     /// <inheritdoc />
-    /// <remarks>
-    /// ⛔ «Налаштовано» = «можна надіслати»: потрібні і хост, і адресант. Лише
-    /// хост раніше давав «налаштовано» в <c>/health/facts</c>, у каналі й у
-    /// диспетчері, а кожна відправка падала на «From не задано» — і черга
-    /// спалювала спроби, замість накопичуватися.
-    /// </remarks>
-    public bool IsConfigured => Host is not null && From is not null;
+    public bool IsConfigured => Current().IsConfigured;
+
+    /// <summary>Скільки разів налаштування читалися з БД — для тестів кешу.</summary>
+    public int DatabaseReads { get; private set; }
+
+    /// <inheritdoc />
+    public void Invalidate()
+    {
+        lock (_gate)
+        {
+            _cached = null;
+        }
+    }
 
     /// <inheritdoc />
     public async Task SendAsync(
@@ -57,10 +79,12 @@ public sealed class SmtpNotificationSender(IConfiguration configuration, ISecret
     {
         ArgumentNullException.ThrowIfNull(recipients);
 
-        if (!IsConfigured)
+        var settings = Current();
+
+        if (!settings.IsConfigured)
         {
             throw new InvalidOperationException(
-                "SMTP не налаштовано: задайте ECR_Smtp__Host і ECR_Smtp__From. Події лишаються в черзі.");
+                "SMTP не налаштовано: задайте його в адмін-налаштуваннях або ECR_Smtp__Host і ECR_Smtp__From. Події лишаються в черзі.");
         }
 
         if (recipients.Count == 0)
@@ -68,34 +92,29 @@ public sealed class SmtpNotificationSender(IConfiguration configuration, ISecret
             throw new InvalidOperationException("Адресатів не визначено.");
         }
 
-        using var message = new MailMessage { From = new MailAddress(From!), Subject = subject, Body = body };
+        using var message = new MailMessage
+        {
+            From = string.IsNullOrWhiteSpace(settings.FromName)
+                ? new MailAddress(settings.From!)
+                : new MailAddress(settings.From!, settings.FromName),
+            Subject = subject,
+            Body = body,
+        };
 
         foreach (var recipient in recipients)
         {
             message.To.Add(recipient);
         }
 
-        using var client = new SmtpClient(Host, Port())
+        using var client = new SmtpClient(settings.Host, settings.Port)
         {
-            EnableSsl = Flag("UseStartTls", @default: true),
+            EnableSsl = settings.StartTls,
             Timeout = (int)Timeout.TotalMilliseconds,
         };
 
-        var user = Value("User");
-        if (!string.IsNullOrWhiteSpace(user))
+        if (!string.IsNullOrWhiteSpace(settings.User))
         {
-            // ⚠ Ім'я секрету, а не пароль. Порожній секрет — це помилка
-            // конфігурації, а не «вхід без пароля»: другий варіант мовчки
-            // перетворив би автентифіковану відправку на анонімну.
-            var secretName = Value("SecretName")
-                             ?? throw new InvalidOperationException(
-                                 "ECR_Smtp__User задано, а ECR_Smtp__SecretName — ні.");
-
-            var password = secrets.Find(secretName)
-                           ?? throw new InvalidOperationException(
-                               $"Секрет '{secretName}' не знайдено.");
-
-            client.Credentials = new NetworkCredential(user, password);
+            client.Credentials = new NetworkCredential(settings.User, settings.PasswordOf(this));
         }
         else
         {
@@ -108,6 +127,74 @@ public sealed class SmtpNotificationSender(IConfiguration configuration, ISecret
         await client.SendMailAsync(message, ct).ConfigureAwait(false);
     }
 
+    private Effective Current()
+    {
+        lock (_gate)
+        {
+            var now = _time.GetUtcNow();
+
+            if (_cached is not null && now < _expires)
+            {
+                return _cached;
+            }
+
+            var fromDb = TryReadDatabase(out var failed);
+            var value = fromDb ?? FromConfiguration();
+
+            if (!failed)
+            {
+                _cached = value;
+                _expires = now + CacheTtl;
+            }
+
+            return value;
+        }
+    }
+
+    /// <summary>Налаштування з БД; <c>null</c> — немає, вимкнені, неповні або БД недоступна.</summary>
+    private Effective? TryReadDatabase(out bool failed)
+    {
+        failed = false;
+
+        if (scopes is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            using var scope = scopes.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<EcrDbContext>();
+            DatabaseReads++;
+
+            var row = db.SmtpSettings.AsNoTracking().FirstOrDefault(s => s.Id == SmtpSettings.SingletonId);
+
+            return row is { IsComplete: true }
+                ? new Effective(
+                    row.Host, row.Port, row.EncryptionMode == SmtpEncryptionMode.StartTls, row.FromAddress,
+                    row.FromName, row.AuthMode == SmtpAuthMode.Password ? row.UserName : null, null,
+                    row.PasswordProtected, "database")
+                : null;
+        }
+#pragma warning disable CA1031 // Недоступна БД не має валити «чи налаштовано»: падаємо на конфігурацію процесу.
+        catch (Exception)
+#pragma warning restore CA1031
+        {
+            failed = true;
+
+            return null;
+        }
+    }
+
+    private Effective FromConfiguration()
+    {
+        var port = int.TryParse(Value("Port"), CultureInfo.InvariantCulture, out var p) && p > 0 ? p : DefaultPort;
+
+        return new Effective(
+            Value("Host"), port, bool.TryParse(Value("UseStartTls"), out var tls) ? tls : true, Value("From"), null,
+            Value("User"), Value("SecretName"), null, "configuration");
+    }
+
     private string? Value(string key)
     {
         var raw = configuration[$"Smtp:{key}"];
@@ -115,11 +202,31 @@ public sealed class SmtpNotificationSender(IConfiguration configuration, ISecret
         return string.IsNullOrWhiteSpace(raw) ? null : raw;
     }
 
-    private int Port()
-        => int.TryParse(Value("Port"), CultureInfo.InvariantCulture, out var port) && port > 0
-            ? port
-            : DefaultPort;
+    /// <summary>Знімок налаштувань, за якими йде відправка.</summary>
+    private sealed record Effective(
+        string? Host, int Port, bool StartTls, string? From, string? FromName, string? User, string? SecretName,
+        byte[]? PasswordProtected, string Source)
+    {
+        public bool IsConfigured => Host is not null && From is not null;
 
-    private bool Flag(string key, bool @default)
-        => bool.TryParse(Value(key), out var value) ? value : @default;
+        public string PasswordOf(SmtpNotificationSender owner)
+        {
+            if (PasswordProtected is { Length: > 0 } blob)
+            {
+                // ⚠ Без розшифровувача блоб прочитати нічим: це помилка збірки, а не «вхід без пароля».
+                return owner._protector?.Unprotect(blob)
+                       ?? throw new InvalidOperationException("Пароль SMTP збережено, а розшифровувача немає.");
+            }
+
+            // ⚠ Ім'я секрету, а не пароль. Порожній секрет — це помилка
+            // конфігурації, а не «вхід без пароля»: другий варіант мовчки
+            // перетворив би автентифіковану відправку на анонімну.
+            var secretName = SecretName
+                             ?? throw new InvalidOperationException(
+                                 "ECR_Smtp__User задано, а ECR_Smtp__SecretName — ні.");
+
+            return owner._secrets.Find(secretName)
+                   ?? throw new InvalidOperationException($"Секрет '{secretName}' не знайдено.");
+        }
+    }
 }

@@ -26,6 +26,12 @@ public enum NotificationEventKind : byte
     /// документ за період пора заповнювати. Інформаційна подія, не збій.
     /// </summary>
     PeriodOpened = 6,
+
+    /// <summary>
+    /// Період перейшов <c>Open → Grace</c>: строк подання минув, лишився пільговий. Нагадування
+    /// «заповніть, поки можна»; інформаційна подія, як й <see cref="PeriodOpened"/>.
+    /// </summary>
+    PeriodGraceStarted = 7,
 }
 
 /// <summary>Серйозність події; правило пропускає події не нижчі за свою межу.</summary>

@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Runtime.ExceptionServices;
 using System.Text.Encodings.Web;
 using System.Text.Json;
@@ -290,6 +290,7 @@ public sealed partial class PeriodStateJob(
         // проєкті, трималося б до кінця прогону по всіх.
         var toMaterialize = new List<int>();
         var opened = new List<Period>();
+        var graceStarted = new List<Period>();
         var skipped = new List<SkippedPeriodTransition>();
         var reopened = 0;
         var attempt = 0;
@@ -300,6 +301,7 @@ public sealed partial class PeriodStateJob(
             // збираються заново, а не дописуються.
             toMaterialize.Clear();
             opened.Clear();
+            graceStarted.Clear();
             skipped.Clear();
             reopened = 0;
 
@@ -353,6 +355,12 @@ public sealed partial class PeriodStateJob(
                 if (before == PeriodState.Scheduled && period.State == PeriodState.Open)
                 {
                     opened.Add(period);
+                }
+
+                // ⚠ Лише `Open → Grace` самого плану (не системний Reopen `Closed → Grace` нижче).
+                if (before == PeriodState.Open && period.State == PeriodState.Grace)
+                {
+                    graceStarted.Add(period);
                 }
 
                 // ⚠ Зокрема `Scheduled → … → Closed` за один прогін (задача
@@ -429,14 +437,28 @@ public sealed partial class PeriodStateJob(
             .EnqueueAfterTransitionAsync(project.Id, toMaterialize, ct)
             .ConfigureAwait(false);
 
-        await NotifyOpenedAsync(project, opened, ct).ConfigureAwait(false);
+        await NotifyAsync(
+            project, opened, NotificationEventKind.PeriodOpened, "period-opened",
+            "notifications.periodOpened.subject", "notifications.periodOpened.body", ct)
+            .ConfigureAwait(false);
+        await NotifyAsync(
+            project, graceStarted, NotificationEventKind.PeriodGraceStarted, "period-grace",
+            "notifications.periodGraceStarted.subject", "notifications.periodGraceStarted.body", ct)
+            .ConfigureAwait(false);
 
         return skipped;
     }
 
-    /// <summary>Подія <see cref="NotificationEventKind.PeriodOpened"/> на кожен щойно відкритий період.</summary>
+    /// <summary>
+    /// Подія <see cref="NotificationEventKind.PeriodOpened"/> (<c>Scheduled → Open</c>) або
+    /// <see cref="NotificationEventKind.PeriodGraceStarted"/> (<c>Open → Grace</c>) на кожен такий період.
+    /// </summary>
     /// <param name="project">Проєкт.</param>
-    /// <param name="opened">Періоди, що перейшли <c>Scheduled → Open</c> у закоміченій транзакції.</param>
+    /// <param name="periods">Періоди, що перейшли в закоміченій транзакції.</param>
+    /// <param name="kind">Подія матриці правил.</param>
+    /// <param name="keyPrefix">Префікс ключа дедуплікації.</param>
+    /// <param name="subjectKey">Ключ теми в каталозі.</param>
+    /// <param name="bodyKey">Ключ тіла в каталозі.</param>
     /// <param name="ct">Токен скасування.</param>
     /// <remarks>
     /// ⛔ ПІСЛЯ коміту і без права валити прогін: сповіщення не транзакційні, а недоступна пошта
@@ -447,9 +469,11 @@ public sealed partial class PeriodStateJob(
     /// ключ дедуплікації — проєкт+період, тож повторний прогін не дублює лист.
     /// </para>
     /// </remarks>
-    private async Task NotifyOpenedAsync(Project project, List<Period> opened, CancellationToken ct)
+    private async Task NotifyAsync(
+        Project project, List<Period> periods, NotificationEventKind kind, string keyPrefix,
+        string subjectKey, string bodyKey, CancellationToken ct)
     {
-        if (opened.Count == 0 || notifications is null || catalog is null)
+        if (periods.Count == 0 || notifications is null || catalog is null)
         {
             return;
         }
@@ -460,7 +484,7 @@ public sealed partial class PeriodStateJob(
                 .GetAsync(Application.Localization.UiStringResolver.DefaultLanguage, ct)
                 .ConfigureAwait(false)).Strings;
 
-            foreach (var period in opened)
+            foreach (var period in periods)
             {
                 var label = string.Create(
                     CultureInfo.InvariantCulture,
@@ -474,11 +498,15 @@ public sealed partial class PeriodStateJob(
                 await notifications
                     .DispatchAsync(
                         new NotificationEvent(
-                            NotificationEventKind.PeriodOpened,
+                            kind,
                             NotificationSeverity.Info,
-                            string.Create(CultureInfo.InvariantCulture, $"period-opened:{project.Code}:{period.PeriodKeyValue}"),
-                            Fill("notifications.periodOpened.subject"),
-                            Fill("notifications.periodOpened.body")),
+                            string.Create(CultureInfo.InvariantCulture, $"{keyPrefix}:{project.Code}:{period.PeriodKeyValue}"),
+                            Fill(subjectKey),
+                            Fill(bodyKey),
+                            new NotificationText(
+                                subjectKey,
+                                bodyKey,
+                                new Dictionary<string, string> { ["project"] = project.Code, ["period"] = label })),
                         ct)
                     .ConfigureAwait(false);
             }

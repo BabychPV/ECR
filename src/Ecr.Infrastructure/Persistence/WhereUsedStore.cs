@@ -1,8 +1,9 @@
-// src/Ecr.Infrastructure/Persistence/WhereUsedStore.cs
+﻿// src/Ecr.Infrastructure/Persistence/WhereUsedStore.cs
 using System.Globalization;
 using Ecr.Application.Common;
 using Ecr.Application.Ports;
 using Ecr.Domain.Entities.Calculations;
+using Ecr.Domain.ValueObjects;
 using Microsoft.EntityFrameworkCore;
 
 namespace Ecr.Infrastructure.Persistence;
@@ -64,7 +65,8 @@ public sealed class WhereUsedStore(EcrDbContext db) : IWhereUsedStore
             select new Hit(
                 f.Id,
                 t.Code + "." + (db.ColumnDefs.Where(c => c.Id == f.ColumnDefId).Select(c => c.Code).FirstOrDefault() ?? "*"),
-                "/admin/templates/" + v.TemplateId + "/versions/" + v.Id))
+                "/admin/templates/" + v.TemplateId + "/versions/" + v.Id,
+                t.NameL10n))
             .ConfigureAwait(false);
 
         await AddAsync(
@@ -73,7 +75,7 @@ public sealed class WhereUsedStore(EcrDbContext db) : IWhereUsedStore
             where b.ColumnDefId == columnDefId || dependencies.Any(d => d.BindingId == b.Id)
             join m in db.Methodologies on b.MethodologyId equals m.Id
             orderby b.Id
-            select new Hit(b.Id, m.Code + "." + b.OutputCode, "/admin/methodologies/" + m.Id + "/versions"))
+            select new Hit(b.Id, m.Code + "." + b.OutputCode, "/admin/methodologies/" + m.Id + "/versions", m.NameL10n))
             .ConfigureAwait(false);
 
         await AddAsync(
@@ -83,7 +85,7 @@ public sealed class WhereUsedStore(EcrDbContext db) : IWhereUsedStore
             join v in db.MethodologyVersions on r.MethodologyVersionId equals v.Id
             join m in db.Methodologies on v.MethodologyId equals m.Id
             orderby r.Id
-            select new Hit(r.Id, m.Code + " " + v.Version, "/admin/methodologies/" + m.Id + "/versions"))
+            select new Hit(r.Id, m.Code + " " + v.Version, "/admin/methodologies/" + m.Id + "/versions", m.NameL10n))
             .ConfigureAwait(false);
 
         await AddAsync(
@@ -91,7 +93,7 @@ public sealed class WhereUsedStore(EcrDbContext db) : IWhereUsedStore
             db.EntityFieldMaps
                 .Where(m => m.TargetColumnDefId == columnDefId)
                 .OrderBy(m => m.Id)
-                .Select(m => new Hit(m.Id, m.SourceField, "/admin/mapping")))
+                .Select(m => new Hit(m.Id, m.SourceField, "/admin/mapping", null)))
             .ConfigureAwait(false);
 
         // ⛔ Ключі `MatchJson` правила — `ColumnDefId` рядком (`MethodologyRuleMatcher`).
@@ -114,14 +116,22 @@ public sealed class WhereUsedStore(EcrDbContext db) : IWhereUsedStore
         total += rules.Count;
         hits.AddRange(rules.Take(Math.Max(0, take - hits.Count)).Select(c => Item(
             UsageKinds.MethodologyRule,
-            new Hit(c.Rule.Id, c.Rule.Code, "/admin/methodologies/" + c.MethodologyId + "/versions"))));
+            new Hit(c.Rule.Id, c.Rule.Code, "/admin/methodologies/" + c.MethodologyId + "/versions", null))));
 
         return new UsageResponse(total, hits);
     }
 
     private static UsageItemDto Item(string kind, Hit hit)
-        => new UsageItemDto(kind, hit.Id.ToString(CultureInfo.InvariantCulture), hit.Label, hit.Route);
+        => new UsageItemDto(kind, hit.Id.ToString(CultureInfo.InvariantCulture), hit.Label, hit.Route, hit.DisplayName());
 
     /// <summary>Проєкція одного посилання до перетворення на <see cref="UsageItemDto"/>.</summary>
-    private sealed record Hit(int Id, string Label, string Route);
+    private sealed record Hit(int Id, string Label, string Route, LocalizedText? Title)
+    {
+        /// <summary>Назва для людини (ФВ-8.14); <c>null</c> — назви немає, клієнт покаже код.</summary>
+        public string? DisplayName()
+        {
+            var name = Title?.Get("uk");
+            return string.IsNullOrWhiteSpace(name) ? null : name;
+        }
+    }
 }

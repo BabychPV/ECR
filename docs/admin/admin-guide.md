@@ -208,18 +208,26 @@ AF (C-3), обліковий запис для з'єднання.
 ## 6. Сповіщення
 
 Екран `/admin/notifications`, право `System.ManageNotifications` (небезп.).
-Ендпоінти: `api/v1/notifications/channels` (`PUT`, `DELETE`, `PUT {id}/secret`,
-`POST {id}/test`), `…/rules`, `…/deliveries`. Секрети каналів шифруються Data
-Protection, тож без ключів (runbook, п. 6) їх не розшифрувати.
+Покроково — [`notifications-runbook.md`](notifications-runbook.md).
+Ендпоінти: `api/v1/notifications/smtp` (`GET`, `PUT`, `POST test`),
+`api/v1/notifications/channels` (`POST`, `PUT`, `DELETE`, `PUT {id}/secret`,
+`POST {id}/test`), `…/rules`, `…/deliveries`. Пароль SMTP і секрети каналів
+шифруються Data Protection, тож без ключів (runbook, п. 6) їх не розшифрувати.
 
-| Канал | Що потрібно |
+✎ 2026-10-01 (`D-263`): SMTP і правила налаштовуються в застосунку.
+
+| Що | Де задається |
 |---|---|
-| Пошта | транспорт процесу: `Smtp:Host`, `Smtp:From`, `Smtp:Port` (587), `Smtp:UseStartTls` (true), `Smtp:User` + `Smtp:SecretName`. Без `Smtp:User` — інтегрована або анонімна відправка |
+| Пошта (транспорт) | панель «SMTP (outgoing mail)»: сервер, порт (587), STARTTLS або без шифрування, відправник, логін і пароль (write-only). Поки вона вимкнена чи неповна — запасний шлях `Smtp:*` конфігурації процесу |
+| Поштовий канал | адресати: явні адреси та/або ролі (активні користувачі ролі з поштою, кожному — його мовою) |
 | Teams / вебхук | URL, чий хост закінчується на один із суфіксів `Notifications:WebhookAllowedHostSuffixes` |
+| Правила | матриця «подія × канал» з межею серйозності |
 
-Розсилку виконує `NotificationJob` щогодини (о хх:05).
+Розсилку виконує `NotificationJob` щогодини (о хх:05); нагадування про відкриття
+періоду — `PeriodStateJob`.
 
-⚠ **потрібне рішення замовника:** SMTP-сервер, адреса відправника, адресати.
+⚠ **потрібне від замовника:** дані поштового сервера (адреса, порт, обліковий
+запис, дозвіл релею для хоста застосунку).
 
 ## 7. Рядки інтерфейсу й переклади
 

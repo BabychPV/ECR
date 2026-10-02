@@ -22,9 +22,9 @@ public sealed class NotificationDispatchStore(EcrDbContext db, IMemoryCache memo
 {
     /// <summary>
     /// Стеля правил у знімку: матриця «подія × канал», тобто п'ять подій на
-    /// кожен із <see cref="NotificationStore.MaxChannels"/> каналів.
+    /// кожен із <see cref="NotificationStore.MaxChannels"/> каналів (подій — стільки, скільки в enum).
     /// </summary>
-    public const int MaxRules = NotificationStore.MaxChannels * 5;
+    public static readonly int MaxRules = NotificationStore.MaxChannels * Enum.GetValues<NotificationEventKind>().Length;
 
     /// <summary>
     /// Стеля життя знімка.

@@ -1,4 +1,4 @@
-import { apiFetch } from '@/api/client';
+﻿import { apiFetch } from '@/api/client';
 import type { components } from '@/api/schema';
 
 /**
@@ -100,6 +100,15 @@ export type NotificationRuleMatrix = components['schemas']['NotificationRuleMatr
 export type NotificationDelivery = components['schemas']['NotificationDeliveryView'];
 export type NotificationDeliveryPage = components['schemas']['PagedResultOfNotificationDeliveryView'];
 
+/**
+ * Ключ кешу React Query для {@link getNotificationRules}.
+ *
+ * ⚠ Спільний з тієї ж причини, що й {@link NotificationChannelsKey}: матриця правил і панель
+ * шаблонів (`NotificationTemplatesPanel`, «хто отримає») читають ту саму матрицю, і збереження
+ * матриці мусить оновити рівно той запис кешу, з якого панель шаблонів бере адресатів.
+ */
+export const NotificationRulesKey = ['notifications', 'rules'] as const;
+
 export function getNotificationRules(): Promise<NotificationRuleMatrix> {
   return apiFetch<NotificationRuleMatrix>('/api/v1/notifications/rules');
 }
@@ -137,4 +146,68 @@ export function listNotificationDeliveries(
       (filter.channelId === undefined ? '' : `&channelId=${String(filter.channelId)}`) +
       (filter.status === undefined ? '' : `&status=${encodeURIComponent(filter.status)}`),
   );
+}
+
+/**
+ * Налаштування SMTP, задані адміністратором (`D-263`). ⛔ Пароля тут немає й не буде — лише `hasPassword`.
+ * `source` каже, звідки транспорт береться зараз: `database`, `configuration` (процес, `Smtp:*`) або `none`.
+ */
+export type SmtpSettings = components['schemas']['SmtpSettingsView'];
+/** Те, що приймає `PUT`. Порожній `password` — не змінювати збережений. */
+export type SmtpSettingsInput = components['schemas']['SmtpSettingsInput'];
+
+/** Ключ кешу React Query для налаштувань SMTP. */
+export const SmtpSettingsKey = ['notifications', 'smtp'] as const;
+
+export function getSmtpSettings(): Promise<SmtpSettings> {
+  return apiFetch<SmtpSettings>('/api/v1/notifications/smtp');
+}
+
+export function saveSmtpSettings(body: SmtpSettingsInput): Promise<SmtpSettings> {
+  return apiFetch<SmtpSettings>('/api/v1/notifications/smtp', { method: 'PUT', ...json(body) });
+}
+
+/** Пробний лист на `to` через ефективні налаштування; `ok: false` — відповідь, а не помилка запиту. */
+export function testSmtpSettings(to: string): Promise<NotificationTestResult> {
+  return apiFetch<NotificationTestResult>('/api/v1/notifications/smtp/test', { method: 'POST', ...json({ to }) });
+}
+
+/** Рядок адміністративного переліку каталогу: еталон і значення мовою як є в базі (`null` — немає). */
+export type UiStringRawRow = components['schemas']['UiStringRawRow'];
+type UiStringListResponse = components['schemas']['UiStringListResponse'];
+type UiStringRevisionResponse = components['schemas']['UiStringRevisionResponse'];
+type SetUiStringRequest = components['schemas']['SetUiStringRequest'];
+
+/**
+ * Ключ кешу сирого переліку мови. ⚠ Префікс `['ui-strings']` — той самий, що інвалідує редактор
+ * рядків (`UiStringsPage`): правка шаблону там і тут — це один і той самий рядок каталогу.
+ */
+export const notificationTemplateStringsKey = (lang: string) => ['ui-strings', 'raw', lang] as const;
+
+/**
+ * Рядки мови БЕЗ підміни мовою за замовчуванням (`System.ManageLocalization`).
+ *
+ * ⛔ Не каталог `GET /ui-strings/{lang}`: там відсутній переклад уже підмінений англійським і
+ * виглядає як переклад — шаблон, якого казахською немає, показався б «заповненим».
+ */
+export function listUiStringsRaw(lang: string): Promise<UiStringListResponse> {
+  return apiFetch<UiStringListResponse>(`/api/v1/ui-strings?lang=${encodeURIComponent(lang)}`);
+}
+
+/**
+ * Записує текст шаблону сповіщення (рядок каталогу). Порожнє значення для мови перекладу — «зняти
+ * переклад» (лист піде мовою за замовчуванням). Плейсхолдери, що не збігаються з еталоном, сервер
+ * відхиляє `422` (`placeholderMismatch`).
+ *
+ * ⚠ Область `Private`: шаблони сповіщень бачить лише той, хто увійшов (`D-114`).
+ */
+export function setNotificationTemplateString(
+  lang: string,
+  key: string,
+  value: string,
+): Promise<UiStringRevisionResponse> {
+  return apiFetch<UiStringRevisionResponse>(`/api/v1/ui-strings/${encodeURIComponent(lang)}/${encodeURIComponent(key)}`, {
+    method: 'PUT',
+    ...json({ value, scope: 'Private' } satisfies SetUiStringRequest),
+  });
 }
