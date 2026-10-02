@@ -94,6 +94,29 @@ public sealed class PermissionHoldersStoreTests(SqlServerFixture sql)
         Assert.True(after[0] >= 0);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "BE-12")]
+    public async Task Таймаут_замка_адміністратора_дає_409_а_не_500_і_замок_знімається_відкатом()
+    {
+        await using var first = Context();
+        await using var tx = await first.Database.BeginTransactionAsync();
+        await new UserStore(first).AcquireAdministratorGuardAsync(CancellationToken.None);
+
+        await using var second = Context();
+        await using var tx2 = await second.Database.BeginTransactionAsync();
+        var error = await Assert.ThrowsAsync<Ecr.Application.Errors.BusinessRuleException>(
+            () => new UserStore(second) { AdministratorLockTimeoutMs = 100 }
+                .AcquireAdministratorGuardAsync(CancellationToken.None));
+        Assert.Equal("ECR-SEC-0409", error.ErrorCode);
+
+        // Відкат першої транзакції звільняє замок (LockOwner = Transaction).
+        await tx.RollbackAsync();
+        await new UserStore(second) { AdministratorLockTimeoutMs = 100 }
+            .AcquireAdministratorGuardAsync(CancellationToken.None);
+    }
+
     private User Add(EcrDbContext db, string prefix)
     {
         var user = new User($"{prefix}_{_tag}", prefix, AuthProvider.Local);

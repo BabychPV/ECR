@@ -89,15 +89,21 @@ public sealed class UserStore(EcrDbContext db) : IUserStore
         };
         await db.Database.ExecuteSqlRawAsync(
             "EXEC @rc = sp_getapplock @Resource = N'ecr.last-administrator', @LockMode = N'Exclusive', "
-            + "@LockOwner = N'Transaction', @LockTimeout = 15000;",
-            [result],
+            + "@LockOwner = N'Transaction', @LockTimeout = @timeout;",
+            [result, new Microsoft.Data.SqlClient.SqlParameter("@timeout", AdministratorLockTimeoutMs)],
             ct).ConfigureAwait(false);
 
         if (result.Value is int code && code < 0)
         {
-            throw new InvalidOperationException("Не вдалося взяти замок «останній адміністратор» (sp_getapplock " + code + ").");
+            // Таймаут (-1) і взаємоблокування (-2/-3) — конфлікт, а не збій: клієнт повторює запит.
+            throw new Application.Errors.BusinessRuleException(
+                "ECR-SEC-0409", "Зміну адміністраторів зараз виконує інший запит; повторіть.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-SEC-0409" });
         }
     }
+
+    /// <summary>Скільки мс чекати замок адміністратора (за замовчуванням 15 с).</summary>
+    public int AdministratorLockTimeoutMs { get; init; } = 15000;
 
     /// <inheritdoc />
     public Task<User?> FindByWindowsSidAsync(string sid, CancellationToken ct)

@@ -92,6 +92,30 @@ public sealed class UserAdministrationTests
         Assert.Empty(await _users.ListUserRolesAsync(_local.Id, CancellationToken.None));
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "BE-12")]
+    public async Task Відмова_409_не_пише_в_журнал_і_не_зберігає_а_строкове_призначення_не_рахується()
+    {
+        // Консервативна (fail-closed) поведінка: строкова ManageUsers-роль не вважається
+        // збереженням права, тож заміна набору в останнього носія відхиляється.
+        await _users.GrantRoleAsync(_local, "Admins", CancellationToken.None);
+        var window = new Dictionary<string, RoleValidityWindow>
+        {
+            ["Admins"] = new(new DateOnly(2026, 9, 1), new DateOnly(2026, 9, 1)),
+        };
+
+        await Assert.ThrowsAsync<BusinessRuleException>(
+            () => ReplaceRoles().HandleAsync(_local.Id, ["Admins"], window, null, CancellationToken.None));
+        await Assert.ThrowsAsync<BusinessRuleException>(
+            () => ReplaceRoles().HandleAsync(_local.Id, [], null, null, CancellationToken.None));
+
+        await _audit.DidNotReceive().WriteSecurityEventAsync(
+            Arg.Any<SecurityEventRecord>(), Arg.Any<CancellationToken>());
+        await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
+        Assert.Equal(["Admins"], await _users.ListUserRolesAsync(_local.Id, CancellationToken.None));
+    }
+
     private ReplaceUserRolesHandler ReplaceRoles() => new(
         _users, _access, _uow, _current, _audit, _clock,
         new DisableBootstrapAdminHandler(_users, _uow, _audit, _current, _clock),
