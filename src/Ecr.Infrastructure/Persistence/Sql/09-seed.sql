@@ -897,10 +897,15 @@ UPDATE t
                                                 N'Нет адресатов: в канале нет явных адресов, а среди пользователей его ролей нет ни одного активного с адресом электронной почты.'),
     (N'notifications.test.smtpNoRecipients', N'kz', N'Алушылар жоқ: арнада нақты мекенжайлар жоқ, ал оның рөлдері электрондық пошта мекенжайы бар бірде-бір белсенді пайдаланушыға айқындалмайды.',
                                                 N'Алушылар жоқ: арнада нақты мекенжайлар жоқ, ал оның рөлдерінде электрондық пошта мекенжайы бар бірде-бір белсенді пайдаланушы жоқ.'),
+    -- ланцюг A → B → C (p3-t1 T1-06: без згадки заголовка Retry-After): обидва рядки з новим C.
     (N'err.ECR-REQ-0429.tooManySmtpTests', N'ru', N'Слишком много пробных сообщений за короткое время. Подождите немного и повторите попытку; заголовок Retry-After указывает, через сколько.',
-                                                N'Слишком много проверочных сообщений за короткое время. Подождите немного и повторите попытку; заголовок Retry-After указывает, через сколько.'),
+                                                N'Слишком много проверочных сообщений за короткое время. Подождите немного и повторите попытку.'),
+    (N'err.ECR-REQ-0429.tooManySmtpTests', N'ru', N'Слишком много проверочных сообщений за короткое время. Подождите немного и повторите попытку; заголовок Retry-After указывает, через сколько.',
+                                                N'Слишком много проверочных сообщений за короткое время. Подождите немного и повторите попытку.'),
     (N'err.ECR-REQ-0429.tooManySmtpTests', N'kz', N'Қысқа уақыт ішінде сынақ хабарламалары тым көп. Біраз күтіп, қайталап көріңіз; қанша уақыттан кейін екенін Retry-After тақырыбы көрсетеді.',
-                                                N'Қысқа уақыт ішінде тексеру хабарламалары тым көп. Біраз күтіп, қайталап көріңіз; қанша уақыттан кейін екенін Retry-After тақырыбы көрсетеді.'),
+                                                N'Қысқа уақыт ішінде тексеру хабарламалары тым көп. Біраз күтіп, қайталап көріңіз.'),
+    (N'err.ECR-REQ-0429.tooManySmtpTests', N'kz', N'Қысқа уақыт ішінде тексеру хабарламалары тым көп. Біраз күтіп, қайталап көріңіз; қанша уақыттан кейін екенін Retry-After тақырыбы көрсетеді.',
+                                                N'Қысқа уақыт ішінде тексеру хабарламалары тым көп. Біраз күтіп, қайталап көріңіз.'),
     (N'schedule.dependsOn', N'kz', N'Тәуелді кесте',
                                                 N'Қай жоспарға тәуелді'),
     (N'schedule.dependsOnHint', N'kz', N'Жоспарлы іске қосулар сол қосылымның таңдалған кестесінің сәтті орындалуын күтеді. Қолмен жинау мен толықтыру бұғатталмайды.',
@@ -990,7 +995,18 @@ UPDATE t
     -- p3-t1 T1-11: відмова називає саме ту адресу, яка хибна ({address}).
     (N'err.ECR-REQ-0422.notificationChannelRecipientInvalid', N'en', N'One of the recipients is not an email address.', N'The recipient "{address}" is not an email address.'),
     (N'err.ECR-REQ-0422.notificationChannelRecipientInvalid', N'ru', N'Один из получателей не является адресом электронной почты.', N'Получатель «{address}» не является адресом электронной почты.'),
-    (N'err.ECR-REQ-0422.notificationChannelRecipientInvalid', N'kz', N'Алушылардың бірі электрондық пошта мекенжайы емес.', N'«{address}» алушысы электрондық пошта мекенжайы емес.')
+    (N'err.ECR-REQ-0422.notificationChannelRecipientInvalid', N'kz', N'Алушылардың бірі электрондық пошта мекенжайы емес.', N'«{address}» алушысы электрондық пошта мекенжайы емес.'),
+    -- p3-t1 T1-06: тексти 429 не згадують HTTP-заголовок Retry-After (користувач його не бачить).
+    (N'err.ECR-AUTH-0429.tooManyAttempts', N'en', N'Too many sign-in attempts from this address. Try again later; the Retry-After header says how long.', N'Too many sign-in attempts from this address. Try again later.'),
+    (N'err.ECR-AUTH-0429.tooManyAttempts', N'ru', N'Слишком много попыток входа с этого адреса. Повторите попытку позже; заголовок Retry-After указывает, через сколько.', N'Слишком много попыток входа с этого адреса. Повторите попытку позже.'),
+    (N'err.ECR-AUTH-0429.tooManyAttempts', N'kz', N'Осы мекенжайдан кіру әрекеттері тым көп. Кейінірек қайталап көріңіз; қанша уақыттан кейін екенін Retry-After тақырыбы көрсетеді.', N'Осы мекенжайдан кіру әрекеттері тым көп. Кейінірек қайталап көріңіз.'),
+    (N'err.ECR-REQ-0429.tooManySearches', N'en', N'Too many searches in a short time. Wait a moment and try again; the Retry-After header says how long.', N'Too many searches in a short time. Wait a moment and try again.'),
+    (N'err.ECR-REQ-0429.tooManySearches', N'ru', N'Слишком много поисковых запросов за короткое время. Подождите немного и повторите попытку; заголовок Retry-After указывает, через сколько.', N'Слишком много поисковых запросов за короткое время. Подождите немного и повторите попытку.'),
+    (N'err.ECR-REQ-0429.tooManySearches', N'kz', N'Қысқа уақыт ішінде іздеу сұраулары тым көп. Біраз күтіп, қайталап көріңіз; қанша уақыттан кейін екенін Retry-After тақырыбы көрсетеді.', N'Қысқа уақыт ішінде іздеу сұраулары тым көп. Біраз күтіп, қайталап көріңіз.'),
+    (N'err.ECR-REQ-0429.tooManySmtpTests', N'en', N'Too many test messages in a short time. Wait a moment and try again; the Retry-After header says how long.', N'Too many test messages in a short time. Wait a moment and try again.'),
+    (N'err.ECR-REQ-0429.tooManyRecalculations', N'en', N'Too many recalculation requests in a short time. Wait a moment and try again; the Retry-After header says how long.', N'Too many recalculation requests in a short time. Wait a moment and try again.'),
+    (N'err.ECR-REQ-0429.tooManyRecalculations', N'ru', N'Слишком много запросов на пересчёт за короткое время. Подождите немного и повторите попытку; заголовок Retry-After указывает, через сколько.', N'Слишком много запросов на пересчёт за короткое время. Подождите немного и повторите попытку.'),
+    (N'err.ECR-REQ-0429.tooManyRecalculations', N'kz', N'Қысқа уақыт ішінде қайта есептеуге сұраныстар тым көп. Біраз күтіп, қайталап көріңіз; қанша уақыттан кейін екенін Retry-After тақырыбы көрсетеді.', N'Қысқа уақыт ішінде қайта есептеуге сұраныстар тым көп. Біраз күтіп, қайталап көріңіз.')
   ) AS s ([Key], Lang, OldVal, NewVal)
     ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
  WHERE t.Value = s.OldVal COLLATE Latin1_General_BIN2;
@@ -1148,10 +1164,10 @@ USING (VALUES
     -- ⚠ Публічна область (0): цей стан видно ДО входу (ФВ-14.9b).
     (N'err.ECR-AUTH-0429', N'en', N'Too many sign-in attempts', 0),
     (N'err.ECR-AUTH-0429.tooManyAttempts', N'en',
-     N'Too many sign-in attempts from this address. Try again later; the Retry-After header says how long.', 0),
+     N'Too many sign-in attempts from this address. Try again later.', 0),
     (N'err.ECR-REQ-0429', N'en', N'Too many requests', 1),
     (N'err.ECR-REQ-0429.tooManySearches', N'en',
-     N'Too many searches in a short time. Wait a moment and try again; the Retry-After header says how long.', 1),
+     N'Too many searches in a short time. Wait a moment and try again.', 1),
     (N'err.ECR-PWD-0428',  N'en', N'Password change is required.', 0),
     (N'err.ECR-PWD-0422',  N'en', N'The new password does not meet the policy.', 0),
 
@@ -6211,7 +6227,7 @@ USING (VALUES
     (N'effectiveAccess.inheritedFrom', N'en', N'Inherited from {resource}', 1),
     -- COLL:fv616 ── кінець секції ──
     -- COLL:smtp-hardening ── Межа частоти проб транспорту (рекомендація безпекового рев'ю D-263) ──
-    (N'err.ECR-REQ-0429.tooManySmtpTests', N'en', N'Too many test messages in a short time. Wait a moment and try again; the Retry-After header says how long.', 1),
+    (N'err.ECR-REQ-0429.tooManySmtpTests', N'en', N'Too many test messages in a short time. Wait a moment and try again.', 1),
     -- COLL:smtp-hardening ── кінець секції ──
     -- COLL:sec-smtp-s1s2 ── Збережений пароль SMTP не переноситься на іншу адресу; пароль без шифрування заборонено (ent6 S1, `SaveSmtpSettingsHandler`) ──
     (N'err.ECR-REQ-0422.smtpPasswordReentryRequired', N'en', N'The server, port, encryption or login was changed, so the saved password is not carried over: enter the password again.', 1),
@@ -6441,7 +6457,7 @@ USING (VALUES
     (N'notificationTemplates.recipientsNoTransport', N'en', N'the channel has no delivery transport configured', 1),
     -- CL6:notification-templates ── кінець секції ──
     -- COLL:recalc-rl ── Межа частоти перерахунку документа (рекомендація безпекового рев'ю «Аудит») ──
-    (N'err.ECR-REQ-0429.tooManyRecalculations', N'en', N'Too many recalculation requests in a short time. Wait a moment and try again; the Retry-After header says how long.', 1),
+    (N'err.ECR-REQ-0429.tooManyRecalculations', N'en', N'Too many recalculation requests in a short time. Wait a moment and try again.', 1),
     -- COLL:recalc-rl ── кінець секції ──
     -- COLL:fv812-ifmatch ── обов'язковий If-Match на PUT опису довідника ──
     (N'err.ECR-REQ-0422.definitionVersionRequired', N'en', N'Saving a registry definition needs an If-Match header carrying the definition version you read. Reload the definition and save again.', 1),
@@ -6585,9 +6601,9 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-AUTH-0403.requiresPermission', N'ru', N'Требуется право'),
     (N'err.ECR-AUTH-0423', N'ru', N'Учётная запись заблокирована.'),
     (N'err.ECR-AUTH-0429', N'ru', N'Слишком много попыток входа'),
-    (N'err.ECR-AUTH-0429.tooManyAttempts', N'ru', N'Слишком много попыток входа с этого адреса. Повторите попытку позже; заголовок Retry-After указывает, через сколько.'),
+    (N'err.ECR-AUTH-0429.tooManyAttempts', N'ru', N'Слишком много попыток входа с этого адреса. Повторите попытку позже.'),
     (N'err.ECR-REQ-0429', N'ru', N'Слишком много запросов'),
-    (N'err.ECR-REQ-0429.tooManySearches', N'ru', N'Слишком много поисковых запросов за короткое время. Подождите немного и повторите попытку; заголовок Retry-After указывает, через сколько.'),
+    (N'err.ECR-REQ-0429.tooManySearches', N'ru', N'Слишком много поисковых запросов за короткое время. Подождите немного и повторите попытку.'),
     (N'err.ECR-PWD-0428', N'ru', N'Требуется сменить пароль.'),
     (N'err.ECR-PWD-0422', N'ru', N'Новый пароль не соответствует парольной политике.'),
     (N'err.ECR-TMPL-4227.formulaOnManualColumn', N'ru', N'Столбец {tableCode}.{columnCode} имеет тип {dataType} — это столбец ручного ввода: формула на нём при следующем пересчёте молча перезапишет то, что ввёл оператор. Создайте столбец типа «Формула» (тип изменить нельзя) или удалите формулу.'),
@@ -9613,9 +9629,9 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-AUTH-0403.requiresPermission', N'kz', N'Құқық қажет'),
     (N'err.ECR-AUTH-0423', N'kz', N'Тіркелгі бұғатталған.'),
     (N'err.ECR-AUTH-0429', N'kz', N'Кіру әрекеттері тым көп'),
-    (N'err.ECR-AUTH-0429.tooManyAttempts', N'kz', N'Осы мекенжайдан кіру әрекеттері тым көп. Кейінірек қайталап көріңіз; қанша уақыттан кейін екенін Retry-After тақырыбы көрсетеді.'),
+    (N'err.ECR-AUTH-0429.tooManyAttempts', N'kz', N'Осы мекенжайдан кіру әрекеттері тым көп. Кейінірек қайталап көріңіз.'),
     (N'err.ECR-REQ-0429', N'kz', N'Сұраулар тым көп'),
-    (N'err.ECR-REQ-0429.tooManySearches', N'kz', N'Қысқа уақыт ішінде іздеу сұраулары тым көп. Біраз күтіп, қайталап көріңіз; қанша уақыттан кейін екенін Retry-After тақырыбы көрсетеді.'),
+    (N'err.ECR-REQ-0429.tooManySearches', N'kz', N'Қысқа уақыт ішінде іздеу сұраулары тым көп. Біраз күтіп, қайталап көріңіз.'),
     (N'err.ECR-PWD-0428', N'kz', N'Құпиясөзді өзгерту қажет.'),
     (N'err.ECR-PWD-0422', N'kz', N'Жаңа құпиясөз құпиясөз саясатына сәйкес келмейді.'),
     (N'err.ECR-TMPL-4227.formulaOnManualColumn', N'kz', N'{tableCode}.{columnCode} бағанының түрі — {dataType}, бұл қолмен енгізілетін баған: ондағы формула келесі қайта есептеу кезінде оператор енгізген мәнді үнсіз қайта жазады. «Формула» түріндегі баған құрыңыз (түрін өзгерту мүмкін емес) немесе формуланы жойыңыз.'),
@@ -14705,8 +14721,8 @@ GO
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
   FROM (VALUES
-    (N'err.ECR-REQ-0429.tooManySmtpTests', N'ru', N'Слишком много проверочных сообщений за короткое время. Подождите немного и повторите попытку; заголовок Retry-After указывает, через сколько.'),
-    (N'err.ECR-REQ-0429.tooManySmtpTests', N'kz', N'Қысқа уақыт ішінде тексеру хабарламалары тым көп. Біраз күтіп, қайталап көріңіз; қанша уақыттан кейін екенін Retry-After тақырыбы көрсетеді.')
+    (N'err.ECR-REQ-0429.tooManySmtpTests', N'ru', N'Слишком много проверочных сообщений за короткое время. Подождите немного и повторите попытку.'),
+    (N'err.ECR-REQ-0429.tooManySmtpTests', N'kz', N'Қысқа уақыт ішінде тексеру хабарламалары тым көп. Біраз күтіп, қайталап көріңіз.')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
@@ -15100,8 +15116,8 @@ GO
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
   FROM (VALUES
-    (N'err.ECR-REQ-0429.tooManyRecalculations', N'ru', N'Слишком много запросов на пересчёт за короткое время. Подождите немного и повторите попытку; заголовок Retry-After указывает, через сколько.'),
-    (N'err.ECR-REQ-0429.tooManyRecalculations', N'kz', N'Қысқа уақыт ішінде қайта есептеуге сұраныстар тым көп. Біраз күтіп, қайталап көріңіз; қанша уақыттан кейін екенін Retry-After тақырыбы көрсетеді.')
+    (N'err.ECR-REQ-0429.tooManyRecalculations', N'ru', N'Слишком много запросов на пересчёт за короткое время. Подождите немного и повторите попытку.'),
+    (N'err.ECR-REQ-0429.tooManyRecalculations', N'kz', N'Қысқа уақыт ішінде қайта есептеуге сұраныстар тым көп. Біраз күтіп, қайталап көріңіз.')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
