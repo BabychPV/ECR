@@ -55,6 +55,10 @@ public sealed class SmtpEndpointPolicyTests
     [InlineData("a.b.localhost")]
     [InlineData("Metadata.Google.Internal.")]
     [InlineData("169.254.170.2")]
+    [InlineData("::ffff:0:127.0.0.1")]       // IPv4-translated, не mapped
+    [InlineData("[::ffff:0:169.254.169.254]")]
+    [InlineData("64:ff9b::7f00:1")]          // NAT64 -> 127.0.0.1
+    [InlineData("64:ff9b::a9fe:a9fe")]       // NAT64 -> 169.254.169.254
     public async Task Loopback_у_будь_якому_записі_і_хибна_форма_хоста_відхиляються_на_сирому_рядку(string host)
     {
         // ⛔ Мутація: повернути `host.Trim().Trim('[', ']')` до розбору літерала → `[::1]:25` знову проходить.
@@ -69,6 +73,7 @@ public sealed class SmtpEndpointPolicyTests
     [InlineData("fd00::5")]
     [InlineData("relay.corp.example")]
     [InlineData("mail_relay-1.corp.example.")]
+    [InlineData("64:ff9b::a00:5")]           // NAT64 -> приватна 10.0.0.5 дозволена
     public async Task Приватні_й_звичайні_адреси_та_імена_проходять(string host)
         => Assert.True(await Policy().IsHostAllowedAsync(host, failClosed: false, CancellationToken.None));
 
@@ -112,6 +117,18 @@ public sealed class SmtpEndpointPolicyTests
             Assert.False(await policy.IsHostAllowedAsync("relay.corp.example", failClosed: true, CancellationToken.None), name);
             Assert.True(await policy.IsHostAllowedAsync("relay.corp.example", failClosed: false, CancellationToken.None), name);
         }
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "ent6-S4")]
+    public async Task Виняток_аргументу_резолвера_рядок_понад_255_символів_це_збій_DNS_а_не_падіння()
+    {
+        // ⛔ Мутація: прибрати or ArgumentException у catch політики → проба падає ArgumentOutOfRangeException.
+        _net.Resolve = () => Task.FromException<IReadOnlyList<IPAddress>>(new ArgumentOutOfRangeException("hostNameOrAddress"));
+
+        Assert.False(await Policy().IsHostAllowedAsync("relay.corp.example", failClosed: true, CancellationToken.None));
+        Assert.True(await Policy().IsHostAllowedAsync("relay.corp.example", failClosed: false, CancellationToken.None));
     }
 
     [Fact]

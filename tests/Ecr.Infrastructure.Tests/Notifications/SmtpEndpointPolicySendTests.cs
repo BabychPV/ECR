@@ -50,6 +50,22 @@ public sealed class SmtpEndpointPolicySendTests
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
     [Trait("Requirement", "ent6-S4")]
+    public async Task Хост_понад_255_символів_у_Smtp_Host_не_кидає_ArgumentOutOfRange_а_закритий_у_пробі()
+    {
+        var sender = new SmtpNotificationSender(
+            Config(("Smtp:Host", new string('a', 300) + ".example"), ("Smtp:Port", "587"), ("Smtp:From", "ecr@corp.example")),
+            Substitute.For<ISecretProvider>());
+
+        using (SmtpEndpointStrictness.Begin())
+        {
+            await Assert.ThrowsAsync<SmtpEndpointForbiddenException>(
+                () => sender.SendAsync(["a@corp.example"], "s", "b", CancellationToken.None));
+        }
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "ent6-S4")]
     public async Task Нерозв_язане_ім_я_відправлення_в_черзі_йде_далі_а_в_пробі_закрите()
     {
         var net = Substitute.For<IEndpointNetwork>();

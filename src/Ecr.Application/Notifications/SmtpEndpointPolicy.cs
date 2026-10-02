@@ -83,7 +83,7 @@ public sealed class SmtpEndpointPolicy(
         {
             resolved = await network.ResolveAsync(name, ct).WaitAsync(ResolveTimeout, ct).ConfigureAwait(false);
         }
-        catch (Exception e) when (e is TimeoutException or System.Net.Sockets.SocketException)
+        catch (Exception e) when (e is TimeoutException or System.Net.Sockets.SocketException or ArgumentException)
         {
             return Unresolved(failClosed);
         }
@@ -134,6 +134,19 @@ public sealed class SmtpEndpointPolicy(
             var bytes = ip.GetAddressBytes();
 
             if (bytes.Take(12).All(b => b == 0))
+            {
+                return true;
+            }
+
+            // IPv4-translated ::ffff:0:a.b.c.d (НЕ mapped; ::ffff:0:0/96) — закрито цілком: ним можна обійти перевірку mapped.
+            if (bytes.Take(8).All(b => b == 0) && bytes[8] == 0xFF && bytes[9] == 0xFF && bytes[10] == 0 && bytes[11] == 0)
+            {
+                return true;
+            }
+
+            // NAT64 64:ff9b::/96: блокується, якщо вбудований IPv4 сам заборонений (loopback/link-local/metadata).
+            if (bytes[0] == 0x00 && bytes[1] == 0x64 && bytes[2] == 0xFF && bytes[3] == 0x9B && bytes.Skip(4).Take(8).All(b => b == 0)
+                && IsBlockedAddress(new IPAddress(bytes[12..16])))
             {
                 return true;
             }
