@@ -68,6 +68,60 @@ describe('Зв\'язки полів: редагування', () => {
     expect(onChange).toHaveBeenCalledWith(42, 6);
   });
 
+  it('поле Lookup без цілі лишається в таблиці, і ціль можна повернути', () => {
+    const unlinked: RegistryDefinitionDto = {
+      ...Definition,
+      fields: [
+        ...Definition.fields,
+        {
+          id: 43, code: 'Site', nameL10n: { values: { en: 'Site' } }, dataType: 'Lookup', isRequired: false,
+          isScopeField: false, lookupRegistryDefId: null, unitId: null,
+        },
+        // Ключове посилання без цілі не редагується тут (бізнес-ключ незмінний).
+        {
+          id: 44, code: 'KeyLink', nameL10n: { values: { en: 'K' } }, dataType: 'Lookup', isRequired: true,
+          isScopeField: true, lookupRegistryDefId: null, unitId: null,
+        },
+      ],
+    };
+    const onChange = vi.fn();
+    show(<RegistryRelations definition={unlinked} canEdit registryOptions={Options} onChangeLink={onChange} />);
+
+    // Поле зі зв'язком (Substance) не дублюється; без цілі — рівно одне (Site); ключове — немає.
+    expect(document.querySelectorAll('[data-unlinked-lookup]')).toHaveLength(1);
+    expect(document.querySelector('[data-unlinked-lookup="Site"]')).not.toBeNull();
+    expect(document.querySelector('[data-unlinked-lookup="KeyLink"]')).toBeNull();
+
+    const selects = screen.getAllByRole('combobox');
+    expect(selects).toHaveLength(2);
+    fireEvent.change(selects[1] as HTMLElement, { target: { value: '6' } });
+    expect(onChange).toHaveBeenCalledWith(43, 6);
+  });
+
+  it('усі зв\'язки зняті — таблиця не зникає, поки є поле Lookup без цілі', () => {
+    const detached: RegistryDefinitionDto = {
+      ...Definition,
+      relations: [],
+      fields: Definition.fields.map((f) => (f.id === 42 ? { ...f, lookupRegistryDefId: null } : f)),
+    };
+    show(<RegistryRelations definition={detached} canEdit registryOptions={Options} onChangeLink={vi.fn()} />);
+
+    expect(document.querySelector('[data-unlinked-lookup="Substance"]')).not.toBeNull();
+    expect(screen.getByRole('combobox')).toBeDefined();
+  });
+
+  it('без права поле Lookup без цілі видно, але вибору немає', () => {
+    const detached: RegistryDefinitionDto = {
+      ...Definition,
+      relations: [],
+      fields: Definition.fields.map((f) => (f.id === 42 ? { ...f, lookupRegistryDefId: null } : f)),
+    };
+    show(<RegistryRelations definition={detached} canEdit={false} registryOptions={Options} onChangeLink={vi.fn()} />);
+
+    expect(document.querySelector('[data-unlinked-lookup="Substance"]')).not.toBeNull();
+    expect(screen.queryByRole('combobox')).toBeNull();
+  });
+
   it('без права на опис — лише читання', () => {
     show(<RegistryRelations definition={Definition} canEdit={false} registryOptions={Options} onChangeLink={vi.fn()} />);
 
