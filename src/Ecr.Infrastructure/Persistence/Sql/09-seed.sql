@@ -6428,10 +6428,10 @@ USING (VALUES
     (N'notificationTemplates.recipientsNoTransport', N'en', N'the channel has no delivery transport configured', 1),
     -- CL6:notification-templates ── кінець секції ──
     -- COLL:recalc-rl ── Межа частоти перерахунку документа (рекомендація безпекового рев'ю «Аудит») ──
-    (N'err.ECR-REQ-0429.tooManyRecalculations', N'en', N'Too many recalculation requests in a short time. Wait a moment and try again; the Retry-After header says how long.', 1)
+    (N'err.ECR-REQ-0429.tooManyRecalculations', N'en', N'Too many recalculation requests in a short time. Wait a moment and try again; the Retry-After header says how long.', 1),
     -- COLL:recalc-rl ── кінець секції ──
     -- CL:states-a11y-2 ── поле Lookup без цілі у вкладці «Зв'язки» (стани нових панелей 2) ──
-    (N'registries.relationTargetMissing', N'en', N'Target not set: choose a registry', 1),
+    (N'registries.relationTargetMissing', N'en', N'Target not set: choose a registry', 1)
     -- ru/kz — окремою порцією CL:states-a11y-2 у блоці I18N нижче.
     -- CL:states-a11y-2 ── кінець секції ──
     -- D16: кінець секції
