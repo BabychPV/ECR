@@ -64,6 +64,50 @@ public sealed class RegistryRetargetTests
         _registries.FindDefinitionByIdAsync(NewTargetId, Arg.Any<CancellationToken>())
             .Returns(new RegistryDef(EcrCode.Create("NEW"), Text("NEW"), false));
         _registries.FindDefinitionByIdAsync(999, Arg.Any<CancellationToken>()).Returns((RegistryDef?)null);
+        _registries.FindFieldChainConsumersAsync(
+                Arg.Any<int>(), Arg.Any<IReadOnlyCollection<string>>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(new UsageResponse(0, []));
+    }
+
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Requirement", "ФВ-8.12")]
+    [InlineData(NewTargetId)]
+    [InlineData(null)]
+    public async Task Ціль_не_змінюється_поки_через_поле_читають_атрибути_правила_чи_методології(int? target)
+    {
+        // ⛔ Правило `LINK.Capacity > 0`, формула методології — через ребра cfg.RegistryUse. Значень
+        // у полі немає, тож лише ця перевірка тримає ціль.
+        UsageItemDto[] consumers =
+        [
+            new(UsageKinds.RegistryField, "5", "OWNER.CAPACITY_POSITIVE", "/admin/registries/OWNER/definition"),
+            new(UsageKinds.MethodologyFormula, "9:E_NOX", "M1 v2.E_NOX", "/admin/methodologies/3/versions"),
+        ];
+        _registries.FindFieldChainConsumersAsync(
+                OwnerId, Arg.Is<IReadOnlyCollection<string>>(codes => codes.Contains("LINK")), Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(new UsageResponse(2, consumers));
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(() => Save(target));
+
+        Assert.Equal("ECR-REG-0422", error.ErrorCode);
+        Assert.Equal("err.ECR-REG-0422.lookupRetargetUsedByRules", error.Details!["messageKey"]);
+        Assert.Equal("LINK", error.Details["fieldCode"]);
+        Assert.Equal("2", error.Details["total"]);
+        Assert.Equal("OWNER.CAPACITY_POSITIVE, M1 v2.E_NOX", error.Details["usedBy"]);
+        Assert.Equal(consumers, (IReadOnlyList<UsageItemDto>)error.Details["references"]!);
+        Assert.Equal(OldTargetId, _link.RefRegistryDefId);
+        await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Requirement", "ФВ-8.12")]
+    public async Task Збереження_без_зміни_цілі_споживачів_не_питає()
+    {
+        await Save(OldTargetId);
+
+        await _registries.DidNotReceive().FindFieldChainConsumersAsync(
+            Arg.Any<int>(), Arg.Any<IReadOnlyCollection<string>>(), Arg.Any<int>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]

@@ -6367,6 +6367,7 @@ USING (VALUES
     (N'err.ECR-REG-0422.lookupTargetUnknown', N'en', N'The target registry of field "{fieldCode}" does not exist.', 1),
     (N'registries.relationTargetFor', N'en', N'Link target of field {field}', 1),
     (N'registries.relationsEditHint', N'en', N'The target of a link can be changed or removed while no record holds a value in that field; otherwise the server refuses it.', 1),
+    (N'err.ECR-REG-0422.lookupRetargetUsedByRules', N'en', N'The link of field "{fieldCode}" cannot be changed: {total} rule(s), formula(s) or methodology version(s) read attributes through it: {usedBy}. Change or disable them first.', 1),
     -- ru/kz — окремою порцією COLL:fv812-relations у блоці I18N нижче.
     -- COLL:fv812-relations ── кінець секції ──
     -- ru/kz — окремою порцією `API:negative-path` у блоці I18N нижче.
@@ -15006,7 +15007,9 @@ SELECT v.[Key], v.Lang, v.Val
     (N'registries.relationTargetFor', N'ru', N'Цель связи поля {field}'),
     (N'registries.relationTargetFor', N'kz', N'{field} өрісінің байланыс мақсаты'),
     (N'registries.relationsEditHint', N'ru', N'Цель связи можно изменить или снять, пока ни в одной записи нет значения этого поля; иначе сервер откажет.'),
-    (N'registries.relationsEditHint', N'kz', N'Байланыс мақсатын осы өрістің мәні бірде-бір жазбада болмаған кезде өзгертуге немесе алуға болады; әйтпесе сервер бас тартады.')
+    (N'registries.relationsEditHint', N'kz', N'Байланыс мақсатын осы өрістің мәні бірде-бір жазбада болмаған кезде өзгертуге немесе алуға болады; әйтпесе сервер бас тартады.'),
+    (N'err.ECR-REG-0422.lookupRetargetUsedByRules', N'ru', N'Связь поля «{fieldCode}» нельзя изменить: через неё читают атрибуты правил, формул или версий методологий — {total}: {usedBy}. Сначала измените или отключите их.'),
+    (N'err.ECR-REG-0422.lookupRetargetUsedByRules', N'kz', N'«{fieldCode}» өрісінің байланысын өзгерту мүмкін емес: ол арқылы атрибуттарды оқитын ережелер, формулалар немесе әдістеме нұсқалары бар — {total}: {usedBy}. Алдымен оларды өзгертіңіз немесе өшіріңіз.')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO

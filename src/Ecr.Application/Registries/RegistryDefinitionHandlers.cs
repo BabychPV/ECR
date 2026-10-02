@@ -955,6 +955,28 @@ public sealed class SaveRegistryDefinitionHandler(
             return;
         }
 
+        // ⛔ Правила, формули й методології, що йдуть через поле (`FIELD.attr`): тип шляху
+        // виводиться з цілі посилання, тож після перенацілення вони тихо посилалися б на атрибут,
+        // якого в новій цілі немає (про це дізнались би лише під час виконання). Відмова з переліком.
+        var consumers = await registries
+            .FindFieldChainConsumersAsync(
+                definition.Id, changed.Select(c => (string)c.Field.Code).ToList(), UsageResponse.PageSize, ct)
+            .ConfigureAwait(false);
+        if (consumers.Total > 0)
+        {
+            throw new BusinessRuleException(
+                "ECR-REG-0422",
+                $"Зв'язок поля «{changed[0].Field.Code}» не можна змінити: через нього читають атрибути правил, формул чи методологій — {consumers.Total.ToString(CultureInfo.InvariantCulture)}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-REG-0422.lookupRetargetUsedByRules",
+                    ["fieldCode"] = (string)changed[0].Field.Code,
+                    ["total"] = consumers.Total.ToString(CultureInfo.InvariantCulture),
+                    ["usedBy"] = string.Join(", ", consumers.Items.Select(i => i.Label)),
+                    ["references"] = consumers.Items,
+                });
+        }
+
         var entries = await entriesAsync().ConfigureAwait(false);
         var fieldIds = changed.Select(c => c.Field.Id).ToHashSet();
         var values = entries.Count == 0

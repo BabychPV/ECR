@@ -483,6 +483,94 @@ public sealed class RegistryStore(EcrDbContext db) : IRegistryStore
     }
 
     /// <inheritdoc />
+    public async Task<UsageResponse> FindFieldChainConsumersAsync(
+        int registryDefId, IReadOnlyCollection<string> fieldCodes, int take, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(fieldCodes);
+
+        if (fieldCodes.Count == 0)
+        {
+            return new UsageResponse(0, []);
+        }
+
+        var prefixes = fieldCodes.Select(c => c + ".").ToList();
+        var edges = await db.RegistryUses
+            .AsNoTracking()
+            .Where(u => u.RegistryDefId == registryDefId && u.FieldPath != null)
+            .Select(u => new { u.SourceKind, u.SourceId, u.FormulaCode, u.FieldPath })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        // Фільтр за префіксом — у пам'яті: ребер довідника небагато, а регістронезалежне
+        // порівняння тут має збігатися з тим, як шлях розбирає компілятор виразів.
+        var hits = edges
+            .Where(e => prefixes.Exists(p => e.FieldPath!.StartsWith(p, StringComparison.OrdinalIgnoreCase)))
+            .Select(e => (e.SourceKind, e.SourceId, e.FormulaCode))
+            .Distinct()
+            .ToList();
+
+        var items = new List<UsageItemDto>();
+
+        var ruleIds = hits.Where(h => h.SourceKind == 2).Select(h => h.SourceId).ToList();
+        if (ruleIds.Count > 0)
+        {
+            var rules = await (
+                    from rule in db.RegistryRuleDefs.AsNoTracking()
+                    where ruleIds.Contains(rule.Id)
+                    join owner in db.RegistryDefs.AsNoTracking() on rule.RegistryDefId equals owner.Id
+                    orderby owner.Code, rule.Code
+                    select new { rule.Id, Owner = owner.Code, Rule = rule.Code })
+                .ToListAsync(ct).ConfigureAwait(false);
+            // Власного виду для правила довідника в `UsageKinds` немає (каталог клієнта, сторож
+            // UsageKindsTests): це лише деталі відмови, тож вид — найближчий, `registryField`,
+            // а правило однозначно читається з підпису «ВЛАСНИК.правило».
+            items.AddRange(rules.Select(r => new UsageItemDto(
+                UsageKinds.RegistryField,
+                r.Id.ToString(CultureInfo.InvariantCulture),
+                r.Owner + "." + r.Rule,
+                "/admin/registries/" + r.Owner + "/definition")));
+        }
+
+        var formulaIds = hits.Where(h => h.SourceKind == 0).Select(h => h.SourceId).ToList();
+        if (formulaIds.Count > 0)
+        {
+            var formulas = await (
+                    from formula in db.FormulaDefs.AsNoTracking()
+                    where formulaIds.Contains(formula.Id)
+                    join table in db.TableDefs.AsNoTracking() on formula.TableDefId equals table.Id
+                    orderby table.Code, formula.Id
+                    select new { formula.Id, Table = table.Code })
+                .ToListAsync(ct).ConfigureAwait(false);
+            items.AddRange(formulas.Select(f => new UsageItemDto(
+                UsageKinds.TemplateFormula,
+                f.Id.ToString(CultureInfo.InvariantCulture),
+                f.Table + "#" + f.Id.ToString(CultureInfo.InvariantCulture),
+                null)));
+        }
+
+        var methodologyHits = hits.Where(h => h.SourceKind == 1).ToList();
+        if (methodologyHits.Count > 0)
+        {
+            var versionIds = methodologyHits.Select(h => h.SourceId).Distinct().ToList();
+            var versions = await (
+                    from version in db.MethodologyVersions.AsNoTracking()
+                    where versionIds.Contains(version.Id)
+                    join methodology in db.Methodologies.AsNoTracking() on version.MethodologyId equals methodology.Id
+                    select new { version.Id, version.MethodologyId, Methodology = methodology.Code, version.Version })
+                .ToListAsync(ct).ConfigureAwait(false);
+            items.AddRange(methodologyHits
+                .Join(versions, h => h.SourceId, v => v.Id, (h, v) => new UsageItemDto(
+                    UsageKinds.MethodologyFormula,
+                    v.Id.ToString(CultureInfo.InvariantCulture) + ":" + h.FormulaCode,
+                    v.Methodology + " v" + v.Version + (h.FormulaCode is null ? string.Empty : "." + h.FormulaCode),
+                    "/admin/methodologies/" + v.MethodologyId + "/versions"))
+                .OrderBy(i => i.Label, StringComparer.Ordinal));
+        }
+
+        return new UsageResponse(items.Count, items.Take(take).ToList());
+    }
+
+    /// <inheritdoc />
     public Task<bool> HasOpenPeriodAsync(CancellationToken ct)
         => db.Periods.AnyAsync(
             p => p.State == PeriodState.Open || p.State == PeriodState.Grace, ct);
