@@ -22,7 +22,8 @@
 | `DataEntry` | `Document.View/Create/Import/Export`, `Template.View`, `Registry.View`, `Calculation.View`, `Report.Export` |
 | `Approver` | `Document.View/Export/Reopen`, `Registry.View`, `Calculation.View`, `Report.*` (крім небезпечних) |
 | `Viewer` | `Document.View`, `Registry.View`, `Calculation.View`, `Report.ViewRegulatory`, `Report.Export` |
-| `Auditor` | `Document.View`, `Registry.View`, `Calculation.View`, `Template.View`, `Integration.View`, `Report.ViewRegulatory`, `Security.ViewAudit`, `System.ViewHealth` |
+| `Auditor` | `Document.View`, `Registry.View`, `Calculation.View`, `Template.View`, `Integration.View`, `Report.ViewRegulatory`, `Report.ViewSnapshot`, `Security.ViewAudit`, `System.ViewHealth` |
+| `ReportViewer` | `Report.ViewRegulatory`, `Report.ViewSnapshot`, `Report.Export` (секція `SEC:RPT` сіду; проєкти — грантом `Read`) |
 | `BootstrapAdministrator` | лише `Security.ManageUsers`, `Security.ManageRoles` |
 
 ⛔ Сід не видає **небезпечних** прав (`IsDangerous = 1`) жодній ролі, крім
@@ -57,9 +58,10 @@
 | `Calculation.ManageRequiredInputs` | | обов'язкові входи | SysAdm |
 | `Calculation.Recalculate` | | перерахунок | SysAdm |
 | `Calculation.Publish` | так | публікація версії методики | — |
-| `Report.ViewRegulatory` | | регуляторні зрізи, `/admin/snapshots` | Approver, Viewer, Auditor, SysAdm |
+| `Report.ViewRegulatory` | | регуляторні зрізи, `/admin/snapshots` | Approver, Viewer, ReportViewer, Auditor, SysAdm |
+| `Report.ViewSnapshot` | | вміст зрізу: «View rows», книга `.xlsx` (разом із `Report.Export`) | Approver, ReportViewer, Auditor, SysAdm |
 | `Report.BuildSnapshot` | | побудова зрізу | Approver, SysAdm |
-| `Report.Export` | | вивантаження звіту | DataEntry, Approver, Viewer, SysAdm |
+| `Report.Export` | | вивантаження звіту | DataEntry, Approver, Viewer, ReportViewer, SysAdm |
 | `Report.EditDefinition` | так | авторство державної форми | Approver (явним рядком seed, `D-203`) |
 | `Report.ViewCampaign` | так | огляд кампанії `/admin/campaign`: усі проєкти періоду без меж грантів | — |
 | `Integration.View` | | джерела даних (лише перегляд) | Auditor, SysAdm |
