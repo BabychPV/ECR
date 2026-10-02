@@ -2995,7 +2995,7 @@ public interface IEndpointNetwork
 public interface ISmtpEndpointPolicy
 {
     public bool IsPortAllowed(int port);
-    public Task<bool> IsHostAllowedAsync(string host, CancellationToken ct);
+    public Task<bool> IsHostAllowedAsync(string host, bool failClosed, CancellationToken ct);
 }
 ```
 
