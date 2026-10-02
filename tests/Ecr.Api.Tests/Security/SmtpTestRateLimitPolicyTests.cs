@@ -18,6 +18,18 @@ public sealed class SmtpTestRateLimitPolicyTests
 {
     private static readonly IConfiguration Empty = new ConfigurationBuilder().Build();
 
+    /// <summary>Годинник із ручним кроком (пакета fake-годинника в тестах немає).</summary>
+    private sealed class StepTime : TimeProvider
+    {
+        private long _ticks;
+
+        public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+
+        public override long GetTimestamp() => _ticks;
+
+        public void Advance(TimeSpan by) => _ticks += by.Ticks;
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     public void Без_ключів_конфігурації_діють_дефолти_5_на_хвилину_і_30_на_годину()
@@ -45,6 +57,34 @@ public sealed class SmtpTestRateLimitPolicyTests
 
         using var over = quota.TryAcquire();
         Assert.False(over.IsAcquired);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    public void Повернений_токен_квоти_доступний_знову_лише_у_тому_самому_вікні_і_лише_раз()
+    {
+        var time = new StepTime();
+        var cfg = new ConfigurationBuilder().AddInMemoryCollection(
+            new Dictionary<string, string?> { [SmtpTestRateLimitPolicy.SystemPermitKey] = "1" }).Build();
+        using var quota = new SmtpTestSystemQuota(cfg, time);
+
+        var first = quota.TryAcquire();
+        Assert.True(first.IsAcquired);
+        Assert.False(quota.TryAcquire().IsAcquired);
+
+        // Мутація: прибрати `_used--` у `Refund` → повернення не діє.
+        first.Refund();
+        first.Refund(); // повторне повернення нічого не додає
+        var second = quota.TryAcquire();
+        Assert.True(second.IsAcquired);
+        Assert.False(quota.TryAcquire().IsAcquired);
+
+        // Нове вікно: токен зі старого вікна не повертається.
+        time.Advance(TimeSpan.FromHours(1) + TimeSpan.FromSeconds(1));
+        var third = quota.TryAcquire();
+        Assert.True(third.IsAcquired);
+        second.Refund();
+        Assert.False(quota.TryAcquire().IsAcquired);
     }
 
     [Fact]
