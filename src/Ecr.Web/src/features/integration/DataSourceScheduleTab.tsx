@@ -59,6 +59,7 @@ export function DataSourceScheduleTab({ source }: { readonly source: DataSource 
             <Table.Tr>
               <Table.Th>{t('sources.entity')}</Table.Th>
               <Table.Th>{t('schedule.cron')}</Table.Th>
+              <Table.Th>{t('schedule.dependsOn')}</Table.Th>
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
@@ -86,6 +87,13 @@ export function DataSourceScheduleTab({ source }: { readonly source: DataSource 
                       </Badge>
                     )}
                   </Group>
+                </Table.Td>
+                <Table.Td data-schedule-depends-on={schedule.dependsOnScheduleId ?? ''}>
+                  {(() => {
+                    const target = schedules.data.find((row) => row.id === schedule.dependsOnScheduleId);
+
+                    return target === undefined ? '—' : (target.sourceEntityName ?? target.sourceEntityCode);
+                  })()}
                 </Table.Td>
               </Table.Tr>
             ))}

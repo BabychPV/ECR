@@ -128,6 +128,8 @@ function render(key: string, params: Record<string, string>): string | null {
       return t('coverageEvents.eventRemovalLimit', params);
     case 'coverageEvents.eventRemovalSheetSubmitted':
       return t('coverageEvents.eventRemovalSheetSubmitted', params);
+    case 'coverageEvents.skippedDependency':
+      return t('coverageEvents.skippedDependency', params);
     default:
       return adapterRefusal(key, params);
   }

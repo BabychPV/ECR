@@ -180,6 +180,8 @@ function statusFilterLabel(status: CoverageEventStatus): string {
       return t('status.coverage.RegistryRuleViolation');
     case 'RegistryExternalKeyRelinked':
       return t('status.coverage.RegistryExternalKeyRelinked');
+    case 'SkippedDependency':
+      return t('status.coverage.SkippedDependency');
     default:
       return status;
   }

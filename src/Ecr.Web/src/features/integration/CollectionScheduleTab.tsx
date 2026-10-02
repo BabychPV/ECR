@@ -1,5 +1,17 @@
 import { useState, type JSX } from 'react';
-import { Alert, Button, Code, Group, Loader, NumberInput, Stack, Switch, Text, TextInput } from '@mantine/core';
+import {
+  Alert,
+  Button,
+  Code,
+  Group,
+  Loader,
+  NumberInput,
+  Select,
+  Stack,
+  Switch,
+  Text,
+  TextInput,
+} from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { EcrApiError } from '@/api/client';
@@ -141,6 +153,9 @@ export function CollectionScheduleTab({
         // рядку, чию версію вона пошле в `If-Match`.
         key={schedule === null ? 'new' : `${schedule.id}:${schedule.rowVersion}`}
         base={schedule}
+        // Залежність можлива лише від розкладу того ж з'єднання (перелік уже відфільтровано
+        // за ним) і не від самого себе; решту (цикли) відхиляє сервер.
+        candidates={schedules.data.filter((row) => row.id !== schedule?.id)}
         busy={save.isPending || remove.isPending}
         blocked={conflict}
         onSave={(draft) => save.mutate({ base: schedule, draft })}
@@ -152,11 +167,16 @@ export function CollectionScheduleTab({
   );
 }
 
-/** Те, що форма посилає: cron, стан і вікно збору (ФВ-13.15). */
+/**
+ * Те, що форма посилає: cron, стан і вікно збору та залежність (ФВ-13.15):
+ * `dependsOnScheduleId` — нова, `clearDependency` — зняти наявну; обидва відсутні — без змін.
+ */
 interface ScheduleDraft {
   cron: string;
   isEnabled: boolean;
   lookbackDays: number;
+  dependsOnScheduleId?: number;
+  clearDependency?: boolean;
 }
 
 /*
@@ -172,12 +192,15 @@ const LOOKBACK_DEFAULT = 7;
 
 function ScheduleForm({
   base,
+  candidates,
   busy,
   blocked,
   onSave,
   onRemove,
 }: {
   base: CollectionSchedule | null;
+  /** Розклади, від яких можна залежати. */
+  candidates: readonly CollectionSchedule[];
   busy: boolean;
   /** Конфлікт версій не розв'язаний — зберігати поверх нього не можна. */
   blocked: boolean;
@@ -189,6 +212,11 @@ function ScheduleForm({
   // ⚠ `NumberInput` віддає '' на порожньому полі — це не нуль, а «не введено».
   const [lookback, setLookback] = useState<number | string>(base?.lookbackDays ?? LOOKBACK_DEFAULT);
   const [confirming, setConfirming] = useState(false);
+  const initialDependency = base?.dependsOnScheduleId ?? null;
+  const [dependsOn, setDependsOn] = useState<string | null>(
+    initialDependency === null ? null : String(initialDependency),
+  );
+  const dependsOnId = dependsOn === null ? null : Number(dependsOn);
 
   const problem = checkCron(cron);
   const lookbackDays = typeof lookback === 'number' ? lookback : Number.NaN;
@@ -198,7 +226,8 @@ function ScheduleForm({
     base === null ||
     cron !== base.cron ||
     isEnabled !== base.isEnabled ||
-    lookbackDays !== base.lookbackDays;
+    lookbackDays !== base.lookbackDays ||
+    dependsOnId !== initialDependency;
 
   return (
     <Stack gap="sm">
@@ -236,6 +265,21 @@ function ScheduleForm({
         allowDecimal={false}
         allowNegative={false}
         error={lookbackValid ? undefined : t('schedule.lookbackRange', { min: LOOKBACK_MIN, max: LOOKBACK_MAX })}
+      />
+
+      <Select
+        label={t('schedule.dependsOn')}
+        description={t('schedule.dependsOnHint')}
+        placeholder={t('schedule.dependsOnNone')}
+        data={candidates.map((row) => ({
+          value: String(row.id),
+          label: row.sourceEntityName ?? row.sourceEntityCode,
+        }))}
+        value={dependsOn}
+        onChange={setDependsOn}
+        // «—»: порожній вибір знімає залежність (`clearDependency`).
+        clearable
+        data-schedule-depends-on=""
       />
 
       <Switch
@@ -276,7 +320,18 @@ function ScheduleForm({
           disabled={problem !== null || !lookbackValid || !dirty || blocked}
           // ⛔ Шле рівно те, що в полі: обрізання — справа сервера, і тоді
           // збережене значення збігається з тим, що людина бачила.
-          onClick={() => onSave({ cron, isEnabled, lookbackDays })}
+          onClick={() =>
+            onSave({
+              cron,
+              isEnabled,
+              lookbackDays,
+              // Лише змінене: без змін залежність на сервері лишається як є.
+              ...(dependsOnId !== null && dependsOnId !== initialDependency
+                ? { dependsOnScheduleId: dependsOnId }
+                : {}),
+              ...(dependsOnId === null && initialDependency !== null ? { clearDependency: true } : {}),
+            })
+          }
         >
           {base === null ? t('schedule.create') : t('common.save')}
         </Button>

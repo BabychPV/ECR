@@ -654,7 +654,7 @@ public sealed partial class EndpointCoverageTests
             "RegistryElementUnlinked", "RegistryValueRejected", "RegistryPendingUpdate",
             "SourceDataRefused",
             "RegistryAutoCreated", "RegistryDeactivated", "RegistryReactivated",
-            "RegistryRuleViolation", "RegistryExternalKeyRelinked"),
+            "RegistryRuleViolation", "RegistryExternalKeyRelinked", "SkippedDependency"),
         "snapshot" => Status(kind, "Draft", "Approved", "Submitted"),
         "notificationDelivery" => Status(kind, "Sent", "Failed", "Suppressed"),
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Невідомий різновид статусу."),

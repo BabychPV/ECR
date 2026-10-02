@@ -48,6 +48,9 @@ const Strings: Record<string, string> = {
   'schedule.lookbackDays': 'Window (days)',
   'schedule.lookbackHint': 'Re-read this many days',
   'schedule.lookbackRange': 'Whole days from {min} to {max}',
+  'schedule.dependsOn': 'Depends on schedule',
+  'schedule.dependsOnHint': 'Waits for a successful run',
+  'schedule.dependsOnNone': 'No dependency',
 };
 
 const SourceEntityId = 42;
@@ -221,6 +224,52 @@ describe('CollectionScheduleTab', () => {
         body: { cron: '0 0 3 * * ?', isEnabled: false, lookbackDays: 7 },
         ifMatch: '"AAAAAAAAB9E="',
       });
+    },
+    Slow,
+  );
+
+  it(
+    'залежність (ФВ-13.15): select без себе й чужих; вибір іде як dependsOnScheduleId, «—» знімає clearDependency',
+    async () => {
+      const other = schedule({ id: 9, sourceEntityId: 5, sourceEntityCode: 'OTHER-1', sourceEntityName: 'Other entity' });
+      const calls = stub([() => json([schedule(), other])], () => json(schedule({ rowVersion: 'DDDD' })));
+      await show();
+
+      const select = (): HTMLInputElement => screen.getByLabelText('Depends on schedule') as HTMLInputElement;
+      await waitFor(() => expect(select().value).toBe(''));
+
+      await userEvent.click(select());
+      // Себе в переліку немає; чужий розклад — є.
+      expect(screen.queryByRole('option', { name: 'Stack analyzer' })).toBeNull();
+      await userEvent.click(await screen.findByRole('option', { name: 'Other entity' }));
+      await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+      await waitFor(() => expect(calls).toHaveLength(1));
+      expect(calls[0]?.body).toEqual({ cron: '0 15 2 * * ?', isEnabled: true, lookbackDays: 7, dependsOnScheduleId: 9 });
+    },
+    Slow,
+  );
+
+  it(
+    'залежність (ФВ-13.15): наявну знімає порожній вибір — clearDependency, а не null',
+    async () => {
+      const other = schedule({ id: 9, sourceEntityId: 5, sourceEntityCode: 'OTHER-1', sourceEntityName: 'Other entity' });
+      const calls = stub([() => json([schedule({ dependsOnScheduleId: 9 }), other])], () => json(schedule()));
+      await show();
+
+      await waitFor(() =>
+        expect((screen.getByLabelText('Depends on schedule') as HTMLInputElement).value).toBe('Other entity'),
+      );
+      // Незмінена залежність — нічого зберігати.
+      expect(screen.getByRole('button', { name: 'Save' })).toHaveProperty('disabled', true);
+
+      const clear = document.querySelector('[data-schedule-depends-on] ~ * button, button.mantine-InputClear-root, [class*="CloseButton"]');
+      expect(clear).not.toBeNull();
+      await userEvent.click(clear as Element);
+      await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+      await waitFor(() => expect(calls).toHaveLength(1));
+      expect(calls[0]?.body).toEqual({ cron: '0 15 2 * * ?', isEnabled: true, lookbackDays: 7, clearDependency: true });
     },
     Slow,
   );
