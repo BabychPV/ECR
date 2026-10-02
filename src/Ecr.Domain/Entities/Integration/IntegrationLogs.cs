@@ -198,8 +198,14 @@ public sealed class CollectionCoverage : Entity<long>
         RegistryDiverged, RegistryConflictKeptManual, RegistrySourceMissing, RegistryElementUnlinked,
         RegistryValueRejected, RegistryPendingUpdate, SourceDataRefused,
         RegistryAutoCreated, RegistryDeactivated, RegistryReactivated, RegistryRuleViolation,
-        RegistryExternalKeyRelinked,
+        RegistryExternalKeyRelinked, SkippedDependency,
     ];
+
+    /// <summary>
+    /// Збір: плановий запуск пропущено за залежністю (<c>ФВ-13.15</c>) — розклад
+    /// чекає успішного прогону розкладу-залежності. Це затримка, а не втрата.
+    /// </summary>
+    public const string SkippedDependency = "SkippedDependency";
 
     /// <summary>
     /// Збір: джерело відмовило віддати дані інтервалу з кодом каталогу (дані
