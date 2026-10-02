@@ -1,5 +1,6 @@
 // tests/Ecr.Application.Tests/Localization/UiStringResolverFormatTests.cs
 using Ecr.Application.Localization;
+using Ecr.Application.Ports;
 using Ecr.TestKit;
 using Xunit;
 
@@ -50,5 +51,38 @@ public sealed class UiStringResolverFormatTests
             "Sources with a failed last run: {count}.", new Dictionary<string, string> { ["total"] = "3" });
 
         Assert.Equal("Sources with a failed last run: {count}.", result);
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    public void T1_05_Причина_відмови_підставляється_текстом_каталогу_а_не_технічним_ім_ям()
+    {
+        var catalog = new UiStringCatalog("en", 1, new Dictionary<string, string>
+        {
+            ["deny.InsufficientGrantLevel"] = "Your grant level is too low.",
+        });
+        var parameters = UiStringResolver.Parameters(new Dictionary<string, object?>
+        {
+            ["messageKey"] = "k",
+            ["reason"] = "InsufficientGrantLevel",
+            ["reasonKey"] = "deny.InsufficientGrantLevel",
+        });
+
+        var result = UiStringResolver.Format(
+            "Sheet 3 cannot be submitted: {reason}.", UiStringResolver.WithLocalizedReason(catalog, parameters));
+
+        Assert.Equal("Sheet 3 cannot be submitted: Your grant level is too low.", result);
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    public void T1_05_Без_тексту_в_каталозі_лишається_сира_причина()
+    {
+        var catalog = new UiStringCatalog("en", 1, new Dictionary<string, string>());
+        var parameters = UiStringResolver.Parameters(new Dictionary<string, object?>
+        {
+            ["reason"] = "BusinessRule",
+            ["reasonKey"] = "deny.BusinessRule",
+        });
+
+        Assert.Equal("BusinessRule", UiStringResolver.WithLocalizedReason(catalog, parameters)["reason"]);
     }
 }

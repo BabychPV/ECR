@@ -188,6 +188,7 @@ public sealed class SubmitSheetHandler(
                     ["messageKey"] = "err.ECR-ACCS-0403.submitDenied",
                     ["sheetDefId"] = sheetDefId.ToString(System.Globalization.CultureInfo.InvariantCulture),
                     ["reason"] = decision.Reason.ToString(),
+                    ["reasonKey"] = $"deny.{decision.Reason}",
                 });
         }
 

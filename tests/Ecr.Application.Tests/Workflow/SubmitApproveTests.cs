@@ -563,8 +563,22 @@ public sealed class SubmitApproveTests
         // відміну від запису, де блокує лише комірковий (D-90): подана форма
         // йде назовні цілком, і рядковий Error у ній — це неправильний звіт.
         Assert.Equal("ECR-ACCS-0403", error.ErrorCode);
+        // T1-05: причина йде ключем каталогу, щоб користувач не бачив «BusinessRule».
+        Assert.Equal("deny.BusinessRule", error.Details!["reasonKey"]);
         Assert.Equal(DocumentStatus.Draft, _sheets[Water].Status);
         await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    public async Task T1_05_Відмова_у_погодженні_несе_ключ_причини()
+    {
+        _access.CanApproveAsync(Arg.Any<AccessProfile>(), Document, Water, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+               .Returns(EditDecision.Deny(EditDenyReason.InsufficientGrantLevel, "рівень гранту"));
+
+        var error = await Assert.ThrowsAsync<AccessDeniedException>(
+            () => Approve().HandleAsync(Document, Water, Period, approved: true, reason: null, CancellationToken.None));
+
+        Assert.Equal("deny.InsufficientGrantLevel", error.Details!["reasonKey"]);
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]

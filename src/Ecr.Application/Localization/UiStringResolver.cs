@@ -152,6 +152,39 @@ public static partial class UiStringResolver
         return result;
     }
 
+    /// <summary>Ім'я подробиці з ключем каталогу для причини відмови (<c>{reason}</c>).</summary>
+    public const string ReasonKeyDetail = "reasonKey";
+
+    /// <summary>
+    /// Підміняє <c>{reason}</c> текстом каталогу за ключем <see cref="ReasonKeyDetail"/>
+    /// (T1-05): без цього користувач бачив технічне ім'я причини
+    /// («InsufficientGrantLevel»). Ключа немає або тексту в каталозі немає —
+    /// підстановки лишаються як є.
+    /// </summary>
+    /// <remarks>
+    /// Кінцева крапка тексту знімається: шаблони пишуть «{reason}.» самі.
+    /// </remarks>
+    /// <param name="catalog">Каталог мови запиту.</param>
+    /// <param name="parameters">Підстановки з <see cref="Parameters"/>.</param>
+    public static IReadOnlyDictionary<string, string> WithLocalizedReason(
+        UiStringCatalog catalog, IReadOnlyDictionary<string, string> parameters)
+    {
+        ArgumentNullException.ThrowIfNull(catalog);
+        ArgumentNullException.ThrowIfNull(parameters);
+
+        if (!parameters.TryGetValue(ReasonKeyDetail, out var key)
+            || !catalog.Strings.TryGetValue(key, out var text)
+            || string.IsNullOrWhiteSpace(text))
+        {
+            return parameters;
+        }
+
+        return new Dictionary<string, string>(parameters, StringComparer.Ordinal)
+        {
+            ["reason"] = text.TrimEnd('.'),
+        };
+    }
+
     /// <summary>
     /// Чи однакові два набори підстановок за вмістом; <c>null</c> і порожній — однакові.
     /// </summary>
