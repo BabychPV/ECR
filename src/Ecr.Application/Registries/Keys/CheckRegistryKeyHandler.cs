@@ -92,7 +92,7 @@ public static class RegistryKeyFields
                     $"У довіднику «{definition.Code}» немає поля «{fieldCode}».",
                     "err.ECR-REG-0422.keyFieldUnknown",
                     ("registryCode", definition.Code),
-                    ("fieldCode", fieldCode));
+                    ("fieldCode", fieldCode ?? string.Empty));
 
             if (result.Contains(field))
             {

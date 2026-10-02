@@ -382,6 +382,7 @@ public sealed class SaveRegistryDefinitionHandler(
 
         var userId = RequireUser(currentUser);
         RequireReason(dto.Reason);
+        RequireNoEmptyItems(dto.Fields, dto.Rules, dto.Keys);
 
         var definition = await registries.FindDefinitionAsync(code, ct).ConfigureAwait(false)
             ?? throw RegistryNotFound(code);
@@ -407,6 +408,24 @@ public sealed class SaveRegistryDefinitionHandler(
                 "ECR-REG-0422",
                 "Причина зміни опису обов'язкова: опис змінює те, як читаються вже збережені записи.",
                 new Dictionary<string, object?> { ["messageKey"] = "err.ECR-REG-0422.definitionReasonRequired" });
+        }
+    }
+
+    /// <summary>
+    /// Порожній елемент (<c>null</c>) у полях, правилах чи ключах — відмова, а не
+    /// <c>NullReferenceException</c> посеред застосування опису (прохід по відмовах 2).
+    /// </summary>
+    internal static void RequireNoEmptyItems<TField, TRule, TKey>(
+        IReadOnlyList<TField>? fields, IReadOnlyList<TRule>? rules, IReadOnlyList<TKey>? keys)
+    {
+        if ((fields?.Any(f => f is null) ?? false)
+            || (rules?.Any(r => r is null) ?? false)
+            || (keys?.Any(k => k is null) ?? false))
+        {
+            throw new BusinessRuleException(
+                "ECR-REG-0422",
+                "Опис містить порожній елемент серед полів, правил чи ключів.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-REG-0422.definitionItemMissing" });
         }
     }
 

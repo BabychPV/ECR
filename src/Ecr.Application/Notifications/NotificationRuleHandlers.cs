@@ -131,9 +131,11 @@ public sealed class ReplaceNotificationRulesHandler(
     /// <summary>Відкидає невідомі значення переліків і дві клітинки з однією парою.</summary>
     private static List<NotificationRuleView> Validate(IReadOnlyList<NotificationRuleView> rules)
     {
-        var ordered = rules.OrderBy(r => r.EventKind).ThenBy(r => r.ChannelId).ToList();
+        // ⚠ Порожня клітинка `[null]` — та сама відмова: без перевірки сортування нижче давало 500.
+        var broken = rules.Any(r => r is null);
+        var ordered = broken ? [] : rules.OrderBy(r => r.EventKind).ThenBy(r => r.ChannelId).ToList();
 
-        var broken = ordered.Exists(r => !Enum.IsDefined(r.EventKind) || !Enum.IsDefined(r.MinSeverity))
+        broken = broken || ordered.Exists(r => !Enum.IsDefined(r.EventKind) || !Enum.IsDefined(r.MinSeverity))
             || ordered.Select(r => (r.EventKind, r.ChannelId)).Distinct().Count() != ordered.Count;
 
         if (broken)

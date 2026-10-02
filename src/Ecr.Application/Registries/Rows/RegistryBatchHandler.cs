@@ -173,7 +173,7 @@ public sealed partial class RegistryBatchHandler(
                     new Dictionary<string, object?>
                     {
                         ["messageKey"] = "err.ECR-REQ-0422.batchItemInvalid",
-                        ["clientRowId"] = item?.ClientRowId,
+                        ["clientRowId"] = item?.ClientRowId ?? string.Empty,
                     });
             }
 

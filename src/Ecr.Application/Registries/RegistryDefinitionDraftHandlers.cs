@@ -121,6 +121,7 @@ public sealed class SaveRegistryDefinitionDraftHandler(
 
         var userId = SaveRegistryDefinitionHandler.RequireUser(currentUser);
         SaveRegistryDefinitionHandler.RequireReason(request.Reason);
+        SaveRegistryDefinitionHandler.RequireNoEmptyItems(request.Fields, request.Rules, request.Keys);
 
         var definition = await registries.FindDefinitionAsync(code, ct).ConfigureAwait(false)
             ?? throw SaveRegistryDefinitionHandler.RegistryNotFound(code);
