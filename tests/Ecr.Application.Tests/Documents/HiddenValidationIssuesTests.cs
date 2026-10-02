@@ -49,6 +49,7 @@ public sealed class HiddenValidationIssuesTests
     private readonly IMetadataCache _metadata = Substitute.For<IMetadataCache>();
     private readonly IAccessDecisionService _access = Substitute.For<IAccessDecisionService>();
     private readonly ICurrentUser _user = Substitute.For<ICurrentUser>();
+    private readonly ITemplateVersionStore _versions = Substitute.For<ITemplateVersionStore>();
     private readonly TemplateVersionSnapshot _snapshot = Snapshot();
 
     public HiddenValidationIssuesTests()
@@ -191,7 +192,53 @@ public sealed class HiddenValidationIssuesTests
         Assert.Equal(LeakedText, only.Message);
     }
 
-    private GetValidationResultHandler Handler() => new(_results, _documents, _metadata, _access, _user);
+    // T1-01 (старі підсумки): збережене повідомлення БЕЗ полів джерела — джерело відновлюється зі зв'язку.
+    private static ValidationMessage LegacyCheck(string code = "REL-CHK1")
+        => new(ValidationSeverity.Error, code, LeakedText, VisibleTable, "R1", "COLVIS", BlocksSave: false);
+
+    private void Relation()
+    {
+        var relation = new TableRelationDef(EcrCode.Create("CHK1"), HiddenTable, VisibleTable, TableRelationKind.Check, "{}");
+        relation.Update(HiddenTable, VisibleTable, TableRelationKind.Check, "{}",
+            $$"""{"left":"{{HiddenColumn}}","right":"COLVIS","tolerance":"0","severity":"Block"}""", 0, true);
+        _versions.ListTableRelationsAsync(TemplateVersionId, Arg.Any<CancellationToken>())
+            .Returns(new List<TableRelationDef> { relation });
+    }
+
+    [Theory]
+    [InlineData(ResourceKind.Column, 52, "REL-CHK1")]
+    [InlineData(ResourceKind.Table, HiddenTable, "REL-CHK1")]
+    [InlineData(ResourceKind.Table, HiddenTable, "REL-UNKNOWN")] // fail-closed: зв'язку немає
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public async Task Старий_збережений_Check_без_полів_джерела_не_віддає_значень(ResourceKind kind, int id, string code)
+    {
+        Relation();
+        Stored(LegacyCheck(code));
+        _access.ReadScopeAsync(Arg.Any<AccessProfile>(), DocumentId, Arg.Any<CancellationToken>())
+            .Returns(DocumentReadScope.For(
+                new AccessBuilder().Grant(ResourceKind.Project, AccessBuilder.ProjectId, GrantLevel.Read).Deny(kind, id).Build(),
+                AccessBuilder.ProjectId, _snapshot));
+
+        var result = await Handler().HandleAsync(DocumentId, new PeriodKey(Period), CancellationToken.None);
+
+        Assert.True(HiddenValidationIssues.IsPlaceholder(Assert.Single(result!)));
+        Assert.DoesNotContain("777.5", JsonSerializer.Serialize(result), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public async Task Старий_збережений_Check_без_заборони_віддається_зі_значеннями_регресія()
+    {
+        Relation();
+        Stored(LegacyCheck());
+        Reader(denyHiddenTable: false);
+
+        var result = await Handler().HandleAsync(DocumentId, new PeriodKey(Period), CancellationToken.None);
+
+        Assert.Equal(LeakedText, Assert.Single(result!).Message);
+    }
+
+    private GetValidationResultHandler Handler() => new(_results, _documents, _metadata, _access, _user, _versions);
 
     private static ValidationMessage HiddenError()
         => new(ValidationSeverity.Error, HiddenRule, HiddenText, HiddenTable, HiddenRowKey, HiddenColumn, BlocksSave: true);

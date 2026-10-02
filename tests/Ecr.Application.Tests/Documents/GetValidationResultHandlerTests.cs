@@ -31,6 +31,7 @@ public sealed class GetValidationResultHandlerTests
     private readonly IMetadataCache _metadata = Substitute.For<IMetadataCache>();
     private readonly IAccessDecisionService _access = Substitute.For<IAccessDecisionService>();
     private readonly ICurrentUser _user = Substitute.For<ICurrentUser>();
+    private readonly ITemplateVersionStore _versions = Substitute.For<ITemplateVersionStore>();
 
     public GetValidationResultHandlerTests()
     {
@@ -44,7 +45,7 @@ public sealed class GetValidationResultHandlerTests
             .Returns(TemplateVersionId);
     }
 
-    private GetValidationResultHandler Handler() => new(_results, _documents, _metadata, _access, _user);
+    private GetValidationResultHandler Handler() => new(_results, _documents, _metadata, _access, _user, _versions);
 
     private static SheetDef SheetWithRule(string ruleCode, LocalizedText message)
     {
