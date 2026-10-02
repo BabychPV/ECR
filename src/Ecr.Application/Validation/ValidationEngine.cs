@@ -252,11 +252,27 @@ public sealed class ValidationEngine(IFormulaEngine formulaEngine)
     /// </remarks>
     private static string StructuralMessage(
         ColumnDef column, Domain.ValueObjects.CellValueData value, string structuralCode, string language)
-        => structuralCode == "ECR-CELL-0422" && column.IsRequired && value.IsEmpty && value.IsWellFormed()
+        => structuralCode != "ECR-CELL-0422"
+            ? structuralCode
+            : column.IsRequired && value.IsEmpty && value.IsWellFormed()
             ? L(language,
                 en: $"Column \"{column.Code}\" is required.",
                 ru: $"Колонка «{column.Code}» обязательна.",
                 kz: $"«{column.Code}» бағаны міндетті.")
+            // T1-02: Scale/Precision колонки — відмова з причиною, а не голий код.
+            : column.DataType == CellDataType.Decimal && value.ValueNumeric is { } number
+              && column.Scale is { } scale
+              && decimal.Round(number, scale, MidpointRounding.AwayFromZero) != number
+            ? L(language,
+                en: $"Column \"{column.Code}\" allows at most {scale} decimal places.",
+                ru: $"Колонка «{column.Code}» допускает не более {scale} знаков после запятой.",
+                kz: $"«{column.Code}» бағанында үтірден кейін {scale} таңбадан артық болмауы керек.")
+            : column.DataType == CellDataType.Decimal && value.ValueNumeric is { } wide
+              && !column.FitsPrecision(wide)
+            ? L(language,
+                en: $"The value does not fit the precision of column \"{column.Code}\" ({column.Precision} digits).",
+                ru: $"Значение не помещается в точность колонки «{column.Code}» ({column.Precision} цифр).",
+                kz: $"Мән «{column.Code}» бағанының дәлдігіне ({column.Precision} сан) сыймайды.")
             : structuralCode;
 
     /// <summary>
