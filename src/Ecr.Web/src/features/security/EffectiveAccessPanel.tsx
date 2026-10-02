@@ -66,7 +66,11 @@ export function EffectiveAccessPanel({ userId }: { userId: number }): JSX.Elemen
 
   return (
     <Stack gap="sm" mt="md" data-testid="effective-access-panel">
-      <Title order={5}>{t('effectiveAccess.title')}</Title>
+      {/* ⚠ Рівень 3, а не 5: панель живе в діалозі доступу, чий заголовок — `h2`; стрибок h2→h5 читалка
+          подає як пропущені розділи (WCAG 1.3.1). Вигляд той самий — `size="h5"`. */}
+      <Title order={3} size="h5">
+        {t('effectiveAccess.title')}
+      </Title>
       <Text size="sm" c="dimmed">
         {t('effectiveAccess.hintAll')}
       </Text>
