@@ -157,6 +157,24 @@ public sealed class ListNotificationChannelsHandler(
                 clock.UtcNow, eventType, TargetUserId: null, TargetRoleId: null,
                 JsonSerializer.Serialize(details, Json), byUserId, currentUser.CorrelationId),
             ct);
+
+    /// <summary>
+    /// Подія аудиту і збереження зміни — ОДНІЄЮ транзакцією (S8 ent6).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Раніше подія автокомітилась ДО <c>SaveChangesAsync</c>: збій збереження лишав у журналі «Updated»
+    /// без зміни. Тепер збій відкочує і подію.
+    /// </remarks>
+    internal static Task AuditAndSaveAsync(
+        IUnitOfWork uow, IAuditWriter audit, IClock clock, ICurrentUser currentUser, int byUserId, string eventType,
+        object details, CancellationToken ct)
+        => uow.ExecuteInTransactionAsync(
+            async token =>
+            {
+                await AuditAsync(audit, clock, currentUser, byUserId, eventType, details, token).ConfigureAwait(false);
+                await uow.SaveChangesAsync(token).ConfigureAwait(false);
+            },
+            ct);
 }
 
 /// <summary>Створення і зміна каналу. Право <c>System.ManageNotifications</c>.</summary>
@@ -182,10 +200,9 @@ public sealed class SaveNotificationChannelHandler(
         var channel = new NotificationChannel(kind, name.Trim(), json, clock.UtcNow, profile.UserId);
         store.AddChannel(channel);
 
-        await ListNotificationChannelsHandler.AuditAsync(
-            audit, clock, currentUser, profile.UserId, "NotificationChannelCreated",
+        await ListNotificationChannelsHandler.AuditAndSaveAsync(
+            uow, audit, clock, currentUser, profile.UserId, "NotificationChannelCreated",
             new { name = channel.Name, kind = kind.ToString(), settings }, ct).ConfigureAwait(false);
-        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
 
         // ⚠ Ролі — другим збереженням: ключа каналу до першого немає. Збій тут лишає канал без ролей,
         // а не ролі без каналу (FK), і наступний PUT їх проставить.
@@ -208,10 +225,9 @@ public sealed class SaveNotificationChannelHandler(
         channel.Update(name.Trim(), json, isEnabled, clock.UtcNow, profile.UserId);
         await store.ReplaceChannelRolesAsync(id, roleIds, ct).ConfigureAwait(false);
 
-        await ListNotificationChannelsHandler.AuditAsync(
-            audit, clock, currentUser, profile.UserId, "NotificationChannelUpdated",
+        await ListNotificationChannelsHandler.AuditAndSaveAsync(
+            uow, audit, clock, currentUser, profile.UserId, "NotificationChannelUpdated",
             new { id, name = channel.Name, isEnabled, settings }, ct).ConfigureAwait(false);
-        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
 
         return ListNotificationChannelsHandler.ToView(channel, sender.IsConfigured, roleIds);
     }
@@ -266,7 +282,24 @@ public sealed class SaveNotificationChannelHandler(
         // ⚠ Адресат перевіряється ЯК АДРЕСА, а не «непорожній рядок»: друкарська
         // помилка інакше лягала б у базу й спливала аж у журналі доставок
         // рядком `Failed` від поштового сервера.
-        if (recipients.FirstOrDefault(r => !MailAddress.TryCreate(r, out _)) is { } broken)
+        // ⛔ Межа явних адрес і довжини заголовка — на збереженні (рев'ю ent6 S3); legacy-значення в базі це не зачіпає.
+        if (recipients.Count > NotificationChannel.MaxExplicitRecipients)
+        {
+            throw ListNotificationChannelsHandler.Invalid(
+                "err.ECR-REQ-0422.channelTooManyRecipients",
+                $"Канал приймає не більше {NotificationChannel.MaxExplicitRecipients} явних адрес.", trimmed);
+        }
+
+        if ((settings.Title?.Trim().Length ?? 0) > NotificationChannel.TitleMaxLength)
+        {
+            throw ListNotificationChannelsHandler.Invalid(
+                "err.ECR-REQ-0422.notificationChannelInvalid",
+                $"Заголовок каналу — до {NotificationChannel.TitleMaxLength} символів.", trimmed);
+        }
+
+        // ⛔ Суворіше за MailAddress: без доменних літералів (a@[10.0.0.1]) — як адреса відправника.
+        // Адреса з підписом («Ops <ops@corp.example>») лишається чинною: суворо перевіряється сама адреса.
+        if (recipients.FirstOrDefault(r => !(MailAddress.TryCreate(r, out var parsed) && SmtpSettings.IsValidAddress(parsed.Address))) is { } broken)
         {
             throw ListNotificationChannelsHandler.Invalid(
                 "err.ECR-REQ-0422.notificationChannelRecipientInvalid",
@@ -303,10 +336,9 @@ public sealed class DeleteNotificationChannelHandler(
         var channel = await ListNotificationChannelsHandler.FindAsync(store, id, ct).ConfigureAwait(false);
         var rules = await store.RemoveChannelWithRulesAsync(channel, ct).ConfigureAwait(false);
 
-        await ListNotificationChannelsHandler.AuditAsync(
-            audit, clock, currentUser, profile.UserId, "NotificationChannelDeleted",
+        await ListNotificationChannelsHandler.AuditAndSaveAsync(
+            uow, audit, clock, currentUser, profile.UserId, "NotificationChannelDeleted",
             new { id, name = channel.Name, removedRules = rules }, ct).ConfigureAwait(false);
-        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
     }
 }
 
@@ -339,10 +371,9 @@ public sealed class ReplaceNotificationChannelSecretHandler(
 
         channel.ReplaceSecret(cleared ? null : protector.Protect(secret!.Trim()), clock.UtcNow, profile.UserId);
 
-        await ListNotificationChannelsHandler.AuditAsync(
-            audit, clock, currentUser, profile.UserId, "NotificationChannelSecretReplaced",
+        await ListNotificationChannelsHandler.AuditAndSaveAsync(
+            uow, audit, clock, currentUser, profile.UserId, "NotificationChannelSecretReplaced",
             new { id, name = channel.Name, hasSecret = channel.HasSecret }, ct).ConfigureAwait(false);
-        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
 
         return ListNotificationChannelsHandler.ToView(
             channel, sender.IsConfigured, await store.ChannelRoleIdsAsync(id, ct).ConfigureAwait(false));
@@ -427,7 +458,8 @@ public sealed class TestNotificationChannelHandler(
             return await TryAsync(
                     classify: true,
                     send: () => sender.SendAsync(
-                        ListNotificationChannelsHandler.ToView(channel, sender.IsConfigured).Settings.Recipients ?? [],
+                        [.. (ListNotificationChannelsHandler.ToView(channel, sender.IsConfigured).Settings.Recipients ?? [])
+                            .Take(ProbeRecipientLimit)],
                         Subject, BodyFor(channel), ct))
                     .ConfigureAwait(false);
         }
@@ -456,7 +488,7 @@ public sealed class TestNotificationChannelHandler(
     private static readonly Action<ILogger, string, Exception?> ProbeFailed = LoggerMessage.Define<string>(
         LogLevel.Warning, new EventId(6301, "NotificationProbeFailed"), "Notification probe failed: {ExceptionType}.");
 
-    /// <summary>Найбільше адрес, розкритих із ролей у пробі: проба — не розсилка.</summary>
+    /// <summary>Найбільше адресатів проби РАЗОМ (явні адреси, потім ролі): проба — не розсилка.</summary>
     public const int ProbeRecipientLimit = 20;
 
     private static string BodyFor(NotificationChannel channel)

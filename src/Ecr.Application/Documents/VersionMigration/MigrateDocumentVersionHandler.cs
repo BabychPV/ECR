@@ -89,8 +89,13 @@ public sealed class MigrateDocumentVersionHandler(
     IAuditWriter audit,
     IClock clock,
     IAccessDecisionService access,
-    ICurrentUser currentUser)
+    ICurrentUser currentUser,
+    IAccessProfileInvalidator profileCache,
+    Microsoft.Extensions.Logging.ILogger<MigrateDocumentVersionHandler> log)
 {
+    /// <summary>Стеля переліку користувачів для скидання кешу профілів; більше — скидається весь кеш.</summary>
+    public const int MaxInvalidatedUsers = 100_000;
+
     /// <summary>Право операції.</summary>
     public const string Permission = "Template.Edit";
 
@@ -140,6 +145,7 @@ public sealed class MigrateDocumentVersionHandler(
         }
 
         DocumentVersionMigrationDto? result = null;
+        var grantedUsers = new GrantedUsers([], Overflow: false);
         await uow.ExecuteInTransactionAsync(async innerCt =>
         {
             // ⛔ План перераховується ПІД блоком рядка проєкту: між сухим
@@ -157,9 +163,16 @@ public sealed class MigrateDocumentVersionHandler(
                 documentId, projectId, current, target, mode, archived, dryRun: false, innerCt).ConfigureAwait(false);
             ThrowIfRefused(dto);
 
+            grantedUsers = await store.ListUsersWithGrantsAsync(plan, MaxInvalidatedUsers, innerCt).ConfigureAwait(false);
             await store.ApplyAsync(projectId, target.Id, plan, innerCt).ConfigureAwait(false);
             result = dto with { Applied = true };
         }, ct).ConfigureAwait(false);
+
+        // ⛔ Профіль у кеші не бачить зміни грантів, яка не рухає відбиток груп
+        // (прямі ролі): без явного скидання закрита колонка лишалася б доступною
+        // до TTL (60 хв). Скидаються ВСІ записи користувача (будь-який відбиток
+        // груп); збій або переповнення переліку — скидання всього кешу, не 500.
+        GrantProfileInvalidation.Run(profileCache, log, grantedUsers);
 
         var applied = result!;
 
@@ -229,6 +242,23 @@ public sealed class MigrateDocumentVersionHandler(
         if (archived)
         {
             refusals.Add("projectArchived");
+        }
+
+        // ⛔ Грант (заборона АБО дозвіл) на ресурсі, якого в новій версії за кодом немає,
+        // нікуди не копіюється. Дозвіл теж звужує доступ (Read під Write проєкту — береться
+        // найдрібніший рівень). Якщо ресурс просто перейменували, новий код лишився б без
+        // обмеження (fail-open) — тому перенос відмовляє, доки грант на старому
+        // ресурсі свідомо не зніме адміністратор безпеки.
+        var mappedColumns = plan.Columns.Select(c => c.SourceColumnDefId).ToHashSet();
+        var denied = await store.CountDenyGrantsAsync(
+            [.. from.Sheets.Where(s => !s.IsDeleted && !plan.Sheets.ContainsKey(s.Id)).Select(s => s.Id)],
+            [.. from.Sheets.SelectMany(s => s.Tables).Where(t => !t.IsDeleted && !plan.Tables.ContainsKey(t.Id)).Select(t => t.Id)],
+            [.. from.Sheets.SelectMany(s => s.Tables).SelectMany(t => t.Columns)
+                .Where(c => !c.IsDeleted && !mappedColumns.Contains(c.Id)).Select(c => c.Id)],
+            ct).ConfigureAwait(false);
+        if (denied > 0)
+        {
+            refusals.Add("grantsNotMapped");
         }
 
         // Спершу те, що зачіпає введені дані, потім решта структури, потім вигляд.
@@ -344,7 +374,9 @@ public sealed class MigrateDocumentVersionHandler(
             {
                 ["messageKey"] = dto.Refusals.Contains("structural")
                     ? "err.ECR-SCHM-0422.migrateStructural"
-                    : "err.ECR-SCHM-0422.migrateDataLoss",
+                    : dto.Refusals.Contains("grantsNotMapped") && dto.LostValues == 0 && dto.GuardedValues == 0
+                        ? "err.ECR-SCHM-0422.migrateGrantsNotMapped"
+                        : "err.ECR-SCHM-0422.migrateDataLoss",
                 ["lostValues"] = dto.LostValues.ToString(CultureInfo.InvariantCulture),
                 ["guardedValues"] = dto.GuardedValues.ToString(CultureInfo.InvariantCulture),
                 ["mode"] = dto.Mode.ToString(),

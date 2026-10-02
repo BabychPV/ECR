@@ -52,6 +52,12 @@ public sealed class FakeUserStore : IUserStore
     public List<(string UserName, string RoleCode, DateOnly? ValidFrom, DateOnly? ValidTo)> DatedGrants { get; } = [];
 
     /// <summary>
+    /// Безстрокові призначення З ОБЛАСТЮ дії (проєкти 1): носій права адміністратора не є,
+    /// бо `Security.*` — глобальне (як `sec.RoleAssignment.ScopeJson IS NOT NULL` у справжньому сховищі).
+    /// </summary>
+    public List<(string UserName, string RoleCode)> ScopedGrants { get; } = [];
+
+    /// <summary>
     /// Ролі, призначені НА ГРУПУ — основний спосіб для доменних користувачів
     /// (<c>ФВ-6.15</c>).
     /// </summary>
@@ -133,14 +139,30 @@ public sealed class FakeUserStore : IUserStore
             .Select(r => r.Code)
             .ToHashSet(StringComparer.Ordinal);
 
+        // Призначення з областю (`ScopedGrants`) не рахуються — як `ScopeJson IS NULL` у справжньому сховищі.
         var holders = Grants
             .Where(g => rolesWithPermission.Contains(g.RoleCode))
             .Select(g => g.UserName)
             .ToHashSet(StringComparer.Ordinal);
 
+        // Строкові призначення — як бойове сховище: рахуються, лише поки чинні (`IsEffectiveOn`).
+        var today = DateOnly.FromDateTime(utcNow);
+        foreach (var dated in DatedGrants.Where(g => rolesWithPermission.Contains(g.RoleCode)))
+        {
+            var probe = new RoleAssignment(0, 0, principalSid: null);
+            probe.SetValidity(dated.ValidFrom, dated.ValidTo);
+            if (probe.IsEffectiveOn(today))
+            {
+                holders.Add(dated.UserName);
+            }
+        }
+
         return Task.FromResult(_users.Count(u =>
             holders.Contains(u.UserName) && u.IsActive && !u.IsLockedOut(utcNow) && u.Id != exceptUserId));
     }
+
+    /// <inheritdoc />
+    public Task AcquireAdministratorGuardAsync(CancellationToken ct) => Task.CompletedTask;
 
     /// <inheritdoc />
     public Task<User?> FindByWindowsSidAsync(string sid, CancellationToken ct)
@@ -186,6 +208,8 @@ public sealed class FakeUserStore : IUserStore
             ? []
             : [.. Grants.Where(g => g.UserName == user.UserName)
                    .Select(g => new UserRoleAssignmentView(g.RoleCode, null, null, null)),
+               .. ScopedGrants.Where(g => g.UserName == user.UserName)
+                   .Select(g => new UserRoleAssignmentView(g.RoleCode, null, null, new RoleScopeDto([1]))),
                .. DatedGrants.Where(g => g.UserName == user.UserName)
                    .Select(g => new UserRoleAssignmentView(g.RoleCode, g.ValidFrom, g.ValidTo, null))]);
     }

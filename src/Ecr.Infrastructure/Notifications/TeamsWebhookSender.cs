@@ -38,6 +38,13 @@ public sealed class TeamsWebhookSender(
     /// </remarks>
     public const string HttpClientName = "Ecr.Notifications.Teams";
 
+    /// <summary>Основний обробник клієнта вебхука: БЕЗ автоматичних редиректів.</summary>
+    /// <remarks>
+    /// ⛔ Перелік хостів перевіряється лише для адреси з секрету; 302 на чужий хост (чи на внутрішню адресу)
+    /// обійшов би його, тому відповідь 3xx — звичайна відмова ("відповів 302"), а не перехід.
+    /// </remarks>
+    public static HttpMessageHandler CreateHandler() => new SocketsHttpHandler { AllowAutoRedirect = false };
+
     /// <summary>Версія схеми картки, яку розуміють Workflows.</summary>
     public const string CardVersion = "1.5";
 

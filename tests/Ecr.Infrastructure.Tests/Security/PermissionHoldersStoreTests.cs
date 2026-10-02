@@ -65,6 +65,93 @@ public sealed class PermissionHoldersStoreTests(SqlServerFixture sql)
         Assert.Equal(0, await Contribution(none));
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "BE-12")]
+    public async Task Призначення_з_областю_дії_не_робить_носієм_а_глобальне_рахується()
+    {
+        await using var db = Context();
+
+        var role = new Role(EcrCode.Create($"PS_{_tag}"), new LocalizedText(new Dictionary<string, string> { ["en"] = "Role" }));
+        db.Roles.Add(role);
+        await db.SaveChangesAsync();
+        db.RolePermissions.Add(new RolePermission(role.Id, Permission));
+
+        var global = Add(db, "glb");
+        var scoped = Add(db, "scp");
+        await db.SaveChangesAsync();
+
+        db.RoleAssignments.Add(new RoleAssignment(role.Id, global.Id, principalSid: null));
+        var narrowed = new RoleAssignment(role.Id, scoped.Id, principalSid: null);
+        narrowed.SetScope(RoleAssignmentScope.Create([1]));
+        db.RoleAssignments.Add(narrowed);
+        await db.SaveChangesAsync();
+
+        var store = new UserStore(db);
+        var all = await store.CountActivePermissionHoldersAsync(Permission, null, Now, CancellationToken.None);
+
+        async Task<int> Contribution(User user)
+            => all - await store.CountActivePermissionHoldersAsync(Permission, user.Id, Now, CancellationToken.None);
+
+        Assert.Equal(1, await Contribution(global));
+
+        // ⛔ Область дії — не адміністратор: `Security.*` діє лише глобально.
+        Assert.Equal(0, await Contribution(scoped));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "BE-12")]
+    public async Task Замок_адміністратора_тримається_до_коміту_і_не_пускає_другу_транзакцію()
+    {
+        await using var first = Context();
+        await using var tx = await first.Database.BeginTransactionAsync();
+        await new UserStore(first).AcquireAdministratorGuardAsync(CancellationToken.None);
+
+        // Друга з'єднана транзакція без очікування не бере замок (-1), доки перша не завершена.
+        await using var second = Context();
+        await using var tx2 = await second.Database.BeginTransactionAsync();
+        var rc = await second.Database
+            .SqlQueryRaw<int>(
+                "DECLARE @r int; EXEC @r = sp_getapplock @Resource = N'ecr.last-administrator', "
+                + "@LockMode = N'Exclusive', @LockOwner = N'Transaction', @LockTimeout = 0; SELECT @r AS [Value];")
+            .ToListAsync();
+        Assert.True(rc[0] < 0);
+
+        await tx.CommitAsync();
+        var after = await second.Database
+            .SqlQueryRaw<int>(
+                "DECLARE @r int; EXEC @r = sp_getapplock @Resource = N'ecr.last-administrator', "
+                + "@LockMode = N'Exclusive', @LockOwner = N'Transaction', @LockTimeout = 0; SELECT @r AS [Value];")
+            .ToListAsync();
+        Assert.True(after[0] >= 0);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "BE-12")]
+    public async Task Таймаут_замка_адміністратора_дає_409_а_не_500_і_замок_знімається_відкатом()
+    {
+        await using var first = Context();
+        await using var tx = await first.Database.BeginTransactionAsync();
+        await new UserStore(first).AcquireAdministratorGuardAsync(CancellationToken.None);
+
+        await using var second = Context();
+        await using var tx2 = await second.Database.BeginTransactionAsync();
+        var error = await Assert.ThrowsAsync<Ecr.Application.Errors.BusinessRuleException>(
+            () => new UserStore(second) { AdministratorLockTimeoutMs = 100 }
+                .AcquireAdministratorGuardAsync(CancellationToken.None));
+        Assert.Equal("ECR-SEC-0409", error.ErrorCode);
+
+        // Відкат першої транзакції звільняє замок (LockOwner = Transaction).
+        await tx.RollbackAsync();
+        await new UserStore(second) { AdministratorLockTimeoutMs = 100 }
+            .AcquireAdministratorGuardAsync(CancellationToken.None);
+    }
+
     private User Add(EcrDbContext db, string prefix)
     {
         var user = new User($"{prefix}_{_tag}", prefix, AuthProvider.Local);

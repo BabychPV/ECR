@@ -3407,6 +3407,14 @@ public interface IValidationResultStore
 з іншого шаблону чи та сама — `422 ECR-TMPL-0422`. Подія — `aud.SecurityEvent`
 (`DocumentVersionMigrated`). Сигнатури — у `src/Ecr.Application/Ports/IDocumentVersionMigrationStore.cs`.
 
+#### `IAccessProfileInvalidator`
+
+Скидання кешу профілів доступу ПРОЦЕСУ без зміни `SecurityStamp`: `InvalidateUser` видаляє
+ВСІ записи користувача (за будь-якого відбитку груп), `InvalidateAll` — весь кеш (fail-closed
+при переповненні переліку чи збої; перенос версії шаблону, ent6 A1). Кеш процесний: інші
+інстанси скидаються лише за TTL `Cache:AccessProfileSlidingMinutes` (60 хв). Сигнатури — у
+`src/Ecr.Application/Ports/IAccessProfileInvalidator.cs`.
+
 #### `IWorkflowStore`
 
 Доступ до стану робочого процесу і періоду для операцій подання, затвердження і повернення в роботу.
@@ -3558,7 +3566,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `ECR-CFG-0422` | 422 | код або `RowKey` не відповідає шаблону — помилка введення, не збій |
 | `ECR-CFG-4221` | 422 | `Project.TimeZoneId` не є відомим ідентифікатором IANA: порожньо, невідомий пояс, Windows-ідентифікатор (`Central Asia Standard Time`) або зсув (`+05:00`) |
 | `ECR-REQ-0422` | 422 | параметр самого запиту поза межами: розмір сторінки, ширина або напрям вікна аудиту |
-| `ECR-REQ-0429` | 429 | КОРИСТУВАЧ вичерпав межу частоти запитів (пошук `GET /api/v1/search`, типово 30 за 10 с, `Security:RateLimit:SearchPermit`/`SearchWindowSeconds`; проби SMTP `POST /notifications/smtp/test` і `/notifications/channels/{id}/test`, політика `smtp-test`: 5/хв на користувача і 30/год на систему, `Security:RateLimit:SmtpTestPermitPerMinute`/`SmtpTestSystemPermitPerHour`); у відповіді `Retry-After` |
+| `ECR-REQ-0429` | 429 | КОРИСТУВАЧ вичерпав межу частоти запитів (пошук `GET /api/v1/search`, типово 30 за 10 с, `Security:RateLimit:SearchPermit`/`SearchWindowSeconds`; перерахунок документа `POST /documents/{id}/recalculate`, межа на користувача й документ: 6/хв, `Security:RateLimit:RecalculatePermitPerMinute`; проби SMTP `POST /notifications/smtp/test` і `/notifications/channels/{id}/test`, політика `smtp-test`: 5/хв на користувача і 30/год на систему, `Security:RateLimit:SmtpTestPermitPerMinute`/`SmtpTestSystemPermitPerHour`); у відповіді `Retry-After` |
 | `ECR-SCHM-0409` | 409 | `Breaking`-зміна у версії з документами (ФВ-7.4) |
 | `ECR-SCHM-0422` | 422 | `Guarded`-зміна без стратегії міграції; режим переносу документа на нову версію (ФВ-7.5) не має стратегії для змін |
 | `ECR-DOC-0404` | 404 | документ не знайдено |
@@ -3654,6 +3662,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `err.ECR-DOC-0409.migrateProjectArchived` | 409 | перенос документів на нову версію шаблону: проєкт в архіві (ФВ-7.5) |
 | `err.ECR-DOC-0409.migrateSheetsLocked` | 409 | перенос версії: у проєкті є подані/затверджені аркуші |
 | `err.ECR-SCHM-0422.migrateDataLoss` | 422 | перенос версії в режимі `Safe` втратив би дані |
+| `err.ECR-SCHM-0422.migrateGrantsNotMapped` | 422 | на аркуші/таблиці/колонці, якої в новій версії за кодом нема, стоїть будь-який грант: заборона або звужувальний дозвіл (`refusals` має `grantsNotMapped`) |
 | `err.ECR-SCHM-0422.migrateStructural` | 422 | перенос версії в режимі `Presentation` відхилено через структурну зміну |
 | `err.ECR-TMPL-0422.migrateOtherTemplate` | 422 | цільова версія належить іншому шаблону |
 | `err.ECR-TMPL-0422.migrateSameVersion` | 422 | цільова версія збігається з поточною |

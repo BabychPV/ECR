@@ -18,6 +18,18 @@ public sealed class SmtpTestRateLimitPolicyTests
 {
     private static readonly IConfiguration Empty = new ConfigurationBuilder().Build();
 
+    /// <summary>Годинник із ручним кроком (пакета fake-годинника в тестах немає).</summary>
+    private sealed class StepTime : TimeProvider
+    {
+        private long _ticks;
+
+        public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+
+        public override long GetTimestamp() => _ticks;
+
+        public void Advance(TimeSpan by) => _ticks += by.Ticks;
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     public void Без_ключів_конфігурації_діють_дефолти_5_на_хвилину_і_30_на_годину()
@@ -45,6 +57,34 @@ public sealed class SmtpTestRateLimitPolicyTests
 
         using var over = quota.TryAcquire();
         Assert.False(over.IsAcquired);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    public void Повернений_токен_квоти_доступний_знову_лише_у_тому_самому_вікні_і_лише_раз()
+    {
+        var time = new StepTime();
+        var cfg = new ConfigurationBuilder().AddInMemoryCollection(
+            new Dictionary<string, string?> { [SmtpTestRateLimitPolicy.SystemPermitKey] = "1" }).Build();
+        using var quota = new SmtpTestSystemQuota(cfg, time);
+
+        var first = quota.TryAcquire();
+        Assert.True(first.IsAcquired);
+        Assert.False(quota.TryAcquire().IsAcquired);
+
+        // Мутація: прибрати `_used--` у `Refund` → повернення не діє.
+        first.Refund();
+        first.Refund(); // повторне повернення нічого не додає
+        var second = quota.TryAcquire();
+        Assert.True(second.IsAcquired);
+        Assert.False(quota.TryAcquire().IsAcquired);
+
+        // Нове вікно: токен зі старого вікна не повертається.
+        time.Advance(TimeSpan.FromHours(1) + TimeSpan.FromSeconds(1));
+        var third = quota.TryAcquire();
+        Assert.True(third.IsAcquired);
+        second.Refund();
+        Assert.False(quota.TryAcquire().IsAcquired);
     }
 
     [Fact]
@@ -77,6 +117,76 @@ public sealed class SmtpTestRateLimitPolicyTests
         }
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    public async Task Межа_користувача_береться_з_конфігурації_вікно_хвилина_без_черги_а_системна_година()
+    {
+        var two = new ConfigurationBuilder()
+            .AddInMemoryCollection([new(SmtpTestRateLimitPolicy.PermitKey, "2"), new(SmtpTestRateLimitPolicy.SystemPermitKey, "3")])
+            .Build();
+
+        // ⚠ МУТАЦІЙНИЙ ДОКАЗ: ігнорувати PermitKey/SystemPermitKey (завжди 5/30), Window хвилина → година
+        // (і навпаки для системної квоти), QueueLimit 0 → 1 — червоніє відповідний рядок.
+        var partition = new SmtpTestRateLimitPolicy(two).GetPartition(ContextOf("1"));
+        using var limiter = partition.Factory(partition.PartitionKey);
+
+        using (var first = limiter.AttemptAcquire())
+        using (var second = limiter.AttemptAcquire())
+        {
+            Assert.True(first.IsAcquired && second.IsAcquired);
+        }
+
+        // Третя — одразу відмова, а не очікування в черзі (UseRateLimiter кличе AcquireAsync).
+        var third = limiter.AcquireAsync().AsTask();
+        Assert.True(third.IsCompleted);
+        using (var rejected = await third)
+        {
+            Assert.False(rejected.IsAcquired);
+        }
+
+        // ⚠ Поповнює розділ сам PartitionedRateLimiter (фабрика розділу знімає AutoReplenishment) — тож
+        // тут лише період вікна.
+        var replenishing = Assert.IsAssignableFrom<ReplenishingRateLimiter>(limiter);
+        Assert.Equal(TimeSpan.FromMinutes(1), replenishing.ReplenishmentPeriod);
+
+        // Системна квота: власний лічильник із годинним вікном (S6), час — підміняний.
+        var clock = new ManualClock();
+        using var quota = new SmtpTestSystemQuota(two, clock);
+        for (var i = 0; i < 3; i++)
+        {
+            using var lease = quota.TryAcquire();
+            Assert.True(lease.IsAcquired);
+        }
+
+        using (var over = quota.TryAcquire())
+        {
+            Assert.False(over.IsAcquired);
+        }
+
+        // Вікно — година: через 59 хв ще відмова, через 61 — нове вікно.
+        clock.Advance(TimeSpan.FromMinutes(59));
+        using (var still = quota.TryAcquire())
+        {
+            Assert.False(still.IsAcquired);
+        }
+
+        clock.Advance(TimeSpan.FromMinutes(2));
+        using (var fresh = quota.TryAcquire())
+        {
+            Assert.True(fresh.IsAcquired);
+        }
+    }
+
+    private sealed class ManualClock : TimeProvider
+    {
+        private long _ticks;
+
+        public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+
+        public override long GetTimestamp() => _ticks;
+
+        public void Advance(TimeSpan by) => _ticks += by.Ticks;
+    }
     private static DefaultHttpContext ContextOf(string? userId, string? ip = null)
     {
         var context = new DefaultHttpContext();

@@ -198,6 +198,7 @@ public static class DependencyInjection
         services.AddSingleton(sp => new Caching.AccessProfileCache(
             sp.GetRequiredService<Microsoft.Extensions.Caching.Memory.IMemoryCache>(),
             sp.GetRequiredService<CacheLifetimes>()));
+        services.AddSingleton<IAccessProfileInvalidator>(sp => sp.GetRequiredService<Caching.AccessProfileCache>());
         services.AddSingleton<IRegistryEntryCache, Caching.RegistryEntryCache>();
         // ⛔ V-06: назовні — обгортка, що підставляє профіль суб'єкта під час
         // симуляції. `SimulationService` отримує САМУ службу: обгортці він
@@ -289,6 +290,12 @@ public static class DependencyInjection
                 Lanes = Jobs.JobLaneMap.ApiLanes(Jobs.JobLaneMap.ReadExecutor(configuration)),
             });
             services.AddHostedService<Jobs.JobWorker>();
+
+            // B5.10: gauge ecr.jobs.queue_depth; кеш раз на N секунд, лише в Api
+            // (ChildComposition прибирає цю службу з воркера пулу).
+            services.AddSingleton(Jobs.JobQueueDepthOptions.Read(configuration));
+            services.AddSingleton<Jobs.IJobQueueDepthSource, Jobs.DbJobQueueDepthSource>();
+            services.AddHostedService<Jobs.JobQueueDepthSampler>();
         }
         else
         {
@@ -371,7 +378,8 @@ public static class DependencyInjection
         // з'єднання після зміни DNS. Таймаут виставляє САМ відправник
         // (`TeamsWebhookSender.Timeout`) — тут лише реєстрація фабрики, щоб
         // забута тут лямбда не могла мовчки повернути типові 100 секунд.
-        services.AddHttpClient(Notifications.TeamsWebhookSender.HttpClientName);
+        services.AddHttpClient(Notifications.TeamsWebhookSender.HttpClientName)
+            .ConfigurePrimaryHttpMessageHandler(Notifications.TeamsWebhookSender.CreateHandler); // S9: без редиректів
 
         // ⚠ Задачі, які use-case називає МАРКЕРОМ, реєструються ще й за ним:
         // `EnqueueAsync<IReportSnapshotJob>` кладе в JobDataMap повне імʼя

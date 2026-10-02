@@ -18,7 +18,7 @@ namespace Ecr.Infrastructure.Tests.Security;
 /// `Q-187`: реальний ключ <see cref="IMemoryCache"/> мусить включати відбиток
 /// груп, інакше власна сесія користувача й перегляд/симуляція адміністратором
 /// того самого <c>userId</c> діляться ОДНИМ записом кешу протягом
-/// <c>AccessProfileCache.Lifetime</c> (30 хв).
+/// <c>AccessProfileCache.Lifetime</c> (60 хв, <c>Cache:AccessProfileSlidingMinutes</c>).
 /// </summary>
 /// <remarks>
 /// ⛔ Атака (не гіпотеза, `Q-187`): `RoleAssignment` на AD-групу дає право

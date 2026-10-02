@@ -28,10 +28,12 @@ public sealed class SmtpSettingsHandlersTests
     private readonly IUnitOfWork _uow = Substitute.For<IUnitOfWork>();
     private readonly ICurrentUser _user = Substitute.For<ICurrentUser>();
     private readonly IClock _clock = Substitute.For<IClock>();
+    private readonly TransactionProbe _tx;
     private readonly INotificationSender _sender = Substitute.For<INotificationSender>();
 
     public SmtpSettingsHandlersTests()
     {
+        _tx = TransactionProbe.Attach(_uow, _audit);
         _clock.UtcNow.Returns(new DateTime(2026, 10, 1, 8, 0, 0, DateTimeKind.Utc));
         _user.UserId.Returns(Actor);
         _audit.WriteSecurityEventAsync(Arg.Do<SecurityEventRecord>(_events.Add), Arg.Any<CancellationToken>())
@@ -433,6 +435,195 @@ public sealed class SmtpSettingsHandlersTests
 
         Assert.Null(_store.Row);
         await _sender.DidNotReceiveWithAnyArgs().SendAsync(default!, default!, default!, default);
+    }
+
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "D-263")]
+    [InlineData("smtp.corp.example", 587, "not-an-address", "from")]   // вимкнена чернетка: заданий From усе одно адреса
+    [InlineData("smtp://evil", 587, "", "host")]                       // вимкнена чернетка: заданий хост усе одно хост
+    [InlineData("smtp.corp.example", 587, "ecr@corp.example", "fromName", 101)]
+    [InlineData("smtp.corp.example", 587, "ecr@corp.example", "auth", 0, 255)]
+    public async Task Вимкнена_чернетка_перевіряє_задані_поля_а_ім_я_відправника_й_логін_мають_стелю(
+        string host, int port, string from, string field, int fromNameLength = 0, int userLength = 0)
+    {
+        Arrange();
+        var input = Input(host: host, port: port, from: from, enabled: field is "from" or "host" ? false : true);
+        if (fromNameLength > 0)
+        {
+            input = input with { FromName = new string('n', fromNameLength) };
+        }
+
+        if (userLength > 0)
+        {
+            input = input with { UserName = new string('u', userLength) };
+        }
+
+        // ⚠ МУТАЦІЙНИЙ ДОКАЗ (SaveSmtpSettingsHandler.Validate): `host.Length > 0` / `from.Length > 0` → `< 0`,
+        // стеля FromName 100 і логіна 254 (`>` → `>=` проходить, прибрати перевірку FromName — червоніє «fromName»).
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Save().HandleAsync(input, CancellationToken.None));
+
+        Assert.Equal(field, error.Details!["name"]);
+        await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "D-263")]
+    public async Task Межові_значення_порт_1_і_65535_ім_я_100_і_логін_254_приймаються()
+    {
+        Arrange();
+
+        // ⚠ МУТАЦІЙНИЙ ДОКАЗ: `Port is < 1 or > 65535` → `<= 1` чи `>= 65535`, стелі FromName/логіна `>` → `>=`
+        // відхилили б рівно ці межові значення.
+        foreach (var port in new[] { 1, 65535 })
+        {
+            var saved = await Save().HandleAsync(Input(port: port), CancellationToken.None);
+            Assert.Equal(port, saved.Port);
+        }
+
+        var edge = await Save().HandleAsync(
+            Input() with { FromName = new string('n', 100), UserName = new string('u', 254) }, CancellationToken.None);
+
+        Assert.Equal(100, edge.FromName!.Length);
+        Assert.Equal(254, edge.UserName!.Length);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "D-263")]
+    public async Task Невідомий_режим_шифрування_чи_автентифікації_дає_422_mode()
+    {
+        Arrange();
+
+        // ⚠ МУТАЦІЙНИЙ ДОКАЗ: `||` → `&&` у перевірці Enum.IsDefined пропустив би кожен із цих двох запитів.
+        foreach (var input in new[]
+                 {
+                     Input() with { EncryptionMode = (SmtpEncryptionMode)7 },
+                     Input() with { AuthMode = (SmtpAuthMode)9 },
+                 })
+        {
+            var error = await Assert.ThrowsAsync<BusinessRuleException>(
+                () => Save().HandleAsync(input, CancellationToken.None));
+            Assert.Equal("mode", error.Details!["name"]);
+        }
+
+        await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "D-263")]
+    public async Task Без_рядка_в_базі_GET_каже_без_пароля_вимкнено_а_неповний_рядок_без_транспорту_це_none()
+    {
+        Arrange();
+
+        // ⚠ МУТАЦІЙНИЙ ДОКАЗ (GetSmtpSettingsHandler.ToView): `HasPassword: false` / `IsEnabled: false` → `true`
+        // для відсутнього рядка, `source != "none"` → `==`, гілка «configuration» замість «none».
+        _sender.IsConfigured.Returns(false);
+        var empty = await Get().HandleAsync(CancellationToken.None);
+        Assert.False(empty.HasPassword);
+        Assert.False(empty.IsEnabled);
+        Assert.False(empty.Configured);
+        Assert.Equal(587, empty.Port);
+
+        var draft = await Save().HandleAsync(Input(enabled: false), CancellationToken.None);
+        Assert.Equal("none", draft.Source);
+        Assert.False(draft.Configured);
+
+        var on = await Save().HandleAsync(Input(password: null), CancellationToken.None);
+        Assert.Equal("database", on.Source);
+        Assert.True(on.Configured);
+
+        _sender.IsConfigured.Returns(true);
+        var off = await Save().HandleAsync(Input(enabled: false, password: null), CancellationToken.None);
+        Assert.Equal("configuration", off.Source);
+        Assert.True(off.Configured);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "D-263")]
+    public async Task Перехід_на_режим_без_автентифікації_без_пароля_не_пише_passwordChanged()
+    {
+        Arrange();
+
+        // Рядка з паролем немає: режим None без ClearPassword нічого не змінює в паролі.
+        // ⚠ МУТАЦІЙНИЙ ДОКАЗ: `clears && input.ClearPassword` → `clears || input.ClearPassword` — тут стало б true.
+        await Save().HandleAsync(Input(auth: SmtpAuthMode.None, user: null, password: null), CancellationToken.None);
+
+        Assert.Contains("\"passwordChanged\":false", _events.Last().DetailsJson, StringComparison.Ordinal);
+        Assert.Equal("SmtpSettingsCreated", _events.Last().EventType);
+
+        await Save().HandleAsync(Input(auth: SmtpAuthMode.None, user: null, password: null), CancellationToken.None);
+        Assert.Equal("SmtpSettingsUpdated", _events.Last().EventType);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "D-263")]
+    public async Task Проба_без_транспорту_не_віддає_тексту_а_журнал_розрізняє_введену_й_власну_адресу()
+    {
+        Arrange();
+        var handler = TestHandler("me@corp.example");
+
+        // ⚠ МУТАЦІЙНИЙ ДОКАЗ (TestSmtpSettingsHandler): прибрати `if (!result.Ok) { Error = null }` або
+        // заперечити умову — назовні пішов би англійський текст «not configured» замість лише ключа.
+        _sender.IsConfigured.Returns(false);
+        var none = await handler.HandleAsync(new SmtpTestRequest("ops@corp.example"), CancellationToken.None);
+        Assert.False(none.Ok);
+        Assert.Null(none.Error);
+        Assert.Equal("notifications.test.smtpNotConfigured", none.MessageKey);
+
+        _sender.IsConfigured.Returns(true);
+        var own = await handler.HandleAsync(new SmtpTestRequest(null), CancellationToken.None);
+        Assert.True(own.Ok);
+
+        // ⚠ МУТАЦІЙНИЙ ДОКАЗ: `useEntered ? "entered" : "own"` → завжди одне з двох.
+        var tested = _events.FindAll(e => e.EventType == "SmtpSettingsTested");
+        Assert.Equal(2, tested.Count);
+        Assert.Contains("\"recipient\":\"entered\"", tested[0].DetailsJson, StringComparison.Ordinal);
+        Assert.Contains("\"domain\":\"corp.example\"", tested[0].DetailsJson, StringComparison.Ordinal);
+        Assert.Contains("\"recipient\":\"own\"", tested[1].DetailsJson, StringComparison.Ordinal);
+        Assert.Contains("\"ok\":true", tested[1].DetailsJson, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "D-263")]
+    public async Task Порожній_рядок_пароля_як_і_null_не_міняє_збереженого_а_збереження_доходить_до_бази()
+    {
+        Arrange();
+        await Save().HandleAsync(Input(), CancellationToken.None);
+        var before = _store.Row!.PasswordProtected;
+
+        // ⚠ МУТАЦІЙНИЙ ДОКАЗ: `IsNullOrEmpty(Password) ? null : Password` → завжди Password — порожній рядок із
+        // форми (поле не чіпали) затер би пароль захищеним «нічим»; прибрати `uow.SaveChangesAsync`.
+        await Save().HandleAsync(Input(password: string.Empty), CancellationToken.None);
+
+        Assert.Equal(before, _store.Row!.PasswordProtected);
+        Assert.Contains("\"passwordChanged\":false", _events.Last().DetailsJson, StringComparison.Ordinal);
+        await _uow.Received(2).SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "S8")]
+    public async Task Збереження_налаштувань_SMTP_пише_аудит_у_транзакції_збереження_і_збій_її_відкочує()
+    {
+        // ⚠ МУТАЦІЙНИЙ ДОКАЗ: у AuditAndSaveAsync викликати Audit/Save поза ExecuteInTransactionAsync.
+        Arrange();
+        await Save().HandleAsync(Input(), CancellationToken.None);
+
+        Assert.Equal([true], _tx.AuditInside);
+        Assert.Equal([true], _tx.SaveInside);
+
+        _uow.SaveChangesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromException<int>(new InvalidOperationException("db down")));
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => Save().HandleAsync(Input(host: "smtp2.corp.example"), CancellationToken.None));
+
+        Assert.Equal([true, true], _tx.AuditInside);
     }
 
     private TestSmtpSettingsHandler TestHandler(string? email)

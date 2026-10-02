@@ -311,6 +311,50 @@ public sealed class SmtpAdminSettingsTests(SqlServerFixture sql) : IAsyncLifetim
         Assert.Equal(3, sent.Count);
     }
 
+    /// <summary>Рев'ю ent6 S3: ліміт проби — на ВСІХ адресатів разом (спершу явні, решту — ролям).</summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ent6-S3")]
+    public async Task Ліміт_проби_діє_на_явні_адреси_і_ролі_разом()
+    {
+        var tag = Guid.NewGuid().ToString("N")[..8];
+        await using var db = Db();
+        var role = new Role(EcrCode.Create($"SQ{tag}"), new LocalizedText(new Dictionary<string, string> { ["en"] = "probe role" }));
+        db.Roles.Add(role);
+        await db.SaveChangesAsync();
+
+        for (var i = 0; i < 5; i++)
+        {
+            await AddUserAsync(db, role.Id, $"r{i}_{tag}@corp.example", "en");
+        }
+
+        var explicitJson = "{\"recipients\":[\"e0@corp.example\",\"e1@corp.example\",\"e2@corp.example\"]}";
+        var channel = new NotificationChannel(NotificationChannelKind.Smtp, $"mix-{tag}", explicitJson, DateTime.UtcNow, null);
+        db.NotificationChannels.Add(channel);
+        await db.SaveChangesAsync();
+        db.NotificationChannelRoles.Add(new NotificationChannelRole(channel.Id, role.Id));
+        await db.SaveChangesAsync();
+
+        var sent = new List<string>();
+        var transport = Substitute.For<INotificationSender>();
+        transport.IsConfigured.Returns(true);
+        transport.SendAsync(Arg.Do<IReadOnlyList<string>>(sent.AddRange), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(Task.CompletedTask);
+        var sender = new SmtpChannelSender(transport, db);
+
+        // Мутація: повернути `.Take(message.RecipientLimit ?? int.MaxValue)` лише на ролях → піде 3 + 4 = 7.
+        await sender.SendAsync(channel, new NotificationMessage("S", "B", RecipientLimit: 4), CancellationToken.None);
+        Assert.Equal(4, sent.Count);
+        Assert.Equal(3, sent.Count(a => a.StartsWith('e')));
+
+        // Явних більше за ліміт — обрізаються, ролі не йдуть узагалі.
+        sent.Clear();
+        await sender.SendAsync(channel, new NotificationMessage("S", "B", RecipientLimit: 2), CancellationToken.None);
+        Assert.Equal(2, sent.Count);
+        Assert.All(sent, a => Assert.StartsWith("e", a, StringComparison.Ordinal));
+    }
+
     private static async Task<int> AddUserAsync(EcrDbContext db, int roleId, string? email, string? language)
     {
         var user = new User($"sm_{Guid.NewGuid():N}"[..20], "Smtp test user", AuthProvider.Local);

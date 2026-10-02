@@ -613,6 +613,11 @@ UPDATE t
   FROM sys_ecr.UiString AS t
   JOIN (VALUES
     (N'common.loading',                  N'en', N'Loading…', N'Loading...'),
+    -- ent7 P2-1: відмова й для звужувального дозволу (Read під Write проєкту), не лише заборони.
+    (N'err.ECR-SCHM-0422.migrateGrantsNotMapped', N'en', N'The target version has no sheet, table or column with the code of a resource that has a deny grant, so the deny cannot be carried over. Remove or re-create that deny deliberately before moving the project.', N'The target version has no sheet, table or column with the code of a resource that has an access grant (deny or a restricting Read), so the grant cannot be carried over and access could widen. Remove or re-create that grant deliberately before moving the project.'),
+    (N'err.ECR-SCHM-0422.migrateGrantsNotMapped', N'ru', N'В целевой версии нет листа, таблицы или столбца с кодом ресурса, на котором стоит запрет, поэтому запрет не перенести. Снимите или пересоздайте этот запрет осознанно до переноса проекта.', N'В целевой версии нет листа, таблицы или столбца с кодом ресурса, на котором стоит право доступа (запрет или ограничивающее чтение), поэтому право не перенести, а доступ мог бы расшириться. Снимите или пересоздайте это право осознанно до переноса проекта.'),
+    (N'err.ECR-SCHM-0422.migrateGrantsNotMapped', N'kz', N'Мақсатты нұсқада тыйым қойылған ресурстың кодымен парақ, кесте немесе баған жоқ, сондықтан тыйымды көшіру мүмкін емес. Жобаны көшірместен бұрын бұл тыйымды саналы түрде алып тастаңыз немесе қайта жасаңыз.', N'Мақсатты нұсқада қол жеткізу құқығы (тыйым немесе шектейтін оқу) қойылған ресурстың кодымен парақ, кесте немесе баған жоқ, сондықтан құқықты көшіру мүмкін емес, ал қолжетімділік кеңеюі мүмкін. Жобаны көшірместен бұрын бұл құқықты саналы түрде алып тастаңыз немесе қайта жасаңыз.'),
+    -- ⚠ kz вище — потрібна вичитка носієм.
     -- D-263: SMTP задається в адмін-налаштуваннях, канал додає адресатів-ролі.
     (N'notifications.smtpTransportHint', N'en', N'The server, sender address and password come from the application configuration; the channel only adds recipients.', N'The server, sender and login come from the SMTP settings above (or from the process configuration while they are not set); the channel adds recipients: addresses and roles.'),
     (N'notifications.smtpTransportHint', N'ru', N'Сервер, адрес отправителя и пароль берутся из конфигурации приложения; канал лишь добавляет получателей.', N'Сервер, отправитель и логин берутся из настроек SMTP выше (пока они не заданы — из конфигурации процесса); канал добавляет получателей: адреса и роли.'),
@@ -6125,6 +6130,10 @@ USING (VALUES
     (N'err.ECR-CALC-0422.strictBackdated',         N'en', N'Strict mode is switched on only by an explicit decision from a new effective date, never retroactively: {effectiveFrom} is not later than today ({today}). Choose a future date.', 1),
     -- ru/kz — окремою порцією `COLL:an13-strict` у блоці I18N нижче.
     -- COLL:an13-strict ── кінець секції ──
+    -- COLL:sec-a1 ── Перенос версії: заборона на аркуші/таблиці/колонці, якої нема в новій версії (`MigrateDocumentVersionHandler`) ──
+    (N'err.ECR-SCHM-0422.migrateGrantsNotMapped', N'en', N'The target version has no sheet, table or column with the code of a resource that has an access grant (deny or a restricting Read), so the grant cannot be carried over and access could widen. Remove or re-create that grant deliberately before moving the project.', 1),
+    -- ru/kz — окремою порцією `COLL:sec-a1` у блоці I18N нижче.
+    -- COLL:sec-a1 ── кінець секції ──
     -- COLL:nosource-hints ── порожній стан списку з'єднань: що робити й де в документації (UI, DataSourcesTable) ──
     (N'sources.notConfiguredHint', N'en', N'To connect PI, an administrator adds a connection here: the PI Web API address, the secret and the authentication. Until then data is entered by hand. See docs/admin/admin-guide.md, section 5, and docs/admin/operations-runbook.md, section 15.', 1),
     -- ru/kz — окремою порцією `I18N` (COLL:nosource-hints).
@@ -6384,6 +6393,10 @@ USING (VALUES
     (N'err.ECR-REG-0422.lookupRetargetUsedByRules', N'en', N'The link of field "{fieldCode}" cannot be changed: {total} rule(s), formula(s) or methodology version(s) read attributes through it: {usedBy}. Change or disable them first.', 1),
     -- ru/kz — окремою порцією COLL:fv812-relations у блоці I18N нижче.
     -- COLL:fv812-relations ── кінець секції ──
+    -- COLL:sec-s3s6 ── межа явних адрес каналу сповіщень (рев'ю ent6 S3) ──
+    (N'err.ECR-REQ-0422.channelTooManyRecipients', N'en', N'A channel accepts at most 50 explicit recipient addresses.', 1),
+    -- ru/kz — окремою порцією COLL:sec-s3s6 у блоці I18N нижче.
+    -- COLL:sec-s3s6 ── кінець секції ──
     -- ru/kz — окремою порцією `API:negative-path` у блоці I18N нижче.
     -- API:negative-path ── кінець секції ──
     -- API:negative-path-2 ── відмови замість 500 у нових ендпоінтах (прохід по відмовах 2) ──
@@ -6417,8 +6430,15 @@ USING (VALUES
     (N'notificationTemplates.recipientsRoleCount', N'en', N'recipient roles: {count}', 1),
     (N'notificationTemplates.recipientsNoRoles', N'en', N'no recipient roles', 1),
     (N'notificationTemplates.recipientsFiltered', N'en', N'the severity threshold is above Info, so this event does not pass', 1),
-    (N'notificationTemplates.recipientsNoTransport', N'en', N'the channel has no delivery transport configured', 1)
+    (N'notificationTemplates.recipientsNoTransport', N'en', N'the channel has no delivery transport configured', 1),
     -- CL6:notification-templates ── кінець секції ──
+    -- COLL:recalc-rl ── Межа частоти перерахунку документа (рекомендація безпекового рев'ю «Аудит») ──
+    (N'err.ECR-REQ-0429.tooManyRecalculations', N'en', N'Too many recalculation requests in a short time. Wait a moment and try again; the Retry-After header says how long.', 1),
+    -- COLL:recalc-rl ── кінець секції ──
+    -- CL:states-a11y-2 ── поле Lookup без цілі у вкладці «Зв'язки» (стани нових панелей 2) ──
+    (N'registries.relationTargetMissing', N'en', N'Target not set: choose a registry', 1)
+    -- ru/kz — окремою порцією CL:states-a11y-2 у блоці I18N нижче.
+    -- CL:states-a11y-2 ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -14049,6 +14069,17 @@ OPTION (RECOMPILE);
 GO
 -- COLL:an13-strict ── кінець секції ──
 
+-- COLL:sec-a1 ── ru/kz відмови переносу версії при заборонах без відповідника; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-SCHM-0422.migrateGrantsNotMapped', N'ru', N'В целевой версии нет листа, таблицы или столбца с кодом ресурса, на котором стоит право доступа (запрет или ограничивающее чтение), поэтому право не перенести, а доступ мог бы расшириться. Снимите или пересоздайте это право осознанно до переноса проекта.'),
+    (N'err.ECR-SCHM-0422.migrateGrantsNotMapped', N'kz', N'Мақсатты нұсқада қол жеткізу құқығы (тыйым немесе шектейтін оқу) қойылған ресурстың кодымен парақ, кесте немесе баған жоқ, сондықтан құқықты көшіру мүмкін емес, ал қолжетімділік кеңеюі мүмкін. Жобаны көшірместен бұрын бұл құқықты саналы түрде алып тастаңыз немесе қайта жасаңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:sec-a1 ── кінець секції ──
+
 -- COLL:nosource-hints ── ru/kz підказки порожнього списку з'єднань; власна порція ──
 -- ⚠ kz — найкращий переклад без термінології замовника: потрібна вичитка носієм.
 INSERT INTO #I18N ([Key], Lang, Val)
@@ -15028,6 +15059,39 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:fv812-relations ── кінець секції ──
+
+-- COLL:recalc-rl ── ru/kz межі частоти перерахунку документа; власна порція; kz — потрібна вичитка носієм ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-REQ-0429.tooManyRecalculations', N'ru', N'Слишком много запросов на пересчёт за короткое время. Подождите немного и повторите попытку; заголовок Retry-After указывает, через сколько.'),
+    (N'err.ECR-REQ-0429.tooManyRecalculations', N'kz', N'Қысқа уақыт ішінде қайта есептеуге сұраныстар тым көп. Біраз күтіп, қайталап көріңіз; қанша уақыттан кейін екенін Retry-After тақырыбы көрсетеді.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:recalc-rl ── кінець секції ──
+
+-- COLL:sec-s3s6 ── ru/kz межі явних адрес каналу (рев'ю ent6 S3); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-REQ-0422.channelTooManyRecipients', N'ru', N'Канал принимает не более 50 явных адресов получателей.'),
+    (N'err.ECR-REQ-0422.channelTooManyRecipients', N'kz', N'Арна ең көбі 50 айқын алушы мекенжайын қабылдайды.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:sec-s3s6 ── кінець секції ──
+
+-- CL:states-a11y-2 ── ru/kz поля Lookup без цілі (стани нових панелей 2); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'registries.relationTargetMissing', N'ru', N'Цель не задана: выберите справочник'),
+    (N'registries.relationTargetMissing', N'kz', N'Мақсат берілмеген: анықтамалықты таңдаңыз')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- CL:states-a11y-2 ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

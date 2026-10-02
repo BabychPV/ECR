@@ -32,6 +32,9 @@ public static class InfrastructureMetrics
     /// <summary>Кеш профілю доступу — значення тегу <c>cache</c>.</summary>
     public const string AccessProfileCacheName = "access_profile";
 
+    /// <summary>Збої скидання кешу профілів (fail-closed режим увімкнено).</summary>
+    public const string AccessProfileInvalidationFailures = "ecr.access_profile.invalidation_failures";
+
     /// <summary>Тривалість реальної побудови профілю доступу (не з кешу), секунди.</summary>
     public const string AccessProfileBuild = "ecr.access.profile.build";
 
@@ -41,17 +44,43 @@ public static class InfrastructureMetrics
     /// </summary>
     public const string JobRunDuration = "ecr.job.run.duration";
 
+    /// <summary>
+    /// Глибина черги задач у базі (B5.10): gauge, теги <c>lane</c> і <c>state</c>
+    /// (<c>Queued</c>/<c>Running</c>) — обидва з фіксованих переліків. Значення — КЕШ,
+    /// який оновлює <c>JobQueueDepthSampler</c>; читання gauge в базу не ходить.
+    /// </summary>
+    public const string JobsQueueDepth = "ecr.jobs.queue_depth";
+
     private static readonly Meter Meter = new(MeterName);
+    private static volatile IReadOnlyList<QueueDepthPoint> queueDepth = [];
+    private static readonly ObservableGauge<long> QueueDepthGauge =
+        Meter.CreateObservableGauge(JobsQueueDepth, ObserveQueueDepth, "{job}", "Задач у черзі в базі за лейном і станом");
     private static readonly Histogram<double> RunDuration =
         Meter.CreateHistogram<double>(JobRunDuration, "s", "Тривалість виконання задачі з черги");
     private static readonly Histogram<double> ProfileBuild =
         Meter.CreateHistogram<double>(AccessProfileBuild, "s", "Побудова AccessProfile");
+    private static readonly Counter<long> InvalidationFailures =
+        Meter.CreateCounter<long>(AccessProfileInvalidationFailures, "{failure}", "Збої скидання кешу профілів доступу");
     private static readonly Counter<long> Failed =
         Meter.CreateCounter<long>(JobFailed, "{job}", "Остаточно провалені фонові задачі");
     private static readonly Counter<long> Hits =
         Meter.CreateCounter<long>(CacheHit, "{lookup}", "Влучання в кеш");
     private static readonly Counter<long> Misses =
         Meter.CreateCounter<long>(CacheMiss, "{lookup}", "Промахи кешу");
+
+    /// <summary>Кладе свіжий знімок глибини черги в кеш gauge <see cref="JobsQueueDepth"/>.</summary>
+    public static void PublishQueueDepth(IReadOnlyList<QueueDepthPoint> points)
+    {
+        ArgumentNullException.ThrowIfNull(points);
+        queueDepth = points.ToArray();
+        _ = QueueDepthGauge;
+    }
+
+    private static IEnumerable<Measurement<long>> ObserveQueueDepth()
+        => queueDepth.Select(p => new Measurement<long>(
+            p.Count,
+            new KeyValuePair<string, object?>("lane", p.Lane),
+            new KeyValuePair<string, object?>("state", p.State)));
 
     /// <summary>Фіксує остаточно провалену задачу; <paramref name="reason"/> — <c>error</c>, <c>overtime</c>, <c>deferral_exhausted</c>.</summary>
     public static void RecordJobFailed(string? jobCode, string reason)
@@ -69,6 +98,9 @@ public static class InfrastructureMetrics
 
     /// <summary>Фіксує тривалість побудови профілю доступу.</summary>
     public static void RecordAccessProfileBuild(double seconds) => ProfileBuild.Record(seconds);
+
+    /// <summary>Фіксує збій скидання кешу профілів.</summary>
+    public static void RecordAccessProfileInvalidationFailure() => InvalidationFailures.Add(1);
 
     /// <summary>Фіксує влучання (<paramref name="hit"/>) чи промах кешу <paramref name="cache"/>.</summary>
     public static void RecordCache(string cache, bool hit)

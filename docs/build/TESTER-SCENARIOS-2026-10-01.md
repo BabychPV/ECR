@@ -345,8 +345,24 @@ Date, Bool, Lookup, Unit), бажано один темпоральний і о�
   4. Для наявного поля змінити зв'язок на композицію.
   5. Додати в C запис, потім спробувати додати ще одне поле «Part of parent» (воно завжди обов'язкове; звичайне нове поле конструктор обов'язковим зробити не дає — лише через API).
 - **Очікується:** п. 1 — поле стає обов'язковим; п. 2–3 — попередження клієнта («A registry can be part of only one parent…», «A registry cannot be part of itself…», «A part cannot have its own validity window…») або відмова сервера; п. 4 — для наявних полів прапорця немає; через API — відмова; п. 5 — відмова.
-- **Помилки:** `422 ECR-REG-0422 compositionNotLookup` / `compositionMoreThanOne` / `compositionTargetSelf` / `compositionNotRequired` / `compositionChildTemporal` / `compositionCycle` / `relationKindImmutable` / `newFieldRequired`.
+- **Помилки:** `422 ECR-REG-0422 compositionNotLookup` / `compositionMoreThanOne` / `compositionTargetSelf` / `compositionNotRequired` / `compositionChildTemporal` / `compositionCycle` / `relationKindImmutable` / `newFieldRequired`; `definitionItemMissing` (порожній елемент `null` у fields/rules/keys — раніше 500, `b57a049b`).
 - **Вимоги:** ФВ-8.16.
+
+### Н-В4а. Зміна цілі поля Lookup (ретаргет) — ✅ (за тестами; вручну не пройдено)
+
+✎ 2026-10-02 (прохід №3; `3753398a`, `287fb68a`, `92fe5d81`).
+
+- **Права:** `Registry.EditDefinition`.
+- **Дані:** довідник C з полем Lookup на P; другий довідник P2; правило/формула/методологія, що читає `ПОЛЕ.атрибут` через це поле.
+- **Кроки:**
+  1. Конструктор C → вкладка «Relations» → змінити ціль поля на P2, коли (а) є правило/формула/методологія, що читає атрибут через поле; (б) у записах C поле вже має значення.
+  2. Через API змінити ціль на довідник, до якого в автора немає доступу.
+  3. Через API зняти ціль (`lookupRegistryDefId: null`) або дати неіснуючий Id.
+  4. Без споживачів і значень — змінити ціль на P2.
+- **Очікується:** п. 1(а) — 422 «The link of field "{fieldCode}" cannot be changed: {total} rule(s), formula(s) or methodology version(s) read attributes through it: {usedBy}. Change or disable them first.» (у `usedBy` — лише споживачі, видимі автору; `total` — повна кількість; у тілі є `hiddenCount`); п. 1(б) — 422 «…records already hold values pointing to the current target.»; п. 2 — 404, як для неіснуючого довідника; п. 3 — 422 «The target registry of field "{fieldCode}" does not exist.»; п. 4 — збережено. У списку цілі наявного поля пункту «—» немає (ціль обов'язкова).
+- **Помилки:** `422 ECR-REG-0422 lookupRetargetUsedByRules` / `lookupRetargetInUse` / `lookupTargetUnknown`; `404 ECR-REG-0404`.
+- **Відоме обмеження:** коли всі споживачі невидимі автору, перелік у тексті порожній («…through it: . Change…») — дефект D3-2 звіту прогонки №3.
+- **Вимоги:** ФВ-8.12.
 
 ### Н-В5. Редактор master-detail і індикатор Σ — ✅
 
@@ -446,10 +462,11 @@ Date, Bool, Lookup, Unit), бажано один темпоральний і о�
 
 ### Н-Д3. Банер «довідник змінено після розрахунку» — ✅ (за тестами; вручну не пройдено)
 
-- **Права:** `Calculation.View` (панель «Calculation results» документа).
+- **Права:** `Calculation.View` (панель «Calculation results» документа); кнопка «Recalculate» у документі — `Document.View` + видимість документа (✎ 2026-10-02, `979865dd`; без `Calculation.Recalculate` запит зливається з уже поставленим перерахунком, не витісняє його — `70412881`).
 - **Кроки:** 1) перерахувати документ; 2) змінити запис довідника X, який читає методологія; 3) відкрити документ; 4) перерахувати (Н-Д2 або кнопкою в документі); 5) знову відкрити.
-- **Очікується:** п. 3 — alert-попередження «These results are out of date» з текстом «The inputs changed after the last recalculation, so these numbers no longer match the data. Recalculate the sheet before submitting it.» і рядком «Registry "{name}" was changed after the calculation» (текст лише радить); **подання не блокується**, автоматичного перерахунку немає; п. 5 — банер зник. ⚠ P2 (живий прохід `d793f199`; 🟨 виправляється, lane `stalefix`): після «Recalculate» банер і тост лишаються до перезавантаження сторінки.
+- **Очікується:** п. 3 — alert-попередження «These results are out of date» з текстом «The inputs changed after the last recalculation, so these numbers no longer match the data. Recalculate the sheet before submitting it.» і рядком «Registry "{name}" was changed after the calculation» (текст лише радить); **подання не блокується**, автоматичного перерахунку немає; п. 5 — банер зник. ~~⚠ P2 (живий прохід `d793f199`): після «Recalculate» банер і тост лишаються до перезавантаження сторінки.~~ ✎ 2026-10-02 (прохід №3): виправлено в RC (`747d0958`, тест `CalculationResultsPanel.staleFix.test.tsx`); вручну не перевірено.
 - **Назва в банері:** назва довідника мовою користувача з каталогу (`85300af4`); **код** — запасний варіант, якщо каталог ще вантажиться, у користувача немає `Registry.View` або довідника в каталозі нема. Результат методології теж застаріває після правки довідника (`40b23079`).
+- **Помилки:** `429 ECR-REQ-0429` «Too many recalculation requests in a short time. Wait a moment and try again; the Retry-After header says how long.» — понад 6 запитів за хвилину на користувача й документ (`Security:RateLimit:RecalculatePermitPerMinute`, `fb957713`); відповіді 403/404/422 ліміт не витрачають.
 - **Вимоги:** ФВ-9.19, RT-25.
 
 ---
@@ -469,7 +486,7 @@ Date, Bool, Lookup, Unit), бажано один темпоральний і о�
   4. Оновити сторінку; відкрити документ проєкту на цій версії.
   5. Переставити **рядки** — ✎ 2026-10-02: тепер окремий сценарій Н-Р1.
 - **Очікується:** п. 1–3 — тост «{name} is now in position {position} of {count}.»; ↑ на першій і ↓ на останній позиції вимкнені; п. 4 — порядок збережено; п. 5 — див. Н-Р1 (✎ 2026-10-02, AN-15 `dfc1946`: кнопки й ручка рядків **активні** в чернетці, підпис «Rows cannot be reordered here yet…» прибрано).
-- **Помилки (API `PATCH /api/v1/template-versions/{id}/presentation`):** `422 ECR-TMPL-0422 emptyPatch` / `ordinalInvalid` (не ціле 0…1000000).
+- **Помилки (API `PATCH /api/v1/template-versions/{id}/presentation`):** `422 ECR-TMPL-0422 emptyPatch` / `ordinalInvalid` (не ціле 0…1000000) / `patchChangeInvalid` («Every patch change needs entityType, entityId and field.» — зміна без цих полів, `[null]`, `[{}]`) / `presentationValueInvalid` (значення не тієї форми: підпис не JSON-об'єктом, IsHidden не 0/1/true/false, StyleId не ціле, DisplayFormat > 50 символів; раніше 500 і зіпсована версія, `7a585839`).
 - **Обмеження:** ✎ 2026-10-02: колишнє «перестановка рядків — лише полем «Order» у формі рядка» застаріло — Н-Р1.
 - **Вимоги:** ФВ-2.6, ФВ-2.7, D-234.
 
@@ -560,7 +577,7 @@ Date, Bool, Lookup, Unit), бажано один темпоральний і о�
 документа, переносить **усі документи проєкту** однією транзакцією.
 
 - **Права:** `Template.Edit` (без нього пункту меню немає).
-- **Дані:** шаблон з ≥ 2 опублікованими версіями; проєкт на старішій, документ з введеними значеннями. Для відмов: версія з видаленою колонкою, де є дані; зі зміненим типом/одиницею/точністю; аркуш у стані Submitted/Approved; архівований проєкт.
+- **Дані:** шаблон з ≥ 2 опублікованими версіями; проєкт на старішій, документ з введеними значеннями. Для відмов: версія з видаленою колонкою, де є дані; зі зміненим типом/одиницею/точністю; аркуш у стані Submitted/Approved; архівований проєкт; роль із грантом і забороною (deny) на аркуш/таблицю/колонку, якої в новій версії за кодом немає.
 - **Кроки:**
   1. `/documents/:id` → **«More»** (⋯) → «Move to another template version».
   2. «Target version» = новіша, режим «Safe» → **«Preview»**.
@@ -568,8 +585,9 @@ Date, Bool, Lookup, Unit), бажано один темпоральний і о�
   4. Повторити на версії з видаленою колонкою з даними; зі зміненим типом; режим «Appearance only» при структурних змінах.
   5. Подати аркуш і спробувати перенос; на архівованому проєкті.
   6. Шаблон з однією опублікованою версією.
-- **Очікується:** п. 2 — «The template version belongs to the project, so all its documents move together. Documents: {count}.», «Values moved: {transferred}. Lost: {lost}. Change meaning: {guarded}.», зелений «The move is possible: no entered value is lost.», таблиця «Element | Change | Entered values» (до 50 рядків); «Move documents» активна лише після Preview з `canApply`; п. 3 — «Documents moved to template version {version}: {count}.», подія безпеки `DocumentVersionMigrated`; п. 4 — червоний звіт з причинами («Entered values would be lost…», «…would change meaning…», «The versions differ in structure, not only in appearance.»), перенос неможливий; п. 5 — «Some sheets are submitted or approved: return them to work first.» / «The project is archived.»; п. 6 — «There is no other published version of this template.»
-- **Помилки:** `404 ECR-TMPL-0404 templateVersion`; `422 ECR-TMPL-0422 migrateSameVersion` / `migrateOtherTemplate` / `migrateTargetNotPublished`; `409 ECR-DOC-0409 migrateSheetsLocked` / `migrateProjectArchived`; `422 ECR-SCHM-0422 migrateStructural` / `migrateDataLoss`.
+  7. ✎ 2026-10-02: поставити заборону (deny) на колонку, якої в новій версії за кодом немає → «Preview»; потім застосувати через API. Окремо — грант (allow) на колонку, що є в обох версіях → перенести → перевірити доступ.
+- **Очікується:** п. 2 — «The template version belongs to the project, so all its documents move together. Documents: {count}.», «Values moved: {transferred}. Lost: {lost}. Change meaning: {guarded}.», зелений «The move is possible: no entered value is lost.», таблиця «Element | Change | Entered values» (до 50 рядків); «Move documents» активна лише після Preview з `canApply`; п. 3 — «Documents moved to template version {version}: {count}.», подія безпеки `DocumentVersionMigrated`; п. 4 — червоний звіт з причинами («Entered values would be lost…», «…would change meaning…», «The versions differ in structure, not only in appearance.»), перенос неможливий; п. 5 — «Some sheets are submitted or approved: return them to work first.» / «The project is archived.»; п. 6 — «There is no other published version of this template.»; п. 7 — Preview: перенос неможливий, причина `grantsNotMapped` (⚠ діалог показує сирий ключ «grantsNotMapped» — дефект D3-1 звіту прогонки №3), API — 422 «The target version has no sheet, table or column with the code of a resource that has a deny grant, so the deny cannot be carried over. Remove or re-create that deny deliberately before moving the project.»; гранти аркуша/таблиці/колонки після переносу діють на нових Id (`ae38caec`, `3b0bdcb2`); кеш профілів скидається лише в процесі, що виконав перенос — інші інстанси до 60 хв (TTL) або перезапуск (`14416923`).
+- **Помилки:** `404 ECR-TMPL-0404 templateVersion`; `422 ECR-TMPL-0422 migrateSameVersion` / `migrateOtherTemplate` / `migrateTargetNotPublished`; `409 ECR-DOC-0409 migrateSheetsLocked` / `migrateProjectArchived`; `422 ECR-SCHM-0422 migrateStructural` / `migrateDataLoss` / `migrateGrantsNotMapped`.
 - **Вимоги:** ФВ-7.5.
 
 ---
@@ -642,11 +660,11 @@ Date, Bool, Lookup, Unit), бажано один темпоральний і о�
   5. Неіснуючий id; неіснуючий користувач (API).
   6. Переглянути себе й іншого користувача, що має роль лише через групу AD.
   7. ✎ 2026-10-02: «Resource type» = Sheet / Table / Column, «Resource ID» і **«Project ID»** (поле з'являється; без нього «Explain» вимкнена) → «Explain»; грант на проєкт, на аркуш і на колонку в одного користувача.
-- **Очікується (п. 7):** рівень береться з найдрібнішого оголошеного гранта в ланцюжку Проєкт→Аркуш→Таблиця→Колонка (грант на колонку перекриває аркуш); внески від предків підписано «Inherited from Project:N» / «Sheet:N»; без гранта на проєкт грант на аркуш нічого не дає; deny на проєкті — «Explicitly denied»; **застереження** «Document state … and assignment narrowing by periods are not taken into account…» стоїть під рядком «Resulting level», над alert заборони й таблицею внесків. API без `projectId` — `422 effectiveAccessProject`; чужий для шаблону проєкту аркуш — `404 effectiveAccessNotInProject`.
-- **Очікується:** п. 2 — кнопка вимкнена до id ≥ 1, запит не надсилається; п. 3 — «Resulting level: {level}», таблиця «Given by | Role | Assigned | Level | Scope | Counted»; зараховуються лише «Everywhere» і «Project is in scope»; «Narrowed to sheets or periods…» і «Assignment not in effect» — «No»; п. 4 — alert «Explicitly denied: a deny wins over any grant and over any global right…»; глобальне `Registry.EditData` / `Registry.View` піднімає рівень, якщо немає заборони; п. 5 — 404; п. 6 — для себе групові ролі видно, для іншого — «The groups in this person's sign-in ticket are not known here…». Розріз **нічого не змінює**.
+- **Очікується (п. 7):** рівень береться з найдрібнішого оголошеного гранта в ланцюжку Проєкт→Аркуш→Таблиця→Колонка (грант на колонку перекриває аркуш); внески від предків підписано «Inherited from Project:N» / «Sheet:N»; без гранта ≥ Read на проєкт внески нижче проєкту — «No: the project is not visible, so grants below it do not apply»; deny на проєкті — «Explicitly denied»; внесок ролі, звуженої до цього аркуша, — «Counted: Yes» з підписом «Narrowed by Sheets:F1», звуженої періодами — «No» з «Narrowed by Periods:…» (✎ 2026-10-02, `def5ade8`); **застереження** «Document state … and assignment narrowing by periods are not taken into account…» стоїть під рядком «Resulting level», далі — попередження «The role is narrowed by sheets or periods: the shown level may be HIGHER than the actual one for a given period…» (якщо є звужене призначення), потім alert заборони й таблиця внесків. API без `projectId` — `422 effectiveAccessProject`; чужий для шаблону проєкту аркуш — `404 effectiveAccessNotInProject`.
+- **Очікується:** п. 2 — кнопка вимкнена до id ≥ 1, запит не надсилається; п. 3 — «Resulting level: {level}», таблиця «Given by | Role | Assigned | Level | Scope | Counted»; зараховуються лише «Everywhere» і «Project is in scope»; «Narrowed to sheets or periods: counted on the sheets of its scope…» і «Assignment not in effect» на рівні проєкту — «No»; п. 4 — alert «Explicitly denied: a deny wins over any grant and over any global right…»; глобальне `Registry.EditData` / `Registry.View` піднімає рівень, якщо немає заборони; п. 5 — 404; п. 6 — для себе групові ролі видно, для іншого — «The groups in this person's sign-in ticket are not known here…». Розріз **нічого не змінює**.
 - **Помилки:** `422 ECR-REQ-0422 effectiveAccessResource` (хибна форма `resource`, напр. `Foo:1`) / `effectiveAccessProject` (Sheet/Table/Column без `projectId` або `projectId` ≤ 0); `404 ECR-SEC-0404 userNotFound`; `404 ECR-PRJ-0404 project`; `404 ECR-REG-0404 registryId`; `404 ECR-TMPL-0404 effectiveAccessResource` (немає аркуша/таблиці/колонки) / `effectiveAccessNotInProject`; `403 ECR-AUTH-0403` (зокрема людина з `Security.ManageRoles`, але без `Security.ManageUsers`: сторінку бачить, розріз — ні).
-- **API:** `GET /api/v1/security/users/{id}/effective-access?resource=<Kind>:<id>[&projectId=N]`; Kind — Registry, Project, Sheet, Table, Column (регістр не важливий). Поля: `level` (None/Read/Write/Submit/Approve/Manage), `isDenied`, `denyReason` (ExplicitDeny/NoGrant/null), `groupsFromTicket`, `caveat` (`DocumentStateNotConsidered` для Sheet/Table/Column), `contributions[]` з `source` (Grant/Permission), `roleCode`, `principalSid`, `level`, `isDeny`, `scope` (Unscoped/InScope/Narrowed/OutOfScope/Expired), `counted`, `inheritedFrom`.
-- **Обмеження:** ✎ 2026-10-02: для `Sheet`/`Table`/`Column` розріз не знає стану документа (подання, затвердження, закритий період) і звужень області періодами — це написано в самому застереженні; ФВ-6.16 лишається 🟨 до підтвердження людиною; рівень показано сирим значенням без перекладу. ⚠ ✎ 2026-10-02 (звірка з кодом, вручну не відтворено): для Sheet/Table/Column внесок ролі, **звуженої до цього самого аркуша**, показано «Narrowed» / «Counted: No», хоча `EditRules.Effective` такий шар застосовує — «Resulting level» може бути вищим, ніж дають рядки «Counted: Yes». Якщо побачите — це відома розбіжність пояснення, не нова (винесено листом).
+- **API:** `GET /api/v1/security/users/{id}/effective-access?resource=<Kind>:<id>[&projectId=N]`; Kind — Registry, Project, Sheet, Table, Column (регістр не важливий). Поля: `level` (None/Read/Write/Submit/Approve/Manage), `isDenied`, `denyReason` (ExplicitDeny/NoGrant/null), `groupsFromTicket`, `caveat` (`DocumentStateNotConsidered` для Sheet/Table/Column), `contributions[]` з `source` (Grant/Permission), `roleCode`, `principalSid`, `level`, `isDeny`, `scope` (Unscoped/InScope/Narrowed/OutOfScope/Expired), `counted`, `inheritedFrom`, `narrowedBy` (`Sheets:F1,F2` / `Periods:a..b`, лише для Narrowed), `notCountedReason` (`ProjectNotVisible` або null); у корені — `projectId` і `levelMayExceedActual` (true, якщо є призначення зі scope Narrowed).
+- **Обмеження:** ✎ 2026-10-02: для `Sheet`/`Table`/`Column` розріз не знає стану документа (подання, затвердження, закритий період) і звужень області періодами — це написано в самому застереженні; ФВ-6.16 лишається 🟨 до підтвердження людиною; рівень показано сирим значенням без перекладу. ✎ 2026-10-02 (прохід №3): колишня розбіжність «звужена до аркуша роль — Counted: No» виправлена (`def5ade8`, `EffectiveAccess.cs:293`); звуження періодами розріз не знає, тож показаний рівень може бути вищим за фактичний у конкретному періоді — про це й попередження «may be HIGHER».
 - **Вимоги:** ФВ-6.16, D-220.
 
 ---
@@ -701,11 +719,11 @@ Date, Bool, Lookup, Unit), бажано один темпоральний і о�
 ### Н-Л2. Negotiate без allowlist — ✅ (за тестами; вручну не пройдено)
 
 - **Кроки:** активне джерело PiWebApi із Negotiate (або порожньою автентифікацією) без `PiWebApi:AllowedHosts` → зберегти; відкрити `/health/ready` (картка `sources`).
-- **Очікується:** `Warning` у журналі при збереженні; картка `sources` — `Degraded` з повідомленням `health.sources.negotiateNoAllowlist` («Sources with Windows authentication and no allowed-hosts list (PiWebApi:AllowedHosts): {count}.»; рахуються лише джерела з активними сутностями збору; коли є падіння (Unhealthy) чи прогалини покриття (Degraded), цей текст додається до їхнього повідомлення, окремим повідомленням — коли інших причин немає); після задання `AllowedHosts` (потрібен перезапуск служби — не перевірено) — без попередження.
+- **Очікується:** `Warning` у журналі при збереженні; картка `sources` — `Degraded` з повідомленням `health.sources.negotiateNoAllowlist` («Sources with Windows authentication and no allowed-hosts list: {count}. Set PiWebApi:AllowedHosts in the EcrApi configuration and restart EcrApi.»; рахуються лише джерела з активними сутностями збору; коли є падіння (Unhealthy) чи прогалини покриття (Degraded), цей текст додається до їхнього повідомлення, окремим повідомленням — коли інших причин немає); після задання `AllowedHosts` (потрібен перезапуск служби — не перевірено) — без попередження.
 - **Уточнення (звірено з кодом `SourcesHealthCheck`/`EndpointNetwork`):** `AllowedHosts` читається з конфігурації `PiWebApi:AllowedHosts`; задається в `appsettings.Production.json` або `ECR_PiWebApi__AllowedHosts__0=…` у `Environment` служби `EcrApi`; потім `Restart-Service EcrApi` → `/health/ready`, картка `sources` — Healthy (за відсутності інших причин: запуск, покриття, падіння). Інсталятор і `deploy-ecr.ps1` ключ не пишуть. Що перезапуск обов'язковий, живою перевіркою не підтверджено.
 - **Без PI:** повідомлення `negotiateNoAllowlist` рахує лише джерела з **активними сутностями збору**, а сутність без PI не створити (TESTER-GUIDE п. 4.4, п. 3) — тож `Degraded` цієї причини **не тестується на стенді без PI**. Без активних джерел картка `sources` — `Healthy` (TESTER-GUIDE п. 5.2); джерело, що не запускалось, дає `Degraded`, а активне джерело з невдалим останнім запуском — `Unhealthy` (503), тому на стенді без PI тримайте джерела неактивними або не створюйте їх.
 - **Вимоги:** ФВ-13.11.
-- ✎ 2026-10-01, живий прохід: `negotiateNoAllowlist` виводиться в одному рядку з «Sources with a coverage gap: N», а лічильник coverage gap **завищений** (сутності рахуються двічі) — 🟨 виправляється (lane `srcfix`).
+- ✎ 2026-10-01, живий прохід: `negotiateNoAllowlist` дописується в той самий рядок, що й «Collection entities with a coverage gap: {count}.» (так задумано). ✎ 2026-10-02 (прохід №3): подвійний підрахунок сутностей виправлено (`1017d7a9`) — кожна сутність рахується один раз (`SourcesHealthCheck.cs:64-67`).
 
 ### Н-Л3. Підтвердження зміни адреси Negotiate-джерела — ✅ (тести серверні 2 + клієнтські 2; вручну не пройдено)
 
@@ -754,13 +772,20 @@ Date, Bool, Lookup, Unit), бажано один темпоральний і о�
 - **Що перевірити:** після застосування міграції `PerfFixJobsStaleHealth` існують `IX_JobProgress_FanOutParent`, `IX_CalculationRun_Project_FinishedAt`, `IX_JobProgress_State_UpdatedAt`, стовпець `FanOutParentJobId` (persisted, з `ISJSON`-захистом, `cdeee2b8`); стан проєктної задачі й `/health/ready` не сповільнюються на великому журналі.
 - **За повідомленням коміту `8ce87536`** (500 тис. рядків `JobProgress`, 1,5 млн `CalculationRun`, стенд розробника): статус проєктної задачі 2,5 с → 14 мс; застарілість зрізу при завершенні прогону 18 с → 5 мс; `/health/ready` 1,6 с → 0,19 с. Цифри на обладнанні замовника — не заміряно.
 
+### Н-М4. Метрика глибини черги `ecr.jobs.queue_depth` — 🟨 (на живому колекторі не перевірено)
+
+✎ 2026-10-02 (`6d715ba4`, B5.10).
+
+- **Що перевірити:** за ввімкненої `Telemetry` у колекторі є gauge `ecr.jobs.queue_depth` з тегами `lane`/`state` — лише від Api у режимі черги `Database`; значення оновлюється раз на `Jobs:QueueDepth:RefreshSeconds` (типово 15).
+- **Негатив:** `Jobs:QueueDepth:RefreshSeconds` < 5 — перевірка конфігурації не проходить, служба не стартує.
+
 ---
 
 ## Н-Н. Доступність нових екранів
 
 - **Статус:** 🟨 — перевірено автоматично (axe-тести), вручну з екранним читачем не проходилось.
-- **Що зроблено** (`855d79f1`, `0318e57c` — хеші lane-гілок): повернення фокуса після діалогів і форм (події PI, умовне форматування, поля/правила довідника), фокус за переставленою колонкою, кожен крок конвеєра — іменована область, обов'язкове поле — `required`, рядок до видалення без низького контрасту; axe-тести конструктора шаблону й конструктора довідника в обох темах; діалоги підтвердження й панель зауважень документа підключаються через `import()`.
-- **Кроки:** пройти клавіатурою (Tab/Enter/Esc) екрани `/admin/sources` (вкладка «Events from PI»), `/admin/pipeline`, конструктор шаблону (колонки, умовне форматування), конструктор довідника, `/admin/registries/:code/entries`, сторінку впливу довідника.
+- **Що зроблено** (`855d79f1`, `0318e57c` — хеші lane-гілок): повернення фокуса після діалогів і форм (події PI, умовне форматування, поля/правила довідника), фокус за переставленою колонкою, кожен крок конвеєра — іменована область, обов'язкове поле — `required`, рядок до видалення без низького контрасту; axe-тести конструктора шаблону й конструктора довідника в обох темах; діалоги підтвердження й панель зауважень документа підключаються через `import()`. ✎ 2026-10-02 (`544b77a2`): підтвердження видалення розкладу (крок 2 конвеєра / вкладка «Schedule») ставить фокус на «Cancel», а «Cancel» повертає його на «Remove»; лінивий діалог «Access» на `/admin/security` після Esc повертає фокус на кнопку рядка.
+- **Кроки:** пройти клавіатурою (Tab/Enter/Esc) екрани `/admin/sources` (вкладка «Events from PI»), `/admin/pipeline`, конструктор шаблону (колонки, умовне форматування), конструктор довідника, `/admin/registries/:code/entries`, сторінку впливу довідника, `/admin/security` → «Access».
 - **Очікується:** видимий фокус, після закриття діалогу фокус повертається на ініціатор, кнопки в рядках мають імена з контексту (напр. «Remove: {code}»), контраст ≥ AA в обох темах.
 - **Вимоги:** ФВ-14.9, ФВ-14.14…14.24.
 
@@ -788,16 +813,16 @@ Date, Bool, Lookup, Unit), бажано один темпоральний і о�
   3. Оновити сторінку; подивитися відповідь `GET` у DevTools.
   4. Поставити «Use these settings» → «Save SMTP settings».
   5. Залишити «Password» порожнім і зберегти; потім «Remove the stored password» і зберегти.
-  6. Відмови (кожна окремо): порт 0; увімкнено з порожнім сервером; сервер `169.254.169.254`; адреса `a@[127.0.0.1]`, `"x"@d.com`, `a@d.com.`, `a@-d.com`; автентифікація за паролем без логіна; через API `encryptionMode: "Ssl"`.
+  6. Відмови (кожна окремо): порт 0; увімкнено з порожнім сервером; сервер `169.254.169.254`; адреса `a@[127.0.0.1]`, `"x"@d.com`, `a@d.com.`, `a@-d.com`; автентифікація за паролем без логіна; через API `encryptionMode: "Ssl"`; ✎ 2026-10-02: «Authentication» = «Login and password» при «Encryption» = None; зі збереженим паролем змінити сервер, порт, шифрування або логін і не вводити пароль.
 - **Очікується:**
   - п. 1: порт 587, STARTTLS, «Authentication» = None, бейдж «Mail is not configured: events stay queued.» (якщо в конфігурації процесу немає `Smtp:Host`/`Smtp:From`);
   - п. 2: тост «SMTP settings saved.»; бейдж не змінюється — вимкнені налаштування не діють (`source=none`), це **чернетка**: порожній сервер у вимкненому стані дозволено;
   - п. 3: під паролем «A password is stored. Leave empty to keep it.»; у JSON **немає** пароля, лише `hasPassword: true`;
   - п. 4: бейдж «In use: the settings below.» (`source=database`) — для цього потрібні увімкнення, сервер і адреса відправника разом;
-  - п. 5: порожній пароль зберігає старий; «Remove the stored password» стирає (у ввімкненому стані з `Password` — відмова `auth`, бо пароля не лишиться);
-  - п. 6: `422 ECR-REQ-0422 smtpSettingsInvalid` («The SMTP settings are not valid: check the field "{name}".») з полем `port` / `host` / `host` / `from` / `auth`; невідомий рядок переліку — `422 malformedRequest`. Приватні й loopback-адреси сервера **дозволені** (SMTP у локальній мережі), link-local і хмарні метадані — ні.
-- **Журнал безпеки:** `SmtpSettingsCreated` / `SmtpSettingsUpdated` з `passwordChanged`, без самого пароля.
-- **Обмеження:** 🟨 `RowVersion` не перевіряється — дві вкладки: перемагає останнє збереження. Інші вузли підхоплюють зміну до 30 с (кеш транспорту). Неявного TLS (порт 465) немає — лише STARTTLS або без шифрування. Раніше збережений From, що не проходить суворіший валідатор, читається, але наступний PUT дасть 422 `from` (TESTER-HANDOVER, обмеження про валідатор).
+  - п. 5: порожній пароль зберігає старий, лише якщо сервер, порт, шифрування й логін не змінено (інакше п. 6, `smtpPasswordReentryRequired`); «Remove the stored password» стирає (у ввімкненому стані з `Password` — відмова `auth`, бо пароля не лишиться);
+  - п. 6: `422 ECR-REQ-0422 smtpSettingsInvalid` («The SMTP settings are not valid: check the field "{name}".») з полем `port` / `host` / `host` / `from` / `auth`; невідомий рядок переліку — `422 malformedRequest`. Приватні й loopback-адреси сервера **дозволені** (SMTP у локальній мережі), link-local і хмарні метадані — ні. ✎ 2026-10-02 (`68c5f25c`): пароль без шифрування — `422 smtpPasswordNeedsTls` (поле `encryption`) «Password authentication needs encryption: choose STARTTLS, or switch authentication off for an internal relay.»; зміна сервера/порту/шифрування/логіна без нового пароля — `422 smtpPasswordReentryRequired` (поле `password`) «The server, port, encryption or login was changed, so the saved password is not carried over: enter the password again.»
+- **Журнал безпеки:** `SmtpSettingsCreated` / `SmtpSettingsUpdated` з `passwordChanged` (true і тоді, коли пароль стерто — «Remove…» або перехід на Authentication None), без самого пароля.
+- **Обмеження:** 🟨 `RowVersion` не перевіряється — дві вкладки: перемагає останнє збереження. Інші вузли підхоплюють зміну до 30 с (кеш транспорту). Неявного TLS (порт 465) немає — лише STARTTLS або без шифрування. Інтегрованої (Windows/NTLM) автентифікації немає: без логіна — лише анонімна відправка, і для `Smtp:*` теж (`e333418b`). Раніше збережений From, що не проходить суворіший валідатор, читається, але наступний PUT дасть 422 `from` (TESTER-HANDOVER, обмеження про валідатор).
 - **Вимоги:** D-263, ФВ-12.x (сповіщення).
 
 ### Н-О2. «Send test message» і межа частоти проб — ✅
@@ -811,13 +836,13 @@ Date, Bool, Lookup, Unit), бажано один темпоральний і о�
   5. Шість проб поспіль за хвилину (UI або API); з іншого користувача — ще одна.
   6. Користувач **без** права — 6 запитів поспіль.
 - **Очікується:**
-  - п. 1: **не відмова запиту**, а `200 {ok:false, messageKey:"notifications.test.smtpNotConfigured"}` — «The SMTP transport is not configured on the server.»;
+  - п. 1: **не відмова запиту**, а `200 {ok:false, messageKey:"notifications.test.smtpNotConfigured"}` — «SMTP is not configured: fill in and enable the SMTP settings, or set Smtp:* in the process configuration.»;
   - п. 2: кнопка **неактивна** при порожньому полі й при незбережених змінах; «порожня адреса → власна пошта» діє **лише через API**;
   - п. 3: `422 ECR-REQ-0422 smtpTestRecipientInvalid` («The test recipient is not an email address.»), поле `to` — проба шле рівно на одну адресу;
   - п. 4: «The channel accepted the test message.», лист «ECR test notification» / «SMTP settings test message.»; збої — `ok:false` з ключем категорії `notifications.test.smtp.{dns|connect|tls|auth|relay|timeout}`, нерозпізнаний — «The channel refused the test message.»; журнал `SmtpSettingsTested` (`recipient: entered|own`, домен);
-  - п. 5: шоста — `429 ECR-REQ-0429` з заголовком `Retry-After` і текстом «Too many test messages in a short time…»; інший користувач не заблокований (межа 5/хв на користувача, `Security:RateLimit:SmtpTestPermitPerMinute`); системна межа — 30/год на всі вузли процесу (`…SmtpTestSystemPermitPerHour`); межа спільна з «Send test» каналу;
+  - п. 5: шоста — `429 ECR-REQ-0429` з заголовком `Retry-After` і текстом «Too many test messages in a short time…»; інший користувач не заблокований (межа 5/хв на користувача, `Security:RateLimit:SmtpTestPermitPerMinute`); системна межа — 30/год на **кожен процес** API (лічильник у пам'яті; на N вузлах — N×30; `…SmtpTestSystemPermitPerHour`); проба, що завершилась будь-яким 4xx (422 адреси, 404 каналу, 415), токен системної квоти повертає, 5xx — ні (`71fa3746`, `14fb0ec7`); межа спільна з «Send test» каналу;
   - п. 6: перші п'ять — 403, шостий — 429 (обмежувач стоїть перед перевіркою права), системна квота при цьому не витрачається.
-- **Обмеження:** 🟨 тайм-аут сервера може прийти як «The channel refused the test message.», а не `smtp.timeout` (`SmtpClient` віддає загальний `SmtpException`; на живому SMTP не перевірено). Після заміни сертифіката Data Protection збережений пароль не розшифровується — проба покаже загальну відмову, а не «login rejected»; пароль треба ввести наново.
+- **Обмеження:** 🟨 тайм-аут сервера може прийти як «The channel refused the test message.», а не `smtp.timeout` (`SmtpClient` віддає загальний `SmtpException`; на живому SMTP не перевірено; до того ж `SmtpClient.Timeout` на `SendMailAsync` не діє — див. дефект D3-4 звіту прогонки №3: завислий сервер тримає пробу до обриву TCP). Після заміни сертифіката Data Protection збережений пароль не розшифровується — проба покаже загальну відмову, а не «login rejected»; пароль треба ввести наново.
 - **Вимоги:** D-263.
 
 ### Н-О3. Канали, матриця правил і журнал доставок — ✅
@@ -825,19 +850,19 @@ Date, Bool, Lookup, Unit), бажано один темпоральний і о�
 - **API:** `/api/v1/notifications/channels` (`GET`, `POST` → 201, `PUT {id}`, `DELETE {id}` → 204, `PUT {id}/secret`, `POST {id}/test`); `GET`/`PUT /api/v1/notifications/rules`; `GET /api/v1/notifications/deliveries?limit&cursor&channelId&status`.
 - **Кроки:**
   1. «Add channel» → «Transport» = «Email (SMTP)», «Name», «Recipients» (через кому), «Subject prefix», «Recipient roles».
-  2. Канал без адрес і без ролей; з сервером/портом у `settings` (API); з неіснуючою роллю (API); Teams-канал із ролями; дві однакові назви.
+  2. Канал без адрес і без ролей; з сервером/портом у `settings` (API); з неіснуючою роллю (API); Teams-канал із ролями; дві однакові назви; ✎ 2026-10-02: понад 50 явних адрес; адреса `a@[10.0.0.1]`; «Subject prefix» понад 200 символів.
   3. «Rules»: для «Reporting period opened» і «Reporting period entered its grace window» вибрати канал і поріг «Info» → «Save rules».
   4. Перевести період `Open → Grace` (за годинником `PeriodStateJob`) і окремо — відкриття нового періоду.
   5. «Deliveries»: фільтри «Channel», «Outcome»; повторити ту саму подію в межах 30 хв.
   6. Вимкнути канал, лишивши правило; повторити подію.
 - **Очікується:**
   - п. 1: канал у переліку; `transportConfigured` = чи налаштовано SMTP (Н-О1);
-  - п. 2: `422 notificationChannelInvalid` / `notificationChannelTransportFromConfiguration` («The SMTP server, port, TLS and sender address come from the application settings…») / `notificationChannelRoleInvalid` / `notificationChannelRoleInvalid` / `notificationChannelNameTaken`; неіснуючий id — `404 ECR-INT-0404 notificationChannel`;
+  - п. 2: `422 notificationChannelInvalid` / `notificationChannelTransportFromConfiguration` («The SMTP server, port, TLS and sender address come from the SMTP settings (or from the process configuration while they are not used); a channel cannot set them.») / `notificationChannelRoleInvalid` / `notificationChannelRoleInvalid` / `notificationChannelNameTaken`; `422 channelTooManyRecipients` («A channel accepts at most 50 explicit recipient addresses.»), `422 notificationChannelRecipientInvalid` («One of the recipients is not an email address.»), заголовок понад 200 — `notificationChannelInvalid` (`a6bb09ab`); неіснуючий id — `404 ECR-INT-0404 notificationChannel`;
   - п. 3: «Rules saved.»; матриця має **7** подій: «Background job failed», «Consistency issues found», «Partitions running out», «Collection from a source failed», «Export failed», «Reporting period opened», «Reporting period entered its grace window»; PUT **замінює всю матрицю** (клітинки, яких немає в тілі, видаляються); журнал `NotificationRulesReplaced`;
   - п. 4: лист у канал; подія grace — лише на переході `Open → Grace` (не на повторному відкритті `Closed → Grace`), серйозність Info;
   - п. 5: «Sent»; повтор у 30 хв — «Suppressed»; канал без транспорту — «Failed» з причиною, **повторних спроб немає**;
   - п. 6: доставок немає — диспетчер вимкнений канал пропускає.
-- **Адресати SMTP-каналу:** явні адреси + активні користувачі ролей із заповненою поштою (`ReceivesAlerts` не потрібен); мова — з налаштування користувача, інакше en; явні адреси — один лист мовою за замовчуванням; `title` каналу — префікс теми. У пробі каналу ролі розгортаються до 20 адрес; нікому слати — `notifications.test.smtpNoRecipients`.
+- **Адресати SMTP-каналу:** явні адреси + активні користувачі ролей із заповненою поштою (`ReceivesAlerts` не потрібен); мова — з налаштування користувача, інакше en; явні адреси — один лист мовою за замовчуванням; `title` каналу — префікс теми. Проба каналу шле не більш ніж 20 адресатам **разом**: спершу явні адреси, решта місць — користувачам ролей (`a6bb09ab`); ⚠ адресатів ролей вибрано без перевірки строку призначення (`ValidFrom/ValidTo`) і без групових призначень — дефект D3-3 звіту прогонки №3; нікому слати — `notifications.test.smtpNoRecipients`.
 - **Помилки:** `422 notificationRuleInvalid` (невідома подія/серйозність або дві клітинки на пару); `404 notificationChannel` у правилі; журнал: `422 pageSizeOutOfRange` (limit поза 1…200), `422 notificationDeliveryStatus` (status не Sent/Failed/Suppressed).
 - **Вимоги:** D-263, AN-9.
 
@@ -880,10 +905,10 @@ HTTP-тести: `CollectionSchedulesControllerTests.ФВ_13_15_*` (нові).
   5. API: B залежить від себе; від C (інше з'єднання); від неіснуючого id; PUT без полів залежності.
 - **Очікується:**
   - п. 1: «Schedule saved.»; у списку вибору — лише розклади того ж з'єднання, без самого себе; підказка «Scheduled runs wait for a successful run of the chosen schedule of the same connection. Manual and catch-up runs are not blocked.»;
-  - п. 2: колонка «Depends on schedule», без залежності — «—»;
+  - п. 2: колонка «Depends on schedule», без залежності — «—»; залежність на розклад, якого немає в переліку, — «#<id>»;
   - п. 3: `422 collectionScheduleDependencyCycle` — «This dependency would close a cycle: the other schedule already depends on this one.»;
-  - п. 4: клієнт шле `clearDependency: true`, у списку «—» (placeholder «No dependency»);
-  - п. 5: `422 …DependencyCycle` (самозалежність — той самий ключ, текст «the other schedule» тут неточний) / `422 …DependencyOtherSource` («A schedule can depend only on a schedule of the same connection.») / `422 …DependencyNotFound` («The schedule this one should depend on does not exist.»); у ProblemDetails — `messageKey` і `dependsOn` (рядком); PUT без полів залежності її **не змінює**, `clearDependency=true` перемагає `dependsOnScheduleId`.
+  - п. 4: у списку є опція «No dependency» (нею залежність знімається й з клавіатури) і хрестик; обидва шлють `clearDependency: true` (`c6c95b41`);
+  - п. 5: `422 …DependencyCycle` (самозалежність — той самий ключ, текст «the other schedule» тут неточний) / `422 …DependencyOtherSource` («A schedule can depend only on a schedule of the same connection.») / `422 …DependencyNotFound` («The schedule this one should depend on does not exist.»); ланцюг залежностей цілі глибше 50 кроків теж дає `…DependencyCycle`; у ProblemDetails — `messageKey` і `dependsOn` (рядком); PUT без полів залежності її **не змінює**, `clearDependency=true` перемагає `dependsOnScheduleId`.
 - **Помилки:** ще й звичні `409 collectionScheduleChanged` (стара версія), `422 collectionScheduleIfMatch`.
 - **Вимоги:** ФВ-13.15.
 
@@ -893,7 +918,7 @@ HTTP-тести: `CollectionSchedulesControllerTests.ФВ_13_15_*` (нові).
   1. B залежить від A; обидва ввімкнені й уже мали хоча б по одному прогону; cron B — найближчі хвилини, cron A — далеко в майбутньому.
   2. Запустити B вручну («Collect» на `/admin/sources` — він залежністю **не блокується**, вікно 7 днів), щоб останній прогін B став пізнішим за A; дочекатися планового запуску B.
   3. Запустити A вручну; дочекатися наступного планового запуску B.
-  4. Видалити розклад A (крок 2 конвеєра → «Remove»).
+  4. Видалити розклад A (крок 2 конвеєра → «Remove» → підтвердження «Remove this schedule? Collection will no longer run automatically.» → «Remove»).
   5. Не перечитуючи сторінку, змінити розклад B.
 - **Очікується:**
   - п. 2: задача B завершується **успішно** з прогресом «Entity {sourceEntityId}: skipped, waiting for a successful run of schedule {dependsOn}» (`{dependsOn}` — **id розкладу**); на `/admin/sources` у журналі покриття — бейдж «Waiting for dependency» (фільтр `status=SkippedDependency`, `GET /api/v1/collection-runs/coverage-events?status=SkippedDependency`), одна подія на сутність на годину; у зведенні сповіщень — Info;
@@ -901,7 +926,7 @@ HTTP-тести: `CollectionSchedulesControllerTests.ФВ_13_15_*` (нові).
   - вимкнений або видалений A, A без жодного прогону, а також A, що не бігав понад 48 год, — B **не** чекає;
   - п. 4: `204`; у B залежність мовчки обнуляється (немає відмови FK);
   - п. 5: `409` і кнопка «Reload the current version» — версія рядка B змінилась при обнуленні.
-- **Обмеження:** 🟨 «успішний прогін» A — це момент **старту** його задачі (`LastRunAt`), а не успіх: збій A після старту B не зупиняє; ручний запуск B зсуває його `LastRunAt`, і наступний плановий чекатиме нового прогону A. Обнулення залежності в B при видаленні A **не пишеться** в журнал змін розкладу окремим записом. Без PI не тестується (розклад прив'язаний до сутності джерела); відмови Н-П1 п. 5 — тестуються через API.
+- **Обмеження:** 🟨 «успішний прогін» A — це прогін, що завершився без винятку, а мітка — час **старту** задачі (`LastRunAt`, `CollectionJob.cs:169-192`): відмова PI-джерела (непокритий діапазон) рахується як прогін, відмова автентифікації чи конфігурації — ні; підказка «waits for a successful run» це перебільшує; ручний запуск B зсуває його `LastRunAt`, і наступний плановий чекатиме нового прогону A. Обнулення залежності в B при видаленні A **не пишеться** в журнал змін розкладу окремим записом. Без PI не тестується (розклад прив'язаний до сутності джерела); відмови Н-П1 п. 5 — тестуються через API.
 - **Вимоги:** ФВ-13.15.
 
 ---
@@ -969,5 +994,5 @@ HTTP-тести: `CollectionSchedulesControllerTests.ФВ_13_15_*` (нові).
 | `FEATURE-HSE301-VIEW.md` §11.6 | ендпоінта імпорту методологій немає | `POST /api/v1/methodologies/import` (Н-З4) |
 | `FEATURE-REGISTRY-TABLES.md` :761, :767 | історія без видів name/active; «422 закритий період» | види є; `impactDocumentNotAffected` |
 | `OPEN-ITEMS.md` :269 (✎ 2026-10-02) | D-258 «не зроблено: розбір лише ISO» | синк довідників читає `MM/dd/yyyy` і ISO (`RegistrySyncValidity.cs`); у синку подій строгого формату немає (Н-А5а) |
-| текст `coverageEvents.eventRemovalLimit` (сід) | «confirm the removal manually» | підтвердження (`confirmRemoval`) немає ні в UI, ні в API (Н-А5а) |
+| текст `coverageEvents.eventRemovalLimit` (сід) | «confirm the removal manually» | у UI й API підтвердження немає: обробник і задача `confirmRemoval` підтримують, ендпоінт `POST sources/{id}/source-events/sync` його не приймає (Н-А5а) |
 | коментар `SmtpNotificationSender.cs:35`; `OutboxDispatcher` «позначається невдалою» | «три спроби, далі Failed»; без адресата — невдача | outbox: до 5 спроб; без адресата — `Pending` з `Attempts+1` до п'ятої (Н-О5) |

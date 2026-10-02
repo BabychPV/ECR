@@ -101,6 +101,29 @@ public sealed class CollectionScheduleDependencyGateTests(SqlServerFixture sql)
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "ФВ-13.15")]
+    public async Task Збір_із_половиною_вікна_теж_не_плановий_і_залежність_його_не_блокує()
+    {
+        await using var db = Context();
+        var (_, waiting) = await ArrangeAsync(db, dependencyRan: Now.AddHours(-5), ownRan: Now.AddHours(-3));
+        var runner = Substitute.For<ICollectionRunner>();
+
+        // ⚠ МУТАЦІЙНИЙ ДОКАЗ (CollectionJob): прибрати з умови «планового» запуску `FromUtc: null` або
+        // `ToUtc: null` — попередній тест (обидві межі задані) лишався зеленим, а тут один із двох запусків
+        // пропускався б як плановий.
+        await Job(db, runner).ExecuteAsync(
+            new CollectionJobRequest(waiting, Now.AddDays(-2), null), Substitute.For<IJobProgress>(), CancellationToken.None);
+        await Job(db, runner).ExecuteAsync(
+            new CollectionJobRequest(waiting, null, Now.AddHours(-1)), Substitute.For<IJobProgress>(), CancellationToken.None);
+
+        await runner.Received(2).RunAsync(waiting, Arg.Any<DateTime>(), Arg.Any<DateTime>(), Arg.Any<IJobProgress>(), Arg.Any<CancellationToken>());
+        Assert.False(await db.CollectionCoverages.AnyAsync(
+            c => c.SourceEntityId == waiting && c.Status == CollectionCoverage.SkippedDependency));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-13.15")]
     public async Task Ключ_самопосилання_без_каскаду_видалення_без_зняття_залежності_відхиляється_базою()
     {
         await using var db = Context();

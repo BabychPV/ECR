@@ -177,7 +177,7 @@ public sealed class SmtpTestRateLimitTests(SqlServerFixture sql)
 
         using var one = await a.PostAsJsonAsync(new Uri("/api/v1/notifications/smtp/test/", UriKind.Relative), new { to = "probe@example.com" })
             .ConfigureAwait(true);
-        using var two = await b.PostAsync(new Uri("/api/v1/notifications/channels/999999/test/", UriKind.Relative), null)
+        using var two = await b.PostAsJsonAsync(new Uri("/api/v1/notifications/smtp/test/", UriKind.Relative), new { to = "probe@example.com" })
             .ConfigureAwait(true);
         Assert.NotEqual(HttpStatusCode.TooManyRequests, one.StatusCode);
         Assert.NotEqual(HttpStatusCode.TooManyRequests, two.StatusCode);
@@ -186,6 +186,67 @@ public sealed class SmtpTestRateLimitTests(SqlServerFixture sql)
         using var three = await a.PostAsJsonAsync(new Uri("/api/v1/notifications/smtp/test/", UriKind.Relative), new { to = "probe@example.com" })
             .ConfigureAwait(true);
         Assert.Equal(HttpStatusCode.TooManyRequests, three.StatusCode);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Відхилені_валідацією_і_пошуком_проби_не_списують_системну_квоту()
+    {
+        using var baseApp = new EcrApiFactory(sql);
+        using var app = baseApp.WithWebHostBuilder(
+            b => b.UseSetting("Security:RateLimit:SmtpTestSystemPermitPerHour", "2"));
+        using var a = await SystemHealthControllerTests.SignedInAsync(sql, app, Permission).ConfigureAwait(true);
+        using var b = await SystemHealthControllerTests.SignedInAsync(sql, app, Permission).ConfigureAwait(true);
+
+        // 404 (немає каналу) ×4 від двох користувачів: квота 2, а 429 немає — токен повернуто.
+        // Мутація: прибрати `lease.Refund()` у `SmtpTestQuotaMiddleware` — третя проба дає 429 і тест падає.
+        for (var i = 0; i < 2; i++)
+        {
+            using var n1 = await ProbeChannelAsync(a).ConfigureAwait(true);
+            using var n2 = await ProbeChannelAsync(b).ConfigureAwait(true);
+            Assert.Equal(HttpStatusCode.NotFound, n1.StatusCode);
+            Assert.Equal(HttpStatusCode.NotFound, n2.StatusCode);
+        }
+
+        // 422 (непридатне тіло) теж не списує.
+        using var bad = await a.PostAsJsonAsync(
+            new Uri("/api/v1/notifications/smtp/test", UriKind.Relative), new { to = "не-адреса" }).ConfigureAwait(true);
+        Assert.NotEqual(HttpStatusCode.TooManyRequests, bad.StatusCode);
+        Assert.True((int)bad.StatusCode is >= 400 and < 500, $"очікувано 4xx, є {bad.StatusCode}");
+
+        // Прийняті проби (не 4xx) списують: дві проходять, третя — 429.
+        using var ok1 = await ProbeAsync(a).ConfigureAwait(true);
+        using var ok2 = await ProbeAsync(b).ConfigureAwait(true);
+        Assert.True((int)ok1.StatusCode < 400, $"{ok1.StatusCode}");
+        Assert.True((int)ok2.StatusCode < 400, $"{ok2.StatusCode}");
+
+        using var over = await ProbeAsync(a).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.TooManyRequests, over.StatusCode);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Відповідь_4xx_без_винятку_415_теж_повертає_токен()
+    {
+        using var baseApp = new EcrApiFactory(sql);
+        using var app = baseApp.WithWebHostBuilder(
+            b => b.UseSetting("Security:RateLimit:SmtpTestSystemPermitPerHour", "1"));
+        using var a = await SystemHealthControllerTests.SignedInAsync(sql, app, Permission).ConfigureAwait(true);
+
+        // Мутація: замінити умову `StatusCode is >= 400 and < 500` у SmtpTestQuotaMiddleware на хибну — другий цикл дає 429.
+        for (var i = 0; i < 3; i++)
+        {
+            using var content = new StringContent("не json", System.Text.Encoding.UTF8, "text/plain");
+            using var broken = await a.PostAsync(new Uri("/api/v1/notifications/smtp/test", UriKind.Relative), content)
+                .ConfigureAwait(true);
+            Assert.NotEqual(HttpStatusCode.TooManyRequests, broken.StatusCode);
+            Assert.True((int)broken.StatusCode is >= 400 and < 500, $"очікувано 4xx, є {broken.StatusCode}");
+        }
+
+        using var ok = await ProbeAsync(a).ConfigureAwait(true);
+        Assert.True((int)ok.StatusCode < 400, $"{ok.StatusCode}");
     }
 
     private static Task<HttpResponseMessage> ProbeAsync(HttpClient client)

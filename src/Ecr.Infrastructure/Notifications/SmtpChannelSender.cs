@@ -62,13 +62,21 @@ public sealed class SmtpChannelSender(
             .Select(r => r.Trim())
             .ToList();
 
+        // ⛔ Ліміт (проба) — на ВСІХ адресатів разом: спершу явні, решта — ролям (рев'ю ent6 S3).
+        var limit = message.RecipientLimit ?? int.MaxValue;
+
+        if (recipients.Count > limit)
+        {
+            recipients = recipients.Take(limit).ToList();
+        }
+
         var byRole = await RoleRecipientsAsync(channel.Id, ct).ConfigureAwait(false);
 
         // ⚠ Адреса, що вже є в явному переліку, у групу мови не потрапляє вдруге: людина отримує один лист.
         var explicitSet = recipients.ToHashSet(StringComparer.OrdinalIgnoreCase);
         var groups = byRole
             .Where(r => explicitSet.Add(r.Email))
-            .Take(message.RecipientLimit ?? int.MaxValue)
+            .Take(Math.Max(0, limit - recipients.Count))
             .GroupBy(r => r.Language, StringComparer.OrdinalIgnoreCase)
             .ToList();
 

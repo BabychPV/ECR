@@ -184,25 +184,15 @@ public sealed class AccessDecisionService(
     }
 
     /// <inheritdoc />
-    public async Task InvalidateProfileAsync(int userId, CancellationToken ct)
+    public Task InvalidateProfileAsync(int userId, CancellationToken ct)
     {
-        var stamp = await db.Users
-            .AsNoTracking()
-            .Where(u => u.Id == userId)
-            .Select(u => u.SecurityStamp)
-            .FirstOrDefaultAsync(ct)
-            .ConfigureAwait(false);
-
-        if (stamp is not null)
-        {
-            // ⚠ Той самий відбиток груп, яким `BuildProfileAsync` кладе запис
-            // (`Q-187`): без нього точкове скидання відбирало б за ключем
-            // `groupsFingerprint: ""`, а реальний запис власної сесії творця
-            // (є групи → непорожній відбиток) лишався б у кеші недоторканим —
-            // тобто щойно виданий грант знову чекав би сплину 30 хв.
-            profileCache.Evict(
-                userId, stamp, await GroupsFingerprintAsync(GroupSidsFor(userId), ct).ConfigureAwait(false));
-        }
+        // ⚠ Скидаються ВСІ записи користувача за будь-якого штампа й відбитку
+        // груп. Раніше ціль обчислювалась як ключ із відбитком ПОТОЧНОЇ сесії
+        // (`GroupSidsFor`): для чужого користувача це порожній відбиток, і
+        // реальний запис (з групами) лишався б у кеші до TTL (60 хв,
+        // `Cache:AccessProfileSlidingMinutes`).
+        profileCache.InvalidateUser(userId);
+        return Task.CompletedTask;
     }
 
     /// <summary>Групи, з якими будується профіль користувача <paramref name="userId"/>.</summary>

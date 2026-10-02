@@ -312,6 +312,72 @@ public sealed class SeedTests(SqlServerFixture sql)
     }
 
     [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Колонки_форм_230_відповідають_полям_джерела_за_кодом_і_типом_мають_en_і_повтор_сіду_не_дублює()
+    {
+        // ⚠ МУТАЦІЙНИЙ ДОКАЗ (09-seed.sql, COLL:an14-ecr230): код колонки з помилкою («Outputcode»), тип
+        // «number» у UnitCode, rowSource не того джерела — восьми колонок і статусу 1 досить, щоб попередній
+        // тест лишився зеленим, а побудова звіту відмовила вже в замовника.
+        var versions = new List<(string Code, string Columns, string Rules)>();
+        await using (var connection = new SqlConnection(sql.ConnectionString))
+        {
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = """
+                SELECT d.Code, v.ColumnsJson, v.RulesJson
+                FROM rpt.ReportVersion AS v
+                JOIN rpt.ReportDef     AS d ON d.Id = v.ReportDefId
+                WHERE d.Code IN (N'ECR230_A1', N'ECR230_B1', N'ECR230_B4') AND v.[Version] = N'1.0'
+                ORDER BY d.Code
+                """;
+            await using var reader = await command.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                versions.Add((reader.GetString(0), reader.GetString(1), reader.GetString(2)));
+            }
+        }
+
+        Assert.Equal(["ECR230_A1", "ECR230_B1", "ECR230_B4"], versions.Select(v => v.Code));
+        foreach (var (code, columns, rules) in versions)
+        {
+            var parsed = Ecr.Application.Reporting.ReportRules.Parse(rules);
+            Assert.Equal(Ecr.Application.Reporting.ReportDefinitionSpec.CalculationResults, parsed.RowSource);
+
+            using var json = System.Text.Json.JsonDocument.Parse(columns);
+            foreach (var column in json.RootElement.EnumerateArray())
+            {
+                var columnCode = column.GetProperty("code").GetString()!;
+                Assert.True(
+                    Ecr.Application.Reporting.ReportSourceColumns.KindOf(parsed.RowSource, columnCode)
+                        == column.GetProperty("kind").GetString(),
+                    $"{code}: колонка {columnCode} не з джерела або не того типу");
+
+                // Підпис — щонайменше en: kz падає на en (ReportColumnNames.Of); без en колонка безіменна.
+                if (column.TryGetProperty("nameL10n", out var names))
+                {
+                    Assert.False(string.IsNullOrWhiteSpace(names.GetProperty("en").GetString()), $"{code}: {columnCode} без en");
+                }
+            }
+
+            Assert.Equal(6, json.RootElement.EnumerateArray().Count(c => c.TryGetProperty("nameL10n", out _)));
+        }
+
+        // Повтор сіду (оновлення наявної бази): MERGE лише вставляє відсутнє.
+        await using (var db = CreateContext())
+        {
+            await new SeedRunner(db).RunAsync(CancellationToken.None);
+        }
+
+        Assert.Equal(3, await ScalarAsync(
+            "SELECT COUNT(*) FROM rpt.ReportDef WHERE Code IN (N'ECR230_A1', N'ECR230_B1', N'ECR230_B4')"));
+        Assert.Equal(3, await ScalarAsync("""
+            SELECT COUNT(*) FROM rpt.ReportVersion AS v JOIN rpt.ReportDef AS d ON d.Id = v.ReportDefId
+            WHERE d.Code IN (N'ECR230_A1', N'ECR230_B1', N'ECR230_B4')
+            """));
+    }
+
+    [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "ФВ-6.12")]

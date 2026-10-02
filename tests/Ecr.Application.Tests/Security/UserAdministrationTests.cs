@@ -41,10 +41,169 @@ public sealed class UserAdministrationTests
         _domain = _users.Seed(FakeUserStore.DomainUser("ivanov", "S-1-5-21-77"));
         _users.Roles.Add(new RoleView(1, "Admins", IsBuiltIn: false, IsActive: true, ["Security.ManageUsers"], []));
 
+        _users.Roles.Add(new RoleView(2, "Viewers", IsBuiltIn: false, IsActive: true, ["Document.View"], []));
+
+        // Транзакція виконує операцію, як справжня: захист адміністратора живе всередині неї.
+        _uow.ExecuteInTransactionAsync(Arg.Any<Func<CancellationToken, Task>>(), Arg.Any<CancellationToken>())
+            .Returns(call => call.Arg<Func<CancellationToken, Task>>()(CancellationToken.None));
+
         _current.UserId.Returns(_actor.Id);
         _current.CorrelationId.Returns("test");
         Allow("Security.ManageUsers");
     }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "BE-12")]
+    public async Task Зняття_ролі_в_останнього_адміністратора_відхиляється_і_нічого_не_змінює()
+    {
+        await _users.GrantRoleAsync(_local, "Admins", CancellationToken.None);
+
+        var cleared = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => ReplaceRoles().HandleAsync(_local.Id, [], null, null, CancellationToken.None));
+        var swapped = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => ReplaceRoles().HandleAsync(_local.Id, ["Viewers"], null, null, CancellationToken.None));
+
+        Assert.Equal("ECR-SEC-0409", cleared.ErrorCode);
+        Assert.Equal("err.ECR-SEC-0409.lastAdministrator", cleared.Details!["messageKey"]);
+        Assert.Equal("err.ECR-SEC-0409.lastAdministrator", swapped.Details!["messageKey"]);
+        Assert.Equal(["Admins"], await _users.ListUserRolesAsync(_local.Id, CancellationToken.None));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "BE-12")]
+    public async Task Зняття_ролі_дозволене_якщо_є_інший_активний_носій_або_набір_її_зберігає()
+    {
+        await _users.GrantRoleAsync(_local, "Admins", CancellationToken.None);
+        var second = _users.Seed(new User("sidorenko", "Сидоренко", AuthProvider.Local));
+        await _users.GrantRoleAsync(second, "Admins", CancellationToken.None);
+
+        // Заблокований носій не рахується — ціль усе ще остання активна.
+        second.LockByAdministrator();
+        await Assert.ThrowsAsync<BusinessRuleException>(
+            () => ReplaceRoles().HandleAsync(_local.Id, [], null, null, CancellationToken.None));
+
+        // Набір, що зберігає право, не чіпається навіть в останнього.
+        await ReplaceRoles().HandleAsync(_local.Id, ["Admins", "Viewers"], null, null, CancellationToken.None);
+
+        second.Unlock();
+        await ReplaceRoles().HandleAsync(_local.Id, [], null, null, CancellationToken.None);
+        Assert.Empty(await _users.ListUserRolesAsync(_local.Id, CancellationToken.None));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "BE-12")]
+    public async Task Відмова_409_не_пише_в_журнал_і_не_зберігає_а_строкове_призначення_не_рахується()
+    {
+        // Консервативна (fail-closed) поведінка: строкова ManageUsers-роль не вважається
+        // збереженням права, тож заміна набору в останнього носія відхиляється.
+        await _users.GrantRoleAsync(_local, "Admins", CancellationToken.None);
+        var window = new Dictionary<string, RoleValidityWindow>
+        {
+            ["Admins"] = new(new DateOnly(2026, 9, 1), new DateOnly(2026, 9, 1)),
+        };
+
+        await Assert.ThrowsAsync<BusinessRuleException>(
+            () => ReplaceRoles().HandleAsync(_local.Id, ["Admins"], window, null, CancellationToken.None));
+        await Assert.ThrowsAsync<BusinessRuleException>(
+            () => ReplaceRoles().HandleAsync(_local.Id, [], null, null, CancellationToken.None));
+
+        await _audit.DidNotReceive().WriteSecurityEventAsync(
+            Arg.Any<SecurityEventRecord>(), Arg.Any<CancellationToken>());
+        await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
+        Assert.Equal(["Admins"], await _users.ListUserRolesAsync(_local.Id, CancellationToken.None));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "BE-12")]
+    public async Task Чинне_строкове_ManageUsers_робить_ціль_останнім_носієм_і_заміна_ролей_відхиляється_409_консервативно()
+    {
+        // ФІКСУЄ ПОТОЧНУ ПОВЕДІНКУ: підрахунок носіїв рахує ЧИННЕ строкове призначення (IsEffectiveOn),
+        // тож ціль — останній носій; а перевірка нового набору строкових призначень цілі не бачить
+        // (вони лишаються, але для набору не враховуються) — відмова консервативна (fail-closed).
+        // Змінюєш це — міняй і речення в admin-guide.
+        _users.DatedGrants.Add((_local.UserName, "Admins", new DateOnly(2026, 9, 1), new DateOnly(2026, 12, 31)));
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => ReplaceRoles().HandleAsync(_local.Id, ["Viewers"], null, null, CancellationToken.None));
+
+        Assert.Equal("err.ECR-SEC-0409.lastAdministrator", error.Details!["messageKey"]);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "BE-12")]
+    public async Task Минуле_строкове_ManageUsers_не_робить_ціль_носієм_і_заміна_ролей_дозволена()
+    {
+        // ФІКСУЄ ПОТОЧНУ ПОВЕДІНКУ: вікно скінчилось до дати перевірки — це не носій, захищати нічого.
+        _users.DatedGrants.Add((_local.UserName, "Admins", new DateOnly(2026, 1, 1), new DateOnly(2026, 2, 1)));
+
+        await ReplaceRoles().HandleAsync(_local.Id, ["Viewers"], null, null, CancellationToken.None);
+
+        Assert.Equal(["Viewers"], await _users.ListUserRolesAsync(_local.Id, CancellationToken.None));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "BE-12")]
+    public async Task Носій_ManageUsers_з_областю_не_рахується_і_єдиного_глобального_зняти_не_можна()
+    {
+        await _users.GrantRoleAsync(_local, "Admins", CancellationToken.None);
+        var scoped = _users.Seed(new User("scoped", "Звужений", AuthProvider.Local));
+        _users.ScopedGrants.Add((scoped.UserName, "Admins"));
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => ReplaceRoles().HandleAsync(_local.Id, [], null, null, CancellationToken.None));
+
+        Assert.Equal("err.ECR-SEC-0409.lastAdministrator", error.Details!["messageKey"]);
+        Assert.Equal(["Admins"], await _users.ListUserRolesAsync(_local.Id, CancellationToken.None));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "BE-12")]
+    public async Task Заміна_ролі_адміністратора_на_ту_саму_роль_з_областю_не_зберігає_право_і_відхиляється()
+    {
+        await _users.GrantRoleAsync(_local, "Admins", CancellationToken.None);
+        // Виконавець керує проєктом 1 (область валідується), проєкт існує.
+        _access.BuildProfileAsync(_actor.Id, Arg.Any<CancellationToken>()).Returns(
+            new AccessBuilder { UserId = _actor.Id }.Permission("Security.ManageUsers").Grant(ResourceKind.Project, 1, GrantLevel.Manage).Build());
+        var documents = Substitute.For<IDocumentStore>();
+        documents.FindProjectStatusAsync(1, Arg.Any<CancellationToken>()).Returns(Enum.GetValues<ProjectStatus>()[0]);
+        var scopes = new Dictionary<string, RoleScopeDto> { ["Admins"] = new([1]) };
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => ReplaceRoles(documents).HandleAsync(_local.Id, ["Admins"], null, scopes, CancellationToken.None));
+
+        Assert.Equal("err.ECR-SEC-0409.lastAdministrator", error.Details!["messageKey"]);
+        Assert.Equal(["Admins"], await _users.ListUserRolesAsync(_local.Id, CancellationToken.None));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "BE-12")]
+    public async Task Збережена_область_наявного_призначення_не_робить_набір_збереженням_права()
+    {
+        // Поле областей у запиті відсутнє — області наявних призначень зберігаються,
+        // тож «Admins» (з областю) право не дає, а глобальну «Admins2» цей набір знімає.
+        _users.Roles.Add(new RoleView(3, "Admins2", IsBuiltIn: false, IsActive: true, ["Security.ManageUsers"], []));
+        await _users.GrantRoleAsync(_local, "Admins2", CancellationToken.None);
+        _users.ScopedGrants.Add((_local.UserName, "Admins"));
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => ReplaceRoles().HandleAsync(_local.Id, ["Admins"], null, null, CancellationToken.None));
+
+        Assert.Equal("err.ECR-SEC-0409.lastAdministrator", error.Details!["messageKey"]);
+    }
+
+    private ReplaceUserRolesHandler ReplaceRoles(IDocumentStore? documents = null) => new(
+        _users, _access, _uow, _current, _audit, _clock,
+        new DisableBootstrapAdminHandler(_users, _uow, _audit, _current, _clock),
+        documents ?? Substitute.For<IDocumentStore>(),
+        Substitute.For<IResourceNameResolver>());
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]

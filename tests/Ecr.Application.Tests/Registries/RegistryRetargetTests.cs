@@ -49,7 +49,8 @@ public sealed class RegistryRetargetTests
             .Returns(call => call.ArgAt<Func<CancellationToken, Task>>(0)(call.ArgAt<CancellationToken>(1)));
         _user.UserId.Returns(9);
         _access.BuildProfileAsync(9, Arg.Any<CancellationToken>()).Returns(new AccessBuilder { UserId = 9 }
-            .Permission("Registry.View").Permission("Registry.EditDefinition").Permission("Registry.Publish").Build());
+            .Permission("Registry.View").Permission("Registry.EditDefinition").Permission("Registry.Publish")
+            .Permission("Template.View").Permission("Calculation.View").Build());
 
         _owner = new RegistryDef(EcrCode.Create("OWNER"), Text("OWNER"), false);
         SetId(_owner, OwnerId);
@@ -237,7 +238,43 @@ public sealed class RegistryRetargetTests
         Assert.Equal(OldTargetId, _link.RefRegistryDefId);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Requirement", "ФВ-8.12")]
+    public async Task Відмова_за_споживачами_не_розкриває_невидимих_правил_формул_і_методологій()
+    {
+        // ⛔ Мутація: прибрати VisibleConsumersAsync (віддавати consumers.Items) — тест червоніє.
+        const int secretId = 77;
+        var secret = new RegistryDef(EcrCode.Create("SECRET"), Text("SECRET"), false);
+        SetId(secret, secretId);
+        _registries.ListDefinitionsAsync(Arg.Any<CancellationToken>()).Returns([_owner, secret]);
+        var own = new UsageItemDto(UsageKinds.RegistryField, "5", "OWNER.CAPACITY_POSITIVE", "/admin/registries/OWNER/definition");
+        UsageItemDto[] consumers =
+        [
+            own,
+            new(UsageKinds.RegistryField, "6", "SECRET.HIDDEN_RULE", "/admin/registries/SECRET/definition"),
+            new(UsageKinds.TemplateFormula, "8", "HIDDEN_TABLE#8", null),
+            new(UsageKinds.MethodologyFormula, "9:E_NOX", "HIDDEN_METH v2.E_NOX", "/admin/methodologies/3/versions"),
+        ];
+        _registries.FindFieldChainConsumersAsync(
+                OwnerId, Arg.Is<IReadOnlyCollection<string>>(codes => codes.Contains("LINK")), Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(new UsageResponse(5, consumers));
+        _access.BuildProfileAsync(9, Arg.Any<CancellationToken>()).Returns(new AccessBuilder { UserId = 9 }
+            .Permission("Registry.View").Permission("Registry.EditDefinition").Permission("Registry.Publish")
+            .Deny(ResourceKind.Registry, secretId).Build());
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(() => Save(NewTargetId));
+
+        Assert.Equal("5", error.Details!["total"]);
+        Assert.Equal("3", error.Details["hiddenCount"]);
+        Assert.Equal("OWNER.CAPACITY_POSITIVE", error.Details["usedBy"]);
+        Assert.Equal([own], (IReadOnlyList<UsageItemDto>)error.Details["references"]!);
+        Assert.DoesNotContain("SECRET", error.Message);
+        Assert.DoesNotContain("HIDDEN", error.Message);
+    }
+
     private void DenyRegistry(int registryDefId)
+
         => _access.BuildProfileAsync(9, Arg.Any<CancellationToken>()).Returns(new AccessBuilder { UserId = 9 }
             .Permission("Registry.View").Permission("Registry.EditDefinition").Permission("Registry.Publish")
             .Deny(ResourceKind.Registry, registryDefId).Build());

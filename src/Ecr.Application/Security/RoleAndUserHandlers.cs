@@ -329,7 +329,7 @@ public sealed class ReplaceUserRolesHandler(
         }
 
         var before = await users.ListUserRolesAsync(userId, ct).ConfigureAwait(false);
-        var count = await users.ReplaceRolesAsync(userId, roleCodes, validity, domainScopes, ct).ConfigureAwait(false);
+        var count = 0;
 
         // ⛔ Зміна повноважень — подія безпеки, і вона мусить бути в журналі
         // з обома наборами. «Хто це йому видав» — питання, на яке через рік
@@ -338,6 +338,14 @@ public sealed class ReplaceUserRolesHandler(
         await uow.ExecuteInTransactionAsync(
             async token =>
             {
+                // Захист останнього адміністратора — в тій самій транзакції під замком.
+                await users.AcquireAdministratorGuardAsync(token).ConfigureAwait(false);
+                await UserAdministration
+                    .EnsureRoleSetKeepsAdministratorAsync(users, userId, roleCodes, validity, domainScopes, clock.UtcNow, token)
+                    .ConfigureAwait(false);
+
+                count = await users.ReplaceRolesAsync(userId, roleCodes, validity, domainScopes, token).ConfigureAwait(false);
+
                 await audit.WriteSecurityEventAsync(
                     new SecurityEventRecord(
                         ChangedAt: clock.UtcNow,

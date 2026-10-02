@@ -245,6 +245,7 @@ public static class LoginRateLimiting
         // Системна межа проб транспорту — не в глобальному обмежувачі: той рахує і ВІДХИЛЕНІ запити, а квота
         // мусить витрачатися лише прийнятими політикою користувача (див. SmtpTestQuotaMiddleware).
         services.AddSingleton<SmtpTestSystemQuota>();
+        services.AddSingleton<DocumentRecalculateQuota>(); // межа перерахунку документа: власний лічильник із поверненням при відмові
 
         services.AddRateLimiter(options =>
         {

@@ -45,6 +45,13 @@ public interface IUserStore
     public Task<int> CountActivePermissionHoldersAsync(
         string permissionCode, int? exceptUserId, DateTime utcNow, CancellationToken ct);
 
+    /// <summary>
+    /// Серіалізує зміни, що можуть прибрати останнього адміністратора: блокування,
+    /// транзакційний замок до коміту. Викликати лише всередині транзакції.
+    /// </summary>
+    /// <param name="ct">Токен скасування.</param>
+    public Task AcquireAdministratorGuardAsync(CancellationToken ct);
+
     /// <summary>Обліковий запис за SID каталогу.</summary>
     public Task<User?> FindByWindowsSidAsync(string sid, CancellationToken ct);
 

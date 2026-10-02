@@ -2,7 +2,7 @@ import { lazy, Suspense, useEffect, useRef, useState, type JSX } from 'react';
 import { Button, Combobox, Group, Modal, MultiSelect, Stack, Text, TextInput } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { apiFetch } from '@/api/client';
+import { apiFetch, EcrApiError } from '@/api/client';
 import type { AffectedRolesResponse, RoleScopeDto, RoleView, UserView } from '@/api/types';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { notificationCloseButtonProps, showApiError, showDone } from '@/shared/ui/notify';
@@ -16,6 +16,9 @@ import { scopeProblem } from './roleScope';
 const EffectiveAccessPanel = lazy(async () => ({
   default: (await import('./EffectiveAccessPanel')).EffectiveAccessPanel,
 }));
+
+/** Ключ `409`: заміна ролей лишила б систему без активного адміністратора (`ReplaceUserRolesHandler`). */
+const LastAdministratorKey = 'err.ECR-SEC-0409.lastAdministrator';
 
 /**
  * Ролі й адреса наявного користувача.
@@ -101,6 +104,9 @@ export function UserAccessEditor({
   const scopes = useUserRoleScopes(user?.id ?? null);
   const [scopeDraft, setScopeDraft] = useState<ScopeDraft>({});
   const [scopeError, setScopeError] = useState<{ code: string; text: string } | null>(null);
+  // `409 lastAdministrator` (захист останнього адміністратора при заміні ролей): текст — ще й під
+  // полем ролей, а не лише в тості, що зникає; поле отримує `aria-invalid` і опис помилки.
+  const [rolesError, setRolesError] = useState<string | null>(null);
   const baselineKey = JSON.stringify(scopes.baseline);
 
   useEffect(() => {
@@ -127,6 +133,7 @@ export function UserAccessEditor({
    * лишилося незбереженим.
    */
   const save = useMutation({
+    onMutate: () => setRolesError(null),
     mutationFn: async () => {
       const scopesBody: Record<string, RoleScopeDto> | undefined = scopesToSend(
         selected,
@@ -176,6 +183,14 @@ export function UserAccessEditor({
         });
 
         return;
+      }
+
+      if (
+        error instanceof EcrApiError &&
+        error.problem.status === 409 &&
+        error.problem.extensions2?.['messageKey'] === LastAdministratorKey
+      ) {
+        setRolesError(messageOf(error));
       }
 
       // ФВ-6.14: `403 noProjectManageGrant` / `422` про область — ще й біля
@@ -271,7 +286,11 @@ export function UserAccessEditor({
                 description={t('security.rolesHint')}
                 data={roles.map((r) => r.code)}
                 value={selected}
-                onChange={setSelected}
+                error={rolesError}
+                onChange={(value) => {
+                  setRolesError(null);
+                  setSelected(value);
+                }}
                 searchable
                 dropdownOpened={rolesOpened}
                 onDropdownOpen={() => setRolesOpened(true)}

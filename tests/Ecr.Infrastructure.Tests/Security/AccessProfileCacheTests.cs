@@ -1,5 +1,9 @@
 // tests/Ecr.Infrastructure.Tests/Security/AccessProfileCacheTests.cs
+using Ecr.Application.Documents.VersionMigration;
+using Ecr.Application.Ports;
 using Ecr.Application.Security;
+using Microsoft.Extensions.Logging;
+using NSubstitute;
 using Ecr.Domain.Enums;
 using Ecr.Infrastructure.Caching;
 using Ecr.TestKit;
@@ -32,6 +36,136 @@ public sealed class AccessProfileCacheTests : IDisposable
         // на права відведено 50 мс на весь запит відкриття таблиці 500×60.
         Assert.Equal(1, builds);
         Assert.Same(first, second);
+    }
+
+    /// <remarks>
+    /// Мутація: прибрати перевірку <c>_dirty</c> у <c>GetOrCreateAsync</c> (читання) або в <c>BuildAsync</c>
+    /// (запис) — червоне; прибрати скидання прапорця в <c>InvalidateAll</c> — червоне.
+    /// </remarks>
+    [Fact]
+    public async Task Збій_скидання_вмикає_fail_closed_і_профілі_не_кешуються_до_успішного_InvalidateAll()
+    {
+        var cache = new AccessProfileCache(_memory);
+        var builds = 0;
+        await cache.GetOrCreateAsync(UserId, "s1", "", _ => Build(ref builds, "s1"), CancellationToken.None);
+
+        cache.MarkInvalidationFailed();
+
+        // застарілий запис не читається, нові не кешуються: сховище опитується щоразу
+        await cache.GetOrCreateAsync(UserId, "s1", "", _ => Build(ref builds, "s1"), CancellationToken.None);
+        await cache.GetOrCreateAsync(UserId, "s1", "", _ => Build(ref builds, "s1"), CancellationToken.None);
+        Assert.Equal(3, builds);
+
+        cache.InvalidateAll(); // успішне повне скидання знімає прапорець
+
+        await cache.GetOrCreateAsync(UserId, "s1", "", _ => Build(ref builds, "s1"), CancellationToken.None);
+        await cache.GetOrCreateAsync(UserId, "s1", "", _ => Build(ref builds, "s1"), CancellationToken.None);
+        Assert.Equal(4, builds);
+    }
+
+    /// <remarks>Мутація: <c>InvalidateUser</c> знімає прапорець dirty — червоне.</remarks>
+    [Fact]
+    public async Task InvalidateUser_не_знімає_dirty_кеш_лишається_fail_closed()
+    {
+        var cache = new AccessProfileCache(_memory);
+        var builds = 0;
+        cache.MarkInvalidationFailed();
+
+        cache.InvalidateUser(UserId);
+
+        await cache.GetOrCreateAsync(UserId, "s1", "", _ => Build(ref builds, "s1"), CancellationToken.None);
+        await cache.GetOrCreateAsync(UserId, "s1", "", _ => Build(ref builds, "s1"), CancellationToken.None);
+        Assert.Equal(2, builds);
+    }
+
+    /// <remarks>
+    /// Мутація: <c>InvalidateAll</c> знімає прапорець безумовно (<c>_cleanGen = _failGen</c> наприкінці) — червоне.
+    /// Детерміновано: збій реєструється з колбека скасування токена «усе», тобто всередині <c>InvalidateAll</c>.
+    /// </remarks>
+    [Fact]
+    public async Task InvalidateAll_що_стартував_до_збою_не_знімає_пізніший_збій()
+    {
+        var spy = new SpyMemory(_memory);
+        var cache = new AccessProfileCache(spy);
+        var builds = 0;
+        await cache.GetOrCreateAsync(UserId, "s1", "", _ => Build(ref builds, "s1"), CancellationToken.None);
+        spy.Entry!.ExpirationTokens[0].RegisterChangeCallback(_ => cache.MarkInvalidationFailed(), null);
+
+        cache.InvalidateAll(); // збій з'являється, поки скидання ще триває
+
+        await cache.GetOrCreateAsync(UserId, "s1", "", _ => Build(ref builds, "s1"), CancellationToken.None);
+        await cache.GetOrCreateAsync(UserId, "s1", "", _ => Build(ref builds, "s1"), CancellationToken.None);
+        Assert.Equal(3, builds); // dirty лишився: профіль будується щоразу
+
+        cache.InvalidateAll(); // наступне повне скидання знімає
+        await cache.GetOrCreateAsync(UserId, "s1", "", _ => Build(ref builds, "s1"), CancellationToken.None);
+        await cache.GetOrCreateAsync(UserId, "s1", "", _ => Build(ref builds, "s1"), CancellationToken.None);
+        Assert.Equal(4, builds);
+    }
+
+    /// <remarks>
+    /// Поточна семантика: <c>InvalidateAll</c> НЕ ковтає виняток скасування токена «усе» (колбек кидає →
+    /// <see cref="AggregateException"/> виходить назовні, бо <c>CancellationTokenSource.Cancel</c> збирає винятки колбеків),
+    /// а прапорець dirty знімається лише ПІСЛЯ успішного скасування. Мутація: піднімати <c>_cleanGen</c> до
+    /// <c>old.Cancel()</c> або у <c>finally</c> — червоне (профіль закешувався б попри збій скидання).
+    /// </remarks>
+    [Fact]
+    public async Task InvalidateAll_що_завершився_винятком_не_знімає_dirty()
+    {
+        var spy = new SpyMemory(_memory);
+        var cache = new AccessProfileCache(spy);
+        var builds = 0;
+        await cache.GetOrCreateAsync(UserId, "s1", "", _ => Build(ref builds, "s1"), CancellationToken.None);
+        spy.Entry!.ExpirationTokens[0].RegisterChangeCallback(_ => throw new InvalidOperationException("збій скидання"), null);
+        cache.MarkInvalidationFailed();
+
+        var thrown = Assert.Throws<AggregateException>(() => cache.InvalidateAll());
+        Assert.IsType<InvalidOperationException>(Assert.Single(thrown.InnerExceptions));
+
+        await cache.GetOrCreateAsync(UserId, "s1", "", _ => Build(ref builds, "s1"), CancellationToken.None);
+        await cache.GetOrCreateAsync(UserId, "s1", "", _ => Build(ref builds, "s1"), CancellationToken.None);
+        Assert.Equal(3, builds); // dirty лишився: профіль будується щоразу
+    }
+    private sealed class SpyMemory(IMemoryCache inner) : IMemoryCache
+    {
+        public ICacheEntry? Entry { get; private set; }
+        public ICacheEntry CreateEntry(object key) => Entry = inner.CreateEntry(key);
+        public bool TryGetValue(object key, out object? value) => inner.TryGetValue(key, out value);
+        public void Remove(object key) => inner.Remove(key);
+        public void Dispose() { }
+    }
+
+    /// <remarks>Мутація: прибрати повторну спробу за зміною епохи в <c>GetOrCreateAsync</c> — приєднаний отримує профіль до скидання, червоне.</remarks>
+    [Fact]
+    public async Task Скидання_під_час_польоту_не_віддає_профіль_побудований_до_нього_жодному_з_учасників()
+    {
+        var cache = new AccessProfileCache(_memory);
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var builds = 0;
+        AccessProfile? stale = null;
+
+        var initiator = cache.GetOrCreateAsync(UserId, "s1", "", async _ =>
+        {
+            var p = await Build(ref builds, "s1");
+            if (stale is null)
+            {
+                stale = p; // лише перша (до скидання) побудова; повторна — свіжа
+                started.TrySetResult();
+            }
+
+            await release.Task;
+            return p;
+        }, CancellationToken.None);
+        await started.Task;
+        var joiner = cache.GetOrCreateAsync(UserId, "s1", "", _ => Build(ref builds, "s1"), CancellationToken.None);
+
+        cache.InvalidateAll(); // «коміт» гранта між початком польоту та відповіддю
+        release.SetResult();
+
+        var results = await Task.WhenAll(initiator, joiner);
+
+        Assert.All(results, r => Assert.NotSame(stale, r));
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
@@ -90,6 +224,73 @@ public sealed class AccessProfileCacheTests : IDisposable
         Assert.True(first.IsSimulation);
         Assert.True(second.IsSimulation);
         Assert.Equal(2, builds);
+        Assert.False(_memory.TryGetValue(AccessProfileCache.Key(UserId, "s1", ""), out _));
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    public async Task InvalidateUser_видаляє_всі_записи_користувача_за_будь_якого_відбитку_груп_і_не_чіпає_інших()
+    {
+        var cache = new AccessProfileCache(_memory);
+        var builds = 0;
+        await cache.GetOrCreateAsync(UserId, "s1", "", _ => Build(ref builds, "s1"), CancellationToken.None);
+        await cache.GetOrCreateAsync(UserId, "s1", "fp-groups", _ => Build(ref builds, "s1"), CancellationToken.None);
+        await cache.GetOrCreateAsync(UserId + 1, "s9", "", _ => Build(ref builds, "s9"), CancellationToken.None);
+
+        cache.InvalidateUser(UserId);
+
+        // ⛔ Мутація: eviction лише за ключем із порожнім відбитком лишає запис із групами (fail-open).
+        Assert.False(_memory.TryGetValue(AccessProfileCache.Key(UserId, "s1", ""), out _));
+        Assert.False(_memory.TryGetValue(AccessProfileCache.Key(UserId, "s1", "fp-groups"), out _));
+        Assert.True(_memory.TryGetValue(AccessProfileCache.Key(UserId + 1, "s9", ""), out _));
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    public async Task InvalidateAll_скидає_весь_кеш_і_нові_записи_кешуються_знову()
+    {
+        var cache = new AccessProfileCache(_memory);
+        var builds = 0;
+        await cache.GetOrCreateAsync(UserId, "s1", "a", _ => Build(ref builds, "s1"), CancellationToken.None);
+        await cache.GetOrCreateAsync(UserId + 1, "s9", "b", _ => Build(ref builds, "s9"), CancellationToken.None);
+
+        cache.InvalidateAll();
+
+        Assert.False(_memory.TryGetValue(AccessProfileCache.Key(UserId, "s1", "a"), out _));
+        Assert.False(_memory.TryGetValue(AccessProfileCache.Key(UserId + 1, "s9", "b"), out _));
+
+        await cache.GetOrCreateAsync(UserId, "s1", "a", _ => Build(ref builds, "s1"), CancellationToken.None);
+        Assert.True(_memory.TryGetValue(AccessProfileCache.Key(UserId, "s1", "a"), out _));
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    public async Task Переповнення_переліку_скидає_реально_закешовані_профілі_усіх_користувачів()
+    {
+        var cache = new AccessProfileCache(_memory);
+        var builds = 0;
+        await cache.GetOrCreateAsync(UserId, "s1", "g", _ => Build(ref builds, "s1"), CancellationToken.None);
+        await cache.GetOrCreateAsync(UserId + 1, "s9", "", _ => Build(ref builds, "s9"), CancellationToken.None);
+        Assert.True(_memory.TryGetValue(AccessProfileCache.Key(UserId, "s1", "g"), out _));
+
+        // Перелік користувачів неповний (Overflow) — Ids не називає нікого, скидатись мусить усе.
+        GrantProfileInvalidation.Run(
+            cache, Substitute.For<ILogger>(), new GrantedUsers([], Overflow: true));
+
+        // ⛔ Мутація: InvalidateAll → no-op лишає ці записи (fail-open).
+        Assert.False(_memory.TryGetValue(AccessProfileCache.Key(UserId, "s1", "g"), out _));
+        Assert.False(_memory.TryGetValue(AccessProfileCache.Key(UserId + 1, "s9", ""), out _));
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    public async Task Профіль_побудований_під_час_скидання_не_кешується_застарілим()
+    {
+        var cache = new AccessProfileCache(_memory);
+        var builds = 0;
+
+        await cache.GetOrCreateAsync(UserId, "s1", "", _ =>
+        {
+            cache.InvalidateUser(UserId); // скидання посеред побудови
+            return Build(ref builds, "s1");
+        }, CancellationToken.None);
+
         Assert.False(_memory.TryGetValue(AccessProfileCache.Key(UserId, "s1", ""), out _));
     }
 

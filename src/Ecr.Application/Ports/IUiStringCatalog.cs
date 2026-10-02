@@ -67,6 +67,13 @@ public interface IUiStringCatalog
     public Task<UiStringWriteResult> SetAsync(UiStringWrite write, CancellationToken ct);
 
     /// <summary>
+    /// КАНОНІЧНИЙ ключ, який база зіставляє з <paramref name="key"/> (колація <c>CI_AS</c>: регістр і кінцеві
+    /// пробіли ігноруються — саме так працює <c>UPDATE … WHERE [Key] = @key</c>); <c>null</c> — такого ключа немає.
+    /// </summary>
+    /// <remarks>⛔ S7: право на правку звіряється з ключем, який РЕАЛЬНО буде змінено, а не з тим, що ввів клієнт.</remarks>
+    public Task<string?> FindKeyAsync(string key, CancellationToken ct);
+
+    /// <summary>
     /// «Сирі» рядки мови для адміністрування (<c>BE-13</c>): по одному запису на
     /// кожен ключ мови за замовчуванням, переклад — **без fallback**.
     /// </summary>

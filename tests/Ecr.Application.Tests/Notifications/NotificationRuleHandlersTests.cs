@@ -30,9 +30,11 @@ public sealed class NotificationRuleHandlersTests
     private readonly IUnitOfWork _uow = Substitute.For<IUnitOfWork>();
     private readonly ICurrentUser _user = Substitute.For<ICurrentUser>();
     private readonly IClock _clock = Substitute.For<IClock>();
+    private readonly TransactionProbe _tx;
 
     public NotificationRuleHandlersTests()
     {
+        _tx = TransactionProbe.Attach(_uow, _audit);
         _clock.UtcNow.Returns(new DateTime(2026, 9, 20, 8, 0, 0, DateTimeKind.Utc));
         _user.UserId.Returns(Actor);
         _audit.WriteSecurityEventAsync(Arg.Do<SecurityEventRecord>(_events.Add), Arg.Any<CancellationToken>())
@@ -203,6 +205,77 @@ public sealed class NotificationRuleHandlersTests
         Assert.Single(all.Items);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "BE-33")]
+    public async Task Журнал_заміни_рахує_додані_оновлені_й_прибрані_а_матриця_повертається_впорядкованою()
+    {
+        var mail = await NewChannelAsync();
+        var second = (await new SaveNotificationChannelHandler(
+                _store, Substitute.For<INotificationSender>(), _access, _uow, _audit, _user, _clock)
+            .CreateAsync(NotificationChannelKind.Smtp, "Mail 2", Smtp, CancellationToken.None)).Id;
+
+        await Replace().HandleAsync(
+            [new(NotificationEventKind.JobFailed, mail, NotificationSeverity.Warning, IsEnabled: true)],
+            CancellationToken.None);
+
+        // Подано «не по порядку»: подія 5 перед 1, канал second перед mail.
+        // ⚠ МУТАЦІЙНИЙ ДОКАЗ: `added++` → `added--` або прибрати його, `ThenBy` → `ThenByDescending`,
+        // `OrderBy` → `OrderByDescending` у ReplaceNotificationRulesHandler — червоніє цей тест.
+        var matrix = await Replace().HandleAsync(
+            [
+                new(NotificationEventKind.ExportFailed, mail, NotificationSeverity.Error, IsEnabled: true),
+                new(NotificationEventKind.JobFailed, second, NotificationSeverity.Info, IsEnabled: true),
+                new(NotificationEventKind.JobFailed, mail, NotificationSeverity.Error, IsEnabled: true),
+            ],
+            CancellationToken.None);
+
+        Assert.Equal(
+            [(NotificationEventKind.JobFailed, mail), (NotificationEventKind.JobFailed, second), (NotificationEventKind.ExportFailed, mail)],
+            matrix.Rules.Select(r => (r.EventKind, r.ChannelId)));
+
+        var audited = _events.FindAll(e => e.EventType == "NotificationRulesReplaced")[^1].DetailsJson;
+        Assert.Contains("\"total\":3", audited, StringComparison.Ordinal);
+        Assert.Contains("\"added\":2", audited, StringComparison.Ordinal);
+        Assert.Contains("\"updated\":1", audited, StringComparison.Ordinal);
+        Assert.Contains("\"removed\":0", audited, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "BE-33")]
+    public async Task Сторінка_журналу_з_одного_рядка_законна()
+    {
+        _store.Deliveries.Add(new NotificationDeliveryView(
+            1, _clock.UtcNow, 1, "Mail", NotificationEventKind.JobFailed, "job:7",
+            NotificationDeliveryStatus.Failed, "relay refused"));
+
+        // ⚠ МУТАЦІЙНИЙ ДОКАЗ: `page.Limit is < 1` → `<= 1` — сторінка з одного рядка стала б 422.
+        var page = await Deliveries().HandleAsync(new CursorRequest(1), null, null, CancellationToken.None);
+
+        Assert.Equal("job:7", Assert.Single(page.Items).EventKey);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "BE-33")]
+    public async Task Заміна_матриці_зберігається_а_null_замість_переліку_це_порожня_матриця()
+    {
+        // ⚠ МУТАЦІЙНИЙ ДОКАЗ: прибрати `uow.SaveChangesAsync` у ReplaceNotificationRulesHandler; `rules ?? []` → `rules`
+        // (тіло без масиву впало б NullReferenceException → 500).
+        var channel = await NewChannelAsync();
+        _uow.ClearReceivedCalls();
+        await Replace().HandleAsync(
+            [new(NotificationEventKind.JobFailed, channel, NotificationSeverity.Warning, IsEnabled: true)], CancellationToken.None);
+        await _uow.Received(1).SaveChangesAsync(Arg.Any<CancellationToken>());
+
+        var cleared = await Replace().HandleAsync(null, CancellationToken.None);
+
+        Assert.Empty(cleared.Rules);
+        Assert.Empty(_store.Rules);
+        await _uow.Received(2).SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
+
     private void Allow(string permission)
         => _access.BuildProfileAsync(Actor, Arg.Any<CancellationToken>())
             .Returns(new AccessBuilder { UserId = Actor }.Permission(permission).Build());
@@ -213,6 +286,48 @@ public sealed class NotificationRuleHandlersTests
             .CreateAsync(NotificationChannelKind.Smtp, "Mail", Smtp, CancellationToken.None)).Id;
 
     private GetNotificationRulesHandler Rules() => new(_store, _access, _user);
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "S8")]
+    public async Task Заміна_правил_пише_аудит_із_матрицею_до_і_після_в_одній_транзакції_із_збереженням()
+    {
+        // ⚠ МУТАЦІЙНИЙ ДОКАЗ: у AuditAndSaveAsync прибрати ExecuteInTransactionAsync (викликати Audit і Save напряму)
+        // → AuditInside/SaveInside порожні/false; прибрати `before` → перевірка нижче червоніє.
+        var channel = await NewChannelAsync();
+        var first = new NotificationRuleView(NotificationEventKind.JobFailed, channel, NotificationSeverity.Warning, true);
+        await Replace().HandleAsync([first], CancellationToken.None);
+        await Replace().HandleAsync([first with { MinSeverity = NotificationSeverity.Error }], CancellationToken.None);
+
+        Assert.All(_tx.AuditInside, inside => Assert.True(inside));
+        // Створення каналу (допоміжне) + дві заміни: по одному збереженню в транзакції; друге збереження ролей створення — поза нею.
+        Assert.Equal(3, _tx.AuditInside.Count);
+        Assert.Equal(3, _tx.SaveInside.Count(inside => inside));
+
+        using var doc = System.Text.Json.JsonDocument.Parse(
+            _events.Last(e => e.EventType == "NotificationRulesReplaced").DetailsJson!);
+        var before = doc.RootElement.GetProperty("before");
+        var after = doc.RootElement.GetProperty("after");
+        Assert.Equal(1, before.GetArrayLength());
+        Assert.Equal(1, after.GetArrayLength());
+        Assert.NotEqual(before[0].ToString(), after[0].ToString());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "S8")]
+    public async Task Збій_збереження_правил_кидає_виняток_а_подія_лишається_всередині_транзакції_що_відкотиться()
+    {
+        var channel = await NewChannelAsync();
+        _uow.SaveChangesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromException<int>(new InvalidOperationException("db down")));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => Replace().HandleAsync(
+            [new(NotificationEventKind.JobFailed, channel, NotificationSeverity.Info, true)], CancellationToken.None));
+
+        // Подія записана ЛИШЕ всередині транзакції: її відкат забирає подію разом зі зміною.
+        Assert.NotEmpty(_tx.AuditInside);
+        Assert.All(_tx.AuditInside, inside => Assert.True(inside));
+    }
 
     private ReplaceNotificationRulesHandler Replace() => new(_store, _access, _uow, _audit, _user, _clock);
 

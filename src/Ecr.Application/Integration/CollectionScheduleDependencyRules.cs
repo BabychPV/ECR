@@ -52,8 +52,10 @@ internal static class CollectionScheduleDependencyRules
         }
 
         // Йдемо вгору ланцюгом залежностей цілі: дійшли до розкладу, що правиться, — цикл.
+        // ⚠ Ланцюг читається СВІЖИМ запитом без відстеження (S-D1): відстежувані сутності, уже завантажені
+        // раніше в цьому запиті, не бачать залежності, яку паралельний запит встиг закомітити.
         var visited = 0;
-        var next = target.Schedule.DependsOnScheduleId;
+        var next = await store.ReadDependsOnAsync(dependsOnId, ct).ConfigureAwait(false);
 
         while (next is { } id)
         {
@@ -62,7 +64,33 @@ internal static class CollectionScheduleDependencyRules
                 throw Cycle(dependsOnId);
             }
 
-            next = (await store.FindAsync(id, ct).ConfigureAwait(false))?.Schedule.DependsOnScheduleId;
+            next = await store.ReadDependsOnAsync(id, ct).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Конфлікт змін залежностей (409): замок джерела не взято вчасно або зовнішній ключ зачепила паралельна
+    /// зміна. Той самий ключ, що й «розклад змінили після читання», — клієнт перечитує й повторює.
+    /// </summary>
+    internal static ConcurrencyConflictException Conflict(int scheduleId) => new(
+        ErrorCodes.JobStateConflict,
+        $"Залежності розкладу {scheduleId} змінив паралельний запит; повторіть.",
+        new Dictionary<string, object?>
+        {
+            ["messageKey"] = "err.ECR-JOB-0409.collectionScheduleChanged",
+            ["id"] = scheduleId.ToString(CultureInfo.InvariantCulture),
+        });
+
+    /// <summary>Виконує зміну; порушення зовнішнього ключа (547) від паралельного видалення чи правки — 409, не 500.</summary>
+    internal static async Task RunMappingConflictAsync(ICollectionScheduleStore store, int scheduleId, Func<Task> operation)
+    {
+        try
+        {
+            await operation().ConfigureAwait(false);
+        }
+        catch (Exception failure) when (store.IsForeignKeyViolation(failure))
+        {
+            throw Conflict(scheduleId);
         }
     }
 

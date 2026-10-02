@@ -67,6 +67,11 @@ public sealed class UserStore(EcrDbContext db) : IUserStore
                 where user.IsActive
                       && role.IsActive
                       && permission.PermissionCode == permissionCode
+
+                      // ⛔ Лише призначення БЕЗ області: функціональне право ролі з областю діє
+                      // лише в її проєктах, а `Security.*` — глобальне (AccessDecisionService),
+                      // тож такий носій адміністратором не є: інакше єдиного глобального можна зняти.
+                      && assignment.ScopeJson == null
                       && (exceptUserId == null || user.Id != exceptUserId)
                       && (user.LockedUntil == null || user.LockedUntil <= utcNow)
                 select new { user.Id, Assignment = assignment })
@@ -77,6 +82,33 @@ public sealed class UserStore(EcrDbContext db) : IUserStore
         var today = DateOnly.FromDateTime(utcNow);
         return candidates.Where(c => c.Assignment.IsEffectiveOn(today)).Select(c => c.Id).Distinct().Count();
     }
+
+    /// <inheritdoc />
+    public async Task AcquireAdministratorGuardAsync(CancellationToken ct)
+    {
+        // Транзакційний application-lock: два одночасні зняття ролі в «двох останніх»
+        // не бачать один одного під RCSI, тож без замка обидва пройшли б перевірку.
+        var result = new Microsoft.Data.SqlClient.SqlParameter("@rc", System.Data.SqlDbType.Int)
+        {
+            Direction = System.Data.ParameterDirection.Output,
+        };
+        await db.Database.ExecuteSqlRawAsync(
+            "EXEC @rc = sp_getapplock @Resource = N'ecr.last-administrator', @LockMode = N'Exclusive', "
+            + "@LockOwner = N'Transaction', @LockTimeout = @timeout;",
+            [result, new Microsoft.Data.SqlClient.SqlParameter("@timeout", AdministratorLockTimeoutMs)],
+            ct).ConfigureAwait(false);
+
+        if (result.Value is int code && code < 0)
+        {
+            // Таймаут (-1) і взаємоблокування (-2/-3) — конфлікт, а не збій: клієнт повторює запит.
+            throw new Application.Errors.BusinessRuleException(
+                "ECR-SEC-0409", "Зміну адміністраторів зараз виконує інший запит; повторіть.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-SEC-0409" });
+        }
+    }
+
+    /// <summary>Скільки мс чекати замок адміністратора (за замовчуванням 15 с).</summary>
+    public int AdministratorLockTimeoutMs { get; init; } = 15000;
 
     /// <inheritdoc />
     public Task<User?> FindByWindowsSidAsync(string sid, CancellationToken ct)

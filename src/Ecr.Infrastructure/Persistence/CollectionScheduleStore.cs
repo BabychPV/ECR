@@ -69,6 +69,52 @@ public sealed class CollectionScheduleStore(EcrDbContext db) : ICollectionSchedu
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
+    /// <summary>Скільки мс чекати замок залежностей (за замовчуванням 15 с).</summary>
+    public int DependencyLockTimeoutMs { get; init; } = 15000;
+
+    /// <inheritdoc />
+    public async Task LockDependenciesAsync(int dataSourceId, CancellationToken ct)
+    {
+        // Транзакційний application-lock на з'єднання: два одночасні `PUT A→B` і `PUT B→A` не бачать один
+        // одного під RCSI, тож без замка обидва пройшли б перевірку циклу (той самий прийом, що в UserStore).
+        var result = new Microsoft.Data.SqlClient.SqlParameter("@rc", System.Data.SqlDbType.Int)
+        {
+            Direction = System.Data.ParameterDirection.Output,
+        };
+        await db.Database.ExecuteSqlRawAsync(
+            "EXEC @rc = sp_getapplock @Resource = @res, @LockMode = N'Exclusive', "
+            + "@LockOwner = N'Transaction', @LockTimeout = @timeout;",
+            [
+                result,
+                new Microsoft.Data.SqlClient.SqlParameter("@res", $"ecr.collection-schedule-deps.{dataSourceId}"),
+                new Microsoft.Data.SqlClient.SqlParameter("@timeout", DependencyLockTimeoutMs),
+            ],
+            ct).ConfigureAwait(false);
+
+        if (result.Value is int code && code < 0)
+        {
+            // Таймаут (-1) і взаємоблокування (-2/-3) — конфлікт, а не збій: клієнт повторює запит.
+            throw new Application.Errors.ConcurrencyConflictException(
+                Ecr.Domain.Errors.ErrorCodes.JobStateConflict,
+                $"Залежності розкладів з'єднання {dataSourceId} зараз змінює інший запит; повторіть.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-JOB-0409.collectionScheduleChanged" });
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<int?> ReadDependsOnAsync(int collectionScheduleId, CancellationToken ct)
+        => await db.CollectionSchedules.AsNoTracking()
+            .Where(s => s.Id == collectionScheduleId)
+            .Select(s => s.DependsOnScheduleId)
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+
+    /// <inheritdoc />
+    public bool IsForeignKeyViolation(Exception failure)
+        // ⚠ Лише ключ залежності: інший 547 (напр. сутність джерела) — це не гонка залежностей, а справжня помилка.
+        => failure is DbUpdateException { InnerException: Microsoft.Data.SqlClient.SqlException { Number: 547 } sql }
+           && sql.Message.Contains("FK_CS_DependsOn", StringComparison.Ordinal);
+
     /// <inheritdoc />
     public void Add(CollectionSchedule schedule) => db.CollectionSchedules.Add(schedule);
 

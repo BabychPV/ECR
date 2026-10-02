@@ -1,4 +1,4 @@
-import { useState, type JSX } from 'react';
+import { useEffect, useRef, useState, type JSX } from 'react';
 import {
   Badge,
   Button,
@@ -33,6 +33,9 @@ import { showProbeResult } from './probeResult';
 /** Ключ відмови `422`: адресу змінено, а збережений пароль не підтверджено (`SaveSmtpSettingsHandler`). */
 const SmtpPasswordReentryRequiredKey = 'err.ECR-REQ-0422.smtpPasswordReentryRequired';
 
+/** Стабільний `id` поля пароля: Mantine будує з нього `-description` і `-error`. */
+const SmtpPasswordId = 'smtp-password';
+
 /**
  * Налаштування SMTP, які адміністратор задає в системі (`D-263`, `GET/PUT /notifications/smtp`).
  *
@@ -52,6 +55,13 @@ export function SmtpSettingsPanel(): JSX.Element {
   const [draft, setDraft] = useState<SmtpDraft | null>(null);
   const [testTo, setTestTo] = useState('');
   const [passwordHint, setPasswordHint] = useState<string | null>(null);
+  const passwordRef = useRef<HTMLInputElement>(null);
+
+  // ⚠ Відмова «введіть пароль ще раз» — фокус у поле пароля: тост зникає, а читач екрана
+  // інакше не знає, ДЕ виправляти (поле вже має `aria-invalid` і опис помилки).
+  useEffect(() => {
+    if (passwordHint !== null) passwordRef.current?.focus();
+  }, [passwordHint]);
 
   const save = useMutation({
     mutationFn: (value: SmtpDraft) => saveSmtpSettings(inputOf(value)),
@@ -109,6 +119,9 @@ export function SmtpSettingsPanel(): JSX.Element {
 
   const form = draft ?? draftOf(settings.data);
   const set = (patch: Partial<SmtpDraft>): void => setDraft({ ...form, ...patch });
+  // ⛔ ent6 S1: пароль без шифрування сервер відхиляє (`smtpPasswordNeedsTls`) — кажемо це біля поля
+  // шифрування ДО збереження, а не лише тостом після відмови.
+  const passwordNeedsTls = form.authMode === 'Password' && form.encryptionMode === 'None';
 
   return (
     <Stack gap="sm">
@@ -144,6 +157,7 @@ export function SmtpSettingsPanel(): JSX.Element {
             { value: 'None', label: t('smtp.encryption.None') },
           ]}
           value={form.encryptionMode}
+          error={passwordNeedsTls ? t('err.ECR-REQ-0422.smtpPasswordNeedsTls') : null}
           onChange={(value) => {
             if (value !== null) set({ encryptionMode: value as SmtpDraft['encryptionMode'] });
           }}
@@ -187,7 +201,15 @@ export function SmtpSettingsPanel(): JSX.Element {
             label={t('smtp.password')}
             description={settings.data.hasPassword ? t('smtp.passwordStored') : t('smtp.passwordNone')}
             autoComplete="new-password"
+            ref={passwordRef}
+            id={SmtpPasswordId}
             error={passwordHint}
+            // ⚠ `PasswordInput` Mantine не ставить внутрішньому полю ні `aria-invalid`, ні посилання на
+            // опис і помилку (`TextInput` ставить) — читач екрана не чув би ні «збережено», ні відмови.
+            aria-invalid={passwordHint !== null}
+            aria-describedby={
+              passwordHint === null ? `${SmtpPasswordId}-description` : `${SmtpPasswordId}-description ${SmtpPasswordId}-error`
+            }
             value={form.password}
             onChange={(e) => {
               setPasswordHint(null);

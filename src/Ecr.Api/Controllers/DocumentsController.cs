@@ -313,6 +313,7 @@ public sealed class DocumentsController(
     /// увесь документ, як і раніше.
     /// </remarks>
     [HttpPost("{id:long}/recalculate")]
+    [Ecr.Api.Security.DocumentRecalculateQuota]
     [ProducesResponseType<Contracts.RecalculationAcceptedResponse>(StatusCodes.Status202Accepted)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> Recalculate(

@@ -116,6 +116,70 @@ public sealed class DocumentVersionMigrationStore(EcrDbContext db) : IDocumentVe
         await db.Database.ExecuteSqlRawAsync(ApplySql, parameters, ct).ConfigureAwait(false);
     }
 
+    /// <inheritdoc />
+    public async Task<int> CountDenyGrantsAsync(
+        IReadOnlyCollection<int> sheetIds, IReadOnlyCollection<int> tableIds, IReadOnlyCollection<int> columnIds,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(sheetIds);
+        ArgumentNullException.ThrowIfNull(tableIds);
+        ArgumentNullException.ThrowIfNull(columnIds);
+
+        var keys = sheetIds.Select(i => new { k = (byte)ResourceKind.Sheet, i })
+            .Concat(tableIds.Select(i => new { k = (byte)ResourceKind.Table, i }))
+            .Concat(columnIds.Select(i => new { k = (byte)ResourceKind.Column, i }))
+            .ToList();
+        if (keys.Count == 0)
+        {
+            return 0;
+        }
+
+        var json = JsonSerializer.Serialize(keys);
+        return await db.Database
+            .SqlQuery<int>($"""
+                SELECT COUNT(*) AS Value
+                FROM   sec.ResourceGrant g
+                JOIN   OPENJSON({json}) WITH (k tinyint, i int) x ON x.k = g.ResourceKind AND x.i = g.ResourceId
+                """)
+            .SingleAsync(ct)
+            .ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async Task<GrantedUsers> ListUsersWithGrantsAsync(VersionMigrationPlan plan, int limit, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(limit);
+
+        var keys = plan.Sheets.Keys.Select(i => new { k = (byte)ResourceKind.Sheet, i })
+            .Concat(plan.Tables.Keys.Select(i => new { k = (byte)ResourceKind.Table, i }))
+            .Concat(plan.Columns.Select(c => new { k = (byte)ResourceKind.Column, i = c.SourceColumnDefId }))
+            .ToList();
+        if (keys.Count == 0)
+        {
+            return new GrantedUsers([], Overflow: false);
+        }
+
+        var json = JsonSerializer.Serialize(keys);
+        var ids = await db.Database
+            .SqlQuery<int>($"""
+                SELECT DISTINCT a.UserId AS Value
+                FROM   sec.RoleAssignment a
+                JOIN   sec.ResourceGrant g ON g.RoleId = a.RoleId
+                JOIN   OPENJSON({json}) WITH (k tinyint, i int) x ON x.k = g.ResourceKind AND x.i = g.ResourceId
+                WHERE  a.UserId IS NOT NULL
+                """)
+            .OrderBy(id => id)
+            .Take(limit + 1)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        // Зайвий (limit+1-й) рядок — ознака переповнення: решту не видно, тож скидається весь кеш.
+        return ids.Count > limit
+            ? new GrantedUsers([.. ids.Take(limit)], Overflow: true)
+            : new GrantedUsers(ids, Overflow: false);
+    }
+
     private static SqlParameter Json(string name, IEnumerable<object> rows)
         => new(name, System.Data.SqlDbType.NVarChar, -1) { Value = JsonSerializer.Serialize(rows) };
 
@@ -300,6 +364,34 @@ public sealed class DocumentVersionMigrationStore(EcrDbContext db) : IDocumentVe
         DELETE v
         FROM   wf.ValidationResult v
         JOIN   @docs d ON d.Id = v.DocumentId;
+
+        -- 6a. Гранти ролей на аркуш/таблицю/колонку (sec.ResourceGrant): Id цих
+        -- ресурсів свої в кожної версії, а грант не має ProjectId і діє на всіх,
+        -- хто сидить на старій версії. Тому КОПІЮЄМО на нові Id за кодом (не
+        -- переносимо), інакше deny мовчки перестає діяти (fail-open). Заборона
+        -- перекриває вже наявний дозвіл на новому Id; повторний перенос нічого
+        -- не дублює (UQ_ResourceGrant).
+        DECLARE @grantMap TABLE (k tinyint NOT NULL, o int NOT NULL, n int NOT NULL, PRIMARY KEY (k, o));
+        INSERT @grantMap (k, o, n)
+        SELECT 1, o, n FROM @sheetMap UNION ALL
+        SELECT 2, o, n FROM @tableMap UNION ALL
+        SELECT 3, o, n FROM @columnMap;
+
+        -- ⚠ DELETE + INSERT, а не UPDATE IsDeny: відбиток груп у ключі кешу профілю
+        -- (count і max(Id) грантів ролі) від UPDATE не міняється, і профіль без
+        -- заборони жив би до 60 хв. Новий рядок дає новий max(Id) → профіль перебудується.
+        DELETE t
+        FROM   sec.ResourceGrant t
+        JOIN   @grantMap m ON m.k = t.ResourceKind AND m.n = t.ResourceId
+        JOIN   sec.ResourceGrant g ON g.RoleId = t.RoleId AND g.ResourceKind = m.k AND g.ResourceId = m.o
+        WHERE  g.IsDeny = 1 AND t.IsDeny = 0;
+
+        INSERT sec.ResourceGrant (RoleId, ResourceKind, ResourceId, [Level], IsDeny)
+        SELECT g.RoleId, g.ResourceKind, m.n, g.[Level], g.IsDeny
+        FROM   sec.ResourceGrant g
+        JOIN   @grantMap m ON m.k = g.ResourceKind AND m.o = g.ResourceId
+        WHERE  NOT EXISTS (SELECT 1 FROM sec.ResourceGrant t
+                           WHERE t.RoleId = g.RoleId AND t.ResourceKind = g.ResourceKind AND t.ResourceId = m.n);
 
         -- 7. Нарешті — версія проєкту.
         UPDATE doc.Project SET TemplateVersionId = @targetVersionId WHERE Id = @projectId;
