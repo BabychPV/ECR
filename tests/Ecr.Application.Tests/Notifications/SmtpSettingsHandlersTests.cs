@@ -779,6 +779,15 @@ public sealed class SmtpSettingsHandlersTests
     [InlineData("::127.0.0.1", null)]
     [InlineData("[10.0.0.5]", null)]
     [InlineData("relay.corp.example:25", null)]   // порт у полі Server
+    [InlineData("[fe80::1]:25", null)]
+    [InlineData("127.0.0.1:25", null)]
+    [InlineData("localhost:25", null)]
+    [InlineData("169.254.169.254:25", null)]
+    [InlineData("fd00:ec2::254", null)]
+    [InlineData("LOCALHOST", null)]
+    [InlineData("localhost.", null)]
+    [InlineData("0.0.0.0", null)]
+    [InlineData("::ffff:169.254.169.254", null)]
     [InlineData("169.254.169.254", null)]
     [InlineData("metadata.google.internal", null)]
     [InlineData("rebind.example", "127.0.0.1")]          // DNS-rebinding на loopback

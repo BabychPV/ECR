@@ -104,6 +104,9 @@ public sealed class SmtpEndpointPolicy(
         return !failClosed;
     }
 
+    private static readonly IReadOnlyList<IPAddress> MetadataAddresses =
+        [IPAddress.Parse("fd00:ec2::254"), IPAddress.Parse("169.254.170.2"), IPAddress.Parse("169.254.169.254")];
+
     /// <summary>Ім'я з літер, цифр, <c>. - _</c> і нічого іншого (дужки, двокрапка, косі, пробіли — ні).</summary>
     internal static bool IsPlainName(string name)
         => name.Length > 0 && name.All(c => char.IsAsciiLetterOrDigit(c) || c is '.' or '-' or '_');
@@ -114,6 +117,18 @@ public sealed class SmtpEndpointPolicy(
     /// </summary>
     internal static bool IsBlockedAddress(IPAddress ip)
     {
+        if (ip.IsIPv4MappedToIPv6)
+        {
+            ip = ip.MapToIPv4();
+        }
+
+        // Явно: metadata хмар, що не вкладаються в link-local — AWS IMDS по IPv6 (fd00:ec2::254, решта fc00::/7 — приватні,
+        // дозволені) і ECS task metadata (169.254.170.2 — уже в 169.254/16, лишено для читача).
+        if (MetadataAddresses.Contains(ip))
+        {
+            return true;
+        }
+
         if (ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6)
         {
             var bytes = ip.GetAddressBytes();

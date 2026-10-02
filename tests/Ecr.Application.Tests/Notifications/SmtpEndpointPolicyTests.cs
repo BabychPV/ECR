@@ -38,6 +38,23 @@ public sealed class SmtpEndpointPolicyTests
     [InlineData("relay.corp.example:25")]
     [InlineData("[relay.corp.example]")]
     [InlineData("a/b")]
+    [InlineData("[fe80::1]:25")]
+    [InlineData("127.0.0.1:25")]
+    [InlineData("localhost:25")]
+    [InlineData("LOCALHOST:25")]
+    [InlineData("0.0.0.0:25")]
+    [InlineData("169.254.169.254:25")]
+    [InlineData("metadata.google.internal:25")]
+    [InlineData("fd00:ec2::254")]
+    [InlineData("[fd00:ec2::254]")]
+    [InlineData("::ffff:169.254.169.254")]
+    [InlineData("127.0.0.2")]
+    [InlineData("0.0.0.0")]
+    [InlineData("localhost.")]
+    [InlineData("LOCALHOST")]
+    [InlineData("a.b.localhost")]
+    [InlineData("Metadata.Google.Internal.")]
+    [InlineData("169.254.170.2")]
     public async Task Loopback_у_будь_якому_записі_і_хибна_форма_хоста_відхиляються_на_сирому_рядку(string host)
     {
         // ⛔ Мутація: повернути `host.Trim().Trim('[', ']')` до розбору літерала → `[::1]:25` знову проходить.

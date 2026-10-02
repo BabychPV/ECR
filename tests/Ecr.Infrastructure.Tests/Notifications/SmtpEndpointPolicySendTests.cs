@@ -32,6 +32,11 @@ public sealed class SmtpEndpointPolicySendTests
     [InlineData("localhost", "25")]
     [InlineData("[::1]:25", "587")]                // P1: справжній EndpointNetwork і справжній SocketException
     [InlineData("[::ffff:127.0.0.1]:25", "587")]
+    [InlineData("[fe80::1]:25", "587")]
+    [InlineData("127.0.0.1:25", "587")]
+    [InlineData("localhost:25", "587")]
+    [InlineData("169.254.169.254:25", "587")]
+    [InlineData("fd00:ec2::254", "587")]
     [InlineData("169.254.169.254", "587")]  // metadata
     public async Task Відправлення_відхиляє_нестандартний_порт_і_loopback_link_local_до_будь_якого_з_єднання(string host, string port)
     {
