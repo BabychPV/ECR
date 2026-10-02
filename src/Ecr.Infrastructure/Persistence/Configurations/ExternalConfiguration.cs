@@ -172,7 +172,7 @@ public sealed class CollectionScheduleConfiguration : IEntityTypeConfiguration<C
         // ФВ-13.15: залежність від іншого розкладу. Самопосилання без каскаду (SQL Server
         // забороняє каскад у циклі): знімає залежність прикладний шар перед видаленням.
         builder.HasOne<CollectionSchedule>().WithMany().HasForeignKey(x => x.DependsOnScheduleId)
-               .OnDelete(DeleteBehavior.NoAction).HasConstraintName("FK_CS_DependsOn");
+               .OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_CS_DependsOn");
     }
 }
 
