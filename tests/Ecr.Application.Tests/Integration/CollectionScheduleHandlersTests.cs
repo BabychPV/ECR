@@ -553,6 +553,48 @@ public sealed class CollectionScheduleHandlersTests
         Assert.Contains("\"Manual\":true", manual, StringComparison.Ordinal);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "ФВ-13.15")]
+    public async Task ФВ_13_15_ланцюг_із_50_предків_приймається_51_вважається_циклом_а_зламане_кільце_не_зависає()
+    {
+        // Ланцюг t0 → t1 → … → t51: у t0 51 предок, у t1 — 50.
+        var chain = Enumerable.Range(0, 52).Select(_ => Add(Hourly)).ToList();
+        for (var i = 0; i < chain.Count - 1; i++)
+        {
+            chain[i].SetDependency(chain[i + 1].Id);
+        }
+
+        var self = Add(Hourly);
+
+        // ⚠ МУТАЦІЙНИЙ ДОКАЗ (CollectionScheduleDependencyRules.MaxChainDepth): `++visited > Max` → `>=` чи `<`
+        // відхилив би законний ланцюг із рівно 50 предків; `--visited` пропустив би 51.
+        var ok = await Save().HandleAsync(
+            self.Id, Hourly, isEnabled: true, lookbackDays: null,
+            new ScheduleDependencyChange(chain[1].Id), Version(self), CancellationToken.None);
+        Assert.Equal(chain[1].Id, ok.DependsOnScheduleId);
+
+        var tooDeep = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Save().HandleAsync(
+                self.Id, Hourly, isEnabled: true, lookbackDays: null,
+                new ScheduleDependencyChange(chain[0].Id), Version(self), CancellationToken.None));
+        Assert.Equal("err.ECR-REQ-0422.collectionScheduleDependencyCycle", tooDeep.Details!["messageKey"]);
+        Assert.Equal(chain[0].Id.ToString(System.Globalization.CultureInfo.InvariantCulture), tooDeep.Details["dependsOn"]);
+
+        // Зламані дані: кільце x ↔ y, що не проходить через розклад, який правиться. Без межі глибини
+        // обхід крутився б вічно; з нею — чесна 422, а не завислий запит.
+        var x = Add(Hourly);
+        var y = Add(Hourly);
+        x.SetDependency(y.Id);
+        y.SetDependency(x.Id);
+
+        var refused = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Save().HandleAsync(
+                self.Id, Hourly, isEnabled: true, lookbackDays: null,
+                new ScheduleDependencyChange(x.Id), Version(self), CancellationToken.None));
+        Assert.Equal("err.ECR-REQ-0422.collectionScheduleDependencyCycle", refused.Details!["messageKey"]);
+    }
+
     private void Allow(string permission)
         => _access.BuildProfileAsync(Actor, Arg.Any<CancellationToken>())
             .Returns(new AccessBuilder { UserId = Actor }.Permission(permission).Build());
