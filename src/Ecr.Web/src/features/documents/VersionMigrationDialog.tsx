@@ -224,6 +224,11 @@ function MigrationReport({ report }: { readonly report: VersionMigrationReport }
                 {refusalText(reason)}
               </Text>
             ))}
+            {report.blockedGrantCount !== null && report.blockedGrantCount !== undefined && report.blockedGrantCount > 0 && (
+              <Text size="sm" data-migrate-blocked-grants="">
+                {t('documents.migrateGrantsNotMappedCount', { count: report.blockedGrantCount })}
+              </Text>
+            )}
           </Stack>
         </Alert>
       )}

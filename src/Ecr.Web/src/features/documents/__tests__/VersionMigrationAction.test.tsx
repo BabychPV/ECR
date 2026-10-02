@@ -211,6 +211,30 @@ describe('useVersionMigrationAction', () => {
     expect(screen.queryByText('grantsNotMapped')).toBeNull();
   });
 
+  it('blockedGrantCount показується рядком із кількістю; без нього рядка немає (ent7 P3-4)', async () => {
+    show(['Template.Edit'], report({ canApply: false, refusals: ['grantsNotMapped'], blockedGrantCount: 3 }));
+    await openAndPickTarget();
+
+    fireEvent.click(screen.getByTestId('migrate-dry-run'));
+
+    const line = await waitFor(() => {
+      const el = document.querySelector('[data-migrate-blocked-grants]');
+      expect(el).not.toBeNull();
+      return el as HTMLElement;
+    });
+    expect(line.textContent).toContain('documents.migrateGrantsNotMappedCount');
+  });
+
+  it('без blockedGrantCount рядка про заблоковані гранти немає', async () => {
+    show(['Template.Edit'], report({ canApply: false, refusals: ['grantsNotMapped'] }));
+    await openAndPickTarget();
+
+    fireEvent.click(screen.getByTestId('migrate-dry-run'));
+
+    await screen.findByText('⟦documents.migrateRefusalGrantsNotMapped⟧');
+    expect(document.querySelector('[data-migrate-blocked-grants]')).toBeNull();
+  });
+
   it('зміна режиму після звіту знецінює звіт — перенос знову вимкнено', async () => {
     show(['Template.Edit'], report({}));
     await openAndPickTarget();
