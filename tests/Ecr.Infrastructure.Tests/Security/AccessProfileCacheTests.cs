@@ -168,6 +168,59 @@ public sealed class AccessProfileCacheTests : IDisposable
         Assert.All(results, r => Assert.NotSame(stale, r));
     }
 
+    /// <remarks>
+    /// ent7 P3-5. Друге скидання під час ДРУГОГО польоту: профіль другої спроби теж побудовано до скидання.
+    /// Мутація: повернути <c>built.Profile</c> з другої спроби безумовно (без побудови поза польотом) — червоне.
+    /// </remarks>
+    [Fact]
+    public async Task Друге_скидання_під_час_другого_польоту_не_віддає_профіль_другої_спроби()
+    {
+        var cache = new AccessProfileCache(_memory);
+        var gates = new[]
+        {
+            new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously),
+            new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously),
+        };
+        var started = new[]
+        {
+            new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously),
+            new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously),
+        };
+        var calls = 0;
+        var profiles = new List<AccessProfile>();
+
+        var request = cache.GetOrCreateAsync(UserId, "s1", "", async _ =>
+        {
+            var n = Interlocked.Increment(ref calls) - 1;
+            var builds = 0;
+            var p = await Build(ref builds, "s1");
+            lock (profiles)
+            {
+                profiles.Add(p);
+            }
+
+            if (n < 2)
+            {
+                started[n].TrySetResult();
+                await gates[n].Task;
+            }
+
+            return p;
+        }, CancellationToken.None);
+
+        await started[0].Task;
+        cache.InvalidateAll();
+        gates[0].SetResult();
+        await started[1].Task; // друга спроба побудована під епохою 1 ...
+        cache.InvalidateAll(); // ... і скидання №2 сталося до її завершення
+        gates[1].SetResult();
+
+        var result = await request;
+
+        Assert.Equal(3, calls);
+        Assert.Same(profiles[2], result);
+    }
+
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
     public async Task Зміна_SecurityStamp_дає_інший_ключ_кешу()
     {

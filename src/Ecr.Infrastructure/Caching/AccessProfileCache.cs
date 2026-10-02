@@ -113,18 +113,19 @@ public sealed class AccessProfileCache(IMemoryCache memory, CacheLifetimes? life
         // ⚠ Той, хто приєднався до вже запущеного польоту, міг би отримати профіль,
         // побудований ДО скидання (до коміту гранта). Тому профіль несе епоху, під
         // якою будувався; якщо скидання сталося — одна перебудова (друга спроба — остання).
-        Built built = default;
         for (var attempt = 0; attempt < 2; attempt++)
         {
-            built = await _flight.RunAsync(key, token => BuildAsync(userId, key, factory, token), ct)
+            var built = await _flight.RunAsync(key, token => BuildAsync(userId, key, factory, token), ct)
                 .ConfigureAwait(false);
             if (built.Epoch == Interlocked.Read(ref _epoch))
             {
-                break;
+                return built.Profile;
             }
         }
 
-        return built.Profile;
+        // ⛔ ent7 P3-5: скидання сталося й під час другого польоту — приєднаний міг би отримати профіль
+        // без нової заборони. Будуємо поза польотом (у кеш не кладемо), а не повертаємо «останній» політ.
+        return await factory(ct).ConfigureAwait(false);
     }
 
     /// <summary>Профіль разом з епохою скидань, під якою його побудовано.</summary>
