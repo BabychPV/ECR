@@ -378,7 +378,8 @@ public static class DependencyInjection
         // з'єднання після зміни DNS. Таймаут виставляє САМ відправник
         // (`TeamsWebhookSender.Timeout`) — тут лише реєстрація фабрики, щоб
         // забута тут лямбда не могла мовчки повернути типові 100 секунд.
-        services.AddHttpClient(Notifications.TeamsWebhookSender.HttpClientName);
+        services.AddHttpClient(Notifications.TeamsWebhookSender.HttpClientName)
+            .ConfigurePrimaryHttpMessageHandler(Notifications.TeamsWebhookSender.CreateHandler); // S9: без редиректів
 
         // ⚠ Задачі, які use-case називає МАРКЕРОМ, реєструються ще й за ним:
         // `EnqueueAsync<IReportSnapshotJob>` кладе в JobDataMap повне імʼя
