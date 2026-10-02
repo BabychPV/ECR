@@ -974,6 +974,10 @@ public sealed class SaveRegistryDefinitionHandler(
             .ConfigureAwait(false);
         if (consumers.Total > 0)
         {
+            // ⛔ Перелік споживачів — лише те, що автор і так бачить: імена правил чужого (забороненого)
+            // довідника, формул шаблонів і методологій без Template.View / Calculation.View не розкриваються;
+            // `total` лишається повним, `hiddenCount` — скільки з показаної сторінки сховано.
+            var visible = await VisibleConsumersAsync(consumers.Items, profile, ct).ConfigureAwait(false);
             throw new BusinessRuleException(
                 "ECR-REG-0422",
                 $"Зв'язок поля «{changed[0].Field.Code}» не можна змінити: через нього читають атрибути правил, формул чи методологій — {consumers.Total.ToString(CultureInfo.InvariantCulture)}.",
@@ -982,8 +986,9 @@ public sealed class SaveRegistryDefinitionHandler(
                     ["messageKey"] = "err.ECR-REG-0422.lookupRetargetUsedByRules",
                     ["fieldCode"] = (string)changed[0].Field.Code,
                     ["total"] = consumers.Total.ToString(CultureInfo.InvariantCulture),
-                    ["usedBy"] = string.Join(", ", consumers.Items.Select(i => i.Label)),
-                    ["references"] = consumers.Items,
+                    ["usedBy"] = string.Join(", ", visible.Select(i => i.Label)),
+                    ["references"] = visible,
+                    ["hiddenCount"] = (consumers.Items.Count - visible.Count).ToString(CultureInfo.InvariantCulture),
                 });
         }
 
@@ -1003,6 +1008,43 @@ public sealed class SaveRegistryDefinitionHandler(
         }
     }
 
+    /// <summary>
+    /// Споживачі, видимі автору: правило — якщо довідник-власник не заборонений; формула шаблону —
+    /// з <c>Template.View</c>; формула методології — з <c>Calculation.View</c>; невідомий вид — приховано.
+    /// </summary>
+    private async Task<IReadOnlyList<UsageItemDto>> VisibleConsumersAsync(
+        IReadOnlyList<UsageItemDto> items, Security.AccessProfile profile, CancellationToken ct)
+    {
+        Dictionary<string, int>? idByCode = null;
+        if (items.Any(i => i.Kind == UsageKinds.RegistryField))
+        {
+            idByCode = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            foreach (var def in await registries.ListDefinitionsAsync(ct).ConfigureAwait(false))
+            {
+                idByCode.TryAdd((string)def.Code, def.Id);
+            }
+        }
+
+        var result = new List<UsageItemDto>();
+        foreach (var item in items)
+        {
+            var seen = item.Kind switch
+            {
+                UsageKinds.RegistryField => idByCode is not null
+                    && idByCode.TryGetValue(item.Label.Split('.')[0], out var ownerId)
+                    && !RegistryAccess.IsDenied(profile, ownerId),
+                UsageKinds.TemplateFormula => profile.Has("Template.View"),
+                UsageKinds.MethodologyFormula => profile.Has("Calculation.View"),
+                _ => false,
+            };
+            if (seen)
+            {
+                result.Add(item);
+            }
+        }
+
+        return result;
+    }
     /// <summary>
     /// Ціль посилання поля <c>Lookup</c>: обов'язкова, існує, і на неї немає заборони автора.
     /// </summary>
