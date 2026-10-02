@@ -273,7 +273,7 @@ Get-ChildItem docs/build/questions -Filter 'Q-*.md' |
 
 ---
 
-## 8. Відомі обмеження RC `rc/2026-10-03` (2026-10-02; повністю — `TESTER-GUIDE.md` §7.13 пп. 18–27)
+## 8. Відомі обмеження RC `rc/2026-10-03` (2026-10-02; повністю — `TESTER-GUIDE.md` §7.13 пп. 18–28)
 
 | Тема | Суть |
 |---|---|
@@ -281,10 +281,10 @@ Get-ChildItem docs/build/questions -Filter 'Q-*.md' |
 | ФВ-6.16 | розріз `Sheet`/`Table`/`Column` без стану документа (`levelMayExceedActual`) |
 | ФВ-13.15 | `SkippedDependency`, вікно 48 год; ручний збір гейт обходить |
 | RT-24 | порожнє поле довідника в `REGFIELD` → `null`; `IFERROR(REGFIELD)` його не ловить |
-| Перерахунок | `DataEntry` не має `Calculation.Recalculate`; `recalc-read` не в RC |
+| Перерахунок | свій документ — за `Document.View` + видимість (Coalesced для не-власників `Calculation.Recalculate`); ⚠ ліміт частоти перерахунку — у наступному RC |
 | Ролі | перелік ролей обрізається `Take(500)` |
 | ent5/ent6 | P3: `Deny` vs `ProjectNotVisible`, `efsync` (TOCTOU/1205/Degraded-проксі), сирі JSON-колонки, `If-Match` на `PUT` опису довідника |
-| Не в RC | A1 deny при міграції версії шаблону (fail-open кеш профілю, не зведено); `fv812-debt` |
+| Не в RC | A1 deny при міграції версії шаблону (fail-open кеш профілю виправлено в lane, рев'ю триває); у чергах `sec-s3s6`, `last-admin`, ліміт частоти перерахунку |
 
 ---
 
