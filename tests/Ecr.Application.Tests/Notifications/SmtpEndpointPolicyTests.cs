@@ -55,6 +55,25 @@ public sealed class SmtpEndpointPolicyTests
     public async Task Приватні_й_звичайні_адреси_та_імена_проходять(string host)
         => Assert.True(await Policy().IsHostAllowedAsync(host, CancellationToken.None));
 
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "ent6-S4")]
+    [InlineData("169.254.169.254")]
+    [InlineData("169.254.1.1")]
+    [InlineData("fe80::1")]
+    [InlineData("[fe80::1]")]
+    [InlineData("metadata.google.internal")]
+    [InlineData("metadata.goog.")]
+    [InlineData("metadata.azure.internal")]
+    [InlineData("localhost")]
+    [InlineData("smtp.localhost")]
+    public async Task Link_local_і_metadata_відхиляються_самою_політикою_без_Validate(string host)
+    {
+        // ⛔ Мутації (кожна окремо): прибрати IsCloudMetadataName; прибрати IsBlocked/IsBlockedAddress для літералів;
+        // прибрати перевірку localhost. Викликаємо політику НАПРЯМУ — Validate цих випадків тут не відсікає.
+        Assert.False(await Policy().IsHostAllowedAsync(host, CancellationToken.None));
+    }
+
     private sealed class StubNetwork : IEndpointNetwork
     {
         public IReadOnlyList<string> AllowedHosts => [];
