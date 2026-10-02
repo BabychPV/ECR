@@ -108,10 +108,10 @@
 | …the server rejected the login | Login, Password / `Smtp:User` + секрет `Smtp:SecretName` |
 | …refused to relay for the sender or a recipient | Sender address / `Smtp:From`; дозвіл релею для хоста й облікового запису |
 | …did not respond in time | сервер не відповів за 30 с |
-| The SMTP transport is not configured on the server. | пошти немає взагалі (п. 5) |
+| SMTP is not configured: fill in and enable the SMTP settings, or set Smtp:* in the process configuration. | пошти немає взагалі (п. 5) |
 
-Тексти повідомлень називають ключі `Smtp:*`; для налаштувань із форми читайте
-відповідне поле. Нерозпізнана відмова — загальне «The channel refused the test
+Тексти повідомлень називають поле форми, а в дужках — ключ `Smtp:*` на випадок,
+коли діє конфігурація процесу. Нерозпізнана відмова — загальне «The channel refused the test
 message.»; подробиці — у журналі застосунку.
 
 ## 3. Канали
@@ -199,7 +199,7 @@ addresses, and its roles resolve to no active user with an email address.»
 |---|---|
 | Канали й правила (п. 3–4) | кожна спроба — рядок `Failed` у журналі доставок («транспорт SMTP процесу не налаштовано»). Повторно не надсилається: нагадування про період, відкритий без транспорту, не прийде і після налаштування |
 | Черга алертів `itg.NotificationOutbox` (п. 6) | події лишаються `Pending` і накопичуються, спроби не витрачаються; після налаштування підуть найближчим прогоном `NotificationJob` |
-| Проба | «The SMTP transport is not configured on the server.» |
+| Проба | «SMTP is not configured: fill in and enable the SMTP settings, or set Smtp:* in the process configuration.» |
 | Стан | панель SMTP: «Mail is not configured: events stay queued.»; `/health/facts`: `notificationTransport.isConfigured = false` |
 
 ## 6. Черга алертів для адміністраторів (`ReceivesAlerts`)
