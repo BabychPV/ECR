@@ -6216,6 +6216,9 @@ USING (VALUES
     (N'effectiveAccess.scopeExpired',    N'en', N'Assignment not in effect', 1),
     (N'effectiveAccess.counted',         N'en', N'Yes', 1),
     (N'effectiveAccess.notCounted',      N'en', N'No', 1),
+    (N'effectiveAccess.narrowedBy',      N'en', N'Narrowed by {by}', 1),
+    (N'effectiveAccess.projectNotVisible', N'en', N'No: the project is not visible, so grants below it do not apply', 1),
+    (N'effectiveAccess.mayExceed',       N'en', N'The role is narrowed by sheets or periods: the shown level may be HIGHER than the actual one for a given period. Check the narrowing in the contributions.', 1),
     -- ru/kz — окремою порцією `I18N` (SEC:effective-access).
     -- SEC:effective-access ── кінець секції ──
     -- REG:rt25-client ── сторінка впливу довідника і банер застарілості (RT-25, клієнт) ──
@@ -14491,6 +14494,9 @@ SELECT v.[Key], v.Lang, v.Val
     (N'effectiveAccess.scopeExpired', N'ru', N'Назначение не действует'),
     (N'effectiveAccess.counted', N'ru', N'Да'),
     (N'effectiveAccess.notCounted', N'ru', N'Нет'),
+    (N'effectiveAccess.narrowedBy', N'ru', N'Сужено: {by}'),
+    (N'effectiveAccess.projectNotVisible', N'ru', N'Нет: проект не виден, поэтому гранты ниже него не действуют'),
+    (N'effectiveAccess.mayExceed', N'ru', N'Роль сужена листами или периодами: показанный уровень может быть ВЫШЕ фактического для конкретного периода. Проверьте сужение во вкладах.'),
     (N'err.ECR-REQ-0422.effectiveAccessResource', N'kz', N'Ресурсты түрі мен оң санымен көрсету керек, мысалы Registry:5 немесе Project:3.'),
     (N'effectiveAccess.show', N'kz', N'Тиімді қолжетімділікті көрсету'),
     (N'effectiveAccess.hide', N'kz', N'Тиімді қолжетімділікті жасыру'),
@@ -14522,7 +14528,10 @@ SELECT v.[Key], v.Lang, v.Val
     (N'effectiveAccess.scopeOutOfScope', N'kz', N'Тағайындау аумағынан тыс'),
     (N'effectiveAccess.scopeExpired', N'kz', N'Тағайындау қолданыста емес'),
     (N'effectiveAccess.counted', N'kz', N'Иә'),
-    (N'effectiveAccess.notCounted', N'kz', N'Жоқ')
+    (N'effectiveAccess.notCounted', N'kz', N'Жоқ'),
+    (N'effectiveAccess.narrowedBy', N'kz', N'Тарылтылған: {by}'),
+    (N'effectiveAccess.projectNotVisible', N'kz', N'Жоқ: жоба көрінбейді, сондықтан одан төмен гранттар әрекет етпейді'),
+    (N'effectiveAccess.mayExceed', N'kz', N'Рөл парақтармен немесе кезеңдермен тарылтылған: көрсетілген деңгей нақты кезең үшін фактіліктен ЖОҒАРЫ болуы мүмкін. Үлестердегі тарылтуды тексеріңіз.')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
