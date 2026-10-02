@@ -1,4 +1,4 @@
-import { Suspense, lazy, useState, type JSX } from 'react';
+﻿import { Suspense, lazy, useState, type JSX } from 'react';
 import { Button, Group, Stack, Table, Tabs, Text } from '@mantine/core';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { RegistryDefDto } from '@/api/types';
@@ -47,6 +47,8 @@ export interface EntryDrawerProps {
  */
 export function EntryDrawer({ registry, row, fields, asOf, readOnly }: EntryDrawerProps): JSX.Element {
   const queryClient = useQueryClient();
+  // D-212: нетемпоральний довідник не має календарної чинності — полів дат і дії «Чинність» немає.
+  const temporal = registry.isTemporal || asOf !== null;
   const [day, setDay] = useState<Date | null>(null);
   const [editing, setEditing] = useState<'name' | 'validity' | null>(null);
   const [tab, setTab] = useState<string | null>('details');
@@ -85,8 +87,12 @@ export function EntryDrawer({ registry, row, fields, asOf, readOnly }: EntryDraw
               items={[
                 { label: t('registries.code'), value: row.code, mono: true },
                 { label: t('registries.name'), value: row.display },
-                { label: t('registries.validFrom'), value: row.validFrom ?? '' },
-                { label: t('registries.validTo'), value: row.validTo ?? '' },
+                ...(temporal
+                  ? [
+                      { label: t('registries.validFrom'), value: row.validFrom ?? '' },
+                      { label: t('registries.validTo'), value: row.validTo ?? '' },
+                    ]
+                  : []),
                 ...fields.map((field) => ({
                   label: localized(field.nameL10n) || field.code,
                   value: row.values[field.code]?.display ?? row.values[field.code]?.value ?? '',
@@ -98,9 +104,11 @@ export function EntryDrawer({ registry, row, fields, asOf, readOnly }: EntryDraw
                 <Button size="xs" variant="default" onClick={() => setEditing('name')}>
                   {t('registries.editEntry')}
                 </Button>
-                <Button size="xs" variant="default" onClick={() => setEditing('validity')}>
-                  {t('registries.validity')}
-                </Button>
+                {temporal && (
+                  <Button size="xs" variant="default" onClick={() => setEditing('validity')}>
+                    {t('registries.validity')}
+                  </Button>
+                )}
               </Group>
             )}
           </Stack>

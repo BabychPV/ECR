@@ -69,7 +69,7 @@ function registryOf(sourceKind: RegistryDefDto['sourceKind']): RegistryDefDto {
         unitId: null,
       },
     ],
-    isTemporal: false,
+    isTemporal: true,
     isHierarchical: false,
     sourceKind,
   };

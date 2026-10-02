@@ -61,7 +61,7 @@ const registry = {
   code: 'UNITS',
   nameL10n: { values: { en: 'Units' } },
   fields: [],
-  isTemporal: false,
+  isTemporal: true,
   isHierarchical: false,
   sourceKind: 'Master',
 };
