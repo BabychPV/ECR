@@ -120,7 +120,8 @@ export function CollectionScheduleTab({
     onError: onFailure,
   });
 
-  if (schedules.isPending) return <Loader size="sm" />;
+  // Ім'я для читалки: голий `Loader` оголошується ніяк, і очікування не відрізнити від порожнечі.
+  if (schedules.isPending) return <Loader size="sm" role="status" aria-label={t('common.loading')} />;
 
   if (schedules.isError) {
     return <ErrorAlert error={schedules.error} onRetry={() => void schedules.refetch()} />;
@@ -271,12 +272,17 @@ function ScheduleForm({
         label={t('schedule.dependsOn')}
         description={t('schedule.dependsOnHint')}
         placeholder={t('schedule.dependsOnNone')}
-        data={candidates.map((row) => ({
-          value: String(row.id),
-          label: row.sourceEntityName ?? row.sourceEntityCode,
-        }))}
+        // ⚠ «Без залежності» — ще й опція переліку: хрестик Mantine має `aria-hidden` і `tabIndex=-1`,
+        // тож із клавіатури чи читалкою зняти залежність інакше нема чим.
+        data={[
+          { value: '', label: t('schedule.dependsOnNone') },
+          ...candidates.map((row) => ({
+            value: String(row.id),
+            label: row.sourceEntityName ?? row.sourceEntityCode,
+          })),
+        ]}
         value={dependsOn}
-        onChange={setDependsOn}
+        onChange={(value) => setDependsOn(value === '' ? null : value)}
         // «—»: порожній вибір знімає залежність (`clearDependency`).
         clearable
         data-schedule-depends-on=""
