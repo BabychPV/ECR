@@ -273,6 +273,21 @@ Get-ChildItem docs/build/questions -Filter 'Q-*.md' |
 
 ---
 
+## 8. Відомі обмеження RC `rc/2026-10-03` (2026-10-02; повністю — `TESTER-GUIDE.md` §7.13 пп. 18–27)
+
+| Тема | Суть |
+|---|---|
+| SMTP | NTLM знято (`D-263`); пароль лише з TLS; ліміт проб 5/хв на користувача і 30/год системно, в пам'яті процесу |
+| ФВ-6.16 | розріз `Sheet`/`Table`/`Column` без стану документа (`levelMayExceedActual`) |
+| ФВ-13.15 | `SkippedDependency`, вікно 48 год; ручний збір гейт обходить |
+| RT-24 | порожнє поле довідника в `REGFIELD` → `null`; `IFERROR(REGFIELD)` його не ловить |
+| Перерахунок | `DataEntry` не має `Calculation.Recalculate`; `recalc-read` не в RC |
+| Ролі | перелік ролей обрізається `Take(500)` |
+| ent5/ent6 | P3: `Deny` vs `ProjectNotVisible`, `efsync` (TOCTOU/1205/Degraded-проксі), сирі JSON-колонки, `If-Match` на `PUT` опису довідника |
+| Не в RC | A1 deny при міграції версії шаблону (fail-open кеш профілю, не зведено); `fv812-debt` |
+
+---
+
 ## Примітка: межі `pf_AuditByMonth` обслуговуються автоматично (2026-10-01)
 
 Раніше межі аудиту закінчувалися 2027-06-01 і ніхто їх не довантажував (після цієї
