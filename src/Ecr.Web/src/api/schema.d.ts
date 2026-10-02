@@ -18305,6 +18305,12 @@ export interface components {
             dataSourceId: number;
             /**
              * Format: int32
+             * @description Розклад того ж з'єднання, після успішного прогону якого цей запускається
+             *     (ФВ-13.15 «залежності»); `null` — залежності немає.
+             */
+            dependsOnScheduleId?: null | number;
+            /**
+             * Format: int32
              * @description Ідентифікатор розкладу.
              */
             id: number;
@@ -18556,6 +18562,12 @@ export interface components {
         CreateCollectionScheduleRequest: {
             /** @description Вираз cron у форматі Quartz: 6–7 полів, одне з полів дня — `?`. */
             cron: string;
+            /**
+             * Format: int32
+             * @description Розклад того ж з'єднання, після успішного прогону якого цей запускається (ФВ-13.15);
+             *     `null` — без залежності.
+             */
+            dependsOnScheduleId?: null | number;
             /** @description Чи має розклад одразу стояти в планувальнику. */
             isEnabled: boolean;
             /**
@@ -25151,8 +25163,15 @@ export interface components {
         };
         /** @description Тіло зміни розкладу. */
         UpdateCollectionScheduleRequest: {
+            /** @description `true` — зняти залежність (перемагає DependsOnScheduleId). */
+            clearDependency?: null | boolean;
             /** @description Вираз cron у форматі Quartz: 6–7 полів, одне з полів дня — `?`. */
             cron: string;
+            /**
+             * Format: int32
+             * @description Нова залежність від розкладу того ж з'єднання (ФВ-13.15); `null` — лишити наявну.
+             */
+            dependsOnScheduleId?: null | number;
             /** @description Чи має розклад стояти в планувальнику. */
             isEnabled: boolean;
             /**

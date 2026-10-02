@@ -83,7 +83,7 @@ public sealed class CollectionSchedulesController(
         return Ok(await save
             .HandleAsync(
                 id, request.Cron, request.IsEnabled, request.LookbackDays,
-                new ScheduleDependencyChange(request.DependsOnScheduleId, request.ClearDependency), ifMatch, ct)
+                new ScheduleDependencyChange(request.DependsOnScheduleId, request.ClearDependency == true), ifMatch, ct)
             .ConfigureAwait(false));
     }
 
@@ -129,4 +129,4 @@ public sealed record CreateCollectionScheduleRequest(
 /// </param>
 /// <param name="ClearDependency"><c>true</c> — зняти залежність (перемагає <paramref name="DependsOnScheduleId"/>).</param>
 public sealed record UpdateCollectionScheduleRequest(
-    string Cron, bool IsEnabled, int? LookbackDays = null, int? DependsOnScheduleId = null, bool ClearDependency = false);
+    string Cron, bool IsEnabled, int? LookbackDays = null, int? DependsOnScheduleId = null, bool? ClearDependency = null);

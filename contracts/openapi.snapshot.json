@@ -1503,6 +1503,14 @@
             "format": "int32",
             "type": "integer"
           },
+          "dependsOnScheduleId": {
+            "description": "Розклад того ж з'єднання, після успішного прогону якого цей запускається\n(ФВ-13.15 «залежності»); `null` — залежності немає.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
           "id": {
             "description": "Ідентифікатор розкладу.",
             "format": "int32",
@@ -2099,6 +2107,14 @@
           "cron": {
             "description": "Вираз cron у форматі Quartz: 6–7 полів, одне з полів дня — `?`.",
             "type": "string"
+          },
+          "dependsOnScheduleId": {
+            "description": "Розклад того ж з'єднання, після успішного прогону якого цей запускається (ФВ-13.15);\n`null` — без залежності.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
           },
           "isEnabled": {
             "description": "Чи має розклад одразу стояти в планувальнику.",
@@ -16387,9 +16403,24 @@
       "UpdateCollectionScheduleRequest": {
         "description": "Тіло зміни розкладу.",
         "properties": {
+          "clearDependency": {
+            "description": "`true` — зняти залежність (перемагає DependsOnScheduleId).",
+            "type": [
+              "null",
+              "boolean"
+            ]
+          },
           "cron": {
             "description": "Вираз cron у форматі Quartz: 6–7 полів, одне з полів дня — `?`.",
             "type": "string"
+          },
+          "dependsOnScheduleId": {
+            "description": "Нова залежність від розкладу того ж з'єднання (ФВ-13.15); `null` — лишити наявну.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
           },
           "isEnabled": {
             "description": "Чи має розклад стояти в планувальнику.",
