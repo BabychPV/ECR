@@ -721,6 +721,17 @@ export const MethodologyCoverageFixture = {
 export function emptyBodyFor(url: string): unknown {
   if (url.includes('/campaign/summary')) return CampaignSummaryFixture;
 
+  // ⚠ Сирий перелік мови (`GET /ui-strings?lang=`, `UiStringListResponse`) — НЕ каталог вище:
+  // панель шаблонів повідомлень (`CL-6`) читає саме його, і без цієї форми гейт сканував би
+  // падіння рендера, а не форму шаблону. Рядки — ті самі тексти сіду, еталон = значення.
+  if (/\/ui-strings\?/.test(url)) {
+    return {
+      languageCode: 'en',
+      items: Object.entries(Catalog)
+        .filter(([key]) => key.startsWith('notifications.period'))
+        .map(([key, value]) => ({ key, reference: value, value })),
+    };
+  }
   if (url.includes('/ui-strings/')) {
     return { languageCode: 'en', revision: 1, strings: Catalog };
   }

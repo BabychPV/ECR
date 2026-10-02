@@ -15,6 +15,7 @@ import {
   getNotificationRules,
   listNotificationChannels,
   NotificationChannelsKey,
+  NotificationRulesKey,
   replaceNotificationRules,
   type NotificationChannel,
   type NotificationRule,
@@ -55,8 +56,8 @@ const Severities = ['Info', 'Warning', 'Error'] as const satisfies readonly Seve
  */
 const DefaultSeverity: Severity = 'Info';
 
-/** Ключ кешу правил. Свого домену у фабриці `queryKeys` сповіщення ще не мають. */
-const RulesKey = ['notifications', 'rules'] as const;
+/** Ключ кешу правил — спільний з панеллю шаблонів (`NotificationRulesKey`, `api.ts`). */
+const RulesKey = NotificationRulesKey;
 
 /*
  * ⚠ Ключ каналів — `NotificationChannelsKey` з `api.ts`, а не локальна

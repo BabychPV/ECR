@@ -14,6 +14,15 @@ const loadSmtpSettingsPanel = () => import('@/features/notifications/SmtpSetting
 const SmtpSettingsPanel = lazy(async () => ({ default: (await loadSmtpSettingsPanel()).SmtpSettingsPanel }));
 
 /**
+ * ⚠ Шаблони повідомлень (`CL-6`) — теж ЛІНИВИЙ чанк, з тієї ж причини: правляться рідко, а маршрут
+ * стоїть біля стелі бюджету (D-132). Модалок у панелі немає — фокус нікуди не переноситься.
+ */
+const loadNotificationTemplatesPanel = () => import('@/features/notifications/NotificationTemplatesPanel');
+const NotificationTemplatesPanel = lazy(async () => ({
+  default: (await loadNotificationTemplatesPanel()).NotificationTemplatesPanel,
+}));
+
+/**
  * Сповіщення (`BE-33`, рішення 2.3 директиви №15): канали, правила «подія ×
  * канал» і журнал доставок.
  *
@@ -55,6 +64,11 @@ export function NotificationsPage(): JSX.Element {
       </Title>
 
       <RulesMatrixPanel />
+
+      {/* Що саме відправляється за подією і кому — після правил, бо адресати виводяться з них. */}
+      <Suspense fallback={<Skeleton height={160} radius="sm" />}>
+        <NotificationTemplatesPanel />
+      </Suspense>
 
       <DeliveriesPanel />
     </Stack>

@@ -100,6 +100,15 @@ export type NotificationRuleMatrix = components['schemas']['NotificationRuleMatr
 export type NotificationDelivery = components['schemas']['NotificationDeliveryView'];
 export type NotificationDeliveryPage = components['schemas']['PagedResultOfNotificationDeliveryView'];
 
+/**
+ * Ключ кешу React Query для {@link getNotificationRules}.
+ *
+ * ⚠ Спільний з тієї ж причини, що й {@link NotificationChannelsKey}: матриця правил і панель
+ * шаблонів (`NotificationTemplatesPanel`, «хто отримає») читають ту саму матрицю, і збереження
+ * матриці мусить оновити рівно той запис кешу, з якого панель шаблонів бере адресатів.
+ */
+export const NotificationRulesKey = ['notifications', 'rules'] as const;
+
 export function getNotificationRules(): Promise<NotificationRuleMatrix> {
   return apiFetch<NotificationRuleMatrix>('/api/v1/notifications/rules');
 }
@@ -161,4 +170,44 @@ export function saveSmtpSettings(body: SmtpSettingsInput): Promise<SmtpSettings>
 /** Пробний лист на `to` через ефективні налаштування; `ok: false` — відповідь, а не помилка запиту. */
 export function testSmtpSettings(to: string): Promise<NotificationTestResult> {
   return apiFetch<NotificationTestResult>('/api/v1/notifications/smtp/test', { method: 'POST', ...json({ to }) });
+}
+
+/** Рядок адміністративного переліку каталогу: еталон і значення мовою як є в базі (`null` — немає). */
+export type UiStringRawRow = components['schemas']['UiStringRawRow'];
+type UiStringListResponse = components['schemas']['UiStringListResponse'];
+type UiStringRevisionResponse = components['schemas']['UiStringRevisionResponse'];
+type SetUiStringRequest = components['schemas']['SetUiStringRequest'];
+
+/**
+ * Ключ кешу сирого переліку мови. ⚠ Префікс `['ui-strings']` — той самий, що інвалідує редактор
+ * рядків (`UiStringsPage`): правка шаблону там і тут — це один і той самий рядок каталогу.
+ */
+export const notificationTemplateStringsKey = (lang: string) => ['ui-strings', 'raw', lang] as const;
+
+/**
+ * Рядки мови БЕЗ підміни мовою за замовчуванням (`System.ManageLocalization`).
+ *
+ * ⛔ Не каталог `GET /ui-strings/{lang}`: там відсутній переклад уже підмінений англійським і
+ * виглядає як переклад — шаблон, якого казахською немає, показався б «заповненим».
+ */
+export function listUiStringsRaw(lang: string): Promise<UiStringListResponse> {
+  return apiFetch<UiStringListResponse>(`/api/v1/ui-strings?lang=${encodeURIComponent(lang)}`);
+}
+
+/**
+ * Записує текст шаблону сповіщення (рядок каталогу). Порожнє значення для мови перекладу — «зняти
+ * переклад» (лист піде мовою за замовчуванням). Плейсхолдери, що не збігаються з еталоном, сервер
+ * відхиляє `422` (`placeholderMismatch`).
+ *
+ * ⚠ Область `Private`: шаблони сповіщень бачить лише той, хто увійшов (`D-114`).
+ */
+export function setNotificationTemplateString(
+  lang: string,
+  key: string,
+  value: string,
+): Promise<UiStringRevisionResponse> {
+  return apiFetch<UiStringRevisionResponse>(`/api/v1/ui-strings/${encodeURIComponent(lang)}/${encodeURIComponent(key)}`, {
+    method: 'PUT',
+    ...json({ value, scope: 'Private' } satisfies SetUiStringRequest),
+  });
 }

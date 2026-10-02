@@ -122,13 +122,15 @@ describe('NotificationsPage: заголовок розділяє тексти Ch
     ).toBeTruthy();
   });
 
-  it('порядок заголовків сторінки: h3 «Notifications» → h2 «SMTP» → h2 «Channels» → h2 «Rules»', async () => {
+  it('порядок заголовків сторінки: h3 «Notifications» → h2 «SMTP» → h2 «Channels» → h2 «Rules» → h2 «Templates»', async () => {
     mockEmptyStand();
     show();
 
     // ⚠ SMTP-панель — лінивий чанк (D-263): без очікування її заголовка перелік залежав би від того,
     // чи встиг чанк завантажитись, — тобто був би плаваючим.
     await screen.findByRole('heading', { name: '⟦smtp.title⟧' }, { timeout: 10_000 });
+    // ⚠ Шаблони повідомлень (CL-6) — теж лінивий чанк, після правил: адресати виводяться з матриці.
+    await screen.findByRole('heading', { name: '⟦notificationTemplates.title⟧' }, { timeout: 10_000 });
     await waitFor(() => {
       expect(screen.getByText('⟦notifications.noChannels⟧')).toBeDefined();
       expect(screen.getByText('⟦notifications.rulesNoChannels⟧')).toBeDefined();
@@ -141,6 +143,7 @@ describe('NotificationsPage: заголовок розділяє тексти Ch
       ['H2', '⟦smtp.title⟧'],
       ['H2', '⟦notifications.channels⟧'],
       ['H2', '⟦notifications.rules⟧'],
+      ['H2', '⟦notificationTemplates.title⟧'],
     ]);
   });
 });
