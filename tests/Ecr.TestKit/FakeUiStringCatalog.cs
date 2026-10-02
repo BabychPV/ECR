@@ -84,6 +84,18 @@ public sealed class FakeUiStringCatalog : IUiStringCatalog
     }
 
     /// <inheritdoc />
+    public Task<string?> FindKeyAsync(string key, CancellationToken ct)
+    {
+        lock (_gate)
+        {
+            // Як колація CI_AS бази: без регістру й кінцевих пробілів.
+            return Task.FromResult(_rows.Keys
+                .Select(k => k.Key)
+                .FirstOrDefault(k => string.Equals(k.TrimEnd(), key.TrimEnd(), StringComparison.OrdinalIgnoreCase)));
+        }
+    }
+
+    /// <inheritdoc />
     public Task<UiStringWriteResult> SetAsync(UiStringWrite write, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(write);

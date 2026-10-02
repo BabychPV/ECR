@@ -80,7 +80,11 @@ public sealed class SetUiStringHandler(
         }
 
         // ⛔ S7: текст листа — окремо захищений: правка перекладу не має давати змогу вписати фішинг у розсилку.
-        if (UiStringMailKeys.IsMailTemplate(key) && !PermissionCheck.IsGranted(profile, UiStringMailKeys.Permission))
+        // Право звіряється і з уведеним, і з КАНОНІЧНИМ ключем бази (CI_AS-збіг: регістр, кінцеві пробіли).
+        var canonical = await catalog.FindKeyAsync(key, ct).ConfigureAwait(false);
+
+        if ((UiStringMailKeys.IsMailTemplate(key) || UiStringMailKeys.IsMailTemplate(canonical))
+            && !PermissionCheck.IsGranted(profile, UiStringMailKeys.Permission))
         {
             throw new AccessDeniedException(
                 "ECR-AUTH-0403", $"Текст листа {key} змінює лише власник права {UiStringMailKeys.Permission}.",

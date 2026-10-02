@@ -19,8 +19,23 @@ public static class UiStringMailKeys
 
     /// <summary>Чи є ключ текстом (темою або тілом) листа.</summary>
     /// <param name="key">Ключ каталогу.</param>
+    /// <remarks>
+    /// ⛔ Порівняння ЛОЯЛЬНЕ: регістр, кінцеві пробіли й невидимі символи (U+00AD…) ігноруються, як і в колації
+    /// бази (<c>CI_AS</c>). Ordinal-порівняння пропускало <c>Notifications.x.Subject</c> повз право, а UPDATE
+    /// усе одно влучав у справжній ключ. Додатково обробник звіряє КАНОНІЧНИЙ ключ із бази.
+    /// </remarks>
     public static bool IsMailTemplate(string? key)
-        => key is not null
-           && key.StartsWith("notifications.", StringComparison.Ordinal)
-           && (key.EndsWith(".subject", StringComparison.Ordinal) || key.EndsWith(".body", StringComparison.Ordinal));
+    {
+        if (key is null)
+        {
+            return false;
+        }
+
+        var visible = new string([.. key.Where(c => char.GetUnicodeCategory(c) is not System.Globalization.UnicodeCategory.Format)])
+            .Trim();
+
+        return visible.StartsWith("notifications.", StringComparison.OrdinalIgnoreCase)
+               && (visible.EndsWith(".subject", StringComparison.OrdinalIgnoreCase)
+                   || visible.EndsWith(".body", StringComparison.OrdinalIgnoreCase));
+    }
 }

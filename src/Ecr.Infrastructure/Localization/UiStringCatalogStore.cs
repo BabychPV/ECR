@@ -71,6 +71,24 @@ public sealed class UiStringCatalogStore(EcrDbContext db, IMemoryCache memory) :
     }
 
     /// <inheritdoc />
+    public async Task<string?> FindKeyAsync(string key, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(key);
+
+        await using var connection = new SqlConnection(db.Database.GetConnectionString());
+        await connection.OpenAsync(ct).ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+
+        // Те саме порівняння (колація стовпця), що й в UPDATE у SetAsync.
+        command.CommandText = "SELECT TOP (1) [Key] FROM sys_ecr.UiString WHERE [Key] = @key;";
+        command.Parameters.AddWithValue("@key", key);
+
+        var raw = await command.ExecuteScalarAsync(ct).ConfigureAwait(false);
+
+        return raw as string;
+    }
+
+    /// <inheritdoc />
     public async Task<UiStringWriteResult> SetAsync(UiStringWrite write, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(write);
