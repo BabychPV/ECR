@@ -138,6 +138,18 @@ public sealed class FakeUserStore : IUserStore
             .Select(g => g.UserName)
             .ToHashSet(StringComparer.Ordinal);
 
+        // Строкові призначення — як бойове сховище: рахуються, лише поки чинні (`IsEffectiveOn`).
+        var today = DateOnly.FromDateTime(utcNow);
+        foreach (var dated in DatedGrants.Where(g => rolesWithPermission.Contains(g.RoleCode)))
+        {
+            var probe = new RoleAssignment(0, 0, principalSid: null);
+            probe.SetValidity(dated.ValidFrom, dated.ValidTo);
+            if (probe.IsEffectiveOn(today))
+            {
+                holders.Add(dated.UserName);
+            }
+        }
+
         return Task.FromResult(_users.Count(u =>
             holders.Contains(u.UserName) && u.IsActive && !u.IsLockedOut(utcNow) && u.Id != exceptUserId));
     }

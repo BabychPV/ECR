@@ -116,6 +116,36 @@ public sealed class UserAdministrationTests
         Assert.Equal(["Admins"], await _users.ListUserRolesAsync(_local.Id, CancellationToken.None));
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "BE-12")]
+    public async Task Чинне_строкове_ManageUsers_робить_ціль_останнім_носієм_і_заміна_ролей_відхиляється_409_консервативно()
+    {
+        // ФІКСУЄ ПОТОЧНУ ПОВЕДІНКУ: підрахунок носіїв рахує ЧИННЕ строкове призначення (IsEffectiveOn),
+        // тож ціль — останній носій; а перевірка нового набору строкових призначень цілі не бачить
+        // (вони лишаються, але для набору не враховуються) — відмова консервативна (fail-closed).
+        // Змінюєш це — міняй і речення в admin-guide.
+        _users.DatedGrants.Add((_local.UserName, "Admins", new DateOnly(2026, 9, 1), new DateOnly(2026, 12, 31)));
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => ReplaceRoles().HandleAsync(_local.Id, ["Viewers"], null, null, CancellationToken.None));
+
+        Assert.Equal("err.ECR-SEC-0409.lastAdministrator", error.Details!["messageKey"]);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "BE-12")]
+    public async Task Минуле_строкове_ManageUsers_не_робить_ціль_носієм_і_заміна_ролей_дозволена()
+    {
+        // ФІКСУЄ ПОТОЧНУ ПОВЕДІНКУ: вікно скінчилось до дати перевірки — це не носій, захищати нічого.
+        _users.DatedGrants.Add((_local.UserName, "Admins", new DateOnly(2026, 1, 1), new DateOnly(2026, 2, 1)));
+
+        await ReplaceRoles().HandleAsync(_local.Id, ["Viewers"], null, null, CancellationToken.None);
+
+        Assert.Equal(["Viewers"], await _users.ListUserRolesAsync(_local.Id, CancellationToken.None));
+    }
+
     private ReplaceUserRolesHandler ReplaceRoles() => new(
         _users, _access, _uow, _current, _audit, _clock,
         new DisableBootstrapAdminHandler(_users, _uow, _audit, _current, _clock),
