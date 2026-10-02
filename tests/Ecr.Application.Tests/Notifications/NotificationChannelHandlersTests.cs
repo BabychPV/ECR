@@ -354,9 +354,11 @@ public sealed class NotificationChannelHandlersTests
         await _sender.DidNotReceiveWithAnyArgs().SendAsync(default!, default!, default!, default);
 
         // Відмова транспорту — це ВІДПОВІДЬ проби, а не помилка запиту.
-        webhook.Fails = new InvalidOperationException("Канал «Teams»: вебхук відповів 500.");
+        // ⛔ Текст винятку транспорту (хост/URL цілі) назовні не йде — лише ключ категорії.
+        // Мутація: повернути `e.Message` у `TryAsync` для не-пошти → Error не null, тест червоніє.
+        webhook.Fails = new HttpRequestException("Connection refused (hooks.example.test:443) /secret-token-123");
         var failed = await Test(webhook).HandleAsync(teams.Id, CancellationToken.None);
-        Assert.Equal((false, "Канал «Teams»: вебхук відповів 500."), (failed.Ok, failed.Error));
+        Assert.Equal((false, null, "notifications.testFailed"), (failed.Ok, failed.Error, failed.MessageKey));
     }
 
     [Fact]

@@ -9,6 +9,7 @@ using Ecr.Application.Security;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Notifications;
 using Ecr.Domain.Errors;
+using Microsoft.Extensions.Logging;
 
 namespace Ecr.Application.Notifications;
 
@@ -373,7 +374,8 @@ public sealed class TestNotificationChannelHandler(
     IAccessDecisionService access,
     IAuditWriter audit,
     ICurrentUser currentUser,
-    IClock clock)
+    IClock clock,
+    ILogger<TestNotificationChannelHandler>? log = null)
 {
     /// <summary>Шле пробу й повертає підсумок; відмова каналу — не виняток.</summary>
     /// <remarks>
@@ -444,11 +446,15 @@ public sealed class TestNotificationChannelHandler(
 
         return await TryAsync(
             classify: false,
-            send: () => transport.SendAsync(channel, new NotificationMessage(Subject, BodyFor(channel)), ct))
+            send: () => transport.SendAsync(channel, new NotificationMessage(Subject, BodyFor(channel)), ct),
+            log: log)
             .ConfigureAwait(false);
     }
 
     private const string Subject = "ECR test notification";
+
+    private static readonly Action<ILogger, string, Exception?> ProbeFailed = LoggerMessage.Define<string>(
+        LogLevel.Warning, new EventId(6301, "NotificationProbeFailed"), "Notification probe failed: {ExceptionType}.");
 
     /// <summary>Найбільше адрес, розкритих із ролей у пробі: проба — не розсилка.</summary>
     public const int ProbeRecipientLimit = 20;
@@ -461,7 +467,8 @@ public sealed class TestNotificationChannelHandler(
     /// ⚠ <paramref name="classify"/> — лише для пошти: категорію (DNS, TLS, автентифікація, relay…) віддаємо
     /// ключем каталогу, нерозпізнану — <c>notifications.testFailed</c>; тексту відмови немає (<see cref="SmtpFailureClassifier"/>).
     /// </remarks>
-    internal static async Task<NotificationTestResult> TryAsync(Func<Task> send, bool classify)
+    internal static async Task<NotificationTestResult> TryAsync(
+        Func<Task> send, bool classify, ILogger? log = null)
     {
         try
         {
@@ -473,15 +480,22 @@ public sealed class TestNotificationChannelHandler(
         catch (Exception e) when (e is not OperationCanceledException)
 #pragma warning restore CA1031
         {
+            // ⛔ У журнал — лише тип винятку: e.Message вебхука може містити хост або URL цілі (а URL Teams — секрет).
+            if (log is not null)
+            {
+                ProbeFailed(log, e.GetType().Name, null);
+            }
+
             var key = e is NotificationNoRecipientsException ? "notifications.test.smtpNoRecipients"
                 : classify ? SmtpFailureClassifier.MessageKeyOf(e) : null;
 
             // ⛔ Пошта: текст відмови транспорту (хост, банер сервера) назовні не йде — лише ключ; нерозпізнана —
-            // загальний ключ клієнта. Інші транспорти складають текст самі (без чужого банера) — лишається.
+            // загальний ключ клієнта. ⛔ Інші транспорти (вебхук, Teams): HttpRequestException.Message може містити хост або
+            // URL цілі — теж лише ключ (рішення рев'ю ent5 P3-3), текст іде тільки в журнал.
             return classify
                 ? new NotificationTestResult(
                     false, null, key is null || key == SmtpFailureClassifier.Unknown ? "notifications.testFailed" : key)
-                : new NotificationTestResult(false, e.Message, key);
+                : new NotificationTestResult(false, null, key ?? "notifications.testFailed");
         }
     }
 }
