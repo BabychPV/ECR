@@ -1,4 +1,4 @@
-// tests/Ecr.Api.Tests/DocumentVersionMigrationTests.Grants.cs
+﻿// tests/Ecr.Api.Tests/DocumentVersionMigrationTests.Grants.cs
 using System.Net;
 using System.Text.Json;
 using Ecr.Application.Security;
@@ -109,6 +109,33 @@ public sealed partial class DocumentVersionMigrationTests
         Assert.Equal(before, await SnapshotAsync(s).ConfigureAwait(true));
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-6.7")]
+    public async Task Профіль_у_кеші_того_самого_застосунку_бачить_заборону_на_новому_id_одразу_після_переносу()
+    {
+        var s = await ArrangeAsync(Target.DropsC3AddsC4AndRow).ConfigureAwait(true);
+        var c2Old = s.Doc.ColumnDefIds[1];
+        var (restricted, roleId) = await AddRestrictedUserAsync(s, (ResourceKind.Column, c2Old, true)).ConfigureAwait(true);
+        await using (var seed = new TestDocumentBuilder(sql.ConnectionString).CreateContext())
+        {
+            seed.ResourceGrants.Add(new ResourceGrant(roleId, ResourceKind.Column, s.TargetColumns["C2"], GrantLevel.Write));
+            await seed.SaveChangesAsync().ConfigureAwait(true);
+        }
+
+        // Один і той самий застосунок (один кеш профілів) до й після переносу.
+        using var app = new EcrApiFactory(sql);
+        Assert.Equal(GrantLevel.None, await EffectiveAsync(app, restricted, s, s.Doc.SheetDefId, s.Doc.TableDefId, c2Old).ConfigureAwait(true));
+        // Прогріваємо профіль: на новому Id дозвіл Write, заборони ще нема.
+        Assert.True(await EffectiveAsync(app, restricted, s, s.TargetSheetDefId, s.TargetTableDefId, s.TargetColumns["C2"]).ConfigureAwait(true) > GrantLevel.None);
+
+        using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
+        var response = await PostAsync(client, s, "Safe", dryRun: false).ConfigureAwait(true);
+        Assert.True(response.StatusCode == HttpStatusCode.OK, await response.Content.ReadAsStringAsync().ConfigureAwait(true));
+
+        Assert.Equal(GrantLevel.None, await EffectiveAsync(app, restricted, s, s.TargetSheetDefId, s.TargetTableDefId, s.TargetColumns["C2"]).ConfigureAwait(true));
+    }
     private async Task<(int UserId, int RoleId)> AddRestrictedUserAsync(
         Scenario s, params (ResourceKind Kind, int Id, bool Deny)[] grants)
     {
