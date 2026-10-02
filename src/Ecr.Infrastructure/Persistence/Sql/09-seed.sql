@@ -6243,6 +6243,13 @@ USING (VALUES
     (N'err.ECR-PRD-4225.offsetOutOfRange', N'en', N'Offset {field} ({value} days) must be between -{max} and {max} days.', 1),
     (N'err.ECR-PRD-0422.pinReasonTooLong', N'en', N'The reason for pinning the current period is longer than {max} characters.', 1),
     (N'err.ECR-PWD-0422.tooLong', N'en', N'The password is longer than {maxLength} characters.', 1),
+    -- COLL:fv812-relations ── редагування зв'язків полів у конструкторі довідників (ФВ-8.12, порція 1) ──
+    (N'err.ECR-REG-0422.lookupRetargetInUse', N'en', N'The link of field "{fieldCode}" cannot be changed: records already hold values pointing to the current target.', 1),
+    (N'err.ECR-REG-0422.lookupTargetUnknown', N'en', N'The target registry of field "{fieldCode}" does not exist.', 1),
+    (N'registries.relationTargetFor', N'en', N'Link target of field {field}', 1),
+    (N'registries.relationsEditHint', N'en', N'The target of a link can be changed or removed while no record holds a value in that field; otherwise the server refuses it.', 1),
+    -- ru/kz — окремою порцією COLL:fv812-relations у блоці I18N нижче.
+    -- COLL:fv812-relations ── кінець секції ──
     -- ru/kz — окремою порцією `API:negative-path` у блоці I18N нижче.
     -- API:negative-path ── кінець секції ──
     -- CL6:notification-templates ── Шаблони повідомлень і адресати події (CL-6, NotificationTemplatesPanel, /admin/notifications) ──
@@ -14825,6 +14832,23 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- CL6:notification-templates ── кінець секції ──
+
+-- COLL:fv812-relations ── ru/kz редагування зв'язків полів у конструкторі довідників (ФВ-8.12, порція 1); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-REG-0422.lookupRetargetInUse', N'ru', N'Связь поля «{fieldCode}» нельзя изменить: в записях уже есть значения, указывающие на текущий справочник.'),
+    (N'err.ECR-REG-0422.lookupRetargetInUse', N'kz', N'«{fieldCode}» өрісінің байланысын өзгерту мүмкін емес: жазбаларда ағымдағы анықтамалыққа сілтейтін мәндер бар.'),
+    (N'err.ECR-REG-0422.lookupTargetUnknown', N'ru', N'Справочника, на который указывает поле «{fieldCode}», не существует.'),
+    (N'err.ECR-REG-0422.lookupTargetUnknown', N'kz', N'«{fieldCode}» өрісі сілтейтін анықтамалық жоқ.'),
+    (N'registries.relationTargetFor', N'ru', N'Цель связи поля {field}'),
+    (N'registries.relationTargetFor', N'kz', N'{field} өрісінің байланыс мақсаты'),
+    (N'registries.relationsEditHint', N'ru', N'Цель связи можно изменить или снять, пока ни в одной записи нет значения этого поля; иначе сервер откажет.'),
+    (N'registries.relationsEditHint', N'kz', N'Байланыс мақсатын осы өрістің мәні бірде-бір жазбада болмаған кезде өзгертуге немесе алуға болады; әйтпесе сервер бас тартады.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:fv812-relations ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t
