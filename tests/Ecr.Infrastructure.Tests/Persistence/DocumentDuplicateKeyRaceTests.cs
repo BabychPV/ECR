@@ -124,6 +124,7 @@ public sealed class DocumentDuplicateKeyRaceTests(SqlServerFixture sql)
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Directive", "DAT-09")]
+    [Trait("Requirement", "ФВ-3.1")]
     public async Task Після_програшу_той_самий_запит_зберігає_документ_з_новим_ключем()
     {
         var projectId = await ArrangeProjectAsync();

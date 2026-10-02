@@ -179,6 +179,7 @@ public sealed class SmtpAdminSettingsTests(SqlServerFixture sql) : IAsyncLifetim
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "D-263")]
+    [Trait("Requirement", "ФВ-12.5")]
     public async Task Адресати_за_ролями_активні_з_поштою_кожен_своєю_мовою_без_дублів_з_явними_адресами()
     {
         var tag = Guid.NewGuid().ToString("N")[..8];

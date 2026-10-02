@@ -1251,6 +1251,7 @@ public sealed class SubmitApproveTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "ФВ-5.20a")]
     public async Task Reopen_документа_повертає_аркуш_у_Draft_із_обовязковою_причиною()
     {
         await Submit().HandleAsync(Document, Water, Period, CancellationToken.None);

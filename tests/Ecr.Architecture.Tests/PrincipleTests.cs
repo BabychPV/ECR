@@ -186,6 +186,7 @@ public sealed partial class PrincipleTests
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
     [Trait(TestCategories.Category, TestCategories.Architecture)]
     [Trait("Requirement", "ФВ-5.16")]
+    [Trait("Requirement", "ФВ-14.10")]
     public void Клієнтські_переходи_збігаються_з_доменом()
     {
         // ⛔ Клієнт вирішує, ЯКУ КНОПКУ показати, за таблицею станів

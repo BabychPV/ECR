@@ -52,7 +52,7 @@ afterEach(() => {
 });
 
 describe('EffectiveAccessPanel: аркуш, таблиця, колонка', () => {
-  it('просить проєкт, шле його в запиті й показує застереження та «успадковано від»', async () => {
+  it('ФВ-6.16: просить проєкт, шле його в запиті й показує застереження та «успадковано від»', async () => {
     const fetchMock = stub(Column);
     show();
 
@@ -79,7 +79,7 @@ describe('EffectiveAccessPanel: аркуш, таблиця, колонка', () 
     expect(screen.getAllByText(/effectiveAccess\.inheritedFrom/)).toHaveLength(1);
   });
 
-  it('для довідника проєкт не питає, застереження немає', async () => {
+  it('ФВ-6.16: для довідника проєкт не питає, застереження немає', async () => {
     stub({ ...Column, resource: 'Registry:5', caveat: null, projectId: null, contributions: [] });
     show();
 

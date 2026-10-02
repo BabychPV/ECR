@@ -147,7 +147,7 @@ describe('CreateDocumentModal: збій запиту структури не в�
     expect(alert.textContent ?? '').toContain('ECR-SYS-0500');
   });
 
-  it('успішний запит показує аркуші, а не помилку', async () => {
+  it('ФВ-3.1: успішний запит показує аркуші, а не помилку', async () => {
     structureFails = false;
     mockServer();
     show();

@@ -169,6 +169,7 @@ public sealed class NotificationDispatcherTests(SqlServerFixture sql)
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "BE-34")]
+    [Trait("Requirement", "ФВ-12.5")]
     public async Task Канал_Smtp_доставляє_листа_адресатам_каналу_а_відмова_транспорту_лишає_Failed()
     {
         // Канал, чий адресат приймає, і канал, чий адресат відбиває: обидва

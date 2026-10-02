@@ -21,7 +21,7 @@ describe('ФВ-14.29: віртуалізація сітки', () => {
   it.each([
     ['DocumentGrid', Product],
     ['стенд', Stand],
-  ])('%s не вимикає віртуалізацію', (_name, code) => {
+  ])('ФВ-14.4: %s не вимикає віртуалізацію', (_name, code) => {
     expect(code).not.toMatch(/disableVirtual[XY]/);
   });
 

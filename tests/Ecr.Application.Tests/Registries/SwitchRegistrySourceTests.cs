@@ -238,6 +238,7 @@ public sealed class SwitchRegistrySourceTests
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage4)]
     [Trait("Requirement", "ФВ-13.10")]
+    [Trait("Requirement", "ФВ-14.7")]
     public async Task Порожній_набір_дублі_і_порожня_причина_відхиляються()
     {
         var empty = await Assert.ThrowsAsync<BusinessRuleException>(() => Handler().HandleAsync(

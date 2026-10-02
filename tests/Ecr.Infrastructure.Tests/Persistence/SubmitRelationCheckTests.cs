@@ -39,6 +39,7 @@ public sealed class SubmitRelationCheckTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage4)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-2.12")]
     public async Task Check_Block_із_відхиленням_блокує_подання_422_з_переліком()
     {
         var run = await RunAsync("Block", left: 10m, right: 12m);
@@ -53,6 +54,7 @@ public sealed class SubmitRelationCheckTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage4)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-2.12")]
     public async Task Check_Warn_не_блокує_а_просить_підтвердження_і_з_підтвердженням_проходить()
     {
         var without = await RunAsync("Warn", left: 10m, right: 12m);

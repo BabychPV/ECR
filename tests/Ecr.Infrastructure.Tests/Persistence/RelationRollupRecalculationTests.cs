@@ -39,6 +39,7 @@ public sealed class RelationRollupRecalculationTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-2.12")]
     public async Task Rollup_пишеться_в_приймач_після_формул_ідемпотентно_і_слідує_за_джерелом()
     {
         var pair = await ArrangeAsync();
