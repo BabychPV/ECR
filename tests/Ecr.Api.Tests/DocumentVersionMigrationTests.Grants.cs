@@ -1,0 +1,155 @@
+// tests/Ecr.Api.Tests/DocumentVersionMigrationTests.Grants.cs
+using System.Net;
+using System.Text.Json;
+using Ecr.Application.Security;
+using Ecr.Domain.Entities.Security;
+using Ecr.Domain.Enums;
+using Ecr.Domain.ValueObjects;
+using Ecr.Infrastructure.Security;
+using Ecr.TestKit;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Xunit;
+
+namespace Ecr.Api.Tests;
+
+/// <summary>
+/// Перенос версії й гранти на аркуш/таблицю/колонку (аудит ent6 A1): Id цих ресурсів свої в кожної
+/// версії, тож без копіювання заборона на старому Id після перенесення проєкту мовчки не діє.
+/// </summary>
+public sealed partial class DocumentVersionMigrationTests
+{
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-6.7")]
+    public async Task Перенос_копіює_заборону_на_колонку_на_нові_id_і_лишає_старі_для_інших_проєктів()
+    {
+        var s = await ArrangeAsync(Target.DropsC3AddsC4AndRow).ConfigureAwait(true);
+        var c2Old = s.Doc.ColumnDefIds[1];
+        var (restricted, roleId) = await AddRestrictedUserAsync(s, (ResourceKind.Column, c2Old, true)).ConfigureAwait(true);
+
+        // Є і наявний «дозвіл» на новому Id: заборона його перекриває, а не дублюється.
+        await using (var seed = new TestDocumentBuilder(sql.ConnectionString).CreateContext())
+        {
+            seed.ResourceGrants.Add(new ResourceGrant(roleId, ResourceKind.Column, s.TargetColumns["C2"], GrantLevel.Write));
+            await seed.SaveChangesAsync().ConfigureAwait(true);
+        }
+
+        using var app = new EcrApiFactory(sql);
+        Assert.Equal(GrantLevel.None, await EffectiveAsync(app, restricted, s, s.Doc.SheetDefId, s.Doc.TableDefId, c2Old).ConfigureAwait(true));
+
+        using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
+        var dry = JsonDocument.Parse(await (await PostAsync(client, s, "Safe", dryRun: true).ConfigureAwait(true))
+            .Content.ReadAsStringAsync().ConfigureAwait(true)).RootElement;
+        Assert.True(dry.GetProperty("canApply").GetBoolean(), dry.ToString());
+
+        var response = await PostAsync(client, s, "Safe", dryRun: false).ConfigureAwait(true);
+        Assert.True(response.StatusCode == HttpStatusCode.OK, await response.Content.ReadAsStringAsync().ConfigureAwait(true));
+
+        // ⛔ Предмет тесту: на НОВИХ Id заборона діє, і лише на ній.
+        using var after = new EcrApiFactory(sql);
+        Assert.Equal(GrantLevel.None, await EffectiveAsync(after, restricted, s, s.TargetSheetDefId, s.TargetTableDefId, s.TargetColumns["C2"]).ConfigureAwait(true));
+        Assert.True(
+            await EffectiveAsync(after, restricted, s, s.TargetSheetDefId, s.TargetTableDefId, s.TargetColumns["C1"]).ConfigureAwait(true) > GrantLevel.None,
+            "заборона не повинна поширитися на сусідню колонку");
+
+        // Старі Id (інші проєкти на старій версії) не зачеплені.
+        Assert.Equal(GrantLevel.None, await EffectiveAsync(after, restricted, s, s.Doc.SheetDefId, s.Doc.TableDefId, c2Old).ConfigureAwait(true));
+
+        await using var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext();
+        var grants = await db.ResourceGrants.AsNoTracking().Where(g => g.RoleId == roleId && g.ResourceKind == ResourceKind.Column).ToListAsync().ConfigureAwait(true);
+        Assert.Equal(2, grants.Count);
+        Assert.All(grants, g => Assert.True(g.IsDeny));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-6.7")]
+    public async Task Перенос_копіює_гранти_аркуша_і_таблиці_ідемпотентно_для_наявних()
+    {
+        var s = await ArrangeAsync(Target.OnlyLabels).ConfigureAwait(true);
+        var (_, roleId) = await AddRestrictedUserAsync(
+            s, (ResourceKind.Sheet, s.Doc.SheetDefId, true), (ResourceKind.Table, s.Doc.TableDefId, false)).ConfigureAwait(true);
+
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
+        var response = await PostAsync(client, s, "Safe", dryRun: false).ConfigureAwait(true);
+        Assert.True(response.StatusCode == HttpStatusCode.OK, await response.Content.ReadAsStringAsync().ConfigureAwait(true));
+
+        await using var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext();
+        var grants = await db.ResourceGrants.AsNoTracking()
+            .Where(g => g.RoleId == roleId && g.ResourceKind != ResourceKind.Project).ToListAsync().ConfigureAwait(true);
+        Assert.Equal(4, grants.Count);
+        Assert.Contains(grants, g => g.ResourceKind == ResourceKind.Sheet && g.ResourceId == s.TargetSheetDefId && g.IsDeny);
+        Assert.Contains(grants, g => g.ResourceKind == ResourceKind.Table && g.ResourceId == s.TargetTableDefId && !g.IsDeny);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-6.7")]
+    public async Task Заборона_на_колонку_якої_нема_в_новій_версії_блокує_перенос_і_показана_в_сухому_прогоні()
+    {
+        var s = await ArrangeAsync(Target.DropsC3AddsC4AndRow).ConfigureAwait(true);
+        await AddRestrictedUserAsync(s, (ResourceKind.Column, s.Doc.ColumnDefIds[2], true)).ConfigureAwait(true);
+        var before = await SnapshotAsync(s).ConfigureAwait(true);
+
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
+
+        var dry = JsonDocument.Parse(await (await PostAsync(client, s, "Safe", dryRun: true).ConfigureAwait(true))
+            .Content.ReadAsStringAsync().ConfigureAwait(true)).RootElement;
+        Assert.False(dry.GetProperty("canApply").GetBoolean());
+        Assert.Contains("grantsNotMapped", dry.GetProperty("refusals").EnumerateArray().Select(r => r.GetString()));
+
+        var response = await PostAsync(client, s, "Safe", dryRun: false).ConfigureAwait(true);
+        await AssertProblemAsync(response, HttpStatusCode.UnprocessableEntity, "ECR-SCHM-0422", "err.ECR-SCHM-0422.migrateGrantsNotMapped").ConfigureAwait(true);
+        Assert.Equal(before, await SnapshotAsync(s).ConfigureAwait(true));
+    }
+
+    private async Task<(int UserId, int RoleId)> AddRestrictedUserAsync(
+        Scenario s, params (ResourceKind Kind, int Id, bool Deny)[] grants)
+    {
+        await using var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext();
+        var name = $"grnt_{Guid.NewGuid():N}"[..20];
+        var user = new User(name, name, AuthProvider.Local);
+        user.SetPassword(new PasswordHasher().Hash(Password));
+        db.Users.Add(user);
+        var role = new Role(
+            EcrCode.Create($"GRNT_{Guid.NewGuid():N}"),
+            new LocalizedText(new Dictionary<string, string> { ["en"] = "Entry" }));
+        db.Roles.Add(role);
+        await db.SaveChangesAsync().ConfigureAwait(false);
+
+        db.RoleAssignments.Add(new RoleAssignment(role.Id, user.Id, null));
+        db.ResourceGrants.Add(new ResourceGrant(role.Id, ResourceKind.Project, s.Doc.ProjectId, GrantLevel.Write));
+        foreach (var (kind, id, deny) in grants)
+        {
+            db.ResourceGrants.Add(deny
+                ? new ResourceGrant(role.Id, kind, id, GrantLevel.None, isDeny: true)
+                : new ResourceGrant(role.Id, kind, id, GrantLevel.Read));
+        }
+
+        await db.SaveChangesAsync().ConfigureAwait(false);
+        return (user.Id, role.Id);
+    }
+
+    /// <summary>Оракул — те саме рішення, що вирішує доступ до комірки.</summary>
+    private static async Task<GrantLevel> EffectiveAsync(
+        EcrApiFactory app, int userId, Scenario s, int sheetId, int tableId, int columnId)
+    {
+        using var scope = app.Services.CreateScope();
+        var access = scope.ServiceProvider.GetRequiredService<IAccessDecisionService>();
+        var profile = await access.BuildProfileAsync(userId, CancellationToken.None).ConfigureAwait(false);
+        return EditRules.Effective(profile, default(CellAccessContext) with
+        {
+            ProjectId = s.Doc.ProjectId,
+            SheetDefId = sheetId,
+            TableDefId = tableId,
+            ColumnDefId = columnId,
+            SheetCode = s.Doc.SheetCode,
+        });
+    }
+}

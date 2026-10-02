@@ -6125,6 +6125,10 @@ USING (VALUES
     (N'err.ECR-CALC-0422.strictBackdated',         N'en', N'Strict mode is switched on only by an explicit decision from a new effective date, never retroactively: {effectiveFrom} is not later than today ({today}). Choose a future date.', 1),
     -- ru/kz — окремою порцією `COLL:an13-strict` у блоці I18N нижче.
     -- COLL:an13-strict ── кінець секції ──
+    -- COLL:sec-a1 ── Перенос версії: заборона на аркуші/таблиці/колонці, якої нема в новій версії (`MigrateDocumentVersionHandler`) ──
+    (N'err.ECR-SCHM-0422.migrateGrantsNotMapped', N'en', N'The target version has no sheet, table or column with the code of a resource that has a deny grant, so the deny cannot be carried over. Remove or re-create that deny deliberately before moving the project.', 1),
+    -- ru/kz — окремою порцією `COLL:sec-a1` у блоці I18N нижче.
+    -- COLL:sec-a1 ── кінець секції ──
     -- COLL:nosource-hints ── порожній стан списку з'єднань: що робити й де в документації (UI, DataSourcesTable) ──
     (N'sources.notConfiguredHint', N'en', N'To connect PI, an administrator adds a connection here: the PI Web API address, the secret and the authentication. Until then data is entered by hand. See docs/admin/admin-guide.md, section 5, and docs/admin/operations-runbook.md, section 15.', 1),
     -- ru/kz — окремою порцією `I18N` (COLL:nosource-hints).
@@ -14048,6 +14052,17 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:an13-strict ── кінець секції ──
+
+-- COLL:sec-a1 ── ru/kz відмови переносу версії при заборонах без відповідника; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-SCHM-0422.migrateGrantsNotMapped', N'ru', N'В целевой версии нет листа, таблицы или столбца с кодом ресурса, на котором стоит запрет, поэтому запрет не перенести. Снимите или пересоздайте этот запрет осознанно до переноса проекта.'),
+    (N'err.ECR-SCHM-0422.migrateGrantsNotMapped', N'kz', N'Мақсатты нұсқада тыйым қойылған ресурстың кодымен парақ, кесте немесе баған жоқ, сондықтан тыйымды көшіру мүмкін емес. Жобаны көшірместен бұрын бұл тыйымды саналы түрде алып тастаңыз немесе қайта жасаңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:sec-a1 ── кінець секції ──
 
 -- COLL:nosource-hints ── ru/kz підказки порожнього списку з'єднань; власна порція ──
 -- ⚠ kz — найкращий переклад без термінології замовника: потрібна вичитка носієм.

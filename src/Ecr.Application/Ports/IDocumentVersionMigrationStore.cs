@@ -30,6 +30,14 @@ public interface IDocumentVersionMigrationStore
     public Task<VersionMigrationScope> ReadScopeAsync(int projectId, CancellationToken ct);
 
     /// <summary>
+    /// Скільки заборон (<c>IsDeny</c>) стоїть на перелічених аркушах, таблицях і
+    /// колонках вихідної версії — тих, що новій версії нема куди скопіювати.
+    /// </summary>
+    public Task<int> CountDenyGrantsAsync(
+        IReadOnlyCollection<int> sheetIds, IReadOnlyCollection<int> tableIds, IReadOnlyCollection<int> columnIds,
+        CancellationToken ct);
+
+    /// <summary>
     /// Переносить дані всіх документів проєкту за планом і перемикає версію
     /// проєкту. Викликається лише в транзакції, після
     /// <see cref="LockProjectVersionAsync"/>.

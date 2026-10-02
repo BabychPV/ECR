@@ -23,7 +23,7 @@ namespace Ecr.Application.Documents.VersionMigration;
 /// <param name="DryRun">Сухий прогін: нічого не змінено.</param>
 /// <param name="Applied">Перенос виконано.</param>
 /// <param name="CanApply">Режим дозволяє перенос.</param>
-/// <param name="Refusals">Причини відмови: <c>structural</c>, <c>dataLoss</c>, <c>guardedWithData</c>, <c>sheetsLocked</c>, <c>projectArchived</c>.</param>
+/// <param name="Refusals">Причини відмови: <c>structural</c>, <c>dataLoss</c>, <c>guardedWithData</c>, <c>sheetsLocked</c>, <c>projectArchived</c>, <c>grantsNotMapped</c> (є заборона на аркуші/таблиці/колонці, якої в новій версії за кодом нема).</param>
 /// <param name="TransferredValues">Скільки введених значень переїде.</param>
 /// <param name="LostValues">Скільки введених значень зникло б.</param>
 /// <param name="GuardedValues">Скільки введених значень змінили б тлумачення.</param>
@@ -231,6 +231,22 @@ public sealed class MigrateDocumentVersionHandler(
             refusals.Add("projectArchived");
         }
 
+        // ⛔ Заборона на ресурсі, якого в новій версії за кодом немає, нікуди не
+        // копіюється. Якщо ресурс просто перейменували, новий код лишився б без
+        // заборони (fail-open) — тому перенос відмовляє, доки заборону на старому
+        // ресурсі свідомо не зніме адміністратор безпеки.
+        var mappedColumns = plan.Columns.Select(c => c.SourceColumnDefId).ToHashSet();
+        var denied = await store.CountDenyGrantsAsync(
+            [.. from.Sheets.Where(s => !s.IsDeleted && !plan.Sheets.ContainsKey(s.Id)).Select(s => s.Id)],
+            [.. from.Sheets.SelectMany(s => s.Tables).Where(t => !t.IsDeleted && !plan.Tables.ContainsKey(t.Id)).Select(t => t.Id)],
+            [.. from.Sheets.SelectMany(s => s.Tables).SelectMany(t => t.Columns)
+                .Where(c => !c.IsDeleted && !mappedColumns.Contains(c.Id)).Select(c => c.Id)],
+            ct).ConfigureAwait(false);
+        if (denied > 0)
+        {
+            refusals.Add("grantsNotMapped");
+        }
+
         // Спершу те, що зачіпає введені дані, потім решта структури, потім вигляд.
         var ordered = plan.Items
             .OrderByDescending(i => i.Values > 0)
@@ -344,7 +360,9 @@ public sealed class MigrateDocumentVersionHandler(
             {
                 ["messageKey"] = dto.Refusals.Contains("structural")
                     ? "err.ECR-SCHM-0422.migrateStructural"
-                    : "err.ECR-SCHM-0422.migrateDataLoss",
+                    : dto.Refusals.Contains("grantsNotMapped") && dto.LostValues == 0 && dto.GuardedValues == 0
+                        ? "err.ECR-SCHM-0422.migrateGrantsNotMapped"
+                        : "err.ECR-SCHM-0422.migrateDataLoss",
                 ["lostValues"] = dto.LostValues.ToString(CultureInfo.InvariantCulture),
                 ["guardedValues"] = dto.GuardedValues.ToString(CultureInfo.InvariantCulture),
                 ["mode"] = dto.Mode.ToString(),

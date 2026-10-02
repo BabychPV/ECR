@@ -3654,6 +3654,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `err.ECR-DOC-0409.migrateProjectArchived` | 409 | перенос документів на нову версію шаблону: проєкт в архіві (ФВ-7.5) |
 | `err.ECR-DOC-0409.migrateSheetsLocked` | 409 | перенос версії: у проєкті є подані/затверджені аркуші |
 | `err.ECR-SCHM-0422.migrateDataLoss` | 422 | перенос версії в режимі `Safe` втратив би дані |
+| `err.ECR-SCHM-0422.migrateGrantsNotMapped` | 422 | на аркуші/таблиці/колонці, якої в новій версії за кодом нема, стоїть заборона (`refusals` має `grantsNotMapped`) |
 | `err.ECR-SCHM-0422.migrateStructural` | 422 | перенос версії в режимі `Presentation` відхилено через структурну зміну |
 | `err.ECR-TMPL-0422.migrateOtherTemplate` | 422 | цільова версія належить іншому шаблону |
 | `err.ECR-TMPL-0422.migrateSameVersion` | 422 | цільова версія збігається з поточною |
