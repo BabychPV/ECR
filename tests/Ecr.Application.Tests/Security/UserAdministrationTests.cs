@@ -146,10 +146,63 @@ public sealed class UserAdministrationTests
         Assert.Equal(["Viewers"], await _users.ListUserRolesAsync(_local.Id, CancellationToken.None));
     }
 
-    private ReplaceUserRolesHandler ReplaceRoles() => new(
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "BE-12")]
+    public async Task Носій_ManageUsers_з_областю_не_рахується_і_єдиного_глобального_зняти_не_можна()
+    {
+        await _users.GrantRoleAsync(_local, "Admins", CancellationToken.None);
+        var scoped = _users.Seed(new User("scoped", "Звужений", AuthProvider.Local));
+        _users.ScopedGrants.Add((scoped.UserName, "Admins"));
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => ReplaceRoles().HandleAsync(_local.Id, [], null, null, CancellationToken.None));
+
+        Assert.Equal("err.ECR-SEC-0409.lastAdministrator", error.Details!["messageKey"]);
+        Assert.Equal(["Admins"], await _users.ListUserRolesAsync(_local.Id, CancellationToken.None));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "BE-12")]
+    public async Task Заміна_ролі_адміністратора_на_ту_саму_роль_з_областю_не_зберігає_право_і_відхиляється()
+    {
+        await _users.GrantRoleAsync(_local, "Admins", CancellationToken.None);
+        // Виконавець керує проєктом 1 (область валідується), проєкт існує.
+        _access.BuildProfileAsync(_actor.Id, Arg.Any<CancellationToken>()).Returns(
+            new AccessBuilder { UserId = _actor.Id }.Permission("Security.ManageUsers").Grant(ResourceKind.Project, 1, GrantLevel.Manage).Build());
+        var documents = Substitute.For<IDocumentStore>();
+        documents.FindProjectStatusAsync(1, Arg.Any<CancellationToken>()).Returns(Enum.GetValues<ProjectStatus>()[0]);
+        var scopes = new Dictionary<string, RoleScopeDto> { ["Admins"] = new([1]) };
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => ReplaceRoles(documents).HandleAsync(_local.Id, ["Admins"], null, scopes, CancellationToken.None));
+
+        Assert.Equal("err.ECR-SEC-0409.lastAdministrator", error.Details!["messageKey"]);
+        Assert.Equal(["Admins"], await _users.ListUserRolesAsync(_local.Id, CancellationToken.None));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "BE-12")]
+    public async Task Збережена_область_наявного_призначення_не_робить_набір_збереженням_права()
+    {
+        // Поле областей у запиті відсутнє — області наявних призначень зберігаються,
+        // тож «Admins» (з областю) право не дає, а глобальну «Admins2» цей набір знімає.
+        _users.Roles.Add(new RoleView(3, "Admins2", IsBuiltIn: false, IsActive: true, ["Security.ManageUsers"], []));
+        await _users.GrantRoleAsync(_local, "Admins2", CancellationToken.None);
+        _users.ScopedGrants.Add((_local.UserName, "Admins"));
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => ReplaceRoles().HandleAsync(_local.Id, ["Admins"], null, null, CancellationToken.None));
+
+        Assert.Equal("err.ECR-SEC-0409.lastAdministrator", error.Details!["messageKey"]);
+    }
+
+    private ReplaceUserRolesHandler ReplaceRoles(IDocumentStore? documents = null) => new(
         _users, _access, _uow, _current, _audit, _clock,
         new DisableBootstrapAdminHandler(_users, _uow, _audit, _current, _clock),
-        Substitute.For<IDocumentStore>(),
+        documents ?? Substitute.For<IDocumentStore>(),
         Substitute.For<IResourceNameResolver>());
 
     [Fact]

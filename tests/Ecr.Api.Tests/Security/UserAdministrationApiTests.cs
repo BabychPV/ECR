@@ -100,6 +100,51 @@ public sealed class UserAdministrationApiTests(SqlServerFixture sql)
         Assert.DoesNotContain(details, d => d.Contains(Temporary, StringComparison.Ordinal));
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "BE-12")]
+    public async Task Єдиного_глобального_адміністратора_не_можна_зняти_коли_є_носій_з_областю_дії()
+    {
+        var ids = await ArrangeAsync().ConfigureAwait(true);
+
+        // Другий носій ManageUsers — але з областю одного проєкту: адміністратором не є.
+        await using (var db = CreateContext())
+        {
+            var role = await db.Roles.AsNoTracking().SingleAsync(r => r.Code == $"UAD_{_tag}").ConfigureAwait(true);
+            var scoped = new User($"scp_{_tag}", "scp", AuthProvider.Local);
+            scoped.SetPassword(new PasswordHasher().Hash(Password));
+            db.Users.Add(scoped);
+            await db.SaveChangesAsync().ConfigureAwait(true);
+            var assignment = new RoleAssignment(role.Id, scoped.Id, principalSid: null);
+            assignment.SetScope(RoleAssignmentScope.Create([1]));
+            db.RoleAssignments.Add(assignment);
+            await db.SaveChangesAsync().ConfigureAwait(true);
+
+            // База спільна для набору: чужі носії ManageUsers із інших тестів гасимо блокуванням,
+            // щоб «єдиний глобальний» був справді єдиним.
+            await db.Database.ExecuteSqlAsync($"""
+                UPDATE u SET LockedUntil = '9999-12-31'
+                FROM sec.[User] u
+                WHERE u.Id <> {ids.Admin}
+                  AND EXISTS (SELECT 1 FROM sec.RoleAssignment a
+                              JOIN sec.RolePermission p ON p.RoleId = a.RoleId
+                              WHERE a.UserId = u.Id AND p.PermissionCode = N'Security.ManageUsers'
+                                AND a.ScopeJson IS NULL)
+                """).ConfigureAwait(true);
+        }
+
+        using var app = new EcrApiFactory(sql);
+        using var admin = await SignedInAsync(app, $"adm_{_tag}").ConfigureAwait(true);
+
+        var put = await admin.PutAsJsonAsync(
+            new Uri($"/api/v1/users/{ids.Admin}/roles", UriKind.Relative),
+            new { roleCodes = Array.Empty<string>() }).ConfigureAwait(true);
+
+        Assert.Equal(HttpStatusCode.Conflict, put.StatusCode);
+        Assert.Contains("ECR-SEC-0409", await put.Content.ReadAsStringAsync().ConfigureAwait(true), StringComparison.Ordinal);
+    }
+
     private async Task<(int Admin, int Target, int Domain)> ArrangeAsync()
     {
         await using var db = CreateContext();
