@@ -243,9 +243,8 @@ public static class LoginRateLimiting
         var trustForwardedFor = configuration.GetValue(TrustForwardedForKey, defaultValue: false);
 
         // Системна межа проб транспорту — не в глобальному обмежувачі: той рахує і ВІДХИЛЕНІ запити, а квота
-        // мусить витрачатися лише прийнятими політикою користувача (див. SmtpTestQuotaFilter).
+        // мусить витрачатися лише прийнятими політикою користувача (див. SmtpTestQuotaMiddleware).
         services.AddSingleton<SmtpTestSystemQuota>();
-        services.AddScoped<SmtpTestQuotaFilter>();
 
         services.AddRateLimiter(options =>
         {

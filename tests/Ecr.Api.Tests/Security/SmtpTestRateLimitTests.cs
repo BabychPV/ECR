@@ -83,7 +83,7 @@ public sealed class SmtpTestRateLimitTests(SqlServerFixture sql)
         Assert.NotEqual(HttpStatusCode.TooManyRequests, one.StatusCode);
         Assert.NotEqual(HttpStatusCode.TooManyRequests, two.StatusCode);
 
-        // Мутація: прибрати `[ServiceFilter(SmtpTestQuotaFilter)]` з `smtp/test` — падає тут.
+        // Мутація: прибрати `UseMiddleware<SmtpTestQuotaMiddleware>` з Program.cs — падає тут.
         using var three = await ProbeAsync(first).ConfigureAwait(true);
         Assert.Equal(HttpStatusCode.TooManyRequests, three.StatusCode);
 
@@ -182,7 +182,7 @@ public sealed class SmtpTestRateLimitTests(SqlServerFixture sql)
         Assert.NotEqual(HttpStatusCode.TooManyRequests, one.StatusCode);
         Assert.NotEqual(HttpStatusCode.TooManyRequests, two.StatusCode);
 
-        // Мутація: прибрати атрибути з ендпоінтів → квота не зачеплена, третя проба не дає 429 — падає тут.
+        // Мутація: прибрати атрибути з ендпоінтів (метадані) → квота не зачеплена, третя проба не дає 429 — падає тут.
         using var three = await a.PostAsJsonAsync(new Uri("/api/v1/notifications/smtp/test/", UriKind.Relative), new { to = "probe@example.com" })
             .ConfigureAwait(true);
         Assert.Equal(HttpStatusCode.TooManyRequests, three.StatusCode);
