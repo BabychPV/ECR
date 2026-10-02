@@ -6436,9 +6436,12 @@ USING (VALUES
     (N'err.ECR-REQ-0429.tooManyRecalculations', N'en', N'Too many recalculation requests in a short time. Wait a moment and try again; the Retry-After header says how long.', 1),
     -- COLL:recalc-rl ── кінець секції ──
     -- CL:states-a11y-2 ── поле Lookup без цілі у вкладці «Зв'язки» (стани нових панелей 2) ──
-    (N'registries.relationTargetMissing', N'en', N'Target not set: choose a registry', 1)
+    (N'registries.relationTargetMissing', N'en', N'Target not set: choose a registry', 1),
     -- ru/kz — окремою порцією CL:states-a11y-2 у блоці I18N нижче.
     -- CL:states-a11y-2 ── кінець секції ──
+    -- COLL:check-relation ── Підказка MapJson для виду зв'язку Check: поле обов'язкове (RelationSpecParser.ParseCheck) ──
+    (N'tables.mapJsonCheckHint', N'en', N'Required for Check: a JSON object with "left" (source column) and "right" (target column); optional "tolerance", "toleranceKind" (abs or rel) and "severity" (Warn, Block or Info).', 1)
+    -- COLL:check-relation ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -15092,6 +15095,16 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- CL:states-a11y-2 ── кінець секції ──
+-- COLL:check-relation ── ru/kz підказка MapJson для виду Check; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'tables.mapJsonCheckHint', N'ru', N'Обязательно для «Проверки»: JSON-объект с полями "left" (столбец источника) и "right" (столбец приёмника); необязательны "tolerance", "toleranceKind" (abs или rel) и "severity" (Warn, Block или Info).'),
+    (N'tables.mapJsonCheckHint', N'kz', N'«Тексеру» үшін міндетті: "left" (көз бағаны) және "right" (қабылдағыш бағаны) өрістері бар JSON-нысан; "tolerance", "toleranceKind" (abs немесе rel) және "severity" (Warn, Block немесе Info) міндетті емес.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:check-relation ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

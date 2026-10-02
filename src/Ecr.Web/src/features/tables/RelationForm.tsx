@@ -50,17 +50,12 @@ export function RelationForm({
 }): JSX.Element {
   const blocker = whyCannotSave(draft);
 
-  // ⛔ Аудит-пас 8, lane7, п.12: форма показувала «Column mapping» повністю
-  // активним для КОЖНОГО виду зв'язку, включно з `Check`, чий власний лейбл
-  // (`tables.kindCheck` — «a cross-table rule, no values move») прямо каже,
-  // що поле не застосовне. Для решти п'яти видів (Mirror/Rollup/Reference/
-  // Cascade/Copy) жодне джерело домену (`TableRelationDef.cs`,
-  // `docs/build/02-contracts.md`) не документує, яке саме поле не
-  // застосовне — там Kind сьогодні суто описовий, виконавець зв'язку
-  // (`TableRelationHandlers.cs`) не гілкується за ним узагалі. Тому фікс
-  // навмисно вузький: лише `Check`, де неактуальність поля — факт із
-  // власного тексту застосунку, а не здогад.
-  const mapJsonNotApplicable = draft.relationKind === 'Check';
+  // ⛔ D-230: для `Check` `MapJson` ОБОВ'ЯЗКОВИЙ (`left`/`right` колонок —
+  // `RelationSpecParser.ParseCheck`, інакше 422 `mapMissingField`). Аудит-пас 8
+  // колись вимкнув це поле для `Check` як «не застосовне» — і зв'язок цього
+  // виду став неможливо створити з веб-форми. Поле лишається активним, а для
+  // `Check` показує власну підказку формату.
+  const isCheck = draft.relationKind === 'Check';
 
   // ⚠ Порожній варіант стоїть першим і має порожнє значення: без нього
   // нативний `<select>` показує першу таблицю як «обрану», хоча користувач
@@ -133,12 +128,10 @@ export function RelationForm({
 
       <Textarea
         label={t('tables.mapJson')}
-        description={
-          mapJsonNotApplicable ? t('tables.mapJsonNotApplicableForCheck') : t('tables.mapJsonHint')
-        }
+        description={isCheck ? t('tables.mapJsonCheckHint') : t('tables.mapJsonHint')}
         autosize
         minRows={2}
-        disabled={disabled || mapJsonNotApplicable}
+        disabled={disabled}
         value={draft.mapJson}
         onChange={(event) => onChange({ ...draft, mapJson: event.currentTarget.value })}
       />

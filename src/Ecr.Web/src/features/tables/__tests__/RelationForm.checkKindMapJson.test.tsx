@@ -51,7 +51,7 @@ describe('RelationForm: «Column mapping» для Kind=Check (аудит-пас 
     expect(screen.getByText('⟦tables.mapJsonHint⟧')).toBeDefined();
   });
 
-  it('перемикання на Kind=Check вимикає «Column mapping» і пояснює причину', () => {
+  it('Kind=Check: «Column mapping» АКТИВНЕ (D-230: MapJson left/right обов\'язковий) і має власну підказку', () => {
     show();
 
     fireEvent.change(screen.getByLabelText('⟦tables.relationKind⟧'), {
@@ -59,11 +59,14 @@ describe('RelationForm: «Column mapping» для Kind=Check (аудит-пас 
     });
 
     const mapJson = screen.getByLabelText('⟦tables.mapJson⟧') as HTMLTextAreaElement;
-    // ⛔ Мутаційний доказ: без `disabled || mapJsonNotApplicable` у
-    // `RelationForm.tsx` поле лишається клікабельним і на `Check`.
-    expect(mapJson.hasAttribute('disabled')).toBe(true);
-    expect(screen.getByText('⟦tables.mapJsonNotApplicableForCheck⟧')).toBeDefined();
+    // ⛔ Мутаційний доказ: з `disabled={disabled || isCheck}` зв'язок виду Check
+    // неможливо створити з веб-форми — сервер без `MapJson` дає `mapMissingField`.
+    expect(mapJson.hasAttribute('disabled')).toBe(false);
+    expect(screen.getByText('⟦tables.mapJsonCheckHint⟧')).toBeDefined();
     expect(screen.queryByText('⟦tables.mapJsonHint⟧')).toBeNull();
+
+    fireEvent.change(mapJson, { target: { value: '{"left":"A","right":"B"}' } });
+    expect(mapJson.value).toBe('{"left":"A","right":"B"}');
   });
 
   it('перемикання назад із Check на інший Kind знову вмикає поле', () => {
