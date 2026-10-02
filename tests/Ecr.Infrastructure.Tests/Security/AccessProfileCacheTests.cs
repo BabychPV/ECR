@@ -63,6 +63,55 @@ public sealed class AccessProfileCacheTests : IDisposable
         Assert.Equal(4, builds);
     }
 
+    /// <remarks>Мутація: <c>InvalidateUser</c> знімає прапорець dirty — червоне.</remarks>
+    [Fact]
+    public async Task InvalidateUser_не_знімає_dirty_кеш_лишається_fail_closed()
+    {
+        var cache = new AccessProfileCache(_memory);
+        var builds = 0;
+        cache.MarkInvalidationFailed();
+
+        cache.InvalidateUser(UserId);
+
+        await cache.GetOrCreateAsync(UserId, "s1", "", _ => Build(ref builds, "s1"), CancellationToken.None);
+        await cache.GetOrCreateAsync(UserId, "s1", "", _ => Build(ref builds, "s1"), CancellationToken.None);
+        Assert.Equal(2, builds);
+    }
+
+    /// <remarks>
+    /// Мутація: <c>InvalidateAll</c> знімає прапорець безумовно (<c>_cleanGen = _failGen</c> наприкінці) — червоне.
+    /// Детерміновано: збій реєструється з колбека скасування токена «усе», тобто всередині <c>InvalidateAll</c>.
+    /// </remarks>
+    [Fact]
+    public async Task InvalidateAll_що_стартував_до_збою_не_знімає_пізніший_збій()
+    {
+        var spy = new SpyMemory(_memory);
+        var cache = new AccessProfileCache(spy);
+        var builds = 0;
+        await cache.GetOrCreateAsync(UserId, "s1", "", _ => Build(ref builds, "s1"), CancellationToken.None);
+        spy.Entry!.ExpirationTokens[0].RegisterChangeCallback(_ => cache.MarkInvalidationFailed(), null);
+
+        cache.InvalidateAll(); // збій з'являється, поки скидання ще триває
+
+        await cache.GetOrCreateAsync(UserId, "s1", "", _ => Build(ref builds, "s1"), CancellationToken.None);
+        await cache.GetOrCreateAsync(UserId, "s1", "", _ => Build(ref builds, "s1"), CancellationToken.None);
+        Assert.Equal(3, builds); // dirty лишився: профіль будується щоразу
+
+        cache.InvalidateAll(); // наступне повне скидання знімає
+        await cache.GetOrCreateAsync(UserId, "s1", "", _ => Build(ref builds, "s1"), CancellationToken.None);
+        await cache.GetOrCreateAsync(UserId, "s1", "", _ => Build(ref builds, "s1"), CancellationToken.None);
+        Assert.Equal(4, builds);
+    }
+
+    private sealed class SpyMemory(IMemoryCache inner) : IMemoryCache
+    {
+        public ICacheEntry? Entry { get; private set; }
+        public ICacheEntry CreateEntry(object key) => Entry = inner.CreateEntry(key);
+        public bool TryGetValue(object key, out object? value) => inner.TryGetValue(key, out value);
+        public void Remove(object key) => inner.Remove(key);
+        public void Dispose() { }
+    }
+
     /// <remarks>Мутація: прибрати повторну спробу за зміною епохи в <c>GetOrCreateAsync</c> — приєднаний отримує профіль до скидання, червоне.</remarks>
     [Fact]
     public async Task Скидання_під_час_польоту_не_віддає_профіль_побудований_до_нього_жодному_з_учасників()

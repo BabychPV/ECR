@@ -92,7 +92,7 @@ public sealed class AccessProfileCache(IMemoryCache memory, CacheLifetimes? life
 
         // ⛔ fail-closed: скидання не вдалося — кеш міг лишити застарілі профілі, тож
         // їх не читаємо й нових не кладемо, поки InvalidateAll не пройде успішно.
-        if (Volatile.Read(ref _dirty) != 0)
+        if (IsDirty)
         {
             Observability.InfrastructureMetrics.RecordCache(Observability.InfrastructureMetrics.AccessProfileCacheName, hit: false);
             return await factory(ct).ConfigureAwait(false);
@@ -152,7 +152,7 @@ public sealed class AccessProfileCache(IMemoryCache memory, CacheLifetimes? life
         // би під ключ, за яким справжній користувач дістав би чужі права разом
         // із прапорцем IsSimulation. Симуляція рідкісна, перебудова дешева.
         // Скидання, що сталося, поки профіль будувався, робить його можливо застарілим: віддаємо, але не кешуємо.
-        if (!profile.IsSimulation && Interlocked.Read(ref _epoch) == epoch && Volatile.Read(ref _dirty) == 0)
+        if (!profile.IsSimulation && Interlocked.Read(ref _epoch) == epoch && !IsDirty)
         {
             var options = new MemoryCacheEntryOptions { AbsoluteExpirationRelativeToNow = Lifetime };
             options.AddExpirationToken(new CancellationChangeToken(all.Token));
@@ -166,12 +166,18 @@ public sealed class AccessProfileCache(IMemoryCache memory, CacheLifetimes? life
     /// <inheritdoc />
     public void MarkInvalidationFailed()
     {
-        Volatile.Write(ref _dirty, 1);
+        Interlocked.Increment(ref _failGen);
         Observability.InfrastructureMetrics.RecordAccessProfileInvalidationFailure();
     }
 
+    /// <summary>Лічильник збоїв скидання; кеш «брудний», поки <see cref="_cleanGen"/> його не наздогнав.</summary>
+    private long _failGen;
+
+    /// <summary>Найбільший <see cref="_failGen"/>, прочитаний на СТАРТІ успішного <see cref="InvalidateAll"/>.</summary>
+    private long _cleanGen;
+
     /// <summary>Скидання не вдалося: кеш не читається й не наповнюється до успішного <see cref="InvalidateAll"/>.</summary>
-    private int _dirty;
+    private bool IsDirty => Volatile.Read(ref _failGen) != Volatile.Read(ref _cleanGen);
 
     /// <inheritdoc />
     public void InvalidateUser(int userId)
@@ -186,10 +192,17 @@ public sealed class AccessProfileCache(IMemoryCache memory, CacheLifetimes? life
     /// <inheritdoc />
     public void InvalidateAll()
     {
+        // Збій, зареєстрований ПІСЛЯ старту цього скидання, не знімається ним: знімаємо лише
+        // збої, що були до старту (скидання, яке почалося раніше, могло їх не покрити).
+        var gen = Volatile.Read(ref _failGen);
         Interlocked.Increment(ref _epoch);
         var old = Interlocked.Exchange(ref _all, new CancellationTokenSource());
         old.Cancel();
-        Volatile.Write(ref _dirty, 0); // лише повне скидання знімає прапорець
+        long seen;
+        while ((seen = Volatile.Read(ref _cleanGen)) < gen
+               && Interlocked.CompareExchange(ref _cleanGen, gen, seen) != seen)
+        {
+        } // лише повне скидання знімає прапорець
     }
 
     /// <summary>
