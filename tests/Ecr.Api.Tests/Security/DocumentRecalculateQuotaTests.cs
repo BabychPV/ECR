@@ -205,6 +205,117 @@ public sealed class DocumentRecalculateQuotaTests(SqlServerFixture sql)
         }
     }
 
+    /// <remarks>ent7 P3-1. Мутація: <c>IsRefusal</c> → <c>status >= 400</c> без верхньої межі — червоніє.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    public async Task Відповідь_5xx_і_виняток_5xx_межу_не_повертають()
+    {
+        var quota = NewQuota(userPermit: 100);
+        var status = StatusCodes.Status500InternalServerError;
+        var middleware = new DocumentRecalculateQuotaMiddleware(ctx =>
+        {
+            ctx.Response.StatusCode = status;
+            return Task.CompletedTask;
+        }, quota);
+
+        for (var i = 0; i < Permit; i++)
+        {
+            await middleware.InvokeAsync(MarkedContext()).ConfigureAwait(true);
+        }
+
+        var over = MarkedContext();
+        await middleware.InvokeAsync(over).ConfigureAwait(true);
+        Assert.Equal(StatusCodes.Status429TooManyRequests, over.Response.StatusCode);
+
+        // Виняток 500 (не-доменний) — теж не повертає.
+        var thrower = new DocumentRecalculateQuotaMiddleware(_ => throw new InvalidOperationException("збій"), NewQuota(userPermit: 100));
+        for (var i = 0; i < Permit; i++)
+        {
+            await Assert.ThrowsAsync<InvalidOperationException>(() => thrower.InvokeAsync(MarkedContext())).ConfigureAwait(true);
+        }
+
+        var overThrown = MarkedContext();
+        await thrower.InvokeAsync(overThrown).ConfigureAwait(true);
+        Assert.Equal(StatusCodes.Status429TooManyRequests, overThrown.Response.StatusCode);
+    }
+
+    /// <remarks>ent7 P3-1. Мутація: у <c>catch</c> повернути <c>|| exception is OperationCanceledException</c> — червоніє.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    public async Task Скасування_запиту_межу_не_повертає()
+    {
+        var middleware = new DocumentRecalculateQuotaMiddleware(_ => throw new OperationCanceledException(), NewQuota(userPermit: 100));
+        for (var i = 0; i < Permit; i++)
+        {
+            await Assert.ThrowsAsync<OperationCanceledException>(() => middleware.InvokeAsync(MarkedContext())).ConfigureAwait(true);
+        }
+
+        var over = MarkedContext();
+        await middleware.InvokeAsync(over).ConfigureAwait(true);
+        Assert.Equal(StatusCodes.Status429TooManyRequests, over.Response.StatusCode);
+    }
+
+    /// <remarks>ent7 P3-2. Мутація: у <c>TryAcquire(userId, documentId, …)</c> прибрати перевірку <c>userKey</c> — червоніє.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    public void Межа_на_користувача_діє_на_всі_документи_разом_і_відмова_пари_повертає_користувацький_дозвіл()
+    {
+        var quota = NewQuota(userPermit: 3);
+
+        Assert.True(quota.TryAcquire("u", "A", out _, out _));
+        Assert.True(quota.TryAcquire("u", "A", out _, out _));
+        Assert.False(quota.TryAcquire("u", "A", out _, out _)); // пара вичерпана; користувацький дозвіл повернуто
+        Assert.True(quota.TryAcquire("u", "B", out _, out _));  // 3-й дозвіл користувача
+        Assert.False(quota.TryAcquire("u", "C", out _, out var retry)); // користувача вичерпано
+        Assert.True(retry >= TimeSpan.FromSeconds(1));
+        Assert.True(quota.TryAcquire("other", "C", out _, out _)); // інший користувач — власна межа
+    }
+
+    /// <remarks>ent7 P3-3. Мутація: у <c>Refund</c> не видаляти нульовий запис — червоніє.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    public void Запити_на_неіснуючі_id_із_поверненням_не_роздувають_словник()
+    {
+        var quota = NewQuota(userPermit: 100_000);
+
+        for (var i = 0; i < 3000; i++)
+        {
+            Assert.True(quota.TryAcquire("u", i.ToString(CultureInfo.InvariantCulture), out var ticket, out _));
+            quota.Refund(ticket);
+        }
+
+        Assert.Equal(0, quota.TrackedKeys);
+    }
+
+    /// <remarks>ent7 P3-3. Прохід по застарілих записах працює раз на вікно й прибирає їх.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    public void Застарілі_записи_прибираються_проходом_раз_на_вікно()
+    {
+        var clock = new ManualClock();
+        var quota = new DocumentRecalculateQuota(
+            new ConfigurationBuilder().AddInMemoryCollection([new(DocumentRecalculateQuota.PermitKey, "2")]).Build(), clock);
+
+        for (var i = 0; i < 2000; i++)
+        {
+            Assert.True(quota.TryAcquire("k" + i.ToString(CultureInfo.InvariantCulture), out _, out _));
+        }
+
+        clock.Advance(TimeSpan.FromSeconds(61));
+        Assert.True(quota.TryAcquire("fresh", out _, out _));
+
+        Assert.Equal(1, quota.TrackedKeys);
+    }
+
+    private static DocumentRecalculateQuota NewQuota(int userPermit)
+        => new(
+            new ConfigurationBuilder().AddInMemoryCollection(
+            [
+                new(DocumentRecalculateQuota.PermitKey, Permit.ToString(CultureInfo.InvariantCulture)),
+                new(DocumentRecalculateQuota.UserPermitKey, userPermit.ToString(CultureInfo.InvariantCulture)),
+            ]).Build(),
+            new ManualClock());
+
     private static DefaultHttpContext MarkedContext()
     {
         var ctx = new DefaultHttpContext();
