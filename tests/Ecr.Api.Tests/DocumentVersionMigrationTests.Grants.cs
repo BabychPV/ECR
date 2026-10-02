@@ -1,7 +1,12 @@
 ﻿// tests/Ecr.Api.Tests/DocumentVersionMigrationTests.Grants.cs
 using System.Net;
 using System.Text.Json;
+using Ecr.Application.Common;
+using Ecr.Application.Ports;
 using Ecr.Application.Security;
+using Ecr.Infrastructure.Caching;
+using Microsoft.Extensions.Caching.Memory;
+using NSubstitute;
 using Ecr.Domain.Entities.Security;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
@@ -136,6 +141,73 @@ public sealed partial class DocumentVersionMigrationTests
 
         Assert.Equal(GrantLevel.None, await EffectiveAsync(app, restricted, s, s.TargetSheetDefId, s.TargetTableDefId, s.TargetColumns["C2"]).ConfigureAwait(true));
     }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-6.7")]
+    public async Task Профіль_користувача_з_ролі_через_групу_в_кеші_бачить_заборону_на_новому_id_одразу_після_переносу()
+    {
+        const string groupSid = "S-1-5-21-000111-222333-9777";
+        var s = await ArrangeAsync(Target.DropsC3AddsC4AndRow).ConfigureAwait(true);
+        var c2Old = s.Doc.ColumnDefIds[1];
+
+        int userId;
+        await using (var seed = new TestDocumentBuilder(sql.ConnectionString).CreateContext())
+        {
+            var user = Ecr.Domain.Entities.Security.User.CreateDomain(
+                $"grp_{Guid.NewGuid():N}"[..20], "Group user", $"S-1-5-21-000111-222333-{Random.Shared.Next(10000, 99999)}", DateTime.UtcNow);
+            seed.Users.Add(user);
+            var role = new Role(
+                EcrCode.Create($"GRPR_{Guid.NewGuid():N}"),
+                new LocalizedText(new Dictionary<string, string> { ["en"] = "Group entry" }));
+            seed.Roles.Add(role);
+            await seed.SaveChangesAsync().ConfigureAwait(true);
+
+            // Роль лише через групу: прямого призначення на користувача немає.
+            seed.RoleAssignments.Add(new RoleAssignment(role.Id, userId: null, principalSid: groupSid));
+            seed.ResourceGrants.Add(new ResourceGrant(role.Id, ResourceKind.Project, s.Doc.ProjectId, GrantLevel.Write));
+            seed.ResourceGrants.Add(new ResourceGrant(role.Id, ResourceKind.Column, c2Old, GrantLevel.None, isDeny: true));
+            seed.ResourceGrants.Add(new ResourceGrant(role.Id, ResourceKind.Column, s.TargetColumns["C2"], GrantLevel.Write));
+            await seed.SaveChangesAsync().ConfigureAwait(true);
+            userId = user.Id;
+        }
+
+        var session = Substitute.For<ICurrentUser>();
+        session.UserId.Returns(userId);
+        session.GroupSids.Returns([groupSid]);
+        using var memory = new MemoryCache(new MemoryCacheOptions());
+
+        async Task<GrantLevel> LevelAsync(int sheet, int table, int column)
+        {
+            await using var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext();
+            var access = new AccessDecisionService(
+                db, Substitute.For<IMetadataCache>(), new AccessProfileCache(memory),
+                new TestClock(DateTime.UtcNow), session, Substitute.For<IWorkflowStore>());
+            var profile = await access.BuildProfileAsync(userId, CancellationToken.None).ConfigureAwait(false);
+            return EditRules.Effective(profile, default(CellAccessContext) with
+            {
+                ProjectId = s.Doc.ProjectId,
+                SheetDefId = sheet,
+                TableDefId = table,
+                ColumnDefId = column,
+                SheetCode = s.Doc.SheetCode,
+            });
+        }
+
+        // Прогріваємо кеш: на новому Id поки дозвіл Write.
+        Assert.Equal(GrantLevel.None, await LevelAsync(s.Doc.SheetDefId, s.Doc.TableDefId, c2Old).ConfigureAwait(true));
+        Assert.True(await LevelAsync(s.TargetSheetDefId, s.TargetTableDefId, s.TargetColumns["C2"]).ConfigureAwait(true) > GrantLevel.None);
+
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
+        var response = await PostAsync(client, s, "Safe", dryRun: false).ConfigureAwait(true);
+        Assert.True(response.StatusCode == HttpStatusCode.OK, await response.Content.ReadAsStringAsync().ConfigureAwait(true));
+
+        // Той самий кеш: відбиток груп мусить змінитися, і deny діє одразу.
+        Assert.Equal(GrantLevel.None, await LevelAsync(s.TargetSheetDefId, s.TargetTableDefId, s.TargetColumns["C2"]).ConfigureAwait(true));
+    }
+
     private async Task<(int UserId, int RoleId)> AddRestrictedUserAsync(
         Scenario s, params (ResourceKind Kind, int Id, bool Deny)[] grants)
     {
