@@ -166,6 +166,13 @@ public static partial class EcrConfigurationValidation
 
         // ⛔ ent6 S4: `Smtp:AllowedPorts` — додаткові порти SMTP; нечисловий чи поза 1–65535 елемент інакше мовчки
         // ігнорувався б читачем, і адміністратор не зрозумів би, чому пошта не йде.
+        // P3-3: скаляр (ECR_Smtp__AllowedPorts=2526 без __0) читач мовчки ігнорував би — це помилка, а не «порожньо».
+        if (Value(configuration, SmtpAllowedPortsKey) is { } scalar)
+        {
+            problems.Add(Describe(
+                SmtpAllowedPortsKey, scalar, "очікується список портів: ECR_Smtp__AllowedPorts__0, ECR_Smtp__AllowedPorts__1, …"));
+        }
+
         foreach (var child in configuration.GetSection(SmtpAllowedPortsKey).GetChildren())
         {
             var text = child.Value?.Trim();

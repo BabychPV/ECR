@@ -66,6 +66,16 @@ public sealed class EcrConfigurationValidationTests(SqlServerFixture sql)
         Assert.Empty(EcrConfigurationValidation.Validate(Config((key, "1"))));
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "ent6-S4")]
+    public void Скалярне_Smtp_AllowedPorts_без_індексу_зупиняє_старт()
+    {
+        // ⛔ Мутація: прибрати перевірку scalar у Validate → ECR_Smtp__AllowedPorts=2526 мовчки ігнорується.
+        var problem = Assert.Single(EcrConfigurationValidation.Validate(Config(("Smtp:AllowedPorts", "2526"))));
+        Assert.StartsWith("Smtp:AllowedPorts = «2526»", problem, StringComparison.Ordinal);
+    }
+
     [Theory]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
     [Trait("Requirement", "ent6-S4")]
