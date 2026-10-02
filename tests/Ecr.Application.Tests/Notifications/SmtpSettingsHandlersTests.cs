@@ -351,6 +351,32 @@ public sealed class SmtpSettingsHandlersTests
         return new TestSmtpSettingsHandler(_sender, _access, _audit, _user, _clock, users);
     }
 
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "D-263")]
+    [InlineData("ecr@[127.0.0.1]")]
+    [InlineData("ops team@corp.example")]
+    public async Task Раніше_збережений_From_що_не_проходить_суворішу_перевірку_читається_без_помилки_а_PUT_його_відхиляє(
+        string legacyFrom)
+    {
+        Arrange();
+        var row = new SmtpSettings(_clock.UtcNow, Actor);
+        row.Update(
+            "smtp.corp.example", 587, SmtpEncryptionMode.StartTls, legacyFrom, null, SmtpAuthMode.None, null, true,
+            _clock.UtcNow, Actor);
+        _store.Row = row;
+
+        // Читання (і, отже, ефективні налаштування відправника) валідації адреси не виконує.
+        // ⛔ Мутація: викликати IsValidAddress у GetSmtpSettingsHandler / IsComplete → кидає або конфігурація «не повна».
+        var read = await Get().HandleAsync(CancellationToken.None);
+        Assert.Equal(legacyFrom, read.FromAddress);
+        Assert.True(row.IsComplete);
+
+        // Нове значення при збереженні — перевіряється.
+        await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Save().HandleAsync(Input(from: legacyFrom), CancellationToken.None));
+    }
+
     private void Arrange()
         => _access.BuildProfileAsync(Actor, Arg.Any<CancellationToken>())
             .Returns(new AccessBuilder { UserId = Actor }.Permission("System.ManageNotifications").Build());
