@@ -2,6 +2,8 @@ using Ecr.Application.Common;
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Domain.Entities.Configuration;
+using Ecr.Domain.Enums;
+using Ecr.Domain.ValueObjects;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
@@ -227,6 +229,12 @@ public sealed class TemplateVersionStore(EcrDbContext db) : ITemplateVersionStor
         await EnsureVersionNumberFreeAsync(source.TemplateId, newVersion, ct).ConfigureAwait(false);
 
         var clonedFrom = source.Id;
+
+        // ⛔ T2-02: зв'язки таблиць (Check/Rollup/…) не мають навігації з версії й
+        // раніше мовчки губились при клоні. Читаються ДО `Prepare`: він скидає
+        // ключі таблиць джерела, а зв'язок посилається на таблиці числом.
+        var relationTemplates = await ReadRelationTemplatesAsync(source, ct).ConfigureAwait(false);
+
         var (clone, links) = TemplateVersionCloner.Prepare(source, newVersion, userId, utcNow);
 
         // ⛔ V-05: два збереження — одна транзакція. Формули посилаються на
@@ -238,7 +246,7 @@ public sealed class TemplateVersionStore(EcrDbContext db) : ITemplateVersionStor
         // загубив обчислення.
         if (db.Database.CurrentTransaction is not null)
         {
-            await SaveCloneAsync(clone, links, clonedFrom, ct).ConfigureAwait(false);
+            await SaveCloneAsync(clone, links, clonedFrom, relationTemplates, ct).ConfigureAwait(false);
             return clone.Id;
         }
 
@@ -246,7 +254,7 @@ public sealed class TemplateVersionStore(EcrDbContext db) : ITemplateVersionStor
         await strategy.ExecuteAsync(async () =>
         {
             await using var tx = await db.Database.BeginTransactionAsync(ct).ConfigureAwait(false);
-            await SaveCloneAsync(clone, links, clonedFrom, ct).ConfigureAwait(false);
+            await SaveCloneAsync(clone, links, clonedFrom, relationTemplates, ct).ConfigureAwait(false);
             await tx.CommitAsync(ct).ConfigureAwait(false);
         }).ConfigureAwait(false);
 
@@ -278,13 +286,75 @@ public sealed class TemplateVersionStore(EcrDbContext db) : ITemplateVersionStor
         }
     }
 
+    /// <summary>Зв'язок джерела з таблицями, названими ідентичністю (аркуш + код), а не ключем.</summary>
+    private sealed record RelationTemplate(
+        string Code, TableRelationKind Kind, (string Sheet, string Table) Source, (string Sheet, string Table) Target,
+        string MatchJson, string? MapJson, byte OnSourceChange, bool IsActive);
+
+    private async Task<IReadOnlyList<RelationTemplate>> ReadRelationTemplatesAsync(
+        TemplateVersion source, CancellationToken ct)
+    {
+        var identity = source.Sheets
+            .SelectMany(s => s.Tables.Select(t => (t.Id, Key: (Sheet: s.Code, Table: t.Code))))
+            .ToDictionary(x => x.Id, x => x.Key);
+
+        var ids = identity.Keys.ToList();
+        var relations = await db.TableRelations
+            .AsNoTracking()
+            .Where(r => ids.Contains(r.SourceTableDefId))
+            .OrderBy(r => r.Code)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        // Зв'язок, чия таблиця лежить поза версією (старі дані), не переноситься:
+        // сенсу в ньому для нової версії немає, а `UQ`/FK лише заважали б.
+        return [.. relations
+            .Where(r => identity.ContainsKey(r.TargetTableDefId))
+            .Select(r => new RelationTemplate(
+                r.Code, r.RelationKind, identity[r.SourceTableDefId], identity[r.TargetTableDefId],
+                r.MatchJson, r.MapJson, r.OnSourceChange, r.IsActive))];
+    }
+
+    /// <summary>
+    /// Код клонованого зв'язку: <c>UQ_TableRelationDef</c> — унікальність по ВСІЙ системі
+    /// (міграція індексу — окрема задача під токен), тож клон не може зберегти код джерела.
+    /// Додається суфікс <c>_v&lt;id нової версії&gt;</c>; сам код обрізається до 64 символів.
+    /// </summary>
+    internal static string ClonedRelationCode(string code, int cloneVersionId)
+    {
+        var suffix = $"_v{cloneVersionId.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
+        return (code.Length + suffix.Length > 64 ? code[..(64 - suffix.Length)] : code) + suffix;
+    }
+
+    private void CloneTableRelations(TemplateVersion clone, IReadOnlyList<RelationTemplate> templates)
+    {
+        var ids = clone.Sheets
+            .SelectMany(s => s.Tables.Select(t => (t.Id, Key: (Sheet: s.Code, Table: t.Code))))
+            .ToDictionary(x => x.Key, x => x.Id);
+
+        foreach (var t in templates)
+        {
+            if (!ids.TryGetValue(t.Source, out var sourceId) || !ids.TryGetValue(t.Target, out var targetId))
+            {
+                continue;
+            }
+
+            var relation = new TableRelationDef(
+                EcrCode.Create(ClonedRelationCode(t.Code, clone.Id)), sourceId, targetId, t.Kind, t.MatchJson);
+            relation.Update(sourceId, targetId, t.Kind, t.MatchJson, t.MapJson, t.OnSourceChange, t.IsActive);
+            db.TableRelations.Add(relation);
+        }
+    }
+
     private async Task SaveCloneAsync(
-        TemplateVersion clone, TemplateVersionCloner.CloneLinks links, int clonedFrom, CancellationToken ct)
+        TemplateVersion clone, TemplateVersionCloner.CloneLinks links, int clonedFrom,
+        IReadOnlyList<RelationTemplate> relationTemplates, CancellationToken ct)
     {
         db.TemplateVersions.Add(clone);
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
 
         db.FormulaDefs.AddRange(TemplateVersionCloner.Relink(links));
+        CloneTableRelations(clone, relationTemplates);
         await CloneConditionalFormatsAsync(clone.Id, clonedFrom, ct).ConfigureAwait(false);
         SetClonedFrom(clone, clonedFrom);
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
