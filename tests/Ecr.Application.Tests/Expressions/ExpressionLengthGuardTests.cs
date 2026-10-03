@@ -59,6 +59,42 @@ public sealed class ExpressionLengthGuardTests
     }
 
     [Fact]
+    public async Task Вираз_на_символ_понад_межу_відхиляється_а_рівно_на_межі_проходить()
+    {
+        // 4000 — проходить (див. тест вище), 4001 — відмова: межа точна, не «приблизно».
+        var text = "1" + string.Concat(Enumerable.Repeat("+1", 1999)) + "00";
+        Assert.Equal(4001, text.Length);
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => ValidateAsync(text, ExpressionDialect.Template));
+
+        Assert.Equal(ErrorCodes.RequestInvalid, error.ErrorCode);
+        Assert.Equal("err.ECR-REQ-0422.expressionTooLong", error.Details!["messageKey"]);
+        Assert.Equal("4001", error.Details["length"]);
+    }
+
+    [Fact]
+    public void Збереження_формули_і_правила_відхиляє_задовгий_вираз_до_розбору()
+    {
+        // ⚠ Шлях збереження (`FormulaDefHandlers`, `ValidationRuleHandlers`) іде через
+        // `ExpressionRejection.RequireValid`, а не через `ValidateExpressionHandler`:
+        // без власної перевірки тут межа діяла б лише на ендпоінті перевірки (L7-01).
+        var version = new Ecr.Domain.Entities.Configuration.TemplateVersion(
+            1, "1.0.0.0", 1, new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc));
+        var engine = new RealFormulaEngine();
+        var site = new Ecr.Application.Templates.ExpressionSite(1, null, 1);
+        var text = string.Join("+", Enumerable.Repeat("1", 32_000));
+
+        var error = Assert.Throws<BusinessRuleException>(
+            () => Ecr.Application.Templates.ExpressionRejection.RequireValid(
+                engine, version, text, ExpressionDialect.Template, site));
+
+        Assert.Equal(ErrorCodes.RequestInvalid, error.ErrorCode);
+        Assert.Equal("err.ECR-REQ-0422.expressionTooLong", error.Details!["messageKey"]);
+        Assert.Equal("63999", error.Details["length"]);
+    }
+
+    [Fact]
     public void Межа_дорівнює_найдовшому_виразу_що_зберігається()
         => Assert.Equal(4000, ExpressionLengthGuard.MaxLength);
 
