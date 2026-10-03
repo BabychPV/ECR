@@ -289,6 +289,11 @@ describe('ImportPanel: четвертий раунд (F-01, F-06)', () => {
 
     // ⛔ T3-06: сирого коду причини в людському тексті немає (мутація: повернути `({reasonCode})` - червоний).
     expect(within(table).queryByText(/\(ECR-CELL-0422\)/)).toBeNull();
+
+    // Код для підтримки не втрачено: окремий дрібний елемент, а не частина речення й не messageKey.
+    const code = within(table).getByTestId('import-reason-code');
+    expect(code.textContent).toBe('ECR-CELL-0422');
+    expect(code.closest('td')?.textContent).not.toContain('(');
     expect(screen.getByRole('button', { name: '⟦import.apply⟧' }).hasAttribute('disabled')).toBe(true);
   });
 

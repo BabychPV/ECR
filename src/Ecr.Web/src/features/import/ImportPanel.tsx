@@ -318,9 +318,15 @@ export function ImportPanel({ documentId, periodKey }: ImportPanelProps): JSX.El
                           переходом. Поза рядками таблиці (`V-10`) вона єдиний
                           орієнтир; прочерк — відмова цілої таблиці. */}
                       <Table.Td>{show(rejection.excelCell)}</Table.Td>
-                      {/* ⛔ T3-06: технічний код причини (`ECR-CELL-0422`) у людському тексті не
-                          показується — він є в `reasonCode` відповіді для підтримки, а не для оператора. */}
-                      <Table.Td>{rejectionText(rejection)}</Table.Td>
+                      {/* ⛔ T3-06: технічний код причини (`ECR-CELL-0422`) НЕ в людському реченні, але й не
+                          втрачений для підтримки: окремий дрібний рядок під текстом (виділяється й
+                          копіюється). Сирий messageKey не показується. */}
+                      <Table.Td>
+                        {rejectionText(rejection)}
+                        <Text size="xs" c="dimmed" data-testid="import-reason-code">
+                          {rejection.reasonCode}
+                        </Text>
+                      </Table.Td>
                     </Table.Tr>
                   ))}
                 </Table.Tbody>
