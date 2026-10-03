@@ -164,6 +164,14 @@ public sealed class FunctionRegistry
                 groups[0], groups.Count > 1 ? groups[1] : [], context);
         }
 
+        // ⛔ Аудит L7-05: функція без `AcceptsRange` бере рівно одне значення на
+        // аргумент. Флетінг діапазону зсував позиції (ROUND(v1, v2)), а порожня
+        // група давала ArgumentOutOfRangeException на `args[0]`.
+        if (GetSignature(name) is { AcceptsRange: false } && groups.Any(g => g.Count != 1))
+        {
+            return ExpressionValue.Error(ExpressionErrors.BadValue);
+        }
+
         var args = groups.Count == 1 ? groups[0] : groups.SelectMany(g => g).ToList();
 
         return name.ToUpperInvariant() switch

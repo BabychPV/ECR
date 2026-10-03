@@ -368,6 +368,21 @@ public sealed class TypeChecker(Func<string, FunctionSignature?>? signatures = n
         var diagnostics = walk.Diagnostics;
         var arguments = node.Arguments.Select(a => Infer(a, walk, row)).ToList();
 
+        // ⛔ Аудит L7-05: `AcceptsRange: false` досі ніде не перевірявся —
+        // `ROUND([T].[r1:r3].[X], 2)` публікувався і рахувався як ROUND(v1, v2).
+        if ((signatures ?? Functions.GetSignature)(node.Name) is { AcceptsRange: false })
+        {
+            foreach (var argument in node.Arguments)
+            {
+                if (argument is CellReferenceNode { Row: RowSelector.Range or RowSelector.Predicate })
+                {
+                    Report(diagnostics, argument, "expr.rangeNotAccepted",
+                        DiagnosticParams.Of(("function", node.Name)),
+                        $"{node.Name} takes a single value, not a range of rows. Wrap the range in SUM, AVERAGE, MIN or MAX.");
+                }
+            }
+        }
+
         switch (upper)
         {
             case "IF" when arguments.Count == 3:
