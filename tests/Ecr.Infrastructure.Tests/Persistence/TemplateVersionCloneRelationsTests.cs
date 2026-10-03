@@ -92,4 +92,59 @@ public sealed class TemplateVersionCloneRelationsTests(SqlServerFixture sql)
         Assert.Equal(doc.TableDefId, original.SourceTableDefId);
         Assert.Equal(secondTableId, original.TargetTableDefId);
     }
+
+    /// <summary>
+    /// T3-07: код клона клона не росте суфіксом (<c>CHK1_v4_v5</c>) — попередній <c>_v&lt;id&gt;</c>
+    /// знімається перед додаванням нового. Мутація: прибрати зняття суфікса — тест червоний.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "T3-07")]
+    public async Task Клон_клона_не_накопичує_суфікс_коду_зв_язку()
+    {
+        var ct = CancellationToken.None;
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var doc = await builder.BuildAsync(ct: ct);
+        var tag = Guid.NewGuid().ToString("N")[..8].ToUpperInvariant();
+        var code = $"CHK{tag}";
+
+        await using (var setup = builder.CreateContext())
+        {
+            var second = new TableDef(
+                doc.SheetDefId, EcrCode.Create($"TB{tag}"),
+                new LocalizedText(new Dictionary<string, string> { ["en"] = "B" }), 2,
+                TableLayoutKind.PerPeriodInstance, TableRowMode.Fixed);
+            setup.TableDefs.Add(second);
+            await setup.SaveChangesAsync(ct);
+            setup.TableRelations.Add(new TableRelationDef(
+                EcrCode.Create(code), doc.TableDefId, second.Id, TableRelationKind.Check, "{\"k\":1}"));
+            await setup.SaveChangesAsync(ct);
+        }
+
+        int firstCloneId;
+        await using (var db = builder.CreateContext())
+        {
+            firstCloneId = await new TemplateVersionStore(db).CloneAsync(
+                doc.TemplateVersionId, $"4.{tag[..4].GetHashCode() & 0xFFF}.0.1", 1,
+                new DateTime(2026, 10, 3, 0, 0, 0, DateTimeKind.Utc), ct);
+        }
+
+        int secondCloneId;
+        await using (var db = builder.CreateContext())
+        {
+            secondCloneId = await new TemplateVersionStore(db).CloneAsync(
+                firstCloneId, $"5.{tag[..4].GetHashCode() & 0xFFF}.0.1", 1,
+                new DateTime(2026, 10, 3, 0, 0, 0, DateTimeKind.Utc), ct);
+        }
+
+        await using var read = builder.CreateContext();
+        var codes = await read.TableRelations.AsNoTracking()
+            .Where(r => r.Code.StartsWith(code))
+            .Select(r => r.Code)
+            .ToListAsync(ct);
+
+        Assert.Contains($"{code}_v{secondCloneId}", codes);
+        Assert.DoesNotContain(codes, c => c.Contains($"_v{firstCloneId}_v", StringComparison.Ordinal));
+    }
 }
