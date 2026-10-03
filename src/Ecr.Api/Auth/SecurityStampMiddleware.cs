@@ -50,7 +50,9 @@ public sealed class SecurityStampMiddleware(RequestDelegate next)
 
         if (!HttpMethods.IsGet(context.Request.Method) && !HttpMethods.IsHead(context.Request.Method))
         {
-            context.Response.OnStarting(() => ReissueIfStampRotatedAsync(context, validator, userId, stamp));
+            var selfRotation = context.RequestServices.GetRequiredService<Ecr.Infrastructure.Security.SelfStampRotation>();
+            selfRotation.BindRequestUser(userId);
+            context.Response.OnStarting(() => ReissueIfStampRotatedAsync(context, validator, selfRotation, userId));
         }
 
         await next(context).ConfigureAwait(false);
@@ -62,24 +64,39 @@ public sealed class SecurityStampMiddleware(RequestDelegate next)
     /// у тій самій відповіді, а не 401 на наступному запиті. Права в cookie не
     /// лежать — профіль будується за новим штампом, тож звужені права діють одразу.
     /// </summary>
+    /// <remarks>
+    /// ⛔ L1-01: перевидається ЛИШЕ штамп, який записав сам цей запит
+    /// (<see cref="Ecr.Infrastructure.Security.SelfStampRotation"/>), і лише поки
+    /// в БД стоїть саме він. Чужа ротація (блокування, скидання пароля, «вийти з
+    /// усіх» з іншого пристрою) — це відкликання, і перевидати на неї cookie
+    /// означало б подарувати відкликаній сесії нові 12 годин.
+    /// </remarks>
     private static async Task ReissueIfStampRotatedAsync(
-        HttpContext context, Ecr.Infrastructure.Security.SecurityStampValidator validator, int userId, string stamp)
+        HttpContext context,
+        Ecr.Infrastructure.Security.SecurityStampValidator validator,
+        Ecr.Infrastructure.Security.SelfStampRotation selfRotation,
+        int userId)
     {
         if (context.Response.StatusCode >= 400 || AuthCookieAlreadyWritten(context))
         {
             return; // ендпоінт сам вийшов (зміна пароля) або сам видав cookie
         }
 
-        var current = await validator.ReadCurrentAsync(userId, context.RequestAborted).ConfigureAwait(false);
-        if (current is null || string.Equals(current, stamp, StringComparison.Ordinal))
+        if (selfRotation.NewStamp is not { } expected)
         {
-            return;
+            return; // штамп цей запит не крутив — перевидавати нема чого
+        }
+
+        var current = await validator.ReadCurrentAsync(userId, context.RequestAborted).ConfigureAwait(false);
+        if (!string.Equals(current, expected, StringComparison.Ordinal))
+        {
+            return; // транзакцію відкочено або штамп уже прокрутив хтось інший
         }
 
         var claims = context.User.Claims
             .Where(c => c.Type != AuthenticationSetup.SecurityStampClaim)
             .Select(c => new Claim(c.Type, c.Value))
-            .Append(new Claim(AuthenticationSetup.SecurityStampClaim, current));
+            .Append(new Claim(AuthenticationSetup.SecurityStampClaim, expected));
         var identity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
 
         await context.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, new ClaimsPrincipal(identity))
