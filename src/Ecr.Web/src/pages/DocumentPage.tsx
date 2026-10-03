@@ -673,6 +673,7 @@ export function DocumentPage(): JSX.Element {
         <Suspense fallback={null}>
           <ValidationPanel
             messages={shownValidation.messages}
+            canSelect={(finding) => tables.data?.some((table) => table.tableDefId === finding.tableDefId) === true}
             onSelect={(finding) => {
               // ⛔ `ФВ-5.6`: спершу аркуш зауваження, потім запит переходу. Модуль
               // переходу — за `import()`: він живе в чанку сітки, не сторінки
