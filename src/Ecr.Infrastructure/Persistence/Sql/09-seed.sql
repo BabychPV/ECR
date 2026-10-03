@@ -6525,6 +6525,9 @@ USING (VALUES
     (N'err.ECR-TMPL-0409.relationCodeTaken.title', N'en', N'Relation code is already in use', 1),
     (N'grid.tableLoadNow', N'en', N'Load now', 1),
     -- COLL:p3-t3 ── кінець секції ──
+    -- COLL:an28 ── AN-28/L8-01: дія над документом не виконується, якщо набране в сітці не збереглося; ru/kz — порцією COLL:an28 у блоці I18N нижче ──
+    (N'document.unsavedBlocksAction', N'en', N'Unsaved changes in the grid could not be saved, so the action was not performed. Fix the cell errors or try again.', 1),
+    -- COLL:an28 ── кінець секції ──
     -- COLL:p4-t4 ── тестувальний прохід №4, T4-09: мова налаштування поза реєстром; ru/kz — порцією COLL:p4-t4 у блоці I18N нижче ──
     (N'err.ECR-REQ-0422.preferenceLanguageUnsupported', N'en', N'The language of preference "{key}" must be the code of an enabled interface language (for example "en", "ru" or "kz"), got: {value}.', 1)
     -- COLL:p4-t4 ── кінець секції ──
@@ -15321,6 +15324,17 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:p4-t4 ── кінець секції ──
+
+-- COLL:an28 ── ru/kz AN-28/L8-01; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'document.unsavedBlocksAction', N'ru', N'Несохранённые изменения в таблице не удалось сохранить, поэтому действие не выполнено. Исправьте ошибки в ячейках или повторите попытку.'),
+    (N'document.unsavedBlocksAction', N'kz', N'Кестедегі сақталмаған өзгерістерді сақтау мүмкін болмады, сондықтан әрекет орындалмады. Ұяшықтардағы қателерді түзетіңіз немесе әрекетті қайталаңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:an28 ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

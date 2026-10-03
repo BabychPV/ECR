@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { showDone } from '@/shared/ui/notify';
 import { t } from '@/shared/i18n';
+import { whenEditsSaved } from '@/features/grid/settleEdits';
 import {
   getVersionMigrationTargets,
   migrateDocumentVersion,
@@ -183,7 +184,7 @@ export function VersionMigrationDialog({ documentId, onClose }: VersionMigration
           <Button
             disabled={report === null || !report.canApply || busy}
             loading={apply.isPending}
-            onClick={() => apply.mutate()}
+            onClick={() => void whenEditsSaved(() => apply.mutate())}
             data-testid="migrate-apply"
           >
             {t('documents.migrateApply')}
