@@ -107,7 +107,7 @@ public sealed partial class ExceptionHandlingMiddleware(
         var problem = new EcrProblemDetails
         {
             Status = status,
-            Title = await LocalizedTitleAsync(context, code).ConfigureAwait(false),
+            Title = await LocalizedTitleAsync(context, code, details).ConfigureAwait(false),
             Detail = await LocalizedDetailAsync(context, code, message, details).ConfigureAwait(false),
             Type = $"https://ecr.ncoc.kz/errors/{code}",
             Instance = context.Request.Path,
@@ -227,7 +227,8 @@ public sealed partial class ExceptionHandlingMiddleware(
     /// кине вдруге — уже поза <c>try</c> конвеєра, і клієнт замість
     /// <c>problem+json</c> отримав би обірване з'єднання.
     /// </remarks>
-    private static async Task<string> LocalizedTitleAsync(HttpContext context, string code)
+    private static async Task<string> LocalizedTitleAsync(
+        HttpContext context, string code, IReadOnlyDictionary<string, object?>? details = null)
     {
         try
         {
@@ -242,6 +243,21 @@ public sealed partial class ExceptionHandlingMiddleware(
             var strings = await catalog
                 .GetAsync(currentUser.Language, context.RequestAborted)
                 .ConfigureAwait(false);
+
+            // ⛔ T3-07: один код (`ECR-TMPL-0409`) покриває різні стани («версію опубліковано», «код
+            // зв'язку зайнятий»), і спільний заголовок по коду брехав для другого. Кидок може мати
+            // власний заголовок: ключ `<messageKey>.title` (необов'язковий) бере верх над `err.<код>`.
+            if (details is not null
+                && details.TryGetValue(MessageKeyDetailName, out var keyValue)
+                && keyValue is string messageKey)
+            {
+                var specific = UiStringResolver.Resolve(strings, messageKey + ".title");
+
+                if (!string.Equals(specific, messageKey + ".title", StringComparison.Ordinal))
+                {
+                    return specific;
+                }
+            }
 
             var text = UiStringResolver.ResolveError(strings, code);
 
