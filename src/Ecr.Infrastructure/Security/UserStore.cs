@@ -305,8 +305,9 @@ public sealed class UserStore(EcrDbContext db, SelfStampRotation? selfRotation =
         // штамп покриває і строкові призначення: редагування меж підміни
         // теж має вимкнути стару копію профілю негайно, а не чекати сплину
         // 30-хвилинного кешу (`AccessProfileCache`).
+        var previousStamp = user.SecurityStamp;
         user.RefreshSecurityStamp();
-        selfRotation?.Observe(user);
+        selfRotation?.Observe(user, previousStamp);
 
         return roles.Count;
     }
@@ -645,8 +646,9 @@ public sealed class UserStore(EcrDbContext db, SelfStampRotation? selfRotation =
 
         foreach (var user in users)
         {
+            var previousStamp = user.SecurityStamp;
             user.RefreshSecurityStamp();
-            selfRotation?.Observe(user);
+            selfRotation?.Observe(user, previousStamp);
         }
 
         return users.Count;
