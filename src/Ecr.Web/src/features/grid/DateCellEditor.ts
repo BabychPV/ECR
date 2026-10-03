@@ -80,6 +80,12 @@ export function createDateCellEditor() {
         focusTimer = setTimeout(() => input?.focus(), 0);
       },
 
+      // AN-39/L8-07: клік повз редактор (`applyOnClose`) бере значення звідси; без
+      // цього набрана дата губилась (сітка діставала `undefined`).
+      getValue(): string | undefined {
+        return input?.value;
+      },
+
       beforeDisconnect(): void {
         input?.blur();
       },
