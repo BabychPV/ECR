@@ -38,6 +38,7 @@ import { useProjectCurrentPeriodDefault } from '@/features/documents/useProjectC
 import { StatusBadge } from '@/shared/ui/StatusBadge';
 import { useUrlNumber, useUrlState } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
+import { whenEditsSaved } from '@/features/grid/settleEdits';
 
 /**
  * Чотири панелі нижче — за `import()`, а не статичним імпортом (`D-132`).
@@ -529,7 +530,7 @@ export function DocumentPage(): JSX.Element {
             size="xs"
             variant="default"
             loading={validate.isPending}
-            onClick={() => validate.mutate(scope)}
+            onClick={() => void whenEditsSaved(() => validate.mutate(scope))}
           >
             {t('document.validate')}
           </Button>

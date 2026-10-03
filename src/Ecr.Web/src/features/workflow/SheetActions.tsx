@@ -1,4 +1,4 @@
-﻿import { useEffect, useRef, useState, type JSX } from 'react';
+import { useEffect, useRef, useState, type JSX } from 'react';
 import { Button, Divider } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -20,6 +20,7 @@ import { Hint } from '@/shared/ui/Hint';
 import { showApiError, showDone } from '@/shared/ui/notify';
 import { useRecallAvailability, type RecallSheetRequest } from './api';
 import { outcomeOf, pollInterval } from './jobFollow';
+import { whenEditsSaved } from '@/features/grid/settleEdits';
 import { humanizeJobId } from './jobLabel';
 import { isAllowed, type WorkflowAction } from './transitions';
 import { t } from '@/shared/i18n';
@@ -599,10 +600,17 @@ export function SheetActions({
             onClick={() => {
               if (recalculateInFlight.current) return;
               recalculateInFlight.current = true;
-              recalculate.mutate(undefined, {
-                onSettled: () => {
-                  recalculateInFlight.current = false;
-                },
+              // AN-28/L8-01: спершу зберегти набране; відмова збереження - дії немає.
+              let started = false;
+              void whenEditsSaved(() => {
+                started = true;
+                recalculate.mutate(undefined, {
+                  onSettled: () => {
+                    recalculateInFlight.current = false;
+                  },
+                });
+              }).then(() => {
+                if (!started) recalculateInFlight.current = false;
               });
             }}
           >
@@ -612,7 +620,7 @@ export function SheetActions({
       )}
 
       {canSubmit && (
-        <Button size="xs" loading={submit.isPending} onClick={() => submit.mutate(false)}>
+        <Button size="xs" loading={submit.isPending} onClick={() => void whenEditsSaved(() => submit.mutate(false))}>
           {t('document.submit')}
         </Button>
       )}
@@ -693,7 +701,7 @@ export function SheetActions({
         verb={t('workflow.submitAnyway')}
         danger={false}
         isPending={submit.isPending}
-        onConfirm={() => submit.mutate(true)}
+        onConfirm={() => void whenEditsSaved(() => submit.mutate(true))}
         onClose={() => setWarnings(null)}
       />
 
@@ -704,7 +712,7 @@ export function SheetActions({
         verb={t('workflow.approve')}
         danger={false}
         isPending={decide.isPending}
-        onConfirm={() => decide.mutate({ approved: true, reason: null })}
+        onConfirm={() => void whenEditsSaved(() => decide.mutate({ approved: true, reason: null }))}
         onClose={() => setAsking(null)}
       />
 
@@ -726,7 +734,7 @@ export function SheetActions({
         description={t('workflow.rejectHint')}
         confirmLabel={t('workflow.reject')}
         isPending={decide.isPending}
-        onConfirm={(reason) => decide.mutate({ approved: false, reason })}
+        onConfirm={(reason) => void whenEditsSaved(() => decide.mutate({ approved: false, reason }))}
         onClose={() => setAsking(null)}
       />
 

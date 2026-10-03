@@ -8,6 +8,7 @@ import { outcomeOf, pollInterval } from '@/features/workflow/jobFollow';
 import { notificationCloseButtonProps, showApiError } from '@/shared/ui/notify';
 import { errorCodeText } from '@/shared/ui/problemText';
 import { t } from '@/shared/i18n';
+import { whenEditsSaved } from '@/features/grid/settleEdits';
 
 /** Що і за який період експортувати. */
 interface ExportButtonProps {
@@ -238,7 +239,7 @@ export function ExportButton({
         disabled={start.isPending || building}
         aria-busy={start.isPending || building}
         data-export-state={start.isPending || building ? 'running' : 'idle'}
-        onClick={() => start.mutate()}
+        onClick={() => void whenEditsSaved(() => start.mutate())}
       >
         <span style={{ display: 'inline-grid' }}>
           <span

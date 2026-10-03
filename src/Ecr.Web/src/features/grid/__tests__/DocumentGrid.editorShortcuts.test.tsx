@@ -87,7 +87,7 @@ function mockServer(): void {
 
   vi.stubGlobal(
     'fetch',
-    vi.fn(async (path: string, init?: RequestInit) => {
+    vi.fn(async (_path: string, init?: RequestInit) => {
       if (init?.method === 'PATCH') {
         patched.push(String(init.body));
 

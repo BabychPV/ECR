@@ -20,6 +20,7 @@ import { notificationCloseButtonProps, showApiError, showDone } from '@/shared/u
 import { useDurationIndicator } from '@/shared/ui/useDurationIndicator';
 import { DurationProgress } from '@/shared/ui/DurationProgress';
 import { t } from '@/shared/i18n';
+import { whenEditsSaved } from '@/features/grid/settleEdits';
 import { localized } from '@/shared/i18n/localized';
 
 /** Куди імпортувати. */
@@ -342,7 +343,7 @@ export function ImportPanel({ documentId, periodKey }: ImportPanelProps): JSX.El
                 disabled={blocked || preview.changes.length === 0}
                 loading={applyPhase !== 'none'}
                 onClick={() => {
-                  if (!apply.isPending) apply.mutate(preview.previewToken);
+                  if (!apply.isPending) void whenEditsSaved(() => apply.mutate(preview.previewToken));
                 }}
               >
                 {t('import.apply')}
