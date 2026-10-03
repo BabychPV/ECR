@@ -308,6 +308,20 @@ public sealed class ImportRegistryEntriesHandler(
             var byCode = code.Length == 0 ? null : prefetched.EntriesByCode.GetValueOrDefault(code);
             var byKey = keyMatch.EntriesByRow.GetValueOrDefault(i);
 
+            // ⛔ Аудит 2026-10-03 (L5-01): код логічно видаленого запису зайнятий назавжди
+            // (UQ_RegistryEntry), а пакет «за кодами» його повертає. Без цієї перевірки рядок мовчки
+            // писав значення у видалений запис — звіт «оновлено», а в довіднику нічого.
+            if (byCode is { IsDeleted: true } gone)
+            {
+                errors.Add(new RegistryEntryImportError(rowNumber, code, null, RegistryEntryWriter.EntryCodeTakenKey,
+                    new Dictionary<string, string>
+                    {
+                        ["code"] = code,
+                        ["id"] = gone.Id.ToString(CultureInfo.InvariantCulture),
+                    }));
+                continue;
+            }
+
             // RT-12 (D-157): новий запис автоматичного довідника отримує код послідовності; код із
             // файлу, якого в довіднику немає, — чужа шкала, і мовчки його не беремо й не підміняємо.
             if (autoCode && byKey is null && byCode is null)

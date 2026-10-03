@@ -6527,6 +6527,9 @@ USING (VALUES
     (N'err.ECR-TMPL-0409.relationCodeTaken.title', N'en', N'Relation code is already in use', 1),
     (N'grid.tableLoadNow', N'en', N'Load now', 1),
     -- COLL:p3-t3 ── кінець секції ──
+    -- REG:an29 ── аудит 2026-10-03 (L4-03 = L5-10): текстове значення поля довідника довше за колонку (`RegistryValue.MaxStringLength`); ru/kz — порцією REG:an29 у блоці I18N нижче ──
+    (N'err.ECR-REG-0422.valueTooLong', N'en', N'The value is longer than {max} characters ({length}).', 1),
+    -- REG:an29 ── кінець секції ──
     -- COLL:p4-t4 ── тестувальний прохід №4, T4-09: мова налаштування поза реєстром; ru/kz — порцією COLL:p4-t4 у блоці I18N нижче ──
     (N'err.ECR-REQ-0422.preferenceLanguageUnsupported', N'en', N'The language of preference "{key}" must be the code of an enabled interface language (for example "en", "ru" or "kz"), got: {value}.', 1),
     -- COLL:p4-t4 ── кінець секції ──
@@ -15320,6 +15323,16 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:p3-t3 ── кінець секції ──
+-- REG:an29 ── ru/kz задовгого текстового значення поля довідника (L4-03 = L5-10); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-REG-0422.valueTooLong', N'ru', N'Значение длиннее {max} символов ({length}).'),
+    (N'err.ECR-REG-0422.valueTooLong', N'kz', N'Мән {max} таңбадан ұзын ({length}).')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- REG:an29 ── кінець секції ──
 -- COLL:p4-t4 ── ru/kz тестувального проходу №4 (T4-09); власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val

@@ -198,7 +198,9 @@ public sealed partial class RegistryBatchHandler(
     {
         var entries = await rows.ListEntriesAsync(definition.Id, asOfUtc: null, ct).ConfigureAwait(false);
         var byId = entries.ToDictionary(e => e.Id);
-        var byCode = entries.Where(e => !e.IsDeleted)
+        // ⚠ Видалені — теж: їхній код лишається зайнятим (UQ_RegistryEntry не фільтрує IsDeleted), і
+        // новий рядок із ним — та сама відмова entryCodeTaken з Id (аудит 2026-10-03, L5-01).
+        var byCode = entries
             .GroupBy(e => e.Code, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
 

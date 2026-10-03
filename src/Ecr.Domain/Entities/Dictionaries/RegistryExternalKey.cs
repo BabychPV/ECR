@@ -30,6 +30,7 @@ public sealed class RegistryExternalKey : Entity<long>
     public RegistryExternalKey(long registryEntryId, int dataSourceId, string externalId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(externalId);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(externalId.Length, MaxExternalIdLength, nameof(externalId));
 
         RegistryEntryId = registryEntryId;
         DataSourceId = dataSourceId;
@@ -56,10 +57,12 @@ public sealed class RegistryExternalKey : Entity<long>
     /// <summary>Фіксує успішну синхронізацію.</summary>
     /// <param name="externalPath">Актуальний шлях; <c>null</c> — не змінювати.</param>
     /// <param name="utcNow">Час синхронізації в UTC.</param>
+    /// <exception cref="ArgumentOutOfRangeException">Шлях довший за <see cref="MaxExternalPathLength"/>.</exception>
     public void MarkSynced(string? externalPath, DateTime utcNow)
     {
         if (externalPath is not null)
         {
+            ArgumentOutOfRangeException.ThrowIfGreaterThan(externalPath.Length, MaxExternalPathLength, nameof(externalPath));
             ExternalPath = externalPath;
         }
 
@@ -68,6 +71,13 @@ public sealed class RegistryExternalKey : Entity<long>
 
     /// <summary>Стеля зовнішнього ідентифікатора — ширина колонки <c>ExternalId</c>.</summary>
     public const int MaxExternalIdLength = 200;
+
+    /// <summary>Стеля шляху в джерелі — ширина колонки <c>ExternalPath</c>.</summary>
+    /// <remarks>
+    /// Аудит 2026-10-03 (L4-03): задовгий шлях елемента AF доїжджав до <c>SaveChanges</c> і валив
+    /// прогін синку. Синк відсікає його ще в знімку (шлях не оновлюється, відмова в журналі).
+    /// </remarks>
+    public const int MaxExternalPathLength = 400;
 
     /// <summary>
     /// З якого моменту (UTC) елемента немає в джерелі; <c>null</c> — є або не
