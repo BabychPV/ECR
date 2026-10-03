@@ -78,6 +78,11 @@ export function captureEdit(
   const same = column.dataType === 'Date' ? sameDateValue(after, before) : sameCellValue(after, before);
   if (same) return null;
 
+  // AN-39/L8-15 (рішення людини Q10=A): `defaultValue` порожньої комірки лише
+  // ПОКАЗУЄТЬСЯ. Клік повз редактор повертає в `afteredit` саме його - це не
+  // введення, і явним значенням воно не пишеться.
+  if (echoesDefault(column, before, after)) return null;
+
   return {
     pending: {
       rowKey: signal.rowKey,
@@ -89,6 +94,39 @@ export function captureEdit(
     step: { rowKey: signal.rowKey, columnCode: signal.columnCode, before, after },
     columnHeader: column.header,
   };
+}
+
+/** Збережено «порожньо», а введене дорівнює `defaultValue` колонки (його лише показують). */
+function echoesDefault(
+  column: { dataType: string; defaultValue?: unknown },
+  before: unknown,
+  after: unknown,
+): boolean {
+  if (before !== null || column.defaultValue === null || column.defaultValue === undefined) return false;
+
+  const fallback = coerce(String(column.defaultValue), column.dataType);
+
+  return column.dataType === 'Date' ? sameDateValue(after, fallback) : sameCellValue(after, fallback);
+}
+
+/**
+ * Чи введене нічого не міняє: збережене значення або (порожня комірка) показаний
+ * `defaultValue`. Для `beforeedit`: підтвердження на незмінене значення не питаємо (L8-15).
+ */
+export function isUnchangedInput(
+  slice: TableSliceDto,
+  signal: EditSignal,
+  rows: ReadonlyMap<string, RowDto> = rowIndexOf(slice),
+): boolean {
+  const column = columnIndexOf(slice).get(signal.columnCode);
+  const row = rows.get(signal.rowKey);
+  if (column === undefined || row === undefined) return false;
+
+  const after = coerce(signal.raw, column.dataType);
+  const before = row.cells[signal.columnCode] ?? null;
+  const same = column.dataType === 'Date' ? sameDateValue(after, before) : sameCellValue(after, before);
+
+  return same || echoesDefault(column, before, after);
 }
 
 /**

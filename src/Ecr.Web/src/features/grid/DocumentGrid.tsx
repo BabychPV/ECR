@@ -20,7 +20,7 @@ import { cellAppearanceClassOf, cellAppearanceOf } from './cellAppearance';
 import { cellFormatOf, withCellFormat } from './conditionalAppearance';
 import { cellDisplay, cellText, editorValueOf, isNumericColumn, sameCellValue } from './cellValue';
 import { parseClipboard, planPaste, toClipboard, type PasteRejection } from './clipboard';
-import { captureEdit, coerce, revertsToSaved, valueOf, withKnownVersions } from './edits';
+import { captureEdit, coerce, isUnchangedInput, revertsToSaved, valueOf, withKnownVersions } from './edits';
 import { captureRange, isRangeEdit, type RangeEditDetail } from './rangeEdit';
 import { ConflictPanel, hasCurrentVersion, type OpenConflict } from './ConflictPanel';
 import { cellStateClass, cellStateOf, type LocalCellFlags } from './cellState';
@@ -1440,6 +1440,9 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
       const rowKey = rowKeyOf(detail?.model);
       const hint = confirmationOf(data, rowKey, column);
       if (hint === null) return;
+
+      // AN-39/L8-15: незмінене значення (зокрема показаний default) - не правка, модалки немає.
+      if (isUnchangedInput(data, { columnCode, rowKey, raw: String(detail?.val ?? '') })) return;
 
       event.preventDefault();
       setConfirmRequest({ rowKey, columnCode, value: detail?.val, hint });
