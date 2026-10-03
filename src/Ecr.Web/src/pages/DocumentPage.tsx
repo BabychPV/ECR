@@ -479,7 +479,11 @@ export function DocumentPage(): JSX.Element {
      */
     <AsyncBoundary<DocumentSummary>
       isPending={summary.isPending || tables.isPending}
-      error={summary.error ?? tables.error}
+      // AN-39/L8-11: збій ФОНОВОГО перезапиту (є `data`) не підміняє сторінку на помилку -
+      // це розмонтувало б сітки, редактор, Undo і панель конфлікту; він іде банером нижче.
+      error={
+        (summary.data === undefined ? summary.error : null) ?? (tables.data === undefined ? tables.error : null)
+      }
       data={summary.data}
       isEmpty={() => sheets.length === 0}
       emptyTitle={t('document.noSheets')}
@@ -492,6 +496,15 @@ export function DocumentPage(): JSX.Element {
     >
       {(document) => (
     <Stack>
+      {(summary.error ?? tables.error) !== null && (
+        <ErrorAlert
+          error={summary.error ?? tables.error}
+          onRetry={() => {
+            void summary.refetch();
+            void tables.refetch();
+          }}
+        />
+      )}
       <PageHeader
         // ⛔ Директива "людське ім'я документа": ім'я ПОРУЧ із бізнес-ключем,
         // а не замість нього — ключ лишається видимим завжди.
