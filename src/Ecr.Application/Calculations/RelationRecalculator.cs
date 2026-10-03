@@ -6,6 +6,7 @@ using Ecr.Application.Validation;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
+using Microsoft.Extensions.Logging;
 
 namespace Ecr.Application.Calculations;
 
@@ -78,7 +79,10 @@ public interface IRelationRecalculator
 /// Параметри конструктора необов'язкові: чиста частина (<see cref="ComputeRollups"/>) не потребує бази, а
 /// <see cref="ComputeForDocumentAsync"/> без них нічого не робить.
 /// </remarks>
-public sealed class RelationRecalculator(ITemplateVersionStore? store = null, ICellStore? cellStore = null) : IRelationRecalculator
+public sealed partial class RelationRecalculator(
+    ITemplateVersionStore? store = null,
+    ICellStore? cellStore = null,
+    ILogger<RelationRecalculator>? logger = null) : IRelationRecalculator
 {
     /// <inheritdoc />
     public async Task<IReadOnlyList<RelationCellWrite>> ComputeForDocumentAsync(RelationRunInput input, CancellationToken ct)
@@ -219,9 +223,25 @@ public sealed class RelationRecalculator(ITemplateVersionStore? store = null, IC
             }
 
             var rollup = RollupEvaluator.Evaluate(relation.Match, relation.Rollup, source, target, relation.TargetScale);
+            foreach (var overflow in rollup.Writes.Where(w => w.Overflow))
+            {
+                // ⚠ Порожній приймач тут — не «даних немає», а переповнення decimal; без журналу це
+                // читалося б як брак даних (рев'ю AN-38, P2-1).
+                if (logger is not null)
+                {
+                    LogRollupOverflow(logger, relation.Code, relation.Rollup.Aggregate, overflow.TargetRowKey, overflow.TargetColumn);
+                }
+            }
+
             result.AddRange(rollup.Writes.Select(w => new RelationWrite(relation.Code, relation.TargetTableDefId, w)));
         }
 
         return result;
     }
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "Rollup {RelationCode}: агрегат {Aggregate} для рядка {TargetRowKey} колонки {TargetColumn} вийшов за межі decimal; приймач лишено порожнім.")]
+    private static partial void LogRollupOverflow(
+        ILogger log, string relationCode, RollupAggregate aggregate, string targetRowKey, string targetColumn);
 }

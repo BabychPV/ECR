@@ -101,6 +101,7 @@ public sealed class RelationKeyCanonicalTests
     [Theory]
     [InlineData(CellDataType.Int, CellDataType.Decimal)]
     [InlineData(CellDataType.Formula, CellDataType.Int)]
+    [InlineData(CellDataType.Formula, CellDataType.String)]
     [InlineData(CellDataType.String, CellDataType.String)]
     public void Сумісні_типи_ключів_проходять(CellDataType source, CellDataType target)
     {

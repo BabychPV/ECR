@@ -1,5 +1,6 @@
 using Ecr.Application.Calculations;
 using Ecr.Application.Templates;
+using Microsoft.Extensions.Logging;
 using Xunit;
 
 namespace Ecr.Application.Tests.Calculations;
@@ -12,11 +13,55 @@ public sealed class RelationOverflowTests
 {
     private const decimal HalfMax = 50_000_000_000_000_000_000_000_000_000m;
 
-    [Theory]
-    [InlineData(RollupAggregate.Sum)]
-    [InlineData(RollupAggregate.Avg)]
-    public void Rollup_переповнення_суми_дає_порожнє_значення(RollupAggregate aggregate)
-        => Assert.Null(RollupEvaluator.Aggregate(aggregate, [HalfMax, HalfMax], targetScale: 2));
+    [Fact]
+    public void Rollup_переповнення_суми_дає_порожнє_значення_з_ознакою()
+    {
+        Assert.Null(RollupEvaluator.Aggregate(RollupAggregate.Sum, [HalfMax, HalfMax], targetScale: 2, out var overflow));
+        Assert.True(overflow);
+    }
+
+    [Fact]
+    public void Rollup_середнє_що_вміщується_не_губиться_на_переповненій_сумі()
+    {
+        Assert.Equal(HalfMax, RollupEvaluator.Aggregate(RollupAggregate.Avg, [HalfMax, HalfMax], targetScale: null, out var overflow));
+        Assert.False(overflow);
+    }
+
+    [Fact]
+    public void Переповнення_Rollup_пише_попередження_з_кодом_зв_язку()
+    {
+        var logger = new ListLogger();
+        var row = new RelationRow("S1", new Dictionary<string, decimal?> { ["Fact"] = HalfMax }, new Dictionary<string, string?>());
+        var target = new RelationRow("T1", new Dictionary<string, decimal?>(), new Dictionary<string, string?>());
+        var relation = new RollupRelation(
+            "REL_SUM", 1, 2, new RelationMatchSpec([]), new RollupSpec("Fact", "Total", RollupAggregate.Sum), null);
+
+        var writes = new RelationRecalculator(logger: logger).ComputeRollups(
+            [relation],
+            new Dictionary<int, IReadOnlyList<RelationRow>> { [1] = [row, row], [2] = [target] });
+
+        var write = Assert.Single(writes).Write;
+        Assert.Null(write.Value);
+        Assert.True(write.Overflow);
+        var entry = Assert.Single(logger.Entries);
+        Assert.Equal(LogLevel.Warning, entry.Level);
+        Assert.Contains("REL_SUM", entry.Message, StringComparison.Ordinal);
+    }
+
+    private sealed class ListLogger : ILogger<RelationRecalculator>
+    {
+        public List<(LogLevel Level, string Message)> Entries { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull
+            => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+            => Entries.Add((logLevel, formatter(state, exception)));
+    }
 
     [Fact]
     public void Rollup_велика_сума_без_переповнення_рахується()

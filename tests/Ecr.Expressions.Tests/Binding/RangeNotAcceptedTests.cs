@@ -36,6 +36,8 @@ public sealed class RangeNotAcceptedTests
     [InlineData("ABS([Main].[r1:r3].[Amount])")]
     [InlineData("IF(TRUE, [Main].[r1:r3].[Amount], 0)")]
     [InlineData("ROUND([Main].[WHERE [Flag] = 1].[Amount], 2)")]
+    [InlineData("ROUND(-[Main].[r1:r3].[Amount], 2)")]
+    [InlineData("ROUND([Main].[r1:r3].[Amount] * 1, 2)")]
     public void Діапазон_у_функції_без_AcceptsRange_відхиляється_публікацією(string expression)
     {
         var diagnostics = Check(expression);
@@ -49,6 +51,7 @@ public sealed class RangeNotAcceptedTests
     [InlineData("SUM([Main].[r1:r3].[Amount])")]
     [InlineData("ROUND(SUM([Main].[r1:r3].[Amount]), 2)")]
     [InlineData("ROUND([Main].[r1].[Amount], 2)")]
+    [InlineData("ROUND(SUM([Main].[r1:r3].[Amount]) * 2, 2)")]
     public void Діапазон_в_агрегаті_й_одиничне_посилання_не_відхиляються(string expression)
         => Assert.DoesNotContain(Check(expression), d => d.MessageKey == "expr.rangeNotAccepted");
 
@@ -82,5 +85,16 @@ public sealed class RangeNotAcceptedTests
         IReadOnlyList<ExpressionValue> digits = [ExpressionValue.Number(1m)];
 
         Assert.Equal(1.3m, new FunctionRegistry().Invoke("ROUND", [value, digits], new TestEvaluationContext()).AsNumber());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public void Пласке_перевантаження_Invoke_розкладає_аргументи_по_групах()
+    {
+        var registry = new FunctionRegistry();
+        var context = new TestEvaluationContext();
+
+        Assert.Equal(1.3m, registry.Invoke("ROUND", [ExpressionValue.Number(1.25m), ExpressionValue.Number(1m)], context).AsNumber());
+        Assert.Equal(6m, registry.Invoke("SUM", [ExpressionValue.Number(1m), ExpressionValue.Number(2m), ExpressionValue.Number(3m)], context).AsNumber());
     }
 }

@@ -50,7 +50,7 @@ public static class RelationSpecValidator
 
             // ⛔ Аудит L7-07: ключ String «5» проти Int 5 чи Date проти String ніколи не зіставиться —
             // Rollup мовчки писав би порожній агрегат. Сумісність — за родом значення.
-            if (KeyKind(sourceColumns[key.Source]) != KeyKind(targetColumns[key.Target]))
+            if (!KeysCompatible(sourceColumns[key.Source], targetColumns[key.Target]))
             {
                 return new RelationSpecFailure(
                     "keyTypeMismatch",
@@ -94,9 +94,16 @@ public static class RelationSpecValidator
             ?? Column("right", c.Right, targetColumns, "target", requireNumeric: true);
     }
 
-    /// <summary>Рід значення ключа: числа (Int, Decimal, Formula, Calculated) зіставні між собою, решта — лише з тим самим типом.</summary>
+    /// <summary>
+    /// Чи зіставні ключі: числа (Int, Decimal, Calculated) між собою, решта — лише з тим самим типом.
+    /// <c>Formula</c> сумісна з будь-яким: тип її результату статично невідомий, і текстова формула
+    /// законно ключує проти String (рев'ю AN-38, P3-4).
+    /// </summary>
+    private static bool KeysCompatible(CellDataType source, CellDataType target)
+        => source == CellDataType.Formula || target == CellDataType.Formula || KeyKind(source) == KeyKind(target);
+
     private static CellDataType KeyKind(CellDataType type)
-        => type is CellDataType.Int or CellDataType.Decimal or CellDataType.Formula or CellDataType.Calculated
+        => type is CellDataType.Int or CellDataType.Decimal or CellDataType.Calculated
             ? CellDataType.Decimal
             : type;
 
