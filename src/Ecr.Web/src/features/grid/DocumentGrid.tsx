@@ -1402,6 +1402,9 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         | { prop?: string | number; model?: unknown; val?: unknown }
         | undefined;
 
+      // L8-07: значення не обрано (див. `onBeforeEdit`) - нічого не застосовуємо.
+      if (detail !== undefined && 'val' in detail && detail.val === undefined) return;
+
       applyEditedValue({
         columnCode: detail?.prop === undefined ? '' : String(detail.prop),
         rowKey: rowKeyOf(detail?.model),
@@ -1432,6 +1435,15 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
       const detail = event.detail as
         | { prop?: string | number; model?: unknown; val?: unknown }
         | undefined;
+
+      // AN-39/L8-07 (Q10=A): редактор без `getValue` (список, довідник, одиниця, Bool)
+      // при кліку повз (`applyOnClose`) віддає `val === undefined` - значення не обрано.
+      // Це не «очистити комірку» і не «записати default»: правка скасовується, сітка
+      // не застосовує `undefined` у свою модель.
+      if (detail !== undefined && 'val' in detail && detail.val === undefined) {
+        event.preventDefault();
+        return;
+      }
 
       const columnCode = detail?.prop === undefined ? '' : String(detail.prop);
       const column = data.columns.find((candidate) => candidate.code === columnCode);
