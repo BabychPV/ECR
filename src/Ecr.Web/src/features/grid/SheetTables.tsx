@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type JSX } from 'react';
-import { Box, Skeleton, Stack, Text } from '@mantine/core';
+import { Box, Button, Skeleton, Stack, Text } from '@mantine/core';
 import type { DocumentTableDto } from '@/api/types';
+import { focusSoon } from '@/shared/a11y/focus';
 import { localized } from '@/shared/i18n/localized';
 import { t } from '@/shared/i18n';
 import { DocumentGrid } from './DocumentGrid';
@@ -159,6 +160,24 @@ export function SheetTables({
   /** Вузли слотів; заповнює React під час фіксації, ДО ефекту нижче. */
   const slots = useRef(new Map<number, HTMLDivElement>());
 
+  // ⛔ T3-10: ліниві таблиці були недосяжні клавіатурою — у заглушці не було фокусованого елемента,
+  // тож Tab проходив повз 90 слотів, і таблицю мав «відкрити» лише скрол. Тепер у заглушці є кнопка
+  // «Load now»: Tab (або Enter) монтує сітку, а фокус, який мала зникла заглушка, переходить на
+  // заголовок таблиці. Рішення дизайну: кнопка, а не Tab-стоп на самому слоті/PageDown-хак.
+  const focusedPlaceholder = useRef<number | null>(null);
+
+  const mountNow = (id: number): void => {
+    setMounted((previous) => (previous.has(id) ? previous : new Set(previous).add(id)));
+  };
+
+  useEffect(() => {
+    const id = focusedPlaceholder.current;
+    if (id === null || !mounted.has(id)) return;
+
+    focusedPlaceholder.current = null;
+    focusSoon(slots.current.get(id)?.querySelector<HTMLElement>('[data-table-title]'), true);
+  }, [mounted]);
+
   useEffect(() => {
     /*
      * ⚠ Немає `IntersectionObserver` (дуже старий браузер) — монтуємо все, як
@@ -292,7 +311,10 @@ export function SheetTables({
             // видимим і перевірюваним рівно там, де записане.
             style={{ minHeight: TableSlotMinHeight }}
           >
-            <Text fw={600}>{localized(table.tableNameL10n)}</Text>
+            {/* `tabIndex={-1}`: сюди повертається фокус, коли заглушка, що його мала, замінюється сіткою. */}
+            <Text fw={600} data-table-title tabIndex={-1}>
+              {localized(table.tableNameL10n)}
+            </Text>
 
             {isMounted ? (
               <DocumentGrid
@@ -306,7 +328,15 @@ export function SheetTables({
                 navigateTo={navigateTo}
               />
             ) : (
-              <LazyTablePlaceholder />
+              <LazyTablePlaceholder
+                onFocus={() => {
+                  focusedPlaceholder.current = id;
+                }}
+                onLoad={() => {
+                  focusedPlaceholder.current = id;
+                  mountNow(id);
+                }}
+              />
             )}
           </Stack>
         );
@@ -329,7 +359,15 @@ export function SheetTables({
  * (коментар `TableSlotMinHeight`), і компактніша заглушка вмістила б у екран
  * більше слотів, ніж таблиць, — тобто змонтувала б їх усі одразу.
  */
-export function LazyTablePlaceholder(): JSX.Element {
+export function LazyTablePlaceholder({
+  onLoad,
+  onFocus,
+}: {
+  /** Монтує сітку негайно (клавіатурний шлях, T3-10). Без нього кнопки немає. */
+  readonly onLoad?: () => void;
+  /** Фокус потрапив на кнопку заглушки. */
+  readonly onFocus?: () => void;
+} = {}): JSX.Element {
   return (
     <Box pos="relative" data-testid="lazy-table-placeholder">
       <Skeleton height="60vh" radius="sm" animate={false} />
@@ -338,6 +376,19 @@ export function LazyTablePlaceholder(): JSX.Element {
       <Text size="sm" pos="absolute" top="var(--mantine-spacing-md)" left="var(--mantine-spacing-md)">
         {t('grid.tableLoadsOnScroll')}
       </Text>
+      {onLoad !== undefined && (
+        <Button
+          size="xs"
+          variant="default"
+          pos="absolute"
+          top="calc(var(--mantine-spacing-md) + 2rem)"
+          left="var(--mantine-spacing-md)"
+          onFocus={onFocus}
+          onClick={onLoad}
+        >
+          {t('grid.tableLoadNow')}
+        </Button>
+      )}
     </Box>
   );
 }
