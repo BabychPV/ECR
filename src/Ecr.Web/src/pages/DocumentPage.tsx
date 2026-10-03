@@ -619,7 +619,16 @@ export function DocumentPage(): JSX.Element {
       <Suspense fallback={null}>
         <DocumentHeaderPanel
           documentId={documentId}
-          canEdit={hasProjectWriteGrant(session.data, document.projectId)}
+          // AN-39/L8-13: сервер править шапку за `EditRules.CanEdit` документа цілком - не в
+          // симуляції, не в архівному проєкті, не за поданого/затвердженого аркуша.
+          canEdit={
+            hasProjectWriteGrant(session.data, document.projectId) &&
+            session.data?.isSimulation !== true &&
+            lock !== 'projectArchived' &&
+            !Object.values(document.sheetStates ?? {}).some(
+              (sheetState) => sheetState === 'Submitted' || sheetState === 'Approved',
+            )
+          }
         />
       </Suspense>
 
