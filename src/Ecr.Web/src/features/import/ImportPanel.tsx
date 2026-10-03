@@ -318,9 +318,9 @@ export function ImportPanel({ documentId, periodKey }: ImportPanelProps): JSX.El
                           переходом. Поза рядками таблиці (`V-10`) вона єдиний
                           орієнтир; прочерк — відмова цілої таблиці. */}
                       <Table.Td>{show(rejection.excelCell)}</Table.Td>
-                      <Table.Td>
-                        {rejectionText(rejection)} ({rejection.reasonCode})
-                      </Table.Td>
+                      {/* ⛔ T3-06: технічний код причини (`ECR-CELL-0422`) у людському тексті не
+                          показується — він є в `reasonCode` відповіді для підтримки, а не для оператора. */}
+                      <Table.Td>{rejectionText(rejection)}</Table.Td>
                     </Table.Tr>
                   ))}
                 </Table.Tbody>
