@@ -124,6 +124,27 @@ public sealed class PiSqlClientWindowTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public async Task Мітки_не_по_черзі_ECR_INT_0422_як_у_SqlDataSource()
+    {
+        using var table = new DataTable();
+        table.Columns.Add("Ts", typeof(DateTime));
+        table.Columns.Add("Val", typeof(double));
+        table.Rows.Add(From.AddMinutes(5), 1d);
+        table.Rows.Add(From, 2d);
+
+        using var reader = table.CreateDataReader();
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(() =>
+            PiSqlClientDataSource.ReadPointsAsync(reader, "EL|Flow", 100, CancellationToken.None));
+
+        // ⛔ L3-10: без перевірки обрізаний батч оголосив би хвостом
+        // [остання мітка, To) — і покриття лягло б на пропущені точки.
+        // Мутація: прибрати виклик SourceRowOrder.EnsureOrdered у ReadSourcePointsAsync.
+        Assert.Equal("ECR-INT-0422", error.ErrorCode);
+        Assert.Equal("err.ECR-INT-0422.timestampsOutOfOrder", error.Details!["messageKey"]);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
     public async Task Без_колонки_Quality_точка_Good_як_у_SqlDataSource()
     {
         using var table = new DataTable();
