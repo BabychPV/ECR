@@ -6542,7 +6542,9 @@ USING (VALUES
     (N'err.ECR-REQ-0422.dataSourceEndpointSqlForbiddenOption', N'en', N'This connection string option is not allowed for a data source: AttachDBFilename (and its synonyms), User Instance, Enclave Attestation Url, or a Server Certificate on a network share.', 1),
     (N'err.ECR-INT-0503.endpointForbidden', N'en', N'The address of source "{dataSource}" is refused by the address policy (link-local or cloud metadata address, or a forbidden connection string option): fix the Endpoint field of the source.', 1),
     -- L3-07: стеля подій вікна після посторінкового читання.
-    (N'coverageEvents.eventsTruncated', N'en', N'The source has more events in the window than were read ({count} in {pages} pages): events after {after} were not synchronized in this run, and removal of missing events was skipped.', 1)
+    (N'coverageEvents.eventsTruncated', N'en', N'The source has more events in the window than were read ({count} in {pages} pages): events after {after} were not synchronized in this run, and removal of missing events was skipped.', 1),
+    -- L4-10: однакові імена елементів PI SQL Client.
+    (N'err.ECR-INT-0422.elementNameAmbiguous', N'en', N'Several source elements share the name used to read them; their values were not read, because a value read by that name could belong to another element. Give the elements unique names or read them through PI Web API.', 1)
     -- COLL:an33 ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
@@ -15372,7 +15374,9 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-INT-0503.endpointForbidden', N'ru', N'Адрес источника «{dataSource}» отклонён политикой адресов (link-local или облачный metadata-адрес либо запрещённый параметр строки подключения): исправьте поле Endpoint источника.'),
     (N'err.ECR-INT-0503.endpointForbidden', N'kz', N'«{dataSource}» көзінің мекенжайы мекенжай саясатымен қабылданбады (link-local немесе бұлттық metadata мекенжайы не қосылу жолының тыйым салынған параметрі): көздің Endpoint өрісін түзетіңіз.'),
     (N'coverageEvents.eventsTruncated', N'ru', N'В окне источника событий больше, чем прочитано ({count} за {pages} страниц): события после {after} в этом прогоне не синхронизированы, удаление исчезнувших пропущено.'),
-    (N'coverageEvents.eventsTruncated', N'kz', N'Көз терезесінде оқылғаннан көп оқиға бар ({pages} бетте {count}): {after} кейінгі оқиғалар бұл өткізуде синхрондалмады, жоғалғандарды жою өткізілді.')
+    (N'coverageEvents.eventsTruncated', N'kz', N'Көз терезесінде оқылғаннан көп оқиға бар ({pages} бетте {count}): {after} кейінгі оқиғалар бұл өткізуде синхрондалмады, жоғалғандарды жою өткізілді.'),
+    (N'err.ECR-INT-0422.elementNameAmbiguous', N'ru', N'Несколько элементов источника имеют одно имя, по которому они читаются; их значения не прочитаны, потому что значение, прочитанное по этому имени, может принадлежать другому элементу. Дайте элементам уникальные имена или читайте их через PI Web API.'),
+    (N'err.ECR-INT-0422.elementNameAmbiguous', N'kz', N'Көздің бірнеше элементінің оқылатын аты бірдей; олардың мәндері оқылмады, себебі осы атпен оқылған мән басқа элементке тиесілі болуы мүмкін. Элементтерге бірегей атау беріңіз немесе оларды PI Web API арқылы оқыңыз.')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
