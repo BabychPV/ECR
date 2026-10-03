@@ -22,6 +22,9 @@ namespace Ecr.Infrastructure.Jobs;
 public sealed class MaterializationScheduler(EcrDbContext db, IBackgroundJobScheduler jobs) : IMaterializationScheduler
 {
     /// <inheritdoc />
+    public bool EnlistsInCallerTransaction => jobs.EnlistsInCallerTransaction;
+
+    /// <inheritdoc />
     public async Task EnqueueAfterTransitionAsync(
         int projectId, IReadOnlyCollection<int> periodKeys, CancellationToken ct)
     {
@@ -34,8 +37,9 @@ public sealed class MaterializationScheduler(EcrDbContext db, IBackgroundJobSche
 
         // ⛔ Лише ПІСЛЯ коміту переходу (див. порт). Відкрита транзакція тут —
         // помилка викликача, і мовчки поставити задачу означало б віддати
-        // воркеру стан, якого ще немає, або який відкотиться.
-        if (db.Database.CurrentTransaction is not null)
+        // воркеру стан, якого ще немає, або який відкотиться. Черга в базі —
+        // виняток: рядок черги комітиться разом із переходом або ніяк.
+        if (db.Database.CurrentTransaction is not null && !EnlistsInCallerTransaction)
         {
             throw new InvalidOperationException(
                 "Матеріалізацію з переходу періоду ставлять лише після коміту переходу: транзакція ще відкрита.");
