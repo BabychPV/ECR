@@ -157,8 +157,23 @@ export function installKeyCommitGate(container: HTMLElement): () => void {
     }
   };
 
+  const editorClosed = (): boolean => container.querySelector(EditWrapper) === null;
+
+  // ⛔ T4-01: `focuscell` приходить РАНІШЕ, ніж RevoGrid прибирає старий
+  // редактор (журнал при інтервалі 50 мс: focuscell 1543 → focusin DIV 1545).
+  // Відтворений в цей момент Enter потрапляв у ще живий `<input>` попередньої
+  // комірки - друга фіксація тієї ж комірки, і фокус стрибав на два рядки. Тож
+  // вікно закривається, лише коли переходу кінець (`focuscell`) І редактора вже
+  // немає в DOM; поки він є - опитування кожні 4 мс (запасний термін лишається).
+  const PollMs = 4;
+  const waitForEditorClosed = (): void => {
+    if (holding !== 'commit') return;
+    if (editorClosed()) release();
+    else setTimeout(waitForEditorClosed, PollMs);
+  };
+
   const onFocusCell = (): void => {
-    if (holding === 'commit') release();
+    if (holding === 'commit') waitForEditorClosed();
   };
 
   const onFocusIn = (event: FocusEvent): void => {
