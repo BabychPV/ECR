@@ -66,6 +66,7 @@ import {
 import { installEnterKeyCompat } from './keyboardCompat';
 import { deferWhileCommitting, installKeyCommitGate, isInCellEditor } from './keyCommitGate';
 import { gridShortcut } from './shortcutKey';
+import { trackEditorTouched, type EditorTouched } from './editorTouched';
 import { installBodyPasteRedirect } from './bodyPaste';
 import {
   TableCornerAnchor,
@@ -1279,8 +1280,12 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
    * Друга копія цієї логіки розійшлася б із першою на першій же зміні
    * правила історії чи дебаунсу.
    */
+  // AN-39/L8-15: чи людина щось вводила в поточному редакторі (див. `editorTouched.ts`).
+  const editorTouched = useRef<EditorTouched | null>(null);
+  const untouchedEditor = (): boolean => editorTouched.current?.isTouched() === false;
+
   const applyEditedValue = useCallback(
-    (signal: { columnCode: string; rowKey: string; raw: string }) => {
+    (signal: { columnCode: string; rowKey: string; raw: string; untouched?: boolean }) => {
       if (data === undefined) return null;
 
       const captured = captureEdit(data, signal);
@@ -1406,10 +1411,14 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
       // L8-07: значення не обрано (див. `onBeforeEdit`) - нічого не застосовуємо.
       if (detail !== undefined && 'val' in detail && detail.val === undefined) return;
 
+      const untouched = untouchedEditor();
+      editorTouched.current?.reset();
+
       applyEditedValue({
         columnCode: detail?.prop === undefined ? '' : String(detail.prop),
         rowKey: rowKeyOf(detail?.model),
         raw: String(detail?.val ?? ''),
+        untouched,
       });
     },
     [data, readOnly, applyEditedValue, applyRangeEdit],
@@ -1456,7 +1465,12 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
 
       // AN-39/L8-15: незмінене значення (зокрема показаний default) - не правка (`captureEdit`
       // поверне null), тож і модалки підтвердження немає.
-      if (captureEdit(data, { columnCode, rowKey, raw: String(detail?.val ?? '') }) === null) return;
+      if (
+        captureEdit(data, { columnCode, rowKey, raw: String(detail?.val ?? ''), untouched: untouchedEditor() }) ===
+        null
+      ) {
+        return;
+      }
 
       event.preventDefault();
       setConfirmRequest({ rowKey, columnCode, value: detail?.val, hint });
@@ -1814,6 +1828,15 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         // ⛔ T3-01: швидкий ввід (сканер, макрос) не мусить склеювати значення —
         // клавіші після Enter/Tab стають у чергу до кінця переходу фокуса.
         installKeyCommitGate(node),
+        (() => {
+          const tracker = trackEditorTouched(node);
+          editorTouched.current = tracker;
+
+          return () => {
+            tracker.dispose();
+            if (editorTouched.current === tracker) editorTouched.current = null;
+          };
+        })(),
         blockNativePaste(node),
         // ⛔ T4-02: Ctrl+V після закриття редактора, коли фокус на `<body>`.
         // Лише озброєна сітка й лише з реальним виділенням (без кута (0,0)).

@@ -25,6 +25,12 @@ export interface EditSignal {
   rowKey: string;
   /** Введене значення до приведення типів. */
   raw: string;
+  /**
+   * AN-39/L8-15: людина НІЧОГО не вводила (клік повз редактор із показаним default).
+   * Лише тоді значення, рівне `defaultValue` порожньої комірки, не пишеться; явний ввід -
+   * пишеться, навіть рівний default (`0` при default `0`).
+   */
+  untouched?: boolean;
 }
 
 /** Захоплена правка разом із кроком історії. */
@@ -78,10 +84,10 @@ export function captureEdit(
   const same = column.dataType === 'Date' ? sameDateValue(after, before) : sameCellValue(after, before);
   if (same) return null;
 
-  // AN-39/L8-15 (рішення людини Q10=A): `defaultValue` порожньої комірки лише
-  // ПОКАЗУЄТЬСЯ. Клік повз редактор повертає в `afteredit` саме його - це не
-  // введення, і явним значенням воно не пишеться.
-  if (echoesDefault(column, before, after)) return null;
+  // AN-39/L8-15 (Q10=A / D-283): `defaultValue` порожньої комірки лише ПОКАЗУЄТЬСЯ. Клік повз
+  // редактор без вводу повертає в `afteredit` саме його - це не введення. Явний ввід
+  // (`untouched` не виставлено) пишеться навіть рівним default.
+  if (signal.untouched === true && echoesDefault(column, before, after)) return null;
 
   return {
     pending: {

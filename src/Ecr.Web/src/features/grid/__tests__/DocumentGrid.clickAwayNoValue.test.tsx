@@ -145,6 +145,18 @@ describe('L8-07: клік повз редактор без вибору', () => 
     expect(patches).toHaveLength(0);
   });
 
+  it('T4-03 збережено: текстове/числове поле з набраним значенням + клік повз = КОМІТ', async () => {
+    sentVal = '7';
+    await show();
+
+    fireEvent.click(screen.getByRole('button', { name: 'close-editor' }));
+    await wait(900);
+
+    expect(prevented).toBe(false);
+    expect(patches).toHaveLength(1);
+    expect(JSON.stringify(patches[0])).toContain('7');
+  });
+
   it('контроль: явне порожнє значення (Delete/очищення) лишається правкою', async () => {
     sentVal = '';
     await show();
