@@ -181,7 +181,7 @@ public static class SourceEventSyncPlanner
     {
         ArgumentNullException.ThrowIfNull(input);
 
-        var (roots, nonRoot, filtered) = Select(input);
+        var (roots, nonRoot, filtered, undecided) = Select(input);
 
         var byId = new Dictionary<string, SourceEventLinkState>(StringComparer.OrdinalIgnoreCase);
         foreach (var link in input.Links)
@@ -218,6 +218,7 @@ public static class SourceEventSyncPlanner
                 .Where(l => l.HasRow
                             && l.Status != SourceEventLinkStatus.Missing
                             && !returned.Contains(l.SourceEventId)
+                            && !undecided.Contains(l.SourceEventId)
                             && !claimed.Contains(l.SourceEventId)
                             && !other.Contains(l.SourceEventId)
                             && l.StartUtc >= input.FromUtc
@@ -230,6 +231,7 @@ public static class SourceEventSyncPlanner
             ? []
             : input.Links
                 .Where(l => !returned.Contains(l.SourceEventId)
+                            && !undecided.Contains(l.SourceEventId)
                             && !claimed.Contains(l.SourceEventId)
                             && !other.Contains(l.SourceEventId)
                             && l.StartUtc >= input.FromUtc
@@ -253,9 +255,11 @@ public static class SourceEventSyncPlanner
     public static DateTime RoundToMillisecond(DateTime value)
         => new((value.Ticks + (TimeSpan.TicksPerMillisecond / 2)) / TimeSpan.TicksPerMillisecond * TimeSpan.TicksPerMillisecond, DateTimeKind.Utc);
 
-    private static (List<SourceEvent> Roots, int NonRoot, int Filtered) Select(SourceEventSyncInput input)
+    private static (List<SourceEvent> Roots, int NonRoot, int Filtered, HashSet<string> Undecided) Select(
+        SourceEventSyncInput input)
     {
         var roots = new List<SourceEvent>();
+        var undecided = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var nonRoot = 0;
         var filtered = 0;
@@ -274,8 +278,17 @@ public static class SourceEventSyncPlanner
                 continue;
             }
 
-            if (!PassesFilter(raw, input.FilterAttribute, input.FilterScope, input.FilterValue))
+            var outcome = PassesFilter(raw, input.FilterAttribute, input.FilterScope, input.FilterValue);
+            if (outcome != FilterOutcome.Pass)
             {
+                // ⛔ L3-12: «невідомо» (атрибута звуження немає чи він NULL — у PI атрибут EF, прив'язаний
+                // до точки, тимчасово не обчислився) — не «не проходить». Подія не пишеться, а її зв'язок
+                // не стає ні Missing, ні Gone: інакше рядок жорстко видалявся б (D-259) і створювався знову.
+                if (outcome == FilterOutcome.Unknown)
+                {
+                    undecided.Add(raw.EventId);
+                }
+
                 filtered++;
                 continue;
             }
@@ -283,34 +296,45 @@ public static class SourceEventSyncPlanner
             roots.Add(raw with { EndUtc = OpenEnd(raw.EndUtc) });
         }
 
-        return (roots, nonRoot, filtered);
+        return (roots, nonRoot, filtered, undecided);
     }
 
-    private static bool PassesFilter(
+    private enum FilterOutcome
+    {
+        Pass,
+        Fail,
+        Unknown,
+    }
+
+    private static FilterOutcome PassesFilter(
         SourceEvent ev, string? attribute, SourceEventAttributeScope? scope, string? value)
     {
         if (attribute is null || scope is null || value is null)
         {
-            return true;
+            return FilterOutcome.Pass;
         }
 
         var found = ev.Attributes.FirstOrDefault(a => a.Scope == scope
                                                       && string.Equals(a.Name, attribute, StringComparison.OrdinalIgnoreCase));
-        if (found is null)
+        if (found is null || (found.ValueString is null && found.ValueNumeric is null))
         {
-            return false;
+            return FilterOutcome.Unknown;
         }
 
         var wanted = value.Trim();
         if (found.ValueString is { } text)
         {
-            return string.Equals(text.Trim(), wanted, StringComparison.OrdinalIgnoreCase);
+            return string.Equals(text.Trim(), wanted, StringComparison.OrdinalIgnoreCase)
+                ? FilterOutcome.Pass
+                : FilterOutcome.Fail;
         }
 
-        return found.ValueNumeric is { } number
-               && (string.Equals(number.ToString(CultureInfo.InvariantCulture), wanted, StringComparison.Ordinal)
-                   || (decimal.TryParse(wanted, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed)
-                       && parsed == number));
+        var number = found.ValueNumeric!.Value;
+        return string.Equals(number.ToString(CultureInfo.InvariantCulture), wanted, StringComparison.Ordinal)
+               || (decimal.TryParse(wanted, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed)
+                   && parsed == number)
+            ? FilterOutcome.Pass
+            : FilterOutcome.Fail;
     }
 
     /// <summary>
