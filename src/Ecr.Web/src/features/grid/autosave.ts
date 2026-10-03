@@ -106,9 +106,14 @@ export function createDebouncer(callback: () => void, delayMs = 500): Debouncer 
  *
  * @returns Функція відписки — знімає слухача при розмонтуванні.
  */
-export function registerUnloadFlush(isPending: () => boolean, flush: () => void): () => void {
-  const handler = (): void => {
-    if (isPending()) flush();
+export function registerUnloadFlush(isPending: () => boolean, flush: () => boolean | void): () => void {
+  const handler = (event: BeforeUnloadEvent): void => {
+    // AN-39/L8-08: `flush` повертає `true`, якщо лишилось те, що надіслати не можна
+    // (утримані відхилені правки) - тоді єдиний чесний захист - рідне питання браузера.
+    if (isPending() && flush() === true) {
+      event.preventDefault();
+      event.returnValue = '';
+    }
   };
 
   window.addEventListener('beforeunload', handler);
@@ -443,7 +448,15 @@ export function useDocumentPending(documentId: number, ownerUserId?: number): vo
       registerUnloadFlush(hasPending, () => {
         // ⚠ `V-01`: і тут без відхилених — інакше останній шанс зберегти
         // правильні правки згорів би на тій самій відмові.
-        for (const slice of pendingSlices({ sendableOnly: true })) {
+        const sendable = pendingSlices({ sendableOnly: true });
+
+        // AN-39/L8-08: відхилені (утримані) правки надіслати неможливо - про них
+        // питаємо; решта їде маячком, як і раніше.
+        const held =
+          pendingSlices().reduce((sum, slice) => sum + slice.edits.length, 0) >
+          sendable.reduce((sum, slice) => sum + slice.edits.length, 0);
+
+        for (const slice of sendable) {
           sendPatchBeacon(
             documentId,
             buildRequest(
@@ -456,6 +469,8 @@ export function useDocumentPending(documentId: number, ownerUserId?: number): vo
             ),
           );
         }
+
+        return held;
       }),
     [documentId, queryClient],
   );
