@@ -245,10 +245,13 @@ public sealed class ImportMethodologyPackageHandler(
         MethodologyPackageDto package, CancellationToken ct)
     {
         var library = string.IsNullOrWhiteSpace(package.Library) ? "Common" : package.Library.Trim();
+        // ⚠ GroupBy, а не ToDictionary: дубль назви в іншому регістрі (`HSE400`/`hse400`) — блокер
+        // планувальника `duplicateMethodology`, а не ArgumentException → 500 ще до нього (аудит L7-09).
         var wanted = (package.Methodologies ?? [])
+            .GroupBy(m => m.Name?.Trim() ?? string.Empty, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(
-                m => m.Name?.Trim() ?? string.Empty,
-                m => new HashSet<string>((m.Versions ?? []).Select(v => v.Version), StringComparer.Ordinal),
+                g => g.Key,
+                g => new HashSet<string>(g.SelectMany(m => m.Versions ?? []).Select(v => v.Version), StringComparer.Ordinal),
                 StringComparer.OrdinalIgnoreCase);
 
         var libraryInPackage = wanted.ContainsKey(library);

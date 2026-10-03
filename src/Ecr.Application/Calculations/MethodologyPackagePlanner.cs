@@ -268,10 +268,21 @@ public static class MethodologyPackagePlanner
                 {
                     blockers.Add(new("invalidVersion", m.Name, v.Version, null, "Порожній номер версії."));
                 }
+                else if (v.Version.Length > CreateMethodologyVersionHandler.MaxVersionLength)
+                {
+                    // ⚠ Межа колонки Version: без блокера сухий прогін казав `created`, а запис — 500 (аудит L7-09).
+                    blockers.Add(new("invalidVersion", m.Name, v.Version, null,
+                        $"Номер версії довший за {CreateMethodologyVersionHandler.MaxVersionLength} символів."));
+                }
 
                 foreach (var f in v.Formulas ?? [])
                 {
                     RequireCode(f.Name, "formula", m.Name, v.Version, f.Name, blockers);
+                    if ((f.Text?.Length ?? 0) > MethodologyFormula.MaxExpressionLength)
+                    {
+                        blockers.Add(new("formulaTooLong", m.Name, v.Version, f.Name,
+                            $"Вираз довший за {MethodologyFormula.MaxExpressionLength} символів."));
+                    }
                 }
 
                 foreach (var c in v.Constants ?? [])
@@ -281,7 +292,7 @@ public static class MethodologyPackagePlanner
             }
         }
 
-        foreach (var duplicate in methodologies.GroupBy(m => m.Name, StringComparer.OrdinalIgnoreCase).Where(g => g.Count() > 1))
+        foreach (var duplicate in methodologies.GroupBy(m => m.Name?.Trim() ?? string.Empty, StringComparer.OrdinalIgnoreCase).Where(g => g.Count() > 1))
         {
             blockers.Add(new("duplicateMethodology", duplicate.Key, null, null, "Методологія двічі в пакеті."));
         }
