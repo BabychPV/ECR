@@ -16,8 +16,18 @@ public sealed class HealthResultCache(TimeProvider? time = null, TimeSpan? ttl =
     private readonly TimeProvider _time = time ?? TimeProvider.System;
     private readonly ConcurrentDictionary<string, (DateTimeOffset At, HealthCheckResult Value)> _entries = new();
 
+    /// <summary>
+    /// Стеля кількості записів (L1-02): ключі нормалізовані, тож їх стільки,
+    /// скільки мов у реєстрі; стеля — другий рубіж на випадок нового ключа з
+    /// даних запиту.
+    /// </summary>
+    public const int MaxEntries = 32;
+
     /// <summary>Скільки живе запис.</summary>
     public TimeSpan Ttl { get; } = ttl ?? DefaultTtl;
+
+    /// <summary>Кількість записів (для тестів стелі).</summary>
+    public int Count => _entries.Count;
 
     /// <summary>Повертає свіжий запис або обчислює й запам'ятовує новий.</summary>
     public async Task<HealthCheckResult> GetOrAddAsync(string key, Func<CancellationToken, Task<HealthCheckResult>> compute, CancellationToken ct)
@@ -31,6 +41,20 @@ public sealed class HealthResultCache(TimeProvider? time = null, TimeSpan? ttl =
         }
 
         var result = await compute(ct).ConfigureAwait(false);
+
+        if (_entries.Count >= MaxEntries && !_entries.ContainsKey(key))
+        {
+            foreach (var stale in _entries.Where(e => now - e.Value.At >= Ttl).Select(e => e.Key).ToList())
+            {
+                _entries.TryRemove(stale, out _);
+            }
+
+            if (_entries.Count >= MaxEntries)
+            {
+                _entries.Clear();
+            }
+        }
+
         _entries[key] = (now, result);
         return result;
     }

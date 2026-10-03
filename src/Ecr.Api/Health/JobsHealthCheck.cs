@@ -53,16 +53,23 @@ public sealed class JobsHealthCheck(
     public static readonly TimeSpan RecalcOverBudgetWindow = TimeSpan.FromDays(1);
 
     /// <inheritdoc />
-    public Task<HealthCheckResult> CheckHealthAsync(
+    public async Task<HealthCheckResult> CheckHealthAsync(
         HealthCheckContext context,
         CancellationToken cancellationToken)
     {
         // ⛔ `/health/ready` анонімний, а перевірка робить ~254 логічних читання на пробу
         // (JobProgressStore.Count*). Результат живе недовго (HealthResultCache.Ttl), тож
         // шквал проб не б'є по базі; зміна стану не ховається довше за TTL.
-        return cache is null
-            ? ComputeAsync(cancellationToken)
-            : cache.GetOrAddAsync($"ready:{currentUser.Language}", ComputeAsync, cancellationToken);
+        //
+        // ⛔ L1-02: ключ — мова, нормалізована реєстром. Сирий `Accept-Language`
+        // у ключі давав обхід кешу будь-яким унікальним заголовком.
+        if (cache is null)
+        {
+            return await ComputeAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        var language = await catalog.ResolveLanguageAsync(currentUser.Language, cancellationToken).ConfigureAwait(false);
+        return await cache.GetOrAddAsync($"ready:{language}", ComputeAsync, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<HealthCheckResult> ComputeAsync(CancellationToken cancellationToken)

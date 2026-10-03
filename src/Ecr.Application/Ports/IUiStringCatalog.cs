@@ -57,6 +57,21 @@ public interface IUiStringCatalog
     public Task<IReadOnlyList<LanguageDto>> ListLanguagesAsync(CancellationToken ct);
 
     /// <summary>
+    /// Код увімкненої мови реєстру, що відповідає <paramref name="languageCode"/>;
+    /// невідома або вимкнена мова — мова за замовчуванням.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ L1-02 (аудит 2026-10-03): мова анонімного запиту — це сирий субтег
+    /// <c>Accept-Language</c> або сегмент URL. Коли він ставав ключем кешу як є,
+    /// кожна вигадана «мова» коштувала три SQL-запити й повний каталог у пам'яті
+    /// на годину. Ключі кешу будуються лише з того, що повертає цей метод.
+    ///
+    /// Типова реалізація — для тестових підробок без реєстру.
+    /// </remarks>
+    public Task<string> ResolveLanguageAsync(string languageCode, CancellationToken ct)
+        => Task.FromResult(languageCode);
+
+    /// <summary>
     /// Записує рядок і **одним** statement піднімає версію каталогу.
     /// </summary>
     /// <remarks>

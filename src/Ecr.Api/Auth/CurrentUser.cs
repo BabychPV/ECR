@@ -84,7 +84,7 @@ public sealed class CurrentUser(IHttpContextAccessor accessor) : ICurrentUser
 
     /// <inheritdoc />
     /// <remarks>
-    /// Мова з профілю користувача, далі <c>Accept-Language</c>, далі мова за
+    /// Мова з <c>Accept-Language</c> (клієнт шле в ньому мову профілю), далі мова за
     /// замовчуванням. Самі тексти беруться з <c>IUiStringCatalog</c>, а не
     /// хардкодом (D-95): додати мову має означати запис у реєстр, а не збірку.
     /// </remarks>
@@ -92,12 +92,6 @@ public sealed class CurrentUser(IHttpContextAccessor accessor) : ICurrentUser
     {
         get
         {
-            var profile = Principal?.FindFirstValue("ecr:lang");
-            if (!string.IsNullOrWhiteSpace(profile))
-            {
-                return profile;
-            }
-
             var accept = accessor.HttpContext?.Request.Headers.AcceptLanguage.ToString();
             if (string.IsNullOrWhiteSpace(accept))
             {
@@ -115,10 +109,18 @@ public sealed class CurrentUser(IHttpContextAccessor accessor) : ICurrentUser
             // це різні рядки — тег `kk`, код `kz`, — тож без переведення
             // анонімний запит із казахського браузера просив каталог мовою,
             // якої в реєстрі немає, і мовчки отримував мову за замовчуванням.
+            //
+            // ⛔ L1-02: заголовок задає будь-хто, зокрема анонім. Лише форма коду
+            // мови (2–3 латинські літери); чи увімкнена мова, вирішує каталог
+            // (`IUiStringCatalog.ResolveLanguageAsync`), і ключ кешу будується з
+            // його відповіді, а не з заголовка.
             var code = LanguageCodes.FromTag(tag);
-            return string.IsNullOrEmpty(code) ? FallbackLanguage : code;
+            return IsLanguageCodeShape(code) ? code : FallbackLanguage;
         }
     }
+
+    private static bool IsLanguageCodeShape(string code)
+        => code.Length is 2 or 3 && code.All(c => c is >= 'a' and <= 'z');
 
     private ClaimsPrincipal? Principal
         => accessor.HttpContext?.User is { Identity.IsAuthenticated: true } user ? user : null;
