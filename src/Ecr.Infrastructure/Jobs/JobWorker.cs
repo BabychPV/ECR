@@ -72,6 +72,12 @@ public sealed record JobWorkerOptions
 
     /// <summary>Скільки повторів завершальної дії після транзієнтного збою (L2-07).</summary>
     public int SettleRetries { get; init; } = 3;
+
+    /// <summary>
+    /// Опитування черги в режимі <c>Quartz</c>, де воркер лише доробляє залишки після
+    /// перемикання з <c>Database</c> (L2-04).
+    /// </summary>
+    public static readonly TimeSpan QuartzModeDrainPollInterval = TimeSpan.FromSeconds(30);
 }
 
 /// <summary>

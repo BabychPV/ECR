@@ -305,6 +305,19 @@ public static class DependencyInjection
         else
         {
             services.AddScoped<IBackgroundJobScheduler>(sp => sp.GetRequiredService<Jobs.QuartzJobScheduler>());
+
+            // ⛔ L2-04: дренаж залишків черги після перемикання Database → Quartz
+            // (runbook §10.1, deploy-ecr.ps1 -DisableWorker). Нові задачі йдуть у Quartz,
+            // а рядки з Lane, що на мить перемикання стояли Queued (інкрементні формули,
+            // перерахунки, імпорт) чи Running (дочірні вбито), інакше ніхто не виконав і не
+            // закрив би: FailStale/SummarizeStale свідомо фільтрують Lane IS NULL, а Expire
+            // кличе лише JobWorker. Рідке опитування — черга тут порожня майже завжди.
+            services.AddSingleton(new Jobs.JobWorkerOptions
+            {
+                Lanes = JobLanes.All,
+                PollInterval = Jobs.JobWorkerOptions.QuartzModeDrainPollInterval,
+            });
+            services.AddHostedService<Jobs.JobWorker>();
         }
 
         // ⚠ Задача реєструється як МАРКЕР IRecalculationJob, бо саме ним її
