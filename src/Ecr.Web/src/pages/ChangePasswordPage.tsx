@@ -108,7 +108,16 @@ export function ChangePasswordPage(): JSX.Element {
       <Card withBorder w={420} p="lg">
         <PageHeader title={t('password.title')} />
 
-        <Stack gap="sm">
+        {/* ⛔ T3-04: без `<form>` Enter у полі не відправляв запит (на формі входу — відправляє). */}
+        <Stack
+          component="form"
+          gap="sm"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (busy || mismatch || next.length === 0) return;
+            void submit();
+          }}
+        >
           <PasswordInput
             label={t('password.current')}
             value={current}
@@ -134,7 +143,7 @@ export function ChangePasswordPage(): JSX.Element {
             visibilityToggleButtonProps={passwordToggleProps()}
           />
 
-          <Button loading={busy} disabled={mismatch || next.length === 0} onClick={() => void submit()}>
+          <Button type="submit" loading={busy} disabled={mismatch || next.length === 0}>
             {t('password.submit')}
           </Button>
 
