@@ -72,6 +72,28 @@ test.describe('Вставка після редактора комірки (T4-0
     });
   }
 
+  for (const neutral of ['body', 'heading'] as const) {
+    test(`клік на нейтральну область (${neutral}) -> Ctrl+V НЕ вставляє в сітку: 0 PATCH`, async ({ page }) => {
+      await openGrid(page);
+      await cellOf(page, 0).click();
+      await page.keyboard.press('Enter');
+      await page.keyboard.press('Escape');
+      await page.waitForTimeout(1_500);
+
+      if (neutral === 'heading') await page.getByRole('heading').first().click();
+      else await page.mouse.click(2, 2);
+
+      let patches = 0;
+      page.on('request', (request) => {
+        if (request.method() === 'PATCH' && request.url().includes(`/documents/${DocumentId}`)) patches += 1;
+      });
+      await pasteAtSelection(page, '77');
+      await page.waitForTimeout(2_000);
+
+      expect(patches, 'сторонній Ctrl+V після кліку повз сітку потрапив у сітку').toBe(0);
+    });
+  }
+
   test('paste у полі вводу ПОЗА сіткою після редактора не перехоплюється сіткою', async ({ page }) => {
     await openGrid(page);
     await cellOf(page, 0).click();

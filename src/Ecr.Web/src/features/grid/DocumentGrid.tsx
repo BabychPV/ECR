@@ -1762,8 +1762,11 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         installKeyCommitGate(node),
         blockNativePaste(node),
         // ⛔ T4-02: Ctrl+V після закриття редактора, коли фокус на `<body>`.
-        installBodyPasteRedirect(node, (event) =>
-          onPasteRef.current(event as unknown as React.ClipboardEvent<HTMLDivElement>),
+        // Лише озброєна сітка й лише з реальним виділенням (без кута (0,0)).
+        installBodyPasteRedirect(
+          node,
+          (event) => onPasteRef.current(event as unknown as React.ClipboardEvent<HTMLDivElement>),
+          () => selection.current !== null,
         ),
         trackSelection(node, (next) => {
           selection.current = next;
