@@ -144,19 +144,29 @@ public sealed class PublishMethodologyHandler(
         // правило, розкидане по обробниках, забудеться на другому виклику.
         methodology.PublishVersion(version, userId, changeReason, from, greenTest, clock.UtcNow);
 
-        // ⚠ У журнал іде diff РЕЗУЛЬТАТІВ, а не тексту формул (ФВ-9.6).
-        // Змінений рядок виразу не каже нічого; змінена на 4 % емісія каже все.
-        await audit.WritePublicationEventAsync(
-            new PublicationEventRecord(
-                ChangedAt: clock.UtcNow,
-                EntityType: "calc.MethodologyVersion",
-                EntityId: methodologyVersionId,
-                ResultDiffJson: JsonSerializer.Serialize(diff),
-                ChangeReason: changeReason,
-                ChangedByUserId: userId),
-            ct).ConfigureAwait(false);
+        // ⛔ Аудит L7-08: подія публікації й сама публікація — ОДНИМ комітом (як C4
+        // у `RunCalculationHandler`). Журнал пише одразу (`AuditWriter` бере поточну
+        // транзакцію, лише якщо вона є), тож без транзакції падіння `SaveChanges`
+        // (дедлок, таймаут, `UQ_MethodologyDependency`) лишало в журналі
+        // «опубліковано з diff», а версія — чернетка.
+        await uow.ExecuteInTransactionAsync(
+            async token =>
+            {
+                // ⚠ У журнал іде diff РЕЗУЛЬТАТІВ, а не тексту формул (ФВ-9.6).
+                // Змінений рядок виразу не каже нічого; змінена на 4 % емісія каже все.
+                await audit.WritePublicationEventAsync(
+                    new PublicationEventRecord(
+                        ChangedAt: clock.UtcNow,
+                        EntityType: "calc.MethodologyVersion",
+                        EntityId: methodologyVersionId,
+                        ResultDiffJson: JsonSerializer.Serialize(diff),
+                        ChangeReason: changeReason,
+                        ChangedByUserId: userId),
+                    token).ConfigureAwait(false);
 
-        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+                await uow.SaveChangesAsync(token).ConfigureAwait(false);
+            },
+            ct).ConfigureAwait(false);
 
         // ⛔ Жодного перерахунку тут не планується. Закриті періоди не
         // перераховуються автоматично НІКОЛИ (ФВ-9.7): інакше публікація

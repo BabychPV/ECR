@@ -49,12 +49,28 @@ public sealed class MethodologyPublishTests
 
     private readonly Methodology _methodology;
     private readonly MethodologyVersion _version;
+    private bool _inTransaction;
 
     public MethodologyPublishTests()
     {
         _clock.UtcNow.Returns(Now);
         _user.UserId.Returns(Reviewer);
         _user.CorrelationId.Returns("test");
+
+        // Транзакція виконує операцію, як справжня, і позначає, що ми всередині неї.
+        _uow.ExecuteInTransactionAsync(Arg.Any<Func<CancellationToken, Task>>(), Arg.Any<CancellationToken>())
+            .Returns(async call =>
+            {
+                _inTransaction = true;
+                try
+                {
+                    await call.Arg<Func<CancellationToken, Task>>()(CancellationToken.None);
+                }
+                finally
+                {
+                    _inTransaction = false;
+                }
+            });
 
         // Права видані обом учасникам: предмет цих тестів — правила
         // публікації, а не доступ. Саме право перевіряє AccessDecisionTests.
@@ -284,6 +300,38 @@ public sealed class MethodologyPublishTests
         await Handler().HandleAsync(VersionId, "Уточнення", new DateOnly(2026, 2, 1), CancellationToken.None);
 
         Assert.True(_version.IsPublished);
+    }
+
+    /// <summary>
+    /// Аудит L7-08: подія публікації і збереження версії — в ОДНІЙ транзакції.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Що було. <c>AuditWriter</c> пише одразу й бере транзакцію, лише якщо вона є;
+    /// обробник її не відкривав, тож падіння <c>SaveChanges</c> лишало в журналі
+    /// «опубліковано з diff» для версії, що лишилась чернеткою.
+    /// </remarks>
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    public async Task Подія_публікації_пишеться_в_транзакції_разом_зі_збереженням()
+    {
+        bool? auditInTransaction = null;
+        bool? saveInTransaction = null;
+        _audit.WritePublicationEventAsync(Arg.Any<PublicationEventRecord>(), Arg.Any<CancellationToken>())
+              .Returns(_ =>
+              {
+                  auditInTransaction = _inTransaction;
+                  return Task.CompletedTask;
+              });
+        _uow.SaveChangesAsync(Arg.Any<CancellationToken>()).Returns(_ =>
+        {
+            saveInTransaction = _inTransaction;
+            return Task.FromException<int>(new InvalidOperationException("deadlock"));
+        });
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => Handler().HandleAsync(VersionId, "Перша", new DateOnly(2026, 2, 1), CancellationToken.None));
+
+        Assert.True(auditInTransaction);
+        Assert.True(saveInTransaction);
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
