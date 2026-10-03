@@ -84,6 +84,13 @@ public interface IJobQueue
     /// <returns><c>false</c> — оренду втрачено.</returns>
     public Task<bool> DeferAsync(JobClaimToken claim, TimeSpan delay, CancellationToken ct);
 
+    /// <summary>
+    /// Повертає задачу в чергу без затримки при зупинці хоста: як
+    /// <see cref="DeferAsync"/>, спроба НЕ рахується; відлік стелі відкладень не змінюється.
+    /// </summary>
+    /// <returns><c>false</c> — оренду втрачено.</returns>
+    public Task<bool> ReleaseAsync(JobClaimToken claim, CancellationToken ct);
+
     /// <summary>Закриває задачу станом <c>Cancelled</c> після запиту скасування.</summary>
     public Task<bool> AcknowledgeCancelAsync(JobClaimToken claim, CancellationToken ct);
 

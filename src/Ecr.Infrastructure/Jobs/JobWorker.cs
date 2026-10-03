@@ -409,7 +409,7 @@ public sealed partial class JobWorker(
             // Зупинка хоста без запиту скасування — задачу не скасовано, її повертають у чергу.
             var shutdown = stopping.IsCancellationRequested && !lease.CancelRequested;
             await SettleAsync(claim.JobId, q => shutdown
-                    ? q.RequeueAsync(claim, TimeSpan.Zero, CancellationToken.None)
+                    ? q.ReleaseAsync(claim, CancellationToken.None)
                     : q.AcknowledgeCancelAsync(claim, CancellationToken.None))
                 .ConfigureAwait(false);
             return;

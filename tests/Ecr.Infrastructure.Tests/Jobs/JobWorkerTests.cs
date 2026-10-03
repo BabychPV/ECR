@@ -144,6 +144,23 @@ public sealed class JobWorkerTests(SqlServerFixture sql) : DbJobQueueTestsBase(s
     }
 
     [Fact]
+    public async Task Зупинка_хоста_повертає_задачу_в_чергу_не_зараховуючи_спробу()
+    {
+        // L2-08 (D-208): зупинка — подія життєвого циклу, а не провал.
+        var probe = new WorkerProbe();
+        string jobId;
+        await using (var host = await StartHostAsync(probe))
+        {
+            jobId = await EnqueueJobAsync<WorkerBlockingJob>(host, new { n = 1 });
+            await probe.Started.Task.WaitAsync(Patience);
+        }
+
+        var row = await RowAsync(jobId);
+        Assert.Equal("Queued", row!.State);
+        Assert.Equal(0, row.Attempt ?? 0);
+    }
+
+    [Fact]
     public async Task Втрачена_оренда_зупиняє_задачу_і_нічого_не_пише_в_чужий_рядок()
     {
         var probe = new WorkerProbe();

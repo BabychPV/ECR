@@ -413,7 +413,7 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock) : IJobQueue
     /// та, що позаду, стає доступною не пізніше, ніж став би наш ретрай.
     /// </remarks>
     public Task<bool> RequeueAsync(JobClaimToken claim, TimeSpan delay, CancellationToken ct)
-        => RequeueCoreAsync(claim, delay, restoreAttempt: false, ct);
+        => RequeueCoreAsync(claim, delay, restoreAttempt: false, DeferralSince.Clear, ct);
 
     /// <inheritdoc />
     /// <remarks>
@@ -422,9 +422,32 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock) : IJobQueue
     /// значення до захоплення, яке додало <c>+1</c>.
     /// </remarks>
     public Task<bool> DeferAsync(JobClaimToken claim, TimeSpan delay, CancellationToken ct)
-        => RequeueCoreAsync(claim, delay, restoreAttempt: true, ct);
+        => RequeueCoreAsync(claim, delay, restoreAttempt: true, DeferralSince.Set, ct);
 
-    private Task<bool> RequeueCoreAsync(JobClaimToken claim, TimeSpan delay, bool restoreAttempt, CancellationToken ct)
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⛔ L2-08 (D-208): зупинка хоста — подія життєвого циклу, не провал. Спроба
+    /// відновлюється, як у <see cref="DeferAsync"/>, а відлік стелі відкладень
+    /// (<c>ecrDeferredSince</c>) лишається як був — його не ставить і не знімає.
+    /// </remarks>
+    public Task<bool> ReleaseAsync(JobClaimToken claim, CancellationToken ct)
+        => RequeueCoreAsync(claim, TimeSpan.Zero, restoreAttempt: true, DeferralSince.Keep, ct);
+
+    /// <summary>Що робити з моментом першого відкладення в payload.</summary>
+    private enum DeferralSince
+    {
+        /// <summary>Ретрай після провалу — відлік знімається.</summary>
+        Clear = 0,
+
+        /// <summary>Відкладення — відлік ставиться, якщо його ще немає.</summary>
+        Set = 1,
+
+        /// <summary>Повернення при зупинці — відлік не чіпається.</summary>
+        Keep = 2,
+    }
+
+    private Task<bool> RequeueCoreAsync(
+        JobClaimToken claim, TimeSpan delay, bool restoreAttempt, DeferralSince since, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(claim);
         ArgumentOutOfRangeException.ThrowIfLessThan(delay, TimeSpan.Zero, nameof(delay));
@@ -446,11 +469,11 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock) : IJobQueue
             IF ISJSON(@addPayload) = 1 AND LEFT(LTRIM(@addPayload), 1) = NCHAR(123)
             BEGIN
                 SET @oldSince = JSON_VALUE(@addPayload, @sincePath);
-                IF @restoreAttempt = 1
+                IF @sinceMode = 1
                     SET @since = ISNULL(@oldSince, @now);
-                IF @restoreAttempt = 1 AND @oldSince IS NULL
+                IF @sinceMode = 1 AND @oldSince IS NULL
                     SET @ownPayload = JSON_MODIFY(@addPayload, @sincePath, @since);
-                IF @restoreAttempt = 0 AND @oldSince IS NOT NULL
+                IF @sinceMode = 0 AND @oldSince IS NOT NULL
                     SET @ownPayload = JSON_MODIFY(@addPayload, @sincePath, NULL);
             END
             IF @ok = 1 AND @target IS NOT NULL
@@ -502,6 +525,7 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock) : IJobQueue
                 BindMerge(p, JobPayloadMerge.ArrayPathOf(JobPayloadMerge.MergeableJobCode));
                 p.Add("@mergeCode", SqlDbType.NVarChar, 64).Value = JobPayloadMerge.MergeableJobCode;
                 p.Add("@restoreAttempt", SqlDbType.Bit).Value = restoreAttempt;
+                p.Add("@sinceMode", SqlDbType.TinyInt).Value = (byte)since;
                 p.Add("@delayMs", SqlDbType.Int).Value = checked((int)delay.TotalMilliseconds);
                 p.Add("@absorbed", SqlDbType.NVarChar, JobProgressMessageCodec.MaxEncodedLength).Value = absorbed;
                 BindDeferral(p);
