@@ -180,6 +180,71 @@ public sealed class RegistryDenyHttpTests(SqlServerFixture sql)
             $"{open.StatusCode} {await open.Content.ReadAsStringAsync()}\n{app.ErrorsText}");
     }
 
+    /// <summary>
+    /// L5-08: перевірка ключа, перемикання джерела й зв'язки в описі не обходять заборону на довідник.
+    /// До виправлення: keys/check віддавав 200/422 замість 404, source-kind перемикав заборонений довідник,
+    /// а <c>relations[].targetRegistryCode</c> віддавав код забороненої цілі.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task L5_08__перевірка_ключа_перемикання_джерела_й_зв_язки_не_розкривають_заборонений_довідник()
+    {
+        using var app = new EcrApiFactory(sql);
+        var stand = await SeedAsync();
+        string referrerCode;
+        await using (var db = new EcrDbContext(Options()))
+        {
+            var referrer = new RegistryDef(EcrCode.Create($"DENY{stand.Tag}_R"), Name($"Ref {stand.Tag}"), isTemporal: false);
+            db.RegistryDefs.Add(referrer);
+            await db.SaveChangesAsync();
+            var link = new RegistryFieldDef(referrer.Id, EcrCode.Create("TO_DENIED"), Name("To denied"), CellDataType.Lookup, 1);
+            link.PointTo(stand.DeniedRegistryId);
+            db.RegistryFieldDefs.Add(link);
+            await db.SaveChangesAsync();
+            referrerCode = referrer.Code;
+        }
+
+        using var denied = await SignedInAsync(app, stand.DeniedRegistryId, "Registry.EditDefinition", "Integration.Manage");
+
+        // 1. keys/check: заборонений = неіснуючий.
+        var request = new { fieldCodes = new[] { "X" }, ignoreCase = false };
+        var check = await denied.PostAsJsonAsync(new Uri($"/api/v1/registries/{stand.DeniedCode}/keys/check", UriKind.Relative), request);
+        var checkMissing = await denied.PostAsJsonAsync(new Uri($"/api/v1/registries/NO_{stand.Tag}/keys/check", UriKind.Relative), request);
+        Assert.Equal(HttpStatusCode.NotFound, check.StatusCode);
+        Assert.Equal(
+            (await JsonAsync(checkMissing)).GetProperty("messageKey").GetString(),
+            (await JsonAsync(check)).GetProperty("messageKey").GetString());
+
+        // 2. source-kind: набір із забороненим відмовляє 404 і НЕ міняє жодного довідника.
+        var switched = await denied.PutAsJsonAsync(
+            new Uri("/api/v1/registries/source-kind", UriKind.Relative),
+            new { registryCodes = new[] { stand.OpenCode, stand.DeniedCode }, sourceKind = "External", reason = "L5-08" });
+        Assert.Equal(HttpStatusCode.NotFound, switched.StatusCode);
+        await using (var db = new EcrDbContext(Options()))
+        {
+            var kinds = await db.RegistryDefs.AsNoTracking()
+                .Where(d => d.Id == stand.DeniedRegistryId || d.Id == stand.OpenRegistryId)
+                .Select(d => d.SourceKind)
+                .ToListAsync();
+            Assert.All(kinds, k => Assert.Equal(RegistrySourceKind.Local, k));
+        }
+
+        // 3. опис довідника-посилальника: ціль-заборонена без коду.
+        var definition = await denied.GetAsync(new Uri($"/api/v1/registries/{referrerCode}/definition", UriKind.Relative));
+        Assert.Equal(HttpStatusCode.OK, definition.StatusCode);
+        var relation = (await JsonAsync(definition)).GetProperty("relations").EnumerateArray()
+            .Single(r => r.GetProperty("fieldCode").GetString() == "TO_DENIED");
+        Assert.Equal(JsonValueKind.Null, relation.GetProperty("targetRegistryCode").ValueKind);
+
+        // Контроль: той, кому не заборонено, бачить код цілі (поведінка до L5-08 не зламана).
+        using var plain = await SignedInAsync(app, denyRegistryId: null);
+        var plainDef = await plain.GetAsync(new Uri($"/api/v1/registries/{referrerCode}/definition", UriKind.Relative));
+        var plainRelation = (await JsonAsync(plainDef)).GetProperty("relations").EnumerateArray()
+            .Single(r => r.GetProperty("fieldCode").GetString() == "TO_DENIED");
+        Assert.Equal(stand.DeniedCode, plainRelation.GetProperty("targetRegistryCode").GetString());
+    }
+
     private static string[] ReadPaths(string code, long entryId) =>
     [
         $"/api/v1/registries/{code}/entries?asOf={AsOf}",
@@ -249,7 +314,7 @@ public sealed class RegistryDenyHttpTests(SqlServerFixture sql)
     /// Користувач із глобальними <c>Registry.View</c>/<c>Registry.EditData</c>; з
     /// <paramref name="denyRegistryId"/> — ще й роль із забороною на цей довідник.
     /// </summary>
-    private async Task<HttpClient> SignedInAsync(EcrApiFactory app, int? denyRegistryId)
+    private async Task<HttpClient> SignedInAsync(EcrApiFactory app, int? denyRegistryId, params string[] extraPermissions)
     {
         var name = $"regdn_{Guid.NewGuid():N}"[..20];
 
@@ -265,6 +330,11 @@ public sealed class RegistryDenyHttpTests(SqlServerFixture sql)
 
             db.RolePermissions.Add(new RolePermission(role.Id, "Registry.View"));
             db.RolePermissions.Add(new RolePermission(role.Id, "Registry.EditData"));
+            foreach (var extra in extraPermissions)
+            {
+                db.RolePermissions.Add(new RolePermission(role.Id, extra));
+            }
+
             db.RoleAssignments.Add(new RoleAssignment(role.Id, user.Id, principalSid: null));
 
             if (denyRegistryId is { } denied)

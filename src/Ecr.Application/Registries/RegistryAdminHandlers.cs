@@ -123,7 +123,7 @@ public sealed class SwitchRegistrySourceHandler(
     {
         ArgumentNullException.ThrowIfNull(registryCodes);
 
-        await Security.PermissionCheck
+        var profile = await Security.PermissionCheck
             .RequireAsync(access, currentUser, Permission, ct)
             .ConfigureAwait(false);
 
@@ -211,6 +211,12 @@ public sealed class SwitchRegistrySourceHandler(
 
         foreach (var code in registryCodes)
         {
+            // ⛔ L5-08: заборонений довідник — 404, як неіснуючий (перемикання не розкриває й не змінює його).
+            if (byCode.TryGetValue(code, out var denied) && RegistryAccess.IsDenied(profile, denied.Id))
+            {
+                throw RegistryAccess.NotFound(code);
+            }
+
             definitions.Add(
                 byCode.TryGetValue(code, out var definition)
                     ? definition

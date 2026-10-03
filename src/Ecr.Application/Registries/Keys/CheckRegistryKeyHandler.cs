@@ -40,12 +40,15 @@ public sealed class CheckRegistryKeyHandler(
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        await Security.PermissionCheck
+        var profile = await Security.PermissionCheck
             .RequireAsync(access, currentUser, Permission, ct)
             .ConfigureAwait(false);
 
         var definition = await registries.FindDefinitionAsync(code, ct).ConfigureAwait(false)
             ?? throw SaveRegistryDefinitionHandler.RegistryNotFound(code);
+
+        // ⛔ L5-08: перевірка ключа віддає значення ключів і приклади записів — заборонений довідник 404.
+        RegistryAccess.EnsureNotDenied(profile, definition.Id, code);
 
         // Первинність тут невідома (її немає в запиті) — обов'язковість полів перевіряє публікація.
         var fields = RegistryKeyFields.Resolve(definition, request.FieldCodes, isPrimary: false);
