@@ -215,6 +215,40 @@ public sealed class PiWebApiDataSourceTests
         Assert.Equal([new TimeInterval(expectedFrom, To)], result.FailedIntervals);
     }
 
+    /// <summary>
+    /// Межа з <c>Kind = Unspecified</c> (так приходить покриття з бази) — UTC за
+    /// контрактом і в запит іде без зсуву (аудит 2026-10-03, L3-01).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ На машині з поясом UTC (раннери CI) <c>ToUniversalTime()</c> нічого не
+    /// зсуває, тож старий код тут теж зелений; червоним тест стає там, де пояс
+    /// не нульовий (у замовника UTC+5). Червоний у CI незалежно від поясу —
+    /// <c>CollectionStoreCoverageWindowTests.GetCoverageAsync_МежіМаютьKindUtc</c>.
+    /// МУТАЦІЙНИЙ ДОКАЗ (прогнано з <c>TZ=Asia/Atyrau</c>): повернути в <c>Iso</c>
+    /// <c>moment.ToUniversalTime()</c> — startTime=2025-12-31T19:00:00Z, тест червоний.
+    /// </remarks>
+    [Fact]
+    public async Task ReadAsync_UnspecifiedМежа_НеЗсувається()
+    {
+        var handler = new QueueHttpMessageHandler()
+            .Enqueue(HttpStatusCode.OK, AttributeJson)
+            .Enqueue(HttpStatusCode.OK, RecordedJson(From, count: 1));
+        var sut = CreateSut(handler, out _);
+
+        var request = new CollectionRequest(
+            1,
+            42,
+            "tag",
+            DateTime.SpecifyKind(From, DateTimeKind.Unspecified),
+            DateTime.SpecifyKind(To, DateTimeKind.Unspecified),
+            MaxPoints: 5);
+        await sut.ReadAsync(request, CancellationToken.None);
+
+        var query = Uri.UnescapeDataString(handler.Requests[^1].RequestUri!.Query);
+        Assert.Contains("startTime=2026-01-01T00:00:00Z", query, StringComparison.Ordinal);
+        Assert.Contains("endTime=2026-01-01T01:00:00Z", query, StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task ReadAsync_БатчМенгеЗаMaxPoints_НеВважаєтьсяОбрізаним()
     {
