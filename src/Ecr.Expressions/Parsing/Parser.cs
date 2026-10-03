@@ -447,8 +447,23 @@ public sealed class Parser
     private static AstNode ParseConcat(State s)
     {
         var left = ParseAdditive(s);
-        while (s.Match(TokenType.Ampersand))
+        while (s.Current.Type == TokenType.Ampersand)
         {
+            if (!s.Syntax.AmpersandIsConcat)
+            {
+                // ⛔ Аудит L7-04: у NCalc 1.3.8 одинарний `&` — побітове AND (`6 & 3` = 2).
+                // Прийняти його конкатенацією означало б тихо порахувати інакше, ніж
+                // чинна система. Розбір продовжується, як і для `^`.
+                s.Error(
+                    "expr.ampersandNotConcat",
+                    null,
+                    "\"&\" in the methodology dialect does not join text: it is bitwise AND, "
+                    + "and \"6 & 3\" equals 2. Use \"and\" for a logical AND.",
+                    s.Current.Position,
+                    1);
+            }
+
+            s.Advance();
             s.CountChainLink();
             var right = ParseAdditive(s);
             left = new BinaryNode(BinaryOperator.Concat, left, right) { Position = left.Position };

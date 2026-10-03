@@ -45,6 +45,10 @@ public enum ExpressionParseMode : byte
 /// Чи означає ідентифікатор без <c>@</c> посилання на параметр. Істина лише
 /// для <see cref="ExpressionParseMode.Import"/> діалекту методологій.
 /// </param>
+/// <param name="AmpersandIsConcat">
+/// Чи означає одинарний <c>&amp;</c> конкатенацію. Хиба для діалекту
+/// методологій: у NCalc 1.3.8 це побітове AND (замір 2026-10-03, аудит L7-04).
+/// </param>
 /// <remarks>
 /// ⛔ Досі різниця між діалектами була лише в дозволених посиланнях і функціях
 /// (<c>D-19</c>), а роздільник аргументів був літералом у лексері. Замір
@@ -55,7 +59,7 @@ public enum ExpressionParseMode : byte
 /// константою, закопаною в лексер.
 /// </remarks>
 public sealed record DialectSyntax(
-    char ArgumentSeparator, bool CaretIsPower, bool BareNameIsArgument = false)
+    char ArgumentSeparator, bool CaretIsPower, bool BareNameIsArgument = false, bool AmpersandIsConcat = true)
 {
     // Діалект шаблонів: `^` — степінь, і саме на цьому тримається чинний тест
     // `Степінь_правоасоціативний_2_у_3_у_2_дорівнює_512`. Тут нічого не
@@ -72,7 +76,10 @@ public sealed record DialectSyntax(
     // Діалект методологій. Роздільник — кома **за заміром корпусу**: 643 коми
     // проти 7 крапок з комою у реальних формулах, тобто крапка з комою там —
     // не альтернативний синтаксис, а поодинокі випадки.
-    private static readonly DialectSyntax MethodologySyntax = new(',', CaretIsPower: false);
+    //
+    // ⛔ `&` тут теж не конкатенація: у NCalc 1.3.8 `6 & 3` = 2 (побітове AND,
+    // замір `tests/Ecr.Legacy.Probe`, аудит L7-04) — той самий клас, що й `^`.
+    private static readonly DialectSyntax MethodologySyntax = new(',', CaretIsPower: false, AmpersandIsConcat: false);
 
     // Той самий діалект очима МІГРАЦІЇ. Різниця лише в голому імені: решта
     // граматики спільна, інакше імпортер розбирав би не ту мову, яку потім

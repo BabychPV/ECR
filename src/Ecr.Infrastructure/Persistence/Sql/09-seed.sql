@@ -6544,8 +6544,11 @@ USING (VALUES
     -- L3-07: стеля подій вікна після посторінкового читання.
     (N'coverageEvents.eventsTruncated', N'en', N'The source has more events in the window than were read ({count} in {pages} pages): events after {after} were not synchronized in this run, and removal of missing events was skipped.', 1),
     -- L4-10: однакові імена елементів PI SQL Client.
-    (N'err.ECR-INT-0422.elementNameAmbiguous', N'en', N'Several source elements share the name used to read them; their values were not read, because a value read by that name could belong to another element. Give the elements unique names or read them through PI Web API.', 1)
+    (N'err.ECR-INT-0422.elementNameAmbiguous', N'en', N'Several source elements share the name used to read them; their values were not read, because a value read by that name could belong to another element. Give the elements unique names or read them through PI Web API.', 1),
     -- COLL:an33 ── кінець секції ──
+    -- COLL:an38 ── AN-38 (аудит 2026-10-03, L7): розрахунки й методології; ru/kz — порцією COLL:an38 у блоці I18N нижче ──
+    (N'expr.ampersandNotConcat', N'en', N'"&" in the methodology dialect does not join text: it is bitwise AND, and "6 & 3" equals 2. Use "and" for a logical AND.', 1)
+    -- COLL:an38 ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -15381,6 +15384,16 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:an33 ── кінець секції ──
+-- COLL:an38 ── ru/kz розрахунків і методологій (L7); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'expr.ampersandNotConcat', N'ru', N'«&» в диалекте методик не объединяет текст: это побитовое И, и «6 & 3» равно 2. Для логического И используйте «and».'),
+    (N'expr.ampersandNotConcat', N'kz', N'Әдістемелер диалектінде «&» мәтінді біріктірмейді: бұл биттік ЖӘНЕ, және «6 & 3» 2-ге тең. Логикалық ЖӘНЕ үшін «and» қолданыңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:an38 ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

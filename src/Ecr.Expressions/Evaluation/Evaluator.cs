@@ -933,7 +933,10 @@ public sealed class Evaluator(
         {
             ExpressionValueType.Null => string.Empty,
             ExpressionValueType.Text => (string)value.Value!,
-            ExpressionValueType.Number => ((decimal)value.Value!).ToString(CultureInfo.InvariantCulture),
+            // ⚠ Legacy-число — boxed double: `(decimal)` розпаковка кидала InvalidCastException (аудит L7-04).
+            ExpressionValueType.Number => value.Value is double d
+                ? d.ToString("R", CultureInfo.InvariantCulture)
+                : ((decimal)value.Value!).ToString(CultureInfo.InvariantCulture),
             ExpressionValueType.Boolean => (bool)value.Value! ? "TRUE" : "FALSE",
             ExpressionValueType.Date => ((DateTime)value.Value!).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
             _ => value.ErrorCode ?? string.Empty,
