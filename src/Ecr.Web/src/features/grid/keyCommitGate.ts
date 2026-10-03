@@ -41,6 +41,11 @@ function inEditor(target: EventTarget | null): boolean {
   return target instanceof Element && target.closest(EditWrapper) !== null;
 }
 
+/** Подія з поля відкритого редактора комірки (light DOM RevoGrid спливає до обгортки сітки). */
+export function isInCellEditor(target: EventTarget | null): boolean {
+  return inEditor(target);
+}
+
 function isPrintable(event: KeyboardEvent): boolean {
   // Модифікаторні комбінації відсіяно раніше (`onKeyDown`), тут лише символ.
   return event.key.length === 1;
