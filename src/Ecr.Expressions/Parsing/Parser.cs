@@ -95,6 +95,19 @@ public sealed class Parser
     public const int MaxRecursionDepth = 192;
 
     /// <summary>
+    /// Скільки ланок ланцюгів бінарних операторів дозволено на одному шляху від
+    /// кореня дерева виразу.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Межа знизу — найдовший вираз, що взагалі зберігається:
+    /// <c>MethodologyFormula.MaxExpressionLength</c> = 4000 символів, тобто не
+    /// більше 2000 бінарних операторів (<c>1+1+…</c>); 2048 пропускає будь-який
+    /// такий вираз. Згори межа тримає глибину дерева для рекурсивних обходів
+    /// після розбору (L7-01): ~2 250 рівнів замість ~32 000.
+    /// </remarks>
+    public const int MaxChainLinks = 2048;
+
+    /// <summary>
     /// Скільки різних виразів парсер тримає розібраними, перш ніж скинути кеш.
     /// </summary>
     /// <remarks>
@@ -352,6 +365,7 @@ public sealed class Parser
         var left = ParseAnd(s);
         while (s.Match(TokenType.Or))
         {
+            s.CountChainLink();
             var right = ParseAnd(s);
             left = new BinaryNode(BinaryOperator.Or, left, right) { Position = left.Position };
         }
@@ -364,6 +378,7 @@ public sealed class Parser
         var left = ParseNot(s);
         while (s.Match(TokenType.And))
         {
+            s.CountChainLink();
             var right = ParseNot(s);
             left = new BinaryNode(BinaryOperator.And, left, right) { Position = left.Position };
         }
@@ -434,6 +449,7 @@ public sealed class Parser
         var left = ParseAdditive(s);
         while (s.Match(TokenType.Ampersand))
         {
+            s.CountChainLink();
             var right = ParseAdditive(s);
             left = new BinaryNode(BinaryOperator.Concat, left, right) { Position = left.Position };
         }
@@ -458,6 +474,7 @@ public sealed class Parser
                 return left;
             }
 
+            s.CountChainLink();
             s.Advance();
             var right = ParseMultiplicative(s);
             left = new BinaryNode(op.Value, left, right) { Position = left.Position };
@@ -482,6 +499,7 @@ public sealed class Parser
                 return left;
             }
 
+            s.CountChainLink();
             s.Advance();
             var right = ParseUnary(s);
             left = new BinaryNode(op.Value, left, right) { Position = left.Position };
@@ -1265,6 +1283,8 @@ public sealed class Parser
     {
         private int _index;
         private int _depth;
+        private int _chainLinks;
+        private readonly int[] _chainLinksAtEntry = new int[MaxRecursionDepth + 1];
 
         public ExpressionDialect Dialect => dialect;
 
@@ -1303,6 +1323,7 @@ public sealed class Parser
         {
             if (++_depth <= MaxRecursionDepth)
             {
+                _chainLinksAtEntry[_depth] = _chainLinks;
                 return;
             }
 
@@ -1319,6 +1340,41 @@ public sealed class Parser
             throw new ParseAbort();
         }
 
+        /// <summary>
+        /// Рахує ще одну ланку ланцюга бінарних операторів; вичерпаний бюджет — відмова.
+        /// </summary>
+        /// <remarks>
+        /// ⛔ L7-01 (аудит 2026-10-03): ланцюг <c>1+1+…+1</c> розбирається ЦИКЛОМ,
+        /// тож <see cref="EnterNesting"/> його не бачить, а дерево виходить лівим
+        /// гребенем глибиною в кількість ланок. Ланцюг на 32 000 доданків (64 КіБ
+        /// тіла запиту) парсер приймав, а рекурсивні обходи після розбору
+        /// (<c>PredicateValidator</c>, <c>TypeChecker</c>, …) вичерпували стек —
+        /// <c>StackOverflowException</c> і смерть процесу API.
+        ///
+        /// ⚠ Лічильник рахує ланки ВІДКРИТИХ ланцюгів на поточному шляху розбору,
+        /// а не кожного ланцюга окремо і не всього виразу: ланцюг у дужках, що
+        /// стоїть операндом іншого ланцюга, додає свою глибину до глибини
+        /// зовнішнього (межа «на ланцюг» це пропустила б), а сусідні аргументи
+        /// функції лежать на різних шляхах і не додають (межа «на вираз»
+        /// відхиляла б широкі, але мілкі вирази). Повернення до значення на
+        /// вході — у <see cref="LeaveNesting"/>. Отже глибина дерева не більша
+        /// за <see cref="MaxChainLinks"/> плюс <see cref="MaxRecursionDepth"/>.
+        /// </remarks>
+        public void CountChainLink()
+        {
+            if (++_chainLinks <= MaxChainLinks)
+            {
+                return;
+            }
+
+            Error(
+                "expr.chainTooLong",
+                Param("max", MaxChainLinks.ToString(CultureInfo.InvariantCulture)),
+                $"The expression has more than {MaxChainLinks} operators chained together.");
+
+            throw new ParseAbort();
+        }
+
         /// <summary>Повертається на рівень вище після успішного розбору вкладеного виразу.</summary>
         /// <remarks>
         /// ⚠ Парного <c>finally</c> свідомо немає: єдиний спосіб не дійти сюди —
@@ -1326,7 +1382,16 @@ public sealed class Parser
         /// вживається взагалі (розбір завершено). <c>try/finally</c> на кожному
         /// рівні рекурсії коштував би більше, ніж дає.
         /// </remarks>
-        public void LeaveNesting() => _depth--;
+        /// <remarks>
+        /// ⚠ Тут же лічильник ланок повертається до значення на вході (L7-01):
+        /// ланки сусідніх аргументів <c>SUM(a+b, c+d, …)</c> лежать на РІЗНИХ
+        /// шляхах дерева і глибини не складають — див. <see cref="CountChainLink"/>.
+        /// </remarks>
+        public void LeaveNesting()
+        {
+            _chainLinks = _chainLinksAtEntry[_depth];
+            _depth--;
+        }
 
         /// <summary>
         /// Синтаксичні відмінності діалекту і режиму розбору: значення <c>^</c>,

@@ -63,6 +63,10 @@ public sealed class ValidateExpressionHandler(
             .RequireAsync(access, currentUser, Permission, ct)
             .ConfigureAwait(false);
 
+        // ⛔ L7-01: довжина — ДО розбору, для всіх діалектів (ланцюг на 32 000
+        // доданків вичерпував стек обходів дерева і валив процес API).
+        ExpressionLengthGuard.Require(request.Expression);
+
         var diagnostics = new List<ExpressionDiagnostic>();
         var skipped = new List<string>();
 

@@ -56,6 +56,10 @@ public static class ExpressionRejection
         ArgumentNullException.ThrowIfNull(formulaEngine);
         ArgumentNullException.ThrowIfNull(version);
 
+        // ⛔ L7-01: довжина — ДО повної перевірки; обробники збереження формули
+        // і правила кличуть цей метод раніше за власну межу колонки.
+        Ecr.Application.Expressions.ExpressionLengthGuard.Require(expression);
+
         var diagnostics = new List<ExpressionDiagnostic>();
         PublishChecks.CheckExpression(
             expression,

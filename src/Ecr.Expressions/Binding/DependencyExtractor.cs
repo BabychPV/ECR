@@ -66,6 +66,12 @@ public sealed class DependencyExtractor(ReferenceResolver resolver, RangeExpande
         int? currentColumnDefId,
         string? rowRegistry)
     {
+        // ⛔ L7-01: лівий гребінь ланцюга — рекурсія глибиною в кількість ланок.
+        if (!TraversalStackGuard.TryEnter(node, diagnostics))
+        {
+            return;
+        }
+
         switch (node)
         {
             case CellReferenceNode reference:

@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Runtime.CompilerServices;
 using System.Text;
 
 namespace Ecr.Expressions.Ast;
@@ -31,6 +32,9 @@ public static class AstPrinter
 
     private static void Write(AstNode node, StringBuilder text)
     {
+        // ⛔ L7-01: лівий гребінь ланцюга — рекурсія глибиною в кількість ланок.
+        RuntimeHelpers.EnsureSufficientExecutionStack();
+
         switch (node)
         {
             case LiteralNode literal:
