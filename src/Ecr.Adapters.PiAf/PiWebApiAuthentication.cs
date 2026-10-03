@@ -115,5 +115,12 @@ public static class PiWebApiAuthentication
                 AllowAutoRedirect = false,
                 ConnectCallback = GuardedSocketConnect.ConnectAsync,
             }
-            : new SocketsHttpHandler { Credentials = null, ConnectCallback = GuardedSocketConnect.ConnectAsync };
+            : new SocketsHttpHandler
+            {
+                Credentials = null,
+                // D-241 п.(5): редиректи вимкнено в УСІХ режимах — 3xx з дозволеного
+                // хоста інакше вів би на хост поза PiWebApi:AllowedHosts (L3-08).
+                AllowAutoRedirect = false,
+                ConnectCallback = GuardedSocketConnect.ConnectAsync,
+            };
 }
