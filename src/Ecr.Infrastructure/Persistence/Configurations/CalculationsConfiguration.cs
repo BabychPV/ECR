@@ -592,7 +592,7 @@ public sealed class CalculationStepConfiguration : IEntityTypeConfiguration<Calc
         builder.HasKey(x => new { x.PeriodKey, x.Id }).HasName("PK_CalculationStep");
         builder.Property(x => x.Id).ValueGeneratedNever();
         builder.Property(x => x.StepCode).HasMaxLength(64).IsRequired();
-        builder.Property(x => x.Expression).HasMaxLength(2000);
+        builder.Property(x => x.Expression).HasMaxLength(CalculationStep.MaxStepExpressionLength);
         builder.Property(x => x.Value).HasColumnType("decimal(34,16)");
         builder.Property(x => x.Masked).HasColumnName("MaskedZero").HasDefaultValue(Domain.Enums.MaskedZeroReason.None);
 
