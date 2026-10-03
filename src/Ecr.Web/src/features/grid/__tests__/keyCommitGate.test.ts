@@ -136,6 +136,80 @@ describe('installKeyCommitGate: швидкий ввід не склеює зна
     grid.dispose();
   });
 
+  /** Відкриває вікно затримки: Enter, символ, Enter (коміт) — без часу на завершення. */
+  function openCommitWindow(grid: Grid): void {
+    grid.press('Enter');
+    vi.advanceTimersByTime(5);
+    grid.press('1');
+    grid.press('Enter');
+  }
+
+  /** keydown на `target`; повертає, чи дійшов він до слухача на `document` одразу. */
+  function fire(target: EventTarget, init: KeyboardEventInit): { delivered: boolean; prevented: boolean } {
+    let delivered = false;
+    const listener = (): void => {
+      delivered = true;
+    };
+    document.addEventListener('keydown', listener);
+    const event = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init });
+    target.dispatchEvent(event);
+    document.removeEventListener('keydown', listener);
+
+    return { delivered, prevented: event.defaultPrevented };
+  }
+
+  it('M2: клавіша в полі ПОЗА гридом (input/textarea/select/модалка) у вікні затримки не затримується', () => {
+    const grid = mountGrid(4, 1, true);
+    const modal = document.createElement('div');
+    modal.setAttribute('role', 'dialog');
+    const outside = [
+      document.createElement('input'),
+      document.createElement('textarea'),
+      document.createElement('select'),
+      modal,
+    ];
+    for (const element of outside) document.body.appendChild(element);
+
+    openCommitWindow(grid);
+
+    for (const element of outside) {
+      const result = fire(element, { key: 'x' });
+      expect(result.delivered, element.tagName).toBe(true);
+      expect(result.prevented, element.tagName).toBe(false);
+    }
+
+    // І нічого з цього не відтворюється пізніше в грид.
+    vi.advanceTimersByTime(2000);
+    expect(grid.values).toEqual(['', '1', '', '']);
+    grid.dispose();
+  });
+
+  it('M3: Ctrl/Meta/Alt+клавіша (Ctrl+C/V/Z/S) у вікні затримки не затримується й не переупорядковується', () => {
+    const grid = mountGrid(4, 1, true);
+    const holder = grid.container.querySelector('div[tabindex]') ?? document.body;
+
+    openCommitWindow(grid);
+
+    const combos: KeyboardEventInit[] = [
+      { key: 'c', ctrlKey: true },
+      { key: 'v', metaKey: true },
+      { key: 'z', ctrlKey: true },
+      { key: 's', ctrlKey: true },
+      { key: 'x', altKey: true },
+    ];
+    for (const init of combos) {
+      for (const target of [holder, document.body]) {
+        const result = fire(target, init);
+        expect(result.delivered, `${init.key} -> ${target instanceof Element ? target.tagName : ''}`).toBe(true);
+        expect(result.prevented).toBe(false);
+      }
+    }
+
+    // Звичайна клавіша в тому ж вікні, як і раніше, у черзі.
+    expect(fire(document.body, { key: 'q' }).delivered).toBe(false);
+    grid.dispose();
+  });
+
   it('контроль моделі: БЕЗ черги та сама послідовність псує дані', () => {
     // Доказ, що тест відтворює дефект, а не проходить за будь-яких умов.
     const grid = mountGrid(4, 1, false);

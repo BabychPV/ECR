@@ -42,7 +42,8 @@ function inEditor(target: EventTarget | null): boolean {
 }
 
 function isPrintable(event: KeyboardEvent): boolean {
-  return event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey;
+  // Модифікаторні комбінації відсіяно раніше (`onKeyDown`), тут лише символ.
+  return event.key.length === 1;
 }
 
 interface QueuedKey {
@@ -116,6 +117,14 @@ export function installKeyCommitGate(container: HTMLElement): () => void {
     const inside = target instanceof Node && container.contains(target);
     const detached = target === doc.body || target === doc.documentElement;
     if (!inside && !(holding !== null && detached)) return;
+
+    // ⛔ Модифікаторні комбінації (Ctrl/Meta/Alt+клавіша: C, V, Z, S, ...) не
+    // затримуємо ВЗАГАЛІ. Нативний `copy`/`paste` породжується дією за
+    // замовчуванням САМОГО keydown: `preventDefault` затриманої клавіші
+    // мовчки з'їдав Ctrl+C (доведено живим прогоном: без черги `copy` є,
+    // з чергою за 5 мс після Enter — немає), а синтетичне відтворення його не
+    // повертає. Вони не друкують символ, тож порядок вводу не змінюють.
+    if (event.ctrlKey || event.metaKey || event.altKey) return;
 
     if (holding !== null) {
       event.preventDefault();
