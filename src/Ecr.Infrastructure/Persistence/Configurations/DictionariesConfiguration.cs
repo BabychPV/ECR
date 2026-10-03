@@ -153,7 +153,7 @@ public sealed class RegistryValueConfiguration : IEntityTypeConfiguration<Regist
         builder.HasKey(x => x.Id).HasName("PK_RegistryValue");
 
         builder.Property(x => x.RegistryEntryId).HasConversion<int>();
-        builder.Property(x => x.ValueString).HasMaxLength(1000);
+        builder.Property(x => x.ValueString).HasMaxLength(RegistryValue.MaxStringLength);
 
         // decimal(34,16) — та сама точність, що в комірках. Інша тут означала б,
         // що ліміт дозволу і виміряне значення округляються по-різному, і
@@ -213,8 +213,8 @@ public sealed class RegistryExternalKeyConfiguration : IEntityTypeConfiguration<
         builder.HasKey(x => x.Id).HasName("PK_RegistryExternalKey");
 
         builder.Property(x => x.RegistryEntryId).HasConversion<int>();
-        builder.Property(x => x.ExternalId).HasMaxLength(200).IsRequired();
-        builder.Property(x => x.ExternalPath).HasMaxLength(400);
+        builder.Property(x => x.ExternalId).HasMaxLength(RegistryExternalKey.MaxExternalIdLength).IsRequired();
+        builder.Property(x => x.ExternalPath).HasMaxLength(RegistryExternalKey.MaxExternalPathLength);
         builder.Property(x => x.LastSyncedAt).HasColumnType("datetime2(3)");
         builder.Property(x => x.MissingInSourceSince).HasColumnType("datetime2(3)");
 

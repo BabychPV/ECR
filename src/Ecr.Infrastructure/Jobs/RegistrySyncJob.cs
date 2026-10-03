@@ -860,8 +860,23 @@ public sealed class RegistrySyncJob(
 
         var elements = new Dictionary<string, SourceElement>(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var element in listed.Elements)
+        var rejections = new List<string>();
+
+        foreach (var listedElement in listed.Elements)
         {
+            // ⛔ Аудит 2026-10-03 (L4-03): ідентифікатор чи шлях, ширший за колонку, валив прогін.
+            var (element, rejection) = RegistrySyncElementLimits.Fit(listedElement);
+            if (rejection is not null)
+            {
+                rejections.Add(Truncate(rejection));
+            }
+
+            if (element is null)
+            {
+                complete = false;
+                continue;
+            }
+
             // Без GUID елемент не зіставити, а дубль GUID — порушення контракту
             // переліку: і те, і те робить знімок неповним, а не падінням задачі.
             if (string.IsNullOrWhiteSpace(element.ExternalId) || !elements.TryAdd(element.ExternalId, element))
@@ -890,7 +905,6 @@ public sealed class RegistrySyncJob(
         }
 
         var values = new Dictionary<string, Dictionary<string, object?>>(StringComparer.OrdinalIgnoreCase);
-        var rejections = new List<string>();
 
         if (addresses.Count > 0)
         {

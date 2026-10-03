@@ -42,6 +42,14 @@ public sealed class RegistryValue : Entity<long>
         RegistryFieldDefId = registryFieldDefId;
     }
 
+    /// <summary>Стеля текстового значення — ширина колонки <c>ValueString</c>.</summary>
+    /// <remarks>
+    /// ⛔ Аудит 2026-10-03 (L4-03 = L5-10): довшого рядка ніщо не перевіряло, і він доїжджав до
+    /// <c>SaveChanges</c> обрізанням у SQL Server — 500 на запит, а в синку — падіння всього прогону.
+    /// Відмова тут — помилка рядка з полем (пакет, CSV, синк) і 422 у ручній правці.
+    /// </remarks>
+    public const int MaxStringLength = 1000;
+
     public long RegistryEntryId { get; private set; }
 
     /// <summary>Запис-власник. Потрібна лише для вставки разом із новим записом.</summary>
@@ -104,7 +112,21 @@ public sealed class RegistryValue : Entity<long>
         switch (dataType)
         {
             case CellDataType.String:
-                ValueString = AsString(value);
+                var text = AsString(value);
+                if (text.Length > MaxStringLength)
+                {
+                    throw new DomainException(
+                        "ECR-REG-0422",
+                        $"Значення довше за {MaxStringLength} символів ({text.Length}).",
+                        new Dictionary<string, object?>
+                        {
+                            ["messageKey"] = "err.ECR-REG-0422.valueTooLong",
+                            ["max"] = MaxStringLength,
+                            ["length"] = text.Length,
+                        });
+                }
+
+                ValueString = text;
                 break;
 
             case CellDataType.Int:
