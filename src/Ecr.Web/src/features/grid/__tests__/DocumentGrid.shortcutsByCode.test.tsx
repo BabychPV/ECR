@@ -24,6 +24,9 @@ vi.mock('@revolist/react-datagrid', () => ({
       >
         simulate-edit
       </button>
+      <div className="edit-input-wrapper">
+        <input data-testid="editor-input" />
+      </div>
     </div>
   ),
 }));
@@ -157,6 +160,38 @@ describe('L8-05: ярлики за event.code', () => {
     fireEvent.keyDown(grid, { key: 'н', code: 'KeyY', ctrlKey: true });
     await wait(100);
     expect(patches[4]).toEqual({ baseVersion: 'v5', value: 5 });
+  });
+
+  it('uk/kz розкладки (я/н/ы) і Ctrl+Z у відкритому редакторі лишається полю', async () => {
+    mockServer();
+    render(
+      <MantineProvider>
+        <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+          <Host />
+        </QueryClientProvider>
+      </MantineProvider>,
+    );
+
+    const grid = await screen.findByTestId('revogrid-stub');
+    fireEvent.click(screen.getByRole('button', { name: 'simulate-edit' }));
+    await wait(900);
+    expect(patches).toHaveLength(1);
+
+    // Ctrl+Z у ПОЛІ редактора - не undo сітки й не гаситься.
+    const notPrevented = fireEvent.keyDown(screen.getByTestId('editor-input'), { key: 'я', code: 'KeyZ', ctrlKey: true });
+    await wait(100);
+    expect(notPrevented).toBe(true);
+    expect(patches).toHaveLength(1);
+
+    // uk: Z -> «я», Y -> «н», S -> «і»; kz: S -> «ы».
+    fireEvent.keyDown(grid, { key: 'я', code: 'KeyZ', ctrlKey: true });
+    await wait(100);
+    expect(patches).toHaveLength(2);
+    fireEvent.keyDown(grid, { key: 'н', code: 'KeyY', ctrlKey: true });
+    await wait(100);
+    expect(patches).toHaveLength(3);
+    expect(fireEvent.keyDown(grid, { key: 'ы', code: 'KeyS', ctrlKey: true })).toBe(false);
+    expect(fireEvent.keyDown(grid, { key: 'і', code: 'KeyS', ctrlKey: true })).toBe(false);
   });
 
   it('Ctrl+І (клавіша S) відміняє дію браузера «зберегти сторінку»', async () => {

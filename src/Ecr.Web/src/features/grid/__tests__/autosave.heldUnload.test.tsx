@@ -63,4 +63,16 @@ describe('L8-08: beforeunload і утримані правки', () => {
 
     expect(event.defaultPrevented).toBe(false);
   });
+
+  it('жодних правок: діалогу немає й нічого не надсилається', () => {
+    const fetchMock = vi.fn(() => Promise.resolve(new Response('{}')));
+    vi.stubGlobal('fetch', fetchMock);
+    renderHook(() => useDocumentPending(1), { wrapper });
+
+    const event = unloadEvent();
+    window.dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(false);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });

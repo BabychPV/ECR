@@ -1,5 +1,6 @@
 import type { ColumnDataSchemaModel, EditorBase, HyperFunc, VNode } from '@revolist/revogrid';
 import { t } from '@/shared/i18n';
+import { announceExplicitCommit } from './editorTouched';
 
 /**
  * Редактор-список комірки сітки: пошук, стрілки, Enter — для `Lookup`, `Bool`
@@ -417,6 +418,7 @@ export function createListCellEditor(
           initialQuery,
           ariaLabel,
           onCommit: (value, viaTab) => {
+            announceExplicitCommit(mounted?.input);
             mounted?.input.blur();
             save(value ?? '', viaTab);
           },

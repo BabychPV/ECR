@@ -6,6 +6,14 @@ import type { ColumnDto, TableSliceDto } from '@/api/types';
 import { cancelAutosave } from '../autosave';
 import { pendingSlice, resetPending } from '../pendingStore';
 import { DocumentGrid } from '../DocumentGrid';
+import { planPaste } from '../clipboard';
+
+// Лічильник вставок: «одна вставка = один розбір буфера» (без подвійної від gate + bodyPaste).
+vi.mock('../clipboard', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../clipboard')>();
+
+  return { ...original, planPaste: vi.fn(original.planPaste) };
+});
 
 /**
  * AN-39 / L8-16: Ctrl+V за 70-250 мс після Enter (макрос, сканер) вставляв у ПОПЕРЕДНЮ
@@ -85,6 +93,7 @@ function paste(stub: HTMLElement): void {
 }
 
 afterEach(() => {
+  vi.mocked(planPaste).mockClear();
   cancelAutosave();
   resetPending();
   vi.unstubAllGlobals();
@@ -111,5 +120,7 @@ describe('L8-16: Ctrl+V одразу після Enter', () => {
     await wait(500);
 
     expect(pendingSlice(4, 202609).size).toBe(1);
+    // Одна вставка = один розбір (не подвійна від gate + нативного шляху).
+    expect(vi.mocked(planPaste)).toHaveBeenCalledTimes(1);
   });
 });

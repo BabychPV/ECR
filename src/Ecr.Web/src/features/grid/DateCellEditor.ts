@@ -1,6 +1,7 @@
 import type { ColumnDataSchemaModel, EditorBase, HyperFunc, VNode } from '@revolist/revogrid';
 import { t } from '@/shared/i18n';
 import { dateOnlyOf } from './cellValue';
+import { announceExplicitCommit } from './editorTouched';
 
 /**
  * Редактор комірки `CellDataType.Date` — поле дати з календарем (`R-02`).
@@ -33,6 +34,7 @@ export function createDateCellEditor() {
     const commit = (viaTab: boolean): void => {
       if (input === null) return;
 
+      announceExplicitCommit(input);
       input.blur();
       save(input.value, viaTab);
     };
