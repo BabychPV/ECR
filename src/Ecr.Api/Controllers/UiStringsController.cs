@@ -137,8 +137,10 @@ public sealed class UiStringsController(
     [ProducesResponseType<Ecr.Application.Ports.UiStringCatalog>(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status304NotModified)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
-    public async Task<IActionResult> Get(string lang, [FromQuery] string scope, CancellationToken ct)
+    public async Task<IActionResult> Get(string lang, [FromQuery] string? scope, CancellationToken ct)
     {
+        // ⛔ T2-09: у контракті `scope` необов'язковий, а неnullable-параметр давав `422 malformedRequest` на
+        // запит без нього. Тепер відсутній `scope` — те саме, що будь-що, крім "public": приватна область.
         // Усе, крім явного "public", вважається приватним. Помилка в написанні
         // має закривати каталог, а не відкривати його.
         var publicOnly = string.Equals(scope, "public", StringComparison.OrdinalIgnoreCase);
