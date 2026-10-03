@@ -562,7 +562,12 @@ export function SheetActions({
   // застосувала для лан 1-7.
   // ✎ 2026-10-02: перерахунок СВОГО документа — за читанням (сервер: `RecalculateDocumentHandler`),
   // а не за `Calculation.Recalculate` (те — проєктний/масовий перерахунок).
-  const canRecalculate = !dataLocked && can(me, 'Document.View');
+  // ✎ AN-39/L8-12: сервер (`RecalculateDocumentHandler`) відмовляє, коли ХОЧ ОДИН аркуш
+  // періоду поданий чи затверджений, - кнопки, яка гарантовано дасть відмову, немає.
+  const sheetsLocked = Object.values(summary?.sheetStates ?? {}).some(
+    (sheetState) => sheetState === 'Submitted' || sheetState === 'Approved',
+  );
+  const canRecalculate = !dataLocked && !sheetsLocked && can(me, 'Document.View');
 
   const hasAnyAction =
     canRecalculate ||
