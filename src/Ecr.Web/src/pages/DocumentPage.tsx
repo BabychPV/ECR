@@ -34,6 +34,7 @@ import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { showApiError } from '@/shared/ui/notify';
 import { PageHeader } from '@/shared/ui/PageHeader';
+import { useProjectCurrentPeriodDefault } from '@/features/documents/useProjectCurrentPeriodDefault';
 import { StatusBadge } from '@/shared/ui/StatusBadge';
 import { useUrlNumber, useUrlState } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
@@ -414,6 +415,8 @@ export function DocumentPage(): JSX.Element {
     queryFn: () => apiFetch<PeriodCalendarDto>(`/api/v1/projects/${String(projectId ?? 0)}/periods`),
     enabled: projectId !== null,
   });
+
+  useProjectCurrentPeriodDefault(urlPeriod, calendar.data?.periods, setPeriodKey);
 
   const lock = documentLockOf({
     projectStatus: projects.data?.items?.find((project) => project.id === projectId)?.status,
