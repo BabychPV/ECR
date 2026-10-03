@@ -137,14 +137,23 @@ public static class RollupEvaluator
             return null;
         }
 
-        var result = aggregate switch
+        decimal result;
+        try
         {
-            RollupAggregate.Sum => present.Sum(),
-            RollupAggregate.Avg => present.Sum() / present.Count,
-            RollupAggregate.Min => present.Min(),
-            RollupAggregate.Max => present.Max(),
-            _ => throw new ArgumentOutOfRangeException(nameof(aggregate)),
-        };
+            result = aggregate switch
+            {
+                RollupAggregate.Sum => present.Sum(),
+                RollupAggregate.Avg => present.Sum() / present.Count,
+                RollupAggregate.Min => present.Min(),
+                RollupAggregate.Max => present.Max(),
+                _ => throw new ArgumentOutOfRangeException(nameof(aggregate)),
+            };
+        }
+        catch (OverflowException)
+        {
+            // ⚠ Сума поза decimal — не число, а не впалий перерахунок (аудит L7-03): приймач порожній.
+            return null;
+        }
 
         return targetScale is null ? result : Math.Round(result, targetScale.Value, MidpointRounding.AwayFromZero);
     }

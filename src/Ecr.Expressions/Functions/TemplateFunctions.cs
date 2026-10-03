@@ -167,16 +167,13 @@ public static class TemplateFunctions
             return ExpressionValue.Error(ExpressionErrors.BadValue);
         }
 
-        if (places != decimal.Truncate(places))
+        // ⚠ Межа — ДО звуження в int: `(int)3e9m` кидає OverflowException (аудит L7-03).
+        if (places != decimal.Truncate(places) || places is < 0m or > 28m)
         {
             return ExpressionValue.Error(ExpressionErrors.BadValue);
         }
 
         var scale = (int)places;
-        if (scale is < 0 or > 28)
-        {
-            return ExpressionValue.Error(ExpressionErrors.BadValue);
-        }
 
         // ⚠ AwayFromZero, а не ToEven: ROUND(0.5, 0) = 1, а банківське дало б 0.
         // Різниця видна саме на .5 і саме там, де рахуються тонни викидів.

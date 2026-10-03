@@ -71,8 +71,12 @@ public sealed class LegacyDoubleArithmetic : IEvaluationArithmetic
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// ⚠ Межа 0…15 — межа <c>Math.Round(double, int)</c>: поза нею BCL кидає, а
+    /// виняток валив би весь прогін через одну комірку (аудит L7-03).
+    /// </remarks>
     public ExpressionValue Round(ExpressionValue value, int digits)
-        => value.AsDouble() is { } d
+        => digits is >= 0 and <= 15 && value.AsDouble() is { } d
             ? ExpressionValue.LegacyNumber(Math.Round(d, digits, MidpointRounding.ToEven))
             : ExpressionValue.Error(ExpressionErrors.BadValue);
 

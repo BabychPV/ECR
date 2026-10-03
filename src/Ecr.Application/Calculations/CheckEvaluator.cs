@@ -41,9 +41,11 @@ public static class CheckEvaluator
             return new CheckResult(Compared: false, Passed: true, 0m, 0m);
         }
 
-        var deviation = Math.Abs(left.Value - right.Value);
+        // ⚠ Переповнення decimal насичується до MaxValue, а не кидає (аудит L7-03): відхилення
+        // понад decimal — провал, допуск понад decimal — пропускає будь-яке представне відхилення.
+        var deviation = Saturated(() => Math.Abs(left.Value - right.Value));
         var allowed = spec.ToleranceKind == CheckToleranceKind.Rel
-            ? spec.Tolerance * Math.Abs(right.Value)
+            ? Saturated(() => spec.Tolerance * Math.Abs(right.Value))
             : spec.Tolerance;
 
         return new CheckResult(Compared: true, deviation <= allowed, deviation, allowed);
@@ -137,6 +139,18 @@ public static class CheckEvaluator
         return [.. failures.Select(f => new ValidationMessage(
             severity, "REL-" + relationCode, Text(spec, f, language), targetTableDefId, f.TargetRowKey, spec.Right, BlocksSave: false,
             SourceTableDefId: sourceTableDefId, SourceColumnCode: sourceTableDefId is null ? null : spec.Left))];
+    }
+
+    private static decimal Saturated(Func<decimal> nonNegative)
+    {
+        try
+        {
+            return nonNegative();
+        }
+        catch (OverflowException)
+        {
+            return decimal.MaxValue;
+        }
     }
 
     private static string N(decimal? v) => v?.ToString("0.############################", CultureInfo.InvariantCulture) ?? string.Empty;
