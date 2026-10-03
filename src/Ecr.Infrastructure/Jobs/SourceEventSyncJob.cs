@@ -154,10 +154,16 @@ public sealed partial class SourceEventSyncJob(
 
         // ⛔ Одне читання на сутність: мапінги (документи ділянок) ділять відповідь, а Truncated —
         // ознака саме цього читання. Відмова джерела — виняток адаптера, задача стає Failed.
-        var read = await adapter
-            .ReadEventsAsync(
-                new SourceEventQuery(dataSource.Id, entity.Id, entity.Code, from, to, AttributesOf(maps)), ct)
+        var (read, pages) = await ReadEventPagesAsync(
+                adapter, new SourceEventQuery(dataSource.Id, entity.Id, entity.Code, from, to, AttributesOf(maps)), ct)
             .ConfigureAwait(false);
+        var truncatedAfterPaging = read.Truncated && read.ErrorCode is null && read.Events.Count > 0
+            ? new EventsTruncation(read.Events.Count, pages, read.Events.Max(e => e.StartUtc))
+            : null;
+        if (truncatedAfterPaging is not null)
+        {
+            LogEventsTruncated(_logger, entity.Code, read.Events.Count, pages);
+        }
 
         await progress.ReportKeyAsync(40, "jobs.sourceEventsWriting", ct).ConfigureAwait(false);
 
@@ -172,7 +178,7 @@ public sealed partial class SourceEventSyncJob(
         var totals = new Totals();
         foreach (var map in maps)
         {
-            await SyncMapAsync(map, own, sibling, from, to, now, totals, ct).ConfigureAwait(false);
+            await SyncMapAsync(map, own, sibling, from, to, now, totals, truncatedAfterPaging, ct).ConfigureAwait(false);
         }
 
         if (totals.Removed > 0 || totals.RemovalSkipped > 0)
@@ -334,8 +340,8 @@ public sealed partial class SourceEventSyncJob(
             SourceEventResult result;
             try
             {
-                result = await adapter
-                    .ReadEventsAsync(
+                (result, _) = await ReadEventPagesAsync(
+                        adapter,
                         new SourceEventQuery(
                             dataSourceId, sibling.Id, sibling.Code, from, to,
                             AttributesOf([.. candidates.First(g => g.Key == sibling.Id)])),
@@ -383,6 +389,56 @@ public sealed partial class SourceEventSyncJob(
         Message = "SourceEventSyncJob: подія {EventId} є в шаблонах {Template} і {Other} з різними значеннями атрибутів; береться перший за порядком шаблонів.")]
     private static partial void LogTemplateOverlap(ILogger logger, string eventId, string template, string other);
 
+    /// <summary>Скільки сторінок подій дочитувати за одне читання шаблону (L3-07).</summary>
+    public const int MaxEventPages = 10;
+
+    /// <summary>Читання подій обрізане й після сторінкування: скільки прочитано і де зупинились.</summary>
+    private sealed record EventsTruncation(int Count, int Pages, DateTime LastStartUtc);
+
+    /// <summary>
+    /// Читає події вікна сторінками: наступна — від найпізнішого прочитаного початку (включно), дублікати —
+    /// за <c>EventId</c>; до <see cref="MaxEventPages"/> сторінок.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ L3-07: одне читання зі стелею <see cref="SourceEventQuery.DefaultMaxEvents"/> від найранішого відкритого
+    /// періоду (повна звірка) щоразу віддавало ті самі найраніші події — найсвіжіші не синхронізувалися ніколи,
+    /// доки старий період не закриють. Запит упорядкований за початком (контракт адаптерів). Сторінка, що не
+    /// зрушила курсор (усі події з одним початком), зупиняє читання як обрізане.
+    /// </remarks>
+    private static async Task<(SourceEventResult Result, int Pages)> ReadEventPagesAsync(
+        IExternalDataSource adapter, SourceEventQuery query, CancellationToken ct)
+    {
+        var events = new List<SourceEvent>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var cursor = query.FromUtc;
+        var pages = 0;
+
+        while (true)
+        {
+            var page = await adapter.ReadEventsAsync(query with { FromUtc = cursor }, ct).ConfigureAwait(false);
+            pages++;
+            events.AddRange(page.Events.Where(e => seen.Add(e.EventId)));
+
+            if (!page.Truncated || page.ErrorCode is not null || page.Events.Count == 0)
+            {
+                return (new SourceEventResult(events, page.Truncated, page.ErrorCode), pages);
+            }
+
+            var next = page.Events.Max(e => e.StartUtc);
+            if (next <= cursor || pages >= MaxEventPages)
+            {
+                return (new SourceEventResult(events, true, null), pages);
+            }
+
+            cursor = next;
+        }
+    }
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "SourceEventSyncJob: шаблон {Template} — подій у вікні більше, ніж дочитано ({Count} за {Pages} сторінок); пізніші цим прогоном не синхронізовано, видалення пропущено.")]
+    private static partial void LogEventsTruncated(ILogger logger, string template, int count, int pages);
+
     private async Task SyncMapAsync(
         SourceEventMap map,
         SourceEventResult read,
@@ -391,6 +447,7 @@ public sealed partial class SourceEventSyncJob(
         DateTime to,
         DateTime now,
         Totals totals,
+        EventsTruncation? truncation,
         CancellationToken ct)
     {
         var projectId = await db.Documents
@@ -480,6 +537,20 @@ public sealed partial class SourceEventSyncJob(
 
         // ── Етап 2: зв'язки.
         var events = new List<CoverageEvent>();
+
+        // L3-07: подій більше, ніж дочитали сторінками, — людині видно в журналі покриття, а не лише
+        // мовчазним вимкненням Missing/видалення.
+        if (truncation is not null && SourceEventPeriods.Locate(truncation.LastStartUtc, periods) is { } truncatedPeriod)
+        {
+            events.Add(new CoverageEvent(
+                map.SourceEntityId,
+                new PeriodKey(truncatedPeriod.PeriodKey),
+                CollectionCoverage.SourceDataRefused,
+                CoverageDetails.EventsTruncated(
+                    truncation.Count,
+                    truncation.Pages,
+                    truncation.LastStartUtc.ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture))));
+        }
         foreach (var item in plan.Items)
         {
             var link = item.Link is { } state ? linkByEventId[state.SourceEventId] : null;

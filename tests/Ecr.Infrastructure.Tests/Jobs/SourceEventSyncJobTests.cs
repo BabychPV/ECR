@@ -698,6 +698,58 @@ public sealed class SourceEventSyncJobTests(SqlServerFixture sql)
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Directive", "HSE301-EFSYNC")]
+    public async Task ПонадСтелюПодій_НайсвіжішіСинхронізуються()
+    {
+        // ⛔ L3-07: читання зі стелею віддавало щоразу ті самі найраніші події — свіжіші за стелю не
+        // синхронізувалися ніколи. Тепер — сторінками від найпізнішого прочитаного початку.
+        // Мутація: ReadEventPagesAsync повертає першу сторінку (без циклу).
+        await using var stand = await ArrangeAsync();
+        var e1 = Ev("E1", Start, End);
+        var e2 = Ev("E2", Start.AddHours(1), End.AddHours(1));
+        var e3 = Ev("E3", Start.AddHours(2), End.AddHours(2));
+        var source = new FakeEventSource
+        {
+            Pages = query => query.FromUtc < e2.StartUtc
+                ? new SourceEventResult([e1, e2], true, null)
+                : new SourceEventResult([e2, e3], false, null),
+        };
+
+        await RunAsync(stand, source);
+
+        Assert.Equal(["EF-E1", "EF-E2", "EF-E3"], (await RowsAsync(stand)).Select(r => r.RowKey).Order(StringComparer.Ordinal));
+        Assert.All(await LinksAsync(stand), l => Assert.Equal(SourceEventLinkStatus.Synced, l.Status));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "HSE301-EFSYNC")]
+    public async Task ОбрізанеПісляСторінок_ПодіяПокриттяEventsTruncated()
+    {
+        // ⛔ L3-07: обрізання, яке сторінки не зняли, видно людині в журналі покриття (раніше — лише
+        // мовчазне вимкнення Missing/видалення). Мутація: прибрати events.Add(...EventsTruncated...).
+        await using var stand = await ArrangeAsync();
+        var source = new FakeEventSource
+        {
+            Pages = query => new SourceEventResult([Ev($"E{query.FromUtc.Ticks}", query.FromUtc.AddMinutes(1), query.FromUtc.AddMinutes(2))], true, null),
+        };
+
+        await RunAsync(stand, source, from: Start, to: Start.AddDays(1));
+
+        Assert.Equal(SourceEventSyncJob.MaxEventPages, (await RowsAsync(stand)).Count);
+        Assert.Equal(
+            1,
+            Convert.ToInt32(
+                await ScalarAsync(
+                    $"SELECT COUNT(*) FROM itg.CollectionCoverage WHERE SourceEntityId = {stand.EntityId} "
+                    + "AND Status = N'SourceDataRefused' AND Details LIKE N'%coverageEvents.eventsTruncated%'"),
+                CultureInfo.InvariantCulture));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "HSE301-EFSYNC")]
     public async Task ПоданняМіжРішеннямІВидаленням_РядокЛишається()
     {
         // ⛔ L3-04: стан аркуша читався ДО транзакції видалення. Подання між рішенням і видаленням
@@ -1259,6 +1311,9 @@ public sealed class SourceEventSyncJobTests(SqlServerFixture sql)
 
         public SourceEventResult Result { get; set; } = new(events, false, null);
 
+        /// <summary>Відповідь за курсором запиту (сторінкування L3-07); <c>null</c> — <see cref="Result"/>.</summary>
+        public Func<SourceEventQuery, SourceEventResult>? Pages { get; init; }
+
         public SourceEventQuery? LastQuery { get; private set; }
 
         /// <summary>Відповіді за шаблоном; шаблону немає в словнику — <see cref="Result"/>.</summary>
@@ -1279,6 +1334,11 @@ public sealed class SourceEventSyncJobTests(SqlServerFixture sql)
             if (FailTemplates.Contains(query.Template))
             {
                 throw new InvalidOperationException($"template {query.Template} unavailable");
+            }
+
+            if (Pages is not null)
+            {
+                return Task.FromResult(Pages(query));
             }
 
             return Task.FromResult(ByTemplate.TryGetValue(query.Template, out var byTemplate) ? byTemplate : Result);

@@ -83,6 +83,11 @@ describe('collectionRunErrorText', () => {
       { eventId: '7', rowKey: 'R1', status: 'Submitted' },
       'eventId=7, rowKey=R1, status=Submitted',
     ],
+    [
+      'coverageEvents.eventsTruncated',
+      { count: '2000', pages: '10', after: '2026-01-28T09:00:00Z' },
+      'count=2000, pages=10, after=2026-01-28T09:00:00Z',
+    ],
     // L3-05: адаптер Sql відмовив політикою адреси до з'єднання.
     ['err.ECR-INT-0503.endpointForbidden', { dataSource: 'FLERT' }, 'dataSource=FLERT'],
   ])('подія покриття від задачі `%s` резолвиться через каталог, а не лишається JSON', (k, p, shown) => {

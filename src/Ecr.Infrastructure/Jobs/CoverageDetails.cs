@@ -42,6 +42,15 @@ public static class CoverageDetails
 
     public const string EventTemplateOverlapKey = "coverageEvents.eventTemplateOverlap";
 
+    public const string EventsTruncatedKey = "coverageEvents.eventsTruncated";
+
+    /// <summary>
+    /// Подій у вікні більше, ніж дочитали сторінками (L3-07): пізніші за <paramref name="after"/> цим прогоном не
+    /// синхронізовано, видалення зниклих пропущено.
+    /// </summary>
+    public static string EventsTruncated(int count, int pages, object after)
+        => Encode(EventsTruncatedKey, ("count", Text(count)), ("pages", Text(pages)), ("after", Text(after)));
+
     /// <summary>Масове видалення зниклих подій перевищило ліміт: за мапінгом нічого не видалено до ручного підтвердження.</summary>
     public static string EventRemovalLimit(int candidates, int limit, int linked)
         => Encode(
