@@ -139,11 +139,7 @@ public sealed class UiStringsController(
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public async Task<IActionResult> Get(string lang, [FromQuery] string? scope, CancellationToken ct)
     {
-        // ⛔ T2-09: у контракті `scope` необов'язковий, а неnullable-параметр давав `422 malformedRequest` на
-        // запит без нього. Тепер відсутній `scope` — те саме, що будь-що, крім "public": приватна область.
-        // Усе, крім явного "public", вважається приватним. Помилка в написанні
-        // має закривати каталог, а не відкривати його.
-        var publicOnly = string.Equals(scope, "public", StringComparison.OrdinalIgnoreCase);
+        var publicOnly = IsPublicOnly(scope, User.Identity?.IsAuthenticated == true);
 
         // Анонімний запит приватної області відхиляється в обробнику (ФВ-14.2);
         // тут лише умовний запит.
@@ -159,6 +155,16 @@ public sealed class UiStringsController(
 
         return Ok(catalog);
     }
+
+    /// <summary>
+    /// Яку область віддавати. T2-09: у контракті <c>scope</c> необов'язковий (раніше запит без нього — 422).
+    /// Відсутній: анонім — ПУБЛІЧНА область (екран входу не ламається), автентифікований — приватна.
+    /// Явне значення: усе, крім "public", — приватне (помилка в написанні закриває каталог).
+    /// </summary>
+    /// <param name="scope">Значення запиту.</param>
+    /// <param name="authenticated">Чи автентифікований запит.</param>
+    public static bool IsPublicOnly(string? scope, bool authenticated)
+        => scope is null ? !authenticated : string.Equals(scope, "public", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>Змінює рядок каталогу. Право <c>System.ManageLocalization</c>.</summary>
     /// <remarks>Будь-який запис інкрементує <c>Revision</c> — інакше клієнти не побачать зміни.</remarks>
