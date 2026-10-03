@@ -420,7 +420,12 @@ public static class DataSourceEndpointPolicy
                || k is "DATASOURCE" or "SOURCE";
     }
 
-    /// <summary>Link-local/metadata: 169.254.0.0/16, fe80::/10.</summary>
+    /// <summary>Link-local/metadata: 169.254.0.0/16, fe80::/10 і IPv6-адреса metadata AWS <c>fd00:ec2::254</c>.</summary>
+    /// <remarks>
+    /// ⚠ <c>fd00:ec2::254</c> — IMDS AWS по IPv6 (Nitro): з ULA-діапазону, тож перевірка fe80::/10 її не
+    /// бачить (рецензія an33b). Діє для PiSqlClient (<c>D-245</c>), Sql (<c>D-279</c>) і PI Web API
+    /// (<see cref="IsBlocked"/>).
+    /// </remarks>
     public static bool IsLinkLocal(IPAddress ip)
     {
         ArgumentNullException.ThrowIfNull(ip);
@@ -432,12 +437,22 @@ public static class DataSourceEndpointPolicy
 
         if (ip.AddressFamily == AddressFamily.InterNetworkV6)
         {
-            return ip.IsIPv6LinkLocal;
+            return ip.IsIPv6LinkLocal || IsAwsMetadataV6(ip);
         }
 
         var b = ip.GetAddressBytes();
 
         return b[0] == 169 && b[1] == 254;
+    }
+
+    private static readonly IPAddress AwsMetadataV6 = IPAddress.Parse("fd00:ec2::254");
+
+    private static bool IsAwsMetadataV6(IPAddress ip)
+    {
+        // Зона (`%eth0`) не змінює адресу призначення.
+        var bare = ip.ScopeId == 0 ? ip : new IPAddress(ip.GetAddressBytes());
+
+        return bare.Equals(AwsMetadataV6);
     }
 
     /// <summary>Хост адреси, якщо це ім'я (не IP-літерал) — його треба розв'язати; інакше <c>null</c>.</summary>
@@ -471,7 +486,7 @@ public static class DataSourceEndpointPolicy
 
         if (ip.AddressFamily == AddressFamily.InterNetworkV6)
         {
-            return ip.IsIPv6LinkLocal || ip.IsIPv6SiteLocal || ip.IsIPv6Multicast;
+            return ip.IsIPv6LinkLocal || ip.IsIPv6SiteLocal || ip.IsIPv6Multicast || IsAwsMetadataV6(ip);
         }
 
         var b = ip.GetAddressBytes();

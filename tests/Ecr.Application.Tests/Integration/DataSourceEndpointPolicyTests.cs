@@ -221,4 +221,33 @@ public sealed class DataSourceEndpointPolicyTests
         Assert.Equal("err.ECR-REQ-0422.dataSourceEndpointMalformed", refused.Details!["messageKey"]);
         Assert.Equal("endpoint", refused.Details!["field"]);
     }
+
+    /// <summary>
+    /// Рецензія an33b: IMDS AWS по IPv6 <c>fd00:ec2::254</c> (ULA, не fe80::/10) — metadata для всіх трьох
+    /// транспортів: PiSqlClient (D-245), Sql (D-279), PI Web API (D-241).
+    /// </summary>
+    [Theory]
+    [InlineData("fd00:ec2::254")]
+    [InlineData("FD00:EC2:0:0:0:0:0:254")]
+    [InlineData("[fd00:ec2::254]:1433")]
+    public void Metadata_AWS_IPv6_відхиляється_всіма_транспортами(string host)
+    {
+        Assert.Equal(EndpointVerdict.HostForbidden, DataSourceEndpointPolicy.CheckSqlServerAddress(host));
+        Assert.Equal(EndpointVerdict.HostForbidden, DataSourceEndpointPolicy.CheckSqlServerAddress($"Driver={{PI SQL Client}};Server={host}"));
+        Assert.Equal(EndpointVerdict.HostForbidden, DataSourceEndpointPolicy.CheckSqlClientConnectionString($"Server={host};Integrated Security=true"));
+
+        var bare = host.TrimStart('[').Split(']')[0];
+        Assert.Equal(EndpointVerdict.HostForbidden, DataSourceEndpointPolicy.CheckAddress($"https://[{bare}]/piwebapi", false, null));
+        Assert.True(DataSourceEndpointPolicy.IsLinkLocal(IPAddress.Parse(bare)));
+        Assert.True(DataSourceEndpointPolicy.IsBlocked(IPAddress.Parse(bare)));
+    }
+
+    [Theory]
+    [InlineData("fd00:ec2::253")]
+    [InlineData("fd12:3456::1")]
+    public void Інші_ULA_не_metadata(string host)
+    {
+        Assert.False(DataSourceEndpointPolicy.IsLinkLocal(IPAddress.Parse(host)));
+        Assert.Equal(EndpointVerdict.Allowed, DataSourceEndpointPolicy.CheckSqlServerAddress(host));
+    }
 }
