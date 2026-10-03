@@ -362,10 +362,22 @@ public sealed class RowWindowFetchJob(
                     ct)
                 .ConfigureAwait(false);
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
         catch (EcrException ex)
         {
             // Відмова джерела рядка не валить решту рядків: статус SourceError, повтор — за RefetchWithinDays.
             return Item.Failed(rowKey, source, span, ex.ErrorCode);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // ⛔ L3-02: адаптери на останній спробі віддають сирі HttpRequestException /
+            // OdbcException. Без цього один такий рядок обривав усю задачу, і прочитане
+            // для інших рядків не записувалося — задача падала на кожному тригері, поки
+            // джерело лежить. Для рядка це та сама відмова транспорту.
+            return Item.Failed(rowKey, source, span, TransportMissingCode);
         }
 
         var fold = RowWindowFetch.Fold(
@@ -407,13 +419,72 @@ public sealed class RowWindowFetchJob(
 
             return 0;
         }
+        catch (Exception ex) when (cells.Count > 1 && ex is BusinessRuleException or DomainException)
+        {
+            // ⛔ L3-02: пакет відхилено цілком (ECR-CELL-0422 validationBlocked, ECR-CALC-0437 …) —
+            // одна комірка не валить решту рядків: розводимо по одному, як SourceEventSyncJob.WriteGroupAsync.
+            return await WriteOneByOneAsync(instance, periodKey, items, cells, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is BusinessRuleException or DomainException)
+        {
+            MarkRejected(items, cells[0].RowKey, ex);
+            return 0;
+        }
 
+        Distribute(items, written);
+        return written.Applied;
+    }
+
+    private async Task<int> WriteOneByOneAsync(
+        TableInstance instance, PeriodKey periodKey, List<Item> items, List<IntegrationCellValue> cells, CancellationToken ct)
+    {
+        var applied = 0;
+        foreach (var cell in cells)
+        {
+            try
+            {
+                var written = await patcher
+                    .ApplyIntegrationAsync(instance.DocumentId, instance.Id, periodKey, [cell], ct)
+                    .ConfigureAwait(false);
+                Distribute(items, written);
+                applied += written.Applied;
+            }
+            catch (AccessDeniedException)
+            {
+                foreach (var item in items)
+                {
+                    item.Abandoned = true;
+                }
+
+                return applied;
+            }
+            catch (Exception ex) when (ex is BusinessRuleException or DomainException)
+            {
+                MarkRejected(items, cell.RowKey, ex);
+            }
+        }
+
+        return applied;
+    }
+
+    private static void Distribute(List<Item> items, IntegrationWriteResult written)
+    {
         Mark(items, written.KeptManual, RowWindowValueStatus.KeptManual, null);
         Mark(items, written.WriteConflicts ?? [], RowWindowValueStatus.SourceError, WriteConflictCode);
         Mark(items, written.AwaitingConfirmation ?? [], RowWindowValueStatus.SourceError, NeedsConfirmationCode);
-
-        return written.Applied;
     }
+
+    private static void MarkRejected(List<Item> items, string rowKey, Exception ex)
+        => Mark(
+            items,
+            [rowKey],
+            RowWindowValueStatus.SourceError,
+            ex switch
+            {
+                EcrException ecr => ecr.ErrorCode,
+                DomainException domain => domain.ErrorCode,
+                _ => TransportMissingCode,
+            });
 
     private static void Mark(List<Item> items, IReadOnlyList<string> entries, RowWindowValueStatus status, string? code)
     {
