@@ -6507,8 +6507,11 @@ USING (VALUES
     -- COLL:sec-s4 ── кінець секції ──
     -- COLL:p3-t1 ── тестувальний прохід №1, пакет P3 (T1-04…); ru/kz — порцією COLL:p3-t1 у блоці I18N нижче ──
     (N'err.ECR-USR-0422.emailInvalid', N'en', N'"{email}" is not a valid email address. Use the form name@example.com.', 1),
-    (N'err.ECR-SEC-0409.grantsStale', N'en', N'The role''s grants were changed after you opened them. Reload the grants and repeat your changes.', 1)
+    (N'err.ECR-SEC-0409.grantsStale', N'en', N'The role''s grants were changed after you opened them. Reload the grants and repeat your changes.', 1),
     -- COLL:p3-t1 ── кінець секції ──
+    -- COLL:p2-t2 ── тестувальний прохід №2, T2-03: код зв'язку таблиць унікальний на всю систему; ru/kz — порцією COLL:p2-t2 у блоці I18N нижче ──
+    (N'err.ECR-TMPL-0409.relationCodeTaken', N'en', N'A table relation with code "{relationCode}" already exists. Relation codes are unique across all templates and versions: choose a different code.', 1)
+    -- COLL:p2-t2 ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -15256,6 +15259,16 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:p3-t1 ── кінець секції ──
+-- COLL:p2-t2 ── ru/kz тестувального проходу №2 (T2-03); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-TMPL-0409.relationCodeTaken', N'ru', N'Связь таблиц с кодом «{relationCode}» уже существует. Коды связей уникальны во всех шаблонах и версиях: выберите другой код.'),
+    (N'err.ECR-TMPL-0409.relationCodeTaken', N'kz', N'«{relationCode}» кодты кесте байланысы бұрыннан бар. Байланыс кодтары барлық үлгілер мен нұсқалар бойынша бірегей: басқа код таңдаңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:p2-t2 ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t
