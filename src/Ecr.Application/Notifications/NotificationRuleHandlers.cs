@@ -177,7 +177,8 @@ public sealed class ReplaceNotificationRulesHandler(
 
 /// <summary>Журнал доставок. Право <c>System.ManageNotifications</c>.</summary>
 public sealed class ListNotificationDeliveriesHandler(
-    INotificationStore store, IAccessDecisionService access, ICurrentUser currentUser)
+    INotificationStore store, IAccessDecisionService access, ICurrentUser currentUser,
+    IUiStringCatalog? uiCatalog = null)
 {
     /// <summary>
     /// Стеля сторінки журналу — менша за спільну (<see cref="CursorRequest.MaxLimit"/>):
@@ -218,9 +219,27 @@ public sealed class ListNotificationDeliveriesHandler(
                 });
         }
 
-        return await store
+        var result = await store
             .ReadDeliveriesAsync(page, new NotificationDeliveryFilter(channelId, StatusOf(status)), ct)
             .ConfigureAwait(false);
+
+        // ⛔ T2-09: причина відмови пишеться відправником у журнал ОДИН раз, у фоновому потоці й без мови читача
+        // (раніше — зашитою українською). Тепер вона — конверт «ключ + параметри» (JobProgressMessageCodec), а
+        // мовою ЧИТАЧА стає тут, при читанні. Рядок не в форматі конверта (старі записи, текст транспорту)
+        // лишається як є.
+        if (uiCatalog is null || !result.Items.Any(item => item.Error is not null))
+        {
+            return result;
+        }
+
+        var resolved = await Integration.JobProgressMessageResolver
+            .ResolveManyAsync(uiCatalog, currentUser.Language, [.. result.Items.Select(item => item.Error)], ct)
+            .ConfigureAwait(false);
+
+        return result with
+        {
+            Items = [.. result.Items.Select((item, index) => item with { Error = resolved[index] })],
+        };
     }
 
     /// <summary>Підсумок за іменем; невідоме — <c>422</c>, а не мовчазне «усі».</summary>

@@ -186,6 +186,60 @@ public static partial class UiStringResolver
     }
 
     /// <summary>
+    /// Які підстановки повідомлення — НАЗВИ СТАНІВ (<c>Grace</c>, <c>Published</c>) і з якого словника
+    /// <c>status.&lt;родина&gt;.*</c> їх перекладати (T2-09).
+    /// </summary>
+    private static readonly Dictionary<string, (string Parameter, string Family)> StateParameters =
+        new(StringComparer.Ordinal)
+        {
+            ["err.ECR-JOB-0409.notActive"] = ("state", "job"),
+            ["err.ECR-JOB-0409.notFailed"] = ("state", "job"),
+            ["err.ECR-JOB-0409.consistencyCheckRunning"] = ("state", "job"),
+            ["err.ECR-TMPL-0409.alreadyPublishedOrDeprecated"] = ("status", "version"),
+            ["err.ECR-TMPL-0409.deprecateRequiresPublished"] = ("status", "version"),
+            ["err.ECR-TMPL-0409.structurallyFrozen"] = ("status", "version"),
+            ["err.ECR-CALC-0409.draftRequired"] = ("status", "version"),
+            ["err.ECR-RPT-0409.versionNotDraft"] = ("status", "version"),
+            ["err.ECR-DOC-0409.reopenWrongState"] = ("status", "sheet"),
+            ["err.ECR-DOC-0409.submitWrongState"] = ("status", "sheet"),
+            ["err.ECR-DOC-0409.approveWrongState"] = ("status", "sheet"),
+            ["err.ECR-DOC-0409.rejectWrongState"] = ("status", "sheet"),
+            ["err.ECR-DOC-0409.recallWrongState"] = ("status", "sheet"),
+            ["err.ECR-PRD-0409.reopenOnlyClosed"] = ("state", "period"),
+            ["err.ECR-PRJ-0422.notDraft"] = ("status", "project"),
+            ["err.ECR-PRD-0409.archiveNotActive"] = ("status", "project"),
+        };
+
+    /// <summary>
+    /// Підміняє в підстановках сиру назву стану («Grace», «Published») підписом каталогу
+    /// <c>status.&lt;родина&gt;.&lt;стан&gt;</c> мовою читача (T2-09): ru/kz повідомлення читалося як
+    /// «состояние периода — Grace». Стану немає в каталозі чи повідомлення не в переліку — без змін.
+    /// </summary>
+    /// <param name="catalog">Каталог мови запиту.</param>
+    /// <param name="messageKey">Ключ повідомлення.</param>
+    /// <param name="parameters">Підстановки.</param>
+    public static IReadOnlyDictionary<string, string> WithLocalizedStates(
+        UiStringCatalog catalog, string messageKey, IReadOnlyDictionary<string, string> parameters)
+    {
+        ArgumentNullException.ThrowIfNull(catalog);
+        ArgumentNullException.ThrowIfNull(messageKey);
+        ArgumentNullException.ThrowIfNull(parameters);
+
+        if (!StateParameters.TryGetValue(messageKey, out var target)
+            || !parameters.TryGetValue(target.Parameter, out var raw)
+            || !catalog.Strings.TryGetValue($"status.{target.Family}.{raw}", out var label)
+            || string.IsNullOrWhiteSpace(label))
+        {
+            return parameters;
+        }
+
+        return new Dictionary<string, string>(parameters, StringComparer.Ordinal)
+        {
+            [target.Parameter] = label,
+        };
+    }
+
+    /// <summary>
     /// Чи однакові два набори підстановок за вмістом; <c>null</c> і порожній — однакові.
     /// </summary>
     public static bool SameParameters(

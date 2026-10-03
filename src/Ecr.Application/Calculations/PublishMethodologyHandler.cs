@@ -31,7 +31,8 @@ public sealed class PublishMethodologyHandler(
     IClock clock,
     IRegistryStore? registryStore = null,
     IRegistryKeyStore? registryKeys = null,
-    IRegistryUseStore? registryUses = null)
+    IRegistryUseStore? registryUses = null,
+    IUiStringCatalog? uiCatalog = null)
 {
     /// <summary>Право на публікацію методології (`02-contracts.md` §9).</summary>
     /// <remarks>
@@ -304,12 +305,18 @@ public sealed class PublishMethodologyHandler(
         // ⛔ V-18: невідома константа — іменна відмова, а не рядок у «N проблем».
         MethodologyPublishChecks.CheckUnknownConstants(parsed, constants);
 
+        // ⛔ T2-04: тексти попереджень — мовою того, хто публікує (каталог), а не зашитою українською.
+        var strings = uiCatalog is null
+            ? null
+            : await uiCatalog.GetAsync(currentUser.Language, ct).ConfigureAwait(false);
+
         problems.AddRange(MethodologyPublishChecks.Check(
             parsed,
             constants,
             outputs,
             MethodologyPublishChecks.DefaultContextualArguments,
-            warnings));
+            warnings,
+            strings));
 
         Reject(problems);
 

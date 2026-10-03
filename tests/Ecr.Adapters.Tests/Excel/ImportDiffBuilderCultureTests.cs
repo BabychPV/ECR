@@ -192,6 +192,10 @@ public sealed class ImportDiffBuilderCultureTests
         Assert.Equal(CellValueReader.TypeMismatch, rejection.ReasonCode);
         Assert.Equal(ImportMessageKeys.ExpectsNumber, rejection.MessageKey);
         Assert.Equal(ambiguous, rejection.Message.Contains("ambiguous separator", StringComparison.Ordinal));
+
+        // T2-13: ключ каталогу не лізе в людський текст (його несе MessageKey).
+        Assert.DoesNotContain("err.", rejection.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("ECR-", rejection.Message, StringComparison.Ordinal);
     }
 
     /// <summary>

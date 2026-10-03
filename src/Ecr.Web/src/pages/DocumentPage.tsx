@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useState, type JSX } from 'react';
-import { Badge, Button, Skeleton, Stack, Tabs, Text } from '@mantine/core';
+import { Button, Skeleton, Stack, Tabs, Text } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useParams } from 'react-router-dom';
@@ -34,6 +34,8 @@ import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { showApiError } from '@/shared/ui/notify';
 import { PageHeader } from '@/shared/ui/PageHeader';
+import { useProjectCurrentPeriodDefault } from '@/features/documents/useProjectCurrentPeriodDefault';
+import { StatusBadge } from '@/shared/ui/StatusBadge';
 import { useUrlNumber, useUrlState } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
 
@@ -414,6 +416,8 @@ export function DocumentPage(): JSX.Element {
     enabled: projectId !== null,
   });
 
+  useProjectCurrentPeriodDefault(urlPeriod, calendar.data?.periods, setPeriodKey);
+
   const lock = documentLockOf({
     projectStatus: projects.data?.items?.find((project) => project.id === projectId)?.status,
     periodState: calendar.data?.periods?.find((period) => period.periodKey === periodKey)?.state,
@@ -685,9 +689,7 @@ export function DocumentPage(): JSX.Element {
           {sheets.map((s) => (
             <Tabs.Tab key={s.code} value={s.code}>
               {s.name}{' '}
-              <Badge size="xs" variant="light">
-                {document.sheetStates[s.code] ?? 'Draft'}
-              </Badge>
+              <StatusBadge kind="sheet" state={document.sheetStates[s.code] ?? 'Draft'} />
             </Tabs.Tab>
           ))}
         </Tabs.List>

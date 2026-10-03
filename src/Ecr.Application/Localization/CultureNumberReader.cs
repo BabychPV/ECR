@@ -63,7 +63,14 @@ public static class CultureNumberReader
             return NotNumber;
         }
 
-        var stripped = string.Concat(raw.Where(c => !char.IsWhiteSpace(c)));
+        // ⛔ T2-10: пробіл усередині — лише розряди тисяч (`1 234 567`, `12 345,5`); `1 2` мовчки ставав 12.
+        var trimmed = raw.Trim();
+        if (trimmed.Any(char.IsWhiteSpace) && !SpacedGroups.IsMatch(trimmed))
+        {
+            return NotNumber;
+        }
+
+        var stripped = string.Concat(trimmed.Where(c => !char.IsWhiteSpace(c)));
         if (stripped.Length == 0)
         {
             return NotNumber;
@@ -88,7 +95,19 @@ public static class CultureNumberReader
             exponent = "e" + digits;
         }
 
-        // `.5`, `1.`, `1,` — не числа, як і на клієнті.
+        // ⚠ T2-10: `.5` / `,5` — число (0.5), як у Excel, але лише з десятковим роздільником культури
+        // (крапка без розрядів — інваріантний запис): `,5` в en-US — розряди без цілої частини, відмова.
+        if (mantissa.Length > 1 && mantissa[0] is '.' or ',' && IsDigits(mantissa[1..]))
+        {
+            var lead = mantissa[0].ToString();
+
+            return string.Equals(lead, culture.NumberFormat.NumberDecimalSeparator, StringComparison.Ordinal)
+                   || (lead == "." && !string.Equals(culture.NumberFormat.NumberGroupSeparator, ".", StringComparison.Ordinal))
+                ? Number(sign, "0", mantissa[1..], exponent)
+                : NotNumber;
+        }
+
+        // `1.`, `1,` — не числа, як і на клієнті.
         if (mantissa.Length == 0
             || !mantissa.All(c => c is (>= '0' and <= '9') or '.' or ',')
             || !char.IsAsciiDigit(mantissa[0])
@@ -161,6 +180,12 @@ public static class CultureNumberReader
     }
 
     private static readonly NumberTextReading NotNumber = new(NumberTextKind.NotNumber, 0m);
+
+    /// <summary>Пробіли — лише розряди: перша група 1–3 цифри, далі рівно по три; дріб — після останньої.</summary>
+    private static readonly System.Text.RegularExpressions.Regex SpacedGroups = new(
+        @"^[+-]?\d{1,3}(?:\s\d{3})+(?:[.,]\d+)?(?:[eE][+-]?\d+)?$",
+        System.Text.RegularExpressions.RegexOptions.CultureInvariant,
+        TimeSpan.FromMilliseconds(100));
 
     private static NumberTextReading Number(string sign, string integer, string fraction, string exponent)
     {

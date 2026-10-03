@@ -1,4 +1,4 @@
-import { useState, type JSX } from 'react';
+import { useEffect, useState, type JSX } from 'react';
 import { Button, Checkbox, Group, Modal, Select, Stack, Text } from '@mantine/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
@@ -45,6 +45,15 @@ export function CreateDocumentModal({
 }): JSX.Element {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+
+  // ⛔ T2-06: діалог монтується ВЖЕ відкритим (лінивий чанк + `creatingRequested &&` на сторінці), а
+  // Mantine `useFocusReturn` запам'ятовує елемент лише при ПЕРЕХОДІ `opened` false → true. Без переходу
+  // перше закриття (Esc) лишало фокус на `BODY`; друге — уже поверталось на кнопку. Тому вузол
+  // `Modal` спершу монтується закритим і відкривається наступним рендером, поки фокус ще на кнопці.
+  const [armed, setArmed] = useState(false);
+  useEffect(() => {
+    setArmed(true);
+  }, []);
 
   const [projectId, setProjectId] = useState<string | null>(null);
   const [sheets, setSheets] = useState<number[]>([]);
@@ -121,7 +130,7 @@ export function CreateDocumentModal({
   const sourceError = projects.error ?? null;
 
   return (
-    <Modal opened={opened} onClose={onClose} title={t('documents.create')} size="lg">
+    <Modal opened={opened && armed} onClose={onClose} title={t('documents.create')} size="lg">
       {/* ⛔ Перед полями: причину видно ДО того, як людина почне гадати, чому
           переліки порожні. Решта діалогу лишається робочою. */}
       {sourceError !== null && <ErrorAlert error={sourceError} onRetry={() => void projects.refetch()} />}

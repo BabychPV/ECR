@@ -124,6 +124,16 @@ public static class ArgumentDeclarationChecker
         var used = Used(root);
         var usedKeys = new HashSet<string>(used.Select(u => NormalizeName(u.Name)), StringComparer.OrdinalIgnoreCase);
 
+        // ⚠ T2-04: у списку (`@A;CST.K`) константу методології можна оголосити як `CST.K`; у виразі
+        // вона — `CST.K`-посилання, а не `@`-аргумент. Без цього вона завжди лишалась «невжитою», хоч
+        // рахується (4×2=8): хибне попередження публікації.
+        var constants = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        CollectConstants(root, constants);
+        foreach (var constant in constants)
+        {
+            usedKeys.Add("CST_" + constant);
+        }
+
         // ⚠ Перше вживання, а не всі: методолог виправляє СПИСОК, і другий
         // рядок про той самий токен не додає йому нічого, крім довжини.
         var undeclared = used
@@ -175,6 +185,41 @@ public static class ArgumentDeclarationChecker
         }
 
         return trimmed.Replace('.', '_');
+    }
+
+    /// <summary>Імена констант <c>CST.X</c>, на які посилається вираз (без префікса).</summary>
+    private static void CollectConstants(AstNode node, HashSet<string> found)
+    {
+        switch (node)
+        {
+            case SymbolReferenceNode { Kind: SymbolKind.Constant } symbol:
+                found.Add(symbol.Name);
+                return;
+            case UnaryNode unary:
+                CollectConstants(unary.Operand, found);
+                return;
+            case BinaryNode binary:
+                CollectConstants(binary.Left, found);
+                CollectConstants(binary.Right, found);
+                return;
+            case ConditionalNode conditional:
+                CollectConstants(conditional.Condition, found);
+                CollectConstants(conditional.WhenTrue, found);
+                CollectConstants(conditional.WhenFalse, found);
+                return;
+            case FunctionNode function:
+                foreach (var argument in function.Arguments)
+                {
+                    CollectConstants(argument, found);
+                }
+
+                return;
+            case CellReferenceNode { Row: RowSelector.Predicate predicate }:
+                CollectConstants(predicate.Condition, found);
+                return;
+            default:
+                return;
+        }
     }
 
     /// <summary>Обхід дерева зі збиранням <c>@Arg</c>.</summary>

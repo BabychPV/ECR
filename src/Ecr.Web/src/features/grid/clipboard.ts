@@ -135,7 +135,13 @@ function isGrouped(text: string, separator: string): boolean {
  * ⚠ Локаль за замовчуванням — `formatLocale()`: та сама, якою форматує сітка.
  */
 export function readNumber(raw: string, locale: string = formatLocale()): NumberReading {
-  const stripped = raw.replace(/\s/g, '');
+  // ⛔ T2-10: пробіл усередині — лише розряди тисяч (`1 234 567`); `1 2` мовчки ставав 12 (як і на сервері).
+  const trimmed = raw.trim();
+  if (/\s/.test(trimmed) && !/^[+-]?\d{1,3}(?:\s\d{3})+(?:[.,]\d+)?(?:[eE][+-]?\d+)?$/.test(trimmed)) {
+    return { kind: 'text' };
+  }
+
+  const stripped = trimmed.replace(/\s/g, '');
   if (stripped.length === 0) return { kind: 'text' };
 
   const match =/^([+-]?)([\d.,]+)(?:[eE]([+-]?\d+))?$/.exec(stripped);
@@ -145,7 +151,17 @@ export function readNumber(raw: string, locale: string = formatLocale()): Number
   const mantissa = match[2] ?? '';
   const exponent = match[3] === undefined ? '' : `e${match[3]}`;
 
-  // `.5`, `1.`, `1,` — не числа, як і доти.
+  // `.5` / `,5` — число (0.5), як і на сервері, але лише з десятковим роздільником локалі (крапка без
+  // розрядів — інваріантний запис); `1.`, `1,` — не числа.
+  const lead = /^([.,])(\d+)$/.exec(mantissa);
+  if (lead !== null) {
+    const { group: leadGroup, decimal: leadDecimal } = separatorsOf(locale);
+    const separator = lead[1];
+    const ok = separator === leadDecimal || (separator === '.' && leadGroup !== '.');
+
+    return ok ? { kind: 'number', text: `${sign}0.${lead[2] ?? ''}${exponent}` } : { kind: 'text' };
+  }
+
   if (!/^\d/.test(mantissa) || !/\d$/.test(mantissa)) return { kind: 'text' };
 
   const number = (int: string, frac: string): NumberReading => ({

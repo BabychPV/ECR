@@ -41,6 +41,29 @@
 }
 
 /*
+ * T2-05. Рамка ПОЛЯ у фокусі в темній темі — теж ≥ 3:1.
+ *
+ * ⛔ Поля Mantine (`Input`, `NativeSelect`, `Select`…) на `:focus` самі гасять `outline`
+ * (`outline: none`) і міняють лише колір РАМКИ: `--input-bd: var(--input-bd-focus)`, а
+ * `--input-bd-focus` — це `--mantine-primary-color-filled`, тобто `brand[5]` (#5558c8). На поверхні
+ * Paper/меню темної теми (#2e2e2e) це 2.34:1 (< 3:1, WCAG 1.4.11); кільце вище (`brand[4]`) на таке
+ * поле не лягає — його перебиває `outline: none` специфічнішого правила. Тому рамка у фокусі бере
+ * той самий `--ecr-focus` (brand[4], ≥ 3:1 на кожній поверхні), що й кільце решти елементів.
+ *
+ * ⚠ Поле з помилкою (`[data-error]`) лишається червоним: друге правило специфічніше за перше й
+ * повертає `--mantine-color-error`, як і в Mantine. Світла тема не чіпається: там `brand[6]` має 8.5:1.
+ */
+:root[data-mantine-color-scheme='dark'] .mantine-Input-input:focus,
+:root[data-mantine-color-scheme='dark'] .mantine-Input-input:focus-within {
+  --input-bd: var(--ecr-focus);
+}
+
+:root[data-mantine-color-scheme='dark'] [data-error] .mantine-Input-input:focus,
+:root[data-mantine-color-scheme='dark'] [data-error] .mantine-Input-input:focus-within {
+  --input-bd: var(--mantine-color-error);
+}
+
+/*
  * Заголовок, на який фокус переносить САМ ЗАСТОСУНОК, — кільце тихіше.
  *
  * ⛔ Причина не косметична, і вона зміряна на живому стенді: `PageHeader`

@@ -283,9 +283,12 @@ Get-ChildItem docs/build/questions -Filter 'Q-*.md' |
 | RT-24 | порожнє поле довідника в `REGFIELD` → `null`; `IFERROR(REGFIELD)` його не ловить |
 | Перерахунок | свій документ — за `Document.View` + видимість (Coalesced для не-власників `Calculation.Recalculate`); ⚠ ліміт частоти перерахунку — у наступному RC |
 | Ролі | перелік ролей обрізається `Take(500)` |
+| Deny | `Deny` не діє на регуляторні зрізи й Rollup-агрегати — рішення замовника (`D-276`), не дефект |
 | ent5/ent6 | P3: `Deny` vs `ProjectNotVisible`, `efsync` (TOCTOU/1205/Degraded-проксі), сирі JSON-колонки, `If-Match` на `PUT` опису довідника |
 | ent6a (P3) | S9 вебхук Teams не слідує редиректам (3xx — відмова доставки); S8 аудит сповіщень і зміна — одна транзакція, NotificationRulesReplaced пише матрицю до/після; D1/D2 залежності розкладів — замок sp_getapplock на джерело, паралельна правка/видалення → 409 (collectionScheduleChanged), аудит залежних при видаленні; S7 тексти листів (notifications.*.subject\|body) правляться лише з System.ManageNotifications (ключ звіряється з канонічним у БД: регістр і кінцеві пробіли не обходять право). ⚠ Відоме: друге збереження ролей при створенні каналу — поза транзакцією (канал без ролей, наступний PUT проставить); S4 (порти проби SMTP) і S5 — не в цьому релізі |
 | Не в RC | A1 deny при міграції версії шаблону (fail-open кеш профілю виправлено, влито e9f04bce); у чергах `sec-s3s6`, `last-admin`, ліміт частоти перерахунку |
+| Ліміт `/projects/{id}/recalculate` | `POST /projects/{id}/recalculate` не має ліміту 429 (свідомо: потрібне право `Calculation.Recalculate`; ліміт 6/хв і 30/хв діє лише на `POST /documents/{id}/recalculate`; 9 запитів поспіль → 202) — вирішити окремо, чи потрібен ліміт на проєкт |
+| renderFeedback — борг стабілізації | два плаваючі падіння в client-гейті (`src/test/__tests__/renderFeedback.test.tsx`): «/admin/units — маршрут, який не рендерився зовсім (#305)» та «подія кешу … коштувала коміти: expected { tree: 1, route: +0 } to deeply equal { tree: +0, route: +0 }»; друга спроба «Аналіза» не допомогла; потрібен сирий журнал падіння — при наступному падінні зберегти `gh run view <id> --log-failed` (повний) у `.sync-local\renderfeedback-fail-<run>.log`; відтворено 2× за добу; перезапуск `gh run rerun --failed` проходить |
 
 ---
 

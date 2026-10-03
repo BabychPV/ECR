@@ -240,6 +240,23 @@ public sealed class UnitOfWork(
                             ["messageKey"] = "err.ECR-PRJ-0409.projectCodeTaken", ["code"] = project.Code,
                         });
 
+                case TableRelationDef relation
+                    when entry.State == EntityState.Added && SqlConflict.ViolatesIndex(ex, "UQ_TableRelationDef"):
+                    // ⛔ T2-03: `UQ_TableRelationDef` унікальний лише по `Code` — на ВСЮ
+                    // систему, а не в межах версії, тож той самий код в іншому
+                    // шаблоні/версії давав голий `500`. Перехоплюється ЛИШЕ цей індекс
+                    // (за ім'ям), не будь-яке порушення унікальності.
+                    // ⚠ Унікальність у межах версії потребує міграції індексу —
+                    // окрема задача під токен міграцій.
+                    return new ConcurrencyConflictException(
+                        "ECR-TMPL-0409",
+                        $"Зв'язок із кодом «{relation.Code}» уже існує в системі (код зв'язку унікальний по всіх шаблонах і версіях).",
+                        new Dictionary<string, object?>
+                        {
+                            ["messageKey"] = "err.ECR-TMPL-0409.relationCodeTaken",
+                            ["relationCode"] = relation.Code,
+                        });
+
                 case Domain.Entities.Dictionaries.RegistryEntryKey registryKey:
                     // ⛔ RT-10b (Д-3): гонку за складеним ключем, яку не закрило блокування
                     // `RegistryKeyStore.FindLiveHoldersForUpdateAsync`, ловить

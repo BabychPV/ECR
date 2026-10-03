@@ -68,7 +68,17 @@ describe('readNumber / parseNumber: en (кома — розряди, крапк�
   });
 
   it('биті записи — не числа', () => {
-    for (const raw of ['1,23,4', '1.2,3', '1,234.5.6', '.5', '1.', '1,', 'н/д', '']) {
+    for (const raw of ['1,23,4', '1.2,3', '1,234.5.6', '1.', '1,', ',5', 'н/д', '']) {
+      expect(parseNumber(raw, 'en'), raw).toBeNull();
+    }
+  });
+
+  it('T2-10: `.5` — число, а пробіл усередині — лише розряди тисяч', () => {
+    expect(parseNumber('.5', 'en')).toBe(0.5);
+    expect(parseNumber('-.5', 'en')).toBe(-0.5);
+    expect(parseNumber('1 234', 'en')).toBe(1234);
+    // `1 2` мовчки ставав 12 — тепер не число (як і на сервері).
+    for (const raw of ['1 2', '12 3', '1  234', '1 2345', '- 5']) {
       expect(parseNumber(raw, 'en'), raw).toBeNull();
     }
   });
