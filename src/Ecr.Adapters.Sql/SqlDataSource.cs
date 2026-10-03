@@ -1,4 +1,6 @@
 using System.Data;
+using System.Net;
+using System.Net.Sockets;
 using Ecr.Application.Errors;
 using Ecr.Application.Integration;
 using Ecr.Application.Ports;
@@ -302,6 +304,65 @@ public sealed class SqlDataSource(
         return configured;
     }
 
+    /// <summary>
+    /// L3-05 (<c>D-279</c>): та сама політика адреси, що й при збереженні джерела, — ще раз перед
+    /// з'єднанням.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Збереження перевіряє лише НОВІ адреси (<c>D-245</c>: наявні джерела ретроспективно не
+    /// перевіряються), а ім'я між збереженням і з'єднанням може розв'язатися інакше. Рядок —
+    /// нормалізований <see cref="SqlConnectionStringBuilder"/> (синоніми ключів зведені), тож політика
+    /// бачить саме те, куди піде клієнт. Пароль ще не підставлено — секрет політику не проходить.
+    /// </remarks>
+    private static async Task RequireAllowedAddressAsync(string code, string connectionString, CancellationToken ct)
+    {
+        var verdict = DataSourceEndpointPolicy.CheckSqlClientConnectionString(connectionString);
+
+        if (verdict == EndpointVerdict.Allowed)
+        {
+            foreach (var host in DataSourceEndpointPolicy.SqlClientHostsOf(connectionString) ?? [])
+            {
+                if (host.Length == 0 || IPAddress.TryParse(host, out _))
+                {
+                    continue;
+                }
+
+                IPAddress[] resolved;
+
+                try
+                {
+                    resolved = await Dns.GetHostAddressesAsync(host, ct).ConfigureAwait(false);
+                }
+                catch (SocketException)
+                {
+                    // Ім'я не розв'язується — з'єднання впаде саме, своєю зрозумілою помилкою.
+                    continue;
+                }
+
+                if (resolved.Any(DataSourceEndpointPolicy.IsLinkLocal))
+                {
+                    verdict = EndpointVerdict.HostForbidden;
+                    break;
+                }
+            }
+        }
+
+        if (verdict == EndpointVerdict.Allowed)
+        {
+            return;
+        }
+
+        // ⚠ Відмова називає джерело й вердикт, а не вміст рядка з'єднання.
+        throw new BusinessRuleException(
+            SourceUnavailable,
+            $"Адресу джерела {code} відхилено політикою адреси ({verdict}): збір не з'єднується.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-INT-0503.endpointForbidden",
+                ["dataSource"] = code,
+            });
+    }
+
     /// <summary>Відкриває з'єднання під службовим обліковим записом.</summary>
     /// <remarks>
     /// ⛔ Секрет береться <b>за іменем</b> і ніколи з конфігурації (ФВ-6.11,
@@ -332,6 +393,8 @@ public sealed class SqlDataSource(
                     ["dataSource"] = source.Code,
                 });
         }
+
+        await RequireAllowedAddressAsync(source.Code, builder.ConnectionString, ct).ConfigureAwait(false);
 
         // ⚠ Каталог із конфігурації джерела перекриває той, що в рядку
         // з'єднання: `ext.DataSource.Catalog` — це поле, яке видно в

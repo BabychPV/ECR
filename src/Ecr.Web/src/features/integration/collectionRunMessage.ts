@@ -167,6 +167,8 @@ function adapterRefusal(key: string, params: Record<string, string>): string | n
       return t('err.ECR-INT-0503.queryNotConfigured', params);
     case 'err.ECR-INT-0503.connectionStringBroken':
       return t('err.ECR-INT-0503.connectionStringBroken', params);
+    case 'err.ECR-INT-0503.endpointForbidden':
+      return t('err.ECR-INT-0503.endpointForbidden', params);
     case 'err.ECR-INT-0503.connectFailed':
       return t('err.ECR-INT-0503.connectFailed', params);
     case 'err.ECR-INT-0503.sourceMissing':

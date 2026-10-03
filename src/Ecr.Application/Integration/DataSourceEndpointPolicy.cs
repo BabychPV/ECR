@@ -21,6 +21,12 @@ public enum EndpointVerdict
 
     /// <summary>Хост поза <c>PiWebApi:AllowedHosts</c>.</summary>
     HostNotAllowed,
+
+    /// <summary>
+    /// Рядок з'єднання SQL Server несе заборонений параметр: <c>AttachDBFilename</c> (і синоніми),
+    /// <c>User Instance</c>, <c>Enclave Attestation Url</c>, <c>Server Certificate</c> на мережевому шляху.
+    /// </summary>
+    ForbiddenOption,
 }
 
 /// <summary>
@@ -105,6 +111,154 @@ public static class DataSourceEndpointPolicy
         }
 
         return EndpointVerdict.Allowed;
+    }
+
+    /// <summary>
+    /// Рядок з'єднання джерела типу <c>Sql</c> (SqlClient, <c>SqlDataSource</c>) — L3-05, <c>D-279</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Без цього <c>Integration.Manage</c> означало б «ходи службовим обліковим записом
+    /// (Integrated Security → NTLM/Kerberos) куди скажу», а <c>AttachDBFilename</c> —
+    /// «прикріпи до СЕРВЕРА файл за довільним шляхом», зокрема UNC.
+    /// <para>
+    /// Правила SqlClient, а не ODBC (лапки, а не фігурні дужки); ключ сервера — будь-який синонім
+    /// (<c>Data Source</c>, <c>Server</c>, <c>Address</c>, <c>Addr</c>, <c>Network Address</c>) і
+    /// <c>Failover Partner</c>: кожен перевіряється тими самими <see cref="SqlHostOf"/> і
+    /// <see cref="IsLinkLocal"/>, що й PiSqlClient (<c>D-245</c>), — з префіксами <c>tcp:</c>/<c>np:</c>/
+    /// <c>lpc:</c>/<c>admin:</c>, <c>,port</c>, <c>\instance</c> і числовими формами IPv4.
+    /// Loopback і приватні — дозволені, як у <c>D-245</c>. Ім'я розв'язує і перевіряє викликач
+    /// (<see cref="SqlClientHostsOf"/>).
+    /// </para>
+    /// <para>
+    /// ⚠ Залишковий ризик, названий прямо: перенаправлення маршрутизації Azure SQL і
+    /// <c>MultiSubnetFailover</c> ведуть на адресу, яку дає сам сервер, а DNS між збереженням і
+    /// з'єднанням може змінитися (rebinding) — адаптер тому перевіряє ще раз перед з'єднанням,
+    /// але не на кожному стрибку протоколу.
+    /// </para>
+    /// </remarks>
+    public static EndpointVerdict CheckSqlClientConnectionString(string? connectionString)
+    {
+        if (string.IsNullOrWhiteSpace(connectionString))
+        {
+            return EndpointVerdict.Malformed;
+        }
+
+        if (!TryParseSqlClient(connectionString, out var builder))
+        {
+            return EndpointVerdict.Malformed;
+        }
+
+        if (builder is null && connectionString.Contains("://", StringComparison.Ordinal))
+        {
+            return EndpointVerdict.Scheme;
+        }
+
+        if (builder is not null)
+        {
+            foreach (string key in builder.Keys)
+            {
+                if (IsForbiddenSqlClientOption(key, builder[key]?.ToString()))
+                {
+                    return EndpointVerdict.ForbiddenOption;
+                }
+            }
+        }
+
+        foreach (var host in SqlClientHostsOf(connectionString) ?? [])
+        {
+            if (IsCloudMetadataName(host) || (IPAddress.TryParse(host, out var ip) && IsLinkLocal(ip)))
+            {
+                return EndpointVerdict.HostForbidden;
+            }
+        }
+
+        return EndpointVerdict.Allowed;
+    }
+
+    /// <summary>
+    /// Хости рядка з'єднання SqlClient: з кожного ключа сервера (і <c>Failover Partner</c>), або голе
+    /// ім'я сервера, якщо рядок без <c>=</c>. <c>null</c> — рядок не розбирається.
+    /// </summary>
+    public static IReadOnlyList<string>? SqlClientHostsOf(string connectionString)
+    {
+        ArgumentNullException.ThrowIfNull(connectionString);
+
+        if (!TryParseSqlClient(connectionString, out var builder))
+        {
+            return null;
+        }
+
+        if (builder is null)
+        {
+            return [SqlHostOf(connectionString)];
+        }
+
+        var hosts = new List<string>();
+
+        foreach (string key in builder.Keys)
+        {
+            if (IsServerKey(key) && builder[key]?.ToString() is { Length: > 0 } value)
+            {
+                hosts.Add(SqlHostOf(value));
+            }
+        }
+
+        return hosts;
+    }
+
+    /// <summary>Розбір за правилами SqlClient; <paramref name="builder"/> <c>null</c> — рядок без <c>=</c>.</summary>
+    private static bool TryParseSqlClient(string connectionString, out DbConnectionStringBuilder? builder)
+    {
+        builder = null;
+
+        if (!connectionString.Contains('=', StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        var parsed = new DbConnectionStringBuilder(useOdbcRules: false);
+
+        try
+        {
+            parsed.ConnectionString = connectionString;
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
+
+        builder = parsed;
+
+        return true;
+    }
+
+    /// <summary>
+    /// Параметр SqlClient, якого в адресі джерела бути не може (порівняння без пробілів і регістру,
+    /// бо так їх читає сам SqlClient).
+    /// </summary>
+    private static bool IsForbiddenSqlClientOption(string key, string? value)
+    {
+        var k = key.Replace(" ", string.Empty, StringComparison.Ordinal).ToUpperInvariant();
+
+        return k switch
+        {
+            // Файл бази на диску СЕРВЕРА (UNC → NTLM служби SQL на чужий хост).
+            "ATTACHDBFILENAME" or "EXTENDEDPROPERTIES" or "INITIALFILENAME" => true,
+
+            // Окремий екземпляр під обліковим записом служби ECR — лише SQL Express, і вимкнений.
+            "USERINSTANCE" => !string.Equals(value?.Trim(), "false", StringComparison.OrdinalIgnoreCase)
+                              && !string.Equals(value?.Trim(), "no", StringComparison.OrdinalIgnoreCase),
+
+            // Ще одна адреса, на яку клієнт піде HTTP-запитом.
+            "ENCLAVEATTESTATIONURL" => true,
+
+            // Сертифікат із мережевої шарі — NTLM на хост із рядка.
+            "SERVERCERTIFICATE" => value?.Trim() is { } path
+                                   && (path.StartsWith(@"\\", StringComparison.Ordinal)
+                                       || path.StartsWith("//", StringComparison.Ordinal)),
+
+            _ => false,
+        };
     }
 
     /// <summary>

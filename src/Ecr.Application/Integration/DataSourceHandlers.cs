@@ -479,13 +479,16 @@ public sealed partial class SaveDataSourceHandler(
             }
         }
 
-        if (transport == ExternalTransport.PiSqlClient)
+        if (transport is ExternalTransport.PiSqlClient or ExternalTransport.Sql)
         {
-            await RequireSqlServerAddressAsync(address, "endpoint", code, ct).ConfigureAwait(false);
+            // L3-05 (D-279): Sql — рядок з'єднання SqlClient, та сама політика адреси, що й PiSqlClient (D-245).
+            var sqlClient = transport == ExternalTransport.Sql;
+
+            await RequireSqlServerAddressAsync(address, "endpoint", code, sqlClient, ct).ConfigureAwait(false);
 
             if (spare is { Length: > 0 })
             {
-                await RequireSqlServerAddressAsync(spare, "secondaryEndpoint", code, ct).ConfigureAwait(false);
+                await RequireSqlServerAddressAsync(spare, "secondaryEndpoint", code, sqlClient, ct).ConfigureAwait(false);
             }
         }
 
@@ -499,17 +502,23 @@ public sealed partial class SaveDataSourceHandler(
     }
 
     /// <summary>
-    /// Адреса PiSqlClient — ім'я сервера, не URL; link-local/metadata (літерал чи розв'язаний) відхиляється.
+    /// Адреса PiSqlClient (ODBC) чи Sql (SqlClient) — ім'я сервера, не URL; link-local/metadata (літерал
+    /// чи розв'язаний) відхиляється; для Sql — ще й заборонені параметри (<c>AttachDBFilename</c> тощо).
     /// Збій розв'язання не блокує (внутрішні імена). Хост поза <c>PiWebApi:AllowedHosts</c> — лише Warning.
     /// </summary>
-    private async Task RequireSqlServerAddressAsync(string address, string field, string code, CancellationToken ct)
+    private async Task RequireSqlServerAddressAsync(
+        string address, string field, string code, bool sqlClient, CancellationToken ct)
     {
-        var verdict = DataSourceEndpointPolicy.CheckSqlServerAddress(address);
+        var verdict = sqlClient
+            ? DataSourceEndpointPolicy.CheckSqlClientConnectionString(address)
+            : DataSourceEndpointPolicy.CheckSqlServerAddress(address);
 
-        // ⛔ ent4 P2-1: кожен сервер рядка з'єднання ODBC, а не весь рядок як «ім'я».
-        var hosts = verdict == EndpointVerdict.Allowed
-            ? DataSourceEndpointPolicy.SqlHostsOf(address) ?? []
-            : [];
+        // ⛔ ent4 P2-1: кожен сервер рядка з'єднання, а не весь рядок як «ім'я».
+        var hosts = verdict != EndpointVerdict.Allowed
+            ? []
+            : (sqlClient
+                ? DataSourceEndpointPolicy.SqlClientHostsOf(address)
+                : DataSourceEndpointPolicy.SqlHostsOf(address)) ?? [];
 
         foreach (var host in hosts)
         {
@@ -541,6 +550,7 @@ public sealed partial class SaveDataSourceHandler(
         {
             EndpointVerdict.Scheme => "err.ECR-REQ-0422.dataSourceEndpointSqlScheme",
             EndpointVerdict.HostForbidden => "err.ECR-REQ-0422.dataSourceEndpointSqlLinkLocal",
+            EndpointVerdict.ForbiddenOption => "err.ECR-REQ-0422.dataSourceEndpointSqlForbiddenOption",
             _ => "err.ECR-REQ-0422.dataSourceEndpointMalformed",
         };
 

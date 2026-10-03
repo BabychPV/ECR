@@ -48,6 +48,7 @@ const FieldOfKey: Readonly<Record<string, FailedField>> = {
   'err.ECR-REQ-0422.dataSourceEndpointHostNotAllowed': 'endpoint',
   'err.ECR-REQ-0422.dataSourceEndpointSqlScheme': 'endpoint',
   'err.ECR-REQ-0422.dataSourceEndpointSqlLinkLocal': 'endpoint',
+  'err.ECR-REQ-0422.dataSourceEndpointSqlForbiddenOption': 'endpoint',
   'err.ECR-REQ-0422.dataSourceCodeTaken': 'code',
   'err.ECR-REQ-0422.dataSourceSecretReentryRequired': 'secretConfirmation',
   'err.ECR-REQ-0422.dataSourceEndpointChangeUnconfirmed': 'confirmEndpointChange',

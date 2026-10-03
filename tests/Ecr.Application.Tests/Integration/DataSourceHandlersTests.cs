@@ -300,7 +300,8 @@ public sealed class DataSourceHandlersTests
             (ExternalTransport.PiWebApi, "http://pi.corp.example/piwebapi", null),
             (ExternalTransport.PiWebApi, "https://pi.corp.example/other", null),
             (ExternalTransport.PiWebApi, Endpoint, "https://attacker.example/piwebapi"),
-            (ExternalTransport.Sql, Endpoint, null),
+            // L3-05: Sql — рядок з'єднання; URL у ньому відхиляє вже політика адреси (D-279), до цього правила.
+            (ExternalTransport.Sql, "Server=pi.corp.example;Database=Vol", null),
         ];
 
         foreach (var (transport, endpoint, spare) in moves)
