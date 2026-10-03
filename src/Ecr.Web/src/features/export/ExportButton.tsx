@@ -111,12 +111,14 @@ export function ExportButton({
   // ⚠ Формат ЗАПУЩЕНОЇ побудови — окремо від перемикача: людина може
   // перемкнути формат, доки файл будується, а підпис посилання має
   // відповідати файлу, який вона отримає, а не поточному положенню перемикача.
-  const [startedFormat, setStartedFormat] = useState<ExportFormat>('xlsx');
-
   // ⛔ AN-39/L8-19: задача прив'язана до документа/періоду, ДЛЯ яких її запущено. Перехід на
   // інший документ (компонент лишається змонтованим) давав посилання з новим id на книгу
   // старого й крутив «Формується…» на чужому документі.
-  const [startedFor, setStartedFor] = useState({ documentId, periodKey });
+  const [started, setStarted] = useState<{ documentId: number; periodKey: number; format: ExportFormat }>({
+    documentId,
+    periodKey,
+    format: 'xlsx',
+  });
 
   const start = useMutation({
     mutationFn: (target: { documentId: number; periodKey: number; format: ExportFormat }) =>
@@ -128,8 +130,7 @@ export function ExportButton({
         periodKey: target.periodKey,
       } satisfies ExportRequest),
     onSuccess: (job, target) => {
-      setStartedFormat(target.format);
-      setStartedFor({ documentId: target.documentId, periodKey: target.periodKey });
+      setStarted(target);
       setJobId(job.jobId);
     },
     onError: showApiError,
@@ -145,7 +146,7 @@ export function ExportButton({
 
   const outcome = jobId === null ? null : outcomeOf(job.data?.state, job.isError);
   const building =
-    outcome === 'running' && startedFor.documentId === documentId && startedFor.periodKey === periodKey;
+    outcome === 'running' && started.documentId === documentId && started.periodKey === periodKey;
 
   // ⚠ Повідомлення про відмову — ОДИН раз на задачу, а не на кожен рендер:
   // `job.data` не змінюється після кінцевого стану, і без захисту `ref`
@@ -189,10 +190,10 @@ export function ExportButton({
           message: (
             <Anchor
               size="sm"
-              href={`/api/v1/documents/${startedFor.documentId}/export/${encodeURIComponent(exportKey)}`}
+              href={`/api/v1/documents/${started.documentId}/export/${encodeURIComponent(exportKey)}`}
               download
             >
-              {exportReadyLabel(startedFormat)}
+              {exportReadyLabel(started.format)}
             </Anchor>
           ),
         });
@@ -211,7 +212,7 @@ export function ExportButton({
         closeButtonProps: notificationCloseButtonProps,
       });
     }
-  }, [jobId, outcome, job.data?.errorCode, job.data?.message, startedFor.documentId, startedFormat]);
+  }, [jobId, outcome, job.data?.errorCode, job.data?.message, started.documentId, started.format]);
 
   return (
     /*

@@ -1,5 +1,6 @@
-﻿import { describe, it, expect } from 'vitest';
-import { parseClipboard, parseNumber, planPaste, toClipboard } from '@/features/grid/clipboard';
+import { describe, it, expect } from 'vitest';
+import { parseNumber, planPaste } from '@/features/grid/clipboard';
+import { parseClipboard, toClipboard } from '@/features/grid/tsvClipboard';
 
 /**
  * Вставка з буфера Excel — критерій FQ-1 №3 і найчастіша причина, з якої

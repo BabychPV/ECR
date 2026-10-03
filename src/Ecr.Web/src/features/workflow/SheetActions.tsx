@@ -11,7 +11,7 @@ import type {
   ReopenDocumentRequest,
   SheetWorkflowRequest,
 } from '@/api/types';
-import { locksDataActions, type DocumentLock } from '@/features/documents/documentLock';
+import { hasLockedSheet, locksDataActions, type DocumentLock } from '@/features/documents/documentLock';
 import { invalidateSlices } from '@/features/grid/sliceCache';
 import { JobFailure } from '@/features/jobs/JobFacts';
 import { can, useSession, type MeDto } from '@/shared/session/useSession';
@@ -564,10 +564,7 @@ export function SheetActions({
   // а не за `Calculation.Recalculate` (те — проєктний/масовий перерахунок).
   // ✎ AN-39/L8-12: сервер (`RecalculateDocumentHandler`) відмовляє, коли ХОЧ ОДИН аркуш
   // періоду поданий чи затверджений, - кнопки, яка гарантовано дасть відмову, немає.
-  const sheetsLocked = Object.values(summary?.sheetStates ?? {}).some(
-    (sheetState) => sheetState === 'Submitted' || sheetState === 'Approved',
-  );
-  const canRecalculate = !dataLocked && !sheetsLocked && can(me, 'Document.View');
+  const canRecalculate = !dataLocked && !hasLockedSheet(summary?.sheetStates) && can(me, 'Document.View');
 
   const hasAnyAction =
     canRecalculate ||

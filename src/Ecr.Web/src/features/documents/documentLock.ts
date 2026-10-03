@@ -46,3 +46,11 @@ export function documentLockOf(facts: DocumentLockFacts): DocumentLock | null {
 export function locksDataActions(lock: DocumentLock | null): boolean {
   return lock === 'projectArchived' || lock === 'periodClosed' || lock === 'periodNotOpen';
 }
+
+/**
+ * AN-39 (L8-12, L8-13): чи є серед аркушів документа за період поданий або затверджений -
+ * сервер тоді відмовляє в перерахунку документа й у правці його шапки.
+ */
+export function hasLockedSheet(sheetStates: Readonly<Record<string, string>> | undefined): boolean {
+  return Object.values(sheetStates ?? {}).some((state) => state === 'Submitted' || state === 'Approved');
+}

@@ -110,26 +110,6 @@ function echoesDefault(
 }
 
 /**
- * Чи введене нічого не міняє: збережене значення або (порожня комірка) показаний
- * `defaultValue`. Для `beforeedit`: підтвердження на незмінене значення не питаємо (L8-15).
- */
-export function isUnchangedInput(
-  slice: TableSliceDto,
-  signal: EditSignal,
-  rows: ReadonlyMap<string, RowDto> = rowIndexOf(slice),
-): boolean {
-  const column = columnIndexOf(slice).get(signal.columnCode);
-  const row = rows.get(signal.rowKey);
-  if (column === undefined || row === undefined) return false;
-
-  const after = coerce(signal.raw, column.dataType);
-  const before = row.cells[signal.columnCode] ?? null;
-  const same = column.dataType === 'Date' ? sameDateValue(after, before) : sameCellValue(after, before);
-
-  return same || echoesDefault(column, before, after);
-}
-
-/**
  * Чи введене ПОВЕРТАЄ комірку до збереженого значення (`V-01`).
  *
  * ⛔ `captureEdit` таке ігнорує — і правильно, коли незбереженої правки немає.
