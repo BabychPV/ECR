@@ -65,6 +65,30 @@ SET XACT_ABORT ON;
 GO
 
 -- -----------------------------------------------------------------------------
+-- L10-07: `DROP TYPE` нижче знімає ВСІ об'єктні права на тип, а runbook просить
+-- DBA видати службі саме `GRANT EXECUTE ON TYPE::…`. Без цього блоку перше
+-- оновлення бази зі старою формою типу лишало службу без `EXECUTE` на TVP, і
+-- кожен запис комірок та аудиту падав «EXECUTE permission was denied».
+-- Права зберігаються тут (тимчасова таблиця живе між пакетами сеансу) і
+-- відтворюються в останньому пакеті файлу. Без жодного `DROP` це порожня
+-- операція: повторний `GRANT` вже виданого права нічого не змінює.
+-- -----------------------------------------------------------------------------
+IF OBJECT_ID(N'tempdb..#TvpGrants') IS NOT NULL DROP TABLE #TvpGrants;
+SELECT SCHEMA_NAME(t.schema_id)           AS SchemaName,
+       t.name                             AS TypeName,
+       p.state_desc                       AS StateDesc,
+       p.permission_name                  AS PermissionName,
+       USER_NAME(p.grantee_principal_id)  AS Grantee
+INTO #TvpGrants
+FROM sys.database_permissions AS p
+JOIN sys.types                AS t ON t.user_type_id = p.major_id
+WHERE p.class = 6
+  AND t.is_table_type = 1
+  AND ((SCHEMA_NAME(t.schema_id) = N'doc' AND t.name = N'CellValueTvp')
+    OR (SCHEMA_NAME(t.schema_id) = N'aud' AND t.name = N'CellChangeTvp'));
+GO
+
+-- -----------------------------------------------------------------------------
 -- doc.CellValueTvp — джерело `MERGE doc.CellValue`.
 --
 -- ⛔ PRIMARY KEY (PeriodKey, TableRowId, ColumnDefId) — не прикраса і не
@@ -191,4 +215,20 @@ CREATE TYPE aud.CellChangeTvp AS TABLE
     CorrelationId   nvarchar(64)   NULL,
     IsOutOfWindow   bit            NOT NULL
 );');
+GO
+
+-- L10-07: відтворення прав, знятих `DROP TYPE` вище (див. початок файлу).
+IF OBJECT_ID(N'tempdb..#TvpGrants') IS NOT NULL
+BEGIN
+    DECLARE @grants nvarchar(max) = N'';
+    SELECT @grants += CASE g.StateDesc WHEN N'DENY' THEN N'DENY ' ELSE N'GRANT ' END
+        + g.PermissionName + N' ON TYPE::' + QUOTENAME(g.SchemaName) + N'.' + QUOTENAME(g.TypeName)
+        + N' TO ' + QUOTENAME(g.Grantee)
+        + CASE g.StateDesc WHEN N'GRANT_WITH_GRANT_OPTION' THEN N' WITH GRANT OPTION' ELSE N'' END + N';'
+    FROM #TvpGrants AS g
+    WHERE g.Grantee IS NOT NULL
+      AND TYPE_ID(QUOTENAME(g.SchemaName) + N'.' + QUOTENAME(g.TypeName)) IS NOT NULL;
+    IF @grants <> N'' EXEC (@grants);
+    DROP TABLE #TvpGrants;
+END;
 GO

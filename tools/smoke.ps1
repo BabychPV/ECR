@@ -211,6 +211,27 @@ if ($ExistingDatabase) {
 }
 else {
     Step 'чиста база і розгортання через sqlcmd'
+
+    # ⛔ L10-13: маркер `Ecr_Smoke_Temp` нижче захищає лише фінальне прибирання, а
+    # `setup-dev-db.ps1` безумовно ЗНИЩУЄ базу з цим іменем ще до маркера. Тому
+    # `smoke.ps1 -Database EcrDev` стирав dev-базу на старті. Існуюча база без
+    # нашого маркера — відмова ДО розгортання (стара тимчасова база, що має маркер,
+    # перестворюється як і раніше).
+    $previousEapGuard = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $foreign = (& sqlcmd -S $Server -E -C -b -h -1 -W -d master `
+            -Q "SET NOCOUNT ON; DECLARE @r int = 0; IF DB_ID(N'$Database') IS NOT NULL EXEC sp_executesql N'SELECT @r = CASE WHEN EXISTS (SELECT 1 FROM [$Database].sys.extended_properties WHERE class = 0 AND name = N''Ecr_Smoke_Temp'') THEN 0 ELSE 1 END', N'@r int OUTPUT', @r OUTPUT; SELECT @r;") `
+            | Select-Object -Last 1
+    }
+    finally {
+        $ErrorActionPreference = $previousEapGuard
+    }
+    if ($LASTEXITCODE -ne 0) { Fail "не вдалося перевірити, чи є база $Database на $Server" }
+    if ("$foreign".Trim() -eq '1') {
+        Fail "база $Database на $Server вже існує і не має позначки Ecr_Smoke_Temp (не наша тимчасова) - розгортання знищило б її. Задай інше -Database або прибери базу вручну."
+    }
+
     # ⚠ `-Documents 1` не для обсягу, а заради СТРУКТУРИ ШАБЛОНУ: створити
     # аркуші, таблиці й колонки через API неможливо — структура приходить із
     # `tools/Ecr.Bootstrap.Excel`, який поки заглушка. Це відома межа сценарію, а
