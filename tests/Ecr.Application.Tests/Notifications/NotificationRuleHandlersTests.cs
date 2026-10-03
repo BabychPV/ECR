@@ -329,6 +329,37 @@ public sealed class NotificationRuleHandlersTests
         Assert.All(_tx.AuditInside, inside => Assert.True(inside));
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    public async Task T2_09_Причина_відмови_у_журналі_резолвиться_мовою_читача()
+    {
+        // ⛔ Відправник пише в журнал конверт «ключ + параметри» (без мови читача, у фоновому потоці), а мовою
+        // читача він стає тут. Рядок не в форматі конверта (текст транспорту, старі записи) лишається як є.
+        var envelope = JobProgressMessageCodec.Encode(new JobProgressMessageEnvelope(
+            "notifications.delivery.smtpNotConfigured",
+            new Dictionary<string, string> { ["channel"] = "T2 mail" }));
+        _store.Deliveries.Add(new NotificationDeliveryView(
+            1, _clock.UtcNow, 1, "T2 mail", NotificationEventKind.JobFailed, "job:7",
+            NotificationDeliveryStatus.Failed, envelope));
+        _store.Deliveries.Add(new NotificationDeliveryView(
+            2, _clock.UtcNow, 1, "T2 mail", NotificationEventKind.JobFailed, "job:8",
+            NotificationDeliveryStatus.Failed, "relay refused"));
+        _user.Language.Returns("ru");
+
+        var catalog = Substitute.For<IUiStringCatalog>();
+        catalog.GetScopedAsync("ru", UiStringScope.Private, Arg.Any<CancellationToken>()).Returns(
+            new UiStringCatalog("ru", 1, new Dictionary<string, string>
+            {
+                ["notifications.delivery.smtpNotConfigured"] = "Канал «{channel}»: почтовый транспорт процесса не настроен.",
+            }));
+
+        var page = await new ListNotificationDeliveriesHandler(_store, _access, _user, catalog)
+            .HandleAsync(new CursorRequest(50), null, null, CancellationToken.None);
+
+        Assert.Equal("Канал «T2 mail»: почтовый транспорт процесса не настроен.", page.Items.Single(i => i.Id == 1).Error);
+        Assert.Equal("relay refused", page.Items.Single(i => i.Id == 2).Error);
+    }
+
     private ReplaceNotificationRulesHandler Replace() => new(_store, _access, _uow, _audit, _user, _clock);
 
     private ListNotificationDeliveriesHandler Deliveries() => new(_store, _access, _user);

@@ -275,6 +275,25 @@ public sealed class SmtpAdminSettingsTests(SqlServerFixture sql) : IAsyncLifetim
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    public async Task T2_09_Причина_відмови_в_журналі_це_конверт_ключа_а_не_зашитий_український_текст()
+    {
+        var transport = Substitute.For<INotificationSender>();
+        transport.IsConfigured.Returns(false);
+        var channel = new NotificationChannel(NotificationChannelKind.Smtp, "T2 mail", "{}", DateTime.UtcNow, null);
+        var sender = new SmtpChannelSender(transport);
+
+        var thrown = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => sender.SendAsync(channel, new NotificationMessage("S", "B"), CancellationToken.None));
+
+        Assert.True(JobProgressMessageCodec.TryDecode(thrown.Message, out var envelope), thrown.Message);
+        Assert.Equal("notifications.delivery.smtpNotConfigured", envelope.Key);
+        Assert.Equal("T2 mail", envelope.Params!["channel"]);
+        Assert.DoesNotMatch("[іїєґа-яА-Я]", thrown.Message);
+        Assert.True(thrown.Message.Length <= NotificationDelivery.ErrorMaxLength);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "D-263")]
     public async Task Проба_розгортає_ролі_каналу_в_адреси_але_не_більше_межі_а_розсилка_без_межі()

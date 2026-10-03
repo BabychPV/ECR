@@ -39,6 +39,13 @@ public sealed class SmtpChannelSender(
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
+    /// <summary>Конверт причини відмови для журналу доставок (ключ каталогу + назва каналу).</summary>
+    private static string DeliveryError(string key, string channelName)
+        => JobProgressMessageCodec.EncodeWithinLimit(
+            new JobProgressMessageEnvelope(
+                key, new Dictionary<string, string>(StringComparer.Ordinal) { ["channel"] = channelName }),
+            "channel");
+
     /// <inheritdoc />
     public NotificationChannelKind Kind => NotificationChannelKind.Smtp;
 
@@ -51,8 +58,9 @@ public sealed class SmtpChannelSender(
 
         if (!transport.IsConfigured)
         {
-            throw new InvalidOperationException(
-                $"Канал «{channel.Name}»: транспорт SMTP процесу не налаштовано (Smtp:Host, Smtp:From).");
+            // ⛔ T2-09: причина йде в журнал доставок один раз, без мови читача, — тож конверт «ключ + параметри»
+            // (читач резолвить його своєю мовою в `ListNotificationDeliveriesHandler`), а не зашитий український текст.
+            throw new InvalidOperationException(DeliveryError("notifications.delivery.smtpNotConfigured", channel.Name));
         }
 
         var settings = SettingsOf(channel);
@@ -83,7 +91,7 @@ public sealed class SmtpChannelSender(
         if (explicitSet.Count == 0)
         {
             throw new NotificationNoRecipientsException(
-                $"Канал «{channel.Name}»: адресатів не задано (PUT …/channels/{{id}}) або в ролях-адресатах немає активних користувачів із поштою.");
+                DeliveryError("notifications.delivery.smtpNoRecipients", channel.Name));
         }
 
         // Явні адреси — мовою каталогу за замовчуванням (мови одержувача система не знає).
