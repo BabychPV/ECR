@@ -138,8 +138,8 @@ describe('ImportPanel: відмови перегляду (P3)', () => {
     const table = screen.getByRole('table');
     // ⛔ Мутація: прибрати гілку `importCalculatedStale` у `rejectionText` — тут
     // буде загальне `⟦import.rejectedCell⟧`.
-    expect(within(table).getByText('⟦err.ECR-CELL-4221.importCalculatedStale⟧ (ECR-CELL-4221)')).toBeTruthy();
-    expect(within(table).getByText('⟦err.ECR-CELL-4221.importCalculated⟧ (ECR-CELL-4221)')).toBeTruthy();
+    expect(within(table).getByText('⟦err.ECR-CELL-4221.importCalculatedStale⟧')).toBeTruthy();
+    expect(within(table).getByText('⟦err.ECR-CELL-4221.importCalculated⟧')).toBeTruthy();
   });
 
   it('відмова цілої таблиці без адреси — прочерк, а не порожня комірка', async () => {

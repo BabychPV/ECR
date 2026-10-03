@@ -17,7 +17,7 @@ namespace Ecr.Infrastructure.Persistence;
 /// ⚠ Файла немає в дереві `05-skeleton.md` §1: порт уведений `Q-032`,
 /// реалізація — `Q-050`.
 /// </remarks>
-public sealed class TemplateVersionStore(EcrDbContext db) : ITemplateVersionStore
+public sealed partial class TemplateVersionStore(EcrDbContext db) : ITemplateVersionStore
 {
     /// <inheritdoc />
     /// <remarks>
@@ -319,12 +319,18 @@ public sealed class TemplateVersionStore(EcrDbContext db) : ITemplateVersionStor
     /// Код клонованого зв'язку: <c>UQ_TableRelationDef</c> — унікальність по ВСІЙ системі
     /// (міграція індексу — окрема задача під токен), тож клон не може зберегти код джерела.
     /// Додається суфікс <c>_v&lt;id нової версії&gt;</c>; сам код обрізається до 64 символів.
+    /// ⛔ T3-07: попередній суфікс <c>_v&lt;id&gt;</c> (код уже від клона) знімається ПЕРЕД додаванням
+    /// нового — інакше клон клона ніс <c>CHK1_v4_v5</c> і суфікси росли з кожним клонуванням.
     /// </summary>
     internal static string ClonedRelationCode(string code, int cloneVersionId)
     {
+        code = PreviousCloneSuffix().Replace(code, string.Empty);
         var suffix = $"_v{cloneVersionId.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
         return (code.Length + suffix.Length > 64 ? code[..(64 - suffix.Length)] : code) + suffix;
     }
+
+    [System.Text.RegularExpressions.GeneratedRegex(@"_v\d+$")]
+    private static partial System.Text.RegularExpressions.Regex PreviousCloneSuffix();
 
     private void CloneTableRelations(TemplateVersion clone, IReadOnlyList<RelationTemplate> templates)
     {

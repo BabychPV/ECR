@@ -38,6 +38,7 @@ import { useCatalog } from '@/shared/i18n/useCatalog';
 import { BrandMark } from '@/shared/ui/BrandMark';
 import { RouteAnnouncer } from '@/shared/ui/RouteAnnouncer';
 import { UnsavedGuard } from '@/shared/ui/UnsavedGuard';
+import { flushUnsaved, hasUnsavedChanges } from '@/shared/ui/unsavedSources';
 import { UserMenu } from '@/shared/ui/UserMenu';
 
 import './routeTransition.css';
@@ -181,6 +182,35 @@ export function AppLayout(): JSX.Element {
 
   // Перемальовує каркас і сторінку, коли приватний каталог доїхав.
   useCatalog();
+
+  // ⛔ T3-02: після зміни мови каркас перекладався, а ВІДКРИТА сторінка — ні, до F5. Елемент
+  // сторінки (`<Outlet/>`) для React той самий, тож без підписки на каталог вона не перемальовується.
+  // Тому сторінка монтується заново, коли ПРИВАТНИЙ каталог нової мови вже розв'язано (ключ — мова
+  // останнього розв'язаного каталогу, а не `language()`: інакше сторінка змонтувалась би зі старим
+  // текстом, а каталог доїхав би вже без неї). Рішення дизайну: remount, а не підписка кожної сторінки;
+  // зміна мови — рідкісна дія, а редагована комірка при відкритті меню вже зафіксована.
+  const activeLanguage = language();
+  const [pageLanguage, setPageLanguage] = useState(activeLanguage);
+  const remountDue = pageLanguage !== activeLanguage && isCatalogResolved(activeLanguage, 'private');
+  // ⛔ Незбережений ввід (сітка, шапка, гранти) remount знищив би. Брудний стан — спершу зберегти
+  // (`flushUnsaved`, як при виході зі сторінки); не вдалося — сторінка лишається старою мовою, але
+  // ввід цілий (безпечний бік помилки).
+  const remountBlocked = remountDue && hasUnsavedChanges();
+  if (remountDue && !remountBlocked) {
+    setPageLanguage(activeLanguage);
+  }
+  useEffect(() => {
+    if (!remountBlocked) return;
+
+    let live = true;
+    void flushUnsaved().then((saved) => {
+      if (live && saved) setPageLanguage(activeLanguage);
+    });
+
+    return () => {
+      live = false;
+    };
+  }, [remountBlocked, activeLanguage]);
 
   const me = session.data;
 
@@ -434,7 +464,7 @@ export function AppLayout(): JSX.Element {
            * (`shared/theme/preferences.ts`).
            */}
           <div ref={transitionRef} className={routeTransitionClassName}>
-            <Suspense fallback={<RouteFallback />}>
+            <Suspense key={pageLanguage} fallback={<RouteFallback />}>
               {malformedPath ? <NotFoundPage /> : <Outlet />}
             </Suspense>
           </div>

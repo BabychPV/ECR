@@ -128,8 +128,8 @@ describe('ImportPanel: перелік змін і відмов', () => {
     await openPreview();
 
     const table = screen.getByRole('table');
-    expect(within(table).getByText('⟦err.ECR-CELL-4221.importCalculated⟧ (ECR-CELL-4221)')).toBeTruthy();
-    expect(within(table).getByText('⟦deny.RowReadOnly⟧ (ECR-ACCS-0403)')).toBeTruthy();
+    expect(within(table).getByText('⟦err.ECR-CELL-4221.importCalculated⟧')).toBeTruthy();
+    expect(within(table).getByText('⟦deny.RowReadOnly⟧')).toBeTruthy();
     expect(within(table).queryByText(/Правило доступу|обчислюється системою/)).toBeNull();
   });
 
@@ -155,7 +155,7 @@ describe('ImportPanel: перелік змін і відмов', () => {
 
     const table = screen.getByRole('table');
     expect(within(table).getByRole('cell', { name: 'B3' })).toBeTruthy();
-    expect(within(table).getByText('⟦err.ECR-ROW-0404.importOutsideRows⟧ (ECR-ROW-0404)')).toBeTruthy();
+    expect(within(table).getByText('⟦err.ECR-ROW-0404.importOutsideRows⟧')).toBeTruthy();
 
     // Відмова блокує застосування — і діалог НЕ каже «файл збігається з аркушем».
     expect(screen.queryByText('⟦import.noChanges⟧')).toBeNull();
@@ -285,7 +285,15 @@ describe('ImportPanel: четвертий раунд (F-01, F-06)', () => {
     await openPreview();
 
     const table = screen.getByRole('table');
-    expect(within(table).getByText('⟦err.ECR-CELL-0422.importExpectsNumber⟧ (ECR-CELL-0422)')).toBeTruthy();
+    expect(within(table).getByText('⟦err.ECR-CELL-0422.importExpectsNumber⟧')).toBeTruthy();
+
+    // ⛔ T3-06: сирого коду причини в людському тексті немає (мутація: повернути `({reasonCode})` - червоний).
+    expect(within(table).queryByText(/\(ECR-CELL-0422\)/)).toBeNull();
+
+    // Код для підтримки не втрачено: окремий дрібний елемент, а не частина речення й не messageKey.
+    const code = within(table).getByTestId('import-reason-code');
+    expect(code.textContent).toBe('ECR-CELL-0422');
+    expect(code.closest('td')?.textContent).not.toContain('(');
     expect(screen.getByRole('button', { name: '⟦import.apply⟧' }).hasAttribute('disabled')).toBe(true);
   });
 
