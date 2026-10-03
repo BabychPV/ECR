@@ -63,7 +63,7 @@ import {
   usePendingSlice,
 } from './pendingStore';
 import { installEnterKeyCompat } from './keyboardCompat';
-import { installKeyCommitGate, isInCellEditor } from './keyCommitGate';
+import { deferWhileCommitting, installKeyCommitGate, isInCellEditor } from './keyCommitGate';
 import { gridShortcut } from './shortcutKey';
 import { installBodyPasteRedirect } from './bodyPaste';
 import {
@@ -1766,10 +1766,39 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
   // T4-02: слухач `paste` на `document` живе в колбеку ref-а, що не
   // перестворюється на кожну правку, — тож бере актуальний `onPaste` з ref.
   const onPasteRef = useRef(onPaste);
-  onPasteRef.current = onPaste;
 
   const gridListenersCleanup = useRef<(() => void)[]>([]);
   const gridContainer = useRef<HTMLDivElement | null>(null);
+
+  // AN-39/L8-16: вставка за 70-250 мс після Enter (макрос, сканер) лягала в ПОПЕРЕДНЮ комірку -
+  // фокус ще не перейшов. Тут її відкладено до кінця вікна коміту (`keyCommitGate`); текст
+  // буфера читається синхронно (потім `clipboardData` уже недоступний).
+  const onPasteGated = useCallback(
+    (event: React.ClipboardEvent<HTMLDivElement>) => {
+      const container = gridContainer.current;
+      const text = event.clipboardData.getData('text/plain');
+
+      if (container !== null && text.length > 0 && !isInCellEditor(event.target)) {
+        const target = event.target;
+        const deferred = deferWhileCommitting(container, () =>
+          onPasteRef.current({
+            target,
+            clipboardData: { getData: () => text },
+            preventDefault: () => undefined,
+          } as unknown as React.ClipboardEvent<HTMLDivElement>),
+        );
+
+        if (deferred) {
+          event.preventDefault();
+          return;
+        }
+      }
+
+      onPaste(event);
+    },
+    [onPaste],
+  );
+  onPasteRef.current = onPasteGated;
   const gridContainerRef = useCallback(
     (node: HTMLDivElement | null) => {
       for (const cleanup of gridListenersCleanup.current) cleanup();
@@ -1873,7 +1902,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
       onRetry={() => void slice.refetch()}
     >
       {() => (
-    <Stack gap="xs" onPaste={onPaste} onCopy={onCopy} onKeyDown={onKeyDown}>
+    <Stack gap="xs" onPaste={onPasteGated} onCopy={onCopy} onKeyDown={onKeyDown}>
       {/*
        * ⛔ Перше, що видно: довідник не завантажився. Раніше тут не було
        * НІЧОГО — випадний список у комірці просто ставав порожнім, і оператор
