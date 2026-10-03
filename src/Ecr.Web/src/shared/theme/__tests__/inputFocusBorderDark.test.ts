@@ -1,8 +1,26 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { DEFAULT_THEME, mergeMantineTheme } from '@mantine/core';
 import { AA, contrast } from '../contrast';
-import { brand } from '../theme';
+import { cssVariablesResolver } from '../cssVariables';
+import { brand, theme } from '../theme';
+
+/**
+ * Фони, на яких в темній темі Mantine лежить поле/меню: Paper і `default`-поле (dark-6), `filled`-поле
+ * (dark-5), тло сторінки (dark-7), пункт меню при наведенні (dark-5).
+ */
+const DarkFieldBackgrounds = ['#2e2e2e', '#3b3b3b', '#242424'] as const;
+
+describe('T2-05: --ecr-focus (реальний вивід резолвера) у Dark ≥ 3:1 на фонах полів', () => {
+  const out = cssVariablesResolver(mergeMantineTheme(DEFAULT_THEME, theme));
+  const focus = out.dark['--ecr-focus'];
+
+  it.each(DarkFieldBackgrounds)('на %s', (bg) => {
+    expect(focus, 'резолвер не віддав --ecr-focus для dark').toBeTruthy();
+    expect(contrast(focus ?? '', bg)).toBeGreaterThanOrEqual(AA.nonText);
+  });
+});
 
 /**
  * T2-05: рамка поля у фокусі в темній темі була `brand[5]` (#5558c8) на поверхні Paper/меню `#2e2e2e` —
