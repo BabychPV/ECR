@@ -1068,10 +1068,10 @@ public sealed class RegistryEntryWriter(
         }
     }
 
-    /// <summary>Типізоване значення поля — для порівняння до/після і для аудиту.</summary>
     /// <summary>Значення не заповнене: <c>null</c> або рядок із самих пробілів.</summary>
     private static bool IsBlank(object? raw) => raw is null || raw is string text && string.IsNullOrWhiteSpace(text);
 
+    /// <summary>Типізоване значення поля — для порівняння до/після і для аудиту.</summary>
     private static object? RawValue(RegistryValue value, CellDataType dataType) => dataType switch
     {
         CellDataType.String => value.ValueString,
