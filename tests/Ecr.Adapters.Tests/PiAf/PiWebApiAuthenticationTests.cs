@@ -82,10 +82,10 @@ public sealed class PiWebApiAuthenticationTests
         // Перевірка IP у момент підключення (DNS-rebinding) — у всіх режимах.
         Assert.NotNull(handler.ConnectCallback);
 
-        // Windows-облікові дані не переходять за перенаправленням на інший хост;
-        // заголовкові режими поведінку не змінюють. Мутація: повернути
-        // AllowAutoRedirect = true (або PreAuthenticate = true) для Negotiate.
-        Assert.Equal(!expected, handler.AllowAutoRedirect);
+        // Жоден режим не слідує перенаправленню (D-241 п.5, L3-08): для Negotiate —
+        // облікові дані служби, для Basic/Bearer — обхід PiWebApi:AllowedHosts.
+        // Мутація: повернути AllowAutoRedirect = true у будь-якій гілці.
+        Assert.False(handler.AllowAutoRedirect);
     }
 
     /// <summary>
