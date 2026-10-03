@@ -113,17 +113,23 @@ export function ExportButton({
   // відповідати файлу, який вона отримає, а не поточному положенню перемикача.
   const [startedFormat, setStartedFormat] = useState<ExportFormat>('xlsx');
 
+  // ⛔ AN-39/L8-19: задача прив'язана до документа/періоду, ДЛЯ яких її запущено. Перехід на
+  // інший документ (компонент лишається змонтованим) давав посилання з новим id на книгу
+  // старого й крутив «Формується…» на чужому документі.
+  const [startedFor, setStartedFor] = useState({ documentId, periodKey });
+
   const start = useMutation({
-    mutationFn: () =>
-      apiEnqueue(`/api/v1/documents/${documentId}/export`, {
-        format,
+    mutationFn: (target: { documentId: number; periodKey: number; format: ExportFormat }) =>
+      apiEnqueue(`/api/v1/documents/${target.documentId}/export`, {
+        format: target.format,
         includeFormulas: true,
         includeStyles: true,
         language,
-        periodKey,
+        periodKey: target.periodKey,
       } satisfies ExportRequest),
-    onSuccess: (job) => {
-      setStartedFormat(format);
+    onSuccess: (job, target) => {
+      setStartedFormat(target.format);
+      setStartedFor({ documentId: target.documentId, periodKey: target.periodKey });
       setJobId(job.jobId);
     },
     onError: showApiError,
@@ -138,7 +144,8 @@ export function ExportButton({
   });
 
   const outcome = jobId === null ? null : outcomeOf(job.data?.state, job.isError);
-  const building = outcome === 'running';
+  const building =
+    outcome === 'running' && startedFor.documentId === documentId && startedFor.periodKey === periodKey;
 
   // ⚠ Повідомлення про відмову — ОДИН раз на задачу, а не на кожен рендер:
   // `job.data` не змінюється після кінцевого стану, і без захисту `ref`
@@ -182,7 +189,7 @@ export function ExportButton({
           message: (
             <Anchor
               size="sm"
-              href={`/api/v1/documents/${documentId}/export/${encodeURIComponent(exportKey)}`}
+              href={`/api/v1/documents/${startedFor.documentId}/export/${encodeURIComponent(exportKey)}`}
               download
             >
               {exportReadyLabel(startedFormat)}
@@ -204,7 +211,7 @@ export function ExportButton({
         closeButtonProps: notificationCloseButtonProps,
       });
     }
-  }, [jobId, outcome, job.data?.errorCode, job.data?.message, documentId, startedFormat]);
+  }, [jobId, outcome, job.data?.errorCode, job.data?.message, startedFor.documentId, startedFormat]);
 
   return (
     /*
@@ -239,7 +246,7 @@ export function ExportButton({
         disabled={start.isPending || building}
         aria-busy={start.isPending || building}
         data-export-state={start.isPending || building ? 'running' : 'idle'}
-        onClick={() => void whenEditsSaved(() => start.mutate())}
+        onClick={() => void whenEditsSaved(() => start.mutate({ documentId, periodKey, format }))}
       >
         <span style={{ display: 'inline-grid' }}>
           <span
