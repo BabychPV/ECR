@@ -782,7 +782,7 @@ public sealed class SaveMethodologyTestCaseHandler(
         // P2 (walk-reg): без цього некоректний JSON зберігався з 200, а публікація/симуляція
         // падали 500. Той самий розбір, що в MethodologyStore.GetTestCasesAsync, плюс форма входу.
         TestCaseJson.RequireInput(testCode.Value, inputJson);
-        TestCaseJson.Require<Dictionary<string, decimal>>(testCode.Value, "expectedJson", expectedJson);
+        TestCaseJson.RequireExpected(testCode.Value, expectedJson);
 
         var version = await drafts.FindVersionAsync(methodologyVersionId, ct).ConfigureAwait(false)
             ?? throw new NotFoundException(
@@ -1592,6 +1592,25 @@ internal static class TestCaseJson
         where T : class
     {
         _ = Parse<T>(testCode, field, json);
+    }
+
+    /// <summary>
+    /// Очікування: словник «ключ → число», і кожен ключ читається так, як його читатиме
+    /// <c>GoldenSet.Judge</c> (аудит L7-10: інакше <c>tons@abc</c> зберігався, а публікація — 500).
+    /// </summary>
+    /// <param name="testCode">Код тесту.</param>
+    /// <param name="json">Текст <c>expectedJson</c>.</param>
+    public static void RequireExpected(string testCode, string json)
+    {
+        const string field = "expectedJson";
+
+        foreach (var key in Parse<Dictionary<string, decimal>>(testCode, field, json).Keys)
+        {
+            if (!GoldenSet.TryParseKey(key, out _, out _))
+            {
+                throw Refusal(testCode, field, "$." + key);
+            }
+        }
     }
 
     private static T Parse<T>(string testCode, string field, string json)

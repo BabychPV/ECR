@@ -182,28 +182,47 @@ public static class GoldenSet
     /// <returns>Код виходу і речовина; <c>null</c> — «усі речовини виходу».</returns>
     private static (string Code, int? Substance) ParseKey(string declaration, string testCode)
     {
-        var separator = declaration.IndexOf(SubstanceSeparator, StringComparison.Ordinal);
-        if (separator < 0)
-        {
-            return (declaration, null);
-        }
-
-        var code = declaration[..separator];
-        var substance = declaration[(separator + 1)..];
-
         // ⛔ Зіпсований ключ кидає, а не стає «виходом без речовини». Тихе
         // зведення означало б, що набір перевіряє не те, що в ньому написано:
         // очікування для однієї речовини мовчки поширилося б на всі — або, що
-        // гірше, на жодну.
-        if (code.Length == 0
-            || !int.TryParse(substance, NumberStyles.Integer, CultureInfo.InvariantCulture, out var entry))
+        // гірше, на жодну. Збереження тесту відхиляє такий ключ раніше (L7-10),
+        // тож сюди доходить лише старий запис.
+        if (!TryParseKey(declaration, out var code, out var substance))
         {
             throw new InvalidOperationException(
                 $"Тест «{testCode}»: ключ очікування «{declaration}» не читається. "
                 + $"Очікується «код_виходу» або «код_виходу{SubstanceSeparator}ідентифікатор_речовини».");
         }
 
-        return (code, entry);
+        return (code, substance);
+    }
+
+    /// <summary>Розбирає ключ очікування; той самий розбір для збереження тесту і для публікації (аудит L7-10).</summary>
+    /// <param name="declaration">Ключ: <c>tons</c> або <c>tons@901</c>.</param>
+    /// <param name="code">Код виходу.</param>
+    /// <param name="substance">Речовина; <c>null</c> — «усі речовини виходу».</param>
+    /// <returns><c>false</c> — ключ не читається.</returns>
+    public static bool TryParseKey(string declaration, out string code, out int? substance)
+    {
+        ArgumentNullException.ThrowIfNull(declaration);
+
+        substance = null;
+        var separator = declaration.IndexOf(SubstanceSeparator, StringComparison.Ordinal);
+        if (separator < 0)
+        {
+            code = declaration;
+            return declaration.Length > 0;
+        }
+
+        code = declaration[..separator];
+        if (code.Length == 0
+            || !int.TryParse(declaration[(separator + 1)..], NumberStyles.Integer, CultureInfo.InvariantCulture, out var entry))
+        {
+            return false;
+        }
+
+        substance = entry;
+        return true;
     }
 }
 
