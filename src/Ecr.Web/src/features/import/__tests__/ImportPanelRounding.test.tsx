@@ -123,7 +123,7 @@ describe('ImportPanel: округлення до Scale колонки (ФВ-9.16
     await openPreview();
 
     const table = screen.getByRole('table');
-    expect(within(table).getByText('⟦err.ECR-CELL-0422.importPrecision⟧ (ECR-CELL-0422)')).toBeTruthy();
+    expect(within(table).getByText('⟦err.ECR-CELL-0422.importPrecision⟧')).toBeTruthy();
     expect(within(table).queryByText(/does not fit/)).toBeNull();
     expect(screen.getByRole('button', { name: '⟦import.apply⟧' }).hasAttribute('disabled')).toBe(true);
   });
