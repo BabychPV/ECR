@@ -37,6 +37,9 @@ export const OpenSettleMs = 200;
 
 const EditWrapper = '.edit-input-wrapper';
 
+/** Типи `<input>`, де працює API виділення (`setRangeText`). */
+const TextLike = new Set(['text', 'search', 'url', 'tel', 'password']);
+
 function inEditor(target: EventTarget | null): boolean {
   return target instanceof Element && target.closest(EditWrapper) !== null;
 }
@@ -105,10 +108,17 @@ export function installKeyCommitGate(container: HTMLElement): () => void {
       !event.defaultPrevented &&
       target instanceof HTMLInputElement &&
       inEditor(target) &&
+      TextLike.has(target.type) &&
       isPrintable(event)
     ) {
-      target.setRangeText(event.key, target.selectionStart ?? target.value.length, target.selectionEnd ?? target.value.length, 'end');
-      target.dispatchEvent(new Event('input', { bubbles: true }));
+      // AN-39/L8-04: `setRangeText` для date/number/... кидає InvalidStateError - решта
+      // черги «зависала» й відтворювалась у іншу комірку. Тому лише текстові типи й try.
+      try {
+        target.setRangeText(event.key, target.selectionStart ?? target.value.length, target.selectionEnd ?? target.value.length, 'end');
+        target.dispatchEvent(new Event('input', { bubbles: true }));
+      } catch {
+        // поле без API виділення: символ не дописуємо, черга триває
+      }
     }
   };
 
