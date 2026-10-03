@@ -113,7 +113,7 @@ internal static class MaintenanceRunFailure
             db.ChangeTracker.Clear();
             db.MaintenanceRuns.Attach(run);
 
-            run.Complete(FailedStatus, Details(error), utcNow);
+            run.Complete(FailedStatus, Details(error, run.Id), utcNow);
 
             await db.SaveChangesAsync(CancellationToken.None).ConfigureAwait(false);
         }
@@ -130,9 +130,17 @@ internal static class MaintenanceRunFailure
     }
 
     /// <summary>Текст помилки як <c>DetailsJson</c> — без стека (ФВ-6.11).</summary>
-    private static string Details(Exception error)
+    /// <remarks>
+    /// ⛔ L2-13 (V-03): <c>DetailsJson</c> дослівно йде в лист зведення і вебхук-канали
+    /// (<see cref="NotificationJob"/>). Текст винятку бази (імена об'єктів, значення
+    /// ключа, «EXECUTE permission was denied on 'arc.usp_…'») туди не потрапляє — той
+    /// самий фільтр, що й для <c>/jobs</c> (<see cref="JobFailureText"/>); повний виняток
+    /// лишається журналу. Кореляція — номер прогону.
+    /// </remarks>
+    private static string Details(Exception error, long runId)
     {
-        var message = error.Message;
+        var message = JobFailureText.For(
+            error, string.Create(System.Globalization.CultureInfo.InvariantCulture, $"maintenance run {runId}"));
 
         if (message.Length > MaxErrorLength)
         {

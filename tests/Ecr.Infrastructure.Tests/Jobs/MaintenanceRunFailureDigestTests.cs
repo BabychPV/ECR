@@ -104,6 +104,51 @@ public sealed class MaintenanceRunFailureDigestTests(SqlServerFixture sql)
         }
     }
 
+    /// <summary>
+    /// L2-13 (V-03): текст винятку бази не йде в <c>DetailsJson</c>, тобто в лист зведення й вебхуки.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "L2-13")]
+    public async Task Текст_винятку_бази_не_потрапляє_в_DetailsJson()
+    {
+        var now = new DateTime(2033, 7, 7, 7, 0, 0, DateTimeKind.Utc);
+        const string secret = "Violation of PRIMARY KEY constraint 'PK_Secret'. The duplicate key value is (42).";
+
+        try
+        {
+            await using var db = CreateContext();
+
+            var scanner = Substitute.For<IOrphanScanner>();
+            scanner.ScanAllAsync(Arg.Any<CancellationToken>())
+                .Returns<Task<Ecr.Application.Registries.OrphanScanSummary>>(
+                    _ => throw new DbUpdateException("An error occurred while saving.", new InvalidOperationException(secret)));
+
+            var job = new ConsistencyCheckJob(
+                db, scanner, new TestClock(now), Substitute.For<IConsistencyMetrics>());
+
+            await Assert.ThrowsAsync<DbUpdateException>(
+                () => job.ExecuteAsync(null, Substitute.For<IJobProgress>(), CancellationToken.None));
+
+            await using var read = CreateContext();
+            var run = await read.MaintenanceRuns
+                .AsNoTracking()
+                .Where(r => r.JobCode == ConsistencyCheckJob.Code && r.StartedAt >= CleanupFrom)
+                .OrderByDescending(r => r.Id)
+                .FirstAsync();
+
+            Assert.Equal("Failed", run.Status);
+            Assert.DoesNotContain("PK_Secret", run.DetailsJson!, StringComparison.Ordinal);
+            Assert.DoesNotContain("saving", run.DetailsJson!, StringComparison.Ordinal);
+            Assert.Contains($"maintenance run {run.Id}", run.DetailsJson!, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await CleanupAsync();
+        }
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
