@@ -77,16 +77,37 @@ public sealed class StoppingInterruptsJobsTests
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait("Requirement", "U8")]
-    public async Task Зупинка_застосунку_надсилає_скасування_задачі_що_виконується()
+    public Task Зупинка_застосунку_надсилає_скасування_задачі_що_виконується()
+        => StopCancelsRunningJobAsync("ecr-stopping", (services, factory) =>
+            services.AddScoped<IBackgroundJobScheduler>(_ => new QuartzJobScheduler(factory)));
+
+    /// <summary>
+    /// L2-02: у режимі <c>Database</c> порт — <see cref="DbBackgroundJobScheduler"/>, а розклад
+    /// однаково виконує Quartz процесу; DI — як у <c>AddInfrastructure</c> цієї гілки.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "U8")]
+    public Task Зупинка_в_режимі_Database_скасовує_задачу_Quartz_за_розкладом()
+        => StopCancelsRunningJobAsync("ecr-stopping-db", (services, factory) =>
+        {
+            services.AddScoped(_ => new QuartzJobScheduler(factory));
+            services.AddScoped(_ => Substitute.For<IJobQueue>());
+            services.AddSingleton<JobQueueSignal>();
+            services.AddScoped<IBackgroundJobScheduler, DbBackgroundJobScheduler>();
+        });
+
+    private static async Task StopCancelsRunningJobAsync(
+        string schedulerName, Action<ServiceCollection, ISchedulerFactory> register)
     {
-        var factory = StandaloneQuartz.Factory("ecr-stopping");
+        var factory = StandaloneQuartz.Factory(schedulerName);
         var quartz = await factory.GetScheduler();
 
         var runId = Guid.NewGuid().ToString("N");
         var run = Runs.GetOrAdd(runId, _ => new Run());
 
         var services = new ServiceCollection();
-        services.AddScoped<IBackgroundJobScheduler>(_ => new QuartzJobScheduler(factory));
+        register(services, factory);
         await using var provider = services.BuildServiceProvider();
 
         // ApplicationStarted ніколи не настає: постановка розкладів і цикл

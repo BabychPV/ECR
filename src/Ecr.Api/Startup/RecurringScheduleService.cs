@@ -191,10 +191,23 @@ public sealed partial class RecurringScheduleService(
 
         await using var scope = provider.CreateAsyncScope();
 
-        return scope.ServiceProvider.GetService<IBackgroundJobScheduler>() is Infrastructure.Jobs.QuartzJobScheduler quartz
+        return LocalQuartz(scope.ServiceProvider) is { } quartz
             ? await quartz.InterruptAllAsync(ct).ConfigureAwait(false)
             : 0;
     }
+
+    /// <summary>
+    /// Quartz цього процесу — за конкретним типом, а не через порт.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ L2-02: у режимі <c>Database</c> порт <see cref="IBackgroundJobScheduler"/> — це
+    /// <c>DbBackgroundJobScheduler</c>, а задачі за розкладом (збір, нічні перевірки,
+    /// <c>PeriodStateJob</c>) однаково виконує Quartz усередині Api. Перевірка через порт
+    /// мовчки не надсилала їм скасування на зупинці (регресія U8).
+    /// </remarks>
+    private static Infrastructure.Jobs.QuartzJobScheduler? LocalQuartz(IServiceProvider provider)
+        => provider.GetService<Infrastructure.Jobs.QuartzJobScheduler>()
+           ?? provider.GetService<IBackgroundJobScheduler>() as Infrastructure.Jobs.QuartzJobScheduler;
 
     /// <summary>Періодичне прибирання, поки застосунок живий.</summary>
     private async Task SweepLoopAsync(CancellationToken ct)
@@ -255,7 +268,7 @@ public sealed partial class RecurringScheduleService(
     {
         ArgumentNullException.ThrowIfNull(provider);
 
-        if (provider.GetService<IBackgroundJobScheduler>() is Infrastructure.Jobs.QuartzJobScheduler quartz)
+        if (LocalQuartz(provider) is { } quartz)
         {
             await quartz.KeepAliveLocalJobsAsync(ct).ConfigureAwait(false);
         }
