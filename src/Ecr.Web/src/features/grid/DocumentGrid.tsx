@@ -64,6 +64,7 @@ import {
 } from './pendingStore';
 import { installEnterKeyCompat } from './keyboardCompat';
 import { installKeyCommitGate, isInCellEditor } from './keyCommitGate';
+import { gridShortcut } from './shortcutKey';
 import { installBodyPasteRedirect } from './bodyPaste';
 import {
   TableCornerAnchor,
@@ -1595,7 +1596,9 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
       const modifier = event.ctrlKey || event.metaKey;
       if (!modifier) return;
 
-      if (event.key === 's') {
+      const shortcut = gridShortcut(event);
+
+      if (shortcut === 'save') {
         event.preventDefault();
         void save([...pending.values()]);
         return;
@@ -1605,13 +1608,13 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
       // (Ctrl+S лишається: зберегти все.)
       if (isInCellEditor(event.target)) return;
 
-      if (event.key === 'z' && !event.shiftKey) {
+      if (shortcut === 'undo') {
         event.preventDefault();
         applyHistory(history.current.undo());
         return;
       }
 
-      if (event.key === 'y' || (event.key === 'z' && event.shiftKey)) {
+      if (shortcut === 'redo') {
         event.preventDefault();
         applyHistory(history.current.redo());
       }
