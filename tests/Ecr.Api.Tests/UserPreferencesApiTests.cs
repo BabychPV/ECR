@@ -145,6 +145,32 @@ public sealed class UserPreferencesApiTests(SqlServerFixture sql)
 
     [Fact]
     [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Мова_налаштування_приймається_лише_кодом_увімкненої_мови()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app).ConfigureAwait(true);
+
+        // T4-09: порожнє, число, об'єкт `{"language":"ru"}`, null, масив, невідома мова, інший регістр.
+        foreach (var bad in new[] { "\"\"", "5", """{ "language": "ru" }""", "null", "[\"ru\"]", "\"xx\"", "\"RU\"" })
+        {
+            await AssertInvalidAsync(
+                await client.PutAsync(At("language"), Json(bad)).ConfigureAwait(true),
+                "err.ECR-REQ-0422.preferenceLanguageUnsupported").ConfigureAwait(true);
+        }
+
+        foreach (var good in new[] { "en", "ru", "kz" })
+        {
+            var put = await ReadAsync(
+                await client.PutAsync(At("language"), Json($"\"{good}\"")).ConfigureAwait(true)).ConfigureAwait(true);
+            Assert.Equal(good, put.GetProperty("value").GetString());
+        }
+
+        // Інші ключі правило не зачіпає.
+        await ReadAsync(await client.PutAsync(At("theme"), Json("5")).ConfigureAwait(true)).ConfigureAwait(true);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
     public async Task Без_входу_401()
     {
         using var app = new EcrApiFactory(sql);

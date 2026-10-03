@@ -169,6 +169,7 @@ public sealed class ExcelExporter(
             var row = FirstRow;
             var headerRows = new List<int>(tables.Count);
             var lastColumn = 0;
+            var contentLength = new List<int>();
 
             foreach (var table in tables)
             {
@@ -178,15 +179,18 @@ public sealed class ExcelExporter(
                     worksheet, name, table, instance, snapshot, styleMap, lookups, styleSource, options, row,
                     rowIdsBatch.GetValueOrDefault(instance.TableInstanceId, NoRows),
                     slicesBatch.GetValueOrDefault(instance.TableInstanceId, NoCells),
-                    formatRules);
+                    formatRules,
+                    contentLength);
 
                 blocks.Add(block);
                 headerRows.Add(block.HeaderRow);
-                lastColumn = Math.Max(lastColumn, block.Columns.Count);
+
+                // +1 — стовпець підпису рядка праворуч від колонок даних.
+                lastColumn = Math.Max(lastColumn, block.Columns.Count + 1);
                 row = block.HeaderRow + block.Rows.Count + 1 + GapRows;
             }
 
-            AdjustHeaders(worksheet, headerRows, lastColumn);
+            AdjustHeaders(worksheet, headerRows, lastColumn, contentLength);
 
             // ⚠ Заморожується рядок ЗАГОЛОВКА першої таблиці, а не перший
             // рядок аркуша: у першому лежить назва таблиці, і замороження по
@@ -266,7 +270,8 @@ public sealed class ExcelExporter(
     /// самостійно — інакше остання таблиця аркуша обрізала б заголовки всіх
     /// попередніх.
     /// </remarks>
-    private static void AdjustHeaders(IXLWorksheet worksheet, List<int> headerRows, int lastColumn)
+    private static void AdjustHeaders(
+        IXLWorksheet worksheet, List<int> headerRows, int lastColumn, List<int> contentLength)
     {
         if (headerRows.Count == 0 || lastColumn == 0)
         {
@@ -285,10 +290,49 @@ public sealed class ExcelExporter(
             }
         }
 
+        // T4-04: ширина ще й під ВМІСТ (довжини зібрані при записі значень, без
+        // вимірювання шрифту — той і був дорогим), у межах [заголовок; MaxContentWidth].
         for (var number = 1; number <= lastColumn; number++)
         {
-            worksheet.Column(number).Width = widths[number];
+            var content = number < contentLength.Count
+                ? Math.Min(contentLength[number] + ContentPadding, MaxContentWidth)
+                : 0;
+
+            worksheet.Column(number).Width = Math.Max(widths[number], content);
         }
+    }
+
+    /// <summary>Верхня межа ширини стовпця за вмістом, символів.</summary>
+    private const double MaxContentWidth = 50;
+
+    /// <summary>Запас на відступи й роздільники розрядів, символів.</summary>
+    private const int ContentPadding = 2;
+
+    /// <summary>Запас на форматування числа (<c>0.000</c>, роздільники розрядів).</summary>
+    private const int NumberFormatPadding = 4;
+
+    /// <summary>Підпис стовпця з підписами рядків — мовою експорту.</summary>
+    private static string RowLabelHeader(string language) => language switch
+    {
+        "ru" => "Строка",
+        "kz" or "kk" => "Жол",
+        _ => "Row",
+    };
+
+    /// <summary>Орієнтовна довжина відображення значення, символів.</summary>
+    private static int DisplayLength(CellValueData value)
+    {
+        if (value.ValueNumeric is { } number)
+        {
+            return number.ToString(CultureInfo.InvariantCulture).Length + NumberFormatPadding;
+        }
+
+        if (value.ValueString is { } text)
+        {
+            return text.Length;
+        }
+
+        return value.ValueDate is not null ? 10 : 8;
     }
 
     /// <summary>Пише одну таблицю і повертає її блок у карті книги.</summary>
@@ -310,7 +354,8 @@ public sealed class ExcelExporter(
         int startRow,
         IReadOnlyDictionary<string, long> rowIds,
         IReadOnlyList<CellRecord> cells,
-        IReadOnlyDictionary<string, IReadOnlyList<ConditionalFormatRule>> formatRules)
+        IReadOnlyDictionary<string, IReadOnlyList<ConditionalFormatRule>> formatRules,
+        List<int> contentLength)
     {
         // ⛔ S6: колонка під забороною — як прихована: ні заголовка, ні значень.
         // Формула, що посилається на неї, не транслюється (`#REF!` →
@@ -387,7 +432,25 @@ public sealed class ExcelExporter(
         }
 
         StyleDataColumns(worksheet, columns, styleMap, styleSource, options, headerRow, keys.Count);
-        WriteValues(worksheet, cells, rowIds, columns, columnNumbers, rowNumbers, lookups);
+        WriteValues(worksheet, cells, rowIds, columns, columnNumbers, rowNumbers, lookups, contentLength);
+
+        // T4-04: підписи рядків — у стовпці ПРАВОРУЧ від колонок даних. Номери
+        // колонок даних (а з ними карта й імпорт) лишаються тими самими.
+        var labelColumn = columns.Count + 1;
+        worksheet.Cell(headerRow, labelColumn).Value = RowLabelHeader(options.Language);
+        worksheet.Cell(headerRow, labelColumn).Style = headerStyleValue;
+
+        foreach (var key in keys)
+        {
+            var label = snapshot.RowsByKey.TryGetValue((table.Id, key), out var rowDef)
+                ? rowDef.LabelL10n.Get(options.Language)
+                : null;
+
+            var text = string.IsNullOrWhiteSpace(label) ? key : label;
+            worksheet.Cell(rowNumbers[key], labelColumn).Value = text;
+            Widen(contentLength, labelColumn, text.Length);
+        }
+
         ApplyConditionalFormats(worksheet, cells, rowIds, columns, columnNumbers, rowNumbers, formatRules);
 
         return new ExcelTableBlock(
@@ -477,7 +540,8 @@ public sealed class ExcelExporter(
         List<ColumnDef> columns,
         Dictionary<int, int> columnNumbers,
         Dictionary<string, int> rowNumbers,
-        IReadOnlyDictionary<int, IReadOnlyDictionary<long, string>> lookups)
+        IReadOnlyDictionary<int, IReadOnlyDictionary<long, string>> lookups,
+        List<int> contentLength)
     {
         if (cells.Count == 0)
         {
@@ -510,6 +574,22 @@ public sealed class ExcelExporter(
                 byColumnId[cell.Address.ColumnDefId],
                 cell.Value,
                 lookups);
+
+            Widen(contentLength, columnNumber, DisplayLength(cell.Value));
+        }
+    }
+
+    /// <summary>Запам'ятовує найбільшу довжину вмісту стовпця аркуша.</summary>
+    private static void Widen(List<int> contentLength, int column, int length)
+    {
+        while (contentLength.Count <= column)
+        {
+            contentLength.Add(0);
+        }
+
+        if (length > contentLength[column])
+        {
+            contentLength[column] = length;
         }
     }
 

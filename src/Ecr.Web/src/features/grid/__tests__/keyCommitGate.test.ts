@@ -25,7 +25,7 @@ interface Grid {
   dispose: () => void;
 }
 
-function mountGrid(rows: number, startRow: number, withGate: boolean): Grid {
+function mountGrid(rows: number, startRow: number, withGate: boolean, lingeringEditor = false): Grid {
   const container = document.createElement('div');
   const overlay = document.createElement('revogr-overlay-selection');
   const holder = document.createElement('div');
@@ -54,12 +54,24 @@ function mountGrid(rows: number, startRow: number, withGate: boolean): Grid {
       if (event.key === 'Enter') {
         values[row] = editor.value;
         editor.blur();
-        editor.parentElement?.remove();
-        editor = null;
+        const closing = editor;
+        // ⚠ T4-01: справжній RevoGrid лишає старий редактор у DOM до самого
+        // переходу фокуса й прибирає його ПІСЛЯ `focuscell` (кілька мс).
+        if (!lingeringEditor) {
+          closing.parentElement?.remove();
+          editor = null;
+        }
+
         setTimeout(() => {
           row = Math.min(row + 1, rows - 1);
           holder.focus();
           container.dispatchEvent(new CustomEvent('focuscell', { bubbles: true }));
+          if (lingeringEditor) {
+            setTimeout(() => {
+              closing.parentElement?.remove();
+              editor = null;
+            }, 2);
+          }
         }, FocusMoveMs);
       }
 
@@ -67,7 +79,8 @@ function mountGrid(rows: number, startRow: number, withGate: boolean): Grid {
     }
 
     if (event.key === 'Enter') open(values[row] ?? '');
-    else if (event.key.length === 1) open(event.key);
+    // ⚠ RevoGrid не відкриває редактор від ярлика (Ctrl/Alt + символ).
+    else if (event.key.length === 1 && !event.ctrlKey && !event.altKey) open(event.key);
   });
 
   holder.focus();
@@ -125,6 +138,18 @@ describe('installKeyCommitGate: швидкий ввід не склеює зна
 
     expect(grid.values).toEqual(['', 'a', 'b', 'c', '']);
     grid.dispose();
+  });
+
+  it('T4-01: редактор лишається в DOM після focuscell - інтервали 0..120 мс дають значення у СВОЇХ рядках', () => {
+    for (const gap of [0, 10, 30, 50, 60, 65, 70, 80, 100, 120]) {
+      const grid = mountGrid(5, 1, true, true);
+
+      type(grid, keys, gap);
+
+      expect(grid.values, `gap ${gap}`).toEqual(['', '1', '2', '', '']);
+      grid.dispose();
+      document.body.innerHTML = '';
+    }
   });
 
   it('повільний ввід (пауза ≥ 0,1 с) поводиться як раніше', () => {
@@ -207,6 +232,39 @@ describe('installKeyCommitGate: швидкий ввід не склеює зна
 
     // Звичайна клавіша в тому ж вікні, як і раніше, у черзі.
     expect(fire(document.body, { key: 'q' }).delivered).toBe(false);
+    grid.dispose();
+  });
+
+  it('T4-07: AltGr-символ (ctrl+alt або AltGraph) одразу після Enter ставиться в чергу й не губиться', () => {
+    const variants: KeyboardEventInit[] = [
+      { key: '@', code: 'Digit2', ctrlKey: true, altKey: true },
+      { key: '@', code: 'Digit2', modifierAltGraph: true },
+    ];
+
+    for (const init of variants) {
+      const grid = mountGrid(4, 1, true);
+
+      openCommitWindow(grid);
+      const result = fire(document.body, init);
+      grid.press('Enter');
+      vi.advanceTimersByTime(2000);
+
+      expect(result.delivered, JSON.stringify(init)).toBe(false);
+      expect(grid.values, JSON.stringify(init)).toEqual(['', '1', '@', '']);
+      grid.dispose();
+      document.body.innerHTML = '';
+    }
+  });
+
+  it('T4-07: Ctrl+Alt+літера, що збігається з кодом клавіші (ярлик), не затримується', () => {
+    const grid = mountGrid(4, 1, true);
+
+    openCommitWindow(grid);
+
+    const result = fire(document.body, { key: 'q', code: 'KeyQ', ctrlKey: true, altKey: true });
+
+    expect(result.delivered).toBe(true);
+    expect(result.prevented).toBe(false);
     grid.dispose();
   });
 

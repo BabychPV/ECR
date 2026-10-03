@@ -64,6 +64,7 @@ import {
 } from './pendingStore';
 import { installEnterKeyCompat } from './keyboardCompat';
 import { installKeyCommitGate } from './keyCommitGate';
+import { installBodyPasteRedirect } from './bodyPaste';
 import {
   TableCornerAnchor,
   clampSelection,
@@ -1739,6 +1740,11 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
    */
   const rowSize = useRowHeight();
 
+  // T4-02: слухач `paste` на `document` живе в колбеку ref-а, що не
+  // перестворюється на кожну правку, — тож бере актуальний `onPaste` з ref.
+  const onPasteRef = useRef(onPaste);
+  onPasteRef.current = onPaste;
+
   const gridListenersCleanup = useRef<(() => void)[]>([]);
   const gridContainer = useRef<HTMLDivElement | null>(null);
   const gridContainerRef = useCallback(
@@ -1755,6 +1761,13 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         // клавіші після Enter/Tab стають у чергу до кінця переходу фокуса.
         installKeyCommitGate(node),
         blockNativePaste(node),
+        // ⛔ T4-02: Ctrl+V після закриття редактора, коли фокус на `<body>`.
+        // Лише озброєна сітка й лише з реальним виділенням (без кута (0,0)).
+        installBodyPasteRedirect(
+          node,
+          (event) => onPasteRef.current(event as unknown as React.ClipboardEvent<HTMLDivElement>),
+          () => selection.current !== null,
+        ),
         trackSelection(node, (next) => {
           selection.current = next;
         }),
@@ -2094,6 +2107,10 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
           source={rows}
           pinnedBottomSource={pinnedTotals}
           readonly={readOnly}
+          // ⛔ T4-03: клік на іншу комірку/кнопку закриває редактор БЕЗ Enter -
+          // без цього набране мовчки зникало. Esc, як і раніше, скасовує
+          // (`cancelChanges`); Enter/Tab фіксують, як і досі.
+          applyOnClose
           onBeforeedit={onBeforeEdit}
           onBeforerangeedit={onBeforeRangeEdit}
           onAfteredit={onAfterEdit}
