@@ -73,6 +73,60 @@ public sealed class JobWorkerMaxDurationTests(SqlServerFixture sql) : DbJobQueue
         }
     }
 
+    [Fact]
+    [Trait("Finding", "L2-03")]
+    public async Task Задача_що_ігнорує_токен_після_межі_і_пільги_втрачає_оренду()
+    {
+        var probe = new WorkerProbe();
+        var hung = new HangGate();
+        await using var provider = BuildHost(probe, hung);
+        var onHang = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var worker = new JobWorker(
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            new JobWorkerOptions
+            {
+                Lanes = JobLanes.All,
+                Role = JobProgressStore.CurrentRole,
+                MaxConcurrency = 1,
+                PollInterval = TimeSpan.FromMilliseconds(50),
+                Lease = TimeSpan.FromSeconds(1),
+                RenewInterval = TimeSpan.FromMilliseconds(100),
+                MaxDuration = TimeSpan.FromMilliseconds(700),
+                HangGrace = TimeSpan.FromMilliseconds(500),
+                OnHang = () => onHang.TrySetResult(),
+            },
+            provider.GetRequiredService<JobQueueSignal>(),
+            NullLogger<JobWorker>.Instance);
+
+        await worker.StartAsync(CancellationToken.None);
+        try
+        {
+            var jobId = await EnqueueJobAsync<WorkerHungJob>(provider);
+            await hung.Started.Task.WaitAsync(Patience);
+            await onHang.Task.WaitAsync(Patience);
+
+            // ⛔ Оренду кинуто: інший процес переклеймлює рядок, як після падіння.
+            // Без фіксу подовження тримає оренду, поки задача не повернеться, — тобто ніколи.
+            await using var other = NewHost();
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            ClaimedJob? reclaimed;
+            while ((reclaimed = await other.ClaimAsync("host/other")) is null)
+            {
+                Assert.True(clock.Elapsed < Patience, $"{jobId}: оренду досі тримає зависла задача.");
+                await Task.Delay(100);
+            }
+
+            Assert.Equal(jobId, reclaimed.Claim.JobId);
+            Assert.Equal(1, (await RowAsync(jobId))!.ReclaimCount);
+        }
+        finally
+        {
+            hung.Release.TrySetResult();
+            await worker.StopAsync(CancellationToken.None);
+            worker.Dispose();
+        }
+    }
+
     private static async Task<string> EnqueueJobAsync<TJob>(ServiceProvider host)
         where TJob : IBackgroundJob
     {
@@ -97,7 +151,7 @@ public sealed class JobWorkerMaxDurationTests(SqlServerFixture sql) : DbJobQueue
         }
     }
 
-    private ServiceProvider BuildHost(WorkerProbe probe)
+    private ServiceProvider BuildHost(WorkerProbe probe, HangGate? hung = null)
     {
         var services = new ServiceCollection();
         services.AddScoped(_ => Sql.CreateContext());
@@ -112,6 +166,26 @@ public sealed class JobWorkerMaxDurationTests(SqlServerFixture sql) : DbJobQueue
         services.AddSingleton(probe);
         services.AddScoped<WorkerProbeJob>();
         services.AddScoped<WorkerBlockingJob>();
+        services.AddSingleton(hung ?? new HangGate());
+        services.AddScoped<WorkerHungJob>();
         return services.BuildServiceProvider();
+    }
+}
+
+/// <summary>Бар'єр задачі, що не стежить за токеном.</summary>
+public sealed class HangGate
+{
+    public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+}
+
+/// <summary>Процесорна фаза, що токена не перевіряє (L2-03): чекає бар'єра, а не скасування.</summary>
+public sealed class WorkerHungJob(HangGate gate) : IBackgroundJob
+{
+    public async Task ExecuteAsync(object? payload, IJobProgress progress, CancellationToken ct)
+    {
+        gate.Started.TrySetResult();
+        await gate.Release.Task.ConfigureAwait(false);
     }
 }

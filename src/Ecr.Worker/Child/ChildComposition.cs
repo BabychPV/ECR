@@ -56,6 +56,9 @@ internal static class ChildComposition
             Role = JobProgressStore.RoleWorker,
             MaxConcurrency = 1,
             MaxDuration = pool.MaxDuration,
+
+            // L2-03: зависла задача — вихід, наглядач перезапустить слот.
+            OnHang = () => Environment.Exit(JobWorkerOptions.ExitJobHung),
         };
     }
 

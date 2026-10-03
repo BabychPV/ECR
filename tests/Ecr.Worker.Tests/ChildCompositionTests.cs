@@ -39,6 +39,9 @@ public sealed class ChildCompositionTests
         Assert.Equal(JobProgressStore.RoleWorker, options.Role);
         Assert.Equal(1, options.MaxConcurrency);
         Assert.Equal(TimeSpan.FromMinutes(7), options.MaxDuration);
+
+        // L2-03: зависла задача завершує дочірній — наглядач перезапустить слот.
+        Assert.NotNull(options.OnHang);
     }
 
     [Theory]

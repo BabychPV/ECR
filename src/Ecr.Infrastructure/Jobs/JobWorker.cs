@@ -58,6 +58,24 @@ public sealed record JobWorkerOptions
     public TimeSpan? MaxDuration { get; init; }
 
     /// <summary>
+    /// Пільга після <see cref="MaxDuration"/> для задачі, що не стежить за токеном (L2-03):
+    /// минула — оренду більше не подовжують, і рядок переклеймить інший процес
+    /// (з <c>ReclaimCount</c>), як після падіння.
+    /// </summary>
+    public TimeSpan HangGrace { get; init; } = TimeSpan.FromMinutes(2);
+
+    /// <summary>
+    /// Що зробити з процесом, коли задача зависла понад <see cref="MaxDuration"/> +
+    /// <see cref="HangGrace"/> (L2-03). Дочірній воркер завершується
+    /// (<see cref="ExitJobHung"/>) — наглядач перезапускає слот; <c>null</c> — процес
+    /// живе далі (Api: слот зайнятий до рестарту, але оренда вже не тримається).
+    /// </summary>
+    public Action? OnHang { get; init; }
+
+    /// <summary>Код виходу дочірнього воркера, чия задача зависла (L2-03).</summary>
+    public const int ExitJobHung = 6;
+
+    /// <summary>
     /// Стеля сумарного відкладення однієї задачі від першого (борг O1,
     /// <see cref="JobDeferral.MaxDeferral"/>): перевищила — <c>Failed</c> з конвертом
     /// <see cref="JobDeferral.ExhaustedKey"/>, без ретраю.
@@ -363,6 +381,23 @@ public sealed partial class JobWorker(
             overtime.CancelAfter(maxDuration);
         }
 
+        // ⛔ L2-03 (аудит 2026-10-03): межа вище лише ПРОСИТЬ зупинитися. Задача, що
+        // токен ігнорує (процесорна фаза), тримала б оренду вічно: подовження
+        // зупиняється лише в `finally`, тобто після її повернення. Через пільгу —
+        // кидаємо оренду (переклейм іншим процесом, як після падіння) і, якщо
+        // задано, завершуємо процес: наглядач перезапустить слот.
+        using var hang = new CancellationTokenSource();
+        using var hangHook = hang.Token.Register(() =>
+        {
+            lease.Abandoned = true;
+            LogJobHung(logger, claim.JobId, job.JobCode);
+            options.OnHang?.Invoke();
+        });
+        if (options.MaxDuration is { } hangAfter)
+        {
+            hang.CancelAfter(hangAfter + options.HangGrace);
+        }
+
         Exception? failure = null;
         JobDeferredException? deferred = null;
         var cancelled = false;
@@ -400,7 +435,8 @@ public sealed partial class JobWorker(
             await renew.ConfigureAwait(false);
         }
 
-        if (lease.Lost || failure is JobLeaseLostException)
+        // Кинута оренда (L2-03) — рядок уже не наш: фіксувати нічого.
+        if (lease.Lost || lease.Abandoned || failure is JobLeaseLostException)
         {
             LogLeaseLost(logger, claim.JobId);
             return;
@@ -494,6 +530,11 @@ public sealed partial class JobWorker(
 
         while (await timer.WaitForNextTickAsync(CancellationToken.None).ConfigureAwait(false))
         {
+            if (lease.Abandoned)
+            {
+                return;
+            }
+
             try
             {
                 await using var scope = scopes.CreateAsyncScope();
@@ -682,6 +723,7 @@ public sealed partial class JobWorker(
         private volatile bool lost;
         private volatile bool cancelRequested;
         private volatile bool timedOut;
+        private volatile bool abandoned;
 
         public bool Lost { get => lost; set => lost = value; }
 
@@ -689,7 +731,18 @@ public sealed partial class JobWorker(
 
         /// <summary>Спрацювала межа <see cref="JobWorkerOptions.MaxDuration"/>.</summary>
         public bool TimedOut { get => timedOut; set => timedOut = value; }
+
+        /// <summary>
+        /// Задача не повернулась за <see cref="JobWorkerOptions.MaxDuration"/> +
+        /// <see cref="JobWorkerOptions.HangGrace"/>: оренду кинуто (L2-03).
+        /// </summary>
+        public bool Abandoned { get => abandoned; set => abandoned = value; }
     }
+
+    [LoggerMessage(
+        Level = LogLevel.Critical,
+        Message = "Задача {JobId} ({JobCode}) не відреагувала на скасування за межею тривалості й пільгою; оренду кинуто, рядок переклеймить інший процес.")]
+    private static partial void LogJobHung(ILogger logger, string jobId, string jobCode);
 
     [LoggerMessage(
         Level = LogLevel.Error,
