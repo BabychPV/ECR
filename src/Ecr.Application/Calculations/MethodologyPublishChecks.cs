@@ -82,6 +82,9 @@ public static class MethodologyPublishChecks
     /// Куди складати попередження, які публікацію <b>не</b> блокують;
     /// <c>null</c> — попередження нікуди не йдуть.
     /// </param>
+    /// <param name="strings">
+    /// Каталог рядків мовою читача для текстів попереджень; <c>null</c> — англійський запас.
+    /// </param>
     /// <returns>Перелік проблем; порожній — публікація за типами проходить.</returns>
     /// <exception cref="ArgumentNullException">
     /// <paramref name="formulas"/>, <paramref name="constants"/> або
@@ -96,7 +99,8 @@ public static class MethodologyPublishChecks
         IReadOnlyList<MethodologyConstant> constants,
         IReadOnlyList<MethodologyOutput> outputs,
         IReadOnlyList<string>? contextualArguments = null,
-        ICollection<string>? warnings = null)
+        ICollection<string>? warnings = null,
+        UiStringCatalog? strings = null)
     {
         ArgumentNullException.ThrowIfNull(formulas);
         ArgumentNullException.ThrowIfNull(constants);
@@ -107,7 +111,7 @@ public static class MethodologyPublishChecks
         // списком, текст виразу і вираз, який збере збірка, — це два різні
         // вирази, і будь-який висновок про типи зроблено не про той, що
         // рахуватиметься. Спершу треба звести їх до одного.
-        Audit(formulas, contextualArguments ?? DefaultContextualArguments, warnings);
+        Audit(formulas, contextualArguments ?? DefaultContextualArguments, warnings, strings);
 
         var problems = new List<PublishProblem>();
         var byCode = new Dictionary<string, MethodologyConstant>(StringComparer.OrdinalIgnoreCase);
@@ -142,6 +146,7 @@ public static class MethodologyPublishChecks
     /// <param name="formulas">Формули версії з розібраними деревами.</param>
     /// <param name="contextual">Контекстні аргументи — глушник другого правила.</param>
     /// <param name="warnings">Куди складати попередження; <c>null</c> — нікуди.</param>
+    /// <param name="strings">Каталог рядків мовою читача; <c>null</c> — англійський запас.</param>
     /// <exception cref="BusinessRuleException">
     /// <c>ECR-CALC-0432</c> — знайдено токен поза списком.
     /// </exception>
@@ -161,7 +166,8 @@ public static class MethodologyPublishChecks
     private static void Audit(
         IReadOnlyList<ParsedFormula> formulas,
         IReadOnlyList<string> contextual,
-        ICollection<string>? warnings)
+        ICollection<string>? warnings,
+        UiStringCatalog? strings)
     {
         var undeclared = new List<string>();
 
@@ -191,9 +197,20 @@ public static class MethodologyPublishChecks
                 // мовчати теж не можна — оголошений і невжитий аргумент
                 // найчастіше означає, що у виразі те саме ім'я написане з
                 // описки інакше, і ТОЙ токен уже нічого не отримає.
-                warnings.Add(
-                    $"Формула «{formula.Code}»: аргумент «{name}» оголошений у списку, але у "
-                    + "виразі не вживається — найчастіше це описка в імені токена.");
+                // T2-04: текст — з каталогу мовою читача (ключ publish.warning.argumentUnused);
+                // без каталогу — англійський запас, а не українська для всіх.
+                const string Key = "publish.warning.argumentUnused";
+                var args = new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["formula"] = formula.Code,
+                    ["name"] = name,
+                };
+
+                warnings.Add(strings is null
+                    ? $"Formula \"{formula.Code}\": argument \"{name}\" is declared in the list but not used in the "
+                      + "expression - most often a typo in the token name."
+                    : Ecr.Application.Localization.UiStringResolver.Format(
+                        Ecr.Application.Localization.UiStringResolver.Resolve(strings, Key), args));
             }
         }
 
