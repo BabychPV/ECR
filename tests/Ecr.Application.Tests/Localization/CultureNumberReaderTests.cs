@@ -71,6 +71,15 @@ public sealed class CultureNumberReaderTests
         { "kz", "1234,5", "1234.5" },
         { "kz", "1,234", "1.234" },
         { "kz", "-0,5", "-0.5" },
+
+        // T2-10: `.5` — число (Excel так само); кома в ru — десятковий. Пробіл-розряди — лише коректними групами.
+        { "en", ".5", "0.5" },
+        { "en", "-.5", "-0.5" },
+        { "ru", ",5", "0.5" },
+        { "ru", ".5", "0.5" },
+        { "en", "1 234", "1234" },
+        { "ru", "12 345 678,5", "12345678.5" },
+        { "ru", " 7 ", "7" },
     };
 
     public static TheoryData<string, string, NumberTextKind> Refused() => new()
@@ -89,6 +98,17 @@ public sealed class CultureNumberReaderTests
         { "en", "1,23,4", NumberTextKind.NotNumber },
         { "ru", "abc", NumberTextKind.NotNumber },
         { "ru", "1,", NumberTextKind.NotNumber },
+
+        // T2-10: пробіл усередині, що не є розрядами тисяч, мовчки не склеюється (`1 2` було 12).
+        { "en", "1 2", NumberTextKind.NotNumber },
+        { "ru", "12 3", NumberTextKind.NotNumber },
+        { "ru", "1  234", NumberTextKind.NotNumber },
+        { "en", "1 2345", NumberTextKind.NotNumber },
+        { "en", "- 5", NumberTextKind.NotNumber },
+
+        // `,5` в en-US — розряди без цілої частини; `5.` — незавершений запис.
+        { "en", ",5", NumberTextKind.NotNumber },
+        { "en", "5.", NumberTextKind.NotNumber },
     };
 
     [Theory]
