@@ -65,6 +65,9 @@ export function ChangePasswordPage(): JSX.Element {
   const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
 
+  // ⛔ T3-08: відмова відноситься до ВІДПРАВЛЕНИХ значень; щойно людина міняє будь-яке поле, стара
+  // помилка (під полем чи банером) застаріла й знімається — інакше червоний текст лишався під уже
+  // виправленим полем до наступного відправлення.
   const mismatch = next.length > 0 && repeat.length > 0 && next !== repeat;
 
   // ⚠ Мінімальна довжина пароля нізвідки клієнту не доступна ДО спроби: не
@@ -121,7 +124,10 @@ export function ChangePasswordPage(): JSX.Element {
           <PasswordInput
             label={t('password.current')}
             value={current}
-            onChange={(event) => setCurrent(event.currentTarget.value)}
+            onChange={(event) => {
+              setCurrent(event.currentTarget.value);
+              setError(null);
+            }}
             error={currentWrongText ?? undefined}
             autoComplete="current-password"
             visibilityToggleButtonProps={passwordToggleProps()}
@@ -129,7 +135,10 @@ export function ChangePasswordPage(): JSX.Element {
           <PasswordInput
             label={t('password.next')}
             value={next}
-            onChange={(event) => setNext(event.currentTarget.value)}
+            onChange={(event) => {
+              setNext(event.currentTarget.value);
+              setError(null);
+            }}
             error={tooShortText ?? undefined}
             autoComplete="new-password"
             visibilityToggleButtonProps={passwordToggleProps()}
@@ -137,7 +146,10 @@ export function ChangePasswordPage(): JSX.Element {
           <PasswordInput
             label={t('password.repeat')}
             value={repeat}
-            onChange={(event) => setRepeat(event.currentTarget.value)}
+            onChange={(event) => {
+              setRepeat(event.currentTarget.value);
+              setError(null);
+            }}
             error={mismatch ? t('password.mismatch') : undefined}
             autoComplete="new-password"
             visibilityToggleButtonProps={passwordToggleProps()}
