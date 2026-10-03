@@ -108,7 +108,13 @@ public sealed class GenericCalculationModule(
         // (ФВ-9.4). Сортувати граф тут заборонено: порядок мусить бути тим
         // самим, за яким версію перевірили тестами, а не тим, який вийде
         // сьогодні.
-        var ordered = formulas.OrderBy(f => f.EvaluationOrder).ThenBy(f => f.Id).ToList();
+        // ⛔ Аудит L7-02: у чернетки порядку ще немає (EvaluationOrder = 0 до
+        // публікації), а золотий прогін і симуляція рахують саме її. Порядок
+        // `Id` — це порядок створення, і формула, що читає пізніше створену,
+        // отримувала `#REF`. Граф тут — той самий, що запише публікація.
+        var ordered = Application.Calculations.MethodologyFormulaOrder.IsUnordered(formulas)
+            ? Application.Calculations.MethodologyFormulaOrder.Topological(formulas, formulaEngine)
+            : formulas.OrderBy(f => f.EvaluationOrder).ThenBy(f => f.Id).ToList();
 
         var period = await PeriodAsync(methodology, documentId, periodKey, ct).ConfigureAwait(false);
 
