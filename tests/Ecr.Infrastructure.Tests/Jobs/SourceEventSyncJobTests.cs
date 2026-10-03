@@ -698,6 +698,39 @@ public sealed class SourceEventSyncJobTests(SqlServerFixture sql)
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Directive", "HSE301-EFSYNC")]
+    public async Task ВидаленийРядок_ЗнімаєЧиннийRowWindowValue()
+    {
+        // ⛔ L3-13: жорстке видалення рядка події лишало ext.RowWindowValue чинним; подія з тим самим
+        // ID повертається, рядок EF-<id> створюється знову, а NeedsFetch бачить старий «Fetched» і
+        // не підтягує — колонка об'єму порожня назавжди. Мутація: прибрати UPDATE ext.RowWindowValue
+        // у JournalAndDeleteAsync.
+        await using var stand = await ArrangeAsync();
+        var source = new FakeEventSource(Ev("E1", Start, End, volume: 10m), Ev("E2", Start.AddHours(1), End.AddHours(1)));
+        await RunAsync(stand, source);
+
+        var mapId = await AddCurrentWindowValueAsync(stand, "EF-E1");
+        try
+        {
+            source.Result = new SourceEventResult([Ev("E2", Start.AddHours(1), End.AddHours(1))], false, null);
+            await RunAsync(stand, source);
+
+            Assert.Equal(["EF-E2"], (await RowsAsync(stand)).Select(r => r.RowKey));
+            Assert.Equal(
+                (1, 0),
+                (Convert.ToInt32(await ScalarAsync($"SELECT COUNT(*) FROM ext.RowWindowValue WHERE RowWindowMapId = {mapId}"), CultureInfo.InvariantCulture),
+                 Convert.ToInt32(await ScalarAsync($"SELECT COUNT(*) FROM ext.RowWindowValue WHERE RowWindowMapId = {mapId} AND IsCurrent = 1"), CultureInfo.InvariantCulture)));
+        }
+        finally
+        {
+            await ExecuteAsync(
+                $"DELETE FROM ext.RowWindowValue WHERE RowWindowMapId = {mapId}; DELETE FROM ext.RowWindowMap WHERE Id = {mapId};");
+        }
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "HSE301-EFSYNC")]
     [Trait("Finding", "audit-B2")]
     public async Task B2_Збій_на_видаленні_зв_язку_відкочує_комірки_рядок_і_запис_журналу_разом()
     {
@@ -1425,6 +1458,31 @@ public sealed class SourceEventSyncJobTests(SqlServerFixture sql)
         => Convert.ToInt32(
             await ScalarAsync($"SELECT COUNT(*) FROM aud.CellChange WHERE DocumentId = {stand.DocumentId}"),
             CultureInfo.InvariantCulture);
+
+    /// <summary>Прив'язка вікна на колонку об'єму і чинний запис провенансу для рядка (як після RowWindowFetchJob).</summary>
+    private static async Task<int> AddCurrentWindowValueAsync(Stand stand, string rowKey)
+    {
+        await using var scope = stand.Provider.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<EcrDbContext>();
+        var columns = await db.ColumnDefs
+            .Where(c => c.Id == stand.VolumeColumn || c.Id == stand.StartColumn || c.Id == stand.EndColumn)
+            .ToDictionaryAsync(c => c.Id);
+        var unitId = await db.Units.OrderBy(u => u.Id).Select(u => u.Id).FirstAsync();
+
+        var map = RowWindowMap.Create(
+            columns[stand.VolumeColumn], columns[stand.StartColumn], columns[stand.EndColumn], null,
+            RowWindowSummaryKind.Total, isStep: false, unitId);
+        db.RowWindowMaps.Add(map);
+        await db.SaveChangesAsync();
+
+        var value = new RowWindowValue(
+            202601, stand.JanuaryInstanceId, rowKey, stand.VolumeColumn, map.Id, stand.EntityId, "tag.total",
+            Start, End, RowWindowSummaryKind.Total, unitId, Now);
+        value.Record(RowWindowValueStatus.Fetched, RowWindowComputedBy.Local, 1m, null, 1m, null, 4, 100m, null);
+        db.RowWindowValues.Add(value);
+        await db.SaveChangesAsync();
+        return map.Id;
+    }
 
     private async Task<object?> ScalarAsync(string query)
     {

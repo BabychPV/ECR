@@ -942,6 +942,10 @@ public sealed partial class SourceEventSyncJob(
             DELETE FROM doc.TableRow
              WHERE PeriodKey = @period AND TableInstanceId = @instance AND RowKey = @rowKey;
             DELETE FROM ext.SourceEventLink WHERE Id = @link;
+            -- L3-13: провенанс вікна рядка (ключ — RowKey) знімається з чинних, історія лишається;
+            -- інакше повернена подія з тим самим ID дає рядок, який RowWindowFetchJob вважає вже підтягнутим.
+            UPDATE ext.RowWindowValue SET IsCurrent = 0
+             WHERE PeriodKey = @period AND TableInstanceId = @instance AND RowKey = @rowKey AND IsCurrent = 1;
             """;
         delete.Parameters.AddWithValue("@period", periodKey);
         delete.Parameters.AddWithValue("@instance", instance);
