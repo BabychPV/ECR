@@ -277,7 +277,8 @@ public static class DependencyInjection
             sp.GetService<ISchedulerFactory>(),
             sp.GetService<IJobProgressStore>(),
             sp.GetService<IClock>(),
-            sp.GetService<ICorrelationIdAccessor>()));
+            sp.GetService<ICorrelationIdAccessor>(),
+            sp.GetService<Microsoft.Extensions.Logging.ILogger<Jobs.QuartzJobScheduler>>()));
 
         // MI-02 (F1c): черга в базі. Порти реєструються завжди (fencing читає оренду
         // й у режимі Quartz — там вона null); виконавець і адаптер — лише за
