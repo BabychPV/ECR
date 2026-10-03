@@ -93,8 +93,10 @@ public sealed class ListUserPreferencesHandler(IUserPreferenceStore store, ICurr
 
 /// <summary>Записує (upsert) одне налаштування поточного користувача.</summary>
 public sealed class PutUserPreferenceHandler(
-    IUserPreferenceStore store, IUnitOfWork uow, ICurrentUser currentUser, IClock clock)
+    IUserPreferenceStore store, IUnitOfWork uow, ICurrentUser currentUser, IClock clock, IUiStringCatalog languages)
 {
+    private const int EchoMaxLength = 64;
+
     /// <summary>Створює або замінює значення за ключем.</summary>
     /// <param name="key">Ключ із білого списку.</param>
     /// <param name="valueJson">Сире JSON-значення; <c>null</c> — тіла немає.</param>
@@ -106,6 +108,7 @@ public sealed class PutUserPreferenceHandler(
         key = UserPreferenceRules.RequireKey(key);
 
         var normalized = Normalize(key, valueJson);
+        await RequireSupportedLanguageAsync(key, normalized, ct).ConfigureAwait(false);
         var size = Encoding.UTF8.GetByteCount(normalized);
         if (size > UserPreferenceRules.MaxValueBytes)
         {
@@ -138,6 +141,36 @@ public sealed class PutUserPreferenceHandler(
 
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
         return UserPreferenceRules.ToDto(existing);
+    }
+
+    // T4-09: `language` — лише рядок-код УВІМКНЕНОЇ мови реєстру (ФВ-14.9: мови
+    // додаються записом у реєстр, тож перелік не зашивається константою).
+    // Об'єкт `{"language":"ru"}`, число, порожній рядок, невідома мова — 422.
+    private async Task RequireSupportedLanguageAsync(string key, string normalizedJson, CancellationToken ct)
+    {
+        if (!string.Equals(key, "language", StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        using var doc = JsonDocument.Parse(normalizedJson);
+        var code = doc.RootElement.ValueKind == JsonValueKind.String ? doc.RootElement.GetString() : null;
+
+        if (!string.IsNullOrEmpty(code))
+        {
+            var enabled = await languages.ListLanguagesAsync(ct).ConfigureAwait(false);
+            if (enabled.Any(l => string.Equals(l.Code, code, StringComparison.Ordinal)))
+            {
+                return;
+            }
+        }
+
+        var echo = normalizedJson.Length > EchoMaxLength ? normalizedJson[..EchoMaxLength] + "…" : normalizedJson;
+        throw UserPreferenceRules.Invalid(
+            "Мова налаштування має бути кодом увімкненої мови інтерфейсу.",
+            "err.ECR-REQ-0422.preferenceLanguageUnsupported",
+            key,
+            new() { ["value"] = echo });
     }
 
     // Перезапис без пробілів: ліміт міряє дані, а не форматування клієнта.

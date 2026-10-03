@@ -6523,8 +6523,11 @@ USING (VALUES
     -- COLL:p3-t2 ── кінець секції ──
     -- COLL:p3-t3 ── тестувальний прохід №3, пакет P3 (T3-07…); ru/kz — порцією COLL:p3-t3 у блоці I18N нижче ──
     (N'err.ECR-TMPL-0409.relationCodeTaken.title', N'en', N'Relation code is already in use', 1),
-    (N'grid.tableLoadNow', N'en', N'Load now', 1)
+    (N'grid.tableLoadNow', N'en', N'Load now', 1),
     -- COLL:p3-t3 ── кінець секції ──
+    -- COLL:p4-t4 ── тестувальний прохід №4, T4-09: мова налаштування поза реєстром; ru/kz — порцією COLL:p4-t4 у блоці I18N нижче ──
+    (N'err.ECR-REQ-0422.preferenceLanguageUnsupported', N'en', N'The language of preference "{key}" must be the code of an enabled interface language (for example "en", "ru" or "kz"), got: {value}.', 1)
+    -- COLL:p4-t4 ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -15308,6 +15311,16 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:p3-t3 ── кінець секції ──
+-- COLL:p4-t4 ── ru/kz тестувального проходу №4 (T4-09); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-REQ-0422.preferenceLanguageUnsupported', N'ru', N'Язык настройки «{key}» должен быть кодом включённого языка интерфейса (например «en», «ru» или «kz»), получено: {value}.'),
+    (N'err.ECR-REQ-0422.preferenceLanguageUnsupported', N'kz', N'«{key}» баптауының тілі қосылған интерфейс тілінің коды болуы тиіс (мысалы, «en», «ru» немесе «kz»), алынғаны: {value}.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:p4-t4 ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t
