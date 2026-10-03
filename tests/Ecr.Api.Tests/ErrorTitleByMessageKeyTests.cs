@@ -59,6 +59,29 @@ public sealed class ErrorTitleByMessageKeyTests
         Assert.Equal("The template version is published", problem.GetProperty("title").GetString());
     }
 
+    /// <summary>
+    /// Регрес: помилки БЕЗ ключа <c>.title</c> (усі наявні, крім relationCodeTaken) мають заголовок
+    /// коду, як і до зміни — із messageKey і без нього.
+    /// </summary>
+    [Theory]
+    [InlineData("ECR-USR-0409", "err.ECR-USR-0409.userNameTaken")]
+    [InlineData("ECR-CFG-0422", "err.ECR-CFG-0422.invalidCode")]
+    [InlineData("ECR-DOC-0409", "err.ECR-DOC-0409.businessKeyDuplicate")]
+    [InlineData("ECR-PRJ-0409", "err.ECR-PRJ-0409.projectCodeTaken")]
+    [InlineData("ECR-CELL-0409", null)]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Finding", "T3-07")]
+    public async Task Помилки_без_title_ключа_лишають_заголовок_коду(string code, string? messageKey)
+    {
+        var catalog = new FakeUiStringCatalog()
+            .Add("en", $"err.{code}", $"Title of {code}", UiStringScope.Public);
+        var details = messageKey is null ? null : new Dictionary<string, object?> { ["messageKey"] = messageKey };
+
+        var problem = await ProblemAsync(catalog, () => throw new BusinessRuleException(code, "сире речення", details));
+
+        Assert.Equal($"Title of {code}", problem.GetProperty("title").GetString());
+    }
+
     private static async Task<JsonElement> ProblemAsync(IUiStringCatalog catalog, Func<Task> throwing)
     {
         var currentUser = Substitute.For<ICurrentUser>();
