@@ -69,6 +69,48 @@ public sealed class CreateUserNameValidationTests
         Assert.Equal("err.ECR-USR-0422.userNameInvalid", error.Details!["messageKey"]);
     }
 
+    [Theory]
+    [InlineData("kovalenko.o")]
+    [InlineData("a.b-c_d")]
+    [InlineData("DOMAIN\\user")]
+    [InlineData("user@domain.tld")]
+    [InlineData("Коваленко_О")]
+    public async Task Реальні_імена_входу_приймаються(string userName)
+    {
+        await CreateAsync(userName);
+
+        Assert.Contains(_users.Users, u => u.UserName == userName);
+    }
+
+    [Theory]
+    [InlineData("a​b")]
+    [InlineData("a\u0007b")]
+    [InlineData("a b")]
+    public async Task Невидимі_та_керуючі_символи_в_імені_входу_відхиляються(string userName)
+    {
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(() => CreateAsync(userName));
+
+        Assert.Equal("err.ECR-USR-0422.userNameInvalid", error.Details!["messageKey"]);
+    }
+
+    [Fact]
+    public async Task Межа_довжини_імені_входу_100_приймається_101_відхиляється()
+    {
+        await CreateAsync(new string('x', 100));
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(() => CreateAsync(new string('y', 101)));
+
+        Assert.Equal("err.ECR-USR-0422.userNameInvalid", error.Details!["messageKey"]);
+    }
+
+    [Fact]
+    public async Task Дублікат_з_крайнім_пробілом_не_створює_другого_запису()
+    {
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(() => CreateAsync("admin "));
+
+        Assert.NotEqual("err.ECR-USR-0422.userNameInvalid", error.Details?["messageKey"]);
+        Assert.Single(_users.Users);
+    }
+
     [Fact]
     public async Task Ім_я_входу_обрізається_від_крайніх_пробілів()
     {
