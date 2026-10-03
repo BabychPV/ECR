@@ -194,6 +194,21 @@ public sealed class MethodologyPublishChecksTests
         Assert.Empty(warnings);
     }
 
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [InlineData("@A * 2", "@A;CST.K", "CST.K")] // оголошена як CST.K, але вираз на константу K не посилається
+    [InlineData("@A * 2", "@A;Density", "Density")] // звичайний невжитий аргумент
+    [InlineData("@A * CST.K2", "@A;CST.K", "CST.K")] // посилання на ІНШУ константу не рятує
+    public void T2_04_Реально_невжитий_аргумент_без_посилання_на_константу_лишається_попередженням(
+        string expression, string declaration, string expectedName)
+    {
+        var warnings = new List<string>();
+
+        CheckWithArguments("OUTRESULT", expression, declaration, warnings);
+
+        Assert.Contains(warnings, w => w.Contains(expectedName, StringComparison.Ordinal));
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
     public void T2_04_Справді_невжита_CST_у_списку_лишається_попередженням()
