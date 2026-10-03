@@ -22,10 +22,9 @@ import {
 import { ActionGroup, DocumentToolbar } from '@/features/documents/DocumentToolbar';
 import { useVersionMigrationAction } from '@/features/documents/VersionMigrationAction';
 import { DocumentLockBanner } from '@/features/documents/DocumentLockBanner';
-import { documentLockOf, locksDataActions } from '@/features/documents/documentLock';
+import { documentLockOf, hasLockedSheet, locksDataActions } from '@/features/documents/documentLock';
 import { SheetFillSummary } from '@/features/documents/SheetFillSummary';
 import { useDocumentPending } from '@/features/grid/autosave';
-import { fetchAllProjects } from '@/features/projects/allProjects';
 import { ExportButton } from '@/features/export/ExportButton';
 import { SheetActions, isEditable } from '@/features/workflow/SheetActions';
 import { can, useSession } from '@/shared/session/useSession';
@@ -408,7 +407,8 @@ export function DocumentPage(): JSX.Element {
   const projects = useQuery({
     queryKey: ['projects'],
     // AN-39/L8-10: усі сторінки - проєкт поза першими 200 теж блокує дії в архіві.
-    queryFn: fetchAllProjects,
+    // ⚠ За `import()`: статичний імпорт додавав файл і ~1 КБ gzip до графа маршруту (бюджет D-132).
+    queryFn: () => import('@/features/projects/allProjects').then((module) => module.fetchAllProjects()),
     enabled: projectId !== null,
   });
 
@@ -467,6 +467,11 @@ export function DocumentPage(): JSX.Element {
   // прогону й відмови — у самому діалозі.
   const versionMigration = useVersionMigrationAction({ documentId, document: summary.data });
 
+  const refetchBoth = (): void => {
+    void summary.refetch();
+    void tables.refetch();
+  };
+
   return (
     /*
      * ⛔ Обгортка навколо ВСЬОГО екрана: заголовок — це бізнес-ключ документа,
@@ -489,21 +494,12 @@ export function DocumentPage(): JSX.Element {
       emptyTitle={t('document.noSheets')}
       emptyHint={t('document.noSheetsHint')}
       skeleton="table"
-      onRetry={() => {
-        void summary.refetch();
-        void tables.refetch();
-      }}
+      onRetry={refetchBoth}
     >
       {(document) => (
     <Stack>
       {(summary.error ?? tables.error) !== null && (
-        <ErrorAlert
-          error={summary.error ?? tables.error}
-          onRetry={() => {
-            void summary.refetch();
-            void tables.refetch();
-          }}
-        />
+        <ErrorAlert error={summary.error ?? tables.error} onRetry={refetchBoth} />
       )}
       <PageHeader
         // ⛔ Директива "людське ім'я документа": ім'я ПОРУЧ із бізнес-ключем,
@@ -625,9 +621,7 @@ export function DocumentPage(): JSX.Element {
             hasProjectWriteGrant(session.data, document.projectId) &&
             session.data?.isSimulation !== true &&
             lock !== 'projectArchived' &&
-            !Object.values(document.sheetStates ?? {}).some(
-              (sheetState) => sheetState === 'Submitted' || sheetState === 'Approved',
-            )
+            !hasLockedSheet(document.sheetStates)
           }
         />
       </Suspense>

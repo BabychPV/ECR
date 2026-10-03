@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseClipboard, toClipboard } from '../clipboard';
+import { parseClipboard, toClipboard } from '../tsvClipboard';
 
 /**
  * AN-39 / L8-06: Excel кладе комірки з переносом/табом/лапкою в лапках (RFC-4180).

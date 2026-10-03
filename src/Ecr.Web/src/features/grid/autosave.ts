@@ -452,9 +452,7 @@ export function useDocumentPending(documentId: number, ownerUserId?: number): vo
 
         // AN-39/L8-08: відхилені (утримані) правки надіслати неможливо - про них
         // питаємо; решта їде маячком, як і раніше.
-        const held =
-          pendingSlices().reduce((sum, slice) => sum + slice.edits.length, 0) >
-          sendable.reduce((sum, slice) => sum + slice.edits.length, 0);
+        const held = pendingCount() > sendable.reduce((sum, slice) => sum + slice.edits.length, 0);
 
         for (const slice of sendable) {
           sendPatchBeacon(
