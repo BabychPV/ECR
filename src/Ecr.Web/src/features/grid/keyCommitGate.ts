@@ -78,12 +78,45 @@ interface QueuedKey {
   readonly target: EventTarget | null;
 }
 
+/** Стан затримки коміту контейнера сітки (для відкладення вставки, AN-39/L8-16). */
+interface GateState {
+  isCommitting(): boolean;
+  afterSettled(run: () => void): void;
+}
+
+const gates = new WeakMap<HTMLElement, GateState>();
+
+/**
+ * AN-39/L8-16: Ctrl+V за 70-250 мс після Enter (макрос, сканер) вставляв у ПОПЕРЕДНЮ комірку:
+ * фокус ще не перейшов, а нативний `paste` не ставиться в чергу. Тут вставку відкладають
+ * до кінця вікна коміту.
+ *
+ * @returns `true` - `run` відкладено й виконається після вікна; `false` - вікна немає,
+ * викликач виконує вставку сам, одразу.
+ */
+export function deferWhileCommitting(container: HTMLElement, run: () => void): boolean {
+  const gate = gates.get(container);
+  if (gate === undefined || !gate.isCommitting()) return false;
+
+  gate.afterSettled(run);
+
+  return true;
+}
+
 /** Встановлює чергу клавіш на контейнері сітки; повертає функцію відписки. */
 export function installKeyCommitGate(container: HTMLElement): () => void {
   const doc = container.ownerDocument;
   let holding: 'commit' | 'open' | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
   let queue: QueuedKey[] = [];
+  let afterSettled: (() => void)[] = [];
+
+  gates.set(container, {
+    isCommitting: () => holding === 'commit',
+    afterSettled: (run) => {
+      afterSettled.push(run);
+    },
+  });
 
   const overlay = (): Element | null => container.querySelector('revogr-overlay-selection');
 
@@ -131,6 +164,14 @@ export function installKeyCommitGate(container: HTMLElement): () => void {
     while (queue.length > 0 && holding === null) {
       const next = queue.shift();
       if (next !== undefined) replay(next);
+    }
+
+    // Вікно справді закрите (черга не відкрила нового) - відкладені вставки йдуть у вже
+    // новій комірці.
+    if (holding === null && afterSettled.length > 0) {
+      const due = afterSettled;
+      afterSettled = [];
+      for (const run of due) run();
     }
   };
 
@@ -229,6 +270,8 @@ export function installKeyCommitGate(container: HTMLElement): () => void {
     container.removeEventListener('focusin', onFocusIn);
     if (timer !== null) clearTimeout(timer);
     queue = [];
+    afterSettled = [];
     holding = null;
+    if (gates.get(container) !== undefined) gates.delete(container);
   };
 }
