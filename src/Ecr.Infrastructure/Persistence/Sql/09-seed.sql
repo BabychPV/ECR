@@ -1004,13 +1004,26 @@ UPDATE t
     (N'err.ECR-REQ-0429.tooManySearches', N'ru', N'Слишком много поисковых запросов за короткое время. Подождите немного и повторите попытку; заголовок Retry-After указывает, через сколько.', N'Слишком много поисковых запросов за короткое время. Подождите немного и повторите попытку.'),
     (N'err.ECR-REQ-0429.tooManySearches', N'kz', N'Қысқа уақыт ішінде іздеу сұраулары тым көп. Біраз күтіп, қайталап көріңіз; қанша уақыттан кейін екенін Retry-After тақырыбы көрсетеді.', N'Қысқа уақыт ішінде іздеу сұраулары тым көп. Біраз күтіп, қайталап көріңіз.'),
     (N'err.ECR-REQ-0429.tooManySmtpTests', N'en', N'Too many test messages in a short time. Wait a moment and try again; the Retry-After header says how long.', N'Too many test messages in a short time. Wait a moment and try again.'),
-    (N'err.ECR-REQ-0429.tooManyRecalculations', N'en', N'Too many recalculation requests in a short time. Wait a moment and try again; the Retry-After header says how long.', N'Too many recalculation requests in a short time. Wait a moment and try again.'),
-    (N'err.ECR-REQ-0429.tooManyRecalculations', N'ru', N'Слишком много запросов на пересчёт за короткое время. Подождите немного и повторите попытку; заголовок Retry-After указывает, через сколько.', N'Слишком много запросов на пересчёт за короткое время. Подождите немного и повторите попытку.'),
-    (N'err.ECR-REQ-0429.tooManyRecalculations', N'kz', N'Қысқа уақыт ішінде қайта есептеуге сұраныстар тым көп. Біраз күтіп, қайталап көріңіз; қанша уақыттан кейін екенін Retry-After тақырыбы көрсетеді.', N'Қысқа уақыт ішінде қайта есептеуге сұраныстар тым көп. Біраз күтіп, қайталап көріңіз.'),
+    (N'err.ECR-REQ-0429.tooManyRecalculations', N'en', N'Too many recalculation requests in a short time. Wait a moment and try again; the Retry-After header says how long.', N'Too many recalculation requests in a short time (limit: 6 per minute for one document from one user). Wait a moment and try again.'),
+    (N'err.ECR-REQ-0429.tooManyRecalculations', N'ru', N'Слишком много запросов на пересчёт за короткое время. Подождите немного и повторите попытку; заголовок Retry-After указывает, через сколько.', N'Слишком много запросов на пересчёт за короткое время (предел: 6 в минуту на один документ от одного пользователя). Подождите немного и повторите попытку.'),
+    (N'err.ECR-REQ-0429.tooManyRecalculations', N'kz', N'Қысқа уақыт ішінде қайта есептеуге сұраныстар тым көп. Біраз күтіп, қайталап көріңіз; қанша уақыттан кейін екенін Retry-After тақырыбы көрсетеді.', N'Қысқа уақыт ішінде қайта есептеуге сұраныстар тым көп (шек: бір пайдаланушыдан бір құжат бойынша минутына 6). Біраз күтіп, қайталап көріңіз.'),
     -- p3-t1 T1-09: у тексті самозв'язку немає імені обмеження БД.
     (N'err.ECR-TMPL-0422.relationSelfLink', N'en', N'Relation "{relationCode}" links table {tableDefId} to itself: this is not allowed (CK_Rel_NotSelf).', N'Relation "{relationCode}" links table {tableDefId} to itself: this is not allowed.'),
     (N'err.ECR-TMPL-0422.relationSelfLink', N'ru', N'Связь «{relationCode}» связывает таблицу {tableDefId} саму с собой: это не допускается (CK_Rel_NotSelf).', N'Связь «{relationCode}» связывает таблицу {tableDefId} саму с собой: это не допускается.'),
-    (N'err.ECR-TMPL-0422.relationSelfLink', N'kz', N'«{relationCode}» байланысы {tableDefId} кестесін өзімен байланыстырады: бұған жол берілмейді (CK_Rel_NotSelf).', N'«{relationCode}» байланысы {tableDefId} кестесін өзімен байланыстырады: бұған жол берілмейді.')
+    (N'err.ECR-TMPL-0422.relationSelfLink', N'kz', N'«{relationCode}» байланысы {tableDefId} кестесін өзімен байланыстырады: бұған жол берілмейді (CK_Rel_NotSelf).', N'«{relationCode}» байланысы {tableDefId} кестесін өзімен байланыстырады: бұған жол берілмейді.'),
+    -- UI-hints 2: підказка «що робити» / межа в тексті помилки (лише текст).
+    (N'err.ECR-SEC-0409.lastAdministrator', N'en', N'"{userName}" is the last active administrator: nobody would be left to manage users.', N'"{userName}" is the last active administrator: nobody would be left to manage users. First give another active user a role with user-management rights.'),
+    (N'err.ECR-SEC-0409.lastAdministrator', N'ru', N'«{userName}» — последний активный администратор: управлять пользователями будет некому.', N'«{userName}» — последний активный администратор: управлять пользователями будет некому. Сначала выдайте другому активному пользователю роль с правом управления пользователями.'),
+    (N'err.ECR-SEC-0409.lastAdministrator', N'kz', N'«{userName}» — соңғы белсенді әкімші: пайдаланушыларды басқаратын ешкім қалмайды.', N'«{userName}» — соңғы белсенді әкімші: пайдаланушыларды басқаратын ешкім қалмайды. Алдымен басқа белсенді пайдаланушыға пайдаланушыларды басқару құқығы бар рөлді беріңіз.'),
+    (N'err.ECR-REG-0422.lookupRetargetInUse', N'en', N'The link of field "{fieldCode}" cannot be changed: records already hold values pointing to the current target.', N'The link of field "{fieldCode}" cannot be changed: records already hold values pointing to the current target. Clear or change those values first, then change the link.'),
+    (N'err.ECR-REG-0422.lookupRetargetInUse', N'ru', N'Связь поля «{fieldCode}» нельзя изменить: в записях уже есть значения, указывающие на текущий справочник.', N'Связь поля «{fieldCode}» нельзя изменить: в записях уже есть значения, указывающие на текущий справочник. Сначала очистите или измените эти значения, затем меняйте связь.'),
+    (N'err.ECR-REG-0422.lookupRetargetInUse', N'kz', N'«{fieldCode}» өрісінің байланысын өзгерту мүмкін емес: жазбаларда ағымдағы анықтамалыққа сілтейтін мәндер бар.', N'«{fieldCode}» өрісінің байланысын өзгерту мүмкін емес: жазбаларда ағымдағы анықтамалыққа сілтейтін мәндер бар. Алдымен осы мәндерді тазалаңыз немесе өзгертіңіз, содан кейін байланысты өзгертіңіз.'),
+    (N'err.ECR-CALC-0409.authorCannotPublish', N'en', N'You are the author of version {version}: a second pair of eyes is required, so another user has to publish it.', N'You are the author of version {version}: a second pair of eyes is required, so another user has to publish it. The author is the user who created the version, not the last editor.'),
+    (N'err.ECR-CALC-0409.authorCannotPublish', N'ru', N'Вы автор версии {version}: требуется вторая пара глаз, поэтому опубликовать её должен другой пользователь.', N'Вы автор версии {version}: требуется вторая пара глаз, поэтому опубликовать её должен другой пользователь. Автор — тот, кто создал версию, а не тот, кто правил её последним.'),
+    (N'err.ECR-CALC-0409.authorCannotPublish', N'kz', N'Сіз {version} нұсқасының авторысыз: екінші тексеруші қажет, сондықтан оны басқа пайдаланушы жариялауы керек.', N'Сіз {version} нұсқасының авторысыз: екінші тексеруші қажет, сондықтан оны басқа пайдаланушы жариялауы керек. Автор — нұсқаны жасаған пайдаланушы, соңғы өңдеген адам емес.'),
+    (N'err.ECR-REQ-0429.tooManyRecalculations', N'en', N'Too many recalculation requests in a short time. Wait a moment and try again.', N'Too many recalculation requests in a short time (limit: 6 per minute for one document from one user). Wait a moment and try again.'),
+    (N'err.ECR-REQ-0429.tooManyRecalculations', N'ru', N'Слишком много запросов на пересчёт за короткое время. Подождите немного и повторите попытку.', N'Слишком много запросов на пересчёт за короткое время (предел: 6 в минуту на один документ от одного пользователя). Подождите немного и повторите попытку.'),
+    (N'err.ECR-REQ-0429.tooManyRecalculations', N'kz', N'Қысқа уақыт ішінде қайта есептеуге сұраныстар тым көп. Біраз күтіп, қайталап көріңіз.', N'Қысқа уақыт ішінде қайта есептеуге сұраныстар тым көп (шек: бір пайдаланушыдан бір құжат бойынша минутына 6). Біраз күтіп, қайталап көріңіз.')
   ) AS s ([Key], Lang, OldVal, NewVal)
     ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
  WHERE t.Value = s.OldVal COLLATE Latin1_General_BIN2;
@@ -1226,7 +1239,7 @@ USING (VALUES
     -- `BE-12`: адміністрування облікових записів — скидання пароля, блокування.
     (N'err.ECR-SEC-0404.userNotFound', N'en', N'User {userId} does not exist.', 1),
     (N'err.ECR-SEC-0409.cannotTargetSelf', N'en', N'You cannot lock your own account or reset its password here. Change your own password from your profile.', 1),
-    (N'err.ECR-SEC-0409.lastAdministrator', N'en', N'"{userName}" is the last active administrator: nobody would be left to manage users.', 1),
+    (N'err.ECR-SEC-0409.lastAdministrator', N'en', N'"{userName}" is the last active administrator: nobody would be left to manage users. First give another active user a role with user-management rights.', 1),
     -- 2026-09-25: код виправлено з `ECR-ROW-0409` (родина рядка таблиці
     -- документа) на `ECR-SEC-0409` (родина безпеки) — окрема задача, не
     -- локалізація; messageKey лишився той самий
@@ -1906,7 +1919,7 @@ USING (VALUES
     (N'err.ECR-CALC-0409.versionNotDraft',      N'en', N'Only a draft methodology version can be deleted; version {version} is {reason}.', 1),
     (N'err.ECR-CALC-0409.versionUsedInCalculations', N'en', N'Methodology version {version} has already been used in calculations and cannot be deleted.', 1),
     -- D-40: with a neutral code title, the four-eyes refusals carry their own detail.
-    (N'err.ECR-CALC-0409.authorCannotPublish',  N'en', N'You are the author of version {version}: a second pair of eyes is required, so another user has to publish it.', 1),
+    (N'err.ECR-CALC-0409.authorCannotPublish',  N'en', N'You are the author of version {version}: a second pair of eyes is required, so another user has to publish it. The author is the user who created the version, not the last editor.', 1),
     (N'err.ECR-CALC-0409.ownRecalculationApproval', N'en', N'You cannot approve your own recalculation of a closed period: a second pair of eyes is required.', 1),
     -- Round 3 of the localization debt (Methodology authoring): container code
     -- clash, ambiguous constant narrowing, clone source mismatch, version
@@ -6409,7 +6422,7 @@ USING (VALUES
     (N'err.ECR-PRD-0422.pinReasonTooLong', N'en', N'The reason for pinning the current period is longer than {max} characters.', 1),
     (N'err.ECR-PWD-0422.tooLong', N'en', N'The password is longer than {maxLength} characters.', 1),
     -- COLL:fv812-relations ── редагування зв'язків полів у конструкторі довідників (ФВ-8.12, порція 1) ──
-    (N'err.ECR-REG-0422.lookupRetargetInUse', N'en', N'The link of field "{fieldCode}" cannot be changed: records already hold values pointing to the current target.', 1),
+    (N'err.ECR-REG-0422.lookupRetargetInUse', N'en', N'The link of field "{fieldCode}" cannot be changed: records already hold values pointing to the current target. Clear or change those values first, then change the link.', 1),
     (N'err.ECR-REG-0422.lookupTargetUnknown', N'en', N'The target registry of field "{fieldCode}" does not exist.', 1),
     (N'registries.relationTargetFor', N'en', N'Link target of field {field}', 1),
     (N'registries.relationsEditHint', N'en', N'The target of a link can be changed to another registry while no record holds a value in that field; otherwise the server refuses it.', 1),
@@ -6461,7 +6474,7 @@ USING (VALUES
     (N'notificationTemplates.recipientsNoTransport', N'en', N'the channel has no delivery transport configured', 1),
     -- CL6:notification-templates ── кінець секції ──
     -- COLL:recalc-rl ── Межа частоти перерахунку документа (рекомендація безпекового рев'ю «Аудит») ──
-    (N'err.ECR-REQ-0429.tooManyRecalculations', N'en', N'Too many recalculation requests in a short time. Wait a moment and try again.', 1),
+    (N'err.ECR-REQ-0429.tooManyRecalculations', N'en', N'Too many recalculation requests in a short time (limit: 6 per minute for one document from one user). Wait a moment and try again.', 1),
     -- COLL:recalc-rl ── кінець секції ──
     -- COLL:fv812-ifmatch ── обов'язковий If-Match на PUT опису довідника ──
     (N'err.ECR-REQ-0422.definitionVersionRequired', N'en', N'Saving a registry definition needs an If-Match header carrying the definition version you read. Reload the definition and save again.', 1),
@@ -6627,7 +6640,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-SEC-0404.groupAssignmentNotFound', N'ru', N'Назначение группе {id} не существует.'),
     (N'err.ECR-SEC-0404.userNotFound', N'ru', N'Пользователь {userId} не существует.'),
     (N'err.ECR-SEC-0409.cannotTargetSelf', N'ru', N'Здесь нельзя заблокировать собственную учётную запись или сбросить её пароль. Смените свой пароль в профиле.'),
-    (N'err.ECR-SEC-0409.lastAdministrator', N'ru', N'«{userName}» — последний активный администратор: управлять пользователями будет некому.'),
+    (N'err.ECR-SEC-0409.lastAdministrator', N'ru', N'«{userName}» — последний активный администратор: управлять пользователями будет некому. Сначала выдайте другому активному пользователю роль с правом управления пользователями.'),
     (N'err.ECR-SEC-0409.resourceGrantDuplicate', N'ru', N'Ресурс {resourceKind} {resourceId} указан в наборе дважды.'),
     (N'err.ECR-USR-0422.domainPasswordReset', N'ru', N'«{userName}» — доменная учётная запись: её пароль управляется в домене, а не здесь.'),
     (N'err.ECR-USR-0422.lockReasonRequired', N'ru', N'Требуется причина длиной до {max} символов: она записывается в журнал безопасности.'),
@@ -7040,7 +7053,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-TMPL-0404.column', N'ru', N'Столбец {columnDefId} не существует или удалён.'),
     (N'err.ECR-CALC-0409.versionNotDraft', N'ru', N'Удалить можно только черновую версию методики; версия {version} — {reason}.'),
     (N'err.ECR-CALC-0409.versionUsedInCalculations', N'ru', N'Версия методики {version} уже использовалась в расчётах и не может быть удалена.'),
-    (N'err.ECR-CALC-0409.authorCannotPublish', N'ru', N'Вы автор версии {version}: требуется вторая пара глаз, поэтому опубликовать её должен другой пользователь.'),
+    (N'err.ECR-CALC-0409.authorCannotPublish', N'ru', N'Вы автор версии {version}: требуется вторая пара глаз, поэтому опубликовать её должен другой пользователь. Автор — тот, кто создал версию, а не тот, кто правил её последним.'),
     (N'err.ECR-CALC-0409.ownRecalculationApproval', N'ru', N'Нельзя подтвердить собственный запрос на пересчёт закрытого периода: требуется вторая пара глаз.'),
     (N'err.ECR-CALC-0409.codeTaken', N'ru', N'Код методики «{code}» уже используется методикой {existingId}.'),
     (N'err.ECR-CALC-0409.constantVariantsAmbiguous', N'ru', N'У константы «{constantCode}» в версии {methodologyVersionId} есть суженные варианты ({variantCount}): по одному коду нельзя понять, какой из них редактировать.'),
@@ -9655,7 +9668,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-SEC-0404.groupAssignmentNotFound', N'kz', N'{id} топтық тағайындауы жоқ.'),
     (N'err.ECR-SEC-0404.userNotFound', N'kz', N'{userId} пайдаланушысы жоқ.'),
     (N'err.ECR-SEC-0409.cannotTargetSelf', N'kz', N'Мұнда өз тіркелгіңізді бұғаттауға немесе оның құпиясөзін қалпына келтіруге болмайды. Өз құпиясөзіңізді профильде өзгертіңіз.'),
-    (N'err.ECR-SEC-0409.lastAdministrator', N'kz', N'«{userName}» — соңғы белсенді әкімші: пайдаланушыларды басқаратын ешкім қалмайды.'),
+    (N'err.ECR-SEC-0409.lastAdministrator', N'kz', N'«{userName}» — соңғы белсенді әкімші: пайдаланушыларды басқаратын ешкім қалмайды. Алдымен басқа белсенді пайдаланушыға пайдаланушыларды басқару құқығы бар рөлді беріңіз.'),
     (N'err.ECR-SEC-0409.resourceGrantDuplicate', N'kz', N'{resourceKind} {resourceId} ресурсы жиынтықта екі рет көрсетілген.'),
     (N'err.ECR-USR-0422.domainPasswordReset', N'kz', N'«{userName}» — домендік тіркелгі: оның құпиясөзі мұнда емес, доменде басқарылады.'),
     (N'err.ECR-USR-0422.lockReasonRequired', N'kz', N'{max} таңбаға дейінгі себеп қажет: ол қауіпсіздік журналына жазылады.'),
@@ -10068,7 +10081,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-TMPL-0404.column', N'kz', N'{columnDefId} бағаны жоқ немесе жойылған.'),
     (N'err.ECR-CALC-0409.versionNotDraft', N'kz', N'Тек әдістеменің нобай нұсқасын жоюға болады; {version} нұсқасы — {reason}.'),
     (N'err.ECR-CALC-0409.versionUsedInCalculations', N'kz', N'{version} әдістеме нұсқасы есептеулерде қолданылған, оны жоюға болмайды.'),
-    (N'err.ECR-CALC-0409.authorCannotPublish', N'kz', N'Сіз {version} нұсқасының авторысыз: екінші тексеруші қажет, сондықтан оны басқа пайдаланушы жариялауы керек.'),
+    (N'err.ECR-CALC-0409.authorCannotPublish', N'kz', N'Сіз {version} нұсқасының авторысыз: екінші тексеруші қажет, сондықтан оны басқа пайдаланушы жариялауы керек. Автор — нұсқаны жасаған пайдаланушы, соңғы өңдеген адам емес.'),
     (N'err.ECR-CALC-0409.ownRecalculationApproval', N'kz', N'Жабық кезеңді қайта есептеуге өз сұрауыңызды өзіңіз растай алмайсыз: екінші тексеруші қажет.'),
     (N'err.ECR-CALC-0409.codeTaken', N'kz', N'«{code}» әдістеме кодын {existingId} әдістемесі пайдаланып отыр.'),
     (N'err.ECR-CALC-0409.constantVariantsAmbiguous', N'kz', N'{methodologyVersionId} нұсқасында «{constantCode}» константасының {variantCount} тарылтылған варианты бар: тек код бойынша қайсысын өңдеу керектігі белгісіз.'),
@@ -15100,8 +15113,8 @@ GO
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
   FROM (VALUES
-    (N'err.ECR-REG-0422.lookupRetargetInUse', N'ru', N'Связь поля «{fieldCode}» нельзя изменить: в записях уже есть значения, указывающие на текущий справочник.'),
-    (N'err.ECR-REG-0422.lookupRetargetInUse', N'kz', N'«{fieldCode}» өрісінің байланысын өзгерту мүмкін емес: жазбаларда ағымдағы анықтамалыққа сілтейтін мәндер бар.'),
+    (N'err.ECR-REG-0422.lookupRetargetInUse', N'ru', N'Связь поля «{fieldCode}» нельзя изменить: в записях уже есть значения, указывающие на текущий справочник. Сначала очистите или измените эти значения, затем меняйте связь.'),
+    (N'err.ECR-REG-0422.lookupRetargetInUse', N'kz', N'«{fieldCode}» өрісінің байланысын өзгерту мүмкін емес: жазбаларда ағымдағы анықтамалыққа сілтейтін мәндер бар. Алдымен осы мәндерді тазалаңыз немесе өзгертіңіз, содан кейін байланысты өзгертіңіз.'),
     (N'err.ECR-REG-0422.lookupTargetUnknown', N'ru', N'Справочника, на который указывает поле «{fieldCode}», не существует.'),
     (N'err.ECR-REG-0422.lookupTargetUnknown', N'kz', N'«{fieldCode}» өрісі сілтейтін анықтамалық жоқ.'),
     (N'registries.relationTargetFor', N'ru', N'Цель связи поля {field}'),
@@ -15121,8 +15134,8 @@ GO
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
   FROM (VALUES
-    (N'err.ECR-REQ-0429.tooManyRecalculations', N'ru', N'Слишком много запросов на пересчёт за короткое время. Подождите немного и повторите попытку.'),
-    (N'err.ECR-REQ-0429.tooManyRecalculations', N'kz', N'Қысқа уақыт ішінде қайта есептеуге сұраныстар тым көп. Біраз күтіп, қайталап көріңіз.')
+    (N'err.ECR-REQ-0429.tooManyRecalculations', N'ru', N'Слишком много запросов на пересчёт за короткое время (предел: 6 в минуту на один документ от одного пользователя). Подождите немного и повторите попытку.'),
+    (N'err.ECR-REQ-0429.tooManyRecalculations', N'kz', N'Қысқа уақыт ішінде қайта есептеуге сұраныстар тым көп (шек: бір пайдаланушыдан бір құжат бойынша минутына 6). Біраз күтіп, қайталап көріңіз.')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
