@@ -499,7 +499,7 @@ public sealed partial class SourceEventSyncJob(
         Exception? initial = null;
         try
         {
-            var removed = await ApplyRemovalsAsync(map, decision, appliedPeriods, links, linkByEventId, totals, ct)
+            var removed = await ApplyRemovalsAsync(map, decision, appliedPeriods, links, linkByEventId, totals, events, ct)
                 .ConfigureAwait(false);
 
             // Подія переїхала в братній шаблон (чи дублюється в ньому): зв'язок знімаємо, РЯДОК лишається —
@@ -771,6 +771,7 @@ public sealed partial class SourceEventSyncJob(
         List<SourceEventLink> links,
         Dictionary<string, SourceEventLink> linkByEventId,
         Totals totals,
+        List<CoverageEvent> events,
         CancellationToken ct)
     {
         var removed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -798,15 +799,51 @@ public sealed partial class SourceEventSyncJob(
         await connection.OpenAsync(ct).ConfigureAwait(false);
         await using var tx = (Microsoft.Data.SqlClient.SqlTransaction)await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
 
+        var sheetDefId = await db.TableDefs
+            .AsNoTracking()
+            .Where(t => t.Id == map.TableDefId)
+            .Select(t => (int?)t.SheetDefId)
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+        var locked = new Dictionary<int, bool>();
+        var deleted = new List<PendingRemoval>();
+
         foreach (var item in physical)
         {
+            // ⛔ L3-04: рішення (DecideRemovalsAsync) читало стан аркуша й правки людини ПОЗА цією
+            // транзакцією — подання чи правка між рішенням і видаленням інакше губилися б. Як правка в
+            // PatchCellsHandler: спільне блокування аркуша, далі гарди повторно — у тій самій транзакції.
+            var periodKey = item.State.PeriodKey!.Value;
+            if (sheetDefId is { } sheet)
+            {
+                if (!locked.TryGetValue(periodKey, out var taken))
+                {
+                    taken = await TryLockSheetAsync(connection, tx, map.DocumentId, sheet, periodKey, ct).ConfigureAwait(false);
+                    locked[periodKey] = taken;
+                }
+
+                if (!taken)
+                {
+                    totals.RemovalSkipped++;
+                    continue;
+                }
+            }
+
+            if (await RecheckRemovalAsync(connection, tx, map, sheetDefId, item, ct).ConfigureAwait(false) is { } refused)
+            {
+                events.Add(refused);
+                totals.RemovalSkipped++;
+                continue;
+            }
+
             await JournalAndDeleteAsync(connection, tx, map, item, ct).ConfigureAwait(false);
+            deleted.Add(item);
         }
 
         await tx.CommitAsync(ct).ConfigureAwait(false);
 
         // Після коміту: трекер і лічильники (до коміту збій не лишає хибного «видалено»).
-        foreach (var item in physical)
+        foreach (var item in deleted)
         {
             db.Entry(item.Link).State = EntityState.Detached;
             links.Remove(item.Link);
@@ -830,6 +867,115 @@ public sealed partial class SourceEventSyncJob(
         links.Remove(link);
         linkByEventId.Remove(link.SourceEventId);
         removed.Add(link.SourceEventId);
+    }
+
+    /// <summary>Спільне блокування аркуша в транзакції видалення (той самий ресурс, що й у <c>SheetEditGate</c>).</summary>
+    /// <returns><c>false</c> — аркуш зайнятий поданням довше за таймаут: видалення лишається наступному прогону.</returns>
+    private static async Task<bool> TryLockSheetAsync(
+        Microsoft.Data.SqlClient.SqlConnection connection,
+        Microsoft.Data.SqlClient.SqlTransaction tx,
+        long documentId,
+        int sheetDefId,
+        int periodKey,
+        CancellationToken ct)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = tx;
+        command.CommandType = System.Data.CommandType.StoredProcedure;
+        command.CommandText = "sp_getapplock";
+        command.Parameters.Add(new Microsoft.Data.SqlClient.SqlParameter("@Resource", System.Data.SqlDbType.NVarChar, 255)
+        {
+            Value = SheetEditGate.ResourceOf(documentId, sheetDefId, periodKey),
+        });
+        command.Parameters.Add(new Microsoft.Data.SqlClient.SqlParameter("@LockMode", System.Data.SqlDbType.VarChar, 32) { Value = "Shared" });
+        command.Parameters.Add(new Microsoft.Data.SqlClient.SqlParameter("@LockOwner", System.Data.SqlDbType.VarChar, 32) { Value = "Transaction" });
+        command.Parameters.Add(new Microsoft.Data.SqlClient.SqlParameter("@LockTimeout", System.Data.SqlDbType.Int)
+        {
+            Value = SheetEditGatePolicy.DefaultLockTimeoutSeconds * 1000,
+        });
+        var result = new Microsoft.Data.SqlClient.SqlParameter("@Result", System.Data.SqlDbType.Int)
+        {
+            Direction = System.Data.ParameterDirection.ReturnValue,
+        };
+        command.Parameters.Add(result);
+        command.CommandTimeout = SheetEditGatePolicy.DefaultLockTimeoutSeconds + 15;
+
+        await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        return (int)result.Value! >= 0;
+    }
+
+    /// <summary>
+    /// Гарди видалення ще раз — під блокуванням аркуша і рядка, у транзакції видалення (L3-04).
+    /// </summary>
+    /// <returns>Подія покриття, якщо рядок видаляти вже не можна; <c>null</c> — можна.</returns>
+    /// <remarks>
+    /// Рядок береться <c>UPDLOCK, HOLDLOCK</c>: правка людини, що ще не закомітилась, дочекається видалення
+    /// (і відмовить), а закомічена — видна наступному оператору (RCSI бере знімок на початку оператора).
+    /// </remarks>
+    private static async Task<CoverageEvent?> RecheckRemovalAsync(
+        Microsoft.Data.SqlClient.SqlConnection connection,
+        Microsoft.Data.SqlClient.SqlTransaction tx,
+        SourceEventMap map,
+        int? sheetDefId,
+        PendingRemoval item,
+        CancellationToken ct)
+    {
+        var state = item.State;
+        var periodKey = state.PeriodKey!.Value;
+
+        await using var command = connection.CreateCommand();
+        command.Transaction = tx;
+        command.CommandText = """
+            SELECT COUNT(*) FROM doc.TableRow WITH (UPDLOCK, HOLDLOCK)
+             WHERE PeriodKey = @period AND TableInstanceId = @instance AND RowKey = @rowKey;
+
+            SELECT TOP (1) Status FROM wf.ApprovalState
+             WHERE @sheet IS NOT NULL AND DocumentId = @document AND SheetDefId = @sheet AND PeriodKey = @period
+               AND Status IN (@submitted, @approved);
+
+            WITH last_change AS (
+                SELECT c.Origin,
+                       ROW_NUMBER() OVER (PARTITION BY c.ColumnDefId ORDER BY c.ChangedAt DESC, c.Id DESC) AS rn
+                  FROM aud.CellChange AS c
+                  JOIN doc.TableRow  AS r ON r.PeriodKey = c.PeriodKey AND r.Id = c.TableRowId
+                 WHERE c.PeriodKey = @period AND r.TableInstanceId = @instance AND c.RowKey = @rowKey
+            )
+            SELECT COUNT(*) FROM last_change WHERE rn = 1 AND Origin = N'UserEdit';
+            """;
+        command.Parameters.AddWithValue("@period", periodKey);
+        command.Parameters.AddWithValue("@instance", state.TableInstanceId!.Value);
+        command.Parameters.AddWithValue("@rowKey", state.RowKey!);
+        command.Parameters.AddWithValue("@document", map.DocumentId);
+        command.Parameters.Add("@sheet", System.Data.SqlDbType.Int).Value = (object?)sheetDefId ?? DBNull.Value;
+        command.Parameters.Add("@submitted", System.Data.SqlDbType.TinyInt).Value = (byte)DocumentStatus.Submitted;
+        command.Parameters.Add("@approved", System.Data.SqlDbType.TinyInt).Value = (byte)DocumentStatus.Approved;
+
+        await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        await reader.ReadAsync(ct).ConfigureAwait(false);
+        await reader.NextResultAsync(ct).ConfigureAwait(false);
+
+        if (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            var status = (DocumentStatus)reader.GetByte(0);
+            return new CoverageEvent(
+                map.SourceEntityId,
+                new PeriodKey(periodKey),
+                CollectionCoverage.SkippedPeriodClosed,
+                CoverageDetails.EventRemovalSheetSubmitted(state.SourceEventId, state.RowKey!, status));
+        }
+
+        await reader.NextResultAsync(ct).ConfigureAwait(false);
+        await reader.ReadAsync(ct).ConfigureAwait(false);
+        if (reader.GetInt32(0) > 0)
+        {
+            return new CoverageEvent(
+                map.SourceEntityId,
+                new PeriodKey(periodKey),
+                CollectionCoverage.ConflictKeptManual,
+                CoverageDetails.EventRemovalKeptManual(state.SourceEventId, state.RowKey!));
+        }
+
+        return null;
     }
 
     /// <summary>
