@@ -156,12 +156,30 @@ internal static partial class WorkerProgram
         return Environment.ExitCode;
     }
 
-    private static HostApplicationBuilder CreateBuilder(ChildStubOptions? stub)
+    /// <summary>Хост воркера: тека exe як корінь, <see cref="SettingsFile"/> і <c>ECR_</c> поверх.</summary>
+    /// <param name="stub">Заглушка дочірнього для тестів наглядача.</param>
+    /// <param name="contentRoot">Корінь вмісту; <c>null</c> — тека exe.</param>
+    /// <remarks>
+    /// ⛔ L2-12: exe лежить у теці Api (<c>Worker.wxs</c>: INSTALLFOLDER), а типові джерела
+    /// <c>HostApplicationBuilder</c> підхоплюють звідти <c>appsettings.json</c> і
+    /// <c>appsettings.{Environment}.json</c> Api — з <c>Jobs:Queue:Mode = Quartz</c>, телеметрією й
+    /// <c>Calculations:*</c> Api. Їх прибрано: решта типових джерел (змінні оточення, логування)
+    /// лишається, конфігурація воркера — лише його файл і <c>ECR_</c>.
+    /// </remarks>
+    internal static HostApplicationBuilder CreateBuilder(ChildStubOptions? stub, string? contentRoot = null)
     {
         var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings
         {
-            ContentRootPath = AppContext.BaseDirectory,
+            ContentRootPath = contentRoot ?? AppContext.BaseDirectory,
         });
+        foreach (var apiFile in builder.Configuration.Sources
+                     .OfType<Microsoft.Extensions.Configuration.Json.JsonConfigurationSource>()
+                     .Where(source => source.Path?.StartsWith("appsettings", StringComparison.OrdinalIgnoreCase) == true)
+                     .ToList())
+        {
+            builder.Configuration.Sources.Remove(apiFile);
+        }
+
         builder.Configuration.AddJsonFile(SettingsFile, optional: true, reloadOnChange: false);
         builder.Configuration.AddEnvironmentVariables(prefix: "ECR_");
         if (stub is not null)

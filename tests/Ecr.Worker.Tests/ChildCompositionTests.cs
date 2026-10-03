@@ -138,6 +138,57 @@ public sealed class ChildCompositionTests
         Assert.True(factory.CreateLogger<JobWorker>().IsEnabled(LogLevel.Information));
     }
 
+    /// <summary>
+    /// L2-12: exe воркера лежить у теці Api; <c>appsettings.json</c> Api звідти не читається,
+    /// і мітка режиму в бюджеті перерахунку дочірнього — не «Quartz» з файлу Api.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Finding", "L2-12")]
+    public void Режим_у_мітці_бюджету_дочірнього_не_береться_з_файлу_Api()
+    {
+        var root = Directory.CreateTempSubdirectory("ecr-worker-root-").FullName;
+        try
+        {
+            File.WriteAllText(
+                Path.Combine(root, "appsettings.json"),
+                """{ "Jobs": { "Queue": { "Mode": "Quartz" } }, "Calculations": { "ApiOnly": "1" } }""");
+            File.WriteAllText(
+                Path.Combine(root, "appsettings.Production.json"),
+                """{ "Telemetry": { "ApiOnly": "1" } }""");
+
+            var builder = WorkerProgram.CreateBuilder(stub: null, contentRoot: root);
+
+            Assert.NotEqual("Quartz", builder.Configuration[DbBackgroundJobScheduler.ModeKey]);
+            Assert.Null(builder.Configuration["Calculations:ApiOnly"]);
+            Assert.Null(builder.Configuration["Telemetry:ApiOnly"]);
+
+            builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["ConnectionStrings:Ecr"] = "Server=.;Database=EcrChildCompositionProbe;Integrated Security=true",
+            });
+            ChildComposition.AddChildWorker(builder.Services, builder.Configuration, new WorkerPoolOptions());
+            using var host = builder.Build();
+
+            Assert.Equal("Database", host.Services.GetRequiredService<RecalculationBudgetOptions>().Mode);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Finding", "L2-12")]
+    public void Мітка_бюджету_дочірнього_Database_навіть_коли_конфігурація_каже_Quartz()
+    {
+        var services = Compose("Quartz", "Worker");
+
+        var budget = Assert.Single(services, d => d.ServiceType == typeof(RecalculationBudgetOptions));
+        Assert.Equal("Database", Assert.IsType<RecalculationBudgetOptions>(budget.ImplementationInstance).Mode);
+    }
+
     private static ServiceCollection Compose(string mode, string? executor)
     {
         var configuration = new ConfigurationBuilder()
