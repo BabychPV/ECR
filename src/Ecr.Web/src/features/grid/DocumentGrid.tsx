@@ -63,6 +63,7 @@ import {
   usePendingSlice,
 } from './pendingStore';
 import { installEnterKeyCompat } from './keyboardCompat';
+import { installKeyCommitGate } from './keyCommitGate';
 import {
   TableCornerAnchor,
   clampSelection,
@@ -1750,6 +1751,9 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
 
       gridListenersCleanup.current = [
         installEnterKeyCompat(node),
+        // ⛔ T3-01: швидкий ввід (сканер, макрос) не мусить склеювати значення —
+        // клавіші після Enter/Tab стають у чергу до кінця переходу фокуса.
+        installKeyCommitGate(node),
         blockNativePaste(node),
         trackSelection(node, (next) => {
           selection.current = next;
