@@ -343,15 +343,19 @@ public sealed partial class JobWorker(
                     jobCancel.Token)
                 .ConfigureAwait(false);
         }
-        catch (OperationCanceledException)
-        {
-            cancelled = true;
-        }
         catch (JobDeferredException ex)
         {
             deferred = ex;
         }
+        // ⛔ L2-01: скасування — за станом ВЛАСНОГО токена, а не за типом винятку. Драйвер
+        // посеред запиту кидає SqlException «Operation cancelled by user», а не OCE; як
+        // провал він ішов би в ретрай, і claim стирав би запит скасування.
 #pragma warning disable CA1031 // Будь-який провал задачі класифікує JobRetryPolicy нижче.
+        catch (Exception ex) when (jobCancel.IsCancellationRequested && ex is not JobLeaseLostException)
+        {
+            cancelled = true;
+        }
+        // OCE не від нашого токена (таймаут HttpClient тощо) — провал нижче, а не «Cancelled».
         catch (Exception ex)
 #pragma warning restore CA1031
         {

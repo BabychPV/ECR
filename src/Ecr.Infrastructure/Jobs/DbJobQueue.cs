@@ -483,8 +483,11 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock) : IJobQueue
                 WHERE JobId = @behind;
             END
             ELSE IF @ok = 1
+                -- ⛔ L2-01: запит скасування людини, що прийшов, поки задача була Running, не
+                -- губиться на відкладенні чи ретраї — наступний claim стер би CancelRequestedAt.
                 UPDATE itg.JobProgress
-                SET [State] = 'Queued', AvailableAt = @available, ClaimToken = NULL, LeaseUntil = NULL,
+                SET [State] = CASE WHEN CancelRequestedAt IS NULL THEN 'Queued' ELSE 'Cancelled' END,
+                    AvailableAt = @available, ClaimToken = NULL, LeaseUntil = NULL,
                     UpdatedAt = @shown, HeartbeatAt = @shown, Payload = ISNULL(@ownPayload, Payload),
                     Attempt = CASE WHEN @restoreAttempt = 1 AND ISNULL(Attempt, 0) > 0 THEN Attempt - 1 ELSE Attempt END,
                     -- Позаду на ціль уже стоїть інша Queued: дві Queued на ціль не пускає UX_JobProgress_Target_Queued.

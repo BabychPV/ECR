@@ -118,6 +118,32 @@ public sealed class JobWorkerTests(SqlServerFixture sql) : DbJobQueueTestsBase(s
     }
 
     [Fact]
+    public async Task Скасована_задача_що_кидає_не_OCE_закривається_Cancelled_а_не_ретраєм()
+    {
+        // L2-01 (в): драйвер посеред запиту кидає «Operation cancelled by user», а не OCE.
+        var probe = new WorkerProbe();
+        await using var host = await StartHostAsync(probe);
+
+        var jobId = await EnqueueJobAsync<WorkerDriverCancelJob>(host, new { n = 1 });
+        await probe.Started.Task.WaitAsync(Patience);
+
+        await using (var other = BuildHost(new WorkerProbe()))
+        await using (var scope = other.CreateAsyncScope())
+        {
+            await scope.ServiceProvider.GetRequiredService<DbBackgroundJobScheduler>()
+                .CancelAsync(jobId, CancellationToken.None);
+        }
+
+        var row = await WaitForStateAsync(jobId, "Cancelled");
+        Assert.Equal(1, row.Attempt);
+        Assert.Single(probe.Attempts);
+
+        // ⛔ Не провал: ні «буде повтор», ні коду помилки — це скасування людиною.
+        Assert.DoesNotContain("retryScheduled", row.Message ?? string.Empty, StringComparison.Ordinal);
+        Assert.Null(row.ErrorCode);
+    }
+
+    [Fact]
     public async Task Втрачена_оренда_зупиняє_задачу_і_нічого_не_пише_в_чужий_рядок()
     {
         var probe = new WorkerProbe();
@@ -218,6 +244,7 @@ public sealed class JobWorkerTests(SqlServerFixture sql) : DbJobQueueTestsBase(s
         services.AddScoped<WorkerVerdictJob>();
         services.AddScoped<WorkerBlockingJob>();
         services.AddScoped<WorkerWitnessJob>();
+        services.AddScoped<WorkerDriverCancelJob>();
         return services.BuildServiceProvider();
     }
 
@@ -333,6 +360,24 @@ public sealed class WorkerBlockingJob(WorkerProbe probe) : IBackgroundJob
         {
             probe.Cancelled.TrySetResult(true);
             throw;
+        }
+    }
+}
+
+/// <summary>Як драйвер БД: на скасування токена кидає НЕ <see cref="OperationCanceledException"/>.</summary>
+public sealed class WorkerDriverCancelJob(WorkerProbe probe) : IBackgroundJob
+{
+    public async Task ExecuteAsync(object? payload, IJobProgress progress, CancellationToken ct)
+    {
+        probe.AttemptQueue.Enqueue(probe.Clock.Elapsed);
+        probe.Started.TrySetResult();
+        try
+        {
+            await Task.Delay(Timeout.Infinite, ct);
+        }
+        catch (OperationCanceledException)
+        {
+            throw new InvalidOperationException("Operation cancelled by user.");
         }
     }
 }
