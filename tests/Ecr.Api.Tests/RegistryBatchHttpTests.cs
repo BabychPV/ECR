@@ -287,6 +287,44 @@ public sealed class RegistryBatchHttpTests(SqlServerFixture sql)
         Assert.Equal(before, await SnapshotAsync(fixture));
     }
 
+    /// <summary>
+    /// Аудит 2026-10-03, L4-03 = L5-10: ручна правка запису (<c>POST …/entries</c>) — 1000 символів
+    /// проходять, 1001 — 422 <c>ECR-REG-0422</c> (а не 500 від обрізання в SQL Server), запис лишається.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Ручна_правка_межа_1000_проходить_1001_це_422()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, "Registry.View", "Registry.EditData");
+        var fixture = await SeedAsync(RegistryCodeMode.Manual);
+        var id = await CreateAsync(client, fixture, "E1", "10");
+
+        async Task<HttpResponseMessage> EditAsync(string stream)
+            => await client.PostAsJsonAsync(
+                new Uri($"/api/v1/registries/{fixture.Code}/entries", UriKind.Relative),
+                new
+                {
+                    id,
+                    registryDefId = fixture.DefinitionId,
+                    code = $"E1{fixture.Tag}",
+                    display = new { en = "E1" },
+                    parentEntryId = (long?)null,
+                    values = new Dictionary<string, object?> { ["STREAM"] = stream },
+                });
+
+        var atLimit = await EditAsync(new string('x', 1000));
+        Assert.True(atLimit.StatusCode == HttpStatusCode.OK, $"{atLimit.StatusCode}: {await atLimit.Content.ReadAsStringAsync()}\n{app.ErrorsText}");
+        var before = await SnapshotAsync(fixture);
+
+        var over = await EditAsync(new string('x', 1001));
+        var text = await over.Content.ReadAsStringAsync();
+        Assert.True(over.StatusCode == HttpStatusCode.UnprocessableEntity, $"{over.StatusCode}: {text}\n{app.ErrorsText}");
+        Assert.Equal("ECR-REG-0422", JsonDocument.Parse(text).RootElement.GetProperty("errorCode").GetString());
+        Assert.Equal(before, await SnapshotAsync(fixture));
+    }
+
     private static object Upsert(string clientRowId, long id, string? baseVersion, params (string Field, string Value)[] values)
         => new { clientRowId, op = "upsert", id, baseVersion, values = values.ToDictionary(v => v.Field, v => (object?)v.Value) };
 
