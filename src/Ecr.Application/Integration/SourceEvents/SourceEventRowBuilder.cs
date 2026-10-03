@@ -239,6 +239,16 @@ public static class SourceEventRowBuilder
             return;
         }
 
+        // ⛔ ФВ-16.9 (L3-06): фактична одиниця атрибута події ≠ оголошеної — не
+        // конвертувати за оголошеною (тиха помилка ×24/×1000), а не писати комірку.
+        if (field.SourceUnitId is not null
+            && units is not null
+            && !BoundaryUnitConversion.IsDeclaredUnit(field.SourceUnitId, attribute.SourceUnitSymbol, units))
+        {
+            unmapped.Add(new SourceEventUnmappedValue(field.ColumnCode, text));
+            return;
+        }
+
         if (field.SourceUnitId is { } from && field.TargetUnitId is { } to && from != to)
         {
             try

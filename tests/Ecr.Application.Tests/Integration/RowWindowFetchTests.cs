@@ -42,8 +42,11 @@ public sealed class RowWindowFetchTests
         },
         new Dictionary<string, int>(StringComparer.Ordinal) { [$"{StdCubicMetreId}|{HourId}"] = StdCubicMetrePerHourId });
 
-    private static WindowResult Result(decimal? value, decimal? percentGood = 100m, string? error = null)
-        => new(value, "Sm3/h", 4, percentGood, WindowComputedBy.Local, [], error);
+    // Одиниця джерела за замовчуванням не названа: порівнювати нема з чим (ФВ-16.12);
+    // звірку фактичної одиниці з оголошеною (ФВ-16.9) перевіряють окремі тести.
+    private static WindowResult Result(
+        decimal? value, decimal? percentGood = 100m, string? error = null, string? sourceUnitSymbol = null)
+        => new(value, sourceUnitSymbol, 4, percentGood, WindowComputedBy.Local, [], error);
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
@@ -106,6 +109,60 @@ public sealed class RowWindowFetchTests
         Assert.Equal(RowWindowValueStatus.Fetched, fold.Status);
         Assert.Equal(0.93m, fold.ValueTarget);
         Assert.Equal(3348m, fold.ValueSource);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Directive", "HSE301-A1")]
+    public void Fold_ФактичнаОдиницяІнша_SourceError_а_не_значення_хибне_в_24_рази()
+    {
+        // Оголошено Sm3_per_h, а джерело повертає Sm3_per_s (UOM атрибута змінили в PI).
+        // ⛔ L3-06 / ФВ-16.9: до фіксу — Fetched зі значенням, конвертованим за ОГОЛОШЕНОЮ
+        // одиницею. Мутація: прибрати перевірку IsDeclaredUnit у RowWindowFetch.Fold.
+        var catalog = Catalog();
+        var units = new Dictionary<string, UnitRef>(catalog.Units, StringComparer.OrdinalIgnoreCase)
+        {
+            ["Sm3_per_s"] = new(12, "Sm3_per_s", DimensionId: 13, FactorToBase: 1m),
+        };
+
+        var fold = RowWindowFetch.Fold(
+            RowWindowSummaryKind.Total,
+            Result(3348m, sourceUnitSymbol: "Sm3_per_s"),
+            95m,
+            StdCubicMetrePerHourId,
+            StdCubicMetreId,
+            new UnitCatalogSnapshot(units, catalog.Derived));
+
+        Assert.Equal(
+            (RowWindowValueStatus.SourceError, "ECR-INT-0422", (decimal?)null, "Sm3_per_s"),
+            (fold.Status, fold.ErrorCode, fold.ValueTarget, fold.SourceUnitSymbol));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Directive", "HSE301-A1")]
+    public void Fold_ФактичнаОдиницяЗбігається_Fetched()
+    {
+        var fold = RowWindowFetch.Fold(
+            RowWindowSummaryKind.Total,
+            Result(3348m, sourceUnitSymbol: "sm3_PER_h"),
+            95m,
+            StdCubicMetrePerHourId,
+            StdCubicMetreId,
+            Catalog());
+
+        Assert.Equal((RowWindowValueStatus.Fetched, 0.93m), (fold.Status, fold.ValueTarget));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Directive", "HSE301-A1")]
+    public void Fold_Count_не_звіряє_одиниці()
+    {
+        var fold = RowWindowFetch.Fold(
+            RowWindowSummaryKind.Count, Result(4m, sourceUnitSymbol: "kg"), 95m, StdCubicMetrePerHourId, StdCubicMetreId, Catalog());
+
+        Assert.Equal((RowWindowValueStatus.Fetched, 4m), (fold.Status, fold.ValueTarget));
     }
 
     [Fact]
