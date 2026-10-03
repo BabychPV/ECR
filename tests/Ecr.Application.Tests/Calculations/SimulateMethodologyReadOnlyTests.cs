@@ -68,7 +68,7 @@ public sealed class SimulateMethodologyReadOnlyTests
         var user = Substitute.For<ICurrentUser>();
         user.UserId.Returns(9);
 
-        var result = await new SimulateMethodologyHandler(module, store, access, user)
+        var result = await new SimulateMethodologyHandler(module, store, access, user, Substitute.For<IPeriodStore>())
             .HandleAsync(VersionId, 202601, CancellationToken.None);
 
         // Контроль: симуляція справді відпрацювала, а не вийшла до обчислень.
