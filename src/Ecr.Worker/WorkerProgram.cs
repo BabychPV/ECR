@@ -134,6 +134,7 @@ internal static partial class WorkerProgram
         try
         {
             Child.ChildComposition.AddChildWorker(builder.Services, builder.Configuration, pool);
+            builder.Services.AddHostedService<ChildStopListener>();
         }
         catch (InvalidOperationException ex)
         {
@@ -186,6 +187,7 @@ internal static partial class WorkerProgram
         {
             builder.Services.AddSingleton(stub);
             builder.Services.AddHostedService<ChildStub>();
+            builder.Services.AddHostedService<ChildStopListener>();
         }
 
         return builder;

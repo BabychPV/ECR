@@ -68,7 +68,8 @@ public sealed partial class WorkerSupervisorTests
         var started = starts.ToArray();
         var exited = exits.ToArray();
         Assert.True(started.Length >= 4, $"стартів {started.Length}, очікувалося ≥ 4");
-        Assert.All(exited, e => Assert.Equal(7, e.Code));
+        // ⚠ L2-09: останній дочірній зупиняється за сигналом штатно (код 0) — рахуються падіння до нього.
+        Assert.All(exited.Take(3), e => Assert.Equal(7, e.Code));
 
         // ⛔ Без відступу пауза між падінням і новим стартом — мілісекунди.
         TimeSpan[] expected = [TimeSpan.FromMilliseconds(300), TimeSpan.FromMilliseconds(600), TimeSpan.FromMilliseconds(1200)];
@@ -138,6 +139,52 @@ public sealed partial class WorkerSupervisorTests
                 Kill(pid);
             }
         }
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Finding", "L2-09")]
+    public async Task Зупинка_наглядача_дає_дочірньому_зупинитися_штатно_до_закриття_Job_Object()
+    {
+        var options = new WorkerPoolOptions { Count = 1, MemoryLimitMb = 256, JobMemoryLimitMb = 512 };
+        var supervisor = new WorkerSupervisor(
+            options,
+            Command("--child", "--exit-after-ms", "600000", "--exit-code", "7"),
+            NullLogger<WorkerSupervisor>.Instance,
+            shutdownGrace: TimeSpan.FromSeconds(15));
+
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+        if (!OperatingSystem.IsWindows())
+        {
+            await Assert.ThrowsAsync<PlatformNotSupportedException>(() => supervisor.RunAsync(cancellation.Token));
+            return;
+        }
+
+        var started = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var exits = new ConcurrentQueue<int>();
+        supervisor.ChildStarted += (_, e) => started.TrySetResult(e.ProcessId);
+        supervisor.ChildExited += (_, e) => exits.Enqueue(e.ExitCode!.Value);
+
+        var run = supervisor.RunAsync(cancellation.Token);
+        var pid = 0;
+        try
+        {
+            pid = await started.Task.WaitAsync(TimeSpan.FromSeconds(30));
+            await Task.Delay(TimeSpan.FromSeconds(2));
+            await cancellation.CancelAsync();
+            await run.WaitAsync(TimeSpan.FromSeconds(30));
+        }
+        finally
+        {
+            if (pid != 0)
+            {
+                Kill(pid);
+            }
+        }
+
+        // ⛔ Без сигналу дочірній гине від закриття Job Object посеред задачі: штатного
+        // виходу немає, і задача перерахунку переклеймлюється з ReclaimCount + 1.
+        Assert.Equal(0, Assert.Single(exits));
     }
 
     [GeneratedRegex(@"pid=(\d+)")]
