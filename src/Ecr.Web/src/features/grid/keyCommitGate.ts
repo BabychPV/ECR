@@ -46,6 +46,25 @@ function isPrintable(event: KeyboardEvent): boolean {
   return event.key.length === 1;
 }
 
+/**
+ * AltGr-символ (`@`, `€`, `{`, `\`...). У браузері на Windows AltGr = ctrlKey +
+ * altKey одночасно (T4-07), на інших ОС - `getModifierState('AltGraph')`.
+ * Це ДРУКОВАНИЙ символ, а не ярлик: його треба ставити в чергу, як звичайну
+ * літеру, інакше за < 30 мс після Enter він губиться.
+ *
+ * ⚠ Ctrl+Alt+літера на розкладці без AltGr (key збігається з літерою коду -
+ * `KeyQ`/`q`, `Digit1`/`1`) лишається ярликом і не затримується.
+ */
+function isAltGrChar(event: KeyboardEvent): boolean {
+  if (event.key.length !== 1 || event.metaKey) return false;
+  if (event.getModifierState('AltGraph')) return true;
+  if (!(event.ctrlKey && event.altKey)) return false;
+
+  const sameAsCode = event.code === `Key${event.key.toUpperCase()}` || event.code === `Digit${event.key}`;
+
+  return !sameAsCode;
+}
+
 interface QueuedKey {
   readonly init: KeyboardEventInit;
   readonly target: EventTarget | null;
@@ -124,7 +143,9 @@ export function installKeyCommitGate(container: HTMLElement): () => void {
     // мовчки з'їдав Ctrl+C (доведено живим прогоном: без черги `copy` є,
     // з чергою за 5 мс після Enter — немає), а синтетичне відтворення його не
     // повертає. Вони не друкують символ, тож порядок вводу не змінюють.
-    if (event.ctrlKey || event.metaKey || event.altKey) return;
+    // Виняток - AltGr-символ (T4-07): він друкується, тож стає в чергу.
+    const altGr = isAltGrChar(event);
+    if (!altGr && (event.ctrlKey || event.metaKey || event.altKey)) return;
 
     if (holding !== null) {
       event.preventDefault();
@@ -134,8 +155,11 @@ export function installKeyCommitGate(container: HTMLElement): () => void {
           key,
           code: event.code,
           shiftKey: event.shiftKey,
-          ctrlKey: event.ctrlKey,
-          altKey: event.altKey,
+          // AltGr уже «використано» на складання символу: при відтворенні
+          // модифікатори знімаємо, щоб RevoGrid (isCopy/isPaste...) не прийняв
+          // символ за ярлик.
+          ctrlKey: altGr ? false : event.ctrlKey,
+          altKey: altGr ? false : event.altKey,
           metaKey: event.metaKey,
         },
         target: event.target,

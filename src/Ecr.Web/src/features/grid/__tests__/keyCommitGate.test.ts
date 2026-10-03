@@ -79,7 +79,8 @@ function mountGrid(rows: number, startRow: number, withGate: boolean, lingeringE
     }
 
     if (event.key === 'Enter') open(values[row] ?? '');
-    else if (event.key.length === 1) open(event.key);
+    // ⚠ RevoGrid не відкриває редактор від ярлика (Ctrl/Alt + символ).
+    else if (event.key.length === 1 && !event.ctrlKey && !event.altKey) open(event.key);
   });
 
   holder.focus();
@@ -231,6 +232,39 @@ describe('installKeyCommitGate: швидкий ввід не склеює зна
 
     // Звичайна клавіша в тому ж вікні, як і раніше, у черзі.
     expect(fire(document.body, { key: 'q' }).delivered).toBe(false);
+    grid.dispose();
+  });
+
+  it('T4-07: AltGr-символ (ctrl+alt або AltGraph) одразу після Enter ставиться в чергу й не губиться', () => {
+    const variants: KeyboardEventInit[] = [
+      { key: '@', code: 'Digit2', ctrlKey: true, altKey: true },
+      { key: '@', code: 'Digit2', modifierAltGraph: true },
+    ];
+
+    for (const init of variants) {
+      const grid = mountGrid(4, 1, true);
+
+      openCommitWindow(grid);
+      const result = fire(document.body, init);
+      grid.press('Enter');
+      vi.advanceTimersByTime(2000);
+
+      expect(result.delivered, JSON.stringify(init)).toBe(false);
+      expect(grid.values, JSON.stringify(init)).toEqual(['', '1', '@', '']);
+      grid.dispose();
+      document.body.innerHTML = '';
+    }
+  });
+
+  it('T4-07: Ctrl+Alt+літера, що збігається з кодом клавіші (ярлик), не затримується', () => {
+    const grid = mountGrid(4, 1, true);
+
+    openCommitWindow(grid);
+
+    const result = fire(document.body, { key: 'q', code: 'KeyQ', ctrlKey: true, altKey: true });
+
+    expect(result.delivered).toBe(true);
+    expect(result.prevented).toBe(false);
     grid.dispose();
   });
 
