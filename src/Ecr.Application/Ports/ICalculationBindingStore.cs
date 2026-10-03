@@ -148,6 +148,19 @@ public interface ICalculationBindingStore
     public Task<IReadOnlyDictionary<int, BoundTableName>> ListTableNamesAsync(
         IReadOnlyCollection<int> tableDefIds, CancellationToken ct);
 
+    /// <summary>
+    /// Довідники <c>Lookup</c>-колонок таблиць, до яких методологію активно прив'язано, —
+    /// звідки беруться записи аргументів <c>@Arg</c> (аудит L7-06).
+    /// </summary>
+    /// <param name="methodologyId">Методологія.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Ідентифікатори довідників без повторів; порожньо — підстановок немає.</returns>
+    /// <remarks>
+    /// ⛔ <c>REGFIELD(@Stream, 'NAME')</c> коду довідника літералом не має: без цього
+    /// переліку знімок прив'язки його не містив, і кожен рядок давав <c>#REF</c>.
+    /// </remarks>
+    public Task<IReadOnlyList<int>> ListLookupRegistryIdsAsync(int methodologyId, CancellationToken ct);
+
     /// <summary>Ставить прив'язку в чергу на вставку; зберігає <c>IUnitOfWork</c>.</summary>
     /// <param name="binding">Нова прив'язка.</param>
     public void Add(CalculationBinding binding);

@@ -168,5 +168,21 @@ public sealed class CalculationBindingStore(EcrDbContext db) : ICalculationBindi
     }
 
     /// <inheritdoc />
+    public async Task<IReadOnlyList<int>> ListLookupRegistryIdsAsync(int methodologyId, CancellationToken ct)
+        => await (
+                from binding in db.CalculationBindings.AsNoTracking()
+                where binding.MethodologyId == methodologyId && binding.IsActive
+                join target in db.ColumnDefs.AsNoTracking()
+                    on binding.ColumnDefId equals target.Id
+                join column in db.ColumnDefs.AsNoTracking()
+                    on target.TableDefId equals column.TableDefId
+                where !column.IsDeleted && column.LookupRegistryDefId != null
+                select column.LookupRegistryDefId!.Value)
+            .Distinct()
+            .OrderBy(id => id)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+    /// <inheritdoc />
     public void Add(CalculationBinding binding) => db.CalculationBindings.Add(binding);
 }
