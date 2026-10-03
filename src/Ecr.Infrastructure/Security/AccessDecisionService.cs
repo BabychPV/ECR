@@ -1482,15 +1482,14 @@ public sealed class AccessDecisionService(
         // (ФВ-5.19), на відміну від запису, де блокує лише коміркова (D-90):
         // подана форма йде назовні цілком, і рядкова помилка в ній — це
         // неправильний звіт.
-        var hasErrors = await db.ValidationResults
-            .AsNoTracking()
-            .Where(v => v.DocumentId == documentId && v.PeriodKey == periodKey.Value)
-            .OrderByDescending(v => v.RunAt)
-            .Select(v => v.ErrorCount)
-            .FirstOrDefaultAsync(ct)
-            .ConfigureAwait(false) > 0;
-
-        return EditRules.CanSubmit(profile, context, hasErrors);
+        //
+        // ⛔ T2-01: тут НЕ читається збережений підсумок (`ErrorCount` останнього
+        // «Перевірити»). Він застарілий одразу після правки даних: відмова `403`
+        // «domain rule» за ним лишалась, хоч помилку вже виправлено (допомагав
+        // лише ручний Validate). Блокування по помилках валідації робить сам
+        // `SubmitSheetHandler` — СВІЖИМ прогоном під блокуванням аркуша
+        // (422 ECR-SUB-4221 зі списком), тож рішення про права його не дублює.
+        return EditRules.CanSubmit(profile, context, hasBlockingErrors: false);
     }
 
     /// <inheritdoc />
