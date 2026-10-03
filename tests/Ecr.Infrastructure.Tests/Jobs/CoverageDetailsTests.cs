@@ -57,7 +57,7 @@ public sealed class CoverageDetailsTests
     /// </summary>
     [Theory]
     [InlineData("MaterializeCollectedDataJob.cs", 5)]
-    [InlineData("SourceEventSyncJob.cs", 8)]
+    [InlineData("SourceEventSyncJob.cs", 10)]
     public void Coverage_events_in_jobs_take_details_from_the_envelope_helper(string file, int expectedCalls)
     {
         var text = File.ReadAllText(Path.Combine(RepoRoot(), "src", "Ecr.Infrastructure", "Jobs", file));
