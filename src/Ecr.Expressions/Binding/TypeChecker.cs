@@ -96,6 +96,12 @@ public sealed class TypeChecker(Func<string, FunctionSignature?>? signatures = n
 
     private Typed Infer(AstNode node, Walk walk, RegistryShape? row)
     {
+        // ⛔ L7-01: лівий гребінь ланцюга — рекурсія глибиною в кількість ланок.
+        if (!TraversalStackGuard.TryEnter(node, walk.Diagnostics))
+        {
+            return Typed.Of(ExpressionValueType.Null);
+        }
+
         var context = walk.Context;
 
         switch (node)

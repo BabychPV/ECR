@@ -283,6 +283,88 @@ public sealed class ExpressionDepthGuardTests
                ?? throw new InvalidOperationException("Не знайдено кореня репозиторію (файла Ecr.sln).");
     }
 
+    /// <summary>Оператори кожного циклу ланцюга парсера: or, and, concat, additive, multiplicative.</summary>
+    public static TheoryData<string> ChainOperators => ["+", "-", "*", "/", "%", "&", " AND ", " OR "];
+
+    [Theory]
+    [MemberData(nameof(ChainOperators))]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public void Плаский_ланцюг_понад_межу_відхиляється_діагностикою(string op)
+    {
+        // ⛔ L7-01: ланцюг розбирається ЦИКЛОМ, тож межа вкладеності його не
+        // бачить, а дерево виходить лівим гребенем глибиною в кількість ланок.
+        var result = Expr.Parse("1" + Repeat(op + "1", Parser.MaxChainLinks + 1));
+
+        Assert.False(result.IsSuccess);
+        Assert.Null(result.Expression);
+        var diagnostic = Assert.Single(result.Diagnostics, d => d.MessageKey == "expr.chainTooLong");
+        Assert.Equal("2048", diagnostic.MessageParams!["max"]);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public void Ланцюг_рівно_на_межі_розбирається()
+    {
+        var result = Expr.Parse("1" + Repeat("+1", Parser.MaxChainLinks));
+
+        Assert.True(result.IsSuccess, string.Join("; ", result.Diagnostics.Select(d => d.Message)));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public void Ланцюг_у_дужках_операндом_іншого_ланцюга_додає_свою_глибину()
+    {
+        // Кожен ланцюг коротший за межу, але внутрішній — операнд останньої ланки
+        // зовнішнього: глибина дерева — їхня сума, і межа «на ланцюг» її не тримала б.
+        var chain = "1" + Repeat("+1", (Parser.MaxChainLinks / 2) + 1);
+
+        var result = Expr.Parse(chain + "+(" + chain + ")");
+
+        Assert.Contains(result.Diagnostics, d => d.MessageKey == "expr.chainTooLong");
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public void Сусідні_аргументи_функції_глибини_не_складають()
+    {
+        // Ланки сусідніх аргументів лежать на різних шляхах дерева: широкий, але
+        // мілкий вираз межа не відхиляє (та сама форма, що в EvaluatorDepthGuardTests).
+        var argument = "1" + Repeat("+1", 50);
+        var expression = "SUM(" + string.Join(", ", Enumerable.Repeat(argument, 200)) + ")";
+
+        Assert.True(Expr.Parse(expression).IsSuccess);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public void Найдовший_вираз_що_зберігається_вкладається_в_межу_ланок()
+    {
+        // 4000 символів (`MethodologyFormula.MaxExpressionLength`) — не більше
+        // 2000 бінарних операторів: жоден збережений вираз межа не відхиляє.
+        var text = "1" + Repeat("+1", 1999);
+        Assert.True(text.Length <= 4000);
+
+        Assert.True(Expr.Parse(text).IsSuccess);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public void Атака_ланцюгом_у_32_тисячі_доданків_відхиляється_на_стеку_1_МБ()
+    {
+        // ⛔ Саме те тіло, яким L7-01 валив процес API (64 КіБ тіла запиту).
+        ParseResult? result = null;
+        var thread = new Thread(
+            () => result = Expr.Parse(string.Join("+", Enumerable.Repeat("1", 32_000))),
+            maxStackSize: 1024 * 1024);
+
+        thread.Start();
+        Assert.True(thread.Join(TimeSpan.FromSeconds(30)), "Розбір не завершився за 30 с.");
+
+        Assert.NotNull(result);
+        Assert.False(result.IsSuccess);
+        Assert.Contains(result.Diagnostics, d => d.MessageKey == "expr.chainTooLong");
+    }
+
     /// <summary>Текст, вкладений рівно <paramref name="levels"/> разів заданим ребром граматики.</summary>
     private static string Build(string path, int levels) => path switch
     {

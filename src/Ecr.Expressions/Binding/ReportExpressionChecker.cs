@@ -100,6 +100,12 @@ public static class ReportExpressionChecker
 
     private static void Bind(AstNode node, ReportExpressionScope scope, List<ExpressionDiagnostic> diagnostics)
     {
+        // ⛔ L7-01: лівий гребінь ланцюга — рекурсія глибиною в кількість ланок.
+        if (!TraversalStackGuard.TryEnter(node, diagnostics))
+        {
+            return;
+        }
+
         switch (node)
         {
             case CellReferenceNode reference when !IsRowColumn(reference):
