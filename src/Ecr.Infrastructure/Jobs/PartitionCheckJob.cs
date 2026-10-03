@@ -4,6 +4,8 @@ using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Integration;
 using Ecr.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Ecr.Infrastructure.Jobs;
 
@@ -16,9 +18,12 @@ namespace Ecr.Infrastructure.Jobs;
 /// Дізнатися про вичерпаний запас треба на старті або за розкладом, а не
 /// вночі під час архівації.
 /// </remarks>
-public sealed class PartitionCheckJob(
-    EcrDbContext db, ISqlCapabilities capabilities, IClock clock) : IBackgroundJob
+public sealed partial class PartitionCheckJob(
+    EcrDbContext db, ISqlCapabilities capabilities, IClock clock, ILogger<PartitionCheckJob>? logger = null)
+    : IBackgroundJob
 {
+    private readonly ILogger log = logger ?? NullLogger<PartitionCheckJob>.Instance;
+
     /// <summary>Код задачі в журналі обслуговування.</summary>
     public static string Code => "partition-check";
 
@@ -64,9 +69,14 @@ public sealed class PartitionCheckJob(
         // Аудит: межі pf_AuditByMonth продовжуються на AuditMonthsAhead місяців
         // уперед процедурою (EXECUTE AS OWNER, тож DDL-прав застосунку не треба —
         // D-66). Ідемпотентно: додає лише відсутні межі; SPLIT порожньої крайньої
-        // партиції — операція метаданих. Збій (напр. таймаут блокування) падає
-        // прогоном Failed (Q-240) і повторюється наступної ночі.
-        var auditAdded = await ExtendAuditBoundariesAsync(ct).ConfigureAwait(false);
+        // партиції — операція метаданих.
+        // ⛔ L2-05 (HU-11 Q8, дефолт A): збій продовження (немає GRANT EXECUTE на arc.*
+        // у перші дні за D-264, таймаут блокування SPLIT) — стан Degraded, а перевірка
+        // запасу pf_ByPeriodKey нижче виконується ЗАВЖДИ. Повтор — наступної ночі.
+        var (auditAdded, boundariesError) = await ExtendAuditBoundariesAsync(ct).ConfigureAwait(false);
+        var boundariesJson = boundariesError is null
+            ? string.Empty
+            : string.Create(CultureInfo.InvariantCulture, $",\"auditBoundariesFailed\":true,\"auditBoundariesErrorNumber\":{boundariesError.Number}");
 
         // D-247: архівація старих партицій аудиту (SWITCH у arc.Audit*) тією ж нічною
         // задачею; процедура ідемпотентна й сама пише слід у itg.MaintenanceRun.
@@ -77,7 +87,8 @@ public sealed class PartitionCheckJob(
             await ArchiveAuditAsync(ct).ConfigureAwait(false);
         var archiveJson = string.Create(
             CultureInfo.InvariantCulture,
-            $",\"auditArchivedPartitions\":{archivedPartitions},\"auditArchivedRows\":{archivedRows}{(archiveError is null ? string.Empty : ",\"auditArchiveFailed\":true")}");
+            $",\"auditArchivedPartitions\":{archivedPartitions},\"auditArchivedRows\":{archivedRows}{(archiveError is null ? string.Empty : $",\"auditArchiveFailed\":true,\"auditArchiveErrorNumber\":{archiveError.Number}")}{boundariesJson}");
+        var auditFailed = archiveError is not null || boundariesError is not null;
 
         // ⛔ Функції партиціонування може не бути — тоді запасу не існує як
         // поняття, і мовчати про це не можна: «перевірка пройшла» на базі без
@@ -110,7 +121,7 @@ public sealed class PartitionCheckJob(
         // щоночі, привчає його не читати — і справжнє попередження губиться
         // серед звичних.
         run.Complete(
-            enough && archiveError is null ? "Succeeded" : "Degraded",
+            enough && !auditFailed ? "Succeeded" : "Degraded",
             string.Create(
                 CultureInfo.InvariantCulture,
                 $"{{\"boundariesAhead\":{ahead},\"minimum\":{MinimumBoundariesAhead},\"auditBoundariesAdded\":{auditAdded}{archiveJson}}}"),
@@ -153,7 +164,12 @@ public sealed class PartitionCheckJob(
     /// <summary>
     /// Архівує старі партиції аудиту процедурою <c>arc.usp_ArchiveAudit</c> (EXEC, без DDL у C#).
     /// </summary>
-    private async Task<(int Partitions, long Rows, string? Error)> ArchiveAuditAsync(CancellationToken ct)
+    /// <remarks>
+    /// ⛔ L2-05: причина збою — у журнал служби повністю, у <c>DetailsJson</c> — лише номер
+    /// помилки SQL (текст бази туди не йде: він доїжджає в лист і вебхуки, V-03 / L2-13).
+    /// </remarks>
+    private async Task<(int Partitions, long Rows, Microsoft.Data.SqlClient.SqlException? Error)> ArchiveAuditAsync(
+        CancellationToken ct)
     {
         var partitions = new Microsoft.Data.SqlClient.SqlParameter("@PartitionsSwitched", System.Data.SqlDbType.Int)
         {
@@ -166,23 +182,24 @@ public sealed class PartitionCheckJob(
 
         try
         {
-            await db.Database
-                .ExecuteSqlRawAsync(
+            await ExecLongAsync(
                     "EXEC arc.usp_ArchiveAudit @OlderThanMonths = {0}, @Today = {1}, @PartitionsSwitched = @PartitionsSwitched OUTPUT, @RowsSwitched = @RowsSwitched OUTPUT;",
-                    new object[] { AuditArchiveOlderThanMonths, clock.UtcNow.Date, partitions, rows },
+                    [AuditArchiveOlderThanMonths, clock.UtcNow.Date, partitions, rows],
                     ct)
                 .ConfigureAwait(false);
         }
         catch (Microsoft.Data.SqlClient.SqlException ex)
         {
-            return (0, 0, ex.Message);
+            LogAuditArchiveFailed(log, ex.Number, ex);
+            return (0, 0, ex);
         }
 
         return (partitions.Value is int p ? p : 0, rows.Value is long r ? r : 0, null);
     }
 
-    /// <summary>Продовжує межі аудиту; повертає, скільки меж додано.</summary>
-    private async Task<int> ExtendAuditBoundariesAsync(CancellationToken ct)
+    /// <summary>Продовжує межі аудиту; повертає, скільки меж додано, або збій.</summary>
+    private async Task<(int Added, Microsoft.Data.SqlClient.SqlException? Error)> ExtendAuditBoundariesAsync(
+        CancellationToken ct)
     {
         var added = new Microsoft.Data.SqlClient.SqlParameter("@Added", System.Data.SqlDbType.Int)
         {
@@ -190,15 +207,52 @@ public sealed class PartitionCheckJob(
         };
 
         var today = clock.UtcNow.Date;
-        await db.Database
-            .ExecuteSqlRawAsync(
-                "EXEC arc.usp_EnsureAuditPartitions @MonthsAhead = {0}, @Today = {1}, @Added = @Added OUTPUT;",
-                new object[] { AuditMonthsAhead, today, added },
-                ct)
-            .ConfigureAwait(false);
+        try
+        {
+            await ExecLongAsync(
+                    "EXEC arc.usp_EnsureAuditPartitions @MonthsAhead = {0}, @Today = {1}, @Added = @Added OUTPUT;",
+                    [AuditMonthsAhead, today, added],
+                    ct)
+                .ConfigureAwait(false);
+        }
+        catch (Microsoft.Data.SqlClient.SqlException ex)
+        {
+            LogAuditBoundariesFailed(log, ex.Number, ex);
+            return (0, ex);
+        }
 
-        return added.Value is int n ? n : 0;
+        return (added.Value is int n ? n : 0, null);
     }
+
+    /// <summary>
+    /// EXEC процедури обслуговування під довгим таймаутом команди, з відновленням попереднього.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ L2-05 (той самий дефект, що S-09/S-19 для <see cref="ArchiveJob"/>): глобальні 60 с
+    /// на першому прогоні з історією понад 24 міс. обривали архівацію атеншеном клієнта, який
+    /// обходить CATCH процедури, — і рядка <c>audit-archive Failed</c> не лишалося.
+    /// </remarks>
+    private async Task ExecLongAsync(string sql, object[] parameters, CancellationToken ct)
+    {
+        var previous = db.Database.GetCommandTimeout();
+        db.Database.SetCommandTimeout(ArchiveJob.CommandTimeoutSeconds);
+        try
+        {
+            await db.Database.ExecuteSqlRawAsync(sql, parameters, ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            db.Database.SetCommandTimeout(previous);
+        }
+    }
+
+    [LoggerMessage(Level = LogLevel.Error,
+        Message = "Продовження меж аудиту (arc.usp_EnsureAuditPartitions) не вдалося, помилка SQL {Number}; перевірка запасу pf_ByPeriodKey виконується далі.")]
+    private static partial void LogAuditBoundariesFailed(ILogger logger, int number, Exception ex);
+
+    [LoggerMessage(Level = LogLevel.Error,
+        Message = "Архівація аудиту (arc.usp_ArchiveAudit) не вдалася, помилка SQL {Number}.")]
+    private static partial void LogAuditArchiveFailed(ILogger logger, int number, Exception ex);
 
     /// <summary>Чи існує функція партиціонування за періодом.</summary>
     private async Task<bool> PartitionFunctionExistsAsync(CancellationToken ct)
