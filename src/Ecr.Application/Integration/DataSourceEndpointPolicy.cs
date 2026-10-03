@@ -97,7 +97,7 @@ public static class DataSourceEndpointPolicy
             return EndpointVerdict.Scheme;
         }
 
-        if (SqlHostsOf(address) is not { } hosts)
+        if (SqlHostsOf(address) is not { } hosts || HasOdbcFileOption(address))
         {
             return EndpointVerdict.Malformed;
         }
@@ -350,6 +350,54 @@ public static class DataSourceEndpointPolicy
     }
 
     private static readonly string[] ProtocolPrefixes = ["tcp:", "np:", "lpc:", "admin:"];
+
+    /// <summary>
+    /// Ключі менеджера драйверів ODBC, що читають чи пишуть ФАЙЛ: <c>FILEDSN</c>, <c>SAVEFILE</c>, і
+    /// <c>DRIVER</c>, заданий шляхом до бібліотеки (L3-09).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Рядок без ключа сервера дає порожній перелік хостів, тобто «дозволено»; з
+    /// <c>FILEDSN=\\host\share\x.dsn</c> менеджер драйверів читає файл через SMB службовим обліковим
+    /// записом, і сервер задає вже вміст <c>.dsn</c> — повз перевірку link-local. <c>SAVEFILE</c> пише
+    /// <c>.dsn</c> у довільний каталог, <c>DRIVER</c> зі шляхом вантажить довільну бібліотеку. Ім'я
+    /// драйвера (<c>{PI SQL Client}</c>) і системний <c>DSN=</c> адміністратора машини — дозволені.
+    /// </remarks>
+    private static bool HasOdbcFileOption(string address)
+    {
+        if (!address.Contains('=', StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var builder = new DbConnectionStringBuilder(useOdbcRules: true);
+
+        try
+        {
+            builder.ConnectionString = address;
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
+
+        foreach (string key in builder.Keys)
+        {
+            var k = key.Replace(" ", string.Empty, StringComparison.Ordinal).ToUpperInvariant();
+
+            if (k is "FILEDSN" or "SAVEFILE")
+            {
+                return true;
+            }
+
+            if (k == "DRIVER" && builder[key]?.ToString()?.Trim().Trim('{', '}') is { } driver
+                && driver.IndexOfAny(['\\', '/', ':']) >= 0)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     /// <summary>
     /// Чи називає ключ рядка з'єднання сервер: <c>Server</c>, <c>Data Source</c>, <c>Address</c>,

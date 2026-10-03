@@ -175,4 +175,50 @@ public sealed class DataSourceEndpointPolicyTests
 
         Assert.Equal("err.ECR-REQ-0422.dataSourceEndpointHostNotAllowed", refused!.Details!["messageKey"]);
     }
+
+    /// <summary>
+    /// L3-09: файлові ключі менеджера драйверів ODBC (<c>FILEDSN</c>, <c>SAVEFILE</c>, <c>DRIVER</c> шляхом)
+    /// обходили перевірку сервера: рядок без ключа сервера давав порожній перелік хостів, тобто «дозволено».
+    /// </summary>
+    [Theory]
+    [InlineData(@"FILEDSN=\\evil\s\x.dsn")]
+    [InlineData(@"filedsn = C:\dsn\x.dsn")]
+    [InlineData(@"Driver={PI SQL Client};Server=af.corp.local;SAVEFILE=C:\ProgramData\x.dsn")]
+    [InlineData(@"Driver=\\evil\s\odbc.dll;Server=af.corp.local")]
+    [InlineData(@"Driver={C:\tmp\evil.dll};Server=af.corp.local")]
+    [InlineData("Driver=/tmp/libevil.so;Server=af.corp.local")]
+    [InlineData(@"DSN=PiSqlEcr;FileDsn=\\evil\s\x.dsn")]
+    [InlineData(@"DSN=PiSqlEcr;File DSN=\\evil\s\x.dsn")]
+    public void CheckSqlServerAddress_FileDsnUnc_Відмова(string address)
+        => Assert.Equal(EndpointVerdict.Malformed, DataSourceEndpointPolicy.CheckSqlServerAddress(address));
+
+    [Theory]
+    [InlineData("Driver={PI SQL Client};Server=af.corp.local;Integrated Security=SSPI")]
+    [InlineData("DSN=PiSqlEcr")]
+    [InlineData("Driver={ODBC Driver 18 for SQL Server};Server=af.corp.local")]
+    public void CheckSqlServerAddress_ім_я_драйвера_і_системний_DSN_дозволені(string address)
+        => Assert.Equal(EndpointVerdict.Allowed, DataSourceEndpointPolicy.CheckSqlServerAddress(address));
+
+    /// <summary>L3-09 через обробник: відмова 422 з ключем некоректної адреси біля поля.</summary>
+    [Fact]
+    public async Task Обробник_PiSqlClient_FileDsn_422()
+    {
+        var access = Substitute.For<IAccessDecisionService>();
+        var user = Substitute.For<ICurrentUser>();
+        user.UserId.Returns(11);
+        access.BuildProfileAsync(11, Arg.Any<CancellationToken>())
+            .Returns(new AccessBuilder { UserId = 11 }.Permission("Integration.Manage").Build());
+
+        var handler = new SaveDataSourceHandler(
+            Substitute.For<IDataSourceStore>(), Substitute.For<ISecretProvider>(), access,
+            Substitute.For<IUnitOfWork>(), Substitute.For<IAuditWriter>(), user, Substitute.For<IClock>(), null);
+
+        var refused = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => handler.CreateAsync(
+                "SQL1", new Dictionary<string, string> { ["uk"] = "AF" }, ExternalTransport.PiSqlClient,
+                @"FILEDSN=\\evil\s\x.dsn", null, null, null, null, default));
+
+        Assert.Equal("err.ECR-REQ-0422.dataSourceEndpointMalformed", refused.Details!["messageKey"]);
+        Assert.Equal("endpoint", refused.Details!["field"]);
+    }
 }
