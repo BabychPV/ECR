@@ -5425,6 +5425,8 @@ USING (VALUES
     (N'err.ECR-IMP-0422.workbookOtherDocument', N'en', N'The workbook was exported from another document.', 1),
     (N'err.ECR-IMP-0422.noMapSheet',            N'en', N'The workbook has no service sheet: only a file exported by this system can be imported.', 1),
     (N'err.ECR-IMP-0422.mapBroken',             N'en', N'The service sheet of the workbook is empty or damaged. Export the document again.', 1),
+    -- ⛔ L6-01: понад стелю змін у таблиці — відмова всього імпорту, а не застосування перших 5000.
+    (N'err.ECR-IMP-0422.importTooManyChanges',  N'en', N'Table {tableCode} has more than {maxChanges} changes. Nothing was imported: split the changes into several files.', 1),
     -- Великий імпорт іде у фон (F-01): людина має знати, де шукати результат.
     (N'import.queued',                          N'en', N'The import is large and is being applied in the background. Follow it in My tasks.', 1),
     -- ⛔ F-27: у «My tasks» замість ідентифікатора файлу експорту.
@@ -9392,6 +9394,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-IMP-0422.workbookOtherDocument', N'ru', N'Книга экспортирована из другого документа.'),
     (N'err.ECR-IMP-0422.noMapSheet', N'ru', N'В книге нет служебного листа: импортировать можно только файл, экспортированный этой системой.'),
     (N'err.ECR-IMP-0422.mapBroken', N'ru', N'Служебный лист книги пуст или повреждён. Экспортируйте документ заново.'),
+    (N'err.ECR-IMP-0422.importTooManyChanges', N'ru', N'В таблице {tableCode} больше {maxChanges} изменений. Ничего не импортировано: разделите изменения на несколько файлов.'),
     (N'import.queued', N'ru', N'Импорт большой и применяется в фоновом режиме. Следите за ним в разделе «Мои задачи».'),
     (N'jobs.exportReady', N'ru', N'Файл готов к скачиванию.'),
     (N'common.close', N'ru', N'Закрыть'),
@@ -12420,6 +12423,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-IMP-0422.workbookOtherDocument', N'kz', N'Кітап басқа құжаттан экспортталған.'),
     (N'err.ECR-IMP-0422.noMapSheet', N'kz', N'Кітапта қызметтік парақ жоқ: тек осы жүйе экспорттаған файлды ғана импорттауға болады.'),
     (N'err.ECR-IMP-0422.mapBroken', N'kz', N'Кітаптың қызметтік парағы бос немесе зақымдалған. Құжатты қайта экспорттаңыз.'),
+    (N'err.ECR-IMP-0422.importTooManyChanges', N'kz', N'{tableCode} кестесінде {maxChanges} өзгерістен көп. Ештеңе импортталмады: өзгерістерді бірнеше файлға бөліңіз.'),
     (N'import.queued', N'kz', N'Импорт көлемді, сондықтан фондық режимде қолданылуда. Оны «Менің тапсырмаларым» бөлімінен бақылаңыз.'),
     (N'jobs.exportReady', N'kz', N'Файл жүктеп алуға дайын.'),
     (N'common.close', N'kz', N'Жабу'),

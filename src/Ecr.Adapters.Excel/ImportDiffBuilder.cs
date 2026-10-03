@@ -1,6 +1,7 @@
 using System.Globalization;
 using ClosedXML.Excel;
 using Ecr.Application.Documents;
+using Ecr.Application.Errors;
 using Ecr.Application.Localization;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
@@ -28,6 +29,10 @@ public sealed class ImportDiffBuilder
     /// ⚠ Не оптимізація. Десять тисяч змін — це не імпорт правок, а підміна
     /// документа: переглянути такий diff людина не може, а «підтвердити не
     /// дивлячись» — саме те, від чого перегляд і захищає (ФВ-4.3).
+    ///
+    /// ⛔ Стеля на ТАБЛИЦЮ, і перевищення — відмова всього перегляду
+    /// (<see cref="ImportMessageKeys.TooManyChanges"/>), а не обрізання до
+    /// перших <see cref="MaxChanges"/> (L6-01).
     /// </remarks>
     public const int MaxChanges = 5_000;
 
@@ -99,11 +104,6 @@ public sealed class ImportDiffBuilder
         {
             foreach (var column in block.Columns)
             {
-                if (changes.Count >= MaxChanges)
-                {
-                    break;
-                }
-
                 if (!columnsById.TryGetValue(column.ColumnDefId, out var definition))
                 {
                     continue;
@@ -326,6 +326,16 @@ public sealed class ImportDiffBuilder
                         table.Code, table.NameL10n, mismatch.MessageKey, excelCell));
 
                     continue;
+                }
+
+                // ⛔ L6-01 (аудит 2026-10-03, DAT-05 «усе або нічого»). Доти тут
+                // стояв `break` ЛИШЕ внутрішнього циклу на 5000-й зміні: решта
+                // книги мовчки відкидалася, план для Apply містив перші 5000, а
+                // Apply відповідав успіхом. Тепер зміна понад стелю — відмова
+                // всього перегляду: план не зберігається, застосувати нічого.
+                if (changes.Count >= MaxChanges)
+                {
+                    throw TooManyChanges(table);
                 }
 
                 changes.Add(new ImportChange(
@@ -660,6 +670,18 @@ public sealed class ImportDiffBuilder
         };
     }
 
+    /// <summary>Відмова перегляду: у таблиці книги змін більше за <see cref="MaxChanges"/>.</summary>
+    private static BusinessRuleException TooManyChanges(TableDef table)
+        => new(
+            "ECR-IMP-0422",
+            $"More than {MaxChanges} changes in table {table.Code}: the import is refused as a whole.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = ImportMessageKeys.TooManyChanges,
+                ["tableCode"] = table.Code,
+                ["maxChanges"] = MaxChanges,
+            });
+
     /// <summary>Поточне значення у вигляді, придатному для показу в переліку змін.</summary>
     private static object? Display(CellValueData? value, ColumnDef definition) => Current(value, definition);
 }
@@ -716,6 +738,12 @@ public static class ImportMessageKeys
 
     /// <summary>Таблиці з файлу немає в чинній версії шаблону.</summary>
     public const string TableMissing = "err.ECR-IMP-0422.importTableMissing";
+
+    /// <summary>
+    /// У таблиці книги змін більше за <see cref="ImportDiffBuilder.MaxChanges"/> —
+    /// відмова всього перегляду (L6-01), а не мовчазне обрізання.
+    /// </summary>
+    public const string TooManyChanges = "err.ECR-IMP-0422.importTooManyChanges";
 
     /// <summary>Правка заборонена правами або станом — той самий текст, що в підказці сітки.</summary>
     public static string Denied(EditDenyReason reason) => $"deny.{reason}";
