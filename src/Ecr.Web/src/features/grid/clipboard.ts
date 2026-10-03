@@ -32,13 +32,95 @@ const ColumnSeparator = '\t';
 export function parseClipboard(text: string): ClipboardMatrix {
   if (text.length === 0) return [];
 
-  const rows = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+  const normalized = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  // AN-39/L8-06: без лапок розбір простий (швидкий шлях, як було).
+  const rows: string[][] = normalized.includes('"')
+    ? parseQuoted(normalized)
+    : normalized.split('\n').map((row) => row.split(ColumnSeparator));
 
-  while (rows.length > 0 && rows[rows.length - 1] === '') {
-    rows.pop();
+  while (rows.length > 0) {
+    const last = rows[rows.length - 1];
+    if (last?.length === 1 && last[0] === '') rows.pop();
+    else break;
   }
 
-  return rows.map((row) => row.split(ColumnSeparator));
+  return rows;
+}
+
+/**
+ * Розбір TSV за RFC-4180 (так Excel кладе комірки з переносом, табом чи лапкою).
+ *
+ * ⛔ Без цього `"Boiler\nNo.2"<TAB>10` розпадався на ТРИ рядки: усе нижче зсувалося
+ * й писалося в чужі комірки. Лапка відкриває поле лише на ПОЧАТКУ поля; `""`
+ * всередині - одна лапка. Лапка посеред поля (`5" труба`) - звичайний символ.
+ * Незакрите або не до кінця поля - читається буквально (як до зміни).
+ */
+function parseQuoted(text: string): string[][] {
+  const rows: string[][] = [];
+  const n = text.length;
+  let row: string[] = [];
+  let i = 0;
+
+  for (;;) {
+    let field: string | null = null;
+
+    if (text[i] === '"') {
+      let j = i + 1;
+      let buf = '';
+      let closed = false;
+
+      while (j < n) {
+        if (text[j] === '"') {
+          if (text[j + 1] === '"') {
+            buf += '"';
+            j += 2;
+            continue;
+          }
+
+          closed = true;
+          break;
+        }
+
+        buf += text[j];
+        j++;
+      }
+
+      const next = text[j + 1];
+      if (closed && (next === undefined || next === '\t' || next === '\n')) {
+        field = buf;
+        i = j + 1;
+      }
+    }
+
+    if (field === null) {
+      let end = i;
+      while (end < n && text[end] !== '\t' && text[end] !== '\n') end++;
+      field = text.slice(i, end);
+      i = end;
+    }
+
+    row.push(field);
+
+    if (i >= n) {
+      rows.push(row);
+      break;
+    }
+
+    if (text[i] === '\n') {
+      rows.push(row);
+      row = [];
+    }
+
+    i++;
+    if (i >= n && text[i - 1] === '\n') break;
+  }
+
+  return rows;
+}
+
+/** Поле, яке Excel бере в лапки: таб, перенос або лапка всередині. */
+function quoteField(field: string): string {
+  return /[\t\n\r"]/.test(field) ? `"${field.replace(/"/g, '""')}"` : field;
 }
 
 /**
@@ -49,7 +131,7 @@ export function parseClipboard(text: string): ClipboardMatrix {
  * помічають не одразу.
  */
 export function toClipboard(matrix: ClipboardMatrix): string {
-  return matrix.map((row) => row.join(ColumnSeparator)).join('\n') + '\n';
+  return matrix.map((row) => row.map(quoteField).join(ColumnSeparator)).join('\n') + '\n';
 }
 
 /**
