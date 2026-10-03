@@ -193,6 +193,11 @@ export function SheetActions({
   /** Перечитує стан документа після кожної зміни робочого процесу. */
   const refresh = async (): Promise<void> => {
     await queryClient.invalidateQueries({ queryKey: ['document', documentId, periodKey] });
+    // ⛔ AN-28/L8-02: `cellPermissions` зрізу залежать від стану аркуша
+    // (`EditRules.CanEdit` -> `DocumentSubmitted`), а зріз живе 5 хв без
+    // перезапиту на фокус. Без цього після Recall/Return/Reopen сітка лишалась
+    // сірою до F5. Зрізи ЦЬОГО аркуша перезапитуються, решта лише позначається.
+    await invalidateSlices(queryClient, { documentId, periodKey, sheetDefId });
   };
 
   // ФВ-5.19: попередження, які сервер попросив підтвердити; `null` — діалог закритий.
