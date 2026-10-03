@@ -194,7 +194,11 @@ public sealed class RowWindowFetchJob(
                 .ToDictionaryAsync(e => e.Id, e => e.Code, ct)
                 .ConfigureAwait(false);
 
+        // ⛔ L3-03: НЕ відстежувані. Патчер ділить із задачею scoped-контекст і на гонці за
+        // рядок робить ChangeTracker.Clear(): відчеплений Supersede() не зберігався, і вставка
+        // нового чинного запису падала на UX_RowWindowValue_Current. Чинні знімаються запитом.
         var current = await db.RowWindowValues
+            .AsNoTracking()
             .Where(v => v.PeriodKey == periodKey && v.TableInstanceId == tableInstanceId && v.IsCurrent)
             .ToListAsync(ct)
             .ConfigureAwait(false);
@@ -499,7 +503,7 @@ public sealed class RowWindowFetchJob(
         }
     }
 
-    /// <summary>Знімає чинні записи, потім додає нові — двома збереженнями (унікальний індекс «чинний — один»).</summary>
+    /// <summary>Знімає чинні записи запитом, потім додає нові (унікальний індекс «чинний — один»).</summary>
     private async Task RecordAsync(
         RowWindowMap map, TableInstance instance, List<Item> items, RowContext context, DateTime now, CancellationToken ct)
     {
@@ -509,15 +513,24 @@ public sealed class RowWindowFetchJob(
             return;
         }
 
+        var superseded = new List<long>();
         foreach (var item in recorded)
         {
             if (context.Current.Remove((item.RowKey.ToUpperInvariant(), map.TargetColumnDefId), out var previous))
             {
-                previous.Supersede();
+                superseded.Add(previous.Id);
             }
         }
 
-        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+        // Запитом, а не через трекер (L3-03): ChangeTracker.Clear() у патчері між читанням і
+        // записом не може загубити зняття «чинного».
+        if (superseded.Count > 0)
+        {
+            await db.RowWindowValues
+                .Where(v => v.PeriodKey == instance.PeriodKeyValue && superseded.Contains(v.Id) && v.IsCurrent)
+                .ExecuteUpdateAsync(set => set.SetProperty(v => v.IsCurrent, false), ct)
+                .ConfigureAwait(false);
+        }
 
         foreach (var item in recorded)
         {

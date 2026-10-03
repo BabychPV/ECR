@@ -140,6 +140,28 @@ public sealed class SourceEventSyncJobTests(SqlServerFixture sql)
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Directive", "HSE301-A5b")]
+    public async Task ПатчерСкидаєТрекер_ЗвязокOpenСтаєSynced()
+    {
+        // ⛔ L3-03: патчер ділить scoped-контекст із задачею і на гонці за рядок робить
+        // ChangeTracker.Clear(). До фіксу зміни зв'язків етапу 2 (тут Open → Synced) мовчки
+        // губилися: SaveChangesAsync відчеплених не бачив. Мутація: прибрати перечитування
+        // links після WriteRowsAsync у SourceEventSyncJob.SyncMapAsync.
+        await using var stand = await ArrangeAsync();
+        var source = new FakeEventSource(Ev("E1", Start, null));
+        await RunAsync(stand, source);
+        Assert.Equal(SourceEventLinkStatus.Open, Assert.Single(await LinksAsync(stand)).Status);
+
+        source.Result = new SourceEventResult([Ev("E1", Start, End, volume: 5m)], false, null);
+        await RunAsync(stand, source, clearTrackerOnWrite: true);
+
+        Assert.Single(await RowsAsync(stand));
+        Assert.Equal(SourceEventLinkStatus.Synced, Assert.Single(await LinksAsync(stand)).Status);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "HSE301-A5b")]
     public async Task Незакрита_подія_не_рахується_і_перечитується_після_закриття()
     {
         await using var stand = await ArrangeAsync();
@@ -1042,7 +1064,7 @@ public sealed class SourceEventSyncJobTests(SqlServerFixture sql)
     private async Task RunAsync(
         Stand stand, FakeEventSource source, bool freshContainer = false, ICalculationTrigger? trigger = null,
         ILogger<SourceEventSyncJob>? logger = null, int? entityId = null,
-        DateTime? from = null, DateTime? to = null, bool confirm = false)
+        DateTime? from = null, DateTime? to = null, bool confirm = false, bool clearTrackerOnWrite = false)
     {
         // ⚠ Метадані таблиці кешуються в контейнері: зміна стелі рядків у базі видна лише новому контейнеру.
         await using var fresh = freshContainer ? BuildProvider() : null;
@@ -1052,10 +1074,12 @@ public sealed class SourceEventSyncJobTests(SqlServerFixture sql)
         var clock = Substitute.For<IClock>();
         clock.UtcNow.Returns(Now);
 
+        var db = services.GetRequiredService<EcrDbContext>();
+        var patcher = services.GetRequiredService<ICellPatcher>();
         var job = new SourceEventSyncJob(
-            services.GetRequiredService<EcrDbContext>(),
+            db,
             [source],
-            services.GetRequiredService<ICellPatcher>(),
+            clearTrackerOnWrite ? new TrackerClearingPatcher(patcher, db) : patcher,
             services.GetRequiredService<ICoverageJournal>(),
             services.GetRequiredService<IntegrationActor>(),
             clock,
@@ -1091,6 +1115,22 @@ public sealed class SourceEventSyncJobTests(SqlServerFixture sql)
     }
 
     /// <summary>Джерело подій, яке віддає задану відповідь і пам'ятає останній запит.</summary>
+    /// <summary>Справжній патчер, що після запису скидає трекер спільного контексту (як на гонці CELL-0409).</summary>
+    private sealed class TrackerClearingPatcher(ICellPatcher inner, EcrDbContext db) : ICellPatcher
+    {
+        public Task<IntegrationWriteResult> ApplyIntegrationAsync(
+            long documentId, long tableInstanceId, PeriodKey periodKey, IReadOnlyList<IntegrationCellValue> cells, CancellationToken ct)
+            => inner.ApplyIntegrationAsync(documentId, tableInstanceId, periodKey, cells, ct);
+
+        public async Task<IntegrationWriteResult> ApplyIntegrationRowsAsync(
+            long documentId, long tableInstanceId, PeriodKey periodKey, IReadOnlyList<IntegrationRowUpsert> rows, CancellationToken ct)
+        {
+            var result = await inner.ApplyIntegrationRowsAsync(documentId, tableInstanceId, periodKey, rows, ct);
+            db.ChangeTracker.Clear();
+            return result;
+        }
+    }
+
     private sealed class FakeEventSource(params SourceEvent[] events) : IExternalDataSource
     {
         public ExternalTransport Transport => ExternalTransport.PiWebApi;
