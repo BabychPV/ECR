@@ -519,13 +519,28 @@ function Set-BootstrapSecretFile {
 # цю логіку по-справжньому (D-134), не проганяючи весь конвеєр до msiexec
 # (реальний, а не заповнювач appsettings.Production.json — той самий факт
 # майданчика, якого цей скрипт не вигадує).
+#
+# ⛔ L10-05: Windows PowerShell 5.1 (`powershell -File tools\deploy-ecr.ps1` — так
+# запускають runbook і install-guide) НЕ парсить JSON із коментарями, а заповнювач,
+# який кладе MSI, їх містить (`//`). Без цього `Test-ConfigIsPlaceholder` повертав
+# $false, і `-ConfigValues` на першій установці не застосовувався ніколи. Коментарі
+# вирізаються тут: цілорядкові `//` і блокові `/* */`.
+function ConvertFrom-JsoncFile {
+    param([Parameter(Mandatory)] [string] $Path)
+
+    $raw = Get-Content $Path -Raw -Encoding UTF8
+    $raw = [regex]::Replace($raw, '(?m)^\s*//.*$', '')
+    $raw = [regex]::Replace($raw, '/\*.*?\*/', '', 'Singleline')
+    return $raw | ConvertFrom-Json -ErrorAction Stop
+}
+
 function Test-ConfigIsPlaceholder {
     param([string] $Path)
 
     if (-not (Test-Path $Path)) { return $true }
 
     try {
-        $existing = Get-Content $Path -Raw | ConvertFrom-Json -ErrorAction Stop
+        $existing = ConvertFrom-JsoncFile -Path $Path
         return @($existing.PSObject.Properties).Count -eq 0
     }
     catch {
@@ -636,7 +651,7 @@ function Get-ConfiguredEditionMode {
     param([string] $Path)
 
     if (-not (Test-Path $Path)) { return $null }
-    try { $json = Get-Content $Path -Raw | ConvertFrom-Json -ErrorAction Stop }
+    try { $json = ConvertFrom-JsoncFile -Path $Path }
     catch { return $null }
     if (-not $json -or -not $json.PSObject.Properties['Database']) { return $null }
     $database = $json.Database
@@ -695,7 +710,7 @@ function Get-ConfiguredValue {
     )
 
     if (-not $Path -or -not (Test-Path $Path)) { return $null }
-    try { $node = Get-Content $Path -Raw | ConvertFrom-Json -ErrorAction Stop }
+    try { $node = ConvertFrom-JsoncFile -Path $Path }
     catch { return $null }
     foreach ($key in $Keys) {
         if ($null -eq $node -or -not $node.PSObject.Properties[$key]) { return $null }
