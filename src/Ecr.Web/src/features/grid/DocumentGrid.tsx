@@ -63,7 +63,7 @@ import {
   usePendingSlice,
 } from './pendingStore';
 import { installEnterKeyCompat } from './keyboardCompat';
-import { installKeyCommitGate } from './keyCommitGate';
+import { installKeyCommitGate, isInCellEditor } from './keyCommitGate';
 import { installBodyPasteRedirect } from './bodyPaste';
 import {
   TableCornerAnchor,
@@ -1127,7 +1127,8 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
   /** Ctrl+V: розкладає буфер по сітці і відхиляє батч цілком, якщо є заборонені. */
   const onPaste = useCallback(
     (event: React.ClipboardEvent<HTMLDivElement>) => {
-      if (data === undefined || readOnly) return;
+      // AN-28/L8-03: paste з поля відкритого редактора належить полю, не сітці.
+      if (data === undefined || readOnly || isInCellEditor(event.target)) return;
 
       const text = event.clipboardData.getData('text/plain');
       if (text.length === 0) return;
@@ -1599,6 +1600,10 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         void save([...pending.values()]);
         return;
       }
+
+      // AN-28/L8-03: undo/redo у відкритому редакторі - над текстом поля, не над сіткою.
+      // (Ctrl+S лишається: зберегти все.)
+      if (isInCellEditor(event.target)) return;
 
       if (event.key === 'z' && !event.shiftKey) {
         event.preventDefault();
