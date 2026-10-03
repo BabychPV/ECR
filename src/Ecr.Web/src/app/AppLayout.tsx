@@ -38,6 +38,7 @@ import { useCatalog } from '@/shared/i18n/useCatalog';
 import { BrandMark } from '@/shared/ui/BrandMark';
 import { RouteAnnouncer } from '@/shared/ui/RouteAnnouncer';
 import { UnsavedGuard } from '@/shared/ui/UnsavedGuard';
+import { flushUnsaved, hasUnsavedChanges } from '@/shared/ui/unsavedSources';
 import { UserMenu } from '@/shared/ui/UserMenu';
 
 import './routeTransition.css';
@@ -190,9 +191,26 @@ export function AppLayout(): JSX.Element {
   // зміна мови — рідкісна дія, а редагована комірка при відкритті меню вже зафіксована.
   const activeLanguage = language();
   const [pageLanguage, setPageLanguage] = useState(activeLanguage);
-  if (pageLanguage !== activeLanguage && isCatalogResolved(activeLanguage, 'private')) {
+  const remountDue = pageLanguage !== activeLanguage && isCatalogResolved(activeLanguage, 'private');
+  // ⛔ Незбережений ввід (сітка, шапка, гранти) remount знищив би. Брудний стан — спершу зберегти
+  // (`flushUnsaved`, як при виході зі сторінки); не вдалося — сторінка лишається старою мовою, але
+  // ввід цілий (безпечний бік помилки).
+  const remountBlocked = remountDue && hasUnsavedChanges();
+  if (remountDue && !remountBlocked) {
     setPageLanguage(activeLanguage);
   }
+  useEffect(() => {
+    if (!remountBlocked) return;
+
+    let live = true;
+    void flushUnsaved().then((saved) => {
+      if (live && saved) setPageLanguage(activeLanguage);
+    });
+
+    return () => {
+      live = false;
+    };
+  }, [remountBlocked, activeLanguage]);
 
   const me = session.data;
 
