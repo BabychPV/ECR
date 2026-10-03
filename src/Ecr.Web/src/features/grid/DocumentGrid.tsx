@@ -2094,6 +2094,10 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
           source={rows}
           pinnedBottomSource={pinnedTotals}
           readonly={readOnly}
+          // ⛔ T4-03: клік на іншу комірку/кнопку закриває редактор БЕЗ Enter -
+          // без цього набране мовчки зникало. Esc, як і раніше, скасовує
+          // (`cancelChanges`); Enter/Tab фіксують, як і досі.
+          applyOnClose
           onBeforeedit={onBeforeEdit}
           onBeforerangeedit={onBeforeRangeEdit}
           onAfteredit={onAfterEdit}
