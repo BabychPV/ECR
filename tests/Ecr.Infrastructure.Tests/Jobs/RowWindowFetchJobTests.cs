@@ -200,7 +200,7 @@ public sealed class RowWindowFetchJobTests(SqlServerFixture sql)
     // ── Стенд ────────────────────────────────────────────────────────────────
 
     private static WindowResult Result(decimal? value, decimal? percentGood = 100m)
-        => new(value, "Sm3/h", value is null ? 0 : 4, percentGood, WindowComputedBy.Local, [], null);
+        => new(value, null, value is null ? 0 : 4, percentGood, WindowComputedBy.Local, [], null);
 
     private async Task RunAsync(Stand stand, FakeWindowSource source, ICalculationTrigger? trigger = null, DateTime? now = null)
     {
