@@ -8,7 +8,6 @@ import type {
   DocumentPeriodRequest,
   DocumentSummary,
   DocumentTableDto,
-  PagedProjects,
   PeriodCalendarDto,
   ValidationResultResponse,
 } from '@/api/types';
@@ -26,6 +25,7 @@ import { DocumentLockBanner } from '@/features/documents/DocumentLockBanner';
 import { documentLockOf, locksDataActions } from '@/features/documents/documentLock';
 import { SheetFillSummary } from '@/features/documents/SheetFillSummary';
 import { useDocumentPending } from '@/features/grid/autosave';
+import { fetchAllProjects } from '@/features/projects/allProjects';
 import { ExportButton } from '@/features/export/ExportButton';
 import { SheetActions, isEditable } from '@/features/workflow/SheetActions';
 import { can, useSession } from '@/shared/session/useSession';
@@ -407,7 +407,8 @@ export function DocumentPage(): JSX.Element {
 
   const projects = useQuery({
     queryKey: ['projects'],
-    queryFn: () => apiFetch<PagedProjects>('/api/v1/projects?limit=200'),
+    // AN-39/L8-10: усі сторінки - проєкт поза першими 200 теж блокує дії в архіві.
+    queryFn: fetchAllProjects,
     enabled: projectId !== null,
   });
 
