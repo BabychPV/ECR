@@ -252,6 +252,32 @@ public sealed class RowWindowFetchJobTests(SqlServerFixture sql)
         Assert.Equal(5m, (await CellsAsync(stand, "R2"))[stand.VolumeColumn].Numeric);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "HSE301-A1")]
+    public async Task ПатчерСкидаєТрекер_ПовторнеПідтягування_ОдинЧиннийЗапис()
+    {
+        // ⛔ L3-03: патчер ділить scoped-контекст із задачею і на гонці за рядок робить
+        // ChangeTracker.Clear(). До фіксу Supersede() відчепленого запису не зберігався, і вставка
+        // нового чинного падала на UX_RowWindowValue_Current. Мутація: повернути відстежуване
+        // читання в LoadRowsAsync і previous.Supersede() замість ExecuteUpdateAsync.
+        await using var stand = await ArrangeAsync(RowWindowSummaryKind.Average, s => (s.StdCubicId, s.StdCubicId));
+        await AddRowAsync(stand, "R1", LocalStart, LocalEnd);
+        var source = new FakeWindowSource(Result(null, percentGood: 0m));
+
+        await RunAsync(stand, source);
+
+        source.Result = Result(7m);
+        await RunAsync(stand, source, now: Now.AddHours(1), patcher: (inner, db) => new ScriptedPatcher(inner) { ClearTracker = db });
+
+        var values = await ValuesAsync(stand);
+        Assert.Equal(
+            [(RowWindowValueStatus.NoData, false), (RowWindowValueStatus.Fetched, true)],
+            values.OrderBy(v => v.Id).Select(v => (v.Status, v.IsCurrent)));
+        Assert.Equal(7m, (await CellsAsync(stand, "R1"))[stand.VolumeColumn].Numeric);
+    }
+
     // ── Стенд ────────────────────────────────────────────────────────────────
 
     private static WindowResult Result(decimal? value, decimal? percentGood = 100m)

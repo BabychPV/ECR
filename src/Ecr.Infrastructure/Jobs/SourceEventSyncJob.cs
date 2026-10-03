@@ -466,6 +466,18 @@ public sealed partial class SourceEventSyncJob(
         var appliedPeriods = new HashSet<int>();
         var writes = await WriteRowsAsync(map, plan, fields, tz, units, appliedPeriods, ct).ConfigureAwait(false);
 
+        // ⛔ L3-03: патчер ділить із задачею scoped-контекст і на гонці за рядок робить
+        // ChangeTracker.Clear() — зв'язки відчеплено, і зміни етапу 2 (Written, Missing, Rekey…)
+        // SaveChangesAsync мовчки не бачив. Відчеплені — перечитуємо відстежуваними.
+        if (links.Any(l => db.Entry(l).State == EntityState.Detached))
+        {
+            links = await db.SourceEventLinks
+                .Where(l => l.SourceEventMapId == map.Id)
+                .ToListAsync(ct)
+                .ConfigureAwait(false);
+            linkByEventId = links.ToDictionary(l => l.SourceEventId, StringComparer.OrdinalIgnoreCase);
+        }
+
         // ── Етап 2: зв'язки.
         var events = new List<CoverageEvent>();
         foreach (var item in plan.Items)
