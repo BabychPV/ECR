@@ -69,6 +69,11 @@ public sealed class SaveDataSourceHandlerTests
     [InlineData("Server=flert;User Instance=true")]
     [InlineData("Server=flert;Enclave Attestation Url=https://169.254.169.254/attest")]
     [InlineData("Server=flert;Server Certificate=\\\\attacker\\share\\c.cer")]
+    [InlineData(@"Server=flert;Server Certificate=\/attacker/share/c.cer")]
+    [InlineData(@"Server=flert;Server Certificate=/\attacker\share\c.cer")]
+    [InlineData("Server=flert;Server Certificate=//attacker/share/c.cer")]
+    [InlineData("Server=flert;Server Certificate= \\/attacker\\share\\c.cer")]
+    [InlineData("Server=flert;Server Certificate=file://attacker/share/c.cer")]
     public async Task Create_Sql_заборонений_параметр_422(string endpoint)
     {
         var refused = await TryCreate(endpoint, new FakeNetwork());

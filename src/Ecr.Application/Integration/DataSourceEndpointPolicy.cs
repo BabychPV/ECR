@@ -206,6 +206,8 @@ public static class DataSourceEndpointPolicy
         return hosts;
     }
 
+    private static bool IsPathSeparator(char c) => c is '\\' or '/';
+
     /// <summary>Розбір за правилами SqlClient; <paramref name="builder"/> <c>null</c> — рядок без <c>=</c>.</summary>
     private static bool TryParseSqlClient(string connectionString, out DbConnectionStringBuilder? builder)
     {
@@ -253,9 +255,11 @@ public static class DataSourceEndpointPolicy
             "ENCLAVEATTESTATIONURL" => true,
 
             // Сертифікат із мережевої шарі — NTLM на хост із рядка.
-            "SERVERCERTIFICATE" => value?.Trim() is { } path
-                                   && (path.StartsWith(@"\\", StringComparison.Ordinal)
-                                       || path.StartsWith("//", StringComparison.Ordinal)),
+            // ⚠ Будь-які два роздільники поспіль на початку: Windows читає `\/host`, `/\host` так само, як
+            // `\\host` (рецензія an33b, P2). `file:` — URI тієї самої шарі.
+            "SERVERCERTIFICATE" => value?.Trim() is { Length: > 0 } path
+                                   && ((path.Length >= 2 && IsPathSeparator(path[0]) && IsPathSeparator(path[1]))
+                                       || path.StartsWith("file:", StringComparison.OrdinalIgnoreCase)),
 
             _ => false,
         };
