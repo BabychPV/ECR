@@ -47,6 +47,15 @@ public static class RelationSpecValidator
             {
                 return ColumnMissing("MatchJson key target", key.Target, "target");
             }
+
+            // ⛔ Аудит L7-07: ключ String «5» проти Int 5 чи Date проти String ніколи не зіставиться —
+            // Rollup мовчки писав би порожній агрегат. Сумісність — за родом значення.
+            if (KeyKind(sourceColumns[key.Source]) != KeyKind(targetColumns[key.Target]))
+            {
+                return new RelationSpecFailure(
+                    "keyTypeMismatch",
+                    $"Key columns \"{key.Source}\" (source, {sourceColumns[key.Source]}) and \"{key.Target}\" (target, {targetColumns[key.Target]}) have incompatible types; rows would never match.");
+            }
         }
 
         if (kind == TableRelationKind.Rollup)
@@ -84,6 +93,12 @@ public static class RelationSpecValidator
         return Column("left", c.Left, sourceColumns, "source", requireNumeric: true)
             ?? Column("right", c.Right, targetColumns, "target", requireNumeric: true);
     }
+
+    /// <summary>Рід значення ключа: числа (Int, Decimal, Formula, Calculated) зіставні між собою, решта — лише з тим самим типом.</summary>
+    private static CellDataType KeyKind(CellDataType type)
+        => type is CellDataType.Int or CellDataType.Decimal or CellDataType.Formula or CellDataType.Calculated
+            ? CellDataType.Decimal
+            : type;
 
     private static RelationSpecFailure? Column(
         string field, string code, IReadOnlyDictionary<string, CellDataType> columns, string table, bool requireNumeric)

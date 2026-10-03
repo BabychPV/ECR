@@ -98,6 +98,13 @@ public static class RelationCheckRunner
         return messages;
     }
 
+    private static string? DateKey(DateTime? value)
+        => value is not { } d
+            ? null
+            : d.TimeOfDay == TimeSpan.Zero
+                ? d.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)
+                : d.ToString("yyyy-MM-dd'T'HH:mm:ss.FFFFFFF", CultureInfo.InvariantCulture);
+
     /// <summary>Комірки зрізу → рядки зі значеннями за кодами колонок.</summary>
     public static IReadOnlyList<RelationRow> BuildRows(
         TemplateVersionSnapshot snapshot, IReadOnlyList<CellRecord> cells, IReadOnlyDictionary<string, long> rowIds)
@@ -116,9 +123,12 @@ public static class RelationCheckRunner
             }
 
             numbers[rowKey][column.Code] = cell.Value.ValueNumeric;
+            // ⚠ Date/Bool теж ключі (аудит L7-07): без них рядок джерела мовчки випадав зі зіставлення.
             texts[rowKey][column.Code] = cell.Value.ValueString
                 ?? cell.Value.ValueRegistryEntryId?.ToString(CultureInfo.InvariantCulture)
-                ?? cell.Value.ValueUnitId?.ToString(CultureInfo.InvariantCulture);
+                ?? cell.Value.ValueUnitId?.ToString(CultureInfo.InvariantCulture)
+                ?? DateKey(cell.Value.ValueDate)
+                ?? (cell.Value.ValueBool is { } flag ? (flag ? "TRUE" : "FALSE") : null);
         }
 
         return [.. rowIds.Keys.Order(StringComparer.Ordinal).Select(k => new RelationRow(k, numbers[k], texts[k]))];

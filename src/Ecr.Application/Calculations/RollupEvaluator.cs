@@ -24,9 +24,19 @@ public sealed record RelationRow(
         }
 
         return Numbers.TryGetValue(column, out var n) && n is not null
-            ? n.Value.ToString(CultureInfo.InvariantCulture)
+            ? CanonicalNumber(n.Value)
             : null;
     }
+
+    /// <summary>Канонічний числовий ключ: без хвостових нулів масштабу (аудит L7-07).</summary>
+    /// <remarks>
+    /// ⛔ Збережене число приходить із <c>decimal(34,16)</c> як <c>5.0000000000000000</c>, а
+    /// результат формули цього ж прогону — як <c>5</c>; рядкове порівняння їх розводило.
+    /// </remarks>
+    /// <param name="value">Число.</param>
+    /// <returns>Інваріантний текст без хвостових нулів; нуль — <c>"0"</c>.</returns>
+    public static string CanonicalNumber(decimal value)
+        => value == 0m ? "0" : value.ToString("0.############################", CultureInfo.InvariantCulture);
 }
 
 /// <summary>Запис Rollup у комірку приймача.</summary>
