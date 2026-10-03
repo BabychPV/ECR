@@ -50,7 +50,7 @@ public sealed class SearchRateLimitTests(SqlServerFixture sql)
 
         // Заголовок і подробиця — з каталогу, а не сам код чи запасне речення.
         Assert.NotEqual("ECR-REQ-0429", json.GetProperty("title").GetString());
-        Assert.Contains("Retry-After", json.GetProperty("detail").GetString(), StringComparison.Ordinal);
+        Assert.Contains("try again", json.GetProperty("detail").GetString(), StringComparison.Ordinal);
     }
 
     [Fact]

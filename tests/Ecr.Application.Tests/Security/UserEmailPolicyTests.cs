@@ -1,6 +1,7 @@
 // tests/Ecr.Application.Tests/Security/UserEmailPolicyTests.cs
 using Ecr.Application.Errors;
 using Ecr.Application.Security;
+using Ecr.Domain.Entities.Notifications;
 using Ecr.TestKit;
 using Xunit;
 
@@ -32,4 +33,19 @@ public sealed class UserEmailPolicyTests
     [InlineData("  mary@corp.example ")]
     public void Порожня_і_коректна_адреси_проходять(string? email)
         => UserEmailPolicy.EnsureValid(email);
+
+    // Фіксація поточної поведінки SmtpSettings.IsValidAddress щодо не-ASCII (T1-04).
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    public void Кирилиця_в_локальній_частині_фіксована_поточною_поведінкою()
+        => Assert.True(
+            SmtpSettings.IsValidAddress("иван@example.com")
+            && Record.Exception(() => UserEmailPolicy.EnsureValid("иван@example.com")) is null);
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    public void Юнікод_домен_фіксований_поточною_поведінкою()
+        => Assert.True(
+            SmtpSettings.IsValidAddress("ivan@пример.рф")
+            && Record.Exception(() => UserEmailPolicy.EnsureValid("ivan@пример.рф")) is null);
 }
