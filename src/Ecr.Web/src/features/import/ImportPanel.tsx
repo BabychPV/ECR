@@ -1,4 +1,4 @@
-import { useRef, useState, type JSX } from 'react';
+import { useEffect, useRef, useState, type JSX } from 'react';
 import { Alert, Badge, Button, Group, Modal, Stack, Table, Text } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQueryClient, type QueryClient } from '@tanstack/react-query';
@@ -12,6 +12,7 @@ import type {
   PatchCellsResponse,
 } from '@/api/types';
 import { denyText } from '@/features/grid/permissions';
+import { useOpenerFocusReturn } from '@/features/projects/useOpenerFocusReturn';
 import { invalidateSlices } from '@/features/grid/sliceCache';
 import { calculationResults } from '@/features/methodologies/api';
 import { RecalculateHintId, calculationResultsKey } from '@/features/methodologies/calculationResultsKey';
@@ -45,6 +46,20 @@ export function ImportPanel({ documentId, periodKey }: ImportPanelProps): JSX.El
   const queryClient = useQueryClient();
   const picker = useRef<HTMLInputElement>(null);
   const [preview, setPreview] = useState<ImportPreview | null>(null);
+
+  // ⛔ T3-05: після Esc у діалозі перегляду фокус падав на `BODY`. Діалог відкривається після ВИБОРУ
+  // файлу системним вікном, коли Mantine запам'ятовує вже не кнопку, а `body`. Відкривач фіксується
+  // у мить кліку по кнопці й отримує фокус назад, щойно перегляд закрито (будь-яким шляхом).
+  const { remember, restore } = useOpenerFocusReturn();
+  const wasOpen = useRef(false);
+  useEffect(() => {
+    if (preview !== null) {
+      wasOpen.current = true;
+    } else if (wasOpen.current) {
+      wasOpen.current = false;
+      restore();
+    }
+  }, [preview, restore]);
 
   const load = useMutation({
     mutationFn: (file: File) => {
@@ -161,6 +176,7 @@ export function ImportPanel({ documentId, periodKey }: ImportPanelProps): JSX.El
         onClick={() => {
           // ⛔ Перші 100 мс кнопка не в стані `loading` (`ФВ-14.26`), тож
           // повторне натискання відсікає обробник, а не вигляд кнопки.
+          remember();
           if (!load.isPending) picker.current?.click();
         }}
       >
