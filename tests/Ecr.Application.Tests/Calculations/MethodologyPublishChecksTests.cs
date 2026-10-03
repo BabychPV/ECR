@@ -183,6 +183,60 @@ public sealed class MethodologyPublishChecksTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public void T2_04_Константа_оголошена_у_списку_як_CST_і_вжита_у_виразі_попередження_не_дає()
+    {
+        // ⛔ Стенд тестувальника: `@A * CST.K` з аргументами `@A;CST.K` рахується (4×2=8), а
+        // попередження казало «CST.K не вживається».
+        var warnings = new List<string>();
+
+        CheckWithArguments("OUTRESULT", "@A * CST.K", "@A;CST.K", warnings);
+
+        Assert.Empty(warnings);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public void T2_04_Справді_невжита_CST_у_списку_лишається_попередженням()
+    {
+        var warnings = new List<string>();
+
+        CheckWithArguments("OUTRESULT", "@A * CST.K", "@A;CST.OTHER", warnings);
+
+        Assert.Single(warnings);
+        Assert.Contains("CST.OTHER", warnings[0], StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public void T2_04_Текст_попередження_береться_з_каталогу_мовою_читача()
+    {
+        var strings = new Ecr.Application.Ports.UiStringCatalog("ru", 1, new Dictionary<string, string>
+        {
+            ["publish.warning.argumentUnused"] = "Формула {formula}: аргумент {name} объявлен, но не используется.",
+        });
+        var warnings = new List<string>();
+
+        MethodologyPublishChecks.Check(
+            [new ParsedFormula("Total", FormulaResultType.Number, Root("@Fuel * 2"),
+                ArgumentDeclarationChecker.ParseDeclaration("Fuel;Density"))],
+            [], [], contextualArguments: null, warnings: warnings, strings: strings);
+
+        Assert.Equal("Формула Total: аргумент Density объявлен, но не используется.", Assert.Single(warnings));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public void T2_04_Без_каталогу_запасний_текст_не_українською()
+    {
+        var warnings = new List<string>();
+
+        CheckWithArguments("Total", "@Fuel * 2", "Fuel;Density", warnings);
+
+        Assert.DoesNotMatch("[іїєґІЇЄҐа-яА-Я]", Assert.Single(warnings));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
     public void Контекстний_аргумент_попередження_не_дає()
     {
         // ⛔ Глушник обов'язковий: без нього кожна публікація дає 186

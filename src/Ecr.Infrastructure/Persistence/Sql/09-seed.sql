@@ -6510,8 +6510,11 @@ USING (VALUES
     (N'err.ECR-SEC-0409.grantsStale', N'en', N'The role''s grants were changed after you opened them. Reload the grants and repeat your changes.', 1),
     -- COLL:p3-t1 ── кінець секції ──
     -- COLL:p2-t2 ── тестувальний прохід №2, T2-03: код зв'язку таблиць унікальний на всю систему; ru/kz — порцією COLL:p2-t2 у блоці I18N нижче ──
-    (N'err.ECR-TMPL-0409.relationCodeTaken', N'en', N'A table relation with code "{relationCode}" already exists. Relation codes are unique across all templates and versions: choose a different code.', 1)
+    (N'err.ECR-TMPL-0409.relationCodeTaken', N'en', N'A table relation with code "{relationCode}" already exists. Relation codes are unique across all templates and versions: choose a different code.', 1),
     -- COLL:p2-t2 ── кінець секції ──
+    -- COLL:p3-t2 ── тестувальний прохід №2, пакет P3 (T2-04…); ru/kz — порцією COLL:p3-t2 у блоці I18N нижче ──
+    (N'publish.warning.argumentUnused', N'en', N'Formula {formula}: argument {name} is declared in the list but not used in the expression - most often a typo in the token name.', 1)
+    -- COLL:p3-t2 ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -15269,6 +15272,16 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:p2-t2 ── кінець секції ──
+-- COLL:p3-t2 ── ru/kz пакета P3 тестувального проходу №2; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'publish.warning.argumentUnused', N'ru', N'Формула {formula}: аргумент {name} объявлен в списке, но не используется в выражении — чаще всего это опечатка в имени токена.'),
+    (N'publish.warning.argumentUnused', N'kz', N'{formula} формуласы: {name} аргументі тізімде жарияланған, бірақ өрнекте қолданылмайды — көбіне бұл токен атауындағы қате.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:p3-t2 ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t
