@@ -46,8 +46,10 @@ public static class DependencyInjection
                 "ECR_ConnectionStrings__Ecr і НЕ зберігається в appsettings.json (D-11).");
         }
 
-        services.AddDbContext<EcrDbContext>(options =>
-            options.UseSqlServer(connectionString, sql =>
+        // L1-01: збережений новий штамп скидає його кеш (`SecurityStampCacheInvalidator`).
+        services.AddSingleton<SecurityStampCacheInvalidator>();
+        services.AddDbContext<EcrDbContext>((sp, options) =>
+            options.AddInterceptors(sp.GetRequiredService<SecurityStampCacheInvalidator>()).UseSqlServer(connectionString, sql =>
             {
                 sql.MigrationsHistoryTable("__EFMigrationsHistory", "dbo");
                 // ⛔ Саме `Database:`, а не `Sql:` (`S-11`). Префікс у файлі
@@ -210,7 +212,9 @@ public static class DependencyInjection
             sp.GetRequiredService<Application.Common.ICurrentUser>()));
         services.AddSingleton<Application.Security.IPasswordHasher, PasswordHasher>();
         services.AddScoped<SecurityStampValidator>();
-        services.AddScoped<IUserStore, UserStore>();
+        services.AddScoped<SelfStampRotation>();
+        services.AddScoped<IUserStore>(sp => new UserStore(
+            sp.GetRequiredService<EcrDbContext>(), sp.GetRequiredService<SelfStampRotation>()));
         services.AddScoped<Application.Ports.IEffectiveAccessStore, EffectiveAccessStore>();
         services.AddSingleton<Application.Ports.IPrincipalNameResolver, WindowsPrincipalNameResolver>();
         services.AddScoped<Application.Ports.IResourceNameResolver, ResourceNameResolver>();

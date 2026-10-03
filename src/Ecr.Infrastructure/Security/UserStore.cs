@@ -13,7 +13,7 @@ using Microsoft.EntityFrameworkCore.Storage;
 namespace Ecr.Infrastructure.Security;
 
 /// <summary>Реалізація <see cref="IUserStore"/> над <see cref="EcrDbContext"/>.</summary>
-public sealed class UserStore(EcrDbContext db) : IUserStore
+public sealed class UserStore(EcrDbContext db, SelfStampRotation? selfRotation = null) : IUserStore
 {
     /// <summary>Код типової політики паролів із seed.</summary>
     private const string DefaultPolicyCode = "Default";
@@ -306,6 +306,7 @@ public sealed class UserStore(EcrDbContext db) : IUserStore
         // теж має вимкнути стару копію профілю негайно, а не чекати сплину
         // 30-хвилинного кешу (`AccessProfileCache`).
         user.RefreshSecurityStamp();
+        selfRotation?.Observe(user);
 
         return roles.Count;
     }
@@ -645,6 +646,7 @@ public sealed class UserStore(EcrDbContext db) : IUserStore
         foreach (var user in users)
         {
             user.RefreshSecurityStamp();
+            selfRotation?.Observe(user);
         }
 
         return users.Count;
