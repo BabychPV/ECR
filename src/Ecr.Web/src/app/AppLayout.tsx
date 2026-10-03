@@ -182,6 +182,18 @@ export function AppLayout(): JSX.Element {
   // Перемальовує каркас і сторінку, коли приватний каталог доїхав.
   useCatalog();
 
+  // ⛔ T3-02: після зміни мови каркас перекладався, а ВІДКРИТА сторінка — ні, до F5. Елемент
+  // сторінки (`<Outlet/>`) для React той самий, тож без підписки на каталог вона не перемальовується.
+  // Тому сторінка монтується заново, коли ПРИВАТНИЙ каталог нової мови вже розв'язано (ключ — мова
+  // останнього розв'язаного каталогу, а не `language()`: інакше сторінка змонтувалась би зі старим
+  // текстом, а каталог доїхав би вже без неї). Рішення дизайну: remount, а не підписка кожної сторінки;
+  // зміна мови — рідкісна дія, а редагована комірка при відкритті меню вже зафіксована.
+  const activeLanguage = language();
+  const [pageLanguage, setPageLanguage] = useState(activeLanguage);
+  if (pageLanguage !== activeLanguage && isCatalogResolved(activeLanguage, 'private')) {
+    setPageLanguage(activeLanguage);
+  }
+
   const me = session.data;
 
   // Налаштування користувача з сервера (`BE-20`) — лише після входу.
@@ -434,7 +446,7 @@ export function AppLayout(): JSX.Element {
            * (`shared/theme/preferences.ts`).
            */}
           <div ref={transitionRef} className={routeTransitionClassName}>
-            <Suspense fallback={<RouteFallback />}>
+            <Suspense key={pageLanguage} fallback={<RouteFallback />}>
               {malformedPath ? <NotFoundPage /> : <Outlet />}
             </Suspense>
           </div>
