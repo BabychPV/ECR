@@ -312,8 +312,8 @@ public sealed class ImportDiffBuilder
                     rejected.Add(new ImportRejection(
                         row.RowKey, column.Code, CellValueReader.TypeMismatch,
                         ambiguous
-                            ? "The value does not match the column type (err.ECR-CELL-0422.expectsNumber): ambiguous separator, the comma may be thousands or decimal."
-                            : "The value does not match the column type (err.ECR-CELL-0422.expectsNumber).",
+                            ? "The value does not match the column type: ambiguous separator, the comma may be thousands or decimal."
+                            : "The value does not match the column type.",
                         table.Code, table.NameL10n, ImportMessageKeys.ExpectsNumber, excelCell));
 
                     continue;
@@ -360,7 +360,8 @@ public sealed class ImportDiffBuilder
         {
             var readerKey = error.Details?.GetValueOrDefault("messageKey") as string;
 
-            return ($"The value does not match the column type ({readerKey ?? error.ErrorCode}).",
+            // T2-13: ключ каталогу не вживається в людський текст — його несе окреме поле messageKey.
+            return ("The value does not match the column type.",
                     ImportMessageKeys.TypeMismatch(readerKey));
         }
     }
