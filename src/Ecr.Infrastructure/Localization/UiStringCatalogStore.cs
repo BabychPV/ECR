@@ -28,6 +28,18 @@ public sealed class UiStringCatalogStore(EcrDbContext db, IMemoryCache memory) :
     /// </remarks>
     private static readonly TimeSpan Lifetime = TimeSpan.FromHours(1);
 
+    /// <summary>Ключ кешу переліку увімкнених мов (L1-02).</summary>
+    internal const string EnabledLanguagesKey = "ui:languages:enabled";
+
+    /// <summary>
+    /// Скільки живе перелік увімкнених мов у кеші.
+    /// </summary>
+    /// <remarks>
+    /// Хвилина: мови вмикаються рідко, а без кешу кожен анонімний запит із
+    /// вигаданою мовою знову бив би по базі — рівно те, від чого захищає L1-02.
+    /// </remarks>
+    private static readonly TimeSpan EnabledLanguagesLifetime = TimeSpan.FromMinutes(1);
+
     /// <inheritdoc />
     public Task<UiStringCatalog> GetAsync(string languageCode, CancellationToken ct)
         => LoadAsync(languageCode, scope: null, ct);
@@ -68,6 +80,25 @@ public sealed class UiStringCatalogStore(EcrDbContext db, IMemoryCache memory) :
         }
 
         return result;
+    }
+
+    /// <inheritdoc />
+    public async Task<string> ResolveLanguageAsync(string languageCode, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(languageCode))
+        {
+            return UiStringResolver.DefaultLanguage;
+        }
+
+        if (!memory.TryGetValue(EnabledLanguagesKey, out IReadOnlyList<string>? enabled) || enabled is null)
+        {
+            enabled = (await ListLanguagesAsync(ct).ConfigureAwait(false)).Select(l => l.Code).ToList();
+            memory.Set(EnabledLanguagesKey, enabled, EnabledLanguagesLifetime);
+        }
+
+        // Повертається код із РЕЄСТРУ, а не з запиту: «RU» і «ru» — один запис кешу.
+        return enabled.FirstOrDefault(code => string.Equals(code, languageCode, StringComparison.OrdinalIgnoreCase))
+               ?? UiStringResolver.DefaultLanguage;
     }
 
     /// <inheritdoc />
@@ -289,6 +320,10 @@ public sealed class UiStringCatalogStore(EcrDbContext db, IMemoryCache memory) :
     private async Task<UiStringCatalog> LoadAsync(string languageCode, UiStringScope? scope, CancellationToken ct)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(languageCode);
+
+        // ⛔ L1-02: ключ кешу — лише код увімкненої мови. Невідома мова
+        // обслуговується записом мови за замовчуванням, а не новим ключем.
+        languageCode = await ResolveLanguageAsync(languageCode, ct).ConfigureAwait(false);
 
         await using var connection = new SqlConnection(db.Database.GetConnectionString());
         await connection.OpenAsync(ct).ConfigureAwait(false);
