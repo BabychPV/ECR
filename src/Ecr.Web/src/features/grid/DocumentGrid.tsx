@@ -64,6 +64,7 @@ import {
 } from './pendingStore';
 import { installEnterKeyCompat } from './keyboardCompat';
 import { installKeyCommitGate } from './keyCommitGate';
+import { installBodyPasteRedirect } from './bodyPaste';
 import {
   TableCornerAnchor,
   clampSelection,
@@ -1739,6 +1740,11 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
    */
   const rowSize = useRowHeight();
 
+  // T4-02: слухач `paste` на `document` живе в колбеку ref-а, що не
+  // перестворюється на кожну правку, — тож бере актуальний `onPaste` з ref.
+  const onPasteRef = useRef(onPaste);
+  onPasteRef.current = onPaste;
+
   const gridListenersCleanup = useRef<(() => void)[]>([]);
   const gridContainer = useRef<HTMLDivElement | null>(null);
   const gridContainerRef = useCallback(
@@ -1755,6 +1761,10 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         // клавіші після Enter/Tab стають у чергу до кінця переходу фокуса.
         installKeyCommitGate(node),
         blockNativePaste(node),
+        // ⛔ T4-02: Ctrl+V після закриття редактора, коли фокус на `<body>`.
+        installBodyPasteRedirect(node, (event) =>
+          onPasteRef.current(event as unknown as React.ClipboardEvent<HTMLDivElement>),
+        ),
         trackSelection(node, (next) => {
           selection.current = next;
         }),
