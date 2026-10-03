@@ -6519,8 +6519,11 @@ USING (VALUES
     -- COLL:p3-t2 ── тестувальний прохід №2, пакет P3 (T2-04…); ru/kz — порцією COLL:p3-t2 у блоці I18N нижче ──
     (N'publish.warning.argumentUnused', N'en', N'Formula {formula}: argument {name} is declared in the list but not used in the expression - most often a typo in the token name.', 1),
     (N'notifications.delivery.smtpNotConfigured', N'en', N'Channel "{channel}": the SMTP transport of the process is not configured (Smtp:Host, Smtp:From).', 1),
-    (N'notifications.delivery.smtpNoRecipients', N'en', N'Channel "{channel}": no recipients are set (edit the channel) or the recipient roles have no active users with an email address.', 1)
+    (N'notifications.delivery.smtpNoRecipients', N'en', N'Channel "{channel}": no recipients are set (edit the channel) or the recipient roles have no active users with an email address.', 1),
     -- COLL:p3-t2 ── кінець секції ──
+    -- COLL:p3-t3 ── тестувальний прохід №3, пакет P3 (T3-07…); ru/kz — порцією COLL:p3-t3 у блоці I18N нижче ──
+    (N'err.ECR-TMPL-0409.relationCodeTaken.title', N'en', N'Relation code is already in use', 1)
+    -- COLL:p3-t3 ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -15292,6 +15295,16 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:p3-t2 ── кінець секції ──
+-- COLL:p3-t3 ── ru/kz пакета P3 тестувального проходу №3; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-TMPL-0409.relationCodeTaken.title', N'ru', N'Код связи уже используется'),
+    (N'err.ECR-TMPL-0409.relationCodeTaken.title', N'kz', N'Байланыс коды бұрыннан қолданылады')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:p3-t3 ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t
