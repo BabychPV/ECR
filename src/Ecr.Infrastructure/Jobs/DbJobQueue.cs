@@ -602,39 +602,60 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock) : IJobQueue
     /// <remarks>
     /// ⚠ На ціль уже стоїть інша <c>Queued</c> — перезапуск зайвий: вона візьме
     /// актуальний стан цілі. <c>UX_JobProgress_Target_Queued</c> відбиває
-    /// перехід (2601), і метод повертає <c>false</c>.
+    /// перехід (2601), і метод повертає <see cref="JobRestartOutcome.CoveredBy"/> з
+    /// ідентифікатором тієї, що чекає (L2-11), — а не «не рядок черги».
     /// </remarks>
-    public async Task<bool> RestartAsync(string jobId, CancellationToken ct)
+    public async Task<JobRestartOutcome> RestartAsync(string jobId, CancellationToken ct)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(jobId);
 
         try
         {
-            return await RunAsync(
-                """
-                UPDATE itg.JobProgress
-                SET [State] = 'Queued', Attempt = 0, ReclaimCount = 0, AvailableAt = SYSUTCDATETIME(),
-                    ClaimToken = NULL, LeaseUntil = NULL, CancelRequestedAt = NULL, [Percent] = 0,
-                    [Message] = NULL, Error = NULL, ErrorCode = NULL, UpdatedAt = @shown, HeartbeatAt = @shown,
-                    -- Нова серія — і новий відлік стелі відкладень (борг O1).
-                    Payload = CASE WHEN ISJSON(Payload) = 1 AND LEFT(LTRIM(Payload), 1) = N'{'
-                                   THEN JSON_MODIFY(Payload, @sincePath, NULL) ELSE Payload END
-                OUTPUT 1
-                WHERE JobId = @id AND Lane IS NOT NULL AND [State] IN ('Failed', 'Cancelled');
-                """,
-                p =>
-                {
-                    p.Add("@id", SqlDbType.NVarChar, 100).Value = jobId;
-                    BindDeferral(p);
-                    AddShown(p);
-                },
-                r => r.ReadAsync(ct),
-                ct).ConfigureAwait(false);
+            return await RestartRowAsync(jobId, ct).ConfigureAwait(false)
+                ? JobRestartOutcome.Restarted
+                : JobRestartOutcome.NotQueueRow;
         }
         catch (SqlException ex) when (IsDuplicateKey(ex))
         {
-            return false;
+            var covering = await RunAsync(
+                """
+                SELECT TOP (1) q.JobId
+                FROM itg.JobProgress f
+                JOIN itg.JobProgress q ON q.TargetKey = f.TargetKey AND q.[State] = 'Queued' AND q.JobId <> f.JobId
+                WHERE f.JobId = @id AND f.TargetKey IS NOT NULL;
+                """,
+                p => p.Add("@id", SqlDbType.NVarChar, 100).Value = jobId,
+                async r => await r.ReadAsync(ct).ConfigureAwait(false) ? r.GetString(0) : null,
+                ct).ConfigureAwait(false);
+
+            // Та, що чекала, могла встигнути стартувати між відмовою і читанням: перезапуск
+            // однаково зайвий (2601 був), просто назвати її вже нема як.
+            return JobRestartOutcome.CoveredBy(covering ?? string.Empty);
         }
+    }
+
+    private Task<bool> RestartRowAsync(string jobId, CancellationToken ct)
+    {
+        return RunAsync(
+            """
+            UPDATE itg.JobProgress
+            SET [State] = 'Queued', Attempt = 0, ReclaimCount = 0, AvailableAt = SYSUTCDATETIME(),
+                ClaimToken = NULL, LeaseUntil = NULL, CancelRequestedAt = NULL, [Percent] = 0,
+                [Message] = NULL, Error = NULL, ErrorCode = NULL, UpdatedAt = @shown, HeartbeatAt = @shown,
+                -- Нова серія — і новий відлік стелі відкладень (борг O1).
+                Payload = CASE WHEN ISJSON(Payload) = 1 AND LEFT(LTRIM(Payload), 1) = N'{'
+                               THEN JSON_MODIFY(Payload, @sincePath, NULL) ELSE Payload END
+            OUTPUT 1
+            WHERE JobId = @id AND Lane IS NOT NULL AND [State] IN ('Failed', 'Cancelled');
+            """,
+            p =>
+            {
+                p.Add("@id", SqlDbType.NVarChar, 100).Value = jobId;
+                BindDeferral(p);
+                AddShown(p);
+            },
+            r => r.ReadAsync(ct),
+            ct);
     }
 
     /// <inheritdoc />

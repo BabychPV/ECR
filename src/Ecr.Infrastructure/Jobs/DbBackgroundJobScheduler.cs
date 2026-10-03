@@ -1,7 +1,9 @@
 // src/Ecr.Infrastructure/Jobs/DbBackgroundJobScheduler.cs
 using System.Text.Json;
 using System.Threading.Channels;
+using Ecr.Application.Errors;
 using Ecr.Application.Ports;
+using Ecr.Domain.Errors;
 using Microsoft.Extensions.Configuration;
 
 namespace Ecr.Infrastructure.Jobs;
@@ -161,14 +163,33 @@ public sealed class DbBackgroundJobScheduler(
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// ⛔ L2-11: на ціль уже чекає інша задача — відмова 409 з її ідентифікатором
+    /// (<c>err.ECR-JOB-0409.restartCoveredBy</c>), а не перехід у Quartz: там деталі
+    /// немає, і людина отримувала 404 «деталі не пережили перезапуск сервера» — неправду.
+    /// </remarks>
     public async Task<bool> RestartAsync(string jobId, CancellationToken ct)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(jobId);
 
-        if (await queue.RestartAsync(jobId, ct).ConfigureAwait(false))
+        var outcome = await queue.RestartAsync(jobId, ct).ConfigureAwait(false);
+        if (outcome.IsRestarted)
         {
             signal.Notify();
             return true;
+        }
+
+        if (outcome.CoveringJobId is { } covering)
+        {
+            throw new BusinessRuleException(
+                ErrorCodes.JobStateConflict,
+                $"Задачу {jobId} не перезапущено: на ту саму ціль уже чекає задача {covering}, вона й виконає роботу.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-JOB-0409.restartCoveredBy",
+                    ["jobId"] = jobId,
+                    ["coveredBy"] = covering,
+                });
         }
 
         return await cron.RestartAsync(jobId, ct).ConfigureAwait(false);

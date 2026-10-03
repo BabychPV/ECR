@@ -188,7 +188,7 @@ public sealed class JobWorkerSettleTests(SqlServerFixture sql) : DbJobQueueTests
         public Task<bool> IsCancelRequestedAsync(string jobId, CancellationToken ct)
             => inner.IsCancelRequestedAsync(jobId, ct);
 
-        public Task<bool> RestartAsync(string jobId, CancellationToken ct) => inner.RestartAsync(jobId, ct);
+        public Task<JobRestartOutcome> RestartAsync(string jobId, CancellationToken ct) => inner.RestartAsync(jobId, ct);
 
         public Task<int> ExpireAsync(int maxReclaims, CancellationToken ct) => inner.ExpireAsync(maxReclaims, ct);
     }

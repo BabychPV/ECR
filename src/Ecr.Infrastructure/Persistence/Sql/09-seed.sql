@@ -6569,8 +6569,11 @@ USING (VALUES
     (N'app.languageSwitchNow', N'en', N'Switch now', 1),
     -- COLL:an39b ── кінець секції ──
     -- COLL:t4-p3 ── тестувальний прохід №4, T4-05: мову не змінено через незбережений ввід; ru/kz — порцією COLL:t4-p3 у блоці I18N нижче ──
-    (N'profile.languageUnsavedBlocked', N'en', N'The language was not changed: some changes on this page are not saved. Save or undo them, then change the language.', 1)
+    (N'profile.languageUnsavedBlocked', N'en', N'The language was not changed: some changes on this page are not saved. Save or undo them, then change the language.', 1),
     -- COLL:t4-p3 ── кінець секції ──
+    -- AN32:L2-11 ── черга: перезапуск, коли на ціль уже чекає інша задача; ru/kz — порцією AN32:L2-11 у блоці I18N нижче
+    (N'err.ECR-JOB-0409.restartCoveredBy', N'en', N'Job {jobId} was not restarted: job {coveredBy} is already queued for the same target and will do this work.', 1)
+    -- AN32:L2-11 ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -15466,6 +15469,16 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:t4-p3 ── кінець секції ──
+-- AN32:L2-11 ── ru/kz черги (перезапуск, коли на ціль уже чекає інша задача); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-JOB-0409.restartCoveredBy', N'ru', N'Задача {jobId} не перезапущена: на ту же цель уже ожидает задача {coveredBy}, она и выполнит работу.'),
+    (N'err.ECR-JOB-0409.restartCoveredBy', N'kz', N'{jobId} тапсырмасы қайта іске қосылмады: сол нысанаға {coveredBy} тапсырмасы кезекте күтуде, жұмысты сол орындайды.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- AN32:L2-11 ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t
