@@ -401,15 +401,14 @@ public sealed class ReplaceResourceGrantsHandler(
 
         if (!string.Equals(actual, expected, StringComparison.OrdinalIgnoreCase))
         {
-            // ⚠ Ключ — загальний `err.ECR-SEC-0409` («конфлікт із налаштуваннями
-            // безпеки»): окремого ключа «гранти застаріли» в каталозі немає, а
-            // нових ключів ця правка не заводить. Актуальна версія — у details.
+            // T1-08: власний ключ «гранти застаріли» (раніше — загальний `err.ECR-SEC-0409`
+            // без підказки, що робити). Актуальна версія — у details.
             throw new ConcurrencyConflictException(
                 ErrorCodes.SecurityConflict,
                 $"Гранти ролі {roleId} змінили після того, як їх прочитали.",
                 new Dictionary<string, object?>
                 {
-                    ["messageKey"] = "err.ECR-SEC-0409",
+                    ["messageKey"] = "err.ECR-SEC-0409.grantsStale",
                     ["roleId"] = roleId.ToString(System.Globalization.CultureInfo.InvariantCulture),
                     ["version"] = actual,
                 });

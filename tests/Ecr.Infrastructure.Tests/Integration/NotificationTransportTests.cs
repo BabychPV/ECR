@@ -138,7 +138,8 @@ public sealed class NotificationTransportTests
         var secrets = Substitute.For<ISecretProvider>();
         secrets.Find(Arg.Any<string>()).Returns((string?)null);
 
-        return new SmtpNotificationSender(new InMemoryConfiguration(settings), secrets);
+        return new SmtpNotificationSender(
+            new InMemoryConfiguration(settings), secrets, endpointPolicy: new Ecr.TestKit.AllowAllSmtpEndpointPolicy());
     }
 
     /// <summary>

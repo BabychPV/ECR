@@ -253,6 +253,19 @@ public sealed class NotificationChannelHandlersTests
         Assert.False(cleared.TransportConfigured);
     }
 
+    /// <summary>T1-11: відповідь називає саме ту адресу зі списку, яка хибна.</summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    public async Task T1_11_Хибна_адреса_адресата_названа_в_подробицях()
+    {
+        var broken = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Save().CreateAsync(
+                NotificationChannelKind.Smtp, "Mail", Smtp with { Recipients = ["ops@corp.example", "bad@@x"] },
+                CancellationToken.None));
+
+        Assert.Equal("bad@@x", broken.Details!["address"]);
+    }
+
     /// <summary>Адресати каналу — саме адреси, а не будь-який непорожній рядок.</summary>
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
@@ -359,7 +372,8 @@ public sealed class NotificationChannelHandlersTests
 
         _sender.SendAsync(default!, default!, default!, default).ThrowsAsyncForAnyArgs(new InvalidOperationException("relay refused"));
         var refused = await Test().HandleAsync(mail.Id, CancellationToken.None);
-        Assert.Equal((false, null, "notifications.testFailed"), (refused.Ok, refused.Error, refused.MessageKey));
+        // ⛔ S4: нерозпізнана відмова пошти — та сама єдина категорія недосяжності, що й connect/timeout.
+        Assert.Equal((false, null, SmtpFailureClassifier.ProbeFailed), (refused.Ok, refused.Error, refused.MessageKey));
     }
 
     [Fact]
@@ -535,7 +549,7 @@ public sealed class NotificationChannelHandlersTests
 
         Assert.False(unknown.Ok);
         // ⛔ Мутація: повернути `e.Message` у `TryAsync` для пошти → тут і у відповіді про `auth` червоніє (текст транспорту — назовні).
-        Assert.Equal("notifications.testFailed", unknown.MessageKey);
+        Assert.Equal(SmtpFailureClassifier.ProbeFailed, unknown.MessageKey);
         Assert.Null(unknown.Error);
         Assert.Null(auth.Error);
     }

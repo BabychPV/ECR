@@ -44,6 +44,21 @@ public static class HiddenValidationIssues
         ColumnCode: null,
         BlocksSave: false);
 
+    /// <summary>
+    /// Чи бачить читач повідомлення: місце повідомлення І, для зв'язку Check, місце джерела —
+    /// текст містить значення обох сторін (T1-01).
+    /// </summary>
+    /// <param name="scope">Межі читання в періоді.</param>
+    /// <param name="message">Повідомлення.</param>
+    public static bool CanSee(Security.DocumentReadScope scope, ValidationMessage message)
+    {
+        ArgumentNullException.ThrowIfNull(scope);
+        ArgumentNullException.ThrowIfNull(message);
+
+        return scope.CanReadAt(message.TableDefId, message.ColumnCode)
+               && (message.SourceTableDefId is not { } source || scope.CanReadAt(source, message.SourceColumnCode));
+    }
+
     /// <summary>Чи це знеособлене зауваження, а не повідомлення правила.</summary>
     /// <param name="message">Повідомлення.</param>
     public static bool IsPlaceholder(ValidationMessage message)

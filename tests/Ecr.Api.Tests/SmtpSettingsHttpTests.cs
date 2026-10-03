@@ -43,7 +43,7 @@ public sealed class SmtpSettingsHttpTests(SqlServerFixture sql)
 
             using var put = await client.PutAsJsonAsync(Settings, new
             {
-                host = "smtp.corp.example",
+                host = "10.20.30.40",
                 port = 2525,
                 encryptionMode = "StartTls",
                 fromAddress = "ecr@corp.example",
@@ -60,7 +60,7 @@ public sealed class SmtpSettingsHttpTests(SqlServerFixture sql)
             var getText = await client.GetStringAsync(Settings).ConfigureAwait(true);
             var view = JsonDocument.Parse(getText).RootElement;
 
-            Assert.Equal("smtp.corp.example", view.GetProperty("host").GetString());
+            Assert.Equal("10.20.30.40", view.GetProperty("host").GetString());
             Assert.Equal(2525, view.GetProperty("port").GetInt32());
             Assert.True(view.GetProperty("hasPassword").GetBoolean());
             Assert.False(view.GetProperty("isEnabled").GetBoolean());
@@ -84,12 +84,12 @@ public sealed class SmtpSettingsHttpTests(SqlServerFixture sql)
     /// рядок <c>169.254.169.254</c> дає 200.
     /// </remarks>
     [Theory]
-    [InlineData("smtp.corp.example", 0, "ecr@corp.example", "None", "", false, "port")]
+    [InlineData("10.20.30.40", 0, "ecr@corp.example", "None", "", false, "port")]
     [InlineData("", 587, "ecr@corp.example", "None", "", true, "host")]
     [InlineData("169.254.169.254", 587, "ecr@corp.example", "None", "", false, "host")]
-    [InlineData("smtp.corp.example", 587, "a@[127.0.0.1]", "None", "", false, "from")]
-    [InlineData("smtp.corp.example", 587, "a@corp.example.", "None", "", false, "from")]
-    [InlineData("smtp.corp.example", 587, "ecr@corp.example", "Password", "", false, "auth")]
+    [InlineData("10.20.30.40", 587, "a@[127.0.0.1]", "None", "", false, "from")]
+    [InlineData("10.20.30.40", 587, "a@corp.example.", "None", "", false, "from")]
+    [InlineData("10.20.30.40", 587, "ecr@corp.example", "Password", "", false, "auth")]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "D-263")]
@@ -138,7 +138,7 @@ public sealed class SmtpSettingsHttpTests(SqlServerFixture sql)
 
         using var put = await client.PutAsJsonAsync(Settings, new
         {
-            host = "smtp.corp.example",
+            host = "10.20.30.40",
             port = 587,
             encryptionMode = "Ssl",
             fromAddress = "ecr@corp.example",

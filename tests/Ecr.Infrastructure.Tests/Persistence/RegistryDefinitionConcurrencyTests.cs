@@ -98,6 +98,63 @@ public sealed class RegistryDefinitionConcurrencyTests(SqlServerFixture sql)
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "ФВ-8.12")]
+    public async Task Блокування_опису_тримається_до_коміту_і_друга_транзакція_його_не_обходить()
+    {
+        // ⛔ Мутація: прибрати `UPDLOCK, HOLDLOCK` із `LockDefinitionIsStaleAsync` — другий запит
+        // проходить без очікування, `LOCK_TIMEOUT` не спрацьовує, тест червоніє. Без блокування дві
+        // правки з однаковим If-Match проходять звірку версії одна одної й пишуть обидві.
+        const int lockTimeoutExpired = 1222;
+        var seed = await SeedAsync(deleteOwnerEntry: false);
+
+        var locked = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        var holder = Task.Run(async () =>
+        {
+            await using var db1 = Context();
+            await new UnitOfWork(db1).ExecuteInTransactionAsync(
+                async ct =>
+                {
+                    Assert.False(await new RegistryStore(db1).LockDefinitionIsStaleAsync(seed.OwnerId, 1, ct));
+                    locked.SetResult();
+                    await release.Task;
+                },
+                default);
+        });
+
+        try
+        {
+            await Task.WhenAny(locked.Task, holder);
+            Assert.True(locked.Task.IsCompletedSuccessfully, "перша транзакція не взяла блокування");
+
+            await using var db2 = Context();
+            await using var tx2 = await db2.Database.BeginTransactionAsync();
+            await db2.Database.ExecuteSqlRawAsync("SET LOCK_TIMEOUT 500");
+
+            var blocked = await Assert.ThrowsAnyAsync<Exception>(
+                () => new RegistryStore(db2).LockDefinitionIsStaleAsync(seed.OwnerId, 1, default));
+            var sqlError = blocked as Microsoft.Data.SqlClient.SqlException
+                           ?? blocked.InnerException as Microsoft.Data.SqlClient.SqlException;
+            Assert.NotNull(sqlError);
+            Assert.Equal(lockTimeoutExpired, sqlError.Number);
+        }
+        finally
+        {
+            release.TrySetResult();
+            await holder;
+        }
+
+        // Після коміту першої блокування знято: друга бере його без очікування.
+        await using var db3 = Context();
+        await new UnitOfWork(db3).ExecuteInTransactionAsync(
+            async ct => Assert.False(await new RegistryStore(db3).LockDefinitionIsStaleAsync(seed.OwnerId, 1, ct)),
+            default);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-8.12")]
     public async Task Чужа_версія_в_If_Match_дає_409_і_опис_лишається_незмінним()
     {
         var seed = await SeedAsync(deleteOwnerEntry: false);

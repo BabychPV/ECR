@@ -276,7 +276,12 @@ export function AppLayout(): JSX.Element {
 
       <AppShell
         header={{ height: 56 }}
-        navbar={{ width: 260, breakpoint: 'sm', collapsed: { mobile: !opened } }}
+        navbar={{
+          width: 260,
+          breakpoint: 'sm',
+          // T1-15 (б): під примусовою зміною пароля меню не потрібне — усі API дають 428.
+          collapsed: { mobile: !opened || me.mustChangePassword, desktop: me.mustChangePassword },
+        }}
         padding="md"
       >
         {/*
@@ -293,13 +298,15 @@ export function AppLayout(): JSX.Element {
         <AppShell.Header>
           <Group h="100%" px="md" justify="space-between">
             <Group gap="sm">
-              <Burger
-                opened={opened}
-                onClick={toggle}
-                hiddenFrom="sm"
-                size="sm"
-                aria-label={t('nav.menu')}
-              />
+              {!me.mustChangePassword && (
+                <Burger
+                  opened={opened}
+                  onClick={toggle}
+                  hiddenFrom="sm"
+                  size="sm"
+                  aria-label={t('nav.menu')}
+                />
+              )}
               {/* ⚠ Знак — оздоба (`aria-hidden`), назва поруч — текст.
                   Зчитувач екрана має прочитати «ECR Web» рівно один раз. */}
               <Group gap="xs" wrap="nowrap">
@@ -355,8 +362,10 @@ export function AppLayout(): JSX.Element {
 
         <AppShell.Navbar p="xs">
           <ScrollArea>
+            {/* T1-15 (б): пунктів меню під примусовою зміною пароля немає зовсім —
+                згорнута панель лишала б їх у дереві й у порядку Tab. */}
             {navRoutes
-              .filter((route) => canAccessRoute(me, route.handle))
+              .filter((route) => !me.mustChangePassword && canAccessRoute(me, route.handle))
               .map((route) => (
                 // Фільтр ховає пункти навігації, на які немає права: нема
                 // сенсу пропонувати тиснути те, що все одно дасть 403. Той

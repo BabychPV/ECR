@@ -134,9 +134,30 @@ public sealed partial class DocumentVersionMigrationTests
         Assert.False(dry.GetProperty("canApply").GetBoolean());
         Assert.Contains("grantsNotMapped", dry.GetProperty("refusals").EnumerateArray().Select(r => r.GetString()));
 
+        // ent7 P3-4: звіт каже лише КІЛЬКІСТЬ блокувальних грантів (Project=Write + Column C3=Read, у новій C3 немає → 1).
+        Assert.Equal(1, dry.GetProperty("blockedGrantCount").GetInt32());
+
         var response = await PostAsync(client, s, "Safe", dryRun: false).ConfigureAwait(true);
         await AssertProblemAsync(response, HttpStatusCode.UnprocessableEntity, "ECR-SCHM-0422", "err.ECR-SCHM-0422.migrateGrantsNotMapped").ConfigureAwait(true);
         Assert.Equal(before, await SnapshotAsync(s).ConfigureAwait(true));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-6.7")]
+    public async Task Сухий_прогін_без_блокувальних_грантів_не_містить_blockedGrantCount()
+    {
+        var s = await ArrangeAsync(Target.OnlyLabels).ConfigureAwait(true);
+        await AddRestrictedUserAsync(s, (ResourceKind.Sheet, s.Doc.SheetDefId, true)).ConfigureAwait(true);
+
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
+
+        var dry = JsonDocument.Parse(await (await PostAsync(client, s, "Safe", dryRun: true).ConfigureAwait(true))
+            .Content.ReadAsStringAsync().ConfigureAwait(true)).RootElement;
+        Assert.True(dry.GetProperty("canApply").GetBoolean());
+        Assert.True(!dry.TryGetProperty("blockedGrantCount", out var count) || count.ValueKind == JsonValueKind.Null);
     }
 
     [Fact]

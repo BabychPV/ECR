@@ -897,10 +897,15 @@ UPDATE t
                                                 N'Нет адресатов: в канале нет явных адресов, а среди пользователей его ролей нет ни одного активного с адресом электронной почты.'),
     (N'notifications.test.smtpNoRecipients', N'kz', N'Алушылар жоқ: арнада нақты мекенжайлар жоқ, ал оның рөлдері электрондық пошта мекенжайы бар бірде-бір белсенді пайдаланушыға айқындалмайды.',
                                                 N'Алушылар жоқ: арнада нақты мекенжайлар жоқ, ал оның рөлдерінде электрондық пошта мекенжайы бар бірде-бір белсенді пайдаланушы жоқ.'),
+    -- ланцюг A → B → C (p3-t1 T1-06: без згадки заголовка Retry-After): обидва рядки з новим C.
     (N'err.ECR-REQ-0429.tooManySmtpTests', N'ru', N'Слишком много пробных сообщений за короткое время. Подождите немного и повторите попытку; заголовок Retry-After указывает, через сколько.',
-                                                N'Слишком много проверочных сообщений за короткое время. Подождите немного и повторите попытку; заголовок Retry-After указывает, через сколько.'),
+                                                N'Слишком много проверочных сообщений за короткое время. Подождите немного и повторите попытку.'),
+    (N'err.ECR-REQ-0429.tooManySmtpTests', N'ru', N'Слишком много проверочных сообщений за короткое время. Подождите немного и повторите попытку; заголовок Retry-After указывает, через сколько.',
+                                                N'Слишком много проверочных сообщений за короткое время. Подождите немного и повторите попытку.'),
     (N'err.ECR-REQ-0429.tooManySmtpTests', N'kz', N'Қысқа уақыт ішінде сынақ хабарламалары тым көп. Біраз күтіп, қайталап көріңіз; қанша уақыттан кейін екенін Retry-After тақырыбы көрсетеді.',
-                                                N'Қысқа уақыт ішінде тексеру хабарламалары тым көп. Біраз күтіп, қайталап көріңіз; қанша уақыттан кейін екенін Retry-After тақырыбы көрсетеді.'),
+                                                N'Қысқа уақыт ішінде тексеру хабарламалары тым көп. Біраз күтіп, қайталап көріңіз.'),
+    (N'err.ECR-REQ-0429.tooManySmtpTests', N'kz', N'Қысқа уақыт ішінде тексеру хабарламалары тым көп. Біраз күтіп, қайталап көріңіз; қанша уақыттан кейін екенін Retry-After тақырыбы көрсетеді.',
+                                                N'Қысқа уақыт ішінде тексеру хабарламалары тым көп. Біраз күтіп, қайталап көріңіз.'),
     (N'schedule.dependsOn', N'kz', N'Тәуелді кесте',
                                                 N'Қай жоспарға тәуелді'),
     (N'schedule.dependsOnHint', N'kz', N'Жоспарлы іске қосулар сол қосылымның таңдалған кестесінің сәтті орындалуын күтеді. Қолмен жинау мен толықтыру бұғатталмайды.',
@@ -986,7 +991,26 @@ UPDATE t
     (N'err.ECR-REG-0422.lookupWrongRegistry', N'ru', N'Поле «{field}» выбирает из справочника «{expectedRegistry}», но запись {value} («{entryCode}») принадлежит другому справочнику.',
                                                 N'Поле «{field}» выбирает из справочника «{expectedRegistry}», но запись {value} принадлежит другому справочнику.'),
     (N'err.ECR-REG-0422.lookupWrongRegistry', N'kz', N'«{field}» өрісі «{expectedRegistry}» анықтамалығынан таңдайды, бірақ {value} («{entryCode}») жазбасы басқа анықтамалыққа тиесілі.',
-                                                N'«{field}» өрісі «{expectedRegistry}» анықтамалығынан таңдайды, бірақ {value} жазбасы басқа анықтамалыққа тиесілі.')
+                                                N'«{field}» өрісі «{expectedRegistry}» анықтамалығынан таңдайды, бірақ {value} жазбасы басқа анықтамалыққа тиесілі.'),
+    -- p3-t1 T1-11: відмова називає саме ту адресу, яка хибна ({address}).
+    (N'err.ECR-REQ-0422.notificationChannelRecipientInvalid', N'en', N'One of the recipients is not an email address.', N'The recipient "{address}" is not an email address.'),
+    (N'err.ECR-REQ-0422.notificationChannelRecipientInvalid', N'ru', N'Один из получателей не является адресом электронной почты.', N'Получатель «{address}» не является адресом электронной почты.'),
+    (N'err.ECR-REQ-0422.notificationChannelRecipientInvalid', N'kz', N'Алушылардың бірі электрондық пошта мекенжайы емес.', N'«{address}» алушысы электрондық пошта мекенжайы емес.'),
+    -- p3-t1 T1-06: тексти 429 не згадують HTTP-заголовок Retry-After (користувач його не бачить).
+    (N'err.ECR-AUTH-0429.tooManyAttempts', N'en', N'Too many sign-in attempts from this address. Try again later; the Retry-After header says how long.', N'Too many sign-in attempts from this address. Try again later.'),
+    (N'err.ECR-AUTH-0429.tooManyAttempts', N'ru', N'Слишком много попыток входа с этого адреса. Повторите попытку позже; заголовок Retry-After указывает, через сколько.', N'Слишком много попыток входа с этого адреса. Повторите попытку позже.'),
+    (N'err.ECR-AUTH-0429.tooManyAttempts', N'kz', N'Осы мекенжайдан кіру әрекеттері тым көп. Кейінірек қайталап көріңіз; қанша уақыттан кейін екенін Retry-After тақырыбы көрсетеді.', N'Осы мекенжайдан кіру әрекеттері тым көп. Кейінірек қайталап көріңіз.'),
+    (N'err.ECR-REQ-0429.tooManySearches', N'en', N'Too many searches in a short time. Wait a moment and try again; the Retry-After header says how long.', N'Too many searches in a short time. Wait a moment and try again.'),
+    (N'err.ECR-REQ-0429.tooManySearches', N'ru', N'Слишком много поисковых запросов за короткое время. Подождите немного и повторите попытку; заголовок Retry-After указывает, через сколько.', N'Слишком много поисковых запросов за короткое время. Подождите немного и повторите попытку.'),
+    (N'err.ECR-REQ-0429.tooManySearches', N'kz', N'Қысқа уақыт ішінде іздеу сұраулары тым көп. Біраз күтіп, қайталап көріңіз; қанша уақыттан кейін екенін Retry-After тақырыбы көрсетеді.', N'Қысқа уақыт ішінде іздеу сұраулары тым көп. Біраз күтіп, қайталап көріңіз.'),
+    (N'err.ECR-REQ-0429.tooManySmtpTests', N'en', N'Too many test messages in a short time. Wait a moment and try again; the Retry-After header says how long.', N'Too many test messages in a short time. Wait a moment and try again.'),
+    (N'err.ECR-REQ-0429.tooManyRecalculations', N'en', N'Too many recalculation requests in a short time. Wait a moment and try again; the Retry-After header says how long.', N'Too many recalculation requests in a short time. Wait a moment and try again.'),
+    (N'err.ECR-REQ-0429.tooManyRecalculations', N'ru', N'Слишком много запросов на пересчёт за короткое время. Подождите немного и повторите попытку; заголовок Retry-After указывает, через сколько.', N'Слишком много запросов на пересчёт за короткое время. Подождите немного и повторите попытку.'),
+    (N'err.ECR-REQ-0429.tooManyRecalculations', N'kz', N'Қысқа уақыт ішінде қайта есептеуге сұраныстар тым көп. Біраз күтіп, қайталап көріңіз; қанша уақыттан кейін екенін Retry-After тақырыбы көрсетеді.', N'Қысқа уақыт ішінде қайта есептеуге сұраныстар тым көп. Біраз күтіп, қайталап көріңіз.'),
+    -- p3-t1 T1-09: у тексті самозв'язку немає імені обмеження БД.
+    (N'err.ECR-TMPL-0422.relationSelfLink', N'en', N'Relation "{relationCode}" links table {tableDefId} to itself: this is not allowed (CK_Rel_NotSelf).', N'Relation "{relationCode}" links table {tableDefId} to itself: this is not allowed.'),
+    (N'err.ECR-TMPL-0422.relationSelfLink', N'ru', N'Связь «{relationCode}» связывает таблицу {tableDefId} саму с собой: это не допускается (CK_Rel_NotSelf).', N'Связь «{relationCode}» связывает таблицу {tableDefId} саму с собой: это не допускается.'),
+    (N'err.ECR-TMPL-0422.relationSelfLink', N'kz', N'«{relationCode}» байланысы {tableDefId} кестесін өзімен байланыстырады: бұған жол берілмейді (CK_Rel_NotSelf).', N'«{relationCode}» байланысы {tableDefId} кестесін өзімен байланыстырады: бұған жол берілмейді.')
   ) AS s ([Key], Lang, OldVal, NewVal)
     ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
  WHERE t.Value = s.OldVal COLLATE Latin1_General_BIN2;
@@ -1144,10 +1168,10 @@ USING (VALUES
     -- ⚠ Публічна область (0): цей стан видно ДО входу (ФВ-14.9b).
     (N'err.ECR-AUTH-0429', N'en', N'Too many sign-in attempts', 0),
     (N'err.ECR-AUTH-0429.tooManyAttempts', N'en',
-     N'Too many sign-in attempts from this address. Try again later; the Retry-After header says how long.', 0),
+     N'Too many sign-in attempts from this address. Try again later.', 0),
     (N'err.ECR-REQ-0429', N'en', N'Too many requests', 1),
     (N'err.ECR-REQ-0429.tooManySearches', N'en',
-     N'Too many searches in a short time. Wait a moment and try again; the Retry-After header says how long.', 1),
+     N'Too many searches in a short time. Wait a moment and try again.', 1),
     (N'err.ECR-PWD-0428',  N'en', N'Password change is required.', 0),
     (N'err.ECR-PWD-0422',  N'en', N'The new password does not meet the policy.', 0),
 
@@ -1467,7 +1491,7 @@ USING (VALUES
     -- сказати це прямо: користувач, який щойно ввів адресу сервера, інакше
     -- шукатиме друкарську помилку там, де її немає.
     (N'err.ECR-REQ-0422.notificationChannelTransportFromConfiguration', N'en', N'The SMTP server, port, TLS and sender address come from the SMTP settings (or from the process configuration while they are not used); a channel cannot set them.', 1),
-    (N'err.ECR-REQ-0422.notificationChannelRecipientInvalid',           N'en', N'One of the recipients is not an email address.', 1),
+    (N'err.ECR-REQ-0422.notificationChannelRecipientInvalid',           N'en', N'The recipient "{address}" is not an email address.', 1),
     (N'err.ECR-INT-0404.notificationChannel',          N'en', N'Notification channel {id} does not exist.', 1),
     (N'err.ECR-REQ-0422.notificationRuleInvalid',      N'en', N'A rule matrix accepts a known event and severity, and at most one rule per event and channel.', 1),
     -- ⚠ Той самий вибір, що в `jobState`: невідомий фільтр — відмова, а не
@@ -1607,7 +1631,7 @@ USING (VALUES
     (N'err.ECR-TMPL-0404.periodAccessRule',          N'en', N'Rule {ruleId} was not found in template version {versionId}.', 1),
     (N'err.ECR-TMPL-0404.tableRelation',             N'en', N'Relation "{relationCode}" was not found in template version {versionId}.', 1),
     (N'err.ECR-SCHM-0409.templateRelationBreaking',  N'en', N'This change to relation "{relationCode}" is breaking: documents are already attached to this template version. Values in them were computed using the relation, and removing or changing it now would silently alter what was already submitted.', 1),
-    (N'err.ECR-TMPL-0422.relationSelfLink',          N'en', N'Relation "{relationCode}" links table {tableDefId} to itself: this is not allowed (CK_Rel_NotSelf).', 1),
+    (N'err.ECR-TMPL-0422.relationSelfLink',          N'en', N'Relation "{relationCode}" links table {tableDefId} to itself: this is not allowed.', 1),
     (N'err.ECR-TMPL-0422.relationMatchRequired',     N'en', N'Relation "{relationCode}" has no row match (MatchJson): without it, it connects no rows while looking configured.', 1),
     (N'err.ECR-TMPL-0422.relationMatchNotObject',    N'en', N'The row match (MatchJson) of relation "{relationCode}" must be a JSON object.', 1),
     (N'err.ECR-TMPL-0422.relationMatchInvalidJson',  N'en', N'The row match (MatchJson) of relation "{relationCode}" is not valid JSON.', 1),
@@ -6207,7 +6231,7 @@ USING (VALUES
     (N'effectiveAccess.inheritedFrom', N'en', N'Inherited from {resource}', 1),
     -- COLL:fv616 ── кінець секції ──
     -- COLL:smtp-hardening ── Межа частоти проб транспорту (рекомендація безпекового рев'ю D-263) ──
-    (N'err.ECR-REQ-0429.tooManySmtpTests', N'en', N'Too many test messages in a short time. Wait a moment and try again; the Retry-After header says how long.', 1),
+    (N'err.ECR-REQ-0429.tooManySmtpTests', N'en', N'Too many test messages in a short time. Wait a moment and try again.', 1),
     -- COLL:smtp-hardening ── кінець секції ──
     -- COLL:sec-smtp-s1s2 ── Збережений пароль SMTP не переноситься на іншу адресу; пароль без шифрування заборонено (ent6 S1, `SaveSmtpSettingsHandler`) ──
     (N'err.ECR-REQ-0422.smtpPasswordReentryRequired', N'en', N'The server, port, encryption or login was changed, so the saved password is not carried over: enter the password again.', 1),
@@ -6397,6 +6421,10 @@ USING (VALUES
     (N'err.ECR-REQ-0422.channelTooManyRecipients', N'en', N'A channel accepts at most 50 explicit recipient addresses.', 1),
     -- ru/kz — окремою порцією COLL:sec-s3s6 у блоці I18N нижче.
     -- COLL:sec-s3s6 ── кінець секції ──
+    -- COLL:sec-t102 ── ім'я входу: порожнє, надто довге або з недозволеними символами (тестувальник T1-03) ──
+    (N'err.ECR-USR-0422.userNameInvalid', N'en', N'The user name must be 1 to {maxLength} characters: letters, digits and . _ - @ \ only, no spaces.', 1),
+    -- ru/kz — окремою порцією COLL:sec-t102 у блоці I18N нижче.
+    -- COLL:sec-t102 ── кінець секції ──
     -- ru/kz — окремою порцією `API:negative-path` у блоці I18N нижче.
     -- API:negative-path ── кінець секції ──
     -- API:negative-path-2 ── відмови замість 500 у нових ендпоінтах (прохід по відмовах 2) ──
@@ -6433,7 +6461,7 @@ USING (VALUES
     (N'notificationTemplates.recipientsNoTransport', N'en', N'the channel has no delivery transport configured', 1),
     -- CL6:notification-templates ── кінець секції ──
     -- COLL:recalc-rl ── Межа частоти перерахунку документа (рекомендація безпекового рев'ю «Аудит») ──
-    (N'err.ECR-REQ-0429.tooManyRecalculations', N'en', N'Too many recalculation requests in a short time. Wait a moment and try again; the Retry-After header says how long.', 1),
+    (N'err.ECR-REQ-0429.tooManyRecalculations', N'en', N'Too many recalculation requests in a short time. Wait a moment and try again.', 1),
     -- COLL:recalc-rl ── кінець секції ──
     -- COLL:fv812-ifmatch ── обов'язковий If-Match на PUT опису довідника ──
     (N'err.ECR-REQ-0422.definitionVersionRequired', N'en', N'Saving a registry definition needs an If-Match header carrying the definition version you read. Reload the definition and save again.', 1),
@@ -6452,8 +6480,22 @@ USING (VALUES
     -- ru/kz — окремою порцією COLL:p3-ent7 у блоці I18N нижче.
     -- COLL:p3-ent7 ── кінець секції ──
     -- COLL:p3-audit-key ── Залежність розкладу знято видаленням розкладу-джерела (`CollectionScheduleHandlers`, `structureChangeReason.ts`) ──
-    (N'integrationAudit.scheduleDependencyCleared', N'en', N'Dependency of collection schedule {id} cleared: schedule {deleted} of entity "{entity}" was deleted.', 1)
+    (N'integrationAudit.scheduleDependencyCleared', N'en', N'Dependency of collection schedule {id} cleared: schedule {deleted} of entity "{entity}" was deleted.', 1),
+    -- COLL:p3-ent7c ── число грантів, що блокують перенос версії (ent7 P3-4); лише кількість, без переліку ──
+    (N'documents.migrateGrantsNotMappedCount', N'en', N'Blocked: {count} permission(s) on sheets, tables or columns have no counterpart in the new version. Remove them or recreate them afterwards.', 1),
+    -- COLL:p3-ent7c ── кінець секції ──
     -- COLL:p3-audit-key ── кінець секції ──
+    -- COLL:sec-s4 ── Напрям пошти: порти й хост SMTP (рев'ю ent6 S4; `SaveSmtpSettingsHandler`, `SmtpEndpointPolicy`) ──
+    (N'err.ECR-REQ-0422.smtpPortNotAllowed', N'en', N'This SMTP port is not allowed. Use 25, 465, 587 or 2525, or ask the administrator to list the port in the Smtp:AllowedPorts configuration key.', 1),
+    (N'err.ECR-REQ-0422.smtpHostForbidden', N'en', N'This SMTP server is not allowed: loopback, link-local and cloud metadata addresses (including names that resolve to them) are forbidden.', 1),
+    (N'notifications.test.smtp.probeFailed', N'en', N'SMTP test failed: the server is not reachable or did not answer. Check the server name, the port and the firewall.', 1),
+    (N'notifications.test.smtp.endpointForbidden', N'en', N'SMTP test refused: the port or the server is not allowed. Allowed ports are 25, 465, 587, 2525 and those in Smtp:AllowedPorts; loopback, link-local and cloud metadata servers are forbidden.', 1),
+    -- ru/kz — окремою порцією COLL:sec-s4 у блоці I18N нижче.
+    -- COLL:sec-s4 ── кінець секції ──
+    -- COLL:p3-t1 ── тестувальний прохід №1, пакет P3 (T1-04…); ru/kz — порцією COLL:p3-t1 у блоці I18N нижче ──
+    (N'err.ECR-USR-0422.emailInvalid', N'en', N'"{email}" is not a valid email address. Use the form name@example.com.', 1),
+    (N'err.ECR-SEC-0409.grantsStale', N'en', N'The role''s grants were changed after you opened them. Reload the grants and repeat your changes.', 1)
+    -- COLL:p3-t1 ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -6564,9 +6606,9 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-AUTH-0403.requiresPermission', N'ru', N'Требуется право'),
     (N'err.ECR-AUTH-0423', N'ru', N'Учётная запись заблокирована.'),
     (N'err.ECR-AUTH-0429', N'ru', N'Слишком много попыток входа'),
-    (N'err.ECR-AUTH-0429.tooManyAttempts', N'ru', N'Слишком много попыток входа с этого адреса. Повторите попытку позже; заголовок Retry-After указывает, через сколько.'),
+    (N'err.ECR-AUTH-0429.tooManyAttempts', N'ru', N'Слишком много попыток входа с этого адреса. Повторите попытку позже.'),
     (N'err.ECR-REQ-0429', N'ru', N'Слишком много запросов'),
-    (N'err.ECR-REQ-0429.tooManySearches', N'ru', N'Слишком много поисковых запросов за короткое время. Подождите немного и повторите попытку; заголовок Retry-After указывает, через сколько.'),
+    (N'err.ECR-REQ-0429.tooManySearches', N'ru', N'Слишком много поисковых запросов за короткое время. Подождите немного и повторите попытку.'),
     (N'err.ECR-PWD-0428', N'ru', N'Требуется сменить пароль.'),
     (N'err.ECR-PWD-0422', N'ru', N'Новый пароль не соответствует парольной политике.'),
     (N'err.ECR-TMPL-4227.formulaOnManualColumn', N'ru', N'Столбец {tableCode}.{columnCode} имеет тип {dataType} — это столбец ручного ввода: формула на нём при следующем пересчёте молча перезапишет то, что ввёл оператор. Создайте столбец типа «Формула» (тип изменить нельзя) или удалите формулу.'),
@@ -6723,7 +6765,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-REQ-0422.notificationChannelNameTaken', N'ru', N'Канал с названием «{name}» уже существует.'),
     (N'err.ECR-REQ-0422.webhookUrlNotAllowed', N'ru', N'Адрес веб-хука должен использовать https и указывать на разрешённый хост.'),
     (N'err.ECR-REQ-0422.notificationChannelTransportFromConfiguration', N'ru', N'SMTP-сервер, порт, TLS и адрес отправителя берутся из настроек SMTP (пока они не используются — из конфигурации процесса); канал не может их задавать.'),
-    (N'err.ECR-REQ-0422.notificationChannelRecipientInvalid', N'ru', N'Один из получателей не является адресом электронной почты.'),
+    (N'err.ECR-REQ-0422.notificationChannelRecipientInvalid', N'ru', N'Получатель «{address}» не является адресом электронной почты.'),
     (N'err.ECR-INT-0404.notificationChannel', N'ru', N'Канал уведомлений {id} не существует.'),
     (N'err.ECR-REQ-0422.notificationRuleInvalid', N'ru', N'Матрица правил принимает известное событие и уровень важности и не более одного правила на событие и канал.'),
     (N'err.ECR-REQ-0422.notificationDeliveryStatus', N'ru', N'Результата доставки «{status}» не существует.'),
@@ -6801,7 +6843,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-TMPL-0404.periodAccessRule', N'ru', N'Правило {ruleId} не найдено в версии шаблона {versionId}.'),
     (N'err.ECR-TMPL-0404.tableRelation', N'ru', N'Связь «{relationCode}» не найдена в версии шаблона {versionId}.'),
     (N'err.ECR-SCHM-0409.templateRelationBreaking', N'ru', N'Это изменение связи «{relationCode}» является критическим: к этой версии шаблона уже привязаны документы. Значения в них рассчитаны с использованием связи, и её удаление или изменение сейчас молча изменило бы то, что уже подано.'),
-    (N'err.ECR-TMPL-0422.relationSelfLink', N'ru', N'Связь «{relationCode}» связывает таблицу {tableDefId} саму с собой: это не допускается (CK_Rel_NotSelf).'),
+    (N'err.ECR-TMPL-0422.relationSelfLink', N'ru', N'Связь «{relationCode}» связывает таблицу {tableDefId} саму с собой: это не допускается.'),
     (N'err.ECR-TMPL-0422.relationMatchRequired', N'ru', N'У связи «{relationCode}» нет сопоставления строк (MatchJson): без него она выглядит настроенной, но не связывает ни одной строки.'),
     (N'err.ECR-TMPL-0422.relationMatchNotObject', N'ru', N'Сопоставление строк (MatchJson) связи «{relationCode}» должно быть объектом JSON.'),
     (N'err.ECR-TMPL-0422.relationMatchInvalidJson', N'ru', N'Сопоставление строк (MatchJson) связи «{relationCode}» не является допустимым JSON.'),
@@ -9592,9 +9634,9 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-AUTH-0403.requiresPermission', N'kz', N'Құқық қажет'),
     (N'err.ECR-AUTH-0423', N'kz', N'Тіркелгі бұғатталған.'),
     (N'err.ECR-AUTH-0429', N'kz', N'Кіру әрекеттері тым көп'),
-    (N'err.ECR-AUTH-0429.tooManyAttempts', N'kz', N'Осы мекенжайдан кіру әрекеттері тым көп. Кейінірек қайталап көріңіз; қанша уақыттан кейін екенін Retry-After тақырыбы көрсетеді.'),
+    (N'err.ECR-AUTH-0429.tooManyAttempts', N'kz', N'Осы мекенжайдан кіру әрекеттері тым көп. Кейінірек қайталап көріңіз.'),
     (N'err.ECR-REQ-0429', N'kz', N'Сұраулар тым көп'),
-    (N'err.ECR-REQ-0429.tooManySearches', N'kz', N'Қысқа уақыт ішінде іздеу сұраулары тым көп. Біраз күтіп, қайталап көріңіз; қанша уақыттан кейін екенін Retry-After тақырыбы көрсетеді.'),
+    (N'err.ECR-REQ-0429.tooManySearches', N'kz', N'Қысқа уақыт ішінде іздеу сұраулары тым көп. Біраз күтіп, қайталап көріңіз.'),
     (N'err.ECR-PWD-0428', N'kz', N'Құпиясөзді өзгерту қажет.'),
     (N'err.ECR-PWD-0422', N'kz', N'Жаңа құпиясөз құпиясөз саясатына сәйкес келмейді.'),
     (N'err.ECR-TMPL-4227.formulaOnManualColumn', N'kz', N'{tableCode}.{columnCode} бағанының түрі — {dataType}, бұл қолмен енгізілетін баған: ондағы формула келесі қайта есептеу кезінде оператор енгізген мәнді үнсіз қайта жазады. «Формула» түріндегі баған құрыңыз (түрін өзгерту мүмкін емес) немесе формуланы жойыңыз.'),
@@ -9751,7 +9793,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-REQ-0422.notificationChannelNameTaken', N'kz', N'«{name}» атты арна бұрыннан бар.'),
     (N'err.ECR-REQ-0422.webhookUrlNotAllowed', N'kz', N'Вебхук мекенжайы https пайдалануы және рұқсат етілген хостқа бағытталуы тиіс.'),
     (N'err.ECR-REQ-0422.notificationChannelTransportFromConfiguration', N'kz', N'SMTP сервері, порт, TLS және жіберуші мекенжайы SMTP баптауларынан алынады (олар қолданылмаса — процесс конфигурациясынан); арна оларды орната алмайды.'),
-    (N'err.ECR-REQ-0422.notificationChannelRecipientInvalid', N'kz', N'Алушылардың бірі электрондық пошта мекенжайы емес.'),
+    (N'err.ECR-REQ-0422.notificationChannelRecipientInvalid', N'kz', N'«{address}» алушысы электрондық пошта мекенжайы емес.'),
     (N'err.ECR-INT-0404.notificationChannel', N'kz', N'{id} хабарландыру арнасы жоқ.'),
     (N'err.ECR-REQ-0422.notificationRuleInvalid', N'kz', N'Ережелер матрицасы белгілі оқиға мен маңыздылық деңгейін қабылдайды, әр оқиға мен арнаға ең көбі бір ереже.'),
     (N'err.ECR-REQ-0422.notificationDeliveryStatus', N'kz', N'«{status}» жеткізу нәтижесі жоқ.'),
@@ -9829,7 +9871,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-TMPL-0404.periodAccessRule', N'kz', N'{ruleId} ережесі {versionId} үлгі нұсқасында табылмады.'),
     (N'err.ECR-TMPL-0404.tableRelation', N'kz', N'«{relationCode}» байланысы {versionId} үлгі нұсқасында табылмады.'),
     (N'err.ECR-SCHM-0409.templateRelationBreaking', N'kz', N'«{relationCode}» байланысының бұл өзгерісі бұзушы болып табылады: бұл үлгі нұсқасына құжаттар бұрыннан тіркелген. Олардағы мәндер осы байланыс арқылы есептелген, және оны қазір жою немесе өзгерту бұрыннан тапсырылған нәрсені үнсіз өзгертер еді.'),
-    (N'err.ECR-TMPL-0422.relationSelfLink', N'kz', N'«{relationCode}» байланысы {tableDefId} кестесін өзімен байланыстырады: бұған жол берілмейді (CK_Rel_NotSelf).'),
+    (N'err.ECR-TMPL-0422.relationSelfLink', N'kz', N'«{relationCode}» байланысы {tableDefId} кестесін өзімен байланыстырады: бұған жол берілмейді.'),
     (N'err.ECR-TMPL-0422.relationMatchRequired', N'kz', N'«{relationCode}» байланысында жолдарды сәйкестендіру (MatchJson) жоқ: онсыз ол бапталған сияқты көрінеді, бірақ ешбір жолды байланыстырмайды.'),
     (N'err.ECR-TMPL-0422.relationMatchNotObject', N'kz', N'«{relationCode}» байланысының жолдарды сәйкестендіруі (MatchJson) JSON нысаны болуы тиіс.'),
     (N'err.ECR-TMPL-0422.relationMatchInvalidJson', N'kz', N'«{relationCode}» байланысының жолдарды сәйкестендіруі (MatchJson) жарамды JSON емес.'),
@@ -14684,8 +14726,8 @@ GO
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
   FROM (VALUES
-    (N'err.ECR-REQ-0429.tooManySmtpTests', N'ru', N'Слишком много проверочных сообщений за короткое время. Подождите немного и повторите попытку; заголовок Retry-After указывает, через сколько.'),
-    (N'err.ECR-REQ-0429.tooManySmtpTests', N'kz', N'Қысқа уақыт ішінде тексеру хабарламалары тым көп. Біраз күтіп, қайталап көріңіз; қанша уақыттан кейін екенін Retry-After тақырыбы көрсетеді.')
+    (N'err.ECR-REQ-0429.tooManySmtpTests', N'ru', N'Слишком много проверочных сообщений за короткое время. Подождите немного и повторите попытку.'),
+    (N'err.ECR-REQ-0429.tooManySmtpTests', N'kz', N'Қысқа уақыт ішінде тексеру хабарламалары тым көп. Біраз күтіп, қайталап көріңіз.')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
@@ -15079,8 +15121,8 @@ GO
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
   FROM (VALUES
-    (N'err.ECR-REQ-0429.tooManyRecalculations', N'ru', N'Слишком много запросов на пересчёт за короткое время. Подождите немного и повторите попытку; заголовок Retry-After указывает, через сколько.'),
-    (N'err.ECR-REQ-0429.tooManyRecalculations', N'kz', N'Қысқа уақыт ішінде қайта есептеуге сұраныстар тым көп. Біраз күтіп, қайталап көріңіз; қанша уақыттан кейін екенін Retry-After тақырыбы көрсетеді.')
+    (N'err.ECR-REQ-0429.tooManyRecalculations', N'ru', N'Слишком много запросов на пересчёт за короткое время. Подождите немного и повторите попытку.'),
+    (N'err.ECR-REQ-0429.tooManyRecalculations', N'kz', N'Қысқа уақыт ішінде қайта есептеуге сұраныстар тым көп. Біраз күтіп, қайталап көріңіз.')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
@@ -15096,6 +15138,17 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:sec-s3s6 ── кінець секції ──
+
+-- COLL:sec-t102 ── ru/kz імені входу (тестувальник T1-03); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-USR-0422.userNameInvalid', N'ru', N'Имя пользователя должно содержать от 1 до {maxLength} символов: только буквы, цифры и . _ - @ \, без пробелов.'),
+    (N'err.ECR-USR-0422.userNameInvalid', N'kz', N'Пайдаланушы аты 1-ден {maxLength} таңбаға дейін болуы керек: тек әріптер, сандар және . _ - @ \, бос орынсыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:sec-t102 ── кінець секції ──
 
 -- COLL:fv812-ifmatch ── ru/kz обов'язкового If-Match на PUT опису довідника; власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)
@@ -15129,7 +15182,7 @@ OPTION (RECOMPILE);
 GO
 -- COLL:check-relation ── кінець секції ──
 
--- COLL:p3-ent7 ── ru/kz: усі споживачі зв'язку приховані від автора (ФВ-8.12, ent7 P3-7); власна порція; kz — потрібна вичитка носієм ──
+-- COLL:p3-ent7 ── ru/kz: усі споживачі зв'язку приховані від автора (ФВ-8.12, ent7 P3-7); власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
   FROM (VALUES
@@ -15151,6 +15204,45 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:p3-audit-key ── кінець секції ──
+-- COLL:p3-ent7c ── ru/kz: число грантів, що блокують перенос версії; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'documents.migrateGrantsNotMappedCount', N'ru', N'Заблокировано: прав на листы, таблицы или колонки без соответствия в новой версии — {count}. Снимите их или создайте заново.'),
+    (N'documents.migrateGrantsNotMappedCount', N'kz', N'Бұғатталған: жаңа нұсқада баламасы жоқ парақтарға, кестелерге немесе бағандарға құқықтар саны — {count}. Оларды алып тастаңыз немесе қайта жасаңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:p3-ent7c ── кінець секції ──
+
+-- COLL:sec-s4 ── ru/kz напряму пошти (рев'ю ent6 S4); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-REQ-0422.smtpPortNotAllowed', N'ru', N'Этот порт SMTP не разрешён. Используйте 25, 465, 587 или 2525 либо попросите администратора добавить порт в ключ конфигурации Smtp:AllowedPorts.'),
+    (N'err.ECR-REQ-0422.smtpPortNotAllowed', N'kz', N'Бұл SMTP порты рұқсат етілмеген. 25, 465, 587 немесе 2525 пайдаланыңыз не әкімшіден портты Smtp:AllowedPorts конфигурация кілтіне қосуын сұраңыз.'),
+    (N'err.ECR-REQ-0422.smtpHostForbidden', N'ru', N'Этот SMTP-сервер не разрешён: адреса loopback, link-local и метаданных облака (в том числе имена, которые на них разрешаются) запрещены.'),
+    (N'err.ECR-REQ-0422.smtpHostForbidden', N'kz', N'Бұл SMTP сервері рұқсат етілмеген: loopback, link-local және бұлт метадеректерінің мекенжайлары (оларға шешілетін атаулар да) тыйым салынған.'),
+    (N'notifications.test.smtp.probeFailed', N'ru', N'Проверка SMTP не удалась: сервер недоступен или не ответил. Проверьте имя сервера, порт и межсетевой экран.'),
+    (N'notifications.test.smtp.probeFailed', N'kz', N'SMTP тексеруі сәтсіз: сервер қолжетімсіз немесе жауап бермеді. Сервер атауын, портты және брандмауэрді тексеріңіз.'),
+    (N'notifications.test.smtp.endpointForbidden', N'ru', N'Проверка SMTP отклонена: порт или сервер не разрешён. Разрешены порты 25, 465, 587, 2525 и из Smtp:AllowedPorts; серверы loopback, link-local и метаданных облака запрещены.'),
+    (N'notifications.test.smtp.endpointForbidden', N'kz', N'SMTP тексеруі қабылданбады: порт немесе сервер рұқсат етілмеген. 25, 465, 587, 2525 және Smtp:AllowedPorts ішіндегі порттар рұқсат; loopback, link-local және бұлт метадеректері серверлеріне тыйым салынған.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:sec-s4 ── кінець секції ──
+-- COLL:p3-t1 ── ru/kz пакета P3 тестувального проходу №1; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-USR-0422.emailInvalid', N'ru', N'«{email}» не является корректным адресом электронной почты. Используйте вид name@example.com.'),
+    (N'err.ECR-USR-0422.emailInvalid', N'kz', N'«{email}» жарамды электрондық пошта мекенжайы емес. name@example.com түрін пайдаланыңыз.'),
+    (N'err.ECR-SEC-0409.grantsStale', N'ru', N'Доступы роли изменили после того, как вы их открыли. Перечитайте доступы и повторите изменения.'),
+    (N'err.ECR-SEC-0409.grantsStale', N'kz', N'Рөлдің қолжетімділіктері сіз оларды ашқаннан кейін өзгертілді. Қолжетімділіктерді қайта оқып, өзгерістеріңізді қайталаңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:p3-t1 ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

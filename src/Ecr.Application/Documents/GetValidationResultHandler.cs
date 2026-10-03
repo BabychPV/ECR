@@ -39,9 +39,13 @@ public sealed class GetValidationResultHandler(
     IDocumentStore documents,
     IMetadataCache metadata,
     Security.IAccessDecisionService access,
-    Common.ICurrentUser currentUser)
+    Common.ICurrentUser currentUser,
+    ITemplateVersionStore templateVersions)
 {
-    /// <summary>Право на перегляд документа (`02-contracts.md` §9).</summary>
+    private static bool IsLegacyCheck(ValidationMessage m)
+        => m.SourceTableDefId is null && m.RuleCode.StartsWith("REL-", StringComparison.Ordinal);
+
+    /// <summary>Право на перегляд документа(`02-contracts.md` §9).</summary>
     public const string Permission = "Document.View";
 
     /// <summary>
@@ -90,9 +94,45 @@ public sealed class GetValidationResultHandler(
         // (`HiddenValidationIssues`), а не мовчки: інакше читач, чиї зауваження
         // всі під забороною, бачить «зауважень немає» при заблокованому поданні.
         // Таблиці 0 у знімку немає, тож перерезолв нижче його текст не чіпає.
+        // ⛔ T1-01: збережені ДО фіксу Check-повідомлення не мають джерела — відновлюємо з зв'язку за кодом
+        // REL-…; невідомий зв'язок — fail-closed (ховаємо, коли читач має бодай одну заборону).
+        var unresolved = new HashSet<ValidationMessage>(ReferenceEqualityComparer.Instance);
+        if (readable is not null && stored.Exists(m => IsLegacyCheck(m)))
+        {
+            var versionId = await documents.GetTemplateVersionIdAsync(documentId, ct).ConfigureAwait(false);
+            var sources = new Dictionary<string, (int Table, string? Column)>(StringComparer.Ordinal);
+            foreach (var relation in await templateVersions.ListTableRelationsAsync(versionId, ct).ConfigureAwait(false))
+            {
+                if (relation.RelationKind == Ecr.Domain.Enums.TableRelationKind.Check)
+                {
+                    var spec = Templates.RelationSpecParser.ParseCheck(relation.MapJson);
+                    sources["REL-" + relation.Code] = (relation.SourceTableDefId, spec.IsOk ? spec.Value!.Left : null);
+                }
+            }
+
+            for (var i = 0; i < stored.Count; i++)
+            {
+                if (!IsLegacyCheck(stored[i]))
+                {
+                    continue;
+                }
+
+                if (sources.TryGetValue(stored[i].RuleCode, out var src))
+                {
+                    stored[i] = stored[i] with { SourceTableDefId = src.Table, SourceColumnCode = src.Column };
+                }
+                else
+                {
+                    unresolved.Add(stored[i]);
+                }
+            }
+        }
+
+        var anyHidden = readable is not null && (readable.HiddenTableIds().Count > 0 || readable.HiddenColumnIds().Count > 0);
         var messages = readable is null
             ? stored
-            : HiddenValidationIssues.ForViewer(stored, m => readable.CanReadAt(m.TableDefId, m.ColumnCode));
+            : HiddenValidationIssues.ForViewer(
+                stored, m => HiddenValidationIssues.CanSee(readable, m) && !(anyHidden && unresolved.Contains(m)));
 
         if (messages.Count == 0)
         {

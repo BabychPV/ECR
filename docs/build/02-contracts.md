@@ -2979,7 +2979,23 @@ loopback/link-local/metadata/unspecified) і розв'язання імені в
 public interface IEndpointNetwork
 {
     public IReadOnlyList<string> AllowedHosts { get; }
+    public IReadOnlyList<int> SmtpAllowedPorts => [];   // Smtp:AllowedPorts
     public Task<IReadOnlyList<IPAddress>> ResolveAsync(string host, CancellationToken ct);
+}
+```
+
+#### `ISmtpEndpointPolicy`
+
+Напрям пошти (ent6 S4): куди SMTP-транспорт має право з'єднуватися — і на пробі, і на
+відправленні, і при збереженні налаштувань. Порти: 25/465/587/2525 і додаткові з
+`Smtp:AllowedPorts`. Хост: loopback, link-local і хмарний metadata заборонені завжди (за літералом,
+за іменем і по кожній розв'язаній адресі); приватні діапазони дозволені (корпоративний relay).
+
+```csharp
+public interface ISmtpEndpointPolicy
+{
+    public bool IsPortAllowed(int port);
+    public Task<bool> IsHostAllowedAsync(string host, bool failClosed, CancellationToken ct);
 }
 ```
 
@@ -3662,7 +3678,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `err.ECR-DOC-0409.migrateProjectArchived` | 409 | перенос документів на нову версію шаблону: проєкт в архіві (ФВ-7.5) |
 | `err.ECR-DOC-0409.migrateSheetsLocked` | 409 | перенос версії: у проєкті є подані/затверджені аркуші |
 | `err.ECR-SCHM-0422.migrateDataLoss` | 422 | перенос версії в режимі `Safe` втратив би дані |
-| `err.ECR-SCHM-0422.migrateGrantsNotMapped` | 422 | на аркуші/таблиці/колонці, якої в новій версії за кодом нема, стоїть будь-який грант: заборона або звужувальний дозвіл (`refusals` має `grantsNotMapped`) |
+| `err.ECR-SCHM-0422.migrateGrantsNotMapped` | 422 | на аркуші/таблиці/колонці, якої в новій версії за кодом нема, стоїть будь-який грант: заборона або звужувальний дозвіл (`refusals` має `grantsNotMapped`); звіт сухого прогону й `details` несуть необов'язкове `blockedGrantCount` — лише кількість таких грантів (без переліку ресурсів/ролей; відсутнє, коли блокування немає) |
 | `err.ECR-SCHM-0422.migrateStructural` | 422 | перенос версії в режимі `Presentation` відхилено через структурну зміну |
 | `err.ECR-TMPL-0422.migrateOtherTemplate` | 422 | цільова версія належить іншому шаблону |
 | `err.ECR-TMPL-0422.migrateSameVersion` | 422 | цільова версія збігається з поточною |

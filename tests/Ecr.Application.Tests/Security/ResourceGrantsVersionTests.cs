@@ -65,6 +65,7 @@ public sealed class ResourceGrantsVersionTests
             () => Handler().HandleAsync(10, [Grant(9, GrantLevel.Manage)], $"\"{stale}\"", CancellationToken.None));
 
         Assert.Equal("ECR-SEC-0409", error.ErrorCode);
+        Assert.Equal("err.ECR-SEC-0409.grantsStale", error.Details!["messageKey"]);
         Assert.Equal(ResourceGrantsVersion.Of(_users.GrantsByRole[10]), error.Details!["version"]);
         Assert.Equal(7, Assert.Single(_users.GrantsByRole[10]).ResourceId);
     }

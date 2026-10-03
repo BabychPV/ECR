@@ -68,6 +68,34 @@ public sealed class EcrConfigurationValidationTests(SqlServerFixture sql)
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "ent6-S4")]
+    public void Скалярне_Smtp_AllowedPorts_без_індексу_зупиняє_старт()
+    {
+        // ⛔ Мутація: прибрати перевірку scalar у Validate → ECR_Smtp__AllowedPorts=2526 мовчки ігнорується.
+        var problem = Assert.Single(EcrConfigurationValidation.Validate(Config(("Smtp:AllowedPorts", "2526"))));
+        Assert.StartsWith("Smtp:AllowedPorts = «2526»", problem, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "ent6-S4")]
+    [InlineData("0")]
+    [InlineData("65536")]
+    [InlineData("-1")]
+    [InlineData("smtp")]
+    [InlineData("587.5")]
+    public void Недійсний_елемент_Smtp_AllowedPorts_називає_ключ_з_індексом(string value)
+    {
+        // ⛔ Мутація: прибрати цикл по Smtp:AllowedPorts у Validate → нечисловий порт мовчки ігнорується читачем.
+        var problem = Assert.Single(EcrConfigurationValidation.Validate(
+            Config(("Smtp:AllowedPorts:0", "8025"), ("Smtp:AllowedPorts:1", value))));
+
+        Assert.StartsWith("Smtp:AllowedPorts:1 = «" + value + "»", problem, StringComparison.Ordinal);
+        Assert.Empty(EcrConfigurationValidation.Validate(
+            Config(("Smtp:AllowedPorts:0", "1"), ("Smtp:AllowedPorts:1", "65535"), ("Smtp:AllowedPorts:2", " "))));
+    }
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
     [Trait("Requirement", "U19")]
     public void Файли_налаштувань_самі_проходять_перевірку_а_порожнє_значення_це_не_задано()
     {

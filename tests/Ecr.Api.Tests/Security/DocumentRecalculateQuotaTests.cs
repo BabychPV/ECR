@@ -307,6 +307,44 @@ public sealed class DocumentRecalculateQuotaTests(SqlServerFixture sql)
         Assert.Equal(1, quota.TrackedKeys);
     }
 
+    /// <remarks>
+    /// ent7 P3-3. Прохід не частіше раза на вікно: застарілі записи, що з'явились між двома викликами в одному вікні проходу,
+    /// лишаються до наступного вікна. Мутація: прибрати <c>now - _lastSweep &gt;= WindowMs</c> - тест червоніє.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    public void Прохід_по_застарілих_записах_не_частіше_раза_на_вікно()
+    {
+        var clock = new ManualClock();
+        var quota = new DocumentRecalculateQuota(
+            new ConfigurationBuilder().AddInMemoryCollection([new(DocumentRecalculateQuota.PermitKey, "2")]).Build(), clock);
+
+        for (var i = 0; i < 10; i++)
+        {
+            Assert.True(quota.TryAcquire("old" + i.ToString(CultureInfo.InvariantCulture), out _, out _));
+        }
+
+        clock.Advance(TimeSpan.FromSeconds(30));
+
+        // Понад поріг (1024): прохід спрацьовує на перетині порогу, старі записи ще не застарілі (30 с).
+        for (var i = 0; i < 1100; i++)
+        {
+            Assert.True(quota.TryAcquire("new" + i.ToString(CultureInfo.InvariantCulture), out _, out _));
+        }
+
+        Assert.Equal(1110, quota.TrackedKeys);
+
+        // «old*» застаріли (61 с), але від останнього проходу минуло лише 31 с - повторного проходу бути не повинно.
+        clock.Advance(TimeSpan.FromSeconds(31));
+        Assert.True(quota.TryAcquire("probe1", out _, out _));
+        Assert.Equal(1111, quota.TrackedKeys);
+
+        // Вікно проходу минуло (61 с): прибрано все застаріле, лишився лише «probe1» і щойно взятий ключ.
+        clock.Advance(TimeSpan.FromSeconds(30));
+        Assert.True(quota.TryAcquire("probe2", out _, out _));
+        Assert.Equal(2, quota.TrackedKeys);
+    }
+
     private static DocumentRecalculateQuota NewQuota(int userPermit)
         => new(
             new ConfigurationBuilder().AddInMemoryCollection(

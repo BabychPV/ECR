@@ -369,7 +369,9 @@ public sealed partial class ExceptionHandlingMiddleware(
 
             // ⛔ Не лише `string`: число в подробицях (`["maxLength"] = 64`) інакше лишало
             // користувачу `{maxLength}` фігурними дужками (клас `D1`).
-            return UiStringResolver.Format(template, UiStringResolver.Parameters(details));
+            return UiStringResolver.Format(
+                template,
+                UiStringResolver.WithLocalizedReason(strings, UiStringResolver.Parameters(details)));
         }
 #pragma warning disable CA1031 // Причина — та сама, що й у LocalizedTitleAsync: обробник помилок не падає вдруге.
         catch (Exception)

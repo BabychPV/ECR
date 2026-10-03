@@ -573,6 +573,8 @@ public sealed class SetUserEmailHandler(
                 });
         }
 
+        UserEmailPolicy.EnsureValid(email);
+
         var user = await users.FindByIdAsync(userId, ct).ConfigureAwait(false)
                    ?? throw new NotFoundException(
                        "ECR-SEC-0404", $"Користувача {userId} не знайдено.",
@@ -692,6 +694,27 @@ public sealed class CreateUserHandler(
     ICurrentUser currentUser,
     IClock clock)
 {
+    /// <summary>Найбільша довжина імені входу (стовпець — 200, з запасом).</summary>
+    public const int UserNameMaxLength = 100;
+
+    /// <summary>Обрізає пробіли й перевіряє ім'я входу; інакше 422 <c>ECR-USR-0422</c>.</summary>
+    public static string NormalizeUserName(string? userName)
+    {
+        var trimmed = userName?.Trim() ?? string.Empty;
+        var valid = trimmed.Length is > 0 and <= UserNameMaxLength
+                    && trimmed.All(c => char.IsLetterOrDigit(c) || c is '.' or '_' or '-' or '@' or '\\');
+        return valid
+            ? trimmed
+            : throw new BusinessRuleException(
+                ErrorCodes.UserInvalid,
+                $"Ім'я входу має бути від 1 до {UserNameMaxLength} символів: літери, цифри та . _ - @ \\ (без пробілів).",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-USR-0422.userNameInvalid",
+                    ["maxLength"] = UserNameMaxLength.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
+    }
+
     /// <summary>Створює локального або доменного користувача.</summary>
     /// <param name="userName">Ім'я входу.</param>
     /// <param name="displayName">Ім'я для показу.</param>
@@ -729,6 +752,12 @@ public sealed class CreateUserHandler(
                     ["permission"] = ListUsersHandler.Permission,
                 });
         }
+
+        // T1-02/T1-03: ім'я входу — без крайніх пробілів, непорожнє, не довше
+        // межі й лише з дозволених символів (`DOMAIN\user`, `user@domain` — теж).
+        userName = NormalizeUserName(userName);
+
+        UserEmailPolicy.EnsureValid(email);
 
         if (await users.FindByUserNameAsync(userName, ct).ConfigureAwait(false) is not null)
         {

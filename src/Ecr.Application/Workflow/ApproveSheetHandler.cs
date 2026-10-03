@@ -56,6 +56,7 @@ public sealed class ApproveSheetHandler(
                     ["messageKey"] = "err.ECR-ACCS-0403.approveDenied",
                     ["sheetDefId"] = sheetDefId.ToString(System.Globalization.CultureInfo.InvariantCulture),
                     ["reason"] = decision.Reason.ToString(),
+                    ["reasonKey"] = $"deny.{decision.Reason}",
                 });
         }
 

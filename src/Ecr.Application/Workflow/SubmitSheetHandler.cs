@@ -188,6 +188,7 @@ public sealed class SubmitSheetHandler(
                     ["messageKey"] = "err.ECR-ACCS-0403.submitDenied",
                     ["sheetDefId"] = sheetDefId.ToString(System.Globalization.CultureInfo.InvariantCulture),
                     ["reason"] = decision.Reason.ToString(),
+                    ["reasonKey"] = $"deny.{decision.Reason}",
                 });
         }
 
@@ -494,7 +495,7 @@ public sealed class SubmitSheetHandler(
             var anyPeriod = await access.ReadScopeAsync(profile, documentId, ct).ConfigureAwait(false);
             DocumentReadScope? readable = null;
             var shown = Validation.HiddenValidationIssues.ForViewer(
-                blocking, m => (readable ??= anyPeriod.InPeriod(key)).CanReadAt(m.TableDefId, m.ColumnCode));
+                blocking, m => Validation.HiddenValidationIssues.CanSee(readable ??= anyPeriod.InPeriod(key), m));
             var onlyHidden = shown.Count == 1 && Validation.HiddenValidationIssues.IsPlaceholder(shown[0]);
 
             // ⚠ Число — лише разом із видимими: `messageCount` рахує рядки
@@ -535,7 +536,7 @@ public sealed class SubmitSheetHandler(
             DocumentReadScope? warnReadable = null;
             shownWarnings = OrderAsOnScreen(
                 Validation.HiddenValidationIssues.ForViewer(
-                    warnings, m => (warnReadable ??= warnScope.InPeriod(key)).CanReadAt(m.TableDefId, m.ColumnCode)),
+                    warnings, m => Validation.HiddenValidationIssues.CanSee(warnReadable ??= warnScope.InPeriod(key), m)),
                 tables, rowIdsByTable);
         }
 

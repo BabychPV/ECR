@@ -1,4 +1,4 @@
-﻿// tests/Ecr.Application.Tests/Validation/ValidationEngineTests.cs
+// tests/Ecr.Application.Tests/Validation/ValidationEngineTests.cs
 using Ecr.Application.Ports;
 using Ecr.Application.Validation;
 using Ecr.Domain.Entities.Configuration;
@@ -198,6 +198,26 @@ public sealed class ValidationEngineTests
         var message = Assert.Single(messages);
         Assert.Contains("обязательна", message.Message, StringComparison.Ordinal);
         Assert.DoesNotContain("обов'язкова", message.Message, StringComparison.Ordinal);
+    }
+
+    [Theory] [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "B-11")]
+    [InlineData("en", "at most 3 decimal places")]
+    [InlineData("ru", "не более 3 знаков после запятой")]
+    [InlineData("kz", "3 таңбадан артық")]
+    public void Відхилення_за_Scale_пояснює_причину_а_не_віддає_голий_код(string language, string expected)
+    {
+        // T1-02: сервер віддавав message = "ECR-CELL-0422".
+        var column = Column("Volume");
+        column.SetNumericFormat(null, 3);
+
+        var messages = Engine().ValidateCell(
+            column, new CellValueData { ValueNumeric = 1.23456m }, [], NoHeaders, language);
+
+        var message = Assert.Single(messages);
+        Assert.True(message.BlocksSave);
+        Assert.Contains(expected, message.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("ECR-CELL-0422", message.Message, StringComparison.Ordinal);
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)]

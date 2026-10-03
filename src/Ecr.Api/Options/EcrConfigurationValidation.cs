@@ -109,6 +109,9 @@ public static partial class EcrConfigurationValidation
         (Ecr.Api.Observability.TelemetrySetup.ProtocolKey, Enum.GetNames<OpenTelemetry.Exporter.OtlpExportProtocol>()),
     ];
 
+    /// <summary>Ключ додаткових портів SMTP (ent6 S4).</summary>
+    public const string SmtpAllowedPortsKey = "Smtp:AllowedPorts";
+
     /// <summary>Ключ адреси OTLP-колектора.</summary>
     public const string OtlpEndpointKey = "Telemetry:OtlpEndpoint";
 
@@ -158,6 +161,28 @@ public static partial class EcrConfigurationValidation
                 && !allowed.Contains(text, StringComparer.OrdinalIgnoreCase))
             {
                 problems.Add(Describe(key, text, "очікується одне з: " + string.Join(", ", allowed)));
+            }
+        }
+
+        // ⛔ ent6 S4: `Smtp:AllowedPorts` — додаткові порти SMTP; нечисловий чи поза 1–65535 елемент інакше мовчки
+        // ігнорувався б читачем, і адміністратор не зрозумів би, чому пошта не йде.
+        // P3-3: скаляр (ECR_Smtp__AllowedPorts=2526 без __0) читач мовчки ігнорував би — це помилка, а не «порожньо».
+        if (Value(configuration, SmtpAllowedPortsKey) is { } scalar)
+        {
+            problems.Add(Describe(
+                SmtpAllowedPortsKey, scalar, "очікується список портів: ECR_Smtp__AllowedPorts__0, ECR_Smtp__AllowedPorts__1, …"));
+        }
+
+        foreach (var child in configuration.GetSection(SmtpAllowedPortsKey).GetChildren())
+        {
+            var text = child.Value?.Trim();
+
+            if (!string.IsNullOrEmpty(text)
+                && (!int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var port)
+                    || port is < 1 or > 65535))
+            {
+                problems.Add(Describe(
+                    $"{SmtpAllowedPortsKey}:{child.Key}", text, "очікується порт — ціле число від 1 до 65535"));
             }
         }
 

@@ -53,7 +53,7 @@ public sealed class GetRegistryDefinitionHandler(
         // ⛔ S18: заборона на довідник перекриває глобальне Registry.View — 404, як неіснуючий.
         RegistryAccess.EnsureNotDenied(profile, definition.Id, code);
 
-        var all =await registries.ListDefinitionsAsync(ct).ConfigureAwait(false);
+        var all = await registries.ListDefinitionsAsync(ct).ConfigureAwait(false);
         var byId = all.ToDictionary(d => d.Id, d => d.Code);
 
         var rules = await registries.ListRulesAsync(definition.Id, ct).ConfigureAwait(false);
@@ -518,7 +518,7 @@ public sealed class SaveRegistryDefinitionHandler(
         RegistryDef definition, SaveRegistryDefinitionDto dto, string operation, int userId,
         Security.AccessProfile profile, CancellationToken ct)
     {
-        var rules =await registries.ListRulesAsync(definition.Id, ct).ConfigureAwait(false);
+        var rules = await registries.ListRulesAsync(definition.Id, ct).ConfigureAwait(false);
         var existingKeys = await keys.ListKeysForUpdateAsync(definition.Id, ct).ConfigureAwait(false);
 
         var before = Snapshot(definition, rules, KeySnapshots(definition, existingKeys, []));
@@ -997,7 +997,7 @@ public sealed class SaveRegistryDefinitionHandler(
         Security.AccessProfile profile,
         CancellationToken ct)
     {
-        var changed =new List<(RegistryFieldDef Field, int? Target)>();
+        var changed = new List<(RegistryFieldDef Field, int? Target)>();
         foreach (var w in wanted)
         {
             // ⛔ Нове поле Lookup: та сама вимога до цілі, що й при перенаціленні (ent6 R1).

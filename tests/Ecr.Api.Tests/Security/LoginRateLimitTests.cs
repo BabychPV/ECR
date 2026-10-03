@@ -129,12 +129,13 @@ public sealed class LoginRateLimitTests(SqlServerFixture sql)
         Assert.DoesNotContain("lock", detail, StringComparison.OrdinalIgnoreCase);
 
         // ⛔ Подробиця приїхала з КАТАЛОГУ, а не із запасного речення в коді:
-        // згадка `Retry-After` є лише в рядку сіду
-        // (`err.ECR-AUTH-0429.tooManyAttempts`). Без цього рядка резолвер
+        // англійський текст є лише в рядку сіду
+        // (`err.ECR-AUTH-0429.tooManyAttempts`; T1-06: без згадки заголовка). Без цього рядка резолвер
         // мовчки віддав би запасне речення — тобто ключ виглядав би
         // локалізованим, не будучи ним, і жодною мовою, крім `en`, не
         // перекладався б ніколи.
-        Assert.Contains("Retry-After", detail, StringComparison.Ordinal);
+        Assert.Contains("Try again later", detail, StringComparison.Ordinal);
+        Assert.DoesNotContain("Retry-After", detail, StringComparison.Ordinal);
 
         Assert.False(
             string.IsNullOrWhiteSpace(json.GetProperty("correlationId").GetString()),

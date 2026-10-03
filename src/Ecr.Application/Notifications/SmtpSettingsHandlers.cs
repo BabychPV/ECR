@@ -1,4 +1,4 @@
-﻿// src/Ecr.Application/Notifications/SmtpSettingsHandlers.cs
+// src/Ecr.Application/Notifications/SmtpSettingsHandlers.cs
 using Ecr.Application.Common;
 using Ecr.Application.Errors;
 using Ecr.Application.Integration;
@@ -80,7 +80,7 @@ public sealed class GetSmtpSettingsHandler(
 public sealed class SaveSmtpSettingsHandler(
     ISmtpSettingsStore store, ISmtpPasswordProtector protector, ISmtpSettingsCache cache,
     INotificationSender sender, IAccessDecisionService access, IUnitOfWork uow, IAuditWriter audit,
-    ICurrentUser currentUser, IClock clock)
+    ICurrentUser currentUser, IClock clock, ISmtpEndpointPolicy endpointPolicy)
 {
     /// <summary>Записує налаштування й скидає кеш транспорту.</summary>
     /// <param name="input">Нові значення.</param>
@@ -111,6 +111,22 @@ public sealed class SaveSmtpSettingsHandler(
 
         Validate(input, host, from, user, willHavePassword);
 
+        // ⛔ S4 (ent6): порт — лише стандартні поштові (+ Smtp:AllowedPorts); хост — не loopback/link-local/metadata
+        // ні за літералом, ні за жодною розв'язаною адресою. Приватні дозволені (корпоративний relay).
+        if (!endpointPolicy.IsPortAllowed(input.Port))
+        {
+            throw Invalid(
+                PortNotAllowedKey,
+                "Порт не дозволено: лише 25, 465, 587, 2525 або порти з конфігурації Smtp:AllowedPorts.", "port");
+        }
+
+        if (host.Length > 0 && !await endpointPolicy.IsHostAllowedAsync(host, failClosed: true, ct).ConfigureAwait(false))
+        {
+            throw Invalid(
+                HostForbiddenKey,
+                "Сервер заборонено: loopback, link-local і адреси метаданих хмари (також за DNS-іменем) не дозволені.",
+                "host");
+        }
         // ⛔ S1 (ent6): збережений пароль іде лише туди, куди його ввели. Змінився хост, порт, шифрування чи
         // логін, а пароль не введено заново, — відмова: інакше адміністратор із правом на налаштування
         // перенаправив би збережений секрет на чужий хост (порожній Password = «лишити» цього не бачить).
@@ -160,6 +176,12 @@ public sealed class SaveSmtpSettingsHandler(
 
     /// <summary>Ключ відмови: адресу змінено, а збережений пароль не підтверджено введенням.</summary>
     public const string PasswordReentryRequiredKey = "err.ECR-REQ-0422.smtpPasswordReentryRequired";
+
+    /// <summary>Ключ відмови: порт поза стандартними поштовими й <c>Smtp:AllowedPorts</c> (ent6 S4).</summary>
+    public const string PortNotAllowedKey = "err.ECR-REQ-0422.smtpPortNotAllowed";
+
+    /// <summary>Ключ відмови: хост — loopback/link-local/metadata, у тому числі після DNS (ent6 S4).</summary>
+    public const string HostForbiddenKey = "err.ECR-REQ-0422.smtpHostForbidden";
 
     /// <summary>Ключ відмови: пароль не можна слати без шифрування (AUTH LOGIN відкритим текстом).</summary>
     public const string PasswordNeedsTlsKey = "err.ECR-REQ-0422.smtpPasswordNeedsTls";

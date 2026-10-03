@@ -119,9 +119,10 @@ public static class CheckEvaluator
     /// <param name="spec">Налаштування Check.</param>
     /// <param name="failures">Знахідки.</param>
     /// <param name="language">Мова запиту (<c>en</c>/<c>ru</c>/<c>kz</c>).</param>
+    /// <param name="sourceTableDefId">Таблиця джерела: текст містить її значення, тож читач без права на неї повідомлення не бачить (T1-01).</param>
     /// <returns>Повідомлення; <c>BlocksSave = false</c> (блокує лише подання, R-B3).</returns>
     public static IReadOnlyList<ValidationMessage> ToMessages(
-        string relationCode, int targetTableDefId, CheckSpec spec, IReadOnlyList<CheckRowResult> failures, string language)
+        string relationCode, int targetTableDefId, CheckSpec spec, IReadOnlyList<CheckRowResult> failures, string language, int? sourceTableDefId = null)
     {
         ArgumentNullException.ThrowIfNull(spec);
         ArgumentNullException.ThrowIfNull(failures);
@@ -134,7 +135,8 @@ public static class CheckEvaluator
         };
 
         return [.. failures.Select(f => new ValidationMessage(
-            severity, "REL-" + relationCode, Text(spec, f, language), targetTableDefId, f.TargetRowKey, spec.Right, BlocksSave: false))];
+            severity, "REL-" + relationCode, Text(spec, f, language), targetTableDefId, f.TargetRowKey, spec.Right, BlocksSave: false,
+            SourceTableDefId: sourceTableDefId, SourceColumnCode: sourceTableDefId is null ? null : spec.Left))];
     }
 
     private static string N(decimal? v) => v?.ToString("0.############################", CultureInfo.InvariantCulture) ?? string.Empty;

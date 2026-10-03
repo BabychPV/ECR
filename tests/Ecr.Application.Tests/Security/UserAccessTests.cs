@@ -126,6 +126,23 @@ public sealed class UserAccessTests
             await _users.ListUserRolesAsync(user.Id, CancellationToken.None));
     }
 
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [InlineData("not-an-email")]
+    [InlineData("also bad@@x")]
+    [InlineData("a b@example.test")]
+    public async Task T1_04_Хибна_адреса_відхиляється_422_і_не_зберігається(string bad)
+    {
+        var user = Add("petrenko");
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Email().HandleAsync(user.Id, bad, CancellationToken.None));
+
+        Assert.Equal("ECR-USR-0422", error.ErrorCode);
+        Assert.Equal("err.ECR-USR-0422.emailInvalid", error.Details!["messageKey"]);
+        Assert.Null(user.Email);
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     public async Task Адреса_задається_і_прибирається_разом_із_прапорцем_алертів()
