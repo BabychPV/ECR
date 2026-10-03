@@ -1023,7 +1023,11 @@ UPDATE t
     (N'err.ECR-CALC-0409.authorCannotPublish', N'kz', N'Сіз {version} нұсқасының авторысыз: екінші тексеруші қажет, сондықтан оны басқа пайдаланушы жариялауы керек.', N'Сіз {version} нұсқасының авторысыз: екінші тексеруші қажет, сондықтан оны басқа пайдаланушы жариялауы керек. Автор — нұсқаны жасаған пайдаланушы, соңғы өңдеген адам емес.'),
     (N'err.ECR-REQ-0429.tooManyRecalculations', N'en', N'Too many recalculation requests in a short time. Wait a moment and try again.', N'Too many recalculation requests in a short time (limit: 6 per minute for one document from one user). Wait a moment and try again.'),
     (N'err.ECR-REQ-0429.tooManyRecalculations', N'ru', N'Слишком много запросов на пересчёт за короткое время. Подождите немного и повторите попытку.', N'Слишком много запросов на пересчёт за короткое время (предел: 6 в минуту на один документ от одного пользователя). Подождите немного и повторите попытку.'),
-    (N'err.ECR-REQ-0429.tooManyRecalculations', N'kz', N'Қысқа уақыт ішінде қайта есептеуге сұраныстар тым көп. Біраз күтіп, қайталап көріңіз.', N'Қысқа уақыт ішінде қайта есептеуге сұраныстар тым көп (шек: бір пайдаланушыдан бір құжат бойынша минутына 6). Біраз күтіп, қайталап көріңіз.')
+    (N'err.ECR-REQ-0429.tooManyRecalculations', N'kz', N'Қысқа уақыт ішінде қайта есептеуге сұраныстар тым көп. Біраз күтіп, қайталап көріңіз.', N'Қысқа уақыт ішінде қайта есептеуге сұраныстар тым көп (шек: бір пайдаланушыдан бір құжат бойынша минутына 6). Біраз күтіп, қайталап көріңіз.'),
+    -- p3-t2 T2-11: ім'я, що не розв'язується, отримує причину про DNS, а не лише про loopback.
+    (N'err.ECR-REQ-0422.smtpHostForbidden', N'en', N'This SMTP server is not allowed: loopback, link-local and cloud metadata addresses (including names that resolve to them) are forbidden.', N'This SMTP server is not allowed. Check that the server name resolves in DNS; loopback, link-local and cloud metadata addresses (including names that resolve to them) are forbidden.'),
+    (N'err.ECR-REQ-0422.smtpHostForbidden', N'ru', N'Этот SMTP-сервер не разрешён: адреса loopback, link-local и метаданных облака (в том числе имена, которые на них разрешаются) запрещены.', N'Этот SMTP-сервер не разрешён. Проверьте, что имя сервера разрешается в DNS; адреса loopback, link-local и метаданных облака (в том числе имена, которые на них разрешаются) запрещены.'),
+    (N'err.ECR-REQ-0422.smtpHostForbidden', N'kz', N'Бұл SMTP сервері рұқсат етілмеген: loopback, link-local және бұлт метадеректерінің мекенжайлары (оларға шешілетін атаулар да) тыйым салынған.', N'Бұл SMTP сервері рұқсат етілмеген. Сервер атауының DNS-те шешілетінін тексеріңіз; loopback, link-local және бұлт метадеректерінің мекенжайлары (оларға шешілетін атаулар да) тыйым салынған.')
   ) AS s ([Key], Lang, OldVal, NewVal)
     ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
  WHERE t.Value = s.OldVal COLLATE Latin1_General_BIN2;
@@ -6500,7 +6504,7 @@ USING (VALUES
     -- COLL:p3-audit-key ── кінець секції ──
     -- COLL:sec-s4 ── Напрям пошти: порти й хост SMTP (рев'ю ent6 S4; `SaveSmtpSettingsHandler`, `SmtpEndpointPolicy`) ──
     (N'err.ECR-REQ-0422.smtpPortNotAllowed', N'en', N'This SMTP port is not allowed. Use 25, 465, 587 or 2525, or ask the administrator to list the port in the Smtp:AllowedPorts configuration key.', 1),
-    (N'err.ECR-REQ-0422.smtpHostForbidden', N'en', N'This SMTP server is not allowed: loopback, link-local and cloud metadata addresses (including names that resolve to them) are forbidden.', 1),
+    (N'err.ECR-REQ-0422.smtpHostForbidden', N'en', N'This SMTP server is not allowed. Check that the server name resolves in DNS; loopback, link-local and cloud metadata addresses (including names that resolve to them) are forbidden.', 1),
     (N'notifications.test.smtp.probeFailed', N'en', N'SMTP test failed: the server is not reachable or did not answer. Check the server name, the port and the firewall.', 1),
     (N'notifications.test.smtp.endpointForbidden', N'en', N'SMTP test refused: the port or the server is not allowed. Allowed ports are 25, 465, 587, 2525 and those in Smtp:AllowedPorts; loopback, link-local and cloud metadata servers are forbidden.', 1),
     -- ru/kz — окремою порцією COLL:sec-s4 у блоці I18N нижче.
@@ -15237,8 +15241,8 @@ SELECT v.[Key], v.Lang, v.Val
   FROM (VALUES
     (N'err.ECR-REQ-0422.smtpPortNotAllowed', N'ru', N'Этот порт SMTP не разрешён. Используйте 25, 465, 587 или 2525 либо попросите администратора добавить порт в ключ конфигурации Smtp:AllowedPorts.'),
     (N'err.ECR-REQ-0422.smtpPortNotAllowed', N'kz', N'Бұл SMTP порты рұқсат етілмеген. 25, 465, 587 немесе 2525 пайдаланыңыз не әкімшіден портты Smtp:AllowedPorts конфигурация кілтіне қосуын сұраңыз.'),
-    (N'err.ECR-REQ-0422.smtpHostForbidden', N'ru', N'Этот SMTP-сервер не разрешён: адреса loopback, link-local и метаданных облака (в том числе имена, которые на них разрешаются) запрещены.'),
-    (N'err.ECR-REQ-0422.smtpHostForbidden', N'kz', N'Бұл SMTP сервері рұқсат етілмеген: loopback, link-local және бұлт метадеректерінің мекенжайлары (оларға шешілетін атаулар да) тыйым салынған.'),
+    (N'err.ECR-REQ-0422.smtpHostForbidden', N'ru', N'Этот SMTP-сервер не разрешён. Проверьте, что имя сервера разрешается в DNS; адреса loopback, link-local и метаданных облака (в том числе имена, которые на них разрешаются) запрещены.'),
+    (N'err.ECR-REQ-0422.smtpHostForbidden', N'kz', N'Бұл SMTP сервері рұқсат етілмеген. Сервер атауының DNS-те шешілетінін тексеріңіз; loopback, link-local және бұлт метадеректерінің мекенжайлары (оларға шешілетін атаулар да) тыйым салынған.'),
     (N'notifications.test.smtp.probeFailed', N'ru', N'Проверка SMTP не удалась: сервер недоступен или не ответил. Проверьте имя сервера, порт и межсетевой экран.'),
     (N'notifications.test.smtp.probeFailed', N'kz', N'SMTP тексеруі сәтсіз: сервер қолжетімсіз немесе жауап бермеді. Сервер атауын, портты және брандмауэрді тексеріңіз.'),
     (N'notifications.test.smtp.endpointForbidden', N'ru', N'Проверка SMTP отклонена: порт или сервер не разрешён. Разрешены порты 25, 465, 587, 2525 и из Smtp:AllowedPorts; серверы loopback, link-local и метаданных облака запрещены.'),
