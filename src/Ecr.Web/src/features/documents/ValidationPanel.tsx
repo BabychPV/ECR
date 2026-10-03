@@ -21,6 +21,12 @@ interface ValidationPanelProps {
    * зауваження — звичайний текст.
    */
   onSelect?: (message: ValidationFindingDto) => void;
+
+  /**
+   * AN-39/L8-21: чи веде зауваження до наявної адреси. Без адреси (таблиці немає на екрані)
+   * кнопка була б зайвим фокус-стопом, що нічого не робить, - тоді лишається текст.
+   */
+  canSelect?: ((message: ValidationFindingDto) => boolean) | undefined;
 }
 
 /**
@@ -48,7 +54,7 @@ interface ValidationPanelProps {
  * Кнопка, а не клік по рядку таблиці: рядок `<tr>` не отримує фокуса з
  * клавіатури, і перехід лишився б лише для миші.
  */
-export function ValidationPanel({ messages, onSelect }: ValidationPanelProps): JSX.Element | null {
+export function ValidationPanel({ messages, onSelect, canSelect }: ValidationPanelProps): JSX.Element | null {
   if (messages === null) {
     return null;
   }
@@ -116,7 +122,7 @@ export function ValidationPanel({ messages, onSelect }: ValidationPanelProps): J
                 <Table.Td>{message.columnCode ?? '—'}</Table.Td>
                 <Table.Td>{message.ruleCode}</Table.Td>
                 <Table.Td>
-                  {onSelect === undefined ? (
+                  {onSelect === undefined || canSelect?.(message) === false ? (
                     message.message
                   ) : (
                     <Anchor

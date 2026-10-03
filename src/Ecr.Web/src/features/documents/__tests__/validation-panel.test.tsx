@@ -111,6 +111,24 @@ describe('перехід від зауваження до комірки (ФВ-5
     expect(button.getAttribute('title')).toBe('⟦document.validationGoTo⟧');
   });
 
+  it('AN-39 L8-21: зауваження без наявної адреси - текст, а не зайвий фокус-стоп', () => {
+    const known = Message({ tableDefId: 7, message: 'Has address' });
+    const orphan = Message({ tableDefId: 0, rowKey: null, message: 'No address' });
+    render(
+      <MantineProvider>
+        <ValidationPanel
+          messages={[known, orphan]}
+          onSelect={() => undefined}
+          canSelect={(message) => message.tableDefId === 7}
+        />
+      </MantineProvider>,
+    );
+
+    expect(screen.getByRole('button', { name: 'Has address' })).toBeDefined();
+    expect(screen.queryByRole('button', { name: 'No address' })).toBeNull();
+    expect(screen.getByText('No address')).toBeDefined();
+  });
+
   it('без обробника текст лишається текстом, а не кнопкою в нікуди', () => {
     render(<Panel messages={[Message()]} />);
 
