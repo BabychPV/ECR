@@ -35,4 +35,18 @@ internal static class SqlConflict
     /// </summary>
     public static bool IsUniqueConstraintViolation(DbUpdateException ex)
         => ex.InnerException is SqlException { Number: 2601 or 2627 };
+
+    /// <summary>
+    /// <c>true</c> — порушення унікальності саме НА ЦЬОМУ індексі/обмеженні (T2-03).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Ім'я індексу стоїть у тексті <c>SqlException.Message</c> («…with unique index
+    /// 'UQ_…'»). Назва індексу в повідомленні СУБД не локалізується (на відміну від
+    /// самого речення), тож перевірка за ім'ям — не те крихке розбирання тексту, про яке
+    /// попереджає <c>UnitOfWork.TryMapDuplicateKey</c>; вона лише ЗВУЖУЄ відповідність за
+    /// типом сутності, щоб інший унікальний індекс тієї ж сутності не мапився хибно.
+    /// </remarks>
+    public static bool ViolatesIndex(DbUpdateException ex, string indexName)
+        => ex.InnerException is SqlException { Number: 2601 or 2627 } sql
+           && sql.Message.Contains(indexName, StringComparison.Ordinal);
 }
