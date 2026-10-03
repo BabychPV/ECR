@@ -1,5 +1,6 @@
 using System.Data;
 using Ecr.Application.Errors;
+using Ecr.Application.Integration;
 using Ecr.Application.Ports;
 using Ecr.Domain.Enums;
 using Microsoft.Data.SqlClient;
@@ -606,28 +607,7 @@ public sealed class SqlDataSource(
     /// <param name="dataSource">Код джерела — для тексту відмови.</param>
     /// <param name="sourcePath">Шлях сутності — для тексту відмови.</param>
     private static void EnsureOrdered(DateTime? previous, DateTime current, string dataSource, string sourcePath)
-    {
-        if (previous is not { } before || current >= before)
-        {
-            return;
-        }
-
-        var earlier = before.ToString("O", System.Globalization.CultureInfo.InvariantCulture);
-        var later = current.ToString("O", System.Globalization.CultureInfo.InvariantCulture);
-
-        throw new BusinessRuleException(
-            ResultRefused,
-            $"Запит значень джерела {dataSource} для «{sourcePath}» повертає мітки не по черзі "
-            + $"({later} після {earlier}): без ORDER BY за міткою хвіст обрізаного батча хибний.",
-            new Dictionary<string, object?>
-            {
-                ["messageKey"] = "err.ECR-INT-0422.timestampsOutOfOrder",
-                ["dataSource"] = dataSource,
-                ["sourcePath"] = sourcePath,
-                ["previous"] = earlier,
-                ["current"] = later,
-            });
-    }
+        => SourceRowOrder.EnsureOrdered(previous, current, dataSource, sourcePath);
 
     /// <summary>Джерела немає або воно вимкнене.</summary>
     /// <param name="dataSourceId">Ідентифікатор із запиту.</param>

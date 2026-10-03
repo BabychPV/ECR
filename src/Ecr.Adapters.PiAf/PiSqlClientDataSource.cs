@@ -3,6 +3,7 @@ using System.Data.Common;
 using System.Data.Odbc;
 using System.Globalization;
 using Ecr.Application.Errors;
+using Ecr.Application.Integration;
 using Ecr.Application.Ports;
 using Ecr.Application.Sources;
 using Ecr.Domain.Enums;
@@ -884,11 +885,17 @@ public sealed class PiSqlClientDataSource(
         ArgumentNullException.ThrowIfNull(reader);
 
         var points = new List<SourceDataPoint>();
+        DateTime? previous = null;
 
         while (points.Count < maxPoints && await reader.ReadAsync(ct).ConfigureAwait(false))
         {
             var row = Row(reader);
             var timestamp = Utc(Column(row, "Ts"), dataSource, sourcePath);
+
+            // ⛔ L3-10: хвіст обрізаного батча правдивий лише для впорядкованого
+            // результату — той самий контракт, що й у SqlDataSource (аудит A7).
+            SourceRowOrder.EnsureOrdered(previous, timestamp, dataSource, sourcePath);
+            previous = timestamp;
 
             var (numeric, text) = Value(Column(row, "Val"));
             var quality = Column(row, "Quality") as string;
