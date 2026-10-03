@@ -562,7 +562,9 @@ public sealed class SaveRegistryDefinitionHandler(
             if (wantedRules is { Count: > 0 })
             {
                 wantedRules = await ruleCompiler
-                    .PrepareAsync(definition, rules, wantedRules, graph, keys, ct)
+                    // ⛔ L5-09: компілятор бачить лише довідники, не заборонені автору — заборонений
+                    // для нього «невідомий» (поля/типи/попередження не стають оракулом його даних).
+                    .PrepareAsync(definition, rules, wantedRules, [.. graph.Where(r => !RegistryAccess.IsDenied(profile, r.Id))], keys, ct)
                     .ConfigureAwait(false);
             }
         }

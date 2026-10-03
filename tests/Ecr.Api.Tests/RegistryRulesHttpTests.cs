@@ -208,6 +208,32 @@ public sealed class RegistryRulesHttpTests(SqlServerFixture sql)
         Assert.True(saved == HttpStatusCode.OK, $"{saved}: {savedBody}\n{app.ErrorsText}");
     }
 
+    /// <summary>
+    /// L5-09: автор без доступу до довідника (явна заборона) не може «намацати» його правилом: новий
+    /// <c>childSum</c> на заборонений довідник відхиляється як невідомий (<c>registryUnknown</c>), а не
+    /// компілюється. До виправлення компілятор бачив усі довідники і зберігав правило (200) або віддавав
+    /// поля/типи забороненого через діагностику. Контроль: той самий опис без заборони зберігається.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Правило_що_читає_заборонений_довідник_відхиляється_як_невідомий()
+    {
+        using var app = new EcrApiFactory(sql);
+        var f = await SeedAsync(ValidationSeverity.Error);
+        using var plain = await SignedInAsync(app);
+        using var denied = await SignedInAsync(app, f.Composition.Id);
+        var extra = Rule(null, "SUM_COPY", "Expression", f.RuleExpression, f.RuleParameters);
+
+        var (blocked, blockedBody) = await SaveDefinitionAsync(denied, f, extra);
+        Assert.True(blocked == HttpStatusCode.UnprocessableEntity, $"{blocked}: {blockedBody}\n{app.ErrorsText}");
+        Assert.Equal(RegistryRuleCompiler.ExpressionInvalidKey, blockedBody.GetProperty("messageKey").GetString());
+        Assert.Equal("SUM_COPY", blockedBody.GetProperty("ruleCode").GetString());
+
+        var (ok, okBody) = await SaveDefinitionAsync(plain, f, extra);
+        Assert.True(ok == HttpStatusCode.OK, $"{ok}: {okBody}\n{app.ErrorsText}");
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
 
     private static object Row(string clientRowId, string code, long caseId, string molPct)
@@ -369,7 +395,7 @@ public sealed class RegistryRulesHttpTests(SqlServerFixture sql)
     private static LocalizedText Name(string value)
         => new(new Dictionary<string, string> { ["en"] = value });
 
-    private async Task<HttpClient> SignedInAsync(EcrApiFactory app)
+    private async Task<HttpClient> SignedInAsync(EcrApiFactory app, int? denyRegistryId = null)
     {
         var name = $"regr_{Guid.NewGuid():N}"[..20];
 
@@ -390,6 +416,16 @@ public sealed class RegistryRulesHttpTests(SqlServerFixture sql)
             }
 
             db.RoleAssignments.Add(new RoleAssignment(role.Id, user.Id, principalSid: null));
+
+            if (denyRegistryId is { } denied)
+            {
+                var denier = new Role(EcrCode.Create($"D{Guid.NewGuid():N}"[..12]), Name("Registry deny"));
+                db.Roles.Add(denier);
+                await db.SaveChangesAsync();
+                db.ResourceGrants.Add(new ResourceGrant(denier.Id, ResourceKind.Registry, denied, GrantLevel.Read, isDeny: true));
+                db.RoleAssignments.Add(new RoleAssignment(denier.Id, user.Id, principalSid: null));
+            }
+
             await db.SaveChangesAsync();
         }
 
