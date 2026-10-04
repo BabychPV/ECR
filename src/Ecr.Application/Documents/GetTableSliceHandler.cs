@@ -152,6 +152,16 @@ public sealed class GetTableSliceHandler(
                             ["versionId"] = instance.TemplateVersionId.ToString(System.Globalization.CultureInfo.InvariantCulture),
                         });
 
+        // ⛔ L6-04: версії рядків читаються ДО значень. Навпаки (значення, потім
+        //    версії) PATCH, що закомітився між двома читаннями, давав клієнту
+        //    НОВУ версію зі СТАРИМ значенням — і наступна правка проходила
+        //    перевірку версії, мовчки затираючи чужу. Стара версія з новим
+        //    значенням безпечна: гірше, що буває, — зайвий 409.
+        var rowIds = await rowStore.GetRowIdsAsync(tableInstanceId, new Domain.ValueObjects.PeriodKey(instance.PeriodKey), ct)
+                                   .ConfigureAwait(false);
+        var versions = await rowStore.GetRowVersionsAsync(tableInstanceId, new Domain.ValueObjects.PeriodKey(instance.PeriodKey), ct)
+                                     .ConfigureAwait(false);
+
         // 2. Значення — ОДИН запит на весь зріз. N+1 тут коштує бюджету
         //    1.5 с на 500×60 (tz/08 §8.2).
         //    ⚠ O3b: з періодом екземпляра — seek в одній партиції замість
@@ -163,10 +173,6 @@ public sealed class GetTableSliceHandler(
         // 3. Права — ОДИН виклик на весь зріз, не по комірці.
         var decisions = await access.CanEditSliceAsync(profile, tableInstanceId, ct).ConfigureAwait(false);
 
-        var rowIds = await rowStore.GetRowIdsAsync(tableInstanceId, new Domain.ValueObjects.PeriodKey(instance.PeriodKey), ct)
-                                   .ConfigureAwait(false);
-        var versions = await rowStore.GetRowVersionsAsync(tableInstanceId, new Domain.ValueObjects.PeriodKey(instance.PeriodKey), ct)
-                                     .ConfigureAwait(false);
         var keyById = rowIds.ToDictionary(kv => kv.Value, kv => kv.Key);
 
         // ⛔ F-02 (четвертий раунд UX): колонка `Calculated` отримує число

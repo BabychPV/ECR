@@ -328,4 +328,30 @@ public sealed class GetTableSliceTests
         // звичайний, лише з піднятим прапорцем. Блокує Submit.
         Assert.Equal(1m, Assert.Single(slice.Rows).Cells["Volume"]);
     }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    public async Task Зріз_не_віддає_версію_новішу_за_значення()
+    {
+        // ⛔ L6-04. Імітація PATCH, що закомітився МІЖ читаннями зрізу: щойно
+        // обробник прочитав значення (12), «чужий» запис ставить 99 і піднімає
+        // версію рядка з 0x0A до 0x0B. Значення в зрізі — старе, тож і версія
+        // мусить бути старою: нова версія зі старим значенням дозволила б
+        // наступній правці пройти перевірку версії й мовчки затерти 99.
+        var version = "0x0A";
+        _rows.GetRowVersionsAsync(TableInstance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+             .Returns(_ => new Dictionary<string, string> { ["7001001"] = version });
+        _cells.ReadSliceAsync(TableInstance, new PeriodKey(Period), Arg.Any<CancellationToken>())
+              .Returns(_ =>
+              {
+                  IReadOnlyList<CellRecord> snapshot = [Cell(Row1, new CellValueData { ValueNumeric = 12m })];
+                  version = "0x0B";
+                  return snapshot;
+              });
+
+        var slice = await Handler().HandleAsync(700, TableInstance, Profile(), "en", CancellationToken.None);
+
+        var row = Assert.Single(slice.Rows);
+        Assert.Equal(12m, row.Cells["Volume"]);
+        Assert.Equal("0x0A", row.RowVersion);
+    }
 }
