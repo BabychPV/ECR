@@ -2,7 +2,7 @@ import { useCallback, useRef, useState } from 'react';
 import { notifications } from '@mantine/notifications';
 import { t } from '@/shared/i18n';
 import { flushUnsaved, hasUnsavedChanges } from '@/shared/ui/unsavedSources';
-import { firstHeldEdit, type HeldEdit } from './pendingStore';
+import type { HeldEdit } from './pendingStore';
 
 /**
  * AN-28 / L8-01: дії над документом (Submit, Approve/Reject, Validate, Export,
@@ -44,6 +44,18 @@ type HeldEditRevealer = (held: HeldEdit) => void;
 
 let revealer: HeldEditRevealer | null = null;
 
+/**
+ * Звідки взяти утриману правку. Ставить `autosave.ts` (власник сховища).
+ *
+ * ⛔ Не статичний імпорт `pendingStore`: цей модуль тягнуть `SheetActions`/`ExportButton`,
+ * а їх - `PeriodsPage`; сховище з `cellValue`/`decimal` додавало маршрутові ~2.7 КБ (D-132).
+ */
+let heldEditLookup: (() => HeldEdit | null) | null = null;
+
+export function registerHeldEditLookup(lookup: () => HeldEdit | null): void {
+  heldEditLookup = lookup;
+}
+
 /** Ставить показ утриманої комірки; повертає зняття (лише свого). */
 export function registerHeldEditRevealer(reveal: HeldEditRevealer): () => void {
   revealer = reveal;
@@ -71,7 +83,7 @@ export interface WhenEditsSavedOptions {
  * комірка показується (`revealer`): інакше оператор шукав би її по 91 таблиці.
  */
 function explainUnsaved(options: WhenEditsSavedOptions): void {
-  const held = firstHeldEdit();
+  const held = heldEditLookup?.() ?? null;
 
   if (options.readOnly === true) {
     notifications.show({ color: 'statusWarning', message: t('document.unsavedNotIncluded') });

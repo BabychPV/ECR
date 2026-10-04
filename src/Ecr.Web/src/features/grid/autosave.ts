@@ -5,9 +5,11 @@ import { registerUnsavedSource, UnsavedSettleMs } from '@/shared/ui/unsavedSourc
 import { onBeforeLoginRedirect } from '@/api/client';
 import { recordLostEdits } from './lostEdits';
 import { resetConfirmed } from './confirmedEdits';
+import { registerHeldEditLookup } from './settleEdits';
 import {
   cellKey,
   discardPendingRows,
+  firstHeldEdit,
   hasPending,
   hasSendablePending,
   markPendingRejected,
@@ -356,6 +358,9 @@ registerUnsavedSource('grid', {
   unsavedCount: pendingCount,
   flush: flushAutosaveAndSettle,
 });
+
+// AN-28 P2-1: дії документа називають утриману комірку - з того самого сховища.
+registerHeldEditLookup(firstHeldEdit);
 
 /**
  * Зберігає безхазяйний зріз від імені ДОКУМЕНТА.
