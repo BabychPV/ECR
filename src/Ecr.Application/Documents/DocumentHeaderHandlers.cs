@@ -297,7 +297,10 @@ public sealed class PatchDocumentHeaderHandler(
         // поставлена до коміту, під RCSI прочитала б стару шапку.
         if (changed > 0)
         {
-            await EnqueueRecalculationAsync(documentId, project, userId, ct).ConfigureAwait(false);
+            // ⛔ L1-17: витісняти виконуваний перерахунок (Exclusive) може лише власник Calculation.Recalculate —
+            // як на RecalculateDocumentHandler; решта (лише Write на проєкт) ставить без витіснення (Coalesced).
+            var mayPreempt = PermissionCheck.IsGrantedIn(profile, RecalculateDocumentHandler.PreemptPermission, project.Id);
+            await EnqueueRecalculationAsync(documentId, project, userId, mayPreempt, ct).ConfigureAwait(false);
         }
 
         var values = await headers.GetValuesAsync(documentId, ct).ConfigureAwait(false);
@@ -491,7 +494,7 @@ public sealed class PatchDocumentHeaderHandler(
     /// перемикали б актуальність прогону навперегін.
     /// </remarks>
     private async Task EnqueueRecalculationAsync(
-        long documentId, Domain.Entities.Documents.Project project, int userId, CancellationToken ct)
+        long documentId, Domain.Entities.Documents.Project project, int userId, bool mayPreempt, CancellationToken ct)
     {
         foreach (var period in project.Periods.OrderBy(p => p.PeriodKeyValue))
         {
@@ -503,18 +506,23 @@ public sealed class PatchDocumentHeaderHandler(
                 continue;
             }
 
-            await jobs.EnqueueExclusiveAsync<IRecalculationJob>(
-                    RecalculateDocumentHandler.TargetOf(documentId, period.Key),
-                    new
-                    {
-                        DocumentId = documentId,
-                        PeriodKey = period.PeriodKeyValue,
-                        TriggeredByUserId = (int?)userId,
-                        SheetDefId = (int?)null,
-                    },
-                    ct,
-                    userId)
-                .ConfigureAwait(false);
+            var target = RecalculateDocumentHandler.TargetOf(documentId, period.Key);
+            var payload = new
+            {
+                DocumentId = documentId,
+                PeriodKey = period.PeriodKeyValue,
+                TriggeredByUserId = (int?)userId,
+                SheetDefId = (int?)null,
+            };
+
+            if (mayPreempt)
+            {
+                await jobs.EnqueueExclusiveAsync<IRecalculationJob>(target, payload, ct, userId).ConfigureAwait(false);
+            }
+            else
+            {
+                await jobs.EnqueueCoalescedAsync<IRecalculationJob>(target, payload, ct, userId).ConfigureAwait(false);
+            }
         }
     }
 }

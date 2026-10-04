@@ -496,6 +496,28 @@ public sealed class DocumentHeaderHandlersTests
     }
 
     /// <summary>
+    /// L1-17: PATCH шапки з грантом Write, але БЕЗ <c>Calculation.Recalculate</c>, ставить перерахунок без витіснення
+    /// (Coalesced). До виправлення завжди Exclusive — обхід права на витіснення чужого виконуваного перерахунку.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    public async Task L1_17_PATCH_без_Calculation_Recalculate_ставить_перерахунок_без_витіснення()
+    {
+        AddPeriod(202603, PeriodState.Open);
+
+        var version = await VersionOfAsync([]);
+        Values([], new() { [_area.Id] = new() { ValueString = "Tengiz" } });
+
+        await Patch().HandleAsync(
+            DocumentId, Request(version, new PatchHeaderField("Area", "Tengiz", false)), CancellationToken.None);
+
+        await _jobs.DidNotReceiveWithAnyArgs().EnqueueExclusiveAsync<IRecalculationJob>(
+            default!, default, default, default);
+        await _jobs.Received(1).EnqueueCoalescedAsync<IRecalculationJob>(
+            RecalculateDocumentHandler.TargetOf(DocumentId, new PeriodKey(202603)), Arg.Any<object?>(), Arg.Any<CancellationToken>(), 9);
+    }
+
+    /// <summary>
     /// <c>HDR.*</c> читають формули — після зміни шапки перераховуються всі
     /// періоди, куди перерахунок має право писати, і лише вони.
     /// </summary>
@@ -503,6 +525,14 @@ public sealed class DocumentHeaderHandlersTests
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     public async Task PATCH_ставить_повний_перерахунок_на_кожен_відкритий_період_і_лише_на_них()
     {
+        // L1-17: витіснення (Exclusive) — лише для власника Calculation.Recalculate.
+        _access.BuildProfileAsync(9, Arg.Any<CancellationToken>())
+            .Returns(new AccessBuilder { UserId = 9 }
+                .Permission("Document.View")
+                .Permission("Calculation.Recalculate")
+                .Grant(ResourceKind.Project, ProjectId, GrantLevel.Write)
+                .Build());
+
         AddPeriod(202601, PeriodState.Closed);
         AddPeriod(202602, PeriodState.Grace);
         AddPeriod(202603, PeriodState.Open);

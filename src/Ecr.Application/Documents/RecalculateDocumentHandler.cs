@@ -203,7 +203,7 @@ public sealed class RecalculateDocumentHandler(
     }
 
     /// <summary>Право, що дає витіснення виконуваного перерахунку того самого документа.</summary>
-    private const string PreemptPermission = "Calculation.Recalculate";
+    internal const string PreemptPermission = "Calculation.Recalculate";
 
     private static bool HasUnnarrowedRead(Security.AccessProfile profile, int? projectId)
         => profile.Permissions.Contains(Permission)
