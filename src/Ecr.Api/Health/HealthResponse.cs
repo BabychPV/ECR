@@ -1,4 +1,4 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 
 namespace Ecr.Api.Health;
@@ -69,7 +69,10 @@ public static class HealthResponse
                 .Select(e => new HealthCheckDto(
                     e.Key,
                     e.Value.Status.ToString(),
-                    e.Value.Description,
+
+                    // ⛔ L1-11 (Q-221): опис перевірки «db» несе ті самі подробиці (RCSI-скрипт, файлові групи,
+                    // відбитки сертифікатів) — анонімному /health/ready його теж не віддаємо.
+                    redactedChecks?.Contains(e.Key) == true ? null : e.Value.Description,
                     e.Value.Duration.TotalMilliseconds,
 
                     // ⚠ Виняток НЕ віддається клієнту: у ньому бувають імена
