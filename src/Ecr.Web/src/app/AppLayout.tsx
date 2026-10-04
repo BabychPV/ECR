@@ -564,15 +564,21 @@ function RouteFallback(): JSX.Element {
 const NumericSegment = /^\d+$/;
 
 /**
- * Чи має найглибший збіг параметр, що мусить бути числом, а ним не є
+ * Чи має БУДЬ-ЯКИЙ збіг параметр, що мусить бути числом, а ним не є
  * (`routes.ts` → `handle.numericParams`).
+ *
+ * ⛔ L9-14: читати лише лист — замало. Картка шаблону (`/admin/templates/:id`)
+ * — індексний лист БЕЗ `handle` (`router.tsx` пояснює, чому), тож її `:id`
+ * оголошує вузол секції над нею. Перевірка лише листа пропускала
+ * `/admin/templates/abc`, і картка йшла запитами на `…/templates/NaN`.
  */
 function hasMalformedParam(matches: ReturnType<typeof useMatches>): boolean {
-  const leaf = matches[matches.length - 1];
-  if (leaf === undefined || !isRouteHandle(leaf.handle)) return false;
-
-  return (leaf.handle.numericParams ?? []).some(
-    (name) => !NumericSegment.test(leaf.params[name] ?? ''),
+  return matches.some(
+    (match) =>
+      isRouteHandle(match.handle) &&
+      (match.handle.numericParams ?? []).some(
+        (name) => !NumericSegment.test(match.params[name] ?? ''),
+      ),
   );
 }
 
