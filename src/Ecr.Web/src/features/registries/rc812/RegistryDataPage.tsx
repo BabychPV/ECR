@@ -266,6 +266,9 @@ export function RegistryDataPage(): JSX.Element {
       setUnmatched(0);
       setSavedAt(new Date());
       void queryClient.invalidateQueries({ queryKey: queryKeys.registries.all() });
+      // Сторінка впливу (RT-25) — ключ поза доменом `registries` (`RegistryImpactPage` `impactKey`):
+      // без цього після правки вона показувала попередній перелік зачеплених документів (L9-21).
+      void queryClient.invalidateQueries({ queryKey: ['registry-impact', code] });
     },
     onError: showApiError,
   });

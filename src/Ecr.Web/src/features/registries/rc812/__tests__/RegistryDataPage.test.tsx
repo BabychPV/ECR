@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { act, fireEvent, screen, within } from '@testing-library/react';
+import { QueryClient } from '@tanstack/react-query';
 import { loadCatalog } from '@/shared/i18n';
 import { mockServer, passed, showDataPage, storedRows, type SentBatch } from './fixtures';
 
@@ -94,6 +95,21 @@ describe('Дані довідника: табличний редактор', () 
       expect(committed(sent)).toHaveLength(1);
     });
     expect(committed(sent)[0]?.items.map((item) => item.values)).toEqual([{ T_C: '12.5' }, { T_C: '7.25' }]);
+  });
+
+  it('збереження скидає сторінку впливу довідника (L9-21)', async () => {
+    mockServer();
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    client.setQueryData(['registry-impact', 'STREAM_CASE'], { items: [] });
+    showDataPage(client);
+    await screen.findByRole('grid');
+
+    await editText(0, 2, '50.5');
+    fireEvent.keyDown(window, { key: 's', ctrlKey: true });
+
+    await vi.waitFor(() => {
+      expect(client.getQueryState(['registry-impact', 'STREAM_CASE'])?.isInvalidated).toBe(true);
+    });
   });
 
   it('неоднозначна кома (1,234) підсвічена до сервера і не дає зберегти', async () => {

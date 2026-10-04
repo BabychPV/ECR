@@ -14,6 +14,7 @@ import {
 } from '@mantine/core';
 import { useDebouncedValue } from '@mantine/hooks';
 import { keepPreviousData, useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query';
+import { queryKeys } from '@/api/queryKeys';
 import type { RegistryDefDto, RegistryDefinitionDto } from '@/api/types';
 import { t } from '@/shared/i18n';
 import { localized } from '@/shared/i18n/localized';
@@ -280,7 +281,14 @@ export function CompositionPanel({
       if (report.applied) {
         setEdits(null);
         showDone(t('registries.rc816.saved', { count: items.length }));
-        await queryClient.invalidateQueries({ queryKey: ['registries', 'rc816', 'rows'] });
+        // ⚠ Увесь домен, а не лише свої ключі: сітка даних того самого довідника (rc812), перелік
+        // записів і варіанти `Lookup` інакше лишались зі старим `version` — правка там давала б
+        // `entryChanged` на щойно збережений рядок. Сторінка впливу (RT-25) — окремий ключ поза
+        // доменом (`RegistryImpactPage` `impactKey`), її перелік зачеплених теж застарів (L9-21).
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: queryKeys.registries.all() }),
+          queryClient.invalidateQueries({ queryKey: ['registry-impact', code] }),
+        ]);
       }
     } catch (error) {
       // ⚠ `422 ECR-REG-4221` — порушене правило рівня `Error` після всього пакета: відмова по суті,

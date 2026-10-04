@@ -14,8 +14,7 @@ import { testTheme } from '@/test/render';
  * Σ перевіряється саме тим числом, яке отримав `t()`.
  */
 
-function show(code = 'STREAM_CASE'): void {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+function show(code = 'STREAM_CASE', client = new QueryClient({ defaultOptions: { queries: { retry: false } } })): void {
 
   render(
     <MantineProvider theme={testTheme}>
@@ -188,6 +187,24 @@ describe('CompositionEditorPage: master-detail без введення іден�
     const searched = server.rowQueries.filter((query) => query.startsWith('STREAM_CASE?') && query.includes('q='));
     expect(searched).toHaveLength(1);
     expect(screen.getByRole('button', { name: 'E77' })).toBeTruthy();
+  });
+
+  it('збереження складу скидає сітку даних того самого довідника і сторінку впливу (L9-21)', async () => {
+    mockServer(['Registry.View', 'Registry.EditData']);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const gridKey = ['registries', 'rows', 'GAS_COMPOSITION', '', '', ''];
+    const impactKey = ['registry-impact', 'GAS_COMPOSITION'];
+    client.setQueryData(gridKey, { pages: [], pageParams: [] });
+    client.setQueryData(impactKey, { items: [] });
+    show('STREAM_CASE', client);
+    const table = await openCase('E77');
+    const panel = table.closest<HTMLElement>('[data-rc816-panel]') as HTMLElement;
+
+    fireEvent.change(within(table).getAllByRole('textbox', { name: 'MOL_PCT' })[0] as HTMLElement, { target: { value: '60.2' } });
+    fireEvent.click(within(panel).getByRole('button', { name: /registries\.rc816\.save/ }));
+
+    await waitFor(() => expect(client.getQueryState(gridKey)?.isInvalidated).toBe(true));
+    expect(client.getQueryState(impactKey)?.isInvalidated).toBe(true);
   });
 
   it('без Registry.EditData — лише перегляд: ні додавання, ні збереження', async () => {

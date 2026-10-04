@@ -174,8 +174,7 @@ export function mockServer(options: ServerOptions = {}): SentBatch[] {
   return sent;
 }
 
-export function showDataPage(): RenderResult {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+export function showDataPage(client = new QueryClient({ defaultOptions: { queries: { retry: false } } })): RenderResult {
 
   return render(
     <MantineProvider theme={testTheme}>
