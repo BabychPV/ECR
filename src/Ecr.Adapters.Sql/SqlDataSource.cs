@@ -379,11 +379,13 @@ public sealed class SqlDataSource(
         {
             builder = new SqlConnectionStringBuilder(source.Endpoint);
         }
-        catch (ArgumentException ex)
+        catch (Exception ex) when (ex is ArgumentException or FormatException or OverflowException)
         {
             // Зіпсований рядок з'єднання — недоступне джерело з погляду збору,
             // а не необроблений виняток: інакше в журналі прогону лежало б
             // «ArgumentException» без натяку, що правити треба поле Endpoint.
+            // ⚠ Значення ключа builder розбирає сам: `Connect Timeout=abc`, `User Instance=0` —
+            // FormatException, `Max Pool Size=99999999999` — OverflowException (рев'ю an33d, P3-4).
             throw new BusinessRuleException(
                 SourceUnavailable,
                 $"Рядок з'єднання джерела {source.Code} не читається: {ex.Message}",

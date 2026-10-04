@@ -29,6 +29,9 @@ public sealed class SqlDataSourceAddressPolicyTests
     [InlineData("Server=metadata.google.internal;Connect Timeout=1")]
     [InlineData("Server=127.0.0.1,1;AttachDBFilename=\\\\attacker\\share\\x.mdf;Connect Timeout=1")]
     [InlineData("Server=127.0.0.1,1;User Instance=true;Connect Timeout=1")]
+    [InlineData("Server=127.0.0.1,1;Authentication=Active Directory Managed Identity;Connect Timeout=1")]
+    [InlineData("Server=127.0.0.1,1;Server SPN=cifs/dc01;Integrated Security=true;Connect Timeout=1")]
+    [InlineData("Server=169\u3002254\u3002169\u3002254;Connect Timeout=1")]
     public async Task Заборонена_адреса_відмова_до_з_єднання(string endpoint)
     {
         var adapter = new SqlDataSource(StoreWith(endpoint), Substitute.For<ISecretProvider>(), Settings());
@@ -42,6 +45,30 @@ public sealed class SqlDataSourceAddressPolicyTests
         Assert.Equal("err.ECR-INT-0503.endpointForbidden", error.Details!["messageKey"]);
         Assert.Equal("FLERT", error.Details!["dataSource"]);
         Assert.DoesNotContain("169.254", error.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Рев'ю an33d, P3-4: <see cref="Microsoft.Data.SqlClient.SqlConnectionStringBuilder"/> кидає не лише
+    /// <see cref="ArgumentException"/>, а й <see cref="FormatException"/> і <see cref="OverflowException"/> —
+    /// у журналі прогону мусить бути зрозуміле <c>connectionStringBroken</c>, а не сирий виняток.
+    /// </summary>
+    [Theory]
+    [InlineData("Server=127.0.0.1,1;Connect Timeout=abc")]
+    [InlineData("Server=127.0.0.1,1;User Instance=0")]
+    [InlineData("Server=127.0.0.1,1;Max Pool Size=99999999999")]
+    [InlineData("Server=127.0.0.1,1;Unknown Option=1")]
+    public async Task Зіпсований_рядок_connectionStringBroken(string endpoint)
+    {
+        var adapter = new SqlDataSource(StoreWith(endpoint), Substitute.For<ISecretProvider>(), Settings());
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => adapter.ReadAsync(
+                new CollectionRequest(1, 7, "STREAM-1", Midnight, Midnight.AddHours(1), 10),
+                CancellationToken.None));
+
+        Assert.Equal("ECR-INT-0503", error.ErrorCode);
+        Assert.Equal("err.ECR-INT-0503.connectionStringBroken", error.Details!["messageKey"]);
+        Assert.Equal("FLERT", error.Details!["dataSource"]);
     }
 
     private static ICollectionStore StoreWith(string endpoint)
