@@ -90,6 +90,10 @@ public sealed class SaveDataSourceHandlerTests
     [InlineData("Server=flert;Authentication=Active Directory Integrated")]
     [InlineData("Server=flert;Authentication=Active Directory Password;User ID=svc")]
     [InlineData("Server=flert;Authentication=Active Directory Service Principal")]
+    // Рев'ю an33d, P3-2: довільний SPN — Kerberos-квиток на чужу службу хосту з рядка.
+    [InlineData("Server=flert;Integrated Security=true;Server SPN=cifs/dc01")]
+    [InlineData("Server=flert;Integrated Security=true;ServerSPN=cifs/dc01")]
+    [InlineData("Server=flert;Failover Partner=spare;Failover Partner SPN=cifs/dc01")]
     public async Task Create_Sql_заборонений_параметр_422(string endpoint)
     {
         var refused = await TryCreate(endpoint, new FakeNetwork());

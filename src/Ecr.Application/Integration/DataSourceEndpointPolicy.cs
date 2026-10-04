@@ -272,6 +272,10 @@ public static class DataSourceEndpointPolicy
             "AUTHENTICATION" => value?.Replace(" ", string.Empty, StringComparison.Ordinal).Trim() is { Length: > 0 } method
                                 && !string.Equals(method, "SqlPassword", StringComparison.OrdinalIgnoreCase),
 
+            // Довільний SPN з Integrated Security — Kerberos-квиток на чужу службу (`cifs/dc01`) хосту з
+            // рядка (Kerberos relay). Аліасам замовника SPN не потрібен (рев'ю an33d, P3-2).
+            "SERVERSPN" or "FAILOVERPARTNERSPN" => true,
+
             _ => false,
         };
     }
