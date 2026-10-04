@@ -1562,43 +1562,48 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
    * порожній буфер на Ctrl+C виглядав би як несправність, а в Excel Ctrl+C без
    * виділення так само працює по всьому, що є під фокусом.
    */
+  // T4-08: текст буфера - окремо від події, бо відкладене копіювання (після вікна коміту)
+  // події вже не має й пише через `navigator.clipboard`.
+  const copyText = useCallback((): string | null => {
+    if (data === undefined) return null;
+
+    // ⛔ `selection.current.range.from/toColumn` — індекси в сітці (див.
+    // `dataColumnIndexOf`): без поправки Ctrl+C на таблиці з підписами
+    // рядків копіював вікно, зсунуте на одну колонку, і за межею вибраного
+    // діапазону міг прихопити зайву колонку.
+    const range =
+      selection.current === null
+        ? null
+        : clampSelection(
+            {
+              ...selection.current.range,
+              fromColumn: dataColumnIndexOf(selection.current.range.fromColumn, data),
+              toColumn: dataColumnIndexOf(selection.current.range.toColumn, data),
+            },
+            data.rows.length,
+            data.columns.length,
+          );
+
+    const rows = range === null ? data.rows : data.rows.slice(range.fromRow, range.toRow + 1);
+    const columns =
+      range === null ? data.columns : data.columns.slice(range.fromColumn, range.toColumn + 1);
+
+    // ⛔ `cellText`, а не `String(...)`: після `e470777a` десяткове приходить
+    // рядком у масштабі колонки, і `String()` клав би в буфер
+    // `5.0000000000` замість `5` — у КОЖНУ комірку аркуша, який оператор
+    // потім вставляє в Excel. Число те саме, аркуш — нечитабельний.
+    return toClipboard(rows.map((row) => columns.map((column) => cellText(row.cells[column.code]))));
+  }, [data]);
+
   const onCopy = useCallback(
     (event: React.ClipboardEvent<HTMLDivElement>) => {
-      if (data === undefined) return;
-
-      // ⛔ `selection.current.range.from/toColumn` — індекси в сітці (див.
-      // `dataColumnIndexOf`): без поправки Ctrl+C на таблиці з підписами
-      // рядків копіював вікно, зсунуте на одну колонку, і за межею вибраного
-      // діапазону міг прихопити зайву колонку.
-      const range =
-        selection.current === null
-          ? null
-          : clampSelection(
-              {
-                ...selection.current.range,
-                fromColumn: dataColumnIndexOf(selection.current.range.fromColumn, data),
-                toColumn: dataColumnIndexOf(selection.current.range.toColumn, data),
-              },
-              data.rows.length,
-              data.columns.length,
-            );
-
-      const rows = range === null ? data.rows : data.rows.slice(range.fromRow, range.toRow + 1);
-      const columns =
-        range === null ? data.columns : data.columns.slice(range.fromColumn, range.toColumn + 1);
+      const text = copyText();
+      if (text === null) return;
 
       event.preventDefault();
-
-      // ⛔ `cellText`, а не `String(...)`: після `e470777a` десяткове приходить
-      // рядком у масштабі колонки, і `String()` клав би в буфер
-      // `5.0000000000` замість `5` — у КОЖНУ комірку аркуша, який оператор
-      // потім вставляє в Excel. Число те саме, аркуш — нечитабельний.
-      event.clipboardData.setData(
-        'text/plain',
-        toClipboard(rows.map((row) => columns.map((column) => cellText(row.cells[column.code])))),
-      );
+      event.clipboardData.setData('text/plain', text);
     },
-    [data],
+    [copyText],
   );
 
   const applyHistory = useCallback(
@@ -1815,6 +1820,33 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     [onPaste],
   );
   onPasteRef.current = onPasteGated;
+
+  // T4-08 (копія L8-16 для Ctrl+C): Ctrl+C одразу після Enter копіював ПОПЕРЕДНЄ виділення -
+  // фокус і виділення ще не перейшли. У вікні коміту копіювання відкладається до його кінця
+  // і пише текст НОВОГО виділення через `navigator.clipboard` (`clipboardData` події тоді
+  // вже недоступний). ⚠ Без перевірки `isInCellEditor`: вікно коміту - це редактор, що
+  // ЗАКРИВАЄТЬСЯ, і копіювати з нього нічого.
+  const copyTextRef = useRef(copyText);
+  copyTextRef.current = copyText;
+  const onCopyGated = useCallback(
+    (event: React.ClipboardEvent<HTMLDivElement>) => {
+      const container = gridContainer.current;
+      const deferred =
+        container !== null &&
+        deferWhileCommitting(container, () => {
+          const text = copyTextRef.current();
+          if (text !== null) void navigator.clipboard?.writeText(text).catch(() => undefined);
+        });
+
+      if (deferred) {
+        event.preventDefault();
+        return;
+      }
+
+      onCopy(event);
+    },
+    [onCopy],
+  );
   const gridContainerRef = useCallback(
     (node: HTMLDivElement | null) => {
       for (const cleanup of gridListenersCleanup.current) cleanup();
@@ -1929,7 +1961,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
       onRetry={() => void slice.refetch()}
     >
       {() => (
-    <Stack gap="xs" onPaste={onPasteGated} onCopy={onCopy} onKeyDown={onKeyDown}>
+    <Stack gap="xs" onPaste={onPasteGated} onCopy={onCopyGated} onKeyDown={onKeyDown}>
       {/*
        * ⛔ Перше, що видно: довідник не завантажився. Раніше тут не було
        * НІЧОГО — випадний список у комірці просто ставав порожнім, і оператор
