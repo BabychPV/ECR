@@ -396,6 +396,12 @@ public sealed class DeleteRegistryEntryHandler(
         {
             if (await registries.FindDefinitionByIdAsync(partRegistryId, ct).ConfigureAwait(false) is { } partRegistry)
             {
+                // ⛔ L1-05: каскад видаляє записи ДОЧІРНІХ довідників — потрібен той самий доступ на запис і до них
+                // (глобальне Registry.EditData або грант Write; заборона = 404), а не лише до батьківського.
+                await RegistryAccess
+                    .RequireAsync(access, currentUser, Permission, GrantLevel.Write, partRegistry.Id, ct)
+                    .ConfigureAwait(false);
+
                 ExternalRegistryGuard.EnsureManualEditAllowed(partRegistry);
                 partRegistries.Add(partRegistry);
             }
