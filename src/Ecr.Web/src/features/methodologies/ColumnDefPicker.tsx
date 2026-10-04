@@ -19,6 +19,21 @@ function columnDefLabel(column: ColumnDefSearchResultDto): string {
   return `${localized(column.headerL10n) || column.code} (${column.code}) · ${column.sheetCode}/${column.tableCode}`;
 }
 
+/**
+ * Підпис уже збереженої колонки з того, що знає рядок переліку (L9-40): код
+ * колонки й (для прив'язки) код таблиці; без коду — ідентифікатор, як і в
+ * самому переліку.
+ */
+export function savedColumnLabel(
+  columnDefId: number,
+  columnCode: string | null | undefined,
+  tableCode?: string | null,
+): string {
+  const column = columnCode ?? String(columnDefId);
+
+  return tableCode === null || tableCode === undefined ? column : `${column} · ${tableCode}`;
+}
+
 interface ColumnDefPickerProps {
   readonly label: string;
   readonly description: string;
@@ -27,6 +42,16 @@ interface ColumnDefPickerProps {
   /** Обрана колонка; `0` — ще не обрано. */
   readonly value: number;
   readonly onChange: (columnDefId: number) => void;
+
+  /**
+   * Підпис обраної колонки, коли її немає серед знайденого (`savedColumnLabel`).
+   *
+   * ⛔ L9-40: при правці збереженого рядка `value` — ідентифікатор колонки, а
+   * серед перших `ColumnSearchLimit` типового пошуку її майже ніколи немає;
+   * без варіанта з таким `value` Mantine показував ПОРОЖНЄ поле, наче колонку
+   * не обрано.
+   */
+  readonly currentLabel?: string | undefined;
 }
 
 /**
@@ -53,6 +78,7 @@ export function ColumnDefPicker({
   disabled,
   value,
   onChange,
+  currentLabel,
 }: ColumnDefPickerProps): JSX.Element {
   const [search, setSearch] = useState('');
   const [selected, setSelected] = useState<ColumnDefSearchResultDto | null>(null);
@@ -78,8 +104,12 @@ export function ColumnDefPicker({
     const found = columns.data ?? [];
     const all = selected !== null && !found.some((c) => c.id === selected.id) ? [selected, ...found] : found;
 
-    return all.map((column) => ({ value: String(column.id), label: columnDefLabel(column) }));
-  }, [columns.data, selected]);
+    const mapped = all.map((column) => ({ value: String(column.id), label: columnDefLabel(column) }));
+
+    return value !== 0 && currentLabel !== undefined && !all.some((c) => c.id === value)
+      ? [{ value: String(value), label: currentLabel }, ...mapped]
+      : mapped;
+  }, [columns.data, selected, value, currentLabel]);
 
   if (columns.error !== null && columns.error !== undefined) {
     return <ErrorAlert error={columns.error} onRetry={() => void columns.refetch()} />;
