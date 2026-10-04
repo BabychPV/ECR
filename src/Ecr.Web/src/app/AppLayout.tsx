@@ -7,6 +7,7 @@ import {
   type MouseEvent,
 } from 'react';
 import {
+  Alert,
   AppShell,
   Badge,
   Burger,
@@ -292,8 +293,13 @@ export function AppLayout(): JSX.Element {
     );
   }
 
-  if (session.isError || me === undefined) {
-    return <Navigate to="/login" replace state={{ from: location.pathname }} />;
+  // ⛔ L9-05: на вхід — лише коли профілю немає ЗОВСІМ. Невдалий ФОНОВИЙ
+  // перезапит `/me` (502 під час перезапуску служби, обрив VPN) лишає `data`, і
+  // TanStack ставить `isError` поверх неї: редирект тут викидав би з живого
+  // cookie-сеансу разом із незбереженими чернетками. Справжній `401` і так
+  // перехоплює `apiFetch`. `from` — у `?from=`: саме його читає `LoginPage`.
+  if (session.isLoadingError || me === undefined) {
+    return <Navigate to={`/login?from=${encodeURIComponent(location.pathname + location.search)}`} replace />;
   }
 
   // ⛔ Разовий пароль закриває все, крім його зміни (ФВ-6.18): інакше
@@ -493,6 +499,12 @@ export function AppLayout(): JSX.Element {
            * (кеш TanStack Query) нікуди не зникають.
            */}
           <Breadcrumbs />
+
+          {session.isRefetchError && (
+            <Alert color="yellow" role="status" mb="sm" data-session-refetch-error>
+              {t('err.http.unavailable')}
+            </Alert>
+          )}
 
           {/*
            * Контейнер переходу (`PR nav-arch #7`, директива B6/D) — ВСЕРЕДИНІ
