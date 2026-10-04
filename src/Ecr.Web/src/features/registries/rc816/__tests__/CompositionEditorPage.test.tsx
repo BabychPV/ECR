@@ -162,6 +162,20 @@ describe('CompositionEditorPage: master-detail без введення іден�
     await waitFor(() => expect(values()[0]?.hasAttribute('disabled')).toBe(false));
   });
 
+  it('після правки «Показати ще» додає довантажені рядки — вони не ховаються за знімком правок (L9-09)', async () => {
+    mockServer(['Registry.View', 'Registry.EditData'], { pagedCases: true });
+    show();
+    await screen.findByRole('button', { name: 'E77' });
+
+    const top = document.querySelector<HTMLElement>('[data-rc816-panel="STREAM_CASE"]') as HTMLElement;
+    fireEvent.change(within(top).getAllByRole('textbox', { name: 'CASE_NAME' })[0] as HTMLElement, { target: { value: 'Renamed' } });
+    fireEvent.click(within(top).getByRole('button', { name: /registries\.rc816\.more/ }));
+
+    expect(await within(top).findByRole('button', { name: 'E999' })).toBeTruthy();
+    // Правка лишилась на місці.
+    expect((within(top).getAllByRole('textbox', { name: 'CASE_NAME' })[0] as HTMLInputElement).value).toBe('Renamed');
+  });
+
   it('без Registry.EditData — лише перегляд: ні додавання, ні збереження', async () => {
     mockServer(['Registry.View']);
     show();

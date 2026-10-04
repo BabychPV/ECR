@@ -135,6 +135,8 @@ export interface ServerOptions {
   readonly threeLevels?: boolean;
   /** Збереження (не `dryRun`) відповідає лише після цього проміса — «запит у дорозі». */
   readonly holdCommit?: Promise<unknown>;
+  /** Кейси верхньої панелі — двома сторінками: 100 рядків і `nextCursor`, далі `E999`. */
+  readonly pagedCases?: boolean;
 }
 
 export function mockServer(permissions: string[], options: ServerOptions = {}): Server {
@@ -177,6 +179,13 @@ export function mockServer(permissions: string[], options: ServerOptions = {}): 
         const parent = url.searchParams.get('parentEntryId');
         if (code === 'STREAM') return json(page(StreamRows));
         if (code === 'STREAM_CASE') {
+          if (options.pagedCases === true) {
+            if (url.searchParams.get('cursor') === 'c2') {
+              return json({ items: [row(999, 'E999', { CASE_NAME: 'Late' }, 'Late')], nextCursor: null, totalCount: 101 });
+            }
+            const first = [...CaseRows, ...Array.from({ length: 98 }, (_, i) => row(1000 + i, `F${String(i)}`, { CASE_NAME: `F${String(i)}` }))];
+            return json({ items: first, nextCursor: 'c2', totalCount: 101 });
+          }
           return json(page(options.threeLevels === true ? StreamCaseRows.filter((item) => item.values['STREAM']?.value === parent) : CaseRows));
         }
         if (code === 'COMPONENT') return json(page(ComponentRows));

@@ -223,7 +223,15 @@ export function CompositionPanel({
     () => (rowsQuery.data?.pages ?? []).flatMap((page) => page.items).map(fromServer),
     [rowsQuery.data],
   );
-  const rows = edits ?? serverRows;
+  // ⚠ Правки — знімок рядків на момент першої правки; сторінки, довантажені «Показати ще» ПІСЛЯ
+  // неї, доливаються до знімка (перед новими рядками), інакше кнопка «нічого не робила» (L9-09).
+  const rows = useMemo(() => {
+    if (edits === null) return serverRows;
+    const known = new Set(edits.map((row) => row.key));
+    const loaded = serverRows.filter((row) => !known.has(row.key));
+    if (loaded.length === 0) return edits;
+    return [...edits.filter((row) => row.id !== null), ...loaded, ...edits.filter((row) => row.id === null)];
+  }, [edits, serverRows]);
   const dirty = dirtyCount(rows);
   const problems = useMemo(() => problemsByRow(result), [result]);
 
