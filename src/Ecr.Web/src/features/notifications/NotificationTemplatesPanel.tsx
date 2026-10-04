@@ -342,7 +342,13 @@ function Recipients({ eventKind }: { readonly eventKind: TemplatedEvent['eventKi
     );
   }
 
-  const byId = new Map(channels.data.map((channel) => [channel.id, channel]));
+  // ⛔ L9-29: вимкнений канал — не адресат. Розсилка бере лише ввімкнені канали
+  // (`INotificationDispatchStore.cs`, `TargetsOf`: `Channels.Where(c => c.IsEnabled && …)`), тож
+  // правило на вимкнений канал листа не дає — показати його в «хто отримає» означало б пообіцяти
+  // лист, якого не буде.
+  const byId = new Map(
+    channels.data.filter((channel) => channel.isEnabled).map((channel) => [channel.id, channel]),
+  );
   const roleCode = new Map((roles.data ?? []).map((role) => [role.id, role.code]));
   const enabled = rules.data.rules.filter(
     (rule) => rule.eventKind === eventKind && rule.isEnabled && byId.has(rule.channelId),
