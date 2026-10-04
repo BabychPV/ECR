@@ -1,5 +1,5 @@
 import { Suspense, useState, type JSX, type MouseEvent } from 'react';
-import { Anchor, Badge, Button, Group, Stack, Title } from '@mantine/core';
+import { Alert, Anchor, Badge, Button, Group, Stack, Title } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
 import { t } from '@/shared/i18n';
 import { can, useSession } from '@/shared/session/useSession';
@@ -29,7 +29,14 @@ export function DataSourcesTable(): JSX.Element {
 
   // ⛔ `Integration.Manage`: без нього кнопок правки НЕМАЄ, а не вимкнені —
   // сервер відповів би `403` на кожну.
-  const canManage = can(session.data, 'Integration.Manage');
+  //
+  // ⛔ L9-18: під симуляцією «очима користувача» сервер відхиляє КОЖЕН не-GET
+  // (`ECR-SIM-0403`), а `can()` бачить права ЦІЛІ. Тож перегляд (вкладки
+  // сутностей і подій, що читаються з тим самим правом) лишається за `canView`,
+  // а керування — лише поза симуляцією. Те саме правило, що `SheetActions.tsx`.
+  const canView = can(session.data, 'Integration.Manage');
+  const simulated = session.data?.isSimulation === true;
+  const canManage = canView && !simulated;
 
   const sources = useQuery({ queryKey: DataSourcesQueryKey, queryFn: listDataSources });
 
@@ -55,6 +62,12 @@ export function DataSourcesTable(): JSX.Element {
           </Button>
         )}
       </Group>
+
+      {canView && simulated && (
+        <Alert color="statusWarning" data-sources-simulation-read-only="">
+          {t('deny.SimulationReadOnly')}
+        </Alert>
+      )}
 
       <DataTable<DataSource>
         columns={[
@@ -134,6 +147,7 @@ export function DataSourcesTable(): JSX.Element {
       {opened !== undefined && (
         <DataSourceDrawer
           source={opened}
+          canView={canView}
           canManage={canManage}
           // Видалене з'єднання — закрита шухляда, а не застарілий `?panel=`.
           onDeleted={() => setPanel(null)}

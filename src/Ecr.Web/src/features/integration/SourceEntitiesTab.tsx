@@ -43,7 +43,14 @@ function policyOf(row: SourceEntityStatus): RegistrySyncPolicy {
  * ⚠ Сутності — з того самого запиту `['sources']`, що й таблиця та вкладка
  * розкладу; довідники — з `queryKeys.registries.list()`, як у редакторі колонки.
  */
-export function SourceEntitiesTab({ source }: { readonly source: DataSource }): JSX.Element {
+export function SourceEntitiesTab({
+  source,
+  readOnly = false,
+}: {
+  readonly source: DataSource;
+  /** L9-18: лише перегляд (симуляція) — без «Додати», прив'язки й політики. */
+  readonly readOnly?: boolean;
+}): JSX.Element {
   const queryClient = useQueryClient();
   const [adding, setAdding] = useState(false);
   const session = useSession();
@@ -99,9 +106,11 @@ export function SourceEntitiesTab({ source }: { readonly source: DataSource }): 
         <Text size="xs" c="dimmed">
           {t('sources.registryHint')}
         </Text>
-        <Button size="xs" onClick={() => setAdding(true)} data-add-entity-open="">
-          {t('sources.addEntity')}
-        </Button>
+        {!readOnly && (
+          <Button size="xs" onClick={() => setAdding(true)} data-add-entity-open="">
+            {t('sources.addEntity')}
+          </Button>
+        )}
       </Group>
 
       {/* ⛔ L10: відмова читання довідників — видно, а вибір вимкнено. */}
@@ -142,7 +151,7 @@ export function SourceEntitiesTab({ source }: { readonly source: DataSource }): 
                       aria-label={t('sources.registry')}
                       data={options}
                       value={entity.registryDefId == null ? Unbound : String(entity.registryDefId)}
-                      disabled={!registries.isSuccess || bind.isPending}
+                      disabled={readOnly || !registries.isSuccess || bind.isPending}
                       allowDeselect={false}
                       onChange={(value) =>
                         bind.mutate({
@@ -155,7 +164,8 @@ export function SourceEntitiesTab({ source }: { readonly source: DataSource }): 
                   </Table.Td>
                   <Table.Td>
                     {/* Політика — лише для прив'язаної сутності й лише з правом на дані довідника. */}
-                    {entity.registryDefId != null &&
+                    {!readOnly &&
+                      entity.registryDefId != null &&
                       canEditRegistrySyncPolicy(session.data, entity.registryDefId) && (
                         <Button
                           size="xs"
