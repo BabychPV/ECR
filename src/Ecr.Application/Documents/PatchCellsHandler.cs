@@ -2413,8 +2413,29 @@ public sealed partial class PatchCellsHandler(
         await audit.WriteCellChangesAsync(
             BuildAuditRecords(
                 request, changes.Upserts, changes.Deletes, context.UserId, now, context.Instance.DocumentId,
-                changes.RowKeyById, previous, isLateEdit, context.OutOfWindow),
+                changes.RowKeyById, previous, isLateEdit, AuditCorrelationId(), context.OutOfWindow),
             ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Кореляція запиту для <c>aud.CellChange.CorrelationId</c> (L6-14); <c>null</c> —
+    /// виклик поза запитом (фонова задача без автора), де <see cref="ICurrentUser.CorrelationId"/>
+    /// за контрактом кидає.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Доти колонка була <c>null</c> на КОЖНОМУ рядку: зв'язати правку в журналі з
+    /// рядком логу сервера (і з відповіддю, яку бачив користувач) було нічим.
+    /// </remarks>
+    private string? AuditCorrelationId()
+    {
+        try
+        {
+            return string.IsNullOrWhiteSpace(currentUser.CorrelationId) ? null : currentUser.CorrelationId;
+        }
+        catch (InvalidOperationException)
+        {
+            return null;
+        }
     }
 
     /// <summary>
@@ -2768,6 +2789,7 @@ public sealed partial class PatchCellsHandler(
         IReadOnlyDictionary<long, string> rowKeyById,
         IReadOnlyDictionary<CellAddress, CellValueData> previous,
         bool isLateEdit,
+        string? correlationId,
         HashSet<CellAddress>? outOfWindow = null)
     {
         var records = new List<CellChangeRecord>(upserts.Count + deletes.Count);
@@ -2802,7 +2824,7 @@ public sealed partial class PatchCellsHandler(
                 now, u.Address, DocumentId: documentId,
                 RowKey: rowKeyById.GetValueOrDefault(u.Address.TableRowId, string.Empty),
                 OldValue: Was(previous, u.Address), NewValue: Describe(u.Value),
-                userId, request.Origin, isLateEdit, CorrelationId: null,
+                userId, request.Origin, isLateEdit, CorrelationId: correlationId,
                 IsOutOfWindow: outOfWindow?.Contains(u.Address) == true));
         }
 
@@ -2812,7 +2834,7 @@ public sealed partial class PatchCellsHandler(
                 now, d, DocumentId: documentId,
                 RowKey: rowKeyById.GetValueOrDefault(d.TableRowId, string.Empty),
                 OldValue: Was(previous, d), NewValue: null,
-                userId, request.Origin, isLateEdit, CorrelationId: null,
+                userId, request.Origin, isLateEdit, CorrelationId: correlationId,
                 IsOutOfWindow: outOfWindow?.Contains(d) == true));
         }
 

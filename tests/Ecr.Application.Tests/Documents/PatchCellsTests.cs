@@ -1665,6 +1665,37 @@ public sealed class PatchCellsTests
             Arg.Is<CellChangeSet>(c => c.IsLateEdit == expected), Arg.Any<CancellationToken>());
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    public async Task Аудит_комірки_несе_CorrelationId_запиту()
+    {
+        // ⛔ L6-14: `aud.CellChange.CorrelationId` був `null` на кожному рядку —
+        // правку в журналі не було чим зв'язати з логом сервера й відповіддю.
+        _user.CorrelationId.Returns("req-l6-14");
+
+        await Handler().HandleAsync(
+            Request(new PatchRow("7001001", "0x0A", [new PatchCell("Volume", 7m)])),
+            CancellationToken.None);
+
+        Assert.Equal("req-l6-14", Assert.Single(Audited()).CorrelationId);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    public async Task Аудит_комірки_поза_запитом_пишеться_без_кореляції()
+    {
+        // ⚠ Поза запитом (фонова задача без автора) `ICurrentUser.CorrelationId`
+        // за контрактом кидає — запис від цього не мусить падати.
+        _user.CorrelationId.Returns(_ => throw new InvalidOperationException("поза запитом"));
+
+        var response = await Handler().HandleAsync(
+            Request(new PatchRow("7001001", "0x0A", [new PatchCell("Volume", 7m)])),
+            CancellationToken.None);
+
+        Assert.Equal(1, response.AppliedCells);
+        Assert.Null(Assert.Single(Audited()).CorrelationId);
+    }
+
     /// <summary>Записи, які обробник віддав у журнал аудиту.</summary>
     private IReadOnlyList<CellChangeRecord> Audited()
     {
