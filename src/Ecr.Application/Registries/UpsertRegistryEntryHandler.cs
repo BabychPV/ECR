@@ -119,6 +119,17 @@ public sealed class UpsertRegistryEntryHandler(
         // ⛔ D-211: записи External-довідника — лише синком з AF. Гард → запис → правила.
         ExternalRegistryGuard.EnsureManualEditAllowed(definition);
 
+        // ⛔ L1-13: батько з тіла запиту — живий запис ЦЬОГО довідника (ієрархія). Раніше не звірявся: запис
+        // чужого довідника ставав батьком, неіснуючий id — 500 на зовнішньому ключі (оракул існування id).
+        if (dto.ParentEntryId is { } parentId)
+        {
+            var parent = await registries.FindEntryAsync(parentId, ct).ConfigureAwait(false);
+            if (parent is null || parent.IsDeleted || parent.RegistryDefId != definition.Id)
+            {
+                throw RegistryAccess.EntryNotFound(parentId, definition.Code);
+            }
+        }
+
         // ⛔ Число текстом — за мовою користувача, до writer'а («12,5» не стає 125). Неоднозначне
         // («1,234» в en-US) — 422 з обома прочитаннями, до створення запису. Writer і синк лишаються
         // інваріантними (RegistryUserNumbers).

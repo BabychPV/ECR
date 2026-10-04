@@ -181,6 +181,45 @@ public sealed class RegistryDenyHttpTests(SqlServerFixture sql)
     }
 
     /// <summary>
+    /// L1-13: батько запису — живий запис ЦЬОГО довідника. До виправлення: запис чужого довідника ставав батьком (201),
+    /// неіснуючий id давав 500 на зовнішньому ключі.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task L1_13_parentEntryId_з_чужого_або_неіснуючого_запису_404_а_свого_довідника_201()
+    {
+        using var app = new EcrApiFactory(sql);
+        var stand = await SeedAsync();
+        using var user = await SignedInAsync(app, denyRegistryId: null);
+        var uri = new Uri($"/api/v1/registries/{stand.OpenCode}/entries", UriKind.Relative);
+
+        object Body(string code, long? parent) => new
+        {
+            id = (long?)null,
+            registryDefId = stand.OpenRegistryId,
+            code,
+            display = new { values = new Dictionary<string, string> { ["en"] = code } },
+            parentEntryId = parent,
+            values = new Dictionary<string, object?>(),
+        };
+
+        var foreign = await user.PostAsJsonAsync(uri, Body("PF1", stand.DeniedEntryId));
+        Assert.Equal(HttpStatusCode.NotFound, foreign.StatusCode);
+
+        var missing = await user.PostAsJsonAsync(uri, Body("PF2", 987654321));
+        Assert.Equal(HttpStatusCode.NotFound, missing.StatusCode);
+
+        await using (var db = new EcrDbContext(Options()))
+        {
+            Assert.False(await db.RegistryEntries.AnyAsync(e => e.RegistryDefId == stand.OpenRegistryId && (e.Code == "PF1" || e.Code == "PF2")));
+        }
+
+        var own = await user.PostAsJsonAsync(uri, Body("PF3", stand.OpenEntryId));
+        Assert.True(own.StatusCode == HttpStatusCode.Created, $"{own.StatusCode}: {await own.Content.ReadAsStringAsync()}\n{app.ErrorsText}");
+    }
+
+    /// <summary>
     /// L5-08: перевірка ключа, перемикання джерела й зв'язки в описі не обходять заборону на довідник.
     /// До виправлення: keys/check віддавав 200/422 замість 404, source-kind перемикав заборонений довідник,
     /// а <c>relations[].targetRegistryCode</c> віддавав код забороненої цілі.
