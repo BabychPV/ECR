@@ -63,7 +63,7 @@ function respond(): void {
             type: 'about:blank',
             title: 'Conflict',
             status: 409,
-            errorCode: 'ECR-SRC-0409',
+            errorCode: 'ECR-INT-0409',
             detail: 'Mapping has links.',
             correlationId: 'corr-l9-01',
           },
