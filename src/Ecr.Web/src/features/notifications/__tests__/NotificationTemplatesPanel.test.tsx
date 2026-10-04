@@ -305,6 +305,14 @@ describe('notificationTemplates: правила сервера', () => {
     expect(placeholdersOf('{project} {period} {project} {Period}')).toEqual(['Period', 'period', 'project']);
   });
 
+  it('L9-31: \\w як у .NET — юнікодний: кириличний плейсхолдер — плейсхолдер (невідомий), а не текст', () => {
+    expect(placeholdersOf('{період} {project} {café_1}')).toEqual(['café_1', 'project', 'період']);
+    expect(templateProblem('ECR: {період} {project}', EnSubject, true)).toEqual({
+      kind: 'unknownPlaceholder',
+      names: ['період'],
+    });
+  });
+
   it('мова за замовчуванням: порожньо — ні; переклад: порожньо — так (лист піде еталоном)', () => {
     expect(templateProblem('  ', EnSubject, true)).toEqual({ kind: 'empty' });
     expect(templateProblem('', EnSubject, false)).toBeNull();

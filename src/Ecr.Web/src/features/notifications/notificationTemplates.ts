@@ -47,11 +47,16 @@ export const TemplatePlaceholders = ['period', 'project'] as const;
  *
  * ⚠ Рівно правило сервера (`UiStringResolver.Placeholders`, шаблон `\{(\w+)\}`, порядок ordinal):
  * інакше клієнт пропустив би те, що сервер відхилить `422`, або навпаки.
+ *
+ * ⛔ L9-31: `\w` у .NET — ЮНІКОДНИЙ (`[\p{L}\p{Mn}\p{Nd}\p{Pc}]`), у JS — лише `[A-Za-z0-9_]`.
+ * Доти `{період}` клієнт плейсхолдером не вважав (ні «невідомий», ні розбіжність набору), а сервер
+ * вважав — і відповідав `422`, або лист ішов із фігурними дужками. Тому клас виписано явно з
+ * прапорцем `u`. Порядок ordinal — порівняння кодових одиниць UTF-16, як `StringComparer.Ordinal`.
  */
 export function placeholdersOf(text: string): string[] {
   const found = new Set<string>();
 
-  for (const match of text.matchAll(/\{(\w+)\}/g)) {
+  for (const match of text.matchAll(/\{([\p{L}\p{Mn}\p{Nd}\p{Pc}]+)\}/gu)) {
     if (match[1] !== undefined) found.add(match[1]);
   }
 
