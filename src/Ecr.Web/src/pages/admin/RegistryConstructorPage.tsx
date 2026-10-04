@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type JSX } from 'react';
+import { useEffect, useMemo, useRef, useState, type JSX } from 'react';
 import { Badge, Group, Skeleton, Tabs, Text } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
 import { useParams } from 'react-router-dom';
@@ -18,7 +18,7 @@ import {
   RegistryRelations,
   RegistryRules,
 } from '@/features/registries/RegistryConstructor';
-import { RegistryDraftPanel } from '@/features/registries/RegistryDraftPanel';
+import { RegistryDraftPanel, type SaveRegistryDraftBody } from '@/features/registries/RegistryDraftPanel';
 import { CompositionEditorLink } from '@/features/registries/rc816/CompositionEditorLink';
 import { RegistryUsagePanel } from '@/features/registries/RegistryUsage';
 import {
@@ -45,6 +45,16 @@ import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { PageHeader } from '@/shared/ui/PageHeader';
+
+/** Чи форма досі та сама, що пішла в збереження чернетки (поля, правила, причина). */
+function sameDraft(sent: SaveRegistryDraftBody, current: SaveRegistryDefinitionDto | null): boolean {
+  if (current === null) return false;
+
+  return (
+    JSON.stringify([sent.fields, sent.rules, sent.reason]) ===
+    JSON.stringify([current.fields, current.rules, current.reason])
+  );
+}
 
 /**
  * Конструктор довідника (`ФВ-8.12`): поля, зв'язки, правила, мапінг, історія.
@@ -164,6 +174,10 @@ export function RegistryConstructorPage(): JSX.Element {
     [registries.data],
   );
 
+  /** Тіло останнього успішного збереження чернетки, доки його не спожив засів форми (L9-39). */
+  const sentDraft = useRef<SaveRegistryDraftBody | null>(null);
+  const latestRequest = useRef<SaveRegistryDefinitionDto | null>(null);
+
   /*
    * ⚠ Чернетка правил і нових полів синхронізується з відповіддю сервера, а
    * не будується в рендері: інакше кожен натиск клавіші відкочував би поле до
@@ -183,6 +197,12 @@ export function RegistryConstructorPage(): JSX.Element {
     if (definition.data === undefined || draft.isPending) return;
 
     const saved = draft.data?.draft ?? null;
+
+    // ⛔ L9-39: це перечитування після НАШОГО збереження, а форму вже правили далі, поки запит
+    // їхав, — сервер повернув рівно надіслане, і засів відкотив би новіші правки.
+    const sent = sentDraft.current;
+    sentDraft.current = null;
+    if (saved !== null && sent !== null && !sameDraft(sent, latestRequest.current)) return;
 
     if (saved === null) {
       // Нові поля скидаються тут само: після публікації вони вже стали
@@ -219,6 +239,10 @@ export function RegistryConstructorPage(): JSX.Element {
         : null,
     [ready, definition.data, rules, newFields, reason, linkEdits],
   );
+
+  // ⚠ Ефект засіву читає поточну форму через ref: у залежностях `request` засів спрацьовував би
+  // на кожну правку.
+  latestRequest.current = request;
 
   return (
     <>
@@ -264,6 +288,9 @@ export function RegistryConstructorPage(): JSX.Element {
               request={request}
               reason={reason}
               onReasonChange={setReason}
+              onSaved={(sent) => {
+                sentDraft.current = sent;
+              }}
             />
 
             <Tabs defaultValue="fields" keepMounted={false}>
