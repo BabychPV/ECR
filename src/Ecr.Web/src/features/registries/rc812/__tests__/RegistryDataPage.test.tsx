@@ -150,6 +150,39 @@ describe('Дані довідника: табличний редактор', () 
     expect(committed(sent)).toHaveLength(0);
   });
 
+  it('поки пакет зберігається, комірки не редагуються і вставка не приймається — правка не зникне мовчки', async () => {
+    let release: () => void = () => undefined;
+    const sent = mockServer({ holdCommit: new Promise<void>((resolve) => (release = resolve)) });
+    showDataPage();
+    const grid = await screen.findByRole('grid');
+
+    await editText(0, 2, '50.5');
+    fireEvent.keyDown(window, { key: 's', ctrlKey: true });
+    await vi.waitFor(() => {
+      expect(committed(sent)).toHaveLength(1);
+    });
+
+    // Запит у дорозі: Enter не відкриває редактор, вставка не додає рядків.
+    const other = cell(1, 2);
+    act(() => other.focus());
+    fireEvent.keyDown(other, { key: 'Enter' });
+    expect(within(other).queryByRole('textbox')).toBeNull();
+    fireEvent.paste(grid, { clipboardData: { getData: () => 'x\ty\nz\tw\n' } });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(document.querySelectorAll('[data-row-key^="n:"]')).toHaveLength(0);
+
+    await act(async () => {
+      release();
+      await Promise.resolve();
+    });
+    expect(await screen.findByText(/^Saved /)).toBeDefined();
+
+    // Після відповіді редагування знову доступне.
+    act(() => other.focus());
+    fireEvent.keyDown(other, { key: 'Enter' });
+    expect(await within(other).findByRole('textbox')).toBeDefined();
+  });
+
   it('без Registry.EditData — лише читання: пояснення словами, без збереження, Enter не редагує', async () => {
     mockServer({ permissions: ['Registry.View'] });
     showDataPage();

@@ -133,6 +133,8 @@ export interface Server {
 export interface ServerOptions {
   /** Три рівні: `STREAM → STREAM_CASE → GAS_COMPOSITION`. */
   readonly threeLevels?: boolean;
+  /** Збереження (не `dryRun`) відповідає лише після цього проміса — «запит у дорозі». */
+  readonly holdCommit?: Promise<unknown>;
 }
 
 export function mockServer(permissions: string[], options: ServerOptions = {}): Server {
@@ -184,6 +186,7 @@ export function mockServer(permissions: string[], options: ServerOptions = {}): 
       if (match?.[2] === 'entries/batch') {
         const body = JSON.parse(String(init?.body)) as RegistryBatchRequest;
         server.batches.push({ code, dryRun: url.searchParams.get('dryRun'), body });
+        if (url.searchParams.get('dryRun') === 'false' && options.holdCommit !== undefined) await options.holdCommit;
         return json({
           added: 1,
           applied: url.searchParams.get('dryRun') === 'false',

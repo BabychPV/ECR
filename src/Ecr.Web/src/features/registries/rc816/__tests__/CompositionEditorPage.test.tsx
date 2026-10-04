@@ -141,6 +141,27 @@ describe('CompositionEditorPage: master-detail без введення іден�
     expect(screen.getByRole('button', { name: 'E79' }).getAttribute('aria-pressed')).toBe('false');
   });
 
+  it('поки пакет зберігається, комірки й додавання заблоковані — правка під час запиту не губиться мовчки', async () => {
+    let release: () => void = () => undefined;
+    const server = mockServer(['Registry.View', 'Registry.EditData'], {
+      holdCommit: new Promise<void>((resolve) => (release = resolve)),
+    });
+    show();
+    const table = await openCase('E77');
+    const panel = table.closest<HTMLElement>('[data-rc816-panel]') as HTMLElement;
+
+    const values = (): HTMLElement[] => within(table).getAllByRole('textbox', { name: 'MOL_PCT' });
+    fireEvent.change(values()[0] as HTMLElement, { target: { value: '60.2' } });
+    fireEvent.click(within(panel).getByRole('button', { name: /registries\.rc816\.save/ }));
+    await waitFor(() => expect(server.batches).toHaveLength(1));
+
+    expect(values().every((input) => input.hasAttribute('disabled'))).toBe(true);
+    expect(within(panel).getByRole('button', { name: /registries\.rc816\.addPart/ }).hasAttribute('disabled')).toBe(true);
+
+    release();
+    await waitFor(() => expect(values()[0]?.hasAttribute('disabled')).toBe(false));
+  });
+
   it('без Registry.EditData — лише перегляд: ні додавання, ні збереження', async () => {
     mockServer(['Registry.View']);
     show();

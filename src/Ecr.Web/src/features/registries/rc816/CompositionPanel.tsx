@@ -241,6 +241,9 @@ export function CompositionPanel({
   const manualCode = definition.codeMode !== 'Auto';
   const external = definition.sourceKind === 'External';
   const locked = readOnly || external;
+  // ⚠ Поки пакет у дорозі, правки заблоковані: після успіху `setEdits(null)` знімає ВСІ правки,
+  // і набране під час запиту зникло б мовчки, а сітка показала б серверне значення.
+  const inputLocked = locked || busy;
 
   function edit(change: (all: readonly PendingRow[]) => PendingRow[]): void {
     setEdits(change(rows));
@@ -359,7 +362,7 @@ export function CompositionPanel({
                           size="xs"
                           aria-label={t('registries.code')}
                           value={row.code}
-                          disabled={locked}
+                          disabled={inputLocked}
                           onChange={(event) => edit((all) => setCode(all, row.key, event.currentTarget.value))}
                         />
                       ) : onSelect !== undefined && row.id !== null ? (
@@ -389,7 +392,7 @@ export function CompositionPanel({
                           row={row}
                           targetCode={lookupTargets(field)}
                           asOf={asOf}
-                          readOnly={locked}
+                          readOnly={inputLocked}
                           onChange={(value) => edit((all) => setValue(all, row.key, field.code, value))}
                         />
                       </Table.Td>
@@ -400,6 +403,7 @@ export function CompositionPanel({
                           size="compact-xs"
                           variant="subtle"
                           color={row.deleted ? 'gray' : 'statusError'}
+                          disabled={busy}
                           onClick={() => edit((all) => toggleDelete(all, row.key))}
                         >
                           {row.deleted ? t('registries.rc816.undoDelete') : t('registries.rc816.delete')}
@@ -445,6 +449,7 @@ export function CompositionPanel({
           <Button
             size="xs"
             variant="default"
+            disabled={busy}
             onClick={() => {
               counter.current += 1;
               edit((all) => [
@@ -468,6 +473,7 @@ export function CompositionPanel({
             <Button
               size="xs"
               variant="subtle"
+              disabled={busy}
               onClick={() => {
                 setEdits(null);
                 setResult(null);

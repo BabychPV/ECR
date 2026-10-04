@@ -29,6 +29,11 @@ export interface RegistryDataGridProps {
   /** Скільки рядків у довіднику всього (`aria-rowcount`). */
   readonly totalCount: number;
   readonly readOnly: boolean;
+  /**
+   * Пакет зберігається: введення й вставка заблоковані до відповіді. Після успіху сторінка
+   * знімає ВСІ чернетки — правка, зроблена під час запиту, зникла б мовчки.
+   */
+  readonly busy?: boolean;
   /** Чи вводить людина код нового запису (`CodeMode = Manual`). */
   readonly manualCode: boolean;
   readonly problems: ReadonlyMap<string, readonly CellProblem[]>;
@@ -60,6 +65,7 @@ interface Position {
  */
 export function RegistryDataGrid(props: RegistryDataGridProps): JSX.Element {
   const { fields, rows, readOnly } = props;
+  const locked = readOnly || props.busy === true;
   const [active, setActive] = useState<Position>({ r: 0, c: 0 });
   const [editing, setEditing] = useState<Position | null>(null);
   const tableRef = useRef<HTMLTableElement>(null);
@@ -112,7 +118,7 @@ export function RegistryDataGrid(props: RegistryDataGridProps): JSX.Element {
       props.onOpen(target.rowKey);
       return;
     }
-    if (readOnly || target === undefined) return;
+    if (locked || target === undefined) return;
 
     if (ctrl && event.key === 'Enter') {
       event.preventDefault();
@@ -132,7 +138,7 @@ export function RegistryDataGrid(props: RegistryDataGridProps): JSX.Element {
   };
 
   const onPaste = (event: ClipboardEvent<HTMLTableElement>): void => {
-    if (readOnly || editing !== null) return;
+    if (locked || editing !== null) return;
     const text = event.clipboardData.getData('text/plain');
     if (text === '') return;
     event.preventDefault();
@@ -197,6 +203,7 @@ export function RegistryDataGrid(props: RegistryDataGridProps): JSX.Element {
                       size="xs"
                       aria-label={t('registries.data.newCode', { row: r + 1 })}
                       value={draft?.code ?? ''}
+                      readOnly={props.busy === true}
                       onChange={(event) => props.onEditCode(rowKey, event.currentTarget.value)}
                     />
                   ) : (
@@ -237,11 +244,11 @@ export function RegistryDataGrid(props: RegistryDataGridProps): JSX.Element {
                       data-cell={`${String(r)}:${String(c)}`}
                       data-edited={edited ? 'true' : undefined}
                       aria-invalid={invalid ? true : undefined}
-                      aria-readonly={readOnly ? true : undefined}
+                      aria-readonly={locked ? true : undefined}
                       title={invalid ? message : undefined}
                       onFocus={() => setActive(pos)}
                       onDoubleClick={() => {
-                        if (!readOnly && !deleted) setEditing(pos);
+                        if (!locked && !deleted) setEditing(pos);
                       }}
                       onKeyDown={(event) => onCellKey(event, pos)}
                       style={{
@@ -305,6 +312,7 @@ export function RegistryDataGrid(props: RegistryDataGridProps): JSX.Element {
                           aria-label={`${deleted ? t('registries.data.restoreRow') : t('registries.data.deleteRow')}: ${rowLabel}`}
                           aria-pressed={deleted}
                           onClick={() => props.onToggleDelete(rowKey)}
+                          disabled={props.busy === true}
                         >
                           {deleted ? '↺' : '✕'}
                         </ActionIcon>

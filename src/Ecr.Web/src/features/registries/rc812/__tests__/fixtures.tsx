@@ -95,6 +95,8 @@ export interface ServerOptions {
   /** Відповідь на пакет; за замовчуванням — усе пройшло. */
   readonly batch?: (sent: SentBatch) => RegistryBatchResult;
   readonly rows?: RegistryRow[];
+  /** Збереження (не `dryRun`) відповідає лише після цього проміса — «запит у дорозі». */
+  readonly holdCommit?: Promise<unknown>;
 }
 
 const json = (body: unknown): Response =>
@@ -141,6 +143,7 @@ export function mockServer(options: ServerOptions = {}): SentBatch[] {
           items: (JSON.parse(String(init?.body)) as { items: RegistryBatchItem[] }).items,
         };
         sent.push(batch);
+        if (!batch.dryRun && options.holdCommit !== undefined) await options.holdCommit;
         return json((options.batch ?? passed)(batch));
       }
       if (url.includes('/definition')) return json(definition);

@@ -342,7 +342,7 @@ export function RegistryDataPage(): JSX.Element {
             </Suspense>
           )}
           {!readOnly && (
-            <Button size="xs" variant="default" onClick={() => addRow()}>
+            <Button size="xs" variant="default" disabled={save.isPending} onClick={() => addRow()}>
               {t('registries.newEntry')}
             </Button>
           )}
@@ -380,6 +380,7 @@ export function RegistryDataPage(): JSX.Element {
               rows={gridRows}
               totalCount={totalCount + newKeys.length}
               readOnly={readOnly}
+              busy={save.isPending}
               manualCode={manualCode}
               problems={problems}
               duplicates={duplicates}
