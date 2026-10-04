@@ -187,6 +187,9 @@ describe('Σ без втрати знаків', () => {
     expect(formatDecimal(parseDecimal('1 234.5') ?? { units: 0n, scale: 0 })).toBe('1234.5');
     expect(parseDecimal('abc')).toBeNull();
     expect(parseDecimal('-')).toBeNull();
+    // ⚠ Неоднозначне (розряди чи дріб?) у Σ не вгадується — сервер його однаково відхилить (L9-04).
+    expect(parseDecimal('1,234')).toBeNull();
+    expect(formatDecimal(parseDecimal('1 234,5') ?? { units: 0n, scale: 0 })).toBe('1234.5');
     expect(sumDecimals(['1', 'x', '', null, undefined])).toEqual({ sum: { units: 1n, scale: 0 }, skipped: 1 });
   });
 

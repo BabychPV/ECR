@@ -1,6 +1,7 @@
 import type { components } from '@/api/schema';
 import type { RegistryBatchItem, RegistryBatchResult, RegistryRow } from '@/features/registries/rows/api';
 import { t } from '@/shared/i18n';
+import { normalizeUserDecimal } from '@/shared/format/userDecimal';
 import { canonicalKey, type KeyPart, type KeyPartType } from '@/features/registries/keys/normalizeKey';
 
 /**
@@ -76,6 +77,19 @@ export function setCell(
   return { ...draft, values, displays };
 }
 
+/**
+ * Введене людиною число → інваріантний запис (`12,5` → `12.5`, `1 000` → `1000`) для полів
+ * `Int`/`Decimal`; решта типів і неоднозначне (`1,234`) — як є, їх назве `validateCell`.
+ *
+ * ⚠ Саме інваріантний рядок іде в пакет: сервер читає його однаково в будь-якій мові, і та сама
+ * вставка з ru/kz Excel не стає червоною лише через кому.
+ */
+export function normalizeCellInput(field: Pick<RegistryField, 'dataType'>, value: string | null): string | null {
+  if (value === null || (field.dataType !== 'Int' && field.dataType !== 'Decimal')) return value;
+  const read = normalizeUserDecimal(value);
+  return read.kind === 'number' ? read.text : value;
+}
+
 /** Чинне значення комірки: правка, інакше збережене. */
 export function cellValue(row: RegistryRow | undefined, draft: RowDraft | undefined, field: string): string | null {
   if (draft !== undefined && field in draft.values) return draft.values[field] ?? null;
@@ -100,20 +114,24 @@ export function isDirty(draft: RowDraft): boolean {
 /**
  * Перевірка значення до сервера. Повертає вид відмови або `null` (текст — `checkText`).
  *
- * ⛔ Число — лише інваріантне, з крапкою: `12,5` сервер відкинув би як неоднозначне
- * (`valueAmbiguousSeparator`), і людина дізналася б про це лише на збереженні.
+ * ⚠ Число читається за правилами сервера (`CultureNumberReader`, `normalizeUserDecimal`):
+ * `12,5` — 12.5 у будь-якій мові, і відмовою тут не є. Неоднозначне лише `1,234` (кома й рівно
+ * три цифри — розряди чи дріб?) — `ambiguous`, і людина дізнається про це до збереження.
  */
-export type CellCheck = 'required' | 'notInteger' | 'decimalDot' | 'notNumber' | 'notDate' | 'notBool';
+export type CellCheck = 'required' | 'notInteger' | 'ambiguous' | 'notNumber' | 'notDate' | 'notBool';
 
 export function validateCell(field: RegistryField, value: string | null): CellCheck | null {
   if (value === null) return field.isRequired ? 'required' : null;
 
   switch (field.dataType) {
-    case 'Int':
-      return /^-?\d+$/.test(value) ? null : 'notInteger';
-    case 'Decimal':
-      if (/^-?\d+,\d+$/.test(value)) return 'decimalDot';
-      return /^-?(\d+(\.\d*)?|\.\d+)$/.test(value) ? null : 'notNumber';
+    case 'Int': {
+      const read = normalizeUserDecimal(value);
+      return read.kind === 'number' && /^-?\d+$/.test(read.text) ? null : 'notInteger';
+    }
+    case 'Decimal': {
+      const read = normalizeUserDecimal(value);
+      return read.kind === 'number' ? null : read.kind;
+    }
     case 'Date':
       return isIsoDate(value) ? null : 'notDate';
     case 'Bool':
@@ -130,7 +148,7 @@ export function checkText(check: CellCheck): string {
       return t('registries.data.required');
     case 'notInteger':
       return t('registries.data.notInteger');
-    case 'decimalDot':
+    case 'ambiguous':
       return t('registries.data.decimalDot');
     case 'notNumber':
       return t('registries.data.notNumber');

@@ -36,6 +36,7 @@ import {
   existingRowKey,
   isDirty,
   newDraft,
+  normalizeCellInput,
   parseBlock,
   pastedBool,
   planBlockPaste,
@@ -145,8 +146,11 @@ export function RegistryDataPage(): JSX.Element {
     setSavedAt(null);
   };
 
-  const onEdit = (rowKey: string, field: string, value: string | null, display?: string): void =>
-    update(rowKey, (draft) => setCell(draft, byKey.get(rowKey), field, value, display));
+  const onEdit = (rowKey: string, field: string, value: string | null, display?: string): void => {
+    const typed = fields.find((f) => f.code === field);
+    const normalized = typed === undefined ? value : normalizeCellInput(typed, value);
+    update(rowKey, (draft) => setCell(draft, byKey.get(rowKey), field, normalized, display));
+  };
 
   const addRow = (): string => {
     seq.current += 1;

@@ -15,7 +15,8 @@ import { mockServer, passed, showDataPage, storedRows, type SentBatch } from './
  *   - `cellDisplay` повертає `value` замість `display` → «Lookup показує назву цілі…»;
  *   - без виклику збереження в обробнику `Ctrl+S` → «правка числа… Ctrl+S…» і «Ctrl+Shift+Delete…»;
  *   - `toBatch` без `baseVersion` наявного рядка → «правка числа… baseVersion…»;
- *   - `validateCell` без гілки коми → «кома в десятковому…»;
+ *   - `validateCell` без гілки неоднозначного → «неоднозначна кома (1,234)…»;
+ *   - (2026-10-04, L9-04) `onEdit` без `normalizeCellInput` → «вставка 12,5 з Excel…»;
  *   - `problemsByRow` губить `field` → «помилка dryRun лягає в свою комірку…»;
  *   - `canSave` без `duplicates.size === 0` → «дубль ключа… блокує збереження».
  */
@@ -76,11 +77,30 @@ describe('Дані довідника: табличний редактор', () 
     expect(await screen.findByText(/^Saved /)).toBeDefined();
   });
 
-  it('кома в десятковому підсвічена до сервера і не дає зберегти', async () => {
+  it('вставка 12,5 з Excel (ru/kz) дає 12.5 у пакеті й не блокує збереження (L9-04)', async () => {
+    const sent = mockServer();
+    showDataPage();
+    const grid = await screen.findByRole('grid');
+
+    act(() => cell(0, 2).focus());
+    fireEvent.paste(grid, { clipboardData: { getData: () => '12,5\n7,25\n' } });
+    await vi.waitFor(() => {
+      expect(cell(1, 2).getAttribute('data-edited')).toBe('true');
+    });
+    expect(cell(0, 2).getAttribute('aria-invalid')).toBeNull();
+
+    fireEvent.keyDown(window, { key: 's', ctrlKey: true });
+    await vi.waitFor(() => {
+      expect(committed(sent)).toHaveLength(1);
+    });
+    expect(committed(sent)[0]?.items.map((item) => item.values)).toEqual([{ T_C: '12.5' }, { T_C: '7.25' }]);
+  });
+
+  it('неоднозначна кома (1,234) підсвічена до сервера і не дає зберегти', async () => {
     showDataPage();
     await screen.findByRole('grid');
 
-    await editText(0, 2, '50,5');
+    await editText(0, 2, '1,234');
 
     await vi.waitFor(() => {
       expect(cell(0, 2).getAttribute('aria-invalid')).toBe('true');

@@ -49,6 +49,19 @@ describe('batchItems', () => {
     ]);
   });
 
+  it('числові поля йдуть інваріантним записом за правилами сервера — як у сітці даних (L9-04)', () => {
+    let rows = [newRow('n1', { field: 'CASE', parentId: 77 })];
+    rows = setValue(rows, 'n1', 'MOL_PCT', '12,5');
+    rows = setValue(rows, 'n1', 'NOTE', '12,5');
+    const existing = setValue([fromServer(Row)], 'e501', 'MOL_PCT', '1 234,5');
+    const ambiguous = setValue([fromServer(Row)], 'e501', 'MOL_PCT', '1,234');
+
+    expect(batchItems(rows, new Set(['MOL_PCT']))[0]?.values).toEqual({ CASE: '77', MOL_PCT: '12.5', NOTE: '12,5' });
+    expect(batchItems(existing, new Set(['MOL_PCT']))[0]?.values).toEqual({ MOL_PCT: '1234.5' });
+    // Неоднозначне — як є: сервер назве його `valueAmbiguousSeparator` у рядку пакета.
+    expect(batchItems(ambiguous, new Set(['MOL_PCT']))[0]?.values).toEqual({ MOL_PCT: '1,234' });
+  });
+
   it('новий рядок з ручним кодом надсилає код', () => {
     const rows = setCode([newRow('n1', null)], 'n1', ' CH4 ');
     expect(batchItems(rows)[0]).toMatchObject({ code: 'CH4', id: null });

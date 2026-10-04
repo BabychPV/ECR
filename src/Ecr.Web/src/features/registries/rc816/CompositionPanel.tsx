@@ -238,6 +238,10 @@ export function CompositionPanel({
   }, [registries]);
 
   const columns = definition.fields.filter((field) => !(isPart && field.code === link.fieldCode));
+  const numeric = useMemo(
+    () => new Set(definition.fields.filter((field) => field.dataType === 'Int' || field.dataType === 'Decimal').map((field) => field.code)),
+    [definition.fields],
+  );
   const manualCode = definition.codeMode !== 'Auto';
   const external = definition.sourceKind === 'External';
   const locked = readOnly || external;
@@ -251,7 +255,7 @@ export function CompositionPanel({
   }
 
   async function submit(dryRun: boolean): Promise<void> {
-    const items = batchItems(rows);
+    const items = batchItems(rows, numeric);
     if (items.length === 0) return;
 
     setBusy(true);

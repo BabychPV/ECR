@@ -5,6 +5,7 @@ import {
   duplicateKeys,
   isDirty,
   newDraft,
+  normalizeCellInput,
   parseBlock,
   pastedBool,
   planBlockPaste,
@@ -25,6 +26,7 @@ import {
  *   - `setCell` без зняття повернутого значення → «повернення до збереженого знімає правку» червоний;
  *   - `duplicateKeys` без `key.ignoreCase` (завжди `true`) → «регістр важить, коли ключ…» червоний;
  *   - `validateCell` без гілки коми → «кома в десятковому» червоний;
+ *   - (2026-10-04, L9-04) `validateCell` знову відкидає `12,5` → «кома за правилами сервера» червоний;
  *   - `problemsByRow` губить `field` → «помилки звіту адресуються рядком і полем» червоний.
  */
 
@@ -106,11 +108,21 @@ describe('пакет із чернеток', () => {
 });
 
 describe('перевірка комірки до сервера', () => {
-  it('кома в десятковому — окрема підказка, крапка проходить', () => {
+  it('кома за правилами сервера: 12,5 — число, неоднозначне лише 1,234', () => {
     const decimal = field('MOL', 'Decimal');
-    expect(validateCell(decimal, '12,5')).toBe('decimalDot');
+    expect(validateCell(decimal, '12,5')).toBeNull();
+    expect(validateCell(decimal, '1,234')).toBe('ambiguous');
     expect(validateCell(decimal, '12.4246690')).toBeNull();
     expect(validateCell(decimal, 'abc')).toBe('notNumber');
+    expect(validateCell(field('N', 'Int'), '1 000')).toBeNull();
+  });
+
+  it('введене число йде в пакет інваріантним записом; неоднозначне й текст — як є', () => {
+    expect(normalizeCellInput(field('MOL', 'Decimal'), '12,5')).toBe('12.5');
+    expect(normalizeCellInput(field('N', 'Int'), '1 000')).toBe('1000');
+    expect(normalizeCellInput(field('MOL', 'Decimal'), '1,234')).toBe('1,234');
+    expect(normalizeCellInput(field('A', 'String'), '12,5')).toBe('12,5');
+    expect(normalizeCellInput(field('MOL', 'Decimal'), null)).toBeNull();
   });
 
   it('обовʼязкове порожнє, ціле з дробом, неіснуюча дата', () => {
