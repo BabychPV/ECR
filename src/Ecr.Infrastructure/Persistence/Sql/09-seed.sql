@@ -6554,8 +6554,12 @@ USING (VALUES
     (N'expr.rangeNotAccepted', N'en', N'{function} takes a single value, not a range of rows. Wrap the range in SUM, AVERAGE, MIN or MAX.', 1),
     -- COLL:an38 ── кінець секції ──
     -- COLL:cl5 ── CL-5: картка jobs жовтіє, коли останнє зведення збоїв нікому не доставлено; ru/kz — порцією COLL:cl5 у блоці I18N нижче ──
-    (N'health.jobs.notificationsUndelivered', N'en', N'The last failure digest reached no one: {count} failures, 0 sent. Check the mail server settings, notification channels and alert recipients.', 1)
+    (N'health.jobs.notificationsUndelivered', N'en', N'The last failure digest reached no one: {count} failures, 0 sent. Check the mail server settings, notification channels and alert recipients.', 1),
     -- COLL:cl5 ── кінець секції ──
+    -- COLL:an39b ── хвіст сітки після AN-39 (AN-28 P2-1/P2-2, L8-11/17/20); ru/kz — власна порція нижче ──
+    (N'document.heldEditBlocksAction', N'en', N'A change in the highlighted cell was rejected, so the action was not performed. Fix or undo it and try again.', 1),
+    (N'document.unsavedNotIncluded', N'en', N'Some changes in the grid are not saved and are not included: the action uses the last saved values.', 1)
+    -- COLL:an39b ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -15424,6 +15428,19 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:an28 ── кінець секції ──
+
+-- COLL:an39b ── ru/kz хвоста сітки; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'document.heldEditBlocksAction', N'ru', N'Изменение в подсвеченной ячейке отклонено, поэтому действие не выполнено. Исправьте или отмените его и повторите.'),
+    (N'document.heldEditBlocksAction', N'kz', N'Белгіленген ұяшықтағы өзгеріс қабылданбады, сондықтан әрекет орындалмады. Оны түзетіңіз немесе болдырмаңыз да, қайталап көріңіз.'),
+    (N'document.unsavedNotIncluded', N'ru', N'Часть изменений в таблице не сохранена и не учтена: действие выполнено по последним сохранённым значениям.'),
+    (N'document.unsavedNotIncluded', N'kz', N'Кестедегі кейбір өзгерістер сақталмаған және ескерілмеді: әрекет соңғы сақталған мәндер бойынша орындалды.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:an39b ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

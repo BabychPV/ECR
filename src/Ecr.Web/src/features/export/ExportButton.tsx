@@ -247,7 +247,7 @@ export function ExportButton({
         disabled={start.isPending || building}
         aria-busy={start.isPending || building}
         data-export-state={start.isPending || building ? 'running' : 'idle'}
-        onClick={() => void whenEditsSaved(() => start.mutate({ documentId, periodKey, format }))}
+        onClick={() => void whenEditsSaved(() => start.mutate({ documentId, periodKey, format }), { readOnly: true })}
       >
         <span style={{ display: 'inline-grid' }}>
           <span

@@ -9,6 +9,7 @@ import {
   cellKey,
   discardPendingRows,
   hasPending,
+  hasSendablePending,
   markPendingRejected,
   openDocument,
   pendingCount,
@@ -305,6 +306,11 @@ async function flushAutosaveAndSettle(
   // Зберігач міг відпрацювати синхронно (тест, кеш) — чекати нема на що.
   if (!hasPending()) return true;
 
+  // ⛔ AN-28 P2-1: лишились САМІ утримані відмовою правки — їх не везе ніхто
+  // (`V-01`), і «порожнього сховища» не буде ніколи. Раніше тут чекали весь
+  // таймаут (3 с) мовчки, а результат був той самий: `false`.
+  if (!hasSendablePending()) return false;
+
   return await new Promise<boolean>((resolve) => {
     let unsubscribe: (() => void) | null = null;
 
@@ -318,12 +324,14 @@ async function flushAutosaveAndSettle(
       resolve(false);
     }, timeoutMs);
 
+    // ⚠ Відстоялось, коли вже нема чого ВЕЗТИ: решта (якщо є) — утримані
+    // відмовою правки, і чекати на них далі означало б мовчати до таймауту.
     const settle = (): void => {
-      if (hasPending()) return;
+      if (hasSendablePending()) return;
 
       clearTimeout(timer);
       stop();
-      resolve(true);
+      resolve(!hasPending());
     };
 
     unsubscribe = subscribePending(settle);

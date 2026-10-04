@@ -20,6 +20,11 @@ import { useSyncExternalStore } from 'react';
 /** Куди перейти: адреса зауваження як її віддає сервер (`ValidationFindingDto`). */
 export interface CellNavigationTarget {
   readonly tableDefId: number;
+  /**
+   * Точний екземпляр таблиці, якщо відомий (утримана правка сітки, AN-28 P2-1);
+   * без нього - перший екземпляр з `tableDefId` на аркуші.
+   */
+  readonly tableInstanceId?: number;
   /** `null` — зауваження до таблиці: перехід лише до неї самої. */
   readonly rowKey: string | null;
   /** `null` — зауваження до рядка: фокус на першу колонку даних. */
@@ -50,6 +55,7 @@ export function requestCellNavigation(target: CellNavigationTarget): void {
   sequence += 1;
   current = {
     tableDefId: target.tableDefId,
+    ...(target.tableInstanceId === undefined ? {} : { tableInstanceId: target.tableInstanceId }),
     rowKey: target.rowKey,
     columnCode: target.columnCode,
     seq: sequence,

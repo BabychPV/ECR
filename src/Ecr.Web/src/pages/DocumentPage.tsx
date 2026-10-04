@@ -37,7 +37,7 @@ import { useProjectCurrentPeriodDefault } from '@/features/documents/useProjectC
 import { StatusBadge } from '@/shared/ui/StatusBadge';
 import { useUrlNumber, useUrlState } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
-import { whenEditsSaved } from '@/features/grid/settleEdits';
+import { registerHeldEditRevealer, whenEditsSaved } from '@/features/grid/settleEdits';
 
 /**
  * Чотири панелі нижче — за `import()`, а не статичним імпортом (`D-132`).
@@ -378,6 +378,30 @@ export function DocumentPage(): JSX.Element {
    */
   const sheets = useMemo(() => groupBySheet(tables.data ?? []), [tables.data]);
   const active = sheets.find((s) => s.code === sheet) ?? sheets[0];
+  const activeCode = active?.code;
+
+  // AN-28 P2-1: дія заблокована утриманою (відхиленою) коміркою - показати її:
+  // аркуш, прокрутка, фокус і підсвітка - тим самим шляхом, що й зауваження (`ФВ-5.6`).
+  useEffect(
+    () =>
+      registerHeldEditRevealer((held) => {
+        if (held.periodKey !== periodKey) return;
+
+        const target = tables.data?.find((table) => table.tableInstanceId === held.tableInstanceId);
+        if (target === undefined) return;
+
+        if (target.sheetCode !== activeCode) setSheet(target.sheetCode);
+        void import('@/features/grid/cellNavigation').then((module) =>
+          module.requestCellNavigation({
+            tableDefId: target.tableDefId,
+            tableInstanceId: target.tableInstanceId,
+            rowKey: held.edit.rowKey,
+            columnCode: held.edit.columnCode,
+          }),
+        );
+      }),
+    [periodKey, tables.data, activeCode, setSheet],
+  );
 
   // ⚠ Стан береться з `SheetStates` документа за КОДОМ аркуша: скалярного
   // статусу документа не існує (D-93) — аркуші за один період бувають у
@@ -540,7 +564,7 @@ export function DocumentPage(): JSX.Element {
             size="xs"
             variant="default"
             loading={validate.isPending}
-            onClick={() => void whenEditsSaved(() => validate.mutate(scope))}
+            onClick={() => void whenEditsSaved(() => validate.mutate(scope), { readOnly: true })}
           >
             {t('document.validate')}
           </Button>
