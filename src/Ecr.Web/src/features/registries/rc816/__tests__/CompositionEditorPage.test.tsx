@@ -124,6 +124,23 @@ describe('CompositionEditorPage: master-detail без введення іден�
     expect(other().getAttribute('aria-pressed')).toBe('false');
   });
 
+  it('зміна верхнього батька скидає вибір середнього рівня — склад кейсу іншого потоку не лишається на екрані', async () => {
+    mockServer(['Registry.View', 'Registry.EditData'], { threeLevels: true });
+    show('STREAM');
+
+    fireEvent.click(await screen.findByRole('button', { name: 'S1' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'E78' }));
+    await waitFor(() => expect(document.querySelector('[data-rc816-panel="GAS_COMPOSITION"]')).not.toBeNull());
+
+    fireEvent.click(screen.getByRole('button', { name: 'S2' }));
+
+    // Кейси S2 на місці, а склад «370 Winter» потоку S1 — ні: інакше правка лягла б не в той потік.
+    expect(await screen.findByRole('button', { name: 'E79' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'E78' })).toBeNull();
+    expect(document.querySelector('[data-rc816-panel="GAS_COMPOSITION"]')).toBeNull();
+    expect(screen.getByRole('button', { name: 'E79' }).getAttribute('aria-pressed')).toBe('false');
+  });
+
   it('без Registry.EditData — лише перегляд: ні додавання, ні збереження', async () => {
     mockServer(['Registry.View']);
     show();

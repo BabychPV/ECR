@@ -101,6 +101,9 @@ function DetailChain({
 
       {selected !== null && (
         <DetailChain
+          // ⛔ Ключ — обраний рядок ЦЬОГО рівня: інакше вибір нижчого рівня пережив би зміну батька
+          // (назви кейсів повторюються між потоками), і нижня панель правила б склад чужого батька.
+          key={`${child.definition.code}:${selected.id}`}
           node={child}
           parent={selected}
           depth={depth + 1}
@@ -285,7 +288,9 @@ export function CompositionEditorPage(): JSX.Element {
                         </Text>
                       ) : (
                         <DetailChain
-                          key={asOf}
+                          // ⚠ Зміна батька перемонтовує ланцюжок і скидає вибір нижчих рівнів; безпечно,
+                          // бо батька дозволено змінити лише коли нижчі рівні чисті (`levelsDirty`).
+                          key={`${asOf}:${selected.id}`}
                           node={tree.data}
                           parent={selected}
                           depth={0}

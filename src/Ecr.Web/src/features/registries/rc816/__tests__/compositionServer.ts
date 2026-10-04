@@ -63,6 +63,20 @@ const Composition: RegistryDefinitionDto = {
 
 const Component: RegistryDefinitionDto = { ...Cases, id: 4, code: 'COMPONENT', fields: [], rules: [] };
 
+/**
+ * Третій рівень згори (`STREAM → STREAM_CASE → GAS_COMPOSITION`, саме той ланцюжок, що описує
+ * `ФВ-8.16`): кейси стають частиною потоку.
+ */
+const Streams: RegistryDefinitionDto = { ...Cases, id: 1, code: 'STREAM', nameL10n: { values: { en: 'Streams' } }, fields: [], rules: [] };
+
+const CasesOfStream: RegistryDefinitionDto = {
+  ...Cases,
+  fields: [field(20, 'STREAM', 'Lookup', 1), ...Cases.fields],
+  relations: [
+    { kind: 'Composition', fieldCode: 'STREAM', targetRegistryDefId: 1, targetRegistryCode: 'STREAM', linkKind: null, linkCount: null, onParentDelete: 'Cascade' },
+  ],
+};
+
 function listed(definition: RegistryDefinitionDto): RegistryDefDto {
   return {
     id: definition.id,
@@ -89,6 +103,13 @@ function row(id: number, code: string, values: Record<string, string>, display =
 }
 
 const CaseRows = [row(77, 'E77', { CASE_NAME: '370 Summer' }, '370 Summer'), row(78, 'E78', { CASE_NAME: '370 Winter' }, '370 Winter')];
+// ⚠ Назва кейсу повторюється між потоками (PK — `(STREAM, CASE_NAME)`): «370 Winter» є і в S2.
+const StreamCaseRows = [
+  row(77, 'E77', { STREAM: '11', CASE_NAME: '370 Summer' }, '370 Summer'),
+  row(78, 'E78', { STREAM: '11', CASE_NAME: '370 Winter' }, '370 Winter'),
+  row(79, 'E79', { STREAM: '12', CASE_NAME: '370 Winter' }, '370 Winter'),
+];
+const StreamRows = [row(11, 'S1', {}, 'Stream 1'), row(12, 'S2', {}, 'Stream 2')];
 const PartRows = [row(501, 'E501', { CASE: '77', COMPONENT: '3', MOL_PCT: '60' }), row(502, 'E502', { CASE: '77', COMPONENT: '5', MOL_PCT: '39.8' })];
 const ComponentRows = [row(3, 'N2', {}, 'Nitrogen'), row(5, 'CH4', {}, 'Methane'), row(6, 'C2H6', {}, 'Ethane')];
 
@@ -108,9 +129,17 @@ export interface Server {
   readonly rowQueries: string[];
 }
 
-export function mockServer(permissions: string[]): Server {
+/** Варіанти стенда. */
+export interface ServerOptions {
+  /** Три рівні: `STREAM → STREAM_CASE → GAS_COMPOSITION`. */
+  readonly threeLevels?: boolean;
+}
+
+export function mockServer(permissions: string[], options: ServerOptions = {}): Server {
   const server: Server = { batches: [], rowQueries: [] };
-  const definitions: Record<string, RegistryDefinitionDto> = { STREAM_CASE: Cases, GAS_COMPOSITION: Composition, COMPONENT: Component };
+  const definitions: Record<string, RegistryDefinitionDto> = options.threeLevels === true
+    ? { STREAM: Streams, STREAM_CASE: CasesOfStream, GAS_COMPOSITION: Composition, COMPONENT: Component }
+    : { STREAM_CASE: Cases, GAS_COMPOSITION: Composition, COMPONENT: Component };
 
   vi.stubGlobal(
     'fetch',
@@ -134,7 +163,7 @@ export function mockServer(permissions: string[]): Server {
         });
       }
 
-      if (path.endsWith('/api/v1/registries')) return json([Cases, Composition, Component].map(listed));
+      if (path.endsWith('/api/v1/registries')) return json(Object.values(definitions).map(listed));
 
       const match = /\/api\/v1\/registries\/([^/]+)\/(definition|rows|entries\/batch)$/.exec(path);
       const code = decodeURIComponent(match?.[1] ?? '');
@@ -143,9 +172,12 @@ export function mockServer(permissions: string[]): Server {
 
       if (match?.[2] === 'rows') {
         server.rowQueries.push(`${code}?${url.searchParams.toString()}`);
-        if (code === 'STREAM_CASE') return json(page(CaseRows));
-        if (code === 'COMPONENT') return json(page(ComponentRows));
         const parent = url.searchParams.get('parentEntryId');
+        if (code === 'STREAM') return json(page(StreamRows));
+        if (code === 'STREAM_CASE') {
+          return json(page(options.threeLevels === true ? StreamCaseRows.filter((item) => item.values['STREAM']?.value === parent) : CaseRows));
+        }
+        if (code === 'COMPONENT') return json(page(ComponentRows));
         return json(page(PartRows.filter((part) => part.values['CASE']?.value === parent)));
       }
 
