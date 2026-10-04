@@ -265,6 +265,13 @@ public static class DataSourceEndpointPolicy
             // починається з роздільника, `file:`, відносний шлях — заборонено.
             "SERVERCERTIFICATE" => value?.Trim() is { Length: > 0 } path && !IsLocalDrivePath(path),
 
+            // Спосіб входу — лише Windows (Integrated Security, gMSA) або SQL-логін (HU-11 Q9).
+            // ⛔ `Active Directory Managed Identity`/`Default` беруть токен служби в IMDS (169.254.169.254
+            // запитує сам SqlClient, повз політику) і віддають його хосту з рядка; `Integrated` — AAD-токен
+            // служби на гібридному AD. Білий список: ключа немає або `SqlPassword`.
+            "AUTHENTICATION" => value?.Replace(" ", string.Empty, StringComparison.Ordinal).Trim() is { Length: > 0 } method
+                                && !string.Equals(method, "SqlPassword", StringComparison.OrdinalIgnoreCase),
+
             _ => false,
         };
     }

@@ -83,6 +83,13 @@ public sealed class SaveDataSourceHandlerTests
     [InlineData(@"Server=flert;Server Certificate=\certs\c.cer")]
     [InlineData("Server=flert;Server Certificate=certs/c.cer")]
     [InlineData("Server=flert;Server Certificate=C:c.cer")]
+    // Рев'ю an33d, P3-1: вхід лише Windows або SQL-логін (HU-11 Q9) — токени AAD/IMDS служби не віддаємо.
+    [InlineData("Server=flert;Authentication=Active Directory Managed Identity")]
+    [InlineData("Server=flert;Authentication=ActiveDirectoryMSI")]
+    [InlineData("Server=flert;Authentication=Active Directory Default")]
+    [InlineData("Server=flert;Authentication=Active Directory Integrated")]
+    [InlineData("Server=flert;Authentication=Active Directory Password;User ID=svc")]
+    [InlineData("Server=flert;Authentication=Active Directory Service Principal")]
     public async Task Create_Sql_заборонений_параметр_422(string endpoint)
     {
         var refused = await TryCreate(endpoint, new FakeNetwork());
@@ -116,6 +123,8 @@ public sealed class SaveDataSourceHandlerTests
     [InlineData("Server=10.1.2.3,1433;User Instance=false")]
     [InlineData("Server=flert;Server Certificate=C:\\certs\\flert.cer")]
     [InlineData("Server=flert;Server Certificate=d:/certs/flert.cer")]
+    [InlineData("Server=flert;Authentication=SqlPassword;User ID=svc")]
+    [InlineData("Server=flert;Authentication=Sql Password;User ID=svc")]
     public async Task Create_Sql_звичайний_рядок_з_єднання_проходить(string endpoint)
         => Assert.Null(await TryCreate(endpoint, new FakeNetwork("10.0.0.5")));
 
