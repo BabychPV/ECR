@@ -276,11 +276,7 @@ export function ConditionalFormatPanel({
                   label={t('conditionalFormat.valueTo')}
                   value={rule.valueTo}
                   disabled={readOnly}
-                  error={
-                    blocker === 'ValueTo' || blocker === 'Range'
-                      ? t(blocker === 'Range' ? 'conditionalFormat.blocker.Range' : 'conditionalFormat.blocker.ValueTo')
-                      : undefined
-                  }
+                  error={blocker === 'ValueTo' ? t('conditionalFormat.blocker.ValueTo') : undefined}
                   onChange={(event) => update(index, { ...rule, valueTo: event.currentTarget.value })}
                 />
               )}

@@ -67,9 +67,18 @@ describe('whyRuleIncomplete', () => {
     expect(whyRuleIncomplete(rule({ columnCode: '' }))).toBe('Column');
     expect(whyRuleIncomplete(rule({ operator: 'gt', value: 'abc' }))).toBe('Value');
     expect(whyRuleIncomplete(rule({ operator: 'between', value: '1', valueTo: '' }))).toBe('ValueTo');
-    expect(whyRuleIncomplete(rule({ operator: 'between', value: '5', valueTo: '1' }))).toBe('Range');
     expect(whyRuleIncomplete(rule({ operator: 'empty', backgroundHex: '' }))).toBe('Style');
     expect(whyRuleIncomplete(rule({ operator: 'eq', value: '1' }))).toBeNull();
+  });
+
+  it('L9-25: between з межами навпаки — повне правило, як на сервері, і приклад його застосовує', () => {
+    // ⛔ Сервер (`ConditionalFormatRule.Validate`) порядку меж не перевіряє, а
+    // `ConditionalFormatEvaluator` бере `Math.Min`/`Math.Max` — сітка таке правило фарбує.
+    const reversed = rule({ operator: 'between', value: '5', valueTo: '1' });
+    expect(whyRuleIncomplete(reversed)).toBeNull();
+    expect(firstMatchingRule([reversed], reversed.columnCode, '3')).toBe(reversed);
+    expect(firstMatchingRule([reversed], reversed.columnCode, '1')).toBe(reversed);
+    expect(firstMatchingRule([reversed], reversed.columnCode, '6')).toBeNull();
   });
 
   it('умови ті самі, що на сервері: «дорівнює» — теж число, колір — #rrggbb, операнд ≤ 64', () => {
