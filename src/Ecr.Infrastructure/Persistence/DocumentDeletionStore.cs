@@ -1,4 +1,6 @@
 using Ecr.Application.Ports;
+using Ecr.Domain.Abstractions;
+using Ecr.Domain.Errors;
 using Microsoft.EntityFrameworkCore;
 
 namespace Ecr.Infrastructure.Persistence;
@@ -37,12 +39,35 @@ public sealed class DocumentDeletionStore(EcrDbContext db) : IDocumentDeletionSt
     /// <inheritdoc />
     public async Task<int> DeleteAsync(long documentId, CancellationToken ct)
     {
+        // ⛔ L10-06: мапа подій джерела (`ext.SourceEventMap`) — конфігурація
+        // інтеграції, що посилається на документ зовнішнім ключем. Доти
+        // видалення падало на FK 547 уже посеред транзакції — і людина бачила
+        // 500. Мапу мовчки не видаляємо (це чужа налаштована робота, не дані
+        // документа): відмова 409 з причиною, документ лишається цілим.
+        if (await db.SourceEventMaps.AnyAsync(m => m.DocumentId == documentId, ct).ConfigureAwait(false))
+        {
+            throw new DomainException(
+                ErrorCodes.DocumentSubmitted,
+                $"Документ {documentId} використовує мапа подій джерела; спершу приберіть мапу.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-DOC-0409.deleteHasEventMap",
+                    ["reason"] = "SourceEventMap",
+                });
+        }
+
         var instances = db.TableInstances.Where(i => i.DocumentId == documentId);
         var rows = db.TableRows.Where(r => instances.Any(
             i => i.Id == r.TableInstanceId && i.PeriodKeyValue == r.PeriodKeyValue));
 
         var cells = await db.CellValues
             .Where(c => rows.Any(r => r.Id == c.TableRowId && r.PeriodKeyValue == c.PeriodKeyValue))
+            .ExecuteDeleteAsync(ct).ConfigureAwait(false);
+
+        // ⛔ L10-06: значення PI за вікном рядка ключуються екземпляром таблиці
+        // без зовнішнього ключа — після видалення екземплярів їх уже не знайти.
+        await db.RowWindowValues
+            .Where(v => instances.Any(i => i.Id == v.TableInstanceId && i.PeriodKeyValue == v.PeriodKey))
             .ExecuteDeleteAsync(ct).ConfigureAwait(false);
 
         await rows.ExecuteDeleteAsync(ct).ConfigureAwait(false);
@@ -52,6 +77,16 @@ public sealed class DocumentDeletionStore(EcrDbContext db) : IDocumentDeletionSt
         // вказують на неіснуючий документ.
         await db.CalculationResults.Where(r => r.DocumentId == documentId).ExecuteDeleteAsync(ct).ConfigureAwait(false);
         await db.CalculationInputs.Where(r => r.DocumentId == documentId).ExecuteDeleteAsync(ct).ConfigureAwait(false);
+
+        // ⛔ L10-06: прогони перерахунку САМЕ цього документа (`DocumentId`).
+        // Прогони проєкту (`DocumentId = NULL`) лишаються — їх рядки цього
+        // документа вже прибрано вище. Кроки, входи й результати прогону
+        // тримають на ньому зовнішній ключ — спершу вони.
+        var runs = db.CalculationRuns.Where(r => r.DocumentId == documentId);
+        await db.CalculationSteps.Where(s => runs.Any(r => r.Id == s.CalculationRunId)).ExecuteDeleteAsync(ct).ConfigureAwait(false);
+        await db.CalculationInputs.Where(i => runs.Any(r => r.Id == i.CalculationRunId)).ExecuteDeleteAsync(ct).ConfigureAwait(false);
+        await db.CalculationResults.Where(r => runs.Any(x => x.Id == r.CalculationRunId)).ExecuteDeleteAsync(ct).ConfigureAwait(false);
+        await runs.ExecuteDeleteAsync(ct).ConfigureAwait(false);
 
         await db.DocumentIndexValues.Where(v => v.DocumentId == documentId).ExecuteDeleteAsync(ct).ConfigureAwait(false);
         await db.ValidationResults.Where(v => v.DocumentId == documentId).ExecuteDeleteAsync(ct).ConfigureAwait(false);
