@@ -6548,8 +6548,11 @@ USING (VALUES
     -- COLL:an33 ── кінець секції ──
     -- COLL:an38 ── AN-38 (аудит 2026-10-03, L7): розрахунки й методології; ru/kz — порцією COLL:an38 у блоці I18N нижче ──
     (N'expr.ampersandNotConcat', N'en', N'"&" in the methodology dialect does not join text: it is bitwise AND, and "6 & 3" equals 2. Use "and" for a logical AND.', 1),
-    (N'expr.rangeNotAccepted', N'en', N'{function} takes a single value, not a range of rows. Wrap the range in SUM, AVERAGE, MIN or MAX.', 1)
+    (N'expr.rangeNotAccepted', N'en', N'{function} takes a single value, not a range of rows. Wrap the range in SUM, AVERAGE, MIN or MAX.', 1),
     -- COLL:an38 ── кінець секції ──
+    -- COLL:cl5 ── CL-5: картка jobs жовтіє, коли останнє зведення збоїв нікому не доставлено; ru/kz — порцією COLL:cl5 у блоці I18N нижче ──
+    (N'health.jobs.notificationsUndelivered', N'en', N'The last failure digest reached no one: {count} failures, 0 sent. Check the mail server settings, notification channels and alert recipients.', 1)
+    -- COLL:cl5 ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -15397,6 +15400,16 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:an38 ── кінець секції ──
+-- COLL:cl5 ── ru/kz недоставленого зведення збоїв (CL-5); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'health.jobs.notificationsUndelivered', N'ru', N'Последняя сводка сбоев никому не доставлена: сбоев {count}, отправлено 0. Проверьте настройки почтового сервера, каналы уведомлений и получателей оповещений.'),
+    (N'health.jobs.notificationsUndelivered', N'kz', N'Ақаулардың соңғы жиынтығы ешкімге жеткізілмеді: {count} ақау, 0 жіберілді. Пошта серверінің баптауларын, хабарлама арналарын және ескерту алушыларын тексеріңіз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:cl5 ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

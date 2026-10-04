@@ -25,6 +25,12 @@ public static class JobCompletionWarning
     public const string NotificationDoneKey = "jobs.notificationDone";
 
     /// <summary>
+    /// Параметр підсумку: збоїв, що мали дійти до адресатів (CL-5). На відміну від <c>count</c>,
+    /// без інформаційного рядка «адресатів немає» — такий прогін нічого не мав надсилати.
+    /// </summary>
+    public const string FailuresParam = "failures";
+
+    /// <summary>
     /// <c>SucceededWithErrors</c> для <c>Succeeded</c> дайджесту зі збоями
     /// (<c>count</c> &gt; 0) і нулем відправлених (<c>sent</c> = 0); інакше <c>null</c>.
     /// </summary>
@@ -34,7 +40,8 @@ public static class JobCompletionWarning
             || !JobProgressMessageCodec.TryDecode(rawMessage, out var envelope)
             || !string.Equals(envelope.Key, NotificationDoneKey, StringComparison.Ordinal)
             || envelope.Params is not { } p
-            || !TryInt(p, "count", out var failures)
+            // ⚠ Старі конверти (до CL-5) без `failures` — як і раніше, за `count`.
+            || !(TryInt(p, FailuresParam, out var failures) || TryInt(p, "count", out failures))
             || !TryInt(p, "sent", out var sent))
         {
             return null;

@@ -1,4 +1,5 @@
 using Ecr.Application.Common;
+using Ecr.Application.Integration;
 using Ecr.Application.Ports;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Quartz;
@@ -51,6 +52,12 @@ public sealed class JobsHealthCheck(
 
     /// <summary>Вікно лічильника перерахунків, що вийшли за бюджет ПРД-13: доба, як і вище.</summary>
     public static readonly TimeSpan RecalcOverBudgetWindow = TimeSpan.FromDays(1);
+
+    /// <summary>
+    /// Вікно пошуку останнього зведення <c>NotificationJob</c> (CL-5): задача щогодинна, доба —
+    /// з запасом; давніше зведення вже нічого не каже про сьогоднішній транспорт.
+    /// </summary>
+    public static readonly TimeSpan NotificationDigestWindow = TimeSpan.FromDays(1);
 
     /// <inheritdoc />
     public async Task<HealthCheckResult> CheckHealthAsync(
@@ -213,6 +220,36 @@ public sealed class JobsHealthCheck(
                         .ConfigureAwait(false);
 
                     // Лише Degraded: повільний перерахунок не виводить інстанс із ротації.
+                    return HealthCheckResult.Degraded(text, data: data);
+                }
+
+                // ⛔ CL-5: зведення збоїв без транспорту закривалося `Succeeded` («збоїв: N;
+                // відправлено: 0»), і картка лишалася зеленою — система, що не може нікого
+                // сповістити, виглядала так само, як система без збоїв (`D-125`). Те саме
+                // правило, що й бейдж `SucceededWithErrors` у `/jobs` (`JobCompletionWarning`),
+                // лише для ОСТАННЬОГО зведення: налаштований транспорт гасить жовтий наступним
+                // щогодинним прогоном.
+                var digest = await progress
+                    .LatestSucceededMessageWithKeyAsync(
+                        JobCompletionWarning.NotificationDoneKey, now - NotificationDigestWindow, cancellationToken)
+                    .ConfigureAwait(false);
+
+                if (JobCompletionWarning.EffectiveStateOf("Succeeded", digest) is not null
+                    && JobProgressMessageCodec.TryDecode(digest, out var envelope)
+                    && envelope.Params is { } digestParams
+                    && (digestParams.TryGetValue(JobCompletionWarning.FailuresParam, out var count)
+                        || digestParams.TryGetValue("count", out count)))
+                {
+                    var data = Data(jobs.Count, triggers.Count);
+                    data["notificationsUndelivered"] = int.Parse(count, System.Globalization.CultureInfo.InvariantCulture);
+                    var text = await Text(
+                            "health.jobs.notificationsUndelivered",
+                            "The last failure digest reached no one: {count} failures, 0 sent. Check the mail server settings, notification channels and alert recipients.",
+                            cancellationToken,
+                            new Dictionary<string, string>(StringComparer.Ordinal) { ["count"] = count })
+                        .ConfigureAwait(false);
+
+                    // Лише Degraded: недоставлене сповіщення не виводить інстанс із ротації.
                     return HealthCheckResult.Degraded(text, data: data);
                 }
             }

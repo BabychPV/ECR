@@ -34,6 +34,31 @@ public sealed class JobCompletionWarningTests
         Assert.Equal(expected, JobCompletionWarning.EffectiveStateOf(state, Done(count, sent)));
     }
 
+    /// <summary>
+    /// CL-5: <c>failures</c> — збої для доставки без рядка «адресатів немає»; коли він є, рішення
+    /// за ним, а не за <c>count</c>. Конверт без нього (до CL-5) читається за <c>count</c>, як раніше.
+    /// </summary>
+    [Theory]
+    [InlineData(1, 0, 0, null)]
+    [InlineData(3, 2, 0, "SucceededWithErrors")]
+    [InlineData(3, 2, 1, null)]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    public void Лише_рядок_про_адресатів_не_попередження_а_збої_без_відправки_так(
+        int count, int failures, int sent, string? expected)
+    {
+        var message = JobProgressMessageCodec.Encode(new JobProgressMessageEnvelope(
+            JobCompletionWarning.NotificationDoneKey,
+            new Dictionary<string, string>
+            {
+                ["count"] = count.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                [JobCompletionWarning.FailuresParam] = failures.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                ["sent"] = sent.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                ["pending"] = "0",
+            }));
+
+        Assert.Equal(expected, JobCompletionWarning.EffectiveStateOf("Succeeded", message));
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     public void Чужий_ключ_і_не_конверт_попередження_не_дають()

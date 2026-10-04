@@ -494,6 +494,24 @@ public sealed class JobProgressStore(EcrDbContext db) : IJobProgressStore
     public Task<int> CountSucceededWithMessageKeyAsync(string messageKey, DateTime sinceUtc, CancellationToken ct)
         => CountWithMessageKeyAsync("Succeeded", messageKey, sinceUtc, ct);
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⚠ Останній за <c>UpdatedAt</c>, а не «чи був хоч один»: зведення йде щогодини, і
+    /// налаштований транспорт має гасити жовтий наступним же прогоном, а не через добу.
+    /// </remarks>
+    public Task<string?> LatestSucceededMessageWithKeyAsync(string messageKey, DateTime sinceUtc, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(messageKey);
+        var quoted = "\"" + messageKey + "\"";
+
+        return db.JobProgresses
+            .AsNoTracking()
+            .Where(p => p.State == "Succeeded" && p.UpdatedAt >= sinceUtc && p.Message != null && p.Message.Contains(quoted))
+            .OrderByDescending(p => p.UpdatedAt)
+            .Select(p => p.Message)
+            .FirstOrDefaultAsync(ct);
+    }
+
     private Task<int> CountWithMessageKeyAsync(string state, string messageKey, DateTime sinceUtc, CancellationToken ct)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(messageKey);
