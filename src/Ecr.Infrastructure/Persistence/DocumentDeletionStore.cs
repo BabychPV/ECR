@@ -1,4 +1,4 @@
-using Ecr.Application.Ports;
+﻿using Ecr.Application.Ports;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Errors;
 using Microsoft.EntityFrameworkCore;
@@ -82,11 +82,39 @@ public sealed class DocumentDeletionStore(EcrDbContext db) : IDocumentDeletionSt
         // Прогони проєкту (`DocumentId = NULL`) лишаються — їх рядки цього
         // документа вже прибрано вище. Кроки, входи й результати прогону
         // тримають на ньому зовнішній ключ — спершу вони.
-        var runs = db.CalculationRuns.Where(r => r.DocumentId == documentId);
-        await db.CalculationSteps.Where(s => runs.Any(r => r.Id == s.CalculationRunId)).ExecuteDeleteAsync(ct).ConfigureAwait(false);
-        await db.CalculationInputs.Where(i => runs.Any(r => r.Id == i.CalculationRunId)).ExecuteDeleteAsync(ct).ConfigureAwait(false);
-        await db.CalculationResults.Where(r => runs.Any(x => x.Id == r.CalculationRunId)).ExecuteDeleteAsync(ct).ConfigureAwait(false);
-        await runs.ExecuteDeleteAsync(ct).ConfigureAwait(false);
+        //
+        // ⛔ Рев'ю AN-37 P2-1: індексу з провідним `CalculationRunId` у
+        // `calc.CalculationStep/Input/Result` немає, тож голий предикат за
+        // прогоном — скан УСІХ партицій трьох найбільших таблиць усередині
+        // транзакції видалення (блокує перерахунок). Тому спершу прогони в
+        // пам'ять, далі предикат ще й за `PeriodKey` — відсічка партицій.
+        // Прогін за період пише лише в свій період; річний (`PeriodKey` NULL) —
+        // у періоди свого проєкту, і саме їх беремо.
+        var runs = await db.CalculationRuns.AsNoTracking()
+            .Where(r => r.DocumentId == documentId)
+            .Select(r => new { r.Id, r.ProjectId, r.PeriodKey })
+            .ToListAsync(ct).ConfigureAwait(false);
+
+        if (runs.Count > 0)
+        {
+            var runIds = runs.Select(r => r.Id).ToList();
+            var periodKeys = runs.Where(r => r.PeriodKey is not null).Select(r => r.PeriodKey!.Value).ToHashSet();
+
+            if (runs.Any(r => r.PeriodKey is null))
+            {
+                var projectIds = runs.Select(r => r.ProjectId).Distinct().ToList();
+                periodKeys.UnionWith(await db.Periods.AsNoTracking()
+                    .Where(p => projectIds.Contains(p.ProjectId))
+                    .Select(p => p.PeriodKeyValue)
+                    .ToListAsync(ct).ConfigureAwait(false));
+            }
+
+            var keys = periodKeys.ToList();
+            await db.CalculationSteps.Where(s => keys.Contains(s.PeriodKey) && runIds.Contains(s.CalculationRunId)).ExecuteDeleteAsync(ct).ConfigureAwait(false);
+            await db.CalculationInputs.Where(i => keys.Contains(i.PeriodKey) && runIds.Contains(i.CalculationRunId)).ExecuteDeleteAsync(ct).ConfigureAwait(false);
+            await db.CalculationResults.Where(r => keys.Contains(r.PeriodKey) && runIds.Contains(r.CalculationRunId)).ExecuteDeleteAsync(ct).ConfigureAwait(false);
+            await db.CalculationRuns.Where(r => runIds.Contains(r.Id)).ExecuteDeleteAsync(ct).ConfigureAwait(false);
+        }
 
         await db.DocumentIndexValues.Where(v => v.DocumentId == documentId).ExecuteDeleteAsync(ct).ConfigureAwait(false);
         await db.ValidationResults.Where(v => v.DocumentId == documentId).ExecuteDeleteAsync(ct).ConfigureAwait(false);

@@ -6,7 +6,9 @@ using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
 using Ecr.Infrastructure.Persistence;
 using Ecr.TestKit;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Xunit;
 
 namespace Ecr.Infrastructure.Tests.Persistence;
@@ -110,6 +112,111 @@ public sealed class DocumentDeletionStoreTests(SqlServerFixture sql)
         Assert.True(await check.CalculationRuns.AnyAsync(r => r.Id == projectRunId));
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Прогони_документа_прибираються_з_відсічкою_партицій_трейсу()
+    {
+        // Рев'ю AN-37 P2-1: без предиката за PeriodKey видалення кроків прогону
+        // документа — скан усіх партицій calc.CalculationStep у транзакції.
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var doc = await builder.BuildAsync(columnCount: 1, rowCount: 1);
+
+        long periodRunId;
+        long yearRunId;
+        await using (var db = builder.CreateContext())
+        {
+            // Прогін за період і річний (PeriodKey NULL) — кроки обох у періоді документа.
+            var periodRun = new CalculationRun(doc.ProjectId, doc.PeriodKey.Value, null, At, doc.DocumentId);
+            var yearRun = new CalculationRun(doc.ProjectId, null, null, At, doc.DocumentId);
+            db.CalculationRuns.AddRange(periodRun, yearRun);
+            await db.SaveChangesAsync();
+
+            foreach (var (runId, code) in new[] { (periodRun.Id, "STEP_P"), (yearRun.Id, "STEP_Y") })
+            {
+                // Id кроку видає послідовність (ValueGeneratedNever) — як у CalculationResultStore.
+                var step = new CalculationStep(runId, doc.PeriodKey.Value, 1, code);
+                var id = (await db.Database
+                    .SqlQuery<long>($"SELECT NEXT VALUE FOR calc.CalculationResultSeq AS Value")
+                    .ToListAsync())[0];
+                typeof(Ecr.Domain.Abstractions.Entity<long>).GetProperty("Id")!.SetValue(step, id);
+                db.CalculationSteps.Add(step);
+            }
+
+            await db.SaveChangesAsync();
+
+            periodRunId = periodRun.Id;
+            yearRunId = yearRun.Id;
+        }
+
+        var recorder = new StepDeleteRecorder();
+        await using (var db = new EcrDbContext(new DbContextOptionsBuilder<EcrDbContext>()
+            .UseSqlServer(sql.ConnectionString)
+            .AddInterceptors(recorder)
+            .Options))
+        {
+            await new DocumentDeletionStore(db).DeleteAsync(doc.DocumentId, CancellationToken.None);
+        }
+
+        await using (var check = builder.CreateContext())
+        {
+            Assert.False(await check.CalculationRuns.AnyAsync(r => r.Id == periodRunId || r.Id == yearRunId));
+            Assert.False(await check.CalculationSteps.AnyAsync(s => s.CalculationRunId == periodRunId || s.CalculationRunId == yearRunId));
+        }
+
+        var delete = Assert.Single(recorder.Seen);
+
+        // Той самий DELETE ще раз — під STATISTICS XML і з відкатом: скільки
+        // партицій calc.CalculationStep він фактично торкнувся.
+        await using var connection = new SqlConnection(sql.ConnectionString);
+        await connection.OpenAsync();
+
+        int fanout;
+        await using (var count = connection.CreateCommand())
+        {
+            count.CommandText = "SELECT fanout FROM sys.partition_functions WHERE name = N'pf_ByPeriodKey';";
+            fanout = (int)(await count.ExecuteScalarAsync())!;
+        }
+
+        await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync();
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = "SET STATISTICS XML ON;\n" + delete.Text + "\nSET STATISTICS XML OFF;";
+        foreach (var (name, type, value) in delete.Parameters)
+        {
+            command.Parameters.Add(new SqlParameter(name, type) { Value = value });
+        }
+
+        var plans = new List<string>();
+        await using (var reader = await command.ExecuteReaderAsync())
+        {
+            do
+            {
+                while (await reader.ReadAsync())
+                {
+                    if (reader.FieldCount == 1 && reader.GetName(0).StartsWith("Microsoft SQL Server", StringComparison.Ordinal))
+                    {
+                        plans.Add(reader.GetString(0));
+                    }
+                }
+            }
+            while (await reader.NextResultAsync());
+        }
+
+        await transaction.RollbackAsync();
+
+        System.Xml.Linq.XNamespace ns = "http://schemas.microsoft.com/sqlserver/2004/07/showplan";
+        var accessed = plans
+            .SelectMany(p => System.Xml.Linq.XDocument.Parse(p).Descendants(ns + "RelOp"))
+            .Where(op => op.Element(ns + "RunTimePartitionSummary") is not null
+                         && op.Descendants(ns + "Object").Any(o => (string?)o.Attribute("Table") == "[CalculationStep]"))
+            .Select(op => (int)op.Element(ns + "RunTimePartitionSummary")!.Element(ns + "PartitionsAccessed")!.Attribute("PartitionCount")!)
+            .ToList();
+
+        Assert.NotEmpty(accessed);
+        Assert.All(accessed, n => Assert.True(n < fanout, $"прочитано {n} партицій calc.CalculationStep із {fanout}:\n{delete.Text}"));
+    }
+
     private static async Task<int> NewSourceEntityAsync(TestDocumentBuilder builder, string prefix)
     {
         var tag = Guid.NewGuid().ToString("N")[..8].ToUpperInvariant();
@@ -128,4 +235,26 @@ public sealed class DocumentDeletionStoreTests(SqlServerFixture sql)
     }
 
     private static LocalizedText Name(string value) => new(new Dictionary<string, string> { ["en"] = value });
+}
+
+/// <summary>Запам'ятовує DELETE кроків трейсу разом із параметрами — для повтору під планом.</summary>
+internal sealed class StepDeleteRecorder : DbCommandInterceptor
+{
+    public List<(string Text, List<(string Name, System.Data.SqlDbType Type, object Value)> Parameters)> Seen { get; } = [];
+
+    public override ValueTask<InterceptionResult<int>> NonQueryExecutingAsync(
+        System.Data.Common.DbCommand command,
+        CommandEventData eventData,
+        InterceptionResult<int> result,
+        CancellationToken cancellationToken = default)
+    {
+        if (command.CommandText.Contains("DELETE", StringComparison.Ordinal)
+            && command.CommandText.Contains("[CalculationStep]", StringComparison.Ordinal))
+        {
+            Seen.Add((command.CommandText, [.. command.Parameters.Cast<SqlParameter>()
+                .Select(p => (p.ParameterName, p.SqlDbType, p.Value))]));
+        }
+
+        return base.NonQueryExecutingAsync(command, eventData, result, cancellationToken);
+    }
 }
