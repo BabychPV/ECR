@@ -13,9 +13,11 @@ import {
   Switch,
   Text,
   TextInput,
+  useComputedColorScheme,
 } from '@mantine/core';
 import { useListFocus } from '@/shared/a11y/focus';
 import { t } from '@/shared/i18n';
+import { themeSurface } from '@/shared/theme/theme';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { showApiError, showDone } from '@/shared/ui/notify';
 import {
@@ -37,6 +39,7 @@ import {
   type ConditionalFormatRuleDto,
   type ConditionalFormatSet,
 } from './conditionalFormatApi';
+import { cellLook } from './tablePreviewModel';
 
 /**
  * Підпис оператора. ⚠ Кожен ключ — літералом, без шаблонного рядка: сторож
@@ -134,6 +137,7 @@ export function ConditionalFormatPanel({
   const [conflict, setConflict] = useState(false);
   const [sampleColumn, setSampleColumn] = useState(firstColumn);
   const [sample, setSample] = useState('');
+  const scheme = useComputedColorScheme('light');
 
   const focus = useListFocus(rules.length);
 
@@ -383,9 +387,11 @@ export function ConditionalFormatPanel({
         data-conditional-preview={matched === null ? 'none' : 'match'}
         p="xs"
         bd="1px solid var(--mantine-color-default-border)"
-        {...(matched !== null && matched.backgroundHex !== '' ? { bg: matched.backgroundHex } : {})}
-        {...(matched !== null && matched.foregroundHex !== '' ? { c: matched.foregroundHex } : {})}
-        {...(matched?.isBold === true ? { fw: 700 } : {})}
+        // ⛔ L9-24: вигляд — `cellLook`, як у перегляді таблиці (`TablePreview`) і в сітці
+        // (`cellAppearance.ts`, `X-10`): колір тексту автора лише тоді, коли він читається на заливці,
+        // інакше — колір теми з більшим контрастом. Доти приклад фарбував сирими `bg`/`c` і показував
+        // нечитабельне поєднання, якого документ не покаже.
+        style={cellLook(matched, themeSurface[scheme].body)}
       >
         {sample.length === 0 ? t('conditionalFormat.sampleEmpty') : sample}
       </Box>

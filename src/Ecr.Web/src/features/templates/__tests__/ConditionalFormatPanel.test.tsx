@@ -226,6 +226,24 @@ describe('ConditionalFormatPanel', () => {
     expect(preview?.getAttribute('data-conditional-preview')).toBe('none');
   });
 
+  it('L9-24: приклад малюється тим самим cellLook, що й перегляд таблиці: нечитабельний текст автора — колір теми', async () => {
+    // Білий текст на білій заливці: сітка (`cellAppearance.ts`) і `TablePreview` такого кольору не
+    // покажуть — замінять кольором тексту теми з кращим контрастом.
+    api.getConditionalFormats.mockResolvedValue(
+      set([{ ...own, backgroundHex: '#ffffff', foregroundHex: '#fefefe', isBold: true }], '"V1"'),
+    );
+    renderPanel();
+    const user = userEvent.setup();
+    await screen.findByRole('textbox', { name: /conditionalFormat\.value(?!To)/ });
+
+    await user.type(screen.getByRole('textbox', { name: /conditionalFormat\.sample/ }), '150');
+    const preview = document.querySelector<HTMLElement>('[data-conditional-preview="match"]');
+
+    expect(preview?.style.backgroundColor).toBe('rgb(255, 255, 255)');
+    expect(preview?.style.color).toBe('rgb(0, 0, 0)');
+    expect(preview?.style.fontWeight).toBe('bold');
+  });
+
   it('правило додається й видаляється', async () => {
     renderPanel();
     const user = userEvent.setup();
