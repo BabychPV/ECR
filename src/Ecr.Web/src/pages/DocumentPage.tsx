@@ -37,7 +37,7 @@ import { useProjectCurrentPeriodDefault } from '@/features/documents/useProjectC
 import { StatusBadge } from '@/shared/ui/StatusBadge';
 import { useUrlNumber, useUrlState } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
-import { registerHeldEditRevealer, whenEditsSaved } from '@/features/grid/settleEdits';
+import { registerHeldEditRevealer, useSettledAction } from '@/features/grid/settleEdits';
 
 /**
  * Чотири панелі нижче — за `import()`, а не статичним імпортом (`D-132`).
@@ -319,6 +319,8 @@ export function DocumentPage(): JSX.Element {
     },
     onError: showApiError,
   });
+  // AN-28 P2-2: зайнятість і single-flight і на час збереження набраного.
+  const validateAction = useSettledAction(validate.isPending);
 
   /**
    * Що показувати в панелі: свіже — **лише для своєї адреси** — інакше
@@ -563,8 +565,8 @@ export function DocumentPage(): JSX.Element {
           <Button
             size="xs"
             variant="default"
-            loading={validate.isPending}
-            onClick={() => void whenEditsSaved(() => validate.mutate(scope), { readOnly: true })}
+            loading={validate.isPending || validateAction.settling}
+            onClick={() => validateAction.run(() => validate.mutateAsync(scope), { readOnly: true })}
           >
             {t('document.validate')}
           </Button>

@@ -2,23 +2,18 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { registerUnsavedSource } from '@/shared/ui/unsavedSources';
 import { SheetActions } from '../SheetActions';
 
 /**
- * Аудит-пас 5: швидкий подвійний клік на «Перерахувати» ставив у чергу ДВА
- * однакових перерахунки замість одного.
- */
-/**
- * ⛔ `Button.loading` (і похідний від нього `disabled`) оновлюється лише на
- * НАСТУПНОМУ рендері React — швидкий подвійний клік (не дві окремі дії
- * користувача, а один фізичний подвійний клік) встигає викликати
- * `recalculate.mutate()` двічі ДО того, як перший рендер із `loading: true`
- * встигає заблокувати кнопку.
+ * AN-28 P2-2: поки зберігається набране (кадр + оберт PATCH), Submit не показував
+ * зайнятості, і другий клік ставив у чергу другий POST submit
+ * (зонд рев'ю: flush, flush, POST submit, POST submit).
  */
 
 const CurrentUser = {
   denies: [],
-  grants: {},
+  grants: { 'Project:7': 'Manage' },
   isSimulation: false,
   language: 'en',
   mustChangePassword: false,
@@ -28,46 +23,40 @@ const CurrentUser = {
   userName: 'tester',
 };
 
-let recalculateCalls = 0;
+const log: string[] = [];
+
+function json(body: unknown): Response {
+  return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
+}
 
 function mockFetch(): void {
-  recalculateCalls = 0;
-
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
-
-      if (url.includes('/api/v1/me')) {
-        return new Response(JSON.stringify(CurrentUser), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' },
-        });
+      if (url.includes('/api/v1/me')) return json(CurrentUser);
+      if (url.includes('/submit')) {
+        log.push('POST submit');
+        // Сервер відповідає не миттєво: подвійний клік у цей час теж не має пройти.
+        await new Promise((resolve) => setTimeout(resolve, 100));
       }
 
-      if (url.includes('/recalculate')) {
-        recalculateCalls += 1;
-
-        return new Response(JSON.stringify({ jobId: `job-${recalculateCalls}` }), {
-          status: 202,
-          headers: { 'Content-Type': 'application/json' },
-        });
-      }
-
-      if (url.includes('/api/v1/jobs/')) {
-        return new Response(
-          JSON.stringify({ jobId: 'job-1', state: 'Running', percent: 10, message: null, error: null }),
-          { status: 200, headers: { 'Content-Type': 'application/json' } },
-        );
-      }
-
-      throw new Error(`неочікуваний запит у тесті: ${url}`);
+      return json({});
     }),
   );
 }
 
 function show(): void {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  client.setQueryData(['document', 1, 202601], {
+    businessKey: 'DOC-1',
+    createdAt: '2026-01-01T00:00:00Z',
+    id: 1,
+    nameL10n: null,
+    projectId: 7,
+    sheetCount: 1,
+    sheetStates: {},
+  });
 
   render(
     <MantineProvider>
@@ -78,30 +67,53 @@ function show(): void {
   );
 }
 
+let unregister: (() => void) | null = null;
+
+/** «Сітка» з набраним, яке зберігається 300 мс. */
+function slowDirtyGrid(): void {
+  let dirty = true;
+  unregister = registerUnsavedSource('an28-p2-2', {
+    hasUnsaved: () => dirty,
+    flush: async () => {
+      log.push('flush');
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      dirty = false;
+
+      return true;
+    },
+  });
+}
+
 afterEach(() => {
+  unregister?.();
+  unregister = null;
+  log.length = 0;
   vi.unstubAllGlobals();
 });
 
-describe('SheetActions: захист від подвійного кліку на «Перерахувати»', () => {
-  it('швидкий подвійний клік ставить у чергу рівно ОДИН перерахунок', async () => {
+describe('AN-28 P2-2: Submit під час збереження набраного', () => {
+  it('кнопка зайнята, повторні кліки не дають другого POST submit', async () => {
     mockFetch();
-
+    slowDirtyGrid();
     show();
 
-    const button = await screen.findByRole('button', { name: /recalculate/i });
-
-    // ⛔ `fireEvent.click` НЕ чекає на перерендер React між викликами (на
-    // відміну від `userEvent.click`, який фактично серіалізує клік і
-    // послідовне очікування — тому НЕ відтворює справжню гонитву й не ловив
-    // би цей дефект). Реальний швидкий подвійний клік викликає обробник
-    // двічі ДО того, як `recalculate.isPending`/`loading` встигає
-    // перерендеритись у `true` і заблокувати кнопку — саме це тут і
-    // відтворено: два виклики `fireEvent.click` без очікування між ними.
+    const button = await screen.findByRole('button', { name: /submit/i });
     fireEvent.click(button);
+    // Синхронний другий клік - до будь-якого рендеру.
     fireEvent.click(button);
 
     await waitFor(() => {
-      expect(recalculateCalls).toBe(1);
+      expect((button as HTMLButtonElement).disabled).toBe(true);
     });
+    fireEvent.click(button);
+
+    await waitFor(() => {
+      expect(log).toEqual(['flush', 'POST submit']);
+    });
+    // Клік, поки сервер іще відповідає.
+    fireEvent.click(button);
+    await new Promise((resolve) => setTimeout(resolve, 400));
+
+    expect(log).toEqual(['flush', 'POST submit']);
   });
 });

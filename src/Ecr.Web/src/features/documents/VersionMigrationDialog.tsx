@@ -5,7 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { showDone } from '@/shared/ui/notify';
 import { t } from '@/shared/i18n';
-import { whenEditsSaved } from '@/features/grid/settleEdits';
+import { useSettledAction } from '@/features/grid/settleEdits';
 import {
   getVersionMigrationTargets,
   migrateDocumentVersion,
@@ -129,7 +129,9 @@ export function VersionMigrationDialog({ documentId, onClose }: VersionMigration
   }, [targetId, mode, resetApply]);
 
   const options = (targets.data?.targets ?? []).map((v) => ({ value: String(v.id), label: v.version }));
-  const busy = dryRun.isPending || apply.isPending;
+  // AN-28 P2-2: зайнятість і на час збереження набраного перед Apply.
+  const settled = useSettledAction(apply.isPending);
+  const busy = dryRun.isPending || apply.isPending || settled.settling;
 
   return (
     <Modal opened onClose={onClose} title={t('documents.migrateVersionTitle')} size="lg">
@@ -193,8 +195,8 @@ export function VersionMigrationDialog({ documentId, onClose }: VersionMigration
           </Button>
           <Button
             disabled={report === null || !report.canApply || busy}
-            loading={apply.isPending}
-            onClick={() => void whenEditsSaved(() => apply.mutate())}
+            loading={apply.isPending || settled.settling}
+            onClick={() => settled.run(() => apply.mutateAsync())}
             data-testid="migrate-apply"
           >
             {t('documents.migrateApply')}

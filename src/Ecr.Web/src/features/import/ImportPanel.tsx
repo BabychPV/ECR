@@ -20,7 +20,7 @@ import { notificationCloseButtonProps, showApiError, showDone } from '@/shared/u
 import { useDurationIndicator } from '@/shared/ui/useDurationIndicator';
 import { DurationProgress } from '@/shared/ui/DurationProgress';
 import { t } from '@/shared/i18n';
-import { whenEditsSaved } from '@/features/grid/settleEdits';
+import { useSettledAction } from '@/features/grid/settleEdits';
 import { localized } from '@/shared/i18n/localized';
 
 /** Куди імпортувати. */
@@ -144,6 +144,8 @@ export function ImportPanel({ documentId, periodKey }: ImportPanelProps): JSX.El
    */
   const loadPhase = useDurationIndicator(load.isPending);
   const applyPhase = useDurationIndicator(apply.isPending);
+  // AN-28 P2-2: Apply з тим самим previewToken - лише один, і на час збереження набраного теж.
+  const settled = useSettledAction(apply.isPending);
 
   const blocked = (preview?.conflicts.length ?? 0) > 0 || (preview?.rejected.length ?? 0) > 0;
   const rounded = preview?.changes.filter(isRounded) ?? [];
@@ -341,10 +343,8 @@ export function ImportPanel({ documentId, periodKey }: ImportPanelProps): JSX.El
               </Button>
               <Button
                 disabled={blocked || preview.changes.length === 0}
-                loading={applyPhase !== 'none'}
-                onClick={() => {
-                  if (!apply.isPending) void whenEditsSaved(() => apply.mutate(preview.previewToken));
-                }}
+                loading={applyPhase !== 'none' || settled.settling}
+                onClick={() => settled.run(() => apply.mutateAsync(preview.previewToken))}
               >
                 {t('import.apply')}
               </Button>

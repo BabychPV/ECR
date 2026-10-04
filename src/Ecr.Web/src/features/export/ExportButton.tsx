@@ -8,7 +8,7 @@ import { outcomeOf, pollInterval } from '@/features/workflow/jobFollow';
 import { notificationCloseButtonProps, showApiError } from '@/shared/ui/notify';
 import { errorCodeText } from '@/shared/ui/problemText';
 import { t } from '@/shared/i18n';
-import { whenEditsSaved } from '@/features/grid/settleEdits';
+import { useSettledAction } from '@/features/grid/settleEdits';
 
 /** Що і за який період експортувати. */
 interface ExportButtonProps {
@@ -147,6 +147,9 @@ export function ExportButton({
   const outcome = jobId === null ? null : outcomeOf(job.data?.state, job.isError);
   const building =
     outcome === 'running' && started.documentId === documentId && started.periodKey === periodKey;
+  // AN-28 P2-2: зайнятість і single-flight і на час збереження набраного перед експортом.
+  const settled = useSettledAction(start.isPending || building);
+  const running = start.isPending || building || settled.settling;
 
   // ⚠ Повідомлення про відмову — ОДИН раз на задачу, а не на кожен рендер:
   // `job.data` не змінюється після кінцевого стану, і без захисту `ref`
@@ -244,27 +247,27 @@ export function ExportButton({
       <Button
         size="xs"
         variant="default"
-        disabled={start.isPending || building}
-        aria-busy={start.isPending || building}
-        data-export-state={start.isPending || building ? 'running' : 'idle'}
-        onClick={() => void whenEditsSaved(() => start.mutate({ documentId, periodKey, format }), { readOnly: true })}
+        disabled={running}
+        aria-busy={running}
+        data-export-state={running ? 'running' : 'idle'}
+        onClick={() => settled.run(() => start.mutateAsync({ documentId, periodKey, format }), { readOnly: true })}
       >
         <span style={{ display: 'inline-grid' }}>
           <span
-            aria-hidden={start.isPending || building}
-            style={{ gridArea: '1 / 1', visibility: start.isPending || building ? 'hidden' : 'visible' }}
+            aria-hidden={running}
+            style={{ gridArea: '1 / 1', visibility: running ? 'hidden' : 'visible' }}
           >
             {t('document.export')}
           </span>
           <span
-            aria-hidden={!(start.isPending || building)}
+            aria-hidden={!running}
             data-testid="export-running-label"
             style={{
               gridArea: '1 / 1',
               display: 'inline-flex',
               alignItems: 'center',
               gap: 6,
-              visibility: start.isPending || building ? 'visible' : 'hidden',
+              visibility: running ? 'visible' : 'hidden',
             }}
           >
             <Loader size={12} />
@@ -278,7 +281,7 @@ export function ExportButton({
         aria-label={t('document.exportFormat')}
         value={format}
         onChange={(value) => setFormat(value as ExportFormat)}
-        disabled={start.isPending || building}
+        disabled={running}
         data={exportFormatOptions()}
       />
     </Group>

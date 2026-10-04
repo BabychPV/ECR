@@ -1,3 +1,4 @@
+import { useCallback, useRef, useState } from 'react';
 import { notifications } from '@mantine/notifications';
 import { t } from '@/shared/i18n';
 import { flushUnsaved, hasUnsavedChanges } from '@/shared/ui/unsavedSources';
@@ -109,4 +110,61 @@ export async function whenEditsSaved(
   }
 
   return false;
+}
+
+/** Дія кнопки: синхронна або проміс (`mutateAsync`) - тоді кнопка зайнята до його кінця. */
+type SettledAction = () => void | Promise<unknown>;
+
+/**
+ * Кнопка дії над документом: зайнятість і single-flight на ВЕСЬ шлях
+ * «зберегти набране -> дія» (AN-28 P2-2).
+ *
+ * ⛔ Що ламалося. `whenEditsSaved` триває кадр + оберт PATCH (до 3 с), а
+ * `loading={mutation.isPending}` у цей час - false: мутація ще не почалась.
+ * Кнопка лишалась активною без жодної ознаки роботи, і другий клік ставив у
+ * чергу другий Submit/Approve/Apply/експорт (журнал зонда: flush, flush,
+ * POST submit, POST submit).
+ *
+ * ⚠ Захист СИНХРОННИЙ (`useRef`), не через стан React: `disabled` настає лише
+ * на наступному рендері, а подвійний клік встигає раніше (той самий урок, що
+ * `recalculateInFlight` у `SheetActions`). `settling` - для показу (`loading`).
+ *
+ * ⚠ Якщо дія повертає проміс (`mutateAsync`), зайнятість тримається до його
+ * кінця: між «збережено» і `isPending` мутації інакше лишалась би щілина.
+ * Відмову промісу показує сама мутація (`onError`); тут вона лише гаситься.
+ *
+ * @param busy Зовнішня зайнятість (мутація вже летить) - клік ігнорується.
+ */
+export function useSettledAction(busy = false): {
+  /** Іде збереження набраного або сама дія. */
+  readonly settling: boolean;
+  /** Запускає `action` після збереження; повторний виклик, доки триває попередній, - нічого. */
+  readonly run: (action: SettledAction, options?: WhenEditsSavedOptions) => void;
+} {
+  const [settling, setSettling] = useState(false);
+  const inFlight = useRef(false);
+  const busyNow = useRef(busy);
+  busyNow.current = busy;
+
+  const run = useCallback((action: SettledAction, options: WhenEditsSavedOptions = {}): void => {
+    if (inFlight.current || busyNow.current) return;
+
+    inFlight.current = true;
+    setSettling(true);
+
+    let running: Promise<unknown> | undefined;
+    void whenEditsSaved(() => {
+      const result = action();
+      if (result instanceof Promise) running = result;
+    }, options)
+      .then(async () => {
+        await running?.catch(() => undefined);
+      })
+      .finally(() => {
+        inFlight.current = false;
+        setSettling(false);
+      });
+  }, []);
+
+  return { settling, run };
 }

@@ -20,7 +20,7 @@ import { Hint } from '@/shared/ui/Hint';
 import { showApiError, showDone } from '@/shared/ui/notify';
 import { useRecallAvailability, type RecallSheetRequest } from './api';
 import { outcomeOf, pollInterval } from './jobFollow';
-import { whenEditsSaved } from '@/features/grid/settleEdits';
+import { useSettledAction } from '@/features/grid/settleEdits';
 import { humanizeJobId } from './jobLabel';
 import { isAllowed, type WorkflowAction } from './transitions';
 import { t } from '@/shared/i18n';
@@ -370,14 +370,17 @@ export function SheetActions({
   });
 
   /**
-   * ⛔ Захист від подвійного кліку — СИНХРОННИЙ, не через `recalculate.isPending`.
+   * ⛔ Захист від подвійного кліку — СИНХРОННИЙ, не через `isPending`.
    * Mantine `Button` вимикається лише разом із `loading`, а той оновлюється
    * лише на НАСТУПНОМУ рендері React — швидкий подвійний клік встигає
-   * викликати `mutate()` двічі ДО першого перерендеру, і ставить у чергу два
-   * однакових перерахунки. `useRef` читається й пишеться негайно, у тому
-   * самому обробнику, без очікування на React.
+   * викликати `mutate()` двічі ДО першого перерендеру.
+   *
+   * ✎ AN-28 P2-2: раніше так був захищений лише Recalculate (`recalculateInFlight`);
+   * Submit/Approve/Reject після L8-01 мали ще й вікно збереження набраного, у
+   * якому кнопка не показувала зайнятості. Тепер усі дії аркуша — один
+   * single-flight на весь шлях «зберегти -> дія -> відповідь».
    */
-  const recalculateInFlight = useRef(false);
+  const settled = useSettledAction(submit.isPending || decide.isPending || recalculate.isPending);
 
   const recalcJob = useQuery({
     queryKey: ['job', recalcJobId],
@@ -603,23 +606,9 @@ export function SheetActions({
           <Button
             size="xs"
             variant="default"
-            loading={recalculate.isPending || recalcRunning}
-            onClick={() => {
-              if (recalculateInFlight.current) return;
-              recalculateInFlight.current = true;
-              // AN-28/L8-01: спершу зберегти набране; відмова збереження - дії немає.
-              let started = false;
-              void whenEditsSaved(() => {
-                started = true;
-                recalculate.mutate(undefined, {
-                  onSettled: () => {
-                    recalculateInFlight.current = false;
-                  },
-                });
-              }).then(() => {
-                if (!started) recalculateInFlight.current = false;
-              });
-            }}
+            loading={recalculate.isPending || recalcRunning || settled.settling}
+            // AN-28/L8-01: спершу зберегти набране; відмова збереження - дії немає.
+            onClick={() => settled.run(() => recalculate.mutateAsync())}
           >
             {recalcRunning ? t('workflow.recalcRunning') : t('workflow.recalculate')}
           </Button>
@@ -627,7 +616,7 @@ export function SheetActions({
       )}
 
       {canSubmit && (
-        <Button size="xs" loading={submit.isPending} onClick={() => void whenEditsSaved(() => submit.mutate(false))}>
+        <Button size="xs" loading={submit.isPending || settled.settling} onClick={() => settled.run(() => submit.mutateAsync(false))}>
           {t('document.submit')}
         </Button>
       )}
@@ -663,7 +652,7 @@ export function SheetActions({
         <Button
           size="xs"
           color="statusSuccess"
-          loading={decide.isPending}
+          loading={decide.isPending || settled.settling}
           onClick={() => setAsking('approve')}
         >
           {t('workflow.approve')}
@@ -707,8 +696,8 @@ export function SheetActions({
         consequences={warnings ?? []}
         verb={t('workflow.submitAnyway')}
         danger={false}
-        isPending={submit.isPending}
-        onConfirm={() => void whenEditsSaved(() => submit.mutate(true))}
+        isPending={submit.isPending || settled.settling}
+        onConfirm={() => settled.run(() => submit.mutateAsync(true))}
         onClose={() => setWarnings(null)}
       />
 
@@ -718,8 +707,8 @@ export function SheetActions({
         text={t('workflow.approveHint')}
         verb={t('workflow.approve')}
         danger={false}
-        isPending={decide.isPending}
-        onConfirm={() => void whenEditsSaved(() => decide.mutate({ approved: true, reason: null }))}
+        isPending={decide.isPending || settled.settling}
+        onConfirm={() => settled.run(() => decide.mutateAsync({ approved: true, reason: null }))}
         onClose={() => setAsking(null)}
       />
 
@@ -740,8 +729,8 @@ export function SheetActions({
         label={t('workflow.reason')}
         description={t('workflow.rejectHint')}
         confirmLabel={t('workflow.reject')}
-        isPending={decide.isPending}
-        onConfirm={(reason) => void whenEditsSaved(() => decide.mutate({ approved: false, reason }))}
+        isPending={decide.isPending || settled.settling}
+        onConfirm={(reason) => settled.run(() => decide.mutateAsync({ approved: false, reason }))}
         onClose={() => setAsking(null)}
       />
 
