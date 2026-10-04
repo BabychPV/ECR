@@ -67,12 +67,18 @@ public sealed class SetEntityFieldMapPausedHandler(
     /// </exception>
     public async Task<EntityFieldMapDto> HandleAsync(int fieldMapId, bool paused, CancellationToken ct)
     {
-        await ListTemplatesHandler
+        var profile = await PermissionCheck
             .RequireAsync(access, currentUser, Permission, ct)
             .ConfigureAwait(false);
 
         var userId = EntityFieldMapLifecycle.RequireUserId(currentUser);
         var map = await EntityFieldMapLifecycle.RequireMapAsync(sources, fieldMapId, ct).ConfigureAwait(false);
+
+        // ⛔ L3-11 / L4-07: дія над мапінгом вимагає прав на ЦІЛЬ (грант Manage на проєкти колонки / запис у довіднику),
+        // а не лише Integration.Manage.
+        await EntityFieldMapLifecycle
+            .RequireTargetAccessAsync(sources, access, currentUser, profile, map, includeColumn: !paused, ct)
+            .ConfigureAwait(false);
 
         // ⛔ Перехід ухвалює ДОМЕН: повторна пауза — `ECR-INT-0409`, і саме
         // суфікс `-0409` робить із нього 409, а не 422.
@@ -174,12 +180,18 @@ public sealed class AcceptSourceUnitChangeHandler(
     public async Task<EntityFieldMapDto> HandleAsync(
         int fieldMapId, int? requestedSourceUnitId, CancellationToken ct)
     {
-        await ListTemplatesHandler
+        var profile = await PermissionCheck
             .RequireAsync(access, currentUser, Permission, ct)
             .ConfigureAwait(false);
 
         var userId = EntityFieldMapLifecycle.RequireUserId(currentUser);
         var map = await EntityFieldMapLifecycle.RequireMapAsync(sources, fieldMapId, ct).ConfigureAwait(false);
+
+        // ⛔ L3-11 / L4-07: дія над мапінгом вимагає прав на ЦІЛЬ (грант Manage на проєкти колонки / запис у довіднику),
+        // а не лише Integration.Manage.
+        await EntityFieldMapLifecycle
+            .RequireTargetAccessAsync(sources, access, currentUser, profile, map, includeColumn: true, ct)
+            .ConfigureAwait(false);
 
         // ⚠ Існування одиниці перевіряється ДО зміни — тим самим порядком, що
         // в `CreateEntityFieldMapHandler.ApplyUnitsAsync`: мапінг, який
@@ -302,12 +314,18 @@ public sealed class DeleteEntityFieldMapHandler(
     /// </exception>
     public async Task HandleAsync(int fieldMapId, CancellationToken ct)
     {
-        await ListTemplatesHandler
+        var profile = await PermissionCheck
             .RequireAsync(access, currentUser, Permission, ct)
             .ConfigureAwait(false);
 
         var userId = EntityFieldMapLifecycle.RequireUserId(currentUser);
         var map = await EntityFieldMapLifecycle.RequireMapAsync(sources, fieldMapId, ct).ConfigureAwait(false);
+
+        // ⛔ L3-11 / L4-07: дія над мапінгом вимагає прав на ЦІЛЬ (грант Manage на проєкти колонки / запис у довіднику),
+        // а не лише Integration.Manage.
+        await EntityFieldMapLifecycle
+            .RequireTargetAccessAsync(sources, access, currentUser, profile, map, includeColumn: true, ct)
+            .ConfigureAwait(false);
 
         var collected = await sources
             .CountCollectedAsync(map.SourceEntityId, map.SourceField, ct)
@@ -380,6 +398,40 @@ internal static class EntityFieldMapLifecycle
                    ["messageKey"] = "err.ECR-INT-0404.fieldMap",
                    ["fieldMapId"] = fieldMapId.ToString(CultureInfo.InvariantCulture),
                });
+
+    /// <summary>
+    /// Права на ЦІЛЬ мапінгу: для колонки — грант <c>Manage</c> на проєкти колонки (S3, L3-11), для поля довідника —
+    /// запис у довіднику-власнику (<c>Registry.EditData</c>/грант <c>Write</c>, заборона = 404; L4-07, D-202).
+    /// </summary>
+    /// <param name="sources">Сховище збору.</param>
+    /// <param name="access">Служба рішень про доступ.</param>
+    /// <param name="currentUser">Поточний користувач.</param>
+    /// <param name="profile">Профіль користувача.</param>
+    /// <param name="map">Мапінг, над яким діють.</param>
+    /// <param name="includeColumn">Чи перевіряти колонку: пауза (зупинка збору) її не вимагає.</param>
+    /// <param name="ct">Скасування.</param>
+    public static async Task RequireTargetAccessAsync(
+        ICollectionStore sources, IAccessDecisionService access, ICurrentUser currentUser, AccessProfile profile,
+        EntityFieldMap map, bool includeColumn, CancellationToken ct)
+    {
+        if (map.TargetColumnDefId is { } columnDefId)
+        {
+            if (includeColumn)
+            {
+                await ColumnProjectGrants.RequireManageAsync(sources, profile, columnDefId, ct).ConfigureAwait(false);
+            }
+
+            return;
+        }
+
+        if (map.TargetRegistryFieldDefId is { } registryFieldDefId
+            && await sources.FindRegistryFieldOwnerAsync(registryFieldDefId, ct).ConfigureAwait(false) is { } owner)
+        {
+            await Ecr.Application.Registries.RegistryAccess
+                .RequireAsync(access, currentUser, Ecr.Application.Registries.UpsertRegistryEntryHandler.Permission, Ecr.Domain.Enums.GrantLevel.Write, owner, ct)
+                .ConfigureAwait(false);
+        }
+    }
 
     /// <summary>Автор події журналу; анонім сюди не доходить, але кидок лишається.</summary>
     public static int RequireUserId(ICurrentUser currentUser)

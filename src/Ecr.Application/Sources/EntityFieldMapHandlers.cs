@@ -221,6 +221,12 @@ public sealed class CreateEntityFieldMapHandler(
                         });
                 }
 
+                // ⛔ L4-07 (D-202): мапінг на поле довідника — це запис збором у ЦЕЙ довідник; Integration.Manage
+                // без права на дані довідника (Registry.EditData / грант Write; заборона = 404) його не заводить.
+                await Registries.RegistryAccess
+                    .RequireAsync(access, currentUser, Registries.UpsertRegistryEntryHandler.Permission, Ecr.Domain.Enums.GrantLevel.Write, owner, ct)
+                    .ConfigureAwait(false);
+
                 return EntityFieldMap.ToRegistryField(sourceEntityId, command.SourceField, registryFieldDefId);
 
             default:

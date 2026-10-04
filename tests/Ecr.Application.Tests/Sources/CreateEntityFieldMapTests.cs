@@ -193,6 +193,10 @@ public sealed class CreateEntityFieldMapTests
     {
         EntityBoundTo(BoundRegistryId);
 
+        // L4-07: запис збором у довідник вимагає ще й права на дані довідника.
+        _access.BuildProfileAsync(9, Arg.Any<CancellationToken>())
+            .Returns(new AccessBuilder { UserId = 9 }.Permission("Integration.Manage").Permission("Registry.EditData").Build());
+
         var dto = await Handler().HandleAsync(SourceEntityId, RegistryCommand(), CancellationToken.None);
 
         Assert.Equal(FieldTargetKind.RegistryField, dto.TargetKind);
