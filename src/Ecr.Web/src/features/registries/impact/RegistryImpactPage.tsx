@@ -202,9 +202,19 @@ export function RegistryImpactPage(): JSX.Element {
     .filter((id) => impact.data?.items.some((item) => item.documentId === id) === true)
     .sort((a, b) => a - b);
 
+  // ⛔ «Нічого не обрано» (→ усі) і «обране зникло» — різні стани: друге ніколи не розширюється до
+  // перерахунку всіх зачеплених (бюджет прогону, D-63, R-14).
+  const selectionGone = selected.size > 0 && effective.length === 0;
+
+  // ⚠ Поза діалогом причини зниклий вибір просто скидається: кнопка чесно каже «усі», і натиск на неї —
+  // свідомий вибір. Під відкритим діалогом — ні: там рішення приймає `onConfirm` нижче.
+  useEffect(() => {
+    if (selectionGone && !asking) setSelected(new Set());
+  }, [selectionGone, asking]);
+
   const recalculate = useMutation({
     mutationFn: (reason: string) =>
-      recalculateImpacted(code, { documentIds: effective.length === 0 ? null : effective, reason }),
+      recalculateImpacted(code, { documentIds: selected.size === 0 ? null : effective, reason }),
     onSuccess: (accepted) => {
       setJobId(accepted.jobId);
       // ⚠ Поставлені документи перераховуються й зникнуть із переліку: вибір не переживає постановку.
@@ -343,6 +353,14 @@ export function RegistryImpactPage(): JSX.Element {
         isPending={recalculate.isPending}
         onConfirm={(reason) => {
           setAsking(false);
+
+          // ⛔ Перелік перечитався, поки був відкритий діалог причини, і обраних документів у ньому вже
+          // немає: запит не йде, вибір скидається — кнопка тепер каже «усі», і це окреме рішення людини.
+          if (selectionGone) {
+            setSelected(new Set());
+            return;
+          }
+
           recalculateFocus.arm();
           recalculate.mutate(reason);
         }}

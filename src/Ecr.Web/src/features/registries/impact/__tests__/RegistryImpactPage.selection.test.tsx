@@ -137,3 +137,32 @@ describe('RegistryImpactPage: вибір документів не пережи�
     expect(server.posts[0]).toEqual({ documentIds: [5], reason: 'лише наявні' });
   });
 });
+
+describe('RegistryImpactPage: обране зникло під відкритим діалогом причини (рев\'ю AN-35, P2)', () => {
+  /*
+   * Мутаційний доказ (перевірено руками 2026-10-04): прибрати гілку `selectionGone` в `onConfirm`
+   * → червоний (POST `{ documentIds: null }`, тобто перерахунок УСІХ зачеплених).
+   */
+  it('перелік перечитався без обраного документа — запит не йде, вибір скинуто', async () => {
+    let items = [Doc5, Doc7];
+    const server = mockServer(() => ({ items, total: items.length, truncated: false }));
+    const client = show();
+
+    fireEvent.click(await screen.findByRole('checkbox', { name: /DOC7/ }));
+    fireEvent.click(document.querySelector<HTMLButtonElement>('[data-impact-recalculate]') as HTMLButtonElement);
+    const dialog = await screen.findByRole('dialog');
+
+    // Поки відкритий діалог, перелік перечитався (повернення фокуса, чужий перерахунок).
+    items = [Doc5];
+    await client.invalidateQueries({ queryKey: ['registry-impact', 'COMPONENT'] });
+    await waitFor(() => expect(document.querySelector('[data-impact-row="7"]')).toBeNull());
+
+    fireEvent.change(within(dialog).getByRole('textbox'), { target: { value: 'лише DOC7' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: /registries\.impact\.recalculateConfirm/ }));
+
+    const button = document.querySelector<HTMLButtonElement>('[data-impact-recalculate]') as HTMLButtonElement;
+    await waitFor(() => expect(button.textContent).toContain('registries.impact.recalculateAll'));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(server.posts).toHaveLength(0);
+  });
+});
