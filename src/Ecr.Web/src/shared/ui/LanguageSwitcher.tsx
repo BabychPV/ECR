@@ -1,10 +1,13 @@
 import { useEffect, useMemo, useState, type JSX } from 'react';
 import { NativeSelect, Text } from '@mantine/core';
+import { notifications } from '@mantine/notifications';
 import { apiFetch } from '@/api/client';
 import type { LanguageDto, UiStringCatalog } from '@/api/types';
 import { language, loadCatalog, setLanguage, t, type Scope } from '@/shared/i18n';
 import { useCatalog } from '@/shared/i18n/useCatalog';
 import { useLanguages } from '@/shared/i18n/useLanguages';
+import { closeNotificationButtonProps } from './a11yLabels';
+import { flushUnsaved, hasUnsavedChanges } from './unsavedSources';
 
 /**
  * Мови, у яких є хоч один власний переклад (`R-16`).
@@ -155,20 +158,47 @@ export function LanguageSwitcher(): JSX.Element | null {
           const value = event.currentTarget.value;
           if (value === language()) return;
 
-          setLanguage(value);
+          // ⛔ T4-05: зі сторінкою з незбереженим вводом (відхилена сервером правка, «Retry
+          // save») перемикач показував нову мову, оболонка перекладалась, а сторінка лишалась
+          // старою мовою без жодного пояснення: remount у `AppLayout` (T3-02) свідомо чекає
+          // збереження, щоб не знищити ввід. Тепер спершу зберігаємо (як при виході зі
+          // сторінки); не вдалося - мову НЕ міняємо (перемикач лишається на поточній, тобто
+          // показує правду) і кажемо, що зробити. Чистий стан - як і раніше, одразу.
+          if (!hasUnsavedChanges()) {
+            applyLanguage(value);
+            return;
+          }
 
-          // ⛔ Без цього виклику перемикач лише запам'ятовує вибір у
-          // `localStorage`: `t()` і далі читає каталог, завантажений під
-          // СТАРУ мову (`loaded` у `shared/i18n/index.ts` наповнюється лише
-          // тим, що явно запитали), і видимий текст не зміниться до
-          // наступного відкриття сторінки.
-          //
-          // ⚠ Область — `private`: перемикач стоїть у `UserMenu`, а це
-          // частина застосунку, показана лише після входу; приватний зріз
-          // містить усе, включно зі спільними ключами (`common.*`, `app.*`).
-          void loadCatalog(value, 'private');
+          void flushUnsaved().then((saved) => {
+            if (saved) {
+              applyLanguage(value);
+              return;
+            }
+
+            notifications.show({
+              color: 'statusWarning',
+              message: t('profile.languageUnsavedBlocked'),
+              closeButtonProps: closeNotificationButtonProps,
+            });
+          });
         }}
       />
     </div>
   );
+}
+
+/** Застосовує обрану мову: запам'ятовує вибір і тягне каталог (`D-134`). */
+function applyLanguage(value: string): void {
+  setLanguage(value);
+
+  // ⛔ Без цього виклику перемикач лише запам'ятовує вибір у
+  // `localStorage`: `t()` і далі читає каталог, завантажений під
+  // СТАРУ мову (`loaded` у `shared/i18n/index.ts` наповнюється лише
+  // тим, що явно запитали), і видимий текст не зміниться до
+  // наступного відкриття сторінки.
+  //
+  // ⚠ Область — `private`: перемикач стоїть у `UserMenu`, а це
+  // частина застосунку, показана лише після входу; приватний зріз
+  // містить усе, включно зі спільними ключами (`common.*`, `app.*`).
+  void loadCatalog(value, 'private');
 }
