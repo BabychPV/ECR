@@ -34,18 +34,31 @@ public static class PredicateValidator
         }
     }
 
-    private static IEnumerable<AstNode> FindPredicates(AstNode node)
+    /// <remarks>
+    /// ⛔ L7-01 (аудит 2026-10-03): обхід ЯВНИМ стеком, а не рекурсивним
+    /// ітератором. Кожен рівень вкладеного <c>yield</c> — окремий кадр
+    /// <c>MoveNext</c> на стеку потоку, і лівий гребінь <c>1+1+…</c> на 32 000
+    /// доданків вбивав процес API саме тут. Порядок обходу той самий —
+    /// зліва направо, згори вниз.
+    /// </remarks>
+    private static IEnumerable<AstNode> FindPredicates(AstNode root)
     {
-        if (node is CellReferenceNode { Row: RowSelector.Predicate predicate })
-        {
-            yield return predicate.Condition;
-        }
+        var pending = new Stack<AstNode>();
+        pending.Push(root);
 
-        foreach (var child in Children(node))
+        while (pending.Count > 0)
         {
-            foreach (var found in FindPredicates(child))
+            var node = pending.Pop();
+
+            if (node is CellReferenceNode { Row: RowSelector.Predicate predicate })
             {
-                yield return found;
+                yield return predicate.Condition;
+            }
+
+            var children = Children(node).ToList();
+            for (var i = children.Count - 1; i >= 0; i--)
+            {
+                pending.Push(children[i]);
             }
         }
     }
@@ -69,6 +82,12 @@ public static class PredicateValidator
     /// </remarks>
     private static void CheckCondition(AstNode node, List<ExpressionDiagnostic> diagnostics)
     {
+        // ⚠ Умова предиката — довільний вираз, тож і тут лівий гребінь (L7-01).
+        if (!TraversalStackGuard.TryEnter(node, diagnostics))
+        {
+            return;
+        }
+
         switch (node)
         {
             case FunctionNode function:

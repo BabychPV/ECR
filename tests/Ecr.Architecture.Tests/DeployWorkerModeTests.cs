@@ -25,12 +25,12 @@ namespace Ecr.Architecture.Tests;
 public sealed class DeployWorkerModeTests
 {
     private const string Harness = """
-        param([string] $Deploy, [string] $Json)
+        param([string] $Deploy, [string] $Json, [string] $Placeholder, [string] $Commented)
         $ErrorActionPreference = 'Stop'
         $tokens = $null; $errors = $null
         $ast = [System.Management.Automation.Language.Parser]::ParseFile($Deploy, [ref] $tokens, [ref] $errors)
         if ($errors.Count) { throw "parse: $($errors[0].Message)" }
-        foreach ($name in 'Resolve-WorkerDeployment', 'Resolve-JobExecutionConfig', 'Remove-ServiceEnvironmentEntry', 'Get-ConfiguredValue') {
+        foreach ($name in 'Resolve-WorkerDeployment', 'Resolve-JobExecutionConfig', 'Remove-ServiceEnvironmentEntry', 'Get-ConfiguredValue', 'ConvertFrom-JsoncFile', 'Test-ConfigIsPlaceholder', 'Get-ConfiguredEditionMode') {
             $fn = $ast.Find({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name }, $true)
             if (-not $fn) { throw "no function $name" }
             . ([scriptblock]::Create($fn.Extent.Text))
@@ -66,6 +66,12 @@ public sealed class DeployWorkerModeTests
 
         "file.mode=$(Get-ConfiguredValue -Path $Json -Keys 'Jobs', 'Queue', 'Mode')"
         "file.missing=$([string]::IsNullOrEmpty((Get-ConfiguredValue -Path $Json -Keys 'Jobs', 'Recalculation', 'Executor')))"
+
+        "jsonc.placeholder=$(Test-ConfigIsPlaceholder -Path $Placeholder)"
+        "jsonc.siteValues=$(Test-ConfigIsPlaceholder -Path $Commented)"
+        "jsonc.plainValues=$(Test-ConfigIsPlaceholder -Path $Json)"
+        "jsonc.edition=$(Get-ConfiguredEditionMode -Path $Commented)"
+        "jsonc.value=$(Get-ConfiguredValue -Path $Commented -Keys 'Jobs', 'Queue', 'Mode')"
         """;
 
     private static readonly Lazy<IReadOnlyDictionary<string, string>> Results = new(Run);
@@ -157,6 +163,25 @@ public sealed class DeployWorkerModeTests
         Assert.Contains("$workerFlag = if ($workerEnabled)", script, StringComparison.Ordinal);
     }
 
+    /// <remarks>
+    /// L10-05: заповнювач, який кладе MSI, містить коментарі <c>//</c>; Windows
+    /// PowerShell 5.1 (так запускають runbook і install-guide) такий JSON не
+    /// парсить. Предмет — справжній <c>src/Ecr.Api/appsettings.Production.json</c>.
+    /// Мутація (прогнано в 5.1): <c>ConvertFrom-JsoncFile</c> замінити на
+    /// <c>Get-Content -Raw | ConvertFrom-Json</c> → <c>jsonc.placeholder</c> = False,
+    /// решта <c>jsonc.*</c> червоні. ⚠ У pwsh 7 коментарі дозволені, тож доказ — лише на 5.1.
+    /// </remarks>
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    [InlineData("jsonc.placeholder", "True")]
+    [InlineData("jsonc.siteValues", "False")]
+    [InlineData("jsonc.plainValues", "False")]
+    [InlineData("jsonc.edition", "Standard")]
+    [InlineData("jsonc.value", "Database")]
+    public void Файл_майданчика_з_коментарями_читається_як_у_Windows_PowerShell_5_1(string key, string expected)
+        => Assert.Equal(expected, Value(key));
+
     private static string Value(string key)
     {
         Assert.True(Results.Value.TryGetValue(key, out var value), $"ключа {key} немає у виводі:\n{string.Join('\n', Results.Value)}");
@@ -180,8 +205,19 @@ public sealed class DeployWorkerModeTests
                 RedirectStandardError = true,
                 UseShellExecute = false,
             };
+            var commented = Path.Combine(dir, "commented.json");
+            File.WriteAllText(commented, """
+                {
+                  // коментар майданчика
+                  "Database": { "EditionMode": "Standard" }, /* блоковий */
+                  "Jobs": { "Queue": { "Mode": "Database" } }
+                }
+                """);
+
             foreach (var argument in new[] { "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", harness,
-                         "-Deploy", Path.Combine(SourceTree.Root, "tools", "deploy-ecr.ps1"), "-Json", json })
+                         "-Deploy", Path.Combine(SourceTree.Root, "tools", "deploy-ecr.ps1"), "-Json", json,
+                         "-Placeholder", Path.Combine(SourceTree.Root, "src", "Ecr.Api", "appsettings.Production.json"),
+                         "-Commented", commented })
             {
                 start.ArgumentList.Add(argument);
             }

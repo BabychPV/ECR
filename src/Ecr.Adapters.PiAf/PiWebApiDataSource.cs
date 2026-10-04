@@ -713,7 +713,19 @@ public sealed partial class PiWebApiDataSource(
             ? value.GetString()
             : null;
 
+    /// <summary>Момент у форматі ISO 8601 UTC для запиту PI Web API.</summary>
+    /// <remarks>
+    /// ⛔ Межі інтервалів у збирачі — UTC за контрактом (<c>FromUtc</c>/<c>ToUtc</c>),
+    /// але з бази можуть прийти з <c>Kind = Unspecified</c>. <c>ToUniversalTime()</c>
+    /// вважає такий момент МІСЦЕВИМ і зсуває на пояс сервера (UTC+5 у замовника),
+    /// тож конвертується лише явний <c>Local</c> (аудит 2026-10-03, L3-01).
+    /// </remarks>
     private static string Iso(DateTime moment)
-        => Uri.EscapeDataString(
-            moment.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture));
+    {
+        var utc = moment.Kind == DateTimeKind.Local
+            ? moment.ToUniversalTime()
+            : DateTime.SpecifyKind(moment, DateTimeKind.Utc);
+
+        return Uri.EscapeDataString(utc.ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture));
+    }
 }

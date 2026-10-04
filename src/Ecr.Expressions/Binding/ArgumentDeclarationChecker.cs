@@ -1,4 +1,5 @@
 ﻿// src/Ecr.Expressions/Binding/ArgumentDeclarationChecker.cs
+using System.Runtime.CompilerServices;
 using Ecr.Expressions.Ast;
 
 namespace Ecr.Expressions.Binding;
@@ -190,6 +191,9 @@ public static class ArgumentDeclarationChecker
     /// <summary>Імена констант <c>CST.X</c>, на які посилається вираз (без префікса).</summary>
     private static void CollectConstants(AstNode node, HashSet<string> found)
     {
+        // ⛔ L7-01: лівий гребінь ланцюга — рекурсія глибиною в кількість ланок.
+        RuntimeHelpers.EnsureSufficientExecutionStack();
+
         switch (node)
         {
             case SymbolReferenceNode { Kind: SymbolKind.Constant } symbol:
@@ -225,6 +229,9 @@ public static class ArgumentDeclarationChecker
     /// <summary>Обхід дерева зі збиранням <c>@Arg</c>.</summary>
     private static void Walk(AstNode node, List<ArgumentUsage> found)
     {
+        // ⛔ L7-01: лівий гребінь ланцюга — рекурсія глибиною в кількість ланок.
+        RuntimeHelpers.EnsureSufficientExecutionStack();
+
         switch (node)
         {
             case SymbolReferenceNode { Kind: SymbolKind.Argument } symbol:

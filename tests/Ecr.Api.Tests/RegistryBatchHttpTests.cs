@@ -199,6 +199,132 @@ public sealed class RegistryBatchHttpTests(SqlServerFixture sql)
         Assert.Equal(HttpStatusCode.Forbidden, denied);
     }
 
+    /// <summary>
+    /// Аудит 2026-10-03, L5-01: код видаленого запису зайнятий назавжди (<c>UQ_RegistryEntry</c>). Новий
+    /// рядок із ним — помилка рядка <c>entryCodeTaken</c> з Id, а не «оновлено» видалений запис.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-8.6")]
+    public async Task Новий_рядок_з_кодом_видаленого_запису_це_помилка_entryCodeTaken()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, "Registry.View", "Registry.EditData");
+        var fixture = await SeedAsync(RegistryCodeMode.Manual);
+
+        var gone = await CreateAsync(client, fixture, "GONE", "10");
+        var (deleted, deletedBody) = await BatchAsync(client, fixture, dryRun: false, new { clientRowId = "d", op = "delete", id = gone });
+        Assert.True(deleted == HttpStatusCode.OK && deletedBody.GetProperty("applied").GetBoolean(), $"{deleted}: {deletedBody}");
+
+        var before = await SnapshotAsync(fixture);
+        var (status, body) = await BatchAsync(client, fixture, dryRun: false,
+            new { clientRowId = "n", op = "upsert", code = $"GONE{fixture.Tag}", values = new Dictionary<string, object?> { ["STREAM"] = "11" } });
+
+        Assert.True(status == HttpStatusCode.OK, $"{status}: {body}\n{app.ErrorsText}");
+        Assert.False(body.GetProperty("applied").GetBoolean(), body.ToString());
+        Assert.Equal(["error"], Statuses(body));
+        var error = Rows(body)[0].GetProperty("errors")[0];
+        Assert.Equal("err.ECR-REG-0409.entryCodeTaken", error.GetProperty("messageKey").GetString());
+        Assert.Equal(gone.ToString(System.Globalization.CultureInfo.InvariantCulture), error.GetProperty("params").GetProperty("id").GetString());
+        Assert.Equal(before, await SnapshotAsync(fixture));
+    }
+
+    /// <summary>
+    /// Аудит 2026-10-03, L4-06 = L5-03: обов'язкове поле наявного запису не очищується ні <c>null</c>, ні
+    /// рядком із пробілів — помилка рядка <c>requiredFieldsMissing</c>, значення лишається.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-8.4")]
+    public async Task Очищення_обов_язкового_поля_це_помилка_рядка_requiredFieldsMissing()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, "Registry.View", "Registry.EditData");
+        var fixture = await SeedAsync(RegistryCodeMode.Manual);
+
+        var e1 = await CreateAsync(client, fixture, "E1", "10");
+        var before = await SnapshotAsync(fixture);
+
+        foreach (var blank in new object?[] { null, "   " })
+        {
+            var (status, body) = await BatchAsync(client, fixture, dryRun: false,
+                new { clientRowId = "c", op = "upsert", id = e1, values = new Dictionary<string, object?> { ["STREAM"] = blank } });
+
+            Assert.True(status == HttpStatusCode.OK, $"{status}: {body}\n{app.ErrorsText}");
+            Assert.False(body.GetProperty("applied").GetBoolean(), body.ToString());
+            Assert.Equal(["error"], Statuses(body));
+            Assert.Equal(
+                "err.ECR-REG-0422.requiredFieldsMissing",
+                Rows(body)[0].GetProperty("errors")[0].GetProperty("messageKey").GetString());
+            Assert.Equal(before, await SnapshotAsync(fixture));
+        }
+    }
+
+    /// <summary>
+    /// Аудит 2026-10-03, L4-03 = L5-10: рядок, довший за колонку <c>ValueString</c>, — помилка рядка
+    /// <c>valueTooLong</c> зі звітом 200, а не 500 від обрізання в SQL Server.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Рядок_довший_за_1000_символів_це_помилка_рядка_а_не_500()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, "Registry.View", "Registry.EditData");
+        var fixture = await SeedAsync(RegistryCodeMode.Manual);
+        var before = await SnapshotAsync(fixture);
+
+        var (status, body) = await BatchAsync(client, fixture, dryRun: false,
+            new { clientRowId = "l", op = "upsert", code = $"LONG{fixture.Tag}", values = new Dictionary<string, object?> { ["STREAM"] = new string('x', 1001) } });
+
+        Assert.True(status == HttpStatusCode.OK, $"{status}: {body}\n{app.ErrorsText}");
+        Assert.False(body.GetProperty("applied").GetBoolean(), body.ToString());
+        Assert.Equal(["error"], Statuses(body));
+        var error = Rows(body)[0].GetProperty("errors")[0];
+        Assert.Equal("err.ECR-REG-0422.valueTooLong", error.GetProperty("messageKey").GetString());
+        Assert.Equal(before, await SnapshotAsync(fixture));
+    }
+
+    /// <summary>
+    /// Аудит 2026-10-03, L4-03 = L5-10: ручна правка запису (<c>POST …/entries</c>) — 1000 символів
+    /// проходять, 1001 — 422 <c>ECR-REG-0422</c> (а не 500 від обрізання в SQL Server), запис лишається.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Ручна_правка_межа_1000_проходить_1001_це_422()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, "Registry.View", "Registry.EditData");
+        var fixture = await SeedAsync(RegistryCodeMode.Manual);
+        var id = await CreateAsync(client, fixture, "E1", "10");
+
+        async Task<HttpResponseMessage> EditAsync(string stream)
+            => await client.PostAsJsonAsync(
+                new Uri($"/api/v1/registries/{fixture.Code}/entries", UriKind.Relative),
+                new
+                {
+                    id,
+                    registryDefId = fixture.DefinitionId,
+                    code = $"E1{fixture.Tag}",
+                    display = new { en = "E1" },
+                    parentEntryId = (long?)null,
+                    values = new Dictionary<string, object?> { ["STREAM"] = stream },
+                });
+
+        var atLimit = await EditAsync(new string('x', 1000));
+        Assert.True(atLimit.StatusCode == HttpStatusCode.OK, $"{atLimit.StatusCode}: {await atLimit.Content.ReadAsStringAsync()}\n{app.ErrorsText}");
+        var before = await SnapshotAsync(fixture);
+
+        var over = await EditAsync(new string('x', 1001));
+        var text = await over.Content.ReadAsStringAsync();
+        Assert.True(over.StatusCode == HttpStatusCode.UnprocessableEntity, $"{over.StatusCode}: {text}\n{app.ErrorsText}");
+        Assert.Equal("ECR-REG-0422", JsonDocument.Parse(text).RootElement.GetProperty("errorCode").GetString());
+        Assert.Equal(before, await SnapshotAsync(fixture));
+    }
+
     private static object Upsert(string clientRowId, long id, string? baseVersion, params (string Field, string Value)[] values)
         => new { clientRowId, op = "upsert", id, baseVersion, values = values.ToDictionary(v => v.Field, v => (object?)v.Value) };
 

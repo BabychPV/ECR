@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 using Ecr.Domain.Enums;
+using Ecr.Expressions.Ast;
 using Ecr.Expressions.Evaluation;
 using Ecr.Expressions.Functions;
 using Ecr.Expressions.Parsing;
@@ -185,11 +186,21 @@ public sealed class EvaluatorDepthGuardTests
         // ⚠ Виняток із потоку НЕ перехоплюється навмисно: перехоплення зробило
         // б тест зеленим і на падінні. Якщо обчислення кине — тест червоний;
         // якщо переповнить стек — процес помре, і це теж не «зелено».
-        var expression = Chain("+", 100_000);
+        //
+        // ✎ L7-01: дерево будується В КОДІ — такий ланцюг парсер тепер відхиляє
+        // сам (`Parser.MaxChainLinks`), а сторож обчислювача мусить тримати
+        // будь-яке дерево, не лише те, що пройшло парсер.
+        AstNode root = new LiteralNode(1m, ExpressionValueType.Number);
+        for (var i = 1; i < 100_000; i++)
+        {
+            root = new BinaryNode(BinaryOperator.Add, root, new LiteralNode(1m, ExpressionValueType.Number));
+        }
 
         ExpressionValue result = default;
         var thread = new Thread(
-            () => result = Eval(expression, out _),
+            () => result = new Evaluator(new FunctionRegistry()).Evaluate(
+                root, new TestEvaluationContext(), ExpressionDialect.Template,
+                new EvaluationBudget(Evaluator.MaxEvaluationSteps)),
             maxStackSize: 256 * 1024);
 
         thread.Start();

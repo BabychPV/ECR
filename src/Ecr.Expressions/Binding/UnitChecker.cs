@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using Ecr.Expressions.Ast;
 using Ecr.Expressions.Evaluation;
 using Ecr.Expressions.Parsing;
@@ -42,6 +43,12 @@ public sealed class UnitChecker
 
     private int? Check(AstNode node, IUnitContext context, List<ExpressionDiagnostic> diagnostics, RegistryShape? row)
     {
+        // ⛔ L7-01: лівий гребінь ланцюга — рекурсія глибиною в кількість ланок.
+        if (!TraversalStackGuard.TryEnter(node, diagnostics))
+        {
+            return null;
+        }
+
         switch (node)
         {
             case LiteralNode:
@@ -417,7 +424,11 @@ public sealed class UnitChecker
     /// однієї одиниці, і саме заради цього конверсія й написана.
     /// </remarks>
     private static bool HasRowScopedUnit(AstNode node, IUnitContext context)
-        => node switch
+    {
+        // ⛔ L7-01: окремий від Check рекурсивний спуск по тому самому піддереву.
+        RuntimeHelpers.EnsureSufficientExecutionStack();
+
+        return node switch
         {
             FunctionNode f when f.Name.Equals("CONVERT", StringComparison.OrdinalIgnoreCase) => false,
             CellReferenceNode reference => context.IsRowScopedUnit(reference),
@@ -428,6 +439,7 @@ public sealed class UnitChecker
                                  || HasRowScopedUnit(c.WhenFalse, context),
             _ => false,
         };
+    }
 
     private static int? Same(
         int? left,

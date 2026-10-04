@@ -79,6 +79,18 @@ public sealed class CalculationStep : Entity<long>
 {
     private CalculationStep() { }
 
+    /// <summary>
+    /// Стеля колонки <c>calc.CalculationStep.Expression</c> (і дзеркала
+    /// <c>arc.CalculationStep</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Вужча за <see cref="MethodologyFormula.MaxExpressionLength"/> (4000,
+    /// D256): трейс — довідка «який вираз бачив рушій», а не джерело формули,
+    /// тож довший вираз обрізається тут, а не валить <c>SaveChanges</c> усього
+    /// прогону (аудит 2026-10-03, L10-01).
+    /// </remarks>
+    public const int MaxStepExpressionLength = 2000;
+
     /// <summary>Створює крок трейсу.</summary>
     /// <param name="runId">Прогін.</param>
     /// <param name="periodKey">Період; він же ключ партиції.</param>
@@ -171,6 +183,10 @@ public sealed class CalculationStep : Entity<long>
     /// <param name="traceJson">Деталізація.</param>
     /// <param name="resultId">Результат, до якого належить крок.</param>
     /// <param name="masked">Причина маскування в нуль (<c>H-24d-1</c>).</param>
+    /// <remarks>
+    /// Вираз, довший за <see cref="MaxStepExpressionLength"/>, обрізається до
+    /// стелі з «…» в кінці — див. <see cref="MaxStepExpressionLength"/>.
+    /// </remarks>
     public void Describe(
         string? expression,
         decimal? value,
@@ -178,7 +194,9 @@ public sealed class CalculationStep : Entity<long>
         long? resultId,
         Enums.MaskedZeroReason masked = Enums.MaskedZeroReason.None)
     {
-        Expression = expression;
+        Expression = expression is { Length: > MaxStepExpressionLength }
+            ? string.Concat(expression.AsSpan(0, MaxStepExpressionLength - 1), "…")
+            : expression;
         Value = value;
         TraceJson = traceJson;
         ResultId = resultId;

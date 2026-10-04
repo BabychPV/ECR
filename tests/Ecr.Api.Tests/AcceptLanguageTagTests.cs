@@ -71,6 +71,19 @@ public sealed class AcceptLanguageTagTests
         Assert.Equal("en", user.Language);
     }
 
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [InlineData("zzzzqq")]
+    [InlineData("x1")]
+    [InlineData("é")]
+    [InlineData("a")]
+    [InlineData("abcd-EF")]
+    public void L1_02_тег_не_у_формі_коду_мови_дає_мову_за_замовчуванням(string header)
+    {
+        // ⛔ Заголовок задає будь-хто; сирий рядок не має ставати ключем кешу.
+        Assert.Equal("en", UserWith(header).Language);
+    }
+
     private static CurrentUser UserWith(string acceptLanguage)
     {
         var context = new DefaultHttpContext();

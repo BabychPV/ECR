@@ -5425,6 +5425,8 @@ USING (VALUES
     (N'err.ECR-IMP-0422.workbookOtherDocument', N'en', N'The workbook was exported from another document.', 1),
     (N'err.ECR-IMP-0422.noMapSheet',            N'en', N'The workbook has no service sheet: only a file exported by this system can be imported.', 1),
     (N'err.ECR-IMP-0422.mapBroken',             N'en', N'The service sheet of the workbook is empty or damaged. Export the document again.', 1),
+    -- ⛔ L6-01: понад стелю змін у таблиці — відмова всього імпорту, а не застосування перших 5000.
+    (N'err.ECR-IMP-0422.importTooManyChanges',  N'en', N'Table {tableCode} has more than {maxChanges} changes. Nothing was imported: split the changes into several files.', 1),
     -- Великий імпорт іде у фон (F-01): людина має знати, де шукати результат.
     (N'import.queued',                          N'en', N'The import is large and is being applied in the background. Follow it in My tasks.', 1),
     -- ⛔ F-27: у «My tasks» замість ідентифікатора файлу експорту.
@@ -6525,9 +6527,17 @@ USING (VALUES
     (N'err.ECR-TMPL-0409.relationCodeTaken.title', N'en', N'Relation code is already in use', 1),
     (N'grid.tableLoadNow', N'en', N'Load now', 1),
     -- COLL:p3-t3 ── кінець секції ──
+    -- REG:an29 ── аудит 2026-10-03 (L4-03 = L5-10): текстове значення поля довідника довше за колонку (`RegistryValue.MaxStringLength`); ru/kz — порцією REG:an29 у блоці I18N нижче ──
+    (N'err.ECR-REG-0422.valueTooLong', N'en', N'The value is longer than {max} characters ({length}).', 1),
+    -- REG:an29 ── кінець секції ──
     -- COLL:p4-t4 ── тестувальний прохід №4, T4-09: мова налаштування поза реєстром; ru/kz — порцією COLL:p4-t4 у блоці I18N нижче ──
-    (N'err.ECR-REQ-0422.preferenceLanguageUnsupported', N'en', N'The language of preference "{key}" must be the code of an enabled interface language (for example "en", "ru" or "kz"), got: {value}.', 1)
+    (N'err.ECR-REQ-0422.preferenceLanguageUnsupported', N'en', N'The language of preference "{key}" must be the code of an enabled interface language (for example "en", "ru" or "kz"), got: {value}.', 1),
     -- COLL:p4-t4 ── кінець секції ──
+    -- COLL:an25 ── L7-01 (аудит 2026-10-03): межі виразу проти переповнення стека; ru/kz — порцією COLL:an25 у блоці I18N нижче ──
+    (N'err.ECR-REQ-0422.expressionTooLong', N'en', N'The expression is too long: {length} characters, at most {max} are allowed. Split it into several formulas.', 1),
+    (N'expr.chainTooLong',                   N'en', N'The expression has more than {max} operators chained together. Split it into several formulas.', 1),
+    (N'expr.tooComplex',                     N'en', N'The expression is too complex to check. Split it into several formulas.', 1)
+    -- COLL:an25 ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -9392,6 +9402,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-IMP-0422.workbookOtherDocument', N'ru', N'Книга экспортирована из другого документа.'),
     (N'err.ECR-IMP-0422.noMapSheet', N'ru', N'В книге нет служебного листа: импортировать можно только файл, экспортированный этой системой.'),
     (N'err.ECR-IMP-0422.mapBroken', N'ru', N'Служебный лист книги пуст или повреждён. Экспортируйте документ заново.'),
+    (N'err.ECR-IMP-0422.importTooManyChanges', N'ru', N'В таблице {tableCode} больше {maxChanges} изменений. Ничего не импортировано: разделите изменения на несколько файлов.'),
     (N'import.queued', N'ru', N'Импорт большой и применяется в фоновом режиме. Следите за ним в разделе «Мои задачи».'),
     (N'jobs.exportReady', N'ru', N'Файл готов к скачиванию.'),
     (N'common.close', N'ru', N'Закрыть'),
@@ -12420,6 +12431,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-IMP-0422.workbookOtherDocument', N'kz', N'Кітап басқа құжаттан экспортталған.'),
     (N'err.ECR-IMP-0422.noMapSheet', N'kz', N'Кітапта қызметтік парақ жоқ: тек осы жүйе экспорттаған файлды ғана импорттауға болады.'),
     (N'err.ECR-IMP-0422.mapBroken', N'kz', N'Кітаптың қызметтік парағы бос немесе зақымдалған. Құжатты қайта экспорттаңыз.'),
+    (N'err.ECR-IMP-0422.importTooManyChanges', N'kz', N'{tableCode} кестесінде {maxChanges} өзгерістен көп. Ештеңе импортталмады: өзгерістерді бірнеше файлға бөліңіз.'),
     (N'import.queued', N'kz', N'Импорт көлемді, сондықтан фондық режимде қолданылуда. Оны «Менің тапсырмаларым» бөлімінен бақылаңыз.'),
     (N'jobs.exportReady', N'kz', N'Файл жүктеп алуға дайын.'),
     (N'common.close', N'kz', N'Жабу'),
@@ -15311,6 +15323,16 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:p3-t3 ── кінець секції ──
+-- REG:an29 ── ru/kz задовгого текстового значення поля довідника (L4-03 = L5-10); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-REG-0422.valueTooLong', N'ru', N'Значение длиннее {max} символов ({length}).'),
+    (N'err.ECR-REG-0422.valueTooLong', N'kz', N'Мән {max} таңбадан ұзын ({length}).')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- REG:an29 ── кінець секції ──
 -- COLL:p4-t4 ── ru/kz тестувального проходу №4 (T4-09); власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
@@ -15321,6 +15343,20 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:p4-t4 ── кінець секції ──
+-- COLL:an25 ── ru/kz меж виразу (L7-01); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-REQ-0422.expressionTooLong', N'ru', N'Выражение слишком длинное: {length} символов, допускается не более {max}. Разбейте его на несколько формул.'),
+    (N'err.ECR-REQ-0422.expressionTooLong', N'kz', N'Өрнек тым ұзын: {length} таңба, ең көбі {max} рұқсат етіледі. Оны бірнеше формулаға бөліңіз.'),
+    (N'expr.chainTooLong', N'ru', N'В выражении больше {max} операторов подряд. Разбейте его на несколько формул.'),
+    (N'expr.chainTooLong', N'kz', N'Өрнекте қатарынан {max} оператордан артық. Оны бірнеше формулаға бөліңіз.'),
+    (N'expr.tooComplex', N'ru', N'Выражение слишком сложное для проверки. Разбейте его на несколько формул.'),
+    (N'expr.tooComplex', N'kz', N'Өрнек тексеру үшін тым күрделі. Оны бірнеше формулаға бөліңіз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:an25 ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

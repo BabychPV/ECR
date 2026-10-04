@@ -69,7 +69,7 @@ public sealed class SecurityStampValidator(EcrDbContext db, IMemoryCache cache, 
         }
 
         var lifetime = CacheLifetime;
-        var key = $"stamp:{userId}";
+        var key = CacheKey(userId);
 
         if (lifetime > TimeSpan.Zero
             && cache.TryGetValue(key, out string? cached)
@@ -90,10 +90,14 @@ public sealed class SecurityStampValidator(EcrDbContext db, IMemoryCache cache, 
             && string.Equals(current, stampFromCookie, StringComparison.Ordinal);
     }
 
+    /// <summary>Ключ кешу штампа; скидає його <see cref="SecurityStampCacheInvalidator"/>.</summary>
+    /// <param name="userId">Користувач.</param>
+    public static string CacheKey(int userId) => string.Create(CultureInfo.InvariantCulture, $"stamp:{userId}");
+
     /// <summary>Чинний штамп активного користувача прямо з бази, повз кеш.</summary>
     /// <param name="userId">Користувач.</param>
     /// <param name="ct">Токен скасування.</param>
-    /// <returns><c>null</c> — користувача немає або його вимкнено.</returns>
+    /// <returns><c>null</c> — користувача немає, його вимкнено або заблоковано адміністратором.</returns>
     public Task<string?> ReadCurrentAsync(int userId, CancellationToken ct) => ReadStampAsync(userId, ct);
 
     /// <summary>Читає чинний штамп активного користувача.</summary>
@@ -102,11 +106,20 @@ public sealed class SecurityStampValidator(EcrDbContext db, IMemoryCache cache, 
     /// навіть cookie, видана йому будь-яким шляхом (дефект входу, підроблений
     /// ключ), відкидається на кожному запиті. Вхід його теж не пускає
     /// (<c>LoginHandler</c>) — це другий рубіж, а не єдиний.
+    ///
+    /// ⛔ L1-01: запис, заблокований адміністратором (<c>LockByAdministrator</c>),
+    /// чинного штампа теж не має — незалежно від того, чи встигла ротація
+    /// штампа дійти до цієї cookie. Тимчасове блокування за невдалі спроби
+    /// входу чинних сесій не обриває свідомо: інакше чужі хибні паролі
+    /// розлоговували б власника.
     /// </remarks>
     private async Task<string?> ReadStampAsync(int userId, CancellationToken ct)
         => await db.Users
             .AsNoTracking()
-            .Where(u => u.Id == userId && u.IsActive && u.UserName != Domain.Entities.Security.User.IntegrationServiceUserName)
+            .Where(u => u.Id == userId
+                        && u.IsActive
+                        && u.UserName != Domain.Entities.Security.User.IntegrationServiceUserName
+                        && (u.LockedUntil == null || u.LockedUntil != Domain.Entities.Security.User.AdministrativeLockUntil))
             .Select(u => u.SecurityStamp)
             .FirstOrDefaultAsync(ct)
             .ConfigureAwait(false);

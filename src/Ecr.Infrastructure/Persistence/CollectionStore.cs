@@ -413,7 +413,11 @@ public sealed class CollectionStore(EcrDbContext db, IClock clock) : ICollection
     {
         var ids = JsonSerializer.Serialize(sourceEntityIds);
 
-        return await db.Database
+        // ⛔ `SqlQuery` у ad-hoc тип оминає конвертер `UtcDateTimeColumns`, тож
+        // межі приходять із `Kind = Unspecified`. Без явного `Utc` PI Web API
+        // трактував їх як місцевий час сервера і читав зі зсувом на пояс
+        // (аудит 2026-10-03, L3-01; регресія V-13).
+        var islands = await db.Database
             .SqlQuery<CoverageIsland>($"""
                 WITH c AS (
                     SELECT cc.SourceEntityId, cc.CoveredFrom, cc.CoveredTo
@@ -442,6 +446,12 @@ public sealed class CollectionStore(EcrDbContext db, IClock clock) : ICollection
                 """)
             .ToListAsync(ct)
             .ConfigureAwait(false);
+
+        return islands.ConvertAll(i => i with
+        {
+            FromUtc = DateTime.SpecifyKind(i.FromUtc, DateTimeKind.Utc),
+            ToUtc = DateTime.SpecifyKind(i.ToUtc, DateTimeKind.Utc),
+        });
     }
 
     /// <summary>Острів покриття: злиті суміжні й перекриті інтервали однієї сутності.</summary>

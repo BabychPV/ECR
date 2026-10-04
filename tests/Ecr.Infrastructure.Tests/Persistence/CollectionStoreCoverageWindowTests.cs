@@ -150,6 +150,44 @@ public sealed class CollectionStoreCoverageWindowTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "L3-01")]
+    public async Task GetCoverageAsync_МежіМаютьKindUtc()
+    {
+        // ⛔ `SqlQuery` в ad-hoc тип оминає конвертер `UtcDateTimeColumns`, і
+        // межі приходили з `Kind = Unspecified`; PI Web API (`Iso`) трактував
+        // їх як місцевий час і читав зі зсувом на пояс сервера (аудит
+        // 2026-10-03, L3-01). Перевірка — сам `Kind`, тож червоне незалежно від
+        // поясу машини.
+        // МУТАЦІЙНИЙ ДОКАЗ (прогнано): прибрати `SpecifyKind` у
+        // `ReadCoverageIslandsAsync` — Kind == Unspecified, тест червоний.
+        await using var db = sql.CreateContext();
+        var entityId = await ArrangeEntityAsync(db);
+
+        try
+        {
+            var store = new CollectionStore(db, new TestClock(Now));
+            var runId = await store.StartRunAsync(entityId, Now.AddDays(-10), Now, false, null, CancellationToken.None);
+
+            await store.WriteCoverageAsync(
+                runId, entityId, [new TimeInterval(Now.AddDays(-10), Now)], CancellationToken.None);
+
+            var coverage = await store.GetCoverageAsync(entityId, WindowFrom, CancellationToken.None);
+
+            var island = Assert.Single(coverage);
+            Assert.Equal(DateTimeKind.Utc, island.FromUtc.Kind);
+            Assert.Equal(DateTimeKind.Utc, island.ToUtc.Kind);
+            Assert.Equal(Now.AddDays(-10), island.FromUtc);
+            Assert.Equal(Now, island.ToUtc);
+        }
+        finally
+        {
+            await CleanUpAsync(entityId);
+        }
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Finding", "P5")]
     public async Task Рядки_подій_журналу_не_є_покриттям()
     {

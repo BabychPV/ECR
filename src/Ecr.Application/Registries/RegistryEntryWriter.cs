@@ -487,6 +487,21 @@ public sealed class RegistryEntryWriter(
                 continue;
             }
 
+            // ⛔ Аудит 2026-10-03 (L5-01): код логічно видаленого запису лишається зайнятим
+            // (UQ_RegistryEntry не фільтрує IsDeleted), і FindEntriesByCodesAsync його повертає.
+            // Без цієї перевірки рядок «оновлював» видалений запис: звіт updated/applied=true, а
+            // нового рядка в довіднику немає. UpdateAsync видалений відсіює раніше (0404).
+            if (target.Existing is { IsDeleted: true } gone)
+            {
+                errors.Add(new RegistryEntryImportError(row, code, null, EntryCodeTakenKey,
+                    new Dictionary<string, string>
+                    {
+                        ["code"] = code,
+                        ["id"] = gone.Id.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    }));
+                continue;
+            }
+
             // Режим «лише створювати»: код уже зайнятий — помилка рядка, не оновлення чужого запису.
             if (target.MustCreate && target.Existing is not null)
             {
@@ -830,6 +845,9 @@ public sealed class RegistryEntryWriter(
 
         var changes = new List<RegistryValueFieldChange>();
 
+        // Кінцеві значення запису: збережені, поверх них — застосовані цим викликом.
+        var final = new Dictionary<int, RegistryValue>(existing);
+
         foreach (var (code, raw) in values)
         {
             var field = fields[code];
@@ -848,6 +866,7 @@ public sealed class RegistryEntryWriter(
             var oldValue = isNew ? null : RawValue(value!, field.DataType);
             value!.Set(field.DataType, CellValueReader.Normalize(raw), field.UnitId);
             var newValue = RawValue(value, field.DataType);
+            final[field.Id] = value;
 
             if (field.DataType == CellDataType.Lookup && value.ValueRefEntryId is { } target)
             {
@@ -860,10 +879,13 @@ public sealed class RegistryEntryWriter(
             }
         }
 
+        // ⛔ Аудит 2026-10-03 (L4-06 = L5-03): відсутність рахується за КІНЦЕВИМ значенням. Раніше
+        // null у вхідних значеннях наявного запису проходив (поле вже було в `existing`), хоча Set(null)
+        // вище його вже стер, — обов'язкове поле очищувалося ручною правкою, пакетом, CSV і синком.
+        // Рядок із самих пробілів — теж «не заповнено»: інакше він гасив поле первинного ключа.
         var missing = definition.Fields
             .Where(f => f.IsRequired)
-            .Where(f => !values.TryGetValue(f.Code, out var v) || v is null)
-            .Where(f => !existing.ContainsKey(f.Id))
+            .Where(f => !final.TryGetValue(f.Id, out var v) || IsBlank(RawValue(v, f.DataType)))
             .Select(f => f.Code)
             .ToList();
 
@@ -1045,6 +1067,9 @@ public sealed class RegistryEntryWriter(
                 });
         }
     }
+
+    /// <summary>Значення не заповнене: <c>null</c> або рядок із самих пробілів.</summary>
+    private static bool IsBlank(object? raw) => raw is null || raw is string text && string.IsNullOrWhiteSpace(text);
 
     /// <summary>Типізоване значення поля — для порівняння до/після і для аудиту.</summary>
     private static object? RawValue(RegistryValue value, CellDataType dataType) => dataType switch
