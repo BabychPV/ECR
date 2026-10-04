@@ -191,11 +191,18 @@ export function ConditionalFormatPanel({
       if (!isStaleConditionalFormats(error)) return;
 
       // ⚠ Перечитати набір, але НЕ чіпати чернетку: вона — робота людини.
-      const fresh = await queryClient.fetchQuery({
-        queryKey: rulesKey(templateVersionId),
-        queryFn: () => getConditionalFormats(templateVersionId),
-        staleTime: 0,
-      });
+      // Перечитування впало — відмову покаже `ErrorAlert` над редактором (стан запиту), а
+      // чернетка лишається на місці.
+      let fresh: ConditionalFormatSet;
+      try {
+        fresh = await queryClient.fetchQuery({
+          queryKey: rulesKey(templateVersionId),
+          queryFn: () => getConditionalFormats(templateVersionId),
+          staleTime: 0,
+        });
+      } catch {
+        return;
+      }
       const next = seedOf(fresh, codes);
       setSeed(next);
       setConflict(canonical(latest.current.rules) !== canonical(next.own));
@@ -203,7 +210,15 @@ export function ConditionalFormatPanel({
   });
 
   if (loaded.isPending) return <Loader size="sm" aria-label={t('common.loading')} />;
-  if (loaded.isError) return <ErrorAlert error={loaded.error} />;
+  /*
+   * ⛔ L9-26: відмова ЗАМІСТЬ редактора — лише поки чернетки ще немає (перше читання). Відмова
+   * пізнішого перечитування (фокус вікна, перечитування після `409`) лишає дані в кеші, а чернетку —
+   * у стані; доти `isError` ховав редактор цілком разом із незбереженими правилами й без «Повторити».
+   * Тепер — `ErrorAlert` над редактором, а редактор із чернеткою лишається.
+   */
+  if (loaded.isError && seed === null) {
+    return <ErrorAlert error={loaded.error} onRetry={() => void loaded.refetch()} />;
+  }
 
   const update = (index: number, next: ConditionalRule): void =>
     setRules((previous) => previous.map((rule, i) => (i === index ? next : rule)));
@@ -219,6 +234,8 @@ export function ConditionalFormatPanel({
 
   return (
     <Stack gap="sm" ref={focus.container}>
+      {loaded.isError && <ErrorAlert error={loaded.error} onRetry={() => void loaded.refetch()} />}
+
       {!canEdit && (
         <Alert data-testid="conditional-format-read-only">
           {t('conditionalFormat.readOnly')}

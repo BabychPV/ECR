@@ -159,6 +159,28 @@ describe('ConditionalFormatPanel', () => {
     expect(api.saveConditionalFormats.mock.calls[1]?.[2]).toBe('"V9"');
   });
 
+  it('L9-26: відмова перечитування після 409 — ErrorAlert поруч, редактор із чернеткою лишається', async () => {
+    renderPanel();
+    const user = userEvent.setup();
+    const value = await screen.findByRole('textbox', { name: /conditionalFormat\.value(?!To)/ });
+
+    api.saveConditionalFormats.mockRejectedValueOnce(stale());
+    api.getConditionalFormats.mockRejectedValue(
+      new EcrApiError({ title: 't', status: 503, errorCode: 'ECR-SYS-0503', correlationId: 'c' }),
+    );
+
+    await user.clear(value);
+    await user.type(value, '200');
+    await user.click(saveButton());
+
+    await waitFor(() => expect(screen.getByText(/ECR-SYS-0503/)).toBeDefined());
+    // ⛔ Редактор не підмінено: чернетка на місці й її можна зберегти ще раз.
+    expect((screen.getByRole('textbox', { name: /conditionalFormat\.value(?!To)/ }) as HTMLInputElement).value).toBe(
+      '200',
+    );
+    expect((saveButton() as HTMLButtonElement).disabled).toBe(false);
+  });
+
   it('«Відкинути мої зміни» після конфлікту показує чужі правила', async () => {
     renderPanel();
     const user = userEvent.setup();
