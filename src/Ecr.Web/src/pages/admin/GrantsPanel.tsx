@@ -3,6 +3,7 @@ import { Button, Group, Select, Switch, Table, Text } from '@mantine/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { EcrApiError, apiFetchResponse } from '@/api/client';
 import { showApiError, showDone } from '@/shared/ui/notify';
+import { useSession } from '@/shared/session/useSession';
 import type { ReplaceGrantsRequest, ResourceGrantDto, RoleView } from '@/api/types';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { ConfirmModal } from '@/shared/ui/ConfirmModal';
@@ -116,6 +117,11 @@ export function GrantsPanel({ roles }: { roles: RoleView[] }): JSX.Element {
   const [conflict, setConflict] = useState(false);
   const nextKey = useRef(0);
   const queryClient = useQueryClient();
+  /*
+   * ⛔ L9-18: під симуляцією сервер відхиляє будь-який `PUT` (`ECR-SIM-0403`) — гранти лише
+   * для перегляду: без «Додати»/«Зберегти»/«Прибрати», поля незмінні. Роль обирати можна.
+   */
+  const readOnly = useSession().data?.isSimulation === true;
 
   const grants = useQuery({
     queryKey: ['grants', roleId],
@@ -244,7 +250,7 @@ export function GrantsPanel({ roles }: { roles: RoleView[] }): JSX.Element {
           onChange={(value) => requestRole(value === null ? null : Number(value))}
         />
 
-        {roleId !== null && (
+        {roleId !== null && !readOnly && (
           <>
             <Button
               size="xs"
@@ -353,6 +359,7 @@ export function GrantsPanel({ roles }: { roles: RoleView[] }): JSX.Element {
                     aria-label={`${t('grants.kind')} ${index + 1}`}
                     data={ResourceKinds.map((kind) => ({ value: kind, label: resourceKindLabel(kind) }))}
                     value={grant.resourceKind}
+                    readOnly={readOnly}
                     onChange={(value) =>
                       value !== null &&
                       replace(row.key, (r) => ({
@@ -368,6 +375,7 @@ export function GrantsPanel({ roles }: { roles: RoleView[] }): JSX.Element {
                     kind={grant.resourceKind}
                     resourceId={grant.resourceId}
                     path={row.path}
+                    readOnly={readOnly}
                     onChange={({ resourceId, code, path }) =>
                       replace(row.key, (r) => {
                         const base = { ...withoutResourceName(r.grant), resourceId };
@@ -403,6 +411,7 @@ export function GrantsPanel({ roles }: { roles: RoleView[] }): JSX.Element {
                     aria-label={`${t('grants.level')} ${index + 1}`}
                     data={GrantLevels.map((level) => ({ value: level, label: grantLevelLabel(level) }))}
                     value={grant.level}
+                    readOnly={readOnly}
                     onChange={(value) =>
                       value !== null &&
                       replace(row.key, (r) => ({ ...r, grant: { ...r.grant, level: value as never } }))
@@ -417,6 +426,7 @@ export function GrantsPanel({ roles }: { roles: RoleView[] }): JSX.Element {
                     size="xs"
                     aria-label={`${t('grants.deny')} ${index + 1}`}
                     checked={grant.isDeny}
+                    disabled={readOnly}
                     onChange={(event) => {
                       const isDeny = event.currentTarget.checked;
                       replace(row.key, (r) => ({ ...r, grant: { ...r.grant, isDeny } }));
@@ -424,14 +434,16 @@ export function GrantsPanel({ roles }: { roles: RoleView[] }): JSX.Element {
                   />
                 </Table.Td>
                 <Table.Td>
-                  <Button
-                    size="compact-xs"
-                    color="statusError"
-                    variant="subtle"
-                    onClick={() => setRows((prev) => prev.filter((r) => r.key !== row.key))}
-                  >
-                    {t('grants.remove')}
-                  </Button>
+                  {!readOnly && (
+                    <Button
+                      size="compact-xs"
+                      color="statusError"
+                      variant="subtle"
+                      onClick={() => setRows((prev) => prev.filter((r) => r.key !== row.key))}
+                    >
+                      {t('grants.remove')}
+                    </Button>
+                  )}
                 </Table.Td>
               </Table.Tr>
               );
