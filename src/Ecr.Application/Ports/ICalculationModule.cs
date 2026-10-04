@@ -235,8 +235,40 @@ public sealed class RegistrySnapshotCache(DateTime? registryAsOfUtc)
     /// <summary>Системний момент знімків цього прогону.</summary>
     public DateTime? RegistryAsOfUtc { get; } = registryAsOfUtc;
 
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, Lazy<Task<IReadOnlyList<int>>>> _registryIds =
+        new(StringComparer.Ordinal);
+
     /// <summary>Скільки різних знімків завантажено (для перевірки спільності кешу).</summary>
     public int Count => _snapshots.Count;
+
+    /// <summary>
+    /// Перелік довідників прив'язки — один раз на прогін для того самого ключа
+    /// (рев'ю AN-38, P3-7).
+    /// </summary>
+    /// <param name="key">Що визначає перелік: методологія й коди довідників у формулах.</param>
+    /// <param name="resolve">Як дістати перелік, якщо його ще немає.</param>
+    /// <remarks>
+    /// ⛔ Знімок кешувався, а запити, що будують його ключ (<c>FindDefinitionsAsync</c>,
+    /// <c>ListLookupRegistryIdsAsync</c>), ішли на КОЖЕН документ прогону: 300 документів —
+    /// 300 однакових пар запитів на методологію. Невдале розв'язання прибирається, як і знімок.
+    /// </remarks>
+    public async Task<IReadOnlyList<int>> GetOrResolveRegistryIdsAsync(
+        string key, Func<Task<IReadOnlyList<int>>> resolve)
+    {
+        ArgumentNullException.ThrowIfNull(key);
+        ArgumentNullException.ThrowIfNull(resolve);
+
+        var entry = _registryIds.GetOrAdd(key, _ => new Lazy<Task<IReadOnlyList<int>>>(resolve));
+        try
+        {
+            return await entry.Value.ConfigureAwait(false);
+        }
+        catch
+        {
+            _registryIds.TryRemove(new KeyValuePair<string, Lazy<Task<IReadOnlyList<int>>>>(key, entry));
+            throw;
+        }
+    }
 
     /// <summary>Знімок із кешу або завантажений заданим завантажувачем.</summary>
     /// <param name="registryDefIds">Довідники, які читають формули.</param>

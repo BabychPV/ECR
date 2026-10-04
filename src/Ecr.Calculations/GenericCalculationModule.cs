@@ -186,17 +186,32 @@ public sealed class GenericCalculationModule(
             return null;
         }
 
-        var definitions = codes.Count == 0
-            ? []
-            : await registryStore.FindDefinitionsAsync(codes, ct).ConfigureAwait(false);
+        async Task<IReadOnlyList<int>> ResolveAsync()
+        {
+            var definitions = codes.Count == 0
+                ? []
+                : await registryStore.FindDefinitionsAsync(codes, ct).ConfigureAwait(false);
 
-        // ⛔ Аудит L7-06: `REGFIELD(@Stream, 'NAME')` читає запис, що прийшов
-        // аргументом із Lookup-колонки, — коду довідника в тексті немає. Довідники
-        // цих колонок ідуть у той самий знімок, інакше кожен рядок дає `#REF`.
-        IReadOnlyList<int> lookups = readsEntryFields
-            ? await bindingStore.ListLookupRegistryIdsAsync(methodologyId, ct).ConfigureAwait(false) ?? []
-            : [];
-        var ids = definitions.Select(d => d.Id).Concat(lookups).Distinct().Order().ToList();
+            // ⛔ Аудит L7-06: `REGFIELD(@Stream, 'NAME')` читає запис, що прийшов
+            // аргументом із Lookup-колонки, — коду довідника в тексті немає. Довідники
+            // цих колонок ідуть у той самий знімок, інакше кожен рядок дає `#REF`.
+            IReadOnlyList<int> lookups = readsEntryFields
+                ? await bindingStore.ListLookupRegistryIdsAsync(methodologyId, ct).ConfigureAwait(false) ?? []
+                : [];
+            return [.. definitions.Select(d => d.Id).Concat(lookups).Distinct().Order()];
+        }
+
+        // ⚠ Рев'ю AN-38, P3-7: у прогоні перелік — раз на методологію й набір кодів, а не
+        // на кожен документ. Ключ містить і методологію (Lookup-колонки її прив'язок), і
+        // коди (бібліотеки на іншу дату можуть дати інший набір).
+        var ids = cache is null
+            ? await ResolveAsync().ConfigureAwait(false)
+            : await cache.GetOrResolveRegistryIdsAsync(
+                    string.Create(
+                        System.Globalization.CultureInfo.InvariantCulture,
+                        $"{methodologyId}|{readsEntryFields}|{string.Join(',', codes.Select(c => c.ToUpperInvariant()).Order(StringComparer.Ordinal))}"),
+                    ResolveAsync)
+                .ConfigureAwait(false);
         if (ids.Count == 0)
         {
             return null;

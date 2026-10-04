@@ -65,6 +65,34 @@ public sealed class LookupArgumentRegistryTests
         await loader.DidNotReceiveWithAnyArgs().LoadAsync(default!, default, default, default);
     }
 
+    /// <summary>
+    /// Рев'ю AN-38, P3-7: у прогоні перелік довідників прив'язки розв'язується раз, а не на
+    /// кожен документ (300 документів — 300 однакових пар запитів).
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    public async Task Перелік_довідників_розв_язується_раз_на_прогін_а_не_на_документ()
+    {
+        var bindings = Substitute.For<ICalculationBindingStore>();
+        bindings.ListLookupRegistryIdsAsync(MethodologyId, Arg.Any<CancellationToken>()).Returns([StreamRegistryId]);
+        var registries = Substitute.For<IRegistryStore>();
+        registries.FindDefinitionsAsync(Arg.Any<IReadOnlyCollection<string>>(), Arg.Any<CancellationToken>())
+                  .Returns([]);
+        var loader = Substitute.For<IRegistrySnapshotLoader>();
+        loader.LoadAsync(default!, default, default, default).ReturnsForAnyArgs(new InMemoryRegistrySnapshot());
+
+        var module = Module(bindings, loader, "REGFIELD(@Stream, 'MW') + REGFIELD(REGFIND('COMPONENT', @Stream), 'MW')", registries);
+        var run = new RegistrySnapshotCache(registryAsOfUtc: null);
+
+        foreach (var document in new long[] { DocumentId, DocumentId + 1, DocumentId + 2 })
+        {
+            await module.PrepareAsync(Descriptor(), document, new PeriodKey(202601), run, CancellationToken.None);
+        }
+
+        await bindings.Received(1).ListLookupRegistryIdsAsync(MethodologyId, Arg.Any<CancellationToken>());
+        await registries.ReceivedWithAnyArgs(1).FindDefinitionsAsync(default!, default);
+    }
+
     private static MethodologyDescriptor Descriptor()
         => new(
             MethodologyId,
@@ -86,7 +114,10 @@ public sealed class LookupArgumentRegistryTests
             Arguments: [new CalculationArgument("Stream", null, null, null, StreamEntryId)]);
 
     private static GenericCalculationModule Module(
-        ICalculationBindingStore bindings, IRegistrySnapshotLoader loader, string expression = "REGFIELD(@Stream, 'MW') * 2")
+        ICalculationBindingStore bindings,
+        IRegistrySnapshotLoader loader,
+        string expression = "REGFIELD(@Stream, 'MW') * 2",
+        IRegistryStore? registryStore = null)
     {
         var formula = new MethodologyFormula(VersionId, EcrCode.Create("Mass"), expression);
         formula.SetEvaluationOrder(1);
@@ -98,7 +129,7 @@ public sealed class LookupArgumentRegistryTests
         store.GetSubstancesAsync(VersionId, Arg.Any<CancellationToken>()).Returns([]);
 
         var periods = Substitute.For<IPeriodStore>();
-        periods.FindPeriodBoundsAsync(DocumentId, 202601, Arg.Any<CancellationToken>())
+        periods.FindPeriodBoundsAsync(Arg.Any<long>(), 202601, Arg.Any<CancellationToken>())
                .Returns(new PeriodBounds(new DateOnly(2026, 1, 1), new DateOnly(2026, 1, 31)));
 
         var units = Substitute.For<IUnitCatalog>();
@@ -106,9 +137,12 @@ public sealed class LookupArgumentRegistryTests
             new Dictionary<string, UnitRef>(StringComparer.OrdinalIgnoreCase) { ["kg"] = new(1, "kg", 1, 1m) },
             new Dictionary<string, int>(StringComparer.Ordinal)));
 
-        var registries = Substitute.For<IRegistryStore>();
-        registries.FindDefinitionsAsync(Arg.Any<IReadOnlyCollection<string>>(), Arg.Any<CancellationToken>())
-                  .Returns([]);
+        var registries = registryStore ?? Substitute.For<IRegistryStore>();
+        if (registryStore is null)
+        {
+            registries.FindDefinitionsAsync(Arg.Any<IReadOnlyCollection<string>>(), Arg.Any<CancellationToken>())
+                      .Returns([]);
+        }
 
         return new GenericCalculationModule(
             new RealFormulaEngine(),
