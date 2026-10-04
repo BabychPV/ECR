@@ -86,9 +86,22 @@ export function MethodologyPackageImport(): JSX.Element {
   const [report, setReport] = useState<MethodologyImportReportDto | null>(null);
   const [invalid, setInvalid] = useState(false);
 
+  /**
+   * ⛔ L9-38: звіт належить ТОМУ пакету, який перевіряли. Без цього звірення
+   * відповідь на перевірку пакета A, що приїхала після вибору пакета B,
+   * лягала звітом `created` під B — і «Імпортувати» відкривалось для
+   * неперевіреного файлу. `pkgRef` — пакет, вибраний ЗАРАЗ (той самий об'єкт,
+   * що йде в `mutate`), `chooseSeq` — номер останнього вибору: читання файлу
+   * асинхронне, і повільніше давнє читання не має права переписати новіше.
+   */
+  const pkgRef = useRef<unknown>(null);
+  const chooseSeq = useRef(0);
+
   const check = useMutation({
     mutationFn: (value: unknown) => importMethodologyPackage(value, true),
-    onSuccess: setReport,
+    onSuccess: (checked, value) => {
+      if (value === pkgRef.current) setReport(checked);
+    },
     onError: showApiError,
   });
 
@@ -97,8 +110,8 @@ export function MethodologyPackageImport(): JSX.Element {
 
   const apply = useMutation({
     mutationFn: (value: unknown) => importMethodologyPackage(value, false),
-    onSuccess: async (done) => {
-      setReport(done);
+    onSuccess: async (done, value) => {
+      if (value === pkgRef.current) setReport(done);
       await queryClient.invalidateQueries({ queryKey: queryKeys.methodologies.list() });
       showDone(
         done.applied
@@ -106,9 +119,9 @@ export function MethodologyPackageImport(): JSX.Element {
           : t('methodologies.importOutcomeUnchanged'),
       );
     },
-    onError: (error: unknown) => {
+    onError: (error: unknown, value) => {
       const refused = reportFromError(error);
-      if (refused !== null) setReport(refused);
+      if (refused !== null && value === pkgRef.current) setReport(refused);
       showApiError(error);
     },
   });
@@ -124,16 +137,21 @@ export function MethodologyPackageImport(): JSX.Element {
   }, [report]);
 
   async function choose(next: File | null): Promise<void> {
+    const seq = ++chooseSeq.current;
     setFile(next);
     setReport(null);
     setPkg(null);
+    pkgRef.current = null;
     setInvalid(false);
     if (next === null) return;
 
     try {
-      setPkg(JSON.parse(await readText(next)) as unknown);
+      const parsed = JSON.parse(await readText(next)) as unknown;
+      if (seq !== chooseSeq.current) return;
+      pkgRef.current = parsed;
+      setPkg(parsed);
     } catch {
-      setInvalid(true);
+      if (seq === chooseSeq.current) setInvalid(true);
     }
   }
 
@@ -155,6 +173,8 @@ export function MethodologyPackageImport(): JSX.Element {
             value={file}
             onChange={(next) => void choose(next)}
             error={invalid ? t('methodologies.importInvalidFile') : undefined}
+            // ⚠ L9-38: на час перевірки чи запису файл не міняється — звіт іде про той, що вже відправлено.
+            disabled={check.isPending || apply.isPending}
             clearable
           />
 

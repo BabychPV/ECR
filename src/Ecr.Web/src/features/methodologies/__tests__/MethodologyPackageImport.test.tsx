@@ -156,3 +156,91 @@ describe('MethodologyPackageImport: фокус', () => {
     expect(report.getAttribute('aria-label')).toBe('⟦methodologies.importOutcomeCreated⟧');
   });
 });
+
+/**
+ * L9-38: гонка «перевірка пакета A ↔ вибір пакета B».
+ *
+ * ⛔ Відповідь на перевірку A, що приїхала після вибору B, лягала звітом
+ * `created` під B — і «Імпортувати» відкривалось для файлу, якого ніхто не
+ * перевіряв. Поле файлу на час запиту вимкнене; `fireEvent.change` обходить
+ * це навмисно, щоб довести й другий рубіж — звірення пакета в `onSuccess`.
+ *
+ * Мутаційні докази: `onSuccess: setReport` (без звірення з `pkgRef`) →
+ * червоний «відповідь про попередній пакет…»; прибрати `disabled` з
+ * `FileInput` → червоний «поле файлу вимкнене…».
+ */
+describe('MethodologyPackageImport: гонка перевірки й вибору файлу (L9-38)', () => {
+  let release: (() => void) | null = null;
+
+  function mockHeldServer(): void {
+    sent.length = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        sent.push({ url: String(url), method: String(init?.method ?? 'GET') });
+        await new Promise<void>((resolve) => {
+          release = resolve;
+        });
+
+        return new Response(JSON.stringify(Report), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }),
+    );
+  }
+
+  function fileInput(): HTMLInputElement {
+    const found = document.querySelector<HTMLInputElement>('input[type="file"]');
+    if (found === null) throw new Error('немає поля файлу');
+    return found;
+  }
+
+  afterEach(() => {
+    release = null;
+  });
+
+  it('поле файлу вимкнене, поки перевірка в польоті', async () => {
+    mockHeldServer();
+    show();
+    await choosePackage();
+
+    fireEvent.click(screen.getByRole('button', { name: '⟦methodologies.importCheck⟧' }));
+    await waitFor(() => expect(sent).toHaveLength(1));
+
+    // ⚠ Видима кнопка поля (Mantine), а не прихований `input[type=file]`: саме нею людина міняє файл.
+    await waitFor(() =>
+      expect((screen.getByLabelText('⟦methodologies.importFile⟧') as HTMLButtonElement).disabled).toBe(true),
+    );
+  });
+
+  it('відповідь про попередній пакет не стає звітом нового і не відкриває «Імпортувати»', async () => {
+    mockHeldServer();
+    show();
+    await choosePackage();
+
+    fireEvent.click(screen.getByRole('button', { name: '⟦methodologies.importCheck⟧' }));
+    await waitFor(() => expect(release).not.toBeNull());
+
+    const other = new File([JSON.stringify({ format: 'ecr-methodology-package', version: 2 })], 'other.json', {
+      type: 'application/json',
+    });
+    fireEvent.change(fileInput(), { target: { files: [other] } });
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: '⟦methodologies.importCheck⟧' }).hasAttribute('disabled')).toBe(false),
+    );
+
+    release?.();
+    // Даємо відповіді доїхати й осісти.
+    await waitFor(() =>
+      expect((screen.getByLabelText('⟦methodologies.importFile⟧') as HTMLButtonElement).disabled).toBe(false),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(screen.queryByText('⟦methodologies.importOutcomeCreated⟧')).toBeNull();
+    expect(screen.getByRole('button', { name: '⟦methodologies.importApply⟧' }).getAttribute('aria-disabled')).toBe(
+      'true',
+    );
+  });
+});
+
