@@ -122,6 +122,9 @@ export function SmtpSettingsPanel(): JSX.Element {
   // ⛔ ent6 S1: пароль без шифрування сервер відхиляє (`smtpPasswordNeedsTls`) — кажемо це біля поля
   // шифрування ДО збереження, а не лише тостом після відмови.
   const passwordNeedsTls = form.authMode === 'Password' && form.encryptionMode === 'None';
+  // ⛔ L9-28: на час `PUT` форма замкнена. `onSuccess` знімає чернетку цілком (`setDraft(null)`), тож
+  // правка між кліком «Зберегти» і відповіддю мовчки зникала б: у тілі запиту її не було.
+  const locked = save.isPending;
 
   return (
     <Stack gap="sm">
@@ -140,10 +143,11 @@ export function SmtpSettingsPanel(): JSX.Element {
       </Group>
 
       <Group grow align="flex-start">
-        <TextInput label={t('smtp.host')} value={form.host} onChange={(e) => set({ host: e.currentTarget.value })} />
+        <TextInput label={t('smtp.host')} readOnly={locked} value={form.host} onChange={(e) => set({ host: e.currentTarget.value })} />
         <NumberInput
           label={t('smtp.port')}
           value={form.port}
+          readOnly={locked}
           min={1}
           max={65535}
           allowDecimal={false}
@@ -157,6 +161,7 @@ export function SmtpSettingsPanel(): JSX.Element {
             { value: 'None', label: t('smtp.encryption.None') },
           ]}
           value={form.encryptionMode}
+          disabled={locked}
           error={passwordNeedsTls ? t('err.ECR-REQ-0422.smtpPasswordNeedsTls') : null}
           onChange={(value) => {
             if (value !== null) set({ encryptionMode: value as SmtpDraft['encryptionMode'] });
@@ -168,11 +173,13 @@ export function SmtpSettingsPanel(): JSX.Element {
         <TextInput
           label={t('smtp.from')}
           value={form.fromAddress}
+          readOnly={locked}
           onChange={(e) => set({ fromAddress: e.currentTarget.value })}
         />
         <TextInput
           label={t('smtp.fromName')}
           value={form.fromName}
+          readOnly={locked}
           onChange={(e) => set({ fromName: e.currentTarget.value })}
         />
       </Group>
@@ -185,6 +192,7 @@ export function SmtpSettingsPanel(): JSX.Element {
           { value: 'Password', label: t('smtp.auth.Password') },
         ]}
         value={form.authMode}
+        disabled={locked}
         onChange={(value) => {
           if (value !== null) set({ authMode: value as SmtpDraft['authMode'] });
         }}
@@ -195,6 +203,7 @@ export function SmtpSettingsPanel(): JSX.Element {
           <TextInput
             label={t('smtp.user')}
             value={form.userName}
+            readOnly={locked}
             onChange={(e) => set({ userName: e.currentTarget.value })}
           />
           <PasswordInput
@@ -211,6 +220,7 @@ export function SmtpSettingsPanel(): JSX.Element {
               passwordHint === null ? `${SmtpPasswordId}-description` : `${SmtpPasswordId}-description ${SmtpPasswordId}-error`
             }
             value={form.password}
+            readOnly={locked}
             onChange={(e) => {
               setPasswordHint(null);
               set({ password: e.currentTarget.value });
@@ -223,6 +233,7 @@ export function SmtpSettingsPanel(): JSX.Element {
         <Checkbox
           label={t('smtp.clearPassword')}
           checked={form.clearPassword}
+          disabled={locked}
           onChange={(e) => set({ clearPassword: e.currentTarget.checked })}
         />
       )}
@@ -230,6 +241,7 @@ export function SmtpSettingsPanel(): JSX.Element {
       <Switch
         label={t('smtp.enabled')}
         checked={form.isEnabled}
+        disabled={locked}
         onChange={(e) => set({ isEnabled: e.currentTarget.checked })}
       />
 

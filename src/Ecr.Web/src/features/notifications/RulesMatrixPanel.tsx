@@ -298,6 +298,14 @@ export function RulesMatrixPanel(): JSX.Element {
     return next;
   }
 
+  /*
+   * ⛔ L9-28: на час `PUT` матриця замкнена. `onSuccess` ставить чернеткою
+   * ВІДПОВІДЬ сервера (`setDraft(savedDraft)`), тобто клітинка, змінена між
+   * кліком «Зберегти» і відповіддю, мовчки зникала б: у тілі запиту її не було,
+   * а чернетку затерто збереженим.
+   */
+  const locked = save.isPending;
+
   function setCell(eventKind: EventKind, channelId: number, cell: Cell): void {
     setDraft((previous) => new Map(previous).set(cellKey(eventKind, channelId), cell));
   }
@@ -361,6 +369,7 @@ export function RulesMatrixPanel(): JSX.Element {
                             size="xs"
                             aria-label={`${eventLabel} · ${channel.name}`}
                             checked={cell.isEnabled}
+                            disabled={locked}
                             onChange={(event) =>
                               setCell(eventKind, channel.id, {
                                 ...cell,
@@ -390,7 +399,7 @@ export function RulesMatrixPanel(): JSX.Element {
                               label: t(statusKey('severity', value)),
                             }))}
                             value={cell.minSeverity}
-                            disabled={!cell.isEnabled}
+                            disabled={!cell.isEnabled || locked}
                             allowDeselect={false}
                             onChange={(value) => {
                               if (value === null) return;

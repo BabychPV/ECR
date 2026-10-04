@@ -217,6 +217,8 @@ function TemplatesEditor(): JSX.Element {
   const subjectProblem = templateProblem(form.subject, subjectRow.reference, isDefault);
   const bodyProblem = templateProblem(form.body, bodyRow.reference, isDefault);
   const untranslated = !isDefault && (subjectRow.value === null || bodyRow.value === null);
+  // ⛔ L9-28: поля замкнені на час запису (`readOnly={save.isPending}` нижче) — `onSuccess` знімає
+  // чернетку цілком (`setDraft(null)`), і правка, зроблена під час `PUT`, мовчки зникала б.
   const placeholders = TemplatePlaceholders.map((name) => `{${name}}`).join(', ');
 
   return (
@@ -241,6 +243,7 @@ function TemplatesEditor(): JSX.Element {
               })
         }
         value={form.subject}
+        readOnly={save.isPending}
         error={problemText(subjectProblem, template.subjectKey)}
         onChange={(event) => setDraft({ ...form, subject: event.currentTarget.value })}
       />
@@ -250,6 +253,7 @@ function TemplatesEditor(): JSX.Element {
         autosize
         minRows={3}
         value={form.body}
+        readOnly={save.isPending}
         error={problemText(bodyProblem, template.bodyKey)}
         onChange={(event) => setDraft({ ...form, body: event.currentTarget.value })}
       />
