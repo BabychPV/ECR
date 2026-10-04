@@ -88,7 +88,13 @@ public sealed class DocumentRecalculateQuota(IConfiguration configuration, TimeP
     public bool TryAcquire(string userId, string documentId, out Ticket ticket, out TimeSpan retryAfter)
     {
         var userKey = "user:" + userId;
-        var documentKey = userKey + "|doc:" + documentId;
+
+        // ⛔ L1-10: ключ — нормалізований id, а не сирий сегмент маршруту: `/05/` і `/5/` — один документ,
+        // інакше різний запис того самого id давав окрему межу (обхід 6/хв).
+        var canonicalId = long.TryParse(documentId, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var parsedId)
+            ? parsedId.ToString(System.Globalization.CultureInfo.InvariantCulture)
+            : documentId;
+        var documentKey = userKey + "|doc:" + canonicalId;
         ticket = default;
 
         if (!Acquire(userKey, _userPermit, out var userWindow, out retryAfter))
