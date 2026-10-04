@@ -164,7 +164,7 @@ public static class RollupEvaluator
         {
             result = aggregate switch
             {
-                RollupAggregate.Sum => present.Sum(),
+                RollupAggregate.Sum => Sum(present),
                 RollupAggregate.Avg => Average(present),
                 RollupAggregate.Min => present.Min(),
                 RollupAggregate.Max => present.Max(),
@@ -182,12 +182,47 @@ public static class RollupEvaluator
         return targetScale is null ? result : Math.Round(result, targetScale.Value, MidpointRounding.AwayFromZero);
     }
 
+    /// <summary>
+    /// Сума, що не «переповнюється» на проміжному кроці, коли сама сума вміщується в decimal
+    /// (рев'ю AN-38, P3-10).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Що було: <c>[max, max, −max]</c> давав OverflowException на другому доданку, хоча
+    /// справжня сума — <c>max</c>. Тепер після такого переповнення доданки йдуть
+    /// урівноваженим порядком: до невід'ємного накопичення — від'ємний, до від'ємного —
+    /// додатний; коли лишився один знак, сума рухається монотонно до результату. Отже,
+    /// кожен проміжний крок за модулем не більший за найбільший доданок або за результат,
+    /// і OverflowException означає, що поза межами справді результат. Звичайний шлях
+    /// (без переповнення) — та сама сума в тому самому порядку, що й раніше.
+    /// </remarks>
+    private static decimal Sum(List<decimal> present)
+    {
+        try
+        {
+            return present.Sum();
+        }
+        catch (OverflowException)
+        {
+            var positives = new Queue<decimal>(present.Where(v => v >= 0m));
+            var negatives = new Queue<decimal>(present.Where(v => v < 0m));
+            var acc = 0m;
+            while (positives.Count > 0 || negatives.Count > 0)
+            {
+                acc += (acc >= 0m && negatives.Count > 0) || positives.Count == 0
+                    ? negatives.Dequeue()
+                    : positives.Dequeue();
+            }
+
+            return acc;
+        }
+    }
+
     /// <summary>Середнє, що не переповнюється на проміжній сумі, коли саме середнє вміщується в decimal.</summary>
     private static decimal Average(List<decimal> present)
     {
         try
         {
-            return present.Sum() / present.Count;
+            return Sum(present) / present.Count;
         }
         catch (OverflowException)
         {

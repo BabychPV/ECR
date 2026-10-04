@@ -63,6 +63,27 @@ public sealed class RelationOverflowTests
             => Entries.Add((logLevel, formatter(state, exception)));
     }
 
+    [Theory]
+    [InlineData(new[] { 1, 1, -1 }, 1)]
+    [InlineData(new[] { 1, 1, -1, -1, 1 }, 1)]
+    [InlineData(new[] { -1, -1, 1 }, -1)]
+    public void Rollup_сума_різних_знаків_не_переповнюється_на_проміжному_кроці(int[] signs, int expectedSign)
+    {
+        // Рев'ю AN-38, P3-10: [max, max, −max] — справжня сума max, а не «переповнення».
+        var values = signs.Select(s => (decimal?)(s * decimal.MaxValue)).ToList();
+
+        Assert.Equal(expectedSign * decimal.MaxValue, RollupEvaluator.Aggregate(RollupAggregate.Sum, values, targetScale: null, out var overflow));
+        Assert.False(overflow);
+    }
+
+    [Fact]
+    public void Rollup_справжнє_переповнення_суми_різних_знаків_лишається_переповненням()
+    {
+        Assert.Null(RollupEvaluator.Aggregate(
+            RollupAggregate.Sum, [decimal.MaxValue, decimal.MaxValue, -1m], targetScale: null, out var overflow));
+        Assert.True(overflow);
+    }
+
     [Fact]
     public void Rollup_велика_сума_без_переповнення_рахується()
         => Assert.Equal(HalfMax, RollupEvaluator.Aggregate(RollupAggregate.Sum, [HalfMax, 0m], targetScale: null));
