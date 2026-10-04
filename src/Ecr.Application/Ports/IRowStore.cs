@@ -47,7 +47,7 @@ public interface IRowStore
         IReadOnlyCollection<long> tableInstanceIds, CancellationToken ct);
 
     /// <summary>
-    /// Поточні версії рядків таблиці: <c>RowKey</c> → hex <c>rowversion</c>.
+    /// Поточні версії рядків таблиці: <c>RowKey</c> → <c>rowversion</c> у Base64.
     /// </summary>
     /// <remarks>
     /// Один виклик на батч, не на рядок: бюджет запису — 300 мс на 100 комірок,

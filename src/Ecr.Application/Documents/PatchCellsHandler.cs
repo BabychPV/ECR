@@ -616,7 +616,9 @@ public sealed partial class PatchCellsHandler(
                 continue;
             }
 
-            if (string.Equals(current, row.BaseVersion, StringComparison.OrdinalIgnoreCase))
+            // ⚠ L6-13: версія — Base64 (`Convert.ToBase64String(rowversion)`), а
+            // Base64 розрізняє регістр: `Ordinal`, а не `OrdinalIgnoreCase`.
+            if (string.Equals(current, row.BaseVersion, StringComparison.Ordinal))
             {
                 continue;
             }
@@ -1003,11 +1005,20 @@ public sealed partial class PatchCellsHandler(
                 {
                     var columnDefId = ColumnDefIdOf(context.Columns, cell.ColumnCode);
 
-                    if (allowed.Columns.TryGetValue(columnDefId, out var decision) && !decision.IsAllowed)
+                    // ⛔ L6-13: немає рішення на колонку — ВІДМОВА, як і для адрес
+                    // оновлення вище. Доти тут жила третя, протилежна політика
+                    // («рішення немає, отже можна»): `TryGetValue && !IsAllowed`.
+                    if (!allowed.Columns.TryGetValue(columnDefId, out var decision))
+                    {
+                        denied.Add(EditDecision.Deny(
+                            EditDenyReason.NoGrant,
+                            $"Рішення про доступ на колонку {cell.ColumnCode} нового рядка {row.RowKey} не отримано."));
+                    }
+                    else if (!decision.IsAllowed)
                     {
                         denied.Add(decision);
                     }
-                    else if (decision is { RequiresConfirmation: true })
+                    else if (decision.RequiresConfirmation)
                     {
                         needsConfirmation++;
                     }
@@ -2087,8 +2098,8 @@ public sealed partial class PatchCellsHandler(
     /// <c>NormalizedCellStore.ApplyAsync</c> тепер приєднується до цієї
     /// ambient-транзакції замість відкриття власної (Q-243);
     /// <c>RowStore.TouchRowsAsync</c> (`ExecuteUpdateAsync`) і
-    /// <c>DocumentStore.TouchAsync</c> (трекнута зміна, комітиться разом із
-    /// <c>uow.SaveChangesAsync</c>) автоматично приєднуються до тієї самої
+    /// <c>DocumentStore.TouchAsync</c> (теж <c>ExecuteUpdateAsync</c>, не трекнута
+    /// зміна — виконується одразу) автоматично приєднуються до тієї самої
     /// транзакції — обидва йдуть через ТОЙ САМИЙ <c>EcrDbContext</c>, що й
     /// <c>uow</c> (один DI-скоуп на запит). <c>AuditWriter.CreateCommand</c>
     /// уже вмів приєднатися до відкритої транзакції — йому просто нізвідки
