@@ -390,12 +390,28 @@ export function discardPendingRows(
 
   for (const [key, edit] of current) {
     const sent = rows.has(edit.rowKey);
-    const newer = keepChangedAfter !== undefined && !wasSent(keepChangedAfter.get(key), edit);
+    const confirmed = keepChangedAfter?.get(key);
+    const newer = keepChangedAfter !== undefined && !wasSent(confirmed, edit);
 
-    if (!sent || newer) next.set(key, edit);
+    if (!sent) next.set(key, edit);
+    else if (newer) next.set(key, rebased(edit, confirmed));
   }
 
   replacePendingSlice(tableInstanceId, periodKey, next);
+}
+
+/**
+ * Новіша правка комірки, чиє попереднє значення сервер щойно ПРИЙНЯВ: тепер
+ * вона стоїть поверх прийнятого, а не того, що людина бачила спершу.
+ *
+ * ⛔ AN-39 / L8-20: без цього `withKnownVersions` прийняв би власне щойно
+ * збережене значення за чуже (кеш ≠ `before`) і лишив би стару версію рядка -
+ * `409` на власних змінах (той самий клас, що `B-09`).
+ */
+function rebased(edit: PendingEdit, confirmed: PendingEdit | undefined): PendingEdit {
+  if (confirmed === undefined || edit.before === undefined) return edit;
+
+  return { ...edit, before: confirmed.isEmpty ? null : confirmed.value };
 }
 
 /**

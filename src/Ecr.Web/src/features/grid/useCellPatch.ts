@@ -30,6 +30,12 @@ export interface PendingEdit {
   isEmpty: boolean;
   /** Версія рядка на момент читання; `null` — створення рядка (R-B2). */
   baseVersion: string | null;
+  /**
+   * Значення комірки, яке людина БАЧИЛА, коли вводила (`null` — порожньо);
+   * `undefined` — невідоме (шлях без знімка). Лише для клієнта, на сервер не їде:
+   * за ним `withKnownVersions` упізнає чужу правку тієї самої комірки (L8-20).
+   */
+  before?: unknown;
 }
 
 /**

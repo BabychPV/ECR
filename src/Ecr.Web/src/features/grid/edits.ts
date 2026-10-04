@@ -96,6 +96,7 @@ export function captureEdit(
       value: after,
       isEmpty: false,
       baseVersion: row.rowVersion,
+      before,
     },
     step: { rowKey: signal.rowKey, columnCode: signal.columnCode, before, after },
     columnHeader: column.header,
@@ -168,8 +169,30 @@ export function withKnownVersions(
 ): PendingEdit[] {
   const rows = slice === undefined ? undefined : rowIndexOf(slice);
 
+  // ⛔ AN-39 / L8-20: рядки, де значення комірки в кеші вже НЕ те, що людина
+  // бачила при введенні (`before`), - його змінив хтось інший, а екран
+  // дізнався про це перезапитом зрізу (Recall/Reopen, фокус, L8-02). Нова
+  // версія з кешу тут означала б тихий перезапис чужого значення: утримана
+  // (відхилена) правка чекає довго, і повтор ішов би з версією, під якою
+  // чуже значення вже лежить. Такий рядок лишається зі СВОЄЮ версією - сервер
+  // відповість 409, і людина вирішить у діалозі конфлікту. Рядком, а не
+  // коміркою: версія в запиті одна на рядок (`buildRequest`).
+  const foreign = new Set<string>();
+  if (rows !== undefined) {
+    for (const edit of edits) {
+      if (edit.before === undefined) continue;
+
+      const row = rows.get(edit.rowKey);
+      if (row !== undefined && !sameCellValue(row.cells[edit.columnCode] ?? null, edit.before)) {
+        foreign.add(edit.rowKey);
+      }
+    }
+  }
+
   return edits.map((edit) => {
-    const known = overrides?.get(edit.rowKey) ?? rows?.get(edit.rowKey)?.rowVersion;
+    const override = overrides?.get(edit.rowKey);
+    const known =
+      override ?? (foreign.has(edit.rowKey) ? undefined : rows?.get(edit.rowKey)?.rowVersion);
 
     // ⚠ Рядка в кеші немає (зріз ще не завантажено, або він новий) — версія
     // лишається та, з якою правку зроблено: вигадувати іншу нема з чого.
