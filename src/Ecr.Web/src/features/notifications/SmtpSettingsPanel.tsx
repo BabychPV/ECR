@@ -306,7 +306,8 @@ export function SmtpSettingsPanel(): JSX.Element {
           loading={testLoading}
           disabled={testTo.trim().length === 0 || draft !== null}
           onClick={() => {
-            // ⚠ Друга проба поверх першої — другий лист і зайвий крок квоти проб (`D-263`).
+            // ⚠ Друга проба поверх першої — другий лист і зайвий крок квоти проб (`SmtpTestRateLimitPolicy`;
+            // `D-263` про квоту не каже — лише про те, що SMTP налаштовується в системі).
             if (test.isPending) return;
             test.mutate(testTo.trim());
           }}
