@@ -208,6 +208,10 @@ public static class DataSourceEndpointPolicy
 
     private static bool IsPathSeparator(char c) => c is '\\' or '/';
 
+    /// <summary>Повний шлях на локальному диску: <c>X:\…</c> чи <c>X:/…</c>, лише ASCII-літера диска.</summary>
+    private static bool IsLocalDrivePath(string path)
+        => path.Length >= 3 && char.IsAsciiLetter(path[0]) && path[1] == ':' && IsPathSeparator(path[2]);
+
     /// <summary>Розбір за правилами SqlClient; <paramref name="builder"/> <c>null</c> — рядок без <c>=</c>.</summary>
     private static bool TryParseSqlClient(string connectionString, out DbConnectionStringBuilder? builder)
     {
@@ -255,11 +259,11 @@ public static class DataSourceEndpointPolicy
             "ENCLAVEATTESTATIONURL" => true,
 
             // Сертифікат із мережевої шарі — NTLM на хост із рядка.
-            // ⚠ Будь-які два роздільники поспіль на початку: Windows читає `\/host`, `/\host` так само, як
-            // `\\host` (рецензія an33b, P2). `file:` — URI тієї самої шарі.
-            "SERVERCERTIFICATE" => value?.Trim() is { Length: > 0 } path
-                                   && ((path.Length >= 2 && IsPathSeparator(path[0]) && IsPathSeparator(path[1]))
-                                       || path.StartsWith("file:", StringComparison.OrdinalIgnoreCase)),
+            // ⛔ Білий список, а не чорний (друге рев'ю an33c, P2): після `\\`, `\/`, `/\` знайшлися
+            // `\??\UNC\…` і `\??\GLOBALROOT\Device\Mup\…` — NT-шляхи, які .NET віддає `CreateFileW` без
+            // нормалізації. Дозволено лише повний шлях на локальному диску `X:\…` (`X:/…`); усе, що
+            // починається з роздільника, `file:`, відносний шлях — заборонено.
+            "SERVERCERTIFICATE" => value?.Trim() is { Length: > 0 } path && !IsLocalDrivePath(path),
 
             _ => false,
         };

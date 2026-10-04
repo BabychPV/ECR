@@ -74,6 +74,15 @@ public sealed class SaveDataSourceHandlerTests
     [InlineData("Server=flert;Server Certificate=//attacker/share/c.cer")]
     [InlineData("Server=flert;Server Certificate= \\/attacker\\share\\c.cer")]
     [InlineData("Server=flert;Server Certificate=file://attacker/share/c.cer")]
+    // Друге рев'ю an33c (P2): NT-шляхи, які .NET віддає CreateFileW без нормалізації, і відносні.
+    [InlineData(@"Server=db;Integrated Security=true;Server Certificate=\??\UNC\attacker\share\c.cer")]
+    [InlineData(@"Server=db;Integrated Security=true;Server Certificate=\??\GLOBALROOT\Device\Mup\attacker\share\c.cer")]
+    [InlineData(@"Server=db;Integrated Security=true;ServerCertificate=\??\UNC\attacker\share\c.cer")]
+    [InlineData(@"Server=flert;Server Certificate=\\?\UNC\attacker\share\c.cer")]
+    [InlineData(@"Server=flert;Server Certificate=\\.\UNC\attacker\share\c.cer")]
+    [InlineData(@"Server=flert;Server Certificate=\certs\c.cer")]
+    [InlineData("Server=flert;Server Certificate=certs/c.cer")]
+    [InlineData("Server=flert;Server Certificate=C:c.cer")]
     public async Task Create_Sql_заборонений_параметр_422(string endpoint)
     {
         var refused = await TryCreate(endpoint, new FakeNetwork());
@@ -106,6 +115,7 @@ public sealed class SaveDataSourceHandlerTests
     [InlineData("Server=localhost\\SQLEXPRESS;TrustServerCertificate=true")]
     [InlineData("Server=10.1.2.3,1433;User Instance=false")]
     [InlineData("Server=flert;Server Certificate=C:\\certs\\flert.cer")]
+    [InlineData("Server=flert;Server Certificate=d:/certs/flert.cer")]
     public async Task Create_Sql_звичайний_рядок_з_єднання_проходить(string endpoint)
         => Assert.Null(await TryCreate(endpoint, new FakeNetwork("10.0.0.5")));
 
