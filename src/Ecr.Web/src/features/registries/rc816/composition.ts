@@ -196,7 +196,10 @@ export interface Decimal {
   readonly scale: number;
 }
 
-const DecimalPattern = /^([+-]?)(\d*)(?:\.(\d*))?(?:[eE]([+-]?\d+))?$/;
+/** Найбільша експонента, яку ще має сенс читати: масштаб `decimal` .NET — 28. */
+const MaxDecimalExponent = 28;
+
+const DecimalPattern =/^([+-]?)(\d*)(?:\.(\d*))?(?:[eE]([+-]?\d+))?$/;
 
 /**
  * Читає число: інваріантний запис сервера (`12.5`, `1E-05`) або введене людиною за правилами
@@ -215,6 +218,10 @@ export function parseDecimal(raw: string): Decimal | null {
 
   const [, sign = '', whole = '', fraction = '', exponent = '0'] = match;
   if (whole.length === 0 && fraction.length === 0) return null;
+  // ⛔ Експонента лише в межах `decimal` .NET (28 знаків): `1e-100000000` інакше змушувало б на
+  // КОЖЕН рендер Σ рахувати `10n ** 100000000n` (вкладка висне), а ще цифра — `RangeError` у рендері
+  // і межа маршруту розмонтовує редактор з усіма незбереженими правками. Сервер такого не прийме.
+  if (Math.abs(Number(exponent)) > MaxDecimalExponent) return null;
 
   let units = BigInt(`${whole}${fraction}` || '0');
   let scale = fraction.length - Number(exponent);
