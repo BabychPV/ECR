@@ -97,6 +97,8 @@ export interface ServerOptions {
   readonly rows?: RegistryRow[];
   /** Збереження (не `dryRun`) відповідає лише після цього проміса — «запит у дорозі». */
   readonly holdCommit?: Promise<unknown>;
+  /** Статус відповіді на рядки довідника-цілі `STREAM` (зіставлення `Lookup`); за замовчуванням 200. */
+  readonly lookupStatus?: number;
 }
 
 const json = (body: unknown): Response =>
@@ -148,6 +150,12 @@ export function mockServer(options: ServerOptions = {}): SentBatch[] {
       }
       if (url.includes('/definition')) return json(definition);
       if (url.includes('/api/v1/registries/STREAM/rows')) {
+        if (options.lookupStatus !== undefined && options.lookupStatus >= 400) {
+          return new Response(JSON.stringify({ title: 'Forbidden', status: options.lookupStatus, errorCode: 'ECR-AUTH-0403' }), {
+            status: options.lookupStatus,
+            headers: { 'Content-Type': 'application/problem+json' },
+          });
+        }
         return json({ items: [{ ...storedRows[0], id: 162, code: 'S162', display: '1D-2 · HP Separator Gas', values: {} }], nextCursor: null, totalCount: 1 });
       }
       if (url.includes('/rows')) {

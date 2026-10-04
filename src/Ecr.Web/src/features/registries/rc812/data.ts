@@ -98,6 +98,44 @@ export async function resolveLookup(
   return only === undefined ? null : { id: String(only.id), display: lookupLabel(only) };
 }
 
+/** Скільки запитів зіставлення `Lookup` вставки йде одночасно. */
+export const LookupPasteConcurrency = 4;
+
+/**
+ * Зіставлення всіх `Lookup` однієї вставки (§8.4): однакові пари «ціль + текст» резолвляться ОДИН
+ * раз (без урахування регістру), до `LookupPasteConcurrency` запитів одночасно.
+ *
+ * ⚠ Відмова запиту (403 на ціль, мережа) — `null`, як і «не знайдено»: вставка не обривається на
+ * півдорозі мовчки, а людина бачить лічильник незіставлених комірок.
+ *
+ * @returns Функція «ціль, текст → запис або `null`» над уже резолвленими парами.
+ */
+export async function resolveLookups(
+  requests: readonly { readonly target: string; readonly text: string }[],
+  asOf: string | null,
+  concurrency: number = LookupPasteConcurrency,
+): Promise<(target: string, text: string) => { id: string; display: string } | null> {
+  const keyOf = (target: string, text: string): string => `${target}\u0000${text.trim().toLocaleLowerCase()}`;
+  const pending = new Map<string, { target: string; text: string }>();
+  for (const request of requests) pending.set(keyOf(request.target, request.text), request);
+
+  const found = new Map<string, { id: string; display: string } | null>();
+  const queue = [...pending.entries()];
+  const worker = async (): Promise<void> => {
+    for (let next = queue.shift(); next !== undefined; next = queue.shift()) {
+      const [key, { target, text }] = next;
+      try {
+        found.set(key, await resolveLookup(target, text, asOf));
+      } catch {
+        found.set(key, null);
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.max(1, Math.min(concurrency, queue.length)) }, worker));
+
+  return (target, text) => found.get(keyOf(target, text)) ?? null;
+}
+
 /**
  * Сьогоднішня дата клієнта як `yyyy-MM-dd` — `asOf` темпорального довідника за замовчуванням.
  *

@@ -20,7 +20,7 @@ import { useUrlState } from '@/shared/ui/useUrlState';
 import {
   dateOfIso,
   isoOfDate,
-  resolveLookup,
+  resolveLookups,
   todayIso,
   useRegistryDefinition,
   useRegistryList,
@@ -173,9 +173,22 @@ export function RegistryDataPage(): JSX.Element {
     update(rowKey, (draft) => ({ ...draft, deleted: !draft.deleted }));
   };
 
-  /** Вставка блоку: нові рядки за краєм, `Lookup` — за кодом або назвою цілі. */
+  /**
+   * Вставка блоку: нові рядки за краєм, `Lookup` — за кодом або назвою цілі.
+   *
+   * ⚠ Усі `Lookup` вставки резолвляться ДО правок, однакові — один раз (`resolveLookups`): стовпець
+   * із 300 рядків і 10 різними компонентами — 10 запитів, а не 300 послідовних, і правки лягають
+   * разом. Відмова запиту — незіставлена комірка в лічильнику, а не мовчки відкинутий хвіст.
+   */
   const onPaste = async (rowIndex: number, columnIndex: number, text: string): Promise<void> => {
     const cells = planBlockPaste(parseBlock(text), rowIndex, columnIndex, fields.map((f) => f.code));
+    const lookups: { target: string; text: string }[] = [];
+    for (const cell of cells) {
+      const field = fields.find((f) => f.code === cell.field);
+      const target = field?.dataType === 'Lookup' ? lookupCodeOf(field) : null;
+      if (target !== null && cell.text !== '') lookups.push({ target, text: cell.text });
+    }
+    const resolved = await resolveLookups(lookups, asOf);
     const keysByIndex = gridRows.map((g) => g.rowKey);
     let misses = 0;
 
@@ -191,7 +204,7 @@ export function RegistryDataPage(): JSX.Element {
 
       if (field.dataType === 'Lookup') {
         const target = lookupCodeOf(field);
-        const hit = target === null ? null : await resolveLookup(target, cell.text, asOf);
+        const hit = target === null ? null : resolved(target, cell.text);
         if (hit === null) misses += 1;
         else onEdit(rowKey, field.code, hit.id, hit.display);
       } else if (field.dataType === 'Unit') {

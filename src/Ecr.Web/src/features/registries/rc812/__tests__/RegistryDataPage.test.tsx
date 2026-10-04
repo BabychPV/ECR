@@ -203,6 +203,41 @@ describe('Дані довідника: табличний редактор', () 
     expect(await within(other).findByRole('textbox')).toBeDefined();
   });
 
+  it('вставка трьох рядків з однаковим Lookup — один запит до довідника-цілі (L9-07)', async () => {
+    mockServer();
+    showDataPage();
+    const grid = await screen.findByRole('grid');
+    const lookupCalls = (): number =>
+      vi.mocked(fetch).mock.calls.filter(([input]) => String(input).includes('/registries/STREAM/rows')).length;
+
+    act(() => cell(0, 0).focus());
+    fireEvent.paste(grid, { clipboardData: { getData: () => 'S162\ns162\nS162\n' } });
+
+    await vi.waitFor(() => {
+      expect(document.querySelectorAll('[data-row-key^="n:"]')).toHaveLength(1);
+    });
+    await vi.waitFor(() => {
+      expect(within(cell(2, 0)).getByText('1D-2 · HP Separator Gas (S162)')).toBeDefined();
+    });
+    expect(lookupCalls()).toBe(1);
+  });
+
+  it('відмова зіставлення Lookup — банер незіставлених, а не мовчки відкинутий хвіст (L9-07)', async () => {
+    mockServer({ lookupStatus: 403 });
+    const unhandled = vi.fn();
+    window.addEventListener('unhandledrejection', unhandled);
+    showDataPage();
+    const grid = await screen.findByRole('grid');
+
+    act(() => cell(0, 0).focus());
+    fireEvent.paste(grid, { clipboardData: { getData: () => 'S162\tAutumn\n' } });
+
+    expect(await screen.findByText('1 pasted cells could not be matched and were left unchanged.')).toBeDefined();
+    expect(within(cell(0, 1)).getByText('Autumn')).toBeDefined();
+    window.removeEventListener('unhandledrejection', unhandled);
+    expect(unhandled).not.toHaveBeenCalled();
+  });
+
   it('без Registry.EditData — лише читання: пояснення словами, без збереження, Enter не редагує', async () => {
     mockServer({ permissions: ['Registry.View'] });
     showDataPage();
