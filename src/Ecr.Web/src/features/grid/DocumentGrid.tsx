@@ -1918,7 +1918,9 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
      */
     <AsyncBoundary<TableSliceDto>
       isPending={slice.isPending}
-      error={slice.error}
+      // AN-39 / L8-11: збій ФОНОВОГО перезапиту зрізу (дані вже є) не підміняє сітку на
+      // помилку - це розмонтувало б редактор, Undo і панель конфлікту; він іде банером.
+      error={data === undefined ? slice.error : null}
       data={data}
       isEmpty={sliceEmpty}
       emptyTitle={noColumns ? t('grid.emptyTable') : t('grid.emptyFixedTable')}
@@ -1934,6 +1936,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
        * читав це як «довідник не наповнили».
        */}
       {lookupError !== null && <ErrorAlert error={lookupError} onRetry={refetchLookups} />}
+      {slice.error !== null && <ErrorAlert error={slice.error} onRetry={() => void slice.refetch()} />}
 
       <Group gap="xs" key={historyRevision}>
         <Button size="xs" variant="default" disabled={!history.current.canUndo} onClick={() => applyHistory(history.current.undo())}>
