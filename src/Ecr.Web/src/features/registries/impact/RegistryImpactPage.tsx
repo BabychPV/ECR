@@ -46,6 +46,20 @@ export function impactPollInterval(status: JobStatus | undefined): number | fals
 }
 
 /**
+ * Інтервал опитування запиту задачі з урахуванням відмови читання.
+ *
+ * ⛔ L9-41: відмова (`403` без права бачити задачу, `404`) лишає `data` порожнім, а
+ * `impactPollInterval(undefined)` — «ще не прочитано, опитувати далі»: запит повторювався кожні
+ * `PollMs` безкінечно, хоча картка вже каже «стан прочитати не вдалося».
+ */
+export function impactJobRefetchInterval(state: {
+  readonly status: 'pending' | 'error' | 'success';
+  readonly data: JobStatus | undefined;
+}): number | false {
+  return state.status === 'error' ? false : impactPollInterval(state.data);
+}
+
+/**
  * Документ у ТОМУ періоді, який зачеплено.
  *
  * ⚠ Без `periodKey` сторінка документа відкрила б поточний період, а не той, чиї результати застаріли.
@@ -80,7 +94,7 @@ function ImpactJob({
   const job = useQuery({
     queryKey: ['job', jobId],
     queryFn: () => apiFetch<JobStatus>(`/api/v1/jobs/${encodeURIComponent(jobId)}`),
-    refetchInterval: (query) => impactPollInterval(query.state.data),
+    refetchInterval: (query) => impactJobRefetchInterval(query.state),
     retry: false,
   });
 
