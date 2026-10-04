@@ -1872,6 +1872,8 @@ USING (VALUES
     -- Document.Delete: only a draft document can be deleted (decision 2026-09-21).
     (N'err.ECR-DOC-0409.deleteNotDraft',        N'en', N'Only a draft document can be deleted; sheet {sheetDefId} for period {periodKey} is {reason}.', 1),
     (N'err.ECR-DOC-0409.deleteHasHistory',      N'en', N'Only a draft document can be deleted; this document has already been through approval.', 1),
+    -- ⛔ L10-06: мапа подій джерела посилається на документ — відмова 409, а не FK 547 → 500.
+    (N'err.ECR-DOC-0409.deleteHasEventMap',     N'en', N'The document cannot be deleted: a source event mapping writes into it. Remove the mapping first.', 1),
     -- Document.ChangeKey: controlled business key change (FV-3.9).
     (N'err.ECR-DOC-0409.rekeyLocked',           N'en', N'The document key cannot be changed: sheet {sheetDefId} for period {periodKey} is {reason}.', 1),
     (N'err.ECR-DOC-0409.rekeyDuplicate',        N'en', N'Another document of this project already has the key "{businessKey}".', 1),
@@ -15479,6 +15481,16 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- AN32:L2-11 ── кінець секції ──
+-- DOC:an37 ── ru/kz відмови видалення документа з мапою подій джерела (L10-06); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-DOC-0409.deleteHasEventMap', N'ru', N'Документ нельзя удалить: в него пишет сопоставление событий источника. Сначала удалите сопоставление.'),
+    (N'err.ECR-DOC-0409.deleteHasEventMap', N'kz', N'Құжатты жою мүмкін емес: оған дереккөз оқиғаларының сәйкестендіруі жазады. Алдымен сәйкестендіруді жойыңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- DOC:an37 ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t
