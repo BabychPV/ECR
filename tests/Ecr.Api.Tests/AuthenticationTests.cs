@@ -134,6 +134,27 @@ public sealed class AuthenticationTests(SqlServerFixture sql)
         Assert.All(attempts, a => Assert.False(a.IsSuccess));
     }
 
+    /// <summary>
+    /// L1-12: ім'я входу довше за колонку (200) раніше давало 500 (truncation при записі спроби в журнал);
+    /// тепер — 401 як на невідоме ім'я, а в журнал іде усічене ім'я.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Задовге_ім_я_входу_401_а_не_500()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var client = app.CreateClient();
+        var longName = new string('x', 201) + Guid.NewGuid().ToString("N");
+
+        var result = await LoginAsync(client, longName, "будь-який-пароль").ConfigureAwait(true);
+
+        Assert.Equal(HttpStatusCode.Unauthorized, result.Status);
+        await using var db = CreateContext();
+        var truncated = longName[..200];
+        Assert.True(await db.LoginAttempts.AnyAsync(a => a.UserName == truncated).ConfigureAwait(true));
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait(TestCategories.Category, TestCategories.Integration)]

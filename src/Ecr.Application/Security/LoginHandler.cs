@@ -59,6 +59,9 @@ public sealed partial class LoginHandler(
     /// </remarks>
     private static readonly ConcurrentDictionary<Type, Lazy<string>> DecoyHashes = new();
 
+    /// <summary>Довжина колонок імені входу (<c>sec.User.UserName</c>, <c>sec.LoginAttempt.UserName</c>).</summary>
+    public const int UserNameMaxLength = 200;
+
     /// <summary>Виконує вхід.</summary>
     /// <param name="userName">Ім'я входу.</param>
     /// <param name="password">Пароль.</param>
@@ -72,6 +75,17 @@ public sealed partial class LoginHandler(
         ArgumentException.ThrowIfNullOrWhiteSpace(userName);
 
         var now = clock.UtcNow;
+
+        // ⛔ L1-12: ім'я довше за колонку (LoginAttempt.UserName, User.UserName — 200) не може належати
+        // жодному запису; без межі запис спроби в журнал давав truncation і 500 замість 401. Відповідь і
+        // час — як на невідоме ім'я; у журнал іде усічене ім'я.
+        if (userName.Length > UserNameMaxLength)
+        {
+            Decoy(password);
+            await FailAsync(userName[..UserNameMaxLength], "UnknownUser", ipAddress, now, ct).ConfigureAwait(false);
+            throw InvalidCredentials();
+        }
+
         var user = await users.FindByUserNameAsync(userName, ct).ConfigureAwait(false);
 
         // ⛔ Службовий запис (`svc-integration`) не входить НІКОЛИ — навіть із
