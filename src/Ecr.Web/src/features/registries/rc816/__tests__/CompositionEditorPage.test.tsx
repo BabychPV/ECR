@@ -176,6 +176,20 @@ describe('CompositionEditorPage: master-detail без введення іден�
     expect((within(top).getAllByRole('textbox', { name: 'CASE_NAME' })[0] as HTMLInputElement).value).toBe('Renamed');
   });
 
+  it('пошук верхньої панелі — один запит після паузи набору, таблиця не зникає між літерами (L9-19)', async () => {
+    const server = mockServer(['Registry.View', 'Registry.EditData']);
+    show();
+    await screen.findByRole('button', { name: 'E77' });
+
+    const search = screen.getByRole('textbox', { name: /registries\.rc816\.search/ });
+    for (const text of ['a', 'ab', 'abc']) fireEvent.change(search, { target: { value: text } });
+
+    await waitFor(() => expect(server.rowQueries.some((query) => query.startsWith('STREAM_CASE?') && query.includes('q=abc'))).toBe(true));
+    const searched = server.rowQueries.filter((query) => query.startsWith('STREAM_CASE?') && query.includes('q='));
+    expect(searched).toHaveLength(1);
+    expect(screen.getByRole('button', { name: 'E77' })).toBeTruthy();
+  });
+
   it('без Registry.EditData — лише перегляд: ні додавання, ні збереження', async () => {
     mockServer(['Registry.View']);
     show();

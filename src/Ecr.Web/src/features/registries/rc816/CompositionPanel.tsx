@@ -12,7 +12,8 @@ import {
   Title,
   VisuallyHidden,
 } from '@mantine/core';
-import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useDebouncedValue } from '@mantine/hooks';
+import { keepPreviousData, useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { RegistryDefDto, RegistryDefinitionDto } from '@/api/types';
 import { t } from '@/shared/i18n';
 import { localized } from '@/shared/i18n/localized';
@@ -199,6 +200,9 @@ export function CompositionPanel({
   const queryClient = useQueryClient();
 
   const [search, setSearch] = useState('');
+  // ⚠ Пошук — після паузи, як у сітці даних (rc812): кожна літера інакше давала окремий запит і
+  // новий ключ, а таблиця на кожну літеру зникала до відповіді (L9-19).
+  const [debouncedSearch] = useDebouncedValue(search, 300);
   const [edits, setEdits] = useState<PendingRow[] | null>(null);
   const [result, setResult] = useState<RegistryBatchResult | null>(null);
   const [failure, setFailure] = useState<unknown>(null);
@@ -206,16 +210,18 @@ export function CompositionPanel({
   const counter = useRef(0);
 
   const rowsQuery = useInfiniteQuery({
-    queryKey: compositionKeys.rows(code, parentId, asOf, isPart ? '' : search),
+    queryKey: compositionKeys.rows(code, parentId, asOf, isPart ? '' : debouncedSearch),
     queryFn: ({ pageParam }) =>
       getRegistryRows(
         code,
         isPart
           ? { asOf, parentEntryId: parentId, cursor: pageParam, limit: PanelPage }
-          : { asOf, q: search, cursor: pageParam, limit: 100 },
+          : { asOf, q: debouncedSearch, cursor: pageParam, limit: 100 },
       ),
     initialPageParam: null as string | null,
     getNextPageParam: (page) => page.nextCursor,
+    // Попередні рядки лишаються на екрані, доки не прийшла відповідь на новий пошук.
+    placeholderData: keepPreviousData,
     refetchOnWindowFocus: false,
   });
 
