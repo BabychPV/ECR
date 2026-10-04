@@ -237,11 +237,13 @@ public sealed class JobsHealthCheck(
                 if (JobCompletionWarning.EffectiveStateOf("Succeeded", digest) is not null
                     && JobProgressMessageCodec.TryDecode(digest, out var envelope)
                     && envelope.Params is { } digestParams
-                    && (digestParams.TryGetValue(JobCompletionWarning.FailuresParam, out var count)
-                        || digestParams.TryGetValue("count", out count)))
+                    && TryDigestFailures(digestParams, out var failures))
                 {
+                    // ⚠ Розбір толерантний: конверт у БД — чужий вхід. `failures` з нечислом не
+                    // має валити /health/ready винятком (503), тож береться перший ЧИСЛОВИЙ параметр.
+                    var count = failures.ToString(System.Globalization.CultureInfo.InvariantCulture);
                     var data = Data(jobs.Count, triggers.Count);
-                    data["notificationsUndelivered"] = int.Parse(count, System.Globalization.CultureInfo.InvariantCulture);
+                    data["notificationsUndelivered"] = failures;
                     var text = await Text(
                             "health.jobs.notificationsUndelivered",
                             "The last failure digest reached no one: {count} failures, 0 sent. Check the mail server settings, notification channels and alert recipients.",
@@ -267,6 +269,17 @@ public sealed class JobsHealthCheck(
                 .ConfigureAwait(false);
             return HealthCheckResult.Unhealthy(unavailable, failure);
         }
+    }
+
+    private static bool TryDigestFailures(IReadOnlyDictionary<string, string> p, out int failures)
+    {
+        failures = 0;
+
+        // Та сама черговість, що в JobCompletionWarning.EffectiveStateOf: failures, далі count.
+        return (p.TryGetValue(JobCompletionWarning.FailuresParam, out var raw)
+                && int.TryParse(raw, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out failures))
+               || (p.TryGetValue("count", out raw)
+                   && int.TryParse(raw, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out failures));
     }
 
     private Task<string> Text(

@@ -108,6 +108,30 @@ public sealed class JobsHealthNotificationDigestTests(SqlServerFixture sql) : IA
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "ФВ-12.5")]
+    public async Task Конверт_з_нечисловим_failures_не_валить_перевірку_а_бере_count()
+    {
+        var at = new DateTime(2037, 9, 10, 9, 0, 0, DateTimeKind.Utc);
+        await SweepAtAsync(at);
+        var envelope = JobProgressMessageCodec.Encode(new JobProgressMessageEnvelope(
+            JobCompletionWarning.NotificationDoneKey,
+            new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["count"] = "2",
+                [JobCompletionWarning.FailuresParam] = "abc",
+                ["sent"] = "0",
+            }));
+        await FinishAsync(at.AddMinutes(-30), "Succeeded", envelope);
+
+        var degraded = await CheckAtAsync(at);
+
+        Assert.Equal(HealthStatus.Degraded, degraded.Status);
+        Assert.Equal(2, degraded.Data["notificationsUndelivered"]);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-12.5")]
     public async Task Недоставлене_зведення_не_робить_health_ready_503_а_jobs_показує_жовтий()
     {
         using var app = new EcrApiFactory(sql);
