@@ -217,6 +217,52 @@ public sealed class RegistrySyncJobTests(SqlServerFixture sql)
         }
     }
 
+    /// <summary>
+    /// L4-10: RTQP адресує елемент ІМЕНЕМ; два елементи з однаковим іменем у різних гілках AF не
+    /// отримують значень (жоден — ані свої, ані чужі), знімок неповний, обидва названо у відмові.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-8.11")]
+    public async Task Два_елементи_з_одним_іменем_не_отримують_значень()
+    {
+        var stand = await ArrangeAsync(RegistrySourceKind.Local, ExternalTransport.PiSqlClient);
+
+        try
+        {
+            // Той самий «Stack1» в іншій гілці AF — інший GUID, та сама адреса читання.
+            var twin = Guid.NewGuid().ToString("D");
+            var twins = stand with { Elements = [.. stand.Elements, new(twin, "Stack1", null, "STACK1")] };
+            var source = new FakeSource(stand.Values, transport: ExternalTransport.PiSqlClient);
+
+            await using (var db = Context())
+            {
+                await Job(db, source, twins, new JobActorScope()).ExecuteAsync(stand.EntityId, CancellationToken.None);
+            }
+
+            var events = await EventsAsync(stand.EntityId);
+
+            // ⛔ Значення «Stack1» (CAP 12.5) могло бути чужим — розбіжності за ним немає.
+            Assert.DoesNotContain(events, e => e.Status == CollectionCoverage.RegistryDiverged
+                                               && e.Details!.Contains("source=12.5", StringComparison.Ordinal));
+
+            // Обидва названо у відмові; неповний знімок про зникнення нічого не каже (D-187).
+            foreach (var id in new[] { stand.Linked1Guid, twin })
+            {
+                Assert.Contains(events, e => e.Status == CollectionCoverage.RegistryValueRejected
+                                             && e.Details!.Contains(id, StringComparison.Ordinal)
+                                             && e.Details.Contains("elementNameAmbiguous", StringComparison.Ordinal));
+            }
+
+            Assert.DoesNotContain(events, e => e.Status == CollectionCoverage.RegistrySourceMissing);
+        }
+        finally
+        {
+            await DeactivateAsync(stand);
+        }
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]

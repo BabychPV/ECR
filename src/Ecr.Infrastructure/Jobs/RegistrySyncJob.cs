@@ -896,7 +896,32 @@ public sealed class RegistrySyncJob(
         // Шлях атрибута → (елемент, атрибут).
         var addresses = new Dictionary<string, (string ExternalId, string Attribute)>(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var element in elements.Values.Where(e => !string.IsNullOrWhiteSpace(e.ReadAddress)))
+        // ⛔ L4-10: PI SQL Client адресує елемент ІМЕНЕМ (`WHERE e.Name = ?`), а однакові імена в різних
+        // гілках AF — норма. Перший за порядком переліку отримував значення, прочитані за спільним ім'ям,
+        // тобто, можливо, ЧУЖІ, а другий — нічого. Тепер жоден з них не читається, знімок неповний
+        // (D-187: зниклих немає), і кожен названо у відмові.
+        // ⚠ Лише для адресації ІМЕНЕМ: шлях PI Web API в AF унікальний, а два GUID на одному шляху —
+        // кандидати на перепривʼязку (D-212), їх розводить планувальник.
+        var byName = adapter.Transport == ExternalTransport.PiSqlClient;
+        var ambiguous = elements.Values
+            .Where(e => byName && !string.IsNullOrWhiteSpace(e.ReadAddress))
+            .GroupBy(e => e.ReadAddress, StringComparer.OrdinalIgnoreCase)
+            .Where(g => g.Count() > 1)
+            .SelectMany(g => g)
+            .ToList();
+
+        foreach (var element in ambiguous.OrderBy(e => e.ExternalId, StringComparer.Ordinal))
+        {
+            complete = false;
+            rejections.Add(Truncate(
+                $"element={element.ExternalId}; path={element.ReadAddress}; error=ECR-INT-0422; "
+                + "messageKey=err.ECR-INT-0422.elementNameAmbiguous"));
+        }
+
+        var skipped = ambiguous.Select(e => e.ExternalId).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var element in elements.Values
+                     .Where(e => !string.IsNullOrWhiteSpace(e.ReadAddress) && !skipped.Contains(e.ExternalId)))
         {
             foreach (var attribute in attributes)
             {
