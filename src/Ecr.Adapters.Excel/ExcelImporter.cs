@@ -294,7 +294,7 @@ public sealed class ExcelImporter(
         await previews
             .SaveAsync(
                 token,
-                JsonSerializer.Serialize(new ImportPlan(documentId, map.PeriodKey, diffs), Options),
+                JsonSerializer.Serialize(new ImportPlan(documentId, map.PeriodKey, diffs, userId), Options),
                 PreviewLifetime,
                 ct)
             .ConfigureAwait(false);
@@ -690,6 +690,16 @@ public sealed class ExcelImporter(
                        "ECR-IMP-0422", "Збережений перегляд імпорту не читається.",
                        new Dictionary<string, object?> { ["messageKey"] = "err.ECR-IMP-0422.previewUnreadable" });
 
+        // ⛔ L1-20: токен перегляду належить користувачеві, що його збудував; чужий токен — той самий «перегляду
+        // немає» (не розкриваємо, що він існує). Плани без власника (до цієї правки) лишаються чинними до спливу строку.
+        if (plan.UserId is { } owner && owner != currentUser.UserId)
+        {
+            throw new BusinessRuleException(
+                "ECR-IMP-0422",
+                "Перегляд імпорту не знайдено або його строк вийшов: побудуйте його заново.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-IMP-0422.previewExpired" });
+        }
+
         if (documentId is not null && plan.DocumentId != documentId)
         {
             throw new BusinessRuleException(
@@ -810,4 +820,5 @@ public sealed class ExcelImporter(
 /// <param name="DocumentId">Документ.</param>
 /// <param name="PeriodKey">Період.</param>
 /// <param name="Tables">Diff-и таблиць.</param>
-public sealed record ImportPlan(long DocumentId, int PeriodKey, IReadOnlyList<TableDiff> Tables);
+/// <param name="UserId">Користувач, що збудував перегляд (L1-20); <c>null</c> — план до прив'язки.</param>
+public sealed record ImportPlan(long DocumentId, int PeriodKey, IReadOnlyList<TableDiff> Tables, int? UserId = null);
