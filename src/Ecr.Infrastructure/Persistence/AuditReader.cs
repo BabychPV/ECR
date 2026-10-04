@@ -632,19 +632,40 @@ public sealed class AuditReader(EcrDbContext db) : IAuditReader
     /// ChangedAt DESC)</c>. Однакові <c>ChangedAt</c> (datetime2(3), пакет)
     /// розводить <c>Id</c>, тож на кожну комірку лишається рівно один рядок —
     /// без <c>DISTINCT</c>.
+    ///
+    /// ⛔ L6-12: нижня межа <c>@since</c> — раніша з двох: початок періоду чи
+    /// розрахункове відкриття (<c>ComputedOpenAt</c>, зсув може бути від'ємним),
+    /// мінус доба на пояс майданчика. Правити період до відкриття не дає
+    /// <c>EditRules</c> (<c>Scheduled</c> → <c>PeriodNotOpenYet</c>), тож
+    /// раніших правок поза вікном не буває. Доти запит на КОЖЕН GET зрізу читав
+    /// усі місячні партиції <c>aud.CellChange</c>; тепер — від <c>@since</c>.
+    /// Періоду в календарі немає або межі не пораховані — межі немає (як доти).
+    /// <c>later.ChangedAt &gt;= o.ChangedAt</c> у <c>NOT EXISTS</c> логічно
+    /// зайве — воно дає оптимізатору ту саму відсічку партицій.
     /// </remarks>
     public const string OutOfWindowCellsSql = """
+        DECLARE @open datetime2(3) =
+            (SELECT CASE WHEN p.ComputedOpenAt < CAST(p.PeriodStart AS datetime2(3))
+                         THEN p.ComputedOpenAt ELSE CAST(p.PeriodStart AS datetime2(3)) END
+               FROM doc.Period AS p
+               JOIN doc.Document AS d ON d.ProjectId = p.ProjectId
+              WHERE d.Id = @documentId AND p.PeriodKey = @periodKey);
+        DECLARE @since datetime2(3) =
+            CASE WHEN @open > '2000-01-01' THEN DATEADD(DAY, -1, @open) ELSE '0001-01-01' END;
+
         SELECT o.TableRowId, o.ColumnDefId
           FROM aud.CellChange AS o
          WHERE o.DocumentId = @documentId
            AND o.PeriodKey = @periodKey
            AND o.IsOutOfWindow = 1
+           AND o.ChangedAt >= @since
            AND NOT EXISTS (
                  SELECT 1
                    FROM aud.CellChange AS later
                   WHERE later.DocumentId = o.DocumentId
                     AND later.TableRowId = o.TableRowId
                     AND later.ColumnDefId = o.ColumnDefId
+                    AND later.ChangedAt >= o.ChangedAt
                     AND (later.ChangedAt > o.ChangedAt
                          OR (later.ChangedAt = o.ChangedAt AND later.Id > o.Id)));
         """;
