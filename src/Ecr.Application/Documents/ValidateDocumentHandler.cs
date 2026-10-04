@@ -64,7 +64,10 @@ public sealed class ValidateDocumentHandler(
                 .SelectMany(s => s.Tables)
                 .FirstOrDefault(t => t.Id == instance.TableDefId);
 
-            if (table is null || table.ValidationRules.Count == 0)
+            // ⛔ L6-09: і таблиця без правил, але з обов'язковою колонкою — подання
+            // блокує саме її незаповнені комірки, тож «Перевірити» мусить їх показати.
+            if (table is null
+                || (table.ValidationRules.Count == 0 && !table.Columns.Any(c => !c.IsDeleted && c.IsRequired)))
             {
                 continue;
             }
@@ -113,9 +116,15 @@ public sealed class ValidateDocumentHandler(
                 ? foundRows
                 : new Dictionary<string, long>(StringComparer.Ordinal);
 
-            messages.AddRange(await TableValidation
-                .RunAsync(engine, registries, snapshot, table, cells, rowIds, headerValues, currentUser.Language, ct)
-                .ConfigureAwait(false));
+            if (table.ValidationRules.Count > 0)
+            {
+                messages.AddRange(await TableValidation
+                    .RunAsync(engine, registries, snapshot, table, cells, rowIds, headerValues, currentUser.Language, ct)
+                    .ConfigureAwait(false));
+            }
+
+            messages.AddRange(TableValidation.MissingRequiredColumnMessages(
+                table, [.. table.Columns.Where(c => !c.IsDeleted && c.IsRequired)], cells, rowIds));
         }
 
         // D-230: зв'язки Check (ПРИПУЩЕННЯ схеми, `RelationSpec.cs`). Читаються після таблиць із
