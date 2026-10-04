@@ -513,6 +513,12 @@ public sealed class RecalculationService(
 
         foreach (var formulaId in targets)
         {
+            // ⛔ Аудит L2-03 (AN-38): процесорна фаза — між формулами — перевіряє
+            // токен. Без цього межа `MaxDuration` і запит скасування лише
+            // «просили» зупинитися: задача рахувала далі, тримала оренду й писала
+            // результат скасованого перерахунку.
+            ct.ThrowIfCancellationRequested();
+
             if (!formulas.TryGetValue(formulaId, out var owner))
             {
                 continue;
