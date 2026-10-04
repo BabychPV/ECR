@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { SmtpSettingsPanel } from '@/features/notifications/SmtpSettingsPanel';
+import { portValid, SmtpSettingsPanel } from '@/features/notifications/SmtpSettingsPanel';
 import { testTheme } from '@/test/render';
 
 /**
@@ -198,4 +198,39 @@ describe('SmtpSettingsPanel', () => {
     expect(post?.method).toBe('POST');
     expect(post?.body).toEqual({ to: 'me@corp.example' });
   }, 30_000);
+});
+
+describe('SmtpSettingsPanel: порт (L9-32)', () => {
+  it('portValid — ціле 1–65535, як SaveSmtpSettingsHandler.Validate', () => {
+    expect(portValid(587)).toBe(true);
+    expect(portValid(1)).toBe(true);
+    expect(portValid(65535)).toBe(true);
+    expect(portValid(0)).toBe(false);
+    expect(portValid(65536)).toBe(false);
+    expect(portValid(25.5)).toBe(false);
+    expect(portValid('')).toBe(false);
+  });
+
+  it('стерте поле лишається порожнім (а не 587), з помилкою; 70000 — теж помилка; зберегти не можна', async () => {
+    const calls = mockServer('ok');
+    show();
+
+    const port = (await screen.findByLabelText(/smtp\.port/)) as HTMLInputElement;
+    fireEvent.change(port, { target: { value: '' } });
+
+    await waitFor(() => expect(port.value).toBe(''));
+    expect(port.getAttribute('aria-invalid')).toBe('true');
+    const save = screen.getByText(/smtp\.save/).closest('button') as HTMLButtonElement;
+    expect(save.disabled).toBe(true);
+
+    fireEvent.change(port, { target: { value: '70000' } });
+    await waitFor(() => expect(port.getAttribute('aria-invalid')).toBe('true'));
+    fireEvent.click(save);
+    expect(calls.some((call) => call.method === 'PUT')).toBe(false);
+
+    fireEvent.change(port, { target: { value: '2525' } });
+    await waitFor(() => expect(save.disabled).toBe(false));
+    fireEvent.click(save);
+    await waitFor(() => expect(calls.find((call) => call.method === 'PUT')?.body).toMatchObject({ port: 2525 }));
+  });
 });

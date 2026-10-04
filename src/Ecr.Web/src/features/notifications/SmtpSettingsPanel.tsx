@@ -154,6 +154,7 @@ export function SmtpSettingsPanel(): JSX.Element {
   // ⛔ L9-28: на час `PUT` форма замкнена. `onSuccess` знімає чернетку цілком (`setDraft(null)`), тож
   // правка між кліком «Зберегти» і відповіддю мовчки зникала б: у тілі запиту її не було.
   const locked = save.isPending;
+  const portOk = portValid(form.port);
 
   return (
     <Stack gap="sm">
@@ -180,7 +181,12 @@ export function SmtpSettingsPanel(): JSX.Element {
           min={1}
           max={65535}
           allowDecimal={false}
-          onChange={(value) => set({ port: typeof value === 'number' ? value : 587 })}
+          allowNegative={false}
+          error={portOk ? undefined : t('err.ECR-REQ-0422.smtpSettingsInvalid', { name: t('smtp.port') })}
+          // ⛔ L9-32: значення поля — як ввела людина. Доти порожнє поле миттю ставало `587` (стерти й
+          // набрати інший порт було неможливо — цифри дописувались до 587), а `70000` до втрати фокуса
+          // (Mantine обрізає лише на blur) їхало на сервер і поверталось загальною відмовою.
+          onChange={(value) => set({ port: value })}
         />
         <Select
           label={t('smtp.encryption')}
@@ -277,7 +283,7 @@ export function SmtpSettingsPanel(): JSX.Element {
       <Group justify="flex-end">
         <Button
           loading={saveLoading}
-          disabled={draft === null}
+          disabled={draft === null || !portOk}
           onClick={() => {
             // ⚠ До порогу `usePendingLoading` кнопка ще активна: другий клік не шле другий PUT.
             if (save.isPending) return;
@@ -323,7 +329,8 @@ function sourceLabel(source: string): string {
 /** Чернетка форми: рядки й булеві; `password` — лише те, що введено ЦЬОГО разу. */
 interface SmtpDraft {
   readonly host: string;
-  readonly port: number;
+  /** Як у полі: число, або рядок (порожньо чи незавершене введення) — тоді зберегти не можна. */
+  readonly port: number | string;
   readonly encryptionMode: 'None' | 'StartTls';
   readonly fromAddress: string;
   readonly fromName: string;
@@ -349,13 +356,18 @@ function draftOf(value: SmtpSettings): SmtpDraft {
   };
 }
 
+/** Порт, який прийме сервер за формою (`SaveSmtpSettingsHandler.Validate`): ціле 1–65535. */
+export function portValid(port: number | string): boolean {
+  return typeof port === 'number' && Number.isInteger(port) && port >= 1 && port <= 65535;
+}
+
 /** Порожні рядки їдуть як `null`; порожній пароль — «не змінювати». */
 function inputOf(draft: SmtpDraft): SmtpSettingsInput {
   const blank = (v: string): string | null => (v.trim().length === 0 ? null : v.trim());
 
   return {
     host: blank(draft.host),
-    port: draft.port,
+    port: Number(draft.port),
     encryptionMode: draft.encryptionMode,
     fromAddress: blank(draft.fromAddress),
     fromName: blank(draft.fromName),
