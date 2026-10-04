@@ -355,6 +355,9 @@ function RecentJobs({ onPick }: { onPick: (jobId: string) => void }): JSX.Elemen
             color="statusError"
             loading={cancelLoading}
             onClick={() => {
+              // ⛔ L9-37: спінер (`usePendingLoading`) з'являється лише після 100 мс —
+              // до того кнопка активна, і подвійний клік/Enter слав два скасування.
+              if (cancel.isPending) return;
               if (confirming !== null) cancel.mutate(confirming.jobId);
             }}
           >

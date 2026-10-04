@@ -39,11 +39,12 @@ const json = (body: unknown): Response =>
     headers: { 'Content-Type': 'application/json' },
   });
 
-function mockFetch(verifyResult: unknown): ReturnType<typeof vi.fn> {
+function mockFetch(verifyResult: unknown, holdVerify = false): ReturnType<typeof vi.fn> {
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
 
     if (url.endsWith('/api/v1/reports/snapshots/7/verify') && init?.method === 'POST') {
+      if (holdVerify) return new Promise<Response>(() => {});
       return json(verifyResult);
     }
 
@@ -150,6 +151,28 @@ describe('SnapshotsPage: перевірка незмінності зрізу (B
       expect(screen.getByText(/Stored: AAAA/)).toBeDefined();
       expect(screen.getByText(/Actual: BBBB/)).toBeDefined();
       expect(screen.queryByText('unchanged')).toBeNull();
+    },
+    SlowEnvTimeout,
+  );
+
+  it(
+    'повторний клік «Verify», поки перевірка в польоті, другого запиту не шле (L9-37)',
+    async () => {
+      const fetchMock = mockFetch(null, true);
+      await show();
+
+      const button = await screen.findByRole('button', { name: 'Verify' }, { timeout: SlowEnvTimeout });
+      fireEvent.click(button);
+
+      // ⚠ Пауза менша за 100 мс `usePendingLoading`: спінера ще немає, кнопка
+      // активна — саме це вікно ловить подвійний клік чи повторний Enter.
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      fireEvent.click(button);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      // ⛔ Мутація «прибрати `if (verify.isPending) return;`» — два POST, червоний.
+      const verifyCalls = fetchMock.mock.calls.filter(([url]) => String(url).endsWith('/7/verify'));
+      expect(verifyCalls).toHaveLength(1);
     },
     SlowEnvTimeout,
   );

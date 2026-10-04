@@ -493,6 +493,9 @@ export function MethodologiesPage(): JSX.Element {
           mt="md"
           loading={simulateLoading}
           onClick={() => {
+            // ⛔ L9-37: спінер (`usePendingLoading`) з'являється лише після 100 мс —
+            // до того кнопка активна, і подвійний клік/Enter слав два прогони.
+            if (simulate.isPending) return;
             if (simulating !== null) simulate.mutate(simulating);
           }}
         >
