@@ -10,6 +10,7 @@ import {
   AppShell,
   Badge,
   Burger,
+  Button,
   Center,
   Group,
   Loader,
@@ -159,6 +160,9 @@ function SkipToContentLink(): JSX.Element {
  */
 
 /** Каркас застосунку: навігація, профіль, вміст сторінки. */
+/** Тост відкладеної зміни мови (L8-17): один на раз, знімається кнопкою. */
+const LanguageAfterSaveId = 'language-after-save';
+
 export function AppLayout(): JSX.Element {
   const [opened, { toggle }] = useDisclosure();
   const session = useSession();
@@ -213,21 +217,46 @@ export function AppLayout(): JSX.Element {
 
       // ⛔ AN-39 / L8-17: доти - тиша: перемикач показував нову мову, сторінка лишалась
       // старою, і ніщо не пояснювало чому (зберегти не дала утримана відмовою правка).
-      notifications.show({ id: 'language-after-save', color: 'statusWarning', message: t('app.languageAfterSave') });
+      //
+      // ⛔ Рев'ю AN-39b P2-1: перемальовувати САМЕ, щойно незбереженого не лишилось, не можна -
+      // remount настав би посеред роботи (набране у відкритому редакторі наступної комірки й
+      // історія Undo зникли б: редактор не є джерелом незбереженого). Тому перемикає людина -
+      // кнопкою «Перемкнути зараз», коли сама готова.
+      notifications.show({
+        id: LanguageAfterSaveId,
+        color: 'statusWarning',
+        autoClose: false,
+        message: (
+          <Stack gap="xs" align="flex-start">
+            <Text size="sm">{t('app.languageAfterSave')}</Text>
+            <Button
+              size="compact-xs"
+              variant="light"
+              onClick={() => {
+                // Знову спершу зберегти: між тостом і кліком могло з'явитися нове набране.
+                void (hasUnsavedChanges() ? flushUnsaved() : Promise.resolve(true)).then((ok) => {
+                  if (!ok) return;
+                  notifications.hide(LanguageAfterSaveId);
+                  setPageLanguage(language());
+                });
+              }}
+            >
+              {t('app.languageSwitchNow')}
+            </Button>
+          </Stack>
+        ),
+      });
     });
-
-    // ⚠ Повтор: щойно незбереженого не лишилось (правку виправили чи скасували, автозбереження
-    // довезло), сторінка перемальовується мовою. Опитування, а не підписка: реєстр джерел
-    // (`shared/ui/unsavedSources`) підписки не має, а таймер живе лише поки remount заблоковано.
-    const retry = setInterval(() => {
-      if (live && !hasUnsavedChanges()) setPageLanguage(activeLanguage);
-    }, 1000);
 
     return () => {
       live = false;
-      clearInterval(retry);
     };
   }, [remountBlocked, activeLanguage]);
+
+  // Сторінка вже мовою перемикача (змінили мову ще раз, чи перемкнули кнопкою) - тост зайвий.
+  useEffect(() => {
+    if (pageLanguage === activeLanguage) notifications.hide(LanguageAfterSaveId);
+  }, [pageLanguage, activeLanguage]);
 
   const me = session.data;
 
