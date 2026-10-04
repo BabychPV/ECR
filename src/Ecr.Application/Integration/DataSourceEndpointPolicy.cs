@@ -164,6 +164,14 @@ public static class DataSourceEndpointPolicy
             }
         }
 
+        // ⛔ Рев'ю an33d, P3-3: хост, який не розібрано (`np://169.254.169.254/pipe` → `//169…`,
+        // `np:\/169…` → порожній, `169。254。169。254` → не IP-літерал), раніше проходив мовчки.
+        // Білий список: непорожній ASCII-хост без `/`; порожній — лише локальний `.`.
+        if (builder is null ? !IsReadableSqlHost(connectionString) : HasUnreadableSqlClientHost(builder))
+        {
+            return EndpointVerdict.Malformed;
+        }
+
         foreach (var host in SqlClientHostsOf(connectionString) ?? [])
         {
             if (IsCloudMetadataName(host) || (IPAddress.TryParse(host, out var ip) && IsLinkLocal(ip)))
@@ -204,6 +212,48 @@ public static class DataSourceEndpointPolicy
         }
 
         return hosts;
+    }
+
+    /// <summary>Чи є серед ключів сервера (крім тих, що лише містять «Server»/«Host» в імені) нерозібраний хост.</summary>
+    private static bool HasUnreadableSqlClientHost(DbConnectionStringBuilder builder)
+    {
+        foreach (string key in builder.Keys)
+        {
+            var k = key.Replace(" ", string.Empty, StringComparison.Ordinal).ToUpperInvariant();
+
+            if (IsServerKey(key) && k is not ("SERVERCERTIFICATE" or "TRUSTSERVERCERTIFICATE" or "HOSTNAMEINCERTIFICATE")
+                && builder[key]?.ToString() is { Length: > 0 } value && !IsReadableSqlHost(value))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Хост розібрано: непорожній, лише ASCII, без <c>/</c> і керівних символів; порожній — лише локальний
+    /// <c>.</c> (<c>.\SQLEXPRESS</c>, <c>np:\\.\pipe\…</c>).
+    /// </summary>
+    private static bool IsReadableSqlHost(string value)
+    {
+        var raw = SqlHostCore(value).Trim();
+        var host = raw.TrimEnd('.');
+
+        if (host.Length == 0)
+        {
+            return raw == ".";
+        }
+
+        foreach (var c in host)
+        {
+            if (c == '/' || !char.IsAscii(c) || char.IsControl(c))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static bool IsPathSeparator(char c) => c is '\\' or '/';
@@ -327,6 +377,12 @@ public static class DataSourceEndpointPolicy
     {
         ArgumentNullException.ThrowIfNull(address);
 
+        return SqlHostCore(address).Trim().TrimEnd('.');
+    }
+
+    /// <summary><see cref="SqlHostOf"/> без зняття кінцевої крапки (щоб відрізнити локальний <c>.</c>).</summary>
+    private static string SqlHostCore(string address)
+    {
         // Лапки ODBC не знімає, але клієнт може; хост у лапках перевіряємо як без них.
         var s = address.Trim().Trim('{', '}', '"', '\'').Trim();
 
@@ -365,7 +421,7 @@ public static class DataSourceEndpointPolicy
             s = s[..colon];
         }
 
-        return s.Trim().TrimEnd('.');
+        return s;
     }
 
     private static readonly string[] ProtocolPrefixes = ["tcp:", "np:", "lpc:", "admin:"];

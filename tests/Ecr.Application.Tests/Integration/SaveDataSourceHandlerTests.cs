@@ -103,6 +103,23 @@ public sealed class SaveDataSourceHandlerTests
         Assert.Equal("endpoint", refused.Details!["field"]);
     }
 
+    /// <summary>Рев'ю an33d, P3-3: хост, який не розібрано, — відмова, а не мовчазний пропуск.</summary>
+    [Theory]
+    [InlineData("Server=np://169.254.169.254/pipe")]
+    [InlineData(@"Server=np:\/169.254.169.254\pipe\sql\query")]
+    [InlineData("Server=169\u3002254\u3002169\u3002254")]
+    [InlineData("Data Source=169\uFF0E254\uFF0E169\uFF0E254,1433")]
+    [InlineData("Server=flert;Failover Partner=//169.254.169.254")]
+    [InlineData("Server=,1433")]
+    [InlineData("169\u3002254\u3002169\u3002254")]
+    public async Task Create_Sql_нерозібраний_хост_422(string endpoint)
+    {
+        var refused = await TryCreate(endpoint, new FakeNetwork("10.0.0.5"));
+
+        Assert.NotNull(refused);
+        Assert.Equal("err.ECR-REQ-0422.dataSourceEndpointMalformed", refused.Details!["messageKey"]);
+    }
+
     [Fact]
     public async Task Create_Sql_запасна_адреса_теж_перевіряється()
     {
@@ -129,6 +146,11 @@ public sealed class SaveDataSourceHandlerTests
     [InlineData("Server=flert;Server Certificate=d:/certs/flert.cer")]
     [InlineData("Server=flert;Authentication=SqlPassword;User ID=svc")]
     [InlineData("Server=flert;Authentication=Sql Password;User ID=svc")]
+    [InlineData("Server=.;Integrated Security=true")]
+    [InlineData(@"Server=.\SQLEXPRESS;Integrated Security=true")]
+    [InlineData(@"Server=np:\\.\pipe\sql\query")]
+    [InlineData(@"Server=(localdb)\MSSQLLocalDB")]
+    [InlineData("Server=flert;Trust Server Certificate=true;Host Name In Certificate=*.corp.local")]
     public async Task Create_Sql_звичайний_рядок_з_єднання_проходить(string endpoint)
         => Assert.Null(await TryCreate(endpoint, new FakeNetwork("10.0.0.5")));
 
