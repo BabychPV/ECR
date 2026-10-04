@@ -54,10 +54,13 @@ export function EntryDrawer({ registry, row, fields, asOf, readOnly }: EntryDraw
   const [tab, setTab] = useState<string | null>('details');
   const asOfUtc = day === null ? null : endOfLocalDayUtc(day);
 
+  // ⛔ Точний фільтр `id`, а не `q: row.code`: `q` — підрядок коду, назви й текстових полів із
+  // лімітом, і короткий код (`N2`, `C1`) губився за 50 чужими рядками з меншим Id — шторка
+  // казала «запису ще не було», що неправда (L9-08).
   const past = useQuery({
-    queryKey: rowsKey(registry.code, asOf, row.code, asOfUtc),
+    queryKey: rowsKey(registry.code, asOf, `#${String(row.id)}`, asOfUtc),
     queryFn: () =>
-      getRegistryRows(registry.code, { ...(asOf ? { asOf } : {}), q: row.code, ...(asOfUtc ? { asOfUtc } : {}), limit: 50 }),
+      getRegistryRows(registry.code, { ...(asOf ? { asOf } : {}), ids: [row.id], ...(asOfUtc ? { asOfUtc } : {}), limit: 1 }),
     enabled: asOfUtc !== null,
   });
   const then = past.data?.items.find((item) => item.id === row.id);
