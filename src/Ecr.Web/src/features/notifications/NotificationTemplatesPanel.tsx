@@ -108,6 +108,20 @@ function TemplatesEditor(): JSX.Element {
     });
   }, [dirty]);
 
+  // ⛔ L9-33: закриття чи перезавантаження вкладки роутер не блокує — штатне питання браузера,
+  // лише поки є чернетка (як `RulesMatrixPanel`).
+  useEffect(() => {
+    if (!dirty) return undefined;
+
+    const warn = (event: BeforeUnloadEvent): void => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', warn);
+
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [dirty]);
+
   const save = useMutation({
     mutationFn: async (next: { subject: string | undefined; body: string | undefined }) => {
       // ⚠ Послідовно, а не паралельно: дві правки одного каталогу — дві версії `Revision`; порядок

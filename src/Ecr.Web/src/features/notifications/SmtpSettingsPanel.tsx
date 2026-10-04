@@ -20,6 +20,7 @@ import { EcrApiError } from '@/api/client';
 import { t } from '@/shared/i18n';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { showApiError, showDone } from '@/shared/ui/notify';
+import { registerUnsavedSource } from '@/shared/ui/unsavedSources';
 import {
   getSmtpSettings,
   saveSmtpSettings,
@@ -56,6 +57,34 @@ export function SmtpSettingsPanel(): JSX.Element {
   const [testTo, setTestTo] = useState('');
   const [passwordHint, setPasswordHint] = useState<string | null>(null);
   const passwordRef = useRef<HTMLInputElement>(null);
+
+  /*
+   * ⛔ L9-33: незбережена чернетка захищена так само, як матриця правил і шаблони: перехід
+   * маршрутом питає `UnsavedGuard` (джерело існує, лише поки є чернетка; `flush` немає — мовчазний
+   * `PUT` налаштувань пошти при переході неприйнятний), закриття вкладки — штатне питання браузера.
+   * Доти вихід зі сторінки мовчки губив введені хост, адресу й пароль.
+   */
+  const dirty = draft !== null;
+  useEffect(() => {
+    if (!dirty) return undefined;
+
+    return registerUnsavedSource('smtp-settings', {
+      hasUnsaved: () => true,
+      unsavedCount: () => 1,
+    });
+  }, [dirty]);
+  useEffect(() => {
+    if (!dirty) return undefined;
+
+    const warn = (event: BeforeUnloadEvent): void => {
+      event.preventDefault();
+      // Старі браузери показують питання лише за непорожнього `returnValue`.
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', warn);
+
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [dirty]);
 
   // ⚠ Відмова «введіть пароль ще раз» — фокус у поле пароля: тост зникає, а читач екрана
   // інакше не знає, ДЕ виправляти (поле вже має `aria-invalid` і опис помилки).
