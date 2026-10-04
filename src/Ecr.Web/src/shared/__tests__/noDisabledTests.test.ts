@@ -20,9 +20,17 @@ import { describe, it, expect } from 'vitest';
 const webRoot = path.resolve(process.cwd());
 
 // Збирається зі шматків, щоб текст сторожа не ловив сам себе.
-const Modifiers = ['sk' + 'ip', 'on' + 'ly', 'to' + 'do', 'fix' + 'me'].join('|');
+const Skip = 'sk' + 'ip';
+const Modifiers = [Skip, 'on' + 'ly', 'to' + 'do', 'fix' + 'me', Skip + 'If', 'run' + 'If'].join('|');
+/*
+ * Ланцюжок будь-якої довжини з пробілами й переносами між ланками: `it.skip.each(...)`,
+ * `it.concurrent.skip(...)`, `test.describe.parallel.skip(...)`, `it\n  .skip(...)`.
+ * `skipIf`/`runIf` заборонені цілком: умовний пропуск поза Playwright не потрібен, а
+ * `skipIf(true)` — безумовний. Плюс префікси `xit`/`fit` у стилі Jasmine.
+ */
 const Disabled = new RegExp(
-  String.raw`\b(it|test|describe)(?:\.describe)?\.(${Modifiers})\s*\(\s*(\S?)`,
+  String.raw`\b(it|test|describe|bench)((?:\s*\.\s*[A-Za-z_$][\w$]*)*?)\s*\.\s*(${Modifiers})\b` +
+    String.raw`|\b(x(?:it|test|describe)|f(?:it|describe))\s*\(`,
   'g',
 );
 
@@ -31,30 +39,101 @@ interface DisabledTest {
   readonly text: string;
 }
 
-/** Порушення в тексті одного файлу; `e2e` — правила Playwright (умовний skip дозволено). */
-function findDisabledTests(source: string, e2e: boolean): DisabledTest[] {
-  const found: DisabledTest[] = [];
-  source.split('\n').forEach((raw, index) => {
-    const trimmed = raw.trim();
-    // Коментарі лише ЗГАДУЮТЬ `test.skip` — це не виклик.
-    if (trimmed.startsWith('//') || trimmed.startsWith('*') || trimmed.startsWith('/*')) return;
-    for (const match of raw.matchAll(Disabled)) {
-      const modifier = match[2];
-      const firstChar = match[3] ?? '';
-      // Порожній перший аргумент у рядку — умова на наступному рядку (так пише Playwright-код тут).
-      const titled = firstChar === '' ? nextArgIsTitle(source, index) : /['"`]/.test(firstChar);
-      const conditionalSkip = e2e && modifier === Modifiers.split('|')[0] && !titled;
-      if (!conditionalSkip) found.push({ line: index + 1, text: trimmed });
-    }
-  });
+/** Коментарі й вміст рядкових літералів — пробіли (переноси лишаються, номери рядків не зсуваються). */
+function blankComments(source: string): string {
+  let out = '';
+  let i = 0;
+  while (i < source.length) {
+    const c = source[i];
+    const next = source[i + 1];
+    if (c === '/' && next === '/') {
+      while (i < source.length && source[i] !== '\n') { out += ' '; i++; }
+    } else if (c === '/' && next === '*') {
+      const close = source.indexOf('*/', i + 2);
+      const stop = close < 0 ? source.length : close + 2;
+      out += source.slice(i, stop).replace(/[^\n]/g, ' ');
+      i = stop;
+    } else if (c === '"' || c === "'" || c === '`') {
+      // Лапки лишаються (по них e2e відрізняє назву від умови), вміст — пробіли.
+      const stop = stringEnd(source, i);
+      out += c + source.slice(i + 1, stop - 1).replace(/[^\n]/g, ' ') + source.slice(stop - 1, stop);
+      i = stop;
+    } else { out += c; i++; }
+  }
 
-  return found;
+  return out;
 }
 
-function nextArgIsTitle(source: string, index: number): boolean {
-  const next = source.split('\n').slice(index + 1).find((l) => l.trim() !== '');
+/** Індекс одразу за рядковим літералом, що починається на `start` (вкладені `${}` шаблону — без розбору). */
+function stringEnd(source: string, start: number): number {
+  const quote = source[start];
+  let i = start + 1;
+  while (i < source.length && source[i] !== quote) {
+    if (source[i] === '\\') i++;
+    else if (source[i] === '\n' && quote !== '`') break;
+    i++;
+  }
 
-  return next !== undefined && /^['"`]/.test(next.trim());
+  return i + 1;
+}
+
+/** Аргументи виклику верхнього рівня, починаючи з `(` на `open`; `undefined` — дужки немає. */
+function callArgs(source: string, open: number): string[] | undefined {
+  if (source[open] !== '(') return undefined;
+  const args: string[] = [];
+  let depth = 0;
+  let current = '';
+  let i = open + 1;
+  while (i < source.length) {
+    const c = source[i];
+    if (c === '"' || c === "'" || c === '`') {
+      const stop = stringEnd(source, i);
+      current += source.slice(i, stop);
+      i = stop;
+      continue;
+    }
+    if (c === '(' || c === '[' || c === '{') depth++;
+    if (c === ')' || c === ']' || c === '}') {
+      if (depth === 0) break;
+      depth--;
+    }
+    if (c === ',' && depth === 0) { args.push(current.trim()); current = ''; }
+    else current += c;
+    i++;
+  }
+  if (current.trim() !== '') args.push(current.trim());
+
+  return args;
+}
+
+/*
+ * Єдина дозволена форма в e2e/: `test.skip(<умова>, 'причина')` Playwright — рівно два
+ * аргументи, перший — вираз (не літерал рядка і не `true`). `test.skip()` і
+ * `test.skip(true, …)` — безумовне вимкнення, `test.skip('назва', …)` — вимкнений тест.
+ */
+function isConditionalPlaywrightSkip(code: string, match: RegExpMatchArray): boolean {
+  if (match[1] !== 'test' || match[2] !== '' || match[3] !== Skip) return false;
+  const after = (match.index ?? 0) + match[0].length;
+  const open = after + (code.slice(after).length - code.slice(after).trimStart().length);
+  const args = callArgs(code, open);
+  if (args === undefined || args.length !== 2) return false;
+  const condition = args[0] ?? '';
+
+  return condition !== '' && condition !== 'true' && !/^['"`]/.test(condition);
+}
+
+/** Порушення в тексті одного файлу; `e2e` — правила Playwright (умовний skip дозволено). */
+function findDisabledTests(source: string, e2e: boolean): DisabledTest[] {
+  const code = blankComments(source);
+  const lines = source.split('\n');
+  const found: DisabledTest[] = [];
+  for (const match of code.matchAll(Disabled)) {
+    if (e2e && isConditionalPlaywrightSkip(code, match)) continue;
+    const line = code.slice(0, match.index).split('\n').length;
+    found.push({ line, text: (lines[line - 1] ?? '').trim() });
+  }
+
+  return found;
 }
 
 function sourceFiles(dir: string): string[] {
@@ -87,6 +166,19 @@ describe('L10-11 — вимкнений тест у клієнті не прох
     [`test.${'fix' + 'me'}(true, 'причина');`, true],
     [`test.${'sk' + 'ip'}('назва', async () => {});`, true],
     [`test.${'sk' + 'ip'}(\n  'назва',\n  async () => {},\n);`, true],
+    // L10-11, рев'ю 04.10: п'ять форм, які проходили повз сторож.
+    [`it.${'sk' + 'ip'}.each([1, 2])('рахує %i', () => {});`, false],
+    [`test.${'on' + 'ly'}.each([1])('рахує %i', () => {});`, false],
+    [`it.${'sk' + 'ip'}If(true)('рахує', () => {});`, false],
+    [`it.${'run' + 'If'}(false)('рахує', () => {});`, false],
+    [`it.concurrent.${'sk' + 'ip'}('рахує', async () => {});`, false],
+    [`describe.sequential.${'sk' + 'ip'}('блок', () => {});`, false],
+    [`test.describe.parallel.${'sk' + 'ip'}('e2e блок', () => {});`, true],
+    [`it\n  .${'sk' + 'ip'}('рахує', () => {});`, false],
+    [`test('сценарій', async () => {\n  test.${'sk' + 'ip'}();\n});`, true],
+    [`test.${'sk' + 'ip'}(true, 'причина');`, true],
+    [`test.${'sk' + 'ip'}(PeriodKey === '');`, true],
+    [`x${'it'}('рахує', () => {});`, false],
   ])('ловить %j', (code, e2e) => {
     expect(findDisabledTests(code, e2e)).toHaveLength(1);
   });
@@ -95,7 +187,8 @@ describe('L10-11 — вимкнений тест у клієнті не прох
     [`test.${'sk' + 'ip'}(PeriodKey === '', 'ECR_E2E_OPTIONAL: стенда немає.');`],
     [`test.${'sk' + 'ip'}(\n  PeriodKey === '' || DocumentId === '',\n  'ECR_E2E_OPTIONAL',\n);`],
     [`// Той самий гейт, що й у \`test.${'sk' + 'ip'}\` вище`],
-    [` * через \`test.${'sk' + 'ip'}\`, і відсутність стенда`],
+    [`/**\n * через \`test.${'sk' + 'ip'}\`, і відсутність стенда\n */`],
+    [`const hint = 'див. test.${'sk' + 'ip'}(...)';`],
   ])('умовний skip Playwright і коментар у e2e — дозволені: %j', (code) => {
     expect(findDisabledTests(code, true)).toEqual([]);
   });
