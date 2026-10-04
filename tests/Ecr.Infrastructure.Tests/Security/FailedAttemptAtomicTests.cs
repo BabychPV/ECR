@@ -162,6 +162,59 @@ public sealed class FailedAttemptAtomicTests(SqlServerFixture sql)
         Assert.Equal(User.AdministrativeLockUntil, outcome.LockedUntil);
     }
 
+    /// <summary>
+    /// L1-03: правильний пароль, що перевіряється ПОКИ паралельні хибні спроби ставлять блокування, не дає входу.
+    /// </summary>
+    /// <remarks>
+    /// Сценарій: обробник прочитав незаблокований запис і стоїть у Verify (хешер тримає виклик); у цей час поріг
+    /// наставав (хибні спроби). Раніше успіх записував сутність через EF і знімав блокування — вхід проходив
+    /// (cookie після блокування). Тепер — один UPDATE з умовою, 0 рядків → 423 <c>ECR-AUTH-0423</c>, блокування
+    /// лишається, успішної спроби в журналі немає.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-6.4a")]
+    public async Task L1_03_правильний_пароль_під_час_блокування_паралельними_спробами_не_дає_входу()
+    {
+        const int Max = 3;
+        var name = await ArrangeUserAsync(maxFailedAttempts: Max).ConfigureAwait(true);
+        var userId = await UserIdAsync(name).ConfigureAwait(true);
+
+        using var inVerify = new ManualResetEventSlim(false);
+        using var release = new ManualResetEventSlim(false);
+
+        var correct = Task.Run(async () =>
+        {
+            await using var db = Context();
+            var handler = new LoginHandler(
+                new UserStore(db), new GatedAcceptingHasher(inVerify, release), new UnitOfWork(db), new FixedClock(),
+                NullLogger<LoginHandler>.Instance);
+
+            return await Assert.ThrowsAsync<BusinessRuleException>(
+                () => handler.HandleAsync(name, "right-password", "10.0.0.2", CancellationToken.None));
+        });
+
+        inVerify.Wait(TimeSpan.FromSeconds(30));
+
+        // Пачка підбору ставить блокування, поки правильний пароль «перевіряється».
+        for (var i = 0; i < Max; i++)
+        {
+            await using var db = Context();
+            await new UserStore(db).RegisterFailedAttemptAsync(userId, Max, 15, Now, CancellationToken.None).ConfigureAwait(true);
+        }
+
+        release.Set();
+        var refusal = await correct.ConfigureAwait(true);
+        Assert.Equal("ECR-AUTH-0423", refusal.ErrorCode);
+
+        await using var check = Context();
+        var row = await check.Users.AsNoTracking().SingleAsync(u => u.Id == userId).ConfigureAwait(true);
+        Assert.True(row.IsLockedOut(Now), "блокування знято успішним входом");
+        Assert.Equal(Max, row.FailedAttempts);
+        Assert.False(await check.LoginAttempts.AnyAsync(a => a.UserName == name && a.IsSuccess).ConfigureAwait(true));
+    }
+
     private async Task<int> UserIdAsync(string name)
     {
         await using var db = Context();
@@ -204,6 +257,21 @@ public sealed class FailedAttemptAtomicTests(SqlServerFixture sql)
         public string Hash(string password) => "decoy";
 
         public bool Verify(string password, string hash) => false;
+
+        public bool NeedsRehash(string hash) => false;
+    }
+
+    /// <summary>Хешер, що приймає будь-який пароль, але спершу сигналить і чекає дозволу (тримає Verify).</summary>
+    private sealed class GatedAcceptingHasher(ManualResetEventSlim entered, ManualResetEventSlim release) : IPasswordHasher
+    {
+        public string Hash(string password) => "decoy";
+
+        public bool Verify(string password, string hash)
+        {
+            entered.Set();
+            release.Wait(TimeSpan.FromSeconds(30));
+            return true;
+        }
 
         public bool NeedsRehash(string hash) => false;
     }

@@ -636,6 +636,19 @@ public sealed class FakeUserStore : IUserStore
         return Task.FromResult(new FailedAttemptOutcome(user.FailedAttempts, user.LockedUntil, locked));
     }
 
+    /// <inheritdoc />
+    public Task<bool> TryRegisterSuccessfulLoginAsync(int userId, DateTime utcNow, CancellationToken ct)
+    {
+        var user = _users.Find(u => u.Id == userId);
+        if (user is null || user.IsLockedOut(utcNow))
+        {
+            return Task.FromResult(false);
+        }
+
+        user.RegisterSuccessfulLogin(utcNow);
+        return Task.FromResult(true);
+    }
+
     /// <summary>Активний доменний користувач для сценаріїв входу.</summary>
     /// <param name="userName">Ім'я входу.</param>
     /// <param name="sid">SID у каталозі.</param>

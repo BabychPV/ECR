@@ -937,6 +937,30 @@ public sealed class UserStore(EcrDbContext db, SelfStampRotation? selfRotation =
         }
     }
 
+    /// <inheritdoc />
+    public async Task<bool> TryRegisterSuccessfulLoginAsync(int userId, DateTime utcNow, CancellationToken ct)
+    {
+        await db.Database.OpenConnectionAsync(ct).ConfigureAwait(false);
+        try
+        {
+            await using var command = db.Database.GetDbConnection().CreateCommand();
+            command.Transaction = db.Database.CurrentTransaction?.GetDbTransaction();
+            command.CommandText = """
+                UPDATE sec.[User]
+                SET FailedAttempts = 0, LockedUntil = NULL, LastSignInAt = @now
+                WHERE Id = @id AND (LockedUntil IS NULL OR LockedUntil <= @now);
+                """;
+            Add(command, "@id", System.Data.DbType.Int32, userId);
+            Add(command, "@now", System.Data.DbType.DateTime2, utcNow);
+
+            return await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false) > 0;
+        }
+        finally
+        {
+            await db.Database.CloseConnectionAsync().ConfigureAwait(false);
+        }
+    }
+
     /// <summary>Типізований параметр команди.</summary>
     private static void Add(System.Data.Common.DbCommand command, string name, System.Data.DbType type, object value)
     {

@@ -134,7 +134,15 @@ public sealed partial class LoginHandler(
             throw InvalidCredentials();
         }
 
-        user.RegisterSuccessfulLogin(now);
+        // ⛔ L1-03: успіх фіксується ОДНИМ UPDATE з умовою «не заблоковано». Сутність `user` прочитано до паралельних
+        // хибних спроб; її запис через EF знімав виставлене ними блокування, і правильний пароль з пачки підбору
+        // отримував cookie після блокування. 0 рядків — запис заблоковано (чи зник): відмова як на заблокований.
+        if (!await users.TryRegisterSuccessfulLoginAsync(user.Id, now, ct).ConfigureAwait(false))
+        {
+            await FailAsync(userName, "LockedOut", ipAddress, now, ct).ConfigureAwait(false);
+            throw Locked(user);
+        }
+
         users.RecordAttempt(new LoginAttempt(userName, AuthProvider.Local, true, now, ipAddress));
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
 
