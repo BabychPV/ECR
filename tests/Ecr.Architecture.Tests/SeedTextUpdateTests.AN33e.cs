@@ -26,4 +26,18 @@ public sealed partial class SeedTextUpdateTests
             Assert.Contains("Server SPN", value, StringComparison.Ordinal);
         }
     }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void AN33e_kz_обрізані_події_видалення_пропущено_а_не_проведено()
+    {
+        // ⛔ «жою өткізілді» означає «видалення проведено» — протилежне до en/ru («removal … was skipped»,
+        // «удаление … пропущено»). Адміністратор вирішив би, що зниклі події вже прибрано.
+        var catalog = Catalog();
+
+        Assert.True(catalog.TryGetValue(("coverageEvents.eventsTruncated", "kz"), out var value));
+        Assert.DoesNotContain("жою өткізілді", value, StringComparison.Ordinal);
+        Assert.Contains("жою өткізіп жіберілді", value, StringComparison.Ordinal);
+    }
 }
