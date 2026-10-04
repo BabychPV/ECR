@@ -431,6 +431,11 @@ public sealed partial class JobWorker(
         }
         finally
         {
+            // ⛔ Сторож зависання — лише на час ExecuteAsync. Спрацювання під час фіксації
+            // результату нижче кинуло б оренду й (дочірній) завершило процес посеред
+            // запису: задачу виконали б удруге. Dispose реєстрації дочікується колбеку,
+            // що вже біжить, тож після нього Abandoned більше не зміниться.
+            await hangHook.DisposeAsync().ConfigureAwait(false);
             await renewStop.CancelAsync().ConfigureAwait(false);
             await renew.ConfigureAwait(false);
         }

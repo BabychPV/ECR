@@ -57,6 +57,32 @@ public sealed class JobWorkerSettleTests(SqlServerFixture sql) : DbJobQueueTests
         Assert.Contains("DI", row.Error, StringComparison.Ordinal);
     }
 
+    [Fact]
+    [Trait("Finding", "L2-03")]
+    public async Task Сторож_зависання_не_спрацьовує_під_час_фіксації_результату()
+    {
+        var probe = new WorkerProbe();
+        var faults = new QueueFaults { CompleteDelay = TimeSpan.FromMilliseconds(1500) };
+        var hung = 0;
+        await using var host = await StartHostAsync(probe, faults, options => options with
+        {
+            MaxDuration = TimeSpan.FromMilliseconds(300),
+            HangGrace = TimeSpan.FromMilliseconds(300),
+            OnHang = () => Interlocked.Increment(ref hung),
+        });
+
+        // Задача повертається одразу; фіксація триває довше за MaxDuration + HangGrace.
+        var jobId = await EnqueueJobAsync<WorkerProbeJob>(host, new { n = 1 });
+
+        var row = await WaitForStateAsync(jobId, "Succeeded");
+
+        // ⛔ Без зняття сторожа після ExecuteAsync він спрацьовував посеред Complete:
+        // дочірній вийшов би до коміту, і задачу виконав би наступний процес.
+        Assert.Equal(0, Volatile.Read(ref hung));
+        Assert.Single(probe.Runs);
+        Assert.Equal(0, row.ReclaimCount ?? 0);
+    }
+
     private static async Task<string> EnqueueJobAsync<TJob>(ServiceProvider host, object payload)
         where TJob : IBackgroundJob
     {
@@ -82,7 +108,8 @@ public sealed class JobWorkerSettleTests(SqlServerFixture sql) : DbJobQueueTests
         }
     }
 
-    private async Task<WorkerHost> StartHostAsync(WorkerProbe probe, QueueFaults faults)
+    private async Task<WorkerHost> StartHostAsync(
+        WorkerProbe probe, QueueFaults faults, Func<JobWorkerOptions, JobWorkerOptions>? configure = null)
     {
         var services = new ServiceCollection();
         services.AddScoped(_ => Sql.CreateContext());
@@ -102,9 +129,7 @@ public sealed class JobWorkerSettleTests(SqlServerFixture sql) : DbJobQueueTests
         services.AddScoped<WorkerUnresolvableJob>();
         var provider = services.BuildServiceProvider();
 
-        var worker = new JobWorker(
-            provider.GetRequiredService<IServiceScopeFactory>(),
-            new JobWorkerOptions
+        var options = new JobWorkerOptions
             {
                 Lanes = JobLanes.All,
                 Role = JobProgressStore.CurrentRole,
@@ -112,7 +137,10 @@ public sealed class JobWorkerSettleTests(SqlServerFixture sql) : DbJobQueueTests
                 RenewInterval = TimeSpan.FromMilliseconds(100),
                 RetryDelay = n => TimeSpan.FromMilliseconds(50 * n),
                 SettleRetryDelay = _ => TimeSpan.FromMilliseconds(50),
-            },
+            };
+        var worker = new JobWorker(
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            configure?.Invoke(options) ?? options,
             provider.GetRequiredService<JobQueueSignal>(),
             NullLogger<JobWorker>.Instance);
 
@@ -141,6 +169,9 @@ public sealed class JobWorkerSettleTests(SqlServerFixture sql) : DbJobQueueTests
 
         public int CompleteFailures { get; init; }
 
+        /// <summary>Затримка перед кожною фіксацією Complete — «повільний коміт».</summary>
+        public TimeSpan CompleteDelay { get; init; }
+
         public int CompleteCalls => Volatile.Read(ref completeCalls);
 
         public bool NextCompleteFails() => Interlocked.Increment(ref completeCalls) <= CompleteFailures;
@@ -163,10 +194,20 @@ public sealed class JobWorkerSettleTests(SqlServerFixture sql) : DbJobQueueTests
 
         public Task<bool> FenceAsync(JobClaimToken claim, CancellationToken ct) => inner.FenceAsync(claim, ct);
 
-        public Task<bool> CompleteAsync(JobClaimToken claim, CancellationToken ct)
-            => faults.NextCompleteFails()
-                ? throw new TransientDbException("A transport-level error has occurred.")
-                : inner.CompleteAsync(claim, ct);
+        public async Task<bool> CompleteAsync(JobClaimToken claim, CancellationToken ct)
+        {
+            if (faults.NextCompleteFails())
+            {
+                throw new TransientDbException("A transport-level error has occurred.");
+            }
+
+            if (faults.CompleteDelay > TimeSpan.Zero)
+            {
+                await Task.Delay(faults.CompleteDelay, ct).ConfigureAwait(false);
+            }
+
+            return await inner.CompleteAsync(claim, ct).ConfigureAwait(false);
+        }
 
         public Task<bool> FailAsync(JobClaimToken claim, string reason, string? errorCode, CancellationToken ct)
             => inner.FailAsync(claim, reason, errorCode, ct);
