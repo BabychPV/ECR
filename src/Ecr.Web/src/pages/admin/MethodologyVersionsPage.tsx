@@ -300,8 +300,7 @@ export function MethodologyVersionsPage(): JSX.Element {
       publishMethodologyVersion(methodologyId, publishing?.versionId ?? 0, {
         changeReason: publishReason,
         // ⚠ `date`, не `Date`: `toISOString()` іде через UTC і ввечері
-        // зсуває дату на добу назад (той самий застережний коментар, що й у
-        // `MethodologiesPage.tsx`).
+        // зсуває дату на добу назад.
         effectiveFrom: publishEffectiveFrom,
       } satisfies PublishMethodologyRequest),
     onSuccess: async (diff) => {
@@ -435,11 +434,11 @@ export function MethodologyVersionsPage(): JSX.Element {
                         {t('methodologies.openVersion')}
                       </Button>
 
-                      {/* ⛔ Публікація — тут, а не лише на переліку методологій
-                          (`MethodologiesPage.tsx`): той екран не показує жодної
-                          з панелей, якими version доводять до готовності
-                          (формули, константи, золотий набір), тож кнопка на
-                          ньому дає публікувати те, чого автор щойно не бачив. */}
+                      {/* ⛔ Публікація — ЛИШЕ тут (L9-43: мертву копію з переліку
+                          `MethodologiesPage.tsx` прибрано — він показує тільки
+                          опубліковані версії). Перелік не показує жодної з
+                          панелей, якими версію доводять до готовності (формули,
+                          константи, золотий набір). */}
                       {version.status !== 'Published' && mayPublish && (
                         <Button
                           size="compact-xs"
@@ -941,8 +940,7 @@ export function MethodologyVersionsPage(): JSX.Element {
       </Modal>
 
       {/*
-       * ⛔ Причина й дата — той самий патерн, що й публікація зі списку
-       * методологій (`MethodologiesPage.tsx`) і публікація версії шаблону
+       * ⛔ Причина й дата — той самий патерн, що й публікація версії шаблону
        * (`TemplateVersionPage.tsx`, `ReasonModal`): обидва поля обов'язкові на
        * сервері (`ECR-CALC-0422`, ФВ-14.7), і кнопка тут вимкнена, доки вони
        * порожні — не з ввічливості, а щоб не вести на гарантовану відмову.
@@ -987,9 +985,8 @@ export function MethodologyVersionsPage(): JSX.Element {
 
       {/*
        * ⛔ Diff РЕЗУЛЬТАТІВ, не тексту формул (ФВ-9.6): змінений рядок виразу
-       * не каже нічого, змінена на 4 % емісія каже все. Той самий вигляд, що
-       * й на `MethodologiesPage.tsx` — друга розбіжна відповідь на «що
-       * показати після публікації» була б гіршою за одну спільну.
+       * не каже нічого, змінена на 4 % емісія каже все. Єдине місце, де
+       * методологію публікують, — і єдиний показ diff після публікації (L9-43).
        */}
       <Modal
         opened={publishDiff !== null}

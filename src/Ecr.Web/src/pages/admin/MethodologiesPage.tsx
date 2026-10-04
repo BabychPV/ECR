@@ -11,7 +11,6 @@ import {
   Table,
   Text,
   TextInput,
-  Textarea,
 } from '@mantine/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
@@ -20,14 +19,11 @@ import { queryKeys } from '@/api/queryKeys';
 import type {
   MethodologyDto,
   MethodologyKind,
-  MethodologyPublicationDiff,
-  PublishMethodologyRequest,
   SimulateMethodologyRequest,
   SimulationResultDto,
 } from '@/api/types';
 import { createMethodology } from '@/features/methodologies/api';
 import { MethodologyPackageImport } from '@/features/methodologies/MethodologyPackageImport';
-import { showPublishError } from '@/features/methodologies/publishError';
 import { localized } from '@/shared/i18n/localized';
 import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
@@ -39,36 +35,20 @@ import { t } from '@/shared/i18n';
 import { usePendingLoading } from '@/features/common/usePendingLoading';
 
 /**
- * Конфігуратор методологій: версії, публікація, симуляція.
+ * Перелік методологій: заведення, імпорт пакета, прогін без запису й вхід у
+ * конфігуратор версій.
  *
- * ⛔ Публікація потребує **причини**, **дати набуття чинності** і **зеленого
- * тесту** (ФВ-9.12), а автор останньої правки опублікувати не може (D-40).
- * Форма вимагає причини не з ввічливості: без неї журнал змін методології
- * показує «щось змінилося», і через рік ніхто не пояснить, чому число за
- * минулий рік перерахувалося.
- *
- * ⛔ Поле дати з'явилося після `A7-11`. Діалог збирав саму лише причину, а
- * сервер відхиляє публікацію без дати (`ECR-CALC-0422`) ПЕРШОЮ ж перевіркою —
- * тобто кнопка «Опублікувати» не спрацьовувала жодного разу. Дата не має
- * значення за замовчуванням саме тому, що вона визначає, ЯКІ ПЕРІОДИ
- * перерахуються: підставити «сьогодні» мовчки означало б обрати межу
- * перерахунку за користувача.
+ * ⛔ L9-43: публікації тут БІЛЬШЕ НЕМАЄ — і це не втрата. Перелік за побудовою
+ * містить лише ОПУБЛІКОВАНІ версії (`ListMethodologiesHandler.Map` відкидає
+ * решту), тож кнопка «Опублікувати» з умовою `status !== 'Published'` не
+ * з'являлась ніколи, а з нею мертвими були діалог причини/дати, мутація й
+ * діалог diff. Публікація з причиною, датою чинності й diff результатів живе
+ * на екрані версій (`MethodologyVersionsPage.tsx`) — там, де версію доводять
+ * до готовності.
  */
 export function MethodologiesPage(): JSX.Element {
   const queryClient = useQueryClient();
   const session = useSession();
-  const [publishing, setPublishing] = useState<{ id: number; versionId: number } | null>(null);
-  const [reason, setReason] = useState('');
-  const [effectiveFrom, setEffectiveFrom] = useState('');
-
-  // ⛔ Diff публікації БІЛЬШЕ НЕ ВИКИДАЄТЬСЯ. Сервер віддає його рівно тому, що
-  // публікація — найнебезпечніша операція системи: вона змінює числа, які вже
-  // подані регуляторові (`ФВ-9.6`). Клієнт мовчки ковтав відповідь, тож той,
-  // хто щойно натиснув кнопку, не бачив ані зміни режиму, ані розбіжностей на
-  // золотому наборі, ані попереджень публікації — тобто саме те, заради чого
-  // diff і рахується.
-  const [diff, setDiff] = useState<MethodologyPublicationDiff | null>(null);
-
   // Заведення методології з нуля: доти ідентифікатор методології не було
   // звідки взяти взагалі, і конфігуратор версій працював лише над тим, що
   // завіз офлайновий генератор тестових даних.
@@ -109,35 +89,6 @@ export function MethodologiesPage(): JSX.Element {
 
   // ⚠ `ФВ-14.26`: спінер на кнопці — лише після 100 мс дії, не з першого кадру.
   const createLoading = usePendingLoading(create.isPending);
-
-  const publish = useMutation({
-    mutationFn: (target: { id: number; versionId: number; reason: string; from: string }) =>
-      apiFetch<MethodologyPublicationDiff>(`/api/v1/methodologies/${target.id}/versions/${target.versionId}/publish`, {
-        method: 'POST',
-        body: JSON.stringify({
-          changeReason: target.reason,
-          // ⚠ `date` дає рівно `YYYY-MM-DD` — форму `DateOnly` сервера. Через
-          // `Date` тут проходити не можна: `toISOString()` переводить у UTC і
-          // ввечері зсуває дату на добу назад.
-          effectiveFrom: target.from,
-        } satisfies PublishMethodologyRequest),
-      }),
-    onSuccess: async (published) => {
-      await queryClient.invalidateQueries({ queryKey: queryKeys.methodologies.list() });
-      setPublishing(null);
-      setReason('');
-      setEffectiveFrom('');
-
-      // ⚠ Diff показується ПІСЛЯ публікації, а не замість неї: перед нею те
-      // саме питання відповідає прогін без запису (`ФВ-13.5`, кнопка поруч).
-      // Тут — звіт про те, що щойно змінилося в числах.
-      setDiff(published);
-      showDone(t('methodologies.published'));
-    },
-    onError: showPublishError,
-  });
-
-  const publishLoading = usePendingLoading(publish.isPending);
 
   /**
    * Прогін методології без запису (`ФВ-13.5`).
@@ -278,18 +229,6 @@ export function MethodologiesPage(): JSX.Element {
                           </Button>
                         )}
 
-                        {version.status !== 'Published' &&
-                          can(session.data, 'Calculation.Publish') && (
-                            <Button
-                              size="compact-xs"
-                              variant="default"
-                              onClick={() =>
-                                setPublishing({ id: methodology.id, versionId: version.id })
-                              }
-                            >
-                              {t('methodologies.publish')}
-                            </Button>
-                          )}
                       </Group>
                     ))}
                   </Group>
@@ -357,103 +296,6 @@ export function MethodologiesPage(): JSX.Element {
             {t('methodologies.create')}
           </Button>
         </Stack>
-      </Modal>
-
-      <Modal
-        opened={diff !== null}
-        onClose={() => setDiff(null)}
-        title={t('methodologies.diffTitle')}
-        size="lg"
-      >
-        {diff !== null && (
-          <Stack gap="sm">
-            {/* ⛔ Обидва режими — обов'язково (`D-78`): їх зміна не видна в
-                жодному рядку формули, а числа змінюються всі — 3.3 % між Actual і
-                Fixed360 на тих самих даних. */}
-            <Text size="sm">
-              {t('methodologies.diffNumeric')}: {diff.numeric.before} → {diff.numeric.after}
-            </Text>
-            <Text size="sm">
-              {t('methodologies.diffCalendar')}: {diff.calendar.before} → {diff.calendar.after}
-            </Text>
-
-            <Text fw={600}>{t('methodologies.diffChanges')}</Text>
-            {diff.changes.length === 0 ? (
-              <Text size="sm" c="dimmed">
-                {t('methodologies.diffNone')}
-              </Text>
-            ) : (
-              <Table striped withTableBorder>
-                <Table.Thead>
-                  <Table.Tr>
-                    <Table.Th>{t('methodologies.testCode')}</Table.Th>
-                    <Table.Th>{t('methodologies.output')}</Table.Th>
-                    <Table.Th>{t('methodologies.before')}</Table.Th>
-                    <Table.Th>{t('methodologies.after')}</Table.Th>
-                  </Table.Tr>
-                </Table.Thead>
-                <Table.Tbody>
-                  {diff.changes.map((change) => (
-                    <Table.Tr key={`${change.testCode}:${change.outputCode}:${String(change.substanceEntryId)}`}>
-                      <Table.Td>{change.testCode}</Table.Td>
-                      <Table.Td>{change.outputCode}</Table.Td>
-                      <Table.Td>{change.before ?? '—'}</Table.Td>
-                      <Table.Td>{change.after}</Table.Td>
-                    </Table.Tr>
-                  ))}
-                </Table.Tbody>
-              </Table>
-            )}
-
-            {/* ⚠ Попередження не валять публікацію, але й мовчати про них
-                не можна: оголошений і невжитий аргумент найчастіше означає
-                описку в імені токена. */}
-            {(diff.warnings ?? []).length > 0 && (
-              <>
-                <Text fw={600}>{t('methodologies.warnings')}</Text>
-                <Code block>{(diff.warnings ?? []).join('\n')}</Code>
-              </>
-            )}
-          </Stack>
-        )}
-      </Modal>
-
-      <Modal
-        opened={publishing !== null}
-        onClose={() => setPublishing(null)}
-        title={t('methodologies.publishTitle')}
-      >
-        <Textarea
-          label={t('methodologies.reason')}
-          description={t('methodologies.reasonHint')}
-          value={reason}
-          onChange={(event) => setReason(event.currentTarget.value)}
-          minRows={3}
-          autosize
-        />
-
-        <TextInput
-          mt="sm"
-          // eslint-disable-next-line no-restricted-syntax -- D15-09, борг №7/8: перехід на DateInput змінює тип значення (string → Date), тому окремим PR; список боргу сторожить lintRules.test.ts
-          type="date"
-          label={t('methodologies.effectiveFrom')}
-          description={t('methodologies.effectiveFromHint')}
-          value={effectiveFrom}
-          onChange={(event) => setEffectiveFrom(event.currentTarget.value)}
-        />
-
-        <Button
-          mt="md"
-          disabled={reason.trim().length === 0 || effectiveFrom.length === 0}
-          loading={publishLoading}
-          onClick={() => {
-            if (publishing !== null) {
-              publish.mutate({ ...publishing, reason, from: effectiveFrom });
-            }
-          }}
-        >
-          {t('methodologies.publish')}
-        </Button>
       </Modal>
 
       <Modal
