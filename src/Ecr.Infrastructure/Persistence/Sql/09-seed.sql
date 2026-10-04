@@ -6558,7 +6558,8 @@ USING (VALUES
     -- COLL:cl5 ── кінець секції ──
     -- COLL:an39b ── хвіст сітки після AN-39 (AN-28 P2-1/P2-2, L8-11/17/20); ru/kz — власна порція нижче ──
     (N'document.heldEditBlocksAction', N'en', N'A change in the highlighted cell was rejected, so the action was not performed. Fix or undo it and try again.', 1),
-    (N'document.unsavedNotIncluded', N'en', N'Some changes in the grid are not saved and are not included: the action uses the last saved values.', 1)
+    (N'document.unsavedNotIncluded', N'en', N'Some changes in the grid are not saved and are not included: the action uses the last saved values.', 1),
+    (N'app.languageAfterSave', N'en', N'The page will switch to the new language once the unsaved changes are saved or undone.', 1)
     -- COLL:an39b ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
@@ -15436,7 +15437,9 @@ SELECT v.[Key], v.Lang, v.Val
     (N'document.heldEditBlocksAction', N'ru', N'Изменение в подсвеченной ячейке отклонено, поэтому действие не выполнено. Исправьте или отмените его и повторите.'),
     (N'document.heldEditBlocksAction', N'kz', N'Белгіленген ұяшықтағы өзгеріс қабылданбады, сондықтан әрекет орындалмады. Оны түзетіңіз немесе болдырмаңыз да, қайталап көріңіз.'),
     (N'document.unsavedNotIncluded', N'ru', N'Часть изменений в таблице не сохранена и не учтена: действие выполнено по последним сохранённым значениям.'),
-    (N'document.unsavedNotIncluded', N'kz', N'Кестедегі кейбір өзгерістер сақталмаған және ескерілмеді: әрекет соңғы сақталған мәндер бойынша орындалды.')
+    (N'document.unsavedNotIncluded', N'kz', N'Кестедегі кейбір өзгерістер сақталмаған және ескерілмеді: әрекет соңғы сақталған мәндер бойынша орындалды.'),
+    (N'app.languageAfterSave', N'ru', N'Страница переключится на новый язык, когда несохранённые изменения будут сохранены или отменены.'),
+    (N'app.languageAfterSave', N'kz', N'Сақталмаған өзгерістер сақталғанда немесе болдырылмағанда бет жаңа тілге ауысады.')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO

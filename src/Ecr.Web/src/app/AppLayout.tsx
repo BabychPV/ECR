@@ -20,6 +20,7 @@ import {
   Text,
 } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
+import { notifications } from '@mantine/notifications';
 import { Navigate, Outlet, ScrollRestoration, useLocation, useMatches } from 'react-router-dom';
 import { Breadcrumbs, isRouteHandle } from './Breadcrumbs';
 import { NavRouteLink } from './NavRouteLink';
@@ -204,11 +205,27 @@ export function AppLayout(): JSX.Element {
 
     let live = true;
     void flushUnsaved().then((saved) => {
-      if (live && saved) setPageLanguage(activeLanguage);
+      if (!live) return;
+      if (saved) {
+        setPageLanguage(activeLanguage);
+        return;
+      }
+
+      // ⛔ AN-39 / L8-17: доти - тиша: перемикач показував нову мову, сторінка лишалась
+      // старою, і ніщо не пояснювало чому (зберегти не дала утримана відмовою правка).
+      notifications.show({ id: 'language-after-save', color: 'statusWarning', message: t('app.languageAfterSave') });
     });
+
+    // ⚠ Повтор: щойно незбереженого не лишилось (правку виправили чи скасували, автозбереження
+    // довезло), сторінка перемальовується мовою. Опитування, а не підписка: реєстр джерел
+    // (`shared/ui/unsavedSources`) підписки не має, а таймер живе лише поки remount заблоковано.
+    const retry = setInterval(() => {
+      if (live && !hasUnsavedChanges()) setPageLanguage(activeLanguage);
+    }, 1000);
 
     return () => {
       live = false;
+      clearInterval(retry);
     };
   }, [remountBlocked, activeLanguage]);
 

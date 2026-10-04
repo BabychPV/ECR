@@ -2,6 +2,7 @@ import { useEffect, type JSX } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
+import { notifications } from '@mantine/notifications';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import { theme } from '@/shared/theme/theme';
@@ -120,5 +121,27 @@ describe('AppLayout: зміна мови й незбережений ввід', 
     await switchToRussian();
 
     await waitFor(() => expect(screen.getByTestId('probe').textContent).toBe('Привет'));
+  });
+
+  // AN-39 / L8-17: доти блокування було мовчазним і без повтору.
+  it('не зберіглося — пояснення, а щойно незбереженого немає — сторінка перемальовується мовою', async () => {
+    const show$ = vi.spyOn(notifications, 'show');
+    let dirty = true;
+    const off = registerUnsavedSource('test-held', { hasUnsaved: () => dirty, flush: async () => false });
+    show();
+    await screen.findByTestId('probe');
+
+    await switchToRussian();
+
+    await waitFor(() =>
+      expect(show$).toHaveBeenCalledWith(expect.objectContaining({ id: 'language-after-save', color: 'statusWarning' })),
+    );
+    expect(screen.getByTestId('probe').textContent).toBe('Hello');
+
+    // Людина виправила/скасувала утриману правку — повтор без нової зміни мови.
+    dirty = false;
+    await waitFor(() => expect(screen.getByTestId('probe').textContent).toBe('Привет'), { timeout: 2500 });
+    off();
+    show$.mockRestore();
   });
 });
