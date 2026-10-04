@@ -174,8 +174,8 @@ export function RegistryConstructorPage(): JSX.Element {
     [registries.data],
   );
 
-  /** Тіло останнього успішного збереження чернетки, доки його не спожив засів форми (L9-39). */
-  const sentDraft = useRef<SaveRegistryDraftBody | null>(null);
+  /** Останнє успішне збереження чернетки (тіло й версія), доки його не спожив засів форми (L9-39). */
+  const sentDraft = useRef<{ body: SaveRegistryDraftBody; rowVersion: string } | null>(null);
   const latestRequest = useRef<SaveRegistryDefinitionDto | null>(null);
 
   /*
@@ -200,9 +200,18 @@ export function RegistryConstructorPage(): JSX.Element {
 
     // ⛔ L9-39: це перечитування після НАШОГО збереження, а форму вже правили далі, поки запит
     // їхав, — сервер повернув рівно надіслане, і засів відкотив би новіші правки.
+    // ⚠ Лише якщо перечитано саме нашу версію: новіша чернетка сусіда засіває форму, інакше
+    // наступне наше збереження з її `rowVersion` мовчки перезаписало б сусіда (рев'ю AN-35, P3).
     const sent = sentDraft.current;
     sentDraft.current = null;
-    if (saved !== null && sent !== null && !sameDraft(sent, latestRequest.current)) return;
+    if (
+      saved !== null &&
+      sent !== null &&
+      saved.rowVersion === sent.rowVersion &&
+      !sameDraft(sent.body, latestRequest.current)
+    ) {
+      return;
+    }
 
     if (saved === null) {
       // Нові поля скидаються тут само: після публікації вони вже стали
@@ -288,8 +297,8 @@ export function RegistryConstructorPage(): JSX.Element {
               request={request}
               reason={reason}
               onReasonChange={setReason}
-              onSaved={(sent) => {
-                sentDraft.current = sent;
+              onSaved={(body, rowVersion) => {
+                sentDraft.current = { body, rowVersion };
               }}
             />
 

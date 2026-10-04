@@ -14,7 +14,8 @@ import { testTheme } from '@/test/render';
  *
  * Мутаційний доказ (перевірено руками 2026-10-04): прибрати ранній `return` за `sameDraft` у засіві
  * `RegistryConstructorPage` → червоний перший тест; другий (без правок — форма засівається
- * збереженим) лишається зеленим.
+ * збереженим) лишається зеленим. Пропуск засіву без порівняння `rowVersion` (рев'ю AN-35, P3) →
+ * червоний третій: новіша чернетка сусіда не потрапляла у форму.
  */
 
 const Code = 'FUEL';
@@ -29,7 +30,7 @@ function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 }
 
-function stub(): Server {
+function stub(neighbor = false): Server {
   let saved: Record<string, unknown> | null = null;
   const server: Server = { puts: [], release: () => undefined };
 
@@ -56,6 +57,11 @@ function stub(): Server {
           });
           saved = { ...body, baseDefinitionVersion: 3, updatedAt: '2026-10-04T10:00:00Z', updatedByUserId: 1, rowVersion: 'AQID' };
           return json(saved);
+        }
+
+        // Сусід зберіг свою чернетку між нашим `PUT` і перечитуванням.
+        if (neighbor && saved !== null) {
+          return json({ definitionVersion: 3, draft: { ...saved, reason: 'причина сусіда', rowVersion: 'NEIGHBOR' } });
         }
 
         return json({ definitionVersion: 3, draft: saved });
@@ -172,6 +178,22 @@ describe('RegistryConstructorPage: правки під час збереженн
         timeout: SlowEnvTimeout,
       });
       expect(reasonInput().value).toBe('лише так');
+    },
+    SlowEnvTimeout,
+  );
+
+  it(
+    'перечитано новішу чернетку сусіда — вона засіває форму, навіть якщо ми правили далі',
+    async () => {
+      const server = stub(true);
+      showPage();
+
+      await saveWithReason(server, 'наша причина');
+      fireEvent.change(reasonInput(), { target: { value: 'наша причина і ще дописане' } });
+
+      server.release();
+
+      await waitFor(() => expect(reasonInput().value).toBe('причина сусіда'), { timeout: SlowEnvTimeout });
     },
     SlowEnvTimeout,
   );

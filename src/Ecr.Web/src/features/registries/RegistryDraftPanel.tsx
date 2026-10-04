@@ -55,12 +55,14 @@ export function RegistryDraftPanel({
   readonly onReasonChange: (value: string) => void;
 
   /**
-   * Чернетку збережено — тіло, яке пішло на сервер; викликається ДО перечитування чернетки.
+   * Чернетку збережено — тіло, яке пішло на сервер, і версія, яку повернув сервер; викликається
+   * ДО перечитування чернетки.
    *
    * ⛔ L9-39: перечитана чернетка засіває форму сторінки, а людина могла правити далі, поки
-   * запит їхав. Сторінка порівнює надіслане з поточною формою і не затирає новіших правок.
+   * запит їхав. Сторінка порівнює надіслане з поточною формою і не затирає новіших правок —
+   * але лише коли перечитано САМЕ збережене (версія та сама), а не новішу чернетку сусіда.
    */
-  readonly onSaved?: (sent: SaveRegistryDraftBody) => void;
+  readonly onSaved?: (sent: SaveRegistryDraftBody, savedRowVersion: string) => void;
 }): JSX.Element {
   const session = useSession();
   const queryClient = useQueryClient();
@@ -94,8 +96,8 @@ export function RegistryDraftPanel({
   const save = useMutation({
     meta: { handled: true },
     mutationFn: (body: SaveRegistryDraftBody) => saveRegistryDraft(code, body),
-    onSuccess: async (_saved, body) => {
-      onSaved?.(body);
+    onSuccess: async (saved, body) => {
+      onSaved?.(body, saved.rowVersion);
       await reload();
       showDone(t('registries.draftSaved'));
     },
