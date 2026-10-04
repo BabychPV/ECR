@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, type JSX } from 'react';
 import { Alert, Anchor, Button, Card, Checkbox, Group, Progress, Stack, Table, Text } from '@mantine/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router-dom';
-import { apiFetch } from '@/api/client';
+import { apiFetch, EcrApiError } from '@/api/client';
 import type { JobStatus } from '@/api/types';
 import { isCalculationResultsQuery } from '@/features/methodologies/calculationResultsKey';
 import { PollMs, badgeStateOf } from '@/features/workflow/jobFollow';
@@ -51,12 +51,23 @@ export function impactPollInterval(status: JobStatus | undefined): number | fals
  * ⛔ L9-41: відмова (`403` без права бачити задачу, `404`) лишає `data` порожнім, а
  * `impactPollInterval(undefined)` — «ще не прочитано, опитувати далі»: запит повторювався кожні
  * `PollMs` безкінечно, хоча картка вже каже «стан прочитати не вдалося».
+ *
+ * ⚠ Зупиняє лише відмова клієнтського класу (`4xx`): вона не мине сама. Тимчасова (`5xx`, обрив
+ * мережі) посеред задачі опитування не зупиняє — інакше прогрес замерзав би, а `onSettled` не
+ * спрацьовував би ніколи (рев'ю AN-35, P3).
  */
 export function impactJobRefetchInterval(state: {
   readonly status: 'pending' | 'error' | 'success';
   readonly data: JobStatus | undefined;
+  readonly error: unknown;
 }): number | false {
-  return state.status === 'error' ? false : impactPollInterval(state.data);
+  const refused =
+    state.status === 'error' &&
+    state.error instanceof EcrApiError &&
+    state.error.problem.status >= 400 &&
+    state.error.problem.status < 500;
+
+  return refused ? false : impactPollInterval(state.data);
 }
 
 /**

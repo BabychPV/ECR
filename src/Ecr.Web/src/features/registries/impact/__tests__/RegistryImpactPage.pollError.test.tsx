@@ -4,6 +4,7 @@ import { MantineProvider } from '@mantine/core';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { impactJobRefetchInterval, RegistryImpactPage } from '../RegistryImpactPage';
+import { EcrApiError } from '@/api/client';
 import { PollMs } from '@/features/workflow/jobFollow';
 import type { JobStatus } from '@/api/types';
 import { testTheme } from '@/test/render';
@@ -14,8 +15,9 @@ import { testTheme } from '@/test/render';
  * До фіксу `403` на `GET /jobs/{id}` (немає права бачити задачу) лишав `data` порожнім, а порожнє
  * `data` означало «опитувати далі» — запит ішов кожні `PollMs` доки відкрита сторінка.
  *
- * Мутаційний доказ (перевірено руками 2026-10-04): `refetchInterval: (q) => impactPollInterval(q.state.data)`
- * (як до фіксу) → червоні обидва тести.
+ * Мутаційні докази (перевірено руками 2026-10-04): `refetchInterval: (q) => impactPollInterval(q.state.data)`
+ * (як до фіксу) → червоні обидва тести; зупинка на будь-якій відмові (`status === 'error'`, як у
+ * першій версії фіксу) → червоний перший (502 посеред задачі).
  */
 
 function json(body: unknown, status = 200): Response {
@@ -30,9 +32,18 @@ describe('RegistryImpactPage: опитування задачі після ві�
   it('інтервал: відмова — стоп; ще не прочитано — опитувати; стан задачі — як раніше', () => {
     const running = { jobId: 'x', state: 'Running', percent: 1, message: null, error: null } as unknown as JobStatus;
 
-    expect(impactJobRefetchInterval({ status: 'error', data: undefined })).toBe(false);
-    expect(impactJobRefetchInterval({ status: 'pending', data: undefined })).toBe(PollMs);
-    expect(impactJobRefetchInterval({ status: 'success', data: running })).toBe(PollMs);
+    const refusal = (status: number): EcrApiError =>
+      new EcrApiError({ title: 'x', status, errorCode: 'ECR-X', correlationId: 'c' });
+
+    expect(impactJobRefetchInterval({ status: 'error', data: undefined, error: refusal(403) })).toBe(false);
+    expect(impactJobRefetchInterval({ status: 'error', data: undefined, error: refusal(404) })).toBe(false);
+    expect(impactJobRefetchInterval({ status: 'pending', data: undefined, error: null })).toBe(PollMs);
+    expect(impactJobRefetchInterval({ status: 'success', data: running, error: null })).toBe(PollMs);
+
+    // ⛔ Рев'ю AN-35, P3: тимчасова відмова посеред задачі (останні `data` — `Running`) опитування не
+    // зупиняє, так само обрив мережі (не `EcrApiError`).
+    expect(impactJobRefetchInterval({ status: 'error', data: running, error: refusal(502) })).toBe(PollMs);
+    expect(impactJobRefetchInterval({ status: 'error', data: running, error: new TypeError('fetch failed') })).toBe(PollMs);
   });
 
   it('403 на читання задачі — одне читання, а не безкінечне опитування', async () => {
