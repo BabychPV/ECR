@@ -84,4 +84,18 @@ describe('L8-20: версія рядка для утриманої правки'
     expect(kept?.before).toBe('12');
     expect(withKnownVersions(kept === undefined ? [] : [kept], sliceWith('v2', 12))[0]?.baseVersion).toBe('v2');
   });
+
+  // Рев'ю AN-39b P3-1: дата після перезапиту приходить у формі сервера - це не чужа зміна.
+  it('Date: власне збережене в формі сервера (T00:00:00) не вважається чужим', () => {
+    const dated: TableSliceDto = {
+      ...sliceWith('v3', null),
+      columns: [{ ...sliceWith('v1', null).columns[0]!, dataType: 'Date' }],
+      rows: [{ rowKey: 'R1', ordinal: 1, rowKind: 'Static', label: null, rowVersion: 'v3', cells: { C1: '2026-09-15T00:00:00' }, isOrphaned: false }],
+    };
+    const edit: PendingEdit = { rowKey: 'R1', columnCode: 'C1', value: '2026-09-20', isEmpty: false, baseVersion: 'v1', before: '2026-09-15' };
+
+    expect(withKnownVersions([edit], dated)[0]?.baseVersion).toBe('v3');
+    // Контроль: інша дата - чужа зміна, версія стара.
+    expect(withKnownVersions([{ ...edit, before: '2026-09-14' }], dated)[0]?.baseVersion).toBe('v1');
+  });
 });

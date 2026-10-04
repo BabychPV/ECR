@@ -183,7 +183,7 @@ export function withKnownVersions(
       if (edit.before === undefined) continue;
 
       const row = rows.get(edit.rowKey);
-      if (row !== undefined && !sameCellValue(row.cells[edit.columnCode] ?? null, edit.before)) {
+      if (row !== undefined && !sameSavedValue(slice, edit.columnCode, row.cells[edit.columnCode] ?? null, edit.before)) {
         foreign.add(edit.rowKey);
       }
     }
@@ -198,6 +198,20 @@ export function withKnownVersions(
     // лишається та, з якою правку зроблено: вигадувати іншу нема з чого.
     return known === undefined || known === edit.baseVersion ? edit : { ...edit, baseVersion: known };
   });
+}
+
+/**
+ * Чи те саме значення в кеші, що людина бачила (`before`) - за типом колонки.
+ *
+ * ⛔ Рев'ю AN-39b P3-1: дата в кеші буває у двох формах - клієнта (`2026-09-15`, після
+ * локального застосування патча) і сервера (`2026-09-15T00:00:00`, після перезапиту зрізу).
+ * `sameCellValue` назвав би їх різними, і L8-20 прийняв би власне збережене за чуже -
+ * `409` на власних змінах. Те саме правило, що й у `captureEdit`.
+ */
+function sameSavedValue(slice: TableSliceDto | undefined, columnCode: string, cached: unknown, before: unknown): boolean {
+  const dataType = slice === undefined ? undefined : columnIndexOf(slice).get(columnCode)?.dataType;
+
+  return dataType === 'Date' ? sameDateValue(cached, before) : sameCellValue(cached, before);
 }
 
 /**
