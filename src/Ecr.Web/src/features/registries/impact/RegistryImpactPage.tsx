@@ -181,11 +181,20 @@ export function RegistryImpactPage(): JSX.Element {
     void client.invalidateQueries({ predicate: isCalculationResultsQuery });
   }, [client, code]);
 
+  // ⛔ L9-35: вибір живе довше за перелік — після перерахунку чи чужої правки обраний документ зникає
+  // з відповіді сервера, а його id лишався у `selected` і йшов у наступний запит (422). Тому і підпис
+  // кнопки, і тіло запиту рахують лише ті обрані, що є в поточному переліку.
+  const effective = [...selected]
+    .filter((id) => impact.data?.items.some((item) => item.documentId === id) === true)
+    .sort((a, b) => a - b);
+
   const recalculate = useMutation({
     mutationFn: (reason: string) =>
-      recalculateImpacted(code, { documentIds: selected.size === 0 ? null : [...selected].sort((a, b) => a - b), reason }),
+      recalculateImpacted(code, { documentIds: effective.length === 0 ? null : effective, reason }),
     onSuccess: (accepted) => {
       setJobId(accepted.jobId);
+      // ⚠ Поставлені документи перераховуються й зникнуть із переліку: вибір не переживає постановку.
+      setSelected(new Set());
       // ⚠ Перелік зачеплених і банер «довідник змінено» в панелі результатів читають кеш: без
       // інвалідації вони показують стан ДО постановки перерахунку (RT-25). Ще раз — коли задача
       // завершиться (`ImpactJob.onSettled`): лише тоді перераховані документи зникають із переліку.
@@ -224,9 +233,9 @@ export function RegistryImpactPage(): JSX.Element {
               onClick={() => setAsking(true)}
               data-impact-recalculate=""
             >
-              {selected.size === 0
+              {effective.length === 0
                 ? t('registries.impact.recalculateAll')
-                : t('registries.impact.recalculateSelected', { count: selected.size })}
+                : t('registries.impact.recalculateSelected', { count: effective.length })}
             </Button>
           )
         }
