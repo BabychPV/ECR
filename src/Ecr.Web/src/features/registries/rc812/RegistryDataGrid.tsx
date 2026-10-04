@@ -1,4 +1,4 @@
-import { useRef, useState, type ClipboardEvent, type JSX, type KeyboardEvent } from 'react';
+import { useEffect, useRef, useState, type ClipboardEvent, type JSX, type KeyboardEvent } from 'react';
 import { ActionIcon, Group, Table, Text, TextInput, VisuallyHidden } from '@mantine/core';
 import { localized } from '@/shared/i18n/localized';
 import { t } from '@/shared/i18n';
@@ -69,6 +69,20 @@ export function RegistryDataGrid(props: RegistryDataGridProps): JSX.Element {
   const [active, setActive] = useState<Position>({ r: 0, c: 0 });
   const [editing, setEditing] = useState<Position | null>(null);
   const tableRef = useRef<HTMLTableElement>(null);
+  /** Куди перевести фокус, щойно з'явиться рядок (`Ctrl+Enter` додає його лише в наступному рендері). */
+  const pendingFocus = useRef<Position | null>(null);
+
+  // ⚠ `focusCell` в обробнику `Ctrl+Enter` обрізав би індекс за СТАРИМ `rows.length` — фокус лишався
+  // на попередньому рядку, і клавіатурний користувач друкував не туди (L9-16, §8.8).
+  useEffect(() => {
+    const next = pendingFocus.current;
+    if (next === null || next.r >= rows.length) return;
+    pendingFocus.current = null;
+    setActive(next);
+    requestAnimationFrame(() => {
+      tableRef.current?.querySelector<HTMLElement>(`[data-cell="${String(next.r)}:${String(next.c)}"]`)?.focus();
+    });
+  }, [rows.length]);
 
   const focusCell = (next: Position): void => {
     const r = Math.max(0, Math.min(rows.length - 1, next.r));
@@ -122,8 +136,8 @@ export function RegistryDataGrid(props: RegistryDataGridProps): JSX.Element {
 
     if (ctrl && event.key === 'Enter') {
       event.preventDefault();
+      pendingFocus.current = { r: rows.length, c: 0 };
       props.onAddRow();
-      focusCell({ r: rows.length, c: 0 });
     } else if (ctrl && event.shiftKey && event.key === 'Delete') {
       event.preventDefault();
       props.onToggleDelete(target.rowKey);

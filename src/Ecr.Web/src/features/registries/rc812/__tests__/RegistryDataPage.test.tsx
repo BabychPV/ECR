@@ -252,6 +252,20 @@ describe('Дані довідника: табличний редактор', () 
     expect(within(target).queryByRole('textbox')).toBeNull();
   });
 
+  it('Ctrl+Enter додає рядок і переводить фокус на НЬОГО, а не лишає на попередньому (L9-16)', async () => {
+    showDataPage();
+    await screen.findByRole('grid');
+
+    const target = cell(1, 1);
+    act(() => target.focus());
+    fireEvent.keyDown(target, { key: 'Enter', ctrlKey: true });
+
+    await vi.waitFor(() => {
+      expect(document.activeElement?.getAttribute('data-cell')).toBe('2:0');
+    });
+    expect(document.querySelectorAll('[data-row-key^="n:"]')).toHaveLength(1);
+  });
+
   it('Ctrl+Shift+Delete позначає рядок до видалення, пакет несе op delete', async () => {
     const sent = mockServer();
     showDataPage();
