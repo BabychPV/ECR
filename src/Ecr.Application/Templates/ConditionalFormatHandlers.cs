@@ -83,14 +83,26 @@ public sealed class SaveConditionalFormatsHandler(
                 });
         }
 
-        var columns = version.Sheets.SelectMany(s => s.Tables).SelectMany(t => t.Columns)
-            .Where(c => !c.IsDeleted).Select(c => c.Code).ToHashSet(StringComparer.Ordinal);
+        var all = version.Sheets.SelectMany(s => s.Tables).SelectMany(t => t.Columns).ToList();
+        var columns = all.Where(c => !c.IsDeleted).Select(c => c.Code).ToHashSet(StringComparer.Ordinal);
+
+        // L9-22: правила колонки, яку видалили (м'яко) після їх створення, лишаються в
+        // наборі, і клієнт шле їх назад як є. 422 тут блокував би збереження ВСЬОГО
+        // набору версії без виходу з UI — тож «сироти» видаленої колонки мовчки
+        // відкидаються (заміна набору прибирає їх і з бази). Код, якого у версії не
+        // було ніколи, — і далі 422.
+        var deleted = all.Where(c => c.IsDeleted && !columns.Contains(c.Code))
+            .Select(c => c.Code).ToHashSet(StringComparer.Ordinal);
 
         var ordinals = new Dictionary<string, int>(StringComparer.Ordinal);
         var built = new List<ConditionalFormatRule>(requested.Count);
         for (var i = 0; i < requested.Count; i++)
         {
             var r = requested[i];
+            if (r.ColumnCode is not null && deleted.Contains(r.ColumnCode))
+            {
+                continue;
+            }
 
             // ⚠ {index} в усіх ключах condFormat* — номер правила серед правил ТІЄЇ Ж
             // колонки (як Ordinal і як у ConditionalFormatRule.Validate), а не позиція
