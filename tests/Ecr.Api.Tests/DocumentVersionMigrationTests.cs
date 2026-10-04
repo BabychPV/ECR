@@ -258,6 +258,57 @@ public sealed partial class DocumentVersionMigrationTests(SqlServerFixture sql)
         Assert.Equal(before, await SnapshotAsync(s).ConfigureAwait(true));
     }
 
+    /// <summary>
+    /// L1-08: <c>Manage</c> на ІНШОМУ проєкті права не дає (403), а <c>Manage</c> на проєкт документа від
+    /// ДРУГОЇ ролі користувача (перше право — Template.Edit + Write у першій ролі) додається до наявних
+    /// ролей і дозволяє перенос: рівень рахується по всіх ролях, а не лише по тій, що має Template.Edit.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-7.5")]
+    public async Task Manage_на_іншому_проєкті_права_не_дає_а_Manage_від_другої_ролі_дає()
+    {
+        var s = await ArrangeAsync(Target.OnlyLabels, grant: GrantLevel.Write).ConfigureAwait(true);
+        var other = await new TestDocumentBuilder(sql.ConnectionString).BuildAsync(columnCount: 1, rowCount: 1).ConfigureAwait(true);
+
+        await using (var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext())
+        {
+            var role = new Role(
+                EcrCode.Create($"MIGR_{Guid.NewGuid():N}"),
+                new LocalizedText(new Dictionary<string, string> { ["en"] = "Manage elsewhere" }));
+            db.Roles.Add(role);
+            await db.SaveChangesAsync().ConfigureAwait(true);
+            db.RoleAssignments.Add(new RoleAssignment(role.Id, s.UserId, null));
+            db.ResourceGrants.Add(new ResourceGrant(role.Id, ResourceKind.Project, other.ProjectId, GrantLevel.Manage));
+            await db.SaveChangesAsync().ConfigureAwait(true);
+        }
+
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
+
+        var elsewhere = await PostAsync(client, s, "Safe", dryRun: true).ConfigureAwait(true);
+        await AssertProblemAsync(elsewhere, HttpStatusCode.Forbidden, "ECR-AUTH-0403", "err.ECR-AUTH-0403.noProjectManageGrant").ConfigureAwait(true);
+
+        await using (var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext())
+        {
+            var role = new Role(
+                EcrCode.Create($"MIGR_{Guid.NewGuid():N}"),
+                new LocalizedText(new Dictionary<string, string> { ["en"] = "Manage here" }));
+            db.Roles.Add(role);
+            await db.SaveChangesAsync().ConfigureAwait(true);
+            db.RoleAssignments.Add(new RoleAssignment(role.Id, s.UserId, null));
+            db.ResourceGrants.Add(new ResourceGrant(role.Id, ResourceKind.Project, s.Doc.ProjectId, GrantLevel.Manage));
+            await db.SaveChangesAsync().ConfigureAwait(true);
+        }
+
+        // Профіль прав кешується в застосунку, тож другий етап — на новому застосунку.
+        using var app2 = new EcrApiFactory(sql);
+        using var fresh = await SignedInAsync(app2, s.UserName).ConfigureAwait(true);
+        var here = await PostAsync(fresh, s, "Safe", dryRun: true).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.OK, here.StatusCode);
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
