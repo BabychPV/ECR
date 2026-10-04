@@ -106,7 +106,15 @@ public sealed class DatabaseHealthRcsiOffTests(SqlServerFixture sql)
             .EnumerateArray()
             .Single(c => string.Equals(c.GetProperty("name").GetString(), "db", StringComparison.Ordinal));
         Assert.Equal("Unhealthy", dbCheck.GetProperty("status").GetString());
-        Assert.Contains("Sql/06-rcsi.sql", dbCheck.GetProperty("description").GetString(), StringComparison.Ordinal);
+
+        // ⛔ L1-11: анонімному /health/ready опис перевірки «db» (шлях RCSI-скрипта) не віддається; діагностика
+        // для оператора лишається в самій перевірці (тест вище) і в журналі.
+        Assert.DoesNotContain("Sql/06-rcsi.sql", body, StringComparison.Ordinal);
+        Assert.True(
+            !dbCheck.TryGetProperty("description", out var description)
+            || description.ValueKind == JsonValueKind.Null
+            || string.IsNullOrEmpty(description.GetString()),
+            $"description: {description}");
     }
 
     /// <summary>Порожня база з <c>READ_COMMITTED_SNAPSHOT OFF</c>, що знімається після тесту.</summary>
