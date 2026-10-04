@@ -51,6 +51,8 @@ export function RowWindowMapsPanel({
   };
 
   const toggle = useMutation({
+    // ⚠ Відмову показує `ErrorAlert` у рендері — без `handled` сітка додала б тост (L9-01).
+    meta: { handled: true },
     mutationFn: (map: RowWindowMap) => updateRowWindowMap(map.id, toggleActiveRequest(map)),
     onSuccess: (map) => {
       refresh();

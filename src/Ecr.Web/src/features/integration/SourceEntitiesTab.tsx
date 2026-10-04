@@ -60,6 +60,8 @@ export function SourceEntitiesTab({ source }: { readonly source: DataSource }): 
   });
 
   const bind = useMutation({
+    // ⚠ Відмову показує `ErrorAlert` у рендері — без `handled` сітка додала б тост (L9-01).
+    meta: { handled: true },
     mutationFn: ({ id, registryDefId }: { id: number; registryDefId: number | null }) =>
       bindSourceEntityRegistry(id, registryDefId),
     onSuccess: (entity) => {

@@ -88,6 +88,8 @@ export function TestDataSourceModal({
   const [reason, setReason] = useState('');
 
   const test = useMutation({
+    // ⚠ Відмову показує `ErrorAlert` у рендері — без `handled` сітка додала б тост (L9-01).
+    meta: { handled: true },
     mutationFn: (value: string) => testDataSource(sourceId, value),
   });
 

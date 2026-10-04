@@ -88,6 +88,8 @@ export function RegistrySyncPolicyModal({
   const [inclusive, setInclusive] = useState(current.validToInclusive);
 
   const save = useMutation({
+    // ⚠ Відмову показує `ErrorAlert` у рендері — без `handled` сітка додала б тост (L9-01).
+    meta: { handled: true },
     mutationFn: (policy: RegistrySyncPolicy) => setRegistrySyncPolicy(entityId, policy),
     onSuccess: (entity) => {
       showDone(t('sources.syncPolicySaved'));

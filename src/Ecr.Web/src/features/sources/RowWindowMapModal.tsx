@@ -130,6 +130,8 @@ export function RowWindowMapModal({
   const problems = validateForm(state, columnList);
 
   const save = useMutation({
+    // ⚠ Відмову показує `ErrorAlert` у рендері — без `handled` сітка додала б тост (L9-01).
+    meta: { handled: true },
     mutationFn: () => (map === null ? createRowWindowMap(toCreateRequest(state)) : updateRowWindowMap(map.id, toUpdateRequest(state, map))),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: SourceEventsKeys.rowWindowMapsAll });

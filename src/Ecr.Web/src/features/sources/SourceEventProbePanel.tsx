@@ -75,6 +75,8 @@ export function SourceEventProbePanel({
   const [maxEvents, setMaxEvents] = useState(20);
 
   const probe = useMutation({
+    // ⚠ Відмову показує `ErrorAlert` у рендері — без `handled` сітка додала б тост (L9-01).
+    meta: { handled: true },
     mutationFn: () => {
       const to = new Date();
       const from = new Date(to.getTime() - days * 24 * 60 * 60 * 1000);

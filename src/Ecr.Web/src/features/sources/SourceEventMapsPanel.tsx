@@ -60,6 +60,8 @@ export function SourceEventMapsPanel({
   };
 
   const toggle = useMutation({
+    // ⚠ Відмову показує `ErrorAlert` у рендері — без `handled` сітка додала б тост (L9-01).
+    meta: { handled: true },
     mutationFn: (map: SourceEventMap) => updateSourceEventMap(map.id, toggleActiveRequest(map)),
     onSuccess: (map) => {
       refresh();
