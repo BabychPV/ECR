@@ -215,6 +215,46 @@ public sealed class FailedAttemptAtomicTests(SqlServerFixture sql)
         Assert.False(await check.LoginAttempts.AnyAsync(a => a.UserName == name && a.IsSuccess).ConfigureAwait(true));
     }
 
+    /// <summary>
+    /// L1-03 (рев'ю): атомарний успіх - без блокування скидає лічильник; після спливу <c>LockedUntil</c> теж
+    /// проходить; поки блокування діє (навіть рівно на межі +1 с) - <c>false</c> і рядок не змінюється.
+    /// Мутація: прибрати умову LockedUntil у UPDATE - третій випадок червоніє.
+    /// </summary>
+    [Theory]
+    [InlineData(3, -1, true)]
+    [InlineData(2, 0, true)]
+    [InlineData(2, 60, true)]
+    [InlineData(5, 1, false)]
+    [InlineData(5, 900, false)]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-6.4a")]
+    public async Task Атомарний_успішний_вхід_поважає_блокування_і_скидає_лічильник(int failed, int lockSeconds, bool expected)
+    {
+        var name = await ArrangeUserAsync(maxFailedAttempts: 5).ConfigureAwait(true);
+        var userId = await UserIdAsync(name).ConfigureAwait(true);
+        DateTime? lockedUntil = lockSeconds < 0 ? null : lockSeconds == 60 ? Now.AddSeconds(-60) : Now.AddSeconds(lockSeconds);
+        await SetCounterAsync(userId, failed, lockedUntil).ConfigureAwait(true);
+
+        await using (var db = Context())
+        {
+            Assert.Equal(expected, await new UserStore(db).TryRegisterSuccessfulLoginAsync(userId, Now, CancellationToken.None).ConfigureAwait(true));
+        }
+
+        await using var check = Context();
+        var row = await check.Users.AsNoTracking().SingleAsync(u => u.Id == userId).ConfigureAwait(true);
+        if (expected)
+        {
+            Assert.Equal(0, row.FailedAttempts);
+            Assert.Null(row.LockedUntil);
+        }
+        else
+        {
+            Assert.Equal(failed, row.FailedAttempts);
+            Assert.Equal(lockedUntil, row.LockedUntil);
+        }
+    }
+
     private async Task<int> UserIdAsync(string name)
     {
         await using var db = Context();
