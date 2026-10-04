@@ -38,11 +38,20 @@ export function RegistryImportPanel({ registryCode, disabled = false }: Registry
   const [file, setFile] = useState<File | null>(null);
   const [report, setReport] = useState<RegistryEntryImportReport | null>(null);
 
+  // ⛔ L9-44: довідник, ДО якого перевірено файл. Панель живе далі, коли на
+  // сторінці обирають інший довідник (`registryCode` міняється без перемонтування),
+  // і без цієї прив'язки «Застосувати» слало файл, перевірений проти одного
+  // довідника, у записи іншого. Звіт чужого довідника не показується.
+  const [target, setTarget] = useState<string | null>(null);
+  const reviewed = report !== null && target === registryCode ? report : null;
+
   const preview = useMutation({
-    mutationFn: (selected: File) => importRegistryEntries(registryCode, selected, true),
-    onSuccess: (result, selected) => {
-      // ⚠ Файл запам'ятовується РАЗОМ зі звітом: «Застосувати» надішле саме
-      // його, а не попросить обрати ще раз.
+    mutationFn: ({ code, selected }: { code: string; selected: File }) =>
+      importRegistryEntries(code, selected, true),
+    onSuccess: (result, { code, selected }) => {
+      // ⚠ Файл запам'ятовується РАЗОМ зі звітом і довідником: «Застосувати»
+      // надішле саме його і туди ж, а не попросить обрати ще раз.
+      setTarget(code);
       setFile(selected);
       setReport(result);
     },
@@ -54,25 +63,26 @@ export function RegistryImportPanel({ registryCode, disabled = false }: Registry
 
   const apply = useMutation({
     mutationFn: () => {
-      if (file === null) {
-        // Недосяжно з інтерфейсу: кнопка нижче недоступна без обраного файлу.
+      if (file === null || target !== registryCode) {
+        // Недосяжно з інтерфейсу: кнопка нижче лише в діалозі перевіреного файлу.
         return Promise.reject(new Error('registry import: apply without a file'));
       }
 
       // ⛔ ТОЙ САМИЙ файл, вдруге: контракт не несе токена першого виклику —
       // намір підтверджує повторне читання файлу з `dryRun=false`, а не
       // пред'явлення довіреності.
-      return importRegistryEntries(registryCode, file, false);
+      return importRegistryEntries(target, file, false);
     },
     onSuccess: async (result) => {
       setReport(result);
+      const code = target ?? registryCode;
 
       // ⚠ `applied` — не те саме, що «запит пройшов»: гонка між переглядом і
       // застосуванням (хтось інший додав запис із тим самим кодом) лишає
       // `applied: false` навіть у відповіді `200` на другий виклик. Перелік
       // перечитується й діалог закривається лише коли справді щось записано.
       if (result.applied) {
-        await queryClient.invalidateQueries({ queryKey: queryKeys.registries.entries(registryCode) });
+        await queryClient.invalidateQueries({ queryKey: queryKeys.registries.entries(code) });
         setFile(null);
         setReport(null);
         showDone(
@@ -92,7 +102,7 @@ export function RegistryImportPanel({ registryCode, disabled = false }: Registry
   // ⛔ Головна умова блокування: хоч одна помилка рядка в перегляді — сервер
   // не запише нічого, навіть якщо натиснути «Застосувати». Кнопка нижче має
   // залишатися недоступною РІВНО за цієї умови.
-  const blocked = (report?.errors.length ?? 0) > 0;
+  const blocked = (reviewed?.errors.length ?? 0) > 0;
 
   function close(): void {
     setReport(null);
@@ -113,7 +123,7 @@ export function RegistryImportPanel({ registryCode, disabled = false }: Registry
         tabIndex={-1}
         onChange={(event) => {
           const selected = event.currentTarget.files?.[0];
-          if (selected !== undefined) preview.mutate(selected);
+          if (selected !== undefined) preview.mutate({ code: registryCode, selected });
 
           // Дозволяє обрати той самий файл удруге: без скидання повторний
           // вибір не викликає `change`.
@@ -131,18 +141,18 @@ export function RegistryImportPanel({ registryCode, disabled = false }: Registry
         {t('registry.import.pick')}
       </Button>
 
-      <Modal opened={report !== null} onClose={close} title={t('registry.import.title')} size="lg">
-        {report !== null && (
+      <Modal opened={reviewed !== null} onClose={close} title={t('registry.import.title')} size="lg">
+        {reviewed !== null && (
           <Stack gap="sm">
             <Group gap="xs">
-              <Badge variant="light">{t('registry.import.added', { count: report.added })}</Badge>
-              <Badge variant="light">{t('registry.import.updated', { count: report.updated })}</Badge>
+              <Badge variant="light">{t('registry.import.added', { count: reviewed.added })}</Badge>
+              <Badge variant="light">{t('registry.import.updated', { count: reviewed.updated })}</Badge>
               <Badge variant="light">
-                {t('registry.import.unchanged', { count: report.unchanged })}
+                {t('registry.import.unchanged', { count: reviewed.unchanged })}
               </Badge>
-              {report.errors.length > 0 && (
+              {reviewed.errors.length > 0 && (
                 <Badge color="statusError">
-                  {t('registry.import.errorsCount', { count: report.errors.length })}
+                  {t('registry.import.errorsCount', { count: reviewed.errors.length })}
                 </Badge>
               )}
             </Group>
@@ -157,7 +167,7 @@ export function RegistryImportPanel({ registryCode, disabled = false }: Registry
               </Alert>
             )}
 
-            {report.errors.length > 0 && (
+            {reviewed.errors.length > 0 && (
               <Table striped withTableBorder className="ecr-sticky-head">
                 <Table.Thead>
                   <Table.Tr>
@@ -168,7 +178,7 @@ export function RegistryImportPanel({ registryCode, disabled = false }: Registry
                   </Table.Tr>
                 </Table.Thead>
                 <Table.Tbody>
-                  {report.errors.map((error, index) => (
+                  {reviewed.errors.map((error, index) => (
                     <Table.Tr
                       key={`${String(error.row)}:${error.key}:${error.field ?? ''}:${String(index)}`}
                     >
