@@ -26,6 +26,7 @@ import {
   collectionSchedulesKey,
   useCollectionSchedules,
 } from '@/features/integration/useCollectionSchedules';
+import { DataSourcesQueryKey } from '@/features/integration/dataSourcesKey';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { Timestamp } from '@/shared/ui/Timestamp';
 import { t } from '@/shared/i18n';
@@ -82,6 +83,16 @@ export function CollectionScheduleTab({
     });
   };
 
+  /*
+   * ⛔ L9-30: створення й видалення розкладу міняють лічильник `collectionSchedules` з'єднання
+   * (`DataSourcesQueryKey`) — з нього шухляда з'єднання вирішує «у використанні» і вимикає
+   * «Видалити». Доти після видалення останнього розкладу кнопка лишалась вимкненою з причиною
+   * «є розклади», а після створення першого — активною до `409`, аж до перезавантаження.
+   */
+  const countersChanged = (): void => {
+    void queryClient.invalidateQueries({ queryKey: DataSourcesQueryKey });
+  };
+
   const onFailure = (error: unknown): void => {
     setFailure(error);
 
@@ -103,8 +114,9 @@ export function CollectionScheduleTab({
         ? createCollectionSchedule({ sourceEntityId, ...draft })
         : updateCollectionSchedule(base.id, draft, base.rowVersion),
     onMutate: () => setFailure(null),
-    onSuccess: (saved) => {
+    onSuccess: (saved, { base }) => {
       replaceRow(saved);
+      if (base === null) countersChanged();
       notifications.show({ message: t('schedule.saved') });
     },
     onError: onFailure,
@@ -115,6 +127,7 @@ export function CollectionScheduleTab({
     onMutate: () => setFailure(null),
     onSuccess: (_, base) => {
       replaceRow(null, base.id);
+      countersChanged();
       notifications.show({ message: t('schedule.removed') });
     },
     onError: onFailure,
