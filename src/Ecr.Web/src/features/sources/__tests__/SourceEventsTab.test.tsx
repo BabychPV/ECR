@@ -145,6 +145,7 @@ function respond({
         return json({ items: [{ id: 100, businessKey: 'DOC-000123' }], nextCursor: null, totalCount: 1 });
       }
       if (path === '/api/v1/sources/42/source-events/sync') return sync();
+      if (path.startsWith('/api/v1/jobs/')) return json({ jobId: 'ISourceEventSyncJob-a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4', state: 'Succeeded' });
       if (path === '/api/v1/sources/42/source-events') {
         return url.searchParams.get('cursor') === 'page-2'
           ? json({ items: [eventRow(2, { status: 'Missing' })], nextCursor: null, totalCount: 2 })
@@ -280,7 +281,7 @@ describe('SourceEventsTab', () => {
   const firstPageReads = (): number =>
     sent.filter((s) => s.method === 'GET' && s.path === '/api/v1/sources/42/source-events' && !s.search.includes('cursor')).length;
 
-  it('успішний «Отримати з PI зараз» — список подій перечитується (інвалідація ключа подій)', async () => {
+  it('успішний «Отримати з PI зараз» — список подій перечитується, коли задача синку завершилась (L9-20)', async () => {
     respond();
     show();
     await firstRow();
