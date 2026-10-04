@@ -94,7 +94,11 @@ export function RegistryDataPage(): JSX.Element {
   const totalCount = rows.data?.pages[0]?.totalCount ?? loaded.length;
   const units = useUnits(fields.some((f) => f.dataType === 'Unit'));
 
-  const readOnly = !can(session.data, 'Registry.EditData') || isExternalRegistry(registry);
+  // ⛔ Під симуляцією «очима користувача» сервер відхиляє КОЖЕН не-GET (`ECR-SIM-0403`), а `can()`
+  // бачить права цілі: без цієї умови сітка правилась би, а кожне збереження й жива перевірка
+  // `dryRun` (теж POST) падали б 403 (L9-18; так само, як `SheetActions` у сітці документа).
+  const simulation = session.data?.isSimulation === true;
+  const readOnly = simulation || !can(session.data, 'Registry.EditData') || isExternalRegistry(registry);
   const manualCode = definition.data?.codeMode !== 'Auto';
 
   const gridRows = useMemo<GridRow[]>(
@@ -327,7 +331,13 @@ export function RegistryDataPage(): JSX.Element {
       {readOnly && registry !== undefined && (
         <Banner
           tone="info"
-          text={isExternalRegistry(registry) ? t('registries.data.readOnlyExternal') : t('registries.data.readOnly')}
+          text={
+            simulation
+              ? t('deny.SimulationReadOnly')
+              : isExternalRegistry(registry)
+                ? t('registries.data.readOnlyExternal')
+                : t('registries.data.readOnly')
+          }
         />
       )}
       {unmatched > 0 && (

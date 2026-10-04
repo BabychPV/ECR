@@ -137,6 +137,8 @@ export interface ServerOptions {
   readonly holdCommit?: Promise<unknown>;
   /** Кейси верхньої панелі — двома сторінками: 100 рядків і `nextCursor`, далі `E999`. */
   readonly pagedCases?: boolean;
+  /** Сеанс симуляції «очима користувача» (`/me.isSimulation`). */
+  readonly simulation?: boolean;
 }
 
 export function mockServer(permissions: string[], options: ServerOptions = {}): Server {
@@ -157,7 +159,7 @@ export function mockServer(permissions: string[], options: ServerOptions = {}): 
         return json({
           denies: [],
           grants: {},
-          isSimulation: false,
+          isSimulation: options.simulation === true,
           language: 'en',
           mustChangePassword: false,
           permissions,

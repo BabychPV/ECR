@@ -266,6 +266,23 @@ describe('Дані довідника: табличний редактор', () 
     expect(document.querySelectorAll('[data-row-key^="n:"]')).toHaveLength(1);
   });
 
+  it('симуляція «очима користувача» з Registry.EditData — лише читання: банер, Enter не редагує, пакетів немає (L9-18)', async () => {
+    const sent = mockServer({ simulation: true });
+    showDataPage();
+    await screen.findByRole('grid');
+
+    expect(await screen.findByText('Permission simulation: writing is disabled regardless of permissions.')).toBeDefined();
+    expect(screen.queryByRole('button', { name: /^Save/ })).toBeNull();
+
+    const target = cell(0, 2);
+    act(() => target.focus());
+    fireEvent.keyDown(target, { key: 'Enter' });
+    expect(within(target).queryByRole('textbox')).toBeNull();
+    fireEvent.keyDown(window, { key: 's', ctrlKey: true });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(sent).toHaveLength(0);
+  });
+
   it('Ctrl+Shift+Delete позначає рядок до видалення, пакет несе op delete', async () => {
     const sent = mockServer();
     showDataPage();

@@ -186,6 +186,17 @@ describe('CompositionEditorPage: master-detail без введення іден�
     expect(screen.queryByRole('button', { name: /registries\.rc816\.addPart/ })).toBeNull();
   });
 
+  it('симуляція «очима користувача» з Registry.EditData — лише перегляд (L9-18)', async () => {
+    mockServer(['Registry.View', 'Registry.EditData'], { simulation: true });
+    show();
+    const table = await openCase('E77');
+
+    expect(screen.getByText(/deny\.SimulationReadOnly/)).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /registries\.rc816\.save/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /registries\.rc816\.addPart/ })).toBeNull();
+    expect(within(table).getAllByRole('textbox', { name: 'MOL_PCT' }).every((input) => input.hasAttribute('disabled'))).toBe(true);
+  });
+
   it('довідник-частина показує, чиєю частиною він є, і веде до редактора батька', async () => {
     mockServer(['Registry.View', 'Registry.EditData']);
     show('GAS_COMPOSITION');

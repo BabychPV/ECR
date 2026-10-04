@@ -185,7 +185,10 @@ export function CompositionEditorPage(): JSX.Element {
       Object.entries(dirtyByCode).some(([panel, count]) => count > 0 && (depthOf.get(panel) ?? 0) >= depth);
   }, [tree.data, dirtyByCode]);
 
-  const mayEdit = can(session.data, 'Registry.EditData');
+  // ⛔ Симуляція «очима користувача» — лише читання: сервер відхиляє кожен не-GET (`ECR-SIM-0403`),
+  // хоч `can()` і бачить права цілі (L9-18).
+  const simulation = session.data?.isSimulation === true;
+  const mayEdit = !simulation && can(session.data, 'Registry.EditData');
 
   /** `F6` — до наступної панелі, `Shift+F6` — до попередньої (§8.8, як у сітці документа). */
   function cyclePanels(event: KeyboardEvent<HTMLDivElement>): void {
@@ -236,7 +239,9 @@ export function CompositionEditorPage(): JSX.Element {
                   {t('registries.rc816.hint')}
                 </Text>
 
-                {!mayEdit && <Banner tone="info" text={t('registries.rc816.readOnly')} />}
+                {!mayEdit && (
+                  <Banner tone="info" text={simulation ? t('deny.SimulationReadOnly') : t('registries.rc816.readOnly')} />
+                )}
 
                 {parentLink !== null && parentLink.parentRegistryCode !== null && (
                   <Banner

@@ -99,6 +99,8 @@ export interface ServerOptions {
   readonly holdCommit?: Promise<unknown>;
   /** Статус відповіді на рядки довідника-цілі `STREAM` (зіставлення `Lookup`); за замовчуванням 200. */
   readonly lookupStatus?: number;
+  /** Сеанс симуляції «очима користувача» (`/me.isSimulation`). */
+  readonly simulation?: boolean;
 }
 
 const json = (body: unknown): Response =>
@@ -122,7 +124,7 @@ export function mockServer(options: ServerOptions = {}): SentBatch[] {
   const me = {
     denies: [],
     grants: {},
-    isSimulation: false,
+    isSimulation: options.simulation === true,
     language: 'en',
     mustChangePassword: false,
     permissions: options.permissions ?? ['Registry.View', 'Registry.EditData'],
