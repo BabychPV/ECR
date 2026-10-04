@@ -169,18 +169,22 @@ export function LanguageSwitcher(): JSX.Element | null {
             return;
           }
 
-          void flushUnsaved().then((saved) => {
-            if (saved) {
-              applyLanguage(value);
-              return;
-            }
+          // ⚠ Збій самого збереження (відхилений промис) - те саме, що «не збережено»: мову не
+          // міняємо й кажемо чому, а не лишаємо необроблену відмову без жодного сліду на екрані.
+          void flushUnsaved()
+            .catch(() => false)
+            .then((saved) => {
+              if (saved) {
+                applyLanguage(value);
+                return;
+              }
 
-            notifications.show({
-              color: 'statusWarning',
-              message: t('profile.languageUnsavedBlocked'),
-              closeButtonProps: closeNotificationButtonProps,
+              notifications.show({
+                color: 'statusWarning',
+                message: t('profile.languageUnsavedBlocked'),
+                closeButtonProps: closeNotificationButtonProps,
+              });
             });
-          });
         }}
       />
     </div>

@@ -96,6 +96,26 @@ describe('Перемикач мови й незбережений ввід (T4-0
     expect(screen.queryByText('kz-loaded')).toBeNull();
   });
 
+  it('збереження впало (відхилений промис) — мова не змінюється, є пояснення', async () => {
+    off = registerUnsavedSource('test-throwing', {
+      hasUnsaved: () => true,
+      flush: () => Promise.reject(new Error('network down')),
+    });
+    routes();
+    show();
+
+    expect(await screen.findByText('en-loaded')).toBeDefined();
+
+    const select = (await screen.findByLabelText('⟦profile.language⟧')) as HTMLSelectElement;
+    fireEvent.change(select, { target: { value: 'kz' } });
+
+    // ⛔ Мутація «прибрати .catch після flushUnsaved» — відмова лишається необробленою,
+    // сповіщення немає: тест червоний.
+    expect(await screen.findByText('⟦profile.languageUnsavedBlocked⟧')).toBeDefined();
+    expect(language()).toBe('en');
+    expect(select.value).toBe('en');
+  });
+
   it('незбережене вдалося зберегти — мова змінюється без сповіщення', async () => {
     let dirty = true;
     off = registerUnsavedSource('test-dirty', {
