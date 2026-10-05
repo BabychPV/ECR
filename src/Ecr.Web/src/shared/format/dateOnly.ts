@@ -12,7 +12,15 @@
  * навмисно (`D15-09`, `eslint.config.js`); показ дати людині — `formatDate`, не цей модуль.
  */
 
-const DateOnly = /^(\d{4})-(\d{2})-(\d{2})$/;
+/*
+ * ⚠ Хвіст `T00:00:00` (з необов'язковими нульовими долями секунди) — теж дата без часу (T7-01):
+ * поле `Date` шапки документа сервер віддає як `DateTime` (`HeaderValueMapping.ToRuleValue`), а
+ * System.Text.Json пише його `2026-10-07T00:00:00`. Строгий `yyyy-MM-dd` давав `null` — поле після
+ * перезавантаження було порожнім, хоча значення в базі є.
+ * ⛔ Ненульовий час, `Z` чи зсув поясу — НЕ дата без часу: обрізати їх до дня мовчки означало б
+ * показати, можливо, інший календарний день. Такий рядок — `null`, як і будь-яка інша чужа форма.
+ */
+const DateOnly = /^(\d{4})-(\d{2})-(\d{2})(?:T00:00:00(?:\.0+)?)?$/;
 
 function pad(part: number, width: number): string {
   return String(part).padStart(width, '0');
@@ -32,7 +40,8 @@ export function formatDateOnly(date: Date | null): string | null {
 }
 
 /**
- * `yyyy-MM-dd` → `Date` опівночі МІСЦЕВОГО часу; `null` — порожньо, не той формат чи не дата.
+ * `yyyy-MM-dd` (або `yyyy-MM-ddT00:00:00`) → `Date` опівночі МІСЦЕВОГО часу; `null` — порожньо, не той
+ * формат чи не дата.
  *
  * ⚠ Розбір рядком `…T00:00:00`, а не `new Date(y, m, d)`: конструктор читає роки 0–99 як 1900–1999.
  * ⚠ Неіснуючий день (`2026-02-30`) — `null`, а не мовчки друге березня: рушій перекочує його в
@@ -42,7 +51,7 @@ export function parseDateOnly(value: string | null | undefined): Date | null {
   const parts = value === null || value === undefined ? null : DateOnly.exec(value);
   if (parts === null) return null;
 
-  const parsed = new Date(`${parts[0]}T00:00:00`);
+  const parsed = new Date(`${parts[1]}-${parts[2]}-${parts[3]}T00:00:00`);
 
   return parsed.getMonth() + 1 === Number(parts[2]) && parsed.getDate() === Number(parts[3]) ? parsed : null;
 }

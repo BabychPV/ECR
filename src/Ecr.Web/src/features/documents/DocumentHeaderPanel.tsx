@@ -6,7 +6,7 @@ import { queryKeys } from '@/api/queryKeys';
 import type { components } from '@/api/schema';
 import type { RegistryDefDto, RegistryEntryDto, UnitRef } from '@/api/types';
 import { coerce } from '@/features/grid/edits';
-import { cellText, sameCellValue } from '@/features/grid/cellValue';
+import { cellText, sameCellValue, sameDateValue } from '@/features/grid/cellValue';
 import { lookupCellDisplay } from '@/features/grid/LookupCellEditor';
 import { unitCellDisplay } from '@/features/grid/UnitCellEditor';
 import { formatDateOnly, parseDateOnly, todayDateOnly } from '@/shared/format';
@@ -135,8 +135,13 @@ function effectiveValueOf(field: DocumentHeaderField, raw: unknown): unknown {
  * (`cellText(null) === ''`). Без цього зведення непорушене порожнє поле
  * вважалося б «зміненим» на кожному відкритті панелі.
  */
-function sameHeaderValue(a: unknown, b: unknown): boolean {
+function sameHeaderValue(field: DocumentHeaderField, a: unknown, b: unknown): boolean {
   const normalize = (value: unknown): unknown => (value === '' ? null : value);
+
+  // ⚠ T7-01: `Date` сервер віддає як `2026-10-07T00:00:00`, а поле повертає `2026-10-07` — та
+  // сама дата (той самий `sameDateValue`, що для комірок сітки), інакше повторний вибір того
+  // самого дня позначав би шапку зміненою.
+  if (field.dataType === 'Date') return sameDateValue(normalize(a), normalize(b));
 
   return sameCellValue(normalize(a), normalize(b));
 }
@@ -385,7 +390,7 @@ export function DocumentHeaderPanel({
   const seedFields = seed !== null && seed.documentId === documentId ? fieldsOf(seed.dto) : [];
 
   const dirty = seedFields.filter(
-    (field) => !sameHeaderValue(effectiveValueOf(field, draft[field.code]), field.value),
+    (field) => !sameHeaderValue(field, effectiveValueOf(field, draft[field.code]), field.value),
   );
 
   // ⚠ Наповнюється при зміні відповіді, а не в ефекті (той самий прийом, що

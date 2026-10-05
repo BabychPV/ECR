@@ -837,3 +837,113 @@ describe('DocumentHeaderPanel: поле Unit (R-01)', () => {
     });
   });
 });
+
+/**
+ * T7-01: поле `Date` після перезавантаження було ПОРОЖНІМ, хоча значення в базі є. Сервер віддає
+ * `DateTime` шапки як `2026-10-07T00:00:00` (`HeaderValueMapping.ToRuleValue` → System.Text.Json),
+ * а `parseDateOnly` приймав лише `yyyy-MM-dd`.
+ *
+ * ⚠ Пояс тут — пояс машини (у потоці `vmThreads` його не задати). Три пояси (Kyiv, Pago_Pago,
+ * Kiritimati) для самого розбору — `shared/format/__tests__/dateOnly.zones.test.ts`; цей файл руками
+ * прогнано з `TZ=` кожного з них (2026-10-05, зелено).
+ * Мутаційний доказ (руками, 2026-10-05): строгий `yyyy-MM-dd` у `parseDateOnly` → червоні
+ * «поле заповнене» і «повторне збереження».
+ */
+describe('DocumentHeaderPanel: дата шапки з сервера (T7-01)', () => {
+  async function dateInput(): Promise<HTMLInputElement> {
+    await waitFor(() => expect(screen.queryByLabelText('Date')).not.toBeNull(), { timeout: 10_000 });
+
+    return screen.getByLabelText('Date') as HTMLInputElement;
+  }
+
+  it('2026-10-07T00:00:00 з сервера — поле заповнене тим самим днем', async () => {
+    show({
+      fields: [field({ code: 'REPORT_DATE', dataType: 'Date', value: '2026-10-07T00:00:00', label: { values: { en: 'Date' } } })],
+    });
+
+    await waitFor(async () => expect((await dateInput()).value).toBe('2026-10-07'));
+    expect((await screen.findByRole('button', { name: '⟦common.save⟧' })).hasAttribute('disabled')).toBe(true);
+  });
+
+  it('повторне збереження шапки НЕ стирає дату: у PATCH лише змінене поле, поле дати лишається заповненим', async () => {
+    show({
+      fields: [
+        field({ code: 'NOTE', dataType: 'String', value: 'стара' }),
+        field({
+          code: 'REPORT_DATE',
+          dataType: 'Date',
+          headerFieldDefId: 2,
+          value: '2026-10-07T00:00:00',
+          label: { values: { en: 'Date' } },
+        }),
+      ],
+    });
+
+    await waitFor(async () => expect((await dateInput()).value).toBe('2026-10-07'));
+
+    fireEvent.change(await screen.findByLabelText('Label'), { target: { value: 'нова' } });
+    fireEvent.click(await screen.findByRole('button', { name: '⟦common.save⟧' }));
+
+    await waitFor(() => expect(sent.length).toBe(1));
+    expect(sent[0]?.body).toEqual({
+      fields: [{ code: 'NOTE', isEmpty: false, value: 'нова' }],
+      baseVersion: HeaderVersion,
+    });
+    await waitFor(async () => expect((await dateInput()).value).toBe('2026-10-07'));
+  });
+
+  it('той самий день, введений знову, — не зміна; інший день іде в PATCH як yyyy-MM-dd', async () => {
+    show({
+      fields: [field({ code: 'REPORT_DATE', dataType: 'Date', value: '2026-10-07T00:00:00', label: { values: { en: 'Date' } } })],
+    });
+
+    const input = await dateInput();
+    await waitFor(() => expect(input.value).toBe('2026-10-07'));
+
+    fireEvent.change(input, { target: { value: '2026-10-08' } });
+    await waitFor(async () =>
+      expect((await screen.findByRole('button', { name: '⟦common.save⟧' })).hasAttribute('disabled')).toBe(false),
+    );
+
+    // ⛔ Мутаційний доказ (руками, 2026-10-05): `sameCellValue` замість `sameDateValue` для `Date` —
+    // `2026-10-07` проти `2026-10-07T00:00:00` лишає шапку «зміненою», і цей рядок червоніє.
+    fireEvent.change(input, { target: { value: '2026-10-07' } });
+    await waitFor(async () =>
+      expect((await screen.findByRole('button', { name: '⟦common.save⟧' })).hasAttribute('disabled')).toBe(true),
+    );
+
+    fireEvent.change(input, { target: { value: '2026-10-08' } });
+    fireEvent.click(await screen.findByRole('button', { name: '⟦common.save⟧' }));
+    await waitFor(() => expect(sent.length).toBe(1));
+    expect(sent[0]?.body).toEqual({
+      fields: [{ code: 'REPORT_DATE', isEmpty: false, value: '2026-10-08' }],
+      baseVersion: HeaderVersion,
+    });
+  });
+
+  it('значення з часом чи поясом — поле порожнє (не обрізане до дня), і збереження іншого поля його НЕ стирає', async () => {
+    show({
+      fields: [
+        field({ code: 'NOTE', dataType: 'String', value: 'стара' }),
+        field({
+          code: 'REPORT_DATE',
+          dataType: 'Date',
+          headerFieldDefId: 2,
+          value: '2026-10-07T10:30:00Z',
+          label: { values: { en: 'Date' } },
+        }),
+      ],
+    });
+
+    expect((await dateInput()).value).toBe('');
+
+    fireEvent.change(await screen.findByLabelText('Label'), { target: { value: 'нова' } });
+    fireEvent.click(await screen.findByRole('button', { name: '⟦common.save⟧' }));
+
+    await waitFor(() => expect(sent.length).toBe(1));
+    expect(sent[0]?.body).toEqual({
+      fields: [{ code: 'NOTE', isEmpty: false, value: 'нова' }],
+      baseVersion: HeaderVersion,
+    });
+  });
+});
