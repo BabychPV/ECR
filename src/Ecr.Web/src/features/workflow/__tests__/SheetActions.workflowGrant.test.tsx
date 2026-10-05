@@ -215,24 +215,23 @@ describe('effectiveGrant: дзеркало EditRules.Effective для аркуш
 
 describe('SheetActions: «Submit» закрито тим самим порогом, що й у сервера', () => {
   it(
-    'грант Write (рівно випадок зі знімка 07-document-open.png) — кнопки «Submit» немає',
+    'D-285: грант Write БЕЗ Document.Submit у /me — «Submit» активна (рішення за сервером: 403)',
     async () => {
       show({ grants: { 'Project:7': 'Write' }, state: 'Draft' });
       await anchor();
 
-      // ⛔ Мутаційний доказ: поверни умову показу на саме `isAllowed('submit',
-      // state)` — і цей рядок стане червоним, бо з'явиться ДІЮЧА кнопка.
-      //
-      // ✎ `F-17`: кнопка тепер є, але вимкнена й пояснена (`submit-needs-grant`)
-      // — зникнення без причини було другою половиною дефекту.
-      expect(activeSubmit()).toBeNull();
-      expect(screen.getByTestId('submit-needs-grant').getAttribute('aria-disabled')).toBe('true');
+      // ⛔ Мутаційний доказ: поверни умову `can(me, 'Document.Submit')` у
+      // `canSubmit` — тут буде null. /me не віддає проєктних прав ролей з
+      // областю, тож клієнт сам не відмовляє: це робить сервер (round4-тест).
+      // ✎ F-17 (вимкнена кнопка для Write) прибрано рішенням координатора.
+      expect(activeSubmit()).not.toBeNull();
+      expect(screen.queryByTestId('submit-needs-grant')).toBeNull();
     },
     SlowEnvTimeout,
   );
 
   it(
-    'D-285: грант Write + право Document.Submit — діюча кнопка «Submit», пояснення F-17 немає',
+    'D-285: грант Write + право Document.Submit — діюча кнопка «Submit»',
     async () => {
       show({
         grants: { 'Project:7': 'Write' },
@@ -240,7 +239,6 @@ describe('SheetActions: «Submit» закрито тим самим порого
         state: 'Draft',
       });
 
-      // ⛔ Мутаційний доказ: прибери гілку права з `canSubmit` — червоніє.
       expect(
         await screen.findByRole('button', { name: /submit/i }, { timeout: SlowEnvTimeout }),
       ).toBeTruthy();
@@ -296,7 +294,9 @@ describe('SheetActions: «Submit» закрито тим самим порого
   it(
     'грант Manage на проєкт, але Write на цей аркуш — «Submit» немає',
     async () => {
-      show({ grants: { 'Project:7': 'Manage', 'Sheet:42': 'Write' }, state: 'Draft' });
+      // ✎ D-285: поріг клієнта — Write (право Document.Submit перевіряє сервер),
+      // тож звужуємо аркуш до Read: найдрібніший оголошений рівень виграє.
+      show({ grants: { 'Project:7': 'Manage', 'Sheet:42': 'Read' }, state: 'Draft' });
       await anchor();
 
       expect(activeSubmit()).toBeNull();
