@@ -74,6 +74,12 @@ public sealed class SubmitSheetHandler(
     // самій транзакції, що й зріз (`IAuditWriter`, C4).
     IAuditWriter audit)
 {
+    /// <summary>
+    /// Ключ тексту відмови подання з причиною <c>InsufficientGrantLevel</c> (D-285):
+    /// називає й право <c>Document.Submit</c>, на відміну від загального <c>deny.InsufficientGrantLevel</c>.
+    /// </summary>
+    public const string SubmitInsufficientLevelReasonKey = "deny.InsufficientGrantLevel.Submit";
+
     /// <summary>Тип події аудиту: подавач підтвердив попередження валідації (ФВ-5.19).</summary>
     public const string WarningsAcknowledgedEventType = "SheetSubmitWarningsAcknowledged";
 
@@ -212,7 +218,12 @@ public sealed class SubmitSheetHandler(
                     ["messageKey"] = "err.ECR-ACCS-0403.submitDenied",
                     ["sheetDefId"] = sheetDefId.ToString(System.Globalization.CultureInfo.InvariantCulture),
                     ["reason"] = decision.Reason.ToString(),
-                    ["reasonKey"] = $"deny.{decision.Reason}",
+                    // ✎ D-285: «рівень замалий» для ПОДАННЯ має власний текст — він
+                    // називає право Document.Submit; загальний `deny.InsufficientGrantLevel`
+                    // бачать і при вставці в комірку, і при погодженні.
+                    ["reasonKey"] = decision.Reason == EditDenyReason.InsufficientGrantLevel
+                        ? SubmitInsufficientLevelReasonKey
+                        : $"deny.{decision.Reason}",
                 });
         }
 

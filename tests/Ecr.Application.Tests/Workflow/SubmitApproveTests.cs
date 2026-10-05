@@ -608,6 +608,27 @@ public sealed class SubmitApproveTests
         await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
     }
 
+    /// <summary>
+    /// D-285: відмова ПОДАННЯ за рівнем має власний reasonKey (текст називає право
+    /// Document.Submit); інша причина лишає загальний <c>deny.&lt;Reason&gt;</c>.
+    /// ⛔ Мутація: повернути <c>$"deny.{decision.Reason}"</c> для всіх — перший рядок червоніє.
+    /// </summary>
+    [Theory]
+    [InlineData(EditDenyReason.InsufficientGrantLevel, "deny.InsufficientGrantLevel.Submit")]
+    [InlineData(EditDenyReason.NoGrant, "deny.NoGrant")]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Decision", "D-285")]
+    public async Task Відмова_у_поданні_несе_ключ_причини_подання(EditDenyReason reason, string expectedKey)
+    {
+        _access.CanSubmitAsync(Arg.Any<AccessProfile>(), Document, Water, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+               .Returns(EditDecision.Deny(reason, "x"));
+
+        var error = await Assert.ThrowsAsync<AccessDeniedException>(
+            () => Submit().HandleAsync(Document, Water, Period, CancellationToken.None));
+
+        Assert.Equal(expectedKey, error.Details!["reasonKey"]);
+    }
+
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
     public async Task T1_05_Відмова_у_погодженні_несе_ключ_причини()
     {

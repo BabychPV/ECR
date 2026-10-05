@@ -46,6 +46,7 @@ public sealed class SubmitRightApiTests(SqlServerFixture sql)
         var body = await ExpectAsync(app, HttpStatusCode.Forbidden, SubmitAsync(client, b)).ConfigureAwait(true);
 
         Assert.Equal("InsufficientGrantLevel", ReasonOf(body));
+        Assert.Contains("deny.InsufficientGrantLevel.Submit", body, StringComparison.Ordinal);
         Assert.Null(await StatusAsync(b).ConfigureAwait(true));
     }
 
@@ -187,6 +188,52 @@ public sealed class SubmitRightApiTests(SqlServerFixture sql)
         Assert.Null(await StatusAsync(b).ConfigureAwait(true));
     }
 
+    /// <summary>
+    /// Право Document.Submit, видане роллю з областю «проєкт документа», подає в цьому
+    /// проєкті. ⛔ Мутація: у <c>EditRules.MeetsSubmit</c> перевіряти право глобально
+    /// (<c>profile.Has(code)</c>) — роль з областю його не дає, тест червоний.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "D-285")]
+    public async Task Право_Submit_ролі_з_областю_проєкту_подає_в_цьому_проєкті()
+    {
+        var b = await ArrangeAsync().ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(
+                app, b, GrantLevel.Write, permissions: [Right],
+                scopeJson: RoleAssignmentScope.Create([b.ProjectId], null, null, null).ToJson())
+            .ConfigureAwait(true);
+
+        await ExpectAsync(app, HttpStatusCode.NoContent, SubmitAsync(client, b)).ConfigureAwait(true);
+
+        Assert.Equal(DocumentStatus.Submitted, await StatusAsync(b).ConfigureAwait(true));
+    }
+
+    /// <summary>
+    /// Роль, ЗВУЖЕНА аркушами (D-214), права Document.Submit не дає: воно не Narrowable —
+    /// відомий наслідок, Narrowable не розширюємо. Рівень Write на аркуші є, права немає → 403.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "D-285")]
+    public async Task Право_Submit_ролі_звуженої_аркушами_не_діє_403()
+    {
+        var b = await ArrangeAsync().ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(
+                app, b, GrantLevel.Write, permissions: [Right],
+                scopeJson: RoleAssignmentScope.Create([b.ProjectId], [b.SheetCode], null, null).ToJson())
+            .ConfigureAwait(true);
+
+        var body = await ExpectAsync(app, HttpStatusCode.Forbidden, SubmitAsync(client, b)).ConfigureAwait(true);
+
+        Assert.Equal("InsufficientGrantLevel", ReasonOf(body));
+        Assert.Null(await StatusAsync(b).ConfigureAwait(true));
+    }
+
     // ───────────────────────────── допоміжне ─────────────────────────────
 
     private static string ReasonOf(string body)
@@ -266,7 +313,8 @@ public sealed class SubmitRightApiTests(SqlServerFixture sql)
 
     /// <summary>Користувач з роллю: грант на проєкт документа (+ заборона на аркуш) і названі права.</summary>
     private async Task<HttpClient> SignedInAsync(
-        EcrApiFactory app, TestDocument b, GrantLevel level, string[] permissions, bool denySheet = false)
+        EcrApiFactory app, TestDocument b, GrantLevel level, string[] permissions, bool denySheet = false,
+        string? scopeJson = null)
     {
         var name = $"d285_{Guid.NewGuid():N}"[..20];
 
@@ -288,7 +336,8 @@ public sealed class SubmitRightApiTests(SqlServerFixture sql)
                 db.RolePermissions.Add(new RolePermission(role.Id, permission));
             }
 
-            db.RoleAssignments.Add(new RoleAssignment(role.Id, user.Id, principalSid: null));
+            var assignment = new RoleAssignment(role.Id, user.Id, principalSid: null);
+            db.RoleAssignments.Add(assignment);
             db.ResourceGrants.Add(new ResourceGrant(role.Id, ResourceKind.Project, b.ProjectId, level));
             if (denySheet)
             {
@@ -296,6 +345,13 @@ public sealed class SubmitRightApiTests(SqlServerFixture sql)
             }
 
             await db.SaveChangesAsync().ConfigureAwait(false);
+
+            if (scopeJson is not null)
+            {
+                await db.Database.ExecuteSqlInterpolatedAsync(
+                        $"UPDATE sec.RoleAssignment SET ScopeJson = {scopeJson} WHERE Id = {assignment.Id}")
+                    .ConfigureAwait(false);
+            }
         }
 
         var client = app.CreateClient();

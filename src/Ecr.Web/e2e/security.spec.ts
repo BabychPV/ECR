@@ -478,7 +478,7 @@ async function expectPasteDenied(page: Page): Promise<void> {
   // що `EditRules.CanEdit` знову злив «немає гранта» і «грант замалий».
   await expect(
     page.getByText(
-      'Your access level is too low for this action: ask for a higher level. To submit a sheet you need the Submit level, or the Write level together with the Submit documents right in this project.',
+      'Your grant level is too low for this action: ask for a higher grant level, not a new grant.',
     ),
     'причина відмови не збігається з очікуваною (deny.InsufficientGrantLevel)',
   ).toBeVisible();

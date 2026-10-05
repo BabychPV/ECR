@@ -144,6 +144,48 @@ public sealed class SubmitRightRulesTests
             EditRules.CanSubmit(profile, AccessBuilder.Cell(sheet: DocumentStatus.Approved), false).Reason);
     }
 
+    /// <summary>
+    /// Право від ролі з областю «проєкт X»: подає в X, не подає в Y (Write у обох).
+    /// ⛔ Мутація: у <c>MeetsSubmit</c> глобальна перевірка (<c>profile.Has(code)</c>) або
+    /// ігнор <c>projectId</c> в <c>IsGrantedIn</c> — перший рядок чи другий червоніє.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Decision", "D-285")]
+    public void Право_від_ролі_з_областю_діє_лише_в_її_проєкті()
+    {
+        const int other = AccessBuilder.ProjectId + 1;
+        var profile = new AccessProfile
+        {
+            CacheKey = "u7:s1",
+            UserId = 7,
+            SecurityStamp = "s1",
+            Permissions = new HashSet<string>(),
+            Grants = new Dictionary<string, GrantLevel>
+            {
+                [$"{ResourceKind.Project}:{AccessBuilder.ProjectId}"] = GrantLevel.Write,
+                [$"{ResourceKind.Project}:{other}"] = GrantLevel.Write,
+            },
+            Denies = new HashSet<string>(),
+            RoleIds = new HashSet<int>(),
+            Scoped = new Dictionary<int, ScopedProjectAccess>
+            {
+                [AccessBuilder.ProjectId] = new(
+                    new Dictionary<string, GrantLevel>(),
+                    new HashSet<string>(),
+                    new HashSet<int>(),
+                    new HashSet<string> { Right }),
+            },
+        };
+
+        Assert.True(EditRules.CanSubmit(profile, AccessBuilder.Cell(), hasBlockingErrors: false).IsAllowed);
+
+        var inOther = AccessBuilder.Cell() with { ProjectId = other };
+        Assert.Equal(
+            EditDenyReason.InsufficientGrantLevel,
+            EditRules.CanSubmit(profile, inOther, hasBlockingErrors: false).Reason);
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait("Decision", "D-285")]
