@@ -272,7 +272,7 @@ public static class RegistryKeyDuplicateScan
 
     /// <summary>Збережене значення поля у формі, яку приймає <see cref="RegistryKeyNormalizer"/>.</summary>
     /// <remarks>Те саме відображення, що в <c>RegistryKeyService</c> (рядки ключів при записі).</remarks>
-    private static object? StoredPart(CellDataType dataType, RegistryValue? value)
+    internal static object? StoredPart(CellDataType dataType, RegistryValue? value)
         => value is null
             ? null
             : dataType switch
