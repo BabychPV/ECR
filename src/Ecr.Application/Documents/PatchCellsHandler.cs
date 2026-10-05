@@ -2662,10 +2662,24 @@ public sealed partial class PatchCellsHandler(
         // рядок може бути незавершеним посеред заповнення, і це нормальний стан.
         foreach (var row in request.Rows)
         {
+            // ⛔ A1-07: значення — ТИПІЗОВАНІ тим самим розбором, що й запис
+            // (`CellValueReader.Read` у `Distribute`, культура користувача), а не
+            // сирі з запиту: клієнт шле Decimal РЯДКОМ, і як Text `[A] > 0` давало
+            // `#VALUE` → Warning `ECR-VAL-RULE` на коректних даних.
+            var typed = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+            foreach (var record in upserts)
+            {
+                if (byRowId.GetValueOrDefault(record.Address.TableRowId) == row.RowKey
+                    && snapshot.ColumnsById.TryGetValue(record.Address.ColumnDefId, out var rowColumn))
+                {
+                    typed[rowColumn.Code] = Ecr.Expressions.Evaluation.CellValueMapping.ToRuleValue(record.Value);
+                }
+            }
+
             messages.AddRange(validation
                 .ValidateScope(
-                    scope: 1, rules, new PatchRowValidationContext(row), headerValues, currentUser.Language,
-                    registryFields)
+                    scope: 1, rules, new PatchRowValidationContext(row.RowKey, typed), headerValues,
+                    currentUser.Language, registryFields)
                 .Select(m => m with { RowKey = row.RowKey }));
         }
 
@@ -2676,18 +2690,16 @@ public sealed partial class PatchCellsHandler(
     /// <remarks>
     /// ⚠ Правило рівня рядка бачить те, що клієнт ЩОЙНО надіслав, а не те, що
     /// лежить у базі: перевіряти треба намір користувача, інакше повідомлення
-    /// стосувалося б стану, який зараз перезаписується.
+    /// стосувалося б стану, який зараз перезаписується. Значення вже розібрані
+    /// за типом колонки (див. <see cref="Validate"/>); стерта комірка — відсутня.
     /// </remarks>
-    private sealed class PatchRowValidationContext(PatchRow row) : Validation.IValidationContext
+    private sealed class PatchRowValidationContext(string rowKey, IReadOnlyDictionary<string, object?> values)
+        : Validation.IValidationContext
     {
-        public object? GetCell(string columnCode)
-            => CellValueReader.Normalize(
-                row.Cells
-                   .FirstOrDefault(c => string.Equals(c.ColumnCode, columnCode, StringComparison.OrdinalIgnoreCase))
-                   ?.Value);
+        public object? GetCell(string columnCode) => values.GetValueOrDefault(columnCode);
 
-        public object? GetCell(string rowKey, string columnCode)
-            => string.Equals(rowKey, row.RowKey, StringComparison.Ordinal) ? GetCell(columnCode) : null;
+        public object? GetCell(string otherRowKey, string columnCode)
+            => string.Equals(otherRowKey, rowKey, StringComparison.Ordinal) ? GetCell(columnCode) : null;
     }
 
     /// <summary>
