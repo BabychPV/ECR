@@ -4057,6 +4057,8 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/registries/{code}/external-keys` | `Registry.EditData` | 8 |
 | `DELETE` | `/api/v1/registries/{code}/external-keys/{id}` | `Registry.EditData` | 8 |
 
+> ✎ 2026-10-05: `GET /documents/{id}` — `sheetStates` і `sheets` повертаються лише за вказаного `periodKey`: стан робочого процесу має гранулярність «аркуш × період» (`D-38`); без `periodKey` обидва поля порожні — це свідомо (`DocumentSummary`: «порожньо без періоду»). Клієнт завжди передає `periodKey`.
+
 > ✎ 2026-09-30 (ФВ-2.6/2.7): `GET /documents/{id}/tables/{tableInstanceId}` → `TableSliceDto.cellFormats`
 > (необов'язкове; `null`/відсутнє = правил немає) — `{ "{rowKey}:{columnCode}": { backgroundHex, foregroundHex, isBold } }`,
 > той самий ключ, що `cellPermissions`. Це ГОТОВИЙ результат правил версії шаблону
@@ -4156,7 +4158,8 @@ public sealed class NotFoundException(string errorCode, string message)
 > дроті незмінні.
 
 > ✎ 2026-10-02 (ФВ-8.14, B5.4): `UsageItemDto` дістала необов'язкове `name` (читабельна
-> назва: колонка шаблону, поле довідника, методика; `null` — назви немає, клієнт показує`n> `label`). `label` лишається кодом — семантику не змінено.
+> назва: колонка шаблону, поле довідника, методика; `null` — назви немає, клієнт показує
+> `label`). `label` лишається кодом — семантику не змінено.
 
 > ✎ 2026-10-05 (AN-35, L5-02, **breaking для старих клієнтів**): `PUT /registries/{code}/definition/draft`
 > потребує заголовок `If-Match` = `definitionVersion` опису, з якого збудовано форму (як
