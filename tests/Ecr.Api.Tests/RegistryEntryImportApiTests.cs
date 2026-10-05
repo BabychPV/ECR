@@ -298,6 +298,32 @@ public sealed class RegistryEntryImportApiTests(SqlServerFixture sql)
     [Trait(TestCategories.Stage, TestCategories.Stage4)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Directive", "BE-24")]
+    public async Task Коди_що_різняться_лише_регістром_у_файлі_це_дубль()
+    {
+        // L5-07: HashSet дублів був регістрозалежним, база (колація) — ні: «new…» і «NEW…» проходили
+        // перевірку файлу як різні рядки одного запису.
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, "Registry.EditData").ConfigureAwait(true);
+
+        var fixture = await SeedAsync().ConfigureAwait(true);
+
+        var csv = $"code,Name\r\nNEW{fixture.Tag},One\r\nnew{fixture.Tag},Two\r\n";
+        var response = await ImportAsync(client, fixture.Code, csv, dryRun: true).ConfigureAwait(true);
+
+        Assert.True(response.IsSuccessStatusCode, $"{response.StatusCode}: {app.ErrorsText}");
+        var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync().ConfigureAwait(true)).RootElement;
+
+        Assert.False(body.GetProperty("applied").GetBoolean());
+        Assert.Equal(1, body.GetProperty("added").GetInt32());
+        var error = Assert.Single(body.GetProperty("errors").EnumerateArray());
+        Assert.Equal(3, error.GetProperty("row").GetInt32());
+        Assert.Equal("err.ECR-REG-0422.entryCodeDuplicateInFile", error.GetProperty("messageKey").GetString());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "BE-24")]
     public async Task Без_права_Registry_EditData_імпорт_дає_403()
     {
         // ⚠ Користувач із ЧИТАННЯМ довідників: інакше тест не розрізняв би
