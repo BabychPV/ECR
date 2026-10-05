@@ -32,7 +32,8 @@ public sealed class MethodologyEffectiveDateClashErrorTests
         Assert.Equal(409, problem.GetProperty("status").GetInt32());
         Assert.Equal("ECR-CALC-0409", problem.GetProperty("errorCode").GetString());
         Assert.Equal("2026-10-01", problem.GetProperty("effectiveFrom").GetString());
-        Assert.Equal("err.ECR-CALC-0409.effectiveDateTaken", problem.GetProperty("messageKey").GetString());
+        Assert.Equal("err.ECR-CALC-0409.effectiveDateTakenNoVersion", problem.GetProperty("messageKey").GetString());
+        Assert.False(problem.TryGetProperty("version", out _));
     }
 
     [Fact]
