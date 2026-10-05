@@ -194,11 +194,15 @@ public sealed class RecallSheetHandler(
         return new RecallAvailabilityDto(state.IsRecallable(firstStepId));
     }
 
+    // ✎ D-285: «подавав би» = ті самі повноваження, що й подання
+    // (`EditRules.MeetsSubmit`): рівень Submit АБО Write + `Document.Submit`.
     private static bool HasSubmitGrant(AccessProfile profile, int? projectId, int sheetDefId)
         => !profile.IsSimulation
            && projectId is { } project
-           && EditRules.Effective(profile, new CellAccessContext { ProjectId = project, SheetDefId = sheetDefId })
-           >= GrantLevel.Submit;
+           && EditRules.MeetsSubmit(
+               profile,
+               project,
+               EditRules.Effective(profile, new CellAccessContext { ProjectId = project, SheetDefId = sheetDefId }));
 
     /// <summary>Перший крок ЧИННОГО маршруту — той самий вибір, що в <c>CurrentApprovalStepAsync</c>.</summary>
     private async Task<int?> FirstStepIdAsync(long documentId, int? projectId, CancellationToken ct)
