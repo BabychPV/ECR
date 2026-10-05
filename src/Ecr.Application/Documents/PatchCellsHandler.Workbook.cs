@@ -86,6 +86,7 @@ public sealed partial class PatchCellsHandler
         foreach (var request in requests)
         {
             Blamed(request.TableInstanceId, request.EnsureWithinCellLimit);
+            Blamed(request.TableInstanceId, request.EnsureNoDuplicates);
         }
 
         var userId = ResolveUserId();

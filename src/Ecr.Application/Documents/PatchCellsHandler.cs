@@ -87,6 +87,10 @@ public sealed partial class PatchCellsHandler(
         // Контролер перевіряє те саме ще раніше; тут — для викликачів поза HTTP.
         request.EnsureWithinCellLimit();
 
+        // ⛔ L6-10: дубль RowKey чи колонки в рядку — 422 тут, а не 500 у
+        // ToDictionary/MERGE/первинному ключі нижче.
+        request.EnsureNoDuplicates();
+
         var context = await LoadContextAsync(request, resolvedInstance, ct).ConfigureAwait(false);
 
         // ⛔ Порожній пакет — no-op (V-02, третій раунд UX-проходу). До цього
