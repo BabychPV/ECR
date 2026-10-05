@@ -182,6 +182,13 @@ public sealed class RegistryEntryHistoryExportHttpTests(SqlServerFixture sql)
         Assert.Equal($"P{fixture.Main.Tag},Печь,{Precise},TARGET{fixture.Target.Tag},{fixture.UnitCode}", lines[1]);
 
         var before = Assert.Single(Items(await GetAsync(client, $"/api/v1/registries/{fixture.Main.Code}/rows?asOf=2026-07-01")));
+        int revisionBefore;
+        DateTime? changedBefore;
+        await using (var db = new EcrDbContext(Options()))
+        {
+            var def = await db.RegistryDefs.AsNoTracking().SingleAsync(d => d.Id == fixture.Main.Id);
+            (revisionBefore, changedBefore) = (def.DataRevision, def.DataChangedAt);
+        }
 
         using var content = new MultipartFormDataContent();
         var file = new ByteArrayContent(bytes);
@@ -193,9 +200,18 @@ public sealed class RegistryEntryHistoryExportHttpTests(SqlServerFixture sql)
         Assert.True(imported.StatusCode == HttpStatusCode.OK, $"{imported.StatusCode}: {report}");
         Assert.Empty(report.GetProperty("errors").EnumerateArray());
         Assert.Equal(0, report.GetProperty("added").GetInt32());
-        // Імпорт рахує «updated» кожен рядок зі значеннями, навіть тими самими, тож доказ «нічого не
-        // змінилося» — рядок сітки й історія запису: жодної версії значень після створення.
-        Assert.Equal(1, report.GetProperty("updated").GetInt32());
+        // L5-04: власний експорт нічого не змінює — звіт «updated=0, unchanged=1, applied=false», ревізія
+        // даних і мітка зміни не рухаються (інакше застарівають прогони розрахунків).
+        Assert.Equal(0, report.GetProperty("updated").GetInt32());
+        Assert.Equal(1, report.GetProperty("unchanged").GetInt32());
+        Assert.False(report.GetProperty("applied").GetBoolean());
+        await using (var db = new EcrDbContext(Options()))
+        {
+            var def = await db.RegistryDefs.AsNoTracking().SingleAsync(d => d.Id == fixture.Main.Id);
+            Assert.Equal(revisionBefore, def.DataRevision);
+            Assert.Equal(changedBefore, def.DataChangedAt);
+        }
+
         var after = Assert.Single(Items(await GetAsync(client, $"/api/v1/registries/{fixture.Main.Code}/rows?asOf=2026-07-01")));
         Assert.Equal(before.GetProperty("values").ToString(), after.GetProperty("values").ToString());
         var history = Items(await GetAsync(client, $"/api/v1/registries/{fixture.Main.Code}/entries/{after.GetProperty("id").GetInt64()}/history"));

@@ -418,7 +418,10 @@ public sealed class ImportRegistryEntriesHandler(
                 valueChanges.Add((entry, changes));
             }
 
-            var outcome = isNew ? RowOutcome.Added : values.Count == 0 ? RowOutcome.Unchanged : RowOutcome.Updated;
+            // ⛔ Аудит 2026-10-03 (L5-04): «оновлено» — лише якщо writer справді щось змінив. Рахувати за
+            // `values.Count` означало, що повторний імпорт власного експорту давав updated=N,
+            // піднімав ревізію даних і мітку зміни та робив застарілими прогони розрахунків.
+            var outcome = isNew ? RowOutcome.Added : changes.Count == 0 ? RowOutcome.Unchanged : RowOutcome.Updated;
             if (outcome != RowOutcome.Unchanged)
             {
                 touched.Add(entry);
