@@ -115,6 +115,12 @@ public sealed class ImportRegistryEntriesHandler(
     /// <summary>Ключ помилки рядка: первинний ключ рядка і його код указують на різні записи.</summary>
     public const string KeyCodeMismatchKey = "err.ECR-REG-4092.keyCodeMismatch";
 
+    /// <summary>Файл закінчується всередині лапок (L5-11).</summary>
+    public const string UnterminatedQuoteKey = "err.ECR-REG-0422.entriesCsvUnterminatedQuote";
+
+    /// <summary>Файл не в UTF-8 (L5-11).</summary>
+    public const string NotUtf8Key = "err.ECR-REG-0422.entriesCsvNotUtf8";
+
     /// <summary>Стеля розміру файлу, коли конфіг не задає іншої.</summary>
     public const int DefaultMaxBytes = 1024 * 1024;
 
@@ -128,8 +134,9 @@ public sealed class ImportRegistryEntriesHandler(
     /// <param name="maxBytes">Стеля розміру.</param>
     /// <param name="dryRun">Лише звіт, без запису.</param>
     /// <param name="ct">Токен скасування.</param>
+    /// <param name="contentNotUtf8">Файл не декодується як UTF-8 (контролер) — відмова 422 після перевірки права.</param>
     public async Task<RegistryEntryImportReport> HandleAsync(
-        string registryCode, string content, long sizeBytes, int maxBytes, bool dryRun, CancellationToken ct)
+        string registryCode, string content, long sizeBytes, int maxBytes, bool dryRun, CancellationToken ct, bool contentNotUtf8 = false)
     {
         ArgumentNullException.ThrowIfNull(content);
 
@@ -163,7 +170,23 @@ public sealed class ImportRegistryEntriesHandler(
         // якого не буде.
         ExternalRegistryGuard.EnsureManualEditAllowed(definition);
 
-        var records = CsvReader.Parse(content);
+        // ⛔ L5-11: файл не в UTF-8 (cp1251 із Excel) контролер раніше декодував із підстановкою «�» і
+        // тихо псував кирилицю; тепер він лише позначає це, а відмову (після перевірки права) дає тут.
+        if (contentNotUtf8)
+        {
+            throw Invalid(NotUtf8Key, "Файл не в кодуванні UTF-8.", registryCode);
+        }
+
+        IReadOnlyList<IReadOnlyList<string>> records;
+        try
+        {
+            records = CsvReader.Parse(content);
+        }
+        catch (FormatException)
+        {
+            throw Invalid(UnterminatedQuoteKey, "У файлі CSV є незакрита лапка.", registryCode);
+        }
+
         var header = records.Count > 0 ? records[0] : [];
         var codeColumn = IndexOf(header, "code");
 

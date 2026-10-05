@@ -112,7 +112,17 @@ public sealed class UiStringImportHandler(
         await RequireTranslationLanguageAsync(catalog, languageCode, ct).ConfigureAwait(false);
         RequireSize(sizeBytes, maxBytes);
 
-        var records = CsvReader.Parse(content);
+        IReadOnlyList<IReadOnlyList<string>> records;
+        try
+        {
+            records = CsvReader.Parse(content);
+        }
+        catch (FormatException)
+        {
+            // L5-11: CsvReader більше не приймає файл, обірваний всередині лапок, — 422, а не 500.
+            throw Invalid("err.ECR-REQ-0422.uiStringCsvUnterminatedQuote", "У файлі CSV є незакрита лапка.", languageCode);
+        }
+
         var header = records.Count > 0 ? records[0] : [];
         var keyColumn = IndexOf(header, "key");
         var valueColumn = IndexOf(header, languageCode);

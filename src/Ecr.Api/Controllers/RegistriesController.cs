@@ -299,14 +299,25 @@ public sealed class RegistriesController(
 
         // Понад стелю файл не читається — обробник відмовить після перевірки права.
         var content = string.Empty;
+        var notUtf8 = false;
         if (file.Length <= maxBytes)
         {
-            using var reader = new StreamReader(file.OpenReadStream(), System.Text.Encoding.UTF8);
-            content = await reader.ReadToEndAsync(ct).ConfigureAwait(false);
+            // ⛔ L5-11: строге декодування. Файл із Excel у cp1251 раніше читався з підстановкою «�» і
+            // кирилиця мовчки псувалась; тепер — 422 `entriesCsvNotUtf8` (після перевірки права в обробнику).
+            using var reader = new StreamReader(
+                file.OpenReadStream(), new System.Text.UTF8Encoding(false, throwOnInvalidBytes: true));
+            try
+            {
+                content = await reader.ReadToEndAsync(ct).ConfigureAwait(false);
+            }
+            catch (System.Text.DecoderFallbackException)
+            {
+                notUtf8 = true;
+            }
         }
 
         return Ok(await importEntries
-            .HandleAsync(code, content, file.Length, maxBytes, dryRun, ct)
+            .HandleAsync(code, content, file.Length, maxBytes, dryRun, ct, notUtf8)
             .ConfigureAwait(false));
     }
 
