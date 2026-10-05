@@ -157,7 +157,11 @@ public sealed class RegistriesController(
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     public async Task<ActionResult<RegistryDefinitionDraftDto>> SaveDraft(
         string code, [FromBody] SaveRegistryDefinitionDraftRequest request, CancellationToken ct)
-        => Ok(await saveDraft.HandleAsync(code, request, ct).ConfigureAwait(false));
+    {
+        // L5-02: `If-Match` = `definitionVersion` опису, з якого збудовано форму; читається вручну, як у `SaveDefinition`.
+        var ifMatch = Request.Headers[Microsoft.Net.Http.Headers.HeaderNames.IfMatch].ToString();
+        return Ok(await saveDraft.HandleAsync(code, request, ct, ifMatch).ConfigureAwait(false));
+    }
 
     /// <summary>
     /// Скасовує чернетку опису без публікації. Право <c>Registry.EditDefinition</c> (`BE-24`).

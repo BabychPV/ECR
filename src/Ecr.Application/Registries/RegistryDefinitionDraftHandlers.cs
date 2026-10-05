@@ -111,9 +111,16 @@ public sealed class SaveRegistryDefinitionDraftHandler(
     public const string Permission = "Registry.EditDefinition";
 
     /// <summary>Створює або замінює чернетку.</summary>
-    /// <exception cref="ConcurrencyConflictException">Версія чернетки чужа — <c>409 ECR-REG-0409</c>.</exception>
+    /// <param name="code">Код довідника.</param>
+    /// <param name="request">Повний стан опису, причина, версія чернетки.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <param name="ifMatch">
+    /// Заголовок <c>If-Match</c> із <c>definitionVersion</c> опису, з якого людина будувала форму (L5-02).
+    /// Обов'язковий: немає — <c>422 ECR-REQ-0422</c>; чужа версія — <c>409 ECR-REG-0409</c>.
+    /// </param>
+    /// <exception cref="ConcurrencyConflictException">Версія чернетки чи опису чужа — <c>409 ECR-REG-0409</c>.</exception>
     public async Task<RegistryDefinitionDraftDto> HandleAsync(
-        string code, SaveRegistryDefinitionDraftRequest request, CancellationToken ct)
+        string code, SaveRegistryDefinitionDraftRequest request, CancellationToken ct, string? ifMatch = null)
     {
         ArgumentNullException.ThrowIfNull(request);
 
@@ -128,6 +135,11 @@ public sealed class SaveRegistryDefinitionDraftHandler(
 
         // ⛔ S18: заборона на довідник виграє і над правом на опис — 404, як неіснуючий.
         RegistryAccess.EnsureNotDenied(profile, definition.Id, code);
+
+        // ⛔ L5-02: збереження перебазовує чернетку на ПОТОЧНУ версію опису (`Replace(definition.DefinitionVersion…)`),
+        // а клієнт будував форму з якоїсь давнішої. Без звірки версії пряма публікація сусіда між читанням
+        // і збереженням лишалась непоміченою, і подальша публікація чернетки мовчки вимикала його правила/ключі.
+        SaveRegistryDefinitionHandler.RequireCurrentVersion(definition, ifMatch);
 
         var draft = await drafts.FindAsync(definition.Id, ct).ConfigureAwait(false);
         RegistryDraft.RequireVersion(draft, request.RowVersion, definition.Code);
