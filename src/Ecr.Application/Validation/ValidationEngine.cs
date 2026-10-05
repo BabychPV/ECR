@@ -62,9 +62,10 @@ public sealed class ValidationEngine(IFormulaEngine formulaEngine)
         // Вона не залежить від конфігурації правил і тому не може «зламатися».
         if (column.ValidateValue(value) is { } structural)
         {
+            var (text, key, parameters) = StructuralMessage(column, value, structural, language);
             messages.Add(new ValidationMessage(
-                ValidationSeverity.Error, "ECR-CELL-0422", StructuralMessage(column, value, structural, language),
-                column.TableDefId, null, column.Code, BlocksSave: true));
+                ValidationSeverity.Error, "ECR-CELL-0422", text,
+                column.TableDefId, null, column.Code, BlocksSave: true, MessageKey: key, Params: parameters));
         }
 
         foreach (var rule in rules.Where(r => r.IsActive && r.Scope == 0))
@@ -184,11 +185,12 @@ public sealed class ValidationEngine(IFormulaEngine formulaEngine)
         var parsed = formulaEngine.Parse(rule.Expression, ExpressionDialect.Template);
         if (!parsed.IsSuccess || parsed.Expression is null)
         {
-            messages.Add(Broken(rule, tableDefId, rowKey, columnCode,
-                L(language,
-                    en: $"Rule '{rule.Code}' does not parse: {(parsed.Diagnostics.Count > 0 ? parsed.Diagnostics[0].Message : string.Empty)}",
-                    ru: $"Правило '{rule.Code}' не разбирается: {(parsed.Diagnostics.Count > 0 ? parsed.Diagnostics[0].Message : string.Empty)}",
-                    kz: $"'{rule.Code}' ережесі талдана алмайды: {(parsed.Diagnostics.Count > 0 ? parsed.Diagnostics[0].Message : string.Empty)}")));
+            messages.Add(Broken(rule, tableDefId, rowKey, columnCode, language, ValidationMessageTemplates.RuleParseError,
+                new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["rule"] = rule.Code.ToString(),
+                    ["detail"] = parsed.Diagnostics.Count > 0 ? parsed.Diagnostics[0].Message : string.Empty,
+                }));
             return;
         }
 
@@ -202,11 +204,12 @@ public sealed class ValidationEngine(IFormulaEngine formulaEngine)
         if (value.IsError || value.Type != ExpressionValueType.Boolean)
         {
             var reason = value.ErrorCode ?? value.Type.ToString();
-            messages.Add(Broken(rule, tableDefId, rowKey, columnCode,
-                L(language,
-                    en: $"Rule '{rule.Code}' did not return a logical answer: {reason}",
-                    ru: $"Правило '{rule.Code}' не дало логического ответа: {reason}",
-                    kz: $"'{rule.Code}' ережесі логикалық жауап бермеді: {reason}")));
+            messages.Add(Broken(rule, tableDefId, rowKey, columnCode, language, ValidationMessageTemplates.RuleNotLogical,
+                new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["rule"] = rule.Code.ToString(),
+                    ["reason"] = reason,
+                }));
             return;
         }
 
@@ -229,8 +232,10 @@ public sealed class ValidationEngine(IFormulaEngine formulaEngine)
     }
 
     private static ValidationMessage Broken(
-        ValidationRule rule, int tableDefId, string? rowKey, string? columnCode, string message)
-        => new(ValidationSeverity.Warning, BrokenRuleCode, message, tableDefId, rowKey, columnCode, BlocksSave: false);
+        ValidationRule rule, int tableDefId, string? rowKey, string? columnCode, string language, string key,
+        Dictionary<string, string> parameters)
+        => new(ValidationSeverity.Warning, BrokenRuleCode, ValidationMessageTemplates.Render(key, language, parameters),
+            tableDefId, rowKey, columnCode, BlocksSave: false, MessageKey: key, Params: parameters);
 
     /// <summary>
     /// Текст структурного порушення для клієнта.
@@ -250,50 +255,45 @@ public sealed class ValidationEngine(IFormulaEngine formulaEngine)
     /// людським текстом ДО виклику цього методу — див. коментар класу.
     /// Розширювати цей метод на решту причин — окрема задача, не ця.
     /// </remarks>
-    private static string StructuralMessage(
+    // T2-07: повертає ще й ключ каталогу та підстановки — збережений результат локалізується на читанні
+    // (GetValidationResultHandler); текст тут — мовою запиту (синхронний шлях без каталогу,
+    // ValidationMessageTemplates). Невпізнана причина — голий код без ключа.
+    private static (string Text, string? Key, IReadOnlyDictionary<string, string>? Params) StructuralMessage(
         ColumnDef column, Domain.ValueObjects.CellValueData value, string structuralCode, string language)
-        => structuralCode != "ECR-CELL-0422"
-            ? structuralCode
-            : column.IsRequired && value.IsEmpty && value.IsWellFormed()
-            ? L(language,
-                en: $"Column \"{column.Code}\" is required.",
-                ru: $"Колонка «{column.Code}» обязательна.",
-                kz: $"«{column.Code}» бағаны міндетті.")
-            // T1-02: Scale/Precision колонки — відмова з причиною, а не голий код.
-            : column.DataType == CellDataType.Decimal && value.ValueNumeric is { } number
-              && column.Scale is { } scale
-              && decimal.Round(number, scale, MidpointRounding.AwayFromZero) != number
-            ? L(language,
-                en: $"Column \"{column.Code}\" allows at most {scale} decimal places.",
-                ru: $"Колонка «{column.Code}» допускает не более {scale} знаков после запятой.",
-                kz: $"«{column.Code}» бағанында үтірден кейін {scale} таңбадан артық болмауы керек.")
-            : column.DataType == CellDataType.Decimal && value.ValueNumeric is { } wide
-              && !column.FitsPrecision(wide)
-            ? L(language,
-                en: $"The value does not fit the precision of column \"{column.Code}\" ({column.Precision} digits).",
-                ru: $"Значение не помещается в точность колонки «{column.Code}» ({column.Precision} цифр).",
-                kz: $"Мән «{column.Code}» бағанының дәлдігіне ({column.Precision} сан) сыймайды.")
-            : structuralCode;
-
-    /// <summary>
-    /// Три готові речення двигуна (не з <c>ValidationRule.MessageL10n</c> —
-    /// їх ніхто не авторить, вони описують сам механізм валідації), обрані за
-    /// мовою запиту (B-11).
-    /// </summary>
-    /// <remarks>
-    /// ⚠ Не через каталог <c>sys_ecr.UiString</c>/<c>messageKey</c>:
-    /// <c>ValidationMessage.Message</c> — не деталь виключення, а поле
-    /// НОРМАЛЬНОЇ (200) відповіді, яку клієнт показує як є (<c>ValidateCell</c>/
-    /// <c>ValidateScope</c> синхронні, каталог читається лише асинхронно). Три
-    /// мови продукту — фіксований, закритий список (D-95), тож `switch`
-    /// без резолвера — не борг, а форма, симетрична самому переліку мов.
-    /// </remarks>
-    private static string L(string language, string en, string ru, string kz) => language switch
     {
-        "ru" => ru,
-        "kz" => kz,
-        _ => en,
-    };
+        if (structuralCode != "ECR-CELL-0422")
+        {
+            return (structuralCode, null, null);
+        }
+
+        string key;
+        var parameters = new Dictionary<string, string>(StringComparer.Ordinal) { ["column"] = column.Code.ToString() };
+
+        if (column.IsRequired && value.IsEmpty && value.IsWellFormed())
+        {
+            key = ValidationMessageTemplates.ColumnRequired;
+        }
+        // T1-02: Scale/Precision колонки — відмова з причиною, а не голий код.
+        else if (column.DataType == CellDataType.Decimal && value.ValueNumeric is { } number
+                 && column.Scale is { } scale
+                 && decimal.Round(number, scale, MidpointRounding.AwayFromZero) != number)
+        {
+            key = ValidationMessageTemplates.ColumnScale;
+            parameters["scale"] = scale.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
+        else if (column.DataType == CellDataType.Decimal && value.ValueNumeric is { } wide
+                 && !column.FitsPrecision(wide))
+        {
+            key = ValidationMessageTemplates.ColumnPrecision;
+            parameters["precision"] = Convert.ToString(column.Precision, System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty;
+        }
+        else
+        {
+            return (structuralCode, null, null);
+        }
+
+        return (ValidationMessageTemplates.Render(key, language, parameters), key, parameters);
+    }
 
     private static SingleCellContext CellContext(
         ColumnDef column, Domain.ValueObjects.CellValueData value, IReadOnlyDictionary<string, ExpressionValue> headers,

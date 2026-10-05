@@ -17,6 +17,17 @@ namespace Ecr.Application.Validation;
 /// не бачить повідомлення (T1-01). <c>null</c> — повідомлення однобічне.
 /// </param>
 /// <param name="SourceColumnCode">Колонка джерела зв'язку Check; <c>null</c> — лише рівень таблиці.</param>
+/// <param name="MessageKey">
+/// Ключ каталогу <c>sys_ecr.UiString</c> (<see cref="ValidationMessageTemplates"/>) для повідомлень двигуна
+/// (Check, структурні, зламане правило): читання підставляє <paramref name="Params"/> у шаблон МОВОЮ ЧИТАЧА
+/// (T2-07 / T3-03 / T4-06). <c>null</c> — старий збережений результат або текст правила (його мови несе
+/// <c>MessageL10n</c>): тоді працює <paramref name="Message"/> як є.
+/// </param>
+/// <param name="Params">
+/// Підстановки шаблону (значення вже текстом за інваріантною культурою). ⛔ Містять значення джерела Check:
+/// назовні НЕ віддаються (DTO несе лише текст), а повідомлення, приховане за <c>HiddenValidationIssues.CanSee</c>,
+/// до локалізації не доходить.
+/// </param>
 public sealed record ValidationMessage(
     ValidationSeverity Severity,
     string RuleCode,
@@ -26,4 +37,6 @@ public sealed record ValidationMessage(
     string? ColumnCode,
     bool BlocksSave,
     int? SourceTableDefId = null,
-    string? SourceColumnCode = null);
+    string? SourceColumnCode = null,
+    string? MessageKey = null,
+    IReadOnlyDictionary<string, string>? Params = null);

@@ -200,6 +200,29 @@ public sealed class ValidationEngineTests
         Assert.DoesNotContain("обов'язкова", message.Message, StringComparison.Ordinal);
     }
 
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "T2-07")]
+    public void Структурні_повідомлення_несуть_ключ_каталогу_і_підстановки()
+    {
+        var required = Column("Volume");
+        required.SetRequired(true);
+        var empty = Assert.Single(Engine().ValidateCell(required, CellValueData.Empty, [], NoHeaders, "kz"));
+        Assert.Equal(ValidationMessageTemplates.ColumnRequired, empty.MessageKey);
+        Assert.Equal("Volume", empty.Params!["column"]);
+
+        var scaled = Column("Volume");
+        scaled.SetNumericFormat(null, 3);
+        var scale = Assert.Single(Engine().ValidateCell(scaled, new CellValueData { ValueNumeric = 1.23456m }, [], NoHeaders, "en"));
+        Assert.Equal(ValidationMessageTemplates.ColumnScale, scale.MessageKey);
+        Assert.Equal("3", scale.Params!["scale"]);
+
+        // Текст правила ключа не має: його мови несе MessageL10n.
+        var rule = Assert.Single(Engine().ValidateCell(
+            Column("Volume"), new CellValueData { ValueNumeric = -5m },
+            [Rule("POSITIVE", ValidationSeverity.Warning, scope: 0, "[Volume] >= 0")], NoHeaders, "en"));
+        Assert.Null(rule.MessageKey);
+    }
+
     [Theory] [Trait(TestCategories.Stage, TestCategories.Stage2)]
     [Trait("Requirement", "B-11")]
     [InlineData("en", "at most 3 decimal places")]
