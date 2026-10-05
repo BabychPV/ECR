@@ -659,6 +659,15 @@ public sealed class RecalculationService(
             // може виконати це замикання вдруге.
             applied = 0;
 
+            // ⛔ L6-02: перерахунок — теж писар комірок. Структура документа —
+            // першою (подання, що кличе перерахунок, уже тримає її тим самим
+            // власником): формули, пораховані за старою версією, після переносу
+            // не пишуться під старими `ColumnDefId`.
+            Documents.DocumentStructure.EnsureUnchanged(
+                await sheetGate.EnterStructureAsync(instance.DocumentId, exclusive: false, token).ConfigureAwait(false),
+                instance.TemplateVersionId,
+                instance.DocumentId);
+
             var writable = await EnterSheetsAsync(
                 instance.DocumentId, periodKey, sheetOfInstance.Values, heldSheetDefId, token).ConfigureAwait(false);
 

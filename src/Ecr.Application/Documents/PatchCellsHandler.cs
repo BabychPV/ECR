@@ -2305,6 +2305,14 @@ public sealed partial class PatchCellsHandler(
     private async Task EnsureSheetStillEditableAsync(
         RequestContext context, CellChangeLists changes, CancellationToken ct)
     {
+        // ⛔ L6-02: структура документа — ПЕРШОЮ, до блокування аркуша. Перенос
+        // версії тримає її винятково, тож запис або йде до переносу цілком, або
+        // бачить нову версію і відмовляє, а не пише під старим `ColumnDefId`.
+        DocumentStructure.EnsureUnchanged(
+            await sheetGate.EnterStructureAsync(context.Instance.DocumentId, exclusive: false, ct).ConfigureAwait(false),
+            context.Instance.TemplateVersionId,
+            context.Instance.DocumentId);
+
         if (CreatesRowsUnderCeiling(context))
         {
             await sheetGate

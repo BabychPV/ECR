@@ -368,7 +368,7 @@ public sealed class ExcelImporter(
         var diffs = plan.Tables.Where(t => t.Changes.Count > 0).ToList();
 
         var period = new PeriodKey(plan.PeriodKey);
-        var sheets = await SheetsInLockOrderAsync(documentId, period, plan, ct).ConfigureAwait(false);
+        var (sheets, templateVersions) = await SheetsInLockOrderAsync(documentId, period, plan, ct).ConfigureAwait(false);
 
         var enlist = jobs.EnlistsInCallerTransaction;
 
@@ -410,6 +410,17 @@ public sealed class ExcelImporter(
                 // `PatchCellsHandler` своєю відмовою (`ECR-ACCS-0403`), тож двох
                 // правд про «подано» не з'являється. Прочитаний тут під
                 // блокуванням стан він отримує готовим — без другого звернення.
+                // ⛔ L6-02: ще раніше — структура документа (порядок `doc-structure` →
+                // `sheet-edit`). Аркуші вище прочитано за версією ДО транзакції;
+                // перенос, що зафіксувався відтоді, — відмова, а не блокування
+                // аркушів старої структури.
+                var locked = await sheetGate.EnterStructureAsync(documentId, exclusive: false, innerCt)
+                    .ConfigureAwait(false);
+                foreach (var version in templateVersions)
+                {
+                    DocumentStructure.EnsureUnchanged(locked, version, documentId);
+                }
+
                 var statuses = new Dictionary<int, Ecr.Domain.Enums.DocumentStatus>();
                 foreach (var sheetDefId in sheets)
                 {
@@ -499,7 +510,8 @@ public sealed class ExcelImporter(
 
     /// <summary>
     /// Аркуші таблиць книги, у які застосування пише, — у порядку, у якому
-    /// береться їхнє блокування (<c>SheetDefId</c> за зростанням).
+    /// береться їхнє блокування (<c>SheetDefId</c> за зростанням), і версії шаблону,
+    /// за якими їх визначено (звіряються під блокуванням структури, L6-02).
     /// </summary>
     /// <remarks>
     /// ⚠ Читається ДО транзакції: це структура (екземпляр → таблиця → аркуш),
@@ -507,20 +519,22 @@ public sealed class ExcelImporter(
     /// немає в документі, сюди не потрапляє — його відхилить сам
     /// <c>PatchCellsHandler</c> своєю відмовою.
     /// </remarks>
-    private async Task<IReadOnlyList<int>> SheetsInLockOrderAsync(
+    private async Task<(IReadOnlyList<int> Sheets, IReadOnlyList<int> TemplateVersions)> SheetsInLockOrderAsync(
         long documentId, PeriodKey period, ImportPlan plan, CancellationToken ct)
     {
         var changed = plan.Tables.Where(t => t.Changes.Count > 0).Select(t => t.TableInstanceId).ToHashSet();
         if (changed.Count == 0)
         {
-            return [];
+            return ([], []);
         }
 
         var instances = await rowStore.GetTableInstancesAsync(documentId, period, ct).ConfigureAwait(false);
         var sheets = new SortedSet<int>();
+        var templateVersions = new List<int>();
 
         foreach (var group in instances.Where(i => changed.Contains(i.TableInstanceId)).GroupBy(i => i.TemplateVersionId))
         {
+            templateVersions.Add(group.Key);
             var snapshot = await metadata.GetAsync(group.Key, ct).ConfigureAwait(false);
             var sheetOfTable = snapshot.Sheets
                 .SelectMany(s => s.Tables)
@@ -535,7 +549,7 @@ public sealed class ExcelImporter(
             }
         }
 
-        return [.. sheets];
+        return ([.. sheets], templateVersions);
     }
 
     /// <summary>

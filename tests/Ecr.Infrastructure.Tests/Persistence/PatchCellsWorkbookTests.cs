@@ -296,7 +296,8 @@ public sealed class PatchCellsWorkbookTests(SqlServerFixture sql) : IDisposable
     /// таблиці (див. храповик). Кожен наступний аркуш додає два (applock + стан).
     /// </summary>
     /// ФВ-5.20a: 26 → 27 (один пошук Reopen-стану аркушів для <c>IsLateEdit</c>).
-    private const long BookExecutions = 27;
+    /// L6-02: 27 → 28 (блокування структури документа разом із версією шаблону, одним пакетом).
+    private const long BookExecutions = 28;
 
     private async Task AssertRejectedAsync<TException>(
         World world, AccessProfile profile, List<PatchCellsRequest> requests, Table guilty, string code, string messageKey)
@@ -887,5 +888,8 @@ public sealed class PatchCellsWorkbookTests(SqlServerFixture sql) : IDisposable
             await beforeSubmit();
             await inner.EnterSubmitAsync(documentId, sheetDefId, periodKey, ct);
         }
+
+        public Task<int?> EnterStructureAsync(long documentId, bool exclusive, CancellationToken ct)
+            => inner.EnterStructureAsync(documentId, exclusive, ct);
     }
 }

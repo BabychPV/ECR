@@ -160,6 +160,10 @@ public sealed class SubmitSheetHandler(
         await uow.ExecuteInTransactionAsync(
             async innerCt =>
             {
+                // ⛔ L6-02: структура документа — спільно й першою. Подання не йде
+                // паралельно з переносом версії: перенос або вже зафіксований (і
+                // версію нижче читаємо нову), або чекає на подання.
+                await sheetGate.EnterStructureAsync(documentId, exclusive: false, innerCt).ConfigureAwait(false);
                 await sheetGate.EnterSubmitAsync(documentId, sheetDefId, key, innerCt).ConfigureAwait(false);
                 await SubmitUnderLockAsync(
                         documentId, sheetDefId, periodKey, key, userId, profile, acknowledgeWarnings, innerCt)

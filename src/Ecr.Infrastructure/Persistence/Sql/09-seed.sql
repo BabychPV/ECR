@@ -6574,8 +6574,13 @@ USING (VALUES
     (N'profile.languageUnsavedBlocked', N'en', N'The language was not changed: some changes on this page are not saved. Save or undo them, then change the language.', 1),
     -- COLL:t4-p3 ── кінець секції ──
     -- AN32:L2-11 ── черга: перезапуск, коли на ціль уже чекає інша задача; ru/kz — порцією AN32:L2-11 у блоці I18N нижче
-    (N'err.ECR-JOB-0409.restartCoveredBy', N'en', N'Job {jobId} was not restarted: job {coveredBy} is already queued for the same target and will do this work.', 1)
+    (N'err.ECR-JOB-0409.restartCoveredBy', N'en', N'Job {jobId} was not restarted: job {coveredBy} is already queued for the same target and will do this work.', 1),
     -- AN32:L2-11 ── кінець секції ──
+    -- COLL:an36 ── AN-36 (L6-02, L6-06): блокування структури й шапки документа; ru/kz — порцією COLL:an36 у блоці I18N нижче ──
+    (N'err.ECR-DOC-4091.structureChanged',      N'en', N'The document was moved to another template version while your changes were being saved. Nothing was saved; reload the page and try again.', 1),
+    (N'err.ECR-DOC-4091.structureChanging',     N'en', N'The document is being moved to another template version right now. Your changes were not saved; try again in a moment.', 1),
+    (N'err.ECR-DOC-4091.documentBeingEdited',   N'en', N'The document is being edited right now. The template version was not changed; try again in a moment.', 1)
+    -- COLL:an36 ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -15491,6 +15496,20 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- DOC:an37 ── кінець секції ──
+-- COLL:an36 ── ru/kz AN-36 (L6-02, L6-06); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-DOC-4091.structureChanged', N'ru', N'Документ перевели на другую версию шаблона, пока сохранялись ваши изменения. Ничего не сохранено; обновите страницу и повторите.'),
+    (N'err.ECR-DOC-4091.structureChanging', N'ru', N'Документ сейчас переводится на другую версию шаблона. Ваши изменения не сохранены; повторите попытку через мгновение.'),
+    (N'err.ECR-DOC-4091.documentBeingEdited', N'ru', N'Документ сейчас редактируется. Версия шаблона не изменена; повторите попытку через мгновение.'),
+    (N'err.ECR-DOC-4091.structureChanged', N'kz', N'Өзгерістеріңіз сақталып жатқанда құжат үлгінің басқа нұсқасына ауыстырылды. Ештеңе сақталмады; бетті жаңартып, қайталап көріңіз.'),
+    (N'err.ECR-DOC-4091.structureChanging', N'kz', N'Құжат дәл қазір үлгінің басқа нұсқасына ауыстырылуда. Өзгерістеріңіз сақталмады; сәлден кейін қайталап көріңіз.'),
+    (N'err.ECR-DOC-4091.documentBeingEdited', N'kz', N'Құжат дәл қазір өңделуде. Үлгі нұсқасы өзгертілмеді; сәлден кейін қайталап көріңіз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:an36 ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

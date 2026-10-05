@@ -52,6 +52,9 @@ public sealed partial class PatchCellsHandler
     /// Стани аркушів (<c>SheetDefId</c> → стан), які викликач УЖЕ прочитав під
     /// спільним блокуванням <see cref="ISheetEditGate.EnterEditAsync"/> у ЦІЙ САМІЙ
     /// транзакції (<c>ExcelImporter</c>); <c>null</c> — взяти й прочитати тут.
+    /// ⚠ Не <c>null</c> означає й те, що викликач уже тримає спільне блокування
+    /// структури документа (<see cref="ISheetEditGate.EnterStructureAsync"/>, L6-02)
+    /// і звірив під ним версію шаблону.
     /// </param>
     /// <returns>Відповідь на кожен батч — у порядку <paramref name="requests"/>.</returns>
     /// <remarks>
@@ -430,6 +433,20 @@ public sealed partial class PatchCellsHandler
         IReadOnlyDictionary<int, Domain.Enums.DocumentStatus>? heldSheetStatuses,
         CancellationToken ct)
     {
+        // ⛔ L6-02: структура документа — до блокувань аркушів, той самий порядок,
+        // що в поштучного. Викликач, що передав `heldSheetStatuses`
+        // (`ExcelImporter`), уже взяв її першою дією своєї транзакції й звірив
+        // версію — тоді другого звернення немає.
+        if (heldSheetStatuses is null)
+        {
+            var locked = await sheetGate.EnterStructureAsync(documentId, exclusive: false, ct).ConfigureAwait(false);
+            foreach (var item in active)
+            {
+                Blamed(item.Id, () => DocumentStructure.EnsureUnchanged(
+                    locked, item.Context.Instance.TemplateVersionId, documentId));
+            }
+        }
+
         var statuses = new Dictionary<int, Domain.Enums.DocumentStatus>();
         foreach (var sheet in active.GroupBy(x => x.Context.Table.SheetDefId).OrderBy(g => g.Key))
         {

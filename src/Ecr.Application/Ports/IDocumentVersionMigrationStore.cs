@@ -31,6 +31,9 @@ public interface IDocumentVersionMigrationStore
     /// </remarks>
     public Task<int?> LockProjectVersionAsync(int projectId, CancellationToken ct);
 
+    /// <summary>Документи проєкту за зростанням <c>Id</c> — порядок, у якому перенос блокує їхню структуру.</summary>
+    public Task<IReadOnlyList<long>> ListDocumentIdsAsync(int projectId, CancellationToken ct);
+
     /// <summary>Рахує, що лежить у документах проєкту.</summary>
     public Task<VersionMigrationScope> ReadScopeAsync(int projectId, CancellationToken ct);
 
