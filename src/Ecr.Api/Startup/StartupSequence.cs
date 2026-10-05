@@ -315,6 +315,6 @@ public static partial class StartupSequence
 
     [LoggerMessage(Level = LogLevel.Critical,
         Message = "Старт: файл bootstrap-пароля відхилено — власник {Owner}, а не Administrators/SYSTEM (L10-02). " +
-                   "Пароль з нього НЕ використано, файл видалено. Хтось, крім адміністратора, писав у %ProgramData%\\ECR\\config — перевір права теки.")]
+                   "Пароль з нього НЕ використано, файл видалено. Хтось, крім адміністратора, писав у теку ECR/config під %ProgramData% — перевір права теки.")]
     private static partial void LogBootstrapSecretRejected(ILogger logger, string owner);
 }
