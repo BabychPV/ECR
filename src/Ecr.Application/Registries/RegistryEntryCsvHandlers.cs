@@ -344,6 +344,15 @@ public sealed class ImportRegistryEntriesHandler(
                 continue;
             }
 
+            // ⛔ Аудит 2026-10-03 (L5-06): код у файлі НОВИЙ, а первинний ключ тримає наявний запис —
+            // раніше рядок мовчки оновлював той запис (код у файлі губився), хоча пакет сітки віддає
+            // `keyTaken`. Людина, яка написала новий код, хотіла створити запис, а не змінити сусіда.
+            if (byKey is not null && byCode is null && code.Length > 0)
+            {
+                errors.Add(new RegistryEntryImportError(rowNumber, code, keyMatch.PrimaryFields, KeyCodeMismatchKey));
+                continue;
+            }
+
             var entry = byKey ?? byCode;
             var isNew = entry is null;
 

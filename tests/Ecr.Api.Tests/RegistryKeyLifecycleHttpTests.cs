@@ -101,9 +101,9 @@ public sealed class RegistryKeyLifecycleHttpTests(SqlServerFixture sql)
         Assert.True(created.StatusCode == HttpStatusCode.Created, $"{created.StatusCode}: {await created.Content.ReadAsStringAsync()}");
         var id = JsonDocument.Parse(await created.Content.ReadAsStringAsync()).RootElement.GetProperty("id").GetInt64();
 
-        // Код у файлі новий, ключ — наявного запису: оновлюється той, чий ключ, а не створюється
-        // другий (який тут-таки впав би на 409 keyTaken).
-        var csv = $"code,STREAM,CASE_NAME,T_C\r\nNEW{fixture.Tag},1d-2,370 WINTER,42\r\n";
+        // Код і ключ називають один запис (ключ — з іншим регістром): оновлюється саме він. Рядок з
+        // НОВИМ кодом і ключем наявного — помилка (L5-06, тест нижче), а не мовчазне оновлення.
+        var csv = $"code,STREAM,CASE_NAME,T_C\r\nE1{fixture.Tag},1d-2,370 WINTER,42\r\n";
         var response = await ImportAsync(client, fixture.Code, csv);
         var body = await response.Content.ReadAsStringAsync();
         Assert.True(response.StatusCode == HttpStatusCode.OK, $"{response.StatusCode}: {body}\n{app.ErrorsText}");
@@ -123,6 +123,41 @@ public sealed class RegistryKeyLifecycleHttpTests(SqlServerFixture sql)
         var key = await db.RegistryEntryKeys.AsNoTracking().SingleAsync(k => k.RegistryKeyDefId == fixture.KeyDefId);
         Assert.Equal(id, key.RegistryEntryId);
         Assert.True(key.IsLive);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-8.15")]
+    public async Task Новий_код_і_ключ_наявного_запису_це_помилка_рядка_а_не_мовчазне_оновлення()
+    {
+        // L5-06: без перевірки `byKey != null && byCode == null` рядок оновлював E1 (код NEW губився).
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app);
+        var fixture = await SeedAsync(isTemporal: false);
+
+        var created = await PostAsync(client, fixture, id: null, $"E1{fixture.Tag}", "1D-2", "370 Winter", 10m);
+        Assert.True(created.StatusCode == HttpStatusCode.Created, $"{created.StatusCode}: {await created.Content.ReadAsStringAsync()}");
+        var id = JsonDocument.Parse(await created.Content.ReadAsStringAsync()).RootElement.GetProperty("id").GetInt64();
+
+        var csv = $"code,STREAM,CASE_NAME,T_C\r\nNEW{fixture.Tag},1D-2,370 Winter,42\r\n";
+        var response = await ImportAsync(client, fixture.Code, csv);
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.True(response.StatusCode == HttpStatusCode.OK, $"{response.StatusCode}: {body}\n{app.ErrorsText}");
+
+        var report = JsonDocument.Parse(body).RootElement;
+        Assert.False(report.GetProperty("applied").GetBoolean(), body);
+        var error = Assert.Single(report.GetProperty("errors").EnumerateArray());
+        Assert.Equal(2, error.GetProperty("row").GetInt32());
+        Assert.Equal("err.ECR-REG-4092.keyCodeMismatch", error.GetProperty("messageKey").GetString());
+
+        await using var db = new EcrDbContext(Options());
+        Assert.Equal(
+            [id],
+            await db.RegistryEntries.Where(e => e.RegistryDefId == fixture.DefinitionId).Select(e => e.Id).ToListAsync());
+        var temperature = await db.RegistryValues.AsNoTracking()
+            .SingleAsync(v => v.RegistryEntryId == id && v.RegistryFieldDefId == fixture.TemperatureFieldId);
+        Assert.Equal(10m, temperature.ValueNumeric);
     }
 
     [Fact]
@@ -155,7 +190,7 @@ public sealed class RegistryKeyLifecycleHttpTests(SqlServerFixture sql)
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "ФВ-8.15")]
-    public async Task Два_рядки_CSV_до_одного_запису_за_ключем_і_за_кодом_помилка_обох()
+    public async Task Два_рядки_CSV_до_одного_запису_за_ключем_і_за_кодом_ручний_режим_відхиляє_рядок_з_новим_кодом()
     {
         using var app = new EcrApiFactory(sql);
         using var client = await SignedInAsync(app);
@@ -164,7 +199,9 @@ public sealed class RegistryKeyLifecycleHttpTests(SqlServerFixture sql)
         Assert.Equal(HttpStatusCode.Created, (await PostAsync(client, fixture, null, $"E1{fixture.Tag}", "1D-2", "370 Winter", 1m)).StatusCode);
 
         // Рядок 2 знаходить E1 за ключем, рядок 3 — за кодом і міняє йому ключ: застосувати обидва
-        // означало б мовчки лишити переможцем останній.
+        // означало б мовчки лишити переможцем останній. З L5-06 рядок 2 (новий код + ключ E1) відхиляє
+        // раніше сама перевірка коду; обидва рядки до одного запису лишаються можливими лише для
+        // довідника з автокодом (порожній код), тож у ручному режимі помилку дає рядок 2.
         var csv = new StringBuilder("code,STREAM,CASE_NAME,T_C\r\n")
             .Append(CultureInfo.InvariantCulture, $"NEW{fixture.Tag},1D-2,370 Winter,5\r\n")
             .Append(CultureInfo.InvariantCulture, $"E1{fixture.Tag},1D-2,370 Summer,6\r\n")
@@ -177,9 +214,9 @@ public sealed class RegistryKeyLifecycleHttpTests(SqlServerFixture sql)
         var report = JsonDocument.Parse(body).RootElement;
         Assert.False(report.GetProperty("applied").GetBoolean());
         var errors = report.GetProperty("errors").EnumerateArray().ToList();
-        Assert.Equal([2, 3], errors.Select(e => e.GetProperty("row").GetInt32()));
-        Assert.All(errors, e => Assert.Equal("err.ECR-REG-4092.keyDuplicateInFile", e.GetProperty("messageKey").GetString()));
-        Assert.Equal(0, report.GetProperty("updated").GetInt32());
+        var error = Assert.Single(errors);
+        Assert.Equal(2, error.GetProperty("row").GetInt32());
+        Assert.Equal("err.ECR-REG-4092.keyCodeMismatch", error.GetProperty("messageKey").GetString());
     }
 
     [Fact]
