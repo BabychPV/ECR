@@ -7,7 +7,7 @@ import { queryKeys } from '@/api/queryKeys';
 import { isExternalRegistry } from '@/features/registries/RegistryEntryEditor';
 import { RegistryExportButton } from '@/features/registries/export/RegistryExportButton';
 import { saveBatch, type RegistryBatchResult, type RegistryRow } from '@/features/registries/rows/api';
-import { formatDateOnly, parseDateOnly, todayDateOnly } from '@/shared/format';
+import { formatDateOnly, formatTime, parseDateOnly, todayDateOnly } from '@/shared/format';
 import { localized } from '@/shared/i18n/localized';
 import { t } from '@/shared/i18n';
 import { can, useSession } from '@/shared/session/useSession';
@@ -305,7 +305,7 @@ export function RegistryDataPage(): JSX.Element {
   const name = registry ? localized(registry.nameL10n) : code;
   const openRow = panel?.startsWith('entry-') ? loaded.find((r) => entryPanelId(r.id) === panel) : undefined;
   const status = savedAt !== null
-    ? t('registries.data.saved', { time: savedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) })
+    ? t('registries.data.saved', { time: formatTime(savedAt) })
     : dirty.length > 0
       ? t('registries.data.unsaved', { count: dirty.length })
       : '';

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { act, fireEvent, screen, within } from '@testing-library/react';
 import { QueryClient } from '@tanstack/react-query';
-import { loadCatalog } from '@/shared/i18n';
+import { loadCatalog, setLanguage } from '@/shared/i18n';
 import { mockServer, passed, showDataPage, storedRows, type SentBatch } from './fixtures';
 
 /**
@@ -20,6 +20,7 @@ import { mockServer, passed, showDataPage, storedRows, type SentBatch } from './
  *   - (2026-10-04, L9-04) `onEdit` без `normalizeCellInput` → «вставка 12,5 з Excel…»;
  *   - `problemsByRow` губить `field` → «помилка dryRun лягає в свою комірку…»;
  *   - `canSave` без `duplicates.size === 0` → «дубль ключа… блокує збереження».
+ *   - (2026-10-05, L9-17) `formatTime(savedAt)` → `savedAt.toLocaleTimeString([], …)` → «час «Збережено» — мовою інтерфейсу…».
  */
 
 const cell = (r: number, c: number): HTMLElement => {
@@ -95,6 +96,27 @@ describe('Дані довідника: табличний редактор', () 
       expect(committed(sent)).toHaveLength(1);
     });
     expect(committed(sent)[0]?.items.map((item) => item.values)).toEqual([{ T_C: '12.5' }, { T_C: '7.25' }]);
+  });
+
+  it('час «Збережено» — мовою інтерфейсу, а не браузера (L9-17)', async () => {
+    // Браузер тесту — en-US (`toLocaleTimeString([])` дає «02:05 PM»); інтерфейс — ru, тож час 24-годинний.
+    setLanguage('ru');
+    try {
+      const sent = mockServer();
+      showDataPage();
+      await screen.findByRole('grid');
+
+      await editText(0, 2, '50.5');
+      fireEvent.keyDown(window, { key: 's', ctrlKey: true });
+      await vi.waitFor(() => {
+        expect(committed(sent)).toHaveLength(1);
+      });
+
+      const status = await screen.findByText(/^Saved /);
+      expect(status.textContent).toMatch(/^Saved \d{1,2}:\d{2}$/);
+    } finally {
+      setLanguage('en');
+    }
   });
 
   it('збереження скидає сторінку впливу довідника (L9-21)', async () => {
