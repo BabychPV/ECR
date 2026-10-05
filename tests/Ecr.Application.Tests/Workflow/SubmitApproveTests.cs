@@ -557,9 +557,24 @@ public sealed class SubmitApproveTests
         _sheets[Water].Reject(userId: 999, "доопрацювати", Now);
         _sheets[Water].Submit(userId: 999, Now);
 
+        // Автор №2 (999) — останній подавач: самопогодження йому заборонене.
+        _user.UserId.Returns(999);
+        _access.BuildProfileAsync(999, Arg.Any<CancellationToken>()).Returns(Profile());
+
+        var error = await Assert.ThrowsAsync<AccessDeniedException>(
+            () => Approve().HandleAsync(Document, Water, Period, approved: true, reason: null, CancellationToken.None));
+
+        Assert.Equal("ECR-ACCS-0403", error.ErrorCode);
+        Assert.Equal("err.ECR-ACCS-0403.approveOwnSubmission", error.Details!["messageKey"]);
+        Assert.Equal(DocumentStatus.Submitted, _sheets[Water].Status);
+
+        // Автор №1 (9) більше не подавач і погоджує вільно.
+        _user.UserId.Returns(9);
+
         await Approve().HandleAsync(Document, Water, Period, approved: true, reason: null, CancellationToken.None);
 
         Assert.Equal(DocumentStatus.Approved, _sheets[Water].Status);
+        Assert.Equal(9, _sheets[Water].ApprovedByUserId);
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
