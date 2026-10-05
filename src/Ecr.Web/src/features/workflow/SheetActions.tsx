@@ -521,8 +521,24 @@ export function SheetActions({
    * `SimulationReadOnly`. Адміністратор, який дивиться чужими правами
    * (`ФВ-6.16a`), не пише від чужого імені.
    */
+  /**
+   * ✎ D-285 (варіант B′): подання дозволене, якщо рівень >= Submit АБО
+   * (рівень >= Write І право `Document.Submit`) — дзеркало
+   * `EditRules.MeetsSubmit`. Право не підіймає рівень: з `Read` воно нічого
+   * не дає, а заборона вже в `grant` (`None`).
+   *
+   * ⚠ `can(me, …)` бачить лише ГЛОБАЛЬНІ права профілю (`/me` не віддає
+   * проєктних прав ролей з областю), тому для ролі, обмеженої областю, кнопка
+   * лишається вимкненою з поясненням F-17, хоча сервер подання дозволить.
+   * Те саме обмеження вже має `Document.Reopen` нижче.
+   */
+  const meetsSubmitAuthority =
+    meetsGrant(grant, 'Submit') || (meetsGrant(grant, 'Write') && can(me, 'Document.Submit'));
+
   const mayWorkflow = (action: 'submit' | 'approve' | 'reject'): boolean =>
-    me !== undefined && !me.isSimulation && meetsGrant(grant, RequiredGrant[action]);
+    me !== undefined &&
+    !me.isSimulation &&
+    (action === 'submit' ? meetsSubmitAuthority : meetsGrant(grant, RequiredGrant[action]));
 
   // ⛔ `F-18`: архівний проєкт, закритий чи ще не відкритий період — подання й
   // перерахунок сервер однаково відхилить. Кнопка, яка гарантовано дасть
@@ -543,7 +559,7 @@ export function SheetActions({
     me !== undefined &&
     !me.isSimulation &&
     meetsGrant(grant, 'Write') &&
-    !meetsGrant(grant, 'Submit');
+    !meetsSubmitAuthority;
   const canApprove = isAllowed('approve', state) && mayWorkflow('approve');
   const canReject = isAllowed('reject', state) && mayWorkflow('reject');
 
