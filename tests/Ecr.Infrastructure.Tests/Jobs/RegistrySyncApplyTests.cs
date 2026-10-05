@@ -493,6 +493,82 @@ public sealed class RegistrySyncApplyTests(SqlServerFixture sql)
         }
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "D-187")]
+    public async Task Знімок_лише_з_чужих_елементів_не_позначає_зниклими()
+    {
+        // L4-02: запобіжник «порожній знімок» рахувався ДО відсіювання чужих елементів.
+        var stand = await ArrangeAsync(RegistrySourceKind.External, e1Author: Author.Svc);
+        var gx = Guid.NewGuid().ToString("D");
+        await ArrangeForeignAsync(stand, gx);
+        stand = stand with { Children = [new("StackX", null, $@"{stand.Parent}\StackX", null, "Element", gx)] };
+
+        // Значення є: без нього читання атрибута - відмова шляху, і знімок неповний з іншої причини.
+        stand.Values[$@"{stand.Parent}\StackX|Capacity"] = Point($@"{stand.Parent}\StackX|Capacity", 99m);
+        await using var provider = BuildProvider();
+
+        try
+        {
+            await RunAsync(provider, stand);
+
+            await using var db = Context();
+            Assert.False(await db.RegistryExternalKeys.AnyAsync(
+                k => (k.RegistryEntryId == stand.E1 || k.RegistryEntryId == stand.E2) && k.MissingInSourceSince != null));
+            Assert.DoesNotContain(await EventsAsync(stand.EntityId), e => e.Status == CollectionCoverage.RegistrySourceMissing);
+        }
+        finally
+        {
+            await DeactivateAsync(stand);
+        }
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "D-187")]
+    public async Task Масове_зникнення_понад_межу_не_позначає_а_пише_одну_подію()
+    {
+        // L4-02: 13 із 14 зв'язків «зникли» - ознака збою джерела, а не 13 видалених елементів.
+        var stand = await ArrangeAsync(RegistrySourceKind.External, e1Author: Author.Svc);
+        await using (var db = Context())
+        {
+            for (var i = 0; i < 12; i++)
+            {
+                var entry = new RegistryEntry(stand.RegistryId, EcrCode.Create($"M{i}"), Text($"M{i}"));
+                db.RegistryEntries.Add(entry);
+                await db.SaveChangesAsync();
+                db.RegistryExternalKeys.Add(new RegistryExternalKey(entry.Id, stand.DataSourceId, Guid.NewGuid().ToString("D")));
+            }
+
+            await db.SaveChangesAsync();
+        }
+
+        stand = stand with { Children = [.. stand.Children.Take(1)] };
+        await using var provider = BuildProvider();
+
+        try
+        {
+            await RunAsync(provider, stand);
+            await RunAsync(provider, stand);
+
+            await using (var db = Context())
+            {
+                Assert.False(await db.RegistryExternalKeys.AnyAsync(
+                    k => k.DataSourceId == stand.DataSourceId && k.MissingInSourceSince != null));
+            }
+
+            var refusal = Assert.Single(
+                await EventsAsync(stand.EntityId), e => e.Status == CollectionCoverage.RegistrySourceMissing);
+            Assert.Contains("reason=removalLimit; candidates=13; limit=10", refusal.Details, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await DeactivateAsync(stand);
+        }
+    }
+
     /// <summary>По одній відмові writer'а на E1 і E2 — з очікуваною ознакою причини.</summary>
     private static void AssertRejected(IReadOnlyList<CollectionCoverage> events, Stand stand, string reason)
     {

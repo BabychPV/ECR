@@ -209,11 +209,16 @@ public sealed class RegistrySyncJob(
         // перепривʼязати його означало б порушити UQ_RegistryExternalKey або вкрасти чужий зв'язок.
         var foreign = await ForeignAsync(dataSource.Id, snapshot.Elements, links, ct).ConfigureAwait(false);
 
+        // L4-02: запобіжник «порожній знімок» — ПІСЛЯ відсіювання чужих елементів. Знімок лише з елементів
+        // іншого довідника для цього довідника порожній, і «зникли всі зв'язки» від нього — хибне.
+        var own = snapshot.Elements.Where(e => !foreign.Contains(e.ExternalId)).ToList();
+        var complete = snapshot.IsComplete && (own.Count > 0 || links.Count == 0);
+
         var input = new RegistrySyncInput(
             registryDefId,
             registry.SourceKind,
-            snapshot.IsComplete,
-            [.. snapshot.Elements.Where(e => !foreign.Contains(e.ExternalId))],
+            complete,
+            own,
             links,
             entries,
             mappings,
@@ -224,6 +229,26 @@ public sealed class RegistrySyncJob(
         // D-212 (5): коди записів інших довідників → Id, одним запитом на довідник.
         var lookupCodes = await ResolveCodesAsync(RegistrySyncPlanner.LookupCodes(input), ct).ConfigureAwait(false);
         var plan = RegistrySyncPlanner.Plan(input with { LookupCodes = lookupCodes });
+
+        // L4-02: масове зникнення — ознака збою джерела чи хибного кореня, а не «усе щойно видалили».
+        // Межа та сама, що в SourceEventSyncJob: max(10, 20 % зв'язків) і не більше 200 за прогін.
+        var removals = plan.MissingMarks.Select(m => m.ExternalId)
+            .Concat(plan.Deactivations.Select(d => d.ExternalId))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        SyncEvent? removalRefusal = null;
+        if (SourceEventSyncJob.ExceedsRemovalLimit(removals.Count, links.Count, out var removalLimit))
+        {
+            var skipped = removals.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            plan = plan with
+            {
+                MissingMarks = [],
+                Deactivations = [],
+                Events = [.. plan.Events.Where(e => e.Kind != RegistrySyncEventKind.SourceMissing
+                                                    || e.ExternalId is null || !skipped.Contains(e.ExternalId))],
+            };
+            removalRefusal = RemovalLimit(removals.Count, removalLimit, links.Count);
+        }
 
         var context = new ApplyContext(registryDefId, registry.Code, dataSource.Id, now, links, plan.MissingMarks);
         var events = new List<SyncEvent>();
@@ -237,6 +262,10 @@ public sealed class RegistrySyncJob(
         events.AddRange(plan.Events.Select(e => e.Kind == RegistrySyncEventKind.SourceMissing
             ? Event(e, context.SinceOf(e.ExternalId))
             : Event(e)));
+        if (removalRefusal is not null)
+        {
+            events.Add(removalRefusal);
+        }
 
         if (registry.SourceKind is RegistrySourceKind.External or RegistrySourceKind.Hybrid)
         {
@@ -1224,6 +1253,22 @@ public sealed class RegistrySyncJob(
                 status,
                 $"entry={entry}; rule={v.Rule}",
                 $"severity={v.Severity}; messageKey={v.MessageKey}; message={message}; value={valueParam}"));
+    }
+
+    /// <summary>
+    /// Зникнення НЕ застосовано: їх більше за межу прогону (L4-02). Одна подія на довідник; значення
+    /// ключа дедупу — з кількостей, тож незмінний стан не повторюється щопрогону.
+    /// </summary>
+    private static SyncEvent RemovalLimit(int candidates, int limit, int links)
+    {
+        var status = CollectionCoverage.RegistrySourceMissing;
+
+        return new SyncEvent(
+            status,
+            $"element=—; reason=removalLimit; candidates={candidates.ToString(CultureInfo.InvariantCulture)}; "
+            + $"limit={limit.ToString(CultureInfo.InvariantCulture)}; links={links.ToString(CultureInfo.InvariantCulture)}; "
+            + "not applied (too many elements missing)",
+            KeyOf(status, "removalLimit", $"candidates={candidates}; limit={limit}; links={links}"));
     }
 
     /// <summary>Елемент з GUID, прив'язаним до запису іншого довідника цього джерела.</summary>
