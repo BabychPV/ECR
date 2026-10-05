@@ -346,7 +346,12 @@ Bundle» перетворює установку на переговори з а
 
 1. Кладе файли в `%ProgramFiles%\ECR\Api` (64-бітна тека, не `Program Files (x86)`).
 2. Створює `%ProgramData%\ECR\logs` і `%ProgramData%\ECR\config` із ACL:
-   служба — запис, `Users` — читання.
+   служба — запис, `Users` — читання. ✎ L10-02 (аудит 2026-10-03): `config` —
+   **захищений** DACL без успадкування від `%ProgramData%` (там `Users` можуть
+   створювати файли): SDDL `D:PAI(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;BU)`
+   — запис лише SYSTEM і Administrators, `Users` (а через них і обліковий
+   запис служби) — читання. Застосунок приймає `bootstrap.secret` лише з
+   власником Administrators/SYSTEM, інакше відхиляє його з Critical у журналі.
 3. Реєструє службу `EcrApi` з відкладеним автостартом і відновленням після
    збою (три спроби, потім пауза).
 4. Додає правило брандмауера на порт застосунку — **лише для профілю домену**.
@@ -772,7 +777,8 @@ $bp = Read-Host -AsSecureString -Prompt 'Пароль bootstrap-адмініст
    застосунок впаде при старті (Q-213, знайдено реальним прогоном).
    Пароль bootstrap-адміністратора — окремим, ОДНОРАЗОВИМ каналом, НЕ
    реєстром: `%ProgramData%\ECR\config\bootstrap.secret`, ACL звужений на
-   `-ServiceAccount` (чи `NT AUTHORITY\SYSTEM` для Local System), сам
+   `-ServiceAccount` (чи `NT AUTHORITY\SYSTEM` для Local System) ще ДО запису
+   пароля, власник — `BUILTIN\Administrators` (L10-02), сам
    застосунок читає й видаляє файл при першому старті (директива №13,
    Q-215, `BootstrapSecretFile.cs`) — на відміну від рядка підключення,
    цей секрет не повинен лишатися в жодному сховищі назавжди. Без

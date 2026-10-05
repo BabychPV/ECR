@@ -271,6 +271,30 @@ finally {
     if (Get-Service EcrApi -ErrorAction SilentlyContinue) { Invoke-Msi "/x `"$msiPath`" /qn /l*v d2x.log" }
 }
 
+# ── D4. Set-BootstrapSecretFile (L10-02): власник і ACL до запису пароля ──
+Write-Host '── D4. Файл bootstrap-пароля: власник Administrators, захищений ACL'
+$fn = $ast.Find({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Set-BootstrapSecretFile' }, $true)
+if (-not $fn) { throw 'у deploy-ecr.ps1 немає функції Set-BootstrapSecretFile — перевірку D4 треба оновити' }
+. ([scriptblock]::Create($fn.Extent.Text))
+Test-Case 'D4. bootstrap.secret: підкладений файл замінено, власник BA, ACL лише служба (Read,Delete) і BA' {
+    $folder = Join-Path ([System.IO.Path]::GetTempPath()) "ecr-d4-$([guid]::NewGuid().ToString('N'))"
+    New-Item -ItemType Directory -Path $folder | Out-Null
+    try {
+        Set-Content -Path (Join-Path $folder 'bootstrap.secret') -Value 'planted' -NoNewline
+        Set-BootstrapSecretFile -ConfigFolder $folder -Password 'D4-Sentinel' -Principal 'NT AUTHORITY\SYSTEM'
+        $path = Join-Path $folder 'bootstrap.secret'
+        if ((Get-Content -LiteralPath $path -Raw) -ne 'D4-Sentinel') { throw 'у файлі не той пароль' }
+        $acl = Get-Acl -LiteralPath $path
+        $owner = ([System.Security.Principal.NTAccount] $acl.Owner).Translate([System.Security.Principal.SecurityIdentifier]).Value
+        if ($owner -ne 'S-1-5-32-544') { throw "власник $($acl.Owner), очікували BUILTIN\Administrators" }
+        if (-not $acl.AreAccessRulesProtected) { throw 'ACL успадковується' }
+        $rules = @($acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier]))
+        $foreign = @($rules | Where-Object { $_.IdentityReference.Value -notin 'S-1-5-18', 'S-1-5-32-544' })
+        if ($foreign) { throw "зайві ACE: $(($foreign | ForEach-Object { $_.IdentityReference.Value }) -join ', ')" }
+    }
+    finally { Remove-Item -LiteralPath $folder -Recurse -Force -ErrorAction SilentlyContinue }
+}
+
 # ── D3. (довідково) Environment EcrApi після оновлення без deploy-ecr.ps1 ──
 if ($PreviousMsiPath) {
     Write-Host '── D3. (довідково) Environment EcrApi після оновлення попередньої MSI поточною'

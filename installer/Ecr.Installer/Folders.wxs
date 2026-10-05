@@ -103,10 +103,32 @@
               KeyPath="yes" />
       </Component>
 
-      <Component Id="ConfigFolderServiceAccountAcl" Directory="CONFIGFOLDER"
-                 Guid="9b4f1e28-3a6d-4c9b-9e2f-5d8a0c1b3e6f" Condition="SERVICE_ACCOUNT">
+      <!--
+        ⛔ L10-02 (аудит 2026-10-03): тека config НЕ успадковує права
+        %ProgramData%. Там BUILTIN\Users мають право створювати файли, тобто
+        будь-який локальний користувач міг підкласти bootstrap.secret (пароль
+        першого адміністратора) або власний appsettings.Production.json.
+        Захищений DACL (P — без успадкування): SYSTEM і Administrators —
+        повний доступ, Users — лише читання й обхід (0x1200a9). Обліковий
+        запис служби читає через Users (Authenticated Users — член
+        BUILTIN\Users), а bootstrap.secret deploy-ecr.ps1 створює з власним
+        захищеним ACL на обліковий запис служби.
+
+        Ядрове PermissionEx (таблиця MsiLockPermissionsEx, Windows Installer
+        5.0 — InstallerVersion="500" у Package.wxs), а не util:PermissionEx:
+        лише SDDL задає «без успадкування». Окремий компонент без
+        NeverOverwrite: ConfigFolder (NeverOverwrite) на оновленні не
+        перевстановлюється, і на наявних серверах права лишились би старими.
+
+        ⛔ Колишній ConfigFolderServiceAccountAcl (util:PermissionEx на
+        SERVICE_ACCOUNT) прибрано свідомо: util пише DACL через
+        SetNamedSecurityInfo без PROTECTED_DACL_SECURITY_INFORMATION, тобто
+        знову вмикав би успадкування — і Users:Write повертався б.
+      -->
+      <Component Id="ConfigFolderAcl" Directory="CONFIGFOLDER"
+                 Guid="2c6e8b14-7d3a-4f91-b5e0-9a4d1c7f2e83">
         <CreateFolder>
-          <util:PermissionEx User="[SERVICE_ACCOUNT]" GenericRead="yes" GenericExecute="yes" />
+          <PermissionEx Sddl="D:PAI(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;BU)" />
         </CreateFolder>
       </Component>
 

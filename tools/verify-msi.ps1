@@ -170,6 +170,33 @@ function Assert-AutoStart([string] $name) {
     return $svc
 }
 
+# ⛔ L10-02: тека config — захищений DACL (без успадкування від %ProgramData%,
+# де BUILTIN\Users можуть створювати файли). Писати в неї й у файл конфігу
+# можуть лише SYSTEM і Administrators; Users — лише читати.
+function Assert-NoForeignWrite([string] $path) {
+    $acl = Get-Acl -LiteralPath $path
+    # WriteData/CreateFiles, AppendData, WriteExtendedAttributes,
+    # DeleteSubdirectoriesAndFiles, WriteAttributes, Delete, WRITE_DAC,
+    # WRITE_OWNER, GENERIC_ALL, GENERIC_WRITE.
+    $writeMask = 0x2 -bor 0x4 -bor 0x10 -bor 0x40 -bor 0x100 -bor 0x10000 -bor 0x40000 -bor 0x80000 -bor 0x10000000 -bor 0x40000000
+    $trusted = 'S-1-5-18', 'S-1-5-32-544'   # SYSTEM, BUILTIN\Administrators
+    foreach ($rule in $acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier])) {
+        if ($rule.AccessControlType -ne 'Allow') { continue }
+        if ($trusted -contains $rule.IdentityReference.Value) { continue }
+        if (([int64] $rule.FileSystemRights -band $writeMask) -ne 0) {
+            throw "$path : $($rule.IdentityReference.Translate([System.Security.Principal.NTAccount])) має право запису ($($rule.FileSystemRights))"
+        }
+    }
+    return $acl
+}
+function Assert-ConfigFolderProtected {
+    $dir = Join-Path $env:ProgramData 'ECR\config'
+    $acl = Assert-NoForeignWrite $dir
+    if (-not $acl.AreAccessRulesProtected) { throw "$dir успадковує права %ProgramData% (DACL не захищений)" }
+    $file = Join-Path $dir 'appsettings.Production.json'
+    if (Test-Path -LiteralPath $file) { Assert-NoForeignWrite $file | Out-Null }
+}
+
 # ── Статичні перевірки: таблиці MSI, без установки ────────────────────────
 $installer = New-Object -ComObject WindowsInstaller.Installer
 $db = $installer.OpenDatabase($MsiPath, 0)   # 0 = лише читання
@@ -295,6 +322,7 @@ Test-Case '1. Чиста установка' {
     }
     $exe = ($w.PathName -replace '^"([^"]+)".*$', '$1')
     if (-not (Test-Path $exe)) { throw "бінарника служби немає на диску: $exe" }
+    Assert-ConfigFolderProtected
 }
 
 Test-Case 'W1. WORKER_ENABLED=0 прибирає службу, EcrApi лишається (REINSTALL, транзитивний компонент)' {
@@ -336,6 +364,9 @@ if ($PreviousMsiPath) {
         if ($versions.Count -ne 1 -or $versions[0] -ne $currentVersion) {
             throw "після оновлення встановлено версії [$($versions -join ', ')], очікували лише $currentVersion"
         }
+        # L10-02: наявна тека з успадкованими правами (поставила попередня MSI)
+        # після оновлення теж захищена.
+        Assert-ConfigFolderProtected
     }
 }
 

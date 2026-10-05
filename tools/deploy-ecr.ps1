@@ -500,11 +500,21 @@ function Set-BootstrapSecretFile {
     )
 
     $path = Join-Path $ConfigFolder 'bootstrap.secret'
-    Set-Content -Path $path -Value $Password -Encoding UTF8 -NoNewline
+
+    # ⛔ L10-02: спершу ПОРОЖНІЙ файл із захищеним ACL і власником
+    # Administrators, і лише потім пароль. Раніше пароль писався у файл з
+    # успадкованим ACL і обмежувався вже після — вікно, у яке файл читав
+    # будь-хто з правом читання теки. Наявний файл (міг підкласти хтось
+    # інший і лишити собі WRITE_DAC як власник) — видаляється, не
+    # перезаписується. Застосунок приймає лише файл із власником
+    # Administrators/SYSTEM (BootstrapSecretFile.UntrustedOwner).
+    if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Force }
+    New-Item -ItemType File -Path $path -Force | Out-Null
 
     $acl = Get-Acl -Path $path
     $acl.SetAccessRuleProtection($true, $false)   # прибрати успадкування — не звичайний файл конфігу
     $acl.Access | ForEach-Object { $acl.RemoveAccessRule($_) | Out-Null }
+    $acl.SetOwner([System.Security.Principal.NTAccount]::new('BUILTIN\Administrators'))
 
     $account = New-Object System.Security.Principal.NTAccount($Principal)
     $acl.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new(
@@ -513,6 +523,8 @@ function Set-BootstrapSecretFile {
         'BUILTIN\Administrators', 'FullControl', 'Allow'))
 
     Set-Acl -Path $path -AclObject $acl
+
+    Set-Content -LiteralPath $path -Value $Password -Encoding UTF8 -NoNewline
 }
 
 # ⚠ Окрема функція, а не вбудований код кроку 4: єдиний спосіб перевірити
