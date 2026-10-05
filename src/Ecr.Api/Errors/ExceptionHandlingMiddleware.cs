@@ -434,6 +434,25 @@ public sealed partial class ExceptionHandlingMiddleware(
             (StatusCodes.Status422UnprocessableEntity, ErrorCodes.UnitContextualCoefficient,
              "Контекстний коефіцієнт не може бути конверсією між різними розмірностями.", null),
 
+        // ⛔ Аудит L7-08 (ФВ-13.3): дві паралельні публікації двох чернеток методології на одну дату
+        // проходять перевірку в пам'яті обидві, і другу відбиває лише індекс `UQ_MV_Effective`.
+        // Без арма це `DbUpdateException` у fallback — голий 500 на звичайну гонку. Це конфлікт
+        // стану (409), код і ключ каталогу ті самі, що в перевірці агрегата
+        // (`Methodology.PublishVersion`): нового ключа немає. ⚠ Версію-суперника SQL Server не
+        // називає (лише значення ключа: методологія, дата), тож `version` — «?», а дату беремо з тексту.
+        Microsoft.EntityFrameworkCore.DbUpdateException e
+            when e.GetBaseException().Message.Contains("UQ_MV_Effective", StringComparison.Ordinal) =>
+            (StatusCodes.Status409Conflict, "ECR-CALC-0409",
+             "Інша версія цієї методології уже чинна від тієї самої дати: дві опубліковані версії від "
+             + "однієї дати роблять вибір методології неоднозначним (ФВ-13.3).",
+             new Dictionary<string, object?>
+             {
+                 ["messageKey"] = "err.ECR-CALC-0409.effectiveDateTaken",
+                 ["version"] = "?",
+                 ["effectiveFrom"] = System.Text.RegularExpressions.Regex
+                     .Match(e.GetBaseException().Message, @"\d{4}-\d{2}-\d{2}").Value,
+             }),
+
         ConcurrencyConflictException e =>
             (StatusCodes.Status409Conflict, e.ErrorCode, e.Message, e.Details),
 
