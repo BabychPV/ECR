@@ -140,6 +140,15 @@ public sealed class MethodologyVersionConfiguration : IEntityTypeConfiguration<M
         builder.HasIndex(x => new { x.MethodologyId, x.Version })
                .IsUnique().HasDatabaseName("UQ_MethodologyVersion");
 
+        // ⛔ Аудит L7-08 (ФВ-13.3): дві ОПУБЛІКОВАНІ версії однієї методології від однієї дати
+        // роблять `VersionOn` неоднозначним. Перевірка «дата зайнята» живе лише в пам'яті агрегата
+        // (`Methodology.PublishVersion`), тож дві паралельні публікації двох чернеток на одну
+        // дату обидві її проходили. Фільтр `Status = 1` лишає Deprecated і чернетки (дати ще
+        // немає) поза обмеженням. Порушення мапиться на `ECR-CALC-0409` (409).
+        builder.HasIndex(x => new { x.MethodologyId, x.EffectiveFrom })
+               .IsUnique().HasDatabaseName("UQ_MV_Effective")
+               .HasFilter("[Status] = 1");
+
         // .WithMany(m => m.Versions) обов'язково: інакше Methodology.Versions
         // стає другим зв'язком і тягне тіньову колонку MethodologyId1.
         builder.HasOne<Methodology>().WithMany(m => m.Versions)
