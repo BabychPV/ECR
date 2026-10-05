@@ -204,6 +204,68 @@ public sealed class ValidateDocumentHandlerTests
         Assert.Contains("REL-REL1", saved.MessagesJson);
     }
 
+    /// <summary>
+    /// T1-01 / T2-07: «Перевірити» читача із забороною на джерело Check не віддає значень джерела
+    /// ні в тексті, ні в Params (DTO їх не несе взагалі); зберігається ж підсумок цілком.
+    /// Мутація: у лямбді <c>ForViewer</c> прибрати перевірку джерела (CanSee → лише місце приймача) — червоніє.
+    /// </summary>
+    [Theory]
+    [InlineData(ResourceKind.Table, 3)]
+    [InlineData(ResourceKind.Column, 40)]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-6.6")]
+    public async Task Check_із_забороненим_джерелом_у_Перевірити_віддається_знеособленим_без_значень(ResourceKind kind, int id)
+    {
+        var snapshot = await _metadata.GetAsync(TemplateVersionId, CancellationToken.None);
+        var columns = snapshot.Sheets.SelectMany(s => s.Tables).SelectMany(t => t.Columns).ToDictionary(c => c.Id);
+        var full = new TemplateVersionSnapshot(TemplateVersionId, 0, snapshot.Sheets, columns, new Dictionary<(int, string), RowDef>());
+        _metadata.GetAsync(TemplateVersionId, Arg.Any<CancellationToken>()).Returns(full);
+
+        var relation = new TableRelationDef(EcrCode.Create("REL1"), 3, 4, TableRelationKind.Check, "{}");
+        relation.Update(3, 4, TableRelationKind.Check, "{}",
+            """{"left":"Volume","right":"Volume","tolerance":"0","severity":"Block"}""", 0, true);
+        var store = Substitute.For<ITemplateVersionStore>();
+        store.ListTableRelationsAsync(TemplateVersionId, Arg.Any<CancellationToken>())
+            .Returns(new List<TableRelationDef> { relation });
+
+        _rows.GetRowIdsBatchAsync(Arg.Any<IReadOnlyList<long>>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<long, IReadOnlyDictionary<string, long>>
+            {
+                [Instance1] = new Dictionary<string, long> { ["R1"] = 1 },
+                [Instance2] = new Dictionary<string, long> { ["R1"] = 2 },
+            });
+        _cells.ReadSlicesAsync(Arg.Any<IReadOnlyList<long>>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<long, IReadOnlyList<CellRecord>>
+            {
+                [Instance1] = [new CellRecord(new CellAddress(new PeriodKey(Period), 1, 40), 3, new CellValueData { ValueNumeric = 777.5m })],
+                [Instance2] = [new CellRecord(new CellAddress(new PeriodKey(Period), 2, 41), 4, new CellValueData { ValueNumeric = 55m })],
+            });
+        _access.ReadScopeAsync(Arg.Any<AccessProfile>(), DocumentId, Arg.Any<CancellationToken>())
+            .Returns(DocumentReadScope.For(
+                new AccessBuilder().Grant(ResourceKind.Project, AccessBuilder.ProjectId, GrantLevel.Read).Deny(kind, id).Build(),
+                AccessBuilder.ProjectId, full));
+        var handler = new ValidateDocumentHandler(
+            _cells, _rows, _metadata, _results, new ValidationEngine(new RealFormulaEngine()),
+            _headers, _clock, _uow, _access, _user, Substitute.For<IRegistryStore>(), store);
+
+        ValidationSummary? saved = null;
+        await _results.SaveAsync(Arg.Do<ValidationSummary>(s => saved = s), Arg.Any<CancellationToken>());
+
+        var result = await handler.HandleAsync(DocumentId, new PeriodKey(Period), CancellationToken.None);
+
+        // Підсумок зберігається цілком (його читає подання): значення там є.
+        Assert.Contains("777.5", saved!.MessagesJson, StringComparison.Ordinal);
+        Assert.Contains("MessageKey", saved.MessagesJson, StringComparison.Ordinal);
+
+        // Читачеві — лише знеособлене зауваження.
+        Assert.True(HiddenValidationIssues.IsPlaceholder(Assert.Single(result)));
+        var json = System.Text.Json.JsonSerializer.Serialize(result);
+        foreach (var leak in new[] { "777.5", "722.5", "REL-REL1" })
+        {
+            Assert.DoesNotContain(leak, json, StringComparison.Ordinal);
+        }
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     public async Task У_пакетний_запит_ідуть_лише_таблиці_з_правилами()
