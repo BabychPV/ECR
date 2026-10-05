@@ -1,3 +1,4 @@
+using System.Data.Common;
 using System.Runtime.InteropServices;
 using System.Security;
 
@@ -89,12 +90,41 @@ internal static class DeployArguments
         return result;
     }
 
-    private static SecureString BuildConnectionString(WizardState state)
+    /// <summary>
+    /// Рядок підключення служби.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ L10-04 (аудит 2026-10-03), D-282: збирається <see cref="DbConnectionStringBuilder"/>,
+    /// а не інтерполяцією — пароль чи ім'я з <c>;</c>, <c>=</c> або лапками раніше
+    /// ламали рядок або дописували в нього власні параметри. Builder бере значення
+    /// в лапки за правилами, які розбирає й <c>SqlConnectionStringBuilder</c>.
+    /// Типово — Windows/gMSA (<c>Integrated Security</c>); SQL-логін — свідомий
+    /// вибір із попередженням на кроці бази даних, пароль у реєстрі служби
+    /// закриває deploy-ecr.ps1 (<c>Protect-ServiceRegistryKey</c>).
+    /// <c>Encrypt=Mandatory</c> — явно (D-282); <c>TrustServerCertificate</c> лишився як
+    /// був: прибрати його = зламати установки на самопідписаному сертифікаті SQL.
+    /// </remarks>
+    internal static SecureString BuildConnectionString(WizardState state)
     {
-        var text = state.SqlAuthIsWindows
-            ? $"Server={state.SqlInstance};Database={state.Database};Trusted_Connection=True;TrustServerCertificate=True;"
-            : $"Server={state.SqlInstance};Database={state.Database};User Id={state.SqlLogin};Password={ToPlain(state.SqlLoginPassword)};TrustServerCertificate=True;";
-        return ToSecure(text);
+        var builder = new DbConnectionStringBuilder
+        {
+            ["Server"] = state.SqlInstance,
+            ["Database"] = state.Database,
+        };
+
+        if (state.SqlAuthIsWindows)
+        {
+            builder["Integrated Security"] = "True";
+        }
+        else
+        {
+            builder["User ID"] = state.SqlLogin ?? string.Empty;
+            builder["Password"] = ToPlain(state.SqlLoginPassword);
+        }
+
+        builder["Encrypt"] = "Mandatory";
+        builder["TrustServerCertificate"] = "True";
+        return ToSecure(builder.ConnectionString);
     }
 
     private static string ToPlain(SecureString? secure)

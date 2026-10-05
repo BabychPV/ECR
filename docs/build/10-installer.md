@@ -783,7 +783,12 @@ $bp = Read-Host -AsSecureString -Prompt 'Пароль bootstrap-адмініст
 4. **Секрети служби** — `ECR_ConnectionStrings__Ecr` у реєстрі служби
    (`HKLM:\SYSTEM\CurrentControlSet\Services\EcrApi\Environment`,
    REG_MULTI_SZ), а не у файлі — секрети ніколи не потрапляють у
-   appsettings.json (D-11). Без `-ConnectionString` — попередження й
+   appsettings.json (D-11). ✎ L10-04 (`D-282`): якщо рядок містить пароль
+   SQL-логіна, ключі `Services\EcrApi` і `Services\EcrWorker` отримують
+   захищений ACL (лише SYSTEM і Administrators; стандартний ACL дає читання
+   `BUILTIN\Users`), а скрипт попереджає, що логін DBA дає застосунку DDL-права.
+   Майстер будує рядок `DbConnectionStringBuilder`-ом (без інтерполяції),
+   типово — Windows/gMSA; SQL-логін — лише з підтвердженням на кроці бази. Без `-ConnectionString` — попередження й
    застосунок впаде при старті (Q-213, знайдено реальним прогоном).
    Пароль bootstrap-адміністратора — окремим, ОДНОРАЗОВИМ каналом, НЕ
    реєстром: `%ProgramData%\ECR\config\bootstrap.secret`, ACL звужений на

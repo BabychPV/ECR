@@ -489,6 +489,36 @@ function Set-ServiceEnvironmentVariable {
     Set-ItemProperty -Path $keyPath -Name Environment -Value $updated -Type MultiString
 }
 
+# ⛔ L10-04 (аудит 2026-10-03), D-282: SQL-логін служби дозволено, але його
+# пароль у рядку підключення лежить у Services\<служба>\Environment, а ключі
+# служб за стандартним ACL читає BUILTIN\Users — пароль бачив би кожен
+# локальний користувач. Тоді ключ служби отримує захищений ACL: лише SYSTEM
+# (SCM читає Environment сам і передає процесу) і Administrators. Get-Service,
+# services.msc і WMI ходять через SCM, а не через реєстр, тож не страждають.
+function Test-ConnectionStringHasPassword {
+    param([Parameter(Mandatory)] [string] $ConnectionString)
+    $builder = [System.Data.Common.DbConnectionStringBuilder]::new()
+    $builder.ConnectionString = $ConnectionString
+    foreach ($key in 'Password', 'Pwd') {
+        if ($builder.ContainsKey($key) -and "$($builder[$key])") { return $true }
+    }
+    return $false
+}
+
+function Protect-ServiceRegistryKey {
+    param([Parameter(Mandatory)] [string] $ServiceName)
+    $keyPath = "HKLM:\SYSTEM\CurrentControlSet\Services\$ServiceName"
+    $acl = Get-Acl -Path $keyPath
+    $acl.SetAccessRuleProtection($true, $false)
+    $acl.Access | ForEach-Object { $acl.RemoveAccessRule($_) | Out-Null }
+    foreach ($sid in 'S-1-5-18', 'S-1-5-32-544') {   # SYSTEM, BUILTIN\Administrators
+        $acl.AddAccessRule([System.Security.AccessControl.RegistryAccessRule]::new(
+            [System.Security.Principal.SecurityIdentifier]::new($sid), 'FullControl',
+            'ContainerInherit', 'None', 'Allow'))
+    }
+    Set-Acl -Path $keyPath -AclObject $acl
+}
+
 # ⚠ Директива №13 (Q-215): bootstrap-пароль — ОДНОРАЗОВИЙ, на відміну від
 # рядка підключення. У реєстрі служби він лишався б назавжди. Файл з ACL на
 # -ServiceAccount; застосунок сам читає й видаляє його при старті
@@ -1527,6 +1557,18 @@ else {
         Set-ServiceEnvironmentVariable -ServiceName 'EcrWorker' -Name 'ECR_ConnectionStrings__Ecr' `
             -Value (ConvertFrom-SecureStringPlain $ConnectionString)
         Write-Host "Рядок підключення записано й для EcrWorker." -ForegroundColor Green
+    }
+
+    if (Test-ConnectionStringHasPassword (ConvertFrom-SecureStringPlain $ConnectionString)) {
+        Write-Host ("⚠ Рядок підключення містить пароль SQL-логіна (D-282): служба працює під цим логіном. " +
+            "Логін DBA дає застосунку DDL-права (D-66) — рекомендовано Windows/gMSA.") -ForegroundColor Yellow
+        foreach ($service in @('EcrApi') + @(if ($workerEnabled) { 'EcrWorker' })) {
+            if ($PSCmdlet.ShouldProcess("HKLM:\SYSTEM\CurrentControlSet\Services\$service",
+                    'закрити ключ служби від BUILTIN\Users (пароль у Environment)')) {
+                Protect-ServiceRegistryKey -ServiceName $service
+                Write-Host "Ключ служби ${service}: читання лише SYSTEM і Administrators." -ForegroundColor Green
+            }
+        }
     }
 }
 
