@@ -163,7 +163,21 @@ public sealed class SubmitSheetHandler(
                 // ⛔ L6-02: структура документа — спільно й першою. Подання не йде
                 // паралельно з переносом версії: перенос або вже зафіксований (і
                 // версію нижче читаємо нову), або чекає на подання.
-                await sheetGate.EnterStructureAsync(documentId, exclusive: false, innerCt).ConfigureAwait(false);
+                var structure = await sheetGate.EnterStructureAsync(documentId, exclusive: false, innerCt)
+                    .ConfigureAwait(false);
+
+                // ⛔ AN-36b (рев'ю AN-36, P2-1): склад документа вище перевірено ДО
+                // транзакції. Перенос версії, що зафіксувався між тим і цим блокуванням,
+                // перенумерував аркуші — старого `sheetDefId` у новій версії немає, і
+                // подання будувало б валідацію без жодної таблиці й стан погодження на
+                // неіснуючий аркуш. Аркуш звіряється з версією, прочитаною ПІД
+                // блокуванням (знімок метаданих — з кешу, без звернення до бази).
+                if (structure is { } version)
+                {
+                    var current = await metadata.GetAsync(version, innerCt).ConfigureAwait(false);
+                    Documents.DocumentStructure.EnsureSheetPresent(
+                        current.Sheets.Any(x => x.Id == sheetDefId), documentId, sheetDefId);
+                }
 
                 // ⛔ L6-06: шапка — спільно, після структури й до аркуша. Подання
                 // валідує шапку й кладе її у зріз; правка шапки (виняткове) або

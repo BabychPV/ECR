@@ -36,15 +36,42 @@ public static class DocumentStructure
             return;
         }
 
-        throw new ConcurrencyConflictException(
-            ErrorCodes.SheetBusy,
+        throw Changed(
+            documentId,
             string.Create(
                 CultureInfo.InvariantCulture,
-                $"Документ {documentId} перенесено на версію шаблону {current}, поки готувався запис за версією {expected}: нічого не записано, оновіть сторінку."),
+                $"Документ {documentId} перенесено на версію шаблону {current}, поки готувався запис за версією {expected}: нічого не записано, оновіть сторінку."));
+    }
+
+    /// <summary>
+    /// Кидає <c>409 ECR-DOC-4091</c>, якщо аркуша, що пройшов перевірку складу до
+    /// транзакції, у версії під блокуванням уже немає (AN-36b).
+    /// </summary>
+    /// <param name="present">Чи є аркуш у версії, прочитаній під блокуванням.</param>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="sheetDefId">Аркуш запиту.</param>
+    /// <exception cref="ConcurrencyConflictException">Аркуша вже немає.</exception>
+    public static void EnsureSheetPresent(bool present, long documentId, int sheetDefId)
+    {
+        if (present)
+        {
+            return;
+        }
+
+        throw Changed(
+            documentId,
+            string.Create(
+                CultureInfo.InvariantCulture,
+                $"Документ {documentId} перенесено на іншу версію шаблону, і аркуша {sheetDefId} у ній немає: нічого не подано, оновіть сторінку."));
+    }
+
+    private static ConcurrencyConflictException Changed(long documentId, string message)
+        => new(
+            ErrorCodes.SheetBusy,
+            message,
             new Dictionary<string, object?>
             {
                 ["messageKey"] = StructureChangedKey,
                 ["documentId"] = documentId.ToString(CultureInfo.InvariantCulture),
             });
-    }
 }
