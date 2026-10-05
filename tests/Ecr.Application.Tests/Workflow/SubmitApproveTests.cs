@@ -972,6 +972,94 @@ public sealed class SubmitApproveTests
         }
     }
 
+    // ───────────── D-285: подання з Write + право Document.Submit ─────────────
+    // Рішення про доступ тут НЕ підставне: `CanSubmitAsync` викликає справжній
+    // `EditRules.CanSubmit` над профілем «Write + Document.Submit», тож решта
+    // шляху (валідація, попередження, самопогодження) перевіряється саме для
+    // цієї пари, а не для гранта Approve з `Profile()`.
+
+    private const string SubmitRight = "Document.Submit";
+
+    private void AsWriterWithSubmitRight()
+    {
+        var writer = new AccessBuilder()
+            .Grant(ResourceKind.Project, AccessBuilder.ProjectId, GrantLevel.Write)
+            .Permission(SubmitRight)
+            .Build();
+        _access.BuildProfileAsync(9, Arg.Any<CancellationToken>()).Returns(writer);
+        _access.CanSubmitAsync(Arg.Any<AccessProfile>(), Document, Arg.Any<int>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+               .Returns(call => EditRules.CanSubmit(
+                   call.Arg<AccessProfile>(), AccessBuilder.Cell(), hasBlockingErrors: false));
+        _access.CanApproveAsync(Arg.Any<AccessProfile>(), Document, Arg.Any<int>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+               .Returns(call => EditRules.CanApprove(
+                   call.Arg<AccessProfile>(), AccessBuilder.Cell(sheet: DocumentStatus.Submitted)));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Decision", "D-285")]
+    public async Task Write_з_правом_Submit_подає_чисту_форму()
+    {
+        AsWriterWithSubmitRight();
+
+        await Submit().HandleAsync(Document, Water, Period, CancellationToken.None);
+
+        Assert.Equal(DocumentStatus.Submitted, _sheets[Water].Status);
+        Assert.Equal(9, _sheets[Water].SubmittedByUserId);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Decision", "D-285")]
+    public async Task Write_з_правом_Submit_із_блокувальною_помилкою_422_ECR_SUB_4221()
+    {
+        AsWriterWithSubmitRight();
+        WithRule("[Volume] <= 100");
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Submit().HandleAsync(Document, Water, Period, CancellationToken.None));
+
+        Assert.Equal("ECR-SUB-4221", error.ErrorCode);
+        Assert.Equal("err.ECR-SUB-4221.validationBlocked", error.Details!["messageKey"]);
+        Assert.Equal(DocumentStatus.Draft, _sheets[Water].Status);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Decision", "D-285")]
+    public async Task Write_з_правом_Submit_попередження_без_підтвердження_422_із_підтвердженням_проходить()
+    {
+        AsWriterWithSubmitRight();
+        WithRule("[Volume] <= 100", ValidationSeverity.Warning);
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Submit().HandleAsync(Document, Water, Period, CancellationToken.None));
+        Assert.Equal("err.ECR-SUB-4221.warningsNeedConfirmation", error.Details!["messageKey"]);
+        Assert.Equal(DocumentStatus.Draft, _sheets[Water].Status);
+
+        await Submit().HandleAsync(Document, Water, Period, acknowledgeWarnings: true, CancellationToken.None);
+
+        Assert.Equal(DocumentStatus.Submitted, _sheets[Water].Status);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Decision", "D-285")]
+    [Trait("Decision", "D-278")]
+    public async Task Write_з_правом_Submit_власне_подання_не_погоджує_бо_рівень_нижче_Approve()
+    {
+        AsWriterWithSubmitRight();
+        await Submit().HandleAsync(Document, Water, Period, CancellationToken.None);
+
+        // Рівень Write: відмова за рівнем (Approve потрібен окремо від права подання).
+        var error = await Assert.ThrowsAsync<AccessDeniedException>(
+            () => Approve().HandleAsync(Document, Water, Period, approved: true, reason: null, CancellationToken.None));
+
+        Assert.Equal("ECR-ACCS-0403", error.ErrorCode);
+        Assert.Equal("InsufficientGrantLevel", error.Details!["reason"]);
+        Assert.Equal(DocumentStatus.Submitted, _sheets[Water].Status);
+    }
+
     /// <summary>Підставляє знімок структури з одним правилом валідації рядка.</summary>
     private void WithRule(string expression, ValidationSeverity severity = ValidationSeverity.Error)
         => _metadata.GetAsync(TemplateVersion, Arg.Any<CancellationToken>()).Returns(

@@ -45,6 +45,7 @@ function currentUser(options: {
   grants: Record<string, string>;
   denies?: string[];
   isSimulation?: boolean;
+  extraPermissions?: string[];
 }) {
   return {
     denies: options.denies ?? [],
@@ -57,7 +58,7 @@ function currentUser(options: {
     // поки вона на екрані, компонент точно відрендерився і профіль доїхав,
     // тож відсутність «Submit» означає саме рішення про грант, а не те, що
     // тест зазирнув до першого рендеру.
-    permissions: ['Document.View', 'Document.Reopen'],
+    permissions: ['Document.View', 'Document.Reopen', ...(options.extraPermissions ?? [])],
     simulatedForUserId: null,
     userId: 9,
     userName: 'tester',
@@ -93,6 +94,7 @@ function show(options: {
   grants: Record<string, string>;
   denies?: string[];
   isSimulation?: boolean;
+  extraPermissions?: string[];
   state: string;
   seedSummary?: boolean;
 }): void {
@@ -225,6 +227,56 @@ describe('SheetActions: «Submit» закрито тим самим порого
       // — зникнення без причини було другою половиною дефекту.
       expect(activeSubmit()).toBeNull();
       expect(screen.getByTestId('submit-needs-grant').getAttribute('aria-disabled')).toBe('true');
+    },
+    SlowEnvTimeout,
+  );
+
+  it(
+    'D-285: грант Write + право Document.Submit — діюча кнопка «Submit», пояснення F-17 немає',
+    async () => {
+      show({
+        grants: { 'Project:7': 'Write' },
+        extraPermissions: ['Document.Submit'],
+        state: 'Draft',
+      });
+
+      // ⛔ Мутаційний доказ: прибери гілку права з `canSubmit` — червоніє.
+      expect(
+        await screen.findByRole('button', { name: /submit/i }, { timeout: SlowEnvTimeout }),
+      ).toBeTruthy();
+      expect(activeSubmit()).not.toBeNull();
+      expect(screen.queryByTestId('submit-needs-grant')).toBeNull();
+    },
+    SlowEnvTimeout,
+  );
+
+  it(
+    'D-285: грант Read + право Document.Submit — «Submit» немає (право не підіймає рівень)',
+    async () => {
+      show({
+        grants: { 'Project:7': 'Read' },
+        extraPermissions: ['Document.Submit'],
+        state: 'Draft',
+      });
+      await anchor();
+
+      expect(activeSubmit()).toBeNull();
+    },
+    SlowEnvTimeout,
+  );
+
+  it(
+    'D-285: заборона на аркуш + Write + право — «Submit» немає',
+    async () => {
+      show({
+        grants: { 'Project:7': 'Write' },
+        denies: ['Sheet:42'],
+        extraPermissions: ['Document.Submit'],
+        state: 'Draft',
+      });
+      await anchor();
+
+      expect(activeSubmit()).toBeNull();
     },
     SlowEnvTimeout,
   );
