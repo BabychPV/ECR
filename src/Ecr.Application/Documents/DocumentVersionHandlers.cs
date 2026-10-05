@@ -50,7 +50,11 @@ public sealed record DocumentCompareDto(
 
 /// <summary>Перелік версій документа за період. Право <c>Document.View</c>.</summary>
 /// <remarks>Доступ вирішує <see cref="GetDocumentHandler"/>: чужий документ — той самий 404, що й неіснуючий.</remarks>
-public sealed class ListDocumentVersionsHandler(GetDocumentHandler getDocument, IDocumentVersionStore versions)
+public sealed class ListDocumentVersionsHandler(
+    GetDocumentHandler getDocument,
+    IDocumentVersionStore versions,
+    Security.IAccessDecisionService access,
+    Common.ICurrentUser currentUser)
 {
     /// <summary>Право — те саме, що й перегляд документа.</summary>
     public const string Permission = ListDocumentsHandler.Permission;
@@ -62,10 +66,19 @@ public sealed class ListDocumentVersionsHandler(GetDocumentHandler getDocument, 
     public async Task<IReadOnlyList<DocumentVersionDto>> HandleAsync(long documentId, int periodKey, CancellationToken ct)
     {
         var key = PeriodKey.Parse(periodKey);
-        await DocumentVersionAccess.RequireAsync(getDocument, documentId, ct).ConfigureAwait(false);
+        var document = await DocumentVersionAccess.RequireAsync(getDocument, documentId, ct).ConfigureAwait(false);
+
+        // ⛔ L1-18 (D-214, ФВ-6.6): версія називає аркуш, автора й момент його подання — це дані
+        // аркуша, тож закритого користувачу аркуша версій немає. Межі — для періоду запиту.
+        var profile = await Security.PermissionCheck
+            .RequireInAnyProjectAsync(access, currentUser, Permission, ct)
+            .ConfigureAwait(false);
+        Security.PermissionCheck.RequireIn(profile, Permission, document.ProjectId);
+        var readable = (await access.ReadScopeAsync(profile, documentId, ct).ConfigureAwait(false)).InPeriod(key);
 
         var list = await versions.ListAsync(documentId, key, MaxVersions, ct).ConfigureAwait(false);
         return list
+            .Where(v => readable.CanReadSheet(v.SheetDefId))
             .Select(v => new DocumentVersionDto(
                 v.Id, v.SheetDefId, v.PeriodKey, v.SubmittedAt,
                 v.SubmittedByDisplayName ?? "#" + v.SubmittedByUserId.ToString(CultureInfo.InvariantCulture)))
