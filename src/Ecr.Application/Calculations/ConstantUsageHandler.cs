@@ -1,5 +1,6 @@
 // src/Ecr.Application/Calculations/ConstantUsageHandler.cs
 using System.Globalization;
+using System.Runtime.CompilerServices;
 using Ecr.Application.Common;
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
@@ -70,7 +71,11 @@ public sealed class ConstantUsageHandler(
 
     /// <summary>Чи є у дереві <c>CST.code</c> — точний збіг імені, не префікс.</summary>
     private static bool References(AstNode node, string code)
-        => node switch
+    {
+        // ⛔ L7-01: лівий гребінь ланцюга — рекурсія глибиною в кількість ланок.
+        RuntimeHelpers.EnsureSufficientExecutionStack();
+
+        return node switch
         {
             SymbolReferenceNode { Kind: SymbolKind.Constant } symbol
                 => string.Equals(symbol.Name, code, StringComparison.OrdinalIgnoreCase),
@@ -82,4 +87,5 @@ public sealed class ConstantUsageHandler(
             FunctionNode function => function.Arguments.Any(a => References(a, code)),
             _ => false,
         };
+    }
 }

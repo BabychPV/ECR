@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Runtime.CompilerServices;
 using Ecr.Application.Ports;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Enums;
@@ -102,6 +103,9 @@ public static class RuleExpressionChecks
     /// </remarks>
     private static void CheckSupportedReferences(AstNode node, List<ExpressionDiagnostic> diagnostics)
     {
+        // ⛔ L7-01: лівий гребінь ланцюга — рекурсія глибиною в кількість ланок.
+        RuntimeHelpers.EnsureSufficientExecutionStack();
+
         switch (node)
         {
             case CellReferenceNode cell:

@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Enums;
 using Ecr.Expressions.Ast;
@@ -73,7 +74,11 @@ public static class RowLocalFormulaClassifier
     }
 
     private static bool IsLocal(AstNode node)
-        => node switch
+    {
+        // ⛔ L7-01: лівий гребінь ланцюга — рекурсія глибиною в кількість ланок.
+        RuntimeHelpers.EnsureSufficientExecutionStack();
+
+        return node switch
         {
             LiteralNode => true,
             UnaryNode unary => IsLocal(unary.Operand),
@@ -88,6 +93,7 @@ public static class RowLocalFormulaClassifier
             CellReferenceNode reference => IsOwnRowCell(reference),
             _ => false,
         };
+    }
 
     /// <summary>Посилання <c>[Col]</c> — колонка того самого рядка тієї самої таблиці.</summary>
     private static bool IsOwnRowCell(CellReferenceNode reference)

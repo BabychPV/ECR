@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Expressions.Ast;
 
@@ -59,7 +60,11 @@ public sealed record RecalculationReadScope(IReadOnlySet<int>? TableDefIds, bool
     /// залежностей не описує.
     /// </remarks>
     public static bool MentionsCells(AstNode? node)
-        => node switch
+    {
+        // ⛔ L7-01: лівий гребінь ланцюга — рекурсія глибиною в кількість ланок.
+        RuntimeHelpers.EnsureSufficientExecutionStack();
+
+        return node switch
         {
             null => false,
             CellReferenceNode => true,
@@ -72,6 +77,7 @@ public sealed record RecalculationReadScope(IReadOnlySet<int>? TableDefIds, bool
             FunctionNode function => function.Arguments.Any(MentionsCells),
             _ => false,
         };
+    }
 
     /// <summary>Рахує замикання читання для набору цілей.</summary>
     /// <param name="dependencies">Розкриті залежності формул версії шаблону.</param>

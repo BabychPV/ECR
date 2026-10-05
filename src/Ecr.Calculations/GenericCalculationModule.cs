@@ -1,4 +1,5 @@
-﻿using Ecr.Application.Ports;
+﻿using System.Runtime.CompilerServices;
+using Ecr.Application.Ports;
 using Ecr.Domain.Entities.Calculations;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
@@ -1061,6 +1062,9 @@ public sealed class GenericCalculationModule(
     /// <summary>Обхід дерева у пошуку <c>CST.Code</c>.</summary>
     private static IEnumerable<string> Walk(Expressions.Ast.AstNode node)
     {
+        // ⛔ L7-01: лівий гребінь ланцюга — рекурсія глибиною в кількість ланок.
+        RuntimeHelpers.EnsureSufficientExecutionStack();
+
         switch (node)
         {
             case Expressions.Ast.SymbolReferenceNode { Kind: Expressions.Ast.SymbolKind.Constant } symbol:
