@@ -17,7 +17,7 @@ public sealed class SeedTests(SqlServerFixture sql)
     /// сюди, тест впаде — і це правильно. Право, якого немає в цьому списку,
     /// ніхто не перевіряв.
     /// </remarks>
-    private const int ExpectedPermissions = 42;
+    private const int ExpectedPermissions = 43; // D-285: + Document.Submit (безпечне, ExpectedDangerous без змін)
 
     private const int ExpectedDangerous = 11;
 

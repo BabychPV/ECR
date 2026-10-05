@@ -582,7 +582,7 @@ public sealed partial class EndpointCoverageTests
         "registries.data.title",
     ];
 
-    /// <summary>Назви прав <c>permission.&lt;Code&gt;</c> — 42 права каталогу <c>sec.Permission</c>.</summary>
+    /// <summary>Назви прав <c>permission.&lt;Code&gt;</c> — 43 права каталогу <c>sec.Permission</c>.</summary>
     private static string[] PermissionLabelKeys =>
     [
         "permission.Template.View",
@@ -598,6 +598,7 @@ public sealed partial class EndpointCoverageTests
         "permission.Document.Import",
         "permission.Document.Export",
         "permission.Document.Reopen",
+        "permission.Document.Submit",
         "permission.Document.ChangeKey",
         "permission.Project.Manage",
         "permission.Period.Configure",

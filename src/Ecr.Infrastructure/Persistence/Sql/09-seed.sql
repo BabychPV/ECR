@@ -112,7 +112,14 @@ USING (VALUES
   (N'System.ManageNotifications', N'System',    1),
   -- НЕБЕЗПЕЧНЕ (1): зміна бізнес-ключа документа (ФВ-3.9) міняє те, під чим
   -- документ знають експорти й зовнішні системи; видається свідомо.
-  (N'Document.ChangeKey',       N'Document',    1)
+  (N'Document.ChangeKey',       N'Document',    1),
+  -- SEC:SUBMIT (D-285, варіант B′): право ПОДАННЯ аркуша для рівня Write.
+  -- Подання дозволене, якщо ефективний рівень >= Submit АБО (>= Write І це
+  -- право в проєкті документа). Сам Write подання не дає. Проєктне, не
+  -- звужуване (`PermissionScopes.Narrowable` не містить). Не небезпечне (0):
+  -- `SystemAdministrator` (`%`) отримує його цим же MERGE; роздача
+  -- `DataEntry` — секція `SEC:SUBMIT` нижче, після `SEC:RPT`.
+  (N'Document.Submit',          N'Document',    0)
 ) AS s (Code, [Group], IsDangerous)
 ON t.Code = s.Code
 WHEN NOT MATCHED THEN INSERT (Code, [Group], NameL10n, IsDangerous)
@@ -583,6 +590,31 @@ ON t.RoleId = s.RoleId AND t.PermissionCode = s.PermissionCode
 WHEN NOT MATCHED THEN INSERT (RoleId, PermissionCode) VALUES (s.RoleId, s.PermissionCode);
 GO
 -- SEC:RPT ── кінець секції ───────────────────────────────────────────────────
+
+-- SEC:SUBMIT ── DataEntry подає свої форми (D-285, рішення людини 2026-10-05) ─
+-- ✎ Варіант B′: рівень Write подання НЕ дає; його дає рівень Submit АБО
+-- Write разом із проєктним правом `Document.Submit`. Вбудована роль
+-- `DataEntry` (заповнює й подає свої форми) отримує право явно.
+-- `SystemAdministrator` — шаблоном `%` (рядок каталогу вище); `Approver`
+-- права не потребує: подає рівнем гранта Submit, а не правом.
+--
+-- ⚠ Для адміністраторів: власні (не вбудовані) ролі з рівнем Write права не
+-- отримують — щоб їхні носії подавали, право видається вручну (`/admin/roles`)
+-- або рівень гранта піднімається до Submit. Наявні гранти не змінюються.
+-- ⚠ MERGE … WHEN NOT MATCHED: наявна база отримує пару на наступному старті
+-- (`SeedRunner`); якщо адміністратор право в `DataEntry` зняв — повторний seed
+-- його поверне (так само, як решту вбудованих пар).
+MERGE sec.RolePermission AS t
+USING (
+    SELECT r.Id AS RoleId, p.Code AS PermissionCode
+    FROM sec.Role AS r
+    JOIN sec.Permission AS p ON p.Code = N'Document.Submit' AND p.IsDangerous = 0
+    WHERE r.Code = N'DataEntry'
+) AS s
+ON t.RoleId = s.RoleId AND t.PermissionCode = s.PermissionCode
+WHEN NOT MATCHED THEN INSERT (RoleId, PermissionCode) VALUES (s.RoleId, s.PermissionCode);
+GO
+-- SEC:SUBMIT ── кінець секції ────────────────────────────────────────────────
 -- Політика періодів ECR
 MERGE doc.PeriodPolicy AS t USING (VALUES (N'ECR-Standard', 0, 15, 45, 45))
       AS s (Code, O, G, H, Y) ON t.Code = s.Code
@@ -613,6 +645,10 @@ UPDATE t
   FROM sys_ecr.UiString AS t
   JOIN (VALUES
     (N'common.loading',                  N'en', N'Loading…', N'Loading...'),
+    -- COLL:an43sub D-285: Write подає лише з правом Document.Submit — підказка F-17 називає й право.
+    (N'workflow.submitNeedsGrant',       N'en', N'Submitting needs the Submit access level on this project or sheet; yours is {level}. Ask an administrator to raise it.', N'Submitting needs the Submit access level on this project or sheet, or the Write level together with the Submit documents right; yours is {level} without that right. Ask an administrator to raise the level or grant the right.'),
+    (N'workflow.submitNeedsGrant',       N'ru', N'Для подачи нужен уровень доступа «Подача» к этому проекту или листу; у вас — {level}. Попросите администратора повысить его.', N'Для подачи нужен уровень доступа «Подача» к этому проекту или листу либо уровень «Запись» вместе с правом «Подача документов»; у вас — {level} без этого права. Попросите администратора повысить уровень или выдать право.'),
+    (N'workflow.submitNeedsGrant',       N'kz', N'Тапсыру үшін осы жобаға немесе параққа «Тапсыру» қолжетімділік деңгейі қажет; сіздікі — {level}. Әкімшіден оны арттыруды сұраңыз.', N'Тапсыру үшін осы жобаға немесе параққа «Тапсыру» қолжетімділік деңгейі не «Жазу» деңгейі мен «Құжаттарды тапсыру» құқығы қажет; сіздікі — {level}, бұл құқықсыз. Әкімшіден деңгейді арттыруды немесе құқық беруді сұраңыз.'),
     -- ent7 P2-1: відмова й для звужувального дозволу (Read під Write проєкту), не лише заборони.
     (N'err.ECR-SCHM-0422.migrateGrantsNotMapped', N'en', N'The target version has no sheet, table or column with the code of a resource that has a deny grant, so the deny cannot be carried over. Remove or re-create that deny deliberately before moving the project.', N'The target version has no sheet, table or column with the code of a resource that has an access grant (deny or a restricting Read), so the grant cannot be carried over and access could widen. Remove or re-create that grant deliberately before moving the project.'),
     (N'err.ECR-SCHM-0422.migrateGrantsNotMapped', N'ru', N'В целевой версии нет листа, таблицы или столбца с кодом ресурса, на котором стоит запрет, поэтому запрет не перенести. Снимите или пересоздайте этот запрет осознанно до переноса проекта.', N'В целевой версии нет листа, таблицы или столбца с кодом ресурса, на котором стоит право доступа (запрет или ограничивающее чтение), поэтому право не перенести, а доступ мог бы расшириться. Снимите или пересоздайте это право осознанно до переноса проекта.'),
@@ -5532,7 +5568,7 @@ USING (VALUES
     (N'grid.tableLoadsOnScroll', N'en', N'This table loads when you scroll to it.', 1),
 
     -- F-17, F-18, X-25: пояснення рівня для подання, причина закритого документа, підтвердження затвердження.
-    (N'workflow.submitNeedsGrant', N'en', N'Submitting needs the Submit access level on this project or sheet; yours is {level}. Ask an administrator to raise it.', 1),
+    (N'workflow.submitNeedsGrant', N'en', N'Submitting needs the Submit access level on this project or sheet, or the Write level together with the Submit documents right; yours is {level} without that right. Ask an administrator to raise the level or grant the right.', 1),
     (N'workflow.approveTitle', N'en', N'Approve this sheet?', 1),
     (N'workflow.approveHint', N'en', N'Approved figures become final for this period and go into regulatory reports. To change them later, the sheet has to be returned for edits.', 1),
     (N'document.lock.projectArchived', N'en', N'This project is archived: its documents are read-only.', 1),
@@ -6616,8 +6652,11 @@ USING (VALUES
     (N'validation.column.scale', N'en', N'Column "{column}" allows at most {scale} decimal places.', 1),
     (N'validation.column.precision', N'en', N'The value does not fit the precision of column "{column}" ({precision} digits).', 1),
     (N'validation.rule.parseError', N'en', N'Rule ''{rule}'' does not parse: {detail}', 1),
-    (N'validation.rule.notLogical', N'en', N'Rule ''{rule}'' did not return a logical answer: {reason}', 1)
+    (N'validation.rule.notLogical', N'en', N'Rule ''{rule}'' did not return a logical answer: {reason}', 1),
     -- COLL:an42vm ── кінець секції ──
+    -- COLL:an43sub ── D-285: право подання аркуша для рівня Write (підпис у ролі й повідомлення); ru/kz — порцією COLL:an43sub у блоці I18N нижче ──
+    (N'permission.Document.Submit', N'en', N'Submit documents (with the Write level)', 1)
+    -- COLL:an43sub ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -9570,7 +9609,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'grid.boolYes', N'ru', N'Да'),
     (N'grid.boolNo', N'ru', N'Нет'),
     (N'grid.tableLoadsOnScroll', N'ru', N'Таблица загрузится, когда вы прокрутите до неё.'),
-    (N'workflow.submitNeedsGrant', N'ru', N'Для подачи нужен уровень доступа «Подача» к этому проекту или листу; у вас — {level}. Попросите администратора повысить его.'),
+    (N'workflow.submitNeedsGrant', N'ru', N'Для подачи нужен уровень доступа «Подача» к этому проекту или листу либо уровень «Запись» вместе с правом «Подача документов»; у вас — {level} без этого права. Попросите администратора повысить уровень или выдать право.'),
     (N'workflow.approveTitle', N'ru', N'Утвердить этот лист?'),
     (N'workflow.approveHint', N'ru', N'Утверждённые показатели становятся окончательными для этого периода и попадают в регламентированные отчёты. Чтобы изменить их позже, лист нужно вернуть в работу.'),
     (N'document.lock.projectArchived', N'ru', N'Проект перенесён в архив: его документы доступны только для чтения.'),
@@ -12599,7 +12638,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'grid.boolYes', N'kz', N'Иә'),
     (N'grid.boolNo', N'kz', N'Жоқ'),
     (N'grid.tableLoadsOnScroll', N'kz', N'Кесте оған дейін айналдырғанда жүктеледі.'),
-    (N'workflow.submitNeedsGrant', N'kz', N'Тапсыру үшін осы жобаға немесе параққа «Тапсыру» қолжетімділік деңгейі қажет; сіздікі — {level}. Әкімшіден оны арттыруды сұраңыз.'),
+    (N'workflow.submitNeedsGrant', N'kz', N'Тапсыру үшін осы жобаға немесе параққа «Тапсыру» қолжетімділік деңгейі не «Жазу» деңгейі мен «Құжаттарды тапсыру» құқығы қажет; сіздікі — {level}, бұл құқықсыз. Әкімшіден деңгейді арттыруды немесе құқық беруді сұраңыз.'),
     (N'workflow.approveTitle', N'kz', N'Бұл парақты бекіту керек пе?'),
     (N'workflow.approveHint', N'kz', N'Бекітілген көрсеткіштер осы кезең үшін түпкілікті болады және реттелетін есептерге енеді. Оларды кейін өзгерту үшін парақты жұмысқа қайтару қажет.'),
     (N'document.lock.projectArchived', N'kz', N'Жоба мұрағатқа жіберілген: оның құжаттары тек оқу үшін қолжетімді.'),
@@ -15617,7 +15656,7 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:an38t5 ── кінець секції ──
--- COLL:an38k ── ru/kz L4-06/L5-03: первинний ключ на записах без значення частини; власна порція ──
+-- COLL:an38k── ru/kz L4-06/L5-03: первинний ключ на записах без значення частини; власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
   FROM (VALUES
@@ -15657,6 +15696,16 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:an42vm ── кінець секції ──
+-- COLL:an43sub ── ru/kz D-285: підпис права Document.Submit; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'permission.Document.Submit', N'ru', N'Подача документов (при уровне «Запись»)'),
+    (N'permission.Document.Submit', N'kz', N'Құжаттарды тапсыру («Жазу» деңгейінде)')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:an43sub ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t
