@@ -498,7 +498,10 @@ function Set-ServiceEnvironmentVariable {
 function Test-ConnectionStringHasPassword {
     param([Parameter(Mandatory)] [string] $ConnectionString)
     $builder = [System.Data.Common.DbConnectionStringBuilder]::new()
-    $builder.ConnectionString = $ConnectionString
+    # ⚠ set_ConnectionString, не `.ConnectionString =`: builder — IDictionary, і
+    # PowerShell присвоєння властивості перетворює на ключ "ConnectionString"
+    # (знайшов CI, D5a).
+    $builder.set_ConnectionString($ConnectionString)
     foreach ($key in 'Password', 'Pwd') {
         if ($builder.ContainsKey($key) -and "$($builder[$key])") { return $true }
     }
