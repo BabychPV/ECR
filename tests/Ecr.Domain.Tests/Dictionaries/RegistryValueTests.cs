@@ -27,6 +27,27 @@ public sealed class RegistryValueTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    public void L4_04_Число_з_масштабом_понад_16_округлюється_як_колонка_decimal_34_16()
+    {
+        var value = new RegistryValue(registryEntryId: 1, registryFieldDefId: 2);
+
+        value.Set(CellDataType.Decimal, 1.12345678901234567890m, unitId: null);
+
+        Assert.Equal(1.1234567890123457m, value.ValueNumeric);
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    public void L4_04_Дата_округлюється_до_мілісекунди_як_колонка_datetime2_3()
+    {
+        var value = new RegistryValue(registryEntryId: 1, registryFieldDefId: 2);
+        var source = new DateTime(2026, 1, 2, 3, 4, 5, DateTimeKind.Utc).AddTicks(12_345);
+
+        value.Set(CellDataType.Date, source, unitId: null);
+
+        Assert.Equal(new DateTime(2026, 1, 2, 3, 4, 5, 1, DateTimeKind.Utc), value.ValueDate);
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
     public void Одиниця_на_нечисловому_полі_відхиляється_з_ключем()
     {
         var value = new RegistryValue(registryEntryId: 1, registryFieldDefId: 2);

@@ -359,6 +359,32 @@ public sealed class RegistrySyncExecuteTests(SqlServerFixture sql)
         }
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "D-212")]
+    public async Task L4_04_Число_з_масштабом_понад_16_пишеться_один_раз_а_не_щопрогону()
+    {
+        var stand = await ArrangeAsync(RegistrySourceKind.External);
+        stand.Put("Stack1", "Capacity", 10.12345678901234567890m);
+        await using var provider = BuildProvider();
+
+        try
+        {
+            await RunAsync(provider, stand);
+            Assert.Equal(10.1234567890123457m, await CapAsync(stand, stand.E1));
+
+            // Повтор із тим самим джерелом: ні оновлення, ні ревізії довідника.
+            var revision = await RevisionAsync(stand);
+            await RunAsync(provider, stand);
+            Assert.Equal(revision, await RevisionAsync(stand));
+        }
+        finally
+        {
+            await DeactivateAsync(stand);
+        }
+    }
+
     // ─── Правила довідника й атомарність ───────────────────────────────────
 
     [Fact]

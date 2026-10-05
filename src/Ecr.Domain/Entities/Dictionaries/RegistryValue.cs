@@ -131,7 +131,9 @@ public sealed class RegistryValue : Entity<long>
 
             case CellDataType.Int:
             case CellDataType.Decimal:
-                ValueNumeric = AsDecimal(value, dataType);
+                // L4-04: значення в пам'яті = те, що поверне колонка decimal(34,16). Інакше число з
+                // масштабом > 16 завжди «відрізняється» від збереженого й синк пише його щопрогону.
+                ValueNumeric = decimal.Round(AsDecimal(value, dataType), NumericScale, MidpointRounding.AwayFromZero);
                 ValueUnitId = unitId;
                 break;
 
@@ -140,7 +142,7 @@ public sealed class RegistryValue : Entity<long>
                 break;
 
             case CellDataType.Date:
-                ValueDate = AsDate(value);
+                ValueDate = ToMillisecond(AsDate(value));
                 break;
 
             case CellDataType.Lookup:
@@ -162,6 +164,16 @@ public sealed class RegistryValue : Entity<long>
                     $"Поле довідника не може мати тип {dataType}.",
                     new Dictionary<string, object?> { ["messageKey"] = "err.ECR-REG-0422.fieldTypeNotAllowed", ["dataType"] = dataType.ToString() });
         }
+    }
+
+    /// <summary>Масштаб колонки <c>ValueNumeric</c> (<c>decimal(34,16)</c>).</summary>
+    private const int NumericScale = 16;
+
+    /// <summary>Округлення до 1 мс, як це робить <c>datetime2(3)</c> при записі (L4-04).</summary>
+    private static DateTime ToMillisecond(DateTime value)
+    {
+        var ticks = (value.Ticks + (TimeSpan.TicksPerMillisecond / 2)) / TimeSpan.TicksPerMillisecond * TimeSpan.TicksPerMillisecond;
+        return new DateTime(Math.Min(ticks, DateTime.MaxValue.Ticks), value.Kind);
     }
 
     /// <summary>Заноляє всі колонки значення.</summary>

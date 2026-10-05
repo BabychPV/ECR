@@ -142,6 +142,22 @@ public sealed class RegistrySyncPlannerTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-8.11")]
+    public void Число_з_масштабом_понад_16_не_дає_оновлення()
+    {
+        // L4-04: колонка decimal(34,16) округлює, тож збережене 1.1234567890123457 і джерело
+        // 1.12345678901234567890 - те саме значення; інакше «оновлення» щопрогону.
+        var input = Input(
+            RegistrySourceKind.External,
+            element: Element(("Permit_Limit", 1.12345678901234567890m)),
+            current: Values((LimitField, 1.1234567890123457m, false)),
+            Limit);
+
+        Assert.True(RegistrySyncPlanner.Plan(input).IsEmpty);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait("Requirement", "ФВ-8.10")]
     public void Зниклий_елемент_повного_знімка_лише_подія_SourceMissing()
     {
