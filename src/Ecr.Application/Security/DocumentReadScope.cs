@@ -164,6 +164,22 @@ public sealed class DocumentReadScope
                || tables.Exists(CanReadTable);
     }
 
+    /// <summary>Те саме за кодом аркуша (журнал погоджень знає код, а не ідентифікатор).</summary>
+    /// <param name="sheetCode">Код аркуша.</param>
+    /// <remarks>Код, якого знімок не знає, — невидимий (закрито за замовчуванням).</remarks>
+    public bool CanReadSheetCode(string sheetCode)
+    {
+        foreach (var (id, code) in _sheetCodes)
+        {
+            if (string.Equals(code, sheetCode, StringComparison.Ordinal))
+            {
+                return CanReadSheet(id);
+            }
+        }
+
+        return false;
+    }
+
     /// <summary>
     /// Чи бачить профіль місце, про яке говорить повідомлення: таблицю і, коли
     /// названо, колонку за її кодом (так адресують повідомлення валідації).
