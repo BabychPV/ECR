@@ -343,6 +343,7 @@ describe("З'єднання: створення", () => {
     'dataSourceEndpointHostNotAllowed',
     'dataSourceEndpointSqlScheme',
     'dataSourceEndpointSqlLinkLocal',
+    'dataSourceEndpointSqlForbiddenOption',
   ])('422 %s — причина БІЛЯ поля адреси, без загального алерта', async (key) => {
     respond({
       change: () =>

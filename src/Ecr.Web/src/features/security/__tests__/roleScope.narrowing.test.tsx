@@ -6,7 +6,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { GrantableProject, GrantableSheet, RoleView, UserRoleAssignmentView, UserView } from '@/api/types';
 import { GroupAssignmentsPanel } from '@/features/security/GroupAssignmentsPanel';
 import { UserAccessEditor } from '@/features/security/UserAccessEditor';
-import { formatPeriod, parsePeriod, scopeToDto } from '@/features/security/roleScope';
+import { formatPeriod, parsePeriod, scopeToDto, scopeValid } from '@/features/security/roleScope';
 import { testTheme } from '@/test/render';
 
 /**
@@ -108,6 +108,36 @@ describe('межі періоду й форма області (D-214)', () => {
   it('область лише з проєктами — дослівно та сама, що до D-214', () => {
     expect(scopeToDto({ projects: [6, 5], sheets: [], from: '', to: '' })).toEqual({ projects: [5, 6] });
     expect(scopeToDto({ projects: [], sheets: ['F1'], from: '2026-01', to: '' })).toBeNull();
+  });
+});
+
+describe('L9-11: без проєктів межі періодів не валідуються', () => {
+  it('scopeValid: порожні проєкти — завжди true, хоч би що лишилось у вимкнених полях', () => {
+    expect(scopeValid({ projects: [], sheets: [], from: 'abc', to: '' })).toBe(true);
+    expect(scopeValid({ projects: [], sheets: [], from: '2026-06', to: '2026-01' })).toBe(true);
+    expect(scopeValid({ projects: [5], sheets: [], from: 'abc', to: '' })).toBe(false);
+  });
+
+  it('UserAccessEditor: невалідна межа, потім зняти всі проєкти — «Зберегти» знову активна, помилки немає', async () => {
+    stubFetch(['Operators']);
+    renderWith(<UserAccessEditor user={user} roles={roles} onClose={() => {}} />);
+
+    const projectsField = await field('⟦security.scopeProjects⟧ · Operators');
+    fireEvent.click(projectsField);
+    fireEvent.click(await screen.findByRole('option', { name: 'Flare south (P6)' }));
+
+    const from = await field('⟦security.scopePeriodFrom⟧ · Operators');
+    await waitFor(() => expect(from.hasAttribute('disabled')).toBe(false));
+    fireEvent.change(from, { target: { value: '2026-1x' } });
+    await waitFor(() => expect(screen.getByRole('button', { name: '⟦common.save⟧' }).hasAttribute('disabled')).toBe(true));
+
+    // Зняти проєкт тим самим списком — роль знову «у всіх проєктах».
+    fireEvent.click(projectsField);
+    fireEvent.click(await screen.findByRole('option', { name: 'Flare south (P6)' }));
+
+    await waitFor(() => expect(from.hasAttribute('disabled')).toBe(true));
+    expect(from.getAttribute('aria-invalid')).not.toBe('true');
+    expect(screen.getByRole('button', { name: '⟦common.save⟧' }).hasAttribute('disabled')).toBe(false);
   });
 });
 

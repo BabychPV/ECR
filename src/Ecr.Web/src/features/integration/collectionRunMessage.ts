@@ -128,6 +128,8 @@ function render(key: string, params: Record<string, string>): string | null {
       return t('coverageEvents.eventRemovalLimit', params);
     case 'coverageEvents.eventRemovalSheetSubmitted':
       return t('coverageEvents.eventRemovalSheetSubmitted', params);
+    case 'coverageEvents.eventsTruncated':
+      return t('coverageEvents.eventsTruncated', params);
     case 'coverageEvents.skippedDependency':
       return t('coverageEvents.skippedDependency', params);
     default:
@@ -167,6 +169,8 @@ function adapterRefusal(key: string, params: Record<string, string>): string | n
       return t('err.ECR-INT-0503.queryNotConfigured', params);
     case 'err.ECR-INT-0503.connectionStringBroken':
       return t('err.ECR-INT-0503.connectionStringBroken', params);
+    case 'err.ECR-INT-0503.endpointForbidden':
+      return t('err.ECR-INT-0503.endpointForbidden', params);
     case 'err.ECR-INT-0503.connectFailed':
       return t('err.ECR-INT-0503.connectFailed', params);
     case 'err.ECR-INT-0503.sourceMissing':

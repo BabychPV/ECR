@@ -225,6 +225,106 @@ public sealed partial class DocumentVersionMigrationTests(SqlServerFixture sql)
         await AssertProblemAsync(response, HttpStatusCode.UnprocessableEntity, "ECR-TMPL-0422", "err.ECR-TMPL-0422.migrateTargetNotPublished").ConfigureAwait(true);
     }
 
+    /// <summary>
+    /// L1-08 (HU-11 Q3=A): право <c>Template.Edit</c> є, документ видимий, але гранта Manage на проєкт
+    /// немає — і перенос, і сухий прогін, і перелік цілей дають 403 з ключем гранта, дані не змінені.
+    /// Мутація: прибрати <c>RequireProjectManage</c> із <c>HandleAsync</c> (або з <c>ListTargetsAsync</c>) —
+    /// відповідний випадок червоніє (200/422 замість 403).
+    /// </summary>
+    [Theory]
+    [InlineData(GrantLevel.Read, false)]
+    [InlineData(GrantLevel.Write, false)]
+    [InlineData(GrantLevel.Submit, true)]
+    [InlineData(GrantLevel.Approve, true)]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-7.5")]
+    public async Task Без_гранта_Manage_на_проєкт_403_для_переносу_сухого_прогону_і_переліку(GrantLevel level, bool dryRun)
+    {
+        var s = await ArrangeAsync(Target.OnlyLabels, grant: level).ConfigureAwait(true);
+        var before = await SnapshotAsync(s).ConfigureAwait(true);
+
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
+
+        var post = await PostAsync(client, s, "Safe", dryRun).ConfigureAwait(true);
+        await AssertProblemAsync(post, HttpStatusCode.Forbidden, "ECR-AUTH-0403", "err.ECR-AUTH-0403.noProjectManageGrant").ConfigureAwait(true);
+
+        var list = await client.GetAsync(
+            new Uri($"/api/v1/documents/{s.Doc.DocumentId.ToString(CultureInfo.InvariantCulture)}/migrate-version", UriKind.Relative))
+            .ConfigureAwait(true);
+        await AssertProblemAsync(list, HttpStatusCode.Forbidden, "ECR-AUTH-0403", "err.ECR-AUTH-0403.noProjectManageGrant").ConfigureAwait(true);
+
+        Assert.Equal(before, await SnapshotAsync(s).ConfigureAwait(true));
+    }
+
+    /// <summary>
+    /// L1-08: <c>Manage</c> на ІНШОМУ проєкті права не дає (403), а <c>Manage</c> на проєкт документа від
+    /// ДРУГОЇ ролі користувача (перше право — Template.Edit + Write у першій ролі) додається до наявних
+    /// ролей і дозволяє перенос: рівень рахується по всіх ролях, а не лише по тій, що має Template.Edit.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-7.5")]
+    public async Task Manage_на_іншому_проєкті_права_не_дає_а_Manage_від_другої_ролі_дає()
+    {
+        var s = await ArrangeAsync(Target.OnlyLabels, grant: GrantLevel.Write).ConfigureAwait(true);
+        var other = await new TestDocumentBuilder(sql.ConnectionString).BuildAsync(columnCount: 1, rowCount: 1).ConfigureAwait(true);
+
+        await using (var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext())
+        {
+            var role = new Role(
+                EcrCode.Create($"MIGR_{Guid.NewGuid():N}"),
+                new LocalizedText(new Dictionary<string, string> { ["en"] = "Manage elsewhere" }));
+            db.Roles.Add(role);
+            await db.SaveChangesAsync().ConfigureAwait(true);
+            db.RoleAssignments.Add(new RoleAssignment(role.Id, s.UserId, null));
+            db.ResourceGrants.Add(new ResourceGrant(role.Id, ResourceKind.Project, other.ProjectId, GrantLevel.Manage));
+            await db.SaveChangesAsync().ConfigureAwait(true);
+        }
+
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
+
+        var elsewhere = await PostAsync(client, s, "Safe", dryRun: true).ConfigureAwait(true);
+        await AssertProblemAsync(elsewhere, HttpStatusCode.Forbidden, "ECR-AUTH-0403", "err.ECR-AUTH-0403.noProjectManageGrant").ConfigureAwait(true);
+
+        await using (var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext())
+        {
+            var role = new Role(
+                EcrCode.Create($"MIGR_{Guid.NewGuid():N}"),
+                new LocalizedText(new Dictionary<string, string> { ["en"] = "Manage here" }));
+            db.Roles.Add(role);
+            await db.SaveChangesAsync().ConfigureAwait(true);
+            db.RoleAssignments.Add(new RoleAssignment(role.Id, s.UserId, null));
+            db.ResourceGrants.Add(new ResourceGrant(role.Id, ResourceKind.Project, s.Doc.ProjectId, GrantLevel.Manage));
+            await db.SaveChangesAsync().ConfigureAwait(true);
+        }
+
+        // Профіль прав кешується в застосунку, тож другий етап — на новому застосунку.
+        using var app2 = new EcrApiFactory(sql);
+        using var fresh = await SignedInAsync(app2, s.UserName).ConfigureAwait(true);
+        var here = await PostAsync(fresh, s, "Safe", dryRun: true).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.OK, here.StatusCode);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-7.5")]
+    public async Task З_грантом_Manage_сухий_прогін_проходить()
+    {
+        var s = await ArrangeAsync(Target.OnlyLabels, grant: GrantLevel.Manage).ConfigureAwait(true);
+
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
+
+        var response = await PostAsync(client, s, "Safe", dryRun: true).ConfigureAwait(true);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
@@ -335,7 +435,8 @@ public sealed partial class DocumentVersionMigrationTests(SqlServerFixture sql)
 
     private async Task<Scenario> ArrangeAsync(
         Target target, bool submitted = false, bool publishTarget = true,
-        string permission = MigrateDocumentVersionHandler.Permission)
+        string permission = MigrateDocumentVersionHandler.Permission,
+        GrantLevel grant = GrantLevel.Manage)
     {
         var builder = new TestDocumentBuilder(sql.ConnectionString);
         var doc = await builder.BuildAsync(columnCount: 3, rowCount: 2).ConfigureAwait(false);
@@ -431,7 +532,7 @@ public sealed partial class DocumentVersionMigrationTests(SqlServerFixture sql)
 
         db.RolePermissions.Add(new RolePermission(role.Id, permission));
         db.RoleAssignments.Add(new RoleAssignment(role.Id, user.Id, null));
-        db.ResourceGrants.Add(new ResourceGrant(role.Id, ResourceKind.Project, doc.ProjectId, GrantLevel.Write));
+        db.ResourceGrants.Add(new ResourceGrant(role.Id, ResourceKind.Project, doc.ProjectId, grant));
         await db.SaveChangesAsync().ConfigureAwait(false);
 
         return new Scenario(

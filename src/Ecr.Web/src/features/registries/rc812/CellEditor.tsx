@@ -28,7 +28,8 @@ export interface CellEditorProps {
 }
 
 /**
- * Типізований редактор комірки (§8.4 «Типізовані редактори»): число з інваріантною крапкою,
+ * Типізований редактор комірки (§8.4 «Типізовані редактори»): число (кома — за правилами сервера,
+ * `normalizeCellInput`),
  * так/ні, дата, пікер `Lookup` з пошуком (показує назву, не id), одиниця.
  */
 export function CellEditor(props: CellEditorProps): JSX.Element {

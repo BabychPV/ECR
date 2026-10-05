@@ -95,6 +95,12 @@ export interface ServerOptions {
   /** Відповідь на пакет; за замовчуванням — усе пройшло. */
   readonly batch?: (sent: SentBatch) => RegistryBatchResult;
   readonly rows?: RegistryRow[];
+  /** Збереження (не `dryRun`) відповідає лише після цього проміса — «запит у дорозі». */
+  readonly holdCommit?: Promise<unknown>;
+  /** Статус відповіді на рядки довідника-цілі `STREAM` (зіставлення `Lookup`); за замовчуванням 200. */
+  readonly lookupStatus?: number;
+  /** Сеанс симуляції «очима користувача» (`/me.isSimulation`). */
+  readonly simulation?: boolean;
 }
 
 const json = (body: unknown): Response =>
@@ -118,7 +124,7 @@ export function mockServer(options: ServerOptions = {}): SentBatch[] {
   const me = {
     denies: [],
     grants: {},
-    isSimulation: false,
+    isSimulation: options.simulation === true,
     language: 'en',
     mustChangePassword: false,
     permissions: options.permissions ?? ['Registry.View', 'Registry.EditData'],
@@ -141,10 +147,17 @@ export function mockServer(options: ServerOptions = {}): SentBatch[] {
           items: (JSON.parse(String(init?.body)) as { items: RegistryBatchItem[] }).items,
         };
         sent.push(batch);
+        if (!batch.dryRun && options.holdCommit !== undefined) await options.holdCommit;
         return json((options.batch ?? passed)(batch));
       }
       if (url.includes('/definition')) return json(definition);
       if (url.includes('/api/v1/registries/STREAM/rows')) {
+        if (options.lookupStatus !== undefined && options.lookupStatus >= 400) {
+          return new Response(JSON.stringify({ title: 'Forbidden', status: options.lookupStatus, errorCode: 'ECR-AUTH-0403' }), {
+            status: options.lookupStatus,
+            headers: { 'Content-Type': 'application/problem+json' },
+          });
+        }
         return json({ items: [{ ...storedRows[0], id: 162, code: 'S162', display: '1D-2 · HP Separator Gas', values: {} }], nextCursor: null, totalCount: 1 });
       }
       if (url.includes('/rows')) {
@@ -161,8 +174,7 @@ export function mockServer(options: ServerOptions = {}): SentBatch[] {
   return sent;
 }
 
-export function showDataPage(): RenderResult {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+export function showDataPage(client = new QueryClient({ defaultOptions: { queries: { retry: false } } })): RenderResult {
 
   return render(
     <MantineProvider theme={testTheme}>

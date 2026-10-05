@@ -140,6 +140,28 @@ public sealed class SourceEventSyncJobTests(SqlServerFixture sql)
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Directive", "HSE301-A5b")]
+    public async Task ПатчерСкидаєТрекер_ЗвязокOpenСтаєSynced()
+    {
+        // ⛔ L3-03: патчер ділить scoped-контекст із задачею і на гонці за рядок робить
+        // ChangeTracker.Clear(). До фіксу зміни зв'язків етапу 2 (тут Open → Synced) мовчки
+        // губилися: SaveChangesAsync відчеплених не бачив. Мутація: прибрати перечитування
+        // links після WriteRowsAsync у SourceEventSyncJob.SyncMapAsync.
+        await using var stand = await ArrangeAsync();
+        var source = new FakeEventSource(Ev("E1", Start, null));
+        await RunAsync(stand, source);
+        Assert.Equal(SourceEventLinkStatus.Open, Assert.Single(await LinksAsync(stand)).Status);
+
+        source.Result = new SourceEventResult([Ev("E1", Start, End, volume: 5m)], false, null);
+        await RunAsync(stand, source, clearTrackerOnWrite: true);
+
+        Assert.Single(await RowsAsync(stand));
+        Assert.Equal(SourceEventLinkStatus.Synced, Assert.Single(await LinksAsync(stand)).Status);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "HSE301-A5b")]
     public async Task Незакрита_подія_не_рахується_і_перечитується_після_закриття()
     {
         await using var stand = await ArrangeAsync();
@@ -676,6 +698,149 @@ public sealed class SourceEventSyncJobTests(SqlServerFixture sql)
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Directive", "HSE301-EFSYNC")]
+    public async Task ПонадСтелюПодій_НайсвіжішіСинхронізуються()
+    {
+        // ⛔ L3-07: читання зі стелею віддавало щоразу ті самі найраніші події — свіжіші за стелю не
+        // синхронізувалися ніколи. Тепер — сторінками від найпізнішого прочитаного початку.
+        // Мутація: ReadEventPagesAsync повертає першу сторінку (без циклу).
+        await using var stand = await ArrangeAsync();
+        var e1 = Ev("E1", Start, End);
+        var e2 = Ev("E2", Start.AddHours(1), End.AddHours(1));
+        var e3 = Ev("E3", Start.AddHours(2), End.AddHours(2));
+        var source = new FakeEventSource
+        {
+            Pages = query => query.FromUtc < e2.StartUtc
+                ? new SourceEventResult([e1, e2], true, null)
+                : new SourceEventResult([e2, e3], false, null),
+        };
+
+        await RunAsync(stand, source);
+
+        Assert.Equal(["EF-E1", "EF-E2", "EF-E3"], (await RowsAsync(stand)).Select(r => r.RowKey).Order(StringComparer.Ordinal));
+        Assert.All(await LinksAsync(stand), l => Assert.Equal(SourceEventLinkStatus.Synced, l.Status));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "HSE301-EFSYNC")]
+    public async Task ОбрізанеПісляСторінок_ПодіяПокриттяEventsTruncated()
+    {
+        // ⛔ L3-07: обрізання, яке сторінки не зняли, видно людині в журналі покриття (раніше — лише
+        // мовчазне вимкнення Missing/видалення). Мутація: прибрати events.Add(...EventsTruncated...).
+        await using var stand = await ArrangeAsync();
+        var source = new FakeEventSource
+        {
+            Pages = query => new SourceEventResult([Ev($"E{query.FromUtc.Ticks}", query.FromUtc.AddMinutes(1), query.FromUtc.AddMinutes(2))], true, null),
+        };
+
+        await RunAsync(stand, source, from: Start, to: Start.AddDays(1));
+
+        Assert.Equal(SourceEventSyncJob.MaxEventPages, (await RowsAsync(stand)).Count);
+        Assert.Equal(
+            1,
+            Convert.ToInt32(
+                await ScalarAsync(
+                    $"SELECT COUNT(*) FROM itg.CollectionCoverage WHERE SourceEntityId = {stand.EntityId} "
+                    + "AND Status = N'SourceDataRefused' AND Details LIKE N'%coverageEvents.eventsTruncated%'"),
+                CultureInfo.InvariantCulture));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "HSE301-EFSYNC")]
+    public async Task ПоданняМіжРішеннямІВидаленням_РядокЛишається()
+    {
+        // ⛔ L3-04: стан аркуша читався ДО транзакції видалення. Подання між рішенням і видаленням
+        // (тут — перехоплювач на останньому запиті рішення) інакше видаляло рядок з уже поданого
+        // аркуша. Мутація: прибрати RecheckRemovalAsync у ApplyRemovalsAsync.
+        await using var stand = await ArrangeAsync();
+        var source = new FakeEventSource(Ev("E1", Start, End), Ev("E2", Start.AddHours(1), End.AddHours(1)));
+        await RunAsync(stand, source);
+
+        var sheetDefId = Convert.ToInt32(
+            await ScalarAsync($"SELECT SheetDefId FROM cfg.TableDef WHERE Id = {stand.TableDefId}"), CultureInfo.InvariantCulture);
+
+        source.Result = new SourceEventResult([Ev("E2", Start.AddHours(1), End.AddHours(1))], false, null);
+        await RunAsync(stand, source, afterRemovalDecision: async () =>
+        {
+            await using var db = sql.CreateContext();
+            var state = new ApprovalState(stand.DocumentId, sheetDefId, 202601);
+            state.Submit(stand.HumanId, Now);
+            db.ApprovalStates.Add(state);
+            await db.SaveChangesAsync();
+        });
+
+        Assert.Equal(["EF-E1", "EF-E2"], (await RowsAsync(stand)).Select(r => r.RowKey).Order(StringComparer.Ordinal));
+        Assert.Equal(0, await JournalCountAsync(stand));
+        Assert.Equal(
+            1,
+            Convert.ToInt32(
+                await ScalarAsync(
+                    $"SELECT COUNT(*) FROM itg.CollectionCoverage WHERE SourceEntityId = {stand.EntityId} "
+                    + "AND Status = N'SkippedPeriodClosed' AND Details LIKE N'%eventRemovalSheetSubmitted%'"),
+                CultureInfo.InvariantCulture));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "HSE301-EFSYNC")]
+    public async Task ПравкаЛюдиниМіжРішеннямІВидаленням_РядокЛишається()
+    {
+        // ⛔ L3-04 / D-118: правка людини між ManualRowKeysAsync і DELETE інакше стиралася разом із
+        // рядком. Мутація: прибрати RecheckRemovalAsync у ApplyRemovalsAsync.
+        await using var stand = await ArrangeAsync();
+        var source = new FakeEventSource(Ev("E1", Start, End, volume: 10m), Ev("E2", Start.AddHours(1), End.AddHours(1)));
+        await RunAsync(stand, source);
+
+        source.Result = new SourceEventResult([Ev("E2", Start.AddHours(1), End.AddHours(1))], false, null);
+        await RunAsync(stand, source, afterRemovalDecision: () => HumanWriteAsync(stand, "EF-E1", new PatchCell(stand.VolumeCode, 42m)));
+
+        Assert.Equal(["EF-E1", "EF-E2"], (await RowsAsync(stand)).Select(r => r.RowKey).Order(StringComparer.Ordinal));
+        Assert.Equal(42m, (await CellsAsync(stand, "EF-E1"))[stand.VolumeColumn].Numeric);
+        Assert.Equal(0, await JournalCountAsync(stand));
+        Assert.Equal(SourceEventLinkStatus.Missing, (await LinksAsync(stand)).Single(l => l.SourceEventId == "E1").Status);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "HSE301-EFSYNC")]
+    public async Task ВидаленийРядок_ЗнімаєЧиннийRowWindowValue()
+    {
+        // ⛔ L3-13: жорстке видалення рядка події лишало ext.RowWindowValue чинним; подія з тим самим
+        // ID повертається, рядок EF-<id> створюється знову, а NeedsFetch бачить старий «Fetched» і
+        // не підтягує — колонка об'єму порожня назавжди. Мутація: прибрати UPDATE ext.RowWindowValue
+        // у JournalAndDeleteAsync.
+        await using var stand = await ArrangeAsync();
+        var source = new FakeEventSource(Ev("E1", Start, End, volume: 10m), Ev("E2", Start.AddHours(1), End.AddHours(1)));
+        await RunAsync(stand, source);
+
+        var mapId = await AddCurrentWindowValueAsync(stand, "EF-E1");
+        try
+        {
+            source.Result = new SourceEventResult([Ev("E2", Start.AddHours(1), End.AddHours(1))], false, null);
+            await RunAsync(stand, source);
+
+            Assert.Equal(["EF-E2"], (await RowsAsync(stand)).Select(r => r.RowKey));
+            Assert.Equal(
+                (1, 0),
+                (Convert.ToInt32(await ScalarAsync($"SELECT COUNT(*) FROM ext.RowWindowValue WHERE RowWindowMapId = {mapId}"), CultureInfo.InvariantCulture),
+                 Convert.ToInt32(await ScalarAsync($"SELECT COUNT(*) FROM ext.RowWindowValue WHERE RowWindowMapId = {mapId} AND IsCurrent = 1"), CultureInfo.InvariantCulture)));
+        }
+        finally
+        {
+            await ExecuteAsync(
+                $"DELETE FROM ext.RowWindowValue WHERE RowWindowMapId = {mapId}; DELETE FROM ext.RowWindowMap WHERE Id = {mapId};");
+        }
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "HSE301-EFSYNC")]
     [Trait("Finding", "audit-B2")]
     public async Task B2_Збій_на_видаленні_зв_язку_відкочує_комірки_рядок_і_запис_журналу_разом()
     {
@@ -1042,7 +1207,8 @@ public sealed class SourceEventSyncJobTests(SqlServerFixture sql)
     private async Task RunAsync(
         Stand stand, FakeEventSource source, bool freshContainer = false, ICalculationTrigger? trigger = null,
         ILogger<SourceEventSyncJob>? logger = null, int? entityId = null,
-        DateTime? from = null, DateTime? to = null, bool confirm = false)
+        DateTime? from = null, DateTime? to = null, bool confirm = false, bool clearTrackerOnWrite = false,
+        Func<Task>? afterRemovalDecision = null)
     {
         // ⚠ Метадані таблиці кешуються в контейнері: зміна стелі рядків у базі видна лише новому контейнеру.
         await using var fresh = freshContainer ? BuildProvider() : null;
@@ -1052,10 +1218,20 @@ public sealed class SourceEventSyncJobTests(SqlServerFixture sql)
         var clock = Substitute.For<IClock>();
         clock.UtcNow.Returns(Now);
 
+        // Гонка «рішення → видалення» (L3-04): контекст задачі з перехоплювачем, що виконує дію після
+        // останнього запиту рішення (перевірки братнього зв'язку) — тобто між рішенням і транзакцією видалення.
+        await using var raced = afterRemovalDecision is null
+            ? null
+            : new EcrDbContext(EfWarningGuard.Apply(new DbContextOptionsBuilder<EcrDbContext>()
+                    .UseSqlServer(sql.ConnectionString)
+                    .AddInterceptors(new AfterQueryInterceptor("[SourceEventMapId] <>", afterRemovalDecision)))
+                .Options);
+        var db = raced ?? services.GetRequiredService<EcrDbContext>();
+        var patcher = services.GetRequiredService<ICellPatcher>();
         var job = new SourceEventSyncJob(
-            services.GetRequiredService<EcrDbContext>(),
+            db,
             [source],
-            services.GetRequiredService<ICellPatcher>(),
+            clearTrackerOnWrite ? new TrackerClearingPatcher(patcher, db) : patcher,
             services.GetRequiredService<ICoverageJournal>(),
             services.GetRequiredService<IntegrationActor>(),
             clock,
@@ -1091,11 +1267,52 @@ public sealed class SourceEventSyncJobTests(SqlServerFixture sql)
     }
 
     /// <summary>Джерело подій, яке віддає задану відповідь і пам'ятає останній запит.</summary>
+    /// <summary>Виконує дію один раз — після першої команди, текст якої містить мітку.</summary>
+    private sealed class AfterQueryInterceptor(string marker, Func<Task> action)
+        : Microsoft.EntityFrameworkCore.Diagnostics.DbCommandInterceptor
+    {
+        private bool _fired;
+
+        public override async ValueTask<System.Data.Common.DbDataReader> ReaderExecutedAsync(
+            System.Data.Common.DbCommand command,
+            Microsoft.EntityFrameworkCore.Diagnostics.CommandExecutedEventData eventData,
+            System.Data.Common.DbDataReader result,
+            CancellationToken cancellationToken = default)
+        {
+            if (!_fired && command.CommandText.Contains(marker, StringComparison.Ordinal))
+            {
+                _fired = true;
+                await action();
+            }
+
+            return result;
+        }
+    }
+
+    /// <summary>Справжній патчер, що після запису скидає трекер спільного контексту (як на гонці CELL-0409).</summary>
+    private sealed class TrackerClearingPatcher(ICellPatcher inner, EcrDbContext db) : ICellPatcher
+    {
+        public Task<IntegrationWriteResult> ApplyIntegrationAsync(
+            long documentId, long tableInstanceId, PeriodKey periodKey, IReadOnlyList<IntegrationCellValue> cells, CancellationToken ct)
+            => inner.ApplyIntegrationAsync(documentId, tableInstanceId, periodKey, cells, ct);
+
+        public async Task<IntegrationWriteResult> ApplyIntegrationRowsAsync(
+            long documentId, long tableInstanceId, PeriodKey periodKey, IReadOnlyList<IntegrationRowUpsert> rows, CancellationToken ct)
+        {
+            var result = await inner.ApplyIntegrationRowsAsync(documentId, tableInstanceId, periodKey, rows, ct);
+            db.ChangeTracker.Clear();
+            return result;
+        }
+    }
+
     private sealed class FakeEventSource(params SourceEvent[] events) : IExternalDataSource
     {
         public ExternalTransport Transport => ExternalTransport.PiWebApi;
 
         public SourceEventResult Result { get; set; } = new(events, false, null);
+
+        /// <summary>Відповідь за курсором запиту (сторінкування L3-07); <c>null</c> — <see cref="Result"/>.</summary>
+        public Func<SourceEventQuery, SourceEventResult>? Pages { get; init; }
 
         public SourceEventQuery? LastQuery { get; private set; }
 
@@ -1117,6 +1334,11 @@ public sealed class SourceEventSyncJobTests(SqlServerFixture sql)
             if (FailTemplates.Contains(query.Template))
             {
                 throw new InvalidOperationException($"template {query.Template} unavailable");
+            }
+
+            if (Pages is not null)
+            {
+                return Task.FromResult(Pages(query));
             }
 
             return Task.FromResult(ByTemplate.TryGetValue(query.Template, out var byTemplate) ? byTemplate : Result);
@@ -1385,6 +1607,31 @@ public sealed class SourceEventSyncJobTests(SqlServerFixture sql)
         => Convert.ToInt32(
             await ScalarAsync($"SELECT COUNT(*) FROM aud.CellChange WHERE DocumentId = {stand.DocumentId}"),
             CultureInfo.InvariantCulture);
+
+    /// <summary>Прив'язка вікна на колонку об'єму і чинний запис провенансу для рядка (як після RowWindowFetchJob).</summary>
+    private static async Task<int> AddCurrentWindowValueAsync(Stand stand, string rowKey)
+    {
+        await using var scope = stand.Provider.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<EcrDbContext>();
+        var columns = await db.ColumnDefs
+            .Where(c => c.Id == stand.VolumeColumn || c.Id == stand.StartColumn || c.Id == stand.EndColumn)
+            .ToDictionaryAsync(c => c.Id);
+        var unitId = await db.Units.OrderBy(u => u.Id).Select(u => u.Id).FirstAsync();
+
+        var map = RowWindowMap.Create(
+            columns[stand.VolumeColumn], columns[stand.StartColumn], columns[stand.EndColumn], null,
+            RowWindowSummaryKind.Total, isStep: false, unitId);
+        db.RowWindowMaps.Add(map);
+        await db.SaveChangesAsync();
+
+        var value = new RowWindowValue(
+            202601, stand.JanuaryInstanceId, rowKey, stand.VolumeColumn, map.Id, stand.EntityId, "tag.total",
+            Start, End, RowWindowSummaryKind.Total, unitId, Now);
+        value.Record(RowWindowValueStatus.Fetched, RowWindowComputedBy.Local, 1m, null, 1m, null, 4, 100m, null);
+        db.RowWindowValues.Add(value);
+        await db.SaveChangesAsync();
+        return map.Id;
+    }
 
     private async Task<object?> ScalarAsync(string query)
     {

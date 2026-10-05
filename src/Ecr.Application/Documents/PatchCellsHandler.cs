@@ -616,7 +616,9 @@ public sealed partial class PatchCellsHandler(
                 continue;
             }
 
-            if (string.Equals(current, row.BaseVersion, StringComparison.OrdinalIgnoreCase))
+            // ⚠ L6-13: версія — Base64 (`Convert.ToBase64String(rowversion)`), а
+            // Base64 розрізняє регістр: `Ordinal`, а не `OrdinalIgnoreCase`.
+            if (string.Equals(current, row.BaseVersion, StringComparison.Ordinal))
             {
                 continue;
             }
@@ -1003,11 +1005,20 @@ public sealed partial class PatchCellsHandler(
                 {
                     var columnDefId = ColumnDefIdOf(context.Columns, cell.ColumnCode);
 
-                    if (allowed.Columns.TryGetValue(columnDefId, out var decision) && !decision.IsAllowed)
+                    // ⛔ L6-13: немає рішення на колонку — ВІДМОВА, як і для адрес
+                    // оновлення вище. Доти тут жила третя, протилежна політика
+                    // («рішення немає, отже можна»): `TryGetValue && !IsAllowed`.
+                    if (!allowed.Columns.TryGetValue(columnDefId, out var decision))
+                    {
+                        denied.Add(EditDecision.Deny(
+                            EditDenyReason.NoGrant,
+                            $"Рішення про доступ на колонку {cell.ColumnCode} нового рядка {row.RowKey} не отримано."));
+                    }
+                    else if (!decision.IsAllowed)
                     {
                         denied.Add(decision);
                     }
-                    else if (decision is { RequiresConfirmation: true })
+                    else if (decision.RequiresConfirmation)
                     {
                         needsConfirmation++;
                     }
@@ -2087,8 +2098,8 @@ public sealed partial class PatchCellsHandler(
     /// <c>NormalizedCellStore.ApplyAsync</c> тепер приєднується до цієї
     /// ambient-транзакції замість відкриття власної (Q-243);
     /// <c>RowStore.TouchRowsAsync</c> (`ExecuteUpdateAsync`) і
-    /// <c>DocumentStore.TouchAsync</c> (трекнута зміна, комітиться разом із
-    /// <c>uow.SaveChangesAsync</c>) автоматично приєднуються до тієї самої
+    /// <c>DocumentStore.TouchAsync</c> (теж <c>ExecuteUpdateAsync</c>, не трекнута
+    /// зміна — виконується одразу) автоматично приєднуються до тієї самої
     /// транзакції — обидва йдуть через ТОЙ САМИЙ <c>EcrDbContext</c>, що й
     /// <c>uow</c> (один DI-скоуп на запит). <c>AuditWriter.CreateCommand</c>
     /// уже вмів приєднатися до відкритої транзакції — йому просто нізвідки
@@ -2402,8 +2413,29 @@ public sealed partial class PatchCellsHandler(
         await audit.WriteCellChangesAsync(
             BuildAuditRecords(
                 request, changes.Upserts, changes.Deletes, context.UserId, now, context.Instance.DocumentId,
-                changes.RowKeyById, previous, isLateEdit, context.OutOfWindow),
+                changes.RowKeyById, previous, isLateEdit, AuditCorrelationId(), context.OutOfWindow),
             ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Кореляція запиту для <c>aud.CellChange.CorrelationId</c> (L6-14); <c>null</c> —
+    /// виклик поза запитом (фонова задача без автора), де <see cref="ICurrentUser.CorrelationId"/>
+    /// за контрактом кидає.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Доти колонка була <c>null</c> на КОЖНОМУ рядку: зв'язати правку в журналі з
+    /// рядком логу сервера (і з відповіддю, яку бачив користувач) було нічим.
+    /// </remarks>
+    private string? AuditCorrelationId()
+    {
+        try
+        {
+            return string.IsNullOrWhiteSpace(currentUser.CorrelationId) ? null : currentUser.CorrelationId;
+        }
+        catch (InvalidOperationException)
+        {
+            return null;
+        }
     }
 
     /// <summary>
@@ -2757,6 +2789,7 @@ public sealed partial class PatchCellsHandler(
         IReadOnlyDictionary<long, string> rowKeyById,
         IReadOnlyDictionary<CellAddress, CellValueData> previous,
         bool isLateEdit,
+        string? correlationId,
         HashSet<CellAddress>? outOfWindow = null)
     {
         var records = new List<CellChangeRecord>(upserts.Count + deletes.Count);
@@ -2791,7 +2824,7 @@ public sealed partial class PatchCellsHandler(
                 now, u.Address, DocumentId: documentId,
                 RowKey: rowKeyById.GetValueOrDefault(u.Address.TableRowId, string.Empty),
                 OldValue: Was(previous, u.Address), NewValue: Describe(u.Value),
-                userId, request.Origin, isLateEdit, CorrelationId: null,
+                userId, request.Origin, isLateEdit, CorrelationId: correlationId,
                 IsOutOfWindow: outOfWindow?.Contains(u.Address) == true));
         }
 
@@ -2801,7 +2834,7 @@ public sealed partial class PatchCellsHandler(
                 now, d, DocumentId: documentId,
                 RowKey: rowKeyById.GetValueOrDefault(d.TableRowId, string.Empty),
                 OldValue: Was(previous, d), NewValue: null,
-                userId, request.Origin, isLateEdit, CorrelationId: null,
+                userId, request.Origin, isLateEdit, CorrelationId: correlationId,
                 IsOutOfWindow: outOfWindow?.Contains(d) == true));
         }
 

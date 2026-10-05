@@ -19,7 +19,8 @@ import { useColumnWidths } from '@/features/preferences/columnWidthsSync';
 import { cellAppearanceClassOf, cellAppearanceOf } from './cellAppearance';
 import { cellFormatOf, withCellFormat } from './conditionalAppearance';
 import { cellDisplay, cellText, editorValueOf, isNumericColumn, sameCellValue } from './cellValue';
-import { parseClipboard, planPaste, toClipboard, type PasteRejection } from './clipboard';
+import { planPaste, type PasteRejection } from './clipboard';
+import { parseClipboard, toClipboard } from './tsvClipboard';
 import { captureEdit, coerce, revertsToSaved, valueOf, withKnownVersions } from './edits';
 import { captureRange, isRangeEdit, type RangeEditDetail } from './rangeEdit';
 import { ConflictPanel, hasCurrentVersion, type OpenConflict } from './ConflictPanel';
@@ -63,7 +64,9 @@ import {
   usePendingSlice,
 } from './pendingStore';
 import { installEnterKeyCompat } from './keyboardCompat';
-import { installKeyCommitGate } from './keyCommitGate';
+import { deferWhileCommitting, installKeyCommitGate, isInCellEditor } from './keyCommitGate';
+import { gridShortcut } from './shortcutKey';
+import { trackEditorTouched, type EditorTouched } from './editorTouched';
 import { installBodyPasteRedirect } from './bodyPaste';
 import {
   TableCornerAnchor,
@@ -1127,7 +1130,8 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
   /** Ctrl+V: розкладає буфер по сітці і відхиляє батч цілком, якщо є заборонені. */
   const onPaste = useCallback(
     (event: React.ClipboardEvent<HTMLDivElement>) => {
-      if (data === undefined || readOnly) return;
+      // AN-28/L8-03: paste з поля відкритого редактора належить полю, не сітці.
+      if (data === undefined || readOnly || isInCellEditor(event.target)) return;
 
       const text = event.clipboardData.getData('text/plain');
       if (text.length === 0) return;
@@ -1276,8 +1280,12 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
    * Друга копія цієї логіки розійшлася б із першою на першій же зміні
    * правила історії чи дебаунсу.
    */
+  // AN-39/L8-15: чи людина щось вводила в поточному редакторі (див. `editorTouched.ts`).
+  const editorTouched = useRef<EditorTouched | null>(null);
+  const untouchedEditor = (): boolean => editorTouched.current?.isTouched() === false;
+
   const applyEditedValue = useCallback(
-    (signal: { columnCode: string; rowKey: string; raw: string }) => {
+    (signal: { columnCode: string; rowKey: string; raw: string; untouched?: boolean }) => {
       if (data === undefined) return null;
 
       const captured = captureEdit(data, signal);
@@ -1400,10 +1408,17 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         | { prop?: string | number; model?: unknown; val?: unknown }
         | undefined;
 
+      // L8-07: значення не обрано (див. `onBeforeEdit`) - нічого не застосовуємо.
+      if (detail !== undefined && 'val' in detail && detail.val === undefined) return;
+
+      const untouched = untouchedEditor();
+      editorTouched.current?.reset();
+
       applyEditedValue({
         columnCode: detail?.prop === undefined ? '' : String(detail.prop),
         rowKey: rowKeyOf(detail?.model),
         raw: String(detail?.val ?? ''),
+        untouched,
       });
     },
     [data, readOnly, applyEditedValue, applyRangeEdit],
@@ -1431,6 +1446,15 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         | { prop?: string | number; model?: unknown; val?: unknown }
         | undefined;
 
+      // AN-39/L8-07 (Q10=A): редактор без `getValue` (список, довідник, одиниця, Bool)
+      // при кліку повз (`applyOnClose`) віддає `val === undefined` - значення не обрано.
+      // Це не «очистити комірку» і не «записати default»: правка скасовується, сітка
+      // не застосовує `undefined` у свою модель.
+      if (detail !== undefined && 'val' in detail && detail.val === undefined) {
+        event.preventDefault();
+        return;
+      }
+
       const columnCode = detail?.prop === undefined ? '' : String(detail.prop);
       const column = data.columns.find((candidate) => candidate.code === columnCode);
       if (column === undefined) return;
@@ -1438,6 +1462,15 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
       const rowKey = rowKeyOf(detail?.model);
       const hint = confirmationOf(data, rowKey, column);
       if (hint === null) return;
+
+      // AN-39/L8-15: незмінене значення (зокрема показаний default) - не правка (`captureEdit`
+      // поверне null), тож і модалки підтвердження немає.
+      if (
+        captureEdit(data, { columnCode, rowKey, raw: String(detail?.val ?? ''), untouched: untouchedEditor() }) ===
+        null
+      ) {
+        return;
+      }
 
       event.preventDefault();
       setConfirmRequest({ rowKey, columnCode, value: detail?.val, hint });
@@ -1529,43 +1562,48 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
    * порожній буфер на Ctrl+C виглядав би як несправність, а в Excel Ctrl+C без
    * виділення так само працює по всьому, що є під фокусом.
    */
+  // T4-08: текст буфера - окремо від події, бо відкладене копіювання (після вікна коміту)
+  // події вже не має й пише через `navigator.clipboard`.
+  const copyText = useCallback((): string | null => {
+    if (data === undefined) return null;
+
+    // ⛔ `selection.current.range.from/toColumn` — індекси в сітці (див.
+    // `dataColumnIndexOf`): без поправки Ctrl+C на таблиці з підписами
+    // рядків копіював вікно, зсунуте на одну колонку, і за межею вибраного
+    // діапазону міг прихопити зайву колонку.
+    const range =
+      selection.current === null
+        ? null
+        : clampSelection(
+            {
+              ...selection.current.range,
+              fromColumn: dataColumnIndexOf(selection.current.range.fromColumn, data),
+              toColumn: dataColumnIndexOf(selection.current.range.toColumn, data),
+            },
+            data.rows.length,
+            data.columns.length,
+          );
+
+    const rows = range === null ? data.rows : data.rows.slice(range.fromRow, range.toRow + 1);
+    const columns =
+      range === null ? data.columns : data.columns.slice(range.fromColumn, range.toColumn + 1);
+
+    // ⛔ `cellText`, а не `String(...)`: після `e470777a` десяткове приходить
+    // рядком у масштабі колонки, і `String()` клав би в буфер
+    // `5.0000000000` замість `5` — у КОЖНУ комірку аркуша, який оператор
+    // потім вставляє в Excel. Число те саме, аркуш — нечитабельний.
+    return toClipboard(rows.map((row) => columns.map((column) => cellText(row.cells[column.code]))));
+  }, [data]);
+
   const onCopy = useCallback(
     (event: React.ClipboardEvent<HTMLDivElement>) => {
-      if (data === undefined) return;
-
-      // ⛔ `selection.current.range.from/toColumn` — індекси в сітці (див.
-      // `dataColumnIndexOf`): без поправки Ctrl+C на таблиці з підписами
-      // рядків копіював вікно, зсунуте на одну колонку, і за межею вибраного
-      // діапазону міг прихопити зайву колонку.
-      const range =
-        selection.current === null
-          ? null
-          : clampSelection(
-              {
-                ...selection.current.range,
-                fromColumn: dataColumnIndexOf(selection.current.range.fromColumn, data),
-                toColumn: dataColumnIndexOf(selection.current.range.toColumn, data),
-              },
-              data.rows.length,
-              data.columns.length,
-            );
-
-      const rows = range === null ? data.rows : data.rows.slice(range.fromRow, range.toRow + 1);
-      const columns =
-        range === null ? data.columns : data.columns.slice(range.fromColumn, range.toColumn + 1);
+      const text = copyText();
+      if (text === null) return;
 
       event.preventDefault();
-
-      // ⛔ `cellText`, а не `String(...)`: після `e470777a` десяткове приходить
-      // рядком у масштабі колонки, і `String()` клав би в буфер
-      // `5.0000000000` замість `5` — у КОЖНУ комірку аркуша, який оператор
-      // потім вставляє в Excel. Число те саме, аркуш — нечитабельний.
-      event.clipboardData.setData(
-        'text/plain',
-        toClipboard(rows.map((row) => columns.map((column) => cellText(row.cells[column.code])))),
-      );
+      event.clipboardData.setData('text/plain', text);
     },
-    [data],
+    [copyText],
   );
 
   const applyHistory = useCallback(
@@ -1594,19 +1632,25 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
       const modifier = event.ctrlKey || event.metaKey;
       if (!modifier) return;
 
-      if (event.key === 's') {
+      const shortcut = gridShortcut(event);
+
+      if (shortcut === 'save') {
         event.preventDefault();
         void save([...pending.values()]);
         return;
       }
 
-      if (event.key === 'z' && !event.shiftKey) {
+      // AN-28/L8-03: undo/redo у відкритому редакторі - над текстом поля, не над сіткою.
+      // (Ctrl+S лишається: зберегти все.)
+      if (isInCellEditor(event.target)) return;
+
+      if (shortcut === 'undo') {
         event.preventDefault();
         applyHistory(history.current.undo());
         return;
       }
 
-      if (event.key === 'y' || (event.key === 'z' && event.shiftKey)) {
+      if (shortcut === 'redo') {
         event.preventDefault();
         applyHistory(history.current.redo());
       }
@@ -1743,10 +1787,66 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
   // T4-02: слухач `paste` на `document` живе в колбеку ref-а, що не
   // перестворюється на кожну правку, — тож бере актуальний `onPaste` з ref.
   const onPasteRef = useRef(onPaste);
-  onPasteRef.current = onPaste;
 
   const gridListenersCleanup = useRef<(() => void)[]>([]);
   const gridContainer = useRef<HTMLDivElement | null>(null);
+
+  // AN-39/L8-16: вставка за 70-250 мс після Enter (макрос, сканер) лягала в ПОПЕРЕДНЮ комірку -
+  // фокус ще не перейшов. Тут її відкладено до кінця вікна коміту (`keyCommitGate`); текст
+  // буфера читається синхронно (потім `clipboardData` уже недоступний).
+  const onPasteGated = useCallback(
+    (event: React.ClipboardEvent<HTMLDivElement>) => {
+      const container = gridContainer.current;
+      const text = event.clipboardData.getData('text/plain');
+
+      if (container !== null && text.length > 0 && !isInCellEditor(event.target)) {
+        const target = event.target;
+        const deferred = deferWhileCommitting(container, () =>
+          onPasteRef.current({
+            target,
+            clipboardData: { getData: () => text },
+            preventDefault: () => undefined,
+          } as unknown as React.ClipboardEvent<HTMLDivElement>),
+        );
+
+        if (deferred) {
+          event.preventDefault();
+          return;
+        }
+      }
+
+      onPaste(event);
+    },
+    [onPaste],
+  );
+  onPasteRef.current = onPasteGated;
+
+  // T4-08 (копія L8-16 для Ctrl+C): Ctrl+C одразу після Enter копіював ПОПЕРЕДНЄ виділення -
+  // фокус і виділення ще не перейшли. У вікні коміту копіювання відкладається до його кінця
+  // і пише текст НОВОГО виділення через `navigator.clipboard` (`clipboardData` події тоді
+  // вже недоступний). ⚠ Без перевірки `isInCellEditor`: вікно коміту - це редактор, що
+  // ЗАКРИВАЄТЬСЯ, і копіювати з нього нічого.
+  const copyTextRef = useRef(copyText);
+  copyTextRef.current = copyText;
+  const onCopyGated = useCallback(
+    (event: React.ClipboardEvent<HTMLDivElement>) => {
+      const container = gridContainer.current;
+      const deferred =
+        container !== null &&
+        deferWhileCommitting(container, () => {
+          const text = copyTextRef.current();
+          if (text !== null) void navigator.clipboard?.writeText(text).catch(() => undefined);
+        });
+
+      if (deferred) {
+        event.preventDefault();
+        return;
+      }
+
+      onCopy(event);
+    },
+    [onCopy],
+  );
   const gridContainerRef = useCallback(
     (node: HTMLDivElement | null) => {
       for (const cleanup of gridListenersCleanup.current) cleanup();
@@ -1760,6 +1860,15 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         // ⛔ T3-01: швидкий ввід (сканер, макрос) не мусить склеювати значення —
         // клавіші після Enter/Tab стають у чергу до кінця переходу фокуса.
         installKeyCommitGate(node),
+        (() => {
+          const tracker = trackEditorTouched(node);
+          editorTouched.current = tracker;
+
+          return () => {
+            tracker.dispose();
+            if (editorTouched.current === tracker) editorTouched.current = null;
+          };
+        })(),
         blockNativePaste(node),
         // ⛔ T4-02: Ctrl+V після закриття редактора, коли фокус на `<body>`.
         // Лише озброєна сітка й лише з реальним виділенням (без кута (0,0)).
@@ -1841,7 +1950,9 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
      */
     <AsyncBoundary<TableSliceDto>
       isPending={slice.isPending}
-      error={slice.error}
+      // AN-39 / L8-11: збій ФОНОВОГО перезапиту зрізу (дані вже є) не підміняє сітку на
+      // помилку - це розмонтувало б редактор, Undo і панель конфлікту; він іде банером.
+      error={data === undefined ? slice.error : null}
       data={data}
       isEmpty={sliceEmpty}
       emptyTitle={noColumns ? t('grid.emptyTable') : t('grid.emptyFixedTable')}
@@ -1850,13 +1961,14 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
       onRetry={() => void slice.refetch()}
     >
       {() => (
-    <Stack gap="xs" onPaste={onPaste} onCopy={onCopy} onKeyDown={onKeyDown}>
+    <Stack gap="xs" onPaste={onPasteGated} onCopy={onCopyGated} onKeyDown={onKeyDown}>
       {/*
        * ⛔ Перше, що видно: довідник не завантажився. Раніше тут не було
        * НІЧОГО — випадний список у комірці просто ставав порожнім, і оператор
        * читав це як «довідник не наповнили».
        */}
       {lookupError !== null && <ErrorAlert error={lookupError} onRetry={refetchLookups} />}
+      {slice.error !== null && <ErrorAlert error={slice.error} onRetry={() => void slice.refetch()} />}
 
       <Group gap="xs" key={historyRevision}>
         <Button size="xs" variant="default" disabled={!history.current.canUndo} onClick={() => applyHistory(history.current.undo())}>

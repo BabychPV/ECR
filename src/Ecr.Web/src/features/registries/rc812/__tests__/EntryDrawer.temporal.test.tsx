@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
@@ -43,6 +43,45 @@ describe('EntryDrawer: чинність лише для темпоральног
     expect(screen.queryByText('Valid to')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Valid' })).toBeNull();
     expect(screen.getByRole('button', { name: /Edit/ })).toBeDefined();
+  });
+
+  it('«станом на» шукає запис за id, а не підрядком коду — короткий код не губиться за лімітом (L9-08)', async () => {
+    // ⚠ Сервер на `q` віддає 50 ІНШИХ рядків (підрядок коду в чужих кодах/назвах, сортування за Id),
+    // і лише точний фільтр `id` повертає шуканий.
+    const base = globalThis.fetch;
+    const queries: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = new URL(String(input), 'http://localhost');
+        if (url.pathname.endsWith('/history')) {
+          return new Response(JSON.stringify({ items: [], nextCursor: null, totalCount: 0 }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        if (url.pathname.endsWith('/registries/STREAM_CASE/rows') && url.searchParams.has('asOfUtc')) {
+          queries.push(url.search);
+          const others = Array.from({ length: 50 }, (_, i) => ({ ...storedRows[1]!, id: 100 + i, code: `X${String(i)}` }));
+          const items = url.searchParams.getAll('id').includes('4411') ? [storedRows[0]] : others;
+          return new Response(JSON.stringify({ items, nextCursor: null, totalCount: items.length }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        return base(input, init);
+      }),
+    );
+    show(false);
+
+    fireEvent.click(await screen.findByRole('tab', { name: 'History' }));
+    const input = await screen.findByRole('textbox', { name: /Values as of/ });
+    fireEvent.change(input, { target: { value: '2026-09-27' } });
+    fireEvent.blur(input);
+
+    expect(await screen.findByRole('table', { name: 'Values as of' })).toBeDefined();
+    expect(screen.queryByText(/did not exist/)).toBeNull();
+    expect(queries.every((query) => query.includes('id=4411') && !query.includes('q='))).toBe(true);
   });
 
   it('темпоральний: поля дат і дія «Validity» є', async () => {

@@ -279,8 +279,8 @@ public sealed class DbJobQueueTests(SqlServerFixture sql) : DbJobQueueTestsBase(
         Assert.True(await host.Queue.FailAsync(claim, "причина", "ECR-SYS-0500", CancellationToken.None));
         Assert.Equal(("Failed", "причина", "ECR-SYS-0500"), ((await RowAsync(jobId))!.State, (await RowAsync(jobId))!.Error, (await RowAsync(jobId))!.ErrorCode));
 
-        Assert.True(await host.Queue.RestartAsync(jobId, CancellationToken.None));
-        Assert.False(await host.Queue.RestartAsync(jobId, CancellationToken.None));
+        Assert.Equal(JobRestartOutcome.Restarted, await host.Queue.RestartAsync(jobId, CancellationToken.None));
+        Assert.Equal(JobRestartOutcome.NotQueueRow, await host.Queue.RestartAsync(jobId, CancellationToken.None));
 
         var again = await host.ClaimAsync();
         Assert.Equal((jobId, 1, 0), (again!.Claim.JobId, again.Attempt, again.ReclaimCount));

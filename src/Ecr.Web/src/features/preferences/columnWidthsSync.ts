@@ -128,6 +128,11 @@ interface ColumnWidthsWriterDeps {
  * - серія змін за `delayMs` дає один запит;
  * - перед `PUT` зміни зливаються з останнім відомим серверним значенням —
  *   колонки, яких ця сесія не чіпала, не затираються;
+ * - стан сервера НЕвідомий (`readServer() === null`: `GET` ще не прийшов або
+ *   впав, а за `retry: false` + `staleTime: Infinity` відмова тримається весь
+ *   сеанс) — зливаються з локальним дзеркалом `localStorage` (останнє відоме
+ *   серверне + правки цієї сесії, `L9-12`). Доти `PUT` ніс самі лише зміни
+ *   сесії й стирав ширини інших колонок, збережені раніше;
  * - усі ширини типові → `DELETE` ключа (якщо відомо, що ключа немає, — нічого);
  * - значення, яке сервер уже має, не пишеться вдруге;
  * - відмова — тихо і без повтору: наступна зміна людини спробує знову.
@@ -179,7 +184,8 @@ export class ColumnWidthsWriter {
 
     const key = columnWidthsKey(this.tableDefId);
     const server = this.deps.readServer();
-    const next = widthDeviations({ ...(server ?? {}), ...changes }, this.defaultWidth);
+    const base = server === null ? readCachedWidths(this.tableDefId) : (server ?? {});
+    const next = widthDeviations({ ...base, ...changes }, this.defaultWidth);
 
     if (server !== null && JSON.stringify(next) === JSON.stringify(server ?? {})) return;
 

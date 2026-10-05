@@ -34,13 +34,23 @@ export function ExistingColumn({
     gcTime: 0,
   });
 
-  if (column.error !== null) {
-    return <ErrorAlert error={column.error} onRetry={() => void column.refetch()} />;
-  }
+  /*
+   * ⛔ L9-26: відмова ЗАМІСТЬ форми — лише поки даних ще немає. Відмова фонового перечитування
+   * (фокус вікна після `staleTime`) лишає дані в кеші; доти вона розмонтовувала форму, а з нею —
+   * `LocalDraft` із незбереженими правками колонки. Тепер `ErrorAlert` стоїть над формою.
+   */
+  if (column.data === undefined) {
+    if (column.error !== null) {
+      return <ErrorAlert error={column.error} onRetry={() => void column.refetch()} />;
+    }
 
-  if (column.isPending) {
     return <Skeleton height={320} radius="sm" data-column-edit="pending" />;
   }
 
-  return <>{children(columnDraftOf(column.data))}</>;
+  return (
+    <>
+      {column.error !== null && <ErrorAlert error={column.error} onRetry={() => void column.refetch()} />}
+      {children(columnDraftOf(column.data))}
+    </>
+  );
 }

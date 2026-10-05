@@ -312,13 +312,19 @@ public sealed class NotificationJob(
         // вимикають разом із корисним. Груп рівно стільки, скільки різних подій
         // матриці правил, бо адміністратор має змогу надіслати «збій збору» в
         // один канал, а «збій задачі» — в інший.
+        //
+        // ⚠ CL-5: відправлене каналами входить у `sent` підсумку. Інакше розсилка
+        // ЛИШЕ каналом (Teams без `Smtp:*`) читалася б як «збої є, відправлено 0» —
+        // `SucceededWithErrors` у `/jobs` і жовта картка `jobs`, хоча лист дійшов.
+        var channelSent = 0;
+
         foreach (var group in failures.GroupBy(f => EventKindOf(f.Kind, f.Subject, f.Status)))
         {
             var lines = group
                 .Select(f => $"[{f.Kind}] {f.Subject}: {f.Status}. {f.Details}")
                 .ToList();
 
-            await channels
+            var dispatched = await channels
                 .DispatchAsync(
                     new NotificationEvent(
                         group.Key,
@@ -328,11 +334,14 @@ public sealed class NotificationJob(
                         string.Join(Environment.NewLine, lines)),
                     ct)
                 .ConfigureAwait(false);
+
+            channelSent += dispatched.Sent;
         }
 
         await progress.ReportKeyAsync(80, "jobs.notificationSendingQueue", ct).ConfigureAwait(false);
 
-        var (sent, pending) = await outbox.FlushAsync(ct).ConfigureAwait(false);
+        var (outboxSent, pending) = await outbox.FlushAsync(ct).ConfigureAwait(false);
+        var sent = outboxSent + channelSent;
 
         await progress
             .ReportKeyAsync(
@@ -341,6 +350,9 @@ public sealed class NotificationJob(
                 new Dictionary<string, string>(StringComparer.Ordinal)
                 {
                     ["count"] = items.Count.ToString(CultureInfo.InvariantCulture),
+                    // ⚠ CL-5: збоїв для ДОСТАВКИ, без інформаційного рядка «адресатів немає».
+                    // Шаблон `jobs.notificationDone` його не показує; читає `JobCompletionWarning`.
+                    [JobCompletionWarning.FailuresParam] = failures.Count.ToString(CultureInfo.InvariantCulture),
                     ["sent"] = sent.ToString(CultureInfo.InvariantCulture),
                     ["pending"] = pending.ToString(CultureInfo.InvariantCulture),
                 },

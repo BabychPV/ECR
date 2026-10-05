@@ -79,7 +79,7 @@ export function operandCount(operator: ConditionOperator): 0 | 1 | 2 {
   return operator === 'between' ? 2 : 1;
 }
 
-export type RuleBlocker = 'Column' | 'Value' | 'ValueTo' | 'Range' | 'Color' | 'Style';
+export type RuleBlocker = 'Column' | 'Value' | 'ValueTo' | 'Color' | 'Style';
 
 /** Межа довжини операнда — `ConditionalFormatRule.MaxOperandLength` на сервері. */
 export const MaxOperandLength = 64;
@@ -140,6 +140,13 @@ function compareMagnitude(left: string, right: string): number {
  * (сервер текстового операнда не прийме — `condFormatOperand`), колір —
  * рівно `#rrggbb`. Правило, яке редактор назвав повним, не може отримати
  * відмову `422` при збереженні.
+ *
+ * ⛔ L9-25: і НІЧОГО понад сервер. `between` із межами навпаки (`5…1`) сервер
+ * приймає й застосовує як `1…5` (`ConditionalFormatEvaluator`: `Math.Min`/
+ * `Math.Max`; вектор «between: межі навпаки» спільної фікстури). Доти тут була
+ * своя перевірка «верхня не менша за нижню»: таке правило, збережене раніше чи
+ * прийшле з сервера, панель вважала неповним — пропускала в прикладі (сітка ж
+ * його фарбує) і блокувала «Зберегти» для ВСЬОГО набору таблиці.
  */
 export function whyRuleIncomplete(rule: ConditionalRule): RuleBlocker | null {
   if (rule.columnCode.trim().length === 0) return 'Column';
@@ -148,10 +155,7 @@ export function whyRuleIncomplete(rule: ConditionalRule): RuleBlocker | null {
 
   if (count >= 1 && !isOperandNumber(rule.value)) return 'Value';
 
-  if (count === 2) {
-    if (!isOperandNumber(rule.valueTo)) return 'ValueTo';
-    if (compareDecimal(decimalOf(rule.valueTo) ?? '0', decimalOf(rule.value) ?? '0') < 0) return 'Range';
-  }
+  if (count === 2 && !isOperandNumber(rule.valueTo)) return 'ValueTo';
 
   for (const hex of [rule.backgroundHex, rule.foregroundHex]) {
     if (hex !== '' && !HexColor.test(hex)) return 'Color';

@@ -227,6 +227,37 @@ public sealed partial class SeedTranslationTests
             $"Переклади в {SeedFile}:" + Environment.NewLine + string.Join(Environment.NewLine, problems));
     }
 
+    /// <summary>
+    /// Ключі, які <c>RegistrySyncJob</c> кладе в текст відмови (<c>messageKey=…</c>), заведені в каталозі
+    /// en/ru/kz (рецензія an33b: <c>elementNameAmbiguous</c> був названий, але не заведений).
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public void Ключі_відмов_синку_довідника_є_в_каталозі_трьома_мовами()
+    {
+        var source = File.ReadAllText(Path.Combine(
+            SourceTree.Root, "src", "Ecr.Infrastructure", "Jobs", "RegistrySyncJob.cs"));
+        var keys = Regex.Matches(source, @"messageKey=(err\.[A-Za-z0-9.\-]+)")
+            .Select(m => m.Groups[1].Value)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+
+        Assert.Contains("err.ECR-INT-0422.elementNameAmbiguous", keys);
+
+        var text = SeedText();
+        var catalog = CatalogRows(text);
+        var translations = TranslationRows(text);
+
+        var missing = keys
+            .SelectMany(key => (catalog.ContainsKey(key) ? [] : new[] { $"{key} en" })
+                .Concat(TranslationLanguages
+                    .Where(lang => !translations.Any(t => t.Key == key && t.Lang == lang))
+                    .Select(lang => $"{key} {lang}")))
+            .ToList();
+
+        Assert.True(missing.Count == 0, $"Немає в {SeedFile}: " + string.Join(", ", missing));
+    }
+
     private static string SeedText()
         => File.ReadAllText(Path.Combine(SourceTree.Root, SeedFile.Replace('/', Path.DirectorySeparatorChar)));
 

@@ -735,6 +735,30 @@ public sealed class RowStore(
             return 0;
         }
 
+        // ⛔ L6-05: період мусить належати проєкту документа. Доти перевірявся
+        // лише формат ключа, і `GET …/tables?periodKey=999999` створював
+        // екземпляри (і рядки) таблиць для періоду, якого в календарі немає.
+        // Перевірка — лише коли є що створювати: повторне відкриття за наявними
+        // екземплярами зайвого запиту не платить.
+        var periodBelongs = await db.Periods
+            .AsNoTracking()
+            .AnyAsync(p => p.PeriodKeyValue == periodKey.Value
+                           && db.Documents.Any(d => d.Id == documentId && d.ProjectId == p.ProjectId), ct)
+            .ConfigureAwait(false);
+
+        if (!periodBelongs)
+        {
+            throw new BusinessRuleException(
+                Domain.Errors.ErrorCodes.PeriodOutOfProject,
+                $"Період {periodKey.Value} не належить проєкту документа {documentId}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-PRD-0422.periodNotInProjectOfDocument",
+                    ["periodKey"] = periodKey.Value.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["documentId"] = documentId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
+        }
+
         // ⚠ Ідентифікатори — з SEQUENCE і ОДНИМ діапазоном на весь набір:
         // дев'яносто окремих звернень до послідовності коштували б дорожче за
         // саму вставку (B02 §2.3).
@@ -754,7 +778,25 @@ public sealed class RowStore(
 
         await MaterializeFixedRowsAsync(created, periodKey, utcNow, ct).ConfigureAwait(false);
 
-        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+        try
+        {
+            await db.SaveChangesAsync(ct).ConfigureAwait(false);
+        }
+        catch (DbUpdateException ex) when (SqlConflict.ViolatesIndex(ex, "UQ_TableInstance"))
+        {
+            // ⛔ L6-05: два одночасні перші відкриття — звичайна річ (див. опис
+            // порту). Друге програє на `UQ_TableInstance` і доти віддавало 500;
+            // переможець уже створив і екземпляри, і рядки, тож тут лишається
+            // відпустити свої незбережені й відповісти «нічого не створено».
+            foreach (var entry in db.ChangeTracker.Entries()
+                         .Where(e => e.State == EntityState.Added && e.Entity is TableInstance or TableRow)
+                         .ToList())
+            {
+                entry.State = EntityState.Detached;
+            }
+
+            return 0;
+        }
 
         return missing.Count;
     }

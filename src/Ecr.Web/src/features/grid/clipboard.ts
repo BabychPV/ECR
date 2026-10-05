@@ -9,48 +9,7 @@
 
 import { formatLocale } from '@/shared/format';
 import { t } from '@/shared/i18n';
-
-/** Розібраний буфер: рядки × колонки. */
-type ClipboardMatrix = string[][];
-
-/**
- * Роздільник колонок в Excel.
- *
- * ⛔ Саме табуляція, а не крапка з комою. Excel кладе в буфер `text/plain` із
- * табуляціями незалежно від регіональних налаштувань; крапка з комою — це
- * роздільник у CSV-файлі, і плутати їх означає розкласти один рядок у одну
- * колонку.
- */
-const ColumnSeparator = '\t';
-
-/**
- * Розбирає буфер обміну Excel.
- *
- * ⚠ Порожній хвостовий рядок відкидається: Excel завершує буфер переносом, і
- * без цього кожна вставка додавала б порожній рядок унизу — тихо і щоразу.
- */
-export function parseClipboard(text: string): ClipboardMatrix {
-  if (text.length === 0) return [];
-
-  const rows = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
-
-  while (rows.length > 0 && rows[rows.length - 1] === '') {
-    rows.pop();
-  }
-
-  return rows.map((row) => row.split(ColumnSeparator));
-}
-
-/**
- * Складає буфер у форматі, який приймає Excel.
- *
- * ⚠ Завершальний перенос обов'язковий: без нього Excel вставляє останній
- * рядок у поточну комірку замість наступної — зсув на один рядок, який
- * помічають не одразу.
- */
-export function toClipboard(matrix: ClipboardMatrix): string {
-  return matrix.map((row) => row.join(ColumnSeparator)).join('\n') + '\n';
-}
+import type { ClipboardMatrix } from './tsvClipboard';
 
 /**
  * Як прочитано текст буфера як число.

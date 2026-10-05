@@ -258,7 +258,11 @@ export function SheetTables({
   const navigationTarget =
     navigation === null
       ? undefined
-      : tables.find((table) => table.tableDefId === navigation.tableDefId);
+      : tables.find((table) =>
+          navigation.tableInstanceId === undefined
+            ? table.tableDefId === navigation.tableDefId
+            : table.tableInstanceId === navigation.tableInstanceId,
+        );
 
   /** Запит, до слота якого вже прокрутили: прокрутка — одна на клік. */
   const scrolledFor = useRef<number | null>(null);

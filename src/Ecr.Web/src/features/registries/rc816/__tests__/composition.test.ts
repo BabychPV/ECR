@@ -187,7 +187,19 @@ describe('Σ без втрати знаків', () => {
     expect(formatDecimal(parseDecimal('1 234.5') ?? { units: 0n, scale: 0 })).toBe('1234.5');
     expect(parseDecimal('abc')).toBeNull();
     expect(parseDecimal('-')).toBeNull();
+    // ⚠ Неоднозначне (розряди чи дріб?) у Σ не вгадується — сервер його однаково відхилить (L9-04).
+    expect(parseDecimal('1,234')).toBeNull();
+    expect(formatDecimal(parseDecimal('1 234,5') ?? { units: 0n, scale: 0 })).toBe('1234.5');
     expect(sumDecimals(['1', 'x', '', null, undefined])).toEqual({ sum: { units: 1n, scale: 0 }, skipped: 1 });
+  });
+
+  it('експонента за межею decimal — не число, а не зависання чи RangeError у рендері (L9-10)', () => {
+    const started = performance.now();
+    expect(parseDecimal('1e-1000000000')).toBeNull();
+    expect(parseDecimal('1e100000000')).toBeNull();
+    expect(performance.now() - started).toBeLessThan(50);
+    expect(sumDecimals(['1', '1e-100000000'])).toEqual({ sum: { units: 1n, scale: 0 }, skipped: 1 });
+    expect(formatDecimal(parseDecimal('1e-28') ?? { units: 0n, scale: 0 })).toBe(`0.${'0'.repeat(27)}1`);
   });
 
   it('межа допуску включна (<=), як у згенерованому виразі', () => {

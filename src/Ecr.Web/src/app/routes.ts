@@ -226,6 +226,9 @@ export const routes = {
         resolveParam: 'id',
         resolveWith: 'templateName',
       },
+      // ⚠ L9-14: оголошено на вузлі секції, бо лист картки — індексний і без
+      // `handle`; `AppLayout` перевіряє `numericParams` усіх збігів, не лише листа.
+      numericParams: ['id'],
     },
   },
   adminTemplateVersion: {
@@ -235,6 +238,7 @@ export const routes = {
       labelKey: 'version.title',
       permission: 'Template.View',
       crumb: { resolveParam: 'versionId', resolveWith: 'templateVersionLabel' },
+      numericParams: ['id', 'versionId'],
       // ⚠ `skeletonShape: 'form'` (`PR nav-arch #6`) — найглибший (3 рівні)
       // представницький маршрут: сама сторінка вже позначає власний
       // `AsyncBoundary` як `skeleton="form"` (структура версії — аркуші й
@@ -255,6 +259,7 @@ export const routes = {
       labelKey: 'tables.relationsTitle',
       permission: 'Template.View',
       crumb: { ancestorIds: ['admin-template-version'] },
+      numericParams: ['id', 'versionId'],
     },
   },
   adminRegistries: {
@@ -332,7 +337,7 @@ export const routes = {
   adminMethodologyVersions: {
     id: 'admin-methodology-versions',
     path: '/admin/methodologies/:id/versions',
-    handle: { labelKey: 'methodologies.versionsTitle', permission: 'Calculation.View' },
+    handle: { labelKey: 'methodologies.versionsTitle', permission: 'Calculation.View', numericParams: ['id'] },
   },
   adminExpressions: {
     id: 'admin-expressions',

@@ -268,10 +268,21 @@ public static class MethodologyPackagePlanner
                 {
                     blockers.Add(new("invalidVersion", m.Name, v.Version, null, "Порожній номер версії."));
                 }
+                else if (v.Version.Length > CreateMethodologyVersionHandler.MaxVersionLength)
+                {
+                    // ⚠ Межа колонки Version: без блокера сухий прогін казав `created`, а запис — 500 (аудит L7-09).
+                    blockers.Add(new("invalidVersion", m.Name, v.Version, null,
+                        $"Номер версії довший за {CreateMethodologyVersionHandler.MaxVersionLength} символів."));
+                }
 
                 foreach (var f in v.Formulas ?? [])
                 {
                     RequireCode(f.Name, "formula", m.Name, v.Version, f.Name, blockers);
+                    if ((f.Text?.Length ?? 0) > MethodologyFormula.MaxExpressionLength)
+                    {
+                        blockers.Add(new("formulaTooLong", m.Name, v.Version, f.Name,
+                            $"Вираз довший за {MethodologyFormula.MaxExpressionLength} символів."));
+                    }
                 }
 
                 foreach (var c in v.Constants ?? [])
@@ -281,7 +292,7 @@ public static class MethodologyPackagePlanner
             }
         }
 
-        foreach (var duplicate in methodologies.GroupBy(m => m.Name, StringComparer.OrdinalIgnoreCase).Where(g => g.Count() > 1))
+        foreach (var duplicate in methodologies.GroupBy(m => m.Name?.Trim() ?? string.Empty, StringComparer.OrdinalIgnoreCase).Where(g => g.Count() > 1))
         {
             blockers.Add(new("duplicateMethodology", duplicate.Key, null, null, "Методологія двічі в пакеті."));
         }
@@ -300,7 +311,9 @@ public static class MethodologyPackagePlanner
 
         if (libraryInPackage is not null)
         {
-            foreach (var v in (libraryInPackage.Versions ?? []).OrderBy(v => v.Version, StringComparer.Ordinal))
+            // ⚠ «Найпізніша» — за числовими компонентами номера (V10 > V9, 1.10 > 1.9), тим самим
+            // правилом, що й для бази нижче (аудит L7-12): порядкове сортування ставило V10 перед V9.
+            foreach (var v in (libraryInPackage.Versions ?? []).OrderBy(v => v.Version, VersionNumberComparer.Instance))
             {
                 libraryFormulas.UnionWith((v.Formulas ?? []).Select(f => f.Name.Trim()));
                 foreach (var c in v.Constants ?? [])
@@ -314,7 +327,9 @@ public static class MethodologyPackagePlanner
         }
         else if (libraryInDb is not null)
         {
-            foreach (var v in libraryInDb.Versions.OrderBy(v => v.Id))
+            // ⚠ Чернетки лишаються: імпорт створює лише чернетки, і бібліотека з попереднього пакета
+            // інакше була б невидимою. Порядок — той самий, що для пакета (аудит L7-12), а не Id.
+            foreach (var v in libraryInDb.Versions.OrderBy(v => v.Version, VersionNumberComparer.Instance).ThenBy(v => v.Id))
             {
                 libraryFormulas.UnionWith(v.Content.Formulas.Select(f => f.Code));
                 foreach (var group in v.Content.Constants.GroupBy(c => c.Code, StringComparer.OrdinalIgnoreCase))
@@ -635,5 +650,79 @@ public static class MethodologyPackagePlanner
             blockers.Add(new("invalidCode", methodology, version, subject,
                 $"Код {what} «{value}»: дозволені латинські літери, цифри й підкреслення, перший символ — літера, до 64."));
         }
+    }
+}
+
+/// <summary>
+/// Порівняння номерів версій методології за числовими компонентами: цифрові відрізки — як
+/// числа, решта — без урахування регістру (аудит L7-12).
+/// </summary>
+/// <remarks>
+/// ⛔ Порядкове порівняння рядків ставить <c>V10</c> перед <c>V9</c> і <c>1.10.0.0</c> перед
+/// <c>1.9.0.0</c>. За рівних компонентів (<c>V01</c> і <c>V1</c>) — порядково, аби відповідь
+/// була сталою.
+/// </remarks>
+internal sealed class VersionNumberComparer : IComparer<string?>
+{
+    /// <summary>Єдиний екземпляр.</summary>
+    public static VersionNumberComparer Instance { get; } = new();
+
+    /// <inheritdoc />
+    public int Compare(string? x, string? y)
+    {
+        if (x is null || y is null)
+        {
+            return x is null ? (y is null ? 0 : -1) : 1;
+        }
+
+        var i = 0;
+        var j = 0;
+        while (i < x.Length && j < y.Length)
+        {
+            var xDigit = char.IsAsciiDigit(x[i]);
+            var yDigit = char.IsAsciiDigit(y[j]);
+            if (xDigit && yDigit)
+            {
+                var xEnd = DigitsEnd(x, i);
+                var yEnd = DigitsEnd(y, j);
+
+                var xNumber = x.AsSpan(i, xEnd - i).TrimStart('0');
+                var yNumber = y.AsSpan(j, yEnd - j).TrimStart('0');
+                var byNumber = xNumber.Length != yNumber.Length
+                    ? xNumber.Length.CompareTo(yNumber.Length)
+                    : xNumber.CompareTo(yNumber, StringComparison.Ordinal);
+                if (byNumber != 0)
+                {
+                    return byNumber;
+                }
+
+                i = xEnd;
+                j = yEnd;
+                continue;
+            }
+
+            var byChar = char.ToUpperInvariant(x[i]).CompareTo(char.ToUpperInvariant(y[j]));
+            if (byChar != 0)
+            {
+                return xDigit != yDigit ? (xDigit ? -1 : 1) : byChar;
+            }
+
+            i++;
+            j++;
+        }
+
+        var byRest = (x.Length - i).CompareTo(y.Length - j);
+        return byRest != 0 ? byRest : string.CompareOrdinal(x, y);
+    }
+
+    private static int DigitsEnd(string value, int start)
+    {
+        var end = start;
+        while (end < value.Length && char.IsAsciiDigit(value[end]))
+        {
+            end++;
+        }
+
+        return end;
     }
 }

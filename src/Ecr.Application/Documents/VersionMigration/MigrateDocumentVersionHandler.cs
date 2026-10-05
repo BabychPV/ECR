@@ -81,7 +81,7 @@ public sealed record DocumentVersionMigrationTargetsDto(
 /// ⚠ Відповідність — за кодами, як у <c>DiffTemplateVersionsHandler</c>:
 /// ідентифікатори в кожної версії свої.
 ///
-/// ⚠ Право — <c>Template.Edit</c>, як на редагування шаблону: перенос міняє
+/// ⚠ Право — <c>Template.Edit</c> І грант <c>Manage</c> на проєкт (L1-08, HU-11 Q3=A), як на редагування шаблону: перенос міняє
 /// те, за якою структурою живуть дані, а не самі дані одного користувача.
 /// Невидимий документ — той самий <c>404</c>, що й неіснуючий.
 /// </remarks>
@@ -114,6 +114,26 @@ public sealed class MigrateDocumentVersionHandler(
     /// <summary>Стеля переліку відмінностей у звіті.</summary>
     public const int MaxItems = 500;
 
+    /// <summary>
+    /// ⛔ L1-08 (HU-11 Q3=A): перенос міняє структуру ВСІХ документів проєкту, тож потрібен грант
+    /// <c>Manage</c> на проєкт (раніше досить було Read + глобального <c>Template.Edit</c>). Діє і на
+    /// сухий прогін, і на перелік цілей. Документ уже видимий — відмова нічого не розкриває.
+    /// </summary>
+    private static void RequireProjectManage(AccessProfile profile, int projectId)
+    {
+        if (profile.LevelFor(ResourceKind.Project, projectId) < GrantLevel.Manage)
+        {
+            throw new AccessDeniedException(
+                "ECR-AUTH-0403",
+                $"Немає гранта Manage на проєкт {projectId}, документи якого переніс би на іншу версію шаблону.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-AUTH-0403.noProjectManageGrant",
+                    ["projectId"] = projectId.ToString(CultureInfo.InvariantCulture),
+                });
+        }
+    }
+
     /// <summary>Будує звіт і, якщо це не сухий прогін, переносить.</summary>
     /// <param name="documentId">Документ.</param>
     /// <param name="targetVersionId">Цільова версія того самого шаблону.</param>
@@ -139,6 +159,7 @@ public sealed class MigrateDocumentVersionHandler(
                         ?? throw DocumentVisibility.NotFound(documentId);
         var project = await periods.FindProjectAsync(projectId, ct).ConfigureAwait(false)
                       ?? throw DocumentVisibility.NotFound(documentId);
+        RequireProjectManage(profile, projectId);
 
         var target = await RequireTargetAsync(project.TemplateVersionId, targetVersionId, ct).ConfigureAwait(false);
         var archived = project.Status == ProjectStatus.Archived || project.IsArchiving;
@@ -214,6 +235,7 @@ public sealed class MigrateDocumentVersionHandler(
                         ?? throw DocumentVisibility.NotFound(documentId);
         var project = await periods.FindProjectAsync(projectId, ct).ConfigureAwait(false)
                       ?? throw DocumentVisibility.NotFound(documentId);
+        RequireProjectManage(profile, projectId);
 
         var current = await versions.GetAsync(project.TemplateVersionId, ct).ConfigureAwait(false);
         var all = await templates

@@ -58,11 +58,44 @@ public sealed record JobWorkerOptions
     public TimeSpan? MaxDuration { get; init; }
 
     /// <summary>
+    /// Пільга після <see cref="MaxDuration"/> для задачі, що не стежить за токеном (L2-03):
+    /// минула — оренду більше не подовжують, і рядок переклеймить інший процес
+    /// (з <c>ReclaimCount</c>), як після падіння.
+    /// </summary>
+    public TimeSpan HangGrace { get; init; } = TimeSpan.FromMinutes(2);
+
+    /// <summary>
+    /// Що зробити з процесом, коли задача зависла понад <see cref="MaxDuration"/> +
+    /// <see cref="HangGrace"/> (L2-03). Дочірній воркер завершується
+    /// (<see cref="ExitJobHung"/>) — наглядач перезапускає слот; <c>null</c> — процес
+    /// живе далі (Api: слот зайнятий до рестарту, але оренда вже не тримається).
+    /// </summary>
+    public Action? OnHang { get; init; }
+
+    /// <summary>Код виходу дочірнього воркера, чия задача зависла (L2-03).</summary>
+    public const int ExitJobHung = 6;
+
+    /// <summary>
     /// Стеля сумарного відкладення однієї задачі від першого (борг O1,
     /// <see cref="JobDeferral.MaxDeferral"/>): перевищила — <c>Failed</c> з конвертом
     /// <see cref="JobDeferral.ExhaustedKey"/>, без ретраю.
     /// </summary>
     public TimeSpan MaxDeferral { get; init; } = JobDeferral.MaxDeferral;
+
+    /// <summary>
+    /// Відступ перед n-м повтором завершальної дії власника (Complete/Fail/Requeue…) після
+    /// транзієнтного збою бази (L2-07): 1/2/4 с.
+    /// </summary>
+    public Func<int, TimeSpan> SettleRetryDelay { get; init; } = n => TimeSpan.FromSeconds(1 << (n - 1));
+
+    /// <summary>Скільки повторів завершальної дії після транзієнтного збою (L2-07).</summary>
+    public int SettleRetries { get; init; } = 3;
+
+    /// <summary>
+    /// Опитування черги в режимі <c>Quartz</c>, де воркер лише доробляє залишки після
+    /// перемикання з <c>Database</c> (L2-04).
+    /// </summary>
+    public static readonly TimeSpan QuartzModeDrainPollInterval = TimeSpan.FromSeconds(30);
 }
 
 /// <summary>
@@ -291,7 +324,25 @@ public sealed partial class JobWorker(
         var provider = scope.ServiceProvider;
         provider.GetRequiredService<JobLeaseContext>().Bind(claim);
 
-        var instance = QuartzJobAdapter.Resolve(provider, job.JobCode);
+        // ⛔ L2-07: помилка DI (відсутня залежність задачі) — гучний Failed одразу, а не
+        // виняток повз виконавця: рядок лишався б Running, тричі переклеймлювався і
+        // закривався хибною причиною jobs.leaseLostTooOften.
+        IBackgroundJob? instance;
+        try
+        {
+            instance = QuartzJobAdapter.Resolve(provider, job.JobCode);
+        }
+#pragma warning disable CA1031 // Будь-який збій резолву — провал задачі, а не воркера.
+        catch (Exception ex)
+#pragma warning restore CA1031
+        {
+            LogJobResolveFailed(logger, job.JobCode, claim.JobId, ex);
+            await SettleAsync(claim.JobId, q => q.FailAsync(
+                    claim, $"Задача «{job.JobCode}» не резолвиться з DI.", ErrorCodes.Internal, CancellationToken.None))
+                .ConfigureAwait(false);
+            return;
+        }
+
         if (instance is null)
         {
             // ⛔ Невідома задача — гучна відмова, не вічне «виконується».
@@ -330,6 +381,23 @@ public sealed partial class JobWorker(
             overtime.CancelAfter(maxDuration);
         }
 
+        // ⛔ L2-03 (аудит 2026-10-03): межа вище лише ПРОСИТЬ зупинитися. Задача, що
+        // токен ігнорує (процесорна фаза), тримала б оренду вічно: подовження
+        // зупиняється лише в `finally`, тобто після її повернення. Через пільгу —
+        // кидаємо оренду (переклейм іншим процесом, як після падіння) і, якщо
+        // задано, завершуємо процес: наглядач перезапустить слот.
+        using var hang = new CancellationTokenSource();
+        using var hangHook = hang.Token.Register(() =>
+        {
+            lease.Abandoned = true;
+            LogJobHung(logger, claim.JobId, job.JobCode);
+            options.OnHang?.Invoke();
+        });
+        if (options.MaxDuration is { } hangAfter)
+        {
+            hang.CancelAfter(hangAfter + options.HangGrace);
+        }
+
         Exception? failure = null;
         JobDeferredException? deferred = null;
         var cancelled = false;
@@ -343,15 +411,19 @@ public sealed partial class JobWorker(
                     jobCancel.Token)
                 .ConfigureAwait(false);
         }
-        catch (OperationCanceledException)
-        {
-            cancelled = true;
-        }
         catch (JobDeferredException ex)
         {
             deferred = ex;
         }
+        // ⛔ L2-01: скасування — за станом ВЛАСНОГО токена, а не за типом винятку. Драйвер
+        // посеред запиту кидає SqlException «Operation cancelled by user», а не OCE; як
+        // провал він ішов би в ретрай, і claim стирав би запит скасування.
 #pragma warning disable CA1031 // Будь-який провал задачі класифікує JobRetryPolicy нижче.
+        catch (Exception ex) when (jobCancel.IsCancellationRequested && ex is not JobLeaseLostException)
+        {
+            cancelled = true;
+        }
+        // OCE не від нашого токена (таймаут HttpClient тощо) — провал нижче, а не «Cancelled».
         catch (Exception ex)
 #pragma warning restore CA1031
         {
@@ -359,11 +431,17 @@ public sealed partial class JobWorker(
         }
         finally
         {
+            // ⛔ Сторож зависання — лише на час ExecuteAsync. Спрацювання під час фіксації
+            // результату нижче кинуло б оренду й (дочірній) завершило процес посеред
+            // запису: задачу виконали б удруге. Dispose реєстрації дочікується колбеку,
+            // що вже біжить, тож після нього Abandoned більше не зміниться.
+            await hangHook.DisposeAsync().ConfigureAwait(false);
             await renewStop.CancelAsync().ConfigureAwait(false);
             await renew.ConfigureAwait(false);
         }
 
-        if (lease.Lost || failure is JobLeaseLostException)
+        // Кинута оренда (L2-03) — рядок уже не наш: фіксувати нічого.
+        if (lease.Lost || lease.Abandoned || failure is JobLeaseLostException)
         {
             LogLeaseLost(logger, claim.JobId);
             return;
@@ -405,7 +483,7 @@ public sealed partial class JobWorker(
             // Зупинка хоста без запиту скасування — задачу не скасовано, її повертають у чергу.
             var shutdown = stopping.IsCancellationRequested && !lease.CancelRequested;
             await SettleAsync(claim.JobId, q => shutdown
-                    ? q.RequeueAsync(claim, TimeSpan.Zero, CancellationToken.None)
+                    ? q.ReleaseAsync(claim, CancellationToken.None)
                     : q.AcknowledgeCancelAsync(claim, CancellationToken.None))
                 .ConfigureAwait(false);
             return;
@@ -457,6 +535,11 @@ public sealed partial class JobWorker(
 
         while (await timer.WaitForNextTickAsync(CancellationToken.None).ConfigureAwait(false))
         {
+            if (lease.Abandoned)
+            {
+                return;
+            }
+
             try
             {
                 await using var scope = scopes.CreateAsyncScope();
@@ -584,15 +667,41 @@ public sealed partial class JobWorker(
     }
 
     /// <summary>Завершальна дія власника оренди у власному scope; <c>false</c> — оренду вже втрачено.</summary>
+    /// <remarks>
+    /// ⛔ L2-07: транзієнтний збій бази (дедлок, обрив) на фіксації результату — обмежений
+    /// повтор у новому scope. Без нього рядок лишався Running, і через оренду переклейм
+    /// виконував уже завершену задачу ще раз (імпорт Excel — з застарілими версіями рядків).
+    /// Повтор дії, що насправді встигла закомітитись, безпечний: власник звіряє токен, і
+    /// другий виклик отримує <c>false</c> («оренди вже немає»).
+    /// </remarks>
     private async Task SettleAsync(string jobId, Func<IJobQueue, Task<bool>> action)
     {
-        await using var scope = scopes.CreateAsyncScope();
-
-        if (!await action(scope.ServiceProvider.GetRequiredService<IJobQueue>()).ConfigureAwait(false))
+        for (var retry = 0; ; retry++)
         {
-            LogLeaseLost(logger, jobId);
+            try
+            {
+                await using var scope = scopes.CreateAsyncScope();
+
+                if (!await action(scope.ServiceProvider.GetRequiredService<IJobQueue>()).ConfigureAwait(false))
+                {
+                    LogLeaseLost(logger, jobId);
+                }
+
+                return;
+            }
+            catch (Exception ex) when (retry < options.SettleRetries && IsTransientDatabaseFault(ex))
+            {
+                var delay = options.SettleRetryDelay(retry + 1);
+                LogSettleRetrying(logger, jobId, retry + 1, delay, ex);
+                await Task.Delay(delay, CancellationToken.None).ConfigureAwait(false);
+            }
         }
     }
+
+    /// <summary>Збій дороги до бази, а не вердикт: повтор має сенс.</summary>
+    private static bool IsTransientDatabaseFault(Exception ex)
+        => ex is System.Data.Common.DbException or TimeoutException
+           && !JobFailureText.IsConstraintViolation(ex);
 
     /// <summary>Запис прогресу, чий збій не підміняє результат задачі (як у Quartz).</summary>
     private async Task WriteProgressAsync(string jobId, Func<IJobProgressStore, Task> write)
@@ -619,6 +728,7 @@ public sealed partial class JobWorker(
         private volatile bool lost;
         private volatile bool cancelRequested;
         private volatile bool timedOut;
+        private volatile bool abandoned;
 
         public bool Lost { get => lost; set => lost = value; }
 
@@ -626,7 +736,28 @@ public sealed partial class JobWorker(
 
         /// <summary>Спрацювала межа <see cref="JobWorkerOptions.MaxDuration"/>.</summary>
         public bool TimedOut { get => timedOut; set => timedOut = value; }
+
+        /// <summary>
+        /// Задача не повернулась за <see cref="JobWorkerOptions.MaxDuration"/> +
+        /// <see cref="JobWorkerOptions.HangGrace"/>: оренду кинуто (L2-03).
+        /// </summary>
+        public bool Abandoned { get => abandoned; set => abandoned = value; }
     }
+
+    [LoggerMessage(
+        Level = LogLevel.Critical,
+        Message = "Задача {JobId} ({JobCode}) не відреагувала на скасування за межею тривалості й пільгою; оренду кинуто, рядок переклеймить інший процес.")]
+    private static partial void LogJobHung(ILogger logger, string jobId, string jobCode);
+
+    [LoggerMessage(
+        Level = LogLevel.Error,
+        Message = "Задача {JobCode} ({JobId}) не резолвиться з DI; стан Failed.")]
+    private static partial void LogJobResolveFailed(ILogger logger, string jobCode, string jobId, Exception ex);
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "Фіксація результату задачі {JobId} не вдалася (повтор {Retry} через {Delay}).")]
+    private static partial void LogSettleRetrying(ILogger logger, string jobId, int retry, TimeSpan delay, Exception ex);
 
     [LoggerMessage(
         Level = LogLevel.Error,

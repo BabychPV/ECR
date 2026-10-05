@@ -390,12 +390,28 @@ export function discardPendingRows(
 
   for (const [key, edit] of current) {
     const sent = rows.has(edit.rowKey);
-    const newer = keepChangedAfter !== undefined && !wasSent(keepChangedAfter.get(key), edit);
+    const confirmed = keepChangedAfter?.get(key);
+    const newer = keepChangedAfter !== undefined && !wasSent(confirmed, edit);
 
-    if (!sent || newer) next.set(key, edit);
+    if (!sent) next.set(key, edit);
+    else if (newer) next.set(key, rebased(edit, confirmed));
   }
 
   replacePendingSlice(tableInstanceId, periodKey, next);
+}
+
+/**
+ * Новіша правка комірки, чиє попереднє значення сервер щойно ПРИЙНЯВ: тепер
+ * вона стоїть поверх прийнятого, а не того, що людина бачила спершу.
+ *
+ * ⛔ AN-39 / L8-20: без цього `withKnownVersions` прийняв би власне щойно
+ * збережене значення за чуже (кеш ≠ `before`) і лишив би стару версію рядка -
+ * `409` на власних змінах (той самий клас, що `B-09`).
+ */
+function rebased(edit: PendingEdit, confirmed: PendingEdit | undefined): PendingEdit {
+  if (confirmed === undefined || edit.before === undefined) return edit;
+
+  return { ...edit, before: confirmed.isEmpty ? null : confirmed.value };
 }
 
 /**
@@ -426,6 +442,54 @@ export function pendingCount(): number {
 /** Чи є в документі бодай одна незбережена правка. */
 export function hasPending(): boolean {
   return slices.size > 0;
+}
+
+/**
+ * Чи є в документі правка, яку автозбереження МАЄ ПРАВО везти (`V-01`).
+ *
+ * AN-28 P2-1: саме цим очікування збереження відрізняє «запит ще летить» від
+ * «лишились тільки утримані відмовою» - другого не дочекаєшся, хоч скільки чекай.
+ */
+export function hasSendablePending(): boolean {
+  for (const key of slices.keys()) {
+    const [tableInstanceId, periodKey] = key.split(':').map(Number) as [number, number];
+    if (sendableEdits(tableInstanceId, periodKey).length > 0) return true;
+  }
+
+  return false;
+}
+
+/** Утримана (відхилена сервером) правка з адресою зрізу. */
+export interface HeldEdit {
+  readonly tableInstanceId: number;
+  readonly periodKey: number;
+  readonly edit: PendingEdit;
+  /** Причина відмови - текст сервера як є. */
+  readonly message: string;
+}
+
+/**
+ * Перша утримана правка документа; `null` - утриманих немає.
+ *
+ * ⚠ Лише та, що досі лежить у сховищі з ТИМ САМИМ значенням: якщо оператор
+ * уже виправив комірку, відмова її не стосується (`sendableEdits`).
+ */
+export function firstHeldEdit(): HeldEdit | null {
+  for (const [key, held] of rejections) {
+    const edits = slices.get(key);
+    if (edits === undefined) continue;
+
+    for (const [cell, rejection] of held) {
+      const edit = edits.get(cell);
+      if (edit === undefined || !wasSent(rejection.edit, edit)) continue;
+
+      const [tableInstanceId, periodKey] = key.split(':').map(Number) as [number, number];
+
+      return { tableInstanceId, periodKey, edit, message: rejection.message };
+    }
+  }
+
+  return null;
 }
 
 /** Зрізи, у яких є незбережені правки, — для надсилання їх усіх разом. */

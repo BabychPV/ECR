@@ -78,19 +78,7 @@ public sealed class SourceUnitConverter(UnitConverter converter, IUnitCatalog ca
     /// <param name="catalogSnapshot">Знімок довідника.</param>
     public static bool IsDeclaredUnit(
         int? declaredSourceUnitId, string? actualSourceUnitCode, UnitCatalogSnapshot catalogSnapshot)
-    {
-        ArgumentNullException.ThrowIfNull(catalogSnapshot);
-
-        // Джерело не повідомило одиниці — порівнювати нема з чим. Це не
-        // «збіглося»: безрозмірність тут не підставляється, значення просто
-        // лягає в одиниці, оголошеній у мапінгу (ФВ-16.12).
-        if (string.IsNullOrWhiteSpace(actualSourceUnitCode) || declaredSourceUnitId is not { } declared)
-        {
-            return true;
-        }
-
-        return catalogSnapshot.Units.TryGetValue(actualSourceUnitCode, out var actual) && actual.Id == declared;
-    }
+        => BoundaryUnitConversion.IsDeclaredUnit(declaredSourceUnitId, actualSourceUnitCode, catalogSnapshot);
 
     /// <summary>Конвертує значення на межі.</summary>
     /// <param name="value">Значення в одиниці джерела.</param>

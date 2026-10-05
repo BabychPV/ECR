@@ -1027,7 +1027,13 @@ UPDATE t
     -- p3-t2 T2-11: ім'я, що не розв'язується, отримує причину про DNS, а не лише про loopback.
     (N'err.ECR-REQ-0422.smtpHostForbidden', N'en', N'This SMTP server is not allowed: loopback, link-local and cloud metadata addresses (including names that resolve to them) are forbidden.', N'This SMTP server is not allowed. Check that the server name resolves in DNS; loopback, link-local and cloud metadata addresses (including names that resolve to them) are forbidden.'),
     (N'err.ECR-REQ-0422.smtpHostForbidden', N'ru', N'Этот SMTP-сервер не разрешён: адреса loopback, link-local и метаданных облака (в том числе имена, которые на них разрешаются) запрещены.', N'Этот SMTP-сервер не разрешён. Проверьте, что имя сервера разрешается в DNS; адреса loopback, link-local и метаданных облака (в том числе имена, которые на них разрешаются) запрещены.'),
-    (N'err.ECR-REQ-0422.smtpHostForbidden', N'kz', N'Бұл SMTP сервері рұқсат етілмеген: loopback, link-local және бұлт метадеректерінің мекенжайлары (оларға шешілетін атаулар да) тыйым салынған.', N'Бұл SMTP сервері рұқсат етілмеген. Сервер атауының DNS-те шешілетінін тексеріңіз; loopback, link-local және бұлт метадеректерінің мекенжайлары (оларға шешілетін атаулар да) тыйым салынған.')
+    (N'err.ECR-REQ-0422.smtpHostForbidden', N'kz', N'Бұл SMTP сервері рұқсат етілмеген: loopback, link-local және бұлт метадеректерінің мекенжайлары (оларға шешілетін атаулар да) тыйым салынған.', N'Бұл SMTP сервері рұқсат етілмеген. Сервер атауының DNS-те шешілетінін тексеріңіз; loopback, link-local және бұлт метадеректерінің мекенжайлары (оларға шешілетін атаулар да) тыйым салынған.'),
+    -- AN-33e (рев'ю an33d, P3-5): після abb69f6a заборонено все, що не X:\…, а ще Authentication, крім SqlPassword, і Server SPN.
+    (N'err.ECR-REQ-0422.dataSourceEndpointSqlForbiddenOption', N'en', N'This connection string option is not allowed for a data source: AttachDBFilename (and its synonyms), User Instance, Enclave Attestation Url, or a Server Certificate on a network share.', N'This connection string option is not allowed for a data source: AttachDBFilename (and its synonyms), User Instance, Enclave Attestation Url, Server SPN, Authentication other than SqlPassword, or a Server Certificate that is not a full local path (X:\…).'),
+    (N'err.ECR-REQ-0422.dataSourceEndpointSqlForbiddenOption', N'ru', N'Этот параметр строки подключения для источника не допускается: AttachDBFilename (и его синонимы), User Instance, Enclave Attestation Url или Server Certificate на сетевом ресурсе.', N'Этот параметр строки подключения для источника не допускается: AttachDBFilename (и его синонимы), User Instance, Enclave Attestation Url, Server SPN, Authentication, отличный от SqlPassword, или Server Certificate не в виде полного локального пути (X:\…).'),
+    (N'err.ECR-REQ-0422.dataSourceEndpointSqlForbiddenOption', N'kz', N'Қосылу жолының бұл параметрі көз үшін рұқсат етілмейді: AttachDBFilename (және оның синонимдері), User Instance, Enclave Attestation Url немесе желілік ресурстағы Server Certificate.', N'Қосылу жолының бұл параметрі көз үшін рұқсат етілмейді: AttachDBFilename (және оның синонимдері), User Instance, Enclave Attestation Url, Server SPN, SqlPassword-тан басқа Authentication немесе толық жергілікті жол (X:\…) емес Server Certificate.'),
+    -- AN-33e (рев'ю an33d, P3-6): «жою өткізілді» = «видалення проведено»; зміст — «пропущено», як en/ru.
+    (N'coverageEvents.eventsTruncated', N'kz', N'Көз терезесінде оқылғаннан көп оқиға бар ({pages} бетте {count}): {after} кейінгі оқиғалар бұл өткізуде синхрондалмады, жоғалғандарды жою өткізілді.', N'Көз терезесінде оқылғаннан көп оқиға бар ({pages} бетте {count}): {after} кейінгі оқиғалар бұл өткізуде синхрондалмады, жоғалғандарды жою өткізіп жіберілді.')
   ) AS s ([Key], Lang, OldVal, NewVal)
     ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
  WHERE t.Value = s.OldVal COLLATE Latin1_General_BIN2;
@@ -1866,6 +1872,8 @@ USING (VALUES
     -- Document.Delete: only a draft document can be deleted (decision 2026-09-21).
     (N'err.ECR-DOC-0409.deleteNotDraft',        N'en', N'Only a draft document can be deleted; sheet {sheetDefId} for period {periodKey} is {reason}.', 1),
     (N'err.ECR-DOC-0409.deleteHasHistory',      N'en', N'Only a draft document can be deleted; this document has already been through approval.', 1),
+    -- ⛔ L10-06: мапа подій джерела посилається на документ — відмова 409, а не FK 547 → 500.
+    (N'err.ECR-DOC-0409.deleteHasEventMap',     N'en', N'The document cannot be deleted: a source event mapping writes into it. Remove the mapping first.', 1),
     -- Document.ChangeKey: controlled business key change (FV-3.9).
     (N'err.ECR-DOC-0409.rekeyLocked',           N'en', N'The document key cannot be changed: sheet {sheetDefId} for period {periodKey} is {reason}.', 1),
     (N'err.ECR-DOC-0409.rekeyDuplicate',        N'en', N'Another document of this project already has the key "{businessKey}".', 1),
@@ -6530,14 +6538,44 @@ USING (VALUES
     -- REG:an29 ── аудит 2026-10-03 (L4-03 = L5-10): текстове значення поля довідника довше за колонку (`RegistryValue.MaxStringLength`); ru/kz — порцією REG:an29 у блоці I18N нижче ──
     (N'err.ECR-REG-0422.valueTooLong', N'en', N'The value is longer than {max} characters ({length}).', 1),
     -- REG:an29 ── кінець секції ──
+    -- COLL:an28 ── AN-28/L8-01: дія над документом не виконується, якщо набране в сітці не збереглося; ru/kz — порцією COLL:an28 у блоці I18N нижче ──
+    (N'document.unsavedBlocksAction', N'en', N'Unsaved changes in the grid could not be saved, so the action was not performed. Fix the cell errors or try again.', 1),
+    -- COLL:an28 ── кінець секції ──
     -- COLL:p4-t4 ── тестувальний прохід №4, T4-09: мова налаштування поза реєстром; ru/kz — порцією COLL:p4-t4 у блоці I18N нижче ──
     (N'err.ECR-REQ-0422.preferenceLanguageUnsupported', N'en', N'The language of preference "{key}" must be the code of an enabled interface language (for example "en", "ru" or "kz"), got: {value}.', 1),
     -- COLL:p4-t4 ── кінець секції ──
     -- COLL:an25 ── L7-01 (аудит 2026-10-03): межі виразу проти переповнення стека; ru/kz — порцією COLL:an25 у блоці I18N нижче ──
     (N'err.ECR-REQ-0422.expressionTooLong', N'en', N'The expression is too long: {length} characters, at most {max} are allowed. Split it into several formulas.', 1),
     (N'expr.chainTooLong',                   N'en', N'The expression has more than {max} operators chained together. Split it into several formulas.', 1),
-    (N'expr.tooComplex',                     N'en', N'The expression is too complex to check. Split it into several formulas.', 1)
+    (N'expr.tooComplex',                     N'en', N'The expression is too complex to check. Split it into several formulas.', 1),
     -- COLL:an25 ── кінець секції ──
+    -- COLL:an33 ── збір із джерел (AN-33): політика адреси Sql-джерела (L3-05, D-279); ru/kz — порцією COLL:an33 у блоці I18N нижче ──
+    (N'err.ECR-REQ-0422.dataSourceEndpointSqlForbiddenOption', N'en', N'This connection string option is not allowed for a data source: AttachDBFilename (and its synonyms), User Instance, Enclave Attestation Url, Server SPN, Authentication other than SqlPassword, or a Server Certificate that is not a full local path (X:\…).', 1),
+    (N'err.ECR-INT-0503.endpointForbidden', N'en', N'The address of source "{dataSource}" is refused by the address policy (link-local or cloud metadata address, or a forbidden connection string option): fix the Endpoint field of the source.', 1),
+    -- L3-07: стеля подій вікна після посторінкового читання.
+    (N'coverageEvents.eventsTruncated', N'en', N'The source has more events in the window than were read ({count} in {pages} pages): events after {after} were not synchronized in this run, and removal of missing events was skipped.', 1),
+    -- L4-10: однакові імена елементів PI SQL Client.
+    (N'err.ECR-INT-0422.elementNameAmbiguous', N'en', N'Several source elements share the name used to read them; their values were not read, because a value read by that name could belong to another element. Give the elements unique names or read them through PI Web API.', 1),
+    -- COLL:an33 ── кінець секції ──
+    -- COLL:an38 ── AN-38 (аудит 2026-10-03, L7): розрахунки й методології; ru/kz — порцією COLL:an38 у блоці I18N нижче ──
+    (N'expr.ampersandNotConcat', N'en', N'"&" in the methodology dialect does not join text: it is bitwise AND, and "6 & 3" equals 2. Use "and" for a logical AND.', 1),
+    (N'expr.rangeNotAccepted', N'en', N'{function} takes a single value, not a range of rows. Wrap the range in SUM, AVERAGE, MIN or MAX.', 1),
+    -- COLL:an38 ── кінець секції ──
+    -- COLL:cl5 ── CL-5: картка jobs жовтіє, коли останнє зведення збоїв нікому не доставлено; ru/kz — порцією COLL:cl5 у блоці I18N нижче ──
+    (N'health.jobs.notificationsUndelivered', N'en', N'The last failure digest reached no one: {count} failures, 0 sent. Check the mail server settings, notification channels and alert recipients.', 1),
+    -- COLL:cl5 ── кінець секції ──
+    -- COLL:an39b ── хвіст сітки після AN-39 (AN-28 P2-1/P2-2, L8-11/17/20); ru/kz — власна порція нижче ──
+    (N'document.heldEditBlocksAction', N'en', N'A change in the highlighted cell was rejected, so the action was not performed. Fix or undo it and try again.', 1),
+    (N'document.unsavedNotIncluded', N'en', N'Some changes in the grid are not saved and are not included: the action uses the last saved values.', 1),
+    (N'app.languageAfterSave', N'en', N'The page is still in the previous language: unsaved changes would be lost. Save or undo them, then press Switch now.', 1),
+    (N'app.languageSwitchNow', N'en', N'Switch now', 1),
+    -- COLL:an39b ── кінець секції ──
+    -- COLL:t4-p3 ── тестувальний прохід №4, T4-05: мову не змінено через незбережений ввід; ru/kz — порцією COLL:t4-p3 у блоці I18N нижче ──
+    (N'profile.languageUnsavedBlocked', N'en', N'The language was not changed: some changes on this page are not saved. Save or undo them, then change the language.', 1),
+    -- COLL:t4-p3 ── кінець секції ──
+    -- AN32:L2-11 ── черга: перезапуск, коли на ціль уже чекає інша задача; ru/kz — порцією AN32:L2-11 у блоці I18N нижче
+    (N'err.ECR-JOB-0409.restartCoveredBy', N'en', N'Job {jobId} was not restarted: job {coveredBy} is already queued for the same target and will do this work.', 1)
+    -- AN32:L2-11 ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -15357,6 +15395,102 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:an25 ── кінець секції ──
+-- COLL:an33 ── ru/kz збору з джерел (AN-33); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-REQ-0422.dataSourceEndpointSqlForbiddenOption', N'ru', N'Этот параметр строки подключения для источника не допускается: AttachDBFilename (и его синонимы), User Instance, Enclave Attestation Url, Server SPN, Authentication, отличный от SqlPassword, или Server Certificate не в виде полного локального пути (X:\…).'),
+    (N'err.ECR-REQ-0422.dataSourceEndpointSqlForbiddenOption', N'kz', N'Қосылу жолының бұл параметрі көз үшін рұқсат етілмейді: AttachDBFilename (және оның синонимдері), User Instance, Enclave Attestation Url, Server SPN, SqlPassword-тан басқа Authentication немесе толық жергілікті жол (X:\…) емес Server Certificate.'),
+    (N'err.ECR-INT-0503.endpointForbidden', N'ru', N'Адрес источника «{dataSource}» отклонён политикой адресов (link-local или облачный metadata-адрес либо запрещённый параметр строки подключения): исправьте поле Endpoint источника.'),
+    (N'err.ECR-INT-0503.endpointForbidden', N'kz', N'«{dataSource}» көзінің мекенжайы мекенжай саясатымен қабылданбады (link-local немесе бұлттық metadata мекенжайы не қосылу жолының тыйым салынған параметрі): көздің Endpoint өрісін түзетіңіз.'),
+    (N'coverageEvents.eventsTruncated', N'ru', N'В окне источника событий больше, чем прочитано ({count} за {pages} страниц): события после {after} в этом прогоне не синхронизированы, удаление исчезнувших пропущено.'),
+    (N'coverageEvents.eventsTruncated', N'kz', N'Көз терезесінде оқылғаннан көп оқиға бар ({pages} бетте {count}): {after} кейінгі оқиғалар бұл өткізуде синхрондалмады, жоғалғандарды жою өткізіп жіберілді.'),
+    (N'err.ECR-INT-0422.elementNameAmbiguous', N'ru', N'Несколько элементов источника имеют одно имя, по которому они читаются; их значения не прочитаны, потому что значение, прочитанное по этому имени, может принадлежать другому элементу. Дайте элементам уникальные имена или читайте их через PI Web API.'),
+    (N'err.ECR-INT-0422.elementNameAmbiguous', N'kz', N'Көздің бірнеше элементінің оқылатын аты бірдей; олардың мәндері оқылмады, себебі осы атпен оқылған мән басқа элементке тиесілі болуы мүмкін. Элементтерге бірегей атау беріңіз немесе оларды PI Web API арқылы оқыңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:an33 ── кінець секції ──
+-- COLL:an38 ── ru/kz розрахунків і методологій (L7); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'expr.ampersandNotConcat', N'ru', N'«&» в диалекте методик не объединяет текст: это побитовое И, и «6 & 3» равно 2. Для логического И используйте «and».'),
+    (N'expr.ampersandNotConcat', N'kz', N'Әдістемелер диалектінде «&» мәтінді біріктірмейді: бұл биттік ЖӘНЕ, және «6 & 3» 2-ге тең. Логикалық ЖӘНЕ үшін «and» қолданыңыз.'),
+    (N'expr.rangeNotAccepted', N'ru', N'{function} принимает одно значение, а не диапазон строк. Оберните диапазон в SUM, AVERAGE, MIN или MAX.'),
+    (N'expr.rangeNotAccepted', N'kz', N'{function} жолдар ауқымын емес, бір мәнді қабылдайды. Ауқымды SUM, AVERAGE, MIN немесе MAX ішіне орналастырыңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:an38 ── кінець секції ──
+-- COLL:cl5 ── ru/kz недоставленого зведення збоїв (CL-5); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'health.jobs.notificationsUndelivered', N'ru', N'Последняя сводка сбоев никому не доставлена: сбоев {count}, отправлено 0. Проверьте настройки почтового сервера, каналы уведомлений и получателей оповещений.'),
+    (N'health.jobs.notificationsUndelivered', N'kz', N'Ақаулардың соңғы жиынтығы ешкімге жеткізілмеді: {count} ақау, 0 жіберілді. Пошта серверінің баптауларын, хабарлама арналарын және ескерту алушыларын тексеріңіз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:cl5 ── кінець секції ──
+
+-- COLL:an28 ── ru/kz AN-28/L8-01; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'document.unsavedBlocksAction', N'ru', N'Несохранённые изменения в таблице не удалось сохранить, поэтому действие не выполнено. Исправьте ошибки в ячейках или повторите попытку.'),
+    (N'document.unsavedBlocksAction', N'kz', N'Кестедегі сақталмаған өзгерістерді сақтау мүмкін болмады, сондықтан әрекет орындалмады. Ұяшықтардағы қателерді түзетіңіз немесе әрекетті қайталаңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:an28 ── кінець секції ──
+
+-- COLL:an39b ── ru/kz хвоста сітки; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'document.heldEditBlocksAction', N'ru', N'Изменение в подсвеченной ячейке отклонено, поэтому действие не выполнено. Исправьте или отмените его и повторите.'),
+    (N'document.heldEditBlocksAction', N'kz', N'Белгіленген ұяшықтағы өзгеріс қабылданбады, сондықтан әрекет орындалмады. Оны түзетіңіз немесе болдырмаңыз да, қайталап көріңіз.'),
+    (N'document.unsavedNotIncluded', N'ru', N'Часть изменений в таблице не сохранена и не учтена: действие выполнено по последним сохранённым значениям.'),
+    (N'document.unsavedNotIncluded', N'kz', N'Кестедегі кейбір өзгерістер сақталмаған және ескерілмеді: әрекет соңғы сақталған мәндер бойынша орындалды.'),
+    (N'app.languageAfterSave', N'ru', N'Страница пока на прежнем языке: несохранённые изменения были бы потеряны. Сохраните или отмените их и нажмите «Переключить сейчас».'),
+    (N'app.languageAfterSave', N'kz', N'Бет әзірге бұрынғы тілде: сақталмаған өзгерістер жоғалар еді. Оларды сақтаңыз немесе болдырмаңыз да, «Қазір ауыстыру» түймесін басыңыз.'),
+    (N'app.languageSwitchNow', N'ru', N'Переключить сейчас'),
+    (N'app.languageSwitchNow', N'kz', N'Қазір ауыстыру')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:an39b ── кінець секції ──
+-- COLL:t4-p3 ── ru/kz тестувального проходу №4 (T4-05); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'profile.languageUnsavedBlocked', N'ru', N'Язык не изменён: часть изменений на этой странице не сохранена. Сохраните или отмените их, затем смените язык.'),
+    (N'profile.languageUnsavedBlocked', N'kz', N'Тіл өзгертілмеді: осы беттегі кейбір өзгерістер сақталмаған. Оларды сақтаңыз немесе болдырмаңыз, содан кейін тілді ауыстырыңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:t4-p3 ── кінець секції ──
+-- AN32:L2-11 ── ru/kz черги (перезапуск, коли на ціль уже чекає інша задача); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-JOB-0409.restartCoveredBy', N'ru', N'Задача {jobId} не перезапущена: на ту же цель уже ожидает задача {coveredBy}, она и выполнит работу.'),
+    (N'err.ECR-JOB-0409.restartCoveredBy', N'kz', N'{jobId} тапсырмасы қайта іске қосылмады: сол нысанаға {coveredBy} тапсырмасы кезекте күтуде, жұмысты сол орындайды.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- AN32:L2-11 ── кінець секції ──
+-- DOC:an37 ── ru/kz відмови видалення документа з мапою подій джерела (L10-06); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-DOC-0409.deleteHasEventMap', N'ru', N'Документ нельзя удалить: в него пишет сопоставление событий источника. Сначала удалите сопоставление.'),
+    (N'err.ECR-DOC-0409.deleteHasEventMap', N'kz', N'Құжатты жою мүмкін емес: оған дереккөз оқиғаларының сәйкестендіруі жазады. Алдымен сәйкестендіруді жойыңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- DOC:an37 ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

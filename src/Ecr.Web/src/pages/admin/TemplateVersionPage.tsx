@@ -276,6 +276,19 @@ export function TemplateVersionPage(): JSX.Element {
   const navigate = useNavigate();
   const session = useSession();
 
+  /*
+   * ⛔ L9-23: перелік версій живе під ДВОМА ключами — `versionsOf(id)` (ця сторінка, картка,
+   * `ExpressionsPage`…) і пакетний `versionsBatch(ids)` переліку `/admin/templates`
+   * (`queryKeys.ts`: навмисно не префікс одне одного). Публікація, клон і виведення з обігу
+   * змінюють обидва; без пакетного повернення на перелік протягом `staleTime` (30 с) показувало
+   * старий статус, а «New version» клонувала зі старої «останньої» версії.
+   */
+  const invalidateVersionLists = (): Promise<unknown> =>
+    Promise.all([
+      queryClient.invalidateQueries({ queryKey: queryKeys.templates.allVersionsOf() }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.templates.allVersionsBatch() }),
+    ]);
+
   const [cloning, setCloning] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [deprecating, setDeprecating] = useState(false);
@@ -389,7 +402,7 @@ export function TemplateVersionPage(): JSX.Element {
       // лишалася кнопка «Publish», а «Withdraw» з'являлася лише після reload.
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.templates.version(id) }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.templates.allVersionsOf() }),
+        invalidateVersionLists(),
       ]);
       setPublishing(false);
       showDone(t('version.published'));
@@ -418,7 +431,7 @@ export function TemplateVersionPage(): JSX.Element {
         body: JSON.stringify({ newVersion: newVersion.trim() } satisfies CloneVersionRequest),
       }),
     onSuccess: async (result) => {
-      await queryClient.invalidateQueries({ queryKey: queryKeys.templates.allVersionsOf() });
+      await invalidateVersionLists();
       setCloning(false);
       showDone(t('version.cloned'));
 
@@ -450,7 +463,7 @@ export function TemplateVersionPage(): JSX.Element {
         body: JSON.stringify({ reason } satisfies DeprecateVersionRequest),
       }),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: queryKeys.templates.allVersionsOf() });
+      await invalidateVersionLists();
       setDeprecating(false);
       showDone(t('version.deprecated'));
     },

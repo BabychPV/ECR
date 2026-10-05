@@ -79,10 +79,17 @@ function connectionItems(source: DataSource): KeyValueItem[] {
  */
 export function DataSourceDrawer({
   source,
+  canView,
   canManage,
   onDeleted,
 }: {
   readonly source: DataSource;
+
+  /**
+   * `Integration.Manage` у профілі: вкладки сутностей і подій (їхні переліки
+   * читаються саме з цим правом). Під симуляцією — `true`, хоча `canManage` ні.
+   */
+  readonly canView: boolean;
 
   /**
    * `Integration.Manage`: без нього кнопок проби, правки й видалення НЕМАЄ,
@@ -207,10 +214,10 @@ export function DataSourceDrawer({
             <Tabs.Tab value="schedule">{t('sources.tabSchedule')}</Tabs.Tab>
             {/* ⛔ Без `Integration.Manage` вкладки НЕМАЄ: і перелік, і заведення,
                 і прив'язка вимагають саме цього права. */}
-            {canManage && <Tabs.Tab value="entities">{t('sources.tabEntities')}</Tabs.Tab>}
+            {canView && <Tabs.Tab value="entities">{t('sources.tabEntities')}</Tabs.Tab>}
             {/* ⚠ «Події з PI» — теж лише з `Integration.Manage`: сутність-шаблон обирається з переліку
                 сутностей (`GET /api/v1/sources`), а той вимагає саме цього права. */}
-            {canManage && <Tabs.Tab value="events">{t('sourceEvents.tab')}</Tabs.Tab>}
+            {canView && <Tabs.Tab value="events">{t('sourceEvents.tab')}</Tabs.Tab>}
           </Tabs.List>
 
           <Tabs.Panel value="connection" pt="sm">
@@ -225,15 +232,15 @@ export function DataSourceDrawer({
             </Suspense>
           </Tabs.Panel>
 
-          {canManage && (
+          {canView && (
             <Tabs.Panel value="entities" pt="sm">
               <Suspense fallback={<Loader size="sm" />}>
-                <SourceEntitiesTab source={source} />
+                <SourceEntitiesTab source={source} readOnly={!canManage} />
               </Suspense>
             </Tabs.Panel>
           )}
 
-          {canManage && (
+          {canView && (
             <Tabs.Panel value="events" pt="sm">
               <Suspense fallback={<Loader size="sm" />}>
                 <SourceEventsTab source={source} canManage={canManage} />

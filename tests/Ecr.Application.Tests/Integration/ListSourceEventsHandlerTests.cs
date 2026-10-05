@@ -48,6 +48,44 @@ public sealed class ListSourceEventsHandlerTests
 
         _store.ReadLinksAsync(Arg.Any<SourceEventLinkFilter>(), Arg.Any<string?>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
             .Returns(new SourceEventLinkPage([], 0));
+
+        TableScope(denyTable: false);
+    }
+
+    /// <summary>Межі читання таблиці мапінгу (id 10): <c>Read</c> на проєкт і, за потреби, заборона на таблицю (L1-09).</summary>
+    private void TableScope(bool denyTable)
+    {
+        var sheet = new SheetDef(1, EcrCode.Create("SH"), Text("SH"), 1);
+        typeof(Entity<int>).GetProperty("Id")!.SetValue(sheet, 1);
+        var table = new TableDef(
+            1, EcrCode.Create("FLARE_EVENTS"), Text("Flare events"), 1, TableLayoutKind.PerPeriodInstance, TableRowMode.Dynamic);
+        typeof(Entity<int>).GetProperty("Id")!.SetValue(table, 10);
+        sheet.AddTable(table);
+        var snapshot = new TemplateVersionSnapshot(1, 0, [sheet], new Dictionary<int, ColumnDef>(), new Dictionary<(int, string), RowDef>());
+
+        var builder = new AccessBuilder().Grant(ResourceKind.Project, AccessBuilder.ProjectId, GrantLevel.Read);
+        if (denyTable)
+        {
+            builder = builder.Deny(ResourceKind.Table, 10);
+        }
+
+        _access.ReadScopeAsync(Arg.Any<AccessProfile>(), VisibleDocument, Arg.Any<CancellationToken>())
+            .Returns(DocumentReadScope.For(builder.Build(), AccessBuilder.ProjectId, snapshot));
+    }
+
+    /// <summary>L1-09: документ видимий, але таблиця мапінгу під забороною — подій немає, сховище не читається.</summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    public async Task Події_таблиці_із_забороною_не_повертаються()
+    {
+        TableScope(denyTable: true);
+
+        var page = await Handler().HandleAsync(
+            new SourceEventsFilter(EntityId, null, null, null, null, null, null), new CursorRequest(), default);
+
+        Assert.Empty(page.Items);
+        Assert.Equal(0, page.TotalCount);
+        await _store.DidNotReceiveWithAnyArgs().ReadLinksAsync(default!, default, default, default);
     }
 
     [Fact]

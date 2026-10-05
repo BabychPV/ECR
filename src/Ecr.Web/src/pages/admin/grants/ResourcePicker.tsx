@@ -57,6 +57,8 @@ interface ResourcePickerProps {
   readonly resourceId: number;
   readonly path: PickPath;
   readonly onChange: (next: PickResult) => void;
+  /** Лише перегляд (симуляція, `L9-18`): поля показують вибір, але не змінюються. */
+  readonly readOnly?: boolean;
 }
 
 /** Глибина каскаду всередині структури версії: аркуш 1, таблиця 2, колонка 3. */
@@ -79,7 +81,14 @@ function selected(id: number): string | null {
   return id > 0 ? String(id) : null;
 }
 
-export function ResourcePicker({ index, kind, resourceId, path, onChange }: ResourcePickerProps): JSX.Element {
+export function ResourcePicker({
+  index,
+  kind,
+  resourceId,
+  path,
+  onChange,
+  readOnly = false,
+}: ResourcePickerProps): JSX.Element {
   const depth = structureDepth(kind);
   const inTemplate = depth > 0;
   const n = index + 1;
@@ -135,8 +144,9 @@ export function ResourcePicker({ index, kind, resourceId, path, onChange }: Reso
   const common = (label: string, failed: boolean) => ({
     size: 'xs' as const,
     miw: 150,
-    searchable: true,
-    clearable: true,
+    searchable: !readOnly,
+    clearable: !readOnly,
+    readOnly,
     placeholder: label,
     nothingFoundMessage: t('grants.pickerNothingFound'),
     ...(failed ? { error: t('grants.pickerLoadFailed') } : {}),

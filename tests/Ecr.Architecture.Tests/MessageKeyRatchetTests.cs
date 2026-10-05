@@ -287,10 +287,90 @@ public sealed partial class MessageKeyRatchetTests
         var templates = SeedTemplate().Matches(seed).ToDictionary(
             m => m.Groups[1].Value, m => m.Groups[2].Value, StringComparer.Ordinal);
 
-        var failures = new List<string>();
-        var checkedSites = 0;
+        var failures = MissingPlaceholders(SourceTree.Production(), templates, out var checkedSites);
 
-        foreach (var file in SourceTree.Production())
+        // ⛔ Регулярка, що перестала збігатися, дала б нуль перевірок і ЗЕЛЕНЕ.
+        Assert.NotEqual(0, checkedSites);
+        Assert.True(failures.Count == 0, string.Join(Environment.NewLine, failures));
+    }
+
+    /// <summary>
+    /// Сторож плейсхолдерів сам червоніє на фікстурі з вигаданим плейсхолдером
+    /// (CL-5, <c>placeholder-guard</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Без цього тесту єдиний доказ сторожа — «на продукті зелено», а зелене
+    /// дає і сторож, що нічого не бачить (зламана регулярка <c>InlineKey</c>
+    /// чи <c>Placeholder</c>, забута гілка фабрики). <c>checkedSites</c> ловить
+    /// лише повний нуль; підміну імені, перевірку не того поля чи пропущений
+    /// <c>return new T(</c> — лише фікстура з відомою відповіддю.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Сторож_плейсхолдерів_червоніє_на_вигаданому_плейсхолдері()
+    {
+        const string sample = """
+            namespace Sample;
+            internal static class Throws
+            {
+                public static void Invented() =>
+                    throw new BusinessRuleException("ECR-X", "Речення.", new Dictionary<string, object?>
+                    {
+                        ["messageKey"] = "err.X-0422.invented",
+                        ["max"] = "64",
+                    });
+
+                public static void Supplied() =>
+                    throw new BusinessRuleException("ECR-X", "Речення.", new Dictionary<string, object?>
+                    {
+                        ["messageKey"] = "err.X-0422.tooLong",
+                        ["max"] = "64",
+                    });
+
+                public static BusinessRuleException Factory() =>
+                    new("ECR-X", "Довше за max.", new Dictionary<string, object?> { ["messageKey"] = "err.X-0422.invented" });
+
+                public static void NotInCatalog() =>
+                    throw new BusinessRuleException("ECR-X", "Речення.", new Dictionary<string, object?>
+                    {
+                        ["messageKey"] = "err.X-0422.unknown",
+                    });
+            }
+            """;
+
+        var templates = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            // `{bogusName}` — плейсхолдер, якого жоден кидок не постачає.
+            ["err.X-0422.invented"] = "Longer than {max}; see {bogusName}.",
+            ["err.X-0422.tooLong"] = "Longer than {max}.",
+        };
+
+        var failures = MissingPlaceholders([new SourceFile("src/Sample.cs", sample)], templates, out var checkedSites);
+
+        // Invented (рядок 5) і фабрика `new(` (19): шаблон чекає {bogusName}, а ще
+        // фабрика не дає {max} (слово «max» у реченні — не поле Details). Supplied — усе є. NotInCatalog — ключа нема в
+        // каталозі, звіряти нема з чим (його стереже ErrorTitleCatalogTests).
+        Assert.Equal(3, checkedSites);
+        Assert.Equal(3, failures.Count);
+        Assert.Contains("src/Sample.cs:5:", failures[0], StringComparison.Ordinal);
+        Assert.Contains("{bogusName}", failures[0], StringComparison.Ordinal);
+        Assert.All(failures.Skip(1), f => Assert.Contains("src/Sample.cs:19:", f, StringComparison.Ordinal));
+        Assert.Contains(failures, f => f.Contains("{max}", StringComparison.Ordinal));
+        Assert.DoesNotContain(failures, f => f.Contains(":12:", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// Плейсхолдери шаблонів, яких не названо полем у <c>Details</c> кидка з
+    /// ключем-літералом.
+    /// </summary>
+    private static List<string> MissingPlaceholders(
+        IReadOnlyList<SourceFile> files, Dictionary<string, string> templates, out int checkedSites)
+    {
+        var failures = new List<string>();
+        checkedSites = 0;
+
+        foreach (var file in files)
         {
             // ⚠ Те саме сито, що й храповик: фабрики й `return new T(` теж.
             // Доти сторож бачив лише `throw new T(` і пропустив
@@ -316,9 +396,7 @@ public sealed partial class MessageKeyRatchetTests
             }
         }
 
-        // ⛔ Регулярка, що перестала збігатися, дала б нуль перевірок і ЗЕЛЕНЕ.
-        Assert.NotEqual(0, checkedSites);
-        Assert.True(failures.Count == 0, string.Join(Environment.NewLine, failures));
+        return failures;
     }
 
     /// <summary>Рядок сіду <c>(N'err.…', N'en', N'шаблон', 0|1)</c>.</summary>

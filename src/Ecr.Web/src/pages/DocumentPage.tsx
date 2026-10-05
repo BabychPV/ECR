@@ -8,7 +8,6 @@ import type {
   DocumentPeriodRequest,
   DocumentSummary,
   DocumentTableDto,
-  PagedProjects,
   PeriodCalendarDto,
   ValidationResultResponse,
 } from '@/api/types';
@@ -23,7 +22,7 @@ import {
 import { ActionGroup, DocumentToolbar } from '@/features/documents/DocumentToolbar';
 import { useVersionMigrationAction } from '@/features/documents/VersionMigrationAction';
 import { DocumentLockBanner } from '@/features/documents/DocumentLockBanner';
-import { documentLockOf, locksDataActions } from '@/features/documents/documentLock';
+import { documentLockOf, hasLockedSheet, locksDataActions } from '@/features/documents/documentLock';
 import { SheetFillSummary } from '@/features/documents/SheetFillSummary';
 import { useDocumentPending } from '@/features/grid/autosave';
 import { ExportButton } from '@/features/export/ExportButton';
@@ -38,6 +37,7 @@ import { useProjectCurrentPeriodDefault } from '@/features/documents/useProjectC
 import { StatusBadge } from '@/shared/ui/StatusBadge';
 import { useUrlNumber, useUrlState } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
+import { registerHeldEditRevealer, useSettledAction } from '@/features/grid/settleEdits';
 
 /**
  * Чотири панелі нижче — за `import()`, а не статичним імпортом (`D-132`).
@@ -319,6 +319,8 @@ export function DocumentPage(): JSX.Element {
     },
     onError: showApiError,
   });
+  // AN-28 P2-2: зайнятість і single-flight і на час збереження набраного.
+  const validateAction = useSettledAction(validate.isPending);
 
   /**
    * Що показувати в панелі: свіже — **лише для своєї адреси** — інакше
@@ -378,6 +380,30 @@ export function DocumentPage(): JSX.Element {
    */
   const sheets = useMemo(() => groupBySheet(tables.data ?? []), [tables.data]);
   const active = sheets.find((s) => s.code === sheet) ?? sheets[0];
+  const activeCode = active?.code;
+
+  // AN-28 P2-1: дія заблокована утриманою (відхиленою) коміркою - показати її:
+  // аркуш, прокрутка, фокус і підсвітка - тим самим шляхом, що й зауваження (`ФВ-5.6`).
+  useEffect(
+    () =>
+      registerHeldEditRevealer((held) => {
+        if (held.periodKey !== periodKey) return;
+
+        const target = tables.data?.find((table) => table.tableInstanceId === held.tableInstanceId);
+        if (target === undefined) return;
+
+        if (target.sheetCode !== activeCode) setSheet(target.sheetCode);
+        void import('@/features/grid/cellNavigation').then((module) =>
+          module.requestCellNavigation({
+            tableDefId: target.tableDefId,
+            tableInstanceId: target.tableInstanceId,
+            rowKey: held.edit.rowKey,
+            columnCode: held.edit.columnCode,
+          }),
+        );
+      }),
+    [periodKey, tables.data, activeCode, setSheet],
+  );
 
   // ⚠ Стан береться з `SheetStates` документа за КОДОМ аркуша: скалярного
   // статусу документа не існує (D-93) — аркуші за один період бувають у
@@ -406,7 +432,9 @@ export function DocumentPage(): JSX.Element {
 
   const projects = useQuery({
     queryKey: ['projects'],
-    queryFn: () => apiFetch<PagedProjects>('/api/v1/projects?limit=200'),
+    // AN-39/L8-10: усі сторінки - проєкт поза першими 200 теж блокує дії в архіві.
+    // ⚠ За `import()`: статичний імпорт додавав файл і ~1 КБ gzip до графа маршруту (бюджет D-132).
+    queryFn: () => import('@/features/projects/allProjects').then((module) => module.fetchAllProjects()),
     enabled: projectId !== null,
   });
 
@@ -465,6 +493,11 @@ export function DocumentPage(): JSX.Element {
   // прогону й відмови — у самому діалозі.
   const versionMigration = useVersionMigrationAction({ documentId, document: summary.data });
 
+  const refetchBoth = (): void => {
+    void summary.refetch();
+    void tables.refetch();
+  };
+
   return (
     /*
      * ⛔ Обгортка навколо ВСЬОГО екрана: заголовок — це бізнес-ключ документа,
@@ -477,19 +510,23 @@ export function DocumentPage(): JSX.Element {
      */
     <AsyncBoundary<DocumentSummary>
       isPending={summary.isPending || tables.isPending}
-      error={summary.error ?? tables.error}
+      // AN-39/L8-11: збій ФОНОВОГО перезапиту (є `data`) не підміняє сторінку на помилку -
+      // це розмонтувало б сітки, редактор, Undo і панель конфлікту; він іде банером нижче.
+      error={
+        (summary.data === undefined ? summary.error : null) ?? (tables.data === undefined ? tables.error : null)
+      }
       data={summary.data}
       isEmpty={() => sheets.length === 0}
       emptyTitle={t('document.noSheets')}
       emptyHint={t('document.noSheetsHint')}
       skeleton="table"
-      onRetry={() => {
-        void summary.refetch();
-        void tables.refetch();
-      }}
+      onRetry={refetchBoth}
     >
       {(document) => (
     <Stack>
+      {(summary.error ?? tables.error) !== null && (
+        <ErrorAlert error={summary.error ?? tables.error} onRetry={refetchBoth} />
+      )}
       <PageHeader
         // ⛔ Директива "людське ім'я документа": ім'я ПОРУЧ із бізнес-ключем,
         // а не замість нього — ключ лишається видимим завжди.
@@ -528,8 +565,8 @@ export function DocumentPage(): JSX.Element {
           <Button
             size="xs"
             variant="default"
-            loading={validate.isPending}
-            onClick={() => validate.mutate(scope)}
+            loading={validate.isPending || validateAction.settling}
+            onClick={() => validateAction.run(() => validate.mutateAsync(scope), { readOnly: true })}
           >
             {t('document.validate')}
           </Button>
@@ -604,7 +641,14 @@ export function DocumentPage(): JSX.Element {
       <Suspense fallback={null}>
         <DocumentHeaderPanel
           documentId={documentId}
-          canEdit={hasProjectWriteGrant(session.data, document.projectId)}
+          // AN-39/L8-13: сервер править шапку за `EditRules.CanEdit` документа цілком - не в
+          // симуляції, не в архівному проєкті, не за поданого/затвердженого аркуша.
+          canEdit={
+            hasProjectWriteGrant(session.data, document.projectId) &&
+            session.data?.isSimulation !== true &&
+            lock !== 'projectArchived' &&
+            !hasLockedSheet(document.sheetStates)
+          }
         />
       </Suspense>
 
@@ -649,6 +693,7 @@ export function DocumentPage(): JSX.Element {
         <Suspense fallback={null}>
           <ValidationPanel
             messages={shownValidation.messages}
+            canSelect={(finding) => tables.data?.some((table) => table.tableDefId === finding.tableDefId) === true}
             onSelect={(finding) => {
               // ⛔ `ФВ-5.6`: спершу аркуш зауваження, потім запит переходу. Модуль
               // переходу — за `import()`: він живе в чанку сітки, не сторінки

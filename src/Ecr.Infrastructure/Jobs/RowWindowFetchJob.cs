@@ -194,7 +194,11 @@ public sealed class RowWindowFetchJob(
                 .ToDictionaryAsync(e => e.Id, e => e.Code, ct)
                 .ConfigureAwait(false);
 
+        // ⛔ L3-03: НЕ відстежувані. Патчер ділить із задачею scoped-контекст і на гонці за
+        // рядок робить ChangeTracker.Clear(): відчеплений Supersede() не зберігався, і вставка
+        // нового чинного запису падала на UX_RowWindowValue_Current. Чинні знімаються запитом.
         var current = await db.RowWindowValues
+            .AsNoTracking()
             .Where(v => v.PeriodKey == periodKey && v.TableInstanceId == tableInstanceId && v.IsCurrent)
             .ToListAsync(ct)
             .ConfigureAwait(false);
@@ -362,10 +366,22 @@ public sealed class RowWindowFetchJob(
                     ct)
                 .ConfigureAwait(false);
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
         catch (EcrException ex)
         {
             // Відмова джерела рядка не валить решту рядків: статус SourceError, повтор — за RefetchWithinDays.
             return Item.Failed(rowKey, source, span, ex.ErrorCode);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // ⛔ L3-02: адаптери на останній спробі віддають сирі HttpRequestException /
+            // OdbcException. Без цього один такий рядок обривав усю задачу, і прочитане
+            // для інших рядків не записувалося — задача падала на кожному тригері, поки
+            // джерело лежить. Для рядка це та сама відмова транспорту.
+            return Item.Failed(rowKey, source, span, TransportMissingCode);
         }
 
         var fold = RowWindowFetch.Fold(
@@ -407,13 +423,72 @@ public sealed class RowWindowFetchJob(
 
             return 0;
         }
+        catch (Exception ex) when (cells.Count > 1 && ex is BusinessRuleException or DomainException)
+        {
+            // ⛔ L3-02: пакет відхилено цілком (ECR-CELL-0422 validationBlocked, ECR-CALC-0437 …) —
+            // одна комірка не валить решту рядків: розводимо по одному, як SourceEventSyncJob.WriteGroupAsync.
+            return await WriteOneByOneAsync(instance, periodKey, items, cells, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is BusinessRuleException or DomainException)
+        {
+            MarkRejected(items, cells[0].RowKey, ex);
+            return 0;
+        }
 
+        Distribute(items, written);
+        return written.Applied;
+    }
+
+    private async Task<int> WriteOneByOneAsync(
+        TableInstance instance, PeriodKey periodKey, List<Item> items, List<IntegrationCellValue> cells, CancellationToken ct)
+    {
+        var applied = 0;
+        foreach (var cell in cells)
+        {
+            try
+            {
+                var written = await patcher
+                    .ApplyIntegrationAsync(instance.DocumentId, instance.Id, periodKey, [cell], ct)
+                    .ConfigureAwait(false);
+                Distribute(items, written);
+                applied += written.Applied;
+            }
+            catch (AccessDeniedException)
+            {
+                foreach (var item in items)
+                {
+                    item.Abandoned = true;
+                }
+
+                return applied;
+            }
+            catch (Exception ex) when (ex is BusinessRuleException or DomainException)
+            {
+                MarkRejected(items, cell.RowKey, ex);
+            }
+        }
+
+        return applied;
+    }
+
+    private static void Distribute(List<Item> items, IntegrationWriteResult written)
+    {
         Mark(items, written.KeptManual, RowWindowValueStatus.KeptManual, null);
         Mark(items, written.WriteConflicts ?? [], RowWindowValueStatus.SourceError, WriteConflictCode);
         Mark(items, written.AwaitingConfirmation ?? [], RowWindowValueStatus.SourceError, NeedsConfirmationCode);
-
-        return written.Applied;
     }
+
+    private static void MarkRejected(List<Item> items, string rowKey, Exception ex)
+        => Mark(
+            items,
+            [rowKey],
+            RowWindowValueStatus.SourceError,
+            ex switch
+            {
+                EcrException ecr => ecr.ErrorCode,
+                DomainException domain => domain.ErrorCode,
+                _ => TransportMissingCode,
+            });
 
     private static void Mark(List<Item> items, IReadOnlyList<string> entries, RowWindowValueStatus status, string? code)
     {
@@ -428,7 +503,7 @@ public sealed class RowWindowFetchJob(
         }
     }
 
-    /// <summary>Знімає чинні записи, потім додає нові — двома збереженнями (унікальний індекс «чинний — один»).</summary>
+    /// <summary>Знімає чинні записи запитом, потім додає нові (унікальний індекс «чинний — один»).</summary>
     private async Task RecordAsync(
         RowWindowMap map, TableInstance instance, List<Item> items, RowContext context, DateTime now, CancellationToken ct)
     {
@@ -438,15 +513,24 @@ public sealed class RowWindowFetchJob(
             return;
         }
 
+        var superseded = new List<long>();
         foreach (var item in recorded)
         {
             if (context.Current.Remove((item.RowKey.ToUpperInvariant(), map.TargetColumnDefId), out var previous))
             {
-                previous.Supersede();
+                superseded.Add(previous.Id);
             }
         }
 
-        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+        // Запитом, а не через трекер (L3-03): ChangeTracker.Clear() у патчері між читанням і
+        // записом не може загубити зняття «чинного».
+        if (superseded.Count > 0)
+        {
+            await db.RowWindowValues
+                .Where(v => v.PeriodKey == instance.PeriodKeyValue && superseded.Contains(v.Id) && v.IsCurrent)
+                .ExecuteUpdateAsync(set => set.SetProperty(v => v.IsCurrent, false), ct)
+                .ConfigureAwait(false);
+        }
 
         foreach (var item in recorded)
         {

@@ -171,7 +171,10 @@ public sealed class PatchCellsRowLimitRaceTests(SqlServerFixture sql)
                   await beforePersist().ConfigureAwait(false);
                   return (IReadOnlyDictionary<string, NewRowAccess>)call.ArgAt<IReadOnlyCollection<string>>(2)
                       .ToDictionary(
-                          k => k, _ => new NewRowAccess(EditDecision.Allow(), new Dictionary<int, EditDecision>()),
+                          // ⚠ L6-13: рішення на кожну колонку — відсутнє рішення тепер відмова.
+                          k => k, _ => new NewRowAccess(
+                              EditDecision.Allow(),
+                              doc.ColumnDefIds.ToDictionary(id => id, _ => EditDecision.Allow())),
                           StringComparer.Ordinal);
               });
 

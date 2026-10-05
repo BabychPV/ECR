@@ -3,6 +3,7 @@ using System.Data.Common;
 using System.Data.Odbc;
 using System.Globalization;
 using Ecr.Application.Errors;
+using Ecr.Application.Integration;
 using Ecr.Application.Ports;
 using Ecr.Application.Sources;
 using Ecr.Domain.Enums;
@@ -410,42 +411,49 @@ public sealed class PiSqlClientDataSource(
 
         using var connection = await OpenAsync(source, ct).ConfigureAwait(false);
 
+        return await ReadCurrentPathsAsync(
+                paths,
+                element => TemplateAsync(connection, source.Code, element, ct),
+                (path, element, template, attribute) => ReadCurrentPointAsync(
+                    connection, source.Code, queryText, path, element, template, attribute, ct))
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>Поточні значення шляхів «елемент|атрибут»: шаблон — раз на елемент, значення — раз на шлях.</summary>
+    /// <param name="paths">Шляхи.</param>
+    /// <param name="templateOf">Шаблон елемента; <c>null</c> — елемента немає.</param>
+    /// <param name="pointOf">Поточна точка (шлях, елемент, шаблон, атрибут); <c>null</c> — не прочиталась.</param>
+    /// <remarks>
+    /// ⛔ L4-09: шаблон елемента перечитувався на КОЖЕН атрибут — два запити RTQP на пару, тобто на
+    /// довіднику з десятком атрибутів удесятеро більше звернень до PI, ніж треба. Кеш — у межах виклику:
+    /// між викликами шаблон елемента може змінитися.
+    /// </remarks>
+    internal static async Task<CurrentValuesResult> ReadCurrentPathsAsync(
+        IReadOnlyCollection<string> paths,
+        Func<string, Task<string?>> templateOf,
+        Func<string, string, string, string, Task<SourceDataPoint?>> pointOf)
+    {
         var values = new List<SourceDataPoint>();
         var failures = new List<CurrentValueFailure>();
+        var templates = new Dictionary<string, string?>(StringComparer.Ordinal);
 
         foreach (var path in paths.Where(p => !string.IsNullOrWhiteSpace(p)).Distinct(StringComparer.Ordinal))
         {
             var (element, attribute) = Split(path);
 
-            var template = await TemplateAsync(connection, source.Code, element, ct).ConfigureAwait(false);
+            if (!templates.TryGetValue(element, out var template))
+            {
+                template = await templateOf(element).ConfigureAwait(false);
+                templates[element] = template;
+            }
+
             if (template is null)
             {
                 failures.Add(new CurrentValueFailure(path, "ECR-INT-0404", "err.ECR-INT-0404.sourcePathNotFound"));
                 continue;
             }
 
-            using var command = connection.CreateCommand();
-            command.CommandText = Fill(queryText, template, attribute);
-            command.Parameters.Add(new OdbcParameter("element", OdbcType.NVarChar) { Value = element });
-
-            using var reader = await RetryAsync(
-                () => command.ExecuteReaderAsync(CommandBehavior.SingleRow, ct),
-                IsTransientOdbcFailure,
-                ct).ConfigureAwait(false);
-
-            SourceDataPoint? point;
-            try
-            {
-                point = (await ReadSourcePointsAsync(reader, source.Code, path, 1, ct).ConfigureAwait(false))
-                    .FirstOrDefault();
-            }
-            catch (BusinessRuleException refused) when (IsTimestampRefusal(refused))
-            {
-                // Поточне значення з нечитабельною міткою — відмова ШЛЯХУ, як і
-                // до F4e (тоді рядок мовчки пропускався і шлях так само ставав
-                // `.currentValueUnreadable`), а не відмова всього знімка.
-                point = null;
-            }
+            var point = await pointOf(path, element, template, attribute).ConfigureAwait(false);
 
             if (point is null)
             {
@@ -458,6 +466,40 @@ public sealed class PiSqlClientDataSource(
         }
 
         return new CurrentValuesResult(values, failures);
+    }
+
+    /// <summary>Перший рядок запиту поточного значення; <c>null</c> — порожньо чи мітка нечитабельна.</summary>
+    private async Task<SourceDataPoint?> ReadCurrentPointAsync(
+        OdbcConnection connection,
+        string dataSourceCode,
+        string queryText,
+        string path,
+        string element,
+        string template,
+        string attribute,
+        CancellationToken ct)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = Fill(queryText, template, attribute);
+        command.Parameters.Add(new OdbcParameter("element", OdbcType.NVarChar) { Value = element });
+
+        using var reader = await RetryAsync(
+            () => command.ExecuteReaderAsync(CommandBehavior.SingleRow, ct),
+            IsTransientOdbcFailure,
+            ct).ConfigureAwait(false);
+
+        try
+        {
+            return (await ReadSourcePointsAsync(reader, dataSourceCode, path, 1, ct).ConfigureAwait(false))
+                .FirstOrDefault();
+        }
+        catch (BusinessRuleException refused) when (IsTimestampRefusal(refused))
+        {
+            // Поточне значення з нечитабельною міткою — відмова ШЛЯХУ, як і
+            // до F4e (тоді рядок мовчки пропускався і шлях так само ставав
+            // `.currentValueUnreadable`), а не відмова всього знімка.
+            return null;
+        }
     }
 
     /// <summary>Ключ запиту подій (HSE301 §4.7.2). Типового тексту немає.</summary>
@@ -884,11 +926,17 @@ public sealed class PiSqlClientDataSource(
         ArgumentNullException.ThrowIfNull(reader);
 
         var points = new List<SourceDataPoint>();
+        DateTime? previous = null;
 
         while (points.Count < maxPoints && await reader.ReadAsync(ct).ConfigureAwait(false))
         {
             var row = Row(reader);
             var timestamp = Utc(Column(row, "Ts"), dataSource, sourcePath);
+
+            // ⛔ L3-10: хвіст обрізаного батча правдивий лише для впорядкованого
+            // результату — той самий контракт, що й у SqlDataSource (аудит A7).
+            SourceRowOrder.EnsureOrdered(previous, timestamp, dataSource, sourcePath);
+            previous = timestamp;
 
             var (numeric, text) = Value(Column(row, "Val"));
             var quality = Column(row, "Quality") as string;

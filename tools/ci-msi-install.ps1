@@ -90,6 +90,30 @@ $currentVersion = Get-MsiVersion $msiPath
 Write-Host "Поточна MSI: $msiPath, версія $currentVersion"
 
 # ── P. Попередня MSI ─────────────────────────────────────────────────────
+<#
+    L10-10 (AUDIT-2026-10-03 §1J): вибір артефакту `ecr-msi` для оновлення.
+    ⛔ Ім'я гілки — не доказ походження: PR з форку з гілкою `main` чи
+    `dev/integration` дає прогін у ЦЬОМУ репозиторії з тим самим head_branch, і
+    його MSI ставилася б на ранер як «попередній реліз». Тому беремо лише
+    прогони, чий head-репозиторій — цей (`workflow_run.head_repository_id`
+    дорівнює `GITHUB_REPOSITORY_ID`). Немає id — нічого не беремо (не вгадуємо).
+    Порядок: найновіший dev/integration|main; інакше — найновіший тієї ж гілки.
+#>
+function Select-PreviousMsiArtifact {
+    param([object[]] $Artifacts, [string] $RepositoryId, [string] $RunId, [string] $OwnBranch)
+    if (-not $RepositoryId) { return $null }
+    $all = @($Artifacts |
+        Where-Object { $_ -and -not $_.expired -and $_.workflow_run -and
+            "$($_.workflow_run.id)" -ne "$RunId" -and
+            "$($_.workflow_run.head_repository_id)" -eq "$RepositoryId" } |
+        Sort-Object created_at -Descending)
+    $pick = $all | Where-Object { $_.workflow_run.head_branch -in 'dev/integration', 'main' } | Select-Object -First 1
+    if (-not $pick -and $OwnBranch) {
+        $pick = $all | Where-Object { $_.workflow_run.head_branch -eq $OwnBranch } | Select-Object -First 1
+    }
+    return $pick
+}
+
 function Find-PreviousMsi {
     if (-not (Get-Command gh -ErrorAction SilentlyContinue)) { Write-Host '  gh на ранері немає — попередню MSI не шукаю.'; return $null }
     if (-not $env:GH_TOKEN) { Write-Host '  GH_TOKEN не задано — попередню MSI не шукаю.'; return $null }
@@ -97,19 +121,12 @@ function Find-PreviousMsi {
 
     $raw = & gh api "repos/$repo/actions/artifacts?name=ecr-msi&per_page=100"
     if ($LASTEXITCODE) { Write-Host "  gh api artifacts → код $LASTEXITCODE — попередню MSI не шукаю."; return $null }
-    $all = @((($raw -join "`n") | ConvertFrom-Json).artifacts |
-        Where-Object { -not $_.expired -and "$($_.workflow_run.id)" -ne "$env:GITHUB_RUN_ID" } |
-        Sort-Object created_at -Descending)
-
-    $pick = $all | Where-Object { $_.workflow_run.head_branch -in 'dev/integration', 'main' } | Select-Object -First 1
-    $label = $null
-    if ($pick) { $label = "гілка $($pick.workflow_run.head_branch)" }
-    else {
-        $own = if ($env:GITHUB_HEAD_REF) { $env:GITHUB_HEAD_REF } else { $env:GITHUB_REF_NAME }
-        $pick = $all | Where-Object { $_.workflow_run.head_branch -eq $own } | Select-Object -First 1
-        if ($pick) { $label = "⚠ НЕ реліз dev/integration/main: ранній прогін тієї самої гілки $own (dev/integration і main артефакту ecr-msi ще не мають)" }
-    }
-    if (-not $pick) { Write-Host '  Артефакту ecr-msi з іншого прогону немає (dev/integration, main, ця гілка) — W3/W3b пропущено.'; return $null }
+    $own = if ($env:GITHUB_HEAD_REF) { $env:GITHUB_HEAD_REF } else { $env:GITHUB_REF_NAME }
+    $pick = Select-PreviousMsiArtifact -Artifacts (($raw -join "`n") | ConvertFrom-Json).artifacts `
+        -RepositoryId $env:GITHUB_REPOSITORY_ID -RunId $env:GITHUB_RUN_ID -OwnBranch $own
+    if (-not $pick) { Write-Host '  Артефакту ecr-msi з іншого прогону цього репозиторію немає (dev/integration, main, ця гілка) — W3/W3b пропущено.'; return $null }
+    $label = if ($pick.workflow_run.head_branch -in 'dev/integration', 'main') { "гілка $($pick.workflow_run.head_branch)" }
+        else { "⚠ НЕ реліз dev/integration/main: ранній прогін тієї самої гілки $own (dev/integration і main артефакту ecr-msi ще не мають)" }
 
     $runId = $pick.workflow_run.id
     # Поза $LogDir: той вивантажується при падінні, а MSI там зайва.

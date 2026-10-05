@@ -1,6 +1,6 @@
 import type { JSX } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MantineProvider, Menu } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { DocumentSummary } from '@/api/types';
@@ -34,10 +34,10 @@ const Document: DocumentSummary = {
   hasLateEdits: false,
 };
 
-function me(permissions: string[]): unknown {
+function me(permissions: string[], grant = 'Manage'): unknown {
   return {
     denies: [],
-    grants: { 'Project:7': 'Write' },
+    grants: { 'Project:7': grant },
     isSimulation: false,
     language: 'en',
     mustChangePassword: false,
@@ -79,7 +79,7 @@ interface Sent {
 
 const sent: Sent[] = [];
 
-function mockServer(permissions: string[], dryRunReport: VersionMigrationReport): void {
+function mockServer(permissions: string[], dryRunReport: VersionMigrationReport, grant = 'Manage'): void {
   sent.length = 0;
 
   vi.stubGlobal(
@@ -90,7 +90,7 @@ function mockServer(permissions: string[], dryRunReport: VersionMigrationReport)
       const json = (body: unknown): Response =>
         new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
 
-      if (url.includes('/api/v1/me')) return json(me(permissions));
+      if (url.includes('/api/v1/me')) return json(me(permissions, grant));
 
       if (url.includes('/migrate-version') && method === 'GET') {
         return json({
@@ -131,8 +131,8 @@ function Harness(): JSX.Element {
   );
 }
 
-function show(permissions: string[], dryRunReport: VersionMigrationReport): void {
-  mockServer(permissions, dryRunReport);
+function show(permissions: string[], dryRunReport: VersionMigrationReport, grant = 'Manage'): void {
+  mockServer(permissions, dryRunReport, grant);
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
   render(
@@ -166,6 +166,19 @@ describe('useVersionMigrationAction', () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(screen.queryByRole('menuitem', { name: '⟦documents.migrateVersion⟧' })).toBeNull();
+  });
+
+  it('Template.Edit без гранта Manage на проєкт (Write, Approve) — пункту немає; з Manage — є', async () => {
+    for (const grant of ['Write', 'Approve']) {
+      show(['Template.Edit'], report({}), grant);
+      await waitFor(() => expect(vi.mocked(fetch)).toHaveBeenCalled());
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(screen.queryByRole('menuitem', { name: '⟦documents.migrateVersion⟧' })).toBeNull();
+      cleanup();
+    }
+
+    show(['Template.Edit'], report({}), 'Manage');
+    expect(await screen.findByRole('menuitem', { name: '⟦documents.migrateVersion⟧' })).toBeDefined();
   });
 
   it('перенос недоступний до сухого прогону; після звіту «можна» — переносить тим самим вибором', async () => {

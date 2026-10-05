@@ -145,7 +145,8 @@ public sealed class SimulateMethodologyHandler(
     ICalculationModule module,
     IMethodologyStore methodologies,
     Security.IAccessDecisionService access,
-    Common.ICurrentUser currentUser)
+    Common.ICurrentUser currentUser,
+    IPeriodStore periods)
 {
     /// <summary>
     /// Право на симуляцію — <b>перегляд</b>, не публікація.
@@ -195,12 +196,19 @@ public sealed class SimulateMethodologyHandler(
         var trace = new List<string>();
         var verdicts = new List<TestCaseVerdict>();
 
-        // Порівнюємо з версією, чинною на дату періоду, а не з «останньою»:
-        // саме її числа зараз у звітах (ФВ-9.3).
-        var published = methodology.VersionOn(periodDate);
-
         foreach (var testCase in testCases)
         {
+            // Порівнюємо з версією, чинною на дату періоду, а не з «останньою»:
+            // саме її числа зараз у звітах (ФВ-9.3).
+            // ⛔ Аудит L7-11: дата — КІНЕЦЬ ПЕРІОДУ за календарем проєкту документа
+            // тесту, тим самим правилом, що й у продуктиві (`CalculationOrchestrator`,
+            // D-112). Ключ як місяць робив з кварталу 202602 28 лютого замість
+            // 30 червня — і diff порівнював не з тією версією.
+            var bounds = await periods
+                .FindPeriodBoundsAsync(testCase.Input.DocumentId, periodKey, ct)
+                .ConfigureAwait(false);
+            var published = methodology.VersionOn(bounds?.PeriodEnd ?? periodDate);
+
             // ⚠ Трейс завжди Full незалежно від TraceLevel версії: сенс
             // симуляції саме в тому, щоб побачити кроки. Її результат нікуди
             // не пишеться, тож обсяг трейсу нічого не коштує.
@@ -298,16 +306,18 @@ public sealed class SimulateMethodologyHandler(
             version.CalendarMode,
             trace);
 
-    /// <summary>Останній день періоду — дата, на яку резолвиться версія.</summary>
+    /// <summary>
+    /// Останній день періоду, якщо читати ключ як місяць, — запасна дата, коли
+    /// документ тесту меж періоду не дає.
+    /// </summary>
     /// <param name="periodKey">Ключ періоду з запиту.</param>
     /// <exception cref="BusinessRuleException">
     /// <c>ECR-CALC-0422</c> — ключ не є місяцем <c>РРРРММ</c>.
     /// </exception>
     /// <remarks>
-    /// ⚠ Симуляція читає ключ як МІСЯЦЬ (так було й до виправлення — інакше
-    /// останнього дня не вивести без календаря проєкту, а симуляція проєкту не
-    /// має). Тому номер поза 1..12 — відмова з назвою формату, а не тихе
-    /// «приведення» до грудня.
+    /// ⚠ Основна дата — межі періоду документа тесту (L7-11); місяць — лише
+    /// запасна, коли документа з таким періодом немає. Номер поза 1..12 —
+    /// відмова з назвою формату, а не тихе «приведення» до грудня.
     /// </remarks>
     private static DateOnly PeriodDate(int periodKey)
     {

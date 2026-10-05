@@ -52,7 +52,7 @@ public sealed class SecurityStampMiddleware(RequestDelegate next)
         {
             var selfRotation = context.RequestServices.GetRequiredService<Ecr.Infrastructure.Security.SelfStampRotation>();
             selfRotation.BindRequestUser(userId);
-            context.Response.OnStarting(() => ReissueIfStampRotatedAsync(context, validator, selfRotation, userId));
+            context.Response.OnStarting(() => ReissueIfStampRotatedAsync(context, validator, selfRotation, userId, stamp));
         }
 
         await next(context).ConfigureAwait(false);
@@ -75,7 +75,8 @@ public sealed class SecurityStampMiddleware(RequestDelegate next)
         HttpContext context,
         Ecr.Infrastructure.Security.SecurityStampValidator validator,
         Ecr.Infrastructure.Security.SelfStampRotation selfRotation,
-        int userId)
+        int userId,
+        string stamp)
     {
         if (context.Response.StatusCode >= 400 || AuthCookieAlreadyWritten(context))
         {
@@ -85,6 +86,13 @@ public sealed class SecurityStampMiddleware(RequestDelegate next)
         if (selfRotation.NewStamp is not { } expected)
         {
             return; // штамп цей запит не крутив — перевидавати нема чого
+        }
+
+        // ⛔ AN-26b: ротацію почато не від штампа цієї cookie — її вже відкликали
+        // (скидання пароля, «вийти з усіх»), а запит проскочив перевірку з кешу.
+        if (!string.Equals(selfRotation.PreviousStamp, stamp, StringComparison.Ordinal))
+        {
+            return;
         }
 
         var current = await validator.ReadCurrentAsync(userId, context.RequestAborted).ConfigureAwait(false);

@@ -14,8 +14,7 @@ import { testTheme } from '@/test/render';
  * Σ перевіряється саме тим числом, яке отримав `t()`.
  */
 
-function show(code = 'STREAM_CASE'): void {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+function show(code = 'STREAM_CASE', client = new QueryClient({ defaultOptions: { queries: { retry: false } } })): void {
 
   render(
     <MantineProvider theme={testTheme}>
@@ -124,6 +123,90 @@ describe('CompositionEditorPage: master-detail без введення іден�
     expect(other().getAttribute('aria-pressed')).toBe('false');
   });
 
+  it('зміна верхнього батька скидає вибір середнього рівня — склад кейсу іншого потоку не лишається на екрані', async () => {
+    mockServer(['Registry.View', 'Registry.EditData'], { threeLevels: true });
+    show('STREAM');
+
+    fireEvent.click(await screen.findByRole('button', { name: 'S1' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'E78' }));
+    await waitFor(() => expect(document.querySelector('[data-rc816-panel="GAS_COMPOSITION"]')).not.toBeNull());
+
+    fireEvent.click(screen.getByRole('button', { name: 'S2' }));
+
+    // Кейси S2 на місці, а склад «370 Winter» потоку S1 — ні: інакше правка лягла б не в той потік.
+    expect(await screen.findByRole('button', { name: 'E79' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'E78' })).toBeNull();
+    expect(document.querySelector('[data-rc816-panel="GAS_COMPOSITION"]')).toBeNull();
+    expect(screen.getByRole('button', { name: 'E79' }).getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('поки пакет зберігається, комірки й додавання заблоковані — правка під час запиту не губиться мовчки', async () => {
+    let release: () => void = () => undefined;
+    const server = mockServer(['Registry.View', 'Registry.EditData'], {
+      holdCommit: new Promise<void>((resolve) => (release = resolve)),
+    });
+    show();
+    const table = await openCase('E77');
+    const panel = table.closest<HTMLElement>('[data-rc816-panel]') as HTMLElement;
+
+    const values = (): HTMLElement[] => within(table).getAllByRole('textbox', { name: 'MOL_PCT' });
+    fireEvent.change(values()[0] as HTMLElement, { target: { value: '60.2' } });
+    fireEvent.click(within(panel).getByRole('button', { name: /registries\.rc816\.save/ }));
+    await waitFor(() => expect(server.batches).toHaveLength(1));
+
+    expect(values().every((input) => input.hasAttribute('disabled'))).toBe(true);
+    expect(within(panel).getByRole('button', { name: /registries\.rc816\.addPart/ }).hasAttribute('disabled')).toBe(true);
+
+    release();
+    await waitFor(() => expect(values()[0]?.hasAttribute('disabled')).toBe(false));
+  });
+
+  it('після правки «Показати ще» додає довантажені рядки — вони не ховаються за знімком правок (L9-09)', async () => {
+    mockServer(['Registry.View', 'Registry.EditData'], { pagedCases: true });
+    show();
+    await screen.findByRole('button', { name: 'E77' });
+
+    const top = document.querySelector<HTMLElement>('[data-rc816-panel="STREAM_CASE"]') as HTMLElement;
+    fireEvent.change(within(top).getAllByRole('textbox', { name: 'CASE_NAME' })[0] as HTMLElement, { target: { value: 'Renamed' } });
+    fireEvent.click(within(top).getByRole('button', { name: /registries\.rc816\.more/ }));
+
+    expect(await within(top).findByRole('button', { name: 'E999' })).toBeTruthy();
+    // Правка лишилась на місці.
+    expect((within(top).getAllByRole('textbox', { name: 'CASE_NAME' })[0] as HTMLInputElement).value).toBe('Renamed');
+  });
+
+  it('пошук верхньої панелі — один запит після паузи набору, таблиця не зникає між літерами (L9-19)', async () => {
+    const server = mockServer(['Registry.View', 'Registry.EditData']);
+    show();
+    await screen.findByRole('button', { name: 'E77' });
+
+    const search = screen.getByRole('textbox', { name: /registries\.rc816\.search/ });
+    for (const text of ['a', 'ab', 'abc']) fireEvent.change(search, { target: { value: text } });
+
+    await waitFor(() => expect(server.rowQueries.some((query) => query.startsWith('STREAM_CASE?') && query.includes('q=abc'))).toBe(true));
+    const searched = server.rowQueries.filter((query) => query.startsWith('STREAM_CASE?') && query.includes('q='));
+    expect(searched).toHaveLength(1);
+    expect(screen.getByRole('button', { name: 'E77' })).toBeTruthy();
+  });
+
+  it('збереження складу скидає сітку даних того самого довідника і сторінку впливу (L9-21)', async () => {
+    mockServer(['Registry.View', 'Registry.EditData']);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const gridKey = ['registries', 'rows', 'GAS_COMPOSITION', '', '', ''];
+    const impactKey = ['registry-impact', 'GAS_COMPOSITION'];
+    client.setQueryData(gridKey, { pages: [], pageParams: [] });
+    client.setQueryData(impactKey, { items: [] });
+    show('STREAM_CASE', client);
+    const table = await openCase('E77');
+    const panel = table.closest<HTMLElement>('[data-rc816-panel]') as HTMLElement;
+
+    fireEvent.change(within(table).getAllByRole('textbox', { name: 'MOL_PCT' })[0] as HTMLElement, { target: { value: '60.2' } });
+    fireEvent.click(within(panel).getByRole('button', { name: /registries\.rc816\.save/ }));
+
+    await waitFor(() => expect(client.getQueryState(gridKey)?.isInvalidated).toBe(true));
+    expect(client.getQueryState(impactKey)?.isInvalidated).toBe(true);
+  });
+
   it('без Registry.EditData — лише перегляд: ні додавання, ні збереження', async () => {
     mockServer(['Registry.View']);
     show();
@@ -132,6 +215,17 @@ describe('CompositionEditorPage: master-detail без введення іден�
     expect(screen.getByText(/registries\.rc816\.readOnly/)).toBeTruthy();
     expect(screen.queryByRole('button', { name: /registries\.rc816\.save/ })).toBeNull();
     expect(screen.queryByRole('button', { name: /registries\.rc816\.addPart/ })).toBeNull();
+  });
+
+  it('симуляція «очима користувача» з Registry.EditData — лише перегляд (L9-18)', async () => {
+    mockServer(['Registry.View', 'Registry.EditData'], { simulation: true });
+    show();
+    const table = await openCase('E77');
+
+    expect(screen.getByText(/deny\.SimulationReadOnly/)).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /registries\.rc816\.save/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /registries\.rc816\.addPart/ })).toBeNull();
+    expect(within(table).getAllByRole('textbox', { name: 'MOL_PCT' }).every((input) => input.hasAttribute('disabled'))).toBe(true);
   });
 
   it('довідник-частина показує, чиєю частиною він є, і веде до редактора батька', async () => {

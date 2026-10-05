@@ -7,9 +7,11 @@ import {
   type MouseEvent,
 } from 'react';
 import {
+  Alert,
   AppShell,
   Badge,
   Burger,
+  Button,
   Center,
   Group,
   Loader,
@@ -20,6 +22,7 @@ import {
   Text,
 } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
+import { notifications } from '@mantine/notifications';
 import { Navigate, Outlet, ScrollRestoration, useLocation, useMatches } from 'react-router-dom';
 import { Breadcrumbs, isRouteHandle } from './Breadcrumbs';
 import { NavRouteLink } from './NavRouteLink';
@@ -158,6 +161,9 @@ function SkipToContentLink(): JSX.Element {
  */
 
 /** Каркас застосунку: навігація, профіль, вміст сторінки. */
+/** Тост відкладеної зміни мови (L8-17): один на раз, знімається кнопкою. */
+const LanguageAfterSaveId = 'language-after-save';
+
 export function AppLayout(): JSX.Element {
   const [opened, { toggle }] = useDisclosure();
   const session = useSession();
@@ -204,13 +210,54 @@ export function AppLayout(): JSX.Element {
 
     let live = true;
     void flushUnsaved().then((saved) => {
-      if (live && saved) setPageLanguage(activeLanguage);
+      if (!live) return;
+      if (saved) {
+        setPageLanguage(activeLanguage);
+        return;
+      }
+
+      // ⛔ AN-39 / L8-17: доти - тиша: перемикач показував нову мову, сторінка лишалась
+      // старою, і ніщо не пояснювало чому (зберегти не дала утримана відмовою правка).
+      //
+      // ⛔ Рев'ю AN-39b P2-1: перемальовувати САМЕ, щойно незбереженого не лишилось, не можна -
+      // remount настав би посеред роботи (набране у відкритому редакторі наступної комірки й
+      // історія Undo зникли б: редактор не є джерелом незбереженого). Тому перемикає людина -
+      // кнопкою «Перемкнути зараз», коли сама готова.
+      notifications.show({
+        id: LanguageAfterSaveId,
+        color: 'statusWarning',
+        autoClose: false,
+        message: (
+          <Stack gap="xs" align="flex-start">
+            <Text size="sm">{t('app.languageAfterSave')}</Text>
+            <Button
+              size="compact-xs"
+              variant="light"
+              onClick={() => {
+                // Знову спершу зберегти: між тостом і кліком могло з'явитися нове набране.
+                void (hasUnsavedChanges() ? flushUnsaved() : Promise.resolve(true)).then((ok) => {
+                  if (!ok) return;
+                  notifications.hide(LanguageAfterSaveId);
+                  setPageLanguage(language());
+                });
+              }}
+            >
+              {t('app.languageSwitchNow')}
+            </Button>
+          </Stack>
+        ),
+      });
     });
 
     return () => {
       live = false;
     };
   }, [remountBlocked, activeLanguage]);
+
+  // Сторінка вже мовою перемикача (змінили мову ще раз, чи перемкнули кнопкою) - тост зайвий.
+  useEffect(() => {
+    if (pageLanguage === activeLanguage) notifications.hide(LanguageAfterSaveId);
+  }, [pageLanguage, activeLanguage]);
 
   const me = session.data;
 
@@ -246,8 +293,13 @@ export function AppLayout(): JSX.Element {
     );
   }
 
-  if (session.isError || me === undefined) {
-    return <Navigate to="/login" replace state={{ from: location.pathname }} />;
+  // ⛔ L9-05: на вхід — лише коли профілю немає ЗОВСІМ. Невдалий ФОНОВИЙ
+  // перезапит `/me` (502 під час перезапуску служби, обрив VPN) лишає `data`, і
+  // TanStack ставить `isError` поверх неї: редирект тут викидав би з живого
+  // cookie-сеансу разом із незбереженими чернетками. Справжній `401` і так
+  // перехоплює `apiFetch`. `from` — у `?from=`: саме його читає `LoginPage`.
+  if (session.isLoadingError || me === undefined) {
+    return <Navigate to={`/login?from=${encodeURIComponent(location.pathname + location.search)}`} replace />;
   }
 
   // ⛔ Разовий пароль закриває все, крім його зміни (ФВ-6.18): інакше
@@ -448,6 +500,12 @@ export function AppLayout(): JSX.Element {
            */}
           <Breadcrumbs />
 
+          {session.isRefetchError && (
+            <Alert color="yellow" role="status" mb="sm" data-session-refetch-error>
+              {t('err.http.unavailable')}
+            </Alert>
+          )}
+
           {/*
            * Контейнер переходу (`PR nav-arch #7`, директива B6/D) — ВСЕРЕДИНІ
            * межі очікування вище нема сенсу: анімується лише зміна МАРШРУТУ
@@ -506,15 +564,21 @@ function RouteFallback(): JSX.Element {
 const NumericSegment = /^\d+$/;
 
 /**
- * Чи має найглибший збіг параметр, що мусить бути числом, а ним не є
+ * Чи має БУДЬ-ЯКИЙ збіг параметр, що мусить бути числом, а ним не є
  * (`routes.ts` → `handle.numericParams`).
+ *
+ * ⛔ L9-14: читати лише лист — замало. Картка шаблону (`/admin/templates/:id`)
+ * — індексний лист БЕЗ `handle` (`router.tsx` пояснює, чому), тож її `:id`
+ * оголошує вузол секції над нею. Перевірка лише листа пропускала
+ * `/admin/templates/abc`, і картка йшла запитами на `…/templates/NaN`.
  */
 function hasMalformedParam(matches: ReturnType<typeof useMatches>): boolean {
-  const leaf = matches[matches.length - 1];
-  if (leaf === undefined || !isRouteHandle(leaf.handle)) return false;
-
-  return (leaf.handle.numericParams ?? []).some(
-    (name) => !NumericSegment.test(leaf.params[name] ?? ''),
+  return matches.some(
+    (match) =>
+      isRouteHandle(match.handle) &&
+      (match.handle.numericParams ?? []).some(
+        (name) => !NumericSegment.test(match.params[name] ?? ''),
+      ),
   );
 }
 

@@ -49,7 +49,7 @@ import {
   saveMethodologyRule,
   saveMethodologyTestCase,
 } from './api';
-import { ColumnDefPicker } from './ColumnDefPicker';
+import { ColumnDefPicker, savedColumnLabel } from './ColumnDefPicker';
 import { MethodologyConstantUsage } from './ConstantUsage';
 import { usePendingLoading } from '@/features/common/usePendingLoading';
 
@@ -767,6 +767,8 @@ export function MethodologyRulesPanel({
 /** Обов'язкова вхідна колонка, яку зараз правлять. */
 interface RequiredInputDraft {
   readonly columnDefId: number;
+  /** Підпис збереженої колонки для вибору (L9-40); у нового рядка немає. */
+  readonly columnLabel?: string;
   readonly severity: RequiredInputSeverity;
   readonly hint: string;
   readonly isNew: boolean;
@@ -893,6 +895,7 @@ export function MethodologyRequiredInputsPanel({
                         onClick={() =>
                           setEditing({
                             columnDefId: requiredInput.columnDefId,
+                            columnLabel: savedColumnLabel(requiredInput.columnDefId, requiredInput.columnCode),
                             severity: requiredInput.severity,
                             hint: requiredInput.hintL10n?.['en'] ?? '',
                             isNew: false,
@@ -931,6 +934,7 @@ export function MethodologyRequiredInputsPanel({
               description={t('methodologies.requiredInputColumnHint')}
               disabled={!editing.isNew}
               value={editing.columnDefId}
+              currentLabel={editing.columnLabel}
               onChange={(columnDefId) => setEditing({ ...editing, columnDefId })}
             />
 
@@ -1368,6 +1372,8 @@ export function MethodologyTestsPanel({
 /** Прив'язка, яку зараз правлять. */
 interface BindingDraft {
   readonly columnDefId: number;
+  /** Підпис збереженої колонки для вибору (L9-40); у нового рядка немає. */
+  readonly columnLabel?: string;
   readonly outputCode: string;
   readonly matchJson: string;
   readonly isActive: boolean;
@@ -1484,6 +1490,7 @@ export function MethodologyBindingsPanel({
                         onClick={() =>
                           setEditing({
                             columnDefId: binding.columnDefId,
+                            columnLabel: savedColumnLabel(binding.columnDefId, binding.columnCode, binding.tableCode),
                             outputCode: binding.outputCode,
                             matchJson: binding.matchJson,
                             isActive: binding.isActive,
@@ -1522,6 +1529,7 @@ export function MethodologyBindingsPanel({
               description={t('methodologies.columnDefIdHint')}
               disabled={!editing.isNew}
               value={editing.columnDefId}
+              currentLabel={editing.columnLabel}
               onChange={(columnDefId) => setEditing({ ...editing, columnDefId })}
             />
 

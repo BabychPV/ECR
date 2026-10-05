@@ -29,6 +29,7 @@ const Strings: Record<string, string> = {
   'methodologies.noBindings': 'This methodology has no bindings',
   'methodologies.noBindingsHint': 'Without a binding, the calculation writes nothing.',
   'methodologies.save': 'Save',
+  'methodologies.editFormula': 'Edit',
   'common.loading': 'Loading...',
   'state.errorTitle': 'The request failed',
   'state.emptyTitle': 'Nothing here yet',
@@ -46,7 +47,7 @@ const Emission = {
   templateVersionId: 1,
 };
 
-function mockApi(): { searches: string[] } {
+function mockApi(bindings: unknown[] = []): { searches: string[] } {
   const searches: string[] = [];
 
   vi.stubGlobal(
@@ -62,7 +63,7 @@ function mockApi(): { searches: string[] } {
       }
 
       if (url.endsWith('/api/v1/methodologies/1/bindings') && method === 'GET') {
-        return json([]);
+        return json(bindings);
       }
 
       if (url.includes('/api/v1/column-defs/search') && method === 'GET') {
@@ -130,3 +131,38 @@ describe('ColumnDefPicker: серверний пошук колонки (F-03, F
     expect(searches).toHaveLength(0);
   }, 60000);
 });
+
+/**
+ * L9-40: правка збереженої прив'язки показувала ПОРОЖНЄ поле колонки.
+ *
+ * ⛔ `value` — ідентифікатор колонки (6017), а типовий пошук (порожній `q`)
+ * повертає перші за кодом, серед яких її немає: без варіанта з таким `value`
+ * Mantine малював поле так, наче колонку не обрано.
+ *
+ * Мутаційний доказ: прибрати синтетичний варіант `currentLabel` з `options`
+ * → поле порожнє, тест червоний.
+ */
+describe('ColumnDefPicker: правка збереженого рядка (L9-40)', () => {
+  it('поле колонки показує код колонки й таблиці, хоч пошук її не повернув', async () => {
+    mockApi([
+      {
+        id: 5,
+        methodologyId: 1,
+        columnDefId: 6017,
+        columnCode: 'EMISSION',
+        tableDefId: 193,
+        tableCode: 'TBL',
+        outputCode: 'OUT',
+        matchJson: '{}',
+        isActive: true,
+      },
+    ]);
+    await show();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+
+    const input = await screen.findByLabelText<HTMLInputElement>('Column');
+    await waitFor(() => expect(input.value).toBe('EMISSION · TBL'));
+  }, 60000);
+});
+

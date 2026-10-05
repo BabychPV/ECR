@@ -135,6 +135,13 @@ public sealed class HealthTests(SqlServerFixture sql)
         // А подробиці — порожні: саме вони перед цим фіксом витікали без
         // авторизації через цей самий ендпоінт.
         Assert.Empty(dbCheck.GetProperty("data").EnumerateObject());
+
+        // L1-11: і текст опису перевірки (RCSI-скрипт, файлові групи, відбитки сертифікатів) не віддається анонімно.
+        Assert.True(
+            !dbCheck.TryGetProperty("description", out var description)
+            || description.ValueKind == JsonValueKind.Null
+            || string.IsNullOrEmpty(description.GetString()),
+            $"description: {description}");
     }
 
     [Fact]

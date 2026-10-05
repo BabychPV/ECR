@@ -1,4 +1,4 @@
-import { useRef, useState, type ClipboardEvent, type JSX, type KeyboardEvent } from 'react';
+import { useEffect, useRef, useState, type ClipboardEvent, type JSX, type KeyboardEvent } from 'react';
 import { ActionIcon, Group, Table, Text, TextInput, VisuallyHidden } from '@mantine/core';
 import { localized } from '@/shared/i18n/localized';
 import { t } from '@/shared/i18n';
@@ -29,6 +29,11 @@ export interface RegistryDataGridProps {
   /** Скільки рядків у довіднику всього (`aria-rowcount`). */
   readonly totalCount: number;
   readonly readOnly: boolean;
+  /**
+   * Пакет зберігається: введення й вставка заблоковані до відповіді. Після успіху сторінка
+   * знімає ВСІ чернетки — правка, зроблена під час запиту, зникла б мовчки.
+   */
+  readonly busy?: boolean;
   /** Чи вводить людина код нового запису (`CodeMode = Manual`). */
   readonly manualCode: boolean;
   readonly problems: ReadonlyMap<string, readonly CellProblem[]>;
@@ -60,9 +65,24 @@ interface Position {
  */
 export function RegistryDataGrid(props: RegistryDataGridProps): JSX.Element {
   const { fields, rows, readOnly } = props;
+  const locked = readOnly || props.busy === true;
   const [active, setActive] = useState<Position>({ r: 0, c: 0 });
   const [editing, setEditing] = useState<Position | null>(null);
   const tableRef = useRef<HTMLTableElement>(null);
+  /** Куди перевести фокус, щойно з'явиться рядок (`Ctrl+Enter` додає його лише в наступному рендері). */
+  const pendingFocus = useRef<Position | null>(null);
+
+  // ⚠ `focusCell` в обробнику `Ctrl+Enter` обрізав би індекс за СТАРИМ `rows.length` — фокус лишався
+  // на попередньому рядку, і клавіатурний користувач друкував не туди (L9-16, §8.8).
+  useEffect(() => {
+    const next = pendingFocus.current;
+    if (next === null || next.r >= rows.length) return;
+    pendingFocus.current = null;
+    setActive(next);
+    requestAnimationFrame(() => {
+      tableRef.current?.querySelector<HTMLElement>(`[data-cell="${String(next.r)}:${String(next.c)}"]`)?.focus();
+    });
+  }, [rows.length]);
 
   const focusCell = (next: Position): void => {
     const r = Math.max(0, Math.min(rows.length - 1, next.r));
@@ -112,12 +132,12 @@ export function RegistryDataGrid(props: RegistryDataGridProps): JSX.Element {
       props.onOpen(target.rowKey);
       return;
     }
-    if (readOnly || target === undefined) return;
+    if (locked || target === undefined) return;
 
     if (ctrl && event.key === 'Enter') {
       event.preventDefault();
+      pendingFocus.current = { r: rows.length, c: 0 };
       props.onAddRow();
-      focusCell({ r: rows.length, c: 0 });
     } else if (ctrl && event.shiftKey && event.key === 'Delete') {
       event.preventDefault();
       props.onToggleDelete(target.rowKey);
@@ -132,7 +152,7 @@ export function RegistryDataGrid(props: RegistryDataGridProps): JSX.Element {
   };
 
   const onPaste = (event: ClipboardEvent<HTMLTableElement>): void => {
-    if (readOnly || editing !== null) return;
+    if (locked || editing !== null) return;
     const text = event.clipboardData.getData('text/plain');
     if (text === '') return;
     event.preventDefault();
@@ -197,6 +217,7 @@ export function RegistryDataGrid(props: RegistryDataGridProps): JSX.Element {
                       size="xs"
                       aria-label={t('registries.data.newCode', { row: r + 1 })}
                       value={draft?.code ?? ''}
+                      readOnly={props.busy === true}
                       onChange={(event) => props.onEditCode(rowKey, event.currentTarget.value)}
                     />
                   ) : (
@@ -237,11 +258,11 @@ export function RegistryDataGrid(props: RegistryDataGridProps): JSX.Element {
                       data-cell={`${String(r)}:${String(c)}`}
                       data-edited={edited ? 'true' : undefined}
                       aria-invalid={invalid ? true : undefined}
-                      aria-readonly={readOnly ? true : undefined}
+                      aria-readonly={locked ? true : undefined}
                       title={invalid ? message : undefined}
                       onFocus={() => setActive(pos)}
                       onDoubleClick={() => {
-                        if (!readOnly && !deleted) setEditing(pos);
+                        if (!locked && !deleted) setEditing(pos);
                       }}
                       onKeyDown={(event) => onCellKey(event, pos)}
                       style={{
@@ -305,6 +326,7 @@ export function RegistryDataGrid(props: RegistryDataGridProps): JSX.Element {
                           aria-label={`${deleted ? t('registries.data.restoreRow') : t('registries.data.deleteRow')}: ${rowLabel}`}
                           aria-pressed={deleted}
                           onClick={() => props.onToggleDelete(rowKey)}
+                          disabled={props.busy === true}
                         >
                           {deleted ? '↺' : '✕'}
                         </ActionIcon>

@@ -290,6 +290,8 @@ export function SourceEventMapModal({
   const problems = validateForm(state, columnList);
 
   const save = useMutation({
+    // ⚠ Відмову показує `ErrorAlert` у рендері — без `handled` сітка додала б тост (L9-01).
+    meta: { handled: true },
     mutationFn: () =>
       map === null
         ? createSourceEventMap(toCreateRequest(sourceEntityId, state))

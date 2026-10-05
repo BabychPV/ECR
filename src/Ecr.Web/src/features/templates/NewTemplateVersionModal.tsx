@@ -46,6 +46,10 @@ export function NewTemplateVersionModal({
       await queryClient.invalidateQueries({
         queryKey: queryKeys.templates.versionsOf(target.templateId),
       });
+      // ⛔ L9-23: і пакетний перелік `/admin/templates` (`versionsBatch`) — окремий ключ, під
+      // `versionsOf` не потрапляє; модалка відкривається й з картки шаблону, де `TemplatesPage`
+      // власного `onClose`-скидання не має.
+      await queryClient.invalidateQueries({ queryKey: queryKeys.templates.allVersionsBatch() });
       await queryClient.invalidateQueries({ queryKey: queryKeys.templates.list() });
       onClose();
       setVersionNumber('');

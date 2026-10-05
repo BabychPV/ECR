@@ -550,12 +550,20 @@ public sealed class Evaluator(
 
         if (left.Type == ExpressionValueType.Date && right.AsNumber() is { } days)
         {
-            return op switch
+            // ⚠ Поза 0001…9999 `AddDays` кидає; описка в числовій комірці (1e7 днів) — значення-помилка (аудит L7-03).
+            try
             {
-                BinaryOperator.Add => ExpressionValue.Date(((DateTime)left.Value!).AddDays((double)days)),
-                BinaryOperator.Subtract => ExpressionValue.Date(((DateTime)left.Value!).AddDays(-(double)days)),
-                _ => ExpressionValue.Error(ExpressionErrors.BadValue),
-            };
+                return op switch
+                {
+                    BinaryOperator.Add => ExpressionValue.Date(((DateTime)left.Value!).AddDays((double)days)),
+                    BinaryOperator.Subtract => ExpressionValue.Date(((DateTime)left.Value!).AddDays(-(double)days)),
+                    _ => ExpressionValue.Error(ExpressionErrors.BadValue),
+                };
+            }
+            catch (ArgumentOutOfRangeException)
+            {
+                return ExpressionValue.Error(ExpressionErrors.BadValue);
+            }
         }
 
         return ExpressionValue.Error(ExpressionErrors.BadValue);
@@ -925,7 +933,10 @@ public sealed class Evaluator(
         {
             ExpressionValueType.Null => string.Empty,
             ExpressionValueType.Text => (string)value.Value!,
-            ExpressionValueType.Number => ((decimal)value.Value!).ToString(CultureInfo.InvariantCulture),
+            // ⚠ Legacy-число — boxed double: `(decimal)` розпаковка кидала InvalidCastException (аудит L7-04).
+            ExpressionValueType.Number => value.Value is double d
+                ? d.ToString("R", CultureInfo.InvariantCulture)
+                : ((decimal)value.Value!).ToString(CultureInfo.InvariantCulture),
             ExpressionValueType.Boolean => (bool)value.Value! ? "TRUE" : "FALSE",
             ExpressionValueType.Date => ((DateTime)value.Value!).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
             _ => value.ErrorCode ?? string.Empty,

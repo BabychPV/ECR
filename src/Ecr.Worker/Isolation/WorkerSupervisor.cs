@@ -57,19 +57,30 @@ public sealed class WorkerChildEventArgs(int slot, int processId, int? exitCode)
 ///
 /// ⛔ Зупинка — закриттям Job Object (<c>KILL_ON_JOB_CLOSE</c>), а не
 /// по-процесним Kill: так само діти помирають, коли сам наглядач убито.
+/// ⛔ L2-09: перед тим — м'який сигнал (<see cref="ChildStopSignal"/>) і до
+/// <see cref="DefaultShutdownGrace"/> на штатну зупинку: дочірній повертає задачу в
+/// чергу без переклейму. Хто не встиг — гине із закриттям Job Object, як і раніше.
 /// </remarks>
 public sealed partial class WorkerSupervisor(
     WorkerPoolOptions options,
     ChildCommand child,
     ILogger<WorkerSupervisor> logger,
     RestartBackoff? backoff = null,
-    TimeProvider? time = null)
+    TimeProvider? time = null,
+    TimeSpan? shutdownGrace = null)
 {
+    /// <summary>
+    /// Скільки чекати штатної зупинки дітей; менше за <c>HostOptions.ShutdownTimeout</c>
+    /// (30 с), щоб служба встигла закрити Job Object сама.
+    /// </summary>
+    public static readonly TimeSpan DefaultShutdownGrace = TimeSpan.FromSeconds(20);
+
     private const int StartFailedExitCode = -1;
     private const long Megabyte = 1024L * 1024L;
 
     private readonly RestartBackoff backoff = backoff ?? RestartBackoff.Default;
     private readonly TimeProvider time = time ?? TimeProvider.System;
+    private readonly TimeSpan shutdownGrace = shutdownGrace ?? DefaultShutdownGrace;
 
     /// <summary>Дочірній процес запущено й додано в Job Object.</summary>
     public event EventHandler<WorkerChildEventArgs>? ChildStarted;
@@ -86,13 +97,22 @@ public sealed partial class WorkerSupervisor(
             options.MemoryLimitMb * Megabyte, options.JobMemoryLimitMb * Megabyte));
         LogPoolStarted(logger, options.Count, options.MemoryLimitMb, options.JobMemoryLimitMb);
 
-        var slots = new Task[options.Count];
-        for (var slot = 0; slot < slots.Length; slot++)
+        using var stop = ChildStopSignal.CreateForChildren();
+        using var signalOnCancel = cancellationToken.Register(() => stop.Set());
+        try
         {
-            slots[slot] = RunSlotAsync(slot, job, cancellationToken);
-        }
+            var slots = new Task[options.Count];
+            for (var slot = 0; slot < slots.Length; slot++)
+            {
+                slots[slot] = RunSlotAsync(slot, job, cancellationToken);
+            }
 
-        await Task.WhenAll(slots).ConfigureAwait(false);
+            await Task.WhenAll(slots).ConfigureAwait(false);
+        }
+        finally
+        {
+            ChildStopSignal.Forget();
+        }
     }
 
     private async Task RunSlotAsync(int slot, JobObject job, CancellationToken cancellationToken)
@@ -149,12 +169,39 @@ public sealed partial class WorkerSupervisor(
         }
         catch (OperationCanceledException)
         {
+            await WaitStoppedAsync(slot, process).ConfigureAwait(false);
             return null;
         }
 
         ChildExited?.Invoke(this, new WorkerChildEventArgs(slot, process.Id, process.ExitCode));
         return process.ExitCode;
     }
+
+    /// <summary>Дочірньому подано сигнал зупинки: чекаємо штатного виходу до пільги.</summary>
+    private async Task WaitStoppedAsync(int slot, Process process)
+    {
+        using var grace = new CancellationTokenSource(shutdownGrace, time);
+        try
+        {
+            await process.WaitForExitAsync(grace.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            LogChildStopTimedOut(logger, slot, process.Id, shutdownGrace);
+            return;
+        }
+
+        LogChildStopped(logger, slot, process.Id, process.ExitCode);
+        ChildExited?.Invoke(this, new WorkerChildEventArgs(slot, process.Id, process.ExitCode));
+    }
+
+    [LoggerMessage(Level = LogLevel.Information,
+        Message = "Воркер {Slot} (pid={ProcessId}) зупинився за сигналом, код {ExitCode}")]
+    private static partial void LogChildStopped(ILogger logger, int slot, int processId, int exitCode);
+
+    [LoggerMessage(Level = LogLevel.Warning,
+        Message = "Воркер {Slot} (pid={ProcessId}) не зупинився за {Grace}; його завершить закриття Job Object")]
+    private static partial void LogChildStopTimedOut(ILogger logger, int slot, int processId, TimeSpan grace);
 
     [LoggerMessage(Level = LogLevel.Information,
         Message = "Пул воркерів: {Count} процесів, межа {MemoryLimitMb} МБ на процес, {JobMemoryLimitMb} МБ на пул")]

@@ -159,6 +159,28 @@ describe('ConditionalFormatPanel', () => {
     expect(api.saveConditionalFormats.mock.calls[1]?.[2]).toBe('"V9"');
   });
 
+  it('L9-26: відмова перечитування після 409 — ErrorAlert поруч, редактор із чернеткою лишається', async () => {
+    renderPanel();
+    const user = userEvent.setup();
+    const value = await screen.findByRole('textbox', { name: /conditionalFormat\.value(?!To)/ });
+
+    api.saveConditionalFormats.mockRejectedValueOnce(stale());
+    api.getConditionalFormats.mockRejectedValue(
+      new EcrApiError({ title: 't', status: 503, errorCode: 'ECR-SYS-0503', correlationId: 'c' }),
+    );
+
+    await user.clear(value);
+    await user.type(value, '200');
+    await user.click(saveButton());
+
+    await waitFor(() => expect(screen.getByText(/ECR-SYS-0503/)).toBeDefined());
+    // ⛔ Редактор не підмінено: чернетка на місці й її можна зберегти ще раз.
+    expect((screen.getByRole('textbox', { name: /conditionalFormat\.value(?!To)/ }) as HTMLInputElement).value).toBe(
+      '200',
+    );
+    expect((saveButton() as HTMLButtonElement).disabled).toBe(false);
+  });
+
   it('«Відкинути мої зміни» після конфлікту показує чужі правила', async () => {
     renderPanel();
     const user = userEvent.setup();
@@ -202,6 +224,24 @@ describe('ConditionalFormatPanel', () => {
     await user.clear(screen.getByRole('textbox', { name: /conditionalFormat\.sample/ }));
     await user.type(screen.getByRole('textbox', { name: /conditionalFormat\.sample/ }), '50');
     expect(preview?.getAttribute('data-conditional-preview')).toBe('none');
+  });
+
+  it('L9-24: приклад малюється тим самим cellLook, що й перегляд таблиці: нечитабельний текст автора — колір теми', async () => {
+    // Білий текст на білій заливці: сітка (`cellAppearance.ts`) і `TablePreview` такого кольору не
+    // покажуть — замінять кольором тексту теми з кращим контрастом.
+    api.getConditionalFormats.mockResolvedValue(
+      set([{ ...own, backgroundHex: '#ffffff', foregroundHex: '#fefefe', isBold: true }], '"V1"'),
+    );
+    renderPanel();
+    const user = userEvent.setup();
+    await screen.findByRole('textbox', { name: /conditionalFormat\.value(?!To)/ });
+
+    await user.type(screen.getByRole('textbox', { name: /conditionalFormat\.sample/ }), '150');
+    const preview = document.querySelector<HTMLElement>('[data-conditional-preview="match"]');
+
+    expect(preview?.style.backgroundColor).toBe('rgb(255, 255, 255)');
+    expect(preview?.style.color).toBe('rgb(0, 0, 0)');
+    expect(preview?.style.fontWeight).toBe('bold');
   });
 
   it('правило додається й видаляється', async () => {

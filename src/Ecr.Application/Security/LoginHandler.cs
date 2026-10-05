@@ -59,6 +59,9 @@ public sealed partial class LoginHandler(
     /// </remarks>
     private static readonly ConcurrentDictionary<Type, Lazy<string>> DecoyHashes = new();
 
+    /// <summary>Довжина колонок імені входу (<c>sec.User.UserName</c>, <c>sec.LoginAttempt.UserName</c>).</summary>
+    public const int UserNameMaxLength = 200;
+
     /// <summary>Виконує вхід.</summary>
     /// <param name="userName">Ім'я входу.</param>
     /// <param name="password">Пароль.</param>
@@ -72,6 +75,17 @@ public sealed partial class LoginHandler(
         ArgumentException.ThrowIfNullOrWhiteSpace(userName);
 
         var now = clock.UtcNow;
+
+        // ⛔ L1-12: ім'я довше за колонку (LoginAttempt.UserName, User.UserName — 200) не може належати
+        // жодному запису; без межі запис спроби в журнал давав truncation і 500 замість 401. Відповідь і
+        // час — як на невідоме ім'я; у журнал іде усічене ім'я.
+        if (userName.Length > UserNameMaxLength)
+        {
+            Decoy(password);
+            await FailAsync(userName[..UserNameMaxLength], "UnknownUser", ipAddress, now, ct).ConfigureAwait(false);
+            throw InvalidCredentials();
+        }
+
         var user = await users.FindByUserNameAsync(userName, ct).ConfigureAwait(false);
 
         // ⛔ Службовий запис (`svc-integration`) не входить НІКОЛИ — навіть із
@@ -120,7 +134,15 @@ public sealed partial class LoginHandler(
             throw InvalidCredentials();
         }
 
-        user.RegisterSuccessfulLogin(now);
+        // ⛔ L1-03: успіх фіксується ОДНИМ UPDATE з умовою «не заблоковано». Сутність `user` прочитано до паралельних
+        // хибних спроб; її запис через EF знімав виставлене ними блокування, і правильний пароль з пачки підбору
+        // отримував cookie після блокування. 0 рядків — запис заблоковано (чи зник): відмова як на заблокований.
+        if (!await users.TryRegisterSuccessfulLoginAsync(user.Id, now, ct).ConfigureAwait(false))
+        {
+            await FailAsync(userName, "LockedOut", ipAddress, now, ct).ConfigureAwait(false);
+            throw Locked(user);
+        }
+
         users.RecordAttempt(new LoginAttempt(userName, AuthProvider.Local, true, now, ipAddress));
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
 

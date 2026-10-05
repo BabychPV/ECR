@@ -45,6 +45,8 @@ export function AddSourceEntityModal({
   const path = trail.length === 0 ? null : (trail[trail.length - 1] ?? null);
 
   const create = useMutation({
+    // ⚠ Відмову показує `ErrorAlert` у рендері — без `handled` сітка додала б тост (L9-01).
+    meta: { handled: true },
     mutationFn: (item: SourceCatalogItem) =>
       createSourceEntity({
         dataSourceId,

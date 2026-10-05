@@ -3,6 +3,7 @@ using Ecr.Domain.ValueObjects;
 using Ecr.Infrastructure.Persistence;
 using Ecr.TestKit;
 using Microsoft.Data.SqlClient;
+using Microsoft.EntityFrameworkCore;
 using Xunit;
 
 namespace Ecr.Infrastructure.Tests.Persistence;
@@ -135,6 +136,79 @@ public sealed class AuditReaderOutOfWindowCellsTests(SqlServerFixture sql)
         var shape = (string?)await command.ExecuteScalarAsync();
 
         Assert.Equal("DocumentId,PeriodKey,TableRowId,ColumnDefId|([IsOutOfWindow]=(1))|ps_AuditByMonth", shape);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-2.16")]
+    public async Task Запит_не_читає_партицій_аудиту_до_відкриття_періоду()
+    {
+        // ⛔ L6-12. Без нижньої межі `ChangedAt` запит на КОЖЕН GET зрізу читав
+        // усі місячні партиції `aud.CellChange`. Період 202612, відкриття
+        // 2026-12-01 → межа 2026-11-30: партиції до листопада 2026 не читаються.
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var doc = await builder.BuildAsync(periodKey: 202612, ct: CancellationToken.None);
+
+        await using var db = builder.CreateContext();
+        await db.Database.ExecuteSqlAsync(
+            $"UPDATE p SET ComputedOpenAt = '2026-12-01' FROM doc.Period AS p WHERE p.ProjectId = {doc.ProjectId} AND p.PeriodKey = 202612");
+
+        var at = new DateTime(2026, 12, 5, 9, 0, 0, DateTimeKind.Utc);
+        await new AuditWriter(db).WriteCellChangesAsync([Change(doc, row: 0, at, outOfWindow: true)], CancellationToken.None);
+
+        // Межа не губить законну правку: вона після відкриття — значок є.
+        Assert.Equal(
+            [(doc.RowIds[0], doc.ColumnDefIds[1])],
+            await new AuditReader(db).ReadOutOfWindowCellsAsync(doc.DocumentId, 202612, CancellationToken.None));
+
+        await using var connection = new SqlConnection(sql.ConnectionString);
+        await connection.OpenAsync();
+
+        int fanout;
+        await using (var count = connection.CreateCommand())
+        {
+            count.CommandText = "SELECT fanout FROM sys.partition_functions WHERE name = N'pf_AuditByMonth';";
+            fanout = (int)(await count.ExecuteScalarAsync())!;
+        }
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SET STATISTICS XML ON;\n" + AuditReader.OutOfWindowCellsSql + "\nSET STATISTICS XML OFF;";
+        command.Parameters.Add("@documentId", System.Data.SqlDbType.BigInt).Value = doc.DocumentId;
+        command.Parameters.Add("@periodKey", System.Data.SqlDbType.Int).Value = 202612;
+
+        var plans = new List<string>();
+        await using (var reader = await command.ExecuteReaderAsync())
+        {
+            do
+            {
+                if (reader.FieldCount == 1 && reader.GetName(0).StartsWith("Microsoft SQL Server", StringComparison.Ordinal))
+                {
+                    while (await reader.ReadAsync())
+                    {
+                        plans.Add(reader.GetString(0));
+                    }
+                }
+                else
+                {
+                    while (await reader.ReadAsync())
+                    {
+                    }
+                }
+            }
+            while (await reader.NextResultAsync());
+        }
+
+        System.Xml.Linq.XNamespace ns = "http://schemas.microsoft.com/sqlserver/2004/07/showplan";
+        var accessed = plans
+            .SelectMany(p => System.Xml.Linq.XDocument.Parse(p).Descendants(ns + "RelOp"))
+            .Where(op => op.Descendants(ns + "Object").Any(o => (string?)o.Attribute("Table") == "[CellChange]")
+                         && op.Element(ns + "RunTimePartitionSummary") is not null)
+            .Select(op => (int)op.Element(ns + "RunTimePartitionSummary")!.Element(ns + "PartitionsAccessed")!.Attribute("PartitionCount")!)
+            .ToList();
+
+        Assert.NotEmpty(accessed);
+        Assert.All(accessed, n => Assert.True(n < fanout, $"прочитано {n} партицій із {fanout}"));
     }
 
     private static CellChangeRecord Change(

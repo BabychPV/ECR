@@ -150,6 +150,26 @@ public sealed class SourceEventRowBuilderTests
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait("Directive", "HSE301-A5b")]
+    public void Фактична_одиниця_атрибута_інша_за_оголошену_комірка_не_пишеться()
+    {
+        // ⛔ L3-06 / ФВ-16.9: оголошено Sm3_per_h, джерело повертає Sm3_per_s. До фіксу
+        // число лягало в комірку як є (конверсія за ОГОЛОШЕНОЮ одиницею) — помилка ×3600.
+        // Мутація: прибрати перевірку IsDeclaredUnit у SourceEventRowBuilder.Number.
+        var field = Field(3, "Volume", CellDataType.Decimal, "Volume") with { SourceUnitId = 11, TargetUnitId = 11 };
+
+        var changed = SourceEventRowBuilder.Build(
+            Ev(Attr("Volume", numeric: 5m, uom: "Sm3_per_s")), [field], Atyrau, FlowUnits());
+        var same = SourceEventRowBuilder.Build(
+            Ev(Attr("Volume", numeric: 5m, uom: "Sm3_per_h")), [field], Atyrau, FlowUnits());
+
+        Assert.Empty(changed.Cells);
+        Assert.Equal("Volume", Assert.Single(changed.Unmapped).Column);
+        Assert.Equal(5m, Assert.IsType<decimal>(Cell(same, 3).Raw));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Directive", "HSE301-A5b")]
     public void Значення_у_колонку_типу_якого_запис_не_вміє_йде_в_незіставлене()
     {
         var built = Build(Ev(Attr("Flag", text: "1")), Field(7, "Flag", CellDataType.Bool, "Flag"));
@@ -180,8 +200,16 @@ public sealed class SourceEventRowBuilderTests
     private static SourceEvent Ev(params SourceEventAttribute[] attrs)
         => new("E1", "FlareEvent", "Flaring", Start, End, null, null, null, attrs);
 
-    private static SourceEventAttribute Attr(string name, decimal? numeric = null, string? text = null)
-        => new(name, SourceEventAttributeScope.Event, numeric, text, null);
+    private static SourceEventAttribute Attr(string name, decimal? numeric = null, string? text = null, string? uom = null)
+        => new(name, SourceEventAttributeScope.Event, numeric, text, uom);
+
+    private static UnitCatalogSnapshot FlowUnits() => new(
+        new Dictionary<string, UnitRef>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Sm3_per_s"] = new(12, "Sm3_per_s", DimensionId: 13, FactorToBase: 1m),
+            ["Sm3_per_h"] = new(11, "Sm3_per_h", DimensionId: 13, FactorToBase: 0.000277777777777778m),
+        },
+        new Dictionary<string, int>(StringComparer.Ordinal));
 
     private static SourceEventFieldPlan Field(int columnId, string code, CellDataType type, string attribute)
         => new(columnId, code, type, attribute, SourceEventAttributeScope.Event, SourceEventValueKind.Direct,

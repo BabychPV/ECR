@@ -107,6 +107,16 @@ public static class RowWindowFetch
             return new RowWindowFold(RowWindowValueStatus.NoData, null, result.SourceUnitSymbol, null, null, null);
         }
 
+        // ⛔ ФВ-16.9 (L3-06): фактична одиниця джерела мусить збігатися з оголошеною.
+        // Інакше конверсія йде за ОГОЛОШЕНОЮ, і зміна UOM атрибута в PI
+        // (Sm3/h → Sm3/d) тихо дає ×24 у комірці. Count — число точок, без одиниці.
+        if (summary != RowWindowSummaryKind.Count
+            && !BoundaryUnitConversion.IsDeclaredUnit(sourceUnitId, result.SourceUnitSymbol, units))
+        {
+            return new RowWindowFold(
+                RowWindowValueStatus.SourceError, value, result.SourceUnitSymbol, null, null, IExternalDataSource.QueryRefusedCode);
+        }
+
         BoundaryValue boundary;
         try
         {

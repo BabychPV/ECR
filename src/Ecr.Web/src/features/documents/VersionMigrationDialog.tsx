@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { showDone } from '@/shared/ui/notify';
 import { t } from '@/shared/i18n';
+import { useSettledAction } from '@/features/grid/settleEdits';
 import {
   getVersionMigrationTargets,
   migrateDocumentVersion,
@@ -85,20 +86,29 @@ export function VersionMigrationDialog({ documentId, onClose }: VersionMigration
 
   const [targetId, setTargetId] = useState<string | null>(null);
   const [mode, setMode] = useState<VersionMigrationMode>('Safe');
-  const [report, setReport] = useState<VersionMigrationReport | null>(null);
+  // AN-39/L8-09: звіт несе ключ вибору, для якого його отримано; показується лише за збігу.
+  const [reportState, setReportState] = useState<{ key: string; result: VersionMigrationReport } | null>(null);
+  const selectionKey = `${targetId ?? ''}|${mode}`;
+  const report = reportState !== null && reportState.key === selectionKey ? reportState.result : null;
 
   const targets = useQuery({
     queryKey: ['document', documentId, 'migrate-version-targets'],
     queryFn: () => getVersionMigrationTargets(documentId),
   });
 
+  // AN-39/L8-14: відмову показує ErrorAlert у діалозі (`dryRun.error`/`apply.error`) -
+  // без `handled` глобальна сітка додавала другий тост.
   const dryRun = useMutation({
-    mutationFn: () =>
-      migrateDocumentVersion({ documentId, targetVersionId: Number(targetId), mode, dryRun: true }),
-    onSuccess: (result) => setReport(result),
+    meta: { handled: true },
+    mutationFn: (key: string) =>
+      migrateDocumentVersion({ documentId, targetVersionId: Number(targetId), mode, dryRun: true }).then(
+        (result) => ({ key, result }),
+      ),
+    onSuccess: (done) => setReportState(done),
   });
 
   const apply = useMutation({
+    meta: { handled: true },
     mutationFn: () =>
       migrateDocumentVersion({ documentId, targetVersionId: Number(targetId), mode, dryRun: false }),
     onSuccess: async (result) => {
@@ -114,12 +124,14 @@ export function VersionMigrationDialog({ documentId, onClose }: VersionMigration
 
   // Будь-яка зміна вибору знецінює звіт — див. коментар до компонента.
   useEffect(() => {
-    setReport(null);
+    setReportState(null);
     resetApply();
   }, [targetId, mode, resetApply]);
 
   const options = (targets.data?.targets ?? []).map((v) => ({ value: String(v.id), label: v.version }));
-  const busy = dryRun.isPending || apply.isPending;
+  // AN-28 P2-2: зайнятість і на час збереження набраного перед Apply.
+  const settled = useSettledAction(apply.isPending);
+  const busy = dryRun.isPending || apply.isPending || settled.settling;
 
   return (
     <Modal opened onClose={onClose} title={t('documents.migrateVersionTitle')} size="lg">
@@ -143,7 +155,7 @@ export function VersionMigrationDialog({ documentId, onClose }: VersionMigration
           data={options}
           value={targetId}
           onChange={setTargetId}
-          disabled={options.length === 0}
+          disabled={options.length === 0 || busy}
           data-testid="migrate-target"
         />
 
@@ -151,6 +163,7 @@ export function VersionMigrationDialog({ documentId, onClose }: VersionMigration
           aria-label={t('documents.migrateVersionTitle')}
           value={mode}
           onChange={(value) => setMode(value as VersionMigrationMode)}
+          disabled={busy}
           data={[
             { value: 'Safe', label: t('documents.migrateModeSafe') },
             { value: 'Presentation', label: t('documents.migrateModePresentation') },
@@ -175,15 +188,15 @@ export function VersionMigrationDialog({ documentId, onClose }: VersionMigration
             variant="default"
             disabled={targetId === null || busy}
             loading={dryRun.isPending}
-            onClick={() => dryRun.mutate()}
+            onClick={() => dryRun.mutate(selectionKey)}
             data-testid="migrate-dry-run"
           >
             {t('documents.migrateDryRun')}
           </Button>
           <Button
             disabled={report === null || !report.canApply || busy}
-            loading={apply.isPending}
-            onClick={() => apply.mutate()}
+            loading={apply.isPending || settled.settling}
+            onClick={() => settled.run(() => apply.mutateAsync())}
             data-testid="migrate-apply"
           >
             {t('documents.migrateApply')}

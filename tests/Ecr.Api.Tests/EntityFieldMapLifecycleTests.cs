@@ -37,6 +37,45 @@ public sealed class EntityFieldMapLifecycleTests(SqlServerFixture sql)
     /// <summary>Право з обробника, а не літералом: розійтися нема з чим.</summary>
     private static string Manage => Ecr.Application.Sources.SetEntityFieldMapPausedHandler.Permission;
 
+    /// <summary>
+    /// L3-11: відновлення, прийняття одиниці й видалення мапінгу на колонку вимагають гранта <c>Manage</c> на проєкти
+    /// колонки. До виправлення: користувач з <c>Integration.Manage</c> і грантом <c>Write</c> (або й без гранта) міг
+    /// відновити збір у чужий проєкт, підсунути довільну одиницю й видалити мапінг (200/204).
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task L3_11_відновлення_прийняття_одиниці_і_видалення_без_гранта_Manage_на_проєкт_колонки_403()
+    {
+        using var app = new EcrApiFactory(sql);
+        var stand = await ArrangeAsync(collectPoints: 0).ConfigureAwait(true);
+        using var manager = await ManagerAsync(app, stand.ProjectId).ConfigureAwait(true);
+        using var writer = await ProjectUserAsync(app, GrantLevel.Write, stand.ProjectId).ConfigureAwait(true);
+
+        // Пауза — захисна дія: лишається доступною й без Manage; відновлення — ні.
+        Assert.Equal(HttpStatusCode.OK, (await PostAsync(writer, stand.FieldMapId, "pause").ConfigureAwait(true)).StatusCode);
+        Assert.False(await IsActiveAsync(stand.FieldMapId).ConfigureAwait(true));
+
+        var resume = await PostAsync(writer, stand.FieldMapId, "resume").ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.Forbidden, resume.StatusCode);
+        Assert.False(await IsActiveAsync(stand.FieldMapId).ConfigureAwait(true));
+
+        var accept = await writer.PostAsJsonAsync(
+            new Uri($"/api/v1/entity-field-maps/{stand.FieldMapId}/accept-unit-change", UriKind.Relative),
+            new { sourceUnitId = stand.NewUnitId });
+        Assert.Equal(HttpStatusCode.Forbidden, accept.StatusCode);
+
+        var delete = await writer.DeleteAsync(new Uri($"/api/v1/entity-field-maps/{stand.FieldMapId}", UriKind.Relative));
+        Assert.Equal(HttpStatusCode.Forbidden, delete.StatusCode);
+        Assert.True(await ExistsAsync(stand.FieldMapId).ConfigureAwait(true));
+
+        // Контроль: з грантом Manage те саме проходить.
+        Assert.Equal(HttpStatusCode.OK, (await PostAsync(manager, stand.FieldMapId, "resume").ConfigureAwait(true)).StatusCode);
+        Assert.Equal(
+            HttpStatusCode.NoContent,
+            (await manager.DeleteAsync(new Uri($"/api/v1/entity-field-maps/{stand.FieldMapId}", UriKind.Relative))).StatusCode);
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
@@ -44,9 +83,9 @@ public sealed class EntityFieldMapLifecycleTests(SqlServerFixture sql)
     public async Task Пауза_і_відновлення_перемикають_мапінг_а_повторні_дають_409()
     {
         using var app = new EcrApiFactory(sql);
-        using var client = await SignedInAsync(app, Manage).ConfigureAwait(true);
 
         var stand = await ArrangeAsync(collectPoints: 0).ConfigureAwait(true);
+        using var client = await ManagerAsync(app, stand.ProjectId).ConfigureAwait(true);
 
         var paused = await PostAsync(client, stand.FieldMapId, "pause").ConfigureAwait(true);
         Assert.Equal(HttpStatusCode.OK, paused.StatusCode);
@@ -80,9 +119,9 @@ public sealed class EntityFieldMapLifecycleTests(SqlServerFixture sql)
     public async Task Приймання_зміни_одиниці_лишає_в_журналі_обидві_одиниці()
     {
         using var app = new EcrApiFactory(sql);
-        using var client = await SignedInAsync(app, Manage).ConfigureAwait(true);
 
         var stand = await ArrangeAsync(collectPoints: 0).ConfigureAwait(true);
+        using var client = await ManagerAsync(app, stand.ProjectId).ConfigureAwait(true);
 
         var accepted = await client.PostAsJsonAsync(
             new Uri($"/api/v1/entity-field-maps/{stand.FieldMapId}/accept-unit-change", UriKind.Relative),
@@ -127,9 +166,9 @@ public sealed class EntityFieldMapLifecycleTests(SqlServerFixture sql)
     public async Task Прийняття_поміченої_збором_одиниці_без_id_відновлює_збір_а_повторне_дає_409()
     {
         using var app = new EcrApiFactory(sql);
-        using var client = await SignedInAsync(app, Manage).ConfigureAwait(true);
 
         var stand = await ArrangeAsync(collectPoints: 0).ConfigureAwait(true);
+        using var client = await ManagerAsync(app, stand.ProjectId).ConfigureAwait(true);
         await MarkPendingAsync(stand.FieldMapId, stand.NewUnitCode, stand.NewUnitId).ConfigureAwait(true);
 
         // Тіло без id: одиницю сервер бере з позначки збору.
@@ -166,9 +205,9 @@ public sealed class EntityFieldMapLifecycleTests(SqlServerFixture sql)
     public async Task Ручне_відновлення_мапінгу_що_чекає_рішення_про_одиницю_дає_409_і_пауза_лишається()
     {
         using var app = new EcrApiFactory(sql);
-        using var client = await SignedInAsync(app, Manage).ConfigureAwait(true);
 
         var stand = await ArrangeAsync(collectPoints: 0).ConfigureAwait(true);
+        using var client = await ManagerAsync(app, stand.ProjectId).ConfigureAwait(true);
         await MarkPendingAsync(stand.FieldMapId, stand.NewUnitCode, stand.NewUnitId).ConfigureAwait(true);
 
         // ⛔ МУТАЦІЙНИЙ ДОКАЗ: прибрати `if (HasPendingSourceUnitChange)` в
@@ -190,9 +229,9 @@ public sealed class EntityFieldMapLifecycleTests(SqlServerFixture sql)
     public async Task Одиницю_якої_немає_в_довіднику_не_приймають_422_і_мапінг_лишається_на_паузі()
     {
         using var app = new EcrApiFactory(sql);
-        using var client = await SignedInAsync(app, Manage).ConfigureAwait(true);
 
         var stand = await ArrangeAsync(collectPoints: 0).ConfigureAwait(true);
+        using var client = await ManagerAsync(app, stand.ProjectId).ConfigureAwait(true);
         await MarkPendingAsync(stand.FieldMapId, "m3-unknown", unitId: null).ConfigureAwait(true);
 
         var refused = await client.PostAsJsonAsync(
@@ -215,9 +254,11 @@ public sealed class EntityFieldMapLifecycleTests(SqlServerFixture sql)
     public async Task Мапінг_зі_зібраними_даними_не_видаляється_а_порожній_видаляється()
     {
         using var app = new EcrApiFactory(sql);
-        using var client = await SignedInAsync(app, Manage).ConfigureAwait(true);
 
         var withData = await ArrangeAsync(collectPoints: 3).ConfigureAwait(true);
+        // ⚠ Другий мапінг — БЕЗ зібраного: інакше тест доводив би лише те, що маршрут завжди відмовляє.
+        var empty = await ArrangeAsync(collectPoints: 0).ConfigureAwait(true);
+        using var client = await ManagerAsync(app, withData.ProjectId, empty.ProjectId).ConfigureAwait(true);
 
         var refused = await client.DeleteAsync(
             new Uri($"/api/v1/entity-field-maps/{withData.FieldMapId}", UriKind.Relative));
@@ -241,10 +282,6 @@ public sealed class EntityFieldMapLifecycleTests(SqlServerFixture sql)
         // Запис на місці: відмова не має лишати мапінг напіввидаленим.
         Assert.True(await ExistsAsync(withData.FieldMapId).ConfigureAwait(true));
 
-        // ⚠ Другий мапінг — БЕЗ зібраного: інакше тест доводив би лише те, що
-        // маршрут завжди відмовляє.
-        var empty = await ArrangeAsync(collectPoints: 0).ConfigureAwait(true);
-
         var deleted = await client.DeleteAsync(
             new Uri($"/api/v1/entity-field-maps/{empty.FieldMapId}", UriKind.Relative));
 
@@ -259,8 +296,8 @@ public sealed class EntityFieldMapLifecycleTests(SqlServerFixture sql)
     public async Task ФВ_12_10_пауза_відновлення_і_видалення_мапінгу_лишають_журнал_зі_старим_і_новим_станом()
     {
         using var app = new EcrApiFactory(sql);
-        using var client = await SignedInAsync(app, Manage).ConfigureAwait(true);
         var stand = await ArrangeAsync(collectPoints: 0).ConfigureAwait(true);
+        using var client = await ManagerAsync(app, stand.ProjectId).ConfigureAwait(true);
 
         Assert.Equal(HttpStatusCode.OK, (await PostAsync(client, stand.FieldMapId, "pause").ConfigureAwait(true)).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await PostAsync(client, stand.FieldMapId, "resume").ConfigureAwait(true)).StatusCode);
@@ -295,8 +332,8 @@ public sealed class EntityFieldMapLifecycleTests(SqlServerFixture sql)
     public async Task ФВ_12_10_прийняття_зміни_одиниці_лишає_запис_структурних_змін_зі_старою_і_новою_одиницею()
     {
         using var app = new EcrApiFactory(sql);
-        using var client = await SignedInAsync(app, Manage).ConfigureAwait(true);
         var stand = await ArrangeAsync(collectPoints: 0).ConfigureAwait(true);
+        using var client = await ManagerAsync(app, stand.ProjectId).ConfigureAwait(true);
 
         var accepted = await client.PostAsJsonAsync(
             new Uri($"/api/v1/entity-field-maps/{stand.FieldMapId}/accept-unit-change", UriKind.Relative),
@@ -351,7 +388,7 @@ public sealed class EntityFieldMapLifecycleTests(SqlServerFixture sql)
 
     /// <summary>Що заведено для одного тесту.</summary>
     private sealed record Stand(
-        int FieldMapId, int OldUnitId, string OldUnitCode, int NewUnitId, string NewUnitCode);
+        int FieldMapId, int OldUnitId, string OldUnitCode, int NewUnitId, string NewUnitCode, int ProjectId);
 
     private static Task<HttpResponseMessage> PostAsync(HttpClient client, int fieldMapId, string action)
         => client.PostAsync(
@@ -486,7 +523,7 @@ public sealed class EntityFieldMapLifecycleTests(SqlServerFixture sql)
                 .ConfigureAwait(false);
         }
 
-        return new Stand(map.Id, oldUnit.Id, oldUnit.Code, newUnit.Id, newUnit.Code);
+        return new Stand(map.Id, oldUnit.Id, oldUnit.Code, newUnit.Id, newUnit.Code, chain.ProjectId);
     }
 
     private DbContextOptions<EcrDbContext> Options()
@@ -496,6 +533,46 @@ public sealed class EntityFieldMapLifecycleTests(SqlServerFixture sql)
 
     private static LocalizedText Name(string value)
         => new(new Dictionary<string, string> { ["en"] = value });
+
+    /// <summary>
+    /// Клієнт з <c>Integration.Manage</c> і грантом <c>Manage</c> на проєкти колонок мапінгів (L3-11:
+    /// відновлення, прийняття одиниці й видалення мапінгу на колонку вимагають його).
+    /// </summary>
+    private Task<HttpClient> ManagerAsync(EcrApiFactory app, params int[] projectIds)
+        => ProjectUserAsync(app, GrantLevel.Manage, projectIds);
+
+    /// <summary>Те саме з довільним рівнем гранта на проєкти (L3-11: Write не дорівнює Manage).</summary>
+    private async Task<HttpClient> ProjectUserAsync(EcrApiFactory app, GrantLevel level, params int[] projectIds)
+    {
+        var name = $"fmlc_{Guid.NewGuid():N}"[..20];
+        const string password = "Map-Lifecycle-Probe-2026!";
+
+        await using (var db = new EcrDbContext(Options()))
+        {
+            var user = new Ecr.Domain.Entities.Security.User(name, name, AuthProvider.Local);
+            user.SetPassword(new Ecr.Infrastructure.Security.PasswordHasher().Hash(password));
+            var role = new Ecr.Domain.Entities.Security.Role(EcrCode.Create($"R{Guid.NewGuid():N}"[..12]), Name("Map lifecycle test"));
+            db.Users.Add(user);
+            db.Roles.Add(role);
+            await db.SaveChangesAsync().ConfigureAwait(false);
+
+            db.RolePermissions.Add(new Ecr.Domain.Entities.Security.RolePermission(role.Id, Manage));
+            db.RoleAssignments.Add(new Ecr.Domain.Entities.Security.RoleAssignment(role.Id, user.Id, principalSid: null));
+            foreach (var projectId in projectIds)
+            {
+                db.ResourceGrants.Add(new Ecr.Domain.Entities.Security.ResourceGrant(role.Id, ResourceKind.Project, projectId, level));
+            }
+
+            await db.SaveChangesAsync().ConfigureAwait(false);
+        }
+
+        var client = app.CreateClient();
+        var login = await client.PostAsJsonAsync(
+            new Uri("/api/v1/login/local", UriKind.Relative), new { userName = name, password })
+            .ConfigureAwait(false);
+        Assert.True(login.IsSuccessStatusCode, $"{login.StatusCode}: {app.ErrorsText}");
+        return client;
+    }
 
     /// <summary>Клієнт із чинним сеансом і названими правами.</summary>
     private Task<HttpClient> SignedInAsync(EcrApiFactory app, params string[] permissions)

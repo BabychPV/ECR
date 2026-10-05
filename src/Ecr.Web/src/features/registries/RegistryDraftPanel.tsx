@@ -22,6 +22,9 @@ import {
 } from './registryDraft';
 import { usePendingLoading } from '@/features/common/usePendingLoading';
 
+/** Тіло `PUT …/definition/draft`: стан форми, причина й версія чернетки. */
+export type SaveRegistryDraftBody = Parameters<typeof saveRegistryDraft>[1];
+
 /**
  * Чернетка опису довідника і публікація (`BE-24` крок 2).
  *
@@ -41,6 +44,7 @@ export function RegistryDraftPanel({
   request,
   reason,
   onReasonChange,
+  onSaved,
 }: {
   readonly code: string;
 
@@ -49,6 +53,16 @@ export function RegistryDraftPanel({
 
   readonly reason: string;
   readonly onReasonChange: (value: string) => void;
+
+  /**
+   * Чернетку збережено — тіло, яке пішло на сервер, і версія, яку повернув сервер; викликається
+   * ДО перечитування чернетки.
+   *
+   * ⛔ L9-39: перечитана чернетка засіває форму сторінки, а людина могла правити далі, поки
+   * запит їхав. Сторінка порівнює надіслане з поточною формою і не затирає новіших правок —
+   * але лише коли перечитано САМЕ збережене (версія та сама), а не новішу чернетку сусіда.
+   */
+  readonly onSaved?: (sent: SaveRegistryDraftBody, savedRowVersion: string) => void;
 }): JSX.Element {
   const session = useSession();
   const queryClient = useQueryClient();
@@ -81,14 +95,9 @@ export function RegistryDraftPanel({
 
   const save = useMutation({
     meta: { handled: true },
-    mutationFn: () =>
-      saveRegistryDraft(code, {
-        fields: request?.fields ?? [],
-        rules: request?.rules ?? [],
-        reason: request?.reason ?? '',
-        rowVersion,
-      }),
-    onSuccess: async () => {
+    mutationFn: (body: SaveRegistryDraftBody) => saveRegistryDraft(code, body),
+    onSuccess: async (saved, body) => {
+      onSaved?.(body, saved.rowVersion);
       await reload();
       showDone(t('registries.draftSaved'));
     },
@@ -226,7 +235,12 @@ export function RegistryDraftPanel({
             loading={saveLoading}
             onClick={() => {
               if (save.isPending) return;
-              save.mutate();
+              save.mutate({
+                fields: request?.fields ?? [],
+                rules: request?.rules ?? [],
+                reason: request?.reason ?? '',
+                rowVersion,
+              });
             }}
             data-save-draft=""
           >

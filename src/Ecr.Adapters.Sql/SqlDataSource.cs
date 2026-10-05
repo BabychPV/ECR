@@ -1,5 +1,8 @@
 using System.Data;
+using System.Net;
+using System.Net.Sockets;
 using Ecr.Application.Errors;
+using Ecr.Application.Integration;
 using Ecr.Application.Ports;
 using Ecr.Domain.Enums;
 using Microsoft.Data.SqlClient;
@@ -301,6 +304,65 @@ public sealed class SqlDataSource(
         return configured;
     }
 
+    /// <summary>
+    /// L3-05 (<c>D-279</c>): та сама політика адреси, що й при збереженні джерела, — ще раз перед
+    /// з'єднанням.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Збереження перевіряє лише НОВІ адреси (<c>D-245</c>: наявні джерела ретроспективно не
+    /// перевіряються), а ім'я між збереженням і з'єднанням може розв'язатися інакше. Рядок —
+    /// нормалізований <see cref="SqlConnectionStringBuilder"/> (синоніми ключів зведені), тож політика
+    /// бачить саме те, куди піде клієнт. Пароль ще не підставлено — секрет політику не проходить.
+    /// </remarks>
+    private static async Task RequireAllowedAddressAsync(string code, string connectionString, CancellationToken ct)
+    {
+        var verdict = DataSourceEndpointPolicy.CheckSqlClientConnectionString(connectionString);
+
+        if (verdict == EndpointVerdict.Allowed)
+        {
+            foreach (var host in DataSourceEndpointPolicy.SqlClientHostsOf(connectionString) ?? [])
+            {
+                if (host.Length == 0 || IPAddress.TryParse(host, out _))
+                {
+                    continue;
+                }
+
+                IPAddress[] resolved;
+
+                try
+                {
+                    resolved = await Dns.GetHostAddressesAsync(host, ct).ConfigureAwait(false);
+                }
+                catch (SocketException)
+                {
+                    // Ім'я не розв'язується — з'єднання впаде саме, своєю зрозумілою помилкою.
+                    continue;
+                }
+
+                if (resolved.Any(DataSourceEndpointPolicy.IsLinkLocal))
+                {
+                    verdict = EndpointVerdict.HostForbidden;
+                    break;
+                }
+            }
+        }
+
+        if (verdict == EndpointVerdict.Allowed)
+        {
+            return;
+        }
+
+        // ⚠ Відмова називає джерело й вердикт, а не вміст рядка з'єднання.
+        throw new BusinessRuleException(
+            SourceUnavailable,
+            $"Адресу джерела {code} відхилено політикою адреси ({verdict}): збір не з'єднується.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-INT-0503.endpointForbidden",
+                ["dataSource"] = code,
+            });
+    }
+
     /// <summary>Відкриває з'єднання під службовим обліковим записом.</summary>
     /// <remarks>
     /// ⛔ Секрет береться <b>за іменем</b> і ніколи з конфігурації (ФВ-6.11,
@@ -317,11 +379,13 @@ public sealed class SqlDataSource(
         {
             builder = new SqlConnectionStringBuilder(source.Endpoint);
         }
-        catch (ArgumentException ex)
+        catch (Exception ex) when (ex is ArgumentException or FormatException or OverflowException)
         {
             // Зіпсований рядок з'єднання — недоступне джерело з погляду збору,
             // а не необроблений виняток: інакше в журналі прогону лежало б
             // «ArgumentException» без натяку, що правити треба поле Endpoint.
+            // ⚠ Значення ключа builder розбирає сам: `Connect Timeout=abc`, `User Instance=0` —
+            // FormatException, `Max Pool Size=99999999999` — OverflowException (рев'ю an33d, P3-4).
             throw new BusinessRuleException(
                 SourceUnavailable,
                 $"Рядок з'єднання джерела {source.Code} не читається: {ex.Message}",
@@ -331,6 +395,8 @@ public sealed class SqlDataSource(
                     ["dataSource"] = source.Code,
                 });
         }
+
+        await RequireAllowedAddressAsync(source.Code, builder.ConnectionString, ct).ConfigureAwait(false);
 
         // ⚠ Каталог із конфігурації джерела перекриває той, що в рядку
         // з'єднання: `ext.DataSource.Catalog` — це поле, яке видно в
@@ -606,28 +672,7 @@ public sealed class SqlDataSource(
     /// <param name="dataSource">Код джерела — для тексту відмови.</param>
     /// <param name="sourcePath">Шлях сутності — для тексту відмови.</param>
     private static void EnsureOrdered(DateTime? previous, DateTime current, string dataSource, string sourcePath)
-    {
-        if (previous is not { } before || current >= before)
-        {
-            return;
-        }
-
-        var earlier = before.ToString("O", System.Globalization.CultureInfo.InvariantCulture);
-        var later = current.ToString("O", System.Globalization.CultureInfo.InvariantCulture);
-
-        throw new BusinessRuleException(
-            ResultRefused,
-            $"Запит значень джерела {dataSource} для «{sourcePath}» повертає мітки не по черзі "
-            + $"({later} після {earlier}): без ORDER BY за міткою хвіст обрізаного батча хибний.",
-            new Dictionary<string, object?>
-            {
-                ["messageKey"] = "err.ECR-INT-0422.timestampsOutOfOrder",
-                ["dataSource"] = dataSource,
-                ["sourcePath"] = sourcePath,
-                ["previous"] = earlier,
-                ["current"] = later,
-            });
-    }
+        => SourceRowOrder.EnsureOrdered(previous, current, dataSource, sourcePath);
 
     /// <summary>Джерела немає або воно вимкнене.</summary>
     /// <param name="dataSourceId">Ідентифікатор із запиту.</param>

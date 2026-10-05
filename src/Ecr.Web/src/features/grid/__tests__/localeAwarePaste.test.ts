@@ -3,7 +3,8 @@ import type { ColumnDto } from '@/api/types';
 import { formatDecimal, normalizeDecimal } from '@/shared/format';
 import { DefaultLanguage, setLanguage } from '@/shared/i18n';
 import { cellText } from '../cellValue';
-import { parseClipboard, parseNumber, planPaste, readNumber, toClipboard } from '../clipboard';
+import { parseNumber, planPaste, readNumber } from '../clipboard';
+import { parseClipboard, toClipboard } from '../tsvClipboard';
 import { decimalTextOf, roundToScale } from '../rounding';
 
 /**

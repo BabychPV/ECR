@@ -40,6 +40,8 @@ export function PauseResumeAction({
   const queryClient = useQueryClient();
 
   const toggle = useMutation({
+    // ⚠ Відмову показує `ErrorAlert` у рендері — без `handled` сітка додала б тост (L9-01).
+    meta: { handled: true },
     mutationFn: () =>
       field.isActive
         ? pauseEntityFieldMap(field.fieldMapId)

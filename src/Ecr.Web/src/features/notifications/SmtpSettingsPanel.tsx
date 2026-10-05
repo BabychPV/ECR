@@ -20,6 +20,7 @@ import { EcrApiError } from '@/api/client';
 import { t } from '@/shared/i18n';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { showApiError, showDone } from '@/shared/ui/notify';
+import { registerUnsavedSource } from '@/shared/ui/unsavedSources';
 import {
   getSmtpSettings,
   saveSmtpSettings,
@@ -56,6 +57,34 @@ export function SmtpSettingsPanel(): JSX.Element {
   const [testTo, setTestTo] = useState('');
   const [passwordHint, setPasswordHint] = useState<string | null>(null);
   const passwordRef = useRef<HTMLInputElement>(null);
+
+  /*
+   * ⛔ L9-33: незбережена чернетка захищена так само, як матриця правил і шаблони: перехід
+   * маршрутом питає `UnsavedGuard` (джерело існує, лише поки є чернетка; `flush` немає — мовчазний
+   * `PUT` налаштувань пошти при переході неприйнятний), закриття вкладки — штатне питання браузера.
+   * Доти вихід зі сторінки мовчки губив введені хост, адресу й пароль.
+   */
+  const dirty = draft !== null;
+  useEffect(() => {
+    if (!dirty) return undefined;
+
+    return registerUnsavedSource('smtp-settings', {
+      hasUnsaved: () => true,
+      unsavedCount: () => 1,
+    });
+  }, [dirty]);
+  useEffect(() => {
+    if (!dirty) return undefined;
+
+    const warn = (event: BeforeUnloadEvent): void => {
+      event.preventDefault();
+      // Старі браузери показують питання лише за непорожнього `returnValue`.
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', warn);
+
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [dirty]);
 
   // ⚠ Відмова «введіть пароль ще раз» — фокус у поле пароля: тост зникає, а читач екрана
   // інакше не знає, ДЕ виправляти (поле вже має `aria-invalid` і опис помилки).
@@ -122,6 +151,10 @@ export function SmtpSettingsPanel(): JSX.Element {
   // ⛔ ent6 S1: пароль без шифрування сервер відхиляє (`smtpPasswordNeedsTls`) — кажемо це біля поля
   // шифрування ДО збереження, а не лише тостом після відмови.
   const passwordNeedsTls = form.authMode === 'Password' && form.encryptionMode === 'None';
+  // ⛔ L9-28: на час `PUT` форма замкнена. `onSuccess` знімає чернетку цілком (`setDraft(null)`), тож
+  // правка між кліком «Зберегти» і відповіддю мовчки зникала б: у тілі запиту її не було.
+  const locked = save.isPending;
+  const portOk = portValid(form.port);
 
   return (
     <Stack gap="sm">
@@ -140,14 +173,20 @@ export function SmtpSettingsPanel(): JSX.Element {
       </Group>
 
       <Group grow align="flex-start">
-        <TextInput label={t('smtp.host')} value={form.host} onChange={(e) => set({ host: e.currentTarget.value })} />
+        <TextInput label={t('smtp.host')} readOnly={locked} value={form.host} onChange={(e) => set({ host: e.currentTarget.value })} />
         <NumberInput
           label={t('smtp.port')}
           value={form.port}
+          readOnly={locked}
           min={1}
           max={65535}
           allowDecimal={false}
-          onChange={(value) => set({ port: typeof value === 'number' ? value : 587 })}
+          allowNegative={false}
+          error={portOk ? undefined : t('err.ECR-REQ-0422.smtpSettingsInvalid', { name: t('smtp.port') })}
+          // ⛔ L9-32: значення поля — як ввела людина. Доти порожнє поле миттю ставало `587` (стерти й
+          // набрати інший порт було неможливо — цифри дописувались до 587), а `70000` до втрати фокуса
+          // (Mantine обрізає лише на blur) їхало на сервер і поверталось загальною відмовою.
+          onChange={(value) => set({ port: value })}
         />
         <Select
           label={t('smtp.encryption')}
@@ -157,6 +196,7 @@ export function SmtpSettingsPanel(): JSX.Element {
             { value: 'None', label: t('smtp.encryption.None') },
           ]}
           value={form.encryptionMode}
+          disabled={locked}
           error={passwordNeedsTls ? t('err.ECR-REQ-0422.smtpPasswordNeedsTls') : null}
           onChange={(value) => {
             if (value !== null) set({ encryptionMode: value as SmtpDraft['encryptionMode'] });
@@ -168,11 +208,13 @@ export function SmtpSettingsPanel(): JSX.Element {
         <TextInput
           label={t('smtp.from')}
           value={form.fromAddress}
+          readOnly={locked}
           onChange={(e) => set({ fromAddress: e.currentTarget.value })}
         />
         <TextInput
           label={t('smtp.fromName')}
           value={form.fromName}
+          readOnly={locked}
           onChange={(e) => set({ fromName: e.currentTarget.value })}
         />
       </Group>
@@ -185,6 +227,7 @@ export function SmtpSettingsPanel(): JSX.Element {
           { value: 'Password', label: t('smtp.auth.Password') },
         ]}
         value={form.authMode}
+        disabled={locked}
         onChange={(value) => {
           if (value !== null) set({ authMode: value as SmtpDraft['authMode'] });
         }}
@@ -195,6 +238,7 @@ export function SmtpSettingsPanel(): JSX.Element {
           <TextInput
             label={t('smtp.user')}
             value={form.userName}
+            readOnly={locked}
             onChange={(e) => set({ userName: e.currentTarget.value })}
           />
           <PasswordInput
@@ -211,6 +255,7 @@ export function SmtpSettingsPanel(): JSX.Element {
               passwordHint === null ? `${SmtpPasswordId}-description` : `${SmtpPasswordId}-description ${SmtpPasswordId}-error`
             }
             value={form.password}
+            readOnly={locked}
             onChange={(e) => {
               setPasswordHint(null);
               set({ password: e.currentTarget.value });
@@ -223,6 +268,7 @@ export function SmtpSettingsPanel(): JSX.Element {
         <Checkbox
           label={t('smtp.clearPassword')}
           checked={form.clearPassword}
+          disabled={locked}
           onChange={(e) => set({ clearPassword: e.currentTarget.checked })}
         />
       )}
@@ -230,13 +276,14 @@ export function SmtpSettingsPanel(): JSX.Element {
       <Switch
         label={t('smtp.enabled')}
         checked={form.isEnabled}
+        disabled={locked}
         onChange={(e) => set({ isEnabled: e.currentTarget.checked })}
       />
 
       <Group justify="flex-end">
         <Button
           loading={saveLoading}
-          disabled={draft === null}
+          disabled={draft === null || !portOk}
           onClick={() => {
             // ⚠ До порогу `usePendingLoading` кнопка ще активна: другий клік не шле другий PUT.
             if (save.isPending) return;
@@ -259,7 +306,8 @@ export function SmtpSettingsPanel(): JSX.Element {
           loading={testLoading}
           disabled={testTo.trim().length === 0 || draft !== null}
           onClick={() => {
-            // ⚠ Друга проба поверх першої — другий лист і зайвий крок квоти проб (`D-263`).
+            // ⚠ Друга проба поверх першої — другий лист і зайвий крок квоти проб (`SmtpTestRateLimitPolicy`;
+            // `D-263` про квоту не каже — лише про те, що SMTP налаштовується в системі).
             if (test.isPending) return;
             test.mutate(testTo.trim());
           }}
@@ -282,7 +330,8 @@ function sourceLabel(source: string): string {
 /** Чернетка форми: рядки й булеві; `password` — лише те, що введено ЦЬОГО разу. */
 interface SmtpDraft {
   readonly host: string;
-  readonly port: number;
+  /** Як у полі: число, або рядок (порожньо чи незавершене введення) — тоді зберегти не можна. */
+  readonly port: number | string;
   readonly encryptionMode: 'None' | 'StartTls';
   readonly fromAddress: string;
   readonly fromName: string;
@@ -308,13 +357,18 @@ function draftOf(value: SmtpSettings): SmtpDraft {
   };
 }
 
+/** Порт, який прийме сервер за формою (`SaveSmtpSettingsHandler.Validate`): ціле 1–65535. */
+export function portValid(port: number | string): boolean {
+  return typeof port === 'number' && Number.isInteger(port) && port >= 1 && port <= 65535;
+}
+
 /** Порожні рядки їдуть як `null`; порожній пароль — «не змінювати». */
 function inputOf(draft: SmtpDraft): SmtpSettingsInput {
   const blank = (v: string): string | null => (v.trim().length === 0 ? null : v.trim());
 
   return {
     host: blank(draft.host),
-    port: draft.port,
+    port: Number(draft.port),
     encryptionMode: draft.encryptionMode,
     fromAddress: blank(draft.fromAddress),
     fromName: blank(draft.fromName),

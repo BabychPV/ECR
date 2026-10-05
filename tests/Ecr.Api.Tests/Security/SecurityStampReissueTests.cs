@@ -118,6 +118,37 @@ public sealed class SecurityStampReissueTests(SqlServerFixture sql)
         Assert.Equal(HttpStatusCode.OK, (await admin.GetAsync(Me)).StatusCode);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Відкликана_cookie_не_перевидає_себе_власною_зміною_ролей()
+    {
+        var ids = await ArrangeAsync().ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql, stampCacheSeconds: 5);
+        using var stolen = await SignedInAsync(app, $"adm_{_tag}").ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.OK, (await stolen.GetAsync(Me)).StatusCode); // кеш тримає штамп A
+
+        // Власник скинув пароль / «вийти з усіх» на іншому вузлі: A→B, кеш цього вузла — ще A.
+        await using (var db = CreateContext())
+        {
+            var user = await db.Users.SingleAsync(u => u.Id == ids.Admin).ConfigureAwait(true);
+            user.RefreshSecurityStamp();
+            await db.SaveChangesAsync().ConfigureAwait(true);
+        }
+
+        // Стара cookie проходить із кешу і сама крутить B→C зміною власних ролей.
+        using var put = await stolen.PutAsJsonAsync(
+            new Uri($"/api/v1/users/{ids.Admin}/roles", UriKind.Relative),
+            new { roleCodes = new[] { ids.ManageUsersCode, ids.ExtraCode } }).ConfigureAwait(true);
+        Assert.True(put.IsSuccessStatusCode, $"{put.StatusCode}: {app.ErrorsText}");
+
+        Assert.DoesNotContain(
+            put.Headers.TryGetValues("Set-Cookie", out var cookies) ? cookies : [],
+            c => c.StartsWith(CookieName + "=", StringComparison.Ordinal)
+                 && !c.StartsWith(CookieName + "=;", StringComparison.Ordinal));
+        Assert.Equal(HttpStatusCode.Unauthorized, (await stolen.GetAsync(Me)).StatusCode);
+    }
+
     private async Task<(int Admin, int User, string ManageUsersCode, string ExtraCode)> ArrangeAsync()
     {
         await using var db = CreateContext();

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { act, fireEvent, screen, within } from '@testing-library/react';
+import { QueryClient } from '@tanstack/react-query';
 import { loadCatalog } from '@/shared/i18n';
 import { mockServer, passed, showDataPage, storedRows, type SentBatch } from './fixtures';
 
@@ -15,7 +16,8 @@ import { mockServer, passed, showDataPage, storedRows, type SentBatch } from './
  *   - `cellDisplay` повертає `value` замість `display` → «Lookup показує назву цілі…»;
  *   - без виклику збереження в обробнику `Ctrl+S` → «правка числа… Ctrl+S…» і «Ctrl+Shift+Delete…»;
  *   - `toBatch` без `baseVersion` наявного рядка → «правка числа… baseVersion…»;
- *   - `validateCell` без гілки коми → «кома в десятковому…»;
+ *   - `validateCell` без гілки неоднозначного → «неоднозначна кома (1,234)…»;
+ *   - (2026-10-04, L9-04) `onEdit` без `normalizeCellInput` → «вставка 12,5 з Excel…»;
  *   - `problemsByRow` губить `field` → «помилка dryRun лягає в свою комірку…»;
  *   - `canSave` без `duplicates.size === 0` → «дубль ключа… блокує збереження».
  */
@@ -76,11 +78,45 @@ describe('Дані довідника: табличний редактор', () 
     expect(await screen.findByText(/^Saved /)).toBeDefined();
   });
 
-  it('кома в десятковому підсвічена до сервера і не дає зберегти', async () => {
+  it('вставка 12,5 з Excel (ru/kz) дає 12.5 у пакеті й не блокує збереження (L9-04)', async () => {
+    const sent = mockServer();
+    showDataPage();
+    const grid = await screen.findByRole('grid');
+
+    act(() => cell(0, 2).focus());
+    fireEvent.paste(grid, { clipboardData: { getData: () => '12,5\n7,25\n' } });
+    await vi.waitFor(() => {
+      expect(cell(1, 2).getAttribute('data-edited')).toBe('true');
+    });
+    expect(cell(0, 2).getAttribute('aria-invalid')).toBeNull();
+
+    fireEvent.keyDown(window, { key: 's', ctrlKey: true });
+    await vi.waitFor(() => {
+      expect(committed(sent)).toHaveLength(1);
+    });
+    expect(committed(sent)[0]?.items.map((item) => item.values)).toEqual([{ T_C: '12.5' }, { T_C: '7.25' }]);
+  });
+
+  it('збереження скидає сторінку впливу довідника (L9-21)', async () => {
+    mockServer();
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    client.setQueryData(['registry-impact', 'STREAM_CASE'], { items: [] });
+    showDataPage(client);
+    await screen.findByRole('grid');
+
+    await editText(0, 2, '50.5');
+    fireEvent.keyDown(window, { key: 's', ctrlKey: true });
+
+    await vi.waitFor(() => {
+      expect(client.getQueryState(['registry-impact', 'STREAM_CASE'])?.isInvalidated).toBe(true);
+    });
+  });
+
+  it('неоднозначна кома (1,234) підсвічена до сервера і не дає зберегти', async () => {
     showDataPage();
     await screen.findByRole('grid');
 
-    await editText(0, 2, '50,5');
+    await editText(0, 2, '1,234');
 
     await vi.waitFor(() => {
       expect(cell(0, 2).getAttribute('aria-invalid')).toBe('true');
@@ -150,6 +186,74 @@ describe('Дані довідника: табличний редактор', () 
     expect(committed(sent)).toHaveLength(0);
   });
 
+  it('поки пакет зберігається, комірки не редагуються і вставка не приймається — правка не зникне мовчки', async () => {
+    let release: () => void = () => undefined;
+    const sent = mockServer({ holdCommit: new Promise<void>((resolve) => (release = resolve)) });
+    showDataPage();
+    const grid = await screen.findByRole('grid');
+
+    await editText(0, 2, '50.5');
+    fireEvent.keyDown(window, { key: 's', ctrlKey: true });
+    await vi.waitFor(() => {
+      expect(committed(sent)).toHaveLength(1);
+    });
+
+    // Запит у дорозі: Enter не відкриває редактор, вставка не додає рядків.
+    const other = cell(1, 2);
+    act(() => other.focus());
+    fireEvent.keyDown(other, { key: 'Enter' });
+    expect(within(other).queryByRole('textbox')).toBeNull();
+    fireEvent.paste(grid, { clipboardData: { getData: () => 'x\ty\nz\tw\n' } });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(document.querySelectorAll('[data-row-key^="n:"]')).toHaveLength(0);
+
+    await act(async () => {
+      release();
+      await Promise.resolve();
+    });
+    expect(await screen.findByText(/^Saved /)).toBeDefined();
+
+    // Після відповіді редагування знову доступне.
+    act(() => other.focus());
+    fireEvent.keyDown(other, { key: 'Enter' });
+    expect(await within(other).findByRole('textbox')).toBeDefined();
+  });
+
+  it('вставка трьох рядків з однаковим Lookup — один запит до довідника-цілі (L9-07)', async () => {
+    mockServer();
+    showDataPage();
+    const grid = await screen.findByRole('grid');
+    const lookupCalls = (): number =>
+      vi.mocked(fetch).mock.calls.filter(([input]) => String(input).includes('/registries/STREAM/rows')).length;
+
+    act(() => cell(0, 0).focus());
+    fireEvent.paste(grid, { clipboardData: { getData: () => 'S162\ns162\nS162\n' } });
+
+    await vi.waitFor(() => {
+      expect(document.querySelectorAll('[data-row-key^="n:"]')).toHaveLength(1);
+    });
+    await vi.waitFor(() => {
+      expect(within(cell(2, 0)).getByText('1D-2 · HP Separator Gas (S162)')).toBeDefined();
+    });
+    expect(lookupCalls()).toBe(1);
+  });
+
+  it('відмова зіставлення Lookup — банер незіставлених, а не мовчки відкинутий хвіст (L9-07)', async () => {
+    mockServer({ lookupStatus: 403 });
+    const unhandled = vi.fn();
+    window.addEventListener('unhandledrejection', unhandled);
+    showDataPage();
+    const grid = await screen.findByRole('grid');
+
+    act(() => cell(0, 0).focus());
+    fireEvent.paste(grid, { clipboardData: { getData: () => 'S162\tAutumn\n' } });
+
+    expect(await screen.findByText('1 pasted cells could not be matched and were left unchanged.')).toBeDefined();
+    expect(within(cell(0, 1)).getByText('Autumn')).toBeDefined();
+    window.removeEventListener('unhandledrejection', unhandled);
+    expect(unhandled).not.toHaveBeenCalled();
+  });
+
   it('без Registry.EditData — лише читання: пояснення словами, без збереження, Enter не редагує', async () => {
     mockServer({ permissions: ['Registry.View'] });
     showDataPage();
@@ -162,6 +266,37 @@ describe('Дані довідника: табличний редактор', () 
     act(() => target.focus());
     fireEvent.keyDown(target, { key: 'Enter' });
     expect(within(target).queryByRole('textbox')).toBeNull();
+  });
+
+  it('Ctrl+Enter додає рядок і переводить фокус на НЬОГО, а не лишає на попередньому (L9-16)', async () => {
+    showDataPage();
+    await screen.findByRole('grid');
+
+    const target = cell(1, 1);
+    act(() => target.focus());
+    fireEvent.keyDown(target, { key: 'Enter', ctrlKey: true });
+
+    await vi.waitFor(() => {
+      expect(document.activeElement?.getAttribute('data-cell')).toBe('2:0');
+    });
+    expect(document.querySelectorAll('[data-row-key^="n:"]')).toHaveLength(1);
+  });
+
+  it('симуляція «очима користувача» з Registry.EditData — лише читання: банер, Enter не редагує, пакетів немає (L9-18)', async () => {
+    const sent = mockServer({ simulation: true });
+    showDataPage();
+    await screen.findByRole('grid');
+
+    expect(await screen.findByText('Permission simulation: writing is disabled regardless of permissions.')).toBeDefined();
+    expect(screen.queryByRole('button', { name: /^Save/ })).toBeNull();
+
+    const target = cell(0, 2);
+    act(() => target.focus());
+    fireEvent.keyDown(target, { key: 'Enter' });
+    expect(within(target).queryByRole('textbox')).toBeNull();
+    fireEvent.keyDown(window, { key: 's', ctrlKey: true });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(sent).toHaveLength(0);
   });
 
   it('Ctrl+Shift+Delete позначає рядок до видалення, пакет несе op delete', async () => {

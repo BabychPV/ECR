@@ -104,7 +104,13 @@ export function UserAdminActions({ user }: { user: UserView }): JSX.Element | nu
 
   const self = session.data?.userId;
 
-  if (!can(session.data, 'Security.ManageUsers') || self === undefined || self === user.id) {
+  // ⛔ L9-18: під симуляцією сервер відхиляє будь-який запис (`ECR-SIM-0403`) — дій немає.
+  if (
+    session.data?.isSimulation === true ||
+    !can(session.data, 'Security.ManageUsers') ||
+    self === undefined ||
+    self === user.id
+  ) {
     return null;
   }
 

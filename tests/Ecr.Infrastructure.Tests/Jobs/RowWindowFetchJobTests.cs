@@ -197,12 +197,98 @@ public sealed class RowWindowFetchJobTests(SqlServerFixture sql)
         Assert.Equal(5m, (await CellsAsync(stand, "R2"))[stand.VolumeColumn].Numeric);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "HSE301-A1")]
+    public async Task ДжерелоКидаєHttpRequestException_РештаРядківПишеться()
+    {
+        // ⛔ L3-02: адаптер на останній спробі віддає СИРИЙ HttpRequestException (не EcrException).
+        // До фіксу він обривав усю задачу, і R2 не записувався. Мутація: прибрати catch (Exception)
+        // у RowWindowFetchJob.ReadAsync.
+        await using var stand = await ArrangeAsync(RowWindowSummaryKind.Average, s => (s.StdCubicId, s.StdCubicId));
+        await AddRowAsync(stand, "R1", LocalStart, LocalEnd);
+        await AddRowAsync(stand, "R2", LocalStart.AddHours(1), LocalEnd.AddHours(1));
+        var source = new FakeWindowSource(Result(5m))
+        {
+            Throw = request => request.FromUtc.Hour == 9 ? new HttpRequestException("connection reset") : null,
+        };
+
+        await RunAsync(stand, source);
+
+        var values = (await ValuesAsync(stand)).ToDictionary(v => v.RowKey);
+        Assert.Equal((RowWindowValueStatus.SourceError, "ECR-INT-0503"), (values["R1"].Status, values["R1"].ErrorCode));
+        Assert.Equal(RowWindowValueStatus.Fetched, values["R2"].Status);
+        Assert.Equal(5m, (await CellsAsync(stand, "R2"))[stand.VolumeColumn].Numeric);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "HSE301-A1")]
+    public async Task ПатчерВідхиляєПакет_РядкиРозводятьсяПоОдному()
+    {
+        // ⛔ L3-02: патчер кидає BusinessRuleException на ПАКЕТ (ECR-CELL-0422 validationBlocked),
+        // бо одна з комірок не проходить. До фіксу падала вся задача; тепер — по рядку.
+        // Мутація: прибрати гілку WriteOneByOneAsync у RowWindowFetchJob.WriteAsync.
+        await using var stand = await ArrangeAsync(RowWindowSummaryKind.Average, s => (s.StdCubicId, s.StdCubicId));
+        await AddRowAsync(stand, "R1", LocalStart, LocalEnd);
+        await AddRowAsync(stand, "R2", LocalStart.AddHours(1), LocalEnd.AddHours(1));
+
+        await RunAsync(
+            stand,
+            new FakeWindowSource(Result(5m)),
+            patcher: (inner, _) => new ScriptedPatcher(inner)
+            {
+                Reject = cells => cells.Any(c => c.RowKey == "R1")
+                    ? new BusinessRuleException("ECR-CELL-0422", "validation blocked")
+                    : null,
+            });
+
+        var values = (await ValuesAsync(stand)).ToDictionary(v => v.RowKey);
+        Assert.Equal((RowWindowValueStatus.SourceError, "ECR-CELL-0422"), (values["R1"].Status, values["R1"].ErrorCode));
+        Assert.Equal(RowWindowValueStatus.Fetched, values["R2"].Status);
+        Assert.False((await CellsAsync(stand, "R1")).ContainsKey(stand.VolumeColumn));
+        Assert.Equal(5m, (await CellsAsync(stand, "R2"))[stand.VolumeColumn].Numeric);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "HSE301-A1")]
+    public async Task ПатчерСкидаєТрекер_ПовторнеПідтягування_ОдинЧиннийЗапис()
+    {
+        // ⛔ L3-03: патчер ділить scoped-контекст із задачею і на гонці за рядок робить
+        // ChangeTracker.Clear(). До фіксу Supersede() відчепленого запису не зберігався, і вставка
+        // нового чинного падала на UX_RowWindowValue_Current. Мутація: повернути відстежуване
+        // читання в LoadRowsAsync і previous.Supersede() замість ExecuteUpdateAsync.
+        await using var stand = await ArrangeAsync(RowWindowSummaryKind.Average, s => (s.StdCubicId, s.StdCubicId));
+        await AddRowAsync(stand, "R1", LocalStart, LocalEnd);
+        var source = new FakeWindowSource(Result(null, percentGood: 0m));
+
+        await RunAsync(stand, source);
+
+        source.Result = Result(7m);
+        await RunAsync(stand, source, now: Now.AddHours(1), patcher: (inner, db) => new ScriptedPatcher(inner) { ClearTracker = db });
+
+        var values = await ValuesAsync(stand);
+        Assert.Equal(
+            [(RowWindowValueStatus.NoData, false), (RowWindowValueStatus.Fetched, true)],
+            values.OrderBy(v => v.Id).Select(v => (v.Status, v.IsCurrent)));
+        Assert.Equal(7m, (await CellsAsync(stand, "R1"))[stand.VolumeColumn].Numeric);
+    }
+
     // ── Стенд ────────────────────────────────────────────────────────────────
 
     private static WindowResult Result(decimal? value, decimal? percentGood = 100m)
-        => new(value, "Sm3/h", value is null ? 0 : 4, percentGood, WindowComputedBy.Local, [], null);
+        => new(value, null, value is null ? 0 : 4, percentGood, WindowComputedBy.Local, [], null);
 
-    private async Task RunAsync(Stand stand, FakeWindowSource source, ICalculationTrigger? trigger = null, DateTime? now = null)
+    private async Task RunAsync(
+        Stand stand,
+        FakeWindowSource source,
+        ICalculationTrigger? trigger = null,
+        DateTime? now = null,
+        Func<ICellPatcher, EcrDbContext, ICellPatcher>? patcher = null)
     {
         await using var scope = stand.Provider.CreateAsyncScope();
         var services = scope.ServiceProvider;
@@ -210,10 +296,12 @@ public sealed class RowWindowFetchJobTests(SqlServerFixture sql)
         var clock = Substitute.For<IClock>();
         clock.UtcNow.Returns(now ?? Now);
 
+        var db = services.GetRequiredService<EcrDbContext>();
+        var cellPatcher = services.GetRequiredService<ICellPatcher>();
         var job = new RowWindowFetchJob(
-            services.GetRequiredService<EcrDbContext>(),
+            db,
             [source],
-            services.GetRequiredService<ICellPatcher>(),
+            patcher?.Invoke(cellPatcher, db) ?? cellPatcher,
             services.GetRequiredService<IntegrationActor>(),
             clock,
             recalculation: trigger);
@@ -230,6 +318,9 @@ public sealed class RowWindowFetchJobTests(SqlServerFixture sql)
         public WindowResult Result { get; set; } = result;
 
         public Func<WindowRequest, bool>? Fail { get; init; }
+
+        /// <summary>Сирий виняток адаптера (не <c>EcrException</c>) — як HttpRequestException останньої спроби.</summary>
+        public Func<WindowRequest, Exception?>? Throw { get; init; }
 
         public List<WindowRequest> Requests { get; } = [];
 
@@ -250,7 +341,34 @@ public sealed class RowWindowFetchJobTests(SqlServerFixture sql)
                 throw new BusinessRuleException("ECR-INT-0503", "source down");
             }
 
+            if (Throw?.Invoke(request) is { } raw)
+            {
+                throw raw;
+            }
+
             return Task.FromResult(Result);
+        }
+    }
+
+    /// <summary>Справжній патчер із підставними відмовою пакета та скиданням трекера спільного контексту.</summary>
+    private sealed class ScriptedPatcher(ICellPatcher inner) : ICellPatcher
+    {
+        public Func<IReadOnlyList<IntegrationCellValue>, Exception?>? Reject { get; init; }
+
+        /// <summary>Контекст, трекер якого скинути після запису (як патчер на гонці CELL-0409).</summary>
+        public EcrDbContext? ClearTracker { get; init; }
+
+        public async Task<IntegrationWriteResult> ApplyIntegrationAsync(
+            long documentId, long tableInstanceId, PeriodKey periodKey, IReadOnlyList<IntegrationCellValue> cells, CancellationToken ct)
+        {
+            if (Reject?.Invoke(cells) is { } error)
+            {
+                throw error;
+            }
+
+            var result = await inner.ApplyIntegrationAsync(documentId, tableInstanceId, periodKey, cells, ct);
+            ClearTracker?.ChangeTracker.Clear();
+            return result;
         }
     }
 

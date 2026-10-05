@@ -114,6 +114,17 @@ describe('ФВ-14.29: відкладений запис на сервер', () =
     expect(put).toHaveBeenCalledWith('grid.columnWidths.5', { NAME: 320, UNIT: 100 });
   });
 
+  it('L9-12: стан сервера невідомий — зміни зливаються з локальним дзеркалом, чужі ширини не затираються', () => {
+    localStorage.setItem(columnWidthsCacheKey(5), JSON.stringify({ B: 300 }));
+    const { instance } = writer(null);
+
+    instance.change({ A: 200 });
+    instance.flush();
+
+    expect(put).toHaveBeenCalledTimes(1);
+    expect(put).toHaveBeenCalledWith('grid.columnWidths.5', { B: 300, A: 200 });
+  });
+
   it('ФВ-14.29: усі ширини типові — DELETE ключа, а не PUT порожнього', () => {
     const { instance, written } = writer({ NAME: 320 });
 

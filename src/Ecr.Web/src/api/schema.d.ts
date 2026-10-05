@@ -21274,7 +21274,8 @@ export interface components {
         };
         /** @description Рядок у пакетній зміні. */
         PatchRow: {
-            /** @description Версія рядка, від якої відштовхується клієнт (hex `rowversion`).
+            /** @description Версія рядка, від якої відштовхується клієнт (`rowversion` у Base64, як віддає зріз;
+             *     порівнюється з урахуванням регістру).
              *     `null` означає <b>створення</b> нового рядка (R-B2). */
             baseVersion: null | string;
             /** @description Зміни комірок. */

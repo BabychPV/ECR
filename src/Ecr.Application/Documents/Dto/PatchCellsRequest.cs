@@ -71,7 +71,8 @@ public sealed record PatchCellsRequest(
 /// </summary>
 /// <param name="RowKey">Ідентичність рядка.</param>
 /// <param name="BaseVersion">
-/// Версія рядка, від якої відштовхується клієнт (hex <c>rowversion</c>).
+/// Версія рядка, від якої відштовхується клієнт (<c>rowversion</c> у Base64, як віддає зріз;
+/// порівнюється з урахуванням регістру).
 /// <c>null</c> означає <b>створення</b> нового рядка (R-B2).
 /// </param>
 /// <param name="Cells">Зміни комірок.</param>

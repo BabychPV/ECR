@@ -24,11 +24,12 @@ namespace Ecr.Infrastructure.Jobs;
 /// Тому без фабрики методи черги відмовляють зрозуміло — <c>ECR-SYS-0503</c>, —
 /// а все, що черги не потребує, працює.
 /// </remarks>
-public sealed class QuartzJobScheduler(
+public sealed partial class QuartzJobScheduler(
     ISchedulerFactory? schedulerFactory = null,
     IJobProgressStore? progress = null,
     Ecr.Domain.Abstractions.IClock? clock = null,
-    ICorrelationIdAccessor? correlation = null) : IBackgroundJobScheduler
+    ICorrelationIdAccessor? correlation = null,
+    Microsoft.Extensions.Logging.ILogger<QuartzJobScheduler>? logger = null) : IBackgroundJobScheduler
 {
     private const string UnavailableCode = "ECR-SYS-0503";
 
@@ -222,7 +223,7 @@ public sealed class QuartzJobScheduler(
 
         // ⚠ Слухач злиття — ДО постановки: він має побачити старт кожної разової задачі,
         // інакше злиття з нею під час виконання не знало б, що вона жива.
-        CoalescedRequeueListener.Of(instance);
+        CoalescedRequeueListener.Of(instance, logger);
 
         await instance.ScheduleJob(detail, trigger, ct).ConfigureAwait(false);
 
@@ -401,7 +402,7 @@ public sealed class QuartzJobScheduler(
         CancellationToken ct)
         where TJob : IBackgroundJob
     {
-        var listener = CoalescedRequeueListener.Of(instance);
+        var listener = CoalescedRequeueListener.Of(instance, logger);
 
         var executing = new HashSet<string>(StringComparer.Ordinal);
         foreach (var context in await instance.GetCurrentlyExecutingJobs(ct).ConfigureAwait(false))
@@ -486,10 +487,13 @@ public sealed class QuartzJobScheduler(
         private readonly Dictionary<string, Func<string, CancellationToken, Task<string>>> dirty =
             new(StringComparer.Ordinal);
 
+        /// <summary>Журнал служби (L2-10); <c>null</c> — поки жодна постановка з логером не прийшла.</summary>
+        private Microsoft.Extensions.Logging.ILogger? log;
+
         public string Name => ListenerName;
 
         /// <summary>Слухач цього планувальника — один на екземпляр, реєструється за першої потреби.</summary>
-        public static CoalescedRequeueListener Of(IScheduler instance)
+        public static CoalescedRequeueListener Of(IScheduler instance, Microsoft.Extensions.Logging.ILogger? logger)
         {
             lock (Registration)
             {
@@ -498,10 +502,11 @@ public sealed class QuartzJobScheduler(
                         .OfType<CoalescedRequeueListener>()
                         .FirstOrDefault() is { } existing)
                 {
+                    existing.log ??= logger;
                     return existing;
                 }
 
-                var created = new CoalescedRequeueListener();
+                var created = new CoalescedRequeueListener { log = logger };
                 instance.ListenerManager.AddJobListener(created, EverythingMatcher<JobKey>.AllJobs());
 
                 return created;
@@ -577,11 +582,25 @@ public sealed class QuartzJobScheduler(
             catch (Exception ex)
 #pragma warning restore CA1031
             {
-                System.Diagnostics.Trace.TraceError(
-                    "Перепостановка після злиття для задачі {0} не вдалася: {1}", jobId, ex.Message);
+                // ⛔ L2-10: не Trace (слухачів Trace у застосунку немає) — журнал служби. Зміна,
+                // прийнята під час прогону, інакше губилась би без жодного сліду.
+                if (log is not null)
+                {
+                    LogCoalescedRequeueFailed(log, jobId, ex);
+                }
+                else
+                {
+                    System.Diagnostics.Trace.TraceError(
+                        "Перепостановка після злиття для задачі {0} не вдалася: {1}", jobId, ex.Message);
+                }
             }
         }
     }
+
+    [Microsoft.Extensions.Logging.LoggerMessage(
+        Level = Microsoft.Extensions.Logging.LogLevel.Error,
+        Message = "Перепостановка після злиття для задачі {JobId} не вдалася: зміну, прийняту під час прогону, не буде пораховано.")]
+    private static partial void LogCoalescedRequeueFailed(Microsoft.Extensions.Logging.ILogger logger, string jobId, Exception ex);
 
     /// <summary>
     /// Префікс ідентифікатора задачі на ціль — ОДИН для Exclusive і Coalesced,

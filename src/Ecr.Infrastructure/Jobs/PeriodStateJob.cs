@@ -52,6 +52,16 @@ public sealed partial class PeriodStateJob(
     /// <summary>Скільки періодів системно відкрито за цей прогін.</summary>
     private int _yearReopens;
 
+    /// <summary>Скільки разів повторити постановку матеріалізації після коміту (Quartz).</summary>
+    public const int MaterializationRetries = 3;
+
+    /// <summary>
+    /// Пауза перед повтором постановки матеріалізації після коміту: 1/2/4 с.
+    /// </summary>
+    /// <remarks>Змінюється лише тестами.</remarks>
+    public Func<int, TimeSpan> MaterializationRetryDelay { get; init; } =
+        retry => TimeSpan.FromSeconds(1 << (retry - 1));
+
     /// <summary>
     /// Автор системного Reopen «вікно року» в <c>aud.StructureChange</c>: не
     /// людина. Та сама умовність, що й у перерахунку (<c>RecalculationService.SystemUserId</c>).
@@ -422,6 +432,16 @@ public sealed partial class PeriodStateJob(
             }
 
             await db.SaveChangesAsync(innerCt).ConfigureAwait(false);
+
+            // ⛔ L2-06 (аудит 2026-10-03): черга в базі — постановка ВСЕРЕДИНІ
+            // транзакції переходу, останнім оператором (MI-02 (в)): збій
+            // постановки відкочує й перехід, і повтор задачі побачить його знову.
+            if (materialization.EnlistsInCallerTransaction)
+            {
+                await materialization
+                    .EnqueueAfterTransitionAsync(project.Id, toMaterialize, innerCt)
+                    .ConfigureAwait(false);
+            }
         }, ct).ConfigureAwait(false);
 
         // Лише закомічені: відкочена транзакція нічого не відкривала.
@@ -433,9 +453,10 @@ public sealed partial class PeriodStateJob(
         // саме звідси, а не зі збору: за вимкненого або рідкого розкладу збір
         // відкриття не побачить ніколи, і точки, зібрані до нього, лишились би
         // сирими назавжди.
-        await materialization
-            .EnqueueAfterTransitionAsync(project.Id, toMaterialize, ct)
-            .ConfigureAwait(false);
+        if (!materialization.EnlistsInCallerTransaction)
+        {
+            await EnqueueMaterializationAfterCommitAsync(project, toMaterialize, ct).ConfigureAwait(false);
+        }
 
         await NotifyAsync(
             project, opened, NotificationEventKind.PeriodOpened, "period-opened",
@@ -656,6 +677,42 @@ public sealed partial class PeriodStateJob(
     private static TimeZoneInfo ResolveZone(string? timeZoneId)
         => SiteTimeZone.Create(timeZoneId).ToTimeZoneInfo();
 
+    /// <summary>
+    /// Постановка матеріалізації після коміту переходу (Quartz) з обмеженим повтором.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ L2-06 (аудит 2026-10-03): перехід уже закомічено, і повтор задачі його
+    /// не побачить — тож транзієнтний збій постановки повторюється тут
+    /// (<see cref="MaterializationRetries"/>, 1/2/4 с), а остаточний — <c>Error</c>
+    /// з переліком періодів: інакшого сліду, які точки лишились сирими, немає.
+    /// </remarks>
+    private async Task EnqueueMaterializationAfterCommitAsync(
+        Project project, List<int> periodKeys, CancellationToken ct)
+    {
+        for (var retry = 1; ; retry++)
+        {
+            try
+            {
+                await materialization
+                    .EnqueueAfterTransitionAsync(project.Id, periodKeys, ct)
+                    .ConfigureAwait(false);
+                return;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException && retry <= MaterializationRetries)
+            {
+                LogMaterializationRetrying(_logger, project.Code, project.Id, retry, ex);
+                await Task.Delay(MaterializationRetryDelay(retry), ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                LogMaterializationLost(
+                    _logger, project.Code, project.Id,
+                    string.Join(",", periodKeys.Select(k => k.ToString(CultureInfo.InvariantCulture))), ex);
+                throw;
+            }
+        }
+    }
+
     /// <summary>Пропущений зворотний перехід — пункт <c>DetailsJson</c>.</summary>
     private sealed record SkippedEntry(string Project, int Period, string From, string To, string Reason);
 
@@ -693,4 +750,17 @@ public sealed partial class PeriodStateJob(
         Message = "PeriodStateJob: системно відкрито періодів — {Count}, але пошук осиротілих рядків НЕ поставлено; "
             + "позначки оновить нічний прохід.")]
     private static partial void LogOrphanScanNotEnqueued(ILogger logger, int count, Exception exception);
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "PeriodStateJob: проєкт {ProjectCode} ({ProjectId}) — постановка матеріалізації після переходу не вдалась, повтор {Retry}.")]
+    private static partial void LogMaterializationRetrying(
+        ILogger logger, string projectCode, int projectId, int retry, Exception exception);
+
+    [LoggerMessage(
+        Level = LogLevel.Error,
+        Message = "PeriodStateJob: проєкт {ProjectCode} ({ProjectId}) — матеріалізацію періодів {PeriodKeys} НЕ поставлено після переходу; "
+            + "точки цих періодів лишаться сирими, доки її не поставлять вручну.")]
+    private static partial void LogMaterializationLost(
+        ILogger logger, string projectCode, int projectId, string periodKeys, Exception exception);
 }

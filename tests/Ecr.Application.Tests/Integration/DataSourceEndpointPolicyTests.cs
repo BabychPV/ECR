@@ -175,4 +175,79 @@ public sealed class DataSourceEndpointPolicyTests
 
         Assert.Equal("err.ECR-REQ-0422.dataSourceEndpointHostNotAllowed", refused!.Details!["messageKey"]);
     }
+
+    /// <summary>
+    /// L3-09: файлові ключі менеджера драйверів ODBC (<c>FILEDSN</c>, <c>SAVEFILE</c>, <c>DRIVER</c> шляхом)
+    /// обходили перевірку сервера: рядок без ключа сервера давав порожній перелік хостів, тобто «дозволено».
+    /// </summary>
+    [Theory]
+    [InlineData(@"FILEDSN=\\evil\s\x.dsn")]
+    [InlineData(@"filedsn = C:\dsn\x.dsn")]
+    [InlineData(@"Driver={PI SQL Client};Server=af.corp.local;SAVEFILE=C:\ProgramData\x.dsn")]
+    [InlineData(@"Driver=\\evil\s\odbc.dll;Server=af.corp.local")]
+    [InlineData(@"Driver={C:\tmp\evil.dll};Server=af.corp.local")]
+    [InlineData("Driver=/tmp/libevil.so;Server=af.corp.local")]
+    [InlineData(@"DSN=PiSqlEcr;FileDsn=\\evil\s\x.dsn")]
+    [InlineData(@"DSN=PiSqlEcr;File DSN=\\evil\s\x.dsn")]
+    public void CheckSqlServerAddress_FileDsnUnc_Відмова(string address)
+        => Assert.Equal(EndpointVerdict.Malformed, DataSourceEndpointPolicy.CheckSqlServerAddress(address));
+
+    [Theory]
+    [InlineData("Driver={PI SQL Client};Server=af.corp.local;Integrated Security=SSPI")]
+    [InlineData("DSN=PiSqlEcr")]
+    [InlineData("Driver={ODBC Driver 18 for SQL Server};Server=af.corp.local")]
+    public void CheckSqlServerAddress_ім_я_драйвера_і_системний_DSN_дозволені(string address)
+        => Assert.Equal(EndpointVerdict.Allowed, DataSourceEndpointPolicy.CheckSqlServerAddress(address));
+
+    /// <summary>L3-09 через обробник: відмова 422 з ключем некоректної адреси біля поля.</summary>
+    [Fact]
+    public async Task Обробник_PiSqlClient_FileDsn_422()
+    {
+        var access = Substitute.For<IAccessDecisionService>();
+        var user = Substitute.For<ICurrentUser>();
+        user.UserId.Returns(11);
+        access.BuildProfileAsync(11, Arg.Any<CancellationToken>())
+            .Returns(new AccessBuilder { UserId = 11 }.Permission("Integration.Manage").Build());
+
+        var handler = new SaveDataSourceHandler(
+            Substitute.For<IDataSourceStore>(), Substitute.For<ISecretProvider>(), access,
+            Substitute.For<IUnitOfWork>(), Substitute.For<IAuditWriter>(), user, Substitute.For<IClock>(), null);
+
+        var refused = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => handler.CreateAsync(
+                "SQL1", new Dictionary<string, string> { ["uk"] = "AF" }, ExternalTransport.PiSqlClient,
+                @"FILEDSN=\\evil\s\x.dsn", null, null, null, null, default));
+
+        Assert.Equal("err.ECR-REQ-0422.dataSourceEndpointMalformed", refused.Details!["messageKey"]);
+        Assert.Equal("endpoint", refused.Details!["field"]);
+    }
+
+    /// <summary>
+    /// Рецензія an33b: IMDS AWS по IPv6 <c>fd00:ec2::254</c> (ULA, не fe80::/10) — metadata для всіх трьох
+    /// транспортів: PiSqlClient (D-245), Sql (D-279), PI Web API (D-241).
+    /// </summary>
+    [Theory]
+    [InlineData("fd00:ec2::254")]
+    [InlineData("FD00:EC2:0:0:0:0:0:254")]
+    [InlineData("[fd00:ec2::254]:1433")]
+    public void Metadata_AWS_IPv6_відхиляється_всіма_транспортами(string host)
+    {
+        Assert.Equal(EndpointVerdict.HostForbidden, DataSourceEndpointPolicy.CheckSqlServerAddress(host));
+        Assert.Equal(EndpointVerdict.HostForbidden, DataSourceEndpointPolicy.CheckSqlServerAddress($"Driver={{PI SQL Client}};Server={host}"));
+        Assert.Equal(EndpointVerdict.HostForbidden, DataSourceEndpointPolicy.CheckSqlClientConnectionString($"Server={host};Integrated Security=true"));
+
+        var bare = host.TrimStart('[').Split(']')[0];
+        Assert.Equal(EndpointVerdict.HostForbidden, DataSourceEndpointPolicy.CheckAddress($"https://[{bare}]/piwebapi", false, null));
+        Assert.True(DataSourceEndpointPolicy.IsLinkLocal(IPAddress.Parse(bare)));
+        Assert.True(DataSourceEndpointPolicy.IsBlocked(IPAddress.Parse(bare)));
+    }
+
+    [Theory]
+    [InlineData("fd00:ec2::253")]
+    [InlineData("fd12:3456::1")]
+    public void Інші_ULA_не_metadata(string host)
+    {
+        Assert.False(DataSourceEndpointPolicy.IsLinkLocal(IPAddress.Parse(host)));
+        Assert.Equal(EndpointVerdict.Allowed, DataSourceEndpointPolicy.CheckSqlServerAddress(host));
+    }
 }

@@ -94,6 +94,7 @@ interface Options {
   readonly permissions?: string[];
   readonly strings?: 'ok' | 'refuse' | 'pending' | 'missing';
   readonly rules?: 'ok' | 'refuse';
+  readonly channels?: NotificationChannel[];
 }
 
 function json(body: unknown, status = 200): Response {
@@ -119,7 +120,7 @@ function mockServer(options: Options = {}): Call[] {
       if (path === '/api/v1/languages') return json(Languages);
       if (path === '/api/v1/roles') return json([{ id: 3, code: 'ECOLOGIST' }]);
       if (path === '/api/v1/notifications/channels') {
-        return options.rules === 'refuse' ? json(Refusal, 500) : json([Mail, Teams]);
+        return options.rules === 'refuse' ? json(Refusal, 500) : json(options.channels ?? [Mail, Teams]);
       }
       if (path === '/api/v1/notifications/rules') {
         return options.rules === 'refuse' ? json(Refusal, 500) : json(Matrix);
@@ -200,6 +201,22 @@ describe('NotificationTemplatesPanel: хто отримає', () => {
     expect(teams.textContent).toContain('⟦notificationTemplates.recipientsNoTransport⟧');
     expect(teams.textContent).toContain('⟦notificationTemplates.recipientsNoRoles⟧');
     expect(mail.textContent).not.toContain('⟦notificationTemplates.recipientsFiltered⟧');
+  });
+
+  it('L9-29: вимкнений канал — не адресат, навіть з увімкненим правилом (розсилка його пропускає)', async () => {
+    mockServer({ channels: [Mail, { ...Teams, isEnabled: false }] });
+    show();
+
+    await screen.findByText(/Ops mailbox/, {}, { timeout: 5000 });
+    expect(screen.queryByText(/Teams ops/)).toBeNull();
+  });
+
+  it('L9-29: усі канали правил події вимкнені — «ніхто не отримає»', async () => {
+    mockServer({ channels: [{ ...Mail, isEnabled: false }, { ...Teams, isEnabled: false }] });
+    show();
+
+    expect(await screen.findByText('⟦notificationTemplates.recipientsNone⟧', {}, { timeout: 5000 })).toBeDefined();
+    expect(screen.queryByText(/Ops mailbox/)).toBeNull();
   });
 
   it('подія без жодного увімкненого правила — «ніхто не отримає», а не порожній перелік', async () => {
@@ -286,6 +303,14 @@ describe('NotificationTemplatesPanel: редагування', () => {
 describe('notificationTemplates: правила сервера', () => {
   it('плейсхолдери — набір без повторів у порядку ordinal, як UiStringResolver.Placeholders', () => {
     expect(placeholdersOf('{project} {period} {project} {Period}')).toEqual(['Period', 'period', 'project']);
+  });
+
+  it('L9-31: \\w як у .NET — юнікодний: кириличний плейсхолдер — плейсхолдер (невідомий), а не текст', () => {
+    expect(placeholdersOf('{період} {project} {café_1}')).toEqual(['café_1', 'project', 'період']);
+    expect(templateProblem('ECR: {період} {project}', EnSubject, true)).toEqual({
+      kind: 'unknownPlaceholder',
+      names: ['період'],
+    });
   });
 
   it('мова за замовчуванням: порожньо — ні; переклад: порожньо — так (лист піде еталоном)', () => {

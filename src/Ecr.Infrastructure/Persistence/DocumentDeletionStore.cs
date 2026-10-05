@@ -1,4 +1,6 @@
-using Ecr.Application.Ports;
+﻿using Ecr.Application.Ports;
+using Ecr.Domain.Abstractions;
+using Ecr.Domain.Errors;
 using Microsoft.EntityFrameworkCore;
 
 namespace Ecr.Infrastructure.Persistence;
@@ -37,12 +39,35 @@ public sealed class DocumentDeletionStore(EcrDbContext db) : IDocumentDeletionSt
     /// <inheritdoc />
     public async Task<int> DeleteAsync(long documentId, CancellationToken ct)
     {
+        // ⛔ L10-06: мапа подій джерела (`ext.SourceEventMap`) — конфігурація
+        // інтеграції, що посилається на документ зовнішнім ключем. Доти
+        // видалення падало на FK 547 уже посеред транзакції — і людина бачила
+        // 500. Мапу мовчки не видаляємо (це чужа налаштована робота, не дані
+        // документа): відмова 409 з причиною, документ лишається цілим.
+        if (await db.SourceEventMaps.AnyAsync(m => m.DocumentId == documentId, ct).ConfigureAwait(false))
+        {
+            throw new DomainException(
+                ErrorCodes.DocumentSubmitted,
+                $"Документ {documentId} використовує мапа подій джерела; спершу приберіть мапу.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-DOC-0409.deleteHasEventMap",
+                    ["reason"] = "SourceEventMap",
+                });
+        }
+
         var instances = db.TableInstances.Where(i => i.DocumentId == documentId);
         var rows = db.TableRows.Where(r => instances.Any(
             i => i.Id == r.TableInstanceId && i.PeriodKeyValue == r.PeriodKeyValue));
 
         var cells = await db.CellValues
             .Where(c => rows.Any(r => r.Id == c.TableRowId && r.PeriodKeyValue == c.PeriodKeyValue))
+            .ExecuteDeleteAsync(ct).ConfigureAwait(false);
+
+        // ⛔ L10-06: значення PI за вікном рядка ключуються екземпляром таблиці
+        // без зовнішнього ключа — після видалення екземплярів їх уже не знайти.
+        await db.RowWindowValues
+            .Where(v => instances.Any(i => i.Id == v.TableInstanceId && i.PeriodKeyValue == v.PeriodKey))
             .ExecuteDeleteAsync(ct).ConfigureAwait(false);
 
         await rows.ExecuteDeleteAsync(ct).ConfigureAwait(false);
@@ -52,6 +77,44 @@ public sealed class DocumentDeletionStore(EcrDbContext db) : IDocumentDeletionSt
         // вказують на неіснуючий документ.
         await db.CalculationResults.Where(r => r.DocumentId == documentId).ExecuteDeleteAsync(ct).ConfigureAwait(false);
         await db.CalculationInputs.Where(r => r.DocumentId == documentId).ExecuteDeleteAsync(ct).ConfigureAwait(false);
+
+        // ⛔ L10-06: прогони перерахунку САМЕ цього документа (`DocumentId`).
+        // Прогони проєкту (`DocumentId = NULL`) лишаються — їх рядки цього
+        // документа вже прибрано вище. Кроки, входи й результати прогону
+        // тримають на ньому зовнішній ключ — спершу вони.
+        //
+        // ⛔ Рев'ю AN-37 P2-1: індексу з провідним `CalculationRunId` у
+        // `calc.CalculationStep/Input/Result` немає, тож голий предикат за
+        // прогоном — скан УСІХ партицій трьох найбільших таблиць усередині
+        // транзакції видалення (блокує перерахунок). Тому спершу прогони в
+        // пам'ять, далі предикат ще й за `PeriodKey` — відсічка партицій.
+        // Прогін за період пише лише в свій період; річний (`PeriodKey` NULL) —
+        // у періоди свого проєкту, і саме їх беремо.
+        var runs = await db.CalculationRuns.AsNoTracking()
+            .Where(r => r.DocumentId == documentId)
+            .Select(r => new { r.Id, r.ProjectId, r.PeriodKey })
+            .ToListAsync(ct).ConfigureAwait(false);
+
+        if (runs.Count > 0)
+        {
+            var runIds = runs.Select(r => r.Id).ToList();
+            var periodKeys = runs.Where(r => r.PeriodKey is not null).Select(r => r.PeriodKey!.Value).ToHashSet();
+
+            if (runs.Any(r => r.PeriodKey is null))
+            {
+                var projectIds = runs.Select(r => r.ProjectId).Distinct().ToList();
+                periodKeys.UnionWith(await db.Periods.AsNoTracking()
+                    .Where(p => projectIds.Contains(p.ProjectId))
+                    .Select(p => p.PeriodKeyValue)
+                    .ToListAsync(ct).ConfigureAwait(false));
+            }
+
+            var keys = periodKeys.ToList();
+            await db.CalculationSteps.Where(s => keys.Contains(s.PeriodKey) && runIds.Contains(s.CalculationRunId)).ExecuteDeleteAsync(ct).ConfigureAwait(false);
+            await db.CalculationInputs.Where(i => keys.Contains(i.PeriodKey) && runIds.Contains(i.CalculationRunId)).ExecuteDeleteAsync(ct).ConfigureAwait(false);
+            await db.CalculationResults.Where(r => keys.Contains(r.PeriodKey) && runIds.Contains(r.CalculationRunId)).ExecuteDeleteAsync(ct).ConfigureAwait(false);
+            await db.CalculationRuns.Where(r => runIds.Contains(r.Id)).ExecuteDeleteAsync(ct).ConfigureAwait(false);
+        }
 
         await db.DocumentIndexValues.Where(v => v.DocumentId == documentId).ExecuteDeleteAsync(ct).ConfigureAwait(false);
         await db.ValidationResults.Where(v => v.DocumentId == documentId).ExecuteDeleteAsync(ct).ConfigureAwait(false);

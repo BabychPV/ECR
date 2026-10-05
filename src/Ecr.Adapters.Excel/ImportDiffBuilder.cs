@@ -44,7 +44,7 @@ public sealed class ImportDiffBuilder
     /// <param name="decisions">Рішення про доступ на комірки зрізу.</param>
     /// <param name="lookups">Коди записів довідників: <c>RegistryDefId</c> → код → <c>Id</c>.</param>
     /// <param name="rowIds">Ідентифікатори рядків цієї таблиці: <c>RowKey</c> → <c>TableRow.Id</c>.</param>
-    /// <param name="versions">Версії рядків цієї таблиці: <c>RowKey</c> → hex <c>rowversion</c>.</param>
+    /// <param name="versions">Версії рядків цієї таблиці: <c>RowKey</c> → <c>rowversion</c> у Base64.</param>
     /// <param name="current">Поточний зріз комірок цієї таблиці.</param>
     /// <param name="canReadColumn">
     /// Чи бачить той, хто імпортує, колонку (<c>DocumentReadScope.CanReadColumn</c>, S6);

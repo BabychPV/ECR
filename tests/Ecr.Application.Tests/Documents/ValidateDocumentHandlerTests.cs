@@ -250,4 +250,44 @@ public sealed class ValidateDocumentHandlerTests
 
         Assert.Equal("ECR-DOC-0404", denied.ErrorCode);
     }
+
+    /// <summary>
+    /// L6-09: таблиця БЕЗ правил, але з обов'язковою колонкою — «Перевірити» показує
+    /// незаповнену комірку так само, як подання на ній відмовляє.
+    /// Мутація: повернути фільтр «лише таблиці з правилами» — тест червоніє.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "ФВ-5.4")]
+    public async Task Перевірити_показує_незаповнену_обовязкову_колонку()
+    {
+        var snapshot = await _metadata.GetAsync(TemplateVersionId, CancellationToken.None);
+        var noRules = snapshot.Sheets.SelectMany(s => s.Tables).Single(t => t.Id == 5);
+        noRules.Columns.Single().SetRequired(true);
+
+        _rows.GetRowIdsBatchAsync(Arg.Any<IReadOnlyList<long>>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<long, IReadOnlyDictionary<string, long>>
+            {
+                [InstanceNoRules] = new Dictionary<string, long>(StringComparer.Ordinal) { ["R1"] = 7 },
+            });
+        _cells.ReadSlicesAsync(Arg.Any<IReadOnlyList<long>>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<long, IReadOnlyList<CellRecord>>());
+
+        ValidationSummary? saved = null;
+        await _results.SaveAsync(Arg.Do<ValidationSummary>(s => saved = s), Arg.Any<CancellationToken>());
+
+        try
+        {
+            await Handler().HandleAsync(DocumentId, new PeriodKey(Period), CancellationToken.None);
+        }
+        catch (NullReferenceException)
+        {
+            // ReadScopeAsync не налаштовано в цьому файлі — див. тест D-230 вище.
+        }
+
+        Assert.NotNull(saved);
+        Assert.Equal(1, saved!.ErrorCount);
+        Assert.Contains("ECR-CELL-0422", saved.MessagesJson);
+        Assert.Contains("\"R1\"", saved.MessagesJson);
+    }
 }

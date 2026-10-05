@@ -40,7 +40,11 @@ interface TemplateDraft {
 }
 
 /**
- * Шаблони повідомлень (`CL-6`, `D-256`, `ФВ-12.4a`): «за якої події ЩО відправляти і КОМУ».
+ * Шаблони повідомлень (`CL-6`, `D-263`, `ФВ-12.4a`): «за якої події ЩО відправляти і КОМУ».
+ *
+ * ⚠ L9-34: тут і нижче стояло `D-256` — це заміни імен методологій AF. Налаштування сповіщень у
+ * системі — `D-263`; «D256» живе лише в назві міграції `D256SmtpSettingsAndChannelRoles` (історично,
+ * примітка в самому `D-263`).
  *
  * ⛔ Окремого сховища шаблонів немає й не вигадується: тема й тіло листа — рядки каталогу
  * (`notifications.periodOpened.subject` …), які сервер бере за ключем і заповнює
@@ -49,7 +53,7 @@ interface TemplateDraft {
  * `PUT /ui-strings/{lang}/{key}`, той самий, що й у редакторі рядків.
  *
  * ⚠ «Хто отримає» — вивід із матриці правил і каналів, а не окреме налаштування: адресати каналу —
- * ролі (`D-256`, без іменних осіб), правило вирішує, чи йде подія цим каналом. Події періоду мають
+ * ролі (`D-263`, без іменних осіб), правило вирішує, чи йде подія цим каналом. Події періоду мають
  * серйозність `Info`, тож правило з вищою межею їх НЕ пропускає — і це сказано словами.
  *
  * ⛔ Порядок станів — відмова → очікування → порожньо → дані (директива №15, `L10`).
@@ -106,6 +110,20 @@ function TemplatesEditor(): JSX.Element {
       hasUnsaved: () => true,
       unsavedCount: () => 1,
     });
+  }, [dirty]);
+
+  // ⛔ L9-33: закриття чи перезавантаження вкладки роутер не блокує — штатне питання браузера,
+  // лише поки є чернетка (як `RulesMatrixPanel`).
+  useEffect(() => {
+    if (!dirty) return undefined;
+
+    const warn = (event: BeforeUnloadEvent): void => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', warn);
+
+    return () => window.removeEventListener('beforeunload', warn);
   }, [dirty]);
 
   const save = useMutation({
@@ -217,6 +235,8 @@ function TemplatesEditor(): JSX.Element {
   const subjectProblem = templateProblem(form.subject, subjectRow.reference, isDefault);
   const bodyProblem = templateProblem(form.body, bodyRow.reference, isDefault);
   const untranslated = !isDefault && (subjectRow.value === null || bodyRow.value === null);
+  // ⛔ L9-28: поля замкнені на час запису (`readOnly={save.isPending}` нижче) — `onSuccess` знімає
+  // чернетку цілком (`setDraft(null)`), і правка, зроблена під час `PUT`, мовчки зникала б.
   const placeholders = TemplatePlaceholders.map((name) => `{${name}}`).join(', ');
 
   return (
@@ -241,6 +261,7 @@ function TemplatesEditor(): JSX.Element {
               })
         }
         value={form.subject}
+        readOnly={save.isPending}
         error={problemText(subjectProblem, template.subjectKey)}
         onChange={(event) => setDraft({ ...form, subject: event.currentTarget.value })}
       />
@@ -250,6 +271,7 @@ function TemplatesEditor(): JSX.Element {
         autosize
         minRows={3}
         value={form.body}
+        readOnly={save.isPending}
         error={problemText(bodyProblem, template.bodyKey)}
         onChange={(event) => setDraft({ ...form, body: event.currentTarget.value })}
       />
@@ -338,7 +360,13 @@ function Recipients({ eventKind }: { readonly eventKind: TemplatedEvent['eventKi
     );
   }
 
-  const byId = new Map(channels.data.map((channel) => [channel.id, channel]));
+  // ⛔ L9-29: вимкнений канал — не адресат. Розсилка бере лише ввімкнені канали
+  // (`INotificationDispatchStore.cs`, `TargetsOf`: `Channels.Where(c => c.IsEnabled && …)`), тож
+  // правило на вимкнений канал листа не дає — показати його в «хто отримає» означало б пообіцяти
+  // лист, якого не буде.
+  const byId = new Map(
+    channels.data.filter((channel) => channel.isEnabled).map((channel) => [channel.id, channel]),
+  );
   const roleCode = new Map((roles.data ?? []).map((role) => [role.id, role.code]));
   const enabled = rules.data.rules.filter(
     (rule) => rule.eventKind === eventKind && rule.isEnabled && byId.has(rule.channelId),

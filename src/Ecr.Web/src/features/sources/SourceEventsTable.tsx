@@ -1,4 +1,4 @@
-import { lazy, Suspense, useMemo, useState, type JSX } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type JSX } from "react";
 import {
   Anchor,
   Badge,
@@ -12,15 +12,16 @@ import {
   Title,
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
-import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { EcrApiError } from "@/api/client";
-import type { DocumentSummary } from "@/api/types";
+import { apiFetch, EcrApiError } from "@/api/client";
+import type { DocumentSummary, JobStatus } from "@/api/types";
 import { formatDateTime, formatNumber } from "@/shared/format";
 import { useFocusAfterBusy } from "@/shared/a11y/focus";
 import { t } from "@/shared/i18n";
 import { ErrorAlert } from "@/shared/ui/ErrorAlert";
 import { PeriodPicker } from "@/shared/ui/PeriodPicker";
+import { outcomeOf, pollInterval } from "@/features/workflow/jobFollow";
 import { humanizeJobId } from "@/features/workflow/jobLabel";
 import { documentLabel } from "./SourceEventMapsPanel";
 import {
@@ -295,12 +296,35 @@ export function SourceEventsTable({
     getNextPageParam: (page) => page.nextCursor,
   });
 
+  /*
+   * ⚠ L9-20: `202` — задача лише в черзі, синк ще нічого не записав. Перелік
+   * перечитується ОДИН раз на задачу, на її `Succeeded` (той самий прийом, що
+   * `useConsistencyRun`), а не на відповіді постановки.
+   */
+  const [syncJobId, setSyncJobId] = useState<string | null>(null);
+  const syncJob = useQuery({
+    queryKey: ["job", syncJobId],
+    queryFn: () => apiFetch<JobStatus>(`/api/v1/jobs/${encodeURIComponent(syncJobId ?? "")}`),
+    enabled: syncJobId !== null,
+    refetchInterval: (q) => pollInterval(q.state.data?.state),
+    retry: false,
+  });
+  const syncOutcome = syncJobId === null ? null : outcomeOf(syncJob.data?.state, syncJob.isError);
+  const syncReported = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (syncJobId === null || syncOutcome !== "succeeded" || syncReported.current === syncJobId) return;
+
+    syncReported.current = syncJobId;
+    void queryClient.invalidateQueries({ queryKey: SourceEventsKeys.eventsOf(sourceEntityId) });
+  }, [syncJobId, syncOutcome, queryClient, sourceEntityId]);
+
   const sync = useMutation({
+    // ⚠ Відмову показує `ErrorAlert` у рендері — без `handled` сітка додала б тост (L9-01).
+    meta: { handled: true },
     mutationFn: () => syncSourceEvents(sourceEntityId),
     onSuccess: (accepted) => {
-      void queryClient.invalidateQueries({
-        queryKey: SourceEventsKeys.eventsOf(sourceEntityId),
-      });
+      setSyncJobId(accepted.jobId);
       notifications.show({
         message: t("sourceEvents.syncQueued", {
           job: humanizeJobId(accepted.jobId),

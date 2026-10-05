@@ -123,7 +123,7 @@ public sealed class SwitchRegistrySourceHandler(
     {
         ArgumentNullException.ThrowIfNull(registryCodes);
 
-        await Security.PermissionCheck
+        var profile = await Security.PermissionCheck
             .RequireAsync(access, currentUser, Permission, ct)
             .ConfigureAwait(false);
 
@@ -211,6 +211,12 @@ public sealed class SwitchRegistrySourceHandler(
 
         foreach (var code in registryCodes)
         {
+            // ⛔ L5-08: заборонений довідник — 404, як неіснуючий (перемикання не розкриває й не змінює його).
+            if (byCode.TryGetValue(code, out var denied) && RegistryAccess.IsDenied(profile, denied.Id))
+            {
+                throw RegistryAccess.NotFound(code);
+            }
+
             definitions.Add(
                 byCode.TryGetValue(code, out var definition)
                     ? definition
@@ -390,6 +396,12 @@ public sealed class DeleteRegistryEntryHandler(
         {
             if (await registries.FindDefinitionByIdAsync(partRegistryId, ct).ConfigureAwait(false) is { } partRegistry)
             {
+                // ⛔ L1-05: каскад видаляє записи ДОЧІРНІХ довідників — потрібен той самий доступ на запис і до них
+                // (глобальне Registry.EditData або грант Write; заборона = 404), а не лише до батьківського.
+                await RegistryAccess
+                    .RequireAsync(access, currentUser, Permission, GrantLevel.Write, partRegistry.Id, ct)
+                    .ConfigureAwait(false);
+
                 ExternalRegistryGuard.EnsureManualEditAllowed(partRegistry);
                 partRegistries.Add(partRegistry);
             }

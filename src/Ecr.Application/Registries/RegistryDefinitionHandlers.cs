@@ -77,7 +77,7 @@ public sealed class GetRegistryDefinitionHandler(
                     f.Id, f.Code, f.NameL10n, f.DataType.ToString(), f.IsRequired,
                     IsScopeField: f.IsKey, f.RefRegistryDefId, f.UnitId))
                 .ToList(),
-            Relations(definition, fields, byId, linkKinds),
+            Relations(definition, fields, byId, linkKinds, profile),
             rules
                 .Select(r => new RegistryRuleDto(
                     r.Id, r.Code, r.RuleKind.ToString(), r.Expression, r.Severity.ToString(),
@@ -113,11 +113,13 @@ public sealed class GetRegistryDefinitionHandler(
     /// <param name="fields">Його поля.</param>
     /// <param name="codesById">Коди всіх довідників — для назви цілі.</param>
     /// <param name="linkKinds">Види зв'язків M:N, наявні в даних.</param>
+    /// <param name="profile">Профіль читача: код забороненої цілі не віддається (L5-08).</param>
     private static List<RegistryRelationDto> Relations(
         RegistryDef definition,
         IReadOnlyList<RegistryFieldDef> fields,
         Dictionary<int, string> codesById,
-        IReadOnlyList<RegistryLinkKindStat> linkKinds)
+        IReadOnlyList<RegistryLinkKindStat> linkKinds,
+        Security.AccessProfile profile)
     {
         var relations = new List<RegistryRelationDto>();
 
@@ -137,7 +139,10 @@ public sealed class GetRegistryDefinitionHandler(
                 Kind: composition ? "Composition" : target == definition.Id ? "Hierarchy" : "Cascade",
                 FieldCode: field.Code,
                 TargetRegistryDefId: target,
-                TargetRegistryCode: codesById.TryGetValue(target, out var targetCode) ? targetCode : null,
+                // ⛔ L5-08: код забороненого довідника-цілі не віддається (як і в переліку довідників).
+                TargetRegistryCode: !RegistryAccess.IsDenied(profile, target) && codesById.TryGetValue(target, out var targetCode)
+                    ? targetCode
+                    : null,
                 LinkKind: null,
                 LinkCount: null,
                 OnParentDelete: composition ? field.OnParentDelete : null));
@@ -557,7 +562,9 @@ public sealed class SaveRegistryDefinitionHandler(
             if (wantedRules is { Count: > 0 })
             {
                 wantedRules = await ruleCompiler
-                    .PrepareAsync(definition, rules, wantedRules, graph, keys, ct)
+                    // ⛔ L5-09: компілятор бачить лише довідники, не заборонені автору — заборонений
+                    // для нього «невідомий» (поля/типи/попередження не стають оракулом його даних).
+                    .PrepareAsync(definition, rules, wantedRules, [.. graph.Where(r => !RegistryAccess.IsDenied(profile, r.Id))], keys, ct)
                     .ConfigureAwait(false);
             }
         }

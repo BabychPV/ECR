@@ -73,12 +73,44 @@ public sealed class ExcelImporterFileRejectionTests
         Assert.Equal("err.ECR-IMP-0422.previewExpired", error.Details!["messageKey"]);
     }
 
-    private static ExcelImporter Importer(IImportPreviewStore? previews = null)
+    private static readonly System.Text.Json.JsonSerializerOptions PlanJson = new(System.Text.Json.JsonSerializerDefaults.Web);
+
+    /// <summary>
+    /// L1-20: токен перегляду, збудований іншим користувачем, не застосовується (і не рахується) — той самий
+    /// «перегляду немає». До виправлення токен не був прив'язаний до автора: хто знав токен, застосовував чужий diff.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public async Task Чужий_токен_перегляду_відмовляє_як_відсутній()
+    {
+        var plan = System.Text.Json.JsonSerializer.Serialize(
+            new ImportPlan(1, 202601, [], UserId: 5),
+            PlanJson);
+        var previews = Substitute.For<IImportPreviewStore>();
+        previews.FindAsync("tok", Arg.Any<CancellationToken>()).Returns(plan);
+        var other = Substitute.For<ICurrentUser>();
+        other.UserId.Returns(7);
+
+        var apply = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Importer(previews, other).ApplyAsync(1, "tok", CancellationToken.None));
+        Assert.Equal("err.ECR-IMP-0422.previewExpired", apply.Details!["messageKey"]);
+
+        var count = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Importer(previews, other).CountPendingChangesAsync("tok", CancellationToken.None));
+        Assert.Equal("err.ECR-IMP-0422.previewExpired", count.Details!["messageKey"]);
+
+        // Власник бачить свій перегляд: рахує зміни (їх 0), а не отримує відмову.
+        var owner = Substitute.For<ICurrentUser>();
+        owner.UserId.Returns(5);
+        Assert.Equal(0, await Importer(previews, owner).CountPendingChangesAsync("tok", CancellationToken.None));
+    }
+
+    private static ExcelImporter Importer(IImportPreviewStore? previews = null, ICurrentUser? user = null)
         => new(
             Substitute.For<IMetadataCache>(),
             Substitute.For<IRegistryStore>(),
             Substitute.For<IAccessDecisionService>(),
-            Substitute.For<ICurrentUser>(),
+            user ?? Substitute.For<ICurrentUser>(),
             previews ?? Substitute.For<IImportPreviewStore>(),
             patch: null!,
             new ImportDiffBuilder(),

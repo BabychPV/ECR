@@ -657,6 +657,46 @@ public sealed class PatchCellsTests
         Assert.True(ex.Details!.ContainsKey("conflicts"));
     }
 
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "ФВ-3.7")]
+    public async Task Версія_рядка_порівнюється_з_урахуванням_регістру()
+    {
+        // ⛔ L6-13: версія — Base64, а в Base64 `a` і `A` — різні байти. Порівняння
+        // без урахування регістру приймало б ЧУЖУ версію як свою.
+        _rows.GetRowsAsync(TableInstance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+             .Returns(RowStates(("7001001", 1001L, "AAAAAAAAB9E=")));
+
+        var ex = await Assert.ThrowsAsync<ConcurrencyConflictException>(() => Handler().HandleAsync(
+            Request(new PatchRow("7001001", "aaaaaaaab9e=", [new PatchCell("Volume", 1m)])),
+            CancellationToken.None));
+
+        Assert.Equal("ECR-CELL-0409", ex.ErrorCode);
+        await _cells.DidNotReceive().ApplyAsync(Arg.Any<CellChangeSet>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "ФВ-4.4")]
+    public async Task Створення_рядка_без_рішення_на_колонку_відхиляється()
+    {
+        // ⛔ L6-13: служба доступу дозволила рядок, але про колонку `Volume` не
+        // сказала нічого. Відсутнє рішення — відмова, як і для оновлень; доти
+        // створення з такою коміркою проходило мовчки.
+        _access.CanCreateRowsAsync(
+                   Arg.Any<AccessProfile>(), TableInstance,
+                   Arg.Any<IReadOnlyCollection<string>>(), Arg.Any<CancellationToken>())
+               .Returns(call => call.ArgAt<IReadOnlyCollection<string>>(2).ToDictionary(
+                   k => k,
+                   _ => new NewRowAccess(EditDecision.Allow(), new Dictionary<int, EditDecision>()),
+                   StringComparer.Ordinal));
+
+        var ex = await Assert.ThrowsAsync<AccessDeniedException>(() => Handler().HandleAsync(
+            Request(new PatchRow("NEW-1", BaseVersion: null, [new PatchCell("Volume", 2m)])),
+            CancellationToken.None));
+
+        Assert.Equal("NoGrant", ex.Details!["reason"]);
+        await _cells.DidNotReceive().ApplyAsync(Arg.Any<CellChangeSet>(), Arg.Any<CancellationToken>());
+    }
+
     /// <summary>
     /// Період із тіла не збігається з періодом екземпляра таблиці — <c>422</c>
     /// зі стабільним кодом, а не <c>500</c> (<c>DAT-04</c>).
@@ -1623,6 +1663,37 @@ public sealed class PatchCellsTests
 
         await _cells.Received(1).ApplyAsync(
             Arg.Is<CellChangeSet>(c => c.IsLateEdit == expected), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    public async Task Аудит_комірки_несе_CorrelationId_запиту()
+    {
+        // ⛔ L6-14: `aud.CellChange.CorrelationId` був `null` на кожному рядку —
+        // правку в журналі не було чим зв'язати з логом сервера й відповіддю.
+        _user.CorrelationId.Returns("req-l6-14");
+
+        await Handler().HandleAsync(
+            Request(new PatchRow("7001001", "0x0A", [new PatchCell("Volume", 7m)])),
+            CancellationToken.None);
+
+        Assert.Equal("req-l6-14", Assert.Single(Audited()).CorrelationId);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    public async Task Аудит_комірки_поза_запитом_пишеться_без_кореляції()
+    {
+        // ⚠ Поза запитом (фонова задача без автора) `ICurrentUser.CorrelationId`
+        // за контрактом кидає — запис від цього не мусить падати.
+        _user.CorrelationId.Returns(_ => throw new InvalidOperationException("поза запитом"));
+
+        var response = await Handler().HandleAsync(
+            Request(new PatchRow("7001001", "0x0A", [new PatchCell("Volume", 7m)])),
+            CancellationToken.None);
+
+        Assert.Equal(1, response.AppliedCells);
+        Assert.Null(Assert.Single(Audited()).CorrelationId);
     }
 
     /// <summary>Записи, які обробник віддав у журнал аудиту.</summary>

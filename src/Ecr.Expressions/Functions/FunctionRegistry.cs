@@ -130,9 +130,16 @@ public sealed class FunctionRegistry
         return Template.GetValueOrDefault(name);
     }
 
-    /// <summary>Викликає функцію.</summary>
+    /// <summary>Викликає функцію; кожен пласкій аргумент — окрема група з одного значення.</summary>
+    /// <remarks>
+    /// ⚠ Не одна спільна група: сторож <c>AcceptsRange</c> (аудит L7-05) прочитав би її як
+    /// діапазон, і <c>Invoke("ROUND", [x, 2])</c> мовчки дав би <c>#VALUE</c> (рев'ю AN-38, P3-2).
+    /// </remarks>
     public ExpressionValue Invoke(string name, IReadOnlyList<ExpressionValue> args, IEvaluationContext context)
-        => Invoke(name, [args], context);
+    {
+        ArgumentNullException.ThrowIfNull(args);
+        return Invoke(name, [.. args.Select(a => (IReadOnlyList<ExpressionValue>)[a])], context);
+    }
 
     /// <summary>Викликає функцію, зберігаючи межі аргументів.</summary>
     /// <remarks>
@@ -162,6 +169,14 @@ public sealed class FunctionRegistry
         {
             return TemplateFunctions.RegistryField(
                 groups[0], groups.Count > 1 ? groups[1] : [], context);
+        }
+
+        // ⛔ Аудит L7-05: функція без `AcceptsRange` бере рівно одне значення на
+        // аргумент. Флетінг діапазону зсував позиції (ROUND(v1, v2)), а порожня
+        // група давала ArgumentOutOfRangeException на `args[0]`.
+        if (GetSignature(name) is { AcceptsRange: false } && groups.Any(g => g.Count != 1))
+        {
+            return ExpressionValue.Error(ExpressionErrors.BadValue);
         }
 
         var args = groups.Count == 1 ? groups[0] : groups.SelectMany(g => g).ToList();

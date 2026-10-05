@@ -1,4 +1,4 @@
-import type { JSX } from 'react';
+import { useState, type JSX } from 'react';
 import { Anchor, Badge, Group, List, Modal, Skeleton, Stack, Text, Title } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
@@ -75,8 +75,9 @@ function EntryUsageBody({
   siblings: readonly RegistryEntryDto[];
 }): JSX.Element {
   // ⚠ Дата фіксується на відкриття діалогу: інакше перехід через північ змінив би ключ і
-  // перечитав звіт посеред читання.
-  const asOf = todayIso();
+  // перечитав звіт посеред читання. ⛔ L9-42: саме `useState` — виклик `todayIso()` у тілі
+  // рахувався на КОЖЕН рендер і нічого не фіксував.
+  const [asOf] = useState(todayIso);
 
   const report = useQuery({
     queryKey: entryUsageKey(registryCode, entry.id, asOf),

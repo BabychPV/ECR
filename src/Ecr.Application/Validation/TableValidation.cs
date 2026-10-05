@@ -207,4 +207,64 @@ internal static class TableValidation
                 : _values.GetValueOrDefault((rowId, column.Id));
         }
     }
+
+    /// <summary>
+    /// Обов'язкова колонка (<c>ColumnDef.IsRequired</c>) без заповненого
+    /// значення для кожного існуючого рядка екземпляра.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ «Заповнене» перевіряється як <c>!Value.IsEmpty</c>, а не як «є запис
+    /// у зрізі»: явна порожнеча (R-B4) теж матеріалізується, і рядок, у якому
+    /// обов'язкову клітинку колись занулили, має блокувати подання так само,
+    /// як рядок, де її взагалі не було. `PatchCellsHandler`/`ColumnDef.ValidateValue`
+    /// вже забороняють ЗАПИСАТИ такий стан явно (`ECR-CELL-0422`) — ця
+    /// перевірка ловить рядок, що прийшов до цього стану БЕЗ жодного запису
+    /// (найчастіше — просто ніхто не торкався клітинки).
+    ///
+    /// ⛔ L6-09: спільна для подання (<c>SubmitSheetHandler</c>) і «Перевірити»
+    /// (<c>ValidateDocumentHandler</c>) — доти жила лише в поданні, і «Перевірити»
+    /// казала «зауважень немає» там, де подання відмовляло саме через це.
+    /// </remarks>
+    public static List<ValidationMessage> MissingRequiredColumnMessages(
+        Domain.Entities.Configuration.TableDef table,
+        List<Domain.Entities.Configuration.ColumnDef> requiredColumns,
+        IReadOnlyList<CellRecord> cells,
+        IReadOnlyDictionary<string, long> rowIds)
+    {
+        if (requiredColumns.Count == 0 || rowIds.Count == 0)
+        {
+            return [];
+        }
+
+        var filled = cells
+            .Where(c => !c.Value.IsEmpty)
+            .Select(c => (c.Address.TableRowId, c.Address.ColumnDefId))
+            .ToHashSet();
+
+        var messages = new List<ValidationMessage>();
+
+        // ⚠ Порядок рядків — явний (`TableRow.Id`), а не порядок словника:
+        // той дорівнює порядку рядків із БД без `ORDER BY`. Див. `OrderAsOnScreen`.
+        foreach (var (rowKey, rowId) in rowIds.OrderBy(kv => kv.Value))
+        {
+            foreach (var column in requiredColumns)
+            {
+                if (filled.Contains((rowId, column.Id)))
+                {
+                    continue;
+                }
+
+                messages.Add(new ValidationMessage(
+                    Domain.Enums.ValidationSeverity.Error,
+                    "ECR-CELL-0422",
+                    $"Колонка «{column.Code}» обов'язкова.",
+                    table.Id,
+                    rowKey,
+                    column.Code,
+                    BlocksSave: true));
+            }
+        }
+
+        return messages;
+    }
 }

@@ -305,8 +305,9 @@ public sealed class UserStore(EcrDbContext db, SelfStampRotation? selfRotation =
         // штамп покриває і строкові призначення: редагування меж підміни
         // теж має вимкнути стару копію профілю негайно, а не чекати сплину
         // 30-хвилинного кешу (`AccessProfileCache`).
+        var previousStamp = user.SecurityStamp;
         user.RefreshSecurityStamp();
-        selfRotation?.Observe(user);
+        selfRotation?.Observe(user, previousStamp);
 
         return roles.Count;
     }
@@ -645,8 +646,9 @@ public sealed class UserStore(EcrDbContext db, SelfStampRotation? selfRotation =
 
         foreach (var user in users)
         {
+            var previousStamp = user.SecurityStamp;
             user.RefreshSecurityStamp();
-            selfRotation?.Observe(user);
+            selfRotation?.Observe(user, previousStamp);
         }
 
         return users.Count;
@@ -928,6 +930,30 @@ public sealed class UserStore(EcrDbContext db, SelfStampRotation? selfRotation =
                 reader.GetInt32(0),
                 reader.IsDBNull(1) ? null : DateTime.SpecifyKind(reader.GetDateTime(1), DateTimeKind.Utc),
                 reader.GetBoolean(2));
+        }
+        finally
+        {
+            await db.Database.CloseConnectionAsync().ConfigureAwait(false);
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> TryRegisterSuccessfulLoginAsync(int userId, DateTime utcNow, CancellationToken ct)
+    {
+        await db.Database.OpenConnectionAsync(ct).ConfigureAwait(false);
+        try
+        {
+            await using var command = db.Database.GetDbConnection().CreateCommand();
+            command.Transaction = db.Database.CurrentTransaction?.GetDbTransaction();
+            command.CommandText = """
+                UPDATE sec.[User]
+                SET FailedAttempts = 0, LockedUntil = NULL, LastSignInAt = @now
+                WHERE Id = @id AND (LockedUntil IS NULL OR LockedUntil <= @now);
+                """;
+            Add(command, "@id", System.Data.DbType.Int32, userId);
+            Add(command, "@now", System.Data.DbType.DateTime2, utcNow);
+
+            return await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false) > 0;
         }
         finally
         {

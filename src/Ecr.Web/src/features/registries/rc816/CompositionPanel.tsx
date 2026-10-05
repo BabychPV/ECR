@@ -12,7 +12,9 @@ import {
   Title,
   VisuallyHidden,
 } from '@mantine/core';
-import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useDebouncedValue } from '@mantine/hooks';
+import { keepPreviousData, useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query';
+import { queryKeys } from '@/api/queryKeys';
 import type { RegistryDefDto, RegistryDefinitionDto } from '@/api/types';
 import { t } from '@/shared/i18n';
 import { localized } from '@/shared/i18n/localized';
@@ -199,6 +201,9 @@ export function CompositionPanel({
   const queryClient = useQueryClient();
 
   const [search, setSearch] = useState('');
+  // ⚠ Пошук — після паузи, як у сітці даних (rc812): кожна літера інакше давала окремий запит і
+  // новий ключ, а таблиця на кожну літеру зникала до відповіді (L9-19).
+  const [debouncedSearch] = useDebouncedValue(search, 300);
   const [edits, setEdits] = useState<PendingRow[] | null>(null);
   const [result, setResult] = useState<RegistryBatchResult | null>(null);
   const [failure, setFailure] = useState<unknown>(null);
@@ -206,16 +211,18 @@ export function CompositionPanel({
   const counter = useRef(0);
 
   const rowsQuery = useInfiniteQuery({
-    queryKey: compositionKeys.rows(code, parentId, asOf, isPart ? '' : search),
+    queryKey: compositionKeys.rows(code, parentId, asOf, isPart ? '' : debouncedSearch),
     queryFn: ({ pageParam }) =>
       getRegistryRows(
         code,
         isPart
           ? { asOf, parentEntryId: parentId, cursor: pageParam, limit: PanelPage }
-          : { asOf, q: search, cursor: pageParam, limit: 100 },
+          : { asOf, q: debouncedSearch, cursor: pageParam, limit: 100 },
       ),
     initialPageParam: null as string | null,
     getNextPageParam: (page) => page.nextCursor,
+    // Попередні рядки лишаються на екрані, доки не прийшла відповідь на новий пошук.
+    placeholderData: keepPreviousData,
     refetchOnWindowFocus: false,
   });
 
@@ -223,7 +230,15 @@ export function CompositionPanel({
     () => (rowsQuery.data?.pages ?? []).flatMap((page) => page.items).map(fromServer),
     [rowsQuery.data],
   );
-  const rows = edits ?? serverRows;
+  // ⚠ Правки — знімок рядків на момент першої правки; сторінки, довантажені «Показати ще» ПІСЛЯ
+  // неї, доливаються до знімка (перед новими рядками), інакше кнопка «нічого не робила» (L9-09).
+  const rows = useMemo(() => {
+    if (edits === null) return serverRows;
+    const known = new Set(edits.map((row) => row.key));
+    const loaded = serverRows.filter((row) => !known.has(row.key));
+    if (loaded.length === 0) return edits;
+    return [...edits.filter((row) => row.id !== null), ...loaded, ...edits.filter((row) => row.id === null)];
+  }, [edits, serverRows]);
   const dirty = dirtyCount(rows);
   const problems = useMemo(() => problemsByRow(result), [result]);
 
@@ -238,9 +253,16 @@ export function CompositionPanel({
   }, [registries]);
 
   const columns = definition.fields.filter((field) => !(isPart && field.code === link.fieldCode));
+  const numeric = useMemo(
+    () => new Set(definition.fields.filter((field) => field.dataType === 'Int' || field.dataType === 'Decimal').map((field) => field.code)),
+    [definition.fields],
+  );
   const manualCode = definition.codeMode !== 'Auto';
   const external = definition.sourceKind === 'External';
   const locked = readOnly || external;
+  // ⚠ Поки пакет у дорозі, правки заблоковані: після успіху `setEdits(null)` знімає ВСІ правки,
+  // і набране під час запиту зникло б мовчки, а сітка показала б серверне значення.
+  const inputLocked = locked || busy;
 
   function edit(change: (all: readonly PendingRow[]) => PendingRow[]): void {
     setEdits(change(rows));
@@ -248,7 +270,7 @@ export function CompositionPanel({
   }
 
   async function submit(dryRun: boolean): Promise<void> {
-    const items = batchItems(rows);
+    const items = batchItems(rows, numeric);
     if (items.length === 0) return;
 
     setBusy(true);
@@ -259,7 +281,14 @@ export function CompositionPanel({
       if (report.applied) {
         setEdits(null);
         showDone(t('registries.rc816.saved', { count: items.length }));
-        await queryClient.invalidateQueries({ queryKey: ['registries', 'rc816', 'rows'] });
+        // ⚠ Увесь домен, а не лише свої ключі: сітка даних того самого довідника (rc812), перелік
+        // записів і варіанти `Lookup` інакше лишались зі старим `version` — правка там давала б
+        // `entryChanged` на щойно збережений рядок. Сторінка впливу (RT-25) — окремий ключ поза
+        // доменом (`RegistryImpactPage` `impactKey`), її перелік зачеплених теж застарів (L9-21).
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: queryKeys.registries.all() }),
+          queryClient.invalidateQueries({ queryKey: ['registry-impact', code] }),
+        ]);
       }
     } catch (error) {
       // ⚠ `422 ECR-REG-4221` — порушене правило рівня `Error` після всього пакета: відмова по суті,
@@ -359,7 +388,7 @@ export function CompositionPanel({
                           size="xs"
                           aria-label={t('registries.code')}
                           value={row.code}
-                          disabled={locked}
+                          disabled={inputLocked}
                           onChange={(event) => edit((all) => setCode(all, row.key, event.currentTarget.value))}
                         />
                       ) : onSelect !== undefined && row.id !== null ? (
@@ -389,7 +418,7 @@ export function CompositionPanel({
                           row={row}
                           targetCode={lookupTargets(field)}
                           asOf={asOf}
-                          readOnly={locked}
+                          readOnly={inputLocked}
                           onChange={(value) => edit((all) => setValue(all, row.key, field.code, value))}
                         />
                       </Table.Td>
@@ -400,6 +429,7 @@ export function CompositionPanel({
                           size="compact-xs"
                           variant="subtle"
                           color={row.deleted ? 'gray' : 'statusError'}
+                          disabled={busy}
                           onClick={() => edit((all) => toggleDelete(all, row.key))}
                         >
                           {row.deleted ? t('registries.rc816.undoDelete') : t('registries.rc816.delete')}
@@ -445,6 +475,7 @@ export function CompositionPanel({
           <Button
             size="xs"
             variant="default"
+            disabled={busy}
             onClick={() => {
               counter.current += 1;
               edit((all) => [
@@ -468,6 +499,7 @@ export function CompositionPanel({
             <Button
               size="xs"
               variant="subtle"
+              disabled={busy}
               onClick={() => {
                 setEdits(null);
                 setResult(null);

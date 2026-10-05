@@ -133,6 +133,18 @@ public sealed class NCalcLegacyTests
         Assert.Equal(1d, Number(Eval("2^3")));
     }
 
+    [Theory]
+    [InlineData("6 & 3", 2d)]
+    [InlineData("1 & 3", 1d)]
+    public void Амперсанд_це_побітове_AND_а_не_конкатенація(string expression, double expected)
+    {
+        // ⛔ Аудит L7-04, замір 2026-10-03: одинарний `&` — побітове AND, а
+        // `'a' & 'b'` кидає FormatException. Через це `&` заборонений у нашому
+        // діалекті B так само, як `^` (`expr.ampersandNotConcat`).
+        Assert.Equal(expected, Number(Eval(expression)));
+        Assert.Throws<FormatException>(() => Eval("'a' & 'b'"));
+    }
+
     [Fact]
     public void Оператора_степеня_НЕМАЄ()
     {

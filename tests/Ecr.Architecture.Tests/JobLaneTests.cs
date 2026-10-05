@@ -107,8 +107,9 @@ public sealed class JobLaneTests
     }
 
     /// <summary>
-    /// Api не бере лейн перерахунку, коли його виконує окремий пул (<c>D-206</c>),
-    /// а виконавець черги й адаптер з'являються лише в режимі <c>Database</c> (F1c).
+    /// Api не бере лейн перерахунку, коли його виконує окремий пул (<c>D-206</c>);
+    /// планувальник черги — лише в режимі <c>Database</c> (F1c), а в режимі <c>Quartz</c>
+    /// виконавець черги лишається дренажем залишків з усіх лейнів (L2-04).
     /// </summary>
     /// <remarks>
     /// ⚠ Перевіряється РЕЄСТРАЦІЯ контейнера (<c>AddEcrInfrastructure</c>), а не
@@ -121,10 +122,10 @@ public sealed class JobLaneTests
     [InlineData("Database", "Worker", true, false)]
     [InlineData("Database", "InProcess", true, true)]
     [InlineData("Database", null, true, true)]
-    [InlineData("Quartz", "Worker", false, false)]
-    [InlineData(null, null, false, false)]
+    [InlineData("Quartz", "Worker", false, true)]
+    [InlineData(null, null, false, true)]
     public void Воркер_Api_опитує_лейни_за_режимом_і_виконавцем_перерахунку(
-        string? mode, string? executor, bool workerRegistered, bool claimsRecalc)
+        string? mode, string? executor, bool queueScheduler, bool claimsRecalc)
     {
         var settings = new Dictionary<string, string?>
         {
@@ -140,20 +141,17 @@ public sealed class JobLaneTests
         var dbScheduler = services.Any(d =>
             d.ServiceType == typeof(IBackgroundJobScheduler) && d.ImplementationType == typeof(DbBackgroundJobScheduler));
 
-        Assert.Equal(workerRegistered, worker);
-        Assert.Equal(workerRegistered, dbScheduler);
+        Assert.True(worker);
+        Assert.Equal(queueScheduler, dbScheduler);
         Assert.Single(services, d => d.ServiceType == typeof(IBackgroundJobScheduler));
         Assert.Contains(services, d => d.ServiceType == typeof(IJobQueue));
         Assert.Contains(services, d => d.ServiceType == typeof(IJobLeaseContext));
 
-        if (workerRegistered)
-        {
-            var lanes = services.Single(d => d.ServiceType == typeof(JobWorkerOptions))
-                .ImplementationInstance is JobWorkerOptions options ? options.Lanes : [];
+        var lanes = services.Single(d => d.ServiceType == typeof(JobWorkerOptions))
+            .ImplementationInstance is JobWorkerOptions options ? options.Lanes : [];
 
-            Assert.Contains(JobLanes.Default, lanes);
-            Assert.Equal(claimsRecalc, lanes.Contains(JobLanes.Recalc));
-        }
+        Assert.Contains(JobLanes.Default, lanes);
+        Assert.Equal(claimsRecalc, lanes.Contains(JobLanes.Recalc));
     }
 
     [Fact]

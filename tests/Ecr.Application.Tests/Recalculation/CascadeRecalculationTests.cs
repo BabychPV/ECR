@@ -79,6 +79,27 @@ public sealed class CascadeRecalculationTests
         Assert.True(upsert.Value.IsCalculated);
     }
 
+    /// <summary>
+    /// Аудит L2-03 (передано в AN-38): цикл цілей перерахунку перевіряє токен.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Що було. Процесорна фаза (`foreach (var formulaId in targets) … Evaluate`)
+    /// токена не перевіряла взагалі: межа `MaxDuration` і запит скасування лише
+    /// «просили» зупинитися, а задача рахувала далі й писала результат.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public async Task Скасування_перед_циклом_цілей_зупиняє_перерахунок_без_запису()
+    {
+        Arrange(jan: 10m, feb: 5m);
+        using var cts = new CancellationTokenSource();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => Service(cts).RecalculateAsync(TableInstance, Dirty(_janId), cts.Token));
+
+        Assert.DoesNotContain(_cells.ReceivedCalls(), c => c.GetMethodInfo().Name == nameof(ICellStore.ApplyBatchAsync));
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
     [Trait("Requirement", "D-70")]
@@ -549,7 +570,7 @@ public sealed class CascadeRecalculationTests
         return dirty;
     }
 
-    private RecalculationService Service()
+    private RecalculationService Service(CancellationTokenSource? cancelOnPeriod = null)
     {
         _units.GetAsync(Arg.Any<CancellationToken>()).Returns(UnitCatalogSnapshot.Empty);
 
@@ -560,7 +581,13 @@ public sealed class CascadeRecalculationTests
         // який ці тести й перевіряють.
         var periods = Substitute.For<IPeriodStore>();
         periods.FindPeriodBoundsAsync(DocumentId, Period.Value, Arg.Any<CancellationToken>())
-            .Returns(new PeriodBounds(new DateOnly(2026, 1, 1), new DateOnly(2026, 1, 31)));
+            .Returns(_ =>
+            {
+                // Межі періоду читаються останніми перед циклом цілей — звідси
+                // зручно «натиснути стоп» рівно між підготовкою й обчисленням.
+                cancelOnPeriod?.Cancel();
+                return new PeriodBounds(new DateOnly(2026, 1, 1), new DateOnly(2026, 1, 31));
+            });
 
         // ⛔ `DAT-02` п. 4 (`S-04`): запис і аудит перерахунку тепер ідуть
         // через `IUnitOfWork.ExecuteInTransactionAsync`. Без цього налаштування

@@ -20,7 +20,7 @@ import { useUrlState } from '@/shared/ui/useUrlState';
 import {
   dateOfIso,
   isoOfDate,
-  resolveLookup,
+  resolveLookups,
   todayIso,
   useRegistryDefinition,
   useRegistryList,
@@ -36,6 +36,7 @@ import {
   existingRowKey,
   isDirty,
   newDraft,
+  normalizeCellInput,
   parseBlock,
   pastedBool,
   planBlockPaste,
@@ -93,7 +94,11 @@ export function RegistryDataPage(): JSX.Element {
   const totalCount = rows.data?.pages[0]?.totalCount ?? loaded.length;
   const units = useUnits(fields.some((f) => f.dataType === 'Unit'));
 
-  const readOnly = !can(session.data, 'Registry.EditData') || isExternalRegistry(registry);
+  // ⛔ Під симуляцією «очима користувача» сервер відхиляє КОЖЕН не-GET (`ECR-SIM-0403`), а `can()`
+  // бачить права цілі: без цієї умови сітка правилась би, а кожне збереження й жива перевірка
+  // `dryRun` (теж POST) падали б 403 (L9-18; так само, як `SheetActions` у сітці документа).
+  const simulation = session.data?.isSimulation === true;
+  const readOnly = simulation || !can(session.data, 'Registry.EditData') || isExternalRegistry(registry);
   const manualCode = definition.data?.codeMode !== 'Auto';
 
   const gridRows = useMemo<GridRow[]>(
@@ -145,8 +150,11 @@ export function RegistryDataPage(): JSX.Element {
     setSavedAt(null);
   };
 
-  const onEdit = (rowKey: string, field: string, value: string | null, display?: string): void =>
-    update(rowKey, (draft) => setCell(draft, byKey.get(rowKey), field, value, display));
+  const onEdit = (rowKey: string, field: string, value: string | null, display?: string): void => {
+    const typed = fields.find((f) => f.code === field);
+    const normalized = typed === undefined ? value : normalizeCellInput(typed, value);
+    update(rowKey, (draft) => setCell(draft, byKey.get(rowKey), field, normalized, display));
+  };
 
   const addRow = (): string => {
     seq.current += 1;
@@ -169,9 +177,22 @@ export function RegistryDataPage(): JSX.Element {
     update(rowKey, (draft) => ({ ...draft, deleted: !draft.deleted }));
   };
 
-  /** Вставка блоку: нові рядки за краєм, `Lookup` — за кодом або назвою цілі. */
+  /**
+   * Вставка блоку: нові рядки за краєм, `Lookup` — за кодом або назвою цілі.
+   *
+   * ⚠ Усі `Lookup` вставки резолвляться ДО правок, однакові — один раз (`resolveLookups`): стовпець
+   * із 300 рядків і 10 різними компонентами — 10 запитів, а не 300 послідовних, і правки лягають
+   * разом. Відмова запиту — незіставлена комірка в лічильнику, а не мовчки відкинутий хвіст.
+   */
   const onPaste = async (rowIndex: number, columnIndex: number, text: string): Promise<void> => {
     const cells = planBlockPaste(parseBlock(text), rowIndex, columnIndex, fields.map((f) => f.code));
+    const lookups: { target: string; text: string }[] = [];
+    for (const cell of cells) {
+      const field = fields.find((f) => f.code === cell.field);
+      const target = field?.dataType === 'Lookup' ? lookupCodeOf(field) : null;
+      if (target !== null && cell.text !== '') lookups.push({ target, text: cell.text });
+    }
+    const resolved = await resolveLookups(lookups, asOf);
     const keysByIndex = gridRows.map((g) => g.rowKey);
     let misses = 0;
 
@@ -187,7 +208,7 @@ export function RegistryDataPage(): JSX.Element {
 
       if (field.dataType === 'Lookup') {
         const target = lookupCodeOf(field);
-        const hit = target === null ? null : await resolveLookup(target, cell.text, asOf);
+        const hit = target === null ? null : resolved(target, cell.text);
         if (hit === null) misses += 1;
         else onEdit(rowKey, field.code, hit.id, hit.display);
       } else if (field.dataType === 'Unit') {
@@ -245,6 +266,9 @@ export function RegistryDataPage(): JSX.Element {
       setUnmatched(0);
       setSavedAt(new Date());
       void queryClient.invalidateQueries({ queryKey: queryKeys.registries.all() });
+      // Сторінка впливу (RT-25) — ключ поза доменом `registries` (`RegistryImpactPage` `impactKey`):
+      // без цього після правки вона показувала попередній перелік зачеплених документів (L9-21).
+      void queryClient.invalidateQueries({ queryKey: ['registry-impact', code] });
     },
     onError: showApiError,
   });
@@ -310,7 +334,13 @@ export function RegistryDataPage(): JSX.Element {
       {readOnly && registry !== undefined && (
         <Banner
           tone="info"
-          text={isExternalRegistry(registry) ? t('registries.data.readOnlyExternal') : t('registries.data.readOnly')}
+          text={
+            simulation
+              ? t('deny.SimulationReadOnly')
+              : isExternalRegistry(registry)
+                ? t('registries.data.readOnlyExternal')
+                : t('registries.data.readOnly')
+          }
         />
       )}
       {unmatched > 0 && (
@@ -342,7 +372,7 @@ export function RegistryDataPage(): JSX.Element {
             </Suspense>
           )}
           {!readOnly && (
-            <Button size="xs" variant="default" onClick={() => addRow()}>
+            <Button size="xs" variant="default" disabled={save.isPending} onClick={() => addRow()}>
               {t('registries.newEntry')}
             </Button>
           )}
@@ -380,6 +410,7 @@ export function RegistryDataPage(): JSX.Element {
               rows={gridRows}
               totalCount={totalCount + newKeys.length}
               readOnly={readOnly}
+              busy={save.isPending}
               manualCode={manualCode}
               problems={problems}
               duplicates={duplicates}

@@ -1,3 +1,4 @@
+import { normalizeUserDecimal } from '@/shared/format/userDecimal';
 import type { RegistryBatchItem, RegistryBatchResult, RegistryRow } from '../rows/api';
 
 /**
@@ -108,6 +109,13 @@ export function dirtyCount(rows: readonly PendingRow[]): number {
   return rows.filter(isDirty).length;
 }
 
+/** Значення числового поля → інваріантний запис (`12,5` → `12.5`); неоднозначне й не число — як є. */
+function sent(field: string, value: string, numeric: ReadonlySet<string>): string {
+  if (!numeric.has(field)) return value;
+  const read = normalizeUserDecimal(value);
+  return read.kind === 'number' ? read.text : value;
+}
+
 /**
  * Пакет змін панелі.
  *
@@ -115,8 +123,12 @@ export function dirtyCount(rows: readonly PendingRow[]): number {
  * як `null`: порожній рядок сервер прочитав би як значення. Новий рядок порожніх полів не надсилає.
  * `baseVersion` іде з кожною правкою й видаленням: чужу зміну після відкриття сервер назве
  * `entryChanged`, а не перезапише мовчки.
+ *
+ * ⚠ Числа (`numeric` — коди полів `Int`/`Decimal`) ідуть інваріантним записом за правилами
+ * сервера (`normalizeUserDecimal`): ті самі, що в сітці даних довідника (rc812) і в Σ.
+ * Неоднозначне `1,234` іде як є — сервер назве його `valueAmbiguousSeparator` у рядку.
  */
-export function batchItems(rows: readonly PendingRow[]): RegistryBatchItem[] {
+export function batchItems(rows: readonly PendingRow[], numeric: ReadonlySet<string> = new Set()): RegistryBatchItem[] {
   const items: RegistryBatchItem[] = [];
 
   for (const row of rows) {
@@ -128,7 +140,7 @@ export function batchItems(rows: readonly PendingRow[]): RegistryBatchItem[] {
     if (row.id === null) {
       const values: Record<string, string> = {};
       for (const [field, value] of Object.entries(row.values)) {
-        if (value.trim() !== '') values[field] = value.trim();
+        if (value.trim() !== '') values[field] = sent(field, value.trim(), numeric);
       }
       items.push({
         clientRowId: row.key,
@@ -147,7 +159,7 @@ export function batchItems(rows: readonly PendingRow[]): RegistryBatchItem[] {
     const values: Record<string, string | null> = {};
     for (const field of changed) {
       const value = (row.values[field] ?? '').trim();
-      values[field] = value === '' ? null : value;
+      values[field] = value === '' ? null : sent(field, value, numeric);
     }
     items.push({ clientRowId: row.key, op: 'upsert', id: row.id, code: null, baseVersion: row.version, values });
   }

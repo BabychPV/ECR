@@ -227,7 +227,8 @@ export function SourcesPage(): JSX.Element {
               label: '',
               sortable: false,
               render: (source) =>
-                can(session.data, 'Integration.Manage') ? (
+                // L9-18: під симуляцією збір (POST) сервер однаково відхилить.
+                can(session.data, 'Integration.Manage') && session.data?.isSimulation !== true ? (
                   <Button
                     size="compact-xs"
                     variant="default"

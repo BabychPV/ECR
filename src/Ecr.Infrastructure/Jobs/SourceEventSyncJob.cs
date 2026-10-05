@@ -154,10 +154,16 @@ public sealed partial class SourceEventSyncJob(
 
         // ⛔ Одне читання на сутність: мапінги (документи ділянок) ділять відповідь, а Truncated —
         // ознака саме цього читання. Відмова джерела — виняток адаптера, задача стає Failed.
-        var read = await adapter
-            .ReadEventsAsync(
-                new SourceEventQuery(dataSource.Id, entity.Id, entity.Code, from, to, AttributesOf(maps)), ct)
+        var (read, pages) = await ReadEventPagesAsync(
+                adapter, new SourceEventQuery(dataSource.Id, entity.Id, entity.Code, from, to, AttributesOf(maps)), ct)
             .ConfigureAwait(false);
+        var truncatedAfterPaging = read.Truncated && read.ErrorCode is null && read.Events.Count > 0
+            ? new EventsTruncation(read.Events.Count, pages, read.Events.Max(e => e.StartUtc))
+            : null;
+        if (truncatedAfterPaging is not null)
+        {
+            LogEventsTruncated(_logger, entity.Code, read.Events.Count, pages);
+        }
 
         await progress.ReportKeyAsync(40, "jobs.sourceEventsWriting", ct).ConfigureAwait(false);
 
@@ -172,7 +178,7 @@ public sealed partial class SourceEventSyncJob(
         var totals = new Totals();
         foreach (var map in maps)
         {
-            await SyncMapAsync(map, own, sibling, from, to, now, totals, ct).ConfigureAwait(false);
+            await SyncMapAsync(map, own, sibling, from, to, now, totals, truncatedAfterPaging, ct).ConfigureAwait(false);
         }
 
         if (totals.Removed > 0 || totals.RemovalSkipped > 0)
@@ -334,8 +340,8 @@ public sealed partial class SourceEventSyncJob(
             SourceEventResult result;
             try
             {
-                result = await adapter
-                    .ReadEventsAsync(
+                (result, _) = await ReadEventPagesAsync(
+                        adapter,
                         new SourceEventQuery(
                             dataSourceId, sibling.Id, sibling.Code, from, to,
                             AttributesOf([.. candidates.First(g => g.Key == sibling.Id)])),
@@ -383,6 +389,56 @@ public sealed partial class SourceEventSyncJob(
         Message = "SourceEventSyncJob: подія {EventId} є в шаблонах {Template} і {Other} з різними значеннями атрибутів; береться перший за порядком шаблонів.")]
     private static partial void LogTemplateOverlap(ILogger logger, string eventId, string template, string other);
 
+    /// <summary>Скільки сторінок подій дочитувати за одне читання шаблону (L3-07).</summary>
+    public const int MaxEventPages = 10;
+
+    /// <summary>Читання подій обрізане й після сторінкування: скільки прочитано і де зупинились.</summary>
+    private sealed record EventsTruncation(int Count, int Pages, DateTime LastStartUtc);
+
+    /// <summary>
+    /// Читає події вікна сторінками: наступна — від найпізнішого прочитаного початку (включно), дублікати —
+    /// за <c>EventId</c>; до <see cref="MaxEventPages"/> сторінок.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ L3-07: одне читання зі стелею <see cref="SourceEventQuery.DefaultMaxEvents"/> від найранішого відкритого
+    /// періоду (повна звірка) щоразу віддавало ті самі найраніші події — найсвіжіші не синхронізувалися ніколи,
+    /// доки старий період не закриють. Запит упорядкований за початком (контракт адаптерів). Сторінка, що не
+    /// зрушила курсор (усі події з одним початком), зупиняє читання як обрізане.
+    /// </remarks>
+    private static async Task<(SourceEventResult Result, int Pages)> ReadEventPagesAsync(
+        IExternalDataSource adapter, SourceEventQuery query, CancellationToken ct)
+    {
+        var events = new List<SourceEvent>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var cursor = query.FromUtc;
+        var pages = 0;
+
+        while (true)
+        {
+            var page = await adapter.ReadEventsAsync(query with { FromUtc = cursor }, ct).ConfigureAwait(false);
+            pages++;
+            events.AddRange(page.Events.Where(e => seen.Add(e.EventId)));
+
+            if (!page.Truncated || page.ErrorCode is not null || page.Events.Count == 0)
+            {
+                return (new SourceEventResult(events, page.Truncated, page.ErrorCode), pages);
+            }
+
+            var next = page.Events.Max(e => e.StartUtc);
+            if (next <= cursor || pages >= MaxEventPages)
+            {
+                return (new SourceEventResult(events, true, null), pages);
+            }
+
+            cursor = next;
+        }
+    }
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "SourceEventSyncJob: шаблон {Template} — подій у вікні більше, ніж дочитано ({Count} за {Pages} сторінок); пізніші цим прогоном не синхронізовано, видалення пропущено.")]
+    private static partial void LogEventsTruncated(ILogger logger, string template, int count, int pages);
+
     private async Task SyncMapAsync(
         SourceEventMap map,
         SourceEventResult read,
@@ -391,6 +447,7 @@ public sealed partial class SourceEventSyncJob(
         DateTime to,
         DateTime now,
         Totals totals,
+        EventsTruncation? truncation,
         CancellationToken ct)
     {
         var projectId = await db.Documents
@@ -466,8 +523,34 @@ public sealed partial class SourceEventSyncJob(
         var appliedPeriods = new HashSet<int>();
         var writes = await WriteRowsAsync(map, plan, fields, tz, units, appliedPeriods, ct).ConfigureAwait(false);
 
+        // ⛔ L3-03: патчер ділить із задачею scoped-контекст і на гонці за рядок робить
+        // ChangeTracker.Clear() — зв'язки відчеплено, і зміни етапу 2 (Written, Missing, Rekey…)
+        // SaveChangesAsync мовчки не бачив. Відчеплені — перечитуємо відстежуваними.
+        if (links.Any(l => db.Entry(l).State == EntityState.Detached))
+        {
+            links = await db.SourceEventLinks
+                .Where(l => l.SourceEventMapId == map.Id)
+                .ToListAsync(ct)
+                .ConfigureAwait(false);
+            linkByEventId = links.ToDictionary(l => l.SourceEventId, StringComparer.OrdinalIgnoreCase);
+        }
+
         // ── Етап 2: зв'язки.
         var events = new List<CoverageEvent>();
+
+        // L3-07: подій більше, ніж дочитали сторінками, — людині видно в журналі покриття, а не лише
+        // мовчазним вимкненням Missing/видалення.
+        if (truncation is not null && SourceEventPeriods.Locate(truncation.LastStartUtc, periods) is { } truncatedPeriod)
+        {
+            events.Add(new CoverageEvent(
+                map.SourceEntityId,
+                new PeriodKey(truncatedPeriod.PeriodKey),
+                CollectionCoverage.SourceDataRefused,
+                CoverageDetails.EventsTruncated(
+                    truncation.Count,
+                    truncation.Pages,
+                    truncation.LastStartUtc.ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture))));
+        }
         foreach (var item in plan.Items)
         {
             var link = item.Link is { } state ? linkByEventId[state.SourceEventId] : null;
@@ -487,7 +570,7 @@ public sealed partial class SourceEventSyncJob(
         Exception? initial = null;
         try
         {
-            var removed = await ApplyRemovalsAsync(map, decision, appliedPeriods, links, linkByEventId, totals, ct)
+            var removed = await ApplyRemovalsAsync(map, decision, appliedPeriods, links, linkByEventId, totals, events, ct)
                 .ConfigureAwait(false);
 
             // Подія переїхала в братній шаблон (чи дублюється в ньому): зв'язок знімаємо, РЯДОК лишається —
@@ -759,6 +842,7 @@ public sealed partial class SourceEventSyncJob(
         List<SourceEventLink> links,
         Dictionary<string, SourceEventLink> linkByEventId,
         Totals totals,
+        List<CoverageEvent> events,
         CancellationToken ct)
     {
         var removed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -786,15 +870,51 @@ public sealed partial class SourceEventSyncJob(
         await connection.OpenAsync(ct).ConfigureAwait(false);
         await using var tx = (Microsoft.Data.SqlClient.SqlTransaction)await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
 
+        var sheetDefId = await db.TableDefs
+            .AsNoTracking()
+            .Where(t => t.Id == map.TableDefId)
+            .Select(t => (int?)t.SheetDefId)
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+        var locked = new Dictionary<int, bool>();
+        var deleted = new List<PendingRemoval>();
+
         foreach (var item in physical)
         {
+            // ⛔ L3-04: рішення (DecideRemovalsAsync) читало стан аркуша й правки людини ПОЗА цією
+            // транзакцією — подання чи правка між рішенням і видаленням інакше губилися б. Як правка в
+            // PatchCellsHandler: спільне блокування аркуша, далі гарди повторно — у тій самій транзакції.
+            var periodKey = item.State.PeriodKey!.Value;
+            if (sheetDefId is { } sheet)
+            {
+                if (!locked.TryGetValue(periodKey, out var taken))
+                {
+                    taken = await TryLockSheetAsync(connection, tx, map.DocumentId, sheet, periodKey, ct).ConfigureAwait(false);
+                    locked[periodKey] = taken;
+                }
+
+                if (!taken)
+                {
+                    totals.RemovalSkipped++;
+                    continue;
+                }
+            }
+
+            if (await RecheckRemovalAsync(connection, tx, map, sheetDefId, item, ct).ConfigureAwait(false) is { } refused)
+            {
+                events.Add(refused);
+                totals.RemovalSkipped++;
+                continue;
+            }
+
             await JournalAndDeleteAsync(connection, tx, map, item, ct).ConfigureAwait(false);
+            deleted.Add(item);
         }
 
         await tx.CommitAsync(ct).ConfigureAwait(false);
 
         // Після коміту: трекер і лічильники (до коміту збій не лишає хибного «видалено»).
-        foreach (var item in physical)
+        foreach (var item in deleted)
         {
             db.Entry(item.Link).State = EntityState.Detached;
             links.Remove(item.Link);
@@ -818,6 +938,115 @@ public sealed partial class SourceEventSyncJob(
         links.Remove(link);
         linkByEventId.Remove(link.SourceEventId);
         removed.Add(link.SourceEventId);
+    }
+
+    /// <summary>Спільне блокування аркуша в транзакції видалення (той самий ресурс, що й у <c>SheetEditGate</c>).</summary>
+    /// <returns><c>false</c> — аркуш зайнятий поданням довше за таймаут: видалення лишається наступному прогону.</returns>
+    private static async Task<bool> TryLockSheetAsync(
+        Microsoft.Data.SqlClient.SqlConnection connection,
+        Microsoft.Data.SqlClient.SqlTransaction tx,
+        long documentId,
+        int sheetDefId,
+        int periodKey,
+        CancellationToken ct)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = tx;
+        command.CommandType = System.Data.CommandType.StoredProcedure;
+        command.CommandText = "sp_getapplock";
+        command.Parameters.Add(new Microsoft.Data.SqlClient.SqlParameter("@Resource", System.Data.SqlDbType.NVarChar, 255)
+        {
+            Value = SheetEditGate.ResourceOf(documentId, sheetDefId, periodKey),
+        });
+        command.Parameters.Add(new Microsoft.Data.SqlClient.SqlParameter("@LockMode", System.Data.SqlDbType.VarChar, 32) { Value = "Shared" });
+        command.Parameters.Add(new Microsoft.Data.SqlClient.SqlParameter("@LockOwner", System.Data.SqlDbType.VarChar, 32) { Value = "Transaction" });
+        command.Parameters.Add(new Microsoft.Data.SqlClient.SqlParameter("@LockTimeout", System.Data.SqlDbType.Int)
+        {
+            Value = SheetEditGatePolicy.DefaultLockTimeoutSeconds * 1000,
+        });
+        var result = new Microsoft.Data.SqlClient.SqlParameter("@Result", System.Data.SqlDbType.Int)
+        {
+            Direction = System.Data.ParameterDirection.ReturnValue,
+        };
+        command.Parameters.Add(result);
+        command.CommandTimeout = SheetEditGatePolicy.DefaultLockTimeoutSeconds + 15;
+
+        await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        return (int)result.Value! >= 0;
+    }
+
+    /// <summary>
+    /// Гарди видалення ще раз — під блокуванням аркуша і рядка, у транзакції видалення (L3-04).
+    /// </summary>
+    /// <returns>Подія покриття, якщо рядок видаляти вже не можна; <c>null</c> — можна.</returns>
+    /// <remarks>
+    /// Рядок береться <c>UPDLOCK, HOLDLOCK</c>: правка людини, що ще не закомітилась, дочекається видалення
+    /// (і відмовить), а закомічена — видна наступному оператору (RCSI бере знімок на початку оператора).
+    /// </remarks>
+    private static async Task<CoverageEvent?> RecheckRemovalAsync(
+        Microsoft.Data.SqlClient.SqlConnection connection,
+        Microsoft.Data.SqlClient.SqlTransaction tx,
+        SourceEventMap map,
+        int? sheetDefId,
+        PendingRemoval item,
+        CancellationToken ct)
+    {
+        var state = item.State;
+        var periodKey = state.PeriodKey!.Value;
+
+        await using var command = connection.CreateCommand();
+        command.Transaction = tx;
+        command.CommandText = """
+            SELECT COUNT(*) FROM doc.TableRow WITH (UPDLOCK, HOLDLOCK)
+             WHERE PeriodKey = @period AND TableInstanceId = @instance AND RowKey = @rowKey;
+
+            SELECT TOP (1) Status FROM wf.ApprovalState
+             WHERE @sheet IS NOT NULL AND DocumentId = @document AND SheetDefId = @sheet AND PeriodKey = @period
+               AND Status IN (@submitted, @approved);
+
+            WITH last_change AS (
+                SELECT c.Origin,
+                       ROW_NUMBER() OVER (PARTITION BY c.ColumnDefId ORDER BY c.ChangedAt DESC, c.Id DESC) AS rn
+                  FROM aud.CellChange AS c
+                  JOIN doc.TableRow  AS r ON r.PeriodKey = c.PeriodKey AND r.Id = c.TableRowId
+                 WHERE c.PeriodKey = @period AND r.TableInstanceId = @instance AND c.RowKey = @rowKey
+            )
+            SELECT COUNT(*) FROM last_change WHERE rn = 1 AND Origin = N'UserEdit';
+            """;
+        command.Parameters.AddWithValue("@period", periodKey);
+        command.Parameters.AddWithValue("@instance", state.TableInstanceId!.Value);
+        command.Parameters.AddWithValue("@rowKey", state.RowKey!);
+        command.Parameters.AddWithValue("@document", map.DocumentId);
+        command.Parameters.Add("@sheet", System.Data.SqlDbType.Int).Value = (object?)sheetDefId ?? DBNull.Value;
+        command.Parameters.Add("@submitted", System.Data.SqlDbType.TinyInt).Value = (byte)DocumentStatus.Submitted;
+        command.Parameters.Add("@approved", System.Data.SqlDbType.TinyInt).Value = (byte)DocumentStatus.Approved;
+
+        await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        await reader.ReadAsync(ct).ConfigureAwait(false);
+        await reader.NextResultAsync(ct).ConfigureAwait(false);
+
+        if (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            var status = (DocumentStatus)reader.GetByte(0);
+            return new CoverageEvent(
+                map.SourceEntityId,
+                new PeriodKey(periodKey),
+                CollectionCoverage.SkippedPeriodClosed,
+                CoverageDetails.EventRemovalSheetSubmitted(state.SourceEventId, state.RowKey!, status));
+        }
+
+        await reader.NextResultAsync(ct).ConfigureAwait(false);
+        await reader.ReadAsync(ct).ConfigureAwait(false);
+        if (reader.GetInt32(0) > 0)
+        {
+            return new CoverageEvent(
+                map.SourceEntityId,
+                new PeriodKey(periodKey),
+                CollectionCoverage.ConflictKeptManual,
+                CoverageDetails.EventRemovalKeptManual(state.SourceEventId, state.RowKey!));
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -930,6 +1159,10 @@ public sealed partial class SourceEventSyncJob(
             DELETE FROM doc.TableRow
              WHERE PeriodKey = @period AND TableInstanceId = @instance AND RowKey = @rowKey;
             DELETE FROM ext.SourceEventLink WHERE Id = @link;
+            -- L3-13: провенанс вікна рядка (ключ — RowKey) знімається з чинних, історія лишається;
+            -- інакше повернена подія з тим самим ID дає рядок, який RowWindowFetchJob вважає вже підтягнутим.
+            UPDATE ext.RowWindowValue SET IsCurrent = 0
+             WHERE PeriodKey = @period AND TableInstanceId = @instance AND RowKey = @rowKey AND IsCurrent = 1;
             """;
         delete.Parameters.AddWithValue("@period", periodKey);
         delete.Parameters.AddWithValue("@instance", instance);

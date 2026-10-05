@@ -79,14 +79,50 @@ public sealed class StoppingInterruptsJobsTests
     [Trait("Requirement", "U8")]
     public async Task Зупинка_застосунку_надсилає_скасування_задачі_що_виконується()
     {
-        var factory = StandaloneQuartz.Factory("ecr-stopping");
+        var (cancelled, elapsed) = await StopRunningJobAsync("ecr-stopping", (services, factory) =>
+            services.AddScoped<IBackgroundJobScheduler>(_ => new QuartzJobScheduler(factory)));
+
+        Assert.True(
+            cancelled,
+            "Зупинка застосунку не надіслала скасування задачі, що виконується (InterruptAllAsync не викликано).");
+        Assert.True(elapsed < TimeSpan.FromSeconds(10), $"Зупинка забрала {elapsed}.");
+    }
+
+    /// <summary>
+    /// L2-02: у режимі <c>Database</c> порт — <see cref="DbBackgroundJobScheduler"/>, а розклад
+    /// однаково виконує Quartz процесу; DI — як у <c>AddInfrastructure</c> цієї гілки.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "U8")]
+    public async Task Зупинка_в_режимі_Database_скасовує_задачу_Quartz_за_розкладом()
+    {
+        var (cancelled, elapsed) = await StopRunningJobAsync("ecr-stopping-db", (services, factory) =>
+        {
+            services.AddScoped(_ => new QuartzJobScheduler(factory));
+            services.AddScoped(_ => Substitute.For<IJobQueue>());
+            services.AddSingleton<JobQueueSignal>();
+            services.AddScoped<IBackgroundJobScheduler, DbBackgroundJobScheduler>();
+        });
+
+        Assert.True(
+            cancelled,
+            "У режимі Database зупинка не надіслала скасування задачі Quartz (порт — DbBackgroundJobScheduler).");
+        Assert.True(elapsed < TimeSpan.FromSeconds(10), $"Зупинка забрала {elapsed}.");
+    }
+
+    /// <summary>Запускає довгу задачу Quartz, зупиняє службу; чи отримала задача скасування і скільки тривала зупинка.</summary>
+    private static async Task<(bool Cancelled, TimeSpan Elapsed)> StopRunningJobAsync(
+        string schedulerName, Action<ServiceCollection, ISchedulerFactory> register)
+    {
+        var factory = StandaloneQuartz.Factory(schedulerName);
         var quartz = await factory.GetScheduler();
 
         var runId = Guid.NewGuid().ToString("N");
         var run = Runs.GetOrAdd(runId, _ => new Run());
 
         var services = new ServiceCollection();
-        services.AddScoped<IBackgroundJobScheduler>(_ => new QuartzJobScheduler(factory));
+        register(services, factory);
         await using var provider = services.BuildServiceProvider();
 
         // ApplicationStarted ніколи не настає: постановка розкладів і цикл
@@ -116,10 +152,7 @@ public sealed class StoppingInterruptsJobsTests
             // Задача, якій не надіслали сигналу, тримається 30 с — чекаємо 10.
             var cancelled = await Task.WhenAny(run.Cancelled.Task, Task.Delay(TimeSpan.FromSeconds(10)));
 
-            Assert.True(
-                cancelled == run.Cancelled.Task,
-                "Зупинка застосунку не надіслала скасування задачі, що виконується (InterruptAllAsync не викликано).");
-            Assert.True(watch.Elapsed < TimeSpan.FromSeconds(10), $"Зупинка забрала {watch.Elapsed}.");
+            return (cancelled == run.Cancelled.Task, watch.Elapsed);
         }
         finally
         {

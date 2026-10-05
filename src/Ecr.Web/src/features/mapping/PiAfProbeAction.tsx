@@ -49,6 +49,8 @@ export function PiAfProbeAction({
   const session = useSession();
 
   const probe = useMutation({
+    // ⚠ Відмову показує `ErrorAlert` у рендері — без `handled` сітка додала б тост (L9-01).
+    meta: { handled: true },
     mutationFn: (value: string) => probeSourcePath(dataSourceId, value),
   });
 

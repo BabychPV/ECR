@@ -175,6 +175,19 @@ public sealed class DocumentRecalculateQuotaTests(SqlServerFixture sql)
         Assert.False(quota.TryAcquire("a", out _, out _));
     }
 
+    /// <summary>L1-10: різний запис того самого id (<c>5</c>, <c>05</c>, <c>0005</c>) ділить одну межу пари.</summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    public void Різний_запис_того_самого_id_ділить_межу()
+    {
+        var quota = new DocumentRecalculateQuota(
+            new ConfigurationBuilder().AddInMemoryCollection([new(DocumentRecalculateQuota.PermitKey, "2")]).Build(), new ManualClock());
+
+        Assert.True(quota.TryAcquire("u", "5", out _, out _));
+        Assert.True(quota.TryAcquire("u", "05", out _, out _));
+        Assert.False(quota.TryAcquire("u", "0005", out _, out _));
+    }
+
     /// <remarks>Мутація: прибрати <c>quota.Refund</c> після <c>next</c> для статусу ≥ 400 без винятку — червоне.</remarks>
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage4)]

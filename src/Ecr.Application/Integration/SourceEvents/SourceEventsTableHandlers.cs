@@ -160,7 +160,10 @@ public sealed class ListSourceEventsHandler(
             }
 
             var read = await access.CanReadDocumentAsync(profile, map.DocumentId, ct).ConfigureAwait(false);
-            if (read.IsAllowed)
+            // ⛔ L1-09: видимості документа мало — заборона/звуження на таблицю мапінгу (S6) теж закриває події
+            // (ключ рядка, час, первинний елемент — дані самої таблиці). Невидима таблиця = мапінгу немає.
+            if (read.IsAllowed
+                && (await access.ReadScopeAsync(profile, map.DocumentId, ct).ConfigureAwait(false)).CanReadTable(map.TableDefId))
             {
                 visible.Add(map.Id);
             }

@@ -1,5 +1,6 @@
 import type { components } from '@/api/schema';
 import type { RegistryDefinitionDto, RegistryFieldSaveDto } from '@/api/types';
+import { normalizeUserDecimal } from '@/shared/format/userDecimal';
 
 /**
  * Композиція довідників (`ФВ-8.16`, `D-155`, FEATURE-REGISTRY-TABLES §4.8): поле `Lookup`
@@ -195,24 +196,32 @@ export interface Decimal {
   readonly scale: number;
 }
 
-const DecimalPattern = /^([+-]?)(\d*)(?:\.(\d*))?(?:[eE]([+-]?\d+))?$/;
+/** Найбільша експонента, яку ще має сенс читати: масштаб `decimal` .NET — 28. */
+const MaxDecimalExponent = 28;
+
+const DecimalPattern =/^([+-]?)(\d*)(?:\.(\d*))?(?:[eE]([+-]?\d+))?$/;
 
 /**
- * Читає число: інваріантний запис сервера (`12.5`, `1E-05`) або введене людиною з однією комою
- * як десятковим роздільником (`12,5`). Пробіли — розряди. `null` — не число.
+ * Читає число: інваріантний запис сервера (`12.5`, `1E-05`) або введене людиною за правилами
+ * сервера (`normalizeUserDecimal`: `12,5`, `1 234,5`). `null` — не число або неоднозначне
+ * (`1,234`): Σ не вгадує те, що сервер однаково відхилить.
  *
  * ⚠ `BigInt`, а не `Number`: склад газу — це десятки значень із шістьма знаками, і Σ у подвійній
  * точності давала б `99.99999999999999` там, де сервер (decimal) рахує рівно `100`.
  */
 export function parseDecimal(raw: string): Decimal | null {
-  let text = raw.replace(/[\s  ]/g, '');
-  if (!text.includes('.') && (text.match(/,/g) ?? []).length === 1) text = text.replace(',', '.');
+  const read = normalizeUserDecimal(raw);
+  if (read.kind !== 'number') return null;
 
-  const match = DecimalPattern.exec(text);
+  const match = DecimalPattern.exec(read.text);
   if (match === null) return null;
 
   const [, sign = '', whole = '', fraction = '', exponent = '0'] = match;
   if (whole.length === 0 && fraction.length === 0) return null;
+  // ⛔ Експонента лише в межах `decimal` .NET (28 знаків): `1e-100000000` інакше змушувало б на
+  // КОЖЕН рендер Σ рахувати `10n ** 100000000n` (вкладка висне), а ще цифра — `RangeError` у рендері
+  // і межа маршруту розмонтовує редактор з усіма незбереженими правками. Сервер такого не прийме.
+  if (Math.abs(Number(exponent)) > MaxDecimalExponent) return null;
 
   let units = BigInt(`${whole}${fraction}` || '0');
   let scale = fraction.length - Number(exponent);

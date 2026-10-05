@@ -365,6 +365,36 @@ public sealed class SourceEventSyncPlannerTests
         Assert.Equal(["E2", "E3"], plan.Gone!.Select(g => g.SourceEventId).Order(StringComparer.Ordinal));
     }
 
+    /// <summary>
+    /// ⛔ L3-12: атрибут звуження NULL чи відсутній — «невідомо», а не «не проходить»: подія не пишеться,
+    /// але зв'язок не стає ні Gone (жорстке видалення рядка), ні Missing. Мутація: повертати
+    /// <c>FilterOutcome.Fail</c> замість <c>Unknown</c> у <c>PassesFilter</c>.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Directive", "HSE301-EFSYNC")]
+    public void АтрибутЗвуженняNull_ЗвязокНеGone()
+    {
+        var nullValue = Linked("E1", "EF-E1");
+        var noAttribute = Linked("E2", "EF-E2", start: Start.AddHours(1));
+        var failed = Linked("E3", "EF-E3", start: Start.AddHours(2));
+
+        var events = new[]
+        {
+            Ev("E1", Start, Start.AddMinutes(15), attrs: [new SourceEventAttribute("Flare", SourceEventAttributeScope.Event, null, null, null)]),
+            Ev("E2", Start.AddHours(1), Start.AddHours(2)),
+            Ev("E3", Start.AddHours(2), Start.AddHours(3), attrs: [Attribute("Flare", "LP")]),
+        };
+
+        var plan = SourceEventSyncPlanner.Plan(Input(events, [nullValue, noAttribute, failed], [January])
+            with { FilterAttribute = "Flare", FilterScope = SourceEventAttributeScope.Event, FilterValue = "HP" });
+
+        Assert.Empty(plan.Items);
+        Assert.Equal(3, plan.Filtered);
+        Assert.Equal(["E3"], plan.Gone!.Select(g => g.SourceEventId));
+        Assert.Equal(["E3"], plan.Missing.Select(m => m.SourceEventId));
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait("Directive", "HSE301-A5b")]

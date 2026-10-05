@@ -56,6 +56,19 @@ public sealed class SheetEditGate(EcrDbContext db, SheetEditGatePolicy? policy =
 
     private readonly TimeSpan _lockTimeout = (policy ?? SheetEditGatePolicy.Default).LockTimeout;
 
+    /// <summary>Ім'я ресурсу <c>sp_getapplock</c> аркуша «документ × аркуш × період».</summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="sheetDefId">Аркуш.</param>
+    /// <param name="periodKey">Період.</param>
+    /// <remarks>
+    /// ⛔ Одне ім'я на всіх, хто пише аркуш повз <c>PatchCellsHandler</c> (видалення рядків подій —
+    /// <c>SourceEventSyncJob</c>, L3-04): інший рядок ресурсу був би іншим блокуванням, і подання
+    /// його не чекало б.
+    /// </remarks>
+    /// <returns>Рядок ресурсу.</returns>
+    public static string ResourceOf(long documentId, int sheetDefId, int periodKey)
+        => string.Create(CultureInfo.InvariantCulture, $"ecr:sheet-edit:{documentId}:{sheetDefId}:{periodKey}");
+
     /// <inheritdoc />
     public async Task<DocumentStatus> EnterEditAsync(
         long documentId, int sheetDefId, PeriodKey periodKey, CancellationToken ct)
@@ -95,8 +108,7 @@ public sealed class SheetEditGate(EcrDbContext db, SheetEditGatePolicy? policy =
         command.CommandType = CommandType.StoredProcedure;
         command.CommandText = "sp_getapplock";
 
-        var resource = string.Create(
-            CultureInfo.InvariantCulture, $"ecr:sheet-edit:{documentId}:{sheetDefId}:{periodKey.Value}");
+        var resource = ResourceOf(documentId, sheetDefId, periodKey.Value);
 
         command.Parameters.Add(new SqlParameter("@Resource", SqlDbType.NVarChar, 255) { Value = resource });
         command.Parameters.Add(new SqlParameter("@LockMode", SqlDbType.VarChar, 32) { Value = mode });

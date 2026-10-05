@@ -100,8 +100,16 @@ export function parsePeriod(text: string): number | null | undefined {
   return year >= 1900 && sequence >= 1 && sequence <= 99 ? year * 100 + sequence : undefined;
 }
 
-/** Чи можна надіслати область: межі — періоди, «з» не пізніше «по». */
+/**
+ * Чи можна надіслати область: межі — періоди, «з» не пізніше «по».
+ *
+ * ⛔ L9-11: без проєктів область не звужується зовсім (`scopeToDto` → `null`), а поля періодів
+ * вимкнені — тож лишений у них текст не валідується. Доти `2026-1x` у вимкненому полі після зняття
+ * всіх проєктів блокував «Save»/«Assign», і виправити поле було неможливо.
+ */
 export function scopeValid(entry: ScopeEntry): boolean {
+  if (entry.projects.length === 0) return true;
+
   const from = parsePeriod(entry.from);
   const to = parsePeriod(entry.to);
 
@@ -248,7 +256,8 @@ export function ScopeFields({
         value={value.from}
         onChange={(event) => onChange({ ...value, from: event.currentTarget.value })}
         disabled={!narrowing}
-        error={from === undefined ? t('security.scopePeriodInvalid') : undefined}
+        // ⚠ L9-11: вимкнене поле не валідується (див. `scopeValid`) — і помилки біля нього немає.
+        error={narrowing && from === undefined ? t('security.scopePeriodInvalid') : undefined}
         miw={140}
       />
       <TextInput
@@ -259,11 +268,13 @@ export function ScopeFields({
         onChange={(event) => onChange({ ...value, to: event.currentTarget.value })}
         disabled={!narrowing}
         error={
-          to === undefined
-            ? t('security.scopePeriodInvalid')
-            : reversed
-              ? t('security.scopePeriodOrder')
-              : undefined
+          !narrowing
+            ? undefined
+            : to === undefined
+              ? t('security.scopePeriodInvalid')
+              : reversed
+                ? t('security.scopePeriodOrder')
+                : undefined
         }
         miw={140}
       />

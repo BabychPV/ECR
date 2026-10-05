@@ -50,6 +50,9 @@ const jobs = [
 /** Усі адреси, куди сторінка сходила методом POST. */
 const posted: string[] = [];
 
+/** Чи тримати відповідь на скасування «у польоті» (L9-37). */
+let holdCancel = false;
+
 function mockFetch(): void {
   posted.length = 0;
 
@@ -61,6 +64,8 @@ function mockFetch(): void {
       if (init?.method === 'POST') posted.push(url);
 
       if (url.includes('/cancel')) {
+        if (holdCancel) return new Promise<Response>(() => {});
+
         return Promise.resolve(
           new Response(JSON.stringify({ jobId: RunningJobId }), {
             status: 202,
@@ -129,6 +134,7 @@ async function findRowOfState(state: string): Promise<HTMLElement> {
 afterEach(() => {
   vi.unstubAllGlobals();
   posted.length = 0;
+  holdCancel = false;
 });
 
 describe('JobsPage: скасування задачі з переліку', () => {
@@ -179,5 +185,28 @@ describe('JobsPage: скасування задачі з переліку', () =
     expect(
       within(rowOfState('Running')).getByRole('button', { name: '⟦jobs.cancel⟧' }),
     ).toBeTruthy();
+  });
+
+  it('повторний клік підтвердження, поки запит у польоті, другого скасування не шле (L9-37)', async () => {
+    mockFetch();
+    holdCancel = true;
+    const user = userEvent.setup();
+    show();
+
+    await user.click(
+      within(await findRowOfState('Running')).getByRole('button', { name: '⟦jobs.cancel⟧' }),
+    );
+    const dialog = await screen.findByRole('dialog');
+
+    await user.click(within(dialog).getByRole('button', { name: '⟦jobs.cancel⟧' }));
+
+    // ⚠ Спінер (`usePendingLoading`) вмикається лише через 100 мс, тож кнопка
+    // ще активна — саме в це вікно влучає подвійний клік чи повторний Enter.
+    const pending = await within(dialog).findByRole('button', { name: '⟦jobs.cancelling⟧' });
+    await user.click(pending);
+
+    // ⛔ Мутація «прибрати `if (cancel.isPending) return;`» — два POST, червоний.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(posted).toHaveLength(1);
   });
 });

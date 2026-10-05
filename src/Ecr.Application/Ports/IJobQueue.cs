@@ -84,6 +84,13 @@ public interface IJobQueue
     /// <returns><c>false</c> — оренду втрачено.</returns>
     public Task<bool> DeferAsync(JobClaimToken claim, TimeSpan delay, CancellationToken ct);
 
+    /// <summary>
+    /// Повертає задачу в чергу без затримки при зупинці хоста: як
+    /// <see cref="DeferAsync"/>, спроба НЕ рахується; відлік стелі відкладень не змінюється.
+    /// </summary>
+    /// <returns><c>false</c> — оренду втрачено.</returns>
+    public Task<bool> ReleaseAsync(JobClaimToken claim, CancellationToken ct);
+
     /// <summary>Закриває задачу станом <c>Cancelled</c> після запиту скасування.</summary>
     public Task<bool> AcknowledgeCancelAsync(JobClaimToken claim, CancellationToken ct);
 
@@ -94,7 +101,11 @@ public interface IJobQueue
     public Task<bool> IsCancelRequestedAsync(string jobId, CancellationToken ct);
 
     /// <summary>Ручний перезапуск завершеної задачі: нова серія спроб і переклеймів.</summary>
-    public Task<bool> RestartAsync(string jobId, CancellationToken ct);
+    /// <returns>
+    /// Перезапущено; не рядок черги (задача Quartz); або відмова — на ту саму ціль уже
+    /// стоїть інша <c>Queued</c>, яка й виконає роботу (L2-11).
+    /// </returns>
+    public Task<JobRestartOutcome> RestartAsync(string jobId, CancellationToken ct);
 
     /// <summary>
     /// Закриває прострочені <c>Running</c>, яких <see cref="ClaimAsync"/> уже не
@@ -239,6 +250,31 @@ public sealed record ClaimedJob(
     string? CorrelationId,
     long? DocumentId,
     long? QueueWaitMs = null);
+
+/// <summary>Результат <see cref="IJobQueue.RestartAsync"/> (L2-11).</summary>
+public sealed record JobRestartOutcome
+{
+    private JobRestartOutcome(bool restarted, string? coveringJobId)
+    {
+        IsRestarted = restarted;
+        CoveringJobId = coveringJobId;
+    }
+
+    /// <summary>Рядок черги повернуто в <c>Queued</c>.</summary>
+    public static JobRestartOutcome Restarted { get; } = new(true, null);
+
+    /// <summary>Такого провального рядка черги немає — задача іншого виконавця (Quartz).</summary>
+    public static JobRestartOutcome NotQueueRow { get; } = new(false, null);
+
+    /// <summary>Чи перезапущено.</summary>
+    public bool IsRestarted { get; }
+
+    /// <summary>Задача, що вже чекає на ту саму ціль; <c>null</c> — немає.</summary>
+    public string? CoveringJobId { get; }
+
+    /// <summary>Перезапуск зайвий: на ціль уже чекає задача <paramref name="jobId"/>.</summary>
+    public static JobRestartOutcome CoveredBy(string jobId) => new(false, jobId);
+}
 
 /// <summary>Стан оренди після <see cref="IJobQueue.RenewAsync"/>.</summary>
 public enum LeaseState

@@ -13,9 +13,11 @@ import {
   Switch,
   Text,
   TextInput,
+  useComputedColorScheme,
 } from '@mantine/core';
 import { useListFocus } from '@/shared/a11y/focus';
 import { t } from '@/shared/i18n';
+import { themeSurface } from '@/shared/theme/theme';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { showApiError, showDone } from '@/shared/ui/notify';
 import {
@@ -37,6 +39,7 @@ import {
   type ConditionalFormatRuleDto,
   type ConditionalFormatSet,
 } from './conditionalFormatApi';
+import { cellLook } from './tablePreviewModel';
 
 /**
  * Підпис оператора. ⚠ Кожен ключ — літералом, без шаблонного рядка: сторож
@@ -134,6 +137,7 @@ export function ConditionalFormatPanel({
   const [conflict, setConflict] = useState(false);
   const [sampleColumn, setSampleColumn] = useState(firstColumn);
   const [sample, setSample] = useState('');
+  const scheme = useComputedColorScheme('light');
 
   const focus = useListFocus(rules.length);
 
@@ -191,11 +195,18 @@ export function ConditionalFormatPanel({
       if (!isStaleConditionalFormats(error)) return;
 
       // ⚠ Перечитати набір, але НЕ чіпати чернетку: вона — робота людини.
-      const fresh = await queryClient.fetchQuery({
-        queryKey: rulesKey(templateVersionId),
-        queryFn: () => getConditionalFormats(templateVersionId),
-        staleTime: 0,
-      });
+      // Перечитування впало — відмову покаже `ErrorAlert` над редактором (стан запиту), а
+      // чернетка лишається на місці.
+      let fresh: ConditionalFormatSet;
+      try {
+        fresh = await queryClient.fetchQuery({
+          queryKey: rulesKey(templateVersionId),
+          queryFn: () => getConditionalFormats(templateVersionId),
+          staleTime: 0,
+        });
+      } catch {
+        return;
+      }
       const next = seedOf(fresh, codes);
       setSeed(next);
       setConflict(canonical(latest.current.rules) !== canonical(next.own));
@@ -203,7 +214,15 @@ export function ConditionalFormatPanel({
   });
 
   if (loaded.isPending) return <Loader size="sm" aria-label={t('common.loading')} />;
-  if (loaded.isError) return <ErrorAlert error={loaded.error} />;
+  /*
+   * ⛔ L9-26: відмова ЗАМІСТЬ редактора — лише поки чернетки ще немає (перше читання). Відмова
+   * пізнішого перечитування (фокус вікна, перечитування після `409`) лишає дані в кеші, а чернетку —
+   * у стані; доти `isError` ховав редактор цілком разом із незбереженими правилами й без «Повторити».
+   * Тепер — `ErrorAlert` над редактором, а редактор із чернеткою лишається.
+   */
+  if (loaded.isError && seed === null) {
+    return <ErrorAlert error={loaded.error} onRetry={() => void loaded.refetch()} />;
+  }
 
   const update = (index: number, next: ConditionalRule): void =>
     setRules((previous) => previous.map((rule, i) => (i === index ? next : rule)));
@@ -219,6 +238,8 @@ export function ConditionalFormatPanel({
 
   return (
     <Stack gap="sm" ref={focus.container}>
+      {loaded.isError && <ErrorAlert error={loaded.error} onRetry={() => void loaded.refetch()} />}
+
       {!canEdit && (
         <Alert data-testid="conditional-format-read-only">
           {t('conditionalFormat.readOnly')}
@@ -276,11 +297,7 @@ export function ConditionalFormatPanel({
                   label={t('conditionalFormat.valueTo')}
                   value={rule.valueTo}
                   disabled={readOnly}
-                  error={
-                    blocker === 'ValueTo' || blocker === 'Range'
-                      ? t(blocker === 'Range' ? 'conditionalFormat.blocker.Range' : 'conditionalFormat.blocker.ValueTo')
-                      : undefined
-                  }
+                  error={blocker === 'ValueTo' ? t('conditionalFormat.blocker.ValueTo') : undefined}
                   onChange={(event) => update(index, { ...rule, valueTo: event.currentTarget.value })}
                 />
               )}
@@ -370,9 +387,11 @@ export function ConditionalFormatPanel({
         data-conditional-preview={matched === null ? 'none' : 'match'}
         p="xs"
         bd="1px solid var(--mantine-color-default-border)"
-        {...(matched !== null && matched.backgroundHex !== '' ? { bg: matched.backgroundHex } : {})}
-        {...(matched !== null && matched.foregroundHex !== '' ? { c: matched.foregroundHex } : {})}
-        {...(matched?.isBold === true ? { fw: 700 } : {})}
+        // ⛔ L9-24: вигляд — `cellLook`, як у перегляді таблиці (`TablePreview`) і в сітці
+        // (`cellAppearance.ts`, `X-10`): колір тексту автора лише тоді, коли він читається на заливці,
+        // інакше — колір теми з більшим контрастом. Доти приклад фарбував сирими `bg`/`c` і показував
+        // нечитабельне поєднання, якого документ не покаже.
+        style={cellLook(matched, themeSurface[scheme].body)}
       >
         {sample.length === 0 ? t('conditionalFormat.sampleEmpty') : sample}
       </Box>

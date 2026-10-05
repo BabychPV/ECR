@@ -497,7 +497,12 @@ export function SnapshotsPage(): JSX.Element {
                     <VerifyCell
                       result={verified[snapshot.id]}
                       loading={verifyLoading && verify.variables === snapshot.id}
-                      onVerify={() => verify.mutate(snapshot.id)}
+                      onVerify={() => {
+                        // ⛔ L9-37: спінер (`usePendingLoading`) — лише після 100 мс;
+                        // до того подвійний клік/Enter слав дві перевірки.
+                        if (verify.isPending) return;
+                        verify.mutate(snapshot.id);
+                      }}
                     />
                   </Table.Td>
                 </Table.Tr>

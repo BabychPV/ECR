@@ -5,10 +5,13 @@ import { registerUnsavedSource, UnsavedSettleMs } from '@/shared/ui/unsavedSourc
 import { onBeforeLoginRedirect } from '@/api/client';
 import { recordLostEdits } from './lostEdits';
 import { resetConfirmed } from './confirmedEdits';
+import { registerHeldEditLookup } from './settleEdits';
 import {
   cellKey,
   discardPendingRows,
+  firstHeldEdit,
   hasPending,
+  hasSendablePending,
   markPendingRejected,
   openDocument,
   pendingCount,
@@ -106,9 +109,14 @@ export function createDebouncer(callback: () => void, delayMs = 500): Debouncer 
  *
  * @returns Функція відписки — знімає слухача при розмонтуванні.
  */
-export function registerUnloadFlush(isPending: () => boolean, flush: () => void): () => void {
-  const handler = (): void => {
-    if (isPending()) flush();
+export function registerUnloadFlush(isPending: () => boolean, flush: () => boolean | void): () => void {
+  const handler = (event: BeforeUnloadEvent): void => {
+    // AN-39/L8-08: `flush` повертає `true`, якщо лишилось те, що надіслати не можна
+    // (утримані відхилені правки) - тоді єдиний чесний захист - рідне питання браузера.
+    if (isPending() && flush() === true) {
+      event.preventDefault();
+      event.returnValue = '';
+    }
   };
 
   window.addEventListener('beforeunload', handler);
@@ -300,6 +308,11 @@ async function flushAutosaveAndSettle(
   // Зберігач міг відпрацювати синхронно (тест, кеш) — чекати нема на що.
   if (!hasPending()) return true;
 
+  // ⛔ AN-28 P2-1: лишились САМІ утримані відмовою правки — їх не везе ніхто
+  // (`V-01`), і «порожнього сховища» не буде ніколи. Раніше тут чекали весь
+  // таймаут (3 с) мовчки, а результат був той самий: `false`.
+  if (!hasSendablePending()) return false;
+
   return await new Promise<boolean>((resolve) => {
     let unsubscribe: (() => void) | null = null;
 
@@ -313,12 +326,14 @@ async function flushAutosaveAndSettle(
       resolve(false);
     }, timeoutMs);
 
+    // ⚠ Відстоялось, коли вже нема чого ВЕЗТИ: решта (якщо є) — утримані
+    // відмовою правки, і чекати на них далі означало б мовчати до таймауту.
     const settle = (): void => {
-      if (hasPending()) return;
+      if (hasSendablePending()) return;
 
       clearTimeout(timer);
       stop();
-      resolve(true);
+      resolve(!hasPending());
     };
 
     unsubscribe = subscribePending(settle);
@@ -343,6 +358,9 @@ registerUnsavedSource('grid', {
   unsavedCount: pendingCount,
   flush: flushAutosaveAndSettle,
 });
+
+// AN-28 P2-1: дії документа називають утриману комірку - з того самого сховища.
+registerHeldEditLookup(firstHeldEdit);
 
 /**
  * Зберігає безхазяйний зріз від імені ДОКУМЕНТА.
@@ -443,7 +461,13 @@ export function useDocumentPending(documentId: number, ownerUserId?: number): vo
       registerUnloadFlush(hasPending, () => {
         // ⚠ `V-01`: і тут без відхилених — інакше останній шанс зберегти
         // правильні правки згорів би на тій самій відмові.
-        for (const slice of pendingSlices({ sendableOnly: true })) {
+        const sendable = pendingSlices({ sendableOnly: true });
+
+        // AN-39/L8-08: відхилені (утримані) правки надіслати неможливо - про них
+        // питаємо; решта їде маячком, як і раніше.
+        const held = pendingCount() > sendable.reduce((sum, slice) => sum + slice.edits.length, 0);
+
+        for (const slice of sendable) {
           sendPatchBeacon(
             documentId,
             buildRequest(
@@ -456,6 +480,8 @@ export function useDocumentPending(documentId: number, ownerUserId?: number): vo
             ),
           );
         }
+
+        return held;
       }),
     [documentId, queryClient],
   );

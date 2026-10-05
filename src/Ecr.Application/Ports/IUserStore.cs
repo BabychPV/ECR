@@ -352,6 +352,23 @@ public interface IUserStore
     /// </remarks>
     public Task<FailedAttemptOutcome> RegisterFailedAttemptAsync(
         int userId, int maxFailedAttempts, int lockoutMinutes, DateTime utcNow, CancellationToken ct);
+
+    /// <summary>
+    /// Фіксує ВДАЛИЙ вхід АТОМАРНО — одним <c>UPDATE</c> з умовою «запис не заблоковано» (L1-03).
+    /// </summary>
+    /// <param name="userId">Обліковий запис.</param>
+    /// <param name="utcNow">Поточний момент.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>
+    /// <c>true</c> — вхід зафіксовано (лічильник скинуто, <c>LastSignInAt</c> оновлено);
+    /// <c>false</c> — запис заблоковано (паралельними хибними спробами чи адміністратором) або його немає.
+    /// </returns>
+    /// <remarks>
+    /// ⛔ Не «<c>User.RegisterSuccessfulLogin</c> → зберегти»: сутність прочитано ДО паралельних хибних спроб, і
+    /// її запис мовчки знімав щойно виставлене блокування й видавав cookie правильному паролю з пачки підбору.
+    /// Сутність у пам'яті викликача цим методом НЕ змінюється.
+    /// </remarks>
+    public Task<bool> TryRegisterSuccessfulLoginAsync(int userId, DateTime utcNow, CancellationToken ct);
 }
 
 /// <summary>Стан лічильника невдалих спроб після атомарного оновлення.</summary>

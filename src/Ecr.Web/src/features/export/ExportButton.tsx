@@ -8,6 +8,7 @@ import { outcomeOf, pollInterval } from '@/features/workflow/jobFollow';
 import { notificationCloseButtonProps, showApiError } from '@/shared/ui/notify';
 import { errorCodeText } from '@/shared/ui/problemText';
 import { t } from '@/shared/i18n';
+import { useSettledAction } from '@/features/grid/settleEdits';
 
 /** Що і за який період експортувати. */
 interface ExportButtonProps {
@@ -110,19 +111,26 @@ export function ExportButton({
   // ⚠ Формат ЗАПУЩЕНОЇ побудови — окремо від перемикача: людина може
   // перемкнути формат, доки файл будується, а підпис посилання має
   // відповідати файлу, який вона отримає, а не поточному положенню перемикача.
-  const [startedFormat, setStartedFormat] = useState<ExportFormat>('xlsx');
+  // ⛔ AN-39/L8-19: задача прив'язана до документа/періоду, ДЛЯ яких її запущено. Перехід на
+  // інший документ (компонент лишається змонтованим) давав посилання з новим id на книгу
+  // старого й крутив «Формується…» на чужому документі.
+  const [started, setStarted] = useState<{ documentId: number; periodKey: number; format: ExportFormat }>({
+    documentId,
+    periodKey,
+    format: 'xlsx',
+  });
 
   const start = useMutation({
-    mutationFn: () =>
-      apiEnqueue(`/api/v1/documents/${documentId}/export`, {
-        format,
+    mutationFn: (target: { documentId: number; periodKey: number; format: ExportFormat }) =>
+      apiEnqueue(`/api/v1/documents/${target.documentId}/export`, {
+        format: target.format,
         includeFormulas: true,
         includeStyles: true,
         language,
-        periodKey,
+        periodKey: target.periodKey,
       } satisfies ExportRequest),
-    onSuccess: (job) => {
-      setStartedFormat(format);
+    onSuccess: (job, target) => {
+      setStarted(target);
       setJobId(job.jobId);
     },
     onError: showApiError,
@@ -137,7 +145,11 @@ export function ExportButton({
   });
 
   const outcome = jobId === null ? null : outcomeOf(job.data?.state, job.isError);
-  const building = outcome === 'running';
+  const building =
+    outcome === 'running' && started.documentId === documentId && started.periodKey === periodKey;
+  // AN-28 P2-2: зайнятість і single-flight і на час збереження набраного перед експортом.
+  const settled = useSettledAction(start.isPending || building);
+  const running = start.isPending || building || settled.settling;
 
   // ⚠ Повідомлення про відмову — ОДИН раз на задачу, а не на кожен рендер:
   // `job.data` не змінюється після кінцевого стану, і без захисту `ref`
@@ -181,10 +193,10 @@ export function ExportButton({
           message: (
             <Anchor
               size="sm"
-              href={`/api/v1/documents/${documentId}/export/${encodeURIComponent(exportKey)}`}
+              href={`/api/v1/documents/${started.documentId}/export/${encodeURIComponent(exportKey)}`}
               download
             >
-              {exportReadyLabel(startedFormat)}
+              {exportReadyLabel(started.format)}
             </Anchor>
           ),
         });
@@ -203,7 +215,7 @@ export function ExportButton({
         closeButtonProps: notificationCloseButtonProps,
       });
     }
-  }, [jobId, outcome, job.data?.errorCode, job.data?.message, documentId, startedFormat]);
+  }, [jobId, outcome, job.data?.errorCode, job.data?.message, started.documentId, started.format]);
 
   return (
     /*
@@ -235,27 +247,27 @@ export function ExportButton({
       <Button
         size="xs"
         variant="default"
-        disabled={start.isPending || building}
-        aria-busy={start.isPending || building}
-        data-export-state={start.isPending || building ? 'running' : 'idle'}
-        onClick={() => start.mutate()}
+        disabled={running}
+        aria-busy={running}
+        data-export-state={running ? 'running' : 'idle'}
+        onClick={() => settled.run(() => start.mutateAsync({ documentId, periodKey, format }), { readOnly: true })}
       >
         <span style={{ display: 'inline-grid' }}>
           <span
-            aria-hidden={start.isPending || building}
-            style={{ gridArea: '1 / 1', visibility: start.isPending || building ? 'hidden' : 'visible' }}
+            aria-hidden={running}
+            style={{ gridArea: '1 / 1', visibility: running ? 'hidden' : 'visible' }}
           >
             {t('document.export')}
           </span>
           <span
-            aria-hidden={!(start.isPending || building)}
+            aria-hidden={!running}
             data-testid="export-running-label"
             style={{
               gridArea: '1 / 1',
               display: 'inline-flex',
               alignItems: 'center',
               gap: 6,
-              visibility: start.isPending || building ? 'visible' : 'hidden',
+              visibility: running ? 'visible' : 'hidden',
             }}
           >
             <Loader size={12} />
@@ -269,7 +281,7 @@ export function ExportButton({
         aria-label={t('document.exportFormat')}
         value={format}
         onChange={(value) => setFormat(value as ExportFormat)}
-        disabled={start.isPending || building}
+        disabled={running}
         data={exportFormatOptions()}
       />
     </Group>

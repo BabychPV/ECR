@@ -26,6 +26,17 @@ public sealed class SelfStampRotation
     /// <summary>Штамп, який записав цей запит виконавцю; <c>null</c> — не записував.</summary>
     public string? NewStamp { get; private set; }
 
+    /// <summary>
+    /// Штамп виконавця в БД ДО першої ротації цим запитом.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ AN-26b (рев'ю AN-26, P2): відкликана cookie зі старим штампом A, що
+    /// проскочила перевірку з кешу, сама крутила B→C власною зміною ролей і
+    /// отримувала cookie з C. Перевидання дозволене, лише коли ротацію почато
+    /// від штампа самої cookie — тобто ніхто не відкликав її раніше.
+    /// </remarks>
+    public string? PreviousStamp { get; private set; }
+
     /// <summary>Хто виконує запит (ставить <c>SecurityStampMiddleware</c> після перевірки штампа).</summary>
     /// <param name="userId">Користувач із cookie.</param>
     public void BindRequestUser(int userId) => _requestUserId = userId;
@@ -35,12 +46,15 @@ public sealed class SelfStampRotation
     /// виконавець запиту — запам'ятати новий штамп.
     /// </summary>
     /// <param name="user">Користувач із уже новим штампом.</param>
-    public void Observe(User user)
+    /// <param name="previousStamp">Його штамп до цієї ротації.</param>
+    public void Observe(User user, string previousStamp)
     {
         ArgumentNullException.ThrowIfNull(user);
 
         if (_requestUserId is { } id && user.Id == id)
         {
+            // Друга ротація в тому самому запиті не підміняє точку відліку.
+            PreviousStamp ??= previousStamp;
             NewStamp = user.SecurityStamp;
         }
     }

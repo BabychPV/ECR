@@ -21,6 +21,12 @@ public enum EndpointVerdict
 
     /// <summary>Хост поза <c>PiWebApi:AllowedHosts</c>.</summary>
     HostNotAllowed,
+
+    /// <summary>
+    /// Рядок з'єднання SQL Server несе заборонений параметр: <c>AttachDBFilename</c> (і синоніми),
+    /// <c>User Instance</c>, <c>Enclave Attestation Url</c>, <c>Server Certificate</c> на мережевому шляху.
+    /// </summary>
+    ForbiddenOption,
 }
 
 /// <summary>
@@ -91,7 +97,7 @@ public static class DataSourceEndpointPolicy
             return EndpointVerdict.Scheme;
         }
 
-        if (SqlHostsOf(address) is not { } hosts)
+        if (SqlHostsOf(address) is not { } hosts || HasOdbcFileOption(address))
         {
             return EndpointVerdict.Malformed;
         }
@@ -105,6 +111,223 @@ public static class DataSourceEndpointPolicy
         }
 
         return EndpointVerdict.Allowed;
+    }
+
+    /// <summary>
+    /// Рядок з'єднання джерела типу <c>Sql</c> (SqlClient, <c>SqlDataSource</c>) — L3-05, <c>D-279</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Без цього <c>Integration.Manage</c> означало б «ходи службовим обліковим записом
+    /// (Integrated Security → NTLM/Kerberos) куди скажу», а <c>AttachDBFilename</c> —
+    /// «прикріпи до СЕРВЕРА файл за довільним шляхом», зокрема UNC.
+    /// <para>
+    /// Правила SqlClient, а не ODBC (лапки, а не фігурні дужки); ключ сервера — будь-який синонім
+    /// (<c>Data Source</c>, <c>Server</c>, <c>Address</c>, <c>Addr</c>, <c>Network Address</c>) і
+    /// <c>Failover Partner</c>: кожен перевіряється тими самими <see cref="SqlHostOf"/> і
+    /// <see cref="IsLinkLocal"/>, що й PiSqlClient (<c>D-245</c>), — з префіксами <c>tcp:</c>/<c>np:</c>/
+    /// <c>lpc:</c>/<c>admin:</c>, <c>,port</c>, <c>\instance</c> і числовими формами IPv4.
+    /// Loopback і приватні — дозволені, як у <c>D-245</c>. Ім'я розв'язує і перевіряє викликач
+    /// (<see cref="SqlClientHostsOf"/>).
+    /// </para>
+    /// <para>
+    /// ⚠ Залишковий ризик, названий прямо: перенаправлення маршрутизації Azure SQL і
+    /// <c>MultiSubnetFailover</c> ведуть на адресу, яку дає сам сервер, а DNS між збереженням і
+    /// з'єднанням може змінитися (rebinding) — адаптер тому перевіряє ще раз перед з'єднанням,
+    /// але не на кожному стрибку протоколу.
+    /// </para>
+    /// </remarks>
+    public static EndpointVerdict CheckSqlClientConnectionString(string? connectionString)
+    {
+        if (string.IsNullOrWhiteSpace(connectionString))
+        {
+            return EndpointVerdict.Malformed;
+        }
+
+        if (!TryParseSqlClient(connectionString, out var builder))
+        {
+            return EndpointVerdict.Malformed;
+        }
+
+        if (builder is null && connectionString.Contains("://", StringComparison.Ordinal))
+        {
+            return EndpointVerdict.Scheme;
+        }
+
+        if (builder is not null)
+        {
+            foreach (string key in builder.Keys)
+            {
+                if (IsForbiddenSqlClientOption(key, builder[key]?.ToString()))
+                {
+                    return EndpointVerdict.ForbiddenOption;
+                }
+            }
+        }
+
+        // ⛔ Рев'ю an33d, P3-3: хост, який не розібрано (`np://169.254.169.254/pipe` → `//169…`,
+        // `np:\/169…` → порожній, `169。254。169。254` → не IP-літерал), раніше проходив мовчки.
+        // Білий список: непорожній ASCII-хост без `/`; порожній — лише локальний `.`.
+        if (builder is null ? !IsReadableSqlHost(connectionString) : HasUnreadableSqlClientHost(builder))
+        {
+            return EndpointVerdict.Malformed;
+        }
+
+        foreach (var host in SqlClientHostsOf(connectionString) ?? [])
+        {
+            if (IsCloudMetadataName(host) || (IPAddress.TryParse(host, out var ip) && IsLinkLocal(ip)))
+            {
+                return EndpointVerdict.HostForbidden;
+            }
+        }
+
+        return EndpointVerdict.Allowed;
+    }
+
+    /// <summary>
+    /// Хости рядка з'єднання SqlClient: з кожного ключа сервера (і <c>Failover Partner</c>), або голе
+    /// ім'я сервера, якщо рядок без <c>=</c>. <c>null</c> — рядок не розбирається.
+    /// </summary>
+    public static IReadOnlyList<string>? SqlClientHostsOf(string connectionString)
+    {
+        ArgumentNullException.ThrowIfNull(connectionString);
+
+        if (!TryParseSqlClient(connectionString, out var builder))
+        {
+            return null;
+        }
+
+        if (builder is null)
+        {
+            return [SqlHostOf(connectionString)];
+        }
+
+        var hosts = new List<string>();
+
+        foreach (string key in builder.Keys)
+        {
+            if (IsServerKey(key) && builder[key]?.ToString() is { Length: > 0 } value)
+            {
+                hosts.Add(SqlHostOf(value));
+            }
+        }
+
+        return hosts;
+    }
+
+    /// <summary>Чи є серед ключів сервера (крім тих, що лише містять «Server»/«Host» в імені) нерозібраний хост.</summary>
+    private static bool HasUnreadableSqlClientHost(DbConnectionStringBuilder builder)
+    {
+        foreach (string key in builder.Keys)
+        {
+            var k = key.Replace(" ", string.Empty, StringComparison.Ordinal).ToUpperInvariant();
+
+            if (IsServerKey(key) && k is not ("SERVERCERTIFICATE" or "TRUSTSERVERCERTIFICATE" or "HOSTNAMEINCERTIFICATE")
+                && builder[key]?.ToString() is { Length: > 0 } value && !IsReadableSqlHost(value))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Хост розібрано: непорожній, лише ASCII, без <c>/</c> і керівних символів; порожній — лише локальний
+    /// <c>.</c> (<c>.\SQLEXPRESS</c>, <c>np:\\.\pipe\…</c>).
+    /// </summary>
+    private static bool IsReadableSqlHost(string value)
+    {
+        var raw = SqlHostCore(value).Trim();
+        var host = raw.TrimEnd('.');
+
+        if (host.Length == 0)
+        {
+            return raw == ".";
+        }
+
+        foreach (var c in host)
+        {
+            if (c == '/' || !char.IsAscii(c) || char.IsControl(c))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool IsPathSeparator(char c) => c is '\\' or '/';
+
+    /// <summary>Повний шлях на локальному диску: <c>X:\…</c> чи <c>X:/…</c>, лише ASCII-літера диска.</summary>
+    private static bool IsLocalDrivePath(string path)
+        => path.Length >= 3 && char.IsAsciiLetter(path[0]) && path[1] == ':' && IsPathSeparator(path[2]);
+
+    /// <summary>Розбір за правилами SqlClient; <paramref name="builder"/> <c>null</c> — рядок без <c>=</c>.</summary>
+    private static bool TryParseSqlClient(string connectionString, out DbConnectionStringBuilder? builder)
+    {
+        builder = null;
+
+        if (!connectionString.Contains('=', StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        var parsed = new DbConnectionStringBuilder(useOdbcRules: false);
+
+        try
+        {
+            parsed.ConnectionString = connectionString;
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
+
+        builder = parsed;
+
+        return true;
+    }
+
+    /// <summary>
+    /// Параметр SqlClient, якого в адресі джерела бути не може (порівняння без пробілів і регістру,
+    /// бо так їх читає сам SqlClient).
+    /// </summary>
+    private static bool IsForbiddenSqlClientOption(string key, string? value)
+    {
+        var k = key.Replace(" ", string.Empty, StringComparison.Ordinal).ToUpperInvariant();
+
+        return k switch
+        {
+            // Файл бази на диску СЕРВЕРА (UNC → NTLM служби SQL на чужий хост).
+            "ATTACHDBFILENAME" or "EXTENDEDPROPERTIES" or "INITIALFILENAME" => true,
+
+            // Окремий екземпляр під обліковим записом служби ECR — лише SQL Express, і вимкнений.
+            "USERINSTANCE" => !string.Equals(value?.Trim(), "false", StringComparison.OrdinalIgnoreCase)
+                              && !string.Equals(value?.Trim(), "no", StringComparison.OrdinalIgnoreCase),
+
+            // Ще одна адреса, на яку клієнт піде HTTP-запитом.
+            "ENCLAVEATTESTATIONURL" => true,
+
+            // Сертифікат із мережевої шарі — NTLM на хост із рядка.
+            // ⛔ Білий список, а не чорний (друге рев'ю an33c, P2): після `\\`, `\/`, `/\` знайшлися
+            // `\??\UNC\…` і `\??\GLOBALROOT\Device\Mup\…` — NT-шляхи, які .NET віддає `CreateFileW` без
+            // нормалізації. Дозволено лише повний шлях на локальному диску `X:\…` (`X:/…`); усе, що
+            // починається з роздільника, `file:`, відносний шлях — заборонено.
+            "SERVERCERTIFICATE" => value?.Trim() is { Length: > 0 } path && !IsLocalDrivePath(path),
+
+            // Спосіб входу — лише Windows (Integrated Security, gMSA) або SQL-логін (HU-11 Q9).
+            // ⛔ `Active Directory Managed Identity`/`Default` беруть токен служби в IMDS (169.254.169.254
+            // запитує сам SqlClient, повз політику) і віддають його хосту з рядка; `Integrated` — AAD-токен
+            // служби на гібридному AD. Білий список: ключа немає або `SqlPassword`.
+            "AUTHENTICATION" => value?.Replace(" ", string.Empty, StringComparison.Ordinal).Trim() is { Length: > 0 } method
+                                && !string.Equals(method, "SqlPassword", StringComparison.OrdinalIgnoreCase),
+
+            // Довільний SPN з Integrated Security — Kerberos-квиток на чужу службу (`cifs/dc01`) хосту з
+            // рядка (Kerberos relay). Аліасам замовника SPN не потрібен (рев'ю an33d, P3-2).
+            "SERVERSPN" or "FAILOVERPARTNERSPN" => true,
+
+            _ => false,
+        };
     }
 
     /// <summary>
@@ -154,6 +377,12 @@ public static class DataSourceEndpointPolicy
     {
         ArgumentNullException.ThrowIfNull(address);
 
+        return SqlHostCore(address).Trim().TrimEnd('.');
+    }
+
+    /// <summary><see cref="SqlHostOf"/> без зняття кінцевої крапки (щоб відрізнити локальний <c>.</c>).</summary>
+    private static string SqlHostCore(string address)
+    {
         // Лапки ODBC не знімає, але клієнт може; хост у лапках перевіряємо як без них.
         var s = address.Trim().Trim('{', '}', '"', '\'').Trim();
 
@@ -192,10 +421,58 @@ public static class DataSourceEndpointPolicy
             s = s[..colon];
         }
 
-        return s.Trim().TrimEnd('.');
+        return s;
     }
 
     private static readonly string[] ProtocolPrefixes = ["tcp:", "np:", "lpc:", "admin:"];
+
+    /// <summary>
+    /// Ключі менеджера драйверів ODBC, що читають чи пишуть ФАЙЛ: <c>FILEDSN</c>, <c>SAVEFILE</c>, і
+    /// <c>DRIVER</c>, заданий шляхом до бібліотеки (L3-09).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Рядок без ключа сервера дає порожній перелік хостів, тобто «дозволено»; з
+    /// <c>FILEDSN=\\host\share\x.dsn</c> менеджер драйверів читає файл через SMB службовим обліковим
+    /// записом, і сервер задає вже вміст <c>.dsn</c> — повз перевірку link-local. <c>SAVEFILE</c> пише
+    /// <c>.dsn</c> у довільний каталог, <c>DRIVER</c> зі шляхом вантажить довільну бібліотеку. Ім'я
+    /// драйвера (<c>{PI SQL Client}</c>) і системний <c>DSN=</c> адміністратора машини — дозволені.
+    /// </remarks>
+    private static bool HasOdbcFileOption(string address)
+    {
+        if (!address.Contains('=', StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var builder = new DbConnectionStringBuilder(useOdbcRules: true);
+
+        try
+        {
+            builder.ConnectionString = address;
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
+
+        foreach (string key in builder.Keys)
+        {
+            var k = key.Replace(" ", string.Empty, StringComparison.Ordinal).ToUpperInvariant();
+
+            if (k is "FILEDSN" or "SAVEFILE")
+            {
+                return true;
+            }
+
+            if (k == "DRIVER" && builder[key]?.ToString()?.Trim().Trim('{', '}') is { } driver
+                && driver.IndexOfAny(['\\', '/', ':']) >= 0)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     /// <summary>
     /// Чи називає ключ рядка з'єднання сервер: <c>Server</c>, <c>Data Source</c>, <c>Address</c>,
@@ -214,7 +491,12 @@ public static class DataSourceEndpointPolicy
                || k is "DATASOURCE" or "SOURCE";
     }
 
-    /// <summary>Link-local/metadata: 169.254.0.0/16, fe80::/10.</summary>
+    /// <summary>Link-local/metadata: 169.254.0.0/16, fe80::/10 і IPv6-адреса metadata AWS <c>fd00:ec2::254</c>.</summary>
+    /// <remarks>
+    /// ⚠ <c>fd00:ec2::254</c> — IMDS AWS по IPv6 (Nitro): з ULA-діапазону, тож перевірка fe80::/10 її не
+    /// бачить (рецензія an33b). Діє для PiSqlClient (<c>D-245</c>), Sql (<c>D-279</c>) і PI Web API
+    /// (<see cref="IsBlocked"/>).
+    /// </remarks>
     public static bool IsLinkLocal(IPAddress ip)
     {
         ArgumentNullException.ThrowIfNull(ip);
@@ -226,12 +508,22 @@ public static class DataSourceEndpointPolicy
 
         if (ip.AddressFamily == AddressFamily.InterNetworkV6)
         {
-            return ip.IsIPv6LinkLocal;
+            return ip.IsIPv6LinkLocal || IsAwsMetadataV6(ip);
         }
 
         var b = ip.GetAddressBytes();
 
         return b[0] == 169 && b[1] == 254;
+    }
+
+    private static readonly IPAddress AwsMetadataV6 = IPAddress.Parse("fd00:ec2::254");
+
+    private static bool IsAwsMetadataV6(IPAddress ip)
+    {
+        // Зона (`%eth0`) не змінює адресу призначення.
+        var bare = ip.ScopeId == 0 ? ip : new IPAddress(ip.GetAddressBytes());
+
+        return bare.Equals(AwsMetadataV6);
     }
 
     /// <summary>Хост адреси, якщо це ім'я (не IP-літерал) — його треба розв'язати; інакше <c>null</c>.</summary>
@@ -265,7 +557,7 @@ public static class DataSourceEndpointPolicy
 
         if (ip.AddressFamily == AddressFamily.InterNetworkV6)
         {
-            return ip.IsIPv6LinkLocal || ip.IsIPv6SiteLocal || ip.IsIPv6Multicast;
+            return ip.IsIPv6LinkLocal || ip.IsIPv6SiteLocal || ip.IsIPv6Multicast || IsAwsMetadataV6(ip);
         }
 
         var b = ip.GetAddressBytes();

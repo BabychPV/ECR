@@ -1,4 +1,4 @@
-﻿import { useEffect, useRef, useState, type JSX } from 'react';
+import { useEffect, useRef, useState, type JSX } from 'react';
 import { Button, Divider } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -11,7 +11,7 @@ import type {
   ReopenDocumentRequest,
   SheetWorkflowRequest,
 } from '@/api/types';
-import { locksDataActions, type DocumentLock } from '@/features/documents/documentLock';
+import { hasLockedSheet, locksDataActions, type DocumentLock } from '@/features/documents/documentLock';
 import { invalidateSlices } from '@/features/grid/sliceCache';
 import { JobFailure } from '@/features/jobs/JobFacts';
 import { can, useSession, type MeDto } from '@/shared/session/useSession';
@@ -20,6 +20,7 @@ import { Hint } from '@/shared/ui/Hint';
 import { showApiError, showDone } from '@/shared/ui/notify';
 import { useRecallAvailability, type RecallSheetRequest } from './api';
 import { outcomeOf, pollInterval } from './jobFollow';
+import { useSettledAction } from '@/features/grid/settleEdits';
 import { humanizeJobId } from './jobLabel';
 import { isAllowed, type WorkflowAction } from './transitions';
 import { t } from '@/shared/i18n';
@@ -192,6 +193,11 @@ export function SheetActions({
   /** Перечитує стан документа після кожної зміни робочого процесу. */
   const refresh = async (): Promise<void> => {
     await queryClient.invalidateQueries({ queryKey: ['document', documentId, periodKey] });
+    // ⛔ AN-28/L8-02: `cellPermissions` зрізу залежать від стану аркуша
+    // (`EditRules.CanEdit` -> `DocumentSubmitted`), а зріз живе 5 хв без
+    // перезапиту на фокус. Без цього після Recall/Return/Reopen сітка лишалась
+    // сірою до F5. Зрізи ЦЬОГО аркуша перезапитуються, решта лише позначається.
+    await invalidateSlices(queryClient, { documentId, periodKey, sheetDefId });
   };
 
   // ФВ-5.19: попередження, які сервер попросив підтвердити; `null` — діалог закритий.
@@ -364,14 +370,17 @@ export function SheetActions({
   });
 
   /**
-   * ⛔ Захист від подвійного кліку — СИНХРОННИЙ, не через `recalculate.isPending`.
+   * ⛔ Захист від подвійного кліку — СИНХРОННИЙ, не через `isPending`.
    * Mantine `Button` вимикається лише разом із `loading`, а той оновлюється
    * лише на НАСТУПНОМУ рендері React — швидкий подвійний клік встигає
-   * викликати `mutate()` двічі ДО першого перерендеру, і ставить у чергу два
-   * однакових перерахунки. `useRef` читається й пишеться негайно, у тому
-   * самому обробнику, без очікування на React.
+   * викликати `mutate()` двічі ДО першого перерендеру.
+   *
+   * ✎ AN-28 P2-2: раніше так був захищений лише Recalculate (`recalculateInFlight`);
+   * Submit/Approve/Reject після L8-01 мали ще й вікно збереження набраного, у
+   * якому кнопка не показувала зайнятості. Тепер усі дії аркуша — один
+   * single-flight на весь шлях «зберегти -> дія -> відповідь».
    */
-  const recalculateInFlight = useRef(false);
+  const settled = useSettledAction(submit.isPending || decide.isPending || recalculate.isPending);
 
   const recalcJob = useQuery({
     queryKey: ['job', recalcJobId],
@@ -556,7 +565,9 @@ export function SheetActions({
   // застосувала для лан 1-7.
   // ✎ 2026-10-02: перерахунок СВОГО документа — за читанням (сервер: `RecalculateDocumentHandler`),
   // а не за `Calculation.Recalculate` (те — проєктний/масовий перерахунок).
-  const canRecalculate = !dataLocked && can(me, 'Document.View');
+  // ✎ AN-39/L8-12: сервер (`RecalculateDocumentHandler`) відмовляє, коли ХОЧ ОДИН аркуш
+  // періоду поданий чи затверджений, - кнопки, яка гарантовано дасть відмову, немає.
+  const canRecalculate = !dataLocked && !hasLockedSheet(summary?.sheetStates) && can(me, 'Document.View');
 
   const hasAnyAction =
     canRecalculate ||
@@ -595,16 +606,9 @@ export function SheetActions({
           <Button
             size="xs"
             variant="default"
-            loading={recalculate.isPending || recalcRunning}
-            onClick={() => {
-              if (recalculateInFlight.current) return;
-              recalculateInFlight.current = true;
-              recalculate.mutate(undefined, {
-                onSettled: () => {
-                  recalculateInFlight.current = false;
-                },
-              });
-            }}
+            loading={recalculate.isPending || recalcRunning || settled.settling}
+            // AN-28/L8-01: спершу зберегти набране; відмова збереження - дії немає.
+            onClick={() => settled.run(() => recalculate.mutateAsync())}
           >
             {recalcRunning ? t('workflow.recalcRunning') : t('workflow.recalculate')}
           </Button>
@@ -612,7 +616,7 @@ export function SheetActions({
       )}
 
       {canSubmit && (
-        <Button size="xs" loading={submit.isPending} onClick={() => submit.mutate(false)}>
+        <Button size="xs" loading={submit.isPending || settled.settling} onClick={() => settled.run(() => submit.mutateAsync(false))}>
           {t('document.submit')}
         </Button>
       )}
@@ -648,7 +652,7 @@ export function SheetActions({
         <Button
           size="xs"
           color="statusSuccess"
-          loading={decide.isPending}
+          loading={decide.isPending || settled.settling}
           onClick={() => setAsking('approve')}
         >
           {t('workflow.approve')}
@@ -692,8 +696,8 @@ export function SheetActions({
         consequences={warnings ?? []}
         verb={t('workflow.submitAnyway')}
         danger={false}
-        isPending={submit.isPending}
-        onConfirm={() => submit.mutate(true)}
+        isPending={submit.isPending || settled.settling}
+        onConfirm={() => settled.run(() => submit.mutateAsync(true))}
         onClose={() => setWarnings(null)}
       />
 
@@ -703,8 +707,8 @@ export function SheetActions({
         text={t('workflow.approveHint')}
         verb={t('workflow.approve')}
         danger={false}
-        isPending={decide.isPending}
-        onConfirm={() => decide.mutate({ approved: true, reason: null })}
+        isPending={decide.isPending || settled.settling}
+        onConfirm={() => settled.run(() => decide.mutateAsync({ approved: true, reason: null }))}
         onClose={() => setAsking(null)}
       />
 
@@ -725,8 +729,8 @@ export function SheetActions({
         label={t('workflow.reason')}
         description={t('workflow.rejectHint')}
         confirmLabel={t('workflow.reject')}
-        isPending={decide.isPending}
-        onConfirm={(reason) => decide.mutate({ approved: false, reason })}
+        isPending={decide.isPending || settled.settling}
+        onConfirm={(reason) => settled.run(() => decide.mutateAsync({ approved: false, reason }))}
         onClose={() => setAsking(null)}
       />
 

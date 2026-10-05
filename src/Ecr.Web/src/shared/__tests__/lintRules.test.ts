@@ -421,7 +421,8 @@ describe('борг D15-09 обмежений і може лише скорочу
    * помітить. Тому число зафіксоване. Дев'яте придушення валить цей тест;
    * прибране — теж (число треба зменшити свідомо, а не «випадково зійшлося»).
    */
-  const ExpectedSuppressions = 8;
+  // ✎ L9-43: було 8 — придушення в мертвому діалозі публікації `MethodologiesPage.tsx` пішло разом із ним.
+  const ExpectedSuppressions = 7;
 
   function sourceFiles(dir: string): readonly string[] {
     return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {

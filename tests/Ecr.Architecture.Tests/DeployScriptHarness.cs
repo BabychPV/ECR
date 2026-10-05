@@ -38,7 +38,8 @@ internal static class DeployScriptHarness
     /// <summary>Виконує <paramref name="body"/> після імпорту <paramref name="functions"/>; повертає рядки <c>ключ=значення</c>.</summary>
     /// <param name="functions">Імена функцій зі скрипта розгортання.</param>
     /// <param name="body">ASCII-сценарій, що друкує рядки <c>ключ=значення</c>.</param>
-    public static Dictionary<string, string> Run(string[] functions, string body)
+    /// <param name="script">Скрипт у <c>tools/</c>, з якого вирізаються функції.</param>
+    public static Dictionary<string, string> Run(string[] functions, string body, string script = "deploy-ecr.ps1")
     {
         var dir = Path.Combine(Path.GetTempPath(), "ecr-deploy-harness-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(dir);
@@ -55,7 +56,7 @@ internal static class DeployScriptHarness
                 UseShellExecute = false,
             };
             foreach (var argument in new[] { "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", harness,
-                         "-Deploy", Path.Combine(SourceTree.Root, "tools", "deploy-ecr.ps1") })
+                         "-Deploy", Path.Combine(SourceTree.Root, "tools", script) })
             {
                 start.ArgumentList.Add(argument);
             }

@@ -3,6 +3,7 @@ import { Menu } from '@mantine/core';
 import type { DocumentSummary } from '@/api/types';
 import { can, useSession } from '@/shared/session/useSession';
 import { t } from '@/shared/i18n';
+import { hasProjectGrant } from './BusinessKeyChangeAction';
 import { MigrateDocumentVersionPermission } from './versionMigrationApi';
 
 /**
@@ -45,7 +46,11 @@ export function useVersionMigrationAction({ documentId, document }: VersionMigra
   const session = useSession();
   const [opened, setOpened] = useState(false);
 
-  const allowed = can(session.data, MigrateDocumentVersionPermission) && document !== undefined;
+  // ⛔ L1-08 (HU-11 Q3=A): дзеркало сервера — `Template.Edit` І грант Manage на проєкт документа.
+  const allowed =
+    can(session.data, MigrateDocumentVersionPermission)
+    && document !== undefined
+    && hasProjectGrant(session.data, document.projectId, 'Manage');
 
   const menuItem = allowed ? (
     <Menu.Item onClick={() => setOpened(true)} data-migrate-version="">

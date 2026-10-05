@@ -93,6 +93,69 @@ public sealed partial class RegistryCompositionHttpTests(SqlServerFixture sql)
         Assert.All(revisions, r => Assert.True(r.DataRevision > f.RevisionAfterSeed[r.Id], $"ревізія довідника {r.Id} не зросла"));
     }
 
+    /// <summary>
+    /// L1-05: користувач з грантом Write лише на ПОТІК не каскадить видалення в дочірні довідники (кейси, склад),
+    /// на які в нього запису немає: 403 і нічого не видалено. До виправлення — 204 і видалені чужі записи.
+    /// Контроль: з грантами Write на всі три довідники — 204.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Каскад_видалення_вимагає_Write_на_кожен_дочірній_довідник()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var admin = await SignedInAsync(app);
+        var f = await SeedAsync(ParentDeletePolicy.Cascade);
+
+        var stream = await CreateAsync(admin, f.Stream, $"S{f.Tag}", new() { ["NAME"] = "1D-2" });
+        await CreateAsync(admin, f.Case, $"W{f.Tag}", new() { ["STREAM"] = stream, ["CASE_NAME"] = "370 Winter" });
+        await ImportCompositionAsync(admin, f, $"W{f.Tag}");
+        var uri = new Uri($"/api/v1/registries/{f.Stream.Code}/entries/{stream}", UriKind.Relative);
+
+        using var partial = await GrantedAsync(app, f.Stream.Id);
+        var denied = await partial.DeleteAsync(uri);
+        Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
+        await using (var db = new EcrDbContext(Options()))
+        {
+            Assert.False(await db.RegistryEntries.AsNoTracking().Where(e => e.Id == stream).Select(e => e.IsDeleted).SingleAsync());
+            Assert.Equal(0, await db.RegistryEntries.CountAsync(e => e.RegistryDefId == f.Case.Id && e.IsDeleted));
+        }
+
+        using var full = await GrantedAsync(app, f.Stream.Id, f.Case.Id, f.Composition.Id);
+        var ok = await full.DeleteAsync(uri);
+        Assert.True(ok.StatusCode == HttpStatusCode.NoContent, $"{ok.StatusCode}: {await ok.Content.ReadAsStringAsync()}\n{app.ErrorsText}");
+    }
+
+    /// <summary>Клієнт БЕЗ глобальних прав, лише з грантами Write на названі довідники.</summary>
+    private async Task<HttpClient> GrantedAsync(EcrApiFactory app, params int[] registryIds)
+    {
+        var name = $"regcg_{Guid.NewGuid():N}"[..20];
+
+        await using (var db = new EcrDbContext(Options()))
+        {
+            var user = new User(name, name, AuthProvider.Local);
+            user.SetPassword(new PasswordHasher().Hash(Password));
+            var role = new Role(EcrCode.Create($"R{Guid.NewGuid():N}"[..12]), Name("Registry grant test"));
+            db.Users.Add(user);
+            db.Roles.Add(role);
+            await db.SaveChangesAsync();
+
+            db.RoleAssignments.Add(new RoleAssignment(role.Id, user.Id, principalSid: null));
+            foreach (var id in registryIds)
+            {
+                db.ResourceGrants.Add(new ResourceGrant(role.Id, ResourceKind.Registry, id, GrantLevel.Write));
+            }
+
+            await db.SaveChangesAsync();
+        }
+
+        var client = app.CreateClient();
+        var login = await client.PostAsJsonAsync(
+            new Uri("/api/v1/login/local", UriKind.Relative), new { userName = name, password = Password });
+        Assert.True(login.IsSuccessStatusCode, $"{login.StatusCode}: {app.ErrorsText}");
+        return client;
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait(TestCategories.Category, TestCategories.Integration)]

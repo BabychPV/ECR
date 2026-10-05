@@ -368,6 +368,21 @@ public sealed class TypeChecker(Func<string, FunctionSignature?>? signatures = n
         var diagnostics = walk.Diagnostics;
         var arguments = node.Arguments.Select(a => Infer(a, walk, row)).ToList();
 
+        // ⛔ Аудит L7-05: `AcceptsRange: false` досі ніде не перевірявся —
+        // `ROUND([T].[r1:r3].[X], 2)` публікувався і рахувався як ROUND(v1, v2).
+        if ((signatures ?? Functions.GetSignature)(node.Name) is { AcceptsRange: false })
+        {
+            foreach (var argument in node.Arguments)
+            {
+                if (RangeInScalarPosition(argument) is { } range)
+                {
+                    Report(diagnostics, range, "expr.rangeNotAccepted",
+                        DiagnosticParams.Of(("function", node.Name)),
+                        $"{node.Name} takes a single value, not a range of rows. Wrap the range in SUM, AVERAGE, MIN or MAX.");
+                }
+            }
+        }
+
         switch (upper)
         {
             case "IF" when arguments.Count == 3:
@@ -812,6 +827,44 @@ public sealed class TypeChecker(Func<string, FunctionSignature?>? signatures = n
             "expr.entryRefMisuse", DiagnosticParams.Of(("registry", entry.Registry ?? string.Empty)),
             $"A reference to an entry of registry \"{entry.Registry}\" cannot take part in arithmetic or be "
             + "compared with a number; compare it only with an entry of the same registry.");
+
+    /// <summary>
+    /// Діапазон у скалярній позиції аргументу: сам аргумент або операнд операторів у ньому
+    /// (<c>-[T].[r1:r3].[X]</c>, <c>[T].[r1:r3].[X] * 1</c> — рев'ю AN-38, P3-3).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Обхід зупиняється на виклику функції: агрегат приймає діапазон законно, а
+    /// вкладена функція без <c>AcceptsRange</c> звітує про свій аргумент сама. Явний стек,
+    /// а не рекурсія — як інші обходи після AN-25.
+    /// </remarks>
+    private static CellReferenceNode? RangeInScalarPosition(AstNode argument)
+    {
+        var pending = new Stack<AstNode>();
+        pending.Push(argument);
+
+        while (pending.Count > 0)
+        {
+            switch (pending.Pop())
+            {
+                case CellReferenceNode { Row: RowSelector.Range or RowSelector.Predicate } range:
+                    return range;
+                case UnaryNode unary:
+                    pending.Push(unary.Operand);
+                    break;
+                case BinaryNode binary:
+                    pending.Push(binary.Right);
+                    pending.Push(binary.Left);
+                    break;
+                case ConditionalNode conditional:
+                    pending.Push(conditional.WhenFalse);
+                    pending.Push(conditional.WhenTrue);
+                    pending.Push(conditional.Condition);
+                    break;
+            }
+        }
+
+        return null;
+    }
 
     private static void Require(
         ExpressionValueType actual,

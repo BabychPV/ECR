@@ -24,16 +24,27 @@ public sealed record RelationRow(
         }
 
         return Numbers.TryGetValue(column, out var n) && n is not null
-            ? n.Value.ToString(CultureInfo.InvariantCulture)
+            ? CanonicalNumber(n.Value)
             : null;
     }
+
+    /// <summary>Канонічний числовий ключ: без хвостових нулів масштабу (аудит L7-07).</summary>
+    /// <remarks>
+    /// ⛔ Збережене число приходить із <c>decimal(34,16)</c> як <c>5.0000000000000000</c>, а
+    /// результат формули цього ж прогону — як <c>5</c>; рядкове порівняння їх розводило.
+    /// </remarks>
+    /// <param name="value">Число.</param>
+    /// <returns>Інваріантний текст без хвостових нулів; нуль — <c>"0"</c>.</returns>
+    public static string CanonicalNumber(decimal value)
+        => value == 0m ? "0" : value.ToString("0.############################", CultureInfo.InvariantCulture);
 }
 
 /// <summary>Запис Rollup у комірку приймача.</summary>
 /// <param name="TargetRowKey">Рядок приймача.</param>
 /// <param name="TargetColumn">Колонка приймача.</param>
 /// <param name="Value">Значення; <c>null</c> — порожнє джерело.</param>
-public sealed record RollupWrite(string TargetRowKey, string TargetColumn, decimal? Value);
+/// <param name="Overflow">Агрегат вийшов за межі decimal: <c>Value</c> порожнє не через брак даних (аудит L7-03).</param>
+public sealed record RollupWrite(string TargetRowKey, string TargetColumn, decimal? Value, bool Overflow = false);
 
 /// <summary>Результат Rollup.</summary>
 /// <param name="Writes">Що записати (по запису на рядок приймача).</param>
@@ -123,8 +134,19 @@ public static class RollupEvaluator
     /// <param name="targetScale">Scale приймача.</param>
     /// <returns>Результат; <c>null</c> — немає значень для sum/avg/min/max.</returns>
     public static decimal? Aggregate(RollupAggregate aggregate, IEnumerable<decimal?> values, byte? targetScale)
+        => Aggregate(aggregate, values, targetScale, out _);
+
+    /// <summary>Агрегує значення з округленням і каже, чи сталося переповнення.</summary>
+    /// <param name="aggregate">Агрегат.</param>
+    /// <param name="values">Значення (<c>null</c> ігнорується).</param>
+    /// <param name="targetScale">Scale приймача.</param>
+    /// <param name="overflow">Сума вийшла за межі decimal — результат <c>null</c> саме через це.</param>
+    /// <returns>Результат; <c>null</c> — немає значень або переповнення.</returns>
+    public static decimal? Aggregate(
+        RollupAggregate aggregate, IEnumerable<decimal?> values, byte? targetScale, out bool overflow)
     {
         ArgumentNullException.ThrowIfNull(values);
+        overflow = false;
         var present = values.Where(v => v is not null).Select(v => v!.Value).ToList();
 
         if (aggregate == RollupAggregate.Count)
@@ -137,26 +159,85 @@ public static class RollupEvaluator
             return null;
         }
 
-        var result = aggregate switch
+        decimal result;
+        try
         {
-            RollupAggregate.Sum => present.Sum(),
-            RollupAggregate.Avg => present.Sum() / present.Count,
-            RollupAggregate.Min => present.Min(),
-            RollupAggregate.Max => present.Max(),
-            _ => throw new ArgumentOutOfRangeException(nameof(aggregate)),
-        };
+            result = aggregate switch
+            {
+                RollupAggregate.Sum => Sum(present),
+                RollupAggregate.Avg => Average(present),
+                RollupAggregate.Min => present.Min(),
+                RollupAggregate.Max => present.Max(),
+                _ => throw new ArgumentOutOfRangeException(nameof(aggregate)),
+            };
+        }
+        catch (OverflowException)
+        {
+            // ⚠ Сума поза decimal — не число, а не впалий перерахунок (аудит L7-03): приймач порожній,
+            // а викликач бачить `overflow` і пише попередження з кодом зв'язку (рев'ю AN-38, P2-1).
+            overflow = true;
+            return null;
+        }
 
         return targetScale is null ? result : Math.Round(result, targetScale.Value, MidpointRounding.AwayFromZero);
     }
 
+    /// <summary>
+    /// Сума, що не «переповнюється» на проміжному кроці, коли сама сума вміщується в decimal
+    /// (рев'ю AN-38, P3-10).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Що було: <c>[max, max, −max]</c> давав OverflowException на другому доданку, хоча
+    /// справжня сума — <c>max</c>. Тепер після такого переповнення доданки йдуть
+    /// урівноваженим порядком: до невід'ємного накопичення — від'ємний, до від'ємного —
+    /// додатний; коли лишився один знак, сума рухається монотонно до результату. Отже,
+    /// кожен проміжний крок за модулем не більший за найбільший доданок або за результат,
+    /// і OverflowException означає, що поза межами справді результат. Звичайний шлях
+    /// (без переповнення) — та сама сума в тому самому порядку, що й раніше.
+    /// </remarks>
+    private static decimal Sum(List<decimal> present)
+    {
+        try
+        {
+            return present.Sum();
+        }
+        catch (OverflowException)
+        {
+            var positives = new Queue<decimal>(present.Where(v => v >= 0m));
+            var negatives = new Queue<decimal>(present.Where(v => v < 0m));
+            var acc = 0m;
+            while (positives.Count > 0 || negatives.Count > 0)
+            {
+                acc += (acc >= 0m && negatives.Count > 0) || positives.Count == 0
+                    ? negatives.Dequeue()
+                    : positives.Dequeue();
+            }
+
+            return acc;
+        }
+    }
+
+    /// <summary>Середнє, що не переповнюється на проміжній сумі, коли саме середнє вміщується в decimal.</summary>
+    private static decimal Average(List<decimal> present)
+    {
+        try
+        {
+            return Sum(present) / present.Count;
+        }
+        catch (OverflowException)
+        {
+            // Кожен доданок ≤ max/n, тож сума часток не виходить за межі (рев'ю AN-38, P3-1).
+            var count = present.Count;
+            return present.Aggregate(0m, (acc, v) => acc + (v / count));
+        }
+    }
+
     private static RollupWrite Write(
         RelationRow targetRow, RollupSpec spec, IReadOnlyList<RelationRow> sources, byte? scale)
-        => new(
-            targetRow.RowKey, spec.TargetColumn,
-            Aggregate(
-                spec.Aggregate,
-                sources.Select(r => ValueOf(r, spec)),
-                scale));
+    {
+        var value = Aggregate(spec.Aggregate, sources.Select(r => ValueOf(r, spec)), scale, out var overflow);
+        return new RollupWrite(targetRow.RowKey, spec.TargetColumn, value, overflow);
+    }
 
     /// <summary>Значення рядка для агрегату; для count рахується й непорожній текст (маркер 1).</summary>
     private static decimal? ValueOf(RelationRow row, RollupSpec spec)

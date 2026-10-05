@@ -4,7 +4,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
 import type { components } from '@/api/schema';
-import type { CreateDocumentRequest, DocumentIdResponse, PagedProjects } from '@/api/types';
+import type { CreateDocumentRequest, DocumentIdResponse } from '@/api/types';
+import { fetchAllProjects } from '@/features/projects/allProjects';
 import { groupRuleViolations } from './groupRuleViolations';
 import { localized } from '@/shared/i18n/localized';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
@@ -64,7 +65,7 @@ export function CreateDocumentModal({
 
   const projects = useQuery({
     queryKey: ['projects'],
-    queryFn: () => apiFetch<PagedProjects>('/api/v1/projects?limit=200'),
+    queryFn: fetchAllProjects,
     enabled: opened,
   });
 

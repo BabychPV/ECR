@@ -227,6 +227,13 @@ describe('ExportButton: стеження за задачею побудови к
 
     await user.click(screen.getByRole('button'));
 
+    // AN-28/L8-01: клік тепер спершу зберігає незбережене (async) і лише потім
+    // ставить задачу. Без очікування читання стану «idle» проходило вакуумно
+    // ДО старту, а відкладений запит протікав у наступний тест.
+    await waitFor(() => {
+      expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes('/jobs/'))).toBe(true);
+    });
+
     // ⛔ Головне твердження регресії. До фіксу `job.data` лишався
     // `undefined` НАЗАВЖДИ (запит на стан провалився), `refetchInterval`
     // бачив `undefined` замість `'Queued'`/`'Running'` і зупиняв опитування,

@@ -1,7 +1,8 @@
 import { useEffect, type JSX } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
+import { notifications } from '@mantine/notifications';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import { theme } from '@/shared/theme/theme';
@@ -120,5 +121,39 @@ describe('AppLayout: зміна мови й незбережений ввід', 
     await switchToRussian();
 
     await waitFor(() => expect(screen.getByTestId('probe').textContent).toBe('Привет'));
+  });
+
+  // AN-39 / L8-17: доти блокування було мовчазним. Рев'ю AN-39b P2-1: і не авто-remount посеред
+  // роботи (набране в редакторі наступної комірки й Undo зникли б) - перемикає кнопка в тості.
+  it('не зберіглося — пояснення; сторінка НЕ перемальовується сама, лише кнопкою «Перемкнути зараз»', async () => {
+    const show$ = vi.spyOn(notifications, 'show');
+    let dirty = true;
+    const off = registerUnsavedSource('test-held', { hasUnsaved: () => dirty, flush: async () => false });
+    show();
+    await screen.findByTestId('probe');
+
+    await switchToRussian();
+
+    await waitFor(() =>
+      expect(show$).toHaveBeenCalledWith(expect.objectContaining({ id: 'language-after-save', color: 'statusWarning' })),
+    );
+    expect(screen.getByTestId('probe').textContent).toBe('Hello');
+
+    // Людина виправила утриману правку - але сама сторінка не перемонтовується.
+    dirty = false;
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+    });
+    expect(screen.getByTestId('probe').textContent).toBe('Hello');
+    expect(mounts).toHaveBeenCalledTimes(1);
+
+    // Кнопка з тосту - явний вибір людини.
+    const toast = show$.mock.calls.find(([options]) => options.id === 'language-after-save')?.[0];
+    render(<MantineProvider theme={theme}>{toast?.message}</MantineProvider>);
+    fireEvent.click(screen.getByRole('button', { name: /app\.languageSwitchNow|Switch now|Переключить/ }));
+
+    await waitFor(() => expect(screen.getByTestId('probe').textContent).toBe('Привет'));
+    off();
+    show$.mockRestore();
   });
 });

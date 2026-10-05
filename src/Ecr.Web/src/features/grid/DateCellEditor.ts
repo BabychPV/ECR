@@ -1,6 +1,7 @@
 import type { ColumnDataSchemaModel, EditorBase, HyperFunc, VNode } from '@revolist/revogrid';
 import { t } from '@/shared/i18n';
 import { dateOnlyOf } from './cellValue';
+import { announceExplicitCommit } from './editorTouched';
 
 /**
  * Редактор комірки `CellDataType.Date` — поле дати з календарем (`R-02`).
@@ -33,6 +34,7 @@ export function createDateCellEditor() {
     const commit = (viaTab: boolean): void => {
       if (input === null) return;
 
+      announceExplicitCommit(input);
       input.blur();
       save(input.value, viaTab);
     };
@@ -78,6 +80,12 @@ export function createDateCellEditor() {
 
         // ⚠ Той самий відкладений фокус, що й у `TextEditor` RevoGrid.
         focusTimer = setTimeout(() => input?.focus(), 0);
+      },
+
+      // AN-39/L8-07: клік повз редактор (`applyOnClose`) бере значення звідси; без
+      // цього набрана дата губилась (сітка діставала `undefined`).
+      getValue(): string | undefined {
+        return input?.value;
       },
 
       beforeDisconnect(): void {

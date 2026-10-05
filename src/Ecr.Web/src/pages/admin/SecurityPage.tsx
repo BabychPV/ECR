@@ -1,5 +1,6 @@
 import { Suspense, lazy, useEffect, useMemo, useState, type JSX } from 'react';
 import {
+  Alert,
   Badge,
   Button,
   Group,
@@ -101,6 +102,15 @@ export function SecurityPage(): JSX.Element {
   const tab = rawTab ?? 'roles';
   const queryClient = useQueryClient();
   const session = useSession();
+
+  /*
+   * ⛔ L9-18: під симуляцією «очима користувача» сервер відхиляє КОЖЕН не-GET
+   * (`SimulationReadOnlyMiddleware`, `ECR-SIM-0403`), а `can()` бачить права ЦІЛІ. Без цієї
+   * перевірки екран показував повний режим правки, і кожна дія давала 403. Те саме правило, що
+   * `SheetActions.tsx` (`!me.isSimulation`). Безпеки не зачіпає — сервер стереже сам.
+   */
+  const simulated = session.data?.isSimulation === true;
+  const canWrite = (permission: string): boolean => !simulated && can(session.data, permission);
 
   // ⛔ Сторінка знає лише «діалог відкрито/закрито». Чернетки «New role» і
   // «New user» живуть у самих діалогах (`CreateRoleModal`, `CreateUserModal`):
@@ -234,13 +244,13 @@ export function SecurityPage(): JSX.Element {
             {/* ⚠ Кнопка створення належить ВКЛАДЦІ, а не екрану: «створити»
                 поруч із матрицею прав і поруч із переліком користувачів
                 означає різне, і одна кнопка на обидві була б загадкою. */}
-            {tab === 'roles' && can(session.data, 'Security.ManageRoles') && (
+            {tab === 'roles' && canWrite('Security.ManageRoles') && (
               <Button size="xs" onClick={() => setCreatingRole(true)}>
                 {t('security.createRole')}
               </Button>
             )}
 
-            {tab === 'users' && can(session.data, 'Security.ManageUsers') && (
+            {tab === 'users' && canWrite('Security.ManageUsers') && (
               <Button size="xs" onClick={() => setCreatingUser(true)}>
                 {t('security.createUser')}
               </Button>
@@ -248,6 +258,12 @@ export function SecurityPage(): JSX.Element {
           </Group>
         }
       />
+
+      {simulated && (
+        <Alert color="statusWarning" data-testid="security-simulation-read-only">
+          {t('deny.SimulationReadOnly')}
+        </Alert>
+      )}
 
       {tab === 'roles' && (
         <AsyncBoundary<RoleView[]>
@@ -267,7 +283,7 @@ export function SecurityPage(): JSX.Element {
             <RoleMatrix
               roles={all}
               permissions={permissions}
-              canManage={can(session.data, 'Security.ManageRoles')}
+              canManage={canWrite('Security.ManageRoles')}
             />
           )}
         </AsyncBoundary>
@@ -289,7 +305,7 @@ export function SecurityPage(): JSX.Element {
         </div>
       )}
 
-      {tab === 'users' && can(session.data, 'Security.ManageUsers') && (
+      {tab === 'users' && canWrite('Security.ManageUsers') && (
         <Suspense fallback={null}>
           <GroupAssignmentsPanel roles={roles.data ?? []} />
         </Suspense>
@@ -351,6 +367,7 @@ export function SecurityPage(): JSX.Element {
                     <Button
                       size="compact-xs"
                       variant="subtle"
+                      disabled={simulated}
                       onClick={() => {
                         accessFocus.remember();
                         setAccessUsed(true);
@@ -383,7 +400,9 @@ export function SecurityPage(): JSX.Element {
                         // погасли, — рівно та поведінка, від якої список
                         // перестає бути списком.
                         disabled={
-                          noEmail(user) || (alerts.isPending && alerts.variables?.id === user.id)
+                          simulated ||
+                          noEmail(user) ||
+                          (alerts.isPending && alerts.variables?.id === user.id)
                         }
                         aria-describedby={noEmail(user) ? alertsReasonId(user.id) : undefined}
                         onChange={(event) =>
@@ -425,7 +444,7 @@ export function SecurityPage(): JSX.Element {
 
                           ⚠ Себе симулювати не можна — сервер відмовить, і
                           кнопки тут немає навмисно. */}
-                      {can(session.data, 'Security.Simulate') &&
+                      {canWrite('Security.Simulate') &&
                         user.id !== session.data?.userId && (
                           <StartSimulationButton userId={user.id} />
                         )}

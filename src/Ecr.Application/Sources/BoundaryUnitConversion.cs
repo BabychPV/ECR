@@ -65,6 +65,35 @@ public static class BoundaryUnitConversion
             value, Spec(units, fromUnitId), Spec(units, toUnitId), explicitConversion: null);
     }
 
+    /// <summary>Чи збігається фактична одиниця джерела з оголошеною (ФВ-16.9).</summary>
+    /// <param name="declaredSourceUnitId">Одиниця з мапінгу; <c>null</c> — не оголошена.</param>
+    /// <param name="actualSourceUnitCode">Одиниця, яку фактично повернуло джерело.</param>
+    /// <param name="units">Знімок довідника.</param>
+    /// <returns>
+    /// <c>true</c> — збігається, або порівнювати нема з чим (джерело не повідомило
+    /// одиниці, мапінг її не оголошує).
+    /// </returns>
+    /// <remarks>
+    /// ⛔ Одна перевірка на всю межу (L3-06): збір PI (<c>SourceUnitConverter</c>),
+    /// вікна рядків (<see cref="Integration.RowWindowFetch"/>) і події джерел
+    /// (<c>SourceEventRowBuilder</c>) кличуть саме цей метод. Доти її бачив лише
+    /// збір, а вікна й події конвертували за ОГОЛОШЕНОЮ одиницею: зміна UOM
+    /// атрибута в PI (<c>Sm3/h</c> → <c>Sm3/d</c>) давала тиху помилку ×24.
+    /// Джерело без одиниці — не «збіглося», а «нема з чим порівняти»:
+    /// значення лягає в одиниці мапінгу (ФВ-16.12).
+    /// </remarks>
+    public static bool IsDeclaredUnit(int? declaredSourceUnitId, string? actualSourceUnitCode, UnitCatalogSnapshot units)
+    {
+        ArgumentNullException.ThrowIfNull(units);
+
+        if (string.IsNullOrWhiteSpace(actualSourceUnitCode) || declaredSourceUnitId is not { } declared)
+        {
+            return true;
+        }
+
+        return units.Units.TryGetValue(actualSourceUnitCode, out var actual) && actual.Id == declared;
+    }
+
     /// <summary>Переводить результат згортки в цільову одиницю мапінгу.</summary>
     /// <param name="kind">Спосіб згортання, яким отримано <paramref name="folded"/>.</param>
     /// <param name="folded">

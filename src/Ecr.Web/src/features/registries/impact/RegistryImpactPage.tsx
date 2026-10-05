@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, type JSX } from 'react';
 import { Alert, Anchor, Button, Card, Checkbox, Group, Progress, Stack, Table, Text } from '@mantine/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router-dom';
-import { apiFetch } from '@/api/client';
+import { apiFetch, EcrApiError } from '@/api/client';
 import type { JobStatus } from '@/api/types';
 import { isCalculationResultsQuery } from '@/features/methodologies/calculationResultsKey';
 import { PollMs, badgeStateOf } from '@/features/workflow/jobFollow';
@@ -46,6 +46,31 @@ export function impactPollInterval(status: JobStatus | undefined): number | fals
 }
 
 /**
+ * Інтервал опитування запиту задачі з урахуванням відмови читання.
+ *
+ * ⛔ L9-41: відмова (`403` без права бачити задачу, `404`) лишає `data` порожнім, а
+ * `impactPollInterval(undefined)` — «ще не прочитано, опитувати далі»: запит повторювався кожні
+ * `PollMs` безкінечно, хоча картка вже каже «стан прочитати не вдалося».
+ *
+ * ⚠ Зупиняє лише відмова клієнтського класу (`4xx`): вона не мине сама. Тимчасова (`5xx`, обрив
+ * мережі) посеред задачі опитування не зупиняє — інакше прогрес замерзав би, а `onSettled` не
+ * спрацьовував би ніколи (рев'ю AN-35, P3).
+ */
+export function impactJobRefetchInterval(state: {
+  readonly status: 'pending' | 'error' | 'success';
+  readonly data: JobStatus | undefined;
+  readonly error: unknown;
+}): number | false {
+  const refused =
+    state.status === 'error' &&
+    state.error instanceof EcrApiError &&
+    state.error.problem.status >= 400 &&
+    state.error.problem.status < 500;
+
+  return refused ? false : impactPollInterval(state.data);
+}
+
+/**
  * Документ у ТОМУ періоді, який зачеплено.
  *
  * ⚠ Без `periodKey` сторінка документа відкрила б поточний період, а не той, чиї результати застаріли.
@@ -80,7 +105,7 @@ function ImpactJob({
   const job = useQuery({
     queryKey: ['job', jobId],
     queryFn: () => apiFetch<JobStatus>(`/api/v1/jobs/${encodeURIComponent(jobId)}`),
-    refetchInterval: (query) => impactPollInterval(query.state.data),
+    refetchInterval: (query) => impactJobRefetchInterval(query.state),
     retry: false,
   });
 
@@ -181,11 +206,30 @@ export function RegistryImpactPage(): JSX.Element {
     void client.invalidateQueries({ predicate: isCalculationResultsQuery });
   }, [client, code]);
 
+  // ⛔ L9-35: вибір живе довше за перелік — після перерахунку чи чужої правки обраний документ зникає
+  // з відповіді сервера, а його id лишався у `selected` і йшов у наступний запит (422). Тому і підпис
+  // кнопки, і тіло запиту рахують лише ті обрані, що є в поточному переліку.
+  const effective = [...selected]
+    .filter((id) => impact.data?.items.some((item) => item.documentId === id) === true)
+    .sort((a, b) => a - b);
+
+  // ⛔ «Нічого не обрано» (→ усі) і «обране зникло» — різні стани: друге ніколи не розширюється до
+  // перерахунку всіх зачеплених (бюджет прогону, D-63, R-14).
+  const selectionGone = selected.size > 0 && effective.length === 0;
+
+  // ⚠ Поза діалогом причини зниклий вибір просто скидається: кнопка чесно каже «усі», і натиск на неї —
+  // свідомий вибір. Під відкритим діалогом — ні: там рішення приймає `onConfirm` нижче.
+  useEffect(() => {
+    if (selectionGone && !asking) setSelected(new Set());
+  }, [selectionGone, asking]);
+
   const recalculate = useMutation({
     mutationFn: (reason: string) =>
-      recalculateImpacted(code, { documentIds: selected.size === 0 ? null : [...selected].sort((a, b) => a - b), reason }),
+      recalculateImpacted(code, { documentIds: selected.size === 0 ? null : effective, reason }),
     onSuccess: (accepted) => {
       setJobId(accepted.jobId);
+      // ⚠ Поставлені документи перераховуються й зникнуть із переліку: вибір не переживає постановку.
+      setSelected(new Set());
       // ⚠ Перелік зачеплених і банер «довідник змінено» в панелі результатів читають кеш: без
       // інвалідації вони показують стан ДО постановки перерахунку (RT-25). Ще раз — коли задача
       // завершиться (`ImpactJob.onSettled`): лише тоді перераховані документи зникають із переліку.
@@ -224,9 +268,9 @@ export function RegistryImpactPage(): JSX.Element {
               onClick={() => setAsking(true)}
               data-impact-recalculate=""
             >
-              {selected.size === 0
+              {effective.length === 0
                 ? t('registries.impact.recalculateAll')
-                : t('registries.impact.recalculateSelected', { count: selected.size })}
+                : t('registries.impact.recalculateSelected', { count: effective.length })}
             </Button>
           )
         }
@@ -320,6 +364,14 @@ export function RegistryImpactPage(): JSX.Element {
         isPending={recalculate.isPending}
         onConfirm={(reason) => {
           setAsking(false);
+
+          // ⛔ Перелік перечитався, поки був відкритий діалог причини, і обраних документів у ньому вже
+          // немає: запит не йде, вибір скидається — кнопка тепер каже «усі», і це окреме рішення людини.
+          if (selectionGone) {
+            setSelected(new Set());
+            return;
+          }
+
           recalculateFocus.arm();
           recalculate.mutate(reason);
         }}

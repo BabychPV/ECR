@@ -126,6 +126,20 @@ public sealed class ConditionalFormatHandlersTests
     }
 
     [Fact]
+    [Trait("Finding", "L9-22")]
+    public async Task Правила_видаленої_колонки_відкидаються_а_не_блокують_збереження_набору()
+    {
+        var table = _draft.Sheets.Single().Tables.Single();
+        _builder.Column(table, "OLD").SoftDelete(7, Now);
+
+        var result = await Save().HandleAsync(
+            1, [Rule(), Rule(column: "OLD"), Rule("lt", "0")], Current, CancellationToken.None);
+
+        Assert.Equal(["VOL", "VOL"], result.Select(r => r.ColumnCode));
+        Assert.Equal([("VOL", 1), ("VOL", 2)], _saved!.Select(r => (r.ColumnCode, r.Ordinal)));
+    }
+
+    [Fact]
     public async Task Занадто_великий_набір_відхиляється()
     {
         var many = Enumerable.Range(0, SaveConditionalFormatsHandler.MaxRules + 1).Select(_ => Rule()).ToList();

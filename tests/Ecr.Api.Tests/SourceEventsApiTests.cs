@@ -252,6 +252,35 @@ public sealed partial class SourceEventsApiTests(SqlServerFixture sql)
         Assert.Null(audit[2].NewJson);
     }
 
+    /// <summary>
+    /// L1-09: читач документа із забороною (S6) на таблицю мапінгу не бачить подій цієї таблиці — порожньо, а
+    /// прямий <c>mapId</c> — 404. До виправлення події повертались за самою видимістю документа.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task L1_09_події_таблиці_із_забороною_не_повертаються_на_живому_SQL()
+    {
+        await using var stand = await ArrangeAsync();
+        using var app = new EcrApiFactory(sql);
+
+        var mapId = await AddMapAsync(stand);
+        await AddLinkAsync(mapId, "L1", L1Start, written: true, kept: "[\"VOLUME\"]");
+
+        var basePath = $"/api/v1/sources/{stand.EntityId}/source-events";
+        using var plain = await SignedInAsync(app, [], stand.ProjectId, GrantLevel.Read);
+        using var denied = await SignedInAsync(app, [], stand.ProjectId, GrantLevel.Read, denyTableDefId: stand.TableDefId);
+
+        var visible = await JsonAsync(await plain.GetAsync(new Uri(basePath, UriKind.Relative)));
+        Assert.Equal(1, visible.GetProperty("totalCount").GetInt32());
+
+        var hidden = await JsonAsync(await denied.GetAsync(new Uri(basePath, UriKind.Relative)));
+        Assert.Equal((0, 0), (hidden.GetProperty("items").GetArrayLength(), hidden.GetProperty("totalCount").GetInt32()));
+
+        var direct = await denied.GetAsync(new Uri($"{basePath}?mapId={mapId}", UriKind.Relative));
+        Assert.Equal(HttpStatusCode.NotFound, direct.StatusCode);
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
@@ -555,15 +584,15 @@ public sealed partial class SourceEventsApiTests(SqlServerFixture sql)
 
     /// <summary>Користувач із заданими функціональними правами і, якщо задано, грантом на проєкт.</summary>
     private async Task<HttpClient> SignedInAsync(
-        EcrApiFactory app, string[] permissions, int? projectId, GrantLevel? level)
-        => await SignedInAsync(app.CreateClient(), permissions, projectId, level, app.ErrorsText);
+        EcrApiFactory app, string[] permissions, int? projectId, GrantLevel? level, int? denyTableDefId = null)
+        => await SignedInAsync(app.CreateClient(), permissions, projectId, level, app.ErrorsText, denyTableDefId);
 
     private async Task<HttpClient> SignedInAsync(
         Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactory<Program> app, string[] permissions, int? projectId, GrantLevel? level)
         => await SignedInAsync(app.CreateClient(), permissions, projectId, level, "(логи — на основній фабриці)");
 
     private async Task<HttpClient> SignedInAsync(
-        HttpClient client, string[] permissions, int? projectId, GrantLevel? level, string errors)
+        HttpClient client, string[] permissions, int? projectId, GrantLevel? level, string errors, int? denyTableDefId = null)
     {
         var name = $"sev_{Guid.NewGuid():N}"[..20];
 
@@ -585,6 +614,11 @@ public sealed partial class SourceEventsApiTests(SqlServerFixture sql)
             if (projectId is { } project && level is { } grant)
             {
                 db.ResourceGrants.Add(new ResourceGrant(role.Id, ResourceKind.Project, project, grant));
+            }
+
+            if (denyTableDefId is { } deniedTable)
+            {
+                db.ResourceGrants.Add(new ResourceGrant(role.Id, ResourceKind.Table, deniedTable, GrantLevel.Read, isDeny: true));
             }
 
             await db.SaveChangesAsync().ConfigureAwait(false);

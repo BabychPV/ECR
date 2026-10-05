@@ -174,6 +174,68 @@ public sealed class SourceEntitiesApiTests(SqlServerFixture sql)
         }
     }
 
+    /// <summary>
+    /// L4-07 (D-202): мапінг на поле довідника — запис збором у довідник. <c>Integration.Manage</c> без права на дані
+    /// довідника не заводить, не призупиняє, не відновлює й не видаляє його. До виправлення всі чотири дії давали 200/204.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task L4_07_мапінг_на_поле_довідника_без_права_на_дані_довідника_403_на_заведення_паузу_відновлення_і_видалення()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var editor = await SignedInAsync(app, Manage, "Registry.EditData").ConfigureAwait(true);
+        using var managerOnly = await SignedInAsync(app, Manage).ConfigureAwait(true);
+        var dataSourceId = await DataSourceAsync().ConfigureAwait(true);
+        var stand = await StandAsync(dataSourceId).ConfigureAwait(true);
+
+        try
+        {
+            var bound = await editor.PutAsJsonAsync(
+                new Uri($"/api/v1/sources/{stand.EntityId}/registry", UriKind.Relative), new { registryDefId = stand.RegistryId });
+            Assert.Equal(HttpStatusCode.OK, bound.StatusCode);
+
+            // Без Registry.EditData мапінг не заводиться (і нічого не записується).
+            var denied = await MapAsync(managerOnly, stand.EntityId, stand.OwnFieldId).ConfigureAwait(true);
+            Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
+            await using (var db = new EcrDbContext(Options()))
+            {
+                Assert.False(await db.EntityFieldMaps.AnyAsync(m => m.SourceEntityId == stand.EntityId).ConfigureAwait(true));
+            }
+
+            // Контроль: з правом на дані довідника — заводиться.
+            var created = await MapAsync(editor, stand.EntityId, stand.OwnFieldId).ConfigureAwait(true);
+            Assert.Equal(HttpStatusCode.OK, created.StatusCode);
+            var mapId = (await JsonAsync(created).ConfigureAwait(true)).GetProperty("id").GetInt32();
+            var mapUri = new Uri($"/api/v1/entity-field-maps/{mapId}", UriKind.Relative);
+
+            // Той самий Manage-only не керує чужим мапінгом на довідник.
+            foreach (var action in new[] { "pause", "resume" })
+            {
+                var response = await managerOnly.PostAsync(
+                    new Uri($"/api/v1/entity-field-maps/{mapId}/{action}", UriKind.Relative), content: null);
+                Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+            }
+
+            Assert.Equal(HttpStatusCode.Forbidden, (await managerOnly.DeleteAsync(mapUri)).StatusCode);
+            await using (var db = new EcrDbContext(Options()))
+            {
+                var map = await db.EntityFieldMaps.AsNoTracking().SingleAsync(m => m.Id == mapId).ConfigureAwait(true);
+                Assert.True(map.IsActive);
+            }
+
+            // Контроль: власник права призупиняє й видаляє.
+            Assert.Equal(
+                HttpStatusCode.OK,
+                (await editor.PostAsync(new Uri($"/api/v1/entity-field-maps/{mapId}/pause", UriKind.Relative), content: null)).StatusCode);
+            Assert.Equal(HttpStatusCode.NoContent, (await editor.DeleteAsync(mapUri)).StatusCode);
+        }
+        finally
+        {
+            await DeactivateAsync(dataSourceId).ConfigureAwait(true);
+        }
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
     [Trait(TestCategories.Category, TestCategories.Integration)]

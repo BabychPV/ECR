@@ -268,6 +268,32 @@ describe('installKeyCommitGate: швидкий ввід не склеює зна
     grid.dispose();
   });
 
+  it('AN-39 L8-04: date-редактор - друковані з черги не кидають, уся черга відтворюється', () => {
+    const container = document.createElement('div');
+    const wrapper = document.createElement('div');
+    wrapper.className = 'edit-input-wrapper';
+    const input = document.createElement('input');
+    input.type = 'date';
+    wrapper.appendChild(input);
+    container.appendChild(wrapper);
+    document.body.appendChild(container);
+    input.focus();
+
+    const dispose = installKeyCommitGate(container);
+    const replayed: string[] = [];
+    container.addEventListener('keydown', (event) => replayed.push(event.key));
+
+    // Enter у редакторі відкриває вікно затримки; наступні символи йдуть у чергу.
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: '1', bubbles: true, cancelable: true }));
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: '2', bubbles: true, cancelable: true }));
+    const beforeRelease = replayed.length;
+
+    expect(() => vi.advanceTimersByTime(2000)).not.toThrow();
+    expect(replayed.slice(beforeRelease)).toEqual(['1', '2']);
+    dispose();
+  });
+
   it('контроль моделі: БЕЗ черги та сама послідовність псує дані', () => {
     // Доказ, що тест відтворює дефект, а не проходить за будь-яких умов.
     const grid = mountGrid(4, 1, false);

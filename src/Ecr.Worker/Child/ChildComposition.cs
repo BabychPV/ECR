@@ -32,6 +32,12 @@ namespace Ecr.Worker.Child;
 /// </remarks>
 internal static class ChildComposition
 {
+    /// <summary>
+    /// Мітка <c>mode</c> вимірів бюджету перерахунку в дочірньому процесі пулу (L2-12): дочірній
+    /// існує лише в режимі черги <c>Database</c>, тож і мітка — завжди вона.
+    /// </summary>
+    public const string BudgetMode = nameof(JobQueueMode.Database);
+
     /// <summary>Налаштування виконавця черги дочірнього процесу.</summary>
     /// <param name="pool">Налаштування пулу (<c>Jobs:Workers:*</c>).</param>
     /// <remarks>
@@ -50,6 +56,9 @@ internal static class ChildComposition
             Role = JobProgressStore.RoleWorker,
             MaxConcurrency = 1,
             MaxDuration = pool.MaxDuration,
+
+            // L2-03: зависла задача — вихід, наглядач перезапустить слот.
+            OnHang = () => Environment.Exit(JobWorkerOptions.ExitJobHung),
         };
     }
 
@@ -90,6 +99,16 @@ internal static class ChildComposition
         // Метрики процесу задачі (ecr.job.failed, start_latency, кеші): без цього вони
         // емітились у нікуди — див. ChildTelemetry.
         services.AddChildTelemetry(configuration);
+
+        // ⛔ L2-12: мітка mode у вимірах бюджету ПРД-13 (ecr.calc.full_year) — не з конфігурації:
+        // у дочірнього вона читалась із файлу Api («Quartz»), хоча дочірній існує лише в режимі
+        // Database (deploy-ecr.ps1 пише ECR_Jobs__Queue__Mode лише в оточення EcrApi).
+        foreach (var budget in services.Where(d => d.ServiceType == typeof(RecalculationBudgetOptions)).ToList())
+        {
+            services.Remove(budget);
+        }
+
+        services.AddSingleton(RecalculationBudgetOptions.Read(configuration) with { Mode = BudgetMode });
 
         services.AddSingleton(WorkerOptions(pool));
         services.AddHostedService<JobWorker>();
