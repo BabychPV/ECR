@@ -135,7 +135,11 @@ export interface ServerOptions {
   readonly threeLevels?: boolean;
   /** Збереження (не `dryRun`) відповідає лише після цього проміса — «запит у дорозі». */
   readonly holdCommit?: Promise<unknown>;
-  /** Кейси верхньої панелі — двома сторінками: 100 рядків і `nextCursor`, далі `E999`. */
+  /**
+   * Кейси верхньої панелі — двома сторінками: перша з `nextCursor`, друга — `E999`. Перша сторінка
+   * навмисно мала: суть перевірки — склейка сторінок і незмінність правки, а не обсяг; 100 рядків
+   * Mantine-полів у jsdom рендеряться ~2 с і на одному ядрі впирались у 5-секундний `asyncUtilTimeout`.
+   */
   readonly pagedCases?: boolean;
   /** Сеанс симуляції «очима користувача» (`/me.isSimulation`). */
   readonly simulation?: boolean;
@@ -185,7 +189,7 @@ export function mockServer(permissions: string[], options: ServerOptions = {}): 
             if (url.searchParams.get('cursor') === 'c2') {
               return json({ items: [row(999, 'E999', { CASE_NAME: 'Late' }, 'Late')], nextCursor: null, totalCount: 101 });
             }
-            const first = [...CaseRows, ...Array.from({ length: 98 }, (_, i) => row(1000 + i, `F${String(i)}`, { CASE_NAME: `F${String(i)}` }))];
+            const first = [...CaseRows, ...Array.from({ length: 3 }, (_, i) => row(1000 + i, `F${String(i)}`, { CASE_NAME: `F${String(i)}` }))];
             return json({ items: first, nextCursor: 'c2', totalCount: 101 });
           }
           return json(page(options.threeLevels === true ? StreamCaseRows.filter((item) => item.values['STREAM']?.value === parent) : CaseRows));
