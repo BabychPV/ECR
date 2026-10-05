@@ -245,7 +245,9 @@ public sealed class ImportRegistryEntriesHandler(
         var flaggedRows = new HashSet<int>();
 
         var errors = new List<RegistryEntryImportError>();
-        var seenCodes = new HashSet<string>(StringComparer.Ordinal);
+        // ⚠ L5-07: регістронезалежно, як колація бази й `EntriesByCode`: інакше «a1» і «A1» у файлі проходили
+        // як різні, а записи в базі для них — один.
+        var seenCodes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var (added, updated, unchanged) = (0, 0, 0);
 
         // RT-12 (D-157): коди нових рядків без коду — одним зверненням на файл, через writer (та
