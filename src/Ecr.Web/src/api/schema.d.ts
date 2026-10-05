@@ -4698,6 +4698,9 @@ export interface paths {
          *     ЦЕЙ маршрут лишається закритим: він обслуговує редактор перекладів і
          *     поля локалізованих назв, тобто вже автентифіковані екрани, і відкривати
          *     його заради екрана входу не було потреби.
+         *
+         *     ✎ AN-40 / L9-13: кожна мова несе `hasTranslations` — перемикач мови в меню користувача більше не тягне
+         *     повні каталоги всіх мов, щоб вирішити, які показувати.
          */
         get: {
             parameters: {
@@ -20058,6 +20061,11 @@ export interface components {
         LanguageDto: {
             /** @description Код мови, напр. `en`. */
             code: string;
+            /** @description Чи є в мові хоч один власний переклад (`R-16`, AN-40 / L9-13); `null` — сервер цього не рахував
+             *     (анонімний `bootstrap`, підробки), і клієнт вирішує сам за каталогом.
+             *     ⛔ `null` у JSON не пишеться: анонімний `GET /public/bootstrap` віддає рівно три поля мови
+             *     (`PublicBootstrapTests`), і нове поле туди не просочується. */
+            hasTranslations?: null | boolean;
             /** @description Чи це мова за замовчуванням; така рівно одна. */
             isDefault: boolean;
             /** @description Назва мови нею самою: «Русский», «Қазақша». */
@@ -24209,6 +24217,10 @@ export interface components {
             id: number;
             /** @description Чи діє синхронізація за мапінгом. */
             isActive: boolean;
+            /** @description Версія для оптимістичного блокування (hex, AN-40 / L9-06): клієнт повертає її в
+             *     `rowVersion` запиту на зміну, і пауза зі застарілого рядка переліку дає `409`,
+             *     а не мовчки відкочує чужу правку полів. */
+            rowVersion: string;
             /**
              * Format: int32
              * @description Сутність-шаблон подій.
@@ -25335,6 +25347,9 @@ export interface components {
             filterValue: null | string;
             /** @description Чи діє синхронізація за мапінгом (пауза — `false`). */
             isActive: boolean;
+            /** @description Версія, яку бачив клієнт (`rowVersion` мапінгу); інша — `409`; `null` — без
+             *     перевірки (необов'язкове поле: наявні споживачі контракту не ламаються). */
+            rowVersion?: null | string;
             /** @description Звідки береться об'єм. */
             volumeMode: components["schemas"]["SourceEventVolumeMode"];
         };

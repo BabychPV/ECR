@@ -146,6 +146,9 @@ export function DataSourcesTable(): JSX.Element {
 
       {opened !== undefined && (
         <DataSourceDrawer
+          // AN-40 / L9-27: інше з'єднання — інша шухляда. Без ключа React перевикористовував її разом зі станом
+          // вкладок і форми «Додати сутність», і шлях каталогу A їхав на сервер із `dataSourceId` B.
+          key={opened.code}
           source={opened}
           canView={canView}
           canManage={canManage}

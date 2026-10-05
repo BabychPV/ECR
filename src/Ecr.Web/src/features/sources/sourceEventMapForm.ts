@@ -65,6 +65,11 @@ export interface MapFormState {
   readonly filterValue: string;
   readonly isActive: boolean;
   readonly fields: readonly FieldRow[];
+  /**
+   * Версія мапінгу, з якої відкрито форму (AN-40 / L9-06); `null` — новий мапінг. Повертається в `PUT`: правка чи
+   * пауза зі застарілого стану дає `409`, а не мовчки відкочує чужу зміну полів.
+   */
+  readonly rowVersion: string | null;
 }
 
 let rowSeed = 0;
@@ -100,6 +105,7 @@ export function emptyForm(): MapFormState {
     filterValue: '',
     isActive: true,
     fields: [newFieldRow({ sourceAttribute: StartAttribute }), newFieldRow({ sourceAttribute: EndAttribute })],
+    rowVersion: null,
   };
 }
 
@@ -113,6 +119,7 @@ export function formFromMap(map: SourceEventMap): MapFormState {
     filterScope: map.filterScope,
     filterValue: map.filterValue ?? '',
     isActive: map.isActive,
+    rowVersion: map.rowVersion,
     fields: map.fields.map((field) =>
       newFieldRow({
         targetColumnDefId: field.targetColumnDefId,
@@ -271,6 +278,7 @@ export function toUpdateRequest(state: MapFormState): UpdateSourceEventMapReques
     isActive: state.isActive,
     ...filterOf(state),
     fields: state.fields.map(fieldInput),
+    rowVersion: state.rowVersion,
   };
 }
 

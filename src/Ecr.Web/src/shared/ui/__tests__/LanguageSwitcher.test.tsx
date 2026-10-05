@@ -89,6 +89,28 @@ afterEach(() => {
 });
 
 describe('Перемикач мови інтерфейсу', () => {
+  // AN-40 / L9-13: ознака перекладу — з реєстру мов; повні каталоги інших мов не тягнуться.
+  // Мутація (лише локально): `flagged` завжди `false` — `routes` кидає на неочікуваний `/ui-strings/ru`, червоніє.
+  it('L9-13: hasTranslations із реєстру — меню не тягне каталоги мов, неперекладена мова схована', async () => {
+    routes({
+      '/api/v1/languages': [
+        { code: 'en', nameNative: 'English', isDefault: true, hasTranslations: true },
+        { code: 'ru', nameNative: 'Русский', isDefault: false, hasTranslations: true },
+        { code: 'kz', nameNative: 'Қазақша', isDefault: false, hasTranslations: false },
+      ],
+      // Лише каталог поточної мови, який тягне сама сторінка (`loadCatalog`).
+      '/api/v1/ui-strings/en': { languageCode: 'en', revision: 1, strings: {} },
+    });
+
+    show();
+
+    const select = (await screen.findByLabelText('⟦profile.language⟧')) as HTMLSelectElement;
+    expect(Array.from(select.options).map((option) => option.textContent)).toEqual(['English', 'Русский']);
+
+    const fetched = vi.mocked(fetch).mock.calls.map(([input]) => String(input));
+    expect(fetched.filter((url) => url.includes('/api/v1/ui-strings/') && !url.includes('/ui-strings/en'))).toEqual([]);
+  });
+
   it('показує мови з реєстру, а не вшиту в збірку трійку', async () => {
     routes({
       '/api/v1/languages': Languages,

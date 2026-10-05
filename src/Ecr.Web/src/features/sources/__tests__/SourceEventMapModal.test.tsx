@@ -35,6 +35,7 @@ const Stored: SourceEventMap = {
   filterScope: null,
   filterValue: null,
   isActive: true,
+  rowVersion: '00000000000007D1',
   fields: [
     { id: 1, targetColumnDefId: 1, sourceAttribute: '$start', attributeScope: 'Event', valueKind: 'Direct', sourceUnitId: null, targetUnitId: null, values: [] },
     { id: 2, targetColumnDefId: 2, sourceAttribute: '$end', attributeScope: 'Event', valueKind: 'Direct', sourceUnitId: null, targetUnitId: null, values: [] },
@@ -186,6 +187,8 @@ describe('SourceEventMapModal', () => {
     expect(put?.body).toEqual({
       volumeMode: 'None',
       isActive: true,
+      // AN-40 / L9-06: версія, з якої відкрито форму, — у тілі PUT.
+      rowVersion: '00000000000007D1',
       filterAttribute: null,
       filterScope: null,
       filterValue: null,

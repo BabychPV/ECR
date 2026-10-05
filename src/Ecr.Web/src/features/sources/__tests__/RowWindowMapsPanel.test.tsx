@@ -72,9 +72,14 @@ const Entity = { id: 42, code: 'FLARE_EVENTS', displayName: 'Flare events' };
 interface Options {
   maps?: RowWindowMap[];
   remove?: () => Response;
+  toggle?: (body: unknown) => Response;
 }
 
-function respond({ maps = [Active, Paused], remove = () => new Response(null, { status: 204 }) }: Options = {}): void {
+function respond({
+  maps = [Active, Paused],
+  remove = () => new Response(null, { status: 204 }),
+  toggle = (body: unknown) => json({ ...Active, ...(body as object) }),
+}: Options = {}): void {
   sent = [];
 
   vi.stubGlobal(
@@ -88,7 +93,7 @@ function respond({ maps = [Active, Paused], remove = () => new Response(null, { 
 
       if (path === '/api/v1/row-window-maps' && method === 'GET') return json(maps);
       if (path === '/api/v1/row-window-maps' && method === 'POST') return json({ ...Active, id: 9, ...(body as object) }, 201);
-      if (path === '/api/v1/row-window-maps/5' && method === 'PUT') return json({ ...Active, ...(body as object) });
+      if (path === '/api/v1/row-window-maps/5' && method === 'PUT') return toggle(body);
       if (path === '/api/v1/row-window-maps/6' && method === 'PUT') return json({ ...Paused, ...(body as object) });
       if (path === '/api/v1/row-window-maps/5' && method === 'DELETE') return remove();
       if (path === '/api/v1/documents/100/tables') {
@@ -208,6 +213,20 @@ describe('RowWindowMapsPanel', () => {
       sources: [{ selectorValue: 'A', sourceEntityId: 42, sourceField: 'Flare.Total', sourceUnitId: 8 }],
     });
     await waitFor(() => expect(sent.filter((s) => s.method === 'GET' && s.path === '/api/v1/row-window-maps').length).toBeGreaterThan(1));
+  });
+
+  // AN-40 / L9-06: 409 зі старим rowVersion повторювався на кожне натискання, доки людина не оновить сторінку.
+  // Мутація (лише локально): прибрати `onError` з `toggle` — перелік не перечитується, червоніє цей тест.
+  it('пауза зі застарілою версією (409) — причина в панелі, а перелік перечитується', async () => {
+    respond({ toggle: () => problem(409, 'ECR-INT-0409', 'err.ECR-INT-0409.rowWindowConcurrency', { rowWindowMapId: '5' }) });
+    show();
+
+    fireEvent.click((await row(5)).querySelector<HTMLElement>('[data-row-window-toggle="5"]') as HTMLElement);
+
+    await waitFor(() => expect(screen.getByRole('alert')).toBeTruthy());
+    await waitFor(() =>
+      expect(sent.filter((s) => s.method === 'GET' && s.path === '/api/v1/row-window-maps').length).toBeGreaterThan(1),
+    );
   });
 
   it('видалення з підтягнутими значеннями (409 rowWindowMapHasValues) — причина сервера в панелі, прив\'язка лишається', async () => {

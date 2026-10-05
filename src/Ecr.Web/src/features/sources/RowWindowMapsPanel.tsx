@@ -1,6 +1,7 @@
 import { useState, type JSX } from 'react';
 import { Badge, Button, Group, Loader, Stack, Table, Text, Title } from '@mantine/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { EcrApiError } from '@/api/client';
 import type { DocumentSummary, SourceEntityStatus } from '@/api/types';
 import { formatNumber } from '@/shared/format';
 import { t } from '@/shared/i18n';
@@ -57,6 +58,10 @@ export function RowWindowMapsPanel({
     onSuccess: (map) => {
       refresh();
       showDone(map.isActive ? t('rowWindow.resumed') : t('rowWindow.paused'));
+    },
+    // AN-40 / L9-06: `409` зі старим `rowVersion` повторювався б на кожне натискання до оновлення сторінки.
+    onError: (error) => {
+      if (error instanceof EcrApiError && error.problem.status === 409) refresh();
     },
   });
 

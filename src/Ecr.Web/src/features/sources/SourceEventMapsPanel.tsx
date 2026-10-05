@@ -1,6 +1,7 @@
 import { useState, type JSX } from 'react';
 import { Badge, Button, Group, Loader, Stack, Table, Text, Title } from '@mantine/core';
 import { useMutation, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
+import { EcrApiError } from '@/api/client';
 import type { DocumentSummary } from '@/api/types';
 import { formatNumber } from '@/shared/format';
 import { useFocusAfterBusy } from '@/shared/a11y/focus';
@@ -66,6 +67,11 @@ export function SourceEventMapsPanel({
     onSuccess: (map) => {
       refresh();
       showDone(map.isActive ? t('sourceEvents.mapResumed') : t('sourceEvents.mapPaused'));
+    },
+    // AN-40 / L9-06: `409` — мапінг змінили після того, як перелік його прочитав. Перечитуємо перелік, щоб наступне
+    // натискання пішло з чинною версією, а не впиралося в ту саму відмову до оновлення сторінки.
+    onError: (error) => {
+      if (error instanceof EcrApiError && error.problem.status === 409) refresh();
     },
   });
 
