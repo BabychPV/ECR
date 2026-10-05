@@ -1015,7 +1015,8 @@ public sealed class RegistrySyncJob(
                 join entry in db.RegistryEntries.AsNoTracking() on key.RegistryEntryId equals entry.Id
                 where key.DataSourceId == dataSourceId && entry.RegistryDefId == registryDefId
                 orderby key.Id
-                select new RegistrySyncLink(key.ExternalId, key.RegistryEntryId, key.ExternalPath, key.MissingInSourceSince))
+                select new RegistrySyncLink(
+                    key.ExternalId, key.RegistryEntryId, key.ExternalPath, key.MissingInSourceSince, entry.IsDeleted))
             .ToListAsync(ct)
             .ConfigureAwait(false);
 

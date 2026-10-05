@@ -385,6 +385,45 @@ public sealed class RegistrySyncExecuteTests(SqlServerFixture sql)
         }
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "D-212")]
+    public async Task L4_12_Зв_язок_видаленого_запису_не_обслуговується_а_подія_з_причиною()
+    {
+        var stand = await ArrangeAsync(RegistrySourceKind.External);
+        stand.Put("Stack2", "Capacity", 99m);
+        await using (var db = Context())
+        {
+            (await db.RegistryEntries.SingleAsync(e => e.Id == stand.E2)).SoftDelete();
+            await db.SaveChangesAsync();
+        }
+
+        await using var provider = BuildProvider();
+
+        try
+        {
+            await RunAsync(provider, stand);
+
+            // Значення видаленого запису не торкнуто, ключ не позначено.
+            Assert.Equal(20m, await CapAsync(stand, stand.E2));
+            Assert.Null((await KeyAsync(stand, stand.G2)).MissingInSourceSince);
+
+            var unlinked = Assert.Single(
+                await EventsAsync(stand), e => e.Status == CollectionCoverage.RegistryElementUnlinked);
+            Assert.Contains($"element={stand.G2}; entry={stand.E2}", unlinked.Details, StringComparison.Ordinal);
+            Assert.Contains("reason=externalKeyOnDeletedEntry", unlinked.Details, StringComparison.Ordinal);
+
+            // Дедуп: той самий стан - жодної нової події.
+            await RunAsync(provider, stand);
+            Assert.Single(await EventsAsync(stand), e => e.Status == CollectionCoverage.RegistryElementUnlinked);
+        }
+        finally
+        {
+            await DeactivateAsync(stand);
+        }
+    }
+
     // ─── Правила довідника й атомарність ───────────────────────────────────
 
     [Fact]

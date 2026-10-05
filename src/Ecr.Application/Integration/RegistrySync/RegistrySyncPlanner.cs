@@ -64,6 +64,9 @@ public static class RegistrySyncPlanner
     /// <summary>Причина події <c>ElementUnlinked</c>: автостворення вимагає <c>CodeMode = Auto</c> (Q6=C).</summary>
     public const string CodeModeManualReason = "codeModeManual";
 
+    /// <summary>Причина події <c>ElementUnlinked</c>: зв'язок елемента веде на видалений запис (L4-12).</summary>
+    public const string EntryDeletedReason = "externalKeyOnDeletedEntry";
+
     /// <summary>
     /// «Поле» події <see cref="RegistrySyncEventKind.Diverged"/> про ввімкненість запису
     /// (<c>Hybrid</c>, <c>D-212</c> Q6) — як <c>@active</c> в аудиті writer'а.
@@ -175,6 +178,15 @@ public static class RegistrySyncPlanner
                 continue;
             }
 
+            // L4-12: зв'язок на видалений запис синк не обслуговує; без події це було б тихе ігнорування.
+            if (link.EntryDeleted)
+            {
+                events.Add(new RegistrySyncEvent(
+                    RegistrySyncEventKind.ElementUnlinked, element.ExternalId, link.RegistryEntryId,
+                    Reason: EntryDeletedReason));
+                continue;
+            }
+
             // Елемент знову є: позначку зникнення знято (сам зв'язок живий, хоч би що з записом).
             if (writes && link.MissingInSourceSince is not null)
             {
@@ -222,7 +234,7 @@ public static class RegistrySyncPlanner
         {
             foreach (var link in links.Values.OrderBy(l => l.ExternalId, StringComparer.Ordinal))
             {
-                if (elements.ContainsKey(link.ExternalId))
+                if (elements.ContainsKey(link.ExternalId) || link.EntryDeleted)
                 {
                     continue;
                 }
@@ -369,7 +381,7 @@ public static class RegistrySyncPlanner
             .ToLookup(e => e.ExternalPath!, StringComparer.OrdinalIgnoreCase);
 
         var lostByPath = links.Values
-            .Where(l => l.ExternalPath is not null && !elements.ContainsKey(l.ExternalId))
+            .Where(l => l.ExternalPath is not null && !l.EntryDeleted && !elements.ContainsKey(l.ExternalId))
             .GroupBy(l => l.ExternalPath!, StringComparer.OrdinalIgnoreCase)
             .OrderBy(g => g.Key, StringComparer.Ordinal);
 

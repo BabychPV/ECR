@@ -36,11 +36,16 @@ public sealed record RegistrySyncSourceElement(
 /// Відколи елемента немає в джерелі (<c>RegistryExternalKey.MissingInSourceSince</c>);
 /// <c>null</c> — є або не перевірялося.
 /// </param>
+/// <param name="EntryDeleted">
+/// Запис довідника видалено логічно (<c>RegistryEntry.IsDeleted</c>): зв'язок лишається в базі, але синк
+/// його не обслуговує — ні значень, ні перепривʼязки, ні зникнення; лише подія (L4-12).
+/// </param>
 public sealed record RegistrySyncLink(
     string ExternalId,
     long RegistryEntryId,
     string? ExternalPath,
-    DateTime? MissingInSourceSince = null);
+    DateTime? MissingInSourceSince = null,
+    bool EntryDeleted = false);
 
 /// <summary>Поточне значення одного поля запису довідника.</summary>
 /// <param name="Value">

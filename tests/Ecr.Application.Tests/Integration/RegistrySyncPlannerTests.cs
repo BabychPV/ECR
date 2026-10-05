@@ -159,6 +159,55 @@ public sealed class RegistrySyncPlannerTests
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait("Requirement", "ФВ-8.10")]
+    public void Зв_язок_видаленого_запису_лише_подія_externalKeyOnDeletedEntry()
+    {
+        // L4-12: елемент є в знімку, а його запис видалено - раніше тихе ігнорування.
+        var input = Input(
+            RegistrySourceKind.External,
+            element: Element(("Permit_Limit", 15m)),
+            current: Values(),
+            Limit) with
+        {
+            Links = [new RegistrySyncLink(Guid1, EntryId, Path1, EntryDeleted: true)],
+            Entries = [],
+        };
+
+        var plan = RegistrySyncPlanner.Plan(input);
+
+        Assert.Empty(plan.Updates);
+        Assert.Empty(plan.Creates);
+        var unlinked = Assert.Single(plan.Events);
+        Assert.Equal(RegistrySyncEventKind.ElementUnlinked, unlinked.Kind);
+        Assert.Equal(Guid1, unlinked.ExternalId);
+        Assert.Equal(EntryId, unlinked.RegistryEntryId);
+        Assert.Equal(RegistrySyncPlanner.EntryDeletedReason, unlinked.Reason);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-8.10")]
+    public void Зв_язок_видаленого_запису_не_переприв_язується_і_не_позначається_зниклим()
+    {
+        // Зв'язок на видалений запис зник зі знімка, а на його шляху з'явився новий елемент.
+        var input = Relink(
+            RegistrySourceKind.External,
+            [new RegistrySyncSourceElement("NEW-GUID", Path1, Attrs(), "FL-01")]) with
+        {
+            Links = [new RegistrySyncLink(Guid1, EntryId, Path1, EntryDeleted: true)],
+            Entries = [],
+        };
+
+        var plan = RegistrySyncPlanner.Plan(input);
+
+        Assert.Empty(plan.Relinks);
+        Assert.Empty(plan.MissingMarks);
+        Assert.Empty(plan.Deactivations);
+        Assert.DoesNotContain(plan.Events, e => e.Kind == RegistrySyncEventKind.SourceMissing);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-8.10")]
     public void Зниклий_елемент_повного_знімка_лише_подія_SourceMissing()
     {
         var input = new RegistrySyncInput(
