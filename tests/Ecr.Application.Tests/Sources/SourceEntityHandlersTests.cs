@@ -249,6 +249,48 @@ public sealed class SourceEntityHandlersTests
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
     [Trait("Requirement", "ФВ-8.11")]
+    [Trait("Directive", "AN-34-L4-01")]
+    public async Task Прив_язка_до_довідника_що_вже_тримає_інша_сутність_з_єднання_дає_409_і_не_пише()
+    {
+        // Мутація (2026-10-05): прибрати перевірку RegistryBoundByOtherEntityAsync з
+        // BindSourceEntityRegistryHandler - тест червоний (прив'язка записана).
+        // ⚠ Id підробленої сутності 0 (її не записувала база), тож «крім неї» - будь-яке число.
+        _sources.RegistryBoundByOtherEntityAsync(DataSourceId, RegistryId, Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(true);
+
+        var ex = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Bind().HandleAsync(EntityId, RegistryId, CancellationToken.None));
+
+        Assert.Equal(ErrorCodes.EntityFieldMapStateConflict, ex.ErrorCode);
+        Assert.Equal("err.ECR-INT-0409.registryAlreadyBound", ex.Details!["messageKey"]);
+        Assert.Equal(RegistryId.ToString(System.Globalization.CultureInfo.InvariantCulture), ex.Details!["registryDefId"]);
+        Assert.Null(_entity.RegistryDefId);
+        await _sources.DidNotReceive().SaveSourceEntityAsync(Arg.Any<SourceEntity>(), Arg.Any<CancellationToken>());
+        await _audit.DidNotReceiveWithAnyArgs().WriteStructureChangeAsync(default!, default);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "ФВ-8.11")]
+    [Trait("Directive", "AN-34-L4-01")]
+    public async Task Повторна_прив_язка_до_свого_довідника_і_відв_язка_не_питають_про_чужу_прив_язку()
+    {
+        // Своя наявна прив'язка не конфліктує сама з собою, а відв'язка нічого не займає.
+        _entity.BindRegistry(RegistryId);
+        _sources.RegistryBoundByOtherEntityAsync(Arg.Any<int>(), Arg.Any<int>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(true);
+
+        var same = await Bind().HandleAsync(EntityId, RegistryId, CancellationToken.None);
+        var unbound = await Bind().HandleAsync(EntityId, null, CancellationToken.None);
+
+        Assert.Equal(RegistryId, same.RegistryDefId);
+        Assert.Null(unbound.RegistryDefId);
+        await _sources.DidNotReceiveWithAnyArgs().RegistryBoundByOtherEntityAsync(default, default, default, default);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "ФВ-8.11")]
     public async Task Прив_язка_неіснуючої_сутності_дає_404()
     {
         var ex = await Assert.ThrowsAsync<NotFoundException>(

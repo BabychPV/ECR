@@ -6574,8 +6574,11 @@ USING (VALUES
     (N'profile.languageUnsavedBlocked', N'en', N'The language was not changed: some changes on this page are not saved. Save or undo them, then change the language.', 1),
     -- COLL:t4-p3 ── кінець секції ──
     -- AN32:L2-11 ── черга: перезапуск, коли на ціль уже чекає інша задача; ru/kz — порцією AN32:L2-11 у блоці I18N нижче
-    (N'err.ECR-JOB-0409.restartCoveredBy', N'en', N'Job {jobId} was not restarted: job {coveredBy} is already queued for the same target and will do this work.', 1)
+    (N'err.ECR-JOB-0409.restartCoveredBy', N'en', N'Job {jobId} was not restarted: job {coveredBy} is already queued for the same target and will do this work.', 1),
     -- AN32:L2-11 ── кінець секції ──
+    -- COLL:an34m ── AN-34 L4-01: довідник тримає одна сутність збору на з'єднання; ru/kz — порцією COLL:an34m у блоці I18N нижче ──
+    (N'err.ECR-INT-0409.registryAlreadyBound', N'en', N'Registry {registryDefId} is already bound to another collection entity of this connection. A connection takes one entity per registry: unbind the other entity first.', 1)
+    -- COLL:an34m ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -15491,6 +15494,16 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- DOC:an37 ── кінець секції ──
+-- COLL:an34m ── ru/kz AN-34 L4-01: довідник уже прив'язаний до іншої сутності збору з'єднання; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-INT-0409.registryAlreadyBound', N'ru', N'Справочник {registryDefId} уже привязан к другой сущности сбора этого подключения. Подключение держит одну сущность на справочник: сначала отвяжите другую сущность.'),
+    (N'err.ECR-INT-0409.registryAlreadyBound', N'kz', N'{registryDefId} анықтамалығы осы қосылымның жинау нысандарының біріне бұрыннан байланған. Қосылым бір анықтамалыққа бір нысанды ұстайды: алдымен басқа нысанды ажыратыңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:an34m ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t
