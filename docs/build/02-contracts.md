@@ -3668,6 +3668,8 @@ public sealed class NotFoundException(string errorCode, string message)
 | `err.ECR-CALC-0422.methodologyImportBlocked` | 422 | пакет методологій має блокери (нерезолвні посилання тощо) — запис не виконується (`POST /methodologies/import`) |
 | `err.ECR-CALC-0422.methodologyImportTimeZone` | 422 | пояс дат AF в імпорті пакета невідомий |
 | `err.ECR-CALC-0409.methodologyImportConflict` | 409 | пакет змінює вже наявну версію методології без нового номера версії |
+| `err.ECR-CALC-0409.effectiveDateTaken` | 409 | публікація: у методології вже є опублікована версія від цієї дати (ФВ-13.3); подробиці `version`, `effectiveFrom` |
+| `err.ECR-CALC-0409.effectiveDateTakenNoVersion` | 409 | те саме, але виявлене базою (унікальний індекс `UQ_MV_Effective`, аудит L7-08) під час гонки двох публікацій на одну дату; версію-суперника база не називає, подробиця лише `effectiveFrom` |
 | `err.ECR-CELL-0422.importPrecision` | 422 | імпорт `.xlsx`: значення після округлення до `Scale` не вміщується в `Precision` колонки (ФВ-9.16b) |
 | `err.ECR-CFG-0422.condFormatColor` | 422 | правило умовного форматування: колір не у форматі `#rrggbb` |
 | `err.ECR-CFG-0422.condFormatColumn` | 422 | правило умовного форматування посилається на неіснуючу колонку таблиці |
