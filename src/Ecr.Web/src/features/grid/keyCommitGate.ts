@@ -34,6 +34,14 @@ import { isEnterKeyEvent } from './keyboardCompat';
 export const CommitSettleMs = 250;
 /** Запасний термін очікування фокуса на `<input>` щойно відкритого редактора. */
 export const OpenSettleMs = 200;
+/**
+ * T5-01: стеля вікна. Запасні терміни вище - не «відпустити будь-що»: поки
+ * перехід RevoGrid ЩЕ ТРИВАЄ (збережений редактор у DOM, або відкритий ще без
+ * фокуса), вікно тримається далі, але не довше за цю стелю.
+ */
+export const MaxHoldMs = 1500;
+/** Крок перевірки кінця переходу, поки вікно відкрите. */
+const PollMs = 4;
 
 const EditWrapper = '.edit-input-wrapper';
 
@@ -110,6 +118,14 @@ export function installKeyCommitGate(container: HTMLElement): () => void {
   let timer: ReturnType<typeof setTimeout> | null = null;
   let queue: QueuedKey[] = [];
   let afterSettled: (() => void)[] = [];
+  // Стан поточного вікна (T5-01): коли відкрите, чи справді збережено комірку
+  // (`celledit`), чи був `focuscell`, чи RevoGrid почав відкривати редактор
+  // (`setedit`) і чи його обгортка вже з'являлась у DOM.
+  let startedAt = 0;
+  let saved = false;
+  let focusSeen = false;
+  let editRequested = false;
+  let editorSeen = false;
 
   gates.set(container, {
     isCommitting: () => holding === 'commit',
@@ -119,6 +135,7 @@ export function installKeyCommitGate(container: HTMLElement): () => void {
   });
 
   const overlay = (): Element | null => container.querySelector('revogr-overlay-selection');
+  const editorClosed = (): boolean => container.querySelector(EditWrapper) === null;
 
   const resolveTarget = (queued: QueuedKey): EventTarget => {
     const active = document.activeElement;
@@ -175,10 +192,61 @@ export function installKeyCommitGate(container: HTMLElement): () => void {
     }
   };
 
+  /*
+   * ⛔ T5-01 (прохід 5, 50–80 мс, ≈4 %; відтворено на `/_key-commit-gate/document`
+   * під CPU ×4 - 3 з 200): запасний термін відпускав вікно, коли перехід
+   * RevoGrid ще ТРИВАВ. У `DocumentGrid` після фіксації перерендер (React-стан
+   * правки, рядок формули) тягне перехід за 250 мс: журнал - `celledit` R1 2659,
+   * `focuscell` 2835, старий `<input>` знову у фокусі 3124, відтворений Enter
+   * 3153 у НЬОГО - друга фіксація R1 і стрибок на R3 (R1=1, R2 порожньо, R3=2).
+   * Другий вид: вікно «відкриття» відпускалось, поки старий редактор ще в DOM,
+   * тож Enter, що відкриває R2, не ставив нового вікна, і символ після нього
+   * падав у сітку в режимі редагування - мовчки губився (1, порожньо, 3).
+   *
+   * Тепер запасний термін відпускає вікно лише тоді, коли переходу справді
+   * кінець: для коміту - збережений редактор прибрано з DOM; для відкриття -
+   * редактор не відкривається або вже закритий. Інакше вікно тримається далі,
+   * до стелі `MaxHoldMs`.
+   */
+  const settled = (): boolean => {
+    const elapsed = Date.now() - startedAt;
+    if (elapsed >= MaxHoldMs) return true;
+
+    if (holding === 'commit') {
+      // Enter не зберіг комірку (список без варіанта, редактор лишився відкритим) - як раніше.
+      if (!saved) return (focusSeen && editorClosed()) || elapsed >= CommitSettleMs;
+
+      // ⛔ T4-01: `focuscell` приходить РАНІШЕ, ніж RevoGrid прибирає старий
+      // редактор (журнал при інтервалі 50 мс: focuscell 1543 → focusin DIV 1545).
+      // Відтворений у цей момент Enter потрапляв у ще живий `<input>` попередньої
+      // комірки. Тож вікно закривається, лише коли редактора вже немає в DOM.
+      return editorClosed() && (focusSeen || elapsed >= CommitSettleMs);
+    }
+
+    if (!editorClosed()) editorSeen = true;
+    if (elapsed < OpenSettleMs) return false;
+
+    // Редактор відкривається (`setedit` був), але `<input>` ще без фокуса - чекаємо.
+    return !(editRequested && (!editorSeen || !editorClosed()));
+  };
+
+  const tick = (): void => {
+    timer = null;
+    if (holding === null) return;
+
+    if (settled()) release();
+    else timer = setTimeout(tick, PollMs);
+  };
+
   const hold = (kind: 'commit' | 'open'): void => {
     holding = kind;
+    startedAt = Date.now();
+    saved = false;
+    focusSeen = false;
+    editRequested = false;
+    editorSeen = false;
     if (timer !== null) clearTimeout(timer);
-    timer = setTimeout(release, kind === 'commit' ? CommitSettleMs : OpenSettleMs);
+    timer = setTimeout(tick, PollMs);
   };
 
   const onKeyDown = (event: KeyboardEvent): void => {
@@ -237,23 +305,21 @@ export function installKeyCommitGate(container: HTMLElement): () => void {
     }
   };
 
-  const editorClosed = (): boolean => container.querySelector(EditWrapper) === null;
-
-  // ⛔ T4-01: `focuscell` приходить РАНІШЕ, ніж RevoGrid прибирає старий
-  // редактор (журнал при інтервалі 50 мс: focuscell 1543 → focusin DIV 1545).
-  // Відтворений в цей момент Enter потрапляв у ще живий `<input>` попередньої
-  // комірки - друга фіксація тієї ж комірки, і фокус стрибав на два рядки. Тож
-  // вікно закривається, лише коли переходу кінець (`focuscell`) І редактора вже
-  // немає в DOM; поки він є - опитування кожні 4 мс (запасний термін лишається).
-  const PollMs = 4;
-  const waitForEditorClosed = (): void => {
+  const onFocusCell = (): void => {
     if (holding !== 'commit') return;
-    if (editorClosed()) release();
-    else setTimeout(waitForEditorClosed, PollMs);
+
+    focusSeen = true;
+    if (timer !== null) clearTimeout(timer);
+    tick();
   };
 
-  const onFocusCell = (): void => {
-    if (holding === 'commit') waitForEditorClosed();
+  // Сигнали RevoGrid (події `revogr-edit`/`revogr-overlay-selection` спливають до контейнера).
+  const onCellEdit = (): void => {
+    if (holding === 'commit') saved = true;
+  };
+
+  const onSetEdit = (): void => {
+    if (holding === 'open') editRequested = true;
   };
 
   const onFocusIn = (event: FocusEvent): void => {
@@ -263,11 +329,15 @@ export function installKeyCommitGate(container: HTMLElement): () => void {
   doc.addEventListener('keydown', onKeyDown, true);
   container.addEventListener('focuscell', onFocusCell);
   container.addEventListener('focusin', onFocusIn);
+  container.addEventListener('celledit', onCellEdit);
+  container.addEventListener('setedit', onSetEdit);
 
   return () => {
     doc.removeEventListener('keydown', onKeyDown, true);
     container.removeEventListener('focuscell', onFocusCell);
     container.removeEventListener('focusin', onFocusIn);
+    container.removeEventListener('celledit', onCellEdit);
+    container.removeEventListener('setedit', onSetEdit);
     if (timer !== null) clearTimeout(timer);
     queue = [];
     afterSettled = [];

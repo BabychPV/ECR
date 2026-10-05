@@ -25,7 +25,28 @@ interface Grid {
   dispose: () => void;
 }
 
-function mountGrid(rows: number, startRow: number, withGate: boolean, lingeringEditor = false): Grid {
+/**
+ * T5-01: повільний перехід - так поводиться RevoGrid у `DocumentGrid` під
+ * навантаженням (живий журнал при CPU ×4: `celledit` → `focuscell` 176 мс,
+ * старий редактор у DOM ще ~450 мс; `setedit` → фокус на `<input>` ~150 мс).
+ */
+interface SlowTransition {
+  /** Затримка переходу фокуса після Enter у редакторі, мс (замість `FocusMoveMs`). */
+  readonly focusMoveMs?: number;
+  /** Через скільки мс після відкриття `<input>` отримує фокус. */
+  readonly openFocusMs?: number;
+  /** Як справжній RevoGrid: `celledit` при збереженні і `setedit` при відкритті. */
+  readonly revoEvents?: boolean;
+}
+
+function mountGrid(
+  rows: number,
+  startRow: number,
+  withGate: boolean,
+  lingeringEditor = false,
+  slow: SlowTransition = {},
+): Grid {
+  const focusMoveMs = slow.focusMoveMs ?? FocusMoveMs;
   const container = document.createElement('div');
   const overlay = document.createElement('revogr-overlay-selection');
   const holder = document.createElement('div');
@@ -46,13 +67,15 @@ function mountGrid(rows: number, startRow: number, withGate: boolean, lingeringE
     wrapper.appendChild(input);
     overlay.appendChild(wrapper);
     editor = input;
-    setTimeout(() => input.focus(), 0);
+    if (slow.revoEvents === true) container.dispatchEvent(new CustomEvent('setedit', { bubbles: true }));
+    setTimeout(() => input.focus(), slow.openFocusMs ?? 0);
   };
 
   overlay.addEventListener('keydown', (event) => {
     if (editor !== null) {
       if (event.key === 'Enter') {
         values[row] = editor.value;
+        if (slow.revoEvents === true) editor.dispatchEvent(new CustomEvent('celledit', { bubbles: true }));
         editor.blur();
         const closing = editor;
         // ⚠ T4-01: справжній RevoGrid лишає старий редактор у DOM до самого
@@ -72,7 +95,7 @@ function mountGrid(rows: number, startRow: number, withGate: boolean, lingeringE
               editor = null;
             }, 2);
           }
-        }, FocusMoveMs);
+        }, focusMoveMs);
       }
 
       return;
@@ -150,6 +173,63 @@ describe('installKeyCommitGate: швидкий ввід не склеює зна
       grid.dispose();
       document.body.innerHTML = '';
     }
+  });
+
+  it('T5-01: перехід довший за запасний термін (250 мс) - вікно чекає кінця, значення у СВОЇХ рядках', () => {
+    // ⛔ Мутаційний доказ: з відпусканням вікна за самим `CommitSettleMs` (стан до T5-01)
+    // відтворений Enter влучає в ще живий редактор R1 - друга фіксація, значення
+    // лягають через рядок (як у тестувальника: R1=1, R2 порожньо, R3=2).
+    for (const gap of [0, 30, 50, 60, 70, 80, 120]) {
+      const grid = mountGrid(6, 1, true, true, { focusMoveMs: 400, revoEvents: true });
+
+      type(grid, keys, gap);
+
+      expect(grid.values, `gap ${gap}`).toEqual(['', '1', '2', '', '', '']);
+      grid.dispose();
+      document.body.innerHTML = '';
+    }
+  });
+
+  it('T5-01: редактор отримує фокус пізніше за запасний термін відкриття (200 мс) - символ не губиться', () => {
+    // ⛔ Мутаційний доказ: з відпусканням за самим `OpenSettleMs` символ відтворюється в
+    // сітку, що вже в режимі редагування без фокуса на `<input>`, і зникає (1, порожньо, 3).
+    for (const gap of [0, 50, 60, 70, 80]) {
+      const grid = mountGrid(6, 1, true, true, { openFocusMs: 300, revoEvents: true });
+
+      type(grid, ['Enter', '1', 'Enter', 'Enter', '2', 'Enter', 'Enter', '3', 'Enter'], gap);
+
+      expect(grid.values, `gap ${gap}`).toEqual(['', '1', '2', '3', '', '']);
+      grid.dispose();
+      document.body.innerHTML = '';
+    }
+  });
+
+  it('T5-01: редактор після збереження так і не зник - черга все одно відтворюється (стеля вікна)', () => {
+    const container = document.createElement('div');
+    const wrapper = document.createElement('div');
+    wrapper.className = 'edit-input-wrapper';
+    const input = document.createElement('input');
+    wrapper.appendChild(input);
+    container.appendChild(wrapper);
+    document.body.appendChild(container);
+    input.focus();
+
+    const dispose = installKeyCommitGate(container);
+    const replayed: string[] = [];
+    container.addEventListener('keydown', (event) => replayed.push(event.key));
+
+    // Enter зберіг комірку (`celledit`), але редактор лишився в DOM.
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    input.dispatchEvent(new CustomEvent('celledit', { bubbles: true }));
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: '5', bubbles: true, cancelable: true }));
+    const beforeRelease = replayed.length;
+
+    vi.advanceTimersByTime(1000);
+    expect(replayed.slice(beforeRelease)).toEqual([]);
+
+    vi.advanceTimersByTime(1000);
+    expect(replayed.slice(beforeRelease)).toEqual(['5']);
+    dispose();
   });
 
   it('повільний ввід (пауза ≥ 0,1 с) поводиться як раніше', () => {
