@@ -153,6 +153,21 @@ setup\`) + `Ecr.msi` (з `artifacts\msi\en-US\`) — усі три в ОДНУ �
 сервері й клон репозиторію з SDK. Саме цього розкладений варіант і не
 вирішує — для нього і зроблено `build-installer.ps1` вище.
 
+**Набір для першого тестування** (A1-08, ✎ 2026-10-05) — zip без .exe майстра, той
+самий пакований розклад, що й payload `build-installer.ps1`: `Ecr.msi` + `.sha256`,
+`deploy-ecr.ps1`, ідемпотентний `migration.sql`, `sql\*.sql`, `verify-msi.ps1`,
+`QUICKSTART-FIRST-TEST.md` і документи. Збирається з розпакованого артефакту CI `ecr-msi`:
+
+```powershell
+.\tools\make-delivery-bundle.ps1 -MsiDir .\ecr-msi -Version 1.0.0   # migration.sql генерує сам (dotnet-ef)
+```
+
+Результат — `artifacts\delivery\ECR-first-test-<версія>.zip` і `.zip.sha256`. Скрипт
+зупиняється з кодом `[BUNDLE-Exx]`, якщо хеш MSI не збігається з `.sha256`,
+`migration.sql` не ідемпотентний чи не містить останньої міграції дерева, або бракує
+SQL-скрипта чи документа. На сервері — розділ 2.2, запуск `.\deploy-ecr.ps1` з кореня
+розпакованого набору (`sql\` і `migration.sql` поруч — SDK не потрібен).
+
 Прапорці `-SkipPublish`/`-SkipWeb`, якщо потрібні лише частково —
 дивись `build-msi.ps1`/`rebuild-and-package-msi.ps1` напряму;
 `build-installer.ps1` пакує "усе в одному" й таких прапорців не приймає.
