@@ -527,7 +527,7 @@ export function SheetActions({
    * Клієнт цього права НЕ перевіряє: `/me` віддає лише глобальні права, тож
    * для ролі з областю проєкту його не видно. Тому «Submit» активна вже з
    * рівня `Write`, а відмову без права дає СЕРВЕР (403 `submitDenied`,
-   * `deny.InsufficientGrantLevel`) — її показує `showApiError`.
+   * `deny.InsufficientGrantLevel.Submit`) — її показує `showApiError`.
    */
   const mayWorkflow = (action: 'submit' | 'approve' | 'reject'): boolean =>
     me !== undefined &&

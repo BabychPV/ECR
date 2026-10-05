@@ -68,7 +68,7 @@ function mockFetch(options: { grants: Record<string, string>; jobState?: string;
               errorCode: 'ECR-ACCS-0403',
               messageKey: 'err.ECR-ACCS-0403.submitDenied',
               reason: 'InsufficientGrantLevel',
-              reasonKey: 'deny.InsufficientGrantLevel',
+              reasonKey: 'deny.InsufficientGrantLevel.Submit',
               sheetDefId: String(SheetDefId),
             },
             403,
