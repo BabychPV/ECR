@@ -493,6 +493,74 @@ public sealed class RegistrySyncApplyTests(SqlServerFixture sql)
         }
     }
 
+    // ─── AN-34 L4-01: одна сутність на довідник у з'єднанні ─────────────────
+
+    /// <summary>
+    /// AN-34 L4-01. <c>LinksAsync</c> бере зв'язки за <c>(DataSourceId, RegistryDefId)</c> без
+    /// <c>SourceEntityId</c>: друга активна сутність того ж з'єднання на тому ж довіднику змусила б
+    /// кожну з двох вважати зв'язки іншої «зниклими» й вимикати чужі записи щопрогону. Тому база не
+    /// дає двох прив'язок (фільтрований унікальний <c>UQ_SourceEntity_Registry</c>), а синк єдиної
+    /// сутності нічого не вимикає.
+    /// </summary>
+    /// <remarks>
+    /// Мутація (2026-10-05, у власному worktree): прибрати <c>HasIndex(DataSourceId, RegistryDefId)</c>
+    /// з <c>SourceEntityConfiguration</c> і міграцію — друга прив'язка проходить, тест червоний.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-8.11")]
+    public async Task Дві_сутності_на_один_довідник_не_вимикають_записи()
+    {
+        var stand = await ArrangeAsync(RegistrySourceKind.External, e1Author: Author.Svc);
+        await using var provider = BuildProvider();
+
+        try
+        {
+            // Друга активна сутність ТОГО САМОГО з'єднання — на той самий довідник.
+            int secondId;
+            await using (var db = Context())
+            {
+                var second = new SourceEntity(stand.DataSourceId, $"Plant7B_{_tag}", RegistrySourceKind.External);
+                second.Describe("Plant B", $@"\\AF\Db\Plant7B_{_tag}");
+                db.SourceEntities.Add(second);
+                await db.SaveChangesAsync();
+                secondId = second.Id;
+
+                second.BindRegistry(stand.RegistryId);
+                var refused = await Record.ExceptionAsync(() => db.SaveChangesAsync());
+
+                // ⛔ База відмовляє на рівні індексу, а не лишає двох власників зв'язків.
+                var update = Assert.IsType<DbUpdateException>(refused);
+                var sqlError = Assert.IsType<Microsoft.Data.SqlClient.SqlException>(update.InnerException);
+                Assert.True(sqlError.Number is 2601 or 2627, $"SQL {sqlError.Number}: {sqlError.Message}");
+                Assert.Contains("UQ_SourceEntity_Registry", sqlError.Message, StringComparison.Ordinal);
+            }
+
+            // Відмовлена прив'язка нічого не лишила: сутність B без довідника.
+            await using (var db = Context())
+            {
+                Assert.Null(await db.SourceEntities.AsNoTracking().Where(e => e.Id == secondId)
+                    .Select(e => e.RegistryDefId).SingleAsync());
+            }
+
+            // Синк єдиної прив'язаної сутності двічі: записи довідника лишаються ввімкненими.
+            await RunAsync(provider, stand);
+            await RunAsync(provider, stand);
+
+            await using var check = Context();
+            var entries = await check.RegistryEntries.AsNoTracking()
+                .Where(e => e.RegistryDefId == stand.RegistryId && (e.Id == stand.E1 || e.Id == stand.E2))
+                .ToListAsync();
+            Assert.Equal(2, entries.Count);
+            Assert.All(entries, e => Assert.True(e.IsActive, $"запис {e.Id} вимкнено"));
+        }
+        finally
+        {
+            await DeactivateAsync(stand);
+        }
+    }
+
     /// <summary>По одній відмові writer'а на E1 і E2 — з очікуваною ознакою причини.</summary>
     private static void AssertRejected(IReadOnlyList<CollectionCoverage> events, Stand stand, string reason)
     {
