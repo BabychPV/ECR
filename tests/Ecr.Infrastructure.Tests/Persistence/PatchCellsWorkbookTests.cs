@@ -307,7 +307,8 @@ public sealed partial class PatchCellsWorkbookTests(SqlServerFixture sql) : IDis
         }
 
         Task Book(int count)
-            => handler.HandleWorkbookAsync([.. requests.Take(count)], new List<RecalculationSeed>(), CancellationToken.None);
+            => handler.HandleWorkbookAsync(
+                [.. requests.Take(count)], new List<RecalculationSeed>(), new List<RowWindowChange>(), CancellationToken.None);
 
         // Прогрів кешів процесу (знімок метаданих, довідник одиниць).
         await Measure(() => Book(12));
@@ -401,8 +402,10 @@ public sealed partial class PatchCellsWorkbookTests(SqlServerFixture sql) : IDis
     /// один виклик хука на таблицю; без колонки вікна — нічого в черзі.
     /// </summary>
     /// <remarks>
-    /// ⛔ Мутація: приберіть виклик <c>rowWindows.RowsChangedAsync</c> у <c>HandleWorkbookAsync</c> —
+    /// ⛔ Мутація: приберіть <c>rowWindowChanges.Add</c> у <c>HandleWorkbookAsync</c> —
     /// червоніє <see cref="Імпорт_книги_зі_зміною_колонки_вікна_ставить_задачу_по_одній_на_таблицю"/>.
+    /// ⚠ L6-11: хук кличе викликач ПІСЛЯ коміту (<c>NotifyRowWindowsAsync</c>), як <c>ExcelImporter</c>;
+    /// усередині транзакції книжковий шлях черги не чіпає.
     /// </remarks>
     [Theory]
     [Trait(TestCategories.Stage, TestCategories.Stage6)]
@@ -424,7 +427,8 @@ public sealed partial class PatchCellsWorkbookTests(SqlServerFixture sql) : IDis
         var trigger = new Ecr.Application.Integration.RowWindowTrigger(
             index, jobs, Microsoft.Extensions.Logging.Abstractions.NullLogger<Ecr.Application.Integration.RowWindowTrigger>.Instance);
 
-        _ = await RunWorkbookAsync(world, Writer(world), requests, rowWindows: trigger);
+        _ = await RunWorkbookAsync(world, Writer(world), requests, rowWindows: trigger, onCommitted: () =>
+            Assert.Empty(jobs.ReceivedCalls()));
 
         Assert.Equal(
             expectedJobs == 0 ? 0 : world.Tables.Count,
@@ -442,11 +446,13 @@ public sealed partial class PatchCellsWorkbookTests(SqlServerFixture sql) : IDis
         Func<ICellStore, ICellStore>? cells = null,
         Func<ISheetEditGate, ISheetEditGate>? gate = null,
         IRowWindowTrigger? rowWindows = null,
-        bool passHeldStatuses = false)
+        bool passHeldStatuses = false,
+        Action? onCommitted = null)
     {
         await using var db = world.Builder.CreateContext();
         var handler = Handler(db, profile, cells, gate, rowWindows: rowWindows);
         var seeds = new List<RecalculationSeed>();
+        var rowWindowChanges = new List<RowWindowChange>();
         IReadOnlyList<PatchCellsResponse> responses = [];
 
         await new UnitOfWork(db).ExecuteInTransactionAsync(
@@ -459,9 +465,14 @@ public sealed partial class PatchCellsWorkbookTests(SqlServerFixture sql) : IDis
                 }
 
                 seeds.Clear();
-                responses = await handler.HandleWorkbookAsync(requests, seeds, ct, passHeldStatuses ? held : null);
+                rowWindowChanges.Clear();
+                responses = await handler.HandleWorkbookAsync(
+                    requests, seeds, rowWindowChanges, ct, passHeldStatuses ? held : null);
             },
             CancellationToken.None);
+
+        onCommitted?.Invoke();
+        await handler.NotifyRowWindowsAsync(rowWindowChanges, CancellationToken.None);
 
         return new Run(responses, seeds);
     }

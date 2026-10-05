@@ -224,15 +224,25 @@ public sealed class ExcelImporterAtomicApplyTests
         return JsonSerializer.Serialize(new ImportPlan(DocumentId, Period, tables), Options);
     }
 
-    private ExcelImporter Importer()
+    private ExcelImporter Importer(IRowWindowTrigger? rowWindows = null)
         => new(
             _metadata, _registries, _access, _user, _previews,
             new PatchCellsHandler(
                 _cells, _rows, _documents, _periods, _metadata, _access,
                 new Ecr.Application.Validation.ValidationEngine(new RealFormulaEngine()),
                 _methodologies, _registries, _headers, _audit, Substitute.For<IAuditReader>(),
-                _jobs, _uow, _user, _clock, Substitute.For<ISheetEditGate>(), NSubstitute.Substitute.For<Ecr.Application.Ports.IUnitCatalog>()),
+                _jobs, _uow, _user, _clock, Substitute.For<ISheetEditGate>(), NSubstitute.Substitute.For<Ecr.Application.Ports.IUnitCatalog>(),
+                rowWindows),
             new ImportDiffBuilder(), _cells, _rows, _uow, _jobs, _importGate);
+
+    /// <summary>Хук вікон рядків, що пише кожен виклик у журнал подій.</summary>
+    private IRowWindowTrigger TracingRowWindows()
+    {
+        var trigger = Substitute.For<IRowWindowTrigger>();
+        trigger.When(t => t.RowsChangedAsync(Arg.Any<RowWindowChange>(), Arg.Any<CancellationToken>()))
+               .Do(call => _trace.Add($"rowwindows:{call.ArgAt<RowWindowChange>(0).TableInstanceId}"));
+        return trigger;
+    }
 
     private static IDocumentHeaderStore CreateHeaderStore()
     {
@@ -308,6 +318,54 @@ public sealed class ExcelImporterAtomicApplyTests
             _trace);
         await _jobs.Received(1).EnqueueCoalescedAsync<IFormulaRecalculationJob>(
             Arg.Any<string>(), Arg.Any<object>(), Arg.Any<CancellationToken>());
+    }
+
+    /// <summary>
+    /// L6-11: імпорт книги ставить підтягування вікон рядків ПІСЛЯ коміту — по виклику хука
+    /// на таблицю, як поштучний PATCH.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Мутація: поверніть виклик <c>rowWindows.RowsChangedAsync</c> у цикл відповідей
+    /// <c>HandleWorkbookAsync</c> (а <c>NotifyRowWindowsAsync</c> зробіть порожнім) — «rowwindows»
+    /// стає перед «tx:commit», червоніє.
+    /// </remarks>
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Directive", "HSE301-A1")]
+    [Trait("Audit", "L6-11")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Імпорт_ставить_підтягування_вікон_після_коміту(bool enlist)
+    {
+        _jobs.EnlistsInCallerTransaction.Returns(enlist);
+
+        await Importer(TracingRowWindows()).ApplyAsync(DocumentId, Token, CancellationToken.None);
+
+        var commit = _trace.IndexOf("tx:commit");
+        Assert.True(commit >= 0, string.Join(" ", _trace));
+        Assert.Equal(
+            ["rowwindows:501", "rowwindows:502", "rowwindows:503"],
+            _trace.Skip(commit + 1).Where(e => e.StartsWith("rowwindows:", StringComparison.Ordinal)));
+        Assert.DoesNotContain(_trace.Take(commit), e => e.StartsWith("rowwindows:", StringComparison.Ordinal));
+    }
+
+    /// <summary>L6-11: відкат книги не ставить підтягування вікон жодної таблиці.</summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Directive", "HSE301-A1")]
+    [Trait("Audit", "L6-11")]
+    public async Task Відкат_імпорту_не_ставить_підтягування_вікон()
+    {
+        _cells.When(c => c.ApplyAsync(
+                  Arg.Is<CellChangeSet>(s => s.TableInstanceId == 502L), Arg.Any<CancellationToken>()))
+              .Do(_ => throw new ConcurrencyConflictException(
+                  "ECR-CELL-0409", "Дані змінилися після того, як ви їх прочитали.",
+                  new Dictionary<string, object?> { ["messageKey"] = "err.ECR-CELL-0409.batchStale" }));
+
+        await Assert.ThrowsAsync<ConcurrencyConflictException>(
+            () => Importer(TracingRowWindows()).ApplyAsync(DocumentId, Token, CancellationToken.None));
+
+        Assert.Equal(["tx:open", "write:501", "write:502", "tx:rollback"], _trace);
     }
 
     [Fact]

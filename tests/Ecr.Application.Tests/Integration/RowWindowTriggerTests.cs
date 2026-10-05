@@ -90,4 +90,41 @@ public sealed class RowWindowTriggerTests
 
         await Trigger().RowsChangedAsync(Change(TableDefId, StartColumn), CancellationToken.None);
     }
+
+    /// <summary>
+    /// L6-11: хук кличуть після коміту запису — збій читання індексу колонок вікна не
+    /// перетворює вже збережену правку на 500.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Мутація: винесіть <c>index.WindowColumnsAsync</c> із <c>try</c> у <c>RowWindowTrigger</c> — червоніє.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Directive", "HSE301-A1")]
+    [Trait("Audit", "L6-11")]
+    public async Task Збій_індексу_колонок_вікна_не_валить_запис_комірок()
+    {
+        var trigger = Trigger();
+        _index.WindowColumnsAsync(TableDefId, Arg.Any<CancellationToken>())
+            .Returns<Task<IReadOnlySet<int>>>(_ => throw new InvalidOperationException("db down"));
+
+        await trigger.RowsChangedAsync(Change(TableDefId, StartColumn), CancellationToken.None);
+
+        Assert.Empty(_jobs.ReceivedCalls());
+    }
+
+    /// <summary>Скасування не ковтається — запит, що скасовано, лишається скасованим.</summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Directive", "HSE301-A1")]
+    [Trait("Audit", "L6-11")]
+    public async Task Скасування_під_час_читання_індексу_не_ковтається()
+    {
+        var trigger = Trigger();
+        _index.WindowColumnsAsync(TableDefId, Arg.Any<CancellationToken>())
+            .Returns<Task<IReadOnlySet<int>>>(_ => throw new OperationCanceledException());
+
+        await Assert.ThrowsAsync<OperationCanceledException>(
+            () => trigger.RowsChangedAsync(Change(TableDefId, StartColumn), CancellationToken.None));
+    }
 }

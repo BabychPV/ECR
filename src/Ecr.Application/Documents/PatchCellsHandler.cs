@@ -177,20 +177,20 @@ public sealed partial class PatchCellsHandler(
         // вікна рядка, без звернень до бази. Після запису: відкат не ставить підтягування.
         if (rowWindows is not null)
         {
-            await rowWindows
-                .RowsChangedAsync(
-                    new RowWindowChange(
-                        context.Instance.TableInstanceId,
-                        context.Instance.PeriodKey,
-                        context.Instance.TableDefId,
-                        [.. changes.Upserts.Select(u => u.Address.ColumnDefId).Concat(changes.Deletes.Select(d => d.ColumnDefId)).Distinct()]),
-                    ct)
-                .ConfigureAwait(false);
+            await rowWindows.RowsChangedAsync(ChangedColumns(context.Instance, changes), ct).ConfigureAwait(false);
         }
 
         return await BuildResponseAsync(request, context, changes, messages, recalculationJobId, ct)
             .ConfigureAwait(false);
     }
+
+    /// <summary>Записані чи стерті колонки екземпляра — для хука вікон рядків (HSE301 A1).</summary>
+    private static RowWindowChange ChangedColumns(TableInstanceRef instance, CellChangeLists applied)
+        => new(
+            instance.TableInstanceId,
+            instance.PeriodKey,
+            instance.TableDefId,
+            [.. applied.Upserts.Select(u => u.Address.ColumnDefId).Concat(applied.Deletes.Select(d => d.ColumnDefId)).Distinct()]);
 
     /// <summary>
     /// Скільки розбіжних комірок їде в <c>conflicts</c>; решта — лічильником

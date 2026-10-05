@@ -364,6 +364,7 @@ public sealed class ExcelImporter(
         var versions = new Dictionary<string, string>(StringComparer.Ordinal);
         var validation = new List<ValidationMessageDto>();
         var seeds = new List<RecalculationSeed>();
+        var rowWindowChanges = new List<RowWindowChange>();
         long seedTableInstanceId = 0;
         var diffs = plan.Tables.Where(t => t.Changes.Count > 0).ToList();
 
@@ -437,6 +438,7 @@ public sealed class ExcelImporter(
                 versions.Clear();
                 validation.Clear();
                 seeds.Clear();
+                rowWindowChanges.Clear();
                 seedTableInstanceId = 0;
 
                 // ⚠ Версії рядків беруться з ПЕРЕГЛЯДУ і передаються як
@@ -465,7 +467,7 @@ public sealed class ExcelImporter(
                 try
                 {
                     responses = await patch
-                        .HandleWorkbookAsync(requests, seeds, innerCt, statuses)
+                        .HandleWorkbookAsync(requests, seeds, rowWindowChanges, innerCt, statuses)
                         .ConfigureAwait(false);
                 }
                 catch (EcrException error) when (Blame(error, diffs) is { } named)
@@ -499,6 +501,11 @@ public sealed class ExcelImporter(
         {
             await EnqueueRecalculationAsync(ct).ConfigureAwait(false);
         }
+
+        // ⛔ L6-11: підтягування вікон рядків — лише ПІСЛЯ коміту книги, як у
+        // поштучного PATCH: задача, поставлена всередині транзакції, читала б
+        // дані до коміту, а після відкату лишалась би без даних узагалі.
+        await patch.NotifyRowWindowsAsync(rowWindowChanges, ct).ConfigureAwait(false);
 
         // Прибирається ЛИШЕ після успіху: якщо застосування впало на конфлікті,
         // користувач має змогу подивитися перегляд ще раз, а не будувати його
