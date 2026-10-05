@@ -529,8 +529,8 @@ public sealed class CellWriteRoundTripTests(SqlServerFixture sql)
     /// `WR-11`: стеля 50 000 комірок на один <c>PATCH …/cells</c>.
     /// </summary>
     /// <remarks>
-    /// ⚠ Обидва батчі однакові за формою — один рядок із неіснуючим ключем і
-    /// заявленою версією, — різниця рівно в одну комірку. На 50 000 запит
+    /// ⚠ Обидва батчі однакові за формою — неіснуючі рядки із заявленою версією,
+    /// по комірці на рядок, — різниця рівно в одну комірку. На 50 000 запит
     /// проходить стелю й доходить до звірки версій (<c>409 ECR-CELL-0409</c>:
     /// рядка немає); на 50 001 — <c>422</c> зі стелі. Тобто межа стоїть саме на
     /// 50 000, а не «десь нижче».
@@ -563,17 +563,17 @@ public sealed class CellWriteRoundTripTests(SqlServerFixture sql)
             tableInstanceId,
             periodKey = scenario.PeriodKey,
             origin = "UserEdit",
-            rows = new[]
-            {
-                new
+            // ✎ L6-10: комірки — по одній у РІЗНИХ неіснуючих рядках. Та сама
+            // колонка двічі в одному рядку тепер відхиляється раніше за звірку
+            // версій (`patchDuplicateCell`), і 50 000 не дійшли б до 409.
+            rows = Enumerable.Range(0, cellCount)
+                .Select(i => new
                 {
-                    rowKey = missingRow,
+                    rowKey = $"{missingRow}-{i}",
                     baseVersion = "0x0000000000000001",
-                    cells = Enumerable.Range(0, cellCount)
-                        .Select(_ => new { columnCode = anyColumn, value = (object)1 })
-                        .ToArray(),
-                },
-            },
+                    cells = new[] { new { columnCode = anyColumn, value = (object)1 } },
+                })
+                .ToArray(),
         };
 
         // ── 50 000 — стелю проходить ─────────────────────────────────────
