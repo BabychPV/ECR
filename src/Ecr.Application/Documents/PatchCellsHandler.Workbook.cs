@@ -454,6 +454,17 @@ public sealed partial class PatchCellsHandler
             {
                 if (sheet.Any(x => CreatesRowsUnderCeiling(x.Context)))
                 {
+                    // ⛔ L6-08: викликач уже тримає СПІЛЬНЕ блокування цього аркуша
+                    // (`heldSheetStatuses`). Виняткове поверх нього — перетворення
+                    // блокування, і два такі власники чекали б один на одного
+                    // (прихований дедлок). Такий виклик — помилка викликача, а не стан.
+                    if (heldSheetStatuses is not null)
+                    {
+                        throw new InvalidOperationException(
+                            $"Книга створює рядки в таблиці зі стелею на аркуші {sheet.Key}, а викликач уже тримає " +
+                            "спільне блокування аркуша: виняткове поверх нього — прихований дедлок.");
+                    }
+
                     await sheetGate.EnterSubmitAsync(documentId, sheet.Key, period, ct).ConfigureAwait(false);
                 }
 

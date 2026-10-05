@@ -390,4 +390,37 @@ public sealed class ExcelImporterAtomicApplyTests
         Assert.Equal(expectedConflicts, conflicts.Count());
         Assert.Equal("err.ECR-CELL-0409.batchStale", error.Details["messageKey"]);
     }
+
+    /// <summary>
+    /// L6-08 (аудит 2026-10-03): рядок книги без версії в перегляді (його не стало між
+    /// експортом і переглядом) — конфлікт «рядок змінився», а не створення рядка.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Що було: такий рядок ішов у <c>PatchCellsHandler</c> з <c>baseVersion = null</c>,
+    /// тобто з наміром СТВОРИТИ (R-B2): видалений рядок мовчки відтворювався, а в таблиці
+    /// зі стелею створення брало виняткове блокування аркуша поверх уже взятого спільного.
+    /// Мутація: повернути <c>diff.RowVersions.GetValueOrDefault(g.Key)</c> у <c>ApplyAsync</c> —
+    /// перелік версій у запиті знову містить null.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait("Finding", "L6-08")]
+    public async Task Рядок_без_версії_в_перегляді_не_йде_наміром_створити()
+    {
+        _previews.FindAsync(Token, Arg.Any<CancellationToken>()).Returns(JsonSerializer.Serialize(
+            new ImportPlan(
+                DocumentId,
+                Period,
+                [new TableDiff(Instances[0], Period, [new ImportChange("R1", "Volume", 5m, 10m)], [], new Dictionary<string, string>())]),
+            Options));
+        _access.ReadScopeAsync(Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
+            .Returns(_ => ReadScopes.Everything(Snapshot()));
+
+        var error = await Assert.ThrowsAsync<ConcurrencyConflictException>(
+            () => Importer().ApplyAsync(DocumentId, Token, CancellationToken.None));
+
+        Assert.StartsWith("ECR-CELL-0409", error.ErrorCode, StringComparison.Ordinal);
+        await _rows.DidNotReceiveWithAnyArgs().CreateRowsAsync(default, default, default!, default, default);
+        Assert.DoesNotContain(_trace, e => e.StartsWith("write:", StringComparison.Ordinal));
+    }
 }

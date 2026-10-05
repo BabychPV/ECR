@@ -457,7 +457,7 @@ public sealed class ExcelImporter(
                             .GroupBy(c => c.RowKey, StringComparer.Ordinal)
                             .Select(g => new PatchRow(
                                 g.Key,
-                                diff.RowVersions.GetValueOrDefault(g.Key),
+                                BaseRowVersion(diff.RowVersions, g.Key),
                                 [.. g.Select(c => new PatchCell(c.ColumnCode, c.NewValue))]))]))
                     .ToList();
 
@@ -507,6 +507,27 @@ public sealed class ExcelImporter(
 
         return new PatchCellsResponse(applied, versions, validation);
     }
+
+    /// <summary>Версія рядка з перегляду для <c>baseVersion</c> застосування (L6-08).</summary>
+    /// <param name="versions">Версії рядків таблиці на момент перегляду.</param>
+    /// <param name="rowKey">Рядок книги.</param>
+    /// <returns>Версія з перегляду; рядка тоді не було — нульова версія, якої не буває в живого рядка.</returns>
+    /// <remarks>
+    /// ⛔ Що було: рядок без версії йшов із <c>baseVersion = null</c>, а це для
+    /// <c>PatchCellsHandler</c> намір СТВОРИТИ рядок (R-B2). Рядки книги — ті, що
+    /// існували на експорті; рядок, якого не стало до перегляду, імпорт мовчки
+    /// відтворював би, а в таблиці зі стелею створення бере виняткове блокування
+    /// аркуша поверх уже взятого спільного — прихований дедлок двох імпортів.
+    /// Нульова версія — звичайний конфлікт <c>ECR-CELL-0409</c> («рядок змінився»).
+    /// </remarks>
+    public static string BaseRowVersion(IReadOnlyDictionary<string, string> versions, string rowKey)
+    {
+        ArgumentNullException.ThrowIfNull(versions);
+        return versions.GetValueOrDefault(rowKey) ?? MissingRowVersion;
+    }
+
+    /// <summary>Нульовий <c>rowversion</c> у base64: живий рядок такої версії не має.</summary>
+    public static readonly string MissingRowVersion = Convert.ToBase64String(new byte[8]);
 
     /// <summary>
     /// Аркуші таблиць книги, у які застосування пише, — у порядку, у якому

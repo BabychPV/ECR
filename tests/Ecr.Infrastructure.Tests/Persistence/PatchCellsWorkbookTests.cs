@@ -230,6 +230,43 @@ public sealed class PatchCellsWorkbookTests(SqlServerFixture sql) : IDisposable
     }
 
     /// <summary>
+    /// L6-08 (аудит 2026-10-03): викликач, що вже тримає спільні блокування аркушів
+    /// (<c>heldSheetStatuses</c> — так робить <c>ExcelImporter</c>), не отримує поверх них
+    /// виняткового: створення рядка в таблиці зі стелею під таким викликом — помилка
+    /// викликача, а не тихе перетворення блокування.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Що було: книжковий шлях брав <c>EnterSubmitAsync</c> поверх спільного блокування
+    /// тієї ж транзакції. Два імпорти в один аркуш тримали б по спільному й чекали один на
+    /// одного за винятковим — дедлок, який SQL Server розриває, вбиваючи одну транзакцію.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "L6-08")]
+    public async Task Стеля_рядків_під_утриманим_спільним_замком_не_перетворює_його_на_винятковий()
+    {
+        var world = await ArrangeAsync([2, 2], maxDynamicRows: 4);
+        var requests = Requests(world, await VersionsAsync(world));
+        var before = await StateAsync(world);
+        var exclusive = 0;
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => RunWorkbookAsync(
+            world, Writer(world), requests,
+            gate: inner => new InterceptingGate(inner, () =>
+            {
+                exclusive++;
+                return Task.CompletedTask;
+            }),
+            passHeldStatuses: true));
+
+        Assert.Equal(0, exclusive);
+        Assert.Contains("прихований дедлок", error.Message, StringComparison.Ordinal);
+        Assert.Equal(before, await StateAsync(world));
+        Assert.Empty(await AuditAsync(world));
+    }
+
+    /// <summary>
     /// Храповик: книга на 3 і на 12 таблиць (один аркуш) коштує ОДНАКОВУ
     /// кількість звернень до бази; поштучно — росте з кількістю таблиць.
     /// </summary>
@@ -404,7 +441,8 @@ public sealed class PatchCellsWorkbookTests(SqlServerFixture sql) : IDisposable
         List<PatchCellsRequest> requests,
         Func<ICellStore, ICellStore>? cells = null,
         Func<ISheetEditGate, ISheetEditGate>? gate = null,
-        IRowWindowTrigger? rowWindows = null)
+        IRowWindowTrigger? rowWindows = null,
+        bool passHeldStatuses = false)
     {
         await using var db = world.Builder.CreateContext();
         var handler = Handler(db, profile, cells, gate, rowWindows: rowWindows);
@@ -414,13 +452,14 @@ public sealed class PatchCellsWorkbookTests(SqlServerFixture sql) : IDisposable
         await new UnitOfWork(db).ExecuteInTransactionAsync(
             async ct =>
             {
+                var held = new Dictionary<int, DocumentStatus>();
                 foreach (var sheet in world.Tables.Select(t => t.SheetDefId).Distinct().Order())
                 {
-                    _ = await new SheetEditGate(db).EnterEditAsync(world.Doc.DocumentId, sheet, Period, ct);
+                    held[sheet] = await new SheetEditGate(db).EnterEditAsync(world.Doc.DocumentId, sheet, Period, ct);
                 }
 
                 seeds.Clear();
-                responses = await handler.HandleWorkbookAsync(requests, seeds, ct);
+                responses = await handler.HandleWorkbookAsync(requests, seeds, ct, passHeldStatuses ? held : null);
             },
             CancellationToken.None);
 
