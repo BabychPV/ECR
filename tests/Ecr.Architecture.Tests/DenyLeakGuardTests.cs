@@ -61,6 +61,8 @@ public sealed partial class DenyLeakGuardTests
         ["src/Ecr.Application/Validation/TableValidation.cs"] = "виробник: структура й обов'язковість",
         ["src/Ecr.Application/Validation/RelationCheckRunner.cs"] = "виробник: зв'язки Check (джерело — правило 1)",
         ["src/Ecr.Application/Calculations/CheckEvaluator.cs"] = "виробник: текст звірки, SourceTableDefId",
+        ["src/Ecr.Application/Validation/ValidationMessageTemplates.cs"] =
+            "шаблони й Localize: працює над УЖЕ відфільтрованим списком (GetValidationResultHandler маскує до Localize; доказ — T1_01_Check_з_ключем_…)",
         ["src/Ecr.Application/Documents/GetTableStatusHandler.cs"] =
             "лише лічильники Error/Warning по таблицях, видимих за CanReadTable; ні тексту, ні колонки",
         ["src/Ecr.Application/Documents/PatchCellsHandler.Workbook.cs"] =
