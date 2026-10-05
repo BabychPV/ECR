@@ -6659,8 +6659,11 @@ USING (VALUES
     (N'validation.rule.notLogical', N'en', N'Rule ''{rule}'' did not return a logical answer: {reason}', 1),
     -- COLL:an42vm ── кінець секції ──
     -- COLL:an43sub ── D-285: право подання аркуша для рівня Write (підпис у ролі й повідомлення); ru/kz — порцією COLL:an43sub у блоці I18N нижче ──
-    (N'permission.Document.Submit', N'en', N'Submit documents (with the Write level)', 1)
+    (N'permission.Document.Submit', N'en', N'Submit documents (with the Write level)', 1),
     -- COLL:an43sub ── кінець секції ──
+    -- COLL:l104 ── L1-04: небезпечний запит з чужого сайту (CSRF, Origin / Sec-Fetch-Site); ru/kz — порцією COLL:l104 у блоці I18N нижче ──
+    (N'err.ECR-AUTH-0403.csrfOrigin', N'en', N'This request came from another website and was rejected. Open the application at its own address and repeat the action.', 1)
+    -- COLL:l104 ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -15710,6 +15713,16 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:an43sub ── кінець секції ──
+-- COLL:l104 ── ru/kz L1-04: небезпечний запит з чужого сайту; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-AUTH-0403.csrfOrigin', N'ru', N'Запрос пришёл с другого сайта и отклонён. Откройте приложение по его собственному адресу и повторите действие.'),
+    (N'err.ECR-AUTH-0403.csrfOrigin', N'kz', N'Сұрау басқа сайттан келді және қабылданбады. Қолданбаны өз мекенжайы бойынша ашып, әрекетті қайталаңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:l104 ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t
