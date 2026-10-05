@@ -222,6 +222,17 @@ public interface ICollectionStore
     /// <summary>Довідник існує.</summary>
     public Task<bool> RegistryDefExistsAsync(int registryDefId, CancellationToken ct);
 
+    /// <summary>
+    /// Інша сутність збору (активна чи вимкнена) того самого з'єднання вже прив'язана до довідника
+    /// (AN-34 L4-01; фільтрований унікальний <c>UQ_SourceEntity_Registry</c>).
+    /// </summary>
+    /// <param name="dataSourceId">З'єднання.</param>
+    /// <param name="registryDefId">Довідник.</param>
+    /// <param name="exceptSourceEntityId">Сутність, яку прив'язують: її власний рядок не рахується.</param>
+    /// <param name="ct">Скасування.</param>
+    public Task<bool> RegistryBoundByOtherEntityAsync(
+        int dataSourceId, int registryDefId, int exceptSourceEntityId, CancellationToken ct);
+
     /// <summary>Довідник, якому належить поле; <c>null</c> — поля немає.</summary>
     /// <remarks>
     /// ⚠ Одним запитом відповідає і на «чи є поле», і на «чиє воно» — мапінг

@@ -287,6 +287,19 @@ public sealed class BindSourceEntityRegistryHandler(
                 .ConfigureAwait(false);
         }
 
+        // ⛔ AN-34 L4-01: один довідник - одна сутність у з'єднанні. Зв'язки синку довідника
+        // (dic.RegistryExternalKey) тримаються за парою (з'єднання, довідник) без сутності, тож
+        // друга сутність змусила б кожну вважати зв'язки іншої «зниклими» й вимикати чужі записи
+        // щопрогону. Перевірка ДО запису, а не спіймане порушення UQ_SourceEntity_Registry (його
+        // ловить лише гонку - CollectionStore.SaveSourceEntityAsync). Після перевірок прав: чужу
+        // прив'язку бачить лише той, кому дозволено прив'язувати.
+        if (registryDefId is { } bindTo
+            && entity.RegistryDefId != bindTo
+            && await sources.RegistryBoundByOtherEntityAsync(entity.DataSourceId, bindTo, entity.Id, ct).ConfigureAwait(false))
+        {
+            throw AlreadyBound(entity.DataSourceId, bindTo);
+        }
+
         var before = IntegrationConfigAudit.Snapshot(entity);
         entity.BindRegistry(registryDefId);
 
@@ -313,6 +326,27 @@ public sealed class BindSourceEntityRegistryHandler(
 
         return SourceEntityDto.From(entity);
     }
+
+    /// <summary>Ключ каталогу: довідник цього з'єднання вже тримає інша сутність збору.</summary>
+    public const string RegistryAlreadyBoundKey = "err.ECR-INT-0409.registryAlreadyBound";
+
+    /// <summary>
+    /// Відмова «довідник уже прив'язаний до іншої сутності цього з'єднання» (<c>409 ECR-INT-0409</c>):
+    /// спільна для перевірки обробника й для порушення <c>UQ_SourceEntity_Registry</c> у сховищі.
+    /// </summary>
+    /// <param name="dataSourceId">З'єднання.</param>
+    /// <param name="registryDefId">Довідник.</param>
+    public static BusinessRuleException AlreadyBound(int dataSourceId, int registryDefId)
+        => new(
+            ErrorCodes.EntityFieldMapStateConflict,
+            $"Довідник {registryDefId} уже прив'язаний до іншої сутності збору цього з'єднання ({dataSourceId}): " +
+            "одному довіднику - одна сутність на з'єднання; спершу відв'яжіть іншу.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = RegistryAlreadyBoundKey,
+                ["registryDefId"] = registryDefId.ToString(CultureInfo.InvariantCulture),
+                ["dataSourceId"] = dataSourceId.ToString(CultureInfo.InvariantCulture),
+            });
 }
 
 /// <summary>Налаштування нової сутності збору — позиція каталогу джерела.</summary>

@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Ecr.Application.Ports;
+using Ecr.Application.Sources;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.External;
 using Ecr.Domain.Entities.Integration;
@@ -731,16 +732,33 @@ public sealed class CollectionStore(EcrDbContext db, IClock clock) : ICollection
     }
 
     /// <inheritdoc />
-    public Task SaveSourceEntityAsync(SourceEntity entity, CancellationToken ct)
+    public async Task SaveSourceEntityAsync(SourceEntity entity, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(entity);
 
-        return db.SaveChangesAsync(ct);
+        try
+        {
+            await db.SaveChangesAsync(ct).ConfigureAwait(false);
+        }
+        catch (DbUpdateException ex) when (entity.RegistryDefId is { } registryDefId
+                                           && SqlConflict.ViolatesIndex(ex, "UQ_SourceEntity_Registry"))
+        {
+            // ⛔ AN-34 L4-01: перевірка обробника (RegistryBoundByOtherEntityAsync) програла гонці з
+            // паралельною прив'язкою - індекс закрив її. Та сама відмова, що й у перевірки, а не 500.
+            throw BindSourceEntityRegistryHandler.AlreadyBound(entity.DataSourceId, registryDefId);
+        }
     }
 
     /// <inheritdoc />
     public Task<bool> RegistryDefExistsAsync(int registryDefId, CancellationToken ct)
         => db.RegistryDefs.AsNoTracking().AnyAsync(r => r.Id == registryDefId, ct);
+
+    /// <inheritdoc />
+    /// <remarks>Усі рядки, не лише активні: індекс <c>UQ_SourceEntity_Registry</c> на <c>IsActive</c> не дивиться.</remarks>
+    public Task<bool> RegistryBoundByOtherEntityAsync(
+        int dataSourceId, int registryDefId, int exceptSourceEntityId, CancellationToken ct)
+        => db.SourceEntities.AsNoTracking().AnyAsync(
+            e => e.DataSourceId == dataSourceId && e.RegistryDefId == registryDefId && e.Id != exceptSourceEntityId, ct);
 
     /// <inheritdoc />
     public Task<int?> FindRegistryFieldOwnerAsync(int registryFieldDefId, CancellationToken ct)
