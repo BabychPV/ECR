@@ -71,10 +71,16 @@ public sealed class SubmitSheetQueryCountTests(SqlServerFixture sql)
     /// прив'язкою. До пакетного методу на тому самому обсязі: без прив'язки
     /// 17 на 3 і 26 на 12 таблицях, з прив'язкою останньої — 18 і 27.
     /// </para>
+    /// <para>
+    /// ✎ AN-36: подання бере ще два спільні applock-и перед винятковим блокуванням
+    /// аркуша — структури документа (L6-02, перенос версії) і шапки (L6-06,
+    /// правка шапки). Свідомі +2, не дрейф: без прив'язки 14 → 16, з
+    /// прив'язкою 15 → 17 (стелі 15/16 мали по одному запасу).
+    /// </para>
     /// </remarks>
-    private const int MaxCommandsUnbound = 15;
+    private const int MaxCommandsUnbound = 16;
 
-    private const int MaxCommandsBound = 16;
+    private const int MaxCommandsBound = 17;
 
     private static readonly AsyncLocal<StrongBox<bool>?> Measuring = new();
 
