@@ -26,7 +26,9 @@ public sealed class PasswordChangeMiddleware(RequestDelegate next)
 
         // Анонімні запити не мають прапорця взагалі: до них правило не
         // застосовується, а сторінка входу має працювати.
-        if (context.User is { Identity.IsAuthenticated: true })
+        // ⛔ A1-01: оболонка SPA — теж ні. Без неї F5 з разовим паролем давав
+        // сирий JSON 428 замість застосунку, який сам веде на зміну пароля.
+        if (context.User is { Identity.IsAuthenticated: true } && !SpaShell.IsShellNavigation(context))
         {
             var mustChange = string.Equals(
                 context.User.FindFirstValue(AuthenticationSetup.MustChangePasswordClaim),

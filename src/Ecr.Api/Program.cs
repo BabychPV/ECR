@@ -390,7 +390,8 @@ app.MapFallback("/scalar/{**_}", () => Results.NotFound());
 // реально відсутній статичний файл (наприклад, видалену картинку) так
 // само лишається 404 від UseStaticFiles вище, а не підміняється
 // сторінкою застосунку.
-app.MapFallbackToFile("index.html", staticFileOptions);
+app.MapFallbackToFile("index.html", staticFileOptions)
+   .WithMetadata(Ecr.Api.Middleware.SpaShell.Metadata); // A1-01/A1-09: оболонка — без воріт сесії, див. SpaShell
 
 app.Run();
 
