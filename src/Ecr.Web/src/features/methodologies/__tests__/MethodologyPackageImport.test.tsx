@@ -196,8 +196,29 @@ describe('MethodologyPackageImport: гонка перевірки й вибор�
     return found;
   }
 
+  /**
+   * Лічильник ЗАВЕРШЕНИХ читань файлу: `choose` читає пакет асинхронно через `FileReader`.
+   *
+   * ⛔ Не «Перевірити» стало доступним: поки перевірка A в польоті, після 100 мс кнопка отримує
+   * `loading` (`usePendingLoading`, `ФВ-14.26`) і з ним `disabled` — до відповіді, яку тест тримає.
+   * Швидкий прогін встигав за 100 мс, під навантаженням чекання падало `expected true to be false`.
+   */
+  function trackFileReads(): () => number {
+    let loaded = 0;
+    const readAsText = FileReader.prototype.readAsText;
+    vi.spyOn(FileReader.prototype, 'readAsText').mockImplementation(function (this: FileReader, blob, encoding) {
+      this.addEventListener('loadend', () => {
+        loaded += 1;
+      });
+      readAsText.call(this, blob, encoding);
+    });
+
+    return () => loaded;
+  }
+
   afterEach(() => {
     release = null;
+    vi.restoreAllMocks();
   });
 
   it('поле файлу вимкнене, поки перевірка в польоті', async () => {
@@ -216,6 +237,7 @@ describe('MethodologyPackageImport: гонка перевірки й вибор�
 
   it('відповідь про попередній пакет не стає звітом нового і не відкриває «Імпортувати»', async () => {
     mockHeldServer();
+    const fileReads = trackFileReads();
     show();
     await choosePackage();
 
@@ -226,9 +248,9 @@ describe('MethodologyPackageImport: гонка перевірки й вибор�
       type: 'application/json',
     });
     fireEvent.change(fileInput(), { target: { files: [other] } });
-    await waitFor(() =>
-      expect(screen.getByRole('button', { name: '⟦methodologies.importCheck⟧' }).hasAttribute('disabled')).toBe(false),
-    );
+    // Пакет B прочитано й розібрано (продовження `choose` після `loadend` — мікрозадачі, вони
+    // встигають до наступної перевірки `waitFor`), і лише тоді відпускаємо відповідь про A.
+    await waitFor(() => expect(fileReads()).toBe(2));
 
     release?.();
     // Даємо відповіді доїхати й осісти.
