@@ -107,7 +107,9 @@ function installStandServer(): void {
       return json({ appliedCells: rows.length, rowVersions: {}, validation: [] });
     }
     if (path === `/api/v1/documents/${StandDocumentId}/tables/${StandTableInstanceId}`) return json(slice());
-    if (path === '/api/v1/registries' || path === '/api/v1/units') return json([]);
+    // ⛔ `/me/preferences` теж свій: у e2e-стенді зі справжнім API сторінка поза сесією отримувала 401 →
+    // редірект на /login, і сітка не з'являлась (dev-сервер без API цього не бачив: там 500 без редіректу).
+    if (path === '/api/v1/registries' || path === '/api/v1/units' || path === '/api/v1/me/preferences') return json([]);
 
     return original(input, init);
   };
