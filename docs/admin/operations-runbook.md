@@ -549,6 +549,9 @@ BACKUP LOG      [Ecr] TO DISK = N'<шлях>\Ecr_log.trn'  WITH CHECKSUM, COMPRE
 
 `arc.usp_ArchiveYear @ProjectId, @FromPeriodKey, @ToPeriodKey, @BatchSize = 500000`
 (`03-archive-proc.sql`) переносить дані з `DATA_HOT` в `DATA_ARCHIVE`.
+Копія в `arc.*` іде пакетами по `@BatchSize` рядків (аудит L10-14; застосунок
+передає 500 000 на Standard і 2 000 000 на Enterprise — `ArchiveBatchSize` на
+`/health/db`); звірка сум — по всьому періоду після копії.
 
 **Права.** `usp_ArchiveYear`, `usp_RestoreYear` і `usp_RestoreArchiveConstraints` —
 `WITH EXECUTE AS OWNER` (аудит L10-08): зняття й повернення ключів і
@@ -562,6 +565,7 @@ BACKUP LOG      [Ecr] TO DISK = N'<шлях>\Ecr_log.trn'  WITH CHECKSUM, COMPRE
 | 50013 | немає меж партицій для діапазону |
 | 50010 | не збіглася контрольна сума, перенесення скасовано |
 | 50014 | прогалина в діапазоні |
+| 50015 | `@BatchSize` не додатний (нічого не змінено) |
 
 Повернення: `arc.usp_RestoreYear` (50011 — не збіглася кількість рядків).
 
