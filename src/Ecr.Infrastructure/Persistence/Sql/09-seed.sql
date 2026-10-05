@@ -6591,8 +6591,11 @@ USING (VALUES
     (N'err.ECR-REQ-0422.patchDuplicateCell',    N'en', N'The change sets column {columnCodes} of row {rowKey} more than once. Nothing was saved; send each cell once.', 1),
     -- COLL:an37-l610 ── кінець секції ──
     -- COLL:an34m ── AN-34 L4-01: довідник тримає одна сутність збору на з'єднання; ru/kz — порцією COLL:an34m у блоці I18N нижче ──
-    (N'err.ECR-INT-0409.registryAlreadyBound', N'en', N'Registry {registryDefId} is already bound to another collection entity of this connection. A connection takes one entity per registry: unbind the other entity first.', 1)
+    (N'err.ECR-INT-0409.registryAlreadyBound', N'en', N'Registry {registryDefId} is already bound to another collection entity of this connection. A connection takes one entity per registry: unbind the other entity first.', 1),
     -- COLL:an34m ── кінець секції ──
+    -- COLL:an31c ── AN-31 (L1-14): 409 зовнішнього ключа без коду чужого запису; ru/kz — порцією COLL:an31c у блоці I18N нижче ──
+    (N'err.ECR-REG-0409.externalKeyTakenElsewhere', N'en', N'Identifier "{externalId}" of source "{dataSource}" is already linked to an entry of another registry.', 1)
+    -- COLL:an31c ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -15558,6 +15561,16 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:an34m ── кінець секції ──
+-- COLL:an31c ── ru/kz AN-31 (L1-14); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-REG-0409.externalKeyTakenElsewhere', N'ru', N'Идентификатор «{externalId}» источника «{dataSource}» уже связан с записью другого справочника.'),
+    (N'err.ECR-REG-0409.externalKeyTakenElsewhere', N'kz', N'«{dataSource}» көзінің «{externalId}» идентификаторы басқа анықтамалықтың жазбасымен бұрыннан байланыстырылған.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:an31c ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

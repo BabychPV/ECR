@@ -143,7 +143,12 @@ public sealed class BindRegistryExternalKeyHandler(
         var taken = await keys.FindByExternalIdAsync(dataSource.Id, externalId, ct).ConfigureAwait(false);
         if (taken is not null)
         {
-            throw RegistryExternalKeyRules.Taken(dataSource.Code, externalId, taken.EntryCode);
+            // ⛔ L1-14: код запису-власника — лише коли той у ТОМУ Ж довіднику, на який перевірено
+            // право (шлях запиту). Запис іншого довідника для питального не існує: його код не
+            // віддаємо, лише факт зайнятості.
+            var holder = await registries.FindEntryAsync(taken.RegistryEntryId, ct).ConfigureAwait(false);
+            var sameRegistry = holder is not null && holder.RegistryDefId == definition.Id;
+            throw RegistryExternalKeyRules.Taken(dataSource.Code, externalId, sameRegistry ? taken.EntryCode : null);
         }
 
         var key = new RegistryExternalKey(entry.Id, dataSource.Id, externalId);
@@ -251,17 +256,30 @@ internal static class RegistryExternalKeyRules
                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.anonymousWrite" });
 
     /// <summary>Пара «джерело + ідентифікатор» уже прив'язана — <c>409 ECR-REG-0409</c>.</summary>
-    internal static BusinessRuleException Taken(string dataSourceCode, string externalId, string entryCode)
-        => new(
-            ErrorCodes.RegistryEntryInUse,
-            $"Ідентифікатор «{externalId}» джерела «{dataSourceCode}» уже прив'язано до запису «{entryCode}».",
-            new Dictionary<string, object?>
-            {
-                ["messageKey"] = "err.ECR-REG-0409.externalKeyTaken",
-                ["externalId"] = externalId,
-                ["dataSource"] = dataSourceCode,
-                ["code"] = entryCode,
-            });
+    /// <param name="dataSourceCode">Код джерела.</param>
+    /// <param name="externalId">Зовнішній ідентифікатор.</param>
+    /// <param name="entryCode">Код запису-власника; <c>null</c> — запис іншого довідника, код не розкривається.</param>
+    internal static BusinessRuleException Taken(string dataSourceCode, string externalId, string? entryCode)
+        => entryCode is null
+            ? new(
+                ErrorCodes.RegistryEntryInUse,
+                $"Ідентифікатор «{externalId}» джерела «{dataSourceCode}» уже прив'язано до запису іншого довідника.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-REG-0409.externalKeyTakenElsewhere",
+                    ["externalId"] = externalId,
+                    ["dataSource"] = dataSourceCode,
+                })
+            : new(
+                ErrorCodes.RegistryEntryInUse,
+                $"Ідентифікатор «{externalId}» джерела «{dataSourceCode}» уже прив'язано до запису «{entryCode}».",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-REG-0409.externalKeyTaken",
+                    ["externalId"] = externalId,
+                    ["dataSource"] = dataSourceCode,
+                    ["code"] = entryCode,
+                });
 
     internal static string Json(string registryCode, string entryCode, int dataSourceId, string externalId)
         => JsonSerializer.Serialize(new { registry = registryCode, code = entryCode, dataSourceId, externalId });
