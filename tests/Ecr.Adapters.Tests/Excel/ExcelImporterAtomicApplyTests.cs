@@ -67,6 +67,9 @@ public sealed class ExcelImporterAtomicApplyTests
     private readonly IUnitOfWork _uow = Substitute.For<IUnitOfWork>();
     private readonly IClock _clock = Substitute.For<IClock>();
 
+    /// <summary>Ворота блокувань самого імпорту (не вкладеного <c>PatchCellsHandler</c>).</summary>
+    private readonly ISheetEditGate _importGate = Substitute.For<ISheetEditGate>();
+
     /// <summary>Журнал подій у порядку, у якому вони сталися.</summary>
     private readonly List<string> _trace = [];
 
@@ -229,7 +232,7 @@ public sealed class ExcelImporterAtomicApplyTests
                 new Ecr.Application.Validation.ValidationEngine(new RealFormulaEngine()),
                 _methodologies, _registries, _headers, _audit, Substitute.For<IAuditReader>(),
                 _jobs, _uow, _user, _clock, Substitute.For<ISheetEditGate>(), NSubstitute.Substitute.For<Ecr.Application.Ports.IUnitCatalog>()),
-            new ImportDiffBuilder(), _cells, _rows, _uow, _jobs, Substitute.For<ISheetEditGate>());
+            new ImportDiffBuilder(), _cells, _rows, _uow, _jobs, _importGate);
 
     private static IDocumentHeaderStore CreateHeaderStore()
     {
@@ -422,5 +425,27 @@ public sealed class ExcelImporterAtomicApplyTests
         Assert.StartsWith("ECR-CELL-0409", error.ErrorCode, StringComparison.Ordinal);
         await _rows.DidNotReceiveWithAnyArgs().CreateRowsAsync(default, default, default!, default, default);
         Assert.DoesNotContain(_trace, e => e.StartsWith("write:", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// AN-36b (рев'ю AN-36, P3-2): імпорт бере блокування структури документа спільно
+    /// і один раз (L6-02).
+    /// </summary>
+    /// <remarks>
+    /// Мутація: прибрати <c>EnterStructureAsync</c> у <c>ApplyAsync</c> — виклику немає,
+    /// тест червоний.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait("Finding", "L6-02")]
+    public async Task Імпорт_бере_структуру_документа_спільно_один_раз()
+    {
+        await Importer().ApplyAsync(DocumentId, Token, CancellationToken.None);
+
+        // ⚠ Аркушів цей опудальний світ не має (їх список — з метаданих), тож порядок
+        // «структура → аркуші» тут видно лише як «структура — один раз і спільно»;
+        // сам порядок перевіряє книжковий тест (`PatchCellsWorkbookTests.LockOrder`).
+        await _importGate.Received(1).EnterStructureAsync(DocumentId, false, Arg.Any<CancellationToken>());
+        await _importGate.DidNotReceive().EnterStructureAsync(DocumentId, true, Arg.Any<CancellationToken>());
     }
 }

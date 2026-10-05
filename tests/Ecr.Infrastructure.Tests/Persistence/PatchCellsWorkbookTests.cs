@@ -37,7 +37,7 @@ namespace Ecr.Infrastructure.Tests.Persistence;
 /// ідентифікатори в них різні, тому стан зводиться до індексів.
 /// </remarks>
 [Collection("SqlServer")]
-public sealed class PatchCellsWorkbookTests(SqlServerFixture sql) : IDisposable
+public sealed partial class PatchCellsWorkbookTests(SqlServerFixture sql) : IDisposable
 {
     /// <summary>Період — не 2026-05…07 (їх архівують <c>ArchiveJobTests</c>).</summary>
     private const int PeriodKeyValue = 202610;
