@@ -503,8 +503,10 @@ public sealed class RegistrySyncApplyTests(SqlServerFixture sql)
     /// сутності нічого не вимикає.
     /// </summary>
     /// <remarks>
-    /// Мутація (2026-10-05, у власному worktree): прибрати <c>HasIndex(DataSourceId, RegistryDefId)</c>
-    /// з <c>SourceEntityConfiguration</c> і міграцію — друга прив'язка проходить, тест червоний.
+    /// Доказ червоного (2026-10-05): на коміті з одним лише тестом, до індексу, друга прив'язка проходить
+    /// — <c>Assert.IsType&lt;DbUpdateException&gt;(): Value is null</c>; з індексом і міграцією зелений.
+    /// ⚠ Мутацією «прибрати індекс» тест не перевіряється: база тестів мігрується один раз на worktree,
+    /// і вже застосований індекс з міграції, що змінилась, не знімається.
     /// </remarks>
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
