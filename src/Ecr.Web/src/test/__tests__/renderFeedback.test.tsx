@@ -301,7 +301,18 @@ beforeAll(async () => {
   ]);
 }, 60_000);
 
+/**
+ * Відповіді заглушки мережі, ще не віддані застосунку.
+ *
+ * ⚠ Рахує ВСІ запити, а не лише ті, що бачить `queryClient.isFetching()`:
+ * каталог рядків (`loadCatalog` → `apiFetchIfChanged`) іде повз TanStack
+ * Query, а саме від нього залежить, коли `AppLayout` змонтує `AppShell` (див.
+ * {@link settle}).
+ */
+let fetchesInFlight = 0;
+
 beforeEach(() => {
+  fetchesInFlight = 0;
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL) => {
@@ -313,7 +324,12 @@ beforeEach(() => {
       // таблиці була б перевіркою іншого документа.
       const body = /\/documents\/[^/?]+\/tables\?/.test(url) ? bigSheet : emptyBodyFor(url);
 
-      return Promise.resolve(sameRealmJson(body));
+      fetchesInFlight += 1;
+      try {
+        return await Promise.resolve(sameRealmJson(body));
+      } finally {
+        fetchesInFlight -= 1;
+      }
     }),
   );
 });
@@ -489,9 +505,48 @@ async function settle(scheduledAt: number, queryClient: QueryClient): Promise<vo
   // тримається умови, а не часу: поки є запит у польоті, чекаємо ще бюджет
   // тактів. Це лише ДОДАЄ очікування (як і {@link SettleMs}) і не є евристикою
   // тиші: умова — відсутність незавершених запитів, межа ітерацій фіксована.
-  for (let round = 0; round < 100 && queryClient.isFetching() > 0; round += 1) {
+  //
+  // ⛔ 2026-10-05, четверте джерело того самого `{ tree: 1, route: 0 }` на
+  // `/admin/units` (RC #475; прогін 37267259058, спроба 6, на f21261ef). Це
+  // знову таймер `AppShell` із розбору {@link SettleMs}, але відлік
+  // {@link SettleMs} від кінця `render()` спирався на хибне припущення, що
+  // `AppShell` монтується всередині `render()`. Це не так: доки не приїхали
+  // `/me` і приватний каталог, `AppLayout` показує `<Loader>`, і `AppShell`
+  // (а з ним і його таймер на 200 мс) з'являється лише після цього ланцюжка.
+  // Зміряно трасою комітів на цій машині: `AppShell` монтується на +202 мс,
+  // `data-resizing` знімається комітом #8 на +454 мс, вікно виміру
+  // відкривається на +491 мс — запас 37 мс. Затримка відповіді каталогу на
+  // 100 мс (лише локально, у заглушці) відтворила дослівно
+  // `expected { tree: 1, route: +0 }`. Каталог іде повз TanStack Query, тож
+  // умова `isFetching()` вище його не бачила.
+  //
+  // Тому умова осідання — дві прямі ознаки, а не час: (1) жодної відповіді
+  // заглушки мережі в польоті ({@link fetchesInFlight}, включно з каталогом)
+  // і (2) корінь `AppShell` уже без `data-resizing="true"`, тобто коміт
+  // таймера ВІДБУВСЯ. Обидві лише ДОДАЮТЬ очікування; межа раундів та сама.
+  // Не дочекалися за межу — падіння з поясненням, а не тихий вимір не того
+  // вікна.
+  for (let round = 0; stillSettling(queryClient); round += 1) {
+    if (round >= 100) {
+      throw new Error(
+        `Маршрут не осів: isFetching=${String(queryClient.isFetching())}, ` +
+          `fetchesInFlight=${String(fetchesInFlight)}, ` +
+          `data-resizing=${String(document.querySelector(ResizingSelector) !== null)}.`,
+      );
+    }
     await turns(EventLoopTurns);
   }
+}
+
+/** Корінь `AppShell` на час його CSS-переходу (`@mantine/core`, `use-resizing.mjs`). */
+const ResizingSelector = '[data-resizing="true"]';
+
+function stillSettling(queryClient: QueryClient): boolean {
+  return (
+    queryClient.isFetching() > 0 ||
+    fetchesInFlight > 0 ||
+    document.querySelector(ResizingSelector) !== null
+  );
 }
 
 async function mountRoute(entry: RouteEntry, page: JSX.Element, url: string): Promise<Mounted> {
