@@ -125,6 +125,15 @@ describe('withCellFormat', () => {
     expect(merged.horizontalAlign).toBe(2);
   });
 
+  it('колір тексту формату перекриває колір автора; заливка автора лишається', () => {
+    const withBackground: CellStyleDto = { ...authored, backgroundArgb: (0xff445566 | 0) as number };
+    const merged = withCellFormat(withBackground, { backgroundHex: null, foregroundHex: '#00ff00', isBold: false });
+
+    expect(merged.foregroundArgb).toBe((0xff00ff00 | 0) as number);
+    expect(merged.foregroundArgb).not.toBe(authored.foregroundArgb);
+    expect(merged.backgroundArgb).toBe(withBackground.backgroundArgb);
+  });
+
   it('без стилю автора — лише те, що задав формат', () => {
     const merged = withCellFormat(null, { backgroundHex: null, foregroundHex: '#00ff00', isBold: true });
 
