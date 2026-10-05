@@ -487,7 +487,7 @@ public sealed class SubmitSheetHandler(
                 warnings.AddRange(tableMessages.Where(m => m.Severity == ValidationSeverity.Warning));
             }
 
-            blocking.AddRange(Validation.TableValidation.MissingRequiredColumnMessages(table, requiredColumns, cells, rowIds));
+            blocking.AddRange(Validation.TableValidation.MissingRequiredColumnMessages(table, requiredColumns, cells, rowIds, currentUser.Language));
         }
 
         // ⛔ D-230: зв'язки Check аркуша. Block → Error блокує подання, Warn → Warning (з підтвердженням),

@@ -126,6 +126,28 @@ public sealed class CheckEvaluatorTests
         Assert.Contains(fragment, Assert.Single(CheckEvaluator.ToMessages("R", 1, spec, f, lang)).Message);
     }
 
+    [Fact]
+    public void T2_07_знахідка_несе_ключ_каталогу_і_підстановки_для_локалізації_на_читанні()
+    {
+        var spec = Spec("0.1", CheckToleranceKind.Rel);
+        var f = CheckEvaluator.Failures(ByUnit, spec, [Row("s", "A", fact: 1m)], [Row("t", "A", total: 2m)]);
+
+        var m = Assert.Single(CheckEvaluator.ToMessages("R", 1, spec, f, "ru", sourceTableDefId: 7));
+
+        Assert.Equal(ValidationMessageTemplates.CheckMismatch, m.MessageKey);
+        Assert.Equal("Fact", m.Params!["left"]);
+        Assert.Equal("1", m.Params["leftValue"]);
+        Assert.Equal("Total", m.Params["right"]);
+        Assert.Equal("2", m.Params["rightValue"]);
+        Assert.Equal("1", m.Params["deviation"]);
+        Assert.Equal("0.2", m.Params["allowed"]);
+        Assert.Equal("rel", m.Params["kind"]);
+        // Запасний текст — мовою запиту й збігається з рендером шаблону.
+        Assert.Equal(ValidationMessageTemplates.Render(ValidationMessageTemplates.CheckMismatch, "ru", m.Params), m.Message);
+        // Адреса джерела лишається: за нею читач без права на джерело отримує знеособлене.
+        Assert.Equal(7, m.SourceTableDefId);
+    }
+
     // ── RelationCheckRunner: від комірок до знахідок ────────────────────────────
 
     private sealed class World

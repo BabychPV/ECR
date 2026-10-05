@@ -229,7 +229,8 @@ internal static class TableValidation
         Domain.Entities.Configuration.TableDef table,
         List<Domain.Entities.Configuration.ColumnDef> requiredColumns,
         IReadOnlyList<CellRecord> cells,
-        IReadOnlyDictionary<string, long> rowIds)
+        IReadOnlyDictionary<string, long> rowIds,
+        string language = "en")
     {
         if (requiredColumns.Count == 0 || rowIds.Count == 0)
         {
@@ -254,14 +255,18 @@ internal static class TableValidation
                     continue;
                 }
 
+                // T2-04/T2-07: ключ + підстановки (читання локалізує мовою читача); текст — мовою запиту.
+                var parameters = new Dictionary<string, string>(StringComparer.Ordinal) { ["column"] = column.Code.ToString() };
                 messages.Add(new ValidationMessage(
                     Domain.Enums.ValidationSeverity.Error,
                     "ECR-CELL-0422",
-                    $"Колонка «{column.Code}» обов'язкова.",
+                    ValidationMessageTemplates.Render(ValidationMessageTemplates.ColumnRequired, language, parameters),
                     table.Id,
                     rowKey,
                     column.Code,
-                    BlocksSave: true));
+                    BlocksSave: true,
+                    MessageKey: ValidationMessageTemplates.ColumnRequired,
+                    Params: parameters));
             }
         }
 
