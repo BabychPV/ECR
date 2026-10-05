@@ -204,7 +204,7 @@ public sealed class RegistrySyncValidityTests
         var element = new RegistrySyncSourceElement(
             Guid1, @"\\AF\ECR\Flares\FL-01",
             new Dictionary<string, object?> { [From] = "2024-01-01", [To] = "2024-12-31" }, "FL-01");
-        var input = new RegistrySyncInput(40, RegistrySourceKind.External, true, [element], [], [], [], Validity: Source(inclusive: true));
+        var input = new RegistrySyncInput(40, RegistrySourceKind.External, true, [element], [], [], [], CodeMode: RegistryCodeMode.Auto, Validity: Source(inclusive: true));
 
         var create = Assert.Single(RegistrySyncPlanner.Plan(input).Creates);
 
