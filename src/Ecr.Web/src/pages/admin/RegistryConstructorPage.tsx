@@ -294,6 +294,7 @@ export function RegistryConstructorPage(): JSX.Element {
                 там немає. */}
             <RegistryDraftPanel
               code={loaded.code}
+              definitionVersion={loaded.definitionVersion}
               request={request}
               reason={reason}
               onReasonChange={setReason}

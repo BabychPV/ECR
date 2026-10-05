@@ -87,6 +87,12 @@ interface Stub {
 
   /** `GET …/definition/draft` відповідає 500: версії опису клієнт не знає. */
   draftStateFails?: boolean;
+
+  /** `If-Match` останнього `PUT …/definition/draft`; `undefined` — запиту ще не було. */
+  draftIfMatch?: string | null;
+
+  /** Версія опису у відповіді `GET …/definition/draft` (за замовчуванням 3, як і в самого опису). */
+  draftStateVersion?: number;
 }
 
 function json(body: unknown, status = 200): Response {
@@ -183,6 +189,7 @@ function respond(options?: Partial<Pick<Stub, 'saveConflict' | 'hasDraft'>>, per
       if (url.includes('/definition/draft')) {
         if (method === 'PUT') {
           state.draftBodies.push(String(init?.body ?? ''));
+          state.draftIfMatch = new Headers(init?.headers).get('If-Match');
 
           if (state.saveConflict === 'changed') {
             return problem(409, 'ECR-REG-0409', {
@@ -216,7 +223,7 @@ function respond(options?: Partial<Pick<Stub, 'saveConflict' | 'hasDraft'>>, per
           return problem(500, 'ECR-SYS-0500', { messageKey: 'err.ECR-SYS-0500' });
         }
 
-        return json({ definitionVersion: 3, draft: state.hasDraft ? draftBody() : null });
+        return json({ definitionVersion: state.draftStateVersion ?? 3, draft: state.hasDraft ? draftBody() : null });
       }
 
       if (url.includes('/definition/publish')) {
@@ -308,14 +315,20 @@ function SessionProbe(): JSX.Element {
   return <span data-testid="session">{session.data === undefined ? 'pending' : 'ready'}</span>;
 }
 
-function showPanel(): void {
+function showPanel(definitionVersion = 3): void {
   render(
     <MantineProvider theme={testTheme}>
       <Notifications />
       <MemoryRouter>
         <QueryClientProvider client={client()}>
           <SessionProbe />
-          <RegistryDraftPanel code={Code} request={Request} reason={DraftReason} onReasonChange={vi.fn()} />
+          <RegistryDraftPanel
+            code={Code}
+            definitionVersion={definitionVersion}
+            request={Request}
+            reason={DraftReason}
+            onReasonChange={vi.fn()}
+          />
         </QueryClientProvider>
       </MemoryRouter>
     </MantineProvider>,
@@ -649,13 +662,14 @@ describe('BE-24 крок 2: чернетка опису довідника в к
   );
 
   it(
-    'версія опису невідома (стан чернетки не прочитався) — прямий PUT не йде зовсім',
+    'прямий PUT несе версію опису з ФОРМИ, а не з відповіді чернетки (L9-36), навіть коли стан чернетки не прочитався',
     async () => {
-      // ⛔ Мутація: прибрати перевірку `version === undefined` у `saveAndPublish.mutationFn` —
-      // PUT піде без `If-Match` (сервер відмовить 422), тест червоніє.
+      // ⛔ Мутація: брати `state.data?.definitionVersion` (відповідь чернетки, тут 9) замість
+      // `definitionVersion` пропа (5) — `If-Match` стає "9" (або запит не йде зовсім, коли стан
+      // чернетки впав), тест червоніє.
       const state = respond({ hasDraft: false });
-      state.draftStateFails = true;
-      showPanel();
+      state.draftStateVersion = 9;
+      showPanel(5);
       await ready();
 
       const direct = await waitFor(
@@ -670,14 +684,43 @@ describe('BE-24 крок 2: чернетка опису довідника в к
       await userEvent.click(direct);
       await userEvent.click(await screen.findByTestId('confirm-verb', {}, { timeout: PromptTimeout }));
 
-      // Дія завершилась (діалог закрито `onSettled`) — і жодного PUT не було.
       await waitFor(
         () => {
-          expect(screen.queryByTestId('confirm-verb')).toBeNull();
+          expect(state.directIfMatch).toBe('"5"');
         },
         { timeout: PromptTimeout },
       );
-      expect(state.calls.some((call) => call.startsWith('PUT '))).toBe(false);
+    },
+    SlowEnvTimeout,
+  );
+
+  it(
+    'збереження чернетки несе If-Match з версією опису форми (L9-36)',
+    async () => {
+      // ⛔ Мутація: прибрати заголовок з `saveRegistryDraft` — сервер відмовив би 422
+      // (`definitionVersionRequired`), а тут `draftIfMatch` лишається `undefined`/`null`.
+      const state = respond();
+      state.draftStateVersion = 9;
+      showPanel(5);
+      await ready();
+
+      const save = await waitFor(
+        () => {
+          const node = document.querySelector('[data-save-draft]');
+          expect(node).not.toBeNull();
+          return node as HTMLElement;
+        },
+        { timeout: SlowEnvTimeout },
+      );
+
+      await userEvent.click(save);
+
+      await waitFor(
+        () => {
+          expect(state.draftIfMatch).toBe('"5"');
+        },
+        { timeout: PromptTimeout },
+      );
     },
     SlowEnvTimeout,
   );
