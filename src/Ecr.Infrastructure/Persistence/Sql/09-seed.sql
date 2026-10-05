@@ -6584,8 +6584,11 @@ USING (VALUES
     -- COLL:an36 ── кінець секції ──
     -- COLL:an40c ── AN-40 контрактний хвіст (L9-06 версія мапінгу подій, L9-27 шлях чужого каталогу); ru/kz — порцією COLL:an40c у блоці I18N нижче ──
     (N'err.ECR-INT-0409.eventMapConcurrency',     N'en', N'Event mapping {eventMapId} was changed after you read it. Reload it and apply your changes again.', 1),
-    (N'err.ECR-REQ-0422.sourceEntityPathForeign', N'en', N'Path {path} does not belong to the catalog of connection {dataSource} (its AF database: {database}). Open this connection''s catalog and choose the entity again.', 1)
+    (N'err.ECR-REQ-0422.sourceEntityPathForeign', N'en', N'Path {path} does not belong to the catalog of connection {dataSource} (its AF database: {database}). Open this connection''s catalog and choose the entity again.', 1),
     -- COLL:an40c ── кінець секції ──
+    -- COLL:an31c ── AN-31 (L1-14): 409 зовнішнього ключа без коду чужого запису; ru/kz — порцією COLL:an31c у блоці I18N нижче ──
+    (N'err.ECR-REG-0409.externalKeyTakenElsewhere', N'en', N'Identifier "{externalId}" of source "{dataSource}" is already linked to an entry of another registry.', 1)
+    -- COLL:an31c ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -15529,6 +15532,16 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:an40c ── кінець секції ──
+-- COLL:an31c ── ru/kz AN-31 (L1-14); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-REG-0409.externalKeyTakenElsewhere', N'ru', N'Идентификатор «{externalId}» источника «{dataSource}» уже связан с записью другого справочника.'),
+    (N'err.ECR-REG-0409.externalKeyTakenElsewhere', N'kz', N'«{dataSource}» көзінің «{externalId}» идентификаторы басқа анықтамалықтың жазбасымен бұрыннан байланыстырылған.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:an31c ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

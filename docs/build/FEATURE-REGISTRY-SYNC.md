@@ -222,8 +222,9 @@ HSE301).
   Запис видалений, відсутній або з іншого довідника — `404 err.ECR-REG-0404.registryEntry`;
   джерела немає — `404 err.ECR-INT-0404.dataSource`; `externalId` порожній чи > 200 —
   `422 err.ECR-REQ-0422.externalKeyInvalid`; пара `(DataSourceId, ExternalId)` уже зайнята —
-  `409 ECR-REG-0409` (`externalKeyTaken`, гонка — `externalKeyTakenConcurrently` з
-  `UQ_RegistryExternalKey`).
+  `409 ECR-REG-0409` (`externalKeyTaken` з кодом запису-власника, лише коли він у цьому ж
+  довіднику; запис іншого довідника — `externalKeyTakenElsewhere` без коду, L1-14; гонка —
+  `externalKeyTakenConcurrently` з `UQ_RegistryExternalKey`).
 - `DELETE /api/v1/registries/{code}/external-keys/{id}` → `204`; зв'язок запису іншого довідника —
   `404 err.ECR-REG-0404.externalKey`.
 - Право — §3 («Хто заводить зовнішній ідентифікатор»). Аудит — `aud.StructureChange`

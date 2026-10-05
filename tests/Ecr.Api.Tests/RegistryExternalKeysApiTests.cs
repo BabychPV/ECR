@@ -112,6 +112,44 @@ public sealed class RegistryExternalKeysApiTests(SqlServerFixture sql)
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "ФВ-8.10")]
+    public async Task Пара_зайнята_записом_іншого_довідника_409_не_називає_код_чужого_запису()
+    {
+        // L1-14: до фіксу тіло 409 містило `code` запису довідника, до якого запит не стосується.
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, "Registry.EditData", "Registry.View").ConfigureAwait(true);
+        var stand = await StandAsync().ConfigureAwait(true);
+        var guid = Guid.NewGuid().ToString("D");
+        var tag = $"{Guid.NewGuid():N}"[..8];
+        var foreignCode = $"SECRET{tag}".ToUpperInvariant();
+
+        await using (var db = Context())
+        {
+            var foreign = new RegistryDef(EcrCode.Create($"XKF{tag}"), Name("Foreign"), isTemporal: false);
+            db.RegistryDefs.Add(foreign);
+            await db.SaveChangesAsync().ConfigureAwait(true);
+            var foreignEntry = new RegistryEntry(foreign.Id, EcrCode.Create(foreignCode), Name("Foreign entry"));
+            db.RegistryEntries.Add(foreignEntry);
+            await db.SaveChangesAsync().ConfigureAwait(true);
+            db.RegistryExternalKeys.Add(new RegistryExternalKey(foreignEntry.Id, stand.DataSourceId, guid));
+            await db.SaveChangesAsync().ConfigureAwait(true);
+        }
+
+        var response = await client.PostAsJsonAsync(
+            Uri(stand.Code), new { entryId = stand.EntryId, dataSourceId = stand.DataSourceId, externalId = guid });
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        var raw = await response.Content.ReadAsStringAsync().ConfigureAwait(true);
+        Assert.DoesNotContain(foreignCode, raw, StringComparison.OrdinalIgnoreCase);
+        var problem = JsonDocument.Parse(raw).RootElement;
+        Assert.Equal("ECR-REG-0409", problem.GetProperty("errorCode").GetString());
+        Assert.Equal("err.ECR-REG-0409.externalKeyTakenElsewhere", problem.GetProperty("messageKey").GetString());
+        Assert.Equal(0, await CountForEntryAsync(stand.EntryId).ConfigureAwait(true));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-8.10")]
     public async Task Гонка_за_парою_в_сховищі_дає_ту_саму_відмову_409_а_не_збій_бази()
     {
         // Обидві прив'язки пройшли перевірку обробника; розводить їх лише UQ_RegistryExternalKey.

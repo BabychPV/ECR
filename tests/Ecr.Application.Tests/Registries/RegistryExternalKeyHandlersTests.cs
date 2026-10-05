@@ -125,6 +125,7 @@ public sealed class RegistryExternalKeyHandlersTests
         // Мутація «прибрати перевірку FindByExternalIdAsync» → червоний (перевірено 2026-09-29).
         _keys.FindByExternalIdAsync(SourceId, "GUID-1", Arg.Any<CancellationToken>())
             .Returns(new RegistryExternalKeyView(1, 77, "FL77", SourceId, "PI_MAIN", "GUID-1", null, null, null));
+        _registries.FindEntryAsync(77, Arg.Any<CancellationToken>()).Returns(Entry(77, RegistryId, "FL77"));
 
         var ex = await Assert.ThrowsAsync<BusinessRuleException>(
             () => Bind().HandleAsync("Flares", Command(), CancellationToken.None));
@@ -134,6 +135,26 @@ public sealed class RegistryExternalKeyHandlersTests
         Assert.Equal("FL77", ex.Details!["code"]);
         await _keys.DidNotReceive().AddAsync(Arg.Any<RegistryExternalKey>(), Arg.Any<CancellationToken>());
         Assert.Empty(_changes);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Requirement", "ФВ-8.10")]
+    public async Task Пара_зайнята_записом_іншого_довідника_409_без_коду_цього_запису()
+    {
+        // ⛔ L1-14: код запису чужого довідника не віддається. Мутація «брати код без звірки
+        // довідника» → червоний.
+        _keys.FindByExternalIdAsync(SourceId, "GUID-1", Arg.Any<CancellationToken>())
+            .Returns(new RegistryExternalKeyView(1, ForeignEntryId, "OTHER", SourceId, "PI_MAIN", "GUID-1", null, null, null));
+
+        var ex = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Bind().HandleAsync("Flares", Command(), CancellationToken.None));
+
+        Assert.Equal(ErrorCodes.RegistryEntryInUse, ex.ErrorCode);
+        Assert.Equal("err.ECR-REG-0409.externalKeyTakenElsewhere", ex.Details!["messageKey"]);
+        Assert.False(ex.Details!.ContainsKey("code"));
+        Assert.DoesNotContain("OTHER", ex.Message, StringComparison.Ordinal);
+        await _keys.DidNotReceive().AddAsync(Arg.Any<RegistryExternalKey>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
