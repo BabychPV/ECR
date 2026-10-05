@@ -167,6 +167,39 @@ public static class EditRules
         return EditDecision.Allow();
     }
 
+    /// <summary>
+    /// Проєктне право, що разом із рівнем <see cref="GrantLevel.Write"/> дає
+    /// подання аркуша (D-285, варіант B′).
+    /// </summary>
+    public const string SubmitRightPermission = "Document.Submit";
+
+    /// <summary>
+    /// Чи вистачає повноважень на подання за ефективним рівнем гранта й правом
+    /// у проєкті документа: <c>effective &gt;= Submit</c> АБО
+    /// (<c>effective &gt;= Write</c> І <see cref="SubmitRightPermission"/> у проєкті).
+    /// </summary>
+    /// <param name="profile">Профіль прав.</param>
+    /// <param name="projectId">Проєкт документа.</param>
+    /// <param name="effective">Ефективний рівень гранта на аркуш (<see cref="Effective"/>).</param>
+    /// <remarks>
+    /// ⛔ Єдине місце цього правила: його читають і <see cref="CanSubmit"/>, і
+    /// відкликання подання (<c>RecallSheetHandler</c>) — відкликання не має
+    /// вимагати від автора більше, ніж подання. Право ПРОЄКТНЕ й не звужуване
+    /// (<c>PermissionScopes.Narrowable</c> його не містить), тож перевіряється
+    /// через <see cref="PermissionCheck.IsGrantedIn"/> (= <c>Has(code, projectId)</c>;
+    /// храповик ФВ-6.8 забороняє голе <c>profile.Has(</c>) у проєкті документа,
+    /// а не глобально. Заборона на ресурс уже в <paramref name="effective"/>
+    /// (<see cref="GrantLevel.None"/>): право її не обходить.
+    /// </remarks>
+    public static bool MeetsSubmit(AccessProfile profile, int projectId, GrantLevel effective)
+    {
+        ArgumentNullException.ThrowIfNull(profile);
+
+        return effective >= GrantLevel.Submit
+               || (effective >= GrantLevel.Write
+                   && PermissionCheck.IsGrantedIn(profile, SubmitRightPermission, projectId));
+    }
+
     /// <summary>Чи можна подати аркуш на погодження.</summary>
     /// <param name="profile">Профіль прав.</param>
     /// <param name="context">Умови аркуша.</param>
@@ -210,6 +243,10 @@ public static class EditRules
 
         // ⚠ Подання потребує рівня Submit, а не Write: право заповнювати і
         // право відповідати за подане — різні повноваження (02c A11).
+        // ✎ D-285 (варіант B′): рівень Write СКЛАДАЄ цю вимогу лише разом із
+        // проєктним правом `Document.Submit` (`SubmitRightPermission`) у
+        // проєкті документа — див. `MeetsSubmit`. Сам по собі Write подання
+        // не дає, а право без рівня Write нічого не підіймає.
         //
         // ⛔ Грант ВІДСУТНІЙ (None) і грант Є, але закороткий, — дві різні
         // причини відмовити, і до цього обидві поверталися як NoGrant.
@@ -218,13 +255,14 @@ public static class EditRules
         // Submit, і дія користувача інша: просити підвищення гранта, а не
         // грант із нуля.
         var effective = Effective(profile, context);
-        if (effective < GrantLevel.Submit)
+        if (!MeetsSubmit(profile, context.ProjectId, effective))
         {
             return effective == GrantLevel.None
                 ? EditDecision.Deny(EditDenyReason.NoGrant)
                 : EditDecision.Deny(
                     EditDenyReason.InsufficientGrantLevel,
-                    $"Наявний рівень гранта — {effective}; для подання потрібен {GrantLevel.Submit}.");
+                    $"Наявний рівень гранта — {effective}; для подання потрібен {GrantLevel.Submit} "
+                    + $"(або {GrantLevel.Write} з правом {SubmitRightPermission}).");
         }
 
         return hasBlockingErrors
