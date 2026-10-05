@@ -5,6 +5,7 @@ using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
 using Ecr.Application.Workflow;
+using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Entities.Workflow;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
@@ -112,12 +113,19 @@ public sealed class GetWorkflowHistoryHandlerTests
         var user = Substitute.For<ICurrentUser>();
         user.UserId.Returns(UserId);
 
+        // Знімок з одним аркушем «S1» (без таблиць - видимий, коли видимий проєкт).
+        var sheet = new SheetDef(1, EcrCode.Create("S1"), new LocalizedText(new Dictionary<string, string> { ["en"] = "S1" }), 1);
+        var snapshot = new TemplateVersionSnapshot(
+            1, 0, [sheet], new Dictionary<int, ColumnDef>(), new Dictionary<(int, string), RowDef>());
+        access.ReadScopeAsync(Arg.Any<AccessProfile>(), DocumentId, Arg.Any<CancellationToken>())
+              .Returns(call => DocumentReadScope.For(call.Arg<AccessProfile>(), AccessBuilder.ProjectId, snapshot));
+
         var documents = Substitute.For<IDocumentStore>();
         documents.FindAsync(DocumentId, Arg.Any<PeriodKeyFilter>(), Arg.Any<CancellationToken>())
                  .Returns(new DocumentSummary(
                      DocumentId, AccessBuilder.ProjectId, "DOC-501", At, 1,
                      new Dictionary<string, string>(StringComparer.Ordinal)));
 
-        return new GetWorkflowHistoryHandler(new GetDocumentHandler(documents, access, user), workflow);
+        return new GetWorkflowHistoryHandler(new GetDocumentHandler(documents, access, user), workflow, access, user);
     }
 }

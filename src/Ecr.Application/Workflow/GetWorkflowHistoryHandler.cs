@@ -38,7 +38,11 @@ public sealed record WorkflowEventDto(
 /// ⚠ Таблиця <c>wf.ApprovalEvent</c> починається порожньою: порожній перелік
 /// для документа, старшого за міграцію, — не помилка.
 /// </remarks>
-public sealed class GetWorkflowHistoryHandler(GetDocumentHandler getDocument, IWorkflowStore workflow)
+public sealed class GetWorkflowHistoryHandler(
+    GetDocumentHandler getDocument,
+    IWorkflowStore workflow,
+    Security.IAccessDecisionService access,
+    Common.ICurrentUser currentUser)
 {
     /// <summary>Право читання журналу — те саме, що й читання документа.</summary>
     /// <remarks>
@@ -78,6 +82,19 @@ public sealed class GetWorkflowHistoryHandler(GetDocumentHandler getDocument, IW
         }
 
         var events = await workflow.GetHistoryAsync(documentId, key, MaxEvents, ct).ConfigureAwait(false);
+
+        // ⛔ L1-18 (D-214, ФВ-6.6): подія називає аркуш, виконавця й текст причини повернення чи
+        // відмови — це дані аркуша; закритого користувачу аркуша подій немає. Межі — для
+        // періоду запиту. Без подій межі не потрібні.
+        if (events.Count > 0)
+        {
+            var profile = await Security.PermissionCheck
+                .RequireInAnyProjectAsync(access, currentUser, Permission, ct)
+                .ConfigureAwait(false);
+            Security.PermissionCheck.RequireIn(profile, Permission, document.ProjectId);
+            var readable = (await access.ReadScopeAsync(profile, documentId, ct).ConfigureAwait(false)).InPeriod(key);
+            events = [.. events.Where(e => readable.CanReadSheetCode(e.SheetCode))];
+        }
 
         return events
             .Select(e => new WorkflowEventDto(
