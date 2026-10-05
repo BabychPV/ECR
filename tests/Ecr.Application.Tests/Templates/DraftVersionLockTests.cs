@@ -190,7 +190,7 @@ public sealed class DraftVersionLockTests
                 .HandleAsync(1, _table.Id, FormulaScope.Column,
                     _formulaColumn.Id.ToString(System.Globalization.CultureInfo.InvariantCulture), ct),
             "DeleteTableRelation" => new DeleteTableRelationHandler(
-                    _versions, _relations, _store, classifier, _audit, _uow, _clock, _access, _user)
+                    _versions, _relations, _store, classifier, _metadataCache, _audit, _uow, _clock, _access, _user)
                 .HandleAsync(1, "REL1", ct),
             _ => throw new ArgumentOutOfRangeException(nameof(handler), handler, null),
         };
