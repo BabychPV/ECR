@@ -51,8 +51,10 @@ public sealed class RegistryResolver
         var allowed = BuildCascadeFilter(links, parentEntryId);
 
         return entries
-            // 1. Чинність на дату періоду. Межі включні з обох боків: запис,
-            //    закритий 30 червня, у звіті за 30 червня ще чинний.
+            // 1. Чинність на дату періоду: напівінтервал [ValidFrom, ValidTo) — початок
+            //    включний, кінець ВИКЛЮЧНИЙ (`ValidityWindow.Contains`). Запис, чинний по
+            //    30 червня включно, має ValidTo = 1 липня; з ValidTo = 30 червня він у звіті
+            //    за 30 червня вже нечинний.
             .Where(e => e.IsValidOn(asOf))
 
             // 2. Видалені й вимкнені не пропонуються. Але й не зникають: у
