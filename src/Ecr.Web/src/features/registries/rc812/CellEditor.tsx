@@ -1,8 +1,9 @@
 import { Suspense, lazy, useRef, useState, type JSX, type KeyboardEvent } from 'react';
 import { Select, TextInput } from '@mantine/core';
 import { useDebouncedValue } from '@mantine/hooks';
+import { formatDateOnly, parseDateOnly } from '@/shared/format';
 import { t } from '@/shared/i18n';
-import { dateOfIso, isoOfDate, lookupLabel, useLookupOptions, useUnits } from './data';
+import { lookupLabel, useLookupOptions, useUnits } from './data';
 import type { RegistryField } from './rowModel';
 
 /**
@@ -184,8 +185,8 @@ function DateEditor({ label, value, onCommit, onCancel }: CellEditorProps): JSX.
         aria-label={label}
         valueFormat="YYYY-MM-DD"
         clearable
-        defaultValue={dateOfIso(value)}
-        onChange={(next) => onCommit(isoOfDate(next), undefined, 'none')}
+        defaultValue={parseDateOnly(value)}
+        onChange={(next) => onCommit(formatDateOnly(next), undefined, 'none')}
         onKeyDown={(event) => {
           if (event.key === 'Escape') commitKeys(event, () => onCancel(), onCancel);
         }}

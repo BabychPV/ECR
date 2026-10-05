@@ -1,5 +1,6 @@
 import { Suspense, lazy, type JSX } from 'react';
 import { Skeleton } from '@mantine/core';
+import { formatDateOnly, parseDateOnly } from '@/shared/format';
 
 /**
  * `@mantine/dates` — за `import()` (`D-132`): дата в редакторі частин потрібна не кожному, хто
@@ -9,20 +10,6 @@ const DateInput = lazy(async () => {
   const module = await import('@/shared/dates/DateInputWithStyles');
   return { default: module.DateInput };
 });
-
-/** `yyyy-MM-dd` → `Date` опівночі МІСЦЕВОГО часу; `null` — порожньо чи нечитабельно. */
-export function parseDateOnly(value: string): Date | null {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
-  const parsed = new Date(`${value}T00:00:00`);
-  return Number.isNaN(parsed.getTime()) ? null : parsed;
-}
-
-/** `Date` → `yyyy-MM-dd` за місцевим часом — бізнес-дата без зсуву поясу. */
-export function formatDateOnly(date: Date): string {
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${date.getFullYear()}-${month}-${day}`;
-}
 
 /**
  * Поле бізнес-дати: значення — рядок `yyyy-MM-dd`, як його віддає і приймає сервер.

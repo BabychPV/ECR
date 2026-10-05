@@ -24,6 +24,8 @@
  * стан, який дозволяє побудову наосліп.
  */
 
+import { formatDateOnly } from '@/shared/format';
+
 /** Тип оголошеного параметра. Той самий словник, що приймає сервер. */
 type ReportParameterType = 'Number' | 'Text' | 'Boolean' | 'Date';
 
@@ -264,30 +266,16 @@ export function toParametersBody(
 function coerce(declaration: ReportParameterDeclaration, value: ParameterValue): unknown {
   if (!isFilled(declaration, value)) return undefined;
 
-  if (declaration.type === 'Date') return value instanceof Date ? formatDay(value) : undefined;
+  if (declaration.type === 'Date') return value instanceof Date ? formatDateOnly(value) : undefined;
 
   return value;
 }
 
 /**
- * Дата як `YYYY-MM-DD` за МІСЦЕВИМИ складниками.
- *
- * ⛔ Не `toISOString()`: той переводить у UTC і зсуває дату на добу для всіх,
- * хто живе західніше за Гринвіч, — тобто перше березня поїхало б у запит як
- * двадцять восьме лютого. Складники дати (на відміну від складників часу доби)
- * для машинного формату брати руками дозволено навмисно (`D15-09`).
- */
-function formatDay(value: Date): string {
-  const pad = (part: number): string => String(part).padStart(2, '0');
-
-  return `${String(value.getFullYear()).padStart(4, '0')}-${pad(value.getMonth() + 1)}-${pad(value.getDate())}`;
-}
-
-/**
  * `YYYY-MM-DD` із замовчування — у МІСЦЕВУ дату.
  *
- * ⛔ Дзеркальне до `formatDay` і з тієї ж причини: `new Date('2026-03-01')`
- * читається як опівніч UTC, і `formatDay` повернув би з неї інший день.
+ * ⛔ Дзеркальне до `formatDateOnly` і з тієї ж причини: `new Date('2026-03-01')`
+ * читається як опівніч UTC, і `formatDateOnly` повернув би з неї інший день.
  */
 export function parseDay(raw: unknown): Date | null {
   if (typeof raw !== 'string') return null;

@@ -149,23 +149,3 @@ export async function resolveLookups(
   return (target, text) => found.get(keyOf(target, text)) ?? null;
 }
 
-/**
- * Сьогоднішня дата клієнта як `yyyy-MM-dd` — `asOf` темпорального довідника за замовчуванням.
- *
- * ⛔ Не `toISOString().slice(0, 10)`: той читає північ як UTC і зсуває день на добу.
- */
-export function todayIso(now: Date = new Date()): string {
-  const pad = (n: number): string => String(n).padStart(2, '0');
-  return `${String(now.getFullYear())}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
-}
-
-/** `Date` з поля дати → `yyyy-MM-dd` за місцевим календарем (та сама пастка, що вище). */
-export function isoOfDate(value: Date | null): string | null {
-  return value === null ? null : todayIso(value);
-}
-
-/** `yyyy-MM-dd` → місцева північ для поля дати. */
-export function dateOfIso(value: string | null): Date | null {
-  const match = value === null ? null : /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
-  return match === null ? null : new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
-}

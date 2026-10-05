@@ -5,6 +5,7 @@ import { Link, useParams } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
 import type { RegistryDefDto, RegistryDefinitionDto } from '@/api/types';
+import { todayDateOnly } from '@/shared/format';
 import { t } from '@/shared/i18n';
 import { localized } from '@/shared/i18n/localized';
 import { can, useSession } from '@/shared/session/useSession';
@@ -16,7 +17,7 @@ import { registerUnsavedSource } from '@/shared/ui/unsavedSources';
 import { compositionOf } from './composition';
 import { CompositionPanel, compositionKeys } from './CompositionPanel';
 import { buildCompositionTree, type CompositionNode } from './compositionTree';
-import { DateOnlyInput, formatDateOnly } from './DateOnlyInput';
+import { DateOnlyInput } from './DateOnlyInput';
 
 /** Адреса редактора master-detail довідника. */
 export function compositionEditorPath(code: string): string {
@@ -25,11 +26,6 @@ export function compositionEditorPath(code: string): string {
 
 function loadDefinition(code: string): Promise<RegistryDefinitionDto> {
   return apiFetch<RegistryDefinitionDto>(`/api/v1/registries/${encodeURIComponent(code)}/definition`);
-}
-
-/** Сьогодні `yyyy-MM-dd` за місцевим часом — типова бізнес-дата чинності. */
-function today(): string {
-  return formatDateOnly(new Date());
 }
 
 /** Обраний рядок панелі. */
@@ -133,7 +129,7 @@ function DetailChain({
 export function CompositionEditorPage(): JSX.Element {
   const { code = '' } = useParams();
   const session = useSession();
-  const [asOf, setAsOf] = useState(today);
+  const [asOf, setAsOf] = useState(todayDateOnly);
   const [selected, setSelected] = useState<Selection | null>(null);
   const [dirtyByCode, setDirtyByCode] = useState<Readonly<Record<string, number>>>({});
   const rootRef = useRef<HTMLDivElement>(null);

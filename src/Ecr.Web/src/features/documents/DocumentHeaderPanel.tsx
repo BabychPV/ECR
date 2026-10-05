@@ -9,6 +9,7 @@ import { coerce } from '@/features/grid/edits';
 import { cellText, sameCellValue } from '@/features/grid/cellValue';
 import { lookupCellDisplay } from '@/features/grid/LookupCellEditor';
 import { unitCellDisplay } from '@/features/grid/UnitCellEditor';
+import { formatDateOnly, parseDateOnly, todayDateOnly } from '@/shared/format';
 import { localized } from '@/shared/i18n/localized';
 import { t } from '@/shared/i18n';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
@@ -87,29 +88,6 @@ function patchDocumentHeader(
       baseVersion,
     } satisfies components['schemas']['PatchDocumentHeaderRequest']),
   });
-}
-
-/** Дата без часу з `DateInput` → `"YYYY-MM-DD"` МІСЦЕВИМИ складниками.
- *
- * ⛔ НЕ `toISOString().slice(0, 10)`: той читає дату як UTC-північ і в
- * від'ємному зсуві зсуває календарний день на добу (той самий клас дефекту,
- * що описаний у `shared/format/datetime.ts` для зворотного напрямку). */
-function isoDateOf(date: Date): string {
-  const year = String(date.getFullYear()).padStart(4, '0');
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-
-  return `${year}-${month}-${day}`;
-}
-
-/** `"YYYY-MM-DD"` → `Date` МІСЦЕВОЇ півночі; що завгодно інше — `null`. */
-function dateOf(value: string): Date | null {
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
-  if (match === null) return null;
-
-  const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
-
-  return Number.isNaN(date.getTime()) ? null : date;
 }
 
 /**
@@ -316,7 +294,7 @@ export function DocumentHeaderPanel({
    * `DocumentPage.tsx` — файл поза дозволеним списком цієї задачі. Якщо
    * шапка колись отримає дату періоду — замінити тут одним рядком.
    */
-  const lookupAsOf = isoDateOf(new Date());
+  const lookupAsOf = todayDateOnly();
 
   const lookupEntriesQueries = useQueries({
     queries: lookupRegistryCodes.map(({ code, isTemporal }) => {
@@ -621,8 +599,8 @@ function HeaderFieldInput({
           valueFormat="YYYY-MM-DD"
           clearable
           disabled={disabled}
-          value={typeof value === 'string' ? dateOf(value) : null}
-          onChange={(next) => onChange(next === null ? null : isoDateOf(next))}
+          value={typeof value === 'string' ? parseDateOnly(value) : null}
+          onChange={(next) => onChange(formatDateOnly(next))}
           data-header-field={field.code}
         />
       </Suspense>

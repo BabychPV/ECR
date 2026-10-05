@@ -20,6 +20,7 @@ import { RegistryImportPanel } from '@/features/registries/RegistryImportPanel';
 import { RegistryExportButton } from '@/features/registries/export/RegistryExportButton';
 import { EntryUsageButton } from '@/features/registries/rc814/EntryUsageButton';
 import { SourceKindSwitch } from '@/features/registries/SourceKindSwitch';
+import { todayDateOnly } from '@/shared/format';
 import { localized } from '@/shared/i18n/localized';
 import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
@@ -53,23 +54,6 @@ import { problemText } from '@/shared/ui/problemText';
  * нейтральні до мови й читаються з обох боків вікна.
  */
 const Unbounded = '…';
-
-/**
- * Сьогоднішня дата КЛІЄНТА як `"YYYY-MM-DD"` — `asOf` для темпорального
- * довідника на цьому екрані (перелік без контексту періоду документа).
- *
- * ⛔ НЕ `toISOString().slice(0, 10)`: той читає північ як UTC і в
- * від'ємному зсуві зсуває календарний день на добу (та сама пастка, що
- * задокументована для `DocumentHeaderPanel.tsx`, `isoDateOf`).
- */
-function todayIso(): string {
-  const now = new Date();
-  const year = String(now.getFullYear()).padStart(4, '0');
-  const month = String(now.getMonth() + 1).padStart(2, '0');
-  const day = String(now.getDate()).padStart(2, '0');
-
-  return `${year}-${month}-${day}`;
-}
 
 /**
  * Конструктор реєстрів: схема, дані, темпоральність.
@@ -130,7 +114,8 @@ export function RegistriesPage(): JSX.Element {
    * стан довідника адміністратору, без контексту періоду документа (той є
    * лише в `DocumentGrid`/`DocumentHeaderPanel`).
    */
-  const asOf = selected?.isTemporal === true ? todayIso() : null;
+  // `asOf` темпорального довідника на цьому екрані — сьогодні клієнта (перелік без контексту періоду).
+  const asOf = selected?.isTemporal === true ? todayDateOnly() : null;
 
   const entries = useQuery({
     queryKey: [...queryKeys.registries.entries(code ?? ''), asOf],

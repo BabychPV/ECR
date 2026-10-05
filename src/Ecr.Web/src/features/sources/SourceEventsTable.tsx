@@ -16,7 +16,7 @@ import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tansta
 import { Link } from "react-router-dom";
 import { apiFetch, EcrApiError } from "@/api/client";
 import type { DocumentSummary, JobStatus } from "@/api/types";
-import { formatDateTime, formatNumber } from "@/shared/format";
+import { formatDateOnly, formatDateTime, formatNumber, parseDateOnly } from "@/shared/format";
 import { useFocusAfterBusy } from "@/shared/a11y/focus";
 import { t } from "@/shared/i18n";
 import { ErrorAlert } from "@/shared/ui/ErrorAlert";
@@ -52,18 +52,6 @@ const DateInput = lazy(async () => {
 
   return { default: module.DateInput };
 });
-
-/** `Date` з поля → `YYYY-MM-DD` за МІСЦЕВИМ календарем (те, що людина обрала). */
-function dateOnly(date: Date): string {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-}
-
-function parseDateOnly(value: string | null): Date | null {
-  if (value === null) return null;
-  const parsed = new Date(`${value}T00:00:00`);
-
-  return Number.isNaN(parsed.getTime()) ? null : parsed;
-}
 
 /**
  * Межа доби в UTC: `from` — початок обраної доби, `to` — початок НАСТУПНОЇ (контракт `toUtc` — «раніше»).
@@ -455,7 +443,7 @@ export function SourceEventsTable({
             onChange={(next) =>
               setFilters({
                 ...filters,
-                from: next === null ? null : dateOnly(next),
+                from: formatDateOnly(next),
               })
             }
           />
@@ -469,7 +457,7 @@ export function SourceEventsTable({
             onChange={(next) =>
               setFilters({
                 ...filters,
-                to: next === null ? null : dateOnly(next),
+                to: formatDateOnly(next),
               })
             }
           />

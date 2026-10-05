@@ -18,6 +18,7 @@ import type { components } from '@/api/schema';
 import type { RoleView } from '@/api/types';
 import { DateInput } from '@mantine/dates';
 import '@mantine/dates/styles.css';
+import { formatDateOnly } from '@/shared/format';
 import { ConfirmModal } from '@/shared/ui/ConfirmModal';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { showApiError, showDone } from '@/shared/ui/notify';
@@ -49,19 +50,6 @@ const URL = '/api/v1/security/group-assignments';
  * є — необмеженість. Так само зроблено в `RegistriesPage` і константах методик.
  */
 const Unbounded = '…';
-
-/**
- * Календарна дата для сервера (`DateOnly`): `YYYY-MM-DD` тієї доби, яку обрано.
- *
- * ⛔ Не `toISOString()`: він переводить у UTC, і локальна північ на схід від
- * Гринвіча стає ПОПЕРЕДНЬОЮ добою (на захід — пізній вечір стає наступною).
- */
-export function toMachineDate(value: Date | null): string | null {
-  if (value === null) return null;
-
-  const pad = (part: number): string => String(part).padStart(2, '0');
-  return `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())}`;
-}
 
 /** Небезпечні права з відмови `409`; `null` — відмова про інше. */
 export function dangerousPermissions(error: unknown): string[] | null {
@@ -96,8 +84,9 @@ export function GroupAssignmentsPanel({ roles }: { roles: RoleView[] }): JSX.Ele
   // права ВСІХ членів групи каталогу одразу.
   const [revoking, setRevoking] = useState<Assignment | null>(null);
 
-  const from = toMachineDate(validFrom);
-  const to = toMachineDate(validTo);
+  // Календарна дата для сервера (`DateOnly`) — та доба, яку обрано (L9-17: `shared/format/dateOnly`).
+  const from = formatDateOnly(validFrom);
+  const to = formatDateOnly(validTo);
   // `YYYY-MM-DD` порівнюється як рядок; рівні дати дозволені — `validTo` включно.
   const orderBroken = from !== null && to !== null && to < from;
 

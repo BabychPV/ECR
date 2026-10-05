@@ -5,7 +5,7 @@ import { MantineProvider } from '@mantine/core';
 import { QueryClientProvider, QueryClient } from '@tanstack/react-query';
 import { theme } from '@/shared/theme/theme';
 import { loadCatalog } from '@/shared/i18n';
-import { GroupAssignmentsPanel, toMachineDate } from '@/features/security/GroupAssignmentsPanel';
+import { GroupAssignmentsPanel } from '@/features/security/GroupAssignmentsPanel';
 import { withTestDefaults } from '@/test/render';
 import type { RoleView } from '@/api/types';
 
@@ -213,28 +213,7 @@ describe('GroupAssignmentsPanel', () => {
   });
 
   describe('дата в запиті — та сама доба, яку обрано', () => {
-    /*
-     * ⚠ Пояс у тесті задати не можна: пул `vmThreads` — це потоки, а присвоєння
-     * `process.env.TZ` у потоці до рушія не доходить (перевірено: мутація
-     * `toISOString()` лишала «New_York 23:30» зеленим). Тому два виміри:
-     *   • північ і пізній вечір ЛОКАЛЬНОЇ доби — у будь-якому поясі з ненульовим
-     *     зсувом `toISOString()` ламає рівно один із них;
-     *   • дата, чия локальна доба свідомо не збігається з UTC, — ловить те саме
-     *     і на машині в UTC (CI).
-     */
-    it.each([0, 23])('toMachineDate бере локальну добу, година %i', (hour) => {
-      expect(toMachineDate(new Date(2026, 2, 1, hour, 30))).toBe('2026-03-01');
-      expect(toMachineDate(null)).toBeNull();
-    });
-
-    it('toMachineDate не читає UTC: локальна доба 2 березня за UTC-доби 1 березня', () => {
-      const picked = new Date(Date.UTC(2026, 2, 1, 12));
-      picked.getFullYear = () => 2026;
-      picked.getMonth = () => 2;
-      picked.getDate = () => 2;
-
-      expect(toMachineDate(picked)).toBe('2026-03-02');
-    });
+    // Перетворення доби на `YYYY-MM-DD` (локальна доба, не UTC) — `shared/format/__tests__/dateOnly.test.ts`.
 
     it('форма шле validFrom/validTo як YYYY-MM-DD, а «to раніше from» не відправляється', async () => {
       const posted: Record<string, unknown>[] = [];

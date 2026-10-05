@@ -2,6 +2,7 @@ import { Suspense, lazy, type JSX } from 'react';
 import { Badge, Button, Group, Stack, Text, Title } from '@mantine/core';
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
+import { formatDateOnly, parseDateOnly } from '@/shared/format';
 import type { SourceEntityStatus } from '@/api/types';
 import { CollectionRunStateBadge } from './CollectionRunStateBadge';
 import { CollectionRunDetailDrawer } from './CollectionRunDetailDrawer';
@@ -44,23 +45,6 @@ import { t } from '@/shared/i18n';
 
 /** Розмір списку сутностей у фільтрі — той самий запит, що вже робить `SourcesPage`. */
 const SourceEntitiesQueryKey = ['sources'] as const;
-
-/** `YYYY-MM-DD` місцевими складниками — не `toISOString()` (той зсуває добу в UTC). */
-function dateOnlyLocal(date: Date): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-
-  return `${year}-${month}-${day}`;
-}
-
-/** `YYYY-MM-DD` → `Date` опівночі МІСЦЕВОГО часу — для показу в `DateInput`. */
-function parseDateOnly(value: string | null): Date | null {
-  if (value === null) return null;
-
-  const parsed = new Date(`${value}T00:00:00`);
-  return Number.isNaN(parsed.getTime()) ? null : parsed;
-}
 
 /** Початок доби `value` в UTC — межа `from` (включно, як і контракт). */
 function startOfDayUtc(value: string): string | null {
@@ -211,7 +195,7 @@ export function CollectionRunsPanel(): JSX.Element {
                 valueFormat="YYYY-MM-DD"
                 clearable
                 value={parseDateOnly(fromDate)}
-                onChange={(next) => setFromDate(next === null ? null : dateOnlyLocal(next))}
+                onChange={(next) => setFromDate(formatDateOnly(next))}
               />
               <DateInput
                 size="sm"
@@ -220,7 +204,7 @@ export function CollectionRunsPanel(): JSX.Element {
                 valueFormat="YYYY-MM-DD"
                 clearable
                 value={parseDateOnly(toDate)}
-                onChange={(next) => setToDate(next === null ? null : dateOnlyLocal(next))}
+                onChange={(next) => setToDate(formatDateOnly(next))}
               />
             </Group>
           </Suspense>

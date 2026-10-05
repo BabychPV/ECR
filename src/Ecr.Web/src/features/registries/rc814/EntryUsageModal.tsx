@@ -3,12 +3,12 @@ import { Anchor, Badge, Group, List, Modal, Skeleton, Stack, Text, Title } from 
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import type { RegistryEntryDto } from '@/api/types';
+import { todayDateOnly } from '@/shared/format';
 import { t } from '@/shared/i18n';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import {
   hasNamedReferences,
   loadEntryUsage,
-  todayIso,
   type EntryUsageReport,
   type FieldReferences,
 } from './entryUsage';
@@ -75,9 +75,9 @@ function EntryUsageBody({
   siblings: readonly RegistryEntryDto[];
 }): JSX.Element {
   // ⚠ Дата фіксується на відкриття діалогу: інакше перехід через північ змінив би ключ і
-  // перечитав звіт посеред читання. ⛔ L9-42: саме `useState` — виклик `todayIso()` у тілі
+  // перечитав звіт посеред читання. ⛔ L9-42: саме `useState` — виклик `todayDateOnly()` у тілі
   // рахувався на КОЖЕН рендер і нічого не фіксував.
-  const [asOf] = useState(todayIso);
+  const [asOf] = useState(todayDateOnly);
 
   const report = useQuery({
     queryKey: entryUsageKey(registryCode, entry.id, asOf),
