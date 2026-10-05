@@ -45,6 +45,16 @@ public sealed class UiStringCsvTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    public async Task Незакрита_лапка_дає_422_а_не_необроблену_помилку_розбору()
+    {
+        // L5-11: CsvReader кидає FormatException на обірвані лапки; обробник перекладає її в 422.
+        var ex = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Import("key,ru\r\na.quote,\"Скажи\r\n", dryRun: false));
+
+        Assert.Equal("err.ECR-REQ-0422.uiStringCsvUnterminatedQuote", ex.Details?["messageKey"]);
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage7)]
     public async Task DryRun_звітує_але_нічого_не_пише()
     {
         var before = _catalog.Revision;

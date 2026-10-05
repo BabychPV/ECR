@@ -324,6 +324,71 @@ public sealed class RegistryEntryImportApiTests(SqlServerFixture sql)
     [Trait(TestCategories.Stage, TestCategories.Stage4)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Directive", "BE-24")]
+    public async Task Файл_не_UTF8_відхиляється_422()
+    {
+        // L5-11: cp1251-файл раніше читався з підстановкою «�» і кирилиця мовчки псувалась.
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, "Registry.EditData").ConfigureAwait(true);
+        var fixture = await SeedAsync().ConfigureAwait(true);
+
+        var cp1251 = new byte[] { 0x63, 0x6F, 0x64, 0x65, 0x2C, 0x4E, 0x61, 0x6D, 0x65, 0x0D, 0x0A, 0x58, 0x2C, 0xCF, 0xE5, 0xF7, 0xFC };
+        var response = await ImportBytesAsync(client, fixture.Code, cp1251).ConfigureAwait(true);
+
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, response.StatusCode);
+        Assert.Contains("err.ECR-REG-0422.entriesCsvNotUtf8", await response.Content.ReadAsStringAsync().ConfigureAwait(true), StringComparison.Ordinal);
+        Assert.False(await EntryExistsAsync(fixture.DefinitionId, "X").ConfigureAwait(true));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "BE-24")]
+    public async Task Незакрита_лапка_у_файлі_422_а_не_мовчазне_прийняття()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, "Registry.EditData").ConfigureAwait(true);
+        var fixture = await SeedAsync().ConfigureAwait(true);
+
+        var csv = $"code,Name\r\nNEW{fixture.Tag},\"Труба\r\nNEW2{fixture.Tag},Кран\r\n";
+        var response = await ImportBytesAsync(client, fixture.Code, Encoding.UTF8.GetBytes(csv)).ConfigureAwait(true);
+
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, response.StatusCode);
+        Assert.Contains("err.ECR-REG-0422.entriesCsvUnterminatedQuote", await response.Content.ReadAsStringAsync().ConfigureAwait(true), StringComparison.Ordinal);
+        Assert.False(await EntryExistsAsync(fixture.DefinitionId, $"NEW{fixture.Tag}").ConfigureAwait(true));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "BE-24")]
+    public async Task Не_UTF8_без_права_редагування_дає_403_а_не_422()
+    {
+        // Відмова за кодуванням стоїть ПІСЛЯ перевірки права: сторонній не дізнається про вміст/формат.
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, "Registry.View").ConfigureAwait(true);
+        var fixture = await SeedAsync().ConfigureAwait(true);
+
+        var response = await ImportBytesAsync(client, fixture.Code, [0xCF, 0xE5, 0xF7, 0xFC]).ConfigureAwait(true);
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    private static async Task<HttpResponseMessage> ImportBytesAsync(HttpClient client, string registryCode, byte[] bytes)
+    {
+        using var content = new MultipartFormDataContent();
+        var file = new ByteArrayContent(bytes);
+        file.Headers.ContentType = new MediaTypeHeaderValue("text/csv");
+        content.Add(file, "file", "entries.csv");
+
+        return await client
+            .PostAsync(new Uri($"/api/v1/registries/{registryCode}/entries/import?dryRun=false", UriKind.Relative), content)
+            .ConfigureAwait(false);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "BE-24")]
     public async Task Без_права_Registry_EditData_імпорт_дає_403()
     {
         // ⚠ Користувач із ЧИТАННЯМ довідників: інакше тест не розрізняв би
