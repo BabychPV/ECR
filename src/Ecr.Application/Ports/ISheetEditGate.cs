@@ -82,4 +82,18 @@ public interface ISheetEditGate
     /// <c>409 ECR-DOC-4091 structureChanged</c>, а не запис під чужою структурою.
     /// </remarks>
     public Task<int?> EnterStructureAsync(long documentId, bool exclusive, CancellationToken ct);
+
+    /// <summary>
+    /// Блокування ШАПКИ документа (L6-06): виняткове — правка шапки, спільне —
+    /// подання аркуша (воно валідує шапку й кладе її у зріз).
+    /// </summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="exclusive"><c>true</c> — правка шапки; <c>false</c> — подання.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⚠ Окремий ключ, а не <c>doc-structure</c> винятково: інакше кожна правка
+    /// шапки чекала б на всі збереження комірок документа, а вони — на неї.
+    /// Береться ПІСЛЯ структури й ДО блокування аркуша.
+    /// </remarks>
+    public Task EnterHeaderAsync(long documentId, bool exclusive, CancellationToken ct);
 }

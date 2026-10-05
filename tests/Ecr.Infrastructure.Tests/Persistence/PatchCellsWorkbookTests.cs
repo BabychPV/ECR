@@ -891,5 +891,8 @@ public sealed class PatchCellsWorkbookTests(SqlServerFixture sql) : IDisposable
 
         public Task<int?> EnterStructureAsync(long documentId, bool exclusive, CancellationToken ct)
             => inner.EnterStructureAsync(documentId, exclusive, ct);
+
+        public Task EnterHeaderAsync(long documentId, bool exclusive, CancellationToken ct)
+            => inner.EnterHeaderAsync(documentId, exclusive, ct);
     }
 }

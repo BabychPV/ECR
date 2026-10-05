@@ -109,6 +109,19 @@ public sealed class SheetEditGate(EcrDbContext db, SheetEditGatePolicy? policy =
         return version;
     }
 
+    /// <inheritdoc />
+    public async Task EnterHeaderAsync(long documentId, bool exclusive, CancellationToken ct)
+    {
+        var mode = exclusive ? ExclusiveMode : SharedMode;
+        var resource = string.Create(CultureInfo.InvariantCulture, $"ecr:doc-header:{documentId}");
+        var (code, _) = await GetAppLockAsync(resource, mode, versionOfDocument: null, ct).ConfigureAwait(false);
+
+        // ⚠ Хто чекав, той і читає відмову: правка шапки — на подання, подання — на правку шапки.
+        ThrowIfRefused(code, resource, mode, () => DocumentBusy(
+            documentId, mode, code,
+            exclusive ? "err.ECR-DOC-4091.sheetBeingSubmitted" : "err.ECR-DOC-4091.headerBeingEdited"));
+    }
+
     private async Task AcquireAsync(
         long documentId, int sheetDefId, PeriodKey periodKey, string mode, CancellationToken ct)
     {

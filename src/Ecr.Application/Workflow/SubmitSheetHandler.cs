@@ -164,6 +164,12 @@ public sealed class SubmitSheetHandler(
                 // паралельно з переносом версії: перенос або вже зафіксований (і
                 // версію нижче читаємо нову), або чекає на подання.
                 await sheetGate.EnterStructureAsync(documentId, exclusive: false, innerCt).ConfigureAwait(false);
+
+                // ⛔ L6-06: шапка — спільно, після структури й до аркуша. Подання
+                // валідує шапку й кладе її у зріз; правка шапки (виняткове) або
+                // вже зафіксована й подання бачить нову, або чекає на подання й
+                // бачить поданий аркуш. Доти у зріз ішла шапка, яку вже правили.
+                await sheetGate.EnterHeaderAsync(documentId, exclusive: false, innerCt).ConfigureAwait(false);
                 await sheetGate.EnterSubmitAsync(documentId, sheetDefId, key, innerCt).ConfigureAwait(false);
                 await SubmitUnderLockAsync(
                         documentId, sheetDefId, periodKey, key, userId, profile, acknowledgeWarnings, innerCt)

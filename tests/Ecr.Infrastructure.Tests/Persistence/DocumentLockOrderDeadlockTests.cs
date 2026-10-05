@@ -57,7 +57,7 @@ namespace Ecr.Infrastructure.Tests.Persistence;
 /// <c>ChangeDocumentKeyHandler.HandleAsync</c> порядок «документ, потім стани».
 /// </remarks>
 [Collection("SqlServer")]
-public sealed class DocumentLockOrderDeadlockTests(SqlServerFixture sql)
+public sealed partial class DocumentLockOrderDeadlockTests(SqlServerFixture sql)
 {
     private const int UserId = 1;
 
@@ -275,7 +275,7 @@ public sealed class DocumentLockOrderDeadlockTests(SqlServerFixture sql)
             new PatchDocumentHeaderHandler(
                 documents, metadata, headers, access, user, periods,
                 new DocumentKeyStore(db), new DocumentDeletionStore(db), new UnitOfWork(db), new AuditWriter(db),
-                Substitute.For<IBackgroundJobScheduler>(), new FixedClock()));
+                Substitute.For<IBackgroundJobScheduler>(), new FixedClock(), new SheetEditGate(db)));
     }
 
     private static ChangeDocumentKeyHandler BuildChangeKeyHandler(EcrDbContext db, int projectId)
