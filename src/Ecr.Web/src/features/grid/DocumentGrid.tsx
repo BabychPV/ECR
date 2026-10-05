@@ -2246,9 +2246,17 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
       </Modal>
 
       <Modal opened={rejected.length > 0} onClose={() => setRejected([])} title={t('grid.rejectedTitle')}>
-        <Text size="sm" mb="sm">
-          {t('grid.rejectedHint')}
-        </Text>
+        {/* T5-04: вступ відповідає причині; права й неоднозначне число не змішуються. */}
+        {rejected.some((rejection) => rejection.kind === 'guard') && (
+          <Text size="sm" mb="sm">
+            {t('grid.rejectedHint')}
+          </Text>
+        )}
+        {rejected.some((rejection) => rejection.kind === 'ambiguous') && (
+          <Text size="sm" mb="sm">
+            {t('grid.rejectedAmbiguousHint')}
+          </Text>
+        )}
         <List size="sm">
           {rejected.map((rejection) => (
             <List.Item key={cellKey(rejection.rowKey, rejection.columnCode)}>

@@ -146,4 +146,18 @@ describe('DocumentGrid (en): неоднозначне число при вста
     expect(reason.textContent).toContain('C1');
     expect(patched).toEqual([]);
   });
+
+  // T5-04: вступ вікна відмови називав причину «лише для читання» і для
+  // неоднозначного числа — права тут ні до чого.
+  it('вступ вікна для неоднозначного числа — власний, без «лише для читання»', async () => {
+    mockServer(sliceOf([column('C1', 'Decimal', 0)]));
+    show();
+
+    const stub = await screen.findByTestId('revogrid-stub');
+    fireEvent.paste(stub, clipboard('4,125\n'));
+
+    await screen.findByText(/grid\.pasteAmbiguousNumber/);
+    expect(screen.getByText(/grid\.rejectedAmbiguousHint/)).toBeTruthy();
+    expect(screen.queryByText(/grid\.rejectedHint/)).toBeNull();
+  });
 });

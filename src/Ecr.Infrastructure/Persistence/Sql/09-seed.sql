@@ -6599,8 +6599,11 @@ USING (VALUES
     -- COLL:an35b ── AN-35 (L5-11): імпорт CSV: незакрита лапка і не-UTF-8; ru/kz — порцією COLL:an35b у блоці I18N нижче ──
     (N'err.ECR-REG-0422.entriesCsvUnterminatedQuote', N'en', N'The file ends inside quotation marks: a closing quote is missing. Nothing was imported.', 1),
     (N'err.ECR-REG-0422.entriesCsvNotUtf8',   N'en', N'The file is not UTF-8 text (it may be saved in a Windows code page). Save it as CSV UTF-8 and try again.', 1),
-    (N'err.ECR-REQ-0422.uiStringCsvUnterminatedQuote', N'en', N'The file ends inside quotation marks: a closing quote is missing. Nothing was imported.', 1)
+    (N'err.ECR-REQ-0422.uiStringCsvUnterminatedQuote', N'en', N'The file ends inside quotation marks: a closing quote is missing. Nothing was imported.', 1),
     -- COLL:an35b ── кінець секції ──
+    -- COLL:an38t5 ── T5-04: вставка неоднозначного числа — власний вступ вікна відмови, не «лише для читання»; ru/kz — порцією COLL:an38t5 у блоці I18N нижче ──
+    (N'grid.rejectedAmbiguousHint', N'en', N'Nothing from this paste was saved. In English a comma separates thousands, so a number such as 4,125 is ambiguous: enter 4125 or 4.125.', 1)
+    -- COLL:an38t5 ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -15590,6 +15593,16 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:an35b ── кінець секції ──
+-- COLL:an38t5 ── ru/kz T5-04: вступ вікна відмови для неоднозначного числа; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'grid.rejectedAmbiguousHint', N'ru', N'Из этой вставки ничего не сохранено. Число с разделителем неоднозначно: запятая может быть и десятичной, и разделителем тысяч. Запишите число без разделителей тысяч или с десятичным разделителем вашего языка.'),
+    (N'grid.rejectedAmbiguousHint', N'kz', N'Осы қоюдан ештеңе сақталмады. Бөлгіші бар сан бір мағыналы емес: үтір ондық бөлгіш те, мыңдықтар бөлгіші де болуы мүмкін. Санды мыңдықтар бөлгішінсіз немесе тіліңіздің ондық бөлгішімен жазыңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:an38t5 ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t
