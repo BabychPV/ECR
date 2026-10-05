@@ -33,6 +33,14 @@ namespace Ecr.Application.Documents;
 /// ?? rule.Code</c>. Правило, якого в поточному знімку вже немає (видалили
 /// чи перейменували з часу останньої перевірки) — лишає збережений текст:
 /// застаріле речення краще порожнього чи винятку.
+///
+/// ⛔ T2-07 / T3-03 / T4-06: повідомлення двигуна (Check, структурні, зламане
+/// правило) не мають правила в знімку, тож їхній текст раніше лишався мовою
+/// автора запуску. Тепер вони зберігають <c>MessageKey</c> + <c>Params</c>, і
+/// текст збирається тут із каталогу <c>sys_ecr.UiString</c> мовою читача
+/// (<see cref="ValidationMessageTemplates.Localize"/>) — ПІСЛЯ маскування
+/// прихованого: значення джерела Check (лише в <c>Params</c>) недоступному
+/// читачеві не доходять. Старий результат без ключа лишається текстом як є.
 /// </remarks>
 public sealed class GetValidationResultHandler(
     IValidationResultStore results,
@@ -40,7 +48,8 @@ public sealed class GetValidationResultHandler(
     IMetadataCache metadata,
     Security.IAccessDecisionService access,
     Common.ICurrentUser currentUser,
-    ITemplateVersionStore templateVersions)
+    ITemplateVersionStore templateVersions,
+    IUiStringCatalog uiStrings)
 {
     private static bool IsLegacyCheck(ValidationMessage m)
         => m.SourceTableDefId is null && m.RuleCode.StartsWith("REL-", StringComparison.Ordinal);
@@ -154,12 +163,20 @@ public sealed class GetValidationResultHandler(
 
         var language = currentUser.Language;
 
+        // ⛔ T2-07 / T3-03 / T4-06: повідомлення двигуна (Check, структурні, зламане правило) зберігають
+        // `MessageKey` + `Params` — текст збирається ТУТ мовою читача з каталогу. Маскування прихованого
+        // вже відбулося вище: значення недоступного джерела (лише в `Params`) сюди не доходять. Старий
+        // збережений результат без ключа лишає текст як є.
+        var catalog = messages.Any(m => m.MessageKey is not null)
+            ? await uiStrings.GetAsync(language, ct).ConfigureAwait(false)
+            : null;
+
         return messages
             .Select(m => rulesByKey.TryGetValue((m.TableDefId, m.RuleCode), out var rule)
                 ? m with { Message = rule.MessageL10n.Get(language) ?? rule.Code }
                 // Правило видалили/перейменували з часу останньої перевірки —
                 // лишаємо збережений текст (запасний варіант, не виняток).
-                : m)
+                : ValidationMessageTemplates.Localize(m, language, catalog))
             .ToList();
     }
 }

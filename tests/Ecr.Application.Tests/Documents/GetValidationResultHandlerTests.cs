@@ -45,7 +45,9 @@ public sealed class GetValidationResultHandlerTests
             .Returns(TemplateVersionId);
     }
 
-    private GetValidationResultHandler Handler() => new(_results, _documents, _metadata, _access, _user, _versions);
+    private readonly IUiStringCatalog _catalog = Substitute.For<IUiStringCatalog>();
+
+    private GetValidationResultHandler Handler() => new(_results, _documents, _metadata, _access, _user, _versions, _catalog);
 
     private static SheetDef SheetWithRule(string ruleCode, LocalizedText message)
     {
@@ -134,6 +136,115 @@ public sealed class GetValidationResultHandlerTests
         var message = Assert.Single(result!);
         // Запасний варіант: збережений текст, БЕЗ винятку.
         Assert.Equal("Застаріле повідомлення", message.Message);
+    }
+
+    private static Dictionary<string, string> CheckParams() => new Dictionary<string, string>
+    {
+        ["left"] = "QTY", ["leftValue"] = "50", ["right"] = "QTY", ["rightValue"] = "100.5",
+        ["deviation"] = "50.5", ["allowed"] = "1.005", ["kind"] = "rel",
+    };
+
+    // Збережено автором запуску мовою ru: готовий текст — лише запасний, ключ + підстановки — джерело правди.
+    private static ValidationMessage StoredCheck() => StoredMessage("REL-CHK1", "Сверка: QTY = 50 не сходится с QTY = 100.5: отклонение 50.5, допустимо 1.005 (rel).")
+        with
+    {
+        Severity = ValidationSeverity.Warning,
+        BlocksSave = false,
+        MessageKey = ValidationMessageTemplates.CheckMismatch,
+        Params = CheckParams(),
+    };
+
+    private void StoreAndSnapshot(params ValidationMessage[] stored)
+    {
+        _results.GetLatestAsync(DocumentId, Period, Arg.Any<CancellationToken>())
+            .Returns(new ValidationSummary(DocumentId, Period, DateTime.UtcNow, 0, 1, 0, JsonSerializer.Serialize(stored.ToList())));
+        SetSnapshot(SheetWithRule("REQ", Text("Field is required")));
+    }
+
+    [Theory]
+    [InlineData("en", "Check: QTY = 50 does not match QTY = 100.5: deviation 50.5, allowed 1.005 (rel).")]
+    [InlineData("ru", "Сверка: QTY = 50 не сходится с QTY = 100.5: отклонение 50.5, допустимо 1.005 (rel).")]
+    [InlineData("kz", "Салыстыру: QTY = 50 мәні QTY = 100.5 мәніне сәйкес келмейді: ауытқу 50.5, рұқсат етілгені 1.005 (rel).")]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "T2-07")]
+    public async Task Check_зберігається_з_ключем_і_віддається_мовою_читача_а_не_автора(string reader, string expected)
+    {
+        StoreAndSnapshot(StoredCheck());
+        _user.Language.Returns(reader);
+
+        // Каталог без ключа (сід не накочено): працюють запасні шаблони коду.
+        _catalog.GetAsync(reader, Arg.Any<CancellationToken>()).Returns(new UiStringCatalog(reader, 1, new Dictionary<string, string>()));
+
+        var result = await Handler().HandleAsync(DocumentId, new PeriodKey(Period), CancellationToken.None);
+
+        Assert.Equal(expected, Assert.Single(result!).Message);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "T2-07")]
+    public async Task Текст_каталогу_мовою_читача_має_пріоритет_над_запасним_шаблоном()
+    {
+        StoreAndSnapshot(StoredCheck());
+        _user.Language.Returns("kz");
+        _catalog.GetAsync("kz", Arg.Any<CancellationToken>()).Returns(new UiStringCatalog("kz", 1, new Dictionary<string, string>
+        {
+            [ValidationMessageTemplates.CheckMismatch] = "ADMIN {left}={leftValue} vs {right}={rightValue} ({kind})",
+        }));
+
+        var result = await Handler().HandleAsync(DocumentId, new PeriodKey(Period), CancellationToken.None);
+
+        Assert.Equal("ADMIN QTY=50 vs QTY=100.5 (rel)", Assert.Single(result!).Message);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "T2-07")]
+    public async Task Структурне_повідомлення_про_обовязкову_колонку_віддається_мовою_читача()
+    {
+        var stored = StoredMessage("ECR-CELL-0422", "Column \"QTY\" is required.") with
+        {
+            MessageKey = ValidationMessageTemplates.ColumnRequired,
+            Params = new Dictionary<string, string> { ["column"] = "QTY" },
+        };
+        StoreAndSnapshot(stored);
+        _user.Language.Returns("ru");
+        _catalog.GetAsync("ru", Arg.Any<CancellationToken>()).Returns(new UiStringCatalog("ru", 1, new Dictionary<string, string>()));
+
+        var result = await Handler().HandleAsync(DocumentId, new PeriodKey(Period), CancellationToken.None);
+
+        Assert.Equal("Колонка «QTY» обязательна.", Assert.Single(result!).Message);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "T2-07")]
+    public async Task Старий_результат_без_ключа_віддається_текстом_як_раніше_і_каталог_не_читається()
+    {
+        StoreAndSnapshot(StoredMessage("REL-CHK1", "Сверка: старий текст"));
+        _user.Language.Returns("en");
+
+        var result = await Handler().HandleAsync(DocumentId, new PeriodKey(Period), CancellationToken.None);
+
+        Assert.Equal("Сверка: старий текст", Assert.Single(result!).Message);
+        await _catalog.DidNotReceive().GetAsync(Arg.Any<string>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "T2-07")]
+    public void Формат_збереження_зворотно_сумісний_старий_JSON_читається_новий_несе_ключ_і_підстановки()
+    {
+        // JSON, записаний ДО змін: жодних полів MessageKey/Params.
+        const string legacyJson = """[{"Severity":2,"RuleCode":"REL-X","Message":"old","TableDefId":3,"RowKey":"R1","ColumnCode":"C","BlocksSave":false}]""";
+        var legacy = JsonSerializer.Deserialize<List<ValidationMessage>>(legacyJson)!;
+        Assert.Equal("old", Assert.Single(legacy).Message);
+        Assert.Null(legacy[0].MessageKey);
+        Assert.Null(legacy[0].Params);
+
+        var round = JsonSerializer.Deserialize<List<ValidationMessage>>(JsonSerializer.Serialize(new List<ValidationMessage> { StoredCheck() }))!;
+        Assert.Equal(ValidationMessageTemplates.CheckMismatch, round[0].MessageKey);
+        Assert.Equal("100.5", round[0].Params!["rightValue"]);
     }
 
     [Fact]
