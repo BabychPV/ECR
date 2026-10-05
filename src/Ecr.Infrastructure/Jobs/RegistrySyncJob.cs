@@ -1096,7 +1096,7 @@ public sealed class RegistrySyncJob(
     /// <remarks>
     /// ⛔ AN-34 L4-11: запит мусить іти індексом <c>IX_CollectionCoverage_RegistryEvents</c>
     /// (<c>(SourceEntityId, Id)</c>, фільтр <c>Status IS NOT NULL AND PeriodKey IS NULL</c>,
-    /// <c>INCLUDE (Status, Details)</c>), а не сканом усього журналу: єдиний інший індекс за
+    /// <c>INCLUDE (Status, PeriodKey, Details)</c>), а не сканом усього журналу: єдиний інший індекс за
     /// сутністю має фільтр <c>Status IS NULL</c> і подій не бачить. Умови
     /// <c>PeriodKey == null</c> і <c>Status != null</c> збігаються з фільтром індексу дослівно -
     /// без них оптимізатор не має права його брати. Мітка - щоб план знайшов

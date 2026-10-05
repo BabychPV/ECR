@@ -34,7 +34,9 @@ namespace Ecr.Infrastructure.Tests.Jobs;
 /// <para>
 /// ⛔ Мутація, що валить тест: прибрати <c>IX_CollectionCoverage_RegistryEvents</c> з
 /// <c>CollectionCoverageConfiguration</c> і міграції - у плані лишається скан
-/// <c>PK_CollectionCoverage</c>. Червоним він був і ДО коміту схеми.
+/// <c>PK_CollectionCoverage</c>. Червоним він був і ДО коміту схеми. Прибрати з INCLUDE
+/// <c>PeriodKey</c> - у плані з'являється <c>Clustered Index Seek [PK_CollectionCoverage]</c>
+/// (Key Lookup лише заради <c>PeriodKey IS NULL</c>): перевірено, червоний.
 /// </para>
 /// </remarks>
 [Collection("SqlServer")]
