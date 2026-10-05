@@ -29855,7 +29855,7 @@
             "description": "Unprocessable Entity"
           }
         },
-        "summary": "Зберігає чернетку опису; опублікований опис не змінюється. Право\n`Registry.EditDefinition` (`BE-24`).",
+        "summary": "Зберігає чернетку опису; опублікований опис не змінюється. Право\n`Registry.EditDefinition` (`BE-24`). Потребує заголовок `If-Match` з\n`definitionVersion` опису, з якого збудовано форму: без нього `422 ECR-REQ-0422`\n(`definitionVersionRequired`), інша версія — `409 ECR-REG-0409` (`definitionChanged`).",
         "tags": [
           "Registries"
         ]

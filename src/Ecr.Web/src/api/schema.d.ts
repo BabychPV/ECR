@@ -9148,7 +9148,9 @@ export interface paths {
             };
         };
         /** Зберігає чернетку опису; опублікований опис не змінюється. Право
-         *     `Registry.EditDefinition` (`BE-24`). */
+         *     `Registry.EditDefinition` (`BE-24`). Потребує заголовок `If-Match` з
+         *     `definitionVersion` опису, з якого збудовано форму: без нього `422 ECR-REQ-0422`
+         *     (`definitionVersionRequired`), інша версія — `409 ECR-REG-0409` (`definitionChanged`). */
         put: {
             parameters: {
                 query?: never;
