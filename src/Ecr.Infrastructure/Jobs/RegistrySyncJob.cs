@@ -129,6 +129,9 @@ public sealed class RegistrySyncJob(
     /// <summary>Префікс ключа дедупу в <c>Details</c> події.</summary>
     public const string DedupKeyPrefix = "; key=";
 
+    /// <summary>Мітка запиту дедупу (<see cref="DedupJournal"/>) - за нею тест знаходить його план у кеші.</summary>
+    public const string DedupJournalTag = "ecr:registry-sync-dedup";
+
     /// <summary>Ключ каталогу: GUID елемента вже прив'язаний у цьому джерелі до іншого запису.</summary>
     public const string ExternalKeyTakenKey = "err.ECR-REG-0409.externalKeyTaken";
 
@@ -159,6 +162,11 @@ public sealed class RegistrySyncJob(
         var registryDefId = entity.RegistryDefId
                             ?? throw new InvalidOperationException(
                                 $"Сутність джерела {sourceEntityId} не прив'язана до довідника: синк довідника їй не належить.");
+
+        // L4-08: синк одного довідника цього з'єднання не виконується двічі одночасно (розклад + ручне
+        // «Зібрати»): дві задачі з однаковим GUID у знімку створили б дубль запису й впали б на
+        // UQ_RegistryExternalKey. Лок на окремому з'єднанні, поза транзакцією; зайнято - відкладення.
+        await using var gate = await AcquireGateAsync(entity.DataSourceId, registryDefId, ct).ConfigureAwait(false);
 
         var dataSource = await db.DataSources
                              .AsNoTracking()
@@ -209,11 +217,16 @@ public sealed class RegistrySyncJob(
         // перепривʼязати його означало б порушити UQ_RegistryExternalKey або вкрасти чужий зв'язок.
         var foreign = await ForeignAsync(dataSource.Id, snapshot.Elements, links, ct).ConfigureAwait(false);
 
+        // L4-02: запобіжник «порожній знімок» — ПІСЛЯ відсіювання чужих елементів. Знімок лише з елементів
+        // іншого довідника для цього довідника порожній, і «зникли всі зв'язки» від нього — хибне.
+        var own = snapshot.Elements.Where(e => !foreign.Contains(e.ExternalId)).ToList();
+        var complete = snapshot.IsComplete && (own.Count > 0 || links.Count == 0);
+
         var input = new RegistrySyncInput(
             registryDefId,
             registry.SourceKind,
-            snapshot.IsComplete,
-            [.. snapshot.Elements.Where(e => !foreign.Contains(e.ExternalId))],
+            complete,
+            own,
             links,
             entries,
             mappings,
@@ -224,6 +237,26 @@ public sealed class RegistrySyncJob(
         // D-212 (5): коди записів інших довідників → Id, одним запитом на довідник.
         var lookupCodes = await ResolveCodesAsync(RegistrySyncPlanner.LookupCodes(input), ct).ConfigureAwait(false);
         var plan = RegistrySyncPlanner.Plan(input with { LookupCodes = lookupCodes });
+
+        // L4-02: масове зникнення — ознака збою джерела чи хибного кореня, а не «усе щойно видалили».
+        // Межа та сама, що в SourceEventSyncJob: max(10, 20 % зв'язків) і не більше 200 за прогін.
+        var removals = plan.MissingMarks.Select(m => m.ExternalId)
+            .Concat(plan.Deactivations.Select(d => d.ExternalId))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        SyncEvent? removalRefusal = null;
+        if (SourceEventSyncJob.ExceedsRemovalLimit(removals.Count, links.Count, out var removalLimit))
+        {
+            var skipped = removals.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            plan = plan with
+            {
+                MissingMarks = [],
+                Deactivations = [],
+                Events = [.. plan.Events.Where(e => e.Kind != RegistrySyncEventKind.SourceMissing
+                                                    || e.ExternalId is null || !skipped.Contains(e.ExternalId))],
+            };
+            removalRefusal = RemovalLimit(removals.Count, removalLimit, links.Count);
+        }
 
         var context = new ApplyContext(registryDefId, registry.Code, dataSource.Id, now, links, plan.MissingMarks);
         var events = new List<SyncEvent>();
@@ -237,6 +270,10 @@ public sealed class RegistrySyncJob(
         events.AddRange(plan.Events.Select(e => e.Kind == RegistrySyncEventKind.SourceMissing
             ? Event(e, context.SinceOf(e.ExternalId))
             : Event(e)));
+        if (removalRefusal is not null)
+        {
+            events.Add(removalRefusal);
+        }
 
         if (registry.SourceKind is RegistrySourceKind.External or RegistrySourceKind.Hybrid)
         {
@@ -981,7 +1018,8 @@ public sealed class RegistrySyncJob(
                 join entry in db.RegistryEntries.AsNoTracking() on key.RegistryEntryId equals entry.Id
                 where key.DataSourceId == dataSourceId && entry.RegistryDefId == registryDefId
                 orderby key.Id
-                select new RegistrySyncLink(key.ExternalId, key.RegistryEntryId, key.ExternalPath, key.MissingInSourceSince))
+                select new RegistrySyncLink(
+                    key.ExternalId, key.RegistryEntryId, key.ExternalPath, key.MissingInSourceSince, entry.IsDeleted))
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
@@ -1053,6 +1091,36 @@ public sealed class RegistrySyncJob(
     }
 
     /// <summary>
+    /// Журнал подій синку цієї сутності з ключем дедупу в <c>Details</c>, у порядку <c>Id</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ AN-34 L4-11: запит мусить іти індексом <c>IX_CollectionCoverage_RegistryEvents</c>
+    /// (<c>(SourceEntityId, Id)</c>, фільтр <c>Status IS NOT NULL AND PeriodKey IS NULL</c>,
+    /// <c>INCLUDE (Status, PeriodKey, Details)</c>), а не сканом усього журналу: єдиний інший індекс за
+    /// сутністю має фільтр <c>Status IS NULL</c> і подій не бачить. Умови
+    /// <c>PeriodKey == null</c> і <c>Status != null</c> збігаються з фільтром індексу дослівно -
+    /// без них оптимізатор не має права його брати. Мітка - щоб план знайшов
+    /// <c>RegistrySyncDedupPlanTests</c>.
+    /// </remarks>
+    public static IQueryable<string> DedupJournal(EcrDbContext db, int sourceEntityId)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+
+        var statuses = CollectionCoverage.RegistryStatuses.ToList();
+        return db.CollectionCoverages
+            .TagWith(DedupJournalTag)
+            .AsNoTracking()
+            .Where(c => c.SourceEntityId == sourceEntityId
+                        && c.PeriodKey == null
+                        && c.Status != null
+                        && statuses.Contains(c.Status)
+                        && c.Details != null
+                        && c.Details.Contains(DedupKeyPrefix))
+            .OrderBy(c => c.Id)
+            .Select(c => c.Details!);
+    }
+
+    /// <summary>
     /// Відкидає події, для яких ОСТАННЯ подія того самого предмета цієї сутності має те саме
     /// значення. Один запит на прогін.
     /// </summary>
@@ -1063,17 +1131,7 @@ public sealed class RegistrySyncJob(
             return events;
         }
 
-        var statuses = CollectionCoverage.RegistryStatuses.ToList();
-        var journal = await db.CollectionCoverages
-            .AsNoTracking()
-            .Where(c => c.SourceEntityId == sourceEntityId
-                        && c.PeriodKey == null
-                        && c.Status != null
-                        && statuses.Contains(c.Status)
-                        && c.Details != null
-                        && c.Details.Contains(DedupKeyPrefix))
-            .OrderBy(c => c.Id)
-            .Select(c => c.Details!)
+        var journal = await DedupJournal(db, sourceEntityId)
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
@@ -1174,6 +1232,11 @@ public sealed class RegistrySyncJob(
             parts.Add($"messageKey={e.MessageKey}");
         }
 
+        if (e.Reason is not null)
+        {
+            parts.Add($"reason={e.Reason}");
+        }
+
         var sinceText = since is { } moment ? $"since={Moment(moment)}" : null;
         if (sinceText is not null)
         {
@@ -1184,8 +1247,8 @@ public sealed class RegistrySyncJob(
         // робить незмінне джерело новою подією.
         var subject = $"element={e.ExternalId}; entry={e.RegistryEntryId}; field={e.FieldCode}";
         var value = e.FieldCode is null
-            ? sinceText ?? string.Empty
-            : $"source={Text(e.SourceValue)}; error={e.ErrorCode}; messageKey={e.MessageKey}";
+            ? sinceText ?? (e.Reason is null ? string.Empty : $"reason={e.Reason}")
+            :$"source={Text(e.SourceValue)}; error={e.ErrorCode}; messageKey={e.MessageKey}";
 
         return new SyncEvent(status, string.Join("; ", parts), KeyOf(status, subject, value));
     }
@@ -1219,6 +1282,41 @@ public sealed class RegistrySyncJob(
                 status,
                 $"entry={entry}; rule={v.Rule}",
                 $"severity={v.Severity}; messageKey={v.MessageKey}; message={message}; value={valueParam}"));
+    }
+
+    /// <summary>Ім'я applock-а синку довідника: одне з'єднання - один довідник.</summary>
+    public static string LockResource(int dataSourceId, int registryDefId)
+        => string.Create(CultureInfo.InvariantCulture, $"ecr.registry-sync:{dataSourceId}:{registryDefId}");
+
+    /// <summary>Лок синку; <c>null</c> - не SQL Server (тести на провайдері пам'яті). Зайнято - <see cref="JobDeferredException"/>.</summary>
+    private async Task<SqlDistributedLock?> AcquireGateAsync(int dataSourceId, int registryDefId, CancellationToken ct)
+    {
+        if (!db.Database.IsSqlServer() || db.Database.GetConnectionString() is not { } connectionString)
+        {
+            return null;
+        }
+
+        var resource = LockResource(dataSourceId, registryDefId);
+
+        return await SqlDistributedLock.TryAcquireAsync(connectionString, resource, ct).ConfigureAwait(false)
+               ?? throw new JobDeferredException(
+                   TimeSpan.FromSeconds(30), "Синк довідника вже виконується; відкладено на 30 с.", resource);
+    }
+
+    /// <summary>
+    /// Зникнення НЕ застосовано: їх більше за межу прогону (L4-02). Одна подія на довідник; значення
+    /// ключа дедупу — з кількостей, тож незмінний стан не повторюється щопрогону.
+    /// </summary>
+    private static SyncEvent RemovalLimit(int candidates, int limit, int links)
+    {
+        var status = CollectionCoverage.RegistrySourceMissing;
+
+        return new SyncEvent(
+            status,
+            $"element=—; reason=removalLimit; candidates={candidates.ToString(CultureInfo.InvariantCulture)}; "
+            + $"limit={limit.ToString(CultureInfo.InvariantCulture)}; links={links.ToString(CultureInfo.InvariantCulture)}; "
+            + "not applied (too many elements missing)",
+            KeyOf(status, "removalLimit", $"candidates={candidates}; limit={limit}; links={links}"));
     }
 
     /// <summary>Елемент з GUID, прив'язаним до запису іншого довідника цього джерела.</summary>

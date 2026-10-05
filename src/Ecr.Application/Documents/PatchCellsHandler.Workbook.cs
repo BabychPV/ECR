@@ -47,11 +47,20 @@ public sealed partial class PatchCellsHandler
     /// <see cref="IBackgroundJobScheduler.EnlistsInCallerTransaction"/> (MI-02 (в)).
     /// Колекція, а не прапорець: викликач не відновлює перелік змінених комірок сам.
     /// </param>
+    /// <param name="rowWindowChanges">
+    /// Змінені колонки кожного записаного екземпляра для хука вікон рядків (HSE301 A1).
+    /// Хук цей метод НЕ кличе: транзакцію тримає викликач, і задача, поставлена до
+    /// коміту, підтягнула б вікна за даними, яких після відкату не було (L6-11).
+    /// Викликач передає перелік у <see cref="NotifyRowWindowsAsync"/> ПІСЛЯ коміту.
+    /// </param>
     /// <param name="ct">Скасування.</param>
     /// <param name="heldSheetStatuses">
     /// Стани аркушів (<c>SheetDefId</c> → стан), які викликач УЖЕ прочитав під
     /// спільним блокуванням <see cref="ISheetEditGate.EnterEditAsync"/> у ЦІЙ САМІЙ
     /// транзакції (<c>ExcelImporter</c>); <c>null</c> — взяти й прочитати тут.
+    /// ⚠ Не <c>null</c> означає й те, що викликач уже тримає спільне блокування
+    /// структури документа (<see cref="ISheetEditGate.EnterStructureAsync"/>, L6-02)
+    /// і звірив під ним версію шаблону.
     /// </param>
     /// <returns>Відповідь на кожен батч — у порядку <paramref name="requests"/>.</returns>
     /// <remarks>
@@ -63,11 +72,13 @@ public sealed partial class PatchCellsHandler
     public async Task<IReadOnlyList<PatchCellsResponse>> HandleWorkbookAsync(
         IReadOnlyList<PatchCellsRequest> requests,
         ICollection<RecalculationSeed> recalculationSeeds,
+        ICollection<RowWindowChange> rowWindowChanges,
         CancellationToken ct,
         IReadOnlyDictionary<int, Domain.Enums.DocumentStatus>? heldSheetStatuses = null)
     {
         ArgumentNullException.ThrowIfNull(requests);
         ArgumentNullException.ThrowIfNull(recalculationSeeds);
+        ArgumentNullException.ThrowIfNull(rowWindowChanges);
 
         if (requests.Count == 0)
         {
@@ -83,6 +94,7 @@ public sealed partial class PatchCellsHandler
         foreach (var request in requests)
         {
             Blamed(request.TableInstanceId, request.EnsureWithinCellLimit);
+            Blamed(request.TableInstanceId, request.EnsureNoDuplicates);
         }
 
         var userId = ResolveUserId();
@@ -147,20 +159,9 @@ public sealed partial class PatchCellsHandler
                 recalculationSeeds.Add(seed);
             }
 
-            // HSE301 A1: імпорт книги — та сама єдина точка, що й у HandleAsync; після запису, один виклик на таблицю.
-            if (rowWindows is not null)
-            {
-                var instance = item.Context.Instance;
-                await rowWindows
-                    .RowsChangedAsync(
-                        new RowWindowChange(
-                            instance.TableInstanceId,
-                            instance.PeriodKey,
-                            instance.TableDefId,
-                            [.. applied.Upserts.Select(u => u.Address.ColumnDefId).Concat(applied.Deletes.Select(d => d.ColumnDefId)).Distinct()]),
-                        ct)
-                    .ConfigureAwait(false);
-            }
+            // HSE301 A1: одна зміна на таблицю; хук кличе викликач після коміту (L6-11).
+            rowWindowChanges.Add(ChangedColumns(item.Context.Instance, applied));
+
             var versions = (IReadOnlyDictionary<string, string>?)MergedRowVersions(item.Context, applied)
                            ?? await rowStore.GetRowVersionsAsync(item.Id, period, ct).ConfigureAwait(false);
             responses.Add(ToResponse(
@@ -168,6 +169,33 @@ public sealed partial class PatchCellsHandler
         }
 
         return responses;
+    }
+
+    /// <summary>
+    /// Передає хукові вікон рядків зміни, зібрані <see cref="HandleWorkbookAsync"/>, — після коміту.
+    /// </summary>
+    /// <param name="changes">Зміни з <c>rowWindowChanges</c> книжкового шляху.</param>
+    /// <param name="ct">Скасування.</param>
+    /// <returns>Завершення.</returns>
+    /// <remarks>
+    /// ⛔ L6-11: до цього книжковий шлях кликав хук сам — усередині транзакції
+    /// <c>ExcelImporter</c>, тобто ДО коміту: Quartz у пам'яті стартував
+    /// підтягування раніше, ніж дані ставали видимими, а відкат книги лишав
+    /// поставлену задачу.
+    /// </remarks>
+    public async Task NotifyRowWindowsAsync(IEnumerable<RowWindowChange> changes, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(changes);
+
+        if (rowWindows is null)
+        {
+            return;
+        }
+
+        foreach (var change in changes)
+        {
+            await rowWindows.RowsChangedAsync(change, ct).ConfigureAwait(false);
+        }
     }
 
     /// <summary>Перевірки й запис непорожніх батчів книги — етап за етапом.</summary>
@@ -430,6 +458,20 @@ public sealed partial class PatchCellsHandler
         IReadOnlyDictionary<int, Domain.Enums.DocumentStatus>? heldSheetStatuses,
         CancellationToken ct)
     {
+        // ⛔ L6-02: структура документа — до блокувань аркушів, той самий порядок,
+        // що в поштучного. Викликач, що передав `heldSheetStatuses`
+        // (`ExcelImporter`), уже взяв її першою дією своєї транзакції й звірив
+        // версію — тоді другого звернення немає.
+        if (heldSheetStatuses is null)
+        {
+            var locked = await sheetGate.EnterStructureAsync(documentId, exclusive: false, ct).ConfigureAwait(false);
+            foreach (var item in active)
+            {
+                Blamed(item.Id, () => DocumentStructure.EnsureUnchanged(
+                    locked, item.Context.Instance.TemplateVersionId, documentId));
+            }
+        }
+
         var statuses = new Dictionary<int, Domain.Enums.DocumentStatus>();
         foreach (var sheet in active.GroupBy(x => x.Context.Table.SheetDefId).OrderBy(g => g.Key))
         {
@@ -437,6 +479,17 @@ public sealed partial class PatchCellsHandler
             {
                 if (sheet.Any(x => CreatesRowsUnderCeiling(x.Context)))
                 {
+                    // ⛔ L6-08: викликач уже тримає СПІЛЬНЕ блокування цього аркуша
+                    // (`heldSheetStatuses`). Виняткове поверх нього — перетворення
+                    // блокування, і два такі власники чекали б один на одного
+                    // (прихований дедлок). Такий виклик — помилка викликача, а не стан.
+                    if (heldSheetStatuses is not null)
+                    {
+                        throw new InvalidOperationException(
+                            $"Книга створює рядки в таблиці зі стелею на аркуші {sheet.Key}, а викликач уже тримає " +
+                            "спільне блокування аркуша: виняткове поверх нього — прихований дедлок.");
+                    }
+
                     await sheetGate.EnterSubmitAsync(documentId, sheet.Key, period, ct).ConfigureAwait(false);
                 }
 

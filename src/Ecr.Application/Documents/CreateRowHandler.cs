@@ -205,6 +205,12 @@ public sealed class CreateRowHandler(
         Ports.TableInstanceRef instance, TableDef table, long tableInstanceId, RowKey key,
         AccessProfile profile, CancellationToken ct)
     {
+        // ⛔ L6-02: структура документа — першою, до блокування аркуша.
+        DocumentStructure.EnsureUnchanged(
+            await sheetGate.EnterStructureAsync(instance.DocumentId, exclusive: false, ct).ConfigureAwait(false),
+            instance.TemplateVersionId,
+            instance.DocumentId);
+
         await sheetGate
             .EnterSubmitAsync(instance.DocumentId, table.SheetDefId, PeriodKeyOf(instance), ct)
             .ConfigureAwait(false);

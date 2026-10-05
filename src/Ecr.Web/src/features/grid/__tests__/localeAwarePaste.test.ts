@@ -141,6 +141,7 @@ describe('planPaste: неоднозначне число відхиляєтьс�
     expect(plan.rejected[0]?.columnCode).toBe('C1');
     expect(plan.rejected[0]?.reason).toContain('1,234');
     expect(plan.rejected[0]?.reason).toContain('grid.pasteAmbiguousNumber');
+    expect(plan.rejected[0]?.kind).toBe('ambiguous');
   });
 
   it('uk: той самий буфер вставляється, і значення — 1.234', () => {

@@ -55,10 +55,9 @@ namespace Ecr.Application.Templates;
 /// <see cref="ITemplateVersionStore.ListPeriodAccessRulesAsync"/>
 /// (<c>AsNoTracking</c>, без кешу) — так само робить і
 /// <c>GetAccessMatrixHandler</c>. Інвалідація кешу, якого правила ніколи не
-/// торкаються, нічого не змінила б: той самий висновок, з якого
-/// <c>SaveTableRelationHandler</c>/<c>DeleteTableRelationHandler</c> теж не
-/// викликають <c>InvalidateAsync</c> — <c>TableRelationDef</c> так само
-/// повз кеш.
+/// торкаються, нічого не змінила б. ⚠ Зв'язки (<c>TableRelationDef</c>) — навпаки, у кеш входять
+/// (<c>HasActiveRollupOrCheck</c>), тому <c>SaveTableRelationHandler</c> і
+/// <c>DeleteTableRelationHandler</c> інвалідацію викликають (T6-01).
 /// </remarks>
 public static class PeriodAccessRuleMapper
 {

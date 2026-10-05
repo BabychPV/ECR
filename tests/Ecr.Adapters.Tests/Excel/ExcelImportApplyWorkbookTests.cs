@@ -47,8 +47,10 @@ public sealed class ExcelImportApplyWorkbookTests(SqlServerFixture sql) : IDispo
     /// для <c>IsLateEdit</c> на спільному книжковому шляху запису (те саме +1,
     /// що в <c>PatchCellsWorkbookTests</c>: 26 → 27); від кількості таблиць не
     /// залежить — рівність 3 = 12 перевіряється окремо вище.
+    /// 21 — L6-02: блокування структури документа з версією шаблону одним
+    /// пакетом, першою дією транзакції книги (книжковий шлях його не повторює).
     /// </summary>
-    private const long ApplyExecutions = 20;
+    private const long ApplyExecutions = 21;
 
     private static readonly DateTime Now = new(2026, 10, 15, 10, 0, 0, DateTimeKind.Utc);
 

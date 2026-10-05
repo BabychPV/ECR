@@ -1,6 +1,7 @@
 // tests/Ecr.Application.Tests/Sources/SourceEntityHandlersTests.cs
 using Ecr.Application.Common;
 using Ecr.Application.Errors;
+using Ecr.Application.Integration;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
 using Ecr.Application.Sources;
@@ -37,6 +38,7 @@ public sealed class SourceEntityHandlersTests
     private readonly IUnitOfWork _uow = Substitute.For<IUnitOfWork>();
     private readonly IAuditWriter _audit = Substitute.For<IAuditWriter>();
     private readonly IClock _clock = Substitute.For<IClock>();
+    private readonly ISourceCatalogReader _catalog = Substitute.For<ISourceCatalogReader>();
 
     public SourceEntityHandlersTests()
     {
@@ -61,9 +63,17 @@ public sealed class SourceEntityHandlersTests
 
         _sources.FindSourceEntityAsync(EntityId, Arg.Any<CancellationToken>()).Returns(_entity);
         _sources.RegistryDefExistsAsync(RegistryId, Arg.Any<CancellationToken>()).Returns(true);
+
+        // Корінь каталогу з'єднання — база AF \\AF\ECR (L9-27); шляхи команд за замовчуванням — у ній.
+        _catalog.BrowseAsync(Arg.Any<int>(), null, Arg.Any<CancellationToken>())
+            .Returns([Root(@"\\AF\ECR\Area_1"), Root(@"\\af\ecr\Area_2")]);
     }
 
-    private CreateSourceEntityHandler Create() => new(_sources, _dataSources, _access, _user, _uow, _audit, _clock);
+    private CreateSourceEntityHandler Create()
+        => new(_sources, _dataSources, _access, _user, _uow, _audit, _clock, _catalog, new SourceCatalogPolicy(TimeSpan.FromSeconds(5)));
+
+    private static SourceEntityDescriptor Root(string path)
+        => new(path[(path.LastIndexOf('\\') + 1)..], null, path, SourceUnitSymbol: null, DataType: "Element");
 
     private BindSourceEntityRegistryHandler Bind() => new(_sources, _access, _user, _uow, _audit, _clock);
 
@@ -249,6 +259,48 @@ public sealed class SourceEntityHandlersTests
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
     [Trait("Requirement", "ФВ-8.11")]
+    [Trait("Directive", "AN-34-L4-01")]
+    public async Task Прив_язка_до_довідника_що_вже_тримає_інша_сутність_з_єднання_дає_409_і_не_пише()
+    {
+        // Мутація (2026-10-05): прибрати перевірку RegistryBoundByOtherEntityAsync з
+        // BindSourceEntityRegistryHandler - тест червоний (прив'язка записана).
+        // ⚠ Id підробленої сутності 0 (її не записувала база), тож «крім неї» - будь-яке число.
+        _sources.RegistryBoundByOtherEntityAsync(DataSourceId, RegistryId, Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(true);
+
+        var ex = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Bind().HandleAsync(EntityId, RegistryId, CancellationToken.None));
+
+        Assert.Equal(ErrorCodes.EntityFieldMapStateConflict, ex.ErrorCode);
+        Assert.Equal("err.ECR-INT-0409.registryAlreadyBound", ex.Details!["messageKey"]);
+        Assert.Equal(RegistryId.ToString(System.Globalization.CultureInfo.InvariantCulture), ex.Details!["registryDefId"]);
+        Assert.Null(_entity.RegistryDefId);
+        await _sources.DidNotReceive().SaveSourceEntityAsync(Arg.Any<SourceEntity>(), Arg.Any<CancellationToken>());
+        await _audit.DidNotReceiveWithAnyArgs().WriteStructureChangeAsync(default!, default);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "ФВ-8.11")]
+    [Trait("Directive", "AN-34-L4-01")]
+    public async Task Повторна_прив_язка_до_свого_довідника_і_відв_язка_не_питають_про_чужу_прив_язку()
+    {
+        // Своя наявна прив'язка не конфліктує сама з собою, а відв'язка нічого не займає.
+        _entity.BindRegistry(RegistryId);
+        _sources.RegistryBoundByOtherEntityAsync(Arg.Any<int>(), Arg.Any<int>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(true);
+
+        var same = await Bind().HandleAsync(EntityId, RegistryId, CancellationToken.None);
+        var unbound = await Bind().HandleAsync(EntityId, null, CancellationToken.None);
+
+        Assert.Equal(RegistryId, same.RegistryDefId);
+        Assert.Null(unbound.RegistryDefId);
+        await _sources.DidNotReceiveWithAnyArgs().RegistryBoundByOtherEntityAsync(default, default, default, default);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "ФВ-8.11")]
     public async Task Прив_язка_неіснуючої_сутності_дає_404()
     {
         var ex = await Assert.ThrowsAsync<NotFoundException>(
@@ -331,6 +383,73 @@ public sealed class SourceEntityHandlersTests
 
         Assert.Equal(Other, moved.RegistryDefId);
     }
+
+    /// <summary>
+    /// AN-40 / L9-27: шлях AF з бази, якої немає в корені каталогу з'єднання, — 422 і нічого не записано.
+    /// </summary>
+    /// <remarks>
+    /// Мутація (лише локально): в <c>RequirePathOfSourceAsync</c> завжди <c>return</c> — сутність заводиться з шляхом
+    /// чужої бази, червоніє цей тест.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Audit", "L9-27")]
+    public async Task L9_27_шлях_чужої_бази_AF_дає_422_а_своєї_бази_заводиться()
+    {
+        var refused = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Create().HandleAsync(Command(path: @"\\AF\OTHER\Flare_01"), CancellationToken.None));
+
+        Assert.Equal(
+            ("ECR-REQ-0422", "err.ECR-REQ-0422.sourceEntityPathForeign"),
+            (refused.ErrorCode, refused.Details!["messageKey"]));
+        Assert.Equal(@"\\AF\OTHER\Flare_01", refused.Details["path"]);
+        await _sources.DidNotReceiveWithAnyArgs().AddSourceEntityAsync(default!, default);
+        await _audit.DidNotReceiveWithAnyArgs().WriteStructureChangeAsync(default!, default);
+
+        // Регістр імені бази AF не важить; атрибут елемента своєї бази — теж свій.
+        var own = await Create().HandleAsync(Command(path: @"\\af\Ecr\Area_1\Flare_01|Flow"), CancellationToken.None);
+
+        Assert.Equal(@"\\af\Ecr\Area_1\Flare_01|Flow", own.EntityPath);
+    }
+
+    /// <summary>
+    /// L9-27: перевірка не робить заведення залежним від PI — корінь не прочитано, шлях не AF чи корінь порожній —
+    /// сутність заводиться, як і до виправлення.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Audit", "L9-27")]
+    public async Task L9_27_без_кореня_каталогу_чи_для_шляху_не_AF_перевірка_не_блокує()
+    {
+        // Шлях не AF (SQL-джерело) — каталог навіть не читається.
+        await Create().HandleAsync(Command(code: "Sql_1", path: "dbo.Flare"), CancellationToken.None);
+        await _catalog.DidNotReceiveWithAnyArgs().BrowseAsync(default, default, default);
+
+        // Джерело лежить — «не знаємо», а не «чуже».
+        _catalog.BrowseAsync(Arg.Any<int>(), null, Arg.Any<CancellationToken>())
+            .Returns<IReadOnlyList<SourceEntityDescriptor>>(_ => throw new HttpRequestException("down"));
+        await Create().HandleAsync(Command(code: "Down_1", path: @"\\AF\OTHER\X"), CancellationToken.None);
+
+        // Корінь порожній або без шляхів AF — теж без відмови.
+        _catalog.BrowseAsync(Arg.Any<int>(), null, Arg.Any<CancellationToken>())
+            .Returns([new SourceEntityDescriptor("Unit-01", null, @"\Db\Unit-01", null, "Element")]);
+        await Create().HandleAsync(Command(code: "Rel_1", path: @"\\AF\OTHER\Y"), CancellationToken.None);
+
+        await _sources.Received(3).AddSourceEntityAsync(Arg.Any<SourceEntity>(), Arg.Any<CancellationToken>());
+    }
+
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Audit", "L9-27")]
+    [InlineData(@"\\SRV\DB\El", @"\\SRV\DB")]
+    [InlineData(@"\\SRV\DB\El\Child|Attr", @"\\SRV\DB")]
+    [InlineData(@"\\SRV\DB", null)]
+    [InlineData(@"\\SRV\\El", null)]
+    [InlineData(@"\SRV\DB\El", null)]
+    [InlineData("dbo.Flare", null)]
+    [InlineData(null, null)]
+    public void L9_27_база_AF_шляху(string? path, string? database)
+        => Assert.Equal(database, CreateSourceEntityHandler.AfDatabaseOf(path));
 
     /// <summary>Профіль з Integration.Manage, але без глобального Registry.EditData.</summary>
     private void Profile(Action<AccessBuilder> configure)

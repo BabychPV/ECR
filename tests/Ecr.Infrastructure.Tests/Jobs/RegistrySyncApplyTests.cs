@@ -493,6 +493,186 @@ public sealed class RegistrySyncApplyTests(SqlServerFixture sql)
         }
     }
 
+    // ─── AN-34 L4-01: одна сутність на довідник у з'єднанні ─────────────────
+
+    /// <summary>
+    /// AN-34 L4-01. <c>LinksAsync</c> бере зв'язки за <c>(DataSourceId, RegistryDefId)</c> без
+    /// <c>SourceEntityId</c>: друга активна сутність того ж з'єднання на тому ж довіднику змусила б
+    /// кожну з двох вважати зв'язки іншої «зниклими» й вимикати чужі записи щопрогону. Тому база не
+    /// дає двох прив'язок (фільтрований унікальний <c>UQ_SourceEntity_Registry</c>), а синк єдиної
+    /// сутності нічого не вимикає.
+    /// </summary>
+    /// <remarks>
+    /// Доказ червоного (2026-10-05): на коміті з одним лише тестом, до індексу, друга прив'язка проходить
+    /// — <c>Assert.IsType&lt;DbUpdateException&gt;(): Value is null</c>; з індексом і міграцією зелений.
+    /// ⚠ Мутацією «прибрати індекс» тест не перевіряється: база тестів мігрується один раз на worktree,
+    /// і вже застосований індекс з міграції, що змінилась, не знімається.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-8.11")]
+    public async Task Дві_сутності_на_один_довідник_не_вимикають_записи()
+    {
+        var stand = await ArrangeAsync(RegistrySourceKind.External, e1Author: Author.Svc);
+        await using var provider = BuildProvider();
+
+        try
+        {
+            // Друга активна сутність ТОГО САМОГО з'єднання — на той самий довідник.
+            int secondId;
+            await using (var db = Context())
+            {
+                var second = new SourceEntity(stand.DataSourceId, $"Plant7B_{_tag}", RegistrySourceKind.External);
+                second.Describe("Plant B", $@"\\AF\Db\Plant7B_{_tag}");
+                db.SourceEntities.Add(second);
+                await db.SaveChangesAsync();
+                secondId = second.Id;
+
+                second.BindRegistry(stand.RegistryId);
+                var refused = await Record.ExceptionAsync(() => db.SaveChangesAsync());
+
+                // ⛔ База відмовляє на рівні індексу, а не лишає двох власників зв'язків.
+                var update = Assert.IsType<DbUpdateException>(refused);
+                var sqlError = Assert.IsType<Microsoft.Data.SqlClient.SqlException>(update.InnerException);
+                Assert.True(sqlError.Number is 2601 or 2627, $"SQL {sqlError.Number}: {sqlError.Message}");
+                Assert.Contains("UQ_SourceEntity_Registry", sqlError.Message, StringComparison.Ordinal);
+            }
+
+            // Відмовлена прив'язка нічого не лишила: сутність B без довідника.
+            await using (var db = Context())
+            {
+                Assert.Null(await db.SourceEntities.AsNoTracking().Where(e => e.Id == secondId)
+                    .Select(e => e.RegistryDefId).SingleAsync());
+            }
+
+            // Синк єдиної прив'язаної сутності двічі: записи довідника лишаються ввімкненими.
+            await RunAsync(provider, stand);
+            await RunAsync(provider, stand);
+
+            await using var check = Context();
+            var entries = await check.RegistryEntries.AsNoTracking()
+                .Where(e => e.RegistryDefId == stand.RegistryId && (e.Id == stand.E1 || e.Id == stand.E2))
+                .ToListAsync();
+            Assert.Equal(2, entries.Count);
+            Assert.All(entries, e => Assert.True(e.IsActive, $"запис {e.Id} вимкнено"));
+        }
+        finally
+        {
+            await DeactivateAsync(stand);
+        }
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "D-187")]
+    public async Task Знімок_лише_з_чужих_елементів_не_позначає_зниклими()
+    {
+        // L4-02: запобіжник «порожній знімок» рахувався ДО відсіювання чужих елементів.
+        var stand = await ArrangeAsync(RegistrySourceKind.External, e1Author: Author.Svc);
+        var gx = Guid.NewGuid().ToString("D");
+        await ArrangeForeignAsync(stand, gx);
+        stand = stand with { Children = [new("StackX", null, $@"{stand.Parent}\StackX", null, "Element", gx)] };
+
+        // Значення є: без нього читання атрибута - відмова шляху, і знімок неповний з іншої причини.
+        stand.Values[$@"{stand.Parent}\StackX|Capacity"] = Point($@"{stand.Parent}\StackX|Capacity", 99m);
+        await using var provider = BuildProvider();
+
+        try
+        {
+            await RunAsync(provider, stand);
+
+            await using var db = Context();
+            Assert.False(await db.RegistryExternalKeys.AnyAsync(
+                k => (k.RegistryEntryId == stand.E1 || k.RegistryEntryId == stand.E2) && k.MissingInSourceSince != null));
+            Assert.DoesNotContain(await EventsAsync(stand.EntityId), e => e.Status == CollectionCoverage.RegistrySourceMissing);
+        }
+        finally
+        {
+            await DeactivateAsync(stand);
+        }
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "D-187")]
+    public async Task Масове_зникнення_понад_межу_не_позначає_а_пише_одну_подію()
+    {
+        // L4-02: 13 із 14 зв'язків «зникли» - ознака збою джерела, а не 13 видалених елементів.
+        var stand = await ArrangeAsync(RegistrySourceKind.External, e1Author: Author.Svc);
+        await using (var db = Context())
+        {
+            for (var i = 0; i < 12; i++)
+            {
+                var entry = new RegistryEntry(stand.RegistryId, EcrCode.Create($"M{i}"), Text($"M{i}"));
+                db.RegistryEntries.Add(entry);
+                await db.SaveChangesAsync();
+                db.RegistryExternalKeys.Add(new RegistryExternalKey(entry.Id, stand.DataSourceId, Guid.NewGuid().ToString("D")));
+            }
+
+            await db.SaveChangesAsync();
+        }
+
+        stand = stand with { Children = [.. stand.Children.Take(1)] };
+        await using var provider = BuildProvider();
+
+        try
+        {
+            await RunAsync(provider, stand);
+            await RunAsync(provider, stand);
+
+            await using (var db = Context())
+            {
+                Assert.False(await db.RegistryExternalKeys.AnyAsync(
+                    k => k.DataSourceId == stand.DataSourceId && k.MissingInSourceSince != null));
+            }
+
+            var refusal = Assert.Single(
+                await EventsAsync(stand.EntityId), e => e.Status == CollectionCoverage.RegistrySourceMissing);
+            Assert.Contains("reason=removalLimit; candidates=13; limit=10", refusal.Details, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await DeactivateAsync(stand);
+        }
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "D-212")]
+    public async Task L4_08_Синк_довідника_не_виконується_двічі_одночасно_зайнятий_лок_відкладає_задачу()
+    {
+        var stand = await ArrangeAsync(RegistrySourceKind.External, e1Author: Author.Svc);
+        await using var provider = BuildProvider();
+
+        try
+        {
+            // Інша задача (розклад або ручне «Зібрати») тримає синк цього довідника цього з'єднання.
+            var resource = RegistrySyncJob.LockResource(stand.DataSourceId, stand.RegistryId);
+            await using (var held = await SqlDistributedLock.TryAcquireAsync(sql.ConnectionString, resource, CancellationToken.None))
+            {
+                Assert.NotNull(held);
+
+                var deferred = await Assert.ThrowsAsync<JobDeferredException>(() => RunAsync(provider, stand));
+                Assert.Equal(resource, deferred.Resource);
+                await using var db = Context();
+                Assert.False(await db.RegistryEntries.AnyAsync(e => e.RegistryDefId == stand.RegistryId && e.Id > stand.E2));
+            }
+
+            // Лок звільнено - наступний прогін виконується й створює запис для нового елемента.
+            await RunAsync(provider, stand);
+            await using var after = Context();
+            Assert.True(await after.RegistryEntries.AnyAsync(e => e.RegistryDefId == stand.RegistryId && e.Id > stand.E2));
+        }
+        finally
+        {
+            await DeactivateAsync(stand);
+        }
+    }
+
     /// <summary>По одній відмові writer'а на E1 і E2 — з очікуваною ознакою причини.</summary>
     private static void AssertRejected(IReadOnlyList<CollectionCoverage> events, Stand stand, string reason)
     {
@@ -548,6 +728,7 @@ public sealed class RegistrySyncApplyTests(SqlServerFixture sql)
         var registry = new RegistryDef(
             EcrCode.Create($"SYNC7_{_tag}"), Text("Stacks"), isTemporal: keyed?.Temporal ?? false);
         registry.SwitchSource(kind);
+        registry.UseCodeMode(RegistryCodeMode.Auto); // Q6=C: автостворення лише в Auto
         db.RegistryDefs.Add(registry);
         await db.SaveChangesAsync();
 

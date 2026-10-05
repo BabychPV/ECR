@@ -99,6 +99,40 @@ public sealed class SourceEventMapChangeHandlersTests : SourceEventMapTestBase
             Arg.Any<CancellationToken>());
     }
 
+    /// <summary>
+    /// AN-40 / L9-06: версія, яку бачив клієнт, звіряється до будь-якої зміни; збіг — мапінг позначено зміненим, щоб
+    /// правка лише полів теж підняла версію.
+    /// </summary>
+    /// <remarks>
+    /// Мутації (лише локально): прибрати звірку <c>command.RowVersion</c> — червоніє перша половина; прибрати
+    /// <c>store.MarkChanged(map)</c> — червоніє друга.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Audit", "L9-06")]
+    public async Task L9_06_застаріла_версія_мапінгу_дає_409_до_змін_а_чинна_позначає_мапінг_зміненим()
+    {
+        var map = NewMap();
+        Store.FindMapAsync(77, Arg.Any<CancellationToken>()).Returns(map);
+        var fresh = Convert.ToHexString(map.RowVersion);
+
+        var stale = await Assert.ThrowsAsync<ConcurrencyConflictException>(
+            () => Update().HandleAsync(77, UpdateCommand() with { IsActive = false, RowVersion = "00000000000007D1" }, default));
+
+        Assert.Equal(("ECR-INT-0409", "err.ECR-INT-0409.eventMapConcurrency"), (stale.ErrorCode, stale.Details!["messageKey"]));
+        Assert.Equal("77", stale.Details["eventMapId"]);
+        Assert.True(map.IsActive);
+        Store.DidNotReceiveWithAnyArgs().ReleaseFields(default!);
+        Store.DidNotReceiveWithAnyArgs().MarkChanged(default!);
+        await Store.DidNotReceiveWithAnyArgs().SaveAsync(default);
+
+        var dto = await Update().HandleAsync(77, UpdateCommand() with { RowVersion = fresh.ToLowerInvariant() }, default);
+
+        Store.Received(1).MarkChanged(map);
+        await Store.Received(1).SaveAsync(Arg.Any<CancellationToken>());
+        Assert.Equal(fresh, dto.RowVersion);
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
     [Trait("Directive", "HSE301-A6")]

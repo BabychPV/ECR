@@ -55,6 +55,25 @@ public sealed class CsvReaderTests
     }
 
     [Fact]
+    public void Лапка_всередині_незакавиченого_поля_літерал()
+    {
+        // L5-11: `Труба 2"` не відкриває режим лапок — інакше решта файлу з'їдалась би в одне поле.
+        var rows = CsvReader.Parse("code,name\r\nA1,Труба 2\"\r\nA2,Кран\r\n");
+
+        Assert.Equal(3, rows.Count);
+        Assert.Equal(["A1", "Труба 2\""], rows[1]);
+        Assert.Equal(["A2", "Кран"], rows[2]);
+    }
+
+    [Fact]
+    public void Незакрита_лапка_помилка()
+    {
+        var ex = Assert.Throws<FormatException>(() => CsvReader.Parse("code,name\r\nA1,\"Труба\r\nA2,Кран\r\n"));
+
+        Assert.Contains("лапка", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Порожній_текст_дає_нуль_записів()
         => Assert.Empty(CsvReader.Parse(string.Empty));
 

@@ -160,6 +160,30 @@ public sealed class SubmitSheetHandler(
         await uow.ExecuteInTransactionAsync(
             async innerCt =>
             {
+                // ⛔ L6-02: структура документа — спільно й першою. Подання не йде
+                // паралельно з переносом версії: перенос або вже зафіксований (і
+                // версію нижче читаємо нову), або чекає на подання.
+                var structure = await sheetGate.EnterStructureAsync(documentId, exclusive: false, innerCt)
+                    .ConfigureAwait(false);
+
+                // ⛔ AN-36b (рев'ю AN-36, P2-1): склад документа вище перевірено ДО
+                // транзакції. Перенос версії, що зафіксувався між тим і цим блокуванням,
+                // перенумерував аркуші — старого `sheetDefId` у новій версії немає, і
+                // подання будувало б валідацію без жодної таблиці й стан погодження на
+                // неіснуючий аркуш. Аркуш звіряється з версією, прочитаною ПІД
+                // блокуванням (знімок метаданих — з кешу, без звернення до бази).
+                if (structure is { } version)
+                {
+                    var current = await metadata.GetAsync(version, innerCt).ConfigureAwait(false);
+                    Documents.DocumentStructure.EnsureSheetPresent(
+                        current.Sheets.Any(x => x.Id == sheetDefId), documentId, sheetDefId);
+                }
+
+                // ⛔ L6-06: шапка — спільно, після структури й до аркуша. Подання
+                // валідує шапку й кладе її у зріз; правка шапки (виняткове) або
+                // вже зафіксована й подання бачить нову, або чекає на подання й
+                // бачить поданий аркуш. Доти у зріз ішла шапка, яку вже правили.
+                await sheetGate.EnterHeaderAsync(documentId, exclusive: false, innerCt).ConfigureAwait(false);
                 await sheetGate.EnterSubmitAsync(documentId, sheetDefId, key, innerCt).ConfigureAwait(false);
                 await SubmitUnderLockAsync(
                         documentId, sheetDefId, periodKey, key, userId, profile, acknowledgeWarnings, innerCt)

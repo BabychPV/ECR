@@ -97,6 +97,7 @@ public sealed class MigrateDocumentVersionHandler(
     IAccessDecisionService access,
     ICurrentUser currentUser,
     IAccessProfileInvalidator profileCache,
+    ISheetEditGate structureGate,
     Microsoft.Extensions.Logging.ILogger<MigrateDocumentVersionHandler> log)
 {
     /// <summary>Стеля переліку користувачів для скидання кешу профілів; більше — скидається весь кеш.</summary>
@@ -184,6 +185,20 @@ public sealed class MigrateDocumentVersionHandler(
             if (current == target.Id)
             {
                 throw SameVersion(target.Id);
+            }
+
+            // ⛔ L6-02: структура КОЖНОГО документа проєкту — винятково, за
+            // зростанням `DocumentId`, ДО плану. Писарі (правка, імпорт, рядок,
+            // подання, шапка, перерахунок) беруть її спільно першою дією, тож
+            // далі жоден із них не комітиться між планом і `ApplyAsync`: план
+            // бачить усе зафіксоване, а запис, що чекав, після коміту побачить
+            // нову версію і відмовить (`DocumentStructure.EnsureUnchanged`).
+            // Доти блокувався лише рядок `doc.Project`, якого писарі не беруть:
+            // значення, введене в колонку, яку нова версія прибирає, між
+            // плануванням і `DELETE` губилося при відповіді 200.
+            foreach (var id in await store.ListDocumentIdsAsync(projectId, innerCt).ConfigureAwait(false))
+            {
+                await structureGate.EnterStructureAsync(id, exclusive: true, innerCt).ConfigureAwait(false);
             }
 
             var (dto, plan) = await PlanAsync(

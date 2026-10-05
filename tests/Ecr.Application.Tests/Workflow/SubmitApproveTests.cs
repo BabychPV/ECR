@@ -491,6 +491,7 @@ public sealed class SubmitApproveTests
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait("Finding", "F-25")]
+    [Trait("Decision", "D-278")]
     public async Task Погодження_власного_подання_відхиляється()
     {
         // Той самий користувач (`_user.UserId` == 9), що подав аркуш,
@@ -511,6 +512,7 @@ public sealed class SubmitApproveTests
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait("Finding", "F-25")]
+    [Trait("Decision", "D-278")]
     public async Task Погодження_подання_іншого_користувача_дозволене()
     {
         // ⚠ Контроль до тесту вище: наявна поведінка (хтось ІНШИЙ подав,
@@ -526,6 +528,7 @@ public sealed class SubmitApproveTests
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait("Finding", "F-25")]
+    [Trait("Decision", "D-278")]
     public async Task Відхилення_власного_подання_дозволене()
     {
         // ⚠ Заборона стосується лише ЗАТВЕРДЖЕННЯ (`approved: true`):
@@ -536,6 +539,42 @@ public sealed class SubmitApproveTests
         await Approve().HandleAsync(Document, Water, Period, approved: false, reason: "помилка у сумі", CancellationToken.None);
 
         Assert.Equal(DocumentStatus.Rejected, _sheets[Water].Status);
+    }
+
+    /// <summary>
+    /// D-278: заборона йде за ОСТАННІМ автором подання, а не за першим. Після
+    /// відхилення й повторного подання іншим користувачем перший автор вже не
+    /// «подавач» і погоджувати може (поточний користувач — 9); нового подавача
+    /// закриває `Погодження_власного_подання_відхиляється`.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Finding", "F-25")]
+    [Trait("Decision", "D-278")]
+    public async Task Заборона_самопогодження_йде_за_останнім_автором_подання()
+    {
+        _sheets[Water].Submit(userId: 9, Now);
+        _sheets[Water].Reject(userId: 999, "доопрацювати", Now);
+        _sheets[Water].Submit(userId: 999, Now);
+
+        // Автор №2 (999) — останній подавач: самопогодження йому заборонене.
+        _user.UserId.Returns(999);
+        _access.BuildProfileAsync(999, Arg.Any<CancellationToken>()).Returns(Profile());
+
+        var error = await Assert.ThrowsAsync<AccessDeniedException>(
+            () => Approve().HandleAsync(Document, Water, Period, approved: true, reason: null, CancellationToken.None));
+
+        Assert.Equal("ECR-ACCS-0403", error.ErrorCode);
+        Assert.Equal("err.ECR-ACCS-0403.approveOwnSubmission", error.Details!["messageKey"]);
+        Assert.Equal(DocumentStatus.Submitted, _sheets[Water].Status);
+
+        // Автор №1 (9) більше не подавач і погоджує вільно.
+        _user.UserId.Returns(9);
+
+        await Approve().HandleAsync(Document, Water, Period, approved: true, reason: null, CancellationToken.None);
+
+        Assert.Equal(DocumentStatus.Approved, _sheets[Water].Status);
+        Assert.Equal(9, _sheets[Water].ApprovedByUserId);
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]

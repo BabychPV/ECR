@@ -104,6 +104,18 @@ public sealed class SourceEventMapStore(EcrDbContext db) : ISourceEventMapStore
     }
 
     /// <inheritdoc />
+    public void MarkChanged(SourceEventMap map)
+    {
+        ArgumentNullException.ThrowIfNull(map);
+
+        var entry = db.Entry(map);
+        if (entry.State == EntityState.Unchanged)
+        {
+            entry.State = EntityState.Modified;
+        }
+    }
+
+    /// <inheritdoc />
     public async Task RemoveMapAsync(SourceEventMap map, CancellationToken ct)
     {
         ReleaseFields(map);

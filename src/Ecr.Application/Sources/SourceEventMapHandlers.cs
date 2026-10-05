@@ -49,6 +49,11 @@ public sealed record SourceEventFieldDto(
 /// <param name="VolumeMode">Звідки береться об'єм (§4.7.5).</param>
 /// <param name="IsActive">Чи діє синхронізація за мапінгом.</param>
 /// <param name="Fields">Поля «атрибут → колонка».</param>
+/// <param name="RowVersion">
+/// Версія для оптимістичного блокування (hex, AN-40 / L9-06): клієнт повертає її в
+/// <c>rowVersion</c> запиту на зміну, і пауза зі застарілого рядка переліку дає <c>409</c>,
+/// а не мовчки відкочує чужу правку полів.
+/// </param>
 public sealed record SourceEventMapDto(
     int Id,
     int SourceEntityId,
@@ -59,7 +64,8 @@ public sealed record SourceEventMapDto(
     string? FilterValue,
     SourceEventVolumeMode VolumeMode,
     bool IsActive,
-    IReadOnlyList<SourceEventFieldDto> Fields);
+    IReadOnlyList<SourceEventFieldDto> Fields,
+    string RowVersion);
 
 /// <summary>Явна відповідність значення у запиті на збереження мапінгу.</summary>
 /// <param name="SourceValue">Значення атрибута в джерелі.</param>
@@ -109,13 +115,18 @@ public sealed record CreateSourceEventMapCommand(
 /// <param name="FilterScope">Де лежить атрибут звуження.</param>
 /// <param name="FilterValue">Значення звуження.</param>
 /// <param name="Fields">Нові поля замість усіх наявних.</param>
+/// <param name="RowVersion">
+/// Версія, яку бачив клієнт (<c>rowVersion</c> мапінгу); інша — <c>409</c>; <c>null</c> — без
+/// перевірки (необов'язкове поле: наявні споживачі контракту не ламаються).
+/// </param>
 public sealed record UpdateSourceEventMapCommand(
     SourceEventVolumeMode VolumeMode,
     bool IsActive,
     string? FilterAttribute,
     SourceEventAttributeScope? FilterScope,
     string? FilterValue,
-    IReadOnlyList<SourceEventFieldInput> Fields);
+    IReadOnlyList<SourceEventFieldInput> Fields,
+    string? RowVersion = null);
 
 /// <summary>Спільні кроки обробників мапінгу подій (HSE301 A6).</summary>
 internal static class SourceEventMapSupport
@@ -141,7 +152,8 @@ internal static class SourceEventMapSupport
                 f.ValueKind,
                 f.SourceUnitId,
                 f.TargetUnitId,
-                [.. f.Values.OrderBy(v => v.Id).Select(v => new SourceEventValueDto(v.Id, v.SourceValue, v.RegistryEntryId))]))]);
+                [.. f.Values.OrderBy(v => v.Id).Select(v => new SourceEventValueDto(v.Id, v.SourceValue, v.RegistryEntryId))]))],
+        Convert.ToHexString(map.RowVersion));
 
     /// <summary>Мапінг або 404.</summary>
     public static async Task<SourceEventMap> RequireMapAsync(ISourceEventMapStore store, int id, CancellationToken ct)

@@ -191,7 +191,8 @@ public sealed partial class WorkflowTransactionTests(SqlServerFixture sql)
 
     // ────────────────────────────── збірка ────────────────────────────
 
-    private SubmitSheetHandler Submit(World world, EcrDbContext db, IAccessDecisionService access)
+    private SubmitSheetHandler Submit(
+        World world, EcrDbContext db, IAccessDecisionService access, ISheetEditGate? gate = null)
     {
         var cells = Substitute.For<ICellStore>();
         cells.ReadSliceAsync(Arg.Any<long>(), Arg.Any<CancellationToken>())
@@ -214,10 +215,17 @@ public sealed partial class WorkflowTransactionTests(SqlServerFixture sql)
         documents.FindProjectIdAsync(world.DocumentId, Arg.Any<CancellationToken>())
                  .Returns(world.ProjectId);
 
+        // ⚠ AN-36b: подання звіряє аркуш із версією під блокуванням структури —
+        // знімок мусить містити аркуш світу (таблиць у нього тут немає).
+        var sheetDef = new SheetDef(
+            world.TemplateVersionId, EcrCode.Create("WFTX"),
+            new LocalizedText(new Dictionary<string, string> { ["en"] = "Sheet" }), 1);
+        typeof(Entity<int>).GetProperty("Id")!.SetValue(sheetDef, world.SheetDefId);
+
         var metadata = Substitute.For<IMetadataCache>();
         metadata.GetAsync(world.TemplateVersionId, Arg.Any<CancellationToken>())
                 .Returns(new TemplateVersionSnapshot(
-                    world.TemplateVersionId, PresentationRevision: 1, Sheets: [],
+                    world.TemplateVersionId, PresentationRevision: 1, Sheets: [sheetDef],
                     ColumnsById: new Dictionary<int, ColumnDef>(),
                     RowsByKey: new Dictionary<(int, string), RowDef>()));
 
@@ -246,7 +254,7 @@ public sealed partial class WorkflowTransactionTests(SqlServerFixture sql)
             new Ecr.Application.Validation.ValidationEngine(new RealFormulaEngine()),
             headers,
             new ReportSnapshotSync(snapshots, documents),
-            new UnitOfWork(db), User(), new TestClock(Now), new SheetEditGate(db),
+            new UnitOfWork(db), User(), new TestClock(Now), gate ?? new SheetEditGate(db),
             NSubstitute.Substitute.For<Ecr.Application.Recalculation.ISubmitRecalculation>(),
             methodologies,
             NSubstitute.Substitute.For<ITemplateVersionStore>(),

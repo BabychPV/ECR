@@ -529,8 +529,8 @@ public sealed class CellWriteRoundTripTests(SqlServerFixture sql)
     /// `WR-11`: стеля 50 000 комірок на один <c>PATCH …/cells</c>.
     /// </summary>
     /// <remarks>
-    /// ⚠ Обидва батчі однакові за формою — один рядок із неіснуючим ключем і
-    /// заявленою версією, — різниця рівно в одну комірку. На 50 000 запит
+    /// ⚠ Обидва батчі однакові за формою — неіснуючі рядки із заявленою версією,
+    /// по комірці на рядок, — різниця рівно в одну комірку. На 50 000 запит
     /// проходить стелю й доходить до звірки версій (<c>409 ECR-CELL-0409</c>:
     /// рядка немає); на 50 001 — <c>422</c> зі стелі. Тобто межа стоїть саме на
     /// 50 000, а не «десь нижче».
@@ -563,17 +563,17 @@ public sealed class CellWriteRoundTripTests(SqlServerFixture sql)
             tableInstanceId,
             periodKey = scenario.PeriodKey,
             origin = "UserEdit",
-            rows = new[]
-            {
-                new
+            // ✎ L6-10: комірки — по одній у РІЗНИХ неіснуючих рядках. Та сама
+            // колонка двічі в одному рядку тепер відхиляється раніше за звірку
+            // версій (`patchDuplicateCell`), і 50 000 не дійшли б до 409.
+            rows = Enumerable.Range(0, cellCount)
+                .Select(i => new
                 {
-                    rowKey = missingRow,
+                    rowKey = $"{missingRow}-{i}",
                     baseVersion = "0x0000000000000001",
-                    cells = Enumerable.Range(0, cellCount)
-                        .Select(_ => new { columnCode = anyColumn, value = (object)1 })
-                        .ToArray(),
-                },
-            },
+                    cells = new[] { new { columnCode = anyColumn, value = (object)1 } },
+                })
+                .ToArray(),
         };
 
         // ── 50 000 — стелю проходить ─────────────────────────────────────
@@ -601,6 +601,85 @@ public sealed class CellWriteRoundTripTests(SqlServerFixture sql)
             .ConfigureAwait(true);
         AssertPatchTooLarge(
             beforeDatabase, await beforeDatabase.Content.ReadAsStringAsync().ConfigureAwait(true), app);
+    }
+
+    /// <summary>
+    /// L6-10: дубль колонки в рядку і дубль <c>RowKey</c> у батчі — керована <c>422</c>, а не <c>500</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ До фіксу перший батч доходив до <c>MERGE</c> (8672: та сама комірка двічі), другий — до
+    /// первинного ключа рядка; обидва давали <c>500</c>. Рядок — новий (<c>baseVersion = null</c>):
+    /// так запит проходить звірку версій і доходить саме до місць, що ламалися.
+    /// Мутація: приберіть виклик <c>EnsureNoDuplicates</c> у <c>PatchCellsHandler.HandleAsync</c> — червоніє.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Audit", "L6-10")]
+    public async Task Дубль_колонки_в_рядку_батчу_дає_422()
+    {
+        var scenario = await ArrangeAsync().ConfigureAwait(true);
+
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, scenario.UserName).ConfigureAwait(true);
+
+        var sliceUri = new Uri(
+            $"/api/v1/documents/{scenario.Document.DocumentId}/tables/{scenario.Document.TableInstanceId}",
+            UriKind.Relative);
+        var patchUri = new Uri(
+            $"/api/v1/documents/{scenario.Document.DocumentId}/cells", UriKind.Relative);
+
+        var opened = await client.GetAsync(sliceUri).ConfigureAwait(true);
+        Assert.True(opened.IsSuccessStatusCode, $"GET зрізу: {opened.StatusCode}: {app.ErrorsText}");
+        var numberColumn = JsonDocument
+            .Parse(await opened.Content.ReadAsStringAsync().ConfigureAwait(true))
+            .RootElement.GetProperty("columns")
+            .EnumerateArray()
+            .Select(c => c.GetProperty("code").GetString()!)
+            .ElementAt(1);
+
+        object Row(string rowKey, params decimal[] values) => new
+        {
+            rowKey,
+            baseVersion = (string?)null,
+            cells = values.Select(v => new { columnCode = numberColumn, value = (object)v }).ToArray(),
+        };
+
+        object Batch(params object[] rows) => new
+        {
+            tableInstanceId = scenario.Document.TableInstanceId,
+            periodKey = scenario.PeriodKey,
+            origin = "UserEdit",
+            rows,
+        };
+
+        var rowKey = $"DUP{Guid.NewGuid():N}"[..12];
+
+        // ── Та сама колонка двічі в одному рядку ─────────────────────────
+        var sameCell = await client.PatchAsJsonAsync(patchUri, Batch(Row(rowKey, 1m, 2m))).ConfigureAwait(true);
+        var sameCellBody = await sameCell.Content.ReadAsStringAsync().ConfigureAwait(true);
+        Assert.True(
+            sameCell.StatusCode == HttpStatusCode.UnprocessableEntity,
+            $"Дубль колонки: очікували 422, отримали {sameCell.StatusCode}\n{sameCellBody}\n{app.ErrorsText}");
+        var cellProblem = JsonDocument.Parse(sameCellBody).RootElement;
+        Assert.Equal("ECR-REQ-0422", cellProblem.GetProperty("errorCode").GetString());
+        Assert.Equal("err.ECR-REQ-0422.patchDuplicateCell", cellProblem.GetProperty("messageKey").GetString());
+        Assert.Equal(rowKey, cellProblem.GetProperty("rowKey").GetString());
+        Assert.Equal(numberColumn, cellProblem.GetProperty("columnCodes").GetString());
+
+        // ── Той самий RowKey двічі в батчі ───────────────────────────────
+        var sameRow = await client.PatchAsJsonAsync(patchUri, Batch(Row(rowKey, 1m), Row(rowKey, 2m))).ConfigureAwait(true);
+        var sameRowBody = await sameRow.Content.ReadAsStringAsync().ConfigureAwait(true);
+        Assert.True(
+            sameRow.StatusCode == HttpStatusCode.UnprocessableEntity,
+            $"Дубль RowKey: очікували 422, отримали {sameRow.StatusCode}\n{sameRowBody}\n{app.ErrorsText}");
+        var rowProblem = JsonDocument.Parse(sameRowBody).RootElement;
+        Assert.Equal("err.ECR-REQ-0422.patchDuplicateRowKey", rowProblem.GetProperty("messageKey").GetString());
+        Assert.Equal(rowKey, rowProblem.GetProperty("rowKeys").GetString());
+
+        // ── Нічого не записано: рядка немає у зрізі ──────────────────────
+        var after = await client.GetAsync(sliceUri).ConfigureAwait(true);
+        Assert.DoesNotContain(rowKey, await after.Content.ReadAsStringAsync().ConfigureAwait(true), StringComparison.Ordinal);
     }
 
     /// <summary>Відмова стелі батчу: код, ключ каталогу і обидва числа.</summary>

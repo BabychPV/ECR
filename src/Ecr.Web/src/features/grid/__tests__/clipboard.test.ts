@@ -62,6 +62,7 @@ describe('Вставка з буфера Excel', () => {
     expect(plan.rejected).toHaveLength(2);
     expect(plan.rejected[0]?.columnCode).toBe('C2');
     expect(plan.rejected[0]?.reason).toContain('рахує система');
+    expect(plan.rejected[0]?.kind).toBe('guard');
   });
 
   it('копіювання у буфер дає формат, який приймає Excel', () => {

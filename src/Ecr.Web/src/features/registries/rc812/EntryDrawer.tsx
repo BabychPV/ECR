@@ -4,12 +4,13 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { RegistryDefDto } from '@/api/types';
 import { getRegistryRows, type RegistryRow } from '@/features/registries/rows/api';
 import { RegistryEntryEditor, ValidityEditor } from '@/features/registries/RegistryEntryEditor';
+import { formatDateOnly } from '@/shared/format';
 import { localized } from '@/shared/i18n/localized';
 import { t } from '@/shared/i18n';
 import { DetailDrawer } from '@/shared/ui/DetailDrawer';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { KeyValue } from '@/shared/ui/KeyValue';
-import { isoOfDate, rowsKey } from './data';
+import { rowsKey } from './data';
 import type { RegistryField } from './rowModel';
 
 const DateInput = lazy(async () => ({ default: (await import('@/shared/dates/DateInputWithStyles')).DateInput }));
@@ -144,7 +145,7 @@ export function EntryDrawer({ registry, row, fields, asOf, readOnly }: EntryDraw
             {past.error !== null && <ErrorAlert error={past.error} />}
             {asOfUtc !== null && past.isSuccess && then === undefined && (
               <Text size="sm" c="dimmed">
-                {t('registries.data.notYetThen', { date: isoOfDate(day) ?? '' })}
+                {t('registries.data.notYetThen', { date: formatDateOnly(day) ?? '' })}
               </Text>
             )}
             {then !== undefined && (
@@ -152,7 +153,7 @@ export function EntryDrawer({ registry, row, fields, asOf, readOnly }: EntryDraw
                 <Table.Thead>
                   <Table.Tr>
                     <Table.Th>{t('registries.field')}</Table.Th>
-                    <Table.Th>{isoOfDate(day)}</Table.Th>
+                    <Table.Th>{formatDateOnly(day)}</Table.Th>
                     <Table.Th>{t('registries.data.now')}</Table.Th>
                   </Table.Tr>
                 </Table.Thead>

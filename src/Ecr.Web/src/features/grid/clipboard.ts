@@ -204,6 +204,12 @@ export interface PasteRejection {
   rowKey: string;
   columnCode: string;
   reason: string;
+  /**
+   * Чому відхилено: `guard` — права/«рахує система»/закрита комірка;
+   * `ambiguous` — число читається двома способами (T5-04: вступ вікна має
+   * називати саме цю причину, а не «лише для читання»).
+   */
+  kind: 'guard' | 'ambiguous';
 }
 
 /** Результат розкладки буфера по сітці. */
@@ -285,12 +291,17 @@ export function planPaste(
       if (columnCode === undefined) break;
 
       const value = row[c] ?? '';
-      const reason =
-        guard(rowKey, columnCode) ??
-        (isNumericColumn(columnCode) ? ambiguityOf(value, locale) : null);
+      const guarded = guard(rowKey, columnCode);
+      const ambiguous =
+        guarded === null && isNumericColumn(columnCode) ? ambiguityOf(value, locale) : null;
 
-      if (reason !== null) {
-        rejected.push({ rowKey, columnCode, reason });
+      if (guarded !== null) {
+        rejected.push({ rowKey, columnCode, reason: guarded, kind: 'guard' });
+        continue;
+      }
+
+      if (ambiguous !== null) {
+        rejected.push({ rowKey, columnCode, reason: ambiguous, kind: 'ambiguous' });
         continue;
       }
 

@@ -22,6 +22,9 @@ public sealed class RegistryDefinitionDraftTests
     private const int RegistryId = 4;
     private static readonly DateTime Now = new(2026, 10, 15, 8, 0, 0, DateTimeKind.Utc);
     private static readonly byte[] Version1 = [0, 0, 0, 0, 0, 0, 0, 1];
+
+    /// <summary>`If-Match` із версією опису 1 — тією, що в довіднику тесту.</summary>
+    private const string IfMatch1 = "\"1\"";
     private static readonly JsonSerializerOptions WebJson = new(JsonSerializerDefaults.Web);
 
     private readonly IRegistryStore _registries = Substitute.For<IRegistryStore>();
@@ -64,7 +67,7 @@ public sealed class RegistryDefinitionDraftTests
         RegistryDefinitionDraft? added = null;
         _drafts.Add(Arg.Do<RegistryDefinitionDraft>(d => added = d));
 
-        await SaveDraft().HandleAsync("PERMIT", DraftRequest("Renamed", rowVersion: null), default);
+        await SaveDraft().HandleAsync("PERMIT", DraftRequest("Renamed", rowVersion: null), default, IfMatch1);
 
         Assert.Equal("Number", _registry.Fields[0].NameL10n.Get("en"));
         Assert.Equal(1, _registry.DefinitionVersion);
@@ -73,6 +76,35 @@ public sealed class RegistryDefinitionDraftTests
         await _audit.Received(1).WriteStructureChangeAsync(
             Arg.Is<StructureChangeRecord>(r => r.EntityType == "cfg.RegistryDefinitionDraft"),
             Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait("Directive", "BE-24")]
+    [Trait("Requirement", "L5-02")]
+    public async Task Збереження_чернетки_з_чужою_версією_опису_409_і_нічого_не_пише()
+    {
+        // L5-02: клієнт будував форму з версії 1, а опис уже опублікували (версія 2). Без звірки збереження
+        // перебазувало б чернетку на 2, і публікація мовчки вимкнула б правила/ключі сусіда.
+        _registry.BumpDefinitionVersion();
+
+        var ex = await Assert.ThrowsAsync<ConcurrencyConflictException>(
+            () => SaveDraft().HandleAsync("PERMIT", DraftRequest("Renamed", rowVersion: null), default, IfMatch1));
+
+        Assert.Equal("err.ECR-REG-0409.definitionChanged", ex.Details!["messageKey"]);
+        _drafts.DidNotReceive().Add(Arg.Any<RegistryDefinitionDraft>());
+        await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait("Directive", "BE-24")]
+    [Trait("Requirement", "L5-02")]
+    public async Task Збереження_чернетки_без_If_Match_422()
+    {
+        var ex = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => SaveDraft().HandleAsync("PERMIT", DraftRequest("Renamed", rowVersion: null), default));
+
+        Assert.Equal("err.ECR-REQ-0422.definitionVersionRequired", ex.Details!["messageKey"]);
+        _drafts.DidNotReceive().Add(Arg.Any<RegistryDefinitionDraft>());
     }
 
     [Fact]
@@ -132,7 +164,7 @@ public sealed class RegistryDefinitionDraftTests
             Keys = [new RegistryKeySaveDto(null, "BY_NUMBER", Text("By number"), ["Number"], false, true, true)],
             CodeMode = RegistryCodeMode.Auto,
         };
-        await SaveDraft().HandleAsync("PERMIT", request, default);
+        await SaveDraft().HandleAsync("PERMIT", request, default, IfMatch1);
 
         Assert.NotNull(added);
         typeof(RegistryDefinitionDraft).GetProperty(nameof(RegistryDefinitionDraft.RowVersion))!.SetValue(added, Version1);

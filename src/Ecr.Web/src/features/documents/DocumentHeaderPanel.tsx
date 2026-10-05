@@ -6,9 +6,10 @@ import { queryKeys } from '@/api/queryKeys';
 import type { components } from '@/api/schema';
 import type { RegistryDefDto, RegistryEntryDto, UnitRef } from '@/api/types';
 import { coerce } from '@/features/grid/edits';
-import { cellText, sameCellValue } from '@/features/grid/cellValue';
+import { cellText, sameCellValue, sameDateValue } from '@/features/grid/cellValue';
 import { lookupCellDisplay } from '@/features/grid/LookupCellEditor';
 import { unitCellDisplay } from '@/features/grid/UnitCellEditor';
+import { formatDateOnly, parseDateOnly, todayDateOnly } from '@/shared/format';
 import { localized } from '@/shared/i18n/localized';
 import { t } from '@/shared/i18n';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
@@ -89,29 +90,6 @@ function patchDocumentHeader(
   });
 }
 
-/** Дата без часу з `DateInput` → `"YYYY-MM-DD"` МІСЦЕВИМИ складниками.
- *
- * ⛔ НЕ `toISOString().slice(0, 10)`: той читає дату як UTC-північ і в
- * від'ємному зсуві зсуває календарний день на добу (той самий клас дефекту,
- * що описаний у `shared/format/datetime.ts` для зворотного напрямку). */
-function isoDateOf(date: Date): string {
-  const year = String(date.getFullYear()).padStart(4, '0');
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-
-  return `${year}-${month}-${day}`;
-}
-
-/** `"YYYY-MM-DD"` → `Date` МІСЦЕВОЇ півночі; що завгодно інше — `null`. */
-function dateOf(value: string): Date | null {
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
-  if (match === null) return null;
-
-  const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
-
-  return Number.isNaN(date.getTime()) ? null : date;
-}
-
 /**
  * Чернетка одного поля: для `Bool`/`Date` — значення в домені контракту
  * (`boolean | null`, `string | null`); для решти типів — СИРИЙ ТЕКСТ поля
@@ -157,8 +135,13 @@ function effectiveValueOf(field: DocumentHeaderField, raw: unknown): unknown {
  * (`cellText(null) === ''`). Без цього зведення непорушене порожнє поле
  * вважалося б «зміненим» на кожному відкритті панелі.
  */
-function sameHeaderValue(a: unknown, b: unknown): boolean {
+function sameHeaderValue(field: DocumentHeaderField, a: unknown, b: unknown): boolean {
   const normalize = (value: unknown): unknown => (value === '' ? null : value);
+
+  // ⚠ T7-01: `Date` сервер віддає як `2026-10-07T00:00:00`, а поле повертає `2026-10-07` — та
+  // сама дата (той самий `sameDateValue`, що для комірок сітки), інакше повторний вибір того
+  // самого дня позначав би шапку зміненою.
+  if (field.dataType === 'Date') return sameDateValue(normalize(a), normalize(b));
 
   return sameCellValue(normalize(a), normalize(b));
 }
@@ -316,7 +299,7 @@ export function DocumentHeaderPanel({
    * `DocumentPage.tsx` — файл поза дозволеним списком цієї задачі. Якщо
    * шапка колись отримає дату періоду — замінити тут одним рядком.
    */
-  const lookupAsOf = isoDateOf(new Date());
+  const lookupAsOf = todayDateOnly();
 
   const lookupEntriesQueries = useQueries({
     queries: lookupRegistryCodes.map(({ code, isTemporal }) => {
@@ -407,7 +390,7 @@ export function DocumentHeaderPanel({
   const seedFields = seed !== null && seed.documentId === documentId ? fieldsOf(seed.dto) : [];
 
   const dirty = seedFields.filter(
-    (field) => !sameHeaderValue(effectiveValueOf(field, draft[field.code]), field.value),
+    (field) => !sameHeaderValue(field, effectiveValueOf(field, draft[field.code]), field.value),
   );
 
   // ⚠ Наповнюється при зміні відповіді, а не в ефекті (той самий прийом, що
@@ -621,8 +604,8 @@ function HeaderFieldInput({
           valueFormat="YYYY-MM-DD"
           clearable
           disabled={disabled}
-          value={typeof value === 'string' ? dateOf(value) : null}
-          onChange={(next) => onChange(next === null ? null : isoDateOf(next))}
+          value={typeof value === 'string' ? parseDateOnly(value) : null}
+          onChange={(next) => onChange(formatDateOnly(next))}
           data-header-field={field.code}
         />
       </Suspense>

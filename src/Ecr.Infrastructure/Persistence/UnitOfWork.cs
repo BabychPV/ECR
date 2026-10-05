@@ -33,10 +33,28 @@ public sealed class UnitOfWork(
     {
         StampRegistryDataChanges();
         StampRegistryAuthors();
+        var bumps = TakeRegistryRevisionBumps();
 
         try
         {
-            return await db.SaveChangesAsync(ct).ConfigureAwait(false);
+            if (bumps.Count == 0)
+            {
+                return await db.SaveChangesAsync(ct).ConfigureAwait(false);
+            }
+
+            // ⛔ L5-05: ревізія росте відносним `UPDATE … DataRevision + n` В ТІЙ САМІЙ транзакції, що й
+            // дані. Абсолютне `SET DataRevision = N+1` від значення, прочитаного на початку запиту, при
+            // двох паралельних записах давало N+1 замість N+2: кеш переліків довідника (ключ несе
+            // ревізію) до 15 хв віддавав застарілий перелік.
+            var saved = 0;
+            await ExecuteInTransactionAsync(
+                async token =>
+                {
+                    await ApplyRegistryRevisionBumpsAsync(bumps, token).ConfigureAwait(false);
+                    saved = await db.SaveChangesAsync(token).ConfigureAwait(false);
+                },
+                ct).ConfigureAwait(false);
+            return saved;
         }
         catch (DbUpdateConcurrencyException ex)
         {
@@ -122,6 +140,58 @@ public sealed class UnitOfWork(
                 now ??= _clock.UtcNow;
                 entry.Entity.MarkDataChanged(now.Value);
             }
+        }
+    }
+
+    /// <summary>
+    /// Забирає з відстежуваних <see cref="RegistryDef"/> приріст <see cref="RegistryDef.DataRevision"/>
+    /// й повертає властивість до початкового значення, щоб звичайний <c>UPDATE</c> її не перезаписав
+    /// абсолютним числом (L5-05).
+    /// </summary>
+    private List<(int Id, int Delta, Microsoft.EntityFrameworkCore.ChangeTracking.PropertyEntry<RegistryDef, int> Property)> TakeRegistryRevisionBumps()
+    {
+        var bumps = new List<(int, int, Microsoft.EntityFrameworkCore.ChangeTracking.PropertyEntry<RegistryDef, int>)>();
+        foreach (var entry in db.ChangeTracker.Entries<RegistryDef>())
+        {
+            if (entry.State != EntityState.Modified)
+            {
+                continue;
+            }
+
+            var revision = entry.Property(r => r.DataRevision);
+            if (revision.CurrentValue > revision.OriginalValue)
+            {
+                bumps.Add((entry.Entity.Id, revision.CurrentValue - revision.OriginalValue, revision));
+                revision.CurrentValue = revision.OriginalValue;
+            }
+        }
+
+        return bumps;
+    }
+
+    /// <summary>
+    /// Піднімає ревізію даних відносним оновленням і підтягує актуальне значення в трекер (без
+    /// помітки «змінено»), щоб подальші читання в цьому запиті бачили справжню ревізію.
+    /// </summary>
+    private async Task ApplyRegistryRevisionBumpsAsync(
+        List<(int Id, int Delta, Microsoft.EntityFrameworkCore.ChangeTracking.PropertyEntry<RegistryDef, int> Property)> bumps,
+        CancellationToken ct)
+    {
+        foreach (var (id, delta, property) in bumps)
+        {
+            await db.RegistryDefs
+                .Where(d => d.Id == id)
+                .ExecuteUpdateAsync(s => s.SetProperty(d => d.DataRevision, d => d.DataRevision + delta), ct)
+                .ConfigureAwait(false);
+
+            var fresh = await db.RegistryDefs
+                .AsNoTracking()
+                .Where(d => d.Id == id)
+                .Select(d => d.DataRevision)
+                .SingleAsync(ct)
+                .ConfigureAwait(false);
+            property.OriginalValue = fresh;
+            property.CurrentValue = fresh;
         }
     }
 
@@ -377,9 +447,37 @@ public sealed class UnitOfWork(
             return;
         }
 
+        // ⛔ L6-15 (аудит 2026-10-03). Стратегія повторів (1205, обрив з'єднання)
+        // виконує замикання вдруге над ТИМ САМИМ трекером змін. Сутності, які
+        // перша спроба завантажила чи додала, лишалися в ньому: запит другої
+        // спроби повертав уже змінений екземпляр (подання → `wrongState`), а
+        // доданий запис (`ApprovalEvent`) вставлявся двічі. Перед повтором
+        // від'єднується все, що з'явилося в трекері ПІСЛЯ початку першої
+        // спроби: друга спроба читає й додає наново.
+        //
+        // ⚠ Не `ChangeTracker.Clear()`: сутність, завантажену викликачем ДО
+        // транзакції і змінену в замиканні, повтор має зберегти — від'єднана,
+        // вона мовчки не записалася б, а обробник відповів би успіхом.
+        HashSet<object>? trackedBefore = null;
         var strategy = db.Database.CreateExecutionStrategy();
         await strategy.ExecuteAsync(async () =>
         {
+            if (trackedBefore is null)
+            {
+                trackedBefore = db.ChangeTracker.Entries()
+                    .Select(e => e.Entity)
+                    .ToHashSet(ReferenceEqualityComparer.Instance);
+            }
+            else
+            {
+                foreach (var entry in db.ChangeTracker.Entries()
+                             .Where(e => !trackedBefore.Contains(e.Entity))
+                             .ToList())
+                {
+                    entry.State = EntityState.Detached;
+                }
+            }
+
             await using var transaction = await db.Database.BeginTransactionAsync(ct).ConfigureAwait(false);
             await operation(ct).ConfigureAwait(false);
             await transaction.CommitAsync(ct).ConfigureAwait(false);

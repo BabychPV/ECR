@@ -32,14 +32,17 @@ public sealed partial class RowWindowTrigger(
             return;
         }
 
-        var windowColumns = await index.WindowColumnsAsync(change.TableDefId, ct).ConfigureAwait(false);
-        if (windowColumns.Count == 0 || !change.ChangedColumnDefIds.Any(windowColumns.Contains))
-        {
-            return;
-        }
-
+        // ⛔ L6-11: індекс колонок — теж у try. Хук кличуть ПІСЛЯ коміту запису; збій
+        // читання індексу (перше звернення до бази на холодному кеші) давав 500 на вже
+        // збережених даних, і людина повторювала успішну правку.
         try
         {
+            var windowColumns = await index.WindowColumnsAsync(change.TableDefId, ct).ConfigureAwait(false);
+            if (windowColumns.Count == 0 || !change.ChangedColumnDefIds.Any(windowColumns.Contains))
+            {
+                return;
+            }
+
             await jobs
                 .EnqueueCoalescedAsync<IRowWindowFetchJob>(
                     RowWindowFetchTarget.Of(change.TableInstanceId),

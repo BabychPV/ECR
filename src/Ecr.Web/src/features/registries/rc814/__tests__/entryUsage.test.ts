@@ -6,7 +6,6 @@ import {
   hasNamedReferences,
   loadEntryUsage,
   parseFieldLabel,
-  todayIso,
   type EntryUsageDeps,
 } from '../entryUsage';
 
@@ -54,13 +53,6 @@ describe('parseFieldLabel', () => {
     expect(parseFieldLabel('NODOT')).toBeNull();
     expect(parseFieldLabel('.FIELD')).toBeNull();
     expect(parseFieldLabel('REG.')).toBeNull();
-  });
-});
-
-describe('todayIso', () => {
-  it('бере календарний день клієнта, а не UTC', () => {
-    // 00:30 місцевого часу: `toISOString` у додатному поясі дав би вчорашній день.
-    expect(todayIso(new Date(2026, 8, 30, 0, 30))).toBe('2026-09-30');
   });
 });
 

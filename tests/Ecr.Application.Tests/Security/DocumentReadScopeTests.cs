@@ -171,6 +171,32 @@ public sealed class DocumentReadScopeTests
         Assert.True(scope.CanReadTable(Table2));
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-6.6")]
+    public void Аркуш_видимий_без_заборон_закритий_забороною_на_нього_чи_на_всі_його_таблиці()
+    {
+        Assert.All([SheetA, SheetB], s => Assert.True(Scope(Reader()).CanReadSheet(s)));
+        Assert.All(["SA", "SB"], c => Assert.True(Scope(Reader()).CanReadSheetCode(c)));
+
+        // Заборона на аркуш закриває його, сусідній лишається.
+        var sheetDenied = Scope(Reader().Deny(ResourceKind.Sheet, SheetA));
+        Assert.False(sheetDenied.CanReadSheet(SheetA));
+        Assert.False(sheetDenied.CanReadSheetCode("SA"));
+        Assert.True(sheetDenied.CanReadSheet(SheetB));
+
+        // Заборонена одна таблиця з двох - аркуш лишається видимим (бачить іншу).
+        Assert.True(Scope(Reader().Deny(ResourceKind.Table, Table1)).CanReadSheet(SheetA));
+
+        // Заборонені всі таблиці аркуша - аркуша для питального немає.
+        var allTables = Scope(Reader().Deny(ResourceKind.Table, Table1).Deny(ResourceKind.Table, Table2));
+        Assert.False(allTables.CanReadSheet(SheetA));
+        Assert.True(allTables.CanReadSheet(SheetB));
+
+        // Невідомий знімку код - закритий.
+        Assert.False(Scope(Reader()).CanReadSheetCode("NOPE"));
+    }
+
     private static AccessBuilder Reader()
         => new AccessBuilder().Grant(ResourceKind.Project, Project, GrantLevel.Read);
 

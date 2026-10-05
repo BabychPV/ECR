@@ -166,7 +166,8 @@ public sealed class PatchDocumentHeaderHandler(
     IUnitOfWork uow,
     IAuditWriter audit,
     IBackgroundJobScheduler jobs,
-    Domain.Abstractions.IClock clock)
+    Domain.Abstractions.IClock clock,
+    ISheetEditGate documentGate)
 {
     /// <summary>Тип події журналу безпеки.</summary>
     public const string EventType = "DocumentHeaderChanged";
@@ -288,6 +289,18 @@ public sealed class PatchDocumentHeaderHandler(
 
         await uow.ExecuteInTransactionAsync(async innerCt =>
         {
+            // ⛔ L6-02 / L6-06: першими діями — структура документа (спільно; перенос
+            // версії прибирає й переносить поля шапки) і шапка (винятково: подання
+            // бере її спільно, валідує й кладе у зріз). Без цього правка, що
+            // комітилась посеред подання, давала зріз із невалідованою шапкою або
+            // змінювала шапку вже поданого аркуша. Порядок той самий, що в подання:
+            // `doc-structure` → `doc-header`, далі стани аркушів і рядок документа.
+            DocumentStructure.EnsureUnchanged(
+                await documentGate.EnterStructureAsync(documentId, exclusive: false, innerCt).ConfigureAwait(false),
+                templateVersionId,
+                documentId);
+            await documentGate.EnterHeaderAsync(documentId, exclusive: true, innerCt).ConfigureAwait(false);
+
             changed = await PersistAsync(
                 documentId, project, profile, request.BaseVersion, toSave, codeById, userId, innerCt)
                 .ConfigureAwait(false);

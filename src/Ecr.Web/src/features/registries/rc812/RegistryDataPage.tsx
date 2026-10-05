@@ -7,6 +7,7 @@ import { queryKeys } from '@/api/queryKeys';
 import { isExternalRegistry } from '@/features/registries/RegistryEntryEditor';
 import { RegistryExportButton } from '@/features/registries/export/RegistryExportButton';
 import { saveBatch, type RegistryBatchResult, type RegistryRow } from '@/features/registries/rows/api';
+import { formatDateOnly, formatTime, parseDateOnly, todayDateOnly } from '@/shared/format';
 import { localized } from '@/shared/i18n/localized';
 import { t } from '@/shared/i18n';
 import { can, useSession } from '@/shared/session/useSession';
@@ -18,10 +19,7 @@ import { PageHeader } from '@/shared/ui/PageHeader';
 import { registerUnsavedSource } from '@/shared/ui/unsavedSources';
 import { useUrlState } from '@/shared/ui/useUrlState';
 import {
-  dateOfIso,
-  isoOfDate,
   resolveLookups,
-  todayIso,
   useRegistryDefinition,
   useRegistryList,
   useRegistryRows,
@@ -73,7 +71,7 @@ export function RegistryDataPage(): JSX.Element {
   const temporal = definition.data?.isTemporal ?? registry?.isTemporal ?? false;
 
   const [asOfParam, setAsOf] = useUrlState('asOf');
-  const asOf = temporal ? (asOfParam ?? todayIso()) : null;
+  const asOf = temporal ? (asOfParam ?? todayDateOnly()) : null;
   const [search, setSearch] = useUrlState('q');
   const [debouncedSearch] = useDebouncedValue(search ?? '', 300);
   const rows = useRegistryRows(code, asOf, debouncedSearch, definition.isSuccess);
@@ -307,7 +305,7 @@ export function RegistryDataPage(): JSX.Element {
   const name = registry ? localized(registry.nameL10n) : code;
   const openRow = panel?.startsWith('entry-') ? loaded.find((r) => entryPanelId(r.id) === panel) : undefined;
   const status = savedAt !== null
-    ? t('registries.data.saved', { time: savedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) })
+    ? t('registries.data.saved', { time: formatTime(savedAt) })
     : dirty.length > 0
       ? t('registries.data.unsaved', { count: dirty.length })
       : '';
@@ -366,8 +364,8 @@ export function RegistryDataPage(): JSX.Element {
                 size="xs"
                 label={t('registries.data.asOf')}
                 valueFormat="YYYY-MM-DD"
-                value={dateOfIso(asOf)}
-                onChange={(day) => setAsOf(isoOfDate(day))}
+                value={parseDateOnly(asOf)}
+                onChange={(day) => setAsOf(formatDateOnly(day))}
               />
             </Suspense>
           )}

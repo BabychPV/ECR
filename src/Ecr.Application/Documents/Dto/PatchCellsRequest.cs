@@ -64,6 +64,69 @@ public sealed record PatchCellsRequest(
                 ["max"] = MaxCells.ToString(System.Globalization.CultureInfo.InvariantCulture),
             });
     }
+
+    /// <summary>
+    /// Відхиляє батч, де той самий <c>RowKey</c> стоїть двічі або колонка
+    /// повторюється в межах рядка, — ДО будь-якої роботи з базою.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ L6-10: до цього такий батч доходив до <c>ToDictionary</c> (обов'язкові
+    /// входи), до <c>MERGE</c> (8672 — та сама комірка двічі) чи до первинного
+    /// ключа рядка і давав <c>500</c>. Тепер — керована <c>422</c> з переліком:
+    /// котра з двох правок «правильна», сервер не вгадує.
+    ///
+    /// ⚠ Порівняння — <c>Ordinal</c>, як у мапах обробника (<c>RowKey</c>, код
+    /// колонки): саме ці дублі й ламали його. Перелік — рядком через кому:
+    /// шаблон каталогу підставляє лише поля типу <c>string</c>.
+    /// </remarks>
+    /// <exception cref="Errors.BusinessRuleException"><c>ECR-REQ-0422</c>.</exception>
+    public void EnsureNoDuplicates()
+    {
+        if (Rows is null)
+        {
+            return;
+        }
+
+        var rowKeys = Rows
+            .Where(row => row?.RowKey is not null)
+            .GroupBy(row => row.RowKey, StringComparer.Ordinal)
+            .Where(g => g.Count() > 1)
+            .Select(g => g.Key)
+            .ToList();
+        if (rowKeys.Count > 0)
+        {
+            throw new Errors.BusinessRuleException(
+                Ecr.Domain.Errors.ErrorCodes.RequestInvalid,
+                $"Рядки повторюються в батчі: {string.Join(", ", rowKeys)}.",
+                new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["messageKey"] = "err.ECR-REQ-0422.patchDuplicateRowKey",
+                    ["rowKeys"] = string.Join(", ", rowKeys),
+                });
+        }
+
+        foreach (var row in Rows)
+        {
+            var columns = (row?.Cells ?? [])
+                .Where(cell => cell?.ColumnCode is not null)
+                .GroupBy(cell => cell.ColumnCode, StringComparer.Ordinal)
+                .Where(g => g.Count() > 1)
+                .Select(g => g.Key)
+                .ToList();
+            if (columns.Count > 0)
+            {
+                throw new Errors.BusinessRuleException(
+                    Ecr.Domain.Errors.ErrorCodes.RequestInvalid,
+                    $"У рядку «{row!.RowKey}» колонки повторюються: {string.Join(", ", columns)}.",
+                    new Dictionary<string, object?>(StringComparer.Ordinal)
+                    {
+                        ["messageKey"] = "err.ECR-REQ-0422.patchDuplicateCell",
+                        ["rowKey"] = row.RowKey,
+                        ["columnCodes"] = string.Join(", ", columns),
+                    });
+            }
+        }
+    }
 }
 
 /// <summary>

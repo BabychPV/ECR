@@ -135,6 +135,37 @@ public sealed class PatchCellsConflictDetailsTests
     private static CellAddress Address(long rowId = TableRowId, int columnDefId = VolumeColumnId)
         => new(PeriodKey.Parse(Period), rowId, columnDefId);
 
+    /// <summary>Знімок таблиці з <paramref name="columns"/> колонками: <c>Volume</c> і <c>V1…</c>.</summary>
+    private static TemplateVersionSnapshot WideSnapshot(int columns)
+    {
+        var sheet = new SheetDef(
+            templateVersionId: 2, EcrCode.Create("Water"),
+            new LocalizedText(new Dictionary<string, string> { ["en"] = "Water" }), 1);
+        var table = new TableDef(
+            sheetDefId: 1, EcrCode.Create("Main"),
+            new LocalizedText(new Dictionary<string, string> { ["en"] = "Main" }), 1,
+            TableLayoutKind.MonthsInColumns, TableRowMode.Dynamic);
+        typeof(Entity<int>).GetProperty("Id")!.SetValue(table, TableDefId);
+
+        var byId = new Dictionary<int, ColumnDef>();
+        for (var i = 0; i < columns; i++)
+        {
+            var code = i == 0 ? "Volume" : $"V{i}";
+            var column = new ColumnDef(
+                TableDefId, EcrCode.Create(code),
+                new LocalizedText(new Dictionary<string, string> { ["en"] = code }), i + 1, CellDataType.Decimal);
+            var id = i == 0 ? VolumeColumnId : 1000 + i;
+            typeof(Entity<int>).GetProperty("Id")!.SetValue(column, id);
+            table.AddColumn(column);
+            byId[id] = column;
+        }
+
+        sheet.AddTable(table);
+        return new TemplateVersionSnapshot(
+            TemplateVersionId: 2, PresentationRevision: 0, Sheets: [sheet],
+            ColumnsById: byId, RowsByKey: new Dictionary<(int, string), RowDef>());
+    }
+
     /// <summary>Батч, що заявляє застарілу версію рядка.</summary>
     private static PatchCellsRequest StaleRequest(params PatchCell[] cells)
         => new(TableInstance, Period, "UserEdit", [new PatchRow(RowKey, "0x0A", cells)]);
@@ -314,10 +345,14 @@ public sealed class PatchCellsConflictDetailsTests
         StoredValue(new CellValueData { ValueNumeric = 12.40m });
         LastChange(new LastCellChange(TheirMoment, 77, "A. Serikbayev", "UserEdit"));
 
-        // ⚠ Той самий код колонки повторюється навмисно: батч на сотні комірок
-        // — це вставка з буфера, і стеля має спрацювати на КІЛЬКОСТІ комірок, а
-        // не на кількості різних колонок.
-        var cells = Enumerable.Range(0, total).Select(_ => new PatchCell("Volume", 9m)).ToArray();
+        // ⚠ Колонки — РІЗНІ: батч на сотні комірок — це вставка з буфера в
+        // широкий рядок. ✎ L6-10: до цього тут повторювався той самий код
+        // колонки, а такий батч тепер відхиляється раніше (`patchDuplicateCell`,
+        // 422) — у живій базі він і так падав на MERGE 8672.
+        _metadata.GetAsync(2, Arg.Any<CancellationToken>()).Returns(WideSnapshot(total));
+        var cells = Enumerable.Range(0, total)
+            .Select(i => new PatchCell(i == 0 ? "Volume" : $"V{i}", 9m))
+            .ToArray();
 
         var conflict = await Assert.ThrowsAsync<ConcurrencyConflictException>(
             () => Handler().HandleAsync(StaleRequest(cells), CancellationToken.None));

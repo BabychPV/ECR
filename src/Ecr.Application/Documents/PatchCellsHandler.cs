@@ -87,6 +87,10 @@ public sealed partial class PatchCellsHandler(
         // Контролер перевіряє те саме ще раніше; тут — для викликачів поза HTTP.
         request.EnsureWithinCellLimit();
 
+        // ⛔ L6-10: дубль RowKey чи колонки в рядку — 422 тут, а не 500 у
+        // ToDictionary/MERGE/первинному ключі нижче.
+        request.EnsureNoDuplicates();
+
         var context = await LoadContextAsync(request, resolvedInstance, ct).ConfigureAwait(false);
 
         // ⛔ Порожній пакет — no-op (V-02, третій раунд UX-проходу). До цього
@@ -173,20 +177,20 @@ public sealed partial class PatchCellsHandler(
         // вікна рядка, без звернень до бази. Після запису: відкат не ставить підтягування.
         if (rowWindows is not null)
         {
-            await rowWindows
-                .RowsChangedAsync(
-                    new RowWindowChange(
-                        context.Instance.TableInstanceId,
-                        context.Instance.PeriodKey,
-                        context.Instance.TableDefId,
-                        [.. changes.Upserts.Select(u => u.Address.ColumnDefId).Concat(changes.Deletes.Select(d => d.ColumnDefId)).Distinct()]),
-                    ct)
-                .ConfigureAwait(false);
+            await rowWindows.RowsChangedAsync(ChangedColumns(context.Instance, changes), ct).ConfigureAwait(false);
         }
 
         return await BuildResponseAsync(request, context, changes, messages, recalculationJobId, ct)
             .ConfigureAwait(false);
     }
+
+    /// <summary>Записані чи стерті колонки екземпляра — для хука вікон рядків (HSE301 A1).</summary>
+    private static RowWindowChange ChangedColumns(TableInstanceRef instance, CellChangeLists applied)
+        => new(
+            instance.TableInstanceId,
+            instance.PeriodKey,
+            instance.TableDefId,
+            [.. applied.Upserts.Select(u => u.Address.ColumnDefId).Concat(applied.Deletes.Select(d => d.ColumnDefId)).Distinct()]);
 
     /// <summary>
     /// Скільки розбіжних комірок їде в <c>conflicts</c>; решта — лічильником
@@ -2305,6 +2309,14 @@ public sealed partial class PatchCellsHandler(
     private async Task EnsureSheetStillEditableAsync(
         RequestContext context, CellChangeLists changes, CancellationToken ct)
     {
+        // ⛔ L6-02: структура документа — ПЕРШОЮ, до блокування аркуша. Перенос
+        // версії тримає її винятково, тож запис або йде до переносу цілком, або
+        // бачить нову версію і відмовляє, а не пише під старим `ColumnDefId`.
+        DocumentStructure.EnsureUnchanged(
+            await sheetGate.EnterStructureAsync(context.Instance.DocumentId, exclusive: false, ct).ConfigureAwait(false),
+            context.Instance.TemplateVersionId,
+            context.Instance.DocumentId);
+
         if (CreatesRowsUnderCeiling(context))
         {
             await sheetGate

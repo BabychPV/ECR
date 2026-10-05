@@ -436,10 +436,11 @@ public sealed partial class DocumentVersionMigrationTests(SqlServerFixture sql)
     private async Task<Scenario> ArrangeAsync(
         Target target, bool submitted = false, bool publishTarget = true,
         string permission = MigrateDocumentVersionHandler.Permission,
-        GrantLevel grant = GrantLevel.Manage)
+        GrantLevel grant = GrantLevel.Manage, string? extraPermission = null,
+        int periodKey = 202601)
     {
         var builder = new TestDocumentBuilder(sql.ConnectionString);
-        var doc = await builder.BuildAsync(columnCount: 3, rowCount: 2).ConfigureAwait(false);
+        var doc = await builder.BuildAsync(periodKey, columnCount: 3, rowCount: 2).ConfigureAwait(false);
         var tag = doc.SheetCode["SHEET".Length..];
         var now = new DateTime(2026, 1, 16, 9, 0, 0, DateTimeKind.Utc);
 
@@ -531,6 +532,11 @@ public sealed partial class DocumentVersionMigrationTests(SqlServerFixture sql)
         await db.SaveChangesAsync().ConfigureAwait(false);
 
         db.RolePermissions.Add(new RolePermission(role.Id, permission));
+        if (extraPermission is not null)
+        {
+            db.RolePermissions.Add(new RolePermission(role.Id, extraPermission));
+        }
+
         db.RoleAssignments.Add(new RoleAssignment(role.Id, user.Id, null));
         db.ResourceGrants.Add(new ResourceGrant(role.Id, ResourceKind.Project, doc.ProjectId, grant));
         await db.SaveChangesAsync().ConfigureAwait(false);

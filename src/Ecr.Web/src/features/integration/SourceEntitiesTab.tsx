@@ -185,6 +185,8 @@ export function SourceEntitiesTab({
       )}
 
       <AddSourceEntityModal
+        // AN-40 / L9-27: стежка каталогу й обрана позиція належать одному з'єднанню.
+        key={source.id}
         dataSourceId={source.id}
         sourceName={source.code}
         opened={adding}

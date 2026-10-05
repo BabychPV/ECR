@@ -41,15 +41,19 @@ public sealed class DocumentVersionMigrationStore(EcrDbContext db) : IDocumentVe
     }
 
     /// <inheritdoc />
-    public async Task<VersionMigrationScope> ReadScopeAsync(int projectId, CancellationToken ct)
-    {
-        var documentIds = await db.Documents
+    public async Task<IReadOnlyList<long>> ListDocumentIdsAsync(int projectId, CancellationToken ct)
+        => await db.Documents
             .AsNoTracking()
             .Where(d => d.ProjectId == projectId)
             .OrderBy(d => d.Id)
             .Select(d => d.Id)
             .ToListAsync(ct)
             .ConfigureAwait(false);
+
+    /// <inheritdoc />
+    public async Task<VersionMigrationScope> ReadScopeAsync(int projectId, CancellationToken ct)
+    {
+        var documentIds = await ListDocumentIdsAsync(projectId, ct).ConfigureAwait(false);
 
         var cells = await db.Database
             .SqlQuery<CellUsageRow>($"""

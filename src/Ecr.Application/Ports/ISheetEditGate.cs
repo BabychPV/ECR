@@ -56,4 +56,44 @@ public interface ISheetEditGate
     /// <param name="ct">Токен скасування.</param>
     public Task EnterSubmitAsync(
         long documentId, int sheetDefId, PeriodKey periodKey, CancellationToken ct);
+
+    /// <summary>
+    /// Блокування СТРУКТУРИ документа (L6-02): спільне — під будь-який запис у
+    /// документ (комірки, рядки, подання, імпорт, шапка), виняткове — під перенос
+    /// документа на іншу версію шаблону. Повертає <c>Project.TemplateVersionId</c>
+    /// документа, прочитаний ПІСЛЯ того, як блокування взято; <c>null</c> — документа
+    /// немає.
+    /// </summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="exclusive"><c>true</c> — перенос версії; <c>false</c> — запис.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ Навіщо. Перенос (<c>MigrateDocumentVersionHandler</c>) блокував лише рядок
+    /// <c>doc.Project</c>, якого писарі не беруть: правка, що комітилася між
+    /// плануванням переносу і його <c>DELETE</c>, губилась, а правка, що будувала
+    /// контекст ДО переносу, писала під старим <c>ColumnDefId</c>.
+    ///
+    /// ⚠ Порядок блокувань ЗАВЖДИ: <c>doc-structure</c> → <c>doc-header</c> →
+    /// <c>sheet-edit</c>, і структура — ПЕРШОЮ дією транзакції. Перенос бере
+    /// виняткові на всі документи проєкту за зростанням <c>DocumentId</c>.
+    ///
+    /// ⚠ Писар порівнює повернуту версію з тією, за якою будував запит
+    /// (<see cref="Documents.DocumentStructure.EnsureUnchanged"/>): розбіжність —
+    /// <c>409 ECR-DOC-4091 structureChanged</c>, а не запис під чужою структурою.
+    /// </remarks>
+    public Task<int?> EnterStructureAsync(long documentId, bool exclusive, CancellationToken ct);
+
+    /// <summary>
+    /// Блокування ШАПКИ документа (L6-06): виняткове — правка шапки, спільне —
+    /// подання аркуша (воно валідує шапку й кладе її у зріз).
+    /// </summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="exclusive"><c>true</c> — правка шапки; <c>false</c> — подання.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⚠ Окремий ключ, а не <c>doc-structure</c> винятково: інакше кожна правка
+    /// шапки чекала б на всі збереження комірок документа, а вони — на неї.
+    /// Береться ПІСЛЯ структури й ДО блокування аркуша.
+    /// </remarks>
+    public Task EnterHeaderAsync(long documentId, bool exclusive, CancellationToken ct);
 }

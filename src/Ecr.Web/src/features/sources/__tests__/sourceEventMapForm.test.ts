@@ -52,6 +52,7 @@ const Stored: SourceEventMap = {
   filterScope: 'PrimaryElement',
   filterValue: 'Island A',
   isActive: true,
+  rowVersion: '00000000000007D1',
   fields: [
     {
       id: 1,
@@ -199,6 +200,7 @@ describe('тіла запитів', () => {
     expect(toUpdateRequest(formFromMap(Stored))).toEqual({
       volumeMode: 'EventAttribute',
       isActive: true,
+      rowVersion: '00000000000007D1',
       filterAttribute: 'Area',
       filterScope: 'PrimaryElement',
       filterValue: 'Island A',
@@ -223,5 +225,13 @@ describe('тіла запитів', () => {
     expect(paused.isActive).toBe(false);
     expect({ ...paused, isActive: true }).toEqual(toUpdateRequest(formFromMap(Stored)));
     expect(toggleActiveRequest({ ...Stored, isActive: false }).isActive).toBe(true);
+  });
+
+  // AN-40 / L9-06: пауза з рядка переліку несе версію цього рядка — застарілий кеш дає 409, а не мовчки відкочує
+  // чужу правку полів. Новий мапінг версії не має.
+  it('пауза й PUT несуть rowVersion мапінгу, новий мапінг — null', () => {
+    expect(toggleActiveRequest(Stored).rowVersion).toBe('00000000000007D1');
+    expect(toUpdateRequest(formFromMap({ ...Stored, rowVersion: 'ABCD' })).rowVersion).toBe('ABCD');
+    expect(emptyForm().rowVersion).toBeNull();
   });
 });

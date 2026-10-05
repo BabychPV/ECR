@@ -64,6 +64,16 @@ public sealed class SourceEntityConfiguration : IEntityTypeConfiguration<SourceE
         builder.HasIndex(x => new { x.DataSourceId, x.Code })
                .IsUnique().HasDatabaseName("UQ_SourceEntity");
 
+        // AN-34 L4-01: один довідник - одна сутність у з'єднанні. Зв'язки синку
+        // (dic.RegistryExternalKey) беруться за (DataSourceId, RegistryDefId) без
+        // SourceEntityId, тож друга сутність на тому ж довіднику змусила б кожну вважати
+        // зв'язки іншої «зниклими» й вимикати чужі записи щопрогону. Індекс - на ВСІ рядки,
+        // а не лише активні: вимкнена сутність лишає ключі, і повторне ввімкнення
+        // повернуло б дефект. Остаточно - SourceEntityId у ключі (окрема робота).
+        builder.HasIndex(x => new { x.DataSourceId, x.RegistryDefId })
+               .IsUnique().HasDatabaseName("UQ_SourceEntity_Registry")
+               .HasFilter("[RegistryDefId] IS NOT NULL");
+
         builder.HasOne<DataSource>().WithMany().HasForeignKey(x => x.DataSourceId)
                .HasConstraintName("FK_SE_DataSource");
         builder.HasOne<RegistryDef>().WithMany().HasForeignKey(x => x.RegistryDefId)
@@ -353,6 +363,18 @@ public sealed class CollectionCoverageConfiguration : IEntityTypeConfiguration<C
         builder.HasIndex(x => new { x.SourceEntityId, x.CoveredTo }, "IX_CollectionCoverage_SourceEntity_CoveredTo")
                .IncludeProperties(x => x.CoveredFrom)
                .HasFilter("[Status] IS NULL");
+
+        // Події журналу (AN-34 L4-11): дедуп подій синку довідника (`RegistrySyncJob.DedupJournal`)
+        // читає рядки однієї сутності з `Status IS NOT NULL AND PeriodKey IS NULL` у порядку Id,
+        // а острівний індекс вище їх не містить (`Status IS NULL`). Без цього індексу - скан усього
+        // журналу щопрогону синку. Details (nvarchar(1000)) у INCLUDE: перевірка ключа дедупу - без
+        // переходу до кластерного індексу. Фільтр збігається з предикатом запиту дослівно.
+        // ⚠ PeriodKey теж у INCLUDE, хоч у індексі він завжди NULL: без нього оптимізатор,
+        // навіть вибравши цей індекс, робить Key Lookup у кластерний ключ лише щоб перевірити
+        // `PeriodKey IS NULL` (заміряно планом RegistrySyncDedupPlanTests).
+        builder.HasIndex(x => new { x.SourceEntityId, x.Id }, "IX_CollectionCoverage_RegistryEvents")
+               .IncludeProperties(x => new { x.Status, x.PeriodKey, x.Details })
+               .HasFilter("[Status] IS NOT NULL AND [PeriodKey] IS NULL");
     }
 }
 

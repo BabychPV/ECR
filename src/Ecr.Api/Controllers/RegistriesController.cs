@@ -145,7 +145,9 @@ public sealed class RegistriesController(
 
     /// <summary>
     /// Зберігає чернетку опису; опублікований опис не змінюється. Право
-    /// <c>Registry.EditDefinition</c> (`BE-24`).
+    /// <c>Registry.EditDefinition</c> (`BE-24`). Потребує заголовок <c>If-Match</c> з
+    /// <c>definitionVersion</c> опису, з якого збудовано форму: без нього <c>422 ECR-REQ-0422</c>
+    /// (<c>definitionVersionRequired</c>), інша версія — <c>409 ECR-REG-0409</c> (<c>definitionChanged</c>).
     /// </summary>
     /// <param name="code">Код довідника.</param>
     /// <param name="request">Повний стан полів і правил, причина, версія чернетки.</param>
@@ -157,7 +159,11 @@ public sealed class RegistriesController(
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     public async Task<ActionResult<RegistryDefinitionDraftDto>> SaveDraft(
         string code, [FromBody] SaveRegistryDefinitionDraftRequest request, CancellationToken ct)
-        => Ok(await saveDraft.HandleAsync(code, request, ct).ConfigureAwait(false));
+    {
+        // L5-02: `If-Match` = `definitionVersion` опису, з якого збудовано форму; читається вручну, як у `SaveDefinition`.
+        var ifMatch = Request.Headers[Microsoft.Net.Http.Headers.HeaderNames.IfMatch].ToString();
+        return Ok(await saveDraft.HandleAsync(code, request, ct, ifMatch).ConfigureAwait(false));
+    }
 
     /// <summary>
     /// Скасовує чернетку опису без публікації. Право <c>Registry.EditDefinition</c> (`BE-24`).
@@ -299,14 +305,25 @@ public sealed class RegistriesController(
 
         // Понад стелю файл не читається — обробник відмовить після перевірки права.
         var content = string.Empty;
+        var notUtf8 = false;
         if (file.Length <= maxBytes)
         {
-            using var reader = new StreamReader(file.OpenReadStream(), System.Text.Encoding.UTF8);
-            content = await reader.ReadToEndAsync(ct).ConfigureAwait(false);
+            // ⛔ L5-11: строге декодування. Файл із Excel у cp1251 раніше читався з підстановкою «�» і
+            // кирилиця мовчки псувалась; тепер — 422 `entriesCsvNotUtf8` (після перевірки права в обробнику).
+            using var reader = new StreamReader(
+                file.OpenReadStream(), new System.Text.UTF8Encoding(false, throwOnInvalidBytes: true));
+            try
+            {
+                content = await reader.ReadToEndAsync(ct).ConfigureAwait(false);
+            }
+            catch (System.Text.DecoderFallbackException)
+            {
+                notUtf8 = true;
+            }
         }
 
         return Ok(await importEntries
-            .HandleAsync(code, content, file.Length, maxBytes, dryRun, ct)
+            .HandleAsync(code, content, file.Length, maxBytes, dryRun, ct, notUtf8)
             .ConfigureAwait(false));
     }
 

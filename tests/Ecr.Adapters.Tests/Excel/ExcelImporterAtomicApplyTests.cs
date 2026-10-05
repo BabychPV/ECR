@@ -67,6 +67,9 @@ public sealed class ExcelImporterAtomicApplyTests
     private readonly IUnitOfWork _uow = Substitute.For<IUnitOfWork>();
     private readonly IClock _clock = Substitute.For<IClock>();
 
+    /// <summary>Ворота блокувань самого імпорту (не вкладеного <c>PatchCellsHandler</c>).</summary>
+    private readonly ISheetEditGate _importGate = Substitute.For<ISheetEditGate>();
+
     /// <summary>Журнал подій у порядку, у якому вони сталися.</summary>
     private readonly List<string> _trace = [];
 
@@ -221,15 +224,25 @@ public sealed class ExcelImporterAtomicApplyTests
         return JsonSerializer.Serialize(new ImportPlan(DocumentId, Period, tables), Options);
     }
 
-    private ExcelImporter Importer()
+    private ExcelImporter Importer(IRowWindowTrigger? rowWindows = null)
         => new(
             _metadata, _registries, _access, _user, _previews,
             new PatchCellsHandler(
                 _cells, _rows, _documents, _periods, _metadata, _access,
                 new Ecr.Application.Validation.ValidationEngine(new RealFormulaEngine()),
                 _methodologies, _registries, _headers, _audit, Substitute.For<IAuditReader>(),
-                _jobs, _uow, _user, _clock, Substitute.For<ISheetEditGate>(), NSubstitute.Substitute.For<Ecr.Application.Ports.IUnitCatalog>()),
-            new ImportDiffBuilder(), _cells, _rows, _uow, _jobs, Substitute.For<ISheetEditGate>());
+                _jobs, _uow, _user, _clock, Substitute.For<ISheetEditGate>(), NSubstitute.Substitute.For<Ecr.Application.Ports.IUnitCatalog>(),
+                rowWindows),
+            new ImportDiffBuilder(), _cells, _rows, _uow, _jobs, _importGate);
+
+    /// <summary>Хук вікон рядків, що пише кожен виклик у журнал подій.</summary>
+    private IRowWindowTrigger TracingRowWindows()
+    {
+        var trigger = Substitute.For<IRowWindowTrigger>();
+        trigger.When(t => t.RowsChangedAsync(Arg.Any<RowWindowChange>(), Arg.Any<CancellationToken>()))
+               .Do(call => _trace.Add($"rowwindows:{call.ArgAt<RowWindowChange>(0).TableInstanceId}"));
+        return trigger;
+    }
 
     private static IDocumentHeaderStore CreateHeaderStore()
     {
@@ -305,6 +318,54 @@ public sealed class ExcelImporterAtomicApplyTests
             _trace);
         await _jobs.Received(1).EnqueueCoalescedAsync<IFormulaRecalculationJob>(
             Arg.Any<string>(), Arg.Any<object>(), Arg.Any<CancellationToken>());
+    }
+
+    /// <summary>
+    /// L6-11: імпорт книги ставить підтягування вікон рядків ПІСЛЯ коміту — по виклику хука
+    /// на таблицю, як поштучний PATCH.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Мутація: поверніть виклик <c>rowWindows.RowsChangedAsync</c> у цикл відповідей
+    /// <c>HandleWorkbookAsync</c> (а <c>NotifyRowWindowsAsync</c> зробіть порожнім) — «rowwindows»
+    /// стає перед «tx:commit», червоніє.
+    /// </remarks>
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Directive", "HSE301-A1")]
+    [Trait("Audit", "L6-11")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Імпорт_ставить_підтягування_вікон_після_коміту(bool enlist)
+    {
+        _jobs.EnlistsInCallerTransaction.Returns(enlist);
+
+        await Importer(TracingRowWindows()).ApplyAsync(DocumentId, Token, CancellationToken.None);
+
+        var commit = _trace.IndexOf("tx:commit");
+        Assert.True(commit >= 0, string.Join(" ", _trace));
+        Assert.Equal(
+            ["rowwindows:501", "rowwindows:502", "rowwindows:503"],
+            _trace.Skip(commit + 1).Where(e => e.StartsWith("rowwindows:", StringComparison.Ordinal)));
+        Assert.DoesNotContain(_trace.Take(commit), e => e.StartsWith("rowwindows:", StringComparison.Ordinal));
+    }
+
+    /// <summary>L6-11: відкат книги не ставить підтягування вікон жодної таблиці.</summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Directive", "HSE301-A1")]
+    [Trait("Audit", "L6-11")]
+    public async Task Відкат_імпорту_не_ставить_підтягування_вікон()
+    {
+        _cells.When(c => c.ApplyAsync(
+                  Arg.Is<CellChangeSet>(s => s.TableInstanceId == 502L), Arg.Any<CancellationToken>()))
+              .Do(_ => throw new ConcurrencyConflictException(
+                  "ECR-CELL-0409", "Дані змінилися після того, як ви їх прочитали.",
+                  new Dictionary<string, object?> { ["messageKey"] = "err.ECR-CELL-0409.batchStale" }));
+
+        await Assert.ThrowsAsync<ConcurrencyConflictException>(
+            () => Importer(TracingRowWindows()).ApplyAsync(DocumentId, Token, CancellationToken.None));
+
+        Assert.Equal(["tx:open", "write:501", "write:502", "tx:rollback"], _trace);
     }
 
     [Fact]
@@ -389,5 +450,60 @@ public sealed class ExcelImporterAtomicApplyTests
         var conflicts = Assert.IsAssignableFrom<IEnumerable<CellConflictDto>>(error.Details!["conflicts"]);
         Assert.Equal(expectedConflicts, conflicts.Count());
         Assert.Equal("err.ECR-CELL-0409.batchStale", error.Details["messageKey"]);
+    }
+
+    /// <summary>
+    /// L6-08 (аудит 2026-10-03): рядок книги без версії в перегляді (його не стало між
+    /// експортом і переглядом) — конфлікт «рядок змінився», а не створення рядка.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Що було: такий рядок ішов у <c>PatchCellsHandler</c> з <c>baseVersion = null</c>,
+    /// тобто з наміром СТВОРИТИ (R-B2): видалений рядок мовчки відтворювався, а в таблиці
+    /// зі стелею створення брало виняткове блокування аркуша поверх уже взятого спільного.
+    /// Мутація: повернути <c>diff.RowVersions.GetValueOrDefault(g.Key)</c> у <c>ApplyAsync</c> —
+    /// перелік версій у запиті знову містить null.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait("Finding", "L6-08")]
+    public async Task Рядок_без_версії_в_перегляді_не_йде_наміром_створити()
+    {
+        _previews.FindAsync(Token, Arg.Any<CancellationToken>()).Returns(JsonSerializer.Serialize(
+            new ImportPlan(
+                DocumentId,
+                Period,
+                [new TableDiff(Instances[0], Period, [new ImportChange("R1", "Volume", 5m, 10m)], [], new Dictionary<string, string>())]),
+            Options));
+        _access.ReadScopeAsync(Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
+            .Returns(_ => ReadScopes.Everything(Snapshot()));
+
+        var error = await Assert.ThrowsAsync<ConcurrencyConflictException>(
+            () => Importer().ApplyAsync(DocumentId, Token, CancellationToken.None));
+
+        Assert.StartsWith("ECR-CELL-0409", error.ErrorCode, StringComparison.Ordinal);
+        await _rows.DidNotReceiveWithAnyArgs().CreateRowsAsync(default, default, default!, default, default);
+        Assert.DoesNotContain(_trace, e => e.StartsWith("write:", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// AN-36b (рев'ю AN-36, P3-2): імпорт бере блокування структури документа спільно
+    /// і один раз (L6-02).
+    /// </summary>
+    /// <remarks>
+    /// Мутація: прибрати <c>EnterStructureAsync</c> у <c>ApplyAsync</c> — виклику немає,
+    /// тест червоний.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait("Finding", "L6-02")]
+    public async Task Імпорт_бере_структуру_документа_спільно_один_раз()
+    {
+        await Importer().ApplyAsync(DocumentId, Token, CancellationToken.None);
+
+        // ⚠ Аркушів цей опудальний світ не має (їх список — з метаданих), тож порядок
+        // «структура → аркуші» тут видно лише як «структура — один раз і спільно»;
+        // сам порядок перевіряє книжковий тест (`PatchCellsWorkbookTests.LockOrder`).
+        await _importGate.Received(1).EnterStructureAsync(DocumentId, false, Arg.Any<CancellationToken>());
+        await _importGate.DidNotReceive().EnterStructureAsync(DocumentId, true, Arg.Any<CancellationToken>());
     }
 }

@@ -25,6 +25,9 @@ public sealed class ProbeSourcePathHandlerTests
     private const string ElementPath = @"\Db\Unit-01";
     private static readonly DateTime Now = new(2026, 6, 1, 12, 0, 0, DateTimeKind.Utc);
 
+    /// <summary>Запобіжник від зависання тесту — у 300 разів довший за межу політики в ньому (200 мс).</summary>
+    private static readonly TimeSpan HangGuard = TimeSpan.FromSeconds(60);
+
     private readonly IDataSourceStore _store = Substitute.For<IDataSourceStore>();
     private readonly ISourceCatalogReader _reader = Substitute.For<ISourceCatalogReader>();
     private readonly IExternalDataSource _adapter = Substitute.For<IExternalDataSource>();
@@ -128,18 +131,25 @@ public sealed class ProbeSourcePathHandlerTests
     [Trait("Requirement", "ФВ-13.17")]
     public async Task Джерело_що_мовчить_за_межею_дає_503_а_не_висить()
     {
+        var seen = CancellationToken.None;
         _reader.AttributesAsync(SourceId, ElementPath, Arg.Any<CancellationToken>())
-            .Returns(call => Hang(call.Arg<CancellationToken>()));
+            .Returns(call => Hang(seen = call.Arg<CancellationToken>()));
 
         var handler = new ProbeSourcePathHandler(
             _store, _reader, [_adapter], new SourceCatalogPolicy(TimeSpan.FromMilliseconds(200)), _access, _user,
             _clock);
 
+        // ⚠ Зовнішня межа — лише запобіжник від справжнього зависання, а не вимір межі політики: під навантаженням
+        // CI (весь Ecr.sln паралельно) таймер і продовження пулу потоків запізнювались понад колишні 5 с, і тест
+        // падав TimeoutException із цього ж WaitAsync (прогін 37296823643), хоча обробник поводився правильно.
         var refused = await Assert.ThrowsAsync<BusinessRuleException>(
-            () => handler.HandleAsync(SourceId, $@"{ElementPath}|Flow", default).WaitAsync(TimeSpan.FromSeconds(5)));
+            () => handler.HandleAsync(SourceId, $@"{ElementPath}|Flow", default).WaitAsync(HangGuard));
 
         Assert.Equal("ECR-INT-0503", refused.ErrorCode);
         Assert.Equal("err.ECR-INT-0503.probeTimeout", refused.Details!["messageKey"]);
+
+        // Межу скасувала саме політика: читач каталогу отримав обмежений токен, а не токен виклику (той — None).
+        Assert.True(seen.IsCancellationRequested);
     }
 
     [Fact]

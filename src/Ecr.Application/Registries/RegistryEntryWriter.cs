@@ -647,7 +647,12 @@ public sealed class RegistryEntryWriter(
             return new RegistryEntryWriteResult(added, updated, unchanged, errors, Applied: false) { Rows = written };
         }
 
-        await SaveBatchAsync(definition, keyDefs, keyDefs.Count > 0 ? staged : [], valueChanges, userId, beforeSave: null, ct)
+        // ⛔ L5-13: прогін із заглушковими кодами (dryRun сітки) відкотиться, тож ревізію даних не рухаємо —
+        // інакше кожна жива перевірка (кожні ~600 мс) робила справжній UPDATE cfg.RegistryDef і тримала
+        // його блокування до відкату, гальмуючи сусідні записи.
+        await SaveBatchAsync(
+                definition, keyDefs, keyDefs.Count > 0 ? staged : [], valueChanges, userId, beforeSave: null, ct,
+                bumpRevision: !placeholderAutoCodes)
             .ConfigureAwait(false);
 
         return new RegistryEntryWriteResult(added, updated, unchanged, errors, Applied: true) { Rows = written };
@@ -746,6 +751,9 @@ public sealed class RegistryEntryWriter(
     /// <param name="userId">Автор події аудиту.</param>
     /// <param name="beforeSave">Запис виклику в тій самій транзакції перед збереженням (журнал імпорту).</param>
     /// <param name="ct">Токен скасування.</param>
+    /// <param name="bumpRevision">
+    /// Піднімати <c>DataRevision</c>; <c>false</c> — лише для прогону, який відкотиться (dryRun сітки).
+    /// </param>
     internal async Task SaveBatchAsync(
         RegistryDef definition,
         IReadOnlyList<RegistryKeyDef> keyDefs,
@@ -753,9 +761,13 @@ public sealed class RegistryEntryWriter(
         IReadOnlyList<(RegistryEntry Entry, IReadOnlyList<RegistryValueFieldChange> Changes)> valueChanges,
         int userId,
         Func<CancellationToken, Task>? beforeSave,
-        CancellationToken ct)
+        CancellationToken ct,
+        bool bumpRevision = true)
     {
-        definition.BumpDataRevision();
+        if (bumpRevision)
+        {
+            definition.BumpDataRevision();
+        }
 
         await uow.ExecuteInTransactionAsync(async innerCt =>
         {

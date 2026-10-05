@@ -27,6 +27,15 @@ namespace Ecr.Application.Sources;
 /// (<c>GET /data-sources/{id}/catalog</c>); повторне звернення до чужої
 /// системи зробило б заведення конфігурації залежним від того, чи відповідає
 /// PI саме зараз, — а збір за неіснуючим кодом і так видно в журналі покриття.
+///
+/// ✎ AN-40 / L9-27: виняток — КОРІНЬ каталогу, і лише для шляхів AF
+/// (<c>\\сервер\база\…</c>). Шухляда одного з'єднання, перевикористана для
+/// іншого, слала шлях каталогу A з <c>dataSourceId</c> B, і сервер це приймав:
+/// сутність B збирала б дані бази A. Тому, коли корінь каталогу з'єднання
+/// читається, шлях мусить лежати в одній із його баз AF — інакше
+/// <c>422 sourceEntityPathForeign</c>. Корінь не прочитався (джерело лежить,
+/// межа очікування, не AF) — перевірка пропускається, і заведення не залежить
+/// від доступності PI, як і раніше.
 /// </remarks>
 public sealed class CreateSourceEntityHandler(
     ICollectionStore sources,
@@ -35,7 +44,9 @@ public sealed class CreateSourceEntityHandler(
     ICurrentUser currentUser,
     IUnitOfWork uow,
     IAuditWriter audit,
-    IClock clock)
+    IClock clock,
+    ISourceCatalogReader catalog,
+    SourceCatalogPolicy catalogPolicy)
 {
     /// <summary>Право на керування інтеграцією (`02-contracts.md` §9).</summary>
     public const string Permission = "Integration.Manage";
@@ -101,8 +112,11 @@ public sealed class CreateSourceEntityHandler(
                 });
         }
 
+        var path = Blank(command.EntityPath);
+        await RequirePathOfSourceAsync(dataSource, path, ct).ConfigureAwait(false);
+
         var entity = new SourceEntity(dataSource.Id, code, kind);
-        entity.Describe(Blank(command.DisplayName), Blank(command.EntityPath));
+        entity.Describe(Blank(command.DisplayName), path);
 
         // ФВ-12.10: заведення сутності збору лишає слід у журналі структурних змін (в одній транзакції).
         SourceEntity? created = null;
@@ -121,6 +135,75 @@ public sealed class CreateSourceEntityHandler(
     }
 
     private static string? Blank(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    /// <summary>
+    /// База AF шляху — <c>\\сервер\база</c>; <c>null</c> — шлях не AF (SQL-джерело, відносний шлях) або коротший
+    /// за «сервер\база\елемент».
+    /// </summary>
+    /// <param name="path">Шлях з каталогу.</param>
+    public static string? AfDatabaseOf(string? path)
+    {
+        if (path is null || !path.StartsWith(@"\\", StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        var parts = path[2..].Split('\\');
+
+        return parts.Length < 3 || parts[0].Length == 0 || parts[1].Length == 0 || parts[2].Length == 0
+            ? null
+            : $@"\\{parts[0]}\{parts[1]}";
+    }
+
+    /// <summary>
+    /// Шлях AF має лежати в базі, яку віддає корінь каталогу з'єднання (L9-27); коли корінь не прочитано —
+    /// без перевірки.
+    /// </summary>
+    private async Task RequirePathOfSourceAsync(DataSource dataSource, string? path, CancellationToken ct)
+    {
+        var database = AfDatabaseOf(path);
+        if (database is null)
+        {
+            return;
+        }
+
+        HashSet<string> known;
+        using (var bounded = CancellationTokenSource.CreateLinkedTokenSource(ct))
+        {
+            bounded.CancelAfter(catalogPolicy.Timeout);
+
+            try
+            {
+                var roots = await catalog.BrowseAsync(dataSource.Id, null, bounded.Token).ConfigureAwait(false);
+                known = new HashSet<string>(
+                    roots.Select(r => AfDatabaseOf(r.EntityPath)).OfType<string>(),
+                    StringComparer.OrdinalIgnoreCase);
+            }
+
+            // ⚠ Будь-яка відмова читання — «не знаємо», а не «чуже»: заведення конфігурації не залежить від того,
+            // чи відповідає PI саме зараз (див. remarks класу). Скасування самого запиту — не ковтається.
+            catch (Exception e) when (e is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                return;
+            }
+        }
+
+        if (known.Count == 0 || known.Contains(database))
+        {
+            return;
+        }
+
+        throw new BusinessRuleException(
+            ErrorCodes.RequestInvalid,
+            $"Шлях «{path}» не належить каталогу з'єднання «{dataSource.Code}»: його база AF — {string.Join(", ", known.Order(StringComparer.OrdinalIgnoreCase))}.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-REQ-0422.sourceEntityPathForeign",
+                ["path"] = path,
+                ["dataSource"] = dataSource.Code,
+                ["database"] = string.Join(", ", known.Order(StringComparer.OrdinalIgnoreCase)),
+            });
+    }
 }
 
 /// <summary>
@@ -204,6 +287,19 @@ public sealed class BindSourceEntityRegistryHandler(
                 .ConfigureAwait(false);
         }
 
+        // ⛔ AN-34 L4-01: один довідник - одна сутність у з'єднанні. Зв'язки синку довідника
+        // (dic.RegistryExternalKey) тримаються за парою (з'єднання, довідник) без сутності, тож
+        // друга сутність змусила б кожну вважати зв'язки іншої «зниклими» й вимикати чужі записи
+        // щопрогону. Перевірка ДО запису, а не спіймане порушення UQ_SourceEntity_Registry (його
+        // ловить лише гонку - CollectionStore.SaveSourceEntityAsync). Після перевірок прав: чужу
+        // прив'язку бачить лише той, кому дозволено прив'язувати.
+        if (registryDefId is { } bindTo
+            && entity.RegistryDefId != bindTo
+            && await sources.RegistryBoundByOtherEntityAsync(entity.DataSourceId, bindTo, entity.Id, ct).ConfigureAwait(false))
+        {
+            throw AlreadyBound(entity.DataSourceId, bindTo);
+        }
+
         var before = IntegrationConfigAudit.Snapshot(entity);
         entity.BindRegistry(registryDefId);
 
@@ -230,6 +326,27 @@ public sealed class BindSourceEntityRegistryHandler(
 
         return SourceEntityDto.From(entity);
     }
+
+    /// <summary>Ключ каталогу: довідник цього з'єднання вже тримає інша сутність збору.</summary>
+    public const string RegistryAlreadyBoundKey = "err.ECR-INT-0409.registryAlreadyBound";
+
+    /// <summary>
+    /// Відмова «довідник уже прив'язаний до іншої сутності цього з'єднання» (<c>409 ECR-INT-0409</c>):
+    /// спільна для перевірки обробника й для порушення <c>UQ_SourceEntity_Registry</c> у сховищі.
+    /// </summary>
+    /// <param name="dataSourceId">З'єднання.</param>
+    /// <param name="registryDefId">Довідник.</param>
+    public static BusinessRuleException AlreadyBound(int dataSourceId, int registryDefId)
+        => new(
+            ErrorCodes.EntityFieldMapStateConflict,
+            $"Довідник {registryDefId} уже прив'язаний до іншої сутності збору цього з'єднання ({dataSourceId}): " +
+            "одному довіднику - одна сутність на з'єднання; спершу відв'яжіть іншу.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = RegistryAlreadyBoundKey,
+                ["registryDefId"] = registryDefId.ToString(CultureInfo.InvariantCulture),
+                ["dataSourceId"] = dataSourceId.ToString(CultureInfo.InvariantCulture),
+            });
 }
 
 /// <summary>Налаштування нової сутності збору — позиція каталогу джерела.</summary>

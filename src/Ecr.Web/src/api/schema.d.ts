@@ -4698,6 +4698,9 @@ export interface paths {
          *     ЦЕЙ маршрут лишається закритим: він обслуговує редактор перекладів і
          *     поля локалізованих назв, тобто вже автентифіковані екрани, і відкривати
          *     його заради екрана входу не було потреби.
+         *
+         *     ✎ AN-40 / L9-13: кожна мова несе `hasTranslations` — перемикач мови в меню користувача більше не тягне
+         *     повні каталоги всіх мов, щоб вирішити, які показувати.
          */
         get: {
             parameters: {
@@ -9148,7 +9151,9 @@ export interface paths {
             };
         };
         /** Зберігає чернетку опису; опублікований опис не змінюється. Право
-         *     `Registry.EditDefinition` (`BE-24`). */
+         *     `Registry.EditDefinition` (`BE-24`). Потребує заголовок `If-Match` з
+         *     `definitionVersion` опису, з якого збудовано форму: без нього `422 ECR-REQ-0422`
+         *     (`definitionVersionRequired`), інша версія — `409 ECR-REG-0409` (`definitionChanged`). */
         put: {
             parameters: {
                 query?: never;
@@ -13132,6 +13137,9 @@ export interface paths {
          *     `svc-integration`, тож прив'язка — делегування права на його дані.
          *     Без права — `403 ECR-AUTH-0403`. `D-202`, доповнення 2026-09-29
          *     (`docs/tz/10-decisions.md` §1.19) — судження розробки, на підтвердження.
+         *     Одна сутність на довідник у з'єднанні (AN-34 L4-01): довідник, який уже тримає
+         *     інша сутність цього з'єднання (активна чи вимкнена), — `409 ECR-INT-0409`
+         *     (`err.ECR-INT-0409.registryAlreadyBound`); відв'язка першої звільняє довідник.
          */
         put: {
             parameters: {
@@ -13176,6 +13184,17 @@ export interface paths {
                 };
                 /** @description Not Found */
                 404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -20058,6 +20077,11 @@ export interface components {
         LanguageDto: {
             /** @description Код мови, напр. `en`. */
             code: string;
+            /** @description Чи є в мові хоч один власний переклад (`R-16`, AN-40 / L9-13); `null` — сервер цього не рахував
+             *     (анонімний `bootstrap`, підробки), і клієнт вирішує сам за каталогом.
+             *     ⛔ `null` у JSON не пишеться: анонімний `GET /public/bootstrap` віддає рівно три поля мови
+             *     (`PublicBootstrapTests`), і нове поле туди не просочується. */
+            hasTranslations?: null | boolean;
             /** @description Чи це мова за замовчуванням; така рівно одна. */
             isDefault: boolean;
             /** @description Назва мови нею самою: «Русский», «Қазақша». */
@@ -24209,6 +24233,10 @@ export interface components {
             id: number;
             /** @description Чи діє синхронізація за мапінгом. */
             isActive: boolean;
+            /** @description Версія для оптимістичного блокування (hex, AN-40 / L9-06): клієнт повертає її в
+             *     `rowVersion` запиту на зміну, і пауза зі застарілого рядка переліку дає `409`,
+             *     а не мовчки відкочує чужу правку полів. */
+            rowVersion: string;
             /**
              * Format: int32
              * @description Сутність-шаблон подій.
@@ -25335,6 +25363,9 @@ export interface components {
             filterValue: null | string;
             /** @description Чи діє синхронізація за мапінгом (пауза — `false`). */
             isActive: boolean;
+            /** @description Версія, яку бачив клієнт (`rowVersion` мапінгу); інша — `409`; `null` — без
+             *     перевірки (необов'язкове поле: наявні споживачі контракту не ламаються). */
+            rowVersion?: null | string;
             /** @description Звідки береться об'єм. */
             volumeMode: components["schemas"]["SourceEventVolumeMode"];
         };

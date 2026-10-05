@@ -26,7 +26,7 @@ import { useFieldDraft } from '@/shared/ui/useFieldDraft';
 import { useUrlNumber, useUrlParamsSetter, useUrlState } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
 import { localized } from '@/shared/i18n/localized';
-import { formatDate, formatDecimal } from '@/shared/format';
+import { formatDate, formatDecimal, todayDateOnly } from '@/shared/format';
 
 /**
  * Журнал змін комірок (`ФВ-6.13`).
@@ -510,8 +510,5 @@ function isoDaysAgo(days: number): string {
   const date = new Date();
   date.setDate(date.getDate() - days);
 
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-
-  return `${date.getFullYear()}-${month}-${day}`;
+  return todayDateOnly(date);
 }

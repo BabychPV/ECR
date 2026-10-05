@@ -215,6 +215,65 @@ public sealed class PatchCellsTests
     private static PatchCellsRequest Request(params PatchRow[] rows)
         => new(TableInstance, Period, "UserEdit", rows);
 
+    /// <summary>
+    /// L6-10: та сама колонка двічі в рядку — <c>422</c> з переліком до будь-якого звернення до бази.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Мутація: приберіть <c>request.EnsureNoDuplicates()</c> у <c>HandleAsync</c> — батч доходить до
+    /// запису (у живій базі — <c>MERGE</c> 8672 і <c>500</c>), тест червоніє.
+    /// </remarks>
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Audit", "L6-10")]
+    public async Task Дубль_колонки_в_рядку_батчу_дає_422_до_роботи_з_базою()
+    {
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(() => Handler().HandleAsync(
+            Request(new PatchRow("7001001", "0x0A", [new PatchCell("Volume", 1m), new PatchCell("Volume", 2m)])),
+            CancellationToken.None));
+
+        Assert.Equal("ECR-REQ-0422", error.ErrorCode);
+        Assert.Equal("err.ECR-REQ-0422.patchDuplicateCell", error.Details!["messageKey"]);
+        Assert.Equal("7001001", error.Details["rowKey"]);
+        Assert.Equal("Volume", error.Details["columnCodes"]);
+        Assert.Empty(_rows.ReceivedCalls());
+        await _cells.DidNotReceiveWithAnyArgs().ApplyAsync(default!, default);
+    }
+
+    /// <summary>L6-10: той самий <c>RowKey</c> двічі в батчі — <c>422</c>, а не первинний ключ рядка.</summary>
+    /// <remarks>⛔ Мутація: та сама, що вище, — червоніє.</remarks>
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Audit", "L6-10")]
+    public async Task Дубль_RowKey_у_батчі_дає_422_до_роботи_з_базою()
+    {
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(() => Handler().HandleAsync(
+            Request(
+                new PatchRow("NEW1", null, [new PatchCell("Volume", 1m)]),
+                new PatchRow("7001001", "0x0A", [new PatchCell("Volume", 3m)]),
+                new PatchRow("NEW1", null, [new PatchCell("Volume", 2m)])),
+            CancellationToken.None));
+
+        Assert.Equal("ECR-REQ-0422", error.ErrorCode);
+        Assert.Equal("err.ECR-REQ-0422.patchDuplicateRowKey", error.Details!["messageKey"]);
+        Assert.Equal("NEW1", error.Details["rowKeys"]);
+        Assert.Empty(_rows.ReceivedCalls());
+        await _cells.DidNotReceiveWithAnyArgs().ApplyAsync(default!, default);
+    }
+
+    /// <summary>
+    /// L6-10, межа перевірки: та сама колонка в РІЗНИХ рядках і ключі, що різняться регістром, — не дубль
+    /// (обробник порівнює <c>Ordinal</c>).
+    /// </summary>
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Audit", "L6-10")]
+    public void Та_сама_колонка_в_різних_рядках_не_дубль()
+    {
+        var request = Request(
+            new PatchRow("a", null, [new PatchCell("Volume", 1m), new PatchCell("RegistryLink", null)]),
+            new PatchRow("A", null, [new PatchCell("Volume", 2m), new PatchCell("volume", 3m)]));
+
+        request.EnsureNoDuplicates();
+        new PatchCellsRequest(TableInstance, Period, "UserEdit", null!).EnsureNoDuplicates();
+    }
+
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
     public async Task Значення_записується_і_повертається_нова_версія_рядка()
     {

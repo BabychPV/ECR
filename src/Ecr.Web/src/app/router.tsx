@@ -196,6 +196,32 @@ const devRoutes = import.meta.env.DEV
           </Chunk>
         ),
       },
+      {
+        // ⚠ Стенд черги клавіш у справжньому RevoGrid (T3-01 → T4-01), міряє `e2e/keyCommitGateLive.spec.ts`.
+        path: '/_key-commit-gate',
+        element: (
+          <Chunk>
+            {createElement(
+              lazy(async () => ({
+                default: (await import('@/pages/KeyCommitGateStandPage')).KeyCommitGateStandPage,
+              })),
+            )}
+          </Chunk>
+        ),
+      },
+      {
+        // ⚠ Те саме у справжньому `DocumentGrid` із сервером у браузері (T5-01).
+        path: '/_key-commit-gate/document',
+        element: (
+          <Chunk>
+            {createElement(
+              lazy(async () => ({
+                default: (await import('@/pages/DocumentGridGateStandPage')).DocumentGridGateStandPage,
+              })),
+            )}
+          </Chunk>
+        ),
+      },
     ]
   : [];
 

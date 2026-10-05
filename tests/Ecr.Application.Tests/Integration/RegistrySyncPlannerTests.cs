@@ -38,7 +38,9 @@ namespace Ecr.Application.Tests.Integration;
 /// <item>автостворення й для <c>Hybrid</c> — червоний випадок <c>(Hybrid, true)</c> того ж тесту;</item>
 /// <item>код = ім'я і в <c>CodeMode = Auto</c> — червоний <see cref="External_CodeMode_Auto_лишає_код_writer_у"/>;</item>
 /// <item>вимкнений мапінг пише в новий запис — червоний
-/// <see cref="External_новий_елемент_повного_знімка_створює_запис_з_кодом_за_іменем"/>;</item>
+/// <see cref="External_новий_елемент_повного_знімка_створює_запис_з_назвою_за_іменем"/>;</item>
+/// <item>Manual створює запис з імені AF (L4-13, Q6=C) — червоний
+/// <see cref="L4_13_Manual_не_створює_запис_з_імені_AF_а_пише_подію_з_причиною"/>;</item>
 /// <item><c>Ignore</c> як <c>MarkOrphaned</c> — червоні обидва <c>Ignore</c>-випадки
 /// <see cref="Ignore_і_Local_лише_подія_SourceMissing"/>;</item>
 /// <item>позначка зникнення щоразу, а не лише першого разу — червоні <c>alreadyMarked</c>-випадки
@@ -136,6 +138,71 @@ public sealed class RegistrySyncPlannerTests
         var update = Assert.Single(plan.Updates);
         Assert.Equal(new RegistrySyncUpdate(EntryId, LimitField, "LIMIT", 12.5m, 15m), update);
         Assert.Empty(plan.Events);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-8.11")]
+    public void Число_з_масштабом_понад_16_не_дає_оновлення()
+    {
+        // L4-04: колонка decimal(34,16) округлює, тож збережене 1.1234567890123457 і джерело
+        // 1.12345678901234567890 - те саме значення; інакше «оновлення» щопрогону.
+        var input = Input(
+            RegistrySourceKind.External,
+            element: Element(("Permit_Limit", 1.12345678901234567890m)),
+            current: Values((LimitField, 1.1234567890123457m, false)),
+            Limit);
+
+        Assert.True(RegistrySyncPlanner.Plan(input).IsEmpty);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-8.10")]
+    public void Зв_язок_видаленого_запису_лише_подія_externalKeyOnDeletedEntry()
+    {
+        // L4-12: елемент є в знімку, а його запис видалено - раніше тихе ігнорування.
+        var input = Input(
+            RegistrySourceKind.External,
+            element: Element(("Permit_Limit", 15m)),
+            current: Values(),
+            Limit) with
+        {
+            Links = [new RegistrySyncLink(Guid1, EntryId, Path1, EntryDeleted: true)],
+            Entries = [],
+        };
+
+        var plan = RegistrySyncPlanner.Plan(input);
+
+        Assert.Empty(plan.Updates);
+        Assert.Empty(plan.Creates);
+        var unlinked = Assert.Single(plan.Events);
+        Assert.Equal(RegistrySyncEventKind.ElementUnlinked, unlinked.Kind);
+        Assert.Equal(Guid1, unlinked.ExternalId);
+        Assert.Equal(EntryId, unlinked.RegistryEntryId);
+        Assert.Equal(RegistrySyncPlanner.EntryDeletedReason, unlinked.Reason);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-8.10")]
+    public void Зв_язок_видаленого_запису_не_переприв_язується_і_не_позначається_зниклим()
+    {
+        // Зв'язок на видалений запис зник зі знімка, а на його шляху з'явився новий елемент.
+        var input = Relink(
+            RegistrySourceKind.External,
+            [new RegistrySyncSourceElement("NEW-GUID", Path1, Attrs(), "FL-01")]) with
+        {
+            Links = [new RegistrySyncLink(Guid1, EntryId, Path1, EntryDeleted: true)],
+            Entries = [],
+        };
+
+        var plan = RegistrySyncPlanner.Plan(input);
+
+        Assert.Empty(plan.Relinks);
+        Assert.Empty(plan.MissingMarks);
+        Assert.Empty(plan.Deactivations);
+        Assert.DoesNotContain(plan.Events, e => e.Kind == RegistrySyncEventKind.SourceMissing);
     }
 
     [Fact]
@@ -366,7 +433,7 @@ public sealed class RegistrySyncPlannerTests
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait("Requirement", "ФВ-8.10")]
-    public void External_новий_елемент_повного_знімка_створює_запис_з_кодом_за_іменем()
+    public void External_новий_елемент_повного_знімка_створює_запис_з_назвою_за_іменем()
     {
         var note = new RegistrySyncFieldMapping(NoteField, "NOTE", CellDataType.String, null, "Note", IsActive: false);
         var input = Unlinked(
@@ -387,7 +454,7 @@ public sealed class RegistrySyncPlannerTests
         var create = Assert.Single(plan.Creates);
         Assert.Equal("NEW-GUID", create.ExternalId);
         Assert.Equal(@"\\AF\ECR\Flares\FL-99", create.ExternalPath);
-        Assert.Equal("FL-99", create.Code);
+        Assert.Null(create.Code);
         Assert.Equal("FL-99", create.DisplayName);
 
         // Порожнє значення (Name = null) і вимкнений мапінг у новий запис не йдуть.
@@ -422,6 +489,32 @@ public sealed class RegistrySyncPlannerTests
         Assert.Null(create.Code);
         Assert.Equal("ПК-3 (370-220) лето", create.DisplayName);
         Assert.Empty(create.Values);
+    }
+
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "D-212")]
+    [InlineData("FL-99")]
+    [InlineData("ПК-3 (370-220) лето")]
+    public void L4_13_Manual_не_створює_запис_з_імені_AF_а_пише_подію_з_причиною(string name)
+    {
+        // Q6=C (HU-11): ім'я не нормалізується й не стає кодом; створення лише в Auto.
+        var input = Unlinked(
+            RegistrySourceKind.External,
+            complete: true,
+            new RegistrySyncSourceElement("NEW-GUID", null, Attrs(), Name: name),
+            Limit) with
+        {
+            CodeMode = RegistryCodeMode.Manual,
+        };
+
+        var plan = RegistrySyncPlanner.Plan(input);
+
+        Assert.Empty(plan.Creates);
+        var unlinked = Assert.Single(plan.Events);
+        Assert.Equal(RegistrySyncEventKind.ElementUnlinked, unlinked.Kind);
+        Assert.Equal("NEW-GUID", unlinked.ExternalId);
+        Assert.Equal(RegistrySyncPlanner.CodeModeManualReason, unlinked.Reason);
     }
 
     [Fact]
@@ -819,6 +912,7 @@ public sealed class RegistrySyncPlannerTests
             Links: [new RegistrySyncLink(Guid1, EntryId, Path1)],
             Entries: [new RegistrySyncEntryState(EntryId, Values())],
             Mappings: [Limit],
+            CodeMode: RegistryCodeMode.Auto,
             OnMissingInSource: RegistryMissingPolicy.Deactivate);
 
     private static RegistrySyncInput Unlinked(
@@ -826,7 +920,7 @@ public sealed class RegistrySyncPlannerTests
         bool complete,
         RegistrySyncSourceElement element,
         params RegistrySyncFieldMapping[] mappings)
-        => new(RegistryDefId, kind, complete, [element], Links: [], Entries: [], mappings);
+        => new(RegistryDefId, kind, complete, [element], Links: [], Entries: [], mappings, CodeMode: RegistryCodeMode.Auto);
 
     private static RegistrySyncSourceElement Element(params (string Attribute, object? Value)[] attributes)
         => new(Guid1, Path1, Attrs(attributes));

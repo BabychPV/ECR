@@ -148,6 +148,14 @@ describe('RegistryEntryEditor: повторне відкриття "New entry" �
     // Модалка закрилася (upsert.onSuccess кличе handleClose → onClose).
     await waitFor(() => expect(screen.queryByLabelText(t('registries.code'))).toBeNull(), { timeout: Ceiling });
 
+    // ⛔ Чекаємо кінця анімації ЗАКРИТТЯ, а не лише зникнення полів: форма зникає одразу, а сам діалог
+    // живе ще ~200 мс переходу. Mantine 7.15 (`useTransition`) при повторному відкритті не скасовує вже
+    // запланований кадр закриття, і його таймер «exited» спрацьовує ПІСЛЯ нового відкриття — вміст
+    // діалогу перемонтовується посеред `user.type`. Знайдене поле відʼєднується з частиною тексту
+    // ("TO"), решта літер іде в нове поле. Під навантаженням друк довший за ~200 мс, і тест падав
+    // `expected 'TO' to be 'TOLUENE'`; детерміновано — `userEvent.setup({ delay: 50 })` на цьому вводі.
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull(), { timeout: Ceiling });
+
     // Друге відкриття «New entry» — той самий компонент, key знову null.
     await user.click(screen.getByRole('button', { name: 'open-new-entry' }));
     const codeAgain = await screen.findByLabelText(t('registries.code'), {}, { timeout: Ceiling });

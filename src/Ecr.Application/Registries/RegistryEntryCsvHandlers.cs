@@ -115,6 +115,12 @@ public sealed class ImportRegistryEntriesHandler(
     /// <summary>Ключ помилки рядка: первинний ключ рядка і його код указують на різні записи.</summary>
     public const string KeyCodeMismatchKey = "err.ECR-REG-4092.keyCodeMismatch";
 
+    /// <summary>Файл закінчується всередині лапок (L5-11).</summary>
+    public const string UnterminatedQuoteKey = "err.ECR-REG-0422.entriesCsvUnterminatedQuote";
+
+    /// <summary>Файл не в UTF-8 (L5-11).</summary>
+    public const string NotUtf8Key = "err.ECR-REG-0422.entriesCsvNotUtf8";
+
     /// <summary>Стеля розміру файлу, коли конфіг не задає іншої.</summary>
     public const int DefaultMaxBytes = 1024 * 1024;
 
@@ -128,8 +134,9 @@ public sealed class ImportRegistryEntriesHandler(
     /// <param name="maxBytes">Стеля розміру.</param>
     /// <param name="dryRun">Лише звіт, без запису.</param>
     /// <param name="ct">Токен скасування.</param>
+    /// <param name="contentNotUtf8">Файл не декодується як UTF-8 (контролер) — відмова 422 після перевірки права.</param>
     public async Task<RegistryEntryImportReport> HandleAsync(
-        string registryCode, string content, long sizeBytes, int maxBytes, bool dryRun, CancellationToken ct)
+        string registryCode, string content, long sizeBytes, int maxBytes, bool dryRun, CancellationToken ct, bool contentNotUtf8 = false)
     {
         ArgumentNullException.ThrowIfNull(content);
 
@@ -163,7 +170,23 @@ public sealed class ImportRegistryEntriesHandler(
         // якого не буде.
         ExternalRegistryGuard.EnsureManualEditAllowed(definition);
 
-        var records = CsvReader.Parse(content);
+        // ⛔ L5-11: файл не в UTF-8 (cp1251 із Excel) контролер раніше декодував із підстановкою «�» і
+        // тихо псував кирилицю; тепер він лише позначає це, а відмову (після перевірки права) дає тут.
+        if (contentNotUtf8)
+        {
+            throw Invalid(NotUtf8Key, "Файл не в кодуванні UTF-8.", registryCode);
+        }
+
+        IReadOnlyList<IReadOnlyList<string>> records;
+        try
+        {
+            records = CsvReader.Parse(content);
+        }
+        catch (FormatException)
+        {
+            throw Invalid(UnterminatedQuoteKey, "У файлі CSV є незакрита лапка.", registryCode);
+        }
+
         var header = records.Count > 0 ? records[0] : [];
         var codeColumn = IndexOf(header, "code");
 
@@ -245,7 +268,9 @@ public sealed class ImportRegistryEntriesHandler(
         var flaggedRows = new HashSet<int>();
 
         var errors = new List<RegistryEntryImportError>();
-        var seenCodes = new HashSet<string>(StringComparer.Ordinal);
+        // ⚠ L5-07: регістронезалежно, як колація бази й `EntriesByCode`: інакше «a1» і «A1» у файлі проходили
+        // як різні, а записи в базі для них — один.
+        var seenCodes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var (added, updated, unchanged) = (0, 0, 0);
 
         // RT-12 (D-157): коди нових рядків без коду — одним зверненням на файл, через writer (та
@@ -344,6 +369,15 @@ public sealed class ImportRegistryEntriesHandler(
                 continue;
             }
 
+            // ⛔ Аудит 2026-10-03 (L5-06): код у файлі НОВИЙ, а первинний ключ тримає наявний запис —
+            // раніше рядок мовчки оновлював той запис (код у файлі губився), хоча пакет сітки віддає
+            // `keyTaken`. Людина, яка написала новий код, хотіла створити запис, а не змінити сусіда.
+            if (byKey is not null && byCode is null && code.Length > 0)
+            {
+                errors.Add(new RegistryEntryImportError(rowNumber, code, keyMatch.PrimaryFields, KeyCodeMismatchKey));
+                continue;
+            }
+
             var entry = byKey ?? byCode;
             var isNew = entry is null;
 
@@ -418,7 +452,10 @@ public sealed class ImportRegistryEntriesHandler(
                 valueChanges.Add((entry, changes));
             }
 
-            var outcome = isNew ? RowOutcome.Added : values.Count == 0 ? RowOutcome.Unchanged : RowOutcome.Updated;
+            // ⛔ Аудит 2026-10-03 (L5-04): «оновлено» — лише якщо writer справді щось змінив. Рахувати за
+            // `values.Count` означало, що повторний імпорт власного експорту давав updated=N,
+            // піднімав ревізію даних і мітку зміни та робив застарілими прогони розрахунків.
+            var outcome = isNew ? RowOutcome.Added : changes.Count == 0 ? RowOutcome.Unchanged : RowOutcome.Updated;
             if (outcome != RowOutcome.Unchanged)
             {
                 touched.Add(entry);

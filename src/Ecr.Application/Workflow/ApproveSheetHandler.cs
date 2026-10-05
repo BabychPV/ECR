@@ -60,36 +60,6 @@ public sealed class ApproveSheetHandler(
                 });
         }
 
-        // ⛔ F-25 (пряме рішення людини): та сама людина не може бути тим, хто
-        // подав аркуш (`Submit`), і тим, хто його погоджує (`Approve`) —
-        // правило чотирьох очей, той самий клас перевірки, що
-        // `RunCalculationHandler.RequireValidApproval` (`ECR-CALC-0409`) уже
-        // застосовує до погодження перерахунку закритого періоду.
-        //
-        // ⚠ Стан читається ТУТ, ДО транзакції: `IAccessDecisionService` не
-        // знає, хто подав аркуш (лише статус), і заводити цю обізнаність
-        // туди заради одного правила означало б тягнути `SubmittedByUserId`
-        // крізь `CellAccessContext`/`EditRules`, якими користуються ще п'ять
-        // інших рішень. `ApproveCoreAsync` нижче отримує вже завантажений
-        // стан, а не читає його вдруге.
-        //
-        // ⛔ Перевірка лише для ЗАТВЕРДЖЕННЯ (`approved == true`): відхилити
-        // власне подання — не конфлікт інтересів, а штатна дія (повернути
-        // собі ж на доопрацювання), і забороняти її означало б зайву відмову
-        // там, де ризику немає.
-        var state = await workflow.GetOrCreateAsync(documentId, sheetDefId, key, ct).ConfigureAwait(false);
-        if (approved && state.SubmittedByUserId == userId)
-        {
-            throw new AccessDeniedException(
-                "ECR-ACCS-0403",
-                $"Затвердження аркуша {sheetDefId} відхилено: той самий користувач подав і погоджує аркуш.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-ACCS-0403.approveOwnSubmission",
-                    ["sheetDefId"] = sheetDefId.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                });
-        }
-
         // ⛔ `DAT-06`. Стан аркуша, запис у аудит і перерахунок статусу зрізу —
         // ОДНИМ комітом. Транзакції тут не було зовсім, і це не «на всяк
         // випадок»: `IAuditWriter` пише сирим `INSERT` по тому самому
@@ -104,9 +74,53 @@ public sealed class ApproveSheetHandler(
         // ⚠ `ExecuteInTransactionAsync` приєднується до вже відкритої
         // зовнішньої транзакції (`UnitOfWork.cs:174-178`), тож це обгортка, а
         // не переробка.
+        //
+        // ⛔ L6-15: стан аркуша читається ВСЕРЕДИНІ замикання. Стратегія повторів
+        // (1205) виконує його вдруге; стан, прочитаний до транзакції й уже
+        // змінений першою спробою (`ApproveStep`), на повторі дав би
+        // `wrongState` замість затвердження.
         await uow.ExecuteInTransactionAsync(
-            innerCt => ApproveCoreAsync(state, documentId, sheetDefId, periodKey, approved, reason, userId, innerCt),
+            async innerCt =>
+            {
+                var state = await workflow.GetOrCreateAsync(documentId, sheetDefId, key, innerCt).ConfigureAwait(false);
+                RejectOwnSubmission(state, approved, userId, sheetDefId);
+                await ApproveCoreAsync(state, documentId, sheetDefId, periodKey, approved, reason, userId, innerCt)
+                    .ConfigureAwait(false);
+            },
             ct).ConfigureAwait(false);
+    }
+
+    /// <summary>F-25: той самий користувач не подає й не затверджує один аркуш.</summary>
+    private static void RejectOwnSubmission(ApprovalState state, bool approved, int userId, int sheetDefId)
+    {
+        // ⛔ F-25 (пряме рішення людини): та сама людина не може бути тим, хто
+        // подав аркуш (`Submit`), і тим, хто його погоджує (`Approve`) —
+        // правило чотирьох очей, той самий клас перевірки, що
+        // `RunCalculationHandler.RequireValidApproval` (`ECR-CALC-0409`) уже
+        // застосовує до погодження перерахунку закритого періоду.
+        //
+        // ⚠ Стан читає викликач — усередині транзакції (L6-15): `IAccessDecisionService`
+        // не знає, хто подав аркуш (лише статус), і заводити цю обізнаність
+        // туди заради одного правила означало б тягнути `SubmittedByUserId`
+        // крізь `CellAccessContext`/`EditRules`, якими користуються ще п'ять
+        // інших рішень. `ApproveCoreAsync` отримує той самий завантажений
+        // стан, а не читає його вдруге.
+        //
+        // ⛔ Перевірка лише для ЗАТВЕРДЖЕННЯ (`approved == true`): відхилити
+        // власне подання — не конфлікт інтересів, а штатна дія (повернути
+        // собі ж на доопрацювання), і забороняти її означало б зайву відмову
+        // там, де ризику немає.
+        if (approved && state.SubmittedByUserId == userId)
+        {
+            throw new AccessDeniedException(
+                "ECR-ACCS-0403",
+                $"Затвердження аркуша {sheetDefId} відхилено: той самий користувач подав і погоджує аркуш.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-ACCS-0403.approveOwnSubmission",
+                    ["sheetDefId"] = sheetDefId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
+        }
     }
 
     /// <summary>Зміна стану, аудит проміжного кроку і статус зрізу — під транзакцією.</summary>

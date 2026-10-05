@@ -37,7 +37,7 @@ namespace Ecr.Infrastructure.Tests.Persistence;
 /// ідентифікатори в них різні, тому стан зводиться до індексів.
 /// </remarks>
 [Collection("SqlServer")]
-public sealed class PatchCellsWorkbookTests(SqlServerFixture sql) : IDisposable
+public sealed partial class PatchCellsWorkbookTests(SqlServerFixture sql) : IDisposable
 {
     /// <summary>Період — не 2026-05…07 (їх архівують <c>ArchiveJobTests</c>).</summary>
     private const int PeriodKeyValue = 202610;
@@ -230,6 +230,43 @@ public sealed class PatchCellsWorkbookTests(SqlServerFixture sql) : IDisposable
     }
 
     /// <summary>
+    /// L6-08 (аудит 2026-10-03): викликач, що вже тримає спільні блокування аркушів
+    /// (<c>heldSheetStatuses</c> — так робить <c>ExcelImporter</c>), не отримує поверх них
+    /// виняткового: створення рядка в таблиці зі стелею під таким викликом — помилка
+    /// викликача, а не тихе перетворення блокування.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Що було: книжковий шлях брав <c>EnterSubmitAsync</c> поверх спільного блокування
+    /// тієї ж транзакції. Два імпорти в один аркуш тримали б по спільному й чекали один на
+    /// одного за винятковим — дедлок, який SQL Server розриває, вбиваючи одну транзакцію.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "L6-08")]
+    public async Task Стеля_рядків_під_утриманим_спільним_замком_не_перетворює_його_на_винятковий()
+    {
+        var world = await ArrangeAsync([2, 2], maxDynamicRows: 4);
+        var requests = Requests(world, await VersionsAsync(world));
+        var before = await StateAsync(world);
+        var exclusive = 0;
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => RunWorkbookAsync(
+            world, Writer(world), requests,
+            gate: inner => new InterceptingGate(inner, () =>
+            {
+                exclusive++;
+                return Task.CompletedTask;
+            }),
+            passHeldStatuses: true));
+
+        Assert.Equal(0, exclusive);
+        Assert.Contains("прихований дедлок", error.Message, StringComparison.Ordinal);
+        Assert.Equal(before, await StateAsync(world));
+        Assert.Empty(await AuditAsync(world));
+    }
+
+    /// <summary>
     /// Храповик: книга на 3 і на 12 таблиць (один аркуш) коштує ОДНАКОВУ
     /// кількість звернень до бази; поштучно — росте з кількістю таблиць.
     /// </summary>
@@ -270,7 +307,8 @@ public sealed class PatchCellsWorkbookTests(SqlServerFixture sql) : IDisposable
         }
 
         Task Book(int count)
-            => handler.HandleWorkbookAsync([.. requests.Take(count)], new List<RecalculationSeed>(), CancellationToken.None);
+            => handler.HandleWorkbookAsync(
+                [.. requests.Take(count)], new List<RecalculationSeed>(), new List<RowWindowChange>(), CancellationToken.None);
 
         // Прогрів кешів процесу (знімок метаданих, довідник одиниць).
         await Measure(() => Book(12));
@@ -296,7 +334,8 @@ public sealed class PatchCellsWorkbookTests(SqlServerFixture sql) : IDisposable
     /// таблиці (див. храповик). Кожен наступний аркуш додає два (applock + стан).
     /// </summary>
     /// ФВ-5.20a: 26 → 27 (один пошук Reopen-стану аркушів для <c>IsLateEdit</c>).
-    private const long BookExecutions = 27;
+    /// L6-02: 27 → 28 (блокування структури документа разом із версією шаблону, одним пакетом).
+    private const long BookExecutions = 28;
 
     private async Task AssertRejectedAsync<TException>(
         World world, AccessProfile profile, List<PatchCellsRequest> requests, Table guilty, string code, string messageKey)
@@ -363,8 +402,10 @@ public sealed class PatchCellsWorkbookTests(SqlServerFixture sql) : IDisposable
     /// один виклик хука на таблицю; без колонки вікна — нічого в черзі.
     /// </summary>
     /// <remarks>
-    /// ⛔ Мутація: приберіть виклик <c>rowWindows.RowsChangedAsync</c> у <c>HandleWorkbookAsync</c> —
+    /// ⛔ Мутація: приберіть <c>rowWindowChanges.Add</c> у <c>HandleWorkbookAsync</c> —
     /// червоніє <see cref="Імпорт_книги_зі_зміною_колонки_вікна_ставить_задачу_по_одній_на_таблицю"/>.
+    /// ⚠ L6-11: хук кличе викликач ПІСЛЯ коміту (<c>NotifyRowWindowsAsync</c>), як <c>ExcelImporter</c>;
+    /// усередині транзакції книжковий шлях черги не чіпає.
     /// </remarks>
     [Theory]
     [Trait(TestCategories.Stage, TestCategories.Stage6)]
@@ -386,7 +427,8 @@ public sealed class PatchCellsWorkbookTests(SqlServerFixture sql) : IDisposable
         var trigger = new Ecr.Application.Integration.RowWindowTrigger(
             index, jobs, Microsoft.Extensions.Logging.Abstractions.NullLogger<Ecr.Application.Integration.RowWindowTrigger>.Instance);
 
-        _ = await RunWorkbookAsync(world, Writer(world), requests, rowWindows: trigger);
+        _ = await RunWorkbookAsync(world, Writer(world), requests, rowWindows: trigger, onCommitted: () =>
+            Assert.Empty(jobs.ReceivedCalls()));
 
         Assert.Equal(
             expectedJobs == 0 ? 0 : world.Tables.Count,
@@ -403,25 +445,34 @@ public sealed class PatchCellsWorkbookTests(SqlServerFixture sql) : IDisposable
         List<PatchCellsRequest> requests,
         Func<ICellStore, ICellStore>? cells = null,
         Func<ISheetEditGate, ISheetEditGate>? gate = null,
-        IRowWindowTrigger? rowWindows = null)
+        IRowWindowTrigger? rowWindows = null,
+        bool passHeldStatuses = false,
+        Action? onCommitted = null)
     {
         await using var db = world.Builder.CreateContext();
         var handler = Handler(db, profile, cells, gate, rowWindows: rowWindows);
         var seeds = new List<RecalculationSeed>();
+        var rowWindowChanges = new List<RowWindowChange>();
         IReadOnlyList<PatchCellsResponse> responses = [];
 
         await new UnitOfWork(db).ExecuteInTransactionAsync(
             async ct =>
             {
+                var held = new Dictionary<int, DocumentStatus>();
                 foreach (var sheet in world.Tables.Select(t => t.SheetDefId).Distinct().Order())
                 {
-                    _ = await new SheetEditGate(db).EnterEditAsync(world.Doc.DocumentId, sheet, Period, ct);
+                    held[sheet] = await new SheetEditGate(db).EnterEditAsync(world.Doc.DocumentId, sheet, Period, ct);
                 }
 
                 seeds.Clear();
-                responses = await handler.HandleWorkbookAsync(requests, seeds, ct);
+                rowWindowChanges.Clear();
+                responses = await handler.HandleWorkbookAsync(
+                    requests, seeds, rowWindowChanges, ct, passHeldStatuses ? held : null);
             },
             CancellationToken.None);
+
+        onCommitted?.Invoke();
+        await handler.NotifyRowWindowsAsync(rowWindowChanges, CancellationToken.None);
 
         return new Run(responses, seeds);
     }
@@ -887,5 +938,11 @@ public sealed class PatchCellsWorkbookTests(SqlServerFixture sql) : IDisposable
             await beforeSubmit();
             await inner.EnterSubmitAsync(documentId, sheetDefId, periodKey, ct);
         }
+
+        public Task<int?> EnterStructureAsync(long documentId, bool exclusive, CancellationToken ct)
+            => inner.EnterStructureAsync(documentId, exclusive, ct);
+
+        public Task EnterHeaderAsync(long documentId, bool exclusive, CancellationToken ct)
+            => inner.EnterHeaderAsync(documentId, exclusive, ct);
     }
 }

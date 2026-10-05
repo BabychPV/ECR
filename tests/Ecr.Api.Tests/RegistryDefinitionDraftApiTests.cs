@@ -59,6 +59,41 @@ public sealed class RegistryDefinitionDraftApiTests(SqlServerFixture sql)
 
     [Fact]
     [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "L5-02")]
+    public async Task Збереження_чернетки_після_прямої_публікації_дає_409()
+    {
+        // L5-02: форма збудована з опису версії 1, сусід тим часом опублікував опис напряму (версія 2).
+        // Без звірки If-Match збереження перебазувало б чернетку на версію 2, і публікація мовчки
+        // затерла б його правку.
+        using var app = new EcrApiFactory(sql);
+        using var client = await SystemHealthControllerTests.SignedInAsync(
+            sql, app, "Registry.View", "Registry.EditDefinition", "Registry.Publish");
+        var (code, fieldId) = await SeedAsync();
+
+        var direct = await PutDefinitionAsync(client, code, fieldId, "Neighbour", "\"1\"");
+        Assert.True(direct.StatusCode == HttpStatusCode.OK, $"{direct.StatusCode}: {await direct.Content.ReadAsStringAsync()}");
+
+        var stale = await PutDraftAsync(client, code, fieldId, "Mine", rowVersion: null, ifMatch: "\"1\"");
+        Assert.Equal(HttpStatusCode.Conflict, stale.StatusCode);
+        var error = await Json(stale);
+        Assert.Equal("ECR-REG-0409", error.GetProperty("errorCode").GetString());
+        Assert.Contains("definitionChanged", error.ToString(), StringComparison.Ordinal);
+
+        // Чернетку не створено.
+        var state = await GetJsonAsync(client, $"/api/v1/registries/{code}/definition/draft");
+        Assert.Equal(JsonValueKind.Null, state.GetProperty("draft").ValueKind);
+
+        // Без заголовка — 422, а не мовчазне збереження.
+        var missing = await PutDraftAsync(client, code, fieldId, "Mine", rowVersion: null, ifMatch: null);
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, missing.StatusCode);
+
+        // З актуальною версією (2) — збережено.
+        var fresh = await PutDraftAsync(client, code, fieldId, "Mine", rowVersion: null, ifMatch: "\"2\"");
+        Assert.Equal(HttpStatusCode.OK, fresh.StatusCode);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Directive", "BE-24")]
     public async Task Без_Registry_Publish_публікація_дає_403_і_опис_не_змінюється()
     {
@@ -133,11 +168,22 @@ public sealed class RegistryDefinitionDraftApiTests(SqlServerFixture sql)
             $"/api/v1/registries/{code}/definition/draft?rowVersion={Uri.EscapeDataString(rowVersion)}",
             UriKind.Relative));
 
+    /// <summary>`PUT …/definition/draft`; <paramref name="ifMatch"/> — версія опису (за замовчуванням 1), <c>null</c> — без заголовка.</summary>
     private static Task<HttpResponseMessage> PutDraftAsync(
-        HttpClient client, string code, int fieldId, string name, string? rowVersion)
-        => client.PutAsJsonAsync(
-            new Uri($"/api/v1/registries/{code}/definition/draft", UriKind.Relative),
-            new
+        HttpClient client, string code, int fieldId, string name, string? rowVersion, string? ifMatch = "\"1\"")
+        => SendAsync(client, "definition/draft", code, fieldId, name, ifMatch, rowVersion);
+
+    /// <summary>Пряме `PUT …/definition` («зберегти й одразу опублікувати»).</summary>
+    private static Task<HttpResponseMessage> PutDefinitionAsync(
+        HttpClient client, string code, int fieldId, string name, string ifMatch)
+        => SendAsync(client, "definition", code, fieldId, name, ifMatch, rowVersion: null);
+
+    private static Task<HttpResponseMessage> SendAsync(
+        HttpClient client, string route, string code, int fieldId, string name, string? ifMatch, string? rowVersion)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Put, new Uri($"/api/v1/registries/{code}/{route}", UriKind.Relative))
+        {
+            Content = JsonContent.Create(new
             {
                 fields = new[]
                 {
@@ -151,7 +197,15 @@ public sealed class RegistryDefinitionDraftApiTests(SqlServerFixture sql)
                 rules = Array.Empty<object>(),
                 reason = "rename key",
                 rowVersion,
-            });
+            }),
+        };
+        if (ifMatch is not null)
+        {
+            request.Headers.TryAddWithoutValidation("If-Match", ifMatch);
+        }
+
+        return client.SendAsync(request);
+    }
 
     private static string? FieldName(JsonElement definition)
         => definition.GetProperty("fields")[0].GetProperty("nameL10n").GetProperty("values").GetProperty("en").GetString();

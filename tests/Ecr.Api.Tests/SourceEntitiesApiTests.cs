@@ -306,6 +306,63 @@ public sealed class SourceEntitiesApiTests(SqlServerFixture sql)
         }
     }
 
+    /// <summary>
+    /// AN-34 L4-01: другу сутність того самого з'єднання не можна прив'язати до довідника, який тримає
+    /// перша, - <c>409 ECR-INT-0409 registryAlreadyBound</c> (а не 422 чи 500); після відв'язки першої
+    /// - можна. Інше з'єднання тримає той самий довідник незалежно.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "AN-34-L4-01")]
+    public async Task AN34_L4_01_довідник_тримає_одна_сутність_з_єднання_друга_дає_409_а_після_відв_язки_першої_проходить()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, Manage, "Registry.EditData").ConfigureAwait(true);
+        var dataSourceId = await DataSourceAsync().ConfigureAwait(true);
+        var otherDataSourceId = await DataSourceAsync().ConfigureAwait(true);
+        var stand = await StandAsync(dataSourceId).ConfigureAwait(true);
+        var otherStand = await StandAsync(otherDataSourceId).ConfigureAwait(true);
+        var registryBody = new { registryDefId = stand.RegistryId };
+        Uri RegistryOf(int entityId) => new($"/api/v1/sources/{entityId}/registry", UriKind.Relative);
+
+        try
+        {
+            var created = await client.PostAsJsonAsync(Sources, new { dataSourceId, code = $"Second{Guid.NewGuid():N}"[..14] });
+            Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+            var secondId = (await JsonAsync(created).ConfigureAwait(true)).GetProperty("id").GetInt32();
+
+            Assert.Equal(HttpStatusCode.OK, (await client.PutAsJsonAsync(RegistryOf(stand.EntityId), registryBody)).StatusCode);
+
+            var refused = await client.PutAsJsonAsync(RegistryOf(secondId), registryBody);
+            Assert.Equal(HttpStatusCode.Conflict, refused.StatusCode);
+            var problem = await JsonAsync(refused).ConfigureAwait(true);
+            Assert.Equal("ECR-INT-0409", problem.GetProperty("errorCode").GetString());
+            Assert.Equal("err.ECR-INT-0409.registryAlreadyBound", problem.GetProperty("messageKey").GetString());
+            Assert.Null(await BoundRegistryAsync(secondId).ConfigureAwait(true));
+
+            // Повторна прив'язка власника до свого довідника - не конфлікт.
+            Assert.Equal(HttpStatusCode.OK, (await client.PutAsJsonAsync(RegistryOf(stand.EntityId), registryBody)).StatusCode);
+
+            // Інше з'єднання тримає той самий довідник незалежно.
+            Assert.Equal(
+                HttpStatusCode.OK,
+                (await client.PutAsJsonAsync(RegistryOf(otherStand.EntityId), registryBody)).StatusCode);
+
+            // Відв'язка першої звільняє довідник другій.
+            Assert.Equal(
+                HttpStatusCode.OK,
+                (await client.PutAsJsonAsync(RegistryOf(stand.EntityId), new { registryDefId = (int?)null })).StatusCode);
+            Assert.Equal(HttpStatusCode.OK, (await client.PutAsJsonAsync(RegistryOf(secondId), registryBody)).StatusCode);
+            Assert.Equal(stand.RegistryId, await BoundRegistryAsync(secondId).ConfigureAwait(true));
+        }
+        finally
+        {
+            await DeactivateAsync(dataSourceId).ConfigureAwait(true);
+            await DeactivateAsync(otherDataSourceId).ConfigureAwait(true);
+        }
+    }
+
     /// <summary>Сутність і два довідники по одному полю.</summary>
     private sealed record Stand(int EntityId, int RegistryId, int OwnFieldId, int ForeignFieldId);
 

@@ -322,3 +322,36 @@ describe('RegistryImpactPage: фокус після постановки пер�
     await waitFor(() => expect(document.activeElement).toBe(button));
   });
 });
+
+describe('RegistryImpactPage: відмова сервера на постановці', () => {
+  it('422 показується відмовою з текстом сервера, а не карткою чи станом задачі', async () => {
+    mockServer(['Registry.View', 'Calculation.Recalculate']);
+    const answer = globalThis.fetch;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input).includes('/recalculate-impacted')) {
+          return new Response(
+            JSON.stringify({
+              title: 'Період закрито для перерахунку',
+              status: 422,
+              code: 'ECR-X',
+            }),
+            { status: 422, headers: { 'Content-Type': 'application/problem+json' } },
+          );
+        }
+        return answer(input, init);
+      }),
+    );
+    show();
+
+    await screen.findByRole('link', { name: 'DOC5' });
+    fireEvent.click(await screen.findByRole('button', { name: /registries\.impact\.recalculateAll/ }));
+    await confirmWithReason('причина');
+
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toContain('Період закрито для перерахунку');
+    expect(document.querySelector('[data-impact-job]')).toBeNull();
+    expect(document.querySelector('[data-impact-job-state]')).toBeNull();
+  });
+});

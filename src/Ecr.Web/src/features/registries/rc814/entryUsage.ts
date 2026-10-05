@@ -89,15 +89,6 @@ export function parseFieldLabel(label: string): { registryCode: string; fieldCod
   return { registryCode: label.slice(0, dot), fieldCode: label.slice(dot + 1) };
 }
 
-/** Сьогоднішня дата клієнта `yyyy-MM-dd` (не `toISOString`: той зсуває день у від'ємному поясі). */
-export function todayIso(now: Date = new Date()): string {
-  const year = String(now.getFullYear()).padStart(4, '0');
-  const month = String(now.getMonth() + 1).padStart(2, '0');
-  const day = String(now.getDate()).padStart(2, '0');
-
-  return `${year}-${month}-${day}`;
-}
-
 /**
  * Збирає звіт для запису.
  *

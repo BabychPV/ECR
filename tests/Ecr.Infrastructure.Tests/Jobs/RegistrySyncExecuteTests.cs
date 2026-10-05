@@ -47,9 +47,10 @@ public sealed class RegistrySyncExecuteTests(SqlServerFixture sql)
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "D-212")]
-    public async Task External_Manual_створює_запис_з_кодом_і_назвою_з_імені_елемента_і_ключем()
+    public async Task L4_13_External_Manual_не_створює_запис_з_імені_елемента_а_пише_подію_з_причиною()
     {
-        var stand = await ArrangeAsync(RegistrySourceKind.External);
+        // Q6=C (HU-11): у Manual код з імені AF не нормалізується й не автостворюється.
+        var stand = await ArrangeAsync(RegistrySourceKind.External, codeMode: RegistryCodeMode.Manual);
         var g9 = stand.Add("Stack9", 3m);
         await using var provider = BuildProvider();
 
@@ -57,24 +58,21 @@ public sealed class RegistrySyncExecuteTests(SqlServerFixture sql)
         {
             await RunAsync(provider, stand);
 
-            var created = await EntryAsync(stand, "Stack9");
-            Assert.NotNull(created);
-            Assert.Equal("Stack9", created.DisplayL10n.Values["en"]);
-            Assert.Equal(3m, await CapAsync(stand, created.Id));
-            Assert.Equal(stand.SvcId, created.CreatedByUserId);
+            Assert.Equal(0, await CountEntriesAsync(stand, "Stack9"));
+            await using (var db = Context())
+            {
+                Assert.False(await db.RegistryExternalKeys.AnyAsync(k => k.ExternalId == g9));
+            }
 
-            var key = await KeyAsync(stand, g9);
-            Assert.Equal(created.Id, key.RegistryEntryId);
-            Assert.Equal($@"{stand.Parent}\Stack9", key.ExternalPath);
+            var events = await EventsAsync(stand);
+            Assert.DoesNotContain(events, e => e.Status == CollectionCoverage.RegistryAutoCreated);
+            var refused = Assert.Single(events, e => e.Status == CollectionCoverage.RegistryElementUnlinked);
+            Assert.Contains($"element={g9}", refused.Details, StringComparison.Ordinal);
+            Assert.Contains("reason=codeModeManual", refused.Details, StringComparison.Ordinal);
 
-            var auto = Assert.Single(await EventsAsync(stand), e => e.Status == CollectionCoverage.RegistryAutoCreated);
-            Assert.Contains($"element={g9}; entry={created.Id}", auto.Details, StringComparison.Ordinal);
-
-            // Повтор: елемент уже прив'язаний — ні другого запису, ні другої події.
-            var count = (await EventsAsync(stand)).Count;
+            // Дедуп: той самий стан — жодної нової події.
             await RunAsync(provider, stand);
-            Assert.Equal(1, await CountEntriesAsync(stand, "Stack9"));
-            Assert.Equal(count, (await EventsAsync(stand)).Count);
+            Assert.Single(await EventsAsync(stand), e => e.Status == CollectionCoverage.RegistryElementUnlinked);
         }
         finally
         {
@@ -86,7 +84,7 @@ public sealed class RegistrySyncExecuteTests(SqlServerFixture sql)
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "D-212")]
-    public async Task External_Auto_бере_код_із_послідовності_а_назву_з_імені()
+    public async Task External_Auto_бере_код_із_послідовності_а_назву_з_імені_і_створює_ключ()
     {
         var stand = await ArrangeAsync(RegistrySourceKind.External, codeMode: RegistryCodeMode.Auto);
         var g9 = stand.Add("Stack9", 3m);
@@ -101,46 +99,17 @@ public sealed class RegistrySyncExecuteTests(SqlServerFixture sql)
             var created = await db.RegistryEntries.AsNoTracking().SingleAsync(e => e.Id == key.RegistryEntryId);
             Assert.Matches("^E[0-9]{9,}$", created.Code);
             Assert.Equal("Stack9", created.DisplayL10n.Values["en"]);
-        }
-        finally
-        {
-            await DeactivateAsync(stand);
-        }
-    }
+            Assert.Equal(3m, await CapAsync(stand, created.Id));
+            Assert.Equal(stand.SvcId, created.CreatedByUserId);
+            Assert.Equal($@"{stand.Parent}\Stack9", key.ExternalPath);
 
-    [Fact]
-    [Trait(TestCategories.Stage, TestCategories.Stage5)]
-    [Trait(TestCategories.Category, TestCategories.Integration)]
-    [Trait("Requirement", "D-212")]
-    public async Task Зайнятий_код_не_створює_і_не_привʼязує_а_подія_з_Id_тримача()
-    {
-        var stand = await ArrangeAsync(RegistrySourceKind.External);
-        var g9 = stand.Add("Stack9", 3m);
-        var holder = await AddEntryAsync(stand, "Stack9");
-        await using var provider = BuildProvider();
+            var auto = Assert.Single(await EventsAsync(stand), e => e.Status == CollectionCoverage.RegistryAutoCreated);
+            Assert.Contains($"element={g9}; entry={created.Id}", auto.Details, StringComparison.Ordinal);
 
-        try
-        {
+            // Повтор: елемент уже прив'язаний — ні другого запису, ні другої події.
+            var count = (await EventsAsync(stand)).Count;
             await RunAsync(provider, stand);
-
-            // ⛔ CreateOnly: наявний запис із тим самим кодом не «переймається» елементом.
-            Assert.Equal(1, await CountEntriesAsync(stand, "Stack9"));
-            await using (var db = Context())
-            {
-                Assert.False(await db.RegistryExternalKeys.AnyAsync(k => k.ExternalId == g9));
-                Assert.False(await db.RegistryValues.AnyAsync(v => v.RegistryEntryId == holder));
-            }
-
-            var events = await EventsAsync(stand);
-            Assert.DoesNotContain(events, e => e.Status == CollectionCoverage.RegistryAutoCreated);
-            var refused = Assert.Single(events, e => e.Status == CollectionCoverage.RegistryElementUnlinked);
-            Assert.Contains($"element={g9}", refused.Details, StringComparison.Ordinal);
-            Assert.Contains($"id={holder};", refused.Details, StringComparison.Ordinal);
-            Assert.Contains($"messageKey={RegistryEntryWriter.EntryCodeTakenKey}", refused.Details, StringComparison.Ordinal);
-
-            // Дедуп: той самий стан — жодної нової події.
-            await RunAsync(provider, stand);
-            Assert.Single(await EventsAsync(stand), e => e.Status == CollectionCoverage.RegistryElementUnlinked);
+            Assert.Equal(count, (await EventsAsync(stand)).Count);
         }
         finally
         {
@@ -390,6 +359,71 @@ public sealed class RegistrySyncExecuteTests(SqlServerFixture sql)
         }
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "D-212")]
+    public async Task L4_04_Число_з_масштабом_понад_16_пишеться_один_раз_а_не_щопрогону()
+    {
+        var stand = await ArrangeAsync(RegistrySourceKind.External);
+        stand.Put("Stack1", "Capacity", 10.12345678901234567890m);
+        await using var provider = BuildProvider();
+
+        try
+        {
+            await RunAsync(provider, stand);
+            Assert.Equal(10.1234567890123457m, await CapAsync(stand, stand.E1));
+
+            // Повтор із тим самим джерелом: ні оновлення, ні ревізії довідника.
+            var revision = await RevisionAsync(stand);
+            await RunAsync(provider, stand);
+            Assert.Equal(revision, await RevisionAsync(stand));
+        }
+        finally
+        {
+            await DeactivateAsync(stand);
+        }
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "D-212")]
+    public async Task L4_12_Зв_язок_видаленого_запису_не_обслуговується_а_подія_з_причиною()
+    {
+        var stand = await ArrangeAsync(RegistrySourceKind.External);
+        stand.Put("Stack2", "Capacity", 99m);
+        await using (var db = Context())
+        {
+            (await db.RegistryEntries.SingleAsync(e => e.Id == stand.E2)).SoftDelete();
+            await db.SaveChangesAsync();
+        }
+
+        await using var provider = BuildProvider();
+
+        try
+        {
+            await RunAsync(provider, stand);
+
+            // Значення видаленого запису не торкнуто, ключ не позначено.
+            Assert.Equal(20m, await CapAsync(stand, stand.E2));
+            Assert.Null((await KeyAsync(stand, stand.G2)).MissingInSourceSince);
+
+            var unlinked = Assert.Single(
+                await EventsAsync(stand), e => e.Status == CollectionCoverage.RegistryElementUnlinked);
+            Assert.Contains($"element={stand.G2}; entry={stand.E2}", unlinked.Details, StringComparison.Ordinal);
+            Assert.Contains("reason=externalKeyOnDeletedEntry", unlinked.Details, StringComparison.Ordinal);
+
+            // Дедуп: той самий стан - жодної нової події.
+            await RunAsync(provider, stand);
+            Assert.Single(await EventsAsync(stand), e => e.Status == CollectionCoverage.RegistryElementUnlinked);
+        }
+        finally
+        {
+            await DeactivateAsync(stand);
+        }
+    }
+
     // ─── Правила довідника й атомарність ───────────────────────────────────
 
     [Fact]
@@ -515,7 +549,7 @@ public sealed class RegistrySyncExecuteTests(SqlServerFixture sql)
     private async Task<Stand> ArrangeAsync(
         RegistrySourceKind kind,
         RegistryMissingPolicy policy = RegistryMissingPolicy.MarkOrphaned,
-        RegistryCodeMode codeMode = RegistryCodeMode.Manual,
+        RegistryCodeMode codeMode = RegistryCodeMode.Auto,
         bool withRef = false)
     {
         await using var db = Context();
@@ -594,15 +628,6 @@ public sealed class RegistrySyncExecuteTests(SqlServerFixture sql)
         return stand;
     }
 
-    private async Task<long> AddEntryAsync(Stand stand, string code)
-    {
-        await using var db = Context();
-        var entry = new RegistryEntry(stand.RegistryId, EcrCode.Create(code), Text(code));
-        db.RegistryEntries.Add(entry);
-        await db.SaveChangesAsync();
-        return entry.Id;
-    }
-
     private async Task RunAsync(ServiceProvider provider, Stand stand, DateTime? now = null)
     {
         await using var db = Context();
@@ -648,12 +673,6 @@ public sealed class RegistrySyncExecuteTests(SqlServerFixture sql)
         var entity = await db.SourceEntities.FirstAsync(e => e.Id == stand.EntityId);
         entity.Deactivate();
         await db.SaveChangesAsync();
-    }
-
-    private async Task<RegistryEntry?> EntryAsync(Stand stand, string code)
-    {
-        await using var db = Context();
-        return await db.RegistryEntries.AsNoTracking().SingleOrDefaultAsync(e => e.RegistryDefId == stand.RegistryId && e.Code == code);
     }
 
     private async Task<int> CountEntriesAsync(Stand stand, string code)

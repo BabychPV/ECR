@@ -3640,7 +3640,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `ECR-INT-0422` | 422 | UOM атрибута джерела змінився — збір зупинено (ФВ-16.9); також тип запиту джерела не налаштовано (`.queryKindNotConfigured`, HSE301 §4.3) чи транспорт його не виконує (`.queryKindNotSupported`); транспорт не читає поточних значень (`.currentValueNotSupported`, FEATURE-REGISTRY-SYNC S1) |
 | `ECR-INT-0404` | 404 | сутності зовнішнього джерела немає або вона вимкнена; **або** немає самого мапінгу поля (`messageKey` розрізняє: `sourceEntity` / `fieldMap`) |
 | `ECR-INT-0405` | 404 | ціль мапінгу поля джерела (колонка або поле реєстру) не існує (`CreateEntityFieldMapHandler`, Прогалина 1 директиви паритету) |
-| `ECR-INT-0409` | 409 | дія над мапінгом суперечить його стану (`BE-27`): повторна пауза, відновлення непризупиненого, приймання вже оголошеної одиниці, видалення мапінгу, за яким уже зібрано дані (`details.collectedPoints`); **або** сутність збору з таким кодом у з'єднанні вже є (`POST /sources`, `messageKey` `sourceEntityDuplicate`) |
+| `ECR-INT-0409` | 409 | дія над мапінгом суперечить його стану (`BE-27`): повторна пауза, відновлення непризупиненого, приймання вже оголошеної одиниці, видалення мапінгу, за яким уже зібрано дані (`details.collectedPoints`); **або** сутність збору з таким кодом у з'єднанні вже є (`POST /sources`, `messageKey` `sourceEntityDuplicate`); **або** довідник уже прив'язаний до іншої сутності цього з'єднання (`PUT /sources/{id}/registry`, `registryAlreadyBound`) |
 | `ECR-INT-0502` | 502 | джерело **відмовило в автентифікації**: збір зупинено, у наздоганяння НЕ йде (`H-20`) |
 | `ECR-RPT-0404` | 404 | звіту з таким кодом немає або жодну версію не опубліковано |
 | `ECR-RPT-0409` | 409 | зріз подано або версію звіту вже опубліковано: обидва іммутабельні, потрібен новий (ФВ-9.17) |
@@ -3691,6 +3691,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `err.ECR-INT-0409.eventMapExists` | 409 | мапінг подій для цієї пари документ–таблиця вже існує |
 | `err.ECR-INT-0409.eventMapHasLinks` | 409 | видалення мапінгу подій, за яким уже синхронізовано рядки (вихід — пауза `isActive=false`) |
 | `err.ECR-INT-0409.eventMapSourceValueTaken` | 409 | значення джерела в `ValueMap` повторюється |
+| `err.ECR-INT-0409.registryAlreadyBound` | 409 | `PUT /sources/{id}/registry`: довідник уже прив'язаний до іншої сутності збору (активної чи вимкненої) цього з'єднання (AN-34 L4-01, `UQ_SourceEntity_Registry`) |
 | `err.ECR-INT-0409.rowWindowConcurrency` | 409 | прив'язку вікна рядка змінено іншим після читання (`rowVersion`) |
 | `err.ECR-INT-0409.rowWindowMapHasValues` | 409 | видалення прив'язки вікна рядка, за якою вже накопичено значення (вихід — пауза) |
 | `err.ECR-INT-0409.rowWindowTargetTaken` | 409 | колонка-ціль уже має прив'язку вікна рядка |
@@ -4157,6 +4158,12 @@ public sealed class NotFoundException(string errorCode, string message)
 > ✎ 2026-10-02 (ФВ-8.14, B5.4): `UsageItemDto` дістала необов'язкове `name` (читабельна
 > назва: колонка шаблону, поле довідника, методика; `null` — назви немає, клієнт показує`n> `label`). `label` лишається кодом — семантику не змінено.
 
+> ✎ 2026-10-05 (AN-35, L5-02, **breaking для старих клієнтів**): `PUT /registries/{code}/definition/draft`
+> потребує заголовок `If-Match` = `definitionVersion` опису, з якого збудовано форму (як
+> `PUT …/definition`). Без нього — `422 ECR-REQ-0422` (`err.ECR-REQ-0422.definitionVersionRequired`),
+> інша версія — `409 ECR-REG-0409` (`err.ECR-REG-0409.definitionChanged`). Заголовок не `[FromHeader]`
+> (конвенція проєкту) і описаний у `summary` ендпоінта; коди 409/422 вже були в `responses`.
+
 > ✎ 2026-09-29 (RT-11, FEATURE-REGISTRY-TABLES §4.1, §4.8, §7.1): опис довідника
 > (`GET`/`PUT …/definition`, `…/definition/draft`, `…/definition/publish`) несе
 > `keys[]` (`RegistryKeyDto`/`RegistryKeySaveDto`: `code`, `nameL10n`,
@@ -4231,7 +4238,10 @@ public sealed class NotFoundException(string errorCode, string message)
 > 200 — `422` (`sourceEntityInvalid`); код уже є в з'єднанні — `409
 > ECR-INT-0409` (`sourceEntityDuplicate`). `PUT /sources/{id}/registry` —
 > `{ registryDefId | null }`, `200`; довідника немає — `404 ECR-REG-0404`
-> (`registryId`). `GET /sources` несе `registryDefId`. Мапінг на поле
+> (`registryId`); довідник уже тримає інша сутність того ж з'єднання —
+> `409 ECR-INT-0409` (`registryAlreadyBound`, AN-34 L4-01: одна сутність на
+> довідник у з'єднанні, відв'язка першої звільняє довідник).
+> `GET /sources` несе `registryDefId`. Мапінг на поле
 > довідника (`POST /entity-field-maps`, `targetKind=RegistryField`) —
 > `422 ECR-REQ-0422`, якщо названо `targetRowKey`/`aggregation`
 > (`entityFieldMapRegistryFieldMaterialization`), сутність не прив'язана

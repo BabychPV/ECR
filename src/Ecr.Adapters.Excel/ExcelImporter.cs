@@ -364,11 +364,12 @@ public sealed class ExcelImporter(
         var versions = new Dictionary<string, string>(StringComparer.Ordinal);
         var validation = new List<ValidationMessageDto>();
         var seeds = new List<RecalculationSeed>();
+        var rowWindowChanges = new List<RowWindowChange>();
         long seedTableInstanceId = 0;
         var diffs = plan.Tables.Where(t => t.Changes.Count > 0).ToList();
 
         var period = new PeriodKey(plan.PeriodKey);
-        var sheets = await SheetsInLockOrderAsync(documentId, period, plan, ct).ConfigureAwait(false);
+        var (sheets, templateVersions) = await SheetsInLockOrderAsync(documentId, period, plan, ct).ConfigureAwait(false);
 
         var enlist = jobs.EnlistsInCallerTransaction;
 
@@ -410,6 +411,17 @@ public sealed class ExcelImporter(
                 // `PatchCellsHandler` своєю відмовою (`ECR-ACCS-0403`), тож двох
                 // правд про «подано» не з'являється. Прочитаний тут під
                 // блокуванням стан він отримує готовим — без другого звернення.
+                // ⛔ L6-02: ще раніше — структура документа (порядок `doc-structure` →
+                // `sheet-edit`). Аркуші вище прочитано за версією ДО транзакції;
+                // перенос, що зафіксувався відтоді, — відмова, а не блокування
+                // аркушів старої структури.
+                var locked = await sheetGate.EnterStructureAsync(documentId, exclusive: false, innerCt)
+                    .ConfigureAwait(false);
+                foreach (var version in templateVersions)
+                {
+                    DocumentStructure.EnsureUnchanged(locked, version, documentId);
+                }
+
                 var statuses = new Dictionary<int, Ecr.Domain.Enums.DocumentStatus>();
                 foreach (var sheetDefId in sheets)
                 {
@@ -426,6 +438,7 @@ public sealed class ExcelImporter(
                 versions.Clear();
                 validation.Clear();
                 seeds.Clear();
+                rowWindowChanges.Clear();
                 seedTableInstanceId = 0;
 
                 // ⚠ Версії рядків беруться з ПЕРЕГЛЯДУ і передаються як
@@ -446,7 +459,7 @@ public sealed class ExcelImporter(
                             .GroupBy(c => c.RowKey, StringComparer.Ordinal)
                             .Select(g => new PatchRow(
                                 g.Key,
-                                diff.RowVersions.GetValueOrDefault(g.Key),
+                                BaseRowVersion(diff.RowVersions, g.Key),
                                 [.. g.Select(c => new PatchCell(c.ColumnCode, c.NewValue))]))]))
                     .ToList();
 
@@ -454,7 +467,7 @@ public sealed class ExcelImporter(
                 try
                 {
                     responses = await patch
-                        .HandleWorkbookAsync(requests, seeds, innerCt, statuses)
+                        .HandleWorkbookAsync(requests, seeds, rowWindowChanges, innerCt, statuses)
                         .ConfigureAwait(false);
                 }
                 catch (EcrException error) when (Blame(error, diffs) is { } named)
@@ -489,6 +502,11 @@ public sealed class ExcelImporter(
             await EnqueueRecalculationAsync(ct).ConfigureAwait(false);
         }
 
+        // ⛔ L6-11: підтягування вікон рядків — лише ПІСЛЯ коміту книги, як у
+        // поштучного PATCH: задача, поставлена всередині транзакції, читала б
+        // дані до коміту, а після відкату лишалась би без даних узагалі.
+        await patch.NotifyRowWindowsAsync(rowWindowChanges, ct).ConfigureAwait(false);
+
         // Прибирається ЛИШЕ після успіху: якщо застосування впало на конфлікті,
         // користувач має змогу подивитися перегляд ще раз, а не будувати його
         // наново з файлу, якого може вже не бути під рукою.
@@ -497,9 +515,31 @@ public sealed class ExcelImporter(
         return new PatchCellsResponse(applied, versions, validation);
     }
 
+    /// <summary>Версія рядка з перегляду для <c>baseVersion</c> застосування (L6-08).</summary>
+    /// <param name="versions">Версії рядків таблиці на момент перегляду.</param>
+    /// <param name="rowKey">Рядок книги.</param>
+    /// <returns>Версія з перегляду; рядка тоді не було — нульова версія, якої не буває в живого рядка.</returns>
+    /// <remarks>
+    /// ⛔ Що було: рядок без версії йшов із <c>baseVersion = null</c>, а це для
+    /// <c>PatchCellsHandler</c> намір СТВОРИТИ рядок (R-B2). Рядки книги — ті, що
+    /// існували на експорті; рядок, якого не стало до перегляду, імпорт мовчки
+    /// відтворював би, а в таблиці зі стелею створення бере виняткове блокування
+    /// аркуша поверх уже взятого спільного — прихований дедлок двох імпортів.
+    /// Нульова версія — звичайний конфлікт <c>ECR-CELL-0409</c> («рядок змінився»).
+    /// </remarks>
+    public static string BaseRowVersion(IReadOnlyDictionary<string, string> versions, string rowKey)
+    {
+        ArgumentNullException.ThrowIfNull(versions);
+        return versions.GetValueOrDefault(rowKey) ?? MissingRowVersion;
+    }
+
+    /// <summary>Нульовий <c>rowversion</c> у base64: живий рядок такої версії не має.</summary>
+    public static readonly string MissingRowVersion = Convert.ToBase64String(new byte[8]);
+
     /// <summary>
     /// Аркуші таблиць книги, у які застосування пише, — у порядку, у якому
-    /// береться їхнє блокування (<c>SheetDefId</c> за зростанням).
+    /// береться їхнє блокування (<c>SheetDefId</c> за зростанням), і версії шаблону,
+    /// за якими їх визначено (звіряються під блокуванням структури, L6-02).
     /// </summary>
     /// <remarks>
     /// ⚠ Читається ДО транзакції: це структура (екземпляр → таблиця → аркуш),
@@ -507,20 +547,22 @@ public sealed class ExcelImporter(
     /// немає в документі, сюди не потрапляє — його відхилить сам
     /// <c>PatchCellsHandler</c> своєю відмовою.
     /// </remarks>
-    private async Task<IReadOnlyList<int>> SheetsInLockOrderAsync(
+    private async Task<(IReadOnlyList<int> Sheets, IReadOnlyList<int> TemplateVersions)> SheetsInLockOrderAsync(
         long documentId, PeriodKey period, ImportPlan plan, CancellationToken ct)
     {
         var changed = plan.Tables.Where(t => t.Changes.Count > 0).Select(t => t.TableInstanceId).ToHashSet();
         if (changed.Count == 0)
         {
-            return [];
+            return ([], []);
         }
 
         var instances = await rowStore.GetTableInstancesAsync(documentId, period, ct).ConfigureAwait(false);
         var sheets = new SortedSet<int>();
+        var templateVersions = new List<int>();
 
         foreach (var group in instances.Where(i => changed.Contains(i.TableInstanceId)).GroupBy(i => i.TemplateVersionId))
         {
+            templateVersions.Add(group.Key);
             var snapshot = await metadata.GetAsync(group.Key, ct).ConfigureAwait(false);
             var sheetOfTable = snapshot.Sheets
                 .SelectMany(s => s.Tables)
@@ -535,7 +577,7 @@ public sealed class ExcelImporter(
             }
         }
 
-        return [.. sheets];
+        return ([.. sheets], templateVersions);
     }
 
     /// <summary>

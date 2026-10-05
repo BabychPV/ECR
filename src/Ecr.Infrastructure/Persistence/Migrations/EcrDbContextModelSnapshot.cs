@@ -3568,6 +3568,11 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .IsUnique()
                         .HasDatabaseName("UQ_SourceEntity");
 
+                    b.HasIndex("DataSourceId", "RegistryDefId")
+                        .IsUnique()
+                        .HasDatabaseName("UQ_SourceEntity_Registry")
+                        .HasFilter("[RegistryDefId] IS NOT NULL");
+
                     b.ToTable("SourceEntity", "ext", t =>
                         {
                             t.HasCheckConstraint("CK_SE_OnMissingInSource", "[OnMissingInSource] IN (0, 1, 2)");
@@ -3888,6 +3893,11 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                     b.HasIndex(new[] { "CollectionRunId", "CoveredFrom" }, "IX_CollectionCoverage_CollectionRunId");
 
                     SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex(new[] { "CollectionRunId", "CoveredFrom" }, "IX_CollectionCoverage_CollectionRunId"), new[] { "CoveredTo" });
+
+                    b.HasIndex(new[] { "SourceEntityId", "Id" }, "IX_CollectionCoverage_RegistryEvents")
+                        .HasFilter("[Status] IS NOT NULL AND [PeriodKey] IS NULL");
+
+                    SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex(new[] { "SourceEntityId", "Id" }, "IX_CollectionCoverage_RegistryEvents"), new[] { "Status", "PeriodKey", "Details" });
 
                     b.HasIndex(new[] { "SourceEntityId", "CoveredTo" }, "IX_CollectionCoverage_SourceEntity_CoveredTo")
                         .HasFilter("[Status] IS NULL");

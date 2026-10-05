@@ -71,8 +71,11 @@ public sealed class PatchCellsQueryCountTests(SqlServerFixture sql)
     /// коміту). 22 — п. 5 (контекст доступу одним запитом замість чотирьох).
     /// 23 — ФВ-5.20a: один індексований пошук Reopen-стану аркуша для
     /// <c>IsLateEdit</c> (<c>D-70</c> б); свідомий +1, не дрейф.
+    /// 24 — AN-36 / L6-02: спільний applock структури документа з читанням
+    /// версії шаблону одним батчем (перенос версії не губить правку); свідомий
+    /// +1, не дрейф.
     /// </remarks>
-    private const int MaxCommands = 23;
+    private const int MaxCommands = 24;
 
     private const string Password = "Api-Patch-Ratchet-2026!";
 

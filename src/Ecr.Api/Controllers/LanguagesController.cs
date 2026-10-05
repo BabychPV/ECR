@@ -36,10 +36,20 @@ public sealed class LanguagesController(IUiStringCatalog catalog) : ControllerBa
     /// ЦЕЙ маршрут лишається закритим: він обслуговує редактор перекладів і
     /// поля локалізованих назв, тобто вже автентифіковані екрани, і відкривати
     /// його заради екрана входу не було потреби.
+    ///
+    /// ✎ AN-40 / L9-13: кожна мова несе <c>hasTranslations</c> — перемикач мови в меню користувача більше не тягне
+    /// повні каталоги всіх мов, щоб вирішити, які показувати.
     /// </remarks>
     /// <param name="ct">Токен скасування.</param>
     [HttpGet]
     [ProducesResponseType<IReadOnlyList<LanguageDto>>(StatusCodes.Status200OK)]
     public async Task<IActionResult> List(CancellationToken ct)
-        => Ok(await catalog.ListLanguagesAsync(ct).ConfigureAwait(false));
+    {
+        var languages = await catalog.ListLanguagesAsync(ct).ConfigureAwait(false);
+        var translated = await catalog.ListTranslatedLanguagesAsync(ct).ConfigureAwait(false);
+
+        return Ok(translated is null
+            ? languages
+            : [.. languages.Select(l => l with { HasTranslations = l.IsDefault || translated.Contains(l.Code) })]);
+    }
 }

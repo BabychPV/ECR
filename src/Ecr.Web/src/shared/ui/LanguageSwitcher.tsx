@@ -29,6 +29,13 @@ import { flushUnsaved, hasUnsavedChanges } from './unsavedSources';
  *
  * ⚠ Кешується надовго (як і сам реєстр): переклади з'являються раз на
  * тижні, а не між двома відкриттями меню.
+ *
+ * ✎ AN-40 / L9-13: для приватної області ознаку рахує сервер —
+ * `hasTranslations` у `GET /api/v1/languages`. Коли вона є в КОЖНОЇ мови,
+ * каталоги не тягнуться зовсім (раніше — повний приватний каталог кожної мови,
+ * ~1 МБ на перше відкриття меню, і поки вони їхали, мови були сховані).
+ * Публічна область (сторінка входу) рахує, як і раніше, за своїм малим зрізом:
+ * анонімний `bootstrap` ознаки не віддає.
  */
 export function useTranslatedLanguages(
   languages: readonly LanguageDto[] | undefined,
@@ -36,12 +43,13 @@ export function useTranslatedLanguages(
 ): LanguageDto[] {
   const all = useMemo(() => languages ?? [], [languages]);
   const fallback = all.find((item) => item.isDefault);
+  const flagged = scope === 'private' && all.length > 0 && all.every((item) => typeof item.hasTranslations === 'boolean');
 
   // Зрізи за кодом мови: `undefined` — ще їде, `null` — відмова.
   const [catalogs, setCatalogs] = useState<Record<string, Strings | null>>({});
 
   useEffect(() => {
-    if (fallback === undefined) return;
+    if (fallback === undefined || flagged) return;
 
     let live = true;
 
@@ -54,12 +62,15 @@ export function useTranslatedLanguages(
     return () => {
       live = false;
     };
-  }, [all, fallback, scope]);
+  }, [all, fallback, flagged, scope]);
 
   if (fallback === undefined) return [...all];
 
-  const reference = catalogs[fallback.code];
   const current = language();
+
+  if (flagged) return all.filter((item) => item.isDefault || item.code === current || item.hasTranslations === true);
+
+  const reference = catalogs[fallback.code];
 
   return all.filter((item) => {
     if (item.isDefault || item.code === current) return true;

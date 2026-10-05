@@ -1,4 +1,4 @@
-// src/Ecr.Application/Integration/RegistrySync/RegistrySyncPlanner.cs
+﻿// src/Ecr.Application/Integration/RegistrySync/RegistrySyncPlanner.cs
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using Ecr.Application.Documents;
@@ -60,6 +60,12 @@ public static class RegistrySyncPlanner
 
     /// <summary>Ключ каталогу: у довіднику, на який посилається поле, немає запису з таким кодом.</summary>
     public const string EntryRefNotFoundKey = "err.ECR-REG-0422.entryRefNotFound";
+
+    /// <summary>Причина події <c>ElementUnlinked</c>: автостворення вимагає <c>CodeMode = Auto</c> (Q6=C).</summary>
+    public const string CodeModeManualReason = "codeModeManual";
+
+    /// <summary>Причина події <c>ElementUnlinked</c>: зв'язок елемента веде на видалений запис (L4-12).</summary>
+    public const string EntryDeletedReason = "externalKeyOnDeletedEntry";
 
     /// <summary>
     /// «Поле» події <see cref="RegistrySyncEventKind.Diverged"/> про ввімкненість запису
@@ -156,17 +162,28 @@ public static class RegistrySyncPlanner
                 // D-212 (1): External на ПОВНОМУ знімку створює запис. Неповний знімок
                 // автостворення не дає: елемент, чий старий GUID не прочитався, став би
                 // дублем уже наявного запису.
-                if (input.SourceKind == RegistrySourceKind.External
-                    && input.IsCompleteSnapshot
-                    && PlanCreate(input, element, mappings, events) is { } create)
+                if (input.SourceKind == RegistrySourceKind.External && input.IsCompleteSnapshot)
                 {
-                    creates.Add(create);
+                    // PlanCreate сам пише подію відмови (причина різна: немає імені, режим коду).
+                    if (PlanCreate(input, element, mappings, events) is { } create)
+                    {
+                        creates.Add(create);
+                    }
                 }
                 else
                 {
                     events.Add(new RegistrySyncEvent(RegistrySyncEventKind.ElementUnlinked, element.ExternalId, null));
                 }
 
+                continue;
+            }
+
+            // L4-12: зв'язок на видалений запис синк не обслуговує; без події це було б тихе ігнорування.
+            if (link.EntryDeleted)
+            {
+                events.Add(new RegistrySyncEvent(
+                    RegistrySyncEventKind.ElementUnlinked, element.ExternalId, link.RegistryEntryId,
+                    Reason: EntryDeletedReason));
                 continue;
             }
 
@@ -217,7 +234,7 @@ public static class RegistrySyncPlanner
         {
             foreach (var link in links.Values.OrderBy(l => l.ExternalId, StringComparer.Ordinal))
             {
-                if (elements.ContainsKey(link.ExternalId))
+                if (elements.ContainsKey(link.ExternalId) || link.EntryDeleted)
                 {
                     continue;
                 }
@@ -364,7 +381,7 @@ public static class RegistrySyncPlanner
             .ToLookup(e => e.ExternalPath!, StringComparer.OrdinalIgnoreCase);
 
         var lostByPath = links.Values
-            .Where(l => l.ExternalPath is not null && !elements.ContainsKey(l.ExternalId))
+            .Where(l => l.ExternalPath is not null && !l.EntryDeleted && !elements.ContainsKey(l.ExternalId))
             .GroupBy(l => l.ExternalPath!, StringComparer.OrdinalIgnoreCase)
             .OrderBy(g => g.Key, StringComparer.Ordinal);
 
@@ -405,6 +422,16 @@ public static class RegistrySyncPlanner
     {
         if (string.IsNullOrWhiteSpace(element.Name))
         {
+            events.Add(new RegistrySyncEvent(RegistrySyncEventKind.ElementUnlinked, element.ExternalId, null));
+            return null;
+        }
+
+        // D-212 Q6=C (HU-11, 03.10): код з імені AF не нормалізуємо й не автостворюємо в Manual —
+        // ім'я («F-101», кирилиця, пробіли) не гарантує валідного EcrCode. Створення — лише в Auto.
+        if (input.CodeMode != RegistryCodeMode.Auto)
+        {
+            events.Add(new RegistrySyncEvent(
+                RegistrySyncEventKind.ElementUnlinked, element.ExternalId, null, Reason: CodeModeManualReason));
             return null;
         }
 
@@ -435,12 +462,10 @@ public static class RegistrySyncPlanner
             }
         }
 
-        var code = input.CodeMode == RegistryCodeMode.Auto ? null : name;
-
         // D-212 PR-7: вікно дії нового запису — з атрибутів; невалідна дата — подія, межа відкрита.
         var window = RegistrySyncValidity.Plan(input.Validity, element, ValidityWindow.Always, null, events);
 
-        return new RegistrySyncCreate(element.ExternalId, element.ExternalPath, code, name, values) { Validity = window };
+        return new RegistrySyncCreate(element.ExternalId, element.ExternalPath, null, name, values) { Validity = window };
     }
 
     private static void PlanField(

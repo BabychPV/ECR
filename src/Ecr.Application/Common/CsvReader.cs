@@ -7,6 +7,7 @@ public static class CsvReader
 {
     /// <summary>Розбирає текст на записи; BOM і завершальний порожній рядок ігноруються.</summary>
     /// <param name="text">Вміст файлу.</param>
+    /// <exception cref="FormatException">Файл закінчується всередині незакритої лапки.</exception>
     public static IReadOnlyList<IReadOnlyList<string>> Parse(string text)
     {
         ArgumentNullException.ThrowIfNull(text);
@@ -36,8 +37,10 @@ public static class CsvReader
                     quoted = false;
                 }
             }
-            else if (c == '"')
+            else if (c == '"' && field.Length == 0)
             {
+                // ⚠ L5-11 (RFC 4180): лапка відкриває режим лише на ПОЧАТКУ поля. `Труба 2"` — літерал;
+                // раніше така лапка вмикала режим лапок, і решта файлу з'їдалась в одне поле.
                 quoted = true;
             }
             else if (c == ',')
@@ -61,6 +64,12 @@ public static class CsvReader
             {
                 field.Append(c);
             }
+        }
+
+        if (quoted)
+        {
+            // L5-11: файл обірвано всередині лапок — мовчки прийняти «що встигли» означало б втратити хвіст.
+            throw new FormatException("CSV: незакрита лапка наприкінці файлу.");
         }
 
         if (field.Length > 0 || row.Count > 0)

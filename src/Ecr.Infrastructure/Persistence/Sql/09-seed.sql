@@ -6574,8 +6574,36 @@ USING (VALUES
     (N'profile.languageUnsavedBlocked', N'en', N'The language was not changed: some changes on this page are not saved. Save or undo them, then change the language.', 1),
     -- COLL:t4-p3 ── кінець секції ──
     -- AN32:L2-11 ── черга: перезапуск, коли на ціль уже чекає інша задача; ru/kz — порцією AN32:L2-11 у блоці I18N нижче
-    (N'err.ECR-JOB-0409.restartCoveredBy', N'en', N'Job {jobId} was not restarted: job {coveredBy} is already queued for the same target and will do this work.', 1)
+    (N'err.ECR-JOB-0409.restartCoveredBy', N'en', N'Job {jobId} was not restarted: job {coveredBy} is already queued for the same target and will do this work.', 1),
     -- AN32:L2-11 ── кінець секції ──
+    -- COLL:an36 ── AN-36 (L6-02, L6-06): блокування структури й шапки документа; ru/kz — порцією COLL:an36 у блоці I18N нижче ──
+    (N'err.ECR-DOC-4091.structureChanged',      N'en', N'The document was moved to another template version while your changes were being saved. Nothing was saved; reload the page and try again.', 1),
+    (N'err.ECR-DOC-4091.structureChanging',     N'en', N'The document is being moved to another template version right now. Your changes were not saved; try again in a moment.', 1),
+    (N'err.ECR-DOC-4091.documentBeingEdited',   N'en', N'The document is being edited right now. The template version was not changed; try again in a moment.', 1),
+    (N'err.ECR-DOC-4091.headerBeingEdited',     N'en', N'The document header is being saved right now. The sheet was not submitted; try again in a moment.', 1),
+    -- COLL:an36 ── кінець секції ──
+    -- COLL:an40c ── AN-40 контрактний хвіст (L9-06 версія мапінгу подій, L9-27 шлях чужого каталогу); ru/kz — порцією COLL:an40c у блоці I18N нижче ──
+    (N'err.ECR-INT-0409.eventMapConcurrency',     N'en', N'Event mapping {eventMapId} was changed after you read it. Reload it and apply your changes again.', 1),
+    (N'err.ECR-REQ-0422.sourceEntityPathForeign', N'en', N'Path {path} does not belong to the catalog of connection {dataSource} (its AF database: {database}). Open this connection''s catalog and choose the entity again.', 1),
+    -- COLL:an40c ── кінець секції ──
+    -- COLL:an37-l610 ── AN-37 (L6-10): дубль рядка чи колонки в батчі запису комірок — 422, а не 500; ru/kz — порцією COLL:an37-l610 у блоці I18N нижче ──
+    (N'err.ECR-REQ-0422.patchDuplicateRowKey',  N'en', N'The change lists row {rowKeys} more than once. Nothing was saved; send each row once.', 1),
+    (N'err.ECR-REQ-0422.patchDuplicateCell',    N'en', N'The change sets column {columnCodes} of row {rowKey} more than once. Nothing was saved; send each cell once.', 1),
+    -- COLL:an37-l610 ── кінець секції ──
+    -- COLL:an34m ── AN-34 L4-01: довідник тримає одна сутність збору на з'єднання; ru/kz — порцією COLL:an34m у блоці I18N нижче ──
+    (N'err.ECR-INT-0409.registryAlreadyBound', N'en', N'Registry {registryDefId} is already bound to another collection entity of this connection. A connection takes one entity per registry: unbind the other entity first.', 1),
+    -- COLL:an34m ── кінець секції ──
+    -- COLL:an31c ── AN-31 (L1-14): 409 зовнішнього ключа без коду чужого запису; ru/kz — порцією COLL:an31c у блоці I18N нижче ──
+    (N'err.ECR-REG-0409.externalKeyTakenElsewhere', N'en', N'Identifier "{externalId}" of source "{dataSource}" is already linked to an entry of another registry.', 1),
+    -- COLL:an31c ── кінець секції ──
+    -- COLL:an35b ── AN-35 (L5-11): імпорт CSV: незакрита лапка і не-UTF-8; ru/kz — порцією COLL:an35b у блоці I18N нижче ──
+    (N'err.ECR-REG-0422.entriesCsvUnterminatedQuote', N'en', N'The file ends inside quotation marks: a closing quote is missing. Nothing was imported.', 1),
+    (N'err.ECR-REG-0422.entriesCsvNotUtf8',   N'en', N'The file is not UTF-8 text (it may be saved in a Windows code page). Save it as CSV UTF-8 and try again.', 1),
+    (N'err.ECR-REQ-0422.uiStringCsvUnterminatedQuote', N'en', N'The file ends inside quotation marks: a closing quote is missing. Nothing was imported.', 1),
+    -- COLL:an35b ── кінець секції ──
+    -- COLL:an38t5 ── T5-04: вставка неоднозначного числа — власний вступ вікна відмови, не «лише для читання»; ru/kz — порцією COLL:an38t5 у блоці I18N нижче ──
+    (N'grid.rejectedAmbiguousHint', N'en', N'Nothing from this paste was saved. In English a comma separates thousands, so a number such as 4,125 is ambiguous: enter 4125 or 4.125.', 1)
+    -- COLL:an38t5 ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -15491,6 +15519,90 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- DOC:an37 ── кінець секції ──
+-- COLL:an36 ── ru/kz AN-36 (L6-02, L6-06); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-DOC-4091.structureChanged', N'ru', N'Документ перевели на другую версию шаблона, пока сохранялись ваши изменения. Ничего не сохранено; обновите страницу и повторите.'),
+    (N'err.ECR-DOC-4091.structureChanging', N'ru', N'Документ сейчас переводится на другую версию шаблона. Ваши изменения не сохранены; повторите попытку через мгновение.'),
+    (N'err.ECR-DOC-4091.documentBeingEdited', N'ru', N'Документ сейчас редактируется. Версия шаблона не изменена; повторите попытку через мгновение.'),
+    (N'err.ECR-DOC-4091.headerBeingEdited', N'ru', N'Шапка документа сейчас сохраняется. Лист не подан; повторите попытку через мгновение.'),
+    (N'err.ECR-DOC-4091.structureChanged', N'kz', N'Өзгерістеріңіз сақталып жатқанда құжат үлгінің басқа нұсқасына ауыстырылды. Ештеңе сақталмады; бетті жаңартып, қайталап көріңіз.'),
+    (N'err.ECR-DOC-4091.structureChanging', N'kz', N'Құжат дәл қазір үлгінің басқа нұсқасына ауыстырылуда. Өзгерістеріңіз сақталмады; сәлден кейін қайталап көріңіз.'),
+    (N'err.ECR-DOC-4091.documentBeingEdited', N'kz', N'Құжат дәл қазір өңделуде. Үлгі нұсқасы өзгертілмеді; сәлден кейін қайталап көріңіз.'),
+    (N'err.ECR-DOC-4091.headerBeingEdited', N'kz', N'Құжаттың тақырыптамасы дәл қазір сақталуда. Парақ тапсырылмады; сәлден кейін қайталап көріңіз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:an36 ── кінець секції ──
+-- COLL:an40c ── ru/kz AN-40 контрактного хвоста (L9-06, L9-27); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-INT-0409.eventMapConcurrency', N'ru', N'Сопоставление событий {eventMapId} изменили после того, как вы его прочитали. Перечитайте его и примените изменения заново.'),
+    (N'err.ECR-REQ-0422.sourceEntityPathForeign', N'ru', N'Путь {path} не относится к каталогу подключения {dataSource} (его база AF: {database}). Откройте каталог этого подключения и выберите сущность заново.'),
+    (N'err.ECR-INT-0409.eventMapConcurrency', N'kz', N'{eventMapId} оқиғалар сәйкестендіруін сіз оқығаннан кейін өзгерткен. Оны қайта оқып, өзгерістерді қайта қолданыңыз.'),
+    (N'err.ECR-REQ-0422.sourceEntityPathForeign', N'kz', N'{path} жолы {dataSource} қосылымының каталогына жатпайды (оның AF базасы: {database}). Осы қосылымның каталогын ашып, нысанды қайта таңдаңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:an40c ── кінець секції ──
+-- COLL:an37-l610 ── ru/kz AN-37 (L6-10); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-REQ-0422.patchDuplicateRowKey', N'ru', N'Изменение содержит строку {rowKeys} больше одного раза. Ничего не сохранено; передайте каждую строку один раз.'),
+    (N'err.ECR-REQ-0422.patchDuplicateCell', N'ru', N'Изменение задаёт столбец {columnCodes} строки {rowKey} больше одного раза. Ничего не сохранено; передайте каждую ячейку один раз.'),
+    (N'err.ECR-REQ-0422.patchDuplicateRowKey', N'kz', N'Өзгерісте {rowKeys} жолы бірнеше рет кездеседі. Ештеңе сақталмады; әр жолды бір рет жіберіңіз.'),
+    (N'err.ECR-REQ-0422.patchDuplicateCell', N'kz', N'Өзгеріс {rowKey} жолының {columnCodes} бағанын бірнеше рет береді. Ештеңе сақталмады; әр ұяшықты бір рет жіберіңіз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:an37-l610 ── кінець секції ──
+-- COLL:an34m ── ru/kz AN-34 L4-01: довідник уже прив'язаний до іншої сутності збору з'єднання; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-INT-0409.registryAlreadyBound', N'ru', N'Справочник {registryDefId} уже привязан к другой сущности сбора этого подключения. Подключение держит одну сущность на справочник: сначала отвяжите другую сущность.'),
+    (N'err.ECR-INT-0409.registryAlreadyBound', N'kz', N'{registryDefId} анықтамалығы осы қосылымның жинау нысандарының біріне бұрыннан байланған. Қосылым бір анықтамалыққа бір нысанды ұстайды: алдымен басқа нысанды ажыратыңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:an34m ── кінець секції ──
+-- COLL:an31c ── ru/kz AN-31 (L1-14); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-REG-0409.externalKeyTakenElsewhere', N'ru', N'Идентификатор «{externalId}» источника «{dataSource}» уже связан с записью другого справочника.'),
+    (N'err.ECR-REG-0409.externalKeyTakenElsewhere', N'kz', N'«{dataSource}» көзінің «{externalId}» идентификаторы басқа анықтамалықтың жазбасымен бұрыннан байланыстырылған.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:an31c ── кінець секції ──
+-- COLL:an35b ── ru/kz AN-35 (L5-11): імпорт CSV; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-REG-0422.entriesCsvUnterminatedQuote', N'ru', N'Файл заканчивается внутри кавычек: не хватает закрывающей кавычки. Ничего не импортировано.'),
+    (N'err.ECR-REG-0422.entriesCsvNotUtf8', N'ru', N'Файл не является текстом в UTF-8 (возможно, он сохранён в кодовой странице Windows). Сохраните его как CSV UTF-8 и повторите.'),
+    (N'err.ECR-REQ-0422.uiStringCsvUnterminatedQuote', N'ru', N'Файл заканчивается внутри кавычек: не хватает закрывающей кавычки. Ничего не импортировано.'),
+    (N'err.ECR-REG-0422.entriesCsvUnterminatedQuote', N'kz', N'Файл тырнақша ішінде аяқталады: жабатын тырнақша жоқ. Ештеңе импортталмады.'),
+    (N'err.ECR-REG-0422.entriesCsvNotUtf8', N'kz', N'Файл UTF-8 мәтіні емес (Windows кодтау беті болуы мүмкін). Оны CSV UTF-8 ретінде сақтап, қайталап көріңіз.'),
+    (N'err.ECR-REQ-0422.uiStringCsvUnterminatedQuote', N'kz', N'Файл тырнақша ішінде аяқталады: жабатын тырнақша жоқ. Ештеңе импортталмады.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:an35b ── кінець секції ──
+-- COLL:an38t5 ── ru/kz T5-04: вступ вікна відмови для неоднозначного числа; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'grid.rejectedAmbiguousHint', N'ru', N'Из этой вставки ничего не сохранено. Число с разделителем неоднозначно: запятая может быть и десятичной, и разделителем тысяч. Запишите число без разделителей тысяч или с десятичным разделителем вашего языка.'),
+    (N'grid.rejectedAmbiguousHint', N'kz', N'Осы қоюдан ештеңе сақталмады. Бөлгіші бар сан бір мағыналы емес: үтір ондық бөлгіш те, мыңдықтар бөлгіші де болуы мүмкін. Санды мыңдықтар бөлгішінсіз немесе тіліңіздің ондық бөлгішімен жазыңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:an38t5 ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t
