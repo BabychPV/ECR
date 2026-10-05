@@ -118,6 +118,39 @@ export function deferWhileCommitting(container: HTMLElement, run: () => void): b
   return true;
 }
 
+/**
+ * T5-02 (T4-08 лишався): Ctrl+C у вікні коміту відкладається на рівні `document`, а не лише
+ * через React-`onCopy` обгортки. Живий Chromium (Enter, Ctrl+C за 0-30 мс): коли редактор уже
+ * знято з DOM, фокус на `<body>`, і `copy` летить у `<body>` - до обгортки він не доходить, а
+ * RevoGrid нічого не кладе в буфер (там лишалось старе). Тут `copy` із `<body>` або з сітки,
+ * поки вікно відкрите, скасовується (без `stopImmediatePropagation` решта слухачів
+ * записала б старий вміст), а `run` виконується після вікна, коли виділення вже нове.
+ *
+ * ⚠ Копіювання з чужого поля поза сіткою (target не `<body>` і не в контейнері) не чіпаємо.
+ *
+ * ⚠ Слухач НЕ змінює стан черги/вікна (лише читає `isCommitting`) і діє лише у вікні 'commit'.
+ * Відомий вузький випадок: Ctrl+C, коли Enter ще в черзі й редактор не відкрито (`holding` =
+ * 'open'), не відкладається - щоб не зачепити чергу клавіш (гейт `keyCommitGateLive`).
+ */
+export function installCopyDefer(container: HTMLElement, run: () => void): () => void {
+  const doc = container.ownerDocument;
+
+  const onCopy = (event: ClipboardEvent): void => {
+    const target = event.target;
+    const inside = target instanceof Node && container.contains(target);
+    const detached = target === doc.body || target === doc.documentElement;
+    if (!inside && !detached) return;
+    if (!deferWhileCommitting(container, run)) return;
+
+    event.preventDefault();
+    event.stopImmediatePropagation();
+  };
+
+  doc.addEventListener('copy', onCopy, true);
+
+  return () => doc.removeEventListener('copy', onCopy, true);
+}
+
 /** Встановлює чергу клавіш на контейнері сітки; повертає функцію відписки. */
 export function installKeyCommitGate(container: HTMLElement): () => void {
   const doc = container.ownerDocument;

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { installKeyCommitGate } from '../keyCommitGate';
+import { installCopyDefer, installKeyCommitGate } from '../keyCommitGate';
 
 /**
  * T3-01 (P2): швидка послідовність `Enter, 1, Enter, Enter, 2, Enter` без пауз
@@ -535,5 +535,112 @@ describe('installKeyCommitGate: швидкий ввід не склеює зна
     type(grid, ['ArrowDown', '2', '0', 'Enter'], 0);
 
     expect(grid.values).not.toEqual(['', '', '20', '', '']);
+  });
+});
+
+/**
+ * T5-02 (T4-08 лишався): живий Chromium - Ctrl+C за 0-30 мс після Enter клав у буфер
+ * старе (`copy` летів у `<body>`, бо редактор уже знято, а обгортка сітки події не бачила) або
+ * читав виділення до завершення черги клавіш. Слухач `copy` на `document` відкладає запис
+ * до кінця вікна. Мутація (перевірено 2026-10-05): прибрати `deferWhileCommitting` у
+ * `installCopyDefer` - червоніють ПЕРШИЙ і третій тести. Лише вікно 'commit': Enter у черзі
+ * (редактор не відкрито) copy НЕ відкладає - так гейт `keyCommitGateLive` не зачеплено.
+ */
+describe('installCopyDefer: Ctrl+C у вікні коміту (T5-02)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    document.body.innerHTML = '';
+  });
+
+  function fireCopy(target: EventTarget): ClipboardEvent {
+    const event = new Event('copy', { bubbles: true, cancelable: true }) as ClipboardEvent;
+    target.dispatchEvent(event);
+
+    return event;
+  }
+
+  it('copy у <body> під час коміту: скасовано, run - лише після вікна, з уже новим станом', () => {
+    const grid = mountGrid(4, 1, true);
+    const seen: string[][] = [];
+    const stop = installCopyDefer(grid.container, () => seen.push([...grid.values]));
+
+    grid.press('Enter');
+    vi.advanceTimersByTime(10);
+    grid.press('Enter');
+    (document.activeElement as HTMLElement | null)?.blur();
+
+    const event = fireCopy(document.body);
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(seen).toEqual([]);
+
+    vi.advanceTimersByTime(2000);
+
+    expect(seen).toEqual([['', '', '', '']]);
+    stop();
+    grid.dispose();
+  });
+
+  it('Enter у черзі (редактор не відкрито): copy не відкладається й НЕ чіпає чергу - ввід цілий', () => {
+    const grid = mountGrid(4, 1, true);
+    const seen: string[][] = [];
+    const stop = installCopyDefer(grid.container, () => seen.push([...grid.values]));
+
+    grid.press('Enter');
+    grid.press('7');
+    grid.press('Enter');
+
+    const event = fireCopy(document.body);
+
+    expect(event.defaultPrevented).toBe(false);
+
+    vi.advanceTimersByTime(2000);
+
+    expect(seen).toEqual([]);
+    expect(grid.values).toEqual(['', '7', '', '']);
+    stop();
+    grid.dispose();
+  });
+
+  it('copy усередині сітки під час коміту теж відкладається', () => {
+    const grid = mountGrid(4, 1, true);
+    const seen: number[] = [];
+    const stop = installCopyDefer(grid.container, () => seen.push(1));
+
+    grid.press('Enter');
+    vi.advanceTimersByTime(10);
+    grid.press('Enter');
+
+    const event = fireCopy(grid.container);
+
+    expect(event.defaultPrevented).toBe(true);
+    vi.advanceTimersByTime(2000);
+    expect(seen).toEqual([1]);
+    stop();
+    grid.dispose();
+  });
+
+  it('поза вікном коміту copy не чіпаємо; copy з чужого поля поза сіткою - теж', () => {
+    const grid = mountGrid(4, 1, true);
+    const seen: number[] = [];
+    const stop = installCopyDefer(grid.container, () => seen.push(1));
+    const outside = document.createElement('input');
+    document.body.appendChild(outside);
+
+    expect(fireCopy(document.body).defaultPrevented).toBe(false);
+
+    grid.press('Enter');
+    vi.advanceTimersByTime(10);
+    grid.press('Enter');
+
+    expect(fireCopy(outside).defaultPrevented).toBe(false);
+    vi.advanceTimersByTime(2000);
+    expect(seen).toEqual([]);
+    stop();
+    grid.dispose();
   });
 });
