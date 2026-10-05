@@ -377,9 +377,37 @@ public sealed class UnitOfWork(
             return;
         }
 
+        // ⛔ L6-15 (аудит 2026-10-03). Стратегія повторів (1205, обрив з'єднання)
+        // виконує замикання вдруге над ТИМ САМИМ трекером змін. Сутності, які
+        // перша спроба завантажила чи додала, лишалися в ньому: запит другої
+        // спроби повертав уже змінений екземпляр (подання → `wrongState`), а
+        // доданий запис (`ApprovalEvent`) вставлявся двічі. Перед повтором
+        // від'єднується все, що з'явилося в трекері ПІСЛЯ початку першої
+        // спроби: друга спроба читає й додає наново.
+        //
+        // ⚠ Не `ChangeTracker.Clear()`: сутність, завантажену викликачем ДО
+        // транзакції і змінену в замиканні, повтор має зберегти — від'єднана,
+        // вона мовчки не записалася б, а обробник відповів би успіхом.
+        HashSet<object>? trackedBefore = null;
         var strategy = db.Database.CreateExecutionStrategy();
         await strategy.ExecuteAsync(async () =>
         {
+            if (trackedBefore is null)
+            {
+                trackedBefore = db.ChangeTracker.Entries()
+                    .Select(e => e.Entity)
+                    .ToHashSet(ReferenceEqualityComparer.Instance);
+            }
+            else
+            {
+                foreach (var entry in db.ChangeTracker.Entries()
+                             .Where(e => !trackedBefore.Contains(e.Entity))
+                             .ToList())
+                {
+                    entry.State = EntityState.Detached;
+                }
+            }
+
             await using var transaction = await db.Database.BeginTransactionAsync(ct).ConfigureAwait(false);
             await operation(ct).ConfigureAwait(false);
             await transaction.CommitAsync(ct).ConfigureAwait(false);
