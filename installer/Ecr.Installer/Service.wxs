@@ -94,12 +94,36 @@
         Умовний саме тому, що документована поведінка (docs/build/
         10-installer.md §1.4, сценарій 2 матриці) — «порожній обліковий
         запис → служба зареєстрована, але НЕ запущена», а не «запущена
-        під LocalSystem за замовчуванням».
+        під LocalSystem за замовчуванням». Тип запуску в цьому разі —
+        Manual (EcrApiDemandStart нижче, L10-03).
       -->
       <Component Id="EcrServiceAutoStart" Directory="INSTALLFOLDER"
                  Guid="4d8f2a71-9e3c-4b6d-a2f5-7c1e9b0d3a6f" Condition="SERVICE_ACCOUNT">
         <ServiceControl Id="EcrApiServiceStart" Name="EcrApi" Start="install" Wait="yes" />
       </Component>
     </ComponentGroup>
+
+    <!--
+      ⛔ L10-03 (аудит 2026-10-03): без облікового запису служба реєструється
+      під LocalSystem, і Start="auto" вище підняв би її під LocalSystem після
+      першого ж перезавантаження — всупереч §1.4 («краще явна ручна дія
+      адміністратора»). ServiceInstall/@Start умови не має, а дві таблиці
+      ServiceInstall на один exe неможливі (бінарник — KeyPath компонента),
+      тому тип запуску міняється відкладеною дією ПІСЛЯ InstallServices:
+      Manual (demand). З SERVICE_ACCOUNT — Auto, як і раніше; адміністратор,
+      що потім задає обліковий запис вручну, ставить і автостарт.
+
+      Умова — стан дії компонента ($EcrService = 3: ставиться чи
+      перевстановлюється), тож на видаленні дія не йде, а на REINSTALL і
+      оновленні — йде щоразу (властивість SERVICE_ACCOUNT не запам'ятовується).
+    -->
+    <SetProperty Id="EcrApiDemandStart" Sequence="execute" Before="EcrApiDemandStart"
+                 Value="&quot;[System64Folder]sc.exe&quot; config EcrApi start= demand" />
+    <CustomAction Id="EcrApiDemandStart" BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORT)" DllEntry="WixQuietExec"
+                  Execute="deferred" Impersonate="no" Return="check" />
+    <InstallExecuteSequence>
+      <Custom Action="EcrApiDemandStart" After="InstallServices"
+              Condition="NOT SERVICE_ACCOUNT AND $EcrService = 3" />
+    </InstallExecuteSequence>
   </Fragment>
 </Wix>

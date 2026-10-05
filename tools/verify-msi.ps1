@@ -36,7 +36,8 @@
     видаляє службу. У CI — ефемерний ранер windows-latest.
     ⚠ Без -ServiceAccount служби реєструються під LocalSystem, але НЕ
     стартують (EcrServiceAutoStart/EcrWorkerAutoStart умовні на
-    SERVICE_ACCOUNT) — саме так і в CI, де SQL для старту служб немає.
+    SERVICE_ACCOUNT) і мають тип запуску Manual (L10-03) — саме так і в CI,
+    де SQL для старту служб немає.
 #>
 [CmdletBinding()]
 param(
@@ -161,12 +162,17 @@ $acct = if ($ServiceAccount) { " SERVICE_ACCOUNT=$ServiceAccount" } else { '' }
 
 # StartMode з WMI (Auto/Manual/Disabled) + DelayedAutoStart з реєстру: Get-Service
 # у різних версіях PowerShell показує відкладений старт по-різному.
-function Assert-AutoStart([string] $name) {
+# ⛔ L10-03: без облікового запису — Manual (служба під LocalSystem не має
+# піднятися сама після перезавантаження), з обліковим записом — Auto (Delayed).
+$expectedStartMode = if ($ServiceAccount) { 'Auto' } else { 'Manual' }
+function Assert-StartMode([string] $name) {
     $svc = Get-CimInstance Win32_Service -Filter "Name='$name'"
     if (-not $svc) { throw "служби $name немає" }
-    if ($svc.StartMode -ne 'Auto') { throw "$name StartMode = $($svc.StartMode), очікували Auto" }
-    $delayed = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\$name" -Name DelayedAutoStart -ErrorAction SilentlyContinue
-    if (-not $delayed -or $delayed.DelayedAutoStart -ne 1) { throw "$name без DelayedAutoStart = 1" }
+    if ($svc.StartMode -ne $expectedStartMode) { throw "$name StartMode = $($svc.StartMode), очікували $expectedStartMode" }
+    if ($expectedStartMode -eq 'Auto') {
+        $delayed = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\$name" -Name DelayedAutoStart -ErrorAction SilentlyContinue
+        if (-not $delayed -or $delayed.DelayedAutoStart -ne 1) { throw "$name без DelayedAutoStart = 1" }
+    }
     return $svc
 }
 
@@ -272,6 +278,20 @@ Test-Case 'S5. EcrApi — безумовна, як і раніше' {
     if ($cond) { throw "компонент EcrApi отримав умову '$cond'" }
 }
 
+Test-Case 'S6. Без SERVICE_ACCOUNT обидві служби стають Manual (L10-03)' {
+    foreach ($pair in @(@('EcrApiDemandStart', 'EcrApi'), @('EcrWorkerDemandStart', 'EcrWorker'))) {
+        $action, $service = $pair
+        $seq = Get-MsiRows "SELECT ``Condition`` FROM ``InstallExecuteSequence`` WHERE ``Action`` = '$action'" 1
+        if ($seq.Count -ne 1) { throw "$action немає в InstallExecuteSequence" }
+        if ($seq[0][0] -notmatch 'NOT SERVICE_ACCOUNT') { throw "$action умова '$($seq[0][0])' — без NOT SERVICE_ACCOUNT" }
+        # SQL Windows Installer не знає LIKE — фільтр на боці PowerShell.
+        $targets = Get-MsiRows 'SELECT `Target` FROM `CustomAction`' 1
+        if (-not @($targets | Where-Object { $_[0] -like "*sc.exe*config $service start= demand*" })) {
+            throw "немає дії з 'sc.exe config $service start= demand'"
+        }
+    }
+}
+
 function Get-MsiProperty([string] $name) {
     $rows = Get-MsiRows "SELECT ``Value`` FROM ``Property`` WHERE ``Property`` = '$name'" 1
     if ($rows.Count -ne 1) { return $null }
@@ -309,10 +329,10 @@ function Get-InstalledEcrVersions {
 
 Test-Case '1. Чиста установка' {
     Invoke-Msi "/i `"$MsiPath`" /qn /l*v c1.log$acct"
-    Assert-AutoStart 'EcrApi' | Out-Null
+    Assert-StartMode 'EcrApi' | Out-Null
     # I2-2: без WORKER_ENABLED служба воркера є — типове значення 1.
     if (-not (Get-CimInstance Win32_Service -Filter "Name='EcrWorker'")) { throw 'EcrWorker не зареєстровано без WORKER_ENABLED (типове 1)' }
-    $w = Assert-AutoStart 'EcrWorker'
+    $w = Assert-StartMode 'EcrWorker'
     if ($w.PathName -notmatch 'Ecr\.Worker\.exe"?\s+--supervisor') { throw "PathName = $($w.PathName)" }
     $api = Get-CimInstance Win32_Service -Filter "Name='EcrApi'"
     if ($w.StartName -ne $api.StartName) { throw "обліковий запис EcrWorker '$($w.StartName)' ≠ EcrApi '$($api.StartName)'" }
@@ -334,7 +354,7 @@ Test-Case 'W1. WORKER_ENABLED=0 прибирає службу, EcrApi лишає
 Test-Case 'W2. Той самий MSI, WORKER_ENABLED=1 повертає службу' {
     Invoke-Msi "/i `"$MsiPath`" /qn /l*v cw2.log REINSTALL=ALL REINSTALLMODE=vomus WORKER_ENABLED=1$acct"
     if (-not (Get-Service EcrWorker -ErrorAction SilentlyContinue)) { throw 'EcrWorker не зареєстровано' }
-    Assert-AutoStart 'EcrWorker' | Out-Null
+    Assert-StartMode 'EcrWorker' | Out-Null
 }
 
 # I2-2: оновлення з попередньої версії БЕЗ властивостей — служба воркера є
@@ -358,8 +378,8 @@ if ($PreviousMsiPath) {
         $before = if (Get-Service EcrWorker -ErrorAction SilentlyContinue) { 'є' } else { 'немає' }
         Write-Host "  W3b: після попередньої MSI служба EcrWorker — $before; версії: $((Get-InstalledEcrVersions) -join ', ')"
         Invoke-Msi "/i `"$MsiPath`" /qn /l*v cw3cb.log$acct"
-        Assert-AutoStart 'EcrWorker' | Out-Null
-        Assert-AutoStart 'EcrApi' | Out-Null
+        Assert-StartMode 'EcrWorker' | Out-Null
+        Assert-StartMode 'EcrApi' | Out-Null
         $versions = Get-InstalledEcrVersions
         if ($versions.Count -ne 1 -or $versions[0] -ne $currentVersion) {
             throw "після оновлення встановлено версії [$($versions -join ', ')], очікували лише $currentVersion"
@@ -394,7 +414,7 @@ Test-Case '9. Видалення' {
 Test-Case 'W5. Чиста установка з WORKER_ENABLED=0 — служби EcrWorker немає' {
     Invoke-Msi "/i `"$MsiPath`" /qn /l*v cw5.log WORKER_ENABLED=0$acct"
     try {
-        Assert-AutoStart 'EcrApi' | Out-Null
+        Assert-StartMode 'EcrApi' | Out-Null
         if (Get-Service EcrWorker -ErrorAction SilentlyContinue) { throw 'EcrWorker зареєстровано за WORKER_ENABLED=0' }
         $api = Get-CimInstance Win32_Service -Filter "Name='EcrApi'"
         $dir = Split-Path ($api.PathName -replace '^"([^"]+)".*$', '$1') -Parent

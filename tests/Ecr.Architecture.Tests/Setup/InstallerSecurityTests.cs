@@ -37,6 +37,39 @@ public sealed class InstallerSecurityTests
         Assert.Empty(components.SelectMany(c => c.Descendants(Util + "PermissionEx")));
     }
 
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    [InlineData("Service.wxs", "EcrApiDemandStart", "EcrApi", "EcrService")]
+    [InlineData("Worker.wxs", "EcrWorkerDemandStart", "EcrWorker", "EcrWorkerService")]
+    public void Без_облікового_запису_служба_стає_Manual_а_не_Auto_під_LocalSystem(
+        string fileName, string action, string service, string component)
+    {
+        // L10-03: Start="auto" + порожній SERVICE_ACCOUNT = LocalSystem після перезавантаження.
+        var document = Load(fileName);
+
+        var custom = document.Descendants(Wix + "Custom").Single(c => (string?)c.Attribute("Action") == action);
+        var condition = (string?)custom.Attribute("Condition") ?? string.Empty;
+        Assert.Contains("NOT SERVICE_ACCOUNT", condition, StringComparison.Ordinal);
+        Assert.Contains($"${component} = 3", condition, StringComparison.Ordinal);
+
+        var setProperty = document.Descendants(Wix + "SetProperty").Single(p => (string?)p.Attribute("Id") == action);
+        Assert.Contains($"config {service} start= demand", (string?)setProperty.Attribute("Value"), StringComparison.Ordinal);
+
+        var customAction = document.Descendants(Wix + "CustomAction").Single(a => (string?)a.Attribute("Id") == action);
+        Assert.Equal("deferred", (string?)customAction.Attribute("Execute"));
+        Assert.Equal("no", (string?)customAction.Attribute("Impersonate"));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Майстер_типово_пропонує_gMSA()
+    {
+        // L10-03, D-282: типовий стан майстра — gMSA, не Local System.
+        Assert.Equal(Ecr.Setup.ServiceAccountMode.Gmsa, new Ecr.Setup.WizardState().ServiceAccountMode);
+    }
+
     private static XDocument Load(string fileName)
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);

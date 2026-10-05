@@ -110,7 +110,8 @@
 .PARAMETER ServiceAccount
     `DOMAIN\ecr-svc$` (gMSA, рекомендовано — без пароля) або `DOMAIN\user`.
     Передається в msiexec як SERVICE_ACCOUNT. Порожнє — служба
-    реєструється, але свідомо НЕ стартує (`docs/build/10-installer.md` §1.4).
+    реєструється з типом запуску Manual і свідомо НЕ стартує, зокрема після
+    перезавантаження (`docs/build/10-installer.md` §1.4, L10-03).
 
 .PARAMETER ServicePassword
     Лише для не-gMSA облікового запису.
@@ -1669,7 +1670,7 @@ Write-Host ("Перерахунок: " + $(if ($workerEnabled) { 'служба E
 Write-Step "Крок 6/7: старт служби"
 
 if (-not $ServiceAccount) {
-    Write-Host "SERVICE_ACCOUNT не задано — служба зареєстрована, але не стартує (навмисно, docs/build/10-installer.md §1.4)." -ForegroundColor Yellow
+    Write-Host "SERVICE_ACCOUNT не задано — служба зареєстрована з типом запуску Manual і не стартує (навмисно, docs/build/10-installer.md §1.4, L10-03)." -ForegroundColor Yellow
     if ($workerEnabled) {
         Write-Host ("  ⚠ EcrWorker теж не стартує, а EcrApi вже налаштовано на Executor = Worker: запускай ОБИДВІ служби, " +
             "інакше перерахунок стоятиме в черзі (перевірка worker на /health/ready — Degraded).") -ForegroundColor Yellow

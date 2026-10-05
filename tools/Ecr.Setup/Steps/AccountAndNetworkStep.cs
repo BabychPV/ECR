@@ -40,6 +40,14 @@ internal sealed class AccountAndNetworkStep : IWizardStep
             return false;
         }
 
+        // gMSA завжди закінчується на `$` (DOMAIN\ecr-svc$); без нього SCM шукає
+        // звичайний обліковий запис і просить пароль — помилка лише на кроці 6.
+        if (_gmsaOption!.Checked && !_accountNameBox!.Text.Trim().EndsWith('$'))
+        {
+            error = "A gMSA account name ends with '$' (for example DOMAIN\\ecr-svc$).";
+            return false;
+        }
+
         if (_domainUserOption!.Checked && string.IsNullOrWhiteSpace(_passwordBox!.Text))
         {
             error = "Enter the service account password.";
@@ -89,11 +97,19 @@ internal sealed class AccountAndNetworkStep : IWizardStep
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
 
-        _localSystemOption = new RadioButton { Text = "Local System (not recommended)", AutoSize = true, Checked = true };
-        _gmsaOption = new RadioButton { Text = "gMSA", AutoSize = true };
+        // ⛔ L10-03 (аудит 2026-10-03), D-282: типово — gMSA. Local System лишається
+        // свідомим вибором: служба реєструється з типом запуску Manual і НЕ
+        // стартує (10-installer.md §1.4), а не піднімається під LocalSystem
+        // після перезавантаження.
+        _localSystemOption = new RadioButton
+        {
+            Text = "Local System (not recommended: the service is registered as Manual and is not started)",
+            AutoSize = true,
+        };
+        _gmsaOption = new RadioButton { Text = "gMSA (recommended)", AutoSize = true, Checked = true };
         _domainUserOption = new RadioButton { Text = "Account and password", AutoSize = true };
 
-        _accountNameBox = new TextBox { Dock = DockStyle.Fill, Enabled = false };
+        _accountNameBox = new TextBox { Dock = DockStyle.Fill, Enabled = true };
         _passwordBox = new TextBox { Dock = DockStyle.Fill, Enabled = false, UseSystemPasswordChar = true };
 
         _localSystemOption.CheckedChanged += (_, _) => UpdateEnabled();

@@ -88,8 +88,8 @@
       <!--
         Старт — окремим компонентом, як EcrServiceAutoStart у Service.wxs:
         ServiceControl/@Condition компілятор не приймає (WIX0004). Порожній
-        SERVICE_ACCOUNT = служба зареєстрована, але не запущена — та сама
-        документована поведінка, що в EcrApi (10-installer.md §1.4).
+        SERVICE_ACCOUNT = служба зареєстрована, але не запущена й Manual — та сама
+        документована поведінка, що в EcrApi (10-installer.md §1.4, L10-03).
         ⚠ Явний GUID: компонент без File (WIX0230).
       -->
       <Component Id="EcrWorkerAutoStart" Guid="e5a0c7d3-1f94-4b2e-8d6a-47c9b3f10e82"
@@ -98,5 +98,20 @@
       </Component>
 
     </ComponentGroup>
+
+    <!--
+      ⛔ L10-03: без облікового запису — Manual, а не Auto під LocalSystem
+      після перезавантаження. Те саме, що EcrApiDemandStart у Service.wxs;
+      умова на стан компонента служби, тож за WORKER_ENABLED=0 (служби немає
+      або її транзитивно знято) sc.exe не кличеться.
+    -->
+    <SetProperty Id="EcrWorkerDemandStart" Sequence="execute" Before="EcrWorkerDemandStart"
+                 Value="&quot;[System64Folder]sc.exe&quot; config EcrWorker start= demand" />
+    <CustomAction Id="EcrWorkerDemandStart" BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORT)" DllEntry="WixQuietExec"
+                  Execute="deferred" Impersonate="no" Return="check" />
+    <InstallExecuteSequence>
+      <Custom Action="EcrWorkerDemandStart" After="EcrApiDemandStart"
+              Condition="NOT SERVICE_ACCOUNT AND $EcrWorkerService = 3" />
+    </InstallExecuteSequence>
   </Fragment>
 </Wix>

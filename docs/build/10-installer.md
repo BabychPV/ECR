@@ -256,6 +256,16 @@ Bundle» перетворює установку на переговори з а
 заданий: краще явна ручна дія адміністратора, ніж служба, яка піднялася під
 `LocalSystem` і тихо працює не під тим, під чим має.
 
+✎ L10-03 (аудит 2026-10-03): «не стартує» стосується й перезавантаження. Без
+`SERVICE_ACCOUNT` обидві служби (`EcrApi`, `EcrWorker`) отримують тип запуску
+**Manual** — відкладені дії `EcrApiDemandStart`/`EcrWorkerDemandStart`
+(`sc.exe config … start= demand` після `InstallServices`, `Service.wxs`,
+`Worker.wxs`); раніше `Start="auto"` піднімав їх під `LocalSystem` після першого
+перезавантаження. З обліковим записом — Auto (Delayed), як і було. Майстер
+`Ecr-Setup` типово пропонує gMSA (`D-282`); Local System — свідомий вибір із
+поясненням, що служба лишиться Manual. Перевірка — `verify-msi.ps1` S6 і
+сценарій 1 (`StartMode = Manual` без `-ServiceAccount`).
+
 Якщо передається пароль — властивість оголошена `Hidden="yes"` і внесена в
 `MsiHiddenProperties`, тому **не потрапляє в лог MSI**. Це не косметика:
 `msiexec /l*v` за замовчуванням пише всі властивості у файл, який лишається

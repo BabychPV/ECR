@@ -51,7 +51,8 @@ internal sealed class WizardState
     public WizardMode Mode { get; set; } = WizardMode.FirstDeployment;
 
     // Крок 2 — обліковий запис і мережа.
-    public ServiceAccountMode ServiceAccountMode { get; set; } = ServiceAccountMode.LocalSystem;
+    // L10-03, D-282: типово gMSA, як і перемикач на кроці 2.
+    public ServiceAccountMode ServiceAccountMode { get; set; } = ServiceAccountMode.Gmsa;
     public string? ServiceAccountName { get; set; }
     public SecureString? ServicePassword { get; set; }
     public int Port { get; set; } = 5000;
