@@ -6602,8 +6602,11 @@ USING (VALUES
     (N'err.ECR-REQ-0422.uiStringCsvUnterminatedQuote', N'en', N'The file ends inside quotation marks: a closing quote is missing. Nothing was imported.', 1),
     -- COLL:an35b ── кінець секції ──
     -- COLL:an38t5 ── T5-04: вставка неоднозначного числа — власний вступ вікна відмови, не «лише для читання»; ru/kz — порцією COLL:an38t5 у блоці I18N нижче ──
-    (N'grid.rejectedAmbiguousHint', N'en', N'Nothing from this paste was saved. In English a comma separates thousands, so a number such as 4,125 is ambiguous: enter 4125 or 4.125.', 1)
+    (N'grid.rejectedAmbiguousHint', N'en', N'Nothing from this paste was saved. In English a comma separates thousands, so a number such as 4,125 is ambiguous: enter 4125 or 4.125.', 1),
     -- COLL:an38t5 ── кінець секції ──
+    -- COLL:an38k ── L4-06/L5-03: первинний ключ на записах без значення частини; ru/kz — порцією COLL:an38k у блоці I18N нижче ──
+    (N'err.ECR-REG-0422.primaryKeyEmptyParts', N'en', N'Primary key {key} cannot be enabled: {entries} entries have no value in a part of the key. Fill it in or delete those entries first.', 1)
+    -- COLL:an38k ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -15603,6 +15606,16 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:an38t5 ── кінець секції ──
+-- COLL:an38k ── ru/kz L4-06/L5-03: первинний ключ на записах без значення частини; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-REG-0422.primaryKeyEmptyParts', N'ru', N'Первичный ключ {key} нельзя включить: у {entries} записей нет значения части ключа. Сначала заполните его или удалите эти записи.'),
+    (N'err.ECR-REG-0422.primaryKeyEmptyParts', N'kz', N'Негізгі кілт {key} қосу мүмкін емес: {entries} жазбада кілт бөлігінің мәні жоқ. Алдымен оны толтырыңыз немесе осы жазбаларды жойыңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:an38k ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t
