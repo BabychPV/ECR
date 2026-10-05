@@ -96,15 +96,12 @@ public sealed class ValidateDocumentHandler(
         // нижче означало б піти в базу настільки ж зайвий раз.
         var headerValues = await headers.GetExpressionValuesAsync(documentId, ct).ConfigureAwait(false);
 
-        // ⚠ B-11: мова того, хто ЗАПУСТИВ перевірку — `ValidationSummary.MessagesJson`
-        // нижче зберігає РЕЗУЛЬТАТ, тобто вже готовий текст цією мовою. Читач
-        // із ІНШОЮ мовою інтерфейсу (`GetValidationResultHandler`) побачить
-        // збережений підсумок мовою того, хто востаннє натиснув «Перевірити»
-        // чи «Подати» — той самий компроміс, що вже був ДО цього фіксу (тоді
-        // мова була завжди `en`, тепер — мова автора запуску). Перерахунок
-        // підсумка під мову КОЖНОГО читача — окрема задача (передбачала б або
-        // повторну валідацію на читанні, або збереження messageKey замість
-        // готового тексту), не ця.
+        // ⚠ B-11: `Message` тут — мовою того, хто ЗАПУСТИВ перевірку, і це лише
+        // запасний текст. T2-07 / T3-03 / T4-06: повідомлення двигуна (Check,
+        // структурні, зламане правило) несуть `MessageKey` + `Params`, а
+        // `GetValidationResultHandler` збирає текст мовою КОЖНОГО читача; тексти
+        // правил він бере з `MessageL10n`. Старі збережені результати без ключа
+        // лишаються текстом автора запуску.
         var messages = new List<ValidationMessage>();
 
         foreach (var (instance, table, snapshot) in toValidate)
@@ -124,7 +121,7 @@ public sealed class ValidateDocumentHandler(
             }
 
             messages.AddRange(TableValidation.MissingRequiredColumnMessages(
-                table, [.. table.Columns.Where(c => !c.IsDeleted && c.IsRequired)], cells, rowIds));
+                table, [.. table.Columns.Where(c => !c.IsDeleted && c.IsRequired)], cells, rowIds, currentUser.Language));
         }
 
         // D-230: зв'язки Check (ПРИПУЩЕННЯ схеми, `RelationSpec.cs`). Читаються після таблиць із
