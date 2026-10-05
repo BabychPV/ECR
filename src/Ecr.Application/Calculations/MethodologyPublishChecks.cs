@@ -1,5 +1,6 @@
 // src/Ecr.Application/Calculations/MethodologyPublishChecks.cs
 using System.Globalization;
+using System.Runtime.CompilerServices;
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Domain.Entities.Calculations;
@@ -528,6 +529,9 @@ public static class MethodologyPublishChecks
     private static void Walk(
         AstNode node, bool isArithmetic, List<string> referenced, HashSet<string> inArithmetic)
     {
+        // ⛔ L7-01: лівий гребінь ланцюга — рекурсія глибиною в кількість ланок.
+        RuntimeHelpers.EnsureSufficientExecutionStack();
+
         switch (node)
         {
             case SymbolReferenceNode { Kind: SymbolKind.Constant } symbol:
@@ -602,7 +606,11 @@ public static class MethodologyPublishChecks
     /// </remarks>
     private static bool ProducesTextOnly(
         AstNode node, Dictionary<string, MethodologyConstant> byCode)
-        => node switch
+    {
+        // ⛔ L7-01: лівий гребінь ланцюга — рекурсія глибиною в кількість ланок.
+        RuntimeHelpers.EnsureSufficientExecutionStack();
+
+        return node switch
         {
             LiteralNode { Type: ExpressionValueType.Text } => true,
             BinaryNode { Operator: BinaryOperator.Concat } => true,
@@ -618,11 +626,16 @@ public static class MethodologyPublishChecks
                    && ProducesTextOnly(function.Arguments[2], byCode),
             _ => false,
         };
+    }
 
     /// <summary>Чи вираз напевно повертає число.</summary>
     private static bool ProducesNumber(
         AstNode node, Dictionary<string, MethodologyConstant> byCode)
-        => node switch
+    {
+        // ⛔ L7-01: лівий гребінь ланцюга — рекурсія глибиною в кількість ланок.
+        RuntimeHelpers.EnsureSufficientExecutionStack();
+
+        return node switch
         {
             LiteralNode { Type: ExpressionValueType.Number } => true,
             BinaryNode binary => Arithmetic.Contains(binary.Operator),
@@ -640,6 +653,7 @@ public static class MethodologyPublishChecks
             FunctionNode function => !NonNumericFunctions.Contains(function.Name),
             _ => false,
         };
+    }
 
     /// <summary>Текст переліку проблем для повідомлення про відмову.</summary>
     /// <param name="problems">Перелік проблем.</param>

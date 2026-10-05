@@ -1,4 +1,5 @@
 // src/Ecr.Application/Registries/Rules/RegistryRuleContext.cs
+using System.Runtime.CompilerServices;
 using Ecr.Domain.Enums;
 using Ecr.Expressions;
 using Ecr.Expressions.Ast;
@@ -80,6 +81,9 @@ internal sealed class RegistryRuleContext(IRegistrySnapshot snapshot, DateOnly d
 
     private static AstNode BindNode(AstNode node, long entryId, int rowScopeDepth)
     {
+        // ⛔ L7-01: лівий гребінь ланцюга — рекурсія глибиною в кількість ланок.
+        RuntimeHelpers.EnsureSufficientExecutionStack();
+
         switch (node)
         {
             case ThisNode:

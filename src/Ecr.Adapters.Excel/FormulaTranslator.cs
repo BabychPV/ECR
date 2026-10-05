@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Runtime.CompilerServices;
 using Ecr.Domain.Enums;
 using Ecr.Expressions.Ast;
 using Ecr.Expressions.Parsing;
@@ -200,6 +201,9 @@ public sealed class FormulaTranslator
         FormulaContext context,
         System.Text.StringBuilder builder)
     {
+        // ⛔ L7-01: лівий гребінь ланцюга — рекурсія глибиною в кількість ланок.
+        RuntimeHelpers.EnsureSufficientExecutionStack();
+
         switch (node)
         {
             case LiteralNode literal:

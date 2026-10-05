@@ -288,6 +288,9 @@ public sealed class UnitChecker
     private static string? EntryRegistry(
         AstNode node, IUnitContext context, IRegistryShapeSource registries, RegistryShape? row)
     {
+        // ⛔ L7-01: лівий гребінь ланцюга — рекурсія глибиною в кількість ланок.
+        RuntimeHelpers.EnsureSufficientExecutionStack();
+
         switch (node)
         {
             case FunctionNode function when function.Arguments.Count > 0
