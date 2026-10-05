@@ -13132,6 +13132,9 @@ export interface paths {
          *     `svc-integration`, тож прив'язка — делегування права на його дані.
          *     Без права — `403 ECR-AUTH-0403`. `D-202`, доповнення 2026-09-29
          *     (`docs/tz/10-decisions.md` §1.19) — судження розробки, на підтвердження.
+         *     Одна сутність на довідник у з'єднанні (AN-34 L4-01): довідник, який уже тримає
+         *     інша сутність цього з'єднання (активна чи вимкнена), — `409 ECR-INT-0409`
+         *     (`err.ECR-INT-0409.registryAlreadyBound`); відв'язка першої звільняє довідник.
          */
         put: {
             parameters: {
@@ -13176,6 +13179,17 @@ export interface paths {
                 };
                 /** @description Not Found */
                 404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
                     headers: {
                         [name: string]: unknown;
                     };

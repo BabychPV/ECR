@@ -97,11 +97,15 @@ public sealed class SourcesController(
     /// <c>svc-integration</c>, тож прив'язка — делегування права на його дані.
     /// Без права — <c>403 ECR-AUTH-0403</c>. <c>D-202</c>, доповнення 2026-09-29
     /// (<c>docs/tz/10-decisions.md</c> §1.19) — судження розробки, на підтвердження.
+    /// Одна сутність на довідник у з'єднанні (AN-34 L4-01): довідник, який уже тримає
+    /// інша сутність цього з'єднання (активна чи вимкнена), — <c>409 ECR-INT-0409</c>
+    /// (<c>err.ECR-INT-0409.registryAlreadyBound</c>); відв'язка першої звільняє довідник.
     /// </remarks>
     [HttpPut("{id:int}/registry")]
     [ProducesResponseType<Ecr.Application.Sources.SourceEntityDto>(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
     public async Task<IActionResult> BindRegistry(
         int id, [FromBody] BindSourceEntityRegistryRequest request, CancellationToken ct)
     {
