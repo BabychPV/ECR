@@ -30,7 +30,7 @@ public sealed class TemplateVersionCloneGrantsTests(SqlServerFixture sql)
     {
         var ct = CancellationToken.None;
         var builder = new TestDocumentBuilder(sql.ConnectionString);
-        var doc = await builder.BuildAsync(ct: ct);
+        var doc = await builder.BuildAsync(columnCount: 3, ct: ct);
         var tag = Guid.NewGuid().ToString("N")[..8].ToUpperInvariant();
         var deniedColumn = doc.ColumnDefIds[0];
 
@@ -48,7 +48,9 @@ public sealed class TemplateVersionCloneGrantsTests(SqlServerFixture sql)
                 new ResourceGrant(roleId, ResourceKind.Sheet, doc.SheetDefId, GrantLevel.None, isDeny: true),
                 new ResourceGrant(roleId, ResourceKind.Table, doc.TableDefId, GrantLevel.None, isDeny: true),
                 new ResourceGrant(roleId, ResourceKind.Column, deniedColumn, GrantLevel.None, isDeny: true),
-                new ResourceGrant(roleId, ResourceKind.Column, doc.ColumnDefIds[1], GrantLevel.Read));
+                new ResourceGrant(roleId, ResourceKind.Column, doc.ColumnDefIds[1], GrantLevel.Read),
+                // Дозвіл вище Read міг би ПІДНЯТИ доступ на клоні (ent7 P2-2) — не копіюється.
+                new ResourceGrant(roleId, ResourceKind.Column, doc.ColumnDefIds[2], GrantLevel.Write));
             await setup.SaveChangesAsync(ct);
         }
 
@@ -83,8 +85,10 @@ public sealed class TemplateVersionCloneGrantsTests(SqlServerFixture sql)
         Assert.Contains(grants, g =>
             g.ResourceKind == ResourceKind.Column && g.ResourceId == cloneAllowed.Id && !g.IsDeny && g.Level == GrantLevel.Read);
 
-        // Гранти джерела не зачеплені: чотири свої + чотири на клон.
+        // Write-дозвіл не скопійований; джерело не зачеплене: п'ять своїх + чотири на клон.
+        var cloneWriteColumn = cloneColumns.Single(c => c.Code == sourceColumns.Single(s => s.Id == doc.ColumnDefIds[2]).Code);
+        Assert.DoesNotContain(grants, g => g.ResourceKind == ResourceKind.Column && g.ResourceId == cloneWriteColumn.Id);
         Assert.Contains(grants, g => g.ResourceKind == ResourceKind.Column && g.ResourceId == deniedColumn && g.IsDeny);
-        Assert.Equal(8, grants.Count);
+        Assert.Equal(9, grants.Count);
     }
 }

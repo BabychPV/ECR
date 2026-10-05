@@ -384,6 +384,13 @@ public sealed partial class TemplateVersionStore(EcrDbContext db) : ITemplateVer
     /// під рівнем проєкту теж звужує доступ.
     /// </summary>
     /// <remarks>
+    /// ⛔ Копіюються ЛИШЕ звужувальні гранти: Deny і дозвіл рівня ≤ Read. Дозвіл вище Read (аркуш
+    /// Approve, колонка Write) без <c>ProjectId</c> діє в усіх проєктах версії, які користувач бачить
+    /// (ent7 P2-2, <c>EditRules.Effective</c>), тож копія могла б ПІДНЯТИ доступ на клоні без рішення
+    /// людини; Read-дозвіл підняти не може (грант діє лише при проєктному ≥ Read, S2). Не скопійований
+    /// дозвіл дає fail-closed для підвищення; відомий залишок — Allow &gt; Read, що звужував рівень
+    /// проєкту (напр. Write під Manage), на клоні не діє: адміністратор видає його заново.
+    ///
     /// ⚠ Профіль прав кешується за відбитком грантів ролі (count і max(Id)): нові рядки його
     /// змінюють, тож інвалідація не потрібна. Ресурс клону без відповідника за кодом неможливий
     /// (клон ідентичний джерелу); якби трапився — гранту просто немає, він нічого не відкриває.
@@ -426,7 +433,8 @@ public sealed partial class TemplateVersionStore(EcrDbContext db) : ITemplateVer
         var ids = sources.Select(s => s.SourceId).Distinct().ToList();
         var grants = await db.ResourceGrants
             .AsNoTracking()
-            .Where(g => kinds.Contains(g.ResourceKind) && ids.Contains(g.ResourceId))
+            .Where(g => kinds.Contains(g.ResourceKind) && ids.Contains(g.ResourceId)
+                        && (g.IsDeny || g.Level <= GrantLevel.Read))
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
