@@ -60,14 +60,21 @@ export function getRegistryDraft(code: string): Promise<RegistryDraftState> {
  *
  * @param code Код довідника.
  * @param body Повний стан форми разом із причиною і версією чернетки.
+ * @param definitionVersion Версія ОПИСУ, з якого збудовано форму (не з відповіді чернетки): іде в
+ *   `If-Match`; інша на сервері — `409 definitionChanged` (опис змінили після читання), без заголовка — `422`.
  */
 export function saveRegistryDraft(
   code: string,
   body: SaveRegistryDraftRequest,
+  definitionVersion: number,
 ): Promise<RegistryDraftDto> {
   return apiFetch<RegistryDraftDto>(
     `/api/v1/registries/${encodeURIComponent(code)}/definition/draft`,
-    { method: 'PUT', body: JSON.stringify(body) },
+    {
+      method: 'PUT',
+      headers: { 'If-Match': `"${definitionVersion}"` },
+      body: JSON.stringify(body),
+    },
   );
 }
 

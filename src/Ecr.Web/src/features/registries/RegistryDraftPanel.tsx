@@ -41,12 +41,23 @@ export type SaveRegistryDraftBody = Parameters<typeof saveRegistryDraft>[1];
  */
 export function RegistryDraftPanel({
   code,
+  definitionVersion,
   request,
   reason,
   onReasonChange,
   onSaved,
 }: {
   readonly code: string;
+
+  /**
+   * Версія опису, З ЯКОГО збудовано форму сторінки (`definition.definitionVersion`).
+   *
+   * ⛔ L9-36: іде в `If-Match` і збереження чернетки, і прямого «зберегти й опублікувати». Версія з
+   * відповіді ЧЕРНЕТКИ (`state.data.definitionVersion`) тут не годиться: вона перечитується після
+   * кожного збереження і може бути новішою за ту, з якої форма засіяна, — тоді сервер не побачив би,
+   * що опис змінили повз форму.
+   */
+  readonly definitionVersion: number;
 
   /** Повний стан форми; `null` — форма ще не готова до збереження. */
   readonly request: SaveRegistryDefinitionDto | null;
@@ -95,7 +106,7 @@ export function RegistryDraftPanel({
 
   const save = useMutation({
     meta: { handled: true },
-    mutationFn: (body: SaveRegistryDraftBody) => saveRegistryDraft(code, body),
+    mutationFn: (body: SaveRegistryDraftBody) => saveRegistryDraft(code, body, definitionVersion),
     onSuccess: async (saved, body) => {
       onSaved?.(body, saved.rowVersion);
       await reload();
@@ -133,18 +144,13 @@ export function RegistryDraftPanel({
    */
   const saveAndPublish = useMutation({
     meta: { handled: true },
-    mutationFn: () => {
-      // ⛔ `If-Match` обов'язковий: версії опису не знаємо — не шлемо запит наосліп.
-      const version = state.data?.definitionVersion;
-      if (version === undefined) {
-        return Promise.reject(new Error('definitionVersion is unknown'));
-      }
-      return saveAndPublishRegistryDefinition(code, {
+    // ⛔ `If-Match` — версія опису, з якого збудовано ФОРМУ (L9-36), а не з відповіді чернетки.
+    mutationFn: () =>
+      saveAndPublishRegistryDefinition(code, {
         fields: request?.fields ?? [],
         rules: request?.rules ?? [],
         reason: request?.reason ?? '',
-      }, version);
-    },
+      }, definitionVersion),
     onSettled: () => setConfirm(null),
     onSuccess: async (result) => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.registries.definition(code) });
@@ -187,8 +193,10 @@ export function RegistryDraftPanel({
     saveAndPublish.reset();
     void reload();
 
-    // Опис змінили в іншій вкладці: свіжа версія потрібна і формі, і наступному `If-Match`.
-    if (conflict?.kind === 'definitionChanged') {
+    // ⛔ L9-36: для БУДЬ-ЯКОГО конфлікту, а не лише `definitionChanged`. Чернетку сусіда (`changed`),
+    // її зникнення (`missing`) чи розбіжність версій (`stale`) спричиняє публікація, яка змінила й сам
+    // опис; без його перечитування наступний `If-Match` ніс би стару версію і знову дав би відмову.
+    if (conflict !== null) {
       void queryClient.invalidateQueries({ queryKey: queryKeys.registries.definition(code) });
     }
   };
