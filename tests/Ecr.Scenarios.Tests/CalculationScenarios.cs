@@ -472,6 +472,89 @@ public sealed class CalculationScenarios(SqlServerFixture sql)
     }
 
     /// <summary>
+    /// D-283 / HU-11 Q2=A: зміна прив'язки ОПУБЛІКОВАНОЇ методології — лише журнал
+    /// (без «чотирьох очей»), і журнал на справжній базі каже, хто змінив, що
+    /// було до того і що опублікована методологія діяла на живі числа.
+    /// </summary>
+    /// <remarks>
+    /// Мутація: прибрати <c>audit.WriteStructureChangeAsync</c> у
+    /// <c>SaveCalculationBindingHandler</c> — журнал порожній, тест червоний;
+    /// другий користувач для зміни НЕ потрібен (той самий автор змінює сам).
+    /// </remarks>
+    [Fact]
+    [Trait("Category", "Integration")]
+    [Trait("Scenario", "S-24d")]
+    [Trait("Decision", "D-283")]
+    public async Task Зміна_прив_язки_опублікованої_методології_лягає_в_журнал_справжньої_бази_без_другого_погодження()
+    {
+        var stand = await ArrangeStandAsync(sql, "S24d", argument: 4m, divisor: 2m);
+        using var app = stand.App;
+
+        var methodologyId = await CreateMethodologyAsync(app, stand.Admin.Client, "S24d");
+        var versionId = await CreateDraftVersionAsync(app, stand.Admin.Client, methodologyId, "1.0.0");
+
+        await SaveConstantAsync(app, stand.Admin.Client, methodologyId, versionId, "EF", 2.5m, stand.UnitId);
+        await SaveFormulaAsync(app, stand.Admin.Client, methodologyId, versionId, "EMISSION", "@A * CST.EF", "A", stand.UnitId);
+        await SaveOutputAsync(app, stand.Admin.Client, methodologyId, versionId, "EMISSION", stand.UnitId);
+        await SaveRuleAsync(app, stand.Admin.Client, methodologyId, versionId, "ALL_ROWS", "{}", priority: 1);
+        await SaveTestCaseAsync(
+            app, stand.Admin.Client, methodologyId, versionId, "GOLDEN",
+            Input(stand, argument: 4m, divisor: 2m), """{"EMISSION":10}""");
+        await SaveBindingAsync(app, stand.Admin.Client, methodologyId, stand.ResultColumnId, "EMISSION");
+        await PublishAsync(app, stand.Publisher.Client, methodologyId, versionId, EffectiveFrom(stand.PeriodKey, yearsBack: 1));
+
+        // Методологія вже опублікована; той самий автор вимикає прив'язку сам.
+        var change = await stand.Admin.Client.PutAsJsonAsync(
+            new Uri(
+                $"/api/v1/methodologies/{methodologyId}/bindings/{stand.ResultColumnId}/EMISSION",
+                UriKind.Relative),
+            new { matchJson = """{"kind":"stack"}""", isActive = false });
+        Assert.True(change.StatusCode == HttpStatusCode.OK, $"{change.StatusCode}: {app.ErrorsText}");
+
+        var bindingId = (await change.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetInt32();
+
+        var rows = await BindingJournalRowsAsync(bindingId);
+
+        Assert.Equal(["Create", "Update"], rows.Select(r => r.Operation).ToList());
+
+        // Створення — до публікації.
+        Assert.Contains("\"publishedMethodology\":false", rows[0].NewJson, StringComparison.Ordinal);
+
+        // Зміна після публікації: автор, стан ДО, стан ПІСЛЯ, ознака «опублікована».
+        var update = rows[1];
+        Assert.Equal(stand.Admin.UserId, update.ChangedByUserId);
+        Assert.Contains("\"isActive\":true", update.OldJson, StringComparison.Ordinal);
+        Assert.Contains("\"isActive\":false", update.NewJson, StringComparison.Ordinal);
+        Assert.Contains("\"publishedMethodology\":true", update.NewJson, StringComparison.Ordinal);
+    }
+
+    /// <summary>Рядки журналу структурних змін однієї прив'язки (автор, до/після) — прямим ADO.</summary>
+    private async Task<List<(string Operation, int ChangedByUserId, string OldJson, string NewJson)>> BindingJournalRowsAsync(
+        int bindingId)
+    {
+        await using var connection = new Microsoft.Data.SqlClient.SqlConnection(sql.ConnectionString);
+        await connection.OpenAsync();
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT Operation, ChangedByUserId, ISNULL(OldJson, N''), ISNULL(NewJson, N'')
+            FROM aud.StructureChange
+            WHERE EntityType = N'cfg.CalculationBinding' AND EntityId = @id
+            ORDER BY ChangedAt, Id;
+            """;
+        command.Parameters.AddWithValue("@id", bindingId);
+
+        var rows = new List<(string, int, string, string)>();
+        await using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            rows.Add((reader.GetString(0), reader.GetInt32(1), reader.GetString(2), reader.GetString(3)));
+        }
+
+        return rows;
+    }
+
+    /// <summary>
     /// S-24. Методологія: створити методологію, константи, правило відбору → результат.
     /// </summary>
     /// <remarks>
