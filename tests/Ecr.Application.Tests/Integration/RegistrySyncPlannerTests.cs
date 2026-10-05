@@ -38,7 +38,9 @@ namespace Ecr.Application.Tests.Integration;
 /// <item>автостворення й для <c>Hybrid</c> — червоний випадок <c>(Hybrid, true)</c> того ж тесту;</item>
 /// <item>код = ім'я і в <c>CodeMode = Auto</c> — червоний <see cref="External_CodeMode_Auto_лишає_код_writer_у"/>;</item>
 /// <item>вимкнений мапінг пише в новий запис — червоний
-/// <see cref="External_новий_елемент_повного_знімка_створює_запис_з_кодом_за_іменем"/>;</item>
+/// <see cref="External_новий_елемент_повного_знімка_створює_запис_з_назвою_за_іменем"/>;</item>
+/// <item>Manual створює запис з імені AF (L4-13, Q6=C) — червоний
+/// <see cref="L4_13_Manual_не_створює_запис_з_імені_AF_а_пише_подію_з_причиною"/>;</item>
 /// <item><c>Ignore</c> як <c>MarkOrphaned</c> — червоні обидва <c>Ignore</c>-випадки
 /// <see cref="Ignore_і_Local_лише_подія_SourceMissing"/>;</item>
 /// <item>позначка зникнення щоразу, а не лише першого разу — червоні <c>alreadyMarked</c>-випадки
@@ -366,7 +368,7 @@ public sealed class RegistrySyncPlannerTests
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait("Requirement", "ФВ-8.10")]
-    public void External_новий_елемент_повного_знімка_створює_запис_з_кодом_за_іменем()
+    public void External_новий_елемент_повного_знімка_створює_запис_з_назвою_за_іменем()
     {
         var note = new RegistrySyncFieldMapping(NoteField, "NOTE", CellDataType.String, null, "Note", IsActive: false);
         var input = Unlinked(
@@ -387,7 +389,7 @@ public sealed class RegistrySyncPlannerTests
         var create = Assert.Single(plan.Creates);
         Assert.Equal("NEW-GUID", create.ExternalId);
         Assert.Equal(@"\\AF\ECR\Flares\FL-99", create.ExternalPath);
-        Assert.Equal("FL-99", create.Code);
+        Assert.Null(create.Code);
         Assert.Equal("FL-99", create.DisplayName);
 
         // Порожнє значення (Name = null) і вимкнений мапінг у новий запис не йдуть.
@@ -422,6 +424,32 @@ public sealed class RegistrySyncPlannerTests
         Assert.Null(create.Code);
         Assert.Equal("ПК-3 (370-220) лето", create.DisplayName);
         Assert.Empty(create.Values);
+    }
+
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "D-212")]
+    [InlineData("FL-99")]
+    [InlineData("ПК-3 (370-220) лето")]
+    public void L4_13_Manual_не_створює_запис_з_імені_AF_а_пише_подію_з_причиною(string name)
+    {
+        // Q6=C (HU-11): ім'я не нормалізується й не стає кодом; створення лише в Auto.
+        var input = Unlinked(
+            RegistrySourceKind.External,
+            complete: true,
+            new RegistrySyncSourceElement("NEW-GUID", null, Attrs(), Name: name),
+            Limit) with
+        {
+            CodeMode = RegistryCodeMode.Manual,
+        };
+
+        var plan = RegistrySyncPlanner.Plan(input);
+
+        Assert.Empty(plan.Creates);
+        var unlinked = Assert.Single(plan.Events);
+        Assert.Equal(RegistrySyncEventKind.ElementUnlinked, unlinked.Kind);
+        Assert.Equal("NEW-GUID", unlinked.ExternalId);
+        Assert.Equal(RegistrySyncPlanner.CodeModeManualReason, unlinked.Reason);
     }
 
     [Fact]
@@ -819,6 +847,7 @@ public sealed class RegistrySyncPlannerTests
             Links: [new RegistrySyncLink(Guid1, EntryId, Path1)],
             Entries: [new RegistrySyncEntryState(EntryId, Values())],
             Mappings: [Limit],
+            CodeMode: RegistryCodeMode.Auto,
             OnMissingInSource: RegistryMissingPolicy.Deactivate);
 
     private static RegistrySyncInput Unlinked(
@@ -826,7 +855,7 @@ public sealed class RegistrySyncPlannerTests
         bool complete,
         RegistrySyncSourceElement element,
         params RegistrySyncFieldMapping[] mappings)
-        => new(RegistryDefId, kind, complete, [element], Links: [], Entries: [], mappings);
+        => new(RegistryDefId, kind, complete, [element], Links: [], Entries: [], mappings, CodeMode: RegistryCodeMode.Auto);
 
     private static RegistrySyncSourceElement Element(params (string Attribute, object? Value)[] attributes)
         => new(Guid1, Path1, Attrs(attributes));

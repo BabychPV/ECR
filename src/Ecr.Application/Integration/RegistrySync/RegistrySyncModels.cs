@@ -289,6 +289,7 @@ public enum RegistrySyncEventKind
 /// <param name="SourceValue">Значення з джерела: типізоване, а для <see cref="RegistrySyncEventKind.ValueRejected"/> — сире.</param>
 /// <param name="ErrorCode">Код відмови (<c>ECR-REG-0422</c>) для <see cref="RegistrySyncEventKind.ValueRejected"/>.</param>
 /// <param name="MessageKey">Ключ каталогу відмови для <see cref="RegistrySyncEventKind.ValueRejected"/>.</param>
+/// <param name="Reason">Коротка причина без каталогу (<c>reason=</c> у подробицях і в ключі дедупу).</param>
 public sealed record RegistrySyncEvent(
     RegistrySyncEventKind Kind,
     string? ExternalId,
@@ -297,7 +298,8 @@ public sealed record RegistrySyncEvent(
     object? CurrentValue = null,
     object? SourceValue = null,
     string? ErrorCode = null,
-    string? MessageKey = null);
+    string? MessageKey = null,
+    string? Reason = null);
 
 /// <summary>План синхронізації: що записати і про що повідомити.</summary>
 /// <param name="Updates">Зміни полів.</param>

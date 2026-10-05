@@ -1174,6 +1174,11 @@ public sealed class RegistrySyncJob(
             parts.Add($"messageKey={e.MessageKey}");
         }
 
+        if (e.Reason is not null)
+        {
+            parts.Add($"reason={e.Reason}");
+        }
+
         var sinceText = since is { } moment ? $"since={Moment(moment)}" : null;
         if (sinceText is not null)
         {
@@ -1184,8 +1189,8 @@ public sealed class RegistrySyncJob(
         // робить незмінне джерело новою подією.
         var subject = $"element={e.ExternalId}; entry={e.RegistryEntryId}; field={e.FieldCode}";
         var value = e.FieldCode is null
-            ? sinceText ?? string.Empty
-            : $"source={Text(e.SourceValue)}; error={e.ErrorCode}; messageKey={e.MessageKey}";
+            ? sinceText ?? (e.Reason is null ? string.Empty : $"reason={e.Reason}")
+            :$"source={Text(e.SourceValue)}; error={e.ErrorCode}; messageKey={e.MessageKey}";
 
         return new SyncEvent(status, string.Join("; ", parts), KeyOf(status, subject, value));
     }

@@ -58,7 +58,7 @@ public sealed class RegistrySyncValidityJobTests(SqlServerFixture sql)
 
             // Кінець включний (ValidToInclusive) → виключний 2025-01-01.
             Assert.Equal(new ValidityWindow(new DateOnly(2024, 1, 1), new DateOnly(2025, 1, 1)), await WindowAsync(stand.E1));
-            var created = await EntryAsync(stand, "Stack9");
+            var created = await EntryAsync(stand, g9);
             Assert.NotNull(created);
             Assert.Equal(new ValidityWindow(new DateOnly(2026, 1, 1), null), created.Window);
             Assert.Equal(1, await CountAsync(KeyQuery(stand, g9)));
@@ -191,6 +191,7 @@ public sealed class RegistrySyncValidityJobTests(SqlServerFixture sql)
 
         var registry = new RegistryDef(EcrCode.Create($"SYNC7D_{_tag}"), Text("Stacks"), isTemporal: temporal);
         registry.SwitchSource(RegistrySourceKind.External);
+        registry.UseCodeMode(RegistryCodeMode.Auto); // Q6=C: автостворення лише в Auto
         db.RegistryDefs.Add(registry);
         await db.SaveChangesAsync();
 
@@ -283,10 +284,15 @@ public sealed class RegistrySyncValidityJobTests(SqlServerFixture sql)
         return entry.Window;
     }
 
-    private async Task<RegistryEntry?> EntryAsync(Stand stand, string code)
+    /// <summary>Автостворений запис елемента: код із послідовності (Auto), тож шукаємо за ключем.</summary>
+    private async Task<RegistryEntry?> EntryAsync(Stand stand, string externalId)
     {
         await using var db = Context();
-        return await db.RegistryEntries.AsNoTracking().SingleOrDefaultAsync(e => e.RegistryDefId == stand.RegistryId && e.Code == code);
+        var entryId = await db.RegistryExternalKeys.AsNoTracking()
+            .Where(k => k.DataSourceId == stand.DataSourceId && k.ExternalId == externalId)
+            .Select(k => (long?)k.RegistryEntryId)
+            .SingleOrDefaultAsync();
+        return entryId is null ? null : await db.RegistryEntries.AsNoTracking().SingleAsync(e => e.Id == entryId);
     }
 
     private async Task<long> RevisionAsync(Stand stand)

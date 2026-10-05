@@ -548,6 +548,7 @@ public sealed class RegistrySyncApplyTests(SqlServerFixture sql)
         var registry = new RegistryDef(
             EcrCode.Create($"SYNC7_{_tag}"), Text("Stacks"), isTemporal: keyed?.Temporal ?? false);
         registry.SwitchSource(kind);
+        registry.UseCodeMode(RegistryCodeMode.Auto); // Q6=C: автостворення лише в Auto
         db.RegistryDefs.Add(registry);
         await db.SaveChangesAsync();
 
