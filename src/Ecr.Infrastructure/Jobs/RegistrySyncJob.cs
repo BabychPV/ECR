@@ -129,6 +129,9 @@ public sealed class RegistrySyncJob(
     /// <summary>Префікс ключа дедупу в <c>Details</c> події.</summary>
     public const string DedupKeyPrefix = "; key=";
 
+    /// <summary>Мітка запиту дедупу (<see cref="DedupJournal"/>) - за нею тест знаходить його план у кеші.</summary>
+    public const string DedupJournalTag = "ecr:registry-sync-dedup";
+
     /// <summary>Ключ каталогу: GUID елемента вже прив'язаний у цьому джерелі до іншого запису.</summary>
     public const string ExternalKeyTakenKey = "err.ECR-REG-0409.externalKeyTaken";
 
@@ -1088,6 +1091,36 @@ public sealed class RegistrySyncJob(
     }
 
     /// <summary>
+    /// Журнал подій синку цієї сутності з ключем дедупу в <c>Details</c>, у порядку <c>Id</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ AN-34 L4-11: запит мусить іти індексом <c>IX_CollectionCoverage_RegistryEvents</c>
+    /// (<c>(SourceEntityId, Id)</c>, фільтр <c>Status IS NOT NULL AND PeriodKey IS NULL</c>,
+    /// <c>INCLUDE (Status, PeriodKey, Details)</c>), а не сканом усього журналу: єдиний інший індекс за
+    /// сутністю має фільтр <c>Status IS NULL</c> і подій не бачить. Умови
+    /// <c>PeriodKey == null</c> і <c>Status != null</c> збігаються з фільтром індексу дослівно -
+    /// без них оптимізатор не має права його брати. Мітка - щоб план знайшов
+    /// <c>RegistrySyncDedupPlanTests</c>.
+    /// </remarks>
+    public static IQueryable<string> DedupJournal(EcrDbContext db, int sourceEntityId)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+
+        var statuses = CollectionCoverage.RegistryStatuses.ToList();
+        return db.CollectionCoverages
+            .TagWith(DedupJournalTag)
+            .AsNoTracking()
+            .Where(c => c.SourceEntityId == sourceEntityId
+                        && c.PeriodKey == null
+                        && c.Status != null
+                        && statuses.Contains(c.Status)
+                        && c.Details != null
+                        && c.Details.Contains(DedupKeyPrefix))
+            .OrderBy(c => c.Id)
+            .Select(c => c.Details!);
+    }
+
+    /// <summary>
     /// Відкидає події, для яких ОСТАННЯ подія того самого предмета цієї сутності має те саме
     /// значення. Один запит на прогін.
     /// </summary>
@@ -1098,17 +1131,7 @@ public sealed class RegistrySyncJob(
             return events;
         }
 
-        var statuses = CollectionCoverage.RegistryStatuses.ToList();
-        var journal = await db.CollectionCoverages
-            .AsNoTracking()
-            .Where(c => c.SourceEntityId == sourceEntityId
-                        && c.PeriodKey == null
-                        && c.Status != null
-                        && statuses.Contains(c.Status)
-                        && c.Details != null
-                        && c.Details.Contains(DedupKeyPrefix))
-            .OrderBy(c => c.Id)
-            .Select(c => c.Details!)
+        var journal = await DedupJournal(db, sourceEntityId)
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
